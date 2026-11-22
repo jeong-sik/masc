@@ -1361,6 +1361,93 @@ let test_default_thinking_preservation_survives_restore () =
     ]
 ;;
 
+let test_dropped_assistant_strips_dual_historical_carriers () =
+  let open Agent_core.Types in
+  let hist_outside text =
+    let base = make_message ~role:User ~origin:Historical_system_context [ Text text ] in
+    { base with
+      metadata = Llm_provider.Message_origin_lowering.mark_historical_outside_context base.metadata
+    }
+  in
+  let hist_system text =
+    make_message ~role:User ~origin:Historical_system_context [ Text text ]
+  in
+  let history =
+    [ message User [ Text "prior input" ]
+    ; hist_outside "prior outside"
+    ; hist_system "prior system"
+    ; message Assistant [ Text "prior answer" ]
+    ]
+  in
+  let executed =
+    [ message User [ Text "current input" ]
+    ; message Assistant
+        [ ToolUse { id = "call-dual"; name = "lookup"; input = `Assoc [] } ]
+    ; message Tool
+        [ ToolResult
+            { tool_use_id = "call-dual"
+            ; content = "result"
+            ; outcome = Tool_succeeded
+            ; json = None
+            ; content_blocks = None
+            }
+        ]
+    ]
+  in
+  let round_outside = hist_outside "current outside" in
+  let round_system = hist_system "current system" in
+  (* Case 1: suppressed / thought-excluded assistant (drop_trailing_assistants) *)
+  let suppressed_assistant =
+    message Assistant
+      [ Thinking { signature = Some "sig"; content = "internal" }
+      ; Text "suppressed final"
+      ]
+  in
+  let original_suppressed =
+    history @ executed @ [ round_outside; round_system; suppressed_assistant ]
+  in
+  List.iter
+    (fun (label, suppress_visible_response, exclude_thought_from_replay) ->
+       let patched, _ =
+         Finalize.checkpoint_for_replay_persistence
+           ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 18 })
+           ~history_messages:history
+           ~session_id:"session-dual"
+           ~response_text:"suppressed final"
+           ~suppress_visible_response
+           ~exclude_thought_from_replay
+           (checkpoint original_suppressed)
+         |> expect_ok
+       in
+       Alcotest.(check bool)
+         (label ^ ": strips both Historical(Outside_context) and Historical(System_context)")
+         true
+         (patched.messages = history @ executed))
+    [ "suppressed", true, false; "thought-excluded", false, true ];
+  (* Case 2: trailing blank/reasoning-only assistant (drop_trailing_blank_assistants) *)
+  let blank_assistant =
+    message Assistant
+      [ Thinking { signature = Some "sig"; content = "reasoning only" }; Text "   " ]
+  in
+  let original_blank =
+    history @ executed @ [ round_outside; round_system; blank_assistant ]
+  in
+  let patched_blank, _ =
+    Finalize.checkpoint_for_replay_persistence
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 19 })
+      ~history_messages:history
+      ~session_id:"session-dual-blank"
+      ~response_text:""
+      ~exclude_thought_from_replay:false
+      (checkpoint original_blank)
+    |> expect_ok
+  in
+  Alcotest.(check bool)
+    "blank assistant strips both Historical(Outside_context) and Historical(System_context)"
+    true
+    (patched_blank.messages = history @ executed)
+;;
+
 let () =
   Alcotest.run
     "keeper replay checkpoint"
@@ -1474,6 +1561,10 @@ let () =
             "direct reasoning-only final is not replayed"
             `Quick
             test_direct_reasoning_only_final_is_not_replayed
+        ; Alcotest.test_case
+            "dropped assistant strips both Historical(Outside_context) and Historical(System_context)"
+            `Quick
+            test_dropped_assistant_strips_dual_historical_carriers
         ] )
     ]
 ;;

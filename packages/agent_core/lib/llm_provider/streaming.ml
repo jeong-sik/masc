@@ -24,7 +24,7 @@ let event_type_of_payload event_type json : (string, string) result =
 let parse_sse_event event_type data_str =
   let open Yojson.Safe.Util in
   try
-    let json = Yojson.Safe.from_string data_str in
+    let json = Json_util.from_string_bounded_exn data_str in
     match event_type_of_payload event_type json with
     | Error reason -> Some (SSEParseFailed { raw = data_str; reason })
     | Ok evt_type ->
@@ -38,26 +38,41 @@ let parse_sse_event event_type data_str =
            if u = `Null
            then None
            else (
-             let input_tokens = u |> member "input_tokens" |> to_int in
+             let input_tokens =
+               u |> member "input_tokens" |> to_int |> Json_util.clamp_non_negative
+             in
              let cache_breakdown = Backend_anthropic.parse_cache_creation_usage u in
              let cache_creation_input_tokens =
                Option.value cache_breakdown.total_input_tokens ~default:0
+               |> Json_util.clamp_non_negative
              in
              let cache_read_input_tokens =
                u
                |> member "cache_read_input_tokens"
                |> to_int_option
                |> Option.value ~default:0
+               |> Json_util.clamp_non_negative
+             in
+             let output_tokens =
+               Cli_common_json.member_int "output_tokens" u
+               |> Json_util.clamp_non_negative
              in
              (* The start snapshot seeds every counter; a later cumulative
                 message_delta replaces the ones it reports (#28903). *)
+             let inclusive_input_tokens =
+               Json_util.saturating_add_non_negative
+                 input_tokens
+                 (Json_util.saturating_add_non_negative
+                    cache_creation_input_tokens
+                    cache_read_input_tokens)
+             in
              Some
-               (Backend_anthropic.usage_of_wire_counts
-                  ~input_tokens
-                  ~output_tokens:
-                    (Cli_common_json.member_int "output_tokens" u)
-                  ~cache_creation_input_tokens
-                  ~cache_read_input_tokens))
+               { Types.input_tokens = inclusive_input_tokens
+               ; output_tokens
+               ; cache_creation_input_tokens
+               ; cache_read_input_tokens
+               ; cost_usd = None
+               })
          in
          Some (MessageStart { id; model; usage })
        | "content_block_start" ->
@@ -135,22 +150,32 @@ let parse_sse_event event_type data_str =
                 against, so the inclusive normalization uses those
                 (an unreported cache field in that report reads as 0, the
                 api_usage convention). *)
-             let output_tokens = u |> member "output_tokens" |> to_int in
+             let output_tokens =
+               u |> member "output_tokens" |> to_int |> Json_util.clamp_non_negative
+             in
              let cache_breakdown = Backend_anthropic.parse_cache_creation_usage u in
-             let cache_creation_input_tokens = cache_breakdown.total_input_tokens in
+             let cache_creation_input_tokens =
+               Option.map Json_util.clamp_non_negative cache_breakdown.total_input_tokens
+             in
              let cache_read_input_tokens =
-               u |> member "cache_read_input_tokens" |> to_int_option
+               u
+               |> member "cache_read_input_tokens"
+               |> to_int_option
+               |> Option.map Json_util.clamp_non_negative
              in
              let input_tokens =
                u
                |> member "input_tokens"
                |> to_int_option
                |> Option.map (fun exclusive_input ->
+                 let exclusive_input = Json_util.clamp_non_negative exclusive_input in
                  (* DET-OK: absent wire field is 0 by api_usage convention *)
-                 exclusive_input
-                 + Option.value cache_creation_input_tokens ~default:0
-                 (* DET-OK: absent wire field is 0 by api_usage convention *)
-                 + Option.value cache_read_input_tokens ~default:0)
+                 Json_util.saturating_add_non_negative
+                   exclusive_input
+                   (Json_util.saturating_add_non_negative
+                      (Option.value cache_creation_input_tokens ~default:0)
+                      (* DET-OK: absent wire field is 0 by api_usage convention *)
+                      (Option.value cache_read_input_tokens ~default:0)))
              in
              Some
                { Types.input_tokens
@@ -192,7 +217,9 @@ let parse_sse_event event_type data_str =
 let message_start_cache_write_lifetime data_str : Types.cache_write_lifetime option =
   try
     let open Yojson.Safe.Util in
-    let u = Yojson.Safe.from_string data_str |> member "message" |> member "usage" in
+    let u =
+      Json_util.from_string_bounded_exn data_str |> member "message" |> member "usage"
+    in
     if u = `Null
     then None
     else (Backend_anthropic.parse_cache_creation_usage u).inferred_write_lifetime
@@ -496,7 +523,7 @@ let responses_sse_to_events = Responses_stream.responses_sse_to_events
    keeps the caller's previous behaviour for anything that is not an error
    envelope. *)
 let sse_error_event_of_bodiless_body ~raw body =
-  match Yojson.Safe.from_string body with
+  match Json_util.from_string_bounded_exn body with
   | exception (Yojson.Json_error _ | Invalid_argument _) -> None
   | (`Assoc _ as json) ->
     (match

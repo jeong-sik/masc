@@ -129,17 +129,31 @@ let redact_media_data_url s =
    allocation in four hours (2026-09-16). *)
 let rec prefix_matches s pos prefix index =
   index = String.length prefix
-  || (Char.equal s.[pos + index] prefix.[index] && prefix_matches s pos prefix (index + 1))
+  || (Char.equal
+        (Char.lowercase_ascii s.[pos + index])
+        (Char.lowercase_ascii prefix.[index])
+      && prefix_matches s pos prefix (index + 1))
 ;;
 
 let has_prefix_at s pos prefix =
   pos >= 0 && pos + String.length prefix <= String.length s && prefix_matches s pos prefix 0
 ;;
 
+let is_ident_char = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true
+  | _ -> false
+;;
+
+let prefix_boundary_ok s pos prefix =
+  if String.ends_with ~suffix:"=" prefix
+  then pos = 0 || not (is_ident_char s.[pos - 1])
+  else true
+;;
+
 let rec find_prefix s pos prefix =
   if pos + String.length prefix > String.length s
   then None
-  else if has_prefix_at s pos prefix
+  else if prefix_boundary_ok s pos prefix && has_prefix_at s pos prefix
   then Some pos
   else find_prefix s (pos + 1) prefix
 ;;
@@ -196,17 +210,156 @@ let rec first_listed_occurrence s ~pos ~stop = function
     [Authorization: Bearer TOKEN] the token belongs to [Bearer ], and the text
     before it holds [Authorization:] with no token after it, which is left as
     it is rather than marked. *)
+let is_hspace ch = Char.equal ch ' ' || Char.equal ch '\t'
+
+let rec skip_hspace s ~stop pos =
+  if pos < stop && is_hspace s.[pos] then skip_hspace s ~stop (pos + 1) else pos
+;;
+
+let is_ascii_letter ch = ('a' <= ch && ch <= 'z') || ('A' <= ch && ch <= 'Z')
+
+let is_escaped_at s pos =
+  let rec count i acc =
+    if i >= 0 && Char.equal s.[i] '\\' then count (i - 1) (acc + 1) else acc
+  in
+  count (pos - 1) 0 mod 2 = 1
+;;
+
+let update_quote_state s ~start ~stop in_dquote in_squote =
+  let len = String.length s in
+  let rec loop i =
+    if i < stop
+    then (
+      (match s.[i] with
+       | '\r' | '\n' ->
+         in_dquote := false;
+         in_squote := false
+       | '"' when (not !in_squote) && not (is_escaped_at s i) ->
+         in_dquote := not !in_dquote
+       | '\'' when (not !in_dquote) && not (is_escaped_at s i) ->
+         let is_contraction =
+           i > 0
+           && i + 1 < len
+           && is_ascii_letter s.[i - 1]
+           && is_ascii_letter s.[i + 1]
+         in
+         if not is_contraction then in_squote := not !in_squote
+       | _ -> ());
+      loop (i + 1))
+  in
+  loop start
+;;
+
+let header_value_end s ~stop ~in_dquote ~in_squote pos =
+  let rec scan i =
+    if i >= stop
+    then i
+    else (
+      match s.[i] with
+      | '\r' | '\n' -> i
+      | '"' when in_dquote && not (is_escaped_at s i) -> i
+      | '\'' when in_squote && not (is_escaped_at s i) -> i
+      | _ -> scan (i + 1))
+  in
+  let raw_end = scan pos in
+  let rec trim_trailing i =
+    if i > pos && is_hspace s.[i - 1] then trim_trailing (i - 1) else i
+  in
+  trim_trailing raw_end
+;;
+
+let is_auth_scheme_header prefix =
+  let lower = String.lowercase_ascii prefix in
+  String.equal lower "authorization:" || String.equal lower "proxy-authorization:"
+;;
+
+let is_cookie_header prefix =
+  let lower = String.lowercase_ascii prefix in
+  String.equal lower "cookie:" || String.equal lower "set-cookie:"
+;;
+
+let known_http_auth_schemes =
+  [ "bearer"
+  ; "basic"
+  ; "token"
+  ; "digest"
+  ; "negotiate"
+  ; "ntlm"
+  ; "aws4-hmac-sha256"
+  ; "hmac"
+  ; "hoba"
+  ; "mutual"
+  ; "oauth"
+  ; "scram-sha-256"
+  ; "vapid"
+  ; "apikey"
+  ; "api-key"
+  ; "bot"
+  ]
+;;
+
+let match_auth_scheme_end s ~stop pos =
+  let rec loop = function
+    | [] -> None
+    | scheme :: rest ->
+      let len = String.length scheme in
+      if pos + len < stop && prefix_matches s pos scheme 0 && is_hspace s.[pos + len]
+      then Some (skip_hspace s ~stop (pos + len))
+      else loop rest
+  in
+  loop known_http_auth_schemes
+;;
+
 let redact_prefixes s prefixes =
   let buf = Buffer.create (String.length s) in
   let cursors = List.map (fun prefix -> { prefix; next = Not_looked }) prefixes in
+  let in_dquote = ref false in
+  let in_squote = ref false in
+  let emit_raw start len =
+    if len > 0
+    then (
+      update_quote_state s ~start ~stop:(start + len) in_dquote in_squote;
+      Buffer.add_substring buf s start len)
+  in
   let rec redact_range pos stop =
     match first_listed_occurrence s ~pos ~stop cursors with
-    | None -> Buffer.add_substring buf s pos (stop - pos)
+    | None -> emit_raw pos (stop - pos)
     | Some (index, prefix) ->
       redact_range pos index;
-      Buffer.add_string buf prefix;
-      let token_pos = index + String.length prefix in
-      let token_stop = token_end s ~stop token_pos in
+      emit_raw index (String.length prefix);
+      let after_prefix = index + String.length prefix in
+      let is_auth = is_auth_scheme_header prefix in
+      let is_cookie = is_cookie_header prefix in
+      let token_pos =
+        if String.ends_with ~suffix:":" prefix
+        then (
+          let ws_end = skip_hspace s ~stop after_prefix in
+          (* For [Authorization:] / [Proxy-Authorization:], preserve known HTTP
+             auth schemes (e.g. [Basic], [Token], [Negotiate], [Digest],
+             [AWS4-HMAC-SHA256]) followed by horizontal whitespace and redact
+             the full credential value that follows; unknown schemes and raw
+             tokens are redacted from [ws_end] to the end of the header value so
+             no credential bytes ever leak. *)
+          let scheme_end =
+            if is_auth
+            then Option.value ~default:ws_end (match_auth_scheme_end s ~stop ws_end)
+            else ws_end
+          in
+          emit_raw after_prefix (scheme_end - after_prefix);
+          scheme_end)
+        else after_prefix
+      in
+      let token_stop =
+        if is_auth || is_cookie
+        then
+          header_value_end
+            s
+            ~stop
+            ~in_dquote:!in_dquote
+            ~in_squote:!in_squote
+            token_pos
+        else token_end s ~stop token_pos
+      in
       if token_stop > token_pos then Buffer.add_string buf redaction_marker;
       redact_range token_stop stop
   in
@@ -305,7 +458,22 @@ let redact_private_key_block s =
     Buffer.contents buf
 ;;
 
-let builtin_prefixes = [ "Bearer "; "api-key: "; "x-api-key: "; "Authorization:"; "key=" ]
+let builtin_prefixes =
+  [ "Bearer "
+  ; "Bearer\t"
+  ; "x-goog-api-key:"
+  ; "x-auth-token:"
+  ; "x-api-key:"
+  ; "api-key:"
+  ; "Proxy-Authorization:"
+  ; "Authorization:"
+  ; "Set-Cookie:"
+  ; "Cookie:"
+  ; "api_key="
+  ; "token="
+  ; "key="
+  ]
+;;
 
 let redact_common_tokens s =
   let s = redact_url_userinfo s in

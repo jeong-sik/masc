@@ -10,8 +10,9 @@ let responses_member_string_opt key json =
 
 let responses_member_int_opt key json =
   match Json_util.assoc_member_opt key json with
-  | Some (`Int n) -> Some n
-  | Some (`Intlit s) -> int_of_string_opt s
+  | Some (`Int n) -> Some (Json_util.clamp_non_negative n)
+  | Some (`Intlit s) ->
+    Option.map Json_util.clamp_non_negative (int_of_string_opt s)
   | Some (`Null | `Bool _ | `Float _ | `String _ | `Assoc _ | `List _) | None -> None
 ;;
 

@@ -722,7 +722,7 @@ let structured_text content =
 
 let normalize_json validation text =
   try
-    let value = Yojson.Safe.from_string text in
+    let value = Json_util.from_string_bounded_exn text in
     Ok { value; validation }
   with
   | Yojson.Json_error detail -> Error (Invalid_json detail)
@@ -736,6 +736,21 @@ let normalize_text response_format text =
   | Types.Off | Types.JsonMode -> normalize_json Json_syntax_validated text
   | Types.JsonSchema _ ->
     normalize_json Provider_schema_requested_client_validation_required text
+;;
+
+let%test "normalize_text rejects deeply nested JSON without Stack_overflow" =
+  let depth = 5000 in
+  let deep = String.make depth '[' ^ String.make depth ']' in
+  match normalize_text Types.JsonMode deep with
+  | Error (Invalid_json _) -> true
+  | Ok _
+  | Error
+      ( Output_limit_stopped
+      | Window_stopped _
+      | Incomplete_structured_response _
+      | Missing_structured_text
+      | Ambiguous_structured_text _
+      | Unexpected_structured_content ) -> false
 ;;
 
 let normalize_response response_format (response : Types.api_response) =

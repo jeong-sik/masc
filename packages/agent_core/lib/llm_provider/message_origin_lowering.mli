@@ -89,6 +89,16 @@ val anthropic_message_header : policy -> Types.message -> (string * Yojson.Safe.
 
 val is_turn_scoped_context : policy -> Types.message -> bool
 
+(** Metadata key marking a [Historical_system_context] row that was originally
+    transmitted as [Outside_context]. Retaining that marker lets Anthropic
+    [Turn_scoped_system_context] models replay the carrier with its original
+    native [user] header (matching Round 1's creation-prefix digest), while
+    keeping [Historical_system_context] origin so non-Anthropic lanes and
+    pre-volatile cache-breakpoint splits treat it as historical. *)
+val historical_outside_context_metadata_key : string
+val mark_historical_outside_context : Types.metadata -> Types.metadata
+val is_historical_outside_context : _ Types.message_with -> bool
+
 (** Validate the exact post-projection/post-prefix transcript again, since a
     removed empty assistant can otherwise invalidate System placement. *)
 val validate_turn_scoped_contexts : policy -> Types.message list -> (unit, error) result

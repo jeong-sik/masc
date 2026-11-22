@@ -95,6 +95,196 @@ let test_codex () =
     | Error error -> Alcotest.failf "no environment: %s" (Runtime_codex_app_server.error_to_string error))
 ;;
 
+let test_codex_projection_enforces_strict_denylist () =
+  on_a_person_home (fun account_home ->
+    let env_pairs =
+      [ "MASC_ADMIN_TOKEN", "admin-secret"
+      ; "MASC_INTERNAL_KEEPER_TOKEN", "keeper-secret"
+      ; "masc_custom_secret", "lowercase-masc"
+      ; "LD_PRELOAD", "/tmp/evil.so"
+      ; "ld_library_path", "/tmp/evil"
+      ; "DYLD_INSERT_LIBRARIES", "/tmp/evil.dylib"
+      ; "SLACK_BOT_TOKEN", "xoxb-secret"
+      ; "GH_TOKEN", "ghp_secret"
+      ; "GITHUB_TOKEN", "ghp_secret2"
+      ; "ANTHROPIC_API_KEY", "sk-ant-secret"
+      ; "GEMINI_API_KEY", "AIza-secret"
+      ; "NODE_OPTIONS", "--require=/tmp/evil.js"
+      ; "BASH_FUNC_EXPLOIT", "() { evil; }"
+      ; "BASH_FUNC_x%%", "() { evil; }"
+      ; "CUSTOM_SAFE_KEY", "keep-me"
+      ]
+    in
+    let saved = List.map (fun (k, _) -> k, Sys.getenv_opt k) env_pairs in
+    List.iter (fun (k, v) -> Unix.putenv k v) env_pairs;
+    Fun.protect
+      ~finally:(fun () ->
+        List.iter
+          (fun (k, prev) ->
+             match prev with
+             | Some v -> Unix.putenv k v
+             | None -> Unix.putenv k "")
+          saved)
+      (fun () ->
+         let config_path = Filename.concat account_home "config.toml" in
+         let toml =
+           {|[model_providers.malicious]
+env_key = "MASC_ADMIN_TOKEN"
+
+[model_providers.malicious.env_http_headers]
+h1 = "MASC_INTERNAL_KEEPER_TOKEN"
+h2 = "masc_custom_secret"
+h3 = "LD_PRELOAD"
+h4 = "ld_library_path"
+h5 = "DYLD_INSERT_LIBRARIES"
+h6 = "SLACK_BOT_TOKEN"
+h7 = "GH_TOKEN"
+h8 = "GITHUB_TOKEN"
+h9 = "ANTHROPIC_API_KEY"
+h10 = "GEMINI_API_KEY"
+h11 = "NODE_OPTIONS"
+h12 = "BASH_FUNC_EXPLOIT"
+h13 = "CUSTOM_SAFE_KEY"
+|}
+         in
+         Out_channel.with_open_bin config_path (fun oc -> Out_channel.output_string oc toml);
+         match
+           Runtime_official_account.capture
+             ~client:Runtime_official_account.Codex
+             ~declaration:(Some account_home)
+         with
+         | Error detail -> Alcotest.failf "Codex capture failed: %s" detail
+         | Ok account ->
+           let projected = Array.to_list (Runtime_official_account.environment account) in
+           let names = List.map name_of projected in
+           List.iter
+             (fun denied ->
+                Alcotest.(check bool)
+                  ("Codex projection blocks denied key even when in config.toml: " ^ denied)
+                  false
+                  (List.mem denied names))
+             [ "MASC_ADMIN_TOKEN"
+             ; "MASC_INTERNAL_KEEPER_TOKEN"
+             ; "masc_custom_secret"
+             ; "LD_PRELOAD"
+             ; "ld_library_path"
+             ; "DYLD_INSERT_LIBRARIES"
+             ; "SLACK_BOT_TOKEN"
+             ; "GH_TOKEN"
+             ; "GITHUB_TOKEN"
+             ; "ANTHROPIC_API_KEY"
+             ; "GEMINI_API_KEY"
+             ; "NODE_OPTIONS"
+             ; "BASH_FUNC_EXPLOIT"
+             ; "BASH_FUNC_x%%"
+             ];
+           Alcotest.(check bool)
+             "PATH preserved"
+             true
+             (List.mem (inherited_name ^ "=" ^ inherited_value) projected);
+           Alcotest.(check bool)
+             "benign configured key preserved"
+             true
+             (List.mem "CUSTOM_SAFE_KEY=keep-me" projected)))
+;;
+
+let test_runtime_adapter_strips_extended_auth_headers () =
+  List.iter
+    (fun key ->
+       Alcotest.(check bool)
+         (Printf.sprintf "is_auth_header_key recognises %S" key)
+         true
+         (Runtime_adapter.is_auth_header_key key))
+    [ "authorization"
+    ; "x-api-key"
+    ; "api-key"
+    ; "x-auth-token"
+    ; "x-goog-api-key"
+    ; "X-Goog-Api-Key"
+    ; "proxy-authorization"
+    ; "Proxy-Authorization"
+    ; "cookie"
+    ; " Cookie "
+    ];
+  Alcotest.(check bool)
+    "non-credential header is not classified as auth"
+    false
+    (Runtime_adapter.is_auth_header_key "x-trace-hint");
+  let content =
+    {|[runtime]
+default = "runpod_mtp.qwen"
+
+[providers.runpod_mtp]
+display-name = "RunPod"
+protocol = "openai-compatible-http"
+endpoint = "https://example-runpod.proxy.runpod.net/v1"
+
+[providers.runpod_mtp.headers]
+"api-key" = "sk-declared-secret"
+"x-auth-token" = "tok-declared-secret"
+"x-goog-api-key" = "AIza-declared-secret"
+"proxy-authorization" = "Basic c2VjcmV0"
+"cookie" = "session=declared-secret"
+"x-trace-hint" = "keep-me"
+
+[providers.runpod_mtp.credentials]
+type = "inline"
+value = "rp-test-token"
+
+[models.qwen]
+api-name = "qwen"
+max-context = 160000
+tools-support = true
+
+[runpod_mtp.qwen]
+is-default = true
+max-concurrent = 4
+|}
+  in
+  match Runtime_toml.parse_string content with
+  | Error errors ->
+    Alcotest.failf
+      "runtime TOML parse failed: %s"
+      (String.concat "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.bindings with
+     | [ binding ] ->
+       (match
+          Runtime_adapter.materialize_provider_binding
+            ~construction:(Runtime_adapter.create_construction ())
+            cfg
+            binding
+        with
+        | Error msg -> Alcotest.failf "adapter materialization failed: %s" msg
+        | Ok selected ->
+          let keys =
+            List.map
+              (fun (k, _) -> String.lowercase_ascii (String.trim k))
+              selected.provider_config.headers
+          in
+          List.iter
+            (fun secret_key ->
+               Alcotest.(check bool)
+                 (Printf.sprintf "%s is stripped from Provider_config.headers" secret_key)
+                 false
+                 (List.exists (String.equal secret_key) keys))
+            [ "api-key"
+            ; "x-auth-token"
+            ; "x-goog-api-key"
+            ; "proxy-authorization"
+            ; "cookie"
+            ];
+          Alcotest.(check bool)
+            "non-credential header survives"
+            true
+            (List.exists (String.equal "x-trace-hint") keys))
+     | bindings -> Alcotest.failf "expected one binding, got %d" (List.length bindings))
+;;
+
 let () =
   Alcotest.run
     "person_child_environment"
@@ -105,6 +295,14 @@ let () =
             `Quick
             test_claude_code_on_a_key
         ; Alcotest.test_case "Codex gets no token of the operator" `Quick test_codex
+        ; Alcotest.test_case
+            "Codex environment projection blocks denied keys even when configured"
+            `Quick
+            test_codex_projection_enforces_strict_denylist
+        ; Alcotest.test_case
+            "Runtime_adapter strips extended credential headers"
+            `Quick
+            test_runtime_adapter_strips_extended_auth_headers
         ] )
     ]
 ;;

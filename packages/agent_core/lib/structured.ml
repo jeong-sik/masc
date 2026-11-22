@@ -30,8 +30,7 @@ let text_block : Llm_provider.Types.content_block -> string option = function
 ;;
 
 let parse_json_string text =
-  try Ok (Yojson.Safe.from_string text) with
-  | Yojson.Json_error detail -> Error detail
+  Llm_provider.Json_util.from_string_bounded text
 ;;
 
 let parse_schema_text_json ~raw schema json =

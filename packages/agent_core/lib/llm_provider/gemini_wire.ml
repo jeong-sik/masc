@@ -111,10 +111,10 @@ let gemini_required_string ~path key json =
 let gemini_optional_int_default_zero ~path key json =
   match Json_util.assoc_member_opt key json with
   | None | Some `Null -> Ok 0
-  | Some (`Int value) -> Ok value
+  | Some (`Int value) -> Ok (Json_util.clamp_non_negative value)
   | Some (`Intlit raw) ->
     (match int_of_string_opt raw with
-     | Some value -> Ok value
+     | Some value -> Ok (Json_util.clamp_non_negative value)
      | None -> Error (Printf.sprintf "%s.%s:not_integer" path key))
   | Some value ->
     Error
@@ -707,7 +707,9 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
          billing thinking tokens at the output rate; fold non-negative thoughts
          into inclusive [output_tokens] to match OpenAI/Anthropic accounting. *)
       let output_tokens =
-        candidates_tokens + Option.value thoughts_tokens ~default:0
+        Json_util.saturating_add_non_negative
+          candidates_tokens
+          (Option.value thoughts_tokens ~default:0)
       in
       let* cache_read_input_tokens =
         gemini_optional_int_default_zero
@@ -738,9 +740,13 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
          counts into inclusive [input_tokens] and expose the raw count on
          [gem_tool_use_prompt_tokens]. *)
       let input_tokens =
-        prompt_tokens + Option.value tool_use_prompt_tokens ~default:0
+        Json_util.saturating_add_non_negative
+          prompt_tokens
+          (Option.value tool_use_prompt_tokens ~default:0)
       in
-      let expected_total = input_tokens + output_tokens in
+      let expected_total =
+        Json_util.saturating_add_non_negative input_tokens output_tokens
+      in
       let total_token_mismatch =
         match reported_total with
         | Some total when not (Int.equal total expected_total) ->
@@ -792,7 +798,7 @@ let gemini_provider_error_of_json ~raw json =
 ;;
 
 let parse_gemini_sse_chunk data_str : gemini_sse_parse_result =
-  match Yojson.Safe.from_string data_str with
+  match Json_util.from_string_bounded_exn data_str with
   | exception Yojson.Json_error message ->
     Gemini_parse_failed { raw = data_str; reason = "json_error: " ^ message }
   | exception Invalid_argument message ->

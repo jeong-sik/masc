@@ -442,7 +442,13 @@ let http_scheme_to_string = function
 let invalid_url url detail =
   Error
     (NetworkError
-       { message = Printf.sprintf "invalid URL %S: %s" url detail; kind = Unknown })
+       { message =
+           Printf.sprintf
+             "invalid URL %S: %s"
+             (Api_common.sanitize_url_for_log url)
+             detail
+       ; kind = Unknown
+       })
 ;;
 
 let parse_uri url =
@@ -786,7 +792,9 @@ let response_header_name_is_sensitive = function
   | "authentication-info"
   | "proxy-authentication-info"
   | "api-key"
-  | "x-api-key" -> true
+  | "x-api-key"
+  | "x-goog-api-key"
+  | "x-auth-token" -> true
   | _ -> false
 ;;
 
@@ -852,9 +860,23 @@ let%test "response header evidence is canonical, multiplicity-sensitive, and red
   let secret_two =
     header_evidence_fingerprint_for_test [ "Set-Cookie", "session=secret-two" ]
   in
+  let goog_one =
+    header_evidence_fingerprint_for_test [ "x-goog-api-key", "AIza-secret-one" ]
+  in
+  let goog_two =
+    header_evidence_fingerprint_for_test [ "X-Goog-Api-Key", "AIza-secret-two" ]
+  in
+  let auth_tok_one =
+    header_evidence_fingerprint_for_test [ "x-auth-token", "tok-secret-one" ]
+  in
+  let auth_tok_two =
+    header_evidence_fingerprint_for_test [ "X-Auth-Token", "tok-secret-two" ]
+  in
   String.equal first reordered
   && (not (String.equal one duplicate))
   && String.equal secret_one secret_two
+  && String.equal goog_one goog_two
+  && String.equal auth_tok_one auth_tok_two
 ;;
 
 type raw_sync_response =
@@ -1058,12 +1080,13 @@ let resolve_origin ?tls_config net (origin : validated_uri) =
   and* tls_wrap =
     match origin.scheme with
     | Https ->
+      let safe_url = Api_common.sanitize_url_for_log origin.url in
       let wrap_error reason =
         Connect_failed
           { message =
               Printf.sprintf
                 "HTTPS requested but TLS not available for %s: %s"
-                origin.url
+                safe_url
                 (Api_common.https_init_error_to_string reason)
           ; kind = https_init_error_network_kind reason
           }
@@ -1080,7 +1103,7 @@ let resolve_origin ?tls_config net (origin : validated_uri) =
                      "https host %S of %s is neither an address nor a host name; the \
                       certificate cannot be checked against it: %s"
                      origin.host
-                     origin.url
+                     safe_url
                      reason
                ; kind = Tls_error
                })
@@ -1113,7 +1136,10 @@ let make_connection ?tls_config ~sw ~net ~origin () : (connection, http_error) r
         Eio.Resource.close sock;
         Printexc.raise_with_backtrace exn bt
     in
-    Diag.debug "http_client" "make_connection: new connection for %s" origin.url;
+    Diag.debug
+      "http_client"
+      "make_connection: new connection for %s"
+      (Api_common.sanitize_url_for_log origin.url);
     Ok conn
   with
   | exn -> connection_failure exn (Printexc.get_raw_backtrace ())
@@ -3122,15 +3148,18 @@ let read_ndjson
          best-effort rather than a loud failure here. *)
       | None, _ -> Eio.Buf_read.line reader
     in
-    (match line with
-     | "" -> ()
-     | _ -> renew_after_payload ~anchor:budget_anchor budget);
     line
+  in
+  let renew_gap () =
+    renew_after_payload
+      ~anchor:budget_anchor
+      (armed_budget ~phase:!phase ~first_event_timeout ~body_timeout ~idle_timeout)
   in
   let rec loop () =
     match read_line () with
     | "" -> loop ()
     | line ->
+      let phase_before_dispatch = !phase in
       (match on_line line with
        | Stop -> ()
        | Continue Output ->
@@ -3140,8 +3169,18 @@ let read_ndjson
            ~first_event_timeout
            ~body_timeout
            ~idle_timeout;
+         (* Production renews the inter-token idle gap; [renew_after_payload]
+            leaves a total budget alone. Mirrors [read_sse]. *)
+         renew_gap ();
          loop ()
-       | Continue Prelude -> loop ())
+       | Continue Prelude ->
+         (* Before the first output, a gap standing in for the first-event
+            bound renews on any line; after the first output, Prelude/empty
+            chunks must NOT reset [idle_timeout] indefinitely. *)
+         (match phase_before_dispatch with
+          | Before_first_output -> renew_gap ()
+          | After_first_output -> ());
+         loop ())
     | exception End_of_file -> ()
   in
   loop ()
@@ -3162,7 +3201,7 @@ let body_injection_error_to_string = function
    silently unchanged request: the provider would otherwise answer a body that
    was not asked to stream. *)
 let inject_into_object_body body_str inject =
-  match Yojson.Safe.from_string body_str with
+  match Json_util.from_string_bounded_exn body_str with
   | `Assoc fields -> Ok (Yojson.Safe.to_string (`Assoc (inject fields)))
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
     Error Body_not_object

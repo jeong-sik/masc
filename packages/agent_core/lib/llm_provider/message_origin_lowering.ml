@@ -79,9 +79,27 @@ let text_content ~message_index content =
   collect [] content
 ;;
 
+let historical_outside_context_metadata_key = "agent_core.historical_outside_context"
+
+let mark_historical_outside_context metadata =
+  (historical_outside_context_metadata_key, `Bool true)
+  :: List.filter
+       (fun (key, _) -> not (String.equal key historical_outside_context_metadata_key))
+       metadata
+;;
+
+let is_historical_outside_context (message : _ Types.message_with) =
+  match List.assoc_opt historical_outside_context_metadata_key message.metadata with
+  | Some (`Bool true) -> true
+  | Some (`Bool false | `Null | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _)
+  | None -> false
+;;
+
 let is_turn_scoped_context policy (message : _ Types.message_with) =
   match policy, message.origin with
-  | Turn_scoped_system_context, (System_context | Historical_system_context) -> true
+  | Turn_scoped_system_context, System_context -> true
+  | Turn_scoped_system_context, Historical_system_context ->
+    not (is_historical_outside_context message)
   | Turn_scoped_system_context,
     (Conversation | Recovery_instruction | Tool_result_followup | Agent_instruction | Outside_context)
   | (Preserve_positions | Omit_historical_system_context | Initial_system_native_tools

@@ -56,7 +56,16 @@ let normalize_header_key key = String.lowercase_ascii (String.trim key)
    is to reject credential-looking keys at parse time or give headers a typed
    non-secret map (issue linked in the PR). Until then one list is strictly
    better than two that disagree. *)
-let auth_header_keys = [ "authorization"; "x-api-key"; "api-key"; "x-auth-token" ]
+let auth_header_keys =
+  [ "authorization"
+  ; "proxy-authorization"
+  ; "cookie"
+  ; "x-api-key"
+  ; "api-key"
+  ; "x-goog-api-key"
+  ; "x-auth-token"
+  ]
+;;
 
 let is_auth_header_key key =
   let normalized = normalize_header_key key in

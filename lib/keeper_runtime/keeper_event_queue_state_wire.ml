@@ -622,7 +622,7 @@ let pending_entry_of_yojson json =
 ;;
 
 let to_yojson state =
-  `Assoc
+  let base_fields =
     [ "schema", `String schema
     ; "revision", int64_json state.revision
     ; "next_arrival", int64_json state.next_arrival
@@ -645,6 +645,15 @@ let to_yojson state =
              accepted_transfer_projection_to_yojson
              state.accepted_transfer_projections) )
     ]
+  in
+  let fields =
+    match state.evicted_transition_ids with
+    | [] -> base_fields
+    | ids ->
+      base_fields
+      @ [ "evicted_transition_ids", `List (List.map (fun id -> `String id) ids) ]
+  in
+  `Assoc fields
 ;;
 
 module String_set = Set.Make (String)
@@ -763,6 +772,43 @@ let validate_state state =
              operation_id)
       | None -> Ok ()
     in
+    let* () =
+      if List.length state.evicted_transition_ids > max_transition_outbox_entries
+      then
+        Error
+          (Printf.sprintf
+             "evicted event queue transition id ledger exceeds capacity (%d)"
+             max_transition_outbox_entries)
+      else if
+        List.exists
+          (fun id -> String.equal (String.trim id) "")
+          state.evicted_transition_ids
+      then Error "evicted event queue transition id must not be empty"
+      else
+        match duplicate_by Fun.id state.evicted_transition_ids with
+        | Some transition_id ->
+          Error
+            (Printf.sprintf
+               "duplicate evicted event queue transition id: %s"
+               transition_id)
+        | None ->
+          if
+            List.exists
+              (fun id ->
+                 List.exists
+                   (fun (entry : outbox_entry) ->
+                      String.equal entry.receipt.transition_id id)
+                   state.transition_outbox
+                 || List.exists
+                      (fun disposition ->
+                         String.equal (durable_transition_id disposition) id)
+                      (projected_dispositions state))
+              state.evicted_transition_ids
+          then
+            Error
+              "evicted event queue transition id duplicates an active or projected transition"
+          else Ok ()
+    in
     Ok state
 ;;
 
@@ -787,6 +833,7 @@ let of_yojson json =
         ; "pending"
         ; "last_transition"
         ; "projected_dispositions"
+        ; "evicted_transition_ids"
         ; "transition_outbox"
         ; "accepted_transfer_projections"
         ]
@@ -813,6 +860,23 @@ let of_yojson json =
       durable_disposition_of_yojson
       fields
   in
+  let* evicted_transition_ids =
+    match List.assoc_opt "evicted_transition_ids" fields with
+    | None -> Ok []
+    | Some (`List values) ->
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | `String value :: rest -> loop (value :: acc) rest
+        | _ :: _ ->
+          Error
+            (Printf.sprintf
+               "%s.evicted_transition_ids entries must be strings"
+               context)
+      in
+      loop [] values
+    | Some _ ->
+      Error (Printf.sprintf "%s.evicted_transition_ids must be a list" context)
+  in
   let* accepted_transfer_projections =
     list_field
       ~context
@@ -832,6 +896,7 @@ let of_yojson json =
     ; pending_entries
     ; last_transition
     ; projected_dispositions
+    ; evicted_transition_ids
     ; transition_outbox
     ; accepted_transfer_projections
     ; last_non_immediate_served

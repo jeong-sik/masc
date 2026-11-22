@@ -33,6 +33,8 @@ type pool =
   ; sw : Eio.Switch.t
   ; owners : (string, Keeper_owner.t) Hashtbl.t
   ; unavailable : (string, string) Hashtbl.t
+  ; starting : (string, (Keeper_owner.t, lookup_error) result Eio.Promise.t) Hashtbl.t
+  ; projection_hooks : (string, Eio.Switch.hook) Hashtbl.t
   ; owners_mu : Eio.Mutex.t
   ; owner_handles : Keeper_owner.t list Atomic.t
   ; stopping : bool Atomic.t
@@ -200,8 +202,16 @@ let record_failed_operation_rows pool ~keeper_name operations =
     | Error error -> log_pending error)
 ;;
 
+let test_on_record_failed_operations : (keeper_name:string -> Keeper_owner.t -> unit) option Atomic.t =
+  Atomic.make None
+;;
+
 let record_failed_operations pool ~keeper_name owner =
+  (match Atomic.get test_on_record_failed_operations with
+   | None -> ()
+   | Some hook -> hook ~keeper_name owner);
   record_failed_operation_rows pool ~keeper_name (Keeper_owner.failed_operations_at_start owner)
+;;
 
 let refresh_owner_handles pool =
   let owner_handles =
@@ -218,43 +228,71 @@ let refresh_owner_handles pool =
   Atomic.set pool.owner_handles owner_handles
 ;;
 
+let remove_projection_hook_opt = function
+  | None -> ()
+  | Some hook -> ignore (Eio.Switch.try_remove_hook hook : bool)
+;;
+
+let safe_broadcast_changed pool ~keeper_name =
+  try
+    Keeper_turn_broadcast.changed
+      ~base_path:pool.config.Workspace.base_path
+      ~keeper_name
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Keeper.warn ~keeper_name
+      "keeper_owner_registry: turn broadcast notification failed: %s"
+      (Printexc.to_string exn)
+;;
+
 let quarantine_faulted_owner pool ~keeper_name faulted_owner exn =
   (* Yield onto a fresh daemon fiber so we never re-enter [pool.owners_mu]
-     synchronously if a fault ever occurs during [ensure_in_pool] startup. *)
+     synchronously if a fault ever occurs during startup. *)
   if not (Atomic.get pool.stopping)
   then
-    Eio.Fiber.fork_daemon ~sw:pool.sw (fun () ->
-      (try
-         Eio.Fiber.yield ();
-         let detail =
-           Printf.sprintf "keeper bulkhead fault: %s" (Printexc.to_string exn)
-         in
-         let quarantined =
-           Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
-             match Hashtbl.find_opt pool.owners keeper_name with
-             | Some current when current == faulted_owner ->
-               Hashtbl.remove pool.owners keeper_name;
-               Hashtbl.replace pool.unavailable keeper_name detail;
-               Keeper_owner_projection.remove
-                 ~base_path:pool.config.base_path
-                 ~keeper_name
-                 faulted_owner;
-               refresh_owner_handles pool;
-               true
-             | Some _ | None -> false)
-         in
-         if quarantined
-         then
-           Keeper_turn_broadcast.changed
-             ~base_path:pool.config.base_path
-             ~keeper_name
-       with
-       | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
-       | cleanup_exn ->
-         Log.Keeper.error ~keeper_name
-           "keeper_owner_registry: failed to quarantine faulted keeper: %s"
-           (Printexc.to_string cleanup_exn));
-      `Stop_daemon)
+    try
+      Eio.Switch.check pool.sw;
+      Eio.Fiber.fork_daemon ~sw:pool.sw (fun () ->
+        (try
+           Eio.Fiber.yield ();
+           let detail =
+             Printf.sprintf "keeper bulkhead fault: %s" (Printexc.to_string exn)
+           in
+           let quarantined_hook =
+             Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
+               match Hashtbl.find_opt pool.owners keeper_name with
+               | Some current when current == faulted_owner ->
+                 let hook = Hashtbl.find_opt pool.projection_hooks keeper_name in
+                 Hashtbl.remove pool.owners keeper_name;
+                 Hashtbl.remove pool.projection_hooks keeper_name;
+                 Hashtbl.replace pool.unavailable keeper_name detail;
+                 refresh_owner_handles pool;
+                 Some hook
+               | Some _ | None -> None)
+           in
+           match quarantined_hook with
+           | None -> ()
+           | Some hook ->
+             remove_projection_hook_opt hook;
+             Keeper_owner_projection.remove
+               ~base_path:pool.config.base_path
+               ~keeper_name
+               faulted_owner;
+             safe_broadcast_changed pool ~keeper_name
+         with
+         | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+         | cleanup_exn ->
+           Log.Keeper.error ~keeper_name
+             "keeper_owner_registry: failed to quarantine faulted keeper: %s"
+             (Printexc.to_string cleanup_exn));
+        `Stop_daemon)
+    with
+    | Eio.Cancel.Cancelled _ as exn ->
+      (match Eio.Switch.check pool.sw with
+       | () -> raise exn
+       | exception (Eio.Cancel.Cancelled _ | Invalid_argument _) -> ())
+    | Invalid_argument _ -> ()
 ;;
 
 let start_owner pool ~keeper_name ~initial_meta =
@@ -279,20 +317,24 @@ let start_owner pool ~keeper_name ~initial_meta =
      with
      | Error _ as error -> error
      | Ok owner ->
-       record_failed_operations pool ~keeper_name owner;
-       Ok owner)
-;;
-
-let install_owner_projection pool keeper_name owner =
-  Keeper_owner_projection.install
-    ~base_path:pool.config.Workspace.base_path
-    ~keeper_name
-    owner;
-  Eio.Switch.on_release pool.sw (fun () ->
-    Keeper_owner_projection.remove
-      ~base_path:pool.config.base_path
-      ~keeper_name
-      owner)
+       (try
+          record_failed_operations pool ~keeper_name owner;
+          Ok owner
+        with
+        | exn ->
+          let bt = Printexc.get_raw_backtrace () in
+          (try
+             Eio.Cancel.protect (fun () ->
+               ignore
+                 (Keeper_owner.begin_stopping owner : (unit, Keeper_owner.error) result))
+           with
+           | (Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break) as stop_exn ->
+             raise stop_exn
+           | stop_exn ->
+             Log.Keeper.error ~keeper_name
+               "keeper_owner_registry: failed to stop owner after failed-operation projection error: %s"
+               (Printexc.to_string stop_exn));
+          Printexc.raise_with_backtrace exn bt))
 ;;
 
 type restart_completion_error =
@@ -319,16 +361,28 @@ let settle_restart_owner pool ~journal_terminal ~keeper_name owner =
       then Error (Restart_child_active error)
       else (
         let detail = Keeper_owner.error_to_string error in
-        Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
-          match Hashtbl.find_opt pool.owners keeper_name with
-          | Some current when current == owner ->
-            Hashtbl.remove pool.owners keeper_name;
-            Hashtbl.replace pool.unavailable keeper_name detail;
-            Keeper_owner_projection.remove ~base_path:pool.config.base_path ~keeper_name owner;
-            refresh_owner_handles pool
-          | Some _ | None -> ());
+        let removed_hook =
+          Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
+            match Hashtbl.find_opt pool.owners keeper_name with
+            | Some current when current == owner ->
+              let hook = Hashtbl.find_opt pool.projection_hooks keeper_name in
+              Hashtbl.remove pool.owners keeper_name;
+              Hashtbl.remove pool.projection_hooks keeper_name;
+              Hashtbl.replace pool.unavailable keeper_name detail;
+              refresh_owner_handles pool;
+              Some hook
+            | Some _ | None -> None)
+        in
+        (match removed_hook with
+         | None -> ()
+         | Some hook ->
+           remove_projection_hook_opt hook;
+           Keeper_owner_projection.remove
+             ~base_path:pool.config.base_path
+             ~keeper_name
+             owner);
         Log.Keeper.error ~keeper_name "restart settlement unavailable: %s" detail;
-        Keeper_turn_broadcast.changed ~base_path:pool.config.base_path ~keeper_name;
+        safe_broadcast_changed pool ~keeper_name;
         Error Restart_owner_unavailable)
 ;;
 
@@ -347,61 +401,216 @@ let complete_registered_restart pool ~keeper_name owner =
      | Error (Restart_child_active error) -> Error (Owner_initialization_failed error))
 ;;
 
-let ensure_in_pool pool meta =
+(* [pool.owners_mu] only protects fast, non-raising in-memory table lookups and
+   swaps. Running [start_owner], [Eio.Switch.on_release_cancellable], projection
+   registration, or broadcast inside [Eio.Mutex.use_rw] would permanently poison
+   [pool.owners_mu] on any non-cancellation exception or switch-finish race,
+   bricking every Keeper in the workspace. Concurrent starters for the same
+   keeper coalesce on a per-keeper [Eio.Promise.t] in [pool.starting]. *)
+let ensure_owner_in_pool pool ~keeper_name ~initial_meta =
   if Atomic.get pool.stopping
   then Error Inventory_stopping
   else
-    let installed = Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
-      match Hashtbl.find_opt pool.owners meta.Keeper_meta_contract.name with
-      | Some owner -> Ok owner
-      | None ->
-        (match Hashtbl.find_opt pool.unavailable meta.Keeper_meta_contract.name with
-         | Some _ -> Error (Owner_unavailable meta.Keeper_meta_contract.name)
-         | None ->
-           (match
-             start_owner
-               pool
-               ~keeper_name:meta.name
-               ~initial_meta:(Some meta)
-            with
-            | Error error -> Error (Owner_initialization_failed error)
-            | Ok owner ->
-              Hashtbl.add pool.owners meta.name owner;
-              install_owner_projection pool meta.name owner;
-              refresh_owner_handles pool;
-              Keeper_turn_broadcast.changed ~base_path:pool.config.Workspace.base_path
-                ~keeper_name:meta.name;
-              Ok owner))) in
-    match installed with
-    | Error _ as error -> error
-    | Ok owner -> complete_registered_restart pool ~keeper_name:meta.name owner
-;;
-
-let ensure_empty_in_pool pool keeper_name =
-  if Atomic.get pool.stopping
-  then Error Inventory_stopping
-  else
-    let installed = Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
-      match Hashtbl.find_opt pool.owners keeper_name with
-      | Some owner -> Ok owner
-      | None ->
-        (match Hashtbl.find_opt pool.unavailable keeper_name with
-         | Some _ -> Error (Owner_unavailable keeper_name)
-         | None ->
-           (match
-              start_owner pool ~keeper_name ~initial_meta:None
-            with
-            | Error error -> Error (Owner_initialization_failed error)
-            | Ok owner ->
-              Hashtbl.add pool.owners keeper_name owner;
-              install_owner_projection pool keeper_name owner;
-              refresh_owner_handles pool;
-              Keeper_turn_broadcast.changed ~base_path:pool.config.Workspace.base_path
-                ~keeper_name;
-              Ok owner))) in
+    let decision =
+      Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
+        if Atomic.get pool.stopping
+        then `Failed Inventory_stopping
+        else
+          match Hashtbl.find_opt pool.owners keeper_name with
+          | Some owner -> `Existing owner
+          | None ->
+            (match Hashtbl.find_opt pool.starting keeper_name with
+             | Some promise -> `Wait promise
+             | None ->
+               (match Hashtbl.find_opt pool.unavailable keeper_name with
+                | Some _ -> `Failed (Owner_unavailable keeper_name)
+                | None ->
+                  let promise, resolver = Eio.Promise.create () in
+                  Hashtbl.replace pool.starting keeper_name promise;
+                  `Start (promise, resolver))))
+    in
+    let installed =
+      match decision with
+      | `Failed error -> Error error
+      | `Existing owner -> Ok owner
+      | `Wait promise -> Eio.Promise.await promise
+      | `Start (promise, resolver) ->
+        let resolved = ref false in
+        let started_owner = ref None in
+        let installed_hook = ref None in
+        let resolve_once result =
+          if not !resolved
+          then (
+            resolved := true;
+            Eio.Promise.resolve resolver result)
+        in
+        let remove_starting_if_mine () =
+          Eio.Cancel.protect (fun () ->
+            Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
+              match Hashtbl.find_opt pool.starting keeper_name with
+              | Some current when current == promise ->
+                Hashtbl.remove pool.starting keeper_name
+              | Some _ | None -> ()))
+        in
+        let rollback_uncommitted_owner () =
+          Eio.Cancel.protect (fun () ->
+            (match !installed_hook with
+             | Some hook ->
+               installed_hook := None;
+               (try remove_projection_hook_opt (Some hook) with
+                | (Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break) as exn ->
+                  raise exn
+                | cleanup_exn ->
+                  Log.Keeper.error ~keeper_name
+                    "keeper_owner_registry: failed to remove projection hook during rollback: %s"
+                    (Printexc.to_string cleanup_exn))
+             | None -> ());
+            match !started_owner with
+            | Some owner ->
+              started_owner := None;
+              (try
+                 Keeper_owner_projection.remove
+                   ~base_path:pool.config.base_path
+                   ~keeper_name
+                   owner
+               with
+               | (Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break) as exn ->
+                 raise exn
+               | cleanup_exn ->
+                 Log.Keeper.error ~keeper_name
+                   "keeper_owner_registry: failed to remove owner projection during rollback: %s"
+                   (Printexc.to_string cleanup_exn));
+              (try
+                 ignore (Keeper_owner.begin_stopping owner : (unit, Keeper_owner.error) result)
+               with
+               | (Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break) as exn ->
+                 raise exn
+               | cleanup_exn ->
+                 Log.Keeper.error ~keeper_name
+                   "keeper_owner_registry: failed to stop rolled-back owner: %s"
+                   (Printexc.to_string cleanup_exn))
+            | None -> ())
+        in
+        let startup_error_of_exn detail =
+          if Atomic.get pool.stopping
+          then Inventory_stopping
+          else Owner_initialization_failed (Keeper_owner.Store_unavailable detail)
+        in
+        let finalize_failure err =
+          Fun.protect
+            ~finally:(fun () ->
+              Fun.protect
+                ~finally:(fun () -> resolve_once (Error err))
+                remove_starting_if_mine)
+            rollback_uncommitted_owner
+        in
+        Fun.protect
+          ~finally:(fun () ->
+            if not !resolved
+            then finalize_failure (startup_error_of_exn "owner startup aborted"))
+          (fun () ->
+             let started =
+               try
+                 match start_owner pool ~keeper_name ~initial_meta with
+                 | Ok owner ->
+                   started_owner := Some owner;
+                   Ok owner
+                 | Error error ->
+                   let err = Owner_initialization_failed error in
+                   finalize_failure err;
+                   Error err
+               with
+               | Eio.Cancel.Cancelled _ as exn ->
+                 finalize_failure (startup_error_of_exn "owner startup cancelled");
+                 raise exn
+               | (Out_of_memory | Stack_overflow | Sys.Break) as exn ->
+                 finalize_failure (startup_error_of_exn (Printexc.to_string exn));
+                 raise exn
+               | exn ->
+                 let err = startup_error_of_exn (Printexc.to_string exn) in
+                 finalize_failure err;
+                 Error err
+             in
+             match started with
+             | Error _ as error -> error
+             | Ok owner ->
+               if Atomic.get pool.stopping
+               then (
+                 finalize_failure Inventory_stopping;
+                 Error Inventory_stopping)
+               else (
+                 let hooked =
+                   try
+                     Keeper_owner_projection.install
+                       ~base_path:pool.config.Workspace.base_path
+                       ~keeper_name
+                       owner;
+                     let hook =
+                       Eio.Switch.on_release_cancellable pool.sw (fun () ->
+                         Keeper_owner_projection.remove
+                           ~base_path:pool.config.base_path
+                           ~keeper_name
+                           owner)
+                     in
+                     installed_hook := Some hook;
+                     Ok hook
+                   with
+                   | Eio.Cancel.Cancelled _ as exn ->
+                     finalize_failure
+                       (startup_error_of_exn "owner projection registration cancelled");
+                     raise exn
+                   | (Out_of_memory | Stack_overflow | Sys.Break) as exn ->
+                     finalize_failure (startup_error_of_exn (Printexc.to_string exn));
+                     raise exn
+                   | exn ->
+                     let err = startup_error_of_exn (Printexc.to_string exn) in
+                     finalize_failure err;
+                     Error err
+                 in
+                 match hooked with
+                 | Error _ as error -> error
+                 | Ok hook ->
+                   let committed =
+                     Eio.Cancel.protect (fun () ->
+                       Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
+                         (match Hashtbl.find_opt pool.starting keeper_name with
+                          | Some current when current == promise ->
+                            Hashtbl.remove pool.starting keeper_name
+                          | Some _ | None -> ());
+                         if Atomic.get pool.stopping
+                         then Error Inventory_stopping
+                         else (
+                           let prev_hook =
+                             Hashtbl.find_opt pool.projection_hooks keeper_name
+                           in
+                           Hashtbl.replace pool.owners keeper_name owner;
+                           Hashtbl.replace pool.projection_hooks keeper_name hook;
+                           refresh_owner_handles pool;
+                           started_owner := None;
+                           installed_hook := None;
+                           Ok prev_hook)))
+                   in
+                   (match committed with
+                    | Error err ->
+                      finalize_failure err;
+                      Error err
+                    | Ok prev_hook ->
+                      resolve_once (Ok owner);
+                      remove_projection_hook_opt prev_hook;
+                      safe_broadcast_changed pool ~keeper_name;
+                      Ok owner)))
+    in
     match installed with
     | Error _ as error -> error
     | Ok owner -> complete_registered_restart pool ~keeper_name owner
+;;
+
+let ensure_in_pool pool meta =
+  ensure_owner_in_pool pool ~keeper_name:meta.Keeper_meta_contract.name ~initial_meta:(Some meta)
+;;
+
+let ensure_empty_in_pool pool keeper_name =
+  ensure_owner_in_pool pool ~keeper_name ~initial_meta:None
 ;;
 
 let install_from_store ~sw ~operation_runner ~on_turn_slot_released config =
@@ -426,6 +635,8 @@ let install_from_store ~sw ~operation_runner ~on_turn_slot_released config =
             ; sw
             ; owners = Hashtbl.create (max 16 (List.length metas))
             ; unavailable = Hashtbl.of_seq (List.to_seq unavailable)
+            ; starting = Hashtbl.create 16
+            ; projection_hooks = Hashtbl.create (max 16 (List.length metas))
             ; owners_mu = Eio.Mutex.create ()
             ; owner_handles = Atomic.make []
             ; stopping = Atomic.make false
@@ -458,9 +669,9 @@ let install_from_store ~sw ~operation_runner ~on_turn_slot_released config =
                "keeper_owner: owner unavailable keeper=%s error=%s"
                meta.name
                detail;
-             Hashtbl.replace pool.unavailable meta.name detail;
-             Keeper_turn_broadcast.changed ~base_path:pool.config.Workspace.base_path
-               ~keeper_name:meta.name;
+             Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
+               Hashtbl.replace pool.unavailable meta.name detail);
+             safe_broadcast_changed pool ~keeper_name:meta.name;
              start_all count rest
            | Error Inventory_stopping ->
              Error
@@ -518,6 +729,22 @@ let find_owner ~purpose ~base_path ~keeper_name =
 ;;
 
 let get ~base_path ~keeper_name = find_owner ~purpose:Admission ~base_path ~keeper_name
+
+let clear_unavailable ~base_path ~keeper_name =
+  match find_pool ~purpose:Admission base_path with
+  | Error _ as error -> error
+  | Ok pool ->
+    let cleared =
+      Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
+        if Hashtbl.mem pool.unavailable keeper_name
+        then (
+          Hashtbl.remove pool.unavailable keeper_name;
+          true)
+        else false)
+    in
+    if cleared then safe_broadcast_changed pool ~keeper_name;
+    Ok cleared
+;;
 
 let complete_restart_settlements ~base_path ~journal_terminal =
   let unavailable detail = Error (Inventory_load_failed { keeper_name = None; detail }) in
@@ -1188,6 +1415,13 @@ module For_testing = struct
     match find_pool ~purpose:Admission base_path with
     | Error _ as error -> error
     | Ok pool -> ensure_in_pool pool meta
+  ;;
+
+  let with_record_failed_operations_hook hook f =
+    let prev = Atomic.exchange test_on_record_failed_operations (Some hook) in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set test_on_record_failed_operations prev)
+      f
   ;;
 end
 

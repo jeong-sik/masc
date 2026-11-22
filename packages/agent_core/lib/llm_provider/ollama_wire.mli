@@ -60,6 +60,12 @@ type kv_cache_read =
   ; semantics : kv_cache_semantics
   }
 
+(** Tolerantly decode an optional numeric JSON member ([`Int], [`Intlit], or
+    finite [`Float]) into a non-negative integer clamped to [[0, Int.max_int]],
+    returning [None] on absent, null, or non-numeric values without raising
+    [Yojson.Safe.Util.Type_error]. *)
+val optional_non_negative_int_member : string -> Yojson.Safe.t -> int option
+
 (** Extract non-negative KV-cache reuse telemetry from an Ollama or llama.cpp
     JSON response object. Returns [None] when no KV-cache field is present or
     when a field carries a negative/non-integer value. *)

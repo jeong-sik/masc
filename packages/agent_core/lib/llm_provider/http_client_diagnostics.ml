@@ -118,7 +118,7 @@ let request_body_shape_profile (body : string) : Yojson.Safe.t =
       ; "skipped_oversized", `Bool true
       ]
   else (
-    match Yojson.Safe.from_string body with
+    match Json_util.from_string_bounded_exn body with
     | exception (Yojson.Json_error _ | Yojson.Safe.Util.Type_error _) ->
       `Assoc [ "parseable", `Bool false; "body_bytes", `Int (String.length body) ]
     | `Assoc fields ->
@@ -265,7 +265,7 @@ let profile_opaque_client_error
     let json =
       `Assoc
         [ "event", `String "http_client_4xx_opaque_response"
-        ; "url", `String url
+        ; "url", `String (Api_common.sanitize_url_for_log url)
         ; "status", `Int code
         ; "response_server", opt (Http.Header.get resp_headers "server")
         ; "cf_ray", opt (Http.Header.get resp_headers "cf-ray")

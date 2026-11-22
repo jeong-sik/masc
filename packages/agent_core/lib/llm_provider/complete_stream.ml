@@ -523,7 +523,11 @@ let complete_stream_http
       let n_substrate = ref 0 in
       let n_heartbeat = ref 0 in
       let n_done = ref 0 in
-      let inter_chunk_samples = ref [] in
+      let max_inter_chunk_samples = 4096 in
+      let inter_chunk_samples = Array.make max_inter_chunk_samples 0.0 in
+      let inter_chunk_sample_count = ref 0 in
+      let inter_chunk_total_seen = ref 0 in
+      let inter_chunk_max = ref None in
       let terminal_state = ref Telemetry_event.Terminal_done in
       let summary_published = ref false in
       let position = ref (Before_first_output Http_client.Awaiting_first_event) in
@@ -616,14 +620,16 @@ let complete_stream_http
         | Types.StreamIncomplete _ -> `Skip
       in
       let percentiles () =
-        match !inter_chunk_samples with
-        | [] -> None
-        | samples ->
-          let sorted = List.sort Float.compare samples in
-          let n = List.length sorted in
-          let nth k = List.nth sorted (max 0 (min (n - 1) k)) in
+        let n = !inter_chunk_sample_count in
+        if n = 0
+        then None
+        else (
+          let sorted = Array.sub inter_chunk_samples 0 n in
+          Array.sort Float.compare sorted;
+          let nth k = sorted.(max 0 (min (n - 1) k)) in
           let idx q = int_of_float (Float.of_int n *. q) in
-          Some (nth (idx 0.5), nth (idx 0.95), nth (n - 1))
+          let pmax = Option.value !inter_chunk_max ~default:(nth (n - 1)) in
+          Some (nth (idx 0.5), nth (idx 0.95), pmax))
       in
       let publish_summary ~terminal () =
         if not !summary_published
@@ -890,7 +896,22 @@ let complete_stream_http
                          ~model_id:model
                          ~chunk_index:!chunk_counter
                          ~inter_chunk_ms;
-                       inter_chunk_samples := inter_chunk_ms :: !inter_chunk_samples
+                       let seen = !inter_chunk_total_seen in
+                       inter_chunk_total_seen := seen + 1;
+                       inter_chunk_max
+                       := (match !inter_chunk_max with
+                           | None -> Some inter_chunk_ms
+                           | Some current -> Some (Float.max current inter_chunk_ms));
+                       if !inter_chunk_sample_count < max_inter_chunk_samples
+                       then (
+                         inter_chunk_samples.(!inter_chunk_sample_count)
+                         <- inter_chunk_ms;
+                         incr inter_chunk_sample_count)
+                       else (
+                         let slot =
+                           (seen * 2654435761) land (max_inter_chunk_samples - 1)
+                         in
+                         inter_chunk_samples.(slot) <- inter_chunk_ms)
                      | Some _, None | None, Some _ | None, None -> ());
                     last_chunk_t := elapsed_ms;
                     incr chunk_counter);
@@ -983,8 +1004,9 @@ let complete_stream_http
                              | Provider_http_codec.Anthropic_messages ->
                                (match Streaming.parse_sse_events event_type data with
                                 | (Types.MessageStart _ :: _) as parsed ->
-                                  Backend_anthropic.observe_input_transformations
-                                    (Yojson.Safe.from_string data);
+                                  Result.iter
+                                    Backend_anthropic.observe_input_transformations
+                                    (Json_util.from_string_bounded data);
                                   parsed, None
                                 | ( ( Types.ContentBlockStart _
                                     | Types.ContentBlockDelta _

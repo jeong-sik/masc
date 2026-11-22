@@ -785,3 +785,8 @@
  (name test_input_budget)
  (modules test_input_budget)
  (libraries agent_core_test_deps llm_provider alcotest yojson))
+
+(test
+ (name test_red_team_wire_security)
+ (modules test_red_team_wire_security)
+ (libraries agent_core_test_deps agent_core agent_core_base llm_provider alcotest yojson http))

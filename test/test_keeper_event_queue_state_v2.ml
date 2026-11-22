@@ -2673,6 +2673,474 @@ let test_multi_entry_fifo_transition_outbox_has_no_hol_deadlock () =
       (List.length (State.transition_outbox settled)))
 ;;
 
+(* Red-Team P0-6: multi-entry WAL crash/reload after [retain_previous = false]
+   projection must NEVER trigger [Invalid_content -> Start_quarantine], the
+   state-change observer must fire strictly AFTER WAL compaction, fairness
+   recency must scan FIFO outbox newest-first, and pending/outbox cardinality
+   bounds must fail closed. *)
+let test_multi_entry_wal_evicted_receipt_and_observer_order () =
+  with_temp_dir "keeper-p06-wal" (fun base_path ->
+    let keeper_name = "p06-wal-keeper" in
+    let src1 = { (stimulus "p06-src-1" 10.0) with urgency = Queue.Normal } in
+    let src2 = { (stimulus "p06-src-2" 20.0) with urgency = Queue.Low } in
+    Persistence.update_result ~base_path ~keeper_name (fun _ -> queue [ src1; src2 ])
+    |> require_ok "seed two pending sources";
+    let sel1, sel2 =
+      match Persistence.pending_selections_result ~base_path ~keeper_name |> require_ok "selections" with
+      | [ a; b ] -> a, b
+      | other -> Alcotest.failf "expected 2 selections, got %d" (List.length other)
+    in
+    let r1 =
+      match
+        Persistence.terminalize_pending_turn_completed_result
+          ~base_path ~keeper_name ~applied_at:100.0 ~selection:sel1 ()
+        |> require_ok "commit first transition"
+      with
+      | Persistence.Turn_terminal_committed
+          (Persistence.Transition_applied r | Persistence.Transition_already_applied r) -> r
+      | _ -> Alcotest.fail "expected r1"
+    in
+    let r2 =
+      match
+        Persistence.terminalize_pending_turn_completed_result
+          ~base_path ~keeper_name ~applied_at:101.0 ~selection:sel2 ()
+        |> require_ok "commit second transition"
+      with
+      | Persistence.Turn_terminal_committed
+          (Persistence.Transition_applied r | Persistence.Transition_already_applied r) -> r
+      | _ -> Alcotest.fail "expected r2"
+    in
+    (* Check newest-first derived_last_non_immediate_served over [Normal; Low]. *)
+    let loaded_two =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load state with 2 outbox entries"
+    in
+    Alcotest.(check bool)
+      "derived_last_non_immediate_served scans FIFO outbox newest-first (Low)"
+      true
+      (State.last_non_immediate_served loaded_two = Some Queue.Low);
+    (* Capture the 2-entry WAL bytes before projection so we can simulate
+       a crash / lock-free reader seeing the stale 2-entry WAL alongside the
+       post-E2 snapshot where E1 was evicted by [retain_previous = false]. *)
+    let wal_path =
+      Filename.concat
+        (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+        Persistence.transition_wal_filename
+    in
+    let two_entry_wal = Fs_compat.load_file wal_path in
+    Alcotest.(check bool) "two-entry WAL is non-empty" true (String.length two_entry_wal > 0);
+    (* Install observer verifying WAL is ALREADY compacted when observer runs. *)
+    let observer_saw_empty_wal = ref None in
+    Fun.protect
+      ~finally:(fun () ->
+        Persistence.install_state_change_observer (fun ~base_path:_ ~keeper_name:_ -> ()))
+      (fun () ->
+        Persistence.install_state_change_observer (fun ~base_path:bp ~keeper_name:kn ->
+          if String.equal bp base_path && String.equal kn keeper_name
+          then
+            let bytes =
+              if Sys.file_exists wal_path then Fs_compat.load_file wal_path else ""
+            in
+            observer_saw_empty_wal := Some (String.equal bytes ""));
+        Persistence.project_transition_outbox_entry_result
+          ~transition_id:r1.transition_id
+          ~append_before_retire:(fun _ _ -> Ok ())
+          ~retain_previous:(fun _ -> false)
+          ~base_path
+          ~keeper_name
+        |> require_ok "project E1 with retain_previous=false");
+    Alcotest.(check (option bool))
+      "observer fires strictly AFTER WAL compaction"
+      (Some true)
+      !observer_saw_empty_wal;
+    (* Project E2 with retain_previous=false, evicting E1 from snapshot. *)
+    Persistence.project_transition_outbox_entry_result
+      ~transition_id:r2.transition_id
+      ~append_before_retire:(fun _ _ -> Ok ())
+      ~retain_previous:(fun _ -> false)
+      ~base_path
+      ~keeper_name
+    |> require_ok "project E2 with retain_previous=false";
+    (* Restore stale 2-entry WAL [Row1(E1); Row2(E2)] alongside post-E2 snapshot. *)
+    Fs_compat.save_file wal_path two_entry_wal;
+    (* Both lock-free read-only validation and lock-free observation must succeed
+       without triggering Invalid_content -> Start_quarantine! *)
+    (match
+       Persistence.validate_existing_state_read_only_classified_result ~base_path ~keeper_name
+     with
+     | Ok st ->
+       Alcotest.(check int) "read-only replay yields drained outbox" 0
+         (List.length (State.transition_outbox st))
+     | Error failure ->
+       Alcotest.failf
+         "stale 2-entry WAL after retain_previous=false must not quarantine: %s"
+         (Persistence.read_only_failure_to_string failure));
+    (match Persistence.observe_state_result ~base_path ~keeper_name with
+     | Ok st ->
+       Alcotest.(check int) "lock-free observer succeeds cleanly" 0
+         (List.length (State.transition_outbox st))
+     | Error errs ->
+       Alcotest.failf
+         "lock-free observer failed on stale 2-entry WAL (%d errors)"
+         (List.length errs));
+    (* Authoritative load must succeed AND compact the absorbed stale WAL. *)
+    let recovered =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "authoritative load recovers and compacts stale 2-entry WAL"
+    in
+    Alcotest.(check int) "recovered outbox empty" 0
+      (List.length (State.transition_outbox recovered));
+    Alcotest.(check string) "stale 2-entry WAL compacted on load" ""
+      (Fs_compat.load_file wal_path);
+    (* Out-of-order HoL projection (E2 projected first, then E1 projected second
+       with retain_previous=false evicting E2): restoring the stale [Row1(E1); Row2(E2)]
+       WAL alongside S_after_E1 must recover cleanly via bidirectional causal
+       absorption without triggering Invalid_content -> Start_quarantine! *)
+    let ooo_keeper = "wal-out-of-order-hol" in
+    Persistence.update_result ~base_path ~keeper_name:ooo_keeper (fun _ ->
+      queue [ stimulus "ooo-e1" 1.0; stimulus "ooo-e2" 2.0 ])
+    |> require_ok "seed out-of-order queue";
+    let ooo_state =
+      Persistence.load_state_result ~base_path ~keeper_name:ooo_keeper
+      |> require_ok "load ooo state"
+    in
+    let ooo_sel1, ooo_sel2 =
+      match State.pending_selections ooo_state with
+      | [ a; b ] -> a, b
+      | other -> Alcotest.failf "expected 2 ooo selections, got %d" (List.length other)
+    in
+    let ooo_r1 =
+      match
+        Persistence.terminalize_pending_turn_completed_result
+          ~base_path ~keeper_name:ooo_keeper ~applied_at:200.0 ~selection:ooo_sel1 ()
+        |> require_ok "commit ooo E1"
+      with
+      | Persistence.Turn_terminal_committed
+          (Persistence.Transition_applied r | Persistence.Transition_already_applied r) -> r
+      | _ -> Alcotest.fail "expected ooo r1"
+    in
+    let ooo_r2 =
+      match
+        Persistence.terminalize_pending_turn_completed_result
+          ~base_path ~keeper_name:ooo_keeper ~applied_at:201.0 ~selection:ooo_sel2 ()
+        |> require_ok "commit ooo E2"
+      with
+      | Persistence.Turn_terminal_committed
+          (Persistence.Transition_applied r | Persistence.Transition_already_applied r) -> r
+      | _ -> Alcotest.fail "expected ooo r2"
+    in
+    let ooo_wal_path =
+      Filename.concat
+        (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) ooo_keeper)
+        Persistence.transition_wal_filename
+    in
+    let ooo_two_entry_wal = Fs_compat.load_file ooo_wal_path in
+    (* Project E2 FIRST (HoL skip), then E1 SECOND (evicting E2 from snapshot). *)
+    Persistence.project_transition_outbox_entry_result
+      ~transition_id:ooo_r2.transition_id
+      ~append_before_retire:(fun _ _ -> Ok ())
+      ~retain_previous:(fun _ -> false)
+      ~base_path
+      ~keeper_name:ooo_keeper
+    |> require_ok "project ooo E2 out-of-order";
+    Persistence.project_transition_outbox_entry_result
+      ~transition_id:ooo_r1.transition_id
+      ~append_before_retire:(fun _ _ -> Ok ())
+      ~retain_previous:(fun _ -> false)
+      ~base_path
+      ~keeper_name:ooo_keeper
+    |> require_ok "project ooo E1 second, evicting E2";
+    Fs_compat.save_file ooo_wal_path ooo_two_entry_wal;
+    (match
+       Persistence.validate_existing_state_read_only_classified_result
+         ~base_path ~keeper_name:ooo_keeper
+     with
+     | Ok st ->
+       Alcotest.(check int) "ooo read-only replay yields drained outbox" 0
+         (List.length (State.transition_outbox st))
+     | Error failure ->
+       Alcotest.failf
+         "out-of-order HoL 2-entry WAL must not quarantine: %s"
+         (Persistence.read_only_failure_to_string failure));
+    (match Persistence.observe_state_result ~base_path ~keeper_name:ooo_keeper with
+     | Ok st ->
+       Alcotest.(check int) "ooo lock-free observer succeeds cleanly" 0
+         (List.length (State.transition_outbox st))
+     | Error errs ->
+       Alcotest.failf
+         "ooo lock-free observer failed (%d errors)" (List.length errs));
+    let ooo_recovered =
+      Persistence.load_state_result ~base_path ~keeper_name:ooo_keeper
+      |> require_ok "ooo authoritative load recovers and compacts stale WAL"
+    in
+    Alcotest.(check int) "ooo recovered outbox empty" 0
+      (List.length (State.transition_outbox ooo_recovered));
+    Alcotest.(check string) "ooo stale 2-entry WAL compacted on load" ""
+      (Fs_compat.load_file ooo_wal_path);
+    (* Unanchored/foreign WAL placed alongside S_after_E1 must STILL fail closed. *)
+    Fs_compat.save_file ooo_wal_path two_entry_wal;
+    (match
+       Persistence.validate_existing_state_read_only_classified_result
+         ~base_path ~keeper_name:ooo_keeper
+     with
+     | Error failure ->
+       Alcotest.(check bool) "foreign WAL still maps to Start_quarantine" true
+         (Persistence.recovery_decision failure = Persistence.Start_quarantine)
+     | Ok _ -> Alcotest.fail "foreign WAL must be rejected");
+    Fs_compat.save_file ooo_wal_path "";
+    (* Red-Team Round 4 P2-3: a divergent UNPROJECTED row2 appended after a
+       projected row1 (with rev(row2.pre_state) < rev(snapshot)) MUST fail
+       closed with Invalid_content -> Start_quarantine instead of being
+       silently absorbed via speculative forward causality! *)
+    let div_keeper = "wal-divergent-unprojected-row2" in
+    Persistence.update_result ~base_path ~keeper_name:div_keeper (fun _ ->
+      queue [ stimulus "div-e1" 1.0; stimulus "div-e2" 2.0 ])
+    |> require_ok "seed divergent keeper queue";
+    let div_sel1, div_sel2 =
+      match
+        Persistence.pending_selections_result ~base_path ~keeper_name:div_keeper
+        |> require_ok "div selections"
+      with
+      | [ a; b ] -> a, b
+      | other -> Alcotest.failf "expected 2 div selections, got %d" (List.length other)
+    in
+    let div_r1 =
+      match
+        Persistence.terminalize_pending_turn_completed_result
+          ~base_path ~keeper_name:div_keeper ~applied_at:300.0 ~selection:div_sel1 ()
+        |> require_ok "commit div E1"
+      with
+      | Persistence.Turn_terminal_committed
+          (Persistence.Transition_applied r | Persistence.Transition_already_applied r) -> r
+      | _ -> Alcotest.fail "expected div r1"
+    in
+    let div_dir =
+      Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) div_keeper
+    in
+    let div_snap_path = Filename.concat div_dir Persistence.snapshot_filename in
+    let div_wal_path = Filename.concat div_dir Persistence.transition_wal_filename in
+    let snap_after_e1_only = Fs_compat.load_file div_snap_path in
+    let wal_after_e1_only = Fs_compat.load_file div_wal_path in
+    (* Commit E2 to produce a real WAL [row1(E1); row2(E2)] where row2.pre_state
+       contains E1 in its transition_outbox. *)
+    ignore
+      (Persistence.terminalize_pending_turn_completed_result
+         ~base_path ~keeper_name:div_keeper ~applied_at:301.0 ~selection:div_sel2 ()
+       |> require_ok "commit div E2 for WAL fixture");
+    let divergent_two_row_wal = Fs_compat.load_file div_wal_path in
+    (* Rewind disk to S_after_E1 (E2 never happened), project ONLY E1, and
+       advance the snapshot revision past row2.pre_state via unrelated updates. *)
+    Fs_compat.save_file div_snap_path snap_after_e1_only;
+    Fs_compat.save_file div_wal_path wal_after_e1_only;
+    Persistence.For_testing.reset_snapshot_cache_for_testing ();
+    Persistence.project_transition_outbox_entry_result
+      ~transition_id:div_r1.transition_id
+      ~append_before_retire:(fun _ _ -> Ok ())
+      ~retain_previous:(fun _ -> false)
+      ~base_path
+      ~keeper_name:div_keeper
+    |> require_ok "project only E1 on divergent branch";
+    for i = 1 to 5 do
+      Persistence.update_result ~base_path ~keeper_name:div_keeper (fun q ->
+        Queue.enqueue q (stimulus (Printf.sprintf "div-unrelated-%d" i) (400.0 +. float_of_int i)))
+      |> require_ok "advance divergent snapshot revision"
+    done;
+    (* Place [row1(E1); row2(E2_unprojected)] alongside the snapshot where E1 is
+       projected, E2 was NEVER projected/evicted, and rev(row2) < rev(snapshot). *)
+    Fs_compat.save_file div_wal_path divergent_two_row_wal;
+    Persistence.For_testing.reset_snapshot_cache_for_testing ();
+    (match
+       Persistence.validate_existing_state_read_only_classified_result
+         ~base_path ~keeper_name:div_keeper
+     with
+     | Error failure ->
+       Alcotest.(check bool)
+         "unprojected divergent row2 after projected row1 fails closed to Start_quarantine"
+         true
+         (Persistence.recovery_decision failure = Persistence.Start_quarantine)
+     | Ok _ ->
+       Alcotest.fail "unprojected divergent row2 must NOT be silently absorbed");
+    (match Persistence.load_state_result ~base_path ~keeper_name:div_keeper with
+     | Error _ -> ()
+     | Ok _ ->
+       Alcotest.fail "authoritative load must fail closed on unprojected divergent row2");
+    Alcotest.(check string)
+      "divergent WAL bytes retained untouched on refusal"
+      divergent_two_row_wal
+      (Fs_compat.load_file div_wal_path);
+    (* Verify evicted_transition_ids round-trip and wire validation invariants. *)
+    let ooo_reloaded =
+      Persistence.load_state_result ~base_path ~keeper_name:ooo_keeper
+      |> require_ok "reload ooo state with evicted_transition_ids"
+    in
+    Alcotest.(check (list string))
+      "evicted_transition_ids durably records evicted ooo_r2"
+      [ ooo_r2.transition_id ]
+      (State.evicted_transition_ids ooo_reloaded);
+    let evicted_json = State.to_yojson ooo_reloaded in
+    let duplicate_evicted_json =
+      match evicted_json with
+      | `Assoc fields ->
+        `Assoc
+          (List.map
+             (function
+               | "evicted_transition_ids", `List [ id ] ->
+                 "evicted_transition_ids", `List [ id; id ]
+               | kv -> kv)
+             fields)
+      | _ -> Alcotest.fail "expected object"
+    in
+    (match State.of_yojson duplicate_evicted_json with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "duplicate evicted_transition_ids must be rejected");
+    let overlap_evicted_json =
+      match evicted_json with
+      | `Assoc fields ->
+        `Assoc
+          (List.map
+             (function
+               | "evicted_transition_ids", `List _ ->
+                 "evicted_transition_ids", `List [ `String ooo_r1.transition_id ]
+               | kv -> kv)
+             fields)
+      | _ -> Alcotest.fail "expected object"
+    in
+    (match State.of_yojson overlap_evicted_json with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "evicted_transition_ids overlapping last_transition must be rejected");
+    (* Re-applying a transition whose transition_id was previously evicted via
+       retain_previous=false must strip that id from evicted_transition_ids in
+       apply_pending_transition so snapshot serialization, subsequent updates,
+       and reloads never self-poison into Start_quarantine. *)
+    let reuse_keeper = "wal-reapply-evicted-op-id" in
+    Persistence.update_result ~base_path ~keeper_name:reuse_keeper (fun _ ->
+      queue
+        [ stimulus "reuse-src-1" 1.0
+        ; stimulus "reuse-src-2" 2.0
+        ; stimulus "reuse-src-3" 3.0
+        ])
+    |> require_ok "seed reuse keeper";
+    let reuse_sel1, reuse_sel2, reuse_sel3 =
+      match
+        Persistence.pending_selections_result ~base_path ~keeper_name:reuse_keeper
+        |> require_ok "reuse selections"
+      with
+      | [ a; b; c ] -> a, b, c
+      | other -> Alcotest.failf "expected 3 reuse selections, got %d" (List.length other)
+    in
+    let cancel_of sel op_id : State.accepted_cancellation =
+      { source = sel.State.source
+      ; source_incarnation = sel.State.admitted_revision
+      ; operator_operation_id = op_id
+      ; reason = "eviction reuse check"
+      }
+    in
+    let reuse_r1 =
+      match
+        Persistence.cancel_pending_accepted_result
+          ~base_path ~keeper_name:reuse_keeper ~applied_at:500.0
+          ~cancellation:(cancel_of reuse_sel1 "reused-op-1") ()
+        |> require_ok "apply T1 with reused-op-1"
+      with
+      | Persistence.Transition_applied r | Persistence.Transition_already_applied r -> r
+      | Persistence.Transition_committed_followup_failed { detail; _ } -> Alcotest.fail detail
+    in
+    Persistence.project_transition_outbox_entry_result
+      ~transition_id:reuse_r1.transition_id
+      ~append_before_retire:(fun _ _ -> Ok ())
+      ~retain_previous:(fun _ -> false)
+      ~base_path ~keeper_name:reuse_keeper
+    |> require_ok "project T1";
+    let reuse_r2 =
+      match
+        Persistence.cancel_pending_accepted_result
+          ~base_path ~keeper_name:reuse_keeper ~applied_at:501.0
+          ~cancellation:(cancel_of reuse_sel2 "reused-op-2") ()
+        |> require_ok "apply T2"
+      with
+      | Persistence.Transition_applied r | Persistence.Transition_already_applied r -> r
+      | Persistence.Transition_committed_followup_failed { detail; _ } -> Alcotest.fail detail
+    in
+    Persistence.project_transition_outbox_entry_result
+      ~transition_id:reuse_r2.transition_id
+      ~append_before_retire:(fun _ _ -> Ok ())
+      ~retain_previous:(fun _ -> false)
+      ~base_path ~keeper_name:reuse_keeper
+    |> require_ok "project T2 evicting T1";
+    let st_evicted =
+      Persistence.load_state_result ~base_path ~keeper_name:reuse_keeper
+      |> require_ok "load state with evicted T1"
+    in
+    Alcotest.(check bool) "T1 transition_id is evicted" true
+      (State.transition_id_is_evicted reuse_r1.transition_id st_evicted);
+    let reuse_r3 =
+      match
+        Persistence.cancel_pending_accepted_result
+          ~base_path ~keeper_name:reuse_keeper ~applied_at:502.0
+          ~cancellation:(cancel_of reuse_sel3 "reused-op-1") ()
+        |> require_ok "apply T3 reusing evicted operation_id"
+      with
+      | Persistence.Transition_applied r | Persistence.Transition_already_applied r -> r
+      | Persistence.Transition_committed_followup_failed { detail; _ } -> Alcotest.fail detail
+    in
+    Alcotest.(check string) "reused operation_id produces same transition_id"
+      reuse_r1.transition_id reuse_r3.transition_id;
+    let st_reapplied =
+      Persistence.load_state_result ~base_path ~keeper_name:reuse_keeper
+      |> require_ok "load state after re-applying evicted transition_id"
+    in
+    Alcotest.(check bool) "re-applied transition_id stripped from evicted_transition_ids" false
+      (State.transition_id_is_evicted reuse_r3.transition_id st_reapplied);
+    ignore
+      (State.to_yojson st_reapplied |> State.of_yojson
+       |> require_ok "re-applied state round-trips through validate_state");
+    Persistence.update_result ~base_path ~keeper_name:reuse_keeper (fun q ->
+      Queue.enqueue q (stimulus "reuse-after-reapply" 503.0))
+    |> require_ok "subsequent update_result succeeds cleanly";
+    Persistence.For_testing.reset_snapshot_cache_for_testing ();
+    (match
+       Persistence.validate_existing_state_read_only_classified_result
+         ~base_path ~keeper_name:reuse_keeper
+     with
+     | Ok _ -> ()
+     | Error failure ->
+       Alcotest.failf
+         "read-only validation failed after re-applying evicted transition_id: %s"
+         (Persistence.read_only_failure_to_string failure));
+    ignore
+      (Persistence.load_state_result ~base_path ~keeper_name:reuse_keeper
+       |> require_ok "authoritative reload succeeds after cache reset");
+    (* Verify cardinality bound on transition_outbox fails closed cleanly. *)
+    let rec fill_outbox n st =
+      if n >= State.max_transition_outbox_entries
+      then st
+      else (
+        let s = stimulus (Printf.sprintf "cap-src-%d" n) (float_of_int n) in
+        let st = State.with_pending (queue [ s ]) st in
+        let sel = List.hd (State.pending_selections st) in
+        let st, _ =
+          State.terminalize_pending_turn_completed
+            ~applied_at:(1000.0 +. float_of_int n)
+            ~selection:sel
+            st
+          |> require_ok "fill outbox"
+        in
+        fill_outbox (n + 1) st)
+    in
+    let full = fill_outbox 0 State.empty in
+    let extra = stimulus "cap-overflow" 9999.0 in
+    let full_with_extra = State.with_pending (queue [ extra ]) full in
+    let extra_sel = List.hd (State.pending_selections full_with_extra) in
+    match
+      State.terminalize_pending_turn_completed
+        ~applied_at:2000.0
+        ~selection:extra_sel
+        full_with_extra
+    with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "expected transition_outbox capacity error")
+;;
+
 let () =
   Alcotest.run
     "keeper pending queue current schema"
@@ -2831,6 +3299,10 @@ let () =
             "multi-entry FIFO transition outbox has no HoL deadlock"
             `Quick
             test_multi_entry_fifo_transition_outbox_has_no_hol_deadlock
+        ; Alcotest.test_case
+            "multi-entry WAL after evicted receipt and observer compaction never quarantines"
+            `Quick
+            test_multi_entry_wal_evicted_receipt_and_observer_order
         ] )
       ]
 ;;

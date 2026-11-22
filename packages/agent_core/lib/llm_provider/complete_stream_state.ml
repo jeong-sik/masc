@@ -58,6 +58,8 @@ type disposition =
   | Natural
   | Incomplete of string
 
+let max_accumulated_stream_bytes = 32 * 1024 * 1024
+
 type t =
   { id : string
   ; model : string
@@ -71,6 +73,7 @@ type t =
   ; blocks : block Blocks.t
   ; inline_content_carrier : (string * int list) option
   ; response_output_items : (Types.Response_replay.kind * int list) list option
+  ; accumulated_bytes : int
   }
 
 type receipt =
@@ -90,8 +93,11 @@ let empty =
   ; blocks = Blocks.empty
   ; inline_content_carrier = None
   ; response_output_items = None
+  ; accumulated_bytes = 0
   }
 ;;
+
+let accumulated_bytes state = state.accumulated_bytes
 
 let empty_block =
   { header = Unannounced
@@ -570,6 +576,119 @@ let normalize_event state event =
   | Types.StreamIncomplete _ -> Ok (Some event)
 ;;
 
+let media_source_bytes = function
+  | Types.Base64 data -> String.length data
+  | Types.Url url -> String.length url
+  | Types.File_id id -> String.length id
+;;
+
+let min_delta_overhead_bytes = 32
+
+(* Iterative, stack-safe byte-size estimator for [Yojson.Safe.t] payloads
+   stored inside stream blocks (such as [ReasoningDetailsDelta.raw]),
+   short-circuiting as soon as [limit] is exceeded. *)
+let yojson_byte_size_bounded ~limit json =
+  let add = Json_util.saturating_add_non_negative in
+  let rec loop acc = function
+    | [] -> acc
+    | _ when acc > limit -> acc
+    | v :: stack ->
+      (match v with
+       | `Null -> loop (add acc 4) stack
+       | `Bool _ -> loop (add acc 5) stack
+       | `Int _ -> loop (add acc 16) stack
+       | `Float _ -> loop (add acc 24) stack
+       | `Intlit s -> loop (add acc (add (String.length s) 8)) stack
+       | `String s -> loop (add acc (add (String.length s) 16)) stack
+       | `List items -> loop (add acc 16) (List.rev_append items stack)
+       | `Assoc fields ->
+         let next_acc, next_stack =
+           List.fold_left
+             (fun (a, st) (k, fv) -> add a (add (String.length k) 24), fv :: st)
+             (add acc 16, stack)
+             fields
+         in
+         loop next_acc next_stack)
+  in
+  loop 0 [ json ]
+;;
+
+let reasoning_detail_bytes (detail : Types.reasoning_detail) =
+  let text_bytes = Option.fold ~none:0 ~some:String.length detail.text in
+  let raw_bytes =
+    yojson_byte_size_bounded ~limit:(max_accumulated_stream_bytes + 1) detail.raw
+  in
+  Json_util.saturating_add_non_negative (text_bytes + 64) raw_bytes
+;;
+
+let block_start_bytes ~content_type ~tool_id ~tool_name =
+  let opt_len = Option.fold ~none:0 ~some:String.length in
+  Json_util.saturating_add_non_negative
+    64
+    (Json_util.saturating_add_non_negative
+       (String.length content_type)
+       (Json_util.saturating_add_non_negative (opt_len tool_id) (opt_len tool_name)))
+;;
+
+let output_items_bytes groups =
+  List.fold_left
+    (fun acc (_, indices) ->
+       Json_util.saturating_add_non_negative
+         acc
+         (Json_util.saturating_add_non_negative 32 (List.length indices * 16)))
+    32
+    groups
+;;
+
+let delta_payload_bytes = function
+  | Types.TextDelta text
+  | Types.TextSnapshot text
+  | Types.ThinkingDelta text
+  | Types.ThinkingSnapshot text
+  | Types.ThinkingSignatureDelta text
+  | Types.RedactedThinkingSnapshot text
+  | Types.InputJsonDelta text
+  | Types.InputJsonSnapshot text ->
+    Json_util.saturating_add_non_negative (String.length text) min_delta_overhead_bytes
+  | Types.ReasoningDetailsDelta { reasoning_content; details } ->
+    let content_bytes =
+      Json_util.saturating_add_non_negative
+        (Option.fold ~none:0 ~some:String.length reasoning_content)
+        min_delta_overhead_bytes
+    in
+    List.fold_left
+      (fun acc detail ->
+         Json_util.saturating_add_non_negative acc (reasoning_detail_bytes detail))
+      content_bytes
+      details
+  | Types.MediaDelta { media_type; source } ->
+    Json_util.saturating_add_non_negative
+      (Json_util.saturating_add_non_negative
+         (String.length media_type)
+         (media_source_bytes source))
+      min_delta_overhead_bytes
+;;
+
+let charge_stream_bytes state added_bytes =
+  let next_bytes =
+    Json_util.saturating_add_non_negative state.accumulated_bytes added_bytes
+  in
+  if next_bytes > max_accumulated_stream_bytes
+  then
+    Error
+      (capture_failure
+         (Types.Stream_parse_failed
+            { reason =
+                Printf.sprintf
+                  "stream_accumulated_bytes_exceeded:%d>%d"
+                  next_bytes
+                  max_accumulated_stream_bytes
+            ; raw = ""
+            })
+         state)
+  else Ok { state with accumulated_bytes = next_bytes }
+;;
+
 let transition_open state = function
   | Types.MessageStart { id; model; usage } ->
     let incoming_start = id, model, usage in
@@ -577,18 +696,24 @@ let transition_open state = function
     then terminal_event_failure "message_start_after_terminal" state
     else if not state.message_started && Blocks.is_empty state.blocks
     then
-      let usage =
-        match usage with
-        | None -> state.usage
-        | Some wire -> Some (Types.delta_usage_of_api_usage wire)
+      let start_bytes =
+        Json_util.saturating_add_non_negative (String.length id) (String.length model)
       in
-      { state with
-        id
-      ; model
-      ; message_started = true
-      ; message_start = Some incoming_start
-      ; usage
-      }
+      (match charge_stream_bytes state start_bytes with
+       | Error failed_state -> failed_state
+       | Ok state ->
+         let usage =
+           match usage with
+           | None -> state.usage
+           | Some wire -> Some (Types.delta_usage_of_api_usage wire)
+         in
+         { state with
+           id
+         ; model
+         ; message_started = true
+         ; message_start = Some incoming_start
+         ; usage
+         })
     else if
       state.message_started
       && state.completion = Awaiting_stop
@@ -682,12 +807,22 @@ let transition_open state = function
             })
          state
      | None ->
-       let block = { empty_block with header } in
-       { state with blocks = Blocks.add index block state.blocks })
+       (match
+          charge_stream_bytes
+            state
+            (block_start_bytes ~content_type ~tool_id ~tool_name)
+        with
+        | Error failed_state -> failed_state
+        | Ok state ->
+          let block = { empty_block with header } in
+          { state with blocks = Blocks.add index block state.blocks }))
   | Types.ContentBlockDelta { index; delta } ->
     if state.message_lifecycle <> Accepting_content
     then terminal_event_failure "content_block_delta_after_terminal" state
     else
+      (match charge_stream_bytes state (delta_payload_bytes delta) with
+       | Error failed_state -> failed_state
+       | Ok state ->
       (match Blocks.find_opt index state.blocks, delta with
      | Some { lifecycle = Closed; _ }, _ ->
        capture_failure
@@ -808,7 +943,7 @@ let transition_open state = function
                  ; tool_name = None
                  }
            })
-            state)
+            state))
   | Types.ContentBlockStop { index } ->
     if state.message_lifecycle = Message_stopped
     then terminal_event_failure "content_block_stop_after_message_stop" state
@@ -823,14 +958,25 @@ let transition_open state = function
     if state.message_lifecycle <> Accepting_content then
       terminal_event_failure "inline_content_replay:after_terminal" state
     else (match state.inline_content_carrier with
-      | None -> {state with inline_content_carrier=Some (raw_content,block_indices)}
+      | None ->
+        let replay_bytes =
+          Json_util.saturating_add_non_negative
+            (Json_util.saturating_add_non_negative (String.length raw_content) 32)
+            (List.length block_indices * 16)
+        in
+        (match charge_stream_bytes state replay_bytes with
+         | Error failed_state -> failed_state
+         | Ok state -> {state with inline_content_carrier=Some (raw_content,block_indices)})
       | Some previous when previous=(raw_content,block_indices) -> state
       | Some _ -> terminal_event_failure "inline_content_replay:conflicting_carrier" state)
   | Types.ResponsesOutputItems groups ->
     if state.message_lifecycle <> Accepting_content then
       terminal_event_failure "responses_output_items_after_terminal" state
     else (match state.response_output_items with
-      | None -> {state with response_output_items=Some groups}
+      | None ->
+        (match charge_stream_bytes state (output_items_bytes groups) with
+         | Error failed_state -> failed_state
+         | Ok state -> {state with response_output_items=Some groups})
       | Some previous when previous=groups -> state
       | Some _ -> terminal_event_failure "conflicting_responses_output_items" state)
   | Types.MessageDelta { stop_reason; usage } ->

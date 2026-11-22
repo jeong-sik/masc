@@ -1011,8 +1011,8 @@ let with_request_metadata ~body run =
   Http_request_observer.with_request_metadata ~body ~metadata:(fun () ->
     let open Http_request_observer in
     let unavailable = {tool_inventory=Tools_unavailable;components=Components_unavailable} in
-    match Yojson.Safe.from_string body with
-    | `Assoc fields as json ->
+    match Json_util.from_string_bounded body with
+    | Ok (`Assoc fields as json) ->
       let tool_inventory = match List.filter_map (fun (name,value) ->
         if String.equal name "tools" then Some value else None) fields with
        | [] -> No_tools_member
@@ -1033,8 +1033,8 @@ let with_request_metadata ~body run =
           let framing_bytes = match members with [] -> 2 | _ :: _ -> List.length members + 1 in
           Json_object_members {members;framing_bytes} in
       {tool_inventory;components}
-    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> unavailable
-    | exception Yojson.Json_error _ -> unavailable) run
+    | Ok (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
+    | Error _ -> unavailable) run
 ;;
 
 let observe_pre_dispatch_serialization ?request_wire_observer observation =
@@ -1057,36 +1057,7 @@ let observe_pre_dispatch_serialization ?request_wire_observer observation =
     [Provider_config.t] may contain an arbitrary endpoint; a misconfigured one like
     [https://user:token@api.example.com/v1?token=abc] must not leak the
     secret to stderr. *)
-let sanitize_url_for_log url =
-  let strip_query s =
-    match String.index_opt s '?' with
-    | Some i -> String.sub s 0 i
-    | None -> s
-  in
-  let strip_userinfo s =
-    (* Only consider the authority segment (between :// and the next /).
-       A literal '@' inside a path is allowed and must not be stripped. *)
-    match String.index_opt s '/' with
-    | None -> s
-    | Some i1 when i1 + 2 > String.length s || s.[i1 + 1] <> '/' -> s
-    | Some i1 ->
-      let authority_start = i1 + 2 in
-      let authority_end =
-        match String.index_from_opt s authority_start '/' with
-        | Some j -> j
-        | None -> String.length s
-      in
-      let authority = String.sub s authority_start (authority_end - authority_start) in
-      (match String.rindex_opt authority '@' with
-       | None -> s
-       | Some k ->
-         let host = String.sub authority (k + 1) (String.length authority - k - 1) in
-         let prefix = String.sub s 0 authority_start in
-         let suffix = String.sub s authority_end (String.length s - authority_end) in
-         prefix ^ host ^ suffix)
-  in
-  strip_query (strip_userinfo url)
-;;
+let sanitize_url_for_log = Api_common.sanitize_url_for_log
 
 let%test "sanitize_url_for_log passthrough plain https" =
   sanitize_url_for_log "https://api.z.ai/api/coding/paas/v4"

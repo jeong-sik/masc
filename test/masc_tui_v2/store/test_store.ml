@@ -3492,6 +3492,1783 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
   Alcotest.(check bool) "/model emits real cmds (never fake empty toast)" true
     (Cmd.flatten cmds_mod <> [])
 
+(* --- Comprehensive Arrow Navigation, Display Order & Symmetric Scroll Regression Suite --- *)
+
+let grouped_keeper ?(health = Wire_fleet.Keeper_healthy) ?(spark = [ 1.0 ])
+    ~group name : Wire_fleet.keeper_summary =
+  {
+    (sample_keeper ~health name) with
+    group = Some group;
+    company = group;
+    activity_sparkline_24h = spark;
+  }
+
+let test_nav_fix1_keepers_grouped_order_collapse_and_resync () =
+  (* Scrambled raw order across 4 generic groups *)
+  let raw_ks =
+    [
+      grouped_keeper ~group:"org-zeta" ~spark:[ 5.0 ] "zeta-1";
+      grouped_keeper ~group:"org-alpha" ~spark:[ 1.0 ] "alpha-2";
+      grouped_keeper ~group:"org-mid" ~spark:[ 9.0 ] "mid-1";
+      grouped_keeper ~group:"org-beta" ~spark:[ 3.0 ] "beta-2";
+      grouped_keeper ~group:"org-alpha" ~spark:[ 2.0 ] "alpha-1";
+      grouped_keeper ~group:"org-beta" ~spark:[ 8.0 ] "beta-1";
+    ]
+  in
+  let expected_grouped =
+    [ "alpha-1"; "alpha-2"; "beta-1"; "beta-2"; "mid-1"; "zeta-1" ]
+  in
+  let f0 = Fleet_store.apply_keepers ~observed_at:t0 raw_ks Fleet_store.empty in
+  let names_of ks =
+    List.map (fun (k : Wire_fleet.keeper_summary) -> k.name) ks
+  in
+  Alcotest.(check (list string))
+    "Fleet_companies filtered_keepers matches exact Wire_fleet.group_by_company order"
+    expected_grouped
+    (names_of (Fleet_store.filtered_keepers f0));
+  let flattened_groups =
+    Fleet_store.company_groups f0
+    |> List.concat_map (fun (g : Wire_fleet.company_group) -> g.keepers)
+    |> names_of
+  in
+  Alcotest.(check (list string))
+    "filtered_keepers equals flattened company_groups"
+    flattened_groups
+    (names_of (Fleet_store.filtered_keepers f0));
+  Alcotest.(check (option string))
+    "initial selection is first visual keeper (alpha-1)" (Some "alpha-1")
+    f0.selected_keeper;
+  Alcotest.(check int) "initial selected_index = 0" 0 f0.selected_index;
+  (* Sequential Down presses walk strictly 0..5, then Up reverses cleanly *)
+  let rec step_down f n acc =
+    if n = 0 then List.rev acc
+    else
+      let f' = Fleet_store.move_selection ~viewport_rows:20 ~delta:1 f in
+      step_down f' (n - 1) ((f'.selected_index, f'.selected_keeper) :: acc)
+  in
+  let down_trace = step_down f0 5 [ (f0.selected_index, f0.selected_keeper) ] in
+  Alcotest.(check (list (pair int (option string))))
+    "sequential Down walks strictly through grouped order"
+    [
+      (0, Some "alpha-1");
+      (1, Some "alpha-2");
+      (2, Some "beta-1");
+      (3, Some "beta-2");
+      (4, Some "mid-1");
+      (5, Some "zeta-1");
+    ]
+    down_trace;
+  (* Poll re-ordering preserves selected_keeper and syncs selected_index so next Down advances *)
+  let f_mid = Fleet_store.select_keeper "mid-1" f0 in
+  let f_reordered =
+    Fleet_store.apply_keepers ~observed_at:t1 (List.rev raw_ks) f_mid
+  in
+  Alcotest.(check (option string))
+    "poll reorder preserves selected_keeper=mid-1" (Some "mid-1")
+    f_reordered.selected_keeper;
+  Alcotest.(check int) "poll reorder keeps selected_index=4" 4
+    f_reordered.selected_index;
+  let f_after_down = Fleet_store.move_selection ~delta:1 f_reordered in
+  Alcotest.(check (option string))
+    "Down after poll reorder advances forward to zeta-1" (Some "zeta-1")
+    f_after_down.selected_keeper;
+  (* Collapsing org-beta skips beta-1/beta-2 cleanly; if selected was inside beta, snaps to nearest visible *)
+  let f_on_beta = Fleet_store.select_keeper "beta-1" f0 in
+  let f_collapsed = Fleet_store.toggle_company_collapsed "org-beta" f_on_beta in
+  Alcotest.(check (list string))
+    "collapsed org-beta skipped from filtered_keepers"
+    [ "alpha-1"; "alpha-2"; "mid-1"; "zeta-1" ]
+    (names_of (Fleet_store.filtered_keepers f_collapsed));
+  Alcotest.(check (option string))
+    "collapsing active group snaps to nearest visible (mid-1)" (Some "mid-1")
+    f_collapsed.selected_keeper;
+  Alcotest.(check int) "selected_index re-synced after collapse" 2
+    f_collapsed.selected_index;
+  let f_a2 = Fleet_store.select_keeper "alpha-2" f_collapsed in
+  let f_skip = Fleet_store.move_selection ~delta:1 f_a2 in
+  Alcotest.(check (option string))
+    "Down from alpha-2 skips collapsed org-beta to mid-1" (Some "mid-1")
+    f_skip.selected_keeper;
+  (* Collapsing ALL companies falls back safely to all grouped keepers *)
+  let f_all_collapsed =
+    f0
+    |> Fleet_store.toggle_company_collapsed "org-alpha"
+    |> Fleet_store.toggle_company_collapsed "org-beta"
+    |> Fleet_store.toggle_company_collapsed "org-mid"
+    |> Fleet_store.toggle_company_collapsed "org-zeta"
+  in
+  Alcotest.(check (list string))
+    "all-collapsed fallback preserves all grouped keepers"
+    expected_grouped
+    (names_of (Fleet_store.filtered_keepers f_all_collapsed));
+  (* set_fleet_mode re-syncs selected_index to selected_keeper in new sort order *)
+  let f_wall = Fleet_store.set_fleet_mode Nav.Fleet_pulse_wall f_mid in
+  Alcotest.(check (option string))
+    "set_fleet_mode preserves selected_keeper=mid-1" (Some "mid-1")
+    f_wall.selected_keeper;
+  Alcotest.(check int)
+    "set_fleet_mode re-syncs selected_index=0 (highest 24h pulse)" 0
+    f_wall.selected_index;
+  (* set_filter hides selected keeper -> picks nearest visible cleanly *)
+  let f_filt = Fleet_store.set_filter "alpha" f_mid in
+  Alcotest.(check (option string))
+    "set_filter hiding selected keeper picks nearest visible" (Some "alpha-1")
+    f_filt.selected_keeper;
+  Alcotest.(check int) "set_filter syncs selected_index=0" 0
+    f_filt.selected_index
+
+let test_nav_fix2_pulse_company_row_stepping () =
+  let ks =
+    [
+      grouped_keeper ~group:"org-alpha" "alpha-1";
+      grouped_keeper ~group:"org-alpha" "alpha-2";
+      grouped_keeper ~group:"org-alpha" "alpha-3";
+      grouped_keeper ~group:"org-beta" "beta-1";
+      grouped_keeper ~group:"org-beta" "beta-2";
+      grouped_keeper ~group:"org-gamma" "gamma-1";
+      grouped_keeper ~group:"org-gamma" "gamma-2";
+    ]
+  in
+  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let m1, _ =
+    Update.step ~now:t0 m0
+      (Msg.Http_reply
+         { epoch = m0.epoch; reply = Msg.Reply_keepers_roster (Ok ks) })
+  in
+  (* Select 3rd keeper inside org-alpha, switch to Pulse, press Down -> must land on org-beta lead *)
+  let m_pulse =
+    {
+      m1 with
+      nav = { m1.nav with workspace = Nav.Pulse };
+      fleet = Fleet_store.select_keeper "alpha-3" m1.fleet;
+    }
+  in
+  let m_d1, _ =
+    Update.step ~now:t1 m_pulse (Msg.Key_event (key Keymap.Input.Down))
+  in
+  Alcotest.(check (option string))
+    "Pulse Down from org-alpha member jumps strictly 1 company to beta-1"
+    (Some "beta-1") m_d1.fleet.selected_keeper;
+  let m_d2, _ =
+    Update.step ~now:t1 m_d1 (Msg.Key_event (key Keymap.Input.Down))
+  in
+  Alcotest.(check (option string))
+    "Pulse second Down jumps strictly 1 company to gamma-1" (Some "gamma-1")
+    m_d2.fleet.selected_keeper;
+  let m_u1, _ =
+    Update.step ~now:t2 m_d2 (Msg.Key_event (key Keymap.Input.Up))
+  in
+  Alcotest.(check (option string))
+    "Pulse Up jumps strictly 1 company back to beta-1" (Some "beta-1")
+    m_u1.fleet.selected_keeper;
+  let m_u2, _ =
+    Update.step ~now:t2 m_u1 (Msg.Key_event (key Keymap.Input.Up))
+  in
+  Alcotest.(check (option string))
+    "Pulse second Up jumps strictly 1 company back to alpha-1" (Some "alpha-1")
+    m_u2.fleet.selected_keeper
+
+let test_nav_fix3_runtime_efficiency_company_grouped_display_order () =
+  let ks =
+    [
+      grouped_keeper ~group:"co-high" "high-1";
+      grouped_keeper ~group:"co-high" "high-2";
+      grouped_keeper ~group:"co-mid" "mid-1";
+      grouped_keeper ~group:"co-mid" "mid-2";
+      grouped_keeper ~group:"co-tie" "tie-1";
+    ]
+  in
+  let mk_eff keeper cost_usd calls : Wire_runtime.keeper_efficiency_row =
+    {
+      keeper;
+      turns = 10;
+      input_tokens = 10000;
+      cache_read_tokens = Observed.value ~observed_at:t0 8000;
+      cache_creation_tokens = Observed.value ~observed_at:t0 0;
+      output_tokens = 500;
+      cache_hit_pct = Observed.value ~observed_at:t0 80.0;
+      cost_usd;
+      calls;
+      failed = 0;
+      deferred = 0;
+      tool_ms = 120.0;
+    }
+  in
+  (* Global USD sort would interleave companies: high-1(10), mid-1(8), tie-1(5), high-2(2), mid-2(1).
+     Canonical grouped sort MUST order companies by total USD desc:
+       co-high ($12): high-1, high-2
+       co-mid  ($9):  mid-1, mid-2
+       co-tie  ($5):  tie-1 *)
+  let eff : Wire_runtime.efficiency_month =
+    {
+      month = "2026-11";
+      window_kind = Some Wire_runtime.Efficiency_month_mtd;
+      generated_at_unix = 1_795_200_000.0;
+      days_covered = 22;
+      keepers =
+        [
+          mk_eff "mid-2" 1.0 10;
+          mk_eff "tie-1" 5.0 30;
+          mk_eff "high-2" 2.0 20;
+          mk_eff "mid-1" 8.0 40;
+          mk_eff "high-1" 10.0 50;
+        ];
+      fleet =
+        {
+          turns_total = 50;
+          calls_per_turn = 3.0;
+          tool_s_per_turn = 1.2;
+          output_tokens_per_turn = 50.0;
+          input_tokens_per_turn = 1000.0;
+          cost_usd_per_turn = 0.52;
+          fleet_cache_hit_pct = Observed.value ~observed_at:t0 80.0;
+        };
+      velocity = [];
+    }
+  in
+  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let m1, _ =
+    Update.step ~now:t0 m0
+      (Msg.Http_reply
+         { epoch = m0.epoch; reply = Msg.Reply_keepers_roster (Ok ks) })
+  in
+  let m2, _ =
+    Update.step ~now:t0 m1
+      (Msg.Http_reply
+         { epoch = m1.epoch; reply = Msg.Reply_efficiency (Ok eff) })
+  in
+  let m_rt =
+    {
+      m2 with
+      nav = { m2.nav with workspace = Nav.Runtime };
+      runtime =
+        Runtime_store.set_tab Nav.Runtime_efficiency_spend m2.runtime;
+    }
+  in
+  let display_names =
+    Runtime_store.keeper_spend_display_rows m_rt.runtime
+    |> List.map (fun (r : Runtime_store.keeper_spend_row) -> r.keeper)
+  in
+  Alcotest.(check (list string))
+    "keeper_spend_display_rows follows company total USD desc then member USD desc"
+    [ "high-1"; "high-2"; "mid-1"; "mid-2"; "tie-1" ]
+    display_names;
+  let rec walk_down m steps acc =
+    if steps = 0 then List.rev acc
+    else
+      let m', _ =
+        Update.step ~now:t1 m (Msg.Key_event (key Keymap.Input.Down))
+      in
+      let sel =
+        Option.map (fun (r : Runtime_store.keeper_spend_row) -> r.keeper)
+          (Runtime_store.selected_keeper_spend_row m'.runtime)
+      in
+      walk_down m' (steps - 1) (sel :: acc)
+  in
+  let initial_sel =
+    Option.map (fun (r : Runtime_store.keeper_spend_row) -> r.keeper)
+      (Runtime_store.selected_keeper_spend_row m_rt.runtime)
+  in
+  let trace = walk_down m_rt 4 [ initial_sel ] in
+  Alcotest.(check (list (option string)))
+    "Down on Runtime Efficiency steps monotonically through company-grouped rows"
+    [ Some "high-1"; Some "high-2"; Some "mid-1"; Some "mid-2"; Some "tie-1" ]
+    trace
+
+let test_nav_fix4_knowledge_board_chains_and_wiki_clusters () =
+  let mk_post ?chain id title ts : Wire_knowledge.board_post =
+    {
+      id;
+      title;
+      body = "body " ^ id;
+      author = "alpha-1";
+      hearth = Some "ops";
+      post_kind = Some Wire_knowledge.Human_post;
+      visibility = Some Wire_knowledge.Vis_public;
+      created_at_unix = ts;
+      updated_at_unix = None;
+      score = 1;
+      comment_count = 0;
+      author_karma = Observed.value ~observed_at:t0 10;
+      succession_chain_root_id = chain;
+      chain_depth = None;
+      is_signal = true;
+    }
+  in
+  let posts =
+    [
+      mk_post ~chain:"root-a" "a-1" "Chain A lead" 300.0;
+      mk_post ~chain:"root-a" "a-2" "Chain A child 1" 290.0;
+      mk_post ~chain:"root-a" "a-3" "Chain A child 2" 280.0;
+      mk_post "b-1" "Singleton B" 250.0;
+      mk_post ~chain:"root-c" "c-1" "Chain C lead" 200.0;
+      mk_post ~chain:"root-c" "c-2" "Chain C child" 190.0;
+    ]
+  in
+  let feed : Wire_knowledge.board_feed =
+    { posts; count = List.length posts; sort_by = "recent"; signal_only = true }
+  in
+  let k0 = Knowledge_store.apply_board ~observed_at:t0 feed Knowledge_store.empty in
+  let post_ids ks = List.map (fun (p : Wire_knowledge.board_post) -> p.id) ks in
+  Alcotest.(check (list string))
+    "collapsed board_display_posts shows leads + singletons only"
+    [ "a-1"; "b-1"; "c-1" ]
+    (post_ids (Knowledge_store.board_display_posts k0));
+  let k1 = Knowledge_store.move_selection ~delta:1 k0 in
+  Alcotest.(check (option string))
+    "Down on collapsed board steps a-1 -> b-1" (Some "b-1")
+    (Option.map (fun (p : Wire_knowledge.board_post) -> p.id)
+       (Knowledge_store.selected_post k1));
+  (* Expand root-a while b-1 is selected -> preserves b-1 and re-syncs index to 3 *)
+  let k_exp = Knowledge_store.toggle_succession_chain ~root_id:"root-a" k1 in
+  Alcotest.(check (list string))
+    "expanded root-a exposes chain members inline"
+    [ "a-1"; "a-2"; "a-3"; "b-1"; "c-1" ]
+    (post_ids (Knowledge_store.board_display_posts k_exp));
+  Alcotest.(check (option string))
+    "expanding chain preserves selected post b-1" (Some "b-1")
+    (Option.map (fun (p : Wire_knowledge.board_post) -> p.id)
+       (Knowledge_store.selected_post k_exp));
+  Alcotest.(check int) "selected_index synced to 3 after expand" 3
+    k_exp.selected_index;
+  (* Move up into a-2, then collapse root-a -> snaps cleanly to a-1 (index 0) *)
+  let k_a2 = Knowledge_store.move_selection ~delta:(-2) k_exp in
+  Alcotest.(check (option string))
+    "Up twice lands on a-2" (Some "a-2")
+    (Option.map (fun (p : Wire_knowledge.board_post) -> p.id)
+       (Knowledge_store.selected_post k_a2));
+  let k_col = Knowledge_store.toggle_succession_chain ~root_id:"root-a" k_a2 in
+  Alcotest.(check (option string))
+    "collapsing active chain snaps selection to lead a-1" (Some "a-1")
+    (Option.map (fun (p : Wire_knowledge.board_post) -> p.id)
+       (Knowledge_store.selected_post k_col));
+  Alcotest.(check int) "selected_index synced to 0 after collapse" 0
+    k_col.selected_index;
+  let k_next = Knowledge_store.move_selection ~delta:1 k_col in
+  Alcotest.(check (option string))
+    "Down after collapse advances cleanly to b-1" (Some "b-1")
+    (Option.map (fun (p : Wire_knowledge.board_post) -> p.id)
+       (Knowledge_store.selected_post k_next));
+  (* Wiki topic clustering (language-neutral string option topic key) *)
+  let mk_wiki slug tags : Wire_knowledge.wiki_page_summary =
+    {
+      slug;
+      file = slug ^ ".md";
+      title = "Title " ^ slug;
+      summary = "Summary " ^ slug;
+      source = Wire_knowledge.Source_research;
+      author = "alpha-1";
+      created = "2026-11-01";
+      updated = "2026-11-22";
+      revision = 1;
+      tags;
+      backlink_count = 0;
+      outgoing_link_count = 0;
+      sources_count = 1;
+      hearsay_count = 0;
+      sha256 = "sha-" ^ slug;
+    }
+  in
+  let empty_lint : Wire_knowledge.wiki_index_lint =
+    {
+      total_findings = 0;
+      counts =
+        {
+          broken_link = 0;
+          unsupported_link = 0;
+          orphan = 0;
+          orphan_unconfirmed = 0;
+          missing_sources = 0;
+          hearsay_only = 0;
+          unreadable_page = 0;
+          revision_log_gap = 0;
+          revision_log_hole = 0;
+          duplicate_title_candidates = 0;
+        };
+      log_hole_suppressed = false;
+      orphans = [];
+      duplicate_title_candidates = [];
+      findings = [];
+    }
+  in
+  let wiki_pages =
+    [
+      mk_wiki "page-untagged" [];
+      mk_wiki "page-ops-1" [ "ops" ];
+      mk_wiki "page-arch-1" [ "arch" ];
+      mk_wiki "page-ops-2" [ "ops" ];
+    ]
+  in
+  let idx : Wire_knowledge.wiki_index =
+    {
+      pages_total = 4;
+      pages_readable = 4;
+      pages_unreadable = 0;
+      pages = wiki_pages;
+      unreadable_pages = [];
+      lint = empty_lint;
+    }
+  in
+  let clusters = Knowledge_store.cluster_wiki_pages wiki_pages in
+  Alcotest.(check (list (option string)))
+    "cluster_wiki_pages uses language-neutral string option keys (None for untagged)"
+    [ None; Some "ops"; Some "arch" ]
+    (List.map fst clusters);
+  let kw0 =
+    Knowledge_store.empty
+    |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts
+    |> Knowledge_store.apply_wiki_index ~observed_at:t0 idx
+  in
+  let disp_slugs =
+    Knowledge_store.wiki_display_pages kw0
+    |> List.map (fun (p : Wire_knowledge.wiki_page_summary) -> p.slug)
+  in
+  Alcotest.(check (list string))
+    "wiki_display_pages matches flattened cluster order"
+    [ "page-untagged"; "page-ops-1"; "page-ops-2"; "page-arch-1" ]
+    disp_slugs;
+  let kw1 = Knowledge_store.move_selection ~delta:3 kw0 in
+  Alcotest.(check (option string))
+    "selected_wiki_page after 3 Down steps is page-arch-1" (Some "page-arch-1")
+    (Option.map (fun (p : Wire_knowledge.wiki_page_summary) -> p.slug)
+       (Knowledge_store.selected_wiki_page kw1));
+  (* Re-applying wiki index with reordered pages preserves slug page-arch-1 *)
+  let kw_re =
+    Knowledge_store.apply_wiki_index ~observed_at:t1
+      { idx with pages = List.rev wiki_pages }
+      kw1
+  in
+  Alcotest.(check (option string))
+    "apply_wiki_index preserves selected slug across refresh" (Some "page-arch-1")
+    (Option.map (fun (p : Wire_knowledge.wiki_page_summary) -> p.slug)
+       (Knowledge_store.selected_wiki_page kw_re))
+
+let test_nav_fix5_keeper_chat_scroll_direction_and_home_bound () =
+  let msgs =
+    List.init 40 (fun i : Wire_fleet.chat_message ->
+        {
+          id = Printf.sprintf "m-%d" i;
+          role =
+            (if i mod 2 = 0 then Wire_fleet.Role_user
+             else Wire_fleet.Role_assistant);
+          content = Printf.sprintf "Message line %d with enough detail" i;
+          ts_unix = 1_700_000_000.0 +. float_of_int i;
+          turn_ref = None;
+          model_used = None;
+          tool_call_id = None;
+          tool_call_name = None;
+          execution_id = None;
+        })
+  in
+  let m0 = Model.initial ~cols:120 ~rows:30 () in
+  let fleet =
+    m0.fleet
+    |> Fleet_store.apply_keepers ~observed_at:t0 [ sample_keeper "alpha-1" ]
+    |> Fleet_store.apply_chat_history ~observed_at:t0 ~keeper:"alpha-1"
+         { messages = msgs; has_more = false; next_cursor = None }
+  in
+  let m_chat =
+    {
+      m0 with
+      fleet;
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha-1"; tab = Nav.Keeper_chat } ];
+        };
+    }
+  in
+  Alcotest.(check int) "chat scroll starts at bottom (0)" 0
+    m_chat.fleet.chat_scroll_offset;
+  let m_up, _ =
+    Update.step ~now:t0 m_chat (Msg.Key_event (key Keymap.Input.Up))
+  in
+  Alcotest.(check int) "Up scrolls UP to older messages (+1)" 1
+    m_up.fleet.chat_scroll_offset;
+  let m_pgup, _ =
+    Update.step ~now:t0 m_up (Msg.Key_event (key Keymap.Input.Page_up))
+  in
+  Alcotest.(check int) "Page_up scrolls UP by +10" 11
+    m_pgup.fleet.chat_scroll_offset;
+  let m_wup, _ =
+    Update.step ~now:t0 m_pgup
+      (Msg.Mouse_event
+         (Keymap.Input.Wheel { dir = Keymap.Input.Wheel_up; col = 10; row = 10 }))
+  in
+  Alcotest.(check int) "Wheel_up scrolls UP (+1)" 12
+    m_wup.fleet.chat_scroll_offset;
+  let m_dn, _ =
+    Update.step ~now:t0 m_wup (Msg.Key_event (key Keymap.Input.Down))
+  in
+  Alcotest.(check int) "Down scrolls DOWN toward latest (-1)" 11
+    m_dn.fleet.chat_scroll_offset;
+  let m_wdn, _ =
+    Update.step ~now:t0 m_dn
+      (Msg.Mouse_event
+         (Keymap.Input.Wheel
+            { dir = Keymap.Input.Wheel_down; col = 10; row = 10 }))
+  in
+  Alcotest.(check int) "Wheel_down scrolls DOWN (-1)" 10
+    m_wdn.fleet.chat_scroll_offset;
+  let m_end, _ =
+    Update.step ~now:t0 m_wdn (Msg.Key_event (key Keymap.Input.End))
+  in
+  Alcotest.(check int) "End jumps straight to bottom (0)" 0
+    m_end.fleet.chat_scroll_offset;
+  let m_home, _ =
+    Update.step ~now:t0 m_end (Msg.Key_event (key Keymap.Input.Home))
+  in
+  let bound = Chat_transcript.max_scroll_for_model ~model:m_chat ~keeper:"alpha-1" in
+  Alcotest.(check bool) "Home bound is tight (>0 and <1000)" true
+    (bound > 0 && bound < 1000);
+  Alcotest.(check int) "Home clamps to tight upper bound (no 100000 overshoot)"
+    bound m_home.fleet.chat_scroll_offset;
+  let m_home_dn, _ =
+    Update.step ~now:t1 m_home (Msg.Key_event (key Keymap.Input.Down))
+  in
+  Alcotest.(check int) "Single Down right after Home decrements immediately"
+    (bound - 1) m_home_dn.fleet.chat_scroll_offset
+
+let test_nav_fix6_work_inbox_filter_and_split_pane_clamping () =
+  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  (* 1. Work_inbox with 3 Attention items moves attention.triage_index *)
+  let work_inbox =
+    m0.work
+    |> Work_store.set_tab Nav.Work_inbox
+    |> Work_store.apply_asks ~observed_at:t0
+         [
+           sample_ask ~id:"ask-1" ~keeper:"alpha-1" ();
+           sample_ask ~id:"ask-2" ~keeper:"alpha-2" ();
+         ]
+    |> Work_store.apply_tool_approvals ~observed_at:t0
+         [ sample_tool_approval ~id:"ap-1" ~keeper:"alpha-1" () ]
+  in
+  let m_inbox =
+    { m0 with nav = { m0.nav with workspace = Nav.Work }; work = work_inbox }
+    |> Model.rebuild_attention
+  in
+  Alcotest.(check int) "Inbox attention count = 3" 3
+    (Attention.count m_inbox.attention);
+  let m_i1, _ =
+    Update.step ~now:t0 m_inbox (Msg.Key_event (key Keymap.Input.Down))
+  in
+  Alcotest.(check int) "Work_inbox Down advances triage_index 0 -> 1" 1
+    m_i1.attention.triage_index;
+  let m_i2, _ =
+    Update.step ~now:t0 m_i1 (Msg.Key_event (key Keymap.Input.Down))
+  in
+  Alcotest.(check int) "Work_inbox second Down advances triage_index 1 -> 2" 2
+    m_i2.attention.triage_index;
+  let m_iu, _ =
+    Update.step ~now:t0 m_i2 (Msg.Key_event (key Keymap.Input.Up))
+  in
+  Alcotest.(check int) "Work_inbox Up moves triage_index 2 -> 1" 1
+    m_iu.attention.triage_index;
+
+  (* 2. Work_store.filtered_tasks unified active/done/sched filters *)
+  let mk_task id status : Wire_work.task =
+    {
+      id;
+      title = "Task " ^ id;
+      description = None;
+      priority = 1;
+      status;
+      goal_link = Wire_work.Unlinked;
+      created_at = None;
+      updated_at = None;
+    }
+  in
+  let tasks =
+    [
+      mk_task "t-todo" Wire_work.Todo;
+      mk_task "t-prog"
+        (Wire_work.InProgress { assignee = "alpha-1"; started_at = "now" });
+      mk_task "t-done"
+        (Wire_work.Done
+           { assignee = "alpha-1"; completed_at = "now"; notes = None });
+    ]
+  in
+  let mk_sched id : Wire_work.schedule_row =
+    {
+      schedule_instance_id = "si-" ^ id;
+      schedule_id = id;
+      status = Wire_work.Sched_scheduled;
+      source = "keeper.toml";
+      due_at_unix = 1_800_000_000.0;
+      next_due_at_unix = None;
+      recurrence_kind = "cron";
+      recurrence_summary = "0 * * * *";
+      payload_kind = None;
+      payload_support = "prompt";
+      payload_target = None;
+      payload_keeper_name = Some "alpha-1";
+      payload_summary = None;
+      last_wake_unix = None;
+      last_disposition = Wire_work.Wake_never;
+    }
+  in
+  let w_ts =
+    Work_store.empty
+    |> Work_store.set_tab Nav.Work_tasks_schedules
+    |> Work_store.apply_planning ~observed_at:t0 { goals = []; tasks }
+    |> Work_store.apply_schedules ~observed_at:t0
+         ([ mk_sched "s-1"; mk_sched "s-2" ], None)
+  in
+  Alcotest.(check int) "filter 'active' returns 1 claimed/in-progress task" 1
+    (List.length (Work_store.filtered_tasks (Work_store.set_filter "active" w_ts)));
+  Alcotest.(check int) "filter 'todo' returns 1 todo task" 1
+    (List.length (Work_store.filtered_tasks (Work_store.set_filter "todo" w_ts)));
+  Alcotest.(check int) "filter 'done' returns 1 done task" 1
+    (List.length (Work_store.filtered_tasks (Work_store.set_filter "done" w_ts)));
+  let w_sched = Work_store.set_filter "sched" w_ts in
+  Alcotest.(check int) "filter 'sched' returns 0 tasks" 0
+    (List.length (Work_store.filtered_tasks w_sched));
+  Alcotest.(check int) "filter 'sched' has 2 schedules" 2
+    (List.length (Work_store.schedules_list w_sched));
+  let w_sched_clamped = Work_store.move_selection ~delta:99 w_sched in
+  Alcotest.(check int) "filter 'sched' clamps cleanly at 1 (no dead zone)" 1
+    w_sched_clamped.selected_index;
+
+  (* 3. Split-pane dead-zone clamping on Tab (Work_pipeline, Runtime_tools_connectors, Knowledge_memory) *)
+  let goals5 = List.init 5 (fun i -> sample_goal ~id:(Printf.sprintf "g-%d" i) ()) in
+  let verifs2 =
+    List.init 2 (fun i : Wire_work.verification_request ->
+        {
+          request_id = Printf.sprintf "v-%d" i;
+          task_id = Printf.sprintf "t-%d" i;
+          task_title = "Verify";
+          submitted_by = "alpha-1";
+          created_at_unix = None;
+          completion_contract = [];
+          required_artifacts = [];
+          submitted_evidence = [];
+          evidence_projection_error = None;
+          review_observation = None;
+        })
+  in
+  let m_pipe =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Work; pane_index = 0 };
+      work =
+        Work_store.empty
+        |> Work_store.set_tab Nav.Work_pipeline
+        |> Work_store.apply_planning ~observed_at:t0 { goals = goals5; tasks = [] }
+        |> Work_store.apply_verifications ~observed_at:t0 verifs2;
+    }
+  in
+  let m_pipe_end, _ =
+    Update.step ~now:t0 m_pipe (Msg.Key_event (key Keymap.Input.End))
+  in
+  Alcotest.(check int) "Work_pipeline pane 0 End lands on goal index 4" 4
+    m_pipe_end.work.selected_index;
+  let m_pipe_tab, _ =
+    Update.step ~now:t0 m_pipe_end (Msg.Key_event (key Keymap.Input.Tab))
+  in
+  Alcotest.(check int) "Tab switches pane_index 0 -> 1" 1
+    m_pipe_tab.nav.pane_index;
+  Alcotest.(check int) "Tab clamps Work_pipeline selected_index to verifs max (1)"
+    1 m_pipe_tab.work.selected_index;
+
+  (* Runtime_tools_connectors: 6 tools on pane 0, 2 connectors on pane 1 *)
+  let tools6 =
+    List.init 6 (fun i : Wire_runtime.tool_summary ->
+        {
+          name = Printf.sprintf "tool_%d" i;
+          description = None;
+          calls_24h = Observed.value ~observed_at:t0 i;
+          failure_rate_pct = Observed.value ~observed_at:t0 0.0;
+        })
+  in
+  let conns2 =
+    List.init 2 (fun i : Wire_runtime.connector_row ->
+        {
+          connector_id = Printf.sprintf "conn-%d" i;
+          display_name = Printf.sprintf "Conn %d" i;
+          connection = Wire_runtime.Connector_connected;
+          channel = None;
+          error = None;
+          binding_count = 1;
+        })
+  in
+  let m_tc =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Runtime; pane_index = 0 };
+      runtime =
+        Runtime_store.empty
+        |> Runtime_store.set_tab Nav.Runtime_tools_connectors
+        |> Runtime_store.apply_tools_catalog ~observed_at:t0 tools6
+        |> Runtime_store.apply_connectors ~observed_at:t0 conns2;
+    }
+  in
+  let m_tc_end, _ =
+    Update.step ~now:t0 m_tc (Msg.Key_event (key Keymap.Input.End))
+  in
+  Alcotest.(check int) "Runtime tools pane 0 End lands on index 5" 5
+    m_tc_end.runtime.selected_index;
+  let m_tc_tab, _ =
+    Update.step ~now:t0 m_tc_end (Msg.Key_event (key Keymap.Input.Tab))
+  in
+  Alcotest.(check int) "Tab clamps Runtime connectors selected_index to 1" 1
+    m_tc_tab.runtime.selected_index;
+
+  (* Knowledge_memory: 4 conflicts on pane 0, 1 diff entry on pane 1 *)
+  let conflicts4 =
+    List.init 4 (fun i : Wire_knowledge.memory_conflict ->
+        {
+          conflict_id = Printf.sprintf "cf-%d" i;
+          description = "Conflict";
+          member_count = 2;
+          competing_claims = [];
+        })
+  in
+  let world_mem : Wire_knowledge.world_memory =
+    {
+      ledger_state = Wire_knowledge.World_ledger_available;
+      ledger_sha256 = None;
+      claims_count = 0;
+      facts_count = 0;
+      conflicts_count = 4;
+      excluded_count = 0;
+      claims = [];
+      active_conflicts = conflicts4;
+      briefing =
+        {
+          status = Wire_knowledge.Briefing_current;
+          text = None;
+          source_ids_count = 0;
+          error = None;
+          building_pass = None;
+        };
+      librarian_writers = Wire_knowledge.Writers_none_in_process;
+      ordinary_absence_detail = None;
+    }
+  in
+  let diff1 : Wire_knowledge.memory_diff =
+    {
+      scope = Wire_knowledge.Scope_world;
+      range =
+        {
+          window = Some "24h";
+          from_rev = None;
+          to_rev = None;
+          from_unix = None;
+          to_unix = None;
+        };
+      retrieval_heat =
+        {
+          hot = 1;
+          warm = 0;
+          cold = 0;
+          never_retrieved = 0;
+          total_events = 1;
+          unreadable_event_lines = 0;
+        };
+      body =
+        Wire_knowledge.Keeper_diff
+          {
+            counts =
+              {
+                total_facts_now = 1;
+                added = 1;
+                updated = 0;
+                retracted = 0;
+                invalidated = 0;
+                journal_failures_in_window = 0;
+                journal_quarantines_in_window = 0;
+                undecodable_journal_lines = 0;
+              };
+            revisions = [];
+            added =
+              [
+                {
+                  added_at_rev = Some 1;
+                  memory_id = "mem-1";
+                  category = "fact";
+                  origin = "keeper";
+                  text = "One diff entry";
+                  first_seen_unix = 100.0;
+                  last_seen_unix = None;
+                  retrieval_count = 1;
+                  last_retrieved_at_unix = None;
+                  heat = Wire_knowledge.Heat_hot;
+                };
+              ];
+            updated = [];
+            retracted = [];
+            invalidated = [];
+            writer_status = None;
+          };
+    }
+  in
+  let m_km =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Knowledge; pane_index = 0 };
+      knowledge =
+        Knowledge_store.empty
+        |> Knowledge_store.set_tab Nav.Knowledge_memory
+        |> Knowledge_store.apply_world_memory ~observed_at:t0 world_mem
+        |> Knowledge_store.apply_memory_diff ~observed_at:t0 diff1;
+    }
+  in
+  let m_km_end, _ =
+    Update.step ~now:t0 m_km (Msg.Key_event (key Keymap.Input.End))
+  in
+  Alcotest.(check int) "Knowledge_memory pane 0 End lands on conflict index 3" 3
+    m_km_end.knowledge.selected_index;
+  let m_km_tab, _ =
+    Update.step ~now:t0 m_km_end (Msg.Key_event (key Keymap.Input.Tab))
+  in
+  Alcotest.(check int) "Tab clamps Knowledge_memory pane 1 selected_index to 0" 0
+    m_km_tab.knowledge.selected_index
+
+let test_nav_fix7_symmetric_viewport_scrolling_all_stores () =
+  (* Verify smooth symmetric scroll with explicit ?viewport_rows:5:
+     scrolling down pushes window forward, then pressing Up inside window keeps
+     scroll_offset constant until cursor hits top edge! *)
+  let vr = 5 in
+  (* 1. Fleet_store (grouped Fleet_companies with headers + flat Fleet_attention) *)
+  let fleet_ks =
+    List.init 12 (fun i ->
+        let grp = Printf.sprintf "org-%02d" (i / 3) in
+        grouped_keeper ~group:grp (Printf.sprintf "k-%02d" i))
+  in
+  let f0 = Fleet_store.apply_keepers ~observed_at:t0 fleet_ks Fleet_store.empty in
+  let f_deep =
+    List.fold_left
+      (fun acc _ -> Fleet_store.move_selection ~viewport_rows:vr ~delta:1 acc)
+      f0 (List.init 8 Fun.id)
+  in
+  (* Index 8 in 4 groups of 3 = group 2 member 2 -> visual row = 2*(1+3) + 1 + 2 = 11 *)
+  Alcotest.(check int) "Fleet grouped scroll_offset tracks visual row (11 - 5 + 1 = 7)"
+    7 f_deep.scroll_offset;
+  let f_up1 = Fleet_store.move_selection ~viewport_rows:vr ~delta:(-1) f_deep in
+  Alcotest.(check int) "Fleet grouped Up inside window keeps scroll_offset=7"
+    7 f_up1.scroll_offset;
+  let f_up2 = Fleet_store.move_selection ~viewport_rows:vr ~delta:(-1) f_up1 in
+  Alcotest.(check int) "Fleet grouped second Up inside window keeps scroll_offset=7"
+    7 f_up2.scroll_offset;
+  let f_up_past =
+    Fleet_store.move_selection ~viewport_rows:vr ~delta:(-4) f_up2
+  in
+  Alcotest.(check bool) "Fleet grouped Up past top edge pulls scroll_offset down"
+    true (f_up_past.scroll_offset < 7);
+
+  (* 2. Work_store *)
+  let goals15 = List.init 15 (fun i -> sample_goal ~id:(Printf.sprintf "g-%02d" i) ()) in
+  let w0 =
+    Work_store.empty
+    |> Work_store.apply_planning ~observed_at:t0 { goals = goals15; tasks = [] }
+  in
+  let w_deep = Work_store.move_selection ~viewport_rows:vr ~delta:10 w0 in
+  Alcotest.(check int) "Work scroll_offset = 10 - 5 + 1 = 6" 6 w_deep.scroll_offset;
+  let w_up1 = Work_store.move_selection ~viewport_rows:vr ~delta:(-1) w_deep in
+  Alcotest.(check int) "Work Up inside window keeps scroll_offset = 6" 6
+    w_up1.scroll_offset;
+  let w_up_edge = Work_store.move_selection ~viewport_rows:vr ~delta:(-4) w_up1 in
+  Alcotest.(check int) "Work Up past top edge pulls scroll_offset = 5" 5
+    w_up_edge.scroll_offset;
+
+  (* 3. Knowledge_store *)
+  let mk_post i : Wire_knowledge.board_post =
+    {
+      id = Printf.sprintf "p-%02d" i;
+      title = "Post";
+      body = "Body";
+      author = "alpha-1";
+      hearth = None;
+      post_kind = Some Wire_knowledge.Human_post;
+      visibility = Some Wire_knowledge.Vis_public;
+      created_at_unix = float_of_int (1000 - i);
+      updated_at_unix = None;
+      score = 0;
+      comment_count = 0;
+      author_karma = Observed.unreported;
+      succession_chain_root_id = None;
+      chain_depth = None;
+      is_signal = true;
+    }
+  in
+  let k0 =
+    Knowledge_store.empty
+    |> Knowledge_store.apply_board ~observed_at:t0
+         {
+           posts = List.init 15 mk_post;
+           count = 15;
+           sort_by = "recent";
+           signal_only = true;
+         }
+  in
+  let k_deep = Knowledge_store.move_selection ~viewport_rows:vr ~delta:10 k0 in
+  Alcotest.(check int) "Knowledge scroll_offset = 6" 6 k_deep.scroll_offset;
+  let k_up1 = Knowledge_store.move_selection ~viewport_rows:vr ~delta:(-1) k_deep in
+  Alcotest.(check int) "Knowledge Up inside window keeps scroll_offset = 6" 6
+    k_up1.scroll_offset;
+
+  (* 4. Infra_store *)
+  let repos15 =
+    List.init 15 (fun i : Wire_infra.repository ->
+        {
+          id = Printf.sprintf "r-%02d" i;
+          name = Printf.sprintf "repo-%02d" i;
+          codebase = None;
+          url = "https://example.invalid/repo";
+          local_path = "/tmp/repo";
+          default_branch = "main";
+          status = Wire_infra.Repo_synced;
+          keepers = [];
+          auto_sync = false;
+        })
+  in
+  let inf0 =
+    Infra_store.empty
+    |> Infra_store.set_tab Nav.Infra_repos_changes
+    |> Infra_store.apply_repositories ~observed_at:t0 repos15
+  in
+  let inf_deep = Infra_store.move_selection ~viewport_rows:vr ~delta:10 inf0 in
+  Alcotest.(check int) "Infra scroll_offset = 6" 6 inf_deep.scroll_offset;
+  let inf_up1 = Infra_store.move_selection ~viewport_rows:vr ~delta:(-1) inf_deep in
+  Alcotest.(check int) "Infra Up inside window keeps scroll_offset = 6" 6
+    inf_up1.scroll_offset;
+
+  (* 5. Incidents *)
+  let inc0 =
+    List.fold_left
+      (fun acc i ->
+        let acc', _ =
+          Incidents.push ~occurred_at_unix:(float_of_int i)
+            ~source:(Health.Source_keeper "alpha-1")
+            ~summary:(Say.make ~ko:"경고" ~en:"Warn")
+            ~detail:"detail" ~status:Health.Resolved acc
+        in
+        acc')
+      Incidents.empty (List.init 15 Fun.id)
+  in
+  let inc_deep = Incidents.move_selection ~viewport_rows:vr ~delta:10 inc0 in
+  Alcotest.(check int) "Incidents scroll_offset = 6" 6 inc_deep.scroll_offset;
+  let inc_up1 = Incidents.move_selection ~viewport_rows:vr ~delta:(-1) inc_deep in
+  Alcotest.(check int) "Incidents Up inside window keeps scroll_offset = 6" 6
+    inc_up1.scroll_offset
+
+let test_nav_left_right_subtab_cycling_and_guards () =
+  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let step m ev = Update.step ~now:t0 m (Msg.Key_event ev) in
+  (* 1. Keepers: Right cycles Companies -> Attention -> Pulse_wall; Left reverses *)
+  let m_k = { m0 with nav = { m0.nav with workspace = Nav.Keepers } } in
+  let m_k1, _ = step m_k (key Keymap.Input.Right) in
+  Alcotest.(check bool) "Keepers Right -> Fleet_attention" true
+    (Nav.equal_keepers_fleet_mode m_k1.fleet.fleet_mode Nav.Fleet_attention);
+  let m_k2, _ = step m_k1 (key Keymap.Input.Right) in
+  Alcotest.(check bool) "Keepers second Right -> Fleet_pulse_wall" true
+    (Nav.equal_keepers_fleet_mode m_k2.fleet.fleet_mode Nav.Fleet_pulse_wall);
+  let m_k3, _ = step m_k2 (key Keymap.Input.Left) in
+  Alcotest.(check bool) "Keepers Left -> Fleet_attention" true
+    (Nav.equal_keepers_fleet_mode m_k3.fleet.fleet_mode Nav.Fleet_attention);
+
+  (* 2. Work, Knowledge, Runtime, Infra cycle sub-tabs on Right/Left *)
+  let m_w = { m0 with nav = { m0.nav with workspace = Nav.Work } } in
+  let m_w1, _ = step m_w (key Keymap.Input.Right) in
+  Alcotest.(check bool) "Work Right -> Work_tasks_schedules" true
+    (Nav.equal_work_tab m_w1.work.active_tab Nav.Work_tasks_schedules);
+  let m_w0, _ = step m_w1 (key Keymap.Input.Left) in
+  Alcotest.(check bool) "Work Left -> Work_pipeline" true
+    (Nav.equal_work_tab m_w0.work.active_tab Nav.Work_pipeline);
+
+  let m_kn = { m0 with nav = { m0.nav with workspace = Nav.Knowledge } } in
+  let m_kn1, _ = step m_kn (key Keymap.Input.Right) in
+  Alcotest.(check bool) "Knowledge Right -> Knowledge_wiki_artifacts" true
+    (Nav.equal_knowledge_tab m_kn1.knowledge.active_tab
+       Nav.Knowledge_wiki_artifacts);
+
+  let m_rt = { m0 with nav = { m0.nav with workspace = Nav.Runtime } } in
+  let m_rt1, _ = step m_rt (key Keymap.Input.Right) in
+  Alcotest.(check bool) "Runtime Right -> Runtime_efficiency_spend" true
+    (Nav.equal_runtime_tab m_rt1.runtime.active_tab
+       Nav.Runtime_efficiency_spend);
+
+  let m_in = { m0 with nav = { m0.nav with workspace = Nav.Infra } } in
+  let m_in1, _ = step m_in (key Keymap.Input.Right) in
+  Alcotest.(check bool) "Infra Right -> Infra_repos_changes" true
+    (Nav.equal_infra_tab m_in1.infra.active_tab Nav.Infra_repos_changes);
+
+  (* 3. Dive_keeper unfocused: Right cycles Chat -> Memory -> Work_candle; Left reverses *)
+  let m_dive =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha-1"; tab = Nav.Keeper_chat } ];
+        };
+    }
+  in
+  let m_d1, _ = step m_dive (key Keymap.Input.Right) in
+  Alcotest.(check bool) "Dive_keeper Right -> Keeper_memory" true
+    (Nav.equal_keeper_tab m_d1.fleet.keeper_dive_tab Nav.Keeper_memory);
+  let m_d0, _ = step m_d1 (key Keymap.Input.Left) in
+  Alcotest.(check bool) "Dive_keeper Left -> Keeper_chat" true
+    (Nav.equal_keeper_tab m_d0.fleet.keeper_dive_tab Nav.Keeper_chat);
+
+  (* 4. Queue_context overlay cycles tabs on Right/Left *)
+  let m_qc =
+    {
+      m0 with
+      nav = { m0.nav with overlay = Some (Nav.Queue_context Nav.Drawer_queue) };
+    }
+  in
+  let m_qc1, _ = step m_qc (key Keymap.Input.Right) in
+  Alcotest.(check bool) "Queue_context Right -> Drawer_context" true
+    (Option.equal Nav.equal_overlay m_qc1.nav.overlay
+       (Some (Nav.Queue_context Nav.Drawer_context)));
+  let m_qc0, _ = step m_qc1 (key Keymap.Input.Left) in
+  Alcotest.(check bool) "Queue_context Left -> Drawer_queue" true
+    (Option.equal Nav.equal_overlay m_qc0.nav.overlay
+       (Some (Nav.Queue_context Nav.Drawer_queue)));
+
+  (* 5. Focused composer guard: Left/Right moves text cursor, NEVER switches tab *)
+  let m_comp =
+    {
+      m_dive with
+      drafts =
+        m_dive.drafts
+        |> Drafts.set_active_keeper "alpha-1"
+        |> Drafts.set_focus true
+        |> Drafts.insert_text "hello";
+    }
+  in
+  let m_comp_l, _ = step m_comp (key Keymap.Input.Left) in
+  Alcotest.(check bool) "Focused composer Left does NOT switch Keeper Dive tab"
+    true (Nav.equal_keeper_tab m_comp_l.fleet.keeper_dive_tab Nav.Keeper_chat);
+  Alcotest.(check int) "Focused composer Left moves cursor 5 -> 4" 4
+    (Drafts.current_draft m_comp_l.drafts).cursor;
+
+  (* 6. Settings overlay guard: Left/Right stays on same Settings tab (tree expand/collapse) *)
+  let m_set =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          overlay = Some (Nav.Settings Nav.Settings_general_ui);
+        };
+      config = Config_store.set_tab Nav.Settings_general_ui m0.config;
+    }
+  in
+  let m_set_r, _ = step m_set (key Keymap.Input.Right) in
+  Alcotest.(check bool) "Settings Right does NOT cycle settings tab" true
+    (Option.equal Nav.equal_overlay m_set_r.nav.overlay
+       (Some (Nav.Settings Nav.Settings_general_ui)))
+
+let test_p1_chat_transcript_ssot_exact_bounds () =
+  let mk_msg ~id ~role ~content ?tool_call_name ts : Wire_fleet.chat_message =
+    {
+      id;
+      role;
+      content;
+      ts_unix = ts;
+      turn_ref = None;
+      model_used = None;
+      tool_call_id = None;
+      tool_call_name;
+      execution_id = None;
+    }
+  in
+  let json_1line =
+    "{\"k1\":1,\"k2\":2,\"k3\":3,\"k4\":4,\"k5\":5,\"k6\":6,\"k7\":7,\"k8\":8,\"k9\":9,\"k10\":10}"
+  in
+  let md_msgs =
+    [
+      mk_msg ~id:"m-1" ~role:Wire_fleet.Role_user
+        ~content:"TOP_MARKER_001 Please inspect board:p-1234567890 and https://example.invalid/very/long/path/for/word/wrapping/check"
+        1_700_000_001.0;
+      mk_msg ~id:"m-2" ~role:Wire_fleet.Role_assistant
+        ~content:"# Release Audit\n\n- First bullet with enough words to wrap across multiple narrow lines at eighty columns\n- Second bullet with `inline_code` and **bold text** for markdown expansion\n- Third bullet closing the check"
+        1_700_000_002.0;
+      mk_msg ~id:"m-3" ~role:Wire_fleet.Role_tool ~tool_call_name:"inspect_json"
+        ~content:json_1line 1_700_000_003.0;
+    ]
+    @ List.init 10 (fun i ->
+          mk_msg
+            ~id:(Printf.sprintf "m-tail-%d" i)
+            ~role:
+              (if i mod 2 = 0 then Wire_fleet.Role_user
+               else Wire_fleet.Role_assistant)
+            ~content:
+              (Printf.sprintf
+                 "Follow-up turn %d with long descriptive prose that definitely wraps when the viewport is narrow eighty columns wide."
+                 i)
+            (1_700_000_010.0 +. float_of_int i))
+    @ [
+        mk_msg ~id:"m-last" ~role:Wire_fleet.Role_assistant
+          ~content:"Final persisted assistant reply." 1_700_000_099.0;
+      ]
+  in
+  let m0 = Model.initial ~cols:80 ~rows:24 () in
+  let base_fleet =
+    m0.fleet
+    |> Fleet_store.apply_keepers ~observed_at:t0 [ sample_keeper "alpha-1" ]
+    |> Fleet_store.apply_chat_history ~observed_at:t0 ~keeper:"alpha-1"
+         { messages = md_msgs; has_more = false; next_cursor = None }
+  in
+  let make_chat_model fleet drafts =
+    {
+      m0 with
+      fleet;
+      drafts;
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha-1"; tab = Nav.Keeper_chat } ];
+        };
+    }
+  in
+  (* (a) Compact vs Tools_results (8+1 JSON rows) vs Tools_full (11 JSON rows) *)
+  let m_compact = make_chat_model base_fleet m0.drafts in
+  let g_compact = Chat_transcript.chat_viewport_geometry ~model:m_compact in
+  let rows_compact =
+    Chat_transcript.count_transcript_rows ~model:m_compact ~keeper:"alpha-1"
+      ~width:g_compact.prose_w
+  in
+  let m_results =
+    make_chat_model
+      (Fleet_store.set_tools_mode Slash.Tools_results base_fleet)
+      m0.drafts
+  in
+  let rows_results =
+    Chat_transcript.count_transcript_rows ~model:m_results ~keeper:"alpha-1"
+      ~width:g_compact.prose_w
+  in
+  Alcotest.(check int)
+    "Tools_results expands 1-line JSON via Json_tree.flatten (+8 shown +1 hidden = +9)"
+    (rows_compact + 9) rows_results;
+  let m_full =
+    make_chat_model
+      (Fleet_store.set_tools_mode Slash.Tools_full base_fleet)
+      m0.drafts
+  in
+  let rows_full =
+    Chat_transcript.count_transcript_rows ~model:m_full ~keeper:"alpha-1"
+      ~width:g_compact.prose_w
+  in
+  Alcotest.(check int)
+    "Tools_full expands all 11 Json_tree lines (+11)" (rows_compact + 11)
+    rows_full;
+
+  (* (b) Persisted finished stream is deduped (adds 0 rows) so Home+Down has 0 dead presses *)
+  let fleet_persisted =
+    base_fleet
+    |> Fleet_store.start_chat_stream ~keeper:"alpha-1" ~request_id:"r-dup"
+    |> Fleet_store.apply_chat_stream_chunk ~keeper:"alpha-1" ~request_id:"r-dup"
+         (Wire_fleet.Chunk_turn_done
+            {
+              operation_id = "op-dup";
+              turn_ref = "t-dup";
+              reply = "Final persisted assistant reply.";
+            })
+  in
+  let m_persisted = make_chat_model fleet_persisted m0.drafts in
+  let rows_persisted =
+    Chat_transcript.count_transcript_rows ~model:m_persisted ~keeper:"alpha-1"
+      ~width:g_compact.prose_w
+  in
+  Alcotest.(check int) "persisted finished stream adds 0 duplicate rows"
+    rows_compact rows_persisted;
+  let max_s =
+    Chat_transcript.max_scroll_for_model ~model:m_persisted ~keeper:"alpha-1"
+  in
+  let m_home, _ =
+    Update.step ~now:t0 m_persisted (Msg.Key_event (key Keymap.Input.Home))
+  in
+  Alcotest.(check int) "Home lands on exact SSOT max_scroll" max_s
+    m_home.fleet.chat_scroll_offset;
+  let m_home_dn, _ =
+    Update.step ~now:t1 m_home (Msg.Key_event (key Keymap.Input.Down))
+  in
+  Alcotest.(check int) "Single Down after Home steps off top immediately"
+    (max_s - 1) m_home_dn.fleet.chat_scroll_offset;
+
+  (* (c) Pending tx adds blank separator + 1 row (+2) *)
+  let drafts_tx =
+    let d1 =
+      m0.drafts
+      |> Drafts.set_active_keeper "alpha-1"
+      |> Drafts.insert_text "Pending steer message"
+    in
+    match
+      Drafts.enqueue_submission ~now:t0 ~keeper:"alpha-1"
+        ~mode:Drafts.Mode_steer d1
+    with
+    | Some (d2, tx) -> Drafts.mark_sending ~now:t0 ~request_id:tx.request_id d2
+    | None -> Alcotest.fail "expected pending tx"
+  in
+  let m_pending = make_chat_model base_fleet drafts_tx in
+  let rows_pending =
+    Chat_transcript.count_transcript_rows ~model:m_pending ~keeper:"alpha-1"
+      ~width:g_compact.prose_w
+  in
+  Alcotest.(check int) "pending tx adds 1 separator + 1 row (+2)"
+    (rows_compact + 2) rows_pending;
+
+  (* (d) Multiline draft expands composer and shrinks chat body_h *)
+  let drafts_multi =
+    m0.drafts
+    |> Drafts.set_active_keeper "alpha-1"
+    |> Drafts.insert_text "line1\nline2\nline3\nline4"
+  in
+  let m_multi = make_chat_model base_fleet drafts_multi in
+  let g_multi = Chat_transcript.chat_viewport_geometry ~model:m_multi in
+  Alcotest.(check bool) "multiline composer shrinks chat body_h" true
+    (g_multi.body_h < g_compact.body_h);
+
+  (* (e) Display_origin_inline removes separate header rows at wide width *)
+  let m_wide = Model.initial ~cols:140 ~rows:40 () in
+  let f_wide =
+    m_wide.fleet
+    |> Fleet_store.apply_keepers ~observed_at:t0 [ sample_keeper "alpha-1" ]
+    |> Fleet_store.apply_chat_history ~observed_at:t0 ~keeper:"alpha-1"
+         { messages = md_msgs; has_more = false; next_cursor = None }
+  in
+  let m_bare =
+    {
+      m_wide with
+      fleet = f_wide;
+      nav =
+        {
+          m_wide.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha-1"; tab = Nav.Keeper_chat } ];
+        };
+    }
+  in
+  let m_inline =
+    { m_bare with fleet = Fleet_store.cycle_origin_mode f_wide }
+  in
+  let gw = Chat_transcript.chat_viewport_geometry ~model:m_bare in
+  let r_bare =
+    Chat_transcript.count_transcript_rows ~model:m_bare ~keeper:"alpha-1"
+      ~width:gw.prose_w
+  in
+  let r_inline =
+    Chat_transcript.count_transcript_rows ~model:m_inline ~keeper:"alpha-1"
+      ~width:gw.prose_w
+  in
+  Alcotest.(check bool) "Display_origin_inline uses fewer rows than Bare at wide width"
+    true (r_inline < r_bare)
+
+let test_p1_work_inbox_ask_approval_sync () =
+  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let work_inbox =
+    m0.work
+    |> Work_store.set_tab Nav.Work_inbox
+    |> Work_store.apply_asks ~observed_at:t0
+         [
+           sample_ask ~id:"ask-1" ~keeper:"alpha-1" ();
+           sample_ask ~id:"ask-2" ~keeper:"alpha-2" ();
+         ]
+    |> Work_store.apply_tool_approvals ~observed_at:t0
+         [ sample_tool_approval ~id:"ap-1" ~keeper:"alpha-1" () ]
+  in
+  let m_inbox =
+    { m0 with nav = { m0.nav with workspace = Nav.Work }; work = work_inbox }
+    |> Model.rebuild_attention
+  in
+  (* Index 0 is Held_tool_approval (urgency 400): MUST NOT focus Ask_choice_focused *)
+  Alcotest.(check bool)
+    "triage_index=0 (tool approval) is Workspace_focused, not Ask_choice_focused"
+    true
+    (Nav.equal_focus_scope
+       (Model.active_focus_scope m_inbox)
+       (Nav.Workspace_focused Nav.Work));
+  let m_press1_on_ap, cmds_press1_ap =
+    Update.step ~now:t0 m_inbox (Msg.Key_event (char_key "1"))
+  in
+  Alcotest.(check bool)
+    "pressing '1' on tool approval switches workspace to Pulse (not answering ask-1)"
+    true
+    (Nav.equal_workspace m_press1_on_ap.nav.workspace Nav.Pulse);
+  let has_ask_post cmds =
+    List.find_map
+      (function
+        | Cmd.Http_post { req = Cmd.Post_ask_answer { ask_id; _ }; _ } ->
+            Some ask_id
+        | Cmd.Batch _
+        | Cmd.Http_get _
+        | Cmd.Http_post _
+        | Cmd.Http_put _
+        | Cmd.Http_post_stream _
+        | Cmd.Sync_streams _
+        | Cmd.Update_workspace_guard _
+        | Cmd.Voice_cmd _
+        | Cmd.Copy_clipboard _
+        | Cmd.Open_external_url _
+        | Cmd.Open_editor_escape_hatch _
+        | Cmd.Start_local_server
+        | Cmd.Restart_tui
+        | Cmd.Quit _ ->
+            None)
+      (Cmd.flatten cmds)
+  in
+  Alcotest.(check (option string))
+    "pressing '1' on tool approval emits 0 Post_ask_answer" None
+    (has_ask_post cmds_press1_ap);
+
+  (* Step Down -> index 1 (ask-1) -> Down -> index 2 (ask-2) *)
+  let m_i1, _ =
+    Update.step ~now:t0 m_inbox (Msg.Key_event (key Keymap.Input.Down))
+  in
+  Alcotest.(check bool) "triage_index=1 (ask-1) enters Ask_choice_focused" true
+    (Nav.equal_focus_scope
+       (Model.active_focus_scope m_i1)
+       Nav.Ask_choice_focused);
+  let m_i2, _ =
+    Update.step ~now:t0 m_i1 (Msg.Key_event (key Keymap.Input.Down))
+  in
+  Alcotest.(check bool) "triage_index=2 (ask-2) enters Ask_choice_focused" true
+    (Nav.equal_focus_scope
+       (Model.active_focus_scope m_i2)
+       Nav.Ask_choice_focused);
+  (* Copy_selected ('y') copies ask-2, NOT ask-1 *)
+  let _, cmds_copy = Update.step ~now:t0 m_i2 (Msg.Key_event (char_key "y")) in
+  let copied =
+    List.find_map
+      (function
+        | Cmd.Copy_clipboard s -> Some s
+        | Cmd.Batch _
+        | Cmd.Http_get _
+        | Cmd.Http_post _
+        | Cmd.Http_put _
+        | Cmd.Http_post_stream _
+        | Cmd.Sync_streams _
+        | Cmd.Update_workspace_guard _
+        | Cmd.Voice_cmd _
+        | Cmd.Open_external_url _
+        | Cmd.Open_editor_escape_hatch _
+        | Cmd.Start_local_server
+        | Cmd.Restart_tui
+        | Cmd.Quit _ ->
+            None)
+      (Cmd.flatten cmds_copy)
+  in
+  Alcotest.(check (option string))
+    "Work_inbox 'y' on triage_index=2 copies ask-2" (Some "ask-2") copied;
+  (* Pressing '1' answers ask-2, NOT ask-1! *)
+  let _, cmds_ans = Update.step ~now:t0 m_i2 (Msg.Key_event (char_key "1")) in
+  Alcotest.(check (option string))
+    "Work_inbox '1' on triage_index=2 submits Post_ask_answer for ask-2"
+    (Some "ask-2") (has_ask_post cmds_ans)
+
+let test_p1_pulse_collapsed_company_dive_and_scroll () =
+  let ks =
+    [
+      grouped_keeper ~group:"org-alpha" "alpha-1";
+      grouped_keeper ~group:"org-alpha" "alpha-2";
+      grouped_keeper ~group:"org-beta" "beta-1";
+      grouped_keeper ~group:"org-beta" "beta-2";
+      grouped_keeper ~group:"org-mid" "mid-1";
+      grouped_keeper ~group:"org-zeta" "zeta-1";
+    ]
+  in
+  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let m1, _ =
+    Update.step ~now:t0 m0
+      (Msg.Http_reply
+         { epoch = m0.epoch; reply = Msg.Reply_keepers_roster (Ok ks) })
+  in
+  (* Collapse org-beta in Keepers, then navigate Pulse onto org-beta *)
+  let m_col =
+    {
+      m1 with
+      nav = { m1.nav with workspace = Nav.Pulse };
+      fleet = Fleet_store.toggle_company_collapsed "org-beta" m1.fleet;
+    }
+  in
+  let m_on_beta, _ =
+    Update.step ~now:t0 m_col (Msg.Key_event (key Keymap.Input.Down))
+  in
+  Alcotest.(check (option string))
+    "Pulse Down lands on collapsed org-beta lead beta-1" (Some "beta-1")
+    m_on_beta.fleet.selected_keeper;
+  Alcotest.(check (option string))
+    "selected_company_keeper resolves beta-1 even when org-beta is collapsed"
+    (Some "beta-1")
+    (Option.map
+       (fun (k : Wire_fleet.keeper_summary) -> k.name)
+       (Fleet_store.selected_company_keeper m_on_beta.fleet));
+  let m_dived, _ =
+    Update.step ~now:t0 m_on_beta (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool)
+    "Enter on Pulse collapsed org-beta dives into beta-1 (not alpha-1)" true
+    (Option.equal Nav.equal_dive
+       (Model.active_dive m_dived)
+       (Some (Nav.Dive_keeper { name = "beta-1"; tab = Nav.Keeper_chat })));
+  let m_popped, _ =
+    Update.step ~now:t0 m_dived (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  let m_on_mid, _ =
+    Update.step ~now:t0 m_popped (Msg.Key_event (key Keymap.Input.Down))
+  in
+  Alcotest.(check (option string))
+    "Next Pulse Down advances cleanly to org-mid (mid-1)" (Some "mid-1")
+    m_on_mid.fleet.selected_keeper;
+
+  (* Independent pulse_scroll_offset with 10 companies & viewport_rows=4 *)
+  let ks10 =
+    List.init 10 (fun i ->
+        grouped_keeper
+          ~group:(Printf.sprintf "org-%02d" i)
+          (Printf.sprintf "k-%02d" i))
+  in
+  let f10 = Fleet_store.apply_keepers ~observed_at:t0 ks10 Fleet_store.empty in
+  let f10_deep =
+    List.fold_left
+      (fun acc _ ->
+        Fleet_store.move_company_selection ~viewport_rows:4 ~delta:1 acc)
+      f10 (List.init 7 Fun.id)
+  in
+  Alcotest.(check int) "pulse_scroll_offset advances symmetrically (7 - 4 + 1 = 4)"
+    4 f10_deep.pulse_scroll_offset;
+  let f10_up1 =
+    Fleet_store.move_company_selection ~viewport_rows:4 ~delta:(-1) f10_deep
+  in
+  Alcotest.(check int)
+    "Pulse Up inside window keeps pulse_scroll_offset = 4" 4
+    f10_up1.pulse_scroll_offset
+
+let test_p2_grouped_top_header_row0_restoration () =
+  let vr = 5 in
+  (* 1. Fleet_store Fleet_companies *)
+  let fleet_ks =
+    List.init 12 (fun i ->
+        grouped_keeper
+          ~group:(Printf.sprintf "org-%02d" (i / 3))
+          (Printf.sprintf "k-%02d" i))
+  in
+  let f0 = Fleet_store.apply_keepers ~observed_at:t0 fleet_ks Fleet_store.empty in
+  let f_deep =
+    List.fold_left
+      (fun acc _ -> Fleet_store.move_selection ~viewport_rows:vr ~delta:1 acc)
+      f0 (List.init 8 Fun.id)
+  in
+  Alcotest.(check bool) "Fleet scrolled down past row 0" true
+    (f_deep.scroll_offset > 1);
+  let f_back_step =
+    List.fold_left
+      (fun acc _ -> Fleet_store.move_selection ~viewport_rows:vr ~delta:(-1) acc)
+      f_deep (List.init 8 Fun.id)
+  in
+  Alcotest.(check int) "Fleet stepping Up to index 0 restores scroll_offset=0 (header visible)"
+    0 f_back_step.scroll_offset;
+  let f_home = Fleet_store.move_selection ~viewport_rows:vr ~delta:(-100000) f_deep in
+  Alcotest.(check int) "Fleet Home restores scroll_offset=0" 0
+    f_home.scroll_offset;
+
+  (* 2. Runtime_store Runtime_efficiency_spend *)
+  let mk_eff i : Wire_runtime.keeper_efficiency_row =
+    {
+      keeper = Printf.sprintf "k-%02d" i;
+      turns = 10;
+      input_tokens = 1000;
+      cache_read_tokens = Observed.value ~observed_at:t0 500;
+      cache_creation_tokens = Observed.value ~observed_at:t0 0;
+      output_tokens = 100;
+      cache_hit_pct = Observed.value ~observed_at:t0 50.0;
+      cost_usd = float_of_int (20 - i);
+      calls = 10;
+      failed = 0;
+      deferred = 0;
+      tool_ms = 50.0;
+    }
+  in
+  let eff : Wire_runtime.efficiency_month =
+    {
+      month = "2026-11";
+      window_kind = Some Wire_runtime.Efficiency_month_mtd;
+      generated_at_unix = 1_795_200_000.0;
+      days_covered = 22;
+      keepers = List.init 12 mk_eff;
+      fleet =
+        {
+          turns_total = 120;
+          calls_per_turn = 1.0;
+          tool_s_per_turn = 0.5;
+          output_tokens_per_turn = 100.0;
+          input_tokens_per_turn = 1000.0;
+          cost_usd_per_turn = 1.0;
+          fleet_cache_hit_pct = Observed.value ~observed_at:t0 50.0;
+        };
+      velocity = [];
+    }
+  in
+  let rt0 =
+    Runtime_store.empty
+    |> Runtime_store.sync_keeper_companies fleet_ks
+    |> Runtime_store.set_tab Nav.Runtime_efficiency_spend
+    |> Runtime_store.apply_efficiency ~observed_at:t0 eff
+  in
+  let rt_deep =
+    List.fold_left
+      (fun acc _ -> Runtime_store.move_selection ~viewport_rows:vr ~delta:1 acc)
+      rt0 (List.init 8 Fun.id)
+  in
+  Alcotest.(check bool) "Runtime efficiency scrolled down past row 0" true
+    (rt_deep.scroll_offset > 1);
+  let rt_back_step =
+    List.fold_left
+      (fun acc _ ->
+        Runtime_store.move_selection ~viewport_rows:vr ~delta:(-1) acc)
+      rt_deep (List.init 8 Fun.id)
+  in
+  Alcotest.(check int)
+    "Runtime efficiency stepping Up to index 0 restores scroll_offset=0" 0
+    rt_back_step.scroll_offset;
+  let rt_home =
+    Runtime_store.move_selection ~viewport_rows:vr ~delta:(-100000) rt_deep
+  in
+  Alcotest.(check int) "Runtime efficiency Home restores scroll_offset=0" 0
+    rt_home.scroll_offset;
+
+  (* 3. Knowledge_store Wiki clusters *)
+  let empty_lint : Wire_knowledge.wiki_index_lint =
+    {
+      total_findings = 0;
+      counts =
+        {
+          broken_link = 0;
+          unsupported_link = 0;
+          orphan = 0;
+          orphan_unconfirmed = 0;
+          missing_sources = 0;
+          hearsay_only = 0;
+          unreadable_page = 0;
+          revision_log_gap = 0;
+          revision_log_hole = 0;
+          duplicate_title_candidates = 0;
+        };
+      log_hole_suppressed = false;
+      orphans = [];
+      duplicate_title_candidates = [];
+      findings = [];
+    }
+  in
+  let wiki12 =
+    List.init 12 (fun i : Wire_knowledge.wiki_page_summary ->
+        {
+          slug = Printf.sprintf "page-%02d" i;
+          file = Printf.sprintf "page-%02d.md" i;
+          title = Printf.sprintf "Page %02d" i;
+          summary = "s";
+          source = Wire_knowledge.Source_research;
+          author = "alpha-1";
+          created = "2026-11-01";
+          updated = "2026-11-22";
+          revision = 1;
+          tags = [ Printf.sprintf "topic-%02d" (i / 3) ];
+          backlink_count = 0;
+          outgoing_link_count = 0;
+          sources_count = 1;
+          hearsay_count = 0;
+          sha256 = "sha";
+        })
+  in
+  let kw0 =
+    Knowledge_store.empty
+    |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts
+    |> Knowledge_store.apply_wiki_index ~observed_at:t0
+         {
+           pages_total = 12;
+           pages_readable = 12;
+           pages_unreadable = 0;
+           pages = wiki12;
+           unreadable_pages = [];
+           lint = empty_lint;
+         }
+  in
+  let kw_deep =
+    List.fold_left
+      (fun acc _ -> Knowledge_store.move_selection ~viewport_rows:vr ~delta:1 acc)
+      kw0 (List.init 8 Fun.id)
+  in
+  Alcotest.(check bool) "Wiki scrolled down past row 0" true
+    (kw_deep.scroll_offset > 1);
+  let kw_back =
+    List.fold_left
+      (fun acc _ ->
+        Knowledge_store.move_selection ~viewport_rows:vr ~delta:(-1) acc)
+      kw_deep (List.init 8 Fun.id)
+  in
+  Alcotest.(check int) "Wiki stepping Up to index 0 restores scroll_offset=0" 0
+    kw_back.scroll_offset;
+  let kw_home =
+    Knowledge_store.move_selection ~viewport_rows:vr ~delta:(-100000) kw_deep
+  in
+  Alcotest.(check int) "Wiki Home restores scroll_offset=0" 0
+    kw_home.scroll_offset;
+
+  (* 4. Knowledge_store Board with expanded first succession chain *)
+  let mk_bpost ?chain_root ?depth i : Wire_knowledge.board_post =
+    {
+      id = Printf.sprintf "bp-%02d" i;
+      title = Printf.sprintf "Post %02d" i;
+      body = "Body";
+      author = "alpha-1";
+      hearth = None;
+      post_kind = Some Wire_knowledge.Human_post;
+      visibility = Some Wire_knowledge.Vis_public;
+      created_at_unix = float_of_int (2000 - i);
+      updated_at_unix = None;
+      score = 0;
+      comment_count = 0;
+      author_karma = Observed.unreported;
+      succession_chain_root_id = chain_root;
+      chain_depth = depth;
+      is_signal = true;
+    }
+  in
+  let board_posts =
+    [
+      mk_bpost ~chain_root:"root-0" ~depth:1 0;
+      mk_bpost ~chain_root:"root-0" ~depth:2 1;
+    ]
+    @ List.init 8 (fun i -> mk_bpost (i + 2))
+  in
+  let kb0 =
+    Knowledge_store.empty
+    |> Knowledge_store.apply_board ~observed_at:t0
+         {
+           posts = board_posts;
+           count = List.length board_posts;
+           sort_by = "recent";
+           signal_only = true;
+         }
+    |> Knowledge_store.toggle_succession_chain ~root_id:"root-0"
+  in
+  let kb_deep =
+    List.fold_left
+      (fun acc _ -> Knowledge_store.move_selection ~viewport_rows:vr ~delta:1 acc)
+      kb0 (List.init 8 Fun.id)
+  in
+  Alcotest.(check bool) "Board expanded chain scrolled past row 0" true
+    (kb_deep.scroll_offset > 1);
+  let kb_back =
+    List.fold_left
+      (fun acc _ ->
+        Knowledge_store.move_selection ~viewport_rows:vr ~delta:(-1) acc)
+      kb_deep (List.init kb_deep.selected_index Fun.id)
+  in
+  Alcotest.(check int)
+    "Board expanded chain stepping Up reaches index 0" 0
+    kb_back.selected_index;
+  Alcotest.(check int)
+    "Board expanded chain stepping Up to index 0 restores scroll_offset=0" 0
+    kb_back.scroll_offset;
+  let kb_home =
+    Knowledge_store.move_selection ~viewport_rows:vr ~delta:(-100000) kb_deep
+  in
+  Alcotest.(check int) "Board expanded chain Home restores scroll_offset=0" 0
+    kb_home.scroll_offset
+
+let test_p2_schedules_attention_scroll_and_filter_guard () =
+  (* 1. Work_tasks_schedules: independent schedules_scroll_offset *)
+  let mk_task i : Wire_work.task =
+    {
+      id = Printf.sprintf "t-%02d" i;
+      title = Printf.sprintf "Task %02d" i;
+      description = None;
+      priority = 1;
+      status = Wire_work.Todo;
+      goal_link = Wire_work.Unlinked;
+      created_at = None;
+      updated_at = None;
+    }
+  in
+  let mk_sched i : Wire_work.schedule_row =
+    {
+      schedule_instance_id = Printf.sprintf "si-%02d" i;
+      schedule_id = Printf.sprintf "s-%02d" i;
+      status = Wire_work.Sched_scheduled;
+      source = "keeper.toml";
+      due_at_unix = 1_800_000_000.0;
+      next_due_at_unix = None;
+      recurrence_kind = "cron";
+      recurrence_summary = "0 * * * *";
+      payload_kind = None;
+      payload_support = "prompt";
+      payload_target = None;
+      payload_keeper_name = Some "alpha-1";
+      payload_summary = None;
+      last_wake_unix = None;
+      last_disposition = Wire_work.Wake_never;
+    }
+  in
+  let w0 =
+    Work_store.empty
+    |> Work_store.set_tab Nav.Work_tasks_schedules
+    |> Work_store.apply_planning ~observed_at:t0
+         { goals = []; tasks = List.init 10 mk_task }
+    |> Work_store.apply_schedules ~observed_at:t0
+         (List.init 10 mk_sched, None)
+  in
+  let w_tasks = Work_store.move_selection ~viewport_rows:5 ~delta:9 w0 in
+  Alcotest.(check int) "Tasks scroll_offset = 5" 5 w_tasks.scroll_offset;
+  Alcotest.(check int) "Schedules scroll_offset starts at 0" 0
+    w_tasks.schedules_scroll_offset;
+  let w_scheds = Work_store.move_selection ~viewport_rows:5 ~delta:9 w_tasks in
+  Alcotest.(check int) "Upper Tasks scroll_offset stays untouched (=5) while scrolling Schedules"
+    5 w_scheds.scroll_offset;
+  Alcotest.(check int) "Schedules scroll_offset scrolls symmetrically (8 - 5 + 1 = 4)"
+    4 w_scheds.schedules_scroll_offset;
+  let w_scheds_up1 = Work_store.move_selection ~viewport_rows:5 ~delta:(-1) w_scheds in
+  Alcotest.(check int) "Schedules Up inside window keeps schedules_scroll_offset=4"
+    4 w_scheds_up1.schedules_scroll_offset;
+
+  (* 2. Attention.move_triage symmetric triage_scroll_offset *)
+  let asks10 =
+    List.init 10 (fun i ->
+        sample_ask ~id:(Printf.sprintf "ask-%02d" i) ~keeper:"alpha-1" ())
+  in
+  let att0 =
+    Attention.rebuild ~asks:asks10 ~tool_approvals:[] ~gate_pending:[]
+      ~goals:[] ~quarantines:[] Attention.empty
+  in
+  let att_deep = Attention.move_triage ~viewport_rows:5 ~delta:8 att0 in
+  Alcotest.(check int) "Attention triage_scroll_offset = 8 - 5 + 1 = 4" 4
+    att_deep.triage_scroll_offset;
+  let att_up1 = Attention.move_triage ~viewport_rows:5 ~delta:(-1) att_deep in
+  Alcotest.(check int) "Attention Up inside window keeps triage_scroll_offset=4"
+    4 att_up1.triage_scroll_offset;
+  let att_up_past =
+    Attention.move_triage ~viewport_rows:5 ~delta:(-4) att_up1
+  in
+  Alcotest.(check int) "Attention Up past top edge pulls triage_scroll_offset=3"
+    3 att_up_past.triage_scroll_offset;
+
+  (* 3. Update_nav.apply_move no-ops when nav.filter_focused = true *)
+  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let m_filt =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Work; filter_focused = true };
+      work = w0;
+    }
+  in
+  let m_after_dn, _ = Update_nav.apply_move m_filt Keymap.Down in
+  Alcotest.(check int) "apply_move Down no-ops when filter_focused=true" 0
+    m_after_dn.work.selected_index;
+  let m_after_r, _ = Update_nav.apply_move m_filt Keymap.Right in
+  Alcotest.(check bool) "apply_move Right does not cycle tab when filter_focused=true"
+    true
+    (Nav.equal_work_tab m_after_r.work.active_tab Nav.Work_tasks_schedules)
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -3542,5 +5319,34 @@ let () =
             `Quick test_v25_data_pipeline_and_settings_2pane;
           Alcotest.test_case "P0-3/P0-4/P1-11 Settings safety & all wired Cmd mutations"
             `Quick test_p0_actions_settings_safety_and_wired_cmds;
+        ] );
+      ( "arrow_nav_display_order"
+      , [
+          Alcotest.test_case "Fix 1: Keepers grouped visual order, collapse & poll/mode re-sync"
+            `Quick test_nav_fix1_keepers_grouped_order_collapse_and_resync;
+          Alcotest.test_case "Fix 2: Pulse strict 1-company-row Up/Down stepping"
+            `Quick test_nav_fix2_pulse_company_row_stepping;
+          Alcotest.test_case "Fix 3: Runtime Efficiency SSOT company-grouped display order"
+            `Quick test_nav_fix3_runtime_efficiency_company_grouped_display_order;
+          Alcotest.test_case "Fix 4: Knowledge Board succession chains & language-neutral Wiki clusters"
+            `Quick test_nav_fix4_knowledge_board_chains_and_wiki_clusters;
+          Alcotest.test_case "Fix 5: Keeper Dive Chat Up/Down/Wheel/Home/End scroll direction & tight bound"
+            `Quick test_nav_fix5_keeper_chat_scroll_direction_and_home_bound;
+          Alcotest.test_case "Fix 6: Work Inbox triage, unified task filters & split-pane Tab clamping"
+            `Quick test_nav_fix6_work_inbox_filter_and_split_pane_clamping;
+          Alcotest.test_case "Fix 7: Smooth symmetric viewport scrolling across all stores"
+            `Quick test_nav_fix7_symmetric_viewport_scrolling_all_stores;
+          Alcotest.test_case "Left/Right sub-tab cycling & composer/Settings guards"
+            `Quick test_nav_left_right_subtab_cycling_and_guards;
+          Alcotest.test_case "P1 #1: Chat_transcript SSOT exact bounds (Markdown/JSON/dedup/pending/composer)"
+            `Quick test_p1_chat_transcript_ssot_exact_bounds;
+          Alcotest.test_case "P1 #2: Work_inbox Ask/Approval focus, choice & copy sync"
+            `Quick test_p1_work_inbox_ask_approval_sync;
+          Alcotest.test_case "P1 #3: Pulse collapsed-company dive & independent pulse_scroll_offset"
+            `Quick test_p1_pulse_collapsed_company_dive_and_scroll;
+          Alcotest.test_case "P2 #4: Grouped views restore header row 0 on return to index 0 / Home"
+            `Quick test_p2_grouped_top_header_row0_restoration;
+          Alcotest.test_case "P2 #5: Schedules/Attention independent symmetric scroll & filter_focused guard"
+            `Quick test_p2_schedules_attention_scroll_and_filter_guard;
         ] );
     ]

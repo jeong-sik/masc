@@ -52,6 +52,7 @@ type t = {
   fleet_mode : Nav.keepers_fleet_mode;
   selected_index : int;
   scroll_offset : int;
+  pulse_scroll_offset : int;
   filter_query : string;
   selected_keeper : string option;
   collapsed_companies : String_set.t;
@@ -80,6 +81,7 @@ let empty =
     fleet_mode = Nav.Fleet_companies;
     selected_index = 0;
     scroll_offset = 0;
+    pulse_scroll_offset = 0;
     filter_query = "";
     selected_keeper = None;
     collapsed_companies = String_set.empty;
@@ -220,28 +222,55 @@ let contains_ci ~needle haystack =
       in
       scan 0
 
+let default_viewport_rows = 15
+
+let adjust_scroll ?(viewport_rows = default_viewport_rows) ~scroll selected =
+  let vr = max 1 viewport_rows in
+  if selected < scroll then selected
+  else if selected >= scroll + vr then max 0 (selected - vr + 1)
+  else scroll
+
+let adjust_grouped_scroll ?(viewport_rows = default_viewport_rows) ~scroll
+    ~header_row vis_row =
+  let vr = max 1 viewport_rows in
+  let top_row = if vr >= 2 then min header_row vis_row else vis_row in
+  if top_row < scroll then top_row
+  else if vis_row >= scroll + vr then max 0 (vis_row - vr + 1)
+  else scroll
+
 let keepers_list t =
   match Observed.to_option t.keepers with Some ks -> ks | None -> []
 
-let filtered_keepers t =
+let filter_matched_keepers t =
   let q = String.trim t.filter_query in
   let base = keepers_list t in
-  let matched =
-    if String.equal q "" then base
-    else
-      List.filter
-        (fun (k : Wire_fleet.keeper_summary) ->
-          contains_ci ~needle:q k.name
-          || contains_ci ~needle:q k.company
-          || contains_ci ~needle:q k.runtime_id
-          ||
-          match k.model_id with
-          | Some m -> contains_ci ~needle:q m
-          | None -> false)
-        base
-  in
+  if String.equal q "" then base
+  else
+    List.filter
+      (fun (k : Wire_fleet.keeper_summary) ->
+        contains_ci ~needle:q k.name
+        || contains_ci ~needle:q k.company
+        || contains_ci ~needle:q k.runtime_id
+        ||
+        match k.model_id with
+        | Some m -> contains_ci ~needle:q m
+        | None -> false)
+      base
+
+let filtered_keepers t =
+  let matched = filter_matched_keepers t in
   match t.fleet_mode with
-  | Nav.Fleet_companies -> matched
+  | Nav.Fleet_companies ->
+      let groups = Wire_fleet.group_by_company matched in
+      let uncollapsed =
+        List.concat_map
+          (fun (g : Wire_fleet.company_group) ->
+            if String_set.mem g.company t.collapsed_companies then []
+            else g.keepers)
+          groups
+      in
+      if uncollapsed <> [] then uncollapsed
+      else List.concat_map (fun (g : Wire_fleet.company_group) -> g.keepers) groups
   | Nav.Fleet_attention ->
       List.stable_sort
         (fun a b ->
@@ -265,7 +294,7 @@ let filtered_keepers t =
 let company_groups_with_costs ?attention ~keeper_costs_24h t =
   let sandbox_profiles = String_map.bindings t.sandbox_profiles in
   Wire_fleet.group_by_company ?attention ~sandbox_profiles ~keeper_costs_24h
-    (filtered_keepers t)
+    (filter_matched_keepers t)
 
 let company_groups ?attention t =
   company_groups_with_costs ?attention ~keeper_costs_24h:[] t
@@ -325,6 +354,31 @@ let selected_keeper_summary t =
       | None -> List.nth_opt ks (clamp_index (List.length ks) t.selected_index))
   | None -> List.nth_opt ks (clamp_index (List.length ks) t.selected_index)
 
+let selected_company_keeper t =
+  let groups = company_groups t in
+  let total = List.length groups in
+  if total = 0 then None
+  else
+    let by_name =
+      match t.selected_keeper with
+      | None -> None
+      | Some name ->
+          List.find_map
+            (fun (g : Wire_fleet.company_group) ->
+              List.find_opt
+                (fun (k : Wire_fleet.keeper_summary) ->
+                  String.equal k.name name)
+                g.keepers)
+            groups
+    in
+    match by_name with
+    | Some _ as k -> k
+    | None -> (
+        match List.nth_opt groups (clamp_index total t.selected_index) with
+        | Some g -> (
+            match g.keepers with lead :: _ -> Some lead | [] -> None)
+        | None -> None)
+
 let turns_list t =
   match Observed.to_option t.turns with Some rows -> rows | None -> []
 
@@ -359,23 +413,116 @@ let apply_shell ~observed_at shell t =
     raw_shell_scorecard = Some shell.scorecard_24h;
   }
 
-let apply_keepers ~observed_at ks t =
-  let next = { t with keepers = Observed.value ~observed_at ks } in
-  let visible = filtered_keepers next in
-  let selected_index = clamp_index (List.length visible) next.selected_index in
-  let selected_keeper =
-    match next.selected_keeper with
-    | Some name
-      when List.exists
-             (fun (k : Wire_fleet.keeper_summary) -> String.equal k.name name)
-             ks ->
-        Some name
-    | Some _ | None -> (
-        match List.nth_opt visible selected_index with
-        | Some k -> Some k.name
-        | None -> None)
+let index_of_keeper_name name (ks : Wire_fleet.keeper_summary list) =
+  let rec find i = function
+    | [] -> None
+    | (k : Wire_fleet.keeper_summary) :: rest ->
+        if String.equal k.name name then Some i else find (i + 1) rest
   in
-  { next with selected_index; selected_keeper }
+  find 0 ks
+
+let resolve_current_index t (ks : Wire_fleet.keeper_summary list) =
+  let len = List.length ks in
+  match t.selected_keeper with
+  | Some name -> (
+      match index_of_keeper_name name ks with
+      | Some idx -> idx
+      | None -> clamp_index len t.selected_index)
+  | None -> clamp_index len t.selected_index
+
+let visual_row_for_selection t ~selected_index ~selected_keeper =
+  match t.fleet_mode with
+  | Nav.Fleet_attention | Nav.Fleet_pulse_wall ->
+      (selected_index, selected_index)
+  | Nav.Fleet_companies -> (
+      let groups = Wire_fleet.group_by_company (filter_matched_keepers t) in
+      match selected_keeper with
+      | None -> (selected_index, selected_index)
+      | Some want ->
+          let rec walk_groups row = function
+            | [] -> (selected_index, selected_index)
+            | (g : Wire_fleet.company_group) :: rest ->
+                let hdr_row = row in
+                if String_set.mem g.company t.collapsed_companies then
+                  if
+                    List.exists
+                      (fun (k : Wire_fleet.keeper_summary) ->
+                        String.equal k.name want)
+                      g.keepers
+                  then (hdr_row, hdr_row)
+                  else walk_groups (row + 1) rest
+                else
+                  let rec walk_members first r = function
+                    | [] -> walk_groups r rest
+                    | (k : Wire_fleet.keeper_summary) :: ks ->
+                        if String.equal k.name want then
+                          ((if first then hdr_row else r), r)
+                        else walk_members false (r + 1) ks
+                  in
+                  walk_members true (row + 1) g.keepers
+          in
+          walk_groups 0 groups)
+
+let sync_selection_after_change ~prev_index ~reset_scroll ~clear_if_empty next =
+  let visible = filtered_keepers next in
+  let len = List.length visible in
+  let n_groups = List.length (company_groups next) in
+  let pulse_scroll_offset =
+    if reset_scroll || n_groups = 0 then 0
+    else min next.pulse_scroll_offset (max 0 (n_groups - 1))
+  in
+  if len = 0 then
+    let selected_keeper = if clear_if_empty then None else next.selected_keeper in
+    {
+      next with
+      selected_index = 0;
+      scroll_offset = 0;
+      pulse_scroll_offset;
+      selected_keeper;
+    }
+  else
+    let selected_index, selected_keeper =
+      match next.selected_keeper with
+      | Some name -> (
+          match index_of_keeper_name name visible with
+          | Some idx -> (idx, Some name)
+          | None ->
+              let idx = clamp_index len prev_index in
+              let kp =
+                match List.nth_opt visible idx with
+                | Some k -> Some k.name
+                | None -> None
+              in
+              (idx, kp))
+      | None ->
+          let idx = clamp_index len prev_index in
+          let kp =
+            match List.nth_opt visible idx with
+            | Some k -> Some k.name
+            | None -> None
+          in
+          (idx, kp)
+    in
+    let header_row, vis_row =
+      visual_row_for_selection next ~selected_index ~selected_keeper
+    in
+    let base_scroll = if reset_scroll then 0 else next.scroll_offset in
+    let scroll_offset =
+      adjust_grouped_scroll ~scroll:base_scroll ~header_row vis_row
+    in
+    {
+      next with
+      selected_index;
+      scroll_offset;
+      pulse_scroll_offset;
+      selected_keeper;
+    }
+
+let apply_keepers ~observed_at ks t =
+  let prev_index = resolve_current_index t (filtered_keepers t) in
+  let next = { t with keepers = Observed.value ~observed_at ks } in
+  sync_selection_after_change ~prev_index ~reset_scroll:false
+    ~clear_if_empty:true next
 
 let apply_roster_extras (extras : Wire_fleet.keeper_roster_extras) t =
   let sandbox_profiles =
@@ -658,7 +805,9 @@ let finish_chat_stream ~keeper ~request_id ~error t =
   | Some _ | None -> t
 
 let set_fleet_mode fleet_mode t =
-  { t with fleet_mode; selected_index = 0; scroll_offset = 0 }
+  let next = { t with fleet_mode } in
+  sync_selection_after_change ~prev_index:0 ~reset_scroll:true
+    ~clear_if_empty:false next
 
 let prev_fleet_mode = function
   | Nav.Fleet_companies -> Nav.Fleet_pulse_wall
@@ -725,54 +874,132 @@ let toggle_turn_details t =
   { t with chat_turn_details_expanded = not t.chat_turn_details_expanded }
 
 let toggle_company_collapsed company t =
+  let prev_index = resolve_current_index t (filtered_keepers t) in
   let collapsed_companies =
     if String_set.mem company t.collapsed_companies then
       String_set.remove company t.collapsed_companies
     else String_set.add company t.collapsed_companies
   in
-  { t with collapsed_companies }
+  let next = { t with collapsed_companies } in
+  sync_selection_after_change ~prev_index ~reset_scroll:false
+    ~clear_if_empty:false next
 
 let select_keeper name t =
   let ks = filtered_keepers t in
-  let idx_opt =
-    let rec find i = function
-      | [] -> None
-      | (k : Wire_fleet.keeper_summary) :: rest ->
-          if String.equal k.name name then Some i else find (i + 1) rest
-    in
-    find 0 ks
-  in
-  match idx_opt with
-  | Some idx -> { t with selected_keeper = Some name; selected_index = idx }
+  match index_of_keeper_name name ks with
+  | Some idx ->
+      let selected_keeper = Some name in
+      let header_row, vis_row =
+        visual_row_for_selection t ~selected_index:idx ~selected_keeper
+      in
+      let scroll_offset =
+        adjust_grouped_scroll ~scroll:t.scroll_offset ~header_row vis_row
+      in
+      { t with selected_keeper; selected_index = idx; scroll_offset }
   | None -> { t with selected_keeper = Some name }
 
-let move_selection ~delta t =
+let move_selection ?viewport_rows ~delta t =
   let ks = filtered_keepers t in
   let len = List.length ks in
-  let selected_index = clamp_index len (t.selected_index + delta) in
-  let scroll_offset =
-    if selected_index < t.scroll_offset then selected_index
-    else t.scroll_offset
-  in
+  let cur = resolve_current_index t ks in
+  let selected_index = clamp_index len (cur + delta) in
   let selected_keeper =
     match List.nth_opt ks selected_index with
     | Some k -> Some k.name
     | None -> t.selected_keeper
   in
+  let header_row, vis_row =
+    visual_row_for_selection t ~selected_index ~selected_keeper
+  in
+  let scroll_offset =
+    adjust_grouped_scroll ?viewport_rows ~scroll:t.scroll_offset ~header_row
+      vis_row
+  in
   { t with selected_index; scroll_offset; selected_keeper }
 
-let move_chat_scroll ~delta t =
-  { t with chat_scroll_offset = max 0 (t.chat_scroll_offset + delta) }
+let move_company_selection ?viewport_rows ~delta t =
+  let groups = company_groups t in
+  let total = List.length groups in
+  if total = 0 then t
+  else
+    let current_group_idx =
+      let sel_name =
+        match t.selected_keeper with
+        | Some _ as s -> s
+        | None ->
+            Option.map
+              (fun (k : Wire_fleet.keeper_summary) -> k.name)
+              (selected_company_keeper t)
+      in
+      let by_selected =
+        match sel_name with
+        | None -> None
+        | Some name ->
+            let rec find i = function
+              | [] -> None
+              | (g : Wire_fleet.company_group) :: rest ->
+                  if
+                    List.exists
+                      (fun (k : Wire_fleet.keeper_summary) ->
+                        String.equal k.name name)
+                      g.keepers
+                  then Some i
+                  else find (i + 1) rest
+            in
+            find 0 groups
+      in
+      match by_selected with
+      | Some idx -> idx
+      | None -> clamp_index total t.selected_index
+    in
+    let target_idx = clamp_index total (current_group_idx + delta) in
+    let pulse_scroll_offset =
+      adjust_scroll ?viewport_rows ~scroll:t.pulse_scroll_offset target_idx
+    in
+    match List.nth_opt groups target_idx with
+    | None -> { t with pulse_scroll_offset }
+    | Some target_group -> (
+        match target_group.keepers with
+        | [] -> { t with pulse_scroll_offset }
+        | lead :: _ ->
+            let ks = filtered_keepers t in
+            let selected_index =
+              match index_of_keeper_name lead.name ks with
+              | Some idx -> idx
+              | None -> clamp_index (List.length ks) t.selected_index
+            in
+            let selected_keeper = Some lead.name in
+            let header_row, vis_row =
+              visual_row_for_selection t ~selected_index ~selected_keeper
+            in
+            let scroll_offset =
+              adjust_grouped_scroll ~scroll:t.scroll_offset ~header_row vis_row
+            in
+            {
+              t with
+              selected_index;
+              scroll_offset;
+              pulse_scroll_offset;
+              selected_keeper;
+            })
+
+let move_chat_scroll ?max_scroll ~delta t =
+  let next =
+    match max_scroll with
+    | None -> max 0 (t.chat_scroll_offset + delta)
+    | Some hi ->
+        let hi = max 0 hi in
+        let base = min hi t.chat_scroll_offset in
+        max 0 (min hi (base + delta))
+  in
+  { t with chat_scroll_offset = next }
 
 let reset_chat_scroll t = { t with chat_scroll_offset = 0 }
 
 let set_filter filter_query t =
-  let next = { t with filter_query; selected_index = 0; scroll_offset = 0 } in
-  let ks = filtered_keepers next in
-  let selected_keeper =
-    match ks with k :: _ -> Some k.name | [] -> next.selected_keeper
-  in
-  { next with selected_keeper }
+  let next = { t with filter_query } in
+  sync_selection_after_change ~prev_index:0 ~reset_scroll:true
+    ~clear_if_empty:false next
 
 let mark_keepers_stale t =
   {

@@ -6,15 +6,7 @@ open Masc_tui_store
 
 module H = Domain_helpers
 
-(* --- 1. Board Helpers & Succession Chain Grouping --- *)
-
-type succession_group = {
-  chain_root_id : string option;
-  lead : Wire_knowledge.board_post;
-  members : Wire_knowledge.board_post list;
-  chain_count : int;
-  unique_keepers : int;
-}
+(* --- 1. Board Helpers --- *)
 
 let unique_strings xs =
   let seen = Hashtbl.create 16 in
@@ -26,70 +18,6 @@ let unique_strings xs =
         true
       end)
     xs
-
-let group_succession_chains (posts : Wire_knowledge.board_post list) :
-    succession_group list =
-  let order = ref [] in
-  let tbl : (string, Wire_knowledge.board_post list) Hashtbl.t =
-    Hashtbl.create 32
-  in
-  List.iter
-    (fun (p : Wire_knowledge.board_post) ->
-      let key =
-        match p.succession_chain_root_id with
-        | Some root when not (String.equal (String.trim root) "") ->
-            "chain:" ^ root
-        | Some _ | None -> "post:" ^ p.id
-      in
-      match Hashtbl.find_opt tbl key with
-      | None ->
-          order := key :: !order;
-          Hashtbl.add tbl key [ p ]
-      | Some prev -> Hashtbl.replace tbl key (prev @ [ p ]))
-    posts;
-  List.rev !order
-  |> List.filter_map (fun key ->
-         match Hashtbl.find_opt tbl key with
-         | None | Some [] -> None
-         | Some (first :: _ as members) ->
-             let lead =
-               List.fold_left
-                 (fun (best : Wire_knowledge.board_post)
-                      (cur : Wire_knowledge.board_post) ->
-                   let best_d =
-                     match best.chain_depth with Some d -> d | None -> 0
-                   in
-                   let cur_d =
-                     match cur.chain_depth with Some d -> d | None -> 0
-                   in
-                   if cur_d > best_d then cur
-                   else if
-                     Int.equal cur_d best_d
-                     && cur.created_at_unix > best.created_at_unix
-                   then cur
-                   else best)
-                 first members
-             in
-             let declared_depth =
-               List.fold_left
-                 (fun acc (p : Wire_knowledge.board_post) ->
-                   match p.chain_depth with Some d -> Int.max acc d | None -> acc)
-                 1 members
-             in
-             let chain_count = Int.max (List.length members) declared_depth in
-             let unique_keepers =
-               members
-               |> List.map (fun (p : Wire_knowledge.board_post) -> p.author)
-               |> unique_strings |> List.length
-             in
-             Some
-               {
-                 chain_root_id = lead.succession_chain_root_id;
-                 lead;
-                 members;
-                 chain_count;
-                 unique_keepers;
-               })
 
 let post_visibility_label ~lang = function
   | None -> ""
@@ -547,13 +475,13 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       let pad_r = if list_inner.w >= 24 then 2 else 1 in
       (match k.board with
        | Observed.Value _ when filtered <> [] ->
-           let groups = group_succession_chains filtered in
+           let groups = Knowledge_store.group_succession_chains filtered in
            let sel_id =
              match selected_post with Some p -> Some p.id | None -> None
            in
            let visual_rows = ref [] in
            List.iter
-             (fun grp ->
+             (fun (grp : Knowledge_store.succession_group) ->
                let is_expanded =
                  match grp.chain_root_id with
                  | Some root_id ->
@@ -747,31 +675,6 @@ let wiki_source_badge ~lang = function
       Say.resolve lang (Say.make ~ko:"실험" ~en:"Experiment")
   | Wire_knowledge.Source_observation ->
       Say.resolve lang (Say.make ~ko:"관측" ~en:"Observation")
-
-let cluster_wiki_pages (pages : Wire_knowledge.wiki_page_summary list) ~lang =
-  let default_topic = Say.resolve lang (Say.make ~ko:"일반" ~en:"General") in
-  let order = ref [] in
-  let tbl : (string, Wire_knowledge.wiki_page_summary list) Hashtbl.t =
-    Hashtbl.create 16
-  in
-  List.iter
-    (fun (p : Wire_knowledge.wiki_page_summary) ->
-      let topic =
-        match p.tags with
-        | t :: _ when not (String.equal (String.trim t) "") -> String.trim t
-        | _ -> default_topic
-      in
-      match Hashtbl.find_opt tbl topic with
-      | None ->
-          order := topic :: !order;
-          Hashtbl.add tbl topic [ p ]
-      | Some prev -> Hashtbl.replace tbl topic (prev @ [ p ]))
-    pages;
-  List.rev !order
-  |> List.filter_map (fun topic ->
-         match Hashtbl.find_opt tbl topic with
-         | Some xs -> Some (topic, xs)
-         | None -> None)
 
 let extract_markdown_headings (md : string) : (int * string) list =
   String.split_on_char '\n' md
@@ -1319,18 +1222,9 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
           cur_y := !cur_y + list_h;
           let pad_r = if left_inner.w >= 24 then 2 else 1 in
           (match k.wiki_index with
-           | Observed.Value { data = idx; _ } ->
+           | Observed.Value _ ->
                let q = String.trim k.filter_query in
-               let visible_pages =
-                 if String.equal q "" then idx.pages
-                 else
-                   List.filter
-                     (fun (p : Wire_knowledge.wiki_page_summary) ->
-                       H.contains_ci ~needle:q p.title
-                       || H.contains_ci ~needle:q p.slug
-                       || H.contains_ci ~needle:q p.summary)
-                     idx.pages
-               in
+               let visible_pages = Knowledge_store.wiki_pages_filtered k in
                if visible_pages = [] then
                  H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp list_area)
                    ~theme
@@ -1341,7 +1235,7 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
                          Say.make ~ko:"필터에 일치하는 위키 페이지 없음"
                            ~en:"No wiki pages match filter"))
                else
-                 let clusters = cluster_wiki_pages visible_pages ~lang in
+                 let clusters = Knowledge_store.cluster_wiki_pages visible_pages in
                  let sel_slug =
                    match Knowledge_store.selected_wiki_page k with
                    | Some s -> Some s.slug
@@ -1354,7 +1248,13 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
                  in
                  let rows_acc = ref [] in
                  List.iter
-                   (fun (topic, ps) ->
+                   (fun (topic_opt, ps) ->
+                     let topic =
+                       match topic_opt with
+                       | Some t -> t
+                       | None ->
+                           Say.resolve lang (Say.make ~ko:"일반" ~en:"General")
+                     in
                      rows_acc := (`Topic (topic, List.length ps)) :: !rows_acc;
                      List.iter
                        (fun (p : Wire_knowledge.wiki_page_summary) ->

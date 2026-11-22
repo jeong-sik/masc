@@ -292,7 +292,23 @@ let active_focus_scope m =
               if
                 Nav.equal_workspace m.nav.workspace Nav.Work
                 && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
-                && Option.is_some (Work_store.selected_open_ask m.work)
+                &&
+                if not (Attention.is_empty m.attention) then
+                  match Attention.current_triage_item m.attention with
+                  | Some { payload = Attention.Payload_ask _; id; _ } ->
+                      not (Attention.is_in_flight ~id m.attention)
+                  | Some
+                      {
+                        payload =
+                          ( Attention.Payload_tool_approval _
+                          | Attention.Payload_gate _
+                          | Attention.Payload_goal_confirmation _
+                          | Attention.Payload_quarantine _ );
+                        _;
+                      }
+                  | None ->
+                      false
+                else Option.is_some (Work_store.selected_open_ask m.work)
               then Nav.Ask_choice_focused
               else Nav.Workspace_focused m.nav.workspace)
 

@@ -753,13 +753,21 @@ let enter_inspector t =
 
 let leave_inspector t = { t with settings_pane = Pane_tree }
 
-let move_tree_selection ~delta t =
+let default_viewport_rows = 15
+
+let adjust_scroll ?(viewport_rows = default_viewport_rows) ~scroll selected =
+  let vr = max 1 viewport_rows in
+  if selected < scroll then selected
+  else if selected >= scroll + vr then max 0 (selected - vr + 1)
+  else scroll
+
+let move_tree_selection ?viewport_rows ~delta t =
   let rows = visible_tree_rows t in
   let len = List.length rows in
   let selected_section_idx = clamp_index len (t.selected_section_idx + delta) in
   let tree_scroll_offset =
-    if selected_section_idx < t.tree_scroll_offset then selected_section_idx
-    else t.tree_scroll_offset
+    adjust_scroll ?viewport_rows ~scroll:t.tree_scroll_offset
+      selected_section_idx
   in
   let active_tab =
     match List.nth_opt rows selected_section_idx with
@@ -1296,17 +1304,17 @@ let commit_edit_field t =
               let staged = stage_patch ~full_key:f.full_key op t in
               Ok { staged with editing_field_key = None; editing_buffer = "" }))
 
-let move_selection ~delta t =
+let move_selection ?viewport_rows ~delta t =
   match t.settings_pane with
-  | Pane_tree -> move_tree_selection ~delta t
+  | Pane_tree -> move_tree_selection ?viewport_rows ~delta t
   | Pane_inspector ->
       let len = List.length (inspector_fields t) in
       let selected_field_index =
         clamp_index len (t.selected_field_index + delta)
       in
       let scroll_offset =
-        if selected_field_index < t.scroll_offset then selected_field_index
-        else t.scroll_offset
+        adjust_scroll ?viewport_rows ~scroll:t.scroll_offset
+          selected_field_index
       in
       { t with selected_field_index; scroll_offset }
 

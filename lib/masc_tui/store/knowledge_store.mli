@@ -112,12 +112,39 @@ val cancel_wiki_edit : t -> t
 val wiki_put_request_of_draft :
   wiki_edit_draft -> Wire_knowledge.wiki_put_request
 
+type succession_group = {
+  chain_root_id : string option;
+  lead : Wire_knowledge.board_post;
+  members : Wire_knowledge.board_post list;
+  chain_count : int;
+  unique_keepers : int;
+}
+
 val filtered_posts : t -> Wire_knowledge.board_post list
+val group_succession_chains :
+  Wire_knowledge.board_post list -> succession_group list
+(** Canonical SSOT succession-chain grouping for Board posts. *)
+
+val board_display_posts : t -> Wire_knowledge.board_post list
+(** Visual display order of selectable Board posts: collapsed/singleton chains
+    yield [[grp.lead]], expanded multi-member chains yield [grp.members]. *)
+
+val wiki_pages_filtered : t -> Wire_knowledge.wiki_page_summary list
+val cluster_wiki_pages :
+  Wire_knowledge.wiki_page_summary list ->
+  (string option * Wire_knowledge.wiki_page_summary list) list
+(** Language-neutral topic clustering of Wiki pages ([None] represents
+    untagged General pages). *)
+
+val wiki_display_pages : t -> Wire_knowledge.wiki_page_summary list
+(** Flattened visual display order matching {!cluster_wiki_pages}. *)
+
 val quarantines_list : t -> Wire_knowledge.quarantine_candidate list
 val selected_post : t -> Wire_knowledge.board_post option
 val selected_wiki_page : t -> Wire_knowledge.wiki_page_summary option
 val selected_artifact : t -> Wire_knowledge.artifact_entry option
 
-val move_selection : delta:int -> t -> t
+val move_selection :
+  ?pane_index:int -> ?viewport_rows:int -> delta:int -> t -> t
 val set_filter : string -> t -> t
 val mark_stale_all : t -> t

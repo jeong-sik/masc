@@ -40,6 +40,7 @@ type t = {
   candle_fallback_404 : bool;
   selected_index : int;
   scroll_offset : int;
+  schedules_scroll_offset : int;
   filter_query : string;
   verification_view : [ `Pending | `All ];
   expanded_ids : String_set.t;
@@ -94,7 +95,12 @@ val record_decision :
   t
 
 val goals : t -> Wire_work.goal list
+val filtered_goals : t -> Wire_work.goal list
 val tasks : t -> Wire_work.task list
+val filtered_tasks : t -> Wire_work.task list
+(** Canonical SSOT task filter supporting status keywords (["active"],
+    ["verify"], ["todo"], ["unlinked"], ["done"], ["sched"]/["schedules"]) and
+    substring matching on title/id. *)
 val verifications_list : t -> Wire_work.verification_request list
 val schedules_list : t -> Wire_work.schedule_row list
 val asks_list : t -> Wire_work.ask_row list
@@ -111,7 +117,8 @@ val selected_verification : t -> Wire_work.verification_request option
 val selected_schedule : t -> Wire_work.schedule_row option
 val selected_open_ask : t -> Wire_work.ask_row option
 
-val move_selection : delta:int -> t -> t
+val move_selection :
+  ?pane_index:int -> ?viewport_rows:int -> delta:int -> t -> t
 val set_filter : string -> t -> t
 val toggle_verification_view : t -> t
 val toggle_expanded : string -> t -> t

@@ -195,36 +195,58 @@ let apply_model_selection ~now ~runtime_id (m : Model.t) =
       , cmds )
 
 let find_actionable_ask (m : Model.t) =
-  match Work_store.selected_open_ask m.work with
-  | Some ask -> Some ask
-  | None -> (
-      match Attention.current_triage_item m.attention with
-      | Some { payload = Attention.Payload_ask ask; id; _ }
-        when not (Attention.is_in_flight ~id m.attention) ->
-          Some ask
-      | Some
-          {
-            payload =
-              ( Attention.Payload_ask _
-              | Attention.Payload_tool_approval _
-              | Attention.Payload_gate _
-              | Attention.Payload_goal_confirmation _
-              | Attention.Payload_quarantine _ );
-            _;
-          }
-      | None ->
-          List.find_map
-            (fun (e : Attention.entry) ->
-              if Attention.is_in_flight ~id:e.id m.attention then None
-              else
-                match e.payload with
-                | Attention.Payload_ask ask -> Some ask
-                | Attention.Payload_tool_approval _
-                | Attention.Payload_gate _
-                | Attention.Payload_goal_confirmation _
-                | Attention.Payload_quarantine _ ->
-                    None)
-            m.attention.items)
+  let on_work_inbox =
+    Nav.equal_workspace m.nav.workspace Nav.Work
+    && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
+  in
+  if on_work_inbox && not (Attention.is_empty m.attention) then
+    match Attention.current_triage_item m.attention with
+    | Some { payload = Attention.Payload_ask ask; id; _ }
+      when not (Attention.is_in_flight ~id m.attention) ->
+        Some ask
+    | Some
+        {
+          payload =
+            ( Attention.Payload_ask _
+            | Attention.Payload_tool_approval _
+            | Attention.Payload_gate _
+            | Attention.Payload_goal_confirmation _
+            | Attention.Payload_quarantine _ );
+          _;
+        }
+    | None ->
+        None
+  else
+    match Attention.current_triage_item m.attention with
+    | Some { payload = Attention.Payload_ask ask; id; _ }
+      when not (Attention.is_in_flight ~id m.attention) ->
+        Some ask
+    | Some
+        {
+          payload =
+            ( Attention.Payload_ask _
+            | Attention.Payload_tool_approval _
+            | Attention.Payload_gate _
+            | Attention.Payload_goal_confirmation _
+            | Attention.Payload_quarantine _ );
+          _;
+        }
+    | None -> (
+        match Work_store.selected_open_ask m.work with
+        | Some ask -> Some ask
+        | None ->
+            List.find_map
+              (fun (e : Attention.entry) ->
+                if Attention.is_in_flight ~id:e.id m.attention then None
+                else
+                  match e.payload with
+                  | Attention.Payload_ask ask -> Some ask
+                  | Attention.Payload_tool_approval _
+                  | Attention.Payload_gate _
+                  | Attention.Payload_goal_confirmation _
+                  | Attention.Payload_quarantine _ ->
+                      None)
+              m.attention.items)
 
 let rec execute_slash ~now (m : Model.t) cmd =
   match cmd with
@@ -447,7 +469,11 @@ and execute_action ~now (m : Model.t) action =
       | None ->
           let delta = match dir with Keymap.Next -> 1 | Keymap.Prev -> -1 in
           let next_pane = (m.nav.pane_index + delta + 3) mod 3 in
-          ({ m with nav = { m.nav with pane_index = next_pane } }, []))
+          let next =
+            Update_nav.clamp_for_pane
+              { m with nav = { m.nav with pane_index = next_pane } }
+          in
+          (next, []))
   | Keymap.Focus_composer -> (
       match m.nav.overlay with
       | Some
@@ -1127,12 +1153,26 @@ and execute_action ~now (m : Model.t) action =
                       (fun (s : Wire_work.schedule_row) -> s.schedule_id)
                       (Work_store.selected_schedule m.work))
             | Nav.Work_inbox -> (
-                match Work_store.selected_open_ask m.work with
-                | Some a -> Some a.ask_id
-                | None ->
-                    Option.map
-                      (fun (e : Attention.entry) -> e.summary)
-                      (Attention.current_triage_item m.attention))
+                if not (Attention.is_empty m.attention) then
+                  match Attention.current_triage_item m.attention with
+                  | Some { payload = Attention.Payload_ask a; _ } ->
+                      Some a.ask_id
+                  | Some
+                      {
+                        payload =
+                          ( Attention.Payload_tool_approval _
+                          | Attention.Payload_gate _
+                          | Attention.Payload_goal_confirmation _
+                          | Attention.Payload_quarantine _ );
+                        summary;
+                        _;
+                      } ->
+                      Some summary
+                  | None -> None
+                else
+                  Option.map
+                    (fun (a : Wire_work.ask_row) -> a.ask_id)
+                    (Work_store.selected_open_ask m.work))
             | Nav.Work_candle_scorecard -> (
                 match Observed.to_option m.work.candle_ledger with
                 | Some l -> (

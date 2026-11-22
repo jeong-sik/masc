@@ -27,12 +27,19 @@ type bucket_counts = {
 type t = {
   items : entry list;
   triage_index : int;
+  triage_scroll_offset : int;
   auto_advance : bool;
   in_flight_ids : string list;
 }
 
 let empty =
-  { items = []; triage_index = 0; auto_advance = true; in_flight_ids = [] }
+  {
+    items = [];
+    triage_index = 0;
+    triage_scroll_offset = 0;
+    auto_advance = true;
+    in_flight_ids = [];
+  }
 
 let urgency_rank = function
   | Health.Held_tool_approval _ -> 400
@@ -53,6 +60,14 @@ let compare_entry (a : entry) (b : entry) =
   else
     let c_time = compare_opt_float a.created_at_unix b.created_at_unix in
     if c_time <> 0 then c_time else String.compare a.id b.id
+
+let default_viewport_rows = 15
+
+let adjust_scroll ?(viewport_rows = default_viewport_rows) ~scroll selected =
+  let vr = max 1 viewport_rows in
+  if selected < scroll then selected
+  else if selected >= scroll + vr then max 0 (selected - vr + 1)
+  else scroll
 
 let clamp_index len idx =
   if len <= 0 then 0
@@ -174,7 +189,11 @@ let rebuild ~asks ~tool_approvals ~gate_pending ~goals ~quarantines t =
       t.in_flight_ids
   in
   let triage_index = clamp_index (List.length items) t.triage_index in
-  { t with items; triage_index; in_flight_ids }
+  let triage_scroll_offset =
+    if items = [] then 0
+    else adjust_scroll ~scroll:t.triage_scroll_offset triage_index
+  in
+  { t with items; triage_index; triage_scroll_offset; in_flight_ids }
 
 let upsert_entry (e : entry) t =
   let filtered =
@@ -182,7 +201,11 @@ let upsert_entry (e : entry) t =
   in
   let items = sort_and_dedup (e :: filtered) in
   let triage_index = clamp_index (List.length items) t.triage_index in
-  { t with items; triage_index }
+  let triage_scroll_offset =
+    if items = [] then 0
+    else adjust_scroll ~scroll:t.triage_scroll_offset triage_index
+  in
+  { t with items; triage_index; triage_scroll_offset }
 
 let remove_by_id id t =
   let items =
@@ -192,7 +215,11 @@ let remove_by_id id t =
     List.filter (fun x -> not (String.equal x id)) t.in_flight_ids
   in
   let triage_index = clamp_index (List.length items) t.triage_index in
-  { t with items; triage_index; in_flight_ids }
+  let triage_scroll_offset =
+    if items = [] then 0
+    else adjust_scroll ~scroll:t.triage_scroll_offset triage_index
+  in
+  { t with items; triage_index; triage_scroll_offset; in_flight_ids }
 
 let is_in_flight ~id t = List.exists (String.equal id) t.in_flight_ids
 
@@ -213,13 +240,25 @@ let top_fast_path t =
 let current_triage_item t =
   List.nth_opt t.items (clamp_index (List.length t.items) t.triage_index)
 
-let move_triage ~delta t =
+let move_triage ?viewport_rows ~delta t =
   let len = List.length t.items in
-  if len <= 0 then { t with triage_index = 0 }
-  else { t with triage_index = clamp_index len (t.triage_index + delta) }
+  if len <= 0 then { t with triage_index = 0; triage_scroll_offset = 0 }
+  else
+    let triage_index = clamp_index len (t.triage_index + delta) in
+    let triage_scroll_offset =
+      adjust_scroll ?viewport_rows ~scroll:t.triage_scroll_offset triage_index
+    in
+    { t with triage_index; triage_scroll_offset }
 
 let select_triage_index idx t =
-  { t with triage_index = clamp_index (List.length t.items) idx }
+  let len = List.length t.items in
+  if len <= 0 then { t with triage_index = 0; triage_scroll_offset = 0 }
+  else
+    let triage_index = clamp_index len idx in
+    let triage_scroll_offset =
+      adjust_scroll ~scroll:t.triage_scroll_offset triage_index
+    in
+    { t with triage_index; triage_scroll_offset }
 
 let set_auto_advance auto_advance t = { t with auto_advance }
 

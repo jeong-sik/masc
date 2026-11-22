@@ -2362,10 +2362,9 @@ let render_incidents_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         let sel =
           Int.max 0 (Int.min (total - 1) model.incidents.selected_index)
         in
-        let start =
-          if sel >= list_r.h then
-            Int.min (Int.max 0 (total - list_r.h)) (sel - list_r.h + 1)
-          else 0
+        let start, _ =
+          Table.compute_viewport ~total_rows:total ~viewport_rows:list_r.h
+            ~scroll:model.incidents.scroll_offset ~selected:(Some sel)
         in
         let right_edge = Rect.right list_r - pad_x in
         for i = 0 to list_r.h - 1 do

@@ -36,6 +36,7 @@ type t = {
   candle_fallback_404 : bool;
   selected_index : int;
   scroll_offset : int;
+  schedules_scroll_offset : int;
   filter_query : string;
   verification_view : [ `Pending | `All ];
   expanded_ids : String_set.t;
@@ -58,6 +59,7 @@ let empty =
     candle_fallback_404 = false;
     selected_index = 0;
     scroll_offset = 0;
+    schedules_scroll_offset = 0;
     filter_query = "";
     verification_view = `Pending;
     expanded_ids = String_set.empty;
@@ -87,7 +89,13 @@ let clamp_index len idx =
   else idx
 
 let set_tab active_tab t =
-  { t with active_tab; selected_index = 0; scroll_offset = 0 }
+  {
+    t with
+    active_tab;
+    selected_index = 0;
+    scroll_offset = 0;
+    schedules_scroll_offset = 0;
+  }
 
 let cycle_tab dir t =
   let next_tab =
@@ -314,6 +322,38 @@ let awaiting_confirmation_goals t =
           false)
     (goals t)
 
+let default_viewport_rows = 15
+
+let adjust_scroll ?(viewport_rows = default_viewport_rows) ~scroll selected =
+  let vr = max 1 viewport_rows in
+  if selected < scroll then selected
+  else if selected >= scroll + vr then max 0 (selected - vr + 1)
+  else scroll
+
+let task_is_active = function
+  | Wire_work.Claimed _ | Wire_work.InProgress _
+  | Wire_work.AwaitingVerification _ ->
+      true
+  | Wire_work.Todo | Wire_work.Done _ | Wire_work.Cancelled _ -> false
+
+let task_is_done = function
+  | Wire_work.Done _ -> true
+  | Wire_work.Todo
+  | Wire_work.Claimed _
+  | Wire_work.InProgress _
+  | Wire_work.AwaitingVerification _
+  | Wire_work.Cancelled _ ->
+      false
+
+let task_is_awaiting_verification = function
+  | Wire_work.AwaitingVerification _ -> true
+  | Wire_work.Todo
+  | Wire_work.Claimed _
+  | Wire_work.InProgress _
+  | Wire_work.Done _
+  | Wire_work.Cancelled _ ->
+      false
+
 let filtered_goals t =
   let q = String.trim t.filter_query in
   if String.equal q "" then goals t
@@ -326,18 +366,48 @@ let filtered_goals t =
       (goals t)
 
 let filtered_tasks t =
-  let q = String.trim t.filter_query in
-  if String.equal q "" then tasks t
+  let q_low = String.lowercase_ascii (String.trim t.filter_query) in
+  let all = tasks t in
+  if String.equal q_low "" then all
+  else if String.equal q_low "schedules" || String.equal q_low "sched" then []
+  else if String.equal q_low "active" then
+    List.filter (fun (tk : Wire_work.task) -> task_is_active tk.status) all
+  else if String.equal q_low "verify" then
+    List.filter
+      (fun (tk : Wire_work.task) -> task_is_awaiting_verification tk.status)
+      all
+  else if String.equal q_low "todo" then
+    List.filter
+      (fun (tk : Wire_work.task) ->
+        match tk.status with
+        | Wire_work.Todo -> true
+        | Wire_work.Claimed _
+        | Wire_work.InProgress _
+        | Wire_work.AwaitingVerification _
+        | Wire_work.Done _
+        | Wire_work.Cancelled _ ->
+            false)
+      all
+  else if String.equal q_low "unlinked" then
+    List.filter
+      (fun (tk : Wire_work.task) ->
+        match tk.goal_link with
+        | Wire_work.Unlinked -> true
+        | Wire_work.Linked _ -> false)
+      all
+  else if String.equal q_low "done" then
+    List.filter (fun (tk : Wire_work.task) -> task_is_done tk.status) all
   else
     List.filter
       (fun (task : Wire_work.task) ->
-        contains_ci ~needle:q task.title || contains_ci ~needle:q task.id)
-      (tasks t)
+        contains_ci ~needle:q_low task.title || contains_ci ~needle:q_low task.id)
+      all
 
-let active_list_len t =
+let active_list_len ?(pane_index = 0) t =
   match t.active_tab with
   | Nav.Work_pipeline ->
-      max (List.length (filtered_goals t)) (List.length (verifications_list t))
+      if Int.equal (pane_index mod 2) 1 then List.length (verifications_list t)
+      else List.length (filtered_goals t)
   | Nav.Work_tasks_schedules ->
       List.length (filtered_tasks t) + List.length (schedules_list t)
   | Nav.Work_inbox ->
@@ -375,17 +445,46 @@ let selected_open_ask t =
   let xs = open_asks t in
   if t.selected_index < 0 then None else List.nth_opt xs t.selected_index
 
-let move_selection ~delta t =
-  let len = active_list_len t in
+let move_selection ?pane_index ?viewport_rows ~delta t =
+  let len = active_list_len ?pane_index t in
   let selected_index = clamp_index len (t.selected_index + delta) in
-  let scroll_offset =
-    if selected_index < t.scroll_offset then selected_index
-    else t.scroll_offset
-  in
-  { t with selected_index; scroll_offset }
+  match t.active_tab with
+  | Nav.Work_tasks_schedules ->
+      let n_tasks = List.length (filtered_tasks t) in
+      if selected_index < n_tasks then
+        let scroll_offset =
+          adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
+        in
+        { t with selected_index; scroll_offset }
+      else
+        let sched_idx = selected_index - n_tasks in
+        let sched_vr =
+          if n_tasks = 0 then
+            Option.value ~default:default_viewport_rows viewport_rows
+          else
+            match viewport_rows with
+            | Some vr -> min 7 (max 2 vr)
+            | None -> 7
+        in
+        let schedules_scroll_offset =
+          adjust_scroll ~viewport_rows:sched_vr
+            ~scroll:t.schedules_scroll_offset sched_idx
+        in
+        { t with selected_index; schedules_scroll_offset }
+  | Nav.Work_pipeline | Nav.Work_inbox | Nav.Work_candle_scorecard ->
+      let scroll_offset =
+        adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
+      in
+      { t with selected_index; scroll_offset }
 
 let set_filter filter_query t =
-  { t with filter_query; selected_index = 0; scroll_offset = 0 }
+  {
+    t with
+    filter_query;
+    selected_index = 0;
+    scroll_offset = 0;
+    schedules_scroll_offset = 0;
+  }
 
 let toggle_verification_view t =
   let verification_view =

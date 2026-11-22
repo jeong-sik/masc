@@ -3364,6 +3364,216 @@ let test_p1_9_p1_10_quotas_max_window_buckets_and_human_cooldowns () =
         (contains_sub ~needle:"Cooldown" ~haystack:txt_exh_429))
     [ Say.Lang_ko; Say.Lang_en ]
 
+let find_left_rail_row ?(y_min = 0) ~x_max (grid : Cell_grid.t) =
+  let rail = Glyph.to_utf8 Glyph.Left_rail in
+  let found = ref None in
+  for y = y_min to Cell_grid.rows grid - 1 do
+    if Option.is_none !found then
+      for x = 0 to Int.min (Cell_grid.cols grid - 1) x_max do
+        if Option.is_none !found then
+          match (Cell_grid.get grid ~x ~y).glyph with
+          | Cell_grid.Utf8 s when String.equal s rail -> found := Some y
+          | Cell_grid.Empty | Cell_grid.Ascii _ | Cell_grid.Braille _
+          | Cell_grid.Utf8 _ | Cell_grid.Continuation ->
+              ()
+      done
+  done;
+  !found
+
+let assert_strictly_increasing ~label xs =
+  let rec check = function
+    | [] | [ _ ] -> ()
+    | a :: (b :: _ as rest) ->
+        Alcotest.(check bool)
+          (Printf.sprintf "%s strictly increasing (%d < %d)" label a b)
+          true (a < b);
+        check rest
+  in
+  check xs
+
+let test_nav_display_order_monotonic_screen_rows () =
+  let m0 = Model.initial ~cols:140 ~rows:44 ~lang:Say.Lang_en () in
+  let mk_keeper group name : Wire_fleet.keeper_summary =
+    {
+      name;
+      group = Some group;
+      company = group;
+      health = Wire_fleet.Keeper_healthy;
+      paused = false;
+      keepalive_running = true;
+      activation_mode = Wire_fleet.Activation_autonomous;
+      runtime_id = "rt-1";
+      model_id = Some "model-1";
+      current_task_id = None;
+      context_ratio = Observed.value ~observed_at:now_mono 0.30;
+      total_turns = Observed.value ~observed_at:now_mono 20;
+      total_tokens = Observed.value ~observed_at:now_mono 10_000;
+      cost_24h_usd = Observed.value ~observed_at:now_mono 1.0;
+      last_turn_at_unix = Some now_unix;
+      active_turn = None;
+      activity_sparkline_24h = [ 1.0; 2.0 ];
+    }
+  in
+  let ks =
+    [
+      mk_keeper "org-high" "high-1";
+      mk_keeper "org-high" "high-2";
+      mk_keeper "org-mid" "mid-1";
+      mk_keeper "org-mid" "mid-2";
+      mk_keeper "org-low" "low-1";
+    ]
+  in
+  let mk_eff keeper cost_usd : Wire_runtime.keeper_efficiency_row =
+    {
+      keeper;
+      turns = 10;
+      input_tokens = 10_000;
+      cache_read_tokens = Observed.value ~observed_at:now_mono 8_000;
+      cache_creation_tokens = Observed.value ~observed_at:now_mono 0;
+      output_tokens = 400;
+      cache_hit_pct = Observed.value ~observed_at:now_mono 80.0;
+      cost_usd;
+      calls = 20;
+      failed = 0;
+      deferred = 0;
+      tool_ms = 50.0;
+    }
+  in
+  let eff : Wire_runtime.efficiency_month =
+    {
+      month = "2026-11";
+      window_kind = Some Wire_runtime.Efficiency_month_mtd;
+      generated_at_unix = now_unix;
+      days_covered = 22;
+      keepers =
+        [
+          mk_eff "mid-2" 1.0;
+          mk_eff "high-1" 10.0;
+          mk_eff "low-1" 5.0;
+          mk_eff "mid-1" 8.0;
+          mk_eff "high-2" 2.0;
+        ];
+      fleet =
+        {
+          turns_total = 50;
+          calls_per_turn = 2.0;
+          tool_s_per_turn = 0.5;
+          output_tokens_per_turn = 40.0;
+          input_tokens_per_turn = 1000.0;
+          cost_usd_per_turn = 0.52;
+          fleet_cache_hit_pct = Observed.value ~observed_at:now_mono 80.0;
+        };
+      velocity = [];
+    }
+  in
+  let fleet = Fleet_store.apply_keepers ~observed_at:now_mono ks m0.fleet in
+  let rt0 =
+    m0.runtime
+    |> Runtime_store.sync_keeper_companies ks
+    |> Runtime_store.set_tab Nav.Runtime_efficiency_spend
+    |> Runtime_store.apply_efficiency ~observed_at:now_mono eff
+  in
+  let rec collect_rt_ys rt steps acc =
+    let g =
+      render_into ~cols:140 ~rows:44 (fun ~cache ~rect gr ->
+          Screen_runtime.render ~model:{ m0 with fleet; runtime = rt }
+            ~cache ~rect gr)
+    in
+    let y =
+      match find_left_rail_row ~x_max:10 g with
+      | Some y -> y
+      | None -> Alcotest.fail "Expected Left_rail selection on Runtime Efficiency"
+    in
+    if steps = 0 then List.rev (y :: acc)
+    else
+      collect_rt_ys
+        (Runtime_store.move_selection ~viewport_rows:20 ~delta:1 rt)
+        (steps - 1) (y :: acc)
+  in
+  let rt_ys = collect_rt_ys rt0 4 [] in
+  assert_strictly_increasing ~label:"Runtime Efficiency ▎ row y" rt_ys;
+
+  (* Knowledge Wiki clusters monotonic ▎ row y *)
+  let mk_wiki slug tags : Wire_knowledge.wiki_page_summary =
+    {
+      slug;
+      file = slug ^ ".md";
+      title = "Page " ^ slug;
+      summary = "Summary";
+      source = Wire_knowledge.Source_research;
+      author = "high-1";
+      created = "2026-11-01";
+      updated = "2026-11-22";
+      revision = 1;
+      tags;
+      backlink_count = 0;
+      outgoing_link_count = 0;
+      sources_count = 1;
+      hearsay_count = 0;
+      sha256 = "sha-" ^ slug;
+    }
+  in
+  let empty_lint : Wire_knowledge.wiki_index_lint =
+    {
+      total_findings = 0;
+      counts =
+        {
+          broken_link = 0;
+          unsupported_link = 0;
+          orphan = 0;
+          orphan_unconfirmed = 0;
+          missing_sources = 0;
+          hearsay_only = 0;
+          unreadable_page = 0;
+          revision_log_gap = 0;
+          revision_log_hole = 0;
+          duplicate_title_candidates = 0;
+        };
+      log_hole_suppressed = false;
+      orphans = [];
+      duplicate_title_candidates = [];
+      findings = [];
+    }
+  in
+  let kw0 =
+    Knowledge_store.empty
+    |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts
+    |> Knowledge_store.apply_wiki_index ~observed_at:now_mono
+         {
+           pages_total = 4;
+           pages_readable = 4;
+           pages_unreadable = 0;
+           pages =
+             [
+               mk_wiki "untagged-1" [];
+               mk_wiki "ops-1" [ "ops" ];
+               mk_wiki "arch-1" [ "arch" ];
+               mk_wiki "ops-2" [ "ops" ];
+             ];
+           unreadable_pages = [];
+           lint = empty_lint;
+         }
+  in
+  let rec collect_wiki_ys kw steps acc =
+    let g =
+      render_into ~cols:140 ~rows:44 (fun ~cache ~rect gr ->
+          Screen_knowledge.render ~model:{ m0 with knowledge = kw } ~cache ~rect
+            gr)
+    in
+    let y =
+      match find_left_rail_row ~y_min:3 ~x_max:10 g with
+      | Some y -> y
+      | None -> Alcotest.fail "Expected Left_rail selection on Knowledge Wiki"
+    in
+    if steps = 0 then List.rev (y :: acc)
+    else
+      collect_wiki_ys
+        (Knowledge_store.move_selection ~viewport_rows:20 ~delta:1 kw)
+        (steps - 1) (y :: acc)
+  in
+  let wiki_ys = collect_wiki_ys kw0 3 [] in
+  assert_strictly_increasing ~label:"Knowledge Wiki ▎ row y" wiki_ys
+
 let () =
   Alcotest.run "masc_tui_screens_domain"
     [
@@ -3424,5 +3634,8 @@ let () =
           Alcotest.test_case
             "P1-9/P1-10 Max-window saturated sub, reconciled buckets, overflow & human cooldowns"
             `Quick test_p1_9_p1_10_quotas_max_window_buckets_and_human_cooldowns;
+          Alcotest.test_case
+            "Nav display-order monotonic Left_rail row progression (Runtime Efficiency & Wiki)"
+            `Quick test_nav_display_order_monotonic_screen_rows;
         ] );
     ]

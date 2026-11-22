@@ -96,7 +96,7 @@ val set_pane : settings_pane -> t -> t
 val toggle_pane : t -> t
 val enter_inspector : t -> t
 val leave_inspector : t -> t
-val move_tree_selection : delta:int -> t -> t
+val move_tree_selection : ?viewport_rows:int -> delta:int -> t -> t
 val toggle_tree_node : t -> t
 val collapse_or_leave : t -> t
 val expand_or_enter : t -> t
@@ -174,5 +174,5 @@ val commit_edit_field : t -> (t, string) result
     {!Wire_config.field_kind} (never silently defaulting invalid ints, floats,
     bools, or enum choices) and stage the resulting {!Wire_config.patch_op}. *)
 
-val move_selection : delta:int -> t -> t
+val move_selection : ?viewport_rows:int -> delta:int -> t -> t
 val mark_stale_all : t -> t

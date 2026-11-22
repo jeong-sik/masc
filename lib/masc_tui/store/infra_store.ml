@@ -408,12 +408,19 @@ let active_list_len t =
       | None -> 0)
   | Nav.Infra_activity_logs -> List.length (visible_logs t)
 
-let move_selection ~delta t =
+let default_viewport_rows = 15
+
+let adjust_scroll ?(viewport_rows = default_viewport_rows) ~scroll selected =
+  let vr = max 1 viewport_rows in
+  if selected < scroll then selected
+  else if selected >= scroll + vr then max 0 (selected - vr + 1)
+  else scroll
+
+let move_selection ?viewport_rows ~delta t =
   let len = active_list_len t in
   let selected_index = clamp_index len (t.selected_index + delta) in
   let scroll_offset =
-    if selected_index < t.scroll_offset then selected_index
-    else t.scroll_offset
+    adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
   in
   { t with selected_index; scroll_offset }
 

@@ -95,10 +95,30 @@ let run_server ~sw ~runtime_sw ~env ~address ~port ~judged ~input_base_path ~on_
        44946173785, head 21a49d25, "the server went on booting with its port
        held"; the same case hung 600s at 3b90e7a). Arm the existing process
        deadline watchdog so a fatal error always exits nonzero even when
-       teardown stalls. *)
-    let (_ : Masc.Shutdown.watchdog) =
-      Masc.Shutdown.start_process_deadline_watchdog_or_exit ~timeout_s:10.0
-    in
+       teardown stalls.
+
+       A normal graceful shutdown must not arm it: failing the session switch
+       to end shutdown cancels in-flight fibers, and a cancellable finalizer
+       then surfaces [Fun.Finally_raised Cancelled] or an [Eio.Exn.Multiple]
+       of such members into this arm. [is_benign_termination] unwraps those
+       structures, so classifying the leaf [Cancelled] as benign — the same
+       leaf list [start]'s benign arm uses, minus [Graceful_shutdown], which
+       is raised after [Fiber.first] returns and never reaches this catch —
+       keeps the watchdog off the clean-shutdown path, whose teardown may
+       legitimately take longer than the deadline. The 30s deadline leaves
+       room for a legitimately slow fatal unwind while staying well inside
+       the 60s nonzero-exit window the bootstrap tests assert. *)
+    if not
+         (Masc.Shutdown.is_benign_termination
+            ~benign:(function
+              | Eio.Cancel.Cancelled _ -> true
+              | _ -> false)
+            exn)
+    then
+      let (_ : Masc.Shutdown.watchdog) =
+        Masc.Shutdown.start_process_deadline_watchdog_or_exit ~timeout_s:30.0
+      in
+      ();
     raise exn
 
 (** CLI options *)

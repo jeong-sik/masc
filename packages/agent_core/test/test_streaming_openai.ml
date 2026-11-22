@@ -2029,6 +2029,63 @@ let test_responses_stream_conflicting_reasoning_and_phase_fail_closed () =
        reasoning_events)
 ;;
 
+(* The three identity cases the replay guard must tell apart, pinned end to end
+   through [responses_sse_to_events] in this file too: an echo that lost its
+   id, a terminal array whose positions do not match the done frames'
+   [output_index], and two different ids landing on one index. *)
+let test_responses_stream_reasoning_identity_cases () =
+  let module Acc = Llm_provider.Complete_stream_acc in
+  let state () =
+    S.create_openai_stream_state ~provider:"openai_compat" ~model:"gpt-5.5" ()
+  in
+  let feed state acc evt_type data =
+    let events, _ = S.responses_sse_to_events state (Some evt_type) data in
+    List.iter (Acc.accumulate_event acc) events
+  in
+  let done_reasoning index id ciphertext =
+    Printf.sprintf
+      {|{"type":"response.output_item.done","output_index":%d,"item":{"id":"%s","type":"reasoning","encrypted_content":"%s","summary":[]}}|}
+      index id ciphertext
+  in
+  let has_redacted response =
+    List.exists
+      (function RedactedThinking _ -> true | _ -> false)
+      response.Llm_provider.Types.content
+  in
+  (* (a) an echo without the id is unknown identity, not a ciphertext conflict *)
+  (let state = state () and acc = Acc.create_stream_acc () in
+   feed state acc "response.output_item.done" (done_reasoning 0 "rs_a" "enc_a");
+   feed state acc "response.completed"
+     {|{"type":"response.completed","response":{"id":"resp_a","model":"gpt-5.5","status":"completed","output":[{"type":"reasoning","encrypted_content":"enc_b","summary":[]}]}}|};
+   match Acc.finalize_stream_acc acc with
+   | Error _ -> Alcotest.fail "an id-less echo failed the turn"
+   | Ok response ->
+     Alcotest.(check bool) "id-less echo keeps the done item" true
+       (has_redacted response));
+  (* (b) the terminal array only orders items; positions must not collide *)
+  (let state = state () and acc = Acc.create_stream_acc () in
+   feed state acc "response.output_item.done" (done_reasoning 1 "rs_1" "enc_a");
+   feed state acc "response.completed"
+     {|{"type":"response.completed","response":{"id":"resp_b","model":"gpt-5.5","status":"completed","output":[{"id":"msg_0","type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"checking"}]},{"id":"rs_1","type":"reasoning","encrypted_content":"enc_a","summary":[]}]}}|};
+   match Acc.finalize_stream_acc acc with
+   | Error _ -> Alcotest.fail "a shifted terminal position collided with the reasoning index"
+   | Ok response ->
+     Alcotest.(check bool) "the shifted echo keeps both items" true
+       (has_redacted response
+        && List.exists (function Text "checking" -> true | _ -> false) response.content));
+  (* (c) two different ids are two items: a refusal, with its own reason *)
+  (let state = state () and acc = Acc.create_stream_acc () in
+   feed state acc "response.output_item.done" (done_reasoning 0 "rs_a" "enc_a");
+   feed state acc "response.completed"
+     {|{"type":"response.completed","response":{"id":"resp_c","model":"gpt-5.5","status":"completed","output":[{"id":"rs_b","type":"reasoning","encrypted_content":"enc_b","summary":[]}]}}|};
+   match Acc.finalize_stream_acc acc with
+   | Error (Stream_parse_failed { reason; _ }) ->
+     Alcotest.(check string) "another item's id is an identity conflict" reason
+       "responses_replay:conflicting_output_item_identity"
+   | Error _ -> Alcotest.fail "the identity conflict lost its reason"
+   | Ok _ -> Alcotest.fail "an output index rebound to another identified item")
+;;
+
 let test_responses_stream_uncovered_content_fails_closed () =
   let module Acc = Llm_provider.Complete_stream_acc in
   let acc = Acc.create_stream_acc () in
@@ -2615,6 +2672,10 @@ let () =
             "conflicting reasoning and phase fail closed"
             `Quick
             test_responses_stream_conflicting_reasoning_and_phase_fail_closed
+        ; test_case
+            "reasoning identity cases (id-less echo, shifted index, distinct ids)"
+            `Quick
+            test_responses_stream_reasoning_identity_cases
         ; test_case
             "uncovered content fails closed"
             `Quick

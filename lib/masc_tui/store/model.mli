@@ -74,6 +74,7 @@ type modal_form_field = {
   label : Say.t;
   value : string;
   required : bool;
+  secret : bool;
 }
 
 type inline_modal_state = {

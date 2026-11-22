@@ -126,7 +126,11 @@ type post_request =
       previous_runtime_id : string option;
     }
   | Post_runtime_default_route of { runtime_id : string }
-  | Post_setup_account_key of { integration_id : string; key : string }
+  | Post_setup_account_key of {
+      integration_id : string;
+      key : string;
+      source_revision : string;
+    }
   | Post_setup_login_start of {
       integration_id : string;
       account_ref : string option;
@@ -284,7 +288,7 @@ let post_request_path = function
   | Post_fusion_launch { keeper; _ } -> Wire_runtime.fusion_launch_path ~keeper
   | Post_runtime_assignment _ -> Wire_runtime.runtime_assignment_path
   | Post_runtime_default_route _ -> Wire_runtime.runtime_routing_path
-  | Post_setup_account_key _ -> Wire_runtime.setup_accounts_key_path
+  | Post_setup_account_key _ -> Wire_runtime.setup_credential_path
   | Post_setup_login_start _ -> Wire_runtime.setup_accounts_login_path
   | Post_sandbox_probe _ -> Wire_infra.infra_sandboxes_probe_path
   | Post_config_patch _ -> Wire_config.config_patch_path
@@ -322,8 +326,9 @@ let post_request_body = function
         ~source_revision ~previous_runtime_id ()
   | Post_runtime_default_route { runtime_id } ->
       Wire_runtime.encode_runtime_default_route ~runtime_id
-  | Post_setup_account_key { integration_id; key } ->
-      Wire_runtime.encode_setup_account_key ~integration_id ~key
+  | Post_setup_account_key { integration_id; key; source_revision } ->
+      Wire_runtime.encode_setup_credential ~provider_id:integration_id
+        ~secret:key ~source_revision
   | Post_setup_login_start { integration_id; account_ref } ->
       Wire_runtime.encode_setup_account_login_start ~integration_id ?account_ref
         ()

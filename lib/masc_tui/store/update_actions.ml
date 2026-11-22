@@ -973,6 +973,7 @@ and execute_action ~now (m : Model.t) action =
                                 ~en:"Proposal title (#goals)";
                             value = "";
                             required = true;
+                            secret = false;
                           };
                           {
                             key = "proposal_measure";
@@ -981,6 +982,7 @@ and execute_action ~now (m : Model.t) action =
                                 ~en:"Success measure";
                             value = "";
                             required = true;
+                            secret = false;
                           };
                           {
                             key = "proposal_procedure";
@@ -989,6 +991,7 @@ and execute_action ~now (m : Model.t) action =
                                 ~en:"Verification procedure";
                             value = "";
                             required = false;
+                            secret = false;
                           };
                           {
                             key = "proposal_priority";
@@ -996,6 +999,7 @@ and execute_action ~now (m : Model.t) action =
                               Say.make ~ko:"우선순위 (1-5)" ~en:"Priority (1-5)";
                             value = "2";
                             required = false;
+                            secret = false;
                           };
                         ];
                       active_field = 0;

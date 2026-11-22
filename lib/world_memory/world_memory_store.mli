@@ -94,6 +94,14 @@ val read_change_log
   -> limit:int
   -> (change_event list * int, store_error) result
 
+(** Read the newest [limit] change-log events in ascending [seq] order together
+    with the current maximum [seq], using a read-only [BEGIN DEFERRED] WAL
+    snapshot off-domain. *)
+val read_change_log_tail
+  :  base_path:string
+  -> limit:int
+  -> (change_event list * int, store_error) result
+
 (** {1 Atomic Off-Domain Writes} *)
 
 val upsert_fact

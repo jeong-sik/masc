@@ -20,7 +20,7 @@ export type LoginEvent =
   /** The whole screen of a CLI that runs in a terminal; it replaces the one before. */
   | { event: 'screen'; text: string }
   | { event: 'input_ready' }
-  | { event: 'complete'; source: Source; authentication: Authentication }
+  | { event: 'complete'; source: Source; authentication: Authentication; keyringHost?: true }
   | { event: 'error'; login_id?: string; source?: Source }
 const path = '/api/v1/setup/accounts/login'
 const reference = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
@@ -66,9 +66,15 @@ export async function streamSetupLogin(source: Source, onEvent: (event: LoginEve
           && (reference(payload.account_ref) || (payload.account_ref === undefined && keyringHost(payload.account)))
           && authentication(payload.authentication) && payload.invocation_verified === false) {
           terminal = true
-          onEvent({ event, source: reference(payload.account_ref)
-            ? { integration_id: source.integration_id, account_ref: payload.account_ref }
-            : { integration_id: source.integration_id }, authentication: payload.authentication })
+          const hasRef = reference(payload.account_ref)
+          onEvent({
+            event,
+            source: hasRef
+              ? { integration_id: source.integration_id, account_ref: payload.account_ref as string }
+              : { integration_id: source.integration_id },
+            authentication: payload.authentication,
+            ...(!hasRef && keyringHost(payload.account) ? { keyringHost: true as const } : {}),
+          })
         } else if (event === 'error') {
           if (payload.account_ref !== undefined && (!reference(payload.account_ref) || payload.integration_id !== source.integration_id)) throw new Error('Invalid login account')
           if (payload.login_id !== undefined && (!reference(payload.login_id) || payload.integration_id !== source.integration_id)) throw new Error('Invalid login identity')

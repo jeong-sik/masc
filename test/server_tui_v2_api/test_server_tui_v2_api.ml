@@ -3080,14 +3080,35 @@ let test_memory_os_world_mvcc_and_keeper_internals () =
      with
      | Ok _ -> ()
      | Error e -> Alcotest.fail ("upsert private world fact: " ^ World_memory_store.error_to_string e));
+    (* Add a public->private edge and transition the private fact to terminal Molted;
+       neither the inactive private fact nor the edge's reason/target may leak! *)
+    let private_edge_secret = "PRIVATE_EDGE_SECRET_DO_NOT_LEAK" in
+    (match
+       World_memory_store.add_edge ~base_path ~now:(now -. 25.0) ~actor:"alpha"
+         ~from_fact_id:pub_id ~to_fact_id:priv_id
+         ~kind:World_memory_types.Refines ~reason:private_edge_secret
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail ("add_edge public->private: " ^ World_memory_store.error_to_string e));
+    let private_molt_reason = "PRIVATE_MOLT_REASON_SECRET" in
+    (match
+       World_memory_store.transition_fact_lifecycle ~base_path ~now:(now -. 20.0)
+         ~actor:"alpha" ~fact_id:priv_id ~to_lifecycle:World_memory_types.Molted
+         ~reason:private_molt_reason
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail ("transition private fact to Molted: " ^ World_memory_store.error_to_string e));
     let world_resp =
       Memory_api.world_json ~now ~config () |> ok_or_fail "GET /api/v1/memory/world (MVCC)"
     in
     let world_str = Yojson.Safe.to_string world_resp in
     Alcotest.(check bool) "world_json includes public world_memory.db fact" true
       (contains_substr ~needle:public_claim world_str);
-    Alcotest.(check bool) "world_json NEVER leaks private keeper-scoped fact" false
-      (contains_substr ~needle:private_claim world_str);
+    Alcotest.(check bool) "world_json NEVER leaks private fact, ID, edge reason, or molt reason" false
+      (contains_substr ~needle:private_claim world_str
+       || contains_substr ~needle:priv_id world_str
+       || contains_substr ~needle:private_edge_secret world_str
+       || contains_substr ~needle:private_molt_reason world_str);
     let world_data = json_member_exn "data" world_resp in
     Alcotest.(check string) "world_json source = world_memory_db" "world_memory_db"
       (json_string_exn "source" world_data);
@@ -3102,9 +3123,54 @@ let test_memory_os_world_mvcc_and_keeper_internals () =
     let world_diff_str = Yojson.Safe.to_string world_diff in
     Alcotest.(check bool) "world diff includes public fact_id" true
       (contains_substr ~needle:pub_id world_diff_str);
-    Alcotest.(check bool) "world diff NEVER leaks private fact" false
+    Alcotest.(check bool) "world diff NEVER leaks private fact, ID, edge reason, or molt reason" false
       (contains_substr ~needle:private_claim world_diff_str
-       || contains_substr ~needle:priv_id world_diff_str);
+       || contains_substr ~needle:priv_id world_diff_str
+       || contains_substr ~needle:private_edge_secret world_diff_str
+       || contains_substr ~needle:private_molt_reason world_diff_str);
+    (* 1b. >205 change-log rows: world_json returns newest tail (not frozen at seq 1..200)
+       and Range_revs with high from_rev returns recent rows instead of empty *)
+    for i = 1 to 210 do
+      let claim = Printf.sprintf "Bulk public architecture fact #%03d" i in
+      let fid = World_memory_types.fact_id_of_claim ~scope:"workspace" ~claim in
+      match
+        World_memory_store.upsert_fact ~base_path ~now:(now -. 10.0 +. (float_of_int i *. 0.01))
+          ~actor:"alpha" ~fact_id:fid ~claim ~category:Keeper_memory_os_types.Fact
+          ~facets:[ "bulk" ] ~scope:"workspace"
+          ~provenance:(Proposed_by { keeper_id = "alpha"; source_fact_ids = [] })
+          ~lifecycle:Canonical
+      with
+      | Ok _ -> ()
+      | Error e -> Alcotest.fail ("bulk upsert world fact: " ^ World_memory_store.error_to_string e)
+    done;
+    let world_tail_resp =
+      Memory_api.world_json ~now ~config () |> ok_or_fail "GET /api/v1/memory/world (tail > 200)"
+    in
+    let world_tail_str = Yojson.Safe.to_string world_tail_resp in
+    Alcotest.(check bool) "world_json >200 events still never leaks private data" false
+      (contains_substr ~needle:priv_id world_tail_str
+       || contains_substr ~needle:private_edge_secret world_tail_str);
+    let world_tail_data = json_member_exn "data" world_tail_resp in
+    let log_report = json_member_exn "recent_batches" world_tail_data in
+    let last_committed_seq = json_int_exn "last_committed_seq" log_report in
+    Alcotest.(check bool) "world_json recent_batches.last_committed_seq > 210" true
+      (last_committed_seq > 210);
+    let recent_changes = json_list_exn "recent_changes" log_report in
+    Alcotest.(check bool) "world_json recent_changes surfaces newest last_committed_seq tail" true
+      (List.exists (fun ev -> json_int_exn "seq" ev = last_committed_seq) recent_changes);
+    let high_rev_diff =
+      Memory_api.diff_json ~now ~config ~scope:Scope_world
+        ~range:(Range_revs { from_rev = 205; to_rev = None }) ()
+      |> ok_or_fail "GET /api/v1/memory/diff?scope=world&from_rev=205"
+    in
+    let high_rev_added =
+      high_rev_diff |> json_member_exn "data" |> json_list_exn "added"
+    in
+    Alcotest.(check bool) "world diff Range_revs from_rev=205 returns recent rows" true
+      (List.length high_rev_added >= 5);
+    Alcotest.(check bool) "world diff Range_revs never leaks private data" false
+      (let s = Yojson.Safe.to_string high_rev_diff in
+       contains_substr ~needle:priv_id s || contains_substr ~needle:private_edge_secret s);
     (* 2. Per-keeper Memory OS Internals (compaction + canonical turns + digest + librarian molt) *)
     let turn_id = Ids.Turn_id.of_string "turn-001" in
     let anchor : Keeper_compaction.compaction_anchor =
@@ -3234,6 +3300,14 @@ tools-support = true
 streaming = true
 
 [claude."claude-sonnet-5"]
+
+[models."claude-sonnet-4.5"]
+api-name = "claude-sonnet-4-5"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[claude."claude-sonnet-4.5"]
 |};
     let keeper_toml_path = Filename.concat base_path ".masc/config/keepers/alpha.toml" in
     let keeper_orig =
@@ -3245,6 +3319,7 @@ streaming = true
       |> ok_or_fail "GET runtime schema optional descriptors"
       |> json_member_exn "data"
     in
+    let rt_sha = json_string_exn "file_sha256" rt_data in
     let rt_fields =
       json_list_exn "categories" rt_data
       |> List.concat_map (fun c -> json_list_exn "fields" c)
@@ -3261,6 +3336,8 @@ streaming = true
       ; "models.claude-sonnet-5.efforts"
       ; "claude.claude-sonnet-5.cache-retention"
       ; "claude.claude-sonnet-5.efforts"
+      ; "models.\"claude-sonnet-4.5\".efforts"
+      ; "claude.\"claude-sonnet-4.5\".cache-retention"
       ];
     let cache_ret_field =
       List.find
@@ -3268,6 +3345,55 @@ streaming = true
         rt_fields
     in
     Alcotest.(check string) "cache-retention is enum" "enum" (json_string_exn "type" cache_ret_field);
+    (* Patch dotted/quoted model & binding tables directly through /api/v1/config/patch *)
+    let dotted_patch_body ~dry_run =
+      Yojson.Safe.to_string
+        (`Assoc
+          [ "target", `String "runtime"
+          ; "expected_sha256", `String rt_sha
+          ; "dry_run", `Bool dry_run
+          ; ( "changes"
+            , `List
+                [ `Assoc
+                    [ "table", `String "models.\"claude-sonnet-4.5\""
+                    ; "key", `String "efforts"
+                    ; "value", `List [ `String "low"; `String "high" ]
+                    ]
+                ; `Assoc
+                    [ "table", `String "claude.\"claude-sonnet-4.5\""
+                    ; "key", `String "efforts"
+                    ; "value", `List [ `String "low"; `String "high" ]
+                    ]
+                ; `Assoc
+                    [ "table", `String "claude.\"claude-sonnet-4.5\""
+                    ; "key", `String "cache-retention"
+                    ; "value", `String "1h"
+                    ]
+                ] )
+          ])
+    in
+    ignore
+      (Candle_cfg_api.config_patch_json ~config ~actor:"tester"
+         ~body_str:(dotted_patch_body ~dry_run:true) ()
+       |> ok_or_fail "POST dry_run dotted model table patch");
+    ignore
+      (Candle_cfg_api.config_patch_json ~config ~actor:"tester"
+         ~body_str:(dotted_patch_body ~dry_run:false) ()
+       |> ok_or_fail "POST commit dotted model table patch");
+    let patched_dotted_rt = read_file_raw runtime_toml_path in
+    (match Runtime_toml.parse_string patched_dotted_rt with
+     | Ok cfg ->
+       Alcotest.(check bool) "dotted table patch expanded claude-sonnet-4.5-high binding" true
+         (List.exists
+            (fun (b : Runtime_schema.binding) ->
+               b.provider_id = "claude" && b.model_id = "claude-sonnet-4.5-high")
+            cfg.bindings)
+     | Error errs ->
+       Alcotest.fail
+         (Printf.sprintf "dotted table patched runtime.toml parse failed (%d errors)\n%s"
+            (List.length errs) patched_dotted_rt));
+    Alcotest.(check bool) "dotted binding patch wrote cache-retention" true
+      (contains_substr ~needle:"cache-retention = \"1h\"" patched_dotted_rt);
     let k_data =
       Candle_cfg_api.config_schema_json ~base_path ~target:(Target_keeper "alpha") ()
       |> ok_or_fail "GET keeper:alpha schema"
@@ -3288,6 +3414,32 @@ streaming = true
       |> List.map (function `String s -> s | _ -> "")
     in
     Alcotest.(check bool) "enum_values includes lane primary" true (List.mem "primary" enum_vals);
+    (* Dual-file failure must NEVER partially mutate alpha.toml *)
+    let bad_dual_body =
+      Yojson.Safe.to_string
+        (`Assoc
+          [ "target", `String "keeper:alpha"
+          ; "expected_sha256", `String k_sha
+          ; "dry_run", `Bool false
+          ; ( "changes"
+            , `List
+                [ `Assoc
+                    [ "table", `String "keeper"
+                    ; "key", `String "instructions"
+                    ; "value", `String "MUST_NOT_BE_WRITTEN"
+                    ]
+                ; `Assoc
+                    [ "key", `String "runtime.assignments.runtime"
+                    ; "value", `String "nonexistent-lane-xyz"
+                    ]
+                ] )
+          ])
+    in
+    (match Candle_cfg_api.config_patch_json ~config ~actor:"tester" ~body_str:bad_dual_body () with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "invalid runtime.assignments.runtime must fail");
+    Alcotest.(check string) "failed dual-file patch leaves alpha.toml untouched" keeper_orig
+      (read_file_raw keeper_toml_path);
     let patch_body ~dry_run =
       Yojson.Safe.to_string
         (`Assoc

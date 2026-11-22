@@ -132,7 +132,11 @@ type post_request =
       previous_runtime_id : string option;
     }
   | Post_runtime_default_route of { runtime_id : string }
-  | Post_setup_account_key of { integration_id : string; key : string }
+  | Post_setup_account_key of {
+      integration_id : string;
+      key : string;
+      source_revision : string;
+    }
   | Post_setup_login_start of {
       integration_id : string;
       account_ref : string option;

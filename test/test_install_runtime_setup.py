@@ -2467,5 +2467,71 @@ class WorkspaceChildEnvironment(unittest.TestCase):
             SETUP.render(dual_creds)
 
 
+class AcpAndGeminiWizardFlows(unittest.TestCase):
+    def test_protocol_choices_include_messages_http_gemini_and_acp(self):
+        self.assertEqual(SETUP.PROTOCOL_CHOICES['messages-http'], 'messages')
+        self.assertEqual(SETUP.PROTOCOL_CHOICES['gemini-http'], 'gemini')
+        self.assertEqual(SETUP.PROTOCOL_CHOICES['vertex-gemini'], 'vertex_gemini')
+        self.assertEqual(SETUP.choice_for_protocol('acp', 'vibe_acp', 'vibe-acp'), 'mistral_vibe')
+        self.assertEqual(SETUP.choice_for_protocol('acp', 'kimi_acp', 'kimi'), 'kimi_acp')
+        self.assertEqual(SETUP.choice_for_protocol('acp', 'antigravity_acp', 'agy'), 'antigravity_acp')
+
+    def test_acp_prepare_connection_skips_native_account_selection(self):
+        for choice, cmd in [
+            ('mistral_vibe', 'vibe-acp'),
+            ('kimi_acp', 'kimi'),
+            ('antigravity_acp', 'agy'),
+        ]:
+            with self.subTest(choice=choice):
+                source = dict(
+                    choice=choice,
+                    provider_id=choice,
+                    command=cmd,
+                    account_home='/stale/should-be-cleared',
+                )
+                creds = SETUP.PendingCredentials('/fixture/masc')
+                with patch.object(
+                    SETUP, 'official_client_path', return_value='/usr/local/bin/' + cmd
+                ), patch.object(
+                    SETUP,
+                    'select_native_account',
+                    side_effect=AssertionError('ACP must not call select_native_account'),
+                ):
+                    prepared = SETUP.prepare_connection('/fixture/masc', source, creds)
+                self.assertNotIn('account_home', prepared)
+
+    def test_acp_and_gemini_source_models_never_call_native_discover_models(self):
+        for choice in ('mistral_vibe', 'kimi_acp', 'antigravity_acp'):
+            with self.subTest(choice=choice):
+                source = dict(choice=choice, provider_id=choice, rows=[])
+                with patch.object(
+                    SETUP,
+                    'native_discover_models',
+                    side_effect=AssertionError('ACP must not call native_discover_models'),
+                ):
+                    rows, origin = SETUP.source_models('/fixture/masc', source, 10)
+                self.assertGreater(len(rows), 0)
+                self.assertIn('ACP model catalog', origin)
+        for choice, provider_id in [
+            ('gemini', 'gemini'),
+            ('vertex_gemini', 'vertex_gemini'),
+        ]:
+            with self.subTest(choice=choice):
+                source = dict(choice=choice, provider_id=provider_id, rows=[])
+                fake_rows = [dict(id='gemini-2.5-pro', label='Gemini 2.5 Pro', max_context=1048576)]
+                with patch.object(
+                    SETUP,
+                    'native_discover_models',
+                    side_effect=AssertionError('Gemini must not call native_discover_models'),
+                ), patch.object(
+                    SETUP, 'provider_catalog_models', return_value=fake_rows
+                ) as catalog_call:
+                    rows, origin = SETUP.source_models('/fixture/masc', source, 10)
+                self.assertEqual([r['id'] for r in rows], ['gemini-2.5-pro'])
+                self.assertEqual(rows[0]['context'], 1048576)
+                self.assertIn('catalog', origin)
+                catalog_call.assert_called_once_with('/fixture/masc', provider_id)
+
+
 if __name__ == '__main__':
     unittest.main()

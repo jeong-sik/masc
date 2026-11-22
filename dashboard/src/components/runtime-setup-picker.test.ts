@@ -382,7 +382,7 @@ it('supports ACP integrations (Mistral Vibe / Kimi ACP) without account_select a
   const cli = { ...inventory, integrations: [{ id: 'vibe_acp', display_name: 'Mistral Vibe', protocol: 'acp', command: 'vibe-acp', setup_support: 'new_connection' }] }
   render(html`<${RuntimeSetupPicker} inventory=${cli} onSaved=${vi.fn()} />`)
   fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'vibe_acp' } })
-  fireEvent.click(screen.getByText('모델 목록 확인'))
+  fireEvent.click(screen.getByText('ACP 모델 목록 확인'))
   await screen.findByLabelText(/Devstral 2/)
   expect(post).not.toHaveBeenCalledWith('/api/v1/setup/accounts/select', expect.anything())
   expect((screen.getByLabelText(/Unknown/) as HTMLInputElement).disabled).toBe(true)

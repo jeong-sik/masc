@@ -5374,7 +5374,7 @@ let test_tui_memory_os_internals_fetch_and_runtime_assignment_setup_cmds () =
              true
          | _ -> false)
        (Cmd.flatten assign_cmds));
-  (* [K] API key modal *)
+  (* [K] API key modal: secret field masked + submits to /api/v1/setup/credential with source_revision *)
   let m_key_modal, _ =
     Update.step ~now:t0 m_raw (Msg.Key_event (key (Keymap.Input.Char "K")))
   in
@@ -5382,6 +5382,12 @@ let test_tui_memory_os_internals_fetch_and_runtime_assignment_setup_cmds () =
     match m_key_modal.inline_modal with
     | None -> Alcotest.fail "key inline_modal missing"
     | Some st ->
+        let secret_field =
+          List.find (fun (f : Model.modal_form_field) -> String.equal f.key "setup_key_secret")
+            st.fields
+        in
+        Alcotest.(check bool) "setup_key_secret marked secret=true for masking" true
+          secret_field.secret;
         let fields =
           List.map
             (fun (f : Model.modal_form_field) ->
@@ -5397,19 +5403,56 @@ let test_tui_memory_os_internals_fetch_and_runtime_assignment_setup_cmds () =
   let _, key_cmds =
     Update.step ~now:t0 m_key_filled (Msg.Key_event (key Keymap.Input.Enter))
   in
-  Alcotest.(check bool) "Submitting [k] modal emits Post_setup_account_key" true
+  let expected_key_req =
+    Cmd.Post_setup_account_key
+      {
+        integration_id = "gemini";
+        key = "test-api-key-value";
+        source_revision = "rev-cas-42";
+      }
+  in
+  Alcotest.(check bool) "Submitting [K] modal emits Post_setup_account_key with source_revision" true
     (List.exists
        (function
-         | Cmd.Http_post
-             {
-               req =
-                 Cmd.Post_setup_account_key
-                   { integration_id = "gemini"; key = "test-api-key-value" };
-               _;
-             } ->
-             true
+         | Cmd.Http_post { req; _ } when req = expected_key_req -> true
          | _ -> false)
        (Cmd.flatten key_cmds));
+  Alcotest.(check string) "Post_setup_account_key targets operator /api/v1/setup/credential"
+    "/api/v1/setup/credential" (Cmd.post_request_path expected_key_req);
+  Alcotest.(check string) "Post_setup_account_key encodes exact 3-field operator payload"
+    {|{"provider_id":"gemini","secret":"test-api-key-value","source_revision":"rev-cas-42"}|}
+    (Yojson.Safe.to_string (Cmd.post_request_body expected_key_req));
+  (* Without loaded runtime_config_raw, [K] blocks submission with modal error instead of posting *)
+  let m_key_no_rev =
+    {
+      m_key_filled with
+      runtime = { m_key_filled.runtime with runtime_config_raw = Observed.unreported };
+    }
+  in
+  let m_key_blocked, blocked_cmds =
+    Update.step ~now:t0 m_key_no_rev (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check int) "Missing source_revision emits zero HTTP commands" 0
+    (List.length (Cmd.flatten blocked_cmds));
+  Alcotest.(check bool) "Missing source_revision keeps inline modal open with error" true
+    (match m_key_blocked.inline_modal with
+     | Some st -> Option.is_some st.error
+     | None -> false);
+  let _, key_ok_cmds =
+    Update.step ~now:t0 m_raw
+      (Msg.Http_reply
+         {
+           epoch = m_raw.epoch;
+           reply = Msg.Reply_setup_account_key { integration_id = "gemini"; result = Ok () };
+         })
+  in
+  Alcotest.(check bool) "Successful [K] reply refetches runtime_config_raw for fresh CAS revision"
+    true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_runtime_config_raw; _ } -> true
+         | _ -> false)
+       (Cmd.flatten key_ok_cmds));
   (* [l] Login start modal + Reply_setup_login_receipt + [L] poll *)
   let m_login_modal, _ =
     Update.step ~now:t0 m_raw (Msg.Key_event (key (Keymap.Input.Char "l")))

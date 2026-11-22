@@ -9,7 +9,7 @@ let runtime_config_raw_path = "/api/v1/runtime/config/raw"
 let runtime_assignment_path = "/api/v1/runtime/config/assignment"
 let runtime_routing_path = "/api/v1/runtime/config/routing"
 let setup_inventory_path = "/api/v1/setup/inventory"
-let setup_accounts_key_path = "/api/v1/setup/accounts/key"
+let setup_credential_path = "/api/v1/setup/credential"
 let setup_accounts_login_path = "/api/v1/setup/accounts/login"
 
 let setup_accounts_login_status_path ~login_id =
@@ -2143,8 +2143,13 @@ let decode_setup_login_receipt json =
   in
   Ok { login_id; integration_id; status; account; account_ref; authentication }
 
-let encode_setup_account_key ~integration_id ~key =
-  `Assoc [ ("integration_id", `String integration_id); ("key", `String key) ]
+let encode_setup_credential ~provider_id ~secret ~source_revision =
+  `Assoc
+    [
+      ("provider_id", `String provider_id);
+      ("secret", `String secret);
+      ("source_revision", `String source_revision);
+    ]
 
 let encode_setup_account_login_start ~integration_id ?account_ref () =
   `Assoc

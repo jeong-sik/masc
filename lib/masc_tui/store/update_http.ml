@@ -790,6 +790,7 @@ let apply_http_reply ~now (m : Model.t) reply =
       , [
           Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_setup_inventory };
           Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_resolved };
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_config_raw };
         ] )
   | Msg.Reply_setup_account_key { integration_id; result = Error err } ->
       let next, cmds =

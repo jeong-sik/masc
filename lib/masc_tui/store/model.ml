@@ -68,6 +68,7 @@ type modal_form_field = {
   label : Say.t;
   value : string;
   required : bool;
+  secret : bool;
 }
 
 type inline_modal_state = {
@@ -336,6 +337,7 @@ let inline_modal_for kind =
             label = Say.make ~ko:"임시 질문 (/btw)" ~en:"Side query (/btw)";
             value = "";
             required = true;
+            secret = false;
           };
         ]
     | Nav.Gate_reject _ ->
@@ -345,6 +347,7 @@ let inline_modal_for kind =
             label = Say.make ~ko:"거절 사유" ~en:"Rejection reason";
             value = "";
             required = true;
+            secret = false;
           };
         ]
     | Nav.Verification_reject _ ->
@@ -354,12 +357,14 @@ let inline_modal_for kind =
             label = Say.make ~ko:"검증 거절 사유" ~en:"Verification rejection reason";
             value = "";
             required = true;
+            secret = false;
           };
           {
             key = "notes";
             label = Say.make ~ko:"추가 메모" ~en:"Notes";
             value = "";
             required = false;
+            secret = false;
           };
         ]
     | Nav.Harness_overrule _ ->
@@ -369,6 +374,7 @@ let inline_modal_for kind =
             label = Say.make ~ko:"판정 재정의 사유" ~en:"Overrule reason";
             value = "";
             required = true;
+            secret = false;
           };
         ]
     | Nav.Task_cancel _ ->
@@ -378,6 +384,7 @@ let inline_modal_for kind =
             label = Say.make ~ko:"취소 사유" ~en:"Cancellation reason";
             value = "";
             required = false;
+            secret = false;
           };
         ]
     | Nav.Schedule_form ->
@@ -387,18 +394,21 @@ let inline_modal_for kind =
             label = Say.make ~ko:"대상 키퍼" ~en:"Target keeper";
             value = "";
             required = true;
+            secret = false;
           };
           {
             key = "recurrence";
             label = Say.make ~ko:"반복 주기" ~en:"Recurrence";
             value = "every 1h";
             required = true;
+            secret = false;
           };
           {
             key = "prompt";
             label = Say.make ~ko:"실행 지시" ~en:"Prompt";
             value = "";
             required = true;
+            secret = false;
           };
         ]
     | Nav.Connector_form ->
@@ -408,12 +418,14 @@ let inline_modal_for kind =
             label = Say.make ~ko:"커넥터 종류" ~en:"Connector kind";
             value = "";
             required = true;
+            secret = false;
           };
           {
             key = "channel";
             label = Say.make ~ko:"채널" ~en:"Channel";
             value = "";
             required = true;
+            secret = false;
           };
         ]
     | Nav.Repo_add_form ->
@@ -423,12 +435,14 @@ let inline_modal_for kind =
             label = Say.make ~ko:"저장소 URL" ~en:"Repository URL";
             value = "";
             required = true;
+            secret = false;
           };
           {
             key = "branch";
             label = Say.make ~ko:"기본 브랜치" ~en:"Default branch";
             value = "main";
             required = false;
+            secret = false;
           };
         ]
     | Nav.Board_new_post ->
@@ -438,18 +452,21 @@ let inline_modal_for kind =
             label = Say.make ~ko:"제목" ~en:"Title";
             value = "";
             required = true;
+            secret = false;
           };
           {
             key = "hearth";
             label = Say.make ~ko:"서브보드" ~en:"Sub-board";
             value = "";
             required = false;
+            secret = false;
           };
           {
             key = "body";
             label = Say.make ~ko:"내용" ~en:"Body";
             value = "";
             required = true;
+            secret = false;
           };
         ]
   in

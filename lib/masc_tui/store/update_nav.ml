@@ -1313,7 +1313,7 @@ let submit_inline_modal ~now (m : Model.t) =
                             };
                       };
                   ] ))
-          | Form_setup_account_key ->
+          | Form_setup_account_key -> (
               let integration_id =
                 String.trim
                   (Model.modal_field_value ~key:"setup_key_integration" modal)
@@ -1321,19 +1321,30 @@ let submit_inline_modal ~now (m : Model.t) =
               let key =
                 String.trim (Model.modal_field_value ~key:"setup_key_secret" modal)
               in
-              ( close_with_inflight_toast
-                  ~msg:
-                    (Say.make
-                       ~ko:("API 키 등록 요청 중: " ^ integration_id)
-                       ~en:("Registering API key for " ^ integration_id))
-                  m
-              , [
-                  Cmd.Http_post
-                    {
-                      epoch = m.epoch;
-                      req = Cmd.Post_setup_account_key { integration_id; key };
-                    };
-                ] )
+              match Observed.to_option m.runtime.runtime_config_raw with
+              | None ->
+                  set_modal_error
+                    "Runtime config revision not loaded yet — press [r] to refresh"
+              | Some meta ->
+                  ( close_with_inflight_toast
+                      ~msg:
+                        (Say.make
+                           ~ko:("API 키 등록 요청 중: " ^ integration_id)
+                           ~en:("Registering API key for " ^ integration_id))
+                      m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_setup_account_key
+                              {
+                                integration_id;
+                                key;
+                                source_revision = meta.source_revision;
+                              };
+                        };
+                    ] ))
           | Form_setup_login_start ->
               let integration_id =
                 String.trim

@@ -2546,7 +2546,7 @@ let test_tui_memory_os_and_runtime_setup_codecs () =
         },
         "librarian_molt": {
           "writer_kind": "writer", "writer_state": "idle",
-          "pending_molt_kind": "structural",
+          "pending_molt": { "kind": "structural", "epoch_id": 2 },
           "pending_molt_categories": ["fact", "lesson"],
           "available_acts": ["resume"]
         }
@@ -2559,6 +2559,8 @@ let test_tui_memory_os_and_runtime_setup_codecs () =
   Alcotest.(check (option string)) "canonical runtime_kind" (Some "acp_cli")
     mi.canonical_turns.latest_runtime_kind;
   Alcotest.(check (option int)) "digest revision" (Some 7) mi.memory_digest.revision;
+  Alcotest.(check (option string)) "pending molt kind" (Some "structural")
+    mi.librarian_molt.pending_molt_kind;
   Alcotest.(check (list string)) "pending molt categories" [ "fact"; "lesson" ]
     mi.librarian_molt.pending_molt_categories;
   (* 3. Wire_runtime provider_id + declared_reasoning_effort + @effort label *)

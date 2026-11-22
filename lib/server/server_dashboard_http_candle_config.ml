@@ -2461,13 +2461,45 @@ let is_valid_toml_bare_segment (s : string) : bool =
     !ok)
 ;;
 
+let is_valid_toml_quoted_segment (s : string) : bool =
+  let len = String.length s in
+  if len < 3
+  then false
+  else (
+    let q = s.[0] in
+    if (q <> '"' && q <> '\'') || s.[len - 1] <> q
+    then false
+    else (
+      let inner = String.sub s 1 (len - 2) in
+      let ok = ref (String.length inner > 0) in
+      let escaped = ref false in
+      for i = 0 to String.length inner - 1 do
+        let c = inner.[i] in
+        if !escaped
+        then escaped := false
+        else if q = '"' && c = '\\'
+        then escaped := true
+        else if c = q || Char.code c < 0x20 || Char.code c = 0x7f
+        then ok := false
+      done;
+      !ok && not !escaped))
+;;
+
+let is_valid_toml_table_segment (s : string) : bool =
+  is_valid_toml_bare_segment s || is_valid_toml_quoted_segment s
+;;
+
 let is_valid_table_path (table : string) : bool =
   if String.equal table ""
   then true
-  else
-    table
-    |> String.split_on_char '.'
-    |> List.for_all is_valid_toml_bare_segment
+  else (
+    let segs = split_dotted_key_segments table in
+    segs <> []
+    && List.for_all is_valid_toml_table_segment segs
+    &&
+    match Otoml.Parser.from_string_result ("[" ^ table ^ "]") with
+    | Ok _ -> true
+    | Error _ -> false)
 ;;
 
 let parse_patch_op idx = function
@@ -2501,7 +2533,7 @@ let parse_patch_op idx = function
       Error
         ( Printf.sprintf "changes[%d].table" idx
         , Printf.sprintf
-            "invalid TOML table path %S; only dot-separated [A-Za-z0-9_-] segments are allowed"
+            "invalid TOML table path %S; expected dot-separated bare [A-Za-z0-9_-] or quoted TOML segments"
             table )
     else if not (is_valid_toml_bare_segment key)
     then
@@ -2912,6 +2944,7 @@ let config_patch_json ?(now = Time_compat.now ()) ~config ~actor ~body_str () =
                        | exception Sys_error msg ->
                          Error ("runtime.toml read failed: " ^ msg)
                        | rt_before ->
+                         let rt_before_sha = Env.sha256_hex rt_before in
                          let rt_after =
                            Toml_line_editor.edit_table_scalar
                              rt_before
@@ -2939,6 +2972,7 @@ let config_patch_json ?(now = Time_compat.now ()) ~config ~actor ~body_str () =
                               ( runtime_path
                               , keeper_name
                               , assign_val
+                              , rt_before_sha
                               , rt_changed
                               , rt_diff
                               , rt_hunks )))
@@ -2968,7 +3002,7 @@ let config_patch_json ?(now = Time_compat.now ()) ~config ~actor ~body_str () =
                    let rt_changed, rt_diff, rt_hunks =
                      match runtime_assign_preview with
                      | None -> false, "", []
-                     | Some (_, _, _, c, d, h) -> c, d, h
+                     | Some (_, _, _, _, c, d, h) -> c, d, h
                    in
                    let changed = file_changed || rt_changed in
                    let file_diff, file_hunks =
@@ -3070,8 +3104,11 @@ let config_patch_json ?(now = Time_compat.now ()) ~config ~actor ~body_str () =
                                      ("runtime config commit failed: "
                                       ^ Fs_compat.atomic_replace_failure_to_string failure))
                               | Target_keeper _ | Target_keeper_create ->
-                                let keeper_write =
-                                  if file_ops = [] && target <> Target_keeper_create
+                                let should_write_keeper =
+                                  file_ops <> [] || target = Target_keeper_create
+                                in
+                                let write_keeper () =
+                                  if not should_write_keeper
                                   then Ok ()
                                   else (
                                     match Fs_compat.save_file_atomic target_path after_text with
@@ -3083,34 +3120,84 @@ let config_patch_json ?(now = Time_compat.now ()) ~config ~actor ~body_str () =
                                       Keeper_types_profile.invalidate_keeper_profile_snapshots ();
                                       Ok ())
                                 in
-                                (match keeper_write with
-                                 | Error _ as err -> err
-                                 | Ok () ->
-                                   (match runtime_assign_preview with
-                                    | None -> Ok ()
-                                    | Some (runtime_path, keeper_name, assign_val, _, _, _) ->
-                                      let assign_res =
-                                        match assign_val with
-                                        | Some runtime_id ->
-                                          Runtime.set_runtime_id_for_keeper
-                                            ~runtime_config_path:runtime_path
-                                            ~keeper_name
-                                            ~runtime_id
-                                            ()
-                                        | None ->
-                                          Runtime.clear_runtime_id_for_keeper
-                                            ~runtime_config_path:runtime_path
-                                            ~keeper_name
-                                            ()
-                                      in
-                                      (match assign_res with
-                                       | Ok _ ->
-                                         Workspace_dataset_event.announce
-                                           ~base_path
-                                           Workspace_dataset_event.Runtime_config;
-                                         Ok ()
-                                       | Error msg ->
-                                         error_result Env.Validation_failed msg)))
+                                let rollback_keeper () =
+                                  if should_write_keeper
+                                  then (
+                                    (if target = Target_keeper_create && not exists
+                                     then (
+                                       try Unix.unlink target_path with
+                                       | Unix.Unix_error _ -> ())
+                                     else ignore (Fs_compat.save_file_atomic target_path disk_preimage));
+                                    Keeper_types_profile.invalidate_keeper_profile_snapshots ())
+                                in
+                                (match runtime_assign_preview with
+                                 | None -> write_keeper ()
+                                 | Some (runtime_path, keeper_name, assign_val, rt_before_sha, _, _, _) ->
+                                   (match
+                                      Runtime.with_config_lock
+                                        ~runtime_config_path:runtime_path
+                                        (fun () ->
+                                           let res =
+                                             match Fs_compat.load_file runtime_path with
+                                             | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+                                             | exception Sys_error msg ->
+                                               error_result
+                                                 Env.Store_unavailable
+                                                 ("runtime.toml read failed: " ^ msg)
+                                             | cur_rt ->
+                                               let cur_rt_sha = Env.sha256_hex cur_rt in
+                                               if not (String.equal cur_rt_sha rt_before_sha)
+                                               then
+                                                 Error
+                                                   ( `Conflict
+                                                   , `Assoc
+                                                       [ ( "error"
+                                                         , `Assoc
+                                                             [ "code", `String "conflict_cas"
+                                                             ; ( "message"
+                                                               , `String
+                                                                   "runtime.toml changed concurrently during keeper assignment patch; reload and retry" )
+                                                             ] )
+                                                       ; "current_runtime_sha256", `String cur_rt_sha
+                                                       ] )
+                                               else (
+                                                 let rt_after =
+                                                   Toml_line_editor.edit_table_scalar
+                                                     cur_rt
+                                                     ~path:"runtime.assignments"
+                                                     ~key:keeper_name
+                                                     ~value:assign_val
+                                                 in
+                                                 match write_keeper () with
+                                                 | Error _ as err -> err
+                                                 | Ok () ->
+                                                   (match
+                                                      Runtime.commit_config_text_locked
+                                                        ~runtime_config_path:runtime_path
+                                                        rt_after
+                                                    with
+                                                    | Ok _ ->
+                                                      Workspace_dataset_event.announce
+                                                        ~base_path
+                                                        Workspace_dataset_event.Runtime_config;
+                                                      Ok ()
+                                                    | Error (Runtime.Config_commit_refused detail) ->
+                                                      rollback_keeper ();
+                                                      error_result Env.Validation_failed detail
+                                                    | Error (Runtime.Config_commit_write_failed failure) ->
+                                                      rollback_keeper ();
+                                                      error_result
+                                                        Env.Store_unavailable
+                                                        ("runtime config commit failed: "
+                                                         ^ Fs_compat.atomic_replace_failure_to_string failure)))
+                                           in
+                                           Ok res)
+                                    with
+                                    | Ok res -> res
+                                    | Error detail ->
+                                      error_result
+                                        Env.Store_unavailable
+                                        ("runtime config lock error: " ^ detail)))
                             in
                             (match write_res with
                              | Error _ as err -> err

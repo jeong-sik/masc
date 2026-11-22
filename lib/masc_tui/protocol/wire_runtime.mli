@@ -11,7 +11,7 @@ val runtime_config_raw_path : string
 val runtime_assignment_path : string
 val runtime_routing_path : string
 val setup_inventory_path : string
-val setup_accounts_key_path : string
+val setup_credential_path : string
 val setup_accounts_login_path : string
 val setup_accounts_login_status_path : login_id:string -> string
 val runtime_probe_path : ?force:bool -> unit -> string
@@ -601,8 +601,8 @@ type setup_login_receipt = {
 val decode_setup_login_receipt :
   Yojson.Safe.t -> (setup_login_receipt, string) result
 
-val encode_setup_account_key :
-  integration_id:string -> key:string -> Yojson.Safe.t
+val encode_setup_credential :
+  provider_id:string -> secret:string -> source_revision:string -> Yojson.Safe.t
 
 val encode_setup_account_login_start :
   integration_id:string -> ?account_ref:string -> unit -> Yojson.Safe.t

@@ -487,7 +487,10 @@ let memory_os_internals_json ~(config : Workspace.config) ~keeper_id =
       ; "derived_count", `Int digest_meta.derived_count
       ]
   in
-  let writer_row = Keeper_memory_writer_health.keeper_rows ~config keeper_id in
+  let writer_row =
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+      Keeper_memory_writer_health.keeper_rows ~config keeper_id)
+  in
   let librarian_molt_json =
     match writer_row with
     | `Assoc fields ->

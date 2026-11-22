@@ -2864,6 +2864,47 @@ let test_p1_pulse_collapsed_company_highlight_and_scroll () =
         true
         (has_sub ~needle:"org-beta" row)
 
+let test_setup_key_inline_modal_masks_secret () =
+  let base = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en in
+  let modal : Model.inline_modal_state =
+    {
+      kind = Nav.Board_new_post;
+      fields =
+        [
+          {
+            key = "setup_key_integration";
+            label = Say.make ~ko:"프로바이더 ID" ~en:"Provider ID";
+            value = "gemini";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "setup_key_secret";
+            label = Say.make ~ko:"API 키" ~en:"API key";
+            value = "sk-SUPER-SECRET-TOKEN-999";
+            required = true;
+            secret = true;
+          };
+        ];
+      active_field = 1;
+      submitting = false;
+      error = None;
+    }
+  in
+  let m =
+    {
+      base with
+      nav = { base.nav with overlay = Some (Nav.Inline_action Nav.Board_new_post) };
+      inline_modal = Some modal;
+    }
+  in
+  let g, _ = render_full ~model:m ~cols:140 ~rows:40 in
+  assert_clean_grid ~label:"setup_key_modal_secret_masked" g;
+  let txt = grid_all_text g in
+  assert_contains ~label:"setup_key_provider_visible" ~needle:"gemini" txt;
+  assert_not_contains ~label:"setup_key_raw_secret_never_rendered"
+    ~needle:"sk-SUPER-SECRET-TOKEN-999" txt
+
 let () =
   Alcotest.run "masc_tui_screens_core"
     [
@@ -2915,5 +2956,7 @@ let () =
             `Quick test_v25_round55_attention_bar_5companies_fail_and_settings_polish;
           Alcotest.test_case "P0-5 toast above active overlay & P1-11 Settings Tab pane focus"
             `Quick test_p0_toast_above_active_overlay_and_settings_tab_focus;
+          Alcotest.test_case "Setup API key inline modal masks secret field on screen"
+            `Quick test_setup_key_inline_modal_masks_secret;
         ] );
     ]

@@ -2954,9 +2954,11 @@ let form_of_inline_modal (modal : Model.inline_modal_state) =
     List.map
       (fun (f : Model.modal_form_field) ->
         let validators = if f.required then [ Form.Required ] else [] in
+        let value =
+          if f.secret then Form.secret_val f.value else Form.Text_val f.value
+        in
         Form.make_field ~key:f.key ~label:f.label ~validators
-          ~provenance:Form.Prov_tui_pref ~reload_scope:Form.Hot_reload
-          (Form.Text_val f.value))
+          ~provenance:Form.Prov_tui_pref ~reload_scope:Form.Hot_reload value)
       modal.fields
   in
   let st = Form.create fields in

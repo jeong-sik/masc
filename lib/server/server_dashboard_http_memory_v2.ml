@@ -262,8 +262,59 @@ let world_fact_as_competing_claim_json (fact : World_memory_types.world_fact) =
     ]
 ;;
 
+let summary_references_private_scope (summary : string) : bool =
+  let lower = String.lowercase_ascii summary in
+  String_util.contains_substring lower "scope=keeper:"
+  || String_util.contains_substring lower "scope=private:"
+;;
+
+let build_private_change_filter (snapshot : World_memory_store.consistent_snapshot) =
+  let private_fact_ids : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+  let private_fact_id_list = ref [] in
+  List.iter
+    (fun (f : World_memory_types.world_fact) ->
+       if World_memory_types.is_private_scope f.scope
+       then (
+         Hashtbl.replace private_fact_ids f.fact_id ();
+         private_fact_id_list := f.fact_id :: !private_fact_id_list))
+    snapshot.facts;
+  let private_edge_seqs : (int, unit) Hashtbl.t = Hashtbl.create 16 in
+  List.iter
+    (fun (e : World_memory_types.world_edge) ->
+       if Hashtbl.mem private_fact_ids e.from_fact_id
+          || Hashtbl.mem private_fact_ids e.to_fact_id
+       then Hashtbl.replace private_edge_seqs e.created_seq ())
+    snapshot.edges;
+  let private_ids = !private_fact_id_list in
+  let is_visible (ev : World_memory_types.change_event) : bool =
+    if Hashtbl.mem private_fact_ids ev.target_id
+    then false
+    else if summary_references_private_scope ev.summary
+    then false
+    else (
+      match ev.kind with
+      | World_memory_types.Edge_added ->
+        if Hashtbl.mem private_edge_seqs ev.seq
+        then false
+        else
+          not
+            (List.exists
+               (fun pid -> String_util.contains_substring ev.summary pid)
+               private_ids)
+      | Fact_upserted | Fact_lifecycle_changed | Index_upserted | Digest_committed ->
+        not
+          (List.exists
+             (fun pid -> String_util.contains_substring ev.summary pid)
+             private_ids))
+  in
+  is_visible
+;;
+
 let world_json_from_mvcc_db ~now ~base_path ~writer_health =
-  match World_memory_store.read_snapshot ~include_inactive:false ~base_path () with
+  (* Read with [include_inactive:true] so [Superseded]/[Molted] keeper-private
+     facts still seed [private_fact_ids] and never leak through change-log rows,
+     while [public_facts] stays filtered to active shared workspace facts. *)
+  match World_memory_store.read_snapshot ~include_inactive:true ~base_path () with
   | Error err ->
     error_result
       Env.Store_unavailable
@@ -273,7 +324,8 @@ let world_json_from_mvcc_db ~now ~base_path ~writer_health =
     let public_facts =
       List.filter
         (fun (f : World_memory_types.world_fact) ->
-           not (World_memory_types.is_private_scope f.scope))
+           (not (World_memory_types.is_private_scope f.scope))
+           && World_memory_types.is_active_lifecycle f.lifecycle)
         snapshot.facts
     in
     let public_fact_tbl : (string, World_memory_types.world_fact) Hashtbl.t =
@@ -282,12 +334,7 @@ let world_json_from_mvcc_db ~now ~base_path ~writer_health =
     List.iter
       (fun (f : World_memory_types.world_fact) -> Hashtbl.replace public_fact_tbl f.fact_id f)
       public_facts;
-    let private_fact_ids : (string, unit) Hashtbl.t = Hashtbl.create 16 in
-    List.iter
-      (fun (f : World_memory_types.world_fact) ->
-         if World_memory_types.is_private_scope f.scope
-         then Hashtbl.replace private_fact_ids f.fact_id ())
-      snapshot.facts;
+    let is_visible_change = build_private_change_filter snapshot in
     let public_edges =
       List.filter
         (fun (e : World_memory_types.world_edge) ->
@@ -375,7 +422,7 @@ let world_json_from_mvcc_db ~now ~base_path ~writer_health =
             ] )
     in
     let log_report_json =
-      match World_memory_store.read_change_log ~base_path ~since_seq:0 ~limit:200 with
+      match World_memory_store.read_change_log_tail ~base_path ~limit:200 with
       | Error err ->
         `Assoc
           [ "status", `String "unavailable"
@@ -387,12 +434,7 @@ let world_json_from_mvcc_db ~now ~base_path ~writer_health =
           ; "recent_changes", `List []
           ]
       | Ok (events, max_seq) ->
-        let visible_events =
-          List.filter
-            (fun (ev : World_memory_types.change_event) ->
-               not (Hashtbl.mem private_fact_ids ev.target_id))
-            events
-        in
+        let visible_events = List.filter is_visible_change events in
         let recent =
           visible_events
           |> List.rev
@@ -1148,30 +1190,30 @@ let world_diff_json_from_mvcc_db ~now ~base_path ~keepers_dir ~range =
       Env.Store_unavailable
       ("world memory db unavailable: " ^ World_memory_store.error_to_string err)
   | Ok snapshot ->
-    (match World_memory_store.read_change_log ~base_path ~since_seq:0 ~limit:500 with
+    let change_log_res =
+      match range with
+      | Range_window _ -> World_memory_store.read_change_log_tail ~base_path ~limit:500
+      | Range_revs { from_rev; _ } ->
+        World_memory_store.read_change_log ~base_path ~since_seq:(max 0 (from_rev - 1)) ~limit:500
+    in
+    (match change_log_res with
      | Error err ->
        error_result
          Env.Store_unavailable
          ("world memory change log unavailable: " ^ World_memory_store.error_to_string err)
      | Ok (events, max_seq) ->
-       let private_fact_ids : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+       let is_visible_change = build_private_change_filter snapshot in
        let public_fact_tbl : (string, World_memory_types.world_fact) Hashtbl.t = Hashtbl.create 32 in
        let active_public_count = ref 0 in
        List.iter
          (fun (f : World_memory_types.world_fact) ->
-            if World_memory_types.is_private_scope f.scope
-            then Hashtbl.replace private_fact_ids f.fact_id ()
-            else (
+            if not (World_memory_types.is_private_scope f.scope)
+            then (
               Hashtbl.replace public_fact_tbl f.fact_id f;
               if World_memory_types.is_active_lifecycle f.lifecycle
               then incr active_public_count))
          snapshot.facts;
-       let visible_events =
-         List.filter
-           (fun (ev : World_memory_types.change_event) ->
-              not (Hashtbl.mem private_fact_ids ev.target_id))
-           events
-       in
+       let visible_events = List.filter is_visible_change events in
        let from_unix_opt, to_unix_opt, from_rev_opt, to_rev_opt, window_label =
          match range with
          | Range_window w ->

@@ -35,7 +35,21 @@ BASE_PATH=/fixture
 '''
 
 
-def run_shell(body, terminal_input=None, timeout=5):
+# Shared macOS CI runners spend 2.7-4.0s on 5-spawn wizard tests; 30s gives
+# 7.5x-11.1x headroom (matching test/test_install_local_build.py and
+# test/test_install_runtime_setup.py) while still failing fast on real hangs.
+DEFAULT_SHELL_TIMEOUT = 30
+
+
+def _decode_timeout_stream(data):
+    if data is None:
+        return ""
+    if isinstance(data, bytes):
+        return data.decode(errors="replace")
+    return data
+
+
+def run_shell(body, terminal_input=None, timeout=DEFAULT_SHELL_TIMEOUT):
     master = slave = reader = None
     terminal = bytearray()
     try:
@@ -57,13 +71,34 @@ def run_shell(body, terminal_input=None, timeout=5):
             reader = threading.Thread(target=drain)
             reader.start()
             os.write(master, terminal_input)
-        result = subprocess.run(
-            ["bash", "-c", DEFINITIONS + CATALOG + body],
-            stdin=slave if slave is not None else subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=slave if slave is not None else subprocess.PIPE,
-            text=True, timeout=timeout,
-        )
+        try:
+            result = subprocess.run(
+                ["bash", "-c", DEFINITIONS + CATALOG + body],
+                stdin=slave if slave is not None else subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=slave if slave is not None else subprocess.PIPE,
+                text=True, timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as error:
+            if slave is not None:
+                os.close(slave)
+                slave = None
+            if reader is not None:
+                reader.join(timeout=5)
+                reader = None
+            terminal_snapshot = bytes(terminal)
+            terminal_text = terminal_snapshot.decode(errors="replace")
+            stdout_text = _decode_timeout_stream(error.stdout)
+            stderr_text = _decode_timeout_stream(error.stderr)
+            raise AssertionError(
+                f"shell command timed out after {timeout}s\n"
+                f"--- pty terminal ({len(terminal_snapshot)} bytes) ---\n"
+                f"{terminal_text or '<empty>'}\n"
+                f"--- stdout ---\n"
+                f"{stdout_text or '<empty>'}\n"
+                f"--- stderr ---\n"
+                f"{stderr_text or '<empty>'}"
+            ) from error
         if slave is not None:
             os.close(slave)
             slave = None
@@ -138,7 +173,7 @@ Path(os.environ['COMMAND_RECEIPT']).write_text(json.dumps({
                         env.pop('MASC_RUNTIME_EVENTS', None)
                         copied = subprocess.run(['bash', '-c', commands[0]], cwd=root,
                                                 env=env, capture_output=True, text=True,
-                                                timeout=5)
+                                                timeout=DEFAULT_SHELL_TIMEOUT)
                         self.assertEqual(copied.returncode, 0, copied.stderr)
                         observed = json.loads(receipt.read_text())
                         self.assertEqual(observed['argv'], expected_argv)
@@ -210,7 +245,7 @@ else:
                     self.assertEqual(len(commands), 1, result.stdout)
                     copied = subprocess.run(['bash', '-c', commands[0]], cwd=root,
                                             env=dict(os.environ, COMMAND_RECEIPT=str(receipt)),
-                                            capture_output=True, text=True, timeout=30)
+                                            capture_output=True, text=True, timeout=DEFAULT_SHELL_TIMEOUT)
                     self.assertEqual(copied.returncode, 0, copied.stderr)
                     self.assertEqual(json.loads(receipt.read_text()), copied_argv)
 
@@ -444,10 +479,25 @@ if provider_ping_possible 0 ""; then echo false-success; else echo check-unavail
             (["--sandbox", "docker"], "--sandbox requires --team"),
         ]:
             with self.subTest(args=args):
-                result = subprocess.run(["bash", str(ROOT / 'scripts/install.sh'), *args], capture_output=True, text=True, timeout=5)
+                result = subprocess.run(["bash", str(ROOT / 'scripts/install.sh'), *args], capture_output=True, text=True, timeout=DEFAULT_SHELL_TIMEOUT)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(message, result.stderr)
                 self.assertNotIn('downloading', result.stdout)
+
+    def test_timeout_reports_pty_and_child_output(self):
+        with self.assertRaises(AssertionError) as raised:
+            run_shell(
+                "\nprintf 'stdout-before-hang\\n'\n"
+                "printf 'pty-before-hang\\n' >&2\n"
+                "exec sleep 10\n",
+                b"",
+                timeout=2,
+            )
+        self.assertIsInstance(raised.exception.__cause__, subprocess.TimeoutExpired)
+        message = str(raised.exception)
+        self.assertIn("timed out after 2s", message)
+        self.assertIn("pty-before-hang", message)
+        self.assertIn("stdout-before-hang", message)
 
 
 if __name__ == '__main__':

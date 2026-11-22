@@ -267,3 +267,7 @@ val handle_with_outcome
 
 val vision_store_suffix : string
 (** What a Keeper's vision store directory appends to the Keeper name. *)
+
+module For_testing : sig
+  val official_failure_can_advance : Fusion_official_client.failure -> bool
+end

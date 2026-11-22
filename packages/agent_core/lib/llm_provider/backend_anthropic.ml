@@ -470,14 +470,64 @@ let capabilities_of_config (config : Provider_config.t) =
     | Provider_config.Gemini | Provider_config.Glm -> Capabilities.default_capabilities
 ;;
 
+let image_omitted_note ~media_type =
+  match Api_common.image_omitted_placeholder ~media_type with
+  | Text note -> note
+  | Thinking _ | ReasoningDetails _ | RedactedThinking _
+  | ToolUse _ | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ ->
+    Printf.sprintf
+      "[image omitted: this model does not accept image input (media_type %s)]"
+      media_type
+;;
+
+let degrade_image_messages_with
+      ~supports_image_input
+      (messages : 'source Types.message_with list)
+  =
+  if supports_image_input
+  then messages
+  else
+    let rec rewrite (block : 'source Types.content_block_with) =
+      match block with
+      | Image { media_type; _ } ->
+        let note = image_omitted_note ~media_type in
+        Text note, [ note ]
+      | ToolResult ({ content_blocks = Some blocks; _ } as result) ->
+        let blocks, notes = List.split (List.map rewrite blocks) in
+        let notes = List.concat notes in
+        (match notes with
+         | [] -> block, []
+         | _ :: _ ->
+           let summary = String.concat "\n" notes in
+           let content =
+             if result.content = "" then summary else result.content ^ "\n" ^ summary
+           in
+           ToolResult { result with content; content_blocks = Some blocks }, notes)
+      | ToolResult { content_blocks = None; _ }
+      | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
+      | ToolUse _ | ToolReference _ | Document _ | Audio _ -> block, []
+    in
+    List.map
+      (fun (message : 'source Types.message_with) ->
+         { message with
+           content = List.map (fun block -> fst (rewrite block)) message.content
+         })
+      messages
+;;
+
 let project_history ?(tools_present = false) config messages =
   (* Request serialization and signed-prefix receipts must see the same
-     projection, including documents introduced during a tool round. *)
+     projection, including documents and images introduced during a tool round. *)
   let caps = capabilities_of_config config in
   let messages, _documents_degraded =
     Api_common.degrade_document_messages
       ~wire_form:Api_common.Document_source_block
       ~supports_document_input:caps.supports_document_input
+      messages
+  in
+  let messages =
+    degrade_image_messages_with
+      ~supports_image_input:caps.supports_image_input
       messages
   in
   Reasoning_history_projection.project_for_provider_config

@@ -553,13 +553,22 @@ type candidate_failure =
    not evidence that another candidate may safely replace the turn. *)
 let official_failure_can_advance : Fusion_official_client.failure -> bool = function
   | Missing_reply | Setup_failure _ | Antigravity_failure _ -> false
-  | Acp_failure (Runtime_acp_client.Spawn_refused _ | Runtime_acp_client.Invalid_config _) -> true
   | Acp_failure
-      ( Runtime_acp_client.Protocol_error _
-      | Runtime_acp_client.Rpc_error _
+      ( Runtime_acp_client.Spawn_refused _
+      | Runtime_acp_client.Invalid_config _
+      | Runtime_acp_client.Protocol_error _
       | Runtime_acp_client.Timeout _
       | Runtime_acp_client.Process_exited _
-      | Runtime_acp_client.Client_closed ) -> false
+      | Runtime_acp_client.Client_closed ) -> true
+  | Acp_failure (Runtime_acp_client.Rpc_error { method_name; code; message }) ->
+    (match Runtime_acp_client.classify_rpc_error ~method_name ~code ~message with
+     | Runtime_acp_client.Rpc_hard_quota
+     | Runtime_acp_client.Rpc_rate_limited
+     | Runtime_acp_client.Rpc_auth_error
+     | Runtime_acp_client.Rpc_authorization_error
+     | Runtime_acp_client.Rpc_provider_unavailable
+     | Runtime_acp_client.Rpc_context_overflow -> true
+     | Runtime_acp_client.Rpc_other -> false)
   | Claude_admission_failure (Invalid_config _) -> false
   | Claude_admission_failure (Runtime_claude_code.Spawn_refused _)
   | Claude_admission_failure (Runtime_claude_code.Protocol_error _)
@@ -810,7 +819,10 @@ let run_candidates_outcome
                 ?tool_use_id ?trace_id ~runtime_id ();
               raise exn)
          with
-       | Error (Llm_provider.Http_client.TimeoutError _) ->
+       | Error (Llm_provider.Http_client.TimeoutError _ as err) ->
+            Runtime_candidate_standing.observe_http_error ~now:(Eio.Time.now clock)
+              ~candidate:rt.Runtime_instance.candidate_backpressure
+              ~quota_scope:(Runtime_instance.quota_scope_of_runtime rt) err;
             record_vision_candidate_attempt
               ?tool_use_id ?trace_id ~runtime_id ~result:"error"
               ~reason:"timeout" ~duration_ms:0.0 ~success:false ();
@@ -1020,11 +1032,15 @@ let run_vision
                 ~attempt_index:0
                 candidates)))
   with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | _exn ->
+  | (Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break) as exn ->
+    raise exn
+  | exn ->
+    Llm_provider.Reserved_exn.reraise_if_reserved exn;
+    let detail = Printexc.to_string exn in
+    Log.Keeper.warn "vision sub-call raised: %s" detail;
     Vo_provider
       { failure_class = Tool_result.Runtime_failure
-      ; detail = "vision sub-call raised"
+      ; detail = "vision sub-call raised: " ^ detail
       }
 
 (* The [Vo_provider] arm below binds its class once and hands the same value
@@ -1201,3 +1217,7 @@ let handle ?base_path ?complete ?tool_use_id ?trace_id ?sw ?clock ?net ~meta ~ar
      ~meta
      ~args
      ()).raw_output
+
+module For_testing = struct
+  let official_failure_can_advance = official_failure_can_advance
+end

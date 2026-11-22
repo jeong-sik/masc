@@ -182,21 +182,38 @@ let acp_error_to_core_error = function
     Agent_core.Error.Provider
       (Llm_provider.Error.ParseError
          { detail = Printf.sprintf "ACP protocol error (%s): %s" stage detail })
-  | Acp.Rpc_error { method_name; code; message }
-    when Acp.is_context_overflow_rpc_error ~method_name ~code ~message ->
-    Agent_core.Error.Api
-      (Agent_core.Retry.ContextOverflow
-         { message =
-             Printf.sprintf "ACP RPC %s context overflow (%d): %s" method_name code message
-         ; limit = None
-         })
   | Acp.Rpc_error { method_name; code; message } ->
-    Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderReportedError
-         { provider = "acp"
-         ; error_type = Some (Printf.sprintf "rpc_%d" code)
-         ; detail = Printf.sprintf "ACP RPC %s failed (%d): %s" method_name code message
-         })
+    let detail = Printf.sprintf "ACP RPC %s failed (%d): %s" method_name code message in
+    (match Acp.classify_rpc_error ~method_name ~code ~message with
+     | Acp.Rpc_context_overflow ->
+       Agent_core.Error.Api
+         (Agent_core.Retry.ContextOverflow
+            { message =
+                Printf.sprintf "ACP RPC %s context overflow (%d): %s" method_name code message
+            ; limit = None
+            })
+     | Acp.Rpc_hard_quota ->
+       Agent_core.Error.Provider
+         (Llm_provider.Error.HardQuota { provider = "acp"; retry_after = None; detail })
+     | Acp.Rpc_rate_limited ->
+       Agent_core.Error.Provider
+         (Llm_provider.Error.RateLimit { provider = "acp"; retry_after = None; detail })
+     | Acp.Rpc_auth_error ->
+       Agent_core.Error.Provider
+         (Llm_provider.Error.AuthError { provider = "acp"; detail })
+     | Acp.Rpc_authorization_error ->
+       Agent_core.Error.Provider
+         (Llm_provider.Error.AuthorizationError { provider = "acp"; detail })
+     | Acp.Rpc_provider_unavailable ->
+       Agent_core.Error.Provider
+         (Llm_provider.Error.ProviderUnavailable { provider = "acp"; detail })
+     | Acp.Rpc_other ->
+       Agent_core.Error.Provider
+         (Llm_provider.Error.ProviderReportedError
+            { provider = "acp"
+            ; error_type = Some (Printf.sprintf "rpc_%d" code)
+            ; detail
+            }))
   | Acp.Timeout { stage; timeout_s } ->
     Agent_core.Error.Api
       (Agent_core.Retry.Timeout
@@ -216,6 +233,27 @@ let acp_error_to_core_error = function
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
          { provider = "acp"; detail = "ACP client closed" })
+;;
+
+(* Preserve a healthy persistent ACP child across upstream quota / rate-limit
+   RPC refusals so quota exhaustion does not trigger infinite CLI respawn
+   storms. Transport, timeout, protocol, and non-quota RPC failures still evict
+   the entry to keep session state clean. *)
+let should_evict_persistent_child_on_error = function
+  | Acp.Rpc_error { method_name; code; message } ->
+    (match Acp.classify_rpc_error ~method_name ~code ~message with
+     | Acp.Rpc_hard_quota | Acp.Rpc_rate_limited -> false
+     | Acp.Rpc_context_overflow
+     | Acp.Rpc_auth_error
+     | Acp.Rpc_authorization_error
+     | Acp.Rpc_provider_unavailable
+     | Acp.Rpc_other -> true)
+  | Acp.Invalid_config _
+  | Acp.Spawn_refused _
+  | Acp.Protocol_error _
+  | Acp.Timeout _
+  | Acp.Process_exited _
+  | Acp.Client_closed -> true
 ;;
 
 let recovery_failure_of_acp_error = function
@@ -1162,6 +1200,10 @@ let run_without_lifecycle
         Host.text_of_blocks ~runtime_label ~field:"goal_blocks" blocks
         |> Result.map (fun t -> t, [])
   in
+  let* () =
+    Runtime_official_client_tool.validate_image_inputs goal_images
+    |> Result.map_error (config_error ~field:"goal_blocks")
+  in
   let* prepared =
     Host.prepare_turn
       ~composed_context
@@ -1544,6 +1586,19 @@ let run_without_lifecycle
           entry.last_used_at <- Time_compat.now ();
           Atomic.set entry.in_flight false)
         (fun () ->
+      let* () =
+        if goal_images <> [] && not (Acp.capabilities entry.client).image_prompt
+        then (
+          recovery_failure := Session_store.Pre_dispatch_failed;
+          Error
+            (Agent_core.Error.Provider
+               (Llm_provider.Error.ProviderReportedError
+                  { provider = "acp"
+                  ; error_type = Some "image_input_unsupported"
+                  ; detail = Acp.image_input_unsupported_detail config.driver
+                  })))
+        else Ok ()
+      in
       Runtime_official_client_mcp_http.begin_turn entry.bridge;
       (* Establish or reuse the ACP session on the persistent child. *)
       let* session_id, resumed, active_prompt_text, transmitted_messages =
@@ -1751,7 +1806,11 @@ let run_without_lifecycle
           (`Completed
               (prompt_res, resumed, compacted, rollover_needed, stream.observed_tool_calls ()))
       | `Runtime (Error err) ->
-        if persistent then evict_entry_if_same key entry else Acp.close entry.client;
+        if persistent
+        then (
+          if should_evict_persistent_child_on_error err || not (Acp.is_alive entry.client)
+          then evict_entry_if_same key entry)
+        else Acp.close entry.client;
         recovery_failure := recovery_failure_of_acp_error err;
         Error (acp_error_to_core_error err)))
   in
@@ -2377,6 +2436,7 @@ let run
 
 module For_testing = struct
   let acp_error_to_core_error = acp_error_to_core_error
+  let should_evict_persistent_child_on_error = should_evict_persistent_child_on_error
   let recovery_failure_of_acp_error = recovery_failure_of_acp_error
   let api_usage_of_acp_usage = api_usage_of_acp_usage
   let stop_reason_of_acp_stop_reason = stop_reason_of_acp_stop_reason

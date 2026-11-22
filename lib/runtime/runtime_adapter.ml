@@ -31,11 +31,13 @@ let create_construction () =
 type provider_materialization =
   { provider_config : Llm_provider.Provider_config.t
   ; credential_admission : Runtime_credential_selection.admission
+  ; has_catalog_model_row : bool
   }
 
 type execution_materialization =
   { execution : Runtime_execution.t
   ; credential_admission : Runtime_credential_selection.admission option
+  ; has_catalog_model_row : bool
   }
 
 (* --- Header and request-path helpers --- *)
@@ -545,11 +547,13 @@ let declared_capabilities_override_of_model_spec
           runtime_caps.declared_thinking_control_format,
           runtime_caps.reasoning_streaming_format,
           runtime_caps.max_output_tokens,
-          runtime_caps.accepted_reasoning_efforts
+          runtime_caps.accepted_reasoning_efforts,
+          runtime_caps.supports_image_input,
+          runtime_caps.supports_multimodal_inputs
         with
-        | None, None, None, None -> None
+        | None, None, None, None, None, None -> None
         | thinking_control_format, reasoning_streaming_format, max_output_tokens,
-          accepted_reasoning_efforts ->
+          accepted_reasoning_efforts, supports_image_input, supports_multimodal_inputs ->
           Some
             { catalog_caps with
               max_output_tokens =
@@ -568,6 +572,14 @@ let declared_capabilities_override_of_model_spec
                 Option.value
                   reasoning_streaming_format
                   ~default:catalog_caps.reasoning_streaming_format
+            ; supports_image_input =
+                Option.value
+                  supports_image_input
+                  ~default:catalog_caps.supports_image_input
+            ; supports_multimodal_inputs =
+                Option.value
+                  supports_multimodal_inputs
+                  ~default:catalog_caps.supports_multimodal_inputs
             }))
   | Llm_provider.Capabilities.Provider_preset preset ->
     (* The preset speaks for every model of its provider and knows nothing of
@@ -1240,7 +1252,13 @@ let provider_config_from_declared_provider ?(person_api = false) ?binding_max_co
             ()
        |> Llm_provider.Provider_config.with_request_policy request_policy
        in
-       Ok {provider_config;credential_admission=admission}
+       let has_catalog_model_row =
+         match Llm_provider.Capabilities.request_policy_catalog_answer request_policy with
+         | Llm_provider.Capabilities.Model_row _ -> true
+         | Llm_provider.Capabilities.Provider_preset _
+         | Llm_provider.Capabilities.No_catalog_answer -> false
+       in
+       Ok { provider_config; credential_admission = admission; has_catalog_model_row }
      | Error reason -> Error reason)
   | Cli _ ->
     Error (Printf.sprintf
@@ -1719,7 +1737,10 @@ let validate_official_binding
 ;;
 
 let official_execution_materialization result =
-  Result.map (fun execution -> { execution; credential_admission = None }) result
+  Result.map
+    (fun execution ->
+       { execution; credential_admission = None; has_catalog_model_row = false })
+    result
 ;;
 
 let materialize_execution ~construction (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)
@@ -1747,7 +1768,8 @@ let materialize_execution ~construction (cfg : Runtime_schema.config) (binding :
             (fun (selected : provider_materialization) ->
               {execution=Runtime_execution.Agent_core
                   (Runtime_account_access.seal_api selected.provider_config);
-               credential_admission=Some selected.credential_admission})
+               credential_admission=Some selected.credential_admission;
+               has_catalog_model_row=selected.has_catalog_model_row})
             (materialize_provider_binding ~construction cfg binding)))
 ;;
 
@@ -1836,6 +1858,7 @@ let materialize_person_execution
                            ~provider_account_id
                            selected.provider_config)
                   ; credential_admission = Some selected.credential_admission
+                  ; has_catalog_model_row = selected.has_catalog_model_row
                   })
                (materialize_provider_binding_with ~person_api:true ~construction clean_cfg binding)
            | ( ( Runtime_schema.Antigravity_cli_runtime

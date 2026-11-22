@@ -22,6 +22,9 @@ type t =
     (** Quota ownership key frozen at materialization, from the same
         credential-alias selection that resolved the dispatched API key
         (PR #28219 review). *)
+  ; has_catalog_model_row : bool
+    (** [true] only when an exact catalog [Model_row] answered for this
+        HTTP [Agent_core] binding at materialization. *)
   }
 
 type dispatch_credential_error =
@@ -138,9 +141,16 @@ let quota_scope_of_materialized
     (match credential_admission with
      | Some admission -> Ok (Runtime_credential_selection.quota_scope admission)
      | None -> Error "HTTP materialization has no credential selection")
-  | Runtime_execution.Antigravity_cli _
-  | Runtime_execution.Acp _ ->
+  | Runtime_execution.Antigravity_cli _ ->
     Ok (Runtime_quota_window.scope_of_credential ~provider_id:provider.id provider.credentials)
+  | Runtime_execution.Acp acp ->
+    (match provider.credentials with
+     | Some (Runtime_schema.Env _ | Runtime_schema.File _) ->
+       Ok (Runtime_quota_window.scope_of_credential ~provider_id:provider.id provider.credentials)
+     | Some (Runtime_schema.Inline _) | None ->
+       Ok
+         (Runtime_quota_window.scope_of_acp_driver
+            ~driver:(Runtime_acp_client.driver_to_string acp.driver)))
 ;;
 
 (* Why a binding did not become a runtime, as a closed vocabulary rather than a
@@ -202,6 +212,7 @@ let materialize_binding_with
                in
                Runtime_candidate_backpressure.create_candidate ~binding)
            ; quota_scope
+           ; has_catalog_model_row = selected.has_catalog_model_row
            })
            (quota_scope_of_materialized ~provider ~execution ~credential_admission)
          |> Result.map_error (fun reason -> Execution_unbuildable reason)

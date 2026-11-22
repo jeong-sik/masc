@@ -585,6 +585,46 @@ let test_zai_glm_error_codes_ssot_parity () =
     [ "1302"; "1305" ]
 ;;
 
+let test_anthropic_400_credit_and_usage_exhaustion () =
+  let credit_body =
+    {|{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."}}|}
+  in
+  let usage_limit_body =
+    {|{"type":"error","error":{"type":"invalid_request_error","message":"You have reached your specified API usage limits. You will regain access on 2026-12-01 at 00:00 UTC."}}|}
+  in
+  let openrouter_nested_credit =
+    {|{"error":{"code":400,"message":"Provider returned error","metadata":{"raw":"{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Your credit balance is too low to access the Anthropic API.\"}}"}}}|}
+  in
+  List.iter
+    (fun (label, body) ->
+       (match Retry.classify_structured_refusal ~retry_after_header:None ~status:400 ~body with
+        | Some (Retry.Structured_account_quota _) -> ()
+        | Some (Retry.Structured_context_overflow _) ->
+          failf "%s misclassified as context overflow" label
+        | None -> failf "%s must classify as Structured_account_quota" label);
+       match Retry.classify_error ~retry_after_header:None ~status:400 ~body with
+       | Retry.PaymentRequired _ -> ()
+       | other ->
+         failf "%s expected PaymentRequired, got %s" label (Retry.error_message other))
+    [ "anthropic 400 credit balance", credit_body
+    ; "anthropic 400 api usage limits", usage_limit_body
+    ; "openrouter nested anthropic credit balance", openrouter_nested_credit
+    ];
+  (* Ordinary HTTP 400 errors must remain Unknown_invalid_request. *)
+  (match
+     Retry.classify_error
+       ~retry_after_header:None
+       ~status:400
+       ~body:{|{"type":"error","error":{"type":"invalid_request_error","message":"invalid model name"}}|}
+   with
+   | Retry.InvalidRequest { reason = Retry.Unknown_invalid_request; _ } -> ()
+   | other -> failf "expected Unknown_invalid_request, got %s" (Retry.error_message other));
+  (* HTTP 403 prose without a structured quota code must still remain AuthorizationError. *)
+  match Retry.classify_error ~retry_after_header:None ~status:403 ~body:credit_body with
+  | Retry.AuthorizationError _ -> ()
+  | other -> failf "expected AuthorizationError on 403, got %s" (Retry.error_message other)
+;;
+
 let () =
   run
     "Retry"
@@ -592,6 +632,8 @@ let () =
       , [ test_case "http status mapping" `Quick test_classify_error
         ; test_case "Z.AI GLM 14 error codes SSOT parity" `Quick
             test_zai_glm_error_codes_ssot_parity
+        ; test_case "Anthropic HTTP 400 credit and usage exhaustion" `Quick
+            test_anthropic_400_credit_and_usage_exhaustion
         ; test_case "edge cases" `Quick test_classify_error_edge_cases
         ; test_case
             "structured 400/422 overflow and 403/429 quota"

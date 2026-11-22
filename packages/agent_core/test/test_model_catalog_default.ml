@@ -1764,11 +1764,69 @@ supports_prompt_cache_retention = "yes"
     | Ok _ -> fail "non-bool supports_prompt_cache_retention must fail closed")
 ;;
 
+let test_text_only_catalog_rows_and_mistral_medium_35 () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"text-only catalog audit"
+  in
+  with_clean_model_catalog_override (fun () ->
+    Llm_provider.Catalog_snapshot.publish
+      (Agent_core_test_deps.admit_catalogs ~models:(Some catalog) ~providers:None);
+    let resolve ?provider model_id =
+      let caps =
+        match provider with
+        | None -> Capabilities.for_model_id model_id
+        | Some p ->
+          Capabilities.for_provider_model_id
+            ~wire:None
+            ~provider:(Llm_provider.Model_catalog.Declared_provider p)
+            ~model_id
+      in
+      match caps with
+      | Some c -> c
+      | None ->
+        failf "missing catalog row for %s/%s" (Option.value provider ~default:"bare") model_id
+    in
+    List.iter
+      (fun (provider, model_id) ->
+         let caps = resolve ?provider model_id in
+         let label = Printf.sprintf "%s/%s" (Option.value provider ~default:"bare") model_id in
+         check bool (label ^ " supports_image_input=false") false caps.supports_image_input)
+      [ Some "deepseek", "deepseek-v4-pro"
+      ; Some "deepseek", "deepseek-v4-flash"
+      ; Some "deepseek-anthropic", "deepseek-v4-pro"
+      ; Some "deepseek-anthropic", "deepseek-v4-flash"
+      ; Some "deepseek-responses", "deepseek-v4-pro"
+      ; Some "deepseek-responses", "deepseek-v4-flash"
+      ; Some "opencode_go", "mimo-v2.6-flash"
+      ; Some "cohere", "command-r-plus"
+      ; Some "openai-speech", "tts-1"
+      ; Some "openai-speech", "gpt-4o-mini-tts"
+      ; None, "qwen3"
+      ; None, "qwen3.6"
+      ; None, "qwen36-35b-a3b-mtp"
+      ];
+    let ds_anth = resolve ~provider:"deepseek-anthropic" "deepseek-v4-flash" in
+    check bool "deepseek-anthropic deepseek-v4-flash supports_document_input=false" false
+      ds_anth.supports_document_input;
+    let ds_vis = resolve ~provider:"deepseek" "deepseek-v4-flash-vision-exp" in
+    check bool "deepseek-v4-flash-vision-exp keeps supports_image_input=true" true
+      ds_vis.supports_image_input;
+    let mistral_med = resolve ~provider:"mistral" "mistral-medium-3.5" in
+    check (option int) "mistral-medium-3.5 max_context_tokens=262144" (Some 262_144)
+      mistral_med.max_context_tokens;
+    check bool "mistral-medium-3.5 supports_image_input=true" true
+      mistral_med.supports_image_input;
+    check bool "mistral-medium-3.5 supports_multimodal_inputs=true" true
+      mistral_med.supports_multimodal_inputs)
+;;
+
 let () =
   run
     "model catalog default"
     [ ( "embedded catalog"
       , [ test_case "load_default" `Quick test_load_default_catalog
+        ; test_case "text-only catalog rows and mistral-medium-3.5" `Quick
+            test_text_only_catalog_rows_and_mistral_medium_35
         ; test_case
             "vendor docs SSOT catalog alignment"
             `Quick

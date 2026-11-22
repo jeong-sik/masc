@@ -868,10 +868,133 @@ supports-image-input = true
       []
       (ids (Runtime_agent.media_walk ~candidates [ Agent_core.Types.Text "hi" ])))
 
+let test_catalog_model_row_inherits_vision_and_honors_toml_overrides () =
+  let fixture =
+    {|
+[runtime]
+default = "claude.claude-default"
+
+[providers.claude]
+protocol = "messages-http"
+endpoint = "https://api.anthropic.com"
+credentials = { type = "inline", value = "synthetic-no-network" }
+
+[providers.deepseek]
+protocol = "openai-compatible-http"
+endpoint = "https://api.deepseek.com/v1"
+credentials = { type = "inline", value = "synthetic-no-network" }
+
+[providers.fixture_novel_endpoint]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+
+[models.claude-default]
+api-name = "claude-sonnet-5"
+
+[models.claude-blinded]
+api-name = "claude-sonnet-5"
+[models.claude-blinded.capabilities]
+supports-image-input = false
+
+[models.deepseek-default]
+api-name = "deepseek-v4-flash"
+
+[models.deepseek-override]
+api-name = "deepseek-v4-flash"
+[models.deepseek-override.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[models.uncatalogued]
+api-name = "unknown-novel-model"
+max-context = 8192
+
+[claude.claude-default]
+[claude.claude-blinded]
+[deepseek.deepseek-default]
+[deepseek.deepseek-override]
+[fixture_novel_endpoint.uncatalogued]
+|}
+  in
+  let path = Filename.temp_file "vision-split-brain-" ".toml" in
+  Out_channel.with_open_bin path (fun oc -> output_string oc fixture);
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    let runtimes =
+      match load_list_text ~config_path:path with
+      | Ok (runtimes, _, _, _, _) -> runtimes
+      | Error detail -> fail detail
+    in
+    let find_rt id =
+      match List.find_opt (fun (rt : Runtime_instance.t) -> String.equal rt.id id) runtimes with
+      | Some rt -> rt
+      | None -> failf "missing runtime %s" id
+    in
+    let resolved_provider_caps rt =
+      match rt.Runtime_instance.execution with
+      | Runtime_execution.Agent_core sealed ->
+        Agent_core.Provider_runtime_binding.capabilities_for_provider_config
+          (Runtime_account_access.api_declaration sealed)
+      | _ -> failf "%s is not Agent_core" rt.id
+    in
+    (* P0 #1: catalog Model_row with omitted supports-image-input inherits catalog truth *)
+    let claude_default = find_rt "claude.claude-default" in
+    check bool "catalog vision row inherits supports_image_input=true" true
+      (Runtime_agent.runtime_accepts_image_input ~runtime:claude_default);
+    check bool "catalog vision row provider caps agree" true
+      (resolved_provider_caps claude_default).supports_image_input;
+    let deepseek_default = find_rt "deepseek.deepseek-default" in
+    check bool "catalog text-only row stays supports_image_input=false" false
+      (Runtime_agent.runtime_accepts_image_input ~runtime:deepseek_default);
+    check bool "catalog text-only row provider caps agree" false
+      (resolved_provider_caps deepseek_default).supports_image_input;
+    let uncatalogued = find_rt "fixture_novel_endpoint.uncatalogued" in
+    check bool "uncatalogued row stays fail-closed false" false
+      (Runtime_agent.runtime_accepts_image_input ~runtime:uncatalogued);
+    (* P0 #2: explicit runtime.toml overrides propagate onto catalog Model_row *)
+    let claude_blinded = find_rt "claude.claude-blinded" in
+    check bool "explicit supports-image-input=false blinds runtime_agent" false
+      (Runtime_agent.runtime_accepts_image_input ~runtime:claude_blinded);
+    check bool "explicit supports-image-input=false propagates to Agent_core" false
+      (resolved_provider_caps claude_blinded).supports_image_input;
+    let deepseek_override = find_rt "deepseek.deepseek-override" in
+    check bool "explicit supports-image-input=true enables runtime_agent" true
+      (Runtime_agent.runtime_accepts_image_input ~runtime:deepseek_override);
+    let ds_override_caps = resolved_provider_caps deepseek_override in
+    check bool "explicit supports-image-input=true propagates to Agent_core" true
+      ds_override_caps.supports_image_input;
+    check bool "explicit supports-multimodal-inputs=true propagates to Agent_core" true
+      ds_override_caps.supports_multimodal_inputs)
+;;
+
+let test_mixed_media_preserves_native_vision_when_other_modality_projected () =
+  (* P1 #6: an image-only runtime with [image; document] or [image; audio] projects
+     the unsupported modality first; only 1 native modality (image) remains, so
+     native vision is preserved rather than stripping all media. *)
+  check bool "image+document on image-only runtime preserves native vision" false
+    (Runtime_agent.requires_text_media_projection
+       (caps ~image:true ()) ~required:[ "image"; "document" ]);
+  check bool "image+audio on image-only runtime preserves native vision" false
+    (Runtime_agent.requires_text_media_projection
+       (caps ~image:true ()) ~required:[ "image"; "audio" ]);
+  (* When both modalities are natively supported without multimodal bundle support,
+     projection is still required. *)
+  check bool "image+document when both native without multimodal still projects" true
+    (Runtime_agent.requires_text_media_projection
+       (caps ~image:true ~document:true ()) ~required:[ "image"; "document" ]);
+  check bool "image+document with multimodal=true needs no projection" false
+    (Runtime_agent.requires_text_media_projection
+       (caps ~image:true ~document:true ~multimodal:true ())
+       ~required:[ "image"; "document" ])
+;;
+
 let () =
   run "rfc0265_modality_reroute"
     [ ( "decide_modality_reroute"
       , [ test_case "text turn no reroute" `Quick test_text_turn_no_reroute
+        ; test_case "catalog Model_row inherits vision & honors TOML overrides" `Quick
+            test_catalog_model_row_inherits_vision_and_honors_toml_overrides
+        ; test_case "mixed media preserves native vision when other modality projected" `Quick
+            test_mixed_media_preserves_native_vision_when_other_modality_projected
         ; test_case "official transport constrains advertised model media" `Quick
             test_official_transport_caps_override_model_media_declarations
         ; test_case "media candidates are the vision runtimes" `Quick

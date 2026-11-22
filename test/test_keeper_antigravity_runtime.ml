@@ -3766,12 +3766,38 @@ printf '{"event":"result","result":{"conversation_id":"conv-p0-7","status":"SUCC
                         ^ Agent_core.Error.to_string err)))))
 ;;
 
+let test_turn_failed_quota_rate_auth_classification () =
+  let check_core label detail pred =
+    let err =
+      Keeper_antigravity_runtime.For_testing.runtime_error_to_core_error
+        (Runtime_antigravity.Turn_failed detail)
+    in
+    check bool (label ^ ": " ^ Agent_core.Error.to_string err) true (pred err)
+  in
+  check_core "RESOURCE_EXHAUSTED -> HardQuota" "RESOURCE_EXHAUSTED: quota exceeded" (function
+    | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _) -> true | _ -> false);
+  check_core "402 -> HardQuota" "HTTP 402 Payment Required: insufficient credits" (function
+    | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _) -> true | _ -> false);
+  check_core "429 -> RateLimit" "HTTP 429 Too Many Requests: rate limit exceeded" (function
+    | Agent_core.Error.Provider (Llm_provider.Error.RateLimit _) -> true | _ -> false);
+  check_core "401 -> AuthError" "HTTP 401 Unauthorized: invalid token" (function
+    | Agent_core.Error.Provider (Llm_provider.Error.AuthError _) -> true | _ -> false);
+  check_core "403 -> AuthorizationError" "HTTP 403 Forbidden: permission denied" (function
+    | Agent_core.Error.Provider (Llm_provider.Error.AuthorizationError _) -> true | _ -> false);
+  check_core "503 -> ProviderUnavailable" "HTTP 503 Service Unavailable" (function
+    | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> true | _ -> false);
+  check_core "ordinary failure -> ProviderReportedError" "tool crashed unexpectedly" (function
+    | Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError _) -> true | _ -> false)
+;;
+
 let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_antigravity_runtime"
     [ ( "immortal_circulation_f1"
-        , [ test_case "P1-2 Antigravity overflow rollover and compaction anchor" `Quick
+        , [ test_case "Turn_failed classifies quota/429/401/403/5xx into typed Agent_core errors" `Quick
+              test_turn_failed_quota_rate_auth_classification
+          ; test_case "P1-2 Antigravity overflow rollover and compaction anchor" `Quick
               test_p1_2_antigravity_overflow_rollover_and_anchor
           ; test_case "P1-2 Antigravity HTTP MCP effect fences overflow retry" `Quick
               test_p1_2_antigravity_mcp_effect_fences_overflow_retry

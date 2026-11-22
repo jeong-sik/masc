@@ -21,6 +21,12 @@ type t =
         later environment change must not re-select the alias at
         window-recording time, or the window is charged to an account the
         dispatch never used (PR #28219 review). *)
+  ; has_catalog_model_row : bool
+    (** [true] only when an exact catalog [Model_row] answered for this
+        HTTP [Agent_core] binding at materialization. Preserved immutably so
+        media-input capability inheritance never depends on mutable global
+        catalog state and never leaks provider-wide presets onto uncatalogued
+        models. *)
   }
 
 type dispatch_credential_error =

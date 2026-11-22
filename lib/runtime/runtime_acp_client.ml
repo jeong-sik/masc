@@ -443,7 +443,7 @@ let contains_substring_ci ~haystack ~needle =
     scan 0)
 ;;
 
-let is_context_overflow_rpc_error ~method_name:_ ~code:_ ~message =
+let has_context_overflow_signal message =
   let needles =
     [ "context_length_exceeded"
     ; "context length"
@@ -460,6 +460,208 @@ let is_context_overflow_rpc_error ~method_name:_ ~code:_ ~message =
     ]
   in
   List.exists (fun needle -> contains_substring_ci ~haystack:message ~needle) needles
+;;
+
+type rpc_error_class =
+  | Rpc_context_overflow
+  | Rpc_hard_quota
+  | Rpc_rate_limited
+  | Rpc_auth_error
+  | Rpc_authorization_error
+  | Rpc_provider_unavailable
+  | Rpc_other
+
+let has_any_ci ~haystack needles =
+  List.exists (fun needle -> contains_substring_ci ~haystack ~needle) needles
+;;
+
+let has_hard_quota_signal message =
+  has_any_ci
+    ~haystack:message
+    [ "exceeded_current_quota_error"
+    ; "insufficient_quota"
+    ; "quota_exceeded"
+    ; "quota exceeded"
+    ; "quota exhausted"
+    ; "exceeded your current quota"
+    ; "exhausted your capacity"
+    ; "your quota will reset"
+    ; "usage_limit_exceeded"
+    ; "billing_hard_limit_reached"
+    ; "credit_balance_too_low"
+    ; "credit balance is too low"
+    ; "reached your specified api usage limits"
+    ; "reached your api usage limit"
+    ; "usage limit reached"
+    ; "reached your usage limit"
+    ; "billing_api_budget_exhausted"
+    ; "billing_disabled"
+    ; "insufficient_balance"
+    ; "insufficient balance"
+    ; "payment_required"
+    ; "payment required"
+    ; "out of credits"
+    ; "spend limit"
+    ; "gousagelimiterror"
+    ; "key_limit_exceeded"
+    ; "http 402"
+    ; "status 402"
+    ; "status: 402"
+    ; "status_code: 402"
+    ; "status code: 402"
+    ; "code 402"
+    ; "402 payment"
+    ]
+;;
+
+let has_rate_limit_signal message =
+  has_any_ci
+    ~haystack:message
+    [ "resource_exhausted"
+    ; "rate_limit"
+    ; "rate limit"
+    ; "ratelimit"
+    ; "too many requests"
+    ; "http 429"
+    ; "status 429"
+    ; "status: 429"
+    ; "status_code: 429"
+    ; "status code: 429"
+    ; "code 429"
+    ; "code: 429"
+    ; "error 429"
+    ; "429 too many"
+    ; "throttl"
+    ; "requests per minute"
+    ; "tokens per minute"
+    ]
+;;
+
+let has_auth_signal message =
+  has_any_ci
+    ~haystack:message
+    [ "unauthenticated"
+    ; "unauthorized"
+    ; "invalid_api_key"
+    ; "invalid api key"
+    ; "invalid_authentication_error"
+    ; "authentication_error"
+    ; "authentication failed"
+    ; "not authenticated"
+    ; "login required"
+    ; "http 401"
+    ; "status 401"
+    ; "status: 401"
+    ; "status_code: 401"
+    ; "status code: 401"
+    ; "code 401"
+    ; "401 unauthorized"
+    ]
+;;
+
+let has_authorization_signal message =
+  has_any_ci
+    ~haystack:message
+    [ "permission_denied"
+    ; "permission denied"
+    ; "forbidden"
+    ; "access denied"
+    ; "http 403"
+    ; "status 403"
+    ; "status: 403"
+    ; "status_code: 403"
+    ; "status code: 403"
+    ; "code 403"
+    ; "403 forbidden"
+    ]
+;;
+
+let has_unavailable_signal message =
+  has_any_ci
+    ~haystack:message
+    [ "service unavailable"
+    ; "temporarily unavailable"
+    ; "internal server error"
+    ; "bad gateway"
+    ; "gateway timeout"
+    ; "overloaded"
+    ; "server_error"
+    ; "http 500"
+    ; "http 502"
+    ; "http 503"
+    ; "http 504"
+    ; "http 529"
+    ; "status 500"
+    ; "status 502"
+    ; "status 503"
+    ; "status 504"
+    ; "status 529"
+    ; "status: 500"
+    ; "status: 502"
+    ; "status: 503"
+    ; "status: 504"
+    ; "status: 529"
+    ; "status_code: 500"
+    ; "status_code: 502"
+    ; "status_code: 503"
+    ; "status_code: 504"
+    ; "status_code: 529"
+    ]
+;;
+
+let classify_rpc_error ~method_name:_ ~code ~message =
+  match code with
+  | 402 -> Rpc_hard_quota
+  | 401 -> Rpc_auth_error
+  | 403 ->
+    if has_hard_quota_signal message then Rpc_hard_quota else Rpc_authorization_error
+  | 429 ->
+    if has_hard_quota_signal message then Rpc_hard_quota else Rpc_rate_limited
+  | 500 | 502 | 503 | 504 | 520 | 521 | 522 | 523 | 524 | 529 ->
+    Rpc_provider_unavailable
+  | _ ->
+    if has_hard_quota_signal message
+    then Rpc_hard_quota
+    else if has_rate_limit_signal message
+    then Rpc_rate_limited
+    else if has_auth_signal message
+    then Rpc_auth_error
+    else if has_authorization_signal message
+    then Rpc_authorization_error
+    else if has_context_overflow_signal message
+    then Rpc_context_overflow
+    else if has_unavailable_signal message
+    then Rpc_provider_unavailable
+    else Rpc_other
+;;
+
+let is_context_overflow_rpc_error ~method_name ~code ~message =
+  classify_rpc_error ~method_name ~code ~message = Rpc_context_overflow
+;;
+
+let image_input_unsupported_detail driver =
+  Printf.sprintf
+    "ACP server (%s) does not advertise promptCapabilities.image support"
+    (driver_to_string driver)
+;;
+
+let validate_prompt_blocks ~driver ~(capabilities : agent_capabilities) blocks =
+  let images =
+    List.filter_map
+      (function
+        | Text_block _ -> None
+        | Image_block { mime_type; base64_data } ->
+          Some { Runtime_official_client_tool.media_type = mime_type; base64_data })
+      blocks
+  in
+  match images with
+  | [] -> Ok ()
+  | _ :: _ ->
+    if not capabilities.image_prompt
+    then Error (Invalid_config (image_input_unsupported_detail driver))
+    else
+      Runtime_official_client_tool.validate_image_inputs images
+      |> Result.map_error (fun detail -> Invalid_config detail)
 ;;
 
 (* ── Higher-rank polymorphic JSON decoding helpers ────────────────────────── *)
@@ -545,17 +747,26 @@ let is_allowed_mcp_kind = function
   | Some _ -> false
 ;;
 
+let is_allowed_explicit_mcp_wrapper_kind = function
+  | None | Some ("mcp" | "other" | "execute") -> true
+  | Some _ -> false
+;;
+
 let is_read_only_tool_kind = function
   | Some ("read" | "search" | "think") -> true
   | Some _ | None -> false
 ;;
 
+let trim_nonempty_opt = function
+  | Some s ->
+    let trimmed = String.trim s in
+    if trimmed = "" then None else Some trimmed
+  | None -> None
+;;
+
 let first_non_empty_json_string keys json =
   List.find_map
-    (fun key ->
-       match json_string_opt key json with
-       | Some s when String.trim s <> "" -> Some s
-       | _ -> None)
+    (fun key -> trim_nonempty_opt (json_string_opt key json))
     keys
 ;;
 
@@ -587,10 +798,12 @@ type tool_call_wire =
   }
 
 let parse_tool_call_wire (json : Yojson.Safe.t) : tool_call_wire =
-  let tool_call_id = Option.value (json_string_opt "toolCallId" json) ~default:"" in
-  let title = json_string_opt "title" json in
-  let name = json_string_opt "name" json in
-  let kind = json_string_opt "kind" json in
+  let tool_call_id =
+    Option.value (trim_nonempty_opt (json_string_opt "toolCallId" json)) ~default:""
+  in
+  let title = trim_nonempty_opt (json_string_opt "title" json) in
+  let name = trim_nonempty_opt (json_string_opt "name" json) in
+  let kind = trim_nonempty_opt (json_string_opt "kind" json) in
   let meta = json_field "_meta" json in
   let meta_server_name =
     Option.bind
@@ -610,26 +823,44 @@ let parse_tool_call_wire (json : Yojson.Safe.t) : tool_call_wire =
     | None -> []
     | Some entries ->
       List.filter_map
-        (fun item ->
-           match json_string_opt "path" item with
-           | Some p when String.trim p <> "" -> Some p
-           | _ -> None)
+        (fun item -> trim_nonempty_opt (json_string_opt "path" item))
         entries
   in
   { tool_call_id; title; name; kind; meta_server_name; meta_tool_name; raw_input; locations }
 ;;
 
+let is_non_empty_raw_input = function
+  | None | Some (`Assoc []) | Some `Null -> false
+  | Some _ -> true
+;;
+
+(* Monotonic merge: first-observed identity fields (kind, meta_server_name,
+   meta_tool_name, name, title, non-empty raw_input) are immutable so a later
+   tool_call_update or session/request_permission cannot downgrade e.g.
+   "execute" -> "read" or spoof a benign title/path over an earlier call,
+   while missing fields may still be enriched and locations are unioned. *)
 let merge_tool_call_wire ~(prior : tool_call_wire) ~(incoming : tool_call_wire) : tool_call_wire =
-  let pick inc prev = match inc with Some _ -> inc | None -> prev in
+  let keep_first prev inc = match prev with Some _ -> prev | None -> inc in
+  let raw_input =
+    if is_non_empty_raw_input prior.raw_input
+    then prior.raw_input
+    else if is_non_empty_raw_input incoming.raw_input
+    then incoming.raw_input
+    else keep_first prior.raw_input incoming.raw_input
+  in
+  let locations =
+    prior.locations
+    @ List.filter (fun p -> not (List.mem p prior.locations)) incoming.locations
+  in
   { tool_call_id =
-      if incoming.tool_call_id <> "" then incoming.tool_call_id else prior.tool_call_id
-  ; title = pick incoming.title prior.title
-  ; name = pick incoming.name prior.name
-  ; kind = pick incoming.kind prior.kind
-  ; meta_server_name = pick incoming.meta_server_name prior.meta_server_name
-  ; meta_tool_name = pick incoming.meta_tool_name prior.meta_tool_name
-  ; raw_input = pick incoming.raw_input prior.raw_input
-  ; locations = if incoming.locations <> [] then incoming.locations else prior.locations
+      if prior.tool_call_id <> "" then prior.tool_call_id else incoming.tool_call_id
+  ; title = keep_first prior.title incoming.title
+  ; name = keep_first prior.name incoming.name
+  ; kind = keep_first prior.kind incoming.kind
+  ; meta_server_name = keep_first prior.meta_server_name incoming.meta_server_name
+  ; meta_tool_name = keep_first prior.meta_tool_name incoming.meta_tool_name
+  ; raw_input
+  ; locations
   }
 ;;
 
@@ -710,9 +941,41 @@ let has_ascii_whitespace s =
   String.exists (function ' ' | '\t' | '\n' | '\r' -> true | _ -> false) s
 ;;
 
+(* Explicit [mcp(<server>/<tool>)] or [mcp(<server>:<tool>)] wrapper emitted by
+   Antigravity ACP (including with [kind = "execute"]). *)
+let parse_explicit_mcp_wrapper candidate =
+  let trimmed = String.trim candidate in
+  let len = String.length trimmed in
+  if len > 5
+     && not (has_ascii_whitespace trimmed)
+     && String.starts_with ~prefix:"mcp(" trimmed
+     && trimmed.[len - 1] = ')'
+  then (
+    let inner = String.sub trimmed 4 (len - 5) in
+    let split_at sep =
+      match String.index_opt inner sep with
+      | Some idx when idx > 0 && idx + 1 < String.length inner ->
+        let srv = String.sub inner 0 idx in
+        let tool = String.sub inner (idx + 1) (String.length inner - idx - 1) in
+        if String.contains srv '/'
+           || String.contains srv ':'
+           || String.contains tool '/'
+           || String.contains tool ':'
+           || String.contains tool '('
+           || String.contains tool ')'
+        then None
+        else Some (Mcp_tool { server = Explicit_server srv; tool_name = tool })
+      | _ -> None
+    in
+    match split_at '/' with
+    | Some _ as m -> m
+    | None -> split_at ':')
+  else None
+;;
+
 let parse_qualified_mcp_identifier ?mcp_server_name ~kind candidate =
   let trimmed = String.trim candidate in
-  if trimmed = "" || has_ascii_whitespace trimmed
+  if trimmed = "" || has_ascii_whitespace trimmed || String.starts_with ~prefix:"mcp(" trimmed
   then None
   else if String.starts_with ~prefix:"mcp__" trimmed
   then (
@@ -731,7 +994,16 @@ let parse_qualified_mcp_identifier ?mcp_server_name ~kind candidate =
       let srv = String.sub rest 0 idx in
       let tool = String.sub rest (idx + 1) (String.length rest - idx - 1) in
       Some (Mcp_tool { server = Explicit_server srv; tool_name = tool })
-    | _ -> None)
+    | _ ->
+      (match mcp_server_name with
+       | Some expected_srv
+         when expected_srv <> ""
+              && String.starts_with ~prefix:(expected_srv ^ "_") rest
+              && String.length rest > String.length expected_srv + 1 ->
+         let prefix_len = String.length expected_srv + 1 in
+         let tool = String.sub rest prefix_len (String.length rest - prefix_len) in
+         Some (Mcp_tool { server = Explicit_server expected_srv; tool_name = tool })
+       | _ -> None))
   else (
     match String.index_opt trimmed ':' with
     | Some idx when idx > 0 && idx + 1 < String.length trimmed ->
@@ -778,102 +1050,127 @@ let classify_tool_call ?managed_schema_root ?mcp_server_name (wire : tool_call_w
     Native_tool { name; kind = wire.kind; locations = wire.locations }
   in
   (* 1. Structured MCP proxy call (e.g. Antigravity [call_mcp_tool] carrying
-        explicit [ServerName] and [ToolName] in [rawInput]/[args]). *)
-  match wire.name with
-  | Some "call_mcp_tool" ->
-    let server =
-      Option.bind
-        wire.raw_input
-        (first_non_empty_json_string [ "ServerName"; "serverName"; "server_name" ])
-    in
-    let tool =
-      Option.bind
-        wire.raw_input
-        (first_non_empty_json_string [ "ToolName"; "toolName"; "tool_name" ])
-    in
-    (match server, tool with
-     | Some srv, Some tool_name ->
-       Mcp_tool { server = Explicit_server srv; tool_name }
-     | _ -> fallback ())
-  | _ ->
+        explicit [ServerName]/[server_name]/[mcp_server] and
+        [ToolName]/[tool_name]/[name] in [rawInput]/[args]). *)
+  let is_call_mcp_tool =
+    match wire.meta_tool_name, wire.name, wire.title with
+    | Some "call_mcp_tool", _, _ -> true
+    | None, Some "call_mcp_tool", _ -> true
+    | None, None, Some "call_mcp_tool" -> true
+    | _ -> false
+  in
+  if is_call_mcp_tool
+  then (
+    if not (is_allowed_explicit_mcp_wrapper_kind wire.kind)
+    then fallback ()
+    else (
+      let server =
+        Option.bind
+          wire.raw_input
+          (first_non_empty_json_string
+             [ "ServerName"; "serverName"; "server_name"; "mcp_server" ])
+      in
+      let tool =
+        Option.bind
+          wire.raw_input
+          (first_non_empty_json_string [ "ToolName"; "toolName"; "tool_name"; "name" ])
+      in
+      match server, tool with
+      | Some srv, Some tool_name
+        when (not (has_ascii_whitespace srv))
+             && not (has_ascii_whitespace tool_name)
+             && (match wire.meta_server_name with
+                 | None -> true
+                 | Some meta_srv -> String.equal meta_srv srv) ->
+        Mcp_tool { server = Explicit_server srv; tool_name }
+      | _ -> fallback ()))
+  else (
     (* 2. Structured [_meta] server identity: whenever [_meta] names a server,
           NEVER fall through to [Implicit_mcp_kind] so a foreign server cannot
           bypass server checks by omitting [_meta.tool_name]. *)
-    (match wire.meta_server_name with
-     | Some srv ->
-       if not (is_allowed_mcp_kind wire.kind)
-       then fallback ()
-       else (
-         let candidate_tool =
-           let pick_non_empty = function
-             | Some s ->
-               let t = String.trim s in
-               if t <> "" && not (has_ascii_whitespace t) then Some t else None
-             | None -> None
-           in
-           match pick_non_empty wire.meta_tool_name with
-           | Some _ as found -> found
-           | None ->
-             (match pick_non_empty wire.name with
-              | Some _ as found -> found
-              | None -> pick_non_empty wire.title)
-         in
-         match candidate_tool with
-         | Some tool_name -> Mcp_tool { server = Explicit_server srv; tool_name }
-         | None -> fallback ())
-     | None ->
-       (* 3. Read-only lazy MCP schema read strictly targeting a single direct
-             child file inside this client's MASC-owned
-             [<gemini_dir>/antigravity-cli/mcp/<server>] folder. *)
-       let schema_read =
-         let allowed_read_tool_name =
-           match wire.name with
-           | None | Some "read_file" -> true
-           | Some _ -> false
-         in
-         match managed_schema_root, wire.kind with
-         | Some (srv, schema_dir), Some "read" when allowed_read_tool_name ->
-           (match extract_schema_read_paths wire with
+    match wire.meta_server_name with
+    | Some srv ->
+      if not (is_allowed_mcp_kind wire.kind)
+      then fallback ()
+      else (
+        let candidate_tool =
+          let pick_non_empty = function
+            | Some s ->
+              let t = String.trim s in
+              if t <> "" && not (has_ascii_whitespace t) then Some t else None
             | None -> None
-            | Some paths ->
-              let canonicalized =
-                List.map (canonical_managed_schema_file ~schema_dir) paths
-              in
-              (match canonicalized with
-               | Some first :: rest
-                 when List.for_all
-                        (function
-                          | Some p -> String.equal p first
-                          | None -> false)
-                        rest ->
-                 Some (Managed_mcp_schema_read { mcp_server_name = srv; path = first })
-               | _ -> None))
-         | _ -> None
-       in
-       (match schema_read with
-        | Some id -> id
-        | None ->
-          (* 4. Protocol-qualified MCP tool identifiers under non-mutating
-                ACP kinds (Kimi [mcp__<srv>__<tool>], Mistral Vibe
-                [_meta.tool_name = "mcp_<srv>.<tool>"], [<srv>:<tool>], etc.). *)
-          if is_allowed_mcp_kind wire.kind
-          then (
-            let candidate =
-              match wire.meta_tool_name with
+          in
+          match pick_non_empty wire.meta_tool_name with
+          | Some _ as found -> found
+          | None ->
+            (match pick_non_empty wire.name with
+             | Some _ as found -> found
+             | None -> pick_non_empty wire.title)
+        in
+        match candidate_tool with
+        | Some tool_name -> Mcp_tool { server = Explicit_server srv; tool_name }
+        | None -> fallback ())
+    | None ->
+      (* 3. Read-only lazy MCP schema read strictly targeting a single direct
+            child file inside this client's MASC-owned
+            [<gemini_dir>/antigravity-cli/mcp/<server>] folder. *)
+      let schema_read =
+        let allowed_read_tool_name =
+          match wire.name with
+          | None | Some "read_file" -> true
+          | Some _ -> false
+        in
+        match managed_schema_root, wire.kind with
+        | Some (srv, schema_dir), Some "read" when allowed_read_tool_name ->
+          (match extract_schema_read_paths wire with
+           | None -> None
+           | Some paths ->
+             let canonicalized =
+               List.map (canonical_managed_schema_file ~schema_dir) paths
+             in
+             (match canonicalized with
+              | Some first :: rest
+                when List.for_all
+                       (function
+                         | Some p -> String.equal p first
+                         | None -> false)
+                       rest ->
+                Some (Managed_mcp_schema_read { mcp_server_name = srv; path = first })
+              | _ -> None))
+        | _ -> None
+      in
+      (match schema_read with
+       | Some id -> id
+       | None ->
+         (* 4. Protocol-qualified MCP tool identifiers:
+               4a. Explicit [mcp(<srv>/<tool>)] / [mcp(<srv>:<tool>)] wrapper
+                   (permitted across None/mcp/other/execute kinds).
+               4b. Standard qualified identifiers (Kimi [mcp__<srv>__<tool>],
+                   Mistral Vibe [mcp_<srv>.<tool>] / [mcp_<srv>_<tool>],
+                   [<srv>:<tool>], [<srv>/<tool>], [<srv>_<tool>], or bare
+                   [kind = "mcp"]) strictly gated on [is_allowed_mcp_kind]. *)
+         let candidate =
+           match wire.meta_tool_name with
+           | Some s -> Some s
+           | None ->
+             (match wire.name with
               | Some s -> Some s
-              | None ->
-                (match wire.name with
-                 | Some s -> Some s
-                 | None -> wire.title)
-            in
-            match
-              Option.bind
-                candidate
-                (parse_qualified_mcp_identifier ?mcp_server_name ~kind:wire.kind)
-            with
-            | Some id -> id
-            | None -> fallback ())
-          else fallback ()))
+              | None -> wire.title)
+         in
+         (match Option.bind candidate parse_explicit_mcp_wrapper with
+          | Some id when is_allowed_explicit_mcp_wrapper_kind wire.kind -> id
+          | Some _ -> fallback ()
+          | None ->
+            if is_allowed_mcp_kind wire.kind
+            then (
+              match
+                Option.bind
+                  candidate
+                  (parse_qualified_mcp_identifier ?mcp_server_name ~kind:wire.kind)
+              with
+              | Some id -> id
+              | None -> fallback ())
+            else fallback ())))
 ;;
 
 let classify_tool_call_json ?managed_schema_root ?mcp_server_name json =
@@ -914,9 +1211,9 @@ let should_allow_tool_call ~policy identity =
 let is_masc_mcp_tool ~mcp_server_name ~allowed_tool_names ~title ~kind =
   let wire =
     { tool_call_id = ""
-    ; title = Some title
+    ; title = trim_nonempty_opt (Some title)
     ; name = None
-    ; kind
+    ; kind = trim_nonempty_opt kind
     ; meta_server_name = None
     ; meta_tool_name = None
     ; raw_input = None
@@ -938,9 +1235,9 @@ let should_allow_permission ~policy ~title ~kind =
   in
   let wire =
     { tool_call_id = ""
-    ; title = Some title
+    ; title = trim_nonempty_opt (Some title)
     ; name = None
-    ; kind
+    ; kind = trim_nonempty_opt kind
     ; meta_server_name = None
     ; meta_tool_name = None
     ; raw_input = None
@@ -1535,7 +1832,7 @@ let handle_permission_request t ~id ~params =
   let req_session_id = json_string_opt "sessionId" params in
   let tool_call = Option.value (json_field "toolCall" params) ~default:(`Assoc []) in
   let incoming_wire = parse_tool_call_wire tool_call in
-  let allow =
+  let allow, effective_wire =
     let matched_turn =
       with_state_lock t (fun () ->
         match t.active_turn, req_session_id with
@@ -1545,7 +1842,7 @@ let handle_permission_request t ~id ~params =
         | _ -> None)
     in
     match matched_turn with
-    | None -> false
+    | None -> false, incoming_wire
     | Some (policy, mcp_server_name, effective_wire) ->
       note_activity t;
       let identity =
@@ -1554,8 +1851,19 @@ let handle_permission_request t ~id ~params =
           ?mcp_server_name
           effective_wire
       in
-      should_allow_tool_call ~policy identity
+      should_allow_tool_call ~policy identity, effective_wire
   in
+  if not allow
+  then
+    Log.Runtime_agent.warn
+      "ACP permission denied: driver=%s tool_call_id=%s meta_tool=%s name=%s title=%S kind=%s session_id=%s"
+      (driver_to_string t.driver)
+      (if effective_wire.tool_call_id <> "" then effective_wire.tool_call_id else "<none>")
+      (Option.value effective_wire.meta_tool_name ~default:"<none>")
+      (Option.value effective_wire.name ~default:"<none>")
+      (Option.value effective_wire.title ~default:"")
+      (Option.value effective_wire.kind ~default:"<none>")
+      (Option.value req_session_id ~default:"<none>");
   let options = Option.value (json_list_opt "options" params) ~default:[] in
   let outcome =
     match choose_permission_option ~allow options with
@@ -2479,6 +2787,7 @@ let prompt
       ?(on_event = ignore)
       ()
   =
+  let* () = validate_prompt_blocks ~driver:t.driver ~capabilities:t.capabilities blocks in
   let started_at = Time_compat.now () in
   let text_buf = Buffer.create 1024 in
   let thought_buf = Buffer.create 512 in

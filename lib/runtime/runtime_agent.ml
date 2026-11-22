@@ -517,7 +517,17 @@ let supports_multimodal_bundle
   caps.supports_multimodal_inputs
 
 let requires_text_media_projection caps ~required =
-  match required with
+  let remaining_native =
+    List.filter
+      (fun modality ->
+         match required_modality_of_string modality with
+         | Some Modality_text -> false
+         | Some (Modality_image | Modality_document | Modality_audio) ->
+           supports_required_modality caps modality
+         | None -> false)
+      required
+  in
+  match remaining_native with
   | [] | [ _ ] -> false
   | _ :: _ :: _ -> not (supports_multimodal_bundle caps)
 
@@ -714,21 +724,31 @@ let validate_content_blocks_for_run_against_capabilities
     ~goal_blocks
 
 let apply_runtime_model_input_capabilities
+    ?(inherit_catalog_image = false)
     (caps : Llm_provider.Capabilities.capabilities)
     (model_caps : Runtime_schema.model_capabilities) =
-  (* Runtime model specs are the MASC SSOT for concrete media input support.
-     Provider-level caps may be broader than the selected model; media input
-     must fail closed before dispatch rather than letting a provider 400 leak
-     back as a late runtime error. *)
-  (* Fail closed on absence too: an unwritten media flag is [false], not the
-     provider's preset. This is the one place where [None] does not mean "the
-     layer below decides" (#37435).
-     DET-OK: absence is the operator withholding the modality, so [false] is
-     the stated contract rather than a fallback for a missing value. *)
+  (* Explicit runtime.toml declarations always take precedence (both [Some true]
+     and [Some false]). When [supports-image-input] / [supports-multimodal-inputs]
+     are omitted ([None]), an HTTP [Agent_core] binding backed by an exact
+     catalog [Model_row] inherits that row's declared image/multimodal support
+     so catalog vision models are not silently blinded when runtime.toml omits
+     a redundant capabilities block. Uncatalogued endpoints, provider-wide
+     presets, and official clients remain fail-closed ([false]) on absence. *)
   let declared field = Option.value field ~default:false in
+  let image_or_multimodal field ~catalog_value =
+    match field with
+    | Some value -> value
+    | None -> if inherit_catalog_image then catalog_value else false
+  in
   { caps with
-    supports_multimodal_inputs = declared model_caps.supports_multimodal_inputs;
-    supports_image_input = declared model_caps.supports_image_input;
+    supports_multimodal_inputs =
+      image_or_multimodal
+        model_caps.supports_multimodal_inputs
+        ~catalog_value:caps.supports_multimodal_inputs;
+    supports_image_input =
+      image_or_multimodal
+        model_caps.supports_image_input
+        ~catalog_value:caps.supports_image_input;
     supports_audio_input = declared model_caps.supports_audio_input;
     supports_video_input = declared model_caps.supports_video_input;
     (* The adapter freezes the document declaration with the wire's floor.
@@ -769,7 +789,15 @@ let input_capabilities_with_runtime caps (runtime : Runtime_instance.t) =
     Option.value
       runtime.model.capabilities
       ~default:Runtime_schema.model_capabilities_default in
-  apply_runtime_model_input_capabilities caps model_caps
+  let inherit_catalog_image =
+    match runtime.Runtime_instance.execution with
+    | Runtime_execution.Agent_core _ -> runtime.Runtime_instance.has_catalog_model_row
+    | Runtime_execution.Codex_app_server _
+    | Runtime_execution.Claude_code _
+    | Runtime_execution.Antigravity_cli _
+    | Runtime_execution.Acp _ -> false
+  in
+  apply_runtime_model_input_capabilities ~inherit_catalog_image caps model_caps
   |> apply_execution_input_capabilities runtime.execution
 
 let input_capabilities_for_config (config : config) =
@@ -1028,8 +1056,8 @@ module For_testing = struct
     validate_content_blocks_for_run_against_capabilities_with_checkpoint
   let validate_content_blocks_against_capabilities =
     validate_content_blocks_against_capabilities
-  let apply_runtime_model_input_capabilities =
-    apply_runtime_model_input_capabilities
+  let apply_runtime_model_input_capabilities caps model_caps =
+    apply_runtime_model_input_capabilities ~inherit_catalog_image:false caps model_caps
   let select_agent_result = select_agent_result
   let stop_reason_of_cooperative_yield = stop_reason_of_cooperative_yield
 end

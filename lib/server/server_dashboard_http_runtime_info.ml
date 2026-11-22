@@ -1453,33 +1453,48 @@ let runtime_default_runtime_id () =
 ;;
 
 let effective_capabilities_json (rt : Runtime_instance.t) =
+  let effective_input = Runtime_agent.input_capabilities_of_runtime rt in
+  let official_capability_fields () =
+    [ "supports_tools", `Bool (Runtime_tool_support.declares_tools rt)
+    ; "supports_native_streaming", `Bool rt.model.streaming
+    ; "supports_multimodal_inputs", `Bool effective_input.supports_multimodal_inputs
+    ; "supports_image_input", `Bool effective_input.supports_image_input
+    ; "supports_document_input", `Bool effective_input.supports_document_input
+    ; "supports_audio_input", `Bool effective_input.supports_audio_input
+    ; "supports_video_input", `Bool effective_input.supports_video_input
+    ]
+  in
   match rt.execution with
   | Runtime_execution.Codex_app_server _ ->
     `Assoc
-      [ "source", `String "unverified"
-      ; "execution", `String "codex_app_server"
-      ; "verified", `Bool false
-      ]
+      ([ "source", `String "unverified"
+       ; "execution", `String "codex_app_server"
+       ; "verified", `Bool false
+       ]
+       @ official_capability_fields ())
   | Runtime_execution.Antigravity_cli _ ->
     `Assoc
-      [ "source", `String "unverified"
-      ; "execution", `String "antigravity_cli"
-      ; "verified", `Bool false
-      ]
+      ([ "source", `String "unverified"
+       ; "execution", `String "antigravity_cli"
+       ; "verified", `Bool false
+       ]
+       @ official_capability_fields ())
   | Runtime_execution.Claude_code _ ->
     `Assoc
-      [ "source", `String "unverified"
-      ; "execution", `String "claude_code"
-      ; "execution_mode", `String "masc_mcp_only"
-      ; "verified", `Bool false
-      ]
+      ([ "source", `String "unverified"
+       ; "execution", `String "claude_code"
+       ; "execution_mode", `String "masc_mcp_only"
+       ; "verified", `Bool false
+       ]
+       @ official_capability_fields ())
   | Runtime_execution.Acp config ->
     `Assoc
-      [ "source", `String "unverified"
-      ; "execution", `String ("acp_" ^ Runtime_acp_client.driver_to_string config.driver)
-      ; "driver", `String (Runtime_acp_client.driver_to_string config.driver)
-      ; "verified", `Bool false
-      ]
+      ([ "source", `String "unverified"
+       ; "execution", `String ("acp_" ^ Runtime_acp_client.driver_to_string config.driver)
+       ; "driver", `String (Runtime_acp_client.driver_to_string config.driver)
+       ; "verified", `Bool false
+       ]
+       @ official_capability_fields ())
   | Runtime_execution.Agent_core sealed ->
    (match
       Llm_provider.Provider_config.capabilities_for_config_model
@@ -1522,8 +1537,8 @@ let effective_capabilities_json (rt : Runtime_instance.t) =
       ; "reasoning_replay_override", `String (reasoning_replay_override_wire caps.reasoning_replay_override)
       ; "supports_response_format_json", `Bool caps.supports_response_format_json
       ; "supports_structured_output", `Bool caps.supports_structured_output
-      ; "supports_multimodal_inputs", `Bool caps.supports_multimodal_inputs
-      ; "supports_image_input", `Bool caps.supports_image_input
+      ; "supports_multimodal_inputs", `Bool effective_input.supports_multimodal_inputs
+      ; "supports_image_input", `Bool effective_input.supports_image_input
       ; "supports_document_input", `Bool caps.supports_document_input
       ; "supports_audio_input", `Bool caps.supports_audio_input
       ; "supports_video_input", `Bool caps.supports_video_input
@@ -1634,6 +1649,7 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime_instance.t) =
   let runtime_status =
     if is_official_client_runtime then "configured_unverified" else "configured"
   in
+  let effective_input = Runtime_agent.input_capabilities_of_runtime rt in
   let models = [ rt.model.api_name ] in
   let capabilities_declared, caps =
     match rt.model.capabilities with
@@ -1662,10 +1678,9 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime_instance.t) =
     ; "available", `Bool (not is_official_client_runtime)
     ; "is_default_runtime", `Bool (Option.equal String.equal default_id (Some rt.id))
     ; "max_context", `Int (Runtime_instance.max_context_of_runtime rt)
-    ; "tools_support", `Bool (Runtime_tool_support.declares_tools rt && not is_official_client_runtime)
-    ; "thinking_support", Json_util.bool_opt_to_json
-        (if is_official_client_runtime then Some false else rt.model.thinking_support)
-    ; "streaming", `Bool (rt.model.streaming && not is_official_client_runtime)
+    ; "tools_support", `Bool (Runtime_tool_support.declares_tools rt)
+    ; "thinking_support", Json_util.bool_opt_to_json rt.model.thinking_support
+    ; "streaming", `Bool rt.model.streaming
       (* Per-model sampling temperature override ([models.<id>].temperature).
          [`Null] when unset (the runtime keeps the fleet fallback). Read-only
          projection for the dashboard runtime capability card. *)
@@ -1677,19 +1692,19 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime_instance.t) =
     ; "top_k", Json_util.int_opt_to_json rt.model.top_k
     ; "min_p", Json_util.float_opt_to_json rt.model.min_p
       (* Additive capability projection for dashboard runtime snapshot cards.
-         These mirrors are declared model capabilities from runtime.toml only.
-         Each key is [null] when the operator wrote nothing for it, and
-         [capabilities_declared] below says whether the block existed at
-         all — an absent block and a block that states one key are different
-         facts (#37435). *)
+         [supports_image_input] and [supports_multimodal_inputs] are
+         single-sourced from [Runtime_agent.input_capabilities_of_runtime] so
+         [effective_capabilities], [runtime_inventory_entry], and
+         [runtime_resolved] agree across HTTP, CLI, and ACP runtimes. Raw
+         runtime.toml declarations remain in [declared_spec.model.capabilities]. *)
     ; "capabilities_declared", `Bool capabilities_declared
     ; "max_output_tokens", Json_util.int_opt_to_json caps.max_output_tokens
     ; "supports_tool_choice", Json_util.bool_opt_to_json caps.supports_tool_choice
     ; "supports_required_tool_choice", Json_util.bool_opt_to_json caps.supports_required_tool_choice
     ; "supports_named_tool_choice", Json_util.bool_opt_to_json caps.supports_named_tool_choice
     ; "supports_parallel_tool_calls", Json_util.bool_opt_to_json caps.supports_parallel_tool_calls
-    ; "supports_multimodal_inputs", Json_util.bool_opt_to_json caps.supports_multimodal_inputs
-    ; "supports_image_input", Json_util.bool_opt_to_json caps.supports_image_input
+    ; "supports_multimodal_inputs", `Bool effective_input.supports_multimodal_inputs
+    ; "supports_image_input", `Bool effective_input.supports_image_input
       ; "supports_document_input", Json_util.bool_opt_to_json caps.supports_document_input
     ; "supports_audio_input", Json_util.bool_opt_to_json caps.supports_audio_input
     ; "supports_video_input", Json_util.bool_opt_to_json caps.supports_video_input

@@ -494,6 +494,58 @@ let claude_quota_standing : Runtime_claude_code.quota_block -> Runtime_candidate
     Runtime_candidate_standing.Rate_limited { retry_after = None }
 ;;
 
+let standing_of_rpc_error_class ~now = function
+  | Runtime_acp_client.Rpc_hard_quota ->
+    Some
+      (Runtime_candidate_standing.Hard_quota
+         { source = Runtime_quota_window.Provider_quota_refused; resets_at = None })
+  | Runtime_acp_client.Rpc_rate_limited ->
+    Some (Runtime_candidate_standing.Rate_limited { retry_after = None })
+  | Runtime_acp_client.Rpc_auth_error ->
+    Some (Runtime_candidate_standing.Credential_refused { noted_at = now })
+  | Runtime_acp_client.Rpc_context_overflow
+  | Runtime_acp_client.Rpc_authorization_error
+  | Runtime_acp_client.Rpc_provider_unavailable
+  | Runtime_acp_client.Rpc_other -> None
+;;
+
+let antigravity_standing_of_error ~now :
+  Runtime_antigravity.error -> Runtime_candidate_standing.observation option
+  = function
+  | Runtime_antigravity.Turn_failed detail ->
+    Runtime_acp_client.classify_rpc_error
+      ~method_name:"antigravity/turn"
+      ~code:0
+      ~message:detail
+    |> standing_of_rpc_error_class ~now
+  | Runtime_antigravity.Invalid_config _
+  | Runtime_antigravity.Spawn_refused _
+  | Runtime_antigravity.Spawn_capacity_busy _
+  | Runtime_antigravity.Protocol_error _
+  | Runtime_antigravity.State_callback_failed _
+  | Runtime_antigravity.Context_window_exceeded _
+  | Runtime_antigravity.Result_not_completed _
+  | Runtime_antigravity.Actions_denied _
+  | Runtime_antigravity.Process_exited _
+  | Runtime_antigravity.Child_fd_ceiling_exceeded _
+  | Runtime_antigravity.Unhandled_exception _
+  | Runtime_antigravity.Timeout _ -> None
+;;
+
+let acp_standing_of_error ~now :
+  Runtime_acp_client.error -> Runtime_candidate_standing.observation option
+  = function
+  | Runtime_acp_client.Rpc_error { method_name; code; message } ->
+    Runtime_acp_client.classify_rpc_error ~method_name ~code ~message
+    |> standing_of_rpc_error_class ~now
+  | Runtime_acp_client.Invalid_config _
+  | Runtime_acp_client.Spawn_refused _
+  | Runtime_acp_client.Protocol_error _
+  | Runtime_acp_client.Timeout _
+  | Runtime_acp_client.Process_exited _
+  | Runtime_acp_client.Client_closed -> None
+;;
+
 let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runtime_instance.t) ~system_prompt ?timeout_s ?output_schema ~prompt () =
   let open Result.Syntax in
   (* The Codex and Claude adapters take the system prompt as an option and
@@ -712,6 +764,10 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
       prepare_antigravity_panel_home
         ~host ~runtime_root:panel_root ~oauth_source:execution.oauth_source) in
     let config = { config with Runtime_antigravity.cwd = native_cwd } in
+    let antigravity_failed error =
+      Option.iter observe (antigravity_standing_of_error ~now:(Time_compat.now ()) error);
+      Error (Antigravity_failure error)
+    in
     (match Runtime_antigravity.run_turn
        ~host
        ~before_spawn:(fun () -> Antigravity_panel_root_owner.before_spawn ~root:panel_root)
@@ -727,9 +783,16 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
        ~home_dir:(Runtime_antigravity_home.home_dir home)
        ~mgr ~clock ~cwd:Eio.Path.(Eio.Stdenv.fs env / native_cwd) config ~prompt with
      | Ok (result : Runtime_antigravity.turn_result) -> succeeded { text = result.text; model = result.model; usage = antigravity_usage result.usage }
-     | Error error ->
-       Error (Antigravity_failure error))
+     | Error error -> antigravity_failed error)
   | Runtime_execution.Acp execution ->
+    let acp_failed err =
+      Option.iter observe (acp_standing_of_error ~now:(Time_compat.now ()) err);
+      Error (Acp_failure err)
+    in
+    let* () =
+      Runtime_official_client_tool.validate_image_inputs images
+      |> Result.map_error (fun detail -> Acp_failure (Runtime_acp_client.Invalid_config detail))
+    in
     let* (_host : Runtime_account_access.host_account) =
       Runtime_account_access.authorize_host (Runtime_account_access.Acp_client execution.driver)
       |> Result.map_error (fun refusal ->
@@ -774,41 +837,49 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
     Eio.Switch.run
     @@ fun sw ->
     (match Runtime_acp_client.start ~sw ~proc_mgr:mgr ~clock ~config:acp_config () with
-     | Error err -> Error (Acp_failure err)
+     | Error err -> acp_failed err
      | Ok client ->
-       let mode =
-         Option.value execution.mode
-           ~default:
-             (Runtime_acp_client.mode_of_posture
-                execution.driver
-                Runtime_native_tools.Native_none)
-       in
        (match
-          Runtime_acp_client.new_session
-            client
-            ~cwd:base_dir
-            ?system_prompt_append
-            ~mode
-            ~model:execution.model
-            ?effort:execution.effort
-            ()
+          Runtime_acp_client.validate_prompt_blocks
+            ~driver:execution.driver
+            ~capabilities:(Runtime_acp_client.capabilities client)
+            blocks
         with
-        | Error err -> Error (Acp_failure err)
-        | Ok session ->
+        | Error err -> acp_failed err
+        | Ok () ->
+          let mode =
+            Option.value execution.mode
+              ~default:
+                (Runtime_acp_client.mode_of_posture
+                   execution.driver
+                   Runtime_native_tools.Native_none)
+          in
           (match
-             Runtime_acp_client.prompt
+             Runtime_acp_client.new_session
                client
-               ~session_id:session.session_id
-               ~blocks
-               ~timeout_s:effective_timeout_s
-               ~permission_policy:Runtime_acp_client.Deny_all
+               ~cwd:base_dir
+               ?system_prompt_append
+               ~mode
+               ~model:execution.model
+               ?effort:execution.effort
                ()
            with
-           | Error err -> Error (Acp_failure err)
-           | Ok res ->
-             let usage = acp_usage ~driver:execution.driver res.usage in
-             on_usage usage;
-             succeeded { text = res.text; model = execution.model; usage })))
+           | Error err -> acp_failed err
+           | Ok session ->
+             (match
+                Runtime_acp_client.prompt
+                  client
+                  ~session_id:session.session_id
+                  ~blocks
+                  ~timeout_s:effective_timeout_s
+                  ~permission_policy:Runtime_acp_client.Deny_all
+                  ()
+              with
+              | Error err -> acp_failed err
+              | Ok res ->
+                let usage = acp_usage ~driver:execution.driver res.usage in
+                on_usage usage;
+                succeeded { text = res.text; model = execution.model; usage }))))
 ;;
 
 let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema ~prompt () =
@@ -834,4 +905,6 @@ module For_testing = struct
   let codex_usage = codex_usage
   let antigravity_panel_root_owner_pid = antigravity_panel_root_owner_pid
   let claude_quota_standing = claude_quota_standing
+  let antigravity_standing_of_error = antigravity_standing_of_error
+  let acp_standing_of_error = acp_standing_of_error
 end

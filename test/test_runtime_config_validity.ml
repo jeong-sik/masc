@@ -8206,6 +8206,40 @@ let test_seat_overlap_ignores_disabled_librarian_lanes_and_follows_keeper_lanes 
 
 ;;
 
+let test_repo_runtime_toml_codex_and_kimi_acp_vision_declarations () =
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  let schema =
+    match Runtime_toml.parse_file path with
+    | Ok cfg -> cfg
+    | Error errs ->
+      failf "config/runtime.toml failed to parse: %s"
+        (String.concat "; "
+           (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errs))
+  in
+  List.iter
+    (fun model_id ->
+       match
+         List.find_opt
+           (fun (m : Runtime_schema.model_spec) -> String.equal m.id model_id)
+           schema.Runtime_schema.models
+       with
+       | None -> failf "missing [models.%s] in config/runtime.toml" model_id
+       | Some model ->
+         let img =
+           Option.bind model.Runtime_schema.capabilities (fun c -> c.supports_image_input)
+         in
+         check (option bool)
+           (Printf.sprintf "config/runtime.toml [models.%s] supports-image-input=true" model_id)
+           (Some true)
+           img)
+    [ "codex-gpt-5-6"
+    ; "acp-kimi-k3"
+    ; "acp-kimi-k3-256k"
+    ; "acp-kimi-for-coding"
+    ; "acp-kimi-for-coding-highspeed"
+    ]
+;;
+
 let () =
   run "runtime_config_validity"
     [ ( "materialized catalog selection",
@@ -8541,6 +8575,9 @@ let () =
           test_case
             "repo runtime.toml declares every mandatory exact-output lane"
             `Quick test_repo_runtime_toml_declares_mandatory_exact_output_lanes;
+          test_case
+            "repo runtime.toml declares supports-image-input on codex-gpt-5-6 and kimi_acp models"
+            `Quick test_repo_runtime_toml_codex_and_kimi_acp_vision_declarations;
           test_case
             "every discovered boot-path fixture declares the mandatory exact-output lanes"
             `Quick test_boot_path_fixtures_declare_mandatory_exact_output_lanes;

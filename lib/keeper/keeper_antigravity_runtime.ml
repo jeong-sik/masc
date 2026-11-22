@@ -30,12 +30,36 @@ let runtime_error_to_core_error = function
          ; detail = message
          })
   | Runtime_antigravity.Turn_failed detail ->
-    Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderReportedError
-         { provider = "antigravity_cli"
-         ; error_type = Some "turn_failed"
-         ; detail
-         })
+    (match
+       Runtime_acp_client.classify_rpc_error
+         ~method_name:"antigravity/turn"
+         ~code:0
+         ~message:detail
+     with
+     | Runtime_acp_client.Rpc_hard_quota ->
+       Agent_core.Error.Provider
+         (Llm_provider.Error.HardQuota
+            { provider = "antigravity_cli"; retry_after = None; detail })
+     | Runtime_acp_client.Rpc_rate_limited ->
+       Agent_core.Error.Provider
+         (Llm_provider.Error.RateLimit
+            { provider = "antigravity_cli"; retry_after = None; detail })
+     | Runtime_acp_client.Rpc_auth_error ->
+       Agent_core.Error.Provider
+         (Llm_provider.Error.AuthError { provider = "antigravity_cli"; detail })
+     | Runtime_acp_client.Rpc_authorization_error ->
+       Agent_core.Error.Provider
+         (Llm_provider.Error.AuthorizationError { provider = "antigravity_cli"; detail })
+     | Runtime_acp_client.Rpc_provider_unavailable ->
+       Agent_core.Error.Provider
+         (Llm_provider.Error.ProviderUnavailable { provider = "antigravity_cli"; detail })
+     | Runtime_acp_client.Rpc_context_overflow | Runtime_acp_client.Rpc_other ->
+       Agent_core.Error.Provider
+         (Llm_provider.Error.ProviderReportedError
+            { provider = "antigravity_cli"
+            ; error_type = Some "turn_failed"
+            ; detail
+            }))
   (* The same provider failure an empty SUCCESS already raises as
      [Turn_failed]; the refusal now names itself instead of hiding in a
      stderr tail, and a partial reply no longer passes as the answer. *)

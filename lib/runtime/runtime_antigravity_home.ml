@@ -341,6 +341,58 @@ let settings_json policy =
   settings_permissions_json ~policy ~allow:[] ~deny:["read_file(*)"; "write_file(*)"; "command(*)"]
 ;;
 
+let acp_settings_json ?mcp_server_name:server_name ~gemini_dir () =
+  if String.trim gemini_dir = ""
+     || Filename.is_relative gemini_dir
+     || String.contains gemini_dir '\000'
+  then
+    Error
+      (Unsafe_directory
+         { path = gemini_dir
+         ; detail = "managed Antigravity ACP dir must be a non-empty absolute path without NUL bytes"
+         })
+  else (
+    match server_name with
+    | Some srv when (not (Fs_compat.is_capability_leaf srv)) || has_permission_pattern_syntax srv ->
+      Error
+        (Unsafe_directory
+           { path = gemini_dir
+           ; detail = "ACP MCP server name is not a safe leaf or contains permission-pattern syntax"
+           })
+    | _ ->
+      let config_dir = Filename.concat gemini_dir "config" in
+      let cli_dir = Filename.concat gemini_dir "antigravity-cli" in
+      let token_path = Filename.concat cli_dir "antigravity-oauth-token" in
+      let schema_dir =
+        Option.map
+          (fun srv -> Filename.concat (Filename.concat cli_dir "mcp") srv)
+          server_name
+      in
+      let checked_paths = config_dir :: token_path :: Option.to_list schema_dir in
+      (match List.find_opt has_permission_pattern_syntax checked_paths with
+       | Some path ->
+         Error
+           (Unsafe_directory
+              { path
+              ; detail = "managed Antigravity ACP dir contains permission-pattern syntax"
+              })
+       | None ->
+         let allow =
+           match server_name, schema_dir with
+           | Some srv, Some dir -> [ "mcp(" ^ srv ^ "/*)"; "read_file(" ^ dir ^ ")" ]
+           | _ -> []
+         in
+         let deny =
+           [ "read_file(" ^ config_dir ^ ")"
+           ; "read_file(" ^ token_path ^ ")"
+           ; "read_url(*)"
+           ; "execute_url(*)"
+           ]
+         in
+         let strings values = `List (List.map (fun value -> `String value) values) in
+         Ok (`Assoc [ "permissions", `Assoc [ "allow", strings allow; "deny", strings deny ] ])))
+;;
+
 let write_private_file ~make_error path contents =
   match Fs_compat.save_file_atomic_strict path contents with
   | Error detail -> Error (make_error path detail)

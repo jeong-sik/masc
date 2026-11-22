@@ -799,13 +799,14 @@ let test_pool_key_switch_evicts_superseded_keeper_entry () =
 ;;
 
 let rec rm_rf path =
-  if Sys.file_exists path
-  then (
-    if Sys.is_directory path
+  match Unix.lstat path with
+  | stat ->
+    if stat.Unix.st_kind = Unix.S_DIR
     then (
       Array.iter (fun name -> rm_rf (Filename.concat path name)) (Sys.readdir path);
-      Sys.rmdir path)
-    else Sys.remove path)
+      Unix.rmdir path)
+    else Unix.unlink path
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 ;;
 
 let read_file_text path =
@@ -1355,6 +1356,574 @@ let test_acp_overflow_shrink_handoff_and_vibe_operator_login () =
      | Error err -> failf "Mistral_vibe operator finish_login failed: %s" err))
 ;;
 
+let test_typed_tool_call_classification_and_schema_boundary () =
+  let tmp = Filename.temp_dir "acp-schema-boundary-" "" in
+  Fun.protect ~finally:(fun () -> rm_rf tmp) (fun () ->
+    let canonical_tmp = Unix.realpath tmp in
+    let schema_dir = Filename.concat canonical_tmp "antigravity-cli/mcp/masc" in
+    let schema_subdir = Filename.concat schema_dir "nested" in
+    let config_dir = Filename.concat canonical_tmp "config" in
+    let outside_dir = Filename.concat canonical_tmp "outside" in
+    Fs_compat.mkdir_p schema_subdir;
+    Fs_compat.mkdir_p config_dir;
+    Fs_compat.mkdir_p outside_dir;
+    let valid_schema = Filename.concat schema_dir "masc_probe_ping.json" in
+    let unpinned_schema = Filename.concat schema_dir "unpinned_tool.json" in
+    let nested_schema = Filename.concat schema_subdir "masc_probe_ping.json" in
+    let valid_instructions = Filename.concat schema_dir "instructions.md" in
+    let invalid_txt = Filename.concat schema_dir "notes.txt" in
+    let secret_cfg = Filename.concat config_dir "mcp_config.json" in
+    let secret_token = Filename.concat canonical_tmp "antigravity-cli/antigravity-oauth-token" in
+    let outside_json = Filename.concat outside_dir "secret.json" in
+    let escaping_link = Filename.concat schema_dir "escape.json" in
+    Out_channel.with_open_text valid_schema (fun oc -> output_string oc "{}");
+    Out_channel.with_open_text unpinned_schema (fun oc -> output_string oc "{}");
+    Out_channel.with_open_text nested_schema (fun oc -> output_string oc "{}");
+    Out_channel.with_open_text valid_instructions (fun oc -> output_string oc "# docs");
+    Out_channel.with_open_text invalid_txt (fun oc -> output_string oc "nope");
+    Out_channel.with_open_text secret_cfg (fun oc -> output_string oc "{}");
+    Out_channel.with_open_text secret_token (fun oc -> output_string oc "secret");
+    Out_channel.with_open_text outside_json (fun oc -> output_string oc "{}");
+    Unix.symlink outside_json escaping_link;
+    let managed_schema_root = "masc", schema_dir in
+    let policy =
+      Runtime_acp_client.Allow_masc_mcp_only
+        { mcp_server_name = "masc"
+        ; allowed_tool_names = [ "masc_probe_ping"; "keeper_skill" ]
+        }
+    in
+    let classify =
+      Runtime_acp_client.For_testing.classify_tool_call_json
+        ~managed_schema_root
+        ~mcp_server_name:"masc"
+    in
+    let allowed json =
+      Runtime_acp_client.should_allow_tool_call ~policy (classify json)
+    in
+    (* Antigravity 1.5.14 structured call_mcp_tool wire payload (kind="execute") *)
+    let agy_mcp_call =
+      `Assoc
+        [ "toolCallId", `String "call_agy_1"
+        ; "name", `String "call_mcp_tool"
+        ; "kind", `String "execute"
+        ; "title", `String "MCP Tool masc_probe_ping"
+        ; ( "rawInput"
+          , `Assoc
+              [ "ServerName", `String "masc"
+              ; "ToolName", `String "masc_probe_ping"
+              ; "Arguments", `Assoc [ "nonce", `String "n1" ]
+              ] )
+        ]
+    in
+    (match classify agy_mcp_call with
+     | Runtime_acp_client.Mcp_tool
+         { server = Runtime_acp_client.Explicit_server "masc"
+         ; tool_name = "masc_probe_ping"
+         } -> ()
+     | _ -> fail "expected Antigravity call_mcp_tool to classify as Explicit_server masc");
+    check bool "allows Antigravity structured call_mcp_tool under Allow_masc_mcp_only" true
+      (allowed agy_mcp_call);
+    (* Foreign server / unpinned tool / missing rawInput all FAIL CLOSED *)
+    check bool "denies call_mcp_tool with foreign ServerName" false
+      (allowed
+         (`Assoc
+            [ "name", `String "call_mcp_tool"
+            ; "kind", `String "execute"
+            ; "title", `String "MCP Tool masc_probe_ping"
+            ; ( "rawInput"
+              , `Assoc [ "ServerName", `String "evil"; "ToolName", `String "masc_probe_ping" ] )
+            ]));
+    check bool "denies call_mcp_tool with unpinned ToolName" false
+      (allowed
+         (`Assoc
+            [ "name", `String "call_mcp_tool"
+            ; "kind", `String "execute"
+            ; ( "rawInput"
+              , `Assoc [ "ServerName", `String "masc"; "ToolName", `String "unpinned_tool" ] )
+            ]));
+    check bool "denies display-title-only MCP Tool without structured rawInput" false
+      (allowed
+         (`Assoc
+            [ "name", `String "call_mcp_tool"
+            ; "kind", `String "execute"
+            ; "title", `String "MCP Tool masc_probe_ping"
+            ]));
+    (* Antigravity lazy MCP schema reads inside managed_schema_root *)
+    let read_call ?(kind = "read") ?(locs = []) path_arg =
+      `Assoc
+        [ "name", `String "read_file"
+        ; "kind", `String kind
+        ; "title", `String ("File " ^ path_arg)
+        ; "locations", `List (List.map (fun p -> `Assoc [ "path", `String p ]) locs)
+        ; "rawInput", `Assoc [ "Path", `String path_arg ]
+        ]
+    in
+    check bool "allows read_file of valid .json inside managed schema dir" true
+      (allowed (read_call ~locs:[ valid_schema ] valid_schema));
+    check bool "denies read_file of unpinned tool .json inside managed schema dir" false
+      (allowed (read_call unpinned_schema));
+    check bool "allows read_file of instructions.md inside managed schema dir" true
+      (allowed (read_call valid_instructions));
+    check bool "denies managed schema read when allowed_tool_names is empty" false
+      (Runtime_acp_client.should_allow_tool_call
+         ~policy:(Runtime_acp_client.Allow_masc_mcp_only { mcp_server_name = "masc"; allowed_tool_names = [] })
+         (classify (read_call valid_schema)));
+    check bool "denies read_file of non-.json file inside managed schema dir" false
+      (allowed (read_call invalid_txt));
+    check bool "denies read_file of config/mcp_config.json" false
+      (allowed (read_call secret_cfg));
+    check bool "denies read_file of antigravity-oauth-token" false
+      (allowed (read_call secret_token));
+    check bool "denies read_file traversal into config/mcp_config.json" false
+      (allowed (read_call (Filename.concat schema_dir "../../../config/mcp_config.json")));
+    check bool "denies read_file through escaping symlink inside schema dir" false
+      (allowed (read_call escaping_link));
+    check bool "denies mixed valid location + outside rawInput.Path" false
+      (allowed (read_call ~locs:[ valid_schema ] outside_json));
+    check bool "denies multi-location mixing pinned + unpinned schemas" false
+      (allowed (read_call ~locs:[ valid_schema; unpinned_schema ] valid_schema));
+    check bool "denies multi-key rawInput with secondary outside file_path" false
+      (allowed
+         (`Assoc
+            [ "name", `String "read_file"
+            ; "kind", `String "read"
+            ; "locations", `List [ `Assoc [ "path", `String valid_schema ] ]
+            ; ( "rawInput"
+              , `Assoc [ "Path", `String valid_schema; "file_path", `String outside_json ] )
+            ]));
+    check bool "denies non-empty rawInput with unrecognized path key" false
+      (allowed
+         (`Assoc
+            [ "name", `String "read_file"
+            ; "kind", `String "read"
+            ; "locations", `List [ `Assoc [ "path", `String valid_schema ] ]
+            ; "rawInput", `Assoc [ "custom_key", `String outside_json ]
+            ]));
+    check bool "denies schema read in nested subdirectory under schema_dir" false
+      (allowed (read_call nested_schema));
+    check bool "denies edit kind targeting managed schema file" false
+      (allowed (read_call ~kind:"edit" valid_schema));
+    (* Foreign _meta.server_name without _meta.tool_name must NOT fall through to Implicit_mcp_kind *)
+    check bool "denies foreign _meta.server_name even when kind=mcp and name matches pinned tool" false
+      (allowed
+         (`Assoc
+            [ "name", `String "masc_probe_ping"
+            ; "kind", `String "mcp"
+            ; "_meta", `Assoc [ "server_name", `String "evil" ]
+            ]));
+    (* Mistral Vibe 3.1.0 structured _meta.tool_name *)
+    check bool "allows Vibe _meta.tool_name mcp_masc.masc_probe_ping" true
+      (allowed
+         (`Assoc
+            [ "toolCallId", `String "effect-1"
+            ; "title", `String "mcp_masc.masc_probe_ping"
+            ; "kind", `String "other"
+            ; "_meta", `Assoc [ "tool_name", `String "mcp_masc.masc_probe_ping" ]
+            ]));
+    (* Declarative acp_settings_json SSOT *)
+    (match Runtime_antigravity_home.acp_settings_json ~mcp_server_name:"masc" ~gemini_dir:canonical_tmp () with
+     | Error err -> failf "acp_settings_json failed: %s" (Runtime_antigravity_home.error_to_string err)
+     | Ok json ->
+       let open Yojson.Safe.Util in
+       let allow_list = json |> member "permissions" |> member "allow" |> to_list |> List.map to_string in
+       let deny_list = json |> member "permissions" |> member "deny" |> to_list |> List.map to_string in
+       check bool "settings allow includes mcp(masc/*)" true (List.mem "mcp(masc/*)" allow_list);
+       check bool "settings allow includes schema dir" true
+         (List.mem ("read_file(" ^ schema_dir ^ ")") allow_list);
+       check bool "settings deny includes config dir" true
+         (List.mem ("read_file(" ^ config_dir ^ ")") deny_list);
+       check bool "settings deny includes oauth token" true
+         (List.mem ("read_file(" ^ secret_token ^ ")") deny_list);
+       check bool "settings deny includes read_url(*)" true (List.mem "read_url(*)" deny_list);
+       check bool "settings deny includes execute_url(*)" true (List.mem "execute_url(*)" deny_list));
+    check bool "acp_settings_json rejects pattern syntax in gemini_dir" true
+      (Result.is_error
+         (Runtime_antigravity_home.acp_settings_json ~mcp_server_name:"masc" ~gemini_dir:"/tmp/bad*dir" ()));
+    check bool "acp_settings_json rejects relative gemini_dir" true
+      (Result.is_error
+         (Runtime_antigravity_home.acp_settings_json ~mcp_server_name:"masc" ~gemini_dir:"relative/dir" ()));
+    check bool "acp_settings_json rejects traversal mcp_server_name" true
+      (Result.is_error
+         (Runtime_antigravity_home.acp_settings_json ~mcp_server_name:"../evil" ~gemini_dir:canonical_tmp ()));
+    (* Kimi & Vibe effort config_option discovery *)
+    let vibe_thinking_opt : Runtime_acp_client.config_option =
+      { id = "thinking"
+      ; name = "Thinking"
+      ; category = Some "thinking"
+      ; current_value = "high"
+      ; available_values = [ "off"; "high" ]
+      }
+    in
+    check (option string) "Vibe category=thinking maps none -> off" (Some "off")
+      (Runtime_acp_client.For_testing.resolve_option_value
+         ~driver:Mistral_vibe
+         ~config_id:"thinking"
+         ~requested:"none"
+         ~option:vibe_thinking_opt);
+    let kimi_profile = Runtime_acp_client.profile_of_driver Kimi_code in
+    check (option string) "Kimi effort_config_id matches live wire id" (Some "thinking")
+      kimi_profile.effort_config_id;
+    let agy_profile = Runtime_acp_client.profile_of_driver Antigravity in
+    check (option string) "Antigravity effort_config_id matches live wire id" (Some "thought_level")
+      agy_profile.effort_config_id)
+;;
+
+let test_set_model_toolcall_correlation_and_idle_liveness () =
+  let tmp = Filename.temp_dir "acp-proto-hardening-" "" in
+  let log_file = Filename.concat tmp "mock_events.json" in
+  let settings_copy = Filename.concat tmp "observed_settings.json" in
+  let mock_script = Filename.concat tmp "mock_proto_acp.py" in
+  let script_body =
+    Printf.sprintf
+      {|#!/usr/bin/env python3
+import json, os, sys, time
+
+gdir = ""
+for i, a in enumerate(sys.argv):
+    if a == "--gemini-dir" and i + 1 < len(sys.argv):
+        gdir = sys.argv[i + 1]
+if gdir:
+    sp = os.path.join(gdir, "antigravity-cli", "settings.json")
+    if os.path.exists(sp):
+        with open(sp, "r") as f:
+            data = f.read()
+        with open(%S, "w") as out:
+            out.write(data)
+
+def send(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+state = {"set_models": [], "set_config_options": [], "perm_outcomes": {}, "cancelled": 0}
+def flush_state():
+    tmp_path = %S + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(state, f)
+    os.replace(tmp_path, %S)
+
+pending_perm_prompt = None
+expected_perms = set()
+session_counter = 0
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    if "method" in msg:
+        m = msg["method"]
+        req_id = msg.get("id")
+        params = msg.get("params", {})
+        if m == "initialize":
+            send({"jsonrpc": "2.0", "id": req_id, "result": {
+                "protocolVersion": 1,
+                "agentCapabilities": {
+                    "loadSession": True,
+                    "sessionCapabilities": {
+                        "resume": {},
+                        "close": False,
+                        "additionalDirectories": {}
+                    }
+                }
+            }})
+        elif m == "session/new":
+            session_counter += 1
+            sid = "sess-proto" if session_counter == 1 else f"sess-proto-{session_counter}"
+            send({"jsonrpc": "2.0", "id": req_id, "result": {
+                "sessionId": sid,
+                "models": {
+                    "currentModelId": "gemini-4-neon-high",
+                    "availableModels": [
+                        {"modelId": "gemini-4-neon-high"},
+                        {"modelId": "gemini-4-neon-medium"}
+                    ]
+                },
+                "configOptions": [
+                    {"id": "model", "name": "Model", "category": "model", "currentValue": "gemini-4-neon",
+                     "options": [{"value": "gemini-4-neon"}]},
+                    {"id": "thought_level", "name": "Thought", "category": "thought_level", "currentValue": "high",
+                     "options": [{"value": "low"}, {"value": "medium"}, {"value": "high"}]}
+                ]
+            }})
+        elif m == "session/set_model":
+            mid = params.get("modelId")
+            sid = params.get("sessionId")
+            state["set_models"].append(mid)
+            flush_state()
+            # First session emits config_option_update synchronously; second session omits it
+            # so the client must treat pre-set_model effort current_value as stale.
+            if sid == "sess-proto":
+                send({"jsonrpc": "2.0", "method": "session/update", "params": {
+                    "sessionId": sid,
+                    "update": {
+                        "sessionUpdate": "config_option_update",
+                        "configOptions": [
+                            {"id": "model", "name": "Model", "category": "model", "currentValue": "gemini-4-neon",
+                             "options": [{"value": "gemini-4-neon"}]},
+                            {"id": "thought_level", "name": "Thought", "category": "thought_level", "currentValue": "medium",
+                             "options": [{"value": "low"}, {"value": "medium"}, {"value": "high"}]}
+                        ]
+                    }
+                }})
+            send({"jsonrpc": "2.0", "id": req_id, "result": {}})
+        elif m == "session/set_config_option":
+            state["set_config_options"].append((params.get("configId"), params.get("value")))
+            flush_state()
+            send({"jsonrpc": "2.0", "id": req_id, "result": {"configOptions": []}})
+        elif m == "session/cancel":
+            state["cancelled"] += 1
+            flush_state()
+        elif m == "session/prompt":
+            text = params["prompt"][0]["text"]
+            sid = params["sessionId"]
+            if text == "perm-correlation":
+                pending_perm_prompt = req_id
+                expected_perms = {"vibe-1", "unknown-1", "agy-1"}
+                # 1. Vibe 3.1.0 style: tool_call announces identity, request_permission sends ONLY toolCallId
+                send({"jsonrpc": "2.0", "method": "session/update", "params": {
+                    "sessionId": sid,
+                    "update": {
+                        "sessionUpdate": "tool_call",
+                        "toolCallId": "effect-vibe-1",
+                        "title": "mcp_masc.masc_probe_ping",
+                        "kind": "other",
+                        "status": "in_progress",
+                        "_meta": {"tool_name": "mcp_masc.masc_probe_ping"}
+                    }
+                }})
+                send({"jsonrpc": "2.0", "id": "vibe-1", "method": "session/request_permission", "params": {
+                    "sessionId": sid,
+                    "toolCall": {"toolCallId": "effect-vibe-1"},
+                    "options": [
+                        {"optionId": "allow_once_vibe", "kind": "allow_once"},
+                        {"optionId": "reject_once_vibe", "kind": "reject_once"}
+                    ]
+                }})
+                # 2. Bare unknown toolCallId must be DENIED
+                send({"jsonrpc": "2.0", "id": "unknown-1", "method": "session/request_permission", "params": {
+                    "sessionId": sid,
+                    "toolCall": {"toolCallId": "effect-never-announced"},
+                    "options": [
+                        {"optionId": "allow_once_u", "kind": "allow_once"},
+                        {"optionId": "reject_once_u", "kind": "reject_once"}
+                    ]
+                }})
+                # 3. Antigravity 1.5.14 call_mcp_tool with kind="execute" & string JSON-RPC id
+                send({"jsonrpc": "2.0", "id": "agy-1", "method": "session/request_permission", "params": {
+                    "sessionId": sid,
+                    "toolCall": {
+                        "toolCallId": "call_agy_1",
+                        "name": "call_mcp_tool",
+                        "kind": "execute",
+                        "title": "MCP Tool masc_probe_ping",
+                        "rawInput": {"ServerName": "masc", "ToolName": "masc_probe_ping"}
+                    },
+                    "options": [
+                        {"optionId": "allow_once_agy", "kind": "allow_once"},
+                        {"optionId": "reject_once_agy", "kind": "reject_once"}
+                    ]
+                }})
+            elif text == "active-stream":
+                # Emit 4 progress updates spaced 0.15s apart (0.60s total > 0.35s idle timeout)
+                for idx in range(4):
+                    time.sleep(0.15)
+                    send({"jsonrpc": "2.0", "method": "session/update", "params": {
+                        "sessionId": sid,
+                        "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": f"chunk-{idx} "}}
+                    }})
+                send({"jsonrpc": "2.0", "id": req_id, "result": {"stopReason": "end_turn"}})
+            elif text == "external-work":
+                # Stay silent for 0.45s while caller brackets MASC MCP tool work via with_external_activity
+                time.sleep(0.45)
+                send({"jsonrpc": "2.0", "id": req_id, "result": {"stopReason": "end_turn"}})
+            elif text == "silent-hang":
+                # Deliberately stay silent; caller must timeout and send session/cancel
+                pass
+    else:
+        rid = str(msg.get("id"))
+        if rid in expected_perms:
+            state["perm_outcomes"][rid] = msg.get("result", {}).get("outcome", {})
+            flush_state()
+            if expected_perms.issubset(state["perm_outcomes"].keys()) and pending_perm_prompt is not None:
+                send({"jsonrpc": "2.0", "id": pending_perm_prompt, "result": {"stopReason": "end_turn"}})
+                pending_perm_prompt = None
+|}
+      settings_copy
+      log_file
+      log_file
+  in
+  Out_channel.with_open_text mock_script (fun oc -> output_string oc script_body);
+  Fun.protect ~finally:(fun () -> rm_rf tmp) (fun () ->
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      let proc_mgr =
+        Runtime_acp_client.foreground_process_mgr ~clock ~grace_seconds:1.0 ()
+      in
+      let mcp_server : Runtime_acp_client.mcp_http_server =
+        { name = "masc"; url = "http://127.0.0.1:9999/mcp"; headers = [] }
+      in
+      let cfg =
+        { (Runtime_acp_client.default_config ~driver:Antigravity ~cwd:tmp) with
+          cli_path = "python3"
+        ; args = [ mock_script ]
+        ; admission_timeout_s = 10.0
+        }
+      in
+      Eio.Switch.run (fun sw ->
+        let client =
+          match Runtime_acp_client.start ~sw ~proc_mgr ~clock ~config:cfg ~mcp_server () with
+          | Ok c -> c
+          | Error err -> failf "mock ACP start failed: %s" (Runtime_acp_client.error_to_string err)
+        in
+        check bool "settings.json materialized in --gemini-dir" true (Sys.file_exists settings_copy);
+        let caps = Runtime_acp_client.capabilities client in
+        check bool "additionalDirectories capability parsed" true caps.additional_directories;
+        check bool "explicit false close capability parsed strictly as false" false caps.close_session;
+        let session =
+          match
+            Runtime_acp_client.new_session
+              client
+              ~cwd:tmp
+              ~model:"gemini-4-neon-medium"
+              ~effort:"medium"
+              ()
+          with
+          | Ok s -> s
+          | Error err -> failf "new_session failed: %s" (Runtime_acp_client.error_to_string err)
+        in
+        check (option string) "current_model_id updated by session/set_model"
+          (Some "gemini-4-neon-medium")
+          session.current_model_id;
+        check (list string) "available_models parsed"
+          [ "gemini-4-neon-high"; "gemini-4-neon-medium" ]
+          session.available_models;
+        let policy =
+          Runtime_acp_client.Allow_masc_mcp_only
+            { mcp_server_name = "masc"; allowed_tool_names = [ "masc_probe_ping" ] }
+        in
+        (* 1. Permission correlation (Vibe toolCallId + Antigravity call_mcp_tool + unknown deny) *)
+        (match
+           Runtime_acp_client.prompt
+             client
+             ~session_id:session.session_id
+             ~blocks:[ Runtime_acp_client.Text_block "perm-correlation" ]
+             ~timeout_s:(Some 5.0)
+             ~permission_policy:policy
+             ()
+         with
+         | Ok _ -> ()
+         | Error err -> failf "perm-correlation failed: %s" (Runtime_acp_client.error_to_string err));
+        let open Yojson.Safe.Util in
+        let state = Yojson.Safe.from_file log_file in
+        check (list string) "session/set_model sent for gemini-4-neon-medium"
+          [ "gemini-4-neon-medium" ]
+          (state |> member "set_models" |> to_list |> List.map to_string);
+        check int "no redundant set_config_option after config_option_update synced effort"
+          0
+          (state |> member "set_config_options" |> to_list |> List.length);
+        let perms = state |> member "perm_outcomes" in
+        check (option string) "Vibe bare toolCallId correlated & allowed"
+          (Some "allow_once_vibe")
+          (perms |> member "vibe-1" |> member "optionId" |> to_string_option);
+        check (option string) "unknown bare toolCallId denied"
+          (Some "reject_once_u")
+          (perms |> member "unknown-1" |> member "optionId" |> to_string_option);
+        check (option string) "Antigravity call_mcp_tool (kind=execute) allowed"
+          (Some "allow_once_agy")
+          (perms |> member "agy-1" |> member "optionId" |> to_string_option);
+        (* 2. Activity-based idle liveness: active stream exceeds single-window timeout and succeeds *)
+        (match
+           Runtime_acp_client.prompt
+             client
+             ~session_id:session.session_id
+             ~blocks:[ Runtime_acp_client.Text_block "active-stream" ]
+             ~timeout_s:(Some 0.35)
+             ~permission_policy:policy
+             ()
+         with
+         | Ok r ->
+           check string "active stream completed all chunks" "chunk-0 chunk-1 chunk-2 chunk-3 " r.text
+         | Error err ->
+           failf "active stream should not timeout under idle liveness: %s"
+             (Runtime_acp_client.error_to_string err));
+        (* 2b. with_external_activity suspends idle watchdog while MASC runs a long MCP tool *)
+        let ext_res = ref None in
+        Eio.Fiber.both
+          (fun () ->
+             Runtime_acp_client.with_external_activity client (fun () ->
+               Eio.Time.sleep clock 0.50))
+          (fun () ->
+             ext_res :=
+               Some
+                 (Runtime_acp_client.prompt
+                    client
+                    ~session_id:session.session_id
+                    ~blocks:[ Runtime_acp_client.Text_block "external-work" ]
+                    ~timeout_s:(Some 0.25)
+                    ~permission_policy:policy
+                    ()));
+        (match !ext_res with
+         | Some (Ok _) -> ()
+         | Some (Error err) ->
+           failf "with_external_activity should prevent idle timeout: %s"
+             (Runtime_acp_client.error_to_string err)
+         | None -> fail "external-work prompt did not complete");
+        (* 3. True silent hang times out and emits session/cancel *)
+        (match
+           Runtime_acp_client.prompt
+             client
+             ~session_id:session.session_id
+             ~blocks:[ Runtime_acp_client.Text_block "silent-hang" ]
+             ~timeout_s:(Some 0.25)
+             ~permission_policy:policy
+             ()
+         with
+         | Error (Runtime_acp_client.Timeout { stage = "session/prompt"; _ }) -> ()
+         | Ok _ -> fail "silent hang unexpectedly succeeded"
+         | Error err ->
+           failf "expected Timeout for silent hang, got %s"
+             (Runtime_acp_client.error_to_string err));
+        let rec wait_for_cancelled attempts =
+          let count =
+            try Yojson.Safe.from_file log_file |> member "cancelled" |> to_int with
+            | Sys_error _ | Yojson.Json_error _ -> 0
+          in
+          if count >= 1 || attempts <= 0
+          then count
+          else (
+            Eio.Time.sleep clock 0.025;
+            wait_for_cancelled (attempts - 1))
+        in
+        check bool "session/cancel emitted on idle timeout" true (wait_for_cancelled 80 >= 1);
+        (* 4. session/set_model WITHOUT preceding config_option_update must treat
+              effort current_value as stale and apply explicit effort override. *)
+        (match
+           Runtime_acp_client.new_session
+             client
+             ~cwd:tmp
+             ~model:"gemini-4-neon-medium"
+             ~effort:"high"
+             ()
+         with
+         | Ok _ -> ()
+         | Error err -> failf "second new_session failed: %s" (Runtime_acp_client.error_to_string err));
+        let stale_state = Yojson.Safe.from_file log_file in
+        let set_opts =
+          stale_state
+          |> member "set_config_options"
+          |> to_list
+          |> List.map (fun pair ->
+               match to_list pair with
+               | [ k; v ] -> to_string k, to_string v
+               | _ -> "", "")
+        in
+        check (list (pair string string))
+          "stale effort after set_model without config_option_update dispatches set_config_option"
+          [ "thought_level", "high" ]
+          set_opts;
+        Runtime_acp_client.close client)))
+;;
+
 let () =
   run "runtime_acp_client"
     [ "profiles", [ test_case "closed driver profiles" `Quick test_driver_profiles ]
@@ -1382,6 +1951,12 @@ let () =
             test_vibe_310_config_options_and_permission_hardening
         ; test_case "ACP overflow shrink handoff single-epoch & Vibe operator login prep/finish" `Quick
             test_acp_overflow_shrink_handoff_and_vibe_operator_login
+        ] )
+    ; ( "protocol_hardening"
+      , [ test_case "typed tool_call_identity, schema boundary & acp_settings_json" `Quick
+            test_typed_tool_call_classification_and_schema_boundary
+        ; test_case "session/set_model, toolCallId permission correlation & activity idle liveness" `Quick
+            test_set_model_toolcall_correlation_and_idle_liveness
         ] )
     ; ( "wire"
       , [ test_case "session update & usage parsing" `Quick test_parse_wire_updates_and_usage

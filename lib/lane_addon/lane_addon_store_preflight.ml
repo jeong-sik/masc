@@ -24,7 +24,6 @@ type decoder =
   | Tool_request_inventory
   | Tool_request_owner
   | Tool_request_payload
-  | History_resolution
   | Tool_request_exact_reads
 
 let decoder_name = function
@@ -41,7 +40,6 @@ let decoder_name = function
   | Tool_request_inventory -> "Lane_addon_store.tool_request_owner_entry"
   | Tool_request_owner -> "Lane_addon_tool_request_owner.Published_reader.read"
   | Tool_request_payload -> "consumer original request payload"
-  | History_resolution -> "consumer history resolution record"
   | Tool_request_exact_reads -> "consumer Exact reads of the original"
 
 type tool_request_reader = scope:string -> request_id:string ->
@@ -53,8 +51,6 @@ type tool_request_records_reader = scope:string ->
   (Lane_addon_tool_request_owner.Record.t list, string) result
 type tool_request_archive_reader = scope:string -> date:string -> request_id:string ->
   (Lane_addon_tool_request_owner.Record.t option, string) result
-type history_resolution_reader = scope:string -> request_id:string -> (Yojson.Safe.t option, string) result
-type history_resolution_validator = group:string -> name:string -> Yojson.Safe.t -> (unit, string) result
 type deleted_record = Deleted_open | Deleted_terminal of Lane_addon_exact.final | Deleted_unknown
 type exact_proof = No_proof | Proof of Yojson.Safe.t | Unreadable_proof of string
 type exact_files =
@@ -78,7 +74,6 @@ type original = {
 type payload_validator = read:tool_request_reader -> read_scope:tool_request_scope_reader ->
   read_records:tool_request_records_reader -> read_body:request_body_reader ->
   read_archive:tool_request_archive_reader ->
-  read_fence:history_resolution_reader -> read_resolution:history_resolution_reader ->
   read_exact:exact_reader -> original -> payload_verdict
 
 type refusal =
@@ -687,14 +682,10 @@ let scan_exact_requests ~after_read root =
     groups
 
 (* The namespaces of one tool request scope, each under the scope's digest:
-   owner records, request bodies, history fences and history resolution
-   records. A fence or resolution record names an original of its scope, so a
-   scope that loses its originals loses all four. *)
+   owner records and request bodies. *)
 let scope_namespaces =
   [ Lane_addon_store.tool_request_owners_directory
   ; Lane_addon_store.tool_request_bodies_directory
-  ; Lane_addon_store.history_fences_directory
-  ; Lane_addon_store.history_resolutions_directory
   ]
 
 let scope_group_directories ~root ~group namespaces =
@@ -707,9 +698,9 @@ let scope_store_directories ~root scope =
     (scope_namespaces @ [ Lane_addon_store.tool_request_archive_directory ])
 
 let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_records:_ ~read_body:_ ~read_archive:_
-    ~read_fence:_ ~read_resolution:_ ~read_exact:_ original ->
+    ~read_exact:_ original ->
       match original.restore () with Ok _ -> Payload_valid | Error detail -> Body_unreadable detail))
-    ?(validate_history_resolution=(fun ~group:_ ~name:_ _ -> Ok ())) ~after_read store ~base_path =
+    ~after_read store ~base_path =
   let root = Lane_addon_store.directory ~masc_dir:(Common.masc_dir_from_base_path ~base_path) in
   let report =
     match store with
@@ -739,29 +730,12 @@ let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_record
           Error (path ^ ": " ^ operation ^ ": " ^ Unix.error_message error) in
       let read_body_bytes ~scope ~request_digest =
         read_text (Filename.concat root (Lane_addon_store.tool_request_body_path ~scope ~request_digest)) in
-      let read_sidecar path ~scope ~request_id =
-        let* bytes=read_text (Filename.concat root (path ~scope ~request_id)) in
-        match bytes with None -> Ok None | Some bytes ->
-          (try Ok (Some (Yojson.Safe.from_string bytes)) with Yojson.Json_error detail -> Error detail) in
-      let read_fence=read_sidecar Lane_addon_store.history_fence_path in
-      let read_resolution=read_sidecar Lane_addon_store.history_resolution_path in
       let read_exact=read_exact ~after_read archive_store ~root in
       (* Discovery reads a scope as a whole and fails it on one record it
-         cannot read, so fresh state deletes the scope: its owner records, its
-         request bodies, and the history fences and resolution records that
-         name those originals. A resolution record left behind names an
-         original that is gone, and stops every pass of its Keeper. *)
+         cannot read, so fresh state deletes the scope: its owner records and
+         its request bodies. *)
       let scope_directories ~group ~group_dir:_ _ =
         List.filter exists (scope_group_directories ~root ~group scope_namespaces) in
-      (* A pass decodes every resolution record of its scope, also one whose
-         original has no record left, so they are read from their own
-         directory and not through the originals. *)
-      let* resolutions =
-        scan_grouped ~after_read ~delete:scope_directories root
-          Lane_addon_store.history_resolutions_directory ~entry:tool_request_owner_entry
-          (fun ~group ~name ~path:_ json ->
-             validate_history_resolution ~group ~name json |> decoded History_resolution) in
-      let+ originals =
       scan_groups root Lane_addon_store.tool_request_owners_directory
         (fun report ~group ~group_dir ->
           let* names = entries group_dir in
@@ -865,8 +839,8 @@ let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_record
                       ; detail = Printf.sprintf "scope=%S request_id=%S request_digest=%s: %s"
                           (Record.scope record) (Record.request_id record) (Record.request_digest record) detail } in
                 (match
-                   validate_tool_request ~read ~read_scope ~read_records ~read_body ~read_archive ~read_fence
-                     ~read_resolution ~read_exact original
+                   validate_tool_request ~read ~read_scope ~read_records ~read_body ~read_archive
+                     ~read_exact original
                  with
                  | Payload_valid -> Ok (counted report)
                  | Body_unreadable detail -> Ok (refuse Tool_request_owner detail (delete path))
@@ -876,8 +850,7 @@ let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_record
                          (List.filter exists
                             (List.concat_map (scope_store_directories ~root) scopes
                              @ List.map (Filename.concat root) paths)))
-                 | Exact_root_differs detail -> Error detail))) in
-      { rows = originals.rows + resolutions.rows; refusals = originals.refusals @ resolutions.refusals }
+                 | Exact_root_differs detail -> Error detail)))
   in
   Result.map finish report
 

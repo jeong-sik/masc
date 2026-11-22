@@ -231,13 +231,6 @@
  (modules librarian_run_tui_reading)
  (libraries alcotest masc masc_test_deps))
 
-(test
- (name test_keeper_librarian_absorb_gate)
- (modules test_keeper_librarian_absorb_gate)
- (deps fixtures/librarian_statements_golden.json (source_tree %{workspace_root}/config/prompts))
- (libraries alcotest masc masc_test_deps exact_output_fixture
-  librarian_run_tui_reading eio_main mtime.clock.os))
-
 (include stanzas/test_typesafeai_client_redaction.inc)
 
 (test
@@ -246,19 +239,6 @@
  (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest masc masc_test_deps exact_output_fixture
   librarian_run_tui_reading eio_main))
-
-; The reference cut (scripts/librarian/statements.py, the scorer of issue
-; #37079) must still write the golden the OCaml test above reads.
-(rule
- (alias runtest-librarian-statements-golden)
- (deps ../scripts/librarian/statements.py fixtures/librarian_statements_golden.json)
- (action
-  (run python3 %{dep:../scripts/librarian/statements.py} --check
-   %{dep:fixtures/librarian_statements_golden.json})))
-
-(alias
- (name runtest)
- (deps (alias runtest-librarian-statements-golden)))
 
 (test
  (name test_keeper_peer_artifact)
@@ -1225,8 +1205,6 @@
  masc.secret_patterns
  masc.agent_core))
 
-(include stanzas/test_keeper_librarian_goal_context_input_sources.inc)
-(include stanzas/test_keeper_librarian_retry_apply_disposition.inc)
 
 (test
  (name test_keeper_tool_execute_stream_close)
@@ -1626,11 +1604,6 @@
 ; schema sentence parity with Agent Core, strict JSON parse, ordered walk.
 
 (test
- (name test_keeper_memory_os_program_publication)
- (modules test_keeper_memory_os_program_publication)
- (libraries masc_test_deps masc masc.runtime agent_core))
-
-(test
  (name test_keeper_memory_os_program)
  (modules test_keeper_memory_os_program)
  (libraries masc_test_deps masc masc.runtime agent_core))
@@ -1646,22 +1619,6 @@
   masc.runtime
   masc.masc_eio_context
   agent_core
-  eio_main))
-
-(include stanzas/test_keeper_librarian_cli_lane_admission_and_plan.inc)
-
-(test
- (name test_keeper_librarian_message_floor)
- (modules test_keeper_librarian_message_floor)
- (deps (source_tree %{workspace_root}/config/prompts))
- (libraries
-  masc_test_deps
-  exact_output_fixture
-  masc
-  masc.runtime
-  masc.masc_eio_context
-  agent_core
-  astring
   eio_main))
 
 (test
@@ -3195,7 +3152,6 @@
 (include stanzas/test_keeper_latched_reason.inc)
 
 (include stanzas/test_keeper_execution_join.inc)
-(include stanzas/test_keeper_external_attention_librarian_sources.inc)
 (include stanzas/test_full_health_wakeup.inc)
 (include stanzas/test_proactive_refresh_changes.inc)
 (include stanzas/test_server_observation_input.inc)
@@ -3270,7 +3226,6 @@
 
 (include stanzas/test_keeper_surface_status.inc)
 
-(include stanzas/test_keeper_memory_admission_judgment.inc)
 (include stanzas/test_keeper_memory_successor_selection.inc)
 (include stanzas/test_keeper_memory_successor_selection_revision_evidence.inc)
 
@@ -3281,14 +3236,10 @@
 (include stanzas/test_keeper_memory_successor_branch_capture.inc)
 
 (include stanzas/test_keeper_memory_successor_http_replay.inc)
-(include stanzas/test_keeper_memory_admission_export.inc)
-(include stanzas/test_keeper_memory_admission_replay.inc)
-(include stanzas/test_keeper_memory_admission_queue.inc)
 (include stanzas/test_keeper_memory_write.inc)
 (include stanzas/test_keeper_memory_write_absorbed.inc)
 (include stanzas/test_keeper_memory_write_growth_probe.inc)
 (include stanzas/test_keeper_memory_change_metrics.inc)
-(include stanzas/test_keeper_librarian_absorb_gate_metrics.inc)
 
 
 (include stanzas/test_keeper_memory_write_supersedes.inc)
@@ -3525,7 +3476,6 @@
 (include stanzas/test_event_bus_subscription_contract.inc)
 
 (include stanzas/test_tool_diversity.inc)
-(include stanzas/test_tool_blob_store_librarian_input_capture.inc)
 
 (include stanzas/test_tool_help_registry_shard_coverage_10101.inc)
 
@@ -3983,18 +3933,13 @@
 (include stanzas/test_keeper_decoded_rows.inc)
 (include stanzas/test_keeper_context_core_history.inc)
 (include stanzas/test_keeper_turn_fragments.inc)
-(include stanzas/test_keeper_turn_fragments_librarian_range.inc)
 (include stanzas/test_keeper_turn_spend.inc)
 (include stanzas/test_keeper_cost_coverage.inc)
 (include stanzas/test_keeper_cost_observation.inc)
 (include stanzas/test_keeper_unsettled_spend.inc)
 
 (include stanzas/test_keeper_clear_admission.inc)
-(include stanzas/test_keeper_librarian_progress.inc)
 (include stanzas/test_keeper_librarian_store_scope.inc)
-(include stanzas/test_keeper_librarian_range.inc)
-(include stanzas/test_keeper_librarian_durable_consumer.inc)
-(include stanzas/test_keeper_librarian_floor_step_request.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)
 (include stanzas/test_keeper_gate_auto_judge_labels.inc)
 (include stanzas/test_keeper_gate_replay.inc)
@@ -5262,15 +5207,12 @@
 
 (include stanzas/test_keeper_continuity_request_view.inc)
 
-(include stanzas/test_keeper_librarian_continuity.inc)
 (include stanzas/test_keeper_working_context_signal_flood.inc)
 
-(include stanzas/test_keeper_continuity_cancel_recovery.inc)
 
 (include stanzas/test_keeper_continuity_dispatch.inc)
 
 (include stanzas/test_keeper_librarian_capacity_callback.inc)
-(include stanzas/test_keeper_librarian_capacity_callback_continuity_and_durable.inc)
 (include stanzas/test_keeper_librarian_walk_failure_algebra.inc)
 
 (include stanzas/test_deployment_store_directories.inc)
@@ -5405,11 +5347,6 @@
  (modules test_h5_media_failover_continuity)
  (libraries masc_test_deps))
 
-(executable
- (name test_h3_working_state_meaning)
- (modules test_h3_working_state_meaning)
- (libraries masc_test_deps))
-
 (test
  (name test_lane_addon_tool_result)
  (modules test_lane_addon_tool_result)
@@ -5452,7 +5389,6 @@
 
 (include stanzas/test_keeper_event_genealogy_capture.inc)
 
-(include stanzas/test_keeper_librarian_admission_mode.inc)
 
 (include stanzas/test_utf8_prefix_parity.inc)
 
@@ -5483,29 +5419,6 @@
  (name test_run_tool_workflow)
  (modules test_run_tool_workflow)
  (libraries masc_test_deps))
-
-(test
- (name test_keeper_librarian_input_capture)
- (modules test_keeper_librarian_input_capture)
- (libraries goal_measure_fixture masc.goal_measure masc_test_deps))
-
-(test
- (name test_keeper_librarian_durable_preparation)
- (modules test_keeper_librarian_durable_preparation)
- (deps (source_tree %{workspace_root}/config/prompts))
- (libraries alcotest astring masc_test_deps masc agent_core))
-
-(include stanzas/test_keeper_librarian_durable_preparation_question_admission.inc)
-
-(test
- (name test_keeper_librarian_durable_capture)
- (modules test_keeper_librarian_durable_capture)
- (libraries alcotest masc_test_deps masc agent_core))
-
-(test
- (name test_keeper_librarian_durable_refusal)
- (modules test_keeper_librarian_durable_refusal)
- (libraries alcotest masc))
 
 (include stanzas/bench_keeper_checkpoint_store.inc)
 

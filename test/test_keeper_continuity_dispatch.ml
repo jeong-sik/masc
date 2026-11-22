@@ -1,7 +1,6 @@
 open Alcotest
 open Masc
 module T = Agent_core.Types
-module B = Keeper_turn_boundaries
 module U = Yojson.Safe.Util
 module Fixture = Exact_output_fixture
 
@@ -74,8 +73,7 @@ candidates = ["refused.sample", "accepted.sample"]
   body ~sw ~net:env#net ~config ~base_path ~refused ~accepted
 
 (* A completed turn over [messages] in the Keeper's turn log, where the turn
-   start is read from (RFC librarian-call-only-proposes §11.2). The boundary
-   log keeps its own line beside it: the Librarian still reads that one. *)
+   start is read from (RFC librarian-call-only-proposes §11.2). *)
 let start_turn_log ~config messages =
   Masc_test_deps.start_turn_log ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
     ~trace_id ~closed_messages:(List.length messages)
@@ -100,18 +98,9 @@ let commit_a_read ~config ~working_state closing =
 
 let start_writer ~sw ~config = Masc_test_deps.booted_memory_writer_view ~sw ~config keeper_name
 
-(* One completed turn over [covered], written to the keeper's boundary log. *)
+(* One completed turn over [covered], written to the keeper's turn log. *)
 let record_completed_turn ~config =
-  let position = match B.position_of_messages covered with
-    | Ok position -> position | Error detail -> fail detail in
-  let boundary : B.record = {recorded_at = 1.; event = B.Turn_ended
-    { task_context = Masc.Keeper_turn_task_context.No_task;turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
-     history_at_start = B.Fresh_history; position}} in
-  let keepers_dir = Workspace.keepers_runtime_dir config in
-  (match B.append ~keepers_dir ~keeper_id:keeper_name boundary with
-   | Ok () -> () | Error error -> fail (B.append_error_to_string error));
-  start_turn_log ~config covered;
-  boundary
+  start_turn_log ~config covered
 
 (* Runs one turn whose history is [covered] plus this turn's input, and
    returns the attempt errors the lane reported, newest first. *)
@@ -193,7 +182,7 @@ let check_dispatched_from_the_turn_start ~accepted =
    goes out from the turn start. *)
 let test_without_a_memory_writer_the_turn_starts_at_the_turn_start () =
   with_dispatch_fixture @@ fun ~sw ~net ~config ~base_path ~refused:_ ~accepted ->
-  let (_ : B.record) = record_completed_turn ~config in
+  record_completed_turn ~config;
   let (_ : (string * Agent_core.Error.t) list) = dispatch ~sw ~net ~base_path () in
   check_dispatched_from_the_turn_start ~accepted;
   check string "with no writer in the process no row says where the request started"
@@ -204,7 +193,7 @@ let test_without_a_memory_writer_the_turn_starts_at_the_turn_start () =
    the turn goes out from the turn start as it does with no writer. *)
 let test_a_writer_that_read_nothing_starts_at_the_turn_start () =
   with_dispatch_fixture @@ fun ~sw ~net ~config ~base_path ~refused:_ ~accepted ->
-  let (_ : B.record) = record_completed_turn ~config in
+  record_completed_turn ~config;
   (match (start_writer ~sw ~config).Librarian_writer.covers_through with
    | Librarian_log.Before_first -> ()
    | Librarian_log.Through _ -> fail "the fixture's writer read a unit");
@@ -237,14 +226,6 @@ let test_a_librarian_behind_refusal_resends_from_the_boundary () =
     ; msg T.User "ask 2"; msg T.Assistant "answer 2" ]
   in
   let initial_messages = completed @ [ msg T.User pending ] in
-  let keepers_dir = Workspace.keepers_runtime_dir config in
-  let position = match B.position_of_messages completed with
-    | Ok position -> position | Error detail -> fail detail in
-  (match B.append ~keepers_dir ~keeper_id:keeper_name
-     {recorded_at = 1.; event = B.Turn_ended
-        { task_context = Masc.Keeper_turn_task_context.No_task;turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
-         history_at_start = B.Fresh_history; position}} with
-   | Ok () -> () | Error error -> fail (B.append_error_to_string error));
   (match write_turn_log ~config [ 2; List.length completed ] with
    | read_turn :: (_ : Masc_test_deps.turn_log_closing list) ->
      commit_a_read ~config ~working_state:Librarian_answer.Keep read_turn
@@ -297,14 +278,6 @@ let test_a_refused_boundary_resends_from_where_this_turn_began () =
   in
   let failed_turn = [ msg T.User "ask 3"; msg T.Assistant "answer 3" ] in
   let initial_messages = completed @ failed_turn @ [ msg T.User pending ] in
-  let keepers_dir = Workspace.keepers_runtime_dir config in
-  let position = match B.position_of_messages completed with
-    | Ok position -> position | Error detail -> fail detail in
-  (match B.append ~keepers_dir ~keeper_id:keeper_name
-     {recorded_at = 1.; event = B.Turn_ended
-        { task_context = Masc.Keeper_turn_task_context.No_task;turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
-         history_at_start = B.Fresh_history; position}} with
-   | Ok () -> () | Error error -> fail (B.append_error_to_string error));
   (match write_turn_log ~config [ 2; List.length completed ] with
    | read_turn :: (_ : Masc_test_deps.turn_log_closing list) ->
      commit_a_read ~config ~working_state:Librarian_answer.Keep read_turn
@@ -340,13 +313,6 @@ let three_completed_exchanges =
   ; msg T.User "ask 2"; msg T.Assistant "answer 2" ]
 
 let record_three_completed_exchanges ~config =
-  let position = match B.position_of_messages three_completed_exchanges with
-    | Ok position -> position | Error detail -> fail detail in
-  (match B.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
-     {recorded_at = 1.; event = B.Turn_ended
-        { task_context = Masc.Keeper_turn_task_context.No_task;turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
-         history_at_start = B.Fresh_history; position}} with
-  | Ok () -> () | Error error -> fail (B.append_error_to_string error));
   start_turn_log ~config three_completed_exchanges
 ;;
 

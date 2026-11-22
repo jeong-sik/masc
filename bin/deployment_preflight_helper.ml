@@ -840,7 +840,7 @@ let validate_tool_request () =
     | Ok () -> L.Payload_valid
     | Error detail -> L.Payload_invalid detail
   in
-  fun ~read:_ ~read_scope:_ ~read_records:_ ~read_body:_ ~read_archive:_ ~read_fence:_ ~read_resolution:_
+  fun ~read:_ ~read_scope:_ ~read_records:_ ~read_body:_ ~read_archive:_
     ~read_exact:_ (original : L.original) ->
     match Tool_request_consumer.classify_scope (Masc.Lane_addon_tool_request_owner.Record.scope original.record) with
     | Some (Tool_request_consumer.Active consumer) ->

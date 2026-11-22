@@ -1,6 +1,5 @@
 open Alcotest
 module Current = Masc.Keeper_memory_os_current
-module Queue = Masc.Keeper_memory_admission_queue
 module Dispatch = Masc.Keeper_tool_runtime
 module Fixture = Exact_output_fixture
 module Json = Yojson.Safe.Util
@@ -53,25 +52,22 @@ let author ~scenario ~keepers_dir ~keeper_id ~trace_id =
   let final=List.map (fun row -> fact (jstring "claim" row)) authored in
   let old=fact (jstring "old_a" scenario) and renamed=fact (jstring "renamed_a" scenario) in
   let initial=old :: List.tl final in
-  List.iteri (fun index (target:Memory.fact) ->
-    ignore (Queue.append ~keepers_dir ~keeper_id
-      ~request_id:(Printf.sprintf "memory-admission-%d" index) target
-      |> Result.map_error Queue.append_error_to_string |> require : Queue.candidate)) initial;
-  let batch=match Queue.read_pending ~keepers_dir ~keeper_id |> require with
-    | Some batch -> batch | None -> fail "pending input missing" in
-  let ids=Queue.candidate_ids batch and candidates=Queue.candidates batch in
-  check (list string) "queue preserves authored source claims"
-    (List.map (fun (fact:Memory.fact) -> fact.claim) initial)
-    (List.map (fun (candidate:Queue.candidate) -> candidate.fact.claim) candidates);
-  let bindings=List.map2 (fun (candidate,candidate_id) target ->
-    {Current.candidate_id;source_fact=candidate.Queue.fact;target_memory_id=Memory.memory_id target})
-    (List.combine candidates ids) initial in
+  let ids = List.mapi (fun index (target : Memory.fact) : Current.explicit_candidate_id ->
+    let sequence = index + 1 in
+    let request_id = Printf.sprintf "memory-admission-%d" index in
+    let row = `Assoc [ "sequence", `Int sequence; "request_id", `String request_id; "fact", Memory.fact_to_json target ] in
+    { queue_generation = "gen-1"
+    ; request_id
+    ; sequence
+    ; input_sha256 = sha (Yojson.Safe.to_string row) }) initial in
+  let bindings = List.map2 (fun candidate_id target ->
+    { Current.candidate_id; source_fact = target; target_memory_id = Memory.memory_id target })
+    ids initial in
   let source={Current.kind=Current.Librarian;trace_id} in
   ignore(Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Admission ~keepers_dir ~keeper_id ~now ~source
     ~explicit_candidate_ids:ids
     ~admission_recall:{Current.decided_at_revision=None; bindings}
     ~absorbed:[] ~revisions:[] ~new_claims:initial () |> require : Current.disposition);
-  Queue.acknowledge_committed ~keepers_dir ~keeper_id |> require;
   let revise old target reason =
     ignore(Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~keepers_dir ~keeper_id ~now:(Time_compat.now ()) ~source
       ~dropped_statements:[{Memory.memory_id=Memory.memory_id old;reason}]
@@ -79,7 +75,6 @@ let author ~scenario ~keepers_dir ~keeper_id ~trace_id =
       ~new_claims:[target] () |> require : Current.disposition) in
   revise old renamed "Authored evidence: W31 renamed NORTH-REPAIR, same event and unchanged production rule.";
   revise renamed (List.hd final) "Authored evidence: Mina replaces only W31 production restart condition; test branch and notification remain separate current facts.";
-  check bool "all authored observations acknowledged" true ((Queue.read_pending ~keepers_dir ~keeper_id |> require)=None);
   final
 
 let capture () =
@@ -109,13 +104,12 @@ let capture () =
   let meta=Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String keeper_id;
     "trace_id",`String trace_id;"instructions",`String instructions]) |> require in
   let expected=Masc_test_deps.with_typesafeai_policy
-    {Runtime_schema.default_typesafeai with lane_enabled=false;absorb_gate=false}
+    {Runtime_schema.default_typesafeai with lane_enabled=false}
     (fun () -> author ~scenario:original ~keepers_dir ~keeper_id ~trace_id) in
   let stores=List.map (fun (name,path) -> name,path,Fs_compat.load_file_opt path)
     ["current_snapshot",Current.path_for_keepers_dir ~keepers_dir ~keeper_id;
      "consumption_and_lookup_receipt",Current.durable_range_receipt_path ~keepers_dir ~keeper_id;
-     "memory_journal",Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id;
-     "pending_queue",Queue.path ~keepers_dir ~keeper_id] in
+     "memory_journal",Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id] in
   let bundle=`Assoc (List.map (fun (name,_,bytes) -> name,match bytes with
     | None -> `Assoc ["present",`Bool false]
     | Some bytes -> `Assoc ["present",`Bool true;"bytes",`String bytes;"sha256",`String (sha bytes)]) stores) in

@@ -756,7 +756,7 @@ let test_a_record_read_again_from_the_same_bytes_is_the_same_record () = with_la
   put (path "parent") parent;
   put (path "checked") (owner ~request_id:"checked");
   let reads = ref None in
-  let validate () ~read ~read_scope:_ ~read_records:_ ~read_body:_ ~read_archive:_ ~read_fence:_ ~read_resolution:_ ~read_exact:_
+  let validate () ~read ~read_scope:_ ~read_records:_ ~read_body:_ ~read_archive:_ ~read_exact:_
       (original : P.original) =
     match original.restore () with
     | Error detail -> P.Body_unreadable detail

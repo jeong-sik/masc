@@ -1,16 +1,12 @@
-(** Runtime adapter for LLM-owned current Memory OS selection. *)
+(** Runtime adapter for the tool-free working-context Librarian pass. *)
 
 module Exact_output = Agent_core.Exact_output
 module Failure_evidence = Keeper_exact_walk_failure
 
 let exact_lane_id = Standalone_lane.to_id Standalone_lane.Librarian
 
-let input_trace_id (inp : Keeper_librarian.input) =
-  Ids.Turn_ref.trace_id inp.turn_ref
-;;
+let input_trace_id (inp : Keeper_librarian.input) = Ids.Turn_ref.trace_id inp.turn_ref
 
-(* The Librarian's answer request is a rendered prompt sent straight to a
-   provider. *)
 let message role text =
   Llm_provider.Types.make_message ~role [ Llm_provider.Types.Text text ]
 ;;
@@ -24,7 +20,7 @@ let slot_reason_pairs ?(sep = "; ") (refusals : slot_refusal list) : string =
   String.concat sep
     (List.map
        (fun { slot_id; cause } ->
-         slot_id ^ ": " ^ Exact_output.admission_error_reason cause)
+          slot_id ^ ": " ^ Exact_output.admission_error_reason cause)
        refusals)
 ;;
 
@@ -38,14 +34,14 @@ type exact_setup_error =
   | Exact_flow_snapshot_failed of Exact_output.flow_snapshot_error
   | Exact_flow_start_failed of Exact_output.flow_start_error
   | Exact_request_projection_failed of slot_refusal list
-    (** Every API slot refused the projected request. Keep each typed cause
-        beside its slot until the error is rendered for an operator. *)
 
 type outward_effect =
   | No_outward_effect
   | Outward_effect_started
 
-type input_capacity_evidence = No_input_capacity_refusal | Input_capacity_refused
+type input_capacity_evidence =
+  | No_input_capacity_refusal
+  | Input_capacity_refused
 
 type message_descent =
   | No_descent_evidence
@@ -56,13 +52,9 @@ type message_descent =
 type exact_execution_error =
   { outward_effect : outward_effect
   ; failure_evidence : Failure_evidence.t
-  ; exhausted_input_refusals : Keeper_librarian_input_refusal.t list option
   ; detail : string
   }
 
-(* The two transports name their slots from separate spaces: an API slot by
-   its exact-output flow candidate id, a CLI slot by its lane runtime id. The
-   constructor keeps them apart so a caller never compares one to the other. *)
 type served_slot =
   | Api_slot of string
   | Cli_slot of string
@@ -79,46 +71,27 @@ type extraction_error =
       { prior_error : extraction_error option
       ; failures : Keeper_lane_cli_oneshot.failure list
       }
-  | Cli_prompt_unavailable of
-      { prior_error : extraction_error option
-      }
+  | Cli_prompt_unavailable of { prior_error : extraction_error option }
   | No_transport_declared
   | Slots_held of
       { until : float
       ; after : extraction_error option
       }
-      (* HTTP slots that wait for a time their provider stated were not
-         called (RFC-exact-lane-waits-for-a-stated-reset). [until] is the
-         earliest such time. [after] is how the slots that could be called
-         failed; [None] when the lane declares no other slot. *)
   | Domain_output_invalid of string
-  | Absorb_judgment_failed of
-      { reason : string
-      ; selected_slot : string
-      }
-  | Memory_snapshot_write_failed of
-      { detail : string
-      ; selected_slot : string
-      }
 
 let rec extraction_error_kind : extraction_error -> Keeper_memory_os_current.librarian_failure_kind
   = function
   | Prompt_render_failed _ -> Prompt_render_failure
   | Exact_setup_failed _ -> Exact_setup_failure
-  | Exact_execution_failed _ ->
-    Exact_execution_failure
+  | Exact_execution_failed _ -> Exact_execution_failure
   | Cli_slots_exhausted { prior_error = Some error; _ }
-  | Cli_prompt_unavailable { prior_error = Some error } ->
-    extraction_error_kind error
+  | Cli_prompt_unavailable { prior_error = Some error } -> extraction_error_kind error
   | Cli_slots_exhausted { prior_error = None; _ }
-  | Cli_prompt_unavailable { prior_error = None } ->
-    Exact_execution_failure
+  | Cli_prompt_unavailable { prior_error = None } -> Exact_execution_failure
   | No_transport_declared -> Exact_setup_failure
   | Slots_held { after = Some error; _ } -> extraction_error_kind error
   | Slots_held { after = None; _ } -> Exact_execution_failure
   | Domain_output_invalid _ -> Domain_output_invalid
-  | Absorb_judgment_failed _ -> Absorb_judgment_failure
-  | Memory_snapshot_write_failed _ -> Memory_snapshot_write_failure
 ;;
 
 let exact_setup_error_to_string = function
@@ -128,10 +101,7 @@ let exact_setup_error_to_string = function
   | Exact_lane_unavailable error ->
     Runtime_exact_output_registry.lane_resolution_error_to_string error
   | Exact_candidate_invalid { position; slot_id } ->
-    Printf.sprintf
-      "exact lane candidate invalid position=%d slot=%S"
-      position
-      slot_id
+    Printf.sprintf "exact lane candidate invalid position=%d slot=%S" position slot_id
   | Exact_flow_snapshot_failed
       (Exact_output.Duplicate_flow_candidate_id
          { candidate_id; first_position; duplicate_position }) ->
@@ -140,8 +110,7 @@ let exact_setup_error_to_string = function
       candidate_id
       first_position
       duplicate_position
-  | Exact_flow_start_failed
-      (Exact_output.Flow_id_generation_failed detail) ->
+  | Exact_flow_start_failed (Exact_output.Flow_id_generation_failed detail) ->
     "exact flow identity allocation failed: " ^ detail
   | Exact_request_projection_failed refusals ->
     "request projection refused by all API slots: " ^ slot_reason_pairs refusals
@@ -163,7 +132,8 @@ let rec extraction_error_to_string = function
       match failures with
       | [] -> summary
       | _ :: _ ->
-        summary ^ ": "
+        summary
+        ^ ": "
         ^ String.concat "; " (List.map Keeper_lane_cli_oneshot.failure_to_string failures)
     in
     (match prior_error with
@@ -176,8 +146,7 @@ let rec extraction_error_to_string = function
     (match prior_error with
      | None -> cli_detail
      | Some error -> extraction_error_to_string error ^ "; " ^ cli_detail)
-  | No_transport_declared ->
-    "lane declares no API or official-client slots"
+  | No_transport_declared -> "lane declares no API or official-client slots"
   | Slots_held { until; after } ->
     let held_detail =
       "API slots waiting for their provider until "
@@ -187,27 +156,7 @@ let rec extraction_error_to_string = function
     (match after with
      | None -> held_detail
      | Some error -> extraction_error_to_string error ^ "; " ^ held_detail)
-  | Domain_output_invalid detail ->
-    "domain output invalid: " ^ detail
-  | Absorb_judgment_failed { reason; selected_slot = _ } ->
-    "absorb judgment failed; current memory unchanged: " ^ reason
-  | Memory_snapshot_write_failed { detail; selected_slot = _ } ->
-    "current snapshot write failed: " ^ detail
-;;
-
-let rec selected_slot_of_extraction_error = function
-  | Absorb_judgment_failed { selected_slot; _ }
-  | Memory_snapshot_write_failed { selected_slot; _ } -> Some selected_slot
-  | Slots_held { after = Some error; _ } -> selected_slot_of_extraction_error error
-  | Slots_held { after = None; _ } -> None
-  | Prompt_render_failed _
-  | Exact_setup_failed _
-  | Exact_execution_failed _
-  | Cli_slots_exhausted _
-  | Cli_prompt_unavailable _
-  | No_transport_declared
-  | Domain_output_invalid _ ->
-    None
+  | Domain_output_invalid detail -> "domain output invalid: " ^ detail
 ;;
 
 let render_prompt key variables =
@@ -220,9 +169,6 @@ let render_prompt key variables =
   | Error message -> Error (Printf.sprintf "%s: %s" key message)
 ;;
 
-(* The [working_contexts] rule is one fragment both prompts that ask for
-   [working_contexts] render, so the Memory pass and the pending-input pass
-   cannot be handed two different rules. *)
 let working_contexts_rule_variable = "working_contexts_rule"
 
 let with_working_contexts_rule variables =
@@ -231,565 +177,44 @@ let with_working_contexts_rule variables =
     (render_prompt Prompt_names.librarian_working_contexts_rule [])
 ;;
 
-(* The turn material of the Memory prompt (the pending working context, past
-   Task/Goal records, the conversation, counterpart and tool observations, the
-   continuity document) and the text that reads it live in two slots of
-   librarian.md. A pass that carries turn material renders both into the body.
-   Admission carries none, so it leaves both variables empty and its prompt
-   holds neither the empty material nor the text about it (RFC-0517 §7.3). *)
-let working_context_input_variable = "working_context_input"
-let turn_inputs_variable = "turn_inputs"
-
-type turn_input_prompts = {
-  working_context_input : Prompt_registry.prompt_resolution;
-  turn_inputs : Prompt_registry.prompt_resolution;
-}
-
-(* A slot's text is trimmed when the file is read, so the blank lines that set
-   the material apart are added here. The body places [working_context_input]
-   right before the Goal heading and [turn_inputs] right after the Goal
-   paragraph; with both empty the body reads as if the material were never
-   there. *)
-let turn_input_variables ~context ~turn variables =
-  (working_context_input_variable, context ^ "\n\n") :: (turn_inputs_variable, "\n\n" ^ turn)
-  :: variables
-
-(* The slots a question was frozen with: a restored question renders the slot
-   text it was sent. *)
-let with_turn_input_prompts (prompts : turn_input_prompts) variables =
-  let open Result.Syntax in
-  let* context = Prompt_registry.render_resolved_prompt_template
-    Prompt_names.librarian_working_context_input prompts.working_context_input variables in
-  let+ turn = Prompt_registry.render_resolved_prompt_template
-    Prompt_names.librarian_turn_inputs prompts.turn_inputs variables in
-  turn_input_variables ~context ~turn variables
-
-(* Today's slots, resolved and rendered in one registry call each, so a slot
-   that is missing or whose file cannot be read is an [Error] like the body's
-   and the rule's. *)
-let resolve_turn_inputs variables =
-  let open Result.Syntax in
-  let* working_context_input, context = Prompt_registry.resolve_and_render_prompt_template
-    Prompt_names.librarian_working_context_input variables in
-  let+ turn_inputs, turn = Prompt_registry.resolve_and_render_prompt_template
-    Prompt_names.librarian_turn_inputs variables in
-  { working_context_input; turn_inputs }, turn_input_variables ~context ~turn variables
-
-let with_turn_inputs variables = Result.map snd (resolve_turn_inputs variables)
-
-let without_turn_inputs variables =
-  (working_context_input_variable, "") :: (turn_inputs_variable, "") :: variables
-
-
-(* [turn_inputs] is the turn-material slot the prompt was rendered with, so a
-   check of that material reads the bytes that were sent. A pass that renders
-   no turn material (admission, continuity, pending-input organization) has
-   none. *)
 type librarian_prompt_material =
   { resolution : Prompt_registry.prompt_resolution
-  ; turn_inputs : Prompt_registry.prompt_resolution option
   ; rendered : string
   }
 
-type working_state_prompt =
-  { run_id : string
-  ; resolution : Prompt_registry.prompt_resolution
-  ; variables : (string * string) list
-  ; rendered_prompt : string
-  ; output_schema : Yojson.Safe.t
-  }
-
-type working_state_preparation =
-  | Not_prepared
-  | Prompt_failed of { run_id : string; variables : (string * string) list; detail : string }
-  | Prompt_prepared of working_state_prompt
-
-(* A process-only decision retains the exact source and gate evidence. *)
-type memory_step =
-  { run_id : string
-  ; source_input : Keeper_librarian.input
-  ; prompt_variables : (string * string) list
-  ; rendered_prompt : string
-  ; absorb_gate : Keeper_librarian_absorb_gate.run_result
-  ; new_claims : Keeper_memory_os_types.fact list
-  ; dropped : Keeper_memory_os_types.dropped_statement list
-  ; absorbed : Keeper_memory_os_types.absorbed_statement list
-  ; revisions : Keeper_memory_os_types.revision list
-  ; working_state : string
-  }
-
-type inference =
-  | Infer_state of
-      { previous_state : string option
-      ; unread_messages : Keeper_librarian_unread.t list
-      ; preparation : working_state_preparation ref
-      ; observe : served_by:served_slot -> string -> unit
-      ; observe_failure : Keeper_librarian_input_refusal.t list option -> unit
-      }
-  | Infer_memory of
-      { previous_state : string option
-      ; unread_messages : Keeper_librarian_unread.t list
-      ; observe : served_by:served_slot -> memory_step -> unit
-      ; observe_failure : Keeper_librarian_input_refusal.t list option -> unit
-      }
-
-(* A scope that writes Memory names the pass its commit is counted under. A
-   context-only run commits no Memory, so it names none. *)
-type write_scope =
-  | Context_only
-  | Context_and_memory of Keeper_memory_commit_pass.t
-  | Memory_maintenance of Keeper_memory_commit_pass.t
-
-(* How an accepted Memory answer of a best-effort run commits: under the pass
-   its scope names, organizing the working contexts too unless the run is a
-   standalone Memory maintenance run. Only a scope that writes Memory makes
-   one, so an inference or a context-only run has nothing to commit with. *)
-type memory_commit =
-  | Commit_with_contexts of Keeper_memory_commit_pass.t
-  | Commit_maintenance of Keeper_memory_commit_pass.t
-
-let memory_commit_pass = function
-  | Commit_with_contexts pass | Commit_maintenance pass -> pass
-;;
-
-(* A best-effort run commits an accepted Memory answer under its write scope.
-   An inference returns its answer and never commits. *)
-type run_kind =
-  | Best_effort of write_scope
-  | Inference of inference
-
-(* Memory inference asks the same Memory question without publishing. Context
-   passes ask only for continuation or queue organization, never Memory. A
-   Memory pass carries what its accepted answer commits with; a prompt measured
-   outside a run carries [()]. *)
-type 'commit pass =
-  | Memory_pass of Keeper_librarian_continuity.prepared option * 'commit
-  | Continuity_state_pass of Keeper_librarian_continuity.prepared
-  | Volatile_state_pass of string option * Keeper_librarian_unread.t list
-  | Volatile_memory_pass of string option * Keeper_librarian_unread.t list
-  | Working_context_pass
-
-let prompt_key_of_pass = function
-  | Memory_pass _ | Volatile_memory_pass _ -> Prompt_names.librarian
-  | Continuity_state_pass _ | Volatile_state_pass _ -> Prompt_names.librarian_continuity
-  | Working_context_pass -> Prompt_names.librarian_working_context
-;;
-
-(* Completed-history synthesis and pending-input organization own different
-   sources and stores. A continuity pass must neither organize nor publish the
-   live queue; its source is the exact prepared checkpoint interval. *)
-let input_for_pass pass (input : Keeper_librarian.input) =
-  match pass with
-  | Memory_pass (None, _) | Working_context_pass -> input
-  | Memory_pass (Some _, _) | Continuity_state_pass _ | Volatile_state_pass _
-  | Volatile_memory_pass _ ->
-    { input with working_context = Keeper_librarian_context.empty }
-
-(* A Memory pass shows the facts budget the commit measures, so it needs the
-   file-source store's lines ([source_lines]); the read result is consulted
-   only by the passes that show the budget. *)
-let prompt_variables_of_pass ~source_lines pass input =
-  let memory_variables () =
-    Result.map (fun source_lines -> Keeper_librarian.prompt_variables ~source_lines input)
-      source_lines in
-  match pass with
-  | Memory_pass (None, _) -> memory_variables ()
-  | Memory_pass (Some prepared, _) ->
-    Result.map (fun variables ->
-      ("continuity", Yojson.Safe.to_string (Keeper_librarian_continuity.prompt_json prepared))
-      :: List.remove_assoc "continuity" variables) (memory_variables ())
-  | Continuity_state_pass prepared ->
-    Ok (Keeper_librarian.continuity_prompt_variables input
-      ~continuity:(Keeper_librarian_continuity.prompt_json prepared))
-  | Volatile_state_pass (previous_state, unread_messages) ->
-    Ok (Keeper_librarian.continuity_prompt_variables input
-      ~continuity:(`Assoc ["previous_working_state",
-        (match previous_state with None -> `Null | Some state -> `String state);
-        "unread_messages", Keeper_librarian_unread.list_to_json unread_messages]))
-  | Volatile_memory_pass (previous_state, unread_messages) ->
-    Result.map (fun variables ->
-      ("continuity", Yojson.Safe.to_string
-        (`Assoc ["previous_working_state",
-          (match previous_state with None -> `Null | Some state -> `String state);
-          "unread_messages", Keeper_librarian_unread.list_to_json unread_messages]))
-      :: List.remove_assoc "continuity" variables) (memory_variables ())
-  | Working_context_pass -> Ok (Keeper_librarian.working_context_prompt_variables input)
-;;
-
-let librarian_prompt_variables ?continuity ~source_lines input =
-  let pass = Memory_pass (continuity, ()) in
-  Result.bind
-    (Result.bind
-       (prompt_variables_of_pass ~source_lines:(Ok source_lines) pass (input_for_pass pass input))
-       with_working_contexts_rule)
-    with_turn_inputs
-;;
-
-let resolve_librarian_prompt ~source_lines pass input =
-  let input = input_for_pass pass input in
-  match prompt_variables_of_pass ~source_lines pass input with
-  | Error detail -> [], Error detail
+let resolve_working_context_prompt (inp : Keeper_librarian.input) =
+  let base_variables = Keeper_librarian.working_context_prompt_variables inp in
+  match with_working_contexts_rule base_variables with
+  | Error detail -> base_variables, Error detail
   | Ok variables ->
-  let variables_with_rule =
-    match pass with
-    | Memory_pass _ | Volatile_memory_pass _ ->
-      Result.bind (with_working_contexts_rule variables) (fun variables ->
-        Result.map (fun ((prompts : turn_input_prompts), variables) ->
-            variables, Some prompts.turn_inputs)
-          (resolve_turn_inputs variables))
-    | Working_context_pass ->
-      Result.map (fun variables -> variables, None) (with_working_contexts_rule variables)
-    | Continuity_state_pass _ | Volatile_state_pass _ -> Ok (variables, None)
-  in
-  match variables_with_rule with
-  | Error detail -> variables, Error detail
-  | Ok (variables, turn_inputs) ->
-    ( variables
-    , Result.map
-        (fun (resolution, rendered) -> { resolution; turn_inputs; rendered })
-        (Prompt_registry.resolve_and_render_prompt_template
-           (prompt_key_of_pass pass)
-           variables) )
+    let material =
+      match
+        Prompt_registry.resolve_and_render_prompt_template
+          Prompt_names.librarian_working_context
+          variables
+      with
+      | Error detail ->
+        Error (Printf.sprintf "%s: %s" Prompt_names.librarian_working_context detail)
+      | Ok (resolution, text) ->
+        let rendered = String.trim text in
+        if String.equal rendered ""
+        then
+          Error (Printf.sprintf "%s rendered empty prompt" Prompt_names.librarian_working_context)
+        else Ok { resolution; rendered }
+    in
+    variables, material
 ;;
 
-type durable_policy = {
-  facts_max_bytes : int;
-  facts_source_lines : string list;
-  category_cap : int;
-  facts_per_category_cap : int;
-}
-type durable_preparation = {
-  source_input : Keeper_librarian.input;
-  parsing_now : float;
-  policy : durable_policy;
-  rule_prompt : Prompt_registry.prompt_resolution;
-  turn_prompts : turn_input_prompts;
-  prompt : Prompt_registry.prompt_resolution;
-  variables : (string * string) list;
-  rendered_prompt : string;
-  output_schema : Yojson.Safe.t;
-}
-type admission_policy = {
-  facts_max_bytes : int;
-  facts_source_lines : string list;
-  category_cap : int;
-  facts_per_category_cap : int;
-}
-type admission_preparation = {
-  policy : admission_policy;
-  rule_prompt : Prompt_registry.prompt_resolution;
-  prompt : Prompt_registry.prompt_resolution;
-  variables : (string * string) list;
-  rendered_prompt : string;
-  output_schema : Yojson.Safe.t;
-  admission_prompt : Prompt_registry.prompt_resolution;
-  retirement_prompt : Prompt_registry.prompt_resolution option;
-}
-let admission_schema () = Keeper_memory_admission_judgment.output_schema
-  ~memory_schema:Keeper_structured_output_schema.librarian_current_output_schema
-let admission_suffix ~admission_prompt ~retirement_prompt ~batch ~retirement =
-  let open Result.Syntax in
-  let* admission=Prompt_registry.render_resolved_prompt_template
-    Prompt_names.librarian_admission_policy admission_prompt [] in
-  let* historical=match retirement_prompt with
-    | None ->
-      if Keeper_memory_admission_judgment.retirement_prompt_needed ~batch retirement
-      then Error "Original admission requires captured retirement policy"
-      else Ok ""
-    | Some prompt ->
-      let+ instructions=Prompt_registry.render_resolved_prompt_template
-        Prompt_names.librarian_retirement_policy prompt [] in
-      Keeper_memory_admission_judgment.retirement_prompt_suffix ~instructions ~batch retirement in
-  Ok (Keeper_memory_admission_judgment.prompt_suffix ~instructions:admission ~batch ^ historical)
-let validate_resolution (resolution : Prompt_registry.prompt_resolution) =
-  let source,effective=match resolution.override_value,resolution.file_value with
-    | Some value,_ -> Prompt_registry.Override,value
-    | None,Some value -> Prompt_registry.File,value
-    | None,None -> Prompt_registry.Missing,"" in
-  if source=resolution.source && effective=resolution.effective
-    && resolution.file_exists=Option.is_some resolution.file_value
-    && resolution.has_override=Option.is_some resolution.override_value
-  then Ok () else Error "Original Librarian prompt resolution is inconsistent"
-(* [continuity] is the document a floor step carries in the prompt's continuity
-   slot, the same one the Runtime floor's Volatile_memory_pass renders there.
-   Without it the slot keeps the placeholder every durable question has. *)
-let durable_substitutions ?continuity ~(policy:durable_policy) ~rule_prompt ~turn_prompts ~prompt source_input =
-  let open Result.Syntax in
-  let* rule=Prompt_registry.render_resolved_prompt_template
-    Prompt_names.librarian_working_contexts_rule rule_prompt [] in
-  let base=Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
-    ~source_lines:policy.facts_source_lines
-    ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap
-    source_input in
-  let base=match continuity with
-    | None -> base
-    | Some continuity ->
-      ("continuity",Yojson.Safe.to_string continuity)::List.remove_assoc "continuity" base in
-  let* variables=with_turn_input_prompts turn_prompts ((working_contexts_rule_variable,String.trim rule)::base) in
-  let+ rendered=Prompt_registry.render_resolved_prompt_template Prompt_names.librarian prompt variables in
-  rule,variables,rendered
-let check_durable_fields (preparation : durable_preparation) =
-  let open Result.Syntax in
-  let policy=preparation.policy in
-  let* ()=if Float.is_finite preparation.parsing_now && preparation.parsing_now>=0.
-    then Ok () else Error "Original history Memory parsing time is invalid" in
-  let* ()=if policy.facts_max_bytes>0 && policy.category_cap>0 && policy.facts_per_category_cap>0
-    then Ok () else Error "Original history Memory advisory limits are invalid" in
-  let* ()=validate_resolution preparation.rule_prompt in
-  let* ()=validate_resolution preparation.turn_prompts.working_context_input in
-  let* ()=validate_resolution preparation.turn_prompts.turn_inputs in
-  validate_resolution preparation.prompt
-let check_durable_rendering ~expected_schema ~rule ~variables ~rendered
-    (preparation : durable_preparation) =
-  let open Result.Syntax in
-  let* ()=if preparation.variables=variables then Ok ()
-    else Error "Original history Memory substitutions differ from captured input" in
-  let* actual_schema=Lane_addon_action.canonical preparation.output_schema in
-  let* expected_schema=Lane_addon_action.canonical expected_schema in
-  if String.trim rule<>"" && String.trim rendered<>""
-    && preparation.rendered_prompt=rendered && Yojson.Safe.equal actual_schema expected_schema
-  then Ok () else Error "Original history Memory prompt/schema differs from captured templates and input"
-let check_durable_preparation ?continuity ~expected_schema (preparation : durable_preparation) =
-  let open Result.Syntax in
-  let* ()=check_durable_fields preparation in
-  let* rule,variables,rendered=durable_substitutions ?continuity ~policy:preparation.policy
-    ~rule_prompt:preparation.rule_prompt ~turn_prompts:preparation.turn_prompts
-    ~prompt:preparation.prompt preparation.source_input in
-  check_durable_rendering ~expected_schema ~rule ~variables ~rendered preparation
-let validate_durable_preparation preparation =
-  check_durable_preparation
-    ~expected_schema:Keeper_structured_output_schema.librarian_current_output_schema preparation
-let restore_durable_preparation ~source_input ~parsing_now ~policy ~rule_prompt ~turn_prompts ~prompt
-    ~output_schema =
-  let open Result.Syntax in
-  let* rule,variables,rendered_prompt=durable_substitutions ~policy ~rule_prompt ~turn_prompts ~prompt
-    source_input in
-  let preparation : durable_preparation = {source_input;parsing_now;policy;rule_prompt;turn_prompts;prompt;
-    variables;rendered_prompt;output_schema} in
-  let* ()=check_durable_fields preparation in
-  let+ ()=check_durable_rendering
-    ~expected_schema:Keeper_structured_output_schema.librarian_current_output_schema
-    ~rule ~variables ~rendered:rendered_prompt preparation in preparation
-(* This is an admission check, not a restoration rule: old captures must keep
-   their original prompt and remain decodable even if it omitted the input.
-   The counterpart observations are turn material: they reach the model only
-   when the body places the turn-material slot and that slot places them. A
-   prompt rendered with no turn material shows no counterpart input. *)
-let require_counterpart_source ~(source_input : Keeper_librarian.input) ~prompt ~turn_inputs =
-  let shown = match turn_inputs with
-    | None -> false
-    | Some slot ->
-      Prompt_registry.resolution_references_variable prompt ~variable:turn_inputs_variable
-      && Prompt_registry.resolution_references_variable slot ~variable:"counterpart_observations" in
-  if source_input.counterpart_observations = [] || shown then Ok ()
-  else Error "Librarian prompt must include {{counterpart_observations}} while counterpart input is pending"
-let require_counterpart_template (preparation : durable_preparation) =
-  require_counterpart_source ~source_input:preparation.source_input ~prompt:preparation.prompt
-    ~turn_inputs:(Some preparation.turn_prompts.turn_inputs)
-let prepare_durable_with ?continuity ~output_schema ~now ~source_lines source_input =
-  let open Result.Syntax in
-  let policy : durable_policy = {
-    facts_max_bytes=Env_config.KeeperMemoryOs.facts_max_bytes ();
-    facts_source_lines=source_lines;
-    category_cap=Env_config.KeeperMemoryOs.category_cap ();
-    facts_per_category_cap=Env_config.KeeperMemoryOs.facts_per_category_cap ()} in
-  let* rule_prompt,rule=Prompt_registry.resolve_and_render_prompt_template
-    Prompt_names.librarian_working_contexts_rule [] in
-  let base=Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
-    ~source_lines:policy.facts_source_lines
-    ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap source_input in
-  let base=match continuity with
-    | None -> base
-    | Some continuity ->
-      ("continuity",Yojson.Safe.to_string continuity)::List.remove_assoc "continuity" base in
-  let* turn_prompts,variables=resolve_turn_inputs ((working_contexts_rule_variable,String.trim rule)::base) in
-  let* prompt,rendered_prompt=Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian variables in
-  let preparation : durable_preparation = {source_input;parsing_now=now;policy;rule_prompt;turn_prompts;prompt;
-    variables;rendered_prompt;output_schema} in
-  let* ()=check_durable_fields preparation in
-  let* ()=check_durable_rendering ~expected_schema:output_schema ~rule ~variables
-    ~rendered:rendered_prompt preparation in
-  let* ()=require_counterpart_template preparation in
-  Ok preparation
-let prepare_durable ~now ~source_lines source_input =
-  prepare_durable_with
-    ~output_schema:Keeper_structured_output_schema.librarian_current_output_schema ~now ~source_lines
-    source_input
-(* One question of the durable message floor. It is the question the Runtime
-   floor asks for the same message (Volatile_memory_pass): the same prompt,
-   with the working state so far and the unread messages in the continuity slot,
-   and the schema that requires a nonblank working state. Only the policy and
-   the prompt resolutions are frozen here, as for any durable question, so a
-   restored step renders the bytes it was sent. *)
-type durable_step_context = {
-  previous_state : string option;
-  unread_messages : Keeper_librarian_unread.t list;
-}
-type retained_step_source = {request_id:string;request_digest:string;source_basis_digest:string}
-type durable_step_mode = Ordinary_floor | Retained_original of retained_step_source
-type durable_step_preparation = {
-  mode : durable_step_mode;
-  context : durable_step_context;
-  preparation : durable_preparation;
-}
-let durable_step_continuity (context : durable_step_context) =
-  `Assoc ["previous_working_state",
-    (match context.previous_state with None -> `Null | Some state -> `String state);
-    "unread_messages", Keeper_librarian_unread.list_to_json context.unread_messages]
-let check_retained_step_source (source : retained_step_source) =
-  if String.trim source.request_id<>""
-    && String_util.is_lowercase_sha256_hex source.request_digest
-    && String_util.is_lowercase_sha256_hex source.source_basis_digest
-  then Ok () else Error "Retained history floor source identity is invalid"
-let check_durable_step_input mode (preparation : durable_preparation) =
-  match mode with
-  | Ordinary_floor ->
-    if preparation.source_input.working_context=Keeper_librarian_context.empty then Ok ()
-    else Error "Original history floor step must not carry a working context"
-  | Retained_original source -> check_retained_step_source source
-let validate_durable_step_preparation (step : durable_step_preparation) =
-  let open Result.Syntax in
-  let* ()=check_durable_step_input step.mode step.preparation in
-  check_durable_preparation ~continuity:(durable_step_continuity step.context)
-    ~expected_schema:Keeper_structured_output_schema.librarian_continuity_output_schema step.preparation
-let restore_step_preparation ~mode ~context ~source_input ~parsing_now ~policy ~rule_prompt ~turn_prompts
-    ~prompt ~output_schema =
-  let open Result.Syntax in
-  let continuity=durable_step_continuity context in
-  let* rule,variables,rendered_prompt=durable_substitutions ~continuity ~policy ~rule_prompt ~turn_prompts
-    ~prompt source_input in
-  let step={mode;context;preparation={source_input;parsing_now;policy;rule_prompt;turn_prompts;prompt;variables;
-    rendered_prompt;output_schema}} in
-  let* ()=check_durable_step_input mode step.preparation in
-  let* ()=check_durable_fields step.preparation in
-  let+ ()=check_durable_rendering
-    ~expected_schema:Keeper_structured_output_schema.librarian_continuity_output_schema
-    ~rule ~variables ~rendered:rendered_prompt step.preparation in step
-let restore_durable_step_preparation = restore_step_preparation ~mode:Ordinary_floor
-let restore_retained_durable_step_preparation ~source =
-  restore_step_preparation ~mode:(Retained_original source)
-(* A floor step reads the input the Runtime floor's volatile Memory pass reads.
-   The pass's state and unread arguments do not change that input. *)
-let durable_step_source_input input = input_for_pass (Volatile_memory_pass (None,[])) input
-let prepare_durable_step ~now ~context ~source_lines input =
-  let open Result.Syntax in
-  let source_input=durable_step_source_input input in
-  let* preparation=prepare_durable_with ~continuity:(durable_step_continuity context)
-    ~output_schema:Keeper_structured_output_schema.librarian_continuity_output_schema ~now ~source_lines
-    source_input in
-  let step={mode=Ordinary_floor;context;preparation} in
-  let+ ()=check_durable_step_input step.mode step.preparation in step
-(* Compare the fixed part without rebuilding any current prompt or policy.
-   The machine owns the five fields it projects for each question. Complete
-   input encoding keeps JSON field order from becoming a second identity. *)
-let retained_step_fixed_input (input : Keeper_librarian.input) =
-  Keeper_librarian_input_capture.to_json {input with current=None;messages=[];
-    historical_task_contexts=[];tool_observations=[];counterpart_observations=[]}
-let check_retained_step_original ~source ~(original:durable_preparation)
-    (step:durable_step_preparation) =
-  let open Result.Syntax in
-  let* ()=check_retained_step_source source in
-  let* ()=validate_durable_preparation original in
-  let* fixed_original=Lane_addon_action.canonical (retained_step_fixed_input original.source_input) in
-  let* fixed_step=Lane_addon_action.canonical (retained_step_fixed_input step.preparation.source_input) in
-  let p=step.preparation in
-  if step.mode=Retained_original source && Yojson.Safe.equal fixed_original fixed_step
-    && p.parsing_now=original.parsing_now && p.policy=original.policy
-    && p.rule_prompt=original.rule_prompt && p.turn_prompts=original.turn_prompts
-    && p.prompt=original.prompt
-  then Ok () else Error "Retained history floor question differs from its original source or frozen preparation"
-let validate_retained_durable_step ~source ~original step =
-  let open Result.Syntax in
-  let* ()=check_retained_step_original ~source ~original step in
-  validate_durable_step_preparation step
-let prepare_retained_durable_step ~source ~(original:durable_preparation) ~context source_input =
-  let open Result.Syntax in
-  let* step=restore_retained_durable_step_preparation ~source ~context ~source_input
-    ~parsing_now:original.parsing_now ~policy:original.policy ~rule_prompt:original.rule_prompt
-    ~turn_prompts:original.turn_prompts ~prompt:original.prompt
-    ~output_schema:Keeper_structured_output_schema.librarian_continuity_output_schema in
-  let* ()=validate_retained_durable_step ~source ~original step in
-  let+ ()=require_counterpart_template step.preparation in step
-let render_librarian_prompt ~source_lines input =
-  prepare_durable ~now:(Time_compat.now ()) ~source_lines input
-  |> Result.map (fun (preparation : durable_preparation) -> preparation.rendered_prompt)
-(* Admission renders neither turn-material slot. An input that carries turn
-   material would be judged without it, so that input is refused here rather
-   than answered from a prompt that left its material out. *)
-let validate_admission_preparation ~batch ~retirement ~input preparation =
-  let open Result.Syntax in
-  let* ()=if Keeper_librarian.carries_turn_material input
-    then Error "Admission input carries turn material that its prompt does not render" else Ok () in
-  let policy=preparation.policy in
-  let* ()=if policy.facts_max_bytes>0 && policy.category_cap>0 && policy.facts_per_category_cap>0
-    then Ok () else Error "Original Librarian advisory limits are invalid" in
-  let* ()=validate_resolution preparation.rule_prompt in
-  let* ()=validate_resolution preparation.prompt in
-  let* ()=validate_resolution preparation.admission_prompt in
-  let* ()=match preparation.retirement_prompt with None -> Ok () | Some prompt -> validate_resolution prompt in
-  let* suffix=admission_suffix ~admission_prompt:preparation.admission_prompt
-    ~retirement_prompt:preparation.retirement_prompt ~batch ~retirement in
-  let* rule=Prompt_registry.render_resolved_prompt_template
-    Prompt_names.librarian_working_contexts_rule preparation.rule_prompt [] in
-  let variables=without_turn_inputs ((working_contexts_rule_variable,String.trim rule)
-    ::Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
-      ~source_lines:policy.facts_source_lines
-      ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap input) in
-  let* ()=if preparation.variables=variables then Ok ()
-    else Error "Original Librarian prompt variables differ from captured input" in
-  let* rendered=Prompt_registry.render_resolved_prompt_template
-    Prompt_names.librarian preparation.prompt preparation.variables in
-  let* actual_schema=Lane_addon_action.canonical preparation.output_schema in
-  let* expected_schema=Lane_addon_action.canonical (admission_schema ()) in
-  if String.trim rule<>"" && preparation.rendered_prompt=rendered ^ suffix
-    && Yojson.Safe.equal actual_schema expected_schema
-  then Ok () else Error "Original Librarian prompt/schema differs from its captured template and input"
-let prepare_admission ~batch ~retirement ~source_lines input =
-  let open Result.Syntax in
-  let policy={facts_max_bytes=Env_config.KeeperMemoryOs.facts_max_bytes ();
-    facts_source_lines=source_lines;
-    category_cap=Env_config.KeeperMemoryOs.category_cap ();
-    facts_per_category_cap=Env_config.KeeperMemoryOs.facts_per_category_cap ()} in
-  let* rule_prompt,rule=Prompt_registry.resolve_and_render_prompt_template
-    Prompt_names.librarian_working_contexts_rule [] in
-  let* ()=if String.trim rule<>"" then Ok () else Error "Librarian working-context rule rendered empty" in
-  let variables=without_turn_inputs ((working_contexts_rule_variable,String.trim rule)
-    ::Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
-      ~source_lines:policy.facts_source_lines
-      ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap input) in
-  let* prompt,rendered=Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian variables in
-  let* admission_prompt,_=Prompt_registry.resolve_and_render_prompt_template
-    Prompt_names.librarian_admission_policy [] in
-  let* retirement_prompt=
-    if Keeper_memory_admission_judgment.retirement_prompt_needed ~batch retirement then
-      let+ prompt,_=Prompt_registry.resolve_and_render_prompt_template
-        Prompt_names.librarian_retirement_policy [] in Some prompt
-    else Ok None in
-  let* suffix=admission_suffix ~admission_prompt ~retirement_prompt ~batch ~retirement in
-  let preparation={policy;rule_prompt;prompt;admission_prompt;retirement_prompt;variables;
-    rendered_prompt=rendered ^ suffix;output_schema=admission_schema ()} in
-  let* ()=validate_admission_preparation ~batch ~retirement ~input preparation in
-  Ok preparation
-
-let prompt_and_input_for_librarian ~source_lines (inp : Keeper_librarian.input) =
-  let open Result.Syntax in
-  (* One asset, one message: the librarian's role statement lives at the top
-     of the selection prompt it is rendered with, so there is no second file
-     to keep in step. *)
-  let+ prompt =
-    render_librarian_prompt ~source_lines inp
-  in
-  inp, prompt
-;;
-
-let messages_and_input_for_librarian ~source_lines inp =
+let working_context_messages (inp : Keeper_librarian.input) =
   Result.map
-    (fun (input, prompt) -> input, [ message Agent_core.Types.User prompt ])
-    (prompt_and_input_for_librarian ~source_lines inp)
+    (fun material -> [ message Agent_core.Types.User material.rendered ])
+    (snd (resolve_working_context_prompt inp))
 ;;
 
-let messages_for_librarian ~source_lines inp =
-  Result.map snd (messages_and_input_for_librarian ~source_lines inp)
+let working_context_requirement =
+  Exact_output.make_output_requirement
+    ~schema:Keeper_structured_output_schema.librarian_working_context_output_schema
+    ~minimum_guarantee:Exact_output.Json_syntax
 ;;
 
 let flow_candidates selected_slots =
@@ -797,52 +222,23 @@ let flow_candidates selected_slots =
     | [] -> Ok (List.rev acc)
     | (slot : Runtime_exact_output_registry.selected_slot) :: rest ->
       (match
-         Exact_output.make_flow_candidate
-           ~id:slot.slot_id
-           ~admitted_target:slot.admitted_target
+         Exact_output.make_flow_candidate ~id:slot.slot_id ~admitted_target:slot.admitted_target
        with
        | Ok candidate -> loop (position + 1) (candidate :: acc) rest
        | Error Exact_output.Blank_flow_candidate_id ->
-         Error
-           (Exact_candidate_invalid
-              { position
-              ; slot_id = slot.slot_id
-              }))
+         Error (Exact_candidate_invalid { position; slot_id = slot.slot_id }))
   in
   loop 0 [] selected_slots
 ;;
 
-let output_requirement_of_pass pass =
-  let schema = match pass with
-    | Memory_pass (None, _) -> Keeper_structured_output_schema.librarian_current_output_schema
-    | Memory_pass (Some _, _) | Volatile_memory_pass _ ->
-      Keeper_structured_output_schema.librarian_continuity_output_schema
-    | Continuity_state_pass _ | Volatile_state_pass _ ->
-      Keeper_structured_output_schema.librarian_continuity_state_output_schema
-    | Working_context_pass ->
-      Keeper_structured_output_schema.librarian_working_context_output_schema in
-  Exact_output.make_output_requirement ~schema
-    ~minimum_guarantee:Exact_output.Json_syntax
-;;
-
-(* Pre-flight projection for the exact Librarian lane: each slot's request
-   either projects (a capability and serialization admission) or is refused
-   outright. Size is not judged here — the provider decides whether it takes
-   the body, and the flow's own advance handles a slot failing at dispatch. *)
 type slot_projection =
   | Slot_admitted
   | Slot_unusable of Exact_output.admission_error
-        (** The projection refused the request outright -- a capability or
-            serialization refusal. *)
 
-let project_slot ~requirement ~(slot : Runtime_exact_output_registry.selected_slot) ~messages :
-  slot_projection =
-  match
-    Exact_output.project_request_body
-      ~target:slot.admitted_target
-      ~messages
-      requirement
-  with
+let project_slot ~requirement ~(slot : Runtime_exact_output_registry.selected_slot) ~messages
+  : slot_projection
+  =
+  match Exact_output.project_request_body ~target:slot.admitted_target ~messages requirement with
   | Error error -> Slot_unusable error
   | Ok (_ : Exact_output.request_body_projection) -> Slot_admitted
 ;;
@@ -852,30 +248,23 @@ type preflight_selection =
   ; unusable : slot_refusal list
   }
 
-(* The pre-flight over the ladder: the exact slots this run can use and the
-   slots it is without, or the error naming every refusal when no slot
-   projects. An empty ladder reports nothing -- the production caller routes
-   an empty slot list to the cli lane before it gets here. *)
 let preflight_slots ~requirement ~selected_slots ~messages =
   match selected_slots with
   | [] -> Ok { selected_slots = []; unusable = [] }
   | _ :: _ ->
     let selected_slots, unusable =
       List.fold_left
-        (fun (selected_slots, unusable)
-             (slot : Runtime_exact_output_registry.selected_slot) ->
+        (fun (selected_slots, unusable) (slot : Runtime_exact_output_registry.selected_slot) ->
            match project_slot ~requirement ~slot ~messages with
            | Slot_admitted -> slot :: selected_slots, unusable
            | Slot_unusable cause ->
              selected_slots, { slot_id = slot.slot_id; cause } :: unusable)
         ([], [])
         selected_slots
-      |> fun (selected_slots, unusable) ->
-      List.rev selected_slots, List.rev unusable
+      |> fun (selected_slots, unusable) -> List.rev selected_slots, List.rev unusable
     in
     (match selected_slots with
-     | [] ->
-       Error (Exact_setup_failed (Exact_request_projection_failed unusable))
+     | [] -> Error (Exact_setup_failed (Exact_request_projection_failed unusable))
      | _ :: _ -> Ok { selected_slots; unusable })
 ;;
 
@@ -883,13 +272,11 @@ let resolve_librarian_slots () =
   let open Result.Syntax in
   let* registry =
     Runtime_exact_output_registry.current ()
-    |> Result.map_error (fun error ->
-      Exact_setup_failed (Exact_registry_unavailable error))
+    |> Result.map_error (fun error -> Exact_setup_failed (Exact_registry_unavailable error))
   in
   let* resolved =
     Runtime_exact_output_registry.resolve_lane registry ~lane_id:exact_lane_id
-    |> Result.map_error (fun error ->
-      Exact_setup_failed (Exact_lane_unavailable error))
+    |> Result.map_error (fun error -> Exact_setup_failed (Exact_lane_unavailable error))
   in
   let (ordered : Runtime_exact_lane_backpressure.ordered) =
     Runtime_exact_lane_backpressure.order resolved
@@ -903,56 +290,44 @@ let resolve_librarian_slots () =
 let prepare_attempt ~requirement ~selected_slots messages =
   let open Result.Syntax in
   let* candidates =
-    flow_candidates selected_slots
-    |> Result.map_error (fun error -> Exact_setup_failed error)
+    flow_candidates selected_slots |> Result.map_error (fun error -> Exact_setup_failed error)
   in
   match candidates with
   | [] ->
     Error
       (Exact_setup_failed
-         (Exact_lane_unavailable
-            (No_admitted_lane_slots { lane_id = exact_lane_id })))
+         (Exact_lane_unavailable (No_admitted_lane_slots { lane_id = exact_lane_id })))
   | first :: rest ->
     let* snapshot =
       Exact_output.snapshot_flow ~first ~rest ~messages requirement
-      |> Result.map_error (fun error ->
-        Exact_setup_failed (Exact_flow_snapshot_failed error))
+      |> Result.map_error (fun error -> Exact_setup_failed (Exact_flow_snapshot_failed error))
     in
     Exact_output.start_flow
       ~admission_class:(Standalone_lane.admission_class Librarian)
       snapshot
-    |> Result.map_error (fun error ->
-      Exact_setup_failed (Exact_flow_start_failed error))
+    |> Result.map_error (fun error -> Exact_setup_failed (Exact_flow_start_failed error))
 ;;
 
-(* The typed failure tree is classified once. Independent axes preserve the
-   historical range policy, admission refusal, invalid-output veto and failures
-   a smaller request would meet again. Measured CLI capacity stays local to the
-   current fallback, matching the continuity callback's existing contract. *)
 let rec extraction_failure_evidence = function
   | Exact_execution_failed error -> error.failure_evidence
   | Domain_output_invalid _ -> Failure_evidence.invalid_output
   | Cli_slots_exhausted { prior_error; failures } ->
     let prior =
-      Option.fold ~none:Failure_evidence.empty
-        ~some:extraction_failure_evidence prior_error
+      Option.fold ~none:Failure_evidence.empty ~some:extraction_failure_evidence prior_error
     in
     Failure_evidence.after_cli_fallback ~prior failures
   | Cli_prompt_unavailable { prior_error } ->
-    Option.fold ~none:Failure_evidence.empty
+    Option.fold
+      ~none:Failure_evidence.empty
       ~some:(fun error ->
-        Failure_evidence.without_measured_cli_capacity
-          (extraction_failure_evidence error))
+        Failure_evidence.without_measured_cli_capacity (extraction_failure_evidence error))
       prior_error
   | Slots_held { after; _ } ->
-    (* A held slot is its account's rest refusal without the call, so it
-       stays size-independent evidence however the other slots failed. *)
     Failure_evidence.combine
       (Option.fold ~none:Failure_evidence.empty ~some:extraction_failure_evidence after)
       Failure_evidence.held
-  | Absorb_judgment_failed _
-  | Prompt_render_failed _ | Exact_setup_failed _ | No_transport_declared
-  | Memory_snapshot_write_failed _ -> Failure_evidence.empty
+  | Prompt_render_failed _ | Exact_setup_failed _ | No_transport_declared ->
+    Failure_evidence.empty
 ;;
 
 let input_capacity_of_failure evidence =
@@ -962,14 +337,15 @@ let input_capacity_of_failure evidence =
 ;;
 
 let message_descent_of_failure (evidence : Failure_evidence.t) =
-  if evidence.unsettled_native_execution then Unsettled_native_blocks_descent
-  else if evidence.invalid_output then Invalid_output_blocks_descent
-  else if evidence.historical_range_size || evidence.named_input_capacity then Smaller_input_may_help
+  if evidence.unsettled_native_execution
+  then Unsettled_native_blocks_descent
+  else if evidence.invalid_output
+  then Invalid_output_blocks_descent
+  else if evidence.historical_range_size || evidence.named_input_capacity
+  then Smaller_input_may_help
   else No_descent_evidence
 ;;
 
-(* What a pass that did not commit hands back: the cause for its caller's
-   log, and independent evidence about reading a smaller input. *)
 type not_committed =
   { input_capacity_evidence : input_capacity_evidence
   ; input_capacity_only : bool
@@ -979,24 +355,6 @@ type not_committed =
   ; walk_shows_size : bool
   ; smaller_range_meets_same_failure : bool
   }
-
-let merge_message_descent earlier later =
-  match earlier,later with
-  | Unsettled_native_blocks_descent,_ | _,Unsettled_native_blocks_descent ->
-    Unsettled_native_blocks_descent
-  | Invalid_output_blocks_descent,_ | _,Invalid_output_blocks_descent ->
-    Invalid_output_blocks_descent
-  | Smaller_input_may_help,_ | _,Smaller_input_may_help -> Smaller_input_may_help
-  | No_descent_evidence,No_descent_evidence -> No_descent_evidence
-;;
-
-let may_descend_messages reports =
-  let policy = List.fold_left (fun policy (report : not_committed) ->
-    merge_message_descent policy report.message_descent) No_descent_evidence reports in
-  match policy with
-  | Smaller_input_may_help -> true
-  | No_descent_evidence | Invalid_output_blocks_descent | Unsettled_native_blocks_descent -> false
-;;
 
 let not_committed_of_failure ~detail (evidence : Failure_evidence.t) =
   { detail
@@ -1009,70 +367,55 @@ let not_committed_of_failure ~detail (evidence : Failure_evidence.t) =
   }
 ;;
 
-let fit_continuity ~capacity ~source_lines ~input_for prepared =
-  let open Result.Syntax in
-  let* _, cli_slots, _ = resolve_librarian_slots ()
-    |> Result.map_error extraction_error_to_string in
-  if not (List.mem capacity.Keeper_lane_cli_oneshot.runtime_id cli_slots)
-  then Ok (Some prepared)
-  else Keeper_librarian_continuity.fit prepared ~fits:(fun continuity ->
-    let* input = input_for continuity in
-    (* Whether this range's Memory is already committed is read after the
-       fit, so either pass may run on the fitted range. The range fits only
-       when both requests fit: an operator override can make either prompt
-       the longer one. *)
-    let pass_fits pass =
-      let* material = snd (resolve_librarian_prompt ~source_lines:(Ok source_lines) pass input) in
-      let prompt = Keeper_lane_cli_oneshot.prompt_with_schema
-        ~requirement:(output_requirement_of_pass pass) ~prompt:material.rendered in
-      let* actual_chars = Runtime_codex_app_server.prompt_char_count prompt in
-      Ok (actual_chars <= capacity.capacity.max_chars)
-    in
-    let* memory_fits = pass_fits (Memory_pass (Some continuity, ())) in
-    if memory_fits then pass_fits (Continuity_state_pass continuity) else Ok false)
-;;
-
-(* The librarian's flow callbacks all answer [Ok ()], so its callback error
-   type is empty and the renderer's callback arms are unreachable by type,
-   not by a label that stands in for a lost cause. *)
 type no_callback_error = |
 
 let no_callback_error_to_string : no_callback_error -> string = function
   | _ -> .
 ;;
 
-(* Whether the walk sent a generation request, over every slot it visited.
-   Reading the slot that ended the walk only reported "none" for a walk whose
-   earlier slot sent its request, failed and advanced (#38450). A token-count
-   measurement is not a generation request and is not counted. *)
-let exact_execution_error ~declared_http ~excluded_http ~declared_cli ~semantic_rejections
-    (error : no_callback_error Exact_output.flow_execution_error) =
-  let http=Keeper_exact_walk_receipt.http_failure
-    ~callback_error_to_string:no_callback_error_to_string
-    ~rejection_to_string:Keeper_librarian.parse_error_to_string
-    (Exact_output.Flow_execution_terminal {cause=error;prior_rejections=semantic_rejections}) in
-  let cli=Keeper_exact_walk_receipt.cli ~visited:[] ~dispatched:[] ~failures:[] ~result:Not_reached in
-  let receipt=match Keeper_exact_walk_receipt.make ~declared_http ~excluded_http ~declared_cli ~http ~cli with
+let exact_execution_error
+      ~declared_http
+      ~excluded_http
+      ~declared_cli
+      ~semantic_rejections
+      (error : no_callback_error Exact_output.flow_execution_error)
+  =
+  let http =
+    Keeper_exact_walk_receipt.http_failure
+      ~callback_error_to_string:no_callback_error_to_string
+      ~rejection_to_string:Keeper_librarian.parse_error_to_string
+      (Exact_output.Flow_execution_terminal { cause = error; prior_rejections = semantic_rejections })
+  in
+  let cli =
+    Keeper_exact_walk_receipt.cli ~visited:[] ~dispatched:[] ~failures:[] ~result:Not_reached
+  in
+  let receipt =
+    match
+      Keeper_exact_walk_receipt.make ~declared_http ~excluded_http ~declared_cli ~http ~cli
+    with
     | Ok receipt -> receipt
-    | Error detail -> invalid_arg ("invalid original Librarian walk: " ^ detail) in
-  let outward_effect=match Keeper_exact_walk_receipt.generation_dispatch receipt with
+    | Error detail -> invalid_arg ("invalid Librarian walk: " ^ detail)
+  in
+  let outward_effect =
+    match Keeper_exact_walk_receipt.generation_dispatch receipt with
     | Exact_output.No_generation_dispatch -> No_outward_effect
-    | Generation_dispatch_started -> Outward_effect_started in
-  let detail=Exact_output.flow_execution_error_to_string
-    ~callback_error_to_string:no_callback_error_to_string
-    ~raw_response_to_string:Keeper_exact_flow_detail.raw_response_excerpt error in
-  {outward_effect;failure_evidence=Keeper_exact_walk_receipt.failure_evidence receipt;
-   exhausted_input_refusals=Keeper_exact_walk_receipt.exhausted_input_refusals receipt;detail}
+    | Generation_dispatch_started -> Outward_effect_started
+  in
+  let detail =
+    Exact_output.flow_execution_error_to_string
+      ~callback_error_to_string:no_callback_error_to_string
+      ~raw_response_to_string:Keeper_exact_flow_detail.raw_response_excerpt
+      error
+  in
+  { outward_effect
+  ; failure_evidence = Keeper_exact_walk_receipt.failure_evidence receipt
+  ; detail
+  }
 ;;
 
-(* The librarian's whole prompt is one User message; the cli one-shot needs
-   that text back out of the fitted list. Anything else is a structural
-   drift this lane has never produced, so the walk is skipped with a log
-   rather than inventing an input. *)
 let cli_prompt_of_messages ~keeper_id (messages : Llm_provider.Types.message list) =
   match messages with
-  | [ { Llm_provider.Types.content = [ Llm_provider.Types.Text prompt ]; _ } ] ->
-    Some prompt
+  | [ { Llm_provider.Types.content = [ Llm_provider.Types.Text prompt ]; _ } ] -> Some prompt
   | ( []
     | _ :: _ :: _
     | [ { Llm_provider.Types.content = []; _ } ]
@@ -1091,8 +434,7 @@ let cli_prompt_of_messages ~keeper_id (messages : Llm_provider.Types.message lis
       } ] ) as messages ->
     Log.Keeper.warn
       ~keeper_name:keeper_id
-      "librarian cli fallback skipped: fitted prompt is not one text message \
-       (%d messages)"
+      "librarian cli fallback skipped: fitted prompt is not one text message (%d messages)"
       (List.length messages);
     None
 ;;
@@ -1101,253 +443,6 @@ type cli_fallback_failure =
   | No_cli_slots
   | Fitted_prompt_unavailable
   | Slot_failures of Keeper_lane_cli_oneshot.failure list
-
-type continuity_answer =
-  | Memory_only
-  | Continuity of
-      { prepared : Keeper_librarian_continuity.prepared
-      ; working_state : string
-      }
-
-type accepted =
-  { selection : Keeper_librarian.selection
-  ; continuity_answer : continuity_answer
-  ; required_memory_ids : string list
-  ; explicit_candidate_ids : Keeper_memory_os_current.explicit_candidate_id list
-  ; admission_support : string list
-  ; admission_recall_bindings : Keeper_memory_os_current.admission_recall_binding list
-  }
-
-(* A continuity pass must produce both Memory disposition and its saved
-   working state before either may be published. Ordinary Memory extraction
-   has no continuity obligation and does not read the working state, so a
-   slip in it cannot refuse the Memory decision. The accepted answer carries
-   the pair, so publication has no case for a continuity pass without one. *)
-let validate_selection ?now ?continuity selected_input output =
-  let open Result.Syntax in
-  let* selection = Keeper_librarian.selection_of_json_result ?now selected_input output in
-  match continuity with
-  | None -> Ok { selection; continuity_answer = Memory_only; required_memory_ids = []; explicit_candidate_ids = []; admission_support = []; admission_recall_bindings = [] }
-  | Some prepared ->
-    let+ working_state = Keeper_librarian.continuity_working_state_of_json_result output in
-    { selection; continuity_answer = Continuity { prepared; working_state }; required_memory_ids = []; explicit_candidate_ids = []; admission_support = []; admission_recall_bindings = [] }
-;;
-
-type durable_absorption = {
-  cited_observations : Keeper_librarian_absorb_gate.cited_observations;
-  facts : Keeper_memory_os_types.fact list;
-  new_claims : Keeper_memory_os_types.fact list;
-  superseding : string list;
-  absorbed : Keeper_memory_os_types.absorbed_statement list;
-}
-type durable_proposal = {accepted : accepted;absorption : durable_absorption}
-type durable_proposal_error =
-  | Preparation_invalid of string
-  | Proposal_invalid of Keeper_librarian.parse_error
-(* What each claim the answer applies cites, as observations: the input
-   entries its [evidence] names, then the pending explicit-write candidates
-   that support the change and whose judgment names that claim. *)
-let cited_observations (input : Keeper_librarian.input) (accepted : accepted) =
-  let candidates =
-    List.filter_map (fun (binding : Keeper_memory_os_current.admission_recall_binding) ->
-      if List.mem binding.candidate_id.request_id accepted.admission_support
-      then Some (binding.target_memory_id,
-        `Assoc ["observation_kind", `String "pending_explicit_memory_candidate";
-                "request_id", `String binding.candidate_id.request_id;
-                "sequence", `Int binding.candidate_id.sequence;
-                "proposal", Keeper_memory_os_types.fact_to_json binding.source_fact])
-      else None) accepted.admission_recall_bindings in
-  List.map (fun (identity, evidence) ->
-    identity,
-    Keeper_librarian.observations_cited input evidence
-    @ List.filter_map (fun (target, row) ->
-        if String.equal target identity then Some row else None) candidates)
-    accepted.selection.cited
-let absorption_input (input : Keeper_librarian.input) (accepted : accepted)
-    : durable_absorption =
-  let selection = accepted.selection in
-  {cited_observations=cited_observations input accepted;
-   facts=(match input.current with None -> [] | Some current -> current.facts);
-   new_claims=selection.new_claims;
-   superseding=List.map (fun (revision : Keeper_librarian.revision) -> revision.superseded_by)
-     selection.revisions;
-   absorbed=selection.absorbed}
-let parse_durable_proposal (preparation : durable_preparation) output =
-  let open Result.Syntax in
-  let+ accepted=validate_selection ~now:preparation.parsing_now preparation.source_input output in
-  {accepted;absorption=absorption_input preparation.source_input accepted}
-let validate_durable_proposal preparation output =
-  let open Result.Syntax in
-  let* ()=validate_durable_preparation preparation |> Result.map_error (fun detail -> Preparation_invalid detail) in
-  parse_durable_proposal preparation output |> Result.map_error (fun error -> Proposal_invalid error)
-
-type durable_step_proposal = {proposal : durable_proposal;working_state : string}
-let validate_durable_step_proposal (step : durable_step_preparation) output =
-  let open Result.Syntax in
-  let invalid error=Proposal_invalid error in
-  let input=step.preparation.source_input in
-  let* ()=validate_durable_step_preparation step |> Result.map_error (fun detail -> Preparation_invalid detail) in
-  let* accepted=validate_selection ~now:step.preparation.parsing_now input output |> Result.map_error invalid in
-  let+ working_state=Keeper_librarian.continuity_working_state_of_json_result output |> Result.map_error invalid in
-  {proposal={accepted;absorption=absorption_input input accepted};working_state}
-
-(* The gated decision a durable floor step stands for, built from what the
-   host retained: the validated answer and the gate's judgment of it. This is
-   the same record the Runtime floor builds after its own gate, so the ordered
-   Memory plan and program take it unchanged. A failed judgment is no decision. *)
-let durable_memory_step ~run_id (step : durable_step_preparation) (proposal : durable_step_proposal)
-    ~absorb_gate =
-  let open Result.Syntax in
-  let* ()=require_counterpart_template step.preparation in
-  let selection=proposal.proposal.accepted.selection in
-  if String.trim run_id="" then Error "Original history floor step needs a run identity"
-  else match Keeper_librarian_absorb_gate.failure_detail ~absorbed:selection.absorbed absorb_gate with
-    | Some reason -> Error reason
-    | None ->
-      Ok {run_id;source_input=step.preparation.source_input;prompt_variables=step.preparation.variables;
-        rendered_prompt=step.preparation.rendered_prompt;absorb_gate;
-        new_claims=Keeper_librarian_absorb_gate.without_copies absorb_gate selection.new_claims;
-        dropped=selection.dropped;absorbed=Keeper_librarian_absorb_gate.absorbed_of_run absorb_gate;
-        revisions=selection.revisions;working_state=proposal.working_state}
-
-(* The accepted answer of each pass. A context-only answer carries no
-   selection, so nothing downstream can reach a Memory field it never asked
-   for. *)
-type 'commit memory_target = Commit_memory of 'commit | Infer_memory_state of string
-
-type 'commit answer =
-  | Memory_answer of accepted * 'commit memory_target
-  | Admission_deferred_answer
-  | Continuity_state_answer of
-      { prepared : Keeper_librarian_continuity.prepared
-      ; working_state : string
-      }
-  | Volatile_state_answer of string
-  | Working_context_answer of Keeper_librarian_context.pocket list
-
-let validate_answer pass selected_input output =
-  match pass with
-  | Memory_pass (continuity, commit) ->
-    validate_selection ?continuity selected_input output
-    |> Result.map (fun accepted -> Memory_answer (accepted, Commit_memory commit))
-  | Volatile_memory_pass _ ->
-    let open Result.Syntax in
-    let* accepted = validate_selection selected_input output in
-    let+ working_state = Keeper_librarian.continuity_working_state_of_json_result output in
-    Memory_answer (accepted, Infer_memory_state working_state)
-  | Continuity_state_pass prepared ->
-    Keeper_librarian.working_state_of_json_result output
-    |> Result.map (fun working_state -> Continuity_state_answer { prepared; working_state })
-  | Volatile_state_pass _ ->
-    Keeper_librarian.working_state_of_json_result output
-    |> Result.map (fun state -> Volatile_state_answer state)
-  | Working_context_pass ->
-    Keeper_librarian.working_contexts_of_json_result selected_input output
-    |> Result.map (fun pockets -> Working_context_answer pockets)
-;;
-
-type admission_proposal = Deferred | Accepted of accepted
-let check_admission_facts_budget ~(policy : admission_policy) (input : Keeper_librarian.input)
-    (accepted : accepted) =
-  let current_facts =
-    Option.fold ~none:[] ~some:(fun (c : Keeper_librarian.current_selection) -> c.facts) input.current
-  in
-  let previous_bytes =
-    Keeper_memory_os_render.facts_payload_bytes
-      ~ordinary_facts:current_facts
-      ~source_lines:policy.facts_source_lines
-  in
-  let budget =
-    Keeper_memory_os_render.measure_facts_budget
-      ~maximum_bytes:policy.facts_max_bytes
-      ~ordinary_facts:accepted.selection.facts
-      ~source_lines:policy.facts_source_lines
-  in
-  if Keeper_memory_os_render.facts_budget_fits budget || budget.total_bytes < previous_bytes
-  then Ok ()
-  else
-    Error
-      (Keeper_librarian.Admission_invalid
-         (Printf.sprintf
-            "proposed Memory OS facts exceed commit budget: %d bytes > %d bytes"
-            budget.total_bytes
-            budget.maximum_bytes))
-;;
-
-let validate_admission_proposal ?policy ~now ~batch ~input:selected_input output =
-  let open Result.Syntax in
-  let* ()=if Float.is_finite now && now>=0. then Ok ()
-    else Error (Keeper_librarian.Admission_invalid "Original admission parsing time is invalid") in
-  let module Judgment = Keeper_memory_admission_judgment in
-  let invalid detail = Keeper_librarian.Admission_invalid detail in
-  let* memory, judgments, change_support = Judgment.unwrap ~batch output |> Result.map_error invalid in
-  let* accepted = validate_selection ~now selected_input memory in
-  let* () = Judgment.verify ~facts:accepted.selection.facts judgments |> Result.map_error invalid in
-  let selection = accepted.selection in
-  (* A new claim that absorbs current memories, and continues no dropped one,
-     merges what admission already read. A claim that absorbs nothing, or that
-     revises a dropped memory through [supersedes], brings knowledge only a
-     candidate can carry (RFC-0517 §7.1). *)
-  let merges identity = List.exists (fun (statement : Keeper_memory_os_types.absorbed_statement) ->
-    String.equal statement.into identity) selection.absorbed in
-  let revises identity = List.exists (fun (revision : Keeper_memory_os_types.revision) ->
-    String.equal revision.superseded_by identity) selection.revisions in
-  let additions = List.filter (fun fact ->
-    let identity = Keeper_memory_os_types.memory_id fact in
-    revises identity || not (merges identity)) selection.new_claims in
-  let* () = Judgment.verify_support ~additions ~change_support judgments
-    |> Result.map_error invalid in
-  let settled = Judgment.settled_requests judgments in
-  if settled = [] then Ok Deferred
-  else
-    let claims = List.filter_map (fun (judgment : Judgment.judgment) ->
-      match judgment.outcome with
-      | Incorporated claim | Already_represented claim -> Some claim
-      | Not_durable | Deferred -> None) judgments in
-    let required_memory_ids = List.filter_map (fun (fact : Keeper_memory_os_types.fact) ->
-      if List.mem fact.claim claims then Some (Keeper_memory_os_types.memory_id fact) else None)
-      accepted.selection.facts in
-    let explicit_candidate_ids = Keeper_memory_admission_queue.candidate_ids batch
-      |> List.filter (fun (candidate : Keeper_memory_os_current.explicit_candidate_id) ->
-        List.mem candidate.request_id settled) in
-    let module Current = Keeper_memory_os_current in
-    let module Queue = Keeper_memory_admission_queue in
-    let* admission_recall_bindings = List.fold_left (fun result (judgment : Judgment.judgment) ->
-      let* bindings = result in
-      match judgment.outcome with
-      | Not_durable | Deferred -> Ok bindings
-      | Incorporated claim | Already_represented claim ->
-        (match List.find_opt (fun (row : Queue.candidate) -> row.request_id = judgment.request_id)
-                 (Queue.candidates batch),
-               List.find_opt (fun (id : Current.explicit_candidate_id) -> id.request_id = judgment.request_id)
-                 explicit_candidate_ids,
-               List.find_opt (fun (fact : Keeper_memory_os_types.fact) -> fact.claim = claim)
-                 accepted.selection.facts with
-         | Some row, Some candidate_id, Some target ->
-           Ok ({Current.candidate_id; source_fact=row.fact;
-                target_memory_id=Keeper_memory_os_types.memory_id target} :: bindings)
-         | _ -> Error (invalid "admitted lookup binding lacks its candidate or selected target")))
-      (Ok []) judgments in
-    let accepted =
-      {accepted with required_memory_ids; explicit_candidate_ids;
-       admission_support = change_support;
-       admission_recall_bindings = List.rev admission_recall_bindings}
-    in
-    let+ () =
-      match policy with
-      | None -> Ok ()
-      | Some policy -> check_admission_facts_budget ~policy selected_input accepted
-    in
-    Accepted accepted
-;;
-
-let validate_admission_answer ?policy ~commit ~now batch input output =
-  let open Result.Syntax in
-  let+ proposal = validate_admission_proposal ?policy ~now ~batch ~input output in
-  match proposal with
-  | Deferred -> Admission_deferred_answer
-  | Accepted accepted -> Memory_answer (accepted, Commit_memory commit)
-;;
 
 let try_cli_slots
       ~requirement
@@ -1377,25 +472,21 @@ let try_cli_slots
               |> Result.map (fun answer -> answer, output)
               |> Result.map_error Keeper_librarian.parse_error_to_string)
             ~on_failure:(fun failure ->
-              Log.Keeper.warn ~keeper_name:keeper_id
+              Log.Keeper.warn
+                ~keeper_name:keeper_id
                 "librarian fallback: %s"
                 (Keeper_lane_cli_oneshot.failure_to_string failure))
             ()
         with
         | Error failures -> Error (Slot_failures failures)
-        | Ok (runtime_id, (selection, output)) ->
-          Ok (runtime_id, selection, output)))
+        | Ok (runtime_id, (selection, output)) -> Ok (runtime_id, selection, output)))
 ;;
 
-(* An API refusal says nothing about the CLI walk that followed it. Keep the
-   walk's typed failures with that refusal so the run record and Memory
-   journal cannot describe an answered CLI request as only API pre-flight. *)
 let with_cli_failure prior_error = function
   | No_cli_slots -> prior_error
   | Slot_failures failures ->
     Cli_slots_exhausted { prior_error = Some prior_error; failures }
-  | Fitted_prompt_unavailable ->
-    Cli_prompt_unavailable { prior_error = Some prior_error }
+  | Fitted_prompt_unavailable -> Cli_prompt_unavailable { prior_error = Some prior_error }
 ;;
 
 let execute_callable
@@ -1416,153 +507,129 @@ let execute_callable
   let open Result.Syntax in
   match selected_slots with
   | [] ->
-    (* Registry publication rejects a lane with neither transport, and lane
-       resolution rejects a lane with no admitted transport. Keep this final
-       classification defensive in case either upstream contract changes. *)
-    (match try_cli_slots ~requirement ~validate ~keeper_id ~base_path ~cli_runner ~cli_slots
-       ~messages with
+    (match
+       try_cli_slots ~requirement ~validate ~keeper_id ~base_path ~cli_runner ~cli_slots ~messages
+     with
      | Ok (runtime_id, selection, output) -> Ok ((selection, output), Cli_slot runtime_id)
      | Error No_cli_slots -> Error No_transport_declared
      | Error (Slot_failures failures) ->
        Error (Cli_slots_exhausted { prior_error = None; failures })
-     | Error Fitted_prompt_unavailable ->
-       Error (Cli_prompt_unavailable { prior_error = None }))
+     | Error Fitted_prompt_unavailable -> Error (Cli_prompt_unavailable { prior_error = None }))
   | _ :: _ ->
-  match preflight_slots ~requirement ~selected_slots ~messages with
-  | Error error ->
-    (* No API slot can project this request. The independently admitted CLI
-       slots still own a chance to answer, just as after API exhaustion. *)
-    (match try_cli_slots ~requirement ~validate ~keeper_id ~base_path ~cli_runner ~cli_slots
-       ~messages with
-     | Ok (runtime_id, selection, output) ->
-       Log.Keeper.warn ~keeper_name:keeper_id
-         "librarian lane=%s every API slot refused projection; answered by cli slot=%s: %s"
-         exact_lane_id runtime_id (extraction_error_to_string error);
-       Ok ((selection, output), Cli_slot runtime_id)
-     | Error cli_failure -> Error (with_cli_failure error cli_failure))
-  | Ok preflight ->
-  (if preflight.unusable <> [] then
-     Log.Keeper.warn ~keeper_name:keeper_id
-       "librarian lane=%s pre-flight excluded slot(s) from this run: %s"
-       exact_lane_id
-       (slot_reason_pairs ~sep:", " preflight.unusable));
-  let* attempt = prepare_attempt ~requirement ~selected_slots:preflight.selected_slots messages in
-  let validate_flow flow_success =
-    let output = Exact_output.flow_success_output flow_success in
-    match validate output.output with
-    | Ok answer -> Exact_output.Accept (answer, output.output)
-    | Error error -> Exact_output.Reject_and_advance error
-  in
-  let flow =
-    Exact_lane_slot_capture.flow attempt (fun () ->
-      Exact_output.execute_flow_once
-      ~net
-      ~clock
-      ~before_measurement_dispatch:(fun _ -> Ok ())
-      ~on_measurement_terminal:(fun _ -> Ok ())
-      ~before_dispatch:(fun _ -> Ok ())
-      ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
-      ~validate:validate_flow
-      attempt)
-  in
-  Runtime_exact_lane_backpressure.observe
-    ~resolved:Runtime_exact_output_registry.{ selected_slots; cli_slots } flow;
-  match flow with
-  | Ok success ->
-    let selected_slot =
-      success.transport_success
-      |> Exact_output.flow_success_candidate
-      |> fun candidate -> candidate.visit.identity.candidate_id
-    in
-    (match usage_observer with
-     | Some observe ->
-       observe (Exact_output.flow_success_output success.transport_success).usage
-     | None -> ());
-    Ok (success.accepted, Api_slot selected_slot)
-  | Error (Exact_output.Flow_execution_terminal { cause; prior_rejections }) ->
-    (* A held slot is declared but not walked, like a slot the pre-flight
-       excluded, so the receipt still checks the walk against the lane. *)
-    let declared_http =
-      List.map (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
-        selected_slots
-      @ held_ids
-    in
-    let excluded_http =
-      List.map (fun (slot : slot_refusal) -> slot.slot_id) preflight.unusable @ held_ids
-    in
-    (* A semantic rejection does not enter the walk's advances. Preserve it
-       separately so a later capacity failure cannot turn invalid output
-       into permission to split an admission partition. *)
-    let terminal () =
-      Error
-        (Exact_execution_failed
-           (exact_execution_error
-              ~declared_http
-              ~excluded_http
-              ~declared_cli:cli_slots
-              ~semantic_rejections:prior_rejections cause))
-    in
-    (* The CLI tail follows the same advancement rule as HTTP successors;
-       only masc's own failures keep their terminal. *)
-    (match Exact_output.flow_execution_terminal_kind cause with
-     | Exact_output.Advanceable_candidates_exhausted ->
+    (match preflight_slots ~requirement ~selected_slots ~messages with
+     | Error error ->
        (match
-          try_cli_slots
-            ~requirement
-            ~validate
-            ~keeper_id
-            ~base_path
-            ~cli_runner
-            ~cli_slots
+          try_cli_slots ~requirement ~validate ~keeper_id ~base_path ~cli_runner ~cli_slots
             ~messages
         with
         | Ok (runtime_id, selection, output) ->
+          Log.Keeper.warn
+            ~keeper_name:keeper_id
+            "librarian lane=%s every API slot refused projection; answered by cli slot=%s: %s"
+            exact_lane_id
+            runtime_id
+            (extraction_error_to_string error);
           Ok ((selection, output), Cli_slot runtime_id)
-        | Error cli_failure ->
-          Error
-            (with_cli_failure
-               (Exact_execution_failed
-                  (exact_execution_error
-                     ~declared_http
-                     ~excluded_http
-                     ~declared_cli:cli_slots
-                     ~semantic_rejections:prior_rejections cause))
-               cli_failure))
-     | Exact_output.Non_advanceable_terminal -> terminal ())
-  | Error
-      (Exact_output.Flow_semantic_candidates_exhausted
-         { rejections; _ }) ->
-    let rejection =
-      List.fold_left
-        (fun _ rejection -> rejection)
-        rejections.first
-        rejections.rest
-    in
-    (match
-       try_cli_slots
-         ~requirement
-         ~validate
-         ~keeper_id
-         ~base_path
-         ~cli_runner
-         ~cli_slots
-         ~messages
-     with
-     | Ok (runtime_id, selection, output) ->
-       Ok ((selection, output), Cli_slot runtime_id)
-     | Error cli_failure ->
-       Error
-         (with_cli_failure
-            (Domain_output_invalid
-               (Keeper_librarian.parse_error_to_string rejection.rejection))
-            cli_failure))
+        | Error cli_failure -> Error (with_cli_failure error cli_failure))
+     | Ok preflight ->
+       if preflight.unusable <> []
+       then
+         Log.Keeper.warn
+           ~keeper_name:keeper_id
+           "librarian lane=%s pre-flight excluded slot(s) from this run: %s"
+           exact_lane_id
+           (slot_reason_pairs ~sep:", " preflight.unusable);
+       let* attempt = prepare_attempt ~requirement ~selected_slots:preflight.selected_slots messages in
+       let validate_flow flow_success =
+         let output = Exact_output.flow_success_output flow_success in
+         match validate output.output with
+         | Ok answer -> Exact_output.Accept (answer, output.output)
+         | Error error -> Exact_output.Reject_and_advance error
+       in
+       let flow =
+         Exact_lane_slot_capture.flow attempt (fun () ->
+           Exact_output.execute_flow_once
+             ~net
+             ~clock
+             ~before_measurement_dispatch:(fun _ -> Ok ())
+             ~on_measurement_terminal:(fun _ -> Ok ())
+             ~before_dispatch:(fun _ -> Ok ())
+             ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+             ~validate:validate_flow
+             attempt)
+       in
+       Runtime_exact_lane_backpressure.observe
+         ~resolved:Runtime_exact_output_registry.{ selected_slots; cli_slots }
+         flow;
+       (match flow with
+        | Ok success ->
+          let selected_slot =
+            success.transport_success
+            |> Exact_output.flow_success_candidate
+            |> fun candidate -> candidate.visit.identity.candidate_id
+          in
+          (match usage_observer with
+           | Some observe ->
+             observe (Exact_output.flow_success_output success.transport_success).usage
+           | None -> ());
+          Ok (success.accepted, Api_slot selected_slot)
+        | Error (Exact_output.Flow_execution_terminal { cause; prior_rejections }) ->
+          let declared_http =
+            List.map
+              (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+              selected_slots
+            @ held_ids
+          in
+          let excluded_http =
+            List.map (fun (slot : slot_refusal) -> slot.slot_id) preflight.unusable @ held_ids
+          in
+          let terminal () =
+            Error
+              (Exact_execution_failed
+                 (exact_execution_error
+                    ~declared_http
+                    ~excluded_http
+                    ~declared_cli:cli_slots
+                    ~semantic_rejections:prior_rejections
+                    cause))
+          in
+          (match Exact_output.flow_execution_terminal_kind cause with
+           | Exact_output.Advanceable_candidates_exhausted ->
+             (match
+                try_cli_slots ~requirement ~validate ~keeper_id ~base_path ~cli_runner ~cli_slots
+                  ~messages
+              with
+              | Ok (runtime_id, selection, output) ->
+                Ok ((selection, output), Cli_slot runtime_id)
+              | Error cli_failure ->
+                Error
+                  (with_cli_failure
+                     (Exact_execution_failed
+                        (exact_execution_error
+                           ~declared_http
+                           ~excluded_http
+                           ~declared_cli:cli_slots
+                           ~semantic_rejections:prior_rejections
+                           cause))
+                     cli_failure))
+           | Exact_output.Non_advanceable_terminal -> terminal ())
+        | Error (Exact_output.Flow_semantic_candidates_exhausted { rejections; _ }) ->
+          let rejection =
+            List.fold_left (fun _ rejection -> rejection) rejections.first rejections.rest
+          in
+          (match
+             try_cli_slots ~requirement ~validate ~keeper_id ~base_path ~cli_runner ~cli_slots
+               ~messages
+           with
+           | Ok (runtime_id, selection, output) ->
+             Ok ((selection, output), Cli_slot runtime_id)
+           | Error cli_failure ->
+             Error
+               (with_cli_failure
+                  (Domain_output_invalid (Keeper_librarian.parse_error_to_string rejection.rejection))
+                  cli_failure))))
 ;;
 
-(* HTTP slots whose provider stated a time are not called
-   (RFC-exact-lane-waits-for-a-stated-reset). A lane whose every slot waits
-   ends as an execution failure, not as a lane without transport; otherwise
-   the slots that can be called are walked, and a failure keeps the held
-   slots as size-independent evidence (R5). *)
 let execute_answer
       ~selected_slots
       ~held_http
@@ -1582,8 +649,8 @@ let execute_answer
     List.map (fun (held : Runtime_exact_lane_backpressure.held_slot) -> held.slot_id) held_http
   in
   let callable () =
-    execute_callable ~selected_slots ~held_ids ~cli_slots ~requirement ~validate ?cli_runner
-      ~clock ~net ~base_path ~keeper_id ~messages ?usage_observer ()
+    execute_callable ~selected_slots ~held_ids ~cli_slots ~requirement ~validate ?cli_runner ~clock
+      ~net ~base_path ~keeper_id ~messages ?usage_observer ()
   in
   match held_http with
   | [] -> callable ()
@@ -1600,9 +667,7 @@ let execute_answer
        callable () |> Result.map_error (fun error -> Slots_held { until; after = Some error }))
 ;;
 
-(* The Memory pass alone, for the tests that walk its answer contract. *)
-let execute_exact_output_classified
-      ~continuity
+let execute_working_context_classified
       ?cli_runner
       ~clock
       ~net
@@ -1614,24 +679,21 @@ let execute_exact_output_classified
   =
   let open Result.Syntax in
   let* selected_slots, cli_slots, held_http = resolve_librarian_slots () in
-  execute_answer ~selected_slots ~held_http ~cli_slots
-    ~requirement:(output_requirement_of_pass (Memory_pass (continuity, ())))
-    ~validate:(validate_selection ?continuity selected_input)
-    ?cli_runner ~clock ~net ~base_path ~keeper_id ~messages ()
+  execute_answer
+    ~selected_slots
+    ~held_http
+    ~cli_slots
+    ~requirement:working_context_requirement
+    ~validate:(Keeper_librarian.working_contexts_of_json_result selected_input)
+    ?cli_runner
+    ~clock
+    ~net
+    ~base_path
+    ~keeper_id
+    ~messages
+    ()
 ;;
 
-(* A failure while no current snapshot exists means the keeper is running
-   memoryless and cannot leave that state on its own — that is an ERROR,
-   not a WARN. With a snapshot present the previous memory keeps serving
-   recall and the failure only stales it. Both the classified [Error] path
-   and the exception catch in [run_best_effort] route through this rule so
-   an exception cannot demote a starving keeper's failure back to WARN. *)
-(* A failed pass leaves no snapshot, so the commit journal line never runs and
-   the attempt would otherwise exist only as a log line and an in-memory
-   counter — neither survives a process restart, which is what made #26729
-   undiagnosable from disk afterwards. Every failure path routes here so the
-   log severity and the recorded line resolve snapshot presence from the same
-   read and cannot disagree about one instant. *)
 let record_failure_io ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
   let snapshot_absent =
     match Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id with
@@ -1662,42 +724,20 @@ let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
     record_failure_io ~keepers_dir ~keeper_id ~trace_id ~kind ~detail)
 ;;
 
-let current_selection_registry_summary = function
-  | None -> `Assoc [ "present", `Bool false; "fact_count", `Int 0 ]
-  | Some (current : Keeper_librarian.current_selection) ->
-    `Assoc
-      [ "present", `Bool true
-      ; "fact_count", `Int (List.length current.facts)
-      ]
-;;
-
-(* [source], [file_path] and [effective_template] describe the body [key]
-   names. The body shows the turn material through its two slot variables, so
-   the slot text a run was sent is recorded with the other substitutions in
-   [rendered_prompt_variables] ([exact_input_payload]), next to the variables
-   it was rendered from. A reader re-renders the sent prompt from the body
-   template and that list alone. Whether a slot's text came from the file or
-   from an override is not recorded. *)
 let prompt_material_payload ~key = function
-  | Ok ({ resolution; rendered; turn_inputs = _ } : librarian_prompt_material) ->
+  | Ok ({ resolution; rendered } : librarian_prompt_material) ->
     `Assoc
       [ "key", `String key
-      ; ( "source"
-        , `String
-            (Prompt_registry.prompt_source_to_string resolution.source) )
+      ; "source", `String (Prompt_registry.prompt_source_to_string resolution.source)
       ; ( "file_path"
         , match resolution.file_path with
           | None -> `Null
           | Some path -> `String path )
       ; "effective_template", `String resolution.effective
       ; "rendered_bytes", `Int (String.length rendered)
-      ; ( "rendered_sha256"
-        , `String Agent_core_sha256.(digest_string rendered |> to_hex) )
+      ; "rendered_sha256", `String Agent_core_sha256.(digest_string rendered |> to_hex)
       ]
-  | Error detail ->
-    `Assoc
-      [ "key", `String key
-      ]
+  | Error _detail -> `Assoc [ "key", `String key ]
 ;;
 
 let exact_input_payload
@@ -1709,1081 +749,398 @@ let exact_input_payload
   `Assoc
     [ "turn_ref", Ids.Turn_ref.to_yojson inp.turn_ref
     ; "goal_context", Keeper_librarian.goal_context_to_json inp.goal_context
-    ; "historical_task_contexts", Keeper_librarian_task_context.to_json inp.historical_task_contexts
     ; "keeper_instructions", `String inp.keeper_instructions
     ; "prompt", prompt_material_payload ~key:prompt_key prompt_material
     ; ( "rendered_prompt_variables"
-      , `Assoc
-          (List.map
-             (fun (name, value) -> name, `String value)
-             prompt_variables) )
+      , `Assoc (List.map (fun (name, value) -> name, `String value) prompt_variables) )
     ]
-;;
-
-let absorbed_statements_json statements =
-  `List
-    (List.map
-       (fun (statement : Keeper_memory_os_types.absorbed_statement) ->
-          `Assoc
-            [ "memory_id", `String statement.absorbed; "into", `String statement.into ])
-       statements)
-;;
-
-(* [absorb_gate] is what the gate let through; [absorption] is what the
-   commit did with it. They differ when a target left the snapshot during the
-   pass, and the run record has to say which absorptions actually happened. *)
-let completed_output
-      ~(inp : Keeper_librarian.input)
-      ~exact_output
-      ~absorb_gate
-      (disposition : Keeper_memory_os_current.disposition)
-  =
-  let snapshot = disposition.snapshot in
-  (* A kept snapshot's own [change] is the earlier commit's; this pass changed
-     no fact, which is what [Unchanged] means. *)
-  let commit, added_count, removed_count, retained =
-    match disposition.commit with
-    | Keeper_memory_os_current.Rewritten ->
-      ( "rewritten"
-      , List.length snapshot.change.added
-      , List.length snapshot.change.removed
-      , snapshot.change.retained )
-    | Unchanged -> "unchanged", 0, 0, List.length snapshot.facts
-  in
-  `Assoc
-    [ "absorb_gate", Keeper_librarian_absorb_gate.run_result_to_yojson absorb_gate
-    ; ( "absorption"
-      , `Assoc
-          [ "applied", absorbed_statements_json disposition.absorbed_applied
-          ; "not_applied", absorbed_statements_json disposition.absorbed_not_applied
-          ] )
-    ; ( "claims_not_applied"
-      , `List
-          (List.map
-             (fun fact -> `String (Keeper_memory_os_types.memory_id fact))
-             disposition.claims_not_applied) )
-    ; "exact_output", exact_output
-    ; "before", current_selection_registry_summary inp.current
-    ; ( "after"
-      , `Assoc
-          [ "commit", `String commit
-          ; "revision", `Int snapshot.revision
-          ; "updated_at", `Float snapshot.updated_at
-          ; "fact_count", `Int (List.length snapshot.facts)
-          ; ( "change"
-            , `Assoc
-                [ "added_count", `Int added_count
-                ; "removed_count", `Int removed_count
-                ; "retained", `Int retained
-                ] )
-          ] )
-    ]
-;;
-
-let failed_output = function
-  | None -> `Assoc []
-  | Some absorb_gate ->
-    `Assoc [ "absorb_gate", Keeper_librarian_absorb_gate.observation_to_yojson absorb_gate ]
 ;;
 
 type context_write =
   | Not_attempted
-  | Answer_missing
-  | Answer_refused of string
   | Withheld
   | Outcome_unconfirmed
   | Committed of Keeper_librarian_context.version
   | Write_failed of string
 
 let context_write_json = function
-  | Not_attempted -> `Assoc ["status", `String "not_attempted"]
-  | Answer_missing -> `Assoc ["status", `String "answer_missing"]
-  | Answer_refused detail ->
-    `Assoc ["status", `String "answer_refused"; "detail", `String detail]
-  | Withheld -> `Assoc ["status", `String "withheld"]
-  | Outcome_unconfirmed -> `Assoc ["status", `String "outcome_unconfirmed"]
-  | Committed (generation, revision) -> `Assoc ["status", `String "committed";
-      "generation", `String generation; "revision", `Int revision]
-  | Write_failed detail -> `Assoc ["status", `String "failed"; "detail", `String detail]
+  | Not_attempted -> `Assoc [ "status", `String "not_attempted" ]
+  | Withheld -> `Assoc [ "status", `String "withheld" ]
+  | Outcome_unconfirmed -> `Assoc [ "status", `String "outcome_unconfirmed" ]
+  | Committed (generation, revision) ->
+    `Assoc
+      [ "status", `String "committed"
+      ; "generation", `String generation
+      ; "revision", `Int revision
+      ]
+  | Write_failed detail -> `Assoc [ "status", `String "failed"; "detail", `String detail ]
 ;;
 
-(* How one continuity publication ended. The caller that owns nothing else
-   decides its run's outcome from it. *)
-type continuity_publication =
-  | Continuity_committed
-  | Continuity_not_committed of string
-
-(* The [Failed] code of a run whose only product, the continuity snapshot, was
-   not committed. *)
-let continuity_not_committed_code = "continuity_not_committed"
-
-let commit_continuity ~commit ~observe =
-  (* The executor job has its own cancellation scope. Keep its caller alive
-     until all disk effects and their observation finish; shutdown/purge must
-     not run past a detached writer after cancellation of the await. *)
-  let observed =
-    Eio.Cancel.protect (fun () ->
-      observe (Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ commit))
-  in
-  Eio.Fiber.check ();
-  observed
-;;
-
-(* The only run an explicit admission batch rides: a standalone Memory
-   maintenance run with no continuity or range binding. Its batch commits
-   under the pass of that scope. The wildcard-expansion codemod once folded
-   the accepting arm into the rejecting one, so a standalone Memory
-   maintenance pass carrying an explicit admission batch was refused. A named
-   function lets tests pin the accepted and rejected shapes. *)
-let admission_commit ~write_scope ~has_continuity ~has_durable_range_id
-      ~has_official_range_id
-  =
-  match write_scope with
-  | Memory_maintenance commit_pass
-    when not (has_continuity || has_durable_range_id || has_official_range_id) ->
-    Some (Commit_maintenance commit_pass)
-  | Memory_maintenance _ | Context_only | Context_and_memory _ -> None
-;;
-
-let run_pass
-      ~run_kind
-      ?admission
-      ?continuity
-      ?(on_memory_committed = fun () -> ())
+let run_best_effort
       ?(on_cli_input_limit = fun _ -> ())
       ?(on_not_committed = fun _ -> ())
-      ?(on_admission_deferred = fun () -> ())
-      ?(on_continuity_committed = fun ~served_by:_ _ -> ())
       ?(on_context_committed = fun _ -> ())
-      ?durable_range_id
-      ?official_range_id
       ?cli_runner
       ~base_path
       ~keepers_dir
       ~keeper_id
-      ~expected_revision
       (inp : Keeper_librarian.input)
   =
-  let inference = match run_kind with
-    | Best_effort _ -> None
-    | Inference inference -> Some inference in
-  let on_not_committed ?(exhausted_input_refusals=None) report =
-    on_not_committed report;
-    match inference with
-    | Some (Infer_memory {observe_failure;_})
-    | Some (Infer_state {observe_failure;_}) -> observe_failure exhausted_input_refusals
-    | None -> ()
-  in
   let trace_id = input_trace_id inp in
-  (* A normal failure observes authoritative Memory and its journal. An
-     inference must not do that read: it can recover an unrelated pending
-     publication. Its lane record and classified callback retain the failure;
-     this log adds no Memory mutation or recovery authority. *)
-  let record_pass_failure_io ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
-    match inference with
-    | None -> record_failure_io ~keepers_dir ~keeper_id ~trace_id ~kind ~detail
-    | Some (Infer_state _) | Some (Infer_memory _) ->
-      Log.Keeper.warn ~keeper_name:keeper_id
-        "librarian inference failed source_trace=%s; %s" trace_id detail
-  in
-  let record_pass_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
-    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-      record_pass_failure_io ~keepers_dir ~keeper_id ~trace_id ~kind ~detail)
-  in
-  (* An inference takes no admission, continuity or range. An explicit
-     admission batch rides only a standalone Memory maintenance run and
-     commits under its pass. *)
-  let admission =
-    let has_continuity = Option.is_some continuity
-    and has_durable_range_id = Option.is_some durable_range_id
-    and has_official_range_id = Option.is_some official_range_id in
-    match run_kind, admission with
-    | Inference _, None
-      when not (has_continuity || has_durable_range_id || has_official_range_id) -> Ok None
-    | Inference _, (None | Some _) -> Error ()
-    | Best_effort _, None -> Ok None
-    | Best_effort write_scope, Some batch ->
-      (match admission_commit ~write_scope ~has_continuity ~has_durable_range_id
-               ~has_official_range_id with
-       | Some commit -> Ok (Some (batch, commit))
-       | None -> Error ())
-  in
-  match admission with
-  | Error () ->
-    on_not_committed {detail = "explicit admission requires a standalone Memory maintenance pass";
-                      walk_shows_size = false; message_descent = No_descent_evidence; input_capacity_evidence = No_input_capacity_refusal; input_capacity_only = false; provider_input_refusals = []; smaller_range_meets_same_failure = false}
-  | Ok admission ->
-    try
-      match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
-      | Some net, Some clock ->
-        (* Admission owns the whole pass, including a JEV NoChange shortcut.
-           Retain its slots across preflight: turning the lane off after this
-           point must not revoke accepted work or make its HTTP/CLI fallback
-           re-acquire from a different publication. *)
-        let acquired = resolve_librarian_slots () in
-        (match acquired with
-         | Error (Exact_setup_failed (Exact_lane_unavailable (Exact_lane_off _))) ->
-           let detail = "Librarian is off; pending input remains unconsumed" in
-           on_not_committed {detail; walk_shows_size=false; message_descent=No_descent_evidence; input_capacity_evidence=No_input_capacity_refusal; input_capacity_only=false; provider_input_refusals=[]; smaller_range_meets_same_failure = false};
-           Log.Keeper.info ~keeper_name:keeper_id "%s" detail
-         | Ok _ | Error (Prompt_render_failed _)
-         | Error
-             (Exact_setup_failed
-               ( Exact_registry_unavailable _
-               | Exact_lane_unavailable (Exact_lane_unconfigured _ | No_admitted_lane_slots _)
-               | Exact_candidate_invalid _
-               | Exact_flow_snapshot_failed _
-               | Exact_flow_start_failed _
-               | Exact_request_projection_failed _ ))
-         | Error (Exact_execution_failed _) | Error (Cli_slots_exhausted _)
-         | Error (Cli_prompt_unavailable _) | Error (No_transport_declared)
-         | Error (Slots_held _)
-         | Error (Domain_output_invalid _) | Error (Absorb_judgment_failed _)
-         | Error (Memory_snapshot_write_failed _) ->
-        let registry = Exact_lane_run_registry.global () in
-        let run_id = Random_id.prefixed ~prefix:"librarian-exact-" ~bytes:16 in
-        let started_at = Time_compat.now () in
-        let started_at_monotonic = Eio.Time.now clock in
-        let current_fact_count =
-          match inp.current with
-          | None -> 0
-          | Some current -> List.length current.facts
-        in
-        let pass =
-          match run_kind, continuity with
-          | Inference (Infer_state {previous_state;unread_messages;_}), _ ->
-            Volatile_state_pass (previous_state, unread_messages)
-          | Inference (Infer_memory {previous_state;unread_messages;_}), _ ->
-            Volatile_memory_pass (previous_state, unread_messages)
-          | Best_effort (Context_and_memory commit_pass), continuity ->
-            Memory_pass (continuity, Commit_with_contexts commit_pass)
-          | Best_effort (Memory_maintenance commit_pass), _ ->
-            Memory_pass (None, Commit_maintenance commit_pass)
-          | Best_effort Context_only, Some prepared -> Continuity_state_pass prepared
-          | Best_effort Context_only, None -> Working_context_pass
-        in
-        let prompt_input = input_for_pass pass inp in
-        (* Read once per pass: every Memory prompt this pass renders, and the
-           no-change preflight that judges it, show the same source part of
-           the facts budget. A pass that shows no budget does not consult it. *)
-        let source_lines =
-          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-            Keeper_memory_source_current.read_budget_lines ~keepers_dir ~keeper_id)
-          |> Result.map_error (fun detail -> "source memory unreadable: " ^ detail) in
-        let durable_preparation = match admission with
-          | Some _ -> None
-          | None -> match pass with
-            | Memory_pass (None, commit) ->
-              Some (commit, Result.bind source_lines (fun source_lines ->
-                prepare_durable ~now:(Time_compat.now ()) ~source_lines prompt_input))
-            | Memory_pass (Some _, _) | Continuity_state_pass _ | Volatile_state_pass _
-            | Volatile_memory_pass _ | Working_context_pass -> None in
-        let prompt_variables, prompt_material, admission_policy = match admission with
-          | None ->
-            (match durable_preparation with
-             | None ->
-               let variables, material = resolve_librarian_prompt ~source_lines pass prompt_input in
-               let material = match pass with
-                 | Memory_pass (Some _, _) | Volatile_memory_pass _ ->
-                   Result.bind material (fun (material : librarian_prompt_material) ->
-                     Result.map (fun () -> material)
-                       (require_counterpart_source ~source_input:prompt_input
-                          ~prompt:material.resolution ~turn_inputs:material.turn_inputs))
-                 | Memory_pass (None, _) | Continuity_state_pass _ | Volatile_state_pass _
-                 | Working_context_pass -> material in
-               variables, material, None
-             | Some (_, Ok prepared) -> prepared.variables,
-               Ok {resolution=prepared.prompt;turn_inputs=Some prepared.turn_prompts.turn_inputs;
-                   rendered=prepared.rendered_prompt}, None
-             | Some (_, Error detail) -> [],Error detail, None)
-          | Some (batch, _) ->
-            let prepared =
-              let open Result.Syntax in
-              let* retirement = match Keeper_memory_os_current.read_retirement_context ~keepers_dir ~keeper_id
-                  ~expected_revision ~current_facts:(match prompt_input.current with
-                    | None -> [] | Some current -> current.facts) with
-                | Retirement_source_changed -> Error "Memory changed before admission retirement evidence was read; retry pending input"
-                | Retirement_source_unavailable detail -> Error detail
-                | Retirement_archive archive -> Ok (match archive with
-                    | Ok archive -> Keeper_memory_admission_judgment.Available archive
-                    | Error detail -> Unavailable detail) in
-              let* source_lines = source_lines in
-              prepare_admission ~batch ~retirement ~source_lines prompt_input in
-            (match prepared with
-             | Ok prepared -> prepared.variables,
-               Ok {resolution=prepared.prompt;turn_inputs=None;rendered=prepared.rendered_prompt},
-               Some prepared.policy
-             | Error detail -> [],Error detail, None) in
-        let parsing_now=match durable_preparation with
-          | Some (_, Ok prepared) -> prepared.parsing_now
-          | None | Some (_, Error _) -> Time_compat.now () in
-        let validate = match admission with
-          | None ->
-            (match durable_preparation with
-             | Some (commit, Ok prepared) -> (fun output ->
-               parse_durable_proposal prepared output
-               |> Result.map (fun proposal -> Memory_answer (proposal.accepted,Commit_memory commit)))
-             | None | Some (_, Error _) -> validate_answer pass prompt_input)
-          | Some (batch, commit) ->
-            validate_admission_answer ?policy:admission_policy ~commit ~now:parsing_now batch prompt_input in
-        let requirement = match admission with
-          | None ->
-            (match durable_preparation with
-             | Some (_, Ok prepared) -> Exact_output.make_output_requirement ~schema:prepared.output_schema
-               ~minimum_guarantee:Exact_output.Json_syntax
-             | None | Some (_, Error _) -> output_requirement_of_pass pass)
-          | Some _ -> Exact_output.make_output_requirement ~schema:(admission_schema ())
-              ~minimum_guarantee:Exact_output.Json_syntax in
-        (match inference with
-         | None | Some (Infer_memory _) -> ()
-         | Some (Infer_state observation) ->
-           observation.preparation := (match prompt_material with
-             | Error detail -> Prompt_failed {run_id; variables=prompt_variables; detail}
-             | Ok material -> Prompt_prepared
-               { run_id; resolution=material.resolution; variables=prompt_variables
-               ; rendered_prompt=material.rendered
-               ; output_schema=Exact_output.domain_schema requirement }));
-        Exact_lane_run_registry.register_running
-          registry
-          ~run_id
-          ~lane:Exact_lane_run_registry.Librarian
-          ~actor:keeper_id
-          ~started_at
-          ~input:
-            (Exact_lane_run_registry.Exact_input
-               (`Assoc
-                  [ "actual_input", exact_input_payload prompt_input
-                      ~prompt_key:(prompt_key_of_pass pass) ~prompt_variables
-                      prompt_material
-                  ; "message_count", `Int (List.length prompt_input.messages)
-                  ; "current_fact_count", `Int current_fact_count
-                  ]));
-        let observed_context_review = ref None in
-        let context_write = ref Not_attempted in
-        let continuity_write = ref (`Assoc ["status", `String "not_attempted"]) in
-        (* Only an API attempt's own success reports usage; a CLI tail never
-           fires the observer, so a CLI-answered run completes with [None]. *)
-        let observed_usage = ref None in
-        let slot_capture = Exact_lane_slot_capture.create ~owner:(Runtime_schema.Builtin Standalone_lane.Librarian) () in
-        let complete ?selected_slot ?usage outcome output =
-          let output = match inference, output with
-            | Some (Infer_memory _), `Assoc fields ->
-              let fields = List.fold_left (fun fields key -> List.remove_assoc key fields)
-                fields ["memory_write"; "memory_inference"; "context_write"; "continuity_write"] in
-              `Assoc (["memory_write", `String "not_attempted";
-                       "memory_inference", `Bool true;
-                       "context_write", `Assoc ["status", `String "not_attempted"];
-                       "continuity_write", `Assoc ["status", `String "not_attempted"]] @ fields)
-            | (None | Some (Infer_state _)), _
-            | Some (Infer_memory _), _ -> output in
-          let output = match continuity, output with
-            | Some _, `Assoc fields -> `Assoc (("continuity_write", !continuity_write) :: fields)
-            | _ -> output in
-          (* An organization the answer left out or got wrong never reaches
-             review, so its write status is the only evidence of the skip. *)
-          let context =
-            match !observed_context_review, !context_write with
-            | Some review,
-              ((Not_attempted | Answer_missing | Answer_refused _ | Withheld
-               | Outcome_unconfirmed | Committed _ | Write_failed _) as write) ->
-              [ "context_write", context_write_json write
-              ; "context_review", Keeper_librarian_context_review.observation_to_yojson review ]
-            | None, ((Answer_missing | Answer_refused _) as write) ->
-              [ "context_write", context_write_json write ]
-            | None, (Not_attempted | Withheld | Outcome_unconfirmed | Committed _ | Write_failed _) ->
-              []
-          in
-          let output = match context, output with
-            | [], _ -> output
-            | context, `Assoc fields ->
-              (* Keep the existing absorption report first; both derived-context
-                 evidence and Memory's receipt survive any later cancellation. *)
-              (match fields with
-               | (("absorb_gate", _) as gate) :: rest -> `Assoc (gate :: context @ rest)
-               | _ -> `Assoc (context @ fields))
-            | _ :: _, _ -> output
-          in
-          let elapsed_s = Eio.Time.now clock -. started_at_monotonic in
-          let completion =
-            Exact_lane_run_registry.mark_completed
-              registry
-              ~run_id
-              ~outcome
-              ~elapsed_s
-              ~selected_slot
-              ?usage
-              ?slot_observations:(Exact_lane_slot_capture.observations slot_capture)
-              ~output
-              ()
-          in
-          match completion with
-          | Ok () -> ()
-          | Error error ->
-            Log.Keeper.error
-              ~keeper_name:keeper_id
-              "librarian exact-run observation completion failed run_id=%s: %s"
-              run_id
-              (Exact_lane_run_registry.completion_error_to_string error)
-        in
-        (* The gate's received evidence survives later storage exceptions or
-           cancellation without changing either the Memory decision or the
-           existing failure classification. *)
-        let observed_absorb_gate = ref None in
-        let committed_memory = ref None in
-        let register_absorb_evaluation
-            ~direction
-            ~destinations
-            ~state
-            ~questions =
-          let started_at = Time_compat.now () in
-          let started_at_ns = Mtime_clock.elapsed_ns () in
-          let evaluation_id = Random_id.prefixed ~prefix:"librarian-absorb-" ~bytes:16 in
-          Exact_lane_run_registry.register_running
-            registry
-            ~run_id:evaluation_id
-            ~lane:Exact_lane_run_registry.Librarian
-            ~actor:keeper_id
-            ~started_at
-            ~input:
-              (Exact_lane_run_registry.Exact_input
-                 (Keeper_librarian_absorb_gate.evaluation_request_to_yojson
-                    ~direction ~destinations ~state ~questions));
-          evaluation_id, started_at_ns
-        in
-        let absorb_evaluation_elapsed_s started_at_ns =
-          Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started_at_ns) /. 1_000_000_000.
-        in
-        let complete_absorb_evaluation ~evaluation_id:(evaluation_id, started_at_ns) evaluation =
-          let outcome =
-            match evaluation.Keeper_librarian_absorb_gate.result with
-            | Ok _ ->
-              (match Keeper_librarian_absorb_gate.validate_evaluation_answer evaluation with
-               | Ok () -> Exact_lane_run_registry.Succeeded
-               | Error detail ->
-                 Exact_lane_run_registry.Failed
-                   { code = "absorb_gate_invalid_answer"; detail })
-            | Error failure ->
-              Exact_lane_run_registry.Failed
-                { code = "absorb_gate_provider_failure"
-                ; detail = Typesafeai_client.failure_to_string failure
-                }
-          in
-          (match
+  try
+    match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
+    | Some net, Some clock ->
+      let acquired = resolve_librarian_slots () in
+      (match acquired with
+       | Error (Exact_setup_failed (Exact_lane_unavailable (Exact_lane_off _))) ->
+         let detail = "Librarian is off; pending input remains unconsumed" in
+         on_not_committed
+           { detail
+           ; walk_shows_size = false
+           ; message_descent = No_descent_evidence
+           ; input_capacity_evidence = No_input_capacity_refusal
+           ; input_capacity_only = false
+           ; provider_input_refusals = []
+           ; smaller_range_meets_same_failure = false
+           };
+         Log.Keeper.info ~keeper_name:keeper_id "%s" detail
+       | Ok _
+       | Error (Prompt_render_failed _)
+       | Error
+           (Exact_setup_failed
+              ( Exact_registry_unavailable _
+              | Exact_lane_unavailable (Exact_lane_unconfigured _ | No_admitted_lane_slots _)
+              | Exact_candidate_invalid _
+              | Exact_flow_snapshot_failed _
+              | Exact_flow_start_failed _
+              | Exact_request_projection_failed _ ))
+       | Error (Exact_execution_failed _)
+       | Error (Cli_slots_exhausted _)
+       | Error (Cli_prompt_unavailable _)
+       | Error No_transport_declared
+       | Error (Slots_held _)
+       | Error (Domain_output_invalid _) ->
+         let registry = Exact_lane_run_registry.global () in
+         let run_id = Random_id.prefixed ~prefix:"librarian-exact-" ~bytes:16 in
+         let started_at = Time_compat.now () in
+         let started_at_monotonic = Eio.Time.now clock in
+         let prompt_variables, prompt_material = resolve_working_context_prompt inp in
+         Exact_lane_run_registry.register_running
+           registry
+           ~run_id
+           ~lane:Exact_lane_run_registry.Librarian
+           ~actor:keeper_id
+           ~started_at
+           ~input:
+             (Exact_lane_run_registry.Exact_input
+                (`Assoc
+                   [ ( "actual_input"
+                     , exact_input_payload
+                         inp
+                         ~prompt_key:Prompt_names.librarian_working_context
+                         ~prompt_variables
+                         prompt_material )
+                   ; "message_count", `Int 0
+                   ; "current_fact_count", `Int 0
+                   ]));
+         let observed_context_review = ref None in
+         let context_write = ref Not_attempted in
+         let observed_usage = ref None in
+         let slot_capture =
+           Exact_lane_slot_capture.create ~owner:(Runtime_schema.Builtin Standalone_lane.Librarian) ()
+         in
+         let complete ?selected_slot ?usage outcome output =
+           let context =
+             match !observed_context_review, !context_write with
+             | ( Some review
+               , ((Not_attempted | Withheld | Outcome_unconfirmed | Committed _ | Write_failed _) as
+                  write) ) ->
+               [ "context_write", context_write_json write
+               ; "context_review", Keeper_librarian_context_review.observation_to_yojson review
+               ]
+             | ( None
+               , (Not_attempted | Withheld | Outcome_unconfirmed | Committed _ | Write_failed _) ) ->
+               []
+           in
+           let output =
+             match context, output with
+             | [], _ -> output
+             | context, `Assoc fields -> `Assoc (context @ fields)
+             | _ :: _, _ -> output
+           in
+           let elapsed_s = Eio.Time.now clock -. started_at_monotonic in
+           match
              Exact_lane_run_registry.mark_completed
                registry
-               ~run_id:evaluation_id
+               ~run_id
                ~outcome
-               ~elapsed_s:(absorb_evaluation_elapsed_s started_at_ns)
-               ~selected_slot:None
-               ~output:
-                 (Keeper_librarian_absorb_gate.observation_to_yojson
-                    (Keeper_librarian_absorb_gate.Incomplete [ evaluation ]))
-               ()
-           with
-           | Ok () -> ()
-           | Error error ->
-             Log.Keeper.warn
-               ~keeper_name:keeper_id
-               "absorb gate evaluation completion persistence failed id=%s: %s"
-               evaluation_id
-               (Exact_lane_run_registry.completion_error_to_string error))
-        in
-        let abort_absorb_evaluation ~evaluation_id:(evaluation_id, started_at_ns) result =
-          let outcome, output =
-            match result with
-            | `Cancelled -> Exact_lane_run_registry.Cancelled, `Null
-            | `Failed detail ->
-              ( Exact_lane_run_registry.Failed
-                  { code = "absorb_gate_dispatch_failed"; detail }
-              , `Assoc [ "status", `String "aborted"; "detail", `String detail ] )
-          in
-          (match
-             Exact_lane_run_registry.mark_completed
-               registry
-               ~run_id:evaluation_id
-               ~outcome
-               ~elapsed_s:(absorb_evaluation_elapsed_s started_at_ns)
-               ~selected_slot:None
+               ~elapsed_s
+               ~selected_slot
+               ?usage
+               ?slot_observations:(Exact_lane_slot_capture.observations slot_capture)
                ~output
                ()
            with
            | Ok () -> ()
            | Error error ->
-             Log.Keeper.warn
+             Log.Keeper.error
                ~keeper_name:keeper_id
-               "absorb gate evaluation abort persistence failed id=%s: %s"
-               evaluation_id
-               (Exact_lane_run_registry.completion_error_to_string error))
-        in
-        (try
-           let result =
-             let open Result.Syntax in
-             let* selected_slots, cli_slots, held_http = acquired in
-             let* prompt =
-               prompt_material
-               |> Result.map (fun material -> material.rendered)
-               |> Result.map_error (fun detail -> Prompt_render_failed detail)
-             in
-             let* (answer, exact_output), served_slot =
-               Exact_lane_slot_capture.with_capture slot_capture (fun () ->
-                 execute_answer ~selected_slots ~held_http ~cli_slots
-                 ~requirement
-                 ~validate
-                 ?cli_runner ~clock ~net ~base_path ~keeper_id
-                 ~messages:[ message Agent_core.Types.User prompt ]
-                 ~usage_observer:(fun usage ->
-                    observed_usage := usage)
-                 ())
-             in
-             let selected_slot = served_slot_id served_slot in
-
-             (* Working context is advisory and has its own revision. A stale
-                or failed context write cannot roll back memory or block the
-                Keeper; original sources remain pending throughout. *)
-             let organize_working_context (proposed : Keeper_librarian_context.pocket list) =
-             let context_review = Keeper_librarian_context_review.run
-               ~observe:(fun observation -> observed_context_review := Some observation)
-               ~clock ~keeper_id ~input:inp.working_context
-               ~proposed () in
-             match Keeper_librarian_context_review.withholding_kind context_review with
-             | Needs_revision ->
-               context_write := Withheld;
-               Log.Keeper.info ~keeper_name:keeper_id
-                 "working context withheld by review: pockets=%d"
-                 (List.length proposed)
-             | Review_failed reason ->
-               context_write := Withheld;
-               Log.Keeper.warn ~keeper_name:keeper_id
-                 "working context withheld fail-closed (%s): pockets=%d"
-                 reason
-                 (List.length proposed)
-             | Not_withheld -> (
-             context_write := Outcome_unconfirmed;
-             (try match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-                Keeper_librarian_context.commit ~keepers_dir ~keeper_id
-                  ~expected_version:(Option.map Keeper_librarian_context.version inp.working_context.previous)
-                  ?execution_basis:inp.working_context.execution_basis
-                  ?observed_sources:(if inp.working_context.unavailable = []
-                    then Some inp.working_context.sources else None)
-                  ~sources:(let references = List.concat_map
-                    (fun (p : Keeper_librarian_context.pocket) -> p.sources) proposed in
-                    List.filter (fun (s : Keeper_librarian_context.source) ->
-                      List.mem s.reference references) inp.working_context.sources)
-                  proposed) with
-              | Ok working ->
-                context_write := Committed (Keeper_librarian_context.version working);
-                on_context_committed (Keeper_librarian_context.version working);
-                (match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-                   Keeper_librarian_context_recall.publish ~base_path ~keepers_dir ~keeper_name:keeper_id working) with
-                 | Ok () -> ()
-                 | Error detail -> Log.Keeper.warn ~keeper_name:keeper_id
-                     "working context reference publication failed: %s" detail);
-                let covered = Keeper_librarian_context.current_references working in
-                let prior = match inp.working_context.previous with None -> [] | Some previous ->
-                  Keeper_librarian_context.current_references previous in
-                let made_progress = List.exists (fun reference -> not (List.mem reference prior)) covered in
-                let remaining = List.exists (fun (source : Keeper_librarian_context.source) ->
-                  not (List.mem source.reference covered)) inp.working_context.sources in
-                (* Continue incremental organization only after measured source
-                   coverage advances. An unfit source or model failure cannot
-                   create a private retry loop. *)
-                if made_progress && remaining then
-                  Keeper_working_context_signal.changed ~base_path ~keeper_name:keeper_id
-              | Error detail ->
-                context_write := Write_failed detail;
-                Log.Keeper.warn ~keeper_name:keeper_id
-                  "working context not committed; original intake continues: %s" detail
-              with
-              | Eio.Cancel.Cancelled _ as exn -> raise exn
-              | exn -> Log.Keeper.warn ~keeper_name:keeper_id
-                  "working context commit failed independently of memory: %s" (Printexc.to_string exn)))
-             in
-             let publish_continuity prepared working_state =
-                continuity_write := `Assoc ["status", `String "outcome_unconfirmed"];
-                commit_continuity
-                  ~commit:(fun () ->
-                   Keeper_librarian_continuity.commit
-                     ~config:(Workspace.default_config base_path) ~keeper_name:keeper_id
-                     ~prepared ~new_unread_messages:[] ~working_state)
-                  ~observe:(function
-                 | Ok snapshot ->
-                   continuity_write := `Assoc
-                     ["status", `String "committed"; "end_atom", `Int snapshot.end_atom;
-                      "prefix_sha256", `String snapshot.prefix_sha256];
-                   on_continuity_committed ~served_by:served_slot snapshot;
-                   Continuity_committed
-                 | Error detail ->
-                   continuity_write := `Assoc ["status", `String "failed"; "detail", `String detail];
-                   let reason = "continuity state not committed: " ^ detail in
-                   (* A snapshot that did not commit -- a CAS the history moved
-                      under, a disk error -- is not the range's size, so the
-                      caller keeps the width and logs this cause. *)
-                   on_not_committed { detail = reason; walk_shows_size = false; message_descent = No_descent_evidence; input_capacity_evidence = No_input_capacity_refusal; input_capacity_only = false; provider_input_refusals = []; smaller_range_meets_same_failure = false};
-                   Log.Keeper.warn ~keeper_name:keeper_id "%s" reason;
-                   Continuity_not_committed reason)
-             in
-             match answer with
-             | Admission_deferred_answer ->
-               let detail = "explicit admission remains pending: Librarian deferred every candidate" in
-               on_not_committed {detail; walk_shows_size = false; message_descent = No_descent_evidence; input_capacity_evidence = No_input_capacity_refusal; input_capacity_only = false; provider_input_refusals = []; smaller_range_meets_same_failure = false};
-               Ok (`Admission_deferred (exact_output, selected_slot))
-             | Volatile_state_answer working_state ->
-               Ok (`Volatile_state (working_state, exact_output, served_slot))
-             | Working_context_answer proposed ->
-               organize_working_context proposed;
-               Ok (`Context_organized (exact_output, selected_slot))
-             | Continuity_state_answer { prepared; working_state } ->
-               (match publish_continuity prepared working_state with
-                | Continuity_committed ->
-                  Ok (`Context_organized (exact_output, selected_slot))
-                | Continuity_not_committed reason ->
-                  Ok (`Continuity_not_committed (reason, exact_output, selected_slot)))
-             | Memory_answer (({ selection; continuity_answer; required_memory_ids;
-                                explicit_candidate_ids; admission_support = _; admission_recall_bindings }
-                               as accepted), memory_target) ->
-             (* A continuity range owns no pending input; only a Memory pass
-                without one organizes the working context. An organization the
-                answer left out or got wrong is skipped for this pass and
-                recorded on the run; the Memory decision below is kept.
-                A no-change judgment reaches here only with nothing pending,
-                where the empty organization is the only valid answer; writing
-                it retires consumed contexts exactly as a generated one does. *)
-             (match memory_target with
-              | Infer_memory_state _ -> ()
-              | Commit_memory commit ->
-             match selection.working_contexts, continuity_answer with
-              | Keeper_librarian.Working_contexts_organized pockets, Memory_only ->
-               (match commit with
-                | Commit_maintenance _ -> ()
-                | Commit_with_contexts _ -> organize_working_context pockets)
-              | Keeper_librarian.Working_contexts_organized _, Continuity _ -> ()
-              | Keeper_librarian.Working_contexts_missing, (Memory_only | Continuity _) ->
-                context_write := Answer_missing;
-                Log.Keeper.warn
-                  ~keeper_name:keeper_id
-                  "memory os librarian kept the memory answer without working_contexts"
-              | Keeper_librarian.Working_contexts_invalid detail, (Memory_only | Continuity _) ->
-                context_write := Answer_refused detail;
-                Log.Keeper.warn
-                  ~keeper_name:keeper_id
-                  "memory os librarian kept the memory answer and refused its working_contexts: %s"
-                  detail);
-             (* The decision goes to the store, not the whole set it projects
-                to. [selection.facts] is that projection, taken against the
-                snapshot this pass read before its provider turn; writing it
-                required nothing to have changed since, and a keeper recording
-                one fact of its own in that window ended the pass (masc
-                #32859). The decision itself has no such requirement: a fact it
-                never mentions is one it never saw. *)
-             (* A restatement keeps the stored memory's fields; what it said
-                differently is not refused, only named once here. *)
-             List.iter
-               (fun (ignored : Keeper_librarian.ignored_fields) ->
-                  Log.Keeper.info
-                    ~keeper_name:keeper_id
-                    "memory os librarian restated memory_id=%s kept=%s ignored differing %s"
-                    ignored.restated_id
-                    (Keeper_librarian.kept_fields_from_to_string ignored.kept_from)
-                    (String.concat
-                       ","
-                       (List.map Keeper_librarian.claim_field_to_string ignored.differing)))
-               selection.ignored_fields;
-             (* An absorption the merged claim does not convey is not applied:
-                that memory stays current. The
-                gate only narrows the list. A gate switched off, or an
-                excluded Keeper, leaves the answer unchanged; a gate that is
-                on but cannot be asked absorbs nothing; a failed judgment
-                retains unconfirmed originals. A failed judgment leaves the
-                entire Memory range pending, including its proposed claims.
-                On a completed judgment, a new claim that absorbed nothing
-                and only repeats its current sources is a copy and is not
-                applied. *)
-             let absorption=absorption_input prompt_input accepted in
-             let absorb_gate =
-               Keeper_librarian_absorb_gate.run
-                 ~cited_observations:absorption.cited_observations
-                 ~observe:(fun observation -> observed_absorb_gate := Some observation)
-                 ~before_evaluate:register_absorb_evaluation
-                 ~after_evaluate:complete_absorb_evaluation
-                 ~on_evaluation_aborted:abort_absorb_evaluation
-                 ~clock
-                 ~keeper_id
-                 ~facts:absorption.facts
-                 ~new_claims:absorption.new_claims
-                 ~superseding:absorption.superseding
-                 ~absorbed:absorption.absorbed
-                 ()
-             in
-             (* A failed judgment has no complete decision for this Memory
-                range. Keep both the sources and its proposed claims pending;
-                the caller retries the same range after the judge recovers. *)
-             let* () =
-               match
-                 Keeper_librarian_absorb_gate.failure_detail
-                   ~absorbed:selection.absorbed
-                   absorb_gate
-               with
-               | Some reason -> Error (Absorb_judgment_failed { reason; selected_slot })
-               | None -> Ok ()
-             in
-             let applied_absorbed = Keeper_librarian_absorb_gate.absorbed_of_run absorb_gate in
-             match memory_target with
-             | Infer_memory_state working_state ->
-               let step =
-                 { run_id
-                 ; source_input = prompt_input
-                 ; prompt_variables
-                 ; rendered_prompt = prompt
-                 ; absorb_gate
-                 ; new_claims = Keeper_librarian_absorb_gate.without_copies
-                     absorb_gate selection.new_claims
-                 ; dropped = selection.dropped
-                 ; absorbed = applied_absorbed
-                 ; revisions = selection.revisions
-                 ; working_state
-                 } in
-               Ok (`Memory_inferred (step, served_slot, exact_output, selected_slot))
-             | Commit_memory commit ->
-             let+ disposition =
-               Keeper_memory_os_current.apply_disposition
-                 ~pass:(memory_commit_pass commit)
-                 ~on_committed:(fun disposition ->
-                   committed_memory := Some (disposition, exact_output, selected_slot, absorb_gate);
-                   on_memory_committed ())
-                 ~clock
-                 ~dropped_statements:selection.dropped
-                 ?durable_range_id
-                 ?official_range_id
-                 ~explicit_candidate_ids
-                 ~admission_recall:{ decided_at_revision = expected_revision
-                                   ; bindings = admission_recall_bindings }
-                 ~required_memory_ids
-                 ~absorbed:applied_absorbed
-                 ~revisions:selection.revisions
-               ~keepers_dir
-               ~keeper_id
-               ~now:(Time_compat.now ())
-               ~source:
-                 { kind = Keeper_memory_os_current.Librarian
-                 ; trace_id = input_trace_id inp
-                 }
-               ~new_claims:
-                 (Keeper_librarian_absorb_gate.without_copies
-                    absorb_gate
-                    selection.new_claims)
-               ()
-             |> Result.map_error (fun detail ->
-               Memory_snapshot_write_failed { detail; selected_slot })
-             in
-             (* Only saved Memory authorizes publishing the corresponding
-                continuity frontier. A failed disposition leaves input intact. *)
-             (match continuity_answer with
-              | Memory_only -> ()
-              | Continuity { prepared; working_state } ->
-                (* The Memory decision is saved above and stands. A snapshot
-                   that did not commit is on the run's output and in the log. *)
-                (match publish_continuity prepared working_state with
-                 | Continuity_committed | Continuity_not_committed _ -> ()));
-             `Memory_committed (disposition, exact_output, selected_slot, absorb_gate)
-           in
-           match result with
-           | Ok (`Admission_deferred (exact_output, selected_slot)) ->
-             complete ~selected_slot ?usage:!observed_usage Exact_lane_run_registry.Succeeded
-               (`Assoc ["memory_write", `String "pending_explicit_admission";
-                        "exact_output", exact_output]);
-             on_admission_deferred ();
-             Eio.Fiber.check ()
-           | Ok (`Memory_inferred (step, served_by, exact_output, selected_slot)) ->
-             complete ~selected_slot ?usage:!observed_usage Exact_lane_run_registry.Succeeded
-               (`Assoc ["absorb_gate", Keeper_librarian_absorb_gate.run_result_to_yojson step.absorb_gate;
-                        "exact_output", exact_output]);
-             (match inference with
-              | Some (Infer_memory {observe;_}) -> observe ~served_by step
-              | Some (Infer_state _) | None -> ());
-             Eio.Fiber.check ()
-           | Ok (`Volatile_state (working_state, exact_output, served_slot)) ->
-             complete ~selected_slot:(served_slot_id served_slot)
-               ?usage:!observed_usage Exact_lane_run_registry.Succeeded
-               (`Assoc ["memory_write", `String "skipped_context_only";
-                        "continuity_write", `Assoc ["status", `String "not_attempted"];
-                        "volatile_inference", `Bool true;
-                        "exact_output", exact_output]);
-             (match inference with
-              | Some (Infer_state {observe;_}) -> observe ~served_by:served_slot working_state
-              | Some (Infer_memory _) | None -> ());
-             Eio.Fiber.check ()
-           | Ok (`Context_organized (exact_output, selected_slot)) ->
-             complete ~selected_slot ?usage:!observed_usage Exact_lane_run_registry.Succeeded
-               (`Assoc [ "memory_write", `String "skipped_context_only"
-                       ; "exact_output", exact_output ]);
-             Eio.Fiber.check ()
-           | Ok (`Continuity_not_committed (reason, exact_output, selected_slot)) ->
-             (* The answer was accepted and the store refused it. The snapshot
-                is this pass's whole product, so the run failed, as a Memory
-                snapshot that cannot be written fails its run. *)
-             complete ~selected_slot ?usage:!observed_usage
-               (Exact_lane_run_registry.Failed
-                  { code = continuity_not_committed_code; detail = reason })
-               (`Assoc [ "memory_write", `String "skipped_context_only"
-                       ; "exact_output", exact_output ]);
-             Eio.Fiber.check ()
-           | Ok (`Memory_committed (disposition, exact_output, selected_slot, absorb_gate)) ->
-             let snapshot = disposition.snapshot in
-             complete
-               ~selected_slot
-               ?usage:!observed_usage
-               Exact_lane_run_registry.Succeeded
-               (completed_output ~inp ~exact_output ~absorb_gate disposition);
-             (match disposition.commit with
-              | Keeper_memory_os_current.Rewritten ->
-                Log.Keeper.info
-                  ~keeper_name:keeper_id
-                  "memory os librarian committed current snapshot revision=%d facts=%d added=%d removed=%d"
-                  snapshot.revision
-                  (List.length snapshot.facts)
-                  (List.length snapshot.change.added)
-                  (List.length snapshot.change.removed)
-              | Unchanged ->
-                Log.Keeper.info
-                  ~keeper_name:keeper_id
-                  "memory os librarian kept current snapshot revision=%d facts=%d: the pass changed no fact"
-                  snapshot.revision
-                  (List.length snapshot.facts));
-             (* A completion observer may request cancellation and return
-                normally. Propagate it here even when no later I/O yields. *)
-             Eio.Fiber.check ()
-           | Error error ->
-             let evidence = extraction_failure_evidence error in
-             Option.iter on_cli_input_limit evidence.measured_cli_capacity;
-             let detail = extraction_error_to_string error in
-             (* The caller reads less after this pass unless the whole walk
-                was transient, and it names the cause in its log: without the
-                cause an authorization outage and an oversized range leave
-                the same line. *)
-             let exhausted_input_refusals = match error with
-               | Exact_execution_failed failure -> failure.exhausted_input_refusals
-               | Prompt_render_failed _ | Exact_setup_failed _ | Cli_slots_exhausted _
-               | Cli_prompt_unavailable _ | No_transport_declared | Slots_held _
-               | Domain_output_invalid _ | Absorb_judgment_failed _
-               | Memory_snapshot_write_failed _ -> None in
-             on_not_committed ~exhausted_input_refusals
-               (not_committed_of_failure ~detail evidence);
-             complete
-               ?selected_slot:(selected_slot_of_extraction_error error)
-               (Exact_lane_run_registry.Failed
-                  { code = "librarian_failed"
-                  ; (* The registry row is what the standalone-lanes dashboard
-                       and the TUI surface, so it carries the same typed cause
-                       the operator log line does. The fixed "inspect the
-                       operator logs" sentence here made all 138 live failures
-                       on 2026-08-27..28 indistinguishable while the causes
-                       (domain-contract violations vs provider execution
-                       failures) sat one WARN line away. *)
-                    detail
-                  })
-               (failed_output !observed_absorb_gate);
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string MemoryOsLibrarianFailures)
-               ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
-               ();
-             Keeper_memory_health_input.written ~keepers_dir ~keeper_id;
-             (* A failed pass leaves the read position where it was. What the
-                next signal reads from it is the caller's to decide, from the
-                verdict handed to [on_not_committed] above; nothing here
-                schedules that read or holds it back. *)
-             record_pass_failure
-               ~keepers_dir
-               ~keeper_id
-               ~trace_id
-               ~kind:(extraction_error_kind error)
-               ~detail:
-                 (Printf.sprintf
-                    "memory os librarian lane=%s: %s"
-                    exact_lane_id
-                    detail);
-             Eio.Fiber.check ()
-         with
-         (* A cancelled pass reached the lane registry and stopped there, so the
-            journal — the record of what the librarian did on this keeper —
-            showed the same silence for a pass killed mid-flight as for a turn
-            on which the librarian never ran. Measured live on 2026-08-07: 11
-            of 23 completed librarian lane runs cancelled, none of them
-            represented in the journal.
-
-            In this cancellation branch, completion and failure-journal writes
-            run under [Eio.Cancel.protect]:
-            payload persistence and lock acquisition can yield before the
-            registry's transaction protection begins. The surrounding context
-            is already cancelled, so protecting only the journal loses both
-            records before reaching it. *)
-         | Eio.Cancel.Cancelled _ as exn ->
-           Eio.Cancel.protect (fun () ->
-             (* Notifications run after the registry commit. A cancellation
-                from that observer must not overwrite a completed outcome. *)
-             let run_completed =
-               List.exists
-                 (fun (run : Exact_lane_run_registry.run) ->
-                    String.equal run.run_id run_id
-                    && match run.status with
-                       | Exact_lane_run_registry.Completed _ -> true
-                       | Running | Completion_persistence_failed _ -> false)
-                 (Exact_lane_run_registry.list_runs registry)
-             in
-             match !committed_memory with
-             | Some (disposition, exact_output, selected_slot, absorb_gate) ->
-               if not run_completed then
-                 complete ~selected_slot Exact_lane_run_registry.Cancelled
-                   (completed_output ~inp ~exact_output ~absorb_gate disposition);
-               Log.Keeper.warn
-                 ~keeper_name:keeper_id
-                 "memory os librarian cancelled after its pass committed at revision=%d; post-commit work may be incomplete"
-                 disposition.snapshot.revision
-             | None ->
-               if not run_completed then
-                 complete
-                   Exact_lane_run_registry.Cancelled
-                   (failed_output !observed_absorb_gate);
-               (* The shared executor's workers are children of the server
-                  switch being cancelled. Do not enqueue protected cleanup on
-                  that pool: its workers can already be gone while this child
-                  prevents the switch's queue-close hook from running. Join a
-                  systhread for the same snapshot read and failure journal. *)
-               Eio_unix.run_in_systhread ~label:"librarian-cancellation-journal" (fun () ->
-                 record_pass_failure_io
-                   ~keepers_dir
-                   ~keeper_id
-                   ~trace_id
-                   ~kind:Keeper_memory_os_current.Lane_cancelled
-                   ~detail:
-                     (Printf.sprintf
-                        "memory os librarian cancelled lane=%s"
-                        exact_lane_id)));
-           (* A later signal reads the same position again, but it does not
-              replay this immutable input; graceful lifecycle boundaries
-              therefore drain accepted work instead of cancelling it. *)
-           raise exn
-         | exn ->
-           complete
-             (Exact_lane_run_registry.Failed
-                { code = "librarian_raised"
-                ; detail = "Librarian raised: " ^ Printexc.to_string exn
-                })
-             (failed_output !observed_absorb_gate);
-           raise exn))
-      (* Missing Eio context is a failed pass like any other: the keeper's
-         memory does not advance. It was previously a bare WARN with no record,
-         which hid a restart-shaped outage behind the same silence as a healthy
-         idle turn. *)
-      | _ ->
-        let detail =
-          Printf.sprintf
-            "memory os librarian skipped: Eio net/clock context unavailable lane=%s"
-            exact_lane_id
-        in
-        (* No request was composed, so nothing here says the range's size
-           stopped the pass. *)
-        on_not_committed { detail; walk_shows_size = false; message_descent = No_descent_evidence; input_capacity_evidence = No_input_capacity_refusal; input_capacity_only = false; provider_input_refusals = []; smaller_range_meets_same_failure = false};
-        record_pass_failure
-          ~keepers_dir
-          ~keeper_id
-          ~trace_id
-          ~kind:Keeper_memory_os_current.Runtime_context_unavailable
-          ~detail
-    with
-    | Eio.Cancel.Cancelled _ as error -> raise error
-    | exn ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string MemoryOsLibrarianFailures)
-        ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
-        ();
-      Keeper_memory_health_input.written ~keepers_dir ~keeper_id;
-      (* A raise is this process failing, not a provider judging the request,
-         so the caller keeps the width it had. *)
+               "librarian exact-run observation completion failed run_id=%s: %s"
+               run_id
+               (Exact_lane_run_registry.completion_error_to_string error)
+         in
+         (try
+            let result =
+              let open Result.Syntax in
+              let* selected_slots, cli_slots, held_http = acquired in
+              let* prompt =
+                prompt_material
+                |> Result.map (fun material -> material.rendered)
+                |> Result.map_error (fun detail -> Prompt_render_failed detail)
+              in
+              let* (proposed, exact_output), served_slot =
+                Exact_lane_slot_capture.with_capture slot_capture (fun () ->
+                  execute_answer
+                    ~selected_slots
+                    ~held_http
+                    ~cli_slots
+                    ~requirement:working_context_requirement
+                    ~validate:(Keeper_librarian.working_contexts_of_json_result inp)
+                    ?cli_runner
+                    ~clock
+                    ~net
+                    ~base_path
+                    ~keeper_id
+                    ~messages:[ message Agent_core.Types.User prompt ]
+                    ~usage_observer:(fun usage -> observed_usage := usage)
+                    ())
+              in
+              let selected_slot = served_slot_id served_slot in
+              let context_review =
+                Keeper_librarian_context_review.run
+                  ~observe:(fun observation -> observed_context_review := Some observation)
+                  ~clock
+                  ~keeper_id
+                  ~input:inp.working_context
+                  ~proposed
+                  ()
+              in
+              (match Keeper_librarian_context_review.withholding_kind context_review with
+               | Needs_revision ->
+                 context_write := Withheld;
+                 Log.Keeper.info
+                   ~keeper_name:keeper_id
+                   "working context withheld by review: pockets=%d"
+                   (List.length proposed)
+               | Review_failed reason ->
+                 context_write := Withheld;
+                 Log.Keeper.warn
+                   ~keeper_name:keeper_id
+                   "working context withheld fail-closed (%s): pockets=%d"
+                   reason
+                   (List.length proposed)
+               | Not_withheld ->
+                 context_write := Outcome_unconfirmed;
+                 (try
+                    match
+                      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+                        Keeper_librarian_context.commit
+                          ~keepers_dir
+                          ~keeper_id
+                          ~expected_version:
+                            (Option.map Keeper_librarian_context.version inp.working_context.previous)
+                          ?execution_basis:inp.working_context.execution_basis
+                          ?observed_sources:
+                            (if inp.working_context.unavailable = []
+                             then Some inp.working_context.sources
+                             else None)
+                          ~sources:
+                            (let references =
+                               List.concat_map
+                                 (fun (p : Keeper_librarian_context.pocket) -> p.sources)
+                                 proposed
+                             in
+                             List.filter
+                               (fun (s : Keeper_librarian_context.source) ->
+                                  List.mem s.reference references)
+                               inp.working_context.sources)
+                          proposed)
+                    with
+                    | Ok working ->
+                      context_write := Committed (Keeper_librarian_context.version working);
+                      on_context_committed (Keeper_librarian_context.version working);
+                      (match
+                         Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+                           Keeper_librarian_context_recall.publish
+                             ~base_path
+                             ~keepers_dir
+                             ~keeper_name:keeper_id
+                             working)
+                       with
+                       | Ok () -> ()
+                       | Error detail ->
+                         Log.Keeper.warn
+                           ~keeper_name:keeper_id
+                           "working context reference publication failed: %s"
+                           detail);
+                      let covered = Keeper_librarian_context.current_references working in
+                      let prior =
+                        match inp.working_context.previous with
+                        | None -> []
+                        | Some previous -> Keeper_librarian_context.current_references previous
+                      in
+                      let made_progress =
+                        List.exists (fun reference -> not (List.mem reference prior)) covered
+                      in
+                      let remaining =
+                        List.exists
+                          (fun (source : Keeper_librarian_context.source) ->
+                             not (List.mem source.reference covered))
+                          inp.working_context.sources
+                      in
+                      if made_progress && remaining
+                      then Keeper_working_context_signal.changed ~base_path ~keeper_name:keeper_id
+                    | Error detail ->
+                      context_write := Write_failed detail;
+                      Log.Keeper.warn
+                        ~keeper_name:keeper_id
+                        "working context not committed; original intake continues: %s"
+                        detail
+                  with
+                  | Eio.Cancel.Cancelled _ as exn -> raise exn
+                  | exn ->
+                    Log.Keeper.warn
+                      ~keeper_name:keeper_id
+                      "working context commit failed independently of memory: %s"
+                      (Printexc.to_string exn)));
+              Ok (exact_output, selected_slot)
+            in
+            match result with
+            | Ok (exact_output, selected_slot) ->
+              complete
+                ~selected_slot
+                ?usage:!observed_usage
+                Exact_lane_run_registry.Succeeded
+                (`Assoc
+                   [ "memory_write", `String "skipped_context_only"
+                   ; "exact_output", exact_output
+                   ]);
+              Eio.Fiber.check ()
+            | Error error ->
+              let evidence = extraction_failure_evidence error in
+              Option.iter on_cli_input_limit evidence.measured_cli_capacity;
+              let detail = extraction_error_to_string error in
+              on_not_committed (not_committed_of_failure ~detail evidence);
+              complete
+                (Exact_lane_run_registry.Failed { code = "librarian_failed"; detail })
+                (`Assoc []);
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string MemoryOsLibrarianFailures)
+                ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
+                ();
+              Keeper_memory_health_input.written ~keepers_dir ~keeper_id;
+              record_failure
+                ~keepers_dir
+                ~keeper_id
+                ~trace_id
+                ~kind:(extraction_error_kind error)
+                ~detail:(Printf.sprintf "memory os librarian lane=%s: %s" exact_lane_id detail);
+              Eio.Fiber.check ()
+          with
+          | Eio.Cancel.Cancelled _ as exn ->
+            Eio.Cancel.protect (fun () ->
+              let run_completed =
+                List.exists
+                  (fun (run : Exact_lane_run_registry.run) ->
+                     String.equal run.run_id run_id
+                     &&
+                     match run.status with
+                     | Exact_lane_run_registry.Completed _ -> true
+                     | Running | Completion_persistence_failed _ -> false)
+                  (Exact_lane_run_registry.list_runs registry)
+              in
+              if not run_completed then complete Exact_lane_run_registry.Cancelled (`Assoc []);
+              Eio_unix.run_in_systhread ~label:"librarian-cancellation-journal" (fun () ->
+                record_failure_io
+                  ~keepers_dir
+                  ~keeper_id
+                  ~trace_id
+                  ~kind:Keeper_memory_os_current.Lane_cancelled
+                  ~detail:(Printf.sprintf "memory os librarian cancelled lane=%s" exact_lane_id)));
+            raise exn
+          | exn ->
+            complete
+              (Exact_lane_run_registry.Failed
+                 { code = "librarian_raised"; detail = "Librarian raised: " ^ Printexc.to_string exn })
+              (`Assoc []);
+            raise exn))
+    | _ ->
+      let detail =
+        Printf.sprintf
+          "memory os librarian skipped: Eio net/clock context unavailable lane=%s"
+          exact_lane_id
+      in
       on_not_committed
-        { detail = "librarian raised: " ^ Printexc.to_string exn
+        { detail
         ; walk_shows_size = false
         ; message_descent = No_descent_evidence
-        ; input_capacity_evidence = No_input_capacity_refusal; input_capacity_only = false; provider_input_refusals = []; smaller_range_meets_same_failure = false
+        ; input_capacity_evidence = No_input_capacity_refusal
+        ; input_capacity_only = false
+        ; provider_input_refusals = []
+        ; smaller_range_meets_same_failure = false
         };
-      record_pass_failure
+      record_failure
         ~keepers_dir
         ~keeper_id
         ~trace_id
-        ~kind:Keeper_memory_os_current.Unhandled_exception
-        ~detail:
-          (Printf.sprintf
-             "memory os librarian lane=%s: %s"
-             exact_lane_id
-             (Printexc.to_string exn))
-;;
-
-let run_best_effort ~write_scope = run_pass ~run_kind:(Best_effort write_scope)
-
-type inference_failure =
-  { reports : not_committed list
-  ; exhausted_input_refusals : Keeper_librarian_input_refusal.t list option
-  }
-
-type working_state_outcome =
-  | Inferred of { working_state : string; served_by : served_slot }
-  | Not_inferred of inference_failure
-
-type working_state_inference =
-  { preparation : working_state_preparation
-  ; outcome : working_state_outcome
-  }
-
-let infer_working_state ?cli_runner ~base_path ~keepers_dir ~keeper_id
-    ~previous_state ~unread_messages input =
-  let inferred = ref None and reports = ref [] and exhausted_input_refusals = ref None in
-  let preparation = ref Not_prepared in
-  run_pass
-    ~run_kind:(Inference (Infer_state {previous_state; unread_messages; preparation;
-      observe=(fun ~served_by working_state -> inferred := Some (working_state, served_by));
-      observe_failure=(fun exhausted -> exhausted_input_refusals := exhausted)}))
-    ~on_not_committed:(fun report -> reports := report :: !reports)
-    ?cli_runner ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
-  let outcome = match !inferred with
-    | Some (working_state, served_by) -> Inferred { working_state; served_by }
-    | None -> Not_inferred {reports=List.rev !reports;
-        exhausted_input_refusals= !exhausted_input_refusals} in
-  {preparation= !preparation; outcome}
-;;
-
-type memory_inference =
-  | Memory_inferred of { step : memory_step; served_by : served_slot }
-  | Memory_not_inferred of inference_failure
-
-let infer_memory_step ?cli_runner ~base_path ~keepers_dir ~keeper_id
-    ~previous_state ~unread_messages input =
-  let inferred = ref None and reports = ref [] and exhausted_input_refusals = ref None in
-  run_pass
-    ~run_kind:(Inference (Infer_memory {previous_state; unread_messages;
-      observe=(fun ~served_by step -> inferred := Some (step, served_by));
-      observe_failure=(fun exhausted -> exhausted_input_refusals := exhausted)}))
-    ~on_not_committed:(fun report -> reports := report :: !reports)
-    ?cli_runner ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
-  match !inferred with
-  | Some (step, served_by) -> Memory_inferred {step; served_by}
-  | None -> Memory_not_inferred {reports=List.rev !reports;
-      exhausted_input_refusals= !exhausted_input_refusals}
+        ~kind:Keeper_memory_os_current.Runtime_context_unavailable
+        ~detail
+  with
+  | Eio.Cancel.Cancelled _ as error -> raise error
+  | exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string MemoryOsLibrarianFailures)
+      ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
+      ();
+    Keeper_memory_health_input.written ~keepers_dir ~keeper_id;
+    on_not_committed
+      { detail = "librarian raised: " ^ Printexc.to_string exn
+      ; walk_shows_size = false
+      ; message_descent = No_descent_evidence
+      ; input_capacity_evidence = No_input_capacity_refusal
+      ; input_capacity_only = false
+      ; provider_input_refusals = []
+      ; smaller_range_meets_same_failure = false
+      };
+    record_failure
+      ~keepers_dir
+      ~keeper_id
+      ~trace_id
+      ~kind:Keeper_memory_os_current.Unhandled_exception
+      ~detail:
+        (Printf.sprintf
+           "memory os librarian lane=%s: %s"
+           exact_lane_id
+           (Printexc.to_string exn))
 ;;
 
 module For_testing = struct
-  let cause_input_refusals cause =
-    (Failure_evidence.of_cause cause).provider_input_refusals
+  let cause_input_refusals cause = (Failure_evidence.of_cause cause).provider_input_refusals
 
   type classified_error = extraction_error
 
   let classified_error_detail = extraction_error_to_string
   let classified_error_kind = extraction_error_kind
-  let execute_exact_output_classified = execute_exact_output_classified
+  let execute_working_context_classified = execute_working_context_classified
   let record_failure = record_failure
-  let commit_continuity = commit_continuity
-  let cause_shows_size cause =
-    Failure_evidence.shows_range_size (Failure_evidence.of_cause cause)
+
+  let cause_shows_size cause = Failure_evidence.shows_range_size (Failure_evidence.of_cause cause)
+
   let cli_failure_shows_size failure =
     Failure_evidence.shows_range_size (Failure_evidence.of_cli_failure failure)
+  ;;
+
   let disposition_shows_size disposition =
     Failure_evidence.shows_range_size (Failure_evidence.of_disposition disposition)
+  ;;
 end

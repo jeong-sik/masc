@@ -80,24 +80,6 @@ val librarian : string
 (** The first part of every question a Memory writer asks. *)
 val librarian_ask : string
 
-(** Managed admission and absorption policy fragments. *)
-val librarian_admission_policy : string
-val librarian_retirement_policy : string
-val librarian_absorb_forward : string
-val librarian_absorb_pair : string
-val librarian_absorb_observations : string
-val librarian_absorb_reverse : string
-val librarian_absorb_reverse_yes : string
-val librarian_absorb_reverse_no : string
-val librarian_absorb_mergeable : string
-val librarian_absorb_different_context : string
-val librarian_absorb_loses_knowledge : string
-val librarian_absorb_uncertain : string
-
-(** A continuity pass over a range whose Memory is already committed: the
-    answer is the working state alone. *)
-val librarian_continuity : string
-
 (** A pending-input organization pass: the answer is the working contexts
     alone. *)
 val librarian_working_context : string
@@ -106,16 +88,6 @@ val librarian_working_context : string
     [librarian.working_context] both render into their
     [working_contexts_rule] variable, so the rule has one text. *)
 val librarian_working_contexts_rule : string
-
-(** The pending working-context material of [librarian]: a pass that carries
-    turn material renders it into the [working_context_input] variable, and the
-    admission pass, which has none, leaves the variable empty. *)
-val librarian_working_context_input : string
-
-(** The turn material of [librarian] (past Task/Goal records, the conversation,
-    counterpart and tool observations, the continuity document): rendered into
-    the [turn_inputs] variable by every pass but admission. *)
-val librarian_turn_inputs : string
 
 val keeper_memory_selection : string
 val keeper_memory_selection_candidate : string

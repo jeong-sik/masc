@@ -1,9 +1,7 @@
-(** Tests for {!Masc.Keeper_turn_fragments} and the official-client rows of
-    {!Masc.Keeper_librarian_range} (RFC librarian-lifecycle §10-3): what an
+(** Tests for {!Masc.Keeper_turn_fragments}: what an
     official-client turn left in its trace's history files is read back by
-    the turn's [turn_ref]; a line the decoder refuses is a typed stop and not
-    an untagged line; and the official-turn end lines of the boundary log are
-    selected by their line number, beyond a cursor. *)
+    the turn's [turn_ref], and a line the decoder refuses is a typed stop and
+    not an untagged line. *)
 
 open Alcotest
 

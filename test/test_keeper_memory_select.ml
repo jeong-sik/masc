@@ -2,7 +2,6 @@ open Alcotest
 module Current = Masc.Keeper_memory_os_current
 module Memory = Masc.Keeper_memory_os_types
 module Source = Masc.Keeper_memory_source_current
-module Queue = Masc.Keeper_memory_admission_queue
 module Dispatch = Masc.Keeper_tool_runtime
 module Fixture = Exact_output_fixture
 module Json = Yojson.Safe.Util
@@ -27,7 +26,7 @@ let restore ~keepers_dir ~keeper_id capture =
     ["current_snapshot",Current.path_for_keepers_dir ~keepers_dir ~keeper_id;
      "consumption_and_lookup_receipt",Current.durable_range_receipt_path ~keepers_dir ~keeper_id;
      "memory_journal",Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id;
-     "pending_queue",Queue.path ~keepers_dir ~keeper_id]
+     "pending_queue",Filename.concat keepers_dir (keeper_id ^ ".memory-admission.json")]
 let answer choice = `Assoc ["type",`String "choice";"choice",`String choice;
   "confidence",`Float 1.;"probabilities",`Assoc (List.map (fun label ->
     label,`Float (if label=choice then 1. else 0.))
@@ -158,7 +157,7 @@ let test_missing_request_context_never_evaluates () =
   let stores=List.map (fun path -> path,Fs_compat.load_file_opt path)
     [journal;Current.path_for_keepers_dir ~keepers_dir ~keeper_id;
      Current.durable_range_receipt_path ~keepers_dir ~keeper_id;
-     Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id;Queue.path ~keepers_dir ~keeper_id] in
+     Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id] in
   let output=dispatch () in
   check string "missing owner guidance is an explicit unavailable result" "unavailable" (text "status" output);
   check string "owner policy failure has its own diagnostic" "selection_prompt_unavailable" (text "reason" output);
@@ -447,8 +446,7 @@ let test_receipt_failure_preserves_incomplete_selection ~choice () =
   Fs_compat.save_file receipt "{damaged admission receipt";
   let stores=List.map (fun path -> path,Fs_compat.load_file_opt path)
     [receipt;Current.path_for_keepers_dir ~keepers_dir ~keeper_id;
-     Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id;
-     Queue.path ~keepers_dir ~keeper_id] in
+     Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id] in
   reply:=response ~choose:(fun _ -> choice);
   let output=dispatch () in
   let request=match !observed with [request] -> request | _ -> fail "one real dispatch expected" in

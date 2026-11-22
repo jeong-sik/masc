@@ -10,7 +10,6 @@ type destinations = Typesafeai_client.destination * Typesafeai_client.destinatio
 type unavailable_reason =
   | Lane_disabled
   | No_armed_destination
-  | Absorb_gate_disabled
   | Board_attention_disabled
   | Context_review_disabled
   | Skill_applicability_disabled
@@ -23,7 +22,6 @@ type unavailable_reason =
 let unavailable_reason_to_string = function
   | Lane_disabled -> "lane_disabled"
   | No_armed_destination -> "no_armed_destination"
-  | Absorb_gate_disabled -> "absorb_gate_disabled"
   | Board_attention_disabled -> "board_attention_disabled"
   | Context_review_disabled -> "context_review_disabled"
   | Skill_applicability_disabled -> "skill_applicability_disabled"
@@ -113,13 +111,6 @@ let gate_destinations ~keeper_id ~switched_on ~off =
   else lane_destinations ()
 ;;
 
-let absorb_gate_destinations ~keeper_id =
-  gate_destinations
-    ~keeper_id
-    ~switched_on:(policy ()).Runtime_schema.absorb_gate
-    ~off:Absorb_gate_disabled
-;;
-
 let board_attention_destinations ~keeper_id =
   gate_destinations
     ~keeper_id
@@ -164,8 +155,6 @@ let memory_recall_destinations ~keeper_id =
     ~off:Memory_recall_disabled
 ;;
 
-let is_absorb_gate_enabled () = is_enabled () && (policy ()).Runtime_schema.absorb_gate
-
 (* The names that exclude nobody: a keeper is excluded by its name, so a
    misspelt name silently excludes nothing. Boot asks this with the keepers
    it found and reports each. *)
@@ -201,7 +190,7 @@ let readiness () =
     | Error (Lane_disabled | Access_unpublished | Host_account_not_shared | No_armed_destination) ->
       Off
     | Error
-        ( Absorb_gate_disabled | Board_attention_disabled | Context_review_disabled
+        ( Board_attention_disabled | Context_review_disabled
         | Skill_applicability_disabled | Workspace_memory_selection_disabled
         | Memory_recall_disabled | Keeper_excluded ) ->
       (* [lane_destinations] answers only about the lane and its keys. *)

@@ -176,8 +176,7 @@ type range_start =
           [accepted]. It lies past the point, or, while the window stays
           ({!held_window}), anywhere. The point's working state still rides
           ahead of it ({!carried_working_state}). The atoms from the point up
-          to a later [accepted] are not sent; the part of them the Librarian
-          has not read either is {!Keeper_carried_front.librarian_gap}. The
+          to a later [accepted] are not sent. The
           atoms from an earlier [accepted] up to the point are in memory and
           in the request both. *)
   | From_seed of Keeper_carried_front.seed

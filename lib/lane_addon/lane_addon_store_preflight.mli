@@ -52,9 +52,6 @@ type decoder =
   | Tool_request_inventory  (** {!Lane_addon_store.tool_request_owner_entry} *)
   | Tool_request_owner  (** {!Lane_addon_tool_request_owner.Published_reader.read} *)
   | Tool_request_payload (** The consumer's current pure payload decoder. *)
-  | History_resolution
-      (** The consumer's decoder for one file of a scope's history resolution
-          directory. *)
   | Tool_request_exact_reads
       (** The consumer's reads of the original's Exact record and proof link,
           on the files the Exact scan leaves. *)
@@ -70,7 +67,6 @@ type tool_request_records_reader = scope:string ->
     canonical summary and progress checks, without reading request bodies. *)
 type tool_request_archive_reader = scope:string -> date:string -> request_id:string ->
   (Lane_addon_tool_request_owner.Record.t option, string) result
-type history_resolution_reader = scope:string -> request_id:string -> (Yojson.Safe.t option, string) result
 
 (** What the record the Exact scan deletes at an original's path showed of
     that original: open, terminal with this final, or nothing, when the record
@@ -109,14 +105,13 @@ type payload_verdict =
       (** Restoring the original body failed. Classified as
           [Tool_request_owner], as in the strict original reader. *)
   | Payload_invalid of string
-      (** Fresh state deletes the record's scope: its owner records,
-          request bodies, history fences and history resolution records. *)
+      (** Fresh state deletes the record's scope: its owner records and
+          request bodies. *)
   | Consumer_stops_on_exact of { detail : string; scopes : string list; paths : string list }
       (** The consumer stops on the Exact files the Exact scan leaves. Fresh
           state deletes every directory the store names by each scope in
-          [scopes] (owner records, request bodies, settled originals, history
-          fences and resolutions) and each path in [paths], below the store
-          root, those that exist. *)
+          [scopes] (owner records, request bodies and settled originals)
+          and each path in [paths], below the store root, those that exist. *)
   | Exact_root_differs of string
       (** The scan stops and prints no fresh-state line. *)
 
@@ -133,7 +128,6 @@ type original = {
 type payload_validator = read:tool_request_reader -> read_scope:tool_request_scope_reader ->
   read_records:tool_request_records_reader -> read_body:request_body_reader ->
   read_archive:tool_request_archive_reader ->
-  read_fence:history_resolution_reader -> read_resolution:history_resolution_reader ->
   read_exact:exact_reader -> original -> payload_verdict
 (** Explicit read-only metadata, parent, scope inventory, body and Exact
     ports. [read] and [read_scope] return complete originals whose physical
@@ -189,11 +183,7 @@ val fresh_state_step : refusal -> string
 (** The fresh-state line the preflight prints: stop the server, delete
     [delete], start the new build. *)
 
-type history_resolution_validator = group:string -> name:string -> Yojson.Safe.t -> (unit, string) result
-(** One file of [<group>/<name>] under {!Lane_addon_store.history_resolutions_directory}. *)
-
 val scan : ?validate_tool_request:(unit -> payload_validator) ->
-  ?validate_history_resolution:history_resolution_validator ->
   Store.t -> base_path:string -> (report, string) result
 (** Read every record of the store under [base_path] with this build's
     decoders. A missing store directory is an empty store. [Error] means a
@@ -209,7 +199,7 @@ val scan : ?validate_tool_request:(unit -> payload_validator) ->
 
 module For_testing : sig
   val scan : ?validate_tool_request:(unit -> payload_validator) ->
-    ?validate_history_resolution:history_resolution_validator -> after_read:(string -> unit) ->
+    after_read:(string -> unit) ->
     Store.t -> base_path:string -> (report, string) result
   (** The same scan, calling [after_read] with each record's path once its
       bytes are read and before they are decoded, so a test can move a file

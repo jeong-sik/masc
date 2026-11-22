@@ -1,7 +1,6 @@
 open Alcotest
 module Current = Masc.Keeper_memory_os_current
 module Memory = Masc.Keeper_memory_os_types
-module Queue = Masc.Keeper_memory_admission_queue
 module Selection = Masc.Keeper_workspace_memory_selection
 let require = function Ok value -> value | Error detail -> fail detail
 let member = Yojson.Safe.Util.member
@@ -15,7 +14,7 @@ let restore ~keepers_dir ~keeper_id bundle =
   let stores = ["current_snapshot",Current.path_for_keepers_dir ~keepers_dir ~keeper_id;
     "consumption_and_lookup_receipt",Current.durable_range_receipt_path ~keepers_dir ~keeper_id;
     "memory_journal",Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id;
-    "pending_queue",Queue.path ~keepers_dir ~keeper_id] in
+    "pending_queue",Filename.concat keepers_dir (keeper_id ^ ".memory-admission.json")] in
   check (list string) "closed four-store bundle" (List.sort String.compare (List.map fst stores))
     (List.sort String.compare (List.map fst (Json.to_assoc bundle)));
   let decoded = List.map (fun (name,path) ->
@@ -52,7 +51,7 @@ let capture () =
   Config_dir_resolver.reset ();
   Fun.protect ~finally:Config_dir_resolver.reset @@ fun () ->
   Masc_test_deps.with_typesafeai_policy
-    {Runtime_schema.default_typesafeai with lane_enabled=false;absorb_gate=false} @@ fun () ->
+    {Runtime_schema.default_typesafeai with lane_enabled=false} @@ fun () ->
   let keeper_id=jstring "keeper_id" original |> Keeper_id.Keeper_name.of_string |> require |> Keeper_id.Keeper_name.to_string in
   let trace_id=jstring "trace_id" original |> Keeper_id.Trace_id.of_string |> require |> Keeper_id.Trace_id.to_string in
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in

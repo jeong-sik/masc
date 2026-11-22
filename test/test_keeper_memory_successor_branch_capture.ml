@@ -1,7 +1,6 @@
 open Alcotest
 module Current = Masc.Keeper_memory_os_current
 module Memory = Masc.Keeper_memory_os_types
-module Queue = Masc.Keeper_memory_admission_queue
 module Selector = Masc.Keeper_memory_successor_selection
 let require = function Ok value -> value | Error detail -> fail detail
 let sha bytes = Agent_core_sha256.(digest_string bytes |> to_hex)
@@ -21,7 +20,7 @@ let capture () =
   Config_dir_resolver.reset ();
   Fun.protect ~finally:Config_dir_resolver.reset @@ fun () ->
   Masc_test_deps.with_typesafeai_policy
-    {Runtime_schema.default_typesafeai with lane_enabled=false;absorb_gate=false} @@ fun () ->
+    {Runtime_schema.default_typesafeai with lane_enabled=false} @@ fun () ->
   let keeper_id="synthetic-successor-branches" and trace_id="authored-event-lineage-fixture" in
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let now=Time_compat.now () in
@@ -31,29 +30,27 @@ let capture () =
     "Event E17: production R-015 requires owner approval.";
     "Event E17: staging R-015 requires owner approval.";
     "Event E18: an unrelated production R-015 release requires release-manager approval."] in
-  let request_ids=List.mapi (fun index claim ->
-    (Queue.append ~keepers_dir ~keeper_id
-       ~request_id:(Printf.sprintf "memory-admission-%d" index) (fact claim)
-     |> Result.map_error Queue.append_error_to_string |> require).request_id) source_claims in
-  let batch=match Queue.read_pending ~keepers_dir ~keeper_id |> require with
-    | Some batch -> batch | None -> fail "producer queue missing" in
-  let candidates=Queue.candidates batch and ids=Queue.candidate_ids batch in
-  check (list string) "queue preserves the three distinct observations" source_claims
-    (List.map (fun (candidate : Queue.candidate) -> candidate.fact.claim) candidates);
+  let source_facts = List.map fact source_claims in
+  let ids = List.mapi (fun index (sf : Memory.fact) : Current.explicit_candidate_id ->
+    let sequence = index + 1 in
+    let request_id = Printf.sprintf "memory-admission-%d" index in
+    let row = `Assoc [ "sequence", `Int sequence; "request_id", `String request_id; "fact", Memory.fact_to_json sf ] in
+    { queue_generation = "gen-1"
+    ; request_id
+    ; sequence
+    ; input_sha256 = sha (Yojson.Safe.to_string row) }) source_facts in
+  let request_ids = List.map (fun (id : Current.explicit_candidate_id) -> id.request_id) ids in
   let a=fact "Event E17: deployment of R-015 to either production or staging requires owner approval." in
   let u=fact "Event E18: release-manager approval governs this unrelated production R-015 release." in
   let targets=[a;a;u] in
-  let bindings=List.map2 (fun ((candidate : Queue.candidate),(candidate_id : Current.explicit_candidate_id)) target ->
-    {Current.candidate_id;source_fact=candidate.fact;target_memory_id=Memory.memory_id target})
-    (List.combine candidates ids) targets in
+  let bindings=List.map2 (fun (source_fact, candidate_id) target ->
+    {Current.candidate_id;source_fact;target_memory_id=Memory.memory_id target})
+    (List.combine source_facts ids) targets in
   let source={Current.kind=Current.Librarian;trace_id} in
   ignore (Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Admission ~keepers_dir ~keeper_id ~now ~source
     ~explicit_candidate_ids:ids
     ~admission_recall:{Current.decided_at_revision=None; bindings}
     ~absorbed:[] ~revisions:[] ~new_claims:[a;u] () |> require : Current.disposition);
-  Queue.acknowledge_committed ~keepers_dir ~keeper_id |> require;
-  check bool "only actual receipts consume initial observations" true
-    ((Queue.read_pending ~keepers_dir ~keeper_id |> require)=None);
   let b=fact "Event E17 production R-015: the owner must authorize the rollout." in
   let c=fact "Event E17 staging R-015: obtain owner sign-off before deployment." in
   let d=fact "Event E17 production R-015: the revised rollout policy now requires two independent approvals, replacing owner-only authorization." in
@@ -78,8 +75,7 @@ let capture () =
     check bool "each path retains the actual combined predecessor" true (candidate.original_target=a)) state.successor_candidates;
   let stores=["current_snapshot",Current.path_for_keepers_dir ~keepers_dir ~keeper_id;
     "consumption_and_lookup_receipt",Current.durable_range_receipt_path ~keepers_dir ~keeper_id;
-    "memory_journal",Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id;
-    "pending_queue",Queue.path ~keepers_dir ~keeper_id] in
+    "memory_journal",Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id] in
   let before=List.map (fun (name,path) -> name,Fs_compat.load_file_opt path) stores in
   let state_bundle=`Assoc (List.map (fun (name,bytes) -> name,match bytes with
     | None -> `Assoc ["present",`Bool false]

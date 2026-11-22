@@ -43,21 +43,10 @@ type carrier_run =
 let msg role text = Agent_core.Types.make_message ~role [Agent_core.Types.Text text]
 
 (* One completed turn over [messages] in the Keeper's turn log, where a
-   request of a turn with no snapshot opens, and in its boundary log, which
-   the Librarian still reads. *)
+   request of a turn with no snapshot opens. *)
 let record_turn_ended ~config messages =
   Masc_test_deps.start_turn_log ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
-    ~trace_id:session_id ~closed_messages:(List.length messages);
-  let position = match Keeper_turn_boundaries.position_of_messages messages with
-    | Ok position -> position | Error detail -> fail detail in
-  match Keeper_turn_boundaries.append ~keepers_dir:(Workspace.keepers_runtime_dir config)
-      ~keeper_id:keeper_name
-      {Keeper_turn_boundaries.recorded_at = 1.; event = Keeper_turn_boundaries.Turn_ended
-         {task_context = Keeper_turn_task_context.No_task;
-          turn_ref = Ids.Turn_ref.make ~trace_id:session_id ~absolute_turn:1;
-          history_at_start = Keeper_turn_boundaries.Fresh_history; position}} with
-  | Ok () -> ()
-  | Error error -> fail (Keeper_turn_boundaries.append_error_to_string error)
+    ~trace_id:session_id ~closed_messages:(List.length messages)
 
 (* The Keeper's artifact reader, as a Keeper is offered it. With a reader the
    ladder can demote tool results to markers the model reads back. *)

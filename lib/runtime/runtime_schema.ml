@@ -609,11 +609,10 @@ type memory_recall =
     turns the lane off; it cannot turn it on without a key in one of the named
     variables. [destinations] are the System One servers asked in order until
     one answers ({!Typesafeai_client.evaluate}); TypeSafe's own server and
-    OpenRouter's [/api/v1/systemone] both speak the protocol. Two gates ask
-    the vendor: [board_attention] (the Board attention judgment,
+    OpenRouter's [/api/v1/systemone] both speak the protocol. The
+    [board_attention] gate asks the vendor (the Board attention judgment,
     {!Keeper_board_attention_exact_flow}, which sends the post and the
-    keeper's context) and [absorb_gate] (the librarian absorb gate,
-    {!Keeper_librarian_absorb_gate}, which sends memory sentences). Context
+    keeper's context). Context
     preservation, Skill applicability, host shared-memory selection and
     memory recall each require independent opt-in. Memory recall also needs
     its scope. All reach the
@@ -628,7 +627,6 @@ type typesafeai =
           answer settles a Board attention candidate when its confidence is at
           least this value (0 to 1); below it the [board_attention_exact] lane
           judges the candidate. *)
-  ; absorb_gate : bool
   ; context_review : bool
   ; skill_applicability : bool
   ; workspace_memory_selection_enabled : bool
@@ -651,8 +649,7 @@ let typesafe_destination =
 ;;
 
 (* What an absent [typesafeai] table means: the lane on when a key is set,
-   the vendor's own server alone, Board attention on, the absorb gate off (it
-   sends memories out, so the operator turns it on by name), memory recall off,
+   the vendor's own server alone, Board attention on, memory recall off,
    nobody excluded.
 
    The Board attention confidence floor follows TypeSafe's confidence-gated
@@ -668,7 +665,6 @@ let default_typesafeai =
   ; destinations = typesafe_destination, []
   ; board_attention = true
   ; board_attention_confidence_floor = 0.3
-  ; absorb_gate = false
   ; context_review = false
   ; skill_applicability = false
   ; workspace_memory_selection_enabled = false

@@ -18,7 +18,7 @@ let with_gate_http_fixture f =
   Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") @@ fun () ->
   Masc_test_deps.with_typesafeai_policy
-    { Runtime_schema.default_typesafeai with absorb_gate = true } @@ fun () ->
+    Runtime_schema.default_typesafeai @@ fun () ->
   f ~sw ~net ~clock
 ;;
 

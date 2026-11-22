@@ -1285,25 +1285,6 @@ streaming = true
                       ] )
                 ];
               Alcotest.(check bool)
-                "Librarian submit_durable returns Dropped in Multi_account"
-                true
-                (Masc.Keeper_librarian_queue_refresh.submit_durable
-                   ~base_path
-                   ~keeper_name:alice.engine_name
-                 = Masc.Keeper_memory_lane.Dropped);
-              Alcotest.(check (list string))
-                "Librarian submit_durable_for_unlaunched returns empty in Multi_account"
-                []
-                (Masc.Keeper_librarian_queue_refresh.submit_durable_for_unlaunched
-                   ~base_path
-                   ~persisted:[ alice.engine_name ]
-                   ~launched:[]);
-              Alcotest.(check bool)
-                "Keeper_memory_cleanup.run returns Disabled in Multi_account"
-                true
-                (Masc.Keeper_memory_cleanup.run ~base_path ~keeper_name:alice.engine_name
-                 = Masc.Keeper_memory_cleanup.Disabled);
-              Alcotest.(check bool)
                 "autoboot_exclusion_reason excludes unregistered keeper in Multi_account"
                 true
                 (Masc.Keeper_runtime.autoboot_exclusion_reason cfg "unregistered-keeper"

@@ -407,7 +407,6 @@ let policy
       ?(board_attention = true)
       ?(board_attention_confidence_floor =
         Runtime_schema.default_typesafeai.Runtime_schema.board_attention_confidence_floor)
-      ?(absorb_gate = false)
       ?(context_review = false)
       ?(skill_applicability = false)
       ?(workspace_memory_selection_enabled = false)
@@ -420,7 +419,6 @@ let policy
   ; destinations
   ; board_attention
   ; board_attention_confidence_floor
-  ; absorb_gate
   ; context_review
   ; skill_applicability
   ; workspace_memory_selection_enabled
@@ -539,26 +537,26 @@ let test_config_readiness_is_typed_and_credential_free () =
 (* Each gate has its own switch on top of the lane's: a key turns the lane
    on, and a gate can still be turned off by name without touching the other. *)
 let test_each_gate_has_its_own_switch () =
-  let gates () = C.is_board_attention_enabled (), C.is_absorb_gate_enabled () in
+  let gates () = C.is_board_attention_enabled (), Result.is_ok (C.context_review_destinations ~keeper_id:"polisher") in
   with_key (Some "synthetic-jev-key") (fun () ->
     with_policy (policy ()) (fun () ->
       Alcotest.(check (pair bool bool))
-        "a key with the default table turns the board gate on and leaves the absorb gate off"
+        "a key with the default table turns the board gate on and leaves context review off"
         (true, false) (gates ()));
-    with_policy (policy ~board_attention:false ~absorb_gate:true ()) (fun () ->
+    with_policy (policy ~board_attention:false ~context_review:true ()) (fun () ->
       (match C.readiness () with
        | C.Off -> ()
        | C.Configured _ -> Alcotest.fail "a disabled Board gate reported JEV configured");
       Alcotest.(check (pair bool bool)) "each switch reaches only its own gate"
         (false, true) (gates ()));
-    with_policy (policy ~absorb_gate:true ()) (fun () ->
-      Alcotest.(check (pair bool bool)) "the absorb gate turned on leaves the board gate on"
+    with_policy (policy ~context_review:true ()) (fun () ->
+      Alcotest.(check (pair bool bool)) "context review turned on leaves the board gate on"
         (true, true) (gates ()));
-    with_policy (policy ~enabled:false ~absorb_gate:true ()) (fun () ->
+    with_policy (policy ~enabled:false ~context_review:true ()) (fun () ->
       Alcotest.(check (pair bool bool)) "the lane off turns both gates off"
         (false, false) (gates ())));
   with_key None (fun () ->
-    with_policy (policy ~absorb_gate:true ()) (fun () ->
+    with_policy (policy ~context_review:true ()) (fun () ->
       Alcotest.(check (pair bool bool)) "without a key neither gate is on"
         (false, false) (gates ())))
 ;;
@@ -575,36 +573,36 @@ let test_an_excluded_keeper_keeps_its_content_home () =
   in
   let excluded = "kidsnote-slack-context-collector" in
   with_key (Some "synthetic-jev-key") (fun () ->
-    with_policy (policy ~absorb_gate:true ~excluded_keepers:[ excluded ] ()) (fun () ->
-      Alcotest.(check string) "the absorb gate excludes the named keeper" "keeper_excluded"
-        (state (C.absorb_gate_destinations ~keeper_id:excluded));
+    with_policy (policy ~context_review:true ~excluded_keepers:[ excluded ] ()) (fun () ->
+      Alcotest.(check string) "context review excludes the named keeper" "keeper_excluded"
+        (state (C.context_review_destinations ~keeper_id:excluded));
       Alcotest.(check string) "the Board gate excludes the same keeper" "keeper_excluded"
         (state (C.board_attention_destinations ~keeper_id:excluded));
-      Alcotest.(check string) "another keeper gets the key at the absorb gate" "on:synthetic-jev-key"
-        (state (C.absorb_gate_destinations ~keeper_id:"polisher"));
+      Alcotest.(check string) "another keeper gets the key at context review" "on:synthetic-jev-key"
+        (state (C.context_review_destinations ~keeper_id:"polisher"));
       Alcotest.(check string) "and at the Board gate" "on:synthetic-jev-key"
         (state (C.board_attention_destinations ~keeper_id:"polisher"));
       Alcotest.(check bool) "the exclusion is one question" true (C.is_excluded ~keeper_id:excluded));
     with_policy (policy ~excluded_keepers:[ "polisher" ] ()) (fun () ->
-      Alcotest.(check string) "an exclusion does not turn a gate on" "absorb_gate_disabled"
-        (state (C.absorb_gate_destinations ~keeper_id:"polisher")));
-    with_policy (policy ~enabled:false ~absorb_gate:true ~excluded_keepers:[ "polisher" ] ()) (fun () ->
+      Alcotest.(check string) "an exclusion does not turn a gate on" "context_review_disabled"
+        (state (C.context_review_destinations ~keeper_id:"polisher")));
+    with_policy (policy ~enabled:false ~context_review:true ~excluded_keepers:[ "polisher" ] ()) (fun () ->
       Alcotest.(check string) "the exclusion is named before the lane switch" "keeper_excluded"
-        (state (C.absorb_gate_destinations ~keeper_id:"polisher")));
-    with_policy (policy ~enabled:false ~absorb_gate:true ()) (fun () ->
+        (state (C.context_review_destinations ~keeper_id:"polisher")));
+    with_policy (policy ~enabled:false ~context_review:true ()) (fun () ->
       Alcotest.(check string) "a gate that is on names the lane switch" "lane_disabled"
-        (state (C.absorb_gate_destinations ~keeper_id:"polisher")));
-    with_policy (policy ~enabled:false ~absorb_gate:false ()) (fun () ->
+        (state (C.context_review_destinations ~keeper_id:"polisher")));
+    with_policy (policy ~enabled:false ~context_review:false ()) (fun () ->
       Alcotest.(check string) "a gate that is off names its own switch, not the lane's"
-        "absorb_gate_disabled"
-        (state (C.absorb_gate_destinations ~keeper_id:"polisher"))));
+        "context_review_disabled"
+        (state (C.context_review_destinations ~keeper_id:"polisher"))));
   with_key None (fun () ->
-    with_policy (policy ~absorb_gate:true ~excluded_keepers:[ "polisher" ] ()) (fun () ->
+    with_policy (policy ~context_review:true ~excluded_keepers:[ "polisher" ] ()) (fun () ->
       Alcotest.(check string) "the exclusion is named before the missing key" "keeper_excluded"
-        (state (C.absorb_gate_destinations ~keeper_id:"polisher")));
-    with_policy (policy ~absorb_gate:true ()) (fun () ->
+        (state (C.context_review_destinations ~keeper_id:"polisher")));
+    with_policy (policy ~context_review:true ()) (fun () ->
       Alcotest.(check string) "a gate that is on names the missing key" "no_armed_destination"
-        (state (C.absorb_gate_destinations ~keeper_id:"polisher"))))
+        (state (C.context_review_destinations ~keeper_id:"polisher"))))
 ;;
 
 let test_context_and_skill_reviews_require_their_own_opt_in () =
@@ -643,7 +641,7 @@ let test_workspace_memory_selection_requires_its_own_opt_in () =
     | Ok _ -> "enabled"
     | Error reason -> C.unavailable_reason_to_string reason in
   with_key (Some "synthetic-jev-key") (fun () ->
-    with_policy (policy ~absorb_gate:true ~context_review:true ~skill_applicability:true ())
+    with_policy (policy ~context_review:true ~skill_applicability:true ())
       (fun () ->
       Alcotest.(check string) "other gates cannot authorize shared-memory selection"
         "workspace_memory_selection_disabled" (state ()));
@@ -668,7 +666,7 @@ let test_memory_recall_requires_its_own_opt_in_and_scope () =
   let all = Runtime_schema.Memory_recall_on Runtime_schema.All_keepers in
   let listed first rest = Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers (first, rest)) in
   with_key (Some "synthetic-jev-key") (fun () ->
-    with_policy (policy ~absorb_gate:true ~context_review:true ~skill_applicability:true
+    with_policy (policy ~context_review:true ~skill_applicability:true
         ~workspace_memory_selection_enabled:true ()) (fun () ->
       Alcotest.(check string) "other gates cannot authorize recall"
         "memory_recall_disabled" (state ()));

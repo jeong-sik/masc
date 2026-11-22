@@ -1,6 +1,5 @@
 open Alcotest
 module Current = Masc.Keeper_memory_os_current
-module Queue = Masc.Keeper_memory_admission_queue
 module Dispatch = Masc.Keeper_tool_runtime
 module Fixture = Exact_output_fixture
 module Json = Yojson.Safe.Util
@@ -13,7 +12,7 @@ let restore ~keepers_dir ~keeper_id bundle =
   let stores = ["current_snapshot",Current.path_for_keepers_dir ~keepers_dir ~keeper_id;
     "consumption_and_lookup_receipt",Current.durable_range_receipt_path ~keepers_dir ~keeper_id;
     "memory_journal",Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id;
-    "pending_queue",Queue.path ~keepers_dir ~keeper_id] in
+    "pending_queue",Filename.concat keepers_dir (keeper_id ^ ".memory-admission.json")] in
   check (list string) "closed four-store bundle" (List.sort String.compare (List.map fst stores))
     (List.sort String.compare (List.map fst (Json.to_assoc bundle)));
   let decoded = List.map (fun (name,path) ->

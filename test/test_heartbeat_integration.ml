@@ -927,8 +927,11 @@ let test_operator_interrupt_skips_turn_accounting () =
         KHL.handle_cycle_exception
           ~registry_entry
           ~meta
+          ~decided_channel:(Some Masc.Keeper_world_observation.Reactive)
           (Eio.Cancel.Cancelled R.Operator_interrupt)
       in
+      check bool "an interrupt after the decision keeps the decision's channel" true
+        (outcome.decided_channel = Some Masc.Keeper_world_observation.Reactive);
       check int
         "operator interrupt does not increment turn failures"
         0

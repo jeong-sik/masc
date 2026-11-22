@@ -197,6 +197,9 @@ type keepalive_turn_outcome = {
   due_schedule : due_schedule_service;
       (** The loop reads it to serve the periodic boundary
           ({!For_testing.periodic_cadence_after_cycle}). *)
+  decided_channel : Keeper_world_observation.keeper_cycle_channel option;
+      (** The channel the cycle decision chose; [None] when the cycle ended
+          before a decision ({!For_testing.adaptive_idle_after_cycle}). *)
 }
 
 (** Record a swallowed keepalive-cycle exception as a turn failure:
@@ -208,10 +211,14 @@ val record_crashed_cycle_failure :
 
 (** Convert an exception escaping one autonomous cycle into its accounting
     outcome. Operator interrupts are expected cancellation and do not mutate
-    the turn-failure counter; every other exception is recorded as a crash. *)
+    the turn-failure counter; every other exception is recorded as a crash.
+    [decided_channel] is the cycle decision's channel when the exception came
+    after it. *)
 val handle_cycle_exception :
   registry_entry:Keeper_registry.registry_entry ->
-  meta:keeper_meta -> exn -> keepalive_turn_outcome
+  meta:keeper_meta ->
+  decided_channel:Keeper_world_observation.keeper_cycle_channel option ->
+  exn -> keepalive_turn_outcome
 
 type turn_terminal_settlement =
   { settled : bool
@@ -467,17 +474,31 @@ module For_testing : sig
       interval after that turn. *)
 
   val adaptive_idle_after_cycle :
-    cycle_status:keepalive_cycle_status ->
     periodic_due:bool ->
-    stimuli_acked:bool ->
+    wake:Keeper_world_observation.cycle_wake ->
+    cycle_status:keepalive_cycle_status ->
+    decided_channel:Keeper_world_observation.keeper_cycle_channel option ->
     due_schedule:due_schedule_service ->
     base_interval_sec:float ->
     now:float ->
     Keeper_keepalive_signal.adaptive_idle_state ->
     Keeper_keepalive_signal.adaptive_idle_state
-  (** Single-SSOT spontaneous cadence transition used by the heartbeat loop:
-      integrates [due_schedule], adaptive idle backoff ([Idle_30m -> Idle_1h ->
-      Idle_2h]), and reactive pull-in without splitting deadline authority. *)
+  (** The one transition of the next self-wake (RFC keeper-reaction-and-queue
+      §4.4). A reaction turn is a turn opened on the reactive channel, whether
+      it finished, failed, crashed or was interrupted. A self-wake at the due
+      boundary backs off unless a reaction turn ran since the previous one; a
+      reaction turn at the boundary serves it and counts as that reaction; a
+      completed due schedule serves it; a reaction turn off the boundary pulls
+      the next self-wake in and never out; a deferred suffix or an undecided
+      cycle holds the stage. *)
+
+  val sleeps_to_the_pulled_boundary :
+    cycle_status:keepalive_cycle_status ->
+    decided_channel:Keeper_world_observation.keeper_cycle_channel option ->
+    bool
+  (** Whether the cycle was a reaction turn that took its batch and did not
+      finish (failed, crashed or interrupted). Such a cycle sleeps to the
+      pulled-in periodic boundary instead of the next tick. *)
 
   (** The loop's deferred hint together with its durable file
       ({!Keeper_deferred_runtime_lane_store}). The production loop builds one

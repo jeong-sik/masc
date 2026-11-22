@@ -2077,6 +2077,55 @@ let test_parent_alias_retarget_cannot_borrow_original_authority () =
       | Cancelled_unconfirmed_launch -> fail "original job did not start")
    | Absent | Created _ | Stopped _ | Unconfirmed _ -> fail "retargeted alias disturbed the original backend")
 
+let test_owned_job_logs_redact_secrets_before_blob_publication () =
+  with_fixture @@ fun _env _initialize fixture ->
+  let secret_stdout = "ghp" ^ "_" ^ "1234567890abcdefghijklmnopqrstuvwxyz" in
+  let secret_stderr = "sk" ^ "-" ^ "proj-abcdefghijklmnopqrstuvwxyz0123456789" in
+  let bundle = fixture.make_bundle () in
+  set_source fixture ~task_id:"task-redact" ~turn:1;
+  let launched =
+    invoke fixture bundle ~tool_use_id:"start-redact" ~turn:1 "keeper_job_start"
+      (`Assoc [ "argv", `List [ `String "fixture-program" ] ])
+  in
+  let id = launched |> member "job_id" |> to_string in
+  control_job fixture id
+    (`Assoc
+      [ "state", `String "exited"
+      ; "exit_code", `Int 0
+      ; ( "custom_logs"
+        , `Assoc
+            [ "stdout", `String ("token=" ^ secret_stdout ^ "\nok\n")
+            ; "stderr", `String ("api=" ^ secret_stderr ^ "\ndone\n")
+            ] )
+      ]);
+  let exited =
+    invoke fixture bundle ~tool_use_id:"status-redact" ~turn:1 "keeper_job_status"
+      (`Assoc [ "job_id", `String id ])
+  in
+  check string "exited phase" "exited" (exited |> member "phase" |> to_string);
+  let store = Tool_blob_store.create ~base_path:fixture.base_path in
+  let fetch_artifact json =
+    match Tool_output.normalized_artifact_ref_of_json json with
+    | Tool_output.Decoded_normalized_artifact_ref reference ->
+      Tool_blob_store.fetch store ~sha256:reference.Tool_output.sha256
+      |> require "fetch redacted log artifact"
+      |> Option.get
+    | _ -> fail "expected normalized artifact reference"
+  in
+  match exited |> member "artifacts" |> to_list with
+  | [ stdout_json; stderr_json ] ->
+    let out_bytes = fetch_artifact stdout_json in
+    let err_bytes = fetch_artifact stderr_json in
+    check bool "stdout blob does not retain raw secret" false
+      (String_util.contains_substring out_bytes secret_stdout);
+    check bool "stderr blob does not retain raw secret" false
+      (String_util.contains_substring err_bytes secret_stderr);
+    check bool "stdout blob contains [REDACTED]" true
+      (String_util.contains_substring out_bytes "[REDACTED]");
+    check bool "stderr blob contains [REDACTED]" true
+      (String_util.contains_substring err_bytes "[REDACTED]")
+  | _ -> fail "expected 2 output log artifacts"
+
 let () = match Array.to_list Sys.argv with
   | [_;"--lose-native-parent-after-child-acceptance";base_path;draft_sha;run_id] ->
     lose_native_parent_after_child_acceptance base_path draft_sha run_id
@@ -2084,7 +2133,9 @@ let () = match Array.to_list Sys.argv with
   Printf.printf "owned_job_feature_transport=synthetic_docker_cli actual_public_handler=true actual_docker_execution=false\n%!";
   run "Keeper owned jobs"
     ["public lifecycle",
-      [ test_case "structured launch, original source, restart and artifact ownership" `Quick test_running_restart_exit_and_artifacts
+      [ test_case "owned job logs redact secrets before tool_blobs publication" `Quick
+          test_owned_job_logs_redact_secrets_before_blob_publication
+      ; test_case "structured launch, original source, restart and artifact ownership" `Quick test_running_restart_exit_and_artifacts
       ; test_case "parent-directory alias retains original invocation, input and complete outputs" `Quick
           test_parent_alias_keeps_original_job_and_outputs
       ; test_case "retargeted parent alias and copied owner cannot borrow original authority" `Quick

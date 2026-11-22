@@ -24,11 +24,15 @@ include Keeper_tool_filesystem_runtime_capability_failure
 include Keeper_tool_filesystem_runtime_created_directory_report
 include Keeper_tool_filesystem_runtime_publication
 
-let store_edit_snapshots ~config ~before ~after =
+let store_edit_snapshots ~config ~keeper_name ~before ~after =
   let store = Tool_blob_store.create ~base_path:config.Workspace.base_path in
+  let redaction =
+    Keeper_secret_redaction.snapshot ~base_path:config.Workspace.base_path ~keeper_name
+  in
   let persist bytes =
     Option.iter (fun hook -> hook ()) (Eio.Fiber.get before_edit_snapshot_key);
-    Tool_blob_store.put_durable store ~bytes ~mime:"application/octet-stream"
+    let redacted = Keeper_secret_redaction.redact_text redaction bytes in
+    Tool_blob_store.put_durable store ~bytes:redacted ~mime:"application/octet-stream"
     |> fun reference -> Tool_output.with_preview reference ""
     |> Tool_output.normalized_artifact_ref_to_json
   in
@@ -698,7 +702,7 @@ let handle_file_write_content_with_outcome
                                   ; "path", `String target
                                   ; "mode", `String "patch"
                                   ; "changed", `Bool true
-                                  ; "edit_snapshots", store_edit_snapshots ~config ~before ~after:updated
+                                  ; "edit_snapshots", store_edit_snapshots ~config ~keeper_name:meta.name ~before ~after:updated
                                   ]
                                   @ operation_fields
                                   @ [ "occurrences", `Int occurrence_count

@@ -254,7 +254,11 @@ elif args[:2] == ["container", "logs"]:
     if fault.get("mode") == "logs_unknown":
         print("synthetic output transport refused", file=sys.stderr)
         sys.exit(19)
-    if fault.get("large_logs"):
+    if fault.get("custom_logs"):
+        custom = fault["custom_logs"]
+        sys.stdout.write(custom.get("stdout", ""))
+        sys.stderr.write(custom.get("stderr", ""))
+    elif fault.get("large_logs"):
         sizes = fault["large_logs"]
         head, tail = sizes["head"], sizes["tail"]
         assert head > 0 and tail > 0

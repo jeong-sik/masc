@@ -135,12 +135,24 @@ val read_frontmatter_cached :
     size identical are indistinguishable by the stat key). Returns [None] when
     the file is absent or unreadable. *)
 
+val max_page_bytes : int
+(** Hard upper byte cap (512 KiB) for a single wiki Markdown page read via
+    wiki tools, MCP resources, or World Memory indexing. *)
+
+val load_regular_page : string -> (string, string) result
+(** Read a wiki page without following symbolic links ([lstat] [S_REG] +
+    [O_NOFOLLOW] + [fstat] [S_REG]) and enforce {!max_page_bytes}. Returns
+    [Error reason] on symlinks, non-regular files, oversized files, or I/O
+    failures. *)
+
 val list_pages : base_path:string -> string list
-(** Every [.md] file directly under {!wiki_root}, as full paths in name
-    order; [[]] when the directory does not exist. The wiki's own index/log
-    files are omitted. An existing path that cannot be listed, including a
-    regular file at the root or a failed filesystem lookup, raises [Sys_error]
-    rather than claiming emptiness. Only an actual missing root is empty. *)
+(** Every regular [.md] file directly under {!wiki_root} (verified via
+    [Unix.lstat] [S_REG] and at most {!max_page_bytes}; symbolic links and
+    directories are excluded), as full paths in name order; [[]] when the
+    directory does not exist. The wiki's own index/log files are omitted. An
+    existing path that cannot be listed, including a regular file or symlink at
+    the root or a failed filesystem lookup, raises [Sys_error] rather than
+    claiming emptiness. Only an actual missing root is empty. *)
 
 val read_index_entries :
   base_path:string -> (Wiki_journal.entry list, string) result

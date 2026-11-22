@@ -149,8 +149,127 @@ type world_fact =
   ; updated_seq : int
   }
 
+let max_scope_bytes = 128
+let max_claim_bytes = 2_048
+let max_facet_bytes = 64
+let max_facets_per_fact = 16
+let max_promotion_batch_size = 32
+let max_change_log_summary_bytes = 256
+
+let has_any_control_char s =
+  let len = String.length s in
+  let rec loop i =
+    if i >= len
+    then false
+    else (
+      let code = Char.code (String.unsafe_get s i) in
+      if code < 0x20 || code = 0x7f then true else loop (i + 1))
+  in
+  loop 0
+;;
+
+let has_disallowed_claim_control_char s =
+  let len = String.length s in
+  let rec loop i =
+    if i >= len
+    then false
+    else (
+      let c = String.unsafe_get s i in
+      let code = Char.code c in
+      if (code < 0x20 && c <> '\t' && c <> '\n' && c <> '\r') || code = 0x7f
+      then true
+      else loop (i + 1))
+  in
+  loop 0
+;;
+
+let validate_scope raw =
+  if has_any_control_char raw
+  then Error "world memory scope must not contain control characters or newlines"
+  else (
+    let trimmed = String.trim raw in
+    if String.equal trimmed ""
+    then Error "world memory scope must not be empty"
+    else if String.length trimmed > max_scope_bytes
+    then
+      Error
+        (Printf.sprintf "world memory scope exceeds %d-byte limit (%d bytes)"
+           max_scope_bytes (String.length trimmed))
+    else Ok trimmed)
+;;
+
+let private_scope_owner scope =
+  let trimmed = String.trim scope in
+  let lower = String.lowercase_ascii trimmed in
+  let extract prefix =
+    let plen = String.length prefix in
+    if String.starts_with ~prefix lower
+    then Some (String.trim (String.sub trimmed plen (String.length trimmed - plen)))
+    else None
+  in
+  match extract "keeper:" with
+  | Some _ as owner -> owner
+  | None -> extract "private:"
+;;
+
+let is_private_scope scope = Option.is_some (private_scope_owner scope)
+
+let is_world_fact_id id =
+  String.starts_with ~prefix:"wf-" id || String.starts_with ~prefix:"wf_syn_" id
+;;
+
+let validate_facet raw =
+  if has_any_control_char raw
+  then Error "world memory facet must not contain control characters or newlines"
+  else (
+    let trimmed = String.trim raw in
+    if String.equal trimmed ""
+    then Error "world memory facet must not be empty"
+    else if String.length trimmed > max_facet_bytes
+    then
+      Error
+        (Printf.sprintf "world memory facet exceeds %d-byte limit (%d bytes)"
+           max_facet_bytes (String.length trimmed))
+    else Ok trimmed)
+;;
+
+let validate_facets facets =
+  let rec loop acc = function
+    | [] ->
+      let unique = List.sort_uniq String.compare acc in
+      if List.length unique > max_facets_per_fact
+      then
+        Error
+          (Printf.sprintf "world memory fact exceeds %d-facet limit (%d facets)"
+             max_facets_per_fact (List.length unique))
+      else Ok unique
+    | raw :: rest ->
+      (match validate_facet raw with
+       | Error _ as err -> err
+       | Ok facet -> loop (facet :: acc) rest)
+  in
+  loop [] facets
+;;
+
+let validate_claim raw =
+  if has_disallowed_claim_control_char raw
+  then Error "world memory claim must not contain NUL or control characters"
+  else (
+    let trimmed = String.trim raw in
+    if String.equal trimmed ""
+    then Error "world memory claim must not be empty"
+    else if String.length trimmed > max_claim_bytes
+    then
+      Error
+        (Printf.sprintf "world memory claim exceeds %d-byte limit (%d bytes)"
+           max_claim_bytes (String.length trimmed))
+    else Ok trimmed)
+;;
+
 let fact_id_of_claim ~scope ~claim =
-  let payload = String.trim scope ^ "\n" ^ String.trim claim in
+  let payload =
+    Yojson.Safe.to_string (`List [ `String (String.trim scope); `String (String.trim claim) ])
+  in
   let hex = Agent_core_sha256.(digest_string payload |> to_hex) in
   "wf-" ^ String.sub hex 0 24
 ;;

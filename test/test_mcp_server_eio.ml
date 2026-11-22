@@ -4265,7 +4265,9 @@ let test_handle_request_keeper_memory_access_and_readership () =
         (error_code_exn (read_direct 1 "masc://keepers/alpha/memory"));
       Alcotest.(check int) "default caller refused on keeper/memory/health" (-32001)
         (error_code_exn (read_direct 2 "masc://keepers/alpha/memory/health"));
-      (* 2. Auth-off Unadmitted request resolves to Operator_admin and reads all 5 facts. *)
+      (* 2. Auth-off Unadmitted request resolves to Operator_admin, which reads
+            board deliveries as the target keeper (N2-B1 / #54377) rather than
+            bypassing Direct post visibility, withholding beta's 2 Direct-derived facts. *)
       let read_via_protocol ~sender ?auth_token uri =
         let req =
           Yojson.Safe.to_string
@@ -4283,9 +4285,9 @@ let test_handle_request_keeper_memory_access_and_readership () =
           (resource_text_exn
              (read_via_protocol ~sender:Mcp_eio.Unadmitted "masc://keepers/alpha/memory"))
       in
-      Alcotest.(check int) "auth-off sees 0 withheld facts" 0
+      Alcotest.(check int) "auth-off withholds beta direct + derived facts (2)" 2
         Yojson.Safe.Util.(auth_off_json |> member "withheld_fact_count" |> to_int);
-      Alcotest.(check int) "auth-off sees all 5 facts" 5
+      Alcotest.(check int) "auth-off sees 3 readable facts" 3
         Yojson.Safe.Util.
           (auth_off_json |> member "ordinary" |> member "facts" |> to_list |> List.length);
       (* 3. Enable auth and test Admin, other Worker, and matching Keeper. *)
@@ -4312,9 +4314,9 @@ let test_handle_request_keeper_memory_access_and_readership () =
              (read_via_protocol ~sender:(admit admin_tok) ~auth_token:admin_tok
                 "masc://keepers/alpha/memory"))
       in
-      Alcotest.(check int) "admin sees 0 withheld" 0
+      Alcotest.(check int) "admin withholds beta direct + derived facts (2)" 2
         Yojson.Safe.Util.(admin_json |> member "withheld_fact_count" |> to_int);
-      Alcotest.(check int) "admin sees all 5 facts" 5
+      Alcotest.(check int) "admin sees 3 readable facts" 3
         Yojson.Safe.Util.(admin_json |> member "ordinary" |> member "facts" |> to_list |> List.length);
       let beta_resp =
         read_via_protocol ~sender:(admit beta_tok) ~auth_token:beta_tok
@@ -4569,7 +4571,258 @@ let response_tests = [
   "make_error", `Quick, test_make_error;
 ]
 
+let test_world_memory_mcp_auth_active_only_and_limit_clamps () =
+  let module Resource = Masc.Mcp_server_eio_resource in
+  let module WM_types = Masc.World_memory_types in
+  let module WM_store = Masc.World_memory_store in
+  let module WM_curator = Masc.World_memory_curator in
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
+  let config = Masc.Mcp_server.workspace_config state in
+  ignore (Masc.Workspace.init config ~agent_name:(Some "op-admin"));
+
+  (* Populate World Memory with:
+     - a shared workspace fact from keeper-alpha (carrying local source_fact_ids)
+     - a private-scoped keeper:alpha fact
+     - a superseded terminal fact *)
+  let shared_claim = "Shared workspace build invariant" in
+  let shared_id = WM_types.fact_id_of_claim ~scope:"workspace" ~claim:shared_claim in
+  ignore
+    (WM_store.upsert_fact ~base_path ~now:10.0 ~actor:"librarian:keeper-alpha"
+       ~fact_id:shared_id ~claim:shared_claim ~category:Masc.Keeper_memory_os_types.Fact
+       ~facets:[ "build" ] ~scope:"workspace"
+       ~provenance:(Proposed_by { keeper_id = "keeper-alpha"; source_fact_ids = [ "sha256:alpha-local-1" ] })
+       ~lifecycle:Canonical
+     |> Result.get_ok);
+  let private_claim = "Alpha private working note" in
+  let private_id = WM_types.fact_id_of_claim ~scope:"keeper:keeper-alpha" ~claim:private_claim in
+  ignore
+    (WM_store.upsert_fact ~base_path ~now:11.0 ~actor:"librarian:keeper-alpha"
+       ~fact_id:private_id ~claim:private_claim ~category:Masc.Keeper_memory_os_types.Fact
+       ~facets:[ "private" ] ~scope:"keeper:keeper-alpha"
+       ~provenance:(Proposed_by { keeper_id = "keeper-alpha"; source_fact_ids = [ "sha256:alpha-priv-1" ] })
+       ~lifecycle:Working
+     |> Result.get_ok);
+  let mixed_case_private_claim = "Alpha mixed-case private note" in
+  let mixed_case_private_id =
+    WM_types.fact_id_of_claim ~scope:"Keeper:keeper-alpha" ~claim:mixed_case_private_claim
+  in
+  ignore
+    (WM_store.upsert_fact ~base_path ~now:11.2 ~actor:"librarian:keeper-alpha"
+       ~fact_id:mixed_case_private_id ~claim:mixed_case_private_claim
+       ~category:Masc.Keeper_memory_os_types.Fact
+       ~facets:[ "private" ] ~scope:"Keeper:keeper-alpha"
+       ~provenance:(Proposed_by { keeper_id = "keeper-alpha"; source_fact_ids = [ "sha256:alpha-priv-2" ] })
+       ~lifecycle:Working
+     |> Result.get_ok);
+  let upper_private_claim = "Alpha UPPER private note" in
+  let upper_private_id =
+    WM_types.fact_id_of_claim ~scope:"PRIVATE:keeper-alpha" ~claim:upper_private_claim
+  in
+  ignore
+    (WM_store.upsert_fact ~base_path ~now:11.4 ~actor:"librarian:keeper-alpha"
+       ~fact_id:upper_private_id ~claim:upper_private_claim
+       ~category:Masc.Keeper_memory_os_types.Fact
+       ~facets:[ "private" ] ~scope:"PRIVATE:keeper-alpha"
+       ~provenance:(Proposed_by { keeper_id = "keeper-alpha"; source_fact_ids = [] })
+       ~lifecycle:Working
+     |> Result.get_ok);
+  (* Link shared_id -> private_id to verify non-admin fact reads withhold edges
+     pointing to invisible sibling private facts. *)
+  ignore
+    (WM_store.add_edge ~base_path ~now:11.6 ~actor:"world_curator"
+       ~from_fact_id:shared_id ~to_fact_id:private_id
+       ~kind:Refines ~reason:"private-peer-edge-reason"
+     |> Result.get_ok);
+  let obsolete_claim = "Obsolete claim to supersede" in
+  let obsolete_id = WM_types.fact_id_of_claim ~scope:"workspace" ~claim:obsolete_claim in
+  ignore
+    (WM_store.upsert_fact ~base_path ~now:12.0 ~actor:"librarian:keeper-alpha"
+       ~fact_id:obsolete_id ~claim:obsolete_claim ~category:Masc.Keeper_memory_os_types.Fact
+       ~facets:[ "old" ] ~scope:"workspace"
+       ~provenance:(Proposed_by { keeper_id = "keeper-alpha"; source_fact_ids = [] })
+       ~lifecycle:Working
+     |> Result.get_ok);
+  ignore
+    (WM_curator.supersede_fact_sync ~base_path ~now:13.0 ~actor:"world_curator"
+       ~old_fact_id:obsolete_id ~new_fact_id:shared_id ~reason:"superseded"
+     |> Result.get_ok);
+
+  let read_direct ?caller id_num uri =
+    Resource.handle_read_resource_eio ?caller state (`Int id_num)
+      (Some (`Assoc [ ("uri", `String uri) ]))
+  in
+  let error_code_of resp =
+    Yojson.Safe.Util.(resp |> member "error" |> member "code" |> to_int)
+  in
+  let text_of resp =
+    Yojson.Safe.Util.(
+      resp |> member "result" |> member "contents" |> to_list |> List.hd |> member "text" |> to_string)
+  in
+
+  (* 1. Anonymous_reader (and omitted ?caller) fail closed with -32001 on ALL World_memory_* URIs. *)
+  List.iteri
+    (fun i uri ->
+       Alcotest.(check int) ("omitted caller refused on " ^ uri) (-32001)
+         (error_code_of (read_direct (100 + i) uri));
+       Alcotest.(check int) ("explicit Anonymous_reader refused on " ^ uri) (-32001)
+         (error_code_of (read_direct ~caller:Resource.Anonymous_reader (200 + i) uri)))
+    [ "masc://world-memory/claims"
+    ; "masc://world-memory/digest"
+    ; "masc://world-memory/index"
+    ; "masc://world-memory/facts/" ^ shared_id
+    ; "masc://world-memory/log"
+    ];
+
+  (* 2. Non-admin Authenticated_reader ("keeper-beta"):
+        - blocked (-32007) on world-memory/log and keeper:keeper-alpha fact
+        - sees shared claims with cross-Keeper source_fact_ids scrubbed to [] *)
+  let beta_caller =
+    Resource.Authenticated_reader
+      { agent_name = "keeper-beta"
+      ; board_reader = Masc_board_handlers.Board_access.named "keeper-beta"
+      }
+  in
+  Alcotest.(check int) "non-admin blocked on world-memory/log (-32007)" (-32007)
+    (error_code_of (read_direct ~caller:beta_caller 301 "masc://world-memory/log"));
+  Alcotest.(check int) "non-admin blocked on sibling private fact scope (-32007)" (-32007)
+    (error_code_of (read_direct ~caller:beta_caller 302 ("masc://world-memory/facts/" ^ private_id)));
+  Alcotest.(check int) "non-admin blocked on mixed-case Keeper: scope (-32007)" (-32007)
+    (error_code_of
+       (read_direct ~caller:beta_caller 306 ("masc://world-memory/facts/" ^ mixed_case_private_id)));
+  Alcotest.(check int) "non-admin blocked on uppercase PRIVATE: scope (-32007)" (-32007)
+    (error_code_of
+       (read_direct ~caller:beta_caller 307 ("masc://world-memory/facts/" ^ upper_private_id)));
+  let alpha_caller =
+    Resource.Authenticated_reader
+      { agent_name = "keeper-alpha"
+      ; board_reader = Masc_board_handlers.Board_access.named "keeper-alpha"
+      }
+  in
+  let alpha_mixed =
+    Yojson.Safe.from_string
+      (text_of
+         (read_direct ~caller:alpha_caller 308 ("masc://world-memory/facts/" ^ mixed_case_private_id)))
+  in
+  Alcotest.(check string) "owning keeper reads own mixed-case Keeper: fact" mixed_case_private_id
+    Yojson.Safe.Util.(alpha_mixed |> member "fact" |> member "fact_id" |> to_string);
+  let beta_claims =
+    Yojson.Safe.from_string (text_of (read_direct ~caller:beta_caller 303 "masc://world-memory/claims"))
+  in
+  let beta_claim_list = Yojson.Safe.Util.(beta_claims |> member "claims" |> to_list) in
+  List.iter
+    (fun (label, hidden_id) ->
+       Alcotest.(check bool) (label ^ " excluded from beta claims") false
+         (List.exists
+            (fun f -> String.equal Yojson.Safe.Util.(f |> member "fact_id" |> to_string) hidden_id)
+            beta_claim_list))
+    [ "private keeper:keeper-alpha fact", private_id
+    ; "mixed-case Keeper:keeper-alpha fact", mixed_case_private_id
+    ; "uppercase PRIVATE:keeper-alpha fact", upper_private_id
+    ];
+  let beta_briefing_text =
+    Yojson.Safe.Util.(beta_claims |> member "briefing" |> member "text" |> to_string)
+  in
+  Alcotest.(check bool) "private keeper:keeper-alpha claim absent from claims briefing" false
+    (String_util.contains_substring beta_briefing_text private_claim);
+  let beta_digest =
+    Yojson.Safe.from_string (text_of (read_direct ~caller:beta_caller 305 "masc://world-memory/digest"))
+  in
+  let beta_digest_rendered =
+    Yojson.Safe.Util.(beta_digest |> member "digest" |> member "rendered" |> to_string)
+  in
+  Alcotest.(check bool) "private keeper:keeper-alpha claim absent from world-memory/digest" false
+    (String_util.contains_substring beta_digest_rendered private_claim);
+  let beta_shared_fact =
+    Yojson.Safe.from_string
+      (text_of (read_direct ~caller:beta_caller 304 ("masc://world-memory/facts/" ^ shared_id)))
+  in
+  let beta_source_ids =
+    Yojson.Safe.Util.(
+      beta_shared_fact |> member "fact" |> member "provenance" |> member "source_fact_ids" |> to_list)
+  in
+  Alcotest.(check int) "cross-Keeper source_fact_ids scrubbed for non-admin reader" 0
+    (List.length beta_source_ids);
+  let beta_shared_edges = Yojson.Safe.Util.(beta_shared_fact |> member "edges" |> to_list) in
+  Alcotest.(check bool) "non-admin fact read withholds edge pointing to sibling private fact" false
+    (List.exists
+       (fun e -> String.equal Yojson.Safe.Util.(e |> member "to_fact_id" |> to_string) private_id)
+       beta_shared_edges);
+  Alcotest.(check bool) "non-admin fact read retains workspace-scoped edge" true
+    (List.exists
+       (fun e -> String.equal Yojson.Safe.Util.(e |> member "to_fact_id" |> to_string) obsolete_id)
+       beta_shared_edges);
+
+  (* 3. Operator_admin sees world-memory/log and full provenance, while Superseded facts
+        remain filtered out by default (-32602). *)
+  let admin_log =
+    Yojson.Safe.from_string
+      (text_of (read_direct ~caller:Resource.Operator_admin 401 "masc://world-memory/log"))
+  in
+  Alcotest.(check bool) "admin reads world-memory/log" true
+    (Yojson.Safe.Util.(admin_log |> member "last_committed_seq" |> to_int) >= 1);
+  let admin_shared =
+    Yojson.Safe.from_string
+      (text_of (read_direct ~caller:Resource.Operator_admin 402 ("masc://world-memory/facts/" ^ shared_id)))
+  in
+  Alcotest.(check int) "admin retains full source_fact_ids" 1
+    (List.length
+       Yojson.Safe.Util.(
+         admin_shared |> member "fact" |> member "provenance" |> member "source_fact_ids" |> to_list));
+  Alcotest.(check int) "Superseded fact filtered out by default (-32602)" (-32602)
+    (error_code_of
+       (read_direct ~caller:Resource.Operator_admin 403 ("masc://world-memory/facts/" ^ obsolete_id)));
+
+  (* 4. ?limit=1000000000 clamped to <= 500 on Messages_* and Events_*, and corrupt/unreadable
+        message files are skipped without raising (honoring .mli Never raises). *)
+  let msgs_dir = Masc.Workspace.messages_dir config in
+  Fs_compat.mkdir_p msgs_dir;
+  for i = 1 to 505 do
+    let msg : Masc_domain.message =
+      { request_id = Printf.sprintf "req-%d" i
+      ; seq = i
+      ; from_agent = "alpha"
+      ; msg_type = "broadcast"
+      ; content = Printf.sprintf "msg-%d" i
+      ; mention = None
+      ; mention_delivery = Masc_domain.Mention_passive
+      ; timestamp = "2026-11-22T00:00:00Z"
+      ; expires_at = None
+      ; trace_context = None
+      }
+    in
+    Fs_compat.save_file
+      (Filename.concat msgs_dir (Printf.sprintf "%06d_msg.json" i))
+      (Yojson.Safe.to_string (Masc_domain.message_to_yojson msg))
+  done;
+  (* Inject a corrupt JSON file and a subdirectory into messages_dir to verify Never raises. *)
+  Fs_compat.save_file (Filename.concat msgs_dir "999999_corrupt.json") "{broken-json";
+  Unix.mkdir (Filename.concat msgs_dir "999998_dir.json") 0o755;
+  let msgs_resp =
+    read_direct ~caller:Resource.Operator_admin 501 "masc://messages.json?limit=1000000000"
+  in
+  let msgs_json = Yojson.Safe.from_string (text_of msgs_resp) |> Yojson.Safe.Util.to_list in
+  Alcotest.(check int) "messages.json clamps ?limit=1000000000 to 500 and survives corrupt files"
+    500 (List.length msgs_json);
+  let events_dir = Filename.concat (Filename.concat base_path ".masc") "events" in
+  Fs_compat.mkdir_p events_dir;
+  let event_lines =
+    String.concat "\n" (List.init 510 (fun i -> Printf.sprintf {|{"seq":%d}|} i)) ^ "\n"
+  in
+  Fs_compat.save_file (Filename.concat events_dir "events.jsonl") event_lines;
+  let events_resp =
+    read_direct ~caller:Resource.Operator_admin 502 "masc://events.json?limit=1000000000"
+  in
+  let events_json = Yojson.Safe.from_string (text_of events_resp) |> Yojson.Safe.Util.to_list in
+  Alcotest.(check bool) "events.json clamps ?limit=1000000000 to <= 500" true
+    (List.length events_json <= 500)
+
 let eio_tests = [
+  "world memory MCP auth, active-only filtering, and limit clamps", `Quick,
+    test_world_memory_mcp_auth_active_only_and_limit_clamps;
   "handle initialize", `Quick, test_handle_request_initialize;
   "handle initialize counteroffers a legacy version", `Quick,
     test_handle_request_initialize_counteroffers_legacy_version;

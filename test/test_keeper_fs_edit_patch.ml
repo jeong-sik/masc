@@ -1658,11 +1658,62 @@ let test_insert_step_edges () =
                         "the file has 2 lines; line 3 does not exist." message
    | Ok _ -> Alcotest.fail "a line past the end took an insert")
 
+let test_patch_edit_snapshots_redact_secrets () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let path = Filename.concat playground "config.env" in
+  let secret_before = "ghp" ^ "_" ^ "1234567890abcdefghijklmnopqrstuvwxyz" in
+  let secret_after = "ghp" ^ "_" ^ "zyxwvutsrqponmlkjihgfedcba0987654321" in
+  Fs_compat.save_file path ("GITHUB_TOKEN=" ^ secret_before ^ "\nMODE=dev\n");
+  let raw =
+    handle_file_write
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~publication_recovery
+      ~args:
+        (`Assoc
+          [ "path", `String path
+          ; "mode", `String "patch"
+          ; "old_string", `String ("GITHUB_TOKEN=" ^ secret_before)
+          ; "new_string", `String ("GITHUB_TOKEN=" ^ secret_after)
+          ])
+      ()
+  in
+  Alcotest.(check bool) "edit succeeded" true (parse_ok raw);
+  let snapshots = Yojson.Safe.from_string raw |> Json.member "edit_snapshots" in
+  Alcotest.(check string) "snapshots stored" "stored"
+    (Json.member "status" snapshots |> Json.to_string);
+  let store = Tool_blob_store.create ~base_path:config.Workspace.base_path in
+  let read_snap key =
+    match Tool_output.normalized_artifact_ref_of_json (Json.member key snapshots) with
+    | Tool_output.Decoded_normalized_artifact_ref reference ->
+      (match Tool_blob_store.fetch store ~sha256:reference.sha256 with
+       | Ok (Some bytes) -> bytes
+       | _ -> Alcotest.fail ("failed to fetch snapshot " ^ key))
+    | _ -> Alcotest.fail ("missing ref for " ^ key)
+  in
+  let before_blob = read_snap "before" in
+  let after_blob = read_snap "after" in
+  Alcotest.(check bool) "before snapshot redacts secret" false
+    (String_util.contains_substring before_blob secret_before);
+  Alcotest.(check bool) "after snapshot redacts secret" false
+    (String_util.contains_substring after_blob secret_after);
+  Alcotest.(check bool) "before snapshot keeps REDACTED marker" true
+    (String_util.contains_substring before_blob "[REDACTED]");
+  Alcotest.(check bool) "after snapshot keeps REDACTED marker" true
+    (String_util.contains_substring after_blob "[REDACTED]");
+  Alcotest.(check string) "target file updated cleanly"
+    ("GITHUB_TOKEN=" ^ secret_after ^ "\nMODE=dev\n")
+    (Fs_compat.load_file path)
+;;
+
 let () =
   Alcotest.run "Keeper_fs_edit_patch"
     [
       ( "patch-mode",
         [
+          Alcotest.test_case "patch edit snapshots redact secrets before tool_blobs persistence" `Quick
+            test_patch_edit_snapshots_redact_secrets;
           Alcotest.test_case "patch rejection recovers with corrected arguments" `Quick test_patch_rejection_recovers_with_corrected_arguments;
           Alcotest.test_case "identical edit is an observed no change" `Quick test_identical_edit_preserves_file_and_records_no_change;
           Alcotest.test_case "unique match replaces" `Quick

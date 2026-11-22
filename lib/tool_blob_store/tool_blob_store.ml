@@ -612,14 +612,38 @@ let put_addressed addressed =
        addressed)
 ;;
 
+external open_readonly_nofollow_nonblock : string -> Unix.file_descr
+  = "caml_masc_tool_blob_open_readonly_nofollow_nonblock"
+
+let run_cpu_off_main ~label f =
+  match Domain_pool_ref.get () with
+  | Some _ -> Domain_pool_ref.submit_cpu_or_inline ~name:label f
+  | None -> Eio_guard.run_in_systhread ~label f
+;;
+
+let large_inline_hash_threshold_bytes = 65_536
+
 (* [address_with ~operation:"put"] rather than [address], so a caller that
    passes an empty mime still reads [put] in the failure. It now raises before
    writing instead of after: a call that cannot return a reference no longer
    leaves the bytes at their address. *)
-let put t ~bytes ~mime = put_addressed (address_with ~operation:"put" t ~bytes ~mime)
+let put t ~bytes ~mime =
+  let addressed =
+    if String.length bytes >= large_inline_hash_threshold_bytes
+       && Option.is_some (Domain_pool_ref.get ())
+    then
+      Domain_pool_ref.submit_cpu_or_inline ~name:"tool-blob-address-put" (fun () ->
+        address_with ~operation:"put" t ~bytes ~mime)
+    else address_with ~operation:"put" t ~bytes ~mime
+  in
+  put_addressed addressed
+;;
 
 let put_durable t ~bytes ~mime =
-  let addressed = address_with ~operation:"put_durable" t ~bytes ~mime in
+  let addressed =
+    run_cpu_off_main ~label:"tool-blob-address-durable" (fun () ->
+      address_with ~operation:"put_durable" t ~bytes ~mime)
+  in
   Eio_guard.run_in_systhread ~label:"tool-blob-put-durable" (fun () ->
     store_addressed
       ~rewrite:Rewrite_every_put
@@ -645,20 +669,44 @@ let record_durable path snapshot =
 
 let store_durable_reuse ~operation addressed =
   let bytes = addressed.addressed_bytes in
+  let expected_len = String.length bytes in
+  let expected_sha256 = addressed.addressed_ref.Tool_output.sha256 in
   let ownership_root = addressed.addressed_ownership_root in
-  mark_put addressed.addressed_ref.Tool_output.sha256;
+  mark_put expected_sha256;
   let path = addressed.addressed_path in
-  let read () = Fs_compat.load_owned_regular_file_with_snapshot
-      ~owner_uid:(Unix.geteuid ()) ~ownership_root path in
+  (* Stream SHA-256 verification off the main Eio domain without materialising
+     additional whole-blob copies in RAM, while preserving owner UID and
+     parent-permission enforcement. *)
+  let verify_owned_streaming () =
+    run_cpu_off_main ~label:"tool-blob-verify-durable-reuse" (fun () ->
+      match
+        Fs_compat.observe_owned_regular_file
+          ~owner_uid:(Unix.geteuid ()) ~ownership_root path
+      with
+      | Error _ | Ok None -> None
+      | Ok (Some observed_snap) ->
+        if observed_snap.file_size <> expected_len
+        then None
+        else
+          match
+            Fs_compat.load_owned_regular_file_range_with_sha256
+              ~ownership_root ~offset:0 ~max_bytes:0 path
+          with
+          | Error _ | Ok None -> None
+          | Ok (Some digest) ->
+            if Fs_compat.equal_owned_regular_file_snapshot observed_snap digest.snapshot
+               && String.equal digest.sha256 expected_sha256
+            then Some digest.snapshot
+            else None)
+  in
   let reusable =
     match Validated_file_map.find_opt path (Atomic.get durable_snapshots) with
     | None -> false
     | Some previous ->
-      (match read () with
-       | Ok (Some observed) ->
-         Fs_compat.equal_owned_regular_file_snapshot previous.snapshot observed.snapshot
-         && String.equal observed.content bytes
-       | Ok None | Error _ -> false) in
+      (match verify_owned_streaming () with
+       | Some observed_snap ->
+         Fs_compat.equal_owned_regular_file_snapshot previous.snapshot observed_snap
+       | None -> false) in
   if reusable then addressed.addressed_ref
   else
     let written_identity = ref None in
@@ -676,18 +724,20 @@ let store_durable_reuse ~operation addressed =
     remove_validated_snapshot path;
     (* A concurrent non-strict writer may replace the pathname after our
        rename. Only the inode produced by the strict writer earns reuse. *)
-    (match written_identity.contents, read () with
-     | Some (device, inode), Ok (Some observed)
-       when observed.snapshot.device = device && observed.snapshot.inode = inode
-            && String.equal observed.content bytes ->
-       record_durable path observed.snapshot
-     | (Some _ | None), (Ok (Some _) | Ok None | Error _) -> ());
+    (match written_identity.contents, verify_owned_streaming () with
+     | Some (device, inode), Some observed_snap
+       when observed_snap.device = device && observed_snap.inode = inode ->
+       record_durable path observed_snap
+     | (Some _ | None), (Some _ | None) -> ());
     addressed.addressed_ref
 ;;
 
 let put_durable_reuse t ~bytes ~mime =
   let operation = "put_durable_reuse" in
-  let addressed = address_with ~operation t ~bytes ~mime in
+  let addressed =
+    run_cpu_off_main ~label:"tool-blob-address-durable-reuse" (fun () ->
+      address_with ~operation t ~bytes ~mime)
+  in
   store_durable_reuse ~operation addressed
 
 let put_prepared_durable_reuse t ~payload ~mime =
@@ -846,8 +896,10 @@ let ingest_open_file_blocking ~after_hash ~expected_sha256 t ~source_path ~sourc
 ;;
 
 let put_file_durable_blocking_with ~after_hash t ~path ~mime =
-  (* Nonblocking open rejects a FIFO without waiting for a writer. *)
-  let source_fd = try Unix.openfile path [Unix.O_RDONLY;Unix.O_NONBLOCK;Unix.O_CLOEXEC] 0
+  (* O_NOFOLLOW rejects symlinks atomically (ELOOP) and O_NONBLOCK rejects a
+     FIFO without waiting for a writer; [ingest_open_file_blocking] then
+     verifies [fstat] [S_REG]. *)
+  let source_fd = try open_readonly_nofollow_nonblock path
     with Unix.Unix_error _ as exn ->
       raise (Sys_error (Printf.sprintf "tool_blob_store.put_file_durable %s: %s" path (Printexc.to_string exn))) in
   ingest_open_file_blocking ~after_hash ~expected_sha256:None t
@@ -860,7 +912,7 @@ let put_file_descriptor_durable_blocking t ~source ~expected_sha256 ~mime =
     ~expected_sha256:(Some expected_sha256) t ~source_path:"<granted descriptor>" ~source_fd ~mime
 
 let put_file_durable_with ~after_hash t ~path ~mime =
-  Eio_guard.run_in_systhread ~label:"tool-blob-put-file-durable" (fun () ->
+  run_cpu_off_main ~label:"tool-blob-put-file-durable" (fun () ->
     put_file_durable_blocking_with ~after_hash t ~path ~mime)
 
 let put_file_durable_blocking =

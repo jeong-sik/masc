@@ -68,16 +68,24 @@ val read_snapshot
   -> (consistent_snapshot, store_error) result
 
 (** Read one fact and its incident edges from a single lock-free
-    [BEGIN DEFERRED] read-only SQLite WAL snapshot. *)
+    [BEGIN DEFERRED] read-only SQLite WAL snapshot. When [include_inactive] is
+    [false] (the default), terminal ([Superseded] / [Molted]) facts are filtered
+    out and returned as [Ok None]. When [visible_scope] is provided, incident
+    edges whose peer fact has a scope failing [visible_scope] (or is missing)
+    are withheld within the same MVCC read transaction. *)
 val read_fact_with_edges
-  :  base_path:string
+  :  ?include_inactive:bool
+  -> ?visible_scope:(string -> bool)
+  -> base_path:string
   -> fact_id:string
+  -> unit
   -> ((world_fact * world_edge list) option, store_error) result
 
-(** Compact, deterministic read-only snapshot of active World Memory facts and
-    unified Wiki/Artifact/Resource index entries, injected into per-Keeper
-    Librarian context to prevent duplicate assertions and enable shared world
-    evolution. Returns [Ok None] when the DB has no active entries yet. *)
+(** Compact, deterministic read-only snapshot of verified [Canonical] World
+    Memory facts (clearly framed as untrusted workspace notes) and unified
+    Wiki/Artifact/Resource index entries, injected into per-Keeper Librarian
+    context. Returns [Ok None] when the DB has no [Canonical] facts or index
+    entries yet. *)
 val read_index_snapshot : base_path:string -> (string option, store_error) result
 
 val read_change_log
@@ -119,6 +127,20 @@ val transition_fact_lifecycle
   -> to_lifecycle:lifecycle
   -> reason:string
   -> (world_fact, store_error) result
+
+(** Atomically supersede [old_fact_id] with active [new_fact_id] inside ONE
+    off-domain [BEGIN IMMEDIATE] SQLite WAL transaction: validates both facts
+    exist, transitions [old_fact_id -> Superseded], records the [Supersedes]
+    edge, and commits the updated {!world_digest}. Any failure rolls back the
+    entire transaction so no dangling [Supersedes] edge is ever persisted. *)
+val supersede_fact
+  :  base_path:string
+  -> now:float
+  -> actor:string
+  -> old_fact_id:string
+  -> new_fact_id:string
+  -> reason:string
+  -> (world_digest, store_error) result
 
 type index_sync_input =
   { entry_id : string

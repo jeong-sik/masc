@@ -246,6 +246,7 @@ let test_in_process_pipeline_and_mcp_resources () =
         let read_resource uri =
           let resp =
             Mcp_server_eio_resource.handle_read_resource_eio
+              ~caller:Mcp_server_eio_resource.Operator_admin
               state
               (`Int 1)
               (Some (`Assoc [ "uri", `String uri ]))

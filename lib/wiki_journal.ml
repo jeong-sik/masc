@@ -57,15 +57,73 @@ let log_line ~(time : Unix.tm) ~action ~revision ~page ~author ~note =
     note
 
 let append_log ~wiki_root line =
-  let path = Filename.concat wiki_root log_file in
-  match
-    Out_channel.with_open_gen
-      [ Open_wronly; Open_append; Open_creat; Open_text ]
-      0o644
-      path
-      (fun channel ->
-         Out_channel.output_string channel line;
-         Out_channel.output_char channel '\n')
-  with
-  | () -> Ok ()
-  | exception Sys_error message -> Error message
+  let check_regular_dir () =
+    match Unix.lstat wiki_root with
+    | st when st.Unix.st_kind = Unix.S_DIR -> Ok ()
+    | _ -> Error (wiki_root ^ ": wiki directory is not a regular directory (symlinks are rejected)")
+    | exception Unix.Unix_error (error, operation, _) ->
+      Error (Printf.sprintf "%s: %s" operation (Unix.error_message error))
+  in
+  let open_log_fd path =
+    match Unix.lstat path with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+      (* Atomic O_CREAT | O_EXCL never follows a symlink. *)
+      (try
+         Ok
+           (Unix.openfile path
+              [ Unix.O_WRONLY; Unix.O_APPEND; Unix.O_CREAT; Unix.O_EXCL; Unix.O_CLOEXEC ]
+              0o644)
+       with
+       | Unix.Unix_error (error, operation, _) ->
+         Error (Printf.sprintf "%s: %s" operation (Unix.error_message error)))
+    | exception Unix.Unix_error (error, operation, _) ->
+      Error (Printf.sprintf "%s: %s" operation (Unix.error_message error))
+    | lstat_st when lstat_st.Unix.st_kind <> Unix.S_REG ->
+      Error "log.md is not a regular file (symlinks are rejected)"
+    | lstat_st ->
+      (try
+         let fd =
+           Unix.openfile path [ Unix.O_WRONLY; Unix.O_APPEND; Unix.O_CLOEXEC ] 0o644
+         in
+         let fstat_st =
+           try Unix.fstat fd with
+           | exn ->
+             let bt = Printexc.get_raw_backtrace () in
+             (try Unix.close fd with Unix.Unix_error _ -> ());
+             Printexc.raise_with_backtrace exn bt
+         in
+         if fstat_st.Unix.st_kind <> Unix.S_REG
+            || fstat_st.Unix.st_dev <> lstat_st.Unix.st_dev
+            || fstat_st.Unix.st_ino <> lstat_st.Unix.st_ino
+         then (
+           (try Unix.close fd with Unix.Unix_error _ -> ());
+           Error "log.md changed or is not a regular file")
+         else Ok fd
+       with
+       | Unix.Unix_error (error, operation, _) ->
+         Error (Printf.sprintf "%s: %s" operation (Unix.error_message error)))
+  in
+  match check_regular_dir () with
+  | Error _ as err -> err
+  | Ok () ->
+    let path = Filename.concat wiki_root log_file in
+    (match open_log_fd path with
+     | Error _ as err -> err
+     | Ok fd ->
+       let oc =
+         try Unix.out_channel_of_descr fd with
+         | exn ->
+           let bt = Printexc.get_raw_backtrace () in
+           (try Unix.close fd with Unix.Unix_error _ -> ());
+           Printexc.raise_with_backtrace exn bt
+       in
+       (try
+          Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+            Out_channel.output_string oc line;
+            Out_channel.output_char oc '\n';
+            Out_channel.flush oc);
+          Ok ()
+        with
+        | Sys_error message -> Error message
+        | Unix.Unix_error (error, operation, _) ->
+          Error (Printf.sprintf "%s: %s" operation (Unix.error_message error))))

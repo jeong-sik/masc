@@ -17,9 +17,11 @@ type resource_caller =
       ; board_reader : Masc_board_handlers.Board_access.reader
       }
   | Anonymous_reader
-(** Authenticated caller identity governing Keeper memory resource access.
-    Non-admin callers only read their own Keeper memory, filtered through
-    current Board readership. *)
+(** Authenticated caller identity governing Keeper memory and World Memory
+    resource access. Non-admin callers only read their own Keeper memory
+    (filtered through current Board readership), cannot read
+    [masc://world-memory/log], and receive World Memory claims/facts with
+    private sibling-Keeper scopes and cross-Keeper [source_fact_ids] withheld. *)
 
 type resource_target =
   | Tool_help_index

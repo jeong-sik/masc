@@ -63,28 +63,126 @@ type context = {
    one every other tool in the request reads. *)
 let wiki_root ~base_path = Config_dir_resolver.wiki_dir ~base_path
 
-(* Every page file in the wiki, in name order. Only the wiki's own two files
-   ([index.md], [log.md]) are left out: any other Markdown file that is not a
-   wiki page shows up as one whose header does not read. *)
+let max_page_bytes = 512 * 1024
+
+let read_fd_bounded ~max_bytes fd =
+  let ic = Unix.in_channel_of_descr fd in
+  (* fun-protect-finally-ok: synchronous descriptor read, no Eio effects. *)
+  Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+    let buf = Buffer.create (min 8192 max_bytes) in
+    let chunk = Bytes.create (min 8192 (max 1 max_bytes)) in
+    let rec loop total =
+      let want = min (Bytes.length chunk) (max_bytes - total + 1) in
+      match input ic chunk 0 want with
+      | 0 -> Ok (Buffer.contents buf)
+      | n ->
+        let next_total = total + n in
+        if next_total > max_bytes
+        then Error (Printf.sprintf "wiki page exceeds %d-byte limit" max_bytes)
+        else (
+          Buffer.add_subbytes buf chunk 0 n;
+          loop next_total)
+    in
+    loop 0)
+;;
+
+let open_regular_page_fd ~max_bytes path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (error, operation, _) ->
+    Error (Printf.sprintf "%s: %s" operation (Unix.error_message error))
+  | { Unix.st_kind; _ } when st_kind <> Unix.S_REG ->
+    Error "wiki page must be a regular file (symlinks and directories are rejected)"
+  | { Unix.st_size; _ } when st_size < 0 || st_size > max_bytes ->
+    Error (Printf.sprintf "wiki page exceeds %d-byte limit (%d bytes)" max_bytes st_size)
+  | lstat_st ->
+    (match Tool_blob_store.open_readonly_nofollow_nonblock path with
+     | exception Unix.Unix_error (error, operation, _) ->
+       Error (Printf.sprintf "%s: %s" operation (Unix.error_message error))
+     | fd ->
+       (match Unix.fstat fd with
+        | exception Unix.Unix_error (error, operation, _) ->
+          (try Unix.close fd with Unix.Unix_error _ -> ());
+          Error (Printf.sprintf "%s: %s" operation (Unix.error_message error))
+        | fstat_st ->
+          if fstat_st.st_kind <> Unix.S_REG
+             || fstat_st.st_dev <> lstat_st.st_dev
+             || fstat_st.st_ino <> lstat_st.st_ino
+          then (
+            (try Unix.close fd with Unix.Unix_error _ -> ());
+            Error "wiki page changed or is not a regular file")
+          else if fstat_st.st_size < 0 || fstat_st.st_size > max_bytes
+          then (
+            (try Unix.close fd with Unix.Unix_error _ -> ());
+            Error
+              (Printf.sprintf "wiki page exceeds %d-byte limit (%d bytes)"
+                 max_bytes fstat_st.st_size))
+          else Ok (fd, fstat_st)))
+;;
+
+let load_regular_page path =
+  match open_regular_page_fd ~max_bytes:max_page_bytes path with
+  | Error _ as err -> err
+  | Ok (fd, _) ->
+    (try read_fd_bounded ~max_bytes:max_page_bytes fd with
+     | Sys_error detail -> Error detail
+     | Unix.Unix_error (error, operation, _) ->
+       Error (Printf.sprintf "%s: %s" operation (Unix.error_message error)))
+;;
+
+(* Verify that neither [<base>/.masc] nor [<base>/.masc/wiki] is a symlink or
+   non-directory file. Returns [Ok `Missing] if either directory does not yet
+   exist, [Ok `Present] if both exist as real directories, or [Error msg] on
+   symlinks, non-directories, or stat errors. *)
+let verify_wiki_root_is_regular_dir ~base_path =
+  let root = wiki_root ~base_path in
+  let masc_dir = Filename.dirname root in
+  match Unix.lstat masc_dir with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok `Missing
+  | exception Unix.Unix_error (error, operation, _) ->
+    Error (Printf.sprintf "%s: %s" operation (Unix.error_message error))
+  | masc_st when masc_st.Unix.st_kind <> Unix.S_DIR ->
+    Error (masc_dir ^ ": Not a directory (symlinks are rejected)")
+  | _ ->
+    (match Unix.lstat root with
+     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok `Missing
+     | exception Unix.Unix_error (error, operation, _) ->
+       Error (Printf.sprintf "%s: %s" operation (Unix.error_message error))
+     | root_st ->
+       if root_st.Unix.st_kind = Unix.S_DIR
+       then Ok `Present
+       else Error (root ^ ": Not a directory (symlinks are rejected)"))
+;;
+
+(* Every regular page file in the wiki, in name order. Only the wiki's own two
+   files ([index.md], [log.md]) are left out; symlinks, directories, non-regular
+   files, and oversized files above [max_page_bytes] are excluded via [lstat]. *)
 let list_pages ~base_path =
   let dir = wiki_root ~base_path in
-  match Unix.stat dir with
-  | _ ->
+  match verify_wiki_root_is_regular_dir ~base_path with
+  | Ok `Missing -> []
+  | Error msg -> raise (Sys_error msg)
+  | Ok `Present ->
     Sys.readdir dir
     |> Array.to_list
     |> List.filter (fun f ->
       Filename.check_suffix f ".md" && not (Wiki_journal.is_own_file f))
     |> List.sort String.compare
-    |> List.map (fun f -> Filename.concat dir f)
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> []
-  | exception Unix.Unix_error (error, operation, _) ->
-    raise (Sys_error (operation ^ ": " ^ Unix.error_message error))
+    |> List.filter_map (fun f ->
+      let full = Filename.concat dir f in
+      match Unix.lstat full with
+      | entry_st ->
+        if entry_st.Unix.st_kind = Unix.S_REG
+           && entry_st.Unix.st_size >= 0
+           && entry_st.Unix.st_size <= max_page_bytes
+        then Some full
+        else None
+      | exception Unix.Unix_error _ -> None)
 
 (* What the index says about each file: a page gives its title and summary,
    a file whose header does not read gives the reason. Reads at most
    [frontmatter_read_limit] header bytes and caches parsed frontmatter in
    memory keyed by [(path, mtime, size)]. A file that vanishes between the
-   listing and the read is left out. *)
+   listing and the read, or is a symlink/oversized file, is left out. *)
 let frontmatter_read_limit = 8192
 
 type cached_frontmatter = {
@@ -101,11 +199,17 @@ let invalidate_frontmatter_cache path =
     Hashtbl.remove frontmatter_cache path)
 
 let read_frontmatter_cached path =
-  match Unix.stat path with
+  match Unix.lstat path with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
     invalidate_frontmatter_cache path;
     None
   | exception (Unix.Unix_error _ | Sys_error _) -> None
+  | { Unix.st_kind; _ } when st_kind <> Unix.S_REG ->
+    invalidate_frontmatter_cache path;
+    None
+  | { Unix.st_size = size; _ } when size < 0 || size > max_page_bytes ->
+    invalidate_frontmatter_cache path;
+    None
   | { Unix.st_mtime = mtime; st_size = size; _ } ->
     let cached =
       Stdlib.Mutex.protect frontmatter_cache_mutex (fun () ->
@@ -118,28 +222,43 @@ let read_frontmatter_cached path =
      | Some result -> Some result
      | None ->
        let len = Int.min (Int.max 0 size) frontmatter_read_limit in
-       (match
-          if len <= 0 then ""
-          else Fs_compat.read_slice ~path ~from:0 ~len
-        with
-        | exception Sys_error _ -> None
-        | slice ->
+       let slice_res =
+         if len <= 0 then Ok ""
+         else
+           match open_regular_page_fd ~max_bytes:max_page_bytes path with
+           | Error _ as err -> err
+           | Ok (fd, _) ->
+             let ic = Unix.in_channel_of_descr fd in
+             Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+               try
+                 let buf = Bytes.create len in
+                 let n = input ic buf 0 len in
+                 Ok (Bytes.sub_string buf 0 n)
+               with
+               | Sys_error detail -> Error detail)
+       in
+       (match slice_res with
+        | Error _ -> None
+        | Ok slice ->
           let parsed =
             match parse_frontmatter slice with
             | Ok _ as ok -> ok
             | Error _ as err ->
               if size > frontmatter_read_limit then
-                (match Fs_compat.load_file path with
-                 | full -> parse_frontmatter full
-                 | exception Sys_error _ -> err)
+                (match load_regular_page path with
+                 | Ok full -> parse_frontmatter full
+                 | Error _ -> err)
               else err
           in
-          (match Unix.stat path with
-           | { Unix.st_mtime = mtime2; st_size = size2; _ }
-             when Float.equal mtime mtime2 && size = size2 ->
-             Stdlib.Mutex.protect frontmatter_cache_mutex (fun () ->
-               Hashtbl.replace frontmatter_cache path { mtime; size; parsed })
-           | _ | exception Unix.Unix_error _ -> ());
+          (match Unix.lstat path with
+           | st2 ->
+             if st2.Unix.st_kind = Unix.S_REG
+                && Float.equal mtime st2.Unix.st_mtime
+                && size = st2.Unix.st_size
+             then
+               Stdlib.Mutex.protect frontmatter_cache_mutex (fun () ->
+                 Hashtbl.replace frontmatter_cache path { mtime; size; parsed })
+           | exception Unix.Unix_error _ -> ());
           Some parsed))
 
 let index_entries ~base_path =
@@ -239,20 +358,16 @@ let handle_read ~tool_name ~start_time ctx args : Tool_result.result =
         workflow_err ~tool_name ~start_time
           (sprintf "No page matching '%s'" topic)
     | Some path ->
-        try
-          let content = In_channel.with_open_text path In_channel.input_all in
-          let heading =
-            match parse_frontmatter content with
-            | Ok _ -> Filename.basename path
-            | Error error -> describe_unreadable path error
-          in
-          text_ok ~tool_name ~start_time (sprintf "## %s\n\n%s" heading content)
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-            runtime_err ~tool_name ~start_time
-              (sprintf "Read error: %s"
-                 (Tool_error.to_string (Tool_error.of_exn exn)))
+        (match load_regular_page path with
+         | Ok content ->
+           let heading =
+             match parse_frontmatter content with
+             | Ok _ -> Filename.basename path
+             | Error error -> describe_unreadable path error
+           in
+           text_ok ~tool_name ~start_time (sprintf "## %s\n\n%s" heading content)
+         | Error detail ->
+           runtime_err ~tool_name ~start_time (sprintf "Read error: %s" detail))
   end
 
 let page_path ~base_path page =
@@ -272,12 +387,24 @@ let today () =
    also holds between processes, for a second server on the same base path. *)
 let with_wiki_lock ~tool_name ~start_time ctx f : Tool_result.result =
   let root = wiki_root ~base_path:ctx.base_path in
-  match Fs_compat.mkdir_p root with
-  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-  | exception exn ->
-    runtime_err ~tool_name ~start_time
-      (sprintf "Wiki directory error: %s" (Tool_error.to_string (Tool_error.of_exn exn)))
-  | () ->
+  let ensure_regular_root () =
+    match verify_wiki_root_is_regular_dir ~base_path:ctx.base_path with
+    | Error msg -> Error msg
+    | Ok `Present -> Ok ()
+    | Ok `Missing ->
+      (match Fs_compat.mkdir_p root with
+       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+       | exception exn -> Error (Tool_error.to_string (Tool_error.of_exn exn))
+       | () ->
+         (match verify_wiki_root_is_regular_dir ~base_path:ctx.base_path with
+          | Ok `Present -> Ok ()
+          | Ok `Missing -> Error (root ^ ": wiki directory disappeared after creation")
+          | Error msg -> Error msg))
+  in
+  match ensure_regular_root () with
+  | Error msg ->
+    runtime_err ~tool_name ~start_time (sprintf "Wiki directory error: %s" msg)
+  | Ok () ->
     (match
        File_lock_eio.with_durable_lock ~lock_path:(Filename.concat root ".wiki.lock") f
      with
@@ -424,14 +551,19 @@ let handle_create ~tool_name ~start_time ctx args : Tool_result.result =
   | Ok (page, title, summary, author, source, tags) ->
     with_wiki_lock ~tool_name ~start_time ctx (fun () ->
       let path = page_path ~base_path:ctx.base_path page in
-      if Sys.file_exists path
-      then
+      match Unix.lstat path with
+      | st when st.Unix.st_kind = Unix.S_REG ->
         workflow_err ~tool_name ~start_time
           (sprintf
              "page \"%s\" already exists. Read it and call masc_wiki_update to change \
               it."
              page)
-      else begin
+      | _ ->
+        runtime_err ~tool_name ~start_time
+          (sprintf
+             "Refusing to create page \"%s\": target path exists and is not a regular file"
+             page)
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
         let day = today () in
         let content =
           render_page
@@ -441,7 +573,9 @@ let handle_create ~tool_name ~start_time ctx args : Tool_result.result =
         write_page ~tool_name ~start_time ctx ~path ~content
           ~action:Wiki_journal.Created ~revision:1 ~page ~author ~note:summary
           ~written:(sprintf "Created wiki page %s at revision 1: %s" page path)
-      end)
+      | exception Unix.Unix_error (error, operation, _) ->
+        runtime_err ~tool_name ~start_time
+          (sprintf "Wiki page error: %s: %s" operation (Unix.error_message error)))
 
 (* A refused update tells the writer where the page is now, so the writer can
    merge into that body and send again without another read. *)
@@ -510,17 +644,22 @@ let handle_update ~tool_name ~start_time ctx args : Tool_result.result =
   | Ok (page, base_revision, note, editor, new_title, new_summary, new_tags) ->
     with_wiki_lock ~tool_name ~start_time ctx (fun () ->
       let path = page_path ~base_path:ctx.base_path page in
-      if not (Sys.file_exists path)
-      then
+      match Unix.lstat path with
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
         workflow_err ~tool_name ~start_time
           (sprintf "No page named \"%s\". Create it with masc_wiki_create." page)
-      else
-        match In_channel.with_open_text path In_channel.input_all with
-        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-        | exception exn ->
-          runtime_err ~tool_name ~start_time
-            (sprintf "Read error: %s" (Tool_error.to_string (Tool_error.of_exn exn)))
-        | content ->
+      | exception Unix.Unix_error (error, operation, _) ->
+        runtime_err ~tool_name ~start_time
+          (sprintf "Read error: %s: %s" operation (Unix.error_message error))
+      | st when st.Unix.st_kind <> Unix.S_REG ->
+        runtime_err ~tool_name ~start_time
+          (sprintf "Read error: wiki page \"%s\" is not a regular file (symlinks are rejected)"
+             page)
+      | _ ->
+        match load_regular_page path with
+        | Error detail ->
+          runtime_err ~tool_name ~start_time (sprintf "Read error: %s" detail)
+        | Ok content ->
           (match parse_frontmatter content with
            | Error error ->
              workflow_err ~tool_name ~start_time
@@ -587,9 +726,9 @@ let handle_search ~tool_name ~start_time ctx args : Tool_result.result =
   else begin
     let docs = list_pages ~base_path:ctx.base_path in
     let pages = List.filter_map (fun path ->
-      match In_channel.with_open_text path In_channel.input_all with
-      | content -> Some (path, content, searchable_text content)
-      | exception Sys_error _ -> None
+      match load_regular_page path with
+      | Ok content -> Some (path, content, searchable_text content)
+      | Error _ -> None
     ) docs in
     (* The corpus for the relevance score is every page, not only the matches,
        so a word found in nearly every page weighs little. *)
@@ -640,18 +779,21 @@ let lint_nodes ~base_path =
   list_pages ~base_path
   |> List.filter_map (fun path ->
     let file = Filename.basename path in
-    match In_channel.with_open_text path In_channel.input_all with
-    | exception Sys_error message ->
+    match load_regular_page path with
+    | Error message ->
       (* Gone between the listing and the read: not a page any more. Still
-         there but not opened (permissions, I/O): a page that does not read,
-         not a page that does not exist. *)
-      if Sys.file_exists path
-      then
-        Some
-          (Wiki_graph.Unreadable
-             { file; reason = Printf.sprintf "the file could not be opened: %s" message })
-      else None
-    | content ->
+         there but not opened (permissions, symlink swap, I/O): a page that
+         does not read, not a page that does not exist. *)
+      (match Unix.lstat path with
+       | st ->
+         if st.Unix.st_kind = Unix.S_REG
+         then
+           Some
+             (Wiki_graph.Unreadable
+                { file; reason = Printf.sprintf "the file could not be opened: %s" message })
+         else None
+       | exception Unix.Unix_error _ -> None)
+    | Ok content ->
       (match parse_frontmatter content with
        | Ok frontmatter ->
          let body = page_body content in
@@ -668,19 +810,41 @@ let lint_nodes ~base_path =
 
 (* [log.md] read for the lint. A wiki that has never been written has no log
    yet, and that is an empty log, not a failure to read. A log that is there
-   but cannot be read is an error, not an empty log: "nothing is wrong" and
-   "nothing could be read" must stay different answers. The one parser
-   in the runtime is {!Wiki_log}, so the lint and any later consumer read the
-   same words the same way. *)
+   but cannot be read (including a symlink) is an error, not an empty log:
+   "nothing is wrong" and "nothing could be read" must stay different answers.
+   The one parser in the runtime is {!Wiki_log}, so the lint and any later
+   consumer read the same words the same way. *)
+let max_log_lint_bytes = 32 * 1024 * 1024
+
 let lint_log ~base_path =
-  let path = Filename.concat (wiki_root ~base_path) Wiki_journal.log_file in
-  if not (Sys.file_exists path)
-  then Ok Wiki_log.empty
-  else (
-    match In_channel.with_open_text path In_channel.input_all with
-    | exception Sys_error message ->
-      Error (Printf.sprintf "log.md exists but could not be read: %s" message)
-    | content -> Ok (Wiki_log.parse ~minute_time:Wiki_log_clock.local_minute content))
+  match verify_wiki_root_is_regular_dir ~base_path with
+  | Ok `Missing -> Ok Wiki_log.empty
+  | Error msg -> Error (Printf.sprintf "wiki directory could not be read: %s" msg)
+  | Ok `Present ->
+    let path = Filename.concat (wiki_root ~base_path) Wiki_journal.log_file in
+    match Unix.lstat path with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Wiki_log.empty
+    | exception Unix.Unix_error (error, operation, _) ->
+      Error
+        (Printf.sprintf "log.md exists but could not be read: %s: %s"
+           operation (Unix.error_message error))
+    | st when st.Unix.st_kind <> Unix.S_REG ->
+      Error "log.md exists but could not be read: not a regular file"
+    | _ ->
+      (match open_regular_page_fd ~max_bytes:max_log_lint_bytes path with
+       | Error message ->
+         Error (Printf.sprintf "log.md exists but could not be read: %s" message)
+       | Ok (fd, _) ->
+         let read_res =
+           try read_fd_bounded ~max_bytes:max_log_lint_bytes fd with
+           | Sys_error detail -> Error detail
+           | Unix.Unix_error (error, operation, _) ->
+             Error (Printf.sprintf "%s: %s" operation (Unix.error_message error))
+         in
+         (match read_res with
+          | Error message ->
+            Error (Printf.sprintf "log.md exists but could not be read: %s" message)
+          | Ok content -> Ok (Wiki_log.parse ~minute_time:Wiki_log_clock.local_minute content)))
 
 let handle_lint ~tool_name ~start_time ctx args : Tool_result.result =
   (* A value of the wrong type is refused, not read as "not given": a limit

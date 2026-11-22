@@ -84,8 +84,12 @@ val build_create_body
     never leak hooks onto a caller's long-lived switch, includes
     {!Provider_config.effective_request_headers}, and returns [None] when the
     prefix is below [min_prefix_bytes] or creation fails so callers fall back
-    transparently to implicit caching. Never holds the cache mutex across HTTP
-    I/O and degrades cleanly without raising [Effect.Unhandled] outside Eio. *)
+    transparently to implicit caching. When [POST .../cachedContents] returns
+    HTTP 401 and invalidates a refreshable credential, [on_auth_invalidated]
+    (when supplied) is invoked so the caller can refresh auth headers once
+    before dispatching generation instead of sending a doomed request with the
+    revoked token. Never holds the cache mutex across HTTP I/O and degrades
+    cleanly without raising [Effect.Unhandled] outside Eio. *)
 val resolve_or_create
   :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?clock:_ Eio.Time.clock
@@ -93,6 +97,7 @@ val resolve_or_create
   -> ?connection_cache:Http_client.cache
   -> ?min_prefix_bytes:int
   -> ?negative_ttl_s:float
+  -> ?on_auth_invalidated:(unit -> unit)
   -> config:Provider_config.t
   -> auth_headers:(string * string) list
   -> ttl_s:int

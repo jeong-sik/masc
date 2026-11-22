@@ -29,6 +29,7 @@ type inflight_slot =
   ; os_cond : Stdlib.Condition.t
   ; mutable done_ : bool
   ; mutable result : handle option
+  ; mutable auth_invalidated : bool
   }
 
 let eio_probe_key : unit Eio.Fiber.key = Eio.Fiber.create_key ()
@@ -220,8 +221,7 @@ let credential_fingerprint ~(config : Provider_config.t) ~auth_headers =
     match config.credential_source with
     | Provider_config.Refreshable_credential _ -> true
     | Provider_config.Static_credential ->
-      Secret.is_empty config.api_key
-      || Option.is_some (vertex_target_of_base_url ~base_url:config.base_url)
+      Option.is_some (vertex_target_of_base_url ~base_url:config.base_url)
   in
   let auth_material =
     match auth_headers with
@@ -355,6 +355,7 @@ let lookup_or_begin_inflight ~key ~now_s ~margin_s =
             ; os_cond = Stdlib.Condition.create ()
             ; done_ = false
             ; result = None
+            ; auth_invalidated = false
             }
           in
           Hashtbl.replace in_flight key slot;
@@ -415,24 +416,39 @@ let is_permanent_negative_cache_status status =
   && status <> 403
   && status <> 408
   && status <> 429
+  && status <> 499
 ;;
 
-let await_inflight ?clock ~effective_timeout_s (slot : inflight_slot) : handle option =
-  if in_eio_fiber ()
-  then (
-    match clock, effective_timeout_s with
-    | Some c, Some t when Float.is_finite t && Float.compare t 0.0 > 0 ->
-      (match Under_deadline.run c t (fun () -> Eio.Promise.await slot.promise) with
-       | Ok result -> result
-       | Error `Timeout -> None)
-    | Some _, Some _ | Some _, None | None, (Some _ | None) ->
-      Eio.Promise.await slot.promise)
-  else
-    with_cache_lock (fun () ->
-      while not slot.done_ do
-        Stdlib.Condition.wait slot.os_cond cache_mu
-      done;
-      slot.result)
+let await_inflight
+      ?clock
+      ?on_auth_invalidated
+      ~effective_timeout_s
+      (slot : inflight_slot)
+  : handle option
+  =
+  let res, auth_invalidated =
+    if in_eio_fiber ()
+    then (
+      let r =
+        match clock, effective_timeout_s with
+        | Some c, Some t when Float.is_finite t && Float.compare t 0.0 > 0 ->
+          (match Under_deadline.run c t (fun () -> Eio.Promise.await slot.promise) with
+           | Ok result -> result
+           | Error `Timeout -> None)
+        | Some _, Some _ | Some _, None | None, (Some _ | None) ->
+          Eio.Promise.await slot.promise
+      in
+      let invalidated = with_cache_lock (fun () -> slot.auth_invalidated) in
+      r, invalidated)
+    else
+      with_cache_lock (fun () ->
+        while not slot.done_ do
+          Stdlib.Condition.wait slot.os_cond cache_mu
+        done;
+        slot.result, slot.auth_invalidated)
+  in
+  if auth_invalidated then Option.iter (fun cb -> cb ()) on_auth_invalidated;
+  res
 ;;
 
 let parse_created_resource_name body =
@@ -464,6 +480,7 @@ let resolve_or_create
       ?connection_cache
       ?(min_prefix_bytes = default_min_prefix_bytes)
       ?(negative_ttl_s = default_negative_ttl_s)
+      ?on_auth_invalidated
       ~(config : Provider_config.t)
       ~auth_headers
       ~ttl_s
@@ -501,9 +518,11 @@ let resolve_or_create
       match lookup_or_begin_inflight ~key ~now_s ~margin_s with
       | Live_hit hit -> Some hit
       | Negative_hit -> None
-      | Join_inflight slot -> await_inflight ?clock ~effective_timeout_s slot
+      | Join_inflight slot ->
+        await_inflight ?clock ?on_auth_invalidated ~effective_timeout_s slot
       | Leader slot ->
         let outcome = ref None in
+        let auth_invalidated = ref false in
         let finish () =
           (* Pure synchronous cleanup: safe inside [Fun.protect] even on
              [Eio.Cancel.Cancelled]. Never performs yielding Eio effects. *)
@@ -516,6 +535,7 @@ let resolve_or_create
                  | Some cur when cur == slot -> Hashtbl.remove in_flight key
                  | Some _ | None -> ());
                 slot.result <- !outcome;
+                slot.auth_invalidated <- !auth_invalidated;
                 slot.done_ <- true;
                 Stdlib.Condition.broadcast slot.os_cond;
                 true))
@@ -523,102 +543,107 @@ let resolve_or_create
           if should_resolve
           then ignore (Eio.Promise.try_resolve slot.resolver !outcome : bool)
         in
-        Fun.protect ~finally:finish (fun () ->
-          if not (in_eio_fiber ())
-          then (
-            Diag.warn
-              "gemini_context_cache"
-              "skipping explicit cachedContents creation outside Eio context for \
-               model=%s; falling back to implicit caching"
-              config.model_id;
-            None)
-          else (
-            let url = cached_contents_url ~base_url:config.base_url in
-            let body =
-              build_create_body
-                ~base_url:config.base_url
-                ~model_id:config.model_id
-                ~ttl_s
-                ~prefix
-                ()
-            in
-            let merged_headers =
-              Provider_config.effective_request_headers config @ auth_headers
-            in
-            let has_content_type =
-              List.exists
-                (fun (k, _) ->
-                   String.equal (String.lowercase_ascii (String.trim k)) "content-type")
-                merged_headers
-            in
-            let headers =
-              if has_content_type
-              then merged_headers
-              else ("Content-Type", "application/json") :: merged_headers
-            in
-            let post_result =
-              Eio.Switch.run (fun create_sw ->
-                Http_client.post_sync
-                  ?cache:connection_cache
-                  ?clock
-                  ?timeout_s:effective_timeout_s
-                  ~sw:create_sw
-                  ~net
-                  ~url
-                  ~headers
-                  ~body
-                  ())
-            in
-            let res =
-              match post_result with
-              | Error err ->
-                Diag.warn
-                  "gemini_context_cache"
-                  "explicit cachedContents creation failed for model=%s (%s); falling \
-                   back to implicit caching"
-                  config.model_id
-                  (describe_http_error err);
-                None
-              | Ok resp ->
-                if Http_client.is_success_status resp.status
-                then (
-                  match parse_created_resource_name resp.body with
-                  | Some resource_name ->
-                    let expires_at_s = current_time_s ?clock () +. float_of_int ttl_s in
-                    store_entry ~key ~resource_name ~expires_at_s;
-                    Some { key; resource_name }
-                  | None ->
+        let res =
+          Fun.protect ~finally:finish (fun () ->
+            if not (in_eio_fiber ())
+            then (
+              Diag.warn
+                "gemini_context_cache"
+                "skipping explicit cachedContents creation outside Eio context for \
+                 model=%s; falling back to implicit caching"
+                config.model_id;
+              None)
+            else (
+              let url = cached_contents_url ~base_url:config.base_url in
+              let body =
+                build_create_body
+                  ~base_url:config.base_url
+                  ~model_id:config.model_id
+                  ~ttl_s
+                  ~prefix
+                  ()
+              in
+              let merged_headers =
+                Provider_config.effective_request_headers config @ auth_headers
+              in
+              let has_content_type =
+                List.exists
+                  (fun (k, _) ->
+                     String.equal (String.lowercase_ascii (String.trim k)) "content-type")
+                  merged_headers
+              in
+              let headers =
+                if has_content_type
+                then merged_headers
+                else ("Content-Type", "application/json") :: merged_headers
+              in
+              let post_result =
+                Eio.Switch.run (fun create_sw ->
+                  Http_client.post_sync
+                    ?cache:connection_cache
+                    ?clock
+                    ?timeout_s:effective_timeout_s
+                    ~sw:create_sw
+                    ~net
+                    ~url
+                    ~headers
+                    ~body
+                    ())
+              in
+              let res =
+                match post_result with
+                | Error err ->
+                  Diag.warn
+                    "gemini_context_cache"
+                    "explicit cachedContents creation failed for model=%s (%s); falling \
+                     back to implicit caching"
+                    config.model_id
+                    (describe_http_error err);
+                  None
+                | Ok resp ->
+                  if Http_client.is_success_status resp.status
+                  then (
+                    match parse_created_resource_name resp.body with
+                    | Some resource_name ->
+                      let expires_at_s = current_time_s ?clock () +. float_of_int ttl_s in
+                      store_entry ~key ~resource_name ~expires_at_s;
+                      Some { key; resource_name }
+                    | None ->
+                      Diag.warn
+                        "gemini_context_cache"
+                        "explicit cachedContents HTTP %d response omitted valid resource \
+                         name for model=%s; falling back to implicit caching"
+                        resp.status
+                        config.model_id;
+                      None)
+                  else (
+                    if resp.status = 401
+                    then (
+                      evict_live_entry ~key;
+                      if Provider_config.invalidate_credential config
+                      then auth_invalidated := true)
+                    else if resp.status = 403
+                    then evict_live_entry ~key
+                    else if is_permanent_negative_cache_status resp.status
+                            && Float.is_finite negative_ttl_s
+                            && Float.compare negative_ttl_s 0.0 > 0
+                    then
+                      store_negative_entry
+                        ~key
+                        ~expires_at_s:(current_time_s ?clock () +. negative_ttl_s);
                     Diag.warn
                       "gemini_context_cache"
-                      "explicit cachedContents HTTP %d response omitted valid resource \
-                       name for model=%s; falling back to implicit caching"
+                      "explicit cachedContents HTTP %d for model=%s; falling back to \
+                       implicit caching"
                       resp.status
                       config.model_id;
                     None)
-                else (
-                  if resp.status = 401
-                  then (
-                    evict_live_entry ~key;
-                    ignore (Provider_config.invalidate_credential config : bool))
-                  else if resp.status = 403
-                  then evict_live_entry ~key
-                  else if is_permanent_negative_cache_status resp.status
-                          && Float.is_finite negative_ttl_s
-                          && Float.compare negative_ttl_s 0.0 > 0
-                  then
-                    store_negative_entry
-                      ~key
-                      ~expires_at_s:(current_time_s ?clock () +. negative_ttl_s);
-                  Diag.warn
-                    "gemini_context_cache"
-                    "explicit cachedContents HTTP %d for model=%s; falling back to \
-                     implicit caching"
-                    resp.status
-                    config.model_id;
-                  None)
-            in
-            outcome := res;
-            res))))
+              in
+              outcome := res;
+              res))
+        in
+        if !auth_invalidated then Option.iter (fun cb -> cb ()) on_auth_invalidated;
+        res))
 ;;
 
 let mentions_cached_content body =

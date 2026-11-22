@@ -1526,6 +1526,56 @@ let test_explicit_cached_content_request_omits_prefix_fields () =
   in
   check bool "distinct static x-goog-api-key headers produce distinct prefix keys" true
     (not (String.equal hk1 hk2));
+  (* Non-Vertex Static_credential Bearer tokens must stay strictly isolated per tenant,
+     both when api_key is empty (caller-supplied auth_headers) and when static api_key is set. *)
+  let static_empty_non_vertex =
+    { config with
+      api_key = Secret.empty
+    ; credential_source = Provider_config.Static_credential
+    }
+  in
+  let sb1 =
+    Gemini_context_cache.prefix_key
+      ~auth_headers:[ "Authorization", "Bearer fixture-static-tenant-a" ]
+      ~config:static_empty_non_vertex
+      ~prefix
+      ()
+  in
+  let sb2 =
+    Gemini_context_cache.prefix_key
+      ~auth_headers:[ "Authorization", "Bearer fixture-static-tenant-b" ]
+      ~config:static_empty_non_vertex
+      ~prefix
+      ()
+  in
+  check bool "distinct non-Vertex static Bearer headers (empty api_key) stay distinct" true
+    (not (String.equal sb1 sb2));
+  let static_bearer_a =
+    { config with
+      auth_scheme = Provider_config.Bearer_token
+    ; api_key = Secret.of_string "fixture-static-bearer-a"
+    ; credential_source = Provider_config.Static_credential
+    }
+  in
+  let static_bearer_b =
+    { static_bearer_a with api_key = Secret.of_string "fixture-static-bearer-b" }
+  in
+  let sbk1 =
+    Gemini_context_cache.prefix_key
+      ~auth_headers:[ "Authorization", "Bearer fixture-static-bearer-a" ]
+      ~config:static_bearer_a
+      ~prefix
+      ()
+  in
+  let sbk2 =
+    Gemini_context_cache.prefix_key
+      ~auth_headers:[ "Authorization", "Bearer fixture-static-bearer-b" ]
+      ~config:static_bearer_b
+      ~prefix
+      ()
+  in
+  check bool "distinct non-Vertex static Bearer api_keys stay distinct" true
+    (not (String.equal sbk1 sbk2));
   let vertex_regional =
     "https://us-central1-aiplatform.googleapis.com/v1/projects/my-proj/locations/us-central1/publishers/google"
   in

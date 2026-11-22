@@ -968,6 +968,7 @@ let complete_http
                 let latency_ms = latency_ms_int latency_counter in
                 result, latency_ms)
         in
+        let cache_auth_invalidated = ref false in
         let resolve_gemini_explicit_cache () =
           match
             serialized.Complete_common.http_codec,
@@ -1012,6 +1013,7 @@ let complete_http
                     ?clock
                     ?timeout_s
                     ?connection_cache
+                    ~on_auth_invalidated:(fun () -> cache_auth_invalidated := true)
                     ~config
                     ~auth_headers:!current_auth_headers
                     ~ttl_s
@@ -1034,11 +1036,24 @@ let complete_http
         let final_serialized, result =
           match resolve_gemini_explicit_cache () with
           | None ->
-            ( serialized
-            , dispatch_serialized
-                ~allow_cached_fallback:false
-                ~allow_auth_retry:allow_initial_auth_retry
-                serialized )
+            if !cache_auth_invalidated
+            then (
+              match Provider_config.resolve_auth_headers config with
+              | Ok fresh_auth_headers ->
+                current_auth_headers := fresh_auth_headers;
+                ( serialized
+                , dispatch_serialized
+                    ~allow_cached_fallback:false
+                    ~allow_auth_retry:false
+                    serialized )
+              | Error reason ->
+                serialized, (Error (Http_client.AcceptRejected { reason }), None))
+            else
+              ( serialized
+              , dispatch_serialized
+                  ~allow_cached_fallback:false
+                  ~allow_auth_retry:allow_initial_auth_retry
+                  serialized )
           | Some handle ->
             (match
                serialize_gemini_cached_http_request

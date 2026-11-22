@@ -424,6 +424,34 @@ let complete_stream_http
               ; kind = Unknown
               }))
     else (
+      let validate_stream_deadlines () =
+        let open Result.Syntax in
+        let* _ =
+          Http_client.resolve_explicit_deadline
+            ~operation:"with_post_stream"
+            ~parameter:"connect_timeout_s"
+            ~clock
+            ~timeout_s:config.connect_timeout_s
+        in
+        let* _ =
+          Http_client.resolve_explicit_deadline
+            ~operation:"with_post_stream"
+            ~parameter:"first_event_timeout_s"
+            ~clock
+            ~timeout_s:first_event_timeout_s
+        in
+        let* _ =
+          Http_client.resolve_explicit_deadline
+            ~operation:"complete_stream_http"
+            ~parameter:"body_timeout_s"
+            ~clock
+            ~timeout_s:body_timeout_s
+        in
+        Ok ()
+      in
+      match validate_stream_deadlines () with
+      | Error err -> Completion_outcome.after_serialization ~request:serialized (Error err)
+      | Ok () ->
       match Provider_config.resolve_auth_headers config with
       | Error reason ->
         Completion_outcome.after_serialization
@@ -432,10 +460,10 @@ let complete_stream_http
       | Ok initial_auth_headers ->
         let current_auth_headers = ref initial_auth_headers in
         let allow_initial_auth_retry = Provider_config.can_invalidate_credential config in
-        let cache_phase_started_s = ref None in
+        let turn_started_s = Option.map Eio.Time.now clock in
         let resolve_remaining_stream_budgets () =
           let elapsed_s =
-            match clock, !cache_phase_started_s with
+            match clock, turn_started_s with
             | Some c, Some started -> Float.max 0.0 (Eio.Time.now c -. started)
             | None, _ | Some _, None -> 0.0
           in
@@ -449,11 +477,11 @@ let complete_stream_http
                 if Float.compare remaining 0.0 <= 0
                 then
                   Error
-                    (Printf.sprintf
-                       "%s deadline exceeded after %.3fs (including explicit \
-                        cachedContents setup)"
-                       knob_name
-                       b)
+                    ( knob_name
+                    , Printf.sprintf
+                        "%s deadline exceeded after %.3fs"
+                        knob_name
+                        b )
                 else Ok (Some remaining)
               | Some _ | None -> Ok budget_opt
             in
@@ -725,7 +753,7 @@ let complete_stream_http
       in
       let auth_headers = !current_auth_headers in
       match resolve_remaining_stream_budgets () with
-      | Error message ->
+      | Error (knob_name, message) ->
         let err = Http_client.TimeoutError { message; phase = Http_client.First_token } in
         observe_wire_once ();
         emit_stream_event on_event (Types.Timeout message);
@@ -735,7 +763,7 @@ let complete_stream_http
         publish_summary
           ~terminal:
             (Telemetry_event.Terminal_error
-               "first_event_timeout_s_exceeded:awaiting_first_event")
+               (Printf.sprintf "%s_exceeded:awaiting_first_event" knob_name))
           ();
         Error err
       | Ok (eff_first_event_timeout_s, eff_body_timeout_s) ->
@@ -1542,6 +1570,7 @@ let complete_stream_http
         publish_summary ~terminal ();
         Error err
     in
+    let cache_auth_invalidated = ref false in
     let resolve_gemini_explicit_cache () =
       match
         serialized.Complete_common.http_codec,
@@ -1564,35 +1593,32 @@ let complete_stream_http
              reason;
            None
          | Ok prefix ->
-           cache_phase_started_s := Option.map Eio.Time.now clock;
            let min_opt a b =
              match a, b with
              | Some x, Some y -> Some (Float.min x y)
              | Some x, None | None, Some x -> Some x
              | None, None -> None
            in
-           let timeout_s =
-             match clock with
-             | None -> None
-             | Some _ ->
-               (match
-                  min_opt
-                    config.connect_timeout_s
-                    (min_opt first_event_timeout_s body_timeout_s)
-                with
-                | Some t when Float.is_finite t && Float.compare t 0.0 > 0 -> Some t
-                | Some _ | None -> None)
-           in
-           Gemini_context_cache.resolve_or_create
-             ~net
-             ?clock
-             ?timeout_s
-             ?connection_cache
-             ~config
-             ~auth_headers:!current_auth_headers
-             ~ttl_s
-             ~prefix
-             ())
+           (match resolve_remaining_stream_budgets () with
+            | Error _ -> None
+            | Ok (eff_first_event, eff_body) ->
+              let timeout_s =
+                match clock with
+                | None -> None
+                | Some _ ->
+                  min_opt config.connect_timeout_s (min_opt eff_first_event eff_body)
+              in
+              Gemini_context_cache.resolve_or_create
+                ~net
+                ?clock
+                ?timeout_s
+                ?connection_cache
+                ~on_auth_invalidated:(fun () -> cache_auth_invalidated := true)
+                ~config
+                ~auth_headers:!current_auth_headers
+                ~ttl_s
+                ~prefix
+                ()))
       | ( Provider_http_codec.Gemini_generate_content
         | Provider_http_codec.Anthropic_messages
         | Provider_http_codec.Openai_chat
@@ -1610,11 +1636,24 @@ let complete_stream_http
     let final_serialized, result =
       match resolve_gemini_explicit_cache () with
       | None ->
-        ( serialized
-        , dispatch_stream_once
-            ~allow_cached_fallback:false
-            ~allow_auth_retry:allow_initial_auth_retry
-            serialized )
+        if !cache_auth_invalidated
+        then (
+          match Provider_config.resolve_auth_headers config with
+          | Ok fresh_auth_headers ->
+            current_auth_headers := fresh_auth_headers;
+            ( serialized
+            , dispatch_stream_once
+                ~allow_cached_fallback:false
+                ~allow_auth_retry:false
+                serialized )
+          | Error reason ->
+            serialized, Error (Http_client.AcceptRejected { reason }))
+        else
+          ( serialized
+          , dispatch_stream_once
+              ~allow_cached_fallback:false
+              ~allow_auth_retry:allow_initial_auth_retry
+              serialized )
       | Some handle ->
         (match
            serialize_gemini_cached_http_request

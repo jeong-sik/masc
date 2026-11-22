@@ -75,11 +75,18 @@ val check_catalog_row
 type provider_materialization = private
   { provider_config : Llm_provider.Provider_config.t
   ; credential_admission : Runtime_credential_selection.admission
+  ; has_catalog_model_row : bool
+      (** [true] only when an exact catalog [Model_row] (not a provider-wide
+          preset or absence) answered for this binding at materialization. *)
   }
 
 type execution_materialization = private
   { execution : Runtime_execution.t
   ; credential_admission : Runtime_credential_selection.admission option
+  ; has_catalog_model_row : bool
+      (** [true] only for HTTP [Agent_core] bindings backed by an exact catalog
+          [Model_row]; [false] for provider presets, uncatalogued HTTP models,
+          and official clients. *)
   }
 (** HTTP executions always carry [Some] selected admission. [None] belongs
     only to official clients, which own their credentials separately. *)

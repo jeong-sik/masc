@@ -496,6 +496,9 @@ tools-support = true
 streaming = true
 reasoning-effort = "low"
 
+[models.codex-gpt-5-6.capabilities]
+supports-image-input = true
+
 [codex_subscription.codex-gpt-5-6]
 wizard-default = true
 
@@ -2489,6 +2492,9 @@ tools-support = true
 thinking-support = true
 streaming = true
 
+[models.acp-kimi-k3.capabilities]
+supports-image-input = true
+
 [kimi_acp.acp-kimi-k3]
 
 [models.acp-kimi-k3-256k]
@@ -2497,6 +2503,9 @@ max-context = 262144
 tools-support = true
 thinking-support = true
 streaming = true
+
+[models.acp-kimi-k3-256k.capabilities]
+supports-image-input = true
 
 [kimi_acp.acp-kimi-k3-256k]
 
@@ -2507,6 +2516,9 @@ tools-support = true
 thinking-support = true
 streaming = true
 
+[models.acp-kimi-for-coding.capabilities]
+supports-image-input = true
+
 [kimi_acp.acp-kimi-for-coding]
 
 [models.acp-kimi-for-coding-highspeed]
@@ -2515,6 +2527,9 @@ max-context = 1048576
 tools-support = true
 thinking-support = true
 streaming = true
+
+[models.acp-kimi-for-coding-highspeed.capabilities]
+supports-image-input = true
 
 [kimi_acp.acp-kimi-for-coding-highspeed]
 

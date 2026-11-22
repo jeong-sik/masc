@@ -85,6 +85,7 @@ val run :
 
 module For_testing : sig
   val acp_error_to_core_error : Runtime_acp_client.error -> Agent_core.Error.t
+  val should_evict_persistent_child_on_error : Runtime_acp_client.error -> bool
 
   val recovery_failure_of_acp_error
     :  Runtime_acp_client.error

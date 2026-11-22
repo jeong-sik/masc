@@ -2540,12 +2540,167 @@ let test_anthropic_reference_projection_precedes_prefix_digest () =
     (prefix [ stale ] = prefix [ fallback ])
 ;;
 
+let test_anthropic_and_responses_degrade_image_messages_when_unsupported () =
+  let contains_sub ~needle haystack =
+    let nlen = String.length needle in
+    let hlen = String.length haystack in
+    if nlen = 0 then true
+    else
+      let rec loop i =
+        i + nlen <= hlen
+        && (String.equal (String.sub haystack i nlen) needle || loop (i + 1))
+      in
+      loop 0
+  in
+  let png_b64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+  in
+  let messages : message list =
+    [ { origin = Conversation
+      ; role = User
+      ; content =
+          [ Text "describe this"
+          ; Image { media_type = "image/png"; source = Base64 png_b64 }
+          ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; { origin = Conversation
+      ; role = Assistant
+      ; content = [ ToolUse { id = "call_img_1"; name = "shot"; input = `Assoc [] } ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; { origin = Conversation
+      ; role = Tool
+      ; content =
+          [ ToolResult
+              { tool_use_id = "call_img_1"
+              ; content = "screenshot captured"
+              ; outcome = Tool_succeeded
+              ; json = None
+              ; content_blocks =
+                  Some
+                    [ Text "caption"
+                    ; Image { media_type = "image/jpeg"; source = Base64 png_b64 }
+                    ]
+              }
+          ]
+      ; name = None
+      ; tool_call_id = Some "call_img_1"
+      ; metadata = []
+      }
+    ]
+  in
+  (* 1. Anthropic Messages wire *)
+  let anth_text_only_caps =
+    { Llm_provider.Capabilities.anthropic_capabilities with
+      supports_image_input = false
+    ; supports_multimodal_inputs = false
+    ; max_output_tokens = Some 4096
+    }
+  in
+  let anth_text_only =
+    PC.make
+      ~kind:Anthropic
+      ~model_id:"deepseek-v4-flash"
+      ~base_url:"https://api.deepseek.com/anthropic"
+      ~max_tokens:1024
+      ~model_capabilities_override:anth_text_only_caps
+      ()
+  in
+  let anth_body_degraded = BA.build_request ~config:anth_text_only ~messages () in
+  Alcotest.(check bool)
+    "Anthropic text-only omits raw image wire blocks"
+    false
+    (contains_sub ~needle:{|"type":"image"|} anth_body_degraded);
+  Alcotest.(check bool)
+    "Anthropic text-only replaces top-level image with omitted placeholder"
+    true
+    (contains_sub
+       ~needle:"[image omitted: this model does not accept image input (media_type image/png)]"
+       anth_body_degraded);
+  Alcotest.(check bool)
+    "Anthropic text-only replaces tool_result image with omitted placeholder"
+    true
+    (contains_sub
+       ~needle:"[image omitted: this model does not accept image input (media_type image/jpeg)]"
+       anth_body_degraded);
+  let anth_vision =
+    PC.make
+      ~kind:Anthropic
+      ~model_id:"claude-sonnet-5"
+      ~base_url:"https://api.anthropic.com"
+      ~max_tokens:1024
+      ~model_capabilities_override:
+        { anth_text_only_caps with supports_image_input = true }
+      ()
+  in
+  let anth_body_vision = BA.build_request ~config:anth_vision ~messages () in
+  Alcotest.(check bool)
+    "Anthropic vision retains raw image wire blocks"
+    true
+    (contains_sub ~needle:{|"type":"image"|} anth_body_vision);
+  (* 2. OpenAI Responses wire *)
+  let resp_text_only_caps =
+    { Llm_provider.Capabilities.openai_compat_chat_capabilities with
+      supports_image_input = false
+    ; supports_multimodal_inputs = false
+    }
+  in
+  let resp_text_only =
+    PC.make
+      ~kind:OpenAI_compat
+      ~model_id:"deepseek-v4-flash"
+      ~base_url:"https://api.deepseek.com/v1"
+      ~request_path:"/v1/responses"
+      ~model_capabilities_override:resp_text_only_caps
+      ()
+  in
+  let resp_body_degraded = BOR.build_request ~config:resp_text_only ~messages () in
+  Alcotest.(check bool)
+    "OpenAI Responses text-only omits raw input_image wire blocks"
+    false
+    (contains_sub ~needle:{|"type":"input_image"|} resp_body_degraded);
+  Alcotest.(check bool)
+    "OpenAI Responses text-only replaces top-level image with omitted placeholder"
+    true
+    (contains_sub
+       ~needle:"[image omitted: this model does not accept image input (media_type image/png)]"
+       resp_body_degraded);
+  Alcotest.(check bool)
+    "OpenAI Responses text-only replaces tool_result image with omitted placeholder"
+    true
+    (contains_sub
+       ~needle:"[image omitted: this model does not accept image input (media_type image/jpeg)]"
+       resp_body_degraded);
+  let resp_vision =
+    PC.make
+      ~kind:OpenAI_compat
+      ~model_id:"gpt-5.4"
+      ~base_url:"https://api.openai.com/v1"
+      ~request_path:"/v1/responses"
+      ~model_capabilities_override:
+        { resp_text_only_caps with supports_image_input = true }
+      ()
+  in
+  let resp_body_vision = BOR.build_request ~config:resp_vision ~messages () in
+  Alcotest.(check bool)
+    "OpenAI Responses vision retains raw input_image wire blocks"
+    true
+    (contains_sub ~needle:{|"type":"input_image"|} resp_body_vision)
+;;
+
 let () =
   let open Alcotest in
   run
     "provider_complete"
     [ ( "anthropic_build_request"
       , [ test_case "basic body" `Quick test_anthropic_basic_body
+        ; test_case "Anthropic & Responses degrade images when supports_image_input=false" `Quick
+            test_anthropic_and_responses_degrade_image_messages_when_unsupported
         ; test_case "with system" `Quick test_anthropic_with_system
         ; test_case "with thinking" `Quick test_anthropic_with_thinking
         ; test_case

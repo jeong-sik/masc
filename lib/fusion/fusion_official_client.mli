@@ -54,6 +54,20 @@ module For_testing : sig
   (** What a blocked Claude Code panel turn records about its candidate: a
       spent window is a hard quota until its stated reset, a throttle is a
       rate limit with no stated wait. *)
+
+  val antigravity_standing_of_error
+    :  now:float
+    -> Runtime_antigravity.error
+    -> Runtime_candidate_standing.observation option
+  (** Standing observation recorded on Antigravity CLI turn failures carrying
+      hard quota, rate-limit, or auth refusals. *)
+
+  val acp_standing_of_error
+    :  now:float
+    -> Runtime_acp_client.error
+    -> Runtime_candidate_standing.observation option
+  (** Standing observation recorded on ACP RPC failures carrying hard quota,
+      rate-limit, or auth refusals. *)
 end
 
 val sweep_stale_antigravity_panel_roots : ?temp_dir:string -> unit -> unit

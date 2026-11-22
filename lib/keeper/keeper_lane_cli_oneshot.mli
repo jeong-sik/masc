@@ -63,18 +63,20 @@ type failure =
 val failure_to_string : failure -> string
 
 val refused_for_binding_rest : failure -> bool
-(** [true] only when the client refused for its account's standing, read from
-    its typed failure: Claude [Quota_blocked], or a Codex turn tagged
-    [Usage_limit_exceeded], [Rate_limit_exceeded] or [Server_overloaded]. Such
-    a refusal says nothing about the prompt, so the same prompt can be served
-    once the account frees. A [Held] slot is that refusal without the call,
-    so it is [true] too. Every other failure, including an Antigravity
-    refusal (its quota arrives only as turn text), is [false]. *)
+(** [true] only when the client refused for its account's standing: Claude
+    [Quota_blocked], a Codex turn refused for spent usage
+    ([Usage_limit_exceeded], [Session_budget_exceeded]), [Rate_limit_exceeded],
+    or [Server_overloaded], or an Antigravity / ACP refusal classified as hard
+    quota or rate-limited. Such a refusal says nothing about the prompt, so
+    the same prompt can be served once the account frees. A [Held] slot is
+    that refusal without the call, so it is [true] too. Every other failure is
+    [false]. *)
 
 val refused_for_input_size : failure -> bool
 (** [true] only when the client refused because the prompt exceeded the model's
-    context window, read from its typed failure: Claude
-    [Context_window_exceeded] or Codex [Context_window_exceeded]. *)
+    context window: Claude [Context_window_exceeded], Codex
+    [Context_window_exceeded], Antigravity [Context_window_exceeded], or an
+    ACP context-overflow RPC error. *)
 
 type input_size_refusal =
   | Input_over_limit of

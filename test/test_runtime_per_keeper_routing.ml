@@ -3372,6 +3372,112 @@ let test_runtime_inventory_surfaces_effective_capabilities () =
       (caps |> J.member "modality_priority" |> J.to_string))
 ;;
 
+let test_runtime_inventory_single_sources_vision_and_cli_capabilities () =
+  let toml =
+    {|
+[runtime]
+default = "claude.claude-vis"
+
+[providers.claude]
+protocol = "messages-http"
+endpoint = "https://api.anthropic.com"
+credentials = { type = "inline", value = "synthetic-no-network" }
+
+[providers.deepseek]
+protocol = "openai-compatible-http"
+endpoint = "https://api.deepseek.com/v1"
+credentials = { type = "inline", value = "synthetic-no-network" }
+
+[providers.codex]
+protocol = "codex-app-server"
+command = "/usr/bin/true"
+is-non-interactive = true
+
+[providers.kimi_acp]
+protocol = "acp"
+driver = "kimi_code"
+command = "/usr/bin/true"
+args = ["acp"]
+is-non-interactive = true
+
+[models.claude-vis]
+api-name = "claude-sonnet-5"
+
+[models.deepseek-txt]
+api-name = "deepseek-v4-flash"
+
+[models.codex-vis]
+api-name = "gpt-5.6"
+max-context = 400000
+tools-support = true
+thinking-support = true
+streaming = true
+[models.codex-vis.capabilities]
+supports-image-input = true
+
+[models.acp-kimi-vis]
+api-name = "k3"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+[models.acp-kimi-vis.capabilities]
+supports-image-input = true
+
+[claude.claude-vis]
+[deepseek.deepseek-txt]
+[codex.codex-vis]
+[kimi_acp.acp-kimi-vis]
+|}
+  in
+  with_temp_dir "runtime-info-vision-ssot-" (fun dir ->
+    let path = Filename.concat dir "runtime.toml" in
+    write_file path toml;
+    let saved = Runtime.For_testing.snapshot () in
+    Fun.protect ~finally:(fun () -> Runtime.For_testing.restore saved) (fun () ->
+      (match Runtime.init_default ~config_path:path with
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail);
+      let inv = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+      let providers = inv |> J.member "providers" |> J.to_list in
+      let find_entry id =
+        List.find
+          (fun p -> String.equal id (p |> J.member "runtime_id" |> J.to_string))
+          providers
+      in
+      let check_vision_parity id expected =
+        let rt = Option.get (Runtime.get_runtime_by_id id) in
+        let entry = find_entry id in
+        let eff = entry |> J.member "effective_capabilities" in
+        Alcotest.(check bool) (id ^ " Runtime_agent.runtime_accepts_image_input")
+          expected (Runtime_agent.runtime_accepts_image_input ~runtime:rt);
+        Alcotest.(check bool) (id ^ " inventory supports_image_input")
+          expected (entry |> J.member "supports_image_input" |> J.to_bool);
+        Alcotest.(check bool) (id ^ " effective_capabilities supports_image_input")
+          expected (eff |> J.member "supports_image_input" |> J.to_bool)
+      in
+      check_vision_parity "claude.claude-vis" true;
+      check_vision_parity "deepseek.deepseek-txt" false;
+      check_vision_parity "codex.codex-vis" true;
+      check_vision_parity "kimi_acp.acp-kimi-vis" true;
+      (* Official clients / ACP expose real capability booleans while unverified stays available=false *)
+      List.iter
+        (fun id ->
+           let entry = find_entry id in
+           let eff = entry |> J.member "effective_capabilities" in
+           Alcotest.(check bool) (id ^ " tools_support") true
+             (entry |> J.member "tools_support" |> J.to_bool);
+           Alcotest.(check bool) (id ^ " thinking_support") true
+             (entry |> J.member "thinking_support" |> J.to_bool);
+           Alcotest.(check bool) (id ^ " streaming") true
+             (entry |> J.member "streaming" |> J.to_bool);
+           Alcotest.(check bool) (id ^ " effective_capabilities supports_tools") true
+             (eff |> J.member "supports_tools" |> J.to_bool);
+           Alcotest.(check bool) (id ^ " unverified official client keeps available=false") false
+             (entry |> J.member "available" |> J.to_bool))
+        [ "codex.codex-vis"; "kimi_acp.acp-kimi-vis" ]))
+;;
+
 let test_runtime_inventory_surfaces_request_config () =
   with_runtime_thinking (fun () ->
     let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
@@ -4756,6 +4862,10 @@ let () =
             "runtime inventory surfaces AGENT_CORE effective capabilities"
             `Quick
             test_runtime_inventory_surfaces_effective_capabilities
+        ; Alcotest.test_case
+            "runtime inventory single-sources vision and CLI/ACP capabilities"
+            `Quick
+            test_runtime_inventory_single_sources_vision_and_cli_capabilities
         ; Alcotest.test_case
             "runtime inventory surfaces AGENT_CORE request config"
             `Quick

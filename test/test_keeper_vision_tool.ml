@@ -3123,7 +3123,88 @@ let run_candidate_standing () =
   test_vision_every_runtime_held_answers_held ();
   test_vision_held_runtime_is_not_called_by_any_path ()
 
+let test_acp_failure_advances_timeout_standing_and_exception_handling () =
+  let module F = Masc.Fusion_official_client in
+  let module Acp = Runtime_acp_client in
+  let can_advance = Vt.For_testing.official_failure_can_advance in
+  (* P1 #9a: retryable ACP failures advance to the next vision candidate *)
+  assert (can_advance (F.Acp_failure (Acp.Spawn_refused (Process_eio.Executable_not_found "kimi"))));
+  assert (can_advance (F.Acp_failure (Acp.Invalid_config "image_input_unsupported")));
+  assert (can_advance (F.Acp_failure (Acp.Protocol_error { stage = "prompt"; detail = "eof" })));
+  assert (can_advance (F.Acp_failure (Acp.Timeout { stage = "prompt"; timeout_s = 30.0 })));
+  assert (can_advance (F.Acp_failure (Acp.Process_exited { detail = "exited 1"; stderr_tail = "" })));
+  assert (can_advance (F.Acp_failure Acp.Client_closed));
+  List.iter
+    (fun message ->
+       assert
+         (can_advance
+            (F.Acp_failure (Acp.Rpc_error { method_name = "session/prompt"; code = -32000; message }))))
+    [ "HTTP 429 rate limit exceeded"
+    ; "exceeded_current_quota_error"
+    ; "HTTP 401 unauthorized"
+    ; "HTTP 403 forbidden"
+    ; "HTTP 503 service unavailable"
+    ; "prompt exceeds maximum context length"
+    ];
+  assert
+    (not
+       (can_advance
+          (F.Acp_failure
+             (Acp.Rpc_error { method_name = "session/prompt"; code = -32602; message = "invalid json params" }))));
+  (* P1 #9b: TimeoutError observes uniform standing & advances; ordinary exceptions log/format Printexc; Sys.Break re-raises *)
+  with_temp_runtime_toml vision_output_limit_runtime_toml (fun () ->
+    let calls = ref [] in
+    let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+      calls := config.Llm_provider.Provider_config.model_id :: !calls;
+      if String.equal config.model_id "vision-a"
+      then Error (Llm_provider.Http_client.TimeoutError { message = "gateway timed out"; phase = Llm_provider.Http_client.Wall_clock })
+      else Ok (ok_response "recovered after timeout")
+    in
+    let outcome =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.run_vision ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env) ~query:"read" ~media_type:"image/png"
+            ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
+    in
+    assert (List.rev !calls = [ "vision-a"; "vision-b" ]);
+    (match outcome with
+     | Vt.Vo_ok r -> assert (String.equal r.runtime_id "p2.vision-b")
+     | _ -> failwith "expected failover after TimeoutError");
+    (* Ordinary exception surfaces Printexc.to_string *)
+    let outcome_fail =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.run_vision
+            ~complete:(fun ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () ->
+              failwith "synthetic_vision_boom")
+            ~sw ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
+            ~query:"read" ~media_type:"image/png" ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
+    in
+    (match outcome_fail with
+     | Vt.Vo_provider { detail; _ } ->
+       assert (String_util.contains_substring detail "synthetic_vision_boom")
+     | _ -> failwith "expected Vo_provider carrying exception text");
+    (* Reserved Sys.Break must NOT be swallowed *)
+    let reraised =
+      try
+        ignore
+          (Eio_main.run (fun env ->
+             Eio.Switch.run (fun sw ->
+               Vt.run_vision
+                 ~complete:(fun ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () ->
+                   raise Sys.Break)
+                 ~sw ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
+                 ~query:"read" ~media_type:"image/png" ~bytes:"\x89PNG\r\n\x1a\nraw" ())));
+        false
+      with
+      | Sys.Break -> true
+    in
+    assert reraised)
+;;
+
 let run_all () =
+  test_acp_failure_advances_timeout_standing_and_exception_handling ();
   test_native_image_admission_continues_turn ();
   test_native_image_read_artifact_and_authority ();
   test_native_image_admission ();

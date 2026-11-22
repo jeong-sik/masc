@@ -37,9 +37,9 @@ let failure_to_string = function
     Printf.sprintf "cli lane slot %s answered non-JSON: %s" runtime_id detail
 
 (* A client refusal that names the account's standing: Claude reports its
-   quota blocked; Codex tags a failed turn with a usage or rate limit spent,
-   or its server overloaded. Antigravity reports RESOURCE_EXHAUSTED only as
-   turn text, which is not read here, so its refusals are not rest. *)
+   quota blocked; Codex tags a failed turn with spent usage, session budget,
+   rate limit, or server overload; Antigravity Turn_failed and ACP Rpc_error
+   surface classified quota / rate-limit refusals. *)
 let claude_error_is_binding_rest : Runtime_claude_code.error -> bool = function
   | Runtime_claude_code.Quota_blocked _ -> true
   | Runtime_claude_code.Invalid_config _
@@ -61,9 +61,9 @@ let codex_info_is_binding_rest :
   Runtime_codex_app_server.Codex_error_info.t -> bool
   = function
   | Runtime_codex_app_server.Codex_error_info.Usage_limit_exceeded
+  | Runtime_codex_app_server.Codex_error_info.Session_budget_exceeded
   | Runtime_codex_app_server.Codex_error_info.Rate_limit_exceeded
   | Runtime_codex_app_server.Codex_error_info.Server_overloaded -> true
-  | Runtime_codex_app_server.Codex_error_info.Session_budget_exceeded
   | Runtime_codex_app_server.Codex_error_info.Cyber_policy
   | Runtime_codex_app_server.Codex_error_info.Misalignment_policy_violation
   | Runtime_codex_app_server.Codex_error_info.Internal_server_error
@@ -80,7 +80,10 @@ let codex_info_is_binding_rest :
   | Runtime_codex_app_server.Codex_error_info.Unrecognized _ -> false
 ;;
 
-let codex_error_is_binding_rest : Runtime_codex_app_server.error -> bool = function
+let codex_error_is_binding_rest (error : Runtime_codex_app_server.error) : bool =
+  Runtime_codex_app_server.refused_for_spent_usage error
+  ||
+  match error with
   | Runtime_codex_app_server.Turn_failed { codex_error_info = Some info; detail = _ } ->
     codex_info_is_binding_rest info
   | Runtime_codex_app_server.Turn_failed { codex_error_info = None; detail = _ }
@@ -101,20 +104,47 @@ let codex_error_is_binding_rest : Runtime_codex_app_server.error -> bool = funct
   | Runtime_codex_app_server.Timeout _ -> false
 ;;
 
+let rpc_error_class_is_binding_rest = function
+  | Runtime_acp_client.Rpc_hard_quota
+  | Runtime_acp_client.Rpc_rate_limited -> true
+  | Runtime_acp_client.Rpc_context_overflow
+  | Runtime_acp_client.Rpc_auth_error
+  | Runtime_acp_client.Rpc_authorization_error
+  | Runtime_acp_client.Rpc_provider_unavailable
+  | Runtime_acp_client.Rpc_other -> false
+;;
+
 let antigravity_error_is_binding_rest : Runtime_antigravity.error -> bool = function
+  | Runtime_antigravity.Turn_failed detail ->
+    Runtime_acp_client.classify_rpc_error
+      ~method_name:"antigravity/turn"
+      ~code:0
+      ~message:detail
+    |> rpc_error_class_is_binding_rest
   | Runtime_antigravity.Invalid_config _
   | Runtime_antigravity.Spawn_refused _
   | Runtime_antigravity.Spawn_capacity_busy _
   | Runtime_antigravity.Protocol_error _
   | Runtime_antigravity.State_callback_failed _
   | Runtime_antigravity.Context_window_exceeded _
-  | Runtime_antigravity.Turn_failed _
   | Runtime_antigravity.Result_not_completed _
   | Runtime_antigravity.Actions_denied _
   | Runtime_antigravity.Process_exited _
   | Runtime_antigravity.Child_fd_ceiling_exceeded _
   | Runtime_antigravity.Unhandled_exception _
   | Runtime_antigravity.Timeout _ -> false
+;;
+
+let acp_error_is_binding_rest : Runtime_acp_client.error -> bool = function
+  | Runtime_acp_client.Rpc_error { method_name; code; message } ->
+    Runtime_acp_client.classify_rpc_error ~method_name ~code ~message
+    |> rpc_error_class_is_binding_rest
+  | Runtime_acp_client.Invalid_config _
+  | Runtime_acp_client.Spawn_refused _
+  | Runtime_acp_client.Protocol_error _
+  | Runtime_acp_client.Timeout _
+  | Runtime_acp_client.Process_exited _
+  | Runtime_acp_client.Client_closed -> false
 ;;
 
 let refused_for_binding_rest = function
@@ -130,9 +160,10 @@ let refused_for_binding_rest = function
   | Execution_failed
       { cause = Fusion_official_client.Antigravity_failure error; runtime_id = _ } ->
     antigravity_error_is_binding_rest error
+  | Execution_failed { cause = Fusion_official_client.Acp_failure error; runtime_id = _ } ->
+    acp_error_is_binding_rest error
   | Execution_failed { cause = Fusion_official_client.Missing_reply; runtime_id = _ }
   | Execution_failed { cause = Fusion_official_client.Setup_failure _; runtime_id = _ }
-  | Execution_failed { cause = Fusion_official_client.Acp_failure _; runtime_id = _ }
   | Unknown_runtime _
   | Not_an_official_client _
   | Invalid_json_output _
@@ -201,9 +232,25 @@ let refused_for_input_size = function
   | Execution_failed
       { cause = Fusion_official_client.Antigravity_failure error; runtime_id = _ } ->
     antigravity_error_is_input_size error
+  | Execution_failed
+      { cause =
+          Fusion_official_client.Acp_failure
+            (Runtime_acp_client.Rpc_error { method_name; code; message })
+      ; runtime_id = _
+      } -> Runtime_acp_client.is_context_overflow_rpc_error ~method_name ~code ~message
+  | Execution_failed
+      { cause =
+          Fusion_official_client.Acp_failure
+            ( Runtime_acp_client.Invalid_config _
+            | Runtime_acp_client.Spawn_refused _
+            | Runtime_acp_client.Protocol_error _
+            | Runtime_acp_client.Timeout _
+            | Runtime_acp_client.Process_exited _
+            | Runtime_acp_client.Client_closed )
+      ; runtime_id = _
+      }
   | Execution_failed { cause = Fusion_official_client.Missing_reply; runtime_id = _ }
   | Execution_failed { cause = Fusion_official_client.Setup_failure _; runtime_id = _ }
-  | Execution_failed { cause = Fusion_official_client.Acp_failure _; runtime_id = _ }
   | Unknown_runtime _
   | Not_an_official_client _
   | Invalid_json_output _

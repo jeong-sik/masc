@@ -310,6 +310,33 @@ val is_context_overflow_rpc_error : method_name:string -> code:int -> message:st
 (** True when an ACP JSON-RPC error reports a provider/model context-window or
     prompt-length overflow that should enter shrink/compaction recovery. *)
 
+type rpc_error_class =
+  | Rpc_context_overflow
+  | Rpc_hard_quota
+  | Rpc_rate_limited
+  | Rpc_auth_error
+  | Rpc_authorization_error
+  | Rpc_provider_unavailable
+  | Rpc_other
+
+val classify_rpc_error : method_name:string -> code:int -> message:string -> rpc_error_class
+(** Classify an upstream ACP RPC / official-client error into a closed
+    provider-refusal class so callers can record quota windows, candidate rate
+    backpressure, auth refusals, and failover without duplicating wire checks. *)
+
+val image_input_unsupported_detail : driver -> string
+(** Canonical refusal detail when an ACP server advertises
+    [agentCapabilities.promptCapabilities.image = false]. *)
+
+val validate_prompt_blocks
+  :  driver:driver
+  -> capabilities:agent_capabilities
+  -> prompt_block list
+  -> (unit, error) result
+(** Gate [Image_block] emission on [capabilities.image_prompt] and validate
+    image media types and base64 payloads via
+    {!Runtime_official_client_tool.validate_image_inputs} before sending JSON-RPC. *)
+
 (** {1 Persistent client handle} *)
 
 type t

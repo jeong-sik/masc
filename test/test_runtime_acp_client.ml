@@ -2028,6 +2028,617 @@ let test_keeper_typed_tool_call_effect_fencing () =
     (fence ~native_posture:Runtime_native_tools.Native_full native_read)
 ;;
 
+let test_acp_rpc_error_classification_pool_preservation_and_scopes () =
+  let rpc message =
+    Runtime_acp_client.Rpc_error { method_name = "session/prompt"; code = -32000; message }
+  in
+  let check_core label err pred =
+    let core = Keeper_acp_runtime.For_testing.acp_error_to_core_error err in
+    check bool (label ^ ": " ^ Agent_core.Error.to_string core) true (pred core)
+  in
+  (* P0 #3: Quota / rate-limit / auth / unavailable / overflow RPC classification *)
+  let quota_err = rpc "exceeded_current_quota_error: billing credits exhausted" in
+  let quota_402_err = rpc "HTTP 402 Payment Required: insufficient credits" in
+  let resource_exhausted_err = rpc "RESOURCE_EXHAUSTED: usage limit reached" in
+  let rate_err = rpc "HTTP 429 Too Many Requests: rate limit exceeded" in
+  let auth_err = rpc "HTTP 401 Unauthorized: invalid API key" in
+  let authz_err = rpc "HTTP 403 Forbidden: access denied" in
+  let unavail_err = rpc "HTTP 503 Service Unavailable: upstream overloaded" in
+  let overflow_err = rpc "prompt exceeds maximum context length" in
+  let other_err = rpc "internal schema parse failure" in
+  check_core "exceeded_current_quota_error -> HardQuota" quota_err (function
+    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.HardQuota _) -> true | _ -> false);
+  check_core "402 -> HardQuota" quota_402_err (function
+    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.HardQuota _) -> true | _ -> false);
+  check_core "RESOURCE_EXHAUSTED -> HardQuota" resource_exhausted_err (function
+    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.HardQuota _) -> true | _ -> false);
+  check_core "429 -> RateLimit" rate_err (function
+    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.RateLimit _) -> true | _ -> false);
+  check_core "401 -> AuthError" auth_err (function
+    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.AuthError _) -> true | _ -> false);
+  check_core "403 -> AuthorizationError" authz_err (function
+    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.AuthorizationError _) -> true | _ -> false);
+  check_core "503 -> ProviderUnavailable" unavail_err (function
+    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.ProviderUnavailable _) -> true | _ -> false);
+  check_core "context length -> ContextOverflow" overflow_err (function
+    | Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _) -> true | _ -> false);
+  check_core "other -> ProviderReportedError" other_err (function
+    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.ProviderReportedError _) -> true | _ -> false);
+  (* Precedence regression (#354 P1 #1): HTTP status codes and explicit quota/rate/auth
+     signals MUST take precedence over broad overflow substrings like "token limit",
+     "request too large", and "exceeds the maximum". *)
+  let tpm_429_code =
+    Runtime_acp_client.Rpc_error
+      { method_name = "session/prompt"
+      ; code = 429
+      ; message = "Rate limit reached on tokens per min (TPM): Request too large for TPM limit"
+      }
+  in
+  let tpm_429_msg = rpc "HTTP 429: exceeded your token limit per minute" in
+  let quota_402_code =
+    Runtime_acp_client.Rpc_error
+      { method_name = "session/prompt"
+      ; code = 402
+      ; message = "monthly token limit exceeded"
+      }
+  in
+  let quota_exceeds_max = rpc "quota_exceeded: usage exceeds the maximum allowed" in
+  let auth_401_token_limit =
+    Runtime_acp_client.Rpc_error
+      { method_name = "session/prompt"
+      ; code = 401
+      ; message = "unauthorized: token limit"
+      }
+  in
+  let unavail_503_large =
+    Runtime_acp_client.Rpc_error
+      { method_name = "session/prompt"
+      ; code = 503
+      ; message = "service unavailable: request too large"
+      }
+  in
+  check_core "429 TPM with 'Request too large' -> RateLimit (not overflow)" tpm_429_code (function
+    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.RateLimit _) -> true | _ -> false);
+  check_core "HTTP 429 with 'token limit' -> RateLimit (not overflow)" tpm_429_msg (function
+    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.RateLimit _) -> true | _ -> false);
+  check_core "402 with 'token limit' -> HardQuota (not overflow)" quota_402_code (function
+    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.HardQuota _) -> true | _ -> false);
+  check_core "quota_exceeded with 'exceeds the maximum' -> HardQuota (not overflow)" quota_exceeds_max (function
+    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.HardQuota _) -> true | _ -> false);
+  check_core "401 with 'token limit' -> AuthError (not overflow)" auth_401_token_limit (function
+    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.AuthError _) -> true | _ -> false);
+  check_core "503 with 'request too large' -> ProviderUnavailable (not overflow)" unavail_503_large (function
+    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.ProviderUnavailable _) -> true | _ -> false);
+  List.iter
+    (fun (label, err) ->
+       match err with
+       | Runtime_acp_client.Rpc_error { method_name; code; message } ->
+         check bool (label ^ " is_context_overflow_rpc_error=false") false
+           (Runtime_acp_client.is_context_overflow_rpc_error ~method_name ~code ~message);
+         check bool (label ^ " recovery_failure is Provider_rejected (not Input_rejected)") true
+           (Keeper_acp_runtime.For_testing.recovery_failure_of_acp_error err
+            = Keeper_official_client_session_store.Provider_rejected)
+       | _ -> fail "expected Rpc_error")
+    [ "429 TPM", tpm_429_code
+    ; "HTTP 429 token limit", tpm_429_msg
+    ; "402 monthly token limit", quota_402_code
+    ; "quota_exceeded max", quota_exceeds_max
+    ];
+  check bool "429 TPM preserves persistent ACP child" false
+    (Keeper_acp_runtime.For_testing.should_evict_persistent_child_on_error tpm_429_code);
+  check bool "402 monthly token limit preserves persistent ACP child" false
+    (Keeper_acp_runtime.For_testing.should_evict_persistent_child_on_error quota_402_code);
+  (* Pool preservation: quota / rate-limit RPC refusals must NOT evict healthy persistent child *)
+  check bool "quota refusal preserves persistent ACP child" false
+    (Keeper_acp_runtime.For_testing.should_evict_persistent_child_on_error quota_err);
+  check bool "rate-limit refusal preserves persistent ACP child" false
+    (Keeper_acp_runtime.For_testing.should_evict_persistent_child_on_error rate_err);
+  check bool "auth failure evicts persistent ACP child" true
+    (Keeper_acp_runtime.For_testing.should_evict_persistent_child_on_error auth_err);
+  check bool "timeout evicts persistent ACP child" true
+    (Keeper_acp_runtime.For_testing.should_evict_persistent_child_on_error
+       (Runtime_acp_client.Timeout { stage = "session/prompt"; timeout_s = 120.0 }));
+  (* Fusion official client standing classification for ACP & Antigravity *)
+  let check_standing label obs pred =
+    check bool label true (pred obs)
+  in
+  check_standing "ACP quota standing -> Hard_quota"
+    (Fusion_official_client.For_testing.acp_standing_of_error ~now:100.0 quota_err)
+    (function Some (Runtime_candidate_standing.Hard_quota _) -> true | _ -> false);
+  check_standing "ACP rate standing -> Rate_limited"
+    (Fusion_official_client.For_testing.acp_standing_of_error ~now:100.0 rate_err)
+    (function Some (Runtime_candidate_standing.Rate_limited _) -> true | _ -> false);
+  check_standing "ACP 401 standing -> Credential_refused"
+    (Fusion_official_client.For_testing.acp_standing_of_error ~now:100.0 auth_err)
+    (function Some (Runtime_candidate_standing.Credential_refused _) -> true | _ -> false);
+  check_standing "ACP other standing -> None"
+    (Fusion_official_client.For_testing.acp_standing_of_error ~now:100.0 other_err)
+    Option.is_none;
+  check_standing "Antigravity quota standing -> Hard_quota"
+    (Fusion_official_client.For_testing.antigravity_standing_of_error ~now:100.0
+       (Runtime_antigravity.Turn_failed "RESOURCE_EXHAUSTED: quota exceeded"))
+    (function Some (Runtime_candidate_standing.Hard_quota _) -> true | _ -> false);
+  check_standing "Antigravity 429 standing -> Rate_limited"
+    (Fusion_official_client.For_testing.antigravity_standing_of_error ~now:100.0
+       (Runtime_antigravity.Turn_failed "HTTP 429 rate limit exceeded"))
+    (function Some (Runtime_candidate_standing.Rate_limited _) -> true | _ -> false);
+  check_standing "Antigravity 401 standing -> Credential_refused"
+    (Fusion_official_client.For_testing.antigravity_standing_of_error ~now:100.0
+       (Runtime_antigravity.Turn_failed "HTTP 401 unauthorized"))
+    (function Some (Runtime_candidate_standing.Credential_refused _) -> true | _ -> false);
+  (* Per-driver ACP quota scopes via Runtime_quota_window.scope_of_acp_driver *)
+  let source =
+    {|
+[providers.agy_scope]
+protocol = "acp"
+driver = "antigravity"
+command = "agy"
+args = ["acp"]
+is-non-interactive = true
+
+[providers.kimi_scope]
+protocol = "acp"
+driver = "kimi_code"
+command = "kimi"
+args = ["acp"]
+is-non-interactive = true
+
+[providers.vibe_scope]
+protocol = "acp"
+driver = "mistral_vibe"
+command = "vibe-acp"
+is-non-interactive = true
+
+[models.m]
+api-name = "m"
+max-context = 100000
+
+[agy_scope.m]
+[kimi_scope.m]
+[vibe_scope.m]
+
+[runtime]
+default = "agy_scope.m"
+|}
+  in
+  let cfg = Result.get_ok (Runtime_toml.parse_string source) in
+  let runtimes, _ = Runtime_instance.partition_bindings cfg cfg.bindings in
+  let scope_of id =
+    let rt = List.find (fun (r : Runtime_instance.t) -> String.equal r.id id) runtimes in
+    Runtime_instance.quota_scope_of_runtime rt
+  in
+  check bool "agy uses acp_driver scope" true
+    (Runtime_quota_window.scope_equal
+       (scope_of "agy_scope.m")
+       (Runtime_quota_window.scope_of_acp_driver ~driver:"antigravity"));
+  check bool "kimi uses acp_driver scope" true
+    (Runtime_quota_window.scope_equal
+       (scope_of "kimi_scope.m")
+       (Runtime_quota_window.scope_of_acp_driver ~driver:"kimi_code"));
+  check bool "vibe uses acp_driver scope" true
+    (Runtime_quota_window.scope_equal
+       (scope_of "vibe_scope.m")
+       (Runtime_quota_window.scope_of_acp_driver ~driver:"mistral_vibe"));
+  check bool "kimi and vibe ACP scopes are distinct" false
+    (Runtime_quota_window.scope_equal (scope_of "kimi_scope.m") (scope_of "vibe_scope.m"))
+;;
+
+let test_acp_v1_image_negotiation_and_validation () =
+  let valid_png_b64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+  in
+  let image_blocks =
+    [ Runtime_acp_client.Text_block "inspect"
+    ; Runtime_acp_client.Image_block { mime_type = "image/png"; base64_data = valid_png_b64 }
+    ]
+  in
+  let no_image_caps : Runtime_acp_client.agent_capabilities =
+    { load_session = false
+    ; resume_session = false
+    ; close_session = false
+    ; additional_directories = false
+    ; image_prompt = false
+    ; embedded_context = false
+    ; mcp_http = false
+    ; antigravity_system_prompt_append = false
+    ; antigravity_tier = None
+    }
+  in
+  let with_image_caps = { no_image_caps with image_prompt = true } in
+  (* When server advertises image_prompt = false, Image_block is refused before RPC *)
+  (match
+     Runtime_acp_client.validate_prompt_blocks
+       ~driver:Mistral_vibe ~capabilities:no_image_caps image_blocks
+   with
+   | Error (Runtime_acp_client.Invalid_config detail) ->
+     check string "detail names exact image_input_unsupported reason"
+       (Runtime_acp_client.image_input_unsupported_detail Mistral_vibe)
+       detail
+   | Ok () -> fail "image_prompt=false must reject Image_block"
+   | Error err -> failf "unexpected error: %s" (Runtime_acp_client.error_to_string err));
+  (* Text-only blocks still pass when image_prompt = false *)
+  check bool "text-only passes when image_prompt=false" true
+    (Result.is_ok
+       (Runtime_acp_client.validate_prompt_blocks
+          ~driver:Mistral_vibe ~capabilities:no_image_caps
+          [ Runtime_acp_client.Text_block "hello" ]));
+  (* Valid PNG passes when image_prompt = true *)
+  check bool "valid PNG passes when image_prompt=true" true
+    (Result.is_ok
+       (Runtime_acp_client.validate_prompt_blocks
+          ~driver:Kimi_code ~capabilities:with_image_caps image_blocks));
+  (* Unsupported MIME and corrupt base64 fail closed before stdio JSON-RPC *)
+  check bool "unsupported MIME rejected before RPC" true
+    (Result.is_error
+       (Runtime_acp_client.validate_prompt_blocks
+          ~driver:Kimi_code ~capabilities:with_image_caps
+          [ Runtime_acp_client.Image_block { mime_type = "image/svg+xml"; base64_data = valid_png_b64 } ]));
+  check bool "invalid base64 rejected before RPC" true
+    (Result.is_error
+       (Runtime_acp_client.validate_prompt_blocks
+          ~driver:Kimi_code ~capabilities:with_image_caps
+          [ Runtime_acp_client.Image_block { mime_type = "image/png"; base64_data = "!!!not-base64!!!" } ]))
+;;
+
+let test_antigravity_acp_mcp_permission_and_call_mcp_tool () =
+  let mcp_only =
+    Runtime_acp_client.Allow_masc_mcp_only
+      { mcp_server_name = "masc"
+      ; allowed_tool_names = [ "keeper_memory_search"; "masc_probe_ping" ]
+      }
+  in
+  let allow = Runtime_acp_client.For_testing.should_allow_permission in
+  let classify = Runtime_acp_client.For_testing.classify_tool_call_json ~mcp_server_name:"masc" in
+  let allowed_json json = Runtime_acp_client.should_allow_tool_call ~policy:mcp_only (classify json) in
+  (* Live agy acp format: mcp(masc/<tool_name>) across None/mcp/other/execute kinds *)
+  List.iter
+    (fun kind ->
+       check bool "allows agy mcp(masc/keeper_memory_search)" true
+         (allow ~policy:mcp_only ~title:"mcp(masc/keeper_memory_search)" ~kind))
+    [ None; Some "mcp"; Some "other"; Some "execute" ];
+  check bool "allows mcp(masc:keeper_memory_search)" true
+    (allow ~policy:mcp_only ~title:"mcp(masc:keeper_memory_search)" ~kind:(Some "other"));
+  check bool "allows mcp_masc_keeper_memory_search" true
+    (allow ~policy:mcp_only ~title:"mcp_masc_keeper_memory_search" ~kind:(Some "other"));
+  (* Security invariants: unpinned tools, foreign servers, edit/delete kinds, and masc_ execute remain denied *)
+  check bool "denies unpinned mcp(masc/unpinned)" false
+    (allow ~policy:mcp_only ~title:"mcp(masc/unpinned)" ~kind:(Some "mcp"));
+  check bool "denies foreign mcp(github/keeper_memory_search)" false
+    (allow ~policy:mcp_only ~title:"mcp(github/keeper_memory_search)" ~kind:(Some "mcp"));
+  check bool "denies edit kind on mcp(masc/keeper_memory_search)" false
+    (allow ~policy:mcp_only ~title:"mcp(masc/keeper_memory_search)" ~kind:(Some "edit"));
+  check bool "denies native execute masc_masc_probe_ping" false
+    (allow ~policy:mcp_only ~title:"masc_masc_probe_ping" ~kind:(Some "execute"));
+  check bool "denies native execute mcp_masc_keeper_memory_search" false
+    (allow ~policy:mcp_only ~title:"mcp_masc_keeper_memory_search" ~kind:(Some "execute"));
+  (* call_mcp_tool wrapper via _meta.tool_name with rawInput extracts exact server/tool identity *)
+  let wrapped_allowed =
+    `Assoc
+      [ "_meta", `Assoc [ "tool_name", `String "call_mcp_tool" ]
+      ; "rawInput", `Assoc [ "server_name", `String "masc"; "tool_name", `String "keeper_memory_search" ]
+      ]
+  in
+  (match classify wrapped_allowed with
+   | Runtime_acp_client.Mcp_tool
+       { server = Runtime_acp_client.Explicit_server "masc"
+       ; tool_name = "keeper_memory_search"
+       } -> ()
+   | _ -> fail "expected _meta.tool_name=call_mcp_tool to classify as Explicit_server masc");
+  check bool "synthesized call_mcp_tool is allowed" true (allowed_json wrapped_allowed);
+  let wrapped_alt_keys =
+    `Assoc
+      [ "_meta", `Assoc [ "tool_name", `String "call_mcp_tool" ]
+      ; "kind", `String "execute"
+      ; "rawInput", `Assoc [ "mcp_server", `String "masc"; "name", `String "keeper_memory_search" ]
+      ]
+  in
+  check bool "call_mcp_tool with mcp_server/name keys is allowed" true (allowed_json wrapped_alt_keys);
+  let wrapped_foreign =
+    `Assoc
+      [ "_meta", `Assoc [ "tool_name", `String "call_mcp_tool" ]
+      ; "rawInput", `Assoc [ "server_name", `String "github"; "tool_name", `String "delete_repo" ]
+      ]
+  in
+  check bool "foreign call_mcp_tool is denied" false (allowed_json wrapped_foreign);
+  (* Whitespace-only _meta.tool_name falls through cleanly to title *)
+  let blank_meta =
+    `Assoc
+      [ "_meta", `Assoc [ "tool_name", `String "   " ]
+      ; "title", `String "mcp(masc/keeper_memory_search)"
+      ]
+  in
+  (match classify blank_meta with
+   | Runtime_acp_client.Mcp_tool
+       { server = Runtime_acp_client.Explicit_server "masc"
+       ; tool_name = "keeper_memory_search"
+       } -> ()
+   | _ -> fail "expected whitespace-only _meta.tool_name to fall through to mcp(masc/...) title");
+  check bool "whitespace-only _meta.tool_name falls through to allowed mcp(masc/...)" true
+    (allowed_json blank_meta);
+  (* choose_permission_option ~allow:true selects Allow_once and never escalates to Allow_always *)
+  check (option string) "prefers allow_once over allow_always" (Some "opt_once")
+    (Runtime_acp_client.For_testing.choose_permission_option ~allow:true
+       [ `Assoc [ "optionId", `String "opt_always"; "kind", `String "allow_always" ]
+       ; `Assoc [ "optionId", `String "opt_once"; "kind", `String "allow_once" ]
+       ]);
+  check (option string) "refuses allow_always escalation when allow_once absent" None
+    (Runtime_acp_client.For_testing.choose_permission_option ~allow:true
+       [ `Assoc [ "optionId", `String "opt_always"; "kind", `String "allow_always" ]
+       ; `Assoc [ "optionId", `String "opt_reject"; "kind", `String "reject_once" ]
+       ])
+;;
+
+(* End-to-end mock ACP child covering Vibe 3.1.0's toolCallId-only
+   session/request_permission wire shape (after session/update tool_call)
+   and Antigravity's mcp(masc/<tool>) permission shape. *)
+let test_vibe_310_tool_call_id_permission_cache_and_agy_wire () =
+  let tmp = Filename.temp_dir "acp-vibe-perm-" "" in
+  let mock_script = Filename.concat tmp "mock_vibe_perm.py" in
+  let perm_log_file = Filename.concat tmp "perm_outcomes.json" in
+  let script_body =
+    Printf.sprintf
+      {|import json, sys
+
+def send(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+perm_outcomes = {}
+pending_prompt_id = None
+opts = [
+    {"optionId": "allow_once_id", "kind": "allow_once"},
+    {"optionId": "reject_once_id", "kind": "reject_once"}
+]
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    if "method" in msg:
+        m = msg["method"]
+        req_id = msg.get("id")
+        if m == "initialize":
+            send({"jsonrpc": "2.0", "id": req_id, "result": {
+                "protocolVersion": 1,
+                "agentCapabilities": {"loadSession": True}
+            }})
+        elif m == "session/new":
+            send({"jsonrpc": "2.0", "id": req_id, "result": {"sessionId": "sess-vibe"}})
+        elif m == "session/prompt":
+            pending_prompt_id = req_id
+            # 1. Vibe 3.1.0 MCP tool_call with _meta.tool_name + human title, then tool_call_update without _meta,
+            #    then toolCallId-only session/request_permission -> MUST allow_once!
+            send({"jsonrpc": "2.0", "method": "session/update", "params": {
+                "sessionId": "sess-vibe",
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "tc-vibe-mcp-1",
+                    "title": "Write keeper memory note",
+                    "kind": "other",
+                    "_meta": {"tool_name": "masc_keeper_memory_write", "effect_kind": "tool"}
+                }
+            }})
+            send({"jsonrpc": "2.0", "method": "session/update", "params": {
+                "sessionId": "sess-vibe",
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tc-vibe-mcp-1",
+                    "title": "Awaiting approval"
+                }
+            }})
+            send({"jsonrpc": "2.0", "id": 1001, "method": "session/request_permission", "params": {
+                "sessionId": "sess-vibe",
+                "toolCall": {"toolCallId": "tc-vibe-mcp-1"},
+                "options": opts
+            }})
+            # 2. Vibe 3.1.0 non-MCP bash tool (kind=execute) -> MUST reject_once!
+            send({"jsonrpc": "2.0", "method": "session/update", "params": {
+                "sessionId": "sess-vibe",
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "tc-vibe-bash-2",
+                    "title": "Run shell command",
+                    "kind": "execute",
+                    "_meta": {"tool_name": "file_system.bash", "effect_kind": "tool"}
+                }
+            }})
+            send({"jsonrpc": "2.0", "id": 1002, "method": "session/request_permission", "params": {
+                "sessionId": "sess-vibe",
+                "toolCall": {"toolCallId": "tc-vibe-bash-2"},
+                "options": opts
+            }})
+            # 3. Unknown toolCallId -> MUST reject_once!
+            send({"jsonrpc": "2.0", "id": 1003, "method": "session/request_permission", "params": {
+                "sessionId": "sess-vibe",
+                "toolCall": {"toolCallId": "tc-unknown-3"},
+                "options": opts
+            }})
+            # 4. Antigravity agy acp mcp(masc/keeper_memory_write) -> MUST allow_once!
+            send({"jsonrpc": "2.0", "id": 1004, "method": "session/request_permission", "params": {
+                "sessionId": "sess-vibe",
+                "toolCall": {"toolCallId": "tc-agy-4", "title": "mcp(masc/keeper_memory_write)", "kind": "other"},
+                "options": opts
+            }})
+            # 5. Antigravity unpinned mcp(masc/unpinned_tool) -> MUST reject_once!
+            send({"jsonrpc": "2.0", "id": 1005, "method": "session/request_permission", "params": {
+                "sessionId": "sess-vibe",
+                "toolCall": {"toolCallId": "tc-agy-5", "title": "mcp(masc/unpinned_tool)", "kind": "other"},
+                "options": opts
+            }})
+            # 6. Adversarial spoofed display title vs cached authoritative _meta.tool_name="bash" (execute) -> MUST reject_once!
+            send({"jsonrpc": "2.0", "method": "session/update", "params": {
+                "sessionId": "sess-vibe",
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "tc-spoof-6",
+                    "title": "Run shell command",
+                    "kind": "execute",
+                    "_meta": {"tool_name": "bash"}
+                }
+            }})
+            send({"jsonrpc": "2.0", "id": 1006, "method": "session/request_permission", "params": {
+                "sessionId": "sess-vibe",
+                "toolCall": {"toolCallId": "tc-spoof-6", "title": "mcp(masc/keeper_memory_write)"},
+                "options": opts
+            }})
+            # 7. Cached _meta.tool_name="masc_keeper_memory_write" wins over repeated human display title -> MUST allow_once!
+            send({"jsonrpc": "2.0", "method": "session/update", "params": {
+                "sessionId": "sess-vibe",
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "tc-human-7",
+                    "title": "Write keeper memory note",
+                    "kind": "other",
+                    "_meta": {"tool_name": "masc_keeper_memory_write"}
+                }
+            }})
+            send({"jsonrpc": "2.0", "id": 1007, "method": "session/request_permission", "params": {
+                "sessionId": "sess-vibe",
+                "toolCall": {"toolCallId": "tc-human-7", "title": "Write keeper memory note"},
+                "options": opts
+            }})
+            # 8. tool_call_update attempting execute -> read kind downgrade under Allow_read_and_masc_mcp -> MUST reject_once!
+            send({"jsonrpc": "2.0", "method": "session/update", "params": {
+                "sessionId": "sess-vibe",
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "tc-downgrade-8",
+                    "title": "Execute command",
+                    "kind": "execute",
+                    "_meta": {"tool_name": "file_system.bash"}
+                }
+            }})
+            send({"jsonrpc": "2.0", "method": "session/update", "params": {
+                "sessionId": "sess-vibe",
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tc-downgrade-8",
+                    "title": "read_file",
+                    "kind": "read"
+                }
+            }})
+            send({"jsonrpc": "2.0", "id": 1008, "method": "session/request_permission", "params": {
+                "sessionId": "sess-vibe",
+                "toolCall": {"toolCallId": "tc-downgrade-8", "kind": "read"},
+                "options": opts
+            }})
+            # 9. Sessionless session/update (no sessionId) MUST NOT populate cache -> MUST reject_once!
+            send({"jsonrpc": "2.0", "method": "session/update", "params": {
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "tc-sessionless-9",
+                    "title": "Write memory",
+                    "kind": "other",
+                    "_meta": {"tool_name": "masc_keeper_memory_write"}
+                }
+            }})
+            send({"jsonrpc": "2.0", "id": 1009, "method": "session/request_permission", "params": {
+                "sessionId": "sess-vibe",
+                "toolCall": {"toolCallId": "tc-sessionless-9"},
+                "options": opts
+            }})
+            # 10. Non-meta tool_call (title=bash, kind=execute) cannot be overwritten by spoofed mcp(...) title -> MUST reject_once!
+            send({"jsonrpc": "2.0", "method": "session/update", "params": {
+                "sessionId": "sess-vibe",
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "tc-nonmeta-spoof-10",
+                    "title": "bash",
+                    "kind": "execute"
+                }
+            }})
+            send({"jsonrpc": "2.0", "id": 1010, "method": "session/request_permission", "params": {
+                "sessionId": "sess-vibe",
+                "toolCall": {"toolCallId": "tc-nonmeta-spoof-10", "title": "mcp(masc/keeper_memory_write)"},
+                "options": opts
+            }})
+            send({"jsonrpc": "2.0", "method": "session/update", "params": {
+                "sessionId": "sess-vibe",
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "done"}}
+            }})
+    else:
+        rid = msg.get("id")
+        if rid in (1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010):
+            perm_outcomes[str(rid)] = msg.get("result", {}).get("outcome", {})
+            if len(perm_outcomes) == 10 and pending_prompt_id is not None:
+                with open(%S, "w") as f:
+                    json.dump(perm_outcomes, f)
+                send({"jsonrpc": "2.0", "id": pending_prompt_id, "result": {
+                    "stopReason": "end_turn",
+                    "usage": {"inputTokens": 10, "outputTokens": 5, "totalTokens": 15}
+                }})
+                pending_prompt_id = None
+|}
+      perm_log_file
+  in
+  Out_channel.with_open_text mock_script (fun oc -> output_string oc script_body);
+  Fun.protect ~finally:(fun () -> rm_rf tmp) (fun () ->
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      let proc_mgr =
+        Runtime_acp_client.foreground_process_mgr ~clock ~grace_seconds:1.0 ()
+      in
+      let cfg =
+        { (Runtime_acp_client.default_config ~driver:Mistral_vibe ~cwd:tmp) with
+          cli_path = "python3"
+        ; args = [ mock_script ]
+        }
+      in
+      Eio.Switch.run (fun sw ->
+        let client =
+          match Runtime_acp_client.start ~sw ~proc_mgr ~clock ~config:cfg () with
+          | Ok c -> c
+          | Error err -> failf "start failed: %s" (Runtime_acp_client.error_to_string err)
+        in
+        Fun.protect ~finally:(fun () -> Runtime_acp_client.close client) (fun () ->
+          let sess =
+            match Runtime_acp_client.new_session client ~cwd:tmp () with
+            | Ok s -> s
+            | Error err -> failf "new_session failed: %s" (Runtime_acp_client.error_to_string err)
+          in
+          let policy =
+            Runtime_acp_client.Allow_read_and_masc_mcp
+              { mcp_server_name = "masc"
+              ; allowed_tool_names = [ "keeper_memory_write" ]
+              }
+          in
+          let res =
+            Runtime_acp_client.prompt
+              client
+              ~session_id:sess.session_id
+              ~blocks:[ Runtime_acp_client.Text_block "save note" ]
+              ~permission_policy:policy
+              ()
+          in
+          (match res with
+           | Ok r -> check string "prompt reply" "done" r.text
+           | Error err -> failf "prompt failed: %s" (Runtime_acp_client.error_to_string err));
+          let outcomes = Yojson.Safe.from_file perm_log_file in
+          let option_of id =
+            Yojson.Safe.Util.(outcomes |> member id |> member "optionId" |> to_string)
+          in
+          check string "Vibe toolCallId-only MASC MCP allowed via session/update cache"
+            "allow_once_id" (option_of "1001");
+          check string "Vibe non-MCP file_system.bash denied"
+            "reject_once_id" (option_of "1002");
+          check string "unknown toolCallId denied"
+            "reject_once_id" (option_of "1003");
+          check string "agy acp mcp(masc/keeper_memory_write) allowed"
+            "allow_once_id" (option_of "1004");
+          check string "agy acp unpinned mcp(masc/unpinned_tool) denied"
+            "reject_once_id" (option_of "1005");
+          check string "spoofed display title cannot override cached _meta.tool_name=bash"
+            "reject_once_id" (option_of "1006");
+          check string "cached _meta.tool_name wins over repeated human display title"
+            "allow_once_id" (option_of "1007");
+          check string "tool_call_update execute->read kind downgrade cannot bypass Allow_read_and_masc_mcp"
+            "reject_once_id" (option_of "1008");
+          check string "sessionless session/update is rejected from permission cache"
+            "reject_once_id" (option_of "1009");
+          check string "non-meta title=bash cannot be overwritten by spoofed mcp(...) title"
+            "reject_once_id" (option_of "1010")))))
+;;
 let () =
   run "runtime_acp_client"
     [ "profiles", [ test_case "closed driver profiles" `Quick test_driver_profiles ]
@@ -2035,6 +2646,16 @@ let () =
     ; ( "argv_and_posture"
       , [ test_case "kimi --skills-dir order & strict permission posture" `Quick
             test_build_argv_and_strict_permission_posture
+        ; test_case "agy acp mcp(masc/...) and call_mcp_tool permission posture" `Quick
+            test_antigravity_acp_mcp_permission_and_call_mcp_tool
+        ; test_case "Vibe 3.1.0 toolCallId permission cache & agy wire" `Quick
+            test_vibe_310_tool_call_id_permission_cache_and_agy_wire
+        ] )
+    ; ( "quota_and_vision"
+      , [ test_case "ACP RPC quota/429/401/403/5xx classification, pool preservation & scopes" `Quick
+            test_acp_rpc_error_classification_pool_preservation_and_scopes
+        ; test_case "ACP v1 image negotiation & pre-RPC validation" `Quick
+            test_acp_v1_image_negotiation_and_validation
         ] )
     ; ( "mcp_bridge"
       , [ test_case "pinned tools advertised before turn_slot is bound" `Quick

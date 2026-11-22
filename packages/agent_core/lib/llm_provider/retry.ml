@@ -323,20 +323,28 @@ type structured_refusal =
       ; retry_after : float option
       }
 
-(* Machine-readable structured provider error signals parsed strictly from
-   JSON error fields (code, type, status, metadata.error_type, details[].reason,
-   and nested OpenRouter metadata.raw JSON). Free-form error.message prose is
-   never inspected here. *)
+(* Machine-readable structured provider error signals parsed from JSON error
+   fields (code, type, status, metadata.error_type, details[].reason, and
+   nested OpenRouter metadata.raw JSON). [messages] carries error.message
+   solely for Anthropic's documented HTTP 400 credit/usage-limit refusal
+   matcher (which emits no distinct billing code). *)
 type error_signals =
   { codes : string list
   ; types : string list
   ; statuses : string list
   ; detail_reasons : string list
+  ; messages : string list
   ; n_ctx : int option
   }
 
 let empty_signals =
-  { codes = []; types = []; statuses = []; detail_reasons = []; n_ctx = None }
+  { codes = []
+  ; types = []
+  ; statuses = []
+  ; detail_reasons = []
+  ; messages = []
+  ; n_ctx = None
+  }
 ;;
 
 let merge_signals a b =
@@ -344,6 +352,7 @@ let merge_signals a b =
   ; types = a.types @ b.types
   ; statuses = a.statuses @ b.statuses
   ; detail_reasons = a.detail_reasons @ b.detail_reasons
+  ; messages = a.messages @ b.messages
   ; n_ctx = (match a.n_ctx with Some _ as v -> v | None -> b.n_ctx)
   }
 ;;
@@ -418,10 +427,15 @@ let rec extract_signals_from_json ~depth (json : Yojson.Safe.t) : error_signals 
         | Some (`Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
         | None -> []
       in
+      let messages =
+        match Option.bind (List.assoc_opt "message" err_obj) json_string_opt with
+        | Some m -> [ m ]
+        | None -> []
+      in
       let n_ctx =
         Option.bind (List.assoc_opt "n_ctx" err_obj) json_positive_int_opt
       in
-      let base = { codes; types; statuses; detail_reasons; n_ctx } in
+      let base = { codes; types; statuses; detail_reasons; messages; n_ctx } in
       (* OpenRouter embeds the upstream provider's structured JSON error object
          as a string inside [error.metadata.raw]. Parse it as JSON with the same
          structured extractor so upstream error codes/types survive proxying. *)
@@ -510,6 +524,48 @@ let signals_indicate_account_quota (s : error_signals) =
   || List.exists is_structured_quota_reason s.detail_reasons
 ;;
 
+let contains_substring_ci ~haystack ~needle =
+  let h_len = String.length haystack in
+  let n_len = String.length needle in
+  if n_len = 0
+  then true
+  else if n_len > h_len
+  then false
+  else (
+    let h = String.lowercase_ascii haystack in
+    let n = String.lowercase_ascii needle in
+    let rec scan idx =
+      if idx > h_len - n_len
+      then false
+      else if String.sub h idx n_len = n
+      then true
+      else scan (idx + 1)
+    in
+    scan 0)
+;;
+
+(* Anthropic reports credit exhaustion and workspace API usage-limit
+   refusals on HTTP 400 with [error.type = "invalid_request_error"] and no
+   dedicated billing code (only the canonical refusal message). Classify those
+   exact documented billing/usage-limit messages on HTTP 400 as
+   [Structured_account_quota] so multi-account lanes rest exhausted Claude API
+   accounts instead of hammering them on every turn. *)
+let is_anthropic_400_account_quota_message msg =
+  let needles =
+    [ "credit balance is too low"
+    ; "reached your specified api usage limits"
+    ; "reached your api usage limit"
+    ; "insufficient credit balance"
+    ; "workspace spend limit"
+    ]
+  in
+  List.exists (fun needle -> contains_substring_ci ~haystack:msg ~needle) needles
+;;
+
+let signals_indicate_anthropic_400_account_quota (s : error_signals) ~message =
+  List.exists is_anthropic_400_account_quota_message (message :: s.messages)
+;;
+
 let classify_structured_refusal ~retry_after_header ~status ~body : structured_refusal option =
   let message = extract_error_message body in
   let signals = signals_of_body body in
@@ -518,7 +574,9 @@ let classify_structured_refusal ~retry_after_header ~status ~body : structured_r
   | 400 | 422 ->
     if signals_indicate_context_overflow signals
     then Some (Structured_context_overflow { message; limit = signals.n_ctx })
-    else if signals_indicate_account_quota signals
+    else if
+      signals_indicate_account_quota signals
+      || (status = 400 && signals_indicate_anthropic_400_account_quota signals ~message)
     then Some (Structured_account_quota { message; retry_after })
     else None
   | 402 -> Some (Structured_account_quota { message; retry_after })

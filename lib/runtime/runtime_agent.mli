@@ -282,10 +282,12 @@ val caps_admit_required_modalities :
 
 val requires_text_media_projection :
   Llm_provider.Capabilities.capabilities -> required:string list -> bool
-(** A turn requiring several media kinds needs a text projection when the
-    runtime does not declare support for their combination. [required] is the
-    distinct media list returned by the modality scan. Supporting each kind
-    separately does not grant support for a mixed request. *)
+(** A turn requiring several natively supported media kinds needs a text
+    projection when the runtime does not declare support for their combination.
+    [required] is the distinct media list returned by the modality scan.
+    Unsupported modalities are projected separately first, so a mixed bundle
+    whose remaining natively supported modalities contain at most one non-text
+    kind preserves native delivery for that kind. *)
 
 val media_candidates_of :
   runtimes:Runtime_instance.t list ->

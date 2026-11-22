@@ -1278,6 +1278,129 @@ let test_input_size_guard_and_refusal_classification () =
     (Cli_oneshot.refused_for_input_size non_size_failure)
 ;;
 
+let test_codex_session_budget_and_acp_antigravity_quota_refusal () =
+  let mk_exec runtime_id cause =
+    Cli_oneshot.Execution_failed { runtime_id; cause }
+  in
+  let codex_session_budget =
+    mk_exec "codex.gpt-5-6"
+      (Masc.Fusion_official_client.Codex_failure
+         (Runtime_codex_app_server.Turn_failed
+            { detail = "session budget exceeded"
+            ; codex_error_info =
+                Some Runtime_codex_app_server.Codex_error_info.Session_budget_exceeded
+            }))
+  in
+  let codex_usage_limit =
+    mk_exec "codex.gpt-5-6"
+      (Masc.Fusion_official_client.Codex_failure
+         (Runtime_codex_app_server.Turn_failed
+            { detail = "usage limit exceeded"
+            ; codex_error_info =
+                Some Runtime_codex_app_server.Codex_error_info.Usage_limit_exceeded
+            }))
+  in
+  let agy_quota =
+    mk_exec "agy.gemini"
+      (Masc.Fusion_official_client.Antigravity_failure
+         (Runtime_antigravity.Turn_failed "RESOURCE_EXHAUSTED: quota exceeded"))
+  in
+  let agy_rate =
+    mk_exec "agy.gemini"
+      (Masc.Fusion_official_client.Antigravity_failure
+         (Runtime_antigravity.Turn_failed "HTTP 429 rate limit exceeded"))
+  in
+  let agy_other =
+    mk_exec "agy.gemini"
+      (Masc.Fusion_official_client.Antigravity_failure
+         (Runtime_antigravity.Turn_failed "unexpected syntax error"))
+  in
+  let acp_quota =
+    mk_exec "kimi_acp.k3"
+      (Masc.Fusion_official_client.Acp_failure
+         (Runtime_acp_client.Rpc_error
+            { method_name = "session/prompt"
+            ; code = -32000
+            ; message = "exceeded_current_quota_error"
+            }))
+  in
+  let acp_rate =
+    mk_exec "vibe_acp.mistral"
+      (Masc.Fusion_official_client.Acp_failure
+         (Runtime_acp_client.Rpc_error
+            { method_name = "session/prompt"
+            ; code = -32000
+            ; message = "HTTP 429 Too Many Requests"
+            }))
+  in
+  let acp_overflow =
+    mk_exec "vibe_acp.mistral"
+      (Masc.Fusion_official_client.Acp_failure
+         (Runtime_acp_client.Rpc_error
+            { method_name = "session/prompt"
+            ; code = -32000
+            ; message = "prompt exceeds maximum context length"
+            }))
+  in
+  let acp_other =
+    mk_exec "vibe_acp.mistral"
+      (Masc.Fusion_official_client.Acp_failure
+         (Runtime_acp_client.Rpc_error
+            { method_name = "session/prompt"
+            ; code = -32603
+            ; message = "internal decode error"
+            }))
+  in
+  check bool "Codex Session_budget_exceeded rests binding" true
+    (Cli_oneshot.refused_for_binding_rest codex_session_budget);
+  check bool "Codex Usage_limit_exceeded rests binding" true
+    (Cli_oneshot.refused_for_binding_rest codex_usage_limit);
+  check bool "Antigravity quota Turn_failed rests binding" true
+    (Cli_oneshot.refused_for_binding_rest agy_quota);
+  check bool "Antigravity 429 Turn_failed rests binding" true
+    (Cli_oneshot.refused_for_binding_rest agy_rate);
+  check bool "Antigravity ordinary Turn_failed does not rest binding" false
+    (Cli_oneshot.refused_for_binding_rest agy_other);
+  check bool "ACP quota Rpc_error rests binding" true
+    (Cli_oneshot.refused_for_binding_rest acp_quota);
+  check bool "ACP 429 Rpc_error rests binding" true
+    (Cli_oneshot.refused_for_binding_rest acp_rate);
+  check bool "ACP ordinary Rpc_error does not rest binding" false
+    (Cli_oneshot.refused_for_binding_rest acp_other);
+  check bool "ACP context overflow counts as refused_for_input_size" true
+    (Cli_oneshot.refused_for_input_size acp_overflow);
+  check bool "ACP quota is not refused_for_input_size" false
+    (Cli_oneshot.refused_for_input_size acp_quota);
+  (* Precedence regression (#354 P1 #1): TPM/quota messages carrying overflow substrings
+     rest the binding and NEVER authorize input shrinking. *)
+  let acp_tpm_large =
+    mk_exec "vibe_acp.mistral"
+      (Masc.Fusion_official_client.Acp_failure
+         (Runtime_acp_client.Rpc_error
+            { method_name = "session/prompt"
+            ; code = 429
+            ; message = "Rate limit reached on tokens per min (TPM): Request too large for TPM limit"
+            }))
+  in
+  let acp_quota_max =
+    mk_exec "kimi_acp.k3"
+      (Masc.Fusion_official_client.Acp_failure
+         (Runtime_acp_client.Rpc_error
+            { method_name = "session/prompt"
+            ; code = -32000
+            ; message = "quota_exceeded: usage exceeds the maximum allowed"
+            }))
+  in
+  check bool "ACP 429 TPM 'Request too large' rests binding" true
+    (Cli_oneshot.refused_for_binding_rest acp_tpm_large);
+  check bool "ACP 429 TPM 'Request too large' is NOT refused_for_input_size" false
+    (Cli_oneshot.refused_for_input_size acp_tpm_large);
+  check bool "ACP quota 'exceeds the maximum' rests binding" true
+    (Cli_oneshot.refused_for_binding_rest acp_quota_max);
+  check bool "ACP quota 'exceeds the maximum' is NOT refused_for_input_size" false
+    (Cli_oneshot.refused_for_input_size acp_quota_max)
+;;
+
 let () =
   Alcotest.run
     "keeper_lane_cli_oneshot"
@@ -1286,6 +1409,10 @@ let () =
             "Runtime.admits exhaustive branches"
             `Quick
             test_admits_exhaustive_branches
+        ; test_case
+            "Codex Session_budget_exceeded and ACP/Antigravity quota refusal"
+            `Quick
+            test_codex_session_budget_and_acp_antigravity_quota_refusal
         ; test_case
             "partition_cli_slots preserves refused_cli_slots and Muse schema channel"
             `Quick

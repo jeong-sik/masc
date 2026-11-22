@@ -197,6 +197,9 @@ type keepalive_turn_outcome = {
   due_schedule : due_schedule_service;
       (** The loop reads it to serve the periodic boundary
           ({!For_testing.periodic_cadence_after_cycle}). *)
+  decided_channel : Keeper_world_observation.keeper_cycle_channel option;
+      (** The channel the cycle decision chose; [None] when the cycle ended
+          before a decision ({!For_testing.adaptive_idle_after_cycle}). *)
 }
 
 (** Record a swallowed keepalive-cycle exception as a turn failure:
@@ -467,17 +470,24 @@ module For_testing : sig
       interval after that turn. *)
 
   val adaptive_idle_after_cycle :
-    cycle_status:keepalive_cycle_status ->
     periodic_due:bool ->
-    stimuli_acked:bool ->
+    wake:Keeper_world_observation.cycle_wake ->
+    decided_channel:Keeper_world_observation.keeper_cycle_channel option ->
     due_schedule:due_schedule_service ->
     base_interval_sec:float ->
     now:float ->
     Keeper_keepalive_signal.adaptive_idle_state ->
     Keeper_keepalive_signal.adaptive_idle_state
-  (** Single-SSOT spontaneous cadence transition used by the heartbeat loop:
-      integrates [due_schedule], adaptive idle backoff ([Idle_30m -> Idle_1h ->
-      Idle_2h]), and reactive pull-in without splitting deadline authority. *)
+  (** The one transition of the next self-wake (RFC keeper-reaction-and-queue
+      §4.4). A self-wake at the due boundary backs off unless a reaction ran
+      since the previous one; a reaction or a completed due schedule at the
+      boundary serves it; a reaction off the boundary pulls the next self-wake
+      in and never out; a deferred suffix or an undecided cycle holds the
+      stage. The turn's result does not choose the arm. *)
+
+  val cycle_left_its_batch : keepalive_cycle_status -> bool
+  (** Whether the cycle's turn took its batch and did not finish. Such a cycle
+      sleeps to the periodic boundary instead of the next tick. *)
 
   (** The loop's deferred hint together with its durable file
       ({!Keeper_deferred_runtime_lane_store}). The production loop builds one

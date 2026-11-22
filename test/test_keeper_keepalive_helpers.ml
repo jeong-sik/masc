@@ -1896,18 +1896,18 @@ let test_staggered_tick_and_adaptive_pull_in_backoff () =
     (tick_a <= 1000.0 +. KKS.default_stagger_tick_sec);
   check bool "beta next tick strictly after now" true (tick_b > 1000.0);
   check bool "distinct keepers stagger phases" true (not (Float.equal tick_a tick_b));
-  (* Adaptive idle ladder: 30m -> 1h -> 2h (cap) *)
+  (* Adaptive idle ladder: 30m -> 1h -> 2h (cap) while no reaction runs *)
   let s0 = KKS.adaptive_idle_init ~now:0.0 ~warmup_sec:0.0 in
   check bool "starts at Idle_30m" true (s0.stage = KKS.Idle_30m);
-  let s1 = KKS.adaptive_idle_after_spontaneous_idle ~now:100.0 s0 in
-  check bool "1st idle advances to Idle_1h" true (s1.stage = KKS.Idle_1h);
-  check (float 0.01) "1st idle schedules +3600s" 3700.0 s1.next_spontaneous_at;
-  let s2 = KKS.adaptive_idle_after_spontaneous_idle ~now:3700.0 s1 in
-  check bool "2nd idle advances to Idle_2h" true (s2.stage = KKS.Idle_2h);
-  check (float 0.01) "2nd idle schedules +7200s" 10900.0 s2.next_spontaneous_at;
-  let s3 = KKS.adaptive_idle_after_spontaneous_idle ~now:10900.0 s2 in
-  check bool "3rd idle caps at Idle_2h" true (s3.stage = KKS.Idle_2h);
-  check (float 0.01) "3rd idle caps at +7200s" 18100.0 s3.next_spontaneous_at;
+  let s1 = KKS.adaptive_idle_after_self_wake ~now:100.0 s0 in
+  check bool "1st quiet self-wake advances to Idle_1h" true (s1.stage = KKS.Idle_1h);
+  check (float 0.01) "1st quiet self-wake schedules +3600s" 3700.0 s1.next_spontaneous_at;
+  let s2 = KKS.adaptive_idle_after_self_wake ~now:3700.0 s1 in
+  check bool "2nd quiet self-wake advances to Idle_2h" true (s2.stage = KKS.Idle_2h);
+  check (float 0.01) "2nd quiet self-wake schedules +7200s" 10900.0 s2.next_spontaneous_at;
+  let s3 = KKS.adaptive_idle_after_self_wake ~now:10900.0 s2 in
+  check bool "3rd quiet self-wake caps at Idle_2h" true (s3.stage = KKS.Idle_2h);
+  check (float 0.01) "3rd quiet self-wake caps at +7200s" 18100.0 s3.next_spontaneous_at;
   (* Reactive pull-in resets to Idle_30m and pulls in without pushing out *)
   let pulled = KKS.adaptive_idle_pull_in_on_reactive ~now:11000.0 s3 in
   check bool "reactive pull-in resets stage to Idle_30m" true (pulled.stage = KKS.Idle_30m);
@@ -1916,47 +1916,129 @@ let test_staggered_tick_and_adaptive_pull_in_backoff () =
   let kept = KKS.adaptive_idle_pull_in_on_reactive ~now:12500.0 pulled in
   check (float 0.01) "reactive pull-in never pushes out earlier deadline"
     12800.0 kept.next_spontaneous_at;
+  let crossed : KKS.adaptive_idle_state =
+    { stage = KKS.Idle_1h
+    ; next_spontaneous_at = 1000.0
+    ; since_self_wake = KKS.Quiet_since_self_wake
+    }
+  in
+  let after_crossing = KKS.adaptive_idle_pull_in_on_reactive ~now:1500.0 crossed in
+  check (float 0.01) "a deadline that came due during the reaction stays due"
+    1000.0 after_crossing.next_spontaneous_at;
+  check bool "the crossed boundary is served on the next cycle" true
+    (KKS.adaptive_idle_is_due ~now:1500.0 after_crossing);
   (* Continuous scaling with custom base_interval_sec (no 60s discontinuity) *)
   check (float 0.01) "base=60s Idle_30m" 60.0
     (KKS.adaptive_idle_interval ~base_interval_sec:60.0 KKS.Idle_30m);
   check (float 0.01) "base=60s Idle_1h" 120.0
     (KKS.adaptive_idle_interval ~base_interval_sec:60.0 KKS.Idle_1h);
   check (float 0.01) "base=60s Idle_2h" 240.0
-    (KKS.adaptive_idle_interval ~base_interval_sec:60.0 KKS.Idle_2h);
-  (* Single-SSOT loop transition: reactive turn at Idle_2h (70m elapsed since
-     t=0, next_spontaneous_at=7200) pulls deadline to now+30m instead of
-     computing 0.0s remaining and firing a spurious spontaneous turn. *)
+    (KKS.adaptive_idle_interval ~base_interval_sec:60.0 KKS.Idle_2h)
+;;
+
+(* The loop transition reads the decision's channel and the wake label, never
+   whether the batch was acked: a self-wake with an empty batch (acked=false)
+   is exactly the turn that must back off. *)
+let test_adaptive_idle_backs_off_quiet_self_wakes_and_resets_on_reactions () =
+  let module L = Keeper_heartbeat_loop in
+  let module WO = Keeper_world_observation in
+  let step ~periodic_due ~wake ~decided_channel ?(due_schedule = L.No_due_schedule_served)
+      ~now state =
+    L.For_testing.adaptive_idle_after_cycle ~periodic_due ~wake ~decided_channel
+      ~due_schedule ~base_interval_sec:1800.0 ~now state
+  in
+  let self_wake ~now state =
+    step ~periodic_due:true ~wake:WO.Periodic_tick
+      ~decided_channel:(Some WO.Scheduled_autonomous) ~now state
+  in
+  let s0 = KKS.adaptive_idle_init ~now:0.0 ~warmup_sec:1800.0 in
+  let s1 = self_wake ~now:1800.0 s0 in
+  check bool "quiet self-wake: 30m -> 1h" true (s1.stage = KKS.Idle_1h);
+  check (float 0.01) "next self-wake one hour later" 5400.0 s1.next_spontaneous_at;
+  let s2 = self_wake ~now:5400.0 s1 in
+  check bool "quiet self-wake: 1h -> 2h" true (s2.stage = KKS.Idle_2h);
+  let s3 = self_wake ~now:12600.0 s2 in
+  check bool "quiet self-wake stays at the 2h cap" true (s3.stage = KKS.Idle_2h);
+  check (float 0.01) "capped self-wake two hours later" 19800.0 s3.next_spontaneous_at;
+  let reacted =
+    step ~periodic_due:false ~wake:WO.Attention_wake
+      ~decided_channel:(Some WO.Reactive) ~now:13000.0 s3
+  in
+  check bool "a reaction returns the stage to 30m" true (reacted.stage = KKS.Idle_30m);
+  check (float 0.01) "a reaction pulls the next self-wake to now+30m" 14800.0
+    reacted.next_spontaneous_at;
+  let after_reacted = self_wake ~now:14800.0 reacted in
+  check bool "the self-wake after a reaction stays at 30m" true
+    (after_reacted.stage = KKS.Idle_30m);
+  check (float 0.01) "and comes again 30m later" 16600.0
+    after_reacted.next_spontaneous_at;
+  let quiet_again = self_wake ~now:16600.0 after_reacted in
+  check bool "the next quiet self-wake backs off again" true
+    (quiet_again.stage = KKS.Idle_1h);
+  let at_boundary =
+    step ~periodic_due:true ~wake:WO.Periodic_tick ~decided_channel:(Some WO.Reactive)
+      ~now:20000.0 quiet_again
+  in
+  check bool "a reaction at the boundary serves it at 30m" true
+    (at_boundary.stage = KKS.Idle_30m);
+  check (float 0.01) "the served boundary moves to now+30m" 21800.0
+    at_boundary.next_spontaneous_at;
+  check bool "after a served boundary the next quiet self-wake backs off" true
+    ((self_wake ~now:21800.0 at_boundary).stage = KKS.Idle_1h);
+  let deferred =
+    step ~periodic_due:true ~wake:WO.Deferred_runtime_lane
+      ~decided_channel:(Some WO.Scheduled_autonomous) ~now:20000.0 quiet_again
+  in
+  check bool "a deferred suffix at the boundary holds the stage" true
+    (deferred.stage = KKS.Idle_1h);
+  check (float 0.01) "and consumes the boundary at the held interval" 23600.0
+    deferred.next_spontaneous_at;
+  let undecided =
+    step ~periodic_due:true ~wake:WO.Periodic_tick ~decided_channel:None ~now:20000.0
+      quiet_again
+  in
+  check bool "an undecided cycle at the boundary holds the stage" true
+    (undecided.stage = KKS.Idle_1h);
+  let unrelated =
+    step ~periodic_due:false ~wake:WO.Attention_wake
+      ~decided_channel:(Some WO.Scheduled_autonomous) ~now:17000.0 quiet_again
+  in
+  check bool "a non-reaction off the boundary leaves the state alone" true
+    (unrelated = quiet_again);
   let idle_2h_state : KKS.adaptive_idle_state =
-    { stage = KKS.Idle_2h; next_spontaneous_at = 7200.0 }
+    { stage = KKS.Idle_2h
+    ; next_spontaneous_at = 7200.0
+    ; since_self_wake = KKS.Quiet_since_self_wake
+    }
   in
-  let after_reactive =
-    Keeper_heartbeat_loop.For_testing.adaptive_idle_after_cycle
-      ~cycle_status:Keeper_heartbeat_loop.Turn_cycle_turn_succeeded
-      ~periodic_due:false
-      ~stimuli_acked:true
-      ~due_schedule:Keeper_heartbeat_loop.No_due_schedule_served
-      ~base_interval_sec:1800.0
-      ~now:4200.0
-      idle_2h_state
-  in
-  check bool "SSOT reactive pull-in resets stage to Idle_30m" true
-    (after_reactive.stage = KKS.Idle_30m);
-  check bool "SSOT reactive pull-in is NOT immediately due" false
-    (KKS.adaptive_idle_is_due ~now:4200.0 after_reactive);
-  check (float 0.01) "SSOT reactive pull-in leaves 1800s remaining" 1800.0
-    (KKS.adaptive_idle_remaining ~now:4200.0 after_reactive);
   let after_schedule =
-    Keeper_heartbeat_loop.For_testing.adaptive_idle_after_cycle
-      ~cycle_status:Keeper_heartbeat_loop.Turn_cycle_turn_succeeded
-      ~periodic_due:false
-      ~stimuli_acked:true
-      ~due_schedule:Keeper_heartbeat_loop.Due_schedule_served
-      ~base_interval_sec:1800.0
-      ~now:5000.0
-      idle_2h_state
+    step ~periodic_due:false ~wake:WO.Attention_wake
+      ~decided_channel:(Some WO.Scheduled_autonomous)
+      ~due_schedule:L.Due_schedule_served ~now:5000.0 idle_2h_state
   in
-  check (float 0.01) "SSOT served due schedule moves deadline to now+base" 6800.0
-    after_schedule.next_spontaneous_at
+  check (float 0.01) "a served due schedule moves the deadline to now+base" 6800.0
+    after_schedule.next_spontaneous_at;
+  check bool "a served due schedule returns the stage to 30m" true
+    (after_schedule.stage = KKS.Idle_30m)
+;;
+
+(* A turn that took its batch and did not finish sleeps to the boundary, not
+   the next tick, so a failing input is retried once per start interval. *)
+let test_a_cycle_that_left_its_batch_sleeps_to_the_boundary () =
+  let module L = Keeper_heartbeat_loop in
+  List.iter
+    (fun (label, status, left) ->
+       check bool label left (L.For_testing.cycle_left_its_batch status))
+    [ "failed turn", L.Turn_cycle_turn_failed, true
+    ; "crashed cycle", L.Turn_cycle_crashed, true
+    ; "interrupted cycle", L.Turn_cycle_interrupted, true
+    ; "finished turn", L.Turn_cycle_turn_succeeded, false
+    ; "no turn", L.Turn_cycle_without_turn, false
+    ; "lifecycle blocked", L.Turn_cycle_lifecycle_blocked, false
+    ; "owner rejected", L.Turn_cycle_owner_rejected, false
+    ; "owner busy", L.Turn_cycle_busy Keeper_owner.Admission_paused, false
+    ; "rested", L.Turn_cycle_rested, false
+    ]
 ;;
 
 let test_at_tick_pending_interrupts_long_sleep_at_staggered_tick () =
@@ -2148,6 +2230,10 @@ let () =
             test_typed_wake_policy_and_inbound_queue_modes
         ; test_case "staggered tick grid and adaptive pull-in idle backoff" `Quick
             test_staggered_tick_and_adaptive_pull_in_backoff
+        ; test_case "quiet self-wakes back off and reactions reset" `Quick
+            test_adaptive_idle_backs_off_quiet_self_wakes_and_resets_on_reactions
+        ; test_case "a cycle that left its batch sleeps to the boundary" `Quick
+            test_a_cycle_that_left_its_batch_sleeps_to_the_boundary
         ; test_case "At_tick pending interrupts long sleep at staggered tick" `Quick
             test_at_tick_pending_interrupts_long_sleep_at_staggered_tick
         ; test_case "board signal enqueues policy urgency before wake" `Quick

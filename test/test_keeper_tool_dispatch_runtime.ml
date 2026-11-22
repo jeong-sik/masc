@@ -2835,7 +2835,7 @@ let test_keeper_task_claim_explicit_unclaimable_rejects_without_auto_claim () =
         ; "unknown task_id", `Assoc [ "task_id", `String "task-999" ], Tool_result.Workflow_rejection
         ; "awaiting_verification task_id", `Assoc [ "task_id", `String "task-003" ], Tool_result.Workflow_rejection
         ; "whitespace-only task_id", `Assoc [ "task_id", `String "   " ], Tool_result.Workflow_rejection
-        ; "unsupported alias field", `Assoc [ "task", `String "task-002" ], Tool_result.Policy_rejection
+        ; "unsupported alias field", `Assoc [ "task", `String "task-002" ], Tool_result.Workflow_rejection
         ])
 
 let test_keeper_task_claim_omitted_task_id_auto_claims_highest_priority () =

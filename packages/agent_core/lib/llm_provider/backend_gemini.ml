@@ -836,14 +836,21 @@ let merge_system_instruction ~(config : Provider_config.t) system_instruction =
   | _, si -> si
 ;;
 
+let tools_json_of_list_pure (tools : Yojson.Safe.t list) =
+  match tools with
+  | [] -> None
+  | ts ->
+    let func_decls = List.map build_function_declaration ts in
+    Some (`List [ `Assoc [ "functionDeclarations", `List func_decls ] ])
+;;
+
 let tools_json_of_list ~(config : Provider_config.t) (tools : Yojson.Safe.t list) =
   match tools with
   | [] -> None
   | ts ->
     if config.disable_parallel_tool_use
     then warn_parallel_disable_unsupported ~model_id:config.model_id;
-    let func_decls = List.map build_function_declaration ts in
-    Some (`List [ `Assoc [ "functionDeclarations", `List func_decls ] ])
+    tools_json_of_list_pure ts
 ;;
 
 let tool_config_json_of_choice = function
@@ -864,27 +871,73 @@ let tool_config_json_of_choice = function
   | None -> None
 ;;
 
-let extract_cacheable_prefix
+let project_messages_for_wire
+      ~(observe : bool)
+      ~(stream : bool)
+      ~(tools_present : bool)
+      ~(config : Provider_config.t)
+      (messages : message list)
+  =
+  match project_history ~tools_present config messages with
+  | Error error ->
+    Error
+      ("Backend_gemini.build_request: "
+       ^ Reasoning_history_projection.error_to_string error)
+  | Ok projection ->
+    if observe
+    then Reasoning_history_projection.observe ~component:"backend_gemini" ~stream projection;
+    validate_projected_thought_signatures projection.messages;
+    (* Images must not reach [contents_of_messages] — and through it
+       [with_image_followups] — against a model that does not declare
+       [supports_image_input]: the projection would emit an inlineData part
+       the endpoint rejects or drops. Degrading to a named placeholder keeps
+       the turn live, mirroring the OpenAI-compatible request boundary. *)
+    let caps = capabilities_of_config config in
+    let projected_messages, _images_degraded =
+      Api_common.degrade_image_messages
+        ~supports_image_input:caps.supports_image_input
+        projection.messages
+    in
+    (* Documents and audio already passed their capability boundaries in
+       [project_history] before [project_function_response_media]. *)
+    Ok projected_messages
+;;
+
+let extract_cacheable_prefix_result
       ~(config : Provider_config.t)
       ~(messages : message list)
       ?(tools : Yojson.Safe.t list = [])
       ()
   =
-  let _contents, msg_system =
-    contents_of_messages
-      ~supports_function_response_parts:(capabilities_of_config config).supports_function_response_parts
-      messages
-  in
-  let system_instruction = merge_system_instruction ~config msg_system in
-  let tools_json =
-    match tools with
-    | [] -> None
-    | ts ->
-      let func_decls = List.map build_function_declaration ts in
-      Some (`List [ `Assoc [ "functionDeclarations", `List func_decls ] ])
-  in
-  let tool_config_json = tool_config_json_of_choice config.tool_choice in
-  { system_instruction; tools_json; tool_config_json }
+  try
+    match
+      project_messages_for_wire
+        ~observe:false
+        ~stream:false
+        ~tools_present:(tools <> [])
+        ~config
+        messages
+    with
+    | Error _ as err -> err
+    | Ok projected_messages ->
+      let _contents, msg_system =
+        contents_of_messages
+          ~supports_function_response_parts:
+            (capabilities_of_config config).supports_function_response_parts
+          projected_messages
+      in
+      let system_instruction = merge_system_instruction ~config msg_system in
+      let tools_json = tools_json_of_list_pure tools in
+      let tool_config_json = tool_config_json_of_choice config.tool_choice in
+      Ok { system_instruction; tools_json; tool_config_json }
+  with
+  | Invalid_argument reason -> Error reason
+;;
+
+let extract_cacheable_prefix ~config ~messages ?tools () =
+  match extract_cacheable_prefix_result ~config ~messages ?tools () with
+  | Ok prefix -> prefix
+  | Error reason -> invalid_arg reason
 ;;
 
 let build_request_artifact
@@ -908,31 +961,16 @@ let build_request_artifact
       config
   in
   let projected_messages =
-    match project_history ~tools_present:(tools <> []) config messages with
-    | Error error ->
-      invalid_arg
-        ("Backend_gemini.build_request: "
-         ^ Reasoning_history_projection.error_to_string error)
-    | Ok projection ->
-      Reasoning_history_projection.observe ~component:"backend_gemini" ~stream projection;
-      validate_projected_thought_signatures projection.messages;
-      projection.messages
-  in
-  (* Images must not reach [contents_of_messages] — and through it
-     [with_image_followups] — against a model that does not declare
-     [supports_image_input]: the projection would emit an inlineData part
-     the endpoint rejects or drops. Degrading to a named placeholder keeps
-     the turn live, mirroring the OpenAI-compatible request boundary. *)
-  let projected_messages =
-    let caps = capabilities_of_config config in
-    let projected_messages, _images_degraded =
-      Api_common.degrade_image_messages
-        ~supports_image_input:caps.supports_image_input
-        projected_messages
-    in
-    (* Documents and audio already passed their capability boundaries in
-       [project_history] before [project_function_response_media]. *)
-    projected_messages
+    match
+      project_messages_for_wire
+        ~observe:true
+        ~stream
+        ~tools_present:(tools <> [])
+        ~config
+        messages
+    with
+    | Error reason -> invalid_arg reason
+    | Ok projected_messages -> projected_messages
   in
   let contents, system_instruction =
     contents_of_messages

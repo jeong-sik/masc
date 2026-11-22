@@ -60,7 +60,10 @@ let get_string ~default name =
   | From_toml (Config_boot_overrides.String v) ->
     if String.trim v = "" then default else v
   | From_toml ((Config_boot_overrides.Bool _ | Int _ | Float _) as v) ->
-    Config_boot_overrides.typed_value_to_string v
+    reject_malformed_env
+      ~name
+      ~raw:(Config_boot_overrides.typed_value_to_string v)
+      ~type_name:"string"
 
 let parse_int_string ~name raw =
   match Safe_ops.int_of_string_safe raw with
@@ -732,17 +735,12 @@ let admin_token_opt () =
 (** SSOT for observability env-var names (issue 8352). The log level names
     belong to {!Log}, which reads them. *)
 let telemetry_enabled_env_key = "MASC_TELEMETRY_ENABLED"
-(* [parse_warn_env_key] is defined near the top of this module (next to the
-   malformed handler that consumes it). *)
 
 (** Log level string (e.g. "debug", "info", "warn", "error"). *)
 (** Whether telemetry tracking is enabled. Default: true. *)
 let telemetry_enabled () =
   get_bool ~default:true telemetry_enabled_env_key
 
-(** Whether malformed env parses are escalated to a hard [Config_error]
-    (fail-fast boot) instead of a warn + default. Controlled by
-    [MASC_PARSE_WARN]. Default: false (warn + use default). *)
 (** Day-file retention for the JSONL stores under [.masc]. Default: 30.
 
     Read by the startup prune and the periodic maintenance prune. Both decide

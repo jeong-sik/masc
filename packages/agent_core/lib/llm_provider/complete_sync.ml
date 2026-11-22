@@ -617,7 +617,11 @@ let complete_http
          (Error err, None)
      | None -> Completion_outcome.before_serialization (Error err, None))
   | Ok (body_deadline, serialized) ->
-    let dispatch_serialized (serialized : Complete_common.serialized_http_request) =
+    ignore sw;
+    let dispatch_serialized
+          ~allow_cached_fallback
+          (serialized : Complete_common.serialized_http_request)
+      =
     let http_codec = serialized.Complete_common.http_codec in
     let body_str = serialized.body in
     if requires_non_http_transport config.kind
@@ -707,11 +711,18 @@ let complete_http
         | Error error -> Error error, None
         | Ok request ->
           let provider_label = provider_name in
-          (* An admitted body and a body serialized here are observed the
-             same way: these bytes, under this request's capture_id. *)
-          observe_pre_dispatch_serialization
-            ?request_wire_observer
-            (serialization_observation ~capture_id ~config ~stream:false serialized);
+          let observed_wire = ref false in
+          let observe_wire_once () =
+            if not !observed_wire
+            then (
+              observed_wire := true;
+              (* An admitted body and a body serialized here are observed the
+                 same way: these bytes, under this request's capture_id. *)
+              observe_pre_dispatch_serialization
+                ?request_wire_observer
+                (serialization_observation ~capture_id ~config ~stream:false serialized))
+          in
+          if not allow_cached_fallback then observe_wire_once ();
           Diag.debug
             "complete"
             "%s %s → %s (%d bytes)"
@@ -749,18 +760,32 @@ let complete_http
              identifies the body deadline, so retry layers treat it
              as retryable with operator-visible attribution. *)
           let post_response =
-            match run_with_body_deadline body_deadline post_sync_call with
-            | Body_deadline_exceeded timeout_s ->
-              Error (non_streaming_body_timeout timeout_s)
-            | Body_completed transport_result ->
-              (match resolve_sync_transport transport_result with
-               | Sync_response response ->
-                 emit_status response.status;
-                 Ok response
-               | Sync_failure_before_response error -> Error error
-               | Sync_failure_after_response { status; error } ->
-                 emit_status status;
-                 Error error)
+            try
+              match run_with_body_deadline body_deadline post_sync_call with
+              | Body_deadline_exceeded timeout_s ->
+                observe_wire_once ();
+                Error (non_streaming_body_timeout timeout_s)
+              | Body_completed transport_result ->
+                (match resolve_sync_transport transport_result with
+                 | Sync_response response ->
+                   if (not allow_cached_fallback)
+                      || (response.status >= 200 && response.status < 300)
+                   then (
+                     observe_wire_once ();
+                     emit_status response.status);
+                   Ok response
+                 | Sync_failure_before_response error ->
+                   observe_wire_once ();
+                   Error error
+                 | Sync_failure_after_response { status; error } ->
+                   observe_wire_once ();
+                   emit_status status;
+                   Error error)
+            with
+            | Eio.Cancel.Cancelled _ as exn ->
+              let bt = Printexc.get_raw_backtrace () in
+              observe_wire_once ();
+              Printexc.raise_with_backtrace exn bt
           in
         let result =
           match post_response with
@@ -785,9 +810,25 @@ let complete_http
                 ~provider_kind:config.kind
                 body)
             else (
+              let refusal =
+                Complete_common.provider_refusal
+                  ~http_codec
+                  (Http_client.HttpError
+                     { code
+                     ; body = Http_client.Received body
+                     ; retry_after_header = response.retry_after_header
+                     })
+              in
+              let will_fallback_cache =
+                allow_cached_fallback && Gemini_context_cache.is_cached_content_error refusal
+              in
+              if not will_fallback_cache
+              then (
+                observe_wire_once ();
+                if allow_cached_fallback then emit_status code);
               (* Log request body diagnostics on error responses to help debug
              Ollama "closing '}' symbol" and similar body-rejection errors. *)
-              if code >= 400
+              if code >= 400 && not will_fallback_cache
               then (
                 (* Strong validation: round-trip parse the body we sent.  The
                cheap balanced=true check only inspects first/last char and
@@ -843,15 +884,7 @@ let complete_http
                  (2026-11-06: code 1308 on this path rested GLM as a throttle).
                  It reads the body as sent; only a refusal that stays an
                  [HttpError] carries the redacted diagnostic body. *)
-              match
-                Complete_common.provider_refusal
-                  ~http_codec
-                  (Http_client.HttpError
-                     { code
-                     ; body = Http_client.Received body
-                     ; retry_after_header = response.retry_after_header
-                     })
-              with
+              match refusal with
               | Http_client.HttpError
                   { code; body = Http_client.Received body; retry_after_header } ->
                 Error
@@ -879,31 +912,56 @@ let complete_http
     in
     let resolve_gemini_explicit_cache () =
       match
-        admitted_body,
         serialized.Complete_common.http_codec,
         Gemini_context_cache.explicit_cache_ttl_if_enabled ~config
       with
-      | None, Provider_http_codec.Gemini_generate_content, Some ttl_s ->
+      | Provider_http_codec.Gemini_generate_content, Some ttl_s ->
         (match Provider_config.resolve_auth_headers config with
          | Error _ -> None
          | Ok auth_headers ->
-           let prefix =
-             Backend_gemini.extract_cacheable_prefix ~config ~messages ~tools ()
-           in
-           Gemini_context_cache.resolve_or_create
-             ~sw
-             ~net
-             ?clock
-             ?connection_cache
-             ~config
-             ~auth_headers
-             ~ttl_s
-             ~prefix
-             ())
-      | (Some _ | None), _, None
-      | Some _, _, Some _
-      | None,
-        ( Provider_http_codec.Anthropic_messages
+           (match
+              Backend_gemini.extract_cacheable_prefix_result
+                ~config
+                ~messages
+                ~tools
+                ()
+            with
+            | Error reason ->
+              Diag.warn
+                "gemini_context_cache"
+                "skipping explicit cachedContents for model=%s (%s); falling back to \
+                 implicit caching"
+                config.model_id
+                reason;
+              None
+            | Ok prefix ->
+              let timeout_s =
+                match clock, config.connect_timeout_s, body_deadline with
+                | Some _, Some ct, Http_client.Bounded (_, bt) -> Some (Float.min ct bt)
+                | Some _, Some ct, Http_client.Unbounded -> Some ct
+                | Some _, None, Http_client.Bounded (_, bt) -> Some bt
+                | (Some _ | None), None, Http_client.Unbounded
+                | None, (Some _ | None), (Http_client.Bounded _ | Http_client.Unbounded) ->
+                  None
+              in
+              Gemini_context_cache.resolve_or_create
+                ~net
+                ?clock
+                ?timeout_s
+                ?connection_cache
+                ~config
+                ~auth_headers
+                ~ttl_s
+                ~prefix
+                ()))
+      | ( Provider_http_codec.Gemini_generate_content
+        | Provider_http_codec.Anthropic_messages
+        | Provider_http_codec.Openai_chat
+        | Provider_http_codec.Openai_responses
+        | Provider_http_codec.Ollama_chat
+        | Provider_http_codec.Glm_chat ),
+        None
+      | ( Provider_http_codec.Anthropic_messages
         | Provider_http_codec.Openai_chat
         | Provider_http_codec.Openai_responses
         | Provider_http_codec.Ollama_chat
@@ -912,7 +970,7 @@ let complete_http
     in
     let final_serialized, result =
       match resolve_gemini_explicit_cache () with
-      | None -> serialized, dispatch_serialized serialized
+      | None -> serialized, dispatch_serialized ~allow_cached_fallback:false serialized
       | Some handle ->
         (match
            serialize_gemini_cached_http_request
@@ -922,9 +980,10 @@ let complete_http
              ~messages
              ~tools
          with
-         | Error _ -> serialized, dispatch_serialized serialized
+         | Error _ ->
+           serialized, dispatch_serialized ~allow_cached_fallback:false serialized
          | Ok cached_serialized ->
-           (match dispatch_serialized cached_serialized with
+           (match dispatch_serialized ~allow_cached_fallback:true cached_serialized with
             | Error err, _ when Gemini_context_cache.is_cached_content_error err ->
               Gemini_context_cache.invalidate ~key:handle.key;
               Diag.warn
@@ -933,7 +992,7 @@ let complete_http
                  caching"
                 handle.resource_name
                 config.model_id;
-              serialized, dispatch_serialized serialized
+              serialized, dispatch_serialized ~allow_cached_fallback:false serialized
             | ((Ok _ | Error _), _) as outcome -> cached_serialized, outcome))
     in
     Completion_outcome.after_serialization ~request:final_serialized result

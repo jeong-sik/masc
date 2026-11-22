@@ -47,8 +47,17 @@ type cacheable_prefix =
 
 (** Extract the canonical [systemInstruction], [tools], and [toolConfig] JSON
     fragments that {!build_request_artifact} would emit for [config],
-    [messages], and [tools]. Used by {!Gemini_context_cache} to hash and
-    materialize explicit [cachedContents] resources. *)
+    [messages], and [tools], applying the same history projection and media
+    degradation steps. Returns [Error reason] instead of raising on invalid
+    history/tool-result projections. *)
+val extract_cacheable_prefix_result
+  :  config:Provider_config.t
+  -> messages:Types.message list
+  -> ?tools:Yojson.Safe.t list
+  -> unit
+  -> (cacheable_prefix, string) result
+
+(** Raising convenience wrapper around {!extract_cacheable_prefix_result}. *)
 val extract_cacheable_prefix
   :  config:Provider_config.t
   -> messages:Types.message list

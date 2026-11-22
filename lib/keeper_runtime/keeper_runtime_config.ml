@@ -65,65 +65,6 @@ let typed_value_of_toml ~(kind : Keeper_runtime_setting_registry.value_kind) = f
     | Keeper_toml_loader.Toml_local_time _ ) ->
     None
 
-let decode_int_opt doc key =
-  match List.assoc_opt key doc with
-  | Some v ->
-    (match typed_value_of_toml ~kind:Keeper_runtime_setting_registry.Integer v with
-     | Some (Config_boot_overrides.Int i) -> Some i
-     | Some (Bool _ | Float _ | String _) | None -> None)
-  | None -> None
-
-let decode_float_opt doc key =
-  match List.assoc_opt key doc with
-  | Some v ->
-    (match typed_value_of_toml ~kind:Keeper_runtime_setting_registry.Float v with
-     | Some (Config_boot_overrides.Float f) -> Some f
-     | Some (Bool _ | Int _ | String _) | None -> None)
-  | None -> None
-
-let decode_bool_opt doc key =
-  match List.assoc_opt key doc with
-  | Some v ->
-    (match typed_value_of_toml ~kind:Keeper_runtime_setting_registry.Boolean v with
-     | Some (Config_boot_overrides.Bool b) -> Some b
-     | Some (Int _ | Float _ | String _) | None -> None)
-  | None -> None
-
-let decode_string_opt doc key =
-  match List.assoc_opt key doc with
-  | Some v ->
-    (match typed_value_of_toml ~kind:Keeper_runtime_setting_registry.String v with
-     | Some (Config_boot_overrides.String s) -> Some s
-     | Some (Bool _ | Int _ | Float _) | None -> None)
-  | None -> None
-
-let decode_typed_namespaces (doc : Keeper_toml_loader.toml_doc)
-  : Config_boot_overrides.typed_namespaces
-  =
-  { Config_boot_overrides.memory =
-      { category_cap = decode_int_opt doc "memory.category_cap"
-      ; facts_per_category_cap = decode_int_opt doc "memory.facts_per_category_cap"
-      ; recall_enabled = decode_bool_opt doc "memory.recall_enabled"
-      ; librarian_enabled = decode_bool_opt doc "memory.librarian_enabled"
-      ; facts_max_bytes = decode_int_opt doc "memory.facts_max_bytes"
-      ; pending_max_bytes = decode_int_opt doc "memory.pending_max_bytes"
-      }
-  ; wiki_contents = { enabled = decode_bool_opt doc "wiki_contents.enabled" }
-  ; maintenance = { jsonl_retention_days = decode_int_opt doc "maintenance.jsonl_retention_days" }
-  ; transport =
-      { h2_max_concurrent_streams = decode_int_opt doc "transport.h2_max_concurrent_streams"
-      ; h2_max_pending_response_bytes = decode_int_opt doc "transport.h2_max_pending_response_bytes"
-      ; h2_initial_window_size = decode_int_opt doc "transport.h2_initial_window_size"
-      ; https_port = decode_int_opt doc "transport.https_port"
-      ; tls_cert_file = decode_string_opt doc "transport.tls_cert_file"
-      ; tls_key_file = decode_string_opt doc "transport.tls_key_file"
-      ; grpc_enabled = decode_bool_opt doc "transport.grpc_enabled"
-      ; ws_enabled = decode_bool_opt doc "transport.ws_enabled"
-      ; serving_domain_enabled = decode_bool_opt doc "transport.serving_domain_enabled"
-      ; startup_watchdog_sec = decode_float_opt doc "transport.startup_watchdog_sec"
-      }
-  }
-
 (** Format a TOML scalar for operator display projections. *)
 let value_to_string = function
   | Keeper_toml_loader.Toml_string s -> Some s
@@ -730,7 +671,6 @@ let load_and_apply_document ~base_path =
                  Keeper_runtime_setting_registry.toml_settings
              in
              Config_boot_overrides.set_typed_batch typed_pairs;
-             Config_boot_overrides.set_typed_namespaces (decode_typed_namespaces doc);
              let count = List.length typed_pairs in
              Hashtbl.clear toml_shadow;
              List.iter

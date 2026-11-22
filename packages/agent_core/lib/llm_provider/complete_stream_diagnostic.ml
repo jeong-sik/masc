@@ -18,12 +18,18 @@ let fiber_sink_key : (refused_frame -> unit) option Eio.Fiber.key = Eio.Fiber.cr
 
 let set_refused_frame_sink sink = Atomic.set process_sink sink
 
+let in_eio_fiber () =
+  match Eio.Fiber.get fiber_sink_key with
+  | Some _ | None -> true
+  | exception Effect.Unhandled _ -> false
+;;
+
 let with_refused_frame_sink sink fn =
-  match Eio.Fiber.with_binding fiber_sink_key sink fn with
-  | result -> result
-  | exception Effect.Unhandled _ ->
+  if in_eio_fiber ()
+  then Eio.Fiber.with_binding fiber_sink_key sink fn
+  else (
     let previous = Atomic.exchange process_sink sink in
-    Fun.protect ~finally:(fun () -> Atomic.set process_sink previous) fn
+    Fun.protect ~finally:(fun () -> Atomic.set process_sink previous) fn)
 ;;
 
 let active_sink () =

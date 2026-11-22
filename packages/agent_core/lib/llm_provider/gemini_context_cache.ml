@@ -50,14 +50,48 @@ let strip_trailing_slashes url =
   String.sub url 0 !len
 ;;
 
-let cached_contents_url ~base_url =
-  strip_trailing_slashes base_url ^ "/cachedContents"
+let bare_model_id model_id =
+  if String.starts_with ~prefix:"models/" model_id
+  then String.sub model_id 7 (String.length model_id - 7)
+  else model_id
 ;;
 
-let model_resource_name model_id =
-  if String.starts_with ~prefix:"models/" model_id
-  then model_id
-  else "models/" ^ model_id
+let vertex_target_of_base_url ~base_url =
+  let trimmed = strip_trailing_slashes base_url in
+  match Vertex_endpoint.parse_base_url trimmed with
+  | Error _ -> None
+  | Ok (project, location) ->
+    let host, region =
+      match location with
+      | Vertex_endpoint.Global -> "aiplatform.googleapis.com", "global"
+      | Vertex_endpoint.Regional r -> r ^ "-aiplatform.googleapis.com", r
+    in
+    Some (host, project, region)
+;;
+
+let cached_contents_url ~base_url =
+  match vertex_target_of_base_url ~base_url with
+  | Some (host, project, region) ->
+    Printf.sprintf
+      "https://%s/v1/projects/%s/locations/%s/cachedContents"
+      host
+      project
+      region
+  | None -> strip_trailing_slashes base_url ^ "/cachedContents"
+;;
+
+let model_resource_name ?base_url model_id =
+  match Option.bind base_url (fun base_url -> vertex_target_of_base_url ~base_url) with
+  | Some (_host, project, region) ->
+    Printf.sprintf
+      "projects/%s/locations/%s/publishers/google/models/%s"
+      project
+      region
+      (bare_model_id model_id)
+  | None ->
+    if String.starts_with ~prefix:"models/" model_id
+    then model_id
+    else "models/" ^ model_id
 ;;
 
 let prefix_components (prefix : Backend_gemini.cacheable_prefix) =
@@ -79,17 +113,64 @@ let prefix_byte_size (prefix : Backend_gemini.cacheable_prefix) =
   | fields -> String.length (Yojson.Safe.to_string (`Assoc fields))
 ;;
 
-let prefix_key ~(config : Provider_config.t) ~(prefix : Backend_gemini.cacheable_prefix) =
-  let key_fp =
-    if Secret.is_empty config.api_key
-    then "no-key"
-    else Secret.fingerprint config.api_key
+let canonical_headers hdrs =
+  hdrs
+  |> List.map (fun (k, v) -> String.lowercase_ascii (String.trim k), v)
+  |> List.sort (fun (k1, v1) (k2, v2) ->
+    match String.compare k1 k2 with
+    | 0 -> String.compare v1 v2
+    | c -> c)
+  |> List.map (fun (k, v) -> `List [ `String k; `String v ])
+;;
+
+let is_ephemeral_request_header ~cache_session_header name =
+  let lower = String.lowercase_ascii (String.trim name) in
+  match lower with
+  | "traceparent" | "tracestate" | "baggage" | "x-request-id" | "x-correlation-id" ->
+    true
+  | _ ->
+    (match cache_session_header with
+     | Some session_header ->
+       String.equal lower (String.lowercase_ascii (String.trim session_header))
+     | None -> false)
+;;
+
+let credential_fingerprint ~(config : Provider_config.t) ~auth_headers =
+  let auth_material =
+    match auth_headers with
+    | _ :: _ -> Yojson.Safe.to_string (`List (canonical_headers auth_headers))
+    | [] ->
+      if Secret.is_empty config.api_key
+      then "no-auth"
+      else "api-key:" ^ Secret.header_value config.api_key
   in
+  (* Exclude per-call tracing/correlation/session headers (e.g. W3C
+     [traceparent]/[tracestate] injected by [config_with_trace_context]) from
+     the cache key so traced turns reuse the cached resource while still
+     forwarding those headers on outbound [POST .../cachedContents] calls. *)
+  let cache_session_header = Provider_config.cache_session_header config in
+  let stable_headers =
+    Provider_config.effective_request_headers config
+    |> List.filter (fun (k, _) ->
+      not (is_ephemeral_request_header ~cache_session_header k))
+    |> canonical_headers
+    |> fun xs -> Yojson.Safe.to_string (`List xs)
+  in
+  Agent_core_sha256.(digest_string (auth_material ^ "\x00" ^ stable_headers) |> to_hex)
+;;
+
+let prefix_key
+      ?(auth_headers = [])
+      ~(config : Provider_config.t)
+      ~(prefix : Backend_gemini.cacheable_prefix)
+      ()
+  =
+  let key_fp = credential_fingerprint ~config ~auth_headers in
   let canonical =
     `Assoc
       ([ "base_url", `String (strip_trailing_slashes config.base_url)
        ; "key_fp", `String key_fp
-       ; "model_id", `String (model_resource_name config.model_id)
+       ; "model_id", `String (model_resource_name ~base_url:config.base_url config.model_id)
        ]
        @ prefix_components prefix)
     |> Yojson.Safe.to_string
@@ -97,9 +178,9 @@ let prefix_key ~(config : Provider_config.t) ~(prefix : Backend_gemini.cacheable
   Agent_core_sha256.(digest_string canonical |> to_hex)
 ;;
 
-let build_create_body ~model_id ~ttl_s ~(prefix : Backend_gemini.cacheable_prefix) =
+let build_create_body ?base_url ~model_id ~ttl_s ~(prefix : Backend_gemini.cacheable_prefix) () =
   let fields =
-    [ "model", `String (model_resource_name model_id)
+    [ "model", `String (model_resource_name ?base_url model_id)
     ; "ttl", `String (Printf.sprintf "%ds" ttl_s)
     ]
     @ prefix_components prefix
@@ -168,9 +249,9 @@ let describe_http_error = function
 ;;
 
 let resolve_or_create
-      ~sw
       ~net
       ?clock
+      ?timeout_s
       ?connection_cache
       ?(min_prefix_bytes = default_min_prefix_bytes)
       ~(config : Provider_config.t)
@@ -182,32 +263,56 @@ let resolve_or_create
   if ttl_s <= 0 || prefix_byte_size prefix < min_prefix_bytes
   then None
   else (
-    let key = prefix_key ~config ~prefix in
+    let key = prefix_key ~auth_headers ~config ~prefix () in
     let now_s = current_time_s ?clock () in
     let margin_s = refresh_margin_s ~ttl_s in
     match lookup_live ~key ~now_s ~margin_s with
     | Some _ as hit -> hit
     | None ->
       let url = cached_contents_url ~base_url:config.base_url in
-      let body = build_create_body ~model_id:config.model_id ~ttl_s ~prefix in
-      let headers = ("Content-Type", "application/json") :: auth_headers in
-      let timeout_s =
-        match clock, config.connect_timeout_s with
-        | Some _, Some t -> Some t
-        | (Some _ | None), None | None, Some _ -> None
-      in
-      match
-        Http_client.post_sync
-          ?cache:connection_cache
-          ?clock
-          ?timeout_s
-          ~sw
-          ~net
-          ~url
-          ~headers
-          ~body
+      let body =
+        build_create_body
+          ~base_url:config.base_url
+          ~model_id:config.model_id
+          ~ttl_s
+          ~prefix
           ()
-      with
+      in
+      let merged_headers =
+        Provider_config.effective_request_headers config @ auth_headers
+      in
+      let has_content_type =
+        List.exists
+          (fun (k, _) ->
+             String.equal (String.lowercase_ascii (String.trim k)) "content-type")
+          merged_headers
+      in
+      let headers =
+        if has_content_type
+        then merged_headers
+        else ("Content-Type", "application/json") :: merged_headers
+      in
+      let effective_timeout_s =
+        match clock, timeout_s, config.connect_timeout_s with
+        | Some _, Some t, _ -> Some t
+        | Some _, None, Some t -> Some t
+        | Some _, None, None
+        | None, (Some _ | None), (Some _ | None) -> None
+      in
+      let post_result =
+        Eio.Switch.run (fun create_sw ->
+          Http_client.post_sync
+            ?cache:connection_cache
+            ?clock
+            ?timeout_s:effective_timeout_s
+            ~sw:create_sw
+            ~net
+            ~url
+            ~headers
+            ~body
+            ())
+      in
+      match post_result with
       | Error err ->
         Diag.warn
           "gemini_context_cache"
@@ -241,13 +346,18 @@ let resolve_or_create
           None))
 ;;
 
+let mentions_cached_content body =
+  let lower = String.lowercase_ascii body in
+  Agent_core_strings.contains_substring ~haystack:lower ~needle:"cachedcontent"
+  || Agent_core_strings.contains_substring ~haystack:lower ~needle:"cached_content"
+  || Agent_core_strings.contains_substring ~haystack:lower ~needle:"cached content"
+;;
+
 let is_cached_content_error (err : Http_client.http_error) : bool =
   match err with
   | Http_client.HttpError { code = 404; _ } -> true
-  | Http_client.HttpError { code = 400; body = Http_client.Received body; _ } ->
-    let lower = String.lowercase_ascii body in
-    Agent_core_strings.contains_substring ~haystack:lower ~needle:"cachedcontent"
-    || Agent_core_strings.contains_substring ~haystack:lower ~needle:"cached_content"
+  | Http_client.HttpError { code = 400 | 403; body = Http_client.Received body; _ } ->
+    mentions_cached_content body
   | Http_client.HttpError
       { code = _
       ; body = Http_client.Received _ | Http_client.Not_received_in_window

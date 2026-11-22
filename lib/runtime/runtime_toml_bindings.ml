@@ -366,6 +366,26 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
       Error (error (path ^ ".include-base") "include-base requires efforts to be declared")
     | (Some _ | None), Some _ | None, None -> Ok ()
   in
+  let* () =
+    match efforts, include_base with
+    | Some _, (None | Some false) ->
+      let errs =
+        (if is_default
+         then
+           error
+             (path ^ ".is-default")
+             "is-default cannot be set on an efforts-expanded binding unless include-base = true"
+         else [])
+        @ (if wizard_default
+           then
+             error
+               (path ^ ".wizard-default")
+               "wizard-default cannot be set on an efforts-expanded binding unless include-base = true"
+           else [])
+      in
+      if errs = [] then Ok () else Error errs
+    | Some _, Some true | None, Some _ | None, None -> Ok ()
+  in
   let base_binding : Runtime_schema.binding =
     { Runtime_schema.provider_id
     ; model_id
@@ -412,23 +432,46 @@ let parse_provider_table (provider_id : string) (tbl : Otoml.t)
   : (Runtime_schema.binding list, parse_error list) result
   =
   let entries = Otoml.get_table tbl in
-  Result.map List.concat
-    (partition_results
-       (List.map
-          (fun (model_id, sub) ->
-             let path = Printf.sprintf "%s.%s" provider_id model_id in
-             if is_toml_table sub
-             then parse_binding_fields provider_id model_id sub
-             else
-               Error
-                 (error
-                    path
-                    (Printf.sprintf
-                       "[%s] holds model bindings; %S must be a [%s] table"
-                       provider_id
-                       model_id
-                       path)))
-          entries))
+  match
+    partition_results
+      (List.map
+         (fun (model_id, sub) ->
+            let path = Printf.sprintf "%s.%s" provider_id model_id in
+            if is_toml_table sub
+            then parse_binding_fields provider_id model_id sub
+            else
+              Error
+                (error
+                   path
+                   (Printf.sprintf
+                      "[%s] holds model bindings; %S must be a [%s] table"
+                      provider_id
+                      model_id
+                      path)))
+         entries)
+  with
+  | Error _ as err -> err
+  | Ok binding_groups ->
+    let bindings = List.concat binding_groups in
+    let rec check_unique seen errs = function
+      | [] -> if errs = [] then Ok bindings else Error (List.rev errs)
+      | (b : Runtime_schema.binding) :: rest ->
+        if List.mem b.model_id seen
+        then
+          let path = Printf.sprintf "%s.%s" b.provider_id b.model_id in
+          check_unique
+            seen
+            ({ path
+             ; message =
+                 Printf.sprintf
+                   "duplicate binding %S after effort expansion"
+                   path
+             }
+             :: errs)
+            rest
+        else check_unique (b.model_id :: seen) errs rest
+    in
+    check_unique [] [] bindings
 ;;
 
 (* Top-level table names that own a binding group, taken from the [\[providers\]]

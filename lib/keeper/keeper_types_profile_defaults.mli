@@ -3,6 +3,7 @@
 type keeper_profile_defaults = {
   id : Ids.Keeper_id.t option;
   manifest_path : string option;
+  group : string option;
   instructions : string option;
   activation_mode : Keeper_activation_mode.t option;
   mention_targets : string list;

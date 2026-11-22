@@ -1,0 +1,960 @@
+module Http = Http_server_eio
+module Env = Server_dashboard_http_v2_envelope
+module Cur = Keeper_memory_os_current
+module Types = Keeper_memory_os_types
+module Events = Keeper_memory_os_events
+module Ledger = Workspace_memory_ledger
+module Briefing = Workspace_memory_briefing
+module Wlog = Workspace_memory_log
+
+type diff_scope =
+  | Scope_world
+  | Scope_keeper of string
+
+type diff_window =
+  | Window_24h
+  | Window_7d
+  | Window_30d
+
+type diff_range =
+  | Range_window of diff_window
+  | Range_revs of
+      { from_rev : int
+      ; to_rev : int option
+      }
+
+type retrieval_heat =
+  | Heat_hot
+  | Heat_warm
+  | Heat_cold
+  | Heat_never
+
+let retrieval_heat_to_string = function
+  | Heat_hot -> "hot"
+  | Heat_warm -> "warm"
+  | Heat_cold -> "cold"
+  | Heat_never -> "never_retrieved"
+;;
+
+let window_seconds = function
+  | Window_24h -> 86400.0
+  | Window_7d -> 7.0 *. 86400.0
+  | Window_30d -> 30.0 *. 86400.0
+;;
+
+let window_to_string = function
+  | Window_24h -> "24h"
+  | Window_7d -> "7d"
+  | Window_30d -> "30d"
+;;
+
+let window_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "24h" -> Some Window_24h
+  | "7d" -> Some Window_7d
+  | "30d" -> Some Window_30d
+  | _ -> None
+;;
+
+let classify_retrieval_heat ~now ~retrieved_count ~last_retrieved_at =
+  if retrieved_count <= 0
+  then Heat_never
+  else (
+    let age_sec =
+      match last_retrieved_at with
+      | Some ts -> Float.max 0.0 (now -. ts)
+      | None -> Float.infinity
+    in
+    if Float.compare age_sec 86400.0 <= 0 || retrieved_count >= 5
+    then Heat_hot
+    else if Float.compare age_sec (7.0 *. 86400.0) <= 0 || retrieved_count >= 2
+    then Heat_warm
+    else Heat_cold)
+;;
+
+let parse_diff_query ~scope ~keeper ~window ~from_rev ~to_rev =
+  let open Result.Syntax in
+  let trim_opt = function
+    | None -> None
+    | Some s ->
+      let t = String.trim s in
+      if String.equal t "" then None else Some t
+  in
+  let* parsed_scope =
+    match trim_opt scope, trim_opt keeper with
+    | None, None -> Error ("scope", "scope parameter is required (world or keeper name)")
+    | Some "world", None -> Ok Scope_world
+    | Some "world", Some _ -> Error ("keeper", "keeper parameter is not valid when scope=world")
+    | Some "keeper", Some k ->
+      if Keeper_config.validate_name k
+      then Ok (Scope_keeper k)
+      else Error ("keeper", Printf.sprintf "invalid keeper name %S" k)
+    | Some "keeper", None ->
+      Error ("keeper", "keeper parameter is required when scope=keeper")
+    | Some raw, None ->
+      if Keeper_config.validate_name raw
+      then Ok (Scope_keeper raw)
+      else Error ("scope", Printf.sprintf "invalid scope %S" raw)
+    | Some _, Some _ ->
+      Error ("scope", "use either scope=<keeper> or scope=keeper&keeper=<keeper>")
+    | None, Some k ->
+      if Keeper_config.validate_name k
+      then Ok (Scope_keeper k)
+      else Error ("keeper", Printf.sprintf "invalid keeper name %S" k)
+  in
+  let* parsed_range =
+    match trim_opt window, trim_opt from_rev, trim_opt to_rev with
+    | None, None, None -> Ok (Range_window Window_24h)
+    | Some w, None, None ->
+      (match window_of_string w with
+       | Some win -> Ok (Range_window win)
+       | None ->
+         Error ("window", Printf.sprintf "invalid window %S; expected 24h, 7d, or 30d" w))
+    | Some _, (Some _ | None), Some _ | Some _, Some _, None ->
+      Error ("window", "cannot combine window with from_rev/to_rev")
+    | None, None, Some _ ->
+      Error ("from_rev", "from_rev is required when to_rev is specified")
+    | None, Some raw_from, raw_to_opt ->
+      (match int_of_string_opt raw_from with
+       | None -> Error ("from_rev", "from_rev must be a non-negative integer")
+       | Some from_v when from_v < 0 ->
+         Error ("from_rev", "from_rev must be a non-negative integer")
+       | Some from_v ->
+         (match raw_to_opt with
+          | None -> Ok (Range_revs { from_rev = from_v; to_rev = None })
+          | Some raw_to ->
+            (match int_of_string_opt raw_to with
+             | None -> Error ("to_rev", "to_rev must be a non-negative integer")
+             | Some to_v when to_v < from_v ->
+               Error ("to_rev", "to_rev must be greater than or equal to from_rev")
+             | Some to_v -> Ok (Range_revs { from_rev = from_v; to_rev = Some to_v }))))
+  in
+  Ok (parsed_scope, parsed_range)
+;;
+
+let error_result ?field code message =
+  Error (Env.error_status code, Env.error_json ?field ~code message)
+;;
+
+let claim_sha256_of_fact (fact : Types.fact) =
+  let id = Types.memory_id fact in
+  let prefix = "sha256:" in
+  if String.starts_with ~prefix id
+  then String.sub id (String.length prefix) (String.length id - String.length prefix)
+  else id
+;;
+
+let fact_lookup_for_keeper ~cache ~keepers_dir keeper_id =
+  match Hashtbl.find_opt cache keeper_id with
+  | Some table -> table
+  | None ->
+    let tbl = Hashtbl.create 32 in
+    (match Cur.read_for_keepers_dir ~keepers_dir ~keeper_id with
+     | Ok (Some snap) ->
+       List.iter
+         (fun (fact : Types.fact) ->
+            Hashtbl.replace tbl (claim_sha256_of_fact fact) fact)
+         snap.facts
+     | Ok None | Error _ -> ());
+    Hashtbl.replace cache keeper_id tbl;
+    tbl
+;;
+
+let resolve_fact_ref_json ~cache ~keepers_dir (ref_ : Ledger.fact_ref) =
+  match ref_ with
+  | Ledger.Ordinary { keeper_id; claim_sha256 } ->
+    let tbl = fact_lookup_for_keeper ~cache ~keepers_dir keeper_id in
+    let resolved_fields =
+      match Hashtbl.find_opt tbl claim_sha256 with
+      | Some fact ->
+        [ "resolved", `Bool true
+        ; "claim", `String fact.claim
+        ; "category", `String (Types.category_to_string fact.category)
+        ; "origin", `String (Types.origin_kind_to_string fact.origin.kind)
+        ; "first_seen_unix", `Float fact.first_seen
+        ; "last_seen_unix", `Float fact.last_seen
+        ]
+      | None ->
+        [ "resolved", `Bool false
+        ; "claim", `Null
+        ; "category", `Null
+        ; "origin", `Null
+        ; "first_seen_unix", `Null
+        ; "last_seen_unix", `Null
+        ]
+    in
+    `Assoc
+      ([ "store_kind", `String "ordinary"
+       ; "keeper_id", `String keeper_id
+       ; "path", `Null
+       ; "claim_sha256", `String claim_sha256
+       ]
+       @ resolved_fields)
+  | Ledger.Source_bound { keeper_id; path; claim_sha256 } ->
+    `Assoc
+      [ "store_kind", `String "source_bound"
+      ; "keeper_id", `String keeper_id
+      ; "path", `String path
+      ; "claim_sha256", `String claim_sha256
+      ; "resolved", `Bool false
+      ; "claim", `Null
+      ; "category", `Null
+      ; "origin", `Null
+      ; "first_seen_unix", `Null
+      ; "last_seen_unix", `Null
+      ]
+;;
+
+let briefing_json ~briefing ~building =
+  let status, text, source_ids_count, error =
+    match briefing with
+    | Error detail -> "unavailable", `Null, 0, Some detail
+    | Ok Briefing.Missing -> "missing", `Null, 0, None
+    | Ok (Briefing.Current summary) ->
+      "current", `String summary.text, List.length summary.source_ids, None
+    | Ok (Briefing.Stale summary) ->
+      "stale", `String summary.text, List.length summary.source_ids, None
+  in
+  let building_json =
+    match building with
+    | Ok (Some (pass : Briefing.pass)) ->
+      `Assoc [ "target", `Int pass.target; "remaining", `Int pass.remaining ]
+    | Ok None | Error _ -> `Null
+  in
+  `Assoc
+    [ "status", `String status
+    ; "text", text
+    ; "source_ids_count", `Int source_ids_count
+    ; "error", Json_util.string_opt_to_json error
+    ; "building_pass", building_json
+    ]
+;;
+
+let world_json ?(now = Time_compat.now ()) ~config () =
+  let base_path = config.Workspace.base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let obs = Ledger.observe ~base_path in
+  let writer_health = Keeper_memory_writer_health.section_json ~config in
+  let log_report_json =
+    match Wlog.recover_file ~path:(Wlog.log_path ~base_path) with
+    | Error err ->
+      `Assoc
+        [ "status", `String "unavailable"
+        ; "error", `String (Wlog.error_to_string err)
+        ; "last_committed_seq", `Int 0
+        ; "committed_changes_count", `Int 0
+        ; "incomplete_batches_count", `Int 0
+        ; "aborted_batches_count", `Int 0
+        ; "recent_changes", `List []
+        ]
+    | Ok report ->
+      let recent =
+        report.Wlog.committed_changes
+        |> List.rev
+        |> Server_utils.take 20
+        |> List.map (fun (c : Wlog.change_entry) ->
+             `Assoc
+               [ "seq", `Int c.seq
+               ; "batch_id", `String c.batch_id
+               ; "fact_id", `String c.fact_id
+               ; "summary", `String c.summary
+               ; "recorded_at", `String c.recorded_at
+               ])
+      in
+      `Assoc
+        [ "status", `String "available"
+        ; "error", `Null
+        ; "last_committed_seq", `Int report.last_committed_seq
+        ; "committed_changes_count", `Int (List.length report.committed_changes)
+        ; "incomplete_batches_count", `Int (List.length report.incomplete_batches)
+        ; "aborted_batches_count", `Int (List.length report.aborted_batches)
+        ; "recent_changes", `List recent
+        ]
+  in
+  match obs with
+  | Ledger.Unavailable detail ->
+    error_result Env.Store_unavailable ("world memory ledger unavailable: " ^ detail)
+  | Ledger.Missing ->
+    let data =
+      `Assoc
+        [ "ledger_state", `String "missing"
+        ; ( "inventory"
+          , `Assoc
+              [ "ledger_sha256", `Null
+              ; "claims_count", `Int 0
+              ; "facts_count", `Int 0
+              ; "conflicts_count", `Int 0
+              ; "excluded_count", `Int 0
+              ] )
+        ; "claims", `List []
+        ; "active_conflicts", `List []
+        ; ( "briefing"
+          , `Assoc
+              [ "status", `String "missing"
+              ; "text", `Null
+              ; "source_ids_count", `Int 0
+              ; "error", `Null
+              ; "building_pass", `Null
+              ] )
+        ; "recent_batches", log_report_json
+        ; "librarian_writers", writer_health
+        ]
+    in
+    Ok (Env.ok ~now data)
+  | Ledger.Available
+      { ledger_sha256
+      ; claim_count
+      ; conflict_count
+      ; classified_count
+      ; excluded_count
+      ; briefing
+      ; building
+      } ->
+    (match Ledger.load ~base_path with
+     | Error detail ->
+       error_result Env.Store_unavailable ("world memory ledger load failed: " ^ detail)
+     | Ok ledger ->
+       let fact_cache = Hashtbl.create 16 in
+       let conflict_members = Hashtbl.create 8 in
+       List.iter
+         (fun (fact_ref, disp) ->
+            match disp with
+            | Ledger.Conflict_member cid ->
+              let prev =
+                match Hashtbl.find_opt conflict_members cid with
+                | Some lst -> lst
+                | None -> []
+              in
+              Hashtbl.replace conflict_members cid (fact_ref :: prev)
+            | Ledger.Claim_member _ | Ledger.Excluded _ -> ())
+         (Ledger.dispositions ledger);
+       let active_conflicts_json =
+         Ledger.conflicts ledger
+         |> List.map (fun (conflict_id, description) ->
+              let refs =
+                match Hashtbl.find_opt conflict_members conflict_id with
+                | Some lst -> List.rev lst
+                | None -> []
+              in
+              `Assoc
+                [ "conflict_id", `String conflict_id
+                ; "description", `String description
+                ; "member_count", `Int (List.length refs)
+                ; ( "competing_claims"
+                  , `List
+                      (List.map (resolve_fact_ref_json ~cache:fact_cache ~keepers_dir) refs) )
+                ])
+       in
+       let claims_json =
+         Ledger.all_claim_provenance ledger
+         |> List.map (fun (prov : Ledger.claim_provenance) ->
+              `Assoc
+                [ "claim_id", `String prov.claim_id
+                ; "claim", `String prov.claim
+                ; "stage", `String (Ledger.corroboration_stage_to_string prov.stage)
+                ; ( "supporting_keepers"
+                  , `List (List.map (fun k -> `String k) prov.supporting_keepers) )
+                ; "support_count", `Int prov.support_count
+                ; "has_source_bound", `Bool prov.has_source_bound
+                ])
+       in
+       let ordinary_absence_json =
+         match Workspace_memory_ledger_view.inventory ~now ~base_path () with
+         | Ok inv ->
+           (match Json_util.assoc_member_opt "ordinary_absence" inv with
+            | Some v -> v
+            | None -> `Null)
+         | Error _ -> `Null
+       in
+       let data =
+         `Assoc
+           [ "ledger_state", `String "available"
+           ; ( "inventory"
+             , `Assoc
+                 [ "ledger_sha256", `String ledger_sha256
+                 ; "claims_count", `Int claim_count
+                 ; "facts_count", `Int (classified_count + excluded_count)
+                 ; "classified_count", `Int classified_count
+                 ; "conflicts_count", `Int conflict_count
+                 ; "excluded_count", `Int excluded_count
+                 ; "ordinary_absence", ordinary_absence_json
+                 ] )
+           ; "claims", `List claims_json
+           ; "active_conflicts", `List active_conflicts_json
+           ; "briefing", briefing_json ~briefing ~building
+           ; "recent_batches", log_report_json
+           ; "librarian_writers", writer_health
+           ]
+       in
+       Ok (Env.ok ~now data))
+;;
+
+type heat_stats =
+  { retrieved_count : int
+  ; last_retrieved_at : float option
+  ; heat : retrieval_heat
+  }
+
+let build_event_heat_table ~now ~keepers_dir ~keeper_id =
+  let counts = Hashtbl.create 64 in
+  let last_seen = Hashtbl.create 64 in
+  let unreadable = ref 0 in
+  let total_events = ref 0 in
+  (match Events.read ~keepers_dir ~keeper_id with
+   | Error _ -> ()
+   | Ok indexed_rows ->
+     List.iter
+       (fun (_idx, row_res) ->
+          match row_res with
+          | Error _ -> incr unreadable
+          | Ok (ev : Events.event) ->
+            incr total_events;
+            let prev_c =
+              match Hashtbl.find_opt counts ev.memory_id with
+              | Some n -> n
+              | None -> 0
+            in
+            Hashtbl.replace counts ev.memory_id (prev_c + 1);
+            let prev_ts = Hashtbl.find_opt last_seen ev.memory_id in
+            let next_ts =
+              match prev_ts with
+              | Some t when Float.compare t ev.recorded_at >= 0 -> t
+              | Some _ | None -> ev.recorded_at
+            in
+            Hashtbl.replace last_seen ev.memory_id next_ts)
+       indexed_rows);
+  let lookup memory_id =
+    let retrieved_count =
+      match Hashtbl.find_opt counts memory_id with
+      | Some n -> n
+      | None -> 0
+    in
+    let last_retrieved_at = Hashtbl.find_opt last_seen memory_id in
+    let heat = classify_retrieval_heat ~now ~retrieved_count ~last_retrieved_at in
+    { retrieved_count; last_retrieved_at; heat }
+  in
+  lookup, !total_events, !unreadable
+;;
+
+let fact_diff_entry_json ~heat_lookup (fact : Types.fact) =
+  let id = Types.memory_id fact in
+  let hs = heat_lookup id in
+  `Assoc
+    [ "memory_id", `String id
+    ; "category", `String (Types.category_to_string fact.category)
+    ; "origin", `String (Types.origin_kind_to_string fact.origin.kind)
+    ; "text", `String fact.claim
+    ; "first_seen_unix", `Float fact.first_seen
+    ; "last_seen_unix", `Float fact.last_seen
+    ; "retrieval_count", `Int hs.retrieved_count
+    ; "last_retrieved_at_unix", Json_util.float_opt_to_json hs.last_retrieved_at
+    ; "heat", `String (retrieval_heat_to_string hs.heat)
+    ]
+;;
+
+let keeper_diff_json ~now ~config ~keeper_id ~range =
+  let base_path = config.Workspace.base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  match Cur.read_for_keepers_dir ~keepers_dir ~keeper_id with
+  | Error msg -> error_result Env.Store_unavailable ("snapshot read failed: " ^ msg)
+  | Ok snap_opt ->
+    (match Cur.read_journal_tail ~keepers_dir ~keeper_id ~limit:2000 with
+     | Error msg -> error_result Env.Store_unavailable ("journal read failed: " ^ msg)
+     | Ok journal_rows ->
+       let lineage_revisions =
+         match Cur.read_commit_lineage ~keepers_dir ~keeper_id with
+         | Ok lineage -> lineage.revisions
+         | Error _ -> []
+       in
+       let heat_lookup, total_events, unreadable_events =
+         build_event_heat_table ~now ~keepers_dir ~keeper_id
+       in
+       let current_facts =
+         match snap_opt with
+         | Some s -> s.facts
+         | None -> []
+       in
+       let current_rev =
+         match snap_opt with
+         | Some s -> s.revision
+         | None -> 0
+       in
+       let from_unix_opt, to_unix_opt, from_rev_opt, to_rev_opt, window_label =
+         match range with
+         | Range_window w ->
+           let span = window_seconds w in
+           Some (now -. span), Some now, None, None, Some (window_to_string w)
+         | Range_revs { from_rev; to_rev } ->
+           None, None, Some from_rev, Some (Option.value to_rev ~default:current_rev), None
+       in
+       let in_range_ts ts =
+         match from_unix_opt, to_unix_opt with
+         | Some lo, Some hi -> Float.compare ts lo >= 0 && Float.compare ts hi <= 0
+         | _ -> true
+       in
+       let in_range_rev rev =
+         match from_rev_opt, to_rev_opt with
+         | Some lo, Some hi -> rev >= lo && rev <= hi
+         | Some lo, None -> rev >= lo
+         | _ -> true
+       in
+       let added_map : (string, Types.fact * int) Hashtbl.t = Hashtbl.create 32 in
+       let removed_map :
+         (string, Types.fact * int * Cur.source * string option) Hashtbl.t
+         =
+         Hashtbl.create 32
+       in
+       let invalidated_rev = ref [] in
+       let rev_ticks_rev = ref [] in
+       let failure_timestamps = ref [] in
+       let quarantine_timestamps = ref [] in
+       let undecodable_lines = ref 0 in
+       let min_rev_seen = ref None in
+       let max_rev_seen = ref None in
+       let min_committed_ts = ref None in
+       let max_committed_ts = ref None in
+       let record_rev r ts =
+         (match !min_rev_seen with
+          | None -> min_rev_seen := Some r
+          | Some prev -> if r < prev then min_rev_seen := Some r);
+         (match !max_rev_seen with
+          | None -> max_rev_seen := Some r
+          | Some prev -> if r > prev then max_rev_seen := Some r);
+         (match !min_committed_ts with
+          | None -> min_committed_ts := Some ts
+          | Some prev -> if Float.compare ts prev < 0 then min_committed_ts := Some ts);
+         match !max_committed_ts with
+         | None -> max_committed_ts := Some ts
+         | Some prev -> if Float.compare ts prev > 0 then max_committed_ts := Some ts
+       in
+       List.iter
+         (function
+           | Error _ -> incr undecodable_lines
+           | Ok (Cur.Journal_failed { recorded_at; _ }) ->
+             failure_timestamps := recorded_at :: !failure_timestamps
+           | Ok (Cur.Journal_quarantined { recorded_at; _ }) ->
+             quarantine_timestamps := recorded_at :: !quarantine_timestamps
+           | Ok (Cur.Journal_committed { recorded_at; revision; source; change; dropped; _ }) ->
+             let matches =
+               match range with
+               | Range_window _ -> in_range_ts recorded_at
+               | Range_revs _ -> in_range_rev revision
+             in
+             if matches
+             then (
+               record_rev revision recorded_at;
+               let drop_reasons = Hashtbl.create 8 in
+               Option.iter
+                 (List.iter (fun (d : Types.dropped_statement) ->
+                    Hashtbl.replace drop_reasons d.memory_id d.reason))
+                 dropped;
+               List.iter
+                 (fun fact ->
+                    let id = Types.memory_id fact in
+                    Hashtbl.replace added_map id (fact, revision))
+                 change.added;
+               List.iter
+                 (fun fact ->
+                    let id = Types.memory_id fact in
+                    let reason = Hashtbl.find_opt drop_reasons id in
+                    Hashtbl.replace removed_map id (fact, revision, source, reason))
+                 change.removed;
+               List.iter
+                 (fun (inv : Cur.support_invalidation) ->
+                    invalidated_rev := (inv, revision) :: !invalidated_rev)
+                 change.invalidated;
+               rev_ticks_rev
+               := `Assoc
+                    [ "rev", `Int revision
+                    ; "at_unix", `Float recorded_at
+                    ; "source", `String (Cur.source_kind_to_string source.kind)
+                    ; "added", `Int (List.length change.added)
+                    ; "removed", `Int (List.length change.removed)
+                    ; "invalidated", `Int (List.length change.invalidated)
+                    ]
+                  :: !rev_ticks_rev))
+         journal_rows;
+       let count_ts_in_scope timestamps =
+         match range with
+         | Range_window _ ->
+           List.fold_left
+             (fun acc ts -> if in_range_ts ts then acc + 1 else acc)
+             0
+             timestamps
+         | Range_revs _ ->
+           (match !min_committed_ts, !max_committed_ts with
+            | Some lo, Some hi ->
+              List.fold_left
+                (fun acc ts ->
+                   if Float.compare ts lo >= 0 && Float.compare ts hi <= 0
+                   then acc + 1
+                   else acc)
+                0
+                timestamps
+            | None, _ | _, None -> 0)
+       in
+       let failures_in_window = ref (count_ts_in_scope !failure_timestamps) in
+       let quarantines_in_window = ref (count_ts_in_scope !quarantine_timestamps) in
+       (* Pair explicit revision links into structured [updated] entries *)
+       let paired_old = Hashtbl.create 16 in
+       let paired_new = Hashtbl.create 16 in
+       let updated_json =
+         List.filter_map
+           (fun (rev_link : Types.revision) ->
+              match
+                ( Hashtbl.find_opt removed_map rev_link.superseded
+                , Hashtbl.find_opt added_map rev_link.superseded_by )
+              with
+              | Some (old_f, _old_rev, _src, _reason), Some (new_f, new_rev) ->
+                Hashtbl.replace paired_old rev_link.superseded ();
+                Hashtbl.replace paired_new rev_link.superseded_by ();
+                Some
+                  (`Assoc
+                    [ "relation", `String "revision"
+                    ; "at_rev", `Int new_rev
+                    ; "before", fact_diff_entry_json ~heat_lookup old_f
+                    ; "after", fact_diff_entry_json ~heat_lookup new_f
+                    ])
+              | _ -> None)
+           lineage_revisions
+       in
+       let added_json =
+         Hashtbl.fold
+           (fun id (fact, rev) acc ->
+              if Hashtbl.mem paired_new id
+              then acc
+              else (rev, id, fact) :: acc)
+           added_map
+           []
+         |> List.sort (fun (ra, ia, _) (rb, ib, _) ->
+              let c = Int.compare rb ra in
+              if c <> 0 then c else String.compare ia ib)
+         |> List.map (fun (rev, _id, fact) ->
+              match fact_diff_entry_json ~heat_lookup fact with
+              | `Assoc fields -> `Assoc (("added_at_rev", `Int rev) :: fields)
+              | other -> other)
+       in
+       let retracted_json =
+         Hashtbl.fold
+           (fun id (fact, rev, src, reason) acc ->
+              if Hashtbl.mem paired_old id
+              then acc
+              else (rev, id, fact, src, reason) :: acc)
+           removed_map
+           []
+         |> List.sort (fun (ra, ia, _, _, _) (rb, ib, _, _, _) ->
+              let c = Int.compare rb ra in
+              if c <> 0 then c else String.compare ia ib)
+         |> List.map (fun (rev, id, (fact : Types.fact), (src : Cur.source), reason) ->
+              `Assoc
+                [ "memory_id", `String id
+                ; "category", `String (Types.category_to_string fact.Types.category)
+                ; "text", `String fact.Types.claim
+                ; "removed_at_rev", `Int rev
+                ; "removed_by", `String (Cur.source_kind_to_string src.kind)
+                ; "drop_reason", Json_util.string_opt_to_json reason
+                ])
+       in
+       let invalidated_json =
+         !invalidated_rev
+         |> List.rev
+         |> List.map (fun ((inv : Cur.support_invalidation), rev) ->
+              `Assoc
+                [ "memory_id", `String (Types.memory_id inv.fact)
+                ; "text", `String inv.fact.claim
+                ; "at_rev", `Int rev
+                ; ( "missing_premise_ids"
+                  , `List (List.map (fun s -> `String s) inv.missing_premise_ids) )
+                ])
+       in
+       (* Compute retrieval heat totals across current facts *)
+       let hot = ref 0 in
+       let warm = ref 0 in
+       let cold = ref 0 in
+       let never = ref 0 in
+       List.iter
+         (fun fact ->
+            let hs = heat_lookup (Types.memory_id fact) in
+            match hs.heat with
+            | Heat_hot -> incr hot
+            | Heat_warm -> incr warm
+            | Heat_cold -> incr cold
+            | Heat_never -> incr never)
+         current_facts;
+       let writer_status = Keeper_memory_writer_health.keeper_rows ~config keeper_id in
+       let data =
+         `Assoc
+           [ ( "scope"
+             , `Assoc [ "kind", `String "keeper"; "keeper", `String keeper_id ] )
+           ; ( "range"
+             , `Assoc
+                 [ "window", Json_util.string_opt_to_json window_label
+                 ; ( "from_rev"
+                   , Json_util.int_opt_to_json
+                       (match from_rev_opt with
+                        | Some r -> Some r
+                        | None -> !min_rev_seen) )
+                 ; ( "to_rev"
+                   , Json_util.int_opt_to_json
+                       (match to_rev_opt with
+                        | Some r -> Some r
+                        | None ->
+                          (match !max_rev_seen with
+                           | Some _ as m -> m
+                           | None -> Some current_rev)) )
+                 ; "from_unix", Json_util.float_opt_to_json from_unix_opt
+                 ; "to_unix", Json_util.float_opt_to_json to_unix_opt
+                 ] )
+           ; ( "counts"
+             , `Assoc
+                 [ "total_facts_now", `Int (List.length current_facts)
+                 ; "added", `Int (List.length added_json)
+                 ; "updated", `Int (List.length updated_json)
+                 ; "retracted", `Int (List.length retracted_json)
+                 ; "invalidated", `Int (List.length invalidated_json)
+                 ; "journal_failures_in_window", `Int !failures_in_window
+                 ; "journal_quarantines_in_window", `Int !quarantines_in_window
+                 ; "undecodable_journal_lines", `Int !undecodable_lines
+                 ] )
+           ; ( "retrieval_heat"
+             , `Assoc
+                 [ "hot", `Int !hot
+                 ; "warm", `Int !warm
+                 ; "cold", `Int !cold
+                 ; "never_retrieved", `Int !never
+                 ; "total_events", `Int total_events
+                 ; "unreadable_event_lines", `Int unreadable_events
+                 ] )
+           ; "revisions", `List (List.rev !rev_ticks_rev)
+           ; "added", `List added_json
+           ; "updated", `List updated_json
+           ; "retracted", `List retracted_json
+           ; "invalidated", `List invalidated_json
+           ; "writer_status", writer_status
+           ]
+       in
+       Ok (Env.ok ~now data))
+;;
+
+let parse_rfc3339_unix raw =
+  match Ptime.of_rfc3339 raw with
+  | Ok (ptime, _, _) -> Some (Ptime.to_float_s ptime)
+  | Error _ -> None
+;;
+
+let world_diff_json ~now ~config ~range =
+  let base_path = config.Workspace.base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  match Wlog.recover_file ~path:(Wlog.log_path ~base_path) with
+  | Error err ->
+    error_result
+      Env.Store_unavailable
+      ("world memory log unavailable: " ^ Wlog.error_to_string err)
+  | Ok report ->
+    let from_unix_opt, to_unix_opt, from_rev_opt, to_rev_opt, window_label =
+      match range with
+      | Range_window w ->
+        let span = window_seconds w in
+        Some (now -. span), Some now, None, None, Some (window_to_string w)
+      | Range_revs { from_rev; to_rev } ->
+        ( None
+        , None
+        , Some from_rev
+        , Some (Option.value to_rev ~default:report.last_committed_seq)
+        , None )
+    in
+    let unparseable_timestamps = ref 0 in
+    let selected =
+      List.filter
+        (fun (c : Wlog.change_entry) ->
+           match range with
+           | Range_window _ ->
+             (match from_unix_opt, to_unix_opt, parse_rfc3339_unix c.recorded_at with
+              | Some lo, Some hi, Some ts ->
+                Float.compare ts lo >= 0 && Float.compare ts hi <= 0
+              | Some _, Some _, None ->
+                incr unparseable_timestamps;
+                false
+              | None, _, _ | _, None, _ -> false)
+           | Range_revs _ ->
+             (match from_rev_opt, to_rev_opt with
+              | Some lo, Some hi -> c.seq >= lo && c.seq <= hi
+              | None, _ | _, None -> false))
+        report.committed_changes
+    in
+    let added = ref [] in
+    let updated = ref [] in
+    let retracted = ref [] in
+    let revisions = ref [] in
+    List.iter
+      (fun (c : Wlog.change_entry) ->
+         let op_kind =
+           match Json_util.assoc_string_opt "op" c.payload with
+           | Some s -> String.lowercase_ascii (String.trim s)
+           | None ->
+             (match Json_util.assoc_string_opt "action" c.payload with
+              | Some s -> String.lowercase_ascii (String.trim s)
+              | None -> "added")
+         in
+         let entry_json =
+           `Assoc
+             [ "seq", `Int c.seq
+             ; "batch_id", `String c.batch_id
+             ; "fact_id", `String c.fact_id
+             ; "summary", `String c.summary
+             ; "recorded_at", `String c.recorded_at
+             ; "payload", c.payload
+             ]
+         in
+         revisions
+         := `Assoc
+              [ "rev", `Int c.seq
+              ; "batch_id", `String c.batch_id
+              ; "fact_id", `String c.fact_id
+              ; "recorded_at", `String c.recorded_at
+              ; "op", `String op_kind
+              ]
+            :: !revisions;
+         if String.equal op_kind "retracted" || String.equal op_kind "removed"
+         then retracted := entry_json :: !retracted
+         else if
+           String.equal op_kind "updated"
+           || Option.is_some (Json_util.assoc_member_opt "before" c.payload)
+         then (
+           let before =
+             Option.value ~default:`Null (Json_util.assoc_member_opt "before" c.payload)
+           in
+           let after =
+             Option.value ~default:c.payload (Json_util.assoc_member_opt "after" c.payload)
+           in
+           updated
+           := `Assoc
+                [ "seq", `Int c.seq
+                ; "fact_id", `String c.fact_id
+                ; "summary", `String c.summary
+                ; "recorded_at", `String c.recorded_at
+                ; "before", before
+                ; "after", after
+                ]
+              :: !updated)
+         else added := entry_json :: !added)
+      selected;
+    (* Fleet-wide retrieval heat rollup across Keeper memory-events sidecars *)
+    let keeper_ids = Cur.list_keeper_ids_for_keepers_dir ~keepers_dir in
+    let hot = ref 0 in
+    let warm = ref 0 in
+    let cold = ref 0 in
+    let never = ref 0 in
+    let total_events = ref 0 in
+    let unreadable_events = ref 0 in
+    List.iter
+      (fun kid ->
+         let lookup, ev_c, unr_c = build_event_heat_table ~now ~keepers_dir ~keeper_id:kid in
+         total_events := !total_events + ev_c;
+         unreadable_events := !unreadable_events + unr_c;
+         match Cur.read_for_keepers_dir ~keepers_dir ~keeper_id:kid with
+         | Ok (Some snap) ->
+           List.iter
+             (fun fact ->
+                match (lookup (Types.memory_id fact)).heat with
+                | Heat_hot -> incr hot
+                | Heat_warm -> incr warm
+                | Heat_cold -> incr cold
+                | Heat_never -> incr never)
+             snap.facts
+         | Ok None | Error _ -> ())
+      keeper_ids;
+    let total_claims_now =
+      match Ledger.load ~base_path with
+      | Ok ledger -> List.length (Ledger.claims ledger)
+      | Error _ -> 0
+    in
+    let data =
+      `Assoc
+        [ "scope", `Assoc [ "kind", `String "world" ]
+        ; ( "range"
+          , `Assoc
+              [ "window", Json_util.string_opt_to_json window_label
+              ; "from_rev", Json_util.int_opt_to_json from_rev_opt
+              ; ( "to_rev"
+                , Json_util.int_opt_to_json
+                    (match to_rev_opt with
+                     | Some _ as t -> t
+                     | None -> Some report.last_committed_seq) )
+              ; "from_unix", Json_util.float_opt_to_json from_unix_opt
+              ; "to_unix", Json_util.float_opt_to_json to_unix_opt
+              ] )
+        ; ( "counts"
+          , `Assoc
+              [ "total_claims_now", `Int total_claims_now
+              ; "added", `Int (List.length !added)
+              ; "updated", `Int (List.length !updated)
+              ; "retracted", `Int (List.length !retracted)
+              ; "incomplete_batches", `Int (List.length report.incomplete_batches)
+              ; "aborted_batches", `Int (List.length report.aborted_batches)
+              ] )
+        ; ( "retrieval_heat"
+          , `Assoc
+              [ "hot", `Int !hot
+              ; "warm", `Int !warm
+              ; "cold", `Int !cold
+              ; "never_retrieved", `Int !never
+              ; "total_events", `Int !total_events
+              ; "unreadable_event_lines", `Int !unreadable_events
+              ] )
+        ; "revisions", `List (List.rev !revisions)
+        ; "added", `List (List.rev !added)
+        ; "updated", `List (List.rev !updated)
+        ; "retracted", `List (List.rev !retracted)
+        ; "unparseable_timestamps", `Int !unparseable_timestamps
+        ]
+    in
+    Ok (Env.ok ~now data)
+;;
+
+let diff_json ?(now = Time_compat.now ()) ~config ~scope ~range () =
+  match scope with
+  | Scope_world -> world_diff_json ~now ~config ~range
+  | Scope_keeper keeper_id -> keeper_diff_json ~now ~config ~keeper_id ~range
+;;
+
+let respond_result ~req reqd = function
+  | Ok json -> Http.Response.json_value ~compress:true ~request:req json reqd
+  | Error (status, json) ->
+    Http.Response.json_value ~status ~compress:true ~request:req json reqd
+;;
+
+let add_routes router =
+  router
+  |> Server_route.get
+       (Server_route.Permission Masc_domain.CanReadState)
+       "/api/v1/memory/world"
+       (fun state req reqd ->
+          let config = Mcp_server.workspace_config state in
+          let result =
+            Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+              world_json ~config ())
+          in
+          respond_result ~req reqd result)
+  |> Server_route.get
+       (Server_route.Permission Masc_domain.CanReadState)
+       "/api/v1/memory/diff"
+       (fun state req reqd ->
+          let config = Mcp_server.workspace_config state in
+          let parsed =
+            parse_diff_query
+              ~scope:(Server_utils.query_param req "scope")
+              ~keeper:(Server_utils.query_param req "keeper")
+              ~window:(Server_utils.query_param req "window")
+              ~from_rev:(Server_utils.query_param req "from_rev")
+              ~to_rev:(Server_utils.query_param req "to_rev")
+          in
+          let result =
+            match parsed with
+            | Error (field, msg) -> error_result ~field Env.Invalid_param msg
+            | Ok (scope, range) ->
+              Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+                diff_json ~config ~scope ~range ())
+          in
+          respond_result ~req reqd result)
+;;

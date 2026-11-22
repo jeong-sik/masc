@@ -43,13 +43,13 @@
   ; editor is what keeps the seed's comments above that key.
   masc.toml_line_editor
   masc_front_door
-  masc_tui_server_lifecycle
+  masc.server_lifecycle
   masc.keeper_sandbox_image
   masc.auth
   masc.http_client
   masc_cli_keeper_create
    masc.agent_core.digest
-  masc_tui_editor
+  masc.cli_editor
   masc.crypto_rng
   masc.masc_random_id
   masc.dashboard
@@ -323,7 +323,7 @@
  (wrapped false)
  (modules masc_tui_server_lifecycle)
  ; masc_tui_wake so the start waiter rings the loop when its outcome is known.
- (libraries masc.masc_core masc.fs_compat masc.masc_process masc_tui_wake unix))
+ (libraries masc.server_lifecycle masc_tui_wake unix))
 
 ;; What bare `masc` does: the TUI on a terminal, the server everywhere else.
 ;; Own library, no dependencies, so the rule runs under a test without a TTY,
@@ -1926,7 +1926,7 @@
  (name masc_tui_editor)
  (wrapped false)
  (modules masc_tui_editor)
- (libraries unix))
+ (libraries masc.cli_editor))
 
 ;; The declaration [masc keeper-create] sends and the answer it reads, both
 ;; pure, so the flag surface is a test rather than a running server.

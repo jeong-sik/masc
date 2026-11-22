@@ -206,11 +206,11 @@ let require_ok label action =
    is the reason -- a base path another server holds, a port that stayed
    taken -- and part of that is written before the server's own log exists,
    so pointing at .masc/logs alone sent the operator to a file without it. *)
-let server_exit_message (report : Masc_tui_server_lifecycle.exit_report) =
+let server_exit_message (report : Masc_server_lifecycle.exit_report) =
   Printf.sprintf "Server exited (%s) before it was ready: %s\n%s\nFix that and rerun setup."
     report.status
-    (Masc_tui_server_lifecycle.describe_last_line report.last_line)
-    (Masc_tui_server_lifecycle.describe_output report.output)
+    (Masc_server_lifecycle.describe_last_line report.last_line)
+    (Masc_server_lifecycle.describe_output report.output)
 
 module Upgrade = Server_upgrade_preparation
 
@@ -260,14 +260,14 @@ let prepare_server ~base_path ~port ~owned =
             in
             (match Upgrade.replacement_readiness ~run_dir ~base_path ~port with
              | Ok Upgrade.Replacement_can_start ->
-               (match Masc_tui_server_lifecycle.start
+               (match Masc_server_lifecycle.start
                         ~masc_bin:Sys.executable_name ~base_path ~host:"127.0.0.1" ~port
                         ~env:(Config_dir_resolver.environment_for_workspace
                           ~cwd:(Sys.getcwd ()) ~base_path ~env:(Unix.environment ())) with
                 | Error message -> fail message
                 | Ok server ->
                   owned := Some server;
-                  Started { pid = Masc_tui_server_lifecycle.owned_pgid server })
+                  Started { pid = Masc_server_lifecycle.owned_pgid server })
              | Ok Upgrade.Port_busy ->
                fail (Printf.sprintf "Port %d is in use by a process that does not hold the lease \
                                      of %s under %s. Choose an unused --port."
@@ -321,7 +321,7 @@ let prepare_server ~base_path ~port ~owned =
             ~watcher:(fun () -> Eio.Time.sleep clock 60.0; Error `Timeout)
             (fun () ->
               let rec wait () =
-                (match Option.bind !owned Masc_tui_server_lifecycle.exit_report with
+                (match Option.bind !owned Masc_server_lifecycle.exit_report with
                  | Some report -> fail (server_exit_message report)
                  | None -> ());
                 let again () = Eio.Time.sleep clock 0.2; wait () in
@@ -368,8 +368,8 @@ let prepare_server ~base_path ~port ~owned =
                              Rerun setup once it is." base_path expected port
                (match !owned with
                 | Some server ->
-                  "; " ^ Masc_tui_server_lifecycle.describe_output
-                           (Masc_tui_server_lifecycle.startup_output server)
+                  "; " ^ Masc_server_lifecycle.describe_output
+                           (Masc_server_lifecycle.startup_output server)
                 | None -> "")))))
 
 (* HIGH-RISK-UNREVIEWED: before each step that mints or sends the operator
@@ -389,7 +389,7 @@ let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image
     ~finally:(fun () ->
       match !owned with
       | None -> ()
-      | Some server -> Masc_tui_server_lifecycle.stop server ~grace_sec:5.0)
+      | Some server -> Masc_server_lifecycle.stop server ~grace_sec:5.0)
     (fun () ->
       try
         if not (Unix.isatty Unix.stdin) && open_tui then

@@ -49,7 +49,7 @@ let planning_cache_key ~base_path = planning_cache_prefix ^ base_path
    them so the SSE-triggered refetch reads the write instead of the
    previous projection for the rest of the TTL. *)
 let board_projection_cache_prefixes =
-  [ "board:memory:"; "board:list:"; "board:hearths:" ]
+  [ "board:memory:"; "board:list:"; "board:chains:"; "board:hearths:" ]
 ;;
 
 let invalidate_board_projections () =

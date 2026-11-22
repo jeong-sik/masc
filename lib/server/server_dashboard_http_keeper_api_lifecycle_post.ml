@@ -398,7 +398,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
              ~status:`Conflict
              ~request:req
              (Server_refusal.json
-                ~code:Tui_decode.keeper_boot_phase_conflict_code
+                ~code:Keeper_boot_refusal.keeper_boot_phase_conflict_code
                 ~fields:[ "ok", `Bool false ]
                 why)
              reqd

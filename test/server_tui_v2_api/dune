@@ -1,0 +1,35 @@
+(include_subdirs no)
+
+(env
+ (_ (flags (:standard -w -4-69))))
+
+(test
+ (name test_server_tui_v2_api)
+ (modules test_server_tui_v2_api)
+ (libraries
+  alcotest
+  eio
+  eio_main
+  httpun
+  masc
+  masc.dashboard
+  masc.server
+  masc.masc_candle
+  masc.masc_candle_config
+  masc.masc_candle_store
+  masc.goal_measure
+  masc.tool_metrics_store
+  masc.tool_types
+  masc.fs_compat
+  masc.config
+  masc.config_dir_resolver
+  masc.runtime
+  masc.agent_core.llm_provider
+  masc_board
+  masc.board_handlers
+  masc_workspace
+  masc_types
+  masc_goal
+  ptime
+  yojson
+  unix))

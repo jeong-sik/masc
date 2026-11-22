@@ -34,9 +34,16 @@
   ;; POST /api/v1/goals/confirmation writes the confirmed pass's PayoutOwed row
   ;; (3.2). dune does not re-export it through masc.
   masc.masc_candle
+  masc.masc_candle_config
   masc.masc_candle_runtime
   ;; Server_candle_broadcast installs the ledger's append observer.
   masc.masc_candle_store
+  masc.toml_line_editor
+  masc.build_commit
+  masc.keeper_types_profile_sandbox
+  masc_string_util
+  exec_ssh_protocol
+  zarith
   masc.keeper_operation_identity
   masc.secret_patterns
   masc.machine_checkpoint

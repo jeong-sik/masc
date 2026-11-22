@@ -5,7 +5,7 @@ val start_runtime_attempt : t -> runtime_id:string -> attempt_index:int -> unit
 val on_event : t -> Agent_core.Types.sse_event -> unit
 val on_progress : t -> block_index:int -> tool_call_id:string option ->
   Runtime_native_tools.progress -> unit
-val snapshots : t -> Masc_tui_keeper_chat_log.t * Masc_tui_keeper_chat_log.t
+val snapshots : t -> Masc.Keeper_chat_event_log.journaled_event list * Yojson.Safe.t list
 val on_completion : t -> block_index:int -> tool_call_id:string option ->
   Runtime_native_tools.completion -> unit
 val events : t -> Masc.Keeper_chat_events.keeper_chat_event list

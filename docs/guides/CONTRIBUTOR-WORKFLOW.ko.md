@@ -117,7 +117,7 @@ Commit 후 `git push -u origin docs/your-topic`으로 올리고 템플릿을 사
 | Keeper 동작·지침 | [Keeper 매뉴얼](../KEEPER-USER-MANUAL.md), 헌법 | `lib/keeper/`, `config/prompts/keeper.md`, `test/` |
 | Goal·Task·Board·완료 | 헌법의 도메인 규칙 | `lib/workspace/`, `config/tools/`, `test/` |
 | Provider·레인 동작 | 관련 인터페이스와 설정 | `lib/runtime/`, `lib/runtime_model/`, `test/` |
-| TUI·브라우저 UI | 기존 상호작용과 payload 계약 | `bin/masc_tui*.ml`, `lib/tui_decode.ml`, `dashboard/`, `test/` |
+| TUI·브라우저 UI | 기존 상호작용과 payload 계약 | `bin/masc_tui.ml`, `lib/masc_tui/`, `dashboard/`, `test/masc_tui_v2/` |
 | CI·개발 정책 | 헌법의 execution protocol | `.github/workflows/`, `scripts/ci/`, `scripts/review/` |
 
 시작 위치를 안내하는 표이며 영향받는 파일 전체 목록은 아닙니다. 호출 경로와 테스트를

@@ -1474,107 +1474,54 @@ let test_restore_retains_visible_commit_observation ~sync_fails () =
     check (list (pair string string)) "autosave still holds state before this restore"
       before.assignments autosave.assignments;
     let wire = Preset.report_to_json report in
-    let payload report = `Assoc ["ok", `Bool true; "report", report] in
-    let decoded = or_fail (Masc.Tui_decode.decode_preset_restore (payload wire)) in
-    let decoded_commit = match decoded.prr_runtime with
-      | Masc.Tui_decode.Preset_runtime_committed commit -> commit
-      | Masc.Tui_decode.Preset_runtime_unchanged | Masc.Tui_decode.Preset_runtime_failed _ ->
-        fail "visible commit must remain committed through the wire"
-    in
-    (* The server writes the commit and the TUI reads it with one codec, so the
-       commit read back is the receipt's own: identity, order, durability with
-       its reason, lock warnings and ignored keys. *)
-    check bool "the TUI reads back the commit the server wrote" true
-      (decoded_commit.prc_commit = Runtime.Config_commit_wire.of_receipt receipt);
-    let expected_attention = sync_fails || receipt.lock_warnings <> [] ||
-      match receipt.exact_output_registry with
-      | Runtime.Exact_output_registry_replaced _ -> false
-      | Runtime.Exact_output_registry_unpublished | Runtime.Exact_output_registry_kept _ -> true in
-    check bool "wire warning classification follows the actual application" expected_attention
-      (Masc.Tui_decode.preset_runtime_commit_needs_attention decoded_commit);
+    let runtime = Yojson.Safe.Util.member "runtime" wire in
+    let commit_json = Yojson.Safe.Util.member "commit" runtime in
+    check string "runtime report carries committed status" "committed"
+      Yojson.Safe.Util.(runtime |> member "status" |> to_string);
+    let decoded_commit = or_fail (Runtime.Config_commit_wire.of_yojson commit_json) in
+    check bool "Config_commit_wire reads back the commit the server wrote" true
+      (decoded_commit = Runtime.Config_commit_wire.of_receipt receipt);
     let replace key value = function
       | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
       | _ -> fail "report part must be an object" in
-    let runtime = Yojson.Safe.Util.member "runtime" wire in
-    let commit_json = Yojson.Safe.Util.member "commit" runtime in
-    (* The receipt is private; add the tolerated legacy key on the wire it
-       round-trips through, exactly as an older committed file would carry it. *)
-    let ignored_runtime = replace "commit"
-      (replace "ignored_legacy_keys" (`List [ `String "max-prompt-bytes" ])
-         (Runtime.config_commit_receipt_to_yojson receipt)) runtime in
-    (match (or_fail (Masc.Tui_decode.decode_preset_restore
-      (payload (replace "runtime" ignored_runtime wire)))).prr_runtime with
-     | Masc.Tui_decode.Preset_runtime_committed commit ->
-       check bool "editor diagnostics do not erase the original commit" true
-         (decoded_commit.prc_commit.Runtime.Config_commit_wire.source_revision
-          = commit.prc_commit.Runtime.Config_commit_wire.source_revision);
-       check Alcotest.(list string) "the TUI keeps the legacy keys the server ignored"
-         [ "max-prompt-bytes" ] commit.prc_commit.Runtime.Config_commit_wire.ignored_legacy_keys
-     | Masc.Tui_decode.Preset_runtime_unchanged | Masc.Tui_decode.Preset_runtime_failed _ ->
-       fail "editor diagnostics cannot turn an observed commit into a failed write");
-    List.iter (fun (application, expected_registry) ->
-      let runtime = replace "exact_output_registry"
-        (Runtime.exact_output_registry_application_to_yojson application) runtime in
-      let decoded = or_fail (Masc.Tui_decode.decode_preset_restore
-        (payload (replace "runtime" runtime wire))) in
-      match decoded.prr_runtime with
-      | Masc.Tui_decode.Preset_runtime_committed commit ->
-        check bool "registry projection keeps its own application state" true
-          (commit.prc_registry = expected_registry)
-      | Masc.Tui_decode.Preset_runtime_unchanged | Masc.Tui_decode.Preset_runtime_failed _ ->
-        fail "registry projection cannot erase a visible commit")
-      [ Runtime.Exact_output_registry_replaced {origin=Runtime.Runtime_binding_targets},
-          Masc.Tui_decode.Preset_registry_applied Masc.Tui_decode.Preset_registry_runtime_bindings
-      ; Runtime.Exact_output_registry_replaced {origin=Runtime.Replacement_catalog_targets {path="/fixture/catalog"}},
-          Masc.Tui_decode.Preset_registry_applied Masc.Tui_decode.Preset_registry_replacement_catalog
-      ; Runtime.Exact_output_registry_unpublished, Masc.Tui_decode.Preset_registry_unpublished
-      ; Runtime.Exact_output_registry_kept {reason=Runtime_exact_output_registry.Publication_busy},
-          Masc.Tui_decode.Preset_registry_kept
-            (Runtime_exact_output_registry.publication_error_to_string Runtime_exact_output_registry.Publication_busy)
-      ];
+    let ignored_commit =
+      replace "ignored_legacy_keys" (`List [ `String "max-prompt-bytes" ])
+        (Runtime.config_commit_receipt_to_yojson receipt) in
+    let decoded_ignored = or_fail (Runtime.Config_commit_wire.of_yojson ignored_commit) in
+    check bool "editor diagnostics do not erase the original commit" true
+      (decoded_commit.Runtime.Config_commit_wire.source_revision
+       = decoded_ignored.Runtime.Config_commit_wire.source_revision);
+    check Alcotest.(list string) "wire codec keeps the legacy keys the server ignored"
+      [ "max-prompt-bytes" ] decoded_ignored.Runtime.Config_commit_wire.ignored_legacy_keys;
     let warnings = [Runtime.Config_lock_release_unconfirmed "fixture unlock observation"] in
     let warned = Runtime.attach_lock_warnings warnings receipt in
-    let warned_runtime = replace "commit" (Runtime.config_commit_receipt_to_yojson warned) runtime in
-    (match (or_fail (Masc.Tui_decode.decode_preset_restore
-      (payload (replace "runtime" warned_runtime wire)))).prr_runtime with
-     | Masc.Tui_decode.Preset_runtime_committed commit ->
-       check bool "lock warning projection retains original detail" true
-         (commit.prc_commit.Runtime.Config_commit_wire.lock_warnings
-          = receipt.lock_warnings @ warnings);
-       check bool "lock warning requires attention" true
-         (Masc.Tui_decode.preset_runtime_commit_needs_attention commit)
-     | Masc.Tui_decode.Preset_runtime_unchanged | Masc.Tui_decode.Preset_runtime_failed _ ->
-       fail "lock warning must remain a committed observation");
-    List.iter (fun malformed_runtime ->
-      check bool "incomplete or unknown commit observation cannot become clean" true
-        (Result.is_error (Masc.Tui_decode.decode_preset_restore
-          (payload (replace "runtime" malformed_runtime wire)))))
-      [ `Assoc ["effect", `String "runtime_commit"; "status", `String "committed"]
-      ; replace "status" (`String "unchanged") runtime
-      ; replace "status" (`String "failed") runtime
-      ; (match runtime with `Assoc fields -> `Assoc (("status", `String "unchanged") :: fields)
-          | _ -> fail "runtime must be an object")
-      ; replace "commit" (replace "source_revision" (`String "invalid") commit_json) runtime
-      ; replace "commit" (replace "order" (`String "0") commit_json) runtime
-      ; replace "commit" (replace "durability" (`String "unknown") commit_json) runtime
-      ; replace "commit" (replace "warnings" `Null commit_json) runtime
-      ; replace "commit" (replace "ignored_legacy_keys" `Null commit_json) runtime
-      ; replace "commit" (replace "ignored_legacy_keys" (`List [`Int 7]) commit_json) runtime
-      ; replace "commit" (match commit_json with
+    let decoded_warned =
+      or_fail (Runtime.Config_commit_wire.of_yojson (Runtime.config_commit_receipt_to_yojson warned)) in
+    check bool "lock warning projection retains original detail" true
+      (decoded_warned.Runtime.Config_commit_wire.lock_warnings
+       = receipt.lock_warnings @ warnings);
+    List.iter (fun malformed_commit ->
+      check bool "incomplete or unknown commit observation is rejected" true
+        (Result.is_error (Runtime.Config_commit_wire.of_yojson malformed_commit)))
+      [ replace "source_revision" (`String "invalid") commit_json
+      ; replace "order" (`String "0") commit_json
+      ; replace "durability" (`String "unknown") commit_json
+      ; replace "warnings" `Null commit_json
+      ; replace "ignored_legacy_keys" `Null commit_json
+      ; replace "ignored_legacy_keys" (`List [`Int 7]) commit_json
+      ; (match commit_json with
           | `Assoc fields -> `Assoc (List.remove_assoc "ignored_legacy_keys" fields)
-          | _ -> fail "commit must be an object") runtime
-      ; replace "commit" (match commit_json with
+          | _ -> fail "commit must be an object")
+      ; (match commit_json with
           | `Assoc fields -> `Assoc (("ignored_legacy_keys", `List []) :: fields)
-          | _ -> fail "commit must be an object") runtime
-      ; replace "commit" (replace "future" (`Bool true) commit_json) runtime
-      ; replace "commit" (replace "durability" (`String "unconfirmed")
-          (replace "durability_detail" `Null commit_json)) runtime
-      ; replace "exact_output_registry" (`Assoc ["status", `String "future";
-          "requires_restart", `Bool false]) runtime
+          | _ -> fail "commit must be an object")
+      ; replace "future" (`Bool true) commit_json
+      ; replace "durability" (`String "unconfirmed")
+          (replace "durability_detail" `Null commit_json)
       ];
     (match detail with
      | Some expected -> check (option string) "wire keeps exact original fsync error"
-         (Some expected) (match decoded_commit.prc_commit.Runtime.Config_commit_wire.durability with
+         (Some expected) (match decoded_commit.Runtime.Config_commit_wire.durability with
             | Runtime.Durability_unconfirmed {detail} -> Some detail
             | Runtime.Durable -> None)
      | None -> ());

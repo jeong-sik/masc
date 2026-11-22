@@ -3,8 +3,8 @@
    subscriber counts, on two transports.
 
    - SSE: the real accept loop and the route's [serve] (everything but the
-     authorization) on the server; the terminal's HTTP client and
-     Masc_tui_fleet_stream on the reader.
+     authorization) on the server; the HTTP client and [Masc.Fleet_stream.decode]
+     on the reader.
    - gRPC: a [Subscribe]-style server-streaming method on grpc-direct. Each
      message is a protobuf message whose field 1 holds the same JSON the SSE
      frame holds, as [payload_json] does in proto/masc_workspace.proto. The
@@ -18,8 +18,82 @@
 
 module F = Masc.Fleet_stream
 module Hub = Masc.Fleet_stream_hub
-module Client = Masc_tui_fleet_stream
 module Route = Server_routes_http_routes_fleet_stream
+
+module Client = struct
+  type reading = { revision : F.Revision.t }
+
+  type view =
+    | Awaiting_first_reading
+    | Reading of { reading : reading }
+
+  type step =
+    | Keep_reading
+    | Reconnect
+
+  type t =
+    { buf : Buffer.t
+    ; mutable last_rev : F.Revision.t option
+    ; mutable view : view
+    }
+
+  let create () = { buf = Buffer.create 4096; last_rev = None; view = Awaiting_first_reading }
+  let started t = Buffer.clear t.buf; t.last_rev <- None
+  let view t = t.view
+
+  let find_frame_end s =
+    let len = String.length s in
+    let rec loop i =
+      if i + 1 >= len then None
+      else if s.[i] = '\n' && s.[i + 1] = '\n' then Some (i, 2)
+      else if i + 3 < len && s.[i] = '\r' && s.[i + 1] = '\n' && s.[i + 2] = '\r' && s.[i + 3] = '\n' then Some (i, 4)
+      else loop (i + 1)
+    in
+    loop 0
+
+  let data_of_frame frame =
+    String.split_on_char '\n' frame
+    |> List.filter_map (fun line ->
+      let n = String.length line in
+      let line = if n > 0 && line.[n - 1] = '\r' then String.sub line 0 (n - 1) else line in
+      if String.starts_with ~prefix:"data: " line then Some (String.sub line 6 (String.length line - 6))
+      else if String.starts_with ~prefix:"data:" line then Some (String.sub line 5 (String.length line - 5))
+      else None)
+    |> String.concat "\n"
+
+  let feed t chunk =
+    Buffer.add_string t.buf chunk;
+    let rec drain () =
+      let contents = Buffer.contents t.buf in
+      match find_frame_end contents with
+      | None -> Keep_reading
+      | Some (idx, sep_len) ->
+        let frame = String.sub contents 0 idx in
+        let rest = String.sub contents (idx + sep_len) (String.length contents - idx - sep_len) in
+        Buffer.clear t.buf;
+        Buffer.add_string t.buf rest;
+        let payload = String.trim (data_of_frame frame) in
+        if payload = "" then drain ()
+        else (
+          match F.decode (Yojson.Safe.from_string payload) with
+          | Error _ -> Reconnect
+          | Ok (F.Snapshot { revision; _ }) ->
+            t.last_rev <- Some revision;
+            t.view <- Reading { reading = { revision } };
+            drain ()
+          | Ok (F.Changed { revision; _ }) ->
+            (match t.last_rev with
+             | Some prev when F.Revision.is_next ~after:prev revision ->
+               t.last_rev <- Some revision;
+               t.view <- Reading { reading = { revision } };
+               drain ()
+             | _ -> Reconnect)
+          | Ok (F.Unavailable_snapshot { revision; _ } | F.Degraded { revision; _ }) ->
+            t.last_rev <- Some revision;
+            drain ())
+    in
+    drain ()
+end
 
 let queue_bound = 64
 let ping_interval_s = 30.0
@@ -170,10 +244,9 @@ let sse =
            | Client.Reconnect -> failwith "the bench reader was asked to reconnect"
            | Client.Keep_reading ->
              (match Client.view reader with
-              | Client.Reading { reading; _ } ->
+              | Client.Reading { reading } ->
                 on_revision (F.Revision.to_int reading.Client.revision)
-              | Client.Awaiting_first_reading | Client.Unreachable _ | Client.Unavailable _
-              | Client.Cannot_read _ -> ())))
+              | Client.Awaiting_first_reading -> ())))
   ; read_then_stall =
       Some
         (fun ~sw ~env ~port ~stalled ->

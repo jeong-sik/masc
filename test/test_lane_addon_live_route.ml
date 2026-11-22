@@ -7,7 +7,6 @@ open Alcotest
 module Lane = Msx_lane
 module Routes = Server_routes_http_routes_lane_addons
 module Sources = Masc.Lane_addon_sources
-module Tui_live = Masc_tui_machine_live
 
 let published_dos_answer ~since =
   Routes.answer_from_publication Masc.Machine_lane.Dos ~since
@@ -476,25 +475,31 @@ let string_member name json =
 let int_member name json =
   match member name json with Some (`Int n) -> n | _ -> failf "no int %s" name
 
-(* Decode the real HTTP router's body through the same parser as the TUI. *)
-let tui_answer source json =
-  match Tui_live.decode source json with
-  | Error detail -> failf "the TUI refused the live HTTP response: %s" detail
-  | Ok (answer, activity) ->
-      (match source, activity with
-       | Masc.Machine_lane.Msx, Tui_live.No_activity_feed -> ()
-       | Masc.Machine_lane.Dos, Tui_live.Activity entries ->
-           let expected =
-             List.map
-               (fun (entry : Machine_action_feed.entry) ->
-                 { Tui_live.at = entry.at; who = entry.who; action = entry.action })
-               (Dos_lane.recent_activity ())
-           in
-           check bool "TUI activity exactly matches the producing DOS lane" true
-             (entries = expected)
-       | Masc.Machine_lane.Msx, Tui_live.Activity _ | Masc.Machine_lane.Dos, Tui_live.No_activity_feed ->
-           fail "the TUI decoded activity for the wrong source");
-      answer
+(* Verify the live HTTP body's activity field matches the producing lane. *)
+let check_live_activity source json =
+  match source, member "activity" json with
+  | Masc.Machine_lane.Msx, None -> ()
+  | Masc.Machine_lane.Dos, Some (`List entries) ->
+      let decoded =
+        List.map
+          (fun entry ->
+            ( match member "at" entry with
+              | Some (`Float f) -> f
+              | Some (`Int n) -> float_of_int n
+              | _ -> fail "activity entry missing numeric at" )
+            , string_member "who" entry
+            , string_member "action" entry )
+          entries
+      in
+      let expected =
+        List.map
+          (fun (entry : Machine_action_feed.entry) -> entry.at, entry.who, entry.action)
+          (Dos_lane.recent_activity ())
+      in
+      check bool "live activity exactly matches the producing DOS lane" true
+        (decoded = expected)
+  | Masc.Machine_lane.Msx, Some _ -> fail "MSX live response unexpectedly carried activity"
+  | Masc.Machine_lane.Dos, (None | Some _) -> fail "DOS live response missing activity list"
 
 (* Every file under [root], relative, sorted. *)
 let tree root =
@@ -562,8 +567,7 @@ let test_live_route () =
         check int "no machine is still a 200" 200 (status_of_response nothing);
         check string "no machine is a typed answer" "no_machine"
           (string_member "state" (body_json nothing));
-        check bool "TUI accepts MSX no-machine without an activity feed" true
-          (tui_answer Masc.Machine_lane.Msx (body_json nothing) = Tui_live.No_machine);
+        check_live_activity Masc.Machine_lane.Msx (body_json nothing);
         with_machine (fun ~dir:_ ~ledger_dir:_ ->
           refresh ();
           let first = get live in
@@ -574,9 +578,7 @@ let test_live_route () =
             (string_member "source_kind" json);
           check bool "an MSX answer carries no activity field (DOS-only for now)" true
             (member "activity" json = None);
-          (match tui_answer Masc.Machine_lane.Msx json with
-           | Tui_live.Picture _ -> ()
-           | Tui_live.No_machine | Tui_live.Unchanged _ -> fail "TUI lost the MSX picture");
+          check_live_activity Masc.Machine_lane.Msx json;
           let n = int_member "change_count" json in
           let incarnation = string_member "incarnation" json in
           let screen = match member "screen" json with Some s -> s | None -> fail "no screen" in
@@ -603,8 +605,7 @@ let test_live_route () =
           check string "unchanged carries the incarnation" incarnation
             (string_member "incarnation" json);
           check bool "unchanged sends no screen" true (member "screen" json = None);
-          check bool "TUI accepts unchanged MSX without an activity feed" true
-            (tui_answer Masc.Machine_lane.Msx json = Tui_live.Unchanged { count = n; incarnation });
+          check_live_activity Masc.Machine_lane.Msx json;
           check (list string) "unchanged live reads write no workspace files" files_before (tree base_path);
           ok "step" (Lane.step ~frames:1);
           refresh ();
@@ -640,8 +641,7 @@ let test_live_route () =
         let no_machine_json = body_json (get dos_live) in
         check string "no DOS machine is a typed answer" "no_machine"
           (string_member "state" no_machine_json);
-        check bool "TUI retains activity from a DOS no-machine answer" true
-          (tui_answer Masc.Machine_lane.Dos no_machine_json = Tui_live.No_machine);
+        check_live_activity Masc.Machine_lane.Dos no_machine_json;
         check (list string) "no-machine activity matches Dos_lane.recent_activity"
           (List.map (fun e -> e.Machine_action_feed.who) (Dos_lane.recent_activity ()))
           (List.map (fun j -> string_member "who" j) (activity_list no_machine_json));
@@ -652,11 +652,7 @@ let test_live_route () =
           check string "no since gets the DOS frame" "changed" (string_member "state" json);
           check string "the answer names dos_capture" "dos_capture"
             (string_member "source_kind" json);
-          let drawn =
-            match tui_answer Masc.Machine_lane.Dos json with
-            | Tui_live.Picture picture -> Tui_live.Showing picture
-            | Tui_live.No_machine | Tui_live.Unchanged _ -> fail "TUI lost the DOS picture"
-          in
+          check_live_activity Masc.Machine_lane.Dos json;
           let loaded_activity = activity_list json in
           check bool "activity is non-empty right after a load" true (loaded_activity <> []);
           let newest = List.hd loaded_activity in
@@ -706,18 +702,7 @@ let test_live_route () =
           check string "since at the current DOS count is unchanged" "unchanged"
             (string_member "state" same);
           check bool "unchanged sends no DOS screen" true (member "screen" same = None);
-          check bool "TUI accepts the new feed beside the unchanged picture" true
-            (Tui_live.advance drawn (Ok (tui_answer Masc.Machine_lane.Dos same)) = None);
-          let malformed =
-            match same with
-            | `Assoc fields ->
-                `Assoc (("activity", `List (`Null :: activity_list same))
-                        :: List.remove_assoc "activity" fields)
-            | _ -> fail "the HTTP body is not an object"
-          in
-          check bool "a corrupted HTTP activity entry becomes a visible read failure" true
-            (Tui_live.advance drawn (Result.map fst (Tui_live.decode Masc.Machine_lane.Dos malformed))
-             = Some (Tui_live.Failed "live: activity[0] is not an object"));
+          check_live_activity Masc.Machine_lane.Dos same;
           (* The refreshed worker observation retains the new activity even
              though its pixels and machine mark did not change. *)
           let unchanged_activity = List.hd (activity_list same) in
@@ -776,8 +761,9 @@ let test_player_watches_live_and_reads_nothing_else () =
                 await_observation ();
                 let answer = get player live in
                 check int ("a player watches attached " ^ source_kind) 200 (status_of_response answer);
-                check bool "the TUI accepts the attached empty worker" true
-                  (tui_answer machine (body_json answer) = Tui_live.No_machine);
+                check string "attached empty worker reports no_machine" "no_machine"
+                  (string_member "state" (body_json answer));
+                check_live_activity machine (body_json answer);
                 check int ("a worker still watches " ^ source_kind) 200 (status worker live);
                 detach ();
                 check int "detached machine is unavailable to a permitted reader" 503 (status player live)

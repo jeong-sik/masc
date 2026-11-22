@@ -6,5 +6,4 @@
   masc_types
   masc.gate
   masc.time_codec
-  masc_tui_keeper_activity
   unix))

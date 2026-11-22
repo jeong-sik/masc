@@ -1638,8 +1638,6 @@ let test_root_heartbeat_reaches_scoped_journal_and_tui ?(retry = false) () =
   let module Stream = Keeper_autonomous_stream in
   let module J = Keeper_chat_event_log in
   let module E = Keeper_chat_events in
-  let module T = Masc_tui_keeper_chat_transcript in
-  let module Chat_log = Masc_tui_keeper_chat_log in
   List.iter (fun thinking ->
     let base_path = temp_workspace () in
     Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
@@ -1750,24 +1748,26 @@ let test_root_heartbeat_reaches_scoped_journal_and_tui ?(retry = false) () =
            List.iter raise (List.rev !failures);
            check int "actual receiver preserves each owned observation once" (if retry then 4 else 2) !reports;
            let lines = read_journal () in
-           let replay = Chat_log.create_for_source ~keeper_name ~source:(Chat_log.Autonomous_turn turn_ref) ~started_at:0. in
-           ignore (Chat_log.add_journaled replay lines);
-           let live,durable = F.snapshots direct in
-           List.iter (fun log ->
-             let t = T.of_log ~now:2000. log in
-             check bool "projection remains readable" true (Option.is_none (T.unreadable t));
-             check bool "model text and thinking never reconstruct the secret" false
-               (Astring.String.is_infix ~affix:secret (T.text t ^ T.thinking t));
-             match T.tool_calls t with
-             | [call] ->
-                 check bool "native end stays an observation" true (call.outcome=T.Native_ended);
-                 check (option string) "heartbeat cannot mint a receipt" None call.execution_id;
-                 check (option int) "decreasing provider elapsed is retained" (Some 3)
-                   (Option.bind call.native_progress (fun p -> p.provider_elapsed_seconds));
-                 if retry then check bool "actual Agent clear reaches live and durable native observation" true
-                   (call.native_retry=Some (Runtime_native_tools.Retry_cleared
-                     {agent_id="child-agent";subagent_type="Explore"}))
-             | _ -> fail "heartbeat did not retain one exact native occurrence") [live;durable;replay];
+           let direct_lines, _frames = F.snapshots direct in
+           List.iter (fun (journal_lines : J.journaled_event list) ->
+             let evs = List.map (fun (line : J.journaled_event) -> line.event) journal_lines in
+             let end_count = List.fold_left (fun n -> function E.Native_tool_end _ -> n + 1 | _ -> n) 0 evs in
+             check int "heartbeat retained one exact native end" 1 end_count;
+             check bool "heartbeat cannot mint a receipt" false
+               (List.exists (function E.Tool_result_ready _ -> true | _ -> false) evs);
+             let last_elapsed = List.fold_left (fun acc -> function
+               | E.Native_tool_progress (_, Runtime_native_tools.Heartbeat_reported { elapsed_seconds }) ->
+                 Some elapsed_seconds
+               | _ -> acc) None evs in
+             check (option int) "decreasing provider elapsed is retained" (Some 3) last_elapsed;
+             if retry then (
+               let last_retry = List.fold_left (fun acc -> function
+                 | E.Native_tool_progress (_, Runtime_native_tools.Retry_observed obs) -> Some obs
+                 | _ -> acc) None evs in
+               check bool "actual Agent clear reaches live and durable native observation" true
+                 (last_retry = Some (Runtime_native_tools.Retry_cleared
+                    { agent_id = "child-agent"; subagent_type = "Explore" }))))
+             [ direct_lines; lines ];
            List.iter (fun events ->
              let body = String.concat "" (fragments events) in
              check bool "safe model content is retained" true (Astring.String.is_infix ~affix:expected body);

@@ -90,7 +90,7 @@ output. Proof goes in the PR body and CI artifacts, not in the repository.
 bin/
 ├── main_eio.ml                  server, CLI subcommands, and the hand-over to the TUI
 ├── main_stdio_eio.ml            stdio MCP entry point
-├── masc_tui.ml                  TUI entry point; masc_tui_*.ml are its modules
+├── masc_tui.ml                  thin TUI entry point (implementation in lib/masc_tui/)
 ├── masc_exec_shim.ml            the shim a remote_ssh endpoint runs
 └── ...                          SSH bootstrap, browser host, cost and trace tools, probes
 
@@ -103,7 +103,7 @@ lib/                             subsystem modules and libraries
 ├── exec/, exec_ssh_protocol/, egress_proxy/   sandboxes, the SSH lane, egress policy
 ├── dashboard/                   read models the SPA consumes
 ├── lsp_client/                  the language-server client behind the Code view
-└── tui_decode.ml                server payload decoding shared with the TUI
+└── masc_tui/                    TUI v2 libraries (core, term, keymap, ui, protocol, net, store, screens_*, app)
 
 packages/                        embedded Agent Core
 dashboard/                       TypeScript + Preact SPA

@@ -298,21 +298,17 @@ let test_released_source_position_through_turns_decoder () =
   let name = "source-position" in
   let writer = Some (reset name ~now:0.) in
   let current () = Option.get (Keeper_turn_preview.current ~keeper_name:name) in
-  let decoded payload =
-    let wire = `Assoc ["schema", `String "masc.keeper_turns.v1";
-      "keepers", `List [`Assoc ["keeper_name", `String name; "status", `String "ok";
-        "turn", `Assoc ["lane", `String "maintenance"; "interrupt_token", `String "turn";
-          "started_at_unix", `Float 0.; "preview", payload]]]] in
-    match Tui_decode.decode_keeper_turns wire with
-    | Ok [{ktr_state=Keeper_turn_running {preview=Some value; _}; _}] -> value
-    | Ok _ -> Alcotest.fail "current preview lost in actual turns decoder"
-    | Error error -> Alcotest.fail error in
   let check_position generation total =
     let preview = current () in
-    let observed = decoded (Keeper_turn_preview.to_json preview) in
-    Alcotest.(check int) "actual wire generation" generation observed.ktp_text_position.kpp_generation;
+    let json = Keeper_turn_preview.to_json preview in
+    let open Yojson.Safe.Util in
+    let pos = json |> member "text_position" in
+    let obs_gen = pos |> member "generation" |> to_int in
+    let obs_start = pos |> member "start_byte" |> to_int in
+    let obs_tail = json |> member "text_tail" |> to_string in
+    Alcotest.(check int) "actual wire generation" generation obs_gen;
     Alcotest.(check int) "actual redacted stream byte boundary" total
-      (observed.ktp_text_position.kpp_start_byte + String.length observed.ktp_text_tail) in
+      (obs_start + String.length obs_tail) in
   Keeper_turn_preview.note_attempt ~writer ~now:1. ~runtime_id:"first";
   let first = String.make 300 'a' ^ "\n" in
   Keeper_turn_preview.note_stream ~writer ~now:2. (text_delta first);
@@ -332,11 +328,11 @@ let test_released_source_position_through_turns_decoder () =
     Keeper_turn_preview.note_stream ~writer ~now:(6.1 +. float_of_int index)
       (ContentBlockDelta {index=0;delta=TextSnapshot text});
     check_position (4 + index) 0;
-    let observed = decoded (Keeper_turn_preview.to_json (current ())) in
-    Alcotest.(check string) "authoritative empty replacement clears the actual decoded tail"
-      "" observed.ktp_text_tail;
+    let observed = Keeper_turn_preview.to_json (current ()) in
+    Alcotest.(check string) "authoritative empty replacement clears the actual wire tail"
+      "" Yojson.Safe.Util.(observed |> member "text_tail" |> to_string);
     Alcotest.(check int) "empty replacement restarts released source bytes" 0
-      observed.ktp_text_position.kpp_start_byte) ["";" \t\n"];
+      Yojson.Safe.Util.(observed |> member "text_position" |> member "start_byte" |> to_int)) ["";" \t\n"];
   Keeper_turn_preview.note_attempt ~writer ~now:7. ~runtime_id:"second";
   check_position 6 0;
   Keeper_turn_preview.note_text ~writer ~now:8. "replacement";
@@ -481,18 +477,13 @@ let test_parallel_preparation_lineage_and_actual_wire () =
     Alcotest.(check bool) "ordinary turns polling does not serialize unselected history" true
       (Yojson.Safe.Util.member "preparation_timeline" (Preview.to_json current) = `Null);
     let payload = Preview.to_json ~include_preparation_timeline:true current in
-    let wire = `Assoc ["schema",`String "masc.keeper_turns.v1";
-      "keepers",`List [`Assoc ["keeper_name",`String keeper_name;"status",`String "ok";
-        "turn",`Assoc ["lane",`String "maintenance";"interrupt_token",`String "original-slot";
-          "started_at_unix",`Float 0.;"turn_ref",Ids.Turn_ref.to_yojson original;"preview",payload]]]] in
-    (match Tui_decode.decode_keeper_turns wire with
-     | Ok [{ktr_state=Keeper_turn_running {preview=Some decoded;_};_}] ->
-       Alcotest.(check bool) "actual turns wire retains all exact observation records" true
-         (Preview.preparation_spans (Option.get decoded.ktp_preparation_timeline)
-          = Preview.preparation_spans current.preparation_timeline)
-     | Ok _ -> Alcotest.fail "actual turns decoder lost the prepared scope history"
-     | Error detail -> Alcotest.fail detail);
     let raw = Yojson.Safe.Util.member "preparation_timeline" payload in
+    (match Preview.preparation_timeline_of_json raw with
+     | Ok decoded_timeline ->
+       Alcotest.(check bool) "actual turns wire retains all exact observation records" true
+         (Preview.preparation_spans decoded_timeline
+          = Preview.preparation_spans current.preparation_timeline)
+     | Error detail -> Alcotest.fail detail);
     let spans = Yojson.Safe.Util.to_list raw in
     let replace field value = function
       | `Assoc fields -> `Assoc (List.map (fun (key,old) -> key,if key=field then value else old) fields)

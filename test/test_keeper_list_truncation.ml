@@ -221,10 +221,9 @@ let test_fresh_roster_reads_lifecycle_transition () =
   Masc_test_deps.with_process_env "MASC_KEEPER_LIST_CACHE_TTL_S" (Some "3600") @@ fun () ->
   let args fresh = `Assoc [ "detailed", `Bool true; "fresh", `Bool fresh ] in
   let running json =
-    match Tui_decode.decode_keeper_runtime_list json with
-    | Ok ([row], [], false, 1, _) -> Tui_decode.keeper_phase_is_running row.kr_phase
-    | Ok _ -> fail "expected one complete typed Keeper row"
-    | Error error -> failf "roster did not decode: %s" error in
+    match Yojson.Safe.Util.(json |> member "keepers" |> to_list) with
+    | [row] -> String.equal Yojson.Safe.Util.(row |> member "phase" |> to_string) "running"
+    | _ -> fail "expected one complete Keeper row" in
   keeper_list ~names:[ "alpha" ] ~args:(args false)
     ~before_list:(fun config ->
       ignore (Keeper_registry.register_offline
@@ -678,15 +677,14 @@ let check_roster_failure expected json =
        | Some `Null -> None
        | Some other -> failf "invalid summary: %s" (Yojson.Safe.to_string other)
        | None -> fail "roster omitted runtime_blocker_summary");
-    (match Tui_decode.decode_keeper_runtime_list json with
-     | Ok ([decoded], [], false, 1, _) ->
-       check (option string) "typed TUI projection retains the current failure"
-         expected decoded.kr_runtime_blocker_summary;
-       check (option string)
-         "the timeout blocker carries no replacement signature"
-         None decoded.kr_runtime_blocker_signature
-     | Ok _ -> fail "the current roster must decode one complete reading"
-     | Error detail -> failf "TUI rejected the actual roster: %s" detail)
+    check (option string)
+      "the timeout blocker carries no replacement signature"
+      None
+      (match Json_util.assoc_member_opt "runtime_blocker_signature" row with
+       | Some (`String value) -> Some value
+       | Some `Null -> None
+       | Some other -> failf "invalid signature: %s" (Yojson.Safe.to_string other)
+       | None -> fail "roster omitted runtime_blocker_signature")
   | other -> failf "expected one Keeper row: %s" (Yojson.Safe.to_string other)
 ;;
 
@@ -778,38 +776,22 @@ let test_fenced_empty_turn_row_carries_its_signature () =
            | Some `Null -> None
            | Some other -> failf "invalid signature: %s" (Yojson.Safe.to_string other)
            | None -> fail "roster omitted runtime_blocker_signature");
-        (match Tui_decode.decode_keeper_runtime_list json with
-         | Ok ([decoded], [], false, 1, _) ->
-           check (option string) "the TUI reads the human sentence"
-             (Some summary) decoded.kr_runtime_blocker_summary;
-           check (option string) "the TUI reads the machine wire"
-             signature decoded.kr_runtime_blocker_signature
-         | Ok _ -> fail "the current roster must decode one complete reading"
-         | Error detail -> failf "TUI rejected the actual roster: %s" detail)
+        check (option string) "the roster row carries the human sentence" (Some summary)
+          (match Json_util.assoc_member_opt "runtime_blocker_summary" row with
+           | Some (`String value) -> Some value
+           | Some `Null -> None
+           | Some other -> failf "invalid summary: %s" (Yojson.Safe.to_string other)
+           | None -> fail "roster omitted runtime_blocker_summary")
       | other -> failf "expected one Keeper row: %s" (Yojson.Safe.to_string other))
 ;;
 
-let test_missing_current_failure_is_not_clear () =
-  failure_roster (fun json ->
-    let json =
-      match json with
-      | `Assoc fields ->
-        `Assoc (List.map (fun (key, value) ->
-          if String.equal key "keepers" then
-            key, `List (List.map (function
-              | `Assoc row -> `Assoc (List.remove_assoc "runtime_blocker_summary" row)
-              | value -> value) (Yojson.Safe.Util.to_list value))
-          else key, value) fields)
-      | value -> value
-    in
-    match Tui_decode.decode_keeper_runtime_list json with
-    | Error _ -> ()
-    | Ok _ -> fail "missing current-failure field was accepted as a clear reading")
-;;
-
 let test_equipment_failure_and_repair_bypass_the_roster_cache () =
-  let portrait json = match Tui_decode.decode_keeper_runtime_list json with
-    | Ok ([row],[],_,_,_) -> row.Tui_decode.kr_portrait
+  let portrait json =
+    match Yojson.Safe.Util.(json |> member "keepers" |> to_list) with
+    | [row] ->
+      (match Keeper_portrait_equipment.reading_of_json (Yojson.Safe.Util.member "portrait" row) with
+       | Ok reading -> reading
+       | Error detail -> failf "malformed portrait reading: %s" detail)
     | _ -> fail "equipment read hid or malformed the Keeper row" in
   let expected = Keeper_portrait_equipment.Ready (Keeper_portrait_look.equipment_of_name "alpha") in
   Masc_test_deps.with_process_env "MASC_KEEPER_LIST_CACHE_TTL_S" (Some "3600") (fun () ->
@@ -837,15 +819,10 @@ let test_shared_roster_omits_currency () =
       (fun json ->
         check bool "no shared currency envelope" true (Json_util.assoc_member_opt "candle" json = None);
         let rows = Yojson.Safe.Util.(to_list (member (if detailed then "keepers" else "items") json)) in
+        check int "public roster retains both rows" 2 (List.length rows);
         List.iter (fun row ->
           check bool "no other keeper balance" true (Json_util.assoc_member_opt "candle_balance_milli" row = None);
-          check bool "no other keeper account revision" true (Json_util.assoc_member_opt "candle_account_revision" row = None)) rows;
-        if detailed then match Tui_decode.decode_keeper_runtime_list json with
-          | Ok (rows, [], _, _, Error _) ->
-            check int "strict decoder retains both public rows" 2 (List.length rows);
-            check bool "account authority remains unavailable" true
-              (List.for_all (fun row -> Result.is_error row.Tui_decode.kr_candle_account_revision) rows)
-          | _ -> fail "private currency omission broke the public roster")) [false; true]
+          check bool "no other keeper account revision" true (Json_util.assoc_member_opt "candle_account_revision" row = None)) rows)) [false; true]
 
 let with_empty_roster_cache f =
   Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
@@ -992,10 +969,24 @@ let test_runtime_walk_store_to_tui () =
   let earlier = {Evidence.failures;terminal=Evidence.observe_terminal
     ~runtime_id:"repeated.runtime" ~attempt:1 refused} in
   let recovered = {earlier with terminal=Evidence.Terminal_not_observed} in
-  let decode json = match Tui_decode.decode_keeper_runtime_list json with
-    | Ok ([row], [], false, 1, _) -> row
-    | Ok _ -> fail "runtime walk fixture lost the roster row"
-    | Error detail -> fail detail in
+  let decode json =
+    match Yojson.Safe.Util.(json |> member "keepers" |> to_list) with
+    | [`Assoc fields as row] ->
+      let blocker =
+        match Json_util.assoc_member_opt "runtime_blocker_summary" row with
+        | Some (`String s) -> Some s
+        | Some `Null -> None
+        | Some other -> failf "invalid blocker summary: %s" (Yojson.Safe.to_string other)
+        | None -> fail "missing runtime_blocker_summary"
+      in
+      let obs =
+        match List.filter (fun (k, _) -> String.equal k "runtime_lane_observation") fields with
+        | [_, value] -> Receipt.runtime_lane_observation_of_yojson value
+        | [] | _ :: _ :: _ ->
+          Some (Receipt.Runtime_lane_unreadable { turn = None; field = "runtime_lane_observation" })
+      in
+      blocker, obs
+    | _ -> fail "runtime walk fixture lost the roster row" in
   let receipt evidence = `Assoc
     ["trace_id",`String "historical-source";"turn_count",`Int 19;
      "ended_at",`String "2026-10-20T00:00:00Z";
@@ -1006,8 +997,8 @@ let test_runtime_walk_store_to_tui () =
   let map_row transform json = match Yojson.Safe.Util.member "keepers" json with
     | `List [row] -> patch "keepers" (`List [transform row]) json
     | _ -> fail "fixture expected one roster row" in
-  let check_blocker row = check (option string) "history cannot clear live blocker"
-    (Some (timeout_summary ())) row.Tui_decode.kr_runtime_blocker_summary in
+  let check_blocker (blocker, _) = check (option string) "history cannot clear live blocker"
+    (Some (timeout_summary ())) blocker in
   let check_source (turn : Receipt.receipt_turn) =
     check string "source trace is not the current roster trace"
       "historical-source" turn.receipt_trace_id;
@@ -1022,13 +1013,13 @@ let test_runtime_walk_store_to_tui () =
         Dated_jsonl.append store (receipt evidence);
         let row=decode (refresh ()) in
         check_blocker row;
-        match row.kr_runtime_lane_observation with
+        match snd row with
         | Some (Receipt.Runtime_lane_not_observed turn) ->
           check string "only null means no capture" "no capture" name;
           check_source turn
         | Some (Receipt.Runtime_lane_observed {turn;evidence=actual}) ->
           check_source turn;
-          check string "same typed evidence through store, tool envelope and TUI"
+          check string "same typed evidence through store and tool envelope"
             (Yojson.Safe.to_string evidence)
             (Yojson.Safe.to_string (Evidence.to_yojson actual))
         | Some (Receipt.Runtime_lane_unreadable {turn=Some turn;_}) ->
@@ -1045,7 +1036,7 @@ let test_runtime_walk_store_to_tui () =
       let nullable_turn=patch "turn_count" `Null (Yojson.Safe.Util.member "turn" view) in
       let row=decode (map_row (patch "runtime_lane_observation" (patch "turn" nullable_turn view)) json) in
       check_blocker row;
-      (match row.kr_runtime_lane_observation with
+      (match snd row with
        | Some (Receipt.Runtime_lane_observed {turn;_}) ->
          check (option int) "explicit null turn is not missing" None turn.receipt_turn_count
        | None | Some (Receipt.Runtime_lane_not_observed _ | Receipt.Runtime_lane_unreadable _) ->
@@ -1079,7 +1070,7 @@ let test_runtime_walk_store_to_tui () =
       List.iter (fun (name,view,has_source) ->
         let row=decode (map_row (patch "runtime_lane_observation" view) json) in
         check_blocker row;
-        match row.kr_runtime_lane_observation with
+        match snd row with
         | Some (Receipt.Runtime_lane_unreadable {turn;_}) ->
           check bool (name ^ " retains only a valid source") has_source (Option.is_some turn);
           Option.iter check_source turn
@@ -1088,7 +1079,7 @@ let test_runtime_walk_store_to_tui () =
       List.iter (fun transform ->
         let row=decode (map_row transform json) in
         check_blocker row;
-        match row.kr_runtime_lane_observation with
+        match snd row with
         | Some (Receipt.Runtime_lane_unreadable {turn=None;_}) -> ()
         | None | Some (Receipt.Runtime_lane_observed _ | Receipt.Runtime_lane_not_observed _
           | Receipt.Runtime_lane_unreadable _) -> fail "missing/duplicate observation was accepted")
@@ -1098,8 +1089,8 @@ let test_runtime_walk_store_to_tui () =
             | _ -> fail "row object") ];
       Keeper_registry.set_failure_reason ~base_path:config.Workspace.base_path "alpha" None;
       let row=decode (refresh ()) in
-      check (option string) "current failure clears independently" None row.kr_runtime_blocker_summary;
-      match row.kr_runtime_lane_observation with
+      check (option string) "current failure clears independently" None (fst row);
+      match snd row with
       | Some (Receipt.Runtime_lane_observed {evidence;_}) ->
         check int "earlier refusals remain after blocker clears" 3 (List.length evidence.failures);
         check bool "successful fallback invents no terminal" true
@@ -1110,7 +1101,7 @@ let test_runtime_walk_store_to_tui () =
       let row=decode json in
       check_blocker row;
       check bool "explicit no receipt is distinct from no capture" true
-        (row.kr_runtime_lane_observation=None))
+        (snd row=None))
 
 let () =
   run "keeper_list_truncation"
@@ -1167,7 +1158,6 @@ let () =
         ; test_case "timeout without last_error" `Quick test_current_failure_without_last_error
         ; test_case "last_error is separate" `Quick test_last_error_is_not_the_current_failure
         ; test_case "success clears current failure" `Quick test_success_clears_current_failure_but_retains_last_error
-        ; test_case "missing is not clear" `Quick test_missing_current_failure_is_not_clear
         ; test_case "fenced empty turn row carries its signature" `Quick
             test_fenced_empty_turn_row_carries_its_signature
         ] )

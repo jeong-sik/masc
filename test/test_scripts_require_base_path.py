@@ -19,7 +19,7 @@ sys.path.insert(0, str(SCRIPTS / "lib"))
 import masc_base_path  # noqa: E402
 
 
-# What the two capture scripts import before they read their arguments.
+# What capture-dashboard-screenshots.py imports before it reads its arguments.
 PLAYWRIGHT_STUB = "Browser = Page = object\n\n\ndef sync_playwright():\n    raise RuntimeError('not a browser')\n"
 
 
@@ -301,35 +301,6 @@ class JudgeEvalPaths(unittest.TestCase):
     def test_a_named_path_is_kept(self):
         self.assertEqual(self.path("/named/store", "/srv/masc"), "/named/store")
         self.assertEqual(self.path("/named/store", None), "/named/store")
-
-
-class TuiCaptures(Workdir):
-    SCRIPTS = ("capture-tui-screenshots.py", "capture-tui-lane-runs.py")
-
-    def capture(self, script, *args, base=None):
-        return self.run_python(script, "--out", str(self.root / "out"), *args, base=base)
-
-    def test_stop_when_no_base_is_named(self):
-        for script in self.SCRIPTS:
-            self.assert_stops_unnamed(self.capture(script), "--base-path")
-
-    # Neither folder below is a workspace, so the script stops at the base
-    # path it chose and names it; nothing is launched.
-    def test_read_the_base_the_environment_names(self):
-        base = self.root / "base"
-        base.mkdir()
-        for script in self.SCRIPTS:
-            result = self.capture(script, base=base)
-            self.assertEqual(result.returncode, 1, result.stderr)
-            self.assertIn(f"not a MASC base path (no .masc directory): {base}", result.stderr)
-
-    def test_read_the_base_the_flag_names(self):
-        base, flagged = self.root / "base", self.root / "flagged"
-        base.mkdir()
-        flagged.mkdir()
-        for script in self.SCRIPTS:
-            result = self.capture(script, "--base-path", str(flagged), base=base)
-            self.assertIn(f"not a MASC base path (no .masc directory): {flagged}", result.stderr)
 
 
 class WebBenchTokens(Workdir):
@@ -656,11 +627,6 @@ class ReadinessScripts(Workdir):
         flagged = self.root / "flagged"
         result = self.run_readiness(self.GATE, "--base-path", str(flagged), base=self.root / "base")
         self.assertIn(f"base_path: {flagged}", result.stdout)
-
-
-class FrameLatency(Workdir):
-    def test_stops_when_no_base_is_named(self):
-        self.assert_stops_unnamed(self.run_python("tui-frame-latency.py"), "--base-path")
 
 
 if __name__ == "__main__":

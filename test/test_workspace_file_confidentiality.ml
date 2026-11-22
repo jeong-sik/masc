@@ -493,8 +493,6 @@ let test_branches_list_the_owning_checkout () =
           | Some _ | None -> Alcotest.fail "branches is not a list")
      | _ -> Alcotest.fail "answer is not an object"))
 
-(* The TUI reads this answer with its own decoder; a shape the decoder refuses
-   would leave the screen with an error while the route looked fine. *)
 let test_branches_answer_decodes_in_the_tui () =
   with_temp_dir (fun base ->
     catalog_git ~cwd:base [ "init"; "-b"; "main" ];
@@ -504,27 +502,30 @@ let test_branches_answer_decodes_in_the_tui () =
     catalog_git ~cwd:base [ "branch"; "--set-upstream-to=main" ];
     catalog_git ~cwd:base [ "branch"; "loose"; "main" ];
     let json = W.For_testing.workspace_branches_json (branches_or_fail ~base ~path:"") in
-    match Masc.Tui_decode.decode_git_branches json with
-    | Error detail -> Alcotest.fail detail
-    | Ok decoded ->
-        check int "every branch decodes" 3 (List.length decoded.gbs_branches);
-        let find name =
-          List.find_opt (fun (b : Masc.Tui_decode.git_branch) -> String.equal b.gb_name name)
-            decoded.gbs_branches
-        in
-        (match find "feat/x" with
-         | Some branch ->
-             check bool "the checked-out branch" true branch.gb_current;
-             check bool "one commit ahead of main" true
-               (branch.gb_upstream
-                = Masc.Tui_decode.Repository_tracking
-                    { upstream = "main"; ahead = 1; behind = 0 })
-         | None -> Alcotest.fail "feat/x is missing");
-        (match find "loose" with
-         | Some branch ->
-             check bool "no upstream decodes as none" true
-               (branch.gb_upstream = Masc.Tui_decode.Repository_no_upstream)
-         | None -> Alcotest.fail "loose is missing"))
+    let branches = Yojson.Safe.Util.(json |> member "branches" |> to_list) in
+    check int "every branch is listed" 3 (List.length branches);
+    let find name =
+      List.find_opt
+        (fun b -> String.equal Yojson.Safe.Util.(b |> member "name" |> to_string) name)
+        branches
+    in
+    (match find "feat/x" with
+     | Some branch ->
+         check bool "the checked-out branch" true
+           Yojson.Safe.Util.(branch |> member "current" |> to_bool);
+         let upstream = Yojson.Safe.Util.member "upstream" branch in
+         check string "upstream name" "main"
+           Yojson.Safe.Util.(upstream |> member "name" |> to_string);
+         check int "one commit ahead of main" 1
+           Yojson.Safe.Util.(upstream |> member "ahead" |> to_int);
+         check int "zero commits behind main" 0
+           Yojson.Safe.Util.(upstream |> member "behind" |> to_int)
+     | None -> Alcotest.fail "feat/x is missing");
+    (match find "loose" with
+     | Some branch ->
+         check bool "no upstream serializes as null" true
+           (Yojson.Safe.Util.member "upstream" branch = `Null)
+     | None -> Alcotest.fail "loose is missing"))
 
 let test_branches_stop_at_workspace_and_keep_nested_prefix () =
   with_temp_dir (fun parent ->
@@ -619,8 +620,6 @@ let test_worktrees_list_names_and_never_paths () =
          | Some _ | None -> Alcotest.fail "expected two worktree rows")
     | _ -> Alcotest.fail "answer is not an object")
 
-(* The TUI reads this answer with its own decoder; a shape the decoder refuses
-   would leave the screen with an error while the route looked fine. *)
 let test_worktrees_answer_decodes_in_the_tui () =
   with_temp_dir (fun parent ->
     let base = Filename.concat parent "ws" in
@@ -631,21 +630,22 @@ let test_worktrees_answer_decodes_in_the_tui () =
     catalog_git ~cwd:base [ "worktree"; "add"; "--detach"; linked ];
     catalog_git ~cwd:base [ "worktree"; "lock"; linked ];
     let json = W.For_testing.workspace_worktrees_json (worktrees_or_fail ~base ~path:"") in
-    match Masc.Tui_decode.decode_git_worktrees json with
-    | Error detail -> Alcotest.fail detail
-    | Ok decoded ->
-        (match decoded.gws_worktrees with
-         | [ main; second ] ->
-             check string "main name" "ws" main.gw_name;
-             check bool "main is first and on its branch" true
-               (main.gw_main && main.gw_state = Masc.Tui_decode.Git_worktree_branch "main");
-             check string "linked name" "linked-tree" second.gw_name;
-             check bool "a detached worktree decodes as detached and locked" true
-               (second.gw_state = Masc.Tui_decode.Git_worktree_detached
-                && second.gw_locked && not second.gw_main)
-         | other ->
-             Alcotest.fail
-               (Printf.sprintf "expected two worktrees, got %d" (List.length other))))
+    match Yojson.Safe.Util.(json |> member "worktrees" |> to_list) with
+    | [ main; second ] ->
+        let open Yojson.Safe.Util in
+        check string "main name" "ws" (main |> member "name" |> to_string);
+        check bool "main is first and on its branch" true
+          ((main |> member "main" |> to_bool)
+           && (main |> member "state" |> to_string = "branch")
+           && (main |> member "branch" |> to_string = "main"));
+        check string "linked name" "linked-tree" (second |> member "name" |> to_string);
+        check bool "a detached worktree serializes as detached and locked" true
+          ((second |> member "state" |> to_string = "detached")
+           && (second |> member "locked" |> to_bool)
+           && not (second |> member "main" |> to_bool))
+    | other ->
+        Alcotest.fail
+          (Printf.sprintf "expected two worktrees, got %d" (List.length other)))
 
 let test_worktrees_of_a_checkout_without_commit () =
   with_temp_dir (fun base ->

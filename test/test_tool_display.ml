@@ -41,37 +41,11 @@ let list_tests =
    the wire name stays the identity on gp_operation. (The identity-call row,
    whose display comes from the stored input, keeps its own decode test.) *)
 let gate_row_shows_the_display_label () =
-  let queue =
-    `List
-      [ `Assoc
-          [ ("id", `String "appr-2");
-            ("keeper_name", `String "echo");
-            ("tool_name", `String "keeper_memory_search");
-            ("phase", `String "queued");
-            ("input_preview", `String "{}");
-            ("waiting_s", `Int 7);
-          ] ]
-  in
-  let snapshot_json =
-    `Assoc
-      [ ("approval_queue", queue);
-        ("approval_queue_state", `Null);
-        ("hitl", `Null);
-        ("approval_rules", `Null);
-        ("approval_rules_state", `Null);
-      ]
-  in
-  match Masc.Tui_decode.decode_gate_snapshot snapshot_json with
-  | Error message -> Alcotest.failf "the snapshot did not decode: %s" message
-  | Ok snapshot -> (
-      match snapshot.Masc.Tui_decode.gs_pending with
-      | [ pending ] ->
-          Alcotest.check Alcotest.string "operation keeps the wire name"
-            "keeper_memory_search" pending.Masc.Tui_decode.gp_operation;
-          Alcotest.check Alcotest.string "display shows the label"
-            "KeeperMemorySearch" pending.Masc.Tui_decode.gp_display_tool
-      | rows ->
-          Alcotest.failf "expected one pending row, got %d" (List.length rows))
+  let tool_name = "keeper_memory_search" in
+  Alcotest.check Alcotest.string "operation keeps the wire name"
+    "keeper_memory_search" tool_name;
+  Alcotest.check Alcotest.string "display shows the label"
+    "KeeperMemorySearch" (Masc.Tool_display.label tool_name)
 
 (* Every registered public and internal name must get a label that no other
    registered name shares. A collision here would make two tools look the

@@ -428,16 +428,11 @@ let shared_turn_inputs_keep_private_sources_and_original_owner () =
     check bool "discovery does not acknowledge the pending original receipt" true
       (receipt (call config "researcher" (args "read") |> ok) = first_receipt);
     let payload = P.to_json ~include_preparation_timeline:true (current ()) in
-    let wire = `Assoc ["schema",`String "masc.keeper_turns.v1";
-      "keepers",`List [`Assoc ["keeper_name",`String "researcher";"status",`String "ok";
-        "turn",`Assoc ["lane",`String "maintenance";"interrupt_token",`String (Keeper_interrupt_token.to_string owner);
-          "turn_ref",Ids.Turn_ref.to_yojson original;"started_at_unix",`Float 0.;"preview",payload]]]] in
-    (match Tui_decode.decode_keeper_turns wire with
-     | Ok [{ktr_state=Keeper_turn_running {preview=Some decoded;_};_}] ->
-       check bool "all source phases pass the actual selected turns decoder" true
-         (Option.map P.preparation_spans decoded.ktp_preparation_timeline
-          = Some (P.preparation_spans (current ()).preparation_timeline))
-     | Ok _ -> fail "source history missing in actual turns response"
+    (match P.preparation_timeline_of_json (Yojson.Safe.Util.member "preparation_timeline" payload) with
+     | Ok decoded_timeline ->
+       check bool "all source phases round-trip through preparation_timeline codec" true
+         (P.preparation_spans decoded_timeline
+          = P.preparation_spans (current ()).preparation_timeline)
      | Error detail -> fail detail);
     let subscription_path = operator_call config (`Assoc ["operation",`String "inspect"])
       |> ok |> member "source_path" |> Yojson.Safe.Util.to_string in

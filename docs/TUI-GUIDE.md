@@ -4,6 +4,13 @@ status: runbook
 
 # MASC TUI Guide
 
+> [!NOTE]
+> MASC TUI now runs on the v2 architecture (`bin/masc_tui.ml` and `lib/masc_tui/`).
+> Run `masc-tui --help` for CLI flags, press `?` in the running TUI (or run
+> `bin/masc_tui_keys_doc_cli.exe`) for the canonical key reference, and inspect
+> `lib/masc_tui/keymap/` for current workspaces, dives, and overlays while the
+> detailed manual sections below are updated in a follow-up docs pass.
+
 Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Operations is
 the first screen. It opens the decisions and conversations that need the
@@ -191,15 +198,24 @@ join over MCP (`/mcp/play`) or plain HTTP with the token after `#`.
 
 ## Options
 
-`masc-tui --help` lists the options: `--base-path` (`--base`), `--port`,
-`--workspace`, `--reasoning` (default `folded`) and `--tool-view` (default
-`compact`), plus `--version` and `--build-commit`.
+`masc-tui --help` lists the options: `--port`, `--host`, `--url`,
+`--base-path` (`--base`), `--workspace`, `--theme`, `--lang`,
+`--no-auto-start`, `--version`, `--build-commit`, and `-h`/`--help`.
+
+The legacy `--reasoning` and `--tool-view` startup flags were removed in v2.5
+(passing either exits with code `2` `Parse_error`). Toggle reasoning at runtime
+with `Toggle_thinking` (`Ctrl-R`) and switch tool detail with
+`/tools compact|results|full`.
 
 ## What the server changes
 
 The TUI runs without a server. Keepers and Work Tasks read `.masc/` and work
-without one. Every other surface needs it, except the TUI session block, which
-records this session's own events.
+without one. Every other surface — including **Settings** and `[tui]`
+configuration (loaded and saved over HTTP via `/api/v1/config/{schema,patch}`
+and `/api/v1/tui/preferences`) — needs a running MASC server; offline
+workspaces cannot read or save Settings locally (use `--theme` and `--lang`
+for session-only overrides). The TUI session block records this session's own
+events.
 
 An unreachable server is reported, not hidden. The header shows
 `refresh failed`, the surface prints the failing call, and each failed load
@@ -573,9 +589,8 @@ a durable memory write — are still decided by the workspace Gate mode and that
 Keeper's own override, whatever this toggle says. The per-Keeper `yolo` / `auto`
 setting is persisted under `.masc/gate/` across server restarts.
 
-The `v` view and `o` order are stored in `tui-keepers.toml` in the resolved
-config directory and restored on the next start; a failed or unconfirmed save
-is reported.
+Fleet list view modes are controlled in-session; v2.5 no longer reads or
+writes a separate `tui-keepers.toml` file.
 
 `K` opens a read-only relationship view for the selected Keeper: each arrow
 comes from the recorded Keeper sender of a request queued for that recipient.
@@ -855,11 +870,11 @@ recorded output, `not seen` when the transcript never observed a return, and
 `no call-log row` when the durable log has no entry for the turn. In compact
 mode, successful Gate lifecycle steps for the same Keeper and approval are
 summarized at the last step, even when conversation separates them. The summary
-names the step count; Full restores every original step. `/thinking` and
-`/tools` expose the same choices by name (`/tools results` jumps straight to
-the middle stop). `--reasoning` and `--tool-view` can
-override the initial modes (`--tool-view results` opens on the concise
-results).
+names the step count; Full restores every original step. `Toggle_thinking`
+(`Ctrl-R`) and `/tools compact|results|full` control reasoning and tool detail
+modes at runtime (`/tools results` jumps straight to the middle stop). The
+legacy `--reasoning` and `--tool-view` CLI flags were removed in v2.5 and exit
+with code `2` (`Parse_error`).
 
 A turn this TUI did not open -- one running when the TUI started, or one
 another surface opened -- is drawn from its journal while it runs.

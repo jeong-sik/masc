@@ -1,9 +1,9 @@
-(* Unit tests for Masc_tui_server_lifecycle.
+(* Unit tests for Masc_server_lifecycle.
    The pure discovery/argv/health-wait logic is exercised deterministically
    with injected effects; start/stop spawns a real sleeper and reaps it so
    the alive/dead assertions do not race a zombie. *)
 
-module L = Masc_tui_server_lifecycle
+module L = Masc_server_lifecycle
 
 let discovery_testable =
   Alcotest.testable
@@ -345,19 +345,18 @@ let test_manual_command_starts_a_server () =
         manual_command
 
 (* The start waiter runs beside the main loop and does not write the
-   screen: it keeps what it saw and rings the loop, which says it (RFC
-   tui-idle-wait §2.1). Without the ring an exit notice waited for whatever
-   woke the loop next. *)
+   screen: it keeps what it saw and calls the caller's [on_settled] wake
+   callback. *)
 let test_the_start_waiter_keeps_its_outcome_and_rings_the_loop () =
-  let rung () = List.mem Masc_tui_wake.Server_start_settled (Masc_tui_wake.take Masc_tui_wake.loop) in
   let settle ~script ~port ~attempts =
     let base_path = temp_dir "tui-start-waiter" in
     let owned = start_fake ~script:(write_script base_path "fake-masc" script) ~base_path ~port in
     let starts = L.create_settled_starts () in
-    ignore (Masc_tui_wake.take Masc_tui_wake.loop);
+    let rung = ref false in
     L.await_start starts owned ~host:"127.0.0.1" ~port ~health_ok:(fun () -> false)
-      ~attempts ~sleep:(fun () -> Unix.sleepf 0.05);
-    Alcotest.(check bool) "the waiter rings Server_start_settled" true (rung ());
+      ~attempts ~sleep:(fun () -> Unix.sleepf 0.05)
+      ~on_settled:(fun () -> rung := true);
+    Alcotest.(check bool) "the waiter invokes on_settled" true !rung;
     let settled = L.take_settled starts in
     Alcotest.(check int) "and keeps its one outcome" 1 (List.length settled);
     Alcotest.(check int) "which is taken once" 0 (List.length (L.take_settled starts));

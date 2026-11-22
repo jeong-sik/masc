@@ -18,7 +18,7 @@ let variation_selector_15 = 0xFE0E
 let variation_selector_16 = 0xFE0F
 
 (* The one ZWJ that is not hiding anything: the one holding an emoji
-   together. [Masc_tui_message_layout] already reads it that way when it
+   together. Grapheme-cluster measurement already reads it that way when it
    measures a cluster ("a family joined by ZWJ"), and escaping it everywhere
    drew 🤷‍♂️ as six ASCII characters on the screen and put them back in the
    input line on recall. UAX #29 GB11 is the line: a ZWJ between two
@@ -50,7 +50,7 @@ let opens_pictograph text index =
 (* The tags that are not hiding anything: the ones spelling a subregion flag.
    U+1F3F4 opens the sequence, a subdivision code follows, and U+E007F closes
    it: U+1F3F4 U+E0067 U+E0062 U+E0073 U+E0063 U+E0074 U+E007F is Scotland.
-   [Masc_tui_message_layout] counts that block as part of one emoji cluster,
+   Grapheme-cluster measurement counts that block as part of one emoji cluster,
    and the exemption here is deliberately narrower than that block: only the
    shape UTS #51 gives a subdivision, three to seven tag characters drawn
    from lowercase letters and digits. The wider grammar would carry a

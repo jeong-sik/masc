@@ -8,8 +8,6 @@ module Signal = Masc.Keeper_chat_run_signal
 module Journal = Masc.Keeper_chat_event_log
 module Audit = Masc.Keeper_chat_journal_audit
 module Store = Masc.Keeper_chat_store
-module Live = Masc_tui_keeper_chat_live
-module Log = Masc_tui_keeper_chat_log
 module Projection = Server_keeper_chat_agui_projection
 
 type failure = Provider_error | Provider_timeout
@@ -130,30 +128,38 @@ let test_tui_and_journal failure () =
   let keeper_name = "retry-consumers" and operation_id = "retry-operation" in
   let journal = Journal.open_journal ~base_dir ~keeper_name ~operation_id () in
   let projection = ref Projection.initial in
-  let decoder = Live.create () in
-  let live_log = Log.create ~keeper_name ~request_id:operation_id ~started_at:0. in
+  let wire_frames = ref [] in
   let events = E.create ~on_publish:(fun ~seq ~ts event ->
     Journal.append journal ~seq ~ts event;
     let next, projected = Projection.project ~timestamp:ts ~redact_text:Fun.id !projection event in
     projection := next;
-    Option.iter (fun event ->
-      Live.feed decoder (Ag_ui.event_to_sse ~id:seq event)
-      |> List.iter (fun (observed : Live.observed_delta) ->
-        ignore (Log.add ?at:observed.at live_log ~seq:observed.seq observed.delta : bool)))
+    Option.iter (fun ev ->
+      let sse = Ag_ui.event_to_sse ~id:seq ev in
+      Sse_wire.data_payloads_of_stream sse
+      |> List.iter (fun payload ->
+        wire_frames := Yojson.Safe.from_string payload :: !wire_frames))
       projected) () in
+  let frames () = List.rev !wire_frames in
   let entries () = match Journal.read_journal journal with
     | Ok entries -> entries
     | Error _ -> fail "the published journal could not be read" in
-  let terminals log = Log.entries log |> List.filter_map (fun (entry : Log.entry) ->
-    match entry.delta with
-    | Live.Run_finished -> Some true
-    | Live.Run_failed _ -> Some false
+  let frame_type json = Yojson.Safe.Util.(json |> member "type" |> to_string) in
+  let custom_name json =
+    if String.equal (frame_type json) "CUSTOM" then
+      Some Yojson.Safe.Util.(json |> member "name" |> to_string)
+    else None in
+  let terminals () = frames () |> List.filter_map (fun json ->
+    match frame_type json with
+    | "RUN_FINISHED" -> Some true
+    | "RUN_ERROR" -> Some false
     | _ -> None) in
-  let replies log = Log.entries log |> List.filter_map (fun (entry : Log.entry) ->
-    match entry.delta with Live.Reply_details {reply; _} -> Some reply | _ -> None) in
+  let replies () = frames () |> List.filter_map (fun json ->
+    if custom_name json = Some "KEEPER_REPLY_DETAILS" then
+      Some Yojson.Safe.Util.(json |> member "value" |> member "reply" |> to_string)
+    else None) in
   let before_completion label =
-    check (list bool) (label ^ ": wire remains open") [] (terminals live_log);
-    check (list string) (label ^ ": no final reply invented") [] (replies live_log);
+    check (list bool) (label ^ ": wire remains open") [] (terminals ());
+    check (list string) (label ^ ": no final reply invented") [] (replies ());
     check (testable Audit.pp_verdict Audit.equal_verdict)
       (label ^ ": journal has no turn terminal") Audit.Journal_truncated
       (Audit.compare (entries ()) []);
@@ -163,22 +169,24 @@ let test_tui_and_journal failure () =
     | Ok _ -> fail "the unfinished turn was admitted as a completed journal segment" in
   List.iter (E.publish events) fixture.failed_attempt;
   before_completion "candidate failure";
-  let diagnostics = Log.entries live_log |> List.filter (fun (entry : Log.entry) ->
-    match entry.delta with Live.Stream_protocol_error _ -> true | _ -> false) in
+  let diagnostics = frames () |> List.filter (fun json ->
+    custom_name json = Some "KEEPER_STREAM_PROTOCOL_ERROR") in
   check int "the same wire consumer observed the failed candidate" 1 (List.length diagnostics);
   List.iter (E.publish events) fixture.next_response;
   before_completion "next candidate MessageStop";
   List.iter (E.publish events) fixture.completion;
   E.close events;
-  check (list bool) "wire sees one successful authoritative terminal" [true] (terminals live_log);
-  check (list string) "wire receives the next candidate's final answer" [answer] (replies live_log);
-  check int "the same wire consumer advanced to the next attempt" 1 (Log.attempt live_log);
+  check (list bool) "wire sees one successful authoritative terminal" [true] (terminals ());
+  check (list string) "wire receives the next candidate's final answer" [answer] (replies ());
+  let wire_attempts = frames () |> List.filter_map (fun json ->
+    if custom_name json = Some "KEEPER_RUNTIME_ATTEMPT_STARTED" then
+      Some Yojson.Safe.Util.(json |> member "value" |> member "attempt_index" |> to_int)
+    else None) in
+  check (list int) "the same wire consumer advanced to the next attempt" [1] wire_attempts;
   let persisted = entries () in
-  let replay_log = Log.create ~keeper_name ~request_id:operation_id ~started_at:0. in
-  ignore (Log.add_journaled replay_log persisted);
-  check (list bool) "journal replay sees one successful terminal" [true] (terminals replay_log);
-  check (list string) "journal replay receives the same final answer" [answer] (replies replay_log);
-  check int "journal replay advanced to the next attempt" 1 (Log.attempt replay_log);
+  let journal_replies = persisted |> List.filter_map (fun (entry : Journal.journaled_event) ->
+    match entry.event with E.Reply_details {reply; _} -> Some reply | _ -> None) in
+  check (list string) "journal records the same final answer" [answer] journal_replies;
   let terminal_count = List.fold_left (fun count (entry : Journal.journaled_event) ->
     if Signal.is_terminal entry.event then count + 1 else count) 0 persisted in
   check int "the journal records one turn settlement" 1 terminal_count;

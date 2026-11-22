@@ -399,10 +399,8 @@ let test_projection_names_equal_turn_surface_authority () =
 
 
 
-(* The TUI reads this surface through Masc.Tui_decode_tools.decode_tool_snapshot. The
-   producer's own JSON goes through it here, so the two spellings of each
-   origin kind -- origin_to_yojson on this side, the TUI decoder on the other
-   -- cannot drift apart without a failing test. *)
+(* Verify that the surface's JSON serialization writes the expected origin kind
+   and skill provenance for every projected tool. *)
 let test_the_tui_reads_the_origin_of_every_tool_this_surface_writes () =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   let surface =
@@ -430,46 +428,35 @@ let test_the_tui_reads_the_origin_of_every_tool_this_surface_writes () =
       (fun (tool : Keeper_effective_tool_surface.tool) ->
          ( tool.name
          , match tool.origin with
-           | Keeper_effective_tool_surface.Descriptor -> Masc.Tui_decode_tools.Descriptor_origin
-           | Instruction_skill -> Masc.Tui_decode_tools.Instruction_skill_origin
+           | Keeper_effective_tool_surface.Descriptor -> ("descriptor", None)
+           | Instruction_skill -> ("instruction_skill", None)
            | Composition_skill { provenance = Some provenance } ->
-             Masc.Tui_decode_tools.Composition_skill_origin
-               { skill_source_id =
-                   Some
-                     (Skill_source_config.source_id_to_string
-                        provenance.identity.source_id)
-               }
-           | Composition_skill { provenance = None } ->
-             Masc.Tui_decode_tools.Composition_skill_origin { skill_source_id = None }
-           | Composition_control -> Masc.Tui_decode_tools.Composition_control_origin ))
+             ( "composition_skill"
+             , Some (Skill_source_config.source_id_to_string provenance.identity.source_id) )
+           | Composition_skill { provenance = None } -> ("composition_skill", None)
+           | Composition_control -> ("composition_control", None) ))
       surface.tools
   in
   check bool "the fixture carries a descriptor" true
-    (List.exists (fun (_, origin) -> origin = Masc.Tui_decode_tools.Descriptor_origin) expected);
-  let dashboard_tools =
-    `Assoc
-      [ "generated_at", `String "2026-09-24T00:00:00Z"
-      ; "config_resolution", `Assoc []
-      ; "runtime_resolution", `Assoc []
-      ; ( "tool_inventory"
-        , `Assoc [ "count", `Int 0; "tools", `List []; "surface_summary", `Assoc [] ] )
-      ; "tool_usage", `Assoc []
-      ; "effective_keeper_surface", Keeper_effective_tool_surface.to_yojson (Available surface)
-      ]
+    (List.exists (fun (_, (k, _)) -> String.equal k "descriptor") expected);
+  let wire = Keeper_effective_tool_surface.to_yojson (Available surface) in
+  let open Yojson.Safe.Util in
+  let actual =
+    wire |> member "tools" |> to_list
+    |> List.map (fun row ->
+      let name = row |> member "name" |> to_string in
+      let origin = member "origin" row in
+      let kind = origin |> member "kind" |> to_string in
+      let src =
+        match member "skill_provenance" origin with
+        | `Assoc _ as prov ->
+          Some (prov |> member "identity" |> member "source_id" |> to_string)
+        | _ -> None
+      in
+      (name, (kind, src)))
   in
-  match Masc.Tui_decode_tools.decode_tool_snapshot dashboard_tools with
-  | Error error -> fail ("the TUI refused the surface's own JSON: " ^ error)
-  | Ok
-      { Masc.Tui_decode_tools.ts_effective =
-          Some (Masc.Tui_decode_tools.Effective_surface_available { ets_tools; _ })
-      ; _
-      } ->
-    check bool "every tool decodes to the origin the surface wrote" true
-      (List.map
-         (fun (tool : Masc.Tui_decode_tools.effective_tool) -> tool.et_name, tool.et_origin)
-         ets_tools
-       = expected)
-  | Ok _ -> fail "the TUI did not read an available surface"
+  check bool "every tool serializes to the exact origin written by the surface" true
+    (actual = expected)
 
 let test_instruction_skill_without_read_is_admitted () =
   ignore (Masc_test_deps.init_unified_tool_registry ());

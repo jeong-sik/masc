@@ -5,4 +5,4 @@
 (test
  (name test_keeper_paste_delivery)
  (modules test_keeper_paste_delivery)
- (libraries astring masc_test_deps masc_tui_paste_spill exec_ssh_protocol eio_main))
+ (libraries astring masc_test_deps exec_ssh_protocol eio_main))

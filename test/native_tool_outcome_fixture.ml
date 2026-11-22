@@ -1,5 +1,5 @@
-(* Feed real adapter callbacks through the same scoped redactor, bridge, journal codec, server
-   SSE projection and TUI decoder used by direct and autonomous chat. *)
+(* Feed real adapter callbacks through the same scoped redactor, bridge, journal codec,
+   and server SSE projection used by direct and autonomous chat. *)
 module E = Masc.Keeper_chat_events
 module Bridge = Masc.Keeper_chat_agent_core_stream_bridge
 module Accum = Masc.Keeper_stream_tool_accum
@@ -7,9 +7,6 @@ module Redactor = Masc.Keeper_stream_text_redaction.Scoped
 module Secret = Masc.Keeper_secret_redaction
 module Journal = Masc.Keeper_chat_event_log
 module Projection = Server_keeper_chat_agui_projection
-module Live = Masc_tui_keeper_chat_live
-module Log = Masc_tui_keeper_chat_log
-module Transcript = Masc_tui_keeper_chat_transcript
 
 type t = {
   accum : Accum.t;
@@ -69,13 +66,11 @@ let snapshots t =
       ~redact_text:Fun.id state line.event in
     state, wire ^ Option.fold ~none:"" ~some:(Ag_ui.event_to_sse ~id:line.seq) projected)
     (Projection.initial, "") lines in
-  let live = Log.create ~keeper_name:"fixture" ~request_id:"native-outcome" ~started_at:1000.
-  and replay = Log.create ~keeper_name:"fixture" ~request_id:"native-outcome" ~started_at:1000. in
-  Live.feed (Live.create ()) wire |> List.iter (fun (item : Live.observed_delta) ->
-    ignore (Log.add ?at:item.at live ~seq:item.seq item.delta));
-  ignore (Log.add_journaled replay lines);
-  live, replay
-
+  let frames =
+    Sse_wire.data_payloads_of_stream wire
+    |> List.map Yojson.Safe.from_string
+  in
+  lines, frames
 
 let check t ~expected =
   let open Alcotest in
@@ -89,71 +84,83 @@ let check t ~expected =
     (List.exists (function E.Tool_result_ready _ -> true | _ -> false) events);
   check bool "valid provider observation has no bridge error" false
     (List.exists (function E.Agent_core_stream_protocol_error _ -> true | _ -> false) events);
-  let live,replay = snapshots t in
-  let calls log =
-    let transcript = Transcript.of_log ~now:2000. log in
-    check bool "wire/replay decodes without unreadable data" true (Option.is_none (Transcript.unreadable transcript));
-    Transcript.tool_calls transcript in
-  let live_calls = calls live and replay_calls = calls replay in
-  check bool "live and journal preserve the same native activity" true (live_calls=replay_calls);
-  check (list (option completion)) "TUI retains every provider report" (List.map Option.some expected)
-    (List.map (fun (call : Transcript.tool_activity) -> call.native_completion) live_calls);
-  List.iter (fun (call : Transcript.tool_activity) ->
-    (* A report that says the step failed reads as Native_failed and every
-       other as Native_ended. Neither becomes a MASC result or failure. *)
-    check bool "provider report stays a native observation" true
-      (match call.outcome with
-       | Transcript.Native_ended | Transcript.Native_failed -> true
-       | Transcript.Started | Transcript.Awaiting_result | Transcript.Returned
-       | Transcript.Native_running | Transcript.Failed | Transcript.Never_returned
-       | Transcript.Outcome_unrecorded -> false);
-    check (option string) "no invented execution identity" None call.execution_id) live_calls;
-  List.iter (fun mode ->
-    let projection = Transcript.project_tool_block mode (Transcript.tool_block live_calls) in
-    let displayed = String.concat "\n" (Option.to_list projection.header @ projection.details) in
-    List.iter (fun report ->
-      (* These rows go through the phrase dresser; the provider's own word for
-         an unrecognized status stays in the results view. *)
-      let open Runtime_native_tools in
-      match report.outcome with
-      | Unrecognized_status status ->
-          check bool "provider status word stays out of dressed rows" false
-            (Astring.String.is_infix ~affix:status displayed)
-      | End_observed | Completion_unrecorded | Completion_reported | Error_reported
-      | Decline_reported | Result_received _ -> ()) expected)
-    [Transcript.Compact; Transcript.Full]
+  let lines, frames = snapshots t in
+  let journal_reports = List.filter_map (fun (line : Journal.journaled_event) ->
+    match line.event with E.Native_tool_end (_, report) -> Some report | _ -> None) lines in
+  check (list completion) "journal roundtrip retains every provider report" expected journal_reports;
+  let sse_reports = List.filter_map (fun frame ->
+    let open Yojson.Safe.Util in
+    if frame |> member "type" |> to_string = "CUSTOM"
+       && frame |> member "name" |> to_string = "KEEPER_NATIVE_TOOL_END"
+    then
+      match Runtime_native_tools.completion_of_json (frame |> member "value" |> member "completion") with
+      | Ok report -> Some report
+      | Error detail -> fail detail
+    else None) frames in
+  check (list completion) "SSE projection retains every provider report" expected sse_reports;
+  check bool "SSE emits no MASC tool result event for native completion" false
+    (List.exists (fun frame ->
+      Yojson.Safe.Util.(frame |> member "type" |> to_string) = "TOOL_CALL_RESULT") frames)
 
 let check_progress t ~expected ~expected_text ~running =
   let open Alcotest in
-  let live,replay = snapshots t in
-  let transcripts = List.map (Transcript.of_log ~now:2000.) [live;replay] in
-  List.iter (fun transcript ->
-    check bool "progress wire/replay remains readable" true (Option.is_none (Transcript.unreadable transcript));
-    check string "progress never enters assistant text" expected_text (Transcript.text transcript);
-    let calls = Transcript.tool_calls transcript in
-    let observations = List.filter_map (fun (call : Transcript.tool_activity) ->
-      Option.map (fun (progress : Transcript.native_progress) ->
-        Option.value call.call_id ~default:"", progress.output_bytes, progress.message)
-        call.native_progress) calls in
-    check (list (triple string (option int) (option string)))
-      "exact native rows retain progress" expected observations;
-    List.iter (fun (call : Transcript.tool_activity) ->
-      check bool "progress never provides completion" true
-        (call.outcome = if running then Transcript.Native_running else Transcript.Native_ended);
-      check (option string) "progress never invents a receipt" None call.execution_id;
-      match call.native_progress with
-      | None -> ()
-      | Some progress ->
-          let indexed = List.mapi (fun seq event -> seq,event) (events t) in
-          let last = List.fold_left (fun found (seq,event) -> match event with
-            | E.Native_tool_progress (tool, _) when tool.tool_call_id=call.call_id -> Some (1000. +. float_of_int seq)
-            | _ -> found) None indexed in
-          check (option (float 0.)) "source event time preserved" last (Some progress.updated_at)) calls;
-    let render mode =
-      let projection = Transcript.project_tool_block mode (Transcript.tool_block calls) in
-      String.concat "\n" (Option.to_list projection.header @ projection.details) in
-    let compact = render Transcript.Compact and full = render Transcript.Full in
-    check bool "native display escapes controls" false (String.contains compact '\027' || String.contains full '\027')) transcripts;
-  match transcripts with
-  | [live;replay] -> check bool "live/replay progress identical" true (Transcript.tool_calls live=Transcript.tool_calls replay)
-  | _ -> fail "expected live and replay snapshots"
+  let lines, frames = snapshots t in
+  let text =
+    lines
+    |> List.filter_map (fun (line : Journal.journaled_event) ->
+      match line.event with E.Text_delta { text; _ } -> Some text | _ -> None)
+    |> String.concat ""
+  in
+  check string "progress never enters assistant text" expected_text text;
+  check bool "progress never invents a receipt" false
+    (List.exists (fun (line : Journal.journaled_event) ->
+      match line.event with E.Tool_result_ready _ -> true | _ -> false) lines);
+  let has_end = List.exists (fun (line : Journal.journaled_event) ->
+    match line.event with E.Native_tool_end _ -> true | _ -> false) lines in
+  check bool "progress never provides completion" (not running) has_end;
+  (* Fold native progress observations by tool_call_id in first-seen order. *)
+  let order = ref [] in
+  let table = Hashtbl.create 8 in
+  let update call_id progress =
+    if not (Hashtbl.mem table call_id) then order := call_id :: !order;
+    let prev_bytes, prev_msg =
+      match Hashtbl.find_opt table call_id with Some v -> v | None -> None, None
+    in
+    let next =
+      match progress with
+      | Runtime_native_tools.Output_observed { byte_count } ->
+        Some (Option.value prev_bytes ~default:0 + byte_count), prev_msg
+      | Runtime_native_tools.Message_reported { message } ->
+        prev_bytes, Some message
+      | Runtime_native_tools.Heartbeat_reported _
+      | Runtime_native_tools.Retry_observed _ ->
+        prev_bytes, prev_msg
+    in
+    Hashtbl.replace table call_id next
+  in
+  List.iter (fun (line : Journal.journaled_event) ->
+    match line.event with
+    | E.Native_tool_progress (tool, progress) ->
+      update (Option.value tool.tool_call_id ~default:"") progress
+    | _ -> ()) lines;
+  let observations =
+    List.rev !order
+    |> List.map (fun id ->
+      let bytes, msg = Hashtbl.find table id in
+      id, bytes, msg)
+  in
+  check (list (triple string (option int) (option string)))
+    "exact native rows retain progress" expected observations;
+  let sse_progress_count =
+    List.fold_left (fun acc frame ->
+      let open Yojson.Safe.Util in
+      if frame |> member "type" |> to_string = "CUSTOM"
+         && frame |> member "name" |> to_string = "KEEPER_NATIVE_TOOL_PROGRESS"
+      then acc + 1 else acc) 0 frames
+  in
+  let journal_progress_count =
+    List.fold_left (fun acc (line : Journal.journaled_event) ->
+      match line.event with E.Native_tool_progress _ -> acc + 1 | _ -> acc) 0 lines
+  in
+  check int "SSE projection preserves every native progress event"
+    journal_progress_count sse_progress_count

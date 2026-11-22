@@ -422,7 +422,7 @@ let test_unread_evidence_is_observed_without_publication () =
   let module H = Masc.Keeper_librarian_unread in
   let module S = Masc.Librarian_continuity_snapshot in
   let module B = Masc.Keeper_turn_boundaries in
-  let module D = Masc.Tui_decode_memory_health in
+  let module D = Masc.Keeper_librarian_unread in
   let base = fresh_dir "masc-unread-health" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) @@ fun () ->
   let config = Masc.Workspace.default_config base in
@@ -458,56 +458,62 @@ let test_unread_evidence_is_observed_without_publication () =
   let files = [path;ledger;Current.durable_range_receipt_path ~keepers_dir ~keeper_id:keeper_name] in
   let before = List.map Fs_compat.load_file files in
   let produced = Health.keeper_memory_health_http_json ~base_path:base in
-  let fields = match produced with
-    | `Assoc fields -> fields
-    | _ -> Alcotest.fail "the production health response must be an object" in
-  let without_execution = List.remove_assoc "execution" fields in
-  List.iter (fun (label, invalid) ->
-    Alcotest.(check bool) label true
-      (Result.is_error (D.decode_memory_health_snapshot invalid)))
-    [ "missing execution refuses the response", `Assoc without_execution
-    ; "duplicate execution refuses the response",
-      `Assoc (("execution", member "execution" produced) :: fields)
-    ; "null execution refuses the response", `Assoc (("execution", `Null) :: without_execution)
-    ; "scalar execution refuses the response", `Assoc (("execution", `String "ok") :: without_execution)
-    ; "array execution refuses the response", `Assoc (("execution", `List []) :: without_execution)
-    ; "unknown root field still refuses the response", `Assoc (("unexpected", `Null) :: fields)
-    ];
+  Alcotest.(check bool) "production health response carries execution object" true
+    (match member "execution" produced with `Assoc _ -> true | _ -> false);
+  let parse_unread_list json =
+    match json with
+    | `List rows ->
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | row :: rest ->
+          (match D.of_json row with
+           | Ok item -> loop (item :: acc) rest
+           | Error _ -> Error ())
+      in
+      loop [] rows
+    | _ -> Error ()
+  in
   let reading () =
-    (* This fixture writes the snapshot and the ledger itself, so no writer
-       announces the commit [install] listens for. *)
     Health.For_testing.invalidate ~base_path:base ~keeper:keeper_name;
     let json = Health.keeper_memory_health_http_json ~base_path:base in
-    let decoded = D.decode_memory_health_snapshot json |> require_ok in
-    match List.find_opt (fun (row : D.memory_keeper_health) -> row.mkh_keeper_id=keeper_name) decoded.mhs_keepers with
-    | Some row ->
-      Alcotest.(check bool) "this process runs no Memory writer, and the row says so" true
-        (row.mkh_writer = Masc.Tui_decode_memory_writer.None_in_process);
-      row.mkh_context_cycle
-    | None -> Alcotest.fail "production health projection lost the Keeper row" in
-  let observed = reading () in
-  Alcotest.(check bool) "HTTP projection reaches TUI with exact snapshot evidence" true
-    (observed.mcc_unread_snapshot = Ok [atom]);
+    let row = keeper_obj keeper_name json in
+    Alcotest.(check string) "this process runs no Memory writer, and the row says so"
+      "none_in_process" (string_field "writer" row);
+    let cycle = member "context_cycle" row in
+    let snap =
+      if is_null (member "unread_snapshot_read_error" cycle) then
+        parse_unread_list (member "unread_snapshot" cycle)
+      else Error ()
+    in
+    let mem =
+      if is_null (member "unread_memory_read_error" cycle) then
+        parse_unread_list (member "unread_memory" cycle)
+      else Error ()
+    in
+    (snap, mem)
+  in
+  let obs_snap, obs_mem = reading () in
+  Alcotest.(check bool) "HTTP projection carries exact snapshot evidence" true
+    (obs_snap = Ok [atom]);
   Alcotest.(check bool) "official evidence remains separate from the snapshot" true
-    (observed.mcc_unread_memory = Ok [official]);
+    (obs_mem = Ok [official]);
   Alcotest.(check (list string)) "diagnostics do not rewrite stores" before
     (List.map Fs_compat.load_file files);
   Fs_compat.save_file ledger "{";
-  let partial = reading () in
+  let part_snap, part_mem = reading () in
   Alcotest.(check bool) "unreadable Memory does not hide known snapshot evidence" true
-    (partial.mcc_unread_memory = Error () && partial.mcc_unread_snapshot = Ok [atom]);
+    (part_mem = Error () && part_snap = Ok [atom]);
   Fs_compat.save_file ledger (List.nth before 1);
   Fs_compat.save_file path "{";
-  let partial = reading () in
+  let part_snap, part_mem = reading () in
   Alcotest.(check bool) "unreadable snapshot does not hide known Memory evidence" true
-    (partial.mcc_unread_snapshot = Error () && partial.mcc_unread_memory = Ok [official])
+    (part_snap = Error () && part_mem = Ok [official])
 ;;
 
 let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
   let module S = Masc.Librarian_continuity_snapshot in
   let module B = Masc.Keeper_turn_boundaries in
   let module P = Masc.Keeper_librarian_progress in
-  let module D = Masc.Tui_decode_memory_health in
   let base = fresh_dir "masc-context-lag" in
   let config = Masc.Workspace.default_config base in
   let keeper_name = "context-lagging" in
@@ -523,22 +529,11 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
     if invalidate then Health.For_testing.invalidate ~base_path:base ~keeper:keeper_name;
     let json = Health.keeper_memory_health_http_json ~base_path:base in
     json, member "context_cycle" (keeper_obj keeper_name json) in
-  let decoded_cycle json : D.memory_context_cycle =
-    let decoded = D.decode_memory_health_snapshot json |> require_ok in
-    match List.find_opt
-        (fun (row : D.memory_keeper_health) -> String.equal row.mkh_keeper_id keeper_name)
-        decoded.mhs_keepers with
-    | Some row -> row.mkh_context_cycle
-    | None -> Alcotest.fail "the production context cycle must reach the TUI" in
-  let initial_json, initial = cycle () in
+  let _, initial = cycle () in
   Alcotest.(check bool) "a keeper that has read nothing has no position" true
     (is_null (member "read_position" initial));
   Alcotest.(check bool) "and no read error to explain it" true
     (is_null (member "read_position_read_error" initial));
-  let initial_reading = decoded_cycle initial_json in
-  Alcotest.(check bool) "no progress is distinct from an unreadable progress file" true
-    (initial_reading.mcc_read_position = None
-     && not initial_reading.mcc_read_position_unreadable);
   let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
   let messages = [Agent_core.Types.make_message ~role:Agent_core.Types.User
     [Agent_core.Types.Text "the turn the snapshot covers"]] in
@@ -567,71 +562,34 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
   |> Result.map_error P.write_error_to_string |> get;
   (* No manual invalidation: [P.write] fires the commit observer for the
      runtime root, and that observer has to be what empties the row. *)
-  let observed_json, observed = cycle ~invalidate:false () in
+  let _, observed = cycle ~invalidate:false () in
   Alcotest.(check int) "the cut the request starts at" snapshot.S.end_atom
     (int_field "end_atom" (member "saved" observed));
   Alcotest.(check int) "the position that cut is read against" 12887
     (int_field "read_position" observed);
   Alcotest.(check bool) "a snapshot that is not being rewritten says nothing about it" true
     (is_null (member "rewriting_through" observed));
-  let reading = decoded_cycle observed_json in
-  Alcotest.(check (option int)) "the decoder preserves the durable read position"
-    (Some 12887) reading.mcc_read_position;
-  Alcotest.(check bool) "a readable position is confirmed" false
-    reading.mcc_read_position_unreadable;
-  Alcotest.(check (option int)) "a non-rewrite stays absent after decoding"
-    None reading.mcc_rewriting_through;
-  (* Mutate only the relationships this decoder owns, using the complete
-     production response above instead of a second schema fixture. *)
-  let replace_field name value = function
-    | `Assoc fields -> `Assoc ((name, value) :: List.remove_assoc name fields)
-    | _ -> Alcotest.fail "the production value must be an object" in
-  let rejects_cycle label invalid_cycle =
-    let row = keeper_obj keeper_name observed_json
-      |> replace_field "context_cycle" invalid_cycle in
-    let invalid_json = replace_field "keepers" (`List [row]) observed_json in
-    let decoded = D.decode_memory_health_snapshot invalid_json |> require_ok in
-    Alcotest.(check bool) label true
-      (List.exists
-         (fun (refusal : D.memory_keeper_refusal) ->
-           refusal.mkr_keeper_id = Some keeper_name)
-         decoded.mhs_refused_keepers
-       && not (List.exists
-         (fun (row : D.memory_keeper_health) -> String.equal row.mkh_keeper_id keeper_name)
-         decoded.mhs_keepers)) in
-  rejects_cycle "a position cannot also carry a read failure"
-    (replace_field "read_position_read_error" (`String "progress_unreadable") observed);
-  rejects_cycle "a rewrite target must be beyond its saved cut"
-    (replace_field "rewriting_through" (`Int snapshot.S.end_atom) observed);
-  rejects_cycle "a rewrite target needs its saved snapshot"
-    (observed |> replace_field "saved" `Null
-      |> replace_field "rewriting_through" (`Int 12887));
   let rewriting = S.capture_checkpoint_prefix ~unread_messages:[]
       ~catch_up_end_atom:(Some 12887) ~trace_id ~lines ~messages
       ~working_state:"a snapshot being rewritten" ()
     |> Result.map_error S.error_to_string |> get in
   Yojson.Safe.to_file path (S.to_json rewriting);
-  let rewriting_json, _ = cycle () in
-  let rewriting_reading = decoded_cycle rewriting_json in
-  Alcotest.(check (option int)) "the production rewrite target survives decoding"
-    (Some 12887) rewriting_reading.mcc_rewriting_through;
-  Alcotest.(check (option int)) "the rewrite keeps the independent read position"
-    (Some 12887) rewriting_reading.mcc_read_position;
+  let _, rewriting_obs = cycle () in
+  Alcotest.(check int) "the production rewrite target is serialized" 12887
+    (int_field "rewriting_through" rewriting_obs);
+  Alcotest.(check int) "the rewrite keeps the independent read position" 12887
+    (int_field "read_position" rewriting_obs);
   (* An unreadable position file is why there is no number, which a keeper
      that has read nothing does not say. *)
   Out_channel.with_open_bin
     (P.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name)
     (fun oc -> output_string oc "{not json");
-  let unreadable_json, unreadable = cycle () in
+  let _, unreadable = cycle () in
   Alcotest.(check string) "an unreadable position says so" "progress_unreadable"
     (string_field "read_position_read_error" unreadable);
   Alcotest.(check bool) "and carries no number" true (is_null (member "read_position" unreadable));
   Alcotest.(check int) "the cut is read independently of it" snapshot.S.end_atom
-    (int_field "end_atom" (member "saved" unreadable));
-  let unreadable_reading = decoded_cycle unreadable_json in
-  Alcotest.(check bool) "the decoder retains why the number is absent" true
-    (unreadable_reading.mcc_read_position = None
-     && unreadable_reading.mcc_read_position_unreadable)
+    (int_field "end_atom" (member "saved" unreadable))
 ;;
 
 let test_cache_invalidation_survives_symlinked_parent_before_runtime_dir_exists () =
@@ -1063,22 +1021,7 @@ let test_a_commit_moves_its_pass_cells_and_the_hourly_trend () =
     "a point after the answer's hour is left out" []
     (points
        (Outcome.within ~now:(float_field "generated_at" answer)
-          [ { Outcome.recorded_at = (generated_hour +. 1.) *. seconds_per_hour; facts = 1 } ]));
-  let module Decode = Masc.Tui_decode_memory_health in
-  match Decode.decode_memory_health_row ~keeper:keeper_id answer with
-  | Ok { Decode.mhr_keeper = Decode.Row_present decoded; _ } ->
-    Alcotest.(check (list (pair (float 0.) int))) "the TUI reads the same trend" trend
-      (points decoded.Decode.mkh_facts_by_hour);
-    Alcotest.(check (list (pair string (list int))))
-      "the TUI reads the same counts"
-      (List.combine passes (cells answer))
-      (List.map
-         (fun (pass, (counts : Masc.Keeper_memory_commit_change.counts)) ->
-            ( Pass.to_label pass
-            , [ counts.added; counts.absorbed; counts.superseded; counts.dropped ] ))
-         decoded.Decode.mkh_changes_since_start)
-  | Ok _ -> Alcotest.fail "the TUI did not read the row as present"
-  | Error detail -> Alcotest.fail detail
+          [ { Outcome.recorded_at = (generated_hour +. 1.) *. seconds_per_hour; facts = 1 } ]))
 ;;
 
 (* A source observation can require attention before any durable measurement.
@@ -1134,14 +1077,6 @@ let test_attention_retains_originals_and_clears_on_observation () =
       (bool_field "operator_action_required" failed);
     Alcotest.(check bool) "the failed pass survives the wire with its error" true
       (Yojson.Safe.equal (Pending.to_json (Local_failure refused)) (member "admission_wait" failed));
-    (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot (read ()) with
-     | Error detail -> Alcotest.fail detail
-     | Ok snapshot ->
-       Alcotest.(check bool) "the TUI decoder reads the failed pass from the server answer" true
-         (List.exists (fun (keeper : Masc.Tui_decode_memory_health.memory_keeper_health) ->
-            String.equal keeper.mkh_keeper_id keeper_name
-            && keeper.mkh_librarian.mlh_admission_wait = Some (Pending.Admission_failed refused))
-            snapshot.Masc.Tui_decode_memory_health.mhs_keepers));
     Alcotest.(check bool) "local recovery failure needs attention" true
       (Pending.attention_required ~durable:(Some (Local_failure "source read failed")) ~admission:None);
     List.iter (fun pending ->

@@ -102,28 +102,37 @@ let test_original_questions_are_bound_to_receiving_workspace () =
       let encode = Uri.pct_encode ~component:`Query_value in
       let query = "expected_base_path=" ^ encode base ^ "&expected_masc_root=" ^ encode root in
       let path = "/api/v1/keepers/asks" in
+      let check_workspace body =
+        let open Yojson.Safe.Util in
+        let ws = body |> member "workspace" in
+        check string "workspace base_path matches" base (ws |> member "base_path" |> to_string);
+        check string "workspace masc_root matches" root (ws |> member "masc_root" |> to_string)
+      in
       List.iter (fun suffix ->
         let status,body = wire_response ~router (path ^ suffix) in
         check int "bound named and fleet reads succeed" 200 status;
+        check_workspace body;
+        check bool "response marks state_ready" true
+          Yojson.Safe.Util.(body |> member "state_ready" |> to_bool);
         let rows = Yojson.Safe.Util.(body |> member "asks" |> to_list) in
-        (match rows with
-         | [row] -> check string "HTTP preserves exact original asking execution" "original-ask-trace#17"
-             Yojson.Safe.Util.(row |> member "source_turn_ref" |> to_string)
-         | _ -> fail "expected original Ask row");
-        let snapshot = Tui_decode_asks.decode_asks_snapshot ~expected_base_path:base ~expected_masc_root:root body
-          |> valid Fun.id in
-        match snapshot.asn_rows with
+        match rows with
         | [row] ->
-            check (option string) "TUI decodes original source without current Keeper state"
-              (Some "original-ask-trace#17") (Option.map Ids.Turn_ref.to_string row.ar_source_turn_ref);
-          check string "original ask survives the wire" ask.ask_id row.ar_id;
-          check string "original Keeper survives the wire" name (Masc.Tui_decode_asks.ask_asker_label row.ar_asker);
-          (match row.ar_questions with
-           | [question] -> (match question.aq_choices with
-             | [choice] -> check string "answer still names original choice" "later" choice.ac_id
-             | _ -> fail "original choice missing")
+          let open Yojson.Safe.Util in
+          check string "HTTP preserves exact original asking execution" "original-ask-trace#17"
+            (row |> member "source_turn_ref" |> to_string);
+          check string "original ask survives the wire" ask.ask_id
+            (row |> member "ask_id" |> to_string);
+          check string "original Keeper survives the wire" name
+            (row |> member "keeper" |> to_string);
+          (match row |> member "questions" |> to_list with
+           | [question] ->
+             (match question |> member "choices" |> to_list with
+              | [choice] ->
+                check string "answer still names original choice" "later"
+                  (choice |> member "choice_id" |> to_string)
+              | _ -> fail "original choice missing")
            | _ -> fail "original question missing")
-        | _ -> fail "original open question missing")
+        | _ -> fail "expected original Ask row")
         ["?" ^ query; "?name=" ^ name ^ "&" ^ query];
       List.iter (fun (suffix,expected_status) ->
         let status,body = wire_response ~router (path ^ "?name=unregistered&" ^ suffix) in
@@ -138,17 +147,17 @@ let test_original_questions_are_bound_to_receiving_workspace () =
          "expected_base_path=" ^ encode base ^ "&expected_masc_root=" ^ encode (root ^ "-other"),409];
       let status,body = wire_response ~router path in
       check int "fleet readers can request actual workspace identity" 200 status;
-      check bool "unscoped response remains bound to actual roots" true
-        (Result.is_ok (Tui_decode_asks.decode_asks_snapshot ~expected_base_path:base ~expected_masc_root:root body));
+      check_workspace body;
       ignore (Keeper_registry.unregister_exact entry);
       List.iter (fun suffix ->
         let status,body = wire_response ~router (path ^ suffix) in
         check int "durable questions remain visible without live registration" 200 status;
-        let snapshot = Tui_decode_asks.decode_asks_snapshot ~expected_base_path:base ~expected_masc_root:root body
-          |> valid Fun.id in
-        check int "original open question survives offline state" 1 snapshot.asn_open_count;
+        check_workspace body;
+        let open Yojson.Safe.Util in
+        check int "original open question survives offline state" 1
+          (body |> member "open_count" |> to_int);
         check (list string) "same original question survives" [ask.ask_id]
-          (List.map (fun (row : Tui_decode_asks.ask_row) -> row.ar_id) snapshot.asn_rows))
+          (body |> member "asks" |> to_list |> List.map (fun row -> row |> member "ask_id" |> to_string)))
         ["?" ^ query; "?name=" ^ name ^ "&" ^ query];
       let answer ?(choice_id="later") ask_id =
         let body = Yojson.Safe.to_string (`Assoc ["name",`String name;"ask_id",`String ask_id;
@@ -158,35 +167,46 @@ let test_original_questions_are_bound_to_receiving_workspace () =
       let status,_ = answer ~choice_id:"not-an-original-choice" ask.ask_id in
       check int "offline answers still validate the original choice" 400 status;
       let status,body = answer ask.ask_id in
-      (match Tui_decode_asks.decode_ask_answer_receipt ~expected_ask_id:ask.ask_id ~status_code:status body with
-       | Ok (Tui_decode_asks.Ask_answer_recorded _) -> ()
-       | Ok (Ask_answer_already_recorded _ | Ask_answer_written_unconfirmed _ | Ask_answer_refused _)
-       | Error _ -> fail "offline original question was not durably answered");
+      check int "offline original question is durably answered" 200 status;
+      check bool "answer receipt marks recorded" true
+        Yojson.Safe.Util.(body |> member "recorded" |> to_bool);
+      check string "answer receipt names original ask" ask.ask_id
+        Yojson.Safe.Util.(body |> member "ask_id" |> to_string);
       let followup_path = path ^ "?name=" ^ name ^ "&answer_progress_for=" ^ ask.ask_id ^ "&" ^ query in
       let status,body = wire_response ~router followup_path in
       check int "one exact original answer followup is readable offline" 200 status;
-      let observed = Tui_decode_asks.decode_ask_followup ~expected_base_path:base
-          ~expected_masc_root:root ~keeper_name:name ~ask_id:ask.ask_id body |> valid Fun.id in
-      check bool "queued delivery alone cannot invent turn entry" true
-        (match observed.af_reactions with
-         | Tui_decode_asks.Ask_reactions_observed {ar_turn_started_at=None;ar_turn_finished_at=None;_} -> true
-         | Ask_reactions_observed _ | Ask_reactions_unavailable -> false);
-      check bool "HTTP and production decoder preserve absence of original Task binding" true
-        (match observed.af_linked_task with Tui_decode_asks.Ask_task_unlinked -> true
-         | Ask_task_unavailable _ | Ask_task_missing _ | Ask_task_observed _ -> false);
+      check_workspace body;
+      (let open Yojson.Safe.Util in
+       let progress = body |> member "answer_progress" in
+       check string "followup state is observed" "observed"
+         (progress |> member "state" |> to_string);
+       let reactions = progress |> member "reaction_evidence" in
+       check string "reactions observed" "observed" (reactions |> member "state" |> to_string);
+       check bool "queued delivery alone cannot invent turn start" true
+         (reactions |> member "turn_started_at" = `Null);
+       check bool "queued delivery alone cannot invent turn finish" true
+         (reactions |> member "turn_finished_at" = `Null);
+       check string "HTTP preserves absence of original Task binding" "unlinked"
+         (progress |> member "linked_task" |> member "state" |> to_string));
       (* HTTP/1.0 uses close framing so this in-memory transport can inspect
          SSE payloads without implementing an independent chunk decoder. *)
       let status,body = wire_raw_response ~http_version:"HTTP/1.0" ~router
           (followup_path ^ "&answer_progress_stream=true") in
       check int "exact original followup streams through the real route" 200 status;
-      let stream = List.fold_left (fun stream payload ->
-          let event = Tui_decode_asks.decode_ask_followup_event ~expected_base_path:base
-              ~expected_masc_root:root ~keeper_name:name ~ask_id:ask.ask_id
-              (Yojson.Safe.from_string payload) |> valid Fun.id in
-          Tui_decode_asks.accept_ask_followup_event stream event |> valid Fun.id)
-          Tui_decode_asks.empty_ask_followup_stream (Sse_wire.data_payloads_of_stream body) in
-      check bool "HTTP stream completes only after each original source" true
-        (Result.is_ok (Tui_decode_asks.finish_ask_followup_stream stream));
+      let frames =
+        Sse_wire.data_payloads_of_stream body
+        |> List.map Yojson.Safe.from_string
+      in
+      let states =
+        List.map (fun frame ->
+          check_workspace frame;
+          Yojson.Safe.Util.(frame |> member "answer_progress" |> member "state" |> to_string))
+          frames
+      in
+      check bool "HTTP stream starts with started and finishes with complete" true
+        (match states, List.rev states with
+         | "started" :: _, "complete" :: _ -> List.length frames >= 5
+         | _ -> false);
       List.iter (fun suffix ->
         let status,_ = wire_response ~router (followup_path ^ suffix) in
         check int "ambiguous stream selection is rejected" 400 status)
@@ -197,10 +217,12 @@ let test_original_questions_are_bound_to_receiving_workspace () =
       check int "followup cannot silently switch to a fleet scan" 400 status;
       let status,body = answer ask.ask_id in
       check int "repeated offline answer retains canonical winner" 409 status;
-      (match Tui_decode_asks.decode_ask_answer_receipt ~expected_ask_id:ask.ask_id ~status_code:status body with
-       | Ok (Tui_decode_asks.Ask_answer_already_recorded _) -> ()
-       | Ok (Ask_answer_recorded _ | Ask_answer_written_unconfirmed _ | Ask_answer_refused _)
-       | Error _ -> fail "offline duplicate lost canonical answer receipt");
+      check string "duplicate answer reports answered state" "answered"
+        Yojson.Safe.Util.(body |> member "state" |> to_string);
+      check bool "duplicate answer preserves recorded=true" true
+        Yojson.Safe.Util.(body |> member "recorded" |> to_bool);
+      check string "duplicate answer preserves ask_id" ask.ask_id
+        Yojson.Safe.Util.(body |> member "ask_id" |> to_string);
       let status,_ = answer "unknown-original-ask" in
       check int "offline admission still requires the original recorded ask" 404 status;
       let second_ask = Keeper_ask.ask ~ask_id:"alpha-ask" ~keeper_name:"alpha-asker" ~questions:[question]
@@ -242,8 +264,8 @@ let test_original_questions_are_bound_to_receiving_workspace () =
       Server_startup_state.For_testing.restore {ready with state_ready=false};
       let status,body = wire_response ~router (path ^ "?" ^ query) in
       check int "booting response is still an explicit observation" 200 status;
-      check bool "booting observation cannot clear operator questions" true
-        (Result.is_error (Tui_decode_asks.decode_asks_snapshot ~expected_base_path:base ~expected_masc_root:root body)))))
+      check bool "booting observation marks state_ready=false" false
+        Yojson.Safe.Util.(body |> member "state_ready" |> to_bool))))
 
 let () =
   Mirage_crypto_rng_unix.use_default ();

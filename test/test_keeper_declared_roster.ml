@@ -24,20 +24,11 @@ let test_declared_keeper_is_visible_without_materialization () =
     let row = List.hd rows in
     check string "actual declaration name" "imp" row.name;
     check int "independent runtime and sandbox checks" 2 (List.length row.requirements);
-    let summary = Tui_decode.keeper_of_declaration row in
-    (match summary.k_origin with
-     | Declared_keeper [ Runtime_check_required; Sandbox_check_required ] -> ()
-     | _ -> fail "must retain both unverified preparation requirements");
-    (match Tui_decode.keeper_trace_id summary with
-     | Error Tui_decode.Keeper_not_started -> ()
-     | Error (Tui_decode.Identity_unreadable _) | Ok _ -> fail "no fabricated trace");
-    check bool "identity is explicitly unavailable before first boot" true
-      (Result.is_error summary.k_identity);
-    check bool "no fabricated activity before first boot" true
-      (Option.is_none summary.k_activity);
     let wire = Keeper_declared_roster.to_json row in
     check string "web lifecycle" "unbooted"
       Yojson.Safe.Util.(wire |> member "status" |> to_string);
+    check bool "no fabricated trace_id before first boot" true
+      (Yojson.Safe.Util.member "trace_id" wire = `Null);
     check bool "no persisted runtime directory" false
       (Sys.file_exists (Filename.concat base ".masc/keepers")))
 

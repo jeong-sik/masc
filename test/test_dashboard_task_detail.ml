@@ -59,10 +59,13 @@ let test_tui_reads_served_detail () =
       Detail.find ~tasks:[original] ~goal_task_index:index ~task_id:original.Masc_domain.id
       |> Detail.response in
     check bool (name ^ ": found") true (status = `OK);
-    match Masc.Tui_decode_task_inspection.detail ~task_id:original.id body with
+    let task_json = Yojson.Safe.Util.member "task" body in
+    check string (name ^ ": exact task id") original.Masc_domain.id
+      Yojson.Safe.Util.(task_json |> member "id" |> to_string);
+    match Masc_domain.task_of_yojson task_json with
     | Ok decoded ->
-        check bool (name ^ ": the TUI decodes the same Task") true
-          (Masc_domain.equal_task original decoded.task)
+        check bool (name ^ ": the wire decodes back to the same Task") true
+          (Masc_domain.equal_task original decoded)
     | Error detail -> fail (name ^ ": " ^ detail)
   in
   reads_back "a Task no execution claimed" (task "task-unlinked" "body");

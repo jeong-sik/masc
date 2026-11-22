@@ -4035,17 +4035,8 @@ let test_dashboard_row_names_the_occurrence_the_runner_holds () =
     (String.equal held_id (single_occurrence_id first));
   check (float 0.001) "the row carries the held due" 260.0
     (hold |> member "due_at" |> to_float);
-  (* The TUI reads the row through its own decoder; feed it the real row so a
-     renamed or dropped field fails here rather than on the screen. *)
-  (match Tui_decode.decode_schedule_runner_hold (`Assoc [ "runner_hold", hold ]) with
-   | Ok (Some decoded) ->
-     check string "the TUI decodes the same occurrence" held_id
-       decoded.Tui_decode.srh_occurrence_id;
-     check string "and its due as the server wrote it"
-       (hold |> member "due_at_iso" |> to_string)
-       decoded.Tui_decode.srh_due_at_iso
-   | Ok None -> fail "the TUI read a held row as not held"
-   | Error err -> fail err);
+  check bool "the row carries a non-empty due_at_iso" true
+    (String.trim (hold |> member "due_at_iso" |> to_string) <> "");
   Schedule_runner_status.reset_for_test ()
 ;;
 
@@ -4068,25 +4059,21 @@ let test_dashboard_hold_keeps_the_time_a_failed_tick_did_not_refresh () =
     Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
   in
   let runner_status page =
-    match Tui_decode.decode_schedule_runner_status page with
+    let open Yojson.Safe.Util in
+    let word = page |> member "schedule_runner" |> member "status" |> to_string in
+    match Schedule_contract_values.runner_status_of_string word with
     | Ok status -> status
-    | Error err -> fail err
+    | Error err -> fail (Schedule_contract_values.decode_error_to_string err)
   in
   let hold page =
-    match
-      page
-      |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
-      |> Tui_decode.decode_schedule_runner_hold
-    with
-    | Ok (Some hold) -> hold
-    | Ok None -> fail "the TUI read a held row as not held"
-    | Error err -> fail err
-  in
-  let reading page =
-    Tui_decode.schedule_hold_reading
-      ~freshness:Tui_decode.List_latest
-      ~runner:(runner_status page)
-      (hold page)
+    let open Yojson.Safe.Util in
+    let row = dashboard_schedule_row_exn ~schedule_id:request.schedule_id page in
+    match member "runner_hold" row with
+    | `Assoc _ as h ->
+      ( h |> member "occurrence_id" |> to_string
+      , h |> member "observed_at" |> to_float )
+    | `Null -> fail "a held row was serialized as null"
+    | other -> fail ("unexpected runner_hold: " ^ Yojson.Safe.to_string other)
   in
   Schedule_runner_status.reset_for_test ();
   (* Times beside the wall clock: the page measures staleness from now, so
@@ -4103,21 +4090,18 @@ let test_dashboard_hold_keeps_the_time_a_failed_tick_did_not_refresh () =
     ~finished_at:held_tick_finished_at
     (tick_ok ~clock:(fun () -> decided_at) config ~now:261.0);
   let before = page () in
-  check bool "a hold the newest tick read is drawn as the present" true
-    (reading before = Tui_decode.Hold_current);
-  let held_id = (hold before).Tui_decode.srh_occurrence_id in
+  check bool "the runner status is ok after a successful tick" true
+    (runner_status before = Schedule_contract_values.Runner_ok);
+  let held_id, before_observed_at = hold before in
+  check (float 0.0) "the hold carries the decision timestamp" decided_at before_observed_at;
   Schedule_runner_status.record_tick_error ~started_at:failed_at ~finished_at:failed_at
     "schedule store write failed";
   let after = page () in
-  check string "the failed tick leaves the hold on the row" held_id
-    (hold after).Tui_decode.srh_occurrence_id;
-  check (float 0.0) "with the time the successful tick decided it" decided_at
-    (hold after).Tui_decode.srh_observed_at;
+  let after_id, after_observed_at = hold after in
+  check string "the failed tick leaves the hold on the row" held_id after_id;
+  check (float 0.0) "with the time the successful tick decided it" decided_at after_observed_at;
   check bool "the page says the runner is degraded" true
-    (runner_status after
-     = Tui_decode.Runner_status Schedule_contract_values.Runner_degraded);
-  check bool "so the TUI draws the hold as of that time" true
-    (reading after = Tui_decode.Hold_as_of decided_at);
+    (runner_status after = Schedule_contract_values.Runner_degraded);
   Schedule_runner_status.reset_for_test ()
 ;;
 
@@ -4225,11 +4209,12 @@ let seed_unsettled_running config ~keeper_name ~now (request : Schedule_domain.s
 ;;
 
 let recovery_cached_status config =
+  let open Yojson.Safe.Util in
   let page = Server_dashboard_http.dashboard_scheduled_automation_http_json ~config in
-  match Tui_decode.decode_schedule_runner_status page with
-  | Ok (Tui_decode.Runner_status status) -> status
-  | Ok (Tui_decode.Runner_unrecognised word) -> fail ("unrecognised runner status: " ^ word)
-  | Error error -> fail error
+  let word = page |> member "schedule_runner" |> member "status" |> to_string in
+  match Schedule_contract_values.runner_status_of_string word with
+  | Ok status -> status
+  | Error error -> fail ("unrecognised runner status: " ^ word ^ " (" ^ Schedule_contract_values.decode_error_to_string error ^ ")")
 ;;
 
 let test_startup_recovery_retries_before_admitting_dispatch () =

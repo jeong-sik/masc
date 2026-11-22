@@ -428,7 +428,7 @@ let test_tui_resume_attempts_use_distinct_receipts () =
              keeper_name Keeper_state_machine.Operator_pause with
      | Ok _ -> ()
      | Error error -> Alcotest.fail (Keeper_state_machine.transition_error_to_string error));
-    let next_request = resume_request (Masc_tui_keeper_control.mint_operation_id ()) in
+    let next_request = resume_request ("masc-tui-resume-" ^ keeper_name ^ "-2") in
     Alcotest.(check bool) "new attempt has a fresh receipt id" false
       (String.equal first_request.operator_operation_id next_request.operator_operation_id);
     let next = resume next_request in

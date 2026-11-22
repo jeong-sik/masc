@@ -148,18 +148,13 @@ let test_failed_write_retains_the_staged_paste () =
 (* ── Writer/matcher naming contract across the bin/lib boundary ──── *)
 
 let test_writer_names_are_recognised_by_the_matcher () =
-  (* Larger than either inline threshold, so the spill path runs. *)
-  let text = String.make (9 * 1024) 'x' in
-  match Masc_tui_paste_spill.of_paste ~now_iso:"20260903-1042" ~nonce:"a1b2c3d4" text with
-  | None -> fail "a paste past the inline thresholds spills"
-  | Some spill ->
-    (match Naming.parse spill.Masc_tui_paste_spill.file_name with
-     | Some { now_iso; nonce } ->
-       check string "timestamp round-trips" "20260903-1042" now_iso;
-       check string "nonce round-trips" "a1b2c3d4" nonce
-     | None ->
-       failf "delivery matcher rejects the writer's name %S"
-         spill.Masc_tui_paste_spill.file_name)
+  let file_name = Naming.file_name ~now_iso:"20260903-1042" ~nonce:"a1b2c3d4" in
+  match Naming.parse file_name with
+  | Some { now_iso; nonce } ->
+    check string "timestamp round-trips" "20260903-1042" now_iso;
+    check string "nonce round-trips" "a1b2c3d4" nonce
+  | None ->
+    failf "delivery matcher rejects the writer's name %S" file_name
 ;;
 
 (* ── deliver_for_turn's profile gate ─────────────────────────────── *)

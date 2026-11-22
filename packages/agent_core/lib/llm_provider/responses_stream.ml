@@ -204,20 +204,112 @@ let responses_assert_output_kind state emit output_index incoming =
     | None -> emit(SSEParseFailed{raw="";reason="responses_replay:conflicting_item_kind_or_phase"});None
 ;;
 
+(* The operator-facing error string is built from a failure record's [raw] and
+   is then clipped to 256 bytes by [Secret_redactor.redacted_excerpt], so the
+   record is capped here instead: two long [rs_...] ids must not push the
+   second digest out of the line that says which two deliveries disagreed. *)
+let responses_bounded_raw text =
+  if String.length text <= 240 then text else String.sub text 0 237 ^ "..."
+;;
+
 let responses_accept_output_identity state emit output_index = function
-  | None | Some "" -> true
+  | None -> true
+  | Some id when Api_common.string_is_blank id -> true
   | Some id ->
     (match Hashtbl.find_opt state.responses_output_ids output_index with
      | None -> Hashtbl.add state.responses_output_ids output_index id;true
      | Some previous when String.equal previous id -> true
-     | Some _ -> emit(SSEParseFailed{raw="";reason="responses_replay:conflicting_output_item_identity"});false)
+     | Some previous ->
+       emit(SSEParseFailed
+         { raw=responses_bounded_raw
+             (Printf.sprintf "idx=%d stored_id=%S incoming_id=%S"
+                output_index previous id)
+         ; reason="responses_replay:conflicting_output_item_identity" });
+       false)
 ;;
 
-let responses_reasoning_update state emit ~output_index apply =
+(* A done frame names its item's place with the event's [output_index]; the
+   terminal [output] array only orders the items. When the two disagree -- an
+   item absent from the array, a reordered echo -- the array position would
+   compare one item against another item's stored state. The non-blank [id] is
+   the identity both paths agree on, so it wins whenever the first capture
+   recorded it. Positions stay the fallback for id-less items. *)
+let responses_index_of_item_id state id =
+  (* An id recorded under two indices is malformed input, but the answer must
+     not depend on hash bucket order: the lowest index wins. *)
+  Hashtbl.fold
+    (fun index recorded found ->
+       if not (String.equal recorded id) then found
+       else
+         match found with
+         | Some previous -> Some (Int.min previous index)
+         | None -> Some index)
+    state.responses_output_ids None
+;;
+
+(* A failure record needs the frame's identity, not its payload: the type, the
+   id, the byte length and a digest prefix locate the item afterwards without
+   copying prompt text, reasoning text or ciphertext into the diagnostic. *)
+let responses_wire_item_digest ~output_index item =
+  let json = Yojson.Safe.to_string item in
+  let digest = Agent_core_sha256.(to_hex (digest_string json)) in
+  let id = match responses_member_string_opt "id" item with
+    | Some value when String.length value <= 12 -> value
+    | Some value -> String.sub value 0 12 ^ "~"
+    | None -> "<none>" in
+  responses_bounded_raw
+    (Printf.sprintf "idx=%d type=%s id=%s bytes=%d sha=%s"
+       output_index
+       (Option.value (responses_member_string_opt "type" item) ~default:"<none>")
+       id (String.length json) (String.sub digest 0 16))
+;;
+
+(* The terminal array is captured under the index each item is known by, never
+   the slot it happens to occupy: an echo that reorders items, or drops a
+   leading one, must not hand two items the same index. An item whose id was
+   never recorded (a text item that only ever arrived as deltas, an id-less
+   done frame) keeps its order and takes the lowest index no identified item
+   claims, so the two rules cannot collide inside one array. Items are then
+   captured in ascending index order, which keeps block indices monotonic. *)
+let responses_terminal_output_keys state items =
+  let resolved =
+    List.map
+      (fun item ->
+         match responses_member_string_opt "id" item with
+         | Some id when not (Api_common.string_is_blank id) ->
+           responses_index_of_item_id state id
+         | Some _ | None -> None)
+      items
+  in
+  let claimed = Hashtbl.create 16 in
+  List.iter
+    (function Some index -> Hashtbl.replace claimed index () | None -> ())
+    resolved;
+  let next_free = ref 0 in
+  let take_free () =
+    let rec walk () =
+      let index = !next_free in
+      incr next_free;
+      if Hashtbl.mem claimed index then walk () else index
+    in
+    walk ()
+  in
+  List.map (function Some index -> index | None -> take_free ()) resolved
+;;
+
+(* The stored item is described, never quoted: the record keeps the two sides
+   distinguishable (id, ciphertext digest prefix, byte length) without the
+   ciphertext, the prompt or the reasoning text. *)
+let responses_reasoning_update ?(describe_incoming=(fun () -> "none")) state emit ~output_index apply =
   let previous=Hashtbl.find_opt state.responses_reasoning output_index
     |> Option.value ~default:Responses_reasoning_stream.empty in
   match apply previous with
-  | Error reason -> emit(SSEParseFailed{raw="";reason})
+  | Error reason ->
+    emit(SSEParseFailed
+      { raw=responses_bounded_raw
+          (Printf.sprintf "idx=%d stored{%s} incoming{%s}"
+             output_index (Responses_reasoning_stream.describe previous) (describe_incoming ()))
+      ; reason })
   | Ok(next,update) ->
     Hashtbl.replace state.responses_reasoning output_index next;
     (match update with
@@ -279,8 +371,12 @@ let responses_capture_output_item ?(drop_function_call=false) state emit ~output
      | None -> ()
      | Some kind ->
     (match Responses_reasoning.decode item with
-     | Error reason -> emit(SSEParseFailed{raw="";reason})
-     | Ok incoming -> responses_reasoning_update state emit ~output_index
+     | Error reason ->
+       emit(SSEParseFailed{raw=responses_wire_item_digest ~output_index item;reason})
+     | Ok incoming ->
+       responses_reasoning_update
+         ~describe_incoming:(fun ()->Responses_reasoning.describe incoming)
+         state emit ~output_index
          (fun previous->Responses_reasoning_stream.item previous incoming));
     capture kind (Option.to_list(Hashtbl.find_opt state.responses_thinking_blocks output_index)))
   | Some "function_call" ->
@@ -335,8 +431,15 @@ let responses_capture_terminal_outputs state emit response =
   (match response |> member "output" with
    | `List items ->
      Hashtbl.clear state.responses_output_groups;
-     List.iteri (fun output_index item ->
-       responses_capture_output_item ~drop_function_call state emit ~output_index item) items
+     (* Capture in output-index order, not array order: content blocks are
+        allocated as they are captured and the replay groups name them by that
+        allocation order, so a reordered echo would otherwise put a later
+        item's block before an earlier one's. *)
+     items
+     |> List.map2 (fun output_index item -> output_index,item) (responses_terminal_output_keys state items)
+     |> List.stable_sort (fun (left,_) (right,_) -> Int.compare left right)
+     |> List.iter (fun (output_index,item) ->
+       responses_capture_output_item ~drop_function_call state emit ~output_index item)
    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> ());
   let explicit_output=match response |> member "output" with `List _->true
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> false in
@@ -423,7 +526,11 @@ let responses_sse_to_events (state : openai_stream_state) event_type data_str
               | None -> ()
               | Some text ->
                 let part=responses_member_int_default part_field json in
-                responses_reasoning_update state emit ~output_index (fun previous->
+                responses_reasoning_update
+                  ~describe_incoming:(fun () ->
+                    Printf.sprintf "%s part=%d bytes=%d"
+                      (if is_delta then "delta" else "part_done") part (String.length text))
+                  state emit ~output_index (fun previous->
                   if is_delta then Responses_reasoning_stream.delta previous ~channel ~part text
                   else Responses_reasoning_stream.part_done previous ~channel ~part text))
        | "response.output_item.added" ->

@@ -38,3 +38,29 @@ let decode item =
   | Some (`String encrypted) when nonblank encrypted -> Ok(Opaque item)
   | Some (`String _ | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
   | None -> Result.map(fun full->Plaintext {full;summary=summary item}) (full_text item)
+
+(* A bounded, secret-free description for a wire failure record. The ciphertext
+   is never quoted: only its digest prefix and byte length, which is enough to
+   tell two deliveries apart after the fact while leaving the payload, the
+   prompt and the reasoning text out of the diagnostic. *)
+let describe = function
+  | Opaque item ->
+    let ciphertext = match field "encrypted_content" item with
+      | Some (`String value) -> Some value
+      | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+      | None -> None in
+    (* A real [rs_...] id runs 51-64 bytes and the failure record that carries
+       this description is capped at 256 bytes, so the id is clipped and the
+       ciphertext digest leads: the two deliveries must stay distinguishable
+       even when both ids are long. *)
+    let id = match field "id" item with
+      | Some (`String value) when nonblank value ->
+        if String.length value <= 12 then value else String.sub value 0 12 ^ "~"
+      | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+      | Some (`String _) | None -> "<none>" in
+    (match ciphertext with
+     | Some value ->
+       let digest = Agent_core_sha256.(to_hex (digest_string value)) in
+       Printf.sprintf "opaque id=%s enc=%s/%d" id (String.sub digest 0 16) (String.length value)
+     | None -> Printf.sprintf "opaque id=%s enc=<none>" id)
+  | Plaintext _ -> "plaintext"

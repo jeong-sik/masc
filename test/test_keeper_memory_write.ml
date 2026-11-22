@@ -848,8 +848,12 @@ let test_demand_recall_does_not_materialize_or_verify_all_memory () =
       ~memory_search_available:search ~artifact_reader_available:reader
       ~config ~meta ~keepers_dir ~keeper_id:meta.name ~now () |> Option.get in
   let prompt = render ~search:true ~reader:true ~now:100. in
-  List.iter (fun text -> Alcotest.(check bool) "notice omits claim and source bodies" false
-      (contains ~needle:text prompt)) [claim; source_claim; source_path];
+  Alcotest.(check bool) "notice injects frozen-epoch Tier-1 ordinary digest" true
+    (contains ~needle:"Current ordinary memory digest (epoch revision=1; 1 stored facts;" prompt
+     && contains ~needle:claim prompt
+     && not (contains ~needle:"bodies omitted" prompt));
+  List.iter (fun text -> Alcotest.(check bool) "notice omits deferred source claim bodies and paths" false
+      (contains ~needle:text prompt)) [source_claim; source_path];
   Alcotest.(check string) "prompt preparation performs no source invalidation write"
     before (Fs_compat.load_file source_file);
   let keeper_dir = Filename.concat (Masc.Workspace.keepers_runtime_dir config) meta.name in
@@ -860,8 +864,12 @@ let test_demand_recall_does_not_materialize_or_verify_all_memory () =
   Alcotest.(check string) "reader availability does not change a search notice" prompt
     (render ~search:true ~reader:false ~now:200.);
   let no_tools = render ~search:false ~reader:false ~now:200. in
-  Alcotest.(check bool) "retrieval-less fallback never includes complete facts" false
-    (contains ~needle:claim no_tools || contains ~needle:source_claim no_tools);
+  Alcotest.(check bool) "retrieval-less fallback keeps frozen-epoch Tier-1 ordinary digest" true
+    (contains ~needle:"Current ordinary memory digest (epoch revision=1; 1 stored facts;" no_tools
+     && contains ~needle:claim no_tools
+     && not (contains ~needle:"bodies omitted" no_tools));
+  List.iter (fun text -> Alcotest.(check bool) "retrieval-less fallback omits deferred source claims" false
+      (contains ~needle:text no_tools)) [source_claim; source_path];
   Alcotest.(check bool) "retrieval-less state explicitly withdraws prior authority" true
     (contains ~needle:"Memory retrieval is unavailable" no_tools
      && contains ~needle:"this notice verifies no claim" no_tools);
@@ -911,10 +919,15 @@ let test_demand_recall_does_not_materialize_or_verify_all_memory () =
       Alcotest.(check string) "unloadable selection preserves no-tool notice" no_tools
         (notice ~offered ~loader_alive ~search:false ~reader:false))
       [([loader],false); ([],true); ([],false)];
-    List.iter (fun body -> List.iter (fun text ->
-      Alcotest.(check bool) "selection notice omits full memory bodies" false
-        (contains ~needle:text body)) [claim;source_claim;source_path])
-      [direct;both;discoverable]);
+    List.iter (fun body ->
+      Alcotest.(check bool) "selection notice injects frozen-epoch Tier-1 ordinary digest" true
+        (contains ~needle:"Current ordinary memory digest (epoch revision=1; 1 stored facts;" body
+         && contains ~needle:claim body
+         && not (contains ~needle:"bodies omitted" body));
+      List.iter (fun text ->
+        Alcotest.(check bool) "selection notice omits deferred source bodies and paths" false
+          (contains ~needle:text body)) [source_claim; source_path])
+      [direct; both; discoverable]);
   List.iter (fun (enabled, excluded) ->
     with_policy ~enabled ~excluded (fun () ->
       Alcotest.(check string) "policy denial preserves lexical fallback" prompt
@@ -966,6 +979,11 @@ let test_same_count_replacement_updates_notice_and_demand_search () =
   let before = read () in
   let first_notice = render 100. in
   Alcotest.(check string) "unchanged store does not change with time" first_notice (render 200.);
+  Alcotest.(check bool) "initial frozen-epoch digest includes prior claim only" true
+    (contains ~needle:(Printf.sprintf "revision=%d" before.revision) first_notice
+     && contains ~needle:old.claim first_notice
+     && not (contains ~needle:current.claim first_notice)
+     && not (contains ~needle:"bodies omitted" first_notice));
   (match Current.replace ~keepers_dir ~keeper_id:meta.name
     ~expected_revision:(Some before.revision) ~now:300.
     ~source:{Current.kind=Current.Librarian; trace_id="transition"} ~facts:[current] () with
@@ -974,10 +992,13 @@ let test_same_count_replacement_updates_notice_and_demand_search () =
   let next_notice = render 400. in
   Alcotest.(check int) "replacement preserves count" (List.length before.facts) (List.length after.facts);
   Alcotest.(check bool) "same-count transition changes notice" true (first_notice <> next_notice);
+  Alcotest.(check string) "successor epoch digest stays byte-stable across turns" next_notice (render 500.);
   Alcotest.(check bool) "notice identifies actual stored revision" true
     (contains ~needle:(Printf.sprintf "revision=%d" after.revision) next_notice);
-  List.iter (fun claim -> Alcotest.(check bool) "notice includes no historical or current body" false
-    (contains ~needle:claim next_notice)) [old.claim; current.claim];
+  Alcotest.(check bool) "successor digest drops historical claim and renders current claim" true
+    (not (contains ~needle:old.claim next_notice)
+     && contains ~needle:current.claim next_notice
+     && not (contains ~needle:"bodies omitted" next_notice));
   let search = Runtime.keeper_memory_search_json ~config ~meta
     ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
     ~args:(`Assoc ["query", `String "deployment"]) |> Yojson.Safe.from_string in

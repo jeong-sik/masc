@@ -9,13 +9,13 @@
 - **주요 개편 묶음**: (1) **MASC TUI v2.5/v2.6 전면 개편**(`#54399`~`#54402`·`#54419`·`#54422` — OCaml 5.5 + Eio 6-워크스페이스·3-도메인 SSE·CSI 2026 차분 렌더러로 교체하고 레거시 v1 TUI ~515k LOC 제거, 화살표 내비게이션·채팅 스크롤 SSOT 통일), (2) **ACP v1 불멸 롤오버·PGID 리핑·Vibe 3.1.0·Compaction/Librarian P0 하드닝**(`#54416`), (3) **보안·고아 자원·순환·부트 워치독 하드닝**(`#54406`·`#54412`·`#54413`·`#54414`·`#54420`·`#54366`), (4) 기존 `0.79.0` 후보의 **Librarian 컷**(`#54326`·`#54328`·`#54331`·`#54340`), **공급자 캐시·wire 파라미터 정합**(`#54384`~`#54386`·`#54394`·`#54395`·`#54398`), **Stack E**(`#54389`·`#54390`·`#54391`).
 - 조각이 `### Exempt` 인 여섯(`#54335`·`#54341`·`#54342`·`#54393`·`#54396`·`#54397`)과 조각이 없는 시험·문서 전용(`#54382`·`#54421`)은 그룹 절에 넣지 않고 마지막 `### Exempt` 에 모았습니다.
 - 이 절은 `changelog.d/` 조각 문구를 그대로 인용해 손으로 접었습니다. `scripts/changelog-fragments.py assemble` 은 실행하지 않았습니다 — 이 트리에는 이미 접힌 조각이 남아 있어 `assemble` 이 그것들을 `[Unreleased]` 로 다시 쏟는 문제가 있습니다(task-3920).
-- **이후 추가 착지** (`bf6e264a`→`429ad3ff`, 7 PR):
+- **이후 추가 착지** (`bf6e264a` 이후 7 PR):
   - `#54423`: `v0.80.0` 버전(`dune-project`·`masc.opam`) 및 `CHANGELOG.md` 초안 정리(미발행 `0.79.0` 흡수).
   - `#54425`: 포트 공고 거부 `[FATAL]` 줄을 `exit 1` 직전 `stderr` 로 직접 flush (`Server_runtime_bootstrap.report_port_announcement_refusal`).
   - `#54424`: Google ADC 액세스 토큰 인메모리 캐시(45분 TTL·`Cross_context_mutex` 단일 비행·401 즉시 무효화), `Gemini_context_cache.prefix_key` OAuth 토큰 분리·`cachedContents` coalescing, 빈 `tools` 시 `toolConfig` 생략.
   - `#54427`: TUI 터미널 입력 디코더 및 raw-mode 안전성 강화(Kitty CSI u shifted punctuation, `Ctrl+Z` `SIGTSTP` 가드, 0 Hz idle 복구, `SS3`/rxvt, 3초 `Ctrl+C` 만료, 2벌식 `'ㅡ'` 마우스 토글).
   - `#54428`: 퇴역 코드·스크립트·대시보드·오래된 문서 정리(`keeper_composition_{run,status,cancel}`·`masc_operator_composition_resolution`·미사용 OCaml 7모듈·Muse `host_last_turn`·`/api/v1/skills/evidence`·구 Python 스크립트 5건·구 문서 36건 제거 및 프롬프트·도구 안내 갱신).
-  - `#54433`: installer wizard 테스트 셸 상한 5초→30초(`DEFAULT_SHELL_TIMEOUT`) 및 타임아웃 시 PTY/stdout/stderr 덤프, 결정적 회귀시험 추가.
+  - `#54433`: installer wizard 테스트 셸 상한 5초→30초(`DEFAULT_SHELL_TIMEOUT`, 한 곳 관리)·타임아웃 시 PTY/stdout/stderr 덤프·결정적 회귀시험.
   - `#54426`: keeper/runtime 좌석 공정성·Claude effect/stream 펜스·compaction tool-carry 리셋·Codex cwd 심링크·prompt presence 하드닝(RT-2).
 
 ### Added

@@ -2402,8 +2402,12 @@ let test_actions_denied_reports_and_recovers () =
 module Argument_start_fixture = struct
   module T = Agent_core.Types
   module Host = Keeper_official_client_host
-  let old_input = `Assoc ["command", `String (String.make 4000 'a')]
-  let current_input = `Assoc ["command", `String (String.make 4000 'c')]
+  (* Derive the payload from [Tool_blob_store.preview_max] so the historical
+     argument stays above the normalization threshold when that limit moves.
+     Same derivation as test_keeper_claude_code_runtime.ml (#54374). *)
+  let payload_bytes = Tool_blob_store.preview_max * 2
+  let old_input = `Assoc ["command", `String (String.make payload_bytes 'a')]
+  let current_input = `Assoc ["command", `String (String.make payload_bytes 'c')]
   let exchange id input =
     [ T.make_message ~role:T.Assistant [T.ToolUse {id;name="record";input}]
     ; T.tool_result_msg ~tool_use_id:id ~content:"done" () ]

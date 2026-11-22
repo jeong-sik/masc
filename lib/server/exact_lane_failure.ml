@@ -174,6 +174,7 @@ let claude_error = function
 
 let antigravity_error = function
   | Runtime_antigravity.Invalid_config _ -> Configuration_refused
+  | Runtime_antigravity.Context_window_exceeded _ -> Input_refused Context_overflow
   | Runtime_antigravity.Result_not_completed _ -> Output_unusable
   (* The same request meets the same permission rules, so a retry ends on
      the same refusal. *)

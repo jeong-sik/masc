@@ -943,6 +943,26 @@ type sent_request =
    of its own would send verbatim the results a size refusal had demoted, and
    the retained results inline after a refusal had switched them to the
    address form. *)
+module Message_indices = Set.Make (Int)
+
+type in_turn_overflow_demotion =
+  | No_in_turn_demotion
+  | Demote_closed_current_turn_tools
+  | Demote_and_preview_closed_current_turn_tools
+
+(* Conservative bytes-per-token factor translating a provider's declared token
+   input budget into {!Keeper_compaction.Explicit_hard_limit}'s byte contract
+   so anchor budgets are never undersized by mixing token and byte units. *)
+let compaction_bytes_per_token = 4
+
+let compaction_bytes_of_tokens tokens =
+  if tokens <= 0
+  then 0
+  else if tokens > max_int / compaction_bytes_per_token
+  then max_int
+  else tokens * compaction_bytes_per_token
+;;
+
 type attempt_state =
   { last_request : sent_request option ref
   ; request_start : Keeper_request_start.t option ref
@@ -958,6 +978,17 @@ type attempt_state =
         (* Set by each composition: the atom count of the request it composed
            when demoting the tool results and bound arguments in those atoms
            would carry fewer bytes, [None] when it would change nothing. *)
+  ; in_turn_demotion : in_turn_overflow_demotion ref
+        (* Escalated only by [in_run_narrower] past [this_turn_start] after a
+           mid-turn size refusal: demotes already-closed current-turn [ToolUse]
+           arguments and [ToolResult] bodies, falling back to deterministic
+           head+tail previews when blob demotion cannot shrink the payload. *)
+  ; dropped_current_turn_atoms : Message_indices.t ref
+        (* Atom indices of oldest completed tool-round cycles inside the
+           current turn dropped by [in_run_narrower] after mid-turn overflow. *)
+  ; last_composed_bytes : int option ref
+        (* [transmitted_bytes] of the most recent composition in this attempt,
+           used by [in_run_narrower] to skip demotion rungs that do not shrink. *)
   ; retained_results : Keeper_client_tool_outbox.run_carrier
         (* The run's first attempt loads the outbox; every later attempt
            carries that snapshot in the form the capacity-refusal hook left
@@ -1003,19 +1034,17 @@ let evicted_prefix_before_atom ~first_atom messages =
       labelled
 ;;
 
-let commit_compaction_for_evicted
+let commit_compaction_for_messages
       ~base_path
       ~keeper_name
       ~reader_available
       ~trigger
-      ~first_atom
       ~(state : attempt_state)
-      messages
+      evicted_messages
   =
   match keepers_dir_for_base_path base_path with
   | None -> false
   | Some keepers_dir ->
-    let evicted_messages = evicted_prefix_before_atom ~first_atom messages in
     (match evicted_messages with
      | [] -> false
      | _ :: _ ->
@@ -1045,6 +1074,109 @@ let commit_compaction_for_evicted
           false))
 ;;
 
+let commit_compaction_for_evicted
+      ~base_path
+      ~keeper_name
+      ~reader_available
+      ~trigger
+      ~first_atom
+      ~(state : attempt_state)
+      messages
+  =
+  commit_compaction_for_messages
+    ~base_path
+    ~keeper_name
+    ~reader_available
+    ~trigger
+    ~state
+    (evicted_prefix_before_atom ~first_atom messages)
+;;
+
+let evicted_messages_for_drop ~first_atom ~dropped_atoms messages =
+  let labelled, _ = Runtime_model_input_tail_window.annotate messages in
+  List.filter_map
+    (fun (msg, label) ->
+       match label with
+       | Runtime_model_input_tail_window.Atom idx
+         when idx < first_atom || Message_indices.mem idx dropped_atoms ->
+         Some msg
+       | Runtime_model_input_tail_window.Atom _ | Runtime_model_input_tail_window.Pinned ->
+         None)
+    labelled
+;;
+
+(* Select the oldest completed tool-round cycle(s) inside the current turn
+   (atoms >= [first_atom] and not yet in [already_dropped]). Ordinary [User]
+   goals and open tool cycles in [protected_suffix] are never dropped, each
+   [Closed_tool_cycle] is dropped atomically so no [ToolUse]/[ToolResult] pair
+   can be split, and at least one surviving atom is always retained. *)
+let droppable_current_turn_tool_atoms ~first_atom ~already_dropped messages =
+  let already_dropped = Message_indices.of_list already_dropped in
+  let labelled, _ = Runtime_model_input_tail_window.annotate messages in
+  let labels = Array.of_list (List.map snd labelled) in
+  let remaining_atoms =
+    Array.fold_left
+      (fun acc label ->
+         match label with
+         | Runtime_model_input_tail_window.Atom idx
+           when idx >= first_atom && not (Message_indices.mem idx already_dropped) ->
+           Message_indices.add idx acc
+         | Runtime_model_input_tail_window.Atom _
+         | Runtime_model_input_tail_window.Pinned -> acc)
+      Message_indices.empty
+      labels
+  in
+  let remaining_count = Message_indices.cardinal remaining_atoms in
+  if remaining_count <= 1
+  then []
+  else (
+    match Keeper_transcript_unit.partition ~quarantine:true messages with
+    | Error (_ : Keeper_transcript_unit.structural_error) -> []
+    | Ok { Keeper_transcript_unit.closed_prefix; protected_suffix = _ } ->
+      let rec collect_cycles msg_idx acc = function
+        | [] -> List.rev acc
+        | Keeper_transcript_unit.Ordinary_message _ :: rest ->
+          collect_cycles (msg_idx + 1) acc rest
+        | Keeper_transcript_unit.Closed_tool_cycle cycle_msgs :: rest ->
+          let len = List.length cycle_msgs in
+          let cycle_atoms = ref Message_indices.empty in
+          let all_eligible = ref true in
+          for k = 0 to len - 1 do
+            let i = msg_idx + k in
+            if i < Array.length labels
+            then (
+              match labels.(i) with
+              | Runtime_model_input_tail_window.Pinned -> ()
+              | Runtime_model_input_tail_window.Atom idx ->
+                if idx >= first_atom && not (Message_indices.mem idx already_dropped)
+                then cycle_atoms := Message_indices.add idx !cycle_atoms
+                else all_eligible := false)
+          done;
+          let next_acc =
+            if !all_eligible && not (Message_indices.is_empty !cycle_atoms)
+            then !cycle_atoms :: acc
+            else acc
+          in
+          collect_cycles (msg_idx + len) next_acc rest
+      in
+      let eligible_cycles = collect_cycles 0 [] closed_prefix in
+      let cycle_count = List.length eligible_cycles in
+      if cycle_count = 0
+      then []
+      else (
+        let target_cycles = max 1 (cycle_count / 2) in
+        let rec pick picked_cycles picked_atoms = function
+          | [] -> picked_atoms
+          | _ when picked_cycles >= target_cycles -> picked_atoms
+          | cycle :: rest ->
+            let next_atoms = Message_indices.union picked_atoms cycle in
+            if remaining_count - Message_indices.cardinal next_atoms >= 1
+            then pick (picked_cycles + 1) next_atoms rest
+            else picked_atoms
+        in
+        pick 0 Message_indices.empty eligible_cycles |> Message_indices.elements))
+;;
+
 (* The ledger's session: the history the carried positions belong to. The
    turn's trace id on the keeper's own turns; an attempt without one has no
    durable history and shares nothing. *)
@@ -1067,6 +1199,9 @@ let new_attempt_state (ctx : try_provider_ctx) =
           ~session_id:(ledger_session ctx))
   ; current_turn_results = ref Current_turn_verbatim
   ; current_turn_demotion = ref None
+  ; in_turn_demotion = ref No_in_turn_demotion
+  ; dropped_current_turn_atoms = ref Message_indices.empty
+  ; last_composed_bytes = ref None
   ; retained_results =
       (* Read from [ctx.tools], the tools the candidate's agent starts with,
          as [reader_available] is for the model input references. A request
@@ -1417,8 +1552,9 @@ let working_state_message text : Agent_core.Types.message =
    or a turn boundary always carries the newest atom
    ({!Keeper_carried_front.clamp}); an unknown boundary carries that atom
    alone. *)
-let project_range_start
+let project_range_start_with_anchor
       ?compaction_anchor
+      ~has_dropped_current_turn_atoms
       ~working_state
       ~measure_message_bytes
       ~atom_count
@@ -1441,13 +1577,85 @@ let project_range_start
     Runtime_model_input_tail_window.project_from_atom
       ~allow_empty_history ~history_already_announced:true ~measure_message_bytes ~first_atom
       (working_state_message text :: messages)
-  | None, Some anchor when first_atom > 0 ->
+  | None, Some anchor when first_atom > 0 || has_dropped_current_turn_atoms ->
     Runtime_model_input_tail_window.project_from_atom
       ~allow_empty_history ~history_already_announced:true ~measure_message_bytes ~first_atom
       (Keeper_compaction.anchor_to_message anchor :: messages)
   | None, (Some _ | None) ->
     Runtime_model_input_tail_window.project_from_atom
       ~allow_empty_history ~measure_message_bytes ~first_atom messages
+;;
+
+let project_range_start
+      ?compaction_anchor
+      ~working_state
+      ~measure_message_bytes
+      ~atom_count
+      start
+      messages
+  =
+  project_range_start_with_anchor
+    ?compaction_anchor
+    ~has_dropped_current_turn_atoms:false
+    ~working_state
+    ~measure_message_bytes
+    ~atom_count
+    start
+    messages
+;;
+
+let drop_atoms_from_projection
+      ~measure_message_bytes
+      ~dropped_atoms
+      ~source_labelled
+      (projection : Runtime_model_input_tail_window.projection)
+  =
+  if Message_indices.is_empty dropped_atoms
+  then projection, None
+  else (
+    let retained_source_labels =
+      List.filter_map
+        (fun ((_ : Agent_core.Types.message), label) ->
+           match label with
+           | Runtime_model_input_tail_window.Pinned -> Some label
+           | Runtime_model_input_tail_window.Atom idx ->
+             if idx >= projection.Runtime_model_input_tail_window.dropped_atoms
+             then Some label
+             else None)
+        source_labelled
+    in
+    let retained_count = List.length retained_source_labels in
+    let projected_count = List.length projection.messages in
+    let prefix_count = projected_count - retained_count in
+    if prefix_count < 0
+    then projection, None
+    else (
+      let rec split_prefix n acc xs =
+        if n <= 0
+        then List.rev acc, xs
+        else (
+          match xs with
+          | [] -> List.rev acc, []
+          | x :: rest -> split_prefix (n - 1) (x :: acc) rest)
+      in
+      let prefix, tail = split_prefix prefix_count [] projection.messages in
+      let filtered_tail =
+        List.fold_left2
+          (fun acc msg label ->
+             match label with
+             | Runtime_model_input_tail_window.Pinned -> msg :: acc
+             | Runtime_model_input_tail_window.Atom idx ->
+               if Message_indices.mem idx dropped_atoms then acc else msg :: acc)
+          []
+          tail
+          retained_source_labels
+        |> List.rev
+      in
+      let messages = prefix @ filtered_tail in
+      let bytes =
+        List.fold_left (fun sum msg -> sum + measure_message_bytes msg) 0 messages
+      in
+      { projection with messages }, Some bytes))
 ;;
 
 (* Where the results and arguments of turns that ended go as markers. A window
@@ -1466,7 +1674,7 @@ let finished_boundary ~held_window ~start ~atom_count ~turn_boundary completed_a
   | Some _ | None -> finished_turn_atoms ~atom_count turn_boundary, completed_arguments
 ;;
 
-let compose_carried_model_input
+let compose_carried_model_input_internal
       ?continuity
       ?compaction_anchor
       ?completed_arguments
@@ -1475,6 +1683,9 @@ let compose_carried_model_input
       ?(finished_turn_results = Finished_turns_verbatim)
       ?this_turn_start
       ?(same_turn_result_as_pointer = fun (_ : string) -> false)
+      ?(in_turn_demotion = No_in_turn_demotion)
+      ?(dropped_current_turn_atoms = [])
+      ?(auto_bind_closed_arguments = true)
       ~measure_message_bytes
       ~measure_wire_bytes
       ~(front : Keeper_carried_front.seed option)
@@ -1485,7 +1696,8 @@ let compose_carried_model_input
       ~turn_boundary
       messages
   =
-  let _labelled, history_atom_count = Runtime_model_input_tail_window.annotate messages in
+  let source_labelled, history_atom_count = Runtime_model_input_tail_window.annotate messages in
+  let dropped_atoms = Message_indices.of_list dropped_current_turn_atoms in
   (* A front whose index this history does not open with the same message
      names no atom of it: the history is shorter than the front, or a purge
      rewrote the message that opens it. The request starts over as with no front
@@ -1520,23 +1732,54 @@ let compose_carried_model_input
      that ended when the caller asks for them as markers: they change only
      when the window moves ([finished_boundary]). *)
   let planned, demote_before =
-    match current_turn_results with
-    | Current_turn_verbatim ->
-      (match finished_turn_results with
-       | Finished_turns_verbatim -> { Keeper_model_input_demotion.messages; pending = [] }, 0
-       | Finished_turns_as_markers ->
-         let finished, completed_arguments =
-           finished_boundary ~held_window ~start ~atom_count:history_atom_count ~turn_boundary
-             completed_arguments messages
-         in
-         ( demotion_plan ?completed_arguments ~min_result_bytes:aged_result_min_bytes ~measure_message_bytes
-             ~measure_wire_bytes
-             ~base_path ~demote_before:finished messages
-         , applied_demote_before ~base_path ~demote_before:finished ))
-    | Current_turn_demoted { refused_atom_count } ->
-      ( demotion_plan ?completed_arguments ~measure_message_bytes ~measure_wire_bytes ~base_path
-          ~demote_before:refused_atom_count messages
-      , applied_demote_before ~base_path ~demote_before:refused_atom_count )
+    match in_turn_demotion with
+    | Demote_closed_current_turn_tools
+    | Demote_and_preview_closed_current_turn_tools ->
+      let effective_completed_arguments =
+        match completed_arguments with
+        | Some _ -> completed_arguments
+        | None when auto_bind_closed_arguments && not (String.equal base_path "") ->
+          (match Keeper_model_input_demotion.bind_closed_arguments_in_messages messages with
+           | Ok closed_args -> Some closed_args
+           | Error (_ : Keeper_transcript_unit.structural_error) -> None)
+        | None -> None
+      in
+      let blob_planned =
+        demotion_plan ?completed_arguments:effective_completed_arguments
+          ~measure_message_bytes ~measure_wire_bytes ~base_path
+          ~demote_before:history_atom_count messages
+      in
+      let planned =
+        match in_turn_demotion with
+        | Demote_closed_current_turn_tools -> blob_planned
+        | Demote_and_preview_closed_current_turn_tools ->
+          let previewed, _changed =
+            Keeper_model_input_demotion.preview_fallback_closed_tool_bodies
+              ~measure_message_bytes
+              blob_planned.Keeper_model_input_demotion.messages
+          in
+          { blob_planned with messages = previewed }
+        | No_in_turn_demotion -> blob_planned
+      in
+      planned, applied_demote_before ~base_path ~demote_before:history_atom_count
+    | No_in_turn_demotion ->
+      (match current_turn_results with
+       | Current_turn_verbatim ->
+         (match finished_turn_results with
+          | Finished_turns_verbatim -> { Keeper_model_input_demotion.messages; pending = [] }, 0
+          | Finished_turns_as_markers ->
+            let finished, completed_arguments =
+              finished_boundary ~held_window ~start ~atom_count:history_atom_count ~turn_boundary
+                completed_arguments messages
+            in
+            ( demotion_plan ?completed_arguments ~min_result_bytes:aged_result_min_bytes ~measure_message_bytes
+                ~measure_wire_bytes
+                ~base_path ~demote_before:finished messages
+            , applied_demote_before ~base_path ~demote_before:finished ))
+       | Current_turn_demoted { refused_atom_count } ->
+         ( demotion_plan ?completed_arguments ~measure_message_bytes ~measure_wire_bytes ~base_path
+             ~demote_before:refused_atom_count messages
+         , applied_demote_before ~base_path ~demote_before:refused_atom_count ))
   in
   (* A response-observed persisted seed is evidence for the range it names.
      Composition consumes that evidence; it does not reinterpret the prior
@@ -1546,13 +1789,21 @@ let compose_carried_model_input
      the turn boundary ([turn_boundary_resend_sequence]). *)
   let working_state = carried_working_state ~held_window start in
   let projection, transmitted_bytes =
-    project_range_start
+    project_range_start_with_anchor
       ?compaction_anchor
+      ~has_dropped_current_turn_atoms:(not (Message_indices.is_empty dropped_atoms))
       ~working_state
       ~measure_message_bytes
       ~atom_count:history_atom_count
       start
       planned.Keeper_model_input_demotion.messages
+  in
+  let projection, transmitted_bytes =
+    match
+      drop_atoms_from_projection ~measure_message_bytes ~dropped_atoms ~source_labelled projection
+    with
+    | projection, Some bytes -> projection, bytes
+    | projection, None -> projection, transmitted_bytes
   in
   { planned
   ; projection
@@ -1564,6 +1815,50 @@ let compose_carried_model_input
   ; working_state
   ; moved_at_max_context
   }
+;;
+
+let compose_carried_model_input
+      ?continuity
+      ?compaction_anchor
+      ?completed_arguments
+      ?past_max_context
+      ?held_window
+      ?finished_turn_results
+      ?this_turn_start
+      ?same_turn_result_as_pointer
+      ?in_turn_demotion
+      ?dropped_current_turn_atoms
+      ~measure_message_bytes
+      ~measure_wire_bytes
+      ~front
+      ~accepted
+      ~history_digest_at
+      ~current_turn_results
+      ~base_path
+      ~turn_boundary
+      messages
+  =
+  compose_carried_model_input_internal
+    ?continuity
+    ?compaction_anchor
+    ?completed_arguments
+    ?past_max_context
+    ?held_window
+    ?finished_turn_results
+    ?this_turn_start
+    ?same_turn_result_as_pointer
+    ?in_turn_demotion
+    ?dropped_current_turn_atoms
+    ~auto_bind_closed_arguments:true
+    ~measure_message_bytes
+    ~measure_wire_bytes
+    ~front
+    ~accepted
+    ~history_digest_at
+    ~current_turn_results
+    ~base_path
+    ~turn_boundary
+    messages
 ;;
 
 (* Whether demoting the refused request's tool results changes it: the same
@@ -1631,6 +1926,8 @@ let materialize_request_history
       ?finished_turn_results
       ?this_turn_start
       ?same_turn_result_as_pointer
+      ?in_turn_demotion
+      ?dropped_current_turn_atoms
       ~measure_message_bytes
       ~measure_wire_bytes
       ~front
@@ -1644,9 +1941,10 @@ let materialize_request_history
   =
   let composed =
     offload_model_input_cpu (fun () ->
-      compose_carried_model_input
+      compose_carried_model_input_internal
         ?continuity ?compaction_anchor ?completed_arguments ?past_max_context ?held_window ?finished_turn_results
-        ?this_turn_start ?same_turn_result_as_pointer
+        ?this_turn_start ?same_turn_result_as_pointer ?in_turn_demotion ?dropped_current_turn_atoms
+        ~auto_bind_closed_arguments:false
         ~measure_message_bytes
         ~measure_wire_bytes
         ~front
@@ -1694,14 +1992,14 @@ let project_materialized_request
     }
 ;;
 
-module Message_indices = Set.Make (Int)
 module Same_turn_result_tool_names = Set.Make (String)
 
 (* Composition retains pinned messages and the selected atom suffix, and
    adds only prefix carriers (working state, omission preamble). This
    parallel vector follows occurrences, including
    repeated identical records; it never searches by digest or tool ID. *)
-let carried_source_indices ~messages (view : request_view) =
+let carried_source_indices ~dropped_current_turn_atoms ~messages (view : request_view) =
+  let dropped_atoms = Message_indices.of_list dropped_current_turn_atoms in
   let labelled, _ = Runtime_model_input_tail_window.annotate messages in
   let retained =
     List.mapi (fun index ((_ : Agent_core.Types.message), label) -> index, label) labelled
@@ -1709,7 +2007,10 @@ let carried_source_indices ~messages (view : request_view) =
       match label with
         | Runtime_model_input_tail_window.Pinned -> Some (Some index)
         | Runtime_model_input_tail_window.Atom atom ->
-          if atom >= view.composed.projection.dropped_atoms then Some (Some index) else None)
+          if atom >= view.composed.projection.dropped_atoms
+             && not (Message_indices.mem atom dropped_atoms)
+          then Some (Some index)
+          else None)
   in
   let synthetic_count = List.length view.carried - List.length retained in
   if synthetic_count < 0 then None
@@ -1719,13 +2020,30 @@ let carried_source_indices ~messages (view : request_view) =
 let request_view
       ?continuity ?compaction_anchor ?completed_arguments ?past_max_context ?held_window ?finished_turn_results
       ?this_turn_start ?same_turn_result_as_pointer
+      ?(in_turn_demotion = No_in_turn_demotion)
+      ?(dropped_current_turn_atoms = [])
       ?(tools = []) ~provider_config ~measure_message_bytes ~measure_wire_bytes ~front
       ~accepted ~history_digest_at ~current_turn_results ~base_path
       ~turn_boundary ~materialize ~prepare_request_media ~to_wire messages =
   let open Result.Syntax in
+  let completed_arguments =
+    match in_turn_demotion with
+    | No_in_turn_demotion -> completed_arguments
+    | Demote_closed_current_turn_tools
+    | Demote_and_preview_closed_current_turn_tools ->
+      if String.equal base_path ""
+      then completed_arguments
+      else (
+        match offload_model_input_cpu (fun () ->
+          Keeper_model_input_demotion.bind_closed_arguments_in_messages messages)
+        with
+        | Ok closed_args -> Some closed_args
+        | Error (_ : Keeper_transcript_unit.structural_error) -> completed_arguments)
+  in
   let materialized ?(materialize = materialize) completed_arguments =
     materialize_request_history ?continuity ?compaction_anchor ?completed_arguments ?past_max_context
       ?held_window ?finished_turn_results ?this_turn_start ?same_turn_result_as_pointer
+      ~in_turn_demotion ~dropped_current_turn_atoms
       ~measure_message_bytes ~measure_wire_bytes ~front ~accepted
       ~history_digest_at
       ~current_turn_results ~base_path ~turn_boundary ~materialize
@@ -1754,7 +2072,7 @@ let request_view
       match retained with
       | None -> Ok None
       | Some indices ->
-        (match carried_source_indices ~messages view with
+        (match carried_source_indices ~dropped_current_turn_atoms ~messages view with
          | None -> Error ()
          | Some sources ->
            let rec collect result = function
@@ -2054,6 +2372,7 @@ let bounded_model_input_projection
      changes what is sent. *)
   let front_reported = ref false in
   let outlived_reported = ref false in
+  let boundary_anchor_checked = ref false in
   (* The cold-start seed is read once per attempt and only when no ledger
      answers; every response updates the working ledger even without usage. *)
   let cold_seed = lazy (ctx.carried_front_seed ()) in
@@ -2172,6 +2491,8 @@ let bounded_model_input_projection
         ~finished_turn_results
         ?this_turn_start:ctx.this_turn_start
         ~same_turn_result_as_pointer
+        ~in_turn_demotion:!(state.in_turn_demotion)
+        ~dropped_current_turn_atoms:(Message_indices.elements !(state.dropped_current_turn_atoms))
         ~tools:prefix_tools
         ~provider_config
         ~measure_message_bytes
@@ -2229,8 +2550,9 @@ let bounded_model_input_projection
             ~reader_available
             ~trigger:
               (Keeper_compaction.Explicit_hard_limit
-                 { capacity_bytes = Llm_provider.Input_budget.to_int signal.input_limit
-                 ; observed_bytes = signal.next_turn_peak
+                 { capacity_bytes =
+                     compaction_bytes_of_tokens (Llm_provider.Input_budget.to_int signal.input_limit)
+                 ; observed_bytes = compaction_bytes_of_tokens signal.next_turn_peak
                  })
             ~first_atom:moved.first_atom
             ~state
@@ -2249,10 +2571,48 @@ let bounded_model_input_projection
         else Ok view
       | Some _, None | None, (Some _ | None) -> Ok view
     in
+    (* Mixed-size or cold-seed failover before first compaction: when a request
+       with no Librarian working state jumps straight to [From_turn_boundary]
+       and drops older history atoms, commit a compaction anchor covering the
+       evicted prefix once per attempt and re-project so that history is
+       anchored rather than dropped behind a static omission preamble. *)
+    let* view =
+      if !boundary_anchor_checked
+      then Ok view
+      else (
+        match view.composed.origin, view.composed.working_state with
+        | ( (Keeper_carried_front.Turn_start _ | Keeper_carried_front.Turn_start_unknown _)
+          , None )
+          when view.composed.projection.Runtime_model_input_tail_window.dropped_atoms > 0 ->
+          boundary_anchor_checked := true;
+          let first_atom =
+            view.composed.projection.Runtime_model_input_tail_window.dropped_atoms
+          in
+          let anchor_updated =
+            commit_compaction_for_evicted
+              ~base_path:ctx.base_path
+              ~keeper_name:ctx.keeper_name
+              ~reader_available
+              ~trigger:
+                (Keeper_compaction.Provider_context_overflow
+                   { provider_limit_tokens = !(state.last_input_limit) })
+              ~first_atom
+              ~state
+              messages
+          in
+          if anchor_updated then build_view () else Ok view
+        | ( ( Keeper_carried_front.Turn_start _
+            | Keeper_carried_front.Turn_start_unknown _
+            | Keeper_carried_front.Covered _
+            | Keeper_carried_front.Carried _ )
+          , (Some _ | None) ) -> Ok view)
+    in
+    state.last_composed_bytes := Some view.composed.transmitted_bytes;
     (* A failed store can change the actual prefix a newly produced reasoning
        block binds to. Recheck each demoting request and only narrow the frozen
        set, including the first ordinary request after a turn ends. *)
-    argument_binding := Arguments_bound view.completed_arguments;
+    if !(state.in_turn_demotion) = No_in_turn_demotion
+    then argument_binding := Arguments_bound view.completed_arguments;
     let completed_arguments = view.completed_arguments in
     if view.argument_prefix_protected && not !argument_protection_reported then (
       argument_protection_reported := true;
@@ -2860,7 +3220,16 @@ let history_rungs (ctx : try_provider_ctx) ~(state : attempt_state) ~(continuity
    candidate. A carrier that cannot switch gives none and closes the rest,
    as the ladder's [on_projection_failure] closes its rungs, so the turn
    ends with the refusal. *)
-let in_run_narrower ~carrier ~boundary ~demotion ~this_turn ~compose =
+let in_run_narrower
+      ~carrier
+      ~boundary
+      ~demotion
+      ~this_turn
+      ~current_turn_tools_blob
+      ~current_turn_tools_preview
+      ~drop_current_turn_rounds
+      ~compose
+  =
   let closed = ref false in
   let composed () = Result.map Option.some (compose ()) in
   let holding step refusal =
@@ -2870,20 +3239,23 @@ let in_run_narrower ~carrier ~boundary ~demotion ~this_turn ~compose =
   in
   List.map
     (fun candidate refusal -> if !closed then Ok None else candidate refusal)
-    [ (fun refusal ->
-        match carrier refusal with
-        | Ok Keeper_memory_delivery_reprojection.Reprojected -> composed ()
-        | Ok Keeper_memory_delivery_reprojection.Unchanged -> Ok None
-        | Error (_ : string) ->
-          closed := true;
-          Ok None)
-    ; holding boundary
-    ; (fun refusal ->
-        match demotion refusal with
-        | Results_demoted -> composed ()
-        | Nothing_to_demote -> Ok None)
-    ; holding this_turn
-    ]
+    ([ (fun refusal ->
+         match carrier refusal with
+         | Ok Keeper_memory_delivery_reprojection.Reprojected -> composed ()
+         | Ok Keeper_memory_delivery_reprojection.Unchanged -> Ok None
+         | Error (_ : string) ->
+           closed := true;
+           Ok None)
+     ; holding boundary
+     ; (fun refusal ->
+         match demotion refusal with
+         | Results_demoted -> composed ()
+         | Nothing_to_demote -> Ok None)
+     ; holding this_turn
+     ; current_turn_tools_blob
+     ; current_turn_tools_preview
+     ]
+     @ drop_current_turn_rounds)
 ;;
 
 (* #52969: what the attempt can say about its own execution. A failure the
@@ -3303,10 +3675,69 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
        the run. An in-run candidate sends nothing again, so the ladder's
        same-run authority does not gate its steps. *)
     let in_run_authorized () = true in
+    let reader_available = Result.is_ok (Keeper_recovery_transmission.require_reader ctx.tools) in
     let candidates rungs messages request =
       if same_run_retry_allowed ctx.checkpoint_progress
       then Agent_core.Agent.one_request request
       else
+        let rec drop_steps_needed n =
+          if n <= 0 then 0 else 1 + drop_steps_needed (n - max 1 (n / 2))
+        in
+        let drop_exhausted = ref false in
+        let drop_step refusal =
+          if !drop_exhausted || not (is_size_refusal refusal)
+          then Ok None
+          else (
+            let first_atom =
+              match !(state.last_request) with
+              | Some (sent : sent_request) -> sent.request.Keeper_model_input_ledger.first_atom
+              | None -> 0
+            in
+            let to_drop =
+              droppable_current_turn_tool_atoms
+                ~first_atom
+                ~already_dropped:(Message_indices.elements !(state.dropped_current_turn_atoms))
+                messages
+            in
+            match to_drop with
+            | [] ->
+              drop_exhausted := true;
+              Ok None
+            | _ :: _ ->
+              state.dropped_current_turn_atoms :=
+                List.fold_left
+                  (fun acc atom -> Message_indices.add atom acc)
+                  !(state.dropped_current_turn_atoms)
+                  to_drop;
+              let evicted_messages =
+                evicted_messages_for_drop
+                  ~first_atom
+                  ~dropped_atoms:!(state.dropped_current_turn_atoms)
+                  messages
+              in
+              ignore
+                (commit_compaction_for_messages
+                   ~base_path:ctx.base_path
+                   ~keeper_name:ctx.keeper_name
+                   ~reader_available
+                   ~trigger:
+                     (Keeper_compaction.Provider_context_overflow
+                        { provider_limit_tokens = !(state.last_input_limit) })
+                   ~state
+                   evicted_messages
+                 : bool);
+              Log.Keeper.info ~keeper_name:ctx.keeper_name
+                "model input oldest current-turn tool rounds dropped after overflow \
+                 runtime=%s dropped_count=%d total_dropped_current_turn=%d error=%s"
+                ctx.runtime_id
+                (List.length to_drop)
+                (Message_indices.cardinal !(state.dropped_current_turn_atoms))
+                (Agent_core.Error.to_string refusal);
+              Result.map Option.some (compose messages))
+        in
+        let drop_current_turn_rounds =
+          List.init (drop_steps_needed (List.length messages)) (fun _ -> drop_step)
+        in
         { Agent_core.Agent.request
         ; narrower =
             in_run_narrower
@@ -3336,6 +3767,45 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                    ~this_turn_front:rungs.this_turn_front
                    ~held_front:ctx.carried_front_after_refusal ~hold_front:ctx.hold_carried_front
                    ~on_this_turn_start:rungs.on_this_turn_start)
+              ~current_turn_tools_blob:(fun refusal ->
+                if not (is_size_refusal refusal)
+                   || !(state.in_turn_demotion) <> No_in_turn_demotion
+                   || not reader_available
+                   || String.equal ctx.base_path ""
+                then Ok None
+                else (
+                  let before_bytes = !(state.last_composed_bytes) in
+                  state.in_turn_demotion := Demote_closed_current_turn_tools;
+                  match compose messages with
+                  | Error _ as err -> err
+                  | Ok next_request ->
+                    (match before_bytes, !(state.last_composed_bytes) with
+                     | Some before, Some after when after < before ->
+                       Log.Keeper.info ~keeper_name:ctx.keeper_name
+                         "model input closed current-turn tool bodies demoted after overflow \
+                          runtime=%s before_bytes=%d after_bytes=%d error=%s"
+                         ctx.runtime_id before after (Agent_core.Error.to_string refusal);
+                       Ok (Some next_request)
+                     | Some _, Some _ | None, _ | _, None -> Ok None)))
+              ~current_turn_tools_preview:(fun refusal ->
+                if not (is_size_refusal refusal)
+                   || !(state.in_turn_demotion) = Demote_and_preview_closed_current_turn_tools
+                then Ok None
+                else (
+                  let before_bytes = !(state.last_composed_bytes) in
+                  state.in_turn_demotion := Demote_and_preview_closed_current_turn_tools;
+                  match compose messages with
+                  | Error _ as err -> err
+                  | Ok next_request ->
+                    (match before_bytes, !(state.last_composed_bytes) with
+                     | Some before, Some after when after < before ->
+                       Log.Keeper.info ~keeper_name:ctx.keeper_name
+                         "model input closed current-turn tool bodies preview-compacted after \
+                          overflow runtime=%s before_bytes=%d after_bytes=%d error=%s"
+                         ctx.runtime_id before after (Agent_core.Error.to_string refusal);
+                       Ok (Some next_request)
+                     | Some _, Some _ | None, _ | _, None -> Ok None)))
+              ~drop_current_turn_rounds
               ~compose:(fun () -> compose messages)
         }
     in
@@ -4302,6 +4772,13 @@ module For_testing = struct
   let carried_front = carried_front
   let message_measurement_hash = Agent_core.Types.Message_value.hash
   let aged_result_min_bytes = aged_result_min_bytes
+  type nonrec in_turn_overflow_demotion = in_turn_overflow_demotion =
+    | No_in_turn_demotion
+    | Demote_closed_current_turn_tools
+    | Demote_and_preview_closed_current_turn_tools
+
+  let compaction_bytes_of_tokens = compaction_bytes_of_tokens
+  let droppable_current_turn_tool_atoms = droppable_current_turn_tool_atoms
   let compose_carried_model_input = compose_carried_model_input
   let request_view = request_view
   let current_turn_demotion = current_turn_demotion

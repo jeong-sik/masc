@@ -434,6 +434,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
     ?event_capture ?on_child_content_observation ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
     ?on_official_client_usage_report ?on_runtime_attempt
+    ?on_refused_model_input
     ?(system_prompt = "pre-dispatch fixture system prompt")
     ?on_request_attribution ?official_client_continuation ?session_id ?accept ~base_path ~cli_path ~goal () =
   let input_source = Masc.Keeper_request_source.Keeper_history
@@ -487,6 +488,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ~raw_trace
                            ?on_official_client_native_action
                            ?on_official_client_usage_report ?on_runtime_attempt
+                           ?on_refused_model_input
                            ?on_request_attribution
                            ?official_client_continuation
                            ?accept
@@ -7105,6 +7107,113 @@ let test_address_form_names_the_offered_reader () =
       (String_util.contains_substring second "cannot read the receipts"))
 ;;
 
+(* P0-5: Claude Code Resume overflow rollover must fire Restart_fresh even when
+   local checkpoint history has 0 atoms, and commit a Keeper_compaction anchor
+   on rollover whenever evicted history exists. *)
+let test_p0_5_resume_overflow_zero_atoms_and_anchor_commit () =
+  let run_case ~label ~initial_messages ~expect_anchor =
+    let base_path = temp_workspace () in
+    Fun.protect
+      ~finally:(fun () -> cleanup_tree base_path)
+      (fun () ->
+         let turn1 =
+           [ Emit (assistant ~turn_id:"turn-1" "SETTLED_TURN_ONE")
+           ; Emit (result ~turn_id:"turn-1" "SETTLED_TURN_ONE")
+           ]
+         in
+         let turn2_resume_overflow =
+           [ Emit blocking_limit_diagnostic
+           ; Emit blocking_limit_result
+           ]
+         in
+         let turn2_fresh_retry =
+           [ Emit (assistant ~turn_id:"turn-2-fresh" "RECOVERED_FRESH_ROLLOVER")
+           ; Emit (result ~turn_id:"turn-2-fresh" "RECOVERED_FRESH_ROLLOVER")
+           ]
+         in
+         with_fixture_sequence
+           ~later_lines:[ turn2_fresh_retry ]
+           turn1
+           turn2_resume_overflow
+           (fun cli_path ->
+              let attempt1 =
+                run_direct_attempt
+                  ~base_path ~cli_path ~initial_messages ~goal:"TURN_1" ~tools:[] ()
+              in
+              (match attempt1.result with
+               | Ok _ -> ()
+               | Error err -> fail (label ^ " turn 1 failed: " ^ Agent_core.Error.to_string err));
+              let attempt2 =
+                run_direct_attempt
+                  ~base_path ~cli_path ~initial_messages ~goal:"TURN_2_AFTER_RESUME_OVERFLOW" ~tools:[] ()
+              in
+              (match attempt2.result with
+               | Ok run_result ->
+                 check string (label ^ ": rolled-over fresh start succeeded")
+                   "RECOVERED_FRESH_ROLLOVER" (keeper_response_text run_result)
+               | Error err ->
+                 fail (label ^ " turn 2 failed instead of rolling over fresh: "
+                       ^ Agent_core.Error.to_string err));
+              (match attempt2.settled_session with
+               | Some settled ->
+                 check int (label ^ ": fresh rolled-over session settled at turn 1")
+                   1 settled.turn_count
+               | None -> fail (label ^ ": rolled-over turn did not settle a fresh session"));
+              let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+              match Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:"claude-pre-dispatch" with
+              | Ok anchor ->
+                check bool (label ^ ": compaction anchor presence matches evicted history")
+                  expect_anchor (Option.is_some anchor)
+              | Error err -> fail (Keeper_compaction.store_error_to_string err)))
+  in
+  run_case ~label:"zero-atom resume overflow" ~initial_messages:[] ~expect_anchor:false;
+  run_case
+    ~label:"history resume overflow commits anchor"
+    ~initial_messages:
+      [ message User "old user 1"
+      ; message Assistant "old assistant 1"
+      ; message User "old user 2"
+      ; message Assistant "old assistant 2"
+      ]
+    ~expect_anchor:true
+;;
+
+(* P1-3: Official CLI size refusal in Keeper_turn_driver invokes
+   on_refused_model_input when Whole_input_transmitted was observed. *)
+let test_p1_3_official_client_size_refusal_records_refused_model_input () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let refused = ref [] in
+       with_fixture [ Emit blocking_limit_diagnostic; Emit blocking_limit_result ]
+         (fun cli_path ->
+            let res =
+              run_keeper_turn
+                ~base_path
+                ~cli_path
+                ~initial_messages:[ message User "seed-u"; message Assistant "seed-a" ]
+                ~on_refused_model_input:(fun r -> refused := r :: !refused)
+                ~goal:"SIZE_REFUSAL_OBSERVATION"
+                ()
+            in
+            (match res with
+             | Error (Agent_core.Error.Api (Llm_provider.Retry.ContextOverflow _)) -> ()
+             | Error err -> fail ("expected ContextOverflow, got " ^ Agent_core.Error.to_string err)
+             | Ok _ -> fail "blocking_limit fixture unexpectedly succeeded");
+            match !refused with
+            | [ obs ] ->
+              check string "refused observation names official runtime"
+                "claude.claude" obs.Turn_record.runtime_profile;
+              check bool "refused observation records Durable_shape" true
+                (obs.Turn_record.window.measurement = Turn_record.Durable_shape);
+              check bool "refused observation records Model_error_not_retryable" true
+                (obs.Turn_record.refusal = Turn_record.Model_error_not_retryable)
+            | list ->
+              failf "expected exactly 1 refused_model_input observation, got %d"
+                (List.length list)))
+;;
+
 let () =
   (* Pin the prompt directory explicitly. Under dune the registry falls back to
      [DUNE_SOURCEROOT], but a test executable run directly has neither that
@@ -7115,7 +7224,13 @@ let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_claude_code_runtime"
-    [ ( "native effort authority",
+    [ ( "immortal_circulation_f1"
+      , [ test_case "P0-5 resume overflow rolls over fresh with 0 atoms and commits anchor"
+            `Quick test_p0_5_resume_overflow_zero_atoms_and_anchor_commit
+        ; test_case "P1-3 official client size refusal invokes on_refused_model_input"
+            `Quick test_p1_3_official_client_size_refusal_records_refused_model_input
+        ] )
+    ; ( "native effort authority",
         List.map (fun (name, selected, expected_effort, expected_thinking) ->
           test_case name `Quick
             (test_selected_claude_inference_survives_catalog_reload ~http_accepted:[Low]

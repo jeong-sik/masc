@@ -169,6 +169,8 @@ runtime_antigravity.mli	error	Spawn_refused	-	Silent Unavailable	the process did
 runtime_antigravity.mli	error	Spawn_capacity_busy	-	Silent Not_called	masc's own spawn limit was full for the whole wait; the same fact as Seats_full
 runtime_antigravity.mli	error	Protocol_error	-	Silent Lost	the client broke its protocol
 runtime_antigravity.mli	error	State_callback_failed	-	Silent Lost	a host callback failed
+runtime_antigravity.mli	error	Context_window_exceeded	tool_effect_attempted = false and response_emitted = false	Refused (Sized Input_too_large)	the client typed an overflow and nothing was generated
+runtime_antigravity.mli	error	Context_window_exceeded	tool_effect_attempted = true or response_emitted = true	Refused (Sized Window_reached)	generation had started, so the input fit
 runtime_antigravity.mli	error	Turn_failed	-	Silent Lost	a string; not read. The client's quota arrives only as turn text
 runtime_antigravity.mli	error	Result_not_completed	-	Silent Lost	the run ended in a non-completed state; the state is not read
 runtime_antigravity.mli	error	Actions_denied	-	Silent Lost	the run ended on a denied action, not on an answer

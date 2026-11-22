@@ -107,6 +107,7 @@ let antigravity_error_is_binding_rest : Runtime_antigravity.error -> bool = func
   | Runtime_antigravity.Spawn_capacity_busy _
   | Runtime_antigravity.Protocol_error _
   | Runtime_antigravity.State_callback_failed _
+  | Runtime_antigravity.Context_window_exceeded _
   | Runtime_antigravity.Turn_failed _
   | Runtime_antigravity.Result_not_completed _
   | Runtime_antigravity.Actions_denied _
@@ -175,6 +176,7 @@ let codex_error_is_input_size : Runtime_codex_app_server.error -> bool = functio
 ;;
 
 let antigravity_error_is_input_size : Runtime_antigravity.error -> bool = function
+  | Runtime_antigravity.Context_window_exceeded _ -> true
   | Runtime_antigravity.Invalid_config _
   | Runtime_antigravity.Spawn_refused _
   | Runtime_antigravity.Spawn_capacity_busy _

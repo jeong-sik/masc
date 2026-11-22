@@ -3245,13 +3245,30 @@ let test_fleet_official_client_recovery_clears_after_success reason () =
           ~detail:"synthetic fleet recovery" ~required_at:2.
         |> Result.get_ok
       in
-      let claim_error, recovery_id =
-        match Session.plan_claim ~expected:(Some held)
-                ~client_kind:Session.Codex ~runtime_id with
-        | Error (Session.Input_recovery_required recovery as error) ->
-          error, recovery.recovery_id
-        | Error error -> Alcotest.fail (Session.claim_error_to_string error)
-        | Ok _ -> Alcotest.fail "held recovery admitted a new claim"
+      let recovery_id =
+        match held.phase with
+        | Session.Recovery_required required -> required.recovery_id
+        | Session.Ready | Session.Start _ | Session.Active _
+        | Session.Turn_inflight _ | Session.Settled _ ->
+          Alcotest.fail "held recovery did not store Recovery_required phase"
+      in
+      Alcotest.(check bool) "next-turn claim auto-supersedes Input_rejected" true
+        (Result.is_ok
+           (Session.plan_claim ~expected:(Some held)
+              ~client_kind:Session.Codex ~runtime_id));
+      let expected_superseded =
+        match reason with
+        | Session.Effect_fenced -> Session.Superseding_effect_fenced
+        | Session.Bootstrap_floor_exceeded -> Session.Superseding_bootstrap_floor_exceeded
+      in
+      Alcotest.(check bool) "superseded_input_rejection retains typed reason" true
+        (Session.superseded_input_rejection
+           ~expected:(Some held)
+           ~client_kind:Session.Codex
+           ~runtime_id
+         = expected_superseded);
+      let claim_error =
+        Session.Input_recovery_required { runtime_id; recovery_id; reason }
       in
       let error = Session.core_error_of_claim_error claim_error in
       let raw_error = Agent_core.Error.to_string error in

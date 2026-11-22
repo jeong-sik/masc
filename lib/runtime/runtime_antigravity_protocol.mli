@@ -91,6 +91,11 @@ type error =
       ; detail : string
       }
   | State_callback_failed of string
+  | Context_window_exceeded of
+      { message : string
+      ; tool_effect_attempted : bool
+      ; response_emitted : bool
+      }
   | Turn_failed of string
   | Result_not_completed of noncompletion_result
   | Actions_denied of denied_result
@@ -130,6 +135,7 @@ type wire_event =
       ; status : result_status
       ; response : string
       ; error : string option
+      ; error_code : string option
       ; num_turns : int
       ; usage : usage
       ; denied : denied_actions option
@@ -164,17 +170,28 @@ type terminal = private {
   status : result_status;
   response : string;
   error : string option;
+  error_code : string option;
   num_turns : int;
   usage : usage;
   denied : denied_actions option;
   tool_steps : int;
   tool_errors : int;
+  text_streamed : bool;
 }
 
 type state
 val initial : state
 val terminal : state -> terminal option
 val read_phase : state -> read_phase
+val activity_observed : state -> bool * bool
+(** [(tool_effect_attempted, response_emitted)] observed in [state] so far. *)
+
+val is_structured_context_overflow :
+  error_code:string option -> detail:string -> stderr:string -> bool
+(** Structured machine-readable overflow detection from an explicit protocol
+    [error_code] or a JSON error envelope inside [detail] / [stderr] via
+    {!Llm_provider.Retry.classify_structured_refusal}. Never inspects free-form
+    prose messages. *)
 (** Derive the existing idle-read policy from the last accepted step. An
     identical closed-response replay preserves the original state and phase.
     The driver stops reading once [terminal] is present. *)

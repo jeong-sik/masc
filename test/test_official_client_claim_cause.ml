@@ -18,13 +18,9 @@ let write_file path contents =
   Fun.protect ~finally:(fun () -> close_out_noerr channel)
     (fun () -> output_string channel contents)
 
-let read_file path =
-  let channel = open_in_bin path in
-  Fun.protect ~finally:(fun () -> close_in_noerr channel)
-    (fun () -> really_input_string channel (in_channel_length channel))
-
 let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
-  let transmitted _ = Alcotest.fail "claim rejection transmitted model input" in
+  let transmitted_count = ref 0 in
+  let transmitted _ = incr transmitted_count in
   match client_kind with
   | S.Codex ->
     let config : Runtime_execution.codex_app_server =
@@ -151,7 +147,14 @@ let check_preserved ~base_path ~keeper_name ~expected error =
        "local claim refusal happened before a provider response"
        false
        (Route.response_observed route)
-   | _ -> Alcotest.fail "local refusal must not rotate, retry or claim a remote effect");
+   | _ -> Alcotest.fail "last-candidate local refusal must surface Session_claim_refused");
+  (match
+     Route.route_of_error ~has_backup_candidates:true ~boundary:Route.Masc_execution error
+   with
+   | Route.Rotate_now { rotate = Route.Admission } -> ()
+   | _ ->
+     Alcotest.fail
+       "local recovery refusal with backup lane candidates must rotate immediately");
   let reason = Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
       ~core_error:error terminal ~raw_error ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate in
   Alcotest.(check bool) "registry receives same typed payload" true
@@ -210,6 +213,7 @@ let check_case client_kind label reason () =
   let base_path = Filename.temp_dir "official-claim-cause-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
     let keeper_name = "claim-probe-" ^ label in
+    Masc_test_deps.declare_fixture_keeper ~base_path ~sandbox_profile:None keeper_name;
     let runtime_id = "claim-probe." ^ label in
     let marker = Filename.concat base_path "unexpected-cli-invocation" in
     let cli_path = Filename.concat base_path "never-run-client.sh" in
@@ -226,8 +230,31 @@ let check_case client_kind label reason () =
     let before = read_recovery ~base_path ~keeper_name in
     Alcotest.(check bool) "store preserves typed rejection" true
       (before.failure = S.Input_rejected reason);
-    let path = S.path ~base_path ~keeper_name |> ok in
-    let bytes_before = read_file path in
+    let expected_recovery : I.official_client_recovery =
+      { runtime_id; recovery_id = before.recovery_id; reason }
+    in
+    let typed_claim_error =
+      S.core_error_of_claim_error (S.Input_recovery_required expected_recovery)
+    in
+    check_preserved ~base_path ~keeper_name ~expected:expected_recovery typed_claim_error;
+    let stored =
+      match S.load ~base_path ~keeper_name |> Result.map_error S.read_error_to_string |> ok with
+      | Some stored -> stored
+      | None -> Alcotest.fail "stored recovery disappeared"
+    in
+    let expected_superseded =
+      match reason with
+      | S.Effect_fenced -> S.Superseding_effect_fenced
+      | S.Bootstrap_floor_exceeded -> S.Superseding_bootstrap_floor_exceeded
+    in
+    Alcotest.(check bool) "superseded_input_rejection detects Input_rejected" true
+      (S.superseded_input_rejection ~expected:(Some stored) ~client_kind ~runtime_id
+       = expected_superseded);
+    (match S.plan_claim ~expected:(Some stored) ~client_kind ~runtime_id with
+     | Ok plan ->
+       Alcotest.(check int) "auto-superseded claim opens at turn 1" 1 plan.turn_count
+     | Error err ->
+       Alcotest.fail ("next-turn claim did not auto-supersede Input_rejected: " ^ S.claim_error_to_string err));
     Eio_main.run (fun env ->
       Eio.Switch.run (fun sw ->
         Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
@@ -235,27 +262,25 @@ let check_case client_kind label reason () =
           (fun () ->
             (* Inside the scope so with_test_env restores the old env too. *)
             Eio_context.set_env env;
-            let result, settled, observed_effect =
+            let result, settled, _observed_effect =
               run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path in
-            Alcotest.(check bool) "no client process spawned" false (Sys.file_exists marker);
-            Alcotest.(check bool) "no settlement" true (Option.is_none settled);
-            Alcotest.(check bool) "no effect" true
-              (observed_effect = Keeper_provider_attempt_effect.No_effect_observed);
+            Alcotest.(check bool) "synthetic failing CLI never settles" true (Option.is_none settled);
             let error = match result with
               | Error error -> error
-              | Ok _ -> Alcotest.fail "claim rejection unexpectedly succeeded" in
-            let expected : I.official_client_recovery =
-              { runtime_id; recovery_id = before.recovery_id; reason } in
-            check_preserved ~base_path ~keeper_name ~expected error;
+              | Ok _ -> Alcotest.fail "synthetic exit-97 CLI unexpectedly succeeded" in
+            Alcotest.(check bool)
+              "next-turn adapter run auto-supersedes instead of re-emitting Input_recovery_required"
+              true
+              (I.classify_masc_internal_error error
+               <> Some (I.Official_client_recovery_required expected_recovery));
+            (match client_kind with
+             | S.Codex | S.Claude_code | S.Acp ->
+               Alcotest.(check bool) "auto-superseded adapter launched fresh client process" true
+                 (Sys.file_exists marker)
+             | S.Antigravity -> ());
             Printf.printf "%s/%s => %s\n%!" label
               (S.recovery_failure_to_string (S.Input_rejected reason))
-              (Agent_core.Error.to_string error))));
-    let after = read_recovery ~base_path ~keeper_name in
-    Alcotest.(check string) "durable recovery id preserved" before.recovery_id after.recovery_id;
-    Alcotest.(check bool) "durable typed rejection preserved" true
-      (after.failure = S.Input_rejected reason);
-    Alcotest.(check string) "claim rejection leaves session bytes untouched"
-      bytes_before (read_file path))
+              (Agent_core.Error.to_string error)))))
 
 let check_codec () =
   let cause = I.Official_client_recovery_required
@@ -423,6 +448,7 @@ let check_remote_fence () =
   | _ -> Alcotest.fail "remote attempt fence was conflated with local claim refusal"
 
 let () =
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   Alcotest.run "official-client claim cause"
     [ "typed contract", [ Alcotest.test_case "strict codec" `Quick check_codec
                         ; Alcotest.test_case "remote fence stays distinct" `Quick check_remote_fence

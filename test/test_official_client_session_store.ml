@@ -1419,19 +1419,32 @@ let test_input_rejected_recovery_is_not_auto_superseded () =
       | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
         fail "input rejection did not enter recovery"
     in
-    (* Same runtime: the heartbeat replay path must retain its typed cause. *)
+    (* Same runtime: next turn auto-supersedes Input_rejected Effect_fenced into
+       a fresh start (no same-turn duplicate-effect hazard) while the typed
+       recovery payload remains preserved for callers and failure routing. *)
+    check bool "superseded_input_rejection identifies Effect_fenced" true
+      (superseded_input_rejection
+         ~expected:(Some recovery)
+         ~client_kind:Claude_code
+         ~runtime_id:"claude_code.claude-sonnet-5"
+       = Superseding_effect_fenced);
     (match plan_claim ~expected:(Some recovery) ~client_kind:Claude_code ~runtime_id:"claude_code.claude-sonnet-5" with
-     | Error (Input_recovery_required payload as error) ->
-       check string "typed refusal retains runtime" recovery.runtime_id payload.runtime_id;
-       check string "typed refusal retains recovery ID" recovery_id payload.recovery_id;
-       check bool "typed refusal retains effect fence" true (payload.reason = Effect_fenced);
-       (match Keeper_internal_error.classify_masc_internal_error
-                (core_error_of_claim_error error) with
-        | Some (Keeper_internal_error.Official_client_recovery_required carried) ->
-          check bool "core carrier preserves exact recovery payload" true (carried = payload)
-        | _ -> fail "input refusal became a generic core error")
-     | Error error -> fail (claim_error_to_string error)
-     | Ok _ -> fail "same-runtime claim auto-superseded an input rejection");
+     | Ok plan ->
+       check int "auto-superseded claim opens at ordinal one" 1 plan.turn_count;
+       check bool "auto-superseded claim drops prior settlement" true
+         (Option.is_none plan.previous_settlement);
+       check bool "auto-superseded claim drops prior tool surface pin" true
+         (Option.is_none plan.required_tool_surface_sha256)
+     | Error error ->
+       fail ("same-runtime claim refused auto-supersede on next turn: " ^ claim_error_to_string error));
+    let payload : Keeper_internal_error.official_client_recovery =
+      { runtime_id = recovery.runtime_id; recovery_id; reason = Effect_fenced }
+    in
+    (match Keeper_internal_error.classify_masc_internal_error
+             (core_error_of_claim_error (Input_recovery_required payload)) with
+     | Some (Keeper_internal_error.Official_client_recovery_required carried) ->
+       check bool "core carrier preserves exact recovery payload" true (carried = payload)
+     | _ -> fail "input refusal became a generic core error");
     (* A different runtime is an operator-driven change and still starts fresh. *)
     (match
        plan_claim
@@ -1560,13 +1573,24 @@ let test_input_rejection_codec_keeps_exact_wire_domain () =
     List.iter (fun reason ->
         write_failure (recovery_failure_to_string (Input_rejected reason));
         let loaded = load ~base_path ~keeper_name |> Result.get_ok in
+        (match loaded with
+         | Some { runtime_id = stored_runtime; phase = Recovery_required required; _ } ->
+           check string "wire retains runtime" runtime_id stored_runtime;
+           check string "wire retains recovery ID" recovery_id required.recovery_id;
+           check bool "wire retains typed reason" true (required.failure = Input_rejected reason)
+         | _ -> fail "loaded input rejection lost Recovery_required phase");
+        let expected_superseded =
+          match reason with
+          | Effect_fenced -> Superseding_effect_fenced
+          | Bootstrap_floor_exceeded -> Superseding_bootstrap_floor_exceeded
+        in
+        check bool "superseded_input_rejection preserves typed reason" true
+          (superseded_input_rejection ~expected:loaded ~client_kind:Codex ~runtime_id
+           = expected_superseded);
         match plan_claim ~expected:loaded ~client_kind:Codex ~runtime_id with
-        | Error (Input_recovery_required payload) ->
-          check string "wire retains runtime" runtime_id payload.runtime_id;
-          check string "wire retains recovery ID" recovery_id payload.recovery_id;
-          check bool "wire retains typed reason" true (payload.reason = reason)
-        | Error error -> fail (claim_error_to_string error)
-        | Ok _ -> fail "loaded input rejection was auto-superseded")
+        | Ok plan ->
+          check int "loaded input rejection auto-supersedes to ordinal one" 1 plan.turn_count
+        | Error error -> fail (claim_error_to_string error))
       [Bootstrap_floor_exceeded; Effect_fenced];
     List.iter (fun wire ->
         write_failure wire;

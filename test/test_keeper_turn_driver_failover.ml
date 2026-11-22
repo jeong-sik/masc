@@ -6951,6 +6951,68 @@ let test_attempt_loop_input_capacity_advances_to_measurable_candidate () =
 (* A typed ContextOverflow is a per-candidate capacity bound: a later lane
    candidate with a larger context window can still serve the same turn, so
    the walk must continue instead of treating the 400 mapping as terminal. *)
+(* P0-4: per-candidate Official_client_recovery_required rotates to backup
+   candidates in the lane, and stays terminal only on the last candidate. *)
+let test_attempt_loop_official_client_recovery_rotates_to_backup () =
+  let recovery_err runtime_id =
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Official_client_recovery_required
+         { runtime_id
+         ; recovery_id = "rec-lane-failover"
+         ; reason = Keeper_internal_error.Effect_fenced
+         })
+  in
+  let attempts = ref [] in
+  let events = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~walk_owner:(Driver.Fleet_keeper_turn test_fleet_turn)
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(emit_manifest_collector events)
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [ runtime_id ];
+        match candidate with
+        | "official.fenced" ->
+          attempt_without_effect (Error (recovery_err runtime_id)) None
+        | "backup.healthy" -> attempt_without_effect (Ok runtime_id) None
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "official.fenced"; "backup.healthy" ]
+  in
+  (match result with
+   | Ok runtime_id ->
+     Alcotest.(check string) "backup candidate serves the turn" "backup.healthy" runtime_id
+   | Error e ->
+     Alcotest.failf "expected backup failover success, got %s" (Agent_core.Error.to_string e));
+  Alcotest.(check (list string))
+    "official-client recovery rotated to backup candidate"
+    [ "official.fenced"; "backup.healthy" ]
+    !attempts;
+  (* When no backup candidates remain, Official_client_recovery_required stays preserved. *)
+  let last_attempts = ref [] in
+  let last_result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~walk_owner:(Driver.Fleet_keeper_turn test_fleet_turn)
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(emit_manifest_collector (ref []))
+      ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
+        last_attempts := !last_attempts @ [ runtime_id ];
+        attempt_without_effect (Error (recovery_err runtime_id)) None)
+      [ "official.only" ]
+  in
+  (match last_result with
+   | Ok _ -> Alcotest.fail "last-candidate recovery refusal unexpectedly succeeded"
+   | Error err ->
+     (match Keeper_internal_error.classify_masc_internal_error err with
+      | Some (Keeper_internal_error.Official_client_recovery_required { runtime_id; _ }) ->
+        Alcotest.(check string) "last-candidate recovery identity preserved"
+          "official.only" runtime_id
+      | _ ->
+        Alcotest.failf "expected Official_client_recovery_required, got %s"
+          (Agent_core.Error.to_string err)));
+  Alcotest.(check (list string)) "single candidate attempted once" [ "official.only" ] !last_attempts
+
 let test_attempt_loop_overflow_tries_next_candidate () =
   let attempts = ref [] in
   let events = ref [] in
@@ -8865,6 +8927,10 @@ let () =
             "attempt loop preserves last Agent Core error"
             `Quick
             test_attempt_loop_preserves_last_core_error;
+          Alcotest.test_case
+            "P0-4 official-client recovery refusal rotates to backup lane candidate"
+            `Quick
+            test_attempt_loop_official_client_recovery_rotates_to_backup;
           Alcotest.test_case
             "context overflow tries next lane candidate"
             `Quick

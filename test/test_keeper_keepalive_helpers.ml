@@ -1617,8 +1617,14 @@ let test_path_rest_follows_the_answer_not_the_cadence () =
     (rest ~retry_class:rate_limited ~retry_after_hint:(Some (-5.0)));
   check (float 0.5) "a NaN hint is unstated" floor_sec
     (rest ~retry_class:rate_limited ~retry_after_hint:(Some nan));
-  check (float 0.001) "a stated reset outlives the fallback cap" 120000.0
+  check (float 0.001) "a stated reset outlives the fallback cap" 43200.0
+    (rest ~retry_class:rate_limited ~retry_after_hint:(Some 43200.0));
+  check (float 0.001) "a stated reset above the ceiling clamps to max_retry_after_s"
+    Keeper_runtime_failure_route.max_retry_after_s
     (rest ~retry_class:rate_limited ~retry_after_hint:(Some 120000.0));
+  check (float 0.001) "a Unix-epoch retry-after clamps to max_retry_after_s"
+    Keeper_runtime_failure_route.max_retry_after_s
+    (rest ~retry_class:rate_limited ~retry_after_hint:(Some 1_760_000_000.0));
   check (float 0.001) "a hard quota reset outlives the fallback cap" 4470.0
     (rest ~retry_class:hard_quota ~retry_after_hint:(Some 4470.0));
   check (float 0.001) "an infinite hint is unstated" floor_sec

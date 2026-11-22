@@ -196,6 +196,10 @@ let claude (error : Runtime_claude_code.error) : 'rejection Outcome.unanswered =
 
 let antigravity (error : Runtime_antigravity.error) : 'rejection Outcome.unanswered =
   match error with
+  | Context_window_exceeded { tool_effect_attempted; response_emitted; _ } ->
+    (match tool_effect_attempted, response_emitted with
+     | false, false -> Refused (Sized Input_too_large)
+     | true, false | false, true | true, true -> Refused (Sized Window_reached))
   | Spawn_capacity_busy _ -> Silent Not_called
   | Invalid_config _ | Spawn_refused _ | Child_fd_ceiling_exceeded _ -> Silent Unavailable
   | Protocol_error _ | State_callback_failed _ | Turn_failed _ | Result_not_completed _

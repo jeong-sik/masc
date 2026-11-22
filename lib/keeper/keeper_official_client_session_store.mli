@@ -426,6 +426,23 @@ val core_error_of_claim_error : claim_error -> Agent_core.Error.t
 (** Preserve an operator-held input rejection as a typed MASC recovery cause.
     Other claim refusals retain the official-client claim configuration error. *)
 
+type superseded_input_rejection =
+  | Not_superseding_input_rejection
+  | Superseding_effect_fenced
+  | Superseding_bootstrap_floor_exceeded
+(** Whether a fresh {!plan_claim} on [(client_kind, runtime_id)] is
+    auto-superseding a prior same-identity [Input_rejected] recovery on the
+    next turn. [Superseding_effect_fenced] starts a fresh vendor session after
+    the prior turn's effect fence prevented same-turn retry;
+    [Superseding_bootstrap_floor_exceeded] rolls over into a minimal
+    anchor-only fresh start instead of permanently bricking the binding. *)
+
+val superseded_input_rejection :
+  expected:t option ->
+  client_kind:client_kind ->
+  runtime_id:string ->
+  superseded_input_rejection
+
 val plan_claim :
   expected:t option ->
   client_kind:client_kind ->
@@ -433,7 +450,9 @@ val plan_claim :
   (claim_plan, claim_error) result
 (** Pure claim planning shared by every official-client adapter. The plan is
     the SSOT for fresh versus resumed execution, the next turn ordinal, and
-    whether the prepared tool surface must match a settled session. *)
+    whether the prepared tool surface must match a settled session. A prior
+    same-identity [Input_rejected] recovery auto-supersedes on the next turn
+    into a fresh session (see {!superseded_input_rejection}). *)
 
 val reconcile_tool_surface : claim_plan -> tool_surface_sha256:string -> claim_plan
 (** Fold a moved tool surface into the plan. A settled session whose stored

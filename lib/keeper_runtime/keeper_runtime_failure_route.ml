@@ -155,8 +155,22 @@ let core_error_is_model_absent : Agent_core.Error.t -> bool = function
     false
 ;;
 
+(* Declarative 24-hour ceiling on any provider-supplied Retry-After wait so a
+   misparsed Unix-epoch timestamp or runaway header cannot park a Keeper
+   indefinitely. *)
+let max_retry_after_s = 86_400.0
+
+(* A provider's retry hint that names a wait: present, finite, above zero,
+   clamped to [max_retry_after_s]. *)
+let usable_retry_after = function
+  | None -> None
+  | Some hint when Float.is_finite hint && hint > 0.0 ->
+    Some (Float.min hint max_retry_after_s)
+  | Some _ -> None
+;;
+
 let observe_retry ?retry_after retry_class =
-  Retry_after_observed { retry_class; retry_after }
+  Retry_after_observed { retry_class; retry_after = usable_retry_after retry_after }
 
 let rotate rotate_class = Rotate_now { rotate = rotate_class }
 
@@ -168,7 +182,8 @@ let empty_max_tokens_accept_rejection ~reason_kind ~response_shape ~stop_reason 
   && stop_reason = Some Llm_provider.Types.MaxTokens
 ;;
 
-let route_of_masc_internal (internal : Keeper_internal_error.masc_internal_error) =
+let route_of_masc_internal ~has_backup_candidates
+      (internal : Keeper_internal_error.masc_internal_error) =
   match internal with
   | Keeper_internal_error.Resumable_cli_session _ -> rotate Resumable_cli_session
   | Keeper_internal_error.Runtime_exhausted { reason; _ } ->
@@ -209,10 +224,14 @@ let route_of_masc_internal (internal : Keeper_internal_error.masc_internal_error
      the same. *)
   | Keeper_internal_error.Runtime_connection_closed _ ->
     observe_retry Server_error
-  (* A local claim refuses the durable session before a provider attempt.
-     Keep the turn exhausted without implying a response or attempted effect. *)
+  (* A local claim refuses this candidate's durable session before a provider
+     attempt. When backup candidates exist in the lane, rotate past this
+     candidate as [Admission]; only fall back to [Session_claim_refused] when
+     no other lane candidates remain. *)
   | Keeper_internal_error.Official_client_recovery_required _ ->
-    exhaust Session_claim_refused
+    if has_backup_candidates
+    then rotate Admission
+    else exhaust Session_claim_refused
   (* The admission check refuses the history before provider dispatch
      ([Keeper_agent_run.provider_transcript_admission]): no request carried
      the turn's input. *)
@@ -473,7 +492,7 @@ let route_of_error_family (err : Agent_core.Error.t) : route =
               | None -> exhaust Internal_opaque))))
 ;;
 
-let route_of_error ~boundary (err : Agent_core.Error.t) : route =
+let route_of_error ?(has_backup_candidates = false) ~boundary (err : Agent_core.Error.t) : route =
   match Keeper_internal_error.classify_masc_internal_error err with
   (* These decide their own route whichever boundary reported them.
      [Terminal_effect_failed] because the effect is the fact.
@@ -489,8 +508,9 @@ let route_of_error ~boundary (err : Agent_core.Error.t) : route =
       (( Keeper_internal_error.Terminal_effect_failed _
        | Keeper_internal_error.Provider_attempt_effect_fenced _
        | Keeper_internal_error.Tool_correction_lost _
-       | Keeper_internal_error.Runtime_connection_closed _ ) as internal) ->
-    route_of_masc_internal internal
+       | Keeper_internal_error.Runtime_connection_closed _
+       | Keeper_internal_error.Official_client_recovery_required _ ) as internal) ->
+    route_of_masc_internal ~has_backup_candidates internal
   (* The provider walk reads its result at the AGENT_CORE boundary, after
      MASC's accept gate may have rejected the SDK-preserved empty truncation.
      That exact typed outcome carries the same provider observation at either
@@ -500,10 +520,9 @@ let route_of_error ~boundary (err : Agent_core.Error.t) : route =
          { reason_kind; response_shape; stop_reason; _ } as internal)
     when empty_max_tokens_accept_rejection ~reason_kind ~response_shape ~stop_reason
          && Option.is_some (Keeper_internal_error.carried_masc_internal_error err) ->
-    route_of_masc_internal internal
+    route_of_masc_internal ~has_backup_candidates internal
   | Some
-      (( Keeper_internal_error.Official_client_recovery_required _
-       | Keeper_internal_error.Runtime_exhausted _
+      (( Keeper_internal_error.Runtime_exhausted _
        | Keeper_internal_error.Resumable_cli_session _
        | Keeper_internal_error.Accept_rejected _
        | Keeper_internal_error.Internal_unhandled_exception _
@@ -514,16 +533,9 @@ let route_of_error ~boundary (err : Agent_core.Error.t) : route =
        | Keeper_internal_error.Receipt_persistence_failed _
        | Keeper_internal_error.Gate_replay_repair_required _ ) as internal) ->
     (match boundary with
-     | Masc_execution -> route_of_masc_internal internal
+     | Masc_execution -> route_of_masc_internal ~has_backup_candidates internal
      | Agent_core_execution -> route_of_error_family err)
   | None -> route_of_error_family err
-
-(* A provider's retry hint that names a wait: present, finite, above zero. *)
-let usable_retry_after = function
-  | None -> None
-  | Some hint when Float.is_finite hint && hint > 0.0 -> Some hint
-  | Some _ -> None
-;;
 
 (* How long a path rests after a provider refused it (RFC-provider-path-rest).
    The rest belongs to the path that received the answer, so its length comes

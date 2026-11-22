@@ -654,6 +654,10 @@ val context_overflow_shrink_sequence :
     reserve does not shrink with the capacity, so a smaller window refuses
     for the same reason, one size lower. *)
 
+val is_size_refusal : Agent_core.Error.t -> bool
+(** Whether [error] is a typed provider size refusal ([ContextOverflow] or
+    [Request_body_refused_by_provider]). *)
+
 val boundary_resend_on : Agent_core.Error.t -> bool
 (** The refusals {!turn_boundary_resend_sequence} answers: a typed size
     refusal ([ContextOverflow], [Request_body_refused_by_provider]) and a
@@ -1006,6 +1010,19 @@ module For_testing : sig
       arguments follow the turn boundary and the working state is the
       snapshot's. *)
 
+  type in_turn_overflow_demotion =
+    | No_in_turn_demotion
+    | Demote_closed_current_turn_tools
+    | Demote_and_preview_closed_current_turn_tools
+
+  val compaction_bytes_of_tokens : int -> int
+
+  val droppable_current_turn_tool_atoms :
+    first_atom:int ->
+    already_dropped:int list ->
+    Agent_core.Types.message list ->
+    int list
+
   val compose_carried_model_input :
     ?continuity:continuity ->
     ?compaction_anchor:Keeper_compaction.compaction_anchor ->
@@ -1015,6 +1032,8 @@ module For_testing : sig
     ?finished_turn_results:finished_turn_results ->
     ?this_turn_start:int ->
     ?same_turn_result_as_pointer:(string -> bool) ->
+    ?in_turn_demotion:in_turn_overflow_demotion ->
+    ?dropped_current_turn_atoms:int list ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->
     measure_wire_bytes:(Agent_core.Types.message -> int option) ->
     front:Keeper_carried_front.seed option ->
@@ -1035,6 +1054,8 @@ module For_testing : sig
     ?finished_turn_results:finished_turn_results ->
     ?this_turn_start:int ->
     ?same_turn_result_as_pointer:(string -> bool) ->
+    ?in_turn_demotion:in_turn_overflow_demotion ->
+    ?dropped_current_turn_atoms:int list ->
     ?tools:Yojson.Safe.t list ->
     provider_config:Agent_core.Llm_provider.Provider_config.t ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->

@@ -49,6 +49,17 @@ module For_testing : sig
   (** [capacity_bytes] of a turn's first attempt, before a typed overflow
       narrows it. *)
 
+  val observe_resume_shrink_capacity
+    :  input_source:Keeper_request_source.t
+    -> capacity_bytes:int
+    -> turn_start:Keeper_carried_front.turn_start
+    -> keeper_name:string
+    -> runtime_id:string
+    -> Agent_core.Types.message list
+    -> (int option * int option, Agent_core.Error.t) result
+  (** Run the projection under [Runtime_claude_code.Resume] and return
+      [(observed_next_shrink_capacity_bytes, observed_floor_capacity_bytes)]. *)
+
   val recovery_failure_of_client_error
     :  Runtime_claude_code.error
     -> Keeper_official_client_session_store.recovery_failure

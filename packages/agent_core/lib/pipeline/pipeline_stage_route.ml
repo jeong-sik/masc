@@ -260,28 +260,87 @@ let before_completion agent serialized result =
   | Some _ -> Llm_provider.Completion_outcome.before_serialization result
 ;;
 
+(* Pre-generation HTTP size refusals eligible for in-run request narrowing.
+   Only typed context-overflow and provider body-size refusals qualify; every
+   other API, provider, config, or internal error answers immediately. *)
+let is_pre_generation_size_refusal = function
+  | Error.Api (Llm_provider.Retry.ContextOverflow _)
+  | Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         { reason = Llm_provider.Retry.Request_body_refused_by_provider _; _ }) -> true
+  | Error.Api
+      ( Llm_provider.Retry.InvalidRequest
+          { reason =
+              ( Llm_provider.Retry.Json_parse_error
+              | Llm_provider.Retry.Attempt_rejected
+              | Llm_provider.Retry.Refusal_body_not_received
+              | Llm_provider.Retry.Unknown_invalid_request
+              | Llm_provider.Retry.Unclassified_status _ )
+          ; _
+          }
+      | Llm_provider.Retry.InputCapacity _
+      | Llm_provider.Retry.RateLimited _
+      | Llm_provider.Retry.Overloaded _
+      | Llm_provider.Retry.ServerError _
+      | Llm_provider.Retry.AuthError _
+      | Llm_provider.Retry.AuthorizationError _
+      | Llm_provider.Retry.PaymentRequired _
+      | Llm_provider.Retry.NotFound _
+      | Llm_provider.Retry.NetworkError _
+      | Llm_provider.Retry.Connect_failed _
+      | Llm_provider.Retry.Timeout _ )
+  | Error.Provider _
+  | Error.Agent _
+  | Error.Mcp _
+  | Error.Config _
+  | Error.Serialization _
+  | Error.Io _
+  | Error.Orchestration _
+  | Error.Media _
+  | Error.Internal _
+  | Error.Internal_carried _ -> false
+;;
+
+let serialized_body_equal left right =
+  let prov s = (Llm_provider.Complete.serialized_outcome s ()).request_provenance in
+  Llm_provider.Completion_outcome.equal_request_provenance (prov left) (prov right)
+;;
+
 (* Where a request stands among the turn's requests. The first opens the
    provider attempt and the caller's windows. A narrower one is compared in
-   that attempt, spends from the windows the first one opened, and carries
-   the refusal before it with that refusal's body. *)
+   that attempt, spends from the windows the first one opened (when exact-fit
+   opened them), and carries the refusal before it with that refusal's body
+   and provenance outcome. *)
 type 'window position =
   | First
   | Narrower of
-      { window : 'window
-      ; refusal : Provider_failure_attribution.detailed_error
+      { window : 'window option
       ; refused : Llm_provider.Complete.serialized_request
+      ; refusal_outcome :
+          ( Llm_provider.Types.api_response
+            , Provider_failure_attribution.detailed_error )
+            result
+            Llm_provider.Completion_outcome.t
       }
 
 (* What one request's way to the provider ended with. [Does_not_fit] is a
-   request [admit_request] refused as larger than the input limit before it
-   was sent: nothing left, and [window] is what its measurement left of the
-   caller's windows. Every other ending answers the route. *)
+   request refused as larger than the input limit before any output or effect
+   was produced -- either locally by [admit_request] or by a pre-generation
+   HTTP [ContextOverflow] / [Request_body_refused_by_provider] refusal.
+   [window] carries what an earlier exact-fit measurement left of the caller's
+   windows, or [None] on the body-only path. Every other ending answers the
+   route. *)
 type ('answer, 'window) request_ending =
   | Answered of 'answer
   | Does_not_fit of
       { refusal : Provider_failure_attribution.detailed_error
       ; serialized : Llm_provider.Complete.serialized_request
-      ; window : 'window
+      ; refusal_outcome :
+          ( Llm_provider.Types.api_response
+            , Provider_failure_attribution.detailed_error )
+            result
+            Llm_provider.Completion_outcome.t
+      ; window : 'window option
       }
 
 (* A narrower request is asked only after the request before it ended as
@@ -298,12 +357,13 @@ let rec next_narrower refusal = function
 ;;
 
 (* The turn's requests, compared front to back in the one provider attempt
-   the first opened; the route sends at most one of them. The answer pairs a
-   response with the request that was sent. When the narrower requests run
-   out the last refusal is the answer, and a step that fails answers with its
-   own error, which no provider made; both keep the refused body as the
-   outcome's provenance. A narrower request that fails before it is sent
-   answers with the refusal before it ([send]). *)
+   the first opened. The answer pairs a response with the request that was
+   sent. When the narrower requests run out the last refusal is the answer
+   with its original provenance outcome, and a step that fails answers with
+   its own error, which no provider made; both keep the refused body as the
+   outcome's provenance. A narrower request that fails before it is sent or
+   serializes to the identical refused body answers with the refusal before
+   it ([send]) and terminates immediately. *)
 let rec route_requests agent ?on_provider_failure ~send position
           (request : Agent_turn.turn_request) narrower =
   match send position request with
@@ -311,21 +371,25 @@ let rec route_requests agent ?on_provider_failure ~send position
     Llm_provider.Completion_outcome.map_result
       (Result.map (fun response -> response, request))
       answer
-  | Does_not_fit { refusal; serialized; window } ->
-    let finish result =
+  | Does_not_fit { refusal; serialized; refusal_outcome; window } ->
+    let finish_outcome outcome =
       Llm_provider.Completion_outcome.map_result
-        (finish_call ?on_provider_failure)
-        (before_completion agent serialized (Error result))
+        (fun result ->
+           finish_call ?on_provider_failure result
+           |> Result.map (fun response -> response, request))
+        outcome
     in
     (match next_narrower refusal.Provider_failure_attribution.error narrower with
      | Ok (Some (request, narrower)) ->
        route_requests agent ?on_provider_failure ~send
-         (Narrower { window; refusal; refused = serialized })
+         (Narrower { window; refused = serialized; refusal_outcome })
          request
          narrower
-     | Ok None -> finish refusal
+     | Ok None -> finish_outcome refusal_outcome
      | Error error ->
-       finish { Provider_failure_attribution.error; provider_failure = None })
+       finish_outcome
+         (before_completion agent serialized
+            (Error { Provider_failure_attribution.error; provider_failure = None })))
 ;;
 
 let dispatch_sync
@@ -364,12 +428,12 @@ let dispatch_sync
     let not_sent ~own error =
       match position with
       | First -> Answered (own ())
-      | Narrower { refusal; refused; _ } ->
+      | Narrower { refusal_outcome; _ } ->
         Log.warn
           _log
           "narrower request failed before it was sent; the refusal before it answers"
           [ Log.S ("error", Error.to_string error) ];
-        Answered (finish (before_completion agent refused (Error refusal)))
+        Answered (finish refusal_outcome)
     in
     let ( let* ) result next = match result with
       | Ok value -> next value
@@ -418,116 +482,137 @@ let dispatch_sync
       not_sent error.Provider_failure_attribution.error ~own:(fun () ->
         finish (Llm_provider.Completion_outcome.before_serialization (Error error)))
     | Ok serialized ->
-      let failed error =
-        not_sent error.Provider_failure_attribution.error ~own:(fun () ->
-          finish (before_completion agent serialized (Error error)))
-      in
-      let sent outcome =
-        Answered
-          (finish
-             (Llm_provider.Completion_outcome.map_result
-                (Result.map_error
-                   (Provider_failure_attribution.of_http_error ~binding ~provider))
-                outcome))
-      in
-      (match preflight_serving_constraint ~binding ~now_unix_s prepared with
-       | Error error -> failed error
-       | Ok () when not requires_exact_fit ->
-         sent
-           (Llm_provider.Complete.complete_serialized
-              ~sw
-              ~net:agent.net
-              ?clock
-              ?transport:agent.options.transport
-              serialized
-              ?body_timeout_s:agent.options.body_timeout_s
-              ?call_timeout_s:agent.options.call_timeout_s
-              ?permit_wait:agent.options.permit_wait
-              ?request_wire_observer:agent.pre_dispatch_serialization_observer
-              ())
-       | Ok () ->
-         (match Llm_provider.Complete.resolve_context_limit prepared with
-          | Error error -> failed (fit_error ~binding error)
-          | Ok max_context_tokens ->
-            (* The call deadline is one window from the first request. Each
-               measurement spends from it -- its permit wait and its count
-               round trip -- and the completion spends the rest of it,
-               permit wait included. A narrower request spends from the
-               window the first one opened. *)
-            let call_window =
-              match position with
-              | Narrower { window = call_window; _ } -> Ok call_window
-              | First ->
-                Llm_provider.Http_client.resolve_explicit_deadline
-                  ~operation:"Pipeline_stage_route.dispatch_sync"
-                  ~parameter:"call_timeout_s"
-                  ~clock
-                  ~timeout_s:agent.options.call_timeout_s
-                |> Result.map Llm_provider.Deadline_window.open_
-            in
-            (match call_window with
-             | Error error ->
-               failed (Provider_failure_attribution.of_http_error ~binding ~provider error)
-             | Ok call_window ->
-               let measured =
-                 Llm_provider.Complete.measure_request
-                   ~sw
-                   ~net:agent.net
-                   ?clock
-                   ?timeout_s:agent.options.body_timeout_s
-                   ~next_stage:(Llm_provider.Complete.Completion { call_window })
-                   ?permit_wait:agent.options.permit_wait
-                   serialized
-                 |> Result.map_error
-                      (measurement_error
-                         ~binding
-                         ~constraint_:(Llm_provider.Complete.serving_constraint prepared)
-                         ~provider)
+      (match position with
+       | Narrower { refused; refusal_outcome; _ }
+         when serialized_body_equal serialized refused ->
+         Log.warn
+           _log
+           "narrower request produced an identical body; terminating narrowing with prior refusal"
+           [];
+         Answered (finish refusal_outcome)
+       | First | Narrower _ ->
+         let failed error =
+           not_sent error.Provider_failure_attribution.error ~own:(fun () ->
+             finish (before_completion agent serialized (Error error)))
+         in
+         let sent ~window outcome =
+           let mapped =
+             Llm_provider.Completion_outcome.map_result
+               (Result.map_error
+                  (Provider_failure_attribution.of_http_error ~binding ~provider))
+               outcome
+           in
+           match mapped.result with
+           | Error refusal
+             when is_pre_generation_size_refusal refusal.Provider_failure_attribution.error ->
+             Does_not_fit { refusal; serialized; refusal_outcome = mapped; window }
+           | Ok _ | Error _ -> Answered (finish mapped)
+         in
+         (match preflight_serving_constraint ~binding ~now_unix_s prepared with
+          | Error error -> failed error
+          | Ok () when not requires_exact_fit ->
+            sent
+              ~window:None
+              (Llm_provider.Complete.complete_serialized
+                 ~sw
+                 ~net:agent.net
+                 ?clock
+                 ?transport:agent.options.transport
+                 serialized
+                 ?body_timeout_s:agent.options.body_timeout_s
+                 ?call_timeout_s:agent.options.call_timeout_s
+                 ?permit_wait:agent.options.permit_wait
+                 ?request_wire_observer:agent.pre_dispatch_serialization_observer
+                 ())
+          | Ok () ->
+            (match Llm_provider.Complete.resolve_context_limit prepared with
+             | Error error -> failed (fit_error ~binding error)
+             | Ok max_context_tokens ->
+               (* The call deadline is one window from the first request. Each
+                  measurement spends from it -- its permit wait and its count
+                  round trip -- and the completion spends the rest of it,
+                  permit wait included. A narrower request spends from the
+                  window the first one opened. *)
+               let call_window =
+                 match position with
+                 | Narrower { window = Some call_window; _ } -> Ok call_window
+                 | First | Narrower { window = None; _ } ->
+                   Llm_provider.Http_client.resolve_explicit_deadline
+                     ~operation:"Pipeline_stage_route.dispatch_sync"
+                     ~parameter:"call_timeout_s"
+                     ~clock
+                     ~timeout_s:agent.options.call_timeout_s
+                   |> Result.map Llm_provider.Deadline_window.open_
                in
-               (match measured with
-                | Error error -> failed error
-                | Ok measured ->
-                  (match
-                     Llm_provider.Complete.admit_request
-                       ~now_unix_s
-                       ~max_context_tokens
-                       measured
-                   with
-                   | Error (Llm_provider.Complete.Context_window_exceeded _ as error) ->
-                     Does_not_fit
-                       { refusal = fit_error ~binding error; serialized; window = call_window }
-                   | Error
-                       (( Llm_provider.Complete.Context_limit_unknown _
-                        | Llm_provider.Complete.Invalid_context_limit _
-                        | Llm_provider.Complete.Output_reservation_unknown _
-                        | Llm_provider.Complete.Serving_constraint_rejected _ ) as error) ->
-                     failed (fit_error ~binding error)
-                   | Ok admitted ->
-                     (match Llm_provider.Deadline_window.remaining call_window with
-                      | `Spent seconds ->
-                        failed
-                          (Provider_failure_attribution.of_http_error
-                             ~binding
-                             ~provider
-                             (window_spent_by_the_measurement
-                                ~operation:"dispatch_sync"
-                                ~parameter:"call_timeout_s"
-                                ~seconds
-                                ~phase:Llm_provider.Http_client.Non_streaming_body
-                                ~next_stage:"completion"))
-                      | `Unbounded | `Remaining _ ->
-                        sent
-                          (Llm_provider.Complete.complete_admitted
-                             ~sw
-                             ~net:agent.net
-                             ?clock
-                             ?transport:agent.options.transport
-                             admitted
-                             ?body_timeout_s:agent.options.body_timeout_s
-                             ~call_window
-                             ?permit_wait:agent.options.permit_wait
-                             ?request_wire_observer:agent.pre_dispatch_serialization_observer
-                             ())))))))
+               (match call_window with
+                | Error error ->
+                  failed (Provider_failure_attribution.of_http_error ~binding ~provider error)
+                | Ok call_window ->
+                  let measured =
+                    Llm_provider.Complete.measure_request
+                      ~sw
+                      ~net:agent.net
+                      ?clock
+                      ?timeout_s:agent.options.body_timeout_s
+                      ~next_stage:(Llm_provider.Complete.Completion { call_window })
+                      ?permit_wait:agent.options.permit_wait
+                      serialized
+                    |> Result.map_error
+                         (measurement_error
+                            ~binding
+                            ~constraint_:(Llm_provider.Complete.serving_constraint prepared)
+                            ~provider)
+                  in
+                  (match measured with
+                   | Error error -> failed error
+                   | Ok measured ->
+                     (match
+                        Llm_provider.Complete.admit_request
+                          ~now_unix_s
+                          ~max_context_tokens
+                          measured
+                      with
+                      | Error (Llm_provider.Complete.Context_window_exceeded _ as error) ->
+                        let refusal = fit_error ~binding error in
+                        Does_not_fit
+                          { refusal
+                          ; serialized
+                          ; refusal_outcome = before_completion agent serialized (Error refusal)
+                          ; window = Some call_window
+                          }
+                      | Error
+                          (( Llm_provider.Complete.Context_limit_unknown _
+                           | Llm_provider.Complete.Invalid_context_limit _
+                           | Llm_provider.Complete.Output_reservation_unknown _
+                           | Llm_provider.Complete.Serving_constraint_rejected _ ) as error) ->
+                        failed (fit_error ~binding error)
+                      | Ok admitted ->
+                        (match Llm_provider.Deadline_window.remaining call_window with
+                         | `Spent seconds ->
+                           failed
+                             (Provider_failure_attribution.of_http_error
+                                ~binding
+                                ~provider
+                                (window_spent_by_the_measurement
+                                   ~operation:"dispatch_sync"
+                                   ~parameter:"call_timeout_s"
+                                   ~seconds
+                                   ~phase:Llm_provider.Http_client.Non_streaming_body
+                                   ~next_stage:"completion"))
+                         | `Unbounded | `Remaining _ ->
+                           sent
+                             ~window:(Some call_window)
+                             (Llm_provider.Complete.complete_admitted
+                                ~sw
+                                ~net:agent.net
+                                ?clock
+                                ?transport:agent.options.transport
+                                admitted
+                                ?body_timeout_s:agent.options.body_timeout_s
+                                ~call_window
+                                ?permit_wait:agent.options.permit_wait
+                                ?request_wire_observer:agent.pre_dispatch_serialization_observer
+                                ()))))))))
   in
   route_requests agent ?on_provider_failure ~send First
     prep.Agent_turn.request prep.Agent_turn.narrower
@@ -589,12 +674,12 @@ let dispatch_stream
     let not_sent ~own error =
       match position with
       | First -> Answered (own ())
-      | Narrower { refusal; refused; _ } ->
+      | Narrower { refusal_outcome; _ } ->
         Log.warn
           _log
           "narrower request failed before it was sent; the refusal before it answers"
           [ Log.S ("error", Error.to_string error) ];
-        Answered (finish (before_completion agent refused (Error refusal)))
+        Answered (finish refusal_outcome)
     in
     let ( let* ) result next = match result with
       | Ok value -> next value
@@ -643,175 +728,202 @@ let dispatch_stream
       not_sent error.Provider_failure_attribution.error ~own:(fun () ->
         finish (Llm_provider.Completion_outcome.before_serialization (Error error)))
     | Ok serialized ->
-      let failed error =
-        not_sent error.Provider_failure_attribution.error ~own:(fun () ->
-          finish (before_completion agent serialized (Error error)))
-      in
-      let sent outcome =
-        Answered
-          (finish
-             (Llm_provider.Completion_outcome.map_result
-                (Result.map_error
-                   (Provider_failure_attribution.of_http_error ~binding ~provider))
-                outcome))
-      in
-      (match preflight_serving_constraint ~binding ~now_unix_s prepared with
-       | Error error -> failed error
-       | Ok () when not requires_exact_fit ->
-         sent
-           (Llm_provider.Complete.complete_stream_serialized
-              ~sw
-              ~net:agent.net
-              ?clock
-              ?admission_timeout_s:agent.options.admission_timeout_s
-              ?permit_wait:agent.options.permit_wait
-              ?transport:agent.options.transport
-              serialized
-              ~on_event
-              ?on_telemetry
-              ?request_wire_observer:agent.pre_dispatch_serialization_observer
-              ())
-       | Ok () ->
-         (match Llm_provider.Complete.resolve_context_limit prepared with
-          | Error error -> failed (fit_error ~binding error)
-          | Ok max_context_tokens ->
-            (* Two of the stream's budgets are one window from the first
-               request. The admission budget spans both permit waits, the
-               measurement's and the stream's, and the count round trip
-               between them, which runs under what the budget has left. The
-               first-event budget is provider silence before the first
-               token: the count round trip spends from it, and the stream
-               arms what that left; permit waits are queueing and spend none
-               of it. A narrower request spends from both: the admission
-               window the first one opened, and what every earlier round
-               trip left of the first-event budget. *)
-            let spent =
-              match position with
-              | First ->
-                Llm_provider.Http_client.resolve_explicit_deadline
-                  ~operation:"Pipeline_stage_route.dispatch_stream"
-                  ~parameter:"admission_timeout_s"
-                  ~clock
-                  ~timeout_s:agent.options.admission_timeout_s
-                |> Result.map (fun admission_deadline ->
-                  { admission_window = Llm_provider.Deadline_window.open_ admission_deadline
-                  ; counted_s = 0.0
-                  })
-              | Narrower { window = spent; _ } ->
-                (match agent.options.first_event_timeout_s with
-                 | Some budget_s when Float.compare (budget_s -. spent.counted_s) 0.0 <= 0 ->
-                   Error (first_event_spent_by_counting ~budget_s)
-                 | Some _ | None -> Ok spent)
-            in
-            (match spent with
-             | Error error ->
-               failed (Provider_failure_attribution.of_http_error ~binding ~provider error)
-             | Ok ({ admission_window; counted_s } as spent) ->
-               let measured =
-                 Llm_provider.Complete.measure_request
-                   ~sw
-                   ~net:agent.net
-                   ?clock
-                   ?timeout_s:agent.options.body_timeout_s
-                   ~next_stage:
-                     (Llm_provider.Complete.Stream
-                        { admission_window
-                        ; first_event_timeout_s =
-                            Option.map
-                              (fun budget_s -> budget_s -. counted_s)
-                              agent.options.first_event_timeout_s
-                        })
-                   ?permit_wait:agent.options.permit_wait
-                   serialized
-                 |> Result.map_error
-                      (measurement_error
-                         ~binding
-                         ~constraint_:(Llm_provider.Complete.serving_constraint prepared)
-                         ~provider)
+      (match position with
+       | Narrower { refused; refusal_outcome; _ }
+         when serialized_body_equal serialized refused ->
+         Log.warn
+           _log
+           "narrower stream request produced an identical body; terminating narrowing with prior refusal"
+           [];
+         Answered (finish refusal_outcome)
+       | First | Narrower _ ->
+         let failed error =
+           not_sent error.Provider_failure_attribution.error ~own:(fun () ->
+             finish (before_completion agent serialized (Error error)))
+         in
+         (* Narrowing on a live HTTP overflow is only safe when 0 stream events
+            have been emitted (pre-generation refusal). *)
+         let event_emitted = ref false in
+         let observed_on_event ev =
+           event_emitted := true;
+           on_event ev
+         in
+         let sent ~window outcome =
+           let mapped =
+             Llm_provider.Completion_outcome.map_result
+               (Result.map_error
+                  (Provider_failure_attribution.of_http_error ~binding ~provider))
+               outcome
+           in
+           match mapped.result with
+           | Error refusal
+             when (not !event_emitted)
+                  && is_pre_generation_size_refusal
+                       refusal.Provider_failure_attribution.error ->
+             Does_not_fit { refusal; serialized; refusal_outcome = mapped; window }
+           | Ok _ | Error _ -> Answered (finish mapped)
+         in
+         (match preflight_serving_constraint ~binding ~now_unix_s prepared with
+          | Error error -> failed error
+          | Ok () when not requires_exact_fit ->
+            sent
+              ~window:None
+              (Llm_provider.Complete.complete_stream_serialized
+                 ~sw
+                 ~net:agent.net
+                 ?clock
+                 ?admission_timeout_s:agent.options.admission_timeout_s
+                 ?permit_wait:agent.options.permit_wait
+                 ?transport:agent.options.transport
+                 serialized
+                 ~on_event:observed_on_event
+                 ?on_telemetry
+                 ?request_wire_observer:agent.pre_dispatch_serialization_observer
+                 ())
+          | Ok () ->
+            (match Llm_provider.Complete.resolve_context_limit prepared with
+             | Error error -> failed (fit_error ~binding error)
+             | Ok max_context_tokens ->
+               (* Two of the stream's budgets are one window from the first
+                  request. The admission budget spans both permit waits, the
+                  measurement's and the stream's, and the count round trip
+                  between them, which runs under what the budget has left. The
+                  first-event budget is provider silence before the first
+                  token: the count round trip spends from it, and the stream
+                  arms what that left; permit waits are queueing and spend none
+                  of it. A narrower request spends from both: the admission
+                  window the first one opened, and what every earlier round
+                  trip left of the first-event budget. *)
+               let spent =
+                 match position with
+                 | First | Narrower { window = None; _ } ->
+                   Llm_provider.Http_client.resolve_explicit_deadline
+                     ~operation:"Pipeline_stage_route.dispatch_stream"
+                     ~parameter:"admission_timeout_s"
+                     ~clock
+                     ~timeout_s:agent.options.admission_timeout_s
+                   |> Result.map (fun admission_deadline ->
+                     { admission_window = Llm_provider.Deadline_window.open_ admission_deadline
+                     ; counted_s = 0.0
+                     })
+                 | Narrower { window = Some spent; _ } ->
+                   (match agent.options.first_event_timeout_s with
+                    | Some budget_s when Float.compare (budget_s -. spent.counted_s) 0.0 <= 0 ->
+                      Error (first_event_spent_by_counting ~budget_s)
+                    | Some _ | None -> Ok spent)
                in
-               (match measured with
-                | Error error -> failed error
-                | Ok measured ->
-                  let counted_s =
-                    counted_s
-                    +. Option.value (Llm_provider.Complete.count_round_trip_s measured) ~default:0.0
+               (match spent with
+                | Error error ->
+                  failed (Provider_failure_attribution.of_http_error ~binding ~provider error)
+                | Ok ({ admission_window; counted_s } as spent) ->
+                  let measured =
+                    Llm_provider.Complete.measure_request
+                      ~sw
+                      ~net:agent.net
+                      ?clock
+                      ?timeout_s:agent.options.body_timeout_s
+                      ~next_stage:
+                        (Llm_provider.Complete.Stream
+                           { admission_window
+                           ; first_event_timeout_s =
+                               Option.map
+                                 (fun budget_s -> budget_s -. counted_s)
+                                 agent.options.first_event_timeout_s
+                           })
+                      ?permit_wait:agent.options.permit_wait
+                      serialized
+                    |> Result.map_error
+                         (measurement_error
+                            ~binding
+                            ~constraint_:(Llm_provider.Complete.serving_constraint prepared)
+                            ~provider)
                   in
-                  (* Fit first, as [dispatch_sync] does: a request that does
-                     not fit is refused as such however the windows stand,
-                     not reported as a timeout the caller would retry. *)
-                  (match
-                     Llm_provider.Complete.admit_request
-                       ~now_unix_s
-                       ~max_context_tokens
-                       measured
-                   with
-                   | Error (Llm_provider.Complete.Context_window_exceeded _ as error) ->
-                     Does_not_fit
-                       { refusal = fit_error ~binding error
-                       ; serialized
-                       ; window = { spent with counted_s }
-                       }
-                   | Error
-                       (( Llm_provider.Complete.Context_limit_unknown _
-                        | Llm_provider.Complete.Invalid_context_limit _
-                        | Llm_provider.Complete.Output_reservation_unknown _
-                        | Llm_provider.Complete.Serving_constraint_rejected _ ) as error) ->
-                     failed (fit_error ~binding error)
-                   | Ok admitted ->
-                     let first_event_left =
-                       match
-                         ( agent.options.first_event_timeout_s
-                         , Llm_provider.Complete.count_round_trip_s measured )
-                       with
-                       | None, _ -> Ok None
-                       | Some budget_s, None ->
-                         (* Not timed: no clock, and the stream stage refuses
-                            the budget as unenforceable itself. *)
-                         Ok (Some budget_s)
-                       | Some budget_s, Some (_ : float) ->
-                         let left_s = budget_s -. counted_s in
-                         if Float.compare left_s 0.0 <= 0
-                         then Error (first_event_spent_by_counting ~budget_s)
-                         else Ok (Some left_s)
+                  (match measured with
+                   | Error error -> failed error
+                   | Ok measured ->
+                     let counted_s =
+                       counted_s
+                       +. Option.value (Llm_provider.Complete.count_round_trip_s measured) ~default:0.0
                      in
-                     let admission_unspent =
-                       match Llm_provider.Deadline_window.remaining admission_window with
-                       | `Unbounded | `Remaining _ -> Ok ()
-                       | `Spent seconds ->
-                         Error
-                           (window_spent_by_the_measurement
-                              ~operation:"dispatch_stream"
-                              ~parameter:"admission_timeout_s"
-                              ~seconds
-                              ~phase:Llm_provider.Http_client.Queue
-                              ~next_stage:"stream")
-                     in
-                     (match first_event_left, admission_unspent with
-                      | Error error, _ | Ok _, Error error ->
-                        failed
-                          (Provider_failure_attribution.of_http_error ~binding ~provider error)
-                      | Ok first_event_timeout_s, Ok () ->
-                        let admitted =
-                          match first_event_timeout_s with
-                          | None -> admitted
-                          | Some first_event_timeout_s ->
-                            Llm_provider.Complete.with_first_event_timeout_s
-                              first_event_timeout_s
-                              admitted
+                     (* Fit first, as [dispatch_sync] does: a request that does
+                        not fit is refused as such however the windows stand,
+                        not reported as a timeout the caller would retry. *)
+                     (match
+                        Llm_provider.Complete.admit_request
+                          ~now_unix_s
+                          ~max_context_tokens
+                          measured
+                      with
+                      | Error (Llm_provider.Complete.Context_window_exceeded _ as error) ->
+                        let refusal = fit_error ~binding error in
+                        Does_not_fit
+                          { refusal
+                          ; serialized
+                          ; refusal_outcome = before_completion agent serialized (Error refusal)
+                          ; window = Some { spent with counted_s }
+                          }
+                      | Error
+                          (( Llm_provider.Complete.Context_limit_unknown _
+                           | Llm_provider.Complete.Invalid_context_limit _
+                           | Llm_provider.Complete.Output_reservation_unknown _
+                           | Llm_provider.Complete.Serving_constraint_rejected _ ) as error) ->
+                        failed (fit_error ~binding error)
+                      | Ok admitted ->
+                        let first_event_left =
+                          match
+                            ( agent.options.first_event_timeout_s
+                            , Llm_provider.Complete.count_round_trip_s measured )
+                          with
+                          | None, _ -> Ok None
+                          | Some budget_s, None ->
+                            (* Not timed: no clock, and the stream stage refuses
+                               the budget as unenforceable itself. *)
+                            Ok (Some budget_s)
+                          | Some budget_s, Some (_ : float) ->
+                            let left_s = budget_s -. counted_s in
+                            if Float.compare left_s 0.0 <= 0
+                            then Error (first_event_spent_by_counting ~budget_s)
+                            else Ok (Some left_s)
                         in
-                        sent
-                          (Llm_provider.Complete.complete_stream_admitted
-                             ~sw
-                             ~net:agent.net
-                             ?clock
-                             ~admission_window
-                             ?permit_wait:agent.options.permit_wait
-                             ?transport:agent.options.transport
-                             admitted
-                             ~on_event
-                             ?on_telemetry
-                             ?request_wire_observer:agent.pre_dispatch_serialization_observer
-                             ())))))))
+                        let admission_unspent =
+                          match Llm_provider.Deadline_window.remaining admission_window with
+                          | `Unbounded | `Remaining _ -> Ok ()
+                          | `Spent seconds ->
+                            Error
+                              (window_spent_by_the_measurement
+                                 ~operation:"dispatch_stream"
+                                 ~parameter:"admission_timeout_s"
+                                 ~seconds
+                                 ~phase:Llm_provider.Http_client.Queue
+                                 ~next_stage:"stream")
+                        in
+                        (match first_event_left, admission_unspent with
+                         | Error error, _ | Ok _, Error error ->
+                           failed
+                             (Provider_failure_attribution.of_http_error ~binding ~provider error)
+                         | Ok first_event_timeout_s, Ok () ->
+                           let admitted =
+                             match first_event_timeout_s with
+                             | None -> admitted
+                             | Some first_event_timeout_s ->
+                               Llm_provider.Complete.with_first_event_timeout_s
+                                 first_event_timeout_s
+                                 admitted
+                           in
+                           sent
+                             ~window:(Some { spent with counted_s })
+                             (Llm_provider.Complete.complete_stream_admitted
+                                ~sw
+                                ~net:agent.net
+                                ?clock
+                                ~admission_window
+                                ?permit_wait:agent.options.permit_wait
+                                ?transport:agent.options.transport
+                                admitted
+                                ~on_event:observed_on_event
+                                ?on_telemetry
+                                ?request_wire_observer:agent.pre_dispatch_serialization_observer
+                                ()))))))))
   in
   route_requests agent ?on_provider_failure ~send First
     prep.Agent_turn.request prep.Agent_turn.narrower

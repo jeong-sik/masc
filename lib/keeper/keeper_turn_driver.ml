@@ -1231,6 +1231,7 @@ let attempt_runtime_candidates
           connection the route calls a server error (RFC-0458 §3.4). *)
        let route =
          Keeper_runtime_failure_route.route_of_error
+           ~has_backup_candidates:(not is_last)
            ~boundary:Keeper_runtime_failure_route.Agent_core_execution
            error
        in
@@ -3390,7 +3391,7 @@ let run_named
         let ( reset_model_input_observation
             , on_model_input_window_observation
             , record_transmitted_model_input
-            , _record_refused_model_input
+            , record_refused_model_input
             , hooks ) =
           official_model_input_observation hooks
         in
@@ -3563,6 +3564,10 @@ let run_named
         let codex_result = observe_official_result
           ~execution_result:codex_attempt.outcome.result codex_result in
         let codex_result = guidance_result codex_result in
+        (match codex_result with
+         | Error error when Keeper_turn_driver_try_provider.is_size_refusal error ->
+           record_refused_model_input Turn_record.Model_error_not_retryable
+         | Ok _ | Error _ -> ());
         ( selected_runtime_result ?official_client_settlement:codex_attempt.outcome.settled_session runtime ~lane_attempt_index:idx codex_result
         , None
         , codex_attempt.outcome.effect_disposition
@@ -3571,7 +3576,7 @@ let run_named
         let ( reset_model_input_observation
             , on_model_input_window_observation
             , record_transmitted_model_input
-            , _record_refused_model_input
+            , record_refused_model_input
             , hooks ) =
           official_model_input_observation hooks
         in
@@ -3593,6 +3598,7 @@ let run_named
             ~configured_reasoning_effort:runtime.model.reasoning_effort
             ~turn_timeout_s:runtime.model.turn_timeout_s
             ?argument_source:official_argument_source
+            ?on_memory_capacity_refusal
             ?on_tool_execution
             ?composed_context:official_client_composed_context
             ~accepts_image_input
@@ -3690,6 +3696,10 @@ let run_named
         let antigravity_result = observe_official_result
           ~execution_result:antigravity_attempt.result antigravity_result in
         let antigravity_result = guidance_result antigravity_result in
+        (match antigravity_result with
+         | Error error when Keeper_turn_driver_try_provider.is_size_refusal error ->
+           record_refused_model_input Turn_record.Model_error_not_retryable
+         | Ok _ | Error _ -> ());
         ( selected_runtime_result ?official_client_settlement:antigravity_attempt.settled_session runtime ~lane_attempt_index:idx antigravity_result
         , None
         , antigravity_attempt.effect_disposition
@@ -3698,7 +3708,7 @@ let run_named
         let ( reset_model_input_observation
             , on_model_input_window_observation
             , record_transmitted_model_input
-            , _record_refused_model_input
+            , record_refused_model_input
             , hooks ) =
           official_model_input_observation hooks
         in
@@ -3793,6 +3803,10 @@ let run_named
         let acp_result = observe_official_result
           ~execution_result:acp_attempt.result acp_result in
         let acp_result = guidance_result acp_result in
+        (match acp_result with
+         | Error error when Keeper_turn_driver_try_provider.is_size_refusal error ->
+           record_refused_model_input Turn_record.Model_error_not_retryable
+         | Ok _ | Error _ -> ());
         ( selected_runtime_result ?official_client_settlement:acp_attempt.settled_session runtime ~lane_attempt_index:idx acp_result
         , None
         , acp_attempt.effect_disposition
@@ -3801,7 +3815,7 @@ let run_named
         let ( reset_model_input_observation
             , on_model_input_window_observation
             , record_transmitted_model_input
-            , _record_refused_model_input
+            , record_refused_model_input
             , hooks ) =
           official_model_input_observation hooks
         in
@@ -3955,6 +3969,10 @@ let run_named
         let claude_result = observe_official_result
           ~execution_result:claude_attempt.result claude_result in
         let claude_result = guidance_result claude_result in
+        (match claude_result with
+         | Error error when Keeper_turn_driver_try_provider.is_size_refusal error ->
+           record_refused_model_input Turn_record.Model_error_not_retryable
+         | Ok _ | Error _ -> ());
         ( selected_runtime_result ?official_client_settlement:claude_attempt.settled_session runtime ~lane_attempt_index:idx claude_result
         , None
         , claude_attempt.effect_disposition

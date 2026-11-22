@@ -119,7 +119,21 @@ let core_error_to_runtime_outcome err =
          (provider_error_to_http_error
             (Llm_provider.Error.ProviderUnavailable
                { provider = runtime_id; detail })))
-  | Some (Keeper_internal_error.Official_client_recovery_required _) | None
+  | Some (Keeper_internal_error.Official_client_recovery_required recovery) ->
+    (* A durable session recovery belongs to this candidate's official-client
+       binding. Returning a provider failure lets [lane_should_retry] rotate
+       to backup candidates when available while still ending the walk on the
+       last candidate. *)
+    Some
+      (Runtime_attempt_fsm.Call_err
+         (Llm_provider.Http_client.ProviderFailure
+            { kind =
+                Llm_provider.Http_client.Provider_reported_error
+                  { error_type = Some "official_client_recovery_required" }
+            ; message =
+                Keeper_internal_error.official_client_recovery_summary recovery
+            }))
+  | None
   | Some (Keeper_internal_error.Runtime_exhausted _)
   | Some (Keeper_internal_error.Accept_rejected _)
   | Some (Keeper_internal_error.Internal_unhandled_exception _)

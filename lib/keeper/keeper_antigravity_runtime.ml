@@ -2,6 +2,7 @@ open Result.Syntax
 
 module Host = Keeper_official_client_host
 module Session_store = Keeper_official_client_session_store
+module Effect_cell = Keeper_official_client_attempt.Effect_cell
 
 let runtime_label = "Antigravity"
 
@@ -14,6 +15,20 @@ let runtime_boundary_site = "antigravity.runtime_boundary"
 let runtime_error_to_core_error = function
   | Runtime_antigravity.Invalid_config detail ->
     config_error ~field:"antigravity_cli" detail
+  | Runtime_antigravity.Context_window_exceeded
+      { message; tool_effect_attempted = false; response_emitted = false } ->
+    Agent_core.Error.Api
+      (Llm_provider.Retry.ContextOverflow { message; limit = None })
+  | Runtime_antigravity.Context_window_exceeded
+      { message; tool_effect_attempted = true; _ }
+  | Runtime_antigravity.Context_window_exceeded
+      { message; response_emitted = true; _ } ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderReportedError
+         { provider = "antigravity_cli"
+         ; error_type = Some "context_window_exceeded_after_activity"
+         ; detail = message
+         })
   | Runtime_antigravity.Turn_failed detail ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderReportedError
@@ -108,8 +123,291 @@ let recovery_failure_of_runtime_error = function
   | Runtime_antigravity.Unhandled_exception _ -> Session_store.Protocol_failed
   | Runtime_antigravity.State_callback_failed _ ->
     Session_store.State_persistence_failed
+  | Runtime_antigravity.Context_window_exceeded
+      { tool_effect_attempted; response_emitted; _ } ->
+    Session_store.Input_rejected
+      (if tool_effect_attempted || response_emitted
+       then Session_store.Effect_fenced
+       else Session_store.Bootstrap_floor_exceeded)
   | Runtime_antigravity.Turn_failed _
   | Runtime_antigravity.Actions_denied _ -> Session_store.Provider_rejected
+;;
+
+let recovery_failure_of_attempt ~conversation_mode ~gate_continuation error =
+  match conversation_mode, gate_continuation, error with
+  | ( Runtime_antigravity.Resume _
+    , true
+    , Runtime_antigravity.Context_window_exceeded
+        { tool_effect_attempted; response_emitted; _ } ) ->
+    Session_store.Vendor_session_full
+      (if tool_effect_attempted || response_emitted
+       then Session_store.Activity_observed
+       else Session_store.No_activity_observed)
+  | ( (Runtime_antigravity.Start | Runtime_antigravity.Resume _)
+    , (true | false)
+    , ( Runtime_antigravity.Invalid_config _
+      | Runtime_antigravity.Spawn_refused _
+      | Runtime_antigravity.Spawn_capacity_busy _
+      | Runtime_antigravity.Protocol_error _
+      | Runtime_antigravity.State_callback_failed _
+      | Runtime_antigravity.Context_window_exceeded _
+      | Runtime_antigravity.Turn_failed _
+      | Runtime_antigravity.Result_not_completed _
+      | Runtime_antigravity.Actions_denied _
+      | Runtime_antigravity.Process_exited _
+      | Runtime_antigravity.Unhandled_exception _
+      | Runtime_antigravity.Child_fd_ceiling_exceeded _
+      | Runtime_antigravity.Timeout _ ) ) ->
+    recovery_failure_of_runtime_error error
+;;
+
+let unbounded_model_input_capacity_bytes = max_int
+
+let measure_model_input_message_bytes message =
+  String.length (Host.encode_history_message message)
+;;
+
+let load_compaction_anchor ~base_path ~keeper_name =
+  if String.equal (String.trim base_path) ""
+  then None
+  else (
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+    match Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:keeper_name with
+    | Ok anchor -> anchor
+    | Error err ->
+      Log.Keeper.warn ~keeper_name "Antigravity compaction anchor load failed: %s"
+        (Keeper_compaction.store_error_to_string err);
+      None)
+;;
+
+let commit_compaction_anchor_for_messages
+      ~base_path ~keeper_name ~tools ~trigger evicted_messages
+  =
+  if String.equal (String.trim base_path) "" || evicted_messages = []
+  then None
+  else (
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+    let blob_store =
+      if Result.is_ok (Keeper_recovery_transmission.require_reader tools)
+      then Some (Tool_blob_store.create ~base_path)
+      else None
+    in
+    match
+      Keeper_compaction.compact_evicted_messages
+        ?blob_store ~keepers_dir ~keeper_id:keeper_name ~trigger ~evicted_messages ()
+    with
+    | Ok (Some anchor) ->
+      Log.Keeper.info ~keeper_name
+        "Antigravity anchored compaction committed epoch=%d covers_through=%s"
+        anchor.epoch_id
+        (Ids.Turn_id.to_string anchor.covers_through_turn);
+      Some anchor
+    | Ok None -> load_compaction_anchor ~base_path ~keeper_name
+    | Error err ->
+      Log.Keeper.warn ~keeper_name "Antigravity anchored compaction commit failed: %s"
+        (Keeper_compaction.store_error_to_string err);
+      load_compaction_anchor ~base_path ~keeper_name)
+;;
+
+let has_librarian_working_state = function
+  | Some (Keeper_turn_driver_try_provider.Covered { working_state = Some _; _ }) -> true
+  | Some (Keeper_turn_driver_try_provider.Covered { working_state = None; _ })
+  | Some Keeper_turn_driver_try_provider.No_read_end
+  | None -> false
+;;
+
+let attach_rollover_anchor_if_needed
+      ~rollover_anchor ~minimal_anchor_only ~librarian_front ~offered ~windowed
+  =
+  match rollover_anchor with
+  | None -> windowed
+  | Some anchor ->
+    if has_librarian_working_state librarian_front
+       || List.exists Runtime_model_input_tail_window.is_compaction_anchor windowed
+    then windowed
+    else (
+      let _, offered_atoms = Runtime_model_input_tail_window.annotate offered in
+      let _, kept_atoms = Runtime_model_input_tail_window.annotate windowed in
+      if minimal_anchor_only || kept_atoms < offered_atoms
+      then Keeper_compaction.anchor_to_message anchor :: windowed
+      else windowed)
+;;
+
+let model_input_projection_for_capacity ~input_source
+    ?argument_projection
+    ~conversation_mode
+    ?(rollover_anchor = None)
+    ?(minimal_anchor_only = false)
+    ~capacity_bytes
+    ~observed_next_shrink_capacity_bytes
+    ~observed_floor_capacity_bytes
+    ?on_model_input_window_observation
+    ?carried_front_seed
+    ?librarian_front
+    ?on_carried_front
+    ~turn_start
+    ~keeper_name
+    ~runtime_id
+    source_projection
+    messages =
+  match conversation_mode with
+  | Runtime_antigravity.Resume _ ->
+    (* A Resume sent none of this range; on overflow always offer a halved
+       capacity step so [on_shrink_retry] triggers [Restart_fresh] even when
+       local checkpoint history has 0 atoms. *)
+    observed_next_shrink_capacity_bytes :=
+      Some
+        (Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+           ~capacity:capacity_bytes);
+    observed_floor_capacity_bytes := None;
+    Host.project_source source_projection messages
+  | Runtime_antigravity.Start ->
+    let* windowed =
+      if minimal_anchor_only
+      then
+        let labelled, _ = Runtime_model_input_tail_window.annotate messages in
+        Ok
+          (List.filter_map
+             (fun (msg, label) ->
+                match label with
+                | Runtime_model_input_tail_window.Pinned -> Some msg
+                | Runtime_model_input_tail_window.Atom _ -> None)
+             labelled)
+      else
+        Host.start_range_projection
+          ~input_source
+          ?argument_projection
+          ~measure_message_bytes:measure_model_input_message_bytes
+          ~capacity_bytes
+          ~unbounded_capacity_bytes:unbounded_model_input_capacity_bytes
+          ~reserved_bytes:0
+          ?on_model_input_window_observation
+          ?carried_front_seed
+          ?librarian_front
+          ?on_carried_front
+          ~turn_start
+          ~keeper_name
+          ~runtime_id
+          messages
+    in
+    let windowed =
+      attach_rollover_anchor_if_needed
+        ~rollover_anchor ~minimal_anchor_only ~librarian_front ~offered:messages ~windowed
+    in
+    if minimal_anchor_only
+    then (
+      observed_next_shrink_capacity_bytes := None;
+      observed_floor_capacity_bytes := None)
+    else
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+        let measured =
+          Runtime_model_input_tail_window.measure_history
+            ~measure_message_bytes:measure_model_input_message_bytes windowed
+        in
+        let target_capacity_bytes =
+          if capacity_bytes = unbounded_model_input_capacity_bytes
+          then
+            Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+              ~capacity:(Runtime_model_input_tail_window.measured_bytes measured)
+          else
+            Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+              ~capacity:capacity_bytes
+        in
+        observed_next_shrink_capacity_bytes :=
+          Runtime_model_input_tail_window.next_shrink_capacity_bytes
+            ~allow_empty_history:true
+            ~target_capacity_bytes
+            measured;
+        observed_floor_capacity_bytes :=
+          Runtime_model_input_tail_window.minimum_capacity_bytes
+            measured);
+    Host.project_source source_projection windowed
+;;
+
+let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id () =
+  match
+    Session_store.load_for_runtime ~base_path ~keeper_name ~client_kind:Antigravity ~runtime_id
+  with
+  | Error _ -> ()
+  | Ok
+      (Some
+         ({ Session_store.phase =
+              Recovery_required
+                { failure = Input_rejected Bootstrap_floor_exceeded
+                ; recovery_id
+                ; _
+                }
+          ; runtime_id = stored_runtime_id
+          ; _
+          } as expected))
+    when String.equal stored_runtime_id runtime_id ->
+    (match
+       Session_store.resolve_recovery
+         ~base_path
+         ~keeper_name
+         ~expected
+         ~recovery_id
+         ~resolution:Session_store.Restart_fresh
+         ~resolved_by:"context-overflow-shrink-retry"
+         ~resolved_at:(Time_compat.now ())
+     with
+     | Ok _ -> ()
+     | Error _ -> ())
+  | Ok None
+  | Ok
+      (Some
+         { Session_store.phase =
+             ( Ready | Start _ | Active _ | Turn_inflight _ | Settled _ )
+         ; _
+         })
+  | Ok
+      (Some
+         { Session_store.phase =
+             Recovery_required
+               { failure =
+                   ( Pre_dispatch_failed
+                   | Spawn_resources_busy
+                   | Spawn_refused_same_input
+                   | Spawn_failed_cause_unknown
+                   | Owner_stopped_turn
+                   | Retryable_turn_failed
+                   | Transport_interrupted
+                   | Protocol_failed
+                   | Provider_rejected
+                   | Input_rejected (Bootstrap_floor_exceeded | Effect_fenced)
+                   | Host_hook_failed
+                   | State_persistence_failed
+                   | Process_restarted
+                   | Vendor_session_full _ )
+               ; _
+               }
+         ; _
+         }) -> ()
+;;
+
+let held_context_for_resume_turn
+      ~resume_system_notice ~previously_held ~goal ~turn_observation ?composed_context messages
+  =
+  let effective_held =
+    match resume_system_notice with
+    | None -> previously_held
+    | Some _ ->
+      List.filter
+        (fun (entry : Session_store.held_context) ->
+           not
+             (List.exists
+                (fun block ->
+                   entry.context = Session_store.Context_block block)
+                Host.standing_system_blocks))
+        previously_held
+  in
+  (Host.resume_prompt
+     ~goal
+     ~held:effective_held
+     ~turn_observation
+     ?composed_context
+     messages)
+    .held_context
 ;;
 
 let home_error_to_core_error error =
@@ -381,20 +679,23 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
     }
 ;;
 
-let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~host ~configured_reasoning_effort ~turn_timeout_s ~keeper_name
+let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~rollover_anchor ~capacity_bytes ~observed_next_shrink_capacity_bytes ~observed_floor_capacity_bytes ~required_native_posture ~official_client_continuation ~runtime_id ~host ~configured_reasoning_effort ~turn_timeout_s ~keeper_name
     ~on_model_input_window_observation
     ~carried_front_seed
     ~librarian_front
     ~on_carried_front
     ~turn_start
-    ~pre_tool_rejects ~base_path ~outbox_viewer ~read_retained_media ~goal ~goal_blocks
+    ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~loading_plan ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
-    ~observe_effect_attempted ~observe_effect_unavailable
+    ~effect_cell ~context_overflow_retry_safe
     ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion
     ~on_usage_report ~on_tool_execution ~(config : Runtime_execution.antigravity_cli) =
   on_results_ready None;
+  context_overflow_retry_safe := false;
+  let observe_effect_attempted () = Effect_cell.attempted effect_cell in
+  let observe_effect_unavailable () = Effect_cell.unobserved effect_cell in
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
     Error
@@ -439,6 +740,42 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
         ~client_kind:Antigravity
         ~runtime_id
       |> Result.map_error Session_store.core_error_of_claim_error
+    in
+    let superseded_rejection =
+      Session_store.superseded_input_rejection
+        ~expected:stored_session
+        ~client_kind:Antigravity
+        ~runtime_id
+    in
+    let minimal_anchor_only =
+      match superseded_rejection with
+      | Session_store.Superseding_bootstrap_floor_exceeded ->
+        (match
+           commit_compaction_anchor_for_messages
+             ~base_path ~keeper_name ~tools
+             ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
+             initial_messages
+         with
+         | Some anchor -> rollover_anchor := Some anchor
+         | None -> ());
+        Log.Keeper.info ~keeper_name
+          "Antigravity superseding Input_rejected(Bootstrap_floor_exceeded) with minimal anchor-only fresh start runtime=%s"
+          runtime_id;
+        true
+      | Session_store.Superseding_effect_fenced ->
+        (match
+           commit_compaction_anchor_for_messages
+             ~base_path ~keeper_name ~tools
+             ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
+             initial_messages
+         with
+         | Some anchor -> rollover_anchor := Some anchor
+         | None -> ());
+        Log.Keeper.info ~keeper_name
+          "Antigravity superseding Input_rejected(Effect_fenced) on next turn into fresh session runtime=%s"
+          runtime_id;
+        false
+      | Session_store.Not_superseding_input_rejection -> false
     in
     (* Before the plan is read; see the note in keeper_codex_runtime.ml. A
        moved surface has to change conversation_mode and the ordinal too, not
@@ -550,8 +887,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
         ~model_input_projection:None
         ~hooks:(Some hooks)
     in
-    let* tool_outbox =
-      Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:outbox_viewer
+    let* tool_outbox, retained_carrier =
+      Keeper_client_tool_outbox.run_carrier_load retained_results
       |> Result.map_error internal_error in
     (* Hooks may replace the system prompt or append an ordinary Nudge. Bind
        the final non-carried composition, and retain the mandatory workspace
@@ -607,9 +944,6 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
         Runtime_antigravity.Resume { conversation_id = session_id }
     in
     let is_resume = Option.is_some claim_plan.previous_settlement in
-    let context_frontier : Session_store.context_frontier =
-      {message_count=List.length snapshot_messages;
-       delivery=Canonical_source_guard {snapshot_sha256}; acknowledged_turn=None; held_context=[]} in
     let turn_count = claim_plan.turn_count in
     let* () =
       match prepared.reasoning_effort with
@@ -626,49 +960,50 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
              "Antigravity effort must be declared by its runtime provider")
     in
     let* prepared =
-      if is_resume then
-        (match model_input_projection with
-         | None -> Ok prepared
-         | Some project ->
-           let* messages =
-             try project prepared.messages with
-             | Eio.Cancel.Cancelled _ as exn -> raise exn
-             | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
-             | exn -> Error (Host.internal_error
-                 (runtime_label ^ " runtime model input projection raised: " ^ Printexc.to_string exn)) in
-           Ok {prepared with messages})
-      else
-        let project =
-          Host.carried_history_projection ~input_source
-            ?argument_projection:(Option.bind argument_source (fun source ->
-              Host.argument_projection source ~tools:prepared.tools
-                ~history_prefix:[]))
-            ?on_model_input_window_observation
-            ?carried_front_seed
-            ?librarian_front
-            ?on_carried_front
-            ~turn_start
-            ~keeper_name
-            ~runtime_id
-            model_input_projection
-        in
-        let* messages =
-          try project prepared.messages with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
-          | exn ->
-            Error
-              (Host.internal_error
-                 (runtime_label
-                  ^ " runtime model input projection raised: "
-                  ^ Printexc.to_string exn))
-        in
-        Ok { prepared with messages }
+      let observed callback = if is_resume then None else callback in
+      let argument_projection =
+        if is_resume
+        then None
+        else
+          Option.bind argument_source (fun source ->
+            Host.argument_projection source ~tools:prepared.tools ~history_prefix:[])
+      in
+      let project =
+        model_input_projection_for_capacity
+          ~input_source
+          ?argument_projection
+          ~conversation_mode
+          ~rollover_anchor:!rollover_anchor
+          ~minimal_anchor_only
+          ~capacity_bytes
+          ~observed_next_shrink_capacity_bytes
+          ~observed_floor_capacity_bytes
+          ?on_model_input_window_observation:(observed on_model_input_window_observation)
+          ?carried_front_seed
+          ?librarian_front
+          ?on_carried_front:(observed on_carried_front)
+          ~turn_start
+          ~keeper_name
+          ~runtime_id
+          model_input_projection
+      in
+      let* messages =
+        try project prepared.messages with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+        | exn ->
+          Error
+            (Host.internal_error
+               (runtime_label
+                ^ " runtime model input projection raised: "
+                ^ Printexc.to_string exn))
+      in
+      Ok { prepared with messages }
     in
     (* Original returned results are not history. A range shrink or caller
        projection cannot erase them before a completed consumer ACKs them. *)
     let prepared = {prepared with Host.messages = prepared.messages
-      @ Option.to_list (Keeper_client_tool_outbox.context_message ~read_media:read_retained_media tool_outbox)} in
+      @ Option.to_list (Keeper_client_tool_outbox.carrier_message retained_carrier)} in
     (* [Host.framed_prompt_for_turn] renders [prepared.system_prompt] as the
        system-instructions section; [Host.prepare_turn] has already refused a
        blank one, so the section is always present on a start (#33165). *)
@@ -694,13 +1029,40 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
           ~session_id:conversation_id
           ~goal
     in
-    (* Antigravity exposes no compaction or context-reset witness. A settled
-       delivery cannot prove these blocks remain in its current model input,
-       so keep the frontier's held set empty and resend on every resume. *)
+    (* Reuse standing-context digests settled by the resumed conversation so
+       unchanged carried blocks are not resent on every resume turn. Standing
+       System observations still refresh whenever [resume_system_notice] is
+       present ({!Host.framed_prompt_for_turn}). *)
+    let previously_held =
+      Session_store.held_context_for_resume claim_plan ~expected:stored_session
+    in
+    let held_context =
+      if is_resume
+      then
+        held_context_for_resume_turn
+          ~resume_system_notice:system_guard.resume_system_notice
+          ~previously_held
+          ~goal
+          ~turn_observation:prepared.turn_observation
+          ?composed_context
+          prepared.messages
+      else
+        Host.start_held_context
+          ~turn_observation:prepared.turn_observation
+          ?composed_context
+          prepared.messages
+    in
+    let context_frontier : Session_store.context_frontier =
+      { message_count = List.length snapshot_messages
+      ; delivery = Canonical_source_guard { snapshot_sha256 }
+      ; acknowledged_turn = None
+      ; held_context
+      }
+    in
     let* prompt =
       Host.framed_prompt_for_turn ?composed_context
         ?resume_system_notice:system_guard.resume_system_notice
-        ~held:[]
+        ~held:previously_held
         ~delivery:(if is_resume then Host.Framed_resume
        else Host.Framed_start { started_at = Time_compat.now () })
         ~goal prepared
@@ -1141,7 +1503,51 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
             client_result
             |> Result.map (fun turn -> `Completed turn)
             |> Result.map_error (fun error ->
-              recovery_failure := recovery_failure_of_runtime_error error;
+              context_overflow_retry_safe :=
+                (match conversation_mode, official_client_continuation, error with
+                 | Runtime_antigravity.Resume _, Some _, _ -> false
+                 | ( (Runtime_antigravity.Start | Runtime_antigravity.Resume _)
+                   , (Some _ | None)
+                   , Runtime_antigravity.Context_window_exceeded
+                       { tool_effect_attempted = false; response_emitted = false; _ } ) ->
+                   true
+                 | ( (Runtime_antigravity.Start | Runtime_antigravity.Resume _)
+                   , (Some _ | None)
+                   , ( Runtime_antigravity.Context_window_exceeded _
+                     | Runtime_antigravity.Invalid_config _
+                     | Runtime_antigravity.Spawn_refused _
+                     | Runtime_antigravity.Spawn_capacity_busy _
+                     | Runtime_antigravity.Protocol_error _
+                     | Runtime_antigravity.State_callback_failed _
+                     | Runtime_antigravity.Turn_failed _
+                     | Runtime_antigravity.Result_not_completed _
+                     | Runtime_antigravity.Actions_denied _
+                     | Runtime_antigravity.Process_exited _
+                     | Runtime_antigravity.Unhandled_exception _
+                     | Runtime_antigravity.Child_fd_ceiling_exceeded _
+                     | Runtime_antigravity.Timeout _ ) ) -> false);
+              (match error with
+               | Runtime_antigravity.Context_window_exceeded
+                   { tool_effect_attempted = false; response_emitted = false; _ } ->
+                 Effect_cell.quiet effect_cell
+               | Runtime_antigravity.Context_window_exceeded _
+               | Runtime_antigravity.Invalid_config _
+               | Runtime_antigravity.Spawn_refused _
+               | Runtime_antigravity.Spawn_capacity_busy _
+               | Runtime_antigravity.Protocol_error _
+               | Runtime_antigravity.State_callback_failed _
+               | Runtime_antigravity.Turn_failed _
+               | Runtime_antigravity.Result_not_completed _
+               | Runtime_antigravity.Actions_denied _
+               | Runtime_antigravity.Process_exited _
+               | Runtime_antigravity.Unhandled_exception _
+               | Runtime_antigravity.Child_fd_ceiling_exceeded _
+               | Runtime_antigravity.Timeout _ -> ());
+              recovery_failure :=
+                recovery_failure_of_attempt
+                  ~conversation_mode
+                  ~gate_continuation:(Option.is_some official_client_continuation)
+                  error;
               runtime_error_to_core_error error)
           | `Abort stop -> Ok (`Stopped stop))
       in
@@ -1324,7 +1730,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
                   recovery_detail))))
 ;;
 
-let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~host ~configured_reasoning_effort ~turn_timeout_s ~keeper_name ~pre_tool_rejects ~base_path ~outbox_viewer ~read_retained_media ~goal ~goal_blocks ~system_prompt
+let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~host ~configured_reasoning_effort ~turn_timeout_s ~keeper_name ~pre_tool_rejects ~base_path ~outbox_viewer ~read_retained_media ~goal ~goal_blocks ~system_prompt
     ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1341,58 +1747,148 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source
     ?on_usage_report
     ?on_tool_execution
     ~event_bus ~raw_trace ~on_event ~config () =
+  let observed_next_shrink_capacity_bytes = ref None in
+  let observed_floor_capacity_bytes = ref None in
+  let context_overflow_retry_safe = ref false in
+  let rollover_anchor = ref (load_compaction_anchor ~base_path ~keeper_name) in
+  let retained_results =
+    Keeper_client_tool_outbox.run_carrier ~base_path ~keeper_name
+      ~artifact_reader_available:
+        (Result.is_ok (Keeper_recovery_transmission.require_reader tools))
+      ~viewer:outbox_viewer ~read_media:read_retained_media
+  in
+  let on_memory_capacity_refusal =
+    Keeper_client_tool_outbox.run_carrier_reprojection retained_results
+      ~then_:
+        (Option.value on_memory_capacity_refusal
+           ~default:(fun ~refusal:_ -> Ok Keeper_memory_delivery_reprojection.Unchanged))
+  in
   Keeper_official_client_attempt.run ~event_bus ~keeper_name
     (fun ~result_scope
          { Keeper_official_client_attempt.on_session_settled; on_results_ready; effect_cell } ->
-      let observe_effect_attempted () =
-        Keeper_official_client_attempt.Effect_cell.attempted effect_cell
-      in
-      (* Built-in actions run outside the MCP effect observer. Record their
-         uncertainty before any caller observation can fail; a non-completed
-         result also cannot prove that no unobserved action ran. *)
-      let observe_effect_unavailable () =
-        Keeper_official_client_attempt.Effect_cell.unobserved effect_cell
-      in
-      run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation
-        ~outbox_viewer ~read_retained_media
-        ~required_native_posture
-        ~runtime_id
-        ~host
-        ~configured_reasoning_effort
-        ~turn_timeout_s
-        ~keeper_name
-        ~on_model_input_window_observation
-        ~carried_front_seed
-        ~librarian_front
-        ~on_carried_front
-        ~turn_start
-    ~pre_tool_rejects
-        ~base_path
-        ~goal
-        ~goal_blocks
-        ~system_prompt
-        ~tools
-        ~loading_plan
-        ~initial_messages
-        ~model_input_projection
-        ~on_transmitted_model_input
-        ~hooks
-        ~context_injector
-        ~context
-        ~terminal_effect_state
-        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion
-        ~on_usage_report
-        ~on_tool_execution
-        ~event_bus
-        ~raw_trace
-        ~on_event
-        ~observe_effect_attempted ~observe_effect_unavailable
-        ~config)
+      Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
+        ~on_memory_capacity_refusal
+        ~on_memory_retry:(fun () ->
+          resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ())
+        ~starting_capacity:unbounded_model_input_capacity_bytes
+        ~same_run_retry_authorized:(fun () ->
+          match input_source with
+          | Keeper_request_source.Completion_review -> false
+          | Keeper_request_source.Keeper_history _ -> !context_overflow_retry_safe)
+        ~shrink_capacity:(fun ~capacity ~default_capacity:_ ->
+          Option.value !observed_next_shrink_capacity_bytes ~default:capacity)
+        ~final_shrink_capacity:(fun ~capacity:_ -> !observed_floor_capacity_bytes)
+        ~shrink_admits_history:(fun ~capacity:_ -> true)
+        ~on_shrink_retry:
+          (fun ~shrink_attempt ~previous_capacity:previous_capacity_bytes ~capacity:capacity_bytes ->
+            resolve_input_rejected_for_shrink_retry
+              ~base_path ~keeper_name ~runtime_id ();
+            let trigger =
+              if previous_capacity_bytes = unbounded_model_input_capacity_bytes
+              then Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None }
+              else
+                Keeper_compaction.Explicit_hard_limit
+                  { capacity_bytes; observed_bytes = previous_capacity_bytes }
+            in
+            (match
+               commit_compaction_anchor_for_messages
+                 ~base_path ~keeper_name ~tools ~trigger initial_messages
+             with
+             | Some anchor -> rollover_anchor := Some anchor
+             | None -> ());
+            Log.Keeper.warn
+              ~keeper_name
+              "Antigravity typed context overflow; shrinking provider-bound history: attempt=%d previous_capacity_bytes=%d capacity_bytes=%d"
+              shrink_attempt
+              previous_capacity_bytes
+              capacity_bytes)
+        ~attempt:(fun ~capacity:capacity_bytes ->
+          run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~rollover_anchor ~capacity_bytes ~observed_next_shrink_capacity_bytes ~observed_floor_capacity_bytes ~official_client_continuation
+            ~required_native_posture
+            ~runtime_id
+            ~host
+            ~configured_reasoning_effort
+            ~turn_timeout_s
+            ~keeper_name
+            ~on_model_input_window_observation
+            ~carried_front_seed
+            ~librarian_front
+            ~on_carried_front
+            ~turn_start
+            ~pre_tool_rejects
+            ~base_path
+            ~goal
+            ~goal_blocks
+            ~system_prompt
+            ~tools
+            ~loading_plan
+            ~initial_messages
+            ~model_input_projection
+            ~on_transmitted_model_input
+            ~hooks
+            ~context_injector
+            ~context
+            ~terminal_effect_state
+            ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion
+            ~on_usage_report
+            ~on_tool_execution
+            ~event_bus
+            ~raw_trace
+            ~on_event
+            ~effect_cell ~context_overflow_retry_safe
+            ~config)
+        ())
 ;;
 
 module For_testing = struct
   let runtime_error_to_core_error = runtime_error_to_core_error
   let recovery_failure_of_runtime_error = recovery_failure_of_runtime_error
+  let recovery_failure_of_attempt = recovery_failure_of_attempt
+  let unbounded_capacity_bytes = unbounded_model_input_capacity_bytes
+
+  let start_seed_projection ~input_source ~capacity_bytes ?carried_front_seed ?librarian_front
+        ?on_carried_front ~turn_start ?on_model_input_window_observation ~keeper_name
+        ~runtime_id messages
+    =
+    model_input_projection_for_capacity
+      ~input_source
+      ~conversation_mode:Runtime_antigravity.Start
+      ~capacity_bytes
+      ~observed_next_shrink_capacity_bytes:(ref None)
+      ~observed_floor_capacity_bytes:(ref None)
+      ?on_model_input_window_observation
+      ?carried_front_seed
+      ?librarian_front
+      ?on_carried_front
+      ~turn_start
+      ~keeper_name
+      ~runtime_id
+      None
+      messages
+  ;;
+
+  let observe_resume_shrink_capacity ~input_source ~capacity_bytes ~turn_start
+        ~keeper_name ~runtime_id messages
+    =
+    let observed_next_shrink_capacity_bytes = ref None in
+    let observed_floor_capacity_bytes = ref None in
+    let* _ =
+      model_input_projection_for_capacity
+        ~input_source
+        ~conversation_mode:(Runtime_antigravity.Resume { conversation_id = "test-conv" })
+        ~capacity_bytes
+        ~observed_next_shrink_capacity_bytes
+        ~observed_floor_capacity_bytes
+        ~turn_start
+        ~keeper_name
+        ~runtime_id
+        None
+        messages
+    in
+    Ok (!observed_next_shrink_capacity_bytes, !observed_floor_capacity_bytes)
+  ;;
+
+  let held_context_for_resume_turn = held_context_for_resume_turn
 
   let report_stream_usage ~turn_count ~position ~report event =
     (stream_projection

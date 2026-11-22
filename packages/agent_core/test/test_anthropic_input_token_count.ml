@@ -1891,9 +1891,8 @@ let test_an_unmeasurable_narrower_request_leaves_the_refusal_before_it () =
   check int "nothing is dispatched" 0 (List.length observations)
 ;;
 
-(* A provider refusal of a sent request is not a refusal before sending: the
-   provider attempt is the turn's only one, so no narrower request is
-   asked. *)
+(* A non-size provider refusal of a sent request is not a size refusal: no
+   narrower request is asked. *)
 let test_a_provider_refusal_asks_no_narrower_request () =
   let asked = ref [] in
   let (result, sent), _captured =
@@ -1909,9 +1908,10 @@ let test_a_provider_refusal_asks_no_narrower_request () =
               incr sent;
               { Llm_transport.response =
                   Error
-                    (Http_client.ProviderFailure
-                       { kind = Http_client.Context_overflow { limit = Some 512 }
-                       ; message = "the provider refused the prompt as too long"
+                    (Http_client.HttpError
+                       { code = 500
+                       ; body = Http_client.Received "upstream internal error"
+                       ; retry_after_header = None
                        })
               ; latency_ms = Some 1
               })
@@ -1934,11 +1934,250 @@ let test_a_provider_refusal_asks_no_narrower_request () =
     result, !sent
   in
   (match result with
-   | Error (Agent_core.Error.Api (Retry.ContextOverflow _)) -> ()
+   | Error (Agent_core.Error.Api (Retry.ServerError { status = 500; _ })) -> ()
    | Error error -> fail (Agent_core.Error.to_string error)
    | Ok _ -> fail "a provider refusal must end the turn");
   check int "the request is sent once" 1 sent;
-  check int "a provider refusal asks no narrower request" 0 (List.length !asked)
+  check int "a non-size provider refusal asks no narrower request" 0 (List.length !asked)
+;;
+
+(* P0-1a: even when count_tokens passes on an exact-fit provider, a
+   pre-generation HTTP ContextOverflow invokes narrower requests cleanly. *)
+let test_exact_fit_http_overflow_triggers_narrower () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let asked = ref [] in
+  let counted = ref 0 in
+  let net = Eio.Stdenv.net env in
+  let base_url, _completion_body =
+    serve_admitted
+      ~sw
+      ~net
+      ~count_of:(fun _ -> 10)
+      ~on_count:(fun _ -> incr counted)
+      ~stream:false
+  in
+  let provider_config = config ~max_context:512 base_url in
+  let media_store = Agent_core.History.Memory_store.create () in
+  let sent = ref 0 in
+  let transport =
+    Llm_provider.Llm_transport.custom
+      { Llm_transport.complete_sync =
+          (fun _ ->
+            incr sent;
+            if !sent = 1
+            then
+              { Llm_transport.response =
+                  Error
+                    (Http_client.ProviderFailure
+                       { kind = Http_client.Context_overflow { limit = Some 512 }
+                       ; message = "prompt exceeded limit despite count_tokens"
+                       })
+              ; latency_ms = Some 1
+              }
+            else { Llm_transport.response = Ok response; latency_ms = Some 1 })
+      ; complete_stream =
+          (fun ?on_telemetry:_ ~on_event:_ _ -> fail "unexpected streaming dispatch")
+      }
+  in
+  let agent =
+    build_admission_agent
+      ~media_store
+      ~net
+      ~provider_config
+      ~transport
+      ~model_input_projection:
+        (narrowing_projection ~media_store ~asked ~first:"first-request-fits"
+           [ (fun _ -> Ok (Some "second-request-narrowed")) ])
+      ()
+  in
+  let result = Agent_core.Agent.run ~sw agent "exact-fit overflow recovers" in
+  (match result with
+   | Ok _ -> ()
+   | Error error -> fail (Agent_core.Error.to_string error));
+  check int "both initial and narrowed requests were counted" 2 !counted;
+  check int "both initial and narrowed requests were sent" 2 !sent;
+  check int "narrower was consulted once after HTTP overflow" 1 (List.length !asked)
+;;
+
+let body_only_provider_config ~stream =
+  let caps =
+    { Capabilities.default_capabilities with
+      supports_native_streaming = stream
+    }
+  in
+  Provider_config.make
+    ~kind:Provider_config.OpenAI_compat
+    ~model_id:"body-only-narrower-fixture"
+    ~base_url:"https://api.example.test"
+    ~api_key:"test-key"
+    ~request_path:"/v1/chat/completions"
+    ~max_tokens:64
+    ~max_context:512
+    ~model_capabilities_override:caps
+    ()
+;;
+
+(* P0-1a: Body_only providers (OpenAI-compat/OpenRouter/Gemini/GLM/Ollama)
+   map pre-generation HTTP ContextOverflow and 413 Request_body_refused_by_provider
+   to Does_not_fit and invoke prep.narrower on both sync and stream routes. *)
+let test_body_only_http_size_refusal_triggers_narrower ~stream http_error () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let asked = ref [] in
+  let sent = ref 0 in
+  let provider_config = body_only_provider_config ~stream in
+  let media_store = Agent_core.History.Memory_store.create () in
+  let transport =
+    Llm_provider.Llm_transport.custom
+      { Llm_transport.complete_sync =
+          (fun _ ->
+            incr sent;
+            if !sent = 1
+            then { Llm_transport.response = Error http_error; latency_ms = Some 1 }
+            else { Llm_transport.response = Ok response; latency_ms = Some 1 })
+      ; complete_stream =
+          (fun ?on_telemetry:_ ~on_event:_ _ ->
+            incr sent;
+            if !sent = 1 then Error http_error else Ok response)
+      }
+  in
+  let agent =
+    Agent_core.Agent.create
+      ~net:(Eio.Stdenv.net env)
+      ~media_store
+      ~config:(agent_config_of_provider provider_config)
+      ~options:
+        { Agent_core.Agent.default_options with
+          provider_config = Some provider_config
+        ; transport = Some transport
+        }
+      ~context_fit_admission:Agent_core.Agent.Body_only
+      ~model_input_projection:
+        (narrowing_projection ~media_store ~asked ~first:"first-body-too-large"
+           [ (fun _ -> Ok (Some "second-body-fits")) ])
+      ()
+  in
+  let result =
+    if stream
+    then Agent_core.Agent.run_stream ~sw ~on_event:(fun _ -> ()) agent "narrow body-only"
+    else Agent_core.Agent.run ~sw agent "narrow body-only"
+  in
+  (match result with
+   | Ok _ -> ()
+   | Error error -> fail (Agent_core.Error.to_string error));
+  check int "initial refused request plus narrowed request" 2 !sent;
+  check int "narrower invoked once" 1 (List.length !asked)
+;;
+
+(* P0-1a: a streaming ContextOverflow AFTER emitting a stream event must NOT
+   invoke narrower (post-generation / post-effect boundary). *)
+let test_stream_overflow_after_event_asks_no_narrower () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let asked = ref [] in
+  let sent = ref 0 in
+  let provider_config = body_only_provider_config ~stream:true in
+  let media_store = Agent_core.History.Memory_store.create () in
+  let transport =
+    Llm_provider.Llm_transport.custom
+      { Llm_transport.complete_sync =
+          (fun _ -> fail "unexpected sync dispatch")
+      ; complete_stream =
+          (fun ?on_telemetry:_ ~on_event _ ->
+            incr sent;
+            on_event
+              (Types.MessageStart
+                 { id = "stream-partial"; model = "body-only-narrower-fixture"; usage = None });
+            Error
+              (Http_client.ProviderFailure
+                 { kind = Http_client.Context_overflow { limit = Some 512 }
+                 ; message = "overflow after stream began"
+                 }))
+      }
+  in
+  let agent =
+    Agent_core.Agent.create
+      ~net:(Eio.Stdenv.net env)
+      ~media_store
+      ~config:(agent_config_of_provider provider_config)
+      ~options:
+        { Agent_core.Agent.default_options with
+          provider_config = Some provider_config
+        ; transport = Some transport
+        }
+      ~context_fit_admission:Agent_core.Agent.Body_only
+      ~model_input_projection:
+        (narrowing_projection ~media_store ~asked ~first:"first-stream-body"
+           [ (fun _ -> Ok (Some "second-stream-body")) ])
+      ()
+  in
+  (match Agent_core.Agent.run_stream ~sw ~on_event:(fun _ -> ()) agent "partial stream" with
+   | Error (Agent_core.Error.Api (Retry.ContextOverflow _)) -> ()
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> fail "post-event overflow unexpectedly succeeded");
+  check int "stream was attempted once" 1 !sent;
+  check int "no narrower asked after stream event emitted" 0 (List.length !asked)
+;;
+
+(* P0-1a: identical serialized body from narrower terminates immediately without
+   resending to the provider (infinite narrowing loop guard). *)
+let test_identical_narrower_body_terminates_immediately () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let asked = ref [] in
+  let sent = ref 0 in
+  let provider_config = body_only_provider_config ~stream:false in
+  let media_store = Agent_core.History.Memory_store.create () in
+  let transport =
+    Llm_provider.Llm_transport.custom
+      { Llm_transport.complete_sync =
+          (fun _ ->
+            incr sent;
+            { Llm_transport.response =
+                Error
+                  (Http_client.ProviderFailure
+                     { kind = Http_client.Context_overflow { limit = Some 512 }
+                     ; message = "still too large"
+                     })
+            ; latency_ms = Some 1
+            })
+      ; complete_stream =
+          (fun ?on_telemetry:_ ~on_event:_ _ -> fail "unexpected stream dispatch")
+      }
+  in
+  let agent =
+    Agent_core.Agent.create
+      ~net:(Eio.Stdenv.net env)
+      ~media_store
+      ~config:(agent_config_of_provider provider_config)
+      ~options:
+        { Agent_core.Agent.default_options with
+          provider_config = Some provider_config
+        ; transport = Some transport
+        }
+      ~context_fit_admission:Agent_core.Agent.Body_only
+      ~model_input_projection:
+        (narrowing_projection ~media_store ~asked ~first:"unchanged-body-marker"
+           [ (fun _ -> Ok (Some "unchanged-body-marker"))
+           ; (fun _ -> fail "narrowing continued after identical body")
+           ])
+      ()
+  in
+  (match Agent_core.Agent.run ~sw agent "identical body guard" with
+   | Error (Agent_core.Error.Api (Retry.ContextOverflow _)) -> ()
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> fail "identical-body refusal unexpectedly succeeded");
+  check int "identical narrower body was never resent" 1 !sent;
+  check int "first narrower was asked once then terminated" 1 (List.length !asked)
 ;;
 
 module Projection = Agent_core.Agent.Execution_projection
@@ -2427,9 +2666,59 @@ let () =
             `Quick
             test_a_failed_step_ends_the_turn_with_its_own_error
         ; test_case
-            "a provider refusal asks no narrower request"
+            "a non-size provider refusal asks no narrower request"
             `Quick
             test_a_provider_refusal_asks_no_narrower_request
+        ; test_case
+            "exact-fit pre-generation HTTP overflow invokes narrower"
+            `Quick
+            test_exact_fit_http_overflow_triggers_narrower
+        ; test_case
+            "body-only sync HTTP ContextOverflow invokes narrower"
+            `Quick
+            (test_body_only_http_size_refusal_triggers_narrower
+               ~stream:false
+               (Http_client.ProviderFailure
+                  { kind = Http_client.Context_overflow { limit = None }
+                  ; message = "context window exceeded"
+                  }))
+        ; test_case
+            "body-only stream HTTP ContextOverflow invokes narrower"
+            `Quick
+            (test_body_only_http_size_refusal_triggers_narrower
+               ~stream:true
+               (Http_client.ProviderFailure
+                  { kind = Http_client.Context_overflow { limit = None }
+                  ; message = "context window exceeded"
+                  }))
+        ; test_case
+            "body-only sync HTTP 413 Request_body_refused invokes narrower"
+            `Quick
+            (test_body_only_http_size_refusal_triggers_narrower
+               ~stream:false
+               (Http_client.HttpError
+                  { code = 413
+                  ; body = Http_client.Received "payload too large"
+                  ; retry_after_header = None
+                  }))
+        ; test_case
+            "body-only stream HTTP 413 Request_body_refused invokes narrower"
+            `Quick
+            (test_body_only_http_size_refusal_triggers_narrower
+               ~stream:true
+               (Http_client.HttpError
+                  { code = 413
+                  ; body = Http_client.Received "payload too large"
+                  ; retry_after_header = None
+                  }))
+        ; test_case
+            "stream overflow after event emitted asks no narrower"
+            `Quick
+            test_stream_overflow_after_event_asks_no_narrower
+        ; test_case
+            "identical narrower body terminates immediately without loop"
+            `Quick
+            test_identical_narrower_body_terminates_immediately
         ; test_case
             "an unmeasurable narrower request leaves the refusal before it"
             `Quick

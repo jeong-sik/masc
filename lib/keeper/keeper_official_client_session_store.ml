@@ -1805,6 +1805,37 @@ let core_error_of_claim_error = function
          })
 ;;
 
+type superseded_input_rejection =
+  | Not_superseding_input_rejection
+  | Superseding_effect_fenced
+  | Superseding_bootstrap_floor_exceeded
+
+let superseded_input_rejection ~expected ~client_kind ~runtime_id =
+  match expected with
+  | None -> Not_superseding_input_rejection
+  | Some binding ->
+    if binding.client_kind <> client_kind
+       || not (String.equal binding.runtime_id runtime_id)
+    then Not_superseding_input_rejection
+    else (
+      match binding.phase with
+      | Recovery_required { failure = Input_rejected Effect_fenced; _ } ->
+        Superseding_effect_fenced
+      | Recovery_required { failure = Input_rejected Bootstrap_floor_exceeded; _ } ->
+        Superseding_bootstrap_floor_exceeded
+      | Recovery_required
+          { failure =
+              ( Pre_dispatch_failed | Spawn_resources_busy | Spawn_refused_same_input
+              | Spawn_failed_cause_unknown | Owner_stopped_turn | Retryable_turn_failed
+              | Transport_interrupted | Protocol_failed | Provider_rejected
+              | Host_hook_failed | State_persistence_failed | Process_restarted
+              | Vendor_session_full _ )
+          ; _
+          }
+      | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+        Not_superseding_input_rejection)
+;;
+
 let plan_claim ~expected ~client_kind ~runtime_id =
   let* () =
     non_empty "runtime_id" runtime_id
@@ -1827,17 +1858,6 @@ let plan_claim ~expected ~client_kind ~runtime_id =
       when binding.client_kind <> client_kind
            || not (String.equal binding.runtime_id runtime_id) ->
       Ok (None, 1, None)
-    (* A same-identity input rejection must keep its exact recovery cause.
-       Floor rejection and an effect-fenced retry both require explicit
-       resolution; neither is a generic provider rejection to supersede.
-       A changed client/runtime identity still follows the fresh plan above. *)
-    | Some
-        { phase =
-            Recovery_required
-              { failure = Input_rejected reason; recovery_id; _ }
-        ; _
-        } ->
-      Error (Input_recovery_required { runtime_id; recovery_id; reason })
     | Some
         { phase = Settled settlement
         ; turn_count
@@ -1854,6 +1874,11 @@ let plan_claim ~expected ~client_kind ~runtime_id =
       Error Active_unsettled
     | Some { phase = Turn_inflight _; _ } ->
       Error Turn_already_inflight
+    (* On the next turn, both [Input_rejected Effect_fenced] (no same-turn
+       duplicate-effect hazard) and [Input_rejected Bootstrap_floor_exceeded]
+       (rolled over into a minimal anchor-only fresh start via
+       {!superseded_input_rejection}) auto-supersede into a fresh session
+       instead of permanently bricking the binding. *)
     | Some
         { phase =
             Recovery_required
@@ -1861,6 +1886,7 @@ let plan_claim ~expected ~client_kind ~runtime_id =
                   ( Pre_dispatch_failed | Spawn_resources_busy | Spawn_refused_same_input | Spawn_failed_cause_unknown
                   | Owner_stopped_turn | Retryable_turn_failed
                   | Transport_interrupted | Protocol_failed | Provider_rejected
+                  | Input_rejected (Effect_fenced | Bootstrap_floor_exceeded)
                   | Host_hook_failed | State_persistence_failed
                   | Process_restarted | Vendor_session_full _ )
               ; _

@@ -1002,34 +1002,143 @@ let build_request_payload
     then `Assoc [ "type", `String "ephemeral"; "ttl", `String "1h" ]
     else `Assoc [ "type", `String "ephemeral" ]
   in
+  (* Mirror backend_openai_request.ml:258-284, 525-538: when the conversation
+     ends with a strictly trailing volatile suffix ([System_context] /
+     [Outside_context]) that does not appear earlier in the prefix, place an
+     explicit [cache_control] breakpoint on the last cacheable block of the
+     stable prefix and omit top-level [cache_control], so ephemeral tail blocks
+     do not trigger 1.25x/2.0x cache-write charges on every turn. Preserve
+     top-level automatic [cache_control] when no volatile tail exists or when
+     no eligible cacheable block exists in the prefix. *)
+  let is_trailing_volatile_origin = function
+    | System_context | Outside_context -> true
+    | Conversation
+    | Historical_system_context
+    | Recovery_instruction
+    | Tool_result_followup
+    | Agent_instruction -> false
+  in
+  let split_strictly_trailing_volatile (msgs : message list) =
+    let rec peel acc = function
+      | msg :: rest when is_trailing_volatile_origin msg.origin ->
+        peel (msg :: acc) rest
+      | rev_prefix -> List.rev rev_prefix, acc
+    in
+    let prefix, trailing = peel [] (List.rev msgs) in
+    match trailing with
+    | [] -> None
+    | _ :: _ ->
+      if List.exists (fun msg -> is_trailing_volatile_origin msg.origin) prefix
+      then None
+      else Some (prefix, trailing)
+  in
+  let attach_cache_control_to_block cc = function
+    | `Assoc block_fields ->
+      let cacheable =
+        match List.assoc_opt "type" block_fields with
+        | Some (`String "text") ->
+          (match List.assoc_opt "text" block_fields with
+           | Some (`String text) -> String.length (String.trim text) > 0
+           | Some _ | None -> false)
+        | Some (`String ("tool_result" | "tool_use" | "image" | "document")) -> true
+        | Some _ | None -> false
+      in
+      if not cacheable
+      then None
+      else
+        let cleaned =
+          List.filter (fun (k, _) -> not (String.equal k "cache_control")) block_fields
+        in
+        Some (`Assoc (cleaned @ [ "cache_control", cc ]))
+    | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+  in
+  let attach_cache_control_to_message cc = function
+    | `Assoc msg_fields ->
+      (match List.assoc_opt "content" msg_fields with
+       | Some (`List blocks) ->
+         let rec walk_blocks acc = function
+           | [] -> None
+           | block :: rest ->
+             (match attach_cache_control_to_block cc block with
+              | Some updated -> Some (List.rev_append rest (updated :: acc))
+              | None -> walk_blocks (block :: acc) rest)
+         in
+         (match walk_blocks [] (List.rev blocks) with
+          | None -> None
+          | Some updated_blocks ->
+            let updated_fields =
+              List.map
+                (fun (k, v) ->
+                   if String.equal k "content" then k, `List updated_blocks else k, v)
+                msg_fields
+            in
+            Some (`Assoc updated_fields))
+       | Some (`Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+       | None -> None)
+    | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+  in
+  let try_attach_pre_volatile_breakpoint cc ~messages ~msgs_json =
+    match split_strictly_trailing_volatile messages with
+    | None -> None
+    | Some (prefix_msgs, _trailing) ->
+      let prefix_len = List.length prefix_msgs in
+      if prefix_len <= 0 || prefix_len >= List.length msgs_json
+      then None
+      else (
+        let rec split_at n acc = function
+          | rest when n = 0 -> List.rev acc, rest
+          | [] -> List.rev acc, []
+          | x :: xs -> split_at (n - 1) (x :: acc) xs
+        in
+        let prefix_json, tail_json = split_at prefix_len [] msgs_json in
+        let rec walk_prefix acc = function
+          | [] -> None
+          | msg :: rest ->
+            (match attach_cache_control_to_message cc msg with
+             | Some updated -> Some (List.rev_append rest (updated :: acc))
+             | None -> walk_prefix (msg :: acc) rest)
+        in
+        match walk_prefix [] (List.rev prefix_json) with
+        | None -> None
+        | Some updated_prefix -> Some (updated_prefix @ tail_json))
+  in
   let body =
     match request_mode with
     | Completion { output_token_receipt; stream } ->
-      let base =
-        [ "model", `String config.model_id
-        ; "max_tokens", `Int (required_output_token_value output_token_receipt)
-        ; "messages", `List msgs_json
-        ; "stream", `Bool stream
-        ]
-      in
-      if
+      let prompt_caching_active =
         config.cache_system_prompt
         && (Backend_openai_request.capabilities_of_config config)
              .supports_prompt_caching
-      then
-        (* Top-level automatic caching: the API applies the breakpoint to the
-           last cacheable block and advances it as the conversation grows, so
-           the message history is read from cache each turn (0.1x input
-           price) instead of being re-prefilled. Coexists with the explicit
-           system/tools breakpoints below (at most three explicit breakpoints
-           plus this automatic one, within the API's four-slot limit). Gated on the
-           [supports_prompt_caching] capability because this builder also
-           serves Kimi's Anthropic-compatible wire, which does not document
-           the top-level field — the block-level breakpoints below keep their
-           long-standing behavior on every kind. Count_tokens carries no
-           top-level cache_control: nothing is cached by counting. *)
-        ("cache_control", cache_control_json) :: base
-      else base
+      in
+      let effective_msgs_json, top_level_cache_control =
+        if prompt_caching_active
+        then
+          (match
+             try_attach_pre_volatile_breakpoint
+               cache_control_json
+               ~messages
+               ~msgs_json
+           with
+           | Some updated_msgs_json ->
+             (* Breakpoint sits immediately before strictly trailing volatile
+                [System_context; Outside_context]: omit top-level cache_control
+                so ephemeral tail blocks bill as plain input instead of
+                triggering 1.25x/2.0x cache-write overhead every turn. *)
+             updated_msgs_json, []
+           | None ->
+             (* Top-level automatic caching when no volatile tail exists or no
+                eligible stable prefix block can hold the breakpoint. *)
+             msgs_json, [ "cache_control", cache_control_json ])
+        else msgs_json, []
+      in
+      let base =
+        [ "model", `String config.model_id
+        ; "max_tokens", `Int (required_output_token_value output_token_receipt)
+        ; "messages", `List effective_msgs_json
+        ; "stream", `Bool stream
+        ]
+      in
+      top_level_cache_control @ base
     | Count_tokens -> [ "model", `String config.model_id; "messages", `List msgs_json ]
   in
   let body =

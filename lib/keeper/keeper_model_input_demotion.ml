@@ -124,6 +124,177 @@ let bind_completed_arguments ~completed_before ~seed ~replay_prefix messages =
   bind_messages 0 Occurrences.empty labelled messages
 ;;
 
+let bind_closed_arguments_in_messages messages =
+  let open Result.Syntax in
+  let* partition = Keeper_transcript_unit.partition ~quarantine:true messages in
+  let closed =
+    List.concat_map Keeper_transcript_unit.messages_of_closed_unit partition.closed_prefix
+  in
+  let closed_count = List.length closed in
+  let labelled, _ = Runtime_model_input_tail_window.annotate messages in
+  let rec bind_messages message_index arguments = function
+    | [] -> Ok arguments
+    | _ when message_index >= closed_count -> Ok arguments
+    | (message, label) :: rest ->
+      let arguments =
+        match label with
+        | Runtime_model_input_tail_window.Pinned -> arguments
+        | Runtime_model_input_tail_window.Atom _ ->
+          List.fold_left
+            (fun acc (block_index, block) ->
+               match block with
+               | Agent_core.Types.ToolUse { input; _ } ->
+                 (match Tool_output.normalized_artifact_ref_of_json input with
+                  | Tool_output.Not_normalized_artifact_ref ->
+                    Occurrences.add (message_index, block_index)
+                      (block, Yojson.Safe.to_string input) acc
+                  | Tool_output.Invalid_normalized_artifact_ref _
+                  | Tool_output.Decoded_normalized_artifact_ref _ -> acc)
+               | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+               | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+               | Agent_core.Types.ToolResult _ | Agent_core.Types.ToolReference _
+               | Agent_core.Types.Image _ | Agent_core.Types.Document _
+               | Agent_core.Types.Audio _ -> acc)
+            arguments
+            (tool_uses message)
+      in
+      bind_messages (message_index + 1) arguments rest
+  in
+  bind_messages 0 Occurrences.empty labelled
+;;
+
+let preview_head_bytes = 256
+let preview_tail_bytes = 256
+let preview_overhead_slack_bytes = 64
+
+let deterministic_head_tail_preview text =
+  let len = String.length text in
+  if len <= preview_head_bytes + preview_tail_bytes + preview_overhead_slack_bytes
+  then text
+  else
+    let head = String_util.utf8_prefix ~max_bytes:preview_head_bytes text in
+    let tail = String_util.utf8_suffix ~max_bytes:preview_tail_bytes text in
+    let omitted = len - String.length head - String.length tail in
+    if omitted <= 0
+    then text
+    else (
+      let candidate =
+        Printf.sprintf "%s\n... [%d bytes omitted] ...\n%s" head omitted tail
+      in
+      if String.length candidate < len then candidate else text)
+;;
+
+let is_truncated_tool_input_preview = function
+  | `Assoc fields -> List.mem_assoc "_truncated_tool_input_bytes" fields
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> false
+;;
+
+let is_plain_text_body text =
+  match Tool_output.decode_from_agent_core text with
+  | Tool_output.Not_marker -> true
+  | Tool_output.Decoded _ | Tool_output.Invalid_marker _ -> false
+;;
+
+let preview_fallback_block (block : Agent_core.Types.content_block) =
+  match block with
+  | Agent_core.Types.ToolResult ({ content; content_blocks; _ } as fields) ->
+    let content_changed = ref false in
+    let next_content =
+      if is_plain_text_body content
+      then (
+        let candidate = deterministic_head_tail_preview content in
+        if candidate <> content then content_changed := true;
+        candidate)
+      else content
+    in
+    let next_blocks =
+      Option.map
+        (List.map (fun (inner : Agent_core.Types.content_block) ->
+           match inner with
+           | Agent_core.Types.Text text when is_plain_text_body text ->
+             let candidate = deterministic_head_tail_preview text in
+             if candidate <> text
+             then (
+               content_changed := true;
+               Agent_core.Types.Text candidate)
+             else inner
+           | Agent_core.Types.Text _
+           | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
+           | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _
+           | Agent_core.Types.ToolResult _ | Agent_core.Types.ToolReference _
+           | Agent_core.Types.Image _ | Agent_core.Types.Document _
+           | Agent_core.Types.Audio _ -> inner))
+        content_blocks
+    in
+    if !content_changed
+    then
+      Agent_core.Types.ToolResult
+        { fields with content = next_content; content_blocks = next_blocks }
+    else block
+  | Agent_core.Types.ToolUse ({ input; _ } as fields) ->
+    if is_truncated_tool_input_preview input
+    then block
+    else (
+      match Tool_output.normalized_artifact_ref_of_json input with
+      | Tool_output.Not_normalized_artifact_ref ->
+        let raw = Yojson.Safe.to_string input in
+        let preview = deterministic_head_tail_preview raw in
+        if String.length preview < String.length raw
+        then
+          Agent_core.Types.ToolUse
+            { fields with
+              input =
+                `Assoc
+                  [ "_truncated_tool_input_bytes", `Int (String.length raw)
+                  ; "preview", `String preview
+                  ]
+            }
+        else block
+      | Tool_output.Invalid_normalized_artifact_ref _
+      | Tool_output.Decoded_normalized_artifact_ref _ -> block)
+  | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+  | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+  | Agent_core.Types.ToolReference _ | Agent_core.Types.Image _
+  | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> block
+;;
+
+let preview_fallback_closed_tool_bodies ~measure_message_bytes messages =
+  match Keeper_transcript_unit.partition ~quarantine:true messages with
+  | Error _ -> messages, false
+  | Ok partition ->
+    let closed_count =
+      List.fold_left
+        (fun acc unit -> acc + List.length (Keeper_transcript_unit.messages_of_closed_unit unit))
+        0
+        partition.closed_prefix
+    in
+    if closed_count <= 0
+    then messages, false
+    else (
+      let labelled, _ = Runtime_model_input_tail_window.annotate messages in
+      let changed = ref false in
+      let rewritten =
+        List.mapi
+          (fun index ((message : Agent_core.Types.message), label) ->
+             if index >= closed_count
+             then message
+             else
+               match label with
+               | Runtime_model_input_tail_window.Pinned -> message
+               | Runtime_model_input_tail_window.Atom _ ->
+                 let candidate =
+                   { message with content = List.map preview_fallback_block message.content }
+                 in
+                 if measure_message_bytes candidate < measure_message_bytes message
+                 then (
+                   changed := true;
+                   candidate)
+                 else message)
+          labelled
+      in
+      if !changed then rewritten, true else messages, false)
+;;
+
 (* Where one stored body sits in its block. A [ToolResult] has its [content],
    and one whose [content_blocks] is [Some] also has each [Text] block, named
    by its index among the blocks. Which of them reaches the wire depends on the

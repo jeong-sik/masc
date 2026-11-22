@@ -2176,13 +2176,26 @@ max-concurrent = 1
            ~detail:"synthetic observed tool activity" ~required_at:2.
          |> Result.get_ok
        in
-       let claim_error, recovery_id =
-         match Session.plan_claim ~expected:(Some held)
-                 ~client_kind:Session.Codex ~runtime_id with
-         | Error (Session.Input_recovery_required recovery as error) ->
-           error, recovery.recovery_id
-         | Error error -> failwith (Session.claim_error_to_string error)
-         | Ok _ -> failwith "unresolved native recovery unexpectedly admitted a claim"
+       let recovery_id =
+         match held.phase with
+         | Session.Recovery_required required -> required.recovery_id
+         | Session.Ready | Session.Start _ | Session.Active _
+         | Session.Turn_inflight _ | Session.Settled _ ->
+           failwith "held recovery did not enter Recovery_required phase"
+       in
+       check "next-turn same-runtime claim auto-supersedes Input_rejected"
+         (Result.is_ok
+            (Session.plan_claim ~expected:(Some held)
+               ~client_kind:Session.Codex ~runtime_id));
+       check "superseded_input_rejection preserves Effect_fenced"
+         (Session.superseded_input_rejection
+            ~expected:(Some held)
+            ~client_kind:Session.Codex
+            ~runtime_id
+          = Session.Superseding_effect_fenced);
+       let claim_error =
+         Session.Input_recovery_required
+           { runtime_id; recovery_id; reason = Session.Effect_fenced }
        in
        let core_error = Session.core_error_of_claim_error claim_error in
        let raw_error = Agent_core.Error.to_string core_error in

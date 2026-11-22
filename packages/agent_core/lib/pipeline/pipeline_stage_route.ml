@@ -306,11 +306,46 @@ let serialized_body_equal left right =
   Llm_provider.Completion_outcome.equal_request_provenance (prov left) (prov right)
 ;;
 
+type stream_event_class =
+  | Generation_event
+  | Keepalive_event
+  | Deferred_pre_generation_event
+
+(* Narrowing on a live HTTP overflow is only safe before any generated content
+   or tool output is emitted. Side-effect-free keepalives ([Connected], [Ping])
+   forward immediately; pre-generation envelope/error frames ([MessageStart],
+   [MessageDelta], [MessageStop], [SSEError], [NDJSONError], etc.) are buffered
+   until either generation begins (flushing in exact order), the attempt answers
+   (flushing in exact order), or a narrowed retry replaces this attempt
+   (discarding the stale refusal frames so downstream stream bridges stay clean). *)
+let classify_stream_event = function
+  | Llm_provider.Types.ContentBlockStart _
+  | Llm_provider.Types.ContentBlockDelta _
+  | Llm_provider.Types.ContentBlockStop _
+  | Llm_provider.Types.InlineContentReplay _
+  | Llm_provider.Types.ResponsesOutputItems _ -> Generation_event
+  | Llm_provider.Types.Connected
+  | Llm_provider.Types.Ping -> Keepalive_event
+  | Llm_provider.Types.MessageStart _
+  | Llm_provider.Types.MessageDelta _
+  | Llm_provider.Types.MessageStop
+  | Llm_provider.Types.SSEError _
+  | Llm_provider.Types.NDJSONError _
+  | Llm_provider.Types.SSEParseFailed _
+  | Llm_provider.Types.NDJSONParseFailed _
+  | Llm_provider.Types.SSEUnknownEventType _
+  | Llm_provider.Types.SSEUnsupportedPart _
+  | Llm_provider.Types.SSEUnsupportedResponse _
+  | Llm_provider.Types.Timeout _
+  | Llm_provider.Types.StreamIncomplete _ -> Deferred_pre_generation_event
+;;
+
 (* Where a request stands among the turn's requests. The first opens the
    provider attempt and the caller's windows. A narrower one is compared in
    that attempt, spends from the windows the first one opened (when exact-fit
-   opened them), and carries the refusal before it with that refusal's body
-   and provenance outcome. *)
+   opened them), and carries the refusal before it with that refusal's body,
+   provenance outcome, and any deferred pre-generation stream frames to flush
+   if that prior refusal ends up answering the turn. *)
 type 'window position =
   | First
   | Narrower of
@@ -321,6 +356,7 @@ type 'window position =
             , Provider_failure_attribution.detailed_error )
             result
             Llm_provider.Completion_outcome.t
+      ; flush_refusal_events : unit -> unit
       }
 
 (* What one request's way to the provider ended with. [Does_not_fit] is a
@@ -328,8 +364,10 @@ type 'window position =
    was produced -- either locally by [admit_request] or by a pre-generation
    HTTP [ContextOverflow] / [Request_body_refused_by_provider] refusal.
    [window] carries what an earlier exact-fit measurement left of the caller's
-   windows, or [None] on the body-only path. Every other ending answers the
-   route. *)
+   windows, or [None] on the body-only path. [flush_refusal_events] flushes any
+   buffered pre-generation stream frames from that refused attempt only if its
+   [refusal_outcome] ends up answering the route. Every other ending answers
+   the route. *)
 type ('answer, 'window) request_ending =
   | Answered of 'answer
   | Does_not_fit of
@@ -340,6 +378,7 @@ type ('answer, 'window) request_ending =
             , Provider_failure_attribution.detailed_error )
             result
             Llm_provider.Completion_outcome.t
+      ; flush_refusal_events : unit -> unit
       ; window : 'window option
       }
 
@@ -371,7 +410,7 @@ let rec route_requests agent ?on_provider_failure ~send position
     Llm_provider.Completion_outcome.map_result
       (Result.map (fun response -> response, request))
       answer
-  | Does_not_fit { refusal; serialized; refusal_outcome; window } ->
+  | Does_not_fit { refusal; serialized; refusal_outcome; flush_refusal_events; window } ->
     let finish_outcome outcome =
       Llm_provider.Completion_outcome.map_result
         (fun result ->
@@ -382,10 +421,12 @@ let rec route_requests agent ?on_provider_failure ~send position
     (match next_narrower refusal.Provider_failure_attribution.error narrower with
      | Ok (Some (request, narrower)) ->
        route_requests agent ?on_provider_failure ~send
-         (Narrower { window; refused = serialized; refusal_outcome })
+         (Narrower { window; refused = serialized; refusal_outcome; flush_refusal_events })
          request
          narrower
-     | Ok None -> finish_outcome refusal_outcome
+     | Ok None ->
+       flush_refusal_events ();
+       finish_outcome refusal_outcome
      | Error error ->
        finish_outcome
          (before_completion agent serialized
@@ -428,11 +469,12 @@ let dispatch_sync
     let not_sent ~own error =
       match position with
       | First -> Answered (own ())
-      | Narrower { refusal_outcome; _ } ->
+      | Narrower { refusal_outcome; flush_refusal_events; _ } ->
         Log.warn
           _log
           "narrower request failed before it was sent; the refusal before it answers"
           [ Log.S ("error", Error.to_string error) ];
+        flush_refusal_events ();
         Answered (finish refusal_outcome)
     in
     let ( let* ) result next = match result with
@@ -505,7 +547,13 @@ let dispatch_sync
            match mapped.result with
            | Error refusal
              when is_pre_generation_size_refusal refusal.Provider_failure_attribution.error ->
-             Does_not_fit { refusal; serialized; refusal_outcome = mapped; window }
+             Does_not_fit
+               { refusal
+               ; serialized
+               ; refusal_outcome = mapped
+               ; flush_refusal_events = (fun () -> ())
+               ; window
+               }
            | Ok _ | Error _ -> Answered (finish mapped)
          in
          (match preflight_serving_constraint ~binding ~now_unix_s prepared with
@@ -578,6 +626,7 @@ let dispatch_sync
                           { refusal
                           ; serialized
                           ; refusal_outcome = before_completion agent serialized (Error refusal)
+                          ; flush_refusal_events = (fun () -> ())
                           ; window = Some call_window
                           }
                       | Error
@@ -674,11 +723,12 @@ let dispatch_stream
     let not_sent ~own error =
       match position with
       | First -> Answered (own ())
-      | Narrower { refusal_outcome; _ } ->
+      | Narrower { refusal_outcome; flush_refusal_events; _ } ->
         Log.warn
           _log
           "narrower request failed before it was sent; the refusal before it answers"
           [ Log.S ("error", Error.to_string error) ];
+        flush_refusal_events ();
         Answered (finish refusal_outcome)
     in
     let ( let* ) result next = match result with
@@ -729,24 +779,40 @@ let dispatch_stream
         finish (Llm_provider.Completion_outcome.before_serialization (Error error)))
     | Ok serialized ->
       (match position with
-       | Narrower { refused; refusal_outcome; _ }
+       | Narrower { refused; refusal_outcome; flush_refusal_events; _ }
          when serialized_body_equal serialized refused ->
          Log.warn
            _log
            "narrower stream request produced an identical body; terminating narrowing with prior refusal"
            [];
+         flush_refusal_events ();
          Answered (finish refusal_outcome)
        | First | Narrower _ ->
          let failed error =
            not_sent error.Provider_failure_attribution.error ~own:(fun () ->
              finish (before_completion agent serialized (Error error)))
          in
-         (* Narrowing on a live HTTP overflow is only safe when 0 stream events
-            have been emitted (pre-generation refusal). *)
          let event_emitted = ref false in
+         let buffered_pre_gen_events = ref [] in
+         let flush_buffered_events () =
+           match List.rev !buffered_pre_gen_events with
+           | [] -> ()
+           | events ->
+             buffered_pre_gen_events := [];
+             List.iter on_event events
+         in
          let observed_on_event ev =
-           event_emitted := true;
-           on_event ev
+           if !event_emitted
+           then on_event ev
+           else (
+             match classify_stream_event ev with
+             | Keepalive_event -> on_event ev
+             | Deferred_pre_generation_event ->
+               buffered_pre_gen_events := ev :: !buffered_pre_gen_events
+             | Generation_event ->
+               event_emitted := true;
+               flush_buffered_events ();
+               on_event ev)
          in
          let sent ~window outcome =
            let mapped =
@@ -760,8 +826,16 @@ let dispatch_stream
              when (not !event_emitted)
                   && is_pre_generation_size_refusal
                        refusal.Provider_failure_attribution.error ->
-             Does_not_fit { refusal; serialized; refusal_outcome = mapped; window }
-           | Ok _ | Error _ -> Answered (finish mapped)
+             Does_not_fit
+               { refusal
+               ; serialized
+               ; refusal_outcome = mapped
+               ; flush_refusal_events = flush_buffered_events
+               ; window
+               }
+           | Ok _ | Error _ ->
+             flush_buffered_events ();
+             Answered (finish mapped)
          in
          (match preflight_serving_constraint ~binding ~now_unix_s prepared with
           | Error error -> failed error
@@ -860,6 +934,7 @@ let dispatch_stream
                           { refusal
                           ; serialized
                           ; refusal_outcome = before_completion agent serialized (Error refusal)
+                          ; flush_refusal_events = (fun () -> ())
                           ; window = Some { spent with counted_s }
                           }
                       | Error

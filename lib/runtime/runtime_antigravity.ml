@@ -10,6 +10,7 @@ type effort =
   | Low
   | Medium
   | High
+  | Xhigh
 
 type execution_mode =
   | Plan
@@ -667,6 +668,7 @@ let effort_to_string = function
   | Low -> "low"
   | Medium -> "medium"
   | High -> "high"
+  | Xhigh -> "xhigh"
 ;;
 
 (* Under [--json-schema] agy takes the answer as the arguments of a tool it

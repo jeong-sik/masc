@@ -3327,13 +3327,443 @@ printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","
                   | Error err -> fail (Keeper_compaction.store_error_to_string err)))))
   in
   run_rollover_case ~label:"antigravity 0-atom resume overflow" ~initial_messages:[] ~expect_anchor:false;
+  (* When Resume overflows and the fresh Start keeps 100% of local history (dropped_atoms = 0),
+     no compaction anchor may be committed over non-evicted messages. *)
   run_rollover_case
-    ~label:"antigravity history resume overflow commits anchor"
+    ~label:"antigravity resume overflow with 0 dropped atoms commits no anchor"
     ~initial_messages:
       [ Agent_core.Types.user_msg "prior user 1"
       ; { (Agent_core.Types.user_msg "prior assistant 1") with role = Agent_core.Types.Assistant }
       ]
-    ~expect_anchor:true
+    ~expect_anchor:false;
+  (* 3. Real Start eviction (dropped_atoms > 0) commits an anchor covering ONLY the evicted
+     prefix, never the kept tail turns. *)
+  let base_path = temp_workspace () |> Unix.realpath in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot; cleanup_tree base_path)
+    (fun () ->
+       Unix.mkdir (Filename.concat base_path ".masc") 0o700;
+       let keeper_name = "antigravity-eviction" in
+       Masc_test_deps.declare_fixture_keeper
+         ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) keeper_name;
+       let oauth_source = Filename.concat base_path "operator-oauth-token" in
+       write_file ~mode:0o600 oauth_source
+         (Masc_test_deps.antigravity_oauth_fixture "eviction-account");
+       let counter_path = Filename.concat base_path "evict-counter" in
+       let cwd_json =
+         Yojson.Safe.to_string
+           (`String
+              (Env_config_core.strip_trailing_slashes
+                 (Filename.concat base_path
+                    (Keeper_sandbox.host_root_rel_of_profile
+                       Keeper_types_profile_sandbox.Docker
+                       keeper_name))))
+       in
+       let cli_path = Filename.concat base_path "agy-evict-fixture.sh" in
+       write_file ~mode:0o700 cli_path
+         (Printf.sprintf
+            {|#!/bin/sh
+set -eu
+cat >/dev/null
+count=0
+if [ -f %s ]; then
+  count=$(cat %s)
+fi
+count=$((count + 1))
+printf '%%s\n' "$count" > %s
+conv="conv-evict-$count"
+printf '{"event":"init","conversation_id":"%%s","init":{"model":"gemini-fixture","cwd":%s,"tools":[],"permission_mode":"always-proceed"}}\n' "$conv"
+if [ "$count" -eq 1 ]; then
+  printf '{"event":"result","result":{"conversation_id":"%%s","status":"ERROR","response":"","error":"prompt exceeds window","error_code":"context_length_exceeded","duration_seconds":0.1,"num_turns":1,"usage":{"input_tokens":200000,"output_tokens":0,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":200000}}}\n' "$conv"
+else
+  printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","response":"EVICTED_OK","error":null,"duration_seconds":0.1,"num_turns":1,"usage":{"input_tokens":12,"output_tokens":4,"thinking_tokens":1,"cache_read_tokens":0,"total_tokens":16}}}\n' "$conv"
+fi
+|}
+            (shell_quote counter_path)
+            (shell_quote counter_path)
+            (shell_quote counter_path)
+            cwd_json);
+       let runtime_path = Filename.concat base_path "runtime.toml" in
+       write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
+       let big_history =
+         List.init 8 (fun idx ->
+           let text = Printf.sprintf "evict-msg-%02d:%s" idx (String.make 2048 'z') in
+           if idx mod 2 = 0
+           then Agent_core.Types.user_msg text
+           else { (Agent_core.Types.user_msg text) with role = Agent_core.Types.Assistant })
+       in
+       let transmitted = ref [] in
+       Eio_main.run (fun env ->
+         Eio.Switch.run (fun sw ->
+           Eio_context.set_env env;
+           Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw
+             (fun () ->
+                Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+                let config =
+                  match Runtime.get_runtime_by_id "antigravity.gemini" with
+                  | Some { Runtime_instance.execution = Runtime_execution.Antigravity_cli cfg; _ } ->
+                    cfg
+                  | Some _ | None -> fail "Antigravity binding missing"
+                in
+                let attempt =
+                  Keeper_antigravity_runtime.run
+                    ~read_retained_media:None
+                    ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only
+                    ~host:(antigravity_host ())
+                    ~configured_reasoning_effort:None
+                    ~turn_timeout_s:None
+                    ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
+                    ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+                    ~accepts_image_input:false
+                    ~runtime_id:"antigravity.gemini"
+                    ~keeper_name
+                    ~pre_tool_rejects:(ref [])
+                    ~base_path
+                    ~goal:"Shrink Start history"
+                    ~goal_blocks:None
+                    ~system_prompt:"ANTIGRAVITY_EVICTION_SYSTEM"
+                    ~tools:[]
+                    ~initial_messages:big_history
+                    ~model_input_projection:None
+                    ~on_transmitted_model_input:(fun t -> transmitted := t :: !transmitted)
+                    ~hooks:None
+                    ~context_injector:None
+                    ~context:(Some (Agent_core.Context.create ()))
+                    ~event_bus:None
+                    ~raw_trace:None
+                    ~on_event:None
+                    ~config
+                    ()
+                in
+                (match attempt.result with
+                 | Ok run_res ->
+                   check string "shrunk Start succeeded" "EVICTED_OK"
+                     (Agent_core.Types.text_of_response run_res.response)
+                 | Error err -> fail ("shrunk Start failed: " ^ Agent_core.Error.to_string err));
+                let kept_atoms =
+                  match !transmitted with
+                  | Keeper_official_client_host.Whole_input_transmitted msgs :: _ ->
+                    let non_preamble =
+                      List.filter
+                        (fun m -> not (Runtime_model_input_tail_window.is_synthetic_preamble m))
+                        msgs
+                    in
+                    check bool "shrunk Start carries compaction anchor" true
+                      (List.exists Runtime_model_input_tail_window.is_compaction_anchor msgs);
+                    snd (Runtime_model_input_tail_window.annotate non_preamble)
+                  | _ -> fail "expected Whole_input_transmitted for shrunk Start"
+                in
+                let dropped_atoms = 8 - kept_atoms in
+                check bool "real eviction dropped strictly between 1 and 7 atoms" true
+                  (dropped_atoms > 0 && dropped_atoms < 8);
+                let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+                match Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:keeper_name with
+                | Ok (Some anchor) ->
+                  let covers = Ids.Turn_id.to_string anchor.covers_through_turn in
+                  let expected_prefix = Printf.sprintf "atom-%d-" (dropped_atoms - 1) in
+                  check bool
+                    (Printf.sprintf "covers_through_turn (%s) covers strictly the evicted prefix (%s*)"
+                       covers expected_prefix)
+                    true
+                    (String.equal covers (Printf.sprintf "atom-%d" (dropped_atoms - 1))
+                     || String.starts_with ~prefix:expected_prefix covers);
+                  let anchor_text =
+                    Agent_core.Types.text_of_message (Keeper_compaction.anchor_to_message anchor)
+                  in
+                  check bool "evicted anchor summary excludes kept tail turn 07" false
+                    (String_util.contains_substring anchor_text "evict-msg-07")
+                | Ok None -> fail "expected compaction anchor on real Start eviction"
+                | Error err -> fail (Keeper_compaction.store_error_to_string err)))))
+;;
+
+(* #210 #1: An out-of-band HTTP MCP effect-capable tool call during an Antigravity turn
+   must fence same-turn overflow retry even when the CLI reports 0 stdout tool steps. *)
+let test_p1_2_antigravity_mcp_effect_fences_overflow_retry () =
+  let base_path = temp_workspace () |> Unix.realpath in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot; cleanup_tree base_path)
+    (fun () ->
+       Unix.mkdir (Filename.concat base_path ".masc") 0o700;
+       let keeper_name = "antigravity-mcp-fence" in
+       Masc_test_deps.declare_fixture_keeper
+         ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) keeper_name;
+       let oauth_source = Filename.concat base_path "operator-oauth-token" in
+       write_file ~mode:0o600 oauth_source
+         (Masc_test_deps.antigravity_oauth_fixture "mcp-fence-account");
+       let invocations = ref 0 in
+       let effect_tool =
+         Agent_core.Tool.create
+           ~descriptor:
+             (Agent_core.Tool.ordinary_descriptor
+                ~call_effect:(fun _ -> Agent_core.Tool.Effect_possible)
+                Agent_core.Tool_contract.Serial)
+           ~name:"masc_effect_write"
+           ~description:"Effect-capable MCP tool"
+           ~parameters:[]
+           (fun _ ->
+              incr invocations;
+              Ok { Agent_core.Types.content = "EFFECT_COMMITTED"; content_blocks = None; _meta = None })
+       in
+       let cli_runs_path = Filename.concat base_path "cli-runs" in
+       let cwd_json =
+         Yojson.Safe.to_string
+           (`String
+              (Env_config_core.strip_trailing_slashes
+                 (Filename.concat base_path
+                    (Keeper_sandbox.host_root_rel_of_profile
+                       Keeper_types_profile_sandbox.Docker
+                       keeper_name))))
+       in
+       let cli_path = Filename.concat base_path "agy-mcp-overflow-fixture.sh" in
+       write_file ~mode:0o700 cli_path
+         (Printf.sprintf
+            {|#!/bin/sh
+set -eu
+printf 'run\n' >> %s
+cat >/dev/null
+printf '{"event":"init","conversation_id":"conv-mcp-fence","init":{"model":"gemini-fixture","cwd":%s,"tools":["call_mcp_tool"],"permission_mode":"always-proceed"}}\n'
+python3 - <<'PY'
+import json, os, urllib.request
+with open(os.path.join(os.environ["HOME"], ".gemini", "config", "mcp_config.json"), encoding="utf-8") as handle:
+    server = json.load(handle)["mcpServers"]["masc"]
+headers = dict(server["headers"])
+headers["Content-Type"] = "application/json"
+headers["Accept"] = "application/json, text/event-stream"
+def post(message, protocol=None):
+    current = dict(headers)
+    if protocol is not None:
+        current["MCP-Protocol-Version"] = protocol
+    req = urllib.request.Request(server["url"], data=json.dumps(message).encode(), headers=current, method="POST")
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        body = resp.read()
+        return None if not body else json.loads(body)
+version = "2025-11-25"
+post({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":version,"capabilities":{},"clientInfo":{"name":"agy-fixture","version":"1"}}})
+post({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}, version)
+called = post({"jsonrpc":"2.0","id":"call-1","method":"tools/call","params":{"name":"masc_effect_write","arguments":{}}}, version)
+assert called["result"]["content"][0]["text"] == "EFFECT_COMMITTED"
+PY
+# Deliberately emit ZERO stdout tool step_updates before context_length_exceeded!
+printf '{"event":"result","result":{"conversation_id":"conv-mcp-fence","status":"ERROR","response":"","error":"prompt exceeds window after MCP call","error_code":"context_length_exceeded","duration_seconds":0.1,"num_turns":1,"usage":{"input_tokens":200000,"output_tokens":0,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":200000}}}\n'
+|}
+            (shell_quote cli_runs_path)
+            cwd_json);
+       let runtime_path = Filename.concat base_path "runtime.toml" in
+       write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
+       let history =
+         [ Agent_core.Types.user_msg ("msg-1:" ^ String.make 1024 'a')
+         ; { (Agent_core.Types.user_msg ("msg-2:" ^ String.make 1024 'b')) with role = Agent_core.Types.Assistant }
+         ]
+       in
+       Eio_main.run (fun env ->
+         Eio.Switch.run (fun sw ->
+           Eio_context.set_env env;
+           Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw
+             (fun () ->
+                Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+                let config =
+                  match Runtime.get_runtime_by_id "antigravity.gemini" with
+                  | Some { Runtime_instance.execution = Runtime_execution.Antigravity_cli cfg; _ } ->
+                    cfg
+                  | Some _ | None -> fail "Antigravity binding missing"
+                in
+                let attempt =
+                  Keeper_antigravity_runtime.run
+                    ~read_retained_media:None
+                    ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only
+                    ~host:(antigravity_host ())
+                    ~configured_reasoning_effort:None
+                    ~turn_timeout_s:None
+                    ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
+                    ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+                    ~accepts_image_input:false
+                    ~runtime_id:"antigravity.gemini"
+                    ~keeper_name
+                    ~pre_tool_rejects:(ref [])
+                    ~base_path
+                    ~goal:"Trigger MCP effect then overflow"
+                    ~goal_blocks:None
+                    ~system_prompt:"ANTIGRAVITY_MCP_FENCE_SYSTEM"
+                    ~tools:[ effect_tool ]
+                    ~initial_messages:history
+                    ~model_input_projection:None
+                    ~on_transmitted_model_input:(fun _ -> ())
+                    ~hooks:None
+                    ~context_injector:None
+                    ~context:(Some (Agent_core.Context.create ()))
+                    ~event_bus:None
+                    ~raw_trace:None
+                    ~on_event:None
+                    ~config
+                    ()
+                in
+                check int "effect-capable MCP tool invoked strictly ONCE (no duplicate retry)" 1 !invocations;
+                let cli_runs =
+                  In_channel.with_open_bin cli_runs_path In_channel.input_all
+                  |> String.trim |> String.split_on_char '\n' |> List.length
+                in
+                check int "CLI spawned strictly ONCE (no same-turn retry)" 1 cli_runs;
+                check string "attempt effect_disposition stays effect_attempted"
+                  "effect_attempted"
+                  (Keeper_provider_attempt_effect.to_string attempt.effect_disposition);
+                (match attempt.result with
+                 | Error
+                     (Agent_core.Error.Provider
+                        (Llm_provider.Error.ProviderReportedError
+                           { provider = "antigravity_cli"
+                           ; error_type = Some "context_window_exceeded_after_activity"
+                           ; _
+                           })) -> ()
+                 | Error err ->
+                   fail ("expected context_window_exceeded_after_activity, got " ^ Agent_core.Error.to_string err)
+                 | Ok _ -> fail "overflow after MCP effect unexpectedly succeeded");
+                match
+                  Keeper_official_client_session_store.load_for_runtime
+                    ~base_path ~keeper_name ~client_kind:Antigravity ~runtime_id:"antigravity.gemini"
+                with
+                | Ok
+                    (Some
+                       { Keeper_official_client_session_store.phase =
+                           Recovery_required { failure = Input_rejected Effect_fenced; _ }
+                       ; _
+                       }) -> ()
+                | Ok (Some _) ->
+                  fail "expected Recovery_required (Input_rejected Effect_fenced), got another session phase"
+                | Ok None ->
+                  fail "expected Recovery_required (Input_rejected Effect_fenced), got None"
+                | Error _ -> fail "session store load failed"))))
+;;
+
+(* P0-7: Non-cancellation exception raised after Session_store.claim must still
+   settle session.json to Recovery_required rather than leaving Start/Active
+   wedged on Claim_held_by_current_epoch. *)
+let test_p0_7_antigravity_post_claim_exception_settles_session () =
+  let base_path = temp_workspace () |> Unix.realpath in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot; cleanup_tree base_path)
+    (fun () ->
+       Unix.mkdir (Filename.concat base_path ".masc") 0o700;
+       let keeper_name = "antigravity-p0-7-exn" in
+       Masc_test_deps.declare_fixture_keeper
+         ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) keeper_name;
+       let oauth_source = Filename.concat base_path "operator-oauth-token" in
+       write_file ~mode:0o600 oauth_source
+         (Masc_test_deps.antigravity_oauth_fixture "p0-7-account");
+       let cli_path = Filename.concat base_path "fake-antigravity-p0-7.sh" in
+       let cwd_json =
+         Yojson.Safe.to_string
+           (`String
+              (Env_config_core.strip_trailing_slashes
+                 (Filename.concat base_path
+                    (Keeper_sandbox.host_root_rel_of_profile
+                       Keeper_types_profile_sandbox.Docker
+                       keeper_name))))
+       in
+       write_file
+         ~mode:0o755
+         cli_path
+         (Printf.sprintf
+            {|#!/bin/sh
+set -eu
+cat >/dev/null
+printf '{"event":"init","conversation_id":"conv-p0-7","init":{"model":"gemini-fixture","cwd":%s,"tools":[],"permission_mode":"always-proceed"}}\n'
+printf '{"event":"result","result":{"conversation_id":"conv-p0-7","status":"SUCCESS","response":"ANTIGRAVITY_UNBRICKED","error":null,"duration_seconds":0.1,"num_turns":1,"usage":{"input_tokens":10,"output_tokens":3,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":13}}}\n'
+|}
+            cwd_json);
+       let runtime_path = Filename.concat base_path "runtime.toml" in
+       write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
+       Eio_main.run (fun env ->
+         Eio.Switch.run (fun sw ->
+           Eio_context.set_env env;
+           Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw
+             (fun () ->
+                Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+                let config =
+                  match Runtime.get_runtime_by_id "antigravity.gemini" with
+                  | Some { Runtime_instance.execution = Runtime_execution.Antigravity_cli cfg; _ } ->
+                    cfg
+                  | Some _ | None -> fail "Antigravity binding missing"
+                in
+                let run_once ~on_transmitted_model_input ~goal =
+                  Keeper_antigravity_runtime.run
+                    ~read_retained_media:None
+                    ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only
+                    ~host:(antigravity_host ())
+                    ~configured_reasoning_effort:None
+                    ~turn_timeout_s:None
+                    ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
+                    ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+                    ~accepts_image_input:false
+                    ~runtime_id:"antigravity.gemini"
+                    ~keeper_name
+                    ~pre_tool_rejects:(ref [])
+                    ~base_path
+                    ~goal
+                    ~goal_blocks:None
+                    ~system_prompt:"ANTIGRAVITY_P0_7_SYSTEM"
+                    ~tools:[]
+                    ~initial_messages:[ Agent_core.Types.user_msg "prior" ]
+                    ~model_input_projection:None
+                    ~on_transmitted_model_input
+                    ~hooks:None
+                    ~context_injector:None
+                    ~context:(Some (Agent_core.Context.create ()))
+                    ~event_bus:None
+                    ~raw_trace:None
+                    ~on_event:None
+                    ~config
+                    ()
+                in
+                let raised = ref false in
+                (try
+                   let attempt =
+                     run_once
+                       ~on_transmitted_model_input:(fun _ -> raise Eio.Time.Timeout)
+                       ~goal:"TRIGGER_POST_CLAIM_EXN"
+                   in
+                   match attempt.result with
+                   | Ok _ -> fail "expected post-claim Eio.Time.Timeout, got Ok"
+                   | Error err ->
+                     fail ("expected post-claim Eio.Time.Timeout, got Error: "
+                           ^ Agent_core.Error.to_string err)
+                 with
+                 | Eio.Time.Timeout -> raised := true
+                 | exn ->
+                   fail ("expected post-claim Eio.Time.Timeout, got exn: "
+                         ^ Printexc.to_string exn));
+                check bool "post-claim Eio.Time.Timeout propagated" true !raised;
+                (match
+                   Keeper_official_client_session_store.load_for_runtime
+                     ~base_path ~keeper_name ~client_kind:Antigravity ~runtime_id:"antigravity.gemini"
+                 with
+                 | Ok
+                     (Some
+                        { Keeper_official_client_session_store.phase =
+                            Recovery_required { failure = Transport_interrupted; _ }
+                        ; _
+                        }) -> ()
+                 | Ok (Some _) ->
+                   fail "expected Recovery_required(Transport_interrupted), session was left stuck"
+                 | Ok None -> fail "expected Recovery_required session record, got None"
+                 | Error err ->
+                   fail ("session store load failed: "
+                         ^ Keeper_official_client_session_store.read_error_to_string err));
+                let next_attempt =
+                  run_once
+                    ~on_transmitted_model_input:(fun _ -> ())
+                    ~goal:"SUBSEQUENT_TURN_UNBRICKED"
+                in
+                match next_attempt.result with
+                | Ok run_res ->
+                  check string "subsequent turn succeeds without Claim_held_by_current_epoch"
+                    "ANTIGRAVITY_UNBRICKED"
+                    (Agent_core.Types.text_of_response run_res.response)
+                | Error err ->
+                  fail ("subsequent turn was bricked after post-claim exception: "
+                        ^ Agent_core.Error.to_string err)))))
 ;;
 
 let () =
@@ -3342,7 +3772,12 @@ let () =
     "keeper_antigravity_runtime"
     [ ( "immortal_circulation_f1"
         , [ test_case "P1-2 Antigravity overflow rollover and compaction anchor" `Quick
-              test_p1_2_antigravity_overflow_rollover_and_anchor ] )
+              test_p1_2_antigravity_overflow_rollover_and_anchor
+          ; test_case "P1-2 Antigravity HTTP MCP effect fences overflow retry" `Quick
+              test_p1_2_antigravity_mcp_effect_fences_overflow_retry
+          ; test_case "P0-7 Antigravity post-claim exception settles session instead of bricking" `Quick
+              test_p0_7_antigravity_post_claim_exception_settles_session
+          ] )
     ; ( "async result outbox"
         , [test_case "original result survives vendor session replacement" `Quick
              test_original_result_survives_a_vendor_session_change])

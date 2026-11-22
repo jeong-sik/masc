@@ -144,7 +144,8 @@ let runtime_request_config_json (rt : Runtime_instance.t) =
                (function
                  | Runtime_antigravity.Low -> "low"
                  | Runtime_antigravity.Medium -> "medium"
-                 | Runtime_antigravity.High -> "high")
+                 | Runtime_antigravity.High -> "high"
+                 | Runtime_antigravity.Xhigh -> "xhigh")
                config.effort) )
       ; "execution_mode", `String "plan"
       ; "sandbox", `Bool true

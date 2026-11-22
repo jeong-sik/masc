@@ -736,8 +736,13 @@ let system_prompt_field ~cache_control (config : Provider_config.t) =
         | None -> []
         | Some marker -> ["cache_control", marker]
       in
-      Some (`List (List.map (fun text ->
-        `Assoc (["type", `String "text"; "text", `String text] @ marker)) texts)))
+      (* Attach [cache_control] only to block 0 (the static prefix when split,
+         or the sole system block when unsplit). Leaving a trailing split
+         volatile suffix unmarked saves a breakpoint slot and avoids 1.25x/2.0x
+         cache-write charges on per-turn system observations. *)
+      Some (`List (List.mapi (fun index text ->
+        let block_marker = if index = 0 then marker else [] in
+        `Assoc (["type", `String "text"; "text", `String text] @ block_marker)) texts)))
     else Some (`String text)
   | _ -> None
 ;;
@@ -1113,22 +1118,33 @@ let build_request_payload
       let effective_msgs_json, top_level_cache_control =
         if prompt_caching_active
         then
-          (match
-             try_attach_pre_volatile_breakpoint
-               cache_control_json
-               ~messages
-               ~msgs_json
-           with
-           | Some updated_msgs_json ->
-             (* Breakpoint sits immediately before strictly trailing volatile
-                [System_context; Outside_context]: omit top-level cache_control
-                so ephemeral tail blocks bill as plain input instead of
-                triggering 1.25x/2.0x cache-write overhead every turn. *)
-             updated_msgs_json, []
-           | None ->
-             (* Top-level automatic caching when no volatile tail exists or no
-                eligible stable prefix block can hold the breakpoint. *)
-             msgs_json, [ "cache_control", cache_control_json ])
+          match config.kind with
+          | Provider_config.Anthropic ->
+            (match
+               try_attach_pre_volatile_breakpoint
+                 cache_control_json
+                 ~messages
+                 ~msgs_json
+             with
+             | Some updated_msgs_json ->
+               (* Breakpoint sits immediately before strictly trailing volatile
+                  [System_context; Outside_context]: omit top-level cache_control
+                  so ephemeral tail blocks bill as plain input instead of
+                  triggering 1.25x/2.0x cache-write overhead every turn. *)
+               updated_msgs_json, []
+             | None ->
+               (* Top-level automatic caching when no volatile tail exists or no
+                  eligible stable prefix block can hold the breakpoint. *)
+               msgs_json, [ "cache_control", cache_control_json ])
+          | Provider_config.Kimi
+          | Provider_config.OpenAI_compat
+          | Provider_config.Ollama
+          | Provider_config.Gemini
+          | Provider_config.Glm ->
+            (* Kimi's Anthropic-compatible wire honors only top-level
+               [cache_control] and ignores block-level markers inside messages,
+               so preserve top-level caching even with trailing volatile context. *)
+            msgs_json, [ "cache_control", cache_control_json ]
         else msgs_json, []
       in
       let base =

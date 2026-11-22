@@ -955,7 +955,8 @@ let test_p0_1b_current_turn_tool_demotion_preview_and_round_drop () =
     @ tool_round 3
     @ [ open_suffix ]
   in
-  (* 1. bind_closed_arguments_in_messages binds closed ToolUses and excludes open suffix. *)
+  (* 1. bind_closed_arguments_in_messages binds closed ToolUses and excludes open suffix
+     and atoms at or past ~demote_before. *)
   let bound =
     match Masc.Keeper_model_input_demotion.bind_closed_arguments_in_messages messages with
     | Ok bound -> bound
@@ -973,7 +974,33 @@ let test_p0_1b_current_turn_tool_demotion_preview_and_round_drop () =
     (planned.pending <> []);
   let last_planned = List.hd (List.rev planned.messages) in
   check bool "open suffix ToolUse stays verbatim" true (last_planned = open_suffix);
-  (* 2. Deterministic head+tail preview fallback works even without keeper_artifact_read. *)
+  (* Watermark bound: messages = [User(0); Asst1+Tool1(1); Asst2+Tool2(2); Asst3+Tool3(3); Open(4)].
+     With ~demote_before:2, only atom 1 (round 1) may be demoted; atoms 2 and 3 stay verbatim. *)
+  let bound_before_2 =
+    match
+      Masc.Keeper_model_input_demotion.bind_closed_arguments_in_messages
+        ~demote_before:2
+        messages
+    with
+    | Ok bound -> bound
+    | Error _ -> fail "bind_closed_arguments_in_messages ~demote_before:2 failed"
+  in
+  let planned_before_2 =
+    Masc.Keeper_model_input_demotion.plan
+      ~completed_arguments:bound_before_2
+      ~measure_message_bytes:measure
+      ~measure_wire_bytes:wire_measure
+      ~demote_before:2
+      messages
+  in
+  check bool "demote_before:2 leaves round 2 ToolUse verbatim" true
+    (List.nth planned_before_2.messages 3 = List.nth messages 3);
+  check bool "demote_before:2 leaves round 2 ToolResult verbatim" true
+    (List.nth planned_before_2.messages 4 = List.nth messages 4);
+  check bool "demote_before:2 leaves round 3 ToolUse verbatim" true
+    (List.nth planned_before_2.messages 5 = List.nth messages 5);
+  (* 2. Deterministic head+tail preview fallback works even without keeper_artifact_read,
+     and strictly respects ~demote_before so fresh tool results stay verbatim. *)
   let total_bytes msgs = List.fold_left (fun acc m -> acc + measure m) 0 msgs in
   let previewed, changed =
     Masc.Keeper_model_input_demotion.preview_fallback_closed_tool_bodies
@@ -991,10 +1018,25 @@ let test_p0_1b_current_turn_tool_demotion_preview_and_round_drop () =
       previewed
   in
   check bool "preview fallback is idempotent" false changed_again;
-  (* 3. compose_carried_model_input supports both in-turn demotion modes. *)
+  let previewed_before_2, changed_before_2 =
+    Masc.Keeper_model_input_demotion.preview_fallback_closed_tool_bodies
+      ~demote_before:2
+      ~measure_message_bytes:measure
+      messages
+  in
+  check bool "preview fallback with demote_before:2 shrinks round 1" true changed_before_2;
+  check bool "preview fallback with demote_before:2 leaves round 2 ToolUse verbatim" true
+    (List.nth previewed_before_2 3 = List.nth messages 3);
+  check bool "preview fallback with demote_before:2 leaves round 2 ToolResult verbatim" true
+    (List.nth previewed_before_2 4 = List.nth messages 4);
+  check bool "preview fallback with demote_before:2 leaves round 3 ToolResult verbatim" true
+    (List.nth previewed_before_2 6 = List.nth messages 6);
+  (* 3. compose_carried_model_input supports both in-turn demotion modes with
+     refused_atom_count watermarks so newly appended closed rounds stay verbatim. *)
   let closed_messages =
     [ text_message Types.User "current turn goal" ] @ tool_round 1 @ tool_round 2 @ tool_round 3
   in
+  (* closed_messages has 4 atoms: 0=User, 1=round 1, 2=round 2, 3=round 3. *)
   let digest_at = Window.atom_opening_digest closed_messages in
   let base_path = Filename.temp_dir "masc-p0-1b-demotion-" "" in
   Fun.protect
@@ -1014,7 +1056,9 @@ let test_p0_1b_current_turn_tool_demotion_preview_and_round_drop () =
        in
        let with_blob_demotion =
          Try_provider.For_testing.compose_carried_model_input
-           ~in_turn_demotion:Try_provider.For_testing.Demote_closed_current_turn_tools
+           ~in_turn_demotion:
+             (Try_provider.For_testing.Demote_closed_current_turn_tools
+                { refused_atom_count = 3 })
            ~measure_message_bytes:measure
            ~measure_wire_bytes:wire_measure
            ~front:None
@@ -1027,7 +1071,9 @@ let test_p0_1b_current_turn_tool_demotion_preview_and_round_drop () =
        in
        let with_preview_fallback =
          Try_provider.For_testing.compose_carried_model_input
-           ~in_turn_demotion:Try_provider.For_testing.Demote_and_preview_closed_current_turn_tools
+           ~in_turn_demotion:
+             (Try_provider.For_testing.Demote_and_preview_closed_current_turn_tools
+                { refused_atom_count = 3 })
            ~measure_message_bytes:measure
            ~measure_wire_bytes:wire_measure
            ~front:None
@@ -1042,16 +1088,34 @@ let test_p0_1b_current_turn_tool_demotion_preview_and_round_drop () =
          (with_blob_demotion.transmitted_bytes < baseline.transmitted_bytes);
        check bool "in-turn preview fallback shrinks carried bytes even with base_path=\"\"" true
          (with_preview_fallback.transmitted_bytes < baseline.transmitted_bytes);
-       (* 4. droppable_current_turn_tool_atoms selects oldest closed tool rounds
-          and commits/attaches a compaction anchor even when first_atom = 0. *)
-       let droppable =
+       let round3_asst = List.nth closed_messages 5 in
+       let round3_res = List.nth closed_messages 6 in
+       let last_two msgs =
+         match List.rev msgs with
+         | b :: a :: _ -> a, b
+         | _ -> fail "expected at least 2 messages"
+       in
+       let blob_r3_asst, blob_r3_res = last_two with_blob_demotion.projection.Window.messages in
+       check bool "blob demotion watermark keeps new round 3 ToolUse verbatim" true
+         (blob_r3_asst = round3_asst);
+       check bool "blob demotion watermark keeps new round 3 ToolResult verbatim" true
+         (blob_r3_res = round3_res);
+       let prev_r3_asst, prev_r3_res = last_two with_preview_fallback.projection.Window.messages in
+       check bool "preview watermark keeps new round 3 ToolUse verbatim" true
+         (prev_r3_asst = round3_asst);
+       check bool "preview watermark keeps new round 3 ToolResult verbatim" true
+         (prev_r3_res = round3_res);
+       (* 4. droppable_current_turn_tool_atoms selects oldest closed tool rounds across
+          multiple drop steps without drifting first_atom (composed.projection.dropped_atoms
+          stays at the true opening atom, never shifting onto User goal or dropped atoms). *)
+       let droppable_step1 =
          Try_provider.For_testing.droppable_current_turn_tool_atoms
            ~first_atom:0
            ~already_dropped:[]
            closed_messages
        in
-       check bool "droppable selects at least one closed round" true (droppable <> []);
-       check bool "droppable never drops atom 0 (User goal)" false (List.mem 0 droppable);
+       check (list int) "step 1 drops atom 1 (round 1), never atom 0 (User goal)" [ 1 ]
+         droppable_step1;
        let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
        let anchor =
          match
@@ -1066,10 +1130,10 @@ let test_p0_1b_current_turn_tool_demotion_preview_and_round_drop () =
          | Ok None -> fail "expected committed compaction anchor"
          | Error err -> fail (Masc.Keeper_compaction.store_error_to_string err)
        in
-       let dropped_composed =
+       let dropped_step1 =
          Try_provider.For_testing.compose_carried_model_input
            ~compaction_anchor:anchor
-           ~dropped_current_turn_atoms:droppable
+           ~dropped_current_turn_atoms:droppable_step1
            ~measure_message_bytes:measure
            ~measure_wire_bytes:wire_measure
            ~front:None
@@ -1080,10 +1144,72 @@ let test_p0_1b_current_turn_tool_demotion_preview_and_round_drop () =
            ~turn_boundary:(Front.Turn_boundary { end_atom = 0 })
            closed_messages
        in
-       check bool "dropped current-turn rounds strictly shrink message count" true
-         (List.length dropped_composed.projection.Window.messages < List.length closed_messages + 1);
+       check int "after step 1, projection.dropped_atoms remains true opening atom 0" 0
+         dropped_step1.projection.Window.dropped_atoms;
        check bool "compaction anchor is injected when current-turn atoms were dropped" true
-         (List.exists Window.is_compaction_anchor dropped_composed.projection.Window.messages))
+         (List.exists Window.is_compaction_anchor dropped_step1.projection.Window.messages);
+       (* Step 2: compute next droppable atoms using dropped_step1.projection.dropped_atoms *)
+       let droppable_step2 =
+         Try_provider.For_testing.droppable_current_turn_tool_atoms
+           ~first_atom:dropped_step1.projection.Window.dropped_atoms
+           ~already_dropped:droppable_step1
+           closed_messages
+       in
+       check (list int) "step 2 drops atom 2 (round 2) without shifting past it" [ 2 ]
+         droppable_step2;
+       let dropped_step2 =
+         Try_provider.For_testing.compose_carried_model_input
+           ~compaction_anchor:anchor
+           ~dropped_current_turn_atoms:(droppable_step1 @ droppable_step2)
+           ~measure_message_bytes:measure
+           ~measure_wire_bytes:wire_measure
+           ~front:None
+           ~accepted:None
+           ~history_digest_at:digest_at
+           ~current_turn_results:Try_provider.Current_turn_verbatim
+           ~base_path
+           ~turn_boundary:(Front.Turn_boundary { end_atom = 0 })
+           closed_messages
+       in
+       check int "after step 2, projection.dropped_atoms still stays 0" 0
+         dropped_step2.projection.Window.dropped_atoms;
+       check bool "step 2 still preserves User goal verbatim" true
+         (List.exists (fun m -> m = text_message Types.User "current turn goal")
+            dropped_step2.projection.Window.messages);
+       (* Step 3 with non-zero prior history prefix (turn_boundary = 4):
+          prior 2 exchanges (atoms 0..3) + User goal (atom 4) + 3 tool rounds (atoms 5, 6, 7). *)
+       let prefixed_messages = exchanges ~from:0 2 @ closed_messages in
+       let prefixed_digest = Window.atom_opening_digest prefixed_messages in
+       let pref_drop1 =
+         Try_provider.For_testing.droppable_current_turn_tool_atoms
+           ~first_atom:4
+           ~already_dropped:[]
+           prefixed_messages
+       in
+       check (list int) "prefixed step 1 drops atom 5 (never atom 4 User goal)" [ 5 ] pref_drop1;
+       let pref_composed1 =
+         Try_provider.For_testing.compose_carried_model_input
+           ~compaction_anchor:anchor
+           ~dropped_current_turn_atoms:pref_drop1
+           ~measure_message_bytes:measure
+           ~measure_wire_bytes:wire_measure
+           ~front:None
+           ~accepted:None
+           ~history_digest_at:prefixed_digest
+           ~current_turn_results:Try_provider.Current_turn_verbatim
+           ~base_path
+           ~turn_boundary:(Front.Turn_boundary { end_atom = 4 })
+           prefixed_messages
+       in
+       check int "prefixed step 1 projection.dropped_atoms stays at true front 4" 4
+         pref_composed1.projection.Window.dropped_atoms;
+       let pref_drop2 =
+         Try_provider.For_testing.droppable_current_turn_tool_atoms
+           ~first_atom:pref_composed1.projection.Window.dropped_atoms
+           ~already_dropped:pref_drop1
+           prefixed_messages
+       in
+       check (list int) "prefixed step 2 drops atom 6 cleanly without drift" [ 6 ] pref_drop2)
 ;;
 
 (* P1-6: token-vs-byte conversion helper + mixed-size first failover jumping to

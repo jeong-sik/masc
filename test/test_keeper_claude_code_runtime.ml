@@ -7167,15 +7167,193 @@ let test_p0_5_resume_overflow_zero_atoms_and_anchor_commit () =
               | Error err -> fail (Keeper_compaction.store_error_to_string err)))
   in
   run_case ~label:"zero-atom resume overflow" ~initial_messages:[] ~expect_anchor:false;
+  (* When Resume overflows and the fresh Start keeps 100% of local history (dropped_atoms = 0),
+     no compaction anchor may be committed over non-evicted messages. *)
   run_case
-    ~label:"history resume overflow commits anchor"
+    ~label:"history resume overflow with 0 dropped atoms commits no anchor"
     ~initial_messages:
       [ message User "old user 1"
       ; message Assistant "old assistant 1"
       ; message User "old user 2"
       ; message Assistant "old assistant 2"
       ]
-    ~expect_anchor:true
+    ~expect_anchor:false;
+  (* Real Start eviction (dropped_atoms > 0) commits an anchor covering ONLY the evicted
+     prefix, never the kept tail turns. *)
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let big_history =
+         List.init 8 (fun idx ->
+           message
+             (if idx mod 2 = 0 then User else Assistant)
+             (Printf.sprintf "claude-evict-%02d:%s" idx (String.make 2048 'q')))
+       in
+       let transmitted = ref [] in
+       with_fixture_sequence
+         [ Emit blocking_limit_diagnostic; Emit blocking_limit_result ]
+         [ Emit (assistant ~turn_id:"turn-shrunk-evict" "SHRUNK_EVICT_OK")
+         ; Emit (result ~turn_id:"turn-shrunk-evict" "SHRUNK_EVICT_OK")
+         ]
+         (fun cli_path ->
+            let attempt =
+              run_direct_attempt
+                ~base_path
+                ~cli_path
+                ~initial_messages:big_history
+                ~on_transmitted_model_input:(fun t -> transmitted := t :: !transmitted)
+                ~goal:"SHRINK_START_EVICTION"
+                ~tools:[]
+                ()
+            in
+            (match attempt.result with
+             | Ok run_result ->
+               check string "shrunk Start answered" "SHRUNK_EVICT_OK"
+                 (keeper_response_text run_result)
+             | Error err -> fail ("shrunk Start failed: " ^ Agent_core.Error.to_string err));
+            let kept_atoms =
+              match !transmitted with
+              | Keeper_official_client_host.Whole_input_transmitted msgs :: _ ->
+                let non_preamble =
+                  List.filter
+                    (fun m -> not (Runtime_model_input_tail_window.is_synthetic_preamble m))
+                    msgs
+                in
+                check bool "shrunk Start attaches compaction anchor" true
+                  (List.exists Runtime_model_input_tail_window.is_compaction_anchor msgs);
+                snd (Runtime_model_input_tail_window.annotate non_preamble)
+              | _ -> fail "expected Whole_input_transmitted for shrunk Start"
+            in
+            let dropped_atoms = 8 - kept_atoms in
+            check bool "real eviction dropped strictly between 1 and 7 atoms" true
+              (dropped_atoms > 0 && dropped_atoms < 8);
+            let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+            match Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:"claude-pre-dispatch" with
+            | Ok (Some anchor) ->
+              let covers = Ids.Turn_id.to_string anchor.covers_through_turn in
+              let expected_prefix = Printf.sprintf "atom-%d-" (dropped_atoms - 1) in
+              check bool
+                (Printf.sprintf "covers_through_turn (%s) covers strictly the evicted prefix (%s*)"
+                   covers expected_prefix)
+                true
+                (String.equal covers (Printf.sprintf "atom-%d" (dropped_atoms - 1))
+                 || String.starts_with ~prefix:expected_prefix covers);
+              let anchor_text =
+                Agent_core.Types.text_of_message (Keeper_compaction.anchor_to_message anchor)
+              in
+              check bool "evicted anchor summary excludes kept tail turn 07" false
+                (String_util.contains_substring anchor_text "claude-evict-07")
+            | Ok None -> fail "expected compaction anchor on real Start eviction"
+            | Error err -> fail (Keeper_compaction.store_error_to_string err)))
+;;
+
+(* #210 #3: Superseding Input_rejected(Bootstrap_floor_exceeded) must latch
+   minimal_anchor_only across on_memory_retry so Attempt 2 never reverts to
+   sending full history after session.json is reset to Ready. *)
+let test_p0_4_minimal_anchor_only_latched_across_memory_retry () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let module Store = Keeper_official_client_session_store in
+       let keeper_name = "claude-pre-dispatch" in
+       let runtime_id = "claude.claude" in
+       let now = Time_compat.now () in
+       Masc_test_deps.declare_fixture_keeper ~base_path ~sandbox_profile:None keeper_name;
+       let () =
+         Eio_main.run (fun env ->
+           Fs_compat.set_fs env#fs;
+           let sha256 = Agent_core_sha256.(to_hex (digest_string "seed-sha")) in
+           let claimed =
+             match
+               Store.claim
+                 ~base_path ~keeper_name ~expected:None ~client_kind:Claude_code
+                 ~owner_epoch:(Store.process_epoch ()) ~runtime_id ~tool_surface_sha256:sha256
+                 ~updated_at:now
+             with
+             | Ok c -> c
+             | Error detail -> fail ("Store.claim failed: " ^ detail)
+           in
+           let _recovery =
+             match
+               Store.require_recovery
+                 ~base_path ~keeper_name ~expected:claimed
+                 ~failure:(Store.Input_rejected Store.Bootstrap_floor_exceeded)
+                 ~detail:"prior bootstrap floor exceeded"
+                 ~required_at:now
+             with
+             | Ok r -> r
+             | Error detail -> fail ("Store.require_recovery failed: " ^ detail)
+           in
+           ())
+       in
+       let history =
+         [ message User "history-atom-0"
+         ; message Assistant "history-atom-1"
+         ; message User "history-atom-2"
+         ; message Assistant "history-atom-3"
+         ]
+       in
+       let transmitted = ref [] in
+       let reprojected_calls = ref 0 in
+       with_fixture_sequence
+         [ Emit blocking_limit_diagnostic; Emit blocking_limit_result ]
+         [ Emit (assistant ~turn_id:"turn-minimal-ok" "MINIMAL_RETRY_OK")
+         ; Emit (result ~turn_id:"turn-minimal-ok" "MINIMAL_RETRY_OK")
+         ]
+         (fun cli_path ->
+            let attempt =
+              run_direct_attempt
+                ~base_path
+                ~cli_path
+                ~initial_messages:history
+                ~on_memory_capacity_refusal:(fun ~refusal:_ ->
+                  incr reprojected_calls;
+                  if !reprojected_calls = 1
+                  then Ok Keeper_memory_delivery_reprojection.Reprojected
+                  else Ok Keeper_memory_delivery_reprojection.Unchanged)
+                ~on_transmitted_model_input:(fun t -> transmitted := t :: !transmitted)
+                ~goal:"RECOVER_MINIMAL_LATCHED"
+                ~tools:[]
+                ()
+            in
+            (match attempt.result with
+             | Ok run_result ->
+               check string "latched minimal_anchor_only retry succeeded"
+                 "MINIMAL_RETRY_OK" (keeper_response_text run_result)
+             | Error err -> fail ("latched minimal retry failed: " ^ Agent_core.Error.to_string err));
+            check int "memory reprojection fired once" 1 !reprojected_calls;
+            let transmissions = List.rev !transmitted in
+            check int "two Start transmissions observed (initial + memory retry)" 2
+              (List.length transmissions);
+            List.iteri
+              (fun idx report ->
+                 match report with
+                 | Keeper_official_client_host.Whole_input_transmitted msgs ->
+                   let _, atoms = Runtime_model_input_tail_window.annotate msgs in
+                   check int
+                     (Printf.sprintf "attempt %d transmits 0 history atoms (minimal_anchor_only latched)" (idx + 1))
+                     0 atoms;
+                   check bool
+                     (Printf.sprintf "attempt %d carries compaction anchor" (idx + 1))
+                     true
+                     (List.exists Runtime_model_input_tail_window.is_compaction_anchor msgs)
+                 | Keeper_official_client_host.Held_by_client_session ->
+                   fail "expected Whole_input_transmitted on minimal_anchor_only fresh Start")
+              transmissions;
+            let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+            match Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:keeper_name with
+            | Ok (Some anchor) ->
+              check int "compaction anchor committed strictly once (not duplicated on memory retry)"
+                1 anchor.epoch_id;
+              let covers = Ids.Turn_id.to_string anchor.covers_through_turn in
+              check bool
+                (Printf.sprintf "anchor (%s) covers all 4 evicted history atoms (atom-3*)" covers)
+                true
+                (String.equal covers "atom-3" || String.starts_with ~prefix:"atom-3-" covers)
+            | Ok None -> fail "expected committed compaction anchor"
+            | Error err -> fail (Keeper_compaction.store_error_to_string err)))
 ;;
 
 (* P1-3: Official CLI size refusal in Keeper_turn_driver invokes
@@ -7214,6 +7392,168 @@ let test_p1_3_official_client_size_refusal_records_refused_model_input () =
                 (List.length list)))
 ;;
 
+(* P0-7: A non-cancellation exception raised after Session_store.claim must
+   still run settle_failed_claim under Eio.Cancel.protect so session.json moves
+   to Recovery_required instead of sticking in Start/Active and permanently
+   bricking the keeper on Claim_held_by_current_epoch. *)
+let test_p0_7_claude_post_claim_exception_settles_session () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let keeper_name = "claude-pre-dispatch" in
+       let runtime_id = "claude.claude" in
+       let raised = ref false in
+       with_fixture
+         [ Emit (assistant ~turn_id:"turn-post-claim" "RECOVERED_AFTER_EXN")
+         ; Emit (result ~turn_id:"turn-post-claim" "RECOVERED_AFTER_EXN")
+         ]
+         (fun cli_path ->
+            (try
+               ignore
+                 (run_direct_attempt
+                    ~base_path
+                    ~cli_path
+                    ~initial_messages:[ message User "prior" ]
+                    ~on_transmitted_model_input:(fun _ -> raise Eio.Time.Timeout)
+                    ~goal:"TRIGGER_POST_CLAIM_EXN"
+                    ~tools:[]
+                    ())
+             with
+             | Eio.Time.Timeout -> raised := true);
+            check bool "post-claim Eio.Time.Timeout propagated" true !raised;
+            let loaded =
+              Eio_main.run (fun env ->
+                Fs_compat.set_fs env#fs;
+                Keeper_official_client_session_store.load_for_runtime
+                  ~base_path ~keeper_name ~client_kind:Claude_code ~runtime_id)
+            in
+            (match loaded with
+             | Ok
+                 (Some
+                    { Keeper_official_client_session_store.phase =
+                        Recovery_required { failure = Transport_interrupted; _ }
+                    ; _
+                    }) -> ()
+             | Ok (Some _) ->
+               fail "expected Recovery_required(Transport_interrupted), session was left stuck"
+             | Ok None -> fail "expected Recovery_required session record, got None"
+             | Error err ->
+               fail ("session store load failed: "
+                     ^ Keeper_official_client_session_store.read_error_to_string err));
+            let next_attempt =
+              run_direct_attempt
+                ~base_path
+                ~cli_path
+                ~initial_messages:[ message User "prior" ]
+                ~goal:"SUBSEQUENT_TURN_UNBRICKED"
+                ~tools:[]
+                ()
+            in
+            match next_attempt.result with
+            | Ok run_result ->
+              check string "subsequent turn succeeds without Claim_held_by_current_epoch"
+                "RECOVERED_AFTER_EXN" (keeper_response_text run_result)
+            | Error err ->
+              fail ("subsequent turn was bricked after post-claim exception: "
+                    ^ Agent_core.Error.to_string err)))
+;;
+
+(* #245 #1: Under Superseding_bootstrap_floor_exceeded (minimal_anchor_only = true),
+   windowed contains no Librarian working_state_message because start_range_projection
+   is skipped. attach_rollover_anchor_if_needed must check whether windowed actually
+   contains a working state (is_working_state) rather than raw input librarian_front,
+   so mature Keepers still commit and attach a compaction anchor over evicted atoms. *)
+let test_p0_4_minimal_anchor_only_commits_anchor_despite_librarian_front () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let module Store = Keeper_official_client_session_store in
+       let keeper_name = "claude-pre-dispatch" in
+       let runtime_id = "claude.claude" in
+       let now = Time_compat.now () in
+       Masc_test_deps.declare_fixture_keeper ~base_path ~sandbox_profile:None keeper_name;
+       let () =
+         Eio_main.run (fun env ->
+           Fs_compat.set_fs env#fs;
+           let sha256 = Agent_core_sha256.(to_hex (digest_string "seed-sha-librarian")) in
+           let claimed =
+             match
+               Store.claim
+                 ~base_path ~keeper_name ~expected:None ~client_kind:Claude_code
+                 ~owner_epoch:(Store.process_epoch ()) ~runtime_id ~tool_surface_sha256:sha256
+                 ~updated_at:now
+             with
+             | Ok c -> c
+             | Error detail -> fail ("Store.claim failed: " ^ detail)
+           in
+           match
+             Store.require_recovery
+               ~base_path ~keeper_name ~expected:claimed
+               ~failure:(Store.Input_rejected Store.Bootstrap_floor_exceeded)
+               ~detail:"prior bootstrap floor exceeded"
+               ~required_at:now
+           with
+           | Ok _ -> ()
+           | Error detail -> fail ("Store.require_recovery failed: " ^ detail))
+       in
+       let history =
+         [ message User "history-atom-0"
+         ; message Assistant "history-atom-1"
+         ; message User "history-atom-2"
+         ; message Assistant "history-atom-3"
+         ]
+       in
+       let librarian_front =
+         Keeper_turn_driver_try_provider.Covered
+           { Keeper_turn_driver_try_provider.end_atom = 1
+           ; working_state = Some "summary"
+           }
+       in
+       let transmitted = ref [] in
+       with_fixture
+         [ Emit (assistant ~turn_id:"turn-minimal-lib" "MINIMAL_LIB_OK")
+         ; Emit (result ~turn_id:"turn-minimal-lib" "MINIMAL_LIB_OK")
+         ]
+         (fun cli_path ->
+            let attempt =
+              run_direct_attempt
+                ~base_path
+                ~cli_path
+                ~initial_messages:history
+                ~librarian_front
+                ~on_transmitted_model_input:(fun t -> transmitted := t :: !transmitted)
+                ~goal:"RECOVER_MINIMAL_WITH_LIBRARIAN"
+                ~tools:[]
+                ()
+            in
+            (match attempt.result with
+             | Ok run_result ->
+               check string "minimal_anchor_only with librarian_front succeeded"
+                 "MINIMAL_LIB_OK" (keeper_response_text run_result)
+             | Error err -> fail ("minimal_anchor_only turn failed: " ^ Agent_core.Error.to_string err));
+            (match !transmitted with
+             | [ Keeper_official_client_host.Whole_input_transmitted msgs ] ->
+               let _, atoms = Runtime_model_input_tail_window.annotate msgs in
+               check int "transmits 0 history atoms under minimal_anchor_only" 0 atoms;
+               check bool "no working_state message was projected under minimal_anchor_only" false
+                 (List.exists Runtime_model_input_tail_window.is_working_state msgs);
+               check bool "compaction anchor IS attached despite raw librarian_front" true
+                 (List.exists Runtime_model_input_tail_window.is_compaction_anchor msgs)
+             | _ -> fail "expected single Whole_input_transmitted for minimal_anchor_only Start");
+            let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+            match Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:keeper_name with
+            | Ok (Some anchor) ->
+              let covers = Ids.Turn_id.to_string anchor.covers_through_turn in
+              check bool
+                (Printf.sprintf "anchor (%s) covers all 4 evicted history atoms (atom-3*)" covers)
+                true
+                (String.equal covers "atom-3" || String.starts_with ~prefix:"atom-3-" covers)
+            | Ok None -> fail "expected committed compaction anchor despite raw librarian_front"
+            | Error err -> fail (Keeper_compaction.store_error_to_string err)))
+;;
+
 let () =
   (* Pin the prompt directory explicitly. Under dune the registry falls back to
      [DUNE_SOURCEROOT], but a test executable run directly has neither that
@@ -7225,10 +7565,16 @@ let () =
   run
     "keeper_claude_code_runtime"
     [ ( "immortal_circulation_f1"
-      , [ test_case "P0-5 resume overflow rolls over fresh with 0 atoms and commits anchor"
+      , [ test_case "P0-5 resume overflow rolls over fresh with 0 atoms and commits anchor on eviction"
             `Quick test_p0_5_resume_overflow_zero_atoms_and_anchor_commit
+        ; test_case "P0-4 minimal_anchor_only stays latched across on_memory_retry"
+            `Quick test_p0_4_minimal_anchor_only_latched_across_memory_retry
+        ; test_case "P0-4 minimal_anchor_only commits and attaches anchor despite raw librarian_front"
+            `Quick test_p0_4_minimal_anchor_only_commits_anchor_despite_librarian_front
         ; test_case "P1-3 official client size refusal invokes on_refused_model_input"
             `Quick test_p1_3_official_client_size_refusal_records_refused_model_input
+        ; test_case "P0-7 post-claim non-cancellation exception settles session instead of bricking"
+            `Quick test_p0_7_claude_post_claim_exception_settles_session
         ] )
     ; ( "native effort authority",
         List.map (fun (name, selected, expected_effort, expected_thinking) ->

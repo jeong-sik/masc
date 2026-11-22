@@ -2093,8 +2093,8 @@ let test_stream_overflow_after_event_asks_no_narrower () =
           (fun ?on_telemetry:_ ~on_event _ ->
             incr sent;
             on_event
-              (Types.MessageStart
-                 { id = "stream-partial"; model = "body-only-narrower-fixture"; usage = None });
+              (Types.ContentBlockDelta
+                 { index = 0; delta = Types.TextDelta "partial generated output" });
             Error
               (Http_client.ProviderFailure
                  { kind = Http_client.Context_overflow { limit = Some 512 }
@@ -2124,6 +2124,201 @@ let test_stream_overflow_after_event_asks_no_narrower () =
    | Ok _ -> fail "post-event overflow unexpectedly succeeded");
   check int "stream was attempted once" 1 !sent;
   check int "no narrower asked after stream event emitted" 0 (List.length !asked)
+;;
+
+(* P0-9 + #244: Complete_stream emits Types.Connected before body bytes (and may
+   emit Ping / MessageStart / MessageDelta / MessageStop / SSEError on an
+   HTTP-200 pre-generation overflow). Those pre-generation frames must NOT flip
+   event_emitted, and Attempt #1's terminal/error frames must be buffered and
+   discarded when Attempt #2 succeeds so downstream stream bridges stay clean. *)
+let test_stream_overflow_after_connected_invokes_narrower () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let asked = ref [] in
+  let sent = ref 0 in
+  let delivered = ref [] in
+  let provider_config = body_only_provider_config ~stream:true in
+  let media_store = Agent_core.History.Memory_store.create () in
+  let transport =
+    Llm_provider.Llm_transport.custom
+      { Llm_transport.complete_sync =
+          (fun _ -> fail "unexpected sync dispatch")
+      ; complete_stream =
+          (fun ?on_telemetry:_ ~on_event _ ->
+            incr sent;
+            on_event Types.Connected;
+            if !sent = 1
+            then (
+              on_event Types.Ping;
+              on_event
+                (Types.MessageStart
+                   { id = "empty-overflow"; model = "body-only-narrower-fixture"; usage = None });
+              on_event
+                (Types.MessageDelta
+                   { stop_reason = Some Types.ContextWindowExceeded; usage = None });
+              on_event Types.MessageStop;
+              on_event
+                (Types.SSEError
+                   { message = "prompt is too long"
+                   ; error_type = Some "invalid_request_error"
+                   ; provider_status = None
+                   ; report = Types.Provider_stated
+                   ; raw = {|{"error":{"message":"prompt is too long"}}|}
+                   });
+              Error
+                (Http_client.ProviderFailure
+                   { kind = Http_client.Context_overflow { limit = Some 512 }
+                   ; message = "prompt is too long"
+                   }))
+            else (
+              on_event
+                (Types.MessageStart
+                   { id = "attempt-2-ok"; model = "body-only-narrower-fixture"; usage = None });
+              on_event
+                (Types.ContentBlockStart
+                   { index = 0; content_type = "text"; tool_id = None; tool_name = None });
+              on_event
+                (Types.ContentBlockDelta
+                   { index = 0; delta = Types.TextDelta "narrowed-answer" });
+              on_event (Types.ContentBlockStop { index = 0 });
+              on_event (Types.MessageDelta { stop_reason = Some Types.EndTurn; usage = None });
+              on_event Types.MessageStop;
+              Ok response))
+      }
+  in
+  let agent =
+    Agent_core.Agent.create
+      ~net:(Eio.Stdenv.net env)
+      ~media_store
+      ~config:(agent_config_of_provider provider_config)
+      ~options:
+        { Agent_core.Agent.default_options with
+          provider_config = Some provider_config
+        ; transport = Some transport
+        }
+      ~context_fit_admission:Agent_core.Agent.Body_only
+      ~model_input_projection:
+        (narrowing_projection ~media_store ~asked ~first:"first-stream-too-large"
+           [ (fun _ -> Ok (Some "second-stream-fits")) ])
+      ()
+  in
+  (match
+     Agent_core.Agent.run_stream
+       ~sw
+       ~on_event:(fun ev -> delivered := ev :: !delivered)
+       agent
+       "connected pre-gen overflow"
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Agent_core.Error.to_string error));
+  check int "initial refused stream plus narrowed stream dispatched" 2 !sent;
+  check int "narrower invoked once despite Types.Connected/Ping/SSEError" 1 (List.length !asked);
+  let events = List.rev !delivered in
+  check bool "Attempt #1 MessageStart was NOT delivered" false
+    (List.exists (function Types.MessageStart { id = "empty-overflow"; _ } -> true | _ -> false) events);
+  check bool "Attempt #1 ContextWindowExceeded MessageDelta was NOT delivered" false
+    (List.exists (function Types.MessageDelta { stop_reason = Some Types.ContextWindowExceeded; _ } -> true | _ -> false) events);
+  check bool "Attempt #1 SSEError was NOT delivered" false
+    (List.exists (function Types.SSEError _ -> true | _ -> false) events);
+  let attempt2_tags =
+    List.filter_map
+      (function
+        | Types.MessageStart { id; _ } -> Some ("start:" ^ id)
+        | Types.ContentBlockStart _ -> Some "block_start"
+        | Types.ContentBlockDelta { delta = Types.TextDelta s; _ } -> Some ("delta:" ^ s)
+        | Types.ContentBlockStop _ -> Some "block_stop"
+        | Types.MessageDelta { stop_reason = Some Types.EndTurn; _ } -> Some "end_turn"
+        | Types.MessageStop -> Some "stop"
+        | _ -> None)
+      events
+  in
+  check (list string) "Attempt #2 frames delivered cleanly in exact order"
+    [ "start:attempt-2-ok"; "block_start"; "delta:narrowed-answer"; "block_stop"; "end_turn"; "stop" ]
+    attempt2_tags
+;;
+
+(* #244: When narrowing is exhausted (or terminates via identical body), the
+   buffered pre-generation refusal frames from the answering attempt ARE
+   flushed in exact order to on_event. *)
+let test_stream_buffered_refusal_events_flushed_when_narrowing_exhausted () =
+  let run_case ~narrower_steps =
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    let asked = ref [] in
+    let sent = ref 0 in
+    let delivered = ref [] in
+    let provider_config = body_only_provider_config ~stream:true in
+    let media_store = Agent_core.History.Memory_store.create () in
+    let transport =
+      Llm_provider.Llm_transport.custom
+        { Llm_transport.complete_sync = (fun _ -> fail "unexpected sync dispatch")
+        ; complete_stream =
+            (fun ?on_telemetry:_ ~on_event _ ->
+              incr sent;
+              on_event Types.Connected;
+              on_event
+                (Types.MessageStart
+                   { id = "refused-1"; model = "body-only-narrower-fixture"; usage = None });
+              on_event
+                (Types.SSEError
+                   { message = "prompt is too long"
+                   ; error_type = Some "invalid_request_error"
+                   ; provider_status = None
+                   ; report = Types.Provider_stated
+                   ; raw = {|{"error":{"message":"prompt is too long"}}|}
+                   });
+              Error
+                (Http_client.ProviderFailure
+                   { kind = Http_client.Context_overflow { limit = Some 512 }
+                   ; message = "prompt is too long"
+                   }))
+        }
+    in
+    let agent =
+      Agent_core.Agent.create
+        ~net:(Eio.Stdenv.net env)
+        ~media_store
+        ~config:(agent_config_of_provider provider_config)
+        ~options:
+          { Agent_core.Agent.default_options with
+            provider_config = Some provider_config
+          ; transport = Some transport
+          }
+        ~context_fit_admission:Agent_core.Agent.Body_only
+        ~model_input_projection:
+          (narrowing_projection ~media_store ~asked ~first:"unchanged-body" narrower_steps)
+        ()
+    in
+    (match
+       Agent_core.Agent.run_stream
+         ~sw
+         ~on_event:(fun ev -> delivered := ev :: !delivered)
+         agent
+         "exhausted refusal flush"
+     with
+     | Error (Agent_core.Error.Api (Retry.ContextOverflow _)) -> ()
+     | Error error -> fail (Agent_core.Error.to_string error)
+     | Ok _ -> fail "exhausted refusal unexpectedly succeeded");
+    check int "only Attempt #1 was sent" 1 !sent;
+    let tags =
+      List.filter_map
+        (function
+          | Types.Connected -> Some "connected"
+          | Types.MessageStart { id; _ } -> Some ("start:" ^ id)
+          | Types.SSEError { message; _ } -> Some ("sse_error:" ^ message)
+          | _ -> None)
+        (List.rev !delivered)
+    in
+    check (list string) "buffered refusal frames flushed in exact order"
+      [ "connected"; "start:refused-1"; "sse_error:prompt is too long" ]
+      tags
+  in
+  run_case ~narrower_steps:[ (fun _ -> Ok None) ];
+  run_case ~narrower_steps:[ (fun _ -> Ok (Some "unchanged-body")) ]
 ;;
 
 (* P0-1a: identical serialized body from narrower terminates immediately without
@@ -2715,6 +2910,14 @@ let () =
             "stream overflow after event emitted asks no narrower"
             `Quick
             test_stream_overflow_after_event_asks_no_narrower
+        ; test_case
+            "stream overflow after Types.Connected/Ping/SSEError still invokes narrower without leaking Attempt #1 frames"
+            `Quick
+            test_stream_overflow_after_connected_invokes_narrower
+        ; test_case
+            "buffered pre-generation refusal frames flush when narrowing is exhausted or identical"
+            `Quick
+            test_stream_buffered_refusal_events_flushed_when_narrowing_exhausted
         ; test_case
             "identical narrower body terminates immediately without loop"
             `Quick

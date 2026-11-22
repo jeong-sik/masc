@@ -1012,8 +1012,8 @@ module For_testing : sig
 
   type in_turn_overflow_demotion =
     | No_in_turn_demotion
-    | Demote_closed_current_turn_tools
-    | Demote_and_preview_closed_current_turn_tools
+    | Demote_closed_current_turn_tools of { refused_atom_count : int }
+    | Demote_and_preview_closed_current_turn_tools of { refused_atom_count : int }
 
   val compaction_bytes_of_tokens : int -> int
 

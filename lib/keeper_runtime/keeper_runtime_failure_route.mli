@@ -255,7 +255,7 @@ val route_of_error
     [Masc_execution], except [Terminal_effect_failed], the two effect fences
     ([Provider_attempt_effect_fenced], [Tool_correction_lost]),
     [Runtime_connection_closed],
-    [Official_client_recovery_required] when [has_backup_candidates = true],
+    [Official_client_recovery_required],
     and a process-local MASC-carried [Accept_rejected] with no usable progress,
     an empty response shape, and [MaxTokens]. Those exact MASC-owned observations cross the live
     AGENT_CORE boundary and retain their typed routes there. Other accept

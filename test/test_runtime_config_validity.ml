@@ -6759,7 +6759,29 @@ let test_antigravity_cli_materializes_typed_process_options () =
           | Runtime_execution.Codex_app_server _
           | Runtime_execution.Claude_code _
           | Runtime_execution.Acp _ ->
-            fail "antigravity-cli was materialized through the wrong execution owner"))
+            fail "antigravity-cli was materialized through the wrong execution owner"));
+  (* #173 / #210: xhigh effort must parse and materialize into Runtime_antigravity.Xhigh. *)
+  with_temp_runtime_toml
+    (antigravity_cli_runtime_toml
+       ~credential:antigravity_file_credential
+       ~options:"effort = \"xhigh\"\ntimeout-s = 45.0"
+       ())
+    (fun path ->
+       without_an_installed_client @@ fun () ->
+       match load_list_text ~config_path:path with
+       | Error error -> failf "antigravity-cli xhigh runtime should load: %s" error
+       | Ok (_, default, _, _, _) ->
+         (match default.execution with
+          | Runtime_execution.Antigravity_cli config ->
+            check bool
+              "xhigh effort materializes as Xhigh"
+              true
+              (config.effort = Some Runtime_antigravity.Xhigh)
+          | Runtime_execution.Agent_core _
+          | Runtime_execution.Codex_app_server _
+          | Runtime_execution.Claude_code _
+          | Runtime_execution.Acp _ ->
+            fail "antigravity-cli xhigh was materialized through the wrong execution owner"))
 ;;
 
 let test_antigravity_cli_add_dirs_reach_the_execution_config () =

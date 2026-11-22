@@ -181,6 +181,7 @@ default = "codex.%s"
       ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"])
       ?official_client_continuation ?on_event ?on_official_client_tool_boundary
+      ?on_transmitted_model_input
       ?(goal="Continue from current World State.") ~instructions ~world () =
     let composed_context = ref None in
     let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
@@ -222,7 +223,11 @@ default = "codex.%s"
       ?on_official_client_tool_boundary
       ~goal_blocks:None ~system_prompt:instructions ~tools
       ~initial_messages
-      ~model_input_projection ~on_transmitted_model_input:(fun report -> reports := report :: !reports)
+      ~model_input_projection
+      ~on_transmitted_model_input:
+        (Option.value
+           on_transmitted_model_input
+           ~default:(fun report -> reports := report :: !reports))
       ~hooks:(Some hooks) ~context_injector:None ~context:(Some (Agent_core.Context.create ()))
       ~event_bus:None ~raw_trace:None ~on_event
       ~account:(Masc_test_deps.authorized_account config.account_home) ~config ()
@@ -1403,8 +1408,12 @@ let argument_input id rows =
   | None -> fail ("missing actual injected tool call " ^ id)
 
 let argument_fixture capture =
-  let old = `Assoc ["command",`String (String.make 4000 'a')] in
-  let current = `Assoc ["command",`String (String.make 4000 'c')] in
+  (* Derive payload size from [Tool_blob_store.preview_max] so a normalized
+     reference strictly shrinks the serialized argument on the wire (#54361
+     raised [preview_max] from 200 bytes to 4 KiB). *)
+  let payload_bytes = Tool_blob_store.preview_max * 2 in
+  let old = `Assoc ["command",`String (String.make payload_bytes 'a')] in
+  let current = `Assoc ["command",`String (String.make payload_bytes 'c')] in
   let seed = Agent_core.Types.user_msg "Earlier decision" :: argument_exchange "old" old in
   let history = seed @ [Agent_core.Types.user_msg "Current decision"] @ argument_exchange "current" current in
   let boundary = Keeper_carried_front.Turn_boundary
@@ -1689,8 +1698,133 @@ let test_codex_resume_overflow_restarts_with_the_address_form () =
     fail (Printf.sprintf "expected the refused and the restarted injection, saw %d"
       (List.length injected))
 
+(* #210 #2: Codex must NOT commit a compaction anchor when Resume overflows and
+   the fresh Start keeps 100% of offered history (dropped_atoms = 0), and MUST
+   commit strictly over the evicted prefix when Start actually drops atoms. *)
+let test_codex_overflow_anchor_commits_only_on_actual_eviction () =
+  let small_history =
+    [ { Agent_core.Types.origin = Llm_provider.Types.Conversation
+      ; role = User
+      ; content = [ Text "small-0:hello" ]
+      ; name = None; tool_call_id = None; metadata = []
+      }
+    ; { Agent_core.Types.origin = Llm_provider.Types.Conversation
+      ; role = Assistant
+      ; content = [ Text "small-1:world" ]
+      ; name = None; tool_call_id = None; metadata = []
+      }
+    ]
+  in
+  (* Case 1: Resume overflows -> fresh Start keeps all 2 atoms (dropped_atoms = 0) -> NO anchor. *)
+  (with_fixture ~overflow_resume:true @@ fun ~run ~capture ~reports:_ ->
+   let base_path = Filename.dirname capture and keeper_name = "context-fixture" in
+   let turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 } in
+   successful (run ~initial_messages:small_history ~turn_start
+     ~instructions:"Keeper instructions" ~world:"world" ());
+   successful (run ~initial_messages:small_history ~turn_start
+     ~instructions:"Keeper instructions" ~world:"world" ());
+   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+   match Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:keeper_name with
+   | Ok None -> ()
+   | Ok (Some anchor) ->
+     failf "unexpected compaction anchor committed with 0 dropped atoms: covers_through=%s"
+       (Ids.Turn_id.to_string anchor.covers_through_turn)
+   | Error err -> fail (Keeper_compaction.store_error_to_string err));
+  (* Case 2: Start overflows when injected bytes exceed threshold -> shrinks and drops oldest
+     prefix -> anchor committed strictly over the evicted prefix (never kept tail turns). *)
+  let eight_msgs =
+    List.init 8 (fun idx ->
+      { Agent_core.Types.origin = Llm_provider.Types.Conversation
+      ; role = if idx mod 2 = 0 then User else Assistant
+      ; content = [ Text (Printf.sprintf "%d:%s" idx (String.make 2048 'x')) ]
+      ; name = None; tool_call_id = None; metadata = []
+      })
+  in
+  (* 8 messages * ~2 KiB ~= 16 KiB; cap at 12 KiB so Attempt 1 overflows and Attempt 2 keeps
+     a strict suffix (dropping older atoms). *)
+  with_fixture ~overflow_over_injected_bytes:12_000 @@ fun ~run ~capture ~reports ->
+  let base_path = Filename.dirname capture and keeper_name = "context-fixture" in
+  let turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 } in
+  successful (run ~initial_messages:eight_msgs ~turn_start
+    ~instructions:"Keeper instructions" ~world:"world" ());
+  let kept_atoms =
+    match !reports with
+    | Keeper_official_client_host.Whole_input_transmitted msgs :: _ ->
+      let non_preamble =
+        List.filter
+          (fun m -> not (Runtime_model_input_tail_window.is_synthetic_preamble m))
+          msgs
+      in
+      check bool "shrunk Codex Start carries compaction anchor" true
+        (List.exists Runtime_model_input_tail_window.is_compaction_anchor msgs);
+      snd (Runtime_model_input_tail_window.annotate non_preamble)
+    | _ -> fail "expected Whole_input_transmitted for shrunk Codex Start"
+  in
+  let dropped_atoms = 8 - kept_atoms in
+  check bool "Codex real eviction dropped strictly between 1 and 7 atoms" true
+    (dropped_atoms > 0 && dropped_atoms < 8);
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  match Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:keeper_name with
+  | Ok (Some anchor) ->
+    let covers = Ids.Turn_id.to_string anchor.covers_through_turn in
+    let expected_prefix = Printf.sprintf "atom-%d-" (dropped_atoms - 1) in
+    check bool
+      (Printf.sprintf "Codex covers_through_turn (%s) covers strictly the evicted prefix (%s*)"
+         covers expected_prefix)
+      true
+      (String.equal covers (Printf.sprintf "atom-%d" (dropped_atoms - 1))
+       || String.starts_with ~prefix:expected_prefix covers);
+    let anchor_text =
+      Agent_core.Types.text_of_message (Keeper_compaction.anchor_to_message anchor)
+    in
+    check bool "Codex evicted anchor summary excludes kept tail turn 7" false
+      (String_util.contains_substring anchor_text "7:xxxx")
+  | Ok None -> fail "expected compaction anchor on Codex real Start eviction"
+  | Error err -> fail (Keeper_compaction.store_error_to_string err)
+;;
+
+(* P0-7: Non-cancellation exception raised after Session_store.claim must still
+   settle session.json to Recovery_required rather than leaving Start/Active
+   stuck on Claim_held_by_current_epoch. *)
+let test_p0_7_codex_post_claim_exception_settles_session () =
+  with_fixture @@ fun ~run ~capture ~reports:_ ->
+  let base_path = Filename.dirname capture and keeper_name = "context-fixture" in
+  let raised = ref false in
+  (try
+     ignore
+       (run
+          ~on_transmitted_model_input:(fun _ -> raise Eio.Time.Timeout)
+          ~instructions:"Keeper instructions"
+          ~world:"world"
+          ())
+   with
+   | Eio.Time.Timeout -> raised := true);
+  check bool "post-claim Eio.Time.Timeout propagated" true !raised;
+  (match
+     Keeper_official_client_session_store.load_for_runtime
+       ~base_path ~keeper_name ~client_kind:Codex ~runtime_id:"codex.context"
+   with
+   | Ok
+       (Some
+          { Keeper_official_client_session_store.phase =
+              Recovery_required { failure = Transport_interrupted; _ }
+          ; _
+          }) -> ()
+   | Ok (Some _) ->
+     fail "expected Recovery_required(Transport_interrupted), session was left stuck"
+   | Ok None -> fail "expected Recovery_required session record, got None"
+   | Error err ->
+     fail ("session store load failed: "
+           ^ Keeper_official_client_session_store.read_error_to_string err));
+  successful (run ~instructions:"Keeper instructions" ~world:"world" ())
+;;
+
 let () =
   run "Keeper current Codex context" ["native requests",[
+  test_case "overflow compaction anchor commits strictly on actual eviction" `Quick
+    test_codex_overflow_anchor_commits_only_on_actual_eviction;
+  test_case "P0-7 post-claim exception settles session instead of bricking" `Quick
+    test_p0_7_codex_post_claim_exception_settles_session;
   test_case "a Keeper's Codex client runs in its private directory" `Quick
     test_codex_runs_in_the_keepers_private_directory;
   test_case "selected high survives a replacement low on start and resume" `Quick

@@ -2,17 +2,20 @@ type reclaimed_key =
   | Literal_next
   | Discard_output
   | Delayed_suspend
+  | Suspend
   | Quit
 
 external literal_next_slot : unit -> int = "masc_tui_v2_termios_literal_next_slot"
 external discard_output_slot : unit -> int = "masc_tui_v2_termios_discard_output_slot"
 external delayed_suspend_slot : unit -> int = "masc_tui_v2_termios_delayed_suspend_slot"
+external suspend_slot : unit -> int = "masc_tui_v2_termios_suspend_slot"
 external quit_slot : unit -> int = "masc_tui_v2_termios_quit_slot"
 
 let slot = function
   | Literal_next -> literal_next_slot ()
   | Discard_output -> discard_output_slot ()
   | Delayed_suspend -> delayed_suspend_slot ()
+  | Suspend -> suspend_slot ()
   | Quit -> quit_slot ()
 
 external slot_char : Unix.file_descr -> int -> int = "masc_tui_v2_termios_slot_char"
@@ -27,6 +30,7 @@ type 'a per_key = {
   literal_next : 'a;
   discard_output : 'a;
   delayed_suspend : 'a;
+  suspend : 'a;
   quit : 'a;
 }
 
@@ -35,6 +39,7 @@ let per_key f =
     literal_next = f Literal_next;
     discard_output = f Discard_output;
     delayed_suspend = f Delayed_suspend;
+    suspend = f Suspend;
     quit = f Quit;
   }
 
@@ -47,10 +52,11 @@ let restore_one fd key ch =
   if ch >= 0 then ignore (set_key_char fd key ch : bool)
 
 let restore fd (snap : snapshot) =
-  let { literal_next; discard_output; delayed_suspend; quit } = snap in
+  let { literal_next; discard_output; delayed_suspend; suspend; quit } = snap in
   restore_one fd Literal_next literal_next;
   restore_one fd Discard_output discard_output;
   restore_one fd Delayed_suspend delayed_suspend;
+  restore_one fd Suspend suspend;
   restore_one fd Quit quit
 
 type restore_outcome =

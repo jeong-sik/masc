@@ -462,10 +462,43 @@ let csi_final_key = function
   | 'S' -> Some (Function 4)
   | _ -> None
 
-let first_subparam s =
-  match String.index_opt s ':' with
-  | Some idx -> String.sub s 0 idx
-  | None -> s
+type csi_u_codepoints = {
+  codepoint : int;
+  shifted : int option;
+}
+
+let parse_optional_codepoint s =
+  let trimmed = String.trim s in
+  if String.equal trimmed "" then Some None
+  else
+    match int_of_string_opt trimmed with
+    | Some cp when Uchar.is_valid cp -> Some (Some cp)
+    | Some _ | None -> None
+
+let parse_csi_u_codepoints raw =
+  match String.split_on_char ':' raw with
+  | [ cp_s ] -> (
+      match int_of_string_opt (String.trim cp_s) with
+      | Some codepoint when Uchar.is_valid codepoint ->
+          Some { codepoint; shifted = None }
+      | Some _ | None -> None)
+  | [ cp_s; shifted_s ] -> (
+      match
+        int_of_string_opt (String.trim cp_s), parse_optional_codepoint shifted_s
+      with
+      | Some codepoint, Some shifted when Uchar.is_valid codepoint ->
+          Some { codepoint; shifted }
+      | _, _ -> None)
+  | [ cp_s; shifted_s; base_s ] -> (
+      match
+        ( int_of_string_opt (String.trim cp_s),
+          parse_optional_codepoint shifted_s,
+          parse_optional_codepoint base_s )
+      with
+      | Some codepoint, Some shifted, Some _ when Uchar.is_valid codepoint ->
+          Some { codepoint; shifted }
+      | _, _, _ -> None)
+  | [] | _ :: _ :: _ :: _ :: _ -> None
 
 let decode_csi_key ~parameters ~final =
   let parts = String.split_on_char ';' parameters in
@@ -477,12 +510,28 @@ let decode_csi_key ~parameters ~final =
       | Mod_release -> []
       | Mod_invalid -> [ Unknown_escape ]
       | Mod_ok mods -> (
-          match int_of_string_opt (String.trim (first_subparam first)) with
+          match parse_csi_u_codepoints first with
           | None -> [ Unknown_escape ]
-          | Some cp -> (
-              match key_of_codepoint ~mods cp with
-              | Some key -> [ Key { key; mods } ]
-              | None -> [ Unknown_escape ])))
+          | Some { codepoint; shifted } -> (
+              match shifted with
+              | Some shifted_cp
+                when mods.shift && (not mods.ctrl) && not mods.alt -> (
+                  let unshifted_mods = { mods with shift = false } in
+                  match key_of_codepoint ~mods:unshifted_mods shifted_cp with
+                  | Some (Char _ as key) ->
+                      [ Key { key; mods = unshifted_mods } ]
+                  | Some
+                      ( Enter | Tab | Backspace | Escape | Delete | Insert
+                      | Up | Down | Left | Right | Home | End | Page_up
+                      | Page_down | Function _ )
+                  | None -> (
+                      match key_of_codepoint ~mods codepoint with
+                      | Some key -> [ Key { key; mods } ]
+                      | None -> [ Unknown_escape ]))
+              | Some _ | None -> (
+                  match key_of_codepoint ~mods codepoint with
+                  | Some key -> [ Key { key; mods } ]
+                  | None -> [ Unknown_escape ]))))
   | '~', [ "27"; mod_s; cp_s ] -> (
       (* xterm modifyOtherKeys format: CSI 27 ; mod ; codepoint ~ *)
       match decode_modifiers_field mod_s, int_of_string_opt (String.trim cp_s) with
@@ -519,6 +568,43 @@ let decode_csi_key ~parameters ~final =
             | Some key -> [ Key { key; mods } ]
             | None -> [ Unknown_escape ]))
 
+let rxvt_ss3_arrow = function
+  | 'a' -> Some Up
+  | 'b' -> Some Down
+  | 'c' -> Some Right
+  | 'd' -> Some Left
+  | _ -> None
+
+let ss3_final_key = function
+  | 'M' -> Some Enter
+  | ch -> csi_final_key ch
+
+let decode_ss3_key ~parameters ~final =
+  if String.equal parameters "" then
+    match rxvt_ss3_arrow final with
+    | Some key -> [ Key { key; mods = { no_mods with ctrl = true } } ]
+    | None -> (
+        match ss3_final_key final with
+        | Some key -> [ Key { key; mods = no_mods } ]
+        | None -> [ Unknown_escape ])
+  else
+    let mod_field =
+      match String.split_on_char ';' parameters with
+      | [ mod_s ] -> Some mod_s
+      | [ "1"; mod_s ] -> Some mod_s
+      | _ -> None
+    in
+    match mod_field with
+    | None -> [ Unknown_escape ]
+    | Some mod_s -> (
+        match decode_modifiers_field mod_s with
+        | Mod_release -> []
+        | Mod_invalid -> [ Unknown_escape ]
+        | Mod_ok mods -> (
+            match ss3_final_key final with
+            | Some key -> [ Key { key; mods } ]
+            | None -> [ Unknown_escape ]))
+
 (* ---- Decoder state machine ---- *)
 type body = {
   bytes : Buffer.t;
@@ -534,7 +620,7 @@ type state =
   | Ground
   | Escape_prefix
   | Csi of Buffer.t
-  | Ss3
+  | Ss3 of Buffer.t
   | X10_awaiting_button
   | X10_awaiting_column of char
   | X10_awaiting_row of char * char
@@ -553,7 +639,8 @@ type t = {
 
 let create () = { state = Ground; x10_held = []; x10_ambiguous = false }
 
-let csi_parameters_max_bytes = 32
+let csi_parameters_max_bytes = 64
+let ss3_parameters_max_bytes = 16
 let body_max_bytes = 4096
 let x10_buttons = 3
 let escape_ch = '\x1b'
@@ -713,7 +800,7 @@ let rec feed t byte =
           t.state <- Csi (Buffer.create 8);
           []
       | 'O' ->
-          t.state <- Ss3;
+          t.state <- Ss3 (Buffer.create 4);
           []
       | '_' ->
           t.state <- Apc_prefix;
@@ -742,14 +829,22 @@ let rec feed t byte =
         t.state <- Ground;
         [ Unknown_escape ]
       end
-  | Ss3 ->
+  | Ss3 params ->
       if byte = escape_ch then begin
         t.state <- Escape_prefix;
         [ Unknown_escape ]
       end
+      else if (byte >= '0' && byte <= '9') || byte = ';' || byte = ':' then begin
+        Buffer.add_char params byte;
+        if Buffer.length params > ss3_parameters_max_bytes then begin
+          t.state <- Ground;
+          [ Unknown_escape ]
+        end
+        else []
+      end
       else begin
         t.state <- Ground;
-        decode_csi_key ~parameters:"" ~final:byte
+        decode_ss3_key ~parameters:(Buffer.contents params) ~final:byte
       end
   | X10_awaiting_button ->
       t.state <- X10_awaiting_column byte;
@@ -830,10 +925,16 @@ let feed_string t text =
 
 let idle t =
   match t.state with
-  | Escape_prefix | Ss3 | Apc_prefix ->
+  | Ground -> []
+  | Escape_prefix | Apc_prefix ->
       t.state <- Ground;
       [ Key { key = Escape; mods = no_mods } ]
-  | X10_awaiting_button | X10_awaiting_column _ | X10_awaiting_row _ ->
+  | Ss3 params ->
+      t.state <- Ground;
+      if Buffer.length params = 0 then
+        [ Key { key = Escape; mods = no_mods } ]
+      else [ Unknown_escape ]
+  | Csi _ | X10_awaiting_button | X10_awaiting_column _ | X10_awaiting_row _ ->
       t.state <- Ground;
       [ Unknown_escape ]
   | Osc body | Apc body ->
@@ -841,38 +942,59 @@ let idle t =
       if Buffer.length body.bytes = 0 && not body.overflowed then
         [ Key { key = Escape; mods = no_mods } ]
       else []
-  | Ground | Csi _ | Utf8 _ | In_paste _ | Draining_paste _ -> []
+  | Utf8 _ ->
+      t.state <- Ground;
+      [ Invalid_utf8 ]
+  | In_paste pd ->
+      t.state <- Ground;
+      if Buffer.length pd.buf = 0 && pd.dropped = 0 then []
+      else [ Paste (paste_snapshot pd) ]
+  | Draining_paste _ ->
+      t.state <- Ground;
+      []
 
 let pending t =
   match t.state with
   | Ground -> None
   | Escape_prefix
-  | Ss3
   | X10_awaiting_button
   | X10_awaiting_column _
   | X10_awaiting_row _
-  | Osc _
-  | Apc_prefix
-  | Apc _ ->
+  | Apc_prefix ->
       Some Prefix
+  | Osc body | Apc body ->
+      if Buffer.length body.bytes = 0 && not body.overflowed then Some Prefix
+      else Some Sequence
+  | Ss3 params ->
+      if Buffer.length params = 0 then Some Prefix else Some Sequence
   | Csi _ -> Some Sequence
   | Utf8 _ -> Some Character
   | In_paste _ -> Some Pasting
   | Draining_paste _ -> Some Draining
 
+let has_pending t = Option.is_some (pending t)
+
+let idle_timeout_s = function
+  | Prefix -> 0.025
+  | Sequence -> 0.100
+  | Character -> 0.100
+  | Pasting -> 5.0
+  | Draining -> 0.200
+
 let cancel_pending t =
   match t.state with
   | Escape_prefix
   | Csi _
-  | Ss3
+  | Ss3 _
   | X10_awaiting_button
   | X10_awaiting_column _
   | X10_awaiting_row _
   | Osc _
   | Apc_prefix
-  | Apc _ ->
+  | Apc _
+  | Utf8 _ ->
       t.state <- Ground
-  | Ground | Utf8 _ | In_paste _ | Draining_paste _ -> ()
+  | Ground | In_paste _ | Draining_paste _ -> ()
 
 let recover_paste t =
   match t.state with
@@ -882,7 +1004,7 @@ let recover_paste t =
   | Ground
   | Escape_prefix
   | Csi _
-  | Ss3
+  | Ss3 _
   | X10_awaiting_button
   | X10_awaiting_column _
   | X10_awaiting_row _
@@ -899,7 +1021,7 @@ let abandon_draining t =
   | Ground
   | Escape_prefix
   | Csi _
-  | Ss3
+  | Ss3 _
   | X10_awaiting_button
   | X10_awaiting_column _
   | X10_awaiting_row _

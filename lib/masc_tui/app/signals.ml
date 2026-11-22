@@ -1,5 +1,7 @@
 open Masc_tui_core
 
+let interrupt_arm_window_s = 3.0
+
 type exit_verdict =
   | Continue
   | Interrupt_armed
@@ -19,16 +21,23 @@ let equal_exit_verdict a b =
   | Terminate _, (Continue | Interrupt_armed | Interrupt_confirmed) ->
       false
 
-(* Pre-allocated option values so POSIX signal handlers do zero allocations. *)
+(* Pre-allocated values so POSIX signal handlers do zero allocations. *)
 let some_sigterm : string option = Some "SIGTERM"
 let some_sighup : string option = Some "SIGHUP"
+let sigtstp_noop_handler : Sys.signal_behavior = Sys.Signal_handle (fun _ -> ())
+
+type sigtstp_state =
+  | Sigtstp_uninstalled
+  | Sigtstp_guarded of Sys.signal_behavior
+  | Sigtstp_suspended of Sys.signal_behavior
 
 type t = {
   bell : Wake_bell.t;
   resize_gen : int Atomic.t;
   terminate_sig : string option Atomic.t;
   interrupt_pending : bool Atomic.t;
-  interrupt_armed : bool Atomic.t;
+  interrupt_armed_until : Clock.Mono.t option Atomic.t;
+  sigtstp_state : sigtstp_state Atomic.t;
 }
 
 let create ~bell =
@@ -37,7 +46,8 @@ let create ~bell =
     resize_gen = Atomic.make 0;
     terminate_sig = Atomic.make None;
     interrupt_pending = Atomic.make false;
-    interrupt_armed = Atomic.make false;
+    interrupt_armed_until = Atomic.make None;
+    sigtstp_state = Atomic.make Sigtstp_uninstalled;
   }
 
 let record_resize t =
@@ -79,26 +89,76 @@ let install ~sw t =
           (Sys.Signal_handle (fun _ -> record_terminate_opt t some_sighup));
       ]
   in
+  (* Catch SIGTSTP while raw mode / alt-screen / Kitty CSI u are active, saving
+     the prior disposition so $EDITOR handoff can suspend/resume it cleanly. *)
+  (match install_one Sys.sigtstp sigtstp_noop_handler with
+  | Some (_, prev) -> Atomic.set t.sigtstp_state (Sigtstp_guarded prev)
+  | None -> Atomic.set t.sigtstp_state Sigtstp_uninstalled);
   Eio.Switch.on_release sw (fun () ->
+      (match Atomic.exchange t.sigtstp_state Sigtstp_uninstalled with
+      | Sigtstp_guarded prev | Sigtstp_suspended prev ->
+          restore_one (Sys.sigtstp, prev)
+      | Sigtstp_uninstalled -> ());
       List.iter restore_one (List.rev installed))
 
-let poll_exit t =
+let suspend_sigtstp_guard t =
+  match Atomic.get t.sigtstp_state with
+  | Sigtstp_guarded prev as current ->
+      if
+        Atomic.compare_and_set t.sigtstp_state current (Sigtstp_suspended prev)
+      then restore_one (Sys.sigtstp, prev)
+  | Sigtstp_suspended _ | Sigtstp_uninstalled -> ()
+
+let resume_sigtstp_guard t =
+  match Atomic.get t.sigtstp_state with
+  | Sigtstp_suspended prev as current ->
+      if Atomic.compare_and_set t.sigtstp_state current (Sigtstp_guarded prev)
+      then
+        ignore
+          (install_one Sys.sigtstp sigtstp_noop_handler
+            : (int * Sys.signal_behavior) option)
+  | Sigtstp_guarded _ | Sigtstp_uninstalled -> ()
+
+let is_sigtstp_guarded t =
+  match Atomic.get t.sigtstp_state with
+  | Sigtstp_guarded _ -> true
+  | Sigtstp_suspended _ | Sigtstp_uninstalled -> false
+
+let is_armed_at ~now t =
+  match Atomic.get t.interrupt_armed_until with
+  | Some deadline -> Clock.Mono.compare now deadline < 0
+  | None -> false
+
+let expire_interrupt ~now t =
+  match Atomic.get t.interrupt_armed_until with
+  | Some deadline as current when Clock.Mono.compare now deadline >= 0 ->
+      Atomic.compare_and_set t.interrupt_armed_until current None
+  | Some _ | None -> false
+
+let poll_exit ?(now = Clock.Mono.now ()) t =
   match Atomic.get t.terminate_sig with
   | Some sig_name -> Terminate sig_name
   | None ->
+      ignore (expire_interrupt ~now t : bool);
       if Atomic.exchange t.interrupt_pending false then
-        if Atomic.get t.interrupt_armed then Interrupt_confirmed
+        if is_armed_at ~now t then begin
+          Atomic.set t.interrupt_armed_until None;
+          Interrupt_confirmed
+        end
         else begin
-          Atomic.set t.interrupt_armed true;
+          let deadline = Clock.Mono.after_s now interrupt_arm_window_s in
+          Atomic.set t.interrupt_armed_until (Some deadline);
           Interrupt_armed
         end
       else Continue
 
-let withdraw_interrupt t = Atomic.set t.interrupt_armed false
+let is_interrupt_armed ?(now = Clock.Mono.now ()) t = is_armed_at ~now t
+let interrupt_armed_deadline t = Atomic.get t.interrupt_armed_until
+let withdraw_interrupt t = Atomic.set t.interrupt_armed_until None
 
 let clear_interrupts t =
   Atomic.set t.interrupt_pending false;
-  Atomic.set t.interrupt_armed false
+  Atomic.set t.interrupt_armed_until None
 let resize_generation t = Atomic.get t.resize_gen
 let terminate_signal t = Atomic.get t.terminate_sig
 

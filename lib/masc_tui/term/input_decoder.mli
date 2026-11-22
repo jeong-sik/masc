@@ -97,10 +97,20 @@ val create : unit -> t
 val feed : t -> char -> event list
 val feed_string : t -> string -> event list
 val idle : t -> event list
-(** Call after a brief read timeout to flush a standalone [ESC] key or clear
-    truncated prefixes. *)
+(** Call after {!idle_timeout_s} of read silence to flush a standalone [ESC] key
+    or recover any stalled pending state ([Csi], modified [SS3], [Utf8],
+    [In_paste], [Draining_paste], [Osc], [Apc], [X10]) back to [Ground] so
+    {!has_pending} becomes [false]. *)
 
 val pending : t -> pending option
+val has_pending : t -> bool
+(** [true] iff the decoder holds an incomplete prefix, sequence, UTF-8 scalar,
+    or paste buffer. *)
+
+val idle_timeout_s : pending -> float
+(** Recommended read-silence timeout in seconds for each {!pending} state before
+    calling {!idle}. *)
+
 val cancel_pending : t -> unit
 val recover_paste : t -> paste_event option
 val abandon_draining : t -> unit

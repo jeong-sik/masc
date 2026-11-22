@@ -46,6 +46,16 @@ CAMLprim value masc_tui_v2_termios_delayed_suspend_slot(value unit)
 #endif
 }
 
+CAMLprim value masc_tui_v2_termios_suspend_slot(value unit)
+{
+  (void)unit;
+#ifdef VSUSP
+  return Val_int(VSUSP);
+#else
+  return Val_int(-1);
+#endif
+}
+
 CAMLprim value masc_tui_v2_termios_quit_slot(value unit)
 {
   (void)unit;

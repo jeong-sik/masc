@@ -5,6 +5,7 @@ type reclaimed_key =
   | Literal_next    (** VLNEXT (Ctrl-V) *)
   | Discard_output  (** VDISCARD (Ctrl-O on BSD) *)
   | Delayed_suspend (** VDSUSP (Ctrl-Y on BSD) *)
+  | Suspend         (** VSUSP (Ctrl-Z) *)
   | Quit            (** VQUIT (Ctrl-backslash) *)
 
 val key_char : Unix.file_descr -> reclaimed_key -> int
@@ -28,8 +29,9 @@ type restore_outcome =
 type raw_session
 
 val enter_raw_mode : Unix.file_descr -> (raw_session, Unix.error) result
-(** Put [fd] into raw TUI mode (keeping [ISIG] active for Ctrl-C/Ctrl-Z while
-    reclaiming VLNEXT/VDISCARD/VDSUSP/VQUIT). *)
+(** Put [fd] into raw TUI mode (keeping [ISIG] active for Ctrl-C while
+    reclaiming VLNEXT/VDISCARD/VDSUSP/VSUSP/VQUIT so Ctrl-Z never suspends
+    the process while leaving raw mode / alt-screen / Kitty CSI u active). *)
 
 val restore_raw_mode : raw_session -> restore_outcome
 (** Idempotently restore saved [Unix.terminal_io] and reclaimed keys. *)

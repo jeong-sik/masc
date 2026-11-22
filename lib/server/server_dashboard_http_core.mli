@@ -143,3 +143,15 @@ val dashboard_shell_payload_json :
   ?timing:Server_timing.t ->
   ?light:bool ->
   Workspace.config -> Yojson.Safe.t
+
+val tasks_24h_rollup_json :
+  now:float -> Masc_domain.task list -> Yojson.Safe.t
+(** O(N) rollup of already-loaded tasks: [tasks_done_24h], [tasks_done_total],
+    [tasks_in_progress], [tasks_claimed], [tasks_awaiting_verification],
+    [tasks_todo], and [tasks_cancelled]. *)
+
+val keeper_groups_json : (string * string option) list -> Yojson.Safe.t
+(** Deployment-neutral grouping of configured keepers by their optional
+    [keeper.group] TOML field (trimmed; absent or blank maps to
+    ["ungrouped"]). Named groups are sorted alphabetically with ["ungrouped"]
+    last, and keepers within each group are sorted alphabetically. *)

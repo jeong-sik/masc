@@ -242,7 +242,7 @@ let to_json activity = `Assoc
   ; "notes", `List (List.map (fun note -> `String note) activity.notes) ]
 
 let of_json json =
-  let open Tui_decode_fields in
+  let open Json_decode_fields in
   let fact json =
     let* memory_id = required_string_field json "memory_id" in
     let* claim = optional_string_field json "claim" in

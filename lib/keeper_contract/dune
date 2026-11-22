@@ -10,6 +10,7 @@
   keeper_approval_origin
   keeper_approval_queue_rules_types
   keeper_approval_lifecycle
+  keeper_boot_refusal
   keeper_invariant
   keeper_path_rejection)
  (flags

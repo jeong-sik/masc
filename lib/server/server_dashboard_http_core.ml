@@ -186,6 +186,128 @@ let shell_projection_label_to_phase : string -> Server_timing.phase = function
   | other -> Custom other
 ;;
 
+let parse_rfc3339_unix (s : string) : float option =
+  match Ptime.of_rfc3339 ~strict:false (String.trim s) with
+  | Ok (t, _, _) -> Some (Ptime.to_float_s t)
+  | Error _ -> None
+;;
+
+let tasks_24h_rollup ~now (tasks : Masc_domain.task list) =
+  let cutoff = now -. 86400.0 in
+  let done_24h = ref 0 in
+  let done_total = ref 0 in
+  let in_progress = ref 0 in
+  let claimed = ref 0 in
+  let awaiting_verification = ref 0 in
+  let todo = ref 0 in
+  let cancelled = ref 0 in
+  List.iter
+    (fun (t : Masc_domain.task) ->
+      match t.task_status with
+      | Masc_domain.Todo -> incr todo
+      | Masc_domain.Claimed _ -> incr claimed
+      | Masc_domain.InProgress _ -> incr in_progress
+      | Masc_domain.AwaitingVerification _ -> incr awaiting_verification
+      | Masc_domain.Cancelled _ -> incr cancelled
+      | Masc_domain.Done { completed_at; _ } ->
+        incr done_total;
+        (match parse_rfc3339_unix completed_at with
+         | Some ts when ts >= cutoff && ts <= now +. 300.0 -> incr done_24h
+         | Some _ | None -> ()))
+    tasks;
+  ( !done_24h
+  , !done_total
+  , !in_progress
+  , !claimed
+  , !awaiting_verification
+  , !todo
+  , !cancelled )
+;;
+
+let tasks_24h_rollup_json ~now (tasks : Masc_domain.task list) : Yojson.Safe.t =
+  let ( done_24h
+      , done_total
+      , in_progress
+      , claimed
+      , awaiting_verification
+      , todo
+      , cancelled )
+    =
+    tasks_24h_rollup ~now tasks
+  in
+  `Assoc
+    [ "tasks_done_24h", `Int done_24h
+    ; "tasks_done_total", `Int done_total
+    ; "tasks_in_progress", `Int in_progress
+    ; "tasks_claimed", `Int claimed
+    ; "tasks_awaiting_verification", `Int awaiting_verification
+    ; "tasks_todo", `Int todo
+    ; "tasks_cancelled", `Int cancelled
+    ]
+;;
+
+let ungrouped_group_name = "ungrouped"
+
+let normalize_keeper_group (group : string option) : string =
+  match group with
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if String.equal trimmed "" then ungrouped_group_name else trimmed
+  | None -> ungrouped_group_name
+;;
+
+let compare_group_names (a : string) (b : string) : int =
+  match String.equal a ungrouped_group_name, String.equal b ungrouped_group_name with
+  | true, true -> 0
+  | true, false -> 1
+  | false, true -> -1
+  | false, false -> String.compare a b
+;;
+
+let keeper_groups_json (keepers : (string * string option) list) : Yojson.Safe.t =
+  let tbl : (string, string list) Hashtbl.t = Hashtbl.create 8 in
+  List.iter
+    (fun (name, group_opt) ->
+      let g = normalize_keeper_group group_opt in
+      let prev = Option.value ~default:[] (Hashtbl.find_opt tbl g) in
+      Hashtbl.replace tbl g (name :: prev))
+    keepers;
+  let rows =
+    Hashtbl.fold
+      (fun group members acc ->
+        let sorted = List.sort String.compare members in
+        ( group
+        , `Assoc
+            [ "group", `String group
+            ; "keeper_count", `Int (List.length sorted)
+            ; "keepers", `List (List.map (fun s -> `String s) sorted)
+            ] )
+        :: acc)
+      tbl
+      []
+    |> List.sort (fun (a, _) (b, _) -> compare_group_names a b)
+    |> List.map snd
+  in
+  `List rows
+;;
+
+let fleet_turns_24h_from_pulse ~base_path (keeper_names : string list) : int option =
+  let total = ref 0 in
+  let seeded = ref 0 in
+  List.iter
+    (fun keeper_name ->
+      match Keeper_turn_pulse.get ~base_path ~keeper_name with
+      | None -> ()
+      | Some pulse ->
+        incr seeded;
+        List.iter
+          (fun (slot : Keeper_turn_pulse.slot) ->
+            total := !total + slot.tally.ok + slot.tally.failed)
+          pulse.slots)
+    keeper_names;
+  if !seeded > 0 then Some !total else None
+;;
+
 let dashboard_shell_payload_json
       ?timing
       ?(light = false)
@@ -309,6 +431,51 @@ let dashboard_shell_payload_json
         ];
     let config_resolution_json, config_resolution_ms = !config_resolution_r in
     let runtime_resolution_json, runtime_resolution_ms = !runtime_resolution_r in
+    let ( tasks_done_24h
+        , _done_total
+        , _in_progress
+        , _claimed
+        , _awaiting_verification
+        , _todo
+        , _cancelled )
+      =
+      tasks_24h_rollup ~now:started_at tasks
+    in
+    let profile_snapshot =
+      match profile_snapshot with
+      | Some snap -> snap
+      | None ->
+        Keeper_types_profile.read_keeper_profile_snapshot
+          ~base_path:config.Workspace.base_path
+    in
+    let configured_names =
+      Keeper_types_profile.snapshot_configured_keeper_names profile_snapshot
+    in
+    let scorecard_24h_json =
+      let base = tasks_24h_rollup_json ~now:started_at tasks in
+      match
+        fleet_turns_24h_from_pulse ~base_path:config.Workspace.base_path configured_names
+      with
+      | None -> base
+      | Some turns_24h ->
+        (match base with
+         | `Assoc fields -> `Assoc (fields @ [ "turns_24h", `Int turns_24h ])
+         | other -> other)
+    in
+    let keeper_group_entries =
+      List.map
+        (fun name ->
+          let group =
+            match
+              Keeper_types_profile.snapshot_profile_defaults profile_snapshot name
+            with
+            | Ok defaults -> defaults.group
+            | Error _ -> None
+          in
+          name, group)
+        configured_names
+    in
+    let groups_json = keeper_groups_json keeper_group_entries in
     shell_projection_trace_finish trace Shell_trace_finished;
     `Assoc
       [ "generated_at", `String (Masc_domain.now_iso ())
@@ -318,10 +485,13 @@ let dashboard_shell_payload_json
         , `Assoc
             [ "agents", `Int general_agents
             ; "tasks", `Int (List.length tasks)
+            ; "tasks_done_24h", `Int tasks_done_24h
             ; "keepers", `Int active_keepers
             ; "persisted_keepers", Json_util.int_opt_to_json persisted_keepers
             ; "total_runtimes", `Int (general_agents + active_keepers)
             ] )
+      ; "scorecard_24h", scorecard_24h_json
+      ; "groups", groups_json
       ; "persisted_keepers", Json_util.int_opt_to_json persisted_keepers
       ; "configured_keepers", `Int configured_keepers
       ; "providers", provider_capacity_json ()

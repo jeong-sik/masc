@@ -22,6 +22,7 @@ type keeper_toml_field_kind =
    (#26622). Declaring the kind here is what keeps that unreachable. *)
 let keeper_toml_fields =
   [ "name", Field_string
+  ; "group", Field_string
   ; "instructions", Field_string
   ; "activation_mode", Field_string
   ; "mention_targets", Field_string_array
@@ -354,10 +355,18 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let* microvm_cpus =
     guest_dimension "microvm_cpus" Keeper_microvm_guest_size.cpus_of_int (int_ "microvm_cpus")
   in
+  let group =
+    match str "group" with
+    | Some raw ->
+      let trimmed = String.trim raw in
+      if String.equal trimmed "" then None else Some trimmed
+    | None -> None
+  in
   Ok
     {
       id = None;
       manifest_path = None;
+      group;
       instructions = str "instructions";
       activation_mode;
       mention_targets = strs "mention_targets";

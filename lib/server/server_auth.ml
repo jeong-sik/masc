@@ -828,6 +828,8 @@ let cors_allow_headers_value =
        Mcp-Protocol-Version, Last-Event-Id, X-Gate-Agent, X-MASC-Agent, X-MASC-Agent-Name"
     ; Request_workspace_precondition.expected_base_path_header
     ; Request_workspace_precondition.expected_masc_root_header
+    ; "x-masc-expected-instance"
+    ; "x-masc-expected-workspace"
     ; Sse_wire.instance_header ]
 
 let cors_expose_headers_value =

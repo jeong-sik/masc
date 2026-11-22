@@ -3413,14 +3413,14 @@ let keeper_create_declaration_from_editor () =
   match
     Masc_cli_keeper_create.form_input_refusal
       ~stdin_is_tty:(Unix.isatty Unix.stdin)
-      ~editor:(Masc_tui_editor.editor_command ())
+      ~editor:(Masc_cli_editor.editor_command ())
   with
   | Some message -> Error message
   | None ->
     (* This process is not a TUI: it never left cooked mode, so there is no
        terminal state to hand back and none to reclaim. *)
     (match
-       Masc_tui_editor.roundtrip
+       Masc_cli_editor.roundtrip
          ~restore:(fun () -> ())
          ~reenter:(fun () -> ())
          Masc_cli_keeper_create.form_stem
@@ -3429,7 +3429,7 @@ let keeper_create_declaration_from_editor () =
        Error
          (Printf.sprintf
             "masc keeper-create --edit: %s. Nothing was created."
-            (Masc_tui_editor.abort_detail ~ko:false abort))
+            (Masc_cli_editor.abort_detail ~ko:false abort))
      | Ok edited -> Masc_cli_keeper_create.declaration_of_form edited)
 
 (* The keeper name becomes a path segment in the request URL, so it is both

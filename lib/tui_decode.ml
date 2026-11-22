@@ -136,7 +136,8 @@ let keeper_phase_is_paused phase = keeper_phase_category phase = `Paused
 let keeper_phase_is_transitioning phase =
   keeper_phase_category phase = `Transitioning
 
-let keeper_boot_phase_conflict_code = "keeper_boot_phase_conflict"
+let keeper_boot_phase_conflict_code =
+  Keeper_boot_refusal.keeper_boot_phase_conflict_code
 
 type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
 

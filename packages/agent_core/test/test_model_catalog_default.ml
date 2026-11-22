@@ -1429,8 +1429,9 @@ let test_provider_cache_session_wire_declarations () =
   check_wire "openai" Llm_provider.Capability_vocab.Prompt_cache_key;
   check_wire "openai-responses" Llm_provider.Capability_vocab.Prompt_cache_key;
   check_wire "mistral" Llm_provider.Capability_vocab.Prompt_cache_key;
+  check_wire "glm" Llm_provider.Capability_vocab.Prompt_cache_key;
+  check_wire "glm-coding" Llm_provider.Capability_vocab.Prompt_cache_key;
   check_wire "claude" Llm_provider.Capability_vocab.No_cache_session_wire;
-  check_wire "glm" Llm_provider.Capability_vocab.No_cache_session_wire;
   check_wire "deepseek" Llm_provider.Capability_vocab.No_cache_session_wire;
   check_wire "xai" Llm_provider.Capability_vocab.No_cache_session_wire;
   check_wire "undeclared-provider" Llm_provider.Capability_vocab.No_cache_session_wire;
@@ -1596,10 +1597,18 @@ let test_provider_cache_session_header_declarations () =
     (fun provider_id ->
        check
          (option string)
+         (provider_id ^ " declares x-session-id")
+         (Some "x-session-id")
+         (Llm_provider.Catalog_snapshot.cache_session_header snapshot ~provider_id))
+    [ "glm"; "glm-coding"; "kimi"; "kimi_coding"; "kimi_coding_anthropic" ];
+  List.iter
+    (fun provider_id ->
+       check
+         (option string)
          (provider_id ^ " defaults cache_session_header None")
          None
          (Llm_provider.Catalog_snapshot.cache_session_header snapshot ~provider_id))
-    [ "openrouter"; "openai"; "openai-responses"; "claude"; "glm-coding"; "mistral" ];
+    [ "openrouter"; "openai"; "openai-responses"; "claude"; "mistral" ];
   let parse_provider_header raw_header =
     Model_catalog.of_toml_string
       ~source:"cache_session_header validation"

@@ -813,8 +813,83 @@ let project_history ?(tools_present = false) config messages =
     messages
 ;;
 
+type cacheable_prefix =
+  { system_instruction : Yojson.Safe.t option
+  ; tools_json : Yojson.Safe.t option
+  ; tool_config_json : Yojson.Safe.t option
+  }
+
+let merge_system_instruction ~(config : Provider_config.t) system_instruction =
+  match config.system_prompt, system_instruction with
+  | Some s, None when not (Api_common.string_is_blank s) ->
+    let s = Utf8_sanitize.sanitize s in
+    Some (`Assoc [ "parts", `List [ `Assoc [ "text", `String s ] ] ])
+  | Some s, Some (`Assoc fields) when not (Api_common.string_is_blank s) ->
+    let s = Utf8_sanitize.sanitize s in
+    let existing_parts =
+      match List.assoc_opt "parts" fields with
+      | Some (`List ps) -> ps
+      | _ -> []
+    in
+    let config_part = `Assoc [ "text", `String s ] in
+    Some (`Assoc [ "parts", `List (config_part :: existing_parts) ])
+  | _, si -> si
+;;
+
+let tools_json_of_list ~(config : Provider_config.t) (tools : Yojson.Safe.t list) =
+  match tools with
+  | [] -> None
+  | ts ->
+    if config.disable_parallel_tool_use
+    then warn_parallel_disable_unsupported ~model_id:config.model_id;
+    let func_decls = List.map build_function_declaration ts in
+    Some (`List [ `Assoc [ "functionDeclarations", `List func_decls ] ])
+;;
+
+let tool_config_json_of_choice = function
+  | Some Auto ->
+    Some (`Assoc [ "functionCallingConfig", `Assoc [ "mode", `String "AUTO" ] ])
+  | Some Any ->
+    Some (`Assoc [ "functionCallingConfig", `Assoc [ "mode", `String "ANY" ] ])
+  | Some None_ ->
+    Some (`Assoc [ "functionCallingConfig", `Assoc [ "mode", `String "NONE" ] ])
+  | Some (Tool name) ->
+    Some
+      (`Assoc
+          [ ( "functionCallingConfig"
+            , `Assoc
+                [ "mode", `String "ANY"; "allowedFunctionNames", `List [ `String name ] ]
+            )
+          ])
+  | None -> None
+;;
+
+let extract_cacheable_prefix
+      ~(config : Provider_config.t)
+      ~(messages : message list)
+      ?(tools : Yojson.Safe.t list = [])
+      ()
+  =
+  let _contents, msg_system =
+    contents_of_messages
+      ~supports_function_response_parts:(capabilities_of_config config).supports_function_response_parts
+      messages
+  in
+  let system_instruction = merge_system_instruction ~config msg_system in
+  let tools_json =
+    match tools with
+    | [] -> None
+    | ts ->
+      let func_decls = List.map build_function_declaration ts in
+      Some (`List [ `Assoc [ "functionDeclarations", `List func_decls ] ])
+  in
+  let tool_config_json = tool_config_json_of_choice config.tool_choice in
+  { system_instruction; tools_json; tool_config_json }
+;;
+
 let build_request_artifact
       ?(stream = false)
+      ?(cached_content : string option)
       ~(config : Provider_config.t)
       ~(messages : message list)
       ?(tools : Yojson.Safe.t list = [])
@@ -865,27 +940,18 @@ let build_request_artifact
       projected_messages
   in
   (* Prepend system_prompt from config if present *)
-  let system_instruction =
-    match config.system_prompt, system_instruction with
-    | Some s, None when not (Api_common.string_is_blank s) ->
-      let s = Utf8_sanitize.sanitize s in
-      Some (`Assoc [ "parts", `List [ `Assoc [ "text", `String s ] ] ])
-    | Some s, Some (`Assoc fields) when not (Api_common.string_is_blank s) ->
-      let s = Utf8_sanitize.sanitize s in
-      let existing_parts =
-        match List.assoc_opt "parts" fields with
-        | Some (`List ps) -> ps
-        | _ -> []
-      in
-      let config_part = `Assoc [ "text", `String s ] in
-      Some (`Assoc [ "parts", `List (config_part :: existing_parts) ])
-    | _, si -> si
-  in
+  let system_instruction = merge_system_instruction ~config system_instruction in
   let body = [ "contents", `List contents ] in
+  (* Gemini API forbids sending systemInstruction, tools, or toolConfig alongside
+     an explicit cachedContent resource — those fields live on the CachedContent
+     object itself. *)
   let body =
-    match system_instruction with
-    | Some si -> ("systemInstruction", si) :: body
-    | None -> body
+    match cached_content with
+    | Some resource_name -> ("cachedContent", `String resource_name) :: body
+    | None ->
+      (match system_instruction with
+       | Some si -> ("systemInstruction", si) :: body
+       | None -> body)
   in
   (* generationConfig *)
   let gen_config = ref [] in
@@ -962,46 +1028,28 @@ let build_request_artifact
      gen_config := ("responseFormat", `Assoc [ "text", text ]) :: !gen_config
    | None -> ());
   let body = ("generationConfig", `Assoc !gen_config) :: body in
-  (* Tools *)
+  (* Tools and toolConfig: omitted when carried by explicit cachedContent *)
   let body =
-    match tools with
-    | [] -> body
-    | ts ->
-      if config.disable_parallel_tool_use
-      then warn_parallel_disable_unsupported ~model_id:config.model_id;
-      let func_decls = List.map build_function_declaration ts in
-      ("tools", `List [ `Assoc [ "functionDeclarations", `List func_decls ] ]) :: body
-  in
-  (* Tool config (tool_choice) *)
-  let body =
-    match config.tool_choice with
-    | Some Auto ->
-      ("toolConfig", `Assoc [ "functionCallingConfig", `Assoc [ "mode", `String "AUTO" ] ])
-      :: body
-    | Some Any ->
-      ("toolConfig", `Assoc [ "functionCallingConfig", `Assoc [ "mode", `String "ANY" ] ])
-      :: body
-    | Some None_ ->
-      ("toolConfig", `Assoc [ "functionCallingConfig", `Assoc [ "mode", `String "NONE" ] ])
-      :: body
-    | Some (Tool name) ->
-      ( "toolConfig"
-      , `Assoc
-          [ ( "functionCallingConfig"
-            , `Assoc
-                [ "mode", `String "ANY"; "allowedFunctionNames", `List [ `String name ] ]
-            )
-          ] )
-      :: body
-    | None -> body
+    match cached_content with
+    | Some _ -> body
+    | None ->
+      let body =
+        match tools_json_of_list ~config tools with
+        | Some tools_json -> ("tools", tools_json) :: body
+        | None -> body
+      in
+      (match tool_config_json_of_choice config.tool_choice with
+       | Some tc -> ("toolConfig", tc) :: body
+       | None -> body)
   in
   Request_artifact_internal.create
     ~payload:(Yojson.Safe.to_string (`Assoc body))
     ~output_token_receipt
 ;;
 
-let build_request ?stream ~config ~messages ?tools () =
-  build_request_artifact ?stream ~config ~messages ?tools () |> request_payload
+let build_request ?stream ?cached_content ~config ~messages ?tools () =
+  build_request_artifact ?stream ?cached_content ~config ~messages ?tools ()
+  |> request_payload
 ;;
 
 (* ── Parse response ─────────────────────────────────── *)
@@ -1123,12 +1171,22 @@ let parse_response json =
         | Some n when n >= 0 -> Some n
         | Some _ | None -> None)
     in
+    let raw_tool_use_prompt_tokens =
+      if um = `Null
+      then None
+      else (
+        match um |> member "toolUsePromptTokenCount" |> to_int_option with
+        | Some n when n >= 0 -> Some n
+        | Some _ | None -> None)
+    in
     let usage =
       if um = `Null
       then None
       else
         Some
-          { input_tokens = Cli_common_json.member_int "promptTokenCount" um
+          { input_tokens =
+              Cli_common_json.member_int "promptTokenCount" um
+              + Option.value raw_tool_use_prompt_tokens ~default:0
           ; output_tokens =
               Cli_common_json.member_int "candidatesTokenCount" um
               + Option.value raw_thoughts ~default:0
@@ -1146,16 +1204,11 @@ let parse_response json =
       else
         match um |> member "totalTokenCount" |> to_int_option with
         | Some total ->
-          let non_negative name =
-            match um |> member name |> to_int_option with
-            | Some n when n >= 0 -> n
-            | Some _ | None -> 0
-          in
           let expected =
             Cli_common_json.member_int "promptTokenCount" um
+            + Option.value raw_tool_use_prompt_tokens ~default:0
             + Cli_common_json.member_int "candidatesTokenCount" um
             + Option.value raw_thoughts ~default:0
-            + non_negative "toolUsePromptTokenCount"
           in
           if Int.equal total expected then None else Some (expected, total)
         | None -> None
@@ -1172,6 +1225,7 @@ let parse_response json =
         { base with
           reasoning_tokens = raw_thoughts
         ; total_token_mismatch
+        ; tool_use_prompt_tokens = raw_tool_use_prompt_tokens
         }
     in
     { id = ""; model = model_str; unreadable_tool_uses = []; stop_reason; content; usage

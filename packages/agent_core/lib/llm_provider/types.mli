@@ -846,6 +846,11 @@ type inference_telemetry =
         outside [candidatesTokenCount]. That is a convention, not a documented
         guarantee, so the verdict is carried here as an observation: it never
         changes [usage] or cost, and it never fails a response. *)
+  ; tool_use_prompt_tokens : int option [@default None]
+    (** Optional provider-reported token count for built-in tool-use prompts
+        (e.g. Gemini [usageMetadata.toolUsePromptTokenCount]). When present and
+        non-negative on Gemini, it is folded into [api_usage.input_tokens] so
+        billed input tokens match Gemini's input-rate pricing. *)
   }
 [@@deriving show, yojson]
 

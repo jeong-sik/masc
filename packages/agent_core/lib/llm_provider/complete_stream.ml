@@ -410,7 +410,10 @@ let complete_stream_http
          (Error err)
      | None -> Completion_outcome.before_serialization (Error err))
   | Ok serialized ->
-    let result =
+    let dispatch_stream_once
+          ~allow_cached_fallback
+          (serialized : Complete_common.serialized_http_request)
+      =
     let http_codec = serialized.Complete_common.http_codec in
     let body_with_stream = serialized.body in
     if requires_non_http_transport config.kind
@@ -489,6 +492,7 @@ let complete_stream_http
          response; this holds the first one the response reported, so a caller
          records it once per response instead of once per chunk. *)
       let stream_total_token_mismatch = ref None in
+      let stream_tool_use_prompt_tokens = ref None in
       (* Agent Core contract — stream-lifetime accumulators for the
          [Streaming_summary] variant that fires once at finalize.
          Hoisted out of [body_logic] so exception paths (timeout,
@@ -1030,6 +1034,10 @@ let complete_stream_http
                                    | None ->
                                      stream_total_token_mismatch :=
                                        chunk.Gemini_wire.gem_total_token_mismatch);
+                                  (match chunk.Gemini_wire.gem_tool_use_prompt_tokens with
+                                   | Some _ as count ->
+                                     stream_tool_use_prompt_tokens := count
+                                   | None -> ());
                                   (match
                                      Streaming.gemini_chunk_to_events (get_state ()) chunk
                                    with
@@ -1230,13 +1238,19 @@ let complete_stream_http
         (* Agent Core contract: transport-level error before body_logic ran (or
            before its publish). Idempotent via summary_published. A non-200
            status arrives here, before any body logic, so the codec reads the
-           refusal here too ([Complete_common.provider_refusal]). *)
-        publish_summary ~terminal:(Telemetry_event.Terminal_error "transport_error") ();
-        Error (Complete_common.provider_refusal ~http_codec err)
+           refusal here too ([Complete_common.provider_refusal]). When an
+           explicit cachedContent attempt is about to retry via implicit
+           caching, suppress the premature summary so one summary fires for the
+           final turn outcome. *)
+        let refusal = Complete_common.provider_refusal ~http_codec err in
+        if not (allow_cached_fallback && Gemini_context_cache.is_cached_content_error refusal)
+        then publish_summary ~terminal:(Telemetry_event.Terminal_error "transport_error") ();
+        Error refusal
       | Ok (Ok resp) ->
         let latency_ms = latency_ms_int latency_counter in
         (* Ollama done-chunk usage overrides the accumulated report; without a
-           done-chunk report, retain the response's reported usage or absence. *)
+           done-chunk report, retain the response's reported usage or absence.
+           Preserve wire-reported KV-cache reuse count instead of erasing it. *)
         let resp =
           match config.kind with
           | Provider_config.Ollama ->
@@ -1245,13 +1259,16 @@ let complete_stream_http
               | Some _ as u -> u
               | None -> resp.usage
             in
+            let reported_cache_read =
+              Option.bind !stream_timings (fun t -> t.Types.cache_n)
+            in
             { resp with
               usage
             ; telemetry =
                 Some
                   (Types.with_reported_cache_usage
                      ~cache_creation_input_tokens:None
-                     ~cache_read_input_tokens:None
+                     ~cache_read_input_tokens:reported_cache_read
                      resp.telemetry)
             }
           | Anthropic | Kimi | OpenAI_compat | Gemini | Glm -> resp
@@ -1309,15 +1326,25 @@ let complete_stream_http
            backend assumes is a telemetry observation, not a failure: the
            response keeps its usage and its stop reason. *)
         let resp =
-          match !stream_total_token_mismatch with
-          | None -> resp
-          | Some (expected, reported) ->
+          match !stream_total_token_mismatch, !stream_tool_use_prompt_tokens with
+          | None, None -> resp
+          | total_token_mismatch, tool_use_prompt_tokens ->
             let base =
               Option.value resp.telemetry ~default:Types.default_inference_telemetry
             in
             { resp with
               telemetry =
-                Some { base with Types.total_token_mismatch = Some (expected, reported) }
+                Some
+                  { base with
+                    Types.total_token_mismatch =
+                      (match total_token_mismatch with
+                       | Some _ as v -> v
+                       | None -> base.total_token_mismatch)
+                  ; tool_use_prompt_tokens =
+                      (match tool_use_prompt_tokens with
+                       | Some _ as v -> v
+                       | None -> base.tool_use_prompt_tokens)
+                  }
             }
         in
         (match !stream_timings with
@@ -1373,5 +1400,65 @@ let complete_stream_http
         publish_summary ~terminal ();
         Error err)
     in
-    Completion_outcome.after_serialization ~request:serialized result
+    let resolve_gemini_explicit_cache () =
+      match
+        admitted_body,
+        serialized.Complete_common.http_codec,
+        Gemini_context_cache.explicit_cache_ttl_if_enabled ~config
+      with
+      | None, Provider_http_codec.Gemini_generate_content, Some ttl_s ->
+        (match Provider_config.resolve_auth_headers config with
+         | Error _ -> None
+         | Ok auth_headers ->
+           let prefix =
+             Backend_gemini.extract_cacheable_prefix ~config ~messages ~tools ()
+           in
+           Gemini_context_cache.resolve_or_create
+             ~sw
+             ~net
+             ?clock
+             ?connection_cache
+             ~config
+             ~auth_headers
+             ~ttl_s
+             ~prefix
+             ())
+      | (Some _ | None), _, None
+      | Some _, _, Some _
+      | None,
+        ( Provider_http_codec.Anthropic_messages
+        | Provider_http_codec.Openai_chat
+        | Provider_http_codec.Openai_responses
+        | Provider_http_codec.Ollama_chat
+        | Provider_http_codec.Glm_chat ),
+        Some _ -> None
+    in
+    let final_serialized, result =
+      match resolve_gemini_explicit_cache () with
+      | None -> serialized, dispatch_stream_once ~allow_cached_fallback:false serialized
+      | Some handle ->
+        (match
+           serialize_gemini_cached_http_request
+             ~stream:true
+             ~cached_content:handle.resource_name
+             ~config
+             ~messages
+             ~tools
+         with
+         | Error _ ->
+           serialized, dispatch_stream_once ~allow_cached_fallback:false serialized
+         | Ok cached_serialized ->
+           (match dispatch_stream_once ~allow_cached_fallback:true cached_serialized with
+            | Error err when Gemini_context_cache.is_cached_content_error err ->
+              Gemini_context_cache.invalidate ~key:handle.key;
+              Diag.warn
+                "gemini_context_cache"
+                "stale cachedContent %s rejected during stream for model=%s; retrying \
+                 with implicit caching"
+                handle.resource_name
+                config.model_id;
+              serialized, dispatch_stream_once ~allow_cached_fallback:false serialized
+            | (Ok _ | Error _) as outcome -> cached_serialized, outcome))
+    in
+    Completion_outcome.after_serialization ~request:final_serialized result
 ;;

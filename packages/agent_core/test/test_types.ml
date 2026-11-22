@@ -589,6 +589,7 @@ let test_usage_and_inference_telemetry_yojson_roundtrip () =
     ; prefill_ms = Some 11.0
     ; upstream_provider = Some "Anthropic"
     ; total_token_mismatch = None
+    ; tool_use_prompt_tokens = None
     }
   in
   (match

@@ -390,7 +390,11 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
     let unreadable_tool_uses =
       if stop_reason = MaxTokens then [] else unreadable_tool_uses
     in
-    let input_tokens = Cli_common_json.member_int "prompt_eval_count" json in
+    let prompt_eval_count = Cli_common_json.member_int "prompt_eval_count" json in
+    let kv_cache_read = Ollama_wire.extract_kv_cache_read json in
+    let input_tokens, cache_read_input_tokens, reported_cache_read =
+      Ollama_wire.resolve_prompt_tokens ~prompt_eval_count ~kv_cache_read
+    in
     let output_tokens = Cli_common_json.member_int "eval_count" json in
     let usage =
       if input_tokens = 0 && output_tokens = 0
@@ -400,7 +404,7 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
           { input_tokens
           ; output_tokens
           ; cache_creation_input_tokens = 0
-          ; cache_read_input_tokens = 0
+          ; cache_read_input_tokens
           ; cost_usd = None
           }
     in
@@ -414,11 +418,13 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
         let prompt_ns = json |> member "prompt_eval_duration" |> to_int_option in
         let predicted_n = json |> member "eval_count" |> to_int_option in
         let predicted_ns = json |> member "eval_duration" |> to_int_option in
+        let cache_n = reported_cache_read in
         let any_set =
           Option.is_some prompt_n
           || Option.is_some prompt_ns
           || Option.is_some predicted_n
           || Option.is_some predicted_ns
+          || Option.is_some cache_n
         in
         if not any_set
         then None
@@ -437,7 +443,7 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
             ; predicted_n
             ; predicted_ms = ms_of_ns predicted_ns
             ; predicted_per_second = per_second predicted_n predicted_ns
-            ; cache_n = None
+            ; cache_n
             })
       in
       let reasoning_tokens = None in
@@ -473,7 +479,7 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
           Some
             (Types.with_reported_cache_usage
                ~cache_creation_input_tokens:None
-               ~cache_read_input_tokens:None
+               ~cache_read_input_tokens:reported_cache_read
                (Some (Types.with_reported_model ~model telemetry)))
       }
 ;;

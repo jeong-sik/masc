@@ -5359,6 +5359,265 @@ let test_gemini_total_token_mismatch_keeps_the_first_verdict () =
     with Exit -> ())
 ;;
 
+let test_gemini_explicit_cache_lifecycle_and_tool_use_prompt_tokens () =
+  let large_system = String.make 5000 's' in
+  let tools =
+    [ `Assoc
+        [ "name", `String "search_docs"
+        ; "description", `String "Search project documentation"
+        ; "input_schema", `Assoc [ "type", `String "object" ]
+        ]
+    ]
+  in
+  let start_gemini_cache_server ~sw ~net ~evict_cache ~create_count ~seen_bodies ~stream =
+    let port = fresh_port () in
+    let handler _conn req body =
+      let request_body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+      let path = Cohttp.Request.uri req |> Uri.path in
+      if String.ends_with ~suffix:"/cachedContents" path
+      then (
+        incr create_count;
+        let json = Yojson.Safe.from_string request_body in
+        let open Yojson.Safe.Util in
+        check string "cachedContents model prefix" "models/fixture-gemini"
+          (json |> member "model" |> to_string);
+        check string "cachedContents ttl" "300s" (json |> member "ttl" |> to_string);
+        check bool "cachedContents carries systemInstruction" true
+          (json |> member "systemInstruction" <> `Null);
+        check bool "cachedContents carries tools" true
+          (json |> member "tools" <> `Null);
+        Cohttp_eio.Server.respond_string
+          ~status:`OK
+          ~body:{|{"name":"cachedContents/cache-001","expireTime":"2099-01-01T00:00:00Z"}|}
+          ())
+      else (
+        seen_bodies := request_body :: !seen_bodies;
+        let json = Yojson.Safe.from_string request_body in
+        let has_cached = Yojson.Safe.Util.(member "cachedContent" json <> `Null) in
+        if !evict_cache && has_cached
+        then
+          Cohttp_eio.Server.respond_string
+            ~status:`Not_found
+            ~body:{|{"error":{"code":404,"message":"CachedContent not found"}}|}
+            ()
+        else (
+          let resp_json =
+            {|{"candidates":[{"content":{"role":"model","parts":[{"text":"cached-ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":100,"toolUsePromptTokenCount":14,"candidatesTokenCount":20,"thoughtsTokenCount":10,"cachedContentTokenCount":80,"totalTokenCount":144},"modelVersion":"fixture-gemini"}|}
+          in
+          let body = if stream then "data: " ^ resp_json ^ "\n\n" else resp_json in
+          Cohttp_eio.Server.respond_string ~status:`OK ~body ()))
+    in
+    let socket =
+      Eio.Net.listen
+        net
+        ~sw
+        ~backlog:8
+        ~reuse_addr:true
+        (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+    in
+    let server = Cohttp_eio.Server.make ~callback:handler () in
+    Eio.Fiber.fork ~sw (fun () ->
+      Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+    Printf.sprintf "http://127.0.0.1:%d" port
+  in
+  List.iter
+    (fun stream ->
+       Gemini_context_cache.clear_for_tests ();
+       Eio_main.run (fun env ->
+         try
+           Eio.Switch.run (fun sw ->
+             let evict_cache = ref false in
+             let create_count = ref 0 in
+             let seen_bodies = ref [] in
+             let endpoint =
+               start_gemini_cache_server
+                 ~sw
+                 ~net:env#net
+                 ~evict_cache
+                 ~create_count
+                 ~seen_bodies
+                 ~stream
+             in
+             let config =
+               Provider_config.make
+                 ~kind:Provider_config.Gemini
+                 ~model_id:"fixture-gemini"
+                 ~base_url:(endpoint ^ "/v1beta")
+                 ~api_key:"fixture-key"
+                 ~system_prompt:large_system
+                 ~explicit_context_cache_ttl_s:300
+                 ~model_capabilities_override:Capabilities.gemini_capabilities
+                 ()
+             in
+             let run_call () =
+               if stream
+               then
+                 (Complete.complete_stream ~sw ~net:env#net ~config ~messages ~tools
+                    ~on_event:(fun _ -> ()) ())
+                   .Llm_provider.Completion_outcome.result
+               else
+                 (Complete.complete ~sw ~net:env#net ~config ~messages ~tools ())
+                   .Llm_provider.Completion_outcome.result
+             in
+             (* Turn 1: cold create + dispatch with cachedContent *)
+             (match run_call () with
+              | Error _ -> fail "turn 1 failed"
+              | Ok resp ->
+                check int "create called once on cold turn" 1 !create_count;
+                (match resp.Types.usage with
+                 | Some u ->
+                   check int "input_tokens folds toolUsePromptTokenCount" 114
+                     u.input_tokens;
+                   check int "cache_read_input_tokens" 80 u.cache_read_input_tokens;
+                   check int "output_tokens folds thoughts" 30 u.output_tokens
+                 | None -> fail "expected usage");
+                (match resp.Types.telemetry with
+                 | Some t ->
+                   check (option int) "telemetry.tool_use_prompt_tokens" (Some 14)
+                     t.tool_use_prompt_tokens;
+                   check bool "total_token_mismatch agrees" true
+                     (t.total_token_mismatch = None)
+                 | None -> fail "expected telemetry"));
+             let body1 = Yojson.Safe.from_string (List.hd !seen_bodies) in
+             check string "turn 1 sends cachedContent" "cachedContents/cache-001"
+               Yojson.Safe.Util.(body1 |> member "cachedContent" |> to_string);
+             check bool "turn 1 omits systemInstruction" true
+               Yojson.Safe.Util.(body1 |> member "systemInstruction" = `Null);
+             check bool "turn 1 omits tools" true
+               Yojson.Safe.Util.(body1 |> member "tools" = `Null);
+             (* Turn 2: warm reuse without second POST /cachedContents *)
+             (match run_call () with
+              | Error _ -> fail "turn 2 failed"
+              | Ok _ ->
+                check int "create still called only once on warm reuse" 1 !create_count);
+             (* Turn 3: server returns 404 for stale cachedContent -> invalidate + implicit retry *)
+             evict_cache := true;
+             (match run_call () with
+              | Error _ -> fail "turn 3 fallback failed"
+              | Ok _ -> ());
+             let fallback_body = Yojson.Safe.from_string (List.hd !seen_bodies) in
+             check bool "fallback omits cachedContent" true
+               Yojson.Safe.Util.(fallback_body |> member "cachedContent" = `Null);
+             check bool "fallback restores systemInstruction" true
+               Yojson.Safe.Util.(fallback_body |> member "systemInstruction" <> `Null);
+             check bool "fallback restores tools" true
+               Yojson.Safe.Util.(fallback_body |> member "tools" <> `Null);
+             (* Invalid non-positive explicit_context_cache_ttl_s fails closed *)
+             let invalid_cfg =
+               { config with explicit_context_cache_ttl_s = Some 0 }
+             in
+             (match Complete_common.request_admission invalid_cfg with
+              | Error _ -> ()
+              | Ok () -> fail "non-positive explicit_context_cache_ttl_s must fail closed");
+             Eio.Switch.fail sw Exit)
+         with Exit -> ()))
+    [ false; true ];
+  Gemini_context_cache.clear_for_tests ()
+;;
+
+let test_ollama_kv_cache_telemetry_sync_and_stream () =
+  let sync_cases =
+    [ ( "prompt_eval_cached_count"
+      , {|{"model":"qwen3:8b","done":true,"done_reason":"stop","message":{"role":"assistant","content":"ok"},"prompt_eval_count":40,"prompt_eval_cached_count":200,"prompt_eval_duration":400000000,"eval_count":15,"eval_duration":300000000}|}
+      , 240
+      , 200 )
+    ; ( "timings.cache_n"
+      , {|{"model":"qwen3:8b","done":true,"done_reason":"stop","message":{"role":"assistant","content":"ok"},"prompt_eval_count":50,"eval_count":10,"timings":{"cache_n":120}}|}
+      , 170
+      , 120 )
+    ; ( "prompt_tokens_details.cached_tokens"
+      , {|{"model":"qwen3:8b","done":true,"done_reason":"stop","message":{"role":"assistant","content":"ok"},"prompt_eval_count":100,"eval_count":10,"prompt_tokens_details":{"cached_tokens":60}}|}
+      , 100
+      , 60 )
+    ]
+  in
+  List.iter
+    (fun (label, response_body, expected_input, expected_cached) ->
+       Eio_main.run (fun env ->
+         try
+           Eio.Switch.run (fun sw ->
+             let endpoint = start_mock_server ~sw ~net:env#net response_body in
+             let config =
+               Provider_config.make
+                 ~kind:Provider_config.Ollama
+                 ~model_id:"qwen3:8b"
+                 ~base_url:endpoint
+                 ()
+             in
+             let outcome = Complete.complete ~sw ~net:env#net ~config ~messages () in
+             (match outcome.Llm_provider.Completion_outcome.result with
+              | Error _ -> failf "ollama sync %s failed" label
+              | Ok resp ->
+                (match resp.Types.usage with
+                 | Some u ->
+                   check int (label ^ " input_tokens") expected_input u.input_tokens;
+                   check int (label ^ " cache_read_input_tokens") expected_cached
+                     u.cache_read_input_tokens
+                 | None -> fail (label ^ " expected usage"));
+                check (option int) (label ^ " reported_cache_read_input_tokens")
+                  (Some expected_cached)
+                  (Types.reported_cache_read_input_tokens resp);
+                let cache_n =
+                  Option.bind resp.Types.telemetry (fun t ->
+                    Option.bind t.Types.timings (fun tm -> tm.Types.cache_n))
+                in
+                check (option int) (label ^ " timings.cache_n")
+                  (Some expected_cached) cache_n);
+             Eio.Switch.fail sw Exit)
+         with Exit -> ()))
+    sync_cases;
+  (* Streaming NDJSON path preserves KV cache telemetry end-to-end *)
+  Eio_main.run (fun env ->
+    try
+      Eio.Switch.run (fun sw ->
+        let ndjson =
+          {|{"model":"qwen3:8b","message":{"role":"assistant","content":"ok"},"done":false}|}
+          ^ "\n"
+          ^ {|{"model":"qwen3:8b","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","prompt_eval_count":40,"prompt_eval_cached_count":200,"prompt_eval_duration":400000000,"eval_count":15,"eval_duration":300000000}|}
+          ^ "\n"
+        in
+        let endpoint = start_mock_server ~sw ~net:env#net ndjson in
+        let config =
+          Provider_config.make
+            ~kind:Provider_config.Ollama
+            ~model_id:"qwen3:8b"
+            ~base_url:endpoint
+            ()
+        in
+        let delta_cached = ref None in
+        let outcome =
+          Complete.complete_stream
+            ~sw
+            ~net:env#net
+            ~config
+            ~messages
+            ~on_event:(function
+              | Types.MessageDelta { usage = Some u; _ } ->
+                delta_cached := u.cache_read_input_tokens
+              | _ -> ())
+            ()
+        in
+        (match outcome.Llm_provider.Completion_outcome.result with
+         | Error _ -> fail "ollama stream failed"
+         | Ok resp ->
+           check (option int) "stream MessageDelta carries cache_read_input_tokens"
+             (Some 200) !delta_cached;
+           (match resp.Types.usage with
+            | Some u ->
+              check int "stream input_tokens" 240 u.input_tokens;
+              check int "stream cache_read_input_tokens" 200 u.cache_read_input_tokens
+            | None -> fail "expected stream usage");
+           check (option int) "stream reported_cache_read_input_tokens"
+             (Some 200) (Types.reported_cache_read_input_tokens resp);
+           let cache_n =
+             Option.bind resp.Types.telemetry (fun t ->
+               Option.bind t.Types.timings (fun tm -> tm.Types.cache_n))
+           in
+           check (option int) "stream timings.cache_n" (Some 200) cache_n);
+        Eio.Switch.fail sw Exit)
+    with Exit -> ())
+;;
+
 let () =
   run
     "complete_http"
@@ -5730,6 +5989,14 @@ let () =
             test_gemini_total_token_mismatch_same_on_both_paths
         ; test_case "one response keeps the first disagreement" `Quick
             test_gemini_total_token_mismatch_keeps_the_first_verdict
+        ; test_case
+            "explicit cachedContents create/reuse/404-fallback + toolUsePromptTokenCount"
+            `Quick
+            test_gemini_explicit_cache_lifecycle_and_tool_use_prompt_tokens
+        ; test_case
+            "Ollama KV cache telemetry (sync and stream)"
+            `Quick
+            test_ollama_kv_cache_telemetry_sync_and_stream
         ] )
     ]
 ;;

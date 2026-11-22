@@ -78,6 +78,7 @@ let make_telemetry ?timings ?(request_latency_ms = 0) ?ttfrc_ms ?prefill_ms ()
   ; prefill_ms
   ; upstream_provider = None
   ; total_token_mismatch = None
+  ; tool_use_prompt_tokens = None
   }
 ;;
 

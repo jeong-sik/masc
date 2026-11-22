@@ -841,7 +841,9 @@ let validate_cache_retention (provider : Runtime_schema.provider)
          (match retention with
           | Runtime_schema.One_hour -> true
           | Runtime_schema.Five_minutes -> false)
-     | true, Llm_provider.Capabilities.No_prompt_cache_wire ->
+     | ( true
+       , ( Llm_provider.Capabilities.No_prompt_cache_wire
+         | Llm_provider.Capabilities.Gemini_explicit_cached_content ) ) ->
        Error
          (Printf.sprintf
             "binding %s.%s declares cache-retention = %S, but model %S has no catalog-declared prompt-cache wire contract"
@@ -849,7 +851,8 @@ let validate_cache_retention (provider : Runtime_schema.provider)
      | false,
        ( Llm_provider.Capabilities.No_prompt_cache_wire
        | Llm_provider.Capabilities.Openrouter_top_level_cache_control
-       | Llm_provider.Capabilities.Kimi_prompt_cache_options ) ->
+       | Llm_provider.Capabilities.Kimi_prompt_cache_options
+       | Llm_provider.Capabilities.Gemini_explicit_cached_content ) ->
        Error
          (Printf.sprintf
             "binding %s.%s declares cache-retention = %S, but protocol %s cannot carry that request policy"

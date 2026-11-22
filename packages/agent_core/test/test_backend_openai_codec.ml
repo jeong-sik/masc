@@ -3153,6 +3153,8 @@ let test_cache_session_wire_emission_and_validation () =
          (List.mem_assoc "session_id" body))
     [ "openai", "gpt-5.5", "https://api.openai.com/v1"
     ; "mistral", "mistral-large-4", "https://api.mistral.ai/v1"
+    ; "glm", "glm-5", "https://api.z.ai/api/paas/v4"
+    ; "glm-coding", "glm-5.3-flash", "https://api.z.ai/api/coding/paas/v4"
     ];
   (* OpenAI Responses emits "prompt_cache_key". *)
   let resp_cfg =
@@ -3186,8 +3188,8 @@ let test_cache_session_wire_emission_and_validation () =
        check_bool (label ^ " omits session_id") false (List.mem_assoc "session_id" body);
        check_bool (label ^ " omits prompt_cache_key") false
          (List.mem_assoc "prompt_cache_key" body))
-    [ "glm", Some "glm", Provider_config.Glm
-    ; "deepseek", Some "deepseek", Provider_config.OpenAI_compat
+    [ "deepseek", Some "deepseek", Provider_config.OpenAI_compat
+    ; "xai", Some "xai", Provider_config.OpenAI_compat
     ; "anonymous", None, Provider_config.OpenAI_compat
     ];
   (* Blank and >256-byte keys are omitted; exact 256-byte key is emitted. *)

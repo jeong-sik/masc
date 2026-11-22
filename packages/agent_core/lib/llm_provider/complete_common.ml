@@ -594,6 +594,16 @@ let validate_thinking_control_request
    them before dispatch instead of letting Slot_scheduler.create raise
    mid-request. *)
 let validate_admission_declaration (config : Provider_config.t) =
+  let open Result.Syntax in
+  let* () =
+    match config.explicit_context_cache_ttl_s with
+    | Some ttl_s when ttl_s <= 0 ->
+      Error
+        (Printf.sprintf
+           "explicit_context_cache_ttl_s must be > 0 when declared, got %d"
+           ttl_s)
+    | Some _ | None -> Ok ()
+  in
   match config.max_concurrent_requests, config.admission_priority_run_limit with
   | Some n, _ when n < 1 ->
     Error (Printf.sprintf "max_concurrent_requests must be >= 1 when declared, got %d" n)
@@ -811,6 +821,32 @@ let serialize_http_request_body ~stream ~(config : Provider_config.t) ~messages 
     ~messages
     ~tools
   |> Result.map (fun (_http_codec, body, _output_token_receipt) -> body)
+;;
+
+let serialize_gemini_cached_http_request
+      ~stream
+      ~cached_content
+      ~(config : Provider_config.t)
+      ~messages
+      ~tools
+  =
+  try
+    let artifact =
+      Backend_gemini.build_request_artifact
+        ~stream
+        ~cached_content
+        ~config
+        ~messages
+        ~tools
+        ()
+    in
+    Ok
+      (seal_serialized
+         ~http_codec:(Provider_http_codec.of_config config)
+         ~body:(Backend_gemini.request_payload artifact)
+         ~output_token_receipt:(Backend_gemini.request_output_token_receipt artifact))
+  with
+  | Invalid_argument reason -> Error (Http_client.AcceptRejected { reason })
 ;;
 
 let serialize_http_request ~stream ~(config : Provider_config.t) ~messages ~tools =

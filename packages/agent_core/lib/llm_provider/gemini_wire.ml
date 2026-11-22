@@ -12,6 +12,7 @@ type gemini_chunk =
   ; gem_finish_reason : gemini_terminal_reason option
   ; gem_usage : api_usage option
   ; gem_reasoning_tokens : int option
+  ; gem_tool_use_prompt_tokens : int option
   ; gem_total_token_mismatch : (int * int) option
     (* [(expected, reported)] when [totalTokenCount] disagrees with
        [promptTokenCount + candidatesTokenCount + thoughtsTokenCount + toolUsePromptTokenCount]. The
@@ -679,11 +680,11 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
     | None -> Ok ()
     | Some part -> Error (Gemini_payload_unsupported_part part)
   in
-  let* gem_usage, gem_reasoning_tokens, gem_total_token_mismatch =
+  let* gem_usage, gem_reasoning_tokens, gem_tool_use_prompt_tokens, gem_total_token_mismatch =
     match Json_util.assoc_member_opt "usageMetadata" json with
-    | None | Some `Null -> Ok (None, None, None)
+    | None | Some `Null -> Ok (None, None, None, None)
     | Some (`Assoc _ as usage) ->
-      let* input_tokens =
+      let* prompt_tokens =
         gemini_optional_int_default_zero
           ~path:"gemini.usageMetadata"
           "promptTokenCount"
@@ -732,12 +733,14 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
              "toolUsePromptTokenCount"
              usage)
       in
-      let expected_total =
-        input_tokens
-        + candidates_tokens
-        + Option.value thoughts_tokens ~default:0
-        + Option.value tool_use_prompt_tokens ~default:0
+      (* Gemini excludes [toolUsePromptTokenCount] from [promptTokenCount] while
+         billing tool-use prompt tokens at the input rate; fold non-negative
+         counts into inclusive [input_tokens] and expose the raw count on
+         [gem_tool_use_prompt_tokens]. *)
+      let input_tokens =
+        prompt_tokens + Option.value tool_use_prompt_tokens ~default:0
       in
+      let expected_total = input_tokens + output_tokens in
       let total_token_mismatch =
         match reported_total with
         | Some total when not (Int.equal total expected_total) ->
@@ -753,6 +756,7 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
             ; cost_usd = None
             }
         , thoughts_tokens
+        , tool_use_prompt_tokens
         , total_token_mismatch )
     | Some value ->
       Error
@@ -767,6 +771,7 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
     ; gem_finish_reason
     ; gem_usage
     ; gem_reasoning_tokens
+    ; gem_tool_use_prompt_tokens
     ; gem_total_token_mismatch
     }
 ;;

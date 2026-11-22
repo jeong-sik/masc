@@ -1280,6 +1280,7 @@ type inference_telemetry =
         outside [candidatesTokenCount]. That is a convention, not a documented
         guarantee, so the verdict is carried here for a caller to record. It
         never changes [usage] or cost. *)
+  ; tool_use_prompt_tokens : int option [@default None]
   }
 [@@deriving show, yojson]
 
@@ -1305,6 +1306,7 @@ let default_inference_telemetry : inference_telemetry =
   ; prefill_ms = None
   ; upstream_provider = None
   ; total_token_mismatch = None
+  ; tool_use_prompt_tokens = None
   }
 ;;
 

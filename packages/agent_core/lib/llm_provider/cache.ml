@@ -56,6 +56,7 @@ let request_fingerprint
                      ; cache_system_prompt
                      ; system_prompt_cache_prefix
                      ; cache_extended_ttl
+                     ; explicit_context_cache_ttl_s
                      ; cache_session_key
                      ; provider_only
                      ; provider_ignore
@@ -111,6 +112,7 @@ let request_fingerprint
      without changing the prompt or expected answer; [http_request_fingerprint]
      still binds the exact serialized body when emitted. *)
   ignore cache_session_key;
+  ignore explicit_context_cache_ttl_s;
   ignore reasoning_uncontrolled;
   let json =
     `Assoc

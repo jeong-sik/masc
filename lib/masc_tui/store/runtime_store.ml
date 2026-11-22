@@ -2,6 +2,8 @@ open Masc_tui_core
 open Masc_tui_keymap
 open Masc_tui_protocol
 
+module String_map = Map.Make (String)
+
 type fusion_draft = {
   keeper : string option;
   prompt : string;
@@ -43,6 +45,12 @@ type company_spend_row = {
   cost_usd : float;
 }
 
+type company_spend_group = {
+  company : string;
+  total_cost_usd : float;
+  members : keeper_spend_row list;
+}
+
 type t = {
   active_tab : Nav.runtime_tab;
   usage_windows : Wire_runtime.provider_usage_windows Observed.t;
@@ -61,6 +69,7 @@ type t = {
   connectors : Wire_runtime.connector_row list Observed.t;
   browser_lane : Wire_runtime.browser_lane_status Observed.t;
   mcp_clients : Wire_runtime.mcp_client_row list Observed.t;
+  keeper_companies : string String_map.t;
   show_outside_lane_probes : bool;
   show_unreported_accounts : bool;
   selected_index : int;
@@ -97,12 +106,23 @@ let empty =
     connectors = Observed.unreported;
     browser_lane = Observed.unreported;
     mcp_clients = Observed.unreported;
+    keeper_companies = String_map.empty;
     show_outside_lane_probes = false;
     show_unreported_accounts = false;
     selected_index = 0;
     scroll_offset = 0;
     filter_query = "";
   }
+
+let default_viewport_rows = 15
+
+let adjust_grouped_scroll ?(viewport_rows = default_viewport_rows) ~scroll
+    ~header_row vis_row =
+  let vr = max 1 viewport_rows in
+  let top_row = if vr >= 2 then min header_row vis_row else vis_row in
+  if top_row < scroll then top_row
+  else if vis_row >= scroll + vr then max 0 (vis_row - vr + 1)
+  else scroll
 
 let clamp_index len idx =
   if len <= 0 then 0
@@ -553,6 +573,37 @@ let velocity_series_24h t =
                ts.buckets)
       | Some _ | None -> Velocity_empty
 
+let sync_keeper_companies (ks : Wire_fleet.keeper_summary list) t =
+  let grouped = Wire_fleet.group_by_company ks in
+  let resolved = Hashtbl.create (max 16 (List.length ks)) in
+  List.iter
+    (fun (g : Wire_fleet.company_group) ->
+      List.iter
+        (fun (k : Wire_fleet.keeper_summary) ->
+          Hashtbl.replace resolved k.name g.company)
+        g.keepers)
+    grouped;
+  let keeper_companies =
+    List.fold_left
+      (fun acc (k : Wire_fleet.keeper_summary) ->
+        let from_group = Hashtbl.find_opt resolved k.name in
+        let raw_c = String.trim k.company in
+        let has_explicit_company =
+          (not (String.equal raw_c ""))
+          && (not (String.equal (String.lowercase_ascii raw_c) "ungrouped"))
+          && not (String.equal raw_c "Other")
+        in
+        let comp =
+          match from_group with
+          | Some g when not (String.equal g "Other") -> g
+          | Some _ | None ->
+              if has_explicit_company then raw_c else "Other"
+        in
+        String_map.add k.name comp acc)
+      String_map.empty ks
+  in
+  { t with keeper_companies }
+
 let keeper_costs_24h_assoc t =
   match Observed.to_option t.keeper_costs with
   | None -> []
@@ -564,10 +615,20 @@ let keeper_costs_24h_assoc t =
           | None -> None)
         kc.rows
 
+let compare_keeper_spend (a : keeper_spend_row) (b : keeper_spend_row) =
+  let c = Float.compare b.cost_usd a.cost_usd in
+  if c <> 0 then c
+  else
+    let cc = Int.compare b.calls a.calls in
+    if cc <> 0 then cc else String.compare a.keeper b.keeper
+
 let keeper_spend_rows t : keeper_spend_row list =
   let company_of name =
-    Option.value ~default:"Other"
-      (Wire_fleet.classify_company_single ~group:None name)
+    match String_map.find_opt name t.keeper_companies with
+    | Some c -> c
+    | None ->
+        Option.value ~default:"Other"
+          (Wire_fleet.classify_company_single ~group:None name)
   in
   match Observed.to_option t.efficiency with
   | Some eff when eff.keepers <> [] ->
@@ -587,9 +648,7 @@ let keeper_spend_rows t : keeper_spend_row list =
               else None);
           })
         eff.keepers
-      |> List.stable_sort (fun (a : keeper_spend_row) (b : keeper_spend_row) ->
-             let c = Float.compare b.cost_usd a.cost_usd in
-             if c <> 0 then c else Int.compare b.calls a.calls)
+      |> List.stable_sort compare_keeper_spend
   | Some _ | None -> (
       match Observed.to_option t.keeper_costs with
       | None -> []
@@ -617,9 +676,40 @@ let keeper_spend_rows t : keeper_spend_row list =
                   else None);
               })
             kc.rows
-          |> List.stable_sort (fun (a : keeper_spend_row) (b : keeper_spend_row) ->
-                 let c = Float.compare b.cost_usd a.cost_usd in
-                 if c <> 0 then c else Int.compare b.calls a.calls))
+          |> List.stable_sort compare_keeper_spend)
+
+let grouped_keeper_spend_rows t : company_spend_group list =
+  let rows = keeper_spend_rows t in
+  let comp_tbl : (string, keeper_spend_row list) Hashtbl.t = Hashtbl.create 8 in
+  List.iter
+    (fun (r : keeper_spend_row) ->
+      let prev =
+        match Hashtbl.find_opt comp_tbl r.company with Some xs -> xs | None -> []
+      in
+      Hashtbl.replace comp_tbl r.company (r :: prev))
+    rows;
+  Hashtbl.fold
+    (fun company rev_members acc ->
+      let members = List.stable_sort compare_keeper_spend (List.rev rev_members) in
+      let total_cost_usd =
+        List.fold_left
+          (fun s (m : keeper_spend_row) -> s +. m.cost_usd)
+          0.0 members
+      in
+      { company; total_cost_usd; members } :: acc)
+    comp_tbl []
+  |> List.sort (fun (a : company_spend_group) (b : company_spend_group) ->
+         let c = Float.compare b.total_cost_usd a.total_cost_usd in
+         if c <> 0 then c else String.compare a.company b.company)
+
+let keeper_spend_display_rows t : keeper_spend_row list =
+  List.concat_map
+    (fun (g : company_spend_group) -> g.members)
+    (grouped_keeper_spend_rows t)
+
+let selected_keeper_spend_row t =
+  let rows = keeper_spend_display_rows t in
+  List.nth_opt rows (clamp_index (List.length rows) t.selected_index)
 
 let company_spend_rollups t =
   let rows = keeper_spend_rows t in
@@ -692,7 +782,7 @@ let selected_lane t =
       List.nth_opt snap.lanes
         (clamp_index (List.length snap.lanes) t.selected_index)
 
-let active_list_len t =
+let active_list_len ?(pane_index = 0) t =
   match t.active_tab with
   | Nav.Runtime_quotas_credits ->
       let p = partition_accounts t in
@@ -705,30 +795,60 @@ let active_list_len t =
         | xs -> if t.show_unreported_accounts then 1 + List.length xs else 1
       in
       base + extra
-  | Nav.Runtime_efficiency_spend -> List.length (keeper_spend_rows t)
+  | Nav.Runtime_efficiency_spend -> List.length (keeper_spend_display_rows t)
   | Nav.Runtime_failover_lanes -> (
       match Observed.to_option t.runtime_resolved with
       | Some r -> List.length r.lanes
       | None -> 0)
-  | Nav.Runtime_tools_connectors -> (
-      let tools_n =
+  | Nav.Runtime_tools_connectors ->
+      if Int.equal (pane_index mod 2) 0 then
         match Observed.to_option t.tools_catalog with
         | Some xs -> List.length xs
         | None -> 0
-      in
-      let conn_n =
+      else
         match Observed.to_option t.connectors with
         | Some xs -> List.length xs
         | None -> 0
-      in
-      max tools_n conn_n)
 
-let move_selection ~delta t =
-  let len = active_list_len t in
+let visual_row_for_selection t ~selected_index =
+  match t.active_tab with
+  | Nav.Runtime_efficiency_spend ->
+      let groups = grouped_keeper_spend_rows t in
+      let rec walk vis_row item_idx = function
+        | [] -> (selected_index, selected_index)
+        | (g : company_spend_group) :: rest ->
+            let n = List.length g.members in
+            if selected_index < item_idx + n then
+              let offset = selected_index - item_idx in
+              let row = vis_row + 1 + offset in
+              ((if offset = 0 then vis_row else row), row)
+            else walk (vis_row + 1 + n) (item_idx + n) rest
+      in
+      walk 0 0 groups
+  | Nav.Runtime_failover_lanes -> (
+      match Observed.to_option t.runtime_resolved with
+      | None -> (selected_index, selected_index)
+      | Some snap ->
+          let rec walk vis_row idx = function
+            | [] -> (vis_row, vis_row)
+            | (lane : Wire_runtime.failover_lane) :: rest ->
+                if idx >= selected_index then (vis_row, vis_row)
+                else
+                  walk
+                    (vis_row + 1 + List.length lane.runtime_ids)
+                    (idx + 1) rest
+          in
+          walk 0 0 snap.lanes)
+  | Nav.Runtime_quotas_credits | Nav.Runtime_tools_connectors ->
+      (selected_index, selected_index)
+
+let move_selection ?pane_index ?viewport_rows ~delta t =
+  let len = active_list_len ?pane_index t in
   let selected_index = clamp_index len (t.selected_index + delta) in
+  let header_row, vis_row = visual_row_for_selection t ~selected_index in
   let scroll_offset =
-    if selected_index < t.scroll_offset then selected_index
-    else t.scroll_offset
+    adjust_grouped_scroll ?viewport_rows ~scroll:t.scroll_offset ~header_row
+      vis_row
   in
   { t with selected_index; scroll_offset }
 

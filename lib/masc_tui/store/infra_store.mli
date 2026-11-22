@@ -85,6 +85,6 @@ val selected_sandbox_keeper : t -> string option
 val selected_repository : t -> Wire_infra.repository option
 val selected_log : t -> Wire_infra.system_log_entry option
 
-val move_selection : delta:int -> t -> t
+val move_selection : ?viewport_rows:int -> delta:int -> t -> t
 val set_filter : string -> t -> t
 val mark_stale_all : t -> t

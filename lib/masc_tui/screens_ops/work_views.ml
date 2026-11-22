@@ -652,18 +652,7 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
   else
     let theme = Ops_common.theme_of_model model in
     let bp = Ops_common.layout_bp model in
-    let goals =
-      let q = String.trim model.work.filter_query in
-      let all = Work_store.goals model.work in
-      if String.equal q "" then all
-      else
-        List.filter
-          (fun (g : Wire_work.goal) ->
-            Ops_common.contains_ci ~needle:q g.title
-            || Ops_common.contains_ci ~needle:q g.id
-            || Ops_common.contains_ci ~needle:q g.measure)
-          all
-    in
+    let goals = Work_store.filtered_goals model.work in
     let left_rect, right_rect =
       if rect.w >= 96 then
         match
@@ -1260,7 +1249,7 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         ( Printf.sprintf "%s %d"
             (Ops_common.say model ~ko:"일정" ~en:"Schedules")
             (List.length all_scheds)
-        , String.equal q_low "schedules"
+        , String.equal q_low "schedules" || String.equal q_low "sched"
         , None );
       ]
     in
@@ -1282,48 +1271,10 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     end;
     if Rect.is_empty body_rect then ()
     else
-      let is_sched_filter = String.equal q_low "schedules" in
-      let filtered_tasks =
-        if String.equal q_low "" || is_sched_filter then all_tasks
-        else if String.equal q_low "active" then
-          List.filter
-            (fun (tk : Wire_work.task) -> Ops_common.task_is_active tk.status)
-            all_tasks
-        else if String.equal q_low "verify" then
-          List.filter
-            (fun (tk : Wire_work.task) ->
-              Ops_common.task_is_awaiting_verification tk.status)
-            all_tasks
-        else if String.equal q_low "todo" then
-          List.filter
-            (fun (tk : Wire_work.task) ->
-              match tk.status with
-              | Wire_work.Todo -> true
-              | Wire_work.Claimed _
-              | Wire_work.InProgress _
-              | Wire_work.AwaitingVerification _
-              | Wire_work.Done _
-              | Wire_work.Cancelled _ ->
-                  false)
-            all_tasks
-        else if String.equal q_low "unlinked" then
-          List.filter
-            (fun (tk : Wire_work.task) ->
-              match tk.goal_link with
-              | Wire_work.Unlinked -> true
-              | Wire_work.Linked _ -> false)
-            all_tasks
-        else if String.equal q_low "done" then
-          List.filter
-            (fun (tk : Wire_work.task) -> Ops_common.task_is_done tk.status)
-            all_tasks
-        else
-          List.filter
-            (fun (tk : Wire_work.task) ->
-              Ops_common.contains_ci ~needle:q_low tk.title
-              || Ops_common.contains_ci ~needle:q_low tk.id)
-            all_tasks
+      let is_sched_filter =
+        String.equal q_low "schedules" || String.equal q_low "sched"
       in
+      let filtered_tasks = Work_store.filtered_tasks model.work in
       let n_tasks = List.length filtered_tasks in
       let n_scheds = List.length all_scheds in
       let task_sel_opt, sched_sel_opt =
@@ -1910,8 +1861,9 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
             in
             ignore
               (Table.draw grid ~rect:s_inner ~theme ~caps:Ops_common.default_caps
-                 ~lang:model.lang ?selected:sched_sel_opt
-                 ~col_gap:(Layout.table_col_gap bp) ~columns:cols rows)
+                 ~lang:model.lang ~scroll:model.work.schedules_scroll_offset
+                 ?selected:sched_sel_opt ~col_gap:(Layout.table_col_gap bp)
+                 ~columns:cols rows)
         end
       end
 
@@ -2330,7 +2282,8 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         in
         ignore
           (Table.draw grid ~rect:l_inner ~theme ~caps:Ops_common.default_caps
-             ~lang:model.lang ~selected:model.attention.triage_index
+             ~lang:model.lang ~scroll:model.attention.triage_scroll_offset
+             ~selected:model.attention.triage_index
              ~col_gap:(Layout.table_col_gap bp) ~columns:cols rows)
       end;
       if not (Rect.is_empty right_rect) then
@@ -3139,6 +3092,7 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 ignore
                   (Table.draw grid ~rect:tbl_r ~theme
                      ~caps:Ops_common.default_caps ~lang:model.lang
+                     ~scroll:model.work.scroll_offset
                      ~selected:model.work.selected_index
                      ~col_gap:(Layout.table_col_gap bp) ~columns:cols rows)
             end
@@ -3240,7 +3194,7 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                      ~caps:Ops_common.default_caps ~lang:model.lang
                      ~col_gap:(Layout.table_col_gap bp) ~columns:cols rows)
       end;
-      (* Right Peer Card: Daily / 7d 5-Company & Top Keeper Leaderboard *)
+      (* Right Peer Card: Daily / 7d Group & Top Keeper Leaderboard *)
       if not (Rect.is_empty right_rect) then begin
         let lb_spec : Card.spec =
           {
@@ -3352,21 +3306,27 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
               kcols;
             y := !y + 2
           end;
-          (* 2. 5-Company Ranked Bars (unfiltered, using company_groups_with_costs!) *)
-          if !y < bot then begin
-            Card.draw_hairline ~pad_x:0 ~bg:r_bg
-              ~label:
-                (Ops_common.say model ~ko:"조직별 성과 (5개 조직)"
-                   ~en:"Company Leaderboard")
-              grid ~rect:content ~y:!y ~theme;
-            incr y
-          end;
+          (* 2. Company/Group Ranked Bars (unfiltered, using company_groups_with_costs!) *)
           let unfiltered_fleet = { model.fleet with filter_query = "" } in
           let costs_assoc = Runtime_store.keeper_costs_24h_assoc model.runtime in
           let groups =
             Fleet_store.company_groups_with_costs ~keeper_costs_24h:costs_assoc
               unfiltered_fleet
           in
+          let grp_cnt = List.length groups in
+          if !y < bot then begin
+            let lb_label =
+              if grp_cnt > 0 then
+                Ops_common.say model
+                  ~ko:(Printf.sprintf "조직별 성과 (%d개 조직)" grp_cnt)
+                  ~en:(Printf.sprintf "Company Leaderboard (%d)" grp_cnt)
+              else
+                Ops_common.say model ~ko:"조직별 성과" ~en:"Company Leaderboard"
+            in
+            Card.draw_hairline ~pad_x:0 ~bg:r_bg ~label:lb_label grid
+              ~rect:content ~y:!y ~theme;
+            incr y
+          end;
           let tasks = Work_store.tasks model.work in
           let company_done_count (grp : Wire_fleet.company_group) =
             let names =

@@ -35,6 +35,7 @@ type bucket_counts = {
 type t = {
   items : entry list;
   triage_index : int;
+  triage_scroll_offset : int;
   auto_advance : bool;
   in_flight_ids : string list;
 }
@@ -67,7 +68,7 @@ val top_fast_path : t -> entry option
 val current_triage_item : t -> entry option
 (** Currently focused item for rapid 1-key Inbox / Ask triage. *)
 
-val move_triage : delta:int -> t -> t
+val move_triage : ?viewport_rows:int -> delta:int -> t -> t
 val select_triage_index : int -> t -> t
 val set_auto_advance : bool -> t -> t
 

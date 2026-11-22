@@ -115,11 +115,252 @@ let contains_ci ~needle haystack =
       in
       scan 0
 
+let default_viewport_rows = 15
+
+let adjust_grouped_scroll ?(viewport_rows = default_viewport_rows) ~scroll
+    ~header_row vis_row =
+  let vr = max 1 viewport_rows in
+  let top_row = if vr >= 2 then min header_row vis_row else vis_row in
+  if top_row < scroll then top_row
+  else if vis_row >= scroll + vr then max 0 (vis_row - vr + 1)
+  else scroll
+
 let clamp_index len idx =
   if len <= 0 then 0
   else if idx < 0 then 0
   else if idx >= len then len - 1
   else idx
+
+type succession_group = {
+  chain_root_id : string option;
+  lead : Wire_knowledge.board_post;
+  members : Wire_knowledge.board_post list;
+  chain_count : int;
+  unique_keepers : int;
+}
+
+let unique_strings xs =
+  let seen = Hashtbl.create 16 in
+  List.filter
+    (fun s ->
+      if Hashtbl.mem seen s then false
+      else begin
+        Hashtbl.add seen s ();
+        true
+      end)
+    xs
+
+let group_succession_chains (posts : Wire_knowledge.board_post list) :
+    succession_group list =
+  let order = ref [] in
+  let tbl : (string, Wire_knowledge.board_post list) Hashtbl.t =
+    Hashtbl.create 32
+  in
+  List.iter
+    (fun (p : Wire_knowledge.board_post) ->
+      let key =
+        match p.succession_chain_root_id with
+        | Some root when not (String.equal (String.trim root) "") ->
+            "chain:" ^ root
+        | Some _ | None -> "post:" ^ p.id
+      in
+      match Hashtbl.find_opt tbl key with
+      | None ->
+          order := key :: !order;
+          Hashtbl.add tbl key [ p ]
+      | Some prev -> Hashtbl.replace tbl key (prev @ [ p ]))
+    posts;
+  List.rev !order
+  |> List.filter_map (fun key ->
+         match Hashtbl.find_opt tbl key with
+         | None | Some [] -> None
+         | Some (first :: _ as members) ->
+             let lead =
+               List.fold_left
+                 (fun (best : Wire_knowledge.board_post)
+                      (cur : Wire_knowledge.board_post) ->
+                   let best_d =
+                     match best.chain_depth with Some d -> d | None -> 0
+                   in
+                   let cur_d =
+                     match cur.chain_depth with Some d -> d | None -> 0
+                   in
+                   if cur_d > best_d then cur
+                   else if
+                     Int.equal cur_d best_d
+                     && cur.created_at_unix > best.created_at_unix
+                   then cur
+                   else best)
+                 first members
+             in
+             let declared_depth =
+               List.fold_left
+                 (fun acc (p : Wire_knowledge.board_post) ->
+                   match p.chain_depth with Some d -> Int.max acc d | None -> acc)
+                 1 members
+             in
+             let chain_count = Int.max (List.length members) declared_depth in
+             let unique_keepers =
+               members
+               |> List.map (fun (p : Wire_knowledge.board_post) -> p.author)
+               |> unique_strings |> List.length
+             in
+             Some
+               {
+                 chain_root_id = lead.succession_chain_root_id;
+                 lead;
+                 members;
+                 chain_count;
+                 unique_keepers;
+               })
+
+let cluster_wiki_pages (pages : Wire_knowledge.wiki_page_summary list) :
+    (string option * Wire_knowledge.wiki_page_summary list) list =
+  let order = ref [] in
+  let tbl : (string option, Wire_knowledge.wiki_page_summary list) Hashtbl.t =
+    Hashtbl.create 16
+  in
+  List.iter
+    (fun (p : Wire_knowledge.wiki_page_summary) ->
+      let topic =
+        match p.tags with
+        | tag :: _ when not (String.equal (String.trim tag) "") ->
+            Some (String.trim tag)
+        | _ -> None
+      in
+      match Hashtbl.find_opt tbl topic with
+      | None ->
+          order := topic :: !order;
+          Hashtbl.add tbl topic [ p ]
+      | Some prev -> Hashtbl.replace tbl topic (prev @ [ p ]))
+    pages;
+  List.rev !order
+  |> List.filter_map (fun topic ->
+         match Hashtbl.find_opt tbl topic with
+         | Some xs -> Some (topic, xs)
+         | None -> None)
+
+let is_succession_chain_expanded ~root_id t =
+  String_set.mem root_id t.expanded_succession_chains
+
+let filtered_posts t =
+  let posts =
+    match Observed.to_option t.board with Some f -> f.posts | None -> []
+  in
+  let signal_filtered =
+    if t.board_signal_only then
+      List.filter (fun (p : Wire_knowledge.board_post) -> p.is_signal) posts
+    else posts
+  in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then signal_filtered
+  else
+    List.filter
+      (fun (p : Wire_knowledge.board_post) ->
+        contains_ci ~needle:q p.title
+        || contains_ci ~needle:q p.author
+        || contains_ci ~needle:q p.body)
+      signal_filtered
+
+let is_group_expanded t (grp : succession_group) =
+  match grp.chain_root_id with
+  | Some root_id when not (String.equal (String.trim root_id) "") ->
+      is_succession_chain_expanded ~root_id t && List.length grp.members > 1
+  | Some _ | None -> false
+
+let board_display_posts t =
+  let groups = group_succession_chains (filtered_posts t) in
+  List.concat_map
+    (fun (grp : succession_group) ->
+      if is_group_expanded t grp then grp.members else [ grp.lead ])
+    groups
+
+let wiki_pages_filtered t =
+  let pages =
+    match Observed.to_option t.wiki_index with Some idx -> idx.pages | None -> []
+  in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then pages
+  else
+    List.filter
+      (fun (p : Wire_knowledge.wiki_page_summary) ->
+        contains_ci ~needle:q p.title
+        || contains_ci ~needle:q p.slug
+        || contains_ci ~needle:q p.summary)
+      pages
+
+let wiki_display_pages t =
+  cluster_wiki_pages (wiki_pages_filtered t) |> List.concat_map snd
+
+let visual_row_for_selection t ~selected_index =
+  match t.active_tab with
+  | Nav.Knowledge_board ->
+      let groups = group_succession_chains (filtered_posts t) in
+      let rec walk vis_row item_idx = function
+        | [] -> (selected_index, selected_index)
+        | (grp : succession_group) :: rest ->
+            if is_group_expanded t grp then
+              let n = List.length grp.members in
+              if selected_index < item_idx + n then
+                let offset = selected_index - item_idx in
+                let row = vis_row + 1 + offset in
+                ((if offset = 0 then vis_row else row), row)
+              else walk (vis_row + 1 + n) (item_idx + n) rest
+            else if selected_index <= item_idx then (vis_row, vis_row)
+            else walk (vis_row + 1) (item_idx + 1) rest
+      in
+      walk 0 0 groups
+  | Nav.Knowledge_wiki_artifacts -> (
+      match t.wiki_artifacts_submode with
+      | `Wiki ->
+          let clusters = cluster_wiki_pages (wiki_pages_filtered t) in
+          let rec walk vis_row item_idx = function
+            | [] -> (selected_index, selected_index)
+            | (_, ps) :: rest ->
+                let n = List.length ps in
+                if selected_index < item_idx + n then
+                  let offset = selected_index - item_idx in
+                  let row = vis_row + 1 + offset in
+                  ((if offset = 0 then vis_row else row), row)
+                else walk (vis_row + 1 + n) (item_idx + n) rest
+          in
+          walk 0 0 clusters
+      | `Artifacts -> (selected_index, selected_index))
+  | Nav.Knowledge_memory -> (selected_index, selected_index)
+
+let selected_post t =
+  let ps = board_display_posts t in
+  List.nth_opt ps (clamp_index (List.length ps) t.selected_index)
+
+let selected_wiki_page t =
+  let ps = wiki_display_pages t in
+  List.nth_opt ps (clamp_index (List.length ps) t.selected_index)
+
+let index_of_post_id id (posts : Wire_knowledge.board_post list) =
+  let rec find i = function
+    | [] -> None
+    | (p : Wire_knowledge.board_post) :: rest ->
+        if String.equal p.id id then Some i else find (i + 1) rest
+  in
+  find 0 posts
+
+let index_of_chain_root root_id (posts : Wire_knowledge.board_post list) =
+  let rec find i = function
+    | [] -> None
+    | (p : Wire_knowledge.board_post) :: rest -> (
+        match p.succession_chain_root_id with
+        | Some r when String.equal r root_id -> Some i
+        | Some _ | None -> find (i + 1) rest)
+  in
+  find 0 posts
+
+let index_of_wiki_slug slug (pages : Wire_knowledge.wiki_page_summary list) =
+  let rec find i = function
+    | [] -> None
+    | (p : Wire_knowledge.wiki_page_summary) :: rest ->
+        if String.equal p.slug slug then Some i else find (i + 1) rest
+  in
+  find 0 pages
 
 let set_tab active_tab t =
   { t with active_tab; selected_index = 0; scroll_offset = 0 }
@@ -144,21 +385,43 @@ let toggle_signal_only t =
     board_signal_only = not t.board_signal_only;
     board = Observed.mark_stale t.board;
     selected_index = 0;
+    scroll_offset = 0;
   }
 
 let set_board_sort board_sort_by t =
   { t with board_sort_by; board = Observed.mark_stale t.board }
 
 let toggle_succession_chain ~root_id t =
+  let prev_post = selected_post t in
   let expanded_succession_chains =
     if String_set.mem root_id t.expanded_succession_chains then
       String_set.remove root_id t.expanded_succession_chains
     else String_set.add root_id t.expanded_succession_chains
   in
-  { t with expanded_succession_chains }
-
-let is_succession_chain_expanded ~root_id t =
-  String_set.mem root_id t.expanded_succession_chains
+  let next = { t with expanded_succession_chains } in
+  let display = board_display_posts next in
+  let len = List.length display in
+  let selected_index =
+    match prev_post with
+    | None -> clamp_index len next.selected_index
+    | Some p -> (
+        match index_of_post_id p.id display with
+        | Some idx -> idx
+        | None -> (
+            let fallback_root =
+              match p.succession_chain_root_id with
+              | Some r -> Some r
+              | None -> Some root_id
+            in
+            match Option.bind fallback_root (fun r -> index_of_chain_root r display) with
+            | Some idx -> idx
+            | None -> clamp_index len next.selected_index))
+  in
+  let header_row, vis_row = visual_row_for_selection next ~selected_index in
+  let scroll_offset =
+    adjust_grouped_scroll ~scroll:next.scroll_offset ~header_row vis_row
+  in
+  { next with selected_index; scroll_offset }
 
 let set_memory_diff_window memory_diff_window t =
   { t with memory_diff_window; memory_diff = Observed.mark_stale t.memory_diff }
@@ -177,7 +440,26 @@ let set_memory_diff_keeper memory_diff_keeper t =
   { t with memory_diff_keeper; memory_diff = Observed.mark_stale t.memory_diff }
 
 let apply_board ~observed_at feed t =
-  { t with board = Observed.value ~observed_at feed }
+  let prev_id =
+    if Nav.equal_knowledge_tab t.active_tab Nav.Knowledge_board then
+      Option.map (fun (p : Wire_knowledge.board_post) -> p.id) (selected_post t)
+    else None
+  in
+  let next = { t with board = Observed.value ~observed_at feed } in
+  if not (Nav.equal_knowledge_tab next.active_tab Nav.Knowledge_board) then next
+  else
+    let display = board_display_posts next in
+    let len = List.length display in
+    let selected_index =
+      match Option.bind prev_id (fun id -> index_of_post_id id display) with
+      | Some idx -> idx
+      | None -> clamp_index len next.selected_index
+    in
+    let header_row, vis_row = visual_row_for_selection next ~selected_index in
+    let scroll_offset =
+      adjust_grouped_scroll ~scroll:next.scroll_offset ~header_row vis_row
+    in
+    { next with selected_index; scroll_offset }
 
 let apply_thread ~observed_at thread t =
   { t with active_thread = Observed.value ~observed_at thread }
@@ -186,7 +468,33 @@ let apply_quarantines ~observed_at quarantines t =
   { t with quarantines = Observed.value ~observed_at quarantines }
 
 let apply_wiki_index ~observed_at idx t =
-  { t with wiki_index = Observed.value ~observed_at idx }
+  let on_wiki =
+    Nav.equal_knowledge_tab t.active_tab Nav.Knowledge_wiki_artifacts
+    &&
+    match t.wiki_artifacts_submode with `Wiki -> true | `Artifacts -> false
+  in
+  let prev_slug =
+    if on_wiki then
+      Option.map
+        (fun (p : Wire_knowledge.wiki_page_summary) -> p.slug)
+        (selected_wiki_page t)
+    else None
+  in
+  let next = { t with wiki_index = Observed.value ~observed_at idx } in
+  if not on_wiki then next
+  else
+    let display = wiki_display_pages next in
+    let len = List.length display in
+    let selected_index =
+      match Option.bind prev_slug (fun sl -> index_of_wiki_slug sl display) with
+      | Some idx -> idx
+      | None -> clamp_index len next.selected_index
+    in
+    let header_row, vis_row = visual_row_for_selection next ~selected_index in
+    let scroll_offset =
+      adjust_grouped_scroll ~scroll:next.scroll_offset ~header_row vis_row
+    in
+    { next with selected_index; scroll_offset }
 
 let apply_wiki_page ~observed_at page t =
   { t with wiki_page = Observed.value ~observed_at page }
@@ -262,41 +570,8 @@ let wiki_put_request_of_draft (d : wiki_edit_draft) :
       else d.note;
   }
 
-let filtered_posts t =
-  let posts =
-    match Observed.to_option t.board with Some f -> f.posts | None -> []
-  in
-  let signal_filtered =
-    if t.board_signal_only then
-      List.filter (fun (p : Wire_knowledge.board_post) -> p.is_signal) posts
-    else posts
-  in
-  let q = String.trim t.filter_query in
-  if String.equal q "" then signal_filtered
-  else
-    List.filter
-      (fun (p : Wire_knowledge.board_post) ->
-        contains_ci ~needle:q p.title
-        || contains_ci ~needle:q p.author
-        || contains_ci ~needle:q p.body)
-      signal_filtered
-
 let quarantines_list t =
   match Observed.to_option t.quarantines with Some xs -> xs | None -> []
-
-let wiki_pages_filtered t =
-  let pages =
-    match Observed.to_option t.wiki_index with Some idx -> idx.pages | None -> []
-  in
-  let q = String.trim t.filter_query in
-  if String.equal q "" then pages
-  else
-    List.filter
-      (fun (p : Wire_knowledge.wiki_page_summary) ->
-        contains_ci ~needle:q p.title
-        || contains_ci ~needle:q p.slug
-        || contains_ci ~needle:q p.summary)
-      pages
 
 let artifacts_filtered t =
   let items =
@@ -310,36 +585,50 @@ let artifacts_filtered t =
         contains_ci ~needle:q a.name || contains_ci ~needle:q a.sha256)
       items
 
-let selected_post t =
-  let ps = filtered_posts t in
-  List.nth_opt ps (clamp_index (List.length ps) t.selected_index)
-
-let selected_wiki_page t =
-  let ps = wiki_pages_filtered t in
-  List.nth_opt ps (clamp_index (List.length ps) t.selected_index)
-
 let selected_artifact t =
   let items = artifacts_filtered t in
   List.nth_opt items (clamp_index (List.length items) t.selected_index)
 
-let active_list_len t =
+let active_list_len ?(pane_index = 0) t =
   match t.active_tab with
-  | Nav.Knowledge_board -> List.length (filtered_posts t)
+  | Nav.Knowledge_board -> List.length (board_display_posts t)
   | Nav.Knowledge_wiki_artifacts -> (
       match t.wiki_artifacts_submode with
-      | `Wiki -> List.length (wiki_pages_filtered t)
+      | `Wiki -> List.length (wiki_display_pages t)
       | `Artifacts -> List.length (artifacts_filtered t))
-  | Nav.Knowledge_memory -> (
-      match Observed.to_option t.world_memory with
-      | Some w -> max (List.length w.active_conflicts) (List.length w.claims)
-      | None -> 0)
+  | Nav.Knowledge_memory ->
+      if Int.equal (pane_index mod 2) 1 then
+        match Observed.to_option t.memory_diff with
+        | Some
+            {
+              body =
+                Wire_knowledge.Keeper_diff
+                  { added; updated; retracted; invalidated; _ };
+              _;
+            } ->
+            List.length added + List.length updated + List.length retracted
+            + List.length invalidated
+        | Some
+            {
+              body = Wire_knowledge.World_diff { added; updated; retracted; _ };
+              _;
+            } ->
+            List.length added + List.length updated + List.length retracted
+        | None -> 0
+      else
+        match Observed.to_option t.world_memory with
+        | Some w ->
+            if w.active_conflicts <> [] then List.length w.active_conflicts
+            else List.length w.claims
+        | None -> 0
 
-let move_selection ~delta t =
-  let len = active_list_len t in
+let move_selection ?pane_index ?viewport_rows ~delta t =
+  let len = active_list_len ?pane_index t in
   let selected_index = clamp_index len (t.selected_index + delta) in
+  let header_row, vis_row = visual_row_for_selection t ~selected_index in
   let scroll_offset =
-    if selected_index < t.scroll_offset then selected_index
-    else t.scroll_offset
+    adjust_grouped_scroll ?viewport_rows ~scroll:t.scroll_offset ~header_row
+      vis_row
   in
   { t with selected_index; scroll_offset }
 

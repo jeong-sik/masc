@@ -130,12 +130,19 @@ let mark_all_read t = { t with unread_count = 0 }
 let find_by_id id t =
   List.find_opt (fun (inc : Health.incident) -> Int.equal inc.id id) t.entries
 
-let move_selection ~delta t =
+let default_viewport_rows = 15
+
+let adjust_scroll ?(viewport_rows = default_viewport_rows) ~scroll selected =
+  let vr = max 1 viewport_rows in
+  if selected < scroll then selected
+  else if selected >= scroll + vr then max 0 (selected - vr + 1)
+  else scroll
+
+let move_selection ?viewport_rows ~delta t =
   let vis_len = List.length (visible_entries t) in
   let selected_index = clamp_index vis_len (t.selected_index + delta) in
   let scroll_offset =
-    if selected_index < t.scroll_offset then selected_index
-    else t.scroll_offset
+    adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
   in
   { t with selected_index; scroll_offset }
 

@@ -718,6 +718,7 @@ let make_populated_model ~cols ~rows ~lang =
   let fleet =
     m0.fleet
     |> Fleet_store.apply_keepers ~observed_at:now_mono sample_keepers
+    |> Fleet_store.select_keeper "e-masc-the-leader"
     |> Fleet_store.apply_chat_history ~observed_at:now_mono
          ~keeper:"e-masc-the-leader"
          {
@@ -2614,6 +2615,228 @@ let test_p0_keeper_dive_honest_24h_vs_lifetime_turns () =
   Alcotest.(check bool) "Preview never shows lowercase [v] PTT hint" false
     (contains_sub ~needle:"[v]" txt_life_en)
 
+let test_nav_keepers_display_order_monotonic_screen_rows () =
+  let mk_k group name : Wire_fleet.keeper_summary =
+    {
+      name;
+      group = Some group;
+      company = group;
+      health = Wire_fleet.Keeper_healthy;
+      paused = false;
+      keepalive_running = true;
+      activation_mode = Wire_fleet.Activation_autonomous;
+      runtime_id = "rt-1";
+      model_id = Some "model-1";
+      current_task_id = None;
+      context_ratio = Observed.value ~observed_at:now_mono 0.25;
+      total_turns = Observed.value ~observed_at:now_mono 10;
+      total_tokens = Observed.value ~observed_at:now_mono 5000;
+      cost_24h_usd = Observed.value ~observed_at:now_mono 1.0;
+      last_turn_at_unix = Some now_unix;
+      active_turn = None;
+      activity_sparkline_24h = [ 1.0; 2.0 ];
+    }
+  in
+  let scrambled =
+    [
+      mk_k "org-zeta" "zeta-1";
+      mk_k "org-alpha" "alpha-2";
+      mk_k "org-mid" "mid-1";
+      mk_k "org-beta" "beta-2";
+      mk_k "org-alpha" "alpha-1";
+      mk_k "org-beta" "beta-1";
+    ]
+  in
+  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let fleet0 = Fleet_store.apply_keepers ~observed_at:now_mono scrambled m0.fleet in
+  let rail = Glyph.to_utf8 Glyph.Left_rail in
+  let find_rail_y (grid : Cell_grid.t) =
+    let found = ref None in
+    for y = 0 to Cell_grid.rows grid - 1 do
+      if Option.is_none !found then
+        for x = 0 to 6 do
+          if Option.is_none !found then
+            match (Cell_grid.get grid ~x ~y).glyph with
+            | Cell_grid.Utf8 s when String.equal s rail -> found := Some y
+            | Cell_grid.Empty | Cell_grid.Ascii _ | Cell_grid.Braille _
+            | Cell_grid.Utf8 _ | Cell_grid.Continuation ->
+                ()
+        done
+    done;
+    !found
+  in
+  let rec walk fleet steps acc =
+    let g =
+      render_to_grid ~cols:140 ~rows:40
+        (Screen_keepers.render ~model:{ m0 with fleet })
+    in
+    let y =
+      match find_rail_y g with
+      | Some y -> y
+      | None -> Alcotest.fail "Expected Left_rail row on Screen_keepers"
+    in
+    if steps = 0 then List.rev (y :: acc)
+    else
+      walk
+        (Fleet_store.move_selection ~viewport_rows:25 ~delta:1 fleet)
+        (steps - 1) (y :: acc)
+  in
+  let ys = walk fleet0 5 [] in
+  let rec check_inc = function
+    | [] | [ _ ] -> ()
+    | a :: (b :: _ as tl) ->
+        Alcotest.(check bool)
+          (Printf.sprintf "Keepers ▎ row strictly increasing (%d < %d)" a b)
+          true (a < b);
+        check_inc tl
+  in
+  check_inc ys;
+  (* Now collapse middle group org-beta and verify remaining 4 keepers still step monotonically *)
+  let fleet_col = Fleet_store.toggle_company_collapsed "org-beta" fleet0 in
+  let ys_col = walk fleet_col 3 [] in
+  check_inc ys_col
+
+let test_p1_chat_transcript_render_parity () =
+  let cols, rows = (80, 24) in
+  let mk_k name : Wire_fleet.keeper_summary =
+    {
+      name;
+      group = Some "org-alpha";
+      company = "org-alpha";
+      health = Wire_fleet.Keeper_healthy;
+      paused = false;
+      keepalive_running = true;
+      activation_mode = Wire_fleet.Activation_autonomous;
+      runtime_id = "rt-1";
+      model_id = Some "model-1";
+      current_task_id = None;
+      context_ratio = Observed.value ~observed_at:now_mono 0.25;
+      total_turns = Observed.value ~observed_at:now_mono 10;
+      total_tokens = Observed.value ~observed_at:now_mono 5000;
+      cost_24h_usd = Observed.value ~observed_at:now_mono 1.0;
+      last_turn_at_unix = Some now_unix;
+      active_turn = None;
+      activity_sparkline_24h = [ 1.0; 2.0 ];
+    }
+  in
+  let mk_msg ~id ~role ~content ?tool_call_name ts : Wire_fleet.chat_message =
+    {
+      id;
+      role;
+      content;
+      ts_unix = ts;
+      turn_ref = None;
+      model_used = None;
+      tool_call_id = None;
+      tool_call_name;
+      execution_id = None;
+    }
+  in
+  let json_1line =
+    "{\"a\":1,\"b\":2,\"c\":3,\"d\":4,\"e\":5,\"f\":6,\"g\":7,\"h\":8,\"i\":9,\"j\":10}"
+  in
+  let msgs =
+    [
+      mk_msg ~id:"c-1" ~role:Wire_fleet.Role_user
+        ~content:"TOP_ROW_MARKER_001 Verify narrow Markdown wrap and https://example.invalid/long/path/check"
+        (now_unix -. 600.0);
+      mk_msg ~id:"c-2" ~role:Wire_fleet.Role_assistant
+        ~content:"# Audit Summary\n\n- Bullet one with generous wording so it wraps across multiple narrow rows\n- Bullet two referencing board:p-1234567890"
+        (now_unix -. 540.0);
+      mk_msg ~id:"c-3" ~role:Wire_fleet.Role_tool ~tool_call_name:"json_tool"
+        ~content:json_1line (now_unix -. 500.0);
+    ]
+    @ List.init 10 (fun i ->
+          mk_msg
+            ~id:(Printf.sprintf "c-mid-%d" i)
+            ~role:
+              (if i mod 2 = 0 then Wire_fleet.Role_user
+               else Wire_fleet.Role_assistant)
+            ~content:
+              (Printf.sprintf
+                 "BODY_TURN_%02d Long multi-word paragraph that wraps cleanly at eighty columns width."
+                 i)
+            (now_unix -. 400.0 +. float_of_int (i * 10)))
+    @ [
+        mk_msg ~id:"c-last" ~role:Wire_fleet.Role_assistant
+          ~content:"BOTTOM_MARKER_FINAL persisted reply." (now_unix -. 10.0);
+      ]
+  in
+  let m0 = Model.initial ~cols ~rows ~lang:Say.Lang_en () in
+  let fleet =
+    m0.fleet
+    |> Fleet_store.apply_keepers ~observed_at:now_mono [ mk_k "alpha-1" ]
+    |> Fleet_store.set_tools_mode Slash.Tools_results
+    |> Fleet_store.apply_chat_history ~observed_at:now_mono ~keeper:"alpha-1"
+         { messages = msgs; has_more = false; next_cursor = None }
+    |> Fleet_store.start_chat_stream ~keeper:"alpha-1" ~request_id:"req-p"
+    |> Fleet_store.apply_chat_stream_chunk ~keeper:"alpha-1" ~request_id:"req-p"
+         (Wire_fleet.Chunk_turn_done
+            {
+              operation_id = "op-p";
+              turn_ref = "t-p";
+              reply = "BOTTOM_MARKER_FINAL persisted reply.";
+            })
+  in
+  let m_chat =
+    {
+      m0 with
+      fleet;
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha-1"; tab = Nav.Keeper_chat } ];
+        };
+    }
+  in
+  let render_dive_body (m : Model.t) =
+    let geom = Chat_transcript.chat_viewport_geometry ~model:m in
+    (* Pass exact Card outer rect matching Chrome body_outer so render_chat_tab matches body_h *)
+    let rect_h = geom.body_h + 3 in
+    let bp = Ops_common.layout_bp m in
+    let body_outer =
+      Layout.inset_body bp (Rect.make ~x:0 ~y:0 ~w:cols ~h:rect_h)
+    in
+    let grid = Cell_grid.create ~cols ~rows:rect_h in
+    let cache = Card.Cache.create () in
+    Screen_keepers.render_dive ~name:"alpha-1" ~tab:Nav.Keeper_chat ~model:m
+      ~cache ~rect:body_outer grid;
+    grid_all_text grid
+  in
+  let txt_bot = render_dive_body m_chat in
+  Alcotest.(check bool) "bottom frame renders BOTTOM_MARKER_FINAL" true
+    (contains_sub ~needle:"BOTTOM_MARKER_FINAL" txt_bot);
+  Alcotest.(check bool) "bottom frame does NOT yet show TOP_ROW_MARKER_001" false
+    (contains_sub ~needle:"TOP_ROW_MARKER_001" txt_bot);
+  let m_home, _ =
+    Update.step ~now:now_mono m_chat
+      (Msg.Key_event
+         {
+           Keymap.Input.key = Keymap.Input.Home;
+           mods = Keymap.Input.no_mods;
+         })
+  in
+  let txt_top = render_dive_body m_home in
+  Alcotest.(check bool)
+    "Home reaches true top row (TOP_ROW_MARKER_001 visible even with wrapped Markdown + JSON tool)"
+    true
+    (contains_sub ~needle:"TOP_ROW_MARKER_001" txt_top);
+  let m_dn1, _ =
+    Update.step ~now:now_mono m_home
+      (Msg.Key_event
+         {
+           Keymap.Input.key = Keymap.Input.Down;
+           mods = Keymap.Input.no_mods;
+         })
+  in
+  let txt_dn1 = render_dive_body m_dn1 in
+  Alcotest.(check bool)
+    "Single Down right after Home immediately changes rendered transcript (0 dead presses)"
+    true
+    (not (String.equal txt_top txt_dn1))
+
 let () =
   Alcotest.run "masc_tui_screens_ops"
     [
@@ -2641,6 +2864,10 @@ let () =
             `Quick test_p2_standard_viewport_keepers_split_and_kpi_visibility;
           Alcotest.test_case "P0-1 Keeper Dive honest 24h vs lifetime turns & uppercase [V] hint"
             `Quick test_p0_keeper_dive_honest_24h_vs_lifetime_turns;
+          Alcotest.test_case "Nav display-order monotonic Left_rail row progression & collapse"
+            `Quick test_nav_keepers_display_order_monotonic_screen_rows;
+          Alcotest.test_case "P1 #1: Chat_transcript Home/Down render parity (narrow Markdown + JSON tool + dedup)"
+            `Quick test_p1_chat_transcript_render_parity;
         ] );
       ( "work"
       , [

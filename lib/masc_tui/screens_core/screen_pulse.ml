@@ -1030,7 +1030,7 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       end
     end
 
-(* ---------- Panel B: 5 Autonomous Companies (0 ungrouped, sparklines, infra & spend) ---------- *)
+(* ---------- Panel B: Autonomous Companies (0 ungrouped, sparklines, infra & spend) ---------- *)
 
 let company_infra_tag ~(model : Model.t) (g : Wire_fleet.company_group) =
   let vm_n, ssh_n, dk_n = (g.microvm_count, g.ssh_count, g.docker_count) in
@@ -1334,7 +1334,7 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             let total_groups = Array.length groups_arr in
             let sel_group_idx =
               let by_selected_keeper =
-                match Fleet_store.selected_keeper_summary model.fleet with
+                match Fleet_store.selected_company_keeper model.fleet with
                 | None -> None
                 | Some k ->
                     let rec find i =
@@ -1360,7 +1360,8 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             let viewport_rows = Int.max 0 (table_h - hdr_rows) in
             let start_group, _ =
               Table.compute_viewport ~total_rows:total_groups ~viewport_rows
-                ~scroll:0 ~selected:(Some sel_group_idx)
+                ~scroll:model.fleet.pulse_scroll_offset
+                ~selected:(Some sel_group_idx)
             in
             let max_rows =
               Int.min viewport_rows (Int.max 0 (total_groups - start_group))

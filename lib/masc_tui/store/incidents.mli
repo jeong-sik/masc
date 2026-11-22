@@ -41,7 +41,7 @@ val visible_entries : t -> Health.incident list
 val selected_entry : t -> Health.incident option
 val find_by_id : int -> t -> Health.incident option
 
-val move_selection : delta:int -> t -> t
+val move_selection : ?viewport_rows:int -> delta:int -> t -> t
 val set_filter : string -> t -> t
 val toggle_show_dismissed : t -> t
 

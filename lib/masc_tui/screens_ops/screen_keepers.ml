@@ -381,7 +381,7 @@ let draw_semantic_fleet_counts grid ~clip ~x ~y ~(theme : Theme.t) ~bg
     items;
   !cx - x
 
-(* Left 5-Company Fleet Tree rail (~36% width) used in Wide/Standard split *)
+(* Left Company/Group Fleet Tree rail (~36% width) used in Wide/Standard split *)
 let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) =
   let selected_name =

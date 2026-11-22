@@ -10,6 +10,8 @@ open Masc_tui_core
 open Masc_tui_keymap
 open Masc_tui_protocol
 
+module String_map : Map.S with type key = string
+
 type fusion_draft = {
   keeper : string option;
   prompt : string;
@@ -54,6 +56,12 @@ type company_spend_row = {
   cost_usd : float;
 }
 
+type company_spend_group = {
+  company : string;
+  total_cost_usd : float;
+  members : keeper_spend_row list;
+}
+
 type t = {
   active_tab : Nav.runtime_tab;
   usage_windows : Wire_runtime.provider_usage_windows Observed.t;
@@ -72,6 +80,7 @@ type t = {
   connectors : Wire_runtime.connector_row list Observed.t;
   browser_lane : Wire_runtime.browser_lane_status Observed.t;
   mcp_clients : Wire_runtime.mcp_client_row list Observed.t;
+  keeper_companies : string String_map.t;
   show_outside_lane_probes : bool;
   show_unreported_accounts : bool;
   selected_index : int;
@@ -194,6 +203,10 @@ val velocity_series_24h : t -> velocity_series_kind
     to hourly calls & USD spend from [models_metrics], then hourly tool calls &
     p95 latency from [tool_series]. *)
 
+val sync_keeper_companies : Wire_fleet.keeper_summary list -> t -> t
+(** Sync keeper -> resolved company lookup table from the authoritative fleet
+    roster so Efficiency & Spend grouping matches Keepers & Pulse. *)
+
 val keeper_costs_24h_assoc : t -> (string * float) list
 (** Per-keeper 24h USD costs from [keeper_costs] for Company rollup. *)
 
@@ -202,8 +215,20 @@ val keeper_spend_rows : t -> keeper_spend_row list
     and [keeper_costs] 24h so the table is populated on both live and isolated
     servers). *)
 
+val grouped_keeper_spend_rows : t -> company_spend_group list
+(** Canonical SSOT company-grouped Efficiency & Spend rows: companies sorted by
+    total USD desc then company name asc; members inside each company sorted by
+    USD desc then calls desc then keeper name asc. *)
+
+val keeper_spend_display_rows : t -> keeper_spend_row list
+(** Flattened visual display order of {!grouped_keeper_spend_rows}, shared by
+    both [Screen_runtime.render_efficiency_spend] and [move_selection]. *)
+
+val selected_keeper_spend_row : t -> keeper_spend_row option
+(** Currently selected keeper row in {!keeper_spend_display_rows}. *)
+
 val company_spend_rollups : t -> company_spend_row list
-(** 5-company spend & call rollup derived from {!keeper_spend_rows}. *)
+(** Company/group spend & call rollup derived from {!keeper_spend_rows}. *)
 
 val set_fusion_prompt : string -> t -> t
 val set_fusion_keeper : string option -> t -> t
@@ -218,6 +243,7 @@ val to_fusion_launch_request :
 val selected_lane : t -> Wire_runtime.failover_lane option
 val runtime_options : t -> Wire_runtime.runtime_option list
 
-val move_selection : delta:int -> t -> t
+val move_selection :
+  ?pane_index:int -> ?viewport_rows:int -> delta:int -> t -> t
 val set_filter : string -> t -> t
 val mark_stale_all : t -> t

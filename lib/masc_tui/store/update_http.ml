@@ -198,13 +198,14 @@ let apply_http_reply ~now (m : Model.t) reply =
         ~en:"Dashboard shell fetch" err
   | Msg.Reply_keepers_roster (Ok ks) ->
       let fleet = Fleet_store.apply_keepers ~observed_at:now ks m.fleet in
+      let runtime = Runtime_store.sync_keeper_companies ks m.runtime in
       let drafts =
         match m.drafts.active_keeper, fleet.selected_keeper with
         | None, Some name -> Drafts.set_active_keeper name m.drafts
         | Some _, _ | None, None -> m.drafts
       in
       let next =
-        { m with fleet; drafts }
+        { m with fleet; runtime; drafts }
         |> Update_nav.sync_config_for_keeper_view
         |> refresh_404_fallbacks ~now
         |> Model.sync_effective_scorecard ~now

@@ -104,7 +104,7 @@ let keeper_company_of ~(model : Model.t) keeper =
   match Fleet_store.find_keeper ~name:keeper model.fleet with
   | Some k when not (String.equal (String.trim k.company) "") -> k.company
   | Some _ | None ->
-      Option.value ~default:"MASC"
+      Option.value ~default:"ungrouped"
         (Wire_fleet.classify_company_single ~group:None keeper)
 
 (* Rich 4-Section Inspector Body — zero nested Card.draw (reused in Sandboxes tab & Sandbox Dive!) *)

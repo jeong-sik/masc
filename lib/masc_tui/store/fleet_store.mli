@@ -61,6 +61,7 @@ type t = {
   fleet_mode : Nav.keepers_fleet_mode;
   selected_index : int;
   scroll_offset : int;
+  pulse_scroll_offset : int;
   filter_query : string;
   selected_keeper : string option;
   collapsed_companies : String_set.t;
@@ -122,6 +123,9 @@ val total_turns_24h : t -> int option
     the fleet, or [None] when no keeper has sparkline data yet. *)
 val find_keeper : name:string -> t -> Wire_fleet.keeper_summary option
 val selected_keeper_summary : t -> Wire_fleet.keeper_summary option
+val selected_company_keeper : t -> Wire_fleet.keeper_summary option
+(** Resolve the selected keeper across {!company_groups} regardless of
+    [collapsed_companies] (for Pulse company-row highlight and dive). *)
 val chat_control_token_for : keeper:string -> t -> string option
 val active_turn_for : keeper:string -> t -> Wire_fleet.active_turn option
 
@@ -182,8 +186,12 @@ val toggle_turn_details : t -> t
 
 val toggle_company_collapsed : string -> t -> t
 val select_keeper : string -> t -> t
-val move_selection : delta:int -> t -> t
-val move_chat_scroll : delta:int -> t -> t
+val move_selection : ?viewport_rows:int -> delta:int -> t -> t
+val move_company_selection : ?viewport_rows:int -> delta:int -> t -> t
+(** Step strictly [±delta] company rows in {!company_groups} (for Pulse
+    Companies navigation), updating [pulse_scroll_offset] and selecting the
+    target company's lead keeper. *)
+val move_chat_scroll : ?max_scroll:int -> delta:int -> t -> t
 val reset_chat_scroll : t -> t
 val set_filter : string -> t -> t
 

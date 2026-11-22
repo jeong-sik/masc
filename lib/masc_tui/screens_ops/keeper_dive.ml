@@ -54,28 +54,7 @@ let single_span_row ?rail_rgb ?(prefix = "") ~prefix_fg
 let blank_row ~bg_rgb =
   make_row ~prefix_fg:bg_rgb ~bg_rgb []
 
-let wrap_plain_lines ~width text =
-  let max_w = Int.max 12 width in
-  let raw_lines = String.split_on_char '\n' text in
-  List.concat_map
-    (fun raw ->
-      let clean = String.map (function '\r' | '\t' -> ' ' | c -> c) raw in
-      if Grapheme.display_width clean <= max_w then [ clean ]
-      else
-        let words = String.split_on_char ' ' clean in
-        let rec pack cur acc = function
-          | [] -> List.rev (if String.length cur > 0 then cur :: acc else acc)
-          | w :: ws ->
-              let cand = if String.length cur = 0 then w else cur ^ " " ^ w in
-              if Grapheme.display_width cand <= max_w then pack cand acc ws
-              else if String.length cur > 0 then
-                pack (Grapheme.truncate_to_width ~max_width:max_w w) (cur :: acc)
-                  ws
-              else
-                pack "" (Grapheme.truncate_to_width ~max_width:max_w w :: acc) ws
-        in
-        pack "" [] words)
-    raw_lines
+let wrap_plain_lines = Chat_transcript.wrap_plain_lines
 
 (* Summarize tool args/output cleanly so raw JSON walls and secrets never flood Chat. *)
 let concise_tool_preview ~max_w raw =
@@ -124,48 +103,19 @@ let concise_tool_preview ~max_w raw =
     Grapheme.truncate_to_width ~max_width:(Int.max 8 max_w) one_line
 
 let preview_tool_output_rows ~(theme : Theme.t) ~(model : Model.t) ~width raw =
-  let trimmed = String.trim raw in
-  let max_preview, max_depth, show_expand_hint =
-    match model.fleet.chat_tools_mode with
-    | Slash.Tools_compact -> (0, 2, false)
-    | Slash.Tools_results -> (8, 2, true)
-    | Slash.Tools_full -> (48, 4, false)
+  let tools_mode = model.fleet.chat_tools_mode in
+  let max_preview, show_expand_hint =
+    match tools_mode with
+    | Slash.Tools_compact -> (0, false)
+    | Slash.Tools_results -> (8, true)
+    | Slash.Tools_full -> (48, false)
   in
-  if String.equal trimmed "" || max_preview <= 0 then []
+  let shown, hidden =
+    Chat_transcript.tool_output_display_lines ~tools_mode ~width raw
+  in
+  if shown = [] && hidden = 0 then []
   else
     let inset_bg = theme.surface_0 in
-    let body_w = Int.max 12 (width - 6) in
-    let all_lines =
-      match Yojson.Safe.from_string trimmed with
-      | json ->
-          let scrubbed = Ops_common.scrub_json_secrets json in
-          let flat =
-            Json_tree.flatten ~max_depth ~redact_secrets:true scrubbed
-          in
-          let string_of_val = function
-            | Json_tree.Object_node { count } -> Printf.sprintf "{%d keys}" count
-            | Json_tree.Array_node { count } -> Printf.sprintf "[%d items]" count
-            | Json_tree.String_val s -> s
-            | Json_tree.Redacted_secret -> "[redacted]"
-            | Json_tree.Int_val n -> Int.to_string n
-            | Json_tree.Float_val f -> Printf.sprintf "%g" f
-            | Json_tree.Bool_val b -> if b then "true" else "false"
-            | Json_tree.Null_val -> "null"
-          in
-          List.map
-            (fun (ln : Json_tree.line) ->
-              let ind = String.make (ln.depth * 2) ' ' in
-              let vs = string_of_val ln.value in
-              match ln.key with
-              | Some k -> Printf.sprintf "%s%s: %s" ind k vs
-              | None -> ind ^ vs)
-            flat
-      | exception Yojson.Json_error _ ->
-          let scrubbed = Ops_common.scrub_secrets_in_text trimmed in
-          wrap_plain_lines ~width:body_w scrubbed
-    in
-    let shown = List.take max_preview all_lines in
-    let hidden = List.length all_lines - List.length shown in
     let body_rows =
       List.map
         (fun ln ->
@@ -204,10 +154,10 @@ let preview_tool_output_rows ~(theme : Theme.t) ~(model : Model.t) ~width raw =
 
 let markdown_rows ?rail_rgb ~(theme : Theme.t) ~width ~prefix ~cont_prefix
     ~prefix_fg ~bg_rgb ?(full_bleed_bg = false) text =
-  let rail_w = match rail_rgb with Some _ -> 2 | None -> 0 in
-  let body_w = Int.max 10 (width - rail_w - Grapheme.display_width prefix) in
-  let rewritten = Ops_common.rewrite_masc_links_for_markdown text in
-  let lines = Markdown.render_lines ~theme ~width:body_w ~osc8:true rewritten in
+  let lines =
+    Chat_transcript.markdown_body_lines ~theme ~width
+      ~rail_present:(Option.is_some rail_rgb) ~prefix text
+  in
   match lines with
   | [] ->
       [
@@ -1032,21 +982,8 @@ let draw_keeper_status_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
                    "Ctx —  [V] PTT")
         end
 
-let stream_reply_already_persisted (hist_msgs : Wire_fleet.chat_message list)
-    (buf : Fleet_store.chat_stream_buffer) =
-  let trimmed = String.trim buf.text in
-  if String.equal trimmed "" then false
-  else
-    List.exists
-      (fun (m : Wire_fleet.chat_message) ->
-        match m.role with
-        | Wire_fleet.Role_assistant ->
-            String.equal (String.trim m.content) trimmed
-        | Wire_fleet.Role_user
-        | Wire_fleet.Role_system
-        | Wire_fleet.Role_tool ->
-            false)
-      hist_msgs
+let stream_reply_already_persisted =
+  Chat_transcript.stream_reply_already_persisted
 
 let render_chat_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     ~name keeper_opt =

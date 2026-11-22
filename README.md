@@ -246,8 +246,8 @@ or `Ctrl+1`–`6` / `Alt+1`–`6` / `F1`–`F6`):
 | `6` | **Infra** | Three tabs: Sandboxes (MicroVM/SSH/Docker fleet + inspector), Repos & Changes, and Activity & Logs (live system logs + events) |
 
 MASC TUI is **monitor-first**: while unfocused, bare keys navigate directly.
-Switch workspaces with `1`–`6`, cycle sub-tabs with `[` / `]` (or `Alt+[` /
-`Alt+]`), move selection or scroll with `↑`/`↓` (`j`/`k`), dive into an item
+Switch workspaces with `1`–`6`, cycle sub-tabs with `[` / `]` (or `←` / `→`
+unfocused, `Alt+[` / `Alt+]`), move selection or scroll with `↑`/`↓` (`j`/`k`), dive into an item
 with `Enter`, and focus the bottom composer with `i` (or press `c` on a Keeper
 to jump straight into Chat). Inside the composer, `Enter` sends/steers,
 `Shift+Enter` (or `Alt+Enter`) queues a follow-up, and `Ctrl+J` inserts a

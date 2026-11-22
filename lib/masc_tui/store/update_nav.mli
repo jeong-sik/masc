@@ -47,4 +47,5 @@ val fast_deny_top : now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
 val teleport_blocked : now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
 val toggle_voice : now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
 val submit_inline_modal : now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
+val clamp_for_pane : Model.t -> Model.t
 val apply_move : Model.t -> Keymap.move_dir -> Model.t * Cmd.t list

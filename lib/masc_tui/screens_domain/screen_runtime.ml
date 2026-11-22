@@ -1592,7 +1592,12 @@ let max_sample_value (arr : Chart.Series.sample array) =
 let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp grid =
   let lang = model.lang in
-  let rt = model.runtime in
+  let rt =
+    match Observed.to_option model.fleet.keepers with
+    | Some ks when ks <> [] ->
+        Runtime_store.sync_keeper_companies ks model.runtime
+    | Some _ | None -> model.runtime
+  in
   let spend_rows = Runtime_store.keeper_spend_rows rt in
   let kpi_h = if rect.h >= 24 then 4 else 3 in
   let charts_ratio = if rect.h >= 34 then 0.48 else 0.44 in
@@ -1911,6 +1916,21 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
           else (act, ret + 1))
         (0, 0) spend_rows
   in
+  let grouped_companies = Runtime_store.grouped_keeper_spend_rows rt in
+  let group_count = List.length grouped_companies in
+  let groups_subtitle =
+    if group_count > 0 then
+      Say.resolve lang
+        (Say.make
+           ~ko:(Printf.sprintf "%d개 조직 · 키퍼별 비용 효율" group_count)
+           ~en:
+             (Printf.sprintf "%d Groups & Per-Keeper Cost Efficiency"
+                group_count))
+    else
+      Say.resolve lang
+        (Say.make ~ko:"조직 · 키퍼별 비용 효율"
+           ~en:"Groups & Per-Keeper Cost Efficiency")
+  in
   let monthly_subtitle ~month ~days_covered =
     if active_roster_loaded && retired_in_tbl > 0 then
       Say.resolve lang
@@ -1921,11 +1941,18 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
            ~en:
              (Printf.sprintf "%s (%dd) · %d active · %d retired" month
                 days_covered active_in_tbl retired_in_tbl))
+    else if group_count > 0 then
+      Say.resolve lang
+        (Say.make
+           ~ko:(Printf.sprintf "%s (%dd) · %d개 조직" month days_covered group_count)
+           ~en:
+             (Printf.sprintf "%s (%dd) · %d Groups" month days_covered
+                group_count))
     else
       Say.resolve lang
         (Say.make
-           ~ko:(Printf.sprintf "%s (%dd) · 5개 자율 조직" month days_covered)
-           ~en:(Printf.sprintf "%s (%dd) · 5 Companies" month days_covered))
+           ~ko:(Printf.sprintf "%s (%dd) · 조직별 비용" month days_covered)
+           ~en:(Printf.sprintf "%s (%dd) · Group Spend" month days_covered))
   in
   let tbl_badge, tbl_subtitle =
     match Runtime_store.keeper_spend_table_window rt with
@@ -1952,17 +1979,8 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
                   ~ko:(Printf.sprintf "%dh 키퍼 귀속" hrs)
                   ~en:(Printf.sprintf "%dh Keeper-Attributed" hrs)))
         in
-        let sub =
-          Say.resolve lang
-            (Say.make ~ko:"5개 자율 조직 · 키퍼별 비용 효율"
-               ~en:"5 Companies & Per-Keeper Cost Efficiency")
-        in
-        (Some badge, sub)
-    | Runtime_store.Spend_window_none ->
-        ( None
-        , Say.resolve lang
-            (Say.make ~ko:"5개 자율 조직 · 키퍼별 비용 효율"
-               ~en:"5 Companies & Per-Keeper Cost Efficiency") )
+        (Some badge, groups_subtitle)
+    | Runtime_store.Spend_window_none -> (None, groups_subtitle)
   in
   let tbl_inner =
     Card.draw ~cache grid ~rect:bottom_rect ~theme
@@ -1981,53 +1999,11 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
       H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp tbl_inner) ~theme
         ~lang obs_hint
     else
-      (* Prefer explicit non-ungrouped company from fleet roster if present, else 5-company classifier *)
-      let fleet_company : (string, string) Hashtbl.t = Hashtbl.create 32 in
-      (match Observed.to_option model.fleet.keepers with
-       | Some ks ->
-           List.iter
-             (fun (k : Wire_fleet.keeper_summary) ->
-               let c = String.trim k.company in
-               if
-                 (not (String.equal c ""))
-                 && not (String.equal (String.lowercase_ascii c) "ungrouped")
-               then Hashtbl.replace fleet_company k.name c)
-             ks
-       | None -> ());
-      let company_of (r : Runtime_store.keeper_spend_row) =
-        match Hashtbl.find_opt fleet_company r.keeper with
-        | Some c -> c
-        | None -> r.company
-      in
+      let display_rows = Runtime_store.keeper_spend_display_rows rt in
       let total_spend_all =
         List.fold_left
           (fun acc (r : Runtime_store.keeper_spend_row) -> acc +. r.cost_usd)
-          0.0 spend_rows
-      in
-      let rollups = Runtime_store.company_spend_rollups rt in
-      let _ = rollups in
-      let comp_tbl : (string, Runtime_store.keeper_spend_row list) Hashtbl.t =
-        Hashtbl.create 8
-      in
-      List.iter
-        (fun (r : Runtime_store.keeper_spend_row) ->
-          let c = company_of r in
-          let prev = match Hashtbl.find_opt comp_tbl c with Some xs -> xs | None -> [] in
-          Hashtbl.replace comp_tbl c (prev @ [ r ]))
-        spend_rows;
-      let grouped_companies =
-        Hashtbl.fold
-          (fun comp members acc ->
-            let tot_usd =
-              List.fold_left
-                (fun s (m : Runtime_store.keeper_spend_row) -> s +. m.cost_usd)
-                0.0 members
-            in
-            (comp, tot_usd, members) :: acc)
-          comp_tbl []
-        |> List.sort (fun (ca, ua, _) (cb, ub, _) ->
-               let c = Float.compare ub ua in
-               if c <> 0 then c else String.compare ca cb)
+          0.0 display_rows
       in
       let columns : Table.column list =
         [
@@ -2080,7 +2056,10 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
       in
       let table_rows =
         List.concat_map
-          (fun (comp, tot_usd, members) ->
+          (fun (grp : Runtime_store.company_spend_group) ->
+            let comp = grp.company in
+            let tot_usd = grp.total_cost_usd in
+            let members = grp.members in
             let tot_calls, tot_turns, cache_sum, cache_w =
               List.fold_left
                 (fun (calls, turns, cs, cw)
@@ -2230,11 +2209,11 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
           grouped_companies
       in
       let selected_keeper_row_idx =
-        let kp_len = List.length spend_rows in
+        let kp_len = List.length display_rows in
         if kp_len = 0 then None
         else
           let clamped = H.clamp_index kp_len rt.selected_index in
-          match List.nth_opt spend_rows clamped with
+          match List.nth_opt display_rows clamped with
           | None -> None
           | Some target_kp ->
               let want_id = "kp:" ^ target_kp.keeper in

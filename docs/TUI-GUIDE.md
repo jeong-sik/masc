@@ -79,7 +79,7 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
 | Key | Scope | Action |
 |---|---|---|
 | `1`–`6` (or `Ctrl+1`–`6`, `Alt+1`–`6`, `F1`–`F6`) | Unfocused / Global | Switch to workspace `1 Pulse`, `2 Work`, `3 Knowledge`, `4 Keepers`, `5 Runtime`, `6 Infra` |
-| `[` / `]` (or `Alt+[` / `Alt+]`) | Unfocused / Global | Cycle sub-tabs (Workspaces, 5-tab Keeper Dive, Settings tabs, Queue/Context drawer) |
+| `[` / `]` (or `←` / `→` unfocused, `Alt+[` / `Alt+]`) | Unfocused / Global | Cycle sub-tabs (Workspaces, 5-tab Keeper Dive, Queue/Context drawer; inside the composer `←`/`→` move the text cursor, and in Settings they collapse/expand tree categories) |
 | `↑` / `↓` or `j` / `k` | Unfocused / Overlay | Move list selection or scroll Keeper Chat |
 | `PgUp` / `PgDn`, `Home` (`g`) / `End` (`G`) | Unfocused / Overlay | Page scroll or jump to top / bottom |
 | `Tab` / `Shift+Tab` | Unfocused / Overlay | Cycle focus pane (or toggle Tree / Inspector in Settings) |
@@ -222,7 +222,7 @@ The organization cockpit (`lib/masc_tui/screens_core/screen_pulse.ml`):
 
 ### `2` Work
 
-Four sub-tabs (`[` / `]`):
+Four sub-tabs (`[` / `]` or `←` / `→`):
 
 1. **Pipeline** (Goals & Verifications): side-by-side Goals list and
    Verification requests (`Tab` switches pane; `Enter` dives into Goal or
@@ -265,7 +265,7 @@ Pending operator decisions appear in two places:
 
 ### `3` Knowledge
 
-Three sub-tabs (`[` / `]`):
+Three sub-tabs (`[` / `]` or `←` / `→`):
 
 1. **Board**: workspace posts with Signal-only vs All filtering and Succession
    Chain folding (`Space` expands/collapses a selected succession chain, or
@@ -289,7 +289,7 @@ Three sub-tabs (`[` / `]`):
 
 ### `4` Keepers
 
-Three fleet modes (`[` / `]`):
+Three fleet modes (`[` / `]` or `←` / `→`):
 
 1. **Companies**: Keepers grouped by `keeper.group` (`Space` folds/unfolds the
    selected group).
@@ -320,7 +320,7 @@ the **5-tab Keeper Dive** (`[` / `]` cycles tabs):
 
 ### `5` Runtime
 
-Four sub-tabs (`[` / `]`):
+Four sub-tabs (`[` / `]` or `←` / `→`):
 
 1. **Quotas & Credits**: provider quota windows, 7-day usage history, and
    unreported accounts toggle (`u`, or `Enter` on the unreported toggle row;
@@ -340,7 +340,7 @@ Four sub-tabs (`[` / `]`):
 
 ### `6` Infra
 
-Three sub-tabs (`[` / `]`):
+Three sub-tabs (`[` / `]` or `←` / `→`):
 
 1. **Sandboxes**: fleet inventory of MicroVM guests (presence, agent socket,
    shim parity, volume), SSH pools (reachability, active/max sessions), and

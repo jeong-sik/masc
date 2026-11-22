@@ -2788,6 +2788,78 @@ let test_p0_toast_above_active_overlay_and_settings_tab_focus () =
   assert_contains ~label:"p1_11_tree_focus_en" ~needle:"TREE · FOCUS"
     (grid_all_text g_tree_en)
 
+let test_p1_pulse_collapsed_company_highlight_and_scroll () =
+  let mk_k group name : Wire_fleet.keeper_summary =
+    {
+      name;
+      group = Some group;
+      company = group;
+      health = Wire_fleet.Keeper_healthy;
+      paused = false;
+      keepalive_running = true;
+      activation_mode = Wire_fleet.Activation_autonomous;
+      runtime_id = "rt-1";
+      model_id = Some "model-1";
+      current_task_id = None;
+      context_ratio = Observed.value ~observed_at:Clock.Mono.zero 0.30;
+      total_turns = Observed.value ~observed_at:Clock.Mono.zero 20;
+      total_tokens = Observed.value ~observed_at:Clock.Mono.zero 8000;
+      cost_24h_usd = Observed.value ~observed_at:Clock.Mono.zero 2.0;
+      last_turn_at_unix = Some 1_795_200_000.0;
+      active_turn = None;
+      activity_sparkline_24h = [ 1.0; 2.0 ];
+    }
+  in
+  let ks =
+    [
+      mk_k "org-alpha" "alpha-1";
+      mk_k "org-beta" "beta-1";
+      mk_k "org-mid" "mid-1";
+      mk_k "org-zeta" "zeta-1";
+    ]
+  in
+  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let fleet =
+    m0.fleet
+    |> Fleet_store.apply_keepers ~observed_at:Clock.Mono.zero ks
+    |> Fleet_store.toggle_company_collapsed "org-beta"
+    |> Fleet_store.move_company_selection ~viewport_rows:10 ~delta:1
+  in
+  let m = { m0 with fleet; nav = { m0.nav with workspace = Nav.Pulse } } in
+  let g, _ = render_full ~model:m ~cols:140 ~rows:40 in
+  assert_clean_grid ~label:"pulse_collapsed_beta_highlight" g;
+  let rail = Glyph.to_utf8 Glyph.Left_rail in
+  let has_sub ~needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    if n = 0 then true
+    else if n > h then false
+    else
+      let rec loop i =
+        if i + n > h then false
+        else if String.equal (String.sub haystack i n) needle then true
+        else loop (i + 1)
+      in
+      loop 0
+  in
+  let rail_row_text =
+    let rec scan y =
+      if y >= 40 then None
+      else
+        let row = grid_row_text g y in
+        if has_sub ~needle:rail row && has_sub ~needle:"org-" row then
+          Some row
+        else scan (y + 1)
+    in
+    scan 6
+  in
+  match rail_row_text with
+  | None -> Alcotest.fail "Expected highlighted org row on Pulse Panel B"
+  | Some row ->
+      Alcotest.(check bool)
+        ("Pulse highlights collapsed org-beta row (got: " ^ String.trim row ^ ")")
+        true
+        (has_sub ~needle:"org-beta" row)
+
 let () =
   Alcotest.run "masc_tui_screens_core"
     [
@@ -2818,6 +2890,8 @@ let () =
             `Quick test_v25_pulse_4kpi_hero_and_5_companies;
           Alcotest.test_case "v2.5 honest Observed markers & zero fabricated zeros"
             `Quick test_v25_pulse_honest_observed_and_no_fabricated_zeros;
+          Alcotest.test_case "P1 #3: Pulse highlights collapsed company row correctly"
+            `Quick test_p1_pulse_collapsed_company_highlight_and_scroll;
         ] );
       ( "overlays",
         [

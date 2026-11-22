@@ -641,7 +641,14 @@ let toggle_voice ~now (m : Model.t) =
 
 let dive_selected (m : Model.t) =
   match m.nav.workspace with
-  | Nav.Pulse | Nav.Keepers -> (
+  | Nav.Pulse -> (
+      match Fleet_store.selected_company_keeper m.fleet with
+      | Some k ->
+          push_dive m
+            (Nav.Dive_keeper
+               { name = k.name; tab = m.fleet.keeper_dive_tab })
+      | None -> (m, []))
+  | Nav.Keepers -> (
       match Fleet_store.selected_keeper_summary m.fleet with
       | Some k ->
           push_dive m
@@ -1234,8 +1241,75 @@ let move_delta = function
   | Keymap.End -> 100000
   | Keymap.Left | Keymap.Right -> 0
 
+let estimated_viewport_rows (m : Model.t) =
+  let rows = m.viewport.rows in
+  match m.nav.overlay with
+  | Some (Nav.Settings _) -> max 4 (rows - 10)
+  | Some Nav.Incidents -> max 4 ((rows - 8) * 45 / 100)
+  | Some
+      ( Nav.Palette
+      | Nav.Queue_context _
+      | Nav.Inline_action _
+      | Nav.Help
+      | Nav.System_gate _ ) ->
+      max 4 (rows - 10)
+  | None -> (
+      match m.nav.workspace with
+      | Nav.Pulse -> max 4 (rows / 3)
+      | Nav.Keepers -> max 4 (rows - 11)
+      | Nav.Work -> (
+          match m.work.active_tab with
+          | Nav.Work_pipeline -> min 10 (max 4 (rows - 14))
+          | Nav.Work_tasks_schedules -> max 4 (rows - 18)
+          | Nav.Work_inbox | Nav.Work_candle_scorecard -> max 4 (rows - 12))
+      | Nav.Knowledge -> max 4 (rows - 14)
+      | Nav.Runtime -> (
+          match m.runtime.active_tab with
+          | Nav.Runtime_efficiency_spend -> max 4 ((rows - 10) * 40 / 100)
+          | Nav.Runtime_tools_connectors -> max 4 (rows - 21)
+          | Nav.Runtime_quotas_credits | Nav.Runtime_failover_lanes ->
+              max 4 (rows - 11))
+      | Nav.Infra -> max 4 (rows - 12))
+
+let sync_runtime_companies_if_needed (m : Model.t) =
+  match Observed.to_option m.fleet.keepers with
+  | Some ks when ks <> [] -> Runtime_store.sync_keeper_companies ks m.runtime
+  | Some _ | None -> m.runtime
+
+let clamp_for_pane (m : Model.t) =
+  let viewport_rows = estimated_viewport_rows m in
+  let pane_index = m.nav.pane_index in
+  match m.nav.overlay with
+  | Some _ -> m
+  | None -> (
+      match m.nav.workspace with
+      | Nav.Work ->
+          {
+            m with
+            work =
+              Work_store.move_selection ~pane_index ~viewport_rows ~delta:0
+                m.work;
+          }
+      | Nav.Runtime ->
+          let rt = sync_runtime_companies_if_needed m in
+          {
+            m with
+            runtime =
+              Runtime_store.move_selection ~pane_index ~viewport_rows ~delta:0
+                rt;
+          }
+      | Nav.Knowledge ->
+          {
+            m with
+            knowledge =
+              Knowledge_store.move_selection ~pane_index ~viewport_rows ~delta:0
+                m.knowledge;
+          }
+      | Nav.Pulse | Nav.Keepers | Nav.Infra -> m)
+
 let apply_move (m : Model.t) dir =
-  if Drafts.is_focused m.drafts then
+  if m.nav.filter_focused then (m, [])
+  else if Drafts.is_focused m.drafts then
     let drafts =
       match dir with
       | Keymap.Left -> Drafts.move_cursor `Left m.drafts
@@ -1246,6 +1320,7 @@ let apply_move (m : Model.t) dir =
     in
     ({ m with drafts }, [])
   else
+    let viewport_rows = estimated_viewport_rows m in
     match m.nav.overlay with
     | Some Nav.Palette ->
         let delta = move_delta dir in
@@ -1260,13 +1335,18 @@ let apply_move (m : Model.t) dir =
           | Keymap.Up | Keymap.Down | Keymap.Page_up | Keymap.Page_down
           | Keymap.Home | Keymap.End ->
               let delta = move_delta dir in
-              Config_store.move_selection ~delta m.config
+              Config_store.move_selection ~viewport_rows ~delta m.config
         in
         let nav = { m.nav with overlay = Some (Nav.Settings config.active_tab) } in
         ({ m with nav; config }, [])
     | Some Nav.Incidents ->
         let delta = move_delta dir in
-        ({ m with incidents = Incidents.move_selection ~delta m.incidents }, [])
+        ( {
+            m with
+            incidents =
+              Incidents.move_selection ~viewport_rows ~delta m.incidents;
+          }
+        , [] )
     | Some (Nav.Inline_action _) -> (
         match m.inline_modal with
         | None -> (m, [])
@@ -1278,71 +1358,152 @@ let apply_move (m : Model.t) dir =
               else modal
             in
             ({ m with inline_modal = Some next_modal }, []))
-    | Some (Nav.Queue_context _ | Nav.Help | Nav.System_gate _) -> (m, [])
+    | Some (Nav.Queue_context _) -> (
+        match dir with
+        | Keymap.Left -> cycle_sub_tab m Keymap.Prev
+        | Keymap.Right -> cycle_sub_tab m Keymap.Next
+        | Keymap.Up | Keymap.Down | Keymap.Page_up | Keymap.Page_down
+        | Keymap.Home | Keymap.End ->
+            (m, []))
+    | Some (Nav.Help | Nav.System_gate _) -> (m, [])
     | None -> (
-        match Model.active_dive m with
-        | Some (Nav.Dive_keeper { tab = Nav.Keeper_chat; _ }) ->
-            let delta = move_delta dir in
-            ({ m with fleet = Fleet_store.move_chat_scroll ~delta m.fleet }, [])
-        | Some
-            ( Nav.Dive_keeper
-                {
-                  tab =
-                    ( Nav.Keeper_memory
-                    | Nav.Keeper_work_candle
-                    | Nav.Keeper_sandbox
-                    | Nav.Keeper_config );
-                  _;
-                }
-            | Nav.Dive_work _
-            | Nav.Dive_knowledge _
-            | Nav.Dive_infra _ )
-        | None -> (
-            let delta = move_delta dir in
-            match m.nav.workspace with
-            | Nav.Pulse ->
-                let fleet = Fleet_store.move_selection ~delta m.fleet in
-                let drafts =
-                  match fleet.selected_keeper with
-                  | Some name -> Drafts.set_active_keeper name m.drafts
-                  | None -> m.drafts
+        match dir with
+        | Keymap.Left -> cycle_sub_tab m Keymap.Prev
+        | Keymap.Right -> cycle_sub_tab m Keymap.Next
+        | Keymap.Up | Keymap.Down | Keymap.Page_up | Keymap.Page_down
+        | Keymap.Home | Keymap.End -> (
+            match Model.active_dive m with
+            | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }) ->
+                let delta = -(move_delta dir) in
+                let max_scroll =
+                  Chat_transcript.max_scroll_for_model ~model:m ~keeper:name
                 in
-                ({ m with fleet; drafts }, [])
-            | Nav.Keepers ->
-                let prev_selected = m.fleet.selected_keeper in
-                let fleet = Fleet_store.move_selection ~delta m.fleet in
-                let drafts =
-                  match fleet.selected_keeper with
-                  | Some name -> Drafts.set_active_keeper name m.drafts
-                  | None -> m.drafts
-                in
-                let next =
-                  { m with fleet; drafts } |> sync_config_for_keeper_view
-                in
-                let selection_changed =
-                  not (Option.equal String.equal prev_selected fleet.selected_keeper)
-                in
-                let cmds =
-                  if selection_changed then
-                    View_fetches.fetches_for_current_view next
-                  else []
-                in
-                (next, cmds)
-            | Nav.Work ->
-                ({ m with work = Work_store.move_selection ~delta m.work }, [])
-            | Nav.Knowledge ->
                 ( {
                     m with
-                    knowledge =
-                      Knowledge_store.move_selection ~delta m.knowledge;
+                    fleet =
+                      Fleet_store.move_chat_scroll ~max_scroll ~delta m.fleet;
                   }
                 , [] )
-            | Nav.Runtime ->
-                ( {
-                    m with
-                    runtime = Runtime_store.move_selection ~delta m.runtime;
-                  }
-                , [] )
-            | Nav.Infra ->
-                ( { m with infra = Infra_store.move_selection ~delta m.infra }
-                , [] )))
+            | Some
+                ( Nav.Dive_keeper
+                    {
+                      tab =
+                        ( Nav.Keeper_memory
+                        | Nav.Keeper_work_candle
+                        | Nav.Keeper_sandbox
+                        | Nav.Keeper_config );
+                      _;
+                    }
+                | Nav.Dive_work _
+                | Nav.Dive_knowledge _
+                | Nav.Dive_infra _ )
+            | None -> (
+                let delta = move_delta dir in
+                let pane_index = m.nav.pane_index in
+                match m.nav.workspace with
+                | Nav.Pulse ->
+                    let fleet =
+                      Fleet_store.move_company_selection ~viewport_rows ~delta
+                        m.fleet
+                    in
+                    let drafts =
+                      match fleet.selected_keeper with
+                      | Some name -> Drafts.set_active_keeper name m.drafts
+                      | None -> m.drafts
+                    in
+                    ({ m with fleet; drafts }, [])
+                | Nav.Keepers ->
+                    let prev_selected = m.fleet.selected_keeper in
+                    let fleet =
+                      Fleet_store.move_selection ~viewport_rows ~delta m.fleet
+                    in
+                    let drafts =
+                      match fleet.selected_keeper with
+                      | Some name -> Drafts.set_active_keeper name m.drafts
+                      | None -> m.drafts
+                    in
+                    let next =
+                      { m with fleet; drafts } |> sync_config_for_keeper_view
+                    in
+                    let selection_changed =
+                      not
+                        (Option.equal String.equal prev_selected
+                           fleet.selected_keeper)
+                    in
+                    let cmds =
+                      if selection_changed then
+                        View_fetches.fetches_for_current_view next
+                      else []
+                    in
+                    (next, cmds)
+                | Nav.Work -> (
+                    match m.work.active_tab with
+                    | Nav.Work_inbox when not (Attention.is_empty m.attention) ->
+                        let attention =
+                          Attention.move_triage ~viewport_rows ~delta
+                            m.attention
+                        in
+                        let work =
+                          match Attention.current_triage_item attention with
+                          | Some { payload = Attention.Payload_ask ask; _ } ->
+                              let asks = Work_store.open_asks m.work in
+                              let rec find i = function
+                                | [] -> None
+                                | (a : Wire_work.ask_row) :: rest ->
+                                    if String.equal a.ask_id ask.ask_id then
+                                      Some i
+                                    else find (i + 1) rest
+                              in
+                              (match find 0 asks with
+                              | Some idx ->
+                                  { m.work with selected_index = idx }
+                              | None -> m.work)
+                          | Some
+                              {
+                                payload =
+                                  ( Attention.Payload_tool_approval _
+                                  | Attention.Payload_gate _
+                                  | Attention.Payload_goal_confirmation _
+                                  | Attention.Payload_quarantine _ );
+                                _;
+                              }
+                          | None ->
+                              m.work
+                        in
+                        ({ m with attention; work }, [])
+                    | Nav.Work_inbox
+                    | Nav.Work_pipeline
+                    | Nav.Work_tasks_schedules
+                    | Nav.Work_candle_scorecard ->
+                        ( {
+                            m with
+                            work =
+                              Work_store.move_selection ~pane_index
+                                ~viewport_rows ~delta m.work;
+                          }
+                        , [] ))
+                | Nav.Knowledge ->
+                    ( {
+                        m with
+                        knowledge =
+                          Knowledge_store.move_selection ~pane_index
+                            ~viewport_rows ~delta m.knowledge;
+                      }
+                    , [] )
+                | Nav.Runtime ->
+                    let rt = sync_runtime_companies_if_needed m in
+                    ( {
+                        m with
+                        runtime =
+                          Runtime_store.move_selection ~pane_index
+                            ~viewport_rows ~delta rt;
+                      }
+                    , [] )
+                | Nav.Infra ->
+                    ( {
+                        m with
+                        infra =
+                          Infra_store.move_selection ~viewport_rows ~delta
+                            m.infra;
+                      }
+                    , [] ))))

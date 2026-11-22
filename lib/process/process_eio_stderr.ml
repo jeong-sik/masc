@@ -63,7 +63,8 @@ let reason_of_exn_for_output = function
     private permissions and marks the descriptor close-on-exec to avoid
     descriptor leaks into unrelated child processes. *)
 let create_stderr_tempfile () =
-  let path = Filename.temp_file "masc_process_eio_stderr" ".tmp" in
+  let prefix = Printf.sprintf "masc_process_eio_stderr_%d_" (Unix.getpid ()) in
+  let path = Filename.temp_file prefix ".tmp" in
   let fd =
     Unix.openfile path [ Unix.O_WRONLY; Unix.O_TRUNC; Unix.O_CLOEXEC ] 0o600
   in

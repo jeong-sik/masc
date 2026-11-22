@@ -1168,6 +1168,12 @@ val sync_directory_capability
     Exposed for tests and recovery sweeps. *)
 val is_atomic_orphan_name : string -> bool
 
+(** [true] iff [name] matches any unpublished staging or pre-lock temp basename
+    produced by this module ([.atomic_*.tmp], [.prep_atomic_*.tmp],
+    [.private_jsonl_*.stage], or [.private_jsonl_prep_*.prep]). Use for
+    read-only directory scanners and blob scope classification. *)
+val is_unpublished_write_name : string -> bool
+
 (** Acquire a non-blocking exclusive stage [flock] on [fd]. Test-only. *)
 val try_lock_stage_fd_for_testing : Unix.file_descr -> bool
 
@@ -1218,7 +1224,10 @@ val atomic_orphan_cleanup_failure_to_string
     Portable [Unix] operations validate inode identity before mutation but
     cannot make replacement of intermediate path components atomic. *)
 val cleanup_atomic_orphans
-  :  ownership_root:string
+  :  ?unlink_private_jsonl_stages:bool
+  -> ?recovery_parent:string
+  -> ?recovery_ownership_root:string
+  -> ownership_root:string
   -> base_path:string
   -> unit
   -> atomic_orphan_cleanup_report
@@ -1843,6 +1852,22 @@ val is_lock_name : string -> bool
     [<path><lock_suffix>]. It is created with mode [0600] and must never be
     renamed or removed while the store may be in use. *)
 val private_jsonl_lock_path : string -> string
+
+type private_jsonl_stale_lock_cleanup =
+  | Private_jsonl_stale_lock_removed
+  | Private_jsonl_stale_lock_kept_target_present
+  | Private_jsonl_stale_lock_kept_held
+  | Private_jsonl_stale_lock_already_absent
+  | Private_jsonl_stale_lock_cleanup_failed of string
+
+(** Remove a private JSONL stable sibling lock ([<data_path>.lock]) only when
+    [target_absent ()] holds, the in-process canonical [data_path] mutex is
+    uncontended, non-blocking [F_TLOCK] confirms no other process holds it, and
+    [target_absent ()] plus unique regular-file identity hold before unlink. *)
+val unlink_private_jsonl_stable_lock_if_unheld :
+  data_path:string ->
+  target_absent:(unit -> bool) ->
+  private_jsonl_stale_lock_cleanup
 
 (** Remove a store under its stable sibling lock and fsync its parent. Success
     returns [Missing], including an already absent store. The stable lock is

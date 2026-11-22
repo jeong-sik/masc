@@ -22,6 +22,7 @@ type t =
   ; base_path_hash : string
   ; source : source
   ; expected : Strings.t
+  ; declared_names : Strings.t
   ; invalid_names : Strings.t
   ; invalid_guest_names : Strings.t
   ; name_knowledge : name_knowledge
@@ -136,16 +137,16 @@ let declared_guest ~base_path keeper_name (defaults : Keeper_types_profile.keepe
 let read ~base_path =
   let directory = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   Result.bind (read_source directory) (fun source ->
-    let expected, invalid_names, invalid_guest_names, name_knowledge =
-      List.fold_left (fun (expected, invalid_names, invalid_guest_names, name_knowledge) file ->
+    let expected, declared_names, invalid_names, invalid_guest_names, name_knowledge =
+      List.fold_left (fun (expected, declared_names, invalid_names, invalid_guest_names, name_knowledge) file ->
         let stem = Filename.remove_extension file.leaf in
         let protect names =
           let invalid_names, invalid_guest_names = List.fold_left (fun state name ->
             protect_invalid ~base_path name state) (invalid_names, invalid_guest_names) names in
-          expected, invalid_names, invalid_guest_names, name_knowledge in
+          expected, declared_names, invalid_names, invalid_guest_names, name_knowledge in
         let unknown_names () =
-          let expected, invalid_names, invalid_guest_names, _ = protect [stem] in
-          expected, invalid_names, invalid_guest_names, Unknown_names in
+          let expected, declared_names, invalid_names, invalid_guest_names, _ = protect [stem] in
+          expected, declared_names, invalid_names, invalid_guest_names, Unknown_names in
         match file.content with
         | None -> unknown_names ()
         | Some content ->
@@ -153,14 +154,27 @@ let read ~base_path =
           match Loader.inspect_keeper_toml_content ~path content with
           | Error _ -> unknown_names ()
           | Ok (keeper_name, defaults) ->
+            let declared_names = Strings.add keeper_name declared_names in
             match declared_guest ~base_path keeper_name defaults with
-            | Expected name -> Strings.add name expected, invalid_names, invalid_guest_names, name_knowledge
-            | Not_apple -> expected, invalid_names, invalid_guest_names, name_knowledge
-            | Unresolved -> protect [stem; keeper_name])
-        (Strings.empty, Strings.empty, Strings.empty, Known_names) source.files in
+            | Expected name ->
+              Strings.add name expected, declared_names, invalid_names, invalid_guest_names, name_knowledge
+            | Not_apple ->
+              expected, declared_names, invalid_names, invalid_guest_names, name_knowledge
+            | Unresolved ->
+              let invalid_names, invalid_guest_names = List.fold_left (fun state name ->
+                protect_invalid ~base_path name state) (invalid_names, invalid_guest_names) [stem; keeper_name] in
+              expected, declared_names, invalid_names, invalid_guest_names, name_knowledge)
+        (Strings.empty, Strings.empty, Strings.empty, Strings.empty, Known_names) source.files in
     let observation = {base_path; base_path_hash = Keeper_sandbox_runtime.base_path_hash base_path;
-      source; expected; invalid_names; invalid_guest_names; name_knowledge} in
+      source; expected; declared_names; invalid_names; invalid_guest_names; name_knowledge} in
     Result.map (fun () -> observation) (revalidate observation))
+;;
+
+let protected_keeper_names observation =
+  match observation.name_knowledge with
+  | Unknown_names -> None
+  | Known_names ->
+    Some (Strings.elements (Strings.union observation.declared_names observation.invalid_names))
 ;;
 
 type preservation =

@@ -445,71 +445,120 @@ let rec try_process_lock fd ~process_lock_held =
   | Unix.Unix_error (error, operation, argument) ->
     Error (unix_failure (error, operation, argument))
 
+let verify_locked_fd_matches_path ~lock_path fd =
+  try
+    let fd_stat = Unix.fstat fd in
+    let path_stat = Unix.lstat lock_path in
+    if path_stat.Unix.st_kind = Unix.S_LNK
+    then Error (unix_failure (Unix.ELOOP, "lstat", lock_path))
+    else if path_stat.Unix.st_kind <> Unix.S_REG
+            || fd_stat.Unix.st_kind <> Unix.S_REG
+    then Error (unix_failure (Unix.EINVAL, "lstat", lock_path))
+    else if fd_stat.Unix.st_dev = path_stat.Unix.st_dev
+            && fd_stat.Unix.st_ino = path_stat.Unix.st_ino
+            && fd_stat.Unix.st_nlink > 0
+    then Ok `Current
+    else Ok `Stale_inode
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok `Stale_inode
+  | Unix.Unix_error (error, operation, argument) ->
+    Error (unix_failure (error, operation, argument))
+;;
+
 let acquire_durable_flock ~execution_context lock_path =
-  match open_durable_lock_file ~execution_context lock_path with
-  | Error cause ->
-    Error (durable_lock_error ~lock_path ~phase:Open_lock_file cause)
-  | Ok fd ->
-    let started_at = Time_compat.now () in
-    let process_lock_held = Atomic.make false in
-    let rec acquire_eio retries =
-      match try_process_lock fd ~process_lock_held with
-      | Ok true ->
-        Eio.Fiber.check ();
-        observe_lock_attempt ~caller:"File_lock_eio.durable" ~retries
-          ~started_at ~outcome:"acquired";
-        Ok ()
-      | Ok false ->
-        (* POSIX record locks expose no readiness source to Eio. Pace unbounded
-           cancellable F_TLOCK retries with [retry_sleep_sec] on Eio Unix (falling
-           back to [Fiber.yield] on non-Unix mock schedulers) so cross-process
-           contention never spins a domain at 100% CPU while imposing no attempt
-           cap or wall-clock timeout. *)
-        (try Eio_unix.sleep retry_sleep_sec with
-         | Effect.Unhandled _ -> Eio.Fiber.yield ());
-        acquire_eio (retries + 1)
-      | Error _ as error -> error
-    in
-    let acquire () =
-      match execution_context with
-      | Eio_guard.Eio_fiber ->
-        Eio.Fiber.check ();
-        acquire_eio 0
-      | Eio_guard.Non_eio ->
-        (try
-           Unix.lockf fd Unix.F_LOCK 0;
-           Atomic.set process_lock_held true;
-           Ok ()
-         with
-         | Unix.Unix_error (error, operation, argument) ->
-           Error (unix_failure (error, operation, argument)))
-    in
-    let acquired =
-      match acquire () with
-      | result -> result
-      | exception exn ->
-        let backtrace = Printexc.get_raw_backtrace () in
-        if Atomic.get process_lock_held
-        then release_fd_after_exception ~lock_path execution_context fd
-        else close_fd_after_exception ~lock_path execution_context fd;
-        Printexc.raise_with_backtrace exn backtrace
-    in
-    (match acquired with
-     | Ok () -> Ok fd
-     | Error cause ->
-       let cleanup_failure =
-         match
-           protect_cleanup execution_context (fun () -> close_fd_result fd)
-         with
-         | Ok () -> None
-         | Error failure -> Some failure
-       in
-       Error
-         (durable_lock_error
-            ?cleanup_failure
-            ~lock_path
-            ~phase:Acquire_process_lock
-            cause))
+  let rec acquire_current_inode () =
+    match open_durable_lock_file ~execution_context lock_path with
+    | Error cause ->
+      Error (durable_lock_error ~lock_path ~phase:Open_lock_file cause)
+    | Ok fd ->
+      let started_at = Time_compat.now () in
+      let process_lock_held = Atomic.make false in
+      let rec acquire_eio retries =
+        match try_process_lock fd ~process_lock_held with
+        | Ok true ->
+          Eio.Fiber.check ();
+          observe_lock_attempt ~caller:"File_lock_eio.durable" ~retries
+            ~started_at ~outcome:"acquired";
+          Ok ()
+        | Ok false ->
+          (* POSIX record locks expose no readiness source to Eio. Pace unbounded
+             cancellable F_TLOCK retries with [retry_sleep_sec] on Eio Unix (falling
+             back to [Fiber.yield] on non-Unix mock schedulers) so cross-process
+             contention never spins a domain at 100% CPU while imposing no attempt
+             cap or wall-clock timeout. *)
+          (try Eio_unix.sleep retry_sleep_sec with
+           | Effect.Unhandled _ -> Eio.Fiber.yield ());
+          acquire_eio (retries + 1)
+        | Error _ as error -> error
+      in
+      let acquire () =
+        match execution_context with
+        | Eio_guard.Eio_fiber ->
+          Eio.Fiber.check ();
+          acquire_eio 0
+        | Eio_guard.Non_eio ->
+          (try
+             Unix.lockf fd Unix.F_LOCK 0;
+             Atomic.set process_lock_held true;
+             Ok ()
+           with
+           | Unix.Unix_error (error, operation, argument) ->
+             Error (unix_failure (error, operation, argument)))
+      in
+      let acquired =
+        match acquire () with
+        | result -> result
+        | exception exn ->
+          let backtrace = Printexc.get_raw_backtrace () in
+          if Atomic.get process_lock_held
+          then release_fd_after_exception ~lock_path execution_context fd
+          else close_fd_after_exception ~lock_path execution_context fd;
+          Printexc.raise_with_backtrace exn backtrace
+      in
+      (match acquired with
+       | Ok () ->
+         (* Verify the locked descriptor still matches the current directory
+            entry at [lock_path]. If another process unlinked the stale lock
+            file after our open and before our lock, release this unlinked
+            inode and re-open so mutual exclusion converges on one inode. *)
+         (match verify_locked_fd_matches_path ~lock_path fd with
+          | Ok `Current -> Ok fd
+          | Ok `Stale_inode ->
+            release_fd_after_exception ~lock_path execution_context fd;
+            (match execution_context with
+             | Eio_guard.Eio_fiber -> Eio.Fiber.check ()
+             | Eio_guard.Non_eio -> ());
+            acquire_current_inode ()
+          | Error cause ->
+            let cleanup_failure =
+              match
+                protect_cleanup execution_context (fun () -> release_durable_fd_result fd)
+              with
+              | Ok () -> None
+              | Error (failure, _) -> Some failure
+            in
+            Error
+              (durable_lock_error
+                 ?cleanup_failure
+                 ~lock_path
+                 ~phase:Acquire_process_lock
+                 cause))
+       | Error cause ->
+         let cleanup_failure =
+           match
+             protect_cleanup execution_context (fun () -> close_fd_result fd)
+           with
+           | Ok () -> None
+           | Error failure -> Some failure
+         in
+         Error
+           (durable_lock_error
+              ?cleanup_failure
+              ~lock_path
+              ~phase:Acquire_process_lock
+              cause))
+  in
+  acquire_current_inode ()
 
 type 'a durable_lock_observation =
   | Lock_not_acquired of durable_lock_error
@@ -584,37 +633,55 @@ let try_with_durable_lock_observed ~lock_path f =
     (fun () ->
       match Cross_context_mutex.try_with_lock lock (fun () ->
         let execution_context = Eio_guard.execution_context () in
-        match open_durable_lock_file ~execution_context lock_path with
-        | Error cause ->
-          Lock_attempted (Lock_not_acquired
-            (durable_lock_error ~lock_path ~phase:Open_lock_file cause))
-        | Ok fd ->
-          let process_lock_held = Atomic.make false in
-          let attempt =
-            match try_process_lock fd ~process_lock_held with
-            | attempt -> attempt
-            | exception exn ->
-              let backtrace = Printexc.get_raw_backtrace () in
-              if Atomic.get process_lock_held
-              then release_fd_after_exception ~lock_path execution_context fd
-              else close_fd_after_exception ~lock_path execution_context fd;
-              Printexc.raise_with_backtrace exn backtrace
-          in
-          match attempt with
-          | Ok true ->
-            Lock_attempted (run_admitted
-              ~release_fd:(release_durable_lock_result ~lock_path) ~lock_path execution_context fd f)
-          | Ok false ->
-            close_fd_after_exception ~lock_path execution_context fd;
-            Lock_held_elsewhere
+        let rec try_current_inode attempts_left =
+          match open_durable_lock_file ~execution_context lock_path with
           | Error cause ->
-            let cleanup_failure =
-              match protect_cleanup execution_context (fun () -> close_fd_result fd) with
-              | Ok () -> None
-              | Error failure -> Some failure
-            in
             Lock_attempted (Lock_not_acquired
-              (durable_lock_error ?cleanup_failure ~lock_path ~phase:Acquire_process_lock cause)))
+              (durable_lock_error ~lock_path ~phase:Open_lock_file cause))
+          | Ok fd ->
+            let process_lock_held = Atomic.make false in
+            let attempt =
+              match try_process_lock fd ~process_lock_held with
+              | attempt -> attempt
+              | exception exn ->
+                let backtrace = Printexc.get_raw_backtrace () in
+                if Atomic.get process_lock_held
+                then release_fd_after_exception ~lock_path execution_context fd
+                else close_fd_after_exception ~lock_path execution_context fd;
+                Printexc.raise_with_backtrace exn backtrace
+            in
+            match attempt with
+            | Ok true ->
+              (match verify_locked_fd_matches_path ~lock_path fd with
+               | Ok `Current ->
+                 Lock_attempted (run_admitted
+                   ~release_fd:(release_durable_lock_result ~lock_path) ~lock_path execution_context fd f)
+               | Ok `Stale_inode ->
+                 release_fd_after_exception ~lock_path execution_context fd;
+                 if attempts_left <= 0
+                 then Lock_held_elsewhere
+                 else try_current_inode (attempts_left - 1)
+               | Error cause ->
+                 let cleanup_failure =
+                   match protect_cleanup execution_context (fun () -> release_durable_fd_result fd) with
+                   | Ok () -> None
+                   | Error (failure, _) -> Some failure
+                 in
+                 Lock_attempted (Lock_not_acquired
+                   (durable_lock_error ?cleanup_failure ~lock_path ~phase:Acquire_process_lock cause)))
+            | Ok false ->
+              close_fd_after_exception ~lock_path execution_context fd;
+              Lock_held_elsewhere
+            | Error cause ->
+              let cleanup_failure =
+                match protect_cleanup execution_context (fun () -> close_fd_result fd) with
+                | Ok () -> None
+                | Error failure -> Some failure
+              in
+              Lock_attempted (Lock_not_acquired
+                (durable_lock_error ?cleanup_failure ~lock_path ~phase:Acquire_process_lock cause))
+        in
+        try_current_inode 8)
       with
       | Some attempt -> attempt
       | None -> Lock_held_elsewhere)
@@ -631,6 +698,118 @@ let with_durable_lock ~lock_path f =
   | Lock_not_acquired error -> Error error
   | Body_completed { value; release_error = None } -> Ok value
   | Body_completed { release_error = Some error; _ } -> Error error
+;;
+
+type stale_lock_cleanup =
+  | Stale_lock_removed
+  | Stale_lock_kept_target_present
+  | Stale_lock_kept_held
+  | Stale_lock_already_absent
+  | Stale_lock_cleanup_failed of string
+
+external try_lock_fd_exclusive_all_raw : Unix.file_descr -> bool
+  = "masc_try_lock_fd_exclusive_all"
+external unlock_fd_all_raw : Unix.file_descr -> unit
+  = "masc_unlock_fd_all"
+
+let unlink_if_unheld ~lock_path ~target_absent =
+  if not (target_absent ())
+  then Stale_lock_kept_target_present
+  else (
+    let canonical_lock = canonical_table_key lock_path in
+    let with_optional_target_mutex f =
+      if Filename.check_suffix canonical_lock lock_suffix
+      then (
+        let target_key = Filename.chop_suffix canonical_lock lock_suffix in
+        if String.equal target_key canonical_lock
+        then Some (f ())
+        else try_with_mutex target_key f)
+      else Some (f ())
+    in
+    let attempt =
+      try_with_mutex canonical_lock (fun () ->
+        match
+          with_optional_target_mutex (fun () ->
+            if not (target_absent ())
+            then Stale_lock_kept_target_present
+            else (
+              match Unix.lstat lock_path with
+              | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Stale_lock_already_absent
+              | exception Unix.Unix_error (error, operation, argument) ->
+                Stale_lock_cleanup_failed
+                  (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))
+              | lstat_before when lstat_before.Unix.st_kind <> Unix.S_REG ->
+                Stale_lock_cleanup_failed "lock path is not a regular file"
+              | lstat_before ->
+                (match
+                   openfile_no_eintr lock_path [ Unix.O_WRONLY; Unix.O_CLOEXEC; Unix.O_NONBLOCK ] 0
+                 with
+                 | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Stale_lock_already_absent
+                 | exception Unix.Unix_error (error, operation, argument) ->
+                   Stale_lock_cleanup_failed
+                     (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))
+                 | fd ->
+                   let os_lock_held = ref false in
+                   Fun.protect
+                     ~finally:(fun () ->
+                       if !os_lock_held
+                       then (try unlock_fd_all_raw fd with Unix.Unix_error _ -> ());
+                       try Unix.close fd with Unix.Unix_error _ -> ())
+                     (fun () ->
+                        match Unix.fstat fd with
+                        | exception Unix.Unix_error (error, operation, argument) ->
+                          Stale_lock_cleanup_failed
+                            (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))
+                        | fstat_open
+                          when fstat_open.Unix.st_kind <> Unix.S_REG
+                               || fstat_open.Unix.st_dev <> lstat_before.Unix.st_dev
+                               || fstat_open.Unix.st_ino <> lstat_before.Unix.st_ino ->
+                          Stale_lock_cleanup_failed "lock file identity changed before lock check"
+                        | _ ->
+                          (* Acquire an OS lock that excludes BOTH BSD [flock(2)] (used by
+                             liveness/stage locks) AND POSIX [fcntl]/[lockf(3)] holders
+                             across macOS/BSD and Linux without self-conflicting on BSD
+                             unified vnode lock tables. *)
+                          (match try_lock_fd_exclusive_all_raw fd with
+                           | exception Unix.Unix_error (error, operation, argument) ->
+                             Stale_lock_cleanup_failed
+                               (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))
+                           | false -> Stale_lock_kept_held
+                           | true ->
+                             os_lock_held := true;
+                             if not (target_absent ())
+                             then Stale_lock_kept_target_present
+                             else (
+                               match Unix.lstat lock_path with
+                               | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+                                 Stale_lock_already_absent
+                               | exception Unix.Unix_error (error, operation, argument) ->
+                                 Stale_lock_cleanup_failed
+                                   (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))
+                               | lstat_after
+                                 when lstat_after.Unix.st_kind <> Unix.S_REG
+                                      || lstat_after.Unix.st_dev <> lstat_before.Unix.st_dev
+                                      || lstat_after.Unix.st_ino <> lstat_before.Unix.st_ino ->
+                                 Stale_lock_cleanup_failed "lock file identity changed before unlink"
+                               | _ ->
+                                 (match Unix.unlink lock_path with
+                                  | () -> Stale_lock_removed
+                                  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+                                    Stale_lock_already_absent
+                                  | exception Unix.Unix_error (error, operation, argument) ->
+                                    Stale_lock_cleanup_failed
+                                      (Printf.sprintf
+                                         "%s(%s): %s"
+                                         operation
+                                         argument
+                                         (Unix.error_message error)))))))))
+        with
+        | Some outcome -> outcome
+        | None -> Stale_lock_kept_held)
+    in
+    match attempt with
+    | Some outcome -> outcome
+    | None -> Stale_lock_kept_held)
 ;;
 
 module For_testing = struct

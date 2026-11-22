@@ -65,12 +65,13 @@ let live_names ~store =
     List.fold_left
       (fun names record ->
         let* names = names in
-        (* Every consumer's originals name only the request IDs of their
-           progress events; the body is decoded by the consumer and the
-           install preflight, not here. *)
-        let* (_ : Consumer.t) =
+        (* Every active or retired consumer's originals name only the request
+           IDs of their progress events; unknown scopes still refuse the pass
+           fail-closed. The body is decoded by the consumer and the install
+           preflight, not here. *)
+        let* (_ : Consumer.scope_classification) =
           Option.to_result ~none:(Sweep_refused "a live record is in a scope no owner claims")
-            (Consumer.of_scope (Owner.Record.scope record))
+            (Consumer.classify_scope (Owner.Record.scope record))
         in
         Ok
           (List.fold_left
@@ -155,11 +156,50 @@ let remove doomed =
       | exception Unix.Unix_error (error, _, _) -> Error (count, Unix.error_message error))
     (Ok (0, 0L)) doomed
 
+(* Best-effort empty directory cleanup after files have been unlinked.
+   Only removes empty directories via [Unix.rmdir] without following symlinks;
+   non-empty or concurrently modified directories are left intact. *)
+let try_rmdir path =
+  match Unix.lstat path with
+  | stat when stat.Unix.st_kind = Unix.S_DIR ->
+    (try Unix.rmdir path with Unix.Unix_error _ -> ())
+  | _ -> ()
+  | exception Unix.Unix_error _ -> ()
+;;
+
+let prune_empty_directories ~root =
+  let list_dirs path =
+    match Unix.lstat path with
+    | stat when stat.Unix.st_kind = Unix.S_DIR ->
+      (try sorted_entries path with Unix.Unix_error _ | Sys_error _ -> [])
+    | _ -> []
+    | exception Unix.Unix_error _ -> []
+  in
+  let archive = Filename.concat root Store.tool_request_archive_directory in
+  List.iter
+    (fun scope_dir ->
+       let scope_path = Filename.concat archive scope_dir in
+       List.iter
+         (fun date_dir ->
+            let date_path = Filename.concat scope_path date_dir in
+            try_rmdir (Filename.concat date_path "bodies");
+            try_rmdir (Filename.concat date_path "records");
+            try_rmdir date_path)
+         (list_dirs scope_path);
+       try_rmdir scope_path)
+    (list_dirs archive);
+  let owners = Filename.concat root Store.tool_request_owners_directory in
+  List.iter
+    (fun scope_dir -> try_rmdir (Filename.concat owners scope_dir))
+    (list_dirs owners)
+;;
+
 let run ~store =
   let* live_records, names = live_names ~store in
   let named_files = Names.map (fun id -> Store.digest id ^ ".json") names in
+  let root = Store.root store in
   let* plan =
-    try plan_archive ~root:(Store.root store) ~named_files with
+    try plan_archive ~root ~named_files with
     | Unix.Unix_error (error, operation, _) ->
       Error (Sweep_refused (operation ^ ": " ^ Unix.error_message error))
     | Sys_error _ -> Error (Sweep_refused "an archive directory could not be listed")
@@ -174,6 +214,7 @@ let run ~store =
     |> Result.map_error (fun (removed_records, detail) ->
       Removal_stopped { removed_records; removed_bodies; detail })
   in
+  prune_empty_directories ~root;
   Ok
     { live_records
     ; named_ids = Names.cardinal names

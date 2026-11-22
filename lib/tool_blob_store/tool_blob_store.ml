@@ -126,12 +126,16 @@ module Touch_map = Map.Make (String)
 type touches =
   { current : touch Touch_map.t
   ; previous : touch Touch_map.t
+  ; current_evicted : bool
+  ; previous_evicted : bool
   }
 
 type touch_ledger_state =
   { mutable current : (string, touch) Hashtbl.t
   ; mutable current_order : string Queue.t
+  ; mutable current_evicted : bool
   ; mutable previous : (string, touch) Hashtbl.t
+  ; mutable previous_evicted : bool
   }
 
 let touch_ledger_mu = Mutex.create ()
@@ -139,7 +143,9 @@ let touch_ledger_mu = Mutex.create ()
 let touch_ledger_state : touch_ledger_state =
   { current = Hashtbl.create 256
   ; current_order = Queue.create ()
+  ; current_evicted = false
   ; previous = Hashtbl.create 16
+  ; previous_evicted = false
   }
 ;;
 
@@ -152,7 +158,9 @@ let record_touch sha256 (mark : touch) =
       while Hashtbl.length touch_ledger_state.current > touch_generation_capacity do
         match Queue.take_opt touch_ledger_state.current_order with
         | None -> ()
-        | Some evicted -> Hashtbl.remove touch_ledger_state.current evicted
+        | Some evicted ->
+          Hashtbl.remove touch_ledger_state.current evicted;
+          touch_ledger_state.current_evicted <- true
       done
     | Some existing ->
       let next_mark =
@@ -1124,8 +1132,10 @@ let delete t ~sha256 =
 let rotate_touches () =
   with_mutex touch_ledger_mu (fun () ->
     touch_ledger_state.previous <- touch_ledger_state.current;
+    touch_ledger_state.previous_evicted <- touch_ledger_state.current_evicted;
     touch_ledger_state.current <- Hashtbl.create 256;
-    touch_ledger_state.current_order <- Queue.create ())
+    touch_ledger_state.current_order <- Queue.create ();
+    touch_ledger_state.current_evicted <- false)
 ;;
 
 let snapshot_touch_tbl tbl =
@@ -1136,6 +1146,8 @@ let observe_touches () =
   with_mutex touch_ledger_mu (fun () ->
     { current = snapshot_touch_tbl touch_ledger_state.current
     ; previous = snapshot_touch_tbl touch_ledger_state.previous
+    ; current_evicted = touch_ledger_state.current_evicted
+    ; previous_evicted = touch_ledger_state.previous_evicted
     })
 ;;
 
@@ -1150,11 +1162,15 @@ let touch_of (observed : touches) ~sha256 =
 type touch_counts =
   { current_addresses : int
   ; previous_addresses : int
+  ; current_evicted : bool
+  ; previous_evicted : bool
   }
 
 let touch_counts (observed : touches) =
   { current_addresses = Touch_map.cardinal observed.current
   ; previous_addresses = Touch_map.cardinal observed.previous
+  ; current_evicted = observed.current_evicted
+  ; previous_evicted = observed.previous_evicted
   }
 ;;
 

@@ -989,35 +989,54 @@ let reclaimable_terminal_phase (operation : Keeper_shutdown_types.t) =
   | Keeper_shutdown_types.Blocked _ -> false
 ;;
 
+let try_rmdir_empty_owner_dir keeper_dir =
+  match Unix.lstat keeper_dir with
+  | stat when stat.Unix.st_kind = Unix.S_DIR ->
+    (try
+       Unix.rmdir keeper_dir;
+       true
+     with
+     | Unix.Unix_error _ -> false)
+  | _ -> false
+  | exception Unix.Unix_error _ -> false
+;;
+
 let delete_terminal ~config ~keeper_name ~operation_id =
+  let* keeper_dir = keeper_records_dir config keeper_name in
   let* operation_path = path ~config ~keeper_name operation_id in
   with_keeper_inventory_lock
     ~access:Write
     ~config
     ~keeper_name
     (fun () ->
-       with_operation_lock ~access:Write operation_path (fun () ->
-         if not (Fs_compat.file_exists operation_path)
-         then Ok Terminal_deleted
-         else
-           match
-             load_path_unlocked ~operation_path ~keeper_name ~operation_id
-           with
-           | Error error -> Error error
-           | Ok operation ->
-             if reclaimable_terminal_phase operation
-             then (
-               match
-                 Keeper_fs.remove_file_durable
-                   ~ownership_root:config.Workspace.base_path
-                   operation_path
-               with
-               | Ok () -> Ok Terminal_deleted
-               | Error error ->
-                 Error
-                   (Io_error
-                      (Keeper_fs.durable_remove_error_to_string error)))
-             else Ok Terminal_retained))
+       let outcome =
+         with_operation_lock ~access:Write operation_path (fun () ->
+           if not (Fs_compat.file_exists operation_path)
+           then Ok Terminal_deleted
+           else
+             match
+               load_path_unlocked ~operation_path ~keeper_name ~operation_id
+             with
+             | Error error -> Error error
+             | Ok operation ->
+               if reclaimable_terminal_phase operation
+               then (
+                 match
+                   Keeper_fs.remove_file_durable
+                     ~ownership_root:config.Workspace.base_path
+                     operation_path
+                 with
+                 | Ok () -> Ok Terminal_deleted
+                 | Error error ->
+                   Error
+                     (Io_error
+                        (Keeper_fs.durable_remove_error_to_string error)))
+               else Ok Terminal_retained)
+       in
+       (match outcome with
+        | Ok Terminal_deleted -> ignore (try_rmdir_empty_owner_dir keeper_dir)
+        | Ok Terminal_retained | Error _ -> ());
+       outcome)
 ;;
 
 let replace ~config ~expected_revision operation =
@@ -1461,6 +1480,90 @@ let scan_inventory ~config =
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Io_error (Printexc.to_string exn))
+;;
+
+type prune_report =
+  { pruned_operations : int
+  ; pruned_empty_dirs : int
+  }
+
+let prune_terminal_and_empty_dirs ?now ~config ~older_than_seconds () =
+  (* NDT-OK: retention of settled shutdown records is explicitly wall-clock mtime based. *)
+  let now = match now with Some ts -> ts | None -> Unix.gettimeofday () in
+  let cutoff = now -. Float.max 0.0 older_than_seconds in
+  let* entries = scan_inventory ~config in
+  let corrupt_keepers =
+    List.filter_map
+      (function
+        | Operation _ -> None
+        | Corrupt_record corrupt -> Some corrupt.keeper_name)
+      entries
+  in
+  let pruned_operations = ref 0 in
+  let pruned_empty_dirs = ref 0 in
+  List.iter
+    (function
+      | Corrupt_record _ -> ()
+      | Operation operation ->
+        if (not (List.mem operation.keeper_name corrupt_keepers))
+           && reclaimable_terminal_phase operation
+        then (
+          match
+            path_for_operation ~config operation, keeper_records_dir config operation.keeper_name
+          with
+          | Ok operation_path, Ok keeper_dir ->
+            let eligible =
+              match Unix.lstat operation_path with
+              | stat when stat.Unix.st_kind = Unix.S_REG -> stat.Unix.st_mtime <= cutoff
+              | _ -> false
+              | exception Unix.Unix_error _ -> false
+            in
+            if eligible
+            then (
+              let dir_existed_before =
+                match Unix.lstat keeper_dir with
+                | stat when stat.Unix.st_kind = Unix.S_DIR -> true
+                | _ -> false
+                | exception Unix.Unix_error _ -> false
+              in
+              match
+                delete_terminal
+                  ~config
+                  ~keeper_name:operation.keeper_name
+                  ~operation_id:operation.operation_id
+              with
+              | Ok Terminal_deleted ->
+                incr pruned_operations;
+                if dir_existed_before
+                then (
+                  match Unix.lstat keeper_dir with
+                  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> incr pruned_empty_dirs
+                  | _ -> ())
+              | Ok Terminal_retained | Error _ -> ())
+          | Error _, _ | _, Error _ -> ()))
+    entries;
+  let dir = records_dir config in
+  (match Fs_compat.path_kind ~follow:false dir with
+   | Fs_compat.Directory ->
+     (match Fs_compat.read_dir dir with
+      | owner_dirs ->
+        List.iter
+          (fun owner_dir_name ->
+             match keeper_name_of_owner_dir_name owner_dir_name with
+             | Error _ -> ()
+             | Ok keeper_name ->
+               if not (List.mem keeper_name corrupt_keepers)
+               then
+                 ignore
+                   (with_keeper_inventory_lock ~access:Write ~config ~keeper_name (fun () ->
+                      if try_rmdir_empty_owner_dir (Filename.concat dir owner_dir_name)
+                      then incr pruned_empty_dirs;
+                      Ok ())))
+          owner_dirs
+      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+      | exception _ -> ())
+   | Fs_compat.Missing | Fs_compat.Other -> ());
+  Ok { pruned_operations = !pruned_operations; pruned_empty_dirs = !pruned_empty_dirs }
 ;;
 
 let list_for_keeper ~config ~keeper_name =

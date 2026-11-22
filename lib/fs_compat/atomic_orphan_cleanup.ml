@@ -84,7 +84,14 @@ let same_inode left right =
   left.Unix.st_dev = right.Unix.st_dev && left.Unix.st_ino = right.Unix.st_ino
 ;;
 
-let cleanup_atomic_orphans ~ownership_root ~(base_path : string) () =
+let cleanup_atomic_orphans
+      ?(unlink_private_jsonl_stages = false)
+      ?recovery_parent
+      ?recovery_ownership_root
+      ~ownership_root
+      ~(base_path : string)
+      ()
+  =
   let recovered_name = ".recovered" in
   let empty_report = { inspected = 0; deleted = 0; preserved = 0; failures = [] } in
   let add_failure report ~operation ~path cause =
@@ -242,24 +249,114 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) () =
        | exn -> (* cancel-guard-ok: Unix.mkdir performs no Eio operation *)
          None, record_exn report ~operation:Create_recovery_directory ~path exn)
   in
+  let recovery_root = Option.value recovery_ownership_root ~default:ownership_root in
+  let resolve_recovery_parent report ~base_stat =
+    match recovery_parent with
+    | None -> Some (base_path, base_stat), report
+    | Some target_parent ->
+      (match Owned_directory_chain.inspect ~ownership_root:recovery_root target_parent with
+       | Ok (Owned_directory_chain.Owned_directory stat) ->
+         Some (target_parent, stat), report
+       | Ok Owned_directory_chain.Owned_directory_missing ->
+         let grand_parent = Filename.dirname target_parent in
+         let child_name = Filename.basename target_parent in
+         (match Owned_directory_chain.inspect ~ownership_root:recovery_root grand_parent with
+          | Ok (Owned_directory_chain.Owned_directory grand_stat) ->
+            ensure_child_directory
+              report
+              ~parent:grand_parent
+              ~parent_stat:grand_stat
+              child_name
+          | Ok Owned_directory_chain.Owned_directory_missing ->
+            ( None
+            , add_failure
+                report
+                ~operation:Create_recovery_directory
+                ~path:grand_parent
+                (Unix_failure (Unix.ENOENT, "lstat", grand_parent)) )
+          | Error (Owned_directory_chain.Owned_path_outside_root _) ->
+            ( None
+            , add_failure
+                report
+                ~operation:Create_recovery_directory
+                ~path:target_parent
+                (Outside_ownership_root { ownership_root = recovery_root }) )
+          | Error (Owned_directory_chain.Owned_path_non_directory { path; kind }) ->
+            ( None
+            , add_failure
+                report
+                ~operation:Create_recovery_directory
+                ~path
+                (Unexpected_file_kind kind) ))
+       | Error (Owned_directory_chain.Owned_path_outside_root _) ->
+         ( None
+         , add_failure
+             report
+             ~operation:Create_recovery_directory
+             ~path:target_parent
+             (Outside_ownership_root { ownership_root = recovery_root }) )
+       | Error (Owned_directory_chain.Owned_path_non_directory { path; kind }) ->
+         ( None
+         , add_failure
+             report
+             ~operation:Create_recovery_directory
+             ~path
+             (Unexpected_file_kind kind) ))
+  in
   let ensure_recovery_directory report ~base_stat =
-    match
-      ensure_child_directory
-        report
-        ~parent:base_path
-        ~parent_stat:base_stat
-        recovered_name
-    with
+    match resolve_recovery_parent report ~base_stat with
     | None, report -> None, report
-    | Some (recovered, recovered_stat), report ->
-      ensure_child_directory
-        report
-        ~parent:recovered
-        ~parent_stat:recovered_stat
-        "root"
+    | Some (parent, parent_stat), report ->
+      (match
+         ensure_child_directory
+           report
+           ~parent
+           ~parent_stat
+           recovered_name
+       with
+       | None, report -> None, report
+       | Some (recovered, recovered_stat), report ->
+         ensure_child_directory
+           report
+           ~parent:recovered
+           ~parent_stat:recovered_stat
+           "root")
+  in
+  let copy_fd_to_new_file ~source_fd ~candidate =
+    let dst_fd =
+      Unix.openfile candidate [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL; Unix.O_CLOEXEC ] 0o600
+    in
+    let succeeded = ref false in
+    Stdlib.Fun.protect
+      ~finally:(fun () ->
+        (try Unix.close dst_fd with Unix.Unix_error _ -> ());
+        if not !succeeded
+        then (try Unix.unlink candidate with Unix.Unix_error _ -> ()))
+      (fun () ->
+         ignore (Unix.lseek source_fd 0 Unix.SEEK_SET : int);
+         let buf = Bytes.create 65536 in
+         let rec write_all off len =
+           if len > 0
+           then (
+             let n = Unix.write dst_fd buf off len in
+             write_all (off + n) (len - n))
+         in
+         let rec pump () =
+           match Unix.read source_fd buf 0 (Bytes.length buf) with
+           | 0 -> ()
+           | n ->
+             write_all 0 n;
+             pump ()
+         in
+         pump ();
+         Unix.fsync dst_fd;
+         let dst_stat = Unix.fstat dst_fd in
+         succeeded := true;
+         dst_stat)
   in
   let find_or_create_preserved_link
         report
+        ~source_fd
         ~source_path
         ~source_stat
         ~source_dir
@@ -302,13 +399,21 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) () =
       else
         try
           Unix.link ~follow:false source_path candidate;
-          Some candidate, report
+          Some (`Linked candidate), report
         with
+        | Unix.Unix_error (Unix.EXDEV, _, _) ->
+          (try
+             let copied_stat = copy_fd_to_new_file ~source_fd ~candidate in
+             Some (`Copied (candidate, copied_stat)), report
+           with
+           | Unix.Unix_error (Unix.EEXIST, _, _) -> loop report (collision + 1)
+           | exn -> (* cancel-guard-ok: Unix copy syscalls perform no Eio operation *)
+             None, record_exn report ~operation:Link_preserved_orphan ~path:candidate exn)
         | Unix.Unix_error (Unix.EEXIST, _, _) ->
           (match lstat report ~operation:Verify_preserved_orphan candidate with
            | Some stat, report
              when stat.Unix.st_kind = Unix.S_REG && same_inode source_stat stat ->
-             Some candidate, report
+             Some (`Linked candidate), report
            | _, report -> loop report (collision + 1))
         | exn -> (* cancel-guard-ok: Unix.link performs no Eio operation *)
           ( None
@@ -316,7 +421,7 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) () =
     in
     loop report 0
   in
-  let preserve_nonempty report ~base_stat ~dir ~dir_stat name source_stat =
+  let preserve_nonempty report ~base_stat ~dir ~dir_stat ~source_fd name source_stat =
     match ensure_recovery_directory report ~base_stat with
     | None, report -> report
     | Some (destination, destination_stat), report ->
@@ -324,6 +429,7 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) () =
       (match
          find_or_create_preserved_link
            report
+           ~source_fd
            ~source_path
            ~source_stat
            ~source_dir:dir
@@ -333,14 +439,24 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) () =
            name
        with
        | None, report -> report
-       | Some target, report ->
+       | Some preserved_target, report ->
+         let target, expected_target_ok =
+           match preserved_target with
+           | `Linked target ->
+             target, (fun target_stat -> same_inode source_stat target_stat)
+           | `Copied (target, copied_stat) ->
+             ( target
+             , fun target_stat ->
+                 same_inode copied_stat target_stat
+                 && target_stat.Unix.st_size = source_stat.Unix.st_size )
+         in
          let target_stat, report =
            lstat report ~operation:Verify_preserved_orphan target
          in
          (match target_stat with
           | Some target_stat
             when target_stat.Unix.st_kind = Unix.S_REG
-                 && same_inode source_stat target_stat ->
+                 && expected_target_ok target_stat ->
             let synced_file, report =
               sync_verified_path
                 report
@@ -450,6 +566,40 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) () =
       with
       | exn -> record_exn report ~operation:Delete_empty_orphan ~path exn (* cancel-guard-ok: this body is Unix stat and unlink calls only, no Eio operation, so Cancelled cannot originate in this body. *)
   in
+  (* Acquire an open-file-description [flock(2)] before mutating ANY orphan
+     ([.atomic_*.tmp] or [.private_jsonl_*.stage]). A live writer holds [flock]
+     from before publication through rename/removal, so contention proves an
+     in-flight write and skips the entry without unlinking, moving, or failing. *)
+  let with_orphan_flock report ~source_stat path f =
+    let opened =
+      try
+        Ok (Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC; Unix.O_NONBLOCK ] 0)
+      with
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> Error `Vanished
+      | exn -> Error (`Exn exn) (* cancel-guard-ok: Unix.openfile performs no Eio operation *)
+    in
+    match opened with
+    | Error `Vanished ->
+      add_failure report ~operation:Inspect_orphan ~path Identity_changed
+    | Error (`Exn exn) ->
+      record_exn report ~operation:Inspect_orphan ~path exn
+    | Ok fd ->
+      let report =
+        try
+          let actual = Unix.fstat fd in
+          if actual.Unix.st_kind <> Unix.S_REG || not (same_inode source_stat actual)
+          then add_failure report ~operation:Inspect_orphan ~path Identity_changed
+          else if not (Stage_flock.try_lock_exclusive_fd fd)
+          then
+            (* A live writer holds flock(2) on this file; skip untouched. *)
+            report
+          else f ~source_fd:fd ~actual_stat:actual report
+        with
+        | exn -> (* cancel-guard-ok: Unix syscalls only, no Eio operations *)
+          record_exn report ~operation:Inspect_orphan ~path exn
+      in
+      close_descriptor report path fd
+  in
   (* TEL-OK: this leaf returns every cleanup decision/failure in the typed
      [report]; the schema owner records that report to its metric namespace. *)
   let handle_orphan report ~base_stat ~dir ~dir_stat name =
@@ -463,10 +613,14 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) () =
         ~operation:Inspect_orphan
         ~path
         (Unexpected_file_kind stat.Unix.st_kind)
-    | Some stat, report when stat.Unix.st_size = 0 ->
-      delete_empty report ~dir ~dir_stat ~source_stat:stat path
     | Some stat, report ->
-      preserve_nonempty report ~base_stat ~dir ~dir_stat name stat
+      with_orphan_flock report ~source_stat:stat path (fun ~source_fd ~actual_stat report ->
+        if unlink_private_jsonl_stages
+           && Atomic_temp_name.is_private_jsonl_stage_name name
+        then delete_empty report ~dir ~dir_stat ~source_stat:actual_stat path
+        else if actual_stat.Unix.st_size = 0
+        then delete_empty report ~dir ~dir_stat ~source_stat:actual_stat path
+        else preserve_nonempty report ~base_stat ~dir ~dir_stat ~source_fd name actual_stat)
   in
   let fold_directory report ~base_stat ~dir ~dir_stat ~on_entry =
     let opened =
@@ -519,7 +673,7 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) () =
         ~dir:base_path
         ~dir_stat:base_stat
         ~on_entry:(fun report ~base_stat ~dir ~dir_stat name ->
-          if Atomic_temp_name.is_private_jsonl_stage_name name
+          if Atomic_temp_name.is_name name
              && Stage_flock.is_path_flocked (Filename.concat dir name)
           then report
           else if Atomic_temp_name.is_name name

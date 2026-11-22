@@ -84,7 +84,24 @@ val delete_terminal :
     A record whose phase still requires an admission fence —
     [Completion_pending] included — is kept and reported as
     [Terminal_retained]. A record that is already absent reports
-    [Terminal_deleted]. *)
+    [Terminal_deleted]. When deleting the last record leaves the Keeper's
+    [_<keeper>] shutdown directory empty, the empty directory is removed too. *)
+
+type prune_report =
+  { pruned_operations : int
+  ; pruned_empty_dirs : int
+  }
+
+val prune_terminal_and_empty_dirs :
+  ?now:float ->
+  config:Workspace.config ->
+  older_than_seconds:float ->
+  unit ->
+  (prune_report, error) result
+(** Sweep aged reclaimable terminal shutdown operation records (strictly
+    preserving dashboard purge receipts, active/fenced/pending operations, and
+    any Keeper with a corrupt record) and remove empty [_<keeper>] owner
+    directories under [.shutdown-operations]. *)
 
 (** Bind the exact admission-owned operation identity and durable revision
     eligible for an explicit operator metadata update. Only [Blocked] with

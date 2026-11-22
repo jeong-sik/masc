@@ -18,6 +18,8 @@ val unsupported_docker_flags : string list
     unknown option rather than ignoring it, so this list is what a reader
     must weigh when choosing the profile, not a runtime fallback. *)
 
+val policy_network_prefix : string
+
 val policy_network_name : keeper_name:string -> string
 (** The host-only network this keeper's [Network_policy] guest is attached
     to. One per keeper, not one for the fleet: separate subnets stop a guest
@@ -45,8 +47,17 @@ val policy_network_create_argv_for :
     that gained a policy arm without gaining this fails here rather than
     booting a guest onto a network nobody created. *)
 
+val policy_network_delete_argv_for :
+  Keeper_microvm_backend.t -> network_name:string -> (string list, string) result
+(** Delete a policy network owned by MASC. Refuses non-policy network names
+    and backends without a policy lane. *)
+
 val policy_network_list_argv_for : Keeper_microvm_backend.t -> (string list, string) result
 (** List networks, to see whether {!policy_network_name} already exists. *)
+
+val policy_network_names_of_listing : listing:string -> (string list, string) result
+(** Strictly decode [container network list --format json] and return all
+    network IDs carrying {!policy_network_prefix}. *)
 
 val policy_network_present : keeper_name:string -> listing:string -> (bool, string) result
 (** Whether [container network list --format json] carries
@@ -60,6 +71,11 @@ val policy_network_present : keeper_name:string -> listing:string -> (bool, stri
     drive a create against a network that may already exist, and the guest
     would then be refused with a message about creation rather than about
     the listing that could not be read. *)
+
+val attached_policy_networks_of_apple_containers :
+  listing:string -> (string list, string) result
+(** Decode [container list --all --format json] and return every policy network
+    attached to or referenced by any observed container across workspaces. *)
 
 val policy_network_inspect_argv_for :
   Keeper_microvm_backend.t -> keeper_name:string -> (string list, string) result
@@ -344,6 +360,16 @@ val work_volume_guest_root : string
     anything outside [A-Za-z0-9._-]. *)
 val work_volume_name : keeper_name:string -> (string, string) result
 
+val workspace_volume_hash_length : int
+val base_path_volume_hash : base_path:string -> string
+val valid_workspace_volume_hash : string -> bool
+
+val scoped_work_volume_name :
+  base_path:string -> keeper_name:string -> (string, string) result
+
+val scoped_work_volume_name_with_hash :
+  workspace_hash:string -> keeper_name:string -> (string, string) result
+
 val apple_volume_create_argv : volume_name:string -> size:string -> string list
 (** Apple's sized-volume spelling. Named after the runtime rather than left
     as the lane's default: [msb] rejects [-s] and wants [--kind disk --size],
@@ -587,6 +613,11 @@ type volume_probe_outcome =
     stopped container system, so a 1 is confirmed against the listing instead
     of being read as absence -- creating over an existing volume would land on
     a keeper's working tree. Pure, so the ambiguity is testable. *)
+val apple_volume_probe :
+  volume_name:string -> timeout_sec:float -> volume_probe_outcome
+
+val apple_container_list_argv : unit -> string list
+
 val classify_volume_probe
   :  volume_name:string
   -> inspect:Unix.process_status * string * string
@@ -640,6 +671,12 @@ val build_volume_name : keeper_name:string -> (string, string) result
 (** [masc-keeper-build-<keeper_name>], or an error when the name carries
     anything outside [A-Za-z0-9._-]. *)
 
+val scoped_build_volume_name :
+  base_path:string -> keeper_name:string -> (string, string) result
+
+val scoped_build_volume_name_with_hash :
+  workspace_hash:string -> keeper_name:string -> (string, string) result
+
 val build_volume_mount_args : volume_name:string -> string list
 
 (** What [_build] is right now, as far as the plan cares. *)
@@ -684,6 +721,12 @@ val apple_volume_list_argv : unit -> string list
 val apple_volume_inspect_argv : volume_name:string -> string list
 (** [container volume inspect NAME]: the JSON whose [configuration.source]
     names the volume's host image ({!Keeper_volume_filesystem.image_of_inspect}). *)
+
+val remove_apple_volumes_by_names :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> timeout_sec:float
+  -> volume_names:string list
+  -> (unit, string) result
 
 val remove_apple_keeper_volumes :
   run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
@@ -814,6 +857,15 @@ val apple_keeper_owner_containers :
     names. An unreadable listing is [Error]. Rows without a matching keeper
     label count only when their name matches one of these helpers. Reclamation
     uses this before touching a volume, and so does a claim release. *)
+
+val apple_keeper_workspace_owner_containers :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> timeout_sec:float
+  -> workspace_hash:string
+  -> keeper_name:string
+  -> (string list, string) result
+(** Every observed container that references [(workspace_hash, keeper_name)]
+    plus any volume helper container for [keeper_name]. *)
 
 type apple_volume_claim_release =
   | Kept_for_claimants of string list

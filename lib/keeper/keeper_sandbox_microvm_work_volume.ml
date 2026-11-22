@@ -13,6 +13,22 @@ let valid_volume_segment segment =
          | _ -> false)
        segment
 
+let workspace_volume_hash_length = 8
+
+let valid_workspace_volume_hash hash =
+  String.length hash = workspace_volume_hash_length
+  && String.for_all
+       (function
+         | '0' .. '9' | 'a' .. 'f' -> true
+         | _ -> false)
+       hash
+
+let base_path_volume_hash ~base_path =
+  String.sub
+    (Keeper_sandbox_runtime_setup.base_path_hash base_path)
+    0
+    workspace_volume_hash_length
+
 (** Apple's spelling of a sized volume. It is named after the runtime rather
     than left as the lane's default because the other two do not share it:
     [msb] rejects [-s] and wants [--kind disk --size] (measured 0.6.16), and
@@ -40,6 +56,20 @@ let work_volume_name ~keeper_name =
   if valid_volume_segment keeper_name
   then Ok ("masc-keeper-work-" ^ keeper_name)
   else Error ("unsupported keeper name for a work volume: " ^ keeper_name)
+;;
+
+let scoped_work_volume_name_with_hash ~workspace_hash ~keeper_name =
+  if not (valid_workspace_volume_hash workspace_hash)
+  then Error ("invalid workspace hash for a scoped work volume: " ^ workspace_hash)
+  else if not (valid_volume_segment keeper_name)
+  then Error ("unsupported keeper name for a work volume: " ^ keeper_name)
+  else Ok (Printf.sprintf "masc-keeper-ws-%s-work-%s" workspace_hash keeper_name)
+;;
+
+let scoped_work_volume_name ~base_path ~keeper_name =
+  scoped_work_volume_name_with_hash
+    ~workspace_hash:(base_path_volume_hash ~base_path)
+    ~keeper_name
 ;;
 
 let work_volume_mount_args ~volume_name =

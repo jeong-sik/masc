@@ -89,19 +89,45 @@ esac
            ~keeper_name ~backend:Masc.Keeper_sandbox.Micro_vm
            ~microvm_backend:Masc.Keeper_microvm_backend.Apple_container
            ~sandbox_image:"masc-test-minimal:image" () in
-       (* The claims release runs one helper container against the shared
-          volume. This fake runtime answers [run] with exit 99, so the helper
-          fails and the release must keep the volumes and name the helper --
-          the same refuse-on-anything-unverified shape the owner check
-          carried before the claims marker existed. *)
-       (match remove_volumes () with
-        | Ok () -> Alcotest.fail "a volume whose claims could not be read was reported removed"
-        | Error detail -> Alcotest.(check bool) "the failed claims helper is named" true
-            (Astring.String.is_infix ~affix:"microvm_volume_claim_helper_failed" detail));
-       let calls = In_channel.with_open_bin calls_path In_channel.input_all in
-       Alcotest.(check bool) "no volume delete was issued for an unverified release" true
-         (not (List.exists (fun call -> String.starts_with ~prefix:"volume delete" call)
-                (String.split_on_char '\n' calls))))
+        (* When volume list proves neither scoped nor legacy volumes exist,
+           volume removal succeeds cleanly without issuing volume delete or
+           spawning a helper against a nonexistent volume. *)
+        (match remove_volumes () with
+         | Ok () -> ()
+         | Error detail -> Alcotest.failf "absent volumes must succeed cleanly, got: %s" detail);
+        let calls = In_channel.with_open_bin calls_path In_channel.input_all in
+        Alcotest.(check bool) "no volume delete was issued when volumes are absent" true
+          (not (List.exists (fun call -> String.starts_with ~prefix:"volume delete" call)
+                 (String.split_on_char '\n' calls)));
+        (* When a legacy shared volume IS present in volume list, the claims
+           release runs one helper container against the shared volume. This
+           fake runtime answers [run] with exit 99, so the helper fails and the
+           release must keep the volumes and name the helper. *)
+        Out_channel.with_open_bin cli (fun channel ->
+          Printf.fprintf channel {|#!/bin/sh
+printf '%%s\n' "$*" >> %s
+case "$1" in
+  stop|delete) exit 0 ;;
+  inspect) exit 1 ;;
+  list) printf '[]\n' ;;
+  volume)
+    if [ "$2" = list ]; then
+      printf '[{"id":"masc-keeper-work-%s"}]\n'
+    fi
+    exit 0 ;;
+  *) exit 99 ;;
+esac
+|} (Filename.quote calls_path) keeper_name);
+        Unix.chmod cli 0o700;
+        Out_channel.with_open_bin calls_path (fun _ -> ());
+        (match remove_volumes () with
+         | Ok () -> Alcotest.fail "a legacy volume whose claims could not be read was reported removed"
+         | Error detail -> Alcotest.(check bool) "the failed claims helper is named" true
+             (Astring.String.is_infix ~affix:"microvm_volume_claim_helper_failed" detail));
+        let calls = In_channel.with_open_bin calls_path In_channel.input_all in
+        Alcotest.(check bool) "no volume delete was issued for an unverified release" true
+          (not (List.exists (fun call -> String.starts_with ~prefix:"volume delete" call)
+                 (String.split_on_char '\n' calls))))
 ;;
 
 (* A caller that forgets the runtime gets a refusal, not a guess. Shutdown

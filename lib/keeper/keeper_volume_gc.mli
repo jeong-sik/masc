@@ -15,12 +15,21 @@ type volume_role =
   | Work_role
   | Build_role
 
+(** Whether a listed volume carries a 1:1 workspace hash in its name or uses
+    the legacy shared keeper-only spelling. *)
+type volume_ownership =
+  | Legacy_shared
+  | Workspace_scoped of string
+
 (** One listed name. A name is this module's only when the remainder after
-    its prefix regenerates it through {!Keeper_sandbox_microvm.work_volume_name}
-    or {!build_volume_name}; anything else is foreign and never judged. *)
+    its prefix regenerates it through {!Keeper_sandbox_microvm.work_volume_name},
+    {!build_volume_name}, {!scoped_work_volume_name_with_hash}, or
+    {!scoped_build_volume_name_with_hash}; anything else is foreign and never
+    judged. *)
 type listed_volume =
   | Masc_keeper_volume of
       { role : volume_role
+      ; ownership : volume_ownership
       ; volume_name : string
       ; keeper_name : string
       }
@@ -36,6 +45,8 @@ type keep_reason =
         (** A live or stopped guest, or a volume helper, still names this keeper. *)
   | Claimed_by_workspaces of string list
         (** The work volume's claims marker still names these base paths. *)
+  | Owned_by_other_workspace of string
+        (** The workspace-scoped volume carries another workspace's hash. *)
   | Registered_in_this_workspace
         (** This workspace still declares the keeper in its config. *)
   | Unverified of string
@@ -82,10 +93,28 @@ val apple_keeper_volume_gc :
   -> registered_keeper:(string -> bool)
   -> claims_image:string option
         (** The image the claims read helper runs on. [None] skips every
-            marker read and keeps the unowned-and-unregistered keepers as
-            [Unverified]: without a marker read there is no claim evidence
-            either way. *)
+            marker read and keeps unowned legacy keepers as [Unverified]:
+            without a marker read there is no claim evidence for shared legacy
+            volumes. *)
   -> request:request
+  -> (report, string) result
+
+val apple_keeper_volume_gc_for_workspace :
+  workspace_hash:string
+  -> ?revalidate:(unit -> (unit, string) result)
+        (** Optional declaration-roster revalidation run immediately before and
+            after delete-time container/volume checks so a roster change or
+            unreadable declaration aborts reclamation fail-closed. *)
+  -> run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> timeout_sec:float
+  -> registered_keeper:(string -> bool)
+  -> claims_image:string option
+        (** Same as {!apple_keeper_volume_gc}, while additionally identifying
+            workspace-scoped volumes owned by [workspace_hash] so retired work
+            and build volumes belonging exclusively to this workspace can be
+            reclaimed safely without touching volumes owned by other workspaces. *)
+  -> request:request
+  -> unit
   -> (report, string) result
 (** List the Apple volumes, group them by keeper, and judge each keeper:
     a container still referencing it keeps it; so do remaining claimants on

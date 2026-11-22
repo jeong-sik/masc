@@ -285,6 +285,74 @@ let test_private_jsonl_stage_reclaims_stranded_and_skips_active () =
   Alcotest.(check int) "released stage reclaimed on next sweep" 1 second.preserved;
   Alcotest.(check bool) "released stage moved" false (Sys.file_exists active_stage)
 
+let test_failing_sync_parent_does_not_double_close_reused_fd () =
+  with_temp_base @@ fun base_path ->
+  let target = Filename.concat base_path "published.json" in
+  let sentinel = Filename.concat base_path "sentinel.txt" in
+  write_file ~path:sentinel ~content:"keep-open";
+  let opened_in_sync = ref None in
+  let outcome =
+    Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+      ~sync_file:(fun _ -> ())
+      ~sync_parent:(fun _ ->
+        (* Opening a fresh FD immediately after [close_lock_fd] reclaims the
+           just-closed numeric FD slot on POSIX. A double [Unix.close lock_fd]
+           in the exception handler would silently close [fd]. *)
+        let fd = Unix.openfile sentinel [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+        opened_in_sync := Some fd;
+        raise (Unix.Unix_error (Unix.EIO, "fsync", "parent")))
+      target
+      "{\"ok\":true}\n"
+  in
+  (match outcome with
+   | Ok () -> Alcotest.fail "expected After_rename sync_parent failure"
+   | Error failure ->
+     Alcotest.(check bool) "failure stage is After_rename" true
+       (failure.stage = Fs_compat.After_rename));
+  match !opened_in_sync with
+  | None -> Alcotest.fail "sync_parent was not called"
+  | Some fd ->
+    Fun.protect
+      ~finally:(fun () -> Unix.close fd)
+      (fun () ->
+         let st = Unix.fstat fd in
+         Alcotest.(check bool) "reused fd stayed open after failing sync_parent" true
+           (st.Unix.st_kind = Unix.S_REG && st.Unix.st_size = String.length "keep-open"))
+
+let test_missing_recovery_grand_parent_reports_enoent_not_identity_changed () =
+  with_temp_base @@ fun base_path ->
+  let orphan = Filename.concat base_path ".atomic_missing_grand.tmp" in
+  write_file ~path:orphan ~content:"evidence";
+  let missing_grand = Filename.concat base_path "missing-grand" in
+  let recovery_parent = Filename.concat missing_grand "recovery-parent" in
+  let report =
+    Fs_compat.cleanup_atomic_orphans
+      ~recovery_parent
+      ~ownership_root:base_path
+      ~base_path
+      ()
+  in
+  Alcotest.(check int) "orphan not preserved when grand_parent missing" 0 report.preserved;
+  Alcotest.(check bool) "source orphan retained" true (Sys.file_exists orphan);
+  let has_enoent =
+    List.exists
+      (fun (f : Fs_compat.atomic_orphan_cleanup_failure) ->
+         f.operation = Fs_compat.Create_recovery_directory
+         && String.equal f.path missing_grand
+         &&
+         match f.cause with
+         | Fs_compat.Unix_failure (Unix.ENOENT, _, _) -> true
+         | Fs_compat.Unix_failure _
+         | Fs_compat.Sys_failure _
+         | Fs_compat.Unexpected_file_kind _
+         | Fs_compat.Outside_ownership_root _
+         | Fs_compat.Identity_changed
+         | Fs_compat.Other_failure _ -> false)
+      report.failures
+  in
+  Alcotest.(check bool) "missing grand_parent reports Unix ENOENT (not Identity_changed)" true
+    has_enoent
+
 let () =
   Alcotest.run "fs_atomic_orphan_sweep_10130"
     [
@@ -315,5 +383,9 @@ let () =
             test_recovery_creation_failure_is_reported;
           Alcotest.test_case "private_jsonl stage stranded vs active" `Quick
             test_private_jsonl_stage_reclaims_stranded_and_skips_active;
+          Alcotest.test_case "failing sync_parent never double-closes reused fd" `Quick
+            test_failing_sync_parent_does_not_double_close_reused_fd;
+          Alcotest.test_case "missing recovery grand_parent reports ENOENT" `Quick
+            test_missing_recovery_grand_parent_reports_enoent_not_identity_changed;
         ] );
     ]

@@ -51,7 +51,7 @@ let deleted_volume_names sent =
 let test_volume_names_parse_back_to_their_keeper () =
   let expect_masc name ~role ~keeper_name =
     match Gc.masc_keeper_volume_of_name name with
-    | Gc.Masc_keeper_volume { role = actual_role; volume_name; keeper_name = actual } ->
+    | Gc.Masc_keeper_volume { ownership = _; role = actual_role; volume_name; keeper_name = actual } ->
       Alcotest.(check string) "the volume name round-trips" name volume_name;
       Alcotest.(check string) "the keeper name is the remainder" keeper_name actual;
       Alcotest.(check bool) "the role matches"
@@ -64,6 +64,22 @@ let test_volume_names_parse_back_to_their_keeper () =
   in
   expect_masc "masc-keeper-work-polisher" ~role:Gc.Work_role ~keeper_name:"polisher";
   expect_masc "masc-keeper-build-edgar.a.poe" ~role:Gc.Build_role ~keeper_name:"edgar.a.poe";
+  (match Gc.masc_keeper_volume_of_name "masc-keeper-ws-abcd1234-work-lane-smith" with
+   | Gc.Masc_keeper_volume
+       { ownership = Gc.Workspace_scoped "abcd1234"
+       ; role = Gc.Work_role
+       ; volume_name = "masc-keeper-ws-abcd1234-work-lane-smith"
+       ; keeper_name = "lane-smith"
+       } -> ()
+   | _ -> Alcotest.fail "workspace-scoped work volume must parse ownership and hyphenated keeper name");
+  (match Gc.masc_keeper_volume_of_name "masc-keeper-ws-deadbeef-build-edgar.a.poe" with
+   | Gc.Masc_keeper_volume
+       { ownership = Gc.Workspace_scoped "deadbeef"
+       ; role = Gc.Build_role
+       ; volume_name = "masc-keeper-ws-deadbeef-build-edgar.a.poe"
+       ; keeper_name = "edgar.a.poe"
+       } -> ()
+   | _ -> Alcotest.fail "workspace-scoped build volume must parse ownership and keeper name");
   List.iter
     (fun name ->
        match Gc.masc_keeper_volume_of_name name with
@@ -74,7 +90,10 @@ let test_volume_names_parse_back_to_their_keeper () =
     [ "unrelated-volume"
     ; "masc-keeper-work-" (* no keeper name after the prefix *)
     ; "masc-keeper-work-has/slash" (* not a valid volume segment *)
-    ; "masc-keeper-work-../escape" ]
+    ; "masc-keeper-work-../escape"
+    ; "masc-keeper-ws-ZZZZZZZZ-work-polisher" (* uppercase/non-hex workspace hash *)
+    ; "masc-keeper-ws-abc-work-polisher" (* short workspace hash *)
+    ; "masc-keeper-ws-abcd1234-work-" (* empty keeper name *) ]
 ;;
 
 (* The CLI lists volume objects, not the names-only fixture inputs below. *)
@@ -753,12 +772,239 @@ let test_the_periodic_report_reads_back_what_the_server_writes () =
   refused "a pass without its time" (`Assoc [ "outcome", `String "failed"; "reason", `String "gone" ])
 ;;
 
+let test_workspace_scoped_volumes_reclaim_owned_retired_and_protect_other_workspaces () =
+  let my_ws = "11112222" in
+  let other_ws = "aaaabbbb" in
+  let initial =
+    [ "masc-keeper-ws-" ^ my_ws ^ "-work-retired"
+    ; "masc-keeper-ws-" ^ my_ws ^ "-build-retired"
+    ; "masc-keeper-ws-" ^ other_ws ^ "-work-foreign"
+    ; "masc-keeper-ws-" ^ other_ws ^ "-build-foreign"
+    ; "masc-keeper-ws-" ^ my_ws ^ "-work-registered"
+    ; "masc-keeper-ws-" ^ my_ws ^ "-work-live"
+    ; "masc-keeper-ws-" ^ my_ws ^ "-work-crossws"
+    ]
+  in
+  let remaining = ref initial in
+  let sent = ref [] in
+  let containers =
+    Yojson.Safe.to_string
+      (`List
+         [ `Assoc
+             [ "id", `String ("masc-keeper-vm-live-net-none-" ^ my_ws)
+             ; ( "configuration"
+               , `Assoc
+                   [ ( "labels"
+                     , `Assoc
+                         [ "masc.mcp.component", `String "keeper-sandbox"
+                         ; "masc.mcp.base_path_hash", `String (my_ws ^ "000000000000000000000000")
+                         ; "masc.mcp.kind", `String "persistent"
+                         ; "masc.mcp.keeper", `String "live"
+                         ] )
+                   ] )
+             ]
+         ; `Assoc
+             [ "id", `String ("masc-keeper-vm-crossws-net-none-" ^ other_ws)
+             ; ( "configuration"
+               , `Assoc
+                   [ ( "labels"
+                     , `Assoc
+                         [ "masc.mcp.component", `String "keeper-sandbox"
+                         ; "masc.mcp.base_path_hash", `String (other_ws ^ "000000000000000000000000")
+                         ; "masc.mcp.kind", `String "persistent"
+                         ; "masc.mcp.keeper", `String "crossws"
+                         ] )
+                   ] )
+             ]
+         ])
+  in
+  let run ~timeout_sec:_ argv =
+    sent := argv :: !sent;
+    if List.exists (String.equal "--all") argv
+    then Unix.WEXITED 0, containers, ""
+    else if adjacent ~flag:"volume" ~value:"list" argv
+    then Unix.WEXITED 0, volume_listing !remaining, ""
+    else if adjacent ~flag:"volume" ~value:"delete" argv
+    then (
+      let name = List.nth argv (List.length argv - 1) in
+      remaining := List.filter (fun n -> not (String.equal n name)) !remaining;
+      Unix.WEXITED 0, "", "")
+    else Alcotest.failf "unexpected command (no claims helper needed for scoped volumes): %s" (String.concat " " argv)
+  in
+  let report =
+    ok_exn
+      (Gc.apple_keeper_volume_gc_for_workspace
+         ~workspace_hash:my_ws
+         ~run
+         ~timeout_sec:1.0
+         ~registered_keeper:(String.equal "registered")
+         ~claims_image:None
+         ~request:(Gc.Reclaim_named [ "retired"; "foreign"; "registered"; "live"; "crossws" ])
+         ())
+  in
+  let outcome_of keeper_name =
+    match
+      List.find_opt
+        (fun (v : Gc.keeper_verdict) -> String.equal v.Gc.keeper_name keeper_name)
+        report.Gc.keepers
+    with
+    | Some { Gc.outcome; _ } -> outcome
+    | None -> Alcotest.failf "keeper %s missing from report" keeper_name
+  in
+  (match outcome_of "retired" with
+   | Gc.Reclaimed -> ()
+   | other -> Alcotest.failf "owned retired scoped volumes must reclaim: %s" (Gc.keeper_outcome_to_string other));
+  (match outcome_of "crossws" with
+   | Gc.Reclaimed -> ()
+   | other -> Alcotest.failf "container in another workspace must not block this workspace's scoped volume: %s" (Gc.keeper_outcome_to_string other));
+  (match outcome_of "foreign" with
+   | Gc.Kept (Gc.Owned_by_other_workspace h) ->
+     Alcotest.(check string) "other workspace hash recorded" other_ws h
+   | other -> Alcotest.failf "other workspace volume must be kept: %s" (Gc.keeper_outcome_to_string other));
+  (match outcome_of "registered" with
+   | Gc.Kept Gc.Registered_in_this_workspace -> ()
+   | other -> Alcotest.failf "registered keeper volume must be kept: %s" (Gc.keeper_outcome_to_string other));
+  (match outcome_of "live" with
+   | Gc.Kept (Gc.Referenced_by_containers _) -> ()
+   | other -> Alcotest.failf "live container volume must be kept: %s" (Gc.keeper_outcome_to_string other));
+  Alcotest.(check (list string))
+    "only retired + crossws volumes in my_ws were deleted"
+    [ "masc-keeper-ws-" ^ my_ws ^ "-build-retired"
+    ; "masc-keeper-ws-" ^ my_ws ^ "-work-crossws"
+    ; "masc-keeper-ws-" ^ my_ws ^ "-work-retired"
+    ]
+    (List.sort String.compare (deleted_volume_names (List.rev !sent)))
+;;
+
+let test_scoped_gc_preserves_on_revalidation_failure_and_mid_gc_reregistration () =
+  let my_ws = "11112222" in
+  let scoped_work = "masc-keeper-ws-" ^ my_ws ^ "-work-target" in
+  let scoped_build = "masc-keeper-ws-" ^ my_ws ^ "-build-target" in
+  let make_run () =
+    let sent = ref [] in
+    let run ~timeout_sec:_ argv =
+      sent := argv :: !sent;
+      if List.exists (String.equal "--all") argv
+      then Unix.WEXITED 0, "[]", ""
+      else if adjacent ~flag:"volume" ~value:"list" argv
+      then Unix.WEXITED 0, volume_listing [ scoped_work; scoped_build ], ""
+      else Alcotest.failf "must not delete when confirmation fails: %s" (String.concat " " argv)
+    in
+    run, sent
+  in
+  (* Case 1: declaration roster revalidation fails right before deletion. *)
+  let run1, sent1 = make_run () in
+  let report1 =
+    ok_exn
+      (Gc.apple_keeper_volume_gc_for_workspace
+         ~workspace_hash:my_ws
+         ~revalidate:(fun () -> Error "roster changed mid-gc")
+         ~run:run1
+         ~timeout_sec:1.0
+         ~registered_keeper:(fun _ -> false)
+         ~claims_image:None
+         ~request:(Gc.Reclaim_named [ "target" ])
+         ())
+  in
+  (match report1.Gc.keepers with
+   | [ { Gc.outcome = Gc.Kept (Gc.Unverified detail); _ } ] ->
+     Alcotest.(check bool) "names roster change" true
+       (Astring.String.is_infix ~affix:"roster changed mid-gc" detail)
+   | _ -> Alcotest.fail "expected Kept (Unverified) on revalidation failure");
+  Alcotest.(check (list string)) "no volumes deleted on revalidation failure" []
+    (deleted_volume_names (List.rev !sent1));
+  (* Case 2: keeper becomes registered between judge_keeper and delete-time confirmation. *)
+  let run2, sent2 = make_run () in
+  let checks = ref 0 in
+  let report2 =
+    ok_exn
+      (Gc.apple_keeper_volume_gc_for_workspace
+         ~workspace_hash:my_ws
+         ~revalidate:(fun () -> Ok ())
+         ~run:run2
+         ~timeout_sec:1.0
+         ~registered_keeper:(fun _ ->
+           incr checks;
+           !checks > 1)
+         ~claims_image:None
+         ~request:(Gc.Reclaim_named [ "target" ])
+         ())
+  in
+  (match report2.Gc.keepers with
+   | [ { Gc.outcome = Gc.Kept (Gc.Unverified detail); _ } ] ->
+     Alcotest.(check bool) "names mid-gc registration" true
+       (Astring.String.is_infix ~affix:"became registered" detail)
+   | _ -> Alcotest.fail "expected Kept (Unverified) on mid-GC re-registration");
+  Alcotest.(check (list string)) "no volumes deleted on mid-GC re-registration" []
+    (deleted_volume_names (List.rev !sent2));
+  (* Case 3: Declared guests reader protects renamed TOML stem AND fails closed on corrupt TOML. *)
+  let tmp = Filename.temp_file "masc_gc_roster_" "" in
+  Sys.remove tmp;
+  Unix.mkdir tmp 0o700;
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree tmp)
+    (fun () ->
+       let keepers_dir = Filename.concat tmp ".masc/config/keepers" in
+       Fs_compat.mkdir_p keepers_dir;
+       Fs_compat.save_file
+         (Filename.concat keepers_dir "alias-file.toml")
+         "[keeper]\nname = \"actual-keeper\"\n";
+       (match Masc.Keeper_microvm_declared_guests.read ~base_path:tmp with
+        | Error err -> Alcotest.fail (Masc.Keeper_microvm_declared_guests.unavailable_message err)
+        | Ok decls ->
+          (match Masc.Keeper_microvm_declared_guests.protected_keeper_names decls with
+           | None -> Alcotest.fail "valid roster should produce protected names"
+           | Some names ->
+             Alcotest.(check bool) "internal keeper name is protected despite different filename"
+               true (List.mem "actual-keeper" names)));
+       Fs_compat.save_file
+         (Filename.concat keepers_dir "corrupt.toml")
+         "[[[ not valid toml";
+       (match Masc.Keeper_microvm_declared_guests.read ~base_path:tmp with
+        | Error _ -> ()
+        | Ok decls ->
+          Alcotest.(check (option (list string)))
+            "corrupt TOML forces fail-closed None"
+            None
+            (Masc.Keeper_microvm_declared_guests.protected_keeper_names decls)))
+;;
+
+let test_scoped_gc_rejects_invalid_workspace_hash () =
+  let called = ref false in
+  let run ~timeout_sec:_ _argv =
+    called := true;
+    Unix.WEXITED 0, "[]", ""
+  in
+  List.iter
+    (fun bad_hash ->
+       match
+         Gc.apple_keeper_volume_gc_for_workspace
+           ~workspace_hash:bad_hash
+           ~run
+           ~timeout_sec:5.0
+           ~registered_keeper:(fun _ -> false)
+           ~claims_image:None
+           ~request:Gc.Report_only
+           ()
+       with
+       | Ok _ -> Alcotest.failf "expected invalid workspace_hash %S to fail" bad_hash
+       | Error _ -> ())
+    [ ""; "ABCD1234"; "1234567"; "123456789"; "zzzz1234" ];
+  Alcotest.(check bool) "run never called for invalid workspace_hash" false !called
+;;
+
 let () =
   Alcotest.run
     "keeper_volume_gc"
     [ ( "reclamation"
       , [ Alcotest.test_case "volume names parse back to their keeper" `Quick
             test_volume_names_parse_back_to_their_keeper
+        ; Alcotest.test_case "workspace-scoped volumes reclaim owned retired and protect other workspaces" `Quick
+            test_workspace_scoped_volumes_reclaim_owned_retired_and_protect_other_workspaces
+        ; Alcotest.test_case "scoped GC preserves volumes on revalidation failure, re-registration, or corrupt roster" `Quick
+            test_scoped_gc_preserves_on_revalidation_failure_and_mid_gc_reregistration
+        ; Alcotest.test_case "scoped GC rejects invalid workspace_hash before invoking CLI" `Quick
+            test_scoped_gc_rejects_invalid_workspace_hash
         ; Alcotest.test_case "the decision table keeps every protected volume" `Quick
             test_the_decision_table_keeps_every_protected_volume
         ; Alcotest.test_case "a report without execute touches nothing" `Quick

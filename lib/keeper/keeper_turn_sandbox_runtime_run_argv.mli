@@ -21,6 +21,21 @@ val sandbox_environment : unit -> string array
 val run_argv_with_status :
   ?timeout_sec:float -> string list -> Unix.process_status * string
 
+type policy_network_setup =
+  | Policy_network_not_needed
+  | Policy_network_ready of
+      { network_name : string
+      ; gateway : string
+      ; created : bool
+      }
+
+val ensure_policy_network_observed :
+  ?on_created:(string -> unit) ->
+  Keeper_microvm_backend.t ->
+  keeper_name:string ->
+  Keeper_types_profile_sandbox.network_mode ->
+  (policy_network_setup, string) result
+
 val ensure_policy_network :
   Keeper_microvm_backend.t ->
   keeper_name:string ->

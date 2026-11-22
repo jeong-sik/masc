@@ -10,7 +10,7 @@ let no_reference = excluded M.Writes_no_reference
 let finder_metadata = excluded M.Finder_metadata M.finder_metadata_name
 
 let unpublished_writes =
-  M.Names { matches = Fs_compat.is_atomic_orphan_name; reason = M.Unpublished_write }
+  M.Names { matches = Fs_compat.is_unpublished_write_name; reason = M.Unpublished_write }
 ;;
 
 (* Every dated store but schedule signals is one directory below .masc. *)

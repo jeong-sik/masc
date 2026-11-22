@@ -246,3 +246,21 @@ val private_jsonl_requested_lock_path : string -> string
 val private_jsonl_cursor_of_stats :
   Unix.stats ->
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
+type private_jsonl_stale_lock_cleanup =
+  | Private_jsonl_stale_lock_removed
+  | Private_jsonl_stale_lock_kept_target_present
+  | Private_jsonl_stale_lock_kept_held
+  | Private_jsonl_stale_lock_already_absent
+  | Private_jsonl_stale_lock_cleanup_failed of string
+
+(** Remove a private JSONL stable sibling lock ([<data_path>.lock]) only when
+    [target_absent ()] holds, the in-process canonical [data_path] mutex is
+    uncontended (preventing same-process POSIX [lockf] release across active
+    transactions), a non-blocking [F_TLOCK] on the verified unique regular file
+    proves no other process holds it, and [target_absent ()] + inode identity
+    still hold immediately before [Unix.unlink]. *)
+val unlink_private_jsonl_stable_lock_if_unheld :
+  data_path:string ->
+  target_absent:(unit -> bool) ->
+  private_jsonl_stale_lock_cleanup

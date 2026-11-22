@@ -25,6 +25,11 @@ val revalidate : t -> (unit, unavailable) result
     before each actual deletion. This detects stale observations; it does not
     claim atomic exclusion of an external configuration writer. *)
 
+val protected_keeper_names : t -> string list option
+(** Every keeper name declared in this workspace (plus any unresolved stems or
+    names), or [None] when unreadable/unparseable files left the roster
+    incomplete and callers must preserve all candidates. *)
+
 type preservation =
   | Roster_unavailable
   | Other_workspace

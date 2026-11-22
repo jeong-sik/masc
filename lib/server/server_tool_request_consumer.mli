@@ -25,5 +25,25 @@ val scope : t -> string
 (** The scope the consumer's own module retains its originals under. *)
 
 val of_scope : string -> t option
-(** The consumer whose originals are stored under the scope, or [None] when no
-    consumer of this build keeps originals there. *)
+(** The active consumer whose originals are stored under the scope, or [None]
+    when no active consumer of this build keeps originals there. *)
+
+(** Retired historical scopes whose live records may remain on disk from prior
+    releases. Recognizing them explicitly prevents boot-time settled-archive
+    sweeps and deploy preflight from aborting on retired records while still
+    refusing genuinely unknown scopes fail-closed. *)
+type retired_scope =
+  | Workspace_curator
+  | Keeper_librarian_parts of { scope_hash : string }
+  | Keeper_librarian_partitions of { scope_hash : string }
+  | Keeper_librarian_admission_gate of { scope_hash : string }
+  | Keeper_librarian_admission_closure of { scope_hash : string }
+
+type scope_classification =
+  | Active of t
+  | Retired of retired_scope
+
+val classify_scope : string -> scope_classification option
+(** Classify [scope] as either an active consumer of this build or an
+    explicitly retired historical scope. Returns [None] for any unknown or
+    malformed scope. *)

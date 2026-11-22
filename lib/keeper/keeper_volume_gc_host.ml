@@ -54,13 +54,38 @@ let run_cli ~timeout_sec argv =
 ;;
 
 let run Apple_container_answered ~base_path ~claims_image ~timeout_sec ~request =
-  let registered_keeper name =
-    Option.is_some (Config_dir_resolver.keeper_toml_path_opt_for_base_path ~base_path name)
+  let module Declarations = Keeper_microvm_declared_guests in
+  let execute () =
+    match Declarations.read ~base_path with
+    | Error unavailable ->
+      Error
+        (Printf.sprintf
+           "cannot read keeper declarations for volume GC: %s"
+           (Declarations.unavailable_message unavailable))
+    | Ok declarations ->
+      (match Declarations.protected_keeper_names declarations with
+       | None ->
+         Error
+           "keeper declaration roster has unreadable declarations; preserving volumes"
+       | Some protected_names ->
+         let registered_keeper name = List.exists (String.equal name) protected_names in
+         let revalidate () =
+           Declarations.revalidate declarations
+           |> Result.map_error Declarations.unavailable_message
+         in
+         let workspace_hash = Keeper_sandbox_microvm.base_path_volume_hash ~base_path in
+         Keeper_volume_gc.apple_keeper_volume_gc_for_workspace
+           ~workspace_hash
+           ~revalidate
+           ~run:run_cli
+           ~timeout_sec
+           ~registered_keeper
+           ~claims_image
+           ~request
+           ())
   in
-  Keeper_volume_gc.apple_keeper_volume_gc
-    ~run:run_cli
-    ~timeout_sec
-    ~registered_keeper
-    ~claims_image
-    ~request
+  match request with
+  | Keeper_volume_gc.Report_only -> execute ()
+  | Keeper_volume_gc.Reclaim_named _ ->
+    Keeper_turn_sandbox_runtime_registry.with_microvm_inventory_lock execute
 ;;

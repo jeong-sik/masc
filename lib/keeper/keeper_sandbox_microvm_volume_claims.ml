@@ -104,7 +104,7 @@ let apple_claims_helper_absent ~run ~timeout_sec ~keeper_name =
    a live guest mounting it, or a helper mid-operation -- so a release
    refuses rather than race it. Unlabelled foreign rows prove nothing and
    are not treated as owners. *)
-let apple_keeper_owner_containers ~run ~timeout_sec ~keeper_name =
+let apple_keeper_owner_containers_with ~matches_labels ~run ~timeout_sec ~keeper_name =
   match apple_claims_inventory ~run ~timeout_sec with
   | Error _ as error -> error
   | Ok inventory ->
@@ -113,7 +113,7 @@ let apple_keeper_owner_containers ~run ~timeout_sec ~keeper_name =
       List.filter_map
         (fun (row : Inventory.row) ->
            match row.scoping_labels with
-           | Some labels when String.equal labels.keeper keeper_name -> Some row.name
+           | Some labels when matches_labels labels -> Some row.name
            | Some _ | None -> None)
         (Inventory.rows inventory)
     in
@@ -129,6 +129,21 @@ let apple_keeper_owner_containers ~run ~timeout_sec ~keeper_name =
         ]
     in
     Ok (guests @ helpers)
+;;
+
+let apple_keeper_owner_containers ~run ~timeout_sec ~keeper_name =
+  apple_keeper_owner_containers_with
+    ~matches_labels:(fun (labels : Keeper_microvm_inventory_json.scoping_labels) ->
+      String.equal labels.keeper keeper_name)
+    ~run ~timeout_sec ~keeper_name
+;;
+
+let apple_keeper_workspace_owner_containers ~run ~timeout_sec ~workspace_hash ~keeper_name =
+  apple_keeper_owner_containers_with
+    ~matches_labels:(fun (labels : Keeper_microvm_inventory_json.scoping_labels) ->
+      String.equal labels.keeper keeper_name
+      && String.starts_with ~prefix:workspace_hash labels.base_path_hash)
+    ~run ~timeout_sec ~keeper_name
 ;;
 
 (* Record one workspace's claim, idempotently. Fresh Apple provisioning stops

@@ -284,8 +284,36 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
       ~network_label:(Keeper_types_profile_sandbox.network_mode_to_string t.network_mode) in
   let identity_host_dir = Store.host_path ~base_path:t.config.base_path
       ~keeper_name:t.meta.name ~backend ~network_mode:t.network_mode in
-  let* plan = requested_apple_plan t ~image ~guest_size ~identity_host_dir
-      ~environment:identity_environment ~config_mount ~stable_labels in
+  (* Match an already-running guest's work/build volume naming from its
+     observed mounts without issuing extra volume CLI probes before adoption or
+     pre-boot shim/ownership checks. *)
+  let adoption_work_volume_name, adoption_build_volume_name =
+    match observation with
+    | Apple_running (Plan.Facts facts) ->
+      (match
+         Keeper_sandbox_microvm.scoped_work_volume_name
+           ~base_path:t.config.base_path ~keeper_name:t.meta.name,
+         Keeper_sandbox_microvm.scoped_build_volume_name
+           ~base_path:t.config.base_path ~keeper_name:t.meta.name
+       with
+       | Ok scoped_work, Ok scoped_build
+         when List.exists
+                (function
+                  | Plan.Named_volume { name; destination } ->
+                    String.equal destination Keeper_sandbox_microvm.work_volume_guest_root
+                    && String.equal name scoped_work
+                  | Plan.Tmpfs _ | Plan.Host_dir _ -> false)
+                facts.mounts ->
+         Some scoped_work, Some scoped_build
+       | Ok _, Ok _ | Error _, _ | _, Error _ -> None, None)
+    | Apple_absent | Apple_stopped _ | Apple_running (Plan.Unreadable _) -> None, None
+  in
+  let* plan =
+    requested_apple_plan ?work_volume_name:adoption_work_volume_name
+      ?build_volume_name:adoption_build_volume_name t
+      ~image ~guest_size ~identity_host_dir
+      ~environment:identity_environment ~config_mount ~stable_labels
+  in
   let* () = Plan.validate plan |> Result.map_error (fun errors -> Invalid_boot_plan errors) in
   let identity_reading = match stored with
     | Ok (Some _) -> Plan.Identity_readable
@@ -393,10 +421,63 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
     else
       let* () = Keeper_sandbox_microvm.image_present_for backend ~name:t.meta.sandbox_image
           ~image ~timeout_sec |> Result.map_error (fun detail -> Guest_provisions_unavailable detail) in
-      let* _provisions = microvm_guest_provisions t ~backend ~shim ~timeout_sec
+      let* apple_volumes =
+        resolve_apple_volume_names
+          ~base_path:t.config.base_path ~keeper_name:t.meta.name ~timeout_sec
+        |> Result.map_error (fun detail -> Guest_provisions_unavailable detail)
+      in
+      let work_volume_name, build_volume_name =
+        match apple_volumes with
+        | `Legacy (work, build) | `Workspace_scoped (work, build) -> work, build
+      in
+      let* plan =
+        requested_apple_plan ~work_volume_name ~build_volume_name t
+          ~image ~guest_size ~identity_host_dir
+          ~environment:identity_environment ~config_mount ~stable_labels
+      in
+      let* () = Plan.validate plan |> Result.map_error (fun errors -> Invalid_boot_plan errors) in
+      let* _provisions = microvm_guest_provisions ~apple_volumes t ~backend ~shim ~timeout_sec
         |> Result.map_error (fun detail -> Guest_provisions_unavailable detail) in
-      let* gateway = ensure_policy_network backend ~keeper_name:t.meta.name t.network_mode
-        |> Result.map_error (fun detail -> Policy_network_unavailable detail) in
+      Eio.Switch.run @@ fun boot_sw ->
+      let rollback_policy_network = ref None in
+      Eio.Switch.on_release boot_sw (fun () ->
+        match !rollback_policy_network with
+        | None -> ()
+        | Some network_name ->
+          Eio.Cancel.protect (fun () ->
+            match
+              Keeper_sandbox_microvm.policy_network_delete_argv_for backend ~network_name
+            with
+            | Error _ -> ()
+            | Ok delete_argv ->
+              (* Only roll back a newly created policy network if no container
+                 is attached to it. *)
+              (match
+                 run_argv_with_status_split ~timeout_sec
+                   (Keeper_sandbox_microvm.apple_container_list_argv ())
+               with
+               | Unix.WEXITED 0, listing, _ ->
+                 (match
+                    Keeper_sandbox_microvm.attached_policy_networks_of_apple_containers ~listing
+                  with
+                  | Ok attached when not (List.mem network_name attached) ->
+                    ignore (run_argv_with_status_split ~timeout_sec delete_argv)
+                  | Ok _ | Error _ -> ())
+               | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _ -> ())));
+      let* gateway =
+        match
+          ensure_policy_network_observed
+            ~on_created:(fun network_name -> rollback_policy_network := Some network_name)
+            backend
+            ~keeper_name:t.meta.name
+            t.network_mode
+        with
+        | Error detail -> Error (Policy_network_unavailable detail)
+        | Ok Policy_network_not_needed -> Ok None
+        | Ok (Policy_network_ready { network_name; gateway; created }) ->
+          if created then rollback_policy_network := Some network_name;
+          Ok (Some gateway)
+      in
       let policy_proxy = match gateway, bound_egress_proxy_port t with
         | Some gateway, Some port ->
           Some
@@ -428,6 +509,7 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
       let* postboot = read_apple_guest ~timeout_sec ~container_name in
       match postboot with
       | Apple_running reading ->
+        rollback_policy_network := None;
         let policy_environment = match policy_proxy with
           | None -> []
           | Some proxy -> Keeper_sandbox_microvm.apple_policy_environment proxy in

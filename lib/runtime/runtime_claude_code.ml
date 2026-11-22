@@ -3230,7 +3230,7 @@ let with_system_prompt_file prompt use = match prompt with
   | None -> use None
   | Some contents ->
     let path, output = Filename.open_temp_file ~perms:0o600 ~mode:[Open_binary]
-      "masc-claude-system-" ".txt" in
+      (Printf.sprintf "masc-claude-system-%d-" (Unix.getpid ())) ".txt" in
     Fun.protect
       ~finally:(fun () ->
         close_out_noerr output;

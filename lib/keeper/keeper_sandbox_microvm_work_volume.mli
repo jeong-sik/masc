@@ -6,11 +6,30 @@
 
 val valid_volume_segment : string -> bool
 
+val workspace_volume_hash_length : int
+(** Exact length (8) of the lowercase hexadecimal workspace volume hash prefix. *)
+
+val base_path_volume_hash : base_path:string -> string
+(** 8-character lowercase hex workspace prefix derived from
+    {!Keeper_sandbox_runtime_setup.base_path_hash}, matching the workspace
+    segment carried by container names. *)
+
+val valid_workspace_volume_hash : string -> bool
+(** [true] iff the segment is exactly 8 lowercase hexadecimal characters. *)
+
 val apple_volume_create_argv : volume_name:string -> size:string -> string list
 
 val msb_volume_create_argv : volume_name:string -> string list
 
 val work_volume_name : keeper_name:string -> (string, string) result
+
+val scoped_work_volume_name :
+  base_path:string -> keeper_name:string -> (string, string) result
+(** [masc-keeper-ws-<base_path_volume_hash>-work-<keeper_name>], binding work
+    volume ownership 1:1 to [(base_path, keeper_name)]. *)
+
+val scoped_work_volume_name_with_hash :
+  workspace_hash:string -> keeper_name:string -> (string, string) result
 
 val work_volume_mount_args : volume_name:string -> string list
 

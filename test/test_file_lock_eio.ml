@@ -316,6 +316,143 @@ let test_durable_lock_contended_wait_cooperates_until_release () =
       | Some r -> check bool "observed at least one paced retry" true (r >= 1)
       | None -> fail "durable lock attempt hook did not fire")
 
+let test_durable_lock_reopens_after_unlinked_inode () =
+  with_temp_path @@ fun path ->
+  let lock_path = path ^ ".lock" in
+  with_external_lock_holder lock_path @@ fun release_holder ->
+  let initial_ino = (Unix.lstat lock_path).Unix.st_ino in
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let waiting, signal_waiting = Eio.Promise.create () in
+  let body_ran = ref false in
+  let locked_current_inode = ref false in
+  let child_saw_contended = ref false in
+  Eio.Fiber.both
+    (fun () ->
+       Eio.Promise.resolve signal_waiting ();
+       match
+         File_lock_eio.with_durable_lock ~lock_path (fun () ->
+           body_ran := true;
+           let cur_stat = Unix.lstat lock_path in
+           locked_current_inode := cur_stat.Unix.st_ino <> initial_ino;
+           (* Confirm from a separate OS process that the newly opened
+              directory entry at [lock_path] actually holds the POSIX lock. *)
+           let pid =
+             Unix.create_process
+               "python3"
+               [| "python3"
+                ; "-c"
+                ; "import fcntl, os, sys; fd = os.open(sys.argv[1], os.O_WRONLY); fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)"
+                ; lock_path
+               |]
+               Unix.stdin
+               Unix.stdout
+               Unix.stderr
+           in
+           let rec wait () =
+             match Unix.waitpid [] pid with
+             | _, status -> status
+             | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+           in
+           match wait () with
+           | Unix.WEXITED 0 -> child_saw_contended := false
+           | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+             child_saw_contended := true)
+       with
+       | Ok () -> ()
+       | Error error -> fail (File_lock_eio.durable_lock_error_to_string error))
+    (fun () ->
+       Eio.Promise.await waiting;
+       Eio.Time.sleep clock 0.025;
+       Unix.unlink lock_path;
+       release_holder ());
+  check bool "body ran after stale inode retry" true !body_ran;
+  check bool "reopened fresh inode at lock_path" true !locked_current_inode;
+  check bool "separate process saw fresh inode locked" true !child_saw_contended
+
+let test_durable_lock_rejects_symlink_without_spinning () =
+  with_temp_path @@ fun path ->
+  let target = path ^ ".target" in
+  let lock_path = path ^ ".lock" in
+  let fd = Unix.openfile target [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_CLOEXEC ] 0o600 in
+  Unix.close fd;
+  Unix.symlink target lock_path;
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.unlink lock_path with Unix.Unix_error _ -> ());
+      (try Unix.unlink target with Unix.Unix_error _ -> ()))
+    (fun () ->
+       (match File_lock_eio.with_durable_lock ~lock_path (fun () -> ()) with
+        | Ok () -> fail "symlink lock_path must fail closed"
+        | Error err ->
+          check bool "symlink returns ELOOP immediately" true (err.cause.error = Unix.ELOOP));
+       match File_lock_eio.try_with_durable_lock_observed ~lock_path (fun () -> ()) with
+       | File_lock_eio.Lock_attempted (File_lock_eio.Lock_not_acquired err) ->
+         check bool "try_with_durable_lock returns ELOOP immediately" true
+           (err.cause.error = Unix.ELOOP)
+       | File_lock_eio.Lock_held_elsewhere
+       | File_lock_eio.Lock_attempted (File_lock_eio.Body_completed _) ->
+         fail "try_with_durable_lock on symlink must fail with ELOOP")
+
+let test_unlink_if_unheld_preserves_bsd_flock_liveness_holder () =
+  with_temp_path @@ fun path ->
+  let lock_path = path ^ ".lock" in
+  let fd = Unix.openfile lock_path [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_CLOEXEC ] 0o600 in
+  Unix.close fd;
+  Fun.protect
+    ~finally:(fun () ->
+      try Unix.unlink lock_path with Unix.Unix_error _ -> ())
+    (fun () ->
+       (match
+          File_lock_eio.try_with_liveness_lock_observed ~lock_path (fun () ->
+            match
+              File_lock_eio.unlink_if_unheld
+                ~lock_path
+                ~target_absent:(fun () -> true)
+            with
+            | File_lock_eio.Stale_lock_kept_held ->
+              check bool "exclusive liveness lock file preserved on disk" true
+                (Sys.file_exists lock_path)
+            | File_lock_eio.Stale_lock_removed
+            | File_lock_eio.Stale_lock_kept_target_present
+            | File_lock_eio.Stale_lock_already_absent
+            | File_lock_eio.Stale_lock_cleanup_failed _ ->
+              fail "unlink_if_unheld must keep file held by exclusive BSD flock")
+        with
+        | File_lock_eio.Lock_attempted (File_lock_eio.Body_completed { value = (); release_error = None }) -> ()
+        | File_lock_eio.Lock_held_elsewhere
+        | File_lock_eio.Lock_attempted _ ->
+          fail "expected exclusive liveness lock acquisition to succeed");
+       (match
+          File_lock_eio.try_with_shared_liveness_lock_observed ~lock_path (fun () ->
+            match
+              File_lock_eio.unlink_if_unheld
+                ~lock_path
+                ~target_absent:(fun () -> true)
+            with
+            | File_lock_eio.Stale_lock_kept_held ->
+              check bool "shared liveness lock file preserved on disk" true
+                (Sys.file_exists lock_path)
+            | File_lock_eio.Stale_lock_removed
+            | File_lock_eio.Stale_lock_kept_target_present
+            | File_lock_eio.Stale_lock_already_absent
+            | File_lock_eio.Stale_lock_cleanup_failed _ ->
+              fail "unlink_if_unheld must keep file held by shared BSD flock")
+        with
+        | File_lock_eio.Lock_attempted (File_lock_eio.Body_completed { value = (); release_error = None }) -> ()
+        | File_lock_eio.Lock_held_elsewhere
+        | File_lock_eio.Lock_attempted _ ->
+          fail "expected shared liveness lock acquisition to succeed");
+       match File_lock_eio.unlink_if_unheld ~lock_path ~target_absent:(fun () -> true) with
+       | File_lock_eio.Stale_lock_removed ->
+         check bool "unheld lock removed after liveness flock release" false
+           (Sys.file_exists lock_path)
+       | File_lock_eio.Stale_lock_kept_held
+       | File_lock_eio.Stale_lock_kept_target_present
+       | File_lock_eio.Stale_lock_already_absent
+       | File_lock_eio.Stale_lock_cleanup_failed _ ->
+         fail "unlink_if_unheld must remove stale lock once liveness flock is released")
+
 let () =
   run "file_lock_eio"
     [
@@ -339,5 +476,11 @@ let () =
             test_with_lock_symlink_convergence_and_cancelled_release;
           test_case "durable cross-process wait cooperates until release" `Quick
             test_durable_lock_contended_wait_cooperates_until_release;
+          test_case "durable lock reopens fresh inode when stale inode is unlinked" `Quick
+            test_durable_lock_reopens_after_unlinked_inode;
+          test_case "durable lock rejects symlink lock_path without spinning" `Quick
+            test_durable_lock_rejects_symlink_without_spinning;
+          test_case "unlink_if_unheld preserves file held by BSD flock liveness lock" `Quick
+            test_unlink_if_unheld_preserves_bsd_flock_liveness_holder;
         ] );
     ]

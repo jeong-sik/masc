@@ -328,7 +328,14 @@ val touch_of : touches -> sha256:string -> touch option
 type touch_counts =
   { current_addresses : int
   ; previous_addresses : int
+  ; current_evicted : bool
+  ; previous_evicted : bool
   }
+(** Address counts and FIFO eviction overflow flags for both touch-ledger
+    generations. When either [current_evicted] or [previous_evicted] is [true],
+    at least one touch mark was dropped due to capacity limits, so deleting
+    sweeps must fail closed and delete nothing until two clean rotations have
+    passed without overflow. *)
 
 val touch_counts : touches -> touch_counts
 

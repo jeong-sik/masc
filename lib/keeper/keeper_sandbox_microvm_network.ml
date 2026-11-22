@@ -265,6 +265,25 @@ let policy_network_create_argv_for backend ~keeper_name =
          (Backend.to_string backend))
 ;;
 
+let policy_network_delete_argv_for backend ~network_name =
+  match (backend : Backend.t) with
+  | Backend.Apple_container ->
+    if String.starts_with ~prefix:policy_network_prefix network_name
+       && String.length network_name > String.length policy_network_prefix
+    then Ok (command_argv_for backend @ [ "network"; "delete"; network_name ])
+    else
+      Error
+        (Printf.sprintf
+           "microvm_policy_network_invalid_name: refusing to delete non-policy network %S"
+           network_name)
+  | Backend.Microsandbox | Backend.Nerdctl_kata ->
+    Error
+      (Printf.sprintf
+         "microvm_policy_network_unsupported: %s has no policy lane, so it has no \
+          host-only network to delete"
+         (Backend.to_string backend))
+;;
+
 let policy_network_list_argv_for backend =
   match (backend : Backend.t) with
   | Backend.Apple_container ->
@@ -282,6 +301,39 @@ let policy_network_list_argv_for backend =
          (Backend.to_string backend))
 ;;
 
+let all_network_ids_of_listing ~listing =
+  match Yojson.Safe.from_string listing with
+  | `List entries ->
+    List.fold_left
+      (fun result entry ->
+        Result.bind result (fun ids ->
+          match entry with
+          | `Assoc fields ->
+            (match List.filter_map
+                     (fun (key, value) -> if String.equal key "id" then Some value else None)
+                     fields with
+             | [ `String id ] when String.trim id <> "" -> Ok (id :: ids)
+             | [] -> Error "container network list: row has no id"
+             | [ `String _ ] -> Error "container network list: row has a blank id"
+             | [ _ ] -> Error "container network list: row id is not a string"
+             | _ :: _ :: _ -> Error "container network list: row repeats id")
+          | _ -> Error "container network list: expected an object row"))
+      (Ok [])
+      entries
+    |> Result.map List.rev
+  | _ -> Error "container network list: expected a JSON array"
+  | exception Yojson.Json_error detail ->
+    Error ("container network list: unparseable JSON: " ^ detail)
+;;
+
+let policy_network_names_of_listing ~listing =
+  Result.map
+    (List.filter (fun id ->
+       String.starts_with ~prefix:policy_network_prefix id
+       && String.length id > String.length policy_network_prefix))
+    (all_network_ids_of_listing ~listing)
+;;
+
 (* [container network list --format json] answers an array whose entries
    carry the network's [id]. Compared as a decoded string, so nothing here
    depends on how the CLI spaces a column.
@@ -292,29 +344,81 @@ let policy_network_list_argv_for backend =
    message about creation rather than about the listing that could not be
    read. *)
 let policy_network_present ~keeper_name ~listing =
-  match Yojson.Safe.from_string listing with
-  | `List entries ->
-    let expected = policy_network_name ~keeper_name in
-    List.fold_left
-      (fun result entry ->
-        Result.bind result (fun present ->
-          match entry with
-          | `Assoc fields ->
-            (match List.filter_map
-                     (fun (key, value) -> if String.equal key "id" then Some value else None)
-                     fields with
-             | [ `String id ] when String.trim id <> "" ->
-               Ok (present || String.equal id expected)
-             | [] -> Error "container network list: row has no id"
-             | [ `String _ ] -> Error "container network list: row has a blank id"
-             | [ _ ] -> Error "container network list: row id is not a string"
-             | _ :: _ :: _ -> Error "container network list: row repeats id")
-          | _ -> Error "container network list: expected an object row"))
-      (Ok false)
-      entries
-  | _ -> Error "container network list: expected a JSON array"
-  | exception Yojson.Json_error detail ->
-    Error ("container network list: unparseable JSON: " ^ detail)
+  let expected = policy_network_name ~keeper_name in
+  Result.map (List.exists (String.equal expected)) (all_network_ids_of_listing ~listing)
+;;
+
+(* Collect policy networks attached to or referenced by any observed Apple
+   container row across all workspaces. Reads both explicit [networks] /
+   [configuration.networks] attachments and keeper scoping labels so a live
+   container's policy network is never treated as orphaned. *)
+let attached_policy_networks_of_apple_containers ~listing =
+  let open Result.Syntax in
+  let* inventory =
+    Keeper_microvm_inventory_json.of_apple_json listing
+    |> Result.map_error (fun error ->
+      "container list: " ^ Keeper_microvm_inventory_json.invalid_inventory_message error)
+  in
+  let is_policy id =
+    String.starts_with ~prefix:policy_network_prefix id
+    && String.length id > String.length policy_network_prefix
+  in
+  let extract_network_entry acc = function
+    | `String id -> Ok (if is_policy id then id :: acc else acc)
+    | `Assoc fields ->
+      let found =
+        List.filter_map
+          (fun key ->
+             match List.assoc_opt key fields with
+             | Some (`String id) when String.trim id <> "" -> Some id
+             | Some _ | None -> None)
+          [ "network"; "id"; "name" ]
+      in
+      Ok (List.fold_left (fun acc id -> if is_policy id then id :: acc else acc) acc found)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ ->
+      Error "container list: invalid network attachment entry"
+  in
+  let extract_networks_field acc fields =
+    match List.assoc_opt "networks" fields with
+    | None | Some `Null -> Ok acc
+    | Some (`List items) ->
+      List.fold_left
+        (fun acc item -> Result.bind acc (fun acc -> extract_network_entry acc item))
+        (Ok acc)
+        items
+    | Some (`Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) ->
+      Error "container list: networks field must be an array"
+  in
+  let* from_rows =
+    match Yojson.Safe.from_string listing with
+    | `List rows ->
+      List.fold_left
+        (fun acc row ->
+           let* acc = acc in
+           match row with
+           | `Assoc fields ->
+             let* acc = extract_networks_field acc fields in
+             (match List.assoc_opt "configuration" fields with
+              | Some (`Assoc config) -> extract_networks_field acc config
+              | Some _ | None -> Ok acc)
+           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+             Error "container list: expected object row")
+        (Ok [])
+        rows
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
+      Error "container list: expected a JSON array"
+    | exception Yojson.Json_error detail ->
+      Error ("container list: unparseable JSON: " ^ detail)
+  in
+  let from_labels =
+    List.filter_map
+      (fun (row : Keeper_microvm_inventory_json.row) ->
+         match row.scoping_labels with
+         | Some labels -> Some (policy_network_name ~keeper_name:labels.keeper)
+         | None -> None)
+      (Keeper_microvm_inventory_json.rows inventory)
+  in
+  Ok (List.sort_uniq String.compare (from_rows @ from_labels))
 ;;
 
 let policy_network_inspect_argv_for backend ~keeper_name =

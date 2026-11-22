@@ -155,13 +155,170 @@ let candidate_snapshot_path ~base_path =
     "candidates.json"
 ;;
 
-let add_references ~path ~line references text =
+type malformed_reference_warning =
+  | Pinned_legacy_blob_ref of
+      { path : string
+      ; line : int
+      ; detail : string
+      ; pinned_sha256 : string option
+      }
+  | Unpinnable_malformed_blob_ref of
+      { path : string
+      ; line : int
+      ; detail : string
+      }
+
+let malformed_reference_warning_to_string = function
+  | Pinned_legacy_blob_ref { path; line; detail; pinned_sha256 } ->
+    Printf.sprintf
+      "pinned legacy blob ref path=%s line=%d sha256=%s: %s"
+      path
+      line
+      (Option.value pinned_sha256 ~default:"none")
+      detail
+  | Unpinnable_malformed_blob_ref { path; line; detail } ->
+    Printf.sprintf
+      "unpinnable malformed blob ref path=%s line=%d: %s"
+      path
+      line
+      detail
+;;
+
+type untyped_legacy_blob =
+  { sha256 : string
+  ; path : string
+  ; line : int
+  }
+
+type resilient_callbacks =
+  { warn : malformed_reference_warning -> unit
+  ; record_untyped_legacy_blob : untyped_legacy_blob -> unit
+  }
+
+type structured_mode =
+  | Strict_structured
+  | Resilient_structured of resilient_callbacks
+
+let sha256_entries fields =
+  List.filter_map
+    (fun (key, value) ->
+       if String.equal key "sha256"
+       then
+         Some
+           (match value with
+            | `String sha256 when Result.is_ok (Tool_blob_store.validate_sha256 sha256) ->
+              Ok sha256
+            | _ -> Error ())
+       else None)
+    fields
+;;
+
+let defensive_artifact_ref_of_blob_fields blob_fields sha256 =
+  (* A missing, empty, invalid, or duplicate ["mime"] field cannot prove whether
+     the target blob is an artifact manifest whose child blobs must be expanded. *)
+  let mime, mime_needs_manifest_probe =
+    match List.filter (fun (key, _) -> String.equal key "mime") blob_fields with
+    | [ _, `String m ]
+      when (not (String.equal (String.trim m) "")) && Tool_output.mime_is_encodable m ->
+      m, false
+    | _ -> "application/octet-stream", true
+  in
+  let bytes =
+    match List.assoc_opt "bytes" blob_fields with
+    | Some (`Int n) when n >= 0 -> n
+    | Some _ | None -> 0
+  in
+  let preview =
+    match List.assoc_opt "preview" blob_fields with
+    | Some (`String p) -> p
+    | Some _ | None -> ""
+  in
+  match Tool_output.make_artifact_ref ~sha256 ~bytes ~preview ~mime with
+  | Ok reference -> Some (reference, mime_needs_manifest_probe)
+  | Error _ -> None
+;;
+
+let count_blob_keys fields =
+  List.fold_left (fun n (k, _) -> if String.equal k "_blob" then n + 1 else n) 0 fields
+;;
+
+let pin_malformed_blob_assoc ~callbacks ~path ~line ~detail references fields =
+  let { warn; record_untyped_legacy_blob } = callbacks in
+  let blob_entries, siblings =
+    List.partition (fun (key, _) -> String.equal key "_blob") fields
+  in
+  match blob_entries with
+  | [] ->
+    warn (Unpinnable_malformed_blob_ref { path; line; detail });
+    references, fields
+  | _ :: _ ->
+    let references, extra_fields =
+      List.fold_left
+        (fun (refs, extra) (_, value) ->
+           match value with
+           | `Assoc blob_fields ->
+             let refs =
+               match sha256_entries blob_fields with
+               | [] ->
+                 warn (Unpinnable_malformed_blob_ref { path; line; detail });
+                 refs
+               | entries ->
+                 List.fold_left
+                   (fun refs entry ->
+                      match
+                        Option.bind
+                          (Result.to_option entry)
+                          (defensive_artifact_ref_of_blob_fields blob_fields)
+                      with
+                      | Some (pinned, mime_needs_manifest_probe) ->
+                        warn
+                          (Pinned_legacy_blob_ref
+                             { path; line; detail; pinned_sha256 = Some pinned.sha256 });
+                        if mime_needs_manifest_probe
+                        then record_untyped_legacy_blob { sha256 = pinned.sha256; path; line };
+                        Live_reference_set.add (Artifact pinned) refs
+                      | None ->
+                        warn (Unpinnable_malformed_blob_ref { path; line; detail });
+                        refs)
+                   refs
+                   entries
+             in
+             refs, List.rev_append blob_fields extra
+           | non_assoc ->
+             warn (Unpinnable_malformed_blob_ref { path; line; detail });
+             refs, ("_blob_value", non_assoc) :: extra)
+        (references, [])
+        blob_entries
+    in
+    references, List.rev extra_fields @ siblings
+;;
+
+let add_references
+      ?(mode = Strict_structured)
+      ?(scan_fields_resilient = fun refs _ -> Ok refs)
+      ~path
+      ~line
+      references
+      text
+  =
   match Tool_output.decode_from_agent_core text with
   | Tool_output.Not_marker ->
     (match Tool_output.decode_structured_handle text with
      | Tool_output.Not_marker -> Ok references
      | Tool_output.Invalid_marker { detail } ->
-       Error (Malformed_structured_artifact_reference { path; line; detail })
+       (match mode with
+        | Strict_structured ->
+          Error (Malformed_structured_artifact_reference { path; line; detail })
+        | Resilient_structured callbacks ->
+          (match Yojson.Safe.from_string (String.trim text) with
+           | `Assoc fields ->
+             let references, fields_to_scan =
+               pin_malformed_blob_assoc ~callbacks ~path ~line ~detail references fields
+             in
+             scan_fields_resilient references fields_to_scan
+           | _ | exception Yojson.Json_error _ ->
+             callbacks.warn (Unpinnable_malformed_blob_ref { path; line; detail });
+             Ok references))
      | Tool_output.Decoded reference ->
        let canonical =
          Tool_output.encode_structured_handle (Tool_output.Stored reference)
@@ -169,12 +326,29 @@ let add_references ~path ~line references text =
        if String.equal text canonical
        then Ok (Live_reference_set.add (Artifact reference) references)
        else
-         Error
-           (Malformed_structured_artifact_reference
-              { path
-              ; line
-              ; detail = "structured artifact handle is not in canonical JSON form"
-              }))
+         (match mode with
+          | Strict_structured ->
+            Error
+              (Malformed_structured_artifact_reference
+                 { path
+                 ; line
+                 ; detail = "structured artifact handle is not in canonical JSON form"
+                 })
+          | Resilient_structured callbacks ->
+            let detail = "structured artifact handle is not in canonical JSON form" in
+            (match Yojson.Safe.from_string (String.trim text) with
+             | `Assoc fields ->
+               let references, fields_to_scan =
+                 pin_malformed_blob_assoc ~callbacks ~path ~line ~detail references fields
+               in
+               scan_fields_resilient
+                 (Live_reference_set.add (Artifact reference) references)
+                 fields_to_scan
+             | _ | exception Yojson.Json_error _ ->
+               callbacks.warn
+                 (Pinned_legacy_blob_ref
+                    { path; line; detail; pinned_sha256 = Some reference.sha256 });
+               Ok (Live_reference_set.add (Artifact reference) references))))
   | Tool_output.Invalid_marker { detail } ->
     Error
       (Malformed_artifact_reference
@@ -406,21 +580,69 @@ let tool_result_payload_fields ~tool_result_source json =
 (* A source token qualifies only this whole-file node. Recursive values and
    JSONL rows intentionally receive no token. *)
 let rec references_in_json
+          ?(mode = Strict_structured)
           ?(context = durable_context)
           ?tool_result_source
           ~path
           ~line
           references
-  = function
-  | `String text -> add_references ~path ~line references text
+  =
+  let scan_fields fields payload_fields references =
+    List.fold_left
+      (fun result (key, value) ->
+         match context.route, key with
+         | Route_evidence_composable_output, "schema" -> result
+         | ( Durable_value
+           | Route_evidence
+           | Route_evidence_composable_output ),
+           _ ->
+           Result.bind result (fun current ->
+             references_in_json
+               ~mode
+               ~context:(child_reference_scan_context context fields payload_fields key)
+               ~path
+               ~line
+               current
+               value))
+      (Ok references)
+      fields
+  in
+  function
+  | `String text ->
+    add_references
+      ~mode
+      ~scan_fields_resilient:(fun refs fields_to_scan -> scan_fields fields_to_scan [] refs)
+      ~path
+      ~line
+      references
+      text
   | (`Assoc fields as json) ->
-    (match Tool_output.normalized_artifact_ref_of_json json with
+    if count_blob_keys fields > 1
+    then (
+      let detail = "structured artifact reference contains duplicate _blob keys" in
+      match mode with
+      | Strict_structured ->
+        Error (Malformed_structured_artifact_reference { path; line; detail })
+      | Resilient_structured callbacks ->
+        let references, fields_to_scan =
+          pin_malformed_blob_assoc ~callbacks ~path ~line ~detail references fields
+        in
+        scan_fields fields_to_scan [] references)
+    else (
+    match Tool_output.normalized_artifact_ref_of_json json with
      | Tool_output.Decoded_normalized_artifact_ref reference ->
        Ok (Live_reference_set.add (Artifact reference) references)
      | Tool_output.Invalid_normalized_artifact_ref { detail } ->
-       Error
-         (Malformed_structured_artifact_reference
-            { path; line; detail })
+       (match mode with
+        | Strict_structured ->
+          Error
+            (Malformed_structured_artifact_reference
+               { path; line; detail })
+        | Resilient_structured callbacks ->
+          let references, fields_to_scan =
+            pin_malformed_blob_assoc ~callbacks ~path ~line ~detail references fields
+          in
+          scan_fields fields_to_scan [] references)
      | Tool_output.Not_normalized_artifact_ref ->
        (match (if context.history_media
                then Agent_core_base.History.stored_source_of_json json
@@ -428,12 +650,47 @@ let rec references_in_json
         | Agent_core_base.History.Decoded_stored_source { stored; media_type = _ } ->
           Ok (Live_reference_set.add (History_media stored) references)
         | Agent_core_base.History.Invalid_stored_source error ->
-          Error
-            (Malformed_structured_artifact_reference
-               { path
-               ; line
-               ; detail = Agent_core_base.History.decode_error_to_string error
-               })
+          let detail = Agent_core_base.History.decode_error_to_string error in
+          (match mode with
+           | Strict_structured ->
+             Error
+               (Malformed_structured_artifact_reference
+                  { path
+                  ; line
+                  ; detail
+                  })
+           | Resilient_structured { warn; _ } ->
+             let bytes =
+               match List.assoc_opt "bytes" fields with
+               | Some (`Int n) when n >= 0 -> n
+               | Some _ | None -> 0
+             in
+             let references =
+               match sha256_entries fields with
+               | [] ->
+                 warn (Unpinnable_malformed_blob_ref { path; line; detail });
+                 references
+               | entries ->
+                 List.fold_left
+                   (fun refs entry ->
+                      match entry with
+                      | Ok sha256 ->
+                        (match Agent_core_base.History.stored ~sha256 ~bytes with
+                         | Ok stored ->
+                           warn
+                             (Pinned_legacy_blob_ref
+                                { path; line; detail; pinned_sha256 = Some sha256 });
+                           Live_reference_set.add (History_media stored) refs
+                         | Error _ ->
+                           warn (Unpinnable_malformed_blob_ref { path; line; detail });
+                           refs)
+                      | Error () ->
+                        warn (Unpinnable_malformed_blob_ref { path; line; detail });
+                        refs)
+                   references
+                   entries
+             in
+             scan_fields fields [] references)
         | Agent_core_base.History.Not_stored_source ->
        let payload_fields =
          if not context.history_media then []
@@ -443,28 +700,12 @@ let rec references_in_json
               @ (match context.official with
                  | Official_blocks when official_tool_result fields -> ["structured_content"]
                  | Other_value | Official_message | Official_blocks -> []) in
-       List.fold_left
-         (fun result (key, value) ->
-            match context.route, key with
-            | Route_evidence_composable_output, "schema" -> result
-            | ( Durable_value
-              | Route_evidence
-              | Route_evidence_composable_output ),
-              _ ->
-              Result.bind result (fun current ->
-                references_in_json
-                  ~context:(child_reference_scan_context context fields payload_fields key)
-                  ~path
-                  ~line
-                  current
-                  value))
-         (Ok references)
-         fields))
+       scan_fields fields payload_fields references))
   | `List values ->
     List.fold_left
       (fun result value ->
          Result.bind result (fun current ->
-           references_in_json ~context:{context with route=Durable_value} ~path ~line current value))
+           references_in_json ~mode ~context:{context with route=Durable_value} ~path ~line current value))
       (Ok references)
       values
   | `Null
@@ -475,7 +716,7 @@ let rec references_in_json
     Ok references
 ;;
 
-let references_in_file ~ownership_root path =
+let references_in_file ~mode ~ownership_root path =
   match Fs_compat.load_owned_regular_file ~ownership_root path with
   | Error error ->
     Error
@@ -494,6 +735,7 @@ let references_in_file ~ownership_root path =
       let tool_result_source = Keeper_official_client_paths.tool_result_source
           ~base_path:ownership_root ~path in
       references_in_json
+        ~mode
         ?tool_result_source
         ~path
         ~line:1
@@ -510,6 +752,7 @@ let references_in_file ~ownership_root path =
                   if String.equal (String.trim line) "" then Ok references
                   else try
                     references_in_json
+                      ~mode
                       ~path
                       ~line:line_number
                       references
@@ -529,6 +772,7 @@ let references_in_file ~ownership_root path =
                            })
                      | Tool_output.Decoded _ | Tool_output.Invalid_marker _ ->
                       add_references
+                        ~mode
                         ~path
                         ~line:line_number
                         references
@@ -539,7 +783,7 @@ let references_in_file ~ownership_root path =
        |> snd
 ;;
 
-let references_in_payload_file ~ownership_root path =
+let references_in_payload_file ~mode ~ownership_root path =
   match Fs_compat.load_owned_regular_file ~ownership_root path with
   | Error error ->
     Error
@@ -553,7 +797,7 @@ let references_in_payload_file ~ownership_root path =
          { path; reason = "retained payload disappeared during scan" })
   | Ok (Some payload) ->
     (match Yojson.Safe.from_string payload with
-     | json -> references_in_json ~path ~line:1 Live_reference_set.empty json
+     | json -> references_in_json ~mode ~path ~line:1 Live_reference_set.empty json
      | exception Yojson.Json_error _ ->
        payload
        |> String.split_on_char '\n'
@@ -561,9 +805,9 @@ let references_in_payload_file ~ownership_root path =
             (fun (line_number, result) line ->
                let next = Result.bind result (fun references ->
                  match Yojson.Safe.from_string line with
-                 | json -> references_in_json ~path ~line:line_number references json
+                 | json -> references_in_json ~mode ~path ~line:line_number references json
                  | exception Yojson.Json_error _ ->
-                   add_references ~path ~line:line_number references line)
+                   add_references ~mode ~path ~line:line_number references line)
                in
                line_number + 1, next)
             (1, Ok Live_reference_set.empty)
@@ -587,7 +831,7 @@ let sqlite_companions_absent path =
     ]
 ;;
 
-let references_in_chat_operation_store ~ownership_root path =
+let references_in_chat_operation_store ~mode ~ownership_root path =
   match Fs_compat.load_owned_regular_file ~ownership_root path with
   | Error error ->
     Error
@@ -628,7 +872,7 @@ let references_in_chat_operation_store ~ownership_root path =
            { chat_operations; batch_member_inputs; semantic_executions; input_checkpoints = _; input_history = _ }) ->
        let fold_json result json =
          Result.bind result (fun references ->
-           references_in_json ~path ~line:1 references json)
+           references_in_json ~mode ~path ~line:1 references json)
        in
        let with_operations =
          List.fold_left
@@ -655,7 +899,7 @@ let references_in_chat_operation_store ~ownership_root path =
                     Result.bind after_record (fun references ->
                       match Yojson.Safe.from_string canonical_checkpoint_bytes with
                       | checkpoint_json ->
-                        references_in_json ~path ~line:1 references checkpoint_json
+                        references_in_json ~mode ~path ~line:1 references checkpoint_json
                       | exception Yojson.Json_error detail ->
                         Error (Durable_source_parse_failed { path; line = 1; detail }))
                   | Keeper_semantic_execution.Prepared_official_client _ ->
@@ -919,7 +1163,7 @@ let keeper_file_decoders scope =
    left unread: [unclassified_entries] lists it, so the record marks nothing
    deletable. A derived name such as [<file>.lock] ends with no decoder's
    suffix and is not read. *)
-let scan_decoded_keeper_files ~base_path ~scope references =
+let scan_decoded_keeper_files ~mode ~base_path ~scope references =
   let open Result.Syntax in
   match keeper_file_decoders scope with
   | [] -> Ok references
@@ -942,7 +1186,7 @@ let scan_decoded_keeper_files ~base_path ~scope references =
             | { Unix.st_kind = Unix.S_REG; _ } ->
               (match decode path with
                | Ok None -> Ok current
-               | Ok (Some json) -> references_in_json ~path ~line:1 current json
+               | Ok (Some json) -> references_in_json ~mode ~path ~line:1 current json
                | Error reason -> Error (Durable_source_read_failed { path; reason }))
             | { Unix.st_kind =
                   Unix.S_DIR | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK
@@ -955,7 +1199,7 @@ let scan_decoded_keeper_files ~base_path ~scope references =
       names
 ;;
 
-let scan_live_references ~base_path ~scope =
+let scan_live_references ~mode ~base_path ~scope =
   let read_directory path =
     let inspect () =
       match
@@ -1014,7 +1258,7 @@ let scan_live_references ~base_path ~scope =
            than authoritative durable-source rows; an incomplete payload
            must not fail their JSONL scan. This skip does not synchronize
            online writers or rescan a target renamed after [read_directory]. *)
-        if Fs_compat.is_atomic_orphan_name basename
+        if Fs_compat.is_unpublished_write_name basename
         then Ok references
         (* A lock holds no record. A private JSONL lock holds one ready
            marker byte, which no row codec decodes. *)
@@ -1033,7 +1277,7 @@ let scan_live_references ~base_path ~scope =
              through the SQLite store reader rather than raw JSONL text scan. *)
           Result.map
             (Live_reference_set.union references)
-            (references_in_chat_operation_store ~ownership_root:base_path path)
+            (references_in_chat_operation_store ~mode ~ownership_root:base_path path)
         else if Common.is_chat_operation_store_sidecar_file basename
         then
           let db_path =
@@ -1103,14 +1347,14 @@ let scan_live_references ~base_path ~scope =
            (Ok references)
   in
   let scan_source references = function
-    | Tree_source root -> scan_directory references_in_file root references
-    | Payload_tree_source root -> scan_directory references_in_payload_file root references
+    | Tree_source root -> scan_directory (references_in_file ~mode) root references
+    | Payload_tree_source root -> scan_directory (references_in_payload_file ~mode) root references
     | Optional_file path ->
       (match Unix.lstat path with
        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok references
        | exception Unix.Unix_error (code, fn, arg) ->
          Error (Durable_source_stat_failed { path; reason = unix_reason fn arg code })
-       | _ -> scan_entry references_in_file path references)
+       | _ -> scan_entry (references_in_file ~mode) path references)
   in
   let open Result.Syntax in
   let* workspace =
@@ -1122,12 +1366,17 @@ let scan_live_references ~base_path ~scope =
             Result.bind result (fun progress -> scan_source progress source))
          (Ok Live_reference_set.empty)
   in
-  scan_decoded_keeper_files ~base_path ~scope workspace
+  scan_decoded_keeper_files ~mode ~base_path ~scope workspace
 ;;
 
-let expand_artifact_manifests ~store references =
+let expand_artifact_manifests
+      ?(untyped_legacy_blobs = [])
+      ?(on_untyped_legacy_warning = fun _ -> ())
+      ~store
+      references
+  =
   let rec expand expanded references = function
-    | [] -> Ok references
+    | [] -> Ok (expanded, references)
     | reference :: rest
       when not
              (String.equal
@@ -1177,6 +1426,7 @@ let expand_artifact_manifests ~store references =
           | Tool_output.Invalid_artifact_manifest { detail } ->
             Error (Artifact_manifest_invalid { sha256; detail })))
   in
+  let open Result.Syntax in
   let artifacts =
     Live_reference_set.fold
       (fun reference artifacts ->
@@ -1186,7 +1436,79 @@ let expand_artifact_manifests ~store references =
       references
       []
   in
-  expand String_set.empty references (List.rev artifacts)
+  let* expanded, references = expand String_set.empty references (List.rev artifacts) in
+  let rec probe_untyped expanded references = function
+    | [] -> Ok references
+    | { sha256; path; line } :: rest ->
+      if String_set.mem sha256 expanded
+      then probe_untyped expanded references rest
+      else (
+        let expanded = String_set.add sha256 expanded in
+        match
+          Tool_blob_store.fetch_bounded
+            store
+            ~sha256
+            ~max_bytes:Tool_blob_store.max_served_bytes
+        with
+        | Error error ->
+          on_untyped_legacy_warning
+            (Unpinnable_malformed_blob_ref
+               { path
+               ; line
+               ; detail =
+                   Printf.sprintf
+                     "legacy untyped _blob %s could not be read (%s); cannot verify whether it is an artifact manifest"
+                     sha256
+                     (Tool_blob_store.fetch_error_to_string error)
+               });
+          probe_untyped expanded references rest
+        | Ok None ->
+          on_untyped_legacy_warning
+            (Unpinnable_malformed_blob_ref
+               { path
+               ; line
+               ; detail =
+                   Printf.sprintf
+                     "legacy untyped _blob %s is absent; cannot verify whether it is an artifact manifest"
+                     sha256
+               });
+          probe_untyped expanded references rest
+        | Ok (Some payload) ->
+          (match Yojson.Safe.from_string payload with
+           | exception Yojson.Json_error _ ->
+             (* Content-addressed SHA-256 verified payload is not JSON, so it
+                cannot be a JSON artifact manifest. *)
+             probe_untyped expanded references rest
+           | json ->
+             (match Tool_output.artifact_manifest_of_json json with
+              | Tool_output.Decoded_artifact_manifest { artifact_refs; _ } ->
+                let references, added =
+                  List.fold_left
+                    (fun (references, added) child ->
+                       if Live_reference_set.mem (Artifact child) references
+                       then references, added
+                       else Live_reference_set.add (Artifact child) references, child :: added)
+                    (references, [])
+                    artifact_refs
+                in
+                let* expanded, references = expand expanded references (List.rev added) in
+                probe_untyped expanded references rest
+              | Tool_output.Not_artifact_manifest ->
+                probe_untyped expanded references rest
+              | Tool_output.Invalid_artifact_manifest { detail } ->
+                on_untyped_legacy_warning
+                  (Unpinnable_malformed_blob_ref
+                     { path
+                     ; line
+                     ; detail =
+                         Printf.sprintf
+                           "legacy untyped _blob %s looks like an invalid artifact manifest: %s"
+                           sha256
+                           detail
+                     });
+                probe_untyped expanded references rest)))
+  in
+  probe_untyped expanded references untyped_legacy_blobs
 ;;
 
 let candidate_snapshot_to_json candidates =
@@ -1317,8 +1639,31 @@ type live_references = Live_reference_set.t
 
 let live_references ~base_path ~scope =
   let open Result.Syntax in
-  let* direct_live = scan_live_references ~base_path ~scope in
+  let* direct_live = scan_live_references ~mode:Strict_structured ~base_path ~scope in
   expand_artifact_manifests ~store:(Tool_blob_store.create ~base_path) direct_live
+;;
+
+let live_references_resilient ~base_path ~scope =
+  let open Result.Syntax in
+  let warnings = ref [] in
+  let untyped_legacy_blobs = ref [] in
+  let push_warning warning = warnings := warning :: !warnings in
+  let mode =
+    Resilient_structured
+      { warn = push_warning
+      ; record_untyped_legacy_blob =
+          (fun entry -> untyped_legacy_blobs := entry :: !untyped_legacy_blobs)
+      }
+  in
+  let* direct_live = scan_live_references ~mode ~base_path ~scope in
+  let* expanded =
+    expand_artifact_manifests
+      ~untyped_legacy_blobs:(List.rev !untyped_legacy_blobs)
+      ~on_untyped_legacy_warning:push_warning
+      ~store:(Tool_blob_store.create ~base_path)
+      direct_live
+  in
+  Ok (expanded, List.rev !warnings)
 ;;
 
 let fold_live_sha256 references ~init ~f =

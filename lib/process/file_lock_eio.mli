@@ -160,6 +160,29 @@ val with_durable_lock :
     failure remains [Error] here; transaction owners that distinguish their
     completed body result must use the observed surface. *)
 
+type stale_lock_cleanup =
+  | Stale_lock_removed
+  | Stale_lock_kept_target_present
+  | Stale_lock_kept_held
+  | Stale_lock_already_absent
+  | Stale_lock_cleanup_failed of string
+
+val unlink_if_unheld :
+  lock_path:string ->
+  target_absent:(unit -> bool) ->
+  stale_lock_cleanup
+(** Safely unlink an unreferenced durable [.lock] file only after confirming:
+    1. [target_absent ()] is [true] both before and after acquiring locks,
+    2. neither the in-process cooperative mutex (for [lock_path] and its
+       unsuffixed target key, when applicable), nor a BSD [flock(2)] lock
+       (checked via non-blocking [LOCK_EX | LOCK_NB]), nor a POSIX [F_TLOCK]
+       record lock is held,
+    3. [Unix.lstat] confirms [lock_path] is a regular file (rejecting symlinks),
+       [openfile] without [O_CREAT] opens it, [Unix.fstat] confirms its inode
+       matches [lstat], and a post-lock [Unix.lstat] re-verifies the same
+       regular-file inode immediately before [Unix.unlink].
+    Never creates [lock_path] if absent and never unlinks a held lock. *)
+
 module For_testing : sig
   val holders_and_waiters : lock_path:string -> int
   (** Read the existing entry reference count without changing lock state.

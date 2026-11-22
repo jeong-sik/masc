@@ -40,19 +40,13 @@ let test_non_positive_is_floored () =
     check int "negative cannot silence the channel" 1 (Channel_gate.max_content_length ()))
 ;;
 
-(* A value the parser rejects must fall back to the default, not to zero.
-   MASC_PARSE_WARN is pinned off so the assertion states this module's
-   behaviour rather than whatever strict-mode setting the runner inherited —
-   under strict mode the shared getter raises instead of defaulting. *)
-let test_malformed_falls_back_to_default () =
-  let previous = Sys.getenv_opt "MASC_PARSE_WARN" in
-  Unix.putenv "MASC_PARSE_WARN" "false";
-  Fun.protect
-    ~finally:(fun () ->
-      Unix.putenv "MASC_PARSE_WARN" (Option.value previous ~default:""))
-    (fun () ->
-      with_knob "not-a-number" (fun () ->
-        check int "malformed keeps the default" 4000 (Channel_gate.max_content_length ())))
+(* A malformed value fails closed with [Config_error] rather than silently
+   substituting the default. *)
+let test_malformed_fails_closed () =
+  with_knob "not-a-number" (fun () ->
+    match Channel_gate.max_content_length () with
+    | _ -> fail "malformed max_content_length must raise Config_error"
+    | exception Env_config_core.Config_error _ -> ())
 ;;
 
 let () =
@@ -62,7 +56,7 @@ let () =
       , [ test_case "default when unset" `Quick test_default_when_unset
         ; test_case "knob raises the ceiling" `Quick test_knob_raises_the_ceiling
         ; test_case "non-positive is floored" `Quick test_non_positive_is_floored
-        ; test_case "malformed falls back" `Quick test_malformed_falls_back_to_default
+        ; test_case "malformed fails closed" `Quick test_malformed_fails_closed
         ] )
     ]
 ;;

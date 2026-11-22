@@ -141,8 +141,9 @@ let lanes_of_decls
   let* () = validate_lanes ~dropped_bindings runtimes lane_decls in
   Ok
     (List.map
-       (fun ({ Runtime_schema.id; candidate_ids } : Runtime_schema.lane_decl) ->
-          Runtime_lane.make ~id candidate_ids)
+       (fun ({ Runtime_schema.id; candidate_ids; effort; candidate_efforts }
+             : Runtime_schema.lane_decl) ->
+          Runtime_lane.make ?default_effort:effort ~candidate_efforts ~id candidate_ids)
        lane_decls)
 ;;
 

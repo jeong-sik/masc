@@ -98,91 +98,11 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # exact-output lane below — [runtime] carries no scalar
 # binding for it.
 
-# TypeSafe AI (System One Jev) Opt-in Integration
-# librarian_preflight = true enables no-change judgment for Memory-only passes;
-# continuity and working-context generation still use the Librarian lane.
-# Calibrated probabilistic decisions for the board_attention_exact lane and
-# the librarian absorb gate.
-# Keys stay in the environment; each destination names the variable holding
-# its own, and a non-blank key in one of them turns the lane on. Everything
-# else about the lane is the [typesafeai] table (sample at the end of this
-# block; absent means the defaults shown there; a misspelt key is a load
-# error): enabled = false turns the lane off even with a key and cannot turn
-# it on without one; destinations lists the System One servers asked in order
-# until one answers (a destination whose variable is empty is left out and
-# reported at boot; every refusal moves on to the next);
-# board_attention is this gate; absorb_gate is the librarian absorb gate
-# (off unless true); excluded_keepers names keepers that no [typesafeai]
-# gate ever asks a destination about, so their posts, context and memories
-# are not sent to the destinations (a name that is no keeper is reported at
-# boot). An excluded keeper's Board candidates are still judged, by the
-# board_attention_exact slots below, and the model a slot names receives
-# the post. In the TUI, Config > runtime.toml [x] edits this list.
-# When enabled, MASC POSTs each destination's key as an Authorization bearer
-# credential to that destination's endpoint and nowhere else. The JSON body's top-level
-# fields are model, state, and questions. state.signal is only the current
-# signal: kind, post_id, typed comment_id/parent_id, author, title, content,
-# hearth, updated_at, reaction (target_type, target_id, user_id, emoji,
-# reacted) and optional vote (target_kind, target_id, target_author, voter,
-# direction). The persisted post and comment snapshot is not sent.
-# questions.relevance sends type=choice, question text naming the Keeper and
-# its normalized board_interests, and relevant/not_relevant/uncertain criteria
-# descriptions; instructions, record/runtime/task identity, and mention lists
-# are not sent. The current signal must
-# itself address or specifically require the Keeper's role; general topic or
-# capability overlap is not relevant.
-# When on, board attention asks Jev first. A relevant or not-relevant answer
-# whose confidence reaches board_attention_confidence_floor (0 to 1, default
-# 0.3) is kept. A lower-confidence answer, an explicit uncertain answer or a
-# failed call is judged again by the board_attention_exact slots below.
-#
-# [typesafeai]
-# enabled = true
-# destinations = [
-#   { endpoint = "https://api.typesafe.ai/v1/systemone", model = "jev-latest", api_key_env = "TYPESAFEAI_API_KEY" },
-#   # OpenRouter serves the same protocol; listed second it answers when the first does not:
-#   # { endpoint = "https://openrouter.ai/api/v1/systemone", model = "~typesafe/jev-latest", api_key_env = "OPENROUTER_API_KEY" },
-# ]
-# board_attention = true
-# board_attention_confidence_floor = 0.3
-# absorb_gate = false
-# context_review = false       # source Context + proposed summary preservation review
-# skill_applicability = false  # current request + authorized Skill body advice
-# librarian_preflight = false # Memory-only no-change judgment; generates no text
-# workspace_memory_selection_enabled = false
-# Set true separately for host-side shared-memory selection and the explicit
-# keeper_memory_select tool. Selection may send current input/task context,
-# Keeper instructions, shared interpretations, current claims and verified file
-# evidence to the configured destinations. Board/absorb opt-in does not enable
-# this gate. Lane credentials and excluded_keepers still apply.
-# Capacity-driven host-memory retries support Agent Core, Codex and Claude Code.
-# Muse/Antigravity lack that retry path when their memory reader is suppressed.
-# memory_recall = false
-# Set true to send a Keeper's stored facts and the turn's input for the recall
-# judgment. It needs memory_recall_scope: "all" (every Keeper that
-# excluded_keepers does not name) or "listed" with memory_recall_keepers, at
-# least one Keeper name. true without a scope is a load error, so is an empty
-# list, and so is a list next to "all". A name that is no Keeper is reported at
-# boot. With memory_recall = false the scope does nothing but is still checked
-# at load. Lane credentials and excluded_keepers still apply.
-# memory_recall_scope = "listed"
-# memory_recall_keepers = ["keeper-name"]
-# excluded_keepers = []
+# TypeSafe AI (System One Jev) opt-in integration: configure under [typesafeai]
+# with destinations (endpoint, model, api_key_env) and per-gate flags.
+# See docs/ for full [typesafeai] schema and privacy boundaries.
 
-# max_output_tokens is the output budget a lane's requests send as max_tokens.
-# It is optional: a lane without it sends no max_tokens of its own and the
-# provider's default applies. The model's catalog max_output_tokens is what
-# the model can emit, not a request budget, and is never sent in its place.
-# 8192 tokens bounds a large structured judgment.
-#
-# thinking is optional too: true or false sends that enable_thinking on every
-# HTTP slot of the lane; absent keeps each slot's catalog default (the model's
-# thinking-support). Every slot of the lane must be able to carry the setting,
-# or boot refuses the lane and names the slot. The shipped DeepSeek V4.1
-# Flash binding has a reasoning-effort ladder without none, so thinking = false
-# is not valid for a lane using it. Keep the lane's catalog default unless
-# every slot can carry the requested thinking setting.
-# thinking = false
+# Optional exact-output lane knobs: max_output_tokens (positive int), thinking (bool).
 [runtime.exact_output_lanes.librarian_exact]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
 max_output_tokens = 8192
@@ -203,44 +123,10 @@ max_output_tokens = 8192
 slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
 max_output_tokens = 8192
 
-# SSH remote execution endpoint registry (Phase 1 SSH lane, spec §4.2 in
-# docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md).
-# A keeper opts in with sandbox_profile = "remote_ssh" + remote_endpoint =
-# "<name>" in its keeper TOML; the name must resolve to one of these tables
-# (unknown names are config-load errors, and unknown keys inside a table fail
-# the load — the registry is fail-closed). No live endpoint ships in the seed;
-# provision one with docs/operations/ssh-endpoints-runbook.md, then uncomment.
-#
-# [exec.ssh.endpoints.dev]
-# host = "builder.local"              # required — remote host
-# user = "masc-exec"                  # required — remote unix user
-# remote_root = "/srv/masc/playground"  # required — remote playground root
-# port = 22                           # ssh port (default 22)
-# # Dedicated key — a path *reference*; key material lives at 0600 under
-# # <base>/.masc/ssh/ (config/identity/ conventions). Defaults resolve
-# # base-relative with the endpoint name substituted:
-# #   identity_file    = ".masc/ssh/<name>.key"
-# #   known_hosts_file = ".masc/ssh/known_hosts.d/<name>"  (pinned; public)
-# connect_timeout_sec = 10            # -> ssh ConnectTimeout (default 10)
-# max_concurrent_sessions = 8         # ControlMaster multiplex ceiling;
-#                                     # sshd MaxSessions defaults to 10, so
-#                                     # the ceiling must be explicit (default 8)
-# env_allowlist = []                  # request env names allowed to cross the
-#                                     # wire (default [] — no host secrets cross)
-# capabilities = []                   # reserved Phase 2 markers: "kvm",
-#                                     # "firecracker"; unknown values warn-and-ignore
-# allowed_paths = []                  # extra endpoint roots Execute may name besides
-#                                     # the workdir and /tmp, e.g. ["/app"]; absolute,
-#                                     # normalized, not "/" (default [])
+# SSH remote execution endpoint registry: configure under [exec.ssh.endpoints.<name>]
+# (see docs/operations/ssh-endpoints-runbook.md).
 
-# Every model row bound here carries `reasoning-uncontrolled = true`.
-# ollama.com /v1 turns reasoning on when a request carries no control, so a
-# reasoning-capable row that declares neither an effort nor this key is
-# refused before dispatch (#36412). These rows sent no control before that
-# refusal existed and their answers were the provider's own default; the key
-# says that on purpose rather than picking an effort none of them was probed
-# with. A row that should run at a named depth declares `reasoning-effort`
-# instead -- the two together are refused when runtime.toml is read.
+# Ollama Cloud rows carry `reasoning-uncontrolled = true` (or explicit `reasoning-effort`).
 [providers.ollama_cloud]
 display-name = "Ollama Cloud"
 protocol = "openai-compatible-http"
@@ -405,179 +291,85 @@ exact-body-timeout-s = 1200.0
 [providers.ollama.healthcheck]
 path = "/api/tags"
 
-# ── Self-hosted OpenAI-compatible servers ───────────────────────────────────
-# llama.cpp, vLLM and MLX all speak /v1/chat/completions, so they need no new
-# protocol — only an honest capability row each, because the three disagree on
-# exactly the features a keeper turn depends on.
-#
-# All three ship commented out, for the same reason the official-client examples
-# below do: none of these servers exists on a fresh install. `enabled = false`
-# is not an option here — the setup wizard walks every declared provider and
-# refuses one whose bindings are all disabled ("has no concrete runtime
-# binding"). Uncomment a stack once its server is up, point `endpoint` at it,
-# and set `api-name` to whatever it reports at /v1/models. The
-# self-hosted-server-templates gate in test_runtime_config_validity uncomments
-# this block on every run, so these rows are parsed even while they sit here.
-#
-# llama.cpp llama-server. Probed 2026-08-29 against build 10180 (Homebrew)
-# serving Qwen3.6-35B-A3B-UD-Q4_K_XL:
-#
-#   tools                        two calls in one turn (Seoul + Tokyo)
-#   tool_choice {name}           honoured
-#   tool_choice "required"       NOT honoured — answered in prose, no call.
-#                                Qwen3.8-27B on the same server does honour it
-#                                (measured 2026-08-30), so this one is the
-#                                model's chat template, not llama.cpp's.
-#   response_format json_schema  honoured exactly: asked for verdict+score,
-#                                got {"verdict":"Excellent","score":5}
-#   reasoning_content            populated under --reasoning-format deepseek
-#   chat_template_kwargs         {"enable_thinking":false} left reasoning empty
-#   seed 7 twice                 same answer both times, with top_k and min_p
-#   image_url                    HTTP 500 "image input is not supported" —
-#                                needs --mmproj, so this row keeps it off
-#
-# --jinja is on by default in this build, so tool calling needs no extra flag.
-# The structured-output result is the interesting one: llama.cpp constrains
-# generation with a real grammar, which ollama.com's cloud wire does not.
+# ── Self-hosted OpenAI-compatible server templates (commented; gated by test_runtime_config_validity) ──
 # [providers.llama_server]
 # display-name = "llama.cpp llama-server"
 # protocol = "openai-compatible-http"
 # endpoint = "http://127.0.0.1:8080/v1"
-#
 # [providers.llama_server.healthcheck]
 # path = "/models"
 #
-# vLLM. Declared from the official docs, not probed — vLLM does not run on
-# Apple silicon, so nothing here was measured on this machine.
-#
-#   tool_choice                  auto | none | required | named function.
-#                                "auto" needs --enable-auto-tool-choice and
-#                                --tool-call-parser; "required" and named both
-#                                go through the structured-outputs backend
-#                                (docs.vllm.ai/en/latest/features/tool_calling/)
-#   parallel tool calls          parser- and model-dependent, so this row
-#                                leaves it off rather than claim it
-#   reasoning                    field is `reasoning` — renamed from
-#                                `reasoning_content` — behind --reasoning-parser
-#                                (docs.vllm.ai/.../features/reasoning_outputs/)
-#   thinking control             chat_template_kwargs {"enable_thinking": bool}
-#                                or reasoning_effort low|medium|high|none
-#   structured output            response_format json_schema; the guided_* body
-#                                fields were removed in v0.12.0
-#
-# The overlay's runpod_mtp row serves vLLM too and its reasoning-streaming
-# declaration still names the older field, `reasoning_content`. Check the
-# version actually being served before copying either value.
 # [providers.vllm]
 # display-name = "vLLM OpenAI Server"
 # protocol = "openai-compatible-http"
 # endpoint = "http://127.0.0.1:8000/v1"
-#
 # [providers.vllm.healthcheck]
 # path = "/models"
 #
-# MLX (mlx_lm.server). Declared from the upstream server docs, not probed.
-# Its profile is the narrowest of the three and the reason these cannot share
-# one row: the server accepts tools, seed, top_k, min_p and repetition_penalty,
-# and detects reasoning between the tokenizer's think tokens — but it supports
-# neither `tool_choice` nor response_format JSON-schema validation. Both stay
-# false so the exact-output lanes never pick it as a judge.
-#
-# Upstream default is 127.0.0.1:8080, which collides with llama-server's
-# default; the port here is moved so both templates can be enabled at once.
 # [providers.mlx_server]
 # display-name = "MLX mlx_lm.server"
 # protocol = "openai-compatible-http"
 # endpoint = "http://127.0.0.1:8081/v1"
-#
 # [providers.mlx_server.healthcheck]
 # path = "/models"
 #
-# One row per stack, matching the three disabled providers above. api-name is
-# what the server answers to at /v1/models: llama-server reports its --alias,
-# vLLM and MLX report the model path they were started with. Change it to yours
-# before enabling — a mismatched name reaches the wire verbatim.
-#
-# The build measured 2026-08-29. max-context is what llama-server was started
-# with (-c); it is a launch flag, not a property of the weights, so raise or
-# lower this row to match the server rather than the model card.
 # [models.llama-server-local]
 # api-name = "qwen3.6-35b-a3b"
 # max-context = 262144
 # tools-support = true
 # thinking-support = true
 # streaming = true
-#
 # [models.llama-server-local.capabilities]
 # supports-tool-choice = true
 # supports-named-tool-choice = true
-# Measured false for this model: with tool_choice "required" it answered in
-# prose. Re-measure after changing the served weights — Qwen3.8-27B honours the
-# same request on the same build, so the value belongs to the model.
 # supports-required-tool-choice = false
 # supports-parallel-tool-calls = true
 # thinking-control-format = "chat-template-kwargs"
 # reasoning-streaming-format = "delta:reasoning_content"
 # supports-response-format-json = true
 # supports-structured-output = true
-# Turn these on together with --mmproj on the server, not before.
 # supports-image-input = false
 # supports-multimodal-inputs = false
-# supports-document-input = false # native documents; independent of mixed modalities
+# supports-document-input = false
 # supports-system-prompt = true
 # supports-seed = true
 # supports-top-k = true
 # supports-min-p = true
-#
 # [llama_server.llama-server-local]
 # max-concurrent = 1
 #
-# vLLM serves one model per process, so api-name is the --model it was started
-# with. Parallel tool calls stay off because vLLM's own docs make them parser-
-# and model-dependent rather than a property of the server.
 # [models.vllm-served-model]
 # api-name = "Qwen/Qwen3.6-35B-A3B"
 # max-context = 262144
 # tools-support = true
 # thinking-support = true
 # streaming = true
-#
 # [models.vllm-served-model.capabilities]
 # supports-tool-choice = true
 # supports-named-tool-choice = true
 # supports-required-tool-choice = true
 # supports-parallel-tool-calls = false
 # thinking-control-format = "chat-template-kwargs"
-# Current vLLM renamed this field to `reasoning`; older builds still send
-# `reasoning_content`. Match the version actually being served.
 # reasoning-streaming-format = "delta:reasoning"
 # supports-response-format-json = true
 # supports-structured-output = true
 # supports-image-input = false
 # supports-multimodal-inputs = false
-# supports-document-input = false # native documents; independent of mixed modalities
+# supports-document-input = false
 # supports-system-prompt = true
 # supports-seed = true
 # supports-top-k = true
 # supports-min-p = true
-#
 # [vllm.vllm-served-model]
 # max-concurrent = 1
 #
-# MLX. thinking-support is off because the server has no request-side control
-# over it — it only splits out whatever the tokenizer's think tokens produced —
-# and a runtime that declares thinking makes the seed request enable_thinking,
-# which this wire cannot encode.
 # [models.mlx-served-model]
 # api-name = "mlx-community/Qwen3.8-27B-4bit"
 # max-context = 262144
 # tools-support = true
 # thinking-support = false
 # streaming = true
-#
 # [models.mlx-served-model.capabilities]
-# The server takes no tool_choice, so it cannot be forced onto a tool, and it
-# validates no JSON schema. Both stay false to keep it out of exact-output lanes.
 # supports-tool-choice = false
 # supports-named-tool-choice = false
 # supports-required-tool-choice = false
@@ -587,82 +379,37 @@ path = "/api/tags"
 # supports-structured-output = false
 # supports-image-input = false
 # supports-multimodal-inputs = false
-# supports-document-input = false # native documents; independent of mixed modalities
+# supports-document-input = false
 # supports-system-prompt = true
 # supports-seed = true
 # supports-top-k = true
 # supports-min-p = true
-#
 # [mlx_server.mlx-served-model]
 # max-concurrent = 1
 #
-# Thinking Machines Tinker (tinker.thinkingmachines.dev) is hosted, not
-# self-hosted. It sits in this region so the same gate parses it.
-# OpenAI-compatible inference (Beta) for Inkling, Qwen3.8, GLM-5.3-Flash and
-# fine-tuned LoRA sampler checkpoints
-# (`tinker://<run-id>:train:0/sampler_weights/<step>`). The AGENT_CORE catalog
-# has the provider row and the thinkingmachines/Inkling-2-Small row, so this
-# binding states no capability. The 1,048,576-token window, the reasoning ladder
-# and the missing structured output all come from the row. A `tinker://`
-# checkpoint has no catalog row, so only the provider's preset answers for it.
-# Its model table carries its own capabilities block, which overrides the
-# preset. It is an exact-output slot only when it states the window, the
-# effort ladder, JSON mode, native schema and the output ceiling
-# (docs/guides/tinker-integration.md).
 # [providers.tinker]
 # display-name = "Thinking Machines Tinker"
 # protocol = "openai-compatible-http"
 # endpoint = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
 # connect-timeout-s = 1200.0
 # exact-body-timeout-s = 1200.0
-#
 # [providers.tinker.credentials]
 # type = "env"
 # key = "TINKER_API_KEY"
-#
 # [providers.tinker.healthcheck]
 # path = "/models"
-#
 # [models.tinker-inkling-2-small]
 # api-name = "thinkingmachines/Inkling-2-Small"
 # tools-support = true
 # thinking-support = true
 # streaming = true
 # reasoning-effort = "high"
-#
 # [tinker.tinker-inkling-2-small]
 # max-concurrent = 4
 
 # ── Official client runtimes ──────────────────────────────────────────────────
-# Claude Code, Codex and Antigravity are catalog entries like every provider
-# above. A declaration says what the runtime is; it does not say the CLI is
-# installed or logged in. Whether a keeper or a lane uses one is assignment
-# ([runtime], a keeper's TOML, an exact-output slot list), and whether it can
-# run is what `masc doctor` and a dispatch refusal report. Each CLI owns its
-# stored login or supported API/token environment; MASC preserves declared
-# client authentication and isolates unrelated settings.
-# To use several subscriptions, add one provider per CLI login and bind each
-# provider to any model already declared below. Give each provider a distinct
-# id and display-name. Set account-home to the absolute directory used when
-# signing in with CLAUDE_CONFIG_DIR (Claude) or CODEX_HOME (Codex); omit it for
-# the ordinary CLI login. For Codex, set `cli_auth_credentials_store = "file"`
-# in each account home's config.toml before `CODEX_HOME=<that-home> codex login`
-# so each login persists in its own home. For example, a second Claude login can use:
-#   [providers.claude_second]
-#   display-name = "Claude Code · second account"
-#   protocol = "claude-code"
-#   command = "claude"
-#   is-non-interactive = true
-#   account-home = "/absolute/path/to/claude-second"
-#   [claude_second.claude-code-sonnet]
-# Add as many providers and bindings as needed. Account homes must be distinct
-# for independent logins; the Overview groups them by provider id. To try
-# accounts in order, list their provider.model ids under a runtime lane's
-# `candidates` and assign that lane to a Keeper. Merely declaring an account
-# does not send turns to it.
-#
-# The interactive wizard lists every enabled binding. For scripted --provider
-# selection with multiple models, set wizard-default on the binding to use.
+# Parameterized via `efforts = [...]` (and `include-base = true` when a default
+# unparameterized profile is also exposed) instead of duplicating model triples.
 [providers.claude_code]
 display-name = "Claude Code"
 protocol = "claude-code"
@@ -674,283 +421,55 @@ api-name = "claude-sonnet-5-5"
 max-context = 1000000
 tools-support = true
 streaming = true
+include-base = true
+efforts = ["low", "medium", "high", "xhigh", "max"]
 
-# Claude Code carries images over the stream-json content-block array, and Codex
-# over its turn/start input list, so a model that reads them says so here. Both
-# halves are required: without this key the turn's images are read by the
-# analyze_image sub-call instead, which costs a provider round-trip and leaves
-# later questions about the same image unanswerable.
 [models.claude-code-sonnet.capabilities]
 supports-image-input = true
 
-# Several claude_code bindings ship, so scripted `--provider claude_code` needs
-# one named as the wizard's pick; the interactive wizard still lists them all.
 [claude_code.claude-code-sonnet]
 wizard-default = true
+include-base = true
+efforts = ["low", "medium", "high", "xhigh", "max"]
 
-# Thinking depth on an official client is a model-level `reasoning-effort`, not
-# a capability: the CLI owns the wire, so MASC selects a level rather than
-# encoding a control. One model row per level is the whole mechanism: the rows
-# below bind each model once per level, and a keeper is assigned the level the
-# work deserves. Claude Code rejects "none" and "minimal"; Codex takes both.
-#
-# The Claude Code ladder: Fable 5.2, Opus 5.5, Sonnet 5.5 and Haiku 5.5 at
-# every level the CLI takes (low..max), and Haiku 4.5.
-# Haiku 4.5 carries no level, so the CLI picks; its window is 200K
-# (OpenRouter /models anthropic/claude-haiku-4.5, 2026-09-22), and it
-# answered `claude -p --model claude-haiku-4-5` the same day.
-[models.claude-code-sonnet-low]
-api-name = "claude-sonnet-5-5"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "low"
-
-[models.claude-code-sonnet-low.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-sonnet-low]
-
-[models.claude-code-sonnet-medium]
-api-name = "claude-sonnet-5-5"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "medium"
-
-[models.claude-code-sonnet-medium.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-sonnet-medium]
-
-[models.claude-code-sonnet-high]
-api-name = "claude-sonnet-5-5"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "high"
-
-[models.claude-code-sonnet-high.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-sonnet-high]
-
-[models.claude-code-sonnet-xhigh]
-api-name = "claude-sonnet-5-5"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "xhigh"
-
-[models.claude-code-sonnet-xhigh.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-sonnet-xhigh]
-
-[models.claude-code-sonnet-max]
-api-name = "claude-sonnet-5-5"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "max"
-
-[models.claude-code-sonnet-max.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-sonnet-max]
-
-# Opus 5.5 (released 2026-09-22) serves on the subscription already: it
-# answered `claude-subscription -p --model claude-opus-5-5` on 2026-09-23.
-# Ladder low..max and window 1M (platform model page, checked
-# 2026-09-23). The API refuses forced tool use on this model; MASC never
-# sends it from the Claude Code lane.
-[models.claude-code-opus-5-5-low]
+[models.claude-code-opus-5-5]
 api-name = "claude-opus-5-5"
 max-context = 1000000
 tools-support = true
 streaming = true
-reasoning-effort = "low"
+efforts = ["low", "medium", "high", "xhigh", "max"]
 
-[models.claude-code-opus-5-5-low.capabilities]
+[models.claude-code-opus-5-5.capabilities]
 supports-image-input = true
 
-[claude_code.claude-code-opus-5-5-low]
+[claude_code.claude-code-opus-5-5]
+efforts = ["low", "medium", "high", "xhigh", "max"]
 
-[models.claude-code-opus-5-5-medium]
-api-name = "claude-opus-5-5"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "medium"
-
-[models.claude-code-opus-5-5-medium.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-opus-5-5-medium]
-
-[models.claude-code-opus-5-5-high]
-api-name = "claude-opus-5-5"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "high"
-
-[models.claude-code-opus-5-5-high.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-opus-5-5-high]
-
-[models.claude-code-opus-5-5-xhigh]
-api-name = "claude-opus-5-5"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "xhigh"
-
-[models.claude-code-opus-5-5-xhigh.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-opus-5-5-xhigh]
-
-[models.claude-code-opus-5-5-max]
-api-name = "claude-opus-5-5"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "max"
-
-[models.claude-code-opus-5-5-max.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-opus-5-5-max]
-
-# The fable slots serve Claude Fable 5.2 (released 2026-11-09). They send the
-# exact id, not the `fable` alias, and Claude Code needs 2.1.321 or later for
-# it (code.claude.com/docs/en/model-config, checked 2026-11-13).
-[models.claude-code-fable-low]
+[models.claude-code-fable]
 api-name = "claude-fable-5-2"
 max-context = 1000000
 tools-support = true
 streaming = true
-reasoning-effort = "low"
+efforts = ["low", "medium", "high", "xhigh", "max"]
 
-[models.claude-code-fable-low.capabilities]
+[models.claude-code-fable.capabilities]
 supports-image-input = true
 
-[claude_code.claude-code-fable-low]
+[claude_code.claude-code-fable]
+efforts = ["low", "medium", "high", "xhigh", "max"]
 
-[models.claude-code-fable-medium]
-api-name = "claude-fable-5-2"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "medium"
-
-[models.claude-code-fable-medium.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-fable-medium]
-
-[models.claude-code-fable-high]
-api-name = "claude-fable-5-2"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "high"
-
-[models.claude-code-fable-high.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-fable-high]
-
-[models.claude-code-fable-xhigh]
-api-name = "claude-fable-5-2"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "xhigh"
-
-[models.claude-code-fable-xhigh.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-fable-xhigh]
-
-[models.claude-code-fable-max]
-api-name = "claude-fable-5-2"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "max"
-
-[models.claude-code-fable-max.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-fable-max]
-
-# Haiku 5.5 (released 2026-10-07) serves on the subscription: Claude Code
-# 2.1.294 answered `claude-subscription -p --model claude-haiku-5-5` on
-# 2026-10-08 at the CLI default and at --effort low, xhigh and max, and
-# reported a 1M context window each time. Ladder low..max as the platform
-# effort page (checked the same day).
-[models.claude-code-haiku-5-5-low]
+[models.claude-code-haiku-5-5]
 api-name = "claude-haiku-5-5"
 max-context = 1000000
 tools-support = true
 streaming = true
-reasoning-effort = "low"
+efforts = ["low", "medium", "high", "xhigh", "max"]
 
-[models.claude-code-haiku-5-5-low.capabilities]
+[models.claude-code-haiku-5-5.capabilities]
 supports-image-input = true
 
-[claude_code.claude-code-haiku-5-5-low]
-
-[models.claude-code-haiku-5-5-medium]
-api-name = "claude-haiku-5-5"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "medium"
-
-[models.claude-code-haiku-5-5-medium.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-haiku-5-5-medium]
-
-[models.claude-code-haiku-5-5-high]
-api-name = "claude-haiku-5-5"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "high"
-
-[models.claude-code-haiku-5-5-high.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-haiku-5-5-high]
-
-[models.claude-code-haiku-5-5-xhigh]
-api-name = "claude-haiku-5-5"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "xhigh"
-
-[models.claude-code-haiku-5-5-xhigh.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-haiku-5-5-xhigh]
-
-[models.claude-code-haiku-5-5-max]
-api-name = "claude-haiku-5-5"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "max"
-
-[models.claude-code-haiku-5-5-max.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-haiku-5-5-max]
+[claude_code.claude-code-haiku-5-5]
+efforts = ["low", "medium", "high", "xhigh", "max"]
 
 [models.claude-code-haiku]
 api-name = "claude-haiku-4-5"
@@ -963,8 +482,6 @@ supports-image-input = true
 
 [claude_code.claude-code-haiku]
 
-# Codex reads images from its turn/start input list, so the image capability
-# key means the same thing here as it does above.
 [providers.codex_subscription]
 model-set = "codex"
 display-name = "Codex ChatGPT Subscription"
@@ -979,537 +496,98 @@ tools-support = true
 streaming = true
 reasoning-effort = "low"
 
-# One of several codex bindings now, so the wizard's pick is named.
 [codex_subscription.codex-gpt-5-6]
 wizard-default = true
 
-# Codex CLI model cache, fetched 2026-09-30 and refreshed 2026-10-27:
-# the GPT-6.1 family now carries a 500000-token context and text+image
-# input; earlier tiers keep 272000. GPT-6.1 Sol/Terra, GPT-6 Astra/Sol and
-# GPT-5.6 Sol/Terra advertise low..ultra; Luna variants advertise low..max
-# and GPT-5.5 low..xhigh. Each profile is bound below for fresh installations.
-[models.codex-gpt-6-1-sol-low]
+[models.codex-gpt-6-1-sol]
 api-name = "gpt-6.1-sol"
 max-context = 500000
 tools-support = true
 streaming = true
-reasoning-effort = "low"
-[models.codex-gpt-6-1-sol-low.capabilities]
-supports-image-input = true
-[codex_subscription.codex-gpt-6-1-sol-low]
+efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 
-[models.codex-gpt-6-1-sol-medium]
-api-name = "gpt-6.1-sol"
-max-context = 500000
-tools-support = true
-streaming = true
-reasoning-effort = "medium"
-[models.codex-gpt-6-1-sol-medium.capabilities]
+[models.codex-gpt-6-1-sol.capabilities]
 supports-image-input = true
-[codex_subscription.codex-gpt-6-1-sol-medium]
 
-[models.codex-gpt-6-1-sol-high]
-api-name = "gpt-6.1-sol"
-max-context = 500000
-tools-support = true
-streaming = true
-reasoning-effort = "high"
-[models.codex-gpt-6-1-sol-high.capabilities]
-supports-image-input = true
-[codex_subscription.codex-gpt-6-1-sol-high]
-
-[models.codex-gpt-6-1-sol-xhigh]
-api-name = "gpt-6.1-sol"
-max-context = 500000
-tools-support = true
-streaming = true
-reasoning-effort = "xhigh"
-[models.codex-gpt-6-1-sol-xhigh.capabilities]
-supports-image-input = true
-[codex_subscription.codex-gpt-6-1-sol-xhigh]
-
-[models.codex-gpt-6-1-sol-max]
-api-name = "gpt-6.1-sol"
-max-context = 500000
-tools-support = true
-streaming = true
-reasoning-effort = "max"
-[models.codex-gpt-6-1-sol-max.capabilities]
-supports-image-input = true
-[codex_subscription.codex-gpt-6-1-sol-max]
-
-[models.codex-gpt-6-1-sol-ultra]
-api-name = "gpt-6.1-sol"
-max-context = 500000
-tools-support = true
-streaming = true
-reasoning-effort = "ultra"
-[models.codex-gpt-6-1-sol-ultra.capabilities]
-supports-image-input = true
-[codex_subscription.codex-gpt-6-1-sol-ultra]
-
-[models.codex-gpt-6-1-terra-low]
+[models.codex-gpt-6-1-terra]
 api-name = "gpt-6.1-terra"
 max-context = 500000
 tools-support = true
 streaming = true
-reasoning-effort = "low"
-[models.codex-gpt-6-1-terra-low.capabilities]
-supports-image-input = true
-[codex_subscription.codex-gpt-6-1-terra-low]
+efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 
-[models.codex-gpt-6-1-terra-medium]
-api-name = "gpt-6.1-terra"
-max-context = 500000
-tools-support = true
-streaming = true
-reasoning-effort = "medium"
-[models.codex-gpt-6-1-terra-medium.capabilities]
+[models.codex-gpt-6-1-terra.capabilities]
 supports-image-input = true
-[codex_subscription.codex-gpt-6-1-terra-medium]
 
-[models.codex-gpt-6-1-terra-high]
-api-name = "gpt-6.1-terra"
-max-context = 500000
-tools-support = true
-streaming = true
-reasoning-effort = "high"
-[models.codex-gpt-6-1-terra-high.capabilities]
-supports-image-input = true
-[codex_subscription.codex-gpt-6-1-terra-high]
-
-[models.codex-gpt-6-1-terra-xhigh]
-api-name = "gpt-6.1-terra"
-max-context = 500000
-tools-support = true
-streaming = true
-reasoning-effort = "xhigh"
-[models.codex-gpt-6-1-terra-xhigh.capabilities]
-supports-image-input = true
-[codex_subscription.codex-gpt-6-1-terra-xhigh]
-
-[models.codex-gpt-6-1-terra-max]
-api-name = "gpt-6.1-terra"
-max-context = 500000
-tools-support = true
-streaming = true
-reasoning-effort = "max"
-[models.codex-gpt-6-1-terra-max.capabilities]
-supports-image-input = true
-[codex_subscription.codex-gpt-6-1-terra-max]
-
-[models.codex-gpt-6-1-terra-ultra]
-api-name = "gpt-6.1-terra"
-max-context = 500000
-tools-support = true
-streaming = true
-reasoning-effort = "ultra"
-[models.codex-gpt-6-1-terra-ultra.capabilities]
-supports-image-input = true
-[codex_subscription.codex-gpt-6-1-terra-ultra]
-
-[models.codex-gpt-6-astra-ultra]
+[models.codex-gpt-6-astra]
 api-name = "gpt-6-astra"
 max-context = 272000
 tools-support = true
 streaming = true
-reasoning-effort = "ultra"
-[models.codex-gpt-6-astra-ultra.capabilities]
-supports-image-input = true
-[codex_subscription.codex-gpt-6-astra-ultra]
+efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 
-[models.codex-gpt-6-sol-ultra]
+[models.codex-gpt-6-astra.capabilities]
+supports-image-input = true
+
+[models.codex-gpt-6-sol]
 api-name = "gpt-6-sol"
 max-context = 272000
 tools-support = true
 streaming = true
-reasoning-effort = "ultra"
-[models.codex-gpt-6-sol-ultra.capabilities]
-supports-image-input = true
-[codex_subscription.codex-gpt-6-sol-ultra]
+efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 
-[models.codex-gpt-5-6-sol-ultra]
-api-name = "gpt-5.6-sol"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "ultra"
-[models.codex-gpt-5-6-sol-ultra.capabilities]
-supports-image-input = true
-[codex_subscription.codex-gpt-5-6-sol-ultra]
-
-[models.codex-gpt-5-6-terra-ultra]
-api-name = "gpt-5.6-terra"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "ultra"
-[models.codex-gpt-5-6-terra-ultra.capabilities]
-supports-image-input = true
-[codex_subscription.codex-gpt-5-6-terra-ultra]
-
-[models.codex-gpt-5-6-sol-medium]
-api-name = "gpt-5.6-sol"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "medium"
-
-[models.codex-gpt-5-6-sol-medium.capabilities]
+[models.codex-gpt-6-sol.capabilities]
 supports-image-input = true
 
-
-[models.codex-gpt-5-6-sol-high]
-api-name = "gpt-5.6-sol"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "high"
-
-[models.codex-gpt-5-6-sol-high.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-5-6-sol-xhigh]
-api-name = "gpt-5.6-sol"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "xhigh"
-
-[models.codex-gpt-5-6-sol-xhigh.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-5-6-sol-max]
-api-name = "gpt-5.6-sol"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "max"
-
-[models.codex-gpt-5-6-sol-max.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-5-6-terra-low]
-api-name = "gpt-5.6-terra"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "low"
-
-[models.codex-gpt-5-6-terra-low.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-5-6-terra-medium]
-api-name = "gpt-5.6-terra"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "medium"
-
-[models.codex-gpt-5-6-terra-medium.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-5-6-terra-high]
-api-name = "gpt-5.6-terra"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "high"
-
-[models.codex-gpt-5-6-terra-high.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-5-6-terra-xhigh]
-api-name = "gpt-5.6-terra"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "xhigh"
-
-[models.codex-gpt-5-6-terra-xhigh.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-5-6-terra-max]
-api-name = "gpt-5.6-terra"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "max"
-
-[models.codex-gpt-5-6-terra-max.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-6-astra-low]
-api-name = "gpt-6-astra"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "low"
-
-[models.codex-gpt-6-astra-low.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-6-astra-medium]
-api-name = "gpt-6-astra"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "medium"
-
-[models.codex-gpt-6-astra-medium.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-6-astra-high]
-api-name = "gpt-6-astra"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "high"
-
-[models.codex-gpt-6-astra-high.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-6-astra-xhigh]
-api-name = "gpt-6-astra"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "xhigh"
-
-[models.codex-gpt-6-astra-xhigh.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-6-astra-max]
-api-name = "gpt-6-astra"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "max"
-
-[models.codex-gpt-6-astra-max.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-6-sol-low]
-api-name = "gpt-6-sol"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "low"
-
-[models.codex-gpt-6-sol-low.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-6-sol-medium]
-api-name = "gpt-6-sol"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "medium"
-
-[models.codex-gpt-6-sol-medium.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-6-sol-high]
-api-name = "gpt-6-sol"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "high"
-
-[models.codex-gpt-6-sol-high.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-6-sol-xhigh]
-api-name = "gpt-6-sol"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "xhigh"
-
-[models.codex-gpt-6-sol-xhigh.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-6-sol-max]
-api-name = "gpt-6-sol"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "max"
-
-[models.codex-gpt-6-sol-max.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-6-luna-low]
+[models.codex-gpt-6-luna]
 api-name = "gpt-6-luna"
 max-context = 272000
 tools-support = true
 streaming = true
-reasoning-effort = "low"
+efforts = ["low", "medium", "high", "xhigh", "max"]
 
-[models.codex-gpt-6-luna-low.capabilities]
+[models.codex-gpt-6-luna.capabilities]
 supports-image-input = true
 
-
-[models.codex-gpt-6-luna-medium]
-api-name = "gpt-6-luna"
+[models.codex-gpt-5-6-sol]
+api-name = "gpt-5.6-sol"
 max-context = 272000
 tools-support = true
 streaming = true
-reasoning-effort = "medium"
+efforts = ["medium", "high", "xhigh", "max", "ultra"]
 
-[models.codex-gpt-6-luna-medium.capabilities]
+[models.codex-gpt-5-6-sol.capabilities]
 supports-image-input = true
 
-
-[models.codex-gpt-6-luna-high]
-api-name = "gpt-6-luna"
+[models.codex-gpt-5-6-terra]
+api-name = "gpt-5.6-terra"
 max-context = 272000
 tools-support = true
 streaming = true
-reasoning-effort = "high"
+efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 
-[models.codex-gpt-6-luna-high.capabilities]
+[models.codex-gpt-5-6-terra.capabilities]
 supports-image-input = true
 
-
-[models.codex-gpt-6-luna-xhigh]
-api-name = "gpt-6-luna"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "xhigh"
-
-[models.codex-gpt-6-luna-xhigh.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-6-luna-max]
-api-name = "gpt-6-luna"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "max"
-
-[models.codex-gpt-6-luna-max.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-5-6-luna-low]
+[models.codex-gpt-5-6-luna]
 api-name = "gpt-5.6-luna"
 max-context = 272000
 tools-support = true
 streaming = true
-reasoning-effort = "low"
+efforts = ["low", "medium", "high", "xhigh", "max"]
 
-[models.codex-gpt-5-6-luna-low.capabilities]
+[models.codex-gpt-5-6-luna.capabilities]
 supports-image-input = true
 
-
-[models.codex-gpt-5-6-luna-medium]
-api-name = "gpt-5.6-luna"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "medium"
-
-[models.codex-gpt-5-6-luna-medium.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-5-6-luna-high]
-api-name = "gpt-5.6-luna"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "high"
-
-[models.codex-gpt-5-6-luna-high.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-5-6-luna-xhigh]
-api-name = "gpt-5.6-luna"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "xhigh"
-
-[models.codex-gpt-5-6-luna-xhigh.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-5-6-luna-max]
-api-name = "gpt-5.6-luna"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "max"
-
-[models.codex-gpt-5-6-luna-max.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-5-5-low]
+[models.codex-gpt-5-5]
 api-name = "gpt-5.5"
 max-context = 272000
 tools-support = true
 streaming = true
-reasoning-effort = "low"
+efforts = ["low", "medium", "high", "xhigh"]
 
-[models.codex-gpt-5-5-low.capabilities]
+[models.codex-gpt-5-5.capabilities]
 supports-image-input = true
-
-
-[models.codex-gpt-5-5-medium]
-api-name = "gpt-5.5"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "medium"
-
-[models.codex-gpt-5-5-medium.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-5-5-high]
-api-name = "gpt-5.5"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "high"
-
-[models.codex-gpt-5-5-high.capabilities]
-supports-image-input = true
-
-
-[models.codex-gpt-5-5-xhigh]
-api-name = "gpt-5.5"
-max-context = 272000
-tools-support = true
-streaming = true
-reasoning-effort = "xhigh"
-
-[models.codex-gpt-5-5-xhigh.capabilities]
-supports-image-input = true
-
 
 # Antigravity is the one official client that needs a credentials table, and it
 # is a file reference rather than an environment variable: the CLI writes an
@@ -2569,40 +1647,9 @@ candidates = [
 # runtime id: delete it and the load fails instead of quietly walking that
 # runtime alone.
 [runtime.assignments]
-# example: pin a test keeper to an explicit runtime
-# canary = "deepseek.deepseek-v4-pro"
+# Per-keeper routing belongs in <base>/.masc/config/runtime.toml.
 
-# ═══ Repositories ═══════════════════════════════════════════════════
-# 서버가 등록된 GitHub 저장소의 열린 PR 을 60초마다 읽을 때 쓸 토큰의 주인
-# Keeper 다. 그 Keeper 의 github-cli/hosts.yml 토큰을 읽을 때마다 새로
-# 읽는다. 적지 않으면 PR 을 읽지 않고, /api/v1/repositories/pulls 가 그 이유를
-# 말한다. github_host 와 graphql_url 은 생략하면 github.com 기본값으로 읽고,
-# GitHub Enterprise 를 읽을 때만 두 키를 함께 적는다(호스트만 적으면 무효).
-# 토큰은 그 호스트 이름의 hosts.yml 칸에서 읽는다. 이 표에는 아래 세 키 말고
-# 다른 키를 쓸 수 없다.
-#
-# [repositories]
-# pr_reader = "<keeper>"
-# github_host = "github.example.com"
-# graphql_url = "https://github.example.com/api/graphql"
-
-# ═══ Connectors ══════════════════════════════════════════════════════
-# 어떤 인바운드 메시지가 턴을 시작하는지를 커넥터별로 정한다. 운영자가 적어두는
-# 입장이라 설정 파일에서만 읽는다 — 환경변수 경로는 없다.
-#
-#   mention_or_thread  — 스레드에서 자동 응답, 일반 채널은 멘션 필요 (기본값)
-#   mention_only       — @멘션된 메시지만 응답
-#   all                — 모든 메시지에 응답
-#   user_only:<id>     — 특정 사용자만 (discord=snowflake, slack=member id)
-#
-# 값을 잘못 적으면 게이트웨이가 뜨지 않는다. 오타를 기본값으로 바꿔 읽으면
-# 운영자가 적지 않은 입장으로 봇이 돌기 때문이다 (masc#29078).
-#
-# 이 값은 서버가 부팅할 때 한 번 읽는다. TUI 의 Config → params 화면에서
-# <connector>.trigger_policy 를 고르면 그 선택이 이 파일보다 앞서고, 재시작
-# 없이 다음 메시지부터 적용된다. 그 선택을 지우면 다시 여기로 돌아온다.
-# 우선순위: params 화면 선택 > 이 값 > mention_or_thread
-
+# Connectors: trigger_policy in {"mention_or_thread", "mention_only", "all", "user_only:<id>"}.
 [discord]
 trigger_policy = "mention_or_thread"
 
@@ -3245,55 +2292,15 @@ supports-image-input = true
 [model_sets.codex]
 models = [
   "codex-gpt-5-6",
-  "codex-gpt-5-6-sol-medium",
-  "codex-gpt-5-6-sol-high",
-  "codex-gpt-5-6-sol-xhigh",
-  "codex-gpt-5-6-sol-max",
-  "codex-gpt-5-6-terra-low",
-  "codex-gpt-5-6-terra-medium",
-  "codex-gpt-5-6-terra-high",
-  "codex-gpt-5-6-terra-xhigh",
-  "codex-gpt-5-6-terra-max",
-  "codex-gpt-6-astra-low",
-  "codex-gpt-6-astra-medium",
-  "codex-gpt-6-astra-high",
-  "codex-gpt-6-astra-xhigh",
-  "codex-gpt-6-astra-max",
-  "codex-gpt-6-sol-low",
-  "codex-gpt-6-sol-medium",
-  "codex-gpt-6-sol-high",
-  "codex-gpt-6-sol-xhigh",
-  "codex-gpt-6-sol-max",
-  "codex-gpt-6-luna-low",
-  "codex-gpt-6-luna-medium",
-  "codex-gpt-6-luna-high",
-  "codex-gpt-6-luna-xhigh",
-  "codex-gpt-6-luna-max",
-  "codex-gpt-5-6-luna-low",
-  "codex-gpt-5-6-luna-medium",
-  "codex-gpt-5-6-luna-high",
-  "codex-gpt-5-6-luna-xhigh",
-  "codex-gpt-5-6-luna-max",
-  "codex-gpt-5-5-low",
-  "codex-gpt-5-5-medium",
-  "codex-gpt-5-5-high",
-  "codex-gpt-5-5-xhigh",
-  "codex-gpt-6-1-sol-low",
-  "codex-gpt-6-1-sol-medium",
-  "codex-gpt-6-1-sol-high",
-  "codex-gpt-6-1-sol-xhigh",
-  "codex-gpt-6-1-sol-max",
-  "codex-gpt-6-1-sol-ultra",
-  "codex-gpt-6-1-terra-low",
-  "codex-gpt-6-1-terra-medium",
-  "codex-gpt-6-1-terra-high",
-  "codex-gpt-6-1-terra-xhigh",
-  "codex-gpt-6-1-terra-max",
-  "codex-gpt-6-1-terra-ultra",
-  "codex-gpt-6-astra-ultra",
-  "codex-gpt-6-sol-ultra",
-  "codex-gpt-5-6-sol-ultra",
-  "codex-gpt-5-6-terra-ultra",
+  { model = "codex-gpt-5-6-sol", efforts = ["medium", "high", "xhigh", "max", "ultra"] },
+  { model = "codex-gpt-5-6-terra", efforts = ["low", "medium", "high", "xhigh", "max", "ultra"] },
+  { model = "codex-gpt-6-astra", efforts = ["low", "medium", "high", "xhigh", "max", "ultra"] },
+  { model = "codex-gpt-6-sol", efforts = ["low", "medium", "high", "xhigh", "max", "ultra"] },
+  { model = "codex-gpt-6-luna", efforts = ["low", "medium", "high", "xhigh", "max"] },
+  { model = "codex-gpt-5-6-luna", efforts = ["low", "medium", "high", "xhigh", "max"] },
+  { model = "codex-gpt-5-5", efforts = ["low", "medium", "high", "xhigh"] },
+  { model = "codex-gpt-6-1-sol", efforts = ["low", "medium", "high", "xhigh", "max", "ultra"] },
+  { model = "codex-gpt-6-1-terra", efforts = ["low", "medium", "high", "xhigh", "max", "ultra"] },
 ]
 
 # ── Unified Persistent ACP v1 Official Runtimes ──────────────────────────────

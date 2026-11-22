@@ -182,9 +182,13 @@ let obsolete_top_level_namespaces = [ "system"; "routes"; "profiles" ]
    [[models]] and inside [[<provider>.<model>]], and an SSH endpoint under
    [[exec.ssh.endpoints]], so neither can collide and neither is checked. *)
 let reserved_provider_ids =
-  List.map Ns.key Ns.all
-  @ Keeper_runtime_config.owned_namespaces
-  @ obsolete_top_level_namespaces
+  let base = List.map Ns.key Ns.all in
+  let extra =
+    List.filter
+      (fun name -> not (List.exists (String.equal name) base))
+      Keeper_runtime_config.owned_namespaces
+  in
+  base @ extra @ obsolete_top_level_namespaces
 ;;
 
 let is_reserved name = List.exists (String.equal name) reserved_provider_ids

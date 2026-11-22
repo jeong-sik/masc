@@ -35,7 +35,7 @@ let allow_exact : string list =
   ; Env_config_core.host_env_key; Env_config_core.http_port_env_key
   ; Env_config_core.http_base_url_env_key; Env_config_core.mcp_url_env_key
   ; Log.level_env_key; Log.routine_level_env_key
-  ; Env_config_core.telemetry_enabled_env_key; Env_config_core.parse_warn_env_key
+  ; Env_config_core.telemetry_enabled_env_key
   ; Env_config_core.secret_dir_env_key
   ; Env_config_core.test_fake_docker_path_env
   ; "MASC_KEEPER_TEST_DOCKER_LOG"

@@ -34,8 +34,97 @@ let read_file path =
   try Ok (Fs_compat.load_file path)
   with Sys_error msg -> Error msg
 
-(** Format a TOML scalar for both its operator display and boot readers.
-    String arrays are not supported — they have no env var equivalent. *)
+(** Decode a TOML scalar directly into a typed boot value without round-tripping
+    through fake environment strings. *)
+let typed_value_of_toml ~(kind : Keeper_runtime_setting_registry.value_kind) = function
+  | Keeper_toml_loader.Toml_bool b ->
+    (match kind with
+     | Keeper_runtime_setting_registry.Boolean -> Some (Config_boot_overrides.Bool b)
+     | Integer | Float | String -> None)
+  | Keeper_toml_loader.Toml_int i ->
+    (match kind with
+     | Keeper_runtime_setting_registry.Integer -> Some (Config_boot_overrides.Int i)
+     | Keeper_runtime_setting_registry.Float -> Some (Config_boot_overrides.Float (float_of_int i))
+     | Boolean | String -> None)
+  | Keeper_toml_loader.Toml_float f ->
+    (match kind with
+     | Keeper_runtime_setting_registry.Float -> Some (Config_boot_overrides.Float f)
+     | Boolean | Integer | String -> None)
+  | Keeper_toml_loader.Toml_string s ->
+    (match kind with
+     | Keeper_runtime_setting_registry.String -> Some (Config_boot_overrides.String s)
+     | Boolean | Integer | Float -> None)
+  | ( Keeper_toml_loader.Toml_string_array _
+    | Keeper_toml_loader.Toml_array _
+    | Keeper_toml_loader.Toml_table _
+    | Keeper_toml_loader.Toml_inline_table _
+    | Keeper_toml_loader.Toml_table_array _
+    | Keeper_toml_loader.Toml_offset_datetime _
+    | Keeper_toml_loader.Toml_local_datetime _
+    | Keeper_toml_loader.Toml_local_date _
+    | Keeper_toml_loader.Toml_local_time _ ) ->
+    None
+
+let decode_int_opt doc key =
+  match List.assoc_opt key doc with
+  | Some v ->
+    (match typed_value_of_toml ~kind:Keeper_runtime_setting_registry.Integer v with
+     | Some (Config_boot_overrides.Int i) -> Some i
+     | Some (Bool _ | Float _ | String _) | None -> None)
+  | None -> None
+
+let decode_float_opt doc key =
+  match List.assoc_opt key doc with
+  | Some v ->
+    (match typed_value_of_toml ~kind:Keeper_runtime_setting_registry.Float v with
+     | Some (Config_boot_overrides.Float f) -> Some f
+     | Some (Bool _ | Int _ | String _) | None -> None)
+  | None -> None
+
+let decode_bool_opt doc key =
+  match List.assoc_opt key doc with
+  | Some v ->
+    (match typed_value_of_toml ~kind:Keeper_runtime_setting_registry.Boolean v with
+     | Some (Config_boot_overrides.Bool b) -> Some b
+     | Some (Int _ | Float _ | String _) | None -> None)
+  | None -> None
+
+let decode_string_opt doc key =
+  match List.assoc_opt key doc with
+  | Some v ->
+    (match typed_value_of_toml ~kind:Keeper_runtime_setting_registry.String v with
+     | Some (Config_boot_overrides.String s) -> Some s
+     | Some (Bool _ | Int _ | Float _) | None -> None)
+  | None -> None
+
+let decode_typed_namespaces (doc : Keeper_toml_loader.toml_doc)
+  : Config_boot_overrides.typed_namespaces
+  =
+  { Config_boot_overrides.memory =
+      { category_cap = decode_int_opt doc "memory.category_cap"
+      ; facts_per_category_cap = decode_int_opt doc "memory.facts_per_category_cap"
+      ; recall_enabled = decode_bool_opt doc "memory.recall_enabled"
+      ; librarian_enabled = decode_bool_opt doc "memory.librarian_enabled"
+      ; facts_max_bytes = decode_int_opt doc "memory.facts_max_bytes"
+      ; pending_max_bytes = decode_int_opt doc "memory.pending_max_bytes"
+      }
+  ; wiki_contents = { enabled = decode_bool_opt doc "wiki_contents.enabled" }
+  ; maintenance = { jsonl_retention_days = decode_int_opt doc "maintenance.jsonl_retention_days" }
+  ; transport =
+      { h2_max_concurrent_streams = decode_int_opt doc "transport.h2_max_concurrent_streams"
+      ; h2_max_pending_response_bytes = decode_int_opt doc "transport.h2_max_pending_response_bytes"
+      ; h2_initial_window_size = decode_int_opt doc "transport.h2_initial_window_size"
+      ; https_port = decode_int_opt doc "transport.https_port"
+      ; tls_cert_file = decode_string_opt doc "transport.tls_cert_file"
+      ; tls_key_file = decode_string_opt doc "transport.tls_key_file"
+      ; grpc_enabled = decode_bool_opt doc "transport.grpc_enabled"
+      ; ws_enabled = decode_bool_opt doc "transport.ws_enabled"
+      ; serving_domain_enabled = decode_bool_opt doc "transport.serving_domain_enabled"
+      ; startup_watchdog_sec = decode_float_opt doc "transport.startup_watchdog_sec"
+      }
+  }
+
+(** Format a TOML scalar for operator display projections. *)
 let value_to_string = function
   | Keeper_toml_loader.Toml_string s -> Some s
   | Keeper_toml_loader.Toml_int i -> Some (string_of_int i)
@@ -52,52 +141,38 @@ let value_to_string = function
     | Keeper_toml_loader.Toml_local_time _ ) ->
     None
 
-(** Resolve a single TOML key to its boot-override value. Returns
-    [Some (env_name, value)] when the key is present in the doc and the
-    corresponding env var is unset (so the TOML value would apply).
-    Returns [None] when the env var is already set (caller override wins;
-    a [Toml_only] row has no such override) or the key is absent /
-    unsupported.
-
-    This is the single precedence rule shared by the pure preview
-    ([resolve_overrides]) and the effectful apply path ([apply_one]):
-    env var > TOML > hardcoded default, with the env var left out for
-    [Toml_only] rows. *)
-let resolve_one
+(** Resolve a single TOML setting directly into its typed boot value. Returns
+    [Some (env_name, typed_value)] when the key is present in the doc and the
+    corresponding env var does not preempt it. *)
+let resolve_typed_row
     ?(env_lookup = Env_config_core.raw_value_opt)
-    (doc : Keeper_toml_loader.toml_doc) (toml_key, env_name) =
-  if env_preempts env_lookup env_name then
-    (* Caller env override — leave alone. *)
-    None
-  else
-    match List.assoc_opt toml_key doc with
-    | None -> None
-    | Some v -> Option.map (fun s -> (env_name, s)) (value_to_string v)
+    (doc : Keeper_toml_loader.toml_doc)
+    (row : Keeper_runtime_setting_registry.setting) =
+  match Keeper_runtime_setting_registry.toml_key_opt row with
+  | None -> None
+  | Some toml_key ->
+    if env_preempts env_lookup row.env_name then
+      None
+    else
+      match List.assoc_opt toml_key doc with
+      | None -> None
+      | Some v ->
+        Option.map
+          (fun tv -> row.env_name, tv)
+          (typed_value_of_toml ~kind:row.value_kind v)
 
-(** Apply one TOML key to the corresponding env var, unless the env var
-    is already set (caller override wins). Returns [true] iff a boot
-    override was actually recorded.
-
-    [~env_lookup] and [~env_set] are injectable for testing: production
-    uses [Env_config_core.raw_value_opt] / [Config_boot_overrides.set];
-    tests supply a fake env to avoid global process env dependence. *)
-let apply_one
-    ?(env_lookup = Env_config_core.raw_value_opt)
-    ?(env_set = Config_boot_overrides.set)
-    (doc : Keeper_toml_loader.toml_doc) pair =
-  match resolve_one ~env_lookup doc pair with
-  | None -> false
-  | Some (env_name, s) ->
-    env_set env_name s;
-    true
-
-(** Pure version of the load+apply pipeline. Parses TOML and returns
-    the number of overrides that would be applied, plus a list of
-    (env_name, value) pairs. Exposed for testing without env side effects. *)
+(** Pure projection for display/testing: returns (count, (env_name, display_str) list). *)
 let resolve_overrides
     ?(env_lookup = Env_config_core.raw_value_opt)
     (doc : Keeper_toml_loader.toml_doc) =
-  let applied = List.filter_map (resolve_one ~env_lookup doc) key_to_env in
+  let applied =
+    List.filter_map
+      (fun row ->
+         Option.map
+           (fun (env_name, tv) -> env_name, Config_boot_overrides.typed_value_to_string tv)
+           (resolve_typed_row ~env_lookup doc row))
+      Keeper_runtime_setting_registry.toml_settings
+  in
   (List.length applied, applied)
 
 (* Store the parsed boot document independently of any env override. Compare
@@ -649,12 +724,14 @@ let load_and_apply_document ~base_path =
              }
          | None ->
            Eio_guard.with_mutex apply_sequence_mutex (fun () ->
-             let count =
-               List.fold_left
-                 (fun acc pair -> if apply_one doc pair then acc + 1 else acc)
-                 0
-                 key_to_env
+             let typed_pairs =
+               List.filter_map
+                 (resolve_typed_row doc)
+                 Keeper_runtime_setting_registry.toml_settings
              in
+             Config_boot_overrides.set_typed_batch typed_pairs;
+             Config_boot_overrides.set_typed_namespaces (decode_typed_namespaces doc);
+             let count = List.length typed_pairs in
              Hashtbl.clear toml_shadow;
              List.iter
                (fun (toml_key, env_name) ->

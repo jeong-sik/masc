@@ -180,13 +180,37 @@ module Transport = struct
   let https_port_default = 8938
 
   let https_port () =
-    match raw_value_opt "MASC_HTTPS_PORT" |> trim_opt with
-    | None -> Some https_port_default
-    | Some "0" -> None
-    | Some raw ->
-      (match int_of_string_opt raw with
-       | Some port when port > 0 && port < 65536 -> Some port
-       | Some _ | None -> Some https_port_default)
+    let validate_port port =
+      if port = 0 then None
+      else if port > 0 && port < 65536 then Some port
+      else
+        raise
+          (Env_config_core.Config_error
+             (Printf.sprintf
+                "malformed env MASC_HTTPS_PORT=%d (expected 0 or TCP port in [1, 65535])"
+                port))
+    in
+    match resolve_value "MASC_HTTPS_PORT" with
+    | Unset -> Some https_port_default
+    | From_toml (Config_boot_overrides.Int port) -> validate_port port
+    | From_toml (Config_boot_overrides.String raw) | From_env raw ->
+      (match trim_opt (Some raw) with
+       | None -> Some https_port_default
+       | Some s ->
+         (match Safe_ops.int_of_string_safe s with
+          | Some port -> validate_port port
+          | None ->
+            raise
+              (Env_config_core.Config_error
+                 (Printf.sprintf
+                    "malformed env MASC_HTTPS_PORT=%S (expected 0 or TCP port in [1, 65535])"
+                    s))))
+    | From_toml ((Config_boot_overrides.Bool _ | Config_boot_overrides.Float _) as v) ->
+      raise
+        (Env_config_core.Config_error
+           (Printf.sprintf
+              "malformed env MASC_HTTPS_PORT=%S (expected 0 or TCP port in [1, 65535])"
+              (Config_boot_overrides.typed_value_to_string v)))
 
   (** PEM files for the HTTPS listener. Both set: the listener serves that
       chain and key. Neither set: a self-signed pair under
@@ -250,7 +274,7 @@ module Transport = struct
       explicit value is rejected because falling back to [false] would disable
       the requested security policy. *)
   let http_auth_strict_env_enabled () =
-    get_bool_strict ~default:false "MASC_HTTP_AUTH_STRICT"
+    get_bool ~default:false "MASC_HTTP_AUTH_STRICT"
 
   (** Startup watchdog timeout, clamped to [30, 600]. Default: 240.
       Re-readable within the process, but operationally a boot-time input. *)

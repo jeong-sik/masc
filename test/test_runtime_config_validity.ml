@@ -4996,6 +4996,7 @@ let test_of_binding_reports_an_undeclared_provider () =
   ; repeat_penalty = None
   ; repeat_last_n = None
     ; return_progress = None
+    ; effort = None
     }
   in
   match Runtime_instance.of_binding cfg binding with

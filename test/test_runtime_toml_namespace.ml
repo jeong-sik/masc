@@ -381,6 +381,136 @@ let test_provider_typo_is_refused_by_file_loader () =
       Alcotest.(check bool) "diagnostic includes the misspelled field" true
         (String_util.contains_substring message "providers.first.model_set"))
 
+let test_parameterized_effort_on_models_bindings_and_lanes () =
+  let toml =
+    {|[providers.p]
+display-name = "P"
+protocol = "openai-compatible-http"
+endpoint = "https://example.invalid/v1"
+
+[models.base]
+api-name = "model-base"
+max-context = 128000
+tools-support = true
+streaming = true
+include-base = true
+efforts = ["low", "high"]
+
+[p.base]
+include-base = true
+efforts = ["low", "high"]
+
+[models.single]
+api-name = "model-single"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[p.single]
+effort = "xhigh"
+
+[runtime]
+default = "review"
+
+[runtime.lanes.review]
+effort = "medium"
+candidates = [
+  "p.base",
+  { runtime = "p.single", effort = "max" },
+]
+|}
+  in
+  match Runtime_toml.parse_string toml with
+  | Error errs ->
+    Alcotest.failf "parameterized effort config failed: %s"
+      (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errs))
+  | Ok cfg ->
+    let model_ids = List.map (fun (m : Runtime_schema.model_spec) -> m.id) cfg.models in
+    Alcotest.(check bool) "expanded base + low + high" true
+      (List.mem "base" model_ids && List.mem "base-low" model_ids && List.mem "base-high" model_ids);
+    let single_binding =
+      List.find (fun (b : Runtime_schema.binding) -> String.equal b.model_id "single") cfg.bindings
+    in
+    Alcotest.(check (option string)) "binding effort override" (Some "xhigh")
+      (Option.map Llm_provider.Reasoning_effort.to_string single_binding.effort);
+    let lane = List.hd cfg.lane_decls in
+    Alcotest.(check (list string)) "lane candidate ids" [ "p.base"; "p.single" ] lane.candidate_ids;
+    let runtime_lane =
+      Runtime_lane.make
+        ?default_effort:lane.effort
+        ~candidate_efforts:lane.candidate_efforts
+        ~id:lane.id
+        lane.candidate_ids
+    in
+    Alcotest.(check (option string)) "lane default effort applies to plain candidate" (Some "medium")
+      (Option.map Llm_provider.Reasoning_effort.to_string
+         (Runtime_lane.effort_for_candidate runtime_lane "p.base"));
+    Alcotest.(check (option string)) "per-candidate effort overrides lane default" (Some "max")
+      (Option.map Llm_provider.Reasoning_effort.to_string
+         (Runtime_lane.effort_for_candidate runtime_lane "p.single"));
+    (* Fail-closed on invalid effort *)
+    let invalid_effort =
+      {|[providers.p]
+display-name = "P"
+protocol = "openai-compatible-http"
+endpoint = "https://example.invalid/v1"
+[models.m]
+api-name = "m"
+efforts = ["bogus"]
+|}
+    in
+    (match Runtime_toml.parse_string invalid_effort with
+     | Ok _ -> Alcotest.fail "invalid effort must fail closed"
+     | Error _ -> ())
+;;
+
+let test_typed_namespaces_decoded_without_string_roundtrip () =
+  let base_path = Filename.temp_dir "typed-ns-" "" in
+  let cfg_dir = Filename.concat (Filename.concat base_path ".masc") "config" in
+  Sys.mkdir (Filename.concat base_path ".masc") 0o755;
+  Sys.mkdir cfg_dir 0o755;
+  let toml =
+    {|[memory]
+category_cap = 42
+facts_per_category_cap = 17
+
+[wiki_contents]
+enabled = false
+
+[maintenance]
+jsonl_retention_days = 14
+
+[transport]
+h2_max_concurrent_streams = 250
+https_port = 9443
+|}
+  in
+  let path = Filename.concat cfg_dir "runtime.toml" in
+  Out_channel.with_open_bin path (fun oc -> output_string oc toml);
+  Config_boot_overrides.reset_for_tests ();
+  Fun.protect
+    ~finally:(fun () ->
+      Config_boot_overrides.reset_for_tests ();
+      Fs_compat.remove_tree base_path)
+    (fun () ->
+       match Keeper_runtime_config.load_and_apply ~base_path with
+       | Error failure ->
+         Alcotest.failf "load_and_apply failed: %s"
+           (Keeper_runtime_config.load_failure_to_string failure)
+       | Ok _ ->
+         let ns = Config_boot_overrides.typed_namespaces () in
+         Alcotest.(check (option int)) "memory.category_cap" (Some 42) ns.memory.category_cap;
+         Alcotest.(check (option int)) "memory.facts_per_category_cap" (Some 17) ns.memory.facts_per_category_cap;
+         Alcotest.(check (option bool)) "wiki_contents.enabled" (Some false) ns.wiki_contents.enabled;
+         Alcotest.(check (option int)) "maintenance.jsonl_retention_days" (Some 14) ns.maintenance.jsonl_retention_days;
+         Alcotest.(check (option int)) "transport.h2_max_concurrent_streams" (Some 250) ns.transport.h2_max_concurrent_streams;
+         Alcotest.(check (option int)) "transport.https_port" (Some 9443) ns.transport.https_port;
+         Alcotest.(check bool) "typed int stored directly (not string)" true
+           (match Config_boot_overrides.get_typed_opt "MASC_KEEPER_MEMORY_CATEGORY_CAP" with
+            | Some (Config_boot_overrides.Int 42) -> true
+            | Some _ | None -> false))
+;;
+
 let () =
   Alcotest.run "runtime_toml_namespace"
     [ ( "namespaces"
@@ -416,5 +546,9 @@ let () =
             test_explicit_binding_overrides_a_set_default
         ; Alcotest.test_case "invalid model sets are refused" `Quick
             test_invalid_model_sets_are_refused
+        ; Alcotest.test_case "parameterized effort on models, bindings, and lanes" `Quick
+            test_parameterized_effort_on_models_bindings_and_lanes
+        ; Alcotest.test_case "typed namespaces decoded without string roundtrip" `Quick
+            test_typed_namespaces_decoded_without_string_roundtrip
         ] )
     ]

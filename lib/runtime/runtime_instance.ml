@@ -177,6 +177,11 @@ let materialize_binding_with
        | Ok selected ->
          let execution = selected.Runtime_adapter.execution in
          let credential_admission = selected.credential_admission in
+         let model =
+           match b.effort with
+           | Some _ as effort -> { model with reasoning_effort = effort }
+           | None -> model
+         in
          Result.map (fun quota_scope ->
            { id = id_of_binding b
            ; provider

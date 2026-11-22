@@ -125,8 +125,7 @@ let with_env name value f =
 ;;
 
 let with_strict_malformed_disk_pressure_cooldown f =
-  with_env "MASC_PARSE_WARN" "true" (fun () ->
-    with_env "MASC_KEEPER_DISK_PRESSURE_COOLDOWN_SEC" "not-a-float" f)
+  with_env "MASC_KEEPER_DISK_PRESSURE_COOLDOWN_SEC" "not-a-float" f
 ;;
 
 let test_non_directory_ancestor_does_not_poison_preparation () =

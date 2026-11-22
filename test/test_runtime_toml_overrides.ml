@@ -1188,7 +1188,15 @@ let test_supervisor_and_rotation_bounds_reach_boot () =
     @@ fun () ->
     check (float 0.) "boot value respects scheduler bounds" expected
       (Runtime_params.get Runtime_settings.keeper_supervisor_sweep_sec))
-    ["0", 10.; "121", 120.; "nan", 30.; "infinity", 30.];
+    ["0", 10.; "121", 120.];
+  List.iter (fun raw ->
+    Masc_test_deps.with_file_owned_values
+      [ "MASC_KEEPER_SUPERVISOR_SWEEP_SEC", raw ]
+    @@ fun () ->
+    match Runtime_params.get Runtime_settings.keeper_supervisor_sweep_sec with
+    | _ -> failf "non-finite %s must raise Config_error" raw
+    | exception Env_config_core.Config_error _ -> ())
+    ["nan"; "infinity"];
   Masc_test_deps.with_file_owned_values [ "MASC_KEEPER_METRICS_MAX_ROTATED", "0" ]
   @@ fun () ->
   check int "a boot value of zero requests no backups" 0
@@ -1197,7 +1205,6 @@ let test_supervisor_and_rotation_bounds_reach_boot () =
 
 let test_strict_reader_validation_happens_at_boot () =
   with_env "MASC_CONFIG_DIR" None @@ fun () ->
-  with_env "MASC_PARSE_WARN" (Some "true") @@ fun () ->
   with_clean_boot_overrides @@ fun () ->
   with_base_path @@ fun base_path ->
   let load_with_toml has_toml =

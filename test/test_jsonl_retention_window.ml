@@ -40,11 +40,12 @@ let test_override_is_honoured () =
   with_env (Some "7") @@ fun () ->
   check int "override wins" 7 (Env_config_core.jsonl_retention_days ())
 
-(* Malformed input is not an override. *)
-let test_unparseable_falls_back () =
+(* Malformed input fails closed instead of silently substituting the default. *)
+let test_unparseable_fails_closed () =
   with_env (Some "thirty") @@ fun () ->
-  check int "non-numeric falls back to the default" documented_default
-    (Env_config_core.jsonl_retention_days ())
+  match Env_config_core.jsonl_retention_days () with
+  | _ -> fail "non-numeric retention days must raise Config_error"
+  | exception Env_config_core.Config_error _ -> ()
 
 let check_days_opt = option int
 
@@ -207,7 +208,7 @@ let () =
       , [ test_case "unset yields the documented default" `Quick
             test_unset_yields_the_documented_default
         ; test_case "override is honoured" `Quick test_override_is_honoured
-        ; test_case "unparseable falls back" `Quick test_unparseable_falls_back
+        ; test_case "unparseable fails closed" `Quick test_unparseable_fails_closed
         ] )
     ; ( "parse"
       , [ test_case "absent table yields none" `Quick test_parse_absent_table_yields_none

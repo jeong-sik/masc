@@ -20,161 +20,153 @@ let () = Printexc.register_printer (function
   | Config_error msg -> Some (Printf.sprintf "Env_config_core.Config_error: %s" msg)
   | _ -> None)
 
-let raw_value_opt name =
+type resolved_value =
+  | From_env of string
+  | From_toml of Config_boot_overrides.typed_value
+  | Unset
+
+let resolve_value name =
+  let from_boot () =
+    match Config_boot_overrides.get_typed_opt name with
+    | Some value -> From_toml value
+    | None -> Unset
+  in
   if Config_boot_overrides.is_file_owned name
-  then Config_boot_overrides.get_opt name
+  then from_boot ()
   else
     match Sys.getenv_opt name with
-    | Some _ as value -> value
-    | None -> Config_boot_overrides.get_opt name
+    | Some value -> From_env value
+    | None -> from_boot ()
 
-(* [MASC_PARSE_WARN] governs strict mode below. Defined here (rather than with
-   the other env-key constants further down) so the malformed handler can see
-   it. *)
-let parse_warn_env_key = "MASC_PARSE_WARN"
+let raw_value_opt name =
+  match resolve_value name with
+  | From_env value -> Some value
+  | From_toml value -> Some (Config_boot_overrides.typed_value_to_string value)
+  | Unset -> None
 
-(* Strict mode: when [MASC_PARSE_WARN] is truthy a malformed env value becomes a
-   hard [Config_error] (fail-fast boot) instead of warn + default. Read with a
-   primitive truthy check rather than [get_bool] so a malformed value for this
-   very key cannot recurse back into [reject_malformed_env]. *)
-let parse_strict_mode () =
-  match raw_value_opt parse_warn_env_key with
-  | Some v -> Option.value ~default:false (String_util.bool_of_word v)
-  | None -> false
-
-(* A non-empty env value that does not parse to the expected type is an operator
-   misconfiguration, not a silent fallback. Loud by default: warn and use
-   [default]. [MASC_PARSE_WARN] escalates to [Config_error] for fail-fast boot.
-   The empty string is handled by each caller as "unset" (silent default) — an
-   empty env var is a common intentional no-op. *)
+(* Strict fail-closed parsing: any non-empty env or boot value that does not
+   parse to the expected type or violates its domain raises [Config_error]
+   rather than silently substituting a default. Blank values stay "unset". *)
 let reject_malformed_env ~name ~raw ~type_name =
-  Log.Misc.warn "malformed env %s=%S (expected %s); using default" name raw
-    type_name;
-  if parse_strict_mode () then
-    raise
-      (Config_error
-         (Printf.sprintf "malformed env %s=%S (expected %s)" name raw type_name))
+  raise
+    (Config_error
+       (Printf.sprintf "malformed env %s=%S (expected %s)" name raw type_name))
 
-(** Safe getters with defaults *)
+(** Typed getters with defaults (strict fail-closed). *)
 let get_string ~default name =
-  match raw_value_opt name with
-  | None -> default
-  | Some v -> if String.trim v = "" then default else v
+  match resolve_value name with
+  | Unset -> default
+  | From_env v -> if String.trim v = "" then default else v
+  | From_toml (Config_boot_overrides.String v) ->
+    if String.trim v = "" then default else v
+  | From_toml ((Config_boot_overrides.Bool _ | Int _ | Float _) as v) ->
+    Config_boot_overrides.typed_value_to_string v
+
+let parse_int_string ~name raw =
+  match Safe_ops.int_of_string_safe raw with
+  | Some n -> n
+  | None -> reject_malformed_env ~name ~raw ~type_name:"int"
 
 let get_int ~default name =
-  match raw_value_opt name with
-  | None -> default
-  | Some v ->
-    if String.trim v = "" then default
-    else (
-      match Safe_ops.int_of_string_safe v with
-      | Some n -> n
-      | None ->
-        reject_malformed_env ~name ~raw:v ~type_name:"int";
-        default)
+  match resolve_value name with
+  | Unset -> default
+  | From_toml (Config_boot_overrides.Int n) -> n
+  | From_toml (Config_boot_overrides.String v) ->
+    if String.trim v = "" then default else parse_int_string ~name v
+  | From_toml ((Config_boot_overrides.Bool _ | Float _) as v) ->
+    reject_malformed_env ~name ~raw:(Config_boot_overrides.typed_value_to_string v) ~type_name:"int"
+  | From_env v ->
+    if String.trim v = "" then default else parse_int_string ~name v
 
-(* One reading of a MASC_*_RETENTION_DAYS knob, because the value decides
-   whether files are deleted and the stores disagreed about a malformed one.
-   tool_usage_log and keeper_runtime_manifest_housekeeping kept files forever;
-   keeper_tool_call_log started pruning at its 30-day default. Both cited the
-   third in a comment as the model they followed. A single operator typo —
-   3O for 30 — therefore deleted from one store and stopped deleting from
-   another, silently (#27110).
-
-   Malformed now means the same thing everywhere: the store's declared
-   default, with the WARN [reject_malformed_env] already emits. An explicit
-   zero or negative is the one way to say "keep everything", and it means that
-   in every store. *)
 type retention =
   | Retain_forever
   | Prune_after_days of int
 
 let get_retention_days ~default name =
-  match raw_value_opt name with
-  | None -> default
-  | Some raw ->
+  let of_days days =
+    if days > 0 then Prune_after_days days else Retain_forever
+  in
+  match resolve_value name with
+  | Unset -> default
+  | From_toml (Config_boot_overrides.Int days) -> of_days days
+  | From_toml (Config_boot_overrides.String raw)
+  | From_env raw ->
     let trimmed = String.trim raw in
     if trimmed = ""
     then default
     else (
       match Safe_ops.int_of_string_safe trimmed with
-      | Some days when days > 0 -> Prune_after_days days
-      | Some _ -> Retain_forever
+      | Some days -> of_days days
       | None ->
-        reject_malformed_env ~name ~raw ~type_name:"retention days (integer)";
-        default)
+        reject_malformed_env ~name ~raw ~type_name:"retention days (integer)")
+  | From_toml ((Config_boot_overrides.Bool _ | Float _) as v) ->
+    reject_malformed_env
+      ~name
+      ~raw:(Config_boot_overrides.typed_value_to_string v)
+      ~type_name:"retention days (integer)"
 ;;
 
+let parse_float_string ~name raw =
+  match Safe_ops.float_of_string_safe raw with
+  | Some f when Float.is_finite f -> f
+  | Some _ | None -> reject_malformed_env ~name ~raw ~type_name:"finite float"
+
 let get_float ~default name =
-  match raw_value_opt name with
-  | None -> default
-  | Some v ->
-    if String.trim v = "" then default
-    else (
-      match Safe_ops.float_of_string_safe v with
-      | Some f -> f
-      | None ->
-        reject_malformed_env ~name ~raw:v ~type_name:"float";
-        default)
+  match resolve_value name with
+  | Unset -> default
+  | From_toml (Config_boot_overrides.Float f) ->
+    if Float.is_finite f then f
+    else reject_malformed_env ~name ~raw:(string_of_float f) ~type_name:"finite float"
+  | From_toml (Config_boot_overrides.Int n) -> float_of_int n
+  | From_toml (Config_boot_overrides.String v)
+  | From_env v ->
+    if String.trim v = "" then default else parse_float_string ~name v
+  | From_toml (Config_boot_overrides.Bool _ as v) ->
+    reject_malformed_env
+      ~name
+      ~raw:(Config_boot_overrides.typed_value_to_string v)
+      ~type_name:"finite float"
 
-(** Variants that floor at zero.  An operator who sets a negative
-    value (e.g. [-5]) gets the default
-    rather than the literal — negative budgets/counts are
-    nonsensical for the call sites these feed
-    ({!Env_config_keeper}, size budgets, retry caps).
-
-    For the float variant, all non-finite values (NaN, +∞, -∞) are
-    also rejected.  [+∞] sneaks past the [< 0.0] check because
-    [infinity > 0.0] is [true], but for timeout/score/ratio
-    settings [+∞] is just as nonsensical as [NaN].  [-∞ < 0.0] is
-    [true] so it would already fall through, but using
-    {!Float.is_finite} as the single guard captures all three
-    pathological values uniformly. *)
-(* Canonical clamped read: before this, four modules each
-   carried their own [int_of_env_default] with a raw getenv + parse +
-   clamp body — the same helper, re-derived, drifting. *)
 let get_int_clamped ~default ~min_v ~max_v name =
   let v = get_int ~default name in
   max min_v (min max_v v)
 
 let get_float_clamped ~default ~min_v ~max_v name =
   let v = get_float ~default name in
-  let v = if Float.is_finite v then v else default in
   Float.max min_v (Float.min max_v v)
 
 let get_int_nonneg ~default name =
   let parsed = get_int ~default name in
-  if parsed < 0 then default else parsed
+  if parsed < 0 then
+    reject_malformed_env ~name ~raw:(string_of_int parsed) ~type_name:"non-negative int"
+  else parsed
 
 let get_float_nonneg ~default name =
   let parsed = get_float ~default name in
-  if (not (Float.is_finite parsed)) || parsed < 0.0 then default
+  if (not (Float.is_finite parsed)) || parsed < 0.0 then
+    reject_malformed_env
+      ~name
+      ~raw:(string_of_float parsed)
+      ~type_name:"non-negative finite float"
   else parsed
 
-let get_bool ~default name =
-  match raw_value_opt name with
-  | None -> default
-  | Some raw ->
-      if String.trim raw = "" then default
-      else (
-        match String_util.bool_of_word raw with
-        | Some value -> value
-        | None ->
-            reject_malformed_env ~name ~raw ~type_name:"bool";
-            default)
+let parse_bool_string ~name raw =
+  match String_util.bool_of_word raw with
+  | Some value -> value
+  | None -> reject_malformed_env ~name ~raw ~type_name:"bool"
 
-let get_bool_strict ~default name =
-  match raw_value_opt name with
-  | None -> default
-  | Some raw ->
-      if String.trim raw = "" then default
-      else (
-        match String_util.bool_of_word raw with
-        | Some value -> value
-        | None ->
-            raise
-              (Config_error
-                 (Printf.sprintf "malformed env %s=%S (expected bool)" name raw)))
+let get_bool ~default name =
+  match resolve_value name with
+  | Unset -> default
+  | From_toml (Config_boot_overrides.Bool b) -> b
+  | From_toml (Config_boot_overrides.String raw)
+  | From_env raw ->
+    if String.trim raw = "" then default else parse_bool_string ~name raw
+  | From_toml ((Config_boot_overrides.Int _ | Float _) as v) ->
+    reject_malformed_env
+      ~name
+      ~raw:(Config_boot_overrides.typed_value_to_string v)
+      ~type_name:"bool"
 
 let trim_opt = function
   | Some raw ->
@@ -351,15 +343,30 @@ and masc_http_base_url_opt () =
 
 (** {1 Additional Helpers} *)
 
-(** Read a TCP port from env, validated to [1, 65535]. Returns default on
-    missing, empty, out-of-range, or non-integer values. *)
+(** Read a TCP port from env or typed boot store, validated to [1, 65535].
+    Returns default on missing or blank values; raises [Config_error] on
+    out-of-range or non-integer values. *)
 let get_port ~default name =
-  match raw_value_opt name |> trim_opt with
-  | Some s -> (
-      match int_of_string_opt s with
-      | Some p when p > 0 && p < 65536 -> p
-      | _ -> default)
-  | None -> default
+  let validate_port p =
+    if p > 0 && p < 65536 then p
+    else reject_malformed_env ~name ~raw:(string_of_int p) ~type_name:"TCP port in [1, 65535]"
+  in
+  match resolve_value name with
+  | Unset -> default
+  | From_toml (Config_boot_overrides.Int p) -> validate_port p
+  | From_toml (Config_boot_overrides.String raw)
+  | From_env raw ->
+    (match trim_opt (Some raw) with
+     | None -> default
+     | Some s ->
+       (match Safe_ops.int_of_string_safe s with
+        | Some p -> validate_port p
+        | None -> reject_malformed_env ~name ~raw:s ~type_name:"TCP port in [1, 65535]"))
+  | From_toml ((Config_boot_overrides.Bool _ | Float _) as v) ->
+    reject_malformed_env
+      ~name
+      ~raw:(Config_boot_overrides.typed_value_to_string v)
+      ~type_name:"TCP port in [1, 65535]"
 
 (** {1 Host pressure integration} *)
 

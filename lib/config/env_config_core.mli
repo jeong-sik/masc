@@ -22,7 +22,17 @@ exception Config_error of string
     environment variable is missing.  Prefer the [_result] variants for
     structured error handling. *)
 
-(** {1 Raw env-var access} *)
+(** {1 Raw env-var and typed boot-value access} *)
+
+type resolved_value =
+  | From_env of string
+  | From_toml of Config_boot_overrides.typed_value
+  | Unset
+
+val resolve_value : string -> resolved_value
+(** Resolve [name] honoring precedence (process env > typed TOML boot store >
+    unset; or typed TOML boot store > unset for file-owned names) without
+    converting typed TOML values to strings. *)
 
 val raw_value_opt : string -> string option
 (** Read [name] via {!Sys.getenv_opt}, falling back to
@@ -32,7 +42,7 @@ val raw_value_opt : string -> string option
     A name declared file-owned ({!Config_boot_overrides.declare_file_owned})
     never reads the process environment: only the boot override store answers. *)
 
-(** {1 Typed getters with defaults} *)
+(** {1 Typed getters with defaults (strict fail-closed)} *)
 
 val get_string : default:string -> string -> string
 (** Unset or empty (including whitespace-only) gives [default], matching the
@@ -46,37 +56,25 @@ val get_retention_days : default:retention -> string -> retention
 
     Unset or empty gives [default], which each store declares for itself. A
     positive value prunes after that many days. Zero or negative keeps
-    everything — the one way to say so, and it says it in every store.
-
-    A malformed value gives [default] and warns, rather than meaning opposite
-    things per store: two kept files forever and one began pruning at its own
-    default, and each of the two cited the third as the model it followed
-    (#27110). *)
+    everything. A malformed non-empty value raises {!Config_error}. *)
 
 val get_int : default:int -> string -> int
 val get_float : default:float -> string -> float
 val get_bool : default:bool -> string -> bool
-val get_bool_strict : default:bool -> string -> bool
-(** Like {!get_bool}, but a present non-empty malformed value always raises
-    {!Config_error}. Missing and empty values still use [default]. Use at
-    security-sensitive boundaries where warn-and-default would fail open. *)
+(** Read typed configuration values. Missing or blank values return [default].
+    Any malformed, non-finite, or wrong-typed value raises {!Config_error}
+    (fail-closed, no silent default substitution). *)
 
 val get_int_clamped : default:int -> min_v:int -> max_v:int -> string -> int
-(** {!get_int} clamped into [[min_v, max_v]]. The canonical spelling of the
-    parse-with-default-then-clamp read that several modules used to carry
-    as local copies. *)
+(** {!get_int} clamped into [[min_v, max_v]]. Malformed values raise
+    {!Config_error}. *)
 
 val get_float_clamped : default:float -> min_v:float -> max_v:float -> string -> float
-(** {!get_float} clamped into [[min_v, max_v]]. Non-finite parses
-    ([NaN], [+∞], [-∞]) fall back to [default] before clamping so
-    [NaN] cannot propagate through {!Float.min} / {!Float.max}. *)
+(** {!get_float} clamped into [[min_v, max_v]]. Malformed or non-finite values
+    ([NaN], [+∞], [-∞]) raise {!Config_error}. *)
 
 val get_int_nonneg : default:int -> string -> int
-(** Like {!get_int} but floors negative parses at [default].  Use
-    for env vars whose call sites treat negatives as nonsensical
-    (retry caps, byte budgets, max counts).  NaN-equivalent for
-    [int] does not exist, so the only extra rejection vs {!get_int}
-    is [v < 0]. *)
+(** Like {!get_int} but raises {!Config_error} on negative parses. *)
 
 val jsonl_retention_days : unit -> int
 (** [MASC_JSONL_RETENTION_DAYS], default 30.  Day-file retention for the
@@ -84,12 +82,8 @@ val jsonl_retention_days : unit -> int
     maintenance prune. *)
 
 val get_float_nonneg : default:float -> string -> float
-(** Like {!get_float} but floors all non-finite (NaN, +∞, -∞) and
-    negative parses at [default].  Use for env vars whose call
-    sites treat negatives or non-finite values as nonsensical
-    (timeouts, scores, ratios).  [+∞] is rejected because
-    [float_of_string "inf"] succeeds and [+∞ > 0.0] would
-    otherwise pass an effectively unbounded value through. *)
+(** Like {!get_float} but raises {!Config_error} on negative or non-finite
+    ([NaN], [+∞], [-∞]) parses. *)
 
 (** {1 String / path helpers} *)
 
@@ -153,8 +147,8 @@ val masc_http_base_url_result : unit -> (string, string) result
 
 val get_port : default:int -> string -> int
 (** Read a TCP port from [name], validated to [\[1, 65535\]].
-    Returns [default] on missing, empty, out-of-range, or
-    non-integer values. *)
+    Returns [default] on missing or empty values; raises {!Config_error} on
+    out-of-range or non-integer values. *)
 
 (** {1 Host pressure integration} *)
 
@@ -279,9 +273,5 @@ val admin_token_opt : unit -> string option
 (** {1 Logging / telemetry} *)
 
 val telemetry_enabled_env_key : string
-
-(** [MASC_PARSE_WARN]. Malformed env values always warn; this flag escalates
-    them to a hard {!Config_error} (fail-fast boot). *)
-val parse_warn_env_key : string
 
 val telemetry_enabled : unit -> bool

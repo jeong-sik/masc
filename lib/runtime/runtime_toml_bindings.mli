@@ -10,5 +10,6 @@ val reject_obsolete_top_level_namespaces :
 val is_toml_table : Otoml.t -> bool
 
 val parse_bindings :
+  declared_models:string list ->
   Otoml.t ->
   (Runtime_schema.binding list, parse_error list) result

@@ -19,6 +19,23 @@ type t =
   | Browser
   | Machines
   | Memory_os
+  | Keeper_settings
+  | Reactive
+  | Autonomous
+  | Heartbeat
+  | Wire_capture
+  | Debug
+  | Turn
+  | Supervisor
+  | Metrics
+  | Memory
+  | Wiki_contents
+  | Vision
+  | Maintenance
+  | Transport
+  | Sandbox
+  | Web_search
+  | Otel
 [@@deriving enumerate]
 
 let key = function
@@ -42,6 +59,23 @@ let key = function
   | Browser -> "browser"
   | Machines -> "machines"
   | Memory_os -> "memory_os"
+  | Keeper_settings -> "keeper_settings"
+  | Reactive -> "reactive"
+  | Autonomous -> "autonomous"
+  | Heartbeat -> "heartbeat"
+  | Wire_capture -> "wire_capture"
+  | Debug -> "debug"
+  | Turn -> "turn"
+  | Supervisor -> "supervisor"
+  | Metrics -> "metrics"
+  | Memory -> "memory"
+  | Wiki_contents -> "wiki_contents"
+  | Vision -> "vision"
+  | Maintenance -> "maintenance"
+  | Transport -> "transport"
+  | Sandbox -> "sandbox"
+  | Web_search -> "web_search"
+  | Otel -> "otel"
 ;;
 
 let path table rest = key table ^ "." ^ rest

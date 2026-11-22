@@ -278,11 +278,24 @@ module Runtime = struct
   ;;
 
   let microvm_cpus () =
-    configured_guest_dimension
-      ~key:microvm_cpus_key
-      ~toml_key:"sandbox.microvm_cpus"
-      ~default:(string_of_int microvm_cpus_default)
-      Keeper_microvm_guest_size.cpus_of_string
+    let configured =
+      match Config_boot_overrides.get_typed_opt microvm_cpus_key with
+      | None -> Ok None
+      | Some (Config_boot_overrides.Int n) ->
+        Result.map Option.some (Keeper_microvm_guest_size.cpus_of_int n)
+      | Some (Config_boot_overrides.String raw) ->
+        guest_dimension_configured Keeper_microvm_guest_size.cpus_of_string raw
+      | Some ((Config_boot_overrides.Bool _ | Config_boot_overrides.Float _) as v) ->
+        Error
+          (Printf.sprintf
+             "expected integer cpus; got %S"
+             (Config_boot_overrides.typed_value_to_string v))
+    in
+    (match configured with
+     | Ok (Some dimension) -> Ok dimension
+     | Ok None -> Keeper_microvm_guest_size.cpus_of_int microvm_cpus_default
+     | Error _ as refused -> refused)
+    |> Result.map_error (fun detail -> "sandbox.microvm_cpus: " ^ detail)
   ;;
 
   let microvm_guest_size ~memory ~cpus =

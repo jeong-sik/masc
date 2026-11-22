@@ -104,6 +104,7 @@ let runpod_binding =
   ; repeat_penalty = None
   ; repeat_last_n = None
   ; return_progress = None
+  ; effort = None
   }
 
 let runtime_toml_with_credentials ?(provider_extra = "") ?(model_extra = "") credentials =

@@ -503,6 +503,44 @@ let sampling_capability_errors
 (* Every key [parse_model] reads. Any other key fails the load: a misspelt
    [tools_support = true] would otherwise load as a model without tool
    support and the keeper would run with an empty tool list. *)
+let reasoning_effort_list_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
+  : (Llm_provider.Reasoning_effort.t list option, parse_error list) result
+  =
+  match typed_find "an array of strings" path tbl key (Otoml.get_array Otoml.get_string) with
+  | Error _ as err -> err
+  | Ok None -> Ok None
+  | Ok (Some []) ->
+    Error (error (path ^ "." ^ key) (Printf.sprintf "%s must not be empty" key))
+  | Ok (Some raw_values) ->
+    let field_path = path ^ "." ^ key in
+    let rec loop seen acc = function
+      | [] -> Ok (Some (List.rev acc))
+      | raw :: rest ->
+        (match Llm_provider.Reasoning_effort.of_string raw with
+         | None ->
+           Error
+             (error
+                field_path
+                (Printf.sprintf
+                   "%s contains unknown effort %S; expected one of %s"
+                   key
+                   raw
+                   Llm_provider.Reasoning_effort.values_for_log))
+         | Some effort ->
+           if List.exists (Llm_provider.Reasoning_effort.equal effort) seen
+           then
+             Error
+               (error
+                  field_path
+                  (Printf.sprintf
+                     "%s must not repeat effort %S"
+                     key
+                     (Llm_provider.Reasoning_effort.to_string effort)))
+           else loop (effort :: seen) (effort :: acc) rest)
+    in
+    loop [] [] raw_values
+;;
+
 let model_keys =
   [ "api-name"
   ; "model-name"
@@ -517,6 +555,8 @@ let model_keys =
   ; "top-k"
   ; "min-p"
   ; "reasoning-effort"
+  ; "efforts"
+  ; "include-base"
   ; "reasoning-uncontrolled"
   ; "turn-timeout-s"
   ]
@@ -557,7 +597,7 @@ let model_unknown_key_errors ~path (tbl : Otoml.t) =
 ;;
 
 let parse_model (id : string) (tbl : Otoml.t)
-  : (Runtime_schema.model_spec, parse_error list) result
+  : (Runtime_schema.model_spec list, parse_error list) result
   =
   let path = Ns.(path Models) id in
   match model_unknown_key_errors ~path tbl with
@@ -572,12 +612,6 @@ let parse_model (id : string) (tbl : Otoml.t)
     | Ok (Some name), Ok _ | Ok None, Ok (Some name) -> Ok name
     | Ok None, Ok None -> Ok id
   in
-  (* [max-context] is an explicit operator override, not a required field: a
-     runtime whose model is covered by the AGENT_CORE capability catalog can leave it
-     unset and inherit the catalog's max-context (see
-     [Runtime_instance.resolve_max_context_of_runtime]). An operator-supplied value
-     must still be positive; [materialize_config] fail-closes at load time on
-     a runtime that resolves neither source. *)
   let max_context_result = positive_int_opt_field ~path ~key:"max-context" tbl in
   (
     let tools_support_result =
@@ -603,6 +637,8 @@ let parse_model (id : string) (tbl : Otoml.t)
     let top_k_result = positive_int_opt_field ~path ~key:"top-k" tbl in
     let min_p_result = probability_opt_field ~path ~key:"min-p" tbl in
     let reasoning_effort_result = reasoning_effort_opt_field ~path tbl in
+    let efforts_result = reasoning_effort_list_opt_field ~path ~key:"efforts" tbl in
+    let include_base_result = typed_find "a boolean" path tbl "include-base" Otoml.get_boolean in
     let reasoning_uncontrolled_result =
       typed_find_or
         "a boolean"
@@ -626,27 +662,41 @@ let parse_model (id : string) (tbl : Otoml.t)
     let* top_k = top_k_result in
     let* min_p = min_p_result in
     let* reasoning_effort = reasoning_effort_result in
+    let* efforts = efforts_result in
+    let* include_base = include_base_result in
     let* reasoning_uncontrolled = reasoning_uncontrolled_result in
-    (* A row that names an effort and also says it sends no control asks for
-       two different requests, and nothing downstream can honour both. Letting
-       one silently win is how a lane ends up reasoning while the config reads
-       as if it does not, which is the confusion this key exists to remove. *)
     let* () =
-      match reasoning_effort, reasoning_uncontrolled with
-      | Some _, true ->
+      match reasoning_effort, efforts, reasoning_uncontrolled with
+      | Some _, Some _, _ ->
+        Error
+          (error
+             (path ^ ".efforts")
+             "efforts cannot be declared alongside reasoning-effort on the same model")
+      | Some _, None, true ->
         Error
           (error
              (path ^ ".reasoning-uncontrolled")
              "reasoning-uncontrolled cannot sit on a model that also declares \
               reasoning-effort: one sends the declared effort, the other sends \
               no control at all")
-      | Some _, false | None, (true | false) -> Ok ()
+      | None, Some _, true ->
+        Error
+          (error
+             (path ^ ".reasoning-uncontrolled")
+             "reasoning-uncontrolled cannot sit on a model that also declares efforts")
+      | Some _, None, false | None, Some _, false | None, None, (true | false) -> Ok ()
+    in
+    let* () =
+      match include_base, efforts with
+      | Some _, None ->
+        Error (error (path ^ ".include-base") "include-base requires efforts to be declared")
+      | (Some _ | None), Some _ | None, None -> Ok ()
     in
     let* turn_timeout_s = turn_timeout_result in
     match sampling_capability_errors ~path ~capabilities ~top_k ~min_p with
     | _ :: _ as errors -> Error errors
     | [] ->
-      Ok
+      let base_spec : Runtime_schema.model_spec =
         { Runtime_schema.id
         ; api_name
         ; tools_support
@@ -661,7 +711,22 @@ let parse_model (id : string) (tbl : Otoml.t)
         ; reasoning_effort
         ; reasoning_uncontrolled
         ; turn_timeout_s
-        ; capabilities        })
+        ; capabilities
+        }
+      in
+      (match efforts with
+       | None -> Ok [ base_spec ]
+       | Some effort_list ->
+         let expanded =
+           List.map
+             (fun effort ->
+                { base_spec with
+                  id = id ^ "-" ^ Llm_provider.Reasoning_effort.to_string effort
+                ; reasoning_effort = Some effort
+                })
+             effort_list
+         in
+         Ok (if Option.value include_base ~default:false then base_spec :: expanded else expanded)))
 ;;
 
 let parse_models (toml : Otoml.t)
@@ -675,17 +740,33 @@ let parse_models (toml : Otoml.t)
       | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ) ->
     Error (error (Ns.(key Models)) "[models] must be a TOML table")
   | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
-    partition_results
-      (List.map
-         (fun (id, tbl) ->
-            match
-              validate_runtime_id_component
-                ~allow_dot:true
-                ~kind:"model"
-                ~path:(Ns.(path Models) id)
-                id
-            with
-            | Error _ as error -> error
-            | Ok () -> parse_model id tbl)
-         entries)
+    let ( let* ) = Result.bind in
+    let* groups =
+      partition_results
+        (List.map
+           (fun (id, tbl) ->
+              match
+                validate_runtime_id_component
+                  ~allow_dot:true
+                  ~kind:"model"
+                  ~path:(Ns.(path Models) id)
+                  id
+              with
+              | Error _ as error -> error
+              | Ok () -> parse_model id tbl)
+           entries)
+    in
+    let models = List.concat groups in
+    let rec check_unique seen = function
+      | [] -> Ok models
+      | (m : Runtime_schema.model_spec) :: rest ->
+        if List.mem m.id seen
+        then
+          Error
+            (error
+               (Ns.(path Models) m.id)
+               (Printf.sprintf "duplicate model id %S after effort expansion" m.id))
+        else check_unique (m.id :: seen) rest
+    in
+    check_unique [] models
 ;;

@@ -645,7 +645,7 @@ let canonical_managed_schema_file ~schema_dir raw_path =
       let base = Filename.basename canonical in
       if stat.Unix.st_kind = Unix.S_REG
          && String.equal (Filename.dirname canonical) schema_dir
-         && Runtime_antigravity_home.path_is_within ~root:schema_dir canonical
+         && Runtime_antigravity_policy.path_is_within ~root:schema_dir canonical
          && (not (String.equal canonical schema_dir))
          && (Filename.check_suffix base ".json" || String.equal base "instructions.md")
       then Some canonical
@@ -951,7 +951,7 @@ let should_allow_permission ~policy ~title ~kind =
   should_allow_tool_call ~policy identity
 ;;
 
-let parse_session_update_with ?managed_schema_root ?mcp_server_name params =
+let parse_session_update_with ?managed_schema_root ?mcp_server_name ?merged_wire params =
   let update =
     match json_field "update" params with
     | Some u -> u
@@ -973,7 +973,7 @@ let parse_session_update_with ?managed_schema_root ?mcp_server_name params =
     in
     Option.map (fun s -> Thought_delta s) text
   | Some "tool_call" ->
-    let wire = parse_tool_call_wire update in
+    let wire = Option.value merged_wire ~default:(parse_tool_call_wire update) in
     let title = Option.value wire.title ~default:"tool_call" in
     let status =
       json_string_opt "status" update
@@ -1200,7 +1200,16 @@ let prepare_antigravity_gemini_dir ~oauth_source ~mcp_server =
       let raw_dir =
         Filename.temp_dir (Printf.sprintf "masc-agy-acp-%d-" (Unix.getpid ())) ""
       in
-      Ok (try Unix.realpath raw_dir with Unix.Unix_error _ -> raw_dir)
+      try Ok (Unix.realpath raw_dir) with
+      | Unix.Unix_error (err, fn, arg) ->
+        (try Fs_compat.remove_tree raw_dir with Sys_error _ | Unix.Unix_error _ -> ());
+        Error
+          (Invalid_config
+             (Printf.sprintf
+                "failed to canonicalize Antigravity --gemini-dir (%s: %s %s)"
+                (Unix.error_message err)
+                fn
+                arg))
     with
     | Sys_error detail ->
       Error (Invalid_config ("failed to create Antigravity --gemini-dir: " ^ detail))
@@ -1222,10 +1231,10 @@ let prepare_antigravity_gemini_dir ~oauth_source ~mcp_server =
     (* Validate [gemini_dir] and [mcp_server.name] (safe leaf, no pattern syntax)
        BEFORE creating any subdirectories or writing config files. *)
     let* settings_json =
-      Runtime_antigravity_home.acp_settings_json ?mcp_server_name ~gemini_dir:dir ()
+      Runtime_antigravity_policy.acp_settings_json ?mcp_server_name ~gemini_dir:dir ()
       |> Result.map_error (fun err ->
         remove_dir_best_effort ();
-        Invalid_config (Runtime_antigravity_home.error_to_string err))
+        Invalid_config (Runtime_antigravity_policy.error_to_string err))
     in
     let config_dir = Filename.concat dir "config" in
     Fs_compat.mkdir_p config_dir;
@@ -1593,14 +1602,20 @@ let dispatch_incoming_message t msg =
       | None -> params
     in
     let update_kind = json_string_opt "sessionUpdate" update in
-    let active, config_observer =
+    let active, config_observer, merged_wire =
       with_state_lock t (fun () ->
-        (match t.active_turn, req_session_id, update_kind with
-         | Some turn, Some sid, Some ("tool_call" | "tool_call_update")
-           when String.equal sid turn.session_id ->
-           ignore (record_turn_tool_call_wire turn (parse_tool_call_wire update) : tool_call_wire)
-         | _ -> ());
-        t.active_turn, t.session_config_observer)
+        let merged =
+          match t.active_turn, req_session_id, update_kind with
+          | Some turn, Some sid, Some "tool_call"
+            when String.equal sid turn.session_id ->
+            Some (record_turn_tool_call_wire turn (parse_tool_call_wire update))
+          | Some turn, Some sid, Some "tool_call_update"
+            when String.equal sid turn.session_id ->
+            ignore (record_turn_tool_call_wire turn (parse_tool_call_wire update) : tool_call_wire);
+            None
+          | _ -> None
+        in
+        t.active_turn, t.session_config_observer, merged)
     in
     let mcp_server_name =
       match active with
@@ -1611,6 +1626,7 @@ let dispatch_incoming_message t msg =
       parse_session_update_with
         ?managed_schema_root:t.managed_schema_root
         ?mcp_server_name
+        ?merged_wire
         params
     in
     (match config_observer, event_opt with

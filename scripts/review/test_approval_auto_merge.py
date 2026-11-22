@@ -634,7 +634,80 @@ class DefaultAutoMergeReservation(unittest.TestCase):
         self.assertIsNotNone(result)
         assert result is not None
         self.assertEqual(result['status'], 'auto_merge_enabled')
-        self.assertFalse(any('/reviews' in path for path in github.counts))
+        self.assertTrue(any('/reviews' in path for path in github.counts))
+
+    def test_open_change_request_prevents_arming_even_with_approval(self):
+        with FakeGitHub() as github, redirect_stdout(io.StringIO()):
+            github.reviews[101] = [
+                review(1, 2, 'APPROVED', head=sha(101), when=T1),
+                review(2, 3, 'CHANGES_REQUESTED', head=sha(101), when=T1),
+            ]
+            self.assertIsNone(MERGE.auto_merge_default(REPO, 101))
+        self.assertEqual(github.mutations, [])
+
+    def test_open_change_request_drops_an_existing_reservation(self):
+        with FakeGitHub() as github, redirect_stdout(io.StringIO()):
+            github.pulls[101]['auto_merge'] = {'merge_method': 'squash'}
+            github.reviews[101] = [
+                review(1, 2, 'APPROVED', head=sha(101), when=T1),
+                review(2, 3, 'CHANGES_REQUESTED', head=sha(101), when=T2),
+            ]
+            self.assertIsNone(MERGE.auto_merge_default(REPO, 101))
+            self.assertIsNone(github.pulls[101]['auto_merge'])
+        self.assertEqual(github.mutations, [
+            ['gh', 'pr', 'merge', '101', '--repo', REPO, '--disable-auto']])
+
+    def test_superseded_or_dismissed_change_request_is_armed(self):
+        cases = {
+            'superseded by approval': [
+                review(1, 2, 'CHANGES_REQUESTED', head=sha(101), when=T1),
+                review(2, 2, 'APPROVED', head=sha(101), when=T2),
+            ],
+            'dismissed': [
+                review(1, 2, 'CHANGES_REQUESTED', head=sha(101), when=T1),
+                review(2, 2, 'DISMISSED', head=sha(101), when=T2),
+            ],
+        }
+        for label, reviews in cases.items():
+            with self.subTest(case=label), FakeGitHub() as github, redirect_stdout(io.StringIO()):
+                github.reviews[101] = reviews
+                result = MERGE.auto_merge_default(REPO, 101)
+            self.assertIsNotNone(result)
+            assert result is not None
+            self.assertEqual(result['status'], 'auto_merge_enabled')
+            self.assertEqual(github.mutations, [
+                ['gh', 'pr', 'merge', '101', '--repo', REPO,
+                 '--auto', '--squash', '--match-head-commit', sha(101)]])
+
+    def test_ambiguous_review_history_prevents_arming_and_drops_reservation(self):
+        with FakeGitHub() as github, redirect_stdout(io.StringIO()):
+            github.pulls[101]['auto_merge'] = {'merge_method': 'squash'}
+            github.reviews[101] = [
+                review(1, 2, 'APPROVED', head=sha(101), when=T1),
+                review(2, 2, 'CHANGES_REQUESTED', head=sha(101), when=T1),
+            ]
+            self.assertIsNone(MERGE.auto_merge_default(REPO, 101))
+            self.assertIsNone(github.pulls[101]['auto_merge'])
+        self.assertEqual(github.mutations, [
+            ['gh', 'pr', 'merge', '101', '--repo', REPO, '--disable-auto']])
+
+    def test_main_holds_and_disarms_when_change_request_is_open(self):
+        stdout = io.StringIO()
+        env = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+               'DISPATCH_PR': '101', 'DISPATCH_RECEIPT': ''}
+        with FakeGitHub() as github, patch.dict(os.environ, env, clear=False),              patch.object(sys, 'argv', ['approval-auto-merge.py']),              redirect_stdout(stdout):
+            github.pulls[101]['auto_merge'] = {'merge_method': 'squash'}
+            github.reviews[101] = [
+                review(1, 2, 'APPROVED', head=sha(101), when=T1),
+                review(2, 3, 'CHANGES_REQUESTED', head=sha(101), when=T2),
+            ]
+            code = MERGE.main()
+        self.assertEqual(code, 0)
+        self.assertEqual(github.mutations, [
+            ['gh', 'pr', 'merge', '101', '--repo', REPO, '--disable-auto']])
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload['status'], 'held')
+        self.assertIn('change request', payload['reason'])
 
     def test_an_existing_reservation_does_not_repeat_the_cli_mutation(self):
         with FakeGitHub() as github:

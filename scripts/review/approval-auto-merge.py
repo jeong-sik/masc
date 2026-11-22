@@ -227,6 +227,12 @@ def reservation_reads(repo, number, seen):
     # then reports why.
     if type_check_hold(repo, head, current['base']['ref']) is not None:
         return None, [current]
+    # GitHub's branch ruleset enforces the approval count, not open change
+    # requests. Do not arm, and drop any earlier reservation, while any
+    # account's latest formal review is CHANGES_REQUESTED or ambiguous;
+    # `prepare` then emits the hold reason.
+    if open_change_request_hold(repo, current) is not None:
+        return None, [current]
     return (current, selected, head), []
 
 
@@ -273,6 +279,16 @@ def auto_merge_default(repo, number):
         raise ValueError('GitHub has not confirmed auto-merge is enabled')
     return {'status': 'auto_merge_enabled', 'pr': selected, 'head': after['head']['sha'],
             'auto_merge': after['auto_merge']}
+
+
+def open_change_request_hold(repo, current):
+    """Why open change requests on `current` forbid an auto-merge reservation, or None."""
+    number, _, head = REVIEWS.pr_identity(current)
+    history = pages(f'repos/{repo}/pulls/{number}/reviews?per_page=100')
+    verdict = REVIEWS.evaluate(current, history, head=head)
+    if verdict['change_requests'] or verdict['ambiguous_review_ids']:
+        return f'#{number} has a change request or ambiguous review history'
+    return None
 
 
 def review_evidence(repo, current):

@@ -259,11 +259,37 @@ let encrypted_reasoning_long_id_stays_within_the_error_budget () =
     Alcotest.(check bool) "the record fits the redacted excerpt budget" true
       (String.length raw <= 240);
     let needle = "enc=" in
-    let occurrences = ref 0 in
-    for index = 0 to String.length raw - String.length needle do
-      if String.sub raw index (String.length needle) = needle then incr occurrences
-    done;
-    Alcotest.(check int) "both deliveries keep their digest" 2 !occurrences
+    let count text =
+      let occurrences = ref 0 in
+      for index = 0 to String.length text - String.length needle do
+        if String.sub text index (String.length needle) = needle then incr occurrences
+      done;
+      !occurrences
+    in
+    Alcotest.(check int) "both deliveries keep their digest" 2 (count raw);
+    (* The operator-facing string is built downstream and clipped there, so the
+       record must survive that pass with both digests intact. *)
+    (match
+       Complete_stream_error.http_error_of_stream_error
+         (Stream_parse_failed { reason; raw })
+     with
+     | Llm_provider.Http_client.ProviderFailure { message; _ } ->
+       Alcotest.(check int) "the projected message keeps both digests" 2 (count message);
+       Alcotest.(check bool) "the projected message is not truncated" true
+         (not
+            (let marker = "truncated" in
+             let found = ref false in
+             for index = 0 to String.length message - String.length marker do
+               if String.sub message index (String.length marker) = marker then found := true
+             done;
+             !found))
+     | Llm_provider.Http_client.HttpError _
+     | Llm_provider.Http_client.NetworkError _
+     | Llm_provider.Http_client.Connect_failed _
+     | Llm_provider.Http_client.TimeoutError _
+     | Llm_provider.Http_client.AcceptRejected _
+     | Llm_provider.Http_client.ProviderTerminal _ ->
+       Alcotest.fail "a parse failure is no longer a provider failure")
   | Error _ -> Alcotest.fail "a long id changed the failure reason"
   | Ok _ -> Alcotest.fail "changed ciphertext under a long id was accepted"
 end

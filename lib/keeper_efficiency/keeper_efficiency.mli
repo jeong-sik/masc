@@ -40,6 +40,10 @@ type keeper_month = {
   turns : int;
   input_tokens : int;
   output_tokens : int;
+  cache_read_tokens : int option;
+  cache_creation_tokens : int option;
+  cache_paired_input_tokens : int;
+  cache_hit_pct : float option;
   cost_usd : float;
   calls : int;
   failed : int;
@@ -48,7 +52,9 @@ type keeper_month = {
 }
 (** Month totals for one Keeper. [input_tokens] is the resolved spend's
     reported input total (cache-inclusive, as the runtime reported it);
-    [cost_usd] is 0 for lanes that do not report money. *)
+    [cache_read_tokens], [cache_creation_tokens], and [cache_hit_pct] stay
+    [None] (serialized as [null]) whenever no resolved row reported cache
+    telemetry; [cost_usd] is 0 for lanes that do not report money. *)
 
 type fleet = {
   turns_total : int;
@@ -57,8 +63,11 @@ type fleet = {
   output_tokens_per_turn : float;
   input_tokens_per_turn : float;
   cost_usd_per_turn : float;
+  cache_hit_pct : float option;
 }
-(** Run-weighted fleet row: totals divided by the fleet's total turns. *)
+(** Run-weighted fleet row: totals divided by the fleet's total turns.
+    [cache_hit_pct] is weighted over rows reporting cache reads and stays
+    [None] when unreported. *)
 
 type month_view = {
   month : string;  (** ["YYYY-MM"], as requested. *)
@@ -85,9 +94,17 @@ val read_month : masc_root:string -> month:string -> (month_view, string) result
     so the other fibers of its domain keep running; a call from outside Eio
     blocks its thread. *)
 
-val month_view_to_json : month_view -> Yojson.Safe.t
+val month_view_to_json :
+  ?registered_keepers:string list ->
+  ?active_only:bool ->
+  month_view ->
+  Yojson.Safe.t
 (** The wire/cache projection of a month view. The response schema is
-    ["masc.keeper-efficiency/v1"]; the TUI decoder consumes the same shape. *)
+    ["masc.keeper-efficiency/v1"]; the TUI decoder consumes the same shape.
+    When [registered_keepers] is provided, each keeper row carries
+    [registered : bool] (whether it is in the active roster vs historical/retired);
+    when [active_only] is [true] alongside [registered_keepers], unregistered
+    rows are filtered out and [fleet] is recomputed over active rows. *)
 
 val cache_path : masc_root:string -> month:string -> (string, string) result
 (** Where the month's boundary cache lives. Exposed for tooling that wants

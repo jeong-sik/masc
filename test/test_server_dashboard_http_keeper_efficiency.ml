@@ -33,6 +33,23 @@ let month_tests =
     , fun () ->
       check string "route path" "/api/v1/keeper-efficiency"
         Server_dashboard_http_keeper_efficiency.route_path )
+  ; ( "active_only query parameter parses strictly"
+    , `Quick
+    , fun () ->
+      let check_ok label expected target =
+        check (result bool string) label (Ok expected)
+          (Server_dashboard_http_keeper_efficiency.active_only_parameter (req target))
+      in
+      let base = Server_dashboard_http_keeper_efficiency.route_path in
+      check_ok "absent defaults false" false base;
+      check_ok "blank defaults false" false (base ^ "?active_only=");
+      check_ok "false is false" false (base ^ "?active_only=false");
+      check_ok "true is true" true (base ^ "?active_only=true");
+      check_ok "1 is true" true (base ^ "?active_only=1");
+      check bool "invalid active_only rejected" true
+        (Result.is_error
+           (Server_dashboard_http_keeper_efficiency.active_only_parameter
+              (req (base ^ "?active_only=maybe")))) )
   ]
 
 let () = run "Keeper_efficiency_route" [ ("month", month_tests) ]

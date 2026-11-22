@@ -308,6 +308,74 @@ let fleet_turns_24h_from_pulse ~base_path (keeper_names : string list) : int opt
   if !seeded > 0 then Some !total else None
 ;;
 
+let verifications_24h_of_runs ~now (runs : Verification_run_registry.run list)
+  : (int * int) option
+  =
+  match runs with
+  | [] -> None
+  | _ :: _ ->
+    let cutoff = now -. 86400.0 in
+    let passed = ref 0 in
+    let rejected = ref 0 in
+    List.iter
+      (fun (run : Verification_run_registry.run) ->
+        match run.status with
+        | Verification_run_registry.Running -> ()
+        | Verification_run_registry.Completed { outcome; elapsed_s; _ } ->
+          let finished_at = run.started_at +. Float.max 0.0 elapsed_s in
+          if finished_at >= cutoff && finished_at <= now +. 300.0
+          then (
+            match outcome with
+            | Verification_run_registry.Approved _ -> incr passed
+            | Verification_run_registry.Rejected _ -> incr rejected
+            | Verification_run_registry.Infrastructure_unavailable _
+            | Verification_run_registry.Not_reviewed _
+            | Verification_run_registry.Commit_failed _
+            | Verification_run_registry.Execution_pending _
+            | Verification_run_registry.Execution_repair_required _
+            | Verification_run_registry.Raised _
+            | Verification_run_registry.Review_cancelled _
+            | Verification_run_registry.Superseded_by _ -> ()))
+      runs;
+    Some (!passed, !rejected)
+;;
+
+let board_posts_24h_in_process ~config ~now ~light : int option =
+  if light || not (String.equal (Board_dispatch.backend_name ()) "jsonl")
+  then None
+  else (
+    try
+      let store = Board_dispatch.backend () in
+      match Board_dispatch.check_store_workspace ~base_path:config.Workspace.base_path store with
+      | Error _ -> None
+      | Ok () ->
+        let cutoff = now -. 86400.0 in
+        let posts = Board_dispatch.list_posts_unchecked ~limit:1000 () in
+        let count =
+          List.fold_left
+            (fun acc (post : Board.post) ->
+               if post.created_at >= cutoff && post.created_at <= now +. 300.0
+               then acc + 1
+               else acc)
+            0
+            posts
+        in
+        Some count
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> None)
+;;
+
+let cost_24h_usd_in_process ~base_path ~now ~light : float option =
+  try
+    if light
+    then Server_model_metrics_stream.peek_cached_cost_24h_usd ~base_path ~now
+    else Server_model_metrics_stream.read_cost_24h_usd ~base_path ~now
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> None
+;;
+
 let dashboard_shell_payload_json
       ?timing
       ?(light = false)
@@ -453,14 +521,37 @@ let dashboard_shell_payload_json
     in
     let scorecard_24h_json =
       let base = tasks_24h_rollup_json ~now:started_at tasks in
-      match
+      let turns_24h_opt =
         fleet_turns_24h_from_pulse ~base_path:config.Workspace.base_path configured_names
-      with
-      | None -> base
-      | Some turns_24h ->
-        (match base with
-         | `Assoc fields -> `Assoc (fields @ [ "turns_24h", `Int turns_24h ])
-         | other -> other)
+      in
+      let verif_passed_opt, verif_rejected_opt =
+        match
+          verifications_24h_of_runs
+            ~now:started_at
+            (Verification_run_registry.list_runs (Verification_run_registry.global ()))
+        with
+        | Some (passed, rejected) -> Some passed, Some rejected
+        | None -> None, None
+      in
+      let board_posts_opt =
+        board_posts_24h_in_process ~config ~now:started_at ~light
+      in
+      let cost_24h_opt =
+        cost_24h_usd_in_process ~base_path:config.Workspace.base_path ~now:started_at ~light
+      in
+      let additive_fields =
+        (match turns_24h_opt with
+         | Some turns_24h -> [ "turns_24h", `Int turns_24h ]
+         | None -> [])
+        @ [ "verifications_passed_24h", Json_util.int_opt_to_json verif_passed_opt
+          ; "verifications_rejected_24h", Json_util.int_opt_to_json verif_rejected_opt
+          ; "board_posts_24h", Json_util.int_opt_to_json board_posts_opt
+          ; "cost_24h_usd", Json_util.float_opt_to_json cost_24h_opt
+          ]
+      in
+      match base with
+      | `Assoc fields -> `Assoc (fields @ additive_fields)
+      | other -> other
     in
     let keeper_group_entries =
       List.map
@@ -492,6 +583,7 @@ let dashboard_shell_payload_json
             ] )
       ; "scorecard_24h", scorecard_24h_json
       ; "groups", groups_json
+      ; "capabilities", Server_health_public.capabilities_json
       ; "persisted_keepers", Json_util.int_opt_to_json persisted_keepers
       ; "configured_keepers", `Int configured_keepers
       ; "providers", provider_capacity_json ()

@@ -20,6 +20,17 @@ let month_parameter req =
   | Some _ | None -> current_month ()
 ;;
 
+let active_only_parameter req =
+  match Server_utils.query_param req "active_only" with
+  | None -> Ok false
+  | Some raw ->
+    let trimmed = String.lowercase_ascii (String.trim raw) in
+    (match trimmed with
+     | "" | "false" | "0" -> Ok false
+     | "true" | "1" -> Ok true
+     | _ -> Error (Printf.sprintf "invalid active_only: %s (expected true or false)" raw))
+;;
+
 let error_json code detail =
   `Assoc [ ("error", `String detail); ("code", `String code) ]
 ;;
@@ -30,28 +41,47 @@ let handle_get state req reqd =
     Server_auth.respond_json_value_with_cors ~status:`Bad_request req reqd
       (error_json "keeper_efficiency_invalid_month" ("invalid month: " ^ month))
   else
-    let masc_root =
-      Common.masc_dir_from_base_path ~base_path:(Mcp_server.workspace_config state).base_path
-    in
-    (* [Keeper_efficiency.read_month] folds dated JSONL with blocking channel
-       IO, exactly the shape the metrics tail routes off the Eio domain.
-       Convert storage exceptions inside the worker without catching
-       cancellation so unreadable paths still answer 503. *)
-    let reading =
-      Eio_guard.with_named_switch "keeper-efficiency" (fun () ->
-          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-              try Keeper_efficiency.read_month ~masc_root ~month with
-              | Sys_error detail -> Error detail
-              | Unix.Unix_error (err, op, arg) ->
-                Error
-                  (Printf.sprintf "%s(%s): %s" op arg (Unix.error_message err))))
-    in
-    match reading with
+    match active_only_parameter req with
     | Error detail ->
-      Server_auth.respond_json_value_with_cors ~status:`Service_unavailable req reqd
-        (error_json "keeper_efficiency_unavailable" detail)
-    | Ok view ->
-      Http.Response.json_value ~status:`OK ~compress:true ~request:req
-        ~extra_headers:(Server_auth.admitted_cors_headers req)
-        (Keeper_efficiency.month_view_to_json view) reqd
+      Server_auth.respond_json_value_with_cors ~status:`Bad_request req reqd
+        (error_json "keeper_efficiency_invalid_active_only" detail)
+    | Ok active_only ->
+      let base_path = (Mcp_server.workspace_config state).base_path in
+      let masc_root = Common.masc_dir_from_base_path ~base_path in
+      (* [Keeper_efficiency.read_month] folds dated JSONL with blocking channel
+         IO, exactly the shape the metrics tail routes off the Eio domain.
+         Convert storage exceptions inside the worker without catching
+         cancellation so unreadable paths still answer 503. *)
+      let reading =
+        Eio_guard.with_named_switch "keeper-efficiency" (fun () ->
+            Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+                try
+                  let view = Keeper_efficiency.read_month ~masc_root ~month in
+                  let configured_names =
+                    Keeper_types_profile.read_keeper_profile_snapshot ~base_path
+                    |> Keeper_types_profile.snapshot_configured_keeper_names
+                  in
+                  let live_names =
+                    Keeper_registry.all ~base_path ()
+                    |> List.map (fun (e : Keeper_registry.registry_entry) -> e.name)
+                  in
+                  let registered_keepers =
+                    List.sort_uniq String.compare (configured_names @ live_names)
+                  in
+                  Result.map (fun v -> v, registered_keepers) view
+                with
+                | Sys_error detail -> Error detail
+                | Unix.Unix_error (err, op, arg) ->
+                  Error
+                    (Printf.sprintf "%s(%s): %s" op arg (Unix.error_message err))))
+      in
+      match reading with
+      | Error detail ->
+        Server_auth.respond_json_value_with_cors ~status:`Service_unavailable req reqd
+          (error_json "keeper_efficiency_unavailable" detail)
+      | Ok (view, registered_keepers) ->
+        Http.Response.json_value ~status:`OK ~compress:true ~request:req
+          ~extra_headers:(Server_auth.admitted_cors_headers req)
+          (Keeper_efficiency.month_view_to_json ~registered_keepers ~active_only view)
+          reqd
 ;;

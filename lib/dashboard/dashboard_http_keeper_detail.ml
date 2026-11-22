@@ -108,6 +108,8 @@ let compute_metrics_window
                      ; "context_ratio", `Null
                      ; "context_tokens", `Null
                      ; "context_max", `Null
+                     ; "context_provenance", `String "unavailable"
+                     ; "context_metrics_unavailable_reason", `String "metrics_row_without_context_measurement"
                      ; ( "message_count"
                        , Json_util.int_opt_to_json
                            (Safe_ops.json_int_opt "message_count" json) )

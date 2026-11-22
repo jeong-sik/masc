@@ -16,6 +16,17 @@
 
 let turn_record_source = "turn_record"
 
+type context_provenance =
+  | Provenance_measured
+  | Provenance_estimated
+  | Provenance_unavailable
+
+let context_provenance_to_string = function
+  | Provenance_measured -> "measured"
+  | Provenance_estimated -> "estimated"
+  | Provenance_unavailable -> "unavailable"
+;;
+
 (* Closed reason set. Every non-observed outcome names which stage failed;
    an unknown string here is a bug, not a new category. *)
 let reason_measurement_missing = "context_measurement_missing"
@@ -47,27 +58,42 @@ let missing_measurement_json () =
   not_observed_json ~reason:reason_measurement_missing ()
 ;;
 
-let context_fields_unavailable unavailable =
+let context_fields_unavailable
+      ?(provenance = Provenance_unavailable)
+      ?estimated_ratio
+      ~reason
+      unavailable
+  =
+  let provenance_wire = `String (context_provenance_to_string provenance) in
+  let estimated_json = Json_util.float_opt_to_json estimated_ratio in
   let context =
     `Assoc
       [ "source", `Null
       ; "context_ratio", `Null
       ; "context_tokens", `Null
       ; "context_max", `Null
+      ; "provenance", provenance_wire
+      ; "estimated_context_ratio", estimated_json
       ; "metrics_unavailable", unavailable
+      ; "metrics_unavailable_reason", `String reason
       ]
   in
   [ "context_ratio", `Null
   ; "context_tokens", `Null
   ; "context_max", `Null
   ; "context_source", `Null
+  ; "context_provenance", provenance_wire
+  ; "estimated_context_ratio", estimated_json
   ; "context_metrics_unavailable", unavailable
+  ; "context_metrics_unavailable_reason", `String reason
   ; "context", context
   ]
 ;;
 
 let missing_context_fields () =
-  context_fields_unavailable (missing_measurement_json ())
+  context_fields_unavailable
+    ~reason:reason_measurement_missing
+    (missing_measurement_json ())
 ;;
 
 type latest_turn_observation =
@@ -156,17 +182,21 @@ let observed_context_fields (record : Turn_record.t) =
     | Some { body_bytes; _ } -> `Int body_bytes
     | None -> `Null
   in
+  let provenance_wire = `String (context_provenance_to_string Provenance_measured) in
   let context =
     `Assoc
       [ "source", `String turn_record_source
       ; "context_ratio", ratio
       ; "context_tokens", opt_int tokens
       ; "context_max", opt_int window
+      ; "provenance", provenance_wire
+      ; "estimated_context_ratio", `Null
       ; "observed_at", `String (Masc_domain.iso8601_of_unix_seconds record.ts)
       ; "turn_ref", Ids.Turn_ref.to_yojson record.turn_ref
       ; "absolute_turn", `Int record.absolute_turn
       ; "request_body_bytes", request_body_bytes
       ; "metrics_unavailable", `Null
+      ; "metrics_unavailable_reason", `Null
       ; "usage_scope", `String (Runtime_usage_scope.to_string record.usage.scope)
       ]
   in
@@ -174,7 +204,10 @@ let observed_context_fields (record : Turn_record.t) =
   ; "context_tokens", opt_int tokens
   ; "context_max", opt_int window
   ; "context_source", `String turn_record_source
+  ; "context_provenance", provenance_wire
+  ; "estimated_context_ratio", `Null
   ; "context_metrics_unavailable", `Null
+  ; "context_metrics_unavailable_reason", `Null
   ; "context", context
   ]
 ;;
@@ -193,31 +226,51 @@ let context_observation ~config ~keeper_name ~current_trace_id =
     | No_turn_record | Undecodable_turn_record | Observed _ -> Complete in
   let fields = match observation with
   | No_turn_record ->
-    context_fields_unavailable (not_observed_json ~reason:reason_measurement_missing ())
+    context_fields_unavailable
+      ~reason:reason_measurement_missing
+      (not_observed_json ~reason:reason_measurement_missing ())
   | Undecodable_turn_record ->
-    context_fields_unavailable (not_observed_json ~reason:reason_undecodable ())
+    context_fields_unavailable
+      ~reason:reason_undecodable
+      (not_observed_json ~reason:reason_undecodable ())
   | Turn_record_read_failed _ ->
-    context_fields_unavailable (not_observed_json ~reason:reason_read_failed ())
+    context_fields_unavailable
+      ~reason:reason_read_failed
+      (not_observed_json ~reason:reason_read_failed ())
   | Observed record ->
     (* A reseeded identity starts a new trace while the per-name store keeps
        the previous trace's rows: projecting those would show the prior
        generation's occupancy on a keeper whose context is empty. *)
     if not (String.equal record.trace_id current_trace_id)
-    then context_fields_unavailable (not_observed_json ~reason:reason_trace_mismatch ())
+    then
+      context_fields_unavailable
+        ~reason:reason_trace_mismatch
+        (not_observed_json ~reason:reason_trace_mismatch ())
     else (
       match record.usage.scope, record.usage.input_tokens, context_window_of_record record with
       | Runtime_usage_scope.Per_request, None, _ ->
-        context_fields_unavailable (not_observed_json ~reason:reason_without_usage ())
+        context_fields_unavailable
+          ~reason:reason_without_usage
+          (not_observed_json ~reason:reason_without_usage ())
       | Runtime_usage_scope.Per_request, Some tokens, window ->
-        let unmeasured reason =
+        let unmeasured ?(provenance = Provenance_unavailable) ?estimated_ratio reason =
           context_fields_unavailable
+            ~provenance
+            ?estimated_ratio
+            ~reason
             (not_observed_json ~reason
                ~usage_scope:(Runtime_usage_scope.to_string record.usage.scope)
                ~raw_input_tokens:tokens ?context_window:window ())
         in
         (match record.usage.input_provenance with
          | Some Turn_input_provenance.Context_estimate ->
-           unmeasured reason_input_estimate
+           let estimated_ratio =
+             match window with
+             | Some maximum when maximum > 0 && tokens >= 0 && tokens <= maximum ->
+               Some (float_of_int tokens /. float_of_int maximum)
+             | Some _ | None -> None
+           in
+           unmeasured ~provenance:Provenance_estimated ?estimated_ratio reason_input_estimate
          | None -> unmeasured reason_input_provenance_unavailable
          | Some Turn_input_provenance.Measured_request ->
            (match window with
@@ -226,6 +279,7 @@ let context_observation ~config ~keeper_name ~current_trace_id =
             | Some _ | None -> observed_context_fields record))
       | Runtime_usage_scope.Turn_total, tokens, window ->
         context_fields_unavailable
+          ~reason:reason_turn_total_usage
           (not_observed_json
              ~reason:reason_turn_total_usage
              ~usage_scope:(Runtime_usage_scope.to_string record.usage.scope)
@@ -234,6 +288,7 @@ let context_observation ~config ~keeper_name ~current_trace_id =
              ())
       | Runtime_usage_scope.Conversation_cumulative, tokens, window ->
         context_fields_unavailable
+          ~reason:reason_cumulative_usage
           (not_observed_json
              ~reason:reason_cumulative_usage
              ~usage_scope:(Runtime_usage_scope.to_string record.usage.scope)
@@ -242,6 +297,7 @@ let context_observation ~config ~keeper_name ~current_trace_id =
              ())
       | Runtime_usage_scope.Usage_scope_unavailable, tokens, window ->
         context_fields_unavailable
+          ~reason:reason_usage_scope_unavailable
           (not_observed_json
              ~reason:reason_usage_scope_unavailable
              ~usage_scope:(Runtime_usage_scope.to_string record.usage.scope)

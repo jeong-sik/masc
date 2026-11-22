@@ -52,8 +52,12 @@ let persistent_agents_json ~keeper_names ~keeper_rows =
                    ; "context_tokens", field_or_null "context_tokens"
                    ; "context_max", field_or_null "context_max"
                    ; "context_source", field_or_null "context_source"
+                   ; "context_provenance", field_or_null "context_provenance"
+                   ; "estimated_context_ratio", field_or_null "estimated_context_ratio"
                    ; ( "context_metrics_unavailable"
                      , field_or_null "context_metrics_unavailable" )
+                   ; ( "context_metrics_unavailable_reason"
+                     , field_or_null "context_metrics_unavailable_reason" )
                    ; "context", field_or_null "context"
                    ]
                  @ [ "last_turn_usage", field_or_null "last_turn_usage" ]))

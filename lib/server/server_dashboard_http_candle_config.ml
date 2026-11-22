@@ -603,6 +603,40 @@ let split_dotted_key_segments (raw : string) : string list =
   List.rev !acc
 ;;
 
+let split_identifier_words (s : string) : string list =
+  String.split_on_char '-' s
+  |> List.concat_map (String.split_on_char '_')
+  |> List.filter (fun seg -> not (String.equal seg ""))
+;;
+
+let normalize_key_separators (s : string) : string =
+  String.map (function '-' -> '_' | c -> c) s
+;;
+
+(* Non-secret configuration keys whose name happens to include the word [key]. *)
+let safe_non_secret_key_names =
+  [ "primary_key"
+  ; "sort_key"
+  ; "foreign_key"
+  ; "partition_key"
+  ; "cache_key"
+  ; "routing_key"
+  ; "group_key"
+  ; "sharding_key"
+  ; "idempotency_key"
+  ; "dedup_key"
+  ; "label_key"
+  ; "tag_key"
+  ; "metric_key"
+  ; "full_key"
+  ; "table_key"
+  ; "key_name"
+  ; "key_type"
+  ; "key_id"
+  ; "public_key"
+  ]
+;;
+
 let is_secret_key raw_key =
   let segments = split_dotted_key_segments raw_key in
   let leaf =
@@ -612,10 +646,33 @@ let is_secret_key raw_key =
   in
   let lc = String.lowercase_ascii (String.trim leaf) in
   if String.ends_with ~suffix:"_env" lc
+     || String.ends_with ~suffix:"-env" lc
      || String.ends_with ~suffix:"_file" lc
+     || String.ends_with ~suffix:"-file" lc
      || String.ends_with ~suffix:"_path" lc
+     || String.ends_with ~suffix:"-path" lc
   then false
-  else
+  else (
+    let words = split_identifier_words lc in
+    let norm = normalize_key_separators lc in
+    let has_secret_key_word =
+      (List.mem "key" words || List.mem "apikey" words || List.mem "passkey" words)
+      && not (List.mem norm safe_non_secret_key_names)
+    in
+    let has_secret_session =
+      String.equal lc "session"
+      || String.starts_with ~prefix:"x-session" lc
+      || String.starts_with ~prefix:"x_session" lc
+      || String.ends_with ~suffix:"_session" lc
+      || String.ends_with ~suffix:"-session" lc
+      || List.mem norm
+           [ "session_id"
+           ; "session_key"
+           ; "session_token"
+           ; "session_secret"
+           ; "session_cookie"
+           ]
+    in
     Secret_patterns.is_sensitive_key lc
     || String_util.contains_substring lc "api_key"
     || String_util.contains_substring lc "api-key"
@@ -624,12 +681,80 @@ let is_secret_key raw_key =
     || String_util.contains_substring lc "passwd"
     || String_util.contains_substring lc "token"
     || String_util.contains_substring lc "private_key"
+    || String_util.contains_substring lc "private-key"
     || String_util.contains_substring lc "credential"
     || String_util.contains_substring lc "authorization"
-    || String.equal lc "auth"
+    || String_util.contains_substring lc "cookie"
+    || String_util.contains_substring lc "hmac"
+    || List.mem "auth" words
+    || List.mem "authn" words
+    || List.mem "authz" words
+    || List.mem "sig" words
+    || List.mem "signature" words
+    || has_secret_key_word
+    || has_secret_session
     || String.equal lc "pat"
     || String.ends_with ~suffix:"_pat" lc
-    || String.equal lc "bearer"
+    || String.ends_with ~suffix:"-pat" lc
+    || String.equal lc "bearer")
+;;
+
+(* Redact secret query-string parameters ([?key=...], [&token=...], [?api_key=...],
+   etc.) while preserving the parameter name and URL structure. Compiled once at
+   module init; [Re] is thread-safe across Eio fibers and domains. *)
+let url_query_secret_re =
+  let secret_param =
+    Re.alt
+      [ Re.str "api_key"
+      ; Re.str "api-key"
+      ; Re.str "apikey"
+      ; Re.str "access_key"
+      ; Re.str "access-key"
+      ; Re.str "access_token"
+      ; Re.str "access-token"
+      ; Re.str "auth_token"
+      ; Re.str "auth-token"
+      ; Re.str "refresh_token"
+      ; Re.str "refresh-token"
+      ; Re.str "id_token"
+      ; Re.str "id-token"
+      ; Re.str "session_token"
+      ; Re.str "session-token"
+      ; Re.str "session_id"
+      ; Re.str "session-id"
+      ; Re.str "bearer_token"
+      ; Re.str "bearer-token"
+      ; Re.str "signature"
+      ; Re.str "password"
+      ; Re.str "passwd"
+      ; Re.str "secret"
+      ; Re.str "session"
+      ; Re.str "token"
+      ; Re.str "auth"
+      ; Re.str "hmac"
+      ; Re.str "sig"
+      ; Re.str "key"
+      ]
+  in
+  Re.compile
+    (Re.seq
+       [ Re.group (Re.seq [ Re.set "?&"; Re.no_case secret_param; Re.char '=' ])
+       ; Re.rep1 (Re.compl [ Re.set "&# \t\r\n\"'" ])
+       ])
+;;
+
+let redact_url_query_secrets (text : string) : string =
+  if not (String.contains text '?') && not (String.contains text '&')
+  then text
+  else
+    Re.replace
+      url_query_secret_re
+      ~f:(fun g -> Re.Group.get g 1 ^ "[REDACTED]")
+      text
+;;
+
+let redact_value_secrets (text : string) : string =
+  text |> Secret_patterns.redact_text |> redact_url_query_secrets
 ;;
 
 let assignment_lhs_of_line (line : string) : (string * int) option =
@@ -858,10 +983,10 @@ let redact_toml_lines (lines : string list) : string array =
              in_secret_multiline := true;
              String.sub line 0 (eq_idx + 1) ^ " \"[REDACTED]\""
            | Some _ | None ->
-             line |> redact_inline_table_secrets |> Secret_patterns.redact_text)
+             line |> redact_inline_table_secrets |> redact_value_secrets)
          else if !in_secret_multiline
          then leading_whitespace line ^ "\"[REDACTED]\""
-         else line |> redact_inline_table_secrets |> Secret_patterns.redact_text)
+         else line |> redact_inline_table_secrets |> redact_value_secrets)
       lines
       structural
   in
@@ -879,7 +1004,7 @@ let redact_diff_line line =
     | Some (lhs, eq_idx) when is_secret_key lhs ->
       String.sub body 0 (eq_idx + 1) ^ " \"[REDACTED]\""
     | Some _ | None ->
-      body |> redact_inline_table_secrets |> Secret_patterns.redact_text
+      body |> redact_inline_table_secrets |> redact_value_secrets
   in
   prefix ^ redacted_body
 ;;
@@ -1055,12 +1180,12 @@ let toml_value_to_json ~secret = function
       ; "masked", `String "[REDACTED]"
       ; "source", `String "inline_redacted"
       ]
-  | Keeper_toml_loader.Toml_string s -> `String (Secret_patterns.redact_text s)
+  | Keeper_toml_loader.Toml_string s -> `String (redact_value_secrets s)
   | Keeper_toml_loader.Toml_int i -> `Int i
   | Keeper_toml_loader.Toml_float f -> `Float f
   | Keeper_toml_loader.Toml_bool b -> `Bool b
   | Keeper_toml_loader.Toml_string_array xs ->
-    `List (List.map (fun s -> `String (Secret_patterns.redact_text s)) xs)
+    `List (List.map (fun s -> `String (redact_value_secrets s)) xs)
   | Keeper_toml_loader.Toml_array _
   | Keeper_toml_loader.Toml_table _
   | Keeper_toml_loader.Toml_inline_table _
@@ -1093,7 +1218,7 @@ let is_unset_effective_display (s : string) : bool =
 ;;
 
 let effective_value_to_json (row : Registry.setting) (raw_eff : string) : Yojson.Safe.t =
-  let eff = Secret_patterns.redact_text raw_eff in
+  let eff = redact_value_secrets raw_eff in
   let trimmed = String.trim eff in
   if is_unset_effective_display trimmed
   then `Null
@@ -1124,6 +1249,75 @@ let is_routing_failover_key (full_key : string) : bool =
   || String.starts_with ~prefix:"cascades." full_key
   || String.starts_with ~prefix:"failover." full_key
   || String.starts_with ~prefix:"fusion." full_key
+;;
+
+(* Process-lifetime bind, port, listener, storage, and worker-pool sections
+   cannot be hot-reloaded by [Server_runtime_config_broadcast]. *)
+let is_restart_only_runtime_key ~segs ~leaf_norm =
+  let top_lc =
+    match segs with
+    | top :: _ -> String.lowercase_ascii top
+    | [] -> ""
+  in
+  let top_is_restart =
+    match top_lc with
+    | "server" | "http" | "grpc" | "listener" | "listeners" | "storage"
+    | "pool" | "pools" | "domain_pool" | "executor_pool" | "worker_pool"
+    | "tls" | "ssl" | "socket" -> true
+    | _ -> false
+  in
+  let leaf_is_restart =
+    match leaf_norm with
+    | "bind" | "bind_host" | "bind_addr" | "bind_address" | "listen_addr"
+    | "listen_host" | "listen_port" | "port" | "grpc_port" | "http_port"
+    | "storage_root" | "storage_dir" | "data_root" | "data_dir"
+    | "base_path" | "masc_root" | "pool_size" | "domain_pool_size"
+    | "executor_pool_size" | "worker_pool_size" | "max_domains" -> true
+    | _ ->
+      String.ends_with ~suffix:"_port" leaf_norm
+      || String.ends_with ~suffix:"_bind" leaf_norm
+      || String.ends_with ~suffix:"_socket" leaf_norm
+      || String.ends_with ~suffix:"_pool_size" leaf_norm
+  in
+  top_is_restart || leaf_is_restart
+;;
+
+let classify_runtime_key_reload_scope ?known_provider_ids (full_key : string) : reload_scope =
+  let segs = split_dotted_key_segments full_key |> List.map strip_toml_quotes in
+  let leaf_norm =
+    match List.rev segs with
+    | leaf :: _ -> normalize_key_separators (String.lowercase_ascii (String.trim leaf))
+    | [] -> ""
+  in
+  if is_restart_only_runtime_key ~segs ~leaf_norm
+  then Restart_required
+  else (
+    let top_raw =
+      match segs with
+      | top :: _ -> top
+      | [] -> ""
+    in
+    let top_lc = String.lowercase_ascii top_raw in
+    let is_known_provider_binding =
+      match known_provider_ids with
+      | Some ids -> Hashtbl.mem ids top_raw
+      | None -> false
+    in
+    let is_hot_reload_section =
+      match top_lc with
+      | "providers" | "models" | "runtime" | "routing" | "assignment"
+      | "assignments" | "lane" | "lanes" | "binding" | "bindings"
+      | "cascade" | "cascades" | "failover" | "fusion" -> true
+      | _ -> is_known_provider_binding
+    in
+    let is_timeout_or_retry_leaf =
+      String_util.contains_substring leaf_norm "timeout"
+      || String_util.contains_substring leaf_norm "retry"
+      || String_util.contains_substring leaf_norm "retries"
+    in
+    if is_hot_reload_section || is_timeout_or_retry_leaf
+    then Hot_reload
+    else Restart_required)
 ;;
 
 let title_case_leaf (raw : string) : string =
@@ -1559,6 +1753,9 @@ let runtime_schema_json ~now ~base_path =
                | Keeper_toml_loader.Toml_local_date _
                | Keeper_toml_loader.Toml_local_time _ -> "structured")
            in
+           let r_scope =
+             classify_runtime_key_reload_scope ~known_provider_ids full_key
+           in
            push
              cat
              (`Assoc
@@ -1569,7 +1766,7 @@ let runtime_schema_json ~now ~base_path =
                 ; "current_value", toml_value_to_json ~secret:sec toml_v
                 ; "default_value", `Null
                 ; "provenance", `String (provenance_to_string Prov_project)
-                ; "reload_scope", `String (reload_scope_to_string Restart_required)
+                ; "reload_scope", `String (reload_scope_to_string r_scope)
                 ; "secret", `Bool sec
                 ; "writable", `Bool (not (String.equal type_str "structured"))
                 ; "description", `String ("Declared runtime.toml key " ^ full_key)
@@ -2088,7 +2285,7 @@ let apply_patch_op text = function
         Ok (Toml_line_editor.edit_table_multiline_array text ~path:table ~key ~values:xs))
 ;;
 
-let reload_scope_for_ops ~target ops =
+let reload_scope_for_ops ?known_provider_ids ~target ops =
   List.fold_left
     (fun acc op ->
        let table, key =
@@ -2102,9 +2299,7 @@ let reload_scope_for_ops ~target ops =
            (match Registry.find_by_toml_key full_key with
             | Some row -> reload_scope_of_registry row.reload_class
             | None ->
-              if String.starts_with ~prefix:"runtime." full_key
-              then Hot_reload
-              else Restart_required)
+              classify_runtime_key_reload_scope ?known_provider_ids full_key)
          | Target_keeper _ | Target_keeper_create ->
            (match key with
             | "voice_always_allow" -> Hot_reload
@@ -2386,7 +2581,17 @@ let config_patch_json ?(now = Time_compat.now ()) ~config ~actor ~body_str () =
                          ~before:disk_preimage
                          ~after:after_text
                      in
-                     let r_scope = reload_scope_for_ops ~target ops in
+                     let known_provider_ids =
+                       match target with
+                       | Target_runtime ->
+                         (match Keeper_toml_loader.parse_toml after_text with
+                          | Ok doc -> Some (fst (collect_provider_catalog doc))
+                          | Error _ -> None)
+                       | Target_keeper _ | Target_keeper_create -> None
+                     in
+                     let r_scope =
+                       reload_scope_for_ops ?known_provider_ids ~target ops
+                     in
                      if dry_run
                      then
                        Ok

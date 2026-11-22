@@ -730,6 +730,91 @@ let test_an_unplaced_row_leaves_with_its_day () =
     check int "the instant before, it counts" 1 (int_field "malformed_rows" (read (leaves -. 1.0)));
     check int "from that instant, it does not" 0 (int_field "malformed_rows" (read leaves)))
 
+let test_cache_telemetry_and_reconciliation () =
+  with_workspace "keeper_cost_cache_reconcile" (fun config ->
+    let now = Unix.gettimeofday () in
+    let ts = now -. 60.0 in
+    (* Keeper A: reports cache tokens on turn 1 (50% hit), omits them on turn 2,
+       and has 1 subscription null-cost turn. *)
+    append_metric config "cache-alpha"
+      (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+       @ [ "ts_unix", `Float ts
+         ; "channel", `String "turn"
+         ; "cost_usd", `Float 1.25
+         ; "latency_ms", `Int 120
+         ; ( "usage"
+           , `Assoc
+               [ "input_tokens", `Int 1000
+               ; "output_tokens", `Int 200
+               ; "cache_read_tokens", `Int 600
+               ; "cache_creation_tokens", `Int 150
+               ; "total_tokens", `Int 1200
+               ] )
+         ]);
+    append_metric config "cache-alpha"
+      (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+       @ [ "ts_unix", `Float ts
+         ; "channel", `String "turn"
+         ; "cost_usd", `Null
+         ; "latency_ms", `Int 180
+         ; ( "usage"
+           , `Assoc
+               [ "input_tokens", `Int 500
+               ; "output_tokens", `Int 100
+               ; "cache_read_tokens", `Null
+               ; "cache_creation_tokens", `Null
+               ; "total_tokens", `Int 600
+               ] )
+         ]);
+    (* Keeper B: never reports cache tokens and runs strictly on subscription null cost. *)
+    append_metric config "sub-beta"
+      (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+       @ [ "ts_unix", `Float ts
+         ; "channel", `String "turn"
+         ; "cost_usd", `Null
+         ; "latency_ms", `Int 90
+         ; ( "usage"
+           , `Assoc
+               [ "input_tokens", `Int 800
+               ; "output_tokens", `Int 50
+               ; "total_tokens", `Int 850
+               ] )
+         ]);
+    let full =
+      Dashboard_http_keeper.keeper_cost_aggregates_json
+        ~config
+        ~keepers:[ make_meta "cache-alpha"; make_meta "sub-beta" ]
+        ~window_minutes:default_window_minutes
+        ~now_ts:now
+    in
+    let keepers =
+      match Yojson.Safe.Util.member "keepers" full with
+      | `List xs -> xs
+      | other -> fail ("expected keepers list, got: " ^ Yojson.Safe.to_string other)
+    in
+    let find_keeper name =
+      List.find (fun k -> String.equal (string_field "keeper_name" k) name) keepers
+    in
+    let alpha = find_keeper "cache-alpha" in
+    check int "alpha cache_read_tokens" 600 (int_field "cache_read_tokens" alpha);
+    check int "alpha cache_creation_tokens" 150 (int_field "cache_creation_tokens" alpha);
+    (* Paired-only cache_hit_pct: 600 / 1000 = 60.0%, NOT diluted by turn 2's 500 input tokens *)
+    check (float 0.0001) "alpha cache_hit_pct" 60.0 (float_field "cache_hit_pct" alpha);
+    let beta = find_keeper "sub-beta" in
+    (* Never fabricate 0.0 when cache telemetry is unreported *)
+    null_field "cache_read_tokens" beta;
+    null_field "cache_creation_tokens" beta;
+    null_field "cache_hit_pct" beta;
+    let reconciliation = Yojson.Safe.Util.member "reconciliation" full in
+    check (float 0.0001) "keeper_attributed_usd" 1.25
+      (float_field "keeper_attributed_usd" reconciliation);
+    check int "subscription_zero_cost_turns" 2
+      (int_field "subscription_zero_cost_turns" reconciliation);
+    check int "total_turns_24h" 3
+      (int_field "total_turns_24h" reconciliation);
+    check bool "reconciliation note mentions /api/v1/models/metrics" true
+      (String.length (string_field "note" reconciliation) > 0))
+
 let () =
   run "dashboard_keeper_cost_aggregates"
     [
@@ -771,5 +856,7 @@ let () =
             test_unread_turn_rows_are_counted;
           test_case "rows of an unreadable kind are counted" `Quick
             test_rows_of_an_unreadable_kind_are_counted;
+          test_case "cache telemetry and reconciliation" `Quick
+            test_cache_telemetry_and_reconciliation;
         ] );
     ]

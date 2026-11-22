@@ -501,6 +501,60 @@ let test_every_projected_shape_decodes () =
       (absent <> measured))
 ;;
 
+let test_context_provenance_and_unavailable_reason () =
+  with_temp_workspace (fun config ->
+    (* 1. Absent -> unavailable + context_measurement_missing *)
+    let absent =
+      Projection.context_fields ~config ~keeper_name:"nobody" ~current_trace_id:sample_trace
+    in
+    check bool "absent provenance is unavailable" true
+      (field absent "context_provenance" = `String "unavailable");
+    check bool "absent reason propagated" true
+      (field absent "context_metrics_unavailable_reason" = `String "context_measurement_missing");
+    check bool "absent estimated_context_ratio is null" true
+      (field absent "estimated_context_ratio" = `Null);
+    (* 2. Measured -> measured + null reason *)
+    append_record config (sample_record ~absolute_turn:1 ());
+    let measured =
+      Projection.context_fields ~config ~keeper_name:"beta" ~current_trace_id:sample_trace
+    in
+    check bool "measured provenance" true
+      (field measured "context_provenance" = `String "measured");
+    check bool "measured reason is null" true
+      (field measured "context_metrics_unavailable_reason" = `Null);
+    check bool "measured estimated_context_ratio is null" true
+      (field measured "estimated_context_ratio" = `Null);
+    (* 3. Estimate -> estimated + context_input_estimate + estimated_context_ratio *)
+    append_record config
+      (sample_record ~absolute_turn:2 ~input_tokens:(Some 65_536)
+         ~context_window:(Some 131_072)
+         ~input_provenance:(Some Turn_input_provenance.Context_estimate) ());
+    let estimated =
+      Projection.context_fields ~config ~keeper_name:"beta" ~current_trace_id:sample_trace
+    in
+    check bool "estimated provenance" true
+      (field estimated "context_provenance" = `String "estimated");
+    check bool "estimated reason propagated" true
+      (field estimated "context_metrics_unavailable_reason" = `String "context_input_estimate");
+    check bool "estimated context_ratio remains null" true
+      (field estimated "context_ratio" = `Null);
+    (match field estimated "estimated_context_ratio" with
+     | `Float r -> check (float 1e-9) "estimated_context_ratio = 0.5" 0.5 r
+     | other -> fail ("expected float estimated_context_ratio, got: " ^ Yojson.Safe.to_string other));
+    (* 4. Overflow estimate -> estimated_context_ratio stays null (never > 1.0) *)
+    append_record config
+      (sample_record ~absolute_turn:3 ~input_tokens:(Some 200_000)
+         ~context_window:(Some 131_072)
+         ~input_provenance:(Some Turn_input_provenance.Context_estimate) ());
+    let overflow_est =
+      Projection.context_fields ~config ~keeper_name:"beta" ~current_trace_id:sample_trace
+    in
+    check bool "overflow estimate provenance" true
+      (field overflow_est "context_provenance" = `String "estimated");
+    check bool "overflow estimate ratio stays null" true
+      (field overflow_est "estimated_context_ratio" = `Null))
+;;
+
 (* This executable stands for the server, the process that writes the
    TurnRecords, so the stores keep their newest row in memory. *)
 let () =
@@ -541,6 +595,8 @@ let () =
             test_newest_unmeasured_input_stays_diagnostic
         ; test_case "every projected shape decodes" `Quick
             test_every_projected_shape_decodes
+        ; test_case "context_provenance and unavailable reason projection" `Quick
+            test_context_provenance_and_unavailable_reason
         ] )
     ]
 ;;

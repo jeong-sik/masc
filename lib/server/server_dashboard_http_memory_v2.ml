@@ -742,6 +742,84 @@ let parse_rfc3339_unix raw =
   | Error _ -> None
 ;;
 
+let strip_entity_prefix (raw : string) : string =
+  let trimmed = String.trim raw in
+  if String.starts_with ~prefix:"claim:" trimmed
+  then String.sub trimmed 6 (String.length trimmed - 6)
+  else if String.starts_with ~prefix:"conflict:" trimmed
+  then String.sub trimmed 9 (String.length trimmed - 9)
+  else trimmed
+;;
+
+let nonblank_string_opt = function
+  | Some (`String s) ->
+    let trimmed = String.trim s in
+    if String.equal trimmed "" then None else Some trimmed
+  | Some _ | None -> None
+;;
+
+let assoc_nonblank_string_opt key json =
+  nonblank_string_opt (Json_util.assoc_member_opt key json)
+;;
+
+let first_some_opt = function
+  | [] -> None
+  | xs -> List.find_map Fun.id xs
+;;
+
+let extract_text_from_json json =
+  match json with
+  | `String s ->
+    let trimmed = String.trim s in
+    if String.equal trimmed "" then None else Some trimmed
+  | `Assoc _ ->
+    first_some_opt
+      [ assoc_nonblank_string_opt "claim_text" json
+      ; assoc_nonblank_string_opt "claim" json
+      ; assoc_nonblank_string_opt "description" json
+      ; assoc_nonblank_string_opt "summary" json
+      ]
+  | _ -> None
+;;
+
+let extract_author_keeper_from_payload payload =
+  let from_fact =
+    match Json_util.assoc_member_opt "fact" payload with
+    | Some (`Assoc _ as fact_json) -> assoc_nonblank_string_opt "keeper_id" fact_json
+    | Some _ | None -> None
+  in
+  let from_vanished =
+    match Json_util.assoc_member_opt "vanished_keepers" payload with
+    | Some (`List (first :: _)) -> nonblank_string_opt (Some first)
+    | Some _ | None -> None
+  in
+  first_some_opt
+    [ assoc_nonblank_string_opt "author_keeper" payload
+    ; assoc_nonblank_string_opt "keeper_id" payload
+    ; from_fact
+    ; from_vanished
+    ]
+;;
+
+let claim_id_of_change_entry (c : Wlog.change_entry) =
+  let from_payload =
+    first_some_opt
+      [ assoc_nonblank_string_opt "claim_id" c.payload
+      ; assoc_nonblank_string_opt "conflict_id" c.payload
+      ]
+  in
+  match from_payload with
+  | Some _ as id -> id
+  | None ->
+    let trimmed = String.trim c.fact_id in
+    if String.starts_with ~prefix:"claim:" trimmed
+       || String.starts_with ~prefix:"conflict:" trimmed
+       || String.starts_with ~prefix:"claim-" trimmed
+       || String.starts_with ~prefix:"conflict-" trimmed
+    then Some (strip_entity_prefix trimmed)
+    else None
+;;
+
 let world_diff_json ~now ~config ~range =
   let base_path = config.Workspace.base_path in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
@@ -751,6 +829,71 @@ let world_diff_json ~now ~config ~range =
       Env.Store_unavailable
       ("world memory log unavailable: " ^ Wlog.error_to_string err)
   | Ok report ->
+    let ledger_opt =
+      match Ledger.load ~base_path with
+      | Ok ledger -> Some ledger
+      | Error _ -> None
+    in
+    let claim_text_tbl : (string, string) Hashtbl.t = Hashtbl.create 64 in
+    let prior_text_tbl : (int, string) Hashtbl.t = Hashtbl.create 16 in
+    let claim_author_tbl : (string, string) Hashtbl.t = Hashtbl.create 64 in
+    let fact_cache : (string, (string, Types.fact) Hashtbl.t) Hashtbl.t = Hashtbl.create 16 in
+    (* Seed historical claim/conflict text and authors chronologically from
+       committed log entries so retracted claims retain human-readable text. *)
+    List.iter
+      (fun (c : Wlog.change_entry) ->
+         let cid_opt = claim_id_of_change_entry c in
+         let payload_text_opt =
+           let from_after =
+             match Json_util.assoc_member_opt "after" c.payload with
+             | Some after_json -> extract_text_from_json after_json
+             | None -> None
+           in
+           first_some_opt
+             [ assoc_nonblank_string_opt "claim_text" c.payload
+             ; assoc_nonblank_string_opt "claim" c.payload
+             ; assoc_nonblank_string_opt "description" c.payload
+             ; from_after
+             ]
+         in
+         (match cid_opt, payload_text_opt with
+          | Some cid, Some text ->
+            (match Hashtbl.find_opt claim_text_tbl cid with
+             | Some prev when not (String.equal prev text) ->
+               Hashtbl.replace prior_text_tbl c.seq prev
+             | Some _ | None -> ());
+            Hashtbl.replace claim_text_tbl cid text;
+            Hashtbl.replace claim_text_tbl c.fact_id text
+          | None, Some text -> Hashtbl.replace claim_text_tbl c.fact_id text
+          | _, None -> ());
+         match cid_opt, extract_author_keeper_from_payload c.payload with
+         | Some cid, Some author ->
+           if not (Hashtbl.mem claim_author_tbl cid)
+           then Hashtbl.replace claim_author_tbl cid author
+         | _, _ -> ())
+      report.committed_changes;
+    (* Overlay authoritative current ledger claims, conflicts, and provenance. *)
+    (match ledger_opt with
+     | None -> ()
+     | Some ledger ->
+       List.iter
+         (fun (cid, text) ->
+            Hashtbl.replace claim_text_tbl cid text;
+            Hashtbl.replace claim_text_tbl ("claim:" ^ cid) text)
+         (Ledger.claims ledger);
+       List.iter
+         (fun (cid, desc) ->
+            Hashtbl.replace claim_text_tbl cid desc;
+            Hashtbl.replace claim_text_tbl ("conflict:" ^ cid) desc)
+         (Ledger.conflicts ledger);
+       List.iter
+         (fun (prov : Ledger.claim_provenance) ->
+            match prov.supporting_keepers with
+            | first :: _ ->
+              if not (Hashtbl.mem claim_author_tbl prov.claim_id)
+              then Hashtbl.replace claim_author_tbl prov.claim_id first
+            | [] -> ())
+         (Ledger.all_claim_provenance ledger));
     let from_unix_opt, to_unix_opt, from_rev_opt, to_rev_opt, window_label =
       match range with
       | Range_window w ->
@@ -782,29 +925,128 @@ let world_diff_json ~now ~config ~range =
               | None, _ | _, None -> false))
         report.committed_changes
     in
+    let resolve_change_fields (c : Wlog.change_entry) =
+      let cid_opt = claim_id_of_change_entry c in
+      let lookup_tbl tbl =
+        first_some_opt
+          [ Option.bind cid_opt (Hashtbl.find_opt tbl)
+          ; Hashtbl.find_opt tbl c.fact_id
+          ; Hashtbl.find_opt tbl (strip_entity_prefix c.fact_id)
+          ]
+      in
+      let from_fact_store () =
+        match Json_util.assoc_member_opt "fact" c.payload with
+        | Some fact_json ->
+          (match Ledger.fact_ref_of_json fact_json with
+           | Ok (Ledger.Ordinary { keeper_id; claim_sha256 }) ->
+             let tbl = fact_lookup_for_keeper ~cache:fact_cache ~keepers_dir keeper_id in
+             Option.map (fun (f : Types.fact) -> f.claim) (Hashtbl.find_opt tbl claim_sha256)
+           | Ok (Ledger.Source_bound _) | Error _ -> None)
+        | None -> None
+      in
+      let claim_text_opt =
+        match
+          first_some_opt
+            [ assoc_nonblank_string_opt "claim_text" c.payload
+            ; assoc_nonblank_string_opt "claim" c.payload
+            ; assoc_nonblank_string_opt "description" c.payload
+            ; Option.bind (Json_util.assoc_member_opt "after" c.payload) extract_text_from_json
+            ; lookup_tbl claim_text_tbl
+            ]
+        with
+        | Some _ as found -> found
+        | None -> from_fact_store ()
+      in
+      let before_text_opt =
+        first_some_opt
+          [ Option.bind (Json_util.assoc_member_opt "before" c.payload) extract_text_from_json
+          ; Hashtbl.find_opt prior_text_tbl c.seq
+          ]
+      in
+      let author_keeper_opt =
+        first_some_opt
+          [ extract_author_keeper_from_payload c.payload
+          ; lookup_tbl claim_author_tbl
+          ]
+      in
+      let ts_opt = parse_rfc3339_unix c.recorded_at in
+      let kind_lc =
+        Option.map (fun s -> String.lowercase_ascii (String.trim s))
+          (Json_util.assoc_string_opt "kind" c.payload)
+      in
+      let display_summary =
+        match claim_text_opt with
+        | Some text when not (String_util.contains_substring c.summary text) ->
+          (match kind_lc with
+           | Some "claim_retracted" -> "Retracted: " ^ text
+           | Some "claim_shrank" -> "Support shrank: " ^ text
+           | Some "claim_joined" -> "Joined: " ^ text
+           | Some "conflict_dissolved" -> "Conflict dissolved: " ^ text
+           | Some "conflict_joined" -> "Conflict joined: " ^ text
+           | Some "claim_created" | Some "conflict_created" -> text
+           | Some _ | None ->
+             if String.starts_with ~prefix:"Claim " c.summary
+                || String.starts_with ~prefix:"Conflict " c.summary
+                || String.starts_with ~prefix:"Joined " c.summary
+             then text
+             else c.summary)
+        | Some _ | None -> c.summary
+      in
+      ( cid_opt
+      , claim_text_opt
+      , before_text_opt
+      , author_keeper_opt
+      , ts_opt
+      , kind_lc
+      , display_summary )
+    in
     let added = ref [] in
     let updated = ref [] in
     let retracted = ref [] in
     let revisions = ref [] in
     List.iter
       (fun (c : Wlog.change_entry) ->
+         let ( cid_opt
+             , claim_text_opt
+             , before_text_opt
+             , author_keeper_opt
+             , ts_opt
+             , kind_lc
+             , display_summary )
+           =
+           resolve_change_fields c
+         in
          let op_kind =
            match Json_util.assoc_string_opt "op" c.payload with
            | Some s -> String.lowercase_ascii (String.trim s)
            | None ->
              (match Json_util.assoc_string_opt "action" c.payload with
               | Some s -> String.lowercase_ascii (String.trim s)
-              | None -> "added")
+              | None ->
+                (match kind_lc with
+                 | Some ("claim_retracted" | "conflict_dissolved") -> "retracted"
+                 | Some "claim_shrank" -> "updated"
+                 | Some ("claim_created" | "claim_joined" | "conflict_created" | "conflict_joined")
+                 | Some _ | None -> "added"))
+         in
+         let enrichment_fields =
+           [ "claim_id", Json_util.string_opt_to_json cid_opt
+           ; "claim_text", Json_util.string_opt_to_json claim_text_opt
+           ; "before_text", Json_util.string_opt_to_json before_text_opt
+           ; "author_keeper", Json_util.string_opt_to_json author_keeper_opt
+           ; "ts", Json_util.float_opt_to_json ts_opt
+           ]
          in
          let entry_json =
            `Assoc
-             [ "seq", `Int c.seq
-             ; "batch_id", `String c.batch_id
-             ; "fact_id", `String c.fact_id
-             ; "summary", `String c.summary
-             ; "recorded_at", `String c.recorded_at
-             ; "payload", c.payload
-             ]
+             ([ "seq", `Int c.seq
+              ; "batch_id", `String c.batch_id
+              ; "fact_id", `String c.fact_id
+              ; "summary", `String display_summary
+              ; "recorded_at", `String c.recorded_at
+              ; "payload", c.payload
+              ]
+              @ enrichment_fields)
          in
          revisions
          := `Assoc
@@ -829,13 +1071,14 @@ let world_diff_json ~now ~config ~range =
            in
            updated
            := `Assoc
-                [ "seq", `Int c.seq
-                ; "fact_id", `String c.fact_id
-                ; "summary", `String c.summary
-                ; "recorded_at", `String c.recorded_at
-                ; "before", before
-                ; "after", after
-                ]
+                ([ "seq", `Int c.seq
+                 ; "fact_id", `String c.fact_id
+                 ; "summary", `String display_summary
+                 ; "recorded_at", `String c.recorded_at
+                 ; "before", before
+                 ; "after", after
+                 ]
+                 @ enrichment_fields)
               :: !updated)
          else added := entry_json :: !added)
       selected;
@@ -865,9 +1108,9 @@ let world_diff_json ~now ~config ~range =
          | Ok None | Error _ -> ())
       keeper_ids;
     let total_claims_now =
-      match Ledger.load ~base_path with
-      | Ok ledger -> List.length (Ledger.claims ledger)
-      | Error _ -> 0
+      match ledger_opt with
+      | Some ledger -> List.length (Ledger.claims ledger)
+      | None -> 0
     in
     let data =
       `Assoc

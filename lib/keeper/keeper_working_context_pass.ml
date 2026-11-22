@@ -97,14 +97,11 @@ let input ~config ~keeper_id ~(meta : Keeper_meta_contract.keeper_meta)
   ; turn_ref = Ids.Turn_ref.make
       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       ~absolute_turn:meta.runtime.last_turn_id
-  ; historical_task_contexts = []
   ; goal_context =
       Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         goal_context_for_task ~config meta.current_task_id)
   ; keeper_instructions = meta.instructions
-  ; current = None
-  ; working_context
-  ; messages = []; tool_observations = []; counterpart_observations = [] }
+  ; working_context }
 
 exception Blank_keeper_name
 
@@ -124,12 +121,10 @@ let run ~base_path ~keeper_name ~keeper_id =
     if needed ~keepers_dir ~keeper_name working_context
     then
       Keeper_librarian_runtime.run_best_effort
-        ~write_scope:Keeper_librarian_runtime.Context_only
         ~on_context_committed:(remember ~keepers_dir ~keeper_name working_context)
         ~base_path
         ~keepers_dir
         ~keeper_id:keeper_name
-        ~expected_revision:None
         (input ~config:(Workspace.default_config base_path) ~keeper_id ~meta ~working_context)
   | (Disabled | Invalid), _
   | ( Enabled

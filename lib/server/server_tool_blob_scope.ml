@@ -270,10 +270,8 @@ let config_keepers =
       { suffix = Keeper_memory_os_events.suffix
       ; reason = M.Writes_no_reference
       }
-    (* Absorbed rows, the pending admission queue and the Librarian unread
-       ledger live in this same directory. Their rows carry claim text, a
-       memory id, a trace id, a request id and a message digest — no tool blob
-       key. *)
+    (* Absorbed rows live in this same directory. Their rows carry claim text,
+       a memory id, and a trace id — no tool blob key. *)
   ; M.Keeper_files
       { suffix = Keeper_memory_absorbed.suffix
       ; reason = M.Writes_no_reference

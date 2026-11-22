@@ -176,7 +176,7 @@ let test_a_stalled_endpoint_ends_at_the_turn_clock () =
   let key = "MASC_TEST_SUCCESSOR_STALLED_KEY" in
   Masc_test_deps.with_process_env key (Some "synthetic-stalled-key") @@ fun () ->
   Masc_test_deps.with_typesafeai_policy
-    {Runtime_schema.default_typesafeai with lane_enabled=true; absorb_gate=false; excluded_keepers=[];
+    {Runtime_schema.default_typesafeai with lane_enabled=true; excluded_keepers=[];
      destinations=({Runtime_schema.endpoint=Printf.sprintf "http://127.0.0.1:%d/evaluate" port;
                     model="jev-fixture"; api_key_env=key},[])} @@ fun () ->
   let config = Masc.Workspace.default_config base_path in

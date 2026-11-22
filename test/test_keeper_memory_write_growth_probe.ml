@@ -4,7 +4,6 @@
     immediate-admission behavior as the desired contract. *)
 module Current = Masc.Keeper_memory_os_current
 module Runtime = Masc.Keeper_tool_memory_runtime
-module Queue = Masc.Keeper_memory_admission_queue
 
 let require = function Ok value -> value | Error detail -> Alcotest.fail detail
 
@@ -49,11 +48,6 @@ let run_probe () =
             | None -> [],`Null | Some current -> current.facts,`Int current.revision in
           let fact_bytes = List.map Masc.Keeper_memory_os_types.fact_to_json facts
             |> fun rows -> String.length (Yojson.Safe.to_string (`List rows)) in
-          let pending = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
-            | None -> [] | Some batch -> Queue.candidates batch in
-          let pending_bytes = List.map (fun (row : Queue.candidate) ->
-            Masc.Keeper_memory_os_types.fact_to_json row.fact) pending
-            |> fun rows -> String.length (Yojson.Safe.to_string (`List rows)) in
           let outcomes = Hashtbl.to_seq receipts |> List.of_seq
             |> List.sort (fun (a,_) (b,_) -> String.compare a b)
             |> List.map (fun (key,n) -> key,`Int n) in
@@ -64,8 +58,8 @@ let run_probe () =
              "declared_final_knowledge_branches",`Int declared_knowledge_branches;
              "current_facts",`Int (List.length facts);"revision",revision;
              "serialized_fact_bytes",`Int fact_bytes;
-             "pending_candidates",`Int (List.length pending);
-             "serialized_pending_fact_bytes",`Int pending_bytes;
+             "pending_candidates",`Int 0;
+             "serialized_pending_fact_bytes",`Int 0;
              "write_receipt_outcomes",`Assoc outcomes;
              "effective_limits",Masc.Keeper_memory_limits.(current facts |> to_json);
              "librarian_executed",`Bool false;"provider_calls",`Int 0] in

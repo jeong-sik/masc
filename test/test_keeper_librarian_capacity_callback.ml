@@ -45,13 +45,11 @@ let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ?same_failure ~
    | Ok _ -> ()
    | Error error -> Alcotest.fail (Runtime_exact_output_registry.publication_error_to_string error));
   let input : Keeper_librarian.input =
-    {turn_ref = Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1;
-     historical_task_contexts = []; goal_context = Keeper_librarian.No_task;
-     keeper_id = Masc_test_deps.keeper_id_fixture keeper_id;
-     keeper_instructions = "Preserve evidence.";
-     current = None; working_context = Keeper_librarian_context.empty;
-     messages = [Agent_core.Types.user_msg "Pending conversation evidence."];
-     tool_observations = []; counterpart_observations = []} in
+    { turn_ref = Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1
+    ; goal_context = Keeper_librarian.No_task
+    ; keeper_id = Masc_test_deps.keeper_id_fixture keeper_id
+    ; keeper_instructions = "Preserve evidence."
+    ; working_context = Keeper_librarian_context.empty } in
   let cli_calls = ref [] in
   let cli_runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     cli_calls := !cli_calls @ [runtime_id];
@@ -59,21 +57,19 @@ let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ?same_failure ~
   let refused = ref 0 and committed = ref false and observed_limit = ref None in
   let verdict = ref None and same = ref None and provider_refusals = ref [] in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  Runtime.run_best_effort ~write_scope:(Runtime.Context_and_memory Keeper_memory_commit_pass.Durable) ~cli_runner
+  Runtime.run_best_effort ~cli_runner
     ~on_cli_input_limit:(fun limit ->
       incr refused;
       observed_limit := Some (limit.Keeper_lane_cli_oneshot.runtime_id, limit.capacity.max_chars))
     ~on_not_committed:(fun outcome ->
       provider_refusals := List.sort_uniq compare
         (!provider_refusals @ outcome.Runtime.provider_input_refusals);
-      (* Folded as the continuity pass folds it: any report's size verdict
-         stands. *)
       let shows_size = outcome.Runtime.walk_shows_size in
       verdict := Some (match !verdict with None -> shows_size | Some earlier -> earlier || shows_size);
       let met = outcome.Runtime.smaller_range_meets_same_failure in
       same := Some (match !same with None -> met | Some earlier -> earlier || met))
-    ~on_memory_committed:(fun () -> committed := true)
-    ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
+    ~on_context_committed:(fun _ -> committed := true)
+    ~base_path ~keepers_dir ~keeper_id input;
   Alcotest.(check int) "only a CLI slot reports an input limit" expected !refused;
   Option.iter (fun expected -> Alcotest.(check (option (pair string int)))
     "limit retains the actual refusing runtime" (Some expected) !observed_limit) expected_limit;
@@ -111,76 +107,6 @@ let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ?same_failure ~
   | [run] -> Alcotest.(check string) "terminal failure remains observable" "failed"
       (Runs.status_label run.status)
   | _ -> Alcotest.fail "expected one recorded Librarian run"
-
-(* A pass of 1,000 turns: the absorb gate carries only the turn the claim
-   cites, so the pass is judged and committed on its first run. *)
-let test_a_large_pass_is_judged_with_the_turn_its_claim_cites ~base_path () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let net = env#net and clock = env#clock in
-  Eio_context.with_test_env ~net ~clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
-  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
-  let keeper_id = "absorb-evidence-capacity" in
-  let module Current = Keeper_memory_os_current in
-  let module L = Keeper_librarian in
-  let module M = Keeper_memory_os_types in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let fact = M.observed ~claim:"A17 is under investigation." ~category:M.Fact
-    ~now:100. ~origin:{kind=M.Authored; trace_id=keeper_id} in
-  let seeded = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
-    ~now:100. ~source:{kind=Current.Librarian; trace_id=keeper_id} ~facts:[fact] ()
-    |> function Ok state -> state | Error detail -> Alcotest.fail detail in
-  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
-  let before = Fs_compat.load_file path in
-  let output = `Assoc ["new_claims", `List [`Assoc [
-      "claim", `String "A17 was investigated and then resolved.";
-      "category", `String "fact"; "absorbs", `List [`String "m1"]; "evidence", `Assoc ["conversation",`List [`Int 999];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]];
-      "dropped", `List []; "working_contexts", `List []] in
-  let librarian = Fixture.start_server ~sw ~net ~clock
-    (Fixture.Reply (Fixture.openai_response output)) in
-  let judged = ref [] in
-  let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply_with (fun _ body ->
-    judged := Yojson.Safe.from_string body :: !judged;
-    `OK, {|{"model":"fixture","answers":{"s0_0":{"type":"choice","choice":"mergeable","confidence":1.0,"probabilities":{"mergeable":1.0,"different_context":0.0,"loses_knowledge":0.0,"uncertain":0.0}}}}|})) in
-  let resolver = Fixture.resolver_snapshot ~source:"absorb-capacity"
-    [{Fixture.id="absorb-capacity-librarian"; base_url=librarian.base_url}] in
-  (match Runtime_exact_output_registry.publish
-    ~lanes:[{Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Librarian; enabled=true;
-      slot_ids=["absorb-capacity-librarian"]; cli_slot_ids=[];
-      max_output_tokens=Some 4096; thinking=None}] resolver with
-   | Ok _ -> () | Error error ->
-     Alcotest.fail (Runtime_exact_output_registry.publication_error_to_string error));
-  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-capacity-key") @@ fun () ->
-  Masc_test_deps.with_typesafeai_policy
-    {Runtime_schema.default_typesafeai with absorb_gate=true;
-     destinations=({Runtime_schema.endpoint=jev.base_url; model="fixture";
-                    api_key_env="TYPESAFEAI_API_KEY"},[])} @@ fun () ->
-  let observation = Agent_core.Types.user_msg "A17 recovery was verified after the investigation." in
-  let input : L.input =
-    {turn_ref=Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1000;
-     historical_task_contexts=[]; goal_context=L.No_task;
-     keeper_id=Masc_test_deps.keeper_id_fixture keeper_id;
-     keeper_instructions="Preserve the event history.";
-     current=Some {facts=seeded.facts}; working_context=Keeper_librarian_context.empty;
-     messages=List.init 1000 (fun _ -> observation);
-     tool_observations=[]; counterpart_observations=[]} in
-  let size = ref None and commits = ref 0 in
-  let run input = Runtime.run_best_effort ~write_scope:(Runtime.Context_and_memory Keeper_memory_commit_pass.Durable)
-    ~on_not_committed:(fun outcome -> size := Some outcome.Runtime.walk_shows_size)
-    ~on_memory_committed:(fun () -> incr commits)
-    ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input in
-  run input;
-  Alcotest.(check (option bool)) "the large pass is not refused" None !size;
-  Alcotest.(check int) "the large pass commits on its first run" 1 !commits;
-  Alcotest.(check int) "one judgment request" 1 (Fixture.post_count jev);
-  (match !judged with
-   | [request] ->
-     let observations = Yojson.Safe.Util.(member "state" request |> member "new_observations" |> to_list) in
-     Alcotest.(check (list int)) "the request carries only the cited turn" [999]
-       (List.map (fun o -> Yojson.Safe.Util.(member "local_position" o |> to_int)) observations)
-   | _ -> Alcotest.fail "expected one judgment request");
-  Alcotest.(check bool) "actual memory snapshot advances" true (before <> Fs_compat.load_file path)
-;;
 
 (* The size verdict, cause by cause. A walk reads less when any of its
    failures answers true, so this table is the whole rule: a row that flips
@@ -475,8 +401,6 @@ let () =
        Alcotest.test_case "every pre-dispatch rejection, one row each" `Quick
          test_disposition_size_verdict_table];
      "actual HTTP outcomes", [
-      Alcotest.test_case "a large pass is judged with the turn its claim cites" `Quick
-        (test_a_large_pass_is_judged_with_the_turn_its_claim_cites ~base_path);
       (* An API slot states its limit in provider prose, which this process
          cannot read back into a number, so it reports none. The pass does
          not need one: a size refusal is evidence enough to read less. *)

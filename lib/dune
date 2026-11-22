@@ -5,7 +5,6 @@
  (public_name masc)
  (private_modules
   keeper_checkpoint_read_observation
-  keeper_librarian_unread_observation
   fusion_decision_event
   hitl_summary_flow_outcome
   hitl_summary_flow_prepare
@@ -14,8 +13,6 @@
   hitl_summary_flow_terminalization
   hitl_summary_cli_walk
   keeper_attempt_request_evidence
-  keeper_librarian_message_floor
-  keeper_librarian_unread_ledger
   keeper_official_client_context_projection
   keeper_board_attention_worker_disposition
   keeper_board_attention_rearm_state
@@ -65,6 +62,7 @@
   keeper_memory_os_snapshot_codec
   keeper_memory_os_journal_codec
   keeper_memory_os_successor_recall
+  keeper_librarian_unread_ledger
   keeper_gate_types
   keeper_gate_projection
   keeper_gate_authorization

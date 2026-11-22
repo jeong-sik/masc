@@ -176,97 +176,6 @@ let test_fusion_judge_schema_uses_parser_wire_contract () =
       (type_strings position_stance_schema)) branches
 ;;
 
- let test_librarian_claim_schema_is_closed () =
-  let claim_schema =
-    Keeper_structured_output_schema.librarian_current_output_schema
-    |> schema_property Keeper_librarian.wire_field_new_claims
-    |> schema_items
-  in
-  check
-    (list string)
-    "librarian claim required fields"
-    (List.sort String.compare Keeper_librarian.wire_claim_fields)
-    (required_strings claim_schema);
-  check bool "librarian claim schema is closed" false
-    (allows_additional_properties claim_schema);
-  let category_schema = schema_property Keeper_librarian.wire_field_category claim_schema in
-  check (list string) "category names are strings" [ "string" ]
-    (type_strings category_schema);
-  check bool "new category names are not excluded by an enum" true
-    (schema_member "enum" category_schema = None);
-  (* The two Board provenance fields are answered on every claim, null when
-     the claim came from the transcript, so strict schema modes accept it. *)
-  let type_tokens schema =
-    match schema with
-    | `Assoc fields ->
-      (match List.assoc_opt "type" fields with
-       | Some (`List values) ->
-         List.filter_map (function `String s -> Some s | _ -> None) values
-       | Some (`String s) -> [ s ]
-       | _ -> [])
-    | _ -> []
-  in
-  List.iter
-    (fun field ->
-       check
-         (list string)
-         (field ^ " is a required nullable string")
-         [ "null"; "string" ]
-         (List.sort String.compare (type_tokens (schema_property field claim_schema))))
-    [ Keeper_memory_os_types.wire_field_board_post_id
-    ; Keeper_memory_os_types.wire_field_board_comment_id
-    ];
-  (* Every claim answers [absorbs], an empty array when it
-     absorbs nothing. *)
-  check
-    (list string)
-    "absorbs is a required array"
-    [ "array" ]
-    (type_tokens (schema_property Keeper_memory_os_types.wire_field_absorbs claim_schema));
-  (* Every claim answers [evidence], a closed object whose four
-     fields are all answered, empty arrays and false when it relied on nothing. *)
-  let evidence_schema =
-    schema_property Keeper_memory_os_types.wire_field_evidence claim_schema
-  in
-  check
-    (list string)
-    "evidence fields are all required"
-    (List.sort String.compare Keeper_memory_os_types.wire_evidence_fields)
-    (required_strings evidence_schema);
-  check bool "evidence schema is closed" false
-    (allows_additional_properties evidence_schema);
-  List.iter
-    (fun (field, expected) ->
-       check (list string) (field ^ " has its type") [ expected ]
-         (type_tokens (schema_property field evidence_schema)))
-    [ Keeper_memory_os_types.wire_evidence_conversation, "array"
-    ; Keeper_memory_os_types.wire_evidence_tools, "array"
-    ; Keeper_memory_os_types.wire_evidence_counterpart, "boolean"
-    ; Keeper_memory_os_types.wire_evidence_task_contexts, "boolean"
-    ]
-;;
-
-let test_librarian_dropped_schema_is_closed () =
-  let schema = Keeper_structured_output_schema.librarian_current_output_schema in
-  check
-    (list string)
-    "librarian top-level required fields"
-    (List.sort String.compare Keeper_librarian.wire_current_fields)
-    (required_strings schema);
-  let dropped_schema =
-    schema
-    |> schema_property Keeper_librarian.wire_field_dropped
-    |> schema_items
-  in
-  check
-    (list string)
-    "librarian dropped required fields"
-    (List.sort String.compare Keeper_librarian.wire_dropped_fields)
-    (required_strings dropped_schema);
-  check bool "librarian dropped schema is closed" false
-    (allows_additional_properties dropped_schema)
-;;
-
 let test_librarian_source_requirement_matches_the_domain () =
   let module Context = Keeper_librarian_context in
   let source : Context.source = { reference = "event:new"; content = `Null } in
@@ -276,12 +185,9 @@ let test_librarian_source_requirement_matches_the_domain () =
   List.iter (fun (label, sources, pockets, accepted) ->
     let working_contexts = `List pockets in
     let output = `Assoc
-      [ "working_state", `Null
-      ; "working_contexts", working_contexts
-      ; Keeper_librarian.wire_field_new_claims, `List []
-      ; Keeper_librarian.wire_field_dropped, `List [] ] in
+      [ Keeper_librarian.wire_field_working_contexts, working_contexts ] in
     let schema_result = Tool_input_validation.validate
-      ~schema:Keeper_structured_output_schema.librarian_current_output_schema
+      ~schema:Keeper_structured_output_schema.librarian_working_context_output_schema
       ~name:"librarian_output" ~args:output () in
     check bool (label ^ ": declared JSON schema") accepted (Result.is_ok schema_result);
     let input = { Context.empty with sources } in
@@ -462,14 +368,6 @@ let () =
             "working contexts require a source in both schema and domain"
             `Quick
             test_librarian_source_requirement_matches_the_domain
-        ; test_case
-            "minimal claim fields remain required"
-            `Quick
-            test_librarian_claim_schema_is_closed
-        ; test_case
-            "dropped statements are required and closed"
-            `Quick
-            test_librarian_dropped_schema_is_closed
         ] )
     ; ( "verdict schemas"
       , [ test_case

@@ -15,7 +15,6 @@ type unavailable_reason =
   | Lane_disabled  (** [\[typesafeai\] enabled = false] *)
   | No_armed_destination
       (** none of the variables the destinations name holds a key *)
-  | Absorb_gate_disabled  (** [\[typesafeai\] absorb_gate = false], the default *)
   | Board_attention_disabled  (** [\[typesafeai\] board_attention = false] *)
   | Context_review_disabled
   | Skill_applicability_disabled
@@ -55,13 +54,6 @@ val lane_destinations : unit -> (destinations, unavailable_reason) result
     when no named variable holds a key. Used by the continuity measurement
     CLI, independently of any gate. *)
 
-val absorb_gate_destinations : keeper_id:string -> (destinations, unavailable_reason) result
-(** One snapshot for evaluation or its skip reason, in this precedence: the
-    lane switch, the armed destinations, the absorb gate's own switch, then
-    the keeper's exclusion. The lane defaults to on when a key is present; the
-    absorb gate requires explicit opt-in because it sends the librarian's
-    memories to the vendor. *)
-
 val workspace_memory_selection_destinations :
   keeper_id:string -> (destinations, unavailable_reason) result
 (** Independent opt-in for host selection of shared memory. Disabled by default;
@@ -96,10 +88,6 @@ val is_enabled : unit -> bool
 val is_board_attention_enabled : unit -> bool
 (** {!is_enabled} and [\[typesafeai\].board_attention] does not say
     otherwise, before any keeper's exclusion. *)
-
-val is_absorb_gate_enabled : unit -> bool
-(** {!is_enabled} and [\[typesafeai\].absorb_gate] says so, before any
-    keeper's exclusion. *)
 
 val is_excluded : keeper_id:string -> bool
 (** The keeper is named in [\[typesafeai\].excluded_keepers]. *)

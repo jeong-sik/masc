@@ -419,8 +419,8 @@ let string_field name fields =
 
 let is_string_field name fields = Option.is_some (string_field name fields)
 
-(* Keeper_librarian_input_capture.content_json owns these kind-tagged blocks;
-   its arbitrary ToolUse.input / ToolResult.json are not media containers. *)
+(* Legacy archived input-capture artifacts carry these kind-tagged blocks;
+   their arbitrary ToolUse.input / ToolResult.json are not media containers. *)
 let captured_tool_payload_fields fields =
   match string_field "kind" fields with
   | Some "tool_use"

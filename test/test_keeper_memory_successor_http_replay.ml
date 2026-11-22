@@ -1,7 +1,6 @@
 open Alcotest
 module Current = Masc.Keeper_memory_os_current
 module Memory = Masc.Keeper_memory_os_types
-module Queue = Masc.Keeper_memory_admission_queue
 module Fixture = Exact_output_fixture
 module Json = Yojson.Safe.Util
 let require = function Ok value -> value | Error detail -> fail detail
@@ -16,7 +15,7 @@ let restore ~keepers_dir ~keeper_id bundle =
   let stores = ["current_snapshot",Current.path_for_keepers_dir ~keepers_dir ~keeper_id;
     "consumption_and_lookup_receipt",Current.durable_range_receipt_path ~keepers_dir ~keeper_id;
     "memory_journal",Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id;
-    "pending_queue",Queue.path ~keepers_dir ~keeper_id] in
+    "pending_queue",Filename.concat keepers_dir (keeper_id ^ ".memory-admission.json")] in
   check (list string) "closed four-store bundle" (List.sort String.compare (List.map fst stores))
     (List.sort String.compare (List.map fst (Json.to_assoc bundle)));
   let decoded = List.map (fun (name,path) ->
@@ -94,7 +93,7 @@ let replay filename ~enabled () =
   let key="MASC_TEST_SUCCESSOR_REPLAY_KEY" in
   Masc_test_deps.with_process_env key (Some "synthetic-local-replay-key") @@ fun () ->
   Masc_test_deps.with_typesafeai_policy
-    {Runtime_schema.default_typesafeai with lane_enabled=enabled;absorb_gate=false;excluded_keepers=[];
+    {Runtime_schema.default_typesafeai with lane_enabled=enabled;excluded_keepers=[];
      destinations=({Runtime_schema.endpoint=server.base_url;model="jev-latest";api_key_env=key},[])} @@ fun () ->
   let results=List.concat_map (fun query -> List.map (fun source ->
     observed:=[];

@@ -34,7 +34,7 @@ let required_prompt key =
 let librarian_case () =
   { requirement =
       Agent_core.Exact_output.make_output_requirement
-        ~schema:Masc.Keeper_structured_output_schema.librarian_current_output_schema
+        ~schema:Masc.Keeper_structured_output_schema.librarian_working_context_output_schema
         ~minimum_guarantee:Agent_core.Exact_output.Json_syntax
   ; system_prompt = required_prompt Prompt_names.lane_cli_probe_librarian_system
   ; prompt = required_prompt Prompt_names.lane_cli_probe_librarian_user ^ "\n"

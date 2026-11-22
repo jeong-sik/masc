@@ -653,7 +653,6 @@ let typesafeai_keys =
   ; "destinations"
   ; "board_attention"
   ; "board_attention_confidence_floor"
-  ; "absorb_gate"
   ; "context_review"
   ; "skill_applicability"
   ; "workspace_memory_selection_enabled"
@@ -918,9 +917,6 @@ let parse_typesafeai (toml : Otoml.t)
         tbl
         ~default:d.board_attention_confidence_floor
     in
-    let absorb_gate =
-      typed_find_or "a boolean" path tbl "absorb_gate" Otoml.get_boolean ~default:d.absorb_gate
-    in
     let context_review =
       typed_find_or "a boolean" path tbl "context_review" Otoml.get_boolean ~default:d.context_review
     in
@@ -939,7 +935,6 @@ let parse_typesafeai (toml : Otoml.t)
        , destinations
        , board_attention
        , board_attention_confidence_floor
-       , absorb_gate
        , context_review
        , skill_applicability
        , workspace_memory_selection_enabled
@@ -951,7 +946,6 @@ let parse_typesafeai (toml : Otoml.t)
        , Ok destinations
        , Ok board_attention
        , Ok board_attention_confidence_floor
-       , Ok absorb_gate
        , Ok context_review
        , Ok skill_applicability
        , Ok workspace_memory_selection_enabled
@@ -962,7 +956,6 @@ let parse_typesafeai (toml : Otoml.t)
          ; destinations
          ; board_attention
          ; board_attention_confidence_floor
-         ; absorb_gate
          ; context_review
          ; skill_applicability
          ; workspace_memory_selection_enabled
@@ -978,7 +971,6 @@ let parse_typesafeai (toml : Otoml.t)
        , (Ok _ | Error _)
        , (Ok _ | Error _)
        , (Ok _ | Error _)
-       , (Ok _ | Error _)
        , (Ok _ | Error _) ) ->
        Error
          (unknown
@@ -986,7 +978,6 @@ let parse_typesafeai (toml : Otoml.t)
           @ result_errors destinations
           @ result_errors board_attention
           @ result_errors board_attention_confidence_floor
-          @ result_errors absorb_gate
           @ result_errors context_review
           @ result_errors skill_applicability
           @ result_errors workspace_memory_selection_enabled

@@ -859,7 +859,7 @@ let test_multi_account () =
                       ; api_key_env = jev_key_variable
                       }
                     , [] )
-                ; absorb_gate = true
+                ; context_review = true
                 ; memory_recall = Runtime_schema.Memory_recall_on Runtime_schema.All_keepers
                 };
               Fun.protect
@@ -868,8 +868,8 @@ let test_multi_account () =
                   ( Masc.Typesafeai_config.lane_destinations ()
                   , [ ( "Board attention"
                       , Masc.Typesafeai_config.board_attention_destinations ~keeper_id:"reader" )
-                    ; ( "the absorb gate"
-                      , Masc.Typesafeai_config.absorb_gate_destinations ~keeper_id:"reader" )
+                    ; ( "context review"
+                      , Masc.Typesafeai_config.context_review_destinations ~keeper_id:"reader" )
                     ; ( "memory recall"
                       , Masc.Typesafeai_config.memory_recall_destinations ~keeper_id:"reader" )
                     ]

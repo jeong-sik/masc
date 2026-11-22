@@ -54,6 +54,15 @@ val get
   -> keeper_name:string
   -> (Keeper_owner.t, lookup_error) result
 
+val clear_unavailable
+  :  base_path:string
+  -> keeper_name:string
+  -> (bool, lookup_error) result
+(** Clear a fenced [unavailable] entry for [keeper_name] so explicit recovery,
+    recreation, or restart can reinstall the owner without restarting the
+    process. Returns [Ok true] when an unavailable fence was removed and
+    [Ok false] when [keeper_name] was not fenced. *)
+
 val complete_restart_settlements :
   base_path:string ->
   journal_terminal:(keeper_name:string -> session_root:string ->
@@ -375,6 +384,11 @@ module For_testing : sig
     base_path:string ->
     Keeper_meta_contract.keeper_meta ->
     (Keeper_owner.t, lookup_error) result
+
+  val with_record_failed_operations_hook :
+    (keeper_name:string -> Keeper_owner.t -> unit) ->
+    (unit -> 'a) ->
+    'a
 end
 
 val heap_root : (Obj.t -> 'a) -> 'a

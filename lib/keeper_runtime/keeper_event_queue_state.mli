@@ -149,6 +149,8 @@ type transfer_projection_result =
   | Transfer_already_projected
 
 val empty : t
+val max_pending_entries : int
+val max_transition_outbox_entries : int
 val revision : t -> int64
 val pending : t -> Keeper_event_queue.t
 val pending_selections : t -> pending_selection list
@@ -206,6 +208,9 @@ val projected_dispositions : t -> durable_disposition list
 
 val transition_receipt_is_projected : transition_receipt -> t -> bool
 (** Exact full-receipt or compact-fingerprint membership used by WAL replay. *)
+
+val evicted_transition_ids : t -> string list
+val transition_id_is_evicted : string -> t -> bool
 
 val prior_disposition_by_operation_id :
   string -> t -> durable_disposition option

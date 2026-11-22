@@ -71,6 +71,48 @@ let fresh_tool_use_id () =
 
 let string_is_blank s = String.trim s = ""
 
+(** Strip query string, fragment, and userinfo from a URL before logging or
+    returning in diagnostic error messages. A caller-owned URL like
+    [https://user:token@api.example.com/v1?key=abc#access_token=xyz] must not
+    leak credentials, and query/fragment values containing ['@'] must not
+    corrupt authority host parsing. *)
+let sanitize_url_for_log url =
+  let strip_query_and_fragment s =
+    let stop =
+      match String.index_opt s '?', String.index_opt s '#' with
+      | Some q, Some f -> Some (Int.min q f)
+      | Some i, None | None, Some i -> Some i
+      | None, None -> None
+    in
+    match stop with
+    | Some i -> String.sub s 0 i
+    | None -> s
+  in
+  let strip_userinfo s =
+    (* Only consider the authority segment (between :// and the next /).
+       A literal '@' inside a path is allowed and must not be stripped. *)
+    match String.index_opt s '/' with
+    | None -> s
+    | Some i1 when i1 + 2 > String.length s || s.[i1 + 1] <> '/' -> s
+    | Some i1 ->
+      let authority_start = i1 + 2 in
+      let authority_end =
+        match String.index_from_opt s authority_start '/' with
+        | Some j -> j
+        | None -> String.length s
+      in
+      let authority = String.sub s authority_start (authority_end - authority_start) in
+      (match String.rindex_opt authority '@' with
+       | None -> s
+       | Some k ->
+         let host = String.sub authority (k + 1) (String.length authority - k - 1) in
+         let prefix = String.sub s 0 authority_start in
+         let suffix = String.sub s authority_end (String.length s - authority_end) in
+         prefix ^ host ^ suffix)
+  in
+  strip_userinfo (strip_query_and_fragment url)
+;;
+
 let text_blocks_to_string blocks =
   blocks
   |> List.filter_map (function
@@ -91,9 +133,9 @@ let text_blocks_to_string blocks =
    body silently read as "no message". *)
 let error_message_of_body (body : string) : string option =
   let named message = if string_is_blank message then None else Some message in
-  match Yojson.Safe.from_string body with
-  | exception Yojson.Json_error _ -> None
-  | `Assoc fields ->
+  match Json_util.from_string_bounded body with
+  | Error _ -> None
+  | Ok (`Assoc fields) ->
     (match List.assoc_opt "error" fields with
      | Some (`String message) -> named message
      | Some (`Assoc error_fields) ->
@@ -102,7 +144,7 @@ let error_message_of_body (body : string) : string option =
         | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
         | None -> None)
      | Some (`List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) | None -> None)
-  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+  | Ok (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) -> None
 ;;
 
 let unsupported_media_source ~backend ~block source =

@@ -231,7 +231,9 @@ let store_entry ~key ~resource_name ~expires_at_s =
 let parse_created_resource_name body =
   try
     let open Yojson.Safe.Util in
-    match Yojson.Safe.from_string body |> member "name" |> to_string_option with
+    match
+      Json_util.from_string_bounded_exn body |> member "name" |> to_string_option
+    with
     | Some name when not (Api_common.string_is_blank name) -> Some (String.trim name)
     | Some _ | None -> None
   with

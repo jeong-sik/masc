@@ -345,11 +345,227 @@ let test_anthropic_sse_stream_preserves_cache_write_lifetime () =
      | None -> Alcotest.fail "expected telemetry on finalized SSE response")
 ;;
 
+let test_prepare_messages_orders_outside_before_system_for_turn_scoped () =
+  let base = [ Agent_core.Types.user_msg "Please inspect the repo." ] in
+  let turn_params =
+    { Agent_core.Hooks.default_turn_params with
+      extra_system_context = Some "Host task state & completion rules"
+    ; extra_outside_context = Some "## Active goals\n- ship fix"
+    }
+  in
+  let prepared = Agent_core.Agent_turn.prepare_messages ~messages:base ~turn_params () in
+  let origins = List.map (fun (m : Agent_core.Types.message) -> m.origin) prepared in
+  Alcotest.(check bool)
+    "prepare_messages places Outside_context before System_context"
+    true
+    (origins = [ Conversation; Outside_context; System_context ]);
+  let wire_msgs =
+    List.map
+      (fun (m : Agent_core.Types.message) ->
+         { Types.role = m.role
+         ; origin = m.origin
+         ; content =
+             List.filter_map
+               (function
+                 | Agent_core.Types.Text s -> Some (Types.Text s)
+                 | _ -> None)
+               m.content
+         ; name = m.name
+         ; tool_call_id = m.tool_call_id
+         ; metadata = m.metadata
+         })
+      prepared
+  in
+  let lowered = (lower Turn_scoped_system_context wire_msgs).Message_origin_lowering.messages in
+  Alcotest.(check int)
+    "Turn_scoped_system_context preserves all 3 messages (does not drop System_context)"
+    3
+    (List.length lowered);
+  Alcotest.(check bool)
+    "System_context remains at the end with native system header"
+    true
+    (let last = List.hd (List.rev lowered) in
+     last.origin = System_context
+     && Message_origin_lowering.anthropic_message_header Turn_scoped_system_context last
+        = [ "role", `String "system"; "clear_at", `String "next_user_message" ])
+;;
+
+let test_anthropic_multi_round_signed_thinking_with_outside_context () =
+  (* Verify both Preserve_positions (claude-sonnet-4-6) and Turn_scoped_system_context
+     (claude-opus-5-5): Round 1 transmits [Conversation; Outside_context; System_context],
+     Agent_turn.prepare_turn retains BOTH carriers in transmission order, and Round 2
+     preserves Round 1's signed Thinking block with zero prefix-binding drops, while
+     Omit_historical_system_context / Initial_system_native_tools strip both historical
+     carriers on non-Anthropic lanes. *)
+  let models =
+    [ "preserve_positions (claude-sonnet-4-6)", "claude-sonnet-4-6"
+    ; "turn_scoped (claude-opus-5-5)", "claude-opus-5-5"
+    ]
+  in
+  List.iter
+    (fun (label, model_id) ->
+       let config =
+         Provider_config.make
+           ~kind:Provider_config.Anthropic
+           ~model_id
+           ~base_url:"https://api.anthropic.com"
+           ~system_prompt:"Static host system prompt"
+           ~enable_thinking:true
+           ~preserve_thinking:true
+           ~max_tokens:1024
+           ()
+       in
+       let media_store = Agent_core.History.Memory_store.create () in
+       let turn_params =
+         { Agent_core.Hooks.default_turn_params with
+           extra_system_context = Some "Host steering state"
+         ; extra_outside_context = Some "## Active goals\n- goal-1"
+         }
+       in
+       let prep =
+         Agent_core.Agent_turn.prepare_turn
+           ~media_store
+           ~tools:Agent_core.Tool_set.empty
+           ~messages:[ Agent_core.Types.user_msg "Please inspect the repo." ]
+           ~turn_params
+           ()
+         |> Result.get_ok
+       in
+       let retained =
+         Result.get_ok prep.request.retained_context_messages
+       in
+       Alcotest.(check int)
+         (label ^ ": retains both Outside_context and System_context")
+         2
+         (List.length retained);
+       Alcotest.(check bool)
+         (label ^ ": retained order is [Outside_context; System_context]")
+         true
+         (List.map (fun (m : Agent_core.Types.message) -> m.origin) retained
+          = [ Outside_context; System_context ]);
+       let signed_response_blocks =
+         [ Thinking { signature = Some "sig_round_1"; content = "analyzing repository" }
+         ; ToolUse { id = "toolu_1"; name = "read_file"; input = `Assoc [ "path", `String "README.md" ] }
+         ]
+       in
+       let prefix_binding =
+         match
+           Backend_anthropic.transmitted_reasoning_prefix
+             ~config
+             ~messages:prep.request.effective_messages
+             ~tools:[]
+             ~response_content:signed_response_blocks
+             ()
+         with
+         | Some binding -> binding
+         | None -> Alcotest.fail (label ^ ": expected Round 1 transmitted_reasoning_prefix")
+       in
+       let reasoning_source =
+         match Reasoning_dialect.replay_capability_for_provider_config ~tools_present:false config with
+         | Ok cap -> cap.target
+         | Error detail -> Alcotest.fail detail
+       in
+       let historical_carriers =
+         List.map
+           (fun (m : Agent_core.Types.message) ->
+              let wire =
+                Agent_core.History.to_wire_message media_store m |> Result.get_ok
+              in
+              match wire.origin with
+              | Outside_context ->
+                { wire with
+                  origin = Historical_system_context
+                ; metadata =
+                    Message_origin_lowering.mark_historical_outside_context wire.metadata
+                }
+              | _ -> { wire with origin = Historical_system_context })
+           retained
+       in
+       let assistant_r1 : message =
+         { role = Assistant
+         ; origin = Conversation
+         ; content = signed_response_blocks
+         ; name = None
+         ; tool_call_id = None
+         ; metadata =
+             Types.Reasoning_source.metadata reasoning_source
+             @ Types.Reasoning_prefix.metadata prefix_binding
+         }
+       in
+       let tool_result_r1 : message =
+         { role = Tool
+         ; origin = Conversation
+         ; content =
+             [ ToolResult
+                 { tool_use_id = "toolu_1"
+                 ; content = "readme contents"
+                 ; outcome = Tool_succeeded
+                 ; json = None
+                 ; content_blocks = None
+                 }
+             ]
+         ; name = None
+         ; tool_call_id = None
+         ; metadata = []
+         }
+       in
+       let round2_outside =
+         message ~origin:Outside_context User [ Text "## Active goals\n- goal-1 (round 2)" ]
+       in
+       let round2_system =
+         message ~origin:System_context User [ Text "[system context] Round 2 host state" ]
+       in
+       let round2_messages =
+         [ message User [ Text "Please inspect the repo." ] ]
+         @ historical_carriers
+         @ [ assistant_r1; tool_result_r1; round2_outside; round2_system ]
+       in
+       (match Backend_anthropic.retained_prefix_reasoning_indices ~config ~tools:[] round2_messages with
+        | Ok (Some [ idx ]) ->
+          Alcotest.(check int)
+            (label ^ ": Round 1 signed assistant retains prefix binding at index 3")
+            3
+            idx
+        | Ok (Some other) ->
+          Alcotest.failf "%s: expected [3] retained reasoning indices, got [%s]" label
+            (String.concat "; " (List.map string_of_int other))
+        | Ok None -> Alcotest.fail (label ^ ": expected Some retained reasoning indices")
+        | Error err ->
+          Alcotest.failf "%s: retained_prefix_reasoning_indices failed: %s" label
+            (Reasoning_history_projection.error_to_string err));
+       (* Verify non-Anthropic lanes strip BOTH historical carriers cleanly. *)
+       List.iter
+         (fun (policy_name, policy) ->
+            let lowered = (lower policy round2_messages).Message_origin_lowering.messages in
+            let remaining_historical =
+              List.filter
+                (fun (m : message) -> m.origin = Historical_system_context)
+                lowered
+            in
+            Alcotest.(check int)
+              (label ^ " / " ^ policy_name ^ ": strips both retained historical carriers")
+              0
+              (List.length remaining_historical))
+         Message_origin_lowering.
+           [ "Omit_historical_system_context", Omit_historical_system_context
+           ; "Initial_system_native_tools", Initial_system_native_tools
+           ])
+    models
+;;
+
 let () =
   Alcotest.run
     "outside_context_origin"
     [ ( "outside context"
       , [ Alcotest.test_case "the stored name reads back" `Quick test_name_round_trips
+        ; Alcotest.test_case
+            "prepare_messages orders Outside_context before System_context for turn-scoped Claude"
+            `Quick
+            test_prepare_messages_orders_outside_before_system_for_turn_scoped
+        ; Alcotest.test_case
+            "Anthropic multi-round signed thinking preserves Outside_context + System_context"
+            `Quick
+            test_anthropic_multi_round_signed_thinking_with_outside_context
         ; Alcotest.test_case
             "initial-system lowering preserves messages[0] KV prefix"
             `Quick

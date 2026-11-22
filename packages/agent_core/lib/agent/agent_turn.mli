@@ -23,11 +23,17 @@ type turn_request =
   ; visible_tool_names : string list
     (** Callable names admitted by this exact request window. *)
   ; context_message : (Types.message option, Error.t) result
-    (** The fresh carrier as actually transmitted after projection, or [None]
-        if no carrier was generated or the projection removed it. An ambiguous
-        selection is data, not a preparation failure: only a signed Anthropic
-        response needs this result. Projected history never replaces the
-        canonical transcript. *)
+    (** The fresh [System_context] carrier as actually transmitted after
+        projection, or [None] if no carrier was generated or the projection
+        removed it. An ambiguous selection is data, not a preparation failure:
+        only a signed Anthropic response needs this result. Projected history
+        never replaces the canonical transcript. *)
+  ; retained_context_messages : (Types.message list, Error.t) result
+    (** Every fresh volatile carrier ([Outside_context] and/or [System_context])
+        actually transmitted after projection, in exact transmission order.
+        Signed Anthropic collection retains all of them before its assistant
+        response so Round 2's prefix hash matches Round 1 verbatim; other
+        providers ignore this list. *)
   }
 
 (** A caller's narrower request ({!Agent_types.narrower_model_input}) with

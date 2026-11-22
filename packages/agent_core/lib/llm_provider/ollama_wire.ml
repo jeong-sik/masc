@@ -41,14 +41,51 @@ type kv_cache_read =
   ; semantics : kv_cache_semantics
   }
 
-let non_negative_int_member key obj =
-  let open Yojson.Safe.Util in
-  match obj with
-  | `Assoc _ ->
-    (match obj |> member key |> to_int_option with
+let non_negative_int_of_float f =
+  if not (Float.is_finite f)
+  then None
+  else if f <= 0.0
+  then Some 0
+  else if f >= Float.of_int Int.max_int
+  then Some Int.max_int
+  else Some (int_of_float f)
+;;
+
+let strict_non_negative_int_of_json = function
+  | `Int n when n >= 0 -> Some n
+  | `Int _ -> None
+  | `Intlit s ->
+    (match int_of_string_opt s with
      | Some n when n >= 0 -> Some n
-     | Some _ | None -> None)
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+     | Some _ -> None
+     | None ->
+       (match float_of_string_opt s with
+        | Some f when Float.is_finite f && f >= 0.0 -> non_negative_int_of_float f
+        | Some _ | None -> None))
+  | `Float f when Float.is_finite f && f >= 0.0 && Float.equal (Float.trunc f) f ->
+    non_negative_int_of_float f
+  | `Float _ | `Null | `Bool _ | `String _ | `List _ | `Assoc _ -> None
+;;
+
+let clamped_non_negative_int_of_json = function
+  | `Int n -> Some (Json_util.clamp_non_negative n)
+  | `Intlit s ->
+    (match int_of_string_opt s with
+     | Some n -> Some (Json_util.clamp_non_negative n)
+     | None ->
+       (match float_of_string_opt s with
+        | Some f -> non_negative_int_of_float f
+        | None -> None))
+  | `Float f -> non_negative_int_of_float f
+  | `Null | `Bool _ | `String _ | `List _ | `Assoc _ -> None
+;;
+
+let optional_non_negative_int_member key obj =
+  Option.bind (Json_util.assoc_member_opt key obj) clamped_non_negative_int_of_json
+;;
+
+let non_negative_int_member key obj =
+  Option.bind (Json_util.assoc_member_opt key obj) strict_non_negative_int_of_json
 ;;
 
 let extract_kv_cache_read json =
@@ -86,14 +123,14 @@ let extract_kv_cache_read json =
 ;;
 
 let resolve_prompt_tokens ~prompt_eval_count ~kv_cache_read =
-  let prompt_eval_count = max 0 prompt_eval_count in
+  let prompt_eval_count = Json_util.clamp_non_negative prompt_eval_count in
   match kv_cache_read with
   | None -> prompt_eval_count, 0, None
   | Some { tokens; semantics = Exclusive_from_prompt_eval } ->
-    let tokens = max 0 tokens in
-    prompt_eval_count + tokens, tokens, Some tokens
+    let tokens = Json_util.clamp_non_negative tokens in
+    Json_util.saturating_add_non_negative prompt_eval_count tokens, tokens, Some tokens
   | Some { tokens; semantics = Inclusive_in_prompt_eval } ->
-    let tokens = max 0 tokens in
+    let tokens = Json_util.clamp_non_negative tokens in
     max prompt_eval_count tokens, tokens, Some tokens
 ;;
 
@@ -137,7 +174,7 @@ let ollama_line_shape json =
 let parse_ollama_ndjson_chunk data_str : ollama_ndjson_parse_result =
   let open Yojson.Safe.Util in
   try
-    let json = Yojson.Safe.from_string data_str in
+    let json = Json_util.from_string_bounded_exn data_str in
     match ollama_line_shape json with
     | Ollama_provider_error_fields { message; error_type } ->
       Ollama_provider_error { message; error_type; raw = data_str }
@@ -192,17 +229,17 @@ let parse_ollama_ndjson_chunk data_str : ollama_ndjson_parse_result =
          so that a downstream consumer's usage-trust classification sees
          [Usage_missing] instead of [zero_token_usage_reported]. *)
       let kv_cache_read = extract_kv_cache_read json in
+      let input_count = optional_non_negative_int_member "prompt_eval_count" json in
+      let output_count = optional_non_negative_int_member "eval_count" json in
       let oll_usage =
-        let input = json |> member "prompt_eval_count" |> to_int_option in
-        let output = json |> member "eval_count" |> to_int_option in
-        match input, output, kv_cache_read with
+        match input_count, output_count, kv_cache_read with
         | None, None, None -> None
         | (Some _ | None), (Some _ | None), (Some _ | None) ->
-          let prompt_eval_count = Option.value ~default:0 input in
+          let prompt_eval_count = Option.value ~default:0 input_count in
           let input_tokens, cache_read_input_tokens, _ =
             resolve_prompt_tokens ~prompt_eval_count ~kv_cache_read
           in
-          let output_tokens = Option.value ~default:0 output in
+          let output_tokens = Option.value ~default:0 output_count in
           if input_tokens = 0 && output_tokens = 0
           then None
           else
@@ -220,14 +257,10 @@ let parse_ollama_ndjson_chunk data_str : ollama_ndjson_parse_result =
          paths. Durations are nanoseconds on the wire; convert to ms
          and tok/s here. *)
       let oll_timings =
-        let prompt_n =
-          json |> member "prompt_eval_count" |> to_int_option |> Option.map (max 0)
-        in
-        let prompt_ns = json |> member "prompt_eval_duration" |> to_int_option in
-        let predicted_n =
-          json |> member "eval_count" |> to_int_option |> Option.map (max 0)
-        in
-        let predicted_ns = json |> member "eval_duration" |> to_int_option in
+        let prompt_n = input_count in
+        let prompt_ns = optional_non_negative_int_member "prompt_eval_duration" json in
+        let predicted_n = output_count in
+        let predicted_ns = optional_non_negative_int_member "eval_duration" json in
         let cache_n = Option.map (fun r -> r.tokens) kv_cache_read in
         let any_set =
           Option.is_some prompt_n

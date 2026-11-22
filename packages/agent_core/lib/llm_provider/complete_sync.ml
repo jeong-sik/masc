@@ -86,7 +86,7 @@ let parse_sync_response_observed
   try
     match http_codec with
     | Provider_http_codec.Anthropic_messages ->
-      let json = Yojson.Safe.from_string body in
+      let json = Json_util.from_string_bounded_exn body in
       Backend_anthropic.observe_input_transformations json;
       without_observation (Ok (Backend_anthropic.parse_response json))
     | Provider_http_codec.Ollama_chat ->
@@ -159,7 +159,8 @@ let parse_sync_response_observed
        | Error (Backend_openai_parse.Empty_completion empty) ->
          Error (Http_client.empty_completion_error ~stop_reason:empty.stop_reason))
     | Provider_http_codec.Gemini_generate_content ->
-      without_observation (Ok (Backend_gemini.parse_response (Yojson.Safe.from_string body)))
+      without_observation
+        (Ok (Backend_gemini.parse_response (Json_util.from_string_bounded_exn body)))
     | Provider_http_codec.Glm_chat ->
       without_observation (match Backend_glm.parse_response_result ~content_inline_reasoning body with
        | Ok response -> Ok response
@@ -728,7 +729,7 @@ let complete_http
             "%s %s → %s (%d bytes)"
             provider_label
             config.model_id
-            url
+            (sanitize_url_for_log url)
             body_len;
           let latency_counter = start_latency_counter ?clock () in
           (* The provider's connect budget bounds the wait for the response
@@ -837,11 +838,7 @@ let complete_http
                '}' symbol", that points at server-side parser limits and we
                want the *exact* body for offline reproduction. *)
                 let parse_ok =
-                  try
-                    let _ = Yojson.Safe.from_string body_str in
-                    true
-                  with
-                  | _json_parse_error -> false
+                  Result.is_ok (Json_util.from_string_bounded body_str)
                 in
                 (* Mask api_key to a short fingerprint so log lines distinguish
                same-provider calls that use different keys (e.g.

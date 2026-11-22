@@ -16,7 +16,7 @@ let validate_object = function
 ;;
 
 let parse_object raw =
-  match Yojson.Safe.from_string raw with
+  match Json_util.from_string_bounded_exn raw with
   | input -> validate_object input
   | exception Yojson.Json_error message -> Error (Invalid_json message)
 ;;

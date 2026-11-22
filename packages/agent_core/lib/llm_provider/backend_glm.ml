@@ -239,7 +239,7 @@ let check_glm_error_json (json : Yojson.Safe.t) : glm_error option =
 ;;
 
 let check_glm_error body : glm_error option =
-  try check_glm_error_json (Yojson.Safe.from_string body) with
+  try check_glm_error_json (Json_util.from_string_bounded_exn body) with
   | Yojson.Json_error _ -> None
 ;;
 
@@ -344,7 +344,7 @@ let extract_reasoning_content_json (resp : api_response) (json : Yojson.Safe.t)
 ;;
 
 let extract_reasoning_content (resp : api_response) body : api_response =
-  try extract_reasoning_content_json resp (Yojson.Safe.from_string body) with
+  try extract_reasoning_content_json resp (Json_util.from_string_bounded_exn body) with
   | Yojson.Json_error _ -> resp
 ;;
 
@@ -378,7 +378,7 @@ let parse_response_result
      unreachable on the GLM path). Malformed JSON and GLM provider errors
      ([check_glm_error_json]) still raise [Glm_api_error]. *)
   let json =
-    try Yojson.Safe.from_string body with
+    try Json_util.from_string_bounded_exn body with
     | Yojson.Json_error msg -> raise (glm_parse_error msg)
   in
   match check_glm_error_json json with

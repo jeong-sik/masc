@@ -257,16 +257,19 @@ let delta_usage_of_openai_json json : Types.delta_usage option =
       | `Assoc _ as details -> Some details
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
     in
-    let input_tokens = member_int_fallback usage [ "prompt_tokens"; "input_tokens" ] in
+    let clamp_opt = Option.map Json_util.clamp_non_negative in
+    let input_tokens =
+      member_int_fallback usage [ "prompt_tokens"; "input_tokens" ] |> clamp_opt
+    in
     let cached_tokens =
       match member_int_fallback usage [ "prompt_cache_hit_tokens" ] with
-      | Some _ as count -> count
+      | Some _ as count -> clamp_opt count
       | None ->
         (match
            Option.bind prompt_details (fun details ->
              member_int_fallback details [ "cached_tokens" ])
          with
-         | Some _ as count -> count
+         | Some _ as count -> clamp_opt count
          | None ->
            (* llama-server reports KV-cache reuse in top-level [timings.cache_n]
               without populating [prompt_tokens_details.cached_tokens]; its
@@ -284,10 +287,12 @@ let delta_usage_of_openai_json json : Types.delta_usage option =
     let cache_creation_input_tokens =
       Option.bind prompt_details (fun details ->
         member_int_fallback details [ "cache_write_tokens" ])
+      |> clamp_opt
     in
     let reasoning_tokens =
       match usage |> member "completion_tokens_details" with
-      | `Assoc _ as details -> member_int_fallback details [ "reasoning_tokens" ]
+      | `Assoc _ as details ->
+        member_int_fallback details [ "reasoning_tokens" ] |> clamp_opt
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
     in
     let parse_non_negative_cost = function
@@ -325,7 +330,8 @@ let delta_usage_of_openai_json json : Types.delta_usage option =
     in
     Some
       { input_tokens
-      ; output_tokens = member_int_fallback usage [ "completion_tokens"; "output_tokens" ]
+      ; output_tokens =
+          member_int_fallback usage [ "completion_tokens"; "output_tokens" ] |> clamp_opt
       ; cache_creation_input_tokens
       ; cache_read_input_tokens = cached_tokens
       ; cost_usd
@@ -622,9 +628,9 @@ let parse_openai_response_result
       ?(content_inline_reasoning = Capabilities.No_content_inline_reasoning)
       json_str
   =
-  parse_openai_response_result_json
-    ~content_inline_reasoning
-    (Yojson.Safe.from_string json_str)
+  match Json_util.from_string_bounded json_str with
+  | Ok json -> parse_openai_response_result_json ~content_inline_reasoning json
+  | Error detail -> Error (Unreadable_response detail)
 ;;
 
 let%test "missing finish reason is not synthesized as stop" =

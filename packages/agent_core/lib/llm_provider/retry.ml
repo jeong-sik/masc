@@ -299,7 +299,7 @@ let usable_retry_after (seconds : float) : float option =
     rejected ([None]) at this boundary (parse, don't validate). *)
 let parse_body_retry_after (body : string) : float option =
   try
-    let json = Yojson.Safe.from_string body in
+    let json = Json_util.from_string_bounded_exn body in
     let open Yojson.Safe.Util in
     json |> member "error" |> member "retry_after" |> to_number |> usable_retry_after
   with
@@ -432,9 +432,9 @@ let rec extract_signals_from_json ~depth (json : Yojson.Safe.t) : error_signals 
         with
         | None -> empty_signals
         | Some raw ->
-          (match Yojson.Safe.from_string raw with
-           | raw_json -> extract_signals_from_json ~depth:(depth + 1) raw_json
-           | exception Yojson.Json_error _ -> empty_signals)
+          (match Json_util.from_string_bounded raw with
+           | Ok raw_json -> extract_signals_from_json ~depth:(depth + 1) raw_json
+           | Error _ -> empty_signals)
       in
       merge_signals base nested
     | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
@@ -442,9 +442,9 @@ let rec extract_signals_from_json ~depth (json : Yojson.Safe.t) : error_signals 
 ;;
 
 let signals_of_body (body : string) : error_signals =
-  match Yojson.Safe.from_string body with
-  | json -> extract_signals_from_json ~depth:0 json
-  | exception Yojson.Json_error _ -> empty_signals
+  match Json_util.from_string_bounded body with
+  | Ok json -> extract_signals_from_json ~depth:0 json
+  | Error _ -> empty_signals
 ;;
 
 let is_structured_context_overflow_code code =

@@ -105,6 +105,7 @@ type t =
   ; pending_entries : pending_selection list
   ; last_transition : transition_receipt option
   ; projected_dispositions : durable_disposition list
+  ; evicted_transition_ids : string list
   ; transition_outbox : outbox_entry list
   ; accepted_transfer_projections : accepted_transfer list
   ; last_non_immediate_served : Keeper_event_queue.urgency option
@@ -124,6 +125,7 @@ let empty =
   ; pending_entries = []
   ; last_transition = None
   ; projected_dispositions = []
+  ; evicted_transition_ids = []
   ; transition_outbox = []
   ; accepted_transfer_projections = []
   ; last_non_immediate_served = None
@@ -172,16 +174,21 @@ let non_immediate_urgency_of_witness (witness : projected_disposition_witness) =
    3. [projected_dispositions] holds newest-first displaced history ( whose
       first element may be an Immediate transition even when an earlier
       disposition served Normal or Low). *)
+let max_pending_entries = 4096
+let max_transition_outbox_entries = 256
+
 let derived_last_non_immediate_served
       ~transition_outbox
       ~last_transition
       ~projected_dispositions
   =
+  (* [transition_outbox] is appended in FIFO order (oldest first, newest last),
+     so scan newest-first to recover the latest served non-immediate urgency. *)
   let from_outbox =
     List.find_map
       (fun (entry : outbox_entry) ->
          non_immediate_urgency_of_transition entry.receipt.transition)
-      transition_outbox
+      (List.rev transition_outbox)
   in
   match from_outbox with
   | Some _ as served -> served
@@ -264,6 +271,12 @@ let projected_dispositions state =
 ;;
 
 let transition_outbox state = state.transition_outbox
+let evicted_transition_ids state = state.evicted_transition_ids
+
+let transition_id_is_evicted transition_id state =
+  List.exists (String.equal transition_id) state.evicted_transition_ids
+;;
+
 let accepted_transfer_projections state = state.accepted_transfer_projections
 
 let transition_source = function
@@ -443,31 +456,38 @@ let project_accepted_transfer ?admitted_at (transfer : accepted_transfer) state 
     in
     (match matching with
      | [] ->
-       let inserted =
-         { source = transfer.source
-         ; admitted_revision = state.revision
-         ; arrival = state.next_arrival
-         ; checkpoint_retentions = 0
-         ; first_admitted_at = admitted_at
-         }
-       in
-       let pending_entries =
-         List.stable_sort
-           (fun left right ->
-              Keeper_event_queue.compare_selection_urgency
-                ~last_non_immediate_served:None
-                left.source.urgency
-                right.source.urgency)
-           (state.pending_entries @ [ inserted ])
-       in
-       Ok
-         ( { state with
-             next_arrival = Int64.succ state.next_arrival
-           ; pending_entries
-           ; accepted_transfer_projections =
-               state.accepted_transfer_projections @ [ transfer ]
+       if List.length state.pending_entries >= max_pending_entries
+       then
+         Error
+           (Printf.sprintf
+              "event queue pending capacity reached (%d)"
+              max_pending_entries)
+       else
+         let inserted =
+           { source = transfer.source
+           ; admitted_revision = state.revision
+           ; arrival = state.next_arrival
+           ; checkpoint_retentions = 0
+           ; first_admitted_at = admitted_at
            }
-         , Transfer_projected )
+         in
+         let pending_entries =
+           List.stable_sort
+             (fun left right ->
+                Keeper_event_queue.compare_selection_urgency
+                  ~last_non_immediate_served:None
+                  left.source.urgency
+                  right.source.urgency)
+             (state.pending_entries @ [ inserted ])
+         in
+         Ok
+           ( { state with
+               next_arrival = Int64.succ state.next_arrival
+             ; pending_entries
+             ; accepted_transfer_projections =
+                 state.accepted_transfer_projections @ [ transfer ]
+             }
+           , Transfer_projected )
      | [ existing ] when existing = transfer.source ->
        Ok
          ( { state with
@@ -479,6 +499,15 @@ let project_accepted_transfer ?admitted_at (transfer : accepted_transfer) state 
        Error "target transfer source identity has a different durable snapshot"
      | _ :: _ :: _ ->
        Error "target transfer source identity is duplicated in durable state")
+;;
+
+let take_at_most limit xs =
+  let rec loop acc remaining = function
+    | [] -> List.rev acc
+    | _ when remaining <= 0 -> List.rev acc
+    | x :: rest -> loop (x :: acc) (remaining - 1) rest
+  in
+  loop [] limit xs
 ;;
 
 (* schema-compat: projected_dispositions rows keep the same constructors and
@@ -507,10 +536,27 @@ let mark_transition_projected ~transition_id ~retain_previous state =
         durable_of_projected_receipt receipt :: state.projected_dispositions
       | Some _ | None -> state.projected_dispositions
     in
+    let evicted_transition_ids =
+      let cleaned =
+        List.filter
+          (fun id -> not (String.equal id entry.receipt.transition_id))
+          state.evicted_transition_ids
+      in
+      match state.last_transition with
+      | Some receipt when not (retain_previous receipt) ->
+        let without_prev =
+          List.filter
+            (fun id -> not (String.equal id receipt.transition_id))
+            cleaned
+        in
+        take_at_most max_transition_outbox_entries (receipt.transition_id :: without_prev)
+      | Some _ | None -> cleaned
+    in
     Ok
       { state with
         last_transition = Some entry.receipt
       ; projected_dispositions
+      ; evicted_transition_ids
       ; transition_outbox = remaining
       }
   | _ :: _ :: _ ->
@@ -527,7 +573,9 @@ let mark_transition_projected ~transition_id ~retain_previous state =
      with
      | Some _ -> Ok state
      | None ->
-       Error (Printf.sprintf "event queue transition not found: %s" transition_id))
+       if transition_id_is_evicted transition_id state
+       then Ok state
+       else Error (Printf.sprintf "event queue transition not found: %s" transition_id))
 ;;
 let reconcile_pending ~first_admitted_at pending state =
   let available_by_identity =
@@ -602,7 +650,17 @@ let with_pending pending state = reconcile_pending ~first_admitted_at:None pendi
 let with_pending_at ~admitted_at pending state =
   if not (Float.is_finite admitted_at)
   then Error "event queue admission time must be finite"
-  else Ok (reconcile_pending ~first_admitted_at:(Some admitted_at) pending state)
+  else (
+    let next = reconcile_pending ~first_admitted_at:(Some admitted_at) pending state in
+    let next_len = List.length next.pending_entries in
+    let prev_len = List.length state.pending_entries in
+    if next_len > max_pending_entries && next_len > prev_len
+    then
+      Error
+        (Printf.sprintf
+           "event queue pending capacity reached (%d)"
+           max_pending_entries)
+    else Ok next)
 ;;
 
 let with_revision revision state = { state with revision }
@@ -920,6 +978,12 @@ let receipt_for_pending_transition ~applied_at ~transition =
 let apply_pending_transition ~applied_at ~transition ~source ~pending state =
   if not (Float.is_finite applied_at)
   then Error "event queue transition application time must be finite"
+  else if List.length state.transition_outbox >= max_transition_outbox_entries
+  then
+    Error
+      (Printf.sprintf
+         "event queue transition outbox capacity reached (%d)"
+         max_transition_outbox_entries)
   else
     let* () = validate_transition transition in
     let* () = validate_transition_for_stimuli transition [ source ] in
@@ -930,9 +994,15 @@ let apply_pending_transition ~applied_at ~transition ~source ~pending state =
       | Some _ as served -> served
       | None -> state.last_non_immediate_served
     in
+    let evicted_transition_ids =
+      List.filter
+        (fun id -> not (String.equal id receipt.transition_id))
+        state.evicted_transition_ids
+    in
     Ok
       ( { state with
-          transition_outbox =
+          evicted_transition_ids
+        ; transition_outbox =
             state.transition_outbox @ [ { receipt; stimuli = [ source ] } ]
         ; last_non_immediate_served
         }

@@ -482,6 +482,18 @@ let test_anthropic_wire_thinking_precedes_terminal_text () =
   check_wire_ready response
 ;;
 
+let test_deeply_nested_json_fails_closed_without_stack_overflow () =
+  let depth = 10_000 in
+  let raw = String.make depth '[' ^ "1" ^ String.make depth ']' in
+  (match Structured.inspect_response_json (make_response [ Text raw ]) with
+   | Invalid error ->
+     check_private_evidence ~reason:Error.Invalid_json ~raw (Error error)
+   | Ready _ | Awaiting_tool_results | Refused _ | Truncated _ | Interrupted _ ->
+     Alcotest.fail "deeply nested JSON response must return Invalid without Stack_overflow");
+  Structured.extract_response ~schema:person_schema (make_response [ Text raw ])
+  |> check_private_evidence ~reason:Error.Invalid_json ~raw
+;;
+
 let () =
   Alcotest.run
     "structured"
@@ -494,6 +506,7 @@ let () =
     ; ( "response states"
       , [ Alcotest.test_case "authoritative stops precede JSON" `Quick test_authoritative_stop_states_precede_valid_json
         ; Alcotest.test_case "tool turn then terminal JSON" `Quick test_tool_call_turn_requires_tool_results_before_json
+        ; Alcotest.test_case "deeply nested JSON fails closed without Stack_overflow" `Quick test_deeply_nested_json_fails_closed_without_stack_overflow
         ] )
     ; ( "private failure evidence"
       , [ Alcotest.test_case "schema refusal" `Quick test_schema_refusal_retains_response_without_public_detail

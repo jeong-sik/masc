@@ -7736,6 +7736,217 @@ let test_registry_quarantine_fences_faulted_owner_and_blocks_reentry () =
     ignore (Owner_registry.begin_stopping_all ~base_path)))
 ;;
 
+(* Red-Team P0-8: owner startup failure or bulkhead quarantine must NEVER
+   poison [pool.owners_mu] for sibling Keepers, and [clear_unavailable] must
+   unfence a quarantined keeper cleanly without restarting the server. *)
+let test_registry_startup_failure_never_poisons_mutex_and_unavailable_recovers () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () ->
+      let config = Workspace.default_config base_path in
+      ignore (Workspace.init config ~agent_name:(Some "registry-p08-test"));
+      let sibling_meta = make_meta "p08-sibling" in
+      let blocked_meta = make_meta "p08-blocked" in
+      let recover_meta = make_meta "p08-recover" in
+      Keeper_meta_store.replace_snapshot config sibling_meta |> Result.get_ok;
+      Keeper_meta_store.replace_snapshot config recover_meta |> Result.get_ok;
+      (* Block [p08-blocked]'s operation store directory with a regular file so
+         [start_owner] fails during [ensure_in_pool]. *)
+      let keepers_rt = Workspace.keepers_runtime_dir config in
+      Fs_compat.mkdir_p keepers_rt;
+      Fs_compat.save_file (Filename.concat keepers_rt blocked_meta.name) "not-a-dir";
+      Eio.Switch.run (fun sw ->
+        (match
+           Owner_registry.install_from_store
+             ~sw
+             ~operation_runner:None
+             ~on_turn_slot_released:None
+             config
+         with
+         | Ok count -> check int "two healthy owners installed" 2 count
+         | Error err -> fail (Owner_registry.install_error_to_string err));
+        let sibling_owner =
+          match Owner_registry.get ~base_path ~keeper_name:sibling_meta.name with
+          | Ok owner -> owner
+          | Error err -> fail (Owner_registry.lookup_error_to_string err)
+        in
+        let recover_owner =
+          match Owner_registry.get ~base_path ~keeper_name:recover_meta.name with
+          | Ok owner -> owner
+          | Error err -> fail (Owner_registry.lookup_error_to_string err)
+        in
+        (* Failed startup for [p08-blocked] must return typed Error and leave
+           [pool.owners_mu] unpoisoned for sibling lookups. *)
+        (match Owner_registry.For_testing.ensure_in_pool ~base_path blocked_meta with
+         | Error (Owner_registry.Owner_initialization_failed _) -> ()
+         | Error err -> fail (Owner_registry.lookup_error_to_string err)
+         | Ok _ -> fail "expected Owner_initialization_failed for file-blocked dir");
+        (match Owner_registry.get ~base_path ~keeper_name:sibling_meta.name with
+         | Ok current ->
+           check bool "sibling lookup succeeds (owners_mu not poisoned)" true
+             (current == sibling_owner)
+         | Error err -> fail (Owner_registry.lookup_error_to_string err));
+        (* Quarantine [p08-recover], verify unavailable, then clear_unavailable
+           and verify it cleanly restarts without server restart! *)
+        let exception Simulated_p08_fault in
+        Owner_registry.For_testing.quarantine_faulted_owner
+          ~base_path
+          ~keeper_name:recover_meta.name
+          recover_owner
+          Simulated_p08_fault;
+        Eio.Fiber.yield ();
+        Eio.Fiber.yield ();
+        (match Owner_registry.get ~base_path ~keeper_name:recover_meta.name with
+         | Error (Owner_registry.Owner_unavailable _) -> ()
+         | Error err -> fail (Owner_registry.lookup_error_to_string err)
+         | Ok _ -> fail "expected Owner_unavailable after quarantine");
+        (match Owner_registry.clear_unavailable ~base_path ~keeper_name:recover_meta.name with
+         | Ok cleared -> check bool "unavailable fence cleared" true cleared
+         | Error err -> fail (Owner_registry.lookup_error_to_string err));
+        (match Owner_registry.clear_unavailable ~base_path ~keeper_name:recover_meta.name with
+         | Ok cleared -> check bool "second clear is idempotent false" false cleared
+         | Error err -> fail (Owner_registry.lookup_error_to_string err));
+        (match Owner_registry.For_testing.ensure_in_pool ~base_path recover_meta with
+         | Ok restarted ->
+           check bool "restarted owner is a fresh handle" true (restarted != recover_owner)
+         | Error err ->
+           fail ("ensure_in_pool failed after clear_unavailable: "
+                 ^ Owner_registry.lookup_error_to_string err));
+        (* Cancelled starter with concurrent waiter must NEVER deadlock pool.starting
+           or leave resolver unresolved, and a subsequent ensure_in_pool must succeed. *)
+        let race_meta = make_meta "p08-cancel-race" in
+        Keeper_meta_store.replace_snapshot config race_meta |> Result.get_ok;
+        let waiter_result = ref None in
+        let waiter_done = Eio.Promise.create () in
+        Eio.Fiber.fork ~sw (fun () ->
+          let res = Owner_registry.For_testing.ensure_in_pool ~base_path race_meta in
+          waiter_result := Some res;
+          Eio.Promise.resolve (snd waiter_done) ());
+        (try
+           Eio.Fiber.first
+             (fun () ->
+                ignore
+                  (Owner_registry.For_testing.ensure_in_pool ~base_path race_meta
+                   : (Keeper_owner.t, Owner_registry.lookup_error) result))
+             (fun () -> Eio.Fiber.yield ())
+         with
+         | Eio.Cancel.Cancelled _ -> ());
+        Eio.Promise.await (fst waiter_done);
+        check bool "concurrent waiter resolved without deadlocking" true
+          (Option.is_some !waiter_result);
+        (match Owner_registry.For_testing.ensure_in_pool ~base_path race_meta with
+         | Ok _ -> ()
+         | Error err ->
+           fail ("ensure_in_pool failed after starter cancellation race: "
+                 ^ Owner_registry.lookup_error_to_string err));
+        (* Explicit sub-switch failure cancelling starter with a concurrent waiter
+           on the outer switch must still clean pool.starting and resolve the
+           waiter cleanly, even if rollback encounters cancellation. *)
+        let abort_meta = make_meta "p08-starter-abort" in
+        Keeper_meta_store.replace_snapshot config abort_meta |> Result.get_ok;
+        let abort_waiter_done = Eio.Promise.create () in
+        let abort_waiter_res = ref None in
+        Eio.Fiber.fork ~sw (fun () ->
+          let res = Owner_registry.For_testing.ensure_in_pool ~base_path abort_meta in
+          abort_waiter_res := Some res;
+          Eio.Promise.resolve (snd abort_waiter_done) ());
+        (let exception Abort_starter in
+         try
+           Eio.Switch.run (fun starter_sw ->
+             Eio.Fiber.fork ~sw:starter_sw (fun () ->
+               ignore
+                 (Owner_registry.For_testing.ensure_in_pool ~base_path abort_meta
+                  : (Keeper_owner.t, Owner_registry.lookup_error) result));
+             Eio.Switch.fail starter_sw Abort_starter)
+         with
+         | Abort_starter -> ());
+        Eio.Promise.await (fst abort_waiter_done);
+        check bool "waiter wakes cleanly after starter sub-switch abort" true
+          (Option.is_some !abort_waiter_res);
+        (match Owner_registry.For_testing.ensure_in_pool ~base_path abort_meta with
+         | Ok _ -> ()
+         | Error err ->
+           fail ("ensure_in_pool failed after starter sub-switch abort: "
+                 ^ Owner_registry.lookup_error_to_string err));
+        (* Red-Team Round 4 P2-1: if [record_failed_operations] raises an
+           exception or encounters cancellation inside [start_owner], the newly
+           started [Keeper_owner.t] MUST be stopped immediately (zero ghost
+           actor left on [pool.sw]) and subsequent startup must succeed. *)
+        let rec_fail_meta = make_meta "p08-record-fail" in
+        Keeper_meta_store.replace_snapshot config rec_fail_meta |> Result.get_ok;
+        let captured_exn_owner = ref None in
+        let exception Simulated_record_failed_ops in
+        (match
+           Owner_registry.For_testing.with_record_failed_operations_hook
+             (fun ~keeper_name owner ->
+                if String.equal keeper_name rec_fail_meta.name
+                then (
+                  captured_exn_owner := Some owner;
+                  raise Simulated_record_failed_ops))
+             (fun () -> Owner_registry.For_testing.ensure_in_pool ~base_path rec_fail_meta)
+         with
+         | Error (Owner_registry.Owner_initialization_failed _) -> ()
+         | Error err ->
+           fail ("expected Owner_initialization_failed, got "
+                 ^ Owner_registry.lookup_error_to_string err)
+         | Ok _ -> fail "expected ensure_in_pool to fail when record_failed_operations raises");
+        (match !captured_exn_owner with
+         | None -> fail "record_failed_operations hook did not run"
+         | Some ghost ->
+           check bool "started owner marked stopping after record_failed_operations exn" true
+             (Owner.projection ghost).Keeper_owner_reducer.stopping;
+           (match Owner.run_autonomous_if_idle ghost (fun () -> ()) with
+            | Error Owner.Owner_stopping -> ()
+            | Error err ->
+              fail ("expected Owner_stopping after record_failed_operations exn, got "
+                    ^ Owner.error_to_string err)
+            | Ok _ -> fail "started owner leaked alive on pool.sw after exception"));
+        (match Owner_registry.For_testing.ensure_in_pool ~base_path rec_fail_meta with
+         | Ok _ -> ()
+         | Error err ->
+           fail ("ensure_in_pool failed after record_failed_operations exn cleanup: "
+                 ^ Owner_registry.lookup_error_to_string err));
+        let rec_cancel_meta = make_meta "p08-record-cancel" in
+        Keeper_meta_store.replace_snapshot config rec_cancel_meta |> Result.get_ok;
+        let captured_cancel_owner = ref None in
+        let exception Simulated_record_cancel in
+        (try
+           Eio.Switch.run (fun cancel_sw ->
+             Owner_registry.For_testing.with_record_failed_operations_hook
+               (fun ~keeper_name owner ->
+                  if String.equal keeper_name rec_cancel_meta.name
+                  then (
+                    captured_cancel_owner := Some owner;
+                    Eio.Switch.fail cancel_sw Simulated_record_cancel;
+                    Eio.Fiber.yield ()))
+               (fun () ->
+                  ignore
+                    (Owner_registry.For_testing.ensure_in_pool ~base_path rec_cancel_meta
+                     : (Keeper_owner.t, Owner_registry.lookup_error) result)))
+         with
+         | Simulated_record_cancel -> ());
+        (match !captured_cancel_owner with
+         | None -> fail "record_failed_operations cancel hook did not run"
+         | Some ghost ->
+           check bool "started owner marked stopping after record_failed_operations cancel" true
+             (Owner.projection ghost).Keeper_owner_reducer.stopping;
+           (match Owner.run_autonomous_if_idle ghost (fun () -> ()) with
+            | Error Owner.Owner_stopping -> ()
+            | Error err ->
+              fail ("expected Owner_stopping after record_failed_operations cancel, got "
+                    ^ Owner.error_to_string err)
+            | Ok _ -> fail "started owner leaked alive on pool.sw after cancellation"));
+        (match Owner_registry.For_testing.ensure_in_pool ~base_path rec_cancel_meta with
+         | Ok _ -> ()
+         | Error err ->
+           fail ("ensure_in_pool failed after record_failed_operations cancel cleanup: "
+                 ^ Owner_registry.lookup_error_to_string err));
+        ignore (Owner_registry.begin_stopping_all ~base_path)))
+;;
+
 let () =
   run
     "keeper owner"
@@ -7743,7 +7954,9 @@ let () =
         test_case "uncaught keeper fault stays inside its own switch and spares siblings" `Quick
           test_per_keeper_bulkhead_isolates_uncaught_fault;
         test_case "registry quarantine fences only exact faulted owner and blocks re-entry" `Quick
-          test_registry_quarantine_fences_faulted_owner_and_blocks_reentry ] )
+          test_registry_quarantine_fences_faulted_owner_and_blocks_reentry;
+        test_case "startup failure never poisons owners_mu and clear_unavailable recovers" `Quick
+          test_registry_startup_failure_never_poisons_mutex_and_unavailable_recovers ] )
     ; ( "receipt wait", [
         test_case "a task waiting for a receipt is claimed only after it arrives" `Quick
           test_owner_receipt_wait_holds_the_claim_until_the_receipt_arrives ] )

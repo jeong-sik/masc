@@ -138,6 +138,7 @@ type t =
   ; pending_entries : pending_selection list
   ; last_transition : transition_receipt option
   ; projected_dispositions : durable_disposition list
+  ; evicted_transition_ids : string list
   ; transition_outbox : outbox_entry list
   ; accepted_transfer_projections : accepted_transfer list
   ; last_non_immediate_served : Keeper_event_queue.urgency option
@@ -152,6 +153,8 @@ type transfer_projection_result =
   | Transfer_already_projected
 
 val empty : t
+val max_pending_entries : int
+val max_transition_outbox_entries : int
 val revision : t -> int64
 val pending : t -> Keeper_event_queue.t
 val pending_selections : t -> pending_selection list
@@ -220,6 +223,13 @@ val projected_dispositions : t -> durable_disposition list
 
 val transition_receipt_is_projected : transition_receipt -> t -> bool
 (** Exact full-receipt or compact-fingerprint membership used by WAL replay. *)
+
+val evicted_transition_ids : t -> string list
+(** Bounded newest-first witness of transition IDs evicted from
+    [last_transition] with [retain_previous = false], so crash/lock-free WAL
+    replay distinguishes genuinely retired transitions from divergent WAL rows. *)
+
+val transition_id_is_evicted : string -> t -> bool
 
 val prior_disposition_by_operation_id :
   string -> t -> durable_disposition option

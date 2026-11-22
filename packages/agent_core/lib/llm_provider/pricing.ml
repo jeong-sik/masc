@@ -90,9 +90,18 @@ let estimate_cost
       ?(cache_read_input_tokens = 0)
       ()
   =
-  let regular_input =
-    max 0 (input_tokens - cache_creation_input_tokens - cache_read_input_tokens)
+  let input_tokens = Json_util.clamp_non_negative input_tokens in
+  let output_tokens = Json_util.clamp_non_negative output_tokens in
+  let cache_creation_input_tokens =
+    Json_util.clamp_non_negative cache_creation_input_tokens
   in
+  let cache_read_input_tokens = Json_util.clamp_non_negative cache_read_input_tokens in
+  let cached_total =
+    Json_util.saturating_add_non_negative
+      cache_creation_input_tokens
+      cache_read_input_tokens
+  in
+  let regular_input = max 0 (input_tokens - cached_total) in
   let cache_write_multiplier =
     match cache_writes with
     | Provider_default -> pricing.cache_write_multiplier
@@ -127,7 +136,8 @@ let estimate_cost
     let output_cost =
       Float.of_int output_tokens *. pricing.output_per_million /. 1_000_000.0
     in
-    Estimated (input_cost +. cache_write_cost +. cache_read_cost +. output_cost)
+    let total = input_cost +. cache_write_cost +. cache_read_cost +. output_cost in
+    Estimated (if Float.is_finite total then Float.max 0.0 total else 0.0)
 ;;
 
 let annotate_usage_cost ~source ~model_id (usage : Types.api_usage) =

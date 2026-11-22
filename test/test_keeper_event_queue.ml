@@ -1091,6 +1091,87 @@ let () =
     { post_id = "p1"; urgency = Normal; arrived_at = 0.0; payload = board_payload () }
   in
   test_async_transition_page ~source:board_stim;
+  (* P0-6: a blocked Transfer_accepted head (target shutdown-fenced) must not
+     HoL-starve independent trailing outbox transfers, while still surfacing the
+     head error and converging cleanly once the target fence rolls back. *)
+  (let base_path = temp_dir "transition-outbox-hol-nonblocking" in
+   Fun.protect ~finally:(fun () -> rm_rf base_path) (fun () ->
+     let stim_blocked = { board_stim with post_id = "hol-blocked-post" } in
+     let stim_healthy = { board_stim with post_id = "hol-healthy-post" } in
+     stage_transfer ~base_path ~from_keeper:"hol-source" ~to_keeper:"hol-blocked-target"
+       ~source:stim_blocked ~operation_id:"hol-op-blocked";
+     stage_transfer ~base_path ~from_keeper:"hol-source" ~to_keeper:"hol-healthy-target"
+       ~source:stim_healthy ~operation_id:"hol-op-healthy";
+     let pending_count () =
+       load_queue_state ~base_path ~keeper_name:"hol-source"
+       |> Keeper_event_queue_state.transition_outbox
+       |> List.length
+     in
+     Alcotest.(check int) "both transfers staged in source outbox" 2 (pending_count ());
+     with_strict_executor ~domain_count:1 (fun () ->
+       let shutdown_op = Masc.Keeper_shutdown_types.Operation_id.generate () in
+       (match
+          Masc.Keeper_shutdown_intake_fence.begin_shutdown
+            ~base_path
+            ~keeper_name:"hol-blocked-target"
+            ~operation_id:shutdown_op
+        with
+        | Masc.Keeper_shutdown_intake_fence.Reserved _ -> ()
+        | Masc.Keeper_shutdown_intake_fence.Already_reserved _ ->
+          Alcotest.fail "blocked target was already reserved");
+       Fun.protect
+         ~finally:(fun () ->
+           ignore
+             (Masc.Keeper_shutdown_intake_fence.rollback_shutdown
+                ~base_path
+                ~keeper_name:"hol-blocked-target"
+                ~operation_id:shutdown_op
+              : Masc.Keeper_shutdown_intake_fence.rollback_result))
+         (fun () ->
+            (match
+               Masc.Keeper_event_queue_recovery.project_owner_result
+                 ~base_path
+                 ~keeper_name:"hol-source"
+             with
+             | Error (Masc.Keeper_event_queue_recovery.Owner_shutdown_reserved actual) ->
+               Alcotest.(check bool)
+                 "blocked target surfaces exact shutdown operation"
+                 true
+                 (Masc.Keeper_shutdown_types.Operation_id.equal shutdown_op actual)
+             | Ok _ -> Alcotest.fail "expected blocked target transfer to surface error"
+             | Error other ->
+               Alcotest.failf
+                 "expected Owner_shutdown_reserved for hol-blocked-target, got %s"
+                 (Masc.Keeper_event_queue_recovery.projection_error_to_string other));
+            Alcotest.(check int)
+              "healthy trailing transfer retired despite blocked head"
+              1
+              (pending_count ());
+            Alcotest.(check bool)
+              "healthy target received its transfer without HoL starvation"
+              true
+              (registry_snapshot ~base_path "hol-healthy-target"
+               |> Keeper_event_queue.to_list
+               |> List.exists (Keeper_event_queue.stimulus_identity_equal stim_healthy)));
+       (* Once the blocked target's fence rolls back, the head converges too. *)
+       (match
+          Masc.Keeper_event_queue_recovery.project_owner_result
+            ~base_path
+            ~keeper_name:"hol-source"
+        with
+        | Ok Masc.Keeper_event_queue_recovery.Transition_converged -> ()
+        | Ok _ -> Alcotest.fail "expected blocked head to converge after rollback"
+        | Error other ->
+          Alcotest.failf
+            "expected blocked head to converge after rollback, got %s"
+            (Masc.Keeper_event_queue_recovery.projection_error_to_string other));
+       Alcotest.(check int) "source outbox fully drained after rollback" 0 (pending_count ());
+       Alcotest.(check bool)
+         "unblocked target received its transfer"
+         true
+         (registry_snapshot ~base_path "hol-blocked-target"
+          |> Keeper_event_queue.to_list
+          |> List.exists (Keeper_event_queue.stimulus_identity_equal stim_blocked)))));
   let bootstrap_stim =
     { post_id = "bootstrap"; urgency = Normal; arrived_at = 0.0; payload = Bootstrap }
   in

@@ -286,7 +286,8 @@ module Aggregating = struct
           match latency_ms with
           | Some measured ->
             with_state agg ("unknown/" ^ model_id) (fun s ->
-              s.latency_ms_sum <- s.latency_ms_sum + measured;
+              s.latency_ms_sum
+              <- Json_util.saturating_add_non_negative s.latency_ms_sum measured;
               s.latency_ms_count <- s.latency_ms_count + 1)
           | None -> ())
     ; on_error =
@@ -306,17 +307,23 @@ module Aggregating = struct
             s.retry_total <- s.retry_total + 1))
     ; on_token_usage =
         (fun ~provider ~model_id ~input_tokens ~output_tokens ->
+          let input_tokens = Json_util.clamp_non_negative input_tokens in
+          let output_tokens = Json_util.clamp_non_negative output_tokens in
           agg.hooks.on_token_usage ~provider ~model_id ~input_tokens ~output_tokens;
           with_state agg (key ~provider ~model_id) (fun s ->
-            s.input_tokens_total <- s.input_tokens_total + input_tokens;
-            s.output_tokens_total <- s.output_tokens_total + output_tokens))
+            s.input_tokens_total
+            <- Json_util.saturating_add_non_negative s.input_tokens_total input_tokens;
+            s.output_tokens_total
+            <- Json_util.saturating_add_non_negative s.output_tokens_total output_tokens))
     ; on_tool_calls =
         (fun ~provider ~model_id ~count ->
+          let count = Json_util.clamp_non_negative count in
           agg.hooks.on_tool_calls ~provider ~model_id ~count;
           if count > 0
           then
             with_state agg (key ~provider ~model_id) (fun s ->
-              s.tool_call_total <- s.tool_call_total + count))
+              s.tool_call_total
+              <- Json_util.saturating_add_non_negative s.tool_call_total count))
     ; on_streaming_first_chunk =
         (fun ~provider ~model_id ~ttfrc_ms ->
           agg.hooks.on_streaming_first_chunk ~provider ~model_id ~ttfrc_ms;

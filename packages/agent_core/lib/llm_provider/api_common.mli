@@ -14,6 +14,7 @@ val max_response_body : int
 val fresh_tool_use_id : unit -> string
 
 val string_is_blank : string -> bool
+val sanitize_url_for_log : string -> string
 val text_blocks_to_string : Types.content_block list -> string
 
 val error_message_of_body : string -> string option

@@ -353,7 +353,7 @@ let parse_ollama_tool_calls = function
 
 let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_inline_reasoning) json_str =
   let open Yojson.Safe.Util in
-  let json = Yojson.Safe.from_string json_str in
+  let* json = Json_util.from_string_bounded json_str in
   match json |> member "error" with
   | `String s -> Error s
   | `Assoc _ as err -> Error (Yojson.Safe.to_string err)
@@ -407,12 +407,14 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
     let unreadable_tool_uses =
       if stop_reason = MaxTokens then [] else unreadable_tool_uses
     in
-    let prompt_eval_count = Cli_common_json.member_int "prompt_eval_count" json in
+    let prompt_n = Ollama_wire.optional_non_negative_int_member "prompt_eval_count" json in
+    let prompt_eval_count = Option.value ~default:0 prompt_n in
     let kv_cache_read = Ollama_wire.extract_kv_cache_read json in
     let input_tokens, cache_read_input_tokens, reported_cache_read =
       Ollama_wire.resolve_prompt_tokens ~prompt_eval_count ~kv_cache_read
     in
-    let output_tokens = Cli_common_json.member_int "eval_count" json in
+    let predicted_n = Ollama_wire.optional_non_negative_int_member "eval_count" json in
+    let output_tokens = Option.value ~default:0 predicted_n in
     let usage =
       if input_tokens = 0 && output_tokens = 0
       then None
@@ -431,14 +433,12 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
        inference_timings so downstream can distinguish hardware
        decode rate from wall-clock tok/s. *)
       let timings =
-        let prompt_n =
-          json |> member "prompt_eval_count" |> to_int_option |> Option.map (max 0)
+        let prompt_ns =
+          Ollama_wire.optional_non_negative_int_member "prompt_eval_duration" json
         in
-        let prompt_ns = json |> member "prompt_eval_duration" |> to_int_option in
-        let predicted_n =
-          json |> member "eval_count" |> to_int_option |> Option.map (max 0)
+        let predicted_ns =
+          Ollama_wire.optional_non_negative_int_member "eval_duration" json
         in
-        let predicted_ns = json |> member "eval_duration" |> to_int_option in
         let cache_n = reported_cache_read in
         let any_set =
           Option.is_some prompt_n

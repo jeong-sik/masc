@@ -28,8 +28,15 @@ type receipt =
   | Completed of Types.api_response
   | Failed of Types.stream_error
 
+(** Maximum cumulative payload bytes accepted across all deltas in one stream
+    before failing closed against unbounded streaming RAM exhaustion. *)
+val max_accumulated_stream_bytes : int
+
 (** Empty stream state. *)
 val empty : t
+
+(** Cumulative payload bytes accumulated across accepted stream deltas so far. *)
+val accumulated_bytes : t -> int
 
 (** Assembly-only compatibility API. [transition state event] returns the next
     immutable snapshot, but callers projecting live events must use

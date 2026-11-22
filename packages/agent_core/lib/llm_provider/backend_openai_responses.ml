@@ -69,7 +69,7 @@ let response_phase_of_metadata metadata =
 
 let responses_raw_reasoning_item_of_redacted data =
   try
-    match Yojson.Safe.from_string data with
+    match Json_util.from_string_bounded_exn data with
     | `Assoc fields as json ->
       (match List.assoc_opt "type" fields with
        | Some (`String "reasoning") -> Some json
@@ -950,15 +950,20 @@ let content_and_replay_of_output ~drop_function_call output =
 let usage_of_response_json json =
   match Json_util.assoc_member_opt "usage" json with
   | Some (`Assoc fields) ->
-    let member_int key = opt_bind (List.assoc_opt key fields) json_int_opt in
+    let member_int key =
+      opt_bind (List.assoc_opt key fields) json_int_opt
+      |> Option.map Json_util.clamp_non_negative
+    in
     let input_tokens = member_int "input_tokens" |> Option.value ~default:0 in
     let output_tokens = member_int "output_tokens" |> Option.value ~default:0 in
     let cache_write_tokens, cached_tokens =
       match List.assoc_opt "input_tokens_details" fields with
       | Some (`Assoc detail_fields) ->
         ( opt_bind (List.assoc_opt "cache_write_tokens" detail_fields) json_int_opt
+          |> Option.map Json_util.clamp_non_negative
           |> Option.value ~default:0
         , opt_bind (List.assoc_opt "cached_tokens" detail_fields) json_int_opt
+          |> Option.map Json_util.clamp_non_negative
           |> Option.value ~default:0 )
       | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
       | None -> 0, 0
@@ -981,6 +986,7 @@ let telemetry_of_response_json json =
       match List.assoc_opt "output_tokens_details" fields with
       | Some (`Assoc detail_fields) ->
         opt_bind (List.assoc_opt "reasoning_tokens" detail_fields) json_int_opt
+        |> Option.map Json_util.clamp_non_negative
       | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
       | None -> None
     in
@@ -988,7 +994,9 @@ let telemetry_of_response_json json =
       match List.assoc_opt "input_tokens_details" fields with
       | Some (`Assoc detail_fields) ->
         ( opt_bind (List.assoc_opt "cache_write_tokens" detail_fields) json_int_opt
-        , opt_bind (List.assoc_opt "cached_tokens" detail_fields) json_int_opt )
+          |> Option.map Json_util.clamp_non_negative
+        , opt_bind (List.assoc_opt "cached_tokens" detail_fields) json_int_opt
+          |> Option.map Json_util.clamp_non_negative )
       | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
       | None -> None, None
     in
@@ -1060,7 +1068,7 @@ let stop_reason_of_response_json ~has_tool_calls json =
 
 let parse_response_result json_str =
   try
-    let json = Yojson.Safe.from_string json_str in
+    let json = Json_util.from_string_bounded_exn json_str in
     let lifecycle = lifecycle_observation json in
     let parsed = match Json_util.assoc_member_opt "error" json with
     | Some (`Assoc fields) ->

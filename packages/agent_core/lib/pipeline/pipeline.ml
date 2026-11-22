@@ -257,7 +257,7 @@ let stage_collect
       ?clock
       ~turn
       ~provider_config
-      ~context_message
+      ~retained_context_messages
       ~execution
       agent
       (response : Llm_provider.Types.api_response)
@@ -403,11 +403,11 @@ let stage_collect
            | ToolUse _ | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
            response.content
        in
-       let* context_message =
+       let* retained_context_messages =
          match provider_config.Llm_provider.Provider_config.kind, binds_context with
-         | Anthropic, true -> context_message
+         | Anthropic, true -> retained_context_messages
          | Anthropic, false
-         | (Kimi | OpenAI_compat | Ollama | Gemini | Glm), _ -> Ok None
+         | (Kimi | OpenAI_compat | Ollama | Gemini | Glm), _ -> Ok []
        in
        let next_turn = turn + 1 in
        (* A dropped call leaves no tool_use for a tool_result to answer, so the
@@ -453,14 +453,29 @@ let stage_collect
           mutation boundaries and as [Agent.create] documents. A sink failure
           stops the turn here but never leaves live state behind a snapshot
           the sink has already seen. *)
+       let historical_carrier (message : Types.message) =
+         match message.origin with
+         | Outside_context ->
+           { message with
+             origin = Historical_system_context
+           ; metadata =
+               Llm_provider.Message_origin_lowering.mark_historical_outside_context
+                 message.metadata
+           }
+         | System_context
+         | Conversation
+         | Historical_system_context
+         | Recovery_instruction
+         | Tool_result_followup
+         | Agent_instruction ->
+           { message with origin = Historical_system_context }
+       in
        update_state agent (fun state ->
          let messages =
-           match provider_config.Llm_provider.Provider_config.kind, context_message with
-           | Anthropic, Some message ->
-             Util.snoc state.messages
-               { message with
-                 origin = Historical_system_context }
-           | Anthropic, None
+           match provider_config.Llm_provider.Provider_config.kind, retained_context_messages with
+           | Anthropic, (_ :: _ as carriers) ->
+             Util.snoc_list state.messages (List.map historical_carrier carriers)
+           | Anthropic, []
            | (Kimi | OpenAI_compat | Ollama | Gemini | Glm), _ -> state.messages
          in
          { state with
@@ -875,7 +890,8 @@ let run_new_turn
     | Ok (provider_config, response, (sent : Agent_turn.turn_request)) ->
       let* response, rejected_tool_calls =
         stage_collect ?raw_trace_run ?clock ~turn ~provider_config
-          ~context_message:sent.Agent_turn.context_message ~execution agent response
+          ~retained_context_messages:sent.Agent_turn.retained_context_messages
+          ~execution agent response
         |> tag_error "collect"
       in
       (match Pipeline_execution_scope.provider execution with

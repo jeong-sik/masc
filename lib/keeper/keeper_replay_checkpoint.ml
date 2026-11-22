@@ -96,22 +96,22 @@ let is_trailing_blank_assistant (message : Agent_core.Types.message) =
   | (Agent_core.Types.System, _) | (Agent_core.Types.User, _) | (Agent_core.Types.Tool, _) -> false
 ;;
 
-(* Collection stores a [Historical_system_context] row immediately before the
-   response whose signed reasoning needed it. When that response leaves
-   replay, the row goes with it so it does not survive as a standalone User
-   message. *)
+(* Collection stores one or more contiguous [Historical_system_context] rows
+   (e.g. [Historical(Outside_context); Historical(System_context)]) immediately
+   before the response whose signed reasoning needed them. When that response
+   leaves replay, its entire contiguous retained-context run goes with it so no
+   carrier survives as a standalone User message. *)
+let rec strip_preceding_retained_context = function
+  | (context : Agent_core.Types.message) :: rest
+    when context.origin = Agent_core.Types.Historical_system_context ->
+    strip_preceding_retained_context rest
+  | rest -> rest
+;;
+
 let drop_trailing_blank_assistants messages =
-  let retained_context (message : Agent_core.Types.message) =
-    message.origin = Agent_core.Types.Historical_system_context
-  in
   let rec drop dropped = function
     | message :: rest when is_trailing_blank_assistant message ->
-      let rest =
-        match rest with
-        | context :: rest when retained_context context -> rest
-        | _ -> rest
-      in
-      drop true rest
+      drop true (strip_preceding_retained_context rest)
     | reversed -> List.rev reversed, dropped
   in
   drop false (List.rev messages)
@@ -135,24 +135,16 @@ let suffix_records_tool_activity (messages : Agent_core.Types.message list) =
 ;;
 
 let drop_trailing_assistants messages =
-  let retained_context (message : Agent_core.Types.message) =
-    message.origin = Agent_core.Types.Historical_system_context
-  in
   let rec drop dropped = function
     | ({ Agent_core.Types.role = Agent_core.Types.Assistant; _ } :
         Agent_core.Types.message)
       :: rest ->
-      (* Collection stored this context immediately before the response whose
-         signed reasoning needed it. Once that response is excluded from
-         replay, its context must not survive as a standalone User message.
+      (* Collection stored these context rows immediately before the response
+         whose signed reasoning needed them. Once that response is excluded from
+         replay, none of its carriers may survive as a standalone User message.
          Never consume an ordinary input or context belonging to an earlier
          retained response. *)
-      let rest =
-        match rest with
-        | context :: rest when retained_context context -> rest
-        | _ -> rest
-      in
-      drop true rest
+      drop true (strip_preceding_retained_context rest)
     | ([]
       | { Agent_core.Types.role =
             ( Agent_core.Types.System | Agent_core.Types.User | Agent_core.Types.Tool )

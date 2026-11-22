@@ -35,16 +35,22 @@ let dialect_ignored_warned : (string * string, unit) Hashtbl.t = Hashtbl.create 
    Effect.Unhandled and poisons the mutex (5ec4d5ff6b / #49900). *)
 let warned_table_mutex = Stdlib.Mutex.create ()
 
+let max_warned_table_entries = 4096
+
+let record_warned_once table key =
+  Stdlib.Mutex.protect warned_table_mutex (fun () ->
+    if Hashtbl.mem table key
+    then false
+    else (
+      if Hashtbl.length table >= max_warned_table_entries then Hashtbl.clear table;
+      Hashtbl.replace table key ();
+      true))
+;;
+
 let warn_capability_drop ~model_id ~field =
   let key = model_id, field in
-  let first =
-    Stdlib.Mutex.protect warned_table_mutex (fun () ->
-      if Hashtbl.mem capability_drop_warned key then false
-      else (
-        Hashtbl.replace capability_drop_warned key ();
-        true))
-  in
-  if first then (
+  if record_warned_once capability_drop_warned key
+  then (
     (Metrics.get_global ()).on_capability_drop ~model_id ~field;
     Diag.warn
       "backend_openai"
@@ -59,14 +65,8 @@ let warn_capability_drop ~model_id ~field =
 let warn_dialect_ignored ~model_id ~parameter =
   let field = Capabilities.sampling_parameter_to_string parameter in
   let key = model_id, field in
-  let first =
-    Stdlib.Mutex.protect warned_table_mutex (fun () ->
-      if Hashtbl.mem dialect_ignored_warned key then false
-      else (
-        Hashtbl.replace dialect_ignored_warned key ();
-        true))
-  in
-  if first then
+  if record_warned_once dialect_ignored_warned key
+  then
     Diag.warn
       "backend_openai"
       "dropping request field %s for model %s: the selected reasoning dialect suppresses \
@@ -85,9 +85,8 @@ let warn_dialect_ignored ~model_id ~parameter =
 let warn_output_token_clamp ~model_id ~receipt =
   let field = "max_tokens:clamp" in
   let key = model_id, field in
-  if not (Hashtbl.mem capability_drop_warned key)
+  if record_warned_once capability_drop_warned key
   then (
-    Hashtbl.replace capability_drop_warned key ();
     (Metrics.get_global ()).on_capability_drop ~model_id ~field;
     let show = function
       | Some n -> string_of_int n

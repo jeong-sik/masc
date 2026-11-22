@@ -1696,7 +1696,7 @@ let try_parse_json (s : string) : Yojson.Safe.t option =
   if String.length s = 0
   then None
   else (
-    match Yojson.Safe.from_string s with
+    match Json_util.from_string_bounded_exn s with
     | json -> Some json
     | exception Yojson.Json_error _ -> None)
 ;;

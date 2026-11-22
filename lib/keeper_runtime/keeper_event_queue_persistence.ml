@@ -375,7 +375,7 @@ let durably_confirmed owner state =
        && same_wal_identity confirmation.dc_wal wal)
 ;;
 
-let save_state_unlocked_with ~save_snapshot owner state =
+let save_state_unlocked_with ?(notify = true) ~save_snapshot owner state =
   let keeper_name = keeper_name_of_owner owner in
   let path = snapshot_path_of_owner owner in
   match
@@ -385,7 +385,7 @@ let save_state_unlocked_with ~save_snapshot owner state =
     (* The atomic writer does not return the written descriptor identity.
        Re-read once before caching; a post-write stat could name a replacement. *)
     forget_snapshot path;
-    notify_state_change_observer owner;
+    if notify then notify_state_change_observer owner;
     Ok ()
   | Error message ->
     (* The file may be half-written, gone, or untouched -- unknown is not a
@@ -399,8 +399,9 @@ let save_state_unlocked_with ~save_snapshot owner state =
          message)
 ;;
 
-let save_state_unlocked ?(before_write = fun () -> ()) owner state =
+let save_state_unlocked ?(notify = true) ?(before_write = fun () -> ()) owner state =
   save_state_unlocked_with
+    ~notify
     ~save_snapshot:(save_snapshot_atomic_with ~before_write ~strict_parent_sync:false)
     owner
     state
@@ -630,53 +631,108 @@ let transition_wal_entry_of_json owner = function
 ;;
 
 let replay_transition_wal_bytes ~wal_only owner state bytes =
-  let row_is_already_projected (entry : State.outbox_entry) state =
+  let row_in_outbox (entry : State.outbox_entry) st =
+    List.exists
+      (fun (existing : State.outbox_entry) -> existing = entry)
+      (State.transition_outbox st)
+  in
+  let row_is_already_projected (entry : State.outbox_entry) st =
     not
       (List.exists
          (fun (existing : State.outbox_entry) ->
             State.transition_receipt_equal existing.receipt entry.receipt)
-         (State.transition_outbox state))
-    && State.transition_receipt_is_projected entry.receipt state
+         (State.transition_outbox st))
+    && State.transition_receipt_is_projected entry.receipt st
   in
-  let rec replay ~saw_row ~all_rows_already_projected state = function
-    | [] | [ "" ] -> Ok (state, saw_row && all_rows_already_projected)
+  let rec parse_rows acc = function
+    | [] | [ "" ] -> Ok (List.rev acc)
     | "" :: _ -> Error (read_failure Invalid_content "transition WAL contains an empty row")
     | line :: rest ->
       (match
          try Ok (Yojson.Safe.from_string line) with
          | Yojson.Json_error detail -> Error detail
        with
-       | Error detail -> Error (read_failure Invalid_json ("invalid transition WAL JSON: " ^ detail))
+       | Error detail ->
+         Error (read_failure Invalid_json ("invalid transition WAL JSON: " ^ detail))
        | Ok json ->
          (match transition_wal_entry_of_json owner json with
           | Error detail -> Error (read_failure Invalid_content detail)
-          | Ok { pre_state; outbox_entry = entry } ->
-            let state = if wal_only && not saw_row then pre_state else state in
-            let already_projected = row_is_already_projected entry state in
-            let pre_state_matches =
-              already_projected
-              || List.exists
-                   (fun (existing : State.outbox_entry) -> existing = entry)
-                   (State.transition_outbox state)
-              || State.to_yojson state = State.to_yojson pre_state
-            in
-            if not pre_state_matches
-            then Error (read_failure Invalid_content
-              "transition WAL pre-state conflicts with its durable snapshot")
-            else (match State.replay_transition_outbox_entry entry state with
+          | Ok row -> parse_rows (row :: acc) rest))
+  in
+  match parse_rows [] (String.split_on_char '\n' bytes) with
+  | Error _ as error -> error
+  | Ok [] -> Ok (state, false)
+  | Ok rows ->
+    (* When a primary snapshot exists, classify each WAL row against durable
+       snapshot evidence only (never speculative forward/backward heuristics):
+       - [directly_projected]: retained in [last_transition] or
+         [projected_dispositions] and absent from [transition_outbox].
+       - [evicted_projected]: strictly earlier [pre_state] revision than the
+         snapshot AND exact [transition_id] durably recorded in
+         [State.evicted_transition_ids] when [retain_previous = false] evicted
+         it from [last_transition] (covering both FIFO and HoL out-of-order
+         projection without ever absorbing an unprojected divergent WAL row).
+       - [directly_in_outbox]: still present unprojected in [transition_outbox]
+         ([absorbed = true], [already_projected = false], so read-time WAL
+         compaction does not run until every row is projected). *)
+    let annotated =
+      if wal_only
+      then List.map (fun row -> row, false, false) rows
+      else
+        List.map
+          (fun row ->
+             let directly_projected = row_is_already_projected row.outbox_entry state in
+             let directly_in_outbox = row_in_outbox row.outbox_entry state in
+             let evicted_projected =
+               (not directly_projected)
+               && (not directly_in_outbox)
+               && Int64.compare (State.revision row.pre_state) (State.revision state) < 0
+               && State.transition_id_is_evicted
+                    row.outbox_entry.receipt.transition_id
+                    state
+             in
+             let already_projected = directly_projected || evicted_projected in
+             let absorbed = already_projected || directly_in_outbox in
+             row, absorbed, already_projected)
+          rows
+    in
+    let rec replay ~saw_row ~all_rows_already_projected current = function
+      | [] -> Ok (current, saw_row && (not wal_only) && all_rows_already_projected)
+      | ({ pre_state; outbox_entry = entry }, absorbed, row_already_projected) :: rest ->
+        if absorbed
+        then
+          replay
+            ~saw_row:true
+            ~all_rows_already_projected:(all_rows_already_projected && row_already_projected)
+            current
+            rest
+        else (
+          let current = if wal_only && not saw_row then pre_state else current in
+          let already_projected = row_is_already_projected entry current in
+          let in_outbox = row_in_outbox entry current in
+          let pre_state_matches =
+            already_projected
+            || in_outbox
+            || State.to_yojson current = State.to_yojson pre_state
+          in
+          if not pre_state_matches
+          then
+            Error
+              (read_failure
+                 Invalid_content
+                 "transition WAL pre-state conflicts with its durable snapshot")
+          else
+            (match State.replay_transition_outbox_entry entry current with
              | Error detail -> Error (read_failure Invalid_content detail)
-             | Ok state ->
+             | Ok next_state ->
                replay
                  ~saw_row:true
-                 ~all_rows_already_projected:(all_rows_already_projected && already_projected)
-                 state
-                 rest)))
-  in
-  replay
-    ~saw_row:false
-    ~all_rows_already_projected:true
-    state
-    (String.split_on_char '\n' bytes)
+                 ~all_rows_already_projected:
+                   (all_rows_already_projected && already_projected)
+                 next_state
+                 rest))
+    in
+    replay ~saw_row:false ~all_rows_already_projected:true state annotated
 ;;
 
 let read_and_replay_wal_unlocked ~wal_only ~path ~surface owner state =
@@ -1282,8 +1338,8 @@ let commit_transform_unlocked
         | Ok next ->
           let save_state =
             if strict_snapshot_durability
-            then save_state_unlocked_with ~save_snapshot:confirm_snapshot
-            else save_state_unlocked ~before_write:before_snapshot_write
+            then save_state_unlocked_with ~notify:false ~save_snapshot:confirm_snapshot
+            else save_state_unlocked ~notify:false ~before_write:before_snapshot_write
           in
           (match save_state owner next with
            | Error _ as error -> error
@@ -1291,20 +1347,23 @@ let commit_transform_unlocked
              (* [load_state_unlocked] above replayed the transition WAL, so
                 [next] already carries that transition's pending mutation and
                 its transition outbox, and the snapshot just written persists
-                both (schema v16). Retire the WAL here, paired with the revision
-                bump that absorbed it. Leaving it behind is what latches the
-                owner: the next load replays an already-absorbed row against
-                the advanced revision, [commit_transition] rejects it on
-                [source_incarnation], and no runtime path can clear it because the
-                projector itself starts with [load_state_unlocked] (#26074). *)
+                both (schema v16). Retire the WAL here BEFORE notifying
+                lock-free observers, paired with the revision bump that
+                absorbed it. Leaving it behind is what latches the owner: the
+                next load replays an already-absorbed row against the advanced
+                revision, [commit_transition] rejects it on
+                [source_incarnation], and no runtime path can clear it because
+                the projector itself starts with [load_state_unlocked] (#26074). *)
              (match compact_transition_wals_unlocked owner with
               | Error _ as error -> error
               | Ok () when strict_snapshot_durability ->
+                notify_state_change_observer owner;
                 let confirmation = sample_durable_confirmation owner next in
                 after_commit (State.pending next);
                 keep_durable_confirmation owner confirmation;
                 Ok value
               | Ok () ->
+                notify_state_change_observer owner;
                 after_commit (State.pending next);
                 Ok value))))
 ;;
@@ -1850,8 +1909,10 @@ let project_selected_outbox_entry_unlocked
         ~retain_previous
     in
     let* projected = bump_revision projected in
-    let* () = save_state_unlocked owner projected in
-    compact_transition_wals_unlocked owner
+    let* () = save_state_unlocked ~notify:false owner projected in
+    let* () = compact_transition_wals_unlocked owner in
+    notify_state_change_observer owner;
+    Ok ()
 ;;
 
 let project_transition_outbox_result

@@ -434,6 +434,53 @@ let test_a_keepalive_does_not_renew_the_inter_token_gap () =
   |> check_timed_out "keep-alives renewed the inter-token gap"
 ;;
 
+let read_ndjson_over ~classify lines =
+  Eio_mock.Backend.run
+  @@ fun () ->
+  let clock = Eio_mock.Clock.make () in
+  let now = ref 0.0 in
+  Eio_mock.Clock.set_time clock !now;
+  let flow = Eio_mock.Flow.make "ndjson-budget-anchor" in
+  let actions : string Eio_mock.Handler.actions =
+    List.map (fun line -> `Run (emit_after_gap ~clock ~now line)) lines
+    @ [ `Raise End_of_file ]
+  in
+  Eio_mock.Flow.on_read flow actions;
+  let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
+  let seen = ref [] in
+  match
+    Http_client.read_ndjson
+      ~clock
+      ~first_event_timeout:first_event_budget_s
+      ~idle_timeout:inter_token_budget_over_one_gap_s
+      ~reader
+      ~on_line:(fun line ->
+        seen := line :: !seen;
+        Http_client.Continue (classify line))
+      ()
+  with
+  | () -> Ok (List.rev !seen)
+  | exception Eio.Time.Timeout -> Error (`Timed_out (List.rev !seen))
+;;
+
+let test_ndjson_prelude_does_not_renew_inter_token_gap () =
+  read_ndjson_over
+    ~classify:(fun line ->
+      if String.equal line "prelude" then Http_client.Prelude else Http_client.Output)
+    [ "token\n"; "prelude\n"; "prelude\n"; "prelude\n" ]
+  |> check_timed_out "NDJSON Prelude lines renewed the inter-token idle timeout"
+;;
+
+let test_ndjson_output_renews_inter_token_gap () =
+  match
+    read_ndjson_over
+      ~classify:(fun _ -> Http_client.Output)
+      [ "t1\n"; "t2\n"; "t3\n"; "t4\n" ]
+  with
+  | Ok lines -> check (list string) "all Output NDJSON lines delivered" [ "t1"; "t2"; "t3"; "t4" ] lines
+  | Error (`Timed_out _) -> fail "NDJSON Output lines unexpectedly timed out"
+;;
+
 let () =
   run
     "SSE budget anchor"
@@ -460,6 +507,14 @@ let () =
             "a keep-alive does not renew the inter-token gap"
             `Quick
             test_a_keepalive_does_not_renew_the_inter_token_gap
+        ; test_case
+            "NDJSON Prelude does not renew the inter-token gap"
+            `Quick
+            test_ndjson_prelude_does_not_renew_inter_token_gap
+        ; test_case
+            "NDJSON Output renews the inter-token gap"
+            `Quick
+            test_ndjson_output_renews_inter_token_gap
         ] )
     ; ( "prelude"
       , [ test_case

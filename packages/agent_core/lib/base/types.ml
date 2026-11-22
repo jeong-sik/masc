@@ -231,13 +231,23 @@ let empty_usage =
   }
 ;;
 
+let sat_add_non_negative a b =
+  let a = if a < 0 then 0 else a in
+  let b = if b < 0 then 0 else b in
+  if a > Int.max_int - b then Int.max_int else a + b
+;;
+
 let add_usage stats (u : api_usage) =
-  { total_input_tokens = stats.total_input_tokens + u.input_tokens
-  ; total_output_tokens = stats.total_output_tokens + u.output_tokens
+  { total_input_tokens = sat_add_non_negative stats.total_input_tokens u.input_tokens
+  ; total_output_tokens = sat_add_non_negative stats.total_output_tokens u.output_tokens
   ; total_cache_creation_input_tokens =
-      stats.total_cache_creation_input_tokens + u.cache_creation_input_tokens
+      sat_add_non_negative
+        stats.total_cache_creation_input_tokens
+        u.cache_creation_input_tokens
   ; total_cache_read_input_tokens =
-      stats.total_cache_read_input_tokens + u.cache_read_input_tokens
+      sat_add_non_negative
+        stats.total_cache_read_input_tokens
+        u.cache_read_input_tokens
   ; api_calls = stats.api_calls + 1
   ; missing_usage_responses = stats.missing_usage_responses
   ; estimated_cost_usd = stats.estimated_cost_usd

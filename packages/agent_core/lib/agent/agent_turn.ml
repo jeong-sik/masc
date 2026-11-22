@@ -25,6 +25,7 @@ type turn_request =
   ; tools_json : Yojson.Safe.t list option
   ; visible_tool_names : string list
   ; context_message : (message option, Error.t) result
+  ; retained_context_messages : (message list, Error.t) result
   }
 
 type narrower_turn_request = Error.t -> (turn_request option, Error.t) result
@@ -142,13 +143,18 @@ let outside_context_message turn_params =
       }
 ;;
 
+(* Emit [Outside_context] before [System_context] so [Turn_scoped_system_context]
+   models keep [System_context] immediately before the assistant turn / end of
+   request (where [native_role Outside_context = Native_user] precedes it)
+   instead of discarding [System_context] as spent. Both stay inside the
+   strictly trailing volatile suffix. *)
 let append_context_message ~messages ~context_message ?outside_context_message () =
   let messages =
-    match context_message with
+    match outside_context_message with
     | None -> messages
     | Some message -> Util.snoc messages message
   in
-  match outside_context_message with
+  match context_message with
   | None -> messages
   | Some message -> Util.snoc messages message
 ;;
@@ -193,12 +199,12 @@ let prepare_turn
     let tools_json, visible_tool_names =
       prepare_tools ~tools ~deferred_tools ~defer_loading ()
     in
-    let context_message =
-      match context_message with
+    let collect_carrier ~expected ~origin ~error_detail =
+      match expected with
       | None -> Ok None
       | Some _ ->
         (match List.filter (fun (message : Llm_provider.Types.message) ->
-           message.origin = System_context)
+           message.origin = origin)
            effective_messages with
          | [] -> Ok None
          | [message] ->
@@ -207,9 +213,46 @@ let prepare_turn
            History.of_wire_message media_store message
            |> Result.map Option.some
            |> Result.map_error (fun error -> Error.Media error)
-         | _ -> Error (Error.Internal "model input projection returned multiple current context carriers"))
+         | _ -> Error (Error.Internal error_detail))
     in
-    { effective_messages; tools; tools_json; visible_tool_names; context_message }
+    let context_message =
+      collect_carrier
+        ~expected:context_message
+        ~origin:System_context
+        ~error_detail:"model input projection returned multiple current context carriers"
+    in
+    let outside_retained =
+      collect_carrier
+        ~expected:outside_context_message
+        ~origin:Outside_context
+        ~error_detail:
+          "model input projection returned multiple current outside context carriers"
+    in
+    let retained_context_messages =
+      match context_message, outside_retained with
+      | (Error _ as err), _ -> err
+      | _, (Error _ as err) -> err
+      | Ok None, Ok None -> Ok []
+      | Ok (Some msg), Ok None -> Ok [ msg ]
+      | Ok None, Ok (Some msg) -> Ok [ msg ]
+      | Ok (Some sys_msg), Ok (Some out_msg) ->
+        let rec in_transmission_order = function
+          | [] -> [ out_msg; sys_msg ]
+          | (m : Llm_provider.Types.message) :: _ when m.origin = System_context ->
+            [ sys_msg; out_msg ]
+          | (m : Llm_provider.Types.message) :: _ when m.origin = Outside_context ->
+            [ out_msg; sys_msg ]
+          | _ :: rest -> in_transmission_order rest
+        in
+        Ok (in_transmission_order effective_messages)
+    in
+    { effective_messages
+    ; tools
+    ; tools_json
+    ; visible_tool_names
+    ; context_message
+    ; retained_context_messages
+    }
   in
   let candidates =
     match model_input_projection with
@@ -307,7 +350,11 @@ let accumulate_usage ~current_usage ~response_model ~response_usage =
   | Some u ->
     let base = add_usage current_usage u in
     (match u.cost_usd with
-     | Some cost -> { base with estimated_cost_usd = base.estimated_cost_usd +. cost }
+     | Some cost ->
+       let safe_cost =
+         if Float.is_finite cost && cost >= 0.0 then cost else 0.0
+       in
+       { base with estimated_cost_usd = base.estimated_cost_usd +. safe_cost }
      | None -> with_pricing_gap base response_model)
   | None -> add_missing_usage current_usage
 ;;

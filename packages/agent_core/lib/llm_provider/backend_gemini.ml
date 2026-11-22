@@ -194,7 +194,7 @@ let thought_signature_of_part = function
 
 let gemini_thought_signature_of_redacted data =
   try
-    let json = Yojson.Safe.from_string data in
+    let json = Json_util.from_string_bounded_exn data in
     match string_field_opt "provider" json, string_field_opt "kind" json with
     | Some "gemini", Some kind when String.equal kind gemini_thought_signature_kind ->
       (match
@@ -1199,7 +1199,10 @@ let parse_response json =
     let raw_cache_read =
       if um = `Null
       then None
-      else um |> member "cachedContentTokenCount" |> to_int_option
+      else (
+        match um |> member "cachedContentTokenCount" |> to_int_option with
+        | Some n when n >= 0 -> Some n
+        | Some _ | None -> None)
     in
     let raw_thoughts =
       if um = `Null
@@ -1217,17 +1220,34 @@ let parse_response json =
         | Some n when n >= 0 -> Some n
         | Some _ | None -> None)
     in
+    let prompt_tokens =
+      if um = `Null
+      then 0
+      else Cli_common_json.member_int "promptTokenCount" um |> Json_util.clamp_non_negative
+    in
+    let candidates_tokens =
+      if um = `Null
+      then 0
+      else
+        Cli_common_json.member_int "candidatesTokenCount" um |> Json_util.clamp_non_negative
+    in
+    let input_tokens =
+      Json_util.saturating_add_non_negative
+        prompt_tokens
+        (Option.value raw_tool_use_prompt_tokens ~default:0)
+    in
+    let output_tokens =
+      Json_util.saturating_add_non_negative
+        candidates_tokens
+        (Option.value raw_thoughts ~default:0)
+    in
     let usage =
       if um = `Null
       then None
       else
         Some
-          { input_tokens =
-              Cli_common_json.member_int "promptTokenCount" um
-              + Option.value raw_tool_use_prompt_tokens ~default:0
-          ; output_tokens =
-              Cli_common_json.member_int "candidatesTokenCount" um
-              + Option.value raw_thoughts ~default:0
+          { input_tokens
+          ; output_tokens
           ; cache_creation_input_tokens = 0
           ; cache_read_input_tokens = Option.value raw_cache_read ~default:0
           ; cost_usd = None
@@ -1242,12 +1262,7 @@ let parse_response json =
       else
         match um |> member "totalTokenCount" |> to_int_option with
         | Some total ->
-          let expected =
-            Cli_common_json.member_int "promptTokenCount" um
-            + Option.value raw_tool_use_prompt_tokens ~default:0
-            + Cli_common_json.member_int "candidatesTokenCount" um
-            + Option.value raw_thoughts ~default:0
-          in
+          let expected = Json_util.saturating_add_non_negative input_tokens output_tokens in
           if Int.equal total expected then None else Some (expected, total)
         | None -> None
     in

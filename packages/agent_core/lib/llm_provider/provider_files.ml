@@ -91,7 +91,7 @@ let auth_headers ~(api_key : string) : (string * string) list =
 ;;
 
 let parse_body_file_object (body : string) : (file_object, string) result =
-  match Yojson.Safe.from_string body with
+  match Json_util.from_string_bounded_exn body with
   | exception Yojson.Json_error _ -> Error "files reply is not JSON"
   | json -> file_object_of_yojson json
 ;;
@@ -129,7 +129,7 @@ let list_files ~sw ~net ~(base_url : string) ~(api_key : string) ()
        parameters exist but default to everything the account holds. *)
     match response.Http_client.status with
     | 200 -> (
-      match Yojson.Safe.from_string response.body with
+      match Json_util.from_string_bounded_exn response.body with
       | exception Yojson.Json_error _ -> Error "files list: reply is not JSON"
       | `Assoc fields -> (
         match List.assoc_opt "data" fields with
@@ -166,7 +166,7 @@ let delete ~sw ~net ~(base_url : string) ~(api_key : string) ~(file_id : string)
        the whole fact, and a non-200 is the caller's error. *)
     match response.Http_client.status with
     | 200 ->
-      (match Yojson.Safe.from_string response.body with
+      (match Json_util.from_string_bounded_exn response.body with
        | exception Yojson.Json_error _ -> Error "files delete: reply is not JSON"
        | `Assoc fields -> (
          match List.assoc_opt "deleted" fields with

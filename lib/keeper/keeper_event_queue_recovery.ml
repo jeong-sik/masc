@@ -236,16 +236,27 @@ let project_transfer_target_result
             { target_keeper = transfer.to_keeper; cause }))
 ;;
 
+module String_set = Set.Make (String)
+
+(* Bound one recovery drain pass so a deep transition outbox cannot pin
+   [Executor_pool_ref] / [owner_claims] indefinitely in a single turn. *)
+let max_drain_entries_per_pass = 64
+
 let project_claimed_owner owner =
   let base_path = Persistence.owner_identity_base_path owner in
   let keeper_name = Persistence.owner_identity_keeper_name owner in
-  let project_open_owner ?target_intake_token () =
+  let project_open_owner ?target_intake_token ~expected_transition_id () =
     match Persistence.load_state_result ~base_path ~keeper_name with
     | Error detail -> Error (Outbox_unavailable detail)
     | Ok state ->
-      (match Keeper_event_queue_state.transition_outbox state with
-       | [] -> Ok No_pending_transition
-       | entry :: _ ->
+      (match
+         List.find_opt
+           (fun (entry : Persistence.outbox_entry) ->
+              String.equal entry.receipt.transition_id expected_transition_id)
+           (Keeper_event_queue_state.transition_outbox state)
+       with
+       | None -> Ok No_pending_transition
+       | Some entry ->
          let project_target =
            match entry.receipt.transition, target_intake_token with
            | Persistence.Transfer_accepted _, Some target_intake_token ->
@@ -272,64 +283,128 @@ let project_claimed_owner owner =
              | Ok () -> Ok Transition_converged
              | Error detail -> Error (Ledger_projection_failed detail))))
   in
-  let rec drain_fifo ~converged () =
-    match Persistence.load_state_result ~base_path ~keeper_name with
-    | Error detail -> Error (Outbox_unavailable detail)
-    | Ok state ->
-      (match Keeper_event_queue_state.transition_outbox state with
-       | [] ->
-         if converged then Ok Transition_converged else Ok No_pending_transition
-       | { receipt = { transition = Persistence.Transfer_accepted transfer; _ }; _ }
-         :: _ ->
-         let step =
-           match
-             Keeper_shutdown_intake_fence.run_transfer_intake_if_open
-               ~base_path
-               ~from_keeper:keeper_name
-               ~to_keeper:transfer.to_keeper
-               (fun ~source_intake_token:_ ~target_intake_token ->
-                  Schedule_store.with_ledger_lock
-                    (Workspace.default_config base_path)
-                    (fun () -> project_open_owner ~target_intake_token ()))
-           with
-           | Keeper_shutdown_intake_fence.Transfer_intake_committed result -> result
-           | Keeper_shutdown_intake_fence.Transfer_intake_source_shutdown_reserved operation_id
-           | Keeper_shutdown_intake_fence.Transfer_intake_target_shutdown_reserved operation_id ->
-             Error (Owner_shutdown_reserved operation_id)
-         in
-         (match step with
-          | Ok Transition_converged -> drain_fifo ~converged:true ()
-          | Ok No_pending_transition ->
-            if converged then Ok Transition_converged else Ok No_pending_transition
-          | Ok Claim_busy -> Ok Claim_busy
-          | Error _ as error -> error)
-       | { receipt =
-             { transition =
-                 (Persistence.Cancel_accepted _ | Persistence.Ack_source_terminal _)
-             ; _
-             }
-         ; _
-         }
-         :: _ ->
-         let step =
-           match
-             Keeper_shutdown_intake_fence.run_durable_intake_if_open
-               ~base_path
-               ~keeper_name
-               (fun _source_intake_token -> project_open_owner ())
-           with
-           | Keeper_shutdown_intake_fence.Intake_committed result -> result
-           | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
-             Error (Owner_shutdown_reserved operation_id)
-         in
-         (match step with
-          | Ok Transition_converged -> drain_fifo ~converged:true ()
-          | Ok No_pending_transition ->
-            if converged then Ok Transition_converged else Ok No_pending_transition
-          | Ok Claim_busy -> Ok Claim_busy
-          | Error _ as error -> error))
+  let record_error first_error err =
+    match first_error with
+    | Some _ -> first_error
+    | None -> Some err
   in
-  drain_fifo ~converged:false ()
+  let finish ~converged ~first_error =
+    match first_error with
+    | Some err -> Error err
+    | None -> if converged then Ok Transition_converged else Ok No_pending_transition
+  in
+  let rec drain_fifo ~steps ~skipped ~first_error ~converged () =
+    if steps >= max_drain_entries_per_pass
+    then finish ~converged ~first_error
+    else
+      match Persistence.load_state_result ~base_path ~keeper_name with
+      | Error detail -> Error (Outbox_unavailable detail)
+      | Ok state ->
+        let next_entry =
+          List.find_opt
+            (fun (entry : Persistence.outbox_entry) ->
+               not (String_set.mem entry.receipt.transition_id skipped))
+            (Keeper_event_queue_state.transition_outbox state)
+        in
+        (match next_entry with
+         | None -> finish ~converged ~first_error
+         | Some
+             ({ receipt =
+                  { transition_id
+                  ; transition = Persistence.Transfer_accepted transfer
+                  ; _
+                  }
+              ; _
+              }) ->
+           let step =
+             match
+               Keeper_shutdown_intake_fence.run_transfer_intake_if_open
+                 ~base_path
+                 ~from_keeper:keeper_name
+                 ~to_keeper:transfer.to_keeper
+                 (fun ~source_intake_token:_ ~target_intake_token ->
+                    Schedule_store.with_ledger_lock
+                      (Workspace.default_config base_path)
+                      (fun () ->
+                         project_open_owner
+                           ~target_intake_token
+                           ~expected_transition_id:transition_id
+                           ()))
+             with
+             | Keeper_shutdown_intake_fence.Transfer_intake_committed result ->
+               `Step result
+             | Keeper_shutdown_intake_fence.Transfer_intake_source_shutdown_reserved
+                 operation_id ->
+               `Source_shutdown (Owner_shutdown_reserved operation_id)
+             | Keeper_shutdown_intake_fence.Transfer_intake_target_shutdown_reserved
+                 operation_id ->
+               `Step (Error (Owner_shutdown_reserved operation_id))
+           in
+           (match step with
+            | `Source_shutdown err -> Error err
+            | `Step (Ok Transition_converged) ->
+              drain_fifo ~steps:(steps + 1) ~skipped ~first_error ~converged:true ()
+            | `Step (Ok No_pending_transition) ->
+              drain_fifo
+                ~steps:(steps + 1)
+                ~skipped:(String_set.add transition_id skipped)
+                ~first_error
+                ~converged
+                ()
+            | `Step (Ok Claim_busy) -> Ok Claim_busy
+            | `Step (Error err) ->
+              (* Skip a blocked transfer head for this pass so independent
+                 cancellations, ACKs, and healthy-target transfers behind it
+                 are not HoL-starved; surface the first error once unblocked
+                 entries have drained. *)
+              drain_fifo
+                ~steps:(steps + 1)
+                ~skipped:(String_set.add transition_id skipped)
+                ~first_error:(record_error first_error err)
+                ~converged
+                ())
+         | Some
+             ({ receipt =
+                  { transition_id
+                  ; transition =
+                      (Persistence.Cancel_accepted _ | Persistence.Ack_source_terminal _)
+                  ; _
+                  }
+              ; _
+              }) ->
+           let step =
+             match
+               Keeper_shutdown_intake_fence.run_durable_intake_if_open
+                 ~base_path
+                 ~keeper_name
+                 (fun _source_intake_token ->
+                    project_open_owner ~expected_transition_id:transition_id ())
+             with
+             | Keeper_shutdown_intake_fence.Intake_committed result -> `Step result
+             | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
+               `Source_shutdown (Owner_shutdown_reserved operation_id)
+           in
+           (match step with
+            | `Source_shutdown err -> Error err
+            | `Step (Ok Transition_converged) ->
+              drain_fifo ~steps:(steps + 1) ~skipped ~first_error ~converged:true ()
+            | `Step (Ok No_pending_transition) ->
+              drain_fifo
+                ~steps:(steps + 1)
+                ~skipped:(String_set.add transition_id skipped)
+                ~first_error
+                ~converged
+                ()
+            | `Step (Ok Claim_busy) -> Ok Claim_busy
+            | `Step (Error err) ->
+              drain_fifo
+                ~steps:(steps + 1)
+                ~skipped:(String_set.add transition_id skipped)
+                ~first_error:(record_error first_error err)
+                ~converged
+                ()))
+  in
+  drain_fifo ~steps:0 ~skipped:String_set.empty ~first_error:None ~converged:false ()
 ;;
 
 let project_resolved_owner owner =

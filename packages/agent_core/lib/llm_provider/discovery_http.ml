@@ -14,8 +14,7 @@ let http_error_detail = function
 let get_json ?clock ?timeout_s ?(headers=[]) ~sw ~net url =
   match Http_client.get_sync ?clock ?timeout_s ~sw ~net ~url ~headers () with
   | Ok { status; body; _ } when status >= 200 && status < 300 ->
-    (try Ok (Yojson.Safe.from_string body) with
-     | Yojson.Json_error msg -> Error msg)
+    Json_util.from_string_bounded body
   | Ok { status; _ } -> Error (Printf.sprintf "HTTP %d" status)
   | Error error -> Error (http_error_detail error)
 ;;

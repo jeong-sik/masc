@@ -300,7 +300,7 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
   if String.equal data_str openai_done_sentinel
   then Openai_done
   else (
-    match Yojson.Safe.from_string data_str with
+    match Json_util.from_string_bounded_exn data_str with
     | exception Yojson.Json_error message ->
       openai_parse_failed ~raw:data_str ("json_error: " ^ message)
     | json ->

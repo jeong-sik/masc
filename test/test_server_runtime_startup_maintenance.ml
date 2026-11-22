@@ -778,6 +778,386 @@ let test_sweep_stale_temp_orphans_pid_and_age_safety () =
   Alcotest.(check bool) "outside symlink target untouched" true (Sys.file_exists outside_sentinel);
   Alcotest.(check bool) "unrelated file untouched" true (Sys.file_exists unrelated)
 
+(* Obtain a guaranteed-dead PID by spawning and reaping a trivial child process. *)
+let dead_pid_for_test () =
+  let pid =
+    Unix.create_process "/bin/sh" [| "/bin/sh"; "-c"; "exit 0" |]
+      Unix.stdin Unix.stdout Unix.stderr
+  in
+  let rec wait () =
+    match Unix.waitpid [] pid with
+    | _ -> ()
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+  in
+  wait ();
+  pid
+
+let make_shutdown_op_fixture ~config ~old_ts ~keeper_name ~reason ~phase =
+  let trace_id =
+    match Keeper_id.Trace_id.of_string "trace-orphan-systhread-test" with
+    | Ok id -> id
+    | Error detail -> Alcotest.fail detail
+  in
+  let op_id = Masc.Keeper_shutdown_types.Operation_id.generate () in
+  let op : Masc.Keeper_shutdown_types.t =
+    { schema_version = Masc.Keeper_shutdown_types.schema_version
+    ; revision = 1
+    ; operation_id = op_id
+    ; keeper_name
+    ; lane_ownership = Dormant_meta
+    ; trace_id
+    ; actor = "test"
+    ; cleanup_intent = { reason; remove_session = false }
+    ; turn_disposition = No_inflight_turn
+    ; expected_backlog_version = 1
+    ; owned_task_ids = []
+    ; join_evidence = None
+    ; phase
+    ; created_at = "2026-01-01T00:00:00Z"
+    ; updated_at = "2026-01-01T00:00:00Z"
+    }
+  in
+  (match Masc.Keeper_shutdown_store.persist_new ~config op with
+   | Ok () -> ()
+   | Error err -> Alcotest.fail (Masc.Keeper_shutdown_store.error_to_string err));
+  match Masc.Keeper_shutdown_store.path ~config ~keeper_name op_id with
+  | Ok p ->
+    Unix.utimes p old_ts old_ts;
+    op_id, p
+  | Error err -> Alcotest.fail (Masc.Keeper_shutdown_store.error_to_string err)
+
+let test_startup_sweep_orphan_hygiene_runs_in_systhread_without_eio_effects () =
+  (* Regression for live v0.79.0 production failure:
+     [startup_sweep_orphan_hygiene] runs all five sweep phases inside
+     [Systhread_host.run] (a non-Eio OS systhread). Previously
+     [Keeper_shutdown_store.with_operation_lock] used [Eio.Mutex.use_rw ~protect:true]
+     / [use_ro], raising [Stdlib.Effect.Unhandled(Eio__core__Cancel.Get_context)]
+     mid-sweep and aborting shutdown-dir, verifier-execution, and temp sweeps. *)
+  let base_path = fresh_dir "masc_startup_orphan_hygiene_e2e" in
+  let isolated_temp = fresh_dir "masc_startup_orphan_temp" in
+  let dead_pid = dead_pid_for_test () in
+  let prev_temp_dir = Filename.get_temp_dir_name () in
+  let prev_cfg_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  let prev_fs = Fs_compat.get_fs_opt () in
+  let prev_guard = Eio_guard.is_ready () in
+  Unix.unsetenv "MASC_CONFIG_DIR";
+  Filename.set_temp_dir_name isolated_temp;
+  Fun.protect
+    ~finally:(fun () ->
+      Filename.set_temp_dir_name prev_temp_dir;
+      (match prev_cfg_dir with
+       | Some v -> Unix.putenv "MASC_CONFIG_DIR" v
+       | None -> Unix.unsetenv "MASC_CONFIG_DIR");
+      (match prev_fs with
+       | Some fs -> Fs_compat.set_fs fs
+       | None -> Fs_compat.clear_fs ());
+      if prev_guard then Eio_guard.enable () else Eio_guard.disable ())
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       Eio_guard.enable ();
+       Eio.Switch.run @@ fun sw ->
+       let state =
+         Masc.Mcp_server.create_state_eio
+           ~sw
+           ~proc_mgr:(Eio.Stdenv.process_mgr env)
+           ~fs:(Eio.Stdenv.fs env)
+           ~clock:(Eio.Stdenv.clock env)
+           ~mono_clock:(Eio.Stdenv.mono_clock env)
+           ~net:(Eio.Stdenv.net env)
+           ~base_path
+       in
+       let config = Masc.Mcp_server.workspace_config state in
+       let masc_root = Common.masc_dir_from_base_path ~base_path in
+       let now = Unix.gettimeofday () in
+       let old_ts = now -. (40.0 *. Masc_time_constants.day) in
+       (* 1. Atomic staging orphan *)
+       let dead_stage = Filename.concat masc_root ".private_jsonl_dead_99.stage" in
+       Fs_compat.mkdir_p masc_root;
+       Fs_compat.save_file dead_stage "aborted stage\n";
+       (* 2. Stale durable locks (.prepare.lock + .checkpoint.lock) *)
+       let dead_agy_lock =
+         Runtime_antigravity_home.keeper_prepare_lock_path
+           ~runtime_root:masc_root ~owner_leaf:"deadleaf"
+       in
+       let live_agy_lock =
+         Runtime_antigravity_home.keeper_prepare_lock_path
+           ~runtime_root:masc_root ~owner_leaf:"liveleaf"
+       in
+       let live_agy_home =
+         Runtime_antigravity_home.keeper_home_dir
+           ~runtime_root:masc_root ~owner_leaf:"liveleaf"
+       in
+       Fs_compat.save_file dead_agy_lock "";
+       Fs_compat.save_file live_agy_lock "";
+       Fs_compat.mkdir_p live_agy_home;
+       let traces_dir = Filename.concat masc_root Workspace_init.traces_dirname in
+       Fs_compat.mkdir_p traces_dir;
+       let dead_trace_lock = Filename.concat traces_dir "dead-session.checkpoint.lock" in
+       Fs_compat.save_file dead_trace_lock "";
+       (* 3. Shutdown operations: aged terminal + empty legacy dir + preserved blocked op *)
+       let ops_root =
+         Filename.concat
+           (Masc.Workspace.keepers_runtime_dir config)
+           (Common.keeper_runtime_store_dirname Common.Keeper_shutdown_operations)
+       in
+       let empty_legacy_dir = Filename.concat ops_root "_legacy-empty" in
+       Fs_compat.mkdir_p empty_legacy_dir;
+       let digest =
+         match Masc.Keeper_meta_json.Snapshot_digest.of_string (String.make 64 'e') with
+         | Ok d -> d
+         | Error detail -> Alcotest.fail detail
+       in
+       let cleanup_evidence =
+         { Masc.Keeper_shutdown_types.settled_task_ids = []
+         ; pending_confirms_removed = 0
+         ; meta_snapshot_digest = digest
+         }
+       in
+       let settled_op_id, settled_path =
+         make_shutdown_op_fixture
+           ~config
+           ~old_ts
+           ~keeper_name:"settled-systhread-keeper"
+           ~reason:Masc.Keeper_shutdown_types.Operator_stop_retain_meta
+           ~phase:
+             (Masc.Keeper_shutdown_types.Finalized
+                { cleanup = cleanup_evidence
+                ; meta_removed = false
+                ; session_removed = false
+                ; registry_unregistered = true
+                ; completion = Masc.Keeper_shutdown_types.Completion_not_requested
+                })
+       in
+       let _blocked_op_id, blocked_path =
+         make_shutdown_op_fixture
+           ~config
+           ~old_ts
+           ~keeper_name:"blocked-systhread-keeper"
+           ~reason:Masc.Keeper_shutdown_types.Operator_stop_retain_meta
+           ~phase:
+             (Masc.Keeper_shutdown_types.Blocked
+                { stage = Task_settlement; detail = "pending" })
+       in
+       (* 4. Aged settled verifier execution dir *)
+       let exec_root = Filename.concat masc_root "verifier-executions" in
+       let old_exec_dir = Filename.concat exec_root (String.make 64 'a') in
+       let old_exec_file = Filename.concat old_exec_dir "journal.json" in
+       Fs_compat.mkdir_p old_exec_dir;
+       Fs_compat.save_file old_exec_file "{}";
+       Unix.utimes old_exec_file old_ts old_ts;
+       Unix.utimes old_exec_dir old_ts old_ts;
+       (* 5. Temp orphans in isolated temp dir *)
+       let dead_temp_file =
+         Filename.concat
+           isolated_temp
+           (Printf.sprintf "masc-claude-system-%d-dead.txt" dead_pid)
+       in
+       let dead_temp_dir =
+         Filename.concat
+           isolated_temp
+           (Printf.sprintf "masc-completion-review-%d-dead" dead_pid)
+       in
+       let aged_usage_dir = Filename.concat isolated_temp "masc-antigravity-usage-old" in
+       Fs_compat.save_file dead_temp_file "prompt";
+       Fs_compat.mkdir_p dead_temp_dir;
+       Fs_compat.save_file (Filename.concat dead_temp_dir "scratch.txt") "x";
+       Fs_compat.mkdir_p aged_usage_dir;
+       Unix.utimes aged_usage_dir old_ts old_ts;
+       (* Hold the shutdown operation write lock concurrently from an Eio fiber
+          while [startup_sweep_orphan_hygiene] runs on a real OS systhread via
+          [Systhread_host.run]. This exercises BOTH contended cross-context
+          waiting ([Read] and [Write]) and uncontended [Write] in [Non_eio]. *)
+       let holder_entered, resolve_holder_entered = Eio.Promise.create () in
+       let release_holder, resolve_release_holder = Eio.Promise.create () in
+       let sweep_done, resolve_sweep_done = Eio.Promise.create () in
+       Eio.Fiber.fork ~sw (fun () ->
+         (match
+            Masc.Keeper_shutdown_store.For_testing.with_operation_write_lock
+              ~config
+              ~keeper_name:"settled-systhread-keeper"
+              settled_op_id
+              (fun () ->
+                 Eio.Promise.resolve resolve_holder_entered ();
+                 Eio.Promise.await release_holder)
+          with
+          | Ok () -> ()
+          | Error err -> Alcotest.fail (Masc.Keeper_shutdown_store.error_to_string err)));
+       Eio.Promise.await holder_entered;
+       Eio.Fiber.fork ~sw (fun () ->
+         let outcome =
+           try
+             SM.startup_sweep_orphan_hygiene state;
+             Ok ()
+           with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn -> Error (Printexc.to_string exn)
+         in
+         Eio.Promise.resolve resolve_sweep_done outcome);
+       (* Let the systhread reach the contended shutdown lock, then release the fiber lock. *)
+       Eio.Time.sleep (Eio.Stdenv.clock env) 0.05;
+       Eio.Promise.resolve resolve_release_holder ();
+       (match Eio.Promise.await sweep_done with
+        | Ok () -> ()
+        | Error detail ->
+          Alcotest.fail ("startup_sweep_orphan_hygiene raised inside systhread: " ^ detail));
+       Alcotest.(check bool) "phase 1: dead stage removed" false (Sys.file_exists dead_stage);
+       Alcotest.(check bool) "phase 2: dead .prepare.lock removed" false (Sys.file_exists dead_agy_lock);
+       Alcotest.(check bool) "phase 2: live .prepare.lock kept" true (Sys.file_exists live_agy_lock);
+       Alcotest.(check bool) "phase 2: dead .checkpoint.lock removed" false (Sys.file_exists dead_trace_lock);
+       Alcotest.(check bool) "phase 3: aged terminal shutdown op removed" false (Sys.file_exists settled_path);
+       Alcotest.(check bool) "phase 3: settled shutdown owner dir removed" false
+         (Sys.file_exists (Filename.dirname settled_path));
+       Alcotest.(check bool) "phase 3: empty legacy shutdown owner dir removed" false
+         (Sys.file_exists empty_legacy_dir);
+       Alcotest.(check bool) "phase 3: blocked shutdown op preserved" true (Sys.file_exists blocked_path);
+       Alcotest.(check bool) "phase 4: aged settled verifier execution removed" false
+         (Sys.file_exists old_exec_dir);
+       Alcotest.(check bool) "phase 5: dead-pid temp file removed" false (Sys.file_exists dead_temp_file);
+       Alcotest.(check bool) "phase 5: dead-pid temp dir removed" false (Sys.file_exists dead_temp_dir);
+       Alcotest.(check bool) "phase 5: aged usage temp dir removed" false (Sys.file_exists aged_usage_dir))
+
+let test_orphan_hygiene_phases_run_in_raw_os_systhread_outside_eio () =
+  (* Execute every orphan hygiene sweep phase inside a real OS systhread
+     ([Thread.create]) with NO Eio scheduler anywhere on the call stack,
+     proving zero [Effect.Unhandled] across all phases. *)
+  let base_path = fresh_dir "masc_raw_systhread_orphan" in
+  let temp_dir = fresh_dir "masc_raw_systhread_temp" in
+  let config = Masc.Workspace.default_config base_path in
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
+  let now = 1_800_000_000.0 in
+  let old_ts = now -. (40.0 *. Masc_time_constants.day) in
+  let prev_cfg_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Unix.unsetenv "MASC_CONFIG_DIR";
+  Fun.protect
+    ~finally:(fun () ->
+      match prev_cfg_dir with
+      | Some v -> Unix.putenv "MASC_CONFIG_DIR" v
+      | None -> Unix.unsetenv "MASC_CONFIG_DIR")
+    (fun () ->
+       Fs_compat.mkdir_p masc_root;
+       let dead_stage = Filename.concat masc_root ".private_jsonl_raw_01.stage" in
+       Fs_compat.save_file dead_stage "orphan stage\n";
+       let dead_agy_lock =
+         Runtime_antigravity_home.keeper_prepare_lock_path
+           ~runtime_root:masc_root ~owner_leaf:"rawdead"
+       in
+       Fs_compat.save_file dead_agy_lock "";
+       let traces_dir = Filename.concat masc_root Workspace_init.traces_dirname in
+       Fs_compat.mkdir_p traces_dir;
+       let dead_trace_lock = Filename.concat traces_dir "raw-dead.checkpoint.lock" in
+       Fs_compat.save_file dead_trace_lock "";
+       let empty_review_dir =
+         List.fold_left Filename.concat masc_root
+           [ "keepers"; "completion-review-raw0001"; "continuity-requests" ]
+       in
+       Fs_compat.mkdir_p empty_review_dir;
+       let ops_root =
+         Filename.concat
+           (Masc.Workspace.keepers_runtime_dir config)
+           (Common.keeper_runtime_store_dirname Common.Keeper_shutdown_operations)
+       in
+       let empty_shutdown_dir = Filename.concat ops_root "_raw-empty" in
+       Fs_compat.mkdir_p empty_shutdown_dir;
+       let digest =
+         match Masc.Keeper_meta_json.Snapshot_digest.of_string (String.make 64 'f') with
+         | Ok d -> d
+         | Error detail -> Alcotest.fail detail
+       in
+       let _op_id, settled_op_path =
+         make_shutdown_op_fixture
+           ~config
+           ~old_ts
+           ~keeper_name:"raw-settled-keeper"
+           ~reason:Masc.Keeper_shutdown_types.Operator_stop_retain_meta
+           ~phase:
+             (Masc.Keeper_shutdown_types.Finalized
+                { cleanup =
+                    { Masc.Keeper_shutdown_types.settled_task_ids = []
+                    ; pending_confirms_removed = 0
+                    ; meta_snapshot_digest = digest
+                    }
+                ; meta_removed = false
+                ; session_removed = false
+                ; registry_unregistered = true
+                ; completion = Masc.Keeper_shutdown_types.Completion_not_requested
+                })
+       in
+       let exec_dir =
+         Filename.concat (Filename.concat masc_root "verifier-executions") (String.make 64 '9')
+       in
+       let exec_file = Filename.concat exec_dir "journal.json" in
+       Fs_compat.mkdir_p exec_dir;
+       Fs_compat.save_file exec_file "{}";
+       Unix.utimes exec_file old_ts old_ts;
+       Unix.utimes exec_dir old_ts old_ts;
+       let dead_temp_file = Filename.concat temp_dir "masc-claude-system-999991-raw.txt" in
+       Fs_compat.save_file dead_temp_file "prompt";
+       let outcome = Atomic.make None in
+       let worker =
+         Thread.create
+           (fun () ->
+              let res =
+                try
+                  let atomic = SM.sweep_atomic_orphans ~base_path in
+                  let locks = SM.sweep_stale_durable_locks ~base_path in
+                  let shutdown_res =
+                    Masc.Keeper_shutdown_store.prune_terminal_and_empty_dirs
+                      ~now
+                      ~config
+                      ~older_than_seconds:(30.0 *. Masc_time_constants.day)
+                      ()
+                  in
+                  let review_dirs = SM.prune_empty_completion_review_dirs ~masc_root in
+                  let verifier_res =
+                    SM.prune_settled_verifier_executions ~now ~base_path ~days:30 ()
+                  in
+                  let temp =
+                    SM.sweep_stale_temp_orphans
+                      ~temp_dir
+                      ~min_age_seconds:Masc_time_constants.day
+                      ~is_pid_alive:(fun _ -> false)
+                      ~now
+                      ()
+                  in
+                  Ok (atomic, locks, shutdown_res, review_dirs, verifier_res, temp)
+                with
+                | Eio.Cancel.Cancelled _ as exn -> raise exn
+                | exn -> Error (Printexc.to_string exn)
+              in
+              Atomic.set outcome (Some res))
+           ()
+       in
+       Thread.join worker;
+       match Atomic.get outcome with
+       | None -> Alcotest.fail "raw OS systhread did not record an outcome"
+       | Some (Error detail) ->
+         Alcotest.fail ("orphan hygiene raised inside raw OS systhread: " ^ detail)
+       | Some (Ok (atomic, locks, shutdown_res, review_dirs, verifier_res, temp)) ->
+         Alcotest.(check int) "atomic stage deleted" 1 atomic.deleted;
+         Alcotest.(check int) "0 atomic failures" 0 (List.length atomic.failures);
+         Alcotest.(check int) "2 stale locks removed (.prepare.lock + .checkpoint.lock)" 2 locks.removed;
+         Alcotest.(check int) "0 lock failures" 0 locks.failed;
+         (match shutdown_res with
+          | Error err -> Alcotest.fail (Masc.Keeper_shutdown_store.error_to_string err)
+          | Ok report ->
+            Alcotest.(check int) "1 aged shutdown op pruned" 1 report.pruned_operations;
+            Alcotest.(check int) "2 empty shutdown dirs pruned" 2 report.pruned_empty_dirs);
+         Alcotest.(check int) "1 empty completion-review dir pruned" 1 review_dirs;
+         (match verifier_res with
+          | Error detail -> Alcotest.fail detail
+          | Ok count -> Alcotest.(check int) "1 settled verifier execution pruned" 1 count);
+         Alcotest.(check int) "1 dead temp file removed" 1 temp.removed_files;
+         Alcotest.(check bool) "dead stage gone" false (Sys.file_exists dead_stage);
+         Alcotest.(check bool) "dead .prepare.lock gone" false (Sys.file_exists dead_agy_lock);
+         Alcotest.(check bool) "dead .checkpoint.lock gone" false (Sys.file_exists dead_trace_lock);
+         Alcotest.(check bool) "empty completion-review dir gone" false
+           (Sys.file_exists (Filename.dirname empty_review_dir));
+         Alcotest.(check bool) "settled shutdown op gone" false (Sys.file_exists settled_op_path);
+         Alcotest.(check bool) "empty shutdown dir gone" false (Sys.file_exists empty_shutdown_dir);
+         Alcotest.(check bool) "settled verifier dir gone" false (Sys.file_exists exec_dir);
+         Alcotest.(check bool) "dead temp file gone" false (Sys.file_exists dead_temp_file))
+
 let () =
   Alcotest.run "server_runtime_startup_maintenance"
     [
@@ -793,6 +1173,10 @@ let () =
             test_sweep_stale_durable_locks_respects_held_and_targets;
           Alcotest.test_case "stale temp orphans respect live pids, age barrier, and symlinks" `Quick
             test_sweep_stale_temp_orphans_pid_and_age_safety;
+          Alcotest.test_case "startup_sweep_orphan_hygiene completes inside Systhread_host.run without Eio effects" `Quick
+            test_startup_sweep_orphan_hygiene_runs_in_systhread_without_eio_effects;
+          Alcotest.test_case "all orphan hygiene phases complete in raw OS systhread outside Eio" `Quick
+            test_orphan_hygiene_phases_run_in_raw_os_systhread_outside_eio;
         ] );
       ( "physical containment",
         [ Alcotest.test_case "runtime root link refused" `Quick test_prune_refuses_linked_runtime_root;

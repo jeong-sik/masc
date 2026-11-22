@@ -116,15 +116,53 @@ type lock_access =
   | Read
   | Write
 
+(* Per-key cross-context mutex registry. Shutdown operations are read and
+   mutated by Eio fibers (lifecycle, HTTP, boot recovery) and pruned on a
+   non-Eio OS systhread by [Server_runtime_startup_maintenance.startup_sweep_orphan_hygiene].
+   [Eio.Mutex.use_rw ~protect:true] performs [Eio__core__Cancel.Get_context]
+   even when uncontended and [Eio.Mutex.use_ro] suspends through an Eio effect
+   when contended, both raising [Effect.Unhandled] on a systhread.
+   [Cross_context_mutex] preserves cooperative cancellation-safe locking for
+   Eio fibers (deferring cancellation on [Write] via [with_durable_lock])
+   while serializing cleanly with non-Eio OS threads and Domains. *)
+type operation_lock =
+  { mutex : Cross_context_mutex.t
+  ; mutable users : int
+  }
+
+let operation_locks : (string, operation_lock) Hashtbl.t = Hashtbl.create 16
+let operation_locks_mutex = Stdlib.Mutex.create ()
+
+let acquire_operation_lock key =
+  Stdlib.Mutex.protect operation_locks_mutex (fun () ->
+    match Hashtbl.find_opt operation_locks key with
+    | Some lock ->
+      lock.users <- lock.users + 1;
+      lock
+    | None ->
+      let lock = { mutex = Cross_context_mutex.create (); users = 1 } in
+      Hashtbl.add operation_locks key lock;
+      lock)
+;;
+
+let release_operation_lock key lock =
+  Stdlib.Mutex.protect operation_locks_mutex (fun () ->
+    lock.users <- lock.users - 1;
+    if lock.users = 0
+    then
+      match Hashtbl.find_opt operation_locks key with
+      | Some current when current == lock -> Hashtbl.remove operation_locks key
+      | Some _ | None -> ())
+;;
+
 let with_operation_lock ~access key f =
-  let lock = Keeper_fs.acquire_path_lock key in
+  let lock = acquire_operation_lock key in
   Fun.protect
-    ~finally:(fun () -> Keeper_fs.release_path_lock key lock)
+    ~finally:(fun () -> release_operation_lock key lock)
     (fun () ->
        match access with
-       | Write ->
-         Eio.Mutex.use_rw ~protect:true (Keeper_fs.path_lock_mutex lock) f
-       | Read -> Eio.Mutex.use_ro (Keeper_fs.path_lock_mutex lock) f)
+       | Write -> Cross_context_mutex.with_durable_lock lock.mutex f
+       | Read -> Cross_context_mutex.with_lock lock.mutex f)
 ;;
 
 let records_dir (config : Workspace.config) =

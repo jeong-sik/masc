@@ -53,25 +53,19 @@ let test_a_briefing_without_the_fields_is_an_error () =
             ; "keepers_listing", listed
             ])))
 
-(* The TUI reads the line the server takes, field for field. *)
-let test_the_tui_reads_the_line () =
+let test_the_line_fields_match_wire_contract () =
   let line =
     Server_workspace_health_line.of_briefing
       (briefing ~health:"warning" [ brief (`String "no-such-word") ])
   in
-  match Masc_tui_loader.decode_health_line line with
-  | Ok overview ->
-    check bool "the health word" true
-      (overview.Masc_tui_types.ov_workspace_health = Masc_tui_types.Workspace_health_warning);
-    check bool "the listing" true
-      (overview.ov_keeper_listing = Keeper_snapshot_unread.Listed);
-    check int "the unreadable count" 1 overview.ov_unreadable_keepers
-  | Error detail -> failf "the TUI refused the line: %s" detail
-
-let test_the_tui_reports_a_server_error () =
-  match Masc_tui_loader.decode_health_line (Server_workspace_health_line.of_briefing (`Assoc [])) with
-  | Error _ -> ()
-  | Ok _ -> fail "an error line read as a Health line"
+  check (option string) "the health word" (Some "warning")
+    (Json_util.assoc_string_opt "workspace_health" line);
+  check (option string) "the listing state" (Some "listed")
+    (match Yojson.Safe.Util.member "keepers_listing" line with
+     | `Assoc _ as obj -> Json_util.assoc_string_opt "state" obj
+     | _ -> None);
+  check (option int) "the unreadable count" (Some 1)
+    (Json_util.assoc_int_opt "unreadable_keepers" line)
 
 let test_only_a_moved_line_is_announced () =
   Eio_main.run @@ fun env ->
@@ -114,9 +108,9 @@ let () =
         ; test_case "a briefing without the fields is an error" `Quick
             test_a_briefing_without_the_fields_is_an_error
         ] )
-    ; ( "tui"
-      , [ test_case "the TUI reads the line" `Quick test_the_tui_reads_the_line
-        ; test_case "the TUI reports a server error" `Quick test_the_tui_reports_a_server_error
+    ; ( "wire"
+      , [ test_case "the line carries health, listing and unreadable count" `Quick
+            test_the_line_fields_match_wire_contract
         ] )
     ; ( "announce"
       , [ test_case "only a moved line is announced" `Quick test_only_a_moved_line_is_announced ] )

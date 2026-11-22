@@ -96,11 +96,11 @@ streaming = false
   let projection = Server_dashboard_runtime_resolved_json.build
     ~generated_at_iso:"2026-09-08T00:00:00Z"
     ~config:(Workspace.default_config base_path) in
-  (match Tui_decode.decode_runtime_resolved projection with
-   | Ok ([runtime], _) ->
-     check string "API and TUI keep the runtime identity" "fixture.sample" runtime.ro_id
-   | Ok _ -> fail "expected exactly one projected runtime"
-   | Error detail -> fail detail);
+  (match Yojson.Safe.Util.(projection |> member "runtimes" |> to_list) with
+   | [runtime] ->
+     check string "API keeps the runtime identity" "fixture.sample"
+       Yojson.Safe.Util.(runtime |> member "id" |> to_string)
+   | _ -> fail "expected exactly one projected runtime");
   let observations = ref [] in
   let projected_requests = ref [] in
   let projection_count = ref 0 in

@@ -479,14 +479,9 @@ let test_correlated_checkpoint_route () =
 ;;
 
 (* A checkpoint the worker refuses before it takes effect settles as a proven
-   refusal, so the terminal retires its retained intent and the next write is
-   admitted. Settled as unknown, the same refusal would leave the intent in
-   place and block every machine write until an offline acknowledgement. Each
-   case runs the real worker; the receipt is then read the way the terminal
-   reads it. *)
+   refusal, so the next write is admitted without an offline acknowledgement.
+   Each case runs the real worker and checks the settled receipt JSON. *)
 let test_pre_effect_checkpoint_refusal_settles_refused () =
-  let module Pending = Masc_tui_msx_checkpoint_pending in
-  let module Tui = Masc.Tui_decode in
   with_tick_machine (fun () ->
     with_attached_worker (fun ~config ~env ~sw ->
       Fs_compat.mkdir_p (Masc.Workspace.masc_dir config);
@@ -499,33 +494,16 @@ let test_pre_effect_checkpoint_refusal_settles_refused () =
           let body = Yojson.Safe.to_string (`Assoc ["operation_id",`String id;
             "slot",`String "quick";"expected_workspace",expected]) in
           snd (Route.checkpoint_response ~config ~restore ~body) in
-        let intent ~restore id : Pending.binding =
-          {operation_id=(match Keeper_operation_id.of_string id with Ok v -> v | Error m -> fail m);
-           restore; slot="quick"; base_path; masc_root} in
-        let gate_is_open label =
-          match Pending.load ~masc_root with
-          | Ok [] -> ()
-          | Ok _ -> fail (label ^ ": an intent still gates machine writes")
-          | Error detail -> fail (label ^ ": " ^ detail) in
         let refuses label ~restore id =
-          let binding = intent ~restore id in
-          (match Pending.remember ~masc_root binding with
-           | Ok () -> () | Error detail -> fail detail);
           let receipt = post ~restore id in
           check (option string) (label ^ " settles as refused") (Some "refused")
             (match member "status" receipt with Some (`String s) -> Some s | _ -> None);
           check (option string) (label ^ " carries the pre-effect proof") (Some "proven_pre_effect")
             (match member "effect_disposition" receipt with Some (`String s) -> Some s | _ -> None);
-          (match Tui.decode_msx_checkpoint_receipt ~operation_id:id ~restore ~slot:"quick"
-                   ~base_path ~masc_root receipt with
-           | Ok (Tui.Checkpoint_refused detail) ->
-               check bool (label ^ " names the reason") true (String.trim detail <> "")
-           | Ok _ -> fail (label ^ ": the terminal does not read this as a refusal")
-           | Error detail -> fail (label ^ ": " ^ detail));
-          (* The terminal retires an intent on [Checkpoint_refused]. *)
-          (match Pending.forget ~masc_root binding with
-           | Ok () -> () | Error detail -> fail detail);
-          gate_is_open label in
+          check bool (label ^ " names the reason") true
+            (match member "message" receipt with
+             | Some (`String s) -> String.trim s <> ""
+             | Some _ | None -> false) in
         refuses "restore of a slot never saved" ~restore:true "restore-missing-slot";
         ignore (require_ok (Lane.eject ()));
         refuses "save with no machine" ~restore:false "save-without-machine";
@@ -545,8 +523,6 @@ let test_pre_effect_checkpoint_refusal_settles_refused () =
    runtime failure of unknown effect, and the receipt must settle as unknown,
    not refused. *)
 let test_unexpected_worker_exception_settles_checkpoint_unknown () =
-  let module Pending = Masc_tui_msx_checkpoint_pending in
-  let module Tui = Masc.Tui_decode in
   with_tick_machine (fun () ->
     with_attached_worker (fun ~config ~env ~sw ->
       Fs_compat.mkdir_p (Masc.Workspace.masc_dir config);
@@ -558,11 +534,6 @@ let test_unexpected_worker_exception_settles_checkpoint_unknown () =
         let id = "restore-through-a-defect" in
         let body = Yojson.Safe.to_string (`Assoc ["operation_id",`String id;
           "slot",`String "quick";"expected_workspace",expected]) in
-        let binding : Pending.binding =
-          {operation_id=(match Keeper_operation_id.of_string id with Ok v -> v | Error m -> fail m);
-           restore=true; slot="quick"; base_path; masc_root} in
-        (match Pending.remember ~masc_root binding with
-         | Ok () -> () | Error detail -> fail detail);
         Fun.protect
           ~finally:(fun () ->
             Msx_lane.install_activity_observer
@@ -576,18 +547,10 @@ let test_unexpected_worker_exception_settles_checkpoint_unknown () =
               (match member "status" receipt with Some (`String s) -> Some s | _ -> None);
             check bool "and claims no pre-effect proof" true
               (member "effect_disposition" receipt = None);
-            (match Tui.decode_msx_checkpoint_receipt ~operation_id:id ~restore:true
-                     ~slot:"quick" ~base_path ~masc_root receipt with
-             | Ok (Tui.Checkpoint_unknown detail) ->
-                 check bool "the terminal reads it as unknown with a reason" true
-                   (String.trim detail <> "")
-             | Ok _ -> fail "the terminal does not read this as unknown"
-             | Error detail -> fail detail);
-            (* An unknown receipt frees nothing: the intent still gates writes. *)
-            (match Pending.load ~masc_root with
-             | Ok [_] -> ()
-             | Ok _ -> fail "the intent should stay in force"
-             | Error detail -> fail detail)))))
+            check bool "and carries a non-empty reason" true
+              (match member "message" receipt with
+               | Some (`String s) -> String.trim s <> ""
+               | Some _ | None -> false)))))
 ;;
 
 let ledger_whos () = List.map (fun (e : Lane.entry) -> e.who) (Lane.ledger ())

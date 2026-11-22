@@ -8,8 +8,6 @@ module Health = Masc.Keeper_memory_writer_health
 module Writers = Masc.Librarian_writers
 module Writer = Masc.Librarian_writer
 module Deps = Masc_test_deps
-module Shown = Masc.Tui_decode_memory_writer
-module Level = Masc.Librarian_level
 
 let keeper = "health-keeper"
 
@@ -94,20 +92,12 @@ let row_of config =
   | other -> failf "keepers is not a list: %s" (Yojson.Safe.to_string other)
 ;;
 
-(* The same writer as the Keeper's memory-health row carries it under
-   [writer], read by the decoder the TUI reads the row with. *)
-let shown_of config name =
-  match Shown.decode (Health.keeper_rows ~config name) with
-  | Ok shown -> shown
-  | Error reason -> failf "the TUI does not read the row's writer: %s" reason
-;;
+let keeper_row_of config name = Health.keeper_rows ~config name ;;
 
 let test_a_process_without_writers () =
   let config = Masc.Workspace.default_config (Filename.temp_dir "writer-health" "") in
-  check bool "a Keeper's row says the process runs none" true
-    (match shown_of config keeper with
-     | Shown.None_in_process -> true
-     | Shown.No_writer | Shown.Writer (_ : Shown.shown) -> false);
+  check string "a Keeper's row says the process runs none" "none_in_process"
+    (text "kind" (keeper_row_of config keeper));
   check string "the section says so" "none_in_process"
     (text "writers" (Health.section_json ~config));
   check bool "and it lists no Keeper" true
@@ -127,11 +117,12 @@ let test_a_keeper_before_its_writer () =
     check (list string) "W1" [ "W1" ] (alarms row);
     check string "a warning" "warn" (text "level" row);
     check bool "the section counts it" true (member "warn" (Health.section_json ~config) = `Int 1);
-    check bool "the Keeper's row shows a writer that has not started" true
-      (shown_of config keeper
-       = Shown.Writer { Shown.level = Level.Warn; alarms = [ Level.W1 ]; row = Shown.Booting });
-    check bool "and a Keeper outside the registry has no writer" true
-      (shown_of config "outside-the-registry" = Shown.No_writer);
+    let krow = keeper_row_of config keeper in
+    check string "the Keeper's row kind is writer" "writer" (text "kind" krow);
+    check string "the Keeper's row matches the section row"
+      (Yojson.Safe.to_string row) (Yojson.Safe.to_string (member "row" krow));
+    check string "and a Keeper outside the registry has no writer" "no_writer"
+      (text "kind" (keeper_row_of config "outside-the-registry"));
     check int "and the table still holds no writer" 0 (List.length (Writers.held (writers config))))
     ()
 ;;
@@ -165,23 +156,10 @@ let test_an_open_writer () =
     check string "of the turn log the Keeper has" (turn_log_id config) (text "turn_log" row);
     check bool "no ask has ended" true (member "last_read" row = `Null);
     check bool "Memory holds no fact" true (member "facts" (member "memory" row) = `Int 0);
-    check bool "the Keeper's row shows the same open writer" true
-      (match shown_of config keeper with
-       | Shown.Writer
-           { Shown.level = Level.Ok
-           ; alarms = []
-           ; row =
-               Shown.Open
-                 { activity = Shown.Idle
-                 ; unread = false
-                 ; kept = { Shown.lane = false; last_read = None; _ }
-                 ; last_line = Shown.Line_started
-                 ; facts = 0
-                 ; turn_log
-                 ; _
-                 }
-           } -> String.equal turn_log (turn_log_id config)
-       | Shown.Writer (_ : Shown.shown) | Shown.None_in_process | Shown.No_writer -> false);
+    let krow = keeper_row_of config keeper in
+    check string "the Keeper's row kind is writer" "writer" (text "kind" krow);
+    check string "the Keeper's row shows the same open writer"
+      (Yojson.Safe.to_string row) (Yojson.Safe.to_string (member "row" krow));
     let section = Health.section_json ~config in
     check string "the section runs" "running" (text "writers" section);
     check bool "with none at error" true (member "error" section = `Int 0);
@@ -213,14 +191,9 @@ let test_a_stopped_writer () =
     check string "an error" "error" (text "level" row);
     check string "why" "store_stopped_log_unreadable" (text "stop" row);
     check string "the snapshot file" "absent" (text "fault" (member "snapshot_file" row));
-    check bool "the Keeper's row shows the same stopped store" true
-      (match shown_of config keeper with
-       | Shown.Writer
-           { Shown.level = Level.Error
-           ; alarms = [ Level.E1 ]
-           ; row = Shown.Stopped { stop = Shown.Log_unreadable; snapshot_file = Shown.File_absent; _ }
-           } -> true
-       | Shown.Writer (_ : Shown.shown) | Shown.None_in_process | Shown.No_writer -> false);
+    let krow = keeper_row_of config keeper in
+    check string "the Keeper's row shows the same stopped store"
+      (Yojson.Safe.to_string row) (Yojson.Safe.to_string (member "row" krow));
     check bool "the section counts it" true (member "error" (Health.section_json ~config) = `Int 1))
     ()
 ;;
@@ -307,23 +280,9 @@ let test_a_writer_resting_on_an_input_fault () =
     let fault = member "fault" read in
     check string "the line does not decode" "line_unreadable" (text "kind" fault);
     check bool "at the offset the operator sends" true (member "offset" fault = `Int offset);
-    check bool "the Keeper's row shows the same fault" true
-      (match shown_of config keeper with
-       | Shown.Writer
-           { Shown.level = Level.Error
-           ; alarms = [ Level.E3 ]
-           ; row =
-               Shown.Open
-                 { activity = Shown.Resting
-                 ; unread = true
-                 ; kept =
-                     { Shown.last_read = Some (Shown.Read_input_fault (Shown.Line_unreadable { offset = at }))
-                     ; _
-                     }
-                 ; _
-                 }
-           } -> at = offset
-       | Shown.Writer (_ : Shown.shown) | Shown.None_in_process | Shown.No_writer -> false))
+    let krow = keeper_row_of config keeper in
+    check string "the Keeper's row shows the same fault"
+      (Yojson.Safe.to_string row) (Yojson.Safe.to_string (member "row" krow)))
     ()
 ;;
 
@@ -427,31 +386,15 @@ let test_a_writer_every_slot_refused () =
         ; "slots", `List [ `Assoc [ "slot", `String slot_id; "outcome", `String "refused" ] ]
         ]
     in
-    let read ~about_lane_now =
-      Some
-        (Shown.Read_refused_not_all_sized
-           { about_memory_now = true; about_lane_now; slots = [ slot_id, Shown.Refused ] })
-    in
     let row = row_of config in
     check string "its state" "resting" (text "state" row);
     check (list string) "E4, and W1 for what is still unread" [ "E4"; "W1" ] (alarms row);
     check string "the refusal has its own end, about the lane value declared now"
       (Yojson.Safe.to_string (wire ~about_lane_now:true))
       (Yojson.Safe.to_string (member "last_read" row));
-    check bool "the Keeper's row shows the same refusal" true
-      (match shown_of config keeper with
-       | Shown.Writer
-           { Shown.level = Level.Error
-           ; alarms = [ Level.E4; Level.W1 ]
-           ; row =
-               Shown.Open
-                 { activity = Shown.Resting
-                 ; unread = true
-                 ; kept = { Shown.lane = true; last_read; _ }
-                 ; _
-                 }
-           } -> last_read = read ~about_lane_now:true
-       | Shown.Writer (_ : Shown.shown) | Shown.None_in_process | Shown.No_writer -> false);
+    check string "the Keeper's row shows the same refusal"
+      (Yojson.Safe.to_string row)
+      (Yojson.Safe.to_string (member "row" (keeper_row_of config keeper)));
     Writers.declaration_changed (writers config) None;
     held_as ~clock:env.clock (writers config) ~what:"let the lane value go"
       (fun (machine : Masc.Librarian_machine.t) -> Option.is_none machine.lane);
@@ -460,14 +403,9 @@ let test_a_writer_every_slot_refused () =
     check string "and the refusal is about a lane value that is not declared now"
       (Yojson.Safe.to_string (wire ~about_lane_now:false))
       (Yojson.Safe.to_string (member "last_read" row));
-    check bool "which the Keeper's row shows" true
-      (match shown_of config keeper with
-       | Shown.Writer
-           { Shown.level = Level.Warn
-           ; alarms = [ Level.W1 ]
-           ; row = Shown.Open { unread = true; kept = { Shown.lane = false; last_read; _ }; _ }
-           } -> last_read = read ~about_lane_now:false
-       | Shown.Writer (_ : Shown.shown) | Shown.None_in_process | Shown.No_writer -> false))
+    check string "which the Keeper's row shows"
+      (Yojson.Safe.to_string row)
+      (Yojson.Safe.to_string (member "row" (keeper_row_of config keeper))))
     ()
 ;;
 

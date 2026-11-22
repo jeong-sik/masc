@@ -15,7 +15,7 @@
 # The surface is a native stand-in, not the OCaml TUI. A small C executable
 # accepts the TUI's argv, waits for SIGTERM and writes the row the TUI writes --
 # `[masc-tui] exit: normal (signal SIGTERM)`, the vocabulary owned by
-# bin/masc_tui_exit_reason.ml. So what this proves is the restart script's own
+# lib/masc_tui/core/exit_reason.ml. So what this proves is the restart script's own
 # path: discovery, the signal, the row read, the fresh start. That the real
 # TUI writes that row is #37949's own test, not this one's claim.
 #

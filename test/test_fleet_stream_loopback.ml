@@ -2,8 +2,159 @@ open Alcotest
 module F = Masc.Fleet_stream
 module Hub = Masc.Fleet_stream_hub
 module Grade = Masc.Keeper_fleet_grade
-module Client = Masc_tui_fleet_stream
 module Route = Server_routes_http_routes_fleet_stream
+
+(* Self-contained SSE reader over [Masc.Fleet_stream.decode] for loopback tests. *)
+module Client = struct
+  type reading =
+    { revision : F.Revision.t
+    ; fleet : F.fleet
+    }
+
+  type trouble =
+    | Scans_failing of F.degradation
+    | Disconnected of float
+
+  type view =
+    | Awaiting_first_reading
+    | Unavailable of
+        { degradation : F.degradation
+        ; disconnected_since : float option
+        }
+    | Reading of
+        { reading : reading
+        ; trouble : trouble option
+        }
+    | Unreachable of string
+    | Cannot_read of string
+
+  type step =
+    | Keep_reading
+    | Reconnect
+
+  type t =
+    { buf : Buffer.t
+    ; mutable last_rev : F.Revision.t option
+    ; mutable view : view
+    }
+
+  let create () =
+    { buf = Buffer.create 4096; last_rev = None; view = Awaiting_first_reading }
+  ;;
+
+  let started t =
+    Buffer.clear t.buf;
+    t.last_rev <- None
+  ;;
+
+  let view t = t.view
+
+  let refused t ~status ~detail =
+    t.view <- Cannot_read (Printf.sprintf "HTTP %d: %s" status detail)
+  ;;
+
+  let lost t ~now =
+    t.view <-
+      (match t.view with
+       | Reading r -> Reading { r with trouble = Some (Disconnected now) }
+       | Unavailable u -> Unavailable { u with disconnected_since = Some now }
+       | (Awaiting_first_reading | Unreachable _ | Cannot_read _) as v -> v)
+  ;;
+
+  let apply_event t event =
+    match event with
+    | F.Snapshot { revision; fleet; degraded; _ } ->
+      t.last_rev <- Some revision;
+      let trouble = Option.map (fun d -> Scans_failing d) degraded in
+      t.view <- Reading { reading = { revision; fleet }; trouble };
+      Keep_reading
+    | F.Unavailable_snapshot { revision; degradation } ->
+      t.last_rev <- Some revision;
+      t.view <- Unavailable { degradation; disconnected_since = None };
+      Keep_reading
+    | F.Changed { revision; fleet; _ } ->
+      (match t.last_rev with
+       | Some prev when F.Revision.is_next ~after:prev revision ->
+         t.last_rev <- Some revision;
+         t.view <- Reading { reading = { revision; fleet }; trouble = None };
+         Keep_reading
+       | _ -> Reconnect)
+    | F.Degraded { revision; degradation } ->
+      (match t.last_rev with
+       | Some prev when F.Revision.is_next ~after:prev revision ->
+         t.last_rev <- Some revision;
+         t.view <-
+           (match t.view with
+            | Reading r ->
+              Reading
+                { reading = { r.reading with revision }
+                ; trouble = Some (Scans_failing degradation)
+                }
+            | _ -> Unavailable { degradation; disconnected_since = None });
+         Keep_reading
+       | _ -> Reconnect)
+  ;;
+
+  let find_frame_end s =
+    let len = String.length s in
+    let rec loop i =
+      if i + 1 >= len then None
+      else if s.[i] = '\n' && s.[i + 1] = '\n' then Some (i, 2)
+      else if i + 3 < len
+              && s.[i] = '\r' && s.[i + 1] = '\n'
+              && s.[i + 2] = '\r' && s.[i + 3] = '\n'
+      then Some (i, 4)
+      else loop (i + 1)
+    in
+    loop 0
+  ;;
+
+  let data_of_frame frame =
+    String.split_on_char '\n' frame
+    |> List.filter_map (fun line ->
+      let line =
+        let n = String.length line in
+        if n > 0 && line.[n - 1] = '\r' then String.sub line 0 (n - 1) else line
+      in
+      if String.starts_with ~prefix:"data: " line then
+        Some (String.sub line 6 (String.length line - 6))
+      else if String.starts_with ~prefix:"data:" line then
+        Some (String.sub line 5 (String.length line - 5))
+      else None)
+    |> String.concat "\n"
+  ;;
+
+  let feed t chunk =
+    Buffer.add_string t.buf chunk;
+    let rec drain () =
+      let contents = Buffer.contents t.buf in
+      match find_frame_end contents with
+      | None -> Keep_reading
+      | Some (idx, sep_len) ->
+        let frame = String.sub contents 0 idx in
+        let rest = String.sub contents (idx + sep_len) (String.length contents - idx - sep_len) in
+        Buffer.clear t.buf;
+        Buffer.add_string t.buf rest;
+        let payload = String.trim (data_of_frame frame) in
+        if payload = "" then drain ()
+        else (
+          match Yojson.Safe.from_string payload with
+          | exception Yojson.Json_error msg ->
+            t.view <- Cannot_read msg;
+            Reconnect
+          | json ->
+            (match F.decode json with
+             | Error err ->
+               t.view <- Cannot_read (F.decode_error_to_string err);
+               Reconnect
+             | Ok event ->
+               (match apply_event t event with
+                | Reconnect -> Reconnect
+                | Keep_reading -> drain ())))
+    in
+    drain ()
+  ;;
+end
 
 (* Short enough for a test to wait through, long enough that a loaded machine
    does not make a quiet stream look dead. *)

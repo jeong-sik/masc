@@ -332,55 +332,58 @@ let test_owned_turn_survives_bound_read_refusal_and_recovery () =
     Eio.Promise.await entered;
     let slot = match Keeper_owner.turn_in_flight owner with
       | Some slot -> slot | None -> Alcotest.fail "original Owner did not hold its turn" in
-    let expected : Tui_decode.server_identity =
-      { sid_version="0.24.0"; sid_binary_commit="owned-turn-source"; sid_binary_commit_age_s=None; sid_runtime_instance_id = None
-      ; sid_base_path=Tui_decode.Canonical_path.of_path (Unix.realpath config.base_path);
-        sid_masc_root=Tui_decode.Canonical_path.of_path (Unix.realpath (Workspace.masc_dir config))
-      ; sid_executable_in_worktree=None; sid_state_ready=Some true
-      ; sid_uptime=None; sid_sse_clients=None; sid_gc=None; sid_scheduler=None;sid_operator_action=None } in
+    let base_path = Unix.realpath config.base_path in
+    let masc_root = Unix.realpath (Workspace.masc_dir config) in
     let served = ref state in
-    let host = "localhost" and port = 8935 in
-    let kept_reads = Masc_tui_kept_reads.create () in
-    let send ~path ~headers =
-      let headers = ("host", "localhost:8935")::headers in
+    let poll () =
+      let path =
+        Uri.make ~path:"/api/v1/keepers/turns"
+          ~query:
+            [ "preparation_details_for", [ name ]
+            ; "expected_base_path", [ base_path ]
+            ; "expected_masc_root", [ masc_root ]
+            ]
+          ()
+        |> Uri.to_string
+      in
+      let headers = [ "host", "localhost:8935" ] in
       let request = Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET path in
-      let raw = Printf.sprintf "GET %s HTTP/1.1\r\n%s\r\n" path
-          (String.concat "" (List.map (fun (key,value) -> key ^ ": " ^ value ^ "\r\n") headers)) in
+      let raw = Printf.sprintf "GET %s HTTP/1.1\r\nhost: localhost:8935\r\n\r\n" path in
       let wire = request_response ~request:raw ~handle:(fun request reqd ->
         Server_auth.with_read_workspace_precondition !served
           Server_routes_http_keeper_control.handle_keeper_turns_list request reqd) in
-      Ok (client_response request wire) in
-    let poll () =
-      let reply, complete = Eio.Promise.create () in
-      Masc_tui_async_read.launch ~source:Masc_tui_async_read.Keeper_turns
-        ~deliver:(Eio.Promise.resolve complete) (fun () ->
-          Masc_tui_workspace_read.with_binding ~host ~port ~expected
-            ~proof:Masc_tui_workspace_read.Request_precondition (fun () ->
-              let ( let* ) = Result.bind in
-              let* json = Masc_tui_workspace_read.read_json ~kept_reads
-                  ~address_of:(fun ~path -> Printf.sprintf "http://%s:%d%s" host port path)
-                  ~send ~decode:Tui_decode.decode_json_response_body ~host ~port
-                  ~path:("/api/v1/keepers/turns?preparation_details_for=" ^ name) in
-              Tui_decode.decode_keeper_turns json));
-      Eio.Promise.await reply in
+      let resp = client_response request wire in
+      if resp.status = 200 then Ok (Yojson.Safe.from_string resp.body)
+      else Error (Printf.sprintf "HTTP %d: %s" resp.status resp.body)
+    in
+    let find_row json =
+      let rows = Yojson.Safe.Util.(json |> member "keepers" |> to_list) in
+      List.find
+        (fun row -> String.equal Yojson.Safe.Util.(row |> member "keeper_name" |> to_string) name)
+        rows
+    in
     let expect_original = function
       | Error detail -> Alcotest.fail detail
-      | Ok rows ->
-          let row = List.find (fun (row : Tui_decode.keeper_turn_row) -> row.ktr_keeper_name=name) rows in
-          Alcotest.(check (option string)) "original chat control observation" (Some (Keeper_owner.chat_control_token owner))
-            row.ktr_chat_control_token;
-          (match row.ktr_state with
-           | Tui_decode.Keeper_turn_running {interrupt_token;preview=Some preview;_} ->
-               Alcotest.(check string) "actual original slot token"
-                 (Keeper_interrupt_token.to_string slot.interrupt_token) interrupt_token;
-               Alcotest.(check bool) "actual original preparation lineage" true
-                 (match preview.ktp_preparation with
-                  | Some preparation -> preparation.turn_ref=Some original
-                      && preparation.phase=Keeper_turn_preview.World_preparation
-                      && preparation.state=Keeper_turn_preview.Preparation_active
-                  | None -> false)
-           | Keeper_turn_running _ | Keeper_turn_idle | Keeper_turn_unavailable _ ->
-               Alcotest.fail "admitted Owner turn lost original running/preparation state") in
+      | Ok json ->
+          let open Yojson.Safe.Util in
+          let row = find_row json in
+          Alcotest.(check (option string)) "original chat control observation"
+            (Some (Keeper_owner.chat_control_token owner))
+            (row |> member "chat_control_token" |> to_string_option);
+          let turn = row |> member "turn" in
+          Alcotest.(check bool) "turn is running" true (turn <> `Null);
+          Alcotest.(check string) "actual original slot token"
+            (Keeper_interrupt_token.to_string slot.interrupt_token)
+            (turn |> member "interrupt_token" |> to_string);
+          let prep = turn |> member "preview" |> member "preparation" in
+          Alcotest.(check string) "actual original preparation turn_ref"
+            (Ids.Turn_ref.to_string original)
+            (prep |> member "turn_ref" |> to_string);
+          Alcotest.(check string) "actual original preparation phase" "world"
+            (prep |> member "phase" |> to_string);
+          Alcotest.(check string) "actual original preparation state" "active"
+            (prep |> member "state" |> to_string)
+    in
     expect_original (poll ());
     served := foreign_state;
     (match poll () with Error _ -> () | Ok _ -> Alcotest.fail "foreign idle row replaced the original running observation");
@@ -396,9 +399,10 @@ let test_owned_turn_survives_bound_read_refusal_and_recovery () =
      | Ok (`Busy _) -> Alcotest.fail "original maintenance lost its slot"
      | Error error -> Alcotest.fail (Keeper_owner.error_to_string error));
     (match poll () with
-     | Ok rows -> Alcotest.(check bool) "actual finished Owner becomes idle only after completion" true
-         (List.exists (fun (row : Tui_decode.keeper_turn_row) -> row.ktr_keeper_name=name
-           && row.ktr_state=Tui_decode.Keeper_turn_idle) rows)
+     | Ok json ->
+       let row = find_row json in
+       Alcotest.(check bool) "actual finished Owner becomes idle only after completion" true
+         (Yojson.Safe.Util.member "turn" row = `Null)
      | Error detail -> Alcotest.fail detail))
 ;;
 

@@ -124,7 +124,7 @@ and what was checked. Section 4 explains CI; maintainers handle fork integration
 | Keeper behavior or instructions | [Keeper manual](../KEEPER-USER-MANUAL.md), constitution | `lib/keeper/`, `config/prompts/keeper.md`, `test/` |
 | Goal, Task, Board or completion | Constitution's domain rules | `lib/workspace/`, `config/tools/`, `test/` |
 | Provider or lane behavior | Relevant interfaces and configuration | `lib/runtime/`, `lib/runtime_model/`, `test/` |
-| TUI or browser UI | Existing interaction and payload contracts | `bin/masc_tui*.ml`, `lib/tui_decode.ml`, `dashboard/`, `test/` |
+| TUI or browser UI | Existing interaction and payload contracts | `bin/masc_tui.ml`, `lib/masc_tui/`, `dashboard/`, `test/masc_tui_v2/` |
 | CI or development policy | Constitution's execution protocol | `.github/workflows/`, `scripts/ci/`, `scripts/review/` |
 
 This is a starting map, not a list of all affected files. Follow callers and tests,

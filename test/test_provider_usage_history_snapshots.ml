@@ -28,8 +28,8 @@ let history config now =
   | Ok json ->
       let open Yojson.Safe.Util in
       check int "all persisted records remain readable" 0 (json |> member "unreadable_reports" |> to_int);
-      (match Tui_decode_usage.decode_provider_usage_history json with
-       | Ok _ -> () | Error detail -> fail detail);
+      check string "sampling contract matches" "latest_provider_report_per_utc_day"
+        (json |> member "sampling" |> to_string);
       json
 
 let points config now = Yojson.Safe.Util.(history config now |> member "points" |> to_list)
@@ -225,44 +225,36 @@ let damaged_journal_keeps_readable_history () = fixture (fun config scope day ->
     (decode Usage.decode_openrouter_key {|{"data":{"limit":null,"usage":21.5}}|});
   let json = match History.read config ~now:(day +. 50.) ~window:History.Seven_days with
     | Ok json -> json | Error detail -> fail detail in
-  let reading = match Tui_decode_usage.decode_provider_usage_history json with
-    | Ok reading -> reading | Error detail -> fail detail in
+  let open Yojson.Safe.Util in
+  let pts = json |> member "points" |> to_list in
   check int "item, syntax and non-list failures reach the consumer" 3
-    reading.puh_unreadable_reports;
+    (json |> member "unreadable_reports" |> to_int);
   check int "valid neighbors, prior day and later report survive" 4
-    (List.length reading.puh_points);
+    (List.length pts);
   check int "corruption is not a successful empty report" 0
-    (List.length reading.puh_reported_no_windows);
+    (json |> member "reported_no_windows" |> to_list |> List.length);
   check bool "every point retains the opaque scope" true
-    (List.for_all (fun (point : Tui_decode_usage.provider_usage_history_point) ->
-      point.puhp_scope_id = scope_id) reading.puh_points);
+    (List.for_all (fun point ->
+      String.equal (point |> member "scope_id" |> to_string) scope_id) pts);
   let by_limit limit_id = List.find
-    (fun (point : Tui_decode_usage.provider_usage_history_point) ->
-      point.puhp_limit_id = Some limit_id) reading.puh_points in
+    (fun point -> member "limit_id" point = `String limit_id) pts in
   List.iter (fun (limit_id, at, expected) ->
     let point = by_limit limit_id in
-    check (float 0.) "neighbor observation time survives" at point.puhp_observed_at;
-    match point.puhp_unit with
-    | Tui_decode_usage.Utilization_percent value ->
-        check int "neighbor utilization survives" expected value
-    | Utilization_fraction _ | Utilization_usd _ | Utilization_credit_balance _
-    | Utilization_credit_unlimited | Utilization_credit_retracted -> fail "neighbor unit changed")
+    check (float 0.) "neighbor observation time survives" at (point |> member "observed_at" |> to_number);
+    check string "neighbor unit is percent" "percent" (point |> member "unit" |> to_string);
+    check int "neighbor utilization survives" expected (point |> member "value" |> to_int))
     ["before", day +. 10., 10; "after", day +. 20., 20];
   let prior = List.find
-    (fun (point : Tui_decode_usage.provider_usage_history_point) ->
-      point.puhp_observed_at < day) reading.puh_points in
+    (fun point -> (point |> member "observed_at" |> to_number) < day) pts in
   check (float 0.) "append day does not replace observation day" (day -. 1.)
-    prior.puhp_observed_at;
-  check string "prior day's cap remains" "provider:API key credit limit" prior.puhp_kind;
+    (prior |> member "observed_at" |> to_number);
+  check string "prior day's cap remains" "provider:API key credit limit" (prior |> member "kind" |> to_string);
   let current = List.find
-    (fun (point : Tui_decode_usage.provider_usage_history_point) ->
-      point.puhp_observed_at = day +. 40.) reading.puh_points in
-  match current.puhp_unit with
-  | Tui_decode_usage.Utilization_usd { used; limit = None } ->
-      check (float 0.) "later uncapped report survives malformed rows" 21.5 used
-  | Utilization_usd { limit = Some _; _ } | Utilization_fraction _
-  | Utilization_percent _ | Utilization_credit_balance _ | Utilization_credit_unlimited
-  | Utilization_credit_retracted -> fail "later report lost its uncapped USD amount")
+    (fun point -> (point |> member "observed_at" |> to_number) = day +. 40.) pts in
+  check string "later report keeps usd unit" "usd" (current |> member "unit" |> to_string);
+  check (float 0.) "later uncapped report survives malformed rows" 21.5
+    (current |> member "used" |> to_number);
+  check bool "later uncapped report has null limit" true (member "limit" current = `Null))
 
 let rec mkdir_p dir =
   if not (Sys.file_exists dir) then (mkdir_p (Filename.dirname dir); Unix.mkdir dir 0o755)

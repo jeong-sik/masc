@@ -1631,23 +1631,31 @@ let daemon_test_clock () =
 ;;
 
 let planning_original_failure config goal_id =
-  (* Consume the actual server payload through the production TUI decoder,
-     including its required nullable diagnostic and closed step type. *)
+  let open Yojson.Safe.Util in
   let json = Server_dashboard_http.dashboard_planning_http_json ~config in
-  let snapshot = match Tui_decode.decode_planning_snapshot json with
-    | Ok snapshot -> snapshot | Error detail -> fail detail in
-  match List.find_opt (fun (goal : Tui_decode.planning_goal) -> goal.pg_id=goal_id)
-      snapshot.pl_goals with
-  | Some goal -> goal.pg_verifier_unreconciled
+  let goals = json |> member "goals" |> to_list in
+  match
+    List.find_opt (fun g -> String.equal (g |> member "id" |> to_string) goal_id) goals
+  with
   | None -> fail "the actual planning payload omitted the Goal"
+  | Some goal -> (
+      match member "verifier_unreconciled" goal with
+      | `Null -> None
+      | `Assoc _ as blocked -> (
+          let raw_step = blocked |> member "step" |> to_string in
+          let detail = blocked |> member "detail" |> to_string in
+          match Goal_reconcile_step.of_string raw_step with
+          | Some step -> Some (step, detail)
+          | None -> fail ("unknown verifier reconcile step " ^ raw_step))
+      | other -> fail ("unexpected verifier_unreconciled: " ^ Yojson.Safe.to_string other))
 ;;
 
 let assert_original_failure_visible config goal_id =
   match planning_original_failure config goal_id with
-  | Some {Tui_decode.vu_step=Goal_reconcile_step.Read_original; vu_detail} ->
-    check bool "the TUI receives the original storage failure" true
+  | Some (Goal_reconcile_step.Read_original, vu_detail) ->
+    check bool "the planning payload exposes the original storage failure" true
       (String_util.contains_substring vu_detail "original request body does not match its record's digest")
-  | Some {vu_step=(Goal_reconcile_step.Reconcile_proof | Goal_reconcile_step.Rearm_proof); _}
+  | Some ((Goal_reconcile_step.Reconcile_proof | Goal_reconcile_step.Rearm_proof), _)
   | None -> fail "the Goal planning row did not expose its typed original-read failure"
 ;;
 

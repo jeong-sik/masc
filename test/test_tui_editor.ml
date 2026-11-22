@@ -26,7 +26,7 @@ let with_editor env_value f =
 let test_editor_command_prefers_editor_over_visual () =
   with_editor (Some "cat") (fun () ->
       check (option string) "EDITOR wins" (Some "cat")
-        (Masc_tui_editor.editor_command ()))
+        (Masc_cli_editor.editor_command ()))
 ;;
 
 let test_editor_command_empty_editor_falls_back_to_none () =
@@ -35,23 +35,23 @@ let test_editor_command_empty_editor_falls_back_to_none () =
      one. *)
   with_editor (Some " ") (fun () ->
       check (option string) "blank editor is no editor" None
-        (Masc_tui_editor.editor_command ()))
+        (Masc_cli_editor.editor_command ()))
 ;;
 
 (* The outcome as one word, so a test says which of the three an empty form
    was without printing a reason that is the shell's to word. *)
 let outcome = function
   | Ok text -> "ok:" ^ text
-  | Error Masc_tui_editor.Cancelled -> "cancelled"
-  | Error (Masc_tui_editor.Editor_unavailable _) -> "editor-unavailable"
-  | Error (Masc_tui_editor.Form_unreadable _) -> "form-unreadable"
+  | Error Masc_cli_editor.Cancelled -> "cancelled"
+  | Error (Masc_cli_editor.Editor_unavailable _) -> "editor-unavailable"
+  | Error (Masc_cli_editor.Form_unreadable _) -> "form-unreadable"
 ;;
 
 let test_roundtrip_exit_zero_hands_bytes_back () =
   with_editor (Some "cat") (fun () ->
       let calls = ref [] in
       let result =
-        Masc_tui_editor.roundtrip
+        Masc_cli_editor.roundtrip
           ~restore:(fun () -> calls := "restore" :: !calls)
           ~reenter:(fun () -> calls := "reenter" :: !calls)
           "{\n}\n"
@@ -65,7 +65,7 @@ let test_roundtrip_exit_zero_hands_bytes_back () =
 let test_roundtrip_nonzero_exit_is_a_cancel () =
   with_editor (Some "false") (fun () ->
       let result =
-        Masc_tui_editor.roundtrip ~restore:Fun.id ~reenter:Fun.id "keep me"
+        Masc_cli_editor.roundtrip ~restore:Fun.id ~reenter:Fun.id "keep me"
       in
       check string "the editor ran and the operator said no" "cancelled"
         (outcome result))
@@ -78,7 +78,7 @@ let test_roundtrip_nonzero_exit_is_a_cancel () =
 let test_roundtrip_missing_command_is_not_a_cancel () =
   with_editor (Some "masc-no-such-editor-27b9 2>/dev/null") (fun () ->
       let result =
-        Masc_tui_editor.roundtrip ~restore:Fun.id ~reenter:Fun.id "keep me"
+        Masc_cli_editor.roundtrip ~restore:Fun.id ~reenter:Fun.id "keep me"
       in
       check string "a command that does not exist did not cancel"
         "editor-unavailable" (outcome result))
@@ -87,7 +87,7 @@ let test_roundtrip_missing_command_is_not_a_cancel () =
 let test_roundtrip_without_an_editor_is_not_a_cancel () =
   with_editor None (fun () ->
       let result =
-        Masc_tui_editor.roundtrip ~restore:Fun.id ~reenter:Fun.id "keep me"
+        Masc_cli_editor.roundtrip ~restore:Fun.id ~reenter:Fun.id "keep me"
       in
       check string "no editor at all did not cancel either"
         "editor-unavailable" (outcome result))

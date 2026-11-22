@@ -548,7 +548,6 @@ let test_unmeasured_terminal_uses_observation_anchor_without_inventing_finish ()
 ;;
 
 let test_registry_rows_reach_tui_without_synthetic_duration () =
-  let module Decode = Masc.Tui_decode in
   let root=Filename.temp_dir "retained-identity-" "" in
   let path=Filename.concat root Exact.storage_filename in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
@@ -568,23 +567,31 @@ let test_registry_rows_reach_tui_without_synthetic_duration () =
   let registry=Exact.replay path in
   let measured=Exact.get registry ~run_id:"tui-original" |> Option.get in
   let unknown=Exact.get registry ~run_id:"tui-unmeasured-original" |> Option.get in
+  let float_opt json = match json with
+    | `Null -> None
+    | `Float f -> Some f
+    | `Int i -> Some (float_of_int i)
+    | other -> fail ("expected float or null elapsed_s, got " ^ Yojson.Safe.to_string other) in
   List.iter (fun (run,expected) ->
     let listing=match Projection.For_testing.recent_run_page_json_with
       ~limit:1 ~before:None ~lane:(Some "candle_appraiser") ~run_kind:None
       ~exact_runs:[run] ~verification_runs:[] ~goal_verification_runs:[] with
       | Ok page -> page | Error e -> fail e in
-    (match Decode.decode_lane_run_page ~lane:Lane_run_identity.Candle_appraiser listing with
-     | Ok {lrpg_runs=[row];_} ->
-       check bool "retained identity is independent of current configuration" true
-         (Lane_run_identity.equal row.lrs_lane Lane_run_identity.Candle_appraiser);
-       check string "original observation ID reaches the TUI" run.run_id row.lrs_run_id;
-       check (option (float 0.)) "original summary duration" expected row.lrs_elapsed_s
-     | Ok _ -> fail "expected one original summary" | Error e -> fail e);
+    (match Yojson.Safe.Util.(listing |> member "runs" |> to_list) with
+     | [row] ->
+       check string "retained lane identity is independent of current configuration"
+         "candle_appraiser" Yojson.Safe.Util.(row |> member "lane" |> to_string);
+       check string "original observation ID reaches the wire" run.run_id
+         Yojson.Safe.Util.(row |> member "run_id" |> to_string);
+       check (option (float 0.)) "original summary duration" expected
+         (float_opt (Yojson.Safe.Util.member "elapsed_s" row))
+     | _ -> fail "expected one original summary");
     (match Projection.For_testing.run_detail_json_with ~run_id:run.run_id ~exact_runs:[run]
         ~verification_runs:[] ~goal_verification_runs:[] with
-     | Projection.Detail_found detail -> (match Decode.decode_lane_run_detail detail with
-       | Ok row -> check (option (float 0.)) "original detail duration" expected row.lrd_elapsed_s
-       | Error e -> fail e)
+     | Projection.Detail_found detail ->
+       let row = Yojson.Safe.Util.member "run" detail in
+       check (option (float 0.)) "original detail duration" expected
+         (float_opt (Yojson.Safe.Util.member "elapsed_s" row))
      | Projection.Detail_not_found | Projection.Detail_ambiguous -> fail "expected original detail"))
     [measured,Some 2.;unknown,None])
 ;;

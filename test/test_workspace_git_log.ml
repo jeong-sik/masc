@@ -24,16 +24,10 @@ let test_a_malformed_row_is_dropped () =
   check_json "a non-epoch second field is not a row" "none"
     (row "abc1234\t2026-08-25\talpha\tfix: a thing")
 
-(* Both Git changes routes answer through [Server_git_status_json.snapshot], and
-   the TUI reads either answer with one decoder. A body the decoder refuses made
-   the repository-scoped screen fail while the project-scoped one worked. *)
+(* Both Git changes routes answer through [Server_git_status_json.snapshot]. *)
 let change : Repo_git.status_file =
   { path = "lib/a.ml"; staged = false; unstaged = true; untracked = false
   ; conflicted = false }
-
-let decode_snapshot ~scope branch =
-  Masc.Tui_decode.decode_repository_change_snapshot
-    (Server_git_status_json.snapshot ~scope ~branch ~changes:[ change ])
 
 let scopes =
   [ "project", `Assoc [ ("kind", `String "project") ]
@@ -44,34 +38,37 @@ let scopes =
 let test_every_branch_state_decodes_in_every_scope () =
   List.iter
     (fun (scope_name, scope) ->
-      let check label branch expected =
-        match decode_snapshot ~scope branch with
-        | Error err -> Alcotest.failf "%s/%s: %s" scope_name label err
-        | Ok snapshot ->
-            Alcotest.(check bool)
-              (scope_name ^ "/" ^ label) true
-              (snapshot.Masc.Tui_decode.rcs_branch = expected
-               && snapshot.Masc.Tui_decode.rcs_total = 1)
+      let check label branch expected_branch =
+        let snapshot =
+          Server_git_status_json.snapshot ~scope ~branch ~changes:[ change ]
+        in
+        let open Yojson.Safe.Util in
+        Alcotest.(check int) (scope_name ^ "/" ^ label ^ " total") 1
+          (snapshot |> member "total" |> to_int);
+        Alcotest.(check string) (scope_name ^ "/" ^ label ^ " branch")
+          (Yojson.Safe.to_string expected_branch)
+          (Yojson.Safe.to_string (snapshot |> member "branch"))
       in
-      check "detached" Repo_git.Detached Masc.Tui_decode.Repository_detached;
+      check "detached" Repo_git.Detached
+        (`Assoc [ "head", `Null; "upstream", `Null ]);
       check "no upstream"
         (Repo_git.On_branch { name = "main"; upstream = No_upstream })
-        (Masc.Tui_decode.Repository_on_branch
-           { name = "main"; upstream = Repository_no_upstream });
+        (`Assoc [ "head", `String "main"; "upstream", `Null ]);
       check "gone upstream"
         (Repo_git.On_branch { name = "main"; upstream = Upstream_gone "origin/main" })
-        (Masc.Tui_decode.Repository_on_branch
-           { name = "main"; upstream = Repository_upstream_gone "origin/main" });
+        (`Assoc
+          [ "head", `String "main"
+          ; "upstream", `Assoc [ "name", `String "origin/main"; "ahead", `Null; "behind", `Null ]
+          ]);
       check "tracking"
         (Repo_git.On_branch
            { name = "feat/x"
            ; upstream = Tracking { upstream = "origin/feat/x"; ahead = 2; behind = 1 }
            })
-        (Masc.Tui_decode.Repository_on_branch
-           { name = "feat/x"
-           ; upstream =
-               Repository_tracking { upstream = "origin/feat/x"; ahead = 2; behind = 1 }
-           }))
+        (`Assoc
+          [ "head", `String "feat/x"
+          ; "upstream", `Assoc [ "name", `String "origin/feat/x"; "ahead", `Int 2; "behind", `Int 1 ]
+          ]))
     scopes
 
 let args ?base_ref ?commit () = D.git_args_of_params ~base_ref ~commit ~rel:"lib/a.ml"

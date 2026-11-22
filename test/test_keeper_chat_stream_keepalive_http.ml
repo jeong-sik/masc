@@ -248,11 +248,12 @@ let test_a_queued_stream_keeps_alive_and_ends_when_the_operation_settles () =
     check (option string) "the operation is accepted queued" (Some "Queued") (accepted ());
     await_stream_waiting ();
     let before_keepalive = List.length (frames wire) in
-    (* The TUI ends a keeper chat stream that stays silent for
-       [keeper_chat_timeout_sec]. Just short of that silence the queued
-       stream must have written. The time moves once, so only the wait the
-       pump started at the acceptance comes due. *)
-    Eio_mock.Clock.set_time clock.mock (Float.pred Masc_tui_http.keeper_chat_timeout_sec);
+    (* A keeper chat stream that stays silent for [keeper_chat_idle_timeout_sec]
+       (180 s, matching the client stream idle bound) must have written a
+       keepalive frame before that silence elapses. The time moves once, so
+       only the wait the pump started at the acceptance comes due. *)
+    let keeper_chat_idle_timeout_sec = 180.0 in
+    Eio_mock.Clock.set_time clock.mock (Float.pred keeper_chat_idle_timeout_sec);
     await "a frame within the TUI's idle bound" (fun () ->
       List.length (frames wire) > before_keepalive);
     let keepalive =
@@ -282,7 +283,7 @@ let test_a_queued_stream_keeps_alive_and_ends_when_the_operation_settles () =
        record at its next quiet interval and ends, so the TUI settles the
        request from the record before its own idle bound would. *)
     Eio_mock.Clock.set_time clock.mock
-      (Eio.Time.now clock.mock +. Float.pred Masc_tui_http.keeper_chat_timeout_sec);
+      (Eio.Time.now clock.mock +. Float.pred keeper_chat_idle_timeout_sec);
     await "the end of the response" (fun () -> wire.ended);
     check int "nothing written after the operation settled" before_close
       (List.length (frames wire)))

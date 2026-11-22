@@ -26,11 +26,9 @@ let ordinary_save_preserves_unknown () =
     check bool "pause/save preserves all historical cost facts" true (cost before = cost persisted);
     check bool "zero never asserts historical pricing" true (Cost.knowledge (cost persisted) = Cost.Unresolved);
     let json = Keeper_meta_json.meta_to_json persisted in
-    match Tui_decode.decode_keeper json with
-    | Error detail -> fail detail
-    | Ok keeper ->
-      check bool "roster decoder retains the same cost authority" true
-        ((Option.get keeper.k_activity).k_total_cost_usd = cost before)) [0.;12.]
+    let roundtripped = get (Keeper_meta_json_parse.meta_of_json json) in
+    check bool "JSON codec retains the same cost authority" true
+      (cost roundtripped = cost before)) [0.;12.]
 
 let started = Spend.start_attempt Spend.empty ~routing_run_id:"cost-run" ~runtime_id:"core" ~lane_attempt_index:0
 let response state id usage = get (Spend.observe_agent_core_response state

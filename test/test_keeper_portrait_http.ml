@@ -419,10 +419,10 @@ let item_path name = "/api/v1/keepers/" ^ name ^ "/items"
 
 let item_account reply =
   check int "Item account HTTP response" 200 reply.status;
-  require_ok Fun.id
-    (Masc_tui_keeper_items.decode ~keeper_name:keeper
-       (Yojson.Safe.from_string reply.body))
-  |> snd
+  let json = Yojson.Safe.from_string reply.body in
+  check string "Item account keeper matches" keeper
+    Yojson.Safe.Util.(json |> member "keeper" |> to_string);
+  json
 
 let test_router_preview_is_read_only () =
   with_router (fun ~config router ->
@@ -711,7 +711,8 @@ let test_router_strict_auth_needs_a_read_token () =
       (get ~router ~token:reader (bound (expected_workspace.effective_base_path ^ "/another-workspace"))).status;
     check int "blank workspace binding is malformed" 400
       (get ~router ~token:reader (bound " ")).status;
-    check bool "reader sees explicit Candle off" true (item_account off = Masc_tui_keeper_items.Off);
+    check string "reader sees explicit Candle off" "off"
+      Yojson.Safe.Util.(item_account off |> member "status" |> to_string);
     check bool "Off has explicit null revision" true
       (Yojson.Safe.Util.member "account_revision" (Yojson.Safe.from_string off.body) = `Null);
     check int "Item account rejects player" 403
@@ -728,13 +729,13 @@ let test_router_strict_auth_needs_a_read_token () =
     let disabled = get ~router ~token:reader items in
     let observed_revision = Candle_observe.account_revision
       (Candle_observe.read ~now:Time_compat.now ~base_path:config.Workspace.base_path) ~keeper in
+    let disabled_json = item_account disabled in
     check (option string) "stable Disabled revision agrees with the actual roster helper"
-      observed_revision (Some Yojson.Safe.Util.(Yojson.Safe.from_string disabled.body |> member "account_revision" |> to_string));
-    (match item_account disabled with
-     | Masc_tui_keeper_items.Disabled reason ->
-       check bool "disabled names a reason" true (String.length reason > 0)
-     | Masc_tui_keeper_items.Off | Masc_tui_keeper_items.Ready _ ->
-       fail "invalid Candle policy was not visible in Item account"))
+      observed_revision (Some Yojson.Safe.Util.(disabled_json |> member "account_revision" |> to_string));
+    check string "invalid Candle policy reports disabled" "disabled"
+      Yojson.Safe.Util.(disabled_json |> member "status" |> to_string);
+    check bool "disabled names a reason" true
+      (String.length Yojson.Safe.Util.(disabled_json |> member "reason" |> to_string) > 0))
 
 let file_state file =
   let stats = Unix.stat file in
@@ -950,13 +951,6 @@ beanie = %d
     check (option string) "ready HTTP account is bound to its authoritative Candle revision"
       (Candle_observe.account_revision (Candle_observe.read ~now:Time_compat.now ~base_path) ~keeper)
       (Some Yojson.Safe.Util.(credited_json |> member "account_revision" |> to_string));
-    let fields = match credited_json with `Assoc fields -> fields | _ -> fail "Item object" in
-    List.iter (fun json ->
-      match Masc_tui_keeper_items.decode ~keeper_name:keeper json with
-      | Error _ -> () | Ok _ -> fail "TUI accepted missing or malformed account revision")
-      [`Assoc (List.remove_assoc "account_revision" fields);
-       `Assoc (("account_revision", `Null) :: List.remove_assoc "account_revision" fields);
-       `Assoc (("account_revision", `String (String.make 64 'A')) :: List.remove_assoc "account_revision" fields)];
     check string "Item balance is an exact decimal string" "1000"
       Yojson.Safe.Util.(credited_json |> member "balance_milli" |> to_string);
     let original_revision = Yojson.Safe.Util.(credited_json |> member "account_revision" |> to_string) in
@@ -964,9 +958,6 @@ beanie = %d
     let changed_json = Yojson.Safe.from_string (get ~router ~token:reader (item_path keeper)).body in
     let changed_revision = Yojson.Safe.Util.(changed_json |> member "account_revision" |> to_string) in
     check bool "price B changes actual response revision" false (original_revision = changed_revision);
-    let changed_reading = require_ok Fun.id (Masc_tui_keeper_items.decode ~keeper_name:keeper changed_json) in
-    check (option string) "TUI decoded account retains its own current revision"
-      (Some changed_revision) (fst changed_reading);
     check (option string) "price B response uses the same current Candle view identity"
       (Candle_observe.account_revision (Candle_observe.read ~now:Time_compat.now ~base_path) ~keeper)
       (Some changed_revision);
@@ -983,58 +974,15 @@ beanie = %d
       Yojson.Safe.Util.(entry |> member "id" |> to_string) = id) catalog_json in
     check string "Item price is an exact decimal string" "200"
       Yojson.Safe.Util.(priced |> member "price_milli" |> to_string);
-    let with_balance value = match credited_json with
-      | `Assoc fields -> `Assoc (List.map (fun (key, field) ->
-          key, if String.equal key "balance_milli" then value else field) fields)
-      | _ -> fail "Item account response is not an object" in
-    (match Masc_tui_keeper_items.decode ~keeper_name:keeper
-        (with_balance (`String (string_of_int max_int))) with
-     | Ok (_, Masc_tui_keeper_items.Ready account) ->
-       check int "Item decoder keeps the full OCaml wallet range" max_int account.balance_milli
-     | Ok _ | Error _ -> fail "Item decoder lost a valid large wallet");
-    List.iter (fun amount ->
-      match Masc_tui_keeper_items.decode ~keeper_name:keeper (with_balance amount) with
-      | Error _ -> ()
-      | Ok _ -> fail "Item decoder accepted a noncanonical wallet")
-      [`Int 1000; `String "01000"; `String "999999999999999999999999999999"];
-    (match item_account credited with
-     | Masc_tui_keeper_items.Ready account ->
-       check int "Item view reads credited balance" 1000 account.balance_milli;
-       check int "Item view reads full catalog" 18 (List.length account.catalog);
-       check int "Item view starts without purchases" 0 (List.length account.owned_items);
-       let module Browser = Masc_tui_keeper_items in
-       let observed = Some (Browser.Ready account) in
-       let untouched = ledger_bytes () in
-       check int "starting outfit does not become owned inventory" 0
-         (List.length (Browser.items ~filter:Browser.Owned ~account:observed ~balance_milli:None));
-       check bool "funded unowned item is offered in can-buy view" true
-         (List.mem item (Browser.items ~filter:Browser.Can_buy ~account:observed ~balance_milli:None));
-       let heads = Browser.items ~filter:(Browser.In_slot Keeper_portrait_item.Head) ~account:observed ~balance_milli:None in
-       check bool "slot navigation excludes other slots" true
-         (List.for_all (fun item -> Keeper_portrait_item.slot item = Keeper_portrait_item.Head) heads);
-       check int "page navigation stays within filtered items" (List.length heads - 1)
-         (Browser.move ~items:heads ~cursor:0 ~delta:18);
-       (match require_ok Fun.id (Browser.request ~account:observed ~balance_milli:None item) with
-        | Browser.Buy_and_equip request ->
-          check bool "request keeps the selected item" true (request.item = item);
-          check int "request caps purchase at the observed price" 200 request.expected_price_milli
-        | Browser.Equip _ -> fail "unowned item was treated as owned");
-       let empty_wallet = Some (Browser.Ready {account with balance_milli=0}) in
-       check bool "unaffordable item is not offered" false
-         (List.mem item (Browser.items ~filter:Browser.Can_buy ~account:empty_wallet ~balance_milli:None));
-       (match Browser.request ~account:empty_wallet ~balance_milli:None item with
-        | Error _ -> () | Ok _ -> fail "prepared an unaffordable purchase");
-       check bool "a balance that fell below the price no longer offers the item" false
-         (List.mem item (Browser.items ~filter:Browser.Can_buy ~account:observed ~balance_milli:(Some 0)));
-       (match Browser.request ~account:observed ~balance_milli:(Some 0) item with
-        | Error _ -> () | Ok _ -> fail "prepared a purchase the balance now cannot cover");
-       check int "unread account does not fabricate inventory" 0
-         (List.length (Browser.items ~filter:Browser.Owned ~account:None ~balance_milli:None));
-       (match Browser.request ~account:None ~balance_milli:None item with
-        | Error _ -> () | Ok _ -> fail "unobserved account prepared a purchase");
-       check string "browsing and preparing a request do not transact" untouched (ledger_bytes ())
-     | Masc_tui_keeper_items.Off | Masc_tui_keeper_items.Disabled _ ->
-       fail "credited Item account unavailable");
+    (let account_json = item_account credited in
+     let open Yojson.Safe.Util in
+     check string "Item view status is ready" "ready" (account_json |> member "status" |> to_string);
+     check string "Item view reads credited balance" "1000"
+       (account_json |> member "balance_milli" |> to_string);
+     check int "Item view reads full catalog" 18
+       (account_json |> member "catalog" |> to_list |> List.length);
+     check int "Item view starts without purchases" 0
+       (account_json |> member "owned_items" |> to_list |> List.length));
     let snapshot_computations = ref 0 in
     let dashboard_portrait () =
       let snapshot = Dashboard_projection_cache.get_or_compute_snapshot_json
@@ -1051,21 +999,14 @@ beanie = %d
     ignore (require_ok Candle_shop.error_to_string
       (Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item));
     check string "purchase alone does not equip" before.body (get ~router (path ~size:"160" keeper)).body;
-    (match item_account (get ~router ~token:reader (item_path keeper)) with
-     | Masc_tui_keeper_items.Ready account ->
-       check int "Item view reads debit" 800 account.balance_milli;
-       check bool "Item view reads purchase" true (List.mem item account.owned_items);
-       let module Browser = Masc_tui_keeper_items in
-       let observed = Some (Browser.Ready account) in
-       check bool "purchased item appears in owned inventory" true
-         (List.mem item (Browser.items ~filter:Browser.Owned ~account:observed ~balance_milli:None));
-       check bool "purchased item is excluded from shopping" false
-         (List.mem item (Browser.items ~filter:Browser.Can_buy ~account:observed ~balance_milli:None));
-       (match require_ok Fun.id (Browser.request ~account:observed ~balance_milli:None item) with
-        | Browser.Equip owned -> check bool "owned request only equips" true (owned = item)
-        | Browser.Buy_and_equip _ -> fail "owned request would buy twice")
-     | Masc_tui_keeper_items.Off | Masc_tui_keeper_items.Disabled _ ->
-       fail "purchased Item account unavailable");
+    (let purchased_json = item_account (get ~router ~token:reader (item_path keeper)) in
+     let open Yojson.Safe.Util in
+     check string "purchased account status is ready" "ready"
+       (purchased_json |> member "status" |> to_string);
+     check string "Item view reads debit" "800"
+       (purchased_json |> member "balance_milli" |> to_string);
+     check bool "Item view reads purchase" true
+       (List.mem id (purchased_json |> member "owned_items" |> to_list |> List.map to_string)));
     check string "purchase alone does not equip" before96.body (get ~router (path ~size:"96" keeper)).body;
     let purchased = ledger_bytes () in
     refused "equipment_refused" (call ~slot:"face" id);
@@ -1105,12 +1046,15 @@ beanie = %d
         check int "operator roster succeeds" 200 response.status;
         Yojson.Safe.from_string response.body) in
     let roster = public_roster () in
-    let runtime_rows, errors, _, _, candle = require_ok Fun.id (Tui_decode.decode_keeper_runtime_list roster) in
-    check int "public roster has no metadata error rows" 0 (List.length errors);
-    (* The TUI computes every Candle amount from the roster's decay basis;
+    let runtime_rows = Yojson.Safe.Util.(roster |> member "keepers" |> to_list) in
+    check bool "public roster has no metadata error rows" true
+      (List.for_all (fun row -> Yojson.Safe.Util.member "error" row = `Null) runtime_rows);
+    (* Clients compute Candle amounts from the roster's decay basis;
        at the wallet's last event nothing has decayed yet. *)
-    (match require_ok Fun.id candle with
-     | Tui_decode.Candle_ready ({ Candle_decay_basis.decay = Decaying { keepers; _ }; _ } as basis) -> (
+    check string "roster candle status is ready" "ready"
+      Yojson.Safe.Util.(roster |> member "candle" |> member "status" |> to_string);
+    (match require_ok Fun.id (Candle_decay_basis.of_json (Yojson.Safe.Util.member "candle_decay" roster)) with
+     | ({ Candle_decay_basis.decay = Decaying { keepers; _ }; _ } as basis) -> (
        match List.assoc_opt keeper keepers with
        | Some held ->
          check int "the decay basis holds the wallet from the same ledger reading" 800
@@ -1122,14 +1066,13 @@ beanie = %d
             check string "equipping leaves circulating amount unchanged" "800" supply.circulating_milli
           | Error error -> fail (Candle_decay.error_to_string error))
        | None -> fail "the paid wallet has no decay basis")
-     | Tui_decode.Candle_ready { Candle_decay_basis.decay = No_decaying_balance; _ } ->
-       fail "the paid wallet has no decay basis"
-     | Tui_decode.Candle_off | Tui_decode.Candle_disabled _ -> fail "paid ledger observation unavailable");
+     | { Candle_decay_basis.decay = No_decaying_balance; _ } ->
+       fail "the paid wallet has no decay basis");
     let reading = match runtime_rows with
       | [row] ->
-        row.Tui_decode.kr_portrait
-      | _ -> fail "expected one healthy decoded Keeper runtime row" in
-    check bool "public roster and real TUI decoder preserve equipped input" true
+        require_ok Fun.id (Keeper_portrait_equipment.reading_of_json (Yojson.Safe.Util.member "portrait" row))
+      | _ -> fail "expected one healthy Keeper runtime row" in
+    check bool "public roster preserves equipped input" true
       (reading = Keeper_portrait_equipment.Ready expected);
     check bool "restart-style replay preserves current equipment" true
       (require_ok Fun.id (Candle_equipment.reader ~now:Time_compat.now ~base_path () ~keeper) = expected);
@@ -1152,16 +1095,22 @@ beanie = %d
     (match dashboard_portrait () with
      | Keeper_portrait_equipment.Unavailable _ -> ()
      | Keeper_portrait_equipment.Ready _ -> fail "dashboard hid unreadable authority with cached gear");
-    let damaged_rows, errors, _, _, damaged_candle = require_ok Fun.id
-      (Tui_decode.decode_keeper_runtime_list (public_roster ())) in
-    check int "currency failure does not invent a Keeper metadata error" 0 (List.length errors);
-    (match require_ok Fun.id damaged_candle with
-     | Tui_decode.Candle_disabled reason -> check bool "ledger error is observable" true (String.length reason > 0)
-     | Tui_decode.Candle_off | Tui_decode.Candle_ready _ -> fail "damaged ledger concealed its failure");
+    let damaged_roster = public_roster () in
+    let damaged_rows = Yojson.Safe.Util.(damaged_roster |> member "keepers" |> to_list) in
+    check bool "currency failure does not invent a Keeper metadata error" true
+      (List.for_all (fun row -> Yojson.Safe.Util.member "error" row = `Null) damaged_rows);
+    let damaged_candle = Yojson.Safe.Util.member "candle" damaged_roster in
+    check string "damaged ledger reports disabled candle" "disabled"
+      Yojson.Safe.Util.(damaged_candle |> member "status" |> to_string);
+    check bool "ledger error is observable" true
+      (String.length Yojson.Safe.Util.(damaged_candle |> member "reason" |> to_string) > 0);
     (match runtime_rows, damaged_rows with
      | [before], [row] ->
+       let open Yojson.Safe.Util in
        check bool "Keeper lifecycle reading survives currency failure" true
-         (before.kr_phase = row.kr_phase && before.kr_health = row.kr_health && before.kr_keepalive_running = row.kr_keepalive_running)
+         (member "phase" before = member "phase" row
+          && member "health" before = member "health" row
+          && member "keepalive_running" before = member "keepalive_running" row)
      | _ -> fail "currency failure hid the healthy Keeper");
     check string "portrait read does not truncate damaged ledger" corrupt (ledger_bytes ());
     (match Sys.getenv_opt "RUNNER_TEMP" with
@@ -1175,13 +1124,8 @@ beanie = %d
        Fs_compat.mkdir_p evidence;
        Fs_compat.save_file (Filename.concat evidence "before.png") before.body;
        Fs_compat.save_file (Filename.concat evidence "equipped.png") after.body;
-       (* The remote TUI consumer replays these receipts through the Info
-          tab, whose icon band draws Masc_tui_keeper_portrait.shown:
-          Draw.render_icon's face framing at View.min_pixel_rows cell rows
-          (4 * 20 px at the consumer's 10x20 cell reply), never the full
-          scene this endpoint serves. Export the same renderer at the same
-          framing and edge so the consumer compares like with like instead
-          of a full portrait against a face-framed icon. *)
+       (* Export the face-framed icon renderer alongside the full portrait so
+          evidence consumers can compare like with like. *)
        let icon equipment =
          let image = Keeper_portrait_draw.render_icon
              (Keeper_portrait_look.body_of_name keeper) equipment

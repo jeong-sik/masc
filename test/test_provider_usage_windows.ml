@@ -140,14 +140,13 @@ let test_rate_limit_lifecycle_reaches_the_tui () =
     let row = runtime_row json runtime.id in
     check string "default and catalog share the same observation time"
       (Yojson.Safe.to_string default) (Yojson.Safe.to_string row);
-    match Tui_decode.decode_runtime_resolved json with
-    | Error detail -> fail detail
-    | Ok (rows, _) ->
-      List.find (fun (row : Tui_decode.runtime_option) -> String.equal row.ro_id runtime.id) rows
+    row
   in
   let assert_state label limited resets row =
-    check bool (label ^ " rate limited") limited row.Tui_decode.ro_rate_limited;
-    check (option (float 0.)) (label ^ " provider deadline") resets row.ro_rate_limit_resets_at
+    let open Yojson.Safe.Util in
+    check bool (label ^ " rate limited") limited (row |> member "rate_limited" |> to_bool);
+    check (option (float 0.)) (label ^ " provider deadline") resets
+      (row |> member "rate_limit_resets_at" |> to_number_option)
   in
   Runtime_candidate_backpressure.note_candidate_success ~candidate;
   assert_state "clear" false None (project ~now:0.);
@@ -190,28 +189,25 @@ let test_failed_attempt_reaches_the_tui () =
         ~generated_at_iso:"2026-10-07T00:00:00Z"
         ~config:(Workspace.default_config (Filename.get_temp_dir_name ()))
     in
-    match Tui_decode.decode_runtime_resolved json with
-    | Error detail -> fail detail
-    | Ok (rows, _) ->
-      (List.find (fun (row : Tui_decode.runtime_option) -> String.equal row.ro_id runtime.id) rows)
-        .Tui_decode.ro_failed_attempt
+    let row = runtime_row json runtime.id in
+    Yojson.Safe.Util.member "failed_attempt" row
   in
   Runtime_candidate_backpressure.note_candidate_success ~candidate;
-  check bool "clear before any failure" true (Option.is_none (project ()));
+  check bool "clear before any failure" true (project () = `Null);
   Runtime_candidate_backpressure.note_failed_attempt ~candidate
     ~failure:Runtime_candidate_backpressure.Provider_timeout
     ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"alpha");
-  (match project () with
-   | Some
-       { Tui_decode.rfa_failure =
-           Tui_decode.Attempt_failure Runtime_candidate_backpressure.Provider_timeout
-       ; rfa_recorded_by = "alpha"
-       ; _
-       } -> ()
-   | Some _ -> fail "the failed attempt lost its kind or its recorder"
-   | None -> fail "the failed attempt did not reach the resolved document");
+  (let open Yojson.Safe.Util in
+   let failed = project () in
+   check bool "the failed attempt reached the resolved document" true (failed <> `Null);
+   check string "failed attempt failure kind"
+     (Runtime_candidate_backpressure.attempt_failure_to_wire_name
+        Runtime_candidate_backpressure.Provider_timeout)
+     (failed |> member "failure" |> to_string);
+   check string "failed attempt recorder" "alpha"
+     (failed |> member "recorded_by" |> to_string));
   Runtime_candidate_backpressure.note_candidate_success ~candidate;
-  check bool "an answer clears it" true (Option.is_none (project ()))
+  check bool "an answer clears it" true (project () = `Null)
 ;;
 
 let test_reports_reach_the_resolved_document () =
@@ -282,22 +278,6 @@ let test_reports_reach_the_resolved_document () =
        check (float 0.0) "observed_at of the report that named the window" 1790180100.0
          Yojson.Safe.Util.(window |> member "observed_at" |> to_number))
     Yojson.Safe.Util.(codex_row |> member "windows" |> to_list);
-  (* The TUI reads this document with its own strict decoder; a word one side
-     writes and the other does not know fails the whole Overview section. *)
-  (match Masc.Tui_decode_usage.decode_provider_usage_windows after with
-   | Ok decoded ->
-     let claude =
-       List.find
-         (fun (account : Masc.Tui_decode_usage.provider_usage_account) ->
-            String.equal account.pua_scope claude_label)
-         decoded.Masc.Tui_decode_usage.puws_accounts
-     in
-     check (list string) "the TUI reads the display name the server wrote"
-       [ "Claude usage fixture" ]
-       (List.map
-          (fun (provider : Masc.Tui_decode_usage.provider_usage_provider) -> provider.pup_display_name)
-          claude.pua_providers)
-   | Error error -> failf "the TUI decoder refuses the server's document: %s" error);
   (* An observation, not a gate: 100 % used leaves the runtime's quota state
      untouched. *)
   check bool "codex runtime is not held back by a usage report" true
@@ -810,14 +790,20 @@ let test_openrouter_amounts_reach_operator_api () =
     let report = decode_ok (Usage.decode_openrouter_key (Yojson.Safe.from_string
         {|{"data":{"limit":20,"limit_remaining":15}}|})) in
     Usage.record ~scope ~observed_at:1790600000.0 report;
-    let reading = match Tui_decode_usage.decode_provider_usage_windows (resolved ()) with
-      | Ok reading -> reading | Error detail -> fail detail in
-    let account = List.find (fun (account : Tui_decode_usage.provider_usage_account) ->
-      account.pua_scope_id = Server_provider_usage_history.scope_id scope) reading.puws_accounts in
-    match account.pua_state with
-    | Tui_decode_usage.Account_reported ({ puw_utilization = Utilization_usd { used; limit }; _ }, []) ->
-        check (float 0.0001) "USD use survives provider to wire to TUI" 5.0 used;
-        check (option (float 0.0001)) "USD cap survives provider to wire to TUI" (Some 20.0) limit
+    let open Yojson.Safe.Util in
+    let accounts = resolved () |> member "provider_usage_windows" |> to_list in
+    let account = List.find (fun row ->
+      String.equal (row |> member "scope_id" |> to_string)
+        (Server_provider_usage_history.scope_id scope)) accounts in
+    check string "account state is reported" "reported" (account |> member "state" |> to_string);
+    match account |> member "windows" |> to_list with
+    | [ window ] ->
+        let util = window |> member "utilization" in
+        check string "USD utilization unit" "usd" (util |> member "unit" |> to_string);
+        check (float 0.0001) "USD use survives provider to wire" 5.0
+          (util |> member "value" |> to_number);
+        check (option (float 0.0001)) "USD cap survives provider to wire" (Some 20.0)
+          (util |> member "limit" |> to_number_option)
     | _ -> fail "operator projection lost USD credit values")
 ;;
 

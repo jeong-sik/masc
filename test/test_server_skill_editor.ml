@@ -98,13 +98,13 @@ let test_load_preview_and_publish () =
    | Ok loaded ->
      check string "exact source" original loaded.source_text;
      check string "write access" "read_write" (Editor.access_to_string loaded.access);
-     (match Masc_tui_editor_wire.decode_skill_editor_loaded (Editor.loaded_to_yojson loaded) with
-      | Ok client ->
-        check bool "client keeps writable source access" true
-          (client.sel_access = Skill_source_config.Read_write);
-        check bool "client keeps exact reference" true
-          (Skill_reference.equal reference client.sel_reference)
-      | Error detail -> fail detail));
+     let loaded_json = Editor.loaded_to_yojson loaded in
+     check string "wire keeps writable source access" "read_write"
+       Yojson.Safe.Util.(loaded_json |> member "access" |> to_string);
+     (match Skill_reference.of_yojson (Yojson.Safe.Util.member "reference" loaded_json) with
+      | Ok wire_ref ->
+        check bool "wire keeps exact reference" true (Skill_reference.equal reference wire_ref)
+      | Error _ -> fail "wire reference did not decode"));
   let edited = skill_text "Edited description." "# Edited" in
   (match Editor.preview ~descriptors:(Masc.Keeper_tool_descriptor.all_descriptors ()) ~base_path reference ~source_text:edited with
    | Error error -> fail (Editor.error_to_string error)
@@ -117,10 +117,15 @@ let test_load_preview_and_publish () =
    | Ok (Editor.Saved_and_published { preview; _ } as outcome) ->
      check bool "new exact reference" false
        (Skill_reference.equal reference preview.profile.reference);
-     (match Masc_tui_editor_wire.decode_skill_editor_save_receipt (Editor.save_outcome_to_yojson outcome) with
-      | Ok receipt -> check bool "TUI reads the producer's nested profile reference" true
-          (Skill_reference.equal preview.profile.reference receipt.ses_reference)
-      | Error detail -> fail detail)
+     let save_json = Editor.save_outcome_to_yojson outcome in
+     check string "wire status is saved_and_published" "saved_and_published"
+       Yojson.Safe.Util.(save_json |> member "status" |> to_string);
+     (match Skill_reference.of_yojson
+              Yojson.Safe.Util.(save_json |> member "preview" |> member "profile" |> member "reference") with
+      | Ok wire_ref ->
+        check bool "wire carries nested profile reference" true
+          (Skill_reference.equal preview.profile.reference wire_ref)
+      | Error _ -> fail "save receipt missing valid nested profile reference")
    | Ok (Unchanged _ | Saved_but_unpublished _) ->
      fail "edited Skill was not saved and published");
   let persisted =
@@ -291,36 +296,16 @@ let test_new_preview_uses_public_plan_without_writing () =
      check bool "create revalidates and publishes the exact previewed revision" true
        (Skill_reference.equal published.profile.reference preview.profile.reference);
      let wire = Editor.create_outcome_to_yojson outcome in
-     (match Masc_tui_editor_wire.decode_skill_editor_create_receipt
-        ~source_id:"workspace" ~package_id:"authored" ~source_text:valid wire with
-      | Ok receipt -> check bool "TUI create receipt binds actual persisted revision" true
-          (Skill_reference.equal receipt.sec_reference published.profile.reference)
-      | Error detail -> fail detail);
-     check bool "a receipt for another selected source cannot be reused" true
-       (Result.is_error (Masc_tui_editor_wire.decode_skill_editor_create_receipt
-         ~source_id:"personal" ~package_id:"authored" ~source_text:valid wire));
-     check bool "a receipt for different document bytes cannot be reused" true
-       (Result.is_error (Masc_tui_editor_wire.decode_skill_editor_create_receipt
-         ~source_id:"workspace" ~package_id:"authored" ~source_text:(valid ^ "different") wire))
+     check string "wire status is created_and_published" "created_and_published"
+       Yojson.Safe.Util.(wire |> member "status" |> to_string);
+     (match Skill_reference.of_yojson
+              Yojson.Safe.Util.(wire |> member "preview" |> member "profile" |> member "reference") with
+      | Ok wire_ref ->
+        check bool "wire create receipt binds actual persisted revision" true
+          (Skill_reference.equal wire_ref published.profile.reference)
+      | Error _ -> fail "create receipt missing valid nested profile reference")
    | Ok _ -> fail "authored composition was not published"
    | Error error -> fail (Editor.error_to_string error))
-;;
-
-let test_tui_source_selection_is_the_request_target () =
-  let sources = ["workspace"; "personal"] in
-  let cursor = match Masc_tui_pick_list.apply ~page:2 ~label:Fun.id sources
-      Masc_tui_pick_list.closed (Masc_tui_pick_list.Move Masc_tui_pick_list.Next) with
-    | Masc_tui_pick_list.Stay cursor -> cursor
-    | _ -> fail "source selection did not move" in
-  let selected = match Masc_tui_pick_list.apply ~page:2 ~label:Fun.id sources cursor Masc_tui_pick_list.Choose with
-    | Masc_tui_pick_list.Chosen source -> source
-    | _ -> fail "source selection did not choose" in
-  let body = Masc_tui_editor_wire.skill_editor_create_body ~composition:true
-    ~source_id:selected ~package_id:"authored" ~source_text:"exact draft" |> Yojson.Safe.from_string in
-  let open Yojson.Safe.Util in
-  check string "the chosen second source is the request authority" "personal" (body |> member "source_id" |> to_string);
-  check string "the explicit creation kind reaches canonical validation" "composition" (body |> member "kind" |> to_string);
-  check string "the draft is not replaced with a starter" "exact draft" (body |> member "source_text" |> to_string)
 ;;
 
 let test_authoring_tools_keep_canonical_names_and_contracts () =
@@ -361,10 +346,8 @@ let test_read_only_source_rejects_save () =
   (match Editor.load ~base_path reference with
    | Error error -> fail (Editor.error_to_string error)
    | Ok loaded ->
-     (match Masc_tui_editor_wire.decode_skill_editor_loaded (Editor.loaded_to_yojson loaded) with
-      | Ok client -> check bool "client keeps read-only source access" true
-          (client.sel_access = Skill_source_config.Read_only)
-      | Error detail -> fail detail));
+     check string "wire keeps read-only source access" "read_only"
+       Yojson.Safe.Util.(Editor.loaded_to_yojson loaded |> member "access" |> to_string));
   let candidate = skill_text "Edited." "# Edited" in
   match Editor.save ~descriptors:(Masc.Keeper_tool_descriptor.all_descriptors ()) ~base_path ~reference ~source_text:candidate ~refresh with
   | Error Editor.Source_read_only -> ()
@@ -426,15 +409,10 @@ let test_saved_but_unpublished_is_explicit () =
    | Ok (Editor.Saved_but_unpublished { reason; _ } as outcome) ->
      check string "failure is preserved" "injected publication failure" reason;
      let wire = Editor.save_outcome_to_yojson outcome in
-     (match Masc_tui_editor_wire.decode_skill_editor_save_receipt wire with
-      | Ok { ses_status = Masc_tui_editor_wire.Skill_saved_but_unpublished actual; _ } ->
-        check string "TUI retains the actual publication failure" reason actual
-      | Ok _ -> fail "TUI save decoder changed the outcome"
-      | Error detail -> fail detail);
-     let without_reason = match wire with
-       | `Assoc fields -> `Assoc (List.remove_assoc "reason" fields) | _ -> assert false in
-     check bool "missing failure detail is not replaced with an invented reason" true
-       (Result.is_error (Masc_tui_editor_wire.decode_skill_editor_save_receipt without_reason))
+     check string "wire status is saved_but_unpublished" "saved_but_unpublished"
+       Yojson.Safe.Util.(wire |> member "status" |> to_string);
+     check string "wire retains the actual publication failure" reason
+       Yojson.Safe.Util.(wire |> member "reason" |> to_string)
    | Error error -> fail (Editor.error_to_string error)
    | Ok (Unchanged _ | Saved_and_published _) ->
      fail "publication failure was reported as published");
@@ -632,13 +610,7 @@ let test_create_behind_an_earlier_source_names_the_winner () =
        Yojson.Safe.Util.(member "status" json |> to_string);
      check bool "receipt names the winner" true
        (Yojson.Safe.Util.member "winner" json
-        = Skill_catalog_snapshot.identity_to_yojson winner);
-     (match Masc_tui_editor_wire.decode_skill_editor_create_receipt ~source_id:"workspace"
-        ~package_id:"shared" ~source_text:(named_skill_text "shared" "A later procedure." "# Later") json with
-      | Ok { sec_status = Skill_created_but_shadowed actual; _ } ->
-        check bool "TUI keeps the producer's earlier-source identity" true (Skill_reference.equal_identity actual winner)
-      | Ok _ -> fail "TUI create decoder changed the shadowed outcome"
-      | Error detail -> fail detail)
+        = Skill_catalog_snapshot.identity_to_yojson winner)
    | Ok (Created_and_published _) ->
      fail "a package behind an earlier source was reported as the one Keepers see"
    | Ok (Created_but_unpublished { reason; _ }) -> fail ("not published: " ^ reason)
@@ -686,54 +658,6 @@ let read_file path =
   Fun.protect
     ~finally:(fun () -> close_in_noerr channel)
     (fun () -> really_input_string channel (in_channel_length channel))
-;;
-
-(* The TUI's delete request carries the exact reference and its own
-   confirmation, and the receipt readback refuses a response that names any
-   other reference: a mismatch is a protocol break, not a deletion. *)
-let test_tui_delete_wire_pins_reference_and_reads_receipt () =
-  with_workspace @@ fun base_path ->
-  let _, _, reference, refresh = setup base_path ~access:"read-write" in
-  let open Masc_tui_editor_wire in
-  (match Yojson.Safe.from_string (skill_editor_delete_body reference) with
-   | `Assoc fields ->
-     (match List.assoc_opt "reference" fields, List.assoc_opt "confirmed" fields with
-      | Some reference_json, Some (`Bool true) ->
-        (match Skill_reference.of_yojson reference_json with
-         | Ok decoded ->
-           check bool "delete body pins the exact reference" true
-             (Skill_reference.equal reference decoded)
-         | Error _ -> fail "delete body reference is invalid")
-      | _ -> fail "delete body is not the exact reference with confirmed=true")
-   | _ -> fail "delete body is not an object");
-  let outcome =
-    match Editor.delete ~base_path ~reference ~confirmed:true ~refresh with
-    | Ok outcome -> outcome
-    | Error error -> fail (Editor.error_to_string error)
-  in
-  (match decode_skill_editor_delete_receipt ~reference (Editor.delete_outcome_to_yojson outcome) with
-   | Ok receipt ->
-     check bool "TUI reads the deleted reference" true
-       (Skill_reference.equal reference receipt.sed_reference);
-     check bool "TUI reads a non-empty recovery id" true
-       (String.length receipt.sed_recovery_id > 0);
-     (match receipt.sed_status with
-      | Skill_deleted_and_published -> ()
-      | Skill_deleted_but_unpublished _ -> fail "delete was published but read as unpublished")
-   | Error detail -> fail detail);
-  let other_revision =
-    match Skill_reference.content_revision_of_string (String.make 64 '0') with
-    | Ok revision ->
-      Skill_reference.make ~identity:reference.Skill_reference.identity ~content_revision:revision
-    | Error (Skill_reference.Invalid_revision_length { actual }) ->
-      fail (Printf.sprintf "zero revision rejected by length %d" actual)
-    | Error (Skill_reference.Invalid_revision_character { index; found }) ->
-      fail (Printf.sprintf "zero revision rejected at %d by %C" index found)
-  in
-  check bool "receipt naming another reference is refused" true
-    (Result.is_error
-       (decode_skill_editor_delete_receipt ~reference:other_revision
-          (Editor.delete_outcome_to_yojson outcome)))
 ;;
 
 let test_delete_exact_reference_and_publish () =
@@ -1415,34 +1339,6 @@ let test_server_skill_snapshot_runtime_refresh () =
        fail "unexpected workspace retired")
 ;;
 
-let test_client_read_contract () =
-  with_workspace @@ fun base_path ->
-  let _, original, reference, _ = setup base_path ~access:"read-write" in
-  let fields =
-    match Editor.load ~base_path reference with
-    | Error error -> fail (Editor.error_to_string error)
-    | Ok loaded ->
-      (match Editor.loaded_to_yojson loaded with
-       | `Assoc fields -> fields
-       | _ -> fail "server read response must be an object")
-  in
-  let without_snapshot = List.remove_assoc "snapshot_revision" fields in
-  (match Masc_tui_editor_wire.decode_skill_editor_loaded (`Assoc without_snapshot) with
-   | Ok client ->
-     check string "read text does not depend on unused snapshot metadata" original client.sel_source_text;
-     check bool "read reference remains exact without metadata" true
-       (Skill_reference.equal reference client.sel_reference)
-   | Error detail -> fail detail);
-  let rejects label field value =
-    let json = `Assoc ((field, value) :: List.remove_assoc field fields) in
-    check bool label true
-      (Result.is_error (Masc_tui_editor_wire.decode_skill_editor_loaded json))
-  in
-  rejects "unknown permission cannot become read-only" "access" (`String "future_access");
-  rejects "non-string permission is refused" "access" (`Bool true);
-  rejects "invalid exact reference is refused" "reference" `Null
-;;
-
 let () =
   Eio_main.run @@ fun _env ->
   run
@@ -1458,8 +1354,6 @@ let () =
             test_new_preview_uses_public_plan_without_writing
         ; test_case "authoring tool discovery preserves canonical contracts" `Quick
             test_authoring_tools_keep_canonical_names_and_contracts
-        ; test_case "TUI source choice becomes the create request target" `Quick
-            test_tui_source_selection_is_the_request_target
         ; test_case "external edit conflicts" `Quick test_external_edit_causes_revision_conflict
         ; test_case "read-only source rejects save" `Quick test_read_only_source_rejects_save
         ; test_case "unreadable body is never written" `Quick
@@ -1474,8 +1368,6 @@ let () =
             test_missing_writable_source_is_discoverable_without_initializing_it
         ; test_case "create behind an earlier source names the winner" `Quick
             test_create_behind_an_earlier_source_names_the_winner
-        ; test_case "TUI delete wire pins reference and reads receipt" `Quick
-            test_tui_delete_wire_pins_reference_and_reads_receipt
         ; test_case "delete exact reference and publish" `Quick
             test_delete_exact_reference_and_publish
         ; test_case "delete removes the empty package and the id is reusable" `Quick
@@ -1517,9 +1409,6 @@ let () =
             test_deleted_but_unpublished_is_explicit
         ; test_case "server skill snapshot runtime refresh from observation" `Quick
             test_server_skill_snapshot_runtime_refresh
-        ; test_case "client read contract rejects unknown authority" `Quick
-            test_client_read_contract
-        
-] )
+        ] )
     ]
 ;;

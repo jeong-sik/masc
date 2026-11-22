@@ -1,6 +1,0 @@
-(library
- (name masc_tui_waiting_inventory)
- (wrapped true)
- (libraries
-  masc_tui_keeper_chat_projection
-  eio))

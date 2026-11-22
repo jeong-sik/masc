@@ -202,10 +202,8 @@ let test_precedence_and_exact_identity () =
   | _ -> fail "expected two configured sources"
 ;;
 
-(* The TUI reads this snapshot through Masc.Tui_decode_tools.decode_skills_catalog. The
-   server's own serializer goes through it here, so a renamed or reshaped
-   shadow fails this test instead of turning the TUI's Skill pane into a read
-   failure. *)
+(* Verify the snapshot's public JSON serialization preserves every shadow,
+   winner first. *)
 let test_the_tui_reads_the_shadows_this_snapshot_writes () =
   let config = parse_config (config_text two_sources) in
   let first = candidate ~directory:"review" (document ~name:"review" ~description:"First" ~body:"first body") in
@@ -215,33 +213,31 @@ let test_the_tui_reads_the_shadows_this_snapshot_writes () =
       ~config
       (scans ~base_path:"/workspace" config [ [ first ]; [ second ] ])
   in
-  let response =
-    `Assoc
-      [ "schema", `String "masc.skill-snapshot/v1"
-      ; "state", `String "ready"
-      ; "snapshot", Snapshot.to_public_yojson snapshot
-      ; "surfaces", `List []
-      ]
-  in
+  let pub = Snapshot.to_public_yojson snapshot in
   let sides winner shadowed =
     ( Reference.identity_source_id_to_string winner
       ^ "/" ^ Reference.identity_package_id_to_string winner
     , Reference.identity_source_id_to_string shadowed
       ^ "/" ^ Reference.identity_package_id_to_string shadowed )
   in
-  match Masc.Tui_decode_tools.decode_skills_catalog response with
-  | Error error -> fail ("the TUI refused the snapshot's own JSON: " ^ error)
-  | Ok catalog ->
-    check (list (pair string string))
-      "the TUI keeps every shadow the snapshot records, winner first"
-      (List.map
-         (fun (shadow : Snapshot.shadow) -> sides shadow.winner shadow.shadowed)
-         (Snapshot.shadows snapshot))
-      (List.map
-         (fun (shadow : Masc.Tui_decode_tools.skill_catalog_shadow) ->
-            sides shadow.scsh_winner shadow.scsh_shadowed)
-         catalog.sc_shadows);
-    check int "the fixture carries one shadow" 1 (List.length catalog.sc_shadows)
+  let open Yojson.Safe.Util in
+  let wire_shadows =
+    pub |> member "shadows" |> to_list
+    |> List.map (fun row ->
+      let id_str obj =
+        (obj |> member "source_id" |> to_string)
+        ^ "/"
+        ^ (obj |> member "package_id" |> to_string)
+      in
+      (id_str (member "winner" row), id_str (member "shadowed" row)))
+  in
+  check (list (pair string string))
+    "the public snapshot keeps every shadow, winner first"
+    (List.map
+       (fun (shadow : Snapshot.shadow) -> sides shadow.winner shadow.shadowed)
+       (Snapshot.shadows snapshot))
+    wire_shadows;
+  check int "the fixture carries one shadow" 1 (List.length wire_shadows)
 
 let test_reversing_sources_reverses_winner () =
   let reversed_sources =

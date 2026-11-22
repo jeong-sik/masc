@@ -15,7 +15,7 @@
 #   [masc-tui] exit: normal (signal SIGTERM)
 #
 # Any `exit: normal (...)` row proves the end was asked for -- the
-# vocabulary in bin/masc_tui_exit_reason.ml is a closed set (quit key,
+# vocabulary in lib/masc_tui/core/exit_reason.ml is a closed set (quit key,
 # interrupt, signal NAME), so the prefix alone is the proof; the row is
 # echoed so the reader sees which one it was.
 #

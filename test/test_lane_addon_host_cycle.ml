@@ -775,23 +775,24 @@ let test_category_edit_preserves_original_export_and_worker () =
         (Lane_addon_tool_export.equal_owner original.owner updated.owner);
       check string "worker history keeps its original immutable package category" "analysis"
         (worker () |> member "package" |> text "ui_category");
-      let inventory = Server_lane_inventory.snapshot ~config |> Server_lane_inventory.to_json
-        |> Tui_decode_lane_inventory.decode |> unwrap in
-      let row = List.find (fun (row : Tui_decode_lane_inventory.row) ->
-        row.selection=Tui_decode_lane_inventory.Declaration source) inventory.rows in
-      (match row.state with
-       | Tui_decode_lane_inventory.Package_state {
-           declaration=Some (Tui_decode_lane_inventory.Valid declared);instances=[instance]} ->
-           check bool "common inventory decodes the current declaration category" true
-             (declared.ui_category=Some Lane_addon_category.Memory_and_judgment);
-           check bool "common inventory independently decodes the original worker category" true
-             (instance.ui_category=Some Lane_addon_category.Analysis)
-       | Tui_decode_lane_inventory.Package_state {
-           declaration=Some (Tui_decode_lane_inventory.Valid _);instances=([]|_::_::_)}
-       | Tui_decode_lane_inventory.Package_state {
-           declaration=(None|Some (Tui_decode_lane_inventory.Invalid _|Absent|Unobserved));instances=_}
-       | Exact_state _ | Browser_clients _ | Machine_state _ ->
-           fail "common inventory lost the exact installation and original worker");
+      let inventory = Server_lane_inventory.snapshot ~config |> Server_lane_inventory.to_json in
+      let row = List.find (fun row ->
+        let sel = member "selection" row in
+        member "kind" sel = `String "declaration"
+        && member "source_path" sel = `String source)
+        (inventory |> member "rows" |> Yojson.Safe.Util.to_list) in
+      let state = member "state" row in
+      let decl = member "declaration" state in
+      check string "common inventory carries valid declaration" "valid" (text "kind" decl);
+      check bool "common inventory exposes the current declaration category" true
+        (Lane_addon_category.of_json (member "ui_category" (member "package" decl))
+         = Ok Lane_addon_category.Memory_and_judgment);
+      (match member "instances" state |> Yojson.Safe.Util.to_list with
+       | [instance] ->
+         check bool "common inventory independently exposes the original worker category" true
+           (Lane_addon_category.of_json (member "ui_category" (member "package" instance))
+            = Ok Lane_addon_category.Analysis)
+       | _ -> fail "common inventory lost the original worker instance");
       admit (); call ();
       check int "both original handler calls reached the original worker" 2 !calls;
       (match Runtime.with_tool_request_destination ~config ~access ~reserved:["queue_question"]

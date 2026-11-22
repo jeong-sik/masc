@@ -36,8 +36,6 @@ module Registry = Runtime_exact_output_registry
 module Fixture = Exact_output_fixture
 module Types = Keeper_memory_os_types
 module Current = Keeper_memory_os_current
-module Shown = Tui_decode_memory_writer
-module Row = Tui_decode_memory_health
 module Health = Server_dashboard_http_keeper_memory_health
 
 let keeper = "cycle-keeper"
@@ -172,13 +170,6 @@ let turn_log_rows (config : Workspace.config) =
    writes it. *)
 let writer_json config =
   Yojson.Safe.to_string (Keeper_memory_writer_health.keeper_rows ~config keeper)
-;;
-
-(* The same member, read by the decoder the TUI reads the row with. *)
-let shown config =
-  match Shown.decode (Keeper_memory_writer_health.keeper_rows ~config keeper) with
-  | Ok shown -> shown
-  | Error reason -> failf "the TUI does not read the writer's row: %s" reason
 ;;
 
 (* Looks until [look] answers. Past [wait_s] the case fails with what
@@ -360,23 +351,19 @@ let test_a_closed_turn_is_asked_committed_and_shown () =
     | Some (Log_line.Committed (_ : Log_line.commit)) | None ->
       failf "the writer's store is not open at its start; %s" (describe ())
   in
-  (match shown config with
-   | Shown.Writer
-       { Shown.level = Librarian_level.Ok
-       ; alarms = []
-       ; row =
-           Shown.Open
-             { activity = Shown.Idle
-             ; unread = false
-             ; kept = { Shown.lane = true; last_read = None; _ }
-             ; last_line = Shown.Line_started
-             ; facts = 0
-             ; _
-             }
-       } -> ()
-   | Shown.Writer (_ : Shown.shown) | Shown.None_in_process | Shown.No_writer ->
-     failf "after the pulse the writer is not open, idle and holding the lane value; %s"
-       (describe ()));
+  (let open Yojson.Safe.Util in
+   let w = Keeper_memory_writer_health.keeper_rows ~config keeper in
+   check string "writer kind" "writer" (w |> member "kind" |> to_string);
+   let r = w |> member "row" in
+   check string "writer level" "ok" (r |> member "level" |> to_string);
+   check (list string) "writer alarms" []
+     (r |> member "alarms" |> to_list |> List.map to_string);
+   check string "writer state" "idle" (r |> member "state" |> to_string);
+   check bool "writer unread" false (r |> member "unread" |> to_bool);
+   check bool "writer holds lane" true (r |> member "lane" |> to_bool);
+   check bool "writer last_read is null" true (r |> member "last_read" = `Null);
+   check string "writer last_line" "started" (r |> member "last_line" |> to_string);
+   check int "writer facts" 0 (r |> member "memory" |> member "facts" |> to_int));
   check int "no slot was asked before a turn closed" 0
     (List.length (Fixture.request_bodies server));
   (* One turn of the Keeper. Its body appends one chat row, so the row is the
@@ -431,36 +418,28 @@ let test_a_closed_turn_is_asked_committed_and_shown () =
    | Ok None -> fail "the Keeper has no Memory snapshot"
    | Error detail -> failf "the Memory snapshot was not read: %s" detail);
   (* The row the operator reads. *)
-  let row =
-    match
-      Row.decode_memory_health_row ~keeper
-        (Health.keeper_memory_health_row_http_json ~base_path:config.base_path ~keeper)
-    with
-    | Ok { Row.mhr_keeper = Row.Row_present row; _ } -> row
-    | Ok { Row.mhr_keeper = Row.Row_refused refusal; _ } ->
-      failf "the TUI refuses the Keeper's row: %s" refusal.Row.mkr_reason
-    | Ok { Row.mhr_keeper = Row.Row_absent; _ } -> fail "the health answer has no row for the Keeper"
-    | Error detail -> failf "the TUI does not read the health answer: %s" detail
+  let open Yojson.Safe.Util in
+  let http_json =
+    Health.keeper_memory_health_row_http_json ~base_path:config.base_path ~keeper
   in
-  check int "the row counts the fact" 1 row.Row.mkh_facts;
-  check int "at the commit's revision" commit.revision row.Row.mkh_revision;
-  match row.Row.mkh_writer with
-  | Shown.Writer
-      { Shown.level = Librarian_level.Ok
-      ; alarms = []
-      ; row =
-          Shown.Open
-            { activity = Shown.Idle
-            ; unread = false
-            ; kept = { Shown.lane = true; last_read = Some Shown.Read_committed; _ }
-            ; last_line = Shown.Line_commit { seq }
-            ; facts = 1
-            ; _
-            }
-      }
-    when Int.equal seq commit.seq -> ()
-  | Shown.Writer (_ : Shown.shown) | Shown.None_in_process | Shown.No_writer ->
-    failf "the row's writer does not show the committed read; %s" (describe ())
+  let row = http_json |> member "keeper" in
+  check bool "the health answer carries a row for the Keeper" true (row <> `Null);
+  check int "the row counts the fact" 1 (row |> member "facts" |> to_int);
+  check int "at the commit's revision" commit.revision (row |> member "revision" |> to_int);
+  let w = row |> member "writer" in
+  check string "writer kind" "writer" (w |> member "kind" |> to_string);
+  let wr = w |> member "row" in
+  check string "writer level" "ok" (wr |> member "level" |> to_string);
+  check (list string) "writer alarms" []
+    (wr |> member "alarms" |> to_list |> List.map to_string);
+  check string "writer state" "idle" (wr |> member "state" |> to_string);
+  check bool "writer unread" false (wr |> member "unread" |> to_bool);
+  check bool "writer lane" true (wr |> member "lane" |> to_bool);
+  check string "writer last_read ended" "committed"
+    (wr |> member "last_read" |> member "ended" |> to_string);
+  check string "writer last_line" "commit" (wr |> member "last_line" |> to_string);
+  check int "writer commit seq" commit.seq (wr |> member "seq" |> to_int);
+  check int "writer facts" 1 (wr |> member "memory" |> member "facts" |> to_int)
 ;;
 
 let () =

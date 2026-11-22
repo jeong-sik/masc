@@ -335,10 +335,20 @@ let test_missing_window_keeps_tokens_without_ratio () =
     check bool "max is null without a window" true (field fields "context_max" = `Null))
 ;;
 
-let decodes fields =
-  Masc.Tui_decode.decode_context_observation
-    ~expected_trace_id:sample_trace
-    (Yojson.Safe.from_string (Yojson.Safe.to_string (`Assoc fields)))
+let roundtrip fields =
+  Yojson.Safe.from_string (Yojson.Safe.to_string (`Assoc fields))
+;;
+
+let check_unavailable_diagnostics fields ~expected_reason ~raw_input_tokens ~context_window =
+  let json = roundtrip fields in
+  let open Yojson.Safe.Util in
+  let unavail = json |> member "context_metrics_unavailable" in
+  check string "reason survives JSON roundtrip" expected_reason
+    (unavail |> member "reason" |> to_string);
+  check (option int) "raw_input_tokens survives JSON roundtrip" raw_input_tokens
+    (unavail |> member "raw_input_tokens" |> to_int_option);
+  check (option int) "context_window survives JSON roundtrip" context_window
+    (unavail |> member "context_window" |> to_int_option)
 ;;
 
 let test_cumulative_usage_is_diagnostic_not_occupancy () =
@@ -357,15 +367,10 @@ let test_cumulative_usage_is_diagnostic_not_occupancy () =
         ~current_trace_id:sample_trace
     in
     check_not_observed fields ~reason:"conversation_cumulative_usage";
-    match decodes fields with
-    | Ok
-        (Masc.Tui_decode.Context_unavailable
-          (Context_conversation_cumulative_usage
-            { raw_input_tokens = Some 1_063_857
-            ; context_window = Some 128_000
-            })) -> ()
-    | Ok _ -> fail "cumulative usage lost its typed raw diagnostics"
-    | Error detail -> fail detail)
+    check_unavailable_diagnostics fields
+      ~expected_reason:"conversation_cumulative_usage"
+      ~raw_input_tokens:(Some 1_063_857)
+      ~context_window:(Some 128_000))
 ;;
 
 let test_client_turn_total_is_diagnostic_not_occupancy () =
@@ -379,13 +384,10 @@ let test_client_turn_total_is_diagnostic_not_occupancy () =
     check_not_observed fields ~reason:"turn_total_usage";
     check bool "an aggregate below the window still has no occupancy ratio" true
       (field fields "context_ratio" = `Null);
-    match decodes fields with
-    | Ok
-        (Masc.Tui_decode.Context_unavailable
-          (Context_turn_total_usage
-            { raw_input_tokens = Some 18_000; context_window = Some 131_072 })) -> ()
-    | Ok _ -> fail "client-turn total lost its typed raw diagnostics"
-    | Error detail -> fail detail)
+    check_unavailable_diagnostics fields
+      ~expected_reason:"turn_total_usage"
+      ~raw_input_tokens:(Some 18_000)
+      ~context_window:(Some 131_072))
 ;;
 
 let test_provider_window_is_used_for_occupancy () =
@@ -418,13 +420,10 @@ let test_per_request_overflow_is_unavailable_not_clamped () =
         ~current_trace_id:sample_trace
     in
     check_not_observed fields ~reason:"context_tokens_exceed_window";
-    match decodes fields with
-    | Ok
-        (Masc.Tui_decode.Context_unavailable
-          (Context_tokens_exceed_window
-            { raw_input_tokens = 310_209; context_window = 272_000 })) -> ()
-    | Ok _ -> fail "per-request overflow was clamped or lost"
-    | Error detail -> fail detail)
+    check_unavailable_diagnostics fields
+      ~expected_reason:"context_tokens_exceed_window"
+      ~raw_input_tokens:(Some 310_209)
+      ~context_window:(Some 272_000))
 ;;
 
 (* A newer compaction estimate or a count with no provenance must not
@@ -461,50 +460,39 @@ let test_newest_unmeasured_input_stays_diagnostic () =
                 | None -> "input_provenance_unavailable"
                 | Some Turn_input_provenance.Measured_request -> fail "fixture must be unmeasured" in
               check_not_observed fields ~reason;
-              match decodes fields with
-              | Ok (Masc.Tui_decode.Context_unavailable
-                      (Context_input_estimate evidence))
-                when provenance = Some Turn_input_provenance.Context_estimate ->
-                check (option int) "estimate diagnostic retains its value" (Some tokens) evidence.raw_input_tokens;
-                check (option int) "estimate retains the same window" (Some 272_000) evidence.context_window
-              | Ok (Masc.Tui_decode.Context_unavailable
-                      (Context_input_provenance_unavailable evidence))
-                when provenance = None ->
-                check (option int) "unknown diagnostic retains its value" (Some tokens) evidence.raw_input_tokens;
-                check (option int) "unknown retains the same window" (Some 272_000) evidence.context_window
-              | Ok _ -> fail "unmeasured newest input became an observed request or measured overflow"
-              | Error detail -> fail detail))
+              check_unavailable_diagnostics fields
+                ~expected_reason:reason
+                ~raw_input_tokens:(Some tokens)
+                ~context_window:(Some 272_000)))
          [45_000; 310_209])
     [Some Turn_input_provenance.Context_estimate; None]
 ;;
 
-(* The projection writes these fields and Tui_decode reads them, but each side
-   had only its own tests: the producer checked what it emitted and the decoder
-   checked hand-written JSON. A field the producer stopped emitting therefore
-   left both suites green while the Live Context surface fell back to zeros
-   (#29320). Every shape the producer can emit is decoded here. *)
 let test_every_projected_shape_decodes () =
   with_temp_workspace (fun config ->
     (* absence: no store at all *)
     let absent =
       Projection.context_fields ~config ~keeper_name:"nobody" ~current_trace_id:sample_trace
     in
-    (match decodes absent with
-     | Ok _ -> ()
-     | Error detail -> failf "typed absence must decode: %s" detail);
+    let absent_json = roundtrip absent in
+    check bool "typed absence sets context_metrics_unavailable" true
+      (Yojson.Safe.Util.member "context_metrics_unavailable" absent_json <> `Null);
     (* measurement: a record on the current trace *)
     append_record config (sample_record ());
     let measured =
       Projection.context_fields ~config ~keeper_name:"beta" ~current_trace_id:sample_trace
     in
-    (match decodes measured with
-     | Ok (Masc.Tui_decode.Context_observed { tokens; maximum; ratio; _ }) ->
-       check int "measured input does not include the output" 18_000 tokens;
-       check (option int) "measured window survives" (Some 131_072) maximum;
-       check (option (float 1e-9)) "measured ratio survives"
-         (Some (18_000.0 /. 131_072.0)) ratio
-     | Ok _ -> fail "an explicit measured request became unavailable"
-     | Error detail -> failf "measured observation must decode: %s" detail);
+    let measured_json = roundtrip measured in
+    let open Yojson.Safe.Util in
+    check bool "measured observation clears unavailability" true
+      (measured_json |> member "context_metrics_unavailable" = `Null);
+    check int "measured input does not include the output" 18_000
+      (measured_json |> member "context_tokens" |> to_int);
+    check (option int) "measured window survives" (Some 131_072)
+      (measured_json |> member "context_max" |> to_int_option);
+    check (option (float 1e-9)) "measured ratio survives"
+      (Some (18_000.0 /. 131_072.0))
+      (measured_json |> member "context_ratio" |> to_number_option);
     (* the two shapes are distinguishable, or decoding both proves nothing *)
     check
       bool

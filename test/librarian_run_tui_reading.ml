@@ -1,8 +1,4 @@
-(* What the Lanes screen holds for one Librarian run. The server projects a
-   list page and a run detail; the TUI reads both with [Tui_decode] and draws
-   what it decoded. A run the decoder refuses opens as a decode error instead
-   of its evidence, so each runtime suite passes its recorded run through
-   here. *)
+(* Verify the server projection of a Librarian run's list page and run detail. *)
 
 open Masc
 module Runs = Exact_lane_run_registry
@@ -16,6 +12,7 @@ let require = function
 let json = Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal
 
 let check (run : Runs.run) =
+  let open Yojson.Safe.Util in
   let page =
     Projection.For_testing.recent_run_page_json_with
       ~limit:1
@@ -26,15 +23,15 @@ let check (run : Runs.run) =
       ~verification_runs:[]
       ~goal_verification_runs:[]
     |> require
-    |> Tui_decode.decode_lane_run_page ~lane:Lane_run_identity.Librarian
-    |> require
   in
+  let runs = page |> member "runs" |> to_list in
   Alcotest.(check (list string))
     "the run list holds this run"
     [ run.run_id ]
-    (List.map (fun (row : Tui_decode.lane_run_summary) -> row.lrs_run_id) page.lrpg_runs);
-  Alcotest.(check (option int)) "the run list counts it as retained" (Some 1) page.lrpg_total;
-  let detail =
+    (List.map (fun row -> row |> member "run_id" |> to_string) runs);
+  Alcotest.(check (option int)) "the run list counts it as retained" (Some 1)
+    (match member "total" page with `Int n -> Some n | _ -> None);
+  let detail_json =
     match
       Projection.For_testing.run_detail_json_with
         ~run_id:run.run_id
@@ -42,24 +39,34 @@ let check (run : Runs.run) =
         ~verification_runs:[]
         ~goal_verification_runs:[]
     with
-    | Projection.Detail_found detail -> require (Tui_decode.decode_lane_run_detail detail)
+    | Projection.Detail_found detail -> detail
     | Detail_not_found | Detail_ambiguous -> Alcotest.fail "the run has no detail to open"
   in
-  Alcotest.(check string) "the detail is this run" run.run_id detail.lrd_run_id;
-  Alcotest.(check bool) "the detail is a Librarian run" true
-    (detail.lrd_lane = Lane_run_identity.Librarian);
+  let row = member "run" detail_json in
+  Alcotest.(check string) "the detail is this run" run.run_id (row |> member "run_id" |> to_string);
+  Alcotest.(check string) "the detail is a Librarian run" "librarian_exact"
+    (row |> member "lane" |> to_string);
   Alcotest.(check string)
     "the detail reports the recorded status"
     (Runs.status_label run.status)
-    (Tui_decode.lane_run_status_label detail.lrd_status);
+    (row |> member "status" |> to_string);
   let recorded_output =
     match run.output_availability with
     | Some Runs.Available ->
-      Some (Yojson.Safe.Util.member "output" (Runs.run_to_yojson run))
+      Some (member "output" (Runs.run_to_yojson run))
     | Some (Runs.Not_loaded | Runs.Unavailable _) | None -> None
+  in
+  let detail_output =
+    match member "output" (member "payload_availability" row) with
+    | `Null -> None
+    | av ->
+      (match Runs.availability_of_yojson av with
+       | Ok Runs.Available -> Some (member "output" row)
+       | Ok (Runs.Not_loaded | Runs.Unavailable _) -> None
+       | Error err -> Alcotest.fail err)
   in
   Alcotest.(check (option json))
     "the detail holds the output the registry recorded"
     recorded_output
-    detail.lrd_output
+    detail_output
 ;;

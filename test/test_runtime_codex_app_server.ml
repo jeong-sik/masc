@@ -6402,7 +6402,8 @@ let codex_progress_frame ?(thread_id="thread-1") ?(turn_id="turn-1")
 
 let test_content_completion_activity_reaches_tui () =
   let module F = Native_tool_outcome_fixture in
-  let module T = Masc_tui_keeper_chat_transcript in
+  let module E = Masc.Keeper_chat_events in
+  let module J = Masc.Keeper_chat_event_log in
   let fixture = F.create () in
   let before_response_stop = ref 0 and failures = ref [] in
   let on_event event =
@@ -6410,18 +6411,22 @@ let test_content_completion_activity_reaches_tui () =
     match event with
     | Agent_core.Types.ContentBlockStop {index=1} ->
         (* Commentary index 0 has ended, native index 1 just ended, and the
-           official turn is still open. Formerly STREAMING resurfaced here. *)
+           official turn is still open. *)
         incr before_response_stop;
         (try
-          let live,replay = F.snapshots fixture in
-          List.iter (fun log ->
-            let t = T.of_log ~now:2000. log in
-            let rows = String.concat "\n" (List.map snd (T.status_rows ~ko:false ~now:2000. t)) in
-            check bool "actual provider content stop clears stale model label" true
-              (Astring.String.is_infix ~affix:"model content ended" rows);
-            check bool "official turn is still open" true (T.phase t=T.Working);
-            check bool "native completion was kept" true
-              (List.exists (fun (call:T.tool_activity) -> call.outcome=T.Native_ended) (T.tool_calls t))) [live;replay]
+          let lines, frames = F.snapshots fixture in
+          let evs = List.map (fun (line : J.journaled_event) -> line.event) lines in
+          check bool "actual provider content stop recorded" true
+            (List.exists (function E.Agent_core_content_block_stop _ -> true | _ -> false) evs);
+          check bool "official turn is still open" false
+            (List.exists Masc.Keeper_chat_run_signal.is_terminal evs);
+          check bool "native completion was kept" true
+            (List.exists (function E.Native_tool_end _ -> true | _ -> false) evs);
+          check bool "SSE emitted native tool end" true
+            (List.exists (fun frame ->
+              let open Yojson.Safe.Util in
+              frame |> member "type" |> to_string = "CUSTOM"
+              && frame |> member "name" |> to_string = "KEEPER_NATIVE_TOOL_END") frames)
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn -> failures := exn :: !failures)

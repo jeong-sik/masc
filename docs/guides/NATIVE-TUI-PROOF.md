@@ -10,39 +10,35 @@ characters) and `native-tui-scenario`:
 
 | Scenario | Native build targets | Executed suites |
 | --- | --- | --- |
-| `detail-ownership` (default) | TUI and the three test executables | `test_tui_detail_reading`, `test_tui_board_successor`, `test_tui_usage_scope` |
-| `workspace-files` | TUI, server and the three test executables | `test_repo_git`, `test_tui_workspace_entries`, `test_workspace_file_confidentiality` |
-| `rich-workspace` | TUI, server and the six test executables | The `workspace-files` suites plus `test_lsp_position`, `test_tui_music_launcher`, `test_tui_alphatex` |
-| `rich-chat-workspace` | TUI, server and the seven test executables | The `rich-workspace` suites plus `test_tui_chat_call_reader` |
-| `original-tool-result` | TUI, server and the four test executables | `test_keeper_tool_result_source`, `test_tool_output_washing_e2e`, `test_server_dashboard_http_keeper_tool_lookup`, `test_tui_chat_call_reader` |
-| `code-references` | TUI, server and the five test executables | `test_lsp_workspace_pool`, `test_lsp_questions`, `test_lsp_message_router`, `test_lsp_process_manager`, `test_server_ide_lsp_proxy` |
-| `resource-reading` | TUI, server and the four test executables | `test_tui_published_reports`, `test_tui_resource_document_search`, `test_tui_resource_image_admission`, `test_tui_resource_images` |
-| `addon-lifecycle` | TUI, server, native Addon launcher and the two test executables | `test_tui_lane_addons`, `test_lane_addon_application` |
-| `browser-lane` | TUI, server, Browser Addon worker, native Addon launcher and twelve test executables | `test_browser_lane`, `test_browser_lane_watched_work`, `test_browser_addon_observation`, `test_browser_addon_tool`, `test_browser_ego_peer`, `test_browser_native_workflow`, `test_tui_browser_lane`, `test_browser_addon_live_ego`, `test_browser_addon_wire`, `test_browser_selection`, `test_server_lane_inventory`, `test_keeper_vision_tool --browser-screenshot` |
-| `source-readers` | TUI, server and the seven test executables | The four `original-tool-result` suites plus `test_tui_workspace_entries`, `test_tui_keys`, `test_tui_palette_matching` |
-| `code-drafts` | TUI, server and the five test executables | `test_tui_code_draft`, `test_tui_workspace_entries`, `test_workspace_file_confidentiality`, `test_tui_keys`, `test_tui_palette_matching` |
+| `detail-ownership` (default) | TUI, key-doc generator and 9 test executables | `v2_tui_tests` (`test_core_term`, `test_keymap_ui`, `test_protocol_net`, `test_store`, `test_screens_core`, `test_screens_ops`, `test_screens_domain`, `test_app`) plus `test_server_tui_v2_api` |
+| `workspace-files` | TUI, key-doc generator, server and 10 test executables | `test_repo_git`, `test_workspace_file_confidentiality`, plus `v2_tui_tests` |
+| `rich-workspace` | TUI, key-doc generator, server and 11 test executables | The `workspace-files` suites plus `test_lsp_position` |
+| `rich-chat-workspace` | TUI, key-doc generator, server and 11 test executables | Same targets as `rich-workspace` (`test_repo_git`, `test_workspace_file_confidentiality`, `v2_tui_tests`, `test_lsp_position`) |
+| `original-tool-result` | TUI, key-doc generator, server and 4 test executables | `test_keeper_tool_result_source`, `test_tool_output_washing_e2e`, `test_server_dashboard_http_keeper_tool_lookup`, `test_keymap_ui` |
+| `code-references` | TUI, key-doc generator, server and 5 test executables | `test_lsp_workspace_pool`, `test_lsp_questions`, `test_lsp_message_router`, `test_lsp_process_manager`, `test_server_ide_lsp_proxy` |
+| `resource-reading` | TUI, key-doc generator, server and 2 test executables | `test_screens_domain`, `test_protocol_net` |
+| `addon-lifecycle` | TUI, key-doc generator, server, native Addon launcher and 2 test executables | `test_lane_addon_application`, `test_screens_domain` |
+| `browser-lane` | TUI, key-doc generator, server, Browser Addon worker, native Addon launcher and 11 test executables | `test_browser_lane`, `test_browser_lane_watched_work`, `test_browser_addon_observation`, `test_browser_addon_tool`, `test_browser_ego_peer`, `test_browser_native_workflow`, `test_browser_addon_live_ego`, `test_browser_addon_wire`, `test_browser_selection`, `test_server_lane_inventory`, `test_keeper_vision_tool --browser-screenshot` |
+| `source-readers` | TUI, key-doc generator, server and 4 test executables | Same targets as `original-tool-result` (`test_keeper_tool_result_source`, `test_tool_output_washing_e2e`, `test_server_dashboard_http_keeper_tool_lookup`, `test_keymap_ui`) |
+| `code-drafts` | TUI, key-doc generator, server and 3 test executables | `test_workspace_file_confidentiality`, `test_keymap_ui`, `test_screens_core` |
+| `tui-performance` | TUI, key-doc generator and 9 test executables | `v2_tui_tests` plus `test_server_tui_v2_api` |
 
 The server target is `bin/main_eio.exe`; the TUI is `bin/masc_tui.exe`.
 Every scenario also builds `bin/masc_tui_keys_doc_cli.exe`, the canonical key
 reference generator, from the selected source. This adds no test suite.
-Each test target is `test/<suite>.exe`. Unknown scenarios are refused before
-source checkout and again before selecting build targets. With no native source
-SHA, only the existing source/config/credential checks run.
+Server and integration test targets live under `test/<suite>.exe`; TUI v2
+suites live under `test/masc_tui_v2/` (`test_core_term.exe` and
+`<layer>/<suite>.exe`) and `test/server_tui_v2_api/test_server_tui_v2_api.exe`.
+Unknown scenarios are refused before source checkout and again before selecting
+build targets. With no native source SHA, only the existing source/config/credential
+checks run.
 
-Use `rich-workspace` for a selected music and Code integration candidate. It
-checks Unicode LSP positions, music child-process handoff and AlphaTex parsing
-alongside file discovery and request ownership. It does not execute the Node
-music package, play audio or establish visible terminal behavior; record those
-checks separately against the same source commit.
-
-Use `rich-chat-workspace` when the selected integration source also includes
-chat original-call reading. It builds and runs `test_tui_chat_call_reader` in
-addition to all six `rich-workspace` suites and packages the matching server.
-The reader suite checks original execution selection, exact-response identity,
-read ownership, retries, retained result/scroll state and terminal Enter intent;
-it is not a visible-UI or actual Keeper tool-turn proof. A selected source
-without that test target fails the build instead of falling back to the older
-six-suite profile. For example:
+Use `rich-workspace` or `rich-chat-workspace` for a workspace, LSP-position and
+full TUI v2 integration candidate. Both build the matching server and TUI and
+run `test_repo_git`, `test_workspace_file_confidentiality`, all eight
+`v2_tui_tests` suites, and `test_lsp_position`. They do not establish visible
+terminal behavior; record live terminal checks separately against the same
+source commit. For example:
 
 ```sh
 gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
@@ -50,26 +46,15 @@ gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
   -f native-tui-scenario=rich-chat-workspace
 ```
 
-Use `original-tool-result` for the retained original-result endpoint and its
-TUI consumer. It checks exact execution/turn binding, owned trace reads and
-mutation failures, byte paging and UTF8 reconstruction, the shared artifact
-page bounds, actual HTTP Admin/workspace enforcement, and Reader ownership and
-retained state. It packages the matching server and TUI for a separate actual
-Keeper-result read. These four suites do not certify music/Code integration,
-complete producer stdout capture, or visible UI behavior. The selected source
-must contain all four targets; a missing target fails instead of reducing scope.
-
-Use `source-readers` when a selected candidate changes both retained original
-tool-result reading and Code's captured file source. It runs the existing four
-original-result suites and the three direct Code document consumers in one
-native build. The workspace entries suite exercises source-byte preservation,
-copy ownership and file navigation; the keys and palette suites exercise the
-same document's search and symbol consumers. This includes the existing Reader
-fixture compile checks without dispatching a second native build. It packages
-the matching server/TUI and records all seven completed suite names in the
-same receipt. It does not run the five LSP suites, real Pyright, music playback
-or visible terminal/clipboard verification. A selected source lacking any
-target fails instead of omitting that suite.
+Use `original-tool-result` or `source-readers` for the retained original-result
+endpoint and its TUI keymap/UI consumer. Both run the three server
+original-result suites (`test_keeper_tool_result_source`,
+`test_tool_output_washing_e2e`, `test_server_dashboard_http_keeper_tool_lookup`)
+plus `test_keymap_ui`, and package the matching server and TUI for separate
+Keeper-result verification. These four suites do not run the five LSP suites,
+real Pyright, complete producer stdout capture, or visible terminal/clipboard
+behavior. The selected source must contain all four targets; a missing target
+fails instead of reducing scope.
 
 ```sh
 gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
@@ -77,17 +62,11 @@ gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
   -f native-tui-scenario=source-readers
 ```
 
-Use `code-drafts` for a selected revision-bound Code editor/save candidate.
-The draft suite checks exact candidate bytes, submitted-save ownership,
-conflict and uncertain-write reconciliation, and the external editor's actual
-temporary file and terminal handoff. The workspace entries suite checks paired
-source/revision decoding, comparison-read ownership and deferred post-save
-refresh. The confidentiality suite checks the server's save authorization,
-workspace identity, revision conflicts and file confinement. The keys and
-palette suites compile and exercise direct consumers of the revised document
-payload. It packages the matching server/TUI for separate actual editor/save
-verification. These five suites do not establish visible terminal behavior,
-real editor usability, or successful deployment. All five targets must exist
+Use `code-drafts` for a selected workspace-confidentiality and TUI core-screen
+candidate. It runs `test_workspace_file_confidentiality`, `test_keymap_ui`, and
+`test_screens_core`, and packages the matching server/TUI for separate editor/save
+verification. These three suites do not establish visible terminal behavior,
+real editor usability, or successful deployment. All three targets must exist
 in the selected source; no missing suite is silently omitted.
 
 ```sh
@@ -114,16 +93,12 @@ gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
   -f native-tui-scenario=code-references
 ```
 
-Use `resource-reading` for a Resources report, body-search or image candidate.
-The four suites check exact report revision requests and read ownership,
-withdrawal and refusal, admitted original document search, logical search
-position after scroll clamping, original multipart image admission and source
-conservation. They check requests, stored state and decisions; they do not
-assert screen wording, layout or row order. The matching server and TUI are
-packaged for separate API and terminal observations. These suites do not
-exercise the actual search keyboard loop, present images in a terminal or
-establish a live report publication. All four targets must exist in the selected
-source; a missing target fails rather than reducing the scope.
+Use `resource-reading` for a domain-screen and protocol/network candidate. It
+runs `test_screens_domain` and `test_protocol_net`, and packages the matching
+server and TUI for separate API and terminal observations. These two suites do
+not exercise a live terminal or establish a live report publication. Both
+targets must exist in the selected source; a missing target fails rather than
+reducing the scope.
 
 ```sh
 gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
@@ -132,13 +107,11 @@ gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
 ```
 
 Use `addon-lifecycle` for an Addon installation/worker observation candidate.
-The two existing suites cover TUI request/state ownership and host application
-decisions. The selected TUI suite also contains existing presentation assertions;
-this scenario adds no new screen wording, layout or row-order tests, and does not
-classify that mixed suite as request/state-only proof. The matching server and
-TUI and native Addon launcher are packaged for separate actual On/Off/reconnect observations. Passing these
-suites does not prove that a container, real model or visible terminal executed.
-Both selected targets must exist; a missing target fails instead of reducing scope.
+It runs `test_lane_addon_application` and `test_screens_domain`, and packages
+the matching server, TUI, and native Addon launcher for separate On/Off/reconnect
+observations. Passing these suites does not prove that a container, real model
+or visible terminal executed. Both selected targets must exist; a missing target
+fails instead of reducing scope.
 
 ```sh
 gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
@@ -156,7 +129,7 @@ gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
 
 Use `browser-lane` for a selected Ego/Browser request and activity candidate.
 It builds the matching TUI, server, Browser Addon worker and native launcher
-together and runs the twelve named protocol/codec/routing/request-state suites.
+together and runs the eleven named protocol/codec/routing/request-state suites.
 The additional checks cover private client DTOs, worker-to-Ego process ownership,
 Space selection/binding, exported inventory and stored screenshot context.
 `test_keeper_vision_tool` runs only `--browser-screenshot`, not its full vision
@@ -171,6 +144,10 @@ gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
   -f native-tui-source-sha=SOURCE_COMMIT_40_HEX \
   -f native-tui-scenario=browser-lane
 ```
+
+Use `detail-ownership` (the default) or `tui-performance` to package the TUI
+binary alone (no server binary) and run all eight `v2_tui_tests` suites plus
+`test_server_tui_v2_api`.
 
 Replace both placeholders with the selected workflow ref and full feature
 commit. Before the workflow changes reach main, select the reviewed CI branch

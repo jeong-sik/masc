@@ -588,20 +588,20 @@ let test_repository_activity_covers_all_writers () =
     let read () =
       let response = dispatch router (http_request ~meth:`GET ~path ~token:(Some token) ()) in
       check_status "one fleet request" 200 response;
-      let data = response |> response_body |> Yojson.Safe.from_string |> Json.member "data" in
-      match Masc.Tui_decode.decode_repository_activity_snapshot data with
-      | Ok snapshot -> snapshot | Error e -> fail e in
+      response |> response_body |> Yojson.Safe.from_string |> Json.member "data" in
     let snapshot = read () in
-    check int "all unassigned writers, no other repository" 205 (List.length snapshot.ras_changes);
+    let changes = snapshot |> Json.member "changes" |> Json.to_list in
+    check int "all unassigned writers, no other repository" 205 (List.length changes);
     check (list string) "writer identities survive without roster membership"
       (List.init 205 (fun n -> "writer-" ^ string_of_int n) |> List.sort String.compare)
-      (List.map (fun (row : Masc.Tui_decode.file_change) -> row.fc_keeper)
-         snapshot.ras_changes |> List.sort String.compare);
-    check int "incomplete addressed write is visible" 1 snapshot.ras_incomplete;
-    check int "unknown-address evidence is not attributed to repo" 1 snapshot.ras_unattributed;
+      (List.map (fun row -> row |> Json.member "keeper" |> Json.to_string)
+         changes |> List.sort String.compare);
+    check int "incomplete addressed write is visible" 1 (snapshot |> Json.member "incomplete" |> Json.to_int);
+    check int "unknown-address evidence is not attributed to repo" 1 (snapshot |> Json.member "unattributed" |> Json.to_int);
     append ~keeper:"later-writer" ~repo:"masc" ~input;
     let next = read () in
-    check int "incremental fleet read retains old and new writers" 206 (List.length next.ras_changes);
+    check int "incremental fleet read retains old and new writers" 206
+      (next |> Json.member "changes" |> Json.to_list |> List.length);
     check_status "exact write content requires authentication" 401
       (dispatch router (http_request ~meth:`GET ~path ()))))
 ;;
@@ -631,12 +631,10 @@ let test_repository_activity_needs_no_canonical_remote () =
     let response = get "/api/v1/ide/repository-activity?repo_id=local&window_hours=24" in
     check_status "repository activity needs only the registered id" 200 response;
     let data = response |> response_body |> Yojson.Safe.from_string |> Json.member "data" in
-    (match Masc.Tui_decode.decode_repository_activity_snapshot data with
-     | Ok snapshot ->
-       check (list string) "the write is read by repository id"
-         ["writer"]
-         (List.map (fun (row : Masc.Tui_decode.file_change) -> row.fc_keeper) snapshot.ras_changes)
-     | Error e -> fail e);
+    let changes = data |> Json.member "changes" |> Json.to_list in
+    check (list string) "the write is read by repository id"
+      ["writer"]
+      (List.map (fun row -> row |> Json.member "keeper" |> Json.to_string) changes);
     check_status "an unknown repository id is still not found" 404
       (get "/api/v1/ide/repository-activity?repo_id=missing&window_hours=24");
     (* File activity keys rows by codebase too, so it still refuses. *)

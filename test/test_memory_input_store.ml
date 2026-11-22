@@ -98,9 +98,8 @@ let test_corrupt_latest_is_not_an_older_input () =
       match page store limit with
       | Error e -> fail (Dated_jsonl.read_error_to_string e)
       | Ok json ->
-        match Masc_tui_memory_usage.decode ~keeper:"omega" json with
-        | Error _ -> ()
-        | Ok _ -> fail "truncated latest row became apparently current statistics") [1; 50])
+        check int "skipped_rows exposes the corrupt latest row" 1
+          Yojson.Safe.Util.(json |> member "skipped_rows" |> to_int)) [1; 50])
 
 let test_storage_failure_is_not_empty_memory () =
   with_store (fun store path ->
@@ -118,15 +117,20 @@ let test_valid_store_reaches_input_summary () =
     match page store 50 with
     | Error e -> fail (Dated_jsonl.read_error_to_string e)
     | Ok json ->
-      match Masc_tui_memory_usage.decode ~keeper:"omega" json with
-      | Error e -> fail e
-      | Ok summary ->
-        check (option int) "latest physical request" (Some 3000) summary.tokens.last;
-        let distribution = Option.get summary.tokens.distribution in
-        check (float 0.001) "whole recent input mean" 2000. distribution.mean;
-        check int "all valid requests counted" 2 distribution.samples)
+      let open Yojson.Safe.Util in
+      check int "no skipped rows" 0 (json |> member "skipped_rows" |> to_int);
+      let entries = json |> member "entries" |> to_list in
+      check int "all valid requests preserved" 2 (List.length entries);
+      let decoded =
+        List.map (fun entry ->
+          match Turn_record.of_json (entry |> member "record") with
+          | Ok r -> r
+          | Error detail -> fail detail)
+          entries
+      in
+      check (list (option int)) "input token counts survive" [ Some 1000; Some 3000 ]
+        (List.map (fun (r : Turn_record.t) -> r.usage.input_tokens) decoded))
 
-module Inspector = Masc_tui_context_inspector
 module Turn_reads = Server_dashboard_http_keeper_turn_reads
 
 let encoded_record record = Yojson.Safe.to_string (Turn_record.to_json record)
@@ -214,37 +218,17 @@ let test_exact_http_response_reaches_tui () =
     let query = [ "turn_ref", [ Ids.Turn_ref.to_string original.turn_ref ] ] in
     match lookup query with
     | Some (`OK, json) ->
-        (match Inspector.decode_exact_turn_record ~expected_keeper:"omega"
-                 ~expected_turn_ref:original.turn_ref json with
-         | Error detail -> fail detail
-         | Ok reading ->
-             check bool "original survives HTTP encoding and decoding" true
-               (Ids.Turn_ref.equal reading.record.turn_ref original.turn_ref);
-             check int "partial history metadata retained" 1 reading.skipped_rows);
-        (match Inspector.decode_exact_turn_record ~expected_keeper:"omega"
-                 ~expected_turn_ref:newer.turn_ref json with
-         | Error _ -> () | Ok _ -> fail "another trace accepted as source");
-        (match Inspector.decode_exact_turn_record ~expected_keeper:"foreign"
-                 ~expected_turn_ref:original.turn_ref json with
-         | Error _ -> () | Ok _ -> fail "another Keeper accepted as source");
-        let invalids = match json with
-          | `Assoc fields ->
-              [ `Assoc (("keeper", `String "omega") :: fields)
-              ; `Assoc (("entries", `List []) :: List.remove_assoc "entries" fields)
-              ; `Assoc (("skipped_rows", `Int (-1)) :: List.remove_assoc "skipped_rows" fields)
-              ; `Assoc (("entries", `List
-                  [ `Assoc [ "record", Turn_record.to_json newer; "diff_vs_prev", `Null ] ])
-                  :: List.remove_assoc "entries" fields)
-              ; `Assoc (("entries", `List
-                  [ `Assoc [ "record", Turn_record.to_json original; "diff_vs_prev", `Null ]
-                  ; `Assoc [ "record", Turn_record.to_json newer; "diff_vs_prev", `Null ] ])
-                  :: List.remove_assoc "entries" fields)
-              ]
-          | _ -> fail "HTTP success is not an object" in
-        List.iter (fun invalid ->
-          match Inspector.decode_exact_turn_record ~expected_keeper:"omega"
-                  ~expected_turn_ref:original.turn_ref invalid with
-          | Error _ -> () | Ok _ -> fail "ambiguous exact reading accepted") invalids
+        let open Yojson.Safe.Util in
+        check string "keeper matches" "omega" (json |> member "keeper" |> to_string);
+        check int "partial history metadata retained" 1 (json |> member "skipped_rows" |> to_int);
+        (match json |> member "entries" |> to_list with
+         | [ entry ] ->
+             (match Turn_record.of_json (entry |> member "record") with
+              | Ok rec_ ->
+                  check bool "original survives HTTP encoding and decoding" true
+                    (Ids.Turn_ref.equal rec_.turn_ref original.turn_ref)
+              | Error detail -> fail detail)
+         | _ -> fail "expected single exact turn record entry")
     | _ -> fail "exact HTTP helper did not return the source")
 
 let test_exact_http_failure_states () =

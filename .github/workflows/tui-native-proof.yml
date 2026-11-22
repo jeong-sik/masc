@@ -69,55 +69,55 @@ jobs:
           set -euo pipefail
           mkdir -p proof
           targets=(bin/masc_tui.exe bin/masc_tui_keys_doc_cli.exe)
+          v2_tui_tests=(
+            test/masc_tui_v2/test_core_term.exe
+            test/masc_tui_v2/keymap_ui/test_keymap_ui.exe
+            test/masc_tui_v2/protocol_net/test_protocol_net.exe
+            test/masc_tui_v2/protocol_net/test_server_config_roundtrip.exe
+            test/masc_tui_v2/store/test_store.exe
+            test/masc_tui_v2/screens_core/test_screens_core.exe
+            test/masc_tui_v2/screens_ops/test_screens_ops.exe
+            test/masc_tui_v2/screens_domain/test_screens_domain.exe
+            test/masc_tui_v2/app/test_app.exe
+          )
           case "$PROOF_SCENARIO" in
             detail-ownership)
-              targets+=(test/test_tui_detail_reading.exe test/test_tui_board_successor.exe test/test_tui_usage_scope.exe)
+              targets+=("${v2_tui_tests[@]}" test/server_tui_v2_api/test_server_tui_v2_api.exe)
               ;;
             workspace-files|rich-workspace|rich-chat-workspace)
-              targets+=(bin/main_eio.exe test/test_repo_git.exe test/test_tui_workspace_entries.exe test/test_workspace_file_confidentiality.exe)
+              targets+=(bin/main_eio.exe test/test_repo_git.exe test/test_workspace_file_confidentiality.exe "${v2_tui_tests[@]}")
               ;;
             resource-reading)
-              targets+=(bin/main_eio.exe test/test_tui_published_reports.exe test/test_tui_resource_document_search.exe test/test_tui_resource_image_admission.exe test/test_tui_resource_images.exe)
+              targets+=(bin/main_eio.exe test/masc_tui_v2/screens_domain/test_screens_domain.exe test/masc_tui_v2/protocol_net/test_protocol_net.exe)
               ;;
             addon-lifecycle)
-              targets+=(bin/main_eio.exe bin/masc_native_addon_launcher.exe test/test_tui_lane_addons.exe test/test_lane_addon_application.exe)
+              targets+=(bin/main_eio.exe bin/masc_native_addon_launcher.exe test/test_lane_addon_application.exe test/masc_tui_v2/screens_domain/test_screens_domain.exe)
               ;;
             browser-lane)
               targets+=(bin/main_eio.exe bin/masc_browser_addon_worker.exe bin/masc_native_addon_launcher.exe
                 test/test_browser_lane.exe test/test_browser_lane_watched_work.exe
                 test/test_browser_addon_observation.exe test/test_browser_addon_tool.exe
-                test/test_browser_ego_peer.exe test/test_browser_native_workflow.exe test/test_tui_browser_lane.exe
+                test/test_browser_ego_peer.exe test/test_browser_native_workflow.exe
                 test/test_browser_addon_live_ego.exe test/test_browser_addon_wire.exe
                 test/test_browser_selection.exe test/test_server_lane_inventory.exe test/test_keeper_vision_tool.exe)
               ;;
             original-tool-result|source-readers)
-              targets+=(bin/main_eio.exe test/test_keeper_tool_result_source.exe test/test_tool_output_washing_e2e.exe test/test_server_dashboard_http_keeper_tool_lookup.exe test/test_tui_chat_call_reader.exe)
+              targets+=(bin/main_eio.exe test/test_keeper_tool_result_source.exe test/test_tool_output_washing_e2e.exe test/test_server_dashboard_http_keeper_tool_lookup.exe test/masc_tui_v2/keymap_ui/test_keymap_ui.exe)
               ;;
             code-references)
               command -v python3 >/dev/null
               targets+=(bin/main_eio.exe test/test_lsp_workspace_pool.exe test/test_lsp_questions.exe test/test_lsp_message_router.exe test/test_lsp_process_manager.exe test/test_server_ide_lsp_proxy.exe)
               ;;
             tui-performance)
-              targets+=(test/test_tui_message_input.exe test/test_tui_render_schedule.exe
-                test/test_tui_memory_facts_explorer.exe test/test_tui_memory_back.exe
-                test/test_tui_detail_reading.exe test/test_tui_resource_document_search.exe
-                test/test_tui_resource_copy.exe
-                test/test_tui_resource_export.exe test/test_tui_code_draft.exe
-                test/test_tui_keeper_memory_reading.exe test/test_tui_answering.exe)
+              targets+=("${v2_tui_tests[@]}" test/server_tui_v2_api/test_server_tui_v2_api.exe)
               ;;
             code-drafts)
-              targets+=(bin/main_eio.exe test/test_tui_code_draft.exe test/test_tui_workspace_entries.exe test/test_workspace_file_confidentiality.exe test/test_tui_keys.exe test/test_tui_palette_matching.exe)
+              targets+=(bin/main_eio.exe test/test_workspace_file_confidentiality.exe test/masc_tui_v2/keymap_ui/test_keymap_ui.exe test/masc_tui_v2/screens_core/test_screens_core.exe)
               ;;
             *) echo 'unsupported native proof scenario' >&2; exit 1 ;;
           esac
-          if [ "$PROOF_SCENARIO" = source-readers ]; then
-            targets+=(test/test_tui_workspace_entries.exe test/test_tui_keys.exe test/test_tui_palette_matching.exe)
-          fi
           if [ "$PROOF_SCENARIO" = rich-workspace ] || [ "$PROOF_SCENARIO" = rich-chat-workspace ]; then
-            targets+=(test/test_lsp_position.exe test/test_tui_music_launcher.exe test/test_tui_alphatex.exe)
-          fi
-          if [ "$PROOF_SCENARIO" = rich-chat-workspace ]; then
-            targets+=(test/test_tui_chat_call_reader.exe)
+            targets+=(test/test_lsp_position.exe)
           fi
           printf '%s\n' "${targets[@]}" > proof/build-targets.txt
           opam exec -- dune build "${targets[@]}" 2>&1 | tee proof/build.log

@@ -6,7 +6,7 @@
     server it has always been, and `masc start` says so explicitly.
 
     The decision is pure over its inputs so it runs under a test without a TTY,
-    a PATH, or an installed TUI (the pattern {!Masc_tui_server_lifecycle} uses
+    a PATH, or an installed TUI (the pattern {!Masc_server_lifecycle} uses
     for the other direction). The caller supplies the terminal answer and the
     filesystem probe; this module supplies the rule. *)
 

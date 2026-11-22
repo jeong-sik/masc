@@ -297,10 +297,9 @@ let test_capture_failures_and_corruption () = with_fixture (fun config ->
     |> require_error "missing source captured";
   let items = capture config (Evidence.Task_producer "producer") [board_ref p] |> restored in
   let item_json = List.hd items |> Store.submitted_evidence_item_to_yojson in
-  let operator = `Assoc ["result", `Assoc ["evidence", `Assoc ["access", `String "available"; "items", `List [item_json]]]] in
-  (match Tui_decode.decode_verification_evidence operator with
-   | Ok (Tui_decode.Evidence_items [Tui_decode.Ev_collaboration _]) -> ()
-   | _ -> fail "operator cannot decode submitted collaboration");
+  (match Store.submitted_evidence_item_of_yojson item_json with
+   | Ok (Store.Evidence_collaboration _) -> ()
+   | _ -> fail "submitted collaboration item did not round-trip");
   let metadata = List.hd items |> Store.submitted_evidence_item_metadata_to_yojson in
   check bool "metadata does not carry full source body" true
     (Yojson.Safe.Util.member "content" metadata = `Null);

@@ -530,6 +530,7 @@ let test_cancelled_turn_evicts_entry_and_recovers () =
     { keeper_name = "alice"
     ; runtime_id = "antigravity_acp.gemini_4_neon_high"
     ; tool_surface_sha256 = "sha-v1"
+    ; process_config_sha256 = "cfg-v1"
     ; cwd = "/tmp/alice"
     ; dangerously_skip_permissions = false
     }
@@ -670,6 +671,7 @@ let test_pool_key_switch_evicts_superseded_keeper_entry () =
     { keeper_name = "alice"
     ; runtime_id = "antigravity_acp.gemini_4_neon_high"
     ; tool_surface_sha256 = "sha-1"
+    ; process_config_sha256 = "cfg-1"
     ; cwd = "/tmp/alice-a"
     ; dangerously_skip_permissions = false
     }
@@ -678,6 +680,7 @@ let test_pool_key_switch_evicts_superseded_keeper_entry () =
     { keeper_name = "bob"
     ; runtime_id = "kimi_acp.k3_1_pro"
     ; tool_surface_sha256 = "sha-bob"
+    ; process_config_sha256 = "cfg-bob"
     ; cwd = "/tmp/bob"
     ; dangerously_skip_permissions = false
     }
@@ -720,6 +723,15 @@ let test_pool_key_switch_evicts_superseded_keeper_entry () =
         ; dangerously_skip_permissions = true
         }
       , make_fake_entry 5 )
+    ; ( "process_config_sha256"
+      , { alice_base with
+          runtime_id = "kimi_acp.k3_1_pro"
+        ; tool_surface_sha256 = "sha-2"
+        ; process_config_sha256 = "cfg-2"
+        ; cwd = "/tmp/alice-b"
+        ; dangerously_skip_permissions = true
+        }
+      , make_fake_entry 6 )
     ]
   in
   let prev = ref alice_1 in
@@ -3163,6 +3175,325 @@ for line in sys.stdin:
       (Sys.file_exists !iso_path_ref))
 ;;
 
+let test_layer4_classify_prompt_error_usage_context_and_process_config_hash () =
+  let overflow_err =
+    Runtime_acp_client.Rpc_error
+      { method_name = "session/prompt"
+      ; code = -32603
+      ; message = "context_length_exceeded: maximum context length reached"
+      }
+  in
+  (* 1. Gate continuation overflow -> Vendor_session_full + non-retryable ProviderReportedError *)
+  (match
+     Keeper_acp_runtime.For_testing.classify_prompt_error
+       ~is_gate_continuation:true
+       ~activity_observed:false
+       overflow_err
+   with
+   | ( Keeper_official_client_session_store.Vendor_session_full
+         Keeper_official_client_session_store.No_activity_observed
+     , Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError _) ) -> ()
+   | _ -> fail "expected Gate continuation overflow without activity to map to Vendor_session_full(No_activity_observed)");
+  (match
+     Keeper_acp_runtime.For_testing.classify_prompt_error
+       ~is_gate_continuation:true
+       ~activity_observed:true
+       overflow_err
+   with
+   | ( Keeper_official_client_session_store.Vendor_session_full
+         Keeper_official_client_session_store.Activity_observed
+     , Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError _) ) -> ()
+   | _ -> fail "expected Gate continuation overflow with activity to map to Vendor_session_full(Activity_observed)");
+  (* 2. Post-activity non-gate overflow -> Effect_fenced + non-retryable ProviderReportedError *)
+  (match
+     Keeper_acp_runtime.For_testing.classify_prompt_error
+       ~is_gate_continuation:false
+       ~activity_observed:true
+       overflow_err
+   with
+   | ( Keeper_official_client_session_store.Input_rejected
+         Keeper_official_client_session_store.Effect_fenced
+     , Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError _) ) -> ()
+   | _ -> fail "expected post-activity overflow to map to Effect_fenced + ProviderReportedError");
+  (* 3. Clean pre-activity non-gate overflow -> Bootstrap_floor_exceeded + ContextOverflow *)
+  (match
+     Keeper_acp_runtime.For_testing.classify_prompt_error
+       ~is_gate_continuation:false
+       ~activity_observed:false
+       overflow_err
+   with
+   | ( Keeper_official_client_session_store.Input_rejected
+         Keeper_official_client_session_store.Bootstrap_floor_exceeded
+     , Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _) ) -> ()
+   | _ -> fail "expected clean pre-activity overflow to enter shrink ladder with ContextOverflow");
+  (* 4. usage_is_nonzero & effective_context_used *)
+  let zero_api_usage =
+    Keeper_acp_runtime.For_testing.api_usage_of_acp_usage
+      ~driver:Antigravity
+      Runtime_acp_client.empty_usage
+  in
+  check bool "zero usage is not nonzero" false
+    (Keeper_acp_runtime.For_testing.usage_is_nonzero zero_api_usage);
+  let agy_usage_no_ctx : Runtime_acp_client.usage =
+    { Runtime_acp_client.empty_usage with
+      input_tokens = 12000
+    ; cached_read_tokens = 38000
+    ; output_tokens = 400
+    }
+  in
+  check bool "nonzero usage detected" true
+    (Keeper_acp_runtime.For_testing.usage_is_nonzero
+       (Keeper_acp_runtime.For_testing.api_usage_of_acp_usage
+          ~driver:Antigravity
+          agy_usage_no_ctx));
+  check (option int) "effective_context_used falls back to normalized inclusive input_tokens"
+    (Some 50000)
+    (Keeper_acp_runtime.For_testing.effective_context_used
+       ~driver:Antigravity
+       agy_usage_no_ctx);
+  check (option int) "effective_context_used prefers explicit positive context_used"
+    (Some 77777)
+    (Keeper_acp_runtime.For_testing.effective_context_used
+       ~driver:Antigravity
+       { agy_usage_no_ctx with context_used = Some 77777 });
+  check (option int) "effective_context_used returns None when all counts are 0" None
+    (Keeper_acp_runtime.For_testing.effective_context_used
+       ~driver:Antigravity
+       Runtime_acp_client.empty_usage);
+  (* 5. process_config_sha256 tracks spawn-time config but stays stable on model/effort/mode *)
+  let base_cfg : Runtime_execution.acp_client =
+    { driver = Runtime_acp_client.Antigravity
+    ; cli_path = "/usr/local/bin/agy"
+    ; args = [ "acp" ]
+    ; strip_env = []
+    ; skills_dirs = []
+    ; model = "gemini-4-neon-medium"
+    ; effort = Some "medium"
+    ; mode = Some "default"
+    ; oauth_source = Some "/tmp/oauth-a"
+    ; timeout_s = 120.0
+    }
+  in
+  let h_base =
+    Keeper_acp_runtime.For_testing.process_config_sha256
+      ~native_posture:Runtime_native_tools.Native_none
+      ~skills_dirs:[]
+      base_cfg
+  in
+  let h_same_proc_diff_model =
+    Keeper_acp_runtime.For_testing.process_config_sha256
+      ~native_posture:Runtime_native_tools.Native_none
+      ~skills_dirs:[]
+      { base_cfg with model = "claude-opus-5-5-high"; effort = Some "high"; mode = Some "auto" }
+  in
+  let h_diff_oauth =
+    Keeper_acp_runtime.For_testing.process_config_sha256
+      ~native_posture:Runtime_native_tools.Native_none
+      ~skills_dirs:[]
+      { base_cfg with oauth_source = Some "/tmp/oauth-b" }
+  in
+  let h_diff_posture =
+    Keeper_acp_runtime.For_testing.process_config_sha256
+      ~native_posture:Runtime_native_tools.Native_read
+      ~skills_dirs:[]
+      base_cfg
+  in
+  check string "process_config_sha256 ignores warm-reconfigurable model/effort/mode"
+    h_base h_same_proc_diff_model;
+  check bool "process_config_sha256 changes on oauth_source change" true
+    (not (String.equal h_base h_diff_oauth));
+  check bool "process_config_sha256 changes on native_posture change" true
+    (not (String.equal h_base h_diff_posture));
+  (* 6. hydrate_start_messages ~prefer_handoff:true preserves appended before_turn nudges *)
+  let tmp = Filename.temp_dir ~perms:0o700 "masc-acp-l4-nudge-" "" in
+  Fun.protect ~finally:(fun () -> rm_rf tmp) (fun () ->
+    let keepers_dir = Unix.realpath tmp in
+    ignore
+      (Keeper_canonical_turn_store.commit_turn
+         ~keepers_dir
+         ~keeper_id:"k-nudge"
+         ~turn_id:(Ids.Turn_id.of_string "turn-1")
+         ~runtime_kind:Keeper_canonical_turn_store.Acp_cli
+         ~runtime_id:"rt-1"
+         ~user_input:"hello"
+         ~tool_calls_json:(`List [])
+         ~assistant_output:"world"
+         ~usage_json:(`Assoc [])
+         ~created_at:100.0
+         ());
+    let nudge_msg : Agent_core.Types.message =
+      { role = Agent_core.Types.User
+      ; origin = Agent_core.Llm_provider.Types.Conversation
+      ; content = [ Agent_core.Types.Text "before-turn-nudge" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    in
+    let sys_carrier_msg : Agent_core.Types.message =
+      { role = Agent_core.Types.System
+      ; origin = Agent_core.Llm_provider.Types.Conversation
+      ; content = [ Agent_core.Types.Text "world-state-carrier" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    in
+    let hydrated =
+      Keeper_acp_runtime.For_testing.hydrate_start_messages
+        ~appended_nudges:[ sys_carrier_msg; nudge_msg ]
+        ~keepers_dir
+        ~keeper_id:"k-nudge"
+        ~prefer_handoff:true
+        [ sys_carrier_msg ]
+    in
+    let has_nudge =
+      List.exists
+        (fun (m : Agent_core.Types.message) ->
+           match m.content with
+           | [ Agent_core.Types.Text "before-turn-nudge" ] -> true
+           | _ -> false)
+        hydrated
+    in
+    let sys_carrier_count =
+      List.length
+        (List.filter
+           (fun (m : Agent_core.Types.message) ->
+              match m.content with
+              | [ Agent_core.Types.Text "world-state-carrier" ] -> true
+              | _ -> false)
+           hydrated)
+    in
+    check bool "prefer_handoff preserves before_turn nudges" true has_nudge;
+    check int "prefer_handoff never duplicates system carrier from appended_nudges" 1 sys_carrier_count)
+;;
+
+let test_layer4_stream_projection_sse_framing_native_tools_and_zero_usage () =
+  let events_rev = ref [] in
+  let native_actions_rev = ref [] in
+  let native_completions_rev = ref [] in
+  let usage_reports_rev = ref [] in
+  let on_acp_event, on_tool_started, on_tool_finished, finish, observed_tool_calls =
+    Keeper_acp_runtime.For_testing.project_stream_for_testing
+      ~on_native_action:(fun ~official_turn ~identity ~tool_name ->
+        native_actions_rev := (official_turn, identity, tool_name) :: !native_actions_rev)
+      ~on_native_tool_completion:(fun ~block_index ~tool_call_id completion ->
+        native_completions_rev :=
+          (block_index, tool_call_id, completion) :: !native_completions_rev)
+      ~on_usage_report:(fun report -> usage_reports_rev := report :: !usage_reports_rev)
+      ~on_event:(fun ev -> events_rev := ev :: !events_rev)
+      ~driver:Runtime_acp_client.Antigravity
+      ~model:"gemini-4-neon-medium"
+      ~session_id:"sess-stream"
+      ~turn_count:3
+      ~native_posture:Runtime_native_tools.Native_read
+      ~allowed_tool_names:[ "masc_probe_ping" ]
+      ()
+  in
+  (* Zero-token Usage_updated must NOT emit on_usage_report *)
+  on_acp_event
+    (Runtime_acp_client.Usage_updated
+       { used = Some 0
+       ; size = Some 400000
+       ; prompt_tokens = Some 0
+       ; completion_tokens = Some 0
+       ; cached_tokens = Some 0
+       ; cached_write_tokens = Some 0
+       ; thought_tokens = Some 0
+       ; total_tokens = Some 0
+       });
+  check int "zero usage suppressed" 0 (List.length !usage_reports_rev);
+  (* Nonzero Usage_updated emits report *)
+  on_acp_event
+    (Runtime_acp_client.Usage_updated
+       { used = Some 1500
+       ; size = Some 400000
+       ; prompt_tokens = Some 1000
+       ; completion_tokens = Some 200
+       ; cached_tokens = Some 300
+       ; cached_write_tokens = None
+       ; thought_tokens = None
+       ; total_tokens = Some 1500
+       });
+  check int "nonzero usage reported" 1 (List.length !usage_reports_rev);
+  (* Thought -> Text -> MCP tool -> Native tool -> Finish *)
+  on_acp_event (Runtime_acp_client.Thought_delta "thinking...");
+  on_acp_event (Runtime_acp_client.Text_delta "hello ");
+  check bool "on_tool_started accepted before finish" true
+    (on_tool_started
+       ~call_id:"mcp-call-1"
+       ~tool_name:"masc_probe_ping"
+       ~arguments:(`Assoc [ "nonce", `String "n1" ]));
+  on_tool_finished ~call_id:"mcp-call-1";
+  on_acp_event
+    (Runtime_acp_client.Tool_call_started
+       { tool_call_id = "nat-call-1"
+       ; title = "Read file"
+       ; kind = Some "read"
+       ; status = Runtime_acp_client.Tool_in_progress
+       ; raw_input = Some (`Assoc [ "path", `String "/tmp/a" ])
+       ; identity =
+           Runtime_acp_client.Native_tool
+             { name = Some "read_file"; kind = Some "read"; locations = [ "/tmp/a" ] }
+       });
+  on_acp_event
+    (Runtime_acp_client.Tool_call_updated
+       { tool_call_id = "nat-call-1"
+       ; title = None
+       ; status = Some Runtime_acp_client.Tool_completed
+       ; raw_output = None
+       });
+  let final_api_usage : Agent_core.Types.api_usage =
+    { input_tokens = 1500
+    ; output_tokens = 200
+    ; cache_creation_input_tokens = 0
+    ; cache_read_input_tokens = 300
+    ; cost_usd = None
+    }
+  in
+  finish ~stop_reason:Agent_core.Types.EndTurn ~usage:(Some final_api_usage);
+  (* Late MCP tool start after finish is rejected cleanly *)
+  check bool "on_tool_started rejected after finish" false
+    (on_tool_started
+       ~call_id:"mcp-call-late"
+       ~tool_name:"masc_probe_ping"
+       ~arguments:(`Assoc []));
+  (* Idempotent second finish emits nothing *)
+  let count_after_first_finish = List.length !events_rev in
+  finish ~stop_reason:Agent_core.Types.EndTurn ~usage:None;
+  check int "finish is idempotent" count_after_first_finish (List.length !events_rev);
+  let events = List.rev !events_rev in
+  (match List.hd events with
+   | Agent_core.Types.MessageStart { model = "gemini-4-neon-medium"; _ } -> ()
+   | _ -> fail "expected MessageStart as first SSE event");
+  let has_input_snapshot =
+    List.exists
+      (function
+        | Agent_core.Types.ContentBlockDelta { delta = Agent_core.Types.InputJsonSnapshot _; _ } ->
+          true
+        | _ -> false)
+      events
+  in
+  check bool "MCP tool emits InputJsonSnapshot" true has_input_snapshot;
+  (match List.rev events with
+   | Agent_core.Types.MessageStop
+     :: Agent_core.Types.MessageDelta
+          { stop_reason = Some EndTurn
+          ; usage = Some { input_tokens = Some 1500; output_tokens = Some 200; _ }
+          }
+     :: _ -> ()
+   | _ -> fail "expected MessageDelta(delta_usage) + MessageStop at end of stream");
+  check int "native action observed" 1 (List.length !native_actions_rev);
+  check int "native completion observed" 1 (List.length !native_completions_rev);
+  (match !native_completions_rev with
+   | [ (_, Some "nat-call-1", { Runtime_native_tools.outcome = Completion_reported; exit_code = None }) ] ->
+     ()
+   | _ -> fail "expected Completion_reported for nat-call-1");
+  let open Yojson.Safe.Util in
+  check int "observed_tool_calls records both MCP and native tools" 2
+    (List.length (observed_tool_calls () |> to_list))
+;;
+
 let () =
   run "runtime_acp_client"
     [ "profiles", [ test_case "closed driver profiles" `Quick test_driver_profiles ]
@@ -3212,6 +3543,10 @@ let () =
             `Quick test_layer3_policy_mode_redaction_and_oauth_security
         ; test_case "Layer 3 isolated workspace, mode fail-closed, reconfigure, load replay & close_session"
             `Quick test_layer3_mock_session_lifecycle_load_reconfigure_close_and_mode_fail_closed
+        ; test_case "Layer 4 prompt overflow classification, zero-usage, config hash & nudge hydration"
+            `Quick test_layer4_classify_prompt_error_usage_context_and_process_config_hash
+        ; test_case "Layer 4 SSE framing, InputJsonSnapshot, native tool callbacks & zero-usage suppression"
+            `Quick test_layer4_stream_projection_sse_framing_native_tools_and_zero_usage
         ] )
     ; ( "wire"
       , [ test_case "session update & usage parsing" `Quick test_parse_wire_updates_and_usage

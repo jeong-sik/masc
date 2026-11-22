@@ -723,7 +723,9 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
     Keeper_librarian_queue_refresh.forget_measurement ~config ~keeper_name;
     Keeper_continuity_observation.forget ~config ~keeper_name;
     Keeper_request_start.forget ~config ~keeper_name;
-    Keeper_acp_runtime.evict_keeper ~keeper_name;
+    Keeper_acp_runtime.evict_keeper_for_workspace
+      ~base_path:config.Workspace.base_path
+      ~keeper_name;
     let artifacts =
       Keeper_shutdown_types.dashboard_purge_artifact_plan
         ~keeper_name:keeper_name

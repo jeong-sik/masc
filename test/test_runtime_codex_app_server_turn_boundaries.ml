@@ -651,9 +651,8 @@ for line in sys.stdin:
         | Ok record -> record | Error detail -> fail detail)
       | _ -> fail "expected the actual turn writer's newest record"
     in
-    let keepers_dir = Workspace.keepers_runtime_dir config in
     let bridged_history () =
-      match Keeper_turn_bridge.uncheckpointed_official_turns ~keepers_dir
+      match Keeper_turn_bridge.uncheckpointed_official_turns ~base_path
         ~keeper_name ~trace_id ~session_dir ~existing_messages:history with
       | Ok msgs -> history @ msgs
       | Error error -> fail (Keeper_turn_bridge.bridge_load_error_to_string error)

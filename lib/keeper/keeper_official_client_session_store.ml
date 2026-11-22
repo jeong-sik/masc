@@ -225,7 +225,6 @@ open Result.Syntax
 let schema = "masc.keeper.official-client-session.v2"
 let filename = "session.json"
 let retained_dirname = "runtimes"
-let bridge_cursors_filename = "bridge-cursors.json"
 let recovery_rng = Random.State.make_self_init ()
 let recovery_rng_mutex = Stdlib.Mutex.create ()
 
@@ -258,12 +257,6 @@ let state_dir = Keeper_official_client_paths.state_dir
 let path ~base_path ~keeper_name =
   Result.map
     (fun directory -> Filename.concat directory filename)
-    (state_dir ~base_path ~keeper_name)
-;;
-
-let bridge_cursors_path ~base_path ~keeper_name =
-  Result.map
-    (fun directory -> Filename.concat directory bridge_cursors_filename)
     (state_dir ~base_path ~keeper_name)
 ;;
 
@@ -1693,12 +1686,6 @@ let clear_then_with_lock ~with_lock ~base_path ~keeper_name after_clear =
           |> Result.map_error Keeper_fs.durable_remove_error_to_string
         in
         let* () = clear_retained_files ~directory in
-        let* () =
-          Keeper_fs.remove_file_durable
-            ~ownership_root:directory
-            (Filename.concat directory bridge_cursors_filename)
-          |> Result.map_error Keeper_fs.durable_remove_error_to_string
-        in
         Ok (after_clear ())
     in
     (match with_lock ~lock_path:(store_lock_path directory) body with

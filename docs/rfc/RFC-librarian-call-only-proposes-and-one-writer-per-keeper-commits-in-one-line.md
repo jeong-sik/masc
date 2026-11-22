@@ -1570,6 +1570,58 @@ builder 는 요청을 만들 때 자기 시작점을 메모리에 적어 둔다.
 
 [RFC-keeper-context-window-in-tokens](RFC-keeper-context-window-in-tokens.md) §1.1 의 한 문장을 고친다. 「Librarian 은 `prompt_max_messages` 로 자기 입력을 묶는다」는 문장인데, 그 이름은 코드에 없다. 「Librarian 의 입력은 이 RFC 의 폭 줄이기로 묶인다」로 바꾼다. 그 절의 결정은 그대로다.
 
+### 11.8 runtime 을 바꿀 때 턴을 잇는 다리
+
+한 trace 를 runtime 둘이 번갈아 돌면 서로의 턴을 모른다. Agent Core 는 checkpoint 를 읽고, official client 는 자기 session 을 잇는다. 다리(`keeper_turn_bridge`)가 그 사이를 잇는다. 하는 일은 둘이다.
+
+- Agent Core 턴이 시작할 때, checkpoint 에 없는 official client 턴의 history 행을 요청에 붙인다(`uncheckpointed_official_turns`).
+- official client 가 자기 session 을 다시 열 때, 그 session 의 마지막 턴 뒤에 돈 턴을 글로 앞에 붙인다(`prepend_resume_handoff`).
+
+둘 다 턴의 차례와 경계를 턴 기록에서 읽는다(L3e). 옛 턴 색인은 읽지 않는다.
+
+**어느 턴을 official client 가 답했나.** 턴 기록에는 이것이 없다.
+
+- `Opened.runtime` 은 턴이 처음 고른 runtime 이다. 한 턴은 후보 여럿을 차례로 보낼 수 있다. 답한 후보는 다른 종류일 수 있다(`selected_run.checkpoint_owner`).
+- `Closed.own` 이 비었다고 official client 턴은 아니다. 닫는 저장 전에 끝난 Agent Core 턴과 문 앞에서 멈춘 Agent Core 턴도 `own` 이 비어 있다. 그 턴의 메시지는 head 에 열린 채로 있을 수 있다.
+- history 파일도 가르지 못한다. 두 실행기가 같은 source 로 쓴다.
+- 운영 디스크에서 `own` 으로만 갈라 보았다(2026-11-22 00:2x KST, Keeper 17, cursor 239). Agent Core 다리는 옛 규칙보다 95턴을 더 붙였다. 오류·취소로 끝난 턴이 94, 옛 색인이 checkpoint 를 남겼다고 적은 턴이 1이다. 다시 여는 글에는 오류·취소로 끝난 턴 12,969가 더 실렸다.
+
+그래서 official client 가 답한 턴을 장부(`client-turns.jsonl`)에 적는다.
+
+- 곳은 `<keepers_dir>/<k>/official-client-runtime/client-turns.jsonl` 이다. 줄만 덧붙인다.
+- 줄 하나가 턴 하나다. `turn_ref` 와 `session` 을 싣는다. `session` 은 그 턴을 정산한 session 의 열쇠 `(client 종류, runtime id, session id)` 이거나 `null` 이다. 오류로 끝난 턴과 정산하지 않은 턴은 `null` 이다.
+- 턴이 끝날 때 쓴다. 정산한 턴은 finalize 가, 오류로 끝난 턴은 오류 길이 쓴다. 옛 색인에 `No_atom_history` 줄을 쓰던 두 곳이다.
+- 장부가 cursor 파일(`bridge-cursors.json`)을 대신한다. 열쇠마다 마지막 줄이 그 session 의 cursor 다. 줄 번호도 offset 도 적지 않는다.
+- 해석되지 않는 줄은 거절한다. 덧붙임이 남긴 끊긴 꼬리는 줄이 아니다. 다음 덧붙임이 잘라 낸다.
+- session 을 지워도(`clear_then`) 장부는 남는다. 지나간 턴의 사실이다. 지운 session 의 열쇠는 다시 오지 않는다.
+
+**Agent Core 가 이어받을 때 붙이는 턴.** 턴 기록을 처음부터 읽는다. 턴의 trace 는 `Opened.turn_ref` 의 trace 이고, 이 trace 의 턴만 본다.
+
+- 장부에 있는 턴이 닫히면 목록 끝에 넣는다. outcome 은 가리지 않는다. 오류로 끝난 턴의 입력과 이미 부른 tool 도 붙는다.
+- 장부에 없는 턴이 `Completed` 로 닫히거나 `own` 이 메시지를 가리키면 목록을 비운다. Agent Core 의 저장이 head 를 썼고, 그 저장은 앞서 붙인 메시지까지 담았다. 옛 규칙의 `Atom_history` 와 `Empty_atom_history` 다.
+- 장부에 없는 턴이 다른 outcome 으로 닫히면 목록을 그대로 둔다. 닫는 저장 전에 끝난 Agent Core 턴이다. 옛 색인은 이 턴에 줄을 쓰지 않았다. `Stale_save` 도 여기 든다. 옛 규칙의 `Stale_noop` 이다.
+- 센 `Reset`(§11.2 의 셈)은 목록을 비운다. `Reset` 의 trace 는 `after.trace` 다. 옛 규칙의 `History_restarted` 다.
+- 지금 이력에 그 턴의 표시(`masc.bridged_turn_ref`)가 있으면 넣지 않는다. 같은 턴은 한 번만 넣는다.
+- 닫히지 않은 턴은 넣지 않는다. 다리를 부르는 턴은 아직 `Opened` 를 쓰기 전이다.
+
+**official client 가 session 을 다시 열 때 넘기는 턴.**
+
+- 그 열쇠의 마지막 장부 줄이 가리키는 턴이 cursor 턴이다.
+- 턴 기록에서 `Opened.turn_ref` 가 cursor 턴인 마지막 줄을 찾는다. 그 뒤에 닫힌 이 trace 의 턴을 모은다. cursor 턴은 뺀다.
+- 넘기는 턴은 장부에 있는 턴, `Completed` 나 `Stale_save` 로 닫힌 턴, `own` 이 메시지를 가리키는 턴이다. 옛 색인이 줄을 쓰던 턴이다. 닫는 저장 전에 끝난 Agent Core 턴은 넘기지 않는다.
+- 센 `Reset` 은 모은 것을 비운다.
+- 열쇠에 장부 줄이 없으면 넘기는 글이 없다. 그 session 이 무엇을 이미 갖고 있는지 모르니 trace 전체를 싣지 않는다.
+- cursor 턴이 턴 기록에 없으면 거절한다(`Cursor_turn_not_in_log`). 어디서부터 모을지 모른다. 그 턴은 글 없이 돌고 이유가 로그에 남는다.
+
+**읽지 못하는 줄.** 턴 기록에서 해석되지 않는 줄이나 순서(§5.2 끝)가 틀린 줄을 만나면 거절한다. 건너뛰지 않는다. 장부와 history 파일도 같다. 거절이면 다리는 아무것도 붙이지 않고 이유를 로그에 남긴다. 턴은 그대로 돈다.
+
+**설치할 때.** 옛 cursor 파일은 읽지 않는다. 설치 앞의 official client 턴은 장부에 없다.
+
+- 설치 뒤 session 마다 첫 다시 열기는 글 없이 간다.
+- 설치 앞의 official client 턴이 `Completed` 로 닫혔으면 Agent Core 다리는 그 턴을 저장으로 읽고 목록을 비운다. 설치 때 아직 붙지 않은 턴은 붙지 않는다.
+
+운영 디스크에서 장부를 옛 색인의 `No_atom_history` 줄로 흉내 내어 견주었다(2026-11-22 00:3x KST). Agent Core 다리는 Keeper 17 모두에서, 다시 여는 글은 cursor 239 모두에서 옛 규칙과 같은 턴을 골랐다.
+
 ## 12. 운영자가 보는 것
 
 운영자는 Keeper 마다 한 행을 본다. 그 행은 쓰는 쪽의 상태와 마지막 묻기의 결과에서 나온다. 이 절은 행의 내용, 경보, 그것이 보이는 곳, 운영자가 할 수 있는 일 다섯을 정한다.
@@ -2029,6 +2081,8 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | | `librarian-continuity.json` 과 그 잠금 | 지운다 |
 | | working-context recall pin | 남긴다 |
 | | `turns.jsonl` | 남긴다. 밀린 턴이 여기 있다(§18.3) |
+| `<keepers_dir>/<k>/official-client-runtime/` | `bridge-cursors.json` | 지운다. 옛 턴 색인의 줄 번호를 적은 cursor 다. 장부가 대신한다(§11.8) |
+| | `client-turns.jsonl` | 남긴다. official client 가 답한 턴의 장부다(§11.8) |
 | add-on | `keeper-librarian` 의 writer container, worker volume, 선언, package | 지운다. container 가 먼저다 |
 | | `workspace-curator` 의 선언과 package | 지운다. 그 add-on 을 지우는 층이 같은 stack 에 있다(§20.1) |
 | lane-addon 저장소 | Librarian scope 접두어 아홉 아래의 기록 | 지운다. 경로 목록은 마지막 층이 scope 정의에서 만든다 |
@@ -2106,12 +2160,12 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 - `keeper_turn_task_context`. 턴 기록의 `task_evidence` 가 대신한다(§5.1).
 - `keeper_carried_front` 의 Librarian 출처 다섯(§11.2).
 - `turn-boundaries.jsonl` 을 읽던 곳 가운데 컷 뒤에도 남는 곳은 지우지 않고 턴 기록으로 옮긴다. 한 층(L3d)에서 옮긴다. 목록은 아래 k 의 표에 있다.
-- 옛 파일 쓰기는 컷(L10)에서 멈춘다. 컷 앞의 빌드에 그 줄을 읽는 곳이 남아 있기 때문이다. `keeper_turn_bridge`, purge(`server_dashboard_http_keeper_api_checkpoints`, `bin/masc_checkpoint_purge`), `Keeper_durable_store` 의 검증이다. 옛 durable consumer 도 그 줄을 읽지만 서버가 그 lane 을 시작하지 않는다(#53463).
+- 옛 파일 쓰기는 컷(L10)에서 멈춘다. 컷 앞의 빌드에 그 줄을 읽는 곳이 남아 있기 때문이다. purge(`server_dashboard_http_keeper_api_checkpoints`, `bin/masc_checkpoint_purge`)와 `Keeper_durable_store` 의 검증이다. 옛 durable consumer 도 그 줄을 읽지만 서버가 그 lane 을 시작하지 않는다(#53463).
 - 컷에서 같이 지우는 것은 넷이다. 줄을 쓰는 곳(`keeper_agent_run_finalize_response`, `keeper_history_clear`, `keeper_agent_run_turn_helpers` 의 턴 시작 줄), `keeper_shutdown_types` 의 `Keeper_turn_boundaries_artifact` 생성자와 삭제 계획, `Keeper_durable_store` 의 `Turn_boundaries` 검증, blob 분류의 `.turn-boundaries.jsonl` 행이다.
 - L3d 가 옮기지 않은 독자는 컷까지 옛 파일을 그대로 읽는다. 쓰기가 컷까지 이어지므로 그 사이의 빌드에서도 읽는 값이 맞다.
 - L3d 가 옮긴 독자는 `keeper_carried_front` 의 세대 경계 하나다(§11.2). 턴 경계와 이 턴이 시작한 곳은 그 앞 층에서 이미 턴 기록으로 옮겼다(`Keeper_turn_driver_try_provider.turn_starts`).
-- L3d 가 옮기지 않은 독자는 넷이다.
-  - `keeper_turn_bridge`. official-client 턴이 checkpoint 없이 끝났는지(`No_atom_history`)와 옛 파일의 줄 번호를 읽는다. 그 줄 번호는 cursor 파일(`last_boundary_line`)에 적혀 디스크에 남는다. 턴 기록에서 같은 것을 읽는 규칙은 이 RFC 에 아직 없다. 컷(L10c)이 이 독자의 옛 파일 읽기를 끊기 전에 그 규칙을 정한다.
+- L3e 가 옮긴 독자는 `keeper_turn_bridge` 다(§11.8). 차례와 경계는 턴 기록에서, official client 가 답한 턴은 장부에서 읽는다. 장부가 옛 파일의 줄 번호를 적던 cursor 파일을 대신한다.
+- L3d 와 L3e 가 옮기지 않은 독자는 셋이다.
   - purge(`keeper_checkpoint_purge`, `server_dashboard_http_keeper_api_checkpoints`, `bin/masc_checkpoint_purge`). 옛 파일은 두 곳에서 읽는다. `Kept_atom_rewritten` 규칙이 지키는 atom 을 찾을 때와 continuity 스냅샷이 이력에 맞는지 볼 때(`Librarian_continuity_snapshot.restore`)다. 컷이 그 규칙과 그 모듈을 지운다(§19.3, 위).
   - `Keeper_durable_store` 의 검증. 컷이 지운다(위).
   - `keeper_agent_run` 의 `history_at_start`. 옛 파일에 재시작 줄을 쓸지 정할 때만 읽는다. 쓰는 쪽이라 컷이 지운다. 이 턴이 시작한 곳은 `Opened.baseline` 에서 읽는다(§19.3).
@@ -2210,7 +2264,8 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L3a3b4d | `Opened` 가 `stimuli` 를 싣는다. event queue payload 를 줄 타입으로 옮기는 전체 함수를 둔다(`Keeper_turn_log_turn.stimulus`). 턴을 도는 함수가 받은 queue 항목을 인자로 받는다. 이 칸이 없는 `Opened` 는 읽지 않는다 | payload 갈래마다 줄 타입이 하나다. 줄 타입마다 글로 박은 모양. 턴 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L3b | official-client 턴의 단위가 두 이력 파일에서 그 턴의 줄과 같은지 턴 전체를 돌려 확인한다. 제품 코드는 바뀌지 않는다. 끝자리 읽기는 L3a3b2 가 넣었고, 받아들일 때의 근거는 L3a3b4a 와 L3a3b4d 가 넣었다 | 단위의 바이트 범위에 그 턴을 이름 붙인 줄이 전부 있고 다른 줄이 없다. 마지막 단위는 파일 끝에서 끝난다. 직접 턴, 실패한 턴, 스스로 깬 턴, 같은 trace 의 두 턴에서 본다. Codex app server 의 턴 fixture 에서 돈다. 나머지 official-client runtime 셋에는 턴 전체를 도는 fixture 가 없다(이슈 #53384). 이력 줄을 쓰는 세 곳은 runtime 을 가리지 않는다 |
 | L3c | reset: head 를 줄이는 제품 경로 둘(이력 지우기의 갈래 다섯, recovering purge)이 함수 하나를 지난다(조건 확인, 줄, head 순서). session 을 지우는 정지가 지우기 전에 줄을 쓴다. CLI purge 를 compare-and-swap 으로 옮긴다. 함수는 줄 앞에서 head 의 열린 메시지를 닫는다. 줄 뒤에 head 변경이 일어났는지는 가리지 않는다. 알리지 않은 reset 을 줄 쓰는 쪽이 적는다 | 줄을 쓰고 죽는 시험과 head 변경이 오류를 돌려주는 시험이 같은 결과를 낸다: 다음 단위가 `after` 에서 시작하고, 건너뛴 메시지가 없다. 도중에 저장하고 죽은 턴 뒤의 지우기와 recovering purge 에서, 버린 메시지가 열려 있던 것까지 `Reset` 줄의 `closed_before` 에 있다. 닫는 저장이 실패하면 줄도 head 변경도 없다. session 을 지우는 정지 뒤에 `Unannounced` 줄이 있고, 덧붙임이 실패하면 session 이 남는다. 덧붙임이 실패하면 head 가 그대로인 시험, 줄과 head 변경 사이에 턴이 받아들여지지 않는 시험, 지우기의 갈래마다 줄 시험 |
-| L3d | `turn-boundaries.jsonl` 을 읽던 곳 가운데 컷 뒤에도 남는 곳을 턴 기록으로 옮긴다(§19.2 d). 옮긴 것은 seed 의 세대 경계다(§11.2). official-client 다리(`keeper_turn_bridge`)는 턴 기록 쪽 규칙이 없어 옮기지 않는다. 옛 파일 쓰기는 컷(L10)에서 멈춘다 | 옮긴 독자마다 다시 쓴 시험. 요청 seed 가 같은 atom 에서 풀린다 |
+| L3d | `turn-boundaries.jsonl` 을 읽던 곳 가운데 컷 뒤에도 남는 곳을 턴 기록으로 옮긴다(§19.2 d). 옮긴 것은 seed 의 세대 경계다(§11.2). official-client 다리는 L3e 가 옮긴다. 옛 파일 쓰기는 컷(L10)에서 멈춘다 | 옮긴 독자마다 다시 쓴 시험. 요청 seed 가 같은 atom 에서 풀린다 |
+| L3e | official-client 다리(`keeper_turn_bridge`)가 턴 기록과 장부(`client-turns.jsonl`)를 읽는다(§11.8). official client 가 답한 턴이 끝날 때 장부에 줄을 쓴다. 장부가 cursor 파일을 대신한다. 옛 cursor 파일은 컷에서 지운다(§19.1) | 장면마다 시험 하나: official client 턴 뒤 Agent Core 가 이어받기, A → B → A 다시 열기, 센 `Reset`, 해석되지 않는 턴 기록 줄, 장부 줄이 없는 session |
 | L4 | lane 선언: Librarian 의 built-in lane 과 그 표, 풀린 lane 값(질문 쪽 값과 slot 별 key), `lane_held` | 로드 시험. 선언이 같으면 값이 같고, slot 하나의 창이 바뀌면 값이 다르다 |
 | L5a | 직접 쓰기의 계획(`Librarian_direct.plan`, §8.5 의 표). 순수 함수다. `removal` 에 직접 쓰기의 둘(`Superseded_by`, `Retracted`)과 쓴 이(`actor`)를 더한다. 부르는 곳은 L5 의 쓰는 쪽이다 | 표의 행마다 시험. 줄을 쓰는 답마다 효과를 적용한 Memory 에 같은 fact 가 둘 없고 근거 없는 파생 fact 가 없다. 철회가 그 fact 에 기댄 fact 를 같은 계획에서 지운다. 같은 쓰기를 두 번 하면 둘째는 줄을 쓰지 않는다 |
 | L5b | 반영 기록의 줄: 줄 타입(`Librarian_log`)과 codec(`Librarian_log_codec`, §8.1). 파일을 읽거나 쓰지 않는다. `cause` 는 전환이 만드는 둘(`Direct`, `Adopt`)만 넣는다. `Read`, `Make_room`, `Skip` 과 그것이 싣는 타입은 그것을 만드는 층(L6, L7)이 더한다. fact 는 스냅샷 codec 으로, 끝자리는 턴 기록 codec 으로 쓴다 | 생성자마다 왕복 시험과 글로 박은 모양. object 마다 field 집합이 정확히 맞아야 한다. 읽기는 쓰기가 실은 글(claim, 이유, 이름)을 거절하지 않는다. 쓰는 쪽이 쓴 줄을 읽는 쪽이 거절하면 저장소가 선다 |

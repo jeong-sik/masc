@@ -335,10 +335,6 @@ val retained_bindings : base_path:string -> keeper_name:string -> (t list, read_
 (** All retained per-runtime bindings currently preserved for [keeper_name],
     sorted deterministically by client kind and runtime identity. Reads only. *)
 
-val bridge_cursors_path : base_path:string -> keeper_name:string -> (string, string) result
-(** Path of the per-keeper causal bridge cursor file inside the official-client
-    runtime state directory. *)
-
 type stored_binding =
   { keeper_name : string
   ; path : string

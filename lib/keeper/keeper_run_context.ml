@@ -231,7 +231,7 @@ let prepare_run_context
     | None ->
       (match
          Keeper_turn_bridge.uncheckpointed_official_turns
-           ~keepers_dir:(Workspace.keepers_runtime_dir config)
+           ~base_path:config.base_path
            ~keeper_name:meta.name
            ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
            ~session_dir

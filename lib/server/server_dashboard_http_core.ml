@@ -350,7 +350,9 @@ let board_posts_24h_in_process ~config ~now ~light : int option =
       | Error _ -> None
       | Ok () ->
         let cutoff = now -. 86400.0 in
-        let posts = Board_dispatch.list_posts_unchecked ~limit:1000 () in
+        let posts =
+          Board_dispatch.list_posts_unchecked ~sort_by:Board_dispatch.Recent ~limit:1000 ()
+        in
         let count =
           List.fold_left
             (fun acc (post : Board.post) ->

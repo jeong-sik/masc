@@ -264,7 +264,7 @@ let keeper_costs_next_change ~base_path ~now =
 
 type keeper_cost_row_stats =
   { attributed_usd : float
-  ; cost_reported_samples : int
+  ; metered_turns : int
   ; subscription_zero_cost_turns : int
   ; sample_count : int
   }
@@ -369,9 +369,10 @@ let keeper_cost_row ~window_minutes ~now ~keeper_name reading =
          ; "metrics_read", metrics_read
          ])
   in
+  let metered_turns = max 0 (cost.reported_samples - !zero_cost_reported_samples) in
   let stats =
     { attributed_usd = cost.reported
-    ; cost_reported_samples = cost.reported_samples
+    ; metered_turns
     ; subscription_zero_cost_turns =
         cost.unreported_samples + !zero_cost_reported_samples
     ; sample_count = !sample_count
@@ -430,11 +431,11 @@ let keeper_cost_aggregates_json
       readings
   in
   let keeper_rows = List.map fst row_pairs in
-  let total_attributed_usd, total_cost_reported, total_subscription_zero, total_turns =
+  let total_attributed_usd, total_metered_turns, total_subscription_zero, total_turns =
     List.fold_left
-      (fun (usd, reported, sub_zero, turns) (_, stats) ->
+      (fun (usd, metered, sub_zero, turns) (_, stats) ->
         ( usd +. stats.attributed_usd
-        , reported + stats.cost_reported_samples
+        , metered + stats.metered_turns
         , sub_zero + stats.subscription_zero_cost_turns
         , turns + stats.sample_count ))
       (0.0, 0, 0, 0)
@@ -446,7 +447,7 @@ let keeper_cost_aggregates_json
       Printf.sprintf
         "Per-keeper metrics attribute $%.2f across %d metered turn(s); %d of %d turn(s) had null/$0 subscription cost, and non-keeper system calls (verifier, librarian, harness, compaction) are reported only in /api/v1/models/metrics."
         total_attributed_usd
-        total_cost_reported
+        total_metered_turns
         total_subscription_zero
         total_turns
     else
@@ -462,9 +463,9 @@ let keeper_cost_aggregates_json
     ; ( "reconciliation"
       , `Assoc
           [ "keeper_attributed_usd", `Float total_attributed_usd
-          ; "cost_reported_turns", `Int total_cost_reported
+          ; "cost_reported_turns", `Int total_metered_turns
           ; "subscription_zero_cost_turns", `Int total_subscription_zero
-          ; "total_turns_24h", `Int total_turns
+          ; "total_turns", `Int total_turns
           ; "note", `String reconciliation_note
           ] )
     ]

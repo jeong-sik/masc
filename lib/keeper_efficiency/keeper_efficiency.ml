@@ -7,6 +7,7 @@ type keeper_month = {
   output_tokens : int;
   cache_read_tokens : int option;
   cache_creation_tokens : int option;
+  cache_paired_read_tokens : int;
   cache_paired_input_tokens : int;
   cache_hit_pct : float option;
   cost_usd : float;
@@ -34,7 +35,7 @@ type month_view = {
   fleet : fleet;
 }
 
-let cache_schema = "masc.keeper-efficiency-cache/v2"
+let cache_schema = "masc.keeper-efficiency-cache/v3"
 let view_schema = "masc.keeper-efficiency/v1"
 let cache_dirname = "keeper-efficiency"
 
@@ -108,6 +109,7 @@ let zero_keeper name =
   ; output_tokens = 0
   ; cache_read_tokens = None
   ; cache_creation_tokens = None
+  ; cache_paired_read_tokens = 0
   ; cache_paired_input_tokens = 0
   ; cache_hit_pct = None
   ; cost_usd = 0.0
@@ -155,13 +157,17 @@ let add_opt_int a b =
   | Some x, Some y -> Some (saturating_add_int x y)
 ;;
 
-let compute_cache_hit_pct ~cache_read_tokens ~paired_input_tokens =
-  match cache_read_tokens with
-  | Some read when paired_input_tokens > 0 ->
-    let pct = 100.0 *. float_of_int (non_negative_int read) /. float_of_int paired_input_tokens in
+let compute_cache_hit_pct ~paired_read_tokens ~paired_input_tokens =
+  if paired_input_tokens <= 0
+  then None
+  else (
+    let pct =
+      100.0
+      *. float_of_int (non_negative_int paired_read_tokens)
+      /. float_of_int paired_input_tokens
+    in
     if Float.is_nan pct || not (Float.is_finite pct) then None
-    else Some (Float.min 100.0 (Float.max 0.0 pct))
-  | Some _ | None -> None
+    else Some (Float.min 100.0 (Float.max 0.0 pct)))
 ;;
 
 let raw_non_neg_int_opt json name =
@@ -206,15 +212,18 @@ let fold_cost_row acc json =
          let cost_usd = non_negative_finite_float reported.cost_usd in
          let row_cache_read = raw_non_neg_int_opt json "cache_read_tokens" in
          let row_cache_creation = raw_non_neg_int_opt json "cache_creation_tokens" in
-         let row_paired_input =
+         let row_paired_read, row_paired_input =
            match row_cache_read with
-           | Some _ when input_tokens > 0 -> input_tokens
-           | Some _ | None -> 0
+           | Some read when input_tokens > 0 -> read, input_tokens
+           | Some _ | None -> 0, 0
          in
          update_keeper acc agent (fun k ->
              let cache_read_tokens = add_opt_int k.cache_read_tokens row_cache_read in
              let cache_creation_tokens =
                add_opt_int k.cache_creation_tokens row_cache_creation
+             in
+             let cache_paired_read_tokens =
+               saturating_add_int k.cache_paired_read_tokens row_paired_read
              in
              let cache_paired_input_tokens =
                saturating_add_int k.cache_paired_input_tokens row_paired_input
@@ -224,10 +233,11 @@ let fold_cost_row acc json =
              ; output_tokens = saturating_add_int k.output_tokens output_tokens
              ; cache_read_tokens
              ; cache_creation_tokens
+             ; cache_paired_read_tokens
              ; cache_paired_input_tokens
              ; cache_hit_pct =
                  compute_cache_hit_pct
-                   ~cache_read_tokens
+                   ~paired_read_tokens:cache_paired_read_tokens
                    ~paired_input_tokens:cache_paired_input_tokens
              ; cost_usd = saturating_add_float k.cost_usd cost_usd
              });
@@ -432,6 +442,10 @@ let keeper_of_json = function
        , non_neg_int_member fields "output_tokens"
        , nullable_non_neg_int_member fields "cache_read_tokens"
        , nullable_non_neg_int_member fields "cache_creation_tokens"
+       , (match List.assoc_opt "cache_paired_read_tokens" fields with
+          | None -> Some 0
+          | Some (`Int v) when v >= 0 -> Some v
+          | Some _ -> None)
        , (match List.assoc_opt "cache_paired_input_tokens" fields with
           | None -> Some 0
           | Some (`Int v) when v >= 0 -> Some v
@@ -448,6 +462,7 @@ let keeper_of_json = function
        , Some output_tokens
        , Some cache_read_tokens
        , Some cache_creation_tokens
+       , Some cache_paired_read_tokens
        , Some cache_paired_input_tokens
        , Some cost_usd
        , Some calls
@@ -462,10 +477,11 @@ let keeper_of_json = function
          ; output_tokens
          ; cache_read_tokens
          ; cache_creation_tokens
+         ; cache_paired_read_tokens
          ; cache_paired_input_tokens
          ; cache_hit_pct =
              compute_cache_hit_pct
-               ~cache_read_tokens
+               ~paired_read_tokens:cache_paired_read_tokens
                ~paired_input_tokens:cache_paired_input_tokens
          ; cost_usd
          ; calls
@@ -487,6 +503,7 @@ let keeper_has_cost_state (k : keeper_month) =
   || k.output_tokens > 0
   || Option.is_some k.cache_read_tokens
   || Option.is_some k.cache_creation_tokens
+  || k.cache_paired_read_tokens > 0
   || k.cache_paired_input_tokens > 0
   || k.cost_usd > 0.0
   || (k.calls = 0 && k.failed = 0 && k.deferred = 0 && k.tool_ms = 0.0)
@@ -614,6 +631,7 @@ let section_to_json section =
                   ; ("output_tokens", `Int k.output_tokens)
                   ; ("cache_read_tokens", int_opt_to_json k.cache_read_tokens)
                   ; ("cache_creation_tokens", int_opt_to_json k.cache_creation_tokens)
+                  ; ("cache_paired_read_tokens", `Int k.cache_paired_read_tokens)
                   ; ("cache_paired_input_tokens", `Int k.cache_paired_input_tokens)
                   ; ("cost_usd", `Float k.cost_usd)
                   ; ("calls", `Int k.calls)
@@ -878,6 +896,9 @@ let add_keeper_months (a : keeper_month) (b : keeper_month) : keeper_month =
   let cache_creation_tokens =
     add_opt_int a.cache_creation_tokens b.cache_creation_tokens
   in
+  let cache_paired_read_tokens =
+    saturating_add_int a.cache_paired_read_tokens b.cache_paired_read_tokens
+  in
   let cache_paired_input_tokens =
     saturating_add_int a.cache_paired_input_tokens b.cache_paired_input_tokens
   in
@@ -887,10 +908,11 @@ let add_keeper_months (a : keeper_month) (b : keeper_month) : keeper_month =
   ; output_tokens = saturating_add_int a.output_tokens b.output_tokens
   ; cache_read_tokens
   ; cache_creation_tokens
+  ; cache_paired_read_tokens
   ; cache_paired_input_tokens
   ; cache_hit_pct =
       compute_cache_hit_pct
-        ~cache_read_tokens
+        ~paired_read_tokens:cache_paired_read_tokens
         ~paired_input_tokens:cache_paired_input_tokens
   ; cost_usd = saturating_add_float a.cost_usd b.cost_usd
   ; calls = saturating_add_int a.calls b.calls
@@ -920,7 +942,7 @@ let fleet_of keepers =
   ; cost_usd_per_turn = per_turn totals.cost_usd
   ; cache_hit_pct =
       compute_cache_hit_pct
-        ~cache_read_tokens:totals.cache_read_tokens
+        ~paired_read_tokens:totals.cache_paired_read_tokens
         ~paired_input_tokens:totals.cache_paired_input_tokens
   }
 ;;

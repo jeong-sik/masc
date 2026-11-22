@@ -262,7 +262,7 @@ let month_tests =
           let tool_size = (Unix.stat tool_path).Unix.st_size in
           let broken_cursors =
             Printf.sprintf
-              {|{"schema":"masc.keeper-efficiency-cache/v2","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":"corrupt","tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
+              {|{"schema":"masc.keeper-efficiency-cache/v3","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":"corrupt","tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
               (today_month ()) day_num day_num tool_path tool_size
           in
           Fs_compat.save_file cache broken_cursors;
@@ -277,7 +277,7 @@ let month_tests =
              cursorless ledger on top of cached totals. *)
           let missing_cost_cursor_only =
             Printf.sprintf
-              {|{"schema":"masc.keeper-efficiency-cache/v2","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[],"tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
+              {|{"schema":"masc.keeper-efficiency-cache/v3","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[],"tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
               (today_month ()) day_num day_num tool_path tool_size
           in
           Fs_compat.save_file cache missing_cost_cursor_only;
@@ -298,7 +298,7 @@ let month_tests =
           let cost_size = (Unix.stat cost_path).Unix.st_size in
           let empty_turn_ids_with_turn =
             Printf.sprintf
-              {|{"schema":"masc.keeper-efficiency-cache/v2","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[{"path":%S,"boundary":%d}],"tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
+              {|{"schema":"masc.keeper-efficiency-cache/v3","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[{"path":%S,"boundary":%d}],"tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
               (today_month ()) day_num day_num cost_path cost_size tool_path tool_size
           in
           Fs_compat.save_file cache empty_turn_ids_with_turn;
@@ -321,7 +321,7 @@ let month_tests =
           let cost_size_now = (Unix.stat cost_path).Unix.st_size in
           let dup_tool_cursors =
             Printf.sprintf
-              {|{"schema":"masc.keeper-efficiency-cache/v2","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[{"path":%S,"boundary":%d}],"tool_cursors":[{"path":%S,"boundary":0},{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":8,"output_tokens":10,"cost_usd":0.40,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
+              {|{"schema":"masc.keeper-efficiency-cache/v3","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[{"path":%S,"boundary":%d}],"tool_cursors":[{"path":%S,"boundary":0},{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":8,"output_tokens":10,"cost_usd":0.40,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
               (today_month ()) day_num day_num cost_path cost_size_now
               tool_path tool_path tool_size
           in
@@ -345,7 +345,7 @@ let month_tests =
           let rotated_size = (Unix.stat rotated_tool_path).Unix.st_size in
           let missing_second_tool_cursor =
             Printf.sprintf
-              {|{"schema":"masc.keeper-efficiency-cache/v2","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[{"path":%S,"boundary":%d}],"tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":8,"output_tokens":10,"cost_usd":0.40,"calls":2,"failed":0,"deferred":0,"tool_ms":20.0}]}}]}|}
+              {|{"schema":"masc.keeper-efficiency-cache/v3","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[{"path":%S,"boundary":%d}],"tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":8,"output_tokens":10,"cost_usd":0.40,"calls":2,"failed":0,"deferred":0,"tool_ms":20.0}]}}]}|}
               (today_month ()) day_num day_num cost_path cost_size_now
               rotated_tool_path rotated_size
           in
@@ -571,6 +571,42 @@ let cache_and_window_tests =
             (filtered_json |> member "fleet" |> member "turns_total" |> to_int);
           near "fleet cache_hit_pct" 75.0
             (filtered_json |> member "fleet" |> member "cache_hit_pct" |> to_float)) )
+  ; ( "unpaired cache_read with zero input_tokens never inflates cache_hit_pct across cache reload"
+    , `Quick
+    , fun () ->
+        with_masc_root (fun root ->
+          let costs = costs_store root in
+          (* Turn 1: paired 200/1000 = 20.0% *)
+          Dated_jsonl.append costs
+            (CL.to_json
+               ~extra_fields:[ "cache_read_tokens", `Int 200 ]
+               (cost_row ~agent:"paired-keeper" ~turn:1 ~input_tokens:1000
+                  ~output_tokens:100 ~cost_usd:0.50 Resolved));
+          (* Turn 2: input_tokens=0 with cache_read_tokens=800 must NOT inflate cache_hit_pct to 100% *)
+          Dated_jsonl.append costs
+            (CL.to_json
+               ~extra_fields:[ "cache_read_tokens", `Int 800 ]
+               (cost_row ~agent:"paired-keeper" ~turn:2 ~input_tokens:0
+                  ~output_tokens:50 ~cost_usd:0.10 Resolved));
+          let month = today_month () in
+          let check_view label view =
+            let row = keeper_row view "paired-keeper" |> Option.get in
+            check (option int) (label ^ " total cache_read_tokens") (Some 1000)
+              row.KE.cache_read_tokens;
+            check int (label ^ " cache_paired_read_tokens") 200
+              row.KE.cache_paired_read_tokens;
+            check int (label ^ " cache_paired_input_tokens") 1000
+              row.KE.cache_paired_input_tokens;
+            near (label ^ " keeper cache_hit_pct stays 20.0") 20.0
+              (Option.get row.KE.cache_hit_pct);
+            near (label ^ " fleet cache_hit_pct stays 20.0") 20.0
+              (Option.get view.KE.fleet.KE.cache_hit_pct)
+          in
+          let view1 = KE.read_month ~masc_root:root ~month |> Result.get_ok in
+          check_view "fresh" view1;
+          (* Second read exercises v3 boundary cache round-trip *)
+          let view2 = KE.read_month ~masc_root:root ~month |> Result.get_ok in
+          check_view "cached" view2) )
   ]
 
 let () =

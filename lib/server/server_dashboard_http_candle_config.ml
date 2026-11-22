@@ -1252,44 +1252,53 @@ let is_routing_failover_key (full_key : string) : bool =
 ;;
 
 (* Process-lifetime bind, port, listener, storage, and worker-pool sections
-   cannot be hot-reloaded by [Server_runtime_config_broadcast]. *)
-let is_restart_only_runtime_key ~segs ~leaf_norm =
-  let top_lc =
-    match segs with
-    | top :: _ -> String.lowercase_ascii top
-    | [] -> ""
-  in
-  let top_is_restart =
-    match top_lc with
-    | "server" | "http" | "grpc" | "listener" | "listeners" | "storage"
-    | "pool" | "pools" | "domain_pool" | "executor_pool" | "worker_pool"
-    | "tls" | "ssl" | "socket" -> true
-    | _ -> false
-  in
+   cannot be hot-reloaded by [Server_runtime_config_broadcast]. Every dotted
+   segment is normalized (`-` -> `_`, lowercased) so kebab-case sections like
+   `[domain-pool]` and nested sections like `runtime.tls.*` or `runtime.pool.*`
+   stay classified as [Restart_required]. *)
+let is_restart_only_section_segment seg_norm =
+  match seg_norm with
+  | "server" | "http" | "grpc" | "listener" | "listeners" | "storage"
+  | "pool" | "pools" | "domain_pool" | "executor_pool" | "worker_pool"
+  | "tls" | "ssl" | "socket" | "sockets" | "bind" -> true
+  | _ -> false
+;;
+
+let is_restart_only_runtime_key ~segs_norm ~leaf_norm =
+  let any_seg_is_restart = List.exists is_restart_only_section_segment segs_norm in
   let leaf_is_restart =
     match leaf_norm with
-    | "bind" | "bind_host" | "bind_addr" | "bind_address" | "listen_addr"
-    | "listen_host" | "listen_port" | "port" | "grpc_port" | "http_port"
-    | "storage_root" | "storage_dir" | "data_root" | "data_dir"
-    | "base_path" | "masc_root" | "pool_size" | "domain_pool_size"
-    | "executor_pool_size" | "worker_pool_size" | "max_domains" -> true
+    | "bind" | "bind_host" | "bind_addr" | "bind_address"
+    | "listen" | "listen_addr" | "listen_address" | "listen_host" | "listen_port"
+    | "port" | "grpc_port" | "http_port"
+    | "storage_root" | "storage_dir" | "storage_path" | "storage_backend"
+    | "data_root" | "data_dir" | "base_path" | "masc_root"
+    | "socket" | "socket_path" | "unix_socket"
+    | "pool_size" | "domain_pool_size" | "executor_pool_size"
+    | "worker_pool_size" | "max_domains" -> true
     | _ ->
       String.ends_with ~suffix:"_port" leaf_norm
       || String.ends_with ~suffix:"_bind" leaf_norm
       || String.ends_with ~suffix:"_socket" leaf_norm
+      || String.ends_with ~suffix:"_socket_path" leaf_norm
       || String.ends_with ~suffix:"_pool_size" leaf_norm
+      || String.starts_with ~prefix:"tls_" leaf_norm
+      || String.starts_with ~prefix:"ssl_" leaf_norm
   in
-  top_is_restart || leaf_is_restart
+  any_seg_is_restart || leaf_is_restart
 ;;
 
 let classify_runtime_key_reload_scope ?known_provider_ids (full_key : string) : reload_scope =
   let segs = split_dotted_key_segments full_key |> List.map strip_toml_quotes in
+  let segs_norm =
+    List.map (fun s -> normalize_key_separators (String.lowercase_ascii (String.trim s))) segs
+  in
   let leaf_norm =
-    match List.rev segs with
-    | leaf :: _ -> normalize_key_separators (String.lowercase_ascii (String.trim leaf))
+    match List.rev segs_norm with
+    | leaf :: _ -> leaf
     | [] -> ""
   in
-  if is_restart_only_runtime_key ~segs ~leaf_norm
+  if is_restart_only_runtime_key ~segs_norm ~leaf_norm
   then Restart_required
   else (
     let top_raw =

@@ -766,7 +766,20 @@ let test_cache_telemetry_and_reconciliation () =
                ; "total_tokens", `Int 600
                ] )
          ]);
-    (* Keeper B: never reports cache tokens and runs strictly on subscription null cost. *)
+    (* Keeper B: never reports cache tokens; 1 explicit $0.0 turn + 1 null subscription turn. *)
+    append_metric config "sub-beta"
+      (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+       @ [ "ts_unix", `Float ts
+         ; "channel", `String "turn"
+         ; "cost_usd", `Float 0.0
+         ; "latency_ms", `Int 80
+         ; ( "usage"
+           , `Assoc
+               [ "input_tokens", `Int 400
+               ; "output_tokens", `Int 25
+               ; "total_tokens", `Int 425
+               ] )
+         ]);
     append_metric config "sub-beta"
       (Keeper_metrics_record.fields Keeper_metrics_record.Turn
        @ [ "ts_unix", `Float ts
@@ -784,7 +797,7 @@ let test_cache_telemetry_and_reconciliation () =
       Dashboard_http_keeper.keeper_cost_aggregates_json
         ~config
         ~keepers:[ make_meta "cache-alpha"; make_meta "sub-beta" ]
-        ~window_minutes:default_window_minutes
+        ~window_minutes:60
         ~now_ts:now
     in
     let keepers =
@@ -808,10 +821,16 @@ let test_cache_telemetry_and_reconciliation () =
     let reconciliation = Yojson.Safe.Util.member "reconciliation" full in
     check (float 0.0001) "keeper_attributed_usd" 1.25
       (float_field "keeper_attributed_usd" reconciliation);
-    check int "subscription_zero_cost_turns" 2
-      (int_field "subscription_zero_cost_turns" reconciliation);
-    check int "total_turns_24h" 3
-      (int_field "total_turns_24h" reconciliation);
+    (* $1.25 is metered; $0.0 + two null turns are subscription_zero_cost_turns (mutually exclusive!) *)
+    let metered = int_field "cost_reported_turns" reconciliation in
+    let sub_zero = int_field "subscription_zero_cost_turns" reconciliation in
+    let total = int_field "total_turns" reconciliation in
+    check int "cost_reported_turns (metered only, excludes $0.0)" 1 metered;
+    check int "subscription_zero_cost_turns ($0.0 + null)" 3 sub_zero;
+    check int "total_turns (window-accurate)" 4 total;
+    check int "metered + subscription_zero_cost = total_turns" total (metered + sub_zero);
+    check bool "stale total_turns_24h key absent" true
+      (Yojson.Safe.Util.member "total_turns_24h" reconciliation = `Null);
     check bool "reconciliation note mentions /api/v1/models/metrics" true
       (String.length (string_field "note" reconciliation) > 0))
 

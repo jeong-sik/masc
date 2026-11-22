@@ -64,6 +64,9 @@ val commit_link_task_goal_json :
   task_id:string ->
   Yojson.Safe.t ->
   (Yojson.Safe.t, link_task_goal_error) result
+(** Validate and commit a task-to-goal link. Requires both [goal_id] and an
+    [expected_workspace] precondition object matching [config] (consistent with
+    sibling operator mutation endpoints). *)
 
 val commit_link_task_goal_body :
   config:Workspace.config ->

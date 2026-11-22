@@ -2455,7 +2455,47 @@ let test_track_a_scorecard_and_capabilities () =
       ; "verifications_rejected_24h"
       ; "board_posts_24h"
       ; "cost_24h_usd"
-      ])
+      ];
+    (* Non-light mode observes recent unvoted board posts via Board_dispatch.Recent *)
+    Eio_main.run (fun _env ->
+      Fun.protect
+        ~finally:Board_dispatch.reset_for_test
+        (fun () ->
+           Board_dispatch.reset_for_test ();
+           (match
+              Board_dispatch.init_jsonl
+                ~base_path:config.Workspace.base_path
+                ~recipient_lookup:Recipient_lookup.none_declared
+                ()
+            with
+            | Ok () -> ()
+            | Error _ -> Alcotest.fail "Board_dispatch.init_jsonl failed");
+           (match
+              Board_dispatch.create_post
+                ~author:"operator"
+                ~title:"Recent unvoted post"
+                ~content:"fresh signal"
+                ~post_kind:Board.Human_post
+                ()
+            with
+            | Ok _ -> ()
+            | Error _ -> Alcotest.fail "Board_dispatch.create_post failed");
+           let full_shell =
+             Server_dashboard_http_core.dashboard_shell_payload_json ~light:false config
+           in
+           let full_sc = json_member_exn "scorecard_24h" full_shell in
+           Alcotest.(check int)
+             "board_posts_24h counts recent unvoted post in non-light mode"
+             1
+             (json_int_exn "board_posts_24h" full_sc);
+           let light_shell =
+             Server_dashboard_http_core.dashboard_shell_payload_json ~light:true config
+           in
+           let light_sc = json_member_exn "scorecard_24h" light_shell in
+           Alcotest.(check bool)
+             "board_posts_24h stays null in light mode"
+             true
+             (json_member_exn "board_posts_24h" light_sc = `Null))))
 ;;
 
 let test_track_a_memory_diff_human_claim_text () =
@@ -2626,6 +2666,17 @@ let test_track_a_hot_reload_and_hardened_secrets () =
   check_scope "http.bind_host stays restart_required" "restart_required" "http.bind_host";
   check_scope "storage.data_dir stays restart_required" "restart_required" "storage.data_dir";
   check_scope "domain_pool.pool_size stays restart_required" "restart_required" "domain_pool.pool_size";
+  check_scope "kebab domain-pool.request_timeout_s stays restart_required" "restart_required" "domain-pool.request_timeout_s";
+  check_scope "kebab executor-pool.retry_limit stays restart_required" "restart_required" "executor-pool.retry_limit";
+  check_scope "nested runtime.tls.cert_file stays restart_required" "restart_required" "runtime.tls.cert_file";
+  check_scope "nested runtime.ssl.ca_bundle stays restart_required" "restart_required" "runtime.ssl.ca_bundle";
+  check_scope "nested runtime.storage.backend stays restart_required" "restart_required" "runtime.storage.backend";
+  check_scope "nested runtime.pool.max_workers stays restart_required" "restart_required" "runtime.pool.max_workers";
+  check_scope "runtime.socket_path stays restart_required" "restart_required" "runtime.socket_path";
+  check_scope "runtime.listen_address stays restart_required" "restart_required" "runtime.listen_address";
+  check_scope "runtime.storage_path stays restart_required" "restart_required" "runtime.storage_path";
+  check_scope "runtime.tls_cert stays restart_required" "restart_required" "runtime.tls_cert";
+  check_scope "runtime.ssl_verify stays restart_required" "restart_required" "runtime.ssl_verify";
   (* 2. Hardened is_secret_key *)
   List.iter
     (fun k ->
@@ -2778,13 +2829,30 @@ let test_track_a_task_goal_link_and_strict_claim () =
     Alcotest.(check int) "link-goal 200 OK" 200 (Httpun.Status.to_code st_ok);
     Alcotest.(check string) "linked task_id" t_low (json_string_exn "task_id" body_ok);
     Alcotest.(check string) "linked goal_id" goal1 (json_string_exn "goal_id" body_ok);
+    (* Missing expected_workspace precondition -> 400 Bad Request *)
+    let st_missing_ws, body_missing_ws =
+      Server_routes_http_routes_verification.commit_link_task_goal_json
+        ~config
+        ~operator_id:"operator"
+        ~task_id:t_low
+        (`Assoc [ "goal_id", `String goal1 ])
+      |> Server_routes_http_routes_verification.link_task_goal_response
+    in
+    Alcotest.(check int)
+      "missing expected_workspace -> 400"
+      400
+      (Httpun.Status.to_code st_missing_ws);
+    Alcotest.(check bool)
+      "missing precondition error mentions expected_workspace"
+      true
+      (contains_substr ~needle:"expected_workspace" (json_string_exn "error" body_missing_ws));
     (* Idempotent retry returns 200 *)
     let st_idem, _ =
       Server_routes_http_routes_verification.commit_link_task_goal_json
         ~config
         ~operator_id:"operator"
         ~task_id:t_low
-        (`Assoc [ "goal_id", `String goal1 ])
+        (`Assoc [ "goal_id", `String goal1; "expected_workspace", good_ws ])
       |> Server_routes_http_routes_verification.link_task_goal_response
     in
     Alcotest.(check int) "idempotent retry 200 OK" 200 (Httpun.Status.to_code st_idem);
@@ -2794,7 +2862,7 @@ let test_track_a_task_goal_link_and_strict_claim () =
         ~config
         ~operator_id:"operator"
         ~task_id:t_low
-        (`Assoc [ "goal_id", `String goal2 ])
+        (`Assoc [ "goal_id", `String goal2; "expected_workspace", good_ws ])
       |> Server_routes_http_routes_verification.link_task_goal_response
     in
     Alcotest.(check int) "already assigned -> 409" 409 (Httpun.Status.to_code st_conflict);
@@ -2804,7 +2872,7 @@ let test_track_a_task_goal_link_and_strict_claim () =
         ~config
         ~operator_id:"operator"
         ~task_id:"task-does-not-exist"
-        (`Assoc [ "goal_id", `String goal1 ])
+        (`Assoc [ "goal_id", `String goal1; "expected_workspace", good_ws ])
       |> Server_routes_http_routes_verification.link_task_goal_response
     in
     Alcotest.(check int) "unknown task -> 404" 404 (Httpun.Status.to_code st_no_task);
@@ -2814,7 +2882,7 @@ let test_track_a_task_goal_link_and_strict_claim () =
         ~config
         ~operator_id:"operator"
         ~task_id:t_high
-        (`Assoc [ "goal_id", `String "goal-missing" ])
+        (`Assoc [ "goal_id", `String "goal-missing"; "expected_workspace", good_ws ])
       |> Server_routes_http_routes_verification.link_task_goal_response
     in
     Alcotest.(check int) "unknown goal -> 404" 404 (Httpun.Status.to_code st_no_goal);

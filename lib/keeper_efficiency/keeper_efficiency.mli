@@ -42,6 +42,7 @@ type keeper_month = {
   output_tokens : int;
   cache_read_tokens : int option;
   cache_creation_tokens : int option;
+  cache_paired_read_tokens : int;
   cache_paired_input_tokens : int;
   cache_hit_pct : float option;
   cost_usd : float;

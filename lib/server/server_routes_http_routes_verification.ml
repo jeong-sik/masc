@@ -330,15 +330,15 @@ let commit_link_task_goal_json ~config ~operator_id ~task_id json
       else (
         let open Result.Syntax in
         let* () =
-          if List.mem_assoc "expected_workspace" fields
-          then (
+          if not (List.mem_assoc "expected_workspace" fields)
+          then Error (Link_invalid_request "expected_workspace precondition is required")
+          else (
             match Workspace.validate_expected_workspace ~config json with
             | Ok _ -> Ok ()
             | Error Workspace.Invalid_workspace_precondition ->
               Error (Link_invalid_request "invalid expected_workspace precondition")
             | Error Workspace.Workspace_precondition_failed ->
               Error (Link_workspace_conflict "workspace precondition failed"))
-          else Ok ()
         in
         let* goal_id =
           match non_empty_string_field fields "goal_id" with
@@ -556,20 +556,13 @@ let add_routes router =
                (error_json "unknown task action endpoint")
            | Some task_id ->
              let config = Mcp_server.workspace_config state in
-             (match Server_auth.validate_read_workspace_precondition ~config request with
-              | Error error ->
-                let body, status =
-                  Server_auth.read_workspace_precondition_error_response error
-                in
-                respond_json_value_with_cors ~status request reqd body
-              | Ok (Server_auth.Workspace_read_unbound | Server_auth.Workspace_read_matched) ->
-                Http.Request.read_body_async reqd (fun body ->
-                  let status, json =
-                    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-                      commit_link_task_goal_body ~config ~operator_id ~task_id body
-                      |> link_task_goal_response)
-                  in
-                  respond_json_value_with_cors ~status request reqd json)))
+             Http.Request.read_body_async reqd (fun body ->
+               let status, json =
+                 Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+                   commit_link_task_goal_body ~config ~operator_id ~task_id body
+                   |> link_task_goal_response)
+               in
+               respond_json_value_with_cors ~status request reqd json))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/tasks/cancel" (fun state operator_id request reqd ->
            Http.Request.read_body_async reqd (fun body ->
              let result =

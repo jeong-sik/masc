@@ -1137,7 +1137,12 @@ and execute_action ~now (m : Model.t) action =
                       in
                       (next, View_fetches.fetches_for_current_view next)
                   | [] ->
-                      if
+                      (* A zoomed panel advertises [Esc] as the way back to the
+                         list, so Esc restores the split layout before it
+                         touches the filter. *)
+                      if m.nav.zoomed then
+                        ({ m with nav = { m.nav with zoomed = false } }, [])
+                      else if
                         not (String.equal (Update_nav.current_filter_query m) "")
                       then (Update_nav.set_active_filter_query "" m, [])
                       else (m, [])))

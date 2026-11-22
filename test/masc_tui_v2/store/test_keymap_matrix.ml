@@ -2728,6 +2728,17 @@ let test_journeys_tab_multipane_dives_safety () =
   let m_z_dive, _ = Update_nav.push_dive m_z_kw1 (Nav.Dive_knowledge (Nav.Wiki_dive "architecture")) in
   Alcotest.(check bool) "R6 push_dive resets zoomed = false" false
     m_z_dive.nav.zoomed;
+  let m_z_filtered =
+    { m_z_kw1 with knowledge = Knowledge_store.set_filter "arch" m_z_kw1.knowledge }
+  in
+  let m_z_esc, _ = step m_z_filtered (mk_key Keymap.Input.Escape) in
+  Alcotest.(check bool) "R6 Esc on a zoomed view resets zoomed = false" false
+    m_z_esc.nav.zoomed;
+  Alcotest.(check string) "R6 Esc unzooms before clearing the filter" "arch"
+    m_z_esc.knowledge.filter_query;
+  let m_z_esc2, _ = step m_z_esc (mk_key Keymap.Input.Escape) in
+  Alcotest.(check string) "R6 second Esc clears the filter" ""
+    m_z_esc2.knowledge.filter_query;
 
   (* R7 & R8: Bounded scroll on End, Micro composer/paste lock, Work_inbox/Tasks_schedules pane counts, Palette Tab clamp *)
   record_case ();

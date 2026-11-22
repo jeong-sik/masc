@@ -669,6 +669,68 @@ let test_an_uncounted_request_leaves_its_turn_out () =
     (Some (2_600 + 600)) (Ledger.next_turn_peak ledger)
 ;;
 
+(* Regression for #54350 live bug: ephemeral [Outside_context] appended at the
+   request tail is absent from durable history on the next round. Because
+   [Runtime_model_input_tail_window] pins [Outside_context] instead of numbering
+   it as atom [history_atom_count - 1], [Ledger.holds] continues to succeed
+   across consecutive rounds without dropping the working ledger. *)
+let test_ephemeral_outside_context_does_not_drop_working_ledger () =
+  let module Types = Agent_core.Types in
+  let module Window = Runtime_model_input_tail_window in
+  let msg ?(origin = Types.Conversation) role text : Types.message =
+    { origin; role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
+  in
+  let user_0 = msg Types.User "check open PRs" in
+  let assistant_1 = msg Types.Assistant "calling list_prs" in
+  let tool_1 = msg Types.Tool "pr list result" in
+  let outside_r1 = msg ~origin:Types.Outside_context Types.User "## Active goals\n- round 1" in
+  let assistant_2 = msg Types.Assistant "calling inspect_pr" in
+  let tool_2 = msg Types.Tool "pr diff result" in
+  let outside_r2 = msg ~origin:Types.Outside_context Types.User "## Active goals\n- round 2" in
+  let assistant_3 = msg Types.Assistant "final summary" in
+  let build_request messages =
+    let atom_count, digest_at = Window.atom_opening_index messages in
+    let turn_context = List.exists Window.is_extra_context messages in
+    ( digest_at
+    , { Ledger.prefix_digest = prefix
+      ; first_atom = 0
+      ; atom_count
+      ; ends = ends_in digest_at ~first_atom:0 ~atom_count
+      ; tail_bytes = 256
+      ; turn_context
+      ; demote_before = 0
+      ; working_state = None
+      } )
+  in
+  let round1_msgs = [ user_0; assistant_1; tool_1; outside_r1 ] in
+  let digest_r1, req_r1 = build_request round1_msgs in
+  check int "round 1 counts only durable atoms (excludes Outside_context)" 2 req_r1.atom_count;
+  check bool "round 1 marks turn_context=true when Outside_context rides" true req_r1.turn_context;
+  let o1 = Ledger.observe ~digest_at:digest_r1 None req_r1 (Some (usage 1_200)) in
+  check string "round 1 starts ledger" "started" (Ledger.event_to_string o1.event);
+  (* Round 2: outside_r1 is gone from agent.state.messages; assistant_2 + tool_2
+     now sit where outside_r1 was, and a new ephemeral outside_r2 rides the tail. *)
+  let round2_msgs = [ user_0; assistant_1; tool_1; assistant_2; tool_2; outside_r2 ] in
+  let digest_r2, req_r2 = build_request round2_msgs in
+  check bool "round 2 durable history holds round 1 ledger (no working-ledger drop)" true
+    (Ledger.holds ~digest_at:digest_r2 o1.ledger);
+  check int "round 2 counts 3 durable atoms" 3 req_r2.atom_count;
+  let o2 = Ledger.observe ~digest_at:digest_r2 (Some o1.ledger) req_r2 (Some (usage 1_500)) in
+  check string "round 2 appends without History_reset" "appended_unmeasured"
+    (Ledger.event_to_string o2.event);
+  (* Round 3: pure post-tool round with no ephemeral context; ledger still holds
+     and takes its first clean sample. *)
+  let round3_msgs = [ user_0; assistant_1; tool_1; assistant_2; tool_2; assistant_3 ] in
+  let digest_r3, req_r3 = build_request round3_msgs in
+  check bool "round 3 durable history still holds round 2 ledger" true
+    (Ledger.holds ~digest_at:digest_r3 o2.ledger);
+  check bool "round 3 without context has turn_context=false" false req_r3.turn_context;
+  let o3 = Ledger.observe ~digest_at:digest_r3 (Some o2.ledger) req_r3 (Some (usage 1_800)) in
+  check string "round 3 appends cleanly without History_reset" "appended_unmeasured"
+    (Ledger.event_to_string o3.event);
+  check (option int) "round 3 records total_tokens sample" (Some 1_800) o3.ledger.total_tokens
+;;
+
 let () =
   Eio_main.run @@ fun _ ->
   run
@@ -714,6 +776,8 @@ let () =
         ; test_case "lookup without the appended atom" `Quick
             test_a_lookup_without_the_appended_atom_restarts
         ; test_case "both positions hold" `Quick test_both_positions_holding_keeps_appending
+        ; test_case "ephemeral Outside_context does not drop working ledger" `Quick
+            test_ephemeral_outside_context_does_not_drop_working_ledger
         ; test_case "provider-observed front checked at its position" `Quick
             test_a_provider_observed_front_is_checked_at_its_own_position
         ] )

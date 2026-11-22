@@ -123,14 +123,15 @@ let budget_error_to_core_error error =
        { message = budget_error_to_string error; limit = None })
 ;;
 
-(* Current runtime context and the Librarian working state survive cuts.
-   Historical system context and outside context are ordinary replay history
-   and may be trimmed. *)
+(* Current runtime context ([System_context] and ephemeral per-request
+   [Outside_context]) and the Librarian working state survive cuts and are
+   never counted as durable conversation atoms. Historical system context is
+   ordinary replay history and may be trimmed. *)
 let is_extra_context (msg : Agent_core.Types.message) =
   match msg.origin with
-  | System_context -> true
+  | System_context | Outside_context -> true
   | Conversation | Historical_system_context | Recovery_instruction
-  | Tool_result_followup | Agent_instruction | Outside_context -> false
+  | Tool_result_followup | Agent_instruction -> false
 ;;
 
 let is_pinned msg =

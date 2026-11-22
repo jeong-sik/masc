@@ -1140,8 +1140,11 @@ let assemble_hooks
                 Eio.Fiber.yield ();
                 emit_request_prompt_metrics ();
                 let extra_system_context, extra_outside_context =
-                  Keeper_context_assembly.split_outside_context
-                    extra_system_context_assembly
+                  match checkpoint_owner with
+                  | Runtime_execution.Masc_agent_core ->
+                    Keeper_context_assembly.split_outside_context
+                      extra_system_context_assembly
+                  | Runtime_execution.Official_client -> ctx, None
                 in
                 Agent_core.Hooks.AdjustParams
                   { current_params with

@@ -341,6 +341,12 @@ let prompt_carrier text =
   }
 ;;
 
+let outside_carrier text =
+  { (message text) with origin = Llm_provider.Types.Outside_context;
+    metadata = []
+  }
+;;
+
 let test_provider_content_messages_removes_typed_prompt_carrier () =
   let history = [ message "history"; message "current user" ] in
   let prompt_context = prompt_carrier "[system context] dynamic and memory blocks" in
@@ -771,6 +777,230 @@ let test_ctx_composition_preserves_input_measurement_boundary () =
      Some Turn_input_provenance.Measured_request, `Int 45_000]
 ;;
 
+(* Post-tool rounds after #54350 can move every dynamic block onto
+   [Outside_context] with no [System_context] carrier, while pre-tool rounds
+   emit both carriers. Both carriers hold blocks already accounted for in
+   [prompt_blocks], so both must be stripped (at most one of each) without
+   triggering [Prompt_context_presence_mismatch] or double-counting bytes in
+   [Message_system]. *)
+let test_provider_content_of_transmitted_handles_outside_context_carriers () =
+  let texts result =
+    Result.to_option result
+    |> Option.map
+         (List.map (fun (m : Agent_core.Types.message) ->
+            Agent_core.Types.text_of_content m.Agent_core.Types.content))
+  in
+  let failure_line ~prompt_context_present messages =
+    match
+      KAPM.provider_content_of_transmitted ~prompt_context_present ~messages
+    with
+    | Ok retained -> Printf.sprintf "attributed(%d)" (List.length retained)
+    | Error failure -> KAPM.provenance_failure_summary failure
+  in
+  let conv = [ message "user turn"; Agent_core.Types.assistant_msg "reply" ] in
+  let sys_ctx = prompt_carrier "[system context] host state" in
+  let out_ctx = outside_carrier "## Active goals\n- ship hotfix" in
+  let historical =
+    { (message "previous context") with
+      origin = Llm_provider.Types.Historical_system_context
+    ; metadata = []
+    }
+  in
+  check (option (list string))
+    "Outside_context-only post-tool round strips Outside_context cleanly"
+    (Some [ "user turn"; "reply" ])
+    (texts
+       (KAPM.provider_content_of_transmitted
+          ~prompt_context_present:true
+          ~messages:(conv @ [ out_ctx ])));
+  check (option (list string))
+    "both System_context and Outside_context are stripped together without repetition error"
+    (Some [ "user turn"; "reply" ])
+    (texts
+       (KAPM.provider_content_of_transmitted
+          ~prompt_context_present:true
+          ~messages:(conv @ [ sys_ctx; out_ctx ])));
+  check (option (list string))
+    "historical context stays when Outside_context is the current carrier"
+    (Some [ "previous context"; "user turn"; "reply" ])
+    (texts
+       (KAPM.provider_content_of_transmitted
+          ~prompt_context_present:true
+          ~messages:((historical :: conv) @ [ out_ctx ])));
+  check (option (list string))
+    "neither carrier present when prompt_context_present=false passes through"
+    (Some [ "user turn"; "reply" ])
+    (texts
+       (KAPM.provider_content_of_transmitted
+          ~prompt_context_present:false
+          ~messages:conv));
+  check string
+    "unannounced Outside_context is rejected as presence mismatch"
+    "prompt_context_presence_mismatch carrier_observed=true prompt_context_present=false"
+    (failure_line ~prompt_context_present:false (conv @ [ out_ctx ]));
+  check string
+    "duplicate Outside_context is rejected as repeated carrier"
+    "prompt_context_carrier_repeated"
+    (failure_line ~prompt_context_present:true (conv @ [ out_ctx; out_ctx ]));
+  check string
+    "duplicate System_context alongside Outside_context is rejected as repeated carrier"
+    "prompt_context_carrier_repeated"
+    (failure_line ~prompt_context_present:true (conv @ [ sys_ctx; out_ctx; sys_ctx ]))
+;;
+
+(* End-to-end projection attribution through [Keeper_run_prompt.assemble_request_context]
+   -> [Keeper_context_assembly.split_outside_context] -> [Agent_core.Agent_turn.prepare_messages]
+   -> [Keeper_context_assembly.has_split_request_context] -> [provider_content_of_transmitted]
+   -> [build_ctx_segments]: verifies the exact live post-tool Outside_context-only
+   round, pre-tool dual-carrier round, and empty/whitespace-only round. *)
+let test_split_outside_context_end_to_end_attribution () =
+  let system =
+    Masc.Keeper_turn_system.resend
+      ~held:None ~runtime_id:"test" ~current:[] ~articles_at:(fun _ -> Ok None)
+      "Base system prompt"
+    |> Result.get_ok |> fst
+  in
+  let tool_history =
+    [ message "inspect repo"
+    ; Agent_core.Types.assistant_msg "calling tool"
+    ; { origin = Llm_provider.Types.Conversation
+      ; role = Agent_core.Types.Tool
+      ; content = [ Agent_core.Types.Text "tool result" ]
+      ; name = None
+      ; tool_call_id = Some "call-1"
+      ; metadata = []
+      }
+    ]
+  in
+  let run_projection ~assembly ~history =
+    let extra_system_context, extra_outside_context =
+      Masc.Keeper_context_assembly.split_outside_context assembly
+    in
+    let turn_params =
+      { Agent_core.Hooks.default_turn_params with
+        extra_system_context
+      ; extra_outside_context
+      }
+    in
+    let prepared =
+      Agent_core.Agent_turn.prepare_messages ~messages:history ~turn_params ()
+    in
+    let prompt_context_present =
+      Masc.Keeper_context_assembly.has_split_request_context assembly
+    in
+    extra_system_context, extra_outside_context, prompt_context_present, prepared,
+    KAPM.provider_content_of_transmitted ~prompt_context_present ~messages:prepared
+  in
+  (* 1. Post-tool round with only Outside_text blocks (Active_goals + Arrived_stimuli). *)
+  let goal_text = "## Active goals\n- goal-outside-only" in
+  let stimuli_text = "## Arrived stimuli\n- ping" in
+  let post_tool_assembly =
+    KRP.assemble_request_context
+      ~checkpoint_owner:Runtime_execution.Masc_agent_core
+      ~system
+      ~post_tool_round:true
+      ~previous_assembly:None
+      ~dynamic_context_partition:None
+      ~existing_extra_system_context:None
+      ~blocks:
+        [ Prompt_block_id.Active_goals, goal_text
+        ; Prompt_block_id.Arrived_stimuli, stimuli_text
+        ]
+  in
+  let host_ctx, out_ctx, present, _prepared, content =
+    run_projection ~assembly:post_tool_assembly ~history:tool_history
+  in
+  check (option string) "post-tool host carrier is None" None host_ctx;
+  check bool "post-tool outside carrier is Some" true (Option.is_some out_ctx);
+  check bool "post-tool split reports prompt context present" true present;
+  (match content with
+   | Error failure ->
+     failf "unexpected provenance failure on Outside_context-only round: %s"
+       (KAPM.provenance_failure_summary failure)
+   | Ok retained ->
+     check int "Outside_context stripped leaving only durable history"
+       (List.length tool_history) (List.length retained);
+     let prompt_blocks =
+       List.map
+         (fun (block, text) ->
+            { Turn_record.block
+            ; bytes = String.length text
+            ; digest = Agent_core_sha256.(digest_string text |> to_hex)
+            })
+         (Masc.Keeper_context_assembly.logical_blocks post_tool_assembly)
+     in
+     let segments =
+       KAPM.build_ctx_segments ~prompt_blocks ~tools:[] ~input_messages:retained
+     in
+     let bytes key =
+       List.assoc_opt key segments
+       |> Option.map (fun (s : KAPM.prompt_segment_metrics) -> s.KAPM.bytes)
+     in
+     check (option int) "Active_goals attributed once via prompt_blocks"
+       (Some (String.length goal_text))
+       (bytes (Turn_record.Prompt_block Prompt_block_id.Active_goals));
+     check (option int) "Arrived_stimuli attributed once via prompt_blocks"
+       (Some (String.length stimuli_text))
+       (bytes (Turn_record.Prompt_block Prompt_block_id.Arrived_stimuli));
+     check (option int) "Outside_context is not double-counted in Message_system"
+       None (bytes Turn_record.Message_system));
+  (* 2. Pre-tool round with both Host_state (Temporal_summary) and Outside_text (Active_goals). *)
+  let dual_assembly =
+    KRP.assemble_request_context
+      ~checkpoint_owner:Runtime_execution.Masc_agent_core
+      ~system
+      ~post_tool_round:false
+      ~previous_assembly:None
+      ~dynamic_context_partition:None
+      ~existing_extra_system_context:None
+      ~blocks:
+        [ Prompt_block_id.Temporal_summary, "[Temporal] now=2026-11-22T01:00Z"
+        ; Prompt_block_id.Active_goals, goal_text
+        ]
+  in
+  let host_ctx2, out_ctx2, present2, prepared2, content2 =
+    run_projection ~assembly:dual_assembly ~history:tool_history
+  in
+  check bool "dual round emits System_context" true (Option.is_some host_ctx2);
+  check bool "dual round emits Outside_context" true (Option.is_some out_ctx2);
+  check bool "dual round reports prompt context present" true present2;
+  check int "prepared has history + 2 carriers" (List.length tool_history + 2)
+    (List.length prepared2);
+  (match content2 with
+   | Error failure ->
+     failf "unexpected provenance failure on dual-carrier round: %s"
+       (KAPM.provenance_failure_summary failure)
+   | Ok retained ->
+     check int "both System_context and Outside_context are stripped"
+       (List.length tool_history) (List.length retained));
+  (* 3. Neither carrier emitted (empty/whitespace-only block). *)
+  let empty_assembly =
+    KRP.assemble_request_context
+      ~checkpoint_owner:Runtime_execution.Masc_agent_core
+      ~system
+      ~post_tool_round:true
+      ~previous_assembly:None
+      ~dynamic_context_partition:None
+      ~existing_extra_system_context:None
+      ~blocks:[ Prompt_block_id.Operator_note, "   " ]
+  in
+  let host_ctx3, out_ctx3, present3, prepared3, content3 =
+    run_projection ~assembly:empty_assembly ~history:tool_history
+  in
+  check (option string) "whitespace-only block emits no host carrier" None host_ctx3;
+  check (option string) "whitespace-only block emits no outside carrier" None out_ctx3;
+  check bool "whitespace-only block reports no split carrier present" false present3;
+  check int "prepared has only durable history" (List.length tool_history)
+    (List.length prepared3);
+  (match content3 with
+   | Error failure ->
+     failf "unexpected provenance failure when neither carrier is emitted: %s"
+       (KAPM.provenance_failure_summary failure)
+   | Ok retained ->
+     check int "durable history preserved unchanged"
+       (List.length tool_history) (List.length retained))
+;;
+
 let () =
   run "keeper_prompt_metrics"
     [
@@ -831,6 +1061,10 @@ let () =
             test_provenance_failure_reaches_the_record;
           test_case "transmitted carrier removal ignores a prefix cut" `Quick
             test_transmitted_carrier_removal_ignores_a_prefix_cut;
+          test_case "transmitted carrier removal handles Outside_context carriers" `Quick
+            test_provider_content_of_transmitted_handles_outside_context_carriers;
+          test_case "split_outside_context end-to-end attribution (outside-only, dual, empty)" `Quick
+            test_split_outside_context_end_to_end_attribution;
           test_case "a resumed client session is its own reason" `Quick
             test_client_session_gap_is_its_own_reason;
         ] );

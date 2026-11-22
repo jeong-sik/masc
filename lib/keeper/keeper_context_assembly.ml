@@ -310,6 +310,11 @@ let split_outside_context assembly =
   join host_parts, join outside_parts
 ;;
 
+let has_split_request_context assembly =
+  let host_ctx, outside_ctx = split_outside_context assembly in
+  Option.is_some host_ctx || Option.is_some outside_ctx
+;;
+
 let receipt_to_json (receipt : receipt) =
   let span_to_json (span : span) =
     let kind =

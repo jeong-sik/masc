@@ -323,6 +323,14 @@ let config_keepers =
       { suffix = Keeper_compaction.db_suffix
       ; decode = Keeper_compaction.decode_live_blob_references_json
       }
+    (* Per-Keeper canonical turn WAL stores unified Agent Core HTTP and
+       ACP/Official CLI turns for cross-runtime failover continuity. Scan live
+       JSON payloads through the read-only SQLite decoder so any referenced
+       tool blobs stay sweep-protected and SQLite sidecars stay classified. *)
+  ; M.Decoded_keeper_files
+      { suffix = Keeper_canonical_turn_store.db_suffix
+      ; decode = Keeper_canonical_turn_store.decode_live_blob_references_json
+      }
   ; finder_metadata
   ; unpublished_writes
   ]

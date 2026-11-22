@@ -981,6 +981,11 @@ module For_testing : sig
 
   val default_max_retained_lineage_bytes : int
 
+  val default_max_retained_lineage_bytes_per_keeper : int
+
   val with_written_lineage_limits :
     max_entries:int -> max_bytes:int -> (unit -> 'a) -> 'a
+
+  val with_per_keeper_lineage_limit :
+    max_bytes_per_keeper:int -> max_bytes:int -> (unit -> 'a) -> 'a
 end

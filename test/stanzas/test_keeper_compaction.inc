@@ -14,5 +14,6 @@
   masc.runtime
   eio
   eio_main
+  sqlite3
   unix
   yojson))

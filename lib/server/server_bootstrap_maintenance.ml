@@ -816,6 +816,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
        uninterrupted uptime. *)
     let last_daily_retention = ref 0.0 in
     let last_chat_journal_audit = ref (Unix.gettimeofday ()) in
+    let last_checkpoint_object_sweep = ref (Unix.gettimeofday ()) in
     (* Operations the audit has reported: each settled operation is audited
        once per process life. *)
     let chat_journal_audited = ref Keeper_chat_journal_audit.Audited.empty in
@@ -1120,6 +1121,47 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
             | exn ->
               Log.Server.warn
                 "chat journal audit sweep failed: %s"
+                (Printexc.to_string exn))
+         end;
+         (* Periodic orphaned checkpoint object GC: runs hourly off-domain,
+            skipping sessions with active in-flight checkpoint lineage and
+            objects newer than one sweep interval so concurrent saves cannot
+            race with object unlinking. *)
+         if now -. !last_checkpoint_object_sweep >= Masc_time_constants.hour
+         then begin
+           last_checkpoint_object_sweep := now;
+           (try
+              let base_dir = (Mcp_server.workspace_config state).base_path in
+              let runtime_root =
+                (Workspace.backend_config_for base_dir).Backend_types.base_path
+              in
+              let memory_dir =
+                Config_dir_resolver.keepers_dir_for_base_path ~base_path:base_dir
+              in
+              match
+                Keeper_checkpoint_object_sweep.run_periodic
+                  ~min_age_seconds:Masc_time_constants.hour
+                  ~runtime_root
+                  ~memory_dir
+              with
+              | Ok { sessions; roots; kept; removed; removed_bytes; failures } ->
+                if removed > 0 || failures <> [] then
+                  Log.Server.info
+                    "periodic checkpoint object sweep: sessions=%d roots=%d kept=%d removed=%d bytes=%d failures=%d"
+                    sessions roots kept removed removed_bytes (List.length failures);
+                List.iter
+                  (fun failure ->
+                     Log.Server.warn "periodic checkpoint object sweep: %s" failure)
+                  failures
+              | Error error ->
+                Log.Server.warn
+                  "periodic checkpoint object sweep skipped: %s"
+                  (Keeper_checkpoint_object_sweep.error_to_string error)
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+              Log.Server.warn
+                "periodic checkpoint object sweep failed: %s"
                 (Printexc.to_string exn))
          end
        with

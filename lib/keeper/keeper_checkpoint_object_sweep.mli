@@ -65,3 +65,19 @@ val error_to_string : error -> string
     [<runtime_root>/keepers] and the Memory writers' commit logs under
     [memory_dir]. *)
 val run : runtime_root:string -> memory_dir:string -> (report, error) result
+
+(** Periodic runtime-safe orphaned checkpoint object sweep executed off-domain
+    via {!Domain_pool_ref.submit_io_or_inline}.
+
+    Unlike boot-only {!run}, this pass is safe while Keepers are running:
+    - Sessions with an active in-flight checkpoint save
+      ({!Keeper_checkpoint_store_lineage.has_active_lineage_for_session}) are
+      skipped untouched.
+    - Unreached object files are only removed when their filesystem mtime
+      predates the start of the sweep by at least [min_age_seconds], so newly
+      staged objects awaiting a canonical head rename are never unlinked. *)
+val run_periodic
+  :  min_age_seconds:float
+  -> runtime_root:string
+  -> memory_dir:string
+  -> (report, error) result

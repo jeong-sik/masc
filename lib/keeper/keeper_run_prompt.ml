@@ -294,8 +294,19 @@ let build_turn_context
   (* 6. Append user message and persist. *)
   (* The same speaker entry AGENT_CORE stamps on its own copy of this input,
      so no copy of the turn's input exists without it. *)
+  let user_metadata =
+    if List.exists
+         (fun (k, _) ->
+            String.equal k Keeper_canonical_turn_store.canonical_turn_id_metadata_key)
+         input_metadata
+    then input_metadata
+    else
+      ( Keeper_canonical_turn_store.canonical_turn_id_metadata_key
+      , `String (Ids.Turn_ref.to_string turn_ref) )
+      :: input_metadata
+  in
   let user_msg =
-    Agent_core.Types.make_message ~metadata:input_metadata ~role:Agent_core.Types.User
+    Agent_core.Types.make_message ~metadata:user_metadata ~role:Agent_core.Types.User
       [ Agent_core.Types.Text user_message ]
   in
   let history_messages =

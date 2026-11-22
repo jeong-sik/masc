@@ -59,3 +59,14 @@ val purge_indexed_transcript : string -> remove:(string -> 'a) -> 'a
     of the file whatever [remove] answers or raises. A transcript removed any
     other way leaves an index that a new file at the same path can match by
     its inode number. *)
+
+val default_max_retained_indices : int
+val default_max_rows_per_keeper : int
+val default_max_total_rows : int
+
+val retained_index_count : unit -> int
+(** Count of transcript paths currently retaining an in-memory provenance index. *)
+
+val with_index_cache_limits :
+  max_entries:int -> max_rows_per_keeper:int -> max_total_rows:int -> (unit -> 'a) -> 'a
+(** Temporarily override provenance-index O(1) LRU eviction bounds for testing. *)

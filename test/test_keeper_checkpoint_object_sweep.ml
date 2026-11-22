@@ -526,6 +526,29 @@ let test_an_unread_line_it_cannot_decode_removes_nothing () = with_root (fun roo
     | Some (Unread.Line_undecodable _) -> true
     | Some (Unread.Listing_failed _ | Unread.Turn_log_unreadable _) | None -> false))
 
+let test_periodic_sweep_respects_min_age_and_removes_old_orphans () = with_root (fun root ->
+  let session_id = "trace-periodic" in
+  let current = save_turns ~root ~session_id ~marker:"current" 1 in
+  write (canonical root session_id) current.head_bytes;
+  let orphan = save_turns ~root ~session_id ~marker:"orphan" 1 in
+  let orphan_bundle = object_path root session_id (only_bundle orphan) in
+  check bool "orphan exists before periodic sweep" true (Sys.file_exists orphan_bundle);
+  (* Fresh orphan (< min_age_seconds) is protected against concurrent save races. *)
+  (match Sweep.run_periodic ~min_age_seconds:3600.0 ~runtime_root:root ~memory_dir:(memory_dir root) with
+   | Ok report ->
+     check int "fresh orphan is not removed" 0 report.removed;
+     check bool "fresh orphan still exists" true (Sys.file_exists orphan_bundle)
+   | Error error -> fail (Sweep.error_to_string error));
+  (* Aging the orphan past min_age_seconds allows periodic sweep to reclaim it. *)
+  let aged = Unix.gettimeofday () -. 7200.0 in
+  Unix.utimes orphan_bundle aged aged;
+  match Sweep.run_periodic ~min_age_seconds:3600.0 ~runtime_root:root ~memory_dir:(memory_dir root) with
+  | Ok report ->
+    check bool "aged orphan removed" true (report.removed >= 1);
+    check bool "aged orphan unlinked" false (Sys.file_exists orphan_bundle);
+    loads root session_id current
+  | Error error -> fail (Sweep.error_to_string error))
+
 let () =
   run "keeper_checkpoint_object_sweep"
     [ ( "sweep"
@@ -540,6 +563,8 @@ let () =
             test_a_segment_it_cannot_follow_removes_nothing
         ; test_case "an unread operation store removes nothing" `Quick
             test_an_unread_operation_store_removes_nothing
+        ; test_case "periodic sweep respects min_age and removes old orphans" `Quick
+            test_periodic_sweep_respects_min_age_and_removes_old_orphans
         ] )
     ; ( "unread turn-log lines"
       , [ test_case "unread lines keep what they point at" `Quick test_unread_lines_keep_what_they_point_at

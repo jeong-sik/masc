@@ -111,11 +111,13 @@ let save_agent_core_classified_typed
         let absent = Option.fold ~none:[] ~some:(absent_objects ~session_dir) existing in
         let ownership_root = Filename.dirname session_dir in
         let run_with_lineage f =
-          match save_lineage with
-          | Save_for_keeper _ ->
-            with_active_lineage ~canonical_path (fun () ->
-              f (lineage_memo ~canonical_path))
-          | Save_without_lineage -> f (Objects.create_memo ())
+          (* Pin in-flight save for BOTH [Save_for_keeper] and
+             [Save_without_lineage] so periodic object sweeps never race with
+             an un-tracked save writer. *)
+          with_active_lineage ~canonical_path (fun () ->
+            match save_lineage with
+            | Save_for_keeper _ -> f (lineage_memo ~canonical_path)
+            | Save_without_lineage -> f (Objects.create_memo ()))
         in
         run_with_lineage (fun memo ->
           let plan payload =

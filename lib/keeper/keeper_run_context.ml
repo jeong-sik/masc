@@ -229,21 +229,42 @@ let prepare_run_context
     match checkpoint with
     | Some _ -> []
     | None ->
-      (match
-         Keeper_turn_bridge.uncheckpointed_official_turns
-           ~base_path:config.base_path
-           ~keeper_name:meta.name
-           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-           ~session_dir
-           ~existing_messages:existing_history_messages
-       with
-       | Ok msgs -> msgs
-       | Error error ->
-         Log.Keeper.warn
-           ~keeper_name:meta.name
-           "uncheckpointed official-client turn bridge skipped: %s"
-           (Keeper_turn_bridge.bridge_load_error_to_string error);
-         [])
+      let official_bridged =
+        match
+          Keeper_turn_bridge.uncheckpointed_official_turns
+            ~base_path:config.base_path
+            ~keeper_name:meta.name
+            ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+            ~session_dir
+            ~existing_messages:existing_history_messages
+        with
+        | Ok msgs -> msgs
+        | Error error ->
+          Log.Keeper.warn
+            ~keeper_name:meta.name
+            "uncheckpointed official-client turn bridge skipped: %s"
+            (Keeper_turn_bridge.bridge_load_error_to_string error);
+          []
+      in
+      let keepers_dir =
+        Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+      in
+      let canonical_hydrated =
+        match
+          Keeper_canonical_turn_store.hydrate_missing_turns
+            ~keepers_dir
+            ~keeper_id:meta.name
+            ~existing_messages:(existing_history_messages @ official_bridged)
+        with
+        | Ok msgs -> msgs
+        | Error err ->
+          Log.Keeper.warn
+            ~keeper_name:meta.name
+            "canonical turn store hydration skipped: %s"
+            (Keeper_canonical_turn_store.store_error_to_string err);
+          []
+      in
+      official_bridged @ canonical_hydrated
   in
   (* 3. Build base system prompt from meta *)
   let config_root =

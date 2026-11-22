@@ -124,6 +124,20 @@ val store_error_to_string : store_error -> string
 val set_on_epoch_committed :
   (keeper_id:string -> compaction_anchor -> unit) option -> unit
 
+(** Register an internal canonical-turn watermark observer notified with the
+    exact [keepers_dir], [keeper_id], committed [anchor], and [evicted_turns]
+    whenever {!commit_epoch} succeeds (used by {!Keeper_canonical_turn_store}
+    to align [compact_evicted_messages] anchors with canonical turn sequences
+    without creating a module cycle). *)
+val set_on_canonical_epoch_committed :
+  (keepers_dir:string
+   -> keeper_id:string
+   -> anchor:compaction_anchor
+   -> evicted_turns:canonical_turn list
+   -> unit)
+    option
+  -> unit
+
 (** Strict JSON codecs (fail-closed on unknown/missing fields). *)
 val anchor_to_json : compaction_anchor -> Yojson.Safe.t
 val anchor_of_json : Yojson.Safe.t -> (compaction_anchor, string) result

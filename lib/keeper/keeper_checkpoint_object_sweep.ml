@@ -80,7 +80,7 @@ let root_head bytes =
 
 let kind path =
   match Unix.lstat path with
-  | { Unix.st_kind; st_size; _ } -> Ok (Some (st_kind, st_size))
+  | { Unix.st_kind; st_size; st_mtime; _ } -> Ok (Some (st_kind, st_size, st_mtime))
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
   | exception Unix.Unix_error (code, _, _) -> Error (Unix.error_message code)
 ;;
@@ -91,13 +91,13 @@ let directory_entries path =
   match kind path with
   | Error detail -> Error (Listing_failed { path; detail })
   | Ok None -> Ok None
-  | Ok (Some (Unix.S_DIR, _)) ->
+  | Ok (Some (Unix.S_DIR, _, _)) ->
     (match Sys.readdir path with
      | names ->
        Array.sort String.compare names;
        Ok (Some (Array.to_list names))
      | exception Sys_error detail -> Error (Listing_failed { path; detail }))
-  | Ok (Some ((Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK), _)) ->
+  | Ok (Some ((Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK), _, _)) ->
     Ok None
 ;;
 
@@ -112,9 +112,9 @@ let subdirectories path =
        let entry = Filename.concat path name in
        match kind entry with
        | Error detail -> Error (Listing_failed { path = entry; detail })
-       | Ok (Some (Unix.S_DIR, _)) -> Ok (name :: found)
+       | Ok (Some (Unix.S_DIR, _, _)) -> Ok (name :: found)
        | Ok None
-       | Ok (Some ((Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK), _)) ->
+       | Ok (Some ((Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK), _, _)) ->
          Ok found)
     (Ok [])
     (Option.value ~default:[] entries)
@@ -173,10 +173,10 @@ let session_root_files ~session_dir ~session_id =
     match kind retained_dir with
     | Error detail -> Error (Listing_failed { path = retained_dir; detail })
     | Ok None -> Ok []
-    | Ok (Some (Unix.S_DIR, _)) ->
+    | Ok (Some (Unix.S_DIR, _, _)) ->
       let* entries = directory_entries retained_dir in
       Ok (Option.value ~default:[] entries)
-    | Ok (Some ((Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK), _)) ->
+    | Ok (Some ((Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK), _, _)) ->
       Error (Listing_failed { path = retained_dir; detail = "not a directory" })
   in
   let retained =
@@ -215,8 +215,25 @@ let reached ~session_root ~session_dir sources =
     sources
 ;;
 
+type path_stamp =
+  (Unix.file_kind * int * int * int * float * float) option
+
+let path_stamp path : (path_stamp, string) result =
+  match Unix.lstat path with
+  | st ->
+    Ok (Some (st.Unix.st_kind, st.Unix.st_dev, st.Unix.st_ino, st.Unix.st_size, st.Unix.st_mtime, st.Unix.st_ctime))
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | exception Unix.Unix_error (code, fn, arg) ->
+    Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+;;
+
 type session_plan =
-  { objects_dir : string
+  { session_id : string
+  ; session_dir : string
+  ; objects_dir : string
+  ; canonical_stamp : path_stamp
+  ; retained_stamp : path_stamp
+  ; external_roots : root list
   ; live : String_set.t
   }
 
@@ -232,37 +249,63 @@ let unread_by_session (unread : Keeper_unread_turn_bundles.root list) =
     unread
 ;;
 
-let plan_sessions ~session_root ~external_roots ~unread =
+let plan_sessions ~skip_active_sessions ~session_root ~external_roots ~unread =
   let* sessions = subdirectories session_root in
   List.fold_left
     (fun acc session_id ->
        let* roots_seen, plans = acc in
-       let session_dir = Filename.concat session_root session_id in
-       let objects_dir = Filename.concat session_dir Object_store.dirname in
-       let* objects = kind objects_dir |> Result.map_error (fun detail ->
-         Listing_failed { path = objects_dir; detail }) in
-       match objects with
-       | None
-       | Some ((Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK), _) ->
-         Ok (roots_seen, plans)
-       | Some (Unix.S_DIR, _) ->
-         let* own = session_root_files ~session_dir ~session_id in
-         let others =
-           Option.value ~default:[] (String_map.find_opt session_id external_roots)
-           |> List.map (fun root -> Root_bytes root)
-         in
-         let* current, live = reached ~session_root ~session_dir (own @ others) in
-         let live =
-           Option.fold ~none:live ~some:(String_set.union live) (String_map.find_opt session_id unread)
-         in
-         Ok (roots_seen + current, { objects_dir; live } :: plans))
+       if skip_active_sessions
+          && Keeper_checkpoint_store_lineage.has_active_lineage_for_session ~session_id
+       then Ok (roots_seen, plans)
+       else (
+         let session_dir = Filename.concat session_root session_id in
+         let objects_dir = Filename.concat session_dir Object_store.dirname in
+         let* objects = kind objects_dir |> Result.map_error (fun detail ->
+           Listing_failed { path = objects_dir; detail }) in
+         match objects with
+         | None
+         | Some ((Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK), _, _) ->
+           Ok (roots_seen, plans)
+         | Some (Unix.S_DIR, _, _) ->
+           let canonical_path = Checkpoint.agent_core_checkpoint_path ~session_dir ~session_id in
+           let retained_dir = Filename.concat session_dir Checkpoint.retained_dirname in
+           let* canonical_stamp =
+             path_stamp canonical_path
+             |> Result.map_error (fun detail -> Root_unreadable { path = canonical_path; detail })
+           in
+           let* retained_stamp =
+             path_stamp retained_dir
+             |> Result.map_error (fun detail -> Listing_failed { path = retained_dir; detail })
+           in
+           let* own = session_root_files ~session_dir ~session_id in
+           let external_roots_for_session =
+             Option.value ~default:[] (String_map.find_opt session_id external_roots)
+           in
+           let others =
+             List.map (fun root -> Root_bytes root) external_roots_for_session
+           in
+           let* current, live = reached ~session_root ~session_dir (own @ others) in
+           let live =
+             Option.fold ~none:live ~some:(String_set.union live) (String_map.find_opt session_id unread)
+           in
+           Ok
+             ( roots_seen + current
+             , { session_id
+               ; session_dir
+               ; objects_dir
+               ; canonical_stamp
+               ; retained_stamp
+               ; external_roots = external_roots_for_session
+               ; live
+               }
+               :: plans )))
     (Ok (0, []))
     sessions
 ;;
 
 let failed report detail = { report with failures = detail :: report.failures }
 
-let remove_object ~live ~prefix_dir report name =
+let remove_object ~cutoff_mtime ~live ~prefix_dir report name =
   match Objects.digest_of_hex name with
   | Error _ -> report
   | Ok _ when not (String.equal (String.sub name 0 2) (Filename.basename prefix_dir)) -> report
@@ -271,15 +314,23 @@ let remove_object ~live ~prefix_dir report name =
     let path = Filename.concat prefix_dir name in
     (match kind path with
      | Error detail -> failed report (path ^ ": " ^ detail)
-     | Ok (Some (Unix.S_REG, size)) ->
-       (match Sys.remove path with
-        | () -> { report with removed = report.removed + 1; removed_bytes = report.removed_bytes + size }
-        | exception Sys_error detail -> failed report detail)
-     | Ok (Some ((Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK), _))
+     | Ok (Some (Unix.S_REG, size, mtime)) ->
+       let too_fresh =
+         match cutoff_mtime with
+         | None -> false
+         | Some cutoff -> mtime > cutoff
+       in
+       if too_fresh
+       then { report with kept = report.kept + 1 }
+       else (
+         match Sys.remove path with
+         | () -> { report with removed = report.removed + 1; removed_bytes = report.removed_bytes + size }
+         | exception Sys_error detail -> failed report detail)
+     | Ok (Some ((Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK), _, _))
      | Ok None -> report)
 ;;
 
-let remove_unreached report { objects_dir; live } =
+let sweep_objects_dir ~cutoff_mtime ~live ~objects_dir report =
   match directory_entries objects_dir with
   | Error error -> failed report (error_to_string error)
   | Ok None -> report
@@ -290,12 +341,66 @@ let remove_unreached report { objects_dir; live } =
          match directory_entries prefix_dir with
          | Error error -> failed report (error_to_string error)
          | Ok None -> report
-         | Ok (Some names) -> List.fold_left (remove_object ~live ~prefix_dir) report names)
+         | Ok (Some names) ->
+           List.fold_left (remove_object ~cutoff_mtime ~live ~prefix_dir) report names)
       report
       prefixes
 ;;
 
-let run ~runtime_root ~memory_dir =
+let remove_unreached
+      ~skip_active_sessions
+      ~cutoff_mtime
+      ~post_plan_external_roots
+      report
+      plan
+  =
+  if not skip_active_sessions
+  then sweep_objects_dir ~cutoff_mtime ~live:plan.live ~objects_dir:plan.objects_dir report
+  else (
+    (* Periodic runtime-safe sweep: acquire the per-session lock and re-verify
+       that no in-flight save started, neither the canonical head nor
+       [accepted-checkpoints/] mutated, and no new Gate preparation head
+       appeared for this session since [plan_sessions]. If anything moved,
+       defer this session safely to the next sweep without unlinking. *)
+    let external_now =
+      Option.value ~default:[] (String_map.find_opt plan.session_id post_plan_external_roots)
+    in
+    if
+      Keeper_checkpoint_store_lineage.has_active_lineage_for_session ~session_id:plan.session_id
+      || external_now <> plan.external_roots
+    then report
+    else (
+      match
+        Checkpoint.with_session_lock ~session_dir:plan.session_dir (fun _locked_dir ->
+          let canonical_path =
+            Checkpoint.agent_core_checkpoint_path
+              ~session_dir:plan.session_dir
+              ~session_id:plan.session_id
+          in
+          let retained_dir = Filename.concat plan.session_dir Checkpoint.retained_dirname in
+          let canonical_ok =
+            match path_stamp canonical_path with
+            | Ok stamp -> stamp = plan.canonical_stamp
+            | Error _ -> false
+          in
+          let retained_ok =
+            match path_stamp retained_dir with
+            | Ok stamp -> stamp = plan.retained_stamp
+            | Error _ -> false
+          in
+          if
+            Keeper_checkpoint_store_lineage.has_active_lineage_for_session
+              ~session_id:plan.session_id
+            || not canonical_ok
+            || not retained_ok
+          then report
+          else sweep_objects_dir ~cutoff_mtime ~live:plan.live ~objects_dir:plan.objects_dir report)
+      with
+      | Ok updated -> updated
+      | Error detail -> failed report (plan.session_dir ^ ": " ^ detail)))
+;;
+
+let run_with_options ~skip_active_sessions ~cutoff_mtime ~runtime_root ~memory_dir =
   let* records =
     Keeper_retained_checkpoint_sweep.owner_records ~runtime_root
     |> Result.map_error (fun error -> Owner_stores_unreadable error)
@@ -312,11 +417,46 @@ let run ~runtime_root ~memory_dir =
   let* roots, plans =
     match session_root with
     | None -> Ok (0, [])
-    | Some session_root -> plan_sessions ~session_root ~external_roots ~unread
+    | Some session_root ->
+      plan_sessions ~skip_active_sessions ~session_root ~external_roots ~unread
+  in
+  let* post_plan_external_roots =
+    if not skip_active_sessions
+    then Ok external_roots
+    else
+      let+ latest_records =
+        Keeper_retained_checkpoint_sweep.owner_records ~runtime_root
+        |> Result.map_error (fun error -> Owner_stores_unreadable error)
+      in
+      gate_roots latest_records
   in
   let empty =
     { sessions = List.length plans; roots; kept = 0; removed = 0; removed_bytes = 0; failures = [] }
   in
-  let report = List.fold_left remove_unreached empty (List.rev plans) in
+  let report =
+    List.fold_left
+      (remove_unreached ~skip_active_sessions ~cutoff_mtime ~post_plan_external_roots)
+      empty
+      (List.rev plans)
+  in
   Ok { report with failures = List.rev report.failures }
+;;
+
+let run ~runtime_root ~memory_dir =
+  run_with_options
+    ~skip_active_sessions:false
+    ~cutoff_mtime:None
+    ~runtime_root
+    ~memory_dir
+;;
+
+let run_periodic ~min_age_seconds ~runtime_root ~memory_dir =
+  let sweep_started_at = Time_compat.now () in
+  let cutoff_mtime = Some (sweep_started_at -. Float.max 0.0 min_age_seconds) in
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+    run_with_options
+      ~skip_active_sessions:true
+      ~cutoff_mtime
+      ~runtime_root
+      ~memory_dir)
 ;;

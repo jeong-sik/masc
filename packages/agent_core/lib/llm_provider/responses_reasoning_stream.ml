@@ -98,24 +98,35 @@ let item_id = function
   | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
 ;;
 
-let same_item left right = match item_id left,item_id right with
-  | Some first,Some second -> String.equal first second
-  | Some _,None | None,Some _ | None,None -> false
+(* Identity decides what a second delivery means. Two non-blank ids that differ
+   are different items, and a missing id on either side leaves the identity
+   unknown: neither is evidence that one item's ciphertext changed, so the
+   stored (done) item stays. Only a positively identified same item reaches the
+   ciphertext comparison. The three cases stay distinct here because the
+   failure record and the tests name them separately even though all three end
+   in [Unchanged]. *)
+type identity = Same_item | Different_item | Unknown_identity
+
+let identity left right = match item_id left,item_id right with
+  | Some first,Some second -> if String.equal first second then Same_item else Different_item
+  | Some _,None | None,Some _ | None,None -> Unknown_identity
 ;;
 
 let describe state = match state.opaque with
-  | None -> "none"
+  | None ->
+    (match selected state with Some _ -> "plaintext" | None -> "none")
   | Some item -> Responses_reasoning.describe (Responses_reasoning.Opaque item)
 ;;
 
 let item state incoming = match state.opaque,incoming with
   | Some original,Responses_reasoning.Opaque raw ->
-    if not(same_item original raw) then Ok(state,Unchanged)
-    else
-      (match opaque_ciphertext original,opaque_ciphertext raw with
-       | Some observed,Some replayed when String.equal observed replayed ->
-         Ok(state,Unchanged)
-       | _ -> Error "responses_replay:conflicting_reasoning_item")
+    (match identity original raw with
+     | Different_item | Unknown_identity -> Ok(state,Unchanged)
+     | Same_item ->
+       (match opaque_ciphertext original,opaque_ciphertext raw with
+        | Some observed,Some replayed when String.equal observed replayed ->
+          Ok(state,Unchanged)
+        | _ -> Error "responses_replay:conflicting_reasoning_item"))
   | None,Responses_reasoning.Opaque raw ->
     Ok({state with opaque=Some raw},Redact(Yojson.Safe.to_string raw))
   | Some _,Responses_reasoning.Plaintext channels ->

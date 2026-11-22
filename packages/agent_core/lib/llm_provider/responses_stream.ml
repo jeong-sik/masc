@@ -204,16 +204,26 @@ let responses_assert_output_kind state emit output_index incoming =
     | None -> emit(SSEParseFailed{raw="";reason="responses_replay:conflicting_item_kind_or_phase"});None
 ;;
 
+(* The operator-facing error string is built from a failure record's [raw] and
+   is then clipped to 256 bytes by [Secret_redactor.redacted_excerpt], so the
+   record is capped here instead: two long [rs_...] ids must not push the
+   second digest out of the line that says which two deliveries disagreed. *)
+let responses_bounded_raw text =
+  if String.length text <= 240 then text else String.sub text 0 237 ^ "..."
+;;
+
 let responses_accept_output_identity state emit output_index = function
-  | None | Some "" -> true
+  | None -> true
+  | Some id when Api_common.string_is_blank id -> true
   | Some id ->
     (match Hashtbl.find_opt state.responses_output_ids output_index with
      | None -> Hashtbl.add state.responses_output_ids output_index id;true
      | Some previous when String.equal previous id -> true
      | Some previous ->
        emit(SSEParseFailed
-         { raw=Printf.sprintf "output_index=%d stored_id=%S incoming_id=%S"
-             output_index previous id
+         { raw=responses_bounded_raw
+             (Printf.sprintf "idx=%d stored_id=%S incoming_id=%S"
+                output_index previous id)
          ; reason="responses_replay:conflicting_output_item_identity" });
        false)
 ;;
@@ -225,11 +235,15 @@ let responses_accept_output_identity state emit output_index = function
    the identity both paths agree on, so it wins whenever the first capture
    recorded it. Positions stay the fallback for id-less items. *)
 let responses_index_of_item_id state id =
+  (* An id recorded under two indices is malformed input, but the answer must
+     not depend on hash bucket order: the lowest index wins. *)
   Hashtbl.fold
     (fun index recorded found ->
-       match found with
-       | Some _ -> found
-       | None -> if String.equal recorded id then Some index else None)
+       if not (String.equal recorded id) then found
+       else
+         match found with
+         | Some previous -> Some (Int.min previous index)
+         | None -> Some index)
     state.responses_output_ids None
 ;;
 
@@ -239,18 +253,48 @@ let responses_index_of_item_id state id =
 let responses_wire_item_digest ~output_index item =
   let json = Yojson.Safe.to_string item in
   let digest = Agent_core_sha256.(to_hex (digest_string json)) in
-  Printf.sprintf "output_index=%d type=%S id=%S bytes=%d sha256:%s.."
-    output_index
-    (Option.value (responses_member_string_opt "type" item) ~default:"<none>")
-    (Option.value (responses_member_string_opt "id" item) ~default:"<none>")
-    (String.length json) (String.sub digest 0 16)
+  let id = match responses_member_string_opt "id" item with
+    | Some value when String.length value <= 12 -> value
+    | Some value -> String.sub value 0 12 ^ "~"
+    | None -> "<none>" in
+  responses_bounded_raw
+    (Printf.sprintf "idx=%d type=%s id=%s bytes=%d sha=%s"
+       output_index
+       (Option.value (responses_member_string_opt "type" item) ~default:"<none>")
+       id (String.length json) (String.sub digest 0 16))
 ;;
 
-let responses_terminal_output_key state position item =
-  match responses_member_string_opt "id" item with
-  | Some id when not (Api_common.string_is_blank id) ->
-    (match responses_index_of_item_id state id with Some index -> index | None -> position)
-  | Some _ | None -> position
+(* The terminal array is captured under the index each item is known by, never
+   the slot it happens to occupy: an echo that reorders items, or drops a
+   leading one, must not hand two items the same index. An item whose id was
+   never recorded (a text item that only ever arrived as deltas, an id-less
+   done frame) keeps its order and takes the lowest index no identified item
+   claims, so the two rules cannot collide inside one array. Items are then
+   captured in ascending index order, which keeps block indices monotonic. *)
+let responses_terminal_output_keys state items =
+  let resolved =
+    List.map
+      (fun item ->
+         match responses_member_string_opt "id" item with
+         | Some id when not (Api_common.string_is_blank id) ->
+           responses_index_of_item_id state id
+         | Some _ | None -> None)
+      items
+  in
+  let claimed = Hashtbl.create 16 in
+  List.iter
+    (function Some index -> Hashtbl.replace claimed index () | None -> ())
+    resolved;
+  let next_free = ref 0 in
+  let take_free () =
+    let rec walk () =
+      let index = !next_free in
+      incr next_free;
+      if Hashtbl.mem claimed index then walk () else index
+    in
+    walk ()
+  in
+  List.map (function Some index -> index | None -> take_free ()) resolved
 ;;
 
 (* The stored item is described, never quoted: the record keeps the two sides
@@ -262,8 +306,9 @@ let responses_reasoning_update ?(describe_incoming=(fun () -> "none")) state emi
   match apply previous with
   | Error reason ->
     emit(SSEParseFailed
-      { raw=Printf.sprintf "output_index=%d stored{%s} incoming{%s}"
-          output_index (Responses_reasoning_stream.describe previous) (describe_incoming ())
+      { raw=responses_bounded_raw
+          (Printf.sprintf "idx=%d stored{%s} incoming{%s}"
+             output_index (Responses_reasoning_stream.describe previous) (describe_incoming ()))
       ; reason })
   | Ok(next,update) ->
     Hashtbl.replace state.responses_reasoning output_index next;
@@ -391,7 +436,7 @@ let responses_capture_terminal_outputs state emit response =
         allocation order, so a reordered echo would otherwise put a later
         item's block before an earlier one's. *)
      items
-     |> List.mapi (fun position item -> responses_terminal_output_key state position item,item)
+     |> List.map2 (fun output_index item -> output_index,item) (responses_terminal_output_keys state items)
      |> List.stable_sort (fun (left,_) (right,_) -> Int.compare left right)
      |> List.iter (fun (output_index,item) ->
        responses_capture_output_item ~drop_function_call state emit ~output_index item)
@@ -481,7 +526,11 @@ let responses_sse_to_events (state : openai_stream_state) event_type data_str
               | None -> ()
               | Some text ->
                 let part=responses_member_int_default part_field json in
-                responses_reasoning_update state emit ~output_index (fun previous->
+                responses_reasoning_update
+                  ~describe_incoming:(fun () ->
+                    Printf.sprintf "%s part=%d bytes=%d"
+                      (if is_delta then "delta" else "part_done") part (String.length text))
+                  state emit ~output_index (fun previous->
                   if is_delta then Responses_reasoning_stream.delta previous ~channel ~part text
                   else Responses_reasoning_stream.part_done previous ~channel ~part text))
        | "response.output_item.added" ->

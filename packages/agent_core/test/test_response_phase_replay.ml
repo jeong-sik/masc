@@ -147,7 +147,7 @@ let encrypted_reasoning_changed () =
          in search 0
        with found -> found in
        contains "stored{opaque id=" && contains "incoming{opaque id="
-       && contains "sha256:");
+       && contains "enc=");
     Alcotest.(check bool) "the record never carries the ciphertext" true
       (not (let contains needle = match
          let rec search i =
@@ -217,6 +217,55 @@ let encrypted_reasoning_distinct_identities () =
       "responses_replay:conflicting_output_item_identity" reason
   | Error _ -> Alcotest.fail "the identity conflict lost its reason"
   | Ok _ -> Alcotest.fail "an output index rebound to another identified item"
+
+(* A text item that only ever arrived as deltas has no id in
+   [responses_output_ids], so it falls back to an index. It must take a free
+   one, never the index an identified reasoning item already owns. *)
+let encrypted_reasoning_idless_terminal_neighbour () =
+  let state, acc = start () in
+  delta state acc 0 0 "checking";
+  let reasoning =
+    named "rs_1" (`Assoc (List.remove_assoc "id" encrypted_reasoning_fields))
+  in
+  done_item state acc 1 reasoning;
+  let message = named "msg_0" (item ~phase:(`String "commentary") ["checking"]) in
+  terminal state acc [reasoning; message];
+  match Acc.finalize_stream_acc acc with
+  | Ok response ->
+    Alcotest.(check bool) "an id-less neighbour takes the free index" true
+      (response.content
+       = [ Text "checking"; RedactedThinking (Yojson.Safe.to_string reasoning) ])
+  | Error _ -> Alcotest.fail "an id-less terminal neighbour collided with the reasoning index"
+
+(* The operator-facing error string is clipped to 256 bytes downstream, so a
+   real [rs_...] id must not push the second digest out of it. *)
+let encrypted_reasoning_long_id_stays_within_the_error_budget () =
+  let state, acc = start () in
+  let long_id = "rs_" ^ String.make 64 'a' in
+  let fields = List.remove_assoc "id" encrypted_reasoning_fields in
+  let original = named long_id (`Assoc fields) in
+  done_item state acc 0 original;
+  let changed =
+    named long_id
+      (`Assoc
+        (("encrypted_content", `String "changed-ciphertext")
+         :: List.remove_assoc "encrypted_content" fields))
+  in
+  terminal state acc [changed];
+  match Acc.finalize_stream_acc acc with
+  | Error (Stream_parse_failed { reason; raw }) ->
+    Alcotest.(check string) "a long id still names the conflict"
+      "responses_replay:conflicting_reasoning_item" reason;
+    Alcotest.(check bool) "the record fits the redacted excerpt budget" true
+      (String.length raw <= 240);
+    let needle = "enc=" in
+    let occurrences = ref 0 in
+    for index = 0 to String.length raw - String.length needle do
+      if String.sub raw index (String.length needle) = needle then incr occurrences
+    done;
+    Alcotest.(check int) "both deliveries keep their digest" 2 !occurrences
+  | Error _ -> Alcotest.fail "a long id changed the failure reason"
+  | Ok _ -> Alcotest.fail "changed ciphertext under a long id was accepted"
 end
 
 let cache_roundtrip () =
@@ -310,4 +359,7 @@ let () = Alcotest.run "provider replay conformance" [
   Alcotest.test_case "changed encrypted reasoning" `Quick Streams.encrypted_reasoning_changed;
   Alcotest.test_case "id-less encrypted reasoning echo" `Quick Streams.encrypted_reasoning_blank_echo_id;
   Alcotest.test_case "shifted terminal encrypted reasoning" `Quick Streams.encrypted_reasoning_terminal_index_shift;
-  Alcotest.test_case "distinct encrypted reasoning identities" `Quick Streams.encrypted_reasoning_distinct_identities]]
+  Alcotest.test_case "distinct encrypted reasoning identities" `Quick Streams.encrypted_reasoning_distinct_identities;
+  Alcotest.test_case "id-less terminal neighbour" `Quick Streams.encrypted_reasoning_idless_terminal_neighbour;
+  Alcotest.test_case "long id stays inside the error budget"
+    `Quick Streams.encrypted_reasoning_long_id_stays_within_the_error_budget]]

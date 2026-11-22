@@ -49,14 +49,18 @@ let describe = function
       | Some (`String value) -> Some value
       | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
       | None -> None in
+    (* A real [rs_...] id runs 51-64 bytes and the failure record that carries
+       this description is capped at 256 bytes, so the id is clipped and the
+       ciphertext digest leads: the two deliveries must stay distinguishable
+       even when both ids are long. *)
     let id = match field "id" item with
-      | Some (`String value) when nonblank value -> Printf.sprintf "%S" value
+      | Some (`String value) when nonblank value ->
+        if String.length value <= 12 then value else String.sub value 0 12 ^ "~"
       | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
       | Some (`String _) | None -> "<none>" in
     (match ciphertext with
      | Some value ->
        let digest = Agent_core_sha256.(to_hex (digest_string value)) in
-       Printf.sprintf "opaque id=%s encrypted_content=sha256:%s.. bytes=%d"
-         id (String.sub digest 0 16) (String.length value)
-     | None -> Printf.sprintf "opaque id=%s encrypted_content=<none>" id)
+       Printf.sprintf "opaque id=%s enc=%s/%d" id (String.sub digest 0 16) (String.length value)
+     | None -> Printf.sprintf "opaque id=%s enc=<none>" id)
   | Plaintext _ -> "plaintext"

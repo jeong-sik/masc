@@ -43,6 +43,13 @@ val config_from_env : unit -> config
     [Invalid_argument] with {!config_error_to_string}; callers that need typed
     startup handling should use {!config_from_env_result}. *)
 
+val default_config : config
+(** The built-in budget used when no environment override is present. The
+    process entrypoint derives its fatal-error watchdog deadline from
+    {!field:default_config.force_timeout_s} so the fatal-arm budget stays
+    above the normal force budget instead of coincidentally matching a
+    separate literal (#54366). *)
+
 (** {1 Process deadline supervision} *)
 
 type deadline_error =

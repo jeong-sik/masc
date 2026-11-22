@@ -141,7 +141,7 @@ type core = {
    one, so a SHA bumped alone turns that test red with the new digest in its
    message. Read the digest of a commit from its build:
    _build/default/lib/identity/dos_core_identity.ml. *)
-let pinned_core_source_digest = "698f3e098d8270e32d0609bb325020ff"
+let pinned_core_source_digest = "adcaaecc1989c31a25824326eb5b3149"
 
 let core =
   { source_digest = Dos_core_identity.source_digest
@@ -291,6 +291,61 @@ let note_activity ~who action =
 ;;
 
 let recent_activity () = Atomic.get activity_feed
+
+(* ---------- INT 진입 흔적 ----------
+
+   코어의 on_int 관찰자(ocaml-dos #243)가 게스트의 INT 진입마다 남기는
+   고정 길이 흔적. 어떤 INT 에서 길이 갈렸는지가 레인 안에서만 재현되는
+   결함을 잡는 관측의 마지막 조각이다 — dosboot 의 --int-trace 는 명령
+   흐름을 지켜보지만, 레인은 자기 실행 반복(run_until) 안에서 같은 것을
+   볼 수 없어 이 훅으로 같은 시야를 얻는다. 계기: 대항해시대2 한국
+   재발매(1999) 가 같은 코어와 같은 파일로 dosboot 에서는 타이틀까지
+   가는데 레인에서만 OPEN.EXE 의 디스크에러 길로 빠지는 발산(2026-11-22
+   조사, 재현 절차는 그날의 handoff 기록).
+
+   [lock] 안에서만 쓴다 — 기계는 오직 레인 호출로만 돌고 on_int 는 그
+   호출 안에서만 울린다. 읽기([masc_dos_screen] include_ints)도 같은
+   잠금 아래다. 흔적은 eject 도 살아남는다: 실패 직후의 관측이 목적이고
+   "비어 있던 화면이 왜 비었는가"는 직전 기계의 마지막 호출이 대답한다. *)
+type int_entry = { int_vector : int; int_ax : int; int_bx : int; int_cx : int; int_dx : int }
+
+let int_trail_length = 64
+let int_trail : int_entry option array = Array.make int_trail_length None
+let int_trail_next = ref 0
+let int_trail_count = ref 0
+
+let record_int ~vector ~ax ~bx ~cx ~dx =
+  Array.set int_trail !int_trail_next
+    (Some { int_vector = vector; int_ax = ax; int_bx = bx; int_cx = cx; int_dx = dx });
+  int_trail_next := (!int_trail_next + 1) mod int_trail_length;
+  if !int_trail_count < int_trail_length then incr int_trail_count
+;;
+
+(* 오래된 것부터. 고정 길이 링의 [Some] 칸만 모은다 — [count] 는 채운
+   칸 수와 같아 전체 함수다. *)
+let recent_ints () =
+  let start = (!int_trail_next - !int_trail_count + int_trail_length) mod int_trail_length in
+  List.filter_map
+    (fun i -> int_trail.((start + i) mod int_trail_length))
+    (List.init !int_trail_count Fun.id)
+;;
+
+let recent_ints_json () =
+  `List
+    (List.map
+       (fun e ->
+          `Assoc
+            [ ("vector", `Int e.int_vector)
+            ; ("ax", `Int e.int_ax)
+            ; ("bx", `Int e.int_bx)
+            ; ("cx", `Int e.int_cx)
+            ; ("dx", `Int e.int_dx) ])
+       (recent_ints ()))
+;;
+
+(* 스냅숏은 관찰자를 싣지 않으므로 기계가 만들어지는 두 지점 — 로드의
+   [Dos_machine.create] 와 복원의 [Dos_snapshot.restore] — 에서 각각 단다. *)
+let attach_int_observer m = Dos_machine.on_int m record_int
 
 (* ---------- the resume mark ----------
 
@@ -1197,6 +1252,7 @@ let prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir ~previous_autosave ~prog
   | None ->
       let* () = check_previous_autosave_consent ~dir:checkpoint_dir previous_autosave in
       let m = Dos_machine.create () in
+      attach_int_observer m;
       let* () = mount_files m files in
       load_image m image;
       let kept = kept_of_mounted m in
@@ -1658,7 +1714,7 @@ let prepare_restore ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of =
          | Machine_checkpoint.Corrupt _) as e) -> Error (Checkpoint_refused e) in
   let* meta = meta_of_json checkpoint.Machine_checkpoint.meta in
   let* m = match Dos_snapshot.restore checkpoint.machine_bytes with
-    | Ok m -> Ok m
+    | Ok m -> attach_int_observer m; Ok m
     | Error e -> Error (Checkpoint_refused (snapshot_error_to_checkpoint_error e)) in
   let kept = kept_of_mounted m in
   let lines = String.concat ""

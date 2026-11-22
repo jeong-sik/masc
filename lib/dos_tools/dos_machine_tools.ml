@@ -1147,17 +1147,22 @@ let image_capture_failed ~tool_name ~start_time message =
 (* The worker returns PNG bytes beside the captured text observation. *)
 (* [include_frame=false] answers from the machine state alone: a caller that
    only needs who holds the controller does not pay for a frame capture and
-   PNG encode. *)
+   PNG encode. [include_ints] adds the lane's recent INT-entry trail — the
+   same view dosboot's --int-trace gives, read after the fact instead of
+   streamed. *)
+let int_trail_field () = ("ints", Dos_lane.recent_ints_json ())
+
 let handle_screen ~tool_name ~start_time ~base_path args =
+  let extra = if get_bool args "include_ints" false then int_trail_field () :: [ core_field ] else [ core_field ] in
   if not (get_bool args "include_frame" true)
-  then of_lane ~base_path ~tool_name ~start_time ~extra:[ core_field ] (off_domain Dos_lane.screen)
+  then of_lane ~base_path ~tool_name ~start_time ~extra (off_domain Dos_lane.screen)
   else
     match capture_png () with
     | Error (Lane e) -> of_lane ~base_path ~tool_name ~start_time (Error e)
     | Error (Encode message) -> image_capture_failed ~tool_name ~start_time message
     | Ok { observation; width; height; png } ->
       of_lane ~base_path ~tool_name ~start_time
-        ~extra:(png_fields ~width ~height ~png @ [ core_field ])
+        ~extra:(png_fields ~width ~height ~png @ extra)
         ~png
         (Ok observation)
 ;;

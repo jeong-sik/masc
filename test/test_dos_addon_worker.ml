@@ -118,6 +118,18 @@ let test_stdio_controller () =
               check bool "and keeps the seat facts" true
                 (member "saves_name" state_only = `String "hello.com"
                  && member "controller" state_only = `String "fixture");
+              check bool "int trail stays opt-in" true (member "ints" state_only = `Null);
+              let with_ints = call "masc_dos_screen"
+                (`Assoc ["include_frame", `Bool false; "include_ints", `Bool true]) in
+              let trail = Yojson.Safe.Util.(member "ints" with_ints |> to_list) in
+              check bool "booted program left an int trail" true (trail <> []);
+              check bool "trail entries carry the entry registers" true
+                (List.for_all
+                   (fun e -> Yojson.Safe.Util.(member "vector" e |> to_int) >= 0
+                    && List.for_all
+                         (fun k -> Yojson.Safe.Util.(member k e |> to_int_option) <> None)
+                         ["ax"; "bx"; "cx"; "dx"])
+                   trail);
               let input_history = Yojson.Safe.Util.(data observed |> member "rows" |> to_list |> List.hd
                 |> member "fields" |> member "input_history") in
               let count = Yojson.Safe.Util.(input_history |> member "entry_count" |> to_int) in

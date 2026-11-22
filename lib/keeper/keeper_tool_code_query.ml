@@ -3,7 +3,7 @@
 (* The name lives in config/tools/keeper_code_query.toml and reaches here
    through the schema, so the tool cannot answer to a name the definition does
    not declare. *)
-let tool_name = (Tool_schemas_code_query.schema : Masc_domain.tool_schema).name
+let tool_name = (Tools.code_query_schema : Masc_domain.tool_schema).name
 
 open Result.Syntax
 let ok ~start_time data = Tool_result.make_ok ~tool_name:tool_name ~start_time ~data ()

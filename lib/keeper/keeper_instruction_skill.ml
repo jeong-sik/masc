@@ -1,4 +1,4 @@
-let skill_tool_schema : Masc_domain.tool_schema = Tool_schemas_skill.schema
+let skill_tool_schema : Masc_domain.tool_schema = Tools.skill_schema
 let skill_tool_name = skill_tool_schema.name
 let skill_reference_input_schema = skill_tool_schema.input_schema
 
@@ -172,7 +172,7 @@ let make_instruction_skill_tool
   Tool_bridge.agent_core_tool_of_masc_with_execution_env
     ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
     ~base_path:config.base_path
-    ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
+    ~model_projection:(fun () -> Tool_output.default_model_projection)
     ~name
     ~description
     ~input_schema:skill_reference_input_schema
@@ -246,95 +246,74 @@ let make_instruction_skill_tool
                     Agent_core.Tool_contract.Invocation.tool_use_id invocation
                   in
                   let return_content ~kind ~wire_content ~is_body metadata =
-                    let wire_bytes = String.length wire_content in
-                    if wire_bytes > Common.max_tool_result_wire_bytes
-                    then
-                      Tool_result.make_err
-                        ~tool_name:name
-                        ~class_:Tool_result.Workflow_rejection
-                        ~start_time
-                        ~data:
-                          (`Assoc
-                             [ ( "skill_content_error"
-                               , `Assoc
-                                   [ "kind", `String "provider_inline_too_large"
-                                   ; "observed_bytes", `Int wire_bytes
-                                   ; "max_bytes", `Int Common.max_tool_result_wire_bytes
-                                   ] )
-                             ])
-                        (Printf.sprintf
-                           "Skill content does not fit the provider inline tool-result boundary: observed_bytes=%d max_bytes=%d"
-                           wire_bytes
-                           Common.max_tool_result_wire_bytes)
-                    else
-                      let wire_content, metadata =
-                        match is_body, assess_applicability with
-                        | true, Some assess ->
-                          let assessment = assess ~reference ~body:wire_content in
-                          let advice =
-                            let open Result.Syntax in
-                            let* advice =
-                              Typesafeai_skill_applicability.model_advice assessment
-                            in
-                            match advice with
-                            | None -> Ok None
-                            | Some advice ->
-                              Prompt_registry.render_prompt_template
-                                Prompt_names.skill_applicability_projection
-                                [ "advice", advice ]
-                              |> Result.map (fun heading ->
-                                   Some (String.trim heading ^ "\n" ^ wire_content))
+                    (* Return the full skill body or resource without any arbitrary 16 KiB
+                       refusal: when content exceeds the provider inline boundary,
+                       [Tool_output.default_model_projection] offloads cleanly to a typed
+                       structured blob handle with a 4 KiB head+tail preview. *)
+                    let wire_content, metadata =
+                      match is_body, assess_applicability with
+                      | true, Some assess ->
+                        let assessment = assess ~reference ~body:wire_content in
+                        let advice =
+                          let open Result.Syntax in
+                          let* advice =
+                            Typesafeai_skill_applicability.model_advice assessment
                           in
-                          let projected =
-                            match advice with
-                            | Ok (Some text) -> text
-                            | Ok None | Error _ -> wire_content
-                          in
-                          let fits =
-                            String.length projected <= Common.max_tool_result_wire_bytes
-                          in
-                          let has_advice =
-                            match advice with
-                            | Ok (Some _) -> true
-                            | Ok None | Error _ -> false
-                          in
-                          let metadata =
-                            match advice with
-                            | Error reason ->
-                              ("applicability_projection_error", `String reason) :: metadata
-                            | Ok _ -> metadata
-                          in
-                          let metadata =
-                            ("skill_applicability", Typesafeai_skill_applicability.to_yojson assessment)
-                            :: ("applicability_advice_in_model_content", `Bool (fits && has_advice))
-                            :: ( "applicability_projection"
-                               , `String
-                                   (match advice with
-                                    | Error _ -> "unavailable"
-                                    | Ok None -> "not_requested"
-                                    | Ok (Some _) ->
-                                      if fits then "inline" else "omitted_inline_limit") )
-                            :: metadata
-                          in
-                          (if fits then projected else wire_content), metadata
-                        | false, _ | true, None -> wire_content, metadata
-                      in
-                      emit_skill_read_telemetry
-                        ?keeper_name
-                        ~kind
-                        ~reference
-                        ~bytes:(String.length wire_content)
-                        ();
-                      Tool_result.make_ok
-                        ~tool_name:name
-                        ~start_time
-                        ~data:(`String wire_content)
-                        ~metadata:
-                          (`Assoc
-                             (("reference", Skill_reference.to_yojson reference)
-                              :: ("skill_tool_use_id", `String skill_tool_use_id)
-                              :: metadata))
-                        ()
+                          match advice with
+                          | None -> Ok None
+                          | Some advice ->
+                            Prompt_registry.render_prompt_template
+                              Prompt_names.skill_applicability_projection
+                              [ "advice", advice ]
+                            |> Result.map (fun heading ->
+                                 Some (String.trim heading ^ "\n" ^ wire_content))
+                        in
+                        let projected =
+                          match advice with
+                          | Ok (Some text) -> text
+                          | Ok None | Error _ -> wire_content
+                        in
+                        let has_advice =
+                          match advice with
+                          | Ok (Some _) -> true
+                          | Ok None | Error _ -> false
+                        in
+                        let metadata =
+                          match advice with
+                          | Error reason ->
+                            ("applicability_projection_error", `String reason) :: metadata
+                          | Ok _ -> metadata
+                        in
+                        let metadata =
+                          ("skill_applicability", Typesafeai_skill_applicability.to_yojson assessment)
+                          :: ("applicability_advice_in_model_content", `Bool has_advice)
+                          :: ( "applicability_projection"
+                             , `String
+                                 (match advice with
+                                  | Error _ -> "unavailable"
+                                  | Ok None -> "not_requested"
+                                  | Ok (Some _) -> "inline") )
+                          :: metadata
+                        in
+                        projected, metadata
+                      | false, _ | true, None -> wire_content, metadata
+                    in
+                    emit_skill_read_telemetry
+                      ?keeper_name
+                      ~kind
+                      ~reference
+                      ~bytes:(String.length wire_content)
+                      ();
+                    Tool_result.make_ok
+                      ~tool_name:name
+                      ~start_time
+                      ~data:(`String wire_content)
+                      ~metadata:
+                        (`Assoc
+                           (("reference", Skill_reference.to_yojson reference)
+                            :: ("skill_tool_use_id", `String skill_tool_use_id)
+                            :: metadata))
+                      ()
                   in
                   (match resource_path with
                    | None ->

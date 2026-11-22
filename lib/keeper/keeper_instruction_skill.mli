@@ -53,5 +53,6 @@ val make_instruction_skill_tool
   -> instruction_skills:instruction_skill list
   -> unit
   -> (Agent_core.Tool.t, Tool_bridge.schema_error) result
-(** Executable [keeper_skill] tool. Concurrent, read-only, bounded inline
-    projection, lightweight telemetry only. *)
+(** Executable [keeper_skill] tool. Concurrent, read-only, full body returned
+    inline up to the provider wire boundary and projected to a structured blob
+    handle above it, lightweight telemetry only. *)

@@ -40,7 +40,7 @@ let is_keeper_task_tool_name name = List.mem name keeper_task_tool_names
     [Mod_state] even when the module-load [Tool_spec] side effect has not run
     yet. The workspace schema inventory owns this dispatch cluster. *)
 let workspace_state_tool_names =
-  List.map (fun (s : Masc_domain.tool_schema) -> s.name) Tool_schemas_workspace.schemas
+  List.map (fun (s : Masc_domain.tool_schema) -> s.name) Tools.workspace_schemas
 
 let is_workspace_state_tool_name name = List.mem name workspace_state_tool_names
 
@@ -171,7 +171,7 @@ let runtime_schema_for_descriptor
   let inventory =
     match descriptor.runtime_handler with
     | Keeper_tool_descriptor.Tool_keeper_composition_result_dispatch ->
-      [ Tool_schemas_composition_control.result_schema ]
+      [ Tools.composition_result_schema ]
     | Keeper_tool_descriptor.Tool_execute | Keeper_tool_descriptor.Tool_search_files
     | Keeper_tool_descriptor.Tool_read_file | Keeper_tool_descriptor.Tool_edit_file
     | Keeper_tool_descriptor.Tool_write_file | Keeper_tool_descriptor.Tool_lane_status

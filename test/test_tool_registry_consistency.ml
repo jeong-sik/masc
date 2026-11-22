@@ -36,7 +36,7 @@ let schema_inventory_names () =
 ;;
 
 let workspace_schema_names () =
-  List.map (fun (s : Masc_domain.tool_schema) -> s.name) Tool_schemas_workspace.schemas
+  List.map (fun (s : Masc_domain.tool_schema) -> s.name) Tools.workspace_schemas
 ;;
 
 let expected_workspace_read_only_names =
@@ -152,7 +152,7 @@ let test_translated_descriptor_keeps_distinct_runtime_schema () =
 
 let test_workspace_schemas_route_to_state () =
   init ();
-  Tool_schemas_workspace.schemas
+  Tools.workspace_schemas
   |> List.iter (fun (schema : Masc_domain.tool_schema) ->
        Alcotest.(check bool)
          (Printf.sprintf "%s routes to Mod_state" schema.name)

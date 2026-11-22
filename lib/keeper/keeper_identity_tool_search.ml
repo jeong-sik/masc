@@ -97,7 +97,7 @@ let summary_of description =
 (* The fixed half of what the model reads lives in
    config/tools/keeper_tool_search.toml with every other tool's prose; only
    the listing is built here, because only this turn knows what is attached. *)
-let declared = Tool_schemas_identity_tool_search.schema
+let declared = Tools.identity_tool_search_schema
 
 (* Every entry, including the ones this turn also places with their schemas.
    This description sits in the tool array, which is the head of the

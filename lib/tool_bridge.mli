@@ -214,3 +214,15 @@ val agent_core_tool_of_masc_with_execution_env :
     heterogeneous lane fallback can change the answer between attempts, so a
     projection fixed at build time would describe the wrong lane. This adapter
     does not know what a lane is; it only defers the question. *)
+
+val agent_core_tool_of_embedded_name :
+  ?descriptor:Agent_core.Tool.descriptor ->
+  ?base_path:string ->
+  ?answer_reader:(string -> Yojson.Safe.t option) ->
+  ?model_projection:(unit -> Tool_output.model_projection) ->
+  ?on_externalization_error:(externalization_error -> unit) ->
+  string ->
+  (Agent_core.Tool.Execution_env.t -> Yojson.Safe.t -> Tool_result.result) ->
+  (Agent_core.Tool.t, schema_error) result
+(** Compile an embedded [config/tools/<name>.toml] declaration directly into an
+    AGENT_CORE {!Agent_core.Tool.t} without intermediate schema-stub wrappers. *)

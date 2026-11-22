@@ -84,7 +84,7 @@ let producer_authorizes descriptor =
 
 let undescribed_kind ~identity_tool_index tool_name =
   if String.equal tool_name Keeper_instruction_skill.skill_tool_name
-     || String.equal tool_name Tool_schemas_identity_tool_search.schema.name
+     || String.equal tool_name Tools.identity_tool_search_schema.name
   then Control
   else if Keeper_identity_tool_index.mem identity_tool_index ~tool_name
   then Attached_service

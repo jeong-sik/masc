@@ -293,12 +293,9 @@ let test_denied_node_tool_withholds_task_composition_from_prompt () =
    | _ -> fail "an admitted Task instruction skill was not advertised")
 ;;
 
-(* An instruction body over the inline read boundary projects as
-   [Entry_unavailable] (#39138). Turn setup fails the turn on any Task Skill
-   resolution Error, so an Error here would stop every turn of a Keeper
-   holding the Task, held Tasks included. The snapshot holds the Skill, so it
-   is a known Skill that is unavailable: the selection resolves, the readable
-   Skill stays selected, and the prompt row names the size refusal. *)
+(* A valid instruction body over 16 KiB is now selected and offered through
+   [keeper_skill] instead of being dropped as unavailable; a blank body still
+   projects as [Entry_unavailable] without failing the turn. *)
 let test_oversized_task_skill_is_unavailable_not_a_failed_turn () =
   let config = config (source_row ~id:"only" ~path:"skills") in
   let oversized_body = String.make (Common.max_tool_result_wire_bytes + 1) 'x' in
@@ -307,6 +304,7 @@ let test_oversized_task_skill_is_unavailable_not_a_failed_turn () =
       config
       [ [ "guide", document ~name:"guide" ~description:"guide" "GUIDE"
         ; "huge", document ~name:"huge" ~description:"huge" oversized_body
+        ; "blank", document ~name:"blank" ~description:"blank" "   "
         ]
       ]
   in
@@ -321,9 +319,12 @@ let test_oversized_task_skill_is_unavailable_not_a_failed_turn () =
   let huge_reference =
     exact_reference skill_snapshot ~source_id ~package_id:"huge" ~name:"huge"
   in
+  let blank_reference =
+    exact_reference skill_snapshot ~source_id ~package_id:"blank" ~name:"blank"
+  in
   let held_task_skills =
     [ { Inputs.held_task_id = "task-held"
-      ; held_skills = [ huge_reference; guide_reference ]
+      ; held_skills = [ huge_reference; guide_reference; blank_reference ]
       }
     ]
   in
@@ -337,13 +338,13 @@ let test_oversized_task_skill_is_unavailable_not_a_failed_turn () =
     | Ok selection -> selection
     | Error error ->
       failf
-        "a pinned oversized Skill failed the turn's Task Skill resolution: %s"
+        "a pinned Task Skill failed the turn's Task Skill resolution: %s"
         (Selection.error_to_string error)
   in
   check
     (list string)
-    "the readable Task Skill stays selected"
-    [ "guide" ]
+    "both guide and >16 KiB huge Task Skills stay selected"
+    [ "huge"; "guide" ]
     (List.map
        (fun (selected : Selection.selected) -> selected.skill.name)
        selection.Selection.selected);
@@ -352,20 +353,16 @@ let test_oversized_task_skill_is_unavailable_not_a_failed_turn () =
     | [ { Selection.reference
         ; reason =
             (Selection.Catalog_entry_unprojectable
-               (Masc.Keeper_skill_catalog.Body_too_large_to_read
-                  { skill; bytes; max_bytes }) as reason)
+               (Masc.Keeper_skill_catalog.Body_blank { skill }) as reason)
         ; task_ids
         }
       ] ->
-      check bool "the unavailable row is the pinned reference" true
-        (Reference.equal reference huge_reference);
-      check string "the size refusal names the Skill" "huge" skill;
-      check int "the refusal carries the inline read boundary"
-        Common.max_tool_result_wire_bytes max_bytes;
-      check bool "the refused body is over that boundary" true (bytes > max_bytes);
+      check bool "the unavailable row is the blank reference" true
+        (Reference.equal reference blank_reference);
+      check string "the blank refusal names the Skill" "blank" skill;
       check (list string) "the row keeps the Task that pinned it" [ "task-held" ] task_ids;
       Selection.unavailable_reason_to_string reason
-    | _ -> fail "the oversized Task Skill was not kept as one typed unavailable row"
+    | _ -> fail "the blank Task Skill was not kept as one typed unavailable row"
   in
   let surfaces =
     match
@@ -387,16 +384,19 @@ let test_oversized_task_skill_is_unavailable_not_a_failed_turn () =
          Reference.equal surface.reference reference)
       surfaces
   in
-  check int "the Task lists both pinned Skills and nothing else" 2 (List.length surfaces);
+  check int "the Task lists all three pinned Skills" 3 (List.length surfaces);
   (match surface_of guide_reference with
    | Some { availability = Masc.Keeper_skill_catalog.Instruction_tool; _ } -> ()
    | Some _ | None -> fail "the readable Task Skill is not offered through keeper_skill");
-  match surface_of huge_reference with
+  (match surface_of huge_reference with
+   | Some { availability = Masc.Keeper_skill_catalog.Instruction_tool; _ } -> ()
+   | Some _ | None -> fail "the >16 KiB Task Skill is not offered through keeper_skill");
+  match surface_of blank_reference with
   | Some { availability = Masc.Keeper_skill_catalog.Exact_unavailable { diagnostic }; _ } ->
-    check string "the prompt row gives the size refusal as the reason" reason diagnostic
+    check string "the prompt row gives the blank refusal as the reason" reason diagnostic
   | Some _ | None ->
     failf
-      "the Task's prompt surface did not list the oversized Skill as unavailable: %s"
+      "the Task's prompt surface did not list the blank Skill as unavailable: %s"
       (Yojson.Safe.to_string
          (`List (List.map Masc.Keeper_skill_catalog.exact_surface_to_yojson surfaces)))
 ;;
@@ -1420,7 +1420,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
     (fun () ->
       let received_assessment = ref None in
       let near_tool = Masc.Keeper_instruction_skill.make_instruction_skill_tool
-          ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
+          ~config:(Masc.Workspace.default_config log_root)
           ~assess_applicability:(fun ~reference ~body ->
             let assessment = Masc.Typesafeai_skill_applicability.assess ~clock ~keeper_id:"skill-fixture"
               ~context:(Some (`Assoc [ "request", `String "inspect the current task" ]))
@@ -1429,11 +1429,12 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
           ~on_result:(fun ~input:_ result -> captured := Some result)
           ~instruction_skills:[ instruction_skill near_reference near_selected.skill ] () |> Result.get_ok in
       let output = run_skill_tool near_tool (Reference.to_yojson near_reference) in
-      check string "advice cannot displace a body at the existing inline boundary" near_body output;
+      check bool "advice + body above 16 KiB offloads to a structured handle instead of refusing"
+        true (Tool_output.is_marker output);
       let metadata = Tool_result.metadata (Option.get !captured) |> Option.get in
-      check string "non-delivery is explicit, not claimed as consumed advice" "omitted_inline_limit"
+      check string "advice is projected inline without arbitrary 16 KiB drop" "inline"
         (metadata |> member "applicability_projection" |> to_string);
-      check bool "projection does not claim model receipt" false
+      check bool "projection records model receipt of advice" true
         (metadata |> member "applicability_advice_in_model_content" |> to_bool);
       let empty_prompts = Filename.concat log_root "empty-prompts" in
       Fs_compat.mkdir_p empty_prompts;
@@ -1443,7 +1444,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
         let retained_assessment = Option.get !received_assessment in
         Prompt_registry.clear (); Prompt_registry.set_markdown_dir empty_prompts;
         let cached_tool = Masc.Keeper_instruction_skill.make_instruction_skill_tool
-          ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
+          ~config:(Masc.Workspace.default_config log_root)
           ~assess_applicability:(fun ~reference:_ ~body:_ -> retained_assessment)
           ~on_result:(fun ~input:_ result -> captured := Some result)
           ~instruction_skills:[ instruction_skill near_reference near_selected.skill ] () |> Result.get_ok in

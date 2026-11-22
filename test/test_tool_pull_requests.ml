@@ -563,7 +563,7 @@ let test_the_tool_rejects_bad_arguments () =
 (* --- the definition against the code --- *)
 
 let test_the_definition_matches_the_code () =
-  let schema = Tool_schemas_misc_toml.pull_requests in
+  let schema = Tool_schemas_misc.pull_requests_schema in
   let properties = member "properties" schema.Masc_domain.input_schema in
   check_string "name" "keeper_pull_requests_list" schema.Masc_domain.name;
   check_strings

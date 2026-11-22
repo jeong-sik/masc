@@ -451,22 +451,16 @@ let test_partition_documents_isolates_rejections () =
     failf "expected one isolated rejection, got %d" (List.length rejected)
 ;;
 
-(* keeper_skill returns an instruction body as one inline tool result. A
-   catalog that offered a body over that boundary would fail every read, so
-   both catalog paths reject it with the typed reason instead. *)
+(* Valid SKILL.md bodies exceeding the 16 KiB inline tool-result boundary are
+   accepted cleanly (never arbitrarily refused); large bodies are delivered on
+   demand via [keeper_skill] and offloaded to a structured blob handle when
+   over the provider wire boundary. *)
 let test_unreadable_body_is_rejected_not_offered () =
   let max_bytes = Common.max_tool_result_wire_bytes in
+  let long_body = String.make (max_bytes + 1) 'x' in
   let document =
     "---\nname: long-guide\ndescription: A body past the inline read boundary.\n---\n"
-    ^ String.make (max_bytes + 1) 'x'
-  in
-  let expect_body_rejection label = function
-    | Skill_catalog.Body_too_large_to_read { skill; bytes; max_bytes = reported } ->
-      check string (label ^ ": skill") "long-guide" skill;
-      check int (label ^ ": bytes") (max_bytes + 1) bytes;
-      check int (label ^ ": max_bytes") max_bytes reported
-    | error ->
-      fail (label ^ ": wrong rejection: " ^ Skill_catalog.error_to_string error)
+    ^ long_body
   in
   let catalog, rejections =
     Skill_catalog.partition_documents
@@ -474,29 +468,23 @@ let test_unreadable_body_is_rejected_not_offered () =
   in
   check
     (list string)
-    "readable skill stays offered"
-    [ "release-checklist" ]
+    "both readable and long skills are offered"
+    [ "long-guide"; "release-checklist" ]
     (Skill_catalog.skills catalog
      |> List.map (fun skill -> skill.Skill_catalog.name));
-  (match rejections with
-   | [ { Skill_catalog.directory; error } ] ->
-     check string "rejection names its package" "long-guide" directory;
-     expect_body_rejection "document catalog" error
-   | rejections ->
-     failf "expected one rejection, got %d" (List.length rejections));
+  check int "no rejection for valid long SKILL.md" 0 (List.length rejections);
   let snapshot_catalog, diagnostics =
     Skill_catalog.of_snapshot (snapshot_of_document ~directory:"long-guide" document)
   in
   check
     int
-    "snapshot catalog does not offer it"
-    0
+    "snapshot catalog offers long SKILL.md"
+    1
     (List.length (Skill_catalog.skills snapshot_catalog));
-  match diagnostics with
-  | [ diagnostic ] ->
-    expect_body_rejection "snapshot catalog" diagnostic.Skill_catalog.error
-  | diagnostics ->
-    failf "expected one projection diagnostic, got %d" (List.length diagnostics)
+  check int "no projection diagnostics for valid long SKILL.md" 0 (List.length diagnostics);
+  match Skill_catalog.find snapshot_catalog "long-guide" with
+  | Some skill -> check int "full body preserved" (max_bytes + 1) (String.length skill.body)
+  | None -> fail "expected long-guide in snapshot catalog"
 ;;
 
 (* keeper_skill returns the body as the instruction. A skill with no text in
@@ -557,13 +545,12 @@ let test_blank_body_is_rejected_not_offered () =
     cases
 ;;
 
-(* A broken composition falls back to its frozen instruction body, and that
-   body is read through [keeper_skill] too. An oversized one is unavailable,
-   not served as an instruction every read would refuse. *)
+(* Long instruction bodies with embedded fenced blocks remain offered cleanly
+   instead of failing a 16 KiB size gate. *)
 let test_oversized_frozen_fallback_is_unavailable () =
   let max_bytes = Common.max_tool_result_wire_bytes in
   let document =
-    "---\nname: broken-long\ndescription: Broken composition, long body.\n---\n\n```toml composition\n[[compositions]]\n"
+    "---\nname: broken-long\ndescription: Long body with fenced block.\n---\n\n```toml composition\n[[compositions]]\n"
     ^ String.make max_bytes 'x'
   in
   let catalog, diagnostics =
@@ -571,20 +558,10 @@ let test_oversized_frozen_fallback_is_unavailable () =
   in
   check
     int
-    "oversized fallback is not offered"
-    0
+    "long skill body is offered"
+    1
     (List.length (Skill_catalog.skills catalog));
-  match diagnostics with
-  | [ diagnostic ] ->
-    (match diagnostic.Skill_catalog.error with
-     | Skill_catalog.Body_too_large_to_read { skill; bytes; max_bytes = reported } ->
-       check string "skill" "broken-long" skill;
-       check bool "bytes exceed the boundary" true (bytes > max_bytes);
-       check int "max_bytes" max_bytes reported
-     | error ->
-       fail ("unexpected projection diagnostic: " ^ Skill_catalog.error_to_string error))
-  | diagnostics ->
-    failf "expected one projection diagnostic, got %d" (List.length diagnostics)
+  check int "no projection diagnostics" 0 (List.length diagnostics)
 ;;
 
 let skill_catalog_of documents =

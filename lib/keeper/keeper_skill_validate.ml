@@ -161,15 +161,6 @@ let handle ~descriptors ~draft_context ~config ~args =
               }
           | Error
               (Invalid_document
-                 (Keeper_skill_catalog.Body_too_large_to_read { bytes; max_bytes; _ } as error)) ->
-            Repeat_cache.Failure
-              { class_ = Tool_result.Policy_rejection
-              ; code = Keeper_skill_catalog.error_code error
-              ; message = Keeper_skill_catalog.error_to_string error
-              ; fields = identity @ [ "bytes", `Int bytes; "max_bytes", `Int max_bytes ]
-              }
-          | Error
-              (Invalid_document
                  (( Keeper_skill_catalog.Definition_rejected _
                   | Keeper_skill_catalog.Duplicate_skill _
                   | Keeper_skill_catalog.Body_blank _ ) as error)) ->

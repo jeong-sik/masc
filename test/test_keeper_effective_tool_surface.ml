@@ -763,28 +763,31 @@ let test_left_out_skills_reach_the_surface () =
 ;;
 
 (* A Task that pins a Skill the snapshot holds but the catalog cannot project
-   (here an instruction body over the inline read boundary) still gets a
-   surface. The pinned Skill is a typed row with its Task and catalog error,
-   the renderers' left-out list names it, and the wire carries the row: a
-   pinned Skill with no row reads as one nobody pinned. *)
+   (here a blank instruction body) still gets a surface. The pinned Skill is a
+   typed row with its Task and catalog error, the renderers' left-out list
+   names it, and the wire carries the row: a pinned Skill with no row reads as
+   one nobody pinned. Meanwhile a valid >16 KiB Skill body is projected cleanly
+   without refusal. *)
 let test_unprojectable_task_skill_is_a_typed_row () =
   let oversized =
     Printf.sprintf
-      "---\nname: huge\ndescription: Oversized fixture.\n---\n\n%s"
+      "---\nname: huge\ndescription: Large valid fixture.\n---\n\n%s"
       (String.make (Common.max_tool_result_wire_bytes + 1) 'x')
   in
+  let blank = "---\nname: blank\ndescription: Blank fixture.\n---\n\n   " in
   let snapshot =
     configured_snapshot
       ~source_id:"fixture-catalog"
       ~anchor:"base-path"
       ~path:"skills"
-      [ "guide", instruction_skill "guide"; "huge", oversized ]
+      [ "guide", instruction_skill "guide"; "huge", oversized; "blank", blank ]
   in
   let huge = reference_by_name snapshot "huge" in
+  let blank_ref = reference_by_name snapshot "blank" in
   match
     project
       ~snapshot
-      ~task_skill_references:[ huge ]
+      ~task_skill_references:[ huge; blank_ref ]
       ~native_posture:Runtime_native_tools.Native_read
       ()
   with
@@ -795,18 +798,18 @@ let test_unprojectable_task_skill_is_a_typed_row () =
       | [ row ] -> row
       | rows -> failf "expected one unavailable Task Skill row, got %d" (List.length rows)
     in
-    check bool "the row is the pinned reference" true
-      (Skill_reference.equal row.Keeper_task_skill_turn.reference huge);
+    check bool "the row is the pinned blank reference" true
+      (Skill_reference.equal row.Keeper_task_skill_turn.reference blank_ref);
     check (list string) "the row keeps the Task that pinned it" [ "task-001" ] row.task_ids;
-    check bool "the row carries the typed size refusal" true
+    check bool "the row carries the typed blank-body refusal" true
       (match row.reason with
        | Keeper_task_skill_turn.Catalog_entry_unprojectable
-           (Keeper_skill_catalog.Body_too_large_to_read { skill = "huge"; _ }) ->
+           (Keeper_skill_catalog.Body_blank { skill = "blank" }) ->
          true
        | Catalog_entry_unprojectable _ | Pin_unresolved _ -> false);
     check (list string) "the left-out list the renderers draw names the row"
       [ Printf.sprintf "%s: %s"
-          (Skill_catalog_snapshot.identity_to_yojson huge.Skill_reference.identity
+          (Skill_catalog_snapshot.identity_to_yojson blank_ref.Skill_reference.identity
            |> Yojson.Safe.to_string)
           (Keeper_task_skill_turn.unavailable_reason_to_string row.reason)
       ; Keeper_task_skill_turn.unprojectable_to_string row

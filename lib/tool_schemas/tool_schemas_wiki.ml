@@ -25,30 +25,22 @@ let operation_id = function
   | Lint_pages -> "lint"
 ;;
 
-let definition operation ~read_only (loaded : Tool_definition_toml.loaded) =
+let definition operation ~read_only name =
+  let loaded = Tool_definition_embedded.load name in
   { operation
-  ; schema = loaded.schema
-  ; keeper_projection = loaded.keeper_projection
+  ; schema = loaded.Tool_definition_toml.schema
+  ; keeper_projection = loaded.Tool_definition_toml.keeper_projection
   ; read_only
   }
 ;;
 
 let definition_for = function
-  (* masc_wiki_list *)
-  | List_pages -> definition List_pages ~read_only:true Tool_schemas_wiki_toml.list
-  (* masc_wiki_read *)
-  | Read_page -> definition Read_page ~read_only:true Tool_schemas_wiki_toml.read
-  (* masc_wiki_create *)
-  | Create_page ->
-    definition Create_page ~read_only:false Tool_schemas_wiki_toml.create
-  (* masc_wiki_update *)
-  | Update_page ->
-    definition Update_page ~read_only:false Tool_schemas_wiki_toml.update
-  (* masc_wiki_search *)
-  | Search_pages ->
-    definition Search_pages ~read_only:true Tool_schemas_wiki_toml.search
-  (* masc_wiki_lint *)
-  | Lint_pages -> definition Lint_pages ~read_only:true Tool_schemas_wiki_toml.lint
+  | List_pages -> definition List_pages ~read_only:true "masc_wiki_list"
+  | Read_page -> definition Read_page ~read_only:true "masc_wiki_read"
+  | Create_page -> definition Create_page ~read_only:false "masc_wiki_create"
+  | Update_page -> definition Update_page ~read_only:false "masc_wiki_update"
+  | Search_pages -> definition Search_pages ~read_only:true "masc_wiki_search"
+  | Lint_pages -> definition Lint_pages ~read_only:true "masc_wiki_lint"
 ;;
 
 let definitions : definition list = List.map definition_for all_of_operation

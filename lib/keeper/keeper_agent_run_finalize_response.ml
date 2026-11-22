@@ -176,7 +176,7 @@ let finalize
     ~session
     ~(append_manifest : Keeper_agent_run_turn_helpers.append_manifest_fn)
     ~model
-    ~(acc : Keeper_run_tools.hook_accumulator)
+    ~(acc : Keeper_run_tools_hook_accumulator.hook_accumulator)
     ~(result : Runtime_agent.run_result)
     ~last_persisted_checkpoint
     ~final_agent_core_turn_ordinal

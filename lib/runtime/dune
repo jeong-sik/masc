@@ -59,7 +59,6 @@
   masc.runtime_toml_namespace
   masc.browser_configuration
   masc.machine_configuration
-  masc.provider_tool_support
   masc.keeper_runtime
   masc.keeper_registry
   masc.auth

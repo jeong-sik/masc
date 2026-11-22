@@ -44,7 +44,7 @@ val run_teardown_protected :
     bound its own work; [protect] makes it uncancellable for its duration. *)
 
 val cleanup_agent_setup :
-  keeper_name:string -> Keeper_run_tools.agent_setup -> unit
+  keeper_name:string -> Keeper_run_tools_hooks.agent_setup -> unit
 (** Tear down one turn's tool bundle through {!run_teardown_protected} at site
     ["tool_cleanup"]. Best effort: it never raises, so it cannot mask the
     turn's own outcome. *)

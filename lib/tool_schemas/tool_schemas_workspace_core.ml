@@ -13,10 +13,14 @@ type operation =
 
 let operations = all_of_operation
 
+let status_schema = Tool_definition_embedded.schema "masc_status"
+let check_schema = Tool_definition_embedded.schema "masc_check"
+let heartbeat_schema = Tool_definition_embedded.schema "masc_heartbeat"
+
 let schema = function
-  | Status -> Tool_schemas_workspace_core_toml.status
-  | Check -> Tool_schemas_workspace_core_toml.check
-  | Heartbeat -> Tool_schemas_workspace_core_toml.heartbeat
+  | Status -> status_schema
+  | Check -> check_schema
+  | Heartbeat -> heartbeat_schema
 ;;
 
 let tool_name operation = (schema operation).name

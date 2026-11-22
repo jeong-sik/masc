@@ -1869,12 +1869,13 @@ let verifier_runtime_admission (runtime : t) =
   match runtime.execution with
   | Runtime_execution.Agent_core sealed
     when not
-           (Provider_tool_support.provider_supports_inline_tools
-              (Runtime_account_access.api_declaration sealed)) ->
+           (Agent_core.Provider_runtime_binding.capabilities_for_provider_config
+              (Runtime_account_access.api_declaration sealed))
+             .Llm_provider.Capabilities.supports_tools ->
     Error (runtime.id ^ ": completion verifier requires a binding that takes inline tools")
   | Runtime_execution.Agent_core sealed
     when not
-           (Provider_tool_support.agent_core_capabilities_of_config
+           (Agent_core.Provider_runtime_binding.capabilities_for_provider_config
               (Runtime_account_access.api_declaration sealed))
              .Llm_provider.Capabilities.supports_system_prompt ->
     Error (runtime.id ^ ": completion verifier requires a model that takes a system prompt")
@@ -4561,10 +4562,12 @@ let capability_of_runtime (rt : t) : runtime_capability =
     match rt.execution with
     | Runtime_execution.Claude_code _ | Runtime_execution.Acp _ -> rt.model.tools_support
     | Runtime_execution.Agent_core sealed ->
-      let provider = Runtime_account_access.api_declaration sealed in
-      Provider_tool_support.provider_supports_inline_tools provider
-      && (Provider_tool_support.agent_core_capabilities_of_config provider)
-           .Llm_provider.Capabilities.supports_system_prompt
+      let caps =
+        Agent_core.Provider_runtime_binding.capabilities_for_provider_config
+          (Runtime_account_access.api_declaration sealed)
+      in
+      caps.Llm_provider.Capabilities.supports_tools
+      && caps.Llm_provider.Capabilities.supports_system_prompt
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Antigravity_cli _ ->
       false

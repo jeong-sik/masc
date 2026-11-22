@@ -52,42 +52,48 @@ let non_negative_int_member key obj =
 ;;
 
 let extract_kv_cache_read json =
-  let open Yojson.Safe.Util in
-  match non_negative_int_member "prompt_eval_cached_count" json with
-  | Some tokens -> Some { tokens; semantics = Exclusive_from_prompt_eval }
-  | None ->
-    (match non_negative_int_member "cache_n" json with
+  match json with
+  | `Assoc _ ->
+    let open Yojson.Safe.Util in
+    (match non_negative_int_member "prompt_eval_cached_count" json with
      | Some tokens -> Some { tokens; semantics = Exclusive_from_prompt_eval }
      | None ->
-       (match json |> member "timings" with
-        | `Assoc _ as timings ->
-          (match non_negative_int_member "cache_n" timings with
-           | Some tokens -> Some { tokens; semantics = Exclusive_from_prompt_eval }
-           | None -> None)
-        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)
-       |> function
-       | Some _ as hit -> hit
-       | None ->
-         let inclusive =
-           match json |> member "prompt_tokens_details" with
-           | `Assoc _ as details -> non_negative_int_member "cached_tokens" details
-           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
-             None
-         in
-         let inclusive =
-           match inclusive with
-           | Some _ as hit -> hit
-           | None -> non_negative_int_member "cached_tokens" json
-         in
-         Option.map (fun tokens -> { tokens; semantics = Inclusive_in_prompt_eval }) inclusive)
+       (match non_negative_int_member "cache_n" json with
+        | Some tokens -> Some { tokens; semantics = Exclusive_from_prompt_eval }
+        | None ->
+          (match json |> member "timings" with
+           | `Assoc _ as timings ->
+             (match non_negative_int_member "cache_n" timings with
+              | Some tokens -> Some { tokens; semantics = Exclusive_from_prompt_eval }
+              | None -> None)
+           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)
+          |> function
+          | Some _ as hit -> hit
+          | None ->
+            let inclusive =
+              match json |> member "prompt_tokens_details" with
+              | `Assoc _ as details -> non_negative_int_member "cached_tokens" details
+              | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+                None
+            in
+            let inclusive =
+              match inclusive with
+              | Some _ as hit -> hit
+              | None -> non_negative_int_member "cached_tokens" json
+            in
+            Option.map (fun tokens -> { tokens; semantics = Inclusive_in_prompt_eval }) inclusive))
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 let resolve_prompt_tokens ~prompt_eval_count ~kv_cache_read =
+  let prompt_eval_count = max 0 prompt_eval_count in
   match kv_cache_read with
   | None -> prompt_eval_count, 0, None
   | Some { tokens; semantics = Exclusive_from_prompt_eval } ->
+    let tokens = max 0 tokens in
     prompt_eval_count + tokens, tokens, Some tokens
   | Some { tokens; semantics = Inclusive_in_prompt_eval } ->
+    let tokens = max 0 tokens in
     max prompt_eval_count tokens, tokens, Some tokens
 ;;
 
@@ -214,9 +220,13 @@ let parse_ollama_ndjson_chunk data_str : ollama_ndjson_parse_result =
          paths. Durations are nanoseconds on the wire; convert to ms
          and tok/s here. *)
       let oll_timings =
-        let prompt_n = json |> member "prompt_eval_count" |> to_int_option in
+        let prompt_n =
+          json |> member "prompt_eval_count" |> to_int_option |> Option.map (max 0)
+        in
         let prompt_ns = json |> member "prompt_eval_duration" |> to_int_option in
-        let predicted_n = json |> member "eval_count" |> to_int_option in
+        let predicted_n =
+          json |> member "eval_count" |> to_int_option |> Option.map (max 0)
+        in
         let predicted_ns = json |> member "eval_duration" |> to_int_option in
         let cache_n = Option.map (fun r -> r.tokens) kv_cache_read in
         let any_set =
@@ -232,7 +242,7 @@ let parse_ollama_ndjson_chunk data_str : ollama_ndjson_parse_result =
           let ms_of_ns ns_opt = Option.map (fun ns -> float_of_int ns /. 1e6) ns_opt in
           let per_second n_opt ns_opt =
             match n_opt, ns_opt with
-            | Some n, Some ns when ns > 0 ->
+            | Some n, Some ns when n >= 0 && ns > 0 ->
               Some (float_of_int n /. (float_of_int ns /. 1e9))
             | Some _, Some _ | Some _, None | None, Some _ | None, None -> None
           in

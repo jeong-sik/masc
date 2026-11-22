@@ -1500,14 +1500,164 @@ let test_explicit_cached_content_request_omits_prefix_fields () =
   check bool "tools omitted" true (json |> member "tools" = `Null);
   check bool "toolConfig omitted" true (json |> member "toolConfig" = `Null);
   check int "contents preserved" 1 (json |> member "contents" |> to_list |> List.length);
-  (* Prefix key isolates by api_key and model_id *)
+  (* Prefix key isolates by api_key, Refreshable_credential auth_headers, custom headers, and model_id *)
   let other_key_cfg = { config with api_key = Secret.of_string "other-key" } in
   let other_model_cfg = { config with model_id = "gemini-3.8-flash" } in
-  let k1 = Gemini_context_cache.prefix_key ~config ~prefix in
-  let k2 = Gemini_context_cache.prefix_key ~config:other_key_cfg ~prefix in
-  let k3 = Gemini_context_cache.prefix_key ~config:other_model_cfg ~prefix in
+  let k1 = Gemini_context_cache.prefix_key ~config ~prefix () in
+  let k2 = Gemini_context_cache.prefix_key ~config:other_key_cfg ~prefix () in
+  let k3 = Gemini_context_cache.prefix_key ~config:other_model_cfg ~prefix () in
   check bool "different api_key produces distinct prefix key" true (not (String.equal k1 k2));
-  check bool "different model_id produces distinct prefix key" true (not (String.equal k1 k3))
+  check bool "different model_id produces distinct prefix key" true (not (String.equal k1 k3));
+  let refreshable_cfg = { config with api_key = Secret.empty } in
+  let rk1 =
+    Gemini_context_cache.prefix_key
+      ~auth_headers:[ "Authorization", "Bearer token-account-a" ]
+      ~config:refreshable_cfg
+      ~prefix
+      ()
+  in
+  let rk2 =
+    Gemini_context_cache.prefix_key
+      ~auth_headers:[ "Authorization", "Bearer token-account-b" ]
+      ~config:refreshable_cfg
+      ~prefix
+      ()
+  in
+  check bool "distinct refreshable Bearer tokens produce distinct prefix keys" true
+    (not (String.equal rk1 rk2));
+  let proj_cfg =
+    { refreshable_cfg with headers = [ "x-goog-user-project", "proj-b" ] }
+  in
+  let rk3 =
+    Gemini_context_cache.prefix_key
+      ~auth_headers:[ "Authorization", "Bearer token-account-a" ]
+      ~config:proj_cfg
+      ~prefix
+      ()
+  in
+  check bool "distinct custom headers produce distinct prefix keys" true
+    (not (String.equal rk1 rk3));
+  let traced_cfg_1 =
+    { config with
+      headers =
+        [ "x-goog-user-project", "proj-a"
+        ; "traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        ; "tracestate", "vendor=span1"
+        ; "baggage", "turn=1"
+        ]
+    }
+  in
+  let traced_cfg_2 =
+    { config with
+      headers =
+        [ "x-goog-user-project", "proj-a"
+        ; "traceparent", "00-99999999999999999999999999999999-1111111111111111-01"
+        ; "tracestate", "vendor=span2"
+        ; "baggage", "turn=2"
+        ]
+    }
+  in
+  let tk1 = Gemini_context_cache.prefix_key ~config:traced_cfg_1 ~prefix () in
+  let tk2 = Gemini_context_cache.prefix_key ~config:traced_cfg_2 ~prefix () in
+  check string "distinct per-call trace headers produce identical prefix keys" tk1 tk2;
+  (* Vertex Gemini endpoint and model resource formatting *)
+  let vertex_regional =
+    "https://us-central1-aiplatform.googleapis.com/v1/projects/my-proj/locations/us-central1/publishers/google"
+  in
+  check string "vertex regional cachedContents URL"
+    "https://us-central1-aiplatform.googleapis.com/v1/projects/my-proj/locations/us-central1/cachedContents"
+    (Gemini_context_cache.cached_contents_url ~base_url:vertex_regional);
+  let vertex_global =
+    "https://aiplatform.googleapis.com/v1/projects/my-proj/locations/global/publishers/google"
+  in
+  check string "vertex global cachedContents URL"
+    "https://aiplatform.googleapis.com/v1/projects/my-proj/locations/global/cachedContents"
+    (Gemini_context_cache.cached_contents_url ~base_url:vertex_global);
+  let vertex_body =
+    Gemini_context_cache.build_create_body
+      ~base_url:vertex_regional
+      ~model_id:"gemini-2.5-flash"
+      ~ttl_s:300
+      ~prefix
+      ()
+    |> parse_body
+  in
+  check string "vertex create body uses full publisher model path"
+    "projects/my-proj/locations/us-central1/publishers/google/models/gemini-2.5-flash"
+    (vertex_body |> member "model" |> to_string);
+  (* Stale cachedContent error detection covers 404, 403, and spaced 'cached content' *)
+  let mk_http_err code body =
+    Http_client.HttpError
+      { code; body = Http_client.Received body; retry_after_header = None }
+  in
+  check bool "404 is cachedContent error" true
+    (Gemini_context_cache.is_cached_content_error (mk_http_err 404 "not found"));
+  check bool "403 CachedContent not found is cachedContent error" true
+    (Gemini_context_cache.is_cached_content_error
+       (mk_http_err 403 "CachedContent not found (or permission denied)"));
+  check bool "400 with spaced 'cached content' is cachedContent error" true
+    (Gemini_context_cache.is_cached_content_error
+       (mk_http_err 400 "Invalid cached content resource name"));
+  check bool "403 unrelated API key error is NOT cachedContent error" false
+    (Gemini_context_cache.is_cached_content_error
+       (mk_http_err 403 "API key not valid"));
+  check bool "400 unrelated error is NOT cachedContent error" false
+    (Gemini_context_cache.is_cached_content_error
+       (mk_http_err 400 "Invalid temperature parameter"));
+  (* extract_cacheable_prefix_result matches build_request_artifact image degradation
+     and returns Error instead of raising on invalid tool-result projection *)
+  let no_image_caps =
+    { Capabilities.gemini_capabilities with supports_image_input = false }
+  in
+  let no_image_cfg =
+    { config with model_capabilities_override = Some no_image_caps }
+  in
+  let sys_with_image =
+    [ { Types.origin = Types.Conversation
+      ; role = Types.System
+      ; content =
+          [ Types.Text "System rules"
+          ; Types.Image { media_type = "image/png"; source = Types.Base64 "AAAA" }
+          ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; Types.user_msg "Hi"
+    ]
+  in
+  let degraded_prefix =
+    match Backend_gemini.extract_cacheable_prefix_result ~config:no_image_cfg ~messages:sys_with_image () with
+    | Ok p -> p
+    | Error e -> fail ("expected degraded prefix Ok, got Error: " ^ e)
+  in
+  let implicit_json =
+    Backend_gemini.build_request ~config:no_image_cfg ~messages:sys_with_image ()
+    |> parse_body
+  in
+  check bool "extract_cacheable_prefix_result matches build_request_artifact systemInstruction" true
+    (degraded_prefix.system_instruction = Some (implicit_json |> member "systemInstruction"));
+  let orphan_tool_msgs =
+    [ { Types.origin = Types.Conversation
+      ; role = Types.Tool
+      ; content =
+          [ Types.ToolResult
+              { tool_use_id = "missing"
+              ; content = "res"
+              ; outcome = Types.Tool_succeeded
+              ; json = None
+              ; content_blocks = None
+              }
+          ]
+      ; name = None
+      ; tool_call_id = Some "missing"
+      ; metadata = []
+      }
+    ]
+  in
+  (match Backend_gemini.extract_cacheable_prefix_result ~config ~messages:orphan_tool_msgs () with
+   | Error _ -> ()
+   | Ok _ -> fail "orphan tool result should return Error instead of raising")
 ;;
 
 let test_tool_choice_mapping () =

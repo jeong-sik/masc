@@ -177,55 +177,6 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
    a leftover [strategy = "ordered"] line was accepted and ignored — a key an
    operator could edit with no effect. Unknown keys fail the load instead,
    the same shape as [parse_exact_output_lane] below. *)
-let parse_lane_candidate ~(path : string) = function
-  | Otoml.TomlString runtime_id -> Ok (runtime_id, None)
-  | (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) as entry_tbl ->
-    let unknown =
-      List.concat_map
-        (fun (k, _) ->
-           if String.equal k "runtime" || String.equal k "effort" then []
-           else
-             error
-               (path ^ "." ^ k)
-               (Printf.sprintf
-                  "unknown lane candidate key %S; expected runtime and optional effort"
-                  k))
-        entries
-    in
-    let ( let* ) = Result.bind in
-    let* () = if unknown = [] then Ok () else Error unknown in
-    let* runtime_id =
-      match typed_find "a string" path entry_tbl "runtime" Otoml.get_string with
-      | Error _ as err -> err
-      | Ok None -> Error (error (path ^ ".runtime") "lane candidate runtime is required")
-      | Ok (Some id) -> Ok id
-    in
-    let* effort =
-      match typed_find "a string" path entry_tbl "effort" Otoml.get_string with
-      | Error _ as err -> err
-      | Ok None -> Ok None
-      | Ok (Some raw) ->
-        (match Llm_provider.Reasoning_effort.of_string raw with
-         | Some e -> Ok (Some e)
-         | None ->
-           Error
-             (error
-                (path ^ ".effort")
-                (Printf.sprintf
-                   "lane candidate effort %S is not a known effort; expected one of %s"
-                   raw
-                   Llm_provider.Reasoning_effort.values_for_log)))
-    in
-    Ok (runtime_id, effort)
-  | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
-  | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
-  | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ->
-    Error
-      (error
-         path
-         "lane candidate must be a runtime id string or inline table { runtime = ..., effort = ... }")
-;;
-
 let parse_lane ~(id : string) (tbl : Otoml.t)
   : (Runtime_schema.lane_decl, parse_error list) result
   =
@@ -235,13 +186,13 @@ let parse_lane ~(id : string) (tbl : Otoml.t)
     | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
       List.concat_map
         (fun (key, _) ->
-           if String.equal key "candidates" || String.equal key "effort"
+           if String.equal key "candidates"
            then []
            else
              error
                (path ^ "." ^ key)
                (Printf.sprintf
-                  "unknown lane key %S; expected candidates or effort (lanes are ordered \
+                  "unknown lane key %S; expected candidates (lanes are ordered \
                    by construction; there is no strategy key)"
                   key))
         entries
@@ -249,53 +200,26 @@ let parse_lane ~(id : string) (tbl : Otoml.t)
     | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
     | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> []
   in
-  let effort_result =
-    match typed_find "a string" path tbl "effort" Otoml.get_string with
-    | Error _ as err -> err
-    | Ok None -> Ok None
-    | Ok (Some raw) ->
-      (match Llm_provider.Reasoning_effort.of_string raw with
-       | Some e -> Ok (Some e)
-       | None ->
-         Error
-           (error
-              (path ^ ".effort")
-              (Printf.sprintf
-                 "lane effort %S is not a known effort; expected one of %s"
-                 raw
-                 Llm_provider.Reasoning_effort.values_for_log)))
-  in
-  let candidates_result =
+  let candidate_ids_result =
     match Otoml.find_opt tbl Fun.id [ "candidates" ] with
     | None -> Error (error (path ^ ".candidates") "lane candidates is required")
-    | Some (Otoml.TomlArray items) ->
-      partition_results (List.map (parse_lane_candidate ~path:(path ^ ".candidates")) items)
-    | Some
-        ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
-        | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
-        | Otoml.TomlLocalTime _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _
-        | Otoml.TomlTableArray _ ) ->
-      Error
-        (error
-           (path ^ ".candidates")
-           "lane candidates must be an array of runtime ids or { runtime, effort } tables")
+    | Some value ->
+      (try Ok (Otoml.get_array Otoml.get_string value) with
+       | Otoml.Type_error msg ->
+         Error
+           (error
+              (path ^ ".candidates")
+              (Printf.sprintf
+                 "lane candidates must be an array of string runtime ids; got %s"
+                 msg)))
   in
-  let e_of = function Ok _ -> [] | Error es -> es in
-  match unknown_key_errors, effort_result, candidates_result with
-  | [], Ok effort, Ok candidates ->
-    if candidates = []
+  match candidate_ids_result with
+  | Error e -> Error (unknown_key_errors @ e)
+  | Ok _ when unknown_key_errors <> [] -> Error unknown_key_errors
+  | Ok candidate_ids ->
+    if candidate_ids = []
     then Error (error path "lane must have at least one candidate")
-    else
-      Ok
-        { Runtime_schema.id
-        ; candidate_ids = List.map fst candidates
-        ; effort
-        ; candidate_efforts = candidates
-        }
-  | (_ :: _ as errs), ((Ok _ | Error _) as eff_r), ((Ok _ | Error _) as cand_r)
-  | ([] as errs), (Error _ as eff_r), ((Ok _ | Error _) as cand_r)
-  | ([] as errs), (Ok _ as eff_r), (Error _ as cand_r) ->
-    Error (errs @ e_of eff_r @ e_of cand_r)
+    else Ok { Runtime_schema.id; candidate_ids }
 ;;
 
 let parse_lanes (toml : Otoml.t) : (Runtime_schema.lane_decl list, parse_error list) result =

@@ -381,7 +381,7 @@ let test_provider_typo_is_refused_by_file_loader () =
       Alcotest.(check bool) "diagnostic includes the misspelled field" true
         (String_util.contains_substring message "providers.first.model_set"))
 
-let test_parameterized_effort_on_models_bindings_and_lanes () =
+let test_parameterized_effort_on_models_and_bindings () =
   let toml =
     {|[providers.p]
 display-name = "P"
@@ -397,6 +397,7 @@ include-base = true
 efforts = ["low", "high"]
 
 [p.base]
+is-default = true
 include-base = true
 efforts = ["low", "high"]
 
@@ -413,10 +414,9 @@ effort = "xhigh"
 default = "review"
 
 [runtime.lanes.review]
-effort = "medium"
 candidates = [
   "p.base",
-  { runtime = "p.single", effort = "max" },
+  "p.single",
 ]
 |}
   in
@@ -428,6 +428,11 @@ candidates = [
     let model_ids = List.map (fun (m : Runtime_schema.model_spec) -> m.id) cfg.models in
     Alcotest.(check bool) "expanded base + low + high" true
       (List.mem "base" model_ids && List.mem "base-low" model_ids && List.mem "base-high" model_ids);
+    let base_binding =
+      List.find (fun (b : Runtime_schema.binding) -> String.equal b.model_id "base") cfg.bindings
+    in
+    Alcotest.(check bool) "base binding preserves is-default when include-base = true" true
+      base_binding.is_default;
     let single_binding =
       List.find (fun (b : Runtime_schema.binding) -> String.equal b.model_id "single") cfg.bindings
     in
@@ -435,19 +440,6 @@ candidates = [
       (Option.map Llm_provider.Reasoning_effort.to_string single_binding.effort);
     let lane = List.hd cfg.lane_decls in
     Alcotest.(check (list string)) "lane candidate ids" [ "p.base"; "p.single" ] lane.candidate_ids;
-    let runtime_lane =
-      Runtime_lane.make
-        ?default_effort:lane.effort
-        ~candidate_efforts:lane.candidate_efforts
-        ~id:lane.id
-        lane.candidate_ids
-    in
-    Alcotest.(check (option string)) "lane default effort applies to plain candidate" (Some "medium")
-      (Option.map Llm_provider.Reasoning_effort.to_string
-         (Runtime_lane.effort_for_candidate runtime_lane "p.base"));
-    Alcotest.(check (option string)) "per-candidate effort overrides lane default" (Some "max")
-      (Option.map Llm_provider.Reasoning_effort.to_string
-         (Runtime_lane.effort_for_candidate runtime_lane "p.single"));
     (* Fail-closed on invalid effort *)
     let invalid_effort =
       {|[providers.p]
@@ -461,10 +453,93 @@ efforts = ["bogus"]
     in
     (match Runtime_toml.parse_string invalid_effort with
      | Ok _ -> Alcotest.fail "invalid effort must fail closed"
-     | Error _ -> ())
+     | Error _ -> ());
+    (* Fail-closed on unknown lane effort key *)
+    let invalid_lane_effort =
+      {|[providers.p]
+display-name = "P"
+protocol = "openai-compatible-http"
+endpoint = "https://example.invalid/v1"
+[models.m]
+api-name = "m"
+[p.m]
+[runtime.lanes.review]
+effort = "medium"
+candidates = ["p.m"]
+|}
+    in
+    (match Runtime_toml.parse_string invalid_lane_effort with
+     | Ok _ -> Alcotest.fail "un-wired lane effort key must fail closed"
+     | Error _ -> ());
+    (* Fail-closed on duplicate binding after effort expansion *)
+    let duplicate_binding =
+      {|[providers.p]
+display-name = "P"
+protocol = "openai-compatible-http"
+endpoint = "https://example.invalid/v1"
+[models.m]
+api-name = "m"
+efforts = ["low", "high"]
+[p.m]
+efforts = ["low", "high"]
+[p.m-low]
+effort = "low"
+|}
+    in
+    (match Runtime_toml.parse_string duplicate_binding with
+     | Ok _ -> Alcotest.fail "duplicate binding after effort expansion must fail closed"
+     | Error errs ->
+       Alcotest.(check bool) "reports duplicate binding" true
+         (List.exists
+            (fun (e : Runtime_toml.parse_error) ->
+               String_util.contains_substring e.message "duplicate binding")
+            errs));
+    (* Fail-closed on is-default / wizard-default with efforts when include-base is omitted *)
+    let default_without_base =
+      {|[providers.p]
+display-name = "P"
+protocol = "openai-compatible-http"
+endpoint = "https://example.invalid/v1"
+[models.m]
+api-name = "m"
+efforts = ["low", "high"]
+[p.m]
+is-default = true
+efforts = ["low", "high"]
+|}
+    in
+    (match Runtime_toml.parse_string default_without_base with
+     | Ok _ -> Alcotest.fail "is-default on efforts-expanded binding without include-base must fail closed"
+     | Error errs ->
+       Alcotest.(check bool) "reports is-default requires include-base" true
+         (List.exists
+            (fun (e : Runtime_toml.parse_error) ->
+               String_util.contains_substring e.message "include-base")
+            errs));
+    let wizard_without_base =
+      {|[providers.p]
+display-name = "P"
+protocol = "openai-compatible-http"
+endpoint = "https://example.invalid/v1"
+[models.m]
+api-name = "m"
+efforts = ["low", "high"]
+[p.m]
+wizard-default = true
+efforts = ["low", "high"]
+|}
+    in
+    (match Runtime_toml.parse_string wizard_without_base with
+     | Ok _ -> Alcotest.fail "wizard-default on efforts-expanded binding without include-base must fail closed"
+     | Error errs ->
+       Alcotest.(check bool) "reports wizard-default requires include-base" true
+         (List.exists
+            (fun (e : Runtime_toml.parse_error) ->
+               String_util.contains_substring e.message "include-base")
+            errs))
 ;;
 
-let test_typed_namespaces_decoded_without_string_roundtrip () =
+let test_typed_boot_overrides_decoded_without_string_roundtrip () =
   let base_path = Filename.temp_dir "typed-ns-" "" in
   let cfg_dir = Filename.concat (Filename.concat base_path ".masc") "config" in
   Sys.mkdir (Filename.concat base_path ".masc") 0o755;
@@ -477,12 +552,16 @@ facts_per_category_cap = 17
 [wiki_contents]
 enabled = false
 
-[maintenance]
-jsonl_retention_days = 14
+[wire_capture]
+retention_days = 14
+
+[turn]
+temperature = 0.25
 
 [transport]
 h2_max_concurrent_streams = 250
 https_port = 9443
+tls_cert_file = "/etc/masc/cert.pem"
 |}
   in
   let path = Filename.concat cfg_dir "runtime.toml" in
@@ -498,17 +577,41 @@ https_port = 9443
          Alcotest.failf "load_and_apply failed: %s"
            (Keeper_runtime_config.load_failure_to_string failure)
        | Ok _ ->
-         let ns = Config_boot_overrides.typed_namespaces () in
-         Alcotest.(check (option int)) "memory.category_cap" (Some 42) ns.memory.category_cap;
-         Alcotest.(check (option int)) "memory.facts_per_category_cap" (Some 17) ns.memory.facts_per_category_cap;
-         Alcotest.(check (option bool)) "wiki_contents.enabled" (Some false) ns.wiki_contents.enabled;
-         Alcotest.(check (option int)) "maintenance.jsonl_retention_days" (Some 14) ns.maintenance.jsonl_retention_days;
-         Alcotest.(check (option int)) "transport.h2_max_concurrent_streams" (Some 250) ns.transport.h2_max_concurrent_streams;
-         Alcotest.(check (option int)) "transport.https_port" (Some 9443) ns.transport.https_port;
          Alcotest.(check bool) "typed int stored directly (not string)" true
            (match Config_boot_overrides.get_typed_opt "MASC_KEEPER_MEMORY_CATEGORY_CAP" with
             | Some (Config_boot_overrides.Int 42) -> true
-            | Some _ | None -> false))
+            | Some (Config_boot_overrides.Bool _ | Float _ | String _ | Int _) | None -> false);
+         Alcotest.(check bool) "typed bool stored directly (not string)" true
+           (match Config_boot_overrides.get_typed_opt Env_config_keeper.KeeperWikiContents.enabled_env_key with
+            | Some (Config_boot_overrides.Bool false) -> true
+            | Some (Config_boot_overrides.Bool _ | Float _ | String _ | Int _) | None -> false);
+         Alcotest.(check bool) "typed float stored directly (not string)" true
+           (match Config_boot_overrides.get_typed_opt "MASC_KEEPER_UNIFIED_TEMP" with
+            | Some (Config_boot_overrides.Float f) -> Float.equal f 0.25
+            | Some (Config_boot_overrides.Bool _ | Int _ | String _) | None -> false);
+         Alcotest.(check int) "memory.category_cap consumer" 42
+           (Env_config_keeper.KeeperMemoryOs.category_cap ());
+         Alcotest.(check int) "memory.facts_per_category_cap consumer" 17
+           (Env_config_keeper.KeeperMemoryOs.facts_per_category_cap ());
+         Alcotest.(check bool) "wiki_contents.enabled consumer" false
+           (Env_config_keeper.KeeperWikiContents.enabled ());
+         Alcotest.(check int) "wire_capture.retention_days consumer" 14
+           (Env_config_keeper.KeeperWireCapture.retention_days ());
+         Alcotest.(check (float 1e-6)) "turn.temperature consumer" 0.25
+           (Env_config_keeper.KeeperTurn.temperature ());
+         Alcotest.(check int) "transport.h2_max_concurrent_streams consumer" 250
+           (H2_response_limits.max_concurrent_streams ());
+         Alcotest.(check (option int)) "transport.https_port consumer" (Some 9443)
+           (Env_config_runtime.Transport.https_port ());
+         Alcotest.(check (option string)) "transport.tls_cert_file consumer"
+           (Some "/etc/masc/cert.pem")
+           (Env_config_runtime.Transport.tls_cert_file ());
+         (* Fail closed if a string consumer encounters a non-string typed boot value *)
+         Config_boot_overrides.set_typed "MASC_TEST_TYPED_STRING_MISMATCH" (Config_boot_overrides.Int 7);
+         Alcotest.(check bool) "get_string fails closed on typed non-string" true
+           (match Env_config_core.get_string ~default:"fallback" "MASC_TEST_TYPED_STRING_MISMATCH" with
+            | _ -> false
+            | exception Env_config_core.Config_error _ -> true))
 ;;
 
 let () =
@@ -546,9 +649,9 @@ let () =
             test_explicit_binding_overrides_a_set_default
         ; Alcotest.test_case "invalid model sets are refused" `Quick
             test_invalid_model_sets_are_refused
-        ; Alcotest.test_case "parameterized effort on models, bindings, and lanes" `Quick
-            test_parameterized_effort_on_models_bindings_and_lanes
-        ; Alcotest.test_case "typed namespaces decoded without string roundtrip" `Quick
-            test_typed_namespaces_decoded_without_string_roundtrip
+        ; Alcotest.test_case "parameterized effort on models and bindings" `Quick
+            test_parameterized_effort_on_models_and_bindings
+        ; Alcotest.test_case "typed boot overrides decoded without string roundtrip" `Quick
+            test_typed_boot_overrides_decoded_without_string_roundtrip
         ] )
     ]

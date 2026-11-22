@@ -414,9 +414,13 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
        inference_timings so downstream can distinguish hardware
        decode rate from wall-clock tok/s. *)
       let timings =
-        let prompt_n = json |> member "prompt_eval_count" |> to_int_option in
+        let prompt_n =
+          json |> member "prompt_eval_count" |> to_int_option |> Option.map (max 0)
+        in
         let prompt_ns = json |> member "prompt_eval_duration" |> to_int_option in
-        let predicted_n = json |> member "eval_count" |> to_int_option in
+        let predicted_n =
+          json |> member "eval_count" |> to_int_option |> Option.map (max 0)
+        in
         let predicted_ns = json |> member "eval_duration" |> to_int_option in
         let cache_n = reported_cache_read in
         let any_set =
@@ -432,9 +436,9 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
           let ms_of_ns ns_opt = Option.map (fun ns -> float_of_int ns /. 1e6) ns_opt in
           let per_second n_opt ns_opt =
             match n_opt, ns_opt with
-            | Some n, Some ns when ns > 0 ->
+            | Some n, Some ns when n >= 0 && ns > 0 ->
               Some (float_of_int n /. (float_of_int ns /. 1e9))
-            | _ -> None
+            | Some _, Some _ | Some _, None | None, Some _ | None, None -> None
           in
           Some
             { Types.prompt_n

@@ -841,12 +841,15 @@ let validate_cache_retention (provider : Runtime_schema.provider)
          (match retention with
           | Runtime_schema.One_hour -> true
           | Runtime_schema.Five_minutes -> false)
-     | ( true
-       , ( Llm_provider.Capabilities.No_prompt_cache_wire
-         | Llm_provider.Capabilities.Gemini_explicit_cached_content ) ) ->
+     | true, Llm_provider.Capabilities.No_prompt_cache_wire ->
        Error
          (Printf.sprintf
             "binding %s.%s declares cache-retention = %S, but model %S has no catalog-declared prompt-cache wire contract"
+            provider.id model_id (Runtime_schema.cache_retention_to_string retention) model_id)
+     | true, Llm_provider.Capabilities.Gemini_explicit_cached_content ->
+       Error
+         (Printf.sprintf
+            "binding %s.%s declares cache-retention = %S, but model %S uses Gemini explicit cachedContents rather than Chat Completions cache-retention"
             provider.id model_id (Runtime_schema.cache_retention_to_string retention) model_id)
      | false,
        ( Llm_provider.Capabilities.No_prompt_cache_wire

@@ -410,6 +410,7 @@ let complete_stream_http
          (Error err)
      | None -> Completion_outcome.before_serialization (Error err))
   | Ok serialized ->
+    ignore sw;
     let dispatch_stream_once
           ~allow_cached_fallback
           (serialized : Complete_common.serialized_http_request)
@@ -433,11 +434,18 @@ let complete_stream_http
         | Anthropic | Kimi | OpenAI_compat | Ollama | Glm ->
           config.base_url ^ config.request_path
       in
-      (* An admitted body and a body serialized here are observed the same
-         way: these bytes, under this request's capture_id. *)
-      observe_pre_dispatch_serialization
-        ?request_wire_observer
-        (serialization_observation ~capture_id ~config ~stream:true serialized);
+      let observed_wire = ref false in
+      let observe_wire_once () =
+        if not !observed_wire
+        then (
+          observed_wire := true;
+          (* An admitted body and a body serialized here are observed the same
+             way: these bytes, under this request's capture_id. *)
+          observe_pre_dispatch_serialization
+            ?request_wire_observer
+            (serialization_observation ~capture_id ~config ~stream:true serialized))
+      in
+      if not allow_cached_fallback then observe_wire_once ();
       let requested_at = Unix.gettimeofday () in
       let latency_counter =
         match latency_counter with
@@ -473,9 +481,14 @@ let complete_stream_http
         | Gemini_generate_content
         | Glm_chat -> Http_client.Sse
       in
-      let on_response_status =
-        let observe = Option.value ~default:metrics.on_http_status on_http_status in
-        fun status -> observe ~provider ~model_id:model ~status
+      let deferred_error_status = ref None in
+      let observe_status = Option.value ~default:metrics.on_http_status on_http_status in
+      let on_response_status status =
+        if (not allow_cached_fallback) || (status >= 200 && status < 300)
+        then (
+          observe_wire_once ();
+          observe_status ~provider ~model_id:model ~status)
+        else deferred_error_status := Some status
       in
       let emit_telemetry evt =
         record_streaming_metrics metrics evt;
@@ -660,24 +673,25 @@ let complete_stream_http
       let* auth_headers = Provider_config.resolve_auth_headers config
         |> Result.map_error (fun reason -> Http_client.AcceptRejected { reason }) in
       match
-        with_request_metadata ~body:body_with_stream (fun () ->
-        Http_client.with_post_stream
-          ?cache:connection_cache
-          ?clock
-          ?connect_timeout_s:config.connect_timeout_s
-          ?first_event_timeout_s
-          ~on_response_status
-          ~net
-          ~url
-          ~headers:
-            (let effective_headers = Provider_config.effective_request_headers config in
-             (match config.kind with
-              | Provider_config.Anthropic ->
-                Backend_anthropic.request_headers ~body:body_with_stream effective_headers
-              | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> effective_headers)
-             @ auth_headers)
-          ~body:body_with_stream
-          ~f:(fun ~pre_header_elapsed_s reader ->
+        try
+          with_request_metadata ~body:body_with_stream (fun () ->
+          Http_client.with_post_stream
+            ?cache:connection_cache
+            ?clock
+            ?connect_timeout_s:config.connect_timeout_s
+            ?first_event_timeout_s
+            ~on_response_status
+            ~net
+            ~url
+            ~headers:
+              (let effective_headers = Provider_config.effective_request_headers config in
+               (match config.kind with
+                | Provider_config.Anthropic ->
+                  Backend_anthropic.request_headers ~body:body_with_stream effective_headers
+                | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> effective_headers)
+               @ auth_headers)
+            ~body:body_with_stream
+            ~f:(fun ~pre_header_elapsed_s reader ->
             (* The first-event budget is one window from the request to the
                first token; the connection, the request and the headers have
                already spent [pre_header_elapsed_s] of it, and the reader
@@ -1230,6 +1244,11 @@ let complete_stream_http
             in
             body_logic ())
           ())
+        with
+        | Eio.Cancel.Cancelled _ as exn ->
+          let bt = Printexc.get_raw_backtrace () in
+          observe_wire_once ();
+          Printexc.raise_with_backtrace exn bt
       with
       | Error
           (( Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.Connect_failed _
@@ -1244,9 +1263,15 @@ let complete_stream_http
            final turn outcome. *)
         let refusal = Complete_common.provider_refusal ~http_codec err in
         if not (allow_cached_fallback && Gemini_context_cache.is_cached_content_error refusal)
-        then publish_summary ~terminal:(Telemetry_event.Terminal_error "transport_error") ();
+        then (
+          observe_wire_once ();
+          Option.iter
+            (fun status -> observe_status ~provider ~model_id:model ~status)
+            !deferred_error_status;
+          publish_summary ~terminal:(Telemetry_event.Terminal_error "transport_error") ());
         Error refusal
       | Ok (Ok resp) ->
+        observe_wire_once ();
         let latency_ms = latency_ms_int latency_counter in
         (* Ollama done-chunk usage overrides the accumulated report; without a
            done-chunk report, retain the response's reported usage or absence.
@@ -1381,9 +1406,11 @@ let complete_stream_http
              ~reasoning_prefix
              latency_ms)
       | Ok (Error (Http_client.TimeoutError _ as err)) ->
+        observe_wire_once ();
         publish_summary ~terminal:(Telemetry_event.Terminal_error "timeout_error") ();
         Error err
       | Ok (Error err) ->
+        observe_wire_once ();
         (* agent-core boundary: downstream classification
            ([Retry.classify_error]) is provider-agnostic and reads the status
            alone, so the codec reads the refusal here while the provider
@@ -1402,31 +1429,65 @@ let complete_stream_http
     in
     let resolve_gemini_explicit_cache () =
       match
-        admitted_body,
         serialized.Complete_common.http_codec,
         Gemini_context_cache.explicit_cache_ttl_if_enabled ~config
       with
-      | None, Provider_http_codec.Gemini_generate_content, Some ttl_s ->
+      | Provider_http_codec.Gemini_generate_content, Some ttl_s ->
         (match Provider_config.resolve_auth_headers config with
          | Error _ -> None
          | Ok auth_headers ->
-           let prefix =
-             Backend_gemini.extract_cacheable_prefix ~config ~messages ~tools ()
-           in
-           Gemini_context_cache.resolve_or_create
-             ~sw
-             ~net
-             ?clock
-             ?connection_cache
-             ~config
-             ~auth_headers
-             ~ttl_s
-             ~prefix
-             ())
-      | (Some _ | None), _, None
-      | Some _, _, Some _
-      | None,
-        ( Provider_http_codec.Anthropic_messages
+           (match
+              Backend_gemini.extract_cacheable_prefix_result
+                ~config
+                ~messages
+                ~tools
+                ()
+            with
+            | Error reason ->
+              Diag.warn
+                "gemini_context_cache"
+                "skipping explicit cachedContents for model=%s (%s); falling back to \
+                 implicit caching"
+                config.model_id
+                reason;
+              None
+            | Ok prefix ->
+              let min_opt a b =
+                match a, b with
+                | Some x, Some y -> Some (Float.min x y)
+                | Some x, None | None, Some x -> Some x
+                | None, None -> None
+              in
+              let timeout_s =
+                match clock with
+                | None -> None
+                | Some _ ->
+                  (match
+                     min_opt
+                       config.connect_timeout_s
+                       (min_opt first_event_timeout_s body_timeout_s)
+                   with
+                   | Some t when Float.is_finite t && Float.compare t 0.0 > 0 -> Some t
+                   | Some _ | None -> None)
+              in
+              Gemini_context_cache.resolve_or_create
+                ~net
+                ?clock
+                ?timeout_s
+                ?connection_cache
+                ~config
+                ~auth_headers
+                ~ttl_s
+                ~prefix
+                ()))
+      | ( Provider_http_codec.Gemini_generate_content
+        | Provider_http_codec.Anthropic_messages
+        | Provider_http_codec.Openai_chat
+        | Provider_http_codec.Openai_responses
+        | Provider_http_codec.Ollama_chat
+        | Provider_http_codec.Glm_chat ),
+        None
+      | ( Provider_http_codec.Anthropic_messages
         | Provider_http_codec.Openai_chat
         | Provider_http_codec.Openai_responses
         | Provider_http_codec.Ollama_chat

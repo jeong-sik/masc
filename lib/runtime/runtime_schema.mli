@@ -431,14 +431,12 @@ type binding =
 (** {1 Lanes}
 
     Ordered failover candidate lists declared in [runtime.lanes.<id>].
-    Declarations carry opaque runtime ids and optional declarative effort
-    overrides; [Runtime] resolves them to materialized runtimes at load time. *)
+    Declarations carry opaque runtime ids; [Runtime] resolves them to
+    materialized runtimes at load time. *)
 
 type lane_decl =
   { id : string
   ; candidate_ids : string list
-  ; effort : Llm_provider.Reasoning_effort.t option
-  ; candidate_efforts : (string * Llm_provider.Reasoning_effort.t option) list
   }
 [@@deriving show, eq]
 

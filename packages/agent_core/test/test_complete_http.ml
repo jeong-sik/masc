@@ -2107,6 +2107,24 @@ let start_sse_server
 ;;
 
 let test_complete_stream_refused_frame_diagnostics () =
+  (* Regression test: with_refused_frame_sink must never re-execute fn () if fn ()
+     itself raises Effect.Unhandled inside an Eio fiber. *)
+  (let module Probe = struct type _ Effect.t += Unhandled_probe : unit Effect.t end in
+   Eio_main.run @@ fun _env ->
+   let calls = ref 0 in
+   let raised =
+     try
+       Complete_stream_diagnostic.with_refused_frame_sink
+         (Some (fun _ -> ()))
+         (fun () ->
+            incr calls;
+            Effect.perform Probe.Unhandled_probe);
+       false
+     with
+     | Effect.Unhandled Probe.Unhandled_probe -> true
+   in
+   check bool "Unhandled effect from fn propagates" true raised;
+   check int "fn invoked exactly once despite Effect.Unhandled" 1 !calls);
   Eio_main.run @@ fun env ->
   List.iter (fun format ->
     let dir = Filename.temp_dir "stream-diagnostic" "" in
@@ -5369,7 +5387,15 @@ let test_gemini_explicit_cache_lifecycle_and_tool_use_prompt_tokens () =
         ]
     ]
   in
-  let start_gemini_cache_server ~sw ~net ~evict_cache ~create_count ~seen_bodies ~stream =
+  let start_gemini_cache_server
+        ~sw
+        ~net
+        ~evict_mode
+        ~create_count
+        ~create_headers
+        ~seen_bodies
+        ~stream
+    =
     let port = fresh_port () in
     let handler _conn req body =
       let request_body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
@@ -5377,6 +5403,7 @@ let test_gemini_explicit_cache_lifecycle_and_tool_use_prompt_tokens () =
       if String.ends_with ~suffix:"/cachedContents" path
       then (
         incr create_count;
+        create_headers := Cohttp.Header.to_list (Cohttp.Request.headers req);
         let json = Yojson.Safe.from_string request_body in
         let open Yojson.Safe.Util in
         check string "cachedContents model prefix" "models/fixture-gemini"
@@ -5394,18 +5421,23 @@ let test_gemini_explicit_cache_lifecycle_and_tool_use_prompt_tokens () =
         seen_bodies := request_body :: !seen_bodies;
         let json = Yojson.Safe.from_string request_body in
         let has_cached = Yojson.Safe.Util.(member "cachedContent" json <> `Null) in
-        if !evict_cache && has_cached
-        then
+        match !evict_mode, has_cached with
+        | `Evict_404, true ->
           Cohttp_eio.Server.respond_string
             ~status:`Not_found
             ~body:{|{"error":{"code":404,"message":"CachedContent not found"}}|}
             ()
-        else (
+        | `Evict_403, true ->
+          Cohttp_eio.Server.respond_string
+            ~status:`Forbidden
+            ~body:{|{"error":{"code":403,"message":"CachedContent not found (or permission denied)"}}|}
+            ()
+        | (`None | `Evict_404 | `Evict_403), _ ->
           let resp_json =
             {|{"candidates":[{"content":{"role":"model","parts":[{"text":"cached-ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":100,"toolUsePromptTokenCount":14,"candidatesTokenCount":20,"thoughtsTokenCount":10,"cachedContentTokenCount":80,"totalTokenCount":144},"modelVersion":"fixture-gemini"}|}
           in
           let body = if stream then "data: " ^ resp_json ^ "\n\n" else resp_json in
-          Cohttp_eio.Server.respond_string ~status:`OK ~body ()))
+          Cohttp_eio.Server.respond_string ~status:`OK ~body ())
     in
     let socket =
       Eio.Net.listen
@@ -5421,20 +5453,22 @@ let test_gemini_explicit_cache_lifecycle_and_tool_use_prompt_tokens () =
     Printf.sprintf "http://127.0.0.1:%d" port
   in
   List.iter
-    (fun stream ->
+    (fun (stream, use_serialized) ->
        Gemini_context_cache.clear_for_tests ();
        Eio_main.run (fun env ->
          try
            Eio.Switch.run (fun sw ->
-             let evict_cache = ref false in
+             let evict_mode = ref `None in
              let create_count = ref 0 in
+             let create_headers = ref [] in
              let seen_bodies = ref [] in
              let endpoint =
                start_gemini_cache_server
                  ~sw
                  ~net:env#net
-                 ~evict_cache
+                 ~evict_mode
                  ~create_count
+                 ~create_headers
                  ~seen_bodies
                  ~stream
              in
@@ -5444,63 +5478,177 @@ let test_gemini_explicit_cache_lifecycle_and_tool_use_prompt_tokens () =
                  ~model_id:"fixture-gemini"
                  ~base_url:(endpoint ^ "/v1beta")
                  ~api_key:"fixture-key"
+                 ~headers:[ "x-goog-user-project", "proj-42" ]
                  ~system_prompt:large_system
                  ~explicit_context_cache_ttl_s:300
                  ~model_capabilities_override:Capabilities.gemini_capabilities
                  ()
              in
-             let run_call () =
-               if stream
-               then
-                 (Complete.complete_stream ~sw ~net:env#net ~config ~messages ~tools
-                    ~on_event:(fun _ -> ()) ())
-                   .Llm_provider.Completion_outcome.result
-               else
-                 (Complete.complete ~sw ~net:env#net ~config ~messages ~tools ())
-                   .Llm_provider.Completion_outcome.result
+             let run_call_observed ~trace_context =
+               let wire_obs = ref [] in
+               let statuses = ref [] in
+               let request_wire_observer obs =
+                 wire_obs := obs :: !wire_obs;
+                 Ok ()
+               in
+               let metrics =
+                 { Metrics.noop with
+                   on_http_status = (fun ~provider:_ ~model_id:_ ~status ->
+                     statuses := status :: !statuses)
+                 }
+               in
+               let outcome =
+                 if use_serialized
+                 then (
+                   let serialized =
+                     match
+                       Complete.admit_request_body
+                         ~stream
+                         (Complete.prepare_request ~config ~messages ~tools ~trace_context ())
+                     with
+                     | Ok s -> s
+                     | Error _ -> fail "admit_request_body failed"
+                   in
+                   if stream
+                   then
+                     Complete.complete_stream_serialized
+                       ~sw
+                       ~net:env#net
+                       ~metrics
+                       ~request_wire_observer
+                       serialized
+                       ~on_event:(fun _ -> ())
+                       ()
+                   else
+                     Complete.complete_serialized
+                       ~sw
+                       ~net:env#net
+                       ~metrics
+                       ~request_wire_observer
+                       serialized
+                       ())
+                 else if stream
+                 then
+                   Complete.complete_stream
+                     ~sw
+                     ~net:env#net
+                     ~metrics
+                     ~request_wire_observer
+                     ~config
+                     ~messages
+                     ~tools
+                     ~trace_context
+                     ~on_event:(fun _ -> ())
+                     ()
+                 else
+                   Complete.complete
+                     ~sw
+                     ~net:env#net
+                     ~metrics
+                     ~request_wire_observer
+                     ~config
+                     ~messages
+                     ~tools
+                     ~trace_context
+                     ()
+               in
+               outcome, List.rev !wire_obs, List.rev !statuses
+             in
+             let label = Printf.sprintf "stream=%b serialized=%b" stream use_serialized in
+             let trace_turn_1 =
+               [ "traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+               ; "tracestate", "masc=turn1"
+               ]
+             in
+             let trace_turn_2 =
+               [ "traceparent", "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01"
+               ; "tracestate", "masc=turn2"
+               ]
+             in
+             let trace_turn_3 =
+               [ "traceparent", "00-cccccccccccccccccccccccccccccccc-dddddddddddddddd-01" ]
              in
              (* Turn 1: cold create + dispatch with cachedContent *)
-             (match run_call () with
-              | Error _ -> fail "turn 1 failed"
+             let outcome1, obs1, statuses1 = run_call_observed ~trace_context:trace_turn_1 in
+             (match outcome1.Llm_provider.Completion_outcome.result with
+              | Error _ -> fail (label ^ ": turn 1 failed")
               | Ok resp ->
-                check int "create called once on cold turn" 1 !create_count;
+                check int (label ^ ": create called once on cold turn") 1 !create_count;
+                check bool (label ^ ": create POST includes custom header") true
+                  (List.exists
+                     (fun (k, v) ->
+                        String.equal (String.lowercase_ascii k) "x-goog-user-project"
+                        && String.equal v "proj-42")
+                     !create_headers);
+                check bool (label ^ ": create POST forwards traceparent header") true
+                  (List.exists
+                     (fun (k, v) ->
+                        String.equal (String.lowercase_ascii k) "traceparent"
+                        && String.equal v "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+                     !create_headers);
+                check int (label ^ ": single content-type header on create POST") 1
+                  (List.length
+                     (List.filter
+                        (fun (k, _) ->
+                           String.equal (String.lowercase_ascii k) "content-type")
+                        !create_headers));
+                check int (label ^ ": turn 1 emits one wire observation") 1 (List.length obs1);
+                check (list int) (label ^ ": turn 1 status") [ 200 ] statuses1;
                 (match resp.Types.usage with
                  | Some u ->
-                   check int "input_tokens folds toolUsePromptTokenCount" 114
+                   check int (label ^ ": input_tokens folds toolUsePromptTokenCount") 114
                      u.input_tokens;
-                   check int "cache_read_input_tokens" 80 u.cache_read_input_tokens;
-                   check int "output_tokens folds thoughts" 30 u.output_tokens
-                 | None -> fail "expected usage");
+                   check int (label ^ ": cache_read_input_tokens") 80 u.cache_read_input_tokens;
+                   check int (label ^ ": output_tokens folds thoughts") 30 u.output_tokens
+                 | None -> fail (label ^ ": expected usage"));
                 (match resp.Types.telemetry with
                  | Some t ->
-                   check (option int) "telemetry.tool_use_prompt_tokens" (Some 14)
+                   check (option int) (label ^ ": telemetry.tool_use_prompt_tokens") (Some 14)
                      t.tool_use_prompt_tokens;
-                   check bool "total_token_mismatch agrees" true
+                   check bool (label ^ ": total_token_mismatch agrees") true
                      (t.total_token_mismatch = None)
-                 | None -> fail "expected telemetry"));
+                 | None -> fail (label ^ ": expected telemetry")));
              let body1 = Yojson.Safe.from_string (List.hd !seen_bodies) in
-             check string "turn 1 sends cachedContent" "cachedContents/cache-001"
+             check string (label ^ ": turn 1 sends cachedContent") "cachedContents/cache-001"
                Yojson.Safe.Util.(body1 |> member "cachedContent" |> to_string);
-             check bool "turn 1 omits systemInstruction" true
+             check bool (label ^ ": turn 1 omits systemInstruction") true
                Yojson.Safe.Util.(body1 |> member "systemInstruction" = `Null);
-             check bool "turn 1 omits tools" true
+             check bool (label ^ ": turn 1 omits tools") true
                Yojson.Safe.Util.(body1 |> member "tools" = `Null);
-             (* Turn 2: warm reuse without second POST /cachedContents *)
-             (match run_call () with
-              | Error _ -> fail "turn 2 failed"
+             (* Turn 2: warm reuse across distinct per-span trace_context without second POST /cachedContents *)
+             let outcome2, obs2, statuses2 = run_call_observed ~trace_context:trace_turn_2 in
+             (match outcome2.Llm_provider.Completion_outcome.result with
+              | Error _ -> fail (label ^ ": turn 2 failed")
               | Ok _ ->
-                check int "create still called only once on warm reuse" 1 !create_count);
-             (* Turn 3: server returns 404 for stale cachedContent -> invalidate + implicit retry *)
-             evict_cache := true;
-             (match run_call () with
-              | Error _ -> fail "turn 3 fallback failed"
+                check int (label ^ ": create still called only once on warm reuse") 1 !create_count;
+                check int (label ^ ": turn 2 emits one wire observation") 1 (List.length obs2);
+                check (list int) (label ^ ": turn 2 status") [ 200 ] statuses2);
+             (* Turn 3: stale cachedContent (404 on sync, 403 on stream) -> invalidate + implicit retry
+                with ONE wire observation matching final provenance and ZERO spurious 404/403 status *)
+             evict_mode := if stream then `Evict_403 else `Evict_404;
+             let outcome3, obs3, statuses3 = run_call_observed ~trace_context:trace_turn_3 in
+             (match outcome3.Llm_provider.Completion_outcome.result with
+              | Error _ -> fail (label ^ ": turn 3 fallback failed")
               | Ok _ -> ());
-             let fallback_body = Yojson.Safe.from_string (List.hd !seen_bodies) in
-             check bool "fallback omits cachedContent" true
+             check int (label ^ ": fallback emits exactly ONE wire observation") 1
+               (List.length obs3);
+             check (list int) (label ^ ": fallback suppresses spurious 404/403 status") [ 200 ]
+               statuses3;
+             let fallback_raw = List.hd !seen_bodies in
+             (match outcome3.request_provenance, obs3 with
+              | Completion_outcome.Serialized sealed, [ observed ] ->
+                check string (label ^ ": fallback provenance matches implicit retry body")
+                  Agent_core_sha256.(digest_string fallback_raw |> to_hex)
+                  sealed.body_sha256;
+                check bool (label ^ ": fallback wire observation matches final provenance") true
+                  (String.equal observed.body_sha256 sealed.body_sha256)
+              | _ -> fail (label ^ ": expected single serialized provenance and observation"));
+             let fallback_body = Yojson.Safe.from_string fallback_raw in
+             check bool (label ^ ": fallback omits cachedContent") true
                Yojson.Safe.Util.(fallback_body |> member "cachedContent" = `Null);
-             check bool "fallback restores systemInstruction" true
+             check bool (label ^ ": fallback restores systemInstruction") true
                Yojson.Safe.Util.(fallback_body |> member "systemInstruction" <> `Null);
-             check bool "fallback restores tools" true
+             check bool (label ^ ": fallback restores tools") true
                Yojson.Safe.Util.(fallback_body |> member "tools" <> `Null);
              (* Invalid non-positive explicit_context_cache_ttl_s fails closed *)
              let invalid_cfg =
@@ -5511,7 +5659,7 @@ let test_gemini_explicit_cache_lifecycle_and_tool_use_prompt_tokens () =
               | Ok () -> fail "non-positive explicit_context_cache_ttl_s must fail closed");
              Eio.Switch.fail sw Exit)
          with Exit -> ()))
-    [ false; true ];
+    [ false, false; true, false; false, true; true, true ];
   Gemini_context_cache.clear_for_tests ()
 ;;
 
@@ -5520,6 +5668,10 @@ let test_ollama_kv_cache_telemetry_sync_and_stream () =
     [ ( "prompt_eval_cached_count"
       , {|{"model":"qwen3:8b","done":true,"done_reason":"stop","message":{"role":"assistant","content":"ok"},"prompt_eval_count":40,"prompt_eval_cached_count":200,"prompt_eval_duration":400000000,"eval_count":15,"eval_duration":300000000}|}
       , 240
+      , 200 )
+    ; ( "negative prompt_eval_count full KV hit"
+      , {|{"model":"qwen3:8b","done":true,"done_reason":"stop","message":{"role":"assistant","content":"ok"},"prompt_eval_count":-1,"prompt_eval_cached_count":200,"eval_count":15}|}
+      , 200
       , 200 )
     ; ( "timings.cache_n"
       , {|{"model":"qwen3:8b","done":true,"done_reason":"stop","message":{"role":"assistant","content":"ok"},"prompt_eval_count":50,"eval_count":10,"timings":{"cache_n":120}}|}

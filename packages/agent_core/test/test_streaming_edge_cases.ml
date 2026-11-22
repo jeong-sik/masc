@@ -1372,9 +1372,30 @@ let test_ollama_event_edge_branches () =
       (S.create_openai_stream_state ())
       (ollama_chunk ~is_done:true ~done_reason:"content_filter" ())
   in
-  match done_unknown_events with
-  | [ MessageDelta { stop_reason = Some ContentFilter; _ }; MessageStop ] -> ()
-  | _ -> fail "canonical content_filter reason should stay typed"
+  (match done_unknown_events with
+   | [ MessageDelta { stop_reason = Some ContentFilter; _ }; MessageStop ] -> ()
+   | _ -> fail "canonical content_filter reason should stay typed");
+  (* Ollama_wire.extract_kv_cache_read stays total on non-object JSON *)
+  List.iter
+    (fun non_obj ->
+       check bool "extract_kv_cache_read non-object returns None" true
+         (OL.extract_kv_cache_read non_obj = None))
+    [ `Null; `List []; `String "not-an-object"; `Int 42; `Bool true ];
+  (* Negative prompt_eval_count clamps to >= 0 so cache_read <= input_tokens *)
+  let input_excl, cache_excl, rep_excl =
+    OL.resolve_prompt_tokens
+      ~prompt_eval_count:(-1)
+      ~kv_cache_read:(Some { tokens = 200; semantics = OL.Exclusive_from_prompt_eval })
+  in
+  check int "negative prompt_eval_count exclusive input_tokens" 200 input_excl;
+  check int "negative prompt_eval_count exclusive cache_read" 200 cache_excl;
+  check (option int) "negative prompt_eval_count exclusive reported" (Some 200) rep_excl;
+  let input_none, cache_none, rep_none =
+    OL.resolve_prompt_tokens ~prompt_eval_count:(-1) ~kv_cache_read:None
+  in
+  check int "negative prompt_eval_count without cache clamps to 0" 0 input_none;
+  check int "no cache_read" 0 cache_none;
+  check (option int) "no reported cache" None rep_none
 ;;
 
 let () =

@@ -18,52 +18,6 @@ type typed_value =
 val typed_value_to_string : typed_value -> string
 (** Format a typed value for operator display projections. *)
 
-(** Typed immutable namespace records decoded directly from [runtime.toml]. *)
-type memory_config =
-  { category_cap : int option
-  ; facts_per_category_cap : int option
-  ; recall_enabled : bool option
-  ; librarian_enabled : bool option
-  ; facts_max_bytes : int option
-  ; pending_max_bytes : int option
-  }
-
-type wiki_contents_config =
-  { enabled : bool option
-  }
-
-type maintenance_config =
-  { jsonl_retention_days : int option
-  }
-
-type transport_config =
-  { h2_max_concurrent_streams : int option
-  ; h2_max_pending_response_bytes : int option
-  ; h2_initial_window_size : int option
-  ; https_port : int option
-  ; tls_cert_file : string option
-  ; tls_key_file : string option
-  ; grpc_enabled : bool option
-  ; ws_enabled : bool option
-  ; serving_domain_enabled : bool option
-  ; startup_watchdog_sec : float option
-  }
-
-type typed_namespaces =
-  { memory : memory_config
-  ; wiki_contents : wiki_contents_config
-  ; maintenance : maintenance_config
-  ; transport : transport_config
-  }
-
-val empty_typed_namespaces : typed_namespaces
-
-val typed_namespaces : unit -> typed_namespaces
-(** Current immutable snapshot of decoded [runtime.toml] namespace records. *)
-
-val set_typed_namespaces : typed_namespaces -> unit
-(** Atomically publish decoded [runtime.toml] namespace records. *)
-
 val get_typed_opt : string -> typed_value option
 (** Read the typed boot value for [name]. [None] if no boot value is set. *)
 
@@ -93,8 +47,7 @@ val is_file_owned : string -> bool
 (** Whether [name] was declared file-owned. *)
 
 val reset_for_tests : unit -> unit
-(** Test-only: reset the entire store, typed namespaces, and file-owned
-    declaration to empty. *)
+(** Test-only: reset the entire store and file-owned declaration to empty. *)
 
 (** The layer that would supply a setting: the process environment, the
     boot-time value the runtime file applied, or neither. *)

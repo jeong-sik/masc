@@ -156,12 +156,60 @@ let test_unknown_archive_directory_refuses () = with_store (fun root store ->
   refused store;
   Alcotest.(check bool) "a refused pass deletes nothing" true (archived root ~scope:any_scope "stray"))
 
+let test_retired_scopes_do_not_abort_sweep_and_prune_empty_dirs () =
+  let sha = String.make 64 'a' in
+  let retired_scopes =
+    [ "workspace-curator"
+    ; "keeper-librarian-parts/" ^ sha
+    ; "keeper-librarian-partitions/" ^ sha
+    ; "keeper-librarian-admission-gate/" ^ sha
+    ; "keeper-librarian-admission-closure/" ^ sha
+    ]
+  in
+  List.iter
+    (fun retired_scope ->
+       with_store (fun root store ->
+         ignore (retain store ~scope:retired_scope "retired-live");
+         settle_stray store ~scope:any_scope;
+         let stray_day_dir = archive_day root ~scope:any_scope in
+         let stray_scope_dir = Filename.dirname stray_day_dir in
+         let report = run store in
+         Alcotest.(check int) (retired_scope ^ ": retired live record read") 1 report.live_records;
+         Alcotest.(check int) (retired_scope ^ ": stray archive record removed") 1 report.removed_records;
+         Alcotest.(check bool) (retired_scope ^ ": empty archive day dir pruned") false
+           (Sys.file_exists stray_day_dir);
+         Alcotest.(check bool) (retired_scope ^ ": empty archive scope dir pruned") false
+           (Sys.file_exists stray_scope_dir)))
+    retired_scopes;
+  (* Retired live record that names a settled child still protects that child. *)
+  with_store (fun root store ->
+    let scope = "workspace-curator" in
+    let child = retain store ~scope "retired-child" in
+    let parent = retain store ~scope "retired-parent" in
+    let parent = advance store parent Progress.Dispatch_intended in
+    let parent = advance store parent (Progress.Refused { stage = Progress.Execution; evidence = `String "retry" }) in
+    let digest = get (Owner.request_digest (request "retired-child")) in
+    let parent = advance store parent (Progress.Successor_intended { request_id = "retired-child"; request_digest = digest }) in
+    ignore (advance store parent (Progress.Successor_observed "retired-child"));
+    settle store child;
+    settle_stray store ~scope;
+    check_named_stays root ~scope ~named:"retired-child" (run store));
+  (* Malformed retired-prefix scope with non-sha256 hash still refuses fail-closed. *)
+  with_store (fun root store ->
+    settle_stray store ~scope:any_scope;
+    ignore (retain store ~scope:"keeper-librarian-parts/not-a-sha256" "bad");
+    refused store;
+    Alcotest.(check bool) "malformed retired scope deletes nothing" true (archived root ~scope:any_scope "stray"))
+;;
+
 let () = Alcotest.run "settled archive sweep" ["sweep", [
   Alcotest.test_case "a successor keeps its settled record" `Quick test_successor_is_named;
   Alcotest.test_case "a replacement keeps its settled record" `Quick test_replacement_is_named;
   Alcotest.test_case "an archived body is deleted" `Quick test_archived_body_is_deleted;
   Alcotest.test_case "a live record of each consumer lets the pass run" `Quick
     test_every_consumer_lets_the_pass_run;
+  Alcotest.test_case "retired scopes let the sweep run and prune empty dirs" `Quick
+    test_retired_scopes_do_not_abort_sweep_and_prune_empty_dirs;
   Alcotest.test_case "a scope no owner claims refuses the pass" `Quick test_unclaimed_scope_refuses;
   Alcotest.test_case "an unknown archive directory refuses the pass" `Quick test_unknown_archive_directory_refuses;
 ]; "consumers", [

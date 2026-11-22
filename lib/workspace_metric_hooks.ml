@@ -375,7 +375,11 @@ let install () =
                  Eio.Path.mkdirs ~exists_ok:true ~perm:0o700 Eio.Path.(fs / owner.session_root);
                  Ok owner.session_root)
             | None ->
-              let root = Filename.temp_file "masc-completion-review-" "" in
+              let root =
+                Filename.temp_file
+                  (Printf.sprintf "masc-completion-review-%d-" (Unix.getpid ()))
+                  ""
+              in
               Unix.unlink root;
               Unix.mkdir root 0o700;
               Eio.Switch.on_release review_sw (fun () -> Fs_compat.remove_tree root);

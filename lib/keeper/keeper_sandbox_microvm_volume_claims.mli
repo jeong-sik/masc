@@ -33,6 +33,17 @@ val apple_keeper_owner_containers :
   -> keeper_name:string
   -> (string list, string) result
 
+val apple_keeper_workspace_owner_containers :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> timeout_sec:float
+  -> workspace_hash:string
+  -> keeper_name:string
+  -> (string list, string) result
+(** Observed containers referencing [(workspace_hash, keeper_name)] (matching
+    scoping labels whose [base_path_hash] starts with [workspace_hash] and
+    [keeper = keeper_name]), plus any volume helper container for
+    [keeper_name]. *)
+
 val add_apple_work_volume_claim :
   run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
   -> timeout_sec:float

@@ -6,15 +6,63 @@ open Keeper_turn_sandbox_runtime_record
 open Keeper_turn_sandbox_runtime_run_argv
 open Keeper_turn_sandbox_runtime_container
 
+let resolve_apple_volume_names_with ~probe ~base_path ~keeper_name =
+  let open Result.Syntax in
+  let* scoped_work =
+    Keeper_sandbox_microvm.scoped_work_volume_name ~base_path ~keeper_name
+    |> Result.map_error (fun message -> "microvm_work_volume_unnamed: " ^ message)
+  in
+  let* scoped_build =
+    Keeper_sandbox_microvm.scoped_build_volume_name ~base_path ~keeper_name
+    |> Result.map_error (fun message -> "microvm_build_volume_unnamed: " ^ message)
+  in
+  match probe ~volume_name:scoped_work with
+  | Keeper_sandbox_microvm.Volume_present ->
+    Ok (`Workspace_scoped (scoped_work, scoped_build))
+  | Keeper_sandbox_microvm.Volume_probe_failed message ->
+    Error ("microvm_work_volume_probe_failed: " ^ message)
+  | Keeper_sandbox_microvm.Volume_absent ->
+    let* legacy_work =
+      Keeper_sandbox_microvm.work_volume_name ~keeper_name
+      |> Result.map_error (fun message -> "microvm_work_volume_unnamed: " ^ message)
+    in
+    let* legacy_build =
+      Keeper_sandbox_microvm.build_volume_name ~keeper_name
+      |> Result.map_error (fun message -> "microvm_build_volume_unnamed: " ^ message)
+    in
+    (match probe ~volume_name:legacy_work with
+     | Keeper_sandbox_microvm.Volume_present ->
+       Ok (`Legacy (legacy_work, legacy_build))
+     | Keeper_sandbox_microvm.Volume_probe_failed message ->
+       Error ("microvm_work_volume_probe_failed: " ^ message)
+     | Keeper_sandbox_microvm.Volume_absent ->
+       Ok (`Workspace_scoped (scoped_work, scoped_build)))
+;;
+
+let resolve_apple_volume_names ~base_path ~keeper_name ~timeout_sec =
+  resolve_apple_volume_names_with
+    ~probe:(fun ~volume_name ->
+      Keeper_sandbox_microvm.apple_volume_probe ~volume_name ~timeout_sec)
+    ~base_path
+    ~keeper_name
+;;
+
 (** The work volume: Apple's working tree is on a guest ext4 disk;
     Linux nerdctl uses a persistent runtime-managed directory, without Apple's
     capacity or flat host-descriptor guarantee. Created if
     it is not there yet; refusing rather than booting without it follows
     [image_present] in the same lane -- a guest with no work volume has no
     tree, and the remote lane has nowhere to run. *)
-let microvm_work_volume ~backend ~keeper_name ~timeout_sec =
-  match Keeper_sandbox_microvm.work_volume_name ~keeper_name with
-  | Error message -> Error ("microvm_work_volume_unnamed: " ^ message)
+let microvm_work_volume ~volume_name ~backend ~keeper_name ~timeout_sec =
+  let resolved =
+    match volume_name with
+    | Some name -> Ok name
+    | None ->
+      Keeper_sandbox_microvm.work_volume_name ~keeper_name
+      |> Result.map_error (fun message -> "microvm_work_volume_unnamed: " ^ message)
+  in
+  match resolved with
+  | Error _ as err -> err
   | Ok volume_name ->
     (match
        Keeper_sandbox_microvm.ensure_work_volume_for
@@ -41,12 +89,19 @@ let microvm_work_volume ~backend ~keeper_name ~timeout_sec =
     {!microvm_work_volume} keeps its own volume across), so "fresh boot"
     and "empty build volume" coincide by construction, and every guest
     restart is a host-disk reclaim. *)
-let microvm_build_volume ~backend ~keeper_name ~timeout_sec =
+let microvm_build_volume ~volume_name ~backend ~keeper_name ~timeout_sec =
   match (backend : Keeper_microvm_backend.t) with
   | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> Ok None
   | Keeper_microvm_backend.Apple_container ->
-    (match Keeper_sandbox_microvm.build_volume_name ~keeper_name with
-     | Error message -> Error ("microvm_build_volume_unnamed: " ^ message)
+    let resolved =
+      match volume_name with
+      | Some name -> Ok name
+      | None ->
+        Keeper_sandbox_microvm.build_volume_name ~keeper_name
+        |> Result.map_error (fun message -> "microvm_build_volume_unnamed: " ^ message)
+    in
+    (match resolved with
+     | Error _ as err -> err
      | Ok volume_name ->
        (match
           Keeper_sandbox_microvm.recreate_apple_build_volume
@@ -153,10 +208,10 @@ let claim_work_volume_at_boot (t : t) ~backend ~volume_name ~timeout_sec =
 
 (** Everything a guest boot mounts besides config and identity, established
     before [container run] so a boot never starts without one of them. *)
-let microvm_guest_provisions (t : t) ~backend ~(shim : boot_shim) ~timeout_sec =
+let microvm_guest_provisions ?apple_volumes (t : t) ~backend ~(shim : boot_shim) ~timeout_sec =
   let Boot_shim_verified = shim in
-  (* Until helper and volume ownership are bound to a workspace, boot must
-     neither launch a name-scoped trim helper nor delete a possible peer's
+  (* Until legacy helper and volume ownership are bound to a workspace, boot
+     must neither launch a name-scoped trim helper nor delete a possible peer's
      helper. A present or unreadable helper inventory refuses provisioning.
      The observation does not fence an older process from starting one later. *)
   let helper_check = match (backend : Keeper_microvm_backend.t) with
@@ -167,14 +222,36 @@ let microvm_guest_provisions (t : t) ~backend ~(shim : boot_shim) ~timeout_sec =
   match helper_check with
   | Error _ as error -> error
   | Ok () ->
-    (match microvm_work_volume ~backend ~keeper_name:t.meta.name ~timeout_sec with
-     | Error _ as err -> err
-     | Ok work_volume_name ->
-       let open Result.Syntax in
-       let* () = claim_work_volume_at_boot t ~backend ~volume_name:work_volume_name ~timeout_sec in
-       let* build_volume_name = microvm_build_volume ~backend ~keeper_name:t.meta.name ~timeout_sec in
-       let* shim_host_dir = prepare_microvm_shim_dir t ~backend in
-       Ok { work_volume_name; build_volume_name; shim_host_dir })
+    let open Result.Syntax in
+    let* apple_resolution =
+      match backend, apple_volumes with
+      | Keeper_microvm_backend.Apple_container, Some resolved -> Ok (Some resolved)
+      | Keeper_microvm_backend.Apple_container, None ->
+        Result.map Option.some
+          (resolve_apple_volume_names
+             ~base_path:t.config.base_path ~keeper_name:t.meta.name ~timeout_sec)
+      | (Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata), _ ->
+        Ok None
+    in
+    let work_override, build_override, needs_legacy_claim =
+      match apple_resolution with
+      | Some (`Legacy (work, build)) -> Some work, Some build, true
+      | Some (`Workspace_scoped (work, build)) -> Some work, Some build, false
+      | None -> None, None, false
+    in
+    let* work_volume_name =
+      microvm_work_volume ~volume_name:work_override ~backend ~keeper_name:t.meta.name ~timeout_sec
+    in
+    let* () =
+      if needs_legacy_claim
+      then claim_work_volume_at_boot t ~backend ~volume_name:work_volume_name ~timeout_sec
+      else Ok ()
+    in
+    let* build_volume_name =
+      microvm_build_volume ~volume_name:build_override ~backend ~keeper_name:t.meta.name ~timeout_sec
+    in
+    let* shim_host_dir = prepare_microvm_shim_dir t ~backend in
+    Ok { work_volume_name; build_volume_name; shim_host_dir }
 ;;
 
 (** Boot invariant, fail-closed:
@@ -342,6 +419,8 @@ module For_testing_microvm = struct
   let provision_guest t ~backend ~timeout_sec =
     microvm_guest_provisions t ~backend ~shim:Boot_shim_verified ~timeout_sec
     |> Result.map (fun _ -> ())
+
+  let resolve_apple_volume_names_with = resolve_apple_volume_names_with
 end
 
 (** Apple build-link preparation. Its caller admits execution only after the

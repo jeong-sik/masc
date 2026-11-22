@@ -60,3 +60,75 @@ CAMLprim value masc_try_open_liveness_lock(value path_value) {
 CAMLprim value masc_try_open_shared_liveness_lock(value path_value) {
   return try_open_private_lock(path_value, LOCK_SH);
 }
+
+/* Acquire an exclusive non-blocking OS lock that excludes BOTH BSD flock(2)
+ * holders (e.g. liveness/stage locks) AND POSIX fcntl/lockf(3) holders.
+ *
+ * - On macOS/BSD kernels (Darwin/FreeBSD/OpenBSD/NetBSD), flock(2) and
+ *   fcntl/lockf(3) share the kernel vnode lock list (vn_advlock), so
+ *   flock(LOCK_EX | LOCK_NB) alone atomically conflicts with both flock(2) and
+ *   fcntl/lockf(3) holders (and issuing fcntl(F_SETLK) afterward on the same
+ *   fd would self-conflict with EAGAIN).
+ * - On Linux and other POSIX systems where flock(2) and fcntl(F_SETLK) are
+ *   independent kernel lock tables, acquire BOTH flock(LOCK_EX | LOCK_NB) and
+ *   F_SETLK(F_WRLCK) simultaneously on fd, rolling back flock if F_SETLK fails. */
+CAMLprim value masc_try_lock_fd_exclusive_all(value fd_value) {
+  CAMLparam1(fd_value);
+  int fd = Int_val(fd_value);
+  int rc, failure = 0, held = 0;
+  caml_enter_blocking_section();
+  do { rc = flock(fd, LOCK_EX | LOCK_NB); }
+  while (rc < 0 && errno == EINTR);
+  if (rc < 0) {
+    if (errno == EWOULDBLOCK || errno == EAGAIN) held = 1;
+    else failure = errno;
+  }
+#if !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(__OpenBSD__) && !defined(__NetBSD__)
+  else {
+    struct flock fl = {0};
+    fl.l_type = F_WRLCK;
+    fl.l_whence = SEEK_SET;
+    fl.l_start = 0;
+    fl.l_len = 0;
+    do { rc = fcntl(fd, F_SETLK, &fl); }
+    while (rc < 0 && errno == EINTR);
+    if (rc < 0) {
+      int saved_errno = errno;
+      int urc;
+      do { urc = flock(fd, LOCK_UN); }
+      while (urc < 0 && errno == EINTR);
+      (void)urc;
+      if (saved_errno == EACCES || saved_errno == EAGAIN) held = 1;
+      else failure = saved_errno;
+    }
+  }
+#endif
+  caml_leave_blocking_section();
+  if (failure) { errno = failure; uerror("flock", Nothing); }
+  CAMLreturn(held ? Val_false : Val_true);
+}
+
+CAMLprim value masc_unlock_fd_all(value fd_value) {
+  CAMLparam1(fd_value);
+  int fd = Int_val(fd_value);
+  int rc, failure = 0;
+  caml_enter_blocking_section();
+#if !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(__OpenBSD__) && !defined(__NetBSD__)
+  {
+    struct flock fl = {0};
+    fl.l_type = F_UNLCK;
+    fl.l_whence = SEEK_SET;
+    fl.l_start = 0;
+    fl.l_len = 0;
+    do { rc = fcntl(fd, F_SETLK, &fl); }
+    while (rc < 0 && errno == EINTR);
+    if (rc < 0) failure = errno;
+  }
+#endif
+  do { rc = flock(fd, LOCK_UN); }
+  while (rc < 0 && errno == EINTR);
+  if (rc < 0 && !failure) failure = errno;
+  caml_leave_blocking_section();
+  if (failure) { errno = failure; uerror("flock", Nothing); }
+  CAMLreturn(Val_unit);
+}

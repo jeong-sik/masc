@@ -360,6 +360,20 @@ let build_volume_name ~keeper_name =
   else Error ("unsupported keeper name for a build volume: " ^ keeper_name)
 ;;
 
+let scoped_build_volume_name_with_hash ~workspace_hash ~keeper_name =
+  if not (valid_workspace_volume_hash workspace_hash)
+  then Error ("invalid workspace hash for a scoped build volume: " ^ workspace_hash)
+  else if not (valid_volume_segment keeper_name)
+  then Error ("unsupported keeper name for a build volume: " ^ keeper_name)
+  else Ok (Printf.sprintf "masc-keeper-ws-%s-build-%s" workspace_hash keeper_name)
+;;
+
+let scoped_build_volume_name ~base_path ~keeper_name =
+  scoped_build_volume_name_with_hash
+    ~workspace_hash:(base_path_volume_hash ~base_path)
+    ~keeper_name
+;;
+
 let build_volume_mount_args ~volume_name =
   [ "--volume"; volume_name ^ ":" ^ build_volume_guest_root ]
 ;;
@@ -368,23 +382,23 @@ let apple_volume_delete_argv ~volume_name =
   command_argv_for Backend.Apple_container @ [ "volume"; "delete"; volume_name ]
 ;;
 
-(* Both volume names are exact, but same-named Keepers in other workspaces
-   may own the same volumes. The claims marker cannot prove that all owners
-   are recorded, and this operation checks no workspace itself. Each delete
-   is attempted whatever the other returned. A
-   delete's exit code cannot prove absence: an already-absent volume and one
-   a guest still holds can both exit non-zero. One listing after both deletes
-   settles it, the same way the trim helper's removal is settled. *)
-let remove_apple_keeper_volumes ~run ~timeout_sec ~keeper_name =
-  match work_volume_name ~keeper_name, build_volume_name ~keeper_name with
-  | Error detail, _ | _, Error detail -> Error detail
-  | Ok work, Ok build ->
-    let delete volume_name =
-      volume_name, run ~timeout_sec (apple_volume_delete_argv ~volume_name)
+let remove_apple_volumes_by_names ~run ~timeout_sec ~volume_names =
+  let unique_names =
+    List.fold_left
+      (fun acc name -> if List.mem name acc then acc else name :: acc)
+      []
+      volume_names
+    |> List.rev
+  in
+  match unique_names with
+  | [] -> Ok ()
+  | _ :: _ ->
+    let deletions =
+      List.map
+        (fun volume_name ->
+           volume_name, run ~timeout_sec (apple_volume_delete_argv ~volume_name))
+        unique_names
     in
-    let work_deletion = delete work in
-    let build_deletion = delete build in
-    let deletions = [ work_deletion; build_deletion ] in
     (match run ~timeout_sec (apple_volume_list_argv ()) with
      | Unix.WEXITED 0, listing, _ ->
        (match Yojson.Safe.from_string listing with
@@ -415,10 +429,22 @@ let remove_apple_keeper_volumes ~run ~timeout_sec ~keeper_name =
      | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), stdout, stderr ->
        Error
          (Printf.sprintf
-            "cannot verify keeper %s's volumes %s and %s were removed (%s): %s"
-            keeper_name
-            work
-            build
+            "cannot verify volumes [%s] were removed (%s): %s"
+            (String.concat ", " unique_names)
             (Keeper_sandbox_exec_failure.status_label status)
             (output_for_log ~stdout ~stderr)))
+;;
+
+(* Both volume names are exact, but same-named Keepers in other workspaces
+   may own the same volumes. The claims marker cannot prove that all owners
+   are recorded, and this operation checks no workspace itself. Each delete
+   is attempted whatever the other returned. A
+   delete's exit code cannot prove absence: an already-absent volume and one
+   a guest still holds can both exit non-zero. One listing after both deletes
+   settles it, the same way the trim helper's removal is settled. *)
+let remove_apple_keeper_volumes ~run ~timeout_sec ~keeper_name =
+  match work_volume_name ~keeper_name, build_volume_name ~keeper_name with
+  | Error detail, _ | _, Error detail -> Error detail
+  | Ok work, Ok build ->
+    remove_apple_volumes_by_names ~run ~timeout_sec ~volume_names:[ work; build ]
 ;;

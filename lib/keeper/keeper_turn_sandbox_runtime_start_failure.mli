@@ -92,6 +92,8 @@ val microvm_start_failure_cause :
   microvm_start_failure -> github_identity_preparation_error
 
 val requested_apple_plan :
+  ?work_volume_name:string ->
+  ?build_volume_name:string ->
   t ->
   image:string ->
   guest_size:Keeper_microvm_guest_size.t ->

@@ -770,3 +770,105 @@ let private_jsonl_cursor_of_stats stats =
          ; end_offset = stats.Unix.st_size
          })
 ;;
+
+type private_jsonl_stale_lock_cleanup =
+  | Private_jsonl_stale_lock_removed
+  | Private_jsonl_stale_lock_kept_target_present
+  | Private_jsonl_stale_lock_kept_held
+  | Private_jsonl_stale_lock_already_absent
+  | Private_jsonl_stale_lock_cleanup_failed of string
+
+let rec openfile_no_eintr_local path flags perm =
+  try Unix.openfile path flags perm with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> openfile_no_eintr_local path flags perm
+;;
+
+let unlink_private_jsonl_stable_lock_if_unheld ~data_path ~target_absent =
+  if not (target_absent ())
+  then Private_jsonl_stale_lock_kept_target_present
+  else
+    (* Acquire the exact in-process canonical data-path mutex that
+       [with_private_jsonl_stable_lock*] holds, so we never open/close/unlock
+       a POSIX [lockf] descriptor while a same-process fiber owns it. *)
+    match
+      try_with_append_path_mutex data_path (fun () ->
+        if not (target_absent ())
+        then Private_jsonl_stale_lock_kept_target_present
+        else (
+          let lock_path = private_jsonl_lock_path data_path in
+          match Unix.lstat lock_path with
+          | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+            Private_jsonl_stale_lock_already_absent
+          | exception Unix.Unix_error (error, operation, argument) ->
+            Private_jsonl_stale_lock_cleanup_failed
+              (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))
+          | lstat_before when lstat_before.Unix.st_kind <> Unix.S_REG ->
+            Private_jsonl_stale_lock_cleanup_failed "stable lock path is not a regular file"
+          | lstat_before when lstat_before.Unix.st_nlink <> 1 ->
+            Private_jsonl_stale_lock_cleanup_failed "stable lock path has ambiguous link count"
+          | lstat_before ->
+            (match
+               openfile_no_eintr_local lock_path [ Unix.O_WRONLY; Unix.O_CLOEXEC; Unix.O_NONBLOCK ] 0
+             with
+             | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+               Private_jsonl_stale_lock_already_absent
+             | exception Unix.Unix_error (error, operation, argument) ->
+               Private_jsonl_stale_lock_cleanup_failed
+                 (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))
+             | fd ->
+               let lock_held = ref false in
+               Fun.protect
+                 ~finally:(fun () ->
+                   if !lock_held
+                   then (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
+                   try Unix.close fd with Unix.Unix_error _ -> ())
+                 (fun () ->
+                    match Unix.fstat fd with
+                    | exception Unix.Unix_error (error, operation, argument) ->
+                      Private_jsonl_stale_lock_cleanup_failed
+                        (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))
+                    | fstat_open
+                      when fstat_open.Unix.st_kind <> Unix.S_REG
+                           || fstat_open.Unix.st_nlink <> 1
+                           || not (private_jsonl_same_identity lstat_before fstat_open) ->
+                      Private_jsonl_stale_lock_cleanup_failed
+                        "stable lock identity changed before lock check"
+                    | _ ->
+                      (match try_lock_whole_file fd with
+                       | exception Unix.Unix_error (error, operation, argument) ->
+                         Private_jsonl_stale_lock_cleanup_failed
+                           (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))
+                       | false -> Private_jsonl_stale_lock_kept_held
+                       | true ->
+                         lock_held := true;
+                         if not (target_absent ())
+                         then Private_jsonl_stale_lock_kept_target_present
+                         else (
+                           match Unix.lstat lock_path with
+                           | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+                             Private_jsonl_stale_lock_already_absent
+                           | exception Unix.Unix_error (error, operation, argument) ->
+                             Private_jsonl_stale_lock_cleanup_failed
+                               (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))
+                           | lstat_after
+                             when lstat_after.Unix.st_kind <> Unix.S_REG
+                                  || lstat_after.Unix.st_nlink <> 1
+                                  || not (private_jsonl_same_identity lstat_before lstat_after) ->
+                             Private_jsonl_stale_lock_cleanup_failed
+                               "stable lock identity changed before unlink"
+                           | _ ->
+                             (match Unix.unlink lock_path with
+                              | () -> Private_jsonl_stale_lock_removed
+                              | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+                                Private_jsonl_stale_lock_already_absent
+                              | exception Unix.Unix_error (error, operation, argument) ->
+                                Private_jsonl_stale_lock_cleanup_failed
+                                  (Printf.sprintf
+                                     "%s(%s): %s"
+                                     operation
+                                     argument
+                                     (Unix.error_message error)))))))))
+    with
+    | Some outcome -> outcome
+    | None -> Private_jsonl_stale_lock_kept_held
+;;

@@ -47,15 +47,67 @@ let blocking_syscalls ~label f =
   | Execution_context.Eio_fiber -> Systhread_host.run ~label f
 ;;
 
+let atomic_prep_prefix = Atomic_temp_name.atomic_prep_prefix
+
+let publish_flocked_atomic_temp ~prep_path ~tmp_path =
+  try
+    Unix.link ~follow:false prep_path tmp_path;
+    (try Unix.unlink prep_path with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+    Ok ()
+  with
+  | Unix.Unix_error (Unix.EEXIST, _, _) -> Error `Exists
+  | Unix.Unix_error ((Unix.EPERM | Unix.EOPNOTSUPP | Unix.EXDEV), _, _) ->
+    Unix.rename prep_path tmp_path;
+    Ok ()
+;;
+
+(* Create a fresh temp file under an unlisted [.prep_atomic_*] name, acquire
+   an open-file-description [flock(2)] on it, and only then publish its
+   [.atomic_*.tmp] name. Concurrent orphan sweeps probe [flock(2)] and skip
+   any flocked temp file without ever unlinking or moving an in-flight write. *)
 let open_atomic_temp_file ~temp_dir () =
-  (* Open_binary: the durable raw-bytes path promises the caller's exact
-     bytes. stdlib defaults this to [Open_text], which rewrites newlines on
-     platforms that separate the two modes. *)
-  Stdlib.Filename.open_temp_file
-    ~mode:[ Open_binary ]
-    ~temp_dir
-    Atomic_temp_name.prefix
-    Atomic_temp_name.suffix
+  let prep_len = String.length atomic_prep_prefix in
+  let rec loop attempt =
+    (* Open_binary: the durable raw-bytes path promises the caller's exact
+       bytes. stdlib defaults this to [Open_text], which rewrites newlines on
+       platforms that separate the two modes. *)
+    let prep_path, channel =
+      Stdlib.Filename.open_temp_file
+        ~mode:[ Open_binary ]
+        ~temp_dir
+        atomic_prep_prefix
+        Atomic_temp_name.suffix
+    in
+    let cleanup_prep () =
+      Stdlib.close_out_noerr channel;
+      try Stdlib.Sys.remove prep_path with Sys_error _ -> ()
+    in
+    let base = Filename.basename prep_path in
+    let tail =
+      if String.length base >= prep_len
+      then String.sub base prep_len (String.length base - prep_len)
+      else base
+    in
+    let tmp_path = Filename.concat temp_dir (Atomic_temp_name.prefix ^ tail) in
+    let published =
+      try
+        Stage_flock.lock_exclusive_fd (Unix.descr_of_out_channel channel) ~path:prep_path;
+        publish_flocked_atomic_temp ~prep_path ~tmp_path
+      with
+      | exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        cleanup_prep ();
+        Printexc.raise_with_backtrace exn backtrace
+    in
+    match published with
+    | Ok () -> tmp_path, channel
+    | Error `Exists ->
+      cleanup_prep ();
+      if attempt >= 8
+      then raise (Sys_error ("open_atomic_temp_file: temp name collision in " ^ temp_dir))
+      else loop (attempt + 1)
+  in
+  loop 0
 ;;
 
 let sync_file_and_parent_strict path =
@@ -106,26 +158,43 @@ let write_file_atomic_with_parent_sync
     (fun () ->
     match
       try
-        Ok
-          (Stdlib.Filename.temp_file
-             ~temp_dir:dir
-             Atomic_temp_name.prefix
-             Atomic_temp_name.suffix)
+        let tmp, channel = open_atomic_temp_file ~temp_dir:dir () in
+        (* Duplicate the flocked open-file description onto a raw descriptor
+           and close [channel] immediately so [write_temp tmp] owns all writes
+           while [lock_fd] keeps [flock(2)] held through rename or removal. *)
+        let lock_fd =
+          try Unix.dup ~cloexec:true (Unix.descr_of_out_channel channel) with
+          | exn ->
+            let backtrace = Printexc.get_raw_backtrace () in
+            Stdlib.close_out_noerr channel;
+            (try Stdlib.Sys.remove tmp with Sys_error _ -> ());
+            Printexc.raise_with_backtrace exn backtrace
+        in
+        Stdlib.close_out_noerr channel;
+        Ok (tmp, lock_fd)
       with
-      (* Filename.temp_file's only documented failure is Sys_error; anything
-         else (Out_of_memory, Assert_failure, ...) is fatal and must stay loud
-         rather than collapse into the staged error channel. *)
-      | Sys_error _ as exception_ ->
+      (* open_temp_file / flock / link failures surface as Sys_error or Unix_error;
+         anything else (Out_of_memory, Assert_failure, ...) stays loud rather
+         than collapsing into the staged error channel. *)
+      | (Sys_error _ | Unix.Unix_error _) as exception_ ->
         let backtrace = Printexc.get_raw_backtrace () in
         failure ~backtrace exception_
     with
     | Error _ as error -> error
-    | Ok tmp ->
+    | Ok (tmp, lock_fd) ->
+      let lock_fd_closed = ref false in
+      let close_lock_fd () =
+        if not !lock_fd_closed
+        then (
+          lock_fd_closed := true;
+          try Unix.close lock_fd with Unix.Unix_error _ -> ())
+      in
       (try
          write_temp tmp;
          sync_file tmp;
          Stdlib.Sys.rename tmp path;
          stage := After_rename;
+         close_lock_fd ();
          sync_parent dir;
          Ok ()
        with
@@ -134,20 +203,24 @@ let write_file_atomic_with_parent_sync
             the failure arm below removes it -- otherwise a cancelled replace
             is the one exit that leaves an orphan behind. Sys.remove performs
             no Eio operation, so it completes while unwinding; past a
-            successful rename tmp is already gone and Sys_error absorbs it.
+            successful rename tmp is already gone. Guard both unlink and
+            [close_lock_fd] so post-rename parent-sync failures never double-close
+            a recycled descriptor.
 
             The backtrace is taken before the removal, the same way the arm
             below takes it. Sys_error being raised and caught in between
             replaces the trace the runtime holds, so a bare re-raise after
             the cleanup would hand on that one instead of the origin. *)
          let backtrace = Printexc.get_raw_backtrace () in
-         (try Stdlib.Sys.remove tmp with
-          | Sys_error _ -> ());
+         if !stage = Before_rename
+         then (try Stdlib.Sys.remove tmp with Sys_error _ -> ());
+         close_lock_fd ();
          Printexc.raise_with_backtrace exn backtrace
        | exception_ ->
          let backtrace = Printexc.get_raw_backtrace () in
-         (try Stdlib.Sys.remove tmp with
-          | Sys_error _ -> ());
+         if !stage = Before_rename
+         then (try Stdlib.Sys.remove tmp with Sys_error _ -> ());
+         close_lock_fd ();
          failure ~backtrace exception_))
 ;;
 

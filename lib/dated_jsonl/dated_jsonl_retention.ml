@@ -19,5 +19,5 @@ let prune ~cutoff_month ~cutoff_day directory =
                         (Dated_jsonl_layout.day_number_of_day_file_name name) cutoff_day < 0)
                && Directory.remove_regular_file month_dir name
             then count + 1 else count) 0) in
-        if comparison < 0 then Directory.remove_empty_child directory month_name;
+        if comparison <= 0 then Directory.remove_empty_child directory month_name;
         deleted + (match removed with None -> 0 | Some count -> count)) 0

@@ -3156,6 +3156,12 @@ let build_input_args_after marker argv =
   find argv
 ;;
 
+let rec waitpid_no_eintr pid =
+  match Unix.waitpid [] pid with
+  | _, status -> status
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_no_eintr pid
+;;
+
 (* Runs the helper part of a request on the host, in [root], with stdin on
    /dev/null as the request attaches none, and with [root] on PYTHONPATH so
    that a module planted there would run if isolated mode did not stop it. *)
@@ -3167,7 +3173,7 @@ let run_build_request ~root ~marker argv =
        "fixture"; root ] @ build_input_args_after marker argv) in
   let pid = Fun.protect ~finally:(fun () -> Unix.close null_fd)
     (fun () -> Unix.create_process "/bin/sh" args null_fd null_fd null_fd) in
-  snd (Unix.waitpid [] pid)
+  waitpid_no_eintr pid
 ;;
 
 (* The request with its count and fields replaced, as a guest would get a
@@ -3737,9 +3743,14 @@ esac
      | None, Error _ -> () (* The fixture refuses the subsequent volume inspect. *)
      | Some _, Ok () -> Alcotest.fail "unowned helper allowed provisioning"
      | None, Ok () -> Alcotest.fail "the fixture unexpectedly provisioned a volume");
+    let expected_work_volume =
+      match M.scoped_work_volume_name ~base_path:dir ~keeper_name with
+      | Ok v -> v
+      | Error detail -> Alcotest.fail detail
+    in
     Alcotest.(check bool) "only verified absence reaches volume inspection"
       (Option.is_none expected_refusal)
-      (List.mem ("volume inspect masc-keeper-work-" ^ keeper_name) calls);
+      (List.mem ("volume inspect " ^ expected_work_volume) calls);
     Alcotest.(check bool) "no helper is deleted or started" false
       (List.exists (fun call -> String.starts_with ~prefix:"delete " call
         || String.starts_with ~prefix:"run " call) calls)) cases
@@ -3760,9 +3771,12 @@ let test_apple_provision_requires_a_confirmed_work_claim () =
     Printf.fprintf out {|#!/bin/sh
 mode=%s
 log=%s
+keeper=%s
 printf '%%s %%s %%s\n' "$1" "${2-}" "${3-}" >> "$log"
 case "$1:${2-}:${3-}" in
   list:--all:--format) printf '[]\n' ;;
+  volume:inspect:masc-keeper-ws-*) exit 1 ;;
+  volume:list:--format) printf '[{"id":"masc-keeper-work-%%s"}]\n' "$keeper" ;;
   volume:inspect:masc-keeper-work-*) exit 0 ;;
   volume:inspect:masc-keeper-build-*) exit 2 ;;
   run:--rm:--name)
@@ -3776,7 +3790,7 @@ case "$1:${2-}:${3-}" in
     esac ;;
   *) exit 92 ;;
 esac
-|} (Filename.quote mode) (Filename.quote log));
+|} (Filename.quote mode) (Filename.quote log) (Filename.quote keeper_name));
   Unix.chmod cli 0o755;
   let previous_path = Sys.getenv "PATH" in
   Unix.putenv "PATH" (dir ^ ":" ^ previous_path);
@@ -4285,13 +4299,25 @@ let test_preboot_refusals_retain_durable_identity_and_recheck_shim () =
 log=%s
 listing_fails=%s
 claims=%s
+keeper=%s
 printf '%%s\n' "$*" >> "$log"
 case "$1" in
   stop|delete) exit 0 ;;
   inspect) exit 1 ;;
   image) printf '[{}]\n'; exit 0 ;;
   volume)
-    case "$2" in inspect|delete) exit 0 ;; *) exit 99 ;; esac ;;
+    case "$2" in
+      inspect)
+        case "$3" in
+          "masc-keeper-work-$keeper"|"masc-keeper-build-$keeper") exit 0 ;;
+          *) exit 1 ;;
+        esac ;;
+      list)
+        printf '[{"id":"masc-keeper-work-%%s"},{"id":"masc-keeper-build-%%s"}]\n' "$keeper" "$keeper"
+        exit 0 ;;
+      delete) exit 0 ;;
+      *) exit 99 ;;
+    esac ;;
   list) printf '[]\n'; exit 0 ;;
   run)
     if [ "${2-}" = "--rm" ] && [ "${3-}" = "--name" ] && [ "${4-}" = "$claims" ]; then
@@ -4308,7 +4334,8 @@ case "$1" in
   *) exit 99 ;;
 esac
 |} (Filename.quote log) (if policy_listing_fails then "1" else "0")
-        (Filename.quote (M.volume_claim_helper_name ~keeper_name)));
+        (Filename.quote (M.volume_claim_helper_name ~keeper_name))
+        (Filename.quote keeper_name));
     Unix.chmod cli 0o755;
     let previous_path = Sys.getenv "PATH" in
     Unix.putenv "PATH" (bin ^ ":" ^ previous_path);
@@ -5997,6 +6024,459 @@ let test_admitted_borrow_is_cancellation_protected () =
     Lifecycle.with_inventory lifecycle (fun () -> ()))
 ;;
 
+let test_workspace_scoped_volume_removal_and_protection () =
+  let base_path = "/tmp/ws-alpha" in
+  let keeper_name = "retired-agent" in
+  let scoped_work =
+    match M.scoped_work_volume_name ~base_path ~keeper_name with
+    | Ok v -> v
+    | Error detail -> Alcotest.fail detail
+  in
+  let scoped_build =
+    match M.scoped_build_volume_name ~base_path ~keeper_name with
+    | Ok v -> v
+    | Error detail -> Alcotest.fail detail
+  in
+  let other_work =
+    match M.scoped_work_volume_name ~base_path:"/tmp/ws-beta" ~keeper_name with
+    | Ok v -> v
+    | Error detail -> Alcotest.fail detail
+  in
+  let remaining = ref [ scoped_work; scoped_build; other_work ] in
+  let deleted = ref [] in
+  let run_empty ~timeout_sec:_ = function
+    | [ "container"; "volume"; "list"; "--format"; "json" ] ->
+      let json =
+        `List (List.map (fun id -> `Assoc [ "id", `String id ]) !remaining)
+        |> Yojson.Safe.to_string
+      in
+      Unix.WEXITED 0, json, ""
+    | [ "container"; "list"; "--all"; "--format"; "json" ] ->
+      Unix.WEXITED 0, "[]", ""
+    | [ "container"; "volume"; "delete"; name ] ->
+      deleted := name :: !deleted;
+      remaining := List.filter (fun v -> not (String.equal v name)) !remaining;
+      Unix.WEXITED 0, "", ""
+    | argv -> Alcotest.failf "unexpected argv: %s" (String.concat " " argv)
+  in
+  (match
+     Masc.Keeper_turn_sandbox_runtime.remove_apple_keeper_volumes_for_workspace_with
+       ~run:run_empty
+       ~timeout_sec:5.0
+       ~base_path
+       ~keeper_name
+       ()
+   with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check (list string))
+    "deletes only this workspace's scoped volumes without requiring sandbox_image"
+    (List.sort String.compare [ scoped_work; scoped_build ])
+    (List.sort String.compare !deleted);
+  Alcotest.(check (list string))
+    "other workspace volume stays intact"
+    [ other_work ]
+    !remaining;
+  let ws_hash = M.base_path_volume_hash ~base_path in
+  let active_container_listing =
+    Yojson.Safe.to_string
+      (`List
+         [ `Assoc
+             [ "id", `String ("masc-keeper-vm-" ^ keeper_name ^ "-net-none-" ^ ws_hash)
+             ; ( "configuration"
+               , `Assoc
+                   [ ( "labels"
+                     , `Assoc
+                         [ "masc.mcp.component", `String "keeper-sandbox"
+                         ; "masc.mcp.base_path_hash", `String (ws_hash ^ "000000000000000000000000")
+                         ; "masc.mcp.kind", `String "persistent"
+                         ; "masc.mcp.keeper", `String keeper_name
+                         ] )
+                   ] )
+             ]
+         ])
+  in
+  let active_deleted = ref [] in
+  let run_busy ~timeout_sec:_ = function
+    | [ "container"; "volume"; "list"; "--format"; "json" ] ->
+      Unix.WEXITED 0, Yojson.Safe.to_string (`List [ `Assoc [ "id", `String scoped_work ] ]), ""
+    | [ "container"; "list"; "--all"; "--format"; "json" ] ->
+      Unix.WEXITED 0, active_container_listing, ""
+    | [ "container"; "volume"; "delete"; name ] ->
+      active_deleted := name :: !active_deleted;
+      Unix.WEXITED 0, "", ""
+    | argv -> Alcotest.failf "unexpected argv: %s" (String.concat " " argv)
+  in
+  (match
+     Masc.Keeper_turn_sandbox_runtime.remove_apple_keeper_volumes_for_workspace_with
+       ~run:run_busy
+       ~timeout_sec:5.0
+       ~base_path
+       ~keeper_name
+       ()
+   with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check (list string)) "active owner container blocks volume delete" [] !active_deleted;
+  (* Multi-workspace dissolution: when this workspace's scoped volume coexists
+     with another workspace's legacy volume and sandbox_image is None, remove
+     this workspace's scoped volume cleanly without failing or touching the
+     foreign legacy volume. *)
+  let foreign_legacy =
+    match M.work_volume_name ~keeper_name with
+    | Ok v -> v
+    | Error detail -> Alcotest.fail detail
+  in
+  let mixed_remaining = ref [ scoped_work; foreign_legacy ] in
+  let mixed_deleted = ref [] in
+  let run_mixed ~timeout_sec:_ = function
+    | [ "container"; "volume"; "list"; "--format"; "json" ] ->
+      let json =
+        `List (List.map (fun id -> `Assoc [ "id", `String id ]) !mixed_remaining)
+        |> Yojson.Safe.to_string
+      in
+      Unix.WEXITED 0, json, ""
+    | [ "container"; "list"; "--all"; "--format"; "json" ] ->
+      Unix.WEXITED 0, "[]", ""
+    | [ "container"; "volume"; "delete"; name ] ->
+      mixed_deleted := name :: !mixed_deleted;
+      mixed_remaining := List.filter (fun v -> not (String.equal v name)) !mixed_remaining;
+      Unix.WEXITED 0, "", ""
+    | argv -> Alcotest.failf "unexpected argv (must not probe foreign legacy): %s" (String.concat " " argv)
+  in
+  (match
+     Masc.Keeper_turn_sandbox_runtime.remove_apple_keeper_volumes_for_workspace_with
+       ~run:run_mixed
+       ~timeout_sec:5.0
+       ~base_path
+       ~keeper_name
+       ()
+   with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check (list string)) "deletes only owned scoped volume" [ scoped_work ] !mixed_deleted;
+  Alcotest.(check (list string)) "foreign legacy volume untouched" [ foreign_legacy ] !mixed_remaining
+;;
+
+let test_resolve_apple_volume_names_prefers_scoped_over_legacy () =
+  let base_path = "/tmp/ws-scoped-priority" in
+  let keeper_name = "alice" in
+  let scoped_work =
+    match M.scoped_work_volume_name ~base_path ~keeper_name with
+    | Ok v -> v
+    | Error detail -> Alcotest.fail detail
+  in
+  let scoped_build =
+    match M.scoped_build_volume_name ~base_path ~keeper_name with
+    | Ok v -> v
+    | Error detail -> Alcotest.fail detail
+  in
+  let legacy_work =
+    match M.work_volume_name ~keeper_name with
+    | Ok v -> v
+    | Error detail -> Alcotest.fail detail
+  in
+  let legacy_build =
+    match M.build_volume_name ~keeper_name with
+    | Ok v -> v
+    | Error detail -> Alcotest.fail detail
+  in
+  (* Case 1: both scoped and legacy exist -> scoped wins immediately without probing legacy. *)
+  let probed = ref [] in
+  let res_both =
+    Masc.Keeper_turn_sandbox_runtime.For_testing_microvm.resolve_apple_volume_names_with
+      ~probe:(fun ~volume_name ->
+        probed := volume_name :: !probed;
+        if String.equal volume_name scoped_work || String.equal volume_name legacy_work
+        then M.Volume_present
+        else M.Volume_absent)
+      ~base_path
+      ~keeper_name
+  in
+  Alcotest.(check (list string)) "probed only scoped_work when present" [ scoped_work ] (List.rev !probed);
+  (match res_both with
+   | Ok (`Workspace_scoped (w, b)) ->
+     Alcotest.(check string) "scoped work selected" scoped_work w;
+     Alcotest.(check string) "scoped build selected" scoped_build b
+   | Ok (`Legacy _) -> Alcotest.fail "legacy volume hijacked existing workspace-scoped volume"
+   | Error detail -> Alcotest.fail detail);
+  (* Case 2: scoped absent, legacy present -> preserves existing legacy volume. *)
+  let res_legacy =
+    Masc.Keeper_turn_sandbox_runtime.For_testing_microvm.resolve_apple_volume_names_with
+      ~probe:(fun ~volume_name ->
+        if String.equal volume_name legacy_work then M.Volume_present else M.Volume_absent)
+      ~base_path
+      ~keeper_name
+  in
+  (match res_legacy with
+   | Ok (`Legacy (w, b)) ->
+     Alcotest.(check string) "legacy work preserved" legacy_work w;
+     Alcotest.(check string) "legacy build preserved" legacy_build b
+   | Ok (`Workspace_scoped _) -> Alcotest.fail "expected legacy fallback when scoped absent"
+   | Error detail -> Alcotest.fail detail);
+  (* Case 3: both absent -> new keeper gets workspace-scoped volumes. *)
+  let res_fresh =
+    Masc.Keeper_turn_sandbox_runtime.For_testing_microvm.resolve_apple_volume_names_with
+      ~probe:(fun ~volume_name:_ -> M.Volume_absent)
+      ~base_path
+      ~keeper_name
+  in
+  (match res_fresh with
+   | Ok (`Workspace_scoped (w, b)) ->
+     Alcotest.(check string) "fresh keeper gets scoped work" scoped_work w;
+     Alcotest.(check string) "fresh keeper gets scoped build" scoped_build b
+   | Ok (`Legacy _) -> Alcotest.fail "fresh keeper must not get legacy volumes"
+   | Error detail -> Alcotest.fail detail);
+  (* Case 4: probe failure fails closed on either probe. *)
+  Alcotest.(check bool) "scoped probe failure fails closed" true
+    (Result.is_error
+       (Masc.Keeper_turn_sandbox_runtime.For_testing_microvm.resolve_apple_volume_names_with
+          ~probe:(fun ~volume_name:_ -> M.Volume_probe_failed "daemon down")
+          ~base_path
+          ~keeper_name));
+  Alcotest.(check bool) "legacy probe failure fails closed" true
+    (Result.is_error
+       (Masc.Keeper_turn_sandbox_runtime.For_testing_microvm.resolve_apple_volume_names_with
+          ~probe:(fun ~volume_name ->
+            if String.equal volume_name scoped_work
+            then M.Volume_absent
+            else M.Volume_probe_failed "daemon down")
+          ~base_path
+          ~keeper_name))
+;;
+
+let test_policy_network_rollback_on_inspect_failure () =
+  with_eio_fs @@ fun () ->
+  let module Turn = Masc.Keeper_turn_sandbox_runtime in
+  let context = Eio_context.snapshot_state () in
+  let dir = temp_dir "policy-rb-" in
+  let bin = Filename.concat dir "bin" in
+  let base = Filename.concat dir "base" in
+  List.iter (fun path -> Unix.mkdir path 0o755) [ bin; base ];
+  let cli = Filename.concat bin "container" in
+  let log = Filename.concat dir "calls" in
+  let keeper_name = "policy-rb" in
+  let masc = Filename.concat base ".masc" in
+  let microvm = Filename.concat masc "microvm" in
+  let shim_dir = Filename.concat microvm "shim" in
+  List.iter (fun path -> Unix.mkdir path 0o755) [ masc; microvm; shim_dir ];
+  let shim = Filename.concat shim_dir M.shim_binary_name in
+  Out_channel.with_open_bin shim (fun channel -> output_string channel current_shim_fixture);
+  Unix.chmod shim 0o755;
+  Out_channel.with_open_bin (Filename.concat shim_dir M.shim_sidecar_name)
+    (fun channel -> output_string channel
+      (Agent_core_sha256.(to_hex (digest_string current_shim_fixture)) ^ "  masc-exec-shim\n"));
+  Out_channel.with_open_bin cli (fun channel ->
+    Printf.fprintf channel {|#!/bin/sh
+log=%s
+printf '%%s\n' "$*" >> "$log"
+case "$1" in
+  stop|delete) exit 0 ;;
+  inspect) exit 1 ;;
+  image) printf '[{}]\n'; exit 0 ;;
+  volume)
+    case "$2" in
+      inspect|create|delete) exit 0 ;;
+      list) printf '[]\n'; exit 0 ;;
+      *) exit 99 ;;
+    esac ;;
+  list) printf '[]\n'; exit 0 ;;
+  network)
+    case "$2" in
+      list) printf '[]\n'; exit 0 ;;
+      create) exit 0 ;;
+      inspect) printf 'gateway unavailable\n' >&2; exit 1 ;;
+      delete) exit 0 ;;
+      *) exit 99 ;;
+    esac ;;
+  *) exit 99 ;;
+esac
+|} (Filename.quote log));
+  Unix.chmod cli 0o755;
+  let previous_path = Sys.getenv "PATH" in
+  Unix.putenv "PATH" (bin ^ ":" ^ previous_path);
+  Fun.protect ~finally:(fun () ->
+    Eio_context.restore_state context;
+    Unix.putenv "PATH" previous_path;
+    remove_snapshot_fixture dir)
+  @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let fs = match Fs_compat.get_fs_opt () with Some fs -> fs | None -> Alcotest.fail "fixture needs Eio FS" in
+  (match Masc.Keeper_microvm_shim_readiness.initialize ~fs ~base_path:base ~payload_path:"/usr/bin:/bin" with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Masc.Keeper_microvm_shim_readiness.error_message error));
+  let config = Masc.Workspace.default_config base in
+  let meta = { (microvm_meta ~name:keeper_name) with network_mode = Profile.Network_policy } in
+  let runtime = Turn.create ~config ~meta ~image:(Ok "trim-fixture")
+    ~network_mode:Profile.Network_policy () in
+  (match Turn.microvm_remote_endpoint ~timeout_sec:5. runtime with
+   | Error detail ->
+     Alcotest.(check bool) "failed on policy network inspect" true
+       (Astring.String.is_infix ~affix:"microvm_policy_network_unreadable" detail)
+   | Ok _ -> Alcotest.fail "inspect failure must fail boot");
+  let calls = In_channel.with_open_bin log In_channel.input_all |> String.split_on_char '\n' in
+  let net_name = M.policy_network_name ~keeper_name in
+  Alcotest.(check bool) "policy network was created" true
+    (List.exists
+       (fun line ->
+          String.starts_with ~prefix:"network create " line
+          && Astring.String.is_infix ~affix:net_name line)
+       calls);
+  Alcotest.(check bool) "newly created policy network was rolled back after inspect failure" true
+    (List.mem ("network delete " ^ net_name) calls);
+  (* Also verify cancellation during gateway_of_network still rolls back via Eio.Cancel.protect. *)
+  let inspect_started = Filename.concat dir "inspect-started" in
+  let cancel_log = Filename.concat dir "calls-cancel" in
+  let cancel_keeper = "policy-rb-c" in
+  Out_channel.with_open_bin cli (fun channel ->
+    Printf.fprintf channel {|#!/bin/sh
+log=%s
+started=%s
+printf '%%s\n' "$*" >> "$log"
+case "$1" in
+  stop|delete) exit 0 ;;
+  inspect) exit 1 ;;
+  image) printf '[{}]\n'; exit 0 ;;
+  volume)
+    case "$2" in
+      inspect|create|delete) exit 0 ;;
+      list) printf '[]\n'; exit 0 ;;
+      *) exit 99 ;;
+    esac ;;
+  list) printf '[]\n'; exit 0 ;;
+  network)
+    case "$2" in
+      list) printf '[]\n'; exit 0 ;;
+      create) exit 0 ;;
+      inspect) : > "$started"; sleep 5; exit 1 ;;
+      delete) exit 0 ;;
+      *) exit 99 ;;
+    esac ;;
+  *) exit 99 ;;
+esac
+|} (Filename.quote cancel_log) (Filename.quote inspect_started));
+  Unix.chmod cli 0o755;
+  let cancel_meta = { (microvm_meta ~name:cancel_keeper) with network_mode = Profile.Network_policy } in
+  let cancel_runtime = Turn.create ~config ~meta:cancel_meta ~image:(Ok "trim-fixture")
+    ~network_mode:Profile.Network_policy () in
+  let rec wait_started n =
+    if Sys.file_exists inspect_started || n <= 0
+    then ()
+    else (
+      Eio_unix.sleep 0.02;
+      wait_started (n - 1))
+  in
+  Eio.Fiber.first
+    (fun () -> ignore (Turn.microvm_remote_endpoint ~timeout_sec:5. cancel_runtime))
+    (fun () -> wait_started 150);
+  Alcotest.(check bool) "reached blocking network inspect before cancelling" true
+    (Sys.file_exists inspect_started);
+  let cancel_calls =
+    In_channel.with_open_bin cancel_log In_channel.input_all |> String.split_on_char '\n'
+  in
+  let cancel_net = M.policy_network_name ~keeper_name:cancel_keeper in
+  Alcotest.(check bool) "cancelled boot created policy network" true
+    (List.exists
+       (fun line ->
+          String.starts_with ~prefix:"network create " line
+          && Astring.String.is_infix ~affix:cancel_net line)
+       cancel_calls);
+  Alcotest.(check bool) "cancelled boot rolled back newly created policy network under Cancel.protect" true
+    (List.mem ("network delete " ^ cancel_net) cancel_calls)
+;;
+
+let test_policy_network_delete_and_sweep_safety () =
+  Alcotest.(check bool)
+    "non-policy network refused"
+    true
+    (Result.is_error
+       (M.policy_network_delete_argv_for Backend.Apple_container ~network_name:"default"));
+  (match
+     M.policy_network_delete_argv_for
+       Backend.Apple_container
+       ~network_name:"masc-egress-policy-orphan"
+   with
+   | Ok [ "container"; "network"; "delete"; "masc-egress-policy-orphan" ] -> ()
+   | Ok argv -> Alcotest.failf "unexpected delete argv: %s" (String.concat " " argv)
+   | Error detail -> Alcotest.fail detail);
+  let networks =
+    ref
+      [ "default"
+      ; M.policy_network_name ~keeper_name:"declared"
+      ; M.policy_network_name ~keeper_name:"busy"
+      ; M.policy_network_name ~keeper_name:"orphan"
+      ]
+  in
+  let deleted = ref [] in
+  let containers_json =
+    Yojson.Safe.to_string
+      (`List
+         [ `Assoc
+             [ "id", `String "masc-keeper-vm-busy-net-policy-abcd1234"
+             ; ( "configuration"
+               , `Assoc
+                   [ ( "labels"
+                     , `Assoc
+                         [ "masc.mcp.component", `String "keeper-sandbox"
+                         ; "masc.mcp.base_path_hash", `String "abcd1234"
+                         ; "masc.mcp.kind", `String "persistent"
+                         ; "masc.mcp.keeper", `String "busy"
+                         ] )
+                   ; "networks", `List [ `Assoc [ "network", `String (M.policy_network_name ~keeper_name:"busy") ] ]
+                   ] )
+             ]
+         ])
+  in
+  let run ~timeout_sec:_ = function
+    | [ "container"; "network"; "list"; "--format"; "json" ] ->
+      let payload =
+        `List (List.map (fun id -> `Assoc [ "id", `String id ]) !networks)
+        |> Yojson.Safe.to_string
+      in
+      Unix.WEXITED 0, payload, ""
+    | [ "container"; "list"; "--all"; "--format"; "json" ] ->
+      Unix.WEXITED 0, containers_json, ""
+    | [ "container"; "network"; "delete"; name ] ->
+      deleted := name :: !deleted;
+      networks := List.filter (fun n -> not (String.equal n name)) !networks;
+      Unix.WEXITED 0, "", ""
+    | argv -> Alcotest.failf "unexpected argv: %s" (String.concat " " argv)
+  in
+  let outcome =
+    Masc.Keeper_turn_sandbox_runtime.sweep_abandoned_apple_policy_networks_with
+      ~run
+      ~timeout_sec:5.0
+      ~protected_keeper_names:[ "declared" ]
+      ~revalidate:(fun () -> Ok ())
+  in
+  Alcotest.(check (list string))
+    "only dead unattached orphan network is deleted"
+    [ M.policy_network_name ~keeper_name:"orphan" ]
+    outcome.removed;
+  Alcotest.(check int) "no sweep failures" 0 (List.length outcome.failed);
+  Alcotest.(check (list string))
+    "declared, busy, and default networks remain"
+    [ "default"
+    ; M.policy_network_name ~keeper_name:"declared"
+    ; M.policy_network_name ~keeper_name:"busy"
+    ]
+    !networks;
+  networks := M.policy_network_name ~keeper_name:"orphan2" :: !networks;
+  let reval_outcome =
+    Masc.Keeper_turn_sandbox_runtime.sweep_abandoned_apple_policy_networks_with
+      ~run
+      ~timeout_sec:5.0
+      ~protected_keeper_names:[ "declared" ]
+      ~revalidate:(fun () -> Error "roster changed")
+  in
+  Alcotest.(check (list string)) "revalidation failure deletes nothing" [] reval_outcome.removed;
+  Alcotest.(check bool)
+    "orphan2 preserved on revalidation failure"
+    true
+    (List.mem (M.policy_network_name ~keeper_name:"orphan2") !networks)
+;;
+
 let () =
   Alcotest.run
     "keeper_sandbox_microvm"
@@ -6303,6 +6783,14 @@ let () =
             test_build_requests_stay_under_the_exec_limits
         ; Alcotest.test_case "build target mkdir argv runs as root for every target" `Quick
             test_build_target_mkdir_argv_runs_as_root_for_every_target
+        ; Alcotest.test_case "workspace-scoped volume removal deletes owned and protects active" `Quick
+            test_workspace_scoped_volume_removal_and_protection
+        ; Alcotest.test_case "resolve_apple_volume_names prefers existing scoped over legacy" `Quick
+            test_resolve_apple_volume_names_prefers_scoped_over_legacy
+        ; Alcotest.test_case "policy network newly created before inspect failure rolls back" `Quick
+            test_policy_network_rollback_on_inspect_failure
+        ; Alcotest.test_case "policy network delete and sweep protect declared and attached networks" `Quick
+            test_policy_network_delete_and_sweep_safety
         ] )
     ; ( "guest env"
       , [ Alcotest.test_case "env follows the config mount" `Quick

@@ -62,13 +62,25 @@ val atomic_orphan_cleanup_failure_to_string
     this ownership boundary.
 
     Zero-byte regular files are unlinked. Non-empty regular files are
-    preserved without overwrite under [<base_path>/.recovered/root/]. The
-    preservation path uses a hard-link-then-unlink protocol and fsyncs both
-    directory sides. Orphan-shaped non-regular entries and every
-    filesystem failure remain in [report.failures]; cancellation is re-raised.
-    A missing [base_path] is an empty inventory, not a failure. *)
+    preserved without overwrite under [<base_path>/.recovered/root/] (or under
+    [<recovery_parent>/.recovered/root/] when [recovery_parent] is provided and
+    validated within [recovery_ownership_root], defaulting to [ownership_root]).
+    Any orphan-shaped file that holds an active open-file-description [flock(2)]
+    is skipped untouched so concurrent live writers are never unlinked or moved.
+    When [unlink_private_jsonl_stages] is [true] (default [false]), dead
+    [.private_jsonl_*.stage] files are unlinked after acquiring a non-blocking
+    exclusive [flock(2)] on the opened descriptor and verifying inode identity.
+    The preservation path uses hard-link-then-unlink (falling back to an
+    exclusive copy+fsync on [EXDEV] when [recovery_parent] lives on another
+    filesystem) and fsyncs both directory sides. Orphan-shaped non-regular
+    entries and every filesystem failure remain in [report.failures];
+    cancellation is re-raised. A missing [base_path] is an empty inventory, not
+    a failure. *)
 val cleanup_atomic_orphans
-  :  ownership_root:string
+  :  ?unlink_private_jsonl_stages:bool
+  -> ?recovery_parent:string
+  -> ?recovery_ownership_root:string
+  -> ownership_root:string
   -> base_path:string
   -> unit
   -> atomic_orphan_cleanup_report

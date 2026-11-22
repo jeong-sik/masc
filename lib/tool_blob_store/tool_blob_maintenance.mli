@@ -256,11 +256,46 @@ type live_references
     artifact references, with the children of the manifests they name, and
     history [Stored] media sources, kept as two kinds. *)
 
+type malformed_reference_warning =
+  | Pinned_legacy_blob_ref of
+      { path : string
+      ; line : int
+      ; detail : string
+      ; pinned_sha256 : string option
+      }
+      (** A non-canonical or legacy [_blob]/history stored object whose valid
+          [sha256] (if any) was defensively pinned live and whose sibling
+          fields were scanned so observation and safe reclamation of unrelated
+          unreferenced blobs can continue. *)
+  | Unpinnable_malformed_blob_ref of
+      { path : string
+      ; line : int
+      ; detail : string
+      }
+      (** A malformed structured [_blob]/history stored object whose [sha256]
+          was missing or invalid and therefore could not be pinned. Callers
+          must treat this as fail-closed and refuse blob deletion while still
+          recording observation telemetry. *)
+
+val malformed_reference_warning_to_string : malformed_reference_warning -> string
+
 val live_references :
   base_path:string ->
   scope:scope ->
   (live_references, error) result
 (** The scan {!run} deletes against, with the same arguments and failures. *)
+
+val live_references_resilient :
+  base_path:string ->
+  scope:scope ->
+  (live_references * malformed_reference_warning list, error) result
+(** Resilient variant used by the in-server sweep ({!Tool_blob_sweep}).
+    Malformed legacy structured [_blob] wrappers are defensively pinned when
+    they carry a valid [sha256] (and reported as warnings rather than aborting
+    the scan), while unpinnable malformed [_blob] objects emit
+    {!Unpinnable_malformed_blob_ref} so the caller blocks deletion fail-closed.
+    Malformed text [[masc:blob ...]] markers and unreadable stores still return
+    [Error]. *)
 
 val fold_live_sha256 : live_references -> init:'a -> f:('a -> string -> 'a) -> 'a
 (** Folds the digest of every live reference. A digest named both by a tool

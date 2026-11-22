@@ -28,8 +28,12 @@ type report =
   ; candidates : int
   ; deletable : int
   ; deletable_bytes : int
+  ; deleted : int
+  ; deleted_bytes : int
+  ; delete_failures : int
   ; unstatable : int
   ; unclassified : string list
+  ; malformed_warnings : Tool_blob_maintenance.malformed_reference_warning list
   ; previous : previous
   ; touches : Tool_blob_store.touch_counts
   }
@@ -44,6 +48,9 @@ type error =
   | Record_write_failed of
       { path : string
       ; detail : string
+      ; deleted : int
+      ; deleted_bytes : int
+      ; delete_failures : int
       }
   | Marker_failed of
       { path : string
@@ -55,8 +62,17 @@ let error_to_string = function
   | Listing_failed { path; reason } -> Printf.sprintf "blob listing path=%s: %s" path reason
   | Record_unreadable { path; detail } ->
     Printf.sprintf "candidate record unreadable path=%s: %s" path detail
-  | Record_write_failed { path; detail } ->
-    Printf.sprintf "candidate record write path=%s: %s" path detail
+  | Record_write_failed { path; detail; deleted; deleted_bytes; delete_failures } ->
+    if deleted > 0 || delete_failures > 0
+    then
+      Printf.sprintf
+        "candidate record write path=%s (after deleted=%d deleted_bytes=%d delete_failures=%d): %s"
+        path
+        deleted
+        deleted_bytes
+        delete_failures
+        detail
+    else Printf.sprintf "candidate record write path=%s: %s" path detail
   | Marker_failed { path; detail } -> Printf.sprintf "scan marker path=%s: %s" path detail
 ;;
 
@@ -78,18 +94,26 @@ let report_to_string report =
   in
   Printf.sprintf
     "scan_seconds=%.1f live_digests=%d blobs=%d candidates=%d deletable=%d \
-     deletable_bytes=%d unstatable=%d unclassified=%d %s touched_current=%d touched_previous=%d"
+     deletable_bytes=%d deleted=%d deleted_bytes=%d delete_failures=%d \
+     unstatable=%d unclassified=%d malformed_warnings=%d %s touched_current=%d \
+     touched_previous=%d touched_current_evicted=%b touched_previous_evicted=%b"
     report.scan_seconds
     report.live_digests
     report.blobs
     report.candidates
     report.deletable
     report.deletable_bytes
+    report.deleted
+    report.deleted_bytes
+    report.delete_failures
     report.unstatable
     (List.length report.unclassified)
+    (List.length report.malformed_warnings)
     previous
     report.touches.Tool_blob_store.current_addresses
     report.touches.previous_addresses
+    report.touches.current_evicted
+    report.touches.previous_evicted
 ;;
 
 let maintenance_dir ~base_path =
@@ -133,7 +157,15 @@ type record =
   ; recorded_deletable : String_set.t
   }
 
-let header_json ~scan_started_at ~candidates ~deletable ~untouched_live ~unclassified =
+let header_json
+      ~scan_started_at
+      ~candidates
+      ~deletable
+      ~untouched_live
+      ~unclassified
+      ~current_evicted
+      ~previous_evicted
+  =
   `Assoc
     [ "schema_version", `Int 2
     ; "scan_started_at", `Float scan_started_at
@@ -141,6 +173,8 @@ let header_json ~scan_started_at ~candidates ~deletable ~untouched_live ~unclass
     ; "deletable", `Int deletable
     ; "untouched_live", `Int untouched_live
     ; "unclassified", `List (List.map (fun name -> `String name) unclassified)
+    ; "current_evicted", `Bool current_evicted
+    ; "previous_evicted", `Bool previous_evicted
     ]
 ;;
 
@@ -150,6 +184,8 @@ type header =
   ; deletable : int
   ; untouched_live : int
   ; unclassified : int
+  ; current_evicted : bool
+  ; previous_evicted : bool
   }
 
 let unclassified_names names =
@@ -175,7 +211,38 @@ let header_of_json = function
       ; "unclassified", `List names
       ] ->
     (match unclassified_names names with
-     | Some unclassified -> Some { scan_started_at; candidates; deletable; untouched_live; unclassified }
+     | Some unclassified ->
+       Some
+         { scan_started_at
+         ; candidates
+         ; deletable
+         ; untouched_live
+         ; unclassified
+         ; current_evicted = false
+         ; previous_evicted = false
+         }
+     | None -> None)
+  | `Assoc
+      [ "schema_version", `Int 2
+      ; "scan_started_at", `Float scan_started_at
+      ; "candidates", `Int candidates
+      ; "deletable", `Int deletable
+      ; "untouched_live", `Int untouched_live
+      ; "unclassified", `List names
+      ; "current_evicted", `Bool current_evicted
+      ; "previous_evicted", `Bool previous_evicted
+      ] ->
+    (match unclassified_names names with
+     | Some unclassified ->
+       Some
+         { scan_started_at
+         ; candidates
+         ; deletable
+         ; untouched_live
+         ; unclassified
+         ; current_evicted
+         ; previous_evicted
+         }
      | None -> None)
   | _ -> None
 ;;
@@ -265,6 +332,8 @@ let parse_record payload =
        then invalid 1 "a deletable digest is not a candidate"
        else if header.unclassified > 0 && header.deletable > 0
        then invalid 1 "a record with unclassified entries names deletable digests"
+       else if (header.current_evicted || header.previous_evicted) && header.deletable > 0
+       then invalid 1 "a record with evicted touch marks names deletable digests"
        else
          Ok
            { recorded_scan_started_at = header.scan_started_at
@@ -317,9 +386,23 @@ let ensure_maintenance_dir ~base_path ~on_error =
      | exception Sys_error detail -> Error (on_error detail))
 ;;
 
-let write_record ~base_path ~scan_started_at ~candidates ~deletable ~untouched_live ~unclassified =
+let write_record
+      ~base_path
+      ~scan_started_at
+      ~candidates
+      ~deletable
+      ~untouched_live
+      ~unclassified
+      ~current_evicted
+      ~previous_evicted
+      ~deleted
+      ~deleted_bytes
+      ~delete_failures
+  =
   let path = record_path ~base_path in
-  let on_error detail = Record_write_failed { path; detail } in
+  let on_error detail =
+    Record_write_failed { path; detail; deleted; deleted_bytes; delete_failures }
+  in
   let open Result.Syntax in
   let* () = ensure_maintenance_dir ~base_path ~on_error in
   let buffer =
@@ -335,7 +418,9 @@ let write_record ~base_path ~scan_started_at ~candidates ~deletable ~untouched_l
           ~candidates:(String_set.cardinal candidates)
           ~deletable:(String_set.cardinal deletable)
           ~untouched_live:(String_set.cardinal untouched_live)
-          ~unclassified));
+          ~unclassified
+          ~current_evicted
+          ~previous_evicted));
   Buffer.add_char buffer '\n';
   let add kind set =
     String_set.iter
@@ -381,8 +466,10 @@ type deletable_tally =
   }
 
 (* Candidates of both scans, minus this process's marks,
-   minus files written since the previous scan opened. *)
-let deletable_now ~store ~touches ~(previous : record) ~candidates =
+   minus files written since the previous scan opened, and (when [min_age_seconds > 0.0])
+   minus files newer than [scan_started_at -. min_age_seconds]. *)
+let deletable_now ~store ~touches ~(previous : record) ~scan_started_at ~min_age_seconds ~candidates =
+  let age_cutoff = scan_started_at -. min_age_seconds in
   String_set.fold
     (fun sha256 tally ->
        match Tool_blob_store.touch_of touches ~sha256 with
@@ -390,7 +477,8 @@ let deletable_now ~store ~touches ~(previous : record) ~candidates =
        | None ->
          (match Tool_blob_store.blob_status store ~sha256 with
           | Tool_blob_store.Present { bytes; modified_at }
-            when modified_at < previous.recorded_scan_started_at ->
+            when modified_at < previous.recorded_scan_started_at
+                 && (min_age_seconds <= 0.0 || modified_at <= age_cutoff) ->
             { tally with deletable_set = String_set.add sha256 tally.deletable_set
             ; bytes = tally.bytes + bytes }
           | Tool_blob_store.Present _ | Tool_blob_store.Absent -> tally
@@ -451,7 +539,66 @@ let compare_previous ~store ~touches ~(previous : record) ~live =
   , untouched )
 ;;
 
-let observe ~base_path ~scope =
+let has_unpinnable_warning warnings =
+  List.exists
+    (function
+      | Tool_blob_maintenance.Unpinnable_malformed_blob_ref _ -> true
+      | Tool_blob_maintenance.Pinned_legacy_blob_ref _ -> false)
+    warnings
+;;
+
+type reclaim_tally =
+  { removed : String_set.t
+  ; deleted_count : int
+  ; deleted_bytes : int
+  ; delete_failures : int
+  }
+
+let reclaim_confirmed_deletable
+      ~store
+      ~(previous : record)
+      ~scan_started_at
+      ~min_age_seconds
+      deletable_set
+  =
+  let age_cutoff = scan_started_at -. min_age_seconds in
+  String_set.fold
+    (fun sha256 tally ->
+       (* Re-check the touch ledger (including overflow flags) and file mtime
+          immediately before unlinking so a concurrent put/fetch or touch-ledger
+          eviction arriving during the scan never deletes a live blob. *)
+       let fresh_touches = Tool_blob_store.observe_touches () in
+       let fresh_counts = Tool_blob_store.touch_counts fresh_touches in
+       if fresh_counts.current_evicted || fresh_counts.previous_evicted
+       then tally
+       else
+       match Tool_blob_store.touch_of fresh_touches ~sha256 with
+       | Some _ -> tally
+       | None ->
+         (match Tool_blob_store.blob_status store ~sha256 with
+          | Tool_blob_store.Present { bytes; modified_at }
+            when modified_at < previous.recorded_scan_started_at
+                 && (min_age_seconds <= 0.0 || modified_at <= age_cutoff) ->
+            (match Tool_blob_store.delete store ~sha256 with
+             | Ok true ->
+               { tally with
+                 removed = String_set.add sha256 tally.removed
+               ; deleted_count = tally.deleted_count + 1
+               ; deleted_bytes = tally.deleted_bytes + bytes
+               }
+             | Ok false ->
+               { tally with removed = String_set.add sha256 tally.removed }
+             | Error _ ->
+               { tally with delete_failures = tally.delete_failures + 1 })
+          | Tool_blob_store.Present _
+          | Tool_blob_store.Absent
+          | Tool_blob_store.Not_regular _
+          | Tool_blob_store.Stat_failed _ -> tally))
+    deletable_set
+    { removed = String_set.empty; deleted_count = 0; deleted_bytes = 0; delete_failures = 0 }
+;;
+
+let scan_internal ~reclaim_mode ~min_age_seconds ~base_path ~scope =
   let open Result.Syntax in
   let store = Tool_blob_store.create ~base_path in
   (* The marker comes first: a scan that cannot read its previous record still
@@ -460,10 +607,10 @@ let observe ~base_path ~scope =
   let* previous = load_record ~base_path in
   (* NDT-OK: scan duration is an operator measurement, not a decision. *)
   let clock_started = Unix.gettimeofday () in
-  let* live_references =
+  let* live_references, malformed_warnings =
     Result.map_error
       (fun error -> Scan_failed error)
-      (Tool_blob_maintenance.live_references ~base_path ~scope)
+      (Tool_blob_maintenance.live_references_resilient ~base_path ~scope)
   in
   (* An entry no rule classifies is a place the scan does not read. The scan
      still records, but names nothing deletable. *)
@@ -491,30 +638,69 @@ let observe ~base_path ~scope =
       blobs
   in
   let touches = Tool_blob_store.observe_touches () in
+  let touch_counts = Tool_blob_store.touch_counts touches in
   let nothing_deletable = { deletable_set = String_set.empty; bytes = 0; unstatable_count = 0 } in
-  let deletable, comparison, untouched_live =
+  let deletion_allowed =
+    unclassified = []
+    && not (has_unpinnable_warning malformed_warnings)
+    && not touch_counts.current_evicted
+    && not touch_counts.previous_evicted
+  in
+  let deletable, comparison, untouched_live, loaded_previous =
     match previous with
-    | Record_absent -> nothing_deletable, No_previous_record, String_set.empty
+    | Record_absent -> nothing_deletable, No_previous_record, String_set.empty, None
     | Record_unparsable { invalid_line; invalid_detail } ->
       ( nothing_deletable
       , Previous_record_invalid { line = invalid_line; detail = invalid_detail }
-      , String_set.empty )
+      , String_set.empty
+      , None )
     | Record_loaded previous ->
       let comparison, untouched = compare_previous ~store ~touches ~previous ~live in
-      ( (match unclassified with
-         | [] -> deletable_now ~store ~touches ~previous ~candidates
-         | _ :: _ -> nothing_deletable)
+      ( (if deletion_allowed
+         then
+           deletable_now
+             ~store
+             ~touches
+             ~previous
+             ~scan_started_at
+             ~min_age_seconds
+             ~candidates
+         else nothing_deletable)
       , Compared_with_previous comparison
-      , untouched )
+      , untouched
+      , Some previous )
   in
+  let reclaimed =
+    if reclaim_mode && deletion_allowed
+    then
+      match loaded_previous with
+      | Some previous ->
+        reclaim_confirmed_deletable
+          ~store
+          ~previous
+          ~scan_started_at
+          ~min_age_seconds
+          deletable.deletable_set
+      | None ->
+        { removed = String_set.empty; deleted_count = 0; deleted_bytes = 0; delete_failures = 0 }
+    else
+      { removed = String_set.empty; deleted_count = 0; deleted_bytes = 0; delete_failures = 0 }
+  in
+  let recorded_candidates = String_set.diff candidates reclaimed.removed in
+  let recorded_deletable = String_set.diff deletable.deletable_set reclaimed.removed in
   let* () =
     write_record
       ~base_path
       ~scan_started_at
-      ~candidates
-      ~deletable:deletable.deletable_set
+      ~candidates:recorded_candidates
+      ~deletable:recorded_deletable
       ~untouched_live
       ~unclassified
+      ~current_evicted:touch_counts.current_evicted
+      ~previous_evicted:touch_counts.previous_evicted
+      ~deleted:reclaimed.deleted_count
+      ~deleted_bytes:reclaimed.deleted_bytes
+      ~delete_failures:reclaimed.delete_failures
   in
   Tool_blob_store.rotate_touches ();
   Ok
@@ -522,12 +708,28 @@ let observe ~base_path ~scope =
     ; scan_seconds = Unix.gettimeofday () -. clock_started
     ; live_digests = String_set.cardinal live
     ; blobs = blob_count
-    ; candidates = String_set.cardinal candidates
+    ; candidates = String_set.cardinal recorded_candidates
     ; deletable = String_set.cardinal deletable.deletable_set
     ; deletable_bytes = deletable.bytes
+    ; deleted = reclaimed.deleted_count
+    ; deleted_bytes = reclaimed.deleted_bytes
+    ; delete_failures = reclaimed.delete_failures
     ; unstatable = deletable.unstatable_count
     ; unclassified
+    ; malformed_warnings
     ; previous = comparison
-    ; touches = Tool_blob_store.touch_counts touches
+    ; touches = touch_counts
     }
+;;
+
+let observe ~base_path ~scope =
+  scan_internal ~reclaim_mode:false ~min_age_seconds:0.0 ~base_path ~scope
+;;
+
+let reclaim ?(min_age_seconds = Masc_time_constants.day) ~base_path ~scope () =
+  scan_internal
+    ~reclaim_mode:true
+    ~min_age_seconds:(Float.max 0.0 min_age_seconds)
+    ~base_path
+    ~scope
 ;;

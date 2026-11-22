@@ -5,6 +5,8 @@
 
     [Keeper_sandbox_microvm] includes this module. *)
 
+val policy_network_prefix : string
+
 val policy_network_name : keeper_name:string -> string
 
 val boot_plan_network :
@@ -40,9 +42,17 @@ val network_args_for :
 val policy_network_create_argv_for :
   Keeper_microvm_backend.t -> keeper_name:string -> (string list, string) result
 
+val policy_network_delete_argv_for :
+  Keeper_microvm_backend.t -> network_name:string -> (string list, string) result
+
 val policy_network_list_argv_for : Keeper_microvm_backend.t -> (string list, string) result
 
+val policy_network_names_of_listing : listing:string -> (string list, string) result
+
 val policy_network_present : keeper_name:string -> listing:string -> (bool, string) result
+
+val attached_policy_networks_of_apple_containers :
+  listing:string -> (string list, string) result
 
 val policy_network_inspect_argv_for :
   Keeper_microvm_backend.t -> keeper_name:string -> (string list, string) result

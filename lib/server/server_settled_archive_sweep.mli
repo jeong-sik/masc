@@ -35,8 +35,10 @@ val error_to_string : error -> string
 
 val run : store:Lane_addon_store.t -> (report, error) result
 (** Call while the workspace process lease excludes original writers and
-    settles. A live record in a scope no owner claims, one that does not
-    decode, or an archive entry of an unknown shape refuses the pass. Bodies are deleted before records. An
+    settles. Active and explicitly retired scopes are classified; a live record
+    in an unknown scope no owner claims, one that does not decode, or an archive
+    entry of an unknown shape refuses the pass. Bodies are deleted before
+    records, and empty archive/owner scope directories are pruned afterward. An
     error names the class of failure, never record or body content. Byte
     counts are logical file sizes. *)
 

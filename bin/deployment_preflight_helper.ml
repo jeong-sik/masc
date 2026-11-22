@@ -842,8 +842,8 @@ let validate_tool_request () =
   in
   fun ~read:_ ~read_scope:_ ~read_records:_ ~read_body:_ ~read_archive:_ ~read_fence:_ ~read_resolution:_
     ~read_exact:_ (original : L.original) ->
-    match Tool_request_consumer.of_scope (Masc.Lane_addon_tool_request_owner.Record.scope original.record) with
-    | Some consumer ->
+    match Tool_request_consumer.classify_scope (Masc.Lane_addon_tool_request_owner.Record.scope original.record) with
+    | Some (Tool_request_consumer.Active consumer) ->
       (match original.restore () with
        | Error detail -> L.Body_unreadable detail
        | Ok record ->
@@ -854,9 +854,16 @@ let validate_tool_request () =
          (* Candle reads its originals back by request ID and decodes nothing
             past the owner and body restoration above. *)
          | Candle_appraisal -> L.Payload_valid)
-    (* No reader of this build reads this scope, so fresh state deletes it.
-       The refusal's fresh-state line names the scope's directories; the
-       detail does not list them again. *)
+    (* Retired historical scopes have no active reader schema in this build,
+       but body restoration still validates that the retained payload is intact
+       rather than corrupt. *)
+    | Some (Tool_request_consumer.Retired _) ->
+      (match original.restore () with
+       | Error detail -> L.Body_unreadable detail
+       | Ok _ -> L.Payload_valid)
+    (* No active or retired consumer of this build recognizes this scope, so
+       fresh state deletes it. The refusal's fresh-state line names the scope's
+       directories; the detail does not list them again. *)
     | None ->
       (match original.restore () with
        | Error detail -> L.Body_unreadable detail

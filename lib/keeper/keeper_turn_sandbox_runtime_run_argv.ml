@@ -69,15 +69,29 @@ let policy_network_create_timeout_s = 60.0
 (* Returns the gateway a guest on the policy network reaches the host at, so
    the boot can point the guest's clients at the proxy behind it. [None] for
    every other mode, which needs no gateway. *)
-let ensure_policy_network backend ~keeper_name (mode : Keeper_types_profile_sandbox.network_mode) =
-  let gateway_of_network () =
+type policy_network_setup =
+  | Policy_network_not_needed
+  | Policy_network_ready of
+      { network_name : string
+      ; gateway : string
+      ; created : bool
+      }
+
+let ensure_policy_network_observed
+      ?on_created
+      backend
+      ~keeper_name
+      (mode : Keeper_types_profile_sandbox.network_mode)
+  =
+  let network_name = Keeper_sandbox_microvm.policy_network_name ~keeper_name in
+  let gateway_of_network ~created () =
     match Keeper_sandbox_microvm.policy_network_inspect_argv_for backend ~keeper_name with
     | Error _ as error -> error
     | Ok inspect_argv ->
       (match run_argv_with_status ~timeout_sec:policy_network_list_timeout_s inspect_argv with
        | Unix.WEXITED 0, inspect ->
          (match Keeper_sandbox_microvm.policy_network_gateway ~inspect with
-          | Ok gateway -> Ok (Some gateway)
+          | Ok gateway -> Ok (Policy_network_ready { network_name; gateway; created })
           | Error detail -> Error ("microvm_policy_network_unreadable: " ^ detail))
        | (Unix.WEXITED _, output) | (Unix.WSIGNALED _, output) | (Unix.WSTOPPED _, output) ->
          Error
@@ -88,7 +102,7 @@ let ensure_policy_network backend ~keeper_name (mode : Keeper_types_profile_sand
   in
   match mode with
   | Keeper_types_profile_sandbox.Network_none | Keeper_types_profile_sandbox.Network_inherit
-    -> Ok None
+    -> Ok Policy_network_not_needed
   | Keeper_types_profile_sandbox.Network_policy ->
     (match Keeper_sandbox_microvm.policy_network_list_argv_for backend with
      | Error _ as error -> error
@@ -109,11 +123,13 @@ let ensure_policy_network backend ~keeper_name (mode : Keeper_types_profile_sand
        (match run_argv_with_status ~timeout_sec:policy_network_list_timeout_s list_argv with
         | Unix.WEXITED 0, listing ->
           (match Keeper_sandbox_microvm.policy_network_present ~keeper_name ~listing with
-           | Ok true -> gateway_of_network ()
+           | Ok true -> gateway_of_network ~created:false ()
            | Ok false ->
              (match create_network () with
               | Error _ as error -> error
-              | Ok () -> gateway_of_network ())
+              | Ok () ->
+                Option.iter (fun notify -> notify network_name) on_created;
+                gateway_of_network ~created:true ())
            | Error detail ->
              Error ("microvm_policy_network_unreadable: " ^ detail))
         | (Unix.WEXITED _, listing) | (Unix.WSIGNALED _, listing) | (Unix.WSTOPPED _, listing) ->
@@ -122,6 +138,14 @@ let ensure_policy_network backend ~keeper_name (mode : Keeper_types_profile_sand
                "microvm_policy_network_unreadable: %s: %s"
                (String.concat " " list_argv)
                (String.trim listing))))
+;;
+
+let ensure_policy_network backend ~keeper_name mode =
+  Result.map
+    (function
+      | Policy_network_not_needed -> None
+      | Policy_network_ready { gateway; _ } -> Some gateway)
+    (ensure_policy_network_observed backend ~keeper_name mode)
 ;;
 
 let output_for_status ~(stdout : string) ~(stderr : string) =

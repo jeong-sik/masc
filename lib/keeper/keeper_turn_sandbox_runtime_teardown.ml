@@ -7,6 +7,262 @@ open Keeper_turn_sandbox_runtime_work_volume
 open Keeper_turn_sandbox_runtime_start_failure
 open Keeper_turn_sandbox_runtime_apple
 
+type policy_network_removal =
+  | Policy_network_removed
+  | Policy_network_already_absent
+  | Policy_network_kept_attached
+
+let list_apple_policy_networks_with ~run ~timeout_sec =
+  let open Result.Syntax in
+  let* list_argv =
+    Keeper_sandbox_microvm.policy_network_list_argv_for
+      Keeper_microvm_backend.Apple_container
+  in
+  let status, stdout, stderr = run ~timeout_sec list_argv in
+  match status with
+  | Unix.WEXITED 0 -> Keeper_sandbox_microvm.policy_network_names_of_listing ~listing:stdout
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+    Error
+      (Printf.sprintf
+         "policy network list failed (%s): %s"
+         (Keeper_sandbox_exec_failure.status_label status)
+         (Keeper_sandbox_runtime.docker_failure_output_for_log
+            (output_for_status ~stdout ~stderr)))
+;;
+
+let remove_unattached_apple_policy_network_with ~run ~timeout_sec ~network_name =
+  let open Result.Syntax in
+  let* delete_argv =
+    Keeper_sandbox_microvm.policy_network_delete_argv_for
+      Keeper_microvm_backend.Apple_container
+      ~network_name
+  in
+  let* existing = list_apple_policy_networks_with ~run ~timeout_sec in
+  if not (List.mem network_name existing)
+  then Ok Policy_network_already_absent
+  else (
+    let status, stdout, stderr =
+      run ~timeout_sec (Keeper_sandbox_microvm.apple_container_list_argv ())
+    in
+    let* attached =
+      match status with
+      | Unix.WEXITED 0 ->
+        Keeper_sandbox_microvm.attached_policy_networks_of_apple_containers ~listing:stdout
+      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+        Error
+          (Printf.sprintf
+             "container list failed while checking policy network %s (%s): %s"
+             network_name
+             (Keeper_sandbox_exec_failure.status_label status)
+             (Keeper_sandbox_runtime.docker_failure_output_for_log
+                (output_for_status ~stdout ~stderr)))
+    in
+    if List.mem network_name attached
+    then Ok Policy_network_kept_attached
+    else (
+      let delete_status, delete_stdout, delete_stderr = run ~timeout_sec delete_argv in
+      let* after = list_apple_policy_networks_with ~run ~timeout_sec in
+      if List.mem network_name after
+      then
+        Error
+          (Printf.sprintf
+             "policy network %s remains after delete (%s): %s"
+             network_name
+             (Keeper_sandbox_exec_failure.status_label delete_status)
+             (Keeper_sandbox_runtime.docker_failure_output_for_log
+                (output_for_status ~stdout:delete_stdout ~stderr:delete_stderr)))
+      else Ok Policy_network_removed))
+;;
+
+let sweep_abandoned_apple_policy_networks_with
+      ~run
+      ~timeout_sec
+      ~protected_keeper_names
+      ~revalidate
+  =
+  let protected_networks =
+    List.map
+      (fun keeper_name -> Keeper_sandbox_microvm.policy_network_name ~keeper_name)
+      protected_keeper_names
+  in
+  match list_apple_policy_networks_with ~run ~timeout_sec with
+  | Error detail ->
+    { Keeper_sandbox_microvm.removed = []; failed = [ "policy-networks", detail ] }
+  | Ok networks ->
+    let removed, failed =
+      List.fold_left
+        (fun (removed, failed) network_name ->
+           if List.mem network_name protected_networks
+           then removed, failed
+           else
+             match revalidate () with
+             | Error detail -> removed, (network_name, detail) :: failed
+             | Ok () ->
+               (match
+                  remove_unattached_apple_policy_network_with ~run ~timeout_sec ~network_name
+                with
+                | Ok Policy_network_removed -> network_name :: removed, failed
+                | Ok (Policy_network_already_absent | Policy_network_kept_attached) ->
+                  removed, failed
+                | Error detail -> removed, (network_name, detail) :: failed))
+        ([], [])
+        networks
+    in
+    { Keeper_sandbox_microvm.removed = List.rev removed; failed = List.rev failed }
+;;
+
+let sweep_abandoned_apple_policy_networks ~base_path ~command_available ~timeout_sec =
+  let backend = Keeper_microvm_backend.Apple_container in
+  if not (command_available (Keeper_microvm_backend.cli_name backend))
+  then None
+  else
+    let module Declarations = Keeper_microvm_declared_guests in
+    Some
+      (with_microvm_inventory_lock (fun () ->
+         match Declarations.read ~base_path with
+         | Error error ->
+           { Keeper_sandbox_microvm.removed = []
+           ; failed = [ "declarations", Declarations.unavailable_message error ]
+           }
+         | Ok declarations ->
+           (match Declarations.protected_keeper_names declarations with
+            | None ->
+              { Keeper_sandbox_microvm.removed = []
+              ; failed =
+                  [ ( "declarations"
+                    , "keeper declaration roster has unreadable declarations; preserving policy networks" )
+                  ]
+              }
+            | Some protected_keeper_names ->
+              sweep_abandoned_apple_policy_networks_with
+                ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
+                ~timeout_sec
+                ~protected_keeper_names
+                ~revalidate:(fun () ->
+                  Declarations.revalidate declarations
+                  |> Result.map_error Declarations.unavailable_message))))
+;;
+
+let list_apple_volumes_with ~run ~timeout_sec =
+  let status, stdout, stderr =
+    run ~timeout_sec (Keeper_sandbox_microvm.apple_volume_list_argv ())
+  in
+  match status with
+  | Unix.WEXITED 0 ->
+    (match Yojson.Safe.from_string stdout with
+     | exception Yojson.Json_error detail ->
+       Error ("microvm_volume_removal_listing_failed: invalid volume listing JSON: " ^ detail)
+     | json ->
+       Keeper_sandbox_microvm.volume_names_of_json json
+       |> Result.map_error (fun detail -> "microvm_volume_removal_listing_failed: " ^ detail))
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+    Error
+      (Printf.sprintf
+         "microvm_volume_removal_listing_failed: %s: %s"
+         (Keeper_sandbox_exec_failure.status_label status)
+         (Keeper_sandbox_runtime.docker_failure_output_for_log
+            (output_for_status ~stdout ~stderr)))
+;;
+
+let remove_apple_keeper_volumes_for_workspace_with
+      ~run
+      ~timeout_sec
+      ~base_path
+      ~keeper_name
+      ?sandbox_image
+      ()
+  =
+  let open Result.Syntax in
+  let* scoped_work =
+    Keeper_sandbox_microvm.scoped_work_volume_name ~base_path ~keeper_name
+    |> Result.map_error (fun detail -> "microvm_volume_removal_unnamed: " ^ detail)
+  in
+  let* scoped_build =
+    Keeper_sandbox_microvm.scoped_build_volume_name ~base_path ~keeper_name
+    |> Result.map_error (fun detail -> "microvm_volume_removal_unnamed: " ^ detail)
+  in
+  let* legacy_work =
+    Keeper_sandbox_microvm.work_volume_name ~keeper_name
+    |> Result.map_error (fun detail -> "microvm_volume_removal_unnamed: " ^ detail)
+  in
+  let* listed = list_apple_volumes_with ~run ~timeout_sec in
+  let present_scoped =
+    List.filter (fun name -> List.mem name listed) [ scoped_work; scoped_build ]
+  in
+  let has_legacy_work = List.mem legacy_work listed in
+  let scoped_result =
+    match present_scoped with
+    | [] -> Ok ()
+    | volume_names ->
+      let workspace_hash = Keeper_sandbox_microvm.base_path_volume_hash ~base_path in
+      (match
+         Keeper_sandbox_microvm.apple_keeper_workspace_owner_containers
+           ~run
+           ~timeout_sec
+           ~workspace_hash
+           ~keeper_name
+       with
+       | Error detail -> Error detail
+       | Ok (_ :: _ as owners) ->
+         Log.Keeper.warn ~keeper_name
+           "keeper removed; its workspace-scoped Apple volumes are kept: containers still reference the keeper: %s"
+           (String.concat ", " owners);
+         Ok ()
+       | Ok [] ->
+         Keeper_sandbox_microvm.remove_apple_volumes_by_names
+           ~run
+           ~timeout_sec
+           ~volume_names)
+  in
+  let legacy_result =
+    if present_scoped <> [] || not has_legacy_work
+    then Ok ()
+    else
+      match sandbox_image with
+      | None ->
+        Error
+          (Printf.sprintf
+             "microvm_volume_removal_image_unresolved: keeper %s's volumes \
+              cannot be released without an image to run the claims helper; \
+              automatic deletion was skipped"
+             keeper_name)
+      | Some image ->
+        let claimant =
+          Keeper_sandbox_runtime_setup.normalize_base_path_for_hash base_path
+        in
+        (match
+           Keeper_sandbox_microvm.release_apple_work_volume_claim
+             ~run
+             ~timeout_sec
+             ~keeper_name
+             ~volume_name:legacy_work
+             ~image
+             ~claimant
+         with
+         | Keeper_sandbox_microvm.Kept_for_claimants claimants ->
+           Log.Keeper.warn ~keeper_name
+             "keeper removed; its Apple volumes are kept: %d other workspace(s) \
+              still claim them: %s"
+             (List.length claimants)
+             (String.concat ", " claimants);
+           Ok ()
+         | Keeper_sandbox_microvm.Kept_for_containers owners ->
+           Log.Keeper.warn ~keeper_name
+             "keeper removed; its claim was released but its Apple volumes are \
+              kept: containers still reference the keeper: %s"
+             (String.concat ", " owners);
+           Ok ()
+         | Keeper_sandbox_microvm.Skipped_unverified detail -> Error detail)
+  in
+  match scoped_result, legacy_result with
+  | Ok (), result -> result
+  | (Error _ as err), Ok () -> err
+  | (Error _ as err), Error detail ->
+    Log.Keeper.warn ~keeper_name
+      "keeper removed; legacy volume claim release also failed: %s" detail;
+    err
+;;
+
 let sweep_abandoned_microvm_guests
     ~base_path ~command_available ~timeout_sec ~is_pid_alive ~run_argv =
   let module Inventory = Keeper_microvm_guest_inventory in
@@ -209,17 +465,33 @@ let teardown_keeper_sandbox_by_name
            ~unavailable:(microvm_start_failure_message Runtime_context_unavailable)
            (fun ~fs ~scope ->
              Result.bind (check_apple_guest_modes ~base_path:config.base_path ~keeper_name ~timeout_sec)
-               (fun () -> perform
-                 (fun ~network_mode ~guest_name ->
-                   stop_owned_apple_guest ~base_path:config.base_path ~keeper_name
-                     ~network_mode ~timeout_sec ~container_name:guest_name)
-                 (fun ~network_mode ~guest_name:_ ->
-                   Keeper_microvm_github_identity.remove_if_guest_absent ~fs ~coordinator:microvm_lifecycle
-                     ~scope ~base_path:config.base_path ~keeper_name ~backend:microvm_backend
-                     ~network_mode ~timeout_sec
-                   |> Result.map (function
-                     | Keeper_microvm_github_identity.Removed | Keeper_microvm_github_identity.Already_absent -> ())
-                   |> Result.map_error Keeper_microvm_github_identity.error_message)))
+               (fun () ->
+                 Result.bind
+                   (perform
+                      (fun ~network_mode ~guest_name ->
+                        stop_owned_apple_guest ~base_path:config.base_path ~keeper_name
+                          ~network_mode ~timeout_sec ~container_name:guest_name)
+                      (fun ~network_mode ~guest_name:_ ->
+                        Keeper_microvm_github_identity.remove_if_guest_absent ~fs ~coordinator:microvm_lifecycle
+                          ~scope ~base_path:config.base_path ~keeper_name ~backend:microvm_backend
+                          ~network_mode ~timeout_sec
+                        |> Result.map (function
+                          | Keeper_microvm_github_identity.Removed | Keeper_microvm_github_identity.Already_absent -> ())
+                        |> Result.map_error Keeper_microvm_github_identity.error_message))
+                   (fun () ->
+                     let network_name = Keeper_sandbox_microvm.policy_network_name ~keeper_name in
+                     (match
+                        remove_unattached_apple_policy_network_with
+                          ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
+                          ~timeout_sec
+                          ~network_name
+                      with
+                      | Ok (Policy_network_removed | Policy_network_already_absent | Policy_network_kept_attached) -> ()
+                      | Error detail ->
+                        Log.Keeper.warn ~keeper_name
+                          "microvm teardown %s: policy network %s cleanup skipped: %s"
+                          keeper_name network_name detail);
+                     Ok ())))
        | Keeper_microvm_backend.Nerdctl_kata | Keeper_microvm_backend.Microsandbox ->
          with_microvm_lifecycle_lock ~keeper_name ~operation:"teardown" (fun () ->
            perform
@@ -260,50 +532,14 @@ let remove_keeper_volumes_by_name
              cannot be removed without the runtime that created them"
             keeper_name)
      | Some Keeper_microvm_backend.Apple_container ->
-       (* Work and build names contain the Keeper name but not its workspace.
-          The marker records confirmed claims, but a legacy or adopted owner
-          may be unrecorded and a paused owner may have no container, so the
-          release keeps the volumes instead of deleting them. The release
-          helper runs on the Keeper's own sandbox image; an unresolvable image
-          prevents this call from releasing the claim. *)
-       (match sandbox_image with
-        | None ->
-          Error
-            (Printf.sprintf
-               "microvm_volume_removal_image_unresolved: keeper %s's volumes \
-                cannot be released without an image to run the claims helper; \
-                automatic deletion was skipped"
-               keeper_name)
-        | Some image ->
-          (match Keeper_sandbox_microvm.work_volume_name ~keeper_name with
-           | Error detail -> Error ("microvm_volume_removal_unnamed: " ^ detail)
-           | Ok volume_name ->
-             let claimant =
-               Keeper_sandbox_runtime_setup.normalize_base_path_for_hash base_path
-             in
-             (match
-                Keeper_sandbox_microvm.release_apple_work_volume_claim
-                  ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
-                  ~timeout_sec
-                  ~keeper_name
-                  ~volume_name
-                  ~image
-                  ~claimant
-              with
-              | Keeper_sandbox_microvm.Kept_for_claimants claimants ->
-                Log.Keeper.warn ~keeper_name
-                  "keeper removed; its Apple volumes are kept: %d other workspace(s) \
-                   still claim them: %s"
-                  (List.length claimants)
-                  (String.concat ", " claimants);
-                Ok ()
-              | Keeper_sandbox_microvm.Kept_for_containers owners ->
-                Log.Keeper.warn ~keeper_name
-                  "keeper removed; its claim was released but its Apple volumes are \
-                   kept: containers still reference the keeper: %s"
-                  (String.concat ", " owners);
-                Ok ()
-              | Keeper_sandbox_microvm.Skipped_unverified detail -> Error detail)))
+       with_microvm_inventory_lock (fun () ->
+         remove_apple_keeper_volumes_for_workspace_with
+           ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
+           ~timeout_sec
+           ~base_path
+           ~keeper_name
+           ?sandbox_image
+           ())
      | Some
          ((Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata) as
           microvm_backend) ->

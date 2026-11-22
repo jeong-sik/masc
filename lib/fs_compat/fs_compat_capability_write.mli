@@ -537,6 +537,8 @@ val sync_directory_capability :
 
 val is_atomic_orphan_name : string -> bool
 
+val is_unpublished_write_name : string -> bool
+
 val try_lock_stage_fd_for_testing : Unix.file_descr -> bool
 
 type atomic_orphan_cleanup_operation = Atomic_orphan_cleanup.atomic_orphan_cleanup_operation =
@@ -579,5 +581,8 @@ val atomic_orphan_cleanup_failure_to_string :
   atomic_orphan_cleanup_failure -> string
 
 val cleanup_atomic_orphans :
+  ?unlink_private_jsonl_stages:bool ->
+  ?recovery_parent:string ->
+  ?recovery_ownership_root:string ->
   ownership_root:string ->
   base_path:string -> unit -> atomic_orphan_cleanup_report

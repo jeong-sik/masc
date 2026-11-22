@@ -1,6 +1,8 @@
 let prefix = ".atomic_"
 let suffix = ".tmp"
 
+let atomic_prep_prefix = ".prep_atomic_"
+
 let private_jsonl_prep_prefix = ".private_jsonl_prep_"
 let private_jsonl_prep_suffix = ".prep"
 
@@ -15,6 +17,10 @@ let has_prefix_and_suffix ~prefix ~suffix name =
 
 let is_atomic_tmp_name name =
   has_prefix_and_suffix ~prefix ~suffix name
+;;
+
+let is_atomic_prep_name name =
+  has_prefix_and_suffix ~prefix:atomic_prep_prefix ~suffix name
 ;;
 
 let is_private_jsonl_prep_name name =
@@ -33,4 +39,8 @@ let is_private_jsonl_stage_name name =
 
 let is_name name =
   is_atomic_tmp_name name || is_private_jsonl_stage_name name
+;;
+
+let is_unpublished_write_name name =
+  is_name name || is_atomic_prep_name name || is_private_jsonl_prep_name name
 ;;

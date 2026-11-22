@@ -1611,6 +1611,8 @@ let start_post_ready_owner_lanes
     ~run:(fun () -> startup_sweep_microvm_guests state);
   start_maintenance ~sw ~task:Superseded_lane_census
     ~run:(fun () -> startup_count_superseded_lanes state);
+  start_maintenance ~sw ~task:Orphan_hygiene_sweep
+    ~run:(fun () -> Server_runtime_startup_maintenance.startup_sweep_orphan_hygiene state);
   Server_runtime_startup_maintenance.report_unknown_typesafeai_exclusions
     ~base_path:(Mcp_server.workspace_config state).base_path;
   Server_runtime_startup_maintenance.report_unknown_memory_recall_keepers

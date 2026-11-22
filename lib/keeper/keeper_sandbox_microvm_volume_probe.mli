@@ -47,9 +47,23 @@ val ensure_work_volume_for :
 
 val build_volume_name : keeper_name:string -> (string, string) result
 
+val scoped_build_volume_name :
+  base_path:string -> keeper_name:string -> (string, string) result
+
+val scoped_build_volume_name_with_hash :
+  workspace_hash:string -> keeper_name:string -> (string, string) result
+
 val build_volume_mount_args : volume_name:string -> string list
 
 val apple_volume_delete_argv : volume_name:string -> string list
+
+val remove_apple_volumes_by_names :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> timeout_sec:float
+  -> volume_names:string list
+  -> (unit, string) result
+(** Delete each named Apple volume and confirm every name is absent in one
+    settling [container volume list --format json] inventory. *)
 
 val remove_apple_keeper_volumes :
   run:(timeout_sec:float -> string list -> Unix.process_status * string * string)

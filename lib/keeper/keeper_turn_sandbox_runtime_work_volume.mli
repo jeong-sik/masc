@@ -41,7 +41,20 @@ type microvm_guest_provisions =
 val ensure_apple_volume_helpers_absent :
   keeper_name:string -> timeout_sec:float -> (unit, string) result
 
+val resolve_apple_volume_names_with :
+  probe:(volume_name:string -> Keeper_sandbox_microvm.volume_probe_outcome) ->
+  base_path:string ->
+  keeper_name:string ->
+  ([ `Legacy of string * string | `Workspace_scoped of string * string ], string) result
+
+val resolve_apple_volume_names :
+  base_path:string ->
+  keeper_name:string ->
+  timeout_sec:float ->
+  ([ `Legacy of string * string | `Workspace_scoped of string * string ], string) result
+
 val microvm_guest_provisions :
+  ?apple_volumes:[ `Legacy of string * string | `Workspace_scoped of string * string ] ->
   t ->
   backend:Keeper_microvm_backend.t ->
   shim:boot_shim ->
@@ -109,6 +122,11 @@ module For_testing_microvm :
       t ->
       backend:Keeper_microvm_backend.t ->
       timeout_sec:float -> (unit, string) result
+    val resolve_apple_volume_names_with :
+      probe:(volume_name:string -> Keeper_sandbox_microvm.volume_probe_outcome) ->
+      base_path:string ->
+      keeper_name:string ->
+      ([ `Legacy of string * string | `Workspace_scoped of string * string ], string) result
   end
 
 val ensure_microvm_build_links :

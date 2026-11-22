@@ -1,5 +1,6 @@
-(** The in-server sweep of the shared {!Tool_blob_store}: it counts and
-    records, and deletes nothing.
+(** The in-server sweep of the shared {!Tool_blob_store}: {!observe} counts and
+    records without deleting; {!reclaim} additionally deletes confirmed
+    two-generation unreferenced blobs once every safety gate holds.
 
     A scan writes a marker file and takes the marker's mtime as the scan's
     start, so later comparisons with blob mtimes read one filesystem clock.
@@ -61,12 +62,19 @@ type report =
   ; candidates : int
   ; deletable : int
   ; deletable_bytes : int
+  ; deleted : int
+  ; deleted_bytes : int
+  ; delete_failures : int
   ; unstatable : int
       (** Candidates of both scans whose file was neither a regular file nor
           absent; never deletable. *)
   ; unclassified : string list
       (** {!Tool_blob_maintenance.unclassified_entry_to_string} of each
           unclassified entry. Non-empty, [deletable] is 0. *)
+  ; malformed_warnings : Tool_blob_maintenance.malformed_reference_warning list
+      (** Malformed legacy structured [_blob] references encountered during
+          scanning. Any {!Tool_blob_maintenance.Unpinnable_malformed_blob_ref}
+          keeps [deletable] at 0 and prevents deletion fail-closed. *)
   ; previous : previous
   ; touches : Tool_blob_store.touch_counts
   }
@@ -81,6 +89,9 @@ type error =
   | Record_write_failed of
       { path : string
       ; detail : string
+      ; deleted : int
+      ; deleted_bytes : int
+      ; delete_failures : int
       }
   | Marker_failed of
       { path : string
@@ -106,4 +117,26 @@ val observe :
   base_path:string ->
   scope:Tool_blob_maintenance.scope ->
   (report, error) result
-(** One scan. Blocking, with no Eio effects: run it off the main domain. *)
+(** One observation-only scan. Deletes nothing. Blocking, with no Eio effects:
+    run it off the main domain. *)
+
+val reclaim :
+  ?min_age_seconds:float ->
+  base_path:string ->
+  scope:Tool_blob_maintenance.scope ->
+  unit ->
+  (report, error) result
+(** One scan with safe, gated deletion of confirmed two-generation unreferenced
+    blobs. Deletes a blob only when:
+    - a valid previous [candidates-v2] record exists,
+    - [unclassified] is empty,
+    - no {!Tool_blob_maintenance.Unpinnable_malformed_blob_ref} was encountered,
+    - the touch ledger has not evicted marks in either generation
+      ([not current_evicted && not previous_evicted], re-checked immediately
+      before unlinking),
+    - the blob is absent from the touch ledger in both generations (re-checked
+      immediately before unlinking), and
+    - the blob's mtime is strictly older than the previous scan opening and at
+      least [min_age_seconds] (default 24h) older than this scan's opening
+      (re-checked immediately before unlinking).
+    Blocking, with no Eio effects: run it off the main domain. *)

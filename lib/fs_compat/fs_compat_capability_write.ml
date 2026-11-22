@@ -485,6 +485,7 @@ let capability_write_failure_to_string = Atomic_write.capability_write_failure_t
 let sync_directory_capability = Atomic_write.sync_directory_capability
 
 let is_atomic_orphan_name = Atomic_temp_name.is_name
+let is_unpublished_write_name = Atomic_temp_name.is_unpublished_write_name
 let try_lock_stage_fd_for_testing = Stage_flock.try_lock_exclusive_fd
 type atomic_orphan_cleanup_operation = Atomic_orphan_cleanup.atomic_orphan_cleanup_operation =
   | Inspect_cleanup_root
@@ -526,6 +527,19 @@ let atomic_orphan_cleanup_failure_to_string =
   Atomic_orphan_cleanup.atomic_orphan_cleanup_failure_to_string
 ;;
 
-let cleanup_atomic_orphans ~ownership_root ~base_path () =
-  Atomic_orphan_cleanup.cleanup_atomic_orphans ~ownership_root ~base_path ()
+let cleanup_atomic_orphans
+      ?unlink_private_jsonl_stages
+      ?recovery_parent
+      ?recovery_ownership_root
+      ~ownership_root
+      ~base_path
+      ()
+  =
+  Atomic_orphan_cleanup.cleanup_atomic_orphans
+    ?unlink_private_jsonl_stages
+    ?recovery_parent
+    ?recovery_ownership_root
+    ~ownership_root
+    ~base_path
+    ()
 ;;

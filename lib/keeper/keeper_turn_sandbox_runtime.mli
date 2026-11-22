@@ -356,6 +356,12 @@ module For_testing_microvm : sig
   val provision_guest
     : t -> backend:Keeper_microvm_backend.t -> timeout_sec:float -> (unit, string) result
   (** Exercise the boot provisioning path without exposing its private record. *)
+
+  val resolve_apple_volume_names_with :
+    probe:(volume_name:string -> Keeper_sandbox_microvm.volume_probe_outcome) ->
+    base_path:string ->
+    keeper_name:string ->
+    ([ `Legacy of string * string | `Workspace_scoped of string * string ], string) result
 end
 
 val run_argv_with_stdin_and_status_split :
@@ -510,6 +516,40 @@ val teardown_keeper_sandbox :
     shutdown finalization. A missing container is a successful teardown.
     The MicroVM identity snapshot is released only after its guest has
     stopped and been deleted. *)
+
+type policy_network_removal =
+  Keeper_turn_sandbox_runtime_teardown.policy_network_removal =
+  | Policy_network_removed
+  | Policy_network_already_absent
+  | Policy_network_kept_attached
+
+val remove_unattached_apple_policy_network_with :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string) ->
+  timeout_sec:float ->
+  network_name:string ->
+  (policy_network_removal, string) result
+
+val sweep_abandoned_apple_policy_networks_with :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string) ->
+  timeout_sec:float ->
+  protected_keeper_names:string list ->
+  revalidate:(unit -> (unit, string) result) ->
+  Keeper_sandbox_microvm.sweep_outcome
+
+val sweep_abandoned_apple_policy_networks :
+  base_path:string ->
+  command_available:(string -> bool) ->
+  timeout_sec:float ->
+  Keeper_sandbox_microvm.sweep_outcome option
+
+val remove_apple_keeper_volumes_for_workspace_with :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string) ->
+  timeout_sec:float ->
+  base_path:string ->
+  keeper_name:string ->
+  ?sandbox_image:string ->
+  unit ->
+  (unit, string) result
 
 val sweep_abandoned_microvm_guests :
   base_path:string ->

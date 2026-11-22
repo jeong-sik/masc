@@ -342,9 +342,458 @@ let test_unknown_memory_recall_keepers_come_from_declarations () =
          ; "recall covers every keeper", Runtime_schema.Memory_recall_on Runtime_schema.All_keepers
          ])
 
+let test_prune_empty_completion_review_and_verifier_executions () =
+  let base_path = fresh_dir "masc_completion_review_prune" in
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
+  let old_review_file =
+    List.fold_left Filename.concat masc_root
+      [ "keepers"; "completion-review-dead0001"; "continuity-requests"; "2020-01"; "01.jsonl" ]
+  in
+  let live_review_file =
+    List.fold_left Filename.concat masc_root
+      [ "keepers"; "completion-review-live0002"; "continuity-requests"; "2999-01"; "01.jsonl" ]
+  in
+  Fs_compat.mkdir_p (Filename.dirname old_review_file);
+  Fs_compat.mkdir_p (Filename.dirname live_review_file);
+  Fs_compat.save_file old_review_file "{}\n";
+  Fs_compat.save_file live_review_file "{}\n";
+  let pruned = SM.prune_shared_jsonl_stores ~days:30 ~masc_root in
+  Alcotest.(check int) "only old review day file counted" 1 pruned;
+  Alcotest.(check bool) "empty old completion-review dir removed" false
+    (Sys.file_exists (List.fold_left Filename.concat masc_root [ "keepers"; "completion-review-dead0001" ]));
+  Alcotest.(check bool) "active completion-review dir preserved" true
+    (Sys.file_exists live_review_file);
+  (* Verifier executions: keep live-referenced and recent settled, remove aged settled. *)
+  let store =
+    Masc.Lane_addon_store.create ~root:(Masc.Lane_addon_store.directory ~masc_dir:masc_root)
+  in
+  let live_req = `Assoc [ "input", `String "active-review" ] in
+  (match
+     Masc.Lane_addon_tool_request_owner.retain
+       ~store
+       ~scope:Masc.Verifier_review_owner.scope
+       ~request_id:"verif-live:attempt-0"
+       ~installation_id:"inst-1"
+       ~package_id:"pkg-1"
+       ~tool:"verifier_review"
+       ~summary:`Null
+       ~request:live_req
+   with
+   | Ok _ -> ()
+   | Error err -> Alcotest.fail (Masc.Lane_addon_tool_request_owner.error_to_string err));
+  let live_digest =
+    match Masc.Lane_addon_tool_request_owner.request_digest live_req with
+    | Ok d -> d
+    | Error d -> Alcotest.fail d
+  in
+  let settled_old_digest = String.make 64 'b' in
+  let settled_fresh_digest = String.make 64 'c' in
+  let exec_root = Filename.concat masc_root "verifier-executions" in
+  let now = 1_800_000_000.0 in
+  let old_ts = now -. (40.0 *. Masc_time_constants.day) in
+  let fresh_ts = now -. 60.0 in
+  let mk_exec digest ts =
+    let dir = Filename.concat exec_root digest in
+    let file = Filename.concat dir "journal.json" in
+    Fs_compat.mkdir_p dir;
+    Fs_compat.save_file file "{}";
+    Unix.utimes file ts ts;
+    Unix.utimes dir ts ts;
+    dir
+  in
+  let live_dir = mk_exec live_digest old_ts in
+  let old_dir = mk_exec settled_old_digest old_ts in
+  let fresh_dir_exec = mk_exec settled_fresh_digest fresh_ts in
+  let removed =
+    match SM.prune_settled_verifier_executions ~now ~base_path ~days:30 () with
+    | Ok n -> n
+    | Error detail -> Alcotest.fail detail
+  in
+  Alcotest.(check int) "only aged settled verifier execution removed" 1 removed;
+  Alcotest.(check bool) "aged settled execution removed" false (Sys.file_exists old_dir);
+  Alcotest.(check bool) "live referenced execution kept even if old" true (Sys.file_exists live_dir);
+  Alcotest.(check bool) "fresh settled execution kept" true (Sys.file_exists fresh_dir_exec)
+
+let test_prune_terminal_shutdown_operations_and_empty_dirs () =
+  Eio_main.run @@ fun _env ->
+  let base_path = fresh_dir "masc_shutdown_ops_prune" in
+  let config = Masc.Workspace.default_config base_path in
+  let ops_root =
+    Filename.concat
+      (Masc.Workspace.keepers_runtime_dir config)
+      (Common.keeper_runtime_store_dirname Common.Keeper_shutdown_operations)
+  in
+  let empty_legacy_dir = Filename.concat ops_root "_legacy-empty" in
+  Fs_compat.mkdir_p empty_legacy_dir;
+  let now = 1_800_000_000.0 in
+  let old_ts = now -. (40.0 *. Masc_time_constants.day) in
+  let trace_id =
+    match Keeper_id.Trace_id.of_string "trace-shutdown-prune-test" with
+    | Ok id -> id
+    | Error detail -> Alcotest.fail detail
+  in
+  let digest =
+    match Masc.Keeper_meta_json.Snapshot_digest.of_string (String.make 64 'd') with
+    | Ok d -> d
+    | Error detail -> Alcotest.fail detail
+  in
+  let cleanup_evidence =
+    { Masc.Keeper_shutdown_types.settled_task_ids = []
+    ; pending_confirms_removed = 0
+    ; meta_snapshot_digest = digest
+    }
+  in
+  let mk_op ~keeper_name ~reason ~phase =
+    let op_id = Masc.Keeper_shutdown_types.Operation_id.generate () in
+    let op : Masc.Keeper_shutdown_types.t =
+      { schema_version = Masc.Keeper_shutdown_types.schema_version
+      ; revision = 1
+      ; operation_id = op_id
+      ; keeper_name
+      ; lane_ownership = Dormant_meta
+      ; trace_id
+      ; actor = "test"
+      ; cleanup_intent = { reason; remove_session = false }
+      ; turn_disposition = No_inflight_turn
+      ; expected_backlog_version = 1
+      ; owned_task_ids = []
+      ; join_evidence = None
+      ; phase
+      ; created_at = "2026-01-01T00:00:00Z"
+      ; updated_at = "2026-01-01T00:00:00Z"
+      }
+    in
+    (match Masc.Keeper_shutdown_store.persist_new ~config op with
+     | Ok () -> ()
+     | Error err -> Alcotest.fail (Masc.Keeper_shutdown_store.error_to_string err));
+    match Masc.Keeper_shutdown_store.path ~config ~keeper_name op_id with
+    | Ok p ->
+      Unix.utimes p old_ts old_ts;
+      p
+    | Error err -> Alcotest.fail (Masc.Keeper_shutdown_store.error_to_string err)
+  in
+  let settled_path =
+    mk_op
+      ~keeper_name:"settled-keeper"
+      ~reason:Masc.Keeper_shutdown_types.Operator_stop_retain_meta
+      ~phase:
+        (Masc.Keeper_shutdown_types.Finalized
+           { cleanup = cleanup_evidence
+           ; meta_removed = false
+           ; session_removed = false
+           ; registry_unregistered = true
+           ; completion = Masc.Keeper_shutdown_types.Completion_not_requested
+           })
+  in
+  let blocked_path =
+    mk_op
+      ~keeper_name:"blocked-keeper"
+      ~reason:Masc.Keeper_shutdown_types.Operator_stop_retain_meta
+      ~phase:(Masc.Keeper_shutdown_types.Blocked { stage = Task_settlement; detail = "pending" })
+  in
+  let purge_path =
+    mk_op
+      ~keeper_name:"purged-keeper"
+      ~reason:(Masc.Keeper_shutdown_types.Dashboard_keeper_purge { requested_name = "purged-keeper" })
+      ~phase:
+        (Masc.Keeper_shutdown_types.Finalized
+           { cleanup = cleanup_evidence
+           ; meta_removed = true
+           ; session_removed = false
+           ; registry_unregistered = true
+           ; completion = Masc.Keeper_shutdown_types.Completion_delivered Dashboard_keeper_purged
+           })
+  in
+  let corrupt_dir = Filename.concat ops_root "_corrupt-keeper" in
+  Fs_compat.mkdir_p corrupt_dir;
+  let corrupt_id = Masc.Keeper_shutdown_types.Operation_id.generate () in
+  let corrupt_path =
+    Filename.concat corrupt_dir (Masc.Keeper_shutdown_types.Operation_id.to_string corrupt_id ^ ".json")
+  in
+  Fs_compat.save_file corrupt_path "{not valid json";
+  Unix.utimes corrupt_path old_ts old_ts;
+  let report =
+    match
+      Masc.Keeper_shutdown_store.prune_terminal_and_empty_dirs
+        ~now
+        ~config
+        ~older_than_seconds:(30.0 *. Masc_time_constants.day)
+        ()
+    with
+    | Ok r -> r
+    | Error err -> Alcotest.fail (Masc.Keeper_shutdown_store.error_to_string err)
+  in
+  Alcotest.(check int) "one aged terminal operation pruned" 1 report.pruned_operations;
+  Alcotest.(check int) "two empty owner dirs pruned (settled + legacy empty)" 2 report.pruned_empty_dirs;
+  Alcotest.(check bool) "legacy empty dir removed" false (Sys.file_exists empty_legacy_dir);
+  Alcotest.(check bool) "settled op removed" false (Sys.file_exists settled_path);
+  Alcotest.(check bool) "settled keeper dir removed" false (Sys.file_exists (Filename.dirname settled_path));
+  Alcotest.(check bool) "blocked op preserved" true (Sys.file_exists blocked_path);
+  Alcotest.(check bool) "dashboard purge receipt preserved" true (Sys.file_exists purge_path);
+  Alcotest.(check bool) "corrupt record preserved" true (Sys.file_exists corrupt_path)
+
+let test_sweep_atomic_orphans_removes_dead_stage_and_preserves_flocked () =
+  let base_path = fresh_dir "masc_atomic_orphan_sweep" in
+  let ext_config_dir = fresh_dir "masc_ext_config_dir" in
+  let ext_keepers = Filename.concat ext_config_dir "keepers" in
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
+  Fs_compat.mkdir_p masc_root;
+  Fs_compat.mkdir_p ext_keepers;
+  let dead_stage = Filename.concat masc_root ".private_jsonl_dead_0001.stage" in
+  let live_stage = Filename.concat masc_root ".private_jsonl_live_0002.stage" in
+  let nonempty_atomic = Filename.concat masc_root ".atomic_99999_0.tmp" in
+  let ext_nonempty_atomic = Filename.concat ext_keepers ".atomic_ext_88.tmp" in
+  Fs_compat.save_file dead_stage "partial dead write\n";
+  Fs_compat.save_file live_stage "active writer stage\n";
+  Fs_compat.save_file nonempty_atomic "uncommitted payload";
+  Fs_compat.save_file ext_nonempty_atomic "external uncommitted payload";
+  (* Live in-flight open_atomic_temp_file writer must NEVER be deleted or moved. *)
+  let live_atomic_path, live_atomic_ch =
+    Fs_compat.open_atomic_temp_file ~temp_dir:masc_root ()
+  in
+  let live_fd = Unix.openfile live_stage [ Unix.O_RDWR; Unix.O_CLOEXEC ] 0 in
+  let prev_cfg_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Unix.putenv "MASC_CONFIG_DIR" ext_config_dir;
+  Fun.protect
+    ~finally:(fun () ->
+      (match prev_cfg_dir with
+       | Some v -> Unix.putenv "MASC_CONFIG_DIR" v
+       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
+      close_out_noerr live_atomic_ch;
+      (try Unix.unlink live_atomic_path with Unix.Unix_error _ -> ());
+      Unix.close live_fd)
+    (fun () ->
+       output_string live_atomic_ch "in-flight atomic write";
+       flush live_atomic_ch;
+       Alcotest.(check bool) "acquire stage flock on live stage" true
+         (Fs_compat.try_lock_stage_fd_for_testing live_fd);
+       let report = SM.sweep_atomic_orphans ~base_path in
+       Alcotest.(check int) "zero failures" 0 (List.length report.failures);
+       Alcotest.(check int) "dead stage unlinked" 1 report.deleted;
+       Alcotest.(check int) "2 dead nonempty atomics preserved (masc_root + external config_keepers)" 2 report.preserved;
+       Alcotest.(check bool) "dead stage gone" false (Sys.file_exists dead_stage);
+       Alcotest.(check bool) "live flocked stage untouched" true (Sys.file_exists live_stage);
+       Alcotest.(check bool) "live in-flight atomic temp file untouched" true (Sys.file_exists live_atomic_path);
+       Alcotest.(check bool) "no unclassified .masc/.recovered created" false
+         (Sys.file_exists (Filename.concat masc_root ".recovered"));
+       Alcotest.(check bool) "no unclassified <external config_keepers>/.recovered created" false
+         (Sys.file_exists (Filename.concat ext_keepers ".recovered"));
+       Alcotest.(check bool) "in-workspace orphan preserved inside classified fs-publication-recovery" true
+         (Sys.file_exists
+            (List.fold_left Filename.concat masc_root
+               [ Fs_compat.Publication_recovery.directory_leaf; ".recovered"; "root"; ".atomic_99999_0.tmp" ]));
+       Alcotest.(check bool) "external config_keepers orphan routed into classified fs-publication-recovery" true
+         (Sys.file_exists
+            (List.fold_left Filename.concat masc_root
+               [ Fs_compat.Publication_recovery.directory_leaf; ".recovered"; "root"; ".atomic_ext_88.tmp" ]));
+       match Tool_blob_maintenance.unclassified_entries ~base_path Server_tool_blob_scope.scope with
+       | Ok entries ->
+         Alcotest.(check (list string)) "blob scope has zero unclassified entries" []
+           (List.map Tool_blob_maintenance.unclassified_entry_to_string entries)
+       | Error err -> Alcotest.fail (Tool_blob_maintenance.error_to_string err))
+
+let test_sweep_stale_durable_locks_respects_held_and_targets () =
+  let base_path = fresh_dir "masc_stale_locks" in
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
+  let keepers_cfg = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Fs_compat.mkdir_p masc_root;
+  Fs_compat.mkdir_p keepers_cfg;
+  (* 1. Antigravity prepare locks (File_lock_eio-owned) *)
+  let dead_agy_lock =
+    Runtime_antigravity_home.keeper_prepare_lock_path ~runtime_root:masc_root ~owner_leaf:"deadleaf"
+  in
+  let live_agy_lock =
+    Runtime_antigravity_home.keeper_prepare_lock_path ~runtime_root:masc_root ~owner_leaf:"liveleaf"
+  in
+  let live_agy_home =
+    Runtime_antigravity_home.keeper_home_dir ~runtime_root:masc_root ~owner_leaf:"liveleaf"
+  in
+  Fs_compat.save_file dead_agy_lock "";
+  Fs_compat.save_file live_agy_lock "";
+  Fs_compat.mkdir_p live_agy_home;
+  (* 2. Artifact draft locks (Fs_compat private JSONL stable locks) *)
+  let drafts_dir = Filename.concat masc_root Masc.Artifact_draft_store.dirname in
+  Fs_compat.mkdir_p drafts_dir;
+  let dead_draft_lock = Filename.concat drafts_dir "gone.json.lock" in
+  let held_draft_data = Filename.concat drafts_dir "held.json" in
+  let held_draft_lock = Filename.concat drafts_dir "held.json.lock" in
+  Fs_compat.save_file dead_draft_lock "1";
+  let missing_draft_snapshot =
+    match Fs_compat.read_private_jsonl_durable_locked_result held_draft_data ~after:None with
+    | Ok snap -> snap
+    | Error err -> Alcotest.fail (Fs_compat.private_jsonl_transaction_error_to_string err)
+  in
+  (* 3. Trace checkpoint locks (File_lock_eio-owned): one dead, one held *)
+  let traces_dir = Filename.concat masc_root Workspace_init.traces_dirname in
+  Fs_compat.mkdir_p traces_dir;
+  let dead_trace_lock = Filename.concat traces_dir "dead-session.checkpoint.lock" in
+  let held_trace_lock = Filename.concat traces_dir "live-session.checkpoint.lock" in
+  Fs_compat.save_file dead_trace_lock "";
+  Fs_compat.save_file held_trace_lock "";
+  (* 4. Board attention candidate locks (Fs_compat private JSONL stable locks):
+        declared keeper with TOML filename != internal name & sanitized segment,
+        plus one retired keeper. *)
+  let bac_dir = Filename.concat masc_root Masc.Keeper_board_attention_candidate.dirname in
+  Fs_compat.mkdir_p bac_dir;
+  Fs_compat.save_file (Filename.concat keepers_cfg "alias.toml") "[keeper]\nname=\"Team.Alpha\"\n";
+  let sanitized_alpha = Workspace_utils_backend_setup.sanitize_namespace_segment "Team.Alpha" in
+  let declared_bac_lock = Filename.concat bac_dir (sanitized_alpha ^ ".jsonl.lock") in
+  let retired_bac_lock = Filename.concat bac_dir "retired.jsonl.lock" in
+  Fs_compat.save_file declared_bac_lock "1";
+  Fs_compat.save_file retired_bac_lock "1";
+  (* Hold BOTH a real same-process Fs_compat private JSONL snapshot guard on
+     held_draft_data (target still absent!) AND a File_lock_eio durable lock on
+     held_trace_lock during the sweep. Verify neither is removed AND the
+     same-process POSIX lockf on held_draft_lock is NEVER dropped! *)
+  let child_saw_draft_locked = ref false in
+  let report =
+    match
+      Fs_compat.with_private_jsonl_snapshot_guard_result
+        held_draft_data
+        ~expected:missing_draft_snapshot
+        ~f:(fun () ->
+          let r =
+            match
+              File_lock_eio.with_durable_lock ~lock_path:held_trace_lock (fun () ->
+                SM.sweep_stale_durable_locks ~base_path)
+            with
+            | Ok r -> r
+            | Error err -> Alcotest.fail (File_lock_eio.durable_lock_error_to_string err)
+          in
+          (* Prove our POSIX lockf on held_draft_lock survived the sweep intact! *)
+          let pid =
+            Unix.create_process
+              "python3"
+              [| "python3"
+               ; "-c"
+               ; "import fcntl, os, sys; fd = os.open(sys.argv[1], os.O_WRONLY); fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)"
+               ; held_draft_lock
+              |]
+              Unix.stdin
+              Unix.stdout
+              Unix.stderr
+          in
+          let rec wait () =
+            match Unix.waitpid [] pid with
+            | _, status -> status
+            | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+          in
+          (match wait () with
+           | Unix.WEXITED 0 -> child_saw_draft_locked := false
+           | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+             child_saw_draft_locked := true);
+          r)
+    with
+    | Fs_compat.Guard_executed { value; cleanup_failures = [] } -> value
+    | Fs_compat.Guard_executed { cleanup_failures = _ :: _; _ } ->
+      Alcotest.fail "private JSONL guard reported cleanup failures"
+    | Fs_compat.Guard_refused _ ->
+      Alcotest.fail "private JSONL guard refused entry on fresh missing snapshot"
+  in
+  Alcotest.(check bool) "same-process private JSONL POSIX lockf remained intact" true !child_saw_draft_locked;
+  Alcotest.(check int) "4 unheld target-absent locks removed" 4 report.removed;
+  Alcotest.(check int) "2 held locks kept (draft + trace)" 2 report.kept_held;
+  Alcotest.(check int) "2 target/declared locks kept" 2 report.kept_target_present;
+  Alcotest.(check int) "0 lock cleanup failures" 0 report.failed;
+  Alcotest.(check bool) "dead antigravity lock removed" false (Sys.file_exists dead_agy_lock);
+  Alcotest.(check bool) "live antigravity lock kept" true (Sys.file_exists live_agy_lock);
+  Alcotest.(check bool) "dead draft lock removed" false (Sys.file_exists dead_draft_lock);
+  Alcotest.(check bool) "held draft lock kept" true (Sys.file_exists held_draft_lock);
+  Alcotest.(check bool) "dead trace lock removed" false (Sys.file_exists dead_trace_lock);
+  Alcotest.(check bool) "held trace lock kept" true (Sys.file_exists held_trace_lock);
+  Alcotest.(check bool) "sanitized declared keeper attention lock kept" true (Sys.file_exists declared_bac_lock);
+  Alcotest.(check bool) "retired keeper attention lock removed" false (Sys.file_exists retired_bac_lock);
+  (* Corrupt keeper TOML fails closed: preserves unknown board attention locks
+     even while now-released draft/trace locks are cleaned up. *)
+  Fs_compat.save_file (Filename.concat keepers_cfg "corrupt.toml") "[[[ invalid";
+  let uncertain_bac_lock = Filename.concat bac_dir "uncertain.jsonl.lock" in
+  Fs_compat.save_file uncertain_bac_lock "1";
+  let corrupt_report = SM.sweep_stale_durable_locks ~base_path in
+  Alcotest.(check int) "only the 2 now-released non-board locks removed" 2 corrupt_report.removed;
+  Alcotest.(check bool) "board lock preserved fail-closed when roster corrupt" true
+    (Sys.file_exists uncertain_bac_lock)
+
+let test_sweep_stale_temp_orphans_pid_and_age_safety () =
+  let temp_dir = fresh_dir "masc_temp_sweep" in
+  let outside = fresh_dir "masc_temp_outside" in
+  let outside_sentinel = Filename.concat outside "keep.txt" in
+  Fs_compat.save_file outside_sentinel "precious";
+  let now = 1_800_000_000.0 in
+  let old_ts = now -. (48.0 *. 3600.0) in
+  let fresh_ts = now -. 600.0 in
+  let dead_review = Filename.concat temp_dir "masc-completion-review-999991-dead" in
+  let live_review = Filename.concat temp_dir "masc-completion-review-888888-live" in
+  let dead_claude = Filename.concat temp_dir "masc-claude-system-999991-dead.txt" in
+  let dead_stderr = Filename.concat temp_dir "masc_process_eio_stderr_999991_dead.tmp" in
+  let untagged_old_acp = Filename.concat temp_dir "masc-agy-acp-untagged-old" in
+  let dead_pid_acp = Filename.concat temp_dir "masc-agy-acp-999991-dead" in
+  let live_pid_acp = Filename.concat temp_dir "masc-agy-acp-888888-live" in
+  let old_usage = Filename.concat temp_dir "masc-antigravity-usage-old" in
+  let fresh_usage = Filename.concat temp_dir "masc-antigravity-usage-fresh" in
+  let symlink_usage = Filename.concat temp_dir "masc-antigravity-usage-link" in
+  let unrelated = Filename.concat temp_dir "unrelated-file.txt" in
+  Fs_compat.mkdir_p dead_review;
+  Fs_compat.save_file (Filename.concat dead_review "scratch.txt") "x";
+  Fs_compat.mkdir_p live_review;
+  Fs_compat.save_file dead_claude "prompt";
+  Fs_compat.save_file dead_stderr "err";
+  Fs_compat.mkdir_p untagged_old_acp;
+  let untagged_acp_child = Filename.concat untagged_old_acp "mcp_config.json" in
+  Fs_compat.save_file untagged_acp_child "{}";
+  Unix.utimes untagged_acp_child old_ts old_ts;
+  Unix.utimes untagged_old_acp old_ts old_ts;
+  Fs_compat.mkdir_p dead_pid_acp;
+  Fs_compat.save_file (Filename.concat dead_pid_acp "mcp_config.json") "{}";
+  Fs_compat.mkdir_p live_pid_acp;
+  Fs_compat.save_file (Filename.concat live_pid_acp "mcp_config.json") "{}";
+  Fs_compat.mkdir_p old_usage;
+  Unix.utimes old_usage old_ts old_ts;
+  Fs_compat.mkdir_p fresh_usage;
+  Unix.utimes fresh_usage fresh_ts fresh_ts;
+  Unix.symlink outside symlink_usage;
+  Fs_compat.save_file unrelated "keep";
+  Unix.utimes unrelated old_ts old_ts;
+  let report =
+    SM.sweep_stale_temp_orphans
+      ~temp_dir
+      ~min_age_seconds:Masc_time_constants.day
+      ~is_pid_alive:(fun pid -> pid = 888888)
+      ~now
+      ()
+  in
+  Alcotest.(check int) "2 dead-pid temp files removed" 2 report.removed_files;
+  Alcotest.(check int) "3 temp dirs removed (dead review + dead-pid acp + aged usage)" 3 report.removed_dirs;
+  Alcotest.(check int) "3 live/fresh entries skipped (live review + live acp + fresh usage)" 3 report.skipped_live;
+  Alcotest.(check int) "0 failures" 0 report.failed;
+  Alcotest.(check bool) "dead review dir removed" false (Sys.file_exists dead_review);
+  Alcotest.(check bool) "live review dir kept" true (Sys.file_exists live_review);
+  Alcotest.(check bool) "dead claude file removed" false (Sys.file_exists dead_claude);
+  Alcotest.(check bool) "dead stderr file removed" false (Sys.file_exists dead_stderr);
+  Alcotest.(check bool) "untagged old acp dir preserved (may belong to long-lived persistent ACP child)" true
+    (Sys.file_exists untagged_old_acp);
+  Alcotest.(check bool) "dead-pid acp dir removed" false (Sys.file_exists dead_pid_acp);
+  Alcotest.(check bool) "live-pid acp dir kept" true (Sys.file_exists live_pid_acp);
+  Alcotest.(check bool) "aged usage dir removed" false (Sys.file_exists old_usage);
+  Alcotest.(check bool) "fresh usage dir kept" true (Sys.file_exists fresh_usage);
+  Alcotest.(check bool) "outside symlink target untouched" true (Sys.file_exists outside_sentinel);
+  Alcotest.(check bool) "unrelated file untouched" true (Sys.file_exists unrelated)
+
 let () =
   Alcotest.run "server_runtime_startup_maintenance"
     [
+      ( "orphan hygiene",
+        [
+          Alcotest.test_case "completion-review empty dirs and settled verifier executions" `Quick
+            test_prune_empty_completion_review_and_verifier_executions;
+          Alcotest.test_case "terminal shutdown operations and empty owner dirs" `Quick
+            test_prune_terminal_shutdown_operations_and_empty_dirs;
+          Alcotest.test_case "atomic orphan sweep unlinks dead stage and preserves flocked" `Quick
+            test_sweep_atomic_orphans_removes_dead_stage_and_preserves_flocked;
+          Alcotest.test_case "stale durable locks respect held locks and live targets" `Quick
+            test_sweep_stale_durable_locks_respects_held_and_targets;
+          Alcotest.test_case "stale temp orphans respect live pids, age barrier, and symlinks" `Quick
+            test_sweep_stale_temp_orphans_pid_and_age_safety;
+        ] );
       ( "physical containment",
         [ Alcotest.test_case "runtime root link refused" `Quick test_prune_refuses_linked_runtime_root;
           Alcotest.test_case "all layouts skip ancestor links" `Quick test_shared_prune_skips_ancestor_links;

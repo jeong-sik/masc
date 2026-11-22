@@ -181,12 +181,20 @@ let microvm_start_failure_cause failure =
    mount sources and stable labels are projections here; provisioning and
    policy route discovery belong to the Boot execution. An Apple guest's first
    process is always the shim's agent ({!Keeper_microvm_backend.request_delivery}). *)
-let requested_apple_plan (t : t) ~image ~guest_size ~identity_host_dir ~environment
+let requested_apple_plan ?work_volume_name ?build_volume_name (t : t) ~image ~guest_size ~identity_host_dir ~environment
     ~config_mount ~stable_labels =
   let open Result.Syntax in
   let volume_name result = Result.map_error (fun detail -> Guest_provisions_unavailable detail) result in
-  let* work_volume_name = volume_name (Keeper_sandbox_microvm.work_volume_name ~keeper_name:t.meta.name) in
-  let* build_volume_name = volume_name (Keeper_sandbox_microvm.build_volume_name ~keeper_name:t.meta.name) in
+  let* work_volume_name =
+    match work_volume_name with
+    | Some name -> Ok name
+    | None -> volume_name (Keeper_sandbox_microvm.work_volume_name ~keeper_name:t.meta.name)
+  in
+  let* build_volume_name =
+    match build_volume_name with
+    | Some name -> Ok name
+    | None -> volume_name (Keeper_sandbox_microvm.build_volume_name ~keeper_name:t.meta.name)
+  in
   let module Plan = Keeper_microvm_boot_plan in
   let container_masc_dir = Keeper_sandbox_runtime_setup.container_masc_dir ~container_root:t.container_root in
   let identity_destination = Keeper_github_identity.container_config_dir

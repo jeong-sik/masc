@@ -1147,14 +1147,12 @@ let execute_post t ~epoch req =
                    label = Say.make ~ko:"TUI 설정 저장됨" ~en:"Preferences saved";
                    result;
                  })
-        | Cmd.Post_keeper_turn_interrupt _ ->
-            let result = post_ack t ~path ~body in
-            Some
-              (Msg.Reply_action_ack
-                 {
-                   label = Say.make ~ko:"턴 중단 요청됨" ~en:"Turn interrupted";
-                   result;
-                 })
+        | Cmd.Post_keeper_turn_interrupt { keeper; _ } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_fleet.decode_turn_interrupt_response
+            in
+            Some (Msg.Reply_turn_interrupt { keeper; result })
         | Cmd.Post_board_create _ ->
             let result = post_ack t ~path ~body in
             Some
@@ -1244,7 +1242,19 @@ let execute_post_stream t ~epoch req =
                 match Yojson.Safe.from_string frame.data with
                 | json -> (
                     match Wire_fleet.decode_chat_stream_chunk json with
-                    | Ok chunk ->
+                    | Ok Wire_fleet.Chunk_ignored -> ()
+                    | Ok
+                        (( Wire_fleet.Chunk_accepted _
+                         | Wire_fleet.Chunk_run_started _
+                         | Wire_fleet.Chunk_text_delta _
+                         | Wire_fleet.Chunk_thinking_delta _
+                         | Wire_fleet.Chunk_thinking_snapshot _
+                         | Wire_fleet.Chunk_tool_start _
+                         | Wire_fleet.Chunk_tool_args _
+                         | Wire_fleet.Chunk_tool_end _
+                         | Wire_fleet.Chunk_reply_details _
+                         | Wire_fleet.Chunk_turn_done _
+                         | Wire_fleet.Chunk_error _ ) as chunk) ->
                         Ui_bus.publish_stream t.bus
                           (Msg.Chat_stream_chunk
                              {
@@ -1254,8 +1264,24 @@ let execute_post_stream t ~epoch req =
                                is_btw;
                                chunk;
                              })
-                    | Error _ -> ())
-                | exception Yojson.Json_error _ -> ())
+                    | Error reason ->
+                        Ui_bus.publish_stream t.bus
+                          (Msg.Chat_stream_decode_warning
+                             {
+                               epoch;
+                               keeper = request.keeper_name;
+                               request_id = request.request_id;
+                               reason;
+                             }))
+                | exception Yojson.Json_error msg ->
+                    Ui_bus.publish_stream t.bus
+                      (Msg.Chat_stream_decode_warning
+                         {
+                           epoch;
+                           keeper = request.keeper_name;
+                           request_id = request.request_id;
+                           reason = "invalid JSON SSE frame: " ^ msg;
+                         }))
               frames
           in
           let result =

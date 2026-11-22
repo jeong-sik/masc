@@ -144,7 +144,10 @@ type post_request =
   | Post_sandbox_probe of [ `All | `Keeper of string | `Ssh_pool of string ]
   | Post_config_patch of Wire_config.patch_request
   | Post_tui_preference of Wire_config.tui_preference_change
-  | Post_keeper_turn_interrupt of { keeper : string; interrupt_token : string }
+  | Post_keeper_turn_interrupt of {
+      keeper : string;
+      target : [ `Turn_token of string | `Operation_id of string ];
+    }
   | Post_board_create of {
       title : string;
       body : string;

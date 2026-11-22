@@ -735,6 +735,9 @@ let make_populated_model ~cols ~rows ~lang =
                  tool_call_id = None;
                  tool_call_name = None;
                  execution_id = None;
+                 operation_id = None;
+                 transcript_slot = None;
+                 failure_kind = None;
                };
                {
                  id = "msg-2";
@@ -746,6 +749,9 @@ let make_populated_model ~cols ~rows ~lang =
                  tool_call_id = None;
                  tool_call_name = None;
                  execution_id = None;
+                 operation_id = None;
+                 transcript_slot = None;
+                 failure_kind = None;
                };
                {
                  id = "msg-3";
@@ -757,6 +763,9 @@ let make_populated_model ~cols ~rows ~lang =
                  tool_call_id = Some "tc-99";
                  tool_call_name = Some "git_diff";
                  execution_id = None;
+                 operation_id = None;
+                 transcript_slot = None;
+                 failure_kind = None;
                };
                {
                  id = "msg-4";
@@ -769,6 +778,9 @@ let make_populated_model ~cols ~rows ~lang =
                  tool_call_id = None;
                  tool_call_name = None;
                  execution_id = None;
+                 operation_id = None;
+                 transcript_slot = None;
+                 failure_kind = None;
                };
              ];
            has_more = false;
@@ -779,12 +791,12 @@ let make_populated_model ~cols ~rows ~lang =
     |> Fleet_store.apply_chat_stream_chunk ~keeper:"e-masc-the-leader"
          ~request_id:"req-live-1"
          (Wire_fleet.Chunk_thinking_delta
-            { operation_id = "op-1"; delta = "Checking head commit and approvals..." })
+            { operation_id = Some "op-1"; delta = "Checking head commit and approvals..." })
     |> Fleet_store.apply_chat_stream_chunk ~keeper:"e-masc-the-leader"
          ~request_id:"req-live-1"
          (Wire_fleet.Chunk_tool_start
             {
-              operation_id = "op-1";
+              operation_id = Some "op-1";
               tool_use_id = "tu-1";
               tool_name = "gh_pr_view";
               args_preview = Some "#54340";
@@ -793,16 +805,16 @@ let make_populated_model ~cols ~rows ~lang =
          ~request_id:"req-live-1"
          (Wire_fleet.Chunk_tool_end
             {
-              operation_id = "op-1";
+              operation_id = Some "op-1";
               tool_use_id = "tu-1";
-              tool_name = "gh_pr_view";
-              ok = true;
+              tool_name = Some "gh_pr_view";
+              ok = Some true;
               output_preview = Some "state=OPEN reviewDecision=APPROVED";
             })
     |> Fleet_store.apply_chat_stream_chunk ~keeper:"e-masc-the-leader"
          ~request_id:"req-live-1"
          (Wire_fleet.Chunk_text_delta
-            { operation_id = "op-1"; delta = "Confirmed head SHA matches." })
+            { operation_id = Some "op-1"; delta = "Confirmed head SHA matches." })
   in
   let fleet =
     Fleet_store.apply_shell ~observed_at:now_mono
@@ -1345,6 +1357,9 @@ let test_p1_chat_dedup_untyped_tool_and_code_bg () =
                  tool_call_id = Some "tc-200";
                  tool_call_name = Some "hist_tool";
                  execution_id = None;
+                 operation_id = None;
+                 transcript_slot = None;
+                 failure_kind = None;
                };
                {
                  id = "msg-asst";
@@ -1356,6 +1371,9 @@ let test_p1_chat_dedup_untyped_tool_and_code_bg () =
                  tool_call_id = None;
                  tool_call_name = None;
                  execution_id = None;
+                 operation_id = None;
+                 transcript_slot = None;
+                 failure_kind = None;
                };
                {
                  id = "msg-code";
@@ -1367,6 +1385,9 @@ let test_p1_chat_dedup_untyped_tool_and_code_bg () =
                  tool_call_id = None;
                  tool_call_name = None;
                  execution_id = None;
+                 operation_id = None;
+                 transcript_slot = None;
+                 failure_kind = None;
                };
              ];
            has_more = false;
@@ -1376,7 +1397,11 @@ let test_p1_chat_dedup_untyped_tool_and_code_bg () =
     |> Fleet_store.apply_chat_stream_chunk ~keeper:"e-masc-the-leader"
          ~request_id:"req-done"
          (Wire_fleet.Chunk_turn_done
-            { operation_id = "op-2"; turn_ref = "t-200"; reply = done_reply })
+            {
+              operation_id = Some "op-2";
+              turn_ref = Some "t-200";
+              reply = Some done_reply;
+            })
   in
   let m = { m0 with fleet } in
   let grid =
@@ -2216,6 +2241,9 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
                  tool_call_id = Some "tc-sec-1";
                  tool_call_name = Some "hist_non_json";
                  execution_id = None;
+                 operation_id = None;
+                 transcript_slot = None;
+                 failure_kind = None;
                };
                {
                  id = "sec-2";
@@ -2227,6 +2255,9 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
                  tool_call_id = Some "tc-sec-2";
                  tool_call_name = Some "hist_json_embed";
                  execution_id = None;
+                 operation_id = None;
+                 transcript_slot = None;
+                 failure_kind = None;
                };
                {
                  id = "sec-3";
@@ -2238,6 +2269,9 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
                  tool_call_id = Some "tc-sec-3";
                  tool_call_name = Some "hist_trunc_json";
                  execution_id = None;
+                 operation_id = None;
+                 transcript_slot = None;
+                 failure_kind = None;
                };
              ];
            has_more = false;
@@ -2249,7 +2283,7 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
          ~request_id:"req-sec"
          (Wire_fleet.Chunk_tool_start
             {
-              operation_id = "op-sec";
+              operation_id = Some "op-sec";
               tool_use_id = "tu-sec-stream";
               tool_name = "bash_exec";
               args_preview = Some truncated_json_args;
@@ -2258,10 +2292,10 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
          ~request_id:"req-sec"
          (Wire_fleet.Chunk_tool_end
             {
-              operation_id = "op-sec";
+              operation_id = Some "op-sec";
               tool_use_id = "tu-sec-stream";
-              tool_name = "bash_exec";
-              ok = true;
+              tool_name = Some "bash_exec";
+              ok = Some true;
               output_preview = Some raw_non_json_out;
             })
   in
@@ -2304,6 +2338,9 @@ let test_p2_tool_modes_ctrl_o_hint_and_origin_modes () =
                    tool_call_id = Some "tc-lines-1";
                    tool_call_name = Some "log_dump";
                    execution_id = None;
+                   operation_id = None;
+                   transcript_slot = None;
+                   failure_kind = None;
                  };
                ];
              has_more = false;
@@ -2731,6 +2768,9 @@ let test_p1_chat_transcript_render_parity () =
       tool_call_id = None;
       tool_call_name;
       execution_id = None;
+      operation_id = None;
+      transcript_slot = None;
+      failure_kind = None;
     }
   in
   let json_1line =
@@ -2768,16 +2808,16 @@ let test_p1_chat_transcript_render_parity () =
     m0.fleet
     |> Fleet_store.apply_keepers ~observed_at:now_mono [ mk_k "alpha-1" ]
     |> Fleet_store.set_tools_mode Slash.Tools_results
-    |> Fleet_store.apply_chat_history ~observed_at:now_mono ~keeper:"alpha-1"
-         { messages = msgs; has_more = false; next_cursor = None }
     |> Fleet_store.start_chat_stream ~keeper:"alpha-1" ~request_id:"req-p"
     |> Fleet_store.apply_chat_stream_chunk ~keeper:"alpha-1" ~request_id:"req-p"
          (Wire_fleet.Chunk_turn_done
             {
-              operation_id = "op-p";
-              turn_ref = "t-p";
-              reply = "BOTTOM_MARKER_FINAL persisted reply.";
+              operation_id = Some "op-p";
+              turn_ref = Some "t-p";
+              reply = Some "BOTTOM_MARKER_FINAL persisted reply.";
             })
+    |> Fleet_store.apply_chat_history ~observed_at:now_mono ~keeper:"alpha-1"
+         { messages = msgs; has_more = false; next_cursor = None }
   in
   let m_chat =
     {
@@ -2838,6 +2878,243 @@ let test_p1_chat_transcript_render_parity () =
     true
     (not (String.equal txt_top txt_dn1))
 
+let test_agui_chat_chronological_projection_and_phase_parity () =
+  let cols, rows = (120, 36) in
+  let mk_k name : Wire_fleet.keeper_summary =
+    {
+      name;
+      group = Some "alpha";
+      company = "alpha";
+      health = Wire_fleet.Keeper_healthy;
+      paused = false;
+      keepalive_running = true;
+      activation_mode = Wire_fleet.Activation_autonomous;
+      runtime_id = "rt-1";
+      model_id = Some "model-1";
+      current_task_id = None;
+      context_ratio = Observed.value ~observed_at:now_mono 0.25;
+      total_turns = Observed.value ~observed_at:now_mono 3;
+      total_tokens = Observed.value ~observed_at:now_mono 900;
+      cost_24h_usd = Observed.value ~observed_at:now_mono 0.1;
+      last_turn_at_unix = Some now_unix;
+      active_turn = None;
+      activity_sparkline_24h = [ 1.0 ];
+    }
+  in
+  let find_row_y grid needle =
+    let rec scan y =
+      if y >= rows then None
+      else if contains_sub ~needle (grid_row_text grid ~y) then Some y
+      else scan (y + 1)
+    in
+    scan 0
+  in
+  let m0 = Model.initial ~cols ~rows ~lang:Say.Lang_ko () in
+  let hist_msg : Wire_fleet.chat_message =
+    {
+      id = "hist-1";
+      role = Wire_fleet.Role_user;
+      content = "HISTORY_FIRST_MSG";
+      ts_unix = now_unix -. 120.0;
+      turn_ref = None;
+      model_used = None;
+      tool_call_id = None;
+      tool_call_name = None;
+      execution_id = None;
+      operation_id = Some "op-old";
+      transcript_slot = Some "accepted_user";
+      failure_kind = None;
+    }
+  in
+  let m1 =
+    {
+      m0 with
+      fleet =
+        m0.fleet
+        |> Fleet_store.apply_keepers ~observed_at:now_mono [ mk_k "alpha-leader" ]
+        |> Fleet_store.apply_chat_history ~observed_at:now_mono
+             ~keeper:"alpha-leader"
+             { messages = [ hist_msg ]; has_more = false; next_cursor = None };
+      drafts = Drafts.set_active_keeper "alpha-leader" m0.drafts;
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha-leader"; tab = Nav.Keeper_chat } ];
+        };
+    }
+  in
+  (* 1. Submit active turn A (direct), start streaming text, then submit Follow_up B *)
+  let m2 = { m1 with drafts = Drafts.insert_text "ACTIVE_USER_A" m1.drafts } in
+  let m3, _ = Update.execute_action ~now:now_mono m2 Keymap.Submit_steer in
+  let req_a =
+    match Drafts.active_tx_for_keeper ~keeper:"alpha-leader" m3.drafts with
+    | Some tx -> tx.request_id
+    | None -> Alcotest.fail "missing active tx A"
+  in
+  let m4, _ =
+    Update.step ~now:now_mono m3
+      (Msg.Chat_stream_chunk
+         {
+           epoch = m3.epoch;
+           keeper = "alpha-leader";
+           request_id = req_a;
+           is_btw = false;
+           chunk =
+             Wire_fleet.Chunk_text_delta
+               { operation_id = Some req_a; delta = "LIVE_STREAM_A_REPLY" };
+         })
+  in
+  let m5 = { m4 with drafts = Drafts.insert_text "QUEUED_FOLLOWUP_B" m4.drafts } in
+  let m6, _ = Update.execute_action ~now:now_mono m5 Keymap.Submit_followup in
+  let req_b =
+    match List.rev (Drafts.pending_txs_for_keeper ~keeper:"alpha-leader" m6.drafts) with
+    | tx :: _ -> tx.request_id
+    | [] -> Alcotest.fail "missing queued tx B"
+  in
+  let m7, _ =
+    Update.step ~now:now_mono m6
+      (Msg.Chat_stream_chunk
+         {
+           epoch = m6.epoch;
+           keeper = "alpha-leader";
+           request_id = req_b;
+           is_btw = false;
+           chunk =
+             Wire_fleet.Chunk_accepted
+               {
+                 operation_id = req_b;
+                 queued_count = 1;
+                 state = Wire_fleet.Accepted_queued;
+                 interactive_outcome = None;
+                 control_token = None;
+               };
+         })
+  in
+  let grid =
+    render_to_grid ~cols ~rows
+      (Screen_keepers.render_dive ~name:"alpha-leader" ~tab:Nav.Keeper_chat
+         ~model:m7)
+  in
+  let y_hist = find_row_y grid "HISTORY_FIRST_MSG" in
+  let y_user_a = find_row_y grid "ACTIVE_USER_A" in
+  let y_stream_a = find_row_y grid "LIVE_STREAM_A_REPLY" in
+  let y_queued_b = find_row_y grid "QUEUED_FOLLOWUP_B" in
+  (match y_hist, y_user_a, y_stream_a, y_queued_b with
+  | Some yh, Some ya, Some ys, Some yq ->
+      Alcotest.(check bool)
+        (Printf.sprintf "chronological order hist(%d) < active_user(%d) < stream(%d) < queued(%d)"
+           yh ya ys yq)
+        true (yh < ya && ya < ys && ys < yq)
+  | _ ->
+      Alcotest.fail
+        ("Missing expected chronological sections in rendered grid:\n"
+       ^ grid_all_text grid));
+  (* Header badge and Composer pill share SSOT live phase ("생성 중…") *)
+  let hdr_row = grid_row_text grid ~y:0 in
+  Alcotest.(check bool) "Header badge shows SSOT 생성 중…" true
+    (contains_sub ~needle:"생성 중…" hdr_row);
+  let phase = Chat_transcript.live_chat_phase ~model:m7 ~keeper:"alpha-leader" in
+  let comp_lbl =
+    match Composer.pending_tx_label (Chat_transcript.composer_pending_tx_of_phase phase) with
+    | Some s -> Say.resolve Say.Lang_ko s
+    | None -> ""
+  in
+  Alcotest.(check string) "Composer pill matches Header badge SSOT" "생성 중…" comp_lbl;
+  (* Direct idle send A must NOT show misleading 조향 tag *)
+  let row_a =
+    match y_user_a with Some y -> grid_row_text grid ~y | None -> ""
+  in
+  Alcotest.(check bool) "Direct send does NOT print 조향" false
+    (contains_sub ~needle:"조향" row_a);
+  (* 2. Persisted failure reconciliation renders Role_request_failure ONCE with 0 duplicate user rows *)
+  let m_err, _ =
+    Update.step ~now:now_mono m7
+      (Msg.Chat_stream_chunk
+         {
+           epoch = m7.epoch;
+           keeper = "alpha-leader";
+           request_id = req_a;
+           is_btw = false;
+           chunk =
+             Wire_fleet.Chunk_error
+               {
+                 operation_id = Some req_a;
+                 code = Some "turn_failed";
+                 message = "provider failed";
+               };
+         })
+  in
+  let m_reconciled, _ =
+    Update.step ~now:now_mono m_err
+      (Msg.Http_reply
+         {
+           epoch = m_err.epoch;
+           reply =
+             Msg.Reply_chat_history
+               {
+                 keeper = "alpha-leader";
+                 result =
+                   Ok
+                     {
+                       messages =
+                         [
+                           hist_msg;
+                           {
+                             id = "hist-2";
+                             role = Wire_fleet.Role_user;
+                             content = "ACTIVE_USER_A";
+                             ts_unix = now_unix -. 10.0;
+                             turn_ref = None;
+                             model_used = None;
+                             tool_call_id = None;
+                             tool_call_name = None;
+                             execution_id = None;
+                             operation_id = Some req_a;
+                             transcript_slot = Some "accepted_user";
+                             failure_kind = None;
+                           };
+                           {
+                             id = "hist-3";
+                             role = Wire_fleet.Role_request_failure;
+                             content = "provider failed";
+                             ts_unix = now_unix -. 9.0;
+                             turn_ref = None;
+                             model_used = None;
+                             tool_call_id = None;
+                             tool_call_name = None;
+                             execution_id = None;
+                             operation_id = Some req_a;
+                             transcript_slot = Some "settled_failure";
+                             failure_kind = Some "turn_exception";
+                           };
+                         ];
+                       has_more = false;
+                       next_cursor = None;
+                     };
+               };
+         })
+  in
+  let grid_rec =
+    render_to_grid ~cols ~rows
+      (Screen_keepers.render_dive ~name:"alpha-leader" ~tab:Nav.Keeper_chat
+         ~model:m_reconciled)
+  in
+  let txt_rec = grid_all_text grid_rec in
+  Alcotest.(check int) "ACTIVE_USER_A appears exactly ONCE after failure persistence"
+    1 (count_sub ~needle:"ACTIVE_USER_A" txt_rec);
+  Alcotest.(check bool) "Role_request_failure renders failure_kind" true
+    (contains_sub ~needle:"turn_exception" txt_rec);
+  Alcotest.(check bool) "Stale 스트림 오류 banner is suppressed after persistence" false
+    (contains_sub ~needle:"스트림 오류" txt_rec);
+  (* 3. Header operator-attention disambiguation (승인/질문 필요, never 응답 대기) *)
+  let _, _, attn_lbl =
+    Ops_common.keeper_live_status ~has_attention:true (mk_k "alpha-leader")
+  in
+  Alcotest.(check string) "Attention badge disambiguated in Korean" "승인/질문 필요"
+    (Say.resolve Say.Lang_ko attn_lbl)
+
 let () =
   Alcotest.run "masc_tui_screens_ops"
     [
@@ -2869,6 +3146,8 @@ let () =
             `Quick test_nav_keepers_display_order_monotonic_screen_rows;
           Alcotest.test_case "P1 #1: Chat_transcript Home/Down render parity (narrow Markdown + JSON tool + dedup)"
             `Quick test_p1_chat_transcript_render_parity;
+          Alcotest.test_case "AG-UI chat chronological projection, dedup & SSOT phase parity"
+            `Quick test_agui_chat_chronological_projection_and_phase_parity;
         ] );
       ( "work"
       , [

@@ -3,6 +3,7 @@ open Masc_tui_core
 module String_map = Map.Make (String)
 
 type delivery_mode =
+  | Mode_direct
   | Mode_follow_up
   | Mode_steer
 
@@ -11,6 +12,7 @@ type tx_state =
   | Sending
   | Pending_processing
   | Confirming_delivery
+  | Interrupting
   | Delivered
   | Failed_retryable of { reason : string }
 
@@ -21,6 +23,7 @@ type pending_message = {
   mode : delivery_mode;
   operation_id : string option;
   prior_user_msg_ids : string list;
+  user_persisted : bool;
   state : tx_state;
   created_at : Clock.Mono.t;
   updated_at : Clock.Mono.t;
@@ -104,8 +107,14 @@ let empty =
 
 let equal_delivery_mode a b =
   match a, b with
-  | Mode_follow_up, Mode_follow_up | Mode_steer, Mode_steer -> true
-  | Mode_follow_up, Mode_steer | Mode_steer, Mode_follow_up -> false
+  | Mode_direct, Mode_direct
+  | Mode_follow_up, Mode_follow_up
+  | Mode_steer, Mode_steer ->
+      true
+  | Mode_direct, (Mode_follow_up | Mode_steer)
+  | Mode_follow_up, (Mode_direct | Mode_steer)
+  | Mode_steer, (Mode_direct | Mode_follow_up) ->
+      false
 
 let equal_tx_state a b =
   match a, b with
@@ -113,6 +122,7 @@ let equal_tx_state a b =
   | Sending, Sending
   | Pending_processing, Pending_processing
   | Confirming_delivery, Confirming_delivery
+  | Interrupting, Interrupting
   | Delivered, Delivered ->
       true
   | Failed_retryable x, Failed_retryable y -> String.equal x.reason y.reason
@@ -120,27 +130,51 @@ let equal_tx_state a b =
     , ( Sending
       | Pending_processing
       | Confirming_delivery
+      | Interrupting
       | Delivered
       | Failed_retryable _ ) )
   | ( Sending
     , ( Queued
       | Pending_processing
       | Confirming_delivery
+      | Interrupting
       | Delivered
       | Failed_retryable _ ) )
   | ( Pending_processing
-    , (Queued | Sending | Confirming_delivery | Delivered | Failed_retryable _) )
+    , ( Queued
+      | Sending
+      | Confirming_delivery
+      | Interrupting
+      | Delivered
+      | Failed_retryable _ ) )
   | ( Confirming_delivery
-    , (Queued | Sending | Pending_processing | Delivered | Failed_retryable _) )
+    , ( Queued
+      | Sending
+      | Pending_processing
+      | Interrupting
+      | Delivered
+      | Failed_retryable _ ) )
+  | ( Interrupting
+    , ( Queued
+      | Sending
+      | Pending_processing
+      | Confirming_delivery
+      | Delivered
+      | Failed_retryable _ ) )
   | ( Delivered
     , ( Queued
       | Sending
       | Pending_processing
       | Confirming_delivery
+      | Interrupting
       | Failed_retryable _ ) )
   | ( Failed_retryable _
-    , (Queued | Sending | Pending_processing | Confirming_delivery | Delivered) )
-    ->
+    , ( Queued
+      | Sending
+      | Pending_processing
+      | Confirming_delivery
+      | Interrupting
+      | Delivered ) ) ->
       false
 
 let tx_state_label = function
@@ -148,8 +182,9 @@ let tx_state_label = function
   | Sending -> Some (Say.make ~ko:"전송 중" ~en:"Sending")
   | Pending_processing -> Some (Say.make ~ko:"처리 대기" ~en:"Awaiting turn")
   | Confirming_delivery -> Some (Say.make ~ko:"전송 확인 중" ~en:"Confirming")
+  | Interrupting -> Some (Say.make ~ko:"중단 요청 중" ~en:"Interrupting")
   | Delivered -> None
-  | Failed_retryable _ -> Some (Say.make ~ko:"전송 실패 · 재시도" ~en:"Retryable")
+  | Failed_retryable _ -> Some (Say.make ~ko:"전송 실패" ~en:"Send failed")
 
 let target_keeper_key t =
   match t.active_keeper with
@@ -445,8 +480,21 @@ let set_popup_selected idx t =
 
 let dismiss_popup t = { t with popup_dismissed = true }
 
+let process_session_nonce =
+  let pid = Unix.getpid () in
+  let ms = Int64.of_float (Unix.gettimeofday () *. 1000.0) in
+  Printf.sprintf "%d-%Lx" pid ms
+
 let fresh_request_id prefix seq =
-  Printf.sprintf "%s-%d" prefix seq
+  if String.equal prefix "chat" then
+    Printf.sprintf "tui-%s-%d" process_session_nonce seq
+  else Printf.sprintf "tui-%s-%s-%d" prefix process_session_nonce seq
+
+let append_bounded_tx msg txs =
+  let appended = txs @ [ msg ] in
+  let len = List.length appended in
+  if len <= max_retained_txs then appended
+  else List.drop (len - max_retained_txs) appended
 
 let enqueue_submission ~now ~keeper ~mode ?(prior_user_msg_ids = []) t =
   let d = draft_for ~keeper t in
@@ -464,6 +512,7 @@ let enqueue_submission ~now ~keeper ~mode ?(prior_user_msg_ids = []) t =
         mode;
         operation_id = None;
         prior_user_msg_ids;
+        user_persisted = false;
         state = Queued;
         created_at = now;
         updated_at = now;
@@ -476,7 +525,7 @@ let enqueue_submission ~now ~keeper ~mode ?(prior_user_msg_ids = []) t =
       else
         String_map.add keeper { d with text = ""; cursor = 0 } t.by_keeper
     in
-    let pending_txs = List.take max_retained_txs (msg :: t.pending_txs) in
+    let pending_txs = append_bounded_tx msg t.pending_txs in
     Some
       ( {
           t with
@@ -490,7 +539,9 @@ let enqueue_submission ~now ~keeper ~mode ?(prior_user_msg_ids = []) t =
 
 let is_terminal_tx_state = function
   | Delivered | Failed_retryable _ -> true
-  | Queued | Sending | Pending_processing | Confirming_delivery -> false
+  | Queued | Sending | Pending_processing | Confirming_delivery | Interrupting
+    ->
+      false
 
 let update_tx ~request_id f t =
   let pending_txs =
@@ -508,6 +559,17 @@ let mark_sending ~now ~request_id t =
       else { m with state = Sending; updated_at = now })
     t
 
+let mark_queued ~now ~request_id ~operation_id t =
+  update_tx ~request_id
+    (fun m ->
+      if is_terminal_tx_state m.state then m
+      else
+        let op =
+          match operation_id with Some _ as x -> x | None -> m.operation_id
+        in
+        { m with operation_id = op; state = Queued; updated_at = now })
+    t
+
 let mark_accepted ~now ~request_id ~operation_id t =
   update_tx ~request_id
     (fun m ->
@@ -516,7 +578,14 @@ let mark_accepted ~now ~request_id ~operation_id t =
         let op =
           match operation_id with Some _ as x -> x | None -> m.operation_id
         in
-        { m with operation_id = op; state = Pending_processing; updated_at = now })
+        let next_state =
+          match m.state with
+          | Interrupting -> Interrupting
+          | Queued | Sending | Pending_processing | Confirming_delivery
+          | Delivered | Failed_retryable _ ->
+              Pending_processing
+        in
+        { m with operation_id = op; state = next_state; updated_at = now })
     t
 
 let mark_confirming ~now ~request_id t =
@@ -532,6 +601,51 @@ let mark_confirming ~now ~request_id t =
         })
     t
 
+let mark_interrupting ~now ~request_id t =
+  update_tx ~request_id
+    (fun m ->
+      match m.state with
+      | Sending | Pending_processing ->
+          { m with state = Interrupting; updated_at = now }
+      | Queued
+      | Confirming_delivery
+      | Interrupting
+      | Delivered
+      | Failed_retryable _ ->
+          m)
+    t
+
+let clear_interrupting ~now ~request_id t =
+  update_tx ~request_id
+    (fun m ->
+      match m.state with
+      | Interrupting -> { m with state = Pending_processing; updated_at = now }
+      | Queued
+      | Sending
+      | Pending_processing
+      | Confirming_delivery
+      | Delivered
+      | Failed_retryable _ ->
+          m)
+    t
+
+let mark_user_persisted ~request_id ?(operation_id = None) t =
+  update_tx ~request_id
+    (fun m ->
+      let op =
+        match operation_id with Some _ as x -> x | None -> m.operation_id
+      in
+      { m with user_persisted = true; operation_id = op })
+    t
+
+let downgrade_mode_to_follow_up ~request_id t =
+  update_tx ~request_id
+    (fun m ->
+      match m.mode with
+      | Mode_steer -> { m with mode = Mode_follow_up }
+      | Mode_direct | Mode_follow_up -> m)
+    t
+
 let mark_delivered ~now ~request_id ~keeper ~body t =
   let pending_txs =
     List.map
@@ -541,7 +655,7 @@ let mark_delivered ~now ~request_id ~keeper ~body t =
           && String.equal m.keeper keeper
           && String.equal m.body body
           && not (is_terminal_tx_state m.state)
-        then { m with state = Delivered; updated_at = now }
+        then { m with state = Delivered; user_persisted = true; updated_at = now }
         else m)
       t.pending_txs
   in
@@ -549,12 +663,55 @@ let mark_delivered ~now ~request_id ~keeper ~body t =
 
 let mark_failed_retryable ~now ~request_id ~reason t =
   update_tx ~request_id
-    (fun m -> { m with state = Failed_retryable { reason }; updated_at = now })
+    (fun m ->
+      match m.state with
+      | Delivered -> m
+      | Queued
+      | Sending
+      | Pending_processing
+      | Confirming_delivery
+      | Interrupting
+      | Failed_retryable _ ->
+          { m with state = Failed_retryable { reason }; updated_at = now })
     t
 
-let is_tx_in_progress = function
-  | Queued | Sending | Pending_processing | Confirming_delivery -> true
-  | Delivered | Failed_retryable _ -> false
+let remove_tx ~request_id t =
+  let pending_txs =
+    List.filter
+      (fun (m : pending_message) -> not (String.equal m.request_id request_id))
+      t.pending_txs
+  in
+  { t with pending_txs }
+
+let dismiss_failed_for_keeper ~keeper t =
+  let removed = ref 0 in
+  let pending_txs =
+    List.filter
+      (fun (m : pending_message) ->
+        if String.equal m.keeper keeper then
+          match m.state with
+          | Failed_retryable _ ->
+              incr removed;
+              false
+          | Queued
+          | Sending
+          | Pending_processing
+          | Confirming_delivery
+          | Interrupting
+          | Delivered ->
+              true
+        else true)
+      t.pending_txs
+  in
+  ({ t with pending_txs }, !removed)
+
+let active_tx_priority = function
+  | Interrupting -> Some 0
+  | Pending_processing -> Some 1
+  | Sending -> Some 2
+  | Confirming_delivery -> Some 3
+  | Queued -> Some 4
+  | Delivered | Failed_retryable _ -> None
 
 let pending_txs_for_keeper ~keeper t =
   List.filter
@@ -562,13 +719,64 @@ let pending_txs_for_keeper ~keeper t =
     t.pending_txs
 
 let active_tx_for_keeper ~keeper t =
-  List.find_opt
-    (fun (m : pending_message) ->
-      String.equal m.keeper keeper && is_tx_in_progress m.state)
-    t.pending_txs
+  let keeper_txs = pending_txs_for_keeper ~keeper t in
+  List.fold_left
+    (fun best (m : pending_message) ->
+      match active_tx_priority m.state with
+      | None -> best
+      | Some prio -> (
+          match best with
+          | None -> Some (prio, m)
+          | Some (best_prio, _) ->
+              (* Strict [<] keeps the oldest tx when priorities tie. *)
+              if prio < best_prio then Some (prio, m) else best))
+    None keeper_txs
+  |> Option.map snd
 
 let has_active_tx_for ~keeper t =
   Option.is_some (active_tx_for_keeper ~keeper t)
+
+let has_unreconciled_tx_for ~keeper t =
+  List.exists
+    (fun (m : pending_message) ->
+      String.equal m.keeper keeper
+      &&
+      match m.state with
+      | Delivered -> false
+      | Queued
+      | Sending
+      | Pending_processing
+      | Confirming_delivery
+      | Interrupting
+      | Failed_retryable _ ->
+          true)
+    t.pending_txs
+
+let queued_count_for_keeper ~keeper t =
+  List.fold_left
+    (fun acc (m : pending_message) ->
+      if String.equal m.keeper keeper then
+        match m.state with
+        | Queued -> acc + 1
+        | Sending
+        | Pending_processing
+        | Confirming_delivery
+        | Interrupting
+        | Delivered
+        | Failed_retryable _ ->
+            acc
+      else acc)
+    0 t.pending_txs
+
+let tx_position_for_keeper ~keeper ~request_id t =
+  let keeper_txs = pending_txs_for_keeper ~keeper t in
+  let rec find idx = function
+    | [] -> None
+    | (m : pending_message) :: rest ->
+        if String.equal m.request_id request_id then Some idx
+        else find (idx + 1) rest
+  in
+  find 0 keeper_txs
 
 let is_voice_active t =
   match t.voice with

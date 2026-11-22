@@ -1014,6 +1014,7 @@ type chat_role =
   | Role_assistant
   | Role_system
   | Role_tool
+  | Role_request_failure
 
 type chat_origin =
   | Origin_bare
@@ -1060,6 +1061,9 @@ type chat_message = {
   tool_call_id : string option;
   tool_call_name : string option;
   execution_id : string option;
+  operation_id : string option;
+  transcript_slot : string option;
+  failure_kind : string option;
 }
 
 type chat_history_page = {
@@ -1068,37 +1072,77 @@ type chat_history_page = {
   next_cursor : string option;
 }
 
+type accepted_state =
+  | Accepted_queued
+  | Accepted_running
+  | Accepted_succeeded
+  | Accepted_failed
+  | Accepted_cancelled
+
+type interactive_outcome =
+  | Interactive_applied
+  | Interactive_stale_control
+  | Interactive_paused
+  | Interactive_replayed
+
+type turn_interrupt_response = {
+  signalled : bool;
+  paused : bool;
+  chat_control_token : string option;
+  reason : string option;
+}
+
 type chat_stream_chunk =
   | Chunk_accepted of {
       operation_id : string;
       queued_count : int;
-      state : string;
+      state : accepted_state;
+      interactive_outcome : interactive_outcome option;
+      control_token : string option;
     }
-  | Chunk_text_delta of { operation_id : string; delta : string }
-  | Chunk_thinking_delta of { operation_id : string; delta : string }
+  | Chunk_run_started of { operation_id : string option }
+  | Chunk_text_delta of { operation_id : string option; delta : string }
+  | Chunk_thinking_delta of { operation_id : string option; delta : string }
+  | Chunk_thinking_snapshot of {
+      operation_id : string option;
+      snapshot : string;
+    }
   | Chunk_tool_start of {
-      operation_id : string;
+      operation_id : string option;
       tool_use_id : string;
       tool_name : string;
       args_preview : string option;
     }
-  | Chunk_tool_end of {
-      operation_id : string;
+  | Chunk_tool_args of {
+      operation_id : string option;
       tool_use_id : string;
-      tool_name : string;
-      ok : bool;
+      delta : string option;
+      snapshot : string option;
+    }
+  | Chunk_tool_end of {
+      operation_id : string option;
+      tool_use_id : string;
+      tool_name : string option;
+      ok : bool option;
       output_preview : string option;
     }
-  | Chunk_turn_done of {
-      operation_id : string;
-      turn_ref : string;
+  | Chunk_reply_details of {
+      operation_id : string option;
       reply : string;
+      turn_outcome : string option;
+      turn_ref : string option;
+    }
+  | Chunk_turn_done of {
+      operation_id : string option;
+      turn_ref : string option;
+      reply : string option;
     }
   | Chunk_error of {
       operation_id : string option;
       code : string option;
       message : string;
     }
+  | Chunk_ignored
 
 let encode_chat_submit_request req =
   (* Strict allowlist in [server_routes_http_keeper_stream.ml:366-434]:
@@ -1174,6 +1218,7 @@ let chat_role_of_string = function
   | "assistant" | "keeper" -> Some Role_assistant
   | "system" -> Some Role_system
   | "tool" -> Some Role_tool
+  | "request_failure" -> Some Role_request_failure
   | _ -> None
 
 let decode_chat_message json =
@@ -1186,6 +1231,21 @@ let decode_chat_message json =
   let* tool_call_id = optional_nonblank_string json "tool_call_id" in
   let* tool_call_name = optional_nonblank_string json "tool_call_name" in
   let* execution_id = optional_nonblank_string json "execution_id" in
+  let* delivery_key_opt = optional_object_field json "delivery_key" in
+  let* dk_op_id =
+    match delivery_key_opt with
+    | Some dk -> optional_nonblank_string dk "operation_id"
+    | None -> Ok None
+  in
+  let* top_op_id = optional_nonblank_string json "operation_id" in
+  let operation_id = match dk_op_id with Some _ as x -> x | None -> top_op_id in
+  let* slot_opt = optional_object_field json "transcript_slot" in
+  let* transcript_slot =
+    match slot_opt with
+    | Some sl -> optional_nonblank_string sl "kind"
+    | None -> Ok None
+  in
+  let* failure_kind = optional_nonblank_string json "failure_kind" in
   Ok
     {
       id;
@@ -1197,6 +1257,9 @@ let decode_chat_message json =
       tool_call_id;
       tool_call_name;
       execution_id;
+      operation_id;
+      transcript_slot;
+      failure_kind;
     }
 
 let decode_chat_history = function
@@ -1211,45 +1274,274 @@ let decode_chat_history_page json =
   let* next_cursor = optional_nonblank_string body "next_cursor" in
   Ok { messages; has_more; next_cursor }
 
+let accepted_state_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "queued" -> Some Accepted_queued
+  | "running" | "accepted" -> Some Accepted_running
+  | "succeeded" -> Some Accepted_succeeded
+  | "failed" -> Some Accepted_failed
+  | "cancelled" -> Some Accepted_cancelled
+  | _ -> None
+
+let interactive_outcome_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "applied" -> Some Interactive_applied
+  | "stale_control" -> Some Interactive_stale_control
+  | "paused" -> Some Interactive_paused
+  | "replayed" -> Some Interactive_replayed
+  | _ -> None
+
+let operation_run_prefix = "keeper-operation-run-"
+
+let operation_id_of_run_id raw =
+  let trimmed = String.trim raw in
+  if String.starts_with ~prefix:operation_run_prefix trimmed then
+    let plen = String.length operation_run_prefix in
+    let rest =
+      String.trim (String.sub trimmed plen (String.length trimmed - plen))
+    in
+    if String.equal rest "" then None else Some rest
+  else None
+
+let chunk_operation_id json =
+  let* direct = optional_nonblank_string json "operation_id" in
+  match direct with
+  | Some _ as x -> Ok x
+  | None ->
+      let* run_id = optional_nonblank_string json "runId" in
+      Ok (Option.bind run_id operation_id_of_run_id)
+
+let resolve_tool_use_id json =
+  let* tc_id = optional_nonblank_string json "toolCallId" in
+  match tc_id with
+  | Some id -> Ok id
+  | None -> (
+      let* legacy_id = optional_nonblank_string json "tool_use_id" in
+      match legacy_id with
+      | Some id -> Ok id
+      | None -> (
+          let* scope = optional_int_field json "toolStreamScope" in
+          let* block = optional_int_field json "toolCallBlockIndex" in
+          match scope, block with
+          | Some s, Some b -> Ok (Printf.sprintf "scope-%d-block-%d" s b)
+          | None, Some b -> Ok (Printf.sprintf "block-%d" b)
+          | Some s, None -> Ok (Printf.sprintf "scope-%d" s)
+          | None, None ->
+              Error
+                "missing tool call identifier (toolCallId, tool_use_id, or toolStreamScope/toolCallBlockIndex)"))
+
+let decode_native_completion_ok completion =
+  let* kind = optional_nonblank_string completion "kind" in
+  match kind with
+  | Some ("error_reported" | "decline_reported") -> Ok (Some false)
+  | Some "completion_reported" -> Ok (Some true)
+  | Some "result_received" -> (
+      let* is_err = optional_bool_field completion "is_error" in
+      match is_err with
+      | Some true -> Ok (Some false)
+      | Some false -> Ok (Some true)
+      | None -> Ok None)
+  | Some ("end_observed" | "completion_unrecorded" | "unrecognized_status") | None ->
+      Ok None
+  | Some _ -> Ok None
+
+let decode_custom_chat_chunk json =
+  let* name = required_nonblank_string json "name" in
+  let* outer_op_id = chunk_operation_id json in
+  match name with
+  | "KEEPER_CHAT_OPERATION_ACCEPTED" ->
+      let* value = required_object_field json "value" in
+      let* operation_id = required_nonblank_string value "operation_id" in
+      let* queued_count = required_nonnegative_int_field value "queued_count" in
+      let* state = decode_enum ~field:"state" accepted_state_of_string value in
+      let* interactive_opt = optional_object_field value "interactive" in
+      let* interactive_outcome, control_token =
+        match interactive_opt with
+        | None -> Ok (None, None)
+        | Some inter ->
+            let* outcome =
+              decode_optional_enum ~field:"outcome"
+                interactive_outcome_of_string inter
+            in
+            let* token =
+              optional_nonblank_string inter "chat_control_token"
+            in
+            Ok (outcome, token)
+      in
+      Ok
+        (Chunk_accepted
+           {
+             operation_id;
+             queued_count;
+             state;
+             interactive_outcome;
+             control_token;
+           })
+  | "KEEPER_THINKING_DELTA" ->
+      let* value = required_object_field json "value" in
+      let* delta = required_string_field value "delta" in
+      Ok (Chunk_thinking_delta { operation_id = outer_op_id; delta })
+  | "KEEPER_THINKING_SNAPSHOT" ->
+      let* value = required_object_field json "value" in
+      let* snapshot = required_string_field value "snapshot" in
+      Ok (Chunk_thinking_snapshot { operation_id = outer_op_id; snapshot })
+  | "KEEPER_REPLY_DETAILS" ->
+      let* value = required_object_field json "value" in
+      let* reply = required_string_field value "reply" in
+      let* turn_outcome = optional_nonblank_string value "turn_outcome" in
+      let* turn_ref = optional_nonblank_string value "turn_ref" in
+      Ok
+        (Chunk_reply_details
+           { operation_id = outer_op_id; reply; turn_outcome; turn_ref })
+  | "KEEPER_TOOL_RESULT_READY" ->
+      let* value = required_object_field json "value" in
+      let* tool_use_id = resolve_tool_use_id value in
+      Ok
+        (Chunk_tool_end
+           {
+             operation_id = outer_op_id;
+             tool_use_id;
+             tool_name = None;
+             ok = None;
+             output_preview = None;
+           })
+  | "KEEPER_NATIVE_TOOL_START" ->
+      let* value = required_object_field json "value" in
+      let* tool_use_id = resolve_tool_use_id value in
+      let* name_opt = optional_nonblank_string value "toolCallName" in
+      let tool_name = Option.value name_opt ~default:"native_tool" in
+      Ok
+        (Chunk_tool_start
+           {
+             operation_id = outer_op_id;
+             tool_use_id;
+             tool_name;
+             args_preview = None;
+           })
+  | "KEEPER_NATIVE_TOOL_END" ->
+      let* value = required_object_field json "value" in
+      let* tool_use_id = resolve_tool_use_id value in
+      let* tool_name = optional_nonblank_string value "toolCallName" in
+      let* comp_opt = optional_object_field value "completion" in
+      let* ok =
+        match comp_opt with
+        | Some comp -> decode_native_completion_ok comp
+        | None -> Ok None
+      in
+      Ok
+        (Chunk_tool_end
+           {
+             operation_id = outer_op_id;
+             tool_use_id;
+             tool_name;
+             ok;
+             output_preview = None;
+           })
+  | "KEEPER_CONNECTED"
+  | "KEEPER_RUNTIME_ATTEMPT_STARTED"
+  | "KEEPER_PROVIDER_RETRY"
+  | "KEEPER_STREAM_MESSAGE_START"
+  | "KEEPER_STREAM_MESSAGE_DELTA"
+  | "KEEPER_STREAM_MESSAGE_STOP"
+  | "KEEPER_STREAM_PING"
+  | "KEEPER_CONTENT_BLOCK_START"
+  | "KEEPER_CONTENT_BLOCK_STOP"
+  | "KEEPER_MODEL_CONTENT_ACTIVITY"
+  | "KEEPER_THINKING_SIGNATURE_DELTA"
+  | "KEEPER_MEDIA_DELTA"
+  | "KEEPER_STREAM_PROTOCOL_ERROR"
+  | "KEEPER_CHAT_BATCH_BOUND"
+  | "KEEPER_CONTINUATION_CHECKPOINT"
+  | "KEEPER_EXTERNAL_EFFECT_COMPLETED"
+  | "KEEPER_TOOL_APPROVAL_REQUESTED"
+  | "KEEPER_TOOL_APPROVAL_SETTLED"
+  | "KEEPER_TOOL_CALL_ADMITTED"
+  | "KEEPER_TOOL_TRANSCRIPT_COMMITTED"
+  | "KEEPER_NATIVE_TOOL_PROGRESS" ->
+      Ok Chunk_ignored
+  | other -> Error (Printf.sprintf "unknown CUSTOM chat stream event %S" other)
+
 let decode_chat_stream_chunk json =
   let* kind = required_nonblank_string json "type" in
   match kind with
+  | "CUSTOM" -> decode_custom_chat_chunk json
   | "accepted" ->
       let* operation_id = required_nonblank_string json "operation_id" in
       let* queued_count = required_nonnegative_int_field json "queued_count" in
-      let* state = required_nonblank_string json "state" in
-      Ok (Chunk_accepted { operation_id; queued_count; state })
+      let* state = decode_enum ~field:"state" accepted_state_of_string json in
+      Ok
+        (Chunk_accepted
+           {
+             operation_id;
+             queued_count;
+             state;
+             interactive_outcome = None;
+             control_token = None;
+           })
+  | "RUN_STARTED" ->
+      let* operation_id = chunk_operation_id json in
+      Ok (Chunk_run_started { operation_id })
+  | "TEXT_MESSAGE_START" | "TEXT_MESSAGE_END" -> Ok Chunk_ignored
   | "text_delta" | "TEXT_MESSAGE_CONTENT" ->
-      let* operation_id = required_nonblank_string json "operation_id" in
+      let* operation_id = chunk_operation_id json in
       let* delta = required_string_field json "delta" in
       Ok (Chunk_text_delta { operation_id; delta })
   | "thinking_delta" ->
-      let* operation_id = required_nonblank_string json "operation_id" in
+      let* operation_id = chunk_operation_id json in
       let* delta = required_string_field json "delta" in
       Ok (Chunk_thinking_delta { operation_id; delta })
   | "tool_start" | "TOOL_CALL_START" ->
-      let* operation_id = required_nonblank_string json "operation_id" in
-      let* tool_use_id = required_nonblank_string json "tool_use_id" in
-      let* tool_name = required_nonblank_string json "tool_name" in
+      let* operation_id = chunk_operation_id json in
+      let* tool_use_id = resolve_tool_use_id json in
+      let* name_camel = optional_nonblank_string json "toolCallName" in
+      let* tool_name =
+        match name_camel with
+        | Some n -> Ok n
+        | None -> required_nonblank_string json "tool_name"
+      in
       let* args_preview = optional_string_field json "args_preview" in
-      Ok (Chunk_tool_start { operation_id; tool_use_id; tool_name; args_preview })
+      Ok
+        (Chunk_tool_start { operation_id; tool_use_id; tool_name; args_preview })
+  | "TOOL_CALL_ARGS" ->
+      let* operation_id = chunk_operation_id json in
+      let* tool_use_id = resolve_tool_use_id json in
+      let* delta = optional_string_field json "delta" in
+      let snapshot =
+        match member "snapshot" json with
+        | `Null -> None
+        | `String s -> Some s
+        | other -> Some (Yojson.Safe.to_string other)
+      in
+      Ok (Chunk_tool_args { operation_id; tool_use_id; delta; snapshot })
   | "tool_end" | "TOOL_CALL_END" ->
-      let* operation_id = required_nonblank_string json "operation_id" in
-      let* tool_use_id = required_nonblank_string json "tool_use_id" in
-      let* tool_name = required_nonblank_string json "tool_name" in
-      let* ok = required_bool_field json "ok" in
+      let* operation_id = chunk_operation_id json in
+      let* tool_use_id = resolve_tool_use_id json in
+      let* name_camel = optional_nonblank_string json "toolCallName" in
+      let* name_snake = optional_nonblank_string json "tool_name" in
+      let tool_name =
+        match name_camel with Some _ as x -> x | None -> name_snake
+      in
+      let* ok = optional_bool_field json "ok" in
       let* output_preview = optional_string_field json "output_preview" in
       Ok
         (Chunk_tool_end
            { operation_id; tool_use_id; tool_name; ok; output_preview })
   | "turn_done" | "RUN_FINISHED" ->
-      let* operation_id = required_nonblank_string json "operation_id" in
-      let* turn_ref = required_nonblank_string json "turn_ref" in
-      let* reply = required_string_field json "reply" in
+      let* operation_id = chunk_operation_id json in
+      let* turn_ref = optional_nonblank_string json "turn_ref" in
+      let* reply = optional_string_field json "reply" in
       Ok (Chunk_turn_done { operation_id; turn_ref; reply })
   | "error" | "RUN_ERROR" ->
-      let* operation_id = optional_nonblank_string json "operation_id" in
+      let* operation_id = chunk_operation_id json in
       let* code = optional_nonblank_string json "code" in
       let* message = required_nonblank_string json "message" in
       Ok (Chunk_error { operation_id; code; message })
   | other -> Error (Printf.sprintf "unknown chat stream chunk type %S" other)
+
+let decode_turn_interrupt_response json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* signalled = decode_bool_field_or body "signalled" ~default:false in
+  let* paused = decode_bool_field_or body "paused" ~default:false in
+  let* chat_control_token = optional_nonblank_string body "chat_control_token" in
+  let* reason = optional_nonblank_string body "reason" in
+  Ok { signalled; paused; chat_control_token; reason }

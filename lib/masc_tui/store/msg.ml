@@ -81,6 +81,10 @@ type http_reply =
       keeper : string;
       result : (Wire_fleet.chat_history_page, http_error) result;
     }
+  | Reply_turn_interrupt of {
+      keeper : string;
+      result : (Wire_fleet.turn_interrupt_response, http_error) result;
+    }
   | Reply_planning of (Wire_work.planning_snapshot, http_error) result
   | Reply_planning_backlog of Wire_work.task_backlog_counts
   | Reply_verifications of
@@ -233,6 +237,12 @@ type t =
       request_id : string;
       is_btw : bool;
       chunk : Wire_fleet.chat_stream_chunk;
+    }
+  | Chat_stream_decode_warning of {
+      epoch : Epoch.t;
+      keeper : string;
+      request_id : string;
+      reason : string;
     }
   | Chat_stream_done of {
       epoch : Epoch.t;

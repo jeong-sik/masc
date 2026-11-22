@@ -26,6 +26,14 @@ val apply_chat_stream_chunk :
   Model.t ->
   Model.t * Cmd.t list
 
+val apply_chat_stream_decode_warning :
+  now:Clock.Mono.t ->
+  keeper:string ->
+  request_id:string ->
+  reason:string ->
+  Model.t ->
+  Model.t * Cmd.t list
+
 val apply_chat_stream_done :
   now:Clock.Mono.t ->
   keeper:string ->

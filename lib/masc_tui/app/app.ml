@@ -107,7 +107,8 @@ let msg_pace = function
       Frame_scheduler.Pace_interactive
   | Msg.Boot | Msg.Tick _ | Msg.Server_health_result _
   | Msg.Server_start_result _ | Msg.Http_reply _ | Msg.Sse_event _
-  | Msg.Sse_freshness _ | Msg.Voice_event _ | Msg.Stream_gap _ ->
+  | Msg.Sse_freshness _ | Msg.Chat_stream_decode_warning _
+  | Msg.Voice_event _ | Msg.Stream_gap _ ->
       Frame_scheduler.Pace_animation
 
 let earliest_opt a b =
@@ -544,6 +545,7 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
             | Msg.Sse_freshness _
             | Msg.Chat_stream_chunk _
             | Msg.Chat_stream_done _
+            | Msg.Chat_stream_decode_warning _
             | Msg.Voice_event _
             | Msg.Stream_gap _ ->
                 false

@@ -32,6 +32,10 @@ type active_tool_call = {
 type chat_stream_buffer = {
   request_id : string;
   operation_id : string option;
+  turn_ref : string option;
+  run_started : bool;
+  interrupting : bool;
+  prior_msg_ids : String_set.t;
   text : string;
   thinking : string;
   tools : active_tool_call list;
@@ -44,6 +48,7 @@ type t = {
   raw_shell_scorecard : Wire_fleet.daily_scorecard option;
   keepers : Wire_fleet.keeper_summary list Observed.t;
   turns : Wire_fleet.keeper_turn_row list Observed.t;
+  chat_control_tokens : string String_map.t;
   sandbox_profiles : Wire_fleet.keeper_sandbox_profile String_map.t;
   candle_balances_milli : int String_map.t;
   candle_summary_fallback : Wire_fleet.candle_summary_fallback option;
@@ -73,6 +78,7 @@ let empty =
     raw_shell_scorecard = None;
     keepers = Observed.loading ~since_ns:Clock.Mono.zero;
     turns = Observed.unreported;
+    chat_control_tokens = String_map.empty;
     sandbox_profiles = String_map.empty;
     candle_balances_milli = String_map.empty;
     candle_summary_fallback = None;
@@ -350,14 +356,39 @@ let turns_list t =
   match Observed.to_option t.turns with Some rows -> rows | None -> []
 
 let chat_control_token_for ~keeper t =
-  match
-    List.find_opt
-      (fun (r : Wire_fleet.keeper_turn_row) ->
-        String.equal r.keeper_name keeper)
-      (turns_list t)
-  with
-  | Some row -> row.chat_control_token
-  | None -> None
+  match String_map.find_opt keeper t.chat_control_tokens with
+  | Some _ as tok -> tok
+  | None -> (
+      match
+        List.find_opt
+          (fun (r : Wire_fleet.keeper_turn_row) ->
+            String.equal r.keeper_name keeper)
+          (turns_list t)
+      with
+      | Some row -> row.chat_control_token
+      | None -> None)
+
+let update_chat_control_token ~keeper ~token t =
+  let trimmed = String.trim token in
+  if String.equal trimmed "" then t
+  else
+    let chat_control_tokens =
+      String_map.add keeper trimmed t.chat_control_tokens
+    in
+    let turns =
+      Observed.map
+        (List.map (fun (r : Wire_fleet.keeper_turn_row) ->
+             if String.equal r.keeper_name keeper then
+               { r with chat_control_token = Some trimmed }
+             else r))
+        t.turns
+    in
+    { t with chat_control_tokens; turns }
+
+let has_active_chat_stream ~keeper t =
+  match String_map.find_opt keeper t.chat_streams with
+  | Some b -> b.active
+  | None -> false
 
 let active_turn_for ~keeper t =
   match
@@ -569,6 +600,15 @@ let enrich_scorecard f t =
   { t with shell; raw_shell_scorecard }
 
 let apply_turns ~observed_at rows t =
+  let chat_control_tokens =
+    List.fold_left
+      (fun acc (r : Wire_fleet.keeper_turn_row) ->
+        match r.chat_control_token with
+        | Some tok when not (String.equal (String.trim tok) "") ->
+            String_map.add r.keeper_name (String.trim tok) acc
+        | Some _ | None -> acc)
+      t.chat_control_tokens rows
+  in
   let keepers =
     Observed.map
       (List.map (fun (k : Wire_fleet.keeper_summary) ->
@@ -585,7 +625,12 @@ let apply_turns ~observed_at rows t =
            | Some { state = Wire_fleet.Turn_unavailable _; _ } | None -> k))
       t.keepers
   in
-  { t with turns = Observed.value ~observed_at rows; keepers }
+  {
+    t with
+    turns = Observed.value ~observed_at rows;
+    chat_control_tokens;
+    keepers;
+  }
 
 let apply_fleet_stream_event ~observed_at ev t =
   match ev with
@@ -642,120 +687,359 @@ let apply_chat_history ~observed_at ~keeper page t =
   in
   { t with chat_histories }
 
+let snapshot_history_ids ~keeper t =
+  match String_map.find_opt keeper t.chat_histories with
+  | None -> String_set.empty
+  | Some obs -> (
+      match Observed.to_option obs with
+      | None -> String_set.empty
+      | Some page ->
+          List.fold_left
+            (fun acc (m : Wire_fleet.chat_message) -> String_set.add m.id acc)
+            String_set.empty page.messages)
+
+let fresh_stream_buffer ~keeper ~request_id t =
+  {
+    request_id;
+    operation_id = None;
+    turn_ref = None;
+    run_started = false;
+    interrupting = false;
+    prior_msg_ids = snapshot_history_ids ~keeper t;
+    text = "";
+    thinking = "";
+    tools = [];
+    active = true;
+    last_error = None;
+  }
+
 let start_chat_stream ~keeper ~request_id t =
-  let buf =
-    {
-      request_id;
-      operation_id = None;
-      text = "";
-      thinking = "";
-      tools = [];
-      active = true;
-      last_error = None;
-    }
-  in
+  let buf = fresh_stream_buffer ~keeper ~request_id t in
   { t with chat_streams = String_map.add keeper buf t.chat_streams }
 
-let apply_chat_stream_chunk ~keeper ~request_id chunk t =
-  let prev =
-    match String_map.find_opt keeper t.chat_streams with
-    | Some b when String.equal b.request_id request_id -> b
-    | Some _ | None ->
-        {
-          request_id;
-          operation_id = None;
-          text = "";
-          thinking = "";
-          tools = [];
-          active = true;
-          last_error = None;
-        }
-  in
-  let updated =
-    match chunk with
-    | Wire_fleet.Chunk_accepted { operation_id; _ } ->
-        { prev with operation_id = Some operation_id; active = true }
-    | Wire_fleet.Chunk_text_delta { operation_id; delta } ->
-        {
-          prev with
-          operation_id = Some operation_id;
-          text = prev.text ^ delta;
-          active = true;
-        }
-    | Wire_fleet.Chunk_thinking_delta { operation_id; delta } ->
-        {
-          prev with
-          operation_id = Some operation_id;
-          thinking = prev.thinking ^ delta;
-          active = true;
-        }
-    | Wire_fleet.Chunk_tool_start
-        { operation_id; tool_use_id; tool_name; args_preview } ->
-        let entry =
-          {
-            tool_use_id;
-            tool_name;
-            args_preview;
-            completed = false;
-            ok = None;
-            output_preview = None;
-          }
-        in
-        let tools =
-          List.filter
-            (fun (c : active_tool_call) ->
-              not (String.equal c.tool_use_id tool_use_id))
-            prev.tools
-          @ [ entry ]
-        in
-        { prev with operation_id = Some operation_id; tools; active = true }
-    | Wire_fleet.Chunk_tool_end
-        { operation_id; tool_use_id; tool_name; ok; output_preview } ->
-        let found =
-          List.exists
-            (fun (c : active_tool_call) ->
-              String.equal c.tool_use_id tool_use_id)
-            prev.tools
-        in
-        let tools =
-          if found then
-            List.map
-              (fun (c : active_tool_call) ->
-                if String.equal c.tool_use_id tool_use_id then
-                  { c with completed = true; ok = Some ok; output_preview }
-                else c)
-              prev.tools
-          else
-            prev.tools
-            @ [
+let merge_opt_op prev_op incoming_op =
+  match incoming_op with Some _ as x -> x | None -> prev_op
+
+let is_explicit_execution_start = function
+  | Wire_fleet.Chunk_run_started _ -> true
+  | Wire_fleet.Chunk_accepted { state = Wire_fleet.Accepted_running; _ } -> true
+  | Wire_fleet.Chunk_accepted
+      {
+        state =
+          ( Wire_fleet.Accepted_queued
+          | Wire_fleet.Accepted_succeeded
+          | Wire_fleet.Accepted_failed
+          | Wire_fleet.Accepted_cancelled );
+        _;
+      }
+  | Wire_fleet.Chunk_text_delta _
+  | Wire_fleet.Chunk_thinking_delta _
+  | Wire_fleet.Chunk_thinking_snapshot _
+  | Wire_fleet.Chunk_tool_start _
+  | Wire_fleet.Chunk_tool_args _
+  | Wire_fleet.Chunk_tool_end _
+  | Wire_fleet.Chunk_reply_details _
+  | Wire_fleet.Chunk_turn_done _
+  | Wire_fleet.Chunk_error _
+  | Wire_fleet.Chunk_ignored ->
+      false
+
+let is_queued_acceptance = function
+  | Wire_fleet.Chunk_accepted { state = Wire_fleet.Accepted_queued; _ } -> true
+  | Wire_fleet.Chunk_accepted
+      {
+        state =
+          ( Wire_fleet.Accepted_running
+          | Wire_fleet.Accepted_succeeded
+          | Wire_fleet.Accepted_failed
+          | Wire_fleet.Accepted_cancelled );
+        _;
+      }
+  | Wire_fleet.Chunk_run_started _
+  | Wire_fleet.Chunk_text_delta _
+  | Wire_fleet.Chunk_thinking_delta _
+  | Wire_fleet.Chunk_thinking_snapshot _
+  | Wire_fleet.Chunk_tool_start _
+  | Wire_fleet.Chunk_tool_args _
+  | Wire_fleet.Chunk_tool_end _
+  | Wire_fleet.Chunk_reply_details _
+  | Wire_fleet.Chunk_turn_done _
+  | Wire_fleet.Chunk_error _
+  | Wire_fleet.Chunk_ignored ->
+      false
+
+let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
+    t =
+  match chunk with
+  | Wire_fleet.Chunk_ignored -> t
+  | ( Wire_fleet.Chunk_accepted _
+    | Wire_fleet.Chunk_run_started _
+    | Wire_fleet.Chunk_text_delta _
+    | Wire_fleet.Chunk_thinking_delta _
+    | Wire_fleet.Chunk_thinking_snapshot _
+    | Wire_fleet.Chunk_tool_start _
+    | Wire_fleet.Chunk_tool_args _
+    | Wire_fleet.Chunk_tool_end _
+    | Wire_fleet.Chunk_reply_details _
+    | Wire_fleet.Chunk_turn_done _
+    | Wire_fleet.Chunk_error _ ) as chunk -> (
+      let t =
+        match chunk with
+        | Wire_fleet.Chunk_accepted { control_token = Some tok; _ } ->
+            update_chat_control_token ~keeper ~token:tok t
+        | Wire_fleet.Chunk_accepted { control_token = None; _ }
+        | Wire_fleet.Chunk_run_started _
+        | Wire_fleet.Chunk_text_delta _
+        | Wire_fleet.Chunk_thinking_delta _
+        | Wire_fleet.Chunk_thinking_snapshot _
+        | Wire_fleet.Chunk_tool_start _
+        | Wire_fleet.Chunk_tool_args _
+        | Wire_fleet.Chunk_tool_end _
+        | Wire_fleet.Chunk_reply_details _
+        | Wire_fleet.Chunk_turn_done _
+        | Wire_fleet.Chunk_error _
+        | Wire_fleet.Chunk_ignored ->
+            t
+      in
+      let prev_opt =
+        match String_map.find_opt keeper t.chat_streams with
+        | Some b when String.equal b.request_id request_id -> Some b
+        | Some b ->
+            if
+              allow_takeover
+              && (not (is_queued_acceptance chunk))
+              && ((not b.active) || is_explicit_execution_start chunk)
+            then Some (fresh_stream_buffer ~keeper ~request_id t)
+            else None
+        | None ->
+            if is_queued_acceptance chunk then None
+            else Some (fresh_stream_buffer ~keeper ~request_id t)
+      in
+      match prev_opt with
+      | None -> t
+      | Some prev ->
+          let updated =
+            match chunk with
+            | Wire_fleet.Chunk_accepted { operation_id; state; _ } ->
+                let run_started =
+                  prev.run_started
+                  ||
+                  match state with
+                  | Wire_fleet.Accepted_running -> true
+                  | Wire_fleet.Accepted_queued
+                  | Wire_fleet.Accepted_succeeded
+                  | Wire_fleet.Accepted_failed
+                  | Wire_fleet.Accepted_cancelled ->
+                      false
+                in
+                let active =
+                  match state with
+                  | Wire_fleet.Accepted_running -> true
+                  | Wire_fleet.Accepted_queued -> prev.run_started
+                  | Wire_fleet.Accepted_succeeded
+                  | Wire_fleet.Accepted_failed
+                  | Wire_fleet.Accepted_cancelled ->
+                      false
+                in
                 {
-                  tool_use_id;
-                  tool_name;
-                  args_preview = None;
-                  completed = true;
-                  ok = Some ok;
-                  output_preview;
-                };
-              ]
-        in
-        { prev with operation_id = Some operation_id; tools; active = true }
-    | Wire_fleet.Chunk_turn_done { operation_id; reply; _ } ->
-        let text =
-          if String.equal (String.trim reply) "" then prev.text else reply
-        in
-        { prev with operation_id = Some operation_id; text; active = false }
-    | Wire_fleet.Chunk_error { operation_id; message; _ } ->
-        {
-          prev with
-          operation_id =
-            (match operation_id with
-            | Some _ as o -> o
-            | None -> prev.operation_id);
-          active = false;
-          last_error = Some message;
-        }
-  in
-  { t with chat_streams = String_map.add keeper updated t.chat_streams }
+                  prev with
+                  operation_id = Some operation_id;
+                  run_started;
+                  active;
+                }
+            | Wire_fleet.Chunk_run_started { operation_id } ->
+                {
+                  prev with
+                  operation_id = merge_opt_op prev.operation_id operation_id;
+                  run_started = true;
+                  active = true;
+                }
+            | Wire_fleet.Chunk_text_delta { operation_id; delta } ->
+                {
+                  prev with
+                  operation_id = merge_opt_op prev.operation_id operation_id;
+                  run_started = true;
+                  text = prev.text ^ delta;
+                  active = true;
+                }
+            | Wire_fleet.Chunk_thinking_delta { operation_id; delta } ->
+                {
+                  prev with
+                  operation_id = merge_opt_op prev.operation_id operation_id;
+                  run_started = true;
+                  thinking = prev.thinking ^ delta;
+                  active = true;
+                }
+            | Wire_fleet.Chunk_thinking_snapshot { operation_id; snapshot } ->
+                {
+                  prev with
+                  operation_id = merge_opt_op prev.operation_id operation_id;
+                  run_started = true;
+                  thinking = snapshot;
+                  active = true;
+                }
+            | Wire_fleet.Chunk_tool_start
+                { operation_id; tool_use_id; tool_name; args_preview } ->
+                let entry =
+                  {
+                    tool_use_id;
+                    tool_name;
+                    args_preview;
+                    completed = false;
+                    ok = None;
+                    output_preview = None;
+                  }
+                in
+                let tools =
+                  List.filter
+                    (fun (c : active_tool_call) ->
+                      not (String.equal c.tool_use_id tool_use_id))
+                    prev.tools
+                  @ [ entry ]
+                in
+                {
+                  prev with
+                  operation_id = merge_opt_op prev.operation_id operation_id;
+                  run_started = true;
+                  tools;
+                  active = true;
+                }
+            | Wire_fleet.Chunk_tool_args
+                { operation_id; tool_use_id; delta; snapshot } ->
+                let tools =
+                  List.map
+                    (fun (c : active_tool_call) ->
+                      if String.equal c.tool_use_id tool_use_id then
+                        let args_preview =
+                          match snapshot, delta with
+                          | Some s, _ -> Some s
+                          | None, Some d ->
+                              Some (Option.value c.args_preview ~default:"" ^ d)
+                          | None, None -> c.args_preview
+                        in
+                        { c with args_preview }
+                      else c)
+                    prev.tools
+                in
+                {
+                  prev with
+                  operation_id = merge_opt_op prev.operation_id operation_id;
+                  run_started = true;
+                  tools;
+                  active = true;
+                }
+            | Wire_fleet.Chunk_tool_end
+                { operation_id; tool_use_id; tool_name; ok; output_preview } ->
+                let found =
+                  List.exists
+                    (fun (c : active_tool_call) ->
+                      String.equal c.tool_use_id tool_use_id)
+                    prev.tools
+                in
+                let tools =
+                  if found then
+                    List.map
+                      (fun (c : active_tool_call) ->
+                        if String.equal c.tool_use_id tool_use_id then
+                          {
+                            c with
+                            tool_name =
+                              Option.value tool_name ~default:c.tool_name;
+                            completed = true;
+                            ok =
+                              (match ok with Some _ as x -> x | None -> c.ok);
+                            output_preview =
+                              (match output_preview with
+                              | Some _ as x -> x
+                              | None -> c.output_preview);
+                          }
+                        else c)
+                      prev.tools
+                  else
+                    prev.tools
+                    @ [
+                        {
+                          tool_use_id;
+                          tool_name = Option.value tool_name ~default:"tool";
+                          args_preview = None;
+                          completed = true;
+                          ok;
+                          output_preview;
+                        };
+                      ]
+                in
+                {
+                  prev with
+                  operation_id = merge_opt_op prev.operation_id operation_id;
+                  run_started = true;
+                  tools;
+                  active = true;
+                }
+            | Wire_fleet.Chunk_reply_details
+                { operation_id; reply; turn_ref; turn_outcome = _ } ->
+                let text =
+                  if String.equal (String.trim reply) "" then prev.text
+                  else reply
+                in
+                {
+                  prev with
+                  operation_id = merge_opt_op prev.operation_id operation_id;
+                  turn_ref =
+                    (match turn_ref with
+                    | Some _ as tr -> tr
+                    | None -> prev.turn_ref);
+                  run_started = true;
+                  text;
+                  active = true;
+                }
+            | Wire_fleet.Chunk_turn_done { operation_id; turn_ref; reply } ->
+                let text =
+                  match reply with
+                  | Some r when not (String.equal (String.trim r) "") -> r
+                  | Some _ | None -> prev.text
+                in
+                {
+                  prev with
+                  operation_id = merge_opt_op prev.operation_id operation_id;
+                  turn_ref =
+                    (match turn_ref with
+                    | Some _ as tr -> tr
+                    | None -> prev.turn_ref);
+                  text;
+                  active = false;
+                  interrupting = false;
+                }
+            | Wire_fleet.Chunk_error { operation_id; message; code = _ } ->
+                {
+                  prev with
+                  operation_id = merge_opt_op prev.operation_id operation_id;
+                  active = false;
+                  interrupting = false;
+                  last_error = Some message;
+                }
+            | Wire_fleet.Chunk_ignored -> prev
+          in
+          { t with chat_streams = String_map.add keeper updated t.chat_streams })
+
+let mark_chat_stream_interrupting ~keeper ~request_id ~interrupting t =
+  match String_map.find_opt keeper t.chat_streams with
+  | Some b when String.equal b.request_id request_id && b.active ->
+      let next = { b with interrupting } in
+      { t with chat_streams = String_map.add keeper next t.chat_streams }
+  | Some _ | None -> t
+
+let clear_inactive_chat_stream_error ~keeper t =
+  match String_map.find_opt keeper t.chat_streams with
+  | Some b when (not b.active) && Option.is_some b.last_error ->
+      if
+        String.equal (String.trim b.text) ""
+        && String.equal (String.trim b.thinking) ""
+        && b.tools = []
+      then { t with chat_streams = String_map.remove keeper t.chat_streams }
+      else
+        let next = { b with last_error = None } in
+        { t with chat_streams = String_map.add keeper next t.chat_streams }
+  | Some _ | None -> t
 
 let finish_chat_stream ~keeper ~request_id ~error t =
   match String_map.find_opt keeper t.chat_streams with
@@ -764,6 +1048,7 @@ let finish_chat_stream ~keeper ~request_id ~error t =
         {
           b with
           active = false;
+          interrupting = false;
           last_error =
             (match error with Some _ as e -> e | None -> b.last_error);
         }

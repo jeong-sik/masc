@@ -138,7 +138,10 @@ type post_request =
   | Post_sandbox_probe of [ `All | `Keeper of string | `Ssh_pool of string ]
   | Post_config_patch of Wire_config.patch_request
   | Post_tui_preference of Wire_config.tui_preference_change
-  | Post_keeper_turn_interrupt of { keeper : string; interrupt_token : string }
+  | Post_keeper_turn_interrupt of {
+      keeper : string;
+      target : [ `Turn_token of string | `Operation_id of string ];
+    }
   | Post_board_create of {
       title : string;
       body : string;
@@ -336,12 +339,13 @@ let post_request_body = function
   | Post_config_patch req -> Wire_config.encode_patch_request req
   | Post_tui_preference change ->
       Wire_config.encode_tui_preference_change change
-  | Post_keeper_turn_interrupt { keeper; interrupt_token } ->
-      `Assoc
-        [
-          ("name", `String keeper);
-          ("interrupt_token", `String interrupt_token);
-        ]
+  | Post_keeper_turn_interrupt { keeper; target } ->
+      let target_field =
+        match target with
+        | `Turn_token tok -> ("interrupt_token", `String tok)
+        | `Operation_id op -> ("request_id", `String op)
+      in
+      `Assoc [ ("name", `String keeper); target_field ]
   | Post_board_create { title; body; hearth } ->
       let base = [ ("title", `String title); ("body", `String body) ] in
       let fields =

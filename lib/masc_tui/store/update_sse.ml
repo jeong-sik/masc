@@ -7,6 +7,13 @@ let is_viewing_keeper_chat ~keeper (m : Model.t) =
   match Model.active_dive m with
   | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }) ->
       String.equal name keeper
+  | None -> (
+      Nav.equal_workspace m.nav.workspace Nav.Keepers
+      && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
+      &&
+      match Fleet_store.selected_keeper_summary m.fleet with
+      | Some k -> String.equal k.name keeper
+      | None -> false)
   | Some
       ( Nav.Dive_keeper
           {
@@ -19,8 +26,7 @@ let is_viewing_keeper_chat ~keeper (m : Model.t) =
           }
       | Nav.Dive_work _
       | Nav.Dive_knowledge _
-      | Nav.Dive_infra _ )
-  | None ->
+      | Nav.Dive_infra _ ) ->
       false
 
 let apply_dataset_invalidation (m : Model.t) ds =
@@ -489,7 +495,7 @@ let apply_observer_event (m : Model.t) = function
   | Wire_observer.Keeper_chat_appended { keeper; _ } ->
       let fleet = Fleet_store.mark_chat_history_stale ~keeper m.fleet in
       let viewing_chat = is_viewing_keeper_chat ~keeper m in
-      let has_pending = Drafts.has_active_tx_for ~keeper m.drafts in
+      let has_pending = Drafts.has_unreconciled_tx_for ~keeper m.drafts in
       let cmds =
         if viewing_chat || has_pending then
           [
@@ -674,6 +680,47 @@ let apply_sse_freshness ~now ~stream ~freshness (m : Model.t) =
   | Health.Disconnected _ ->
       (next, [])
 
+let allow_stream_takeover ~keeper ~request_id (m : Model.t) =
+  match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with
+  | None -> true
+  | Some b when String.equal b.request_id request_id -> false
+  | Some b -> (
+      let inc_is_terminal =
+        match
+          List.find_opt
+            (fun (tx : Drafts.pending_message) ->
+              String.equal tx.request_id request_id)
+            m.drafts.pending_txs
+        with
+        | Some { state = Drafts.Delivered | Drafts.Failed_retryable _; _ } ->
+            true
+        | Some
+            {
+              state =
+                ( Drafts.Queued
+                | Drafts.Sending
+                | Drafts.Pending_processing
+                | Drafts.Confirming_delivery
+                | Drafts.Interrupting );
+              _;
+            }
+        | None ->
+            false
+      in
+      if inc_is_terminal then false
+      else
+        let cur_pos =
+          Drafts.tx_position_for_keeper ~keeper ~request_id:b.request_id m.drafts
+        in
+        let inc_pos =
+          Drafts.tx_position_for_keeper ~keeper ~request_id m.drafts
+        in
+        match cur_pos, inc_pos with
+        | Some cp, Some ip -> ip > cp
+        | None, Some _ -> true
+        | Some _, None -> false
+        | None, None -> not b.active)
+
 let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t)
     =
   if is_btw then
@@ -681,34 +728,93 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
       match chunk with
       | Wire_fleet.Chunk_text_delta { delta; _ } ->
           Drafts.append_btw_delta ~request_id ~delta m.drafts
-      | Wire_fleet.Chunk_turn_done { reply; _ } ->
+      | Wire_fleet.Chunk_reply_details { reply; _ } ->
+          if String.equal (String.trim reply) "" then m.drafts
+          else Drafts.finish_btw ~request_id ~reply m.drafts
+      | Wire_fleet.Chunk_turn_done { reply = Some reply; _ } ->
           Drafts.finish_btw ~request_id ~reply m.drafts
+      | Wire_fleet.Chunk_turn_done { reply = None; _ } ->
+          Drafts.finalize_btw_eof ~request_id m.drafts
       | Wire_fleet.Chunk_error { message; _ } ->
           Drafts.fail_btw ~request_id ~reason:message m.drafts
       | Wire_fleet.Chunk_accepted _
+      | Wire_fleet.Chunk_run_started _
       | Wire_fleet.Chunk_thinking_delta _
+      | Wire_fleet.Chunk_thinking_snapshot _
       | Wire_fleet.Chunk_tool_start _
-      | Wire_fleet.Chunk_tool_end _ ->
+      | Wire_fleet.Chunk_tool_args _
+      | Wire_fleet.Chunk_tool_end _
+      | Wire_fleet.Chunk_ignored ->
           m.drafts
     in
     ({ m with drafts }, [])
   else
+    let allow_takeover = allow_stream_takeover ~keeper ~request_id m in
     let fleet =
-      Fleet_store.apply_chat_stream_chunk ~keeper ~request_id chunk m.fleet
+      Fleet_store.apply_chat_stream_chunk ~allow_takeover ~keeper ~request_id
+        chunk m.fleet
     in
     let drafts, cmds =
       match chunk with
-      | Wire_fleet.Chunk_accepted { operation_id; _ } ->
-          ( Drafts.mark_accepted ~now ~request_id
-              ~operation_id:(Some operation_id) m.drafts
-          , [] )
+      | Wire_fleet.Chunk_accepted
+          { operation_id; state; interactive_outcome; _ } ->
+          let d0 =
+            match interactive_outcome with
+            | Some Wire_fleet.Interactive_stale_control ->
+                Drafts.downgrade_mode_to_follow_up ~request_id m.drafts
+            | Some
+                ( Wire_fleet.Interactive_applied
+                | Wire_fleet.Interactive_paused
+                | Wire_fleet.Interactive_replayed )
+            | None ->
+                m.drafts
+          in
+          let d1, extra_cmds =
+            match state with
+            | Wire_fleet.Accepted_queued ->
+                ( Drafts.mark_queued ~now ~request_id
+                    ~operation_id:(Some operation_id) d0
+                , [] )
+            | Wire_fleet.Accepted_running ->
+                ( Drafts.mark_accepted ~now ~request_id
+                    ~operation_id:(Some operation_id) d0
+                , [] )
+            | Wire_fleet.Accepted_succeeded | Wire_fleet.Accepted_cancelled ->
+                let d_conf =
+                  Drafts.mark_accepted ~now ~request_id
+                    ~operation_id:(Some operation_id) d0
+                  |> Drafts.mark_confirming ~now ~request_id
+                in
+                ( d_conf
+                , [
+                    get_cmd m.epoch
+                      (Cmd.Get_chat_history
+                         { keeper; limit = Some 80; cursor = None });
+                  ] )
+            | Wire_fleet.Accepted_failed ->
+                let d_fail =
+                  Drafts.mark_accepted ~now ~request_id
+                    ~operation_id:(Some operation_id) d0
+                  |> Drafts.mark_failed_retryable ~now ~request_id
+                       ~reason:"operation failed"
+                in
+                ( d_fail
+                , [
+                    get_cmd m.epoch
+                      (Cmd.Get_chat_history
+                         { keeper; limit = Some 80; cursor = None });
+                  ] )
+          in
+          (d1, extra_cmds)
+      | Wire_fleet.Chunk_run_started { operation_id }
       | Wire_fleet.Chunk_text_delta { operation_id; _ }
       | Wire_fleet.Chunk_thinking_delta { operation_id; _ }
+      | Wire_fleet.Chunk_thinking_snapshot { operation_id; _ }
       | Wire_fleet.Chunk_tool_start { operation_id; _ }
-      | Wire_fleet.Chunk_tool_end { operation_id; _ } ->
-          ( Drafts.mark_accepted ~now ~request_id
-              ~operation_id:(Some operation_id) m.drafts
-          , [] )
+      | Wire_fleet.Chunk_tool_args { operation_id; _ }
+      | Wire_fleet.Chunk_tool_end { operation_id; _ }
+      | Wire_fleet.Chunk_reply_details { operation_id; _ } ->
+          (Drafts.mark_accepted ~now ~request_id ~operation_id m.drafts, [])
       | Wire_fleet.Chunk_turn_done _ ->
           ( Drafts.mark_confirming ~now ~request_id m.drafts
           , [
@@ -719,9 +825,27 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
       | Wire_fleet.Chunk_error { message; _ } ->
           ( Drafts.mark_failed_retryable ~now ~request_id ~reason:message
               m.drafts
-          , [] )
+          , [
+              get_cmd m.epoch
+                (Cmd.Get_chat_history
+                   { keeper; limit = Some 80; cursor = None });
+            ] )
+      | Wire_fleet.Chunk_ignored -> (m.drafts, [])
     in
     ({ m with fleet; drafts }, cmds)
+
+let apply_chat_stream_decode_warning ~now:_ ~keeper ~request_id ~reason
+    (m : Model.t) =
+  let incidents, _ =
+    Incidents.push ~occurred_at_unix:m.freshness.last_wall_unix
+      ~source:Health.Source_stream
+      ~summary:
+        (Say.make ~ko:"대화 스트림 프레임 디코드 경고"
+           ~en:"Chat stream frame decode warning")
+      ~detail:(Printf.sprintf "%s (%s): %s" keeper request_id reason)
+      ~status:Health.Resolved m.incidents
+  in
+  ({ m with incidents }, [])
 
 let apply_chat_stream_done ~now ~keeper ~request_id ~is_btw ~result (m : Model.t)
     =
@@ -738,41 +862,37 @@ let apply_chat_stream_done ~now ~keeper ~request_id ~is_btw ~result (m : Model.t
           ~context:(Say.make ~ko:"/btw 질의" ~en:"/btw query")
           err { m with drafts }
   else
+    let hist_cmd =
+      get_cmd m.epoch
+        (Cmd.Get_chat_history { keeper; limit = Some 80; cursor = None })
+    in
     match result with
     | Ok () ->
         let fleet =
           Fleet_store.finish_chat_stream ~keeper ~request_id ~error:None m.fleet
         in
-        let tx_is_terminal =
+        let tx_state_opt =
           match
             List.find_opt
               (fun (tx : Drafts.pending_message) ->
                 String.equal tx.request_id request_id)
               m.drafts.pending_txs
           with
-          | Some { state = Drafts.Delivered | Drafts.Failed_retryable _; _ } ->
-              true
-          | Some
-              {
-                state =
-                  ( Drafts.Queued
-                  | Drafts.Sending
-                  | Drafts.Pending_processing
-                  | Drafts.Confirming_delivery );
-                _;
-              }
-          | None ->
-              false
+          | Some tx -> Some tx.state
+          | None -> None
         in
-        if tx_is_terminal then ({ m with fleet }, [])
-        else
-          let drafts = Drafts.mark_confirming ~now ~request_id m.drafts in
-          ( { m with fleet; drafts }
-          , [
-              get_cmd m.epoch
-                (Cmd.Get_chat_history
-                   { keeper; limit = Some 80; cursor = None });
-            ] )
+        (match tx_state_opt with
+        | Some Drafts.Delivered -> ({ m with fleet }, [])
+        | Some (Drafts.Failed_retryable _) -> ({ m with fleet }, [ hist_cmd ])
+        | Some
+            ( Drafts.Queued
+            | Drafts.Sending
+            | Drafts.Pending_processing
+            | Drafts.Confirming_delivery
+            | Drafts.Interrupting )
+        | None ->
+            let drafts = Drafts.mark_confirming ~now ~request_id m.drafts in
+            ({ m with fleet; drafts }, [ hist_cmd ]))
     | Error err ->
         let detail = Msg.http_error_detail err in
         let fleet =
@@ -782,10 +902,13 @@ let apply_chat_stream_done ~now ~keeper ~request_id ~is_btw ~result (m : Model.t
         let drafts =
           Drafts.mark_failed_retryable ~now ~request_id ~reason:detail m.drafts
         in
-        Update_http.record_http_incident ~now
-          ~source:(Health.Source_keeper keeper)
-          ~context:(Say.make ~ko:"키퍼 대화 전송" ~en:"Keeper chat stream")
-          err { m with fleet; drafts }
+        let next, inc_cmds =
+          Update_http.record_http_incident ~now
+            ~source:(Health.Source_keeper keeper)
+            ~context:(Say.make ~ko:"키퍼 대화 전송" ~en:"Keeper chat stream")
+            err { m with fleet; drafts }
+        in
+        (next, inc_cmds @ [ hist_cmd ])
 
 let apply_stream_gap ~now dropped (m : Model.t) =
   if dropped <= 0 then (m, [])

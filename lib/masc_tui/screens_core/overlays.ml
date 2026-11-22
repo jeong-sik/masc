@@ -2394,6 +2394,7 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 (fun (tx : Drafts.pending_message) ->
                   let mode_s =
                     match tx.mode with
+                    | Drafts.Mode_direct -> "[Direct]"
                     | Drafts.Mode_steer -> "[Steer]"
                     | Drafts.Mode_follow_up -> "[FollowUp]"
                   in
@@ -2405,13 +2406,14 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                           ok_st )
                     | Drafts.Failed_retryable { reason } ->
                         ( Say.resolve lang
-                            (Say.make ~ko:("재시도: " ^ reason)
-                               ~en:("Retry: " ^ reason)),
+                            (Say.make ~ko:("전송 실패: " ^ reason)
+                               ~en:("Send failed: " ^ reason)),
                           crit_st )
                     | Drafts.Queued
                     | Drafts.Sending
                     | Drafts.Pending_processing
-                    | Drafts.Confirming_delivery ->
+                    | Drafts.Confirming_delivery
+                    | Drafts.Interrupting ->
                         let lbl =
                           match Drafts.tx_state_label tx.state with
                           | Some s -> Say.resolve lang s

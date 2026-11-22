@@ -379,19 +379,39 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
                 else []
               in
               compact_line :: detail_rows
+          | Wire_fleet.Role_request_failure ->
+              let meta =
+                match msg.failure_kind with
+                | Some fk -> Printf.sprintf "%s · %s" fk hhmm
+                | None -> hhmm
+              in
+              let hdr =
+                single_span_row ~rail_rgb:theme.status_critical
+                  ~prefix:(Glyph.to_utf8 Glyph.Live_failing ^ " ")
+                  ~prefix_fg:theme.status_critical ~prefix_attrs:Attr.bold
+                  ~text:(Ops_common.say model ~ko:"요청 실패" ~en:"Request failed")
+                  ~text_fg:theme.status_critical ~attrs:Attr.bold
+                  ~right_meta:meta ~right_meta_fg:theme.text_muted
+                  ~right_meta_attrs:Attr.italic ~bg_rgb:base_bg ()
+              in
+              hdr
+              :: markdown_rows ~rail_rgb:theme.status_critical ~theme ~width
+                   ~prefix:"  " ~cont_prefix:"  "
+                   ~prefix_fg:theme.status_critical ~bg_rgb:base_bg msg.content
         in
         loop (Some hhmm) (List.rev_append (spacing @ msg_rows) acc) rest
   in
   loop None [] messages
 
 let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
-    (buf : Fleet_store.chat_stream_buffer) =
+    (sp : Chat_transcript.stream_projection) =
+  let buf = sp.buf in
   let base_bg = theme.surface_1 in
   let rows = ref [] in
   let push r = rows := r :: !rows in
   let push_all rs = List.iter push rs in
   (* 1. Keeper Thinking / Reasoning: Violet ▎ (status_ai) + ✦ (Ai_spark) + Tier-4 italic! *)
-  if not (String.equal (String.trim buf.thinking) "") then begin
+  if sp.show_thinking then begin
     let approx_toks = Int.max 1 (String.length buf.thinking / 4) in
     match model.fleet.chat_thinking_mode with
     | Fleet_store.Thinking_hidden -> ()
@@ -442,71 +462,72 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
     | Slash.Tools_compact -> false
     | Slash.Tools_results | Slash.Tools_full -> true
   in
-  List.iter
-    (fun (tc : Fleet_store.active_tool_call) ->
-      let rail_rgb, pill_txt, pill_fg =
-        if not tc.completed then
-          ( theme.status_active
-          , Glyph.to_utf8 Glyph.Live_working ^ " run"
-          , theme.status_active )
-        else
-          match tc.ok with
-          | Some true ->
-              ( theme.status_ok
-              , Glyph.to_utf8 Glyph.Live_healthy ^ " ok"
-              , theme.status_ok )
-          | Some false ->
-              ( theme.status_critical
-              , Glyph.to_utf8 Glyph.Delta_up ^ " err"
-              , theme.status_critical )
-          | None ->
-              ( theme.border_inactive
-              , Glyph.to_utf8 Glyph.Live_idle
-              , theme.text_secondary )
-      in
-      let chevron =
-        if expanded_tools && Option.is_some tc.output_preview then
-          Glyph.to_utf8 Glyph.Expand_open
-        else Glyph.to_utf8 Glyph.Expand_closed
-      in
-      let args_part =
-        match tc.args_preview with
-        | Some a -> concise_tool_preview ~max_w:(Int.max 10 (width - 30)) a
-        | None -> ""
-      in
-      let bg = Color.of_rgb theme.surface_2 in
-      let spans =
-        [
-          {
-            Markdown.text = tc.tool_name;
-            style = Typography.accent ~bg ~bold:true theme;
-            hyperlink = None;
-          };
-        ]
-        @
-        if String.length args_part > 0 then
+  if sp.show_tools then
+    List.iter
+      (fun (tc : Fleet_store.active_tool_call) ->
+        let rail_rgb, pill_txt, pill_fg =
+          if not tc.completed then
+            ( theme.status_active
+            , Glyph.to_utf8 Glyph.Live_working ^ " run"
+            , theme.status_active )
+          else
+            match tc.ok with
+            | Some true ->
+                ( theme.status_ok
+                , Glyph.to_utf8 Glyph.Live_healthy ^ " ok"
+                , theme.status_ok )
+            | Some false ->
+                ( theme.status_critical
+                , Glyph.to_utf8 Glyph.Delta_up ^ " err"
+                , theme.status_critical )
+            | None ->
+                ( theme.border_inactive
+                , Glyph.to_utf8 Glyph.Live_idle
+                , theme.text_secondary )
+        in
+        let chevron =
+          if expanded_tools && Option.is_some tc.output_preview then
+            Glyph.to_utf8 Glyph.Expand_open
+          else Glyph.to_utf8 Glyph.Expand_closed
+        in
+        let args_part =
+          match tc.args_preview with
+          | Some a -> concise_tool_preview ~max_w:(Int.max 10 (width - 30)) a
+          | None -> ""
+        in
+        let bg = Color.of_rgb theme.surface_2 in
+        let spans =
           [
             {
-              Markdown.text = "  " ^ args_part;
-              style = Typography.structure ~bg theme;
+              Markdown.text = tc.tool_name;
+              style = Typography.accent ~bg ~bold:true theme;
               hyperlink = None;
             };
           ]
-        else []
-      in
-      push
-        (make_row ~rail_rgb
-           ~prefix:(chevron ^ " " ^ Glyph.to_utf8 Glyph.Tool_square ^ " ")
-           ~prefix_fg:rail_rgb ~right_meta:pill_txt ~right_meta_fg:pill_fg
-           ~right_meta_attrs:Attr.bold ~bg_rgb:theme.surface_2
-           ~full_bleed_bg:true spans);
-      match expanded_tools, tc.output_preview with
-      | true, Some out ->
-          push_all (preview_tool_output_rows ~theme ~model ~width out)
-      | false, _ | true, None -> ())
-    buf.tools;
+          @
+          if String.length args_part > 0 then
+            [
+              {
+                Markdown.text = "  " ^ args_part;
+                style = Typography.structure ~bg theme;
+                hyperlink = None;
+              };
+            ]
+          else []
+        in
+        push
+          (make_row ~rail_rgb
+             ~prefix:(chevron ^ " " ^ Glyph.to_utf8 Glyph.Tool_square ^ " ")
+             ~prefix_fg:rail_rgb ~right_meta:pill_txt ~right_meta_fg:pill_fg
+             ~right_meta_attrs:Attr.bold ~bg_rgb:theme.surface_2
+             ~full_bleed_bg:true spans);
+        match expanded_tools, tc.output_preview with
+        | true, Some out ->
+            push_all (preview_tool_output_rows ~theme ~model ~width out)
+        | false, _ | true, None -> ())
+      buf.tools;
   (* 3. Live Assistant Text Delta *)
-  if not (String.equal (String.trim buf.text) "") then begin
+  if sp.show_text then begin
     let glyph, fg, tag =
       if buf.active then
         ( Glyph.Live_working
@@ -528,7 +549,7 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
          ~bg_rgb:base_bg buf.text)
   end;
   (* 4. Explicit Stream Error (Coral left rail, non-italic Bold) *)
-  (match buf.last_error with
+  (match sp.show_error with
   | Some err ->
       push
         (single_span_row ~rail_rgb:theme.status_critical
@@ -541,54 +562,101 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
   | None -> ());
   List.rev !rows
 
-let build_pending_tx_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name
-    ~width =
-  let pending = Drafts.pending_txs_for_keeper ~keeper:keeper_name model.drafts in
+let build_pending_tx_rows ~(theme : Theme.t) ~(model : Model.t) ~width
+    (items : Chat_transcript.pending_tx_projection list) =
   let base_bg = theme.surface_2 in
-  List.filter_map
-    (fun (tx : Drafts.pending_message) ->
-      match Drafts.tx_state_label tx.state with
-      | None -> None
-      | Some state_say ->
-          let state_str = Say.resolve model.lang state_say in
-          let state_fg =
-            match tx.state with
-            | Drafts.Failed_retryable _ -> theme.status_critical
-            | Drafts.Queued | Drafts.Sending -> theme.status_attention
-            | Drafts.Pending_processing | Drafts.Confirming_delivery ->
-                theme.status_active
-            | Drafts.Delivered -> theme.status_ok
-          in
-          let mode_tag =
-            match tx.mode with
-            | Drafts.Mode_steer -> Ops_common.say model ~ko:"조향" ~en:"Steer"
-            | Drafts.Mode_follow_up -> Ops_common.say model ~ko:"후속" ~en:"Queue"
-          in
-          let body_preview =
-            Grapheme.truncate_to_width
-              ~max_width:(Int.max 12 (width - 30))
-              (String.map (function '\n' | '\r' -> ' ' | c -> c) tx.body)
-          in
-          let detail =
-            match tx.state with
-            | Drafts.Failed_retryable { reason } ->
-                Printf.sprintf "%s (%s)" body_preview reason
-            | Drafts.Queued
-            | Drafts.Sending
-            | Drafts.Pending_processing
-            | Drafts.Confirming_delivery
-            | Drafts.Delivered ->
-                body_preview
-          in
-          let pill = Printf.sprintf "%s · %s" state_str mode_tag in
-          Some
-            (single_span_row ~rail_rgb:state_fg
-               ~prefix:(Glyph.to_utf8 Glyph.Prompt_caret ^ " ")
-               ~prefix_fg:state_fg ~prefix_attrs:Attr.bold ~text:detail
-               ~text_fg:theme.text_primary ~right_meta:pill
-               ~right_meta_fg:state_fg ~right_meta_attrs:Attr.bold
-               ~bg_rgb:base_bg ~full_bleed_bg:true ()))
-    pending
+  List.map
+    (fun (item : Chat_transcript.pending_tx_projection) ->
+      let tx = item.tx in
+      if item.error_only then
+        let reason =
+          match tx.state with
+          | Drafts.Failed_retryable { reason } -> reason
+          | Drafts.Queued
+          | Drafts.Sending
+          | Drafts.Pending_processing
+          | Drafts.Confirming_delivery
+          | Drafts.Interrupting
+          | Drafts.Delivered ->
+              ""
+        in
+        let notice =
+          Ops_common.say model
+            ~ko:("전송 실패: " ^ reason)
+            ~en:("Send failed: " ^ reason)
+        in
+        single_span_row ~rail_rgb:theme.status_critical
+          ~prefix:(Glyph.to_utf8 Glyph.Live_failing ^ " ")
+          ~prefix_fg:theme.status_critical ~prefix_attrs:Attr.bold
+          ~text:
+            (Grapheme.truncate_to_width
+               ~max_width:(Int.max 12 (width - 22))
+               notice)
+          ~text_fg:theme.status_critical ~attrs:Attr.bold
+          ~right_meta:(Ops_common.say model ~ko:"[X] 닫기" ~en:"[X] dismiss")
+          ~right_meta_fg:theme.text_muted ~right_meta_attrs:Attr.italic
+          ~bg_rgb:theme.surface_1 ()
+      else
+        let state_str =
+          match Drafts.tx_state_label tx.state with
+          | Some state_say -> Say.resolve model.lang state_say
+          | None -> ""
+        in
+        let state_fg =
+          match tx.state with
+          | Drafts.Failed_retryable _ -> theme.status_critical
+          | Drafts.Queued | Drafts.Sending | Drafts.Interrupting ->
+              theme.status_attention
+          | Drafts.Pending_processing | Drafts.Confirming_delivery ->
+              theme.status_active
+          | Drafts.Delivered -> theme.status_ok
+        in
+        let mode_tag =
+          match tx.mode with
+          | Drafts.Mode_direct -> None
+          | Drafts.Mode_steer ->
+              Some (Ops_common.say model ~ko:"조향" ~en:"Steer")
+          | Drafts.Mode_follow_up ->
+              Some (Ops_common.say model ~ko:"후속" ~en:"Queue")
+        in
+        let body_preview =
+          Grapheme.truncate_to_width
+            ~max_width:(Int.max 12 (width - 30))
+            (String.map (function '\n' | '\r' -> ' ' | c -> c) tx.body)
+        in
+        let detail =
+          match tx.state with
+          | Drafts.Failed_retryable { reason } ->
+              Printf.sprintf "%s (%s)" body_preview reason
+          | Drafts.Queued
+          | Drafts.Sending
+          | Drafts.Pending_processing
+          | Drafts.Confirming_delivery
+          | Drafts.Interrupting
+          | Drafts.Delivered ->
+              body_preview
+        in
+        let pill =
+          match tx.state with
+          | Drafts.Failed_retryable _ ->
+              Printf.sprintf "%s · %s" state_str
+                (Ops_common.say model ~ko:"[X] 닫기" ~en:"[X] dismiss")
+          | Drafts.Queued
+          | Drafts.Sending
+          | Drafts.Pending_processing
+          | Drafts.Confirming_delivery
+          | Drafts.Interrupting
+          | Drafts.Delivered -> (
+              match mode_tag with
+              | Some mt -> Printf.sprintf "%s · %s" state_str mt
+              | None -> state_str)
+        in
+        single_span_row ~rail_rgb:state_fg
+          ~prefix:(Glyph.to_utf8 Glyph.Prompt_caret ^ " ")
+          ~prefix_fg:state_fg ~prefix_attrs:Attr.bold ~text:detail
+          ~text_fg:theme.text_primary ~right_meta:pill ~right_meta_fg:state_fg
+          ~right_meta_attrs:Attr.bold ~bg_rgb:base_bg ~full_bleed_bg:true ())
+    items
 
 let draw_transcript_rows grid ~(rect : Rect.t) ~(theme : Theme.t) ~pad_x ~scroll
     rows =
@@ -986,9 +1054,6 @@ let draw_keeper_status_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
                    "Ctx —  [V] PTT")
         end
 
-let stream_reply_already_persisted =
-  Chat_transcript.stream_reply_already_persisted
-
 let render_chat_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     ~name keeper_opt =
   if Rect.is_empty rect then ()
@@ -1006,37 +1071,32 @@ let render_chat_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
       | Some o -> o
       | None -> Observed.unreported
     in
-    let hist_msgs =
-      match Observed.to_option hist_obs with
-      | Some page -> page.messages
-      | None -> []
-    in
-    let stream_rows =
-      match Fleet_store.String_map.find_opt name model.fleet.chat_streams with
-      | Some buf ->
-          if
-            (not buf.active)
-            && Option.is_none buf.last_error
-            && stream_reply_already_persisted hist_msgs buf
-          then []
-          else build_stream_rows ~theme ~model ~keeper_name:name ~width:prose_w buf
-      | None -> []
-    in
-    let pending_rows =
-      build_pending_tx_rows ~theme ~model ~keeper_name:name ~width:prose_w
-    in
-    let hist_rows =
-      build_history_rows ~theme ~model ~keeper_name:name ~width:prose_w hist_msgs
-    in
+    let sections = Chat_transcript.project_transcript ~model ~keeper:name in
     let all_rows =
-      let with_stream =
-        if stream_rows = [] then hist_rows
-        else if hist_rows = [] then stream_rows
-        else hist_rows @ [ blank_row ~bg_rgb:theme.surface_1 ] @ stream_rows
+      let _, rev_rows =
+        List.fold_left
+          (fun (first, acc) sec ->
+            let sec_rows =
+              match sec with
+              | Chat_transcript.Section_history msgs ->
+                  build_history_rows ~theme ~model ~keeper_name:name
+                    ~width:prose_w msgs
+              | Chat_transcript.Section_pending items ->
+                  build_pending_tx_rows ~theme ~model ~width:prose_w items
+              | Chat_transcript.Section_stream sp ->
+                  build_stream_rows ~theme ~model ~keeper_name:name
+                    ~width:prose_w sp
+            in
+            if sec_rows = [] then (first, acc)
+            else
+              let with_sep =
+                if first then sec_rows
+                else blank_row ~bg_rgb:theme.surface_1 :: sec_rows
+              in
+              (false, List.rev_append with_sep acc))
+          (true, []) sections
       in
-      if pending_rows = [] then with_stream
-      else if with_stream = [] then pending_rows
-      else with_stream @ [ blank_row ~bg_rgb:theme.surface_1 ] @ pending_rows
+      List.rev rev_rows
     in
     if all_rows = [] then
       render_empty_chat_context grid ~rect:body_rect ~theme ~model ~name
@@ -3074,19 +3134,34 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
     let theme = Ops_common.theme_of_model model in
     let keeper_opt = Fleet_store.find_keeper ~name model.fleet in
     let has_attn = Ops_common.keeper_has_attention model.attention name in
+    let chat_phase = Chat_transcript.live_chat_phase ~model ~keeper:name in
     let badge_opt =
-      match keeper_opt with
-      | Some k ->
-          let g, tok, lbl =
-            Ops_common.keeper_live_status ~has_attention:has_attn k
-          in
+      let live_chat_badge =
+        if Nav.equal_keeper_tab tab Nav.Keeper_chat then
+          Chat_transcript.live_chat_phase_badge chat_phase
+        else None
+      in
+      match live_chat_badge with
+      | Some (g, tok, lbl) ->
           Some
             {
               Card.glyph = Some g;
               text = Say.resolve model.lang lbl;
               tone = Some tok;
             }
-      | None -> None
+      | None -> (
+          match keeper_opt with
+          | Some k ->
+              let g, tok, lbl =
+                Ops_common.keeper_live_status ~has_attention:has_attn k
+              in
+              Some
+                {
+                  Card.glyph = Some g;
+                  text = Say.resolve model.lang lbl;
+                  tone = Some tok;
+                }
+          | None -> None)
     in
     let company_sub =
       match keeper_opt with Some k -> Some k.company | None -> None
@@ -3103,13 +3178,7 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
           (Glyph.to_utf8 Glyph.Prompt_caret)
           name
     in
-    let has_running_turn =
-      Option.is_some (Fleet_store.active_turn_for ~keeper:name model.fleet)
-      ||
-      match Fleet_store.String_map.find_opt name model.fleet.chat_streams with
-      | Some buf -> buf.active
-      | None -> false
-    in
+    let has_running_turn = Chat_transcript.is_phase_interruptible chat_phase in
     let hotkey =
       if embedded then
         Some

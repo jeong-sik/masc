@@ -468,19 +468,552 @@ let markdown_body_lines ~theme ~width ~rail_present ~prefix text =
 
 let stream_reply_already_persisted (hist_msgs : Wire_fleet.chat_message list)
     (buf : Fleet_store.chat_stream_buffer) =
-  let trimmed = String.trim buf.text in
-  if String.equal trimmed "" then false
-  else
+  let buf_op_id = Option.value buf.operation_id ~default:buf.request_id in
+  let op_persisted =
     List.exists
       (fun (m : Wire_fleet.chat_message) ->
-        match m.role with
-        | Wire_fleet.Role_assistant ->
-            String.equal (String.trim m.content) trimmed
-        | Wire_fleet.Role_user
-        | Wire_fleet.Role_system
-        | Wire_fleet.Role_tool ->
-            false)
+        match m.operation_id with
+        | Some op when String.equal op buf_op_id -> (
+            match m.role with
+            | Wire_fleet.Role_assistant -> (
+                match m.transcript_slot with
+                | None | Some "terminal_result" -> true
+                | Some _ -> false)
+            | Wire_fleet.Role_request_failure -> true
+            | Wire_fleet.Role_user
+            | Wire_fleet.Role_system
+            | Wire_fleet.Role_tool ->
+                false)
+        | Some _ | None -> false)
       hist_msgs
+  in
+  let turn_ref_persisted =
+    match buf.turn_ref with
+    | None -> false
+    | Some tr ->
+        List.exists
+          (fun (m : Wire_fleet.chat_message) ->
+            match m.role, m.turn_ref with
+            | ( (Wire_fleet.Role_assistant | Wire_fleet.Role_request_failure)
+              , Some mtr ) ->
+                String.equal mtr tr
+            | ( ( Wire_fleet.Role_user
+                | Wire_fleet.Role_assistant
+                | Wire_fleet.Role_system
+                | Wire_fleet.Role_tool
+                | Wire_fleet.Role_request_failure )
+              , (Some _ | None) ) ->
+                false)
+          hist_msgs
+  in
+  let legacy_text_persisted =
+    match buf.last_error with
+    | Some _ -> false
+    | None ->
+        let trimmed = String.trim buf.text in
+        if String.equal trimmed "" then false
+        else
+          List.exists
+            (fun (m : Wire_fleet.chat_message) ->
+              match m.role with
+              | Wire_fleet.Role_assistant ->
+                  Option.is_none m.operation_id
+                  && (not (Fleet_store.String_set.mem m.id buf.prior_msg_ids))
+                  && String.equal (String.trim m.content) trimmed
+              | Wire_fleet.Role_user
+              | Wire_fleet.Role_system
+              | Wire_fleet.Role_tool
+              | Wire_fleet.Role_request_failure ->
+                  false)
+            hist_msgs
+  in
+  op_persisted || turn_ref_persisted || legacy_text_persisted
+
+type live_chat_phase =
+  | Phase_idle
+  | Phase_sending
+  | Phase_queued of int
+  | Phase_awaiting_turn
+  | Phase_thinking
+  | Phase_tool_running of string
+  | Phase_streaming
+  | Phase_confirming
+  | Phase_interrupting
+  | Phase_failed of string
+
+let equal_live_chat_phase a b =
+  match a, b with
+  | Phase_idle, Phase_idle
+  | Phase_sending, Phase_sending
+  | Phase_awaiting_turn, Phase_awaiting_turn
+  | Phase_thinking, Phase_thinking
+  | Phase_streaming, Phase_streaming
+  | Phase_confirming, Phase_confirming
+  | Phase_interrupting, Phase_interrupting ->
+      true
+  | Phase_queued x, Phase_queued y -> Int.equal x y
+  | Phase_tool_running x, Phase_tool_running y
+  | Phase_failed x, Phase_failed y ->
+      String.equal x y
+  | ( Phase_idle
+    , ( Phase_sending
+      | Phase_queued _
+      | Phase_awaiting_turn
+      | Phase_thinking
+      | Phase_tool_running _
+      | Phase_streaming
+      | Phase_confirming
+      | Phase_interrupting
+      | Phase_failed _ ) )
+  | ( Phase_sending
+    , ( Phase_idle
+      | Phase_queued _
+      | Phase_awaiting_turn
+      | Phase_thinking
+      | Phase_tool_running _
+      | Phase_streaming
+      | Phase_confirming
+      | Phase_interrupting
+      | Phase_failed _ ) )
+  | ( Phase_queued _
+    , ( Phase_idle
+      | Phase_sending
+      | Phase_awaiting_turn
+      | Phase_thinking
+      | Phase_tool_running _
+      | Phase_streaming
+      | Phase_confirming
+      | Phase_interrupting
+      | Phase_failed _ ) )
+  | ( Phase_awaiting_turn
+    , ( Phase_idle
+      | Phase_sending
+      | Phase_queued _
+      | Phase_thinking
+      | Phase_tool_running _
+      | Phase_streaming
+      | Phase_confirming
+      | Phase_interrupting
+      | Phase_failed _ ) )
+  | ( Phase_thinking
+    , ( Phase_idle
+      | Phase_sending
+      | Phase_queued _
+      | Phase_awaiting_turn
+      | Phase_tool_running _
+      | Phase_streaming
+      | Phase_confirming
+      | Phase_interrupting
+      | Phase_failed _ ) )
+  | ( Phase_tool_running _
+    , ( Phase_idle
+      | Phase_sending
+      | Phase_queued _
+      | Phase_awaiting_turn
+      | Phase_thinking
+      | Phase_streaming
+      | Phase_confirming
+      | Phase_interrupting
+      | Phase_failed _ ) )
+  | ( Phase_streaming
+    , ( Phase_idle
+      | Phase_sending
+      | Phase_queued _
+      | Phase_awaiting_turn
+      | Phase_thinking
+      | Phase_tool_running _
+      | Phase_confirming
+      | Phase_interrupting
+      | Phase_failed _ ) )
+  | ( Phase_confirming
+    , ( Phase_idle
+      | Phase_sending
+      | Phase_queued _
+      | Phase_awaiting_turn
+      | Phase_thinking
+      | Phase_tool_running _
+      | Phase_streaming
+      | Phase_interrupting
+      | Phase_failed _ ) )
+  | ( Phase_interrupting
+    , ( Phase_idle
+      | Phase_sending
+      | Phase_queued _
+      | Phase_awaiting_turn
+      | Phase_thinking
+      | Phase_tool_running _
+      | Phase_streaming
+      | Phase_confirming
+      | Phase_failed _ ) )
+  | ( Phase_failed _
+    , ( Phase_idle
+      | Phase_sending
+      | Phase_queued _
+      | Phase_awaiting_turn
+      | Phase_thinking
+      | Phase_tool_running _
+      | Phase_streaming
+      | Phase_confirming
+      | Phase_interrupting ) ) ->
+      false
+
+let history_msgs_for_keeper ~(model : Model.t) ~keeper =
+  match Fleet_store.String_map.find_opt keeper model.fleet.chat_histories with
+  | None -> []
+  | Some obs -> (
+      match Observed.to_option obs with
+      | Some page -> page.messages
+      | None -> [])
+
+let has_persisted_failure_for_op (hist_msgs : Wire_fleet.chat_message list)
+    op_id =
+  List.exists
+    (fun (m : Wire_fleet.chat_message) ->
+      match m.role, m.operation_id with
+      | Wire_fleet.Role_request_failure, Some op -> String.equal op op_id
+      | ( ( Wire_fleet.Role_user
+          | Wire_fleet.Role_assistant
+          | Wire_fleet.Role_system
+          | Wire_fleet.Role_tool
+          | Wire_fleet.Role_request_failure )
+        , (Some _ | None) ) ->
+          false)
+    hist_msgs
+
+let has_persisted_user_for_op (hist_msgs : Wire_fleet.chat_message list) op_id =
+  List.exists
+    (fun (m : Wire_fleet.chat_message) ->
+      match m.role, m.operation_id with
+      | Wire_fleet.Role_user, Some op -> String.equal op op_id
+      | ( ( Wire_fleet.Role_user
+          | Wire_fleet.Role_assistant
+          | Wire_fleet.Role_system
+          | Wire_fleet.Role_tool
+          | Wire_fleet.Role_request_failure )
+        , (Some _ | None) ) ->
+          false)
+    hist_msgs
+
+let live_chat_phase ~(model : Model.t) ~keeper =
+  let hist_msgs = history_msgs_for_keeper ~model ~keeper in
+  let buf_opt = Fleet_store.String_map.find_opt keeper model.fleet.chat_streams in
+  let active_tx_opt = Drafts.active_tx_for_keeper ~keeper model.drafts in
+  let queued_count = Drafts.queued_count_for_keeper ~keeper model.drafts in
+  let active_turn_opt = Fleet_store.active_turn_for ~keeper model.fleet in
+  let is_interrupting =
+    (match buf_opt with
+    | Some b -> b.active && b.interrupting
+    | None -> false)
+    ||
+    match active_tx_opt with
+    | Some { state = Drafts.Interrupting; _ } -> true
+    | Some
+        {
+          state =
+            ( Drafts.Queued
+            | Drafts.Sending
+            | Drafts.Pending_processing
+            | Drafts.Confirming_delivery
+            | Drafts.Delivered
+            | Drafts.Failed_retryable _ );
+          _;
+        }
+    | None ->
+        false
+  in
+  if is_interrupting then Phase_interrupting
+  else
+    match buf_opt with
+    | Some b when b.active -> (
+        let running_tool =
+          List.find_opt
+            (fun (tc : Fleet_store.active_tool_call) -> not tc.completed)
+            (List.rev b.tools)
+        in
+        match running_tool with
+        | Some tc -> Phase_tool_running tc.tool_name
+        | None ->
+            if not (String.equal (String.trim b.text) "") then Phase_streaming
+            else if not (String.equal (String.trim b.thinking) "") then
+              Phase_thinking
+            else if b.run_started then Phase_awaiting_turn
+            else (
+              match active_tx_opt with
+              | Some { state = Drafts.Sending; _ } -> Phase_sending
+              | Some { state = Drafts.Queued; _ } ->
+                  Phase_queued (Int.max 1 queued_count)
+              | Some { state = Drafts.Confirming_delivery; _ } ->
+                  Phase_confirming
+              | Some { state = Drafts.Interrupting; _ } -> Phase_interrupting
+              | Some
+                  {
+                    state =
+                      ( Drafts.Pending_processing
+                      | Drafts.Delivered
+                      | Drafts.Failed_retryable _ );
+                    _;
+                  }
+              | None ->
+                  Phase_awaiting_turn))
+    | Some _ | None -> (
+        match active_tx_opt with
+        | Some { state = Drafts.Interrupting; _ } -> Phase_interrupting
+        | Some { state = Drafts.Pending_processing; _ } -> Phase_awaiting_turn
+        | Some { state = Drafts.Sending; _ } -> Phase_sending
+        | Some { state = Drafts.Confirming_delivery; _ } -> Phase_confirming
+        | Some { state = Drafts.Queued; _ } ->
+            Phase_queued (Int.max 1 queued_count)
+        | Some { state = Drafts.Delivered | Drafts.Failed_retryable _; _ }
+        | None -> (
+            match active_turn_opt with
+            | Some { tool_in_flight = Some tool; _ } -> Phase_tool_running tool
+            | Some { phase = Some p; _ }
+              when String.equal (String.lowercase_ascii (String.trim p))
+                     "thinking" ->
+                Phase_thinking
+            | Some _ -> Phase_awaiting_turn
+            | None -> (
+                let latest_unpersisted_failed =
+                  Drafts.pending_txs_for_keeper ~keeper model.drafts
+                  |> List.rev
+                  |> List.find_map (fun (tx : Drafts.pending_message) ->
+                         match tx.state with
+                         | Drafts.Failed_retryable { reason } ->
+                             let op =
+                               Option.value tx.operation_id
+                                 ~default:tx.request_id
+                             in
+                             if has_persisted_failure_for_op hist_msgs op then
+                               None
+                             else Some reason
+                         | Drafts.Queued
+                         | Drafts.Sending
+                         | Drafts.Pending_processing
+                         | Drafts.Confirming_delivery
+                         | Drafts.Interrupting
+                         | Drafts.Delivered ->
+                             None)
+                in
+                match latest_unpersisted_failed with
+                | Some reason -> Phase_failed reason
+                | None -> (
+                    match buf_opt with
+                    | Some b
+                      when (not b.active)
+                           && not (stream_reply_already_persisted hist_msgs b)
+                      -> (
+                        match b.last_error with
+                        | Some err -> Phase_failed err
+                        | None -> Phase_idle)
+                    | Some _ | None -> Phase_idle))))
+
+let live_chat_phase_badge = function
+  | Phase_idle -> None
+  | Phase_sending ->
+      Some
+        ( Glyph.Live_working
+        , Theme.Status_active
+        , Say.make ~ko:"전송 중" ~en:"Sending" )
+  | Phase_queued n ->
+      Some
+        ( Glyph.Live_working
+        , Theme.Status_attention
+        , Say.make
+            ~ko:(if n > 1 then Printf.sprintf "대기열 %d" n else "전송 대기")
+            ~en:(if n > 1 then Printf.sprintf "Queued %d" n else "Queued") )
+  | Phase_awaiting_turn ->
+      Some
+        ( Glyph.Live_working
+        , Theme.Status_active
+        , Say.make ~ko:"처리 대기" ~en:"Awaiting turn" )
+  | Phase_thinking ->
+      Some
+        ( Glyph.Ai_spark
+        , Theme.Status_ai
+        , Say.make ~ko:"추론 중…" ~en:"Thinking…" )
+  | Phase_tool_running tool ->
+      Some
+        ( Glyph.Tool_square
+        , Theme.Status_active
+        , Say.make ~ko:("도구 실행 · " ^ tool) ~en:("Tool · " ^ tool) )
+  | Phase_streaming ->
+      Some
+        ( Glyph.Live_working
+        , Theme.Status_active
+        , Say.make ~ko:"생성 중…" ~en:"Streaming…" )
+  | Phase_confirming ->
+      Some
+        ( Glyph.Live_working
+        , Theme.Status_active
+        , Say.make ~ko:"전송 확인 중" ~en:"Confirming" )
+  | Phase_interrupting ->
+      Some
+        ( Glyph.Live_paused
+        , Theme.Status_attention
+        , Say.make ~ko:"중단 요청 중" ~en:"Interrupting" )
+  | Phase_failed _ ->
+      Some
+        ( Glyph.Live_failing
+        , Theme.Status_critical
+        , Say.make ~ko:"전송 실패" ~en:"Send failed" )
+
+let composer_pending_tx_of_phase = function
+  | Phase_idle -> Composer.Tx_idle
+  | Phase_sending -> Composer.Tx_sending
+  | Phase_queued n ->
+      if n > 1 then Composer.Tx_queued_count n else Composer.Tx_queued
+  | Phase_awaiting_turn -> Composer.Tx_awaiting_turn
+  | Phase_thinking -> Composer.Tx_thinking
+  | Phase_tool_running tool -> Composer.Tx_tool_running tool
+  | Phase_streaming -> Composer.Tx_streaming
+  | Phase_confirming -> Composer.Tx_confirming
+  | Phase_interrupting -> Composer.Tx_interrupting
+  | Phase_failed reason -> Composer.Tx_failed reason
+
+let is_phase_interruptible = function
+  | Phase_sending
+  | Phase_awaiting_turn
+  | Phase_thinking
+  | Phase_tool_running _
+  | Phase_streaming ->
+      true
+  | Phase_idle
+  | Phase_queued _
+  | Phase_confirming
+  | Phase_interrupting
+  | Phase_failed _ ->
+      false
+
+type stream_projection = {
+  buf : Fleet_store.chat_stream_buffer;
+  show_thinking : bool;
+  show_tools : bool;
+  show_text : bool;
+  show_error : string option;
+}
+
+type pending_tx_projection = {
+  tx : Drafts.pending_message;
+  error_only : bool;
+}
+
+type transcript_section =
+  | Section_history of Wire_fleet.chat_message list
+  | Section_pending of pending_tx_projection list
+  | Section_stream of stream_projection
+
+let project_transcript ~(model : Model.t) ~keeper =
+  let hist_msgs = history_msgs_for_keeper ~model ~keeper in
+  let all_pending = Drafts.pending_txs_for_keeper ~keeper model.drafts in
+  let visible_indexed =
+    all_pending
+    |> List.mapi (fun idx (tx : Drafts.pending_message) ->
+           let op_id = Option.value tx.operation_id ~default:tx.request_id in
+           match tx.state with
+           | Drafts.Delivered -> None
+           | Drafts.Failed_retryable _ ->
+               if has_persisted_failure_for_op hist_msgs op_id then None
+               else
+                 let user_in_hist =
+                   tx.user_persisted || has_persisted_user_for_op hist_msgs op_id
+                 in
+                 Some (idx, { tx; error_only = user_in_hist })
+           | Drafts.Queued
+           | Drafts.Sending
+           | Drafts.Pending_processing
+           | Drafts.Confirming_delivery
+           | Drafts.Interrupting ->
+               if tx.user_persisted || has_persisted_user_for_op hist_msgs op_id
+               then None
+               else Some (idx, { tx; error_only = false }))
+    |> List.filter_map Fun.id
+  in
+  let stream_opt =
+    match Fleet_store.String_map.find_opt keeper model.fleet.chat_streams with
+    | None -> None
+    | Some buf ->
+        if (not buf.active) && stream_reply_already_persisted hist_msgs buf then
+          None
+        else
+          let show_thinking =
+            (not (String.equal (String.trim buf.thinking) ""))
+            &&
+            match model.fleet.chat_thinking_mode with
+            | Fleet_store.Thinking_hidden -> false
+            | Fleet_store.Thinking_folded | Fleet_store.Thinking_full -> true
+          in
+          let show_tools = buf.tools <> [] in
+          let show_text = not (String.equal (String.trim buf.text) "") in
+          let show_error =
+            match buf.last_error with
+            | None -> None
+            | Some err ->
+                let matched_by_pending =
+                  List.exists
+                    (fun (_, p) ->
+                      String.equal p.tx.request_id buf.request_id
+                      &&
+                      match p.tx.state with
+                      | Drafts.Failed_retryable _ -> true
+                      | Drafts.Queued
+                      | Drafts.Sending
+                      | Drafts.Pending_processing
+                      | Drafts.Confirming_delivery
+                      | Drafts.Interrupting
+                      | Drafts.Delivered ->
+                          false)
+                    visible_indexed
+                in
+                let superseded =
+                  (not buf.active)
+                  &&
+                  match Drafts.active_tx_for_keeper ~keeper model.drafts with
+                  | Some active_tx
+                    when not (String.equal active_tx.request_id buf.request_id) ->
+                      true
+                  | Some _ | None -> false
+                in
+                if matched_by_pending || superseded then None else Some err
+          in
+          if
+            (not show_thinking) && (not show_tools) && (not show_text)
+            && Option.is_none show_error
+          then None
+          else Some { buf; show_thinking; show_tools; show_text; show_error }
+  in
+  let add_if_nonempty sec acc =
+    match sec with
+    | Section_history [] | Section_pending [] -> acc
+    | Section_history (_ :: _) | Section_pending (_ :: _) | Section_stream _ ->
+        sec :: acc
+  in
+  let sections_rev =
+    match stream_opt with
+    | None ->
+        []
+        |> add_if_nonempty (Section_history hist_msgs)
+        |> add_if_nonempty (Section_pending (List.map snd visible_indexed))
+    | Some sp ->
+        let buf_idx_opt =
+          Drafts.tx_position_for_keeper ~keeper ~request_id:sp.buf.request_id
+            model.drafts
+        in
+        let before_stream, after_stream =
+          match buf_idx_opt with
+          | Some buf_idx ->
+              let b, a =
+                List.partition (fun (idx, _) -> idx <= buf_idx) visible_indexed
+              in
+              (List.map snd b, List.map snd a)
+          | None -> ([], List.map snd visible_indexed)
+        in
+        []
+        |> add_if_nonempty (Section_history hist_msgs)
+        |> add_if_nonempty (Section_pending before_stream)
+        |> add_if_nonempty (Section_stream sp)
+        |> add_if_nonempty (Section_pending after_stream)
+  in
+  List.rev sections_rev
 
 type viewport_geometry = {
   body_h : int;
@@ -500,17 +1033,6 @@ let voice_state_of_drafts (drafts : Drafts.t) =
   | Drafts.Voice_recording { levels; elapsed_s; _ } ->
       Composer.Voice_recording { levels = Array.of_list levels; elapsed_s }
   | Drafts.Voice_transcribing -> Composer.Voice_transcribing
-
-let pending_tx_of_drafts ~keeper (drafts : Drafts.t) =
-  match Drafts.active_tx_for_keeper ~keeper drafts with
-  | None -> Composer.Tx_idle
-  | Some tx -> (
-      match tx.state with
-      | Drafts.Queued -> Composer.Tx_queued
-      | Drafts.Sending -> Composer.Tx_sending
-      | Drafts.Pending_processing -> Composer.Tx_awaiting_turn
-      | Drafts.Confirming_delivery -> Composer.Tx_confirming
-      | Drafts.Delivered | Drafts.Failed_retryable _ -> Composer.Tx_idle)
 
 let chat_viewport_geometry ~(model : Model.t) =
   let cols = Int.max 0 model.viewport.cols in
@@ -541,13 +1063,14 @@ let chat_viewport_geometry ~(model : Model.t) =
               | Some k -> k.name
               | None -> Drafts.target_keeper_key sized_model.drafts)
         in
+        let phase = live_chat_phase ~model:sized_model ~keeper in
         let comp_st : Composer.state =
           {
             target_keeper = keeper;
             draft = draft.text;
             cursor = draft.cursor;
             focused = Drafts.is_focused sized_model.drafts;
-            pending_tx = pending_tx_of_drafts ~keeper sized_model.drafts;
+            pending_tx = composer_pending_tx_of_phase phase;
             voice = voice_state_of_drafts sized_model.drafts;
             popup = Composer.Popup_none;
             draft_count_other_keepers =
@@ -623,21 +1146,13 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
     | Slash.Tools_compact -> false
     | Slash.Tools_results | Slash.Tools_full -> true
   in
-  let hist_msgs =
-    match Fleet_store.String_map.find_opt keeper model.fleet.chat_histories with
-    | None -> []
-    | Some obs -> (
-        match Observed.to_option obs with
-        | Some page -> page.messages
-        | None -> [])
-  in
   let inline_user_prefix =
     Printf.sprintf "00:00 %s " (Glyph.to_utf8 Glyph.Prompt_caret)
   in
   let inline_asst_prefix =
     Printf.sprintf "00:00 %s " (Glyph.to_utf8 Glyph.Live_healthy)
   in
-  let hist_rows =
+  let count_history hist_msgs =
     let _, total =
       List.fold_left
         (fun (first, acc) (msg : Wire_fleet.chat_message) ->
@@ -697,73 +1212,69 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
                 if expanded_tools then
                   count_tool_output_rows ~tools_mode ~width msg.content
                 else 0
+            | Wire_fleet.Role_request_failure ->
+                1
+                + count_markdown_rows ~theme ~width ~rail_present:true
+                    ~prefix:"  " msg.content
           in
           (false, acc + spacing + msg_r))
         (true, 0) hist_msgs
     in
     total
   in
-  let stream_rows =
-    match Fleet_store.String_map.find_opt keeper model.fleet.chat_streams with
-    | None -> 0
-    | Some buf ->
-        if
-          (not buf.active)
-          && Option.is_none buf.last_error
-          && stream_reply_already_persisted hist_msgs buf
-        then 0
+  let count_stream (sp : stream_projection) =
+    let buf = sp.buf in
+    let think_r =
+      if not sp.show_thinking then 0
+      else
+        match model.fleet.chat_thinking_mode with
+        | Fleet_store.Thinking_hidden -> 0
+        | Fleet_store.Thinking_folded -> 1
+        | Fleet_store.Thinking_full ->
+            1
+            + List.length
+                (wrap_plain_lines ~width:(Int.max 12 (width - 6)) buf.thinking)
+    in
+    let tools_r =
+      if not sp.show_tools then 0
+      else
+        List.fold_left
+          (fun acc (tc : Fleet_store.active_tool_call) ->
+            let det =
+              match expanded_tools, tc.output_preview with
+              | true, Some out -> count_tool_output_rows ~tools_mode ~width out
+              | false, _ | true, None -> 0
+            in
+            acc + 1 + det)
+          0 buf.tools
+    in
+    let text_r =
+      if not sp.show_text then 0
+      else
+        1
+        + count_markdown_rows ~theme ~width ~rail_present:false ~prefix:"  "
+            buf.text
+    in
+    let err_r = match sp.show_error with Some _ -> 1 | None -> 0 in
+    think_r + tools_r + text_r + err_r
+  in
+  let sections = project_transcript ~model ~keeper in
+  let _, total =
+    List.fold_left
+      (fun (first, acc) sec ->
+        let rows =
+          match sec with
+          | Section_history msgs -> count_history msgs
+          | Section_pending txs -> List.length txs
+          | Section_stream sp -> count_stream sp
+        in
+        if rows = 0 then (first, acc)
         else
-          let think_r =
-            if String.equal (String.trim buf.thinking) "" then 0
-            else
-              match model.fleet.chat_thinking_mode with
-              | Fleet_store.Thinking_hidden -> 0
-              | Fleet_store.Thinking_folded -> 1
-              | Fleet_store.Thinking_full ->
-                  1
-                  + List.length
-                      (wrap_plain_lines ~width:(Int.max 12 (width - 6))
-                         buf.thinking)
-          in
-          let tools_r =
-            List.fold_left
-              (fun acc (tc : Fleet_store.active_tool_call) ->
-                let det =
-                  match expanded_tools, tc.output_preview with
-                  | true, Some out ->
-                      count_tool_output_rows ~tools_mode ~width out
-                  | false, _ | true, None -> 0
-                in
-                acc + 1 + det)
-              0 buf.tools
-          in
-          let text_r =
-            if String.equal (String.trim buf.text) "" then 0
-            else
-              1
-              + count_markdown_rows ~theme ~width ~rail_present:false
-                  ~prefix:"  " buf.text
-          in
-          let err_r = match buf.last_error with Some _ -> 1 | None -> 0 in
-          think_r + tools_r + text_r + err_r
+          let sep = if first then 0 else 1 in
+          (false, acc + sep + rows))
+      (true, 0) sections
   in
-  let pending_rows =
-    Drafts.pending_txs_for_keeper ~keeper model.drafts
-    |> List.fold_left
-         (fun acc (tx : Drafts.pending_message) ->
-           match Drafts.tx_state_label tx.state with
-           | Some _ -> acc + 1
-           | None -> acc)
-         0
-  in
-  let with_stream =
-    if stream_rows = 0 then hist_rows
-    else if hist_rows = 0 then stream_rows
-    else hist_rows + 1 + stream_rows
-  in
-  if pending_rows = 0 then with_stream
-  else if with_stream = 0 then pending_rows
-  else with_stream + 1 + pending_rows
+  total
 
 let max_scroll_for_model ~(model : Model.t) ~keeper =
   let { body_h; prose_w } = chat_viewport_geometry ~model in

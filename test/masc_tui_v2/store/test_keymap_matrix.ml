@@ -293,6 +293,9 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
               tool_call_id = None;
               tool_call_name = None;
               execution_id = None;
+              operation_id = None;
+              transcript_slot = None;
+              failure_kind = None;
             });
       has_more = false;
       next_cursor = None;

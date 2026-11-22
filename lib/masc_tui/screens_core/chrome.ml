@@ -1324,6 +1324,8 @@ let render_micro_cockpit grid ~cache ~(body : Rect.t) ~(theme : Theme.t)
                      | Wire_fleet.Role_assistant -> Glyph.to_utf8 Glyph.Live_healthy
                      | Wire_fleet.Role_tool -> Glyph.to_utf8 Glyph.Tool_square
                      | Wire_fleet.Role_system -> Glyph.to_utf8 Glyph.Separator_dot
+                     | Wire_fleet.Role_request_failure ->
+                         Glyph.to_utf8 Glyph.Live_failing
                    in
                    let one_line =
                      String.map

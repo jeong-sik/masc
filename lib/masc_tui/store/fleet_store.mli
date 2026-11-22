@@ -41,6 +41,10 @@ type active_tool_call = {
 type chat_stream_buffer = {
   request_id : string;
   operation_id : string option;
+  turn_ref : string option;
+  run_started : bool;
+  interrupting : bool;
+  prior_msg_ids : String_set.t;
   text : string;
   thinking : string;
   tools : active_tool_call list;
@@ -53,6 +57,7 @@ type t = {
   raw_shell_scorecard : Wire_fleet.daily_scorecard option;
   keepers : Wire_fleet.keeper_summary list Observed.t;
   turns : Wire_fleet.keeper_turn_row list Observed.t;
+  chat_control_tokens : string String_map.t;
   sandbox_profiles : Wire_fleet.keeper_sandbox_profile String_map.t;
   candle_balances_milli : int String_map.t;
   candle_summary_fallback : Wire_fleet.candle_summary_fallback option;
@@ -127,7 +132,9 @@ val selected_company_keeper : t -> Wire_fleet.keeper_summary option
 (** Resolve the selected keeper across {!company_groups} regardless of
     [collapsed_companies] (for Pulse company-row highlight and dive). *)
 val chat_control_token_for : keeper:string -> t -> string option
+val update_chat_control_token : keeper:string -> token:string -> t -> t
 val active_turn_for : keeper:string -> t -> Wire_fleet.active_turn option
+val has_active_chat_stream : keeper:string -> t -> bool
 
 val apply_shell :
   observed_at:Clock.Mono.t -> Wire_fleet.dashboard_shell -> t -> t
@@ -163,11 +170,22 @@ val apply_chat_history :
 val start_chat_stream : keeper:string -> request_id:string -> t -> t
 
 val apply_chat_stream_chunk :
+  ?allow_takeover:bool ->
   keeper:string ->
   request_id:string ->
   Wire_fleet.chat_stream_chunk ->
   t ->
   t
+(** Strictly enforces [request_id] ownership on [chat_streams[keeper]]:
+    late chunks/errors from a different [request_id] are dropped unless
+    [allow_takeover = true] and either the prior buffer is inactive or the chunk
+    signals explicit execution start ([Chunk_run_started] /
+    [Chunk_accepted { state = Accepted_running }]). *)
+
+val mark_chat_stream_interrupting :
+  keeper:string -> request_id:string -> interrupting:bool -> t -> t
+
+val clear_inactive_chat_stream_error : keeper:string -> t -> t
 
 val finish_chat_stream :
   keeper:string -> request_id:string -> error:string option -> t -> t

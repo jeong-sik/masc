@@ -932,7 +932,7 @@ let run_keeper_cycle
                       ~boundary:(execution_boundary_of_turn_failure err)
                       err
                   in
-                  let provider_rest =
+                  let provider_rest, is_seat_contention_rest =
                     let now = Time_compat.now () in
                     let assignment_id = Keeper_meta_contract.runtime_id_of_meta meta in
                     match
@@ -942,13 +942,16 @@ let run_keeper_cycle
                         ~assignment_id
                         turn_state.deferred_runtime_lane
                     with
-                    | Some _ as rest -> rest
+                    | Some _ as rest -> rest, false
                     | None ->
-                      Keeper_turn_driver.seat_contention_rest_of_failure
-                        ~now
-                        ~error:err
-                        ~assignment_id
-                        turn_state.deferred_runtime_lane
+                      let rest =
+                        Keeper_turn_driver.seat_contention_rest_of_failure
+                          ~now
+                          ~error:err
+                          ~assignment_id
+                          turn_state.deferred_runtime_lane
+                      in
+                      rest, Option.is_some rest
                   in
                   let is_transient = EC.is_transient_network_error err in
                   (match err with
@@ -1134,8 +1137,12 @@ let run_keeper_cycle
                      | None -> "not_sent")
                     latency_ms
                     (if Option.is_some provider_rest
-                     then " (provider-stated quota, the refused attempt had no \
-                           tool effect; not counted as a turn failure)"
+                     then
+                       if is_seat_contention_rest
+                       then " (shared account seat busy, the refused attempt had no \
+                             tool effect; not counted as a turn failure)"
+                       else " (provider-stated quota, the refused attempt had no \
+                             tool effect; not counted as a turn failure)"
                      else if is_provider_wire_error
                     then " (provider wire error, counts toward crash threshold)"
                     else if is_server_parse_rejection

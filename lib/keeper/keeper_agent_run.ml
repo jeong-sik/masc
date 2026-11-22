@@ -306,12 +306,27 @@ let prompt_context_presence_for_owner
   | Some assembly ->
     (match checkpoint_owner with
      | Some Runtime_execution.Official_client ->
+       (* All four official-client runtimes (Codex, Claude Code, Antigravity CLI,
+          ACP) run [Keeper_official_client_host.project_start_system] before
+          [model_input_projection], moving [Completion_authority] and
+          [Goals_awaiting_proof] out of the [System_context] carrier and into
+          [start_context]/[turn_observation]. Match
+          [record_transmitted_model_input] by checking
+          [transmitted_carrier_receipt]: [None] when those were the carrier's
+          only blocks. *)
        { Keeper_context_assembly.system_context_present =
-           Option.is_some assembly.Keeper_context_assembly.extra_system_context
+           Option.is_some
+             (Keeper_official_client_host.transmitted_carrier_receipt assembly)
        ; outside_context_present = false
        }
      | Some Runtime_execution.Masc_agent_core | None ->
        Keeper_context_assembly.split_request_context_presence assembly)
+;;
+
+let live_stream_consumer_for_turn ~(turn_kind : Turn_record.turn_kind) ~on_event =
+  match turn_kind with
+  | Turn_record.Direct -> Option.is_some on_event
+  | Turn_record.Autonomous -> false
 ;;
 
 (* A terminal tool that fails inside the provider loop ends the run with Agent
@@ -411,6 +426,7 @@ module For_testing = struct
     dispatch_after_provider_transcript_admission
   let turn_record_raw_trace_run_ref = turn_record_raw_trace_run_ref
   let raw_trace_reference_for_turn = raw_trace_reference_for_turn
+  let live_stream_consumer_for_turn = live_stream_consumer_for_turn
 end
 
 let capture_skill_snapshot ~base_path =
@@ -1474,7 +1490,9 @@ let run_turn
         Request_evidence.observe_attribution attribution !request_evidence_ref
     in
     (* 8. Run Agent *)
-    let live_stream_consumer = Option.is_some on_event in
+    let live_stream_consumer =
+      live_stream_consumer_for_turn ~turn_kind ~on_event
+    in
     let record_turn_progress, on_yield, on_resume, on_event =
       Turn_helpers.turn_progress_callbacks
         ~preview

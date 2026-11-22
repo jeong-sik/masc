@@ -805,13 +805,16 @@ let make_tool_bundle_for_descriptors_with_policy
           ~surface:receipt_surface
       in
       let history_carry_tail =
-        let keepers_dir =
-          Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
-        in
-        Keeper_compaction.live_history_after_latest_anchor
-          ~keepers_dir
-          ~keeper_id:meta.name
-          surface.Keeper_tools_agent_core.history
+        if String.equal (String.trim config.base_path) ""
+        then surface.Keeper_tools_agent_core.history
+        else (
+          let keepers_dir =
+            Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+          in
+          Keeper_compaction.live_history_after_latest_anchor
+            ~keepers_dir
+            ~keeper_id:meta.name
+            surface.Keeper_tools_agent_core.history)
       in
       Some (surface, receipts, history_carry_tail)
   in

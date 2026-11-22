@@ -2235,95 +2235,94 @@ let parse_atom_turn_id (turn_id : string) : (int * string) option =
 ;;
 
 let messages_after_anchor ~(anchor : compaction_anchor) (messages : Agent_core.Types.message list) =
-  let rec inline_tail last_after = function
-    | [] -> last_after
-    | msg :: rest ->
-      let next_after =
-        if Runtime_model_input_tail_window.is_compaction_anchor msg
-        then Some rest
-        else last_after
-      in
-      inline_tail next_after rest
+  (* Compute both the latest inline compaction anchor position and the latest
+     persisted DB anchor coverage position on [messages], then slice strictly
+     past [max inline_pos db_anchor_pos] so a stale inline anchor from an
+     earlier epoch never short-circuits a newer DB [covers_through_turn]. *)
+  let inline_pos = ref (-1) in
+  List.iteri
+    (fun pos msg ->
+       if Runtime_model_input_tail_window.is_compaction_anchor msg
+       then inline_pos := pos)
+    messages;
+  let target = Turn_id.to_string anchor.covers_through_turn in
+  let labelled, _ = Runtime_model_input_tail_window.annotate messages in
+  let atom_tbl : (int, Agent_core.Types.message list) Hashtbl.t = Hashtbl.create 16 in
+  let atom_order = ref [] in
+  List.iter
+    (fun (msg, label) ->
+       match label with
+       | Runtime_model_input_tail_window.Pinned -> ()
+       | Runtime_model_input_tail_window.Atom idx ->
+         if not (Hashtbl.mem atom_tbl idx) then atom_order := idx :: !atom_order;
+         let prev = Option.value ~default:[] (Hashtbl.find_opt atom_tbl idx) in
+         Hashtbl.replace atom_tbl idx (msg :: prev))
+    labelled;
+  let atom_hash idx =
+    let msgs = Option.value ~default:[] (Hashtbl.find_opt atom_tbl idx) |> List.rev in
+    let full_hex = Agent_core_sha256.(digest_string (encode_messages msgs) |> to_hex) in
+    let hash16 =
+      if String.length full_hex >= 16 then String.sub full_hex 0 16 else full_hex
+    in
+    msgs, hash16
   in
-  match inline_tail None messages with
-  | Some tail -> tail
-  | None ->
-    let target = Turn_id.to_string anchor.covers_through_turn in
-    let labelled, _ = Runtime_model_input_tail_window.annotate messages in
-    let atom_tbl : (int, Agent_core.Types.message list) Hashtbl.t = Hashtbl.create 16 in
-    let atom_order = ref [] in
-    List.iter
-      (fun (msg, label) ->
-         match label with
-         | Runtime_model_input_tail_window.Pinned -> ()
-         | Runtime_model_input_tail_window.Atom idx ->
-           if not (Hashtbl.mem atom_tbl idx) then atom_order := idx :: !atom_order;
-           let prev = Option.value ~default:[] (Hashtbl.find_opt atom_tbl idx) in
-           Hashtbl.replace atom_tbl idx (msg :: prev))
-      labelled;
-    let atom_hash idx =
-      let msgs = Option.value ~default:[] (Hashtbl.find_opt atom_tbl idx) |> List.rev in
-      let full_hex = Agent_core_sha256.(digest_string (encode_messages msgs) |> to_hex) in
-      let hash16 =
-        if String.length full_hex >= 16 then String.sub full_hex 0 16 else full_hex
-      in
-      msgs, hash16
-    in
-    let atom_matches_exact idx =
-      let msgs, hash16 = atom_hash idx in
-      let atom_turn_id = Printf.sprintf "atom-%d-%s" idx hash16 in
-      if turn_id_matches_target ~target atom_turn_id
-      then true
-      else
-        List.exists
-          (fun (msg : Agent_core.Types.message) ->
-             match List.assoc_opt "canonical_turn_id" msg.metadata with
-             | Some (`String canonical_id) -> turn_id_matches_target ~target canonical_id
-             | Some _ | None -> false)
-          msgs
-    in
-    let ordered_atoms = List.rev !atom_order in
-    let exact_covered =
-      List.fold_left
-        (fun matched idx -> if atom_matches_exact idx then Some idx else matched)
-        None
-        ordered_atoms
-    in
-    let covered_atom =
-      match exact_covered with
-      | Some _ as hit -> hit
-      | None ->
-        (* Fallback when [compact_evicted_messages] compacted a non-prefix subset
-           (so atom [idx] was re-indexed to a smaller [target_idx] inside
-           [evicted_messages]): match by full-atom content hash for atoms at or
-           after [target_idx]. *)
-        (match parse_atom_turn_id target with
-         | None -> None
-         | Some (target_idx, target_hash) ->
-           List.fold_left
-             (fun matched idx ->
-                if idx >= target_idx && String.equal (snd (atom_hash idx)) target_hash
-                then Some idx
-                else matched)
-             None
-             ordered_atoms)
-    in
-    (match covered_atom with
-     | None -> messages
-     | Some covered_idx ->
-       let last_covered_pos = ref (-1) in
-       List.iteri
-         (fun pos (_msg, label) ->
-            match label with
-            | Runtime_model_input_tail_window.Atom idx when idx = covered_idx ->
-              last_covered_pos := pos
-            | Runtime_model_input_tail_window.Atom _
-            | Runtime_model_input_tail_window.Pinned -> ())
-         labelled;
-       if !last_covered_pos < 0
-       then messages
-       else
-         List.filteri (fun pos _ -> pos > !last_covered_pos) messages)
+  let atom_matches_exact idx =
+    let msgs, hash16 = atom_hash idx in
+    let atom_turn_id = Printf.sprintf "atom-%d-%s" idx hash16 in
+    if turn_id_matches_target ~target atom_turn_id
+    then true
+    else
+      List.exists
+        (fun (msg : Agent_core.Types.message) ->
+           match List.assoc_opt "canonical_turn_id" msg.metadata with
+           | Some (`String canonical_id) -> turn_id_matches_target ~target canonical_id
+           | Some _ | None -> false)
+        msgs
+  in
+  let ordered_atoms = List.rev !atom_order in
+  let exact_covered =
+    List.fold_left
+      (fun matched idx -> if atom_matches_exact idx then Some idx else matched)
+      None
+      ordered_atoms
+  in
+  let covered_atom =
+    match exact_covered with
+    | Some _ as hit -> hit
+    | None ->
+      (* Fallback when [compact_evicted_messages] compacted a non-prefix subset
+         (so atom [idx] was re-indexed to a smaller [target_idx] inside
+         [evicted_messages]): match by full-atom content hash for the earliest
+         atom at or after [target_idx] so repeated live-epoch turns with the
+         same content hash (e.g. autonomous ["Continue."] turns) never advance
+         the cut mid-epoch and bust the prompt cache. *)
+      (match parse_atom_turn_id target with
+       | None -> None
+       | Some (target_idx, target_hash) ->
+         List.find_opt
+           (fun idx ->
+              idx >= target_idx && String.equal (snd (atom_hash idx)) target_hash)
+           ordered_atoms)
+  in
+  let db_anchor_pos =
+    match covered_atom with
+    | None -> -1
+    | Some covered_idx ->
+      let last_covered_pos = ref (-1) in
+      List.iteri
+        (fun pos (_msg, label) ->
+           match label with
+           | Runtime_model_input_tail_window.Atom idx when idx = covered_idx ->
+             last_covered_pos := pos
+           | Runtime_model_input_tail_window.Atom _
+           | Runtime_model_input_tail_window.Pinned -> ())
+        labelled;
+      !last_covered_pos
+  in
+  let cut_pos = max !inline_pos db_anchor_pos in
+  if cut_pos < 0
+  then messages
+  else List.filteri (fun pos _ -> pos > cut_pos) messages
 ;;
 
 let live_history_after_latest_anchor ~keepers_dir ~keeper_id messages =

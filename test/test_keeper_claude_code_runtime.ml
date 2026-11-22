@@ -6036,19 +6036,53 @@ let test_streamed_text_to_live_consumer_fences_failover () =
                      | _ ->
                        fail ("expected Provider_attempt_effect_fenced, got: "
                              ^ Agent_core.Error.to_string err)));
-                 (* Without a live stream consumer (e.g. autonomous turn with progress-only
-                    observer), zero-tool partial text under Native_none still rotates cleanly. *)
+                 (* Autonomous keepalive turns always pass a non-None [on_event]
+                    observer ([Keeper_autonomous_stream]) that isolates runtime
+                    attempts via [response_scope]. Verify [live_stream_consumer_for_turn]
+                    is [false] for autonomous turns even with [Some on_event], [true]
+                    only for direct streaming turns, and that an autonomous observer
+                    receiving partial [TextDelta] still rotates cleanly on zero-tool
+                    [Native_none] transport drops. *)
+                 check bool "Direct + Some on_event is live stream consumer" true
+                   (Keeper_agent_run.For_testing.live_stream_consumer_for_turn
+                      ~turn_kind:Turn_record.Direct
+                      ~on_event:(Some (fun _ -> ())));
+                 check bool "Direct + None on_event is not live stream consumer" false
+                   (Keeper_agent_run.For_testing.live_stream_consumer_for_turn
+                      ~turn_kind:Turn_record.Direct
+                      ~on_event:None);
+                 check bool "Autonomous + Some on_event is not live stream consumer" false
+                   (Keeper_agent_run.For_testing.live_stream_consumer_for_turn
+                      ~turn_kind:Turn_record.Autonomous
+                      ~on_event:(Some (fun _ -> ())));
+                 check bool "Autonomous + None on_event is not live stream consumer" false
+                   (Keeper_agent_run.For_testing.live_stream_consumer_for_turn
+                      ~turn_kind:Turn_record.Autonomous
+                      ~on_event:None);
+                 let bg_observed = ref [] in
+                 let bg_on_event = function
+                   | Agent_core.Types.ContentBlockDelta { delta = TextDelta t; _ } ->
+                     bg_observed := t :: !bg_observed
+                   | _ -> ()
+                 in
+                 let bg_live_stream_consumer =
+                   Keeper_agent_run.For_testing.live_stream_consumer_for_turn
+                     ~turn_kind:Turn_record.Autonomous
+                     ~on_event:(Some bg_on_event)
+                 in
                  let attempted_bg, outcome_bg =
                    run_claude_failover_lane_with_stream
-                     ~live_stream_consumer:false
-                     ~on_event:(fun _ -> ())
+                     ~live_stream_consumer:bg_live_stream_consumer
+                     ~on_event:bg_on_event
                      ~base_path:base_path_bg
                      ~first_cli:partial_cli
                      ~second_cli:backup_cli
                      ()
                  in
+                 check bool "autonomous observer still saw candidate 1 partial text" true
+                   (List.mem "ALREADY_STREAMED_TO_USER" !bg_observed);
                  check (list string)
-                   "non-live progress observer still rotates on zero-tool Native_none transport drop"
+                   "autonomous observer still rotates on zero-tool Native_none transport drop"
                    [ "claude_first.claude"; "claude_second.claude" ]
                    attempted_bg;
                  match outcome_bg with

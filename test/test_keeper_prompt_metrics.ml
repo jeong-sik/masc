@@ -1099,7 +1099,7 @@ let test_prompt_context_presence_for_owner_distinguishes_official_client () =
     ; prompt_carrier (Option.get assembly.extra_system_context)
     ]
   in
-  match
+  (match
     KAPM.provider_content_of_transmitted
       ~outside_context_present:official_presence.outside_context_present
       ~prompt_context_present:official_presence.system_context_present
@@ -1110,7 +1110,123 @@ let test_prompt_context_presence_for_owner_distinguishes_official_client () =
       (KAPM.provenance_failure_summary failure)
   | Ok retained ->
     check int "Official_client unsplit System_context stripped cleanly" 1
-      (List.length retained)
+      (List.length retained));
+  (* Turn-block-only (Completion_authority / Goals_awaiting_proof) and mixed
+     assemblies must agree between [Host.prepare_turn] and
+     [prompt_context_presence_for_owner] on BOTH official-client projection
+     patterns:
+       - Codex / Claude Code: [~model_input_projection:(Some ...)] inside
+         [Host.prepare_turn]
+       - Antigravity CLI / ACP: [~model_input_projection:None] inside
+         [Host.prepare_turn], projecting [prepared.messages] right after. *)
+  let check_official_prepare_turn_paths label ~blocks ~expect_carrier =
+    let case_assembly =
+      KRP.assemble_request_context
+        ~checkpoint_owner:Runtime_execution.Official_client
+        ~system
+        ~post_tool_round:false
+        ~previous_assembly:None
+        ~dynamic_context_partition:None
+        ~existing_extra_system_context:None
+        ~blocks
+    in
+    let presence =
+      KAR.prompt_context_presence_for_owner
+        ~checkpoint_owner:(Some Runtime_execution.Official_client)
+        (Some case_assembly)
+    in
+    check bool (label ^ ": system_context_present matches transmitted_carrier_receipt")
+      expect_carrier presence.system_context_present;
+    check bool (label ^ ": outside_context_present is false for Official_client")
+      false presence.outside_context_present;
+    let hooks =
+      { Agent_core.Hooks.empty with
+        before_turn_params =
+          Some
+            (function
+              | Agent_core.Hooks.BeforeTurnParams { current_params; _ } ->
+                Agent_core.Hooks.AdjustParams
+                  { current_params with
+                    extra_system_context = case_assembly.extra_system_context
+                  ; system_prompt_override =
+                      Masc.Keeper_context_assembly.system_prompt_override
+                        ~previous:current_params.system_prompt_override
+                        case_assembly
+                  }
+              | _ -> Agent_core.Hooks.Continue)
+      }
+    in
+    let check_projection path_label projected_messages =
+      match
+        KAPM.provider_content_of_transmitted
+          ~outside_context_present:presence.outside_context_present
+          ~prompt_context_present:presence.system_context_present
+          ~messages:projected_messages
+      with
+      | Error failure ->
+        failf "%s (%s): unexpected provenance failure: %s" label path_label
+          (KAPM.provenance_failure_summary failure)
+      | Ok retained ->
+        check int (label ^ " (" ^ path_label ^ "): durable user message retained") 1
+          (List.length retained)
+    in
+    (* Path A: Codex / Claude Code (projection runs inside Host.prepare_turn) *)
+    let inside_projected = ref None in
+    (match
+       Masc.Keeper_official_client_host.prepare_turn
+         ~runtime_label:"codex-claude-path"
+         ~keeper_name:"test-keeper"
+         ~turn_count:1
+         ~system_prompt:"Base system prompt"
+         ~tools:[]
+         ~initial_messages:[ message "user turn" ]
+         ~model_input_projection:
+           (Some
+              (fun ~tools:_ msgs ->
+                 inside_projected := Some msgs;
+                 Ok msgs))
+         ~hooks:(Some hooks)
+         ~composed_context:(Some (fun () -> Some case_assembly))
+         ~configured_reasoning_effort:None
+     with
+     | Error err ->
+       failf "%s (inside prepare_turn): %s" label (Agent_core.Error.to_string err)
+     | Ok _ ->
+       check_projection "Codex/Claude inside prepare_turn"
+         (Option.get !inside_projected));
+    (* Path B: Antigravity CLI / ACP (projection runs after Host.prepare_turn) *)
+    match
+      Masc.Keeper_official_client_host.prepare_turn
+        ~runtime_label:"antigravity-acp-path"
+        ~keeper_name:"test-keeper"
+        ~turn_count:1
+        ~system_prompt:"Base system prompt"
+        ~tools:[]
+        ~initial_messages:[ message "user turn" ]
+        ~model_input_projection:None
+        ~hooks:(Some hooks)
+        ~composed_context:(Some (fun () -> Some case_assembly))
+        ~configured_reasoning_effort:None
+    with
+    | Error err ->
+      failf "%s (after prepare_turn): %s" label (Agent_core.Error.to_string err)
+    | Ok prepared ->
+      check_projection "Antigravity/ACP after prepare_turn" prepared.messages
+  in
+  check_official_prepare_turn_paths
+    "turn-block-only (Completion_authority + Goals_awaiting_proof)"
+    ~blocks:
+      [ Prompt_block_id.Completion_authority, "Approved task-1"
+      ; Prompt_block_id.Goals_awaiting_proof, "Goal-1 awaiting proof"
+      ]
+    ~expect_carrier:false;
+  check_official_prepare_turn_paths
+    "mixed (Dynamic_context + Completion_authority)"
+    ~blocks:
+      [ Prompt_block_id.Dynamic_context, "FLEET-WORLD"
+      ; Prompt_block_id.Completion_authority, "Approved task-1"
+      ]
+    ~expect_carrier:true
 ;;
 
 let () =

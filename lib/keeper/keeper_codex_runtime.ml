@@ -1103,13 +1103,13 @@ let native_cwd ~base_path ~keeper_name ~sandbox_profile =
              else ensure_no_symlink_in_prefix next rest
            | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ())
       in
-      (match ensure_no_symlink_in_prefix base_path segments with
+      (match ensure_no_symlink_in_prefix canonical_base segments with
        | Error _ as err -> err
        | Ok () ->
          let dir =
            List.fold_left
              Filename.concat
-             (Common.masc_dir_from_base_path ~base_path)
+             (Common.masc_dir_from_base_path ~base_path:canonical_base)
              [ "official-clients"; "codex-workspaces"; identity ]
          in
          Fs_compat.mkdir_p dir;
@@ -1119,14 +1119,8 @@ let native_cwd ~base_path ~keeper_name ~sandbox_profile =
          else if st.Unix.st_uid <> Unix.geteuid ()
          then unusable "the Keeper Codex workspace must be owned by the current user"
          else (
-           let expected =
-             List.fold_left
-               Filename.concat
-               (Common.masc_dir_from_base_path ~base_path:canonical_base)
-               [ "official-clients"; "codex-workspaces"; identity ]
-           in
            let canonical = Unix.realpath dir in
-           if not (String.equal canonical (Env_config_core.strip_trailing_slashes expected))
+           if not (String.equal canonical (Env_config_core.strip_trailing_slashes dir))
            then unusable "the Keeper Codex workspace must not traverse symbolic links"
            else (
              Unix.chmod canonical 0o700;

@@ -1784,6 +1784,35 @@ let test_p1_5_live_history_after_latest_anchor_scopes_tool_carry () =
   check (list string) "reindexed evicted atom still slices strictly after atom 1"
     [ "svc_live_c" ]
     (tool_names_in (Keeper_compaction.messages_after_anchor ~anchor:reindexed_anchor full_history));
+  (* When a later live-epoch turn repeats the exact same atom content hash as
+     a compacted re-indexed atom (e.g. repeated autonomous "Continue." turns),
+     messages_after_anchor must anchor at the earliest valid atom so live-epoch
+     carried tools are never dropped mid-epoch (zero prompt-cache bust). *)
+  let repeated_history = atom0 @ atom1 @ atom2 @ atom1 in
+  check (list string)
+    "reindexed anchor matches earliest valid atom and keeps live-epoch tools despite repeated later turn"
+    [ "svc_live_c"; "svc_old_b" ]
+    (tool_names_in
+       (Keeper_compaction.messages_after_anchor ~anchor:reindexed_anchor repeated_history));
+  (* When messages carry an older inline compaction anchor (e.g. epoch 1 after
+     atom0) while the persisted DB anchor has advanced to epoch 2 (covering
+     atom1), slice strictly past max(inline_pos, db_anchor_pos) so epoch-2
+     compacted messages do not leak back into tool carry. *)
+  let older_inline_anchor : Agent_core.Types.message =
+    { origin = Agent_core.Llm_provider.Types.Historical_system_context
+    ; role = Agent_core.Types.System
+    ; content = [ Agent_core.Types.Text "epoch-1 handoff" ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = Runtime_model_input_tail_window.compaction_anchor_metadata
+    }
+  in
+  let history_with_stale_inline = atom0 @ [ older_inline_anchor ] @ atom1 @ atom2 in
+  check (list string)
+    "newer DB covers_through_turn advances past an older inline compaction anchor"
+    [ "svc_live_c" ]
+    (tool_names_in
+       (Keeper_compaction.messages_after_anchor ~anchor history_with_stale_inline));
   (* Unmatched covers_through_turn fails open to full history so live turns are never dropped. *)
   let unrelated_anchor =
     { anchor with covers_through_turn = Ids.Turn_id.of_string "turn-not-in-history" }

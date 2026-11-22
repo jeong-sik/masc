@@ -24,8 +24,6 @@ let rolled_up_section_names =
     "disk_observation";
     "keeper_fleet_safety";
     "keeper_identity_drift";
-    "keeper_memory_execution";
-    "keeper_memory_attention";
     "publication_recovery_activation";
     "keeper_reaction_ledger";
     "keeper_owner";

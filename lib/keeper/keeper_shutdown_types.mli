@@ -34,10 +34,6 @@ type dashboard_purge_artifact =
   | Keeper_root_logs_artifact
   | Keeper_runtime_directory_artifact
   | Keeper_memory_current_artifact
-  | Keeper_librarian_range_receipt_artifact
-  | Keeper_librarian_unread_ledger_artifact
-  | Keeper_memory_admission_queue_artifact
-      (** Independent pending inputs: removed by whole-Keeper purge, not checkpoint purge. *)
   | Keeper_memory_epoch_artifact
   | Keeper_memory_publication_artifact
   | Keeper_memory_retraction_plan_artifact
@@ -51,10 +47,6 @@ type dashboard_purge_artifact =
   | Keeper_memory_log_lock_artifact
   | Keeper_memory_writer_lock_artifact
   | Keeper_memory_events_artifact
-  | Keeper_turn_boundaries_artifact
-  | Keeper_librarian_progress_artifact
-  | Keeper_external_read_cursor_artifact
-  | Keeper_librarian_official_progress_artifact
   | Keeper_playground_bundles_artifact
   | Keeper_runtime_configuration_artifact
   | Keeper_configuration_artifact

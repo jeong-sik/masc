@@ -213,7 +213,7 @@ let test_reports_revision_snapshot_bytes_and_latest_delta () =
   let keeper = keeper_obj "solo" json in
   Alcotest.(check string)
     "schema"
-    "keeper.memory_os.current_health.v18"
+    "keeper.memory_os.current_health.v19"
     (string_field "schema" json);
   Alcotest.(check int) "revision" 2 (int_field "revision" keeper);
   Alcotest.(check int) "facts" 2 (int_field "facts" keeper);
@@ -457,7 +457,7 @@ let test_sorts_by_snapshot_bytes_and_handles_empty_store () =
   let empty_base = fresh_dir "masc-memory-health-empty" in
   let empty = Health.keeper_memory_health_http_json ~base_path:empty_base in
   Alcotest.(check (list string)) "empty keepers" [] (keeper_ids empty);
-  Alcotest.(check int) "empty unread total" 0 (int_field "librarian_unread_turns" (totals empty));
+  Alcotest.(check int) "empty facts" 0 (int_field "facts" (totals empty));
   Alcotest.(check int) "empty bytes" 0 (int_field "snapshot_bytes" (totals empty))
 ;;
 
@@ -683,7 +683,7 @@ let test_one_keepers_row_is_its_fleet_row () =
   let fleet = Health.keeper_memory_health_http_json ~base_path:base in
   let answer = Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:"solo" in
   Alcotest.(check string) "the row answer names the fleet schema"
-    "keeper.memory_os.current_health.v18" (string_field "schema" answer);
+    "keeper.memory_os.current_health.v19" (string_field "schema" answer);
   Alcotest.(check bool) "the row is the fleet's row for the Keeper" true
     (Yojson.Safe.equal (keeper_obj "solo" fleet) (member "keeper" answer));
   let row_of keeper =
@@ -695,13 +695,11 @@ let test_one_keepers_row_is_its_fleet_row () =
     (Yojson.Safe.equal `Null (row_of "../solo"))
 ;;
 
-(* The totals count the rows: unread turns go unknown with one unmeasured
-   row, the continuity lag sums the measured rows and counts the rest, and
-   the alert summary counts each severity. *)
+(* The totals count the rows and the alert summary counts each severity. *)
 let test_totals_count_the_rows () =
   let module Totals = Masc.Keeper_memory_health_totals in
-  let row ?(unread = Some (1, 2)) ?(continuity = Some 3) ?(alerts = []) ?(failures = 0)
-      ?(snapshot_present = true) ?(stopped = false) ?(attention = false) ?(read_error = false) facts : Totals.Row.t =
+  let row ?(alerts = []) ?(failures = 0)
+      ?(snapshot_present = true) ?(read_error = false) facts : Totals.Row.t =
     { Totals.Row.facts
     ; observed_facts = facts
     ; derived_facts = 0
@@ -712,47 +710,31 @@ let test_totals_count_the_rows () =
     ; source_facts = 0
     ; source_invalidations = 0
     ; source_snapshot_bytes = 0
-    ; unread_atom_turns = Option.map fst unread
-    ; unread_official_turns = Option.map snd unread
-    ; continuity_unread_atoms = continuity
     ; librarian_failures = failures
     ; vision_ingest_errors = 0
     ; read_error
     ; source_read_error = false
     ; snapshot_present
-    ; librarian_stopped = stopped
-    ; librarian_attention_required = attention
     ; alerts
     }
   in
-  let measured = Totals.of_rows [ row 2; row 3 ~continuity:None ] in
+  let measured = Totals.of_rows [ row 2; row 3 ] in
   Alcotest.(check int) "facts are summed" 5 measured.Totals.facts;
-  Alcotest.(check (option int)) "unread turns are summed when every row is measured" (Some 6)
-    measured.Totals.librarian_unread_turns;
-  Alcotest.(check int) "the continuity lag sums the measured rows" 3
-    measured.Totals.librarian_continuity_unread_atoms;
-  Alcotest.(check int) "and counts the rest" 1 measured.Totals.librarian_continuity_unmeasured;
   let mixed =
     Totals.of_rows
-      [ row 1 ~unread:None ~failures:1 ~snapshot_present:false ~stopped:true ~read_error:true
+      [ row 1 ~failures:1 ~snapshot_present:false ~read_error:true
           ~alerts:[ Totals.Alert_warn; Totals.Alert_error ]
-      ; row 1 ~attention:true
+      ; row 1
       ]
   in
-  Alcotest.(check (option int)) "one unmeasured row leaves unread turns unknown" None
-    mixed.Totals.librarian_unread_turns;
   Alcotest.(check int) "warn alerts" 1 mixed.Totals.warn_alerts;
   Alcotest.(check int) "error alerts" 1 mixed.Totals.error_alerts;
   Alcotest.(check int) "every alert" 2 mixed.Totals.total_alerts;
   Alcotest.(check int) "Keepers with alerts" 1 mixed.Totals.keepers_with_alerts;
   Alcotest.(check int) "read errors" 1 mixed.Totals.read_errors;
-  Alcotest.(check int) "stopped Keepers" 1 mixed.Totals.librarian_stopped_keepers;
-  Alcotest.(check int) "attention is counted separately from stopped" 1
-    mixed.Totals.librarian_attention_required_keepers;
   Alcotest.(check int) "a Keeper with failures and no snapshot starves" 1
     mixed.Totals.librarian_starving_keepers;
-  Alcotest.(check (option int)) "no row is a measured zero" (Some 0)
-    (Totals.of_rows []).Totals.librarian_unread_turns
+  Alcotest.(check int) "empty rows have zero facts" 0 (Totals.of_rows []).Totals.facts
 ;;
 
 let test_a_merged_row_is_the_fleet_read_after_the_write () =

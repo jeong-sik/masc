@@ -8,56 +8,12 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_agent_result
 
-(* Where this finished turn left the durable history (RFC librarian-lifecycle
-   §4.6). The checkpoint in hand is the one the save returned, trimmed the way
-   it was stored. An agent-core turn with no saved checkpoint is the store's
-   stale no-op -- a missing checkpoint is an [Error] that never reaches here --
-   and says so in its line rather than leaving no line. *)
-let turn_boundary_position ~checkpoint_owner saved_checkpoint =
-  match saved_checkpoint with
-  | Some checkpoint ->
-    Keeper_turn_boundaries.position_of_messages checkpoint.Agent_core.Checkpoint.messages
-  | None ->
-    (match checkpoint_owner with
-     | Runtime_execution.Official_client -> Ok Keeper_turn_boundaries.No_atom_history
-     | Runtime_execution.Masc_agent_core -> Ok Keeper_turn_boundaries.Stale_noop)
-;;
-
-(* The checkpoint is already durable when this runs, so a line that cannot be
-   built or written is reported and the turn still finishes. That holds for an
-   exception as well as an [Error]: past this point the turn has a saved
-   checkpoint and no receipt yet, so nothing raised here may escape except a
-   cancellation. After a failure the next line's span covers both turns. *)
-type boundary_recording = Recorded | Not_recorded
-
-let record_turn_boundary
-      ~task_context
-      ~config
+let persist_tool_observations
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~turn_ref
       ~session
-      ~checkpoint_owner
-      ~tool_observations
-      ~history_at_start
-      ~restart_notice_pending
-      saved_checkpoint
+      tool_observations
   =
-  let not_recorded ~site detail =
-    Log.Keeper.error
-      ~keeper_name:meta.name
-      "turn boundary not recorded turn=%d: %s"
-      (Ids.Turn_ref.absolute_turn turn_ref)
-      detail;
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string TurnBoundaryFailures)
-      ~labels:[ "keeper", meta.name; "site", site ]
-      ();
-    Not_recorded
-  in
-  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-  (* This function owns the durable commit order for a finished turn. Keeping
-     the observations here makes it impossible to move them below the turn's
-     end line without changing this function. *)
   List.iter
     (fun (detail : Keeper_agent_result.tool_call_detail) ->
        Keeper_context_runtime.persist_tool_observation
@@ -67,45 +23,7 @@ let record_turn_boundary
          ~tool_name:
            (Keeper_tool_descriptor_resolution.canonical_tool_name detail.tool_name)
          ~outcome:detail.execution_outcome)
-    tool_observations;
-  (* Outside the position below, and before the line that ends the turn.
-     Before, because a reader takes a restart that follows a line as proof
-     that the line's history is gone and would drop this turn's own atoms.
-     Outside, because this line carries no position: a turn whose digest
-     cannot be built still restarted the history, and tying the two together
-     would lose both records of that restart on one failure. *)
-  if
-    Keeper_agent_run_turn_helpers.restart_line_owed_at_finalize
-      ~notice_pending:(Atomic.exchange restart_notice_pending false)
-      ~saved_checkpoint_present:(Option.is_some saved_checkpoint)
-  then
-    Keeper_agent_run_turn_helpers.record_history_restart
-      ~config
-      ~keeper_name:meta.name
-      ~trace_id
-      Keeper_agent_run_turn_helpers.After_first_save;
-  match turn_boundary_position ~checkpoint_owner saved_checkpoint with
-  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  | exception exn -> not_recorded ~site:"position" (Printexc.to_string exn)
-  | Error detail -> not_recorded ~site:"position" detail
-  | Ok position ->
-    let record : Keeper_turn_boundaries.record =
-      { recorded_at = Time_compat.now ()
-      ; event =
-          Keeper_turn_boundaries.Turn_ended { turn_ref; task_context; history_at_start; position }
-      }
-    in
-    (match
-       Keeper_turn_boundaries.append
-         ~keepers_dir:(Workspace.keepers_runtime_dir config)
-         ~keeper_id:meta.name
-         record
-     with
-     | Ok () -> Recorded
-     | Error error ->
-       not_recorded ~site:"append" (Keeper_turn_boundaries.append_error_to_string error)
-     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-     | exception exn -> not_recorded ~site:"append" (Printexc.to_string exn))
+    tool_observations
 ;;
 
 (* The ledger line of a turn an official client answered (RFC
@@ -135,41 +53,22 @@ let record_client_turn
 
 (* An official-client turn that failed never reaches [finalize], yet its input
    is already a fragment of its [turn_ref] and the tools it called may already
-   have acted. Its end line names the turn so a Librarian round reads what it
-   left (RFC librarian-lifecycle §10-3). It saved no checkpoint and kept no
-   assistant text, so the line is [No_atom_history] and the round reads the
-   input and the tool observations. It settled no session, so its ledger line
-   names none. *)
-let record_errored_official_turn_boundary
-      ~task_context
+   have acted. Persist its tool observations and official-client ledger line
+   (with no settled session) and notify the working-context pass. *)
+let record_errored_official_turn
       ~config
       ~meta
       ~turn_ref
       ~session
       ~tool_observations
-      ~history_at_start
-      ~restart_notice_pending
   =
   record_client_turn ~config ~meta ~turn_ref ~settled_session:None;
-  match record_turn_boundary
-    ~task_context
-    ~config
-    ~meta
-    ~turn_ref
-    ~session
-    ~checkpoint_owner:Runtime_execution.Official_client
-    ~tool_observations
-    ~history_at_start
-    ~restart_notice_pending
-    None with
-  | Not_recorded -> ()
-  | Recorded ->
-    Keeper_agent_run_post_turn_memory.completed_history_changed
-      ~config ~keeper_name:meta.name
+  persist_tool_observations ~meta ~turn_ref ~session tool_observations;
+  Keeper_agent_run_post_turn_memory.completed_history_changed
+    ~config ~keeper_name:meta.name
 ;;
 
 let finalize
-    ~task_context
     ~config
     ~meta
     ~manifest_keeper_turn_id
@@ -186,8 +85,6 @@ let finalize
     ~runtime_id_string
     ~max_context
     ~checkpoint_owner
-    ~history_at_start
-    ~(restart_notice_pending : bool Atomic.t)
     ~official_client_settlement
     ~history_messages
     ~prompt_metrics
@@ -528,22 +425,9 @@ let finalize
             "canonical turn store commit skipped turn=%d: %s"
             manifest_keeper_turn_id
             (Keeper_canonical_turn_store.store_error_to_string err)));
-    let (_ : boundary_recording) = record_turn_boundary
-      ~task_context
-      ~config
-      ~meta
-      ~turn_ref
-      ~session
-      ~checkpoint_owner
-      ~tool_observations:
-        (match checkpoint_owner with
-         | Runtime_execution.Official_client -> List.rev acc.tool_calls
-         | Runtime_execution.Masc_agent_core -> [])
-      ~history_at_start
-      ~restart_notice_pending
-      saved_checkpoint in
     (match checkpoint_owner with
      | Runtime_execution.Official_client ->
+       persist_tool_observations ~meta ~turn_ref ~session (List.rev acc.tool_calls);
        record_client_turn
          ~config
          ~meta

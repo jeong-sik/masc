@@ -967,8 +967,6 @@ let test_purge_plan_removes_memory_sidecars () =
   let context = { Shutdown.requested_name = "keeper" } in
   let plan = Shutdown.dashboard_purge_artifact_plan ~keeper_name:"keeper" context in
   let contains artifact = List.exists (fun entry -> entry = artifact) plan in
-  check bool "plan removes cumulative unread evidence for a deleted keeper" true
-    (contains Shutdown.Keeper_librarian_unread_ledger_artifact);
   check bool "plan removes the Memory epoch of a deleted Keeper" true
     (contains Shutdown.Keeper_memory_epoch_artifact);
   check bool "plan removes the fact snapshot" true

@@ -5,15 +5,12 @@
 
 import { get, type AbortableRequestOptions } from './core'
 import { asNumber, isRecord } from '../components/common/normalize'
-import { decodeUnreadEvidence, type UnreadEvidence } from './librarian-unread'
 
 // --- Keeper Memory Health ---
 
 export type KeeperMemoryHealthAlertCode =
   | 'snapshot_read_error'
   | 'source_snapshot_read_error'
-  | 'librarian_stopped'
-  | 'librarian_attention_required'
   | 'librarian_failures'
   | 'librarian_starvation'
   | 'vision_ingest_errors'
@@ -23,8 +20,6 @@ export type KeeperMemoryHealthAlertSeverity = 'warn' | 'error'
 export type KeeperMemoryHealthAlertTarget =
   | 'snapshot_read_error'
   | 'source_snapshot_read_error'
-  | 'librarian_stopped'
-  | 'librarian_attention_required'
   | 'librarian_failures'
   | 'librarian_starvation'
   | 'vision_ingest_errors'
@@ -38,8 +33,6 @@ const KEEPER_MEMORY_HEALTH_ALERT_SEVERITY: Record<
 > = {
   snapshot_read_error: 'warn',
   source_snapshot_read_error: 'warn',
-  librarian_stopped: 'warn',
-  librarian_attention_required: 'warn',
   librarian_failures: 'warn',
   librarian_starvation: 'error',
   vision_ingest_errors: 'warn',
@@ -56,125 +49,6 @@ export interface KeeperMemoryHealthAlert {
 export interface KeeperMemoryHealthVisionErrorReason {
   reason: string
   count: number
-}
-
-// RFC librarian-lifecycle §4.9. What the keeper's Librarian loop measured
-// when its last pass ended. A null count is "not measured", not zero: the
-// loop is not running yet, or it could not place the read position.
-export type KeeperMemoryHealthLibrarianState =
-  | 'off'
-  | 'lane_unconfigured'
-  | 'drained'
-  | 'yielded_to_waiting_unit'
-  | 'pending'
-  | 'not_committed'
-  | 'stopped'
-  | 'raised'
-
-export type KeeperLibrarianWorkerPending = {
-  kind: 'worker'; installation_id: string; request_id: string;
-  wait: 'capacity' | 'processing' | 'outcome_unknown' | 'unreachable' | 'missing_after_dispatch' | 'journal_recheck'
-}
-
-export type KeeperLibrarianLocalFailure = { kind: 'local_failure'; detail: string }
-
-export type KeeperLibrarianPending =
-  | KeeperLibrarianWorkerPending
-  | { kind: 'publication' | 'message_floor'; request_id: string; detail: string }
-  | { kind: 'basis_changed'; request_id: string }
-  | KeeperLibrarianLocalFailure
-
-/** What the latest explicit-admission pass left unfinished: a worker wait or the pass's own failure. */
-export type KeeperLibrarianAdmission = KeeperLibrarianWorkerPending | KeeperLibrarianLocalFailure
-
-export interface KeeperMemoryHealthLibrarian {
-  state: KeeperMemoryHealthLibrarianState | null
-  detail: string | null
-  pending: KeeperLibrarianPending | null
-  admission_wait: KeeperLibrarianAdmission | null
-  operator_action_required: boolean
-  measured_at: number | null
-  unread_atom_turns: number | null
-  unread_official_turns: number | null
-  /**
-   * How far the continuity snapshot trails the Librarian's read position.
-   * A different lag from `unread_atom_turns`, which counts the durable
-   * drain: the two rounds fall behind separately. `null` means it could not
-   * be taken (no snapshot, an unreadable one, or one from another trace),
-   * which is not the same as being caught up.
-   */
-  continuity_unread_atoms: number | null
-  last_success_at: number | null
-  last_failure_kind: string | null
-  /**
-   * RFC librarian-lifecycle §4.10: the atoms the keeper's requests skip
-   * because the Librarian stands behind the start the provider last
-   * accepted. `gap_end_atom` is that start; the gap ends just before it.
-   * `null` while the Librarian point is at or past it. `unmeasured` when a
-   * file the gap is read from did not read: neither no gap nor a gap.
-   * An alarm, not a gate.
-   */
-  stalled: KeeperMemoryHealthLibrarianStalled | null
-}
-
-export type KeeperMemoryHealthLibrarianStallCause =
-  | 'meta_unreadable'
-  | 'turn_records_unreadable'
-  | 'turn_boundary_refused'
-  | 'snapshot_unreadable'
-  | 'read_position_unreadable'
-
-export type KeeperMemoryHealthLibrarianStalled =
-  | { kind: 'gap'; gap_start_atom: number; gap_end_atom: number }
-  | { kind: 'unmeasured'; cause: KeeperMemoryHealthLibrarianStallCause; detail: string }
-
-export interface ContextFrontier {
-  trace_id: string
-  end_atom: number
-  boundary_line: number
-}
-
-/** The Librarian's durable position: a request started here carries no
- *  summary of what lies before it, and the position has no boundary line. */
-export interface ContextPosition {
-  trace_id: string
-  end_atom: number
-}
-/** Local continuity stop branch, not a diagnosis of a provider or its output. */
-export type ContextSynthesisStopReason =
-  | 'source_read_failed' | 'history_resolution_required' | 'input_build_failed' | 'no_smaller_range_evidence'
-  | 'narrowed_for_next_signal' | 'indivisible_unit_uncommitted'
-  | 'observed_capacity_unfit' | 'observed_capacity_disagrees' | 'raised_during_pass'
-
-export interface ContextSynthesis {
-  stop_reason: ContextSynthesisStopReason | null
-  observed_at: number
-  trace_id: string | null
-  state: 'checking' | 'running' | 'committed' | 'no_source' | 'disabled'
-    | 'source_unavailable' | 'input_unavailable' | 'not_committed' | 'capacity_refused' | 'cancelled'
-  range: { start_atom: number; end_atom: number; completed_end_atom: number } | null
-}
-export interface ContextCycle {
-  unread: UnreadEvidence
-  synthesis: ContextSynthesis | null
-  saved: ContextFrontier | null
-  saved_read_error: 'snapshot_unreadable' | null
-  /** Where the Librarian has read to, beside where its snapshot cuts. A request
-   *  starts at the cut and carries the atoms up to here, so the two apart is
-   *  what the turn pays; the distance is the subtraction (#37793). */
-  read_position: number | null
-  read_position_read_error: 'progress_unreadable' | null
-  /** Where a snapshot being rewritten from atom 0 has to reach before a request
-   *  starts from it. Always past the saved cut. */
-  rewriting_through: number | null
-  prepared: {
-    prepared_at: number
-    runtime_id: string
-    input: { kind: 'summarized'; frontier: ContextFrontier }
-      | { kind: 'absorbed'; frontier: ContextPosition }
-      | { kind: 'without_snapshot' | 'not_applied'; frontier: null }
-    request_bytes: number
-  } | null
 }
 
 /** How many bins the server's memory age ladder has (RFC-0515 §2.4.5). */
@@ -246,10 +120,7 @@ export type KeeperMemoryWriterLevel = 'ok' | 'warn' | 'error'
 export type KeeperMemoryWriterAlarm = 'E1' | 'E2' | 'E3' | 'E4' | 'E5' | 'W1' | 'W2' | 'W3'
 
 /** The Keeper's Memory writer as its row carries it under `writer`: the one
- *  that commits to the Keeper's Memory. `librarian` is the Librarian that ran
- *  before it and says nothing of this writer. The dashboard draws none of the
- *  writer yet, so it reads the closed tags and leaves the fields each state
- *  carries unread. */
+ *  that commits to the Keeper's Memory. */
 export type KeeperMemoryWriter =
   /** The answering process runs no writer. */
   | { kind: 'none_in_process' }
@@ -284,9 +155,7 @@ export interface KeeperMemoryHealthKeeperEntry {
   /** Oldest first, one point per clock hour of the last {@link KEEPER_MEMORY_TREND_HOURS}. */
   facts_by_hour: KeeperMemoryFactsAtHour[]
   changes_since_start: KeeperMemoryChangesByPass
-  librarian: KeeperMemoryHealthLibrarian
   writer: KeeperMemoryWriter
-  context_cycle: ContextCycle
   librarian_failures: number
   vision_ingest_errors: number
   vision_ingest_error_reasons: KeeperMemoryHealthVisionErrorReason[]
@@ -301,7 +170,7 @@ export interface KeeperMemoryHealthKeeperEntry {
 }
 
 export interface KeeperMemoryHealthResponse {
-  schema: 'keeper.memory_os.current_health.v18'
+  schema: 'keeper.memory_os.current_health.v19'
   generated_at: number
   keepers: KeeperMemoryHealthKeeperEntry[]
   totals: {
@@ -315,9 +184,6 @@ export interface KeeperMemoryHealthResponse {
     source_facts: number
     source_invalidations: number
     source_snapshot_bytes: number
-    librarian_unread_turns: number | null
-    librarian_continuity_unread_atoms: number
-    librarian_continuity_unmeasured: number
     librarian_failures: number
     vision_ingest_errors: number
     read_errors: number
@@ -330,8 +196,6 @@ export interface KeeperMemoryHealthResponse {
     keepers_with_alerts: number
     snapshot_read_error_keepers: number
     source_snapshot_read_error_keepers: number
-    librarian_stopped_keepers: number
-    librarian_attention_required_keepers: number
     librarian_starving_keepers: number
   }
 }
@@ -366,8 +230,6 @@ function decodeKeeperMemoryHealthAlert(raw: unknown): KeeperMemoryHealthAlert | 
   const code =
     raw.code === 'snapshot_read_error'
     || raw.code === 'source_snapshot_read_error'
-    || raw.code === 'librarian_stopped'
-    || raw.code === 'librarian_attention_required'
     || raw.code === 'librarian_failures'
     || raw.code === 'librarian_starvation'
     || raw.code === 'vision_ingest_errors'
@@ -376,8 +238,6 @@ function decodeKeeperMemoryHealthAlert(raw: unknown): KeeperMemoryHealthAlert | 
   const target =
     raw.target === 'snapshot_read_error'
     || raw.target === 'source_snapshot_read_error'
-    || raw.target === 'librarian_stopped'
-    || raw.target === 'librarian_attention_required'
     || raw.target === 'librarian_failures'
     || raw.target === 'librarian_starvation'
     || raw.target === 'vision_ingest_errors'
@@ -407,301 +267,6 @@ function decodeVisionErrorReason(raw: unknown): KeeperMemoryHealthVisionErrorRea
   const reason = nonEmptyString(raw.reason)
   const count = nonNegativeInteger(raw.count)
   return reason === null || count === null || count === 0 ? null : { reason, count }
-}
-
-const KEEPER_MEMORY_HEALTH_LIBRARIAN_STATES: readonly KeeperMemoryHealthLibrarianState[] = [
-  'off',
-  'lane_unconfigured',
-  'drained',
-  'yielded_to_waiting_unit',
-  'pending',
-  'not_committed',
-  'stopped',
-  'raised',
-]
-
-function decodeKeeperLibrarianPending(raw: unknown): KeeperLibrarianPending | null {
-  if (!isRecord(raw)) return null
-  switch (raw.kind) {
-    case 'worker': {
-      if (!exactKeys(raw, ['kind', 'installation_id', 'request_id', 'wait'])) return null
-      const installation_id = nonEmptyString(raw.installation_id)
-      const request_id = nonEmptyString(raw.request_id)
-      const wait = raw.wait
-      if (!installation_id || !request_id) return null
-      switch (wait) {
-        case 'capacity': case 'processing': case 'outcome_unknown': case 'unreachable':
-        case 'missing_after_dispatch': case 'journal_recheck':
-          return { kind: 'worker', installation_id, request_id, wait }
-        default: return null
-      }
-    }
-    case 'publication': case 'message_floor': {
-      if (!exactKeys(raw, ['kind', 'request_id', 'detail'])) return null
-      const request_id = nonEmptyString(raw.request_id)
-      return request_id && typeof raw.detail === 'string'
-        ? { kind: raw.kind, request_id, detail: raw.detail } : null
-    }
-    case 'basis_changed': {
-      if (!exactKeys(raw, ['kind', 'request_id'])) return null
-      const request_id = nonEmptyString(raw.request_id)
-      return request_id ? { kind: 'basis_changed', request_id } : null
-    }
-    case 'local_failure':
-      return exactKeys(raw, ['kind', 'detail']) && typeof raw.detail === 'string'
-        ? { kind: 'local_failure', detail: raw.detail } : null
-    default: return null
-  }
-}
-
-function librarianPendingNeedsAttention(pending: KeeperLibrarianPending | null): boolean {
-  if (pending === null) return false
-  switch (pending.kind) {
-    case 'worker':
-      switch (pending.wait) {
-        case 'outcome_unknown': case 'missing_after_dispatch': return true
-        case 'capacity': case 'processing': case 'unreachable': case 'journal_recheck': return false
-      }
-    case 'local_failure': return true
-    case 'publication': case 'message_floor': case 'basis_changed': return false
-  }
-}
-
-function decodeKeeperMemoryHealthLibrarian(raw: unknown): KeeperMemoryHealthLibrarian | null {
-  if (!isRecord(raw) || !exactKeys(raw, [
-    'state',
-    'detail',
-    'pending',
-    'admission_wait',
-    'operator_action_required',
-    'measured_at',
-    'unread_atom_turns',
-    'unread_official_turns',
-    'continuity_unread_atoms',
-    'last_success_at',
-    'last_failure_kind',
-    'stalled',
-  ])) return null
-  const state = raw.state === null
-    ? null
-    : KEEPER_MEMORY_HEALTH_LIBRARIAN_STATES.find(known => known === raw.state) ?? null
-  if (raw.state !== null && state === null) return null
-  const pending = raw.pending === null ? null : decodeKeeperLibrarianPending(raw.pending)
-  if ((state === 'pending') !== (pending !== null) || (raw.pending !== null && pending === null)) return null
-  const admission = raw.admission_wait === null ? null : decodeKeeperLibrarianPending(raw.admission_wait)
-  const admission_wait = admission?.kind === 'worker' || admission?.kind === 'local_failure'
-    ? admission : null
-  if (raw.admission_wait !== null && admission_wait === null) return null
-  const operator_action_required = librarianPendingNeedsAttention(pending)
-    || librarianPendingNeedsAttention(admission_wait)
-  if (raw.operator_action_required !== operator_action_required) return null
-  const detail = raw.detail === null ? null : nonEmptyString(raw.detail)
-  if (raw.detail !== null && detail === null) return null
-  const measured_at = raw.measured_at === null ? null : finiteNumber(raw.measured_at)
-  if (raw.measured_at !== null && (measured_at === null || measured_at < 0)) return null
-  const unread_atom_turns = raw.unread_atom_turns === null
-    ? null
-    : nonNegativeInteger(raw.unread_atom_turns)
-  if (raw.unread_atom_turns !== null && unread_atom_turns === null) return null
-  const unread_official_turns = raw.unread_official_turns === null
-    ? null
-    : nonNegativeInteger(raw.unread_official_turns)
-  if (raw.unread_official_turns !== null && unread_official_turns === null) return null
-  // Read from the snapshot and the read position, not from the drain's
-  // measurement, so it is not weighed against measured_at below.
-  const continuity_unread_atoms = raw.continuity_unread_atoms === null
-    ? null
-    : nonNegativeInteger(raw.continuity_unread_atoms)
-  if (raw.continuity_unread_atoms !== null && continuity_unread_atoms === null) return null
-  const last_success_at = raw.last_success_at === null
-    ? null
-    : finiteNumber(raw.last_success_at)
-  if (raw.last_success_at !== null && (last_success_at === null || last_success_at < 0)) {
-    return null
-  }
-  const last_failure_kind = raw.last_failure_kind === null
-    ? null
-    : nonEmptyString(raw.last_failure_kind)
-  if (raw.last_failure_kind !== null && last_failure_kind === null) return null
-  const stalled = raw.stalled === null ? null : decodeLibrarianStalled(raw.stalled)
-  if (raw.stalled !== null && stalled === null) return null
-  // A count with no time it was taken at has nothing to say how old it is.
-  if (measured_at === null && (unread_atom_turns !== null || unread_official_turns !== null)) {
-    return null
-  }
-  return {
-    state,
-    detail,
-    pending,
-    admission_wait,
-    operator_action_required,
-    measured_at,
-    unread_atom_turns,
-    unread_official_turns,
-    continuity_unread_atoms,
-    last_success_at,
-    last_failure_kind,
-    stalled,
-  }
-}
-
-const LIBRARIAN_STALL_CAUSES: readonly KeeperMemoryHealthLibrarianStallCause[] = [
-  'meta_unreadable',
-  'turn_records_unreadable',
-  'turn_boundary_refused',
-  'snapshot_unreadable',
-  'read_position_unreadable',
-]
-
-function decodeLibrarianStallCause(raw: unknown): KeeperMemoryHealthLibrarianStallCause | null {
-  return LIBRARIAN_STALL_CAUSES.find(cause => cause === raw) ?? null
-}
-
-function decodeLibrarianStalled(raw: unknown): KeeperMemoryHealthLibrarianStalled | null {
-  if (!isRecord(raw)) return null
-  switch (raw.kind) {
-    case 'gap': {
-      if (!exactKeys(raw, ['kind', 'gap_start_atom', 'gap_end_atom'])) return null
-      const gap_start_atom = nonNegativeInteger(raw.gap_start_atom)
-      const gap_end_atom = nonNegativeInteger(raw.gap_end_atom)
-      if (gap_start_atom === null || gap_end_atom === null || gap_end_atom <= gap_start_atom) {
-        return null
-      }
-      return { kind: 'gap', gap_start_atom, gap_end_atom }
-    }
-    case 'unmeasured': {
-      if (!exactKeys(raw, ['kind', 'cause', 'detail'])) return null
-      const cause = decodeLibrarianStallCause(raw.cause)
-      if (cause === null || typeof raw.detail !== 'string') return null
-      return { kind: 'unmeasured', cause, detail: raw.detail }
-    }
-    default:
-      return null
-  }
-}
-
-function decodeContextFrontier(raw: unknown): ContextFrontier | null {
-  if (!isRecord(raw) || !exactKeys(raw, ['trace_id', 'end_atom', 'boundary_line'])) return null
-  const trace_id = nonEmptyString(raw.trace_id)
-  const end_atom = nonNegativeInteger(raw.end_atom)
-  const boundary_line = nonNegativeInteger(raw.boundary_line)
-  if (trace_id === null || end_atom === null || end_atom === 0
-    || boundary_line === null || boundary_line === 0) return null
-  return { trace_id, end_atom, boundary_line }
-}
-
-function decodeContextPosition(raw: unknown): ContextPosition | null {
-  if (!isRecord(raw) || !exactKeys(raw, ['trace_id', 'end_atom'])) return null
-  const trace_id = nonEmptyString(raw.trace_id)
-  const end_atom = nonNegativeInteger(raw.end_atom)
-  if (trace_id === null || end_atom === null || end_atom === 0) return null
-  return { trace_id, end_atom }
-}
-
-function decodeContextSynthesis(raw: unknown): ContextSynthesis | null {
-  if (!isRecord(raw) || !exactKeys(raw, ['observed_at', 'trace_id', 'state', 'stop_reason', 'range'])) return null
-  const observed_at = finiteNumber(raw.observed_at)
-  const trace_id = raw.trace_id === null ? null : nonEmptyString(raw.trace_id)
-  if (observed_at === null || observed_at < 0 || (raw.trace_id !== null && trace_id === null)) return null
-  const state = raw.state
-  switch (state) {
-    case 'checking': case 'running': case 'committed': case 'no_source': case 'disabled':
-    case 'source_unavailable': case 'input_unavailable': case 'not_committed': case 'capacity_refused': case 'cancelled':
-      break
-    default: return null
-  }
-  const stop_reason = raw.stop_reason
-  switch (stop_reason) {
-    case null: case 'source_read_failed': case 'history_resolution_required': case 'input_build_failed':
-    case 'no_smaller_range_evidence': case 'narrowed_for_next_signal':
-    case 'indivisible_unit_uncommitted': case 'observed_capacity_unfit':
-    case 'observed_capacity_disagrees': case 'raised_during_pass': break
-    default: return null
-  }
-  switch (state) {
-    case 'checking': case 'running': case 'committed': case 'no_source': case 'disabled': case 'cancelled':
-      if (stop_reason !== null) return null
-      break
-    case 'source_unavailable':
-      if (stop_reason !== null && stop_reason !== 'source_read_failed'
-        && stop_reason !== 'history_resolution_required') return null
-      break
-    case 'input_unavailable':
-      if (stop_reason !== 'input_build_failed') return null
-      break
-    case 'not_committed':
-      if (stop_reason !== 'no_smaller_range_evidence' && stop_reason !== 'narrowed_for_next_signal'
-        && stop_reason !== 'indivisible_unit_uncommitted' && stop_reason !== 'observed_capacity_unfit'
-        && stop_reason !== 'raised_during_pass') return null
-      break
-    case 'capacity_refused':
-      if (stop_reason !== 'observed_capacity_unfit' && stop_reason !== 'observed_capacity_disagrees') return null
-      break
-  }
-  let range: ContextSynthesis['range'] = null
-  if (raw.range !== null) {
-    if (!isRecord(raw.range) || !exactKeys(raw.range, ['start_atom', 'end_atom', 'completed_end_atom'])) return null
-    const start_atom = nonNegativeInteger(raw.range.start_atom)
-    const end_atom = nonNegativeInteger(raw.range.end_atom)
-    const completed_end_atom = nonNegativeInteger(raw.range.completed_end_atom)
-    if (start_atom === null || end_atom === null || completed_end_atom === null
-      || end_atom <= start_atom || completed_end_atom < end_atom || trace_id === null) return null
-    range = { start_atom, end_atom, completed_end_atom }
-  }
-  if ((state === 'running' || state === 'committed') && range === null) return null
-  return { observed_at, trace_id, state, stop_reason, range }
-}
-
-function decodeContextCycle(raw: unknown): ContextCycle | null {
-  if (!isRecord(raw) || !exactKeys(raw, ['saved', 'saved_read_error', 'read_position',
-    'read_position_read_error', 'rewriting_through', 'prepared', 'synthesis', 'unread'])) return null
-  const saved = raw.saved === null ? null : decodeContextFrontier(raw.saved)
-  if (raw.saved !== null && saved === null) return null
-  if (raw.saved_read_error !== null && raw.saved_read_error !== 'snapshot_unreadable') return null
-  if (saved !== null && raw.saved_read_error !== null) return null
-  const read_position = raw.read_position === null ? null : nonNegativeInteger(raw.read_position)
-  if (raw.read_position !== null && (read_position === null || read_position === 0)) return null
-  if (raw.read_position_read_error !== null && raw.read_position_read_error !== 'progress_unreadable') return null
-  if (read_position !== null && raw.read_position_read_error !== null) return null
-  const rewriting_through = raw.rewriting_through === null ? null : nonNegativeInteger(raw.rewriting_through)
-  if (raw.rewriting_through !== null && (rewriting_through === null || rewriting_through === 0)) return null
-  // The writer sets this only past the cut it belongs to, on a snapshot it read.
-  if (rewriting_through !== null && (saved === null || rewriting_through <= saved.end_atom)) return null
-  const synthesis = raw.synthesis === null ? null : decodeContextSynthesis(raw.synthesis)
-  if (raw.synthesis !== null && synthesis === null) return null
-  const unread = decodeUnreadEvidence(raw.unread)
-  if (unread === null) return null
-  if (raw.saved_read_error === 'snapshot_unreadable') {
-    if (unread.snapshot.kind !== 'unavailable') return null
-  } else {
-    if (unread.snapshot.kind !== 'available'
-      || (saved === null && unread.snapshot.messages.length !== 0)) return null
-  }
-  const result: ContextCycle = { unread, saved, saved_read_error: raw.saved_read_error, read_position,
-    read_position_read_error: raw.read_position_read_error, rewriting_through, prepared: null, synthesis }
-  if (raw.prepared === null) return result
-  const p = raw.prepared
-  if (!isRecord(p) || !exactKeys(p, ['prepared_at', 'runtime_id', 'input', 'request_bytes'])) return null
-  const prepared_at = finiteNumber(p.prepared_at)
-  const runtime_id = nonEmptyString(p.runtime_id)
-  const request_bytes = nonNegativeInteger(p.request_bytes)
-  if (prepared_at === null || prepared_at < 0 || runtime_id === null || request_bytes === null) return null
-  if (!isRecord(p.input) || !exactKeys(p.input, ['kind', 'frontier'])) return null
-  let input: NonNullable<ContextCycle['prepared']>['input']
-  if (p.input.kind === 'summarized') {
-    const frontier = decodeContextFrontier(p.input.frontier)
-    if (frontier === null) return null
-    input = { kind: 'summarized', frontier }
-  } else if (p.input.kind === 'absorbed') {
-    const frontier = decodeContextPosition(p.input.frontier)
-    if (frontier === null) return null
-    input = { kind: 'absorbed', frontier }
-  } else if ((p.input.kind === 'without_snapshot' || p.input.kind === 'not_applied')
-    && p.input.frontier === null) {
-    input = { kind: p.input.kind, frontier: null }
-  } else return null
-  result.prepared = { prepared_at, runtime_id, input, request_bytes }
-  return result
 }
 
 function decodeKeeperMemoryAgeBins(raw: unknown, expectedFacts: number): KeeperMemoryAgeBins | null {
@@ -847,9 +412,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     'age_bins',
     'facts_by_hour',
     'changes_since_start',
-    'librarian',
     'writer',
-    'context_cycle',
     'librarian_failures',
     'vision_ingest_errors',
     'vision_ingest_error_reasons',
@@ -877,8 +440,6 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     : null
   const facts_by_hour = decodeKeeperMemoryFactsByHour(raw.facts_by_hour)
   const changes_since_start = decodeKeeperMemoryChangesByPass(raw.changes_since_start)
-  const context_cycle = decodeContextCycle(raw.context_cycle)
-  const librarian = decodeKeeperMemoryHealthLibrarian(raw.librarian)
   const writer = decodeKeeperMemoryWriter(raw.writer)
   const librarian_failures = nonNegativeInteger(raw.librarian_failures)
   const vision_ingest_errors = nonNegativeInteger(raw.vision_ingest_errors)
@@ -921,8 +482,6 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     || (raw.age_bins !== null && age_bins === null)
     || facts_by_hour === null
     || changes_since_start === null
-    || context_cycle === null
-    || librarian === null
     || writer === null
     || librarian_failures === null
     || vision_ingest_errors === null
@@ -943,8 +502,6 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     new Set(visionReasons.map(reason => reason.reason)).size !== visionReasons.length
     || visionReasons.reduce((total, reason) => total + reason.count, 0) !== vision_ingest_errors
   ) return null
-  if (alerts.filter(alert => alert?.code === 'librarian_attention_required').length
-    !== (librarian.operator_action_required ? 1 : 0)) return null
   return {
     keeper_id,
     revision,
@@ -960,9 +517,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     age_bins,
     facts_by_hour,
     changes_since_start,
-    librarian,
     writer,
-    context_cycle,
     librarian_failures,
     vision_ingest_errors,
     vision_ingest_error_reasons: visionReasons,
@@ -979,13 +534,8 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
 
 function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | null {
   if (!isRecord(raw)) return null
-  const keys = Object.keys(raw)
-  const hasExecution = keys.includes('execution')
-  const expectedKeys = hasExecution
-    ? ['schema', 'generated_at', 'keepers', 'totals', 'alert_summary', 'execution']
-    : ['schema', 'generated_at', 'keepers', 'totals', 'alert_summary']
-  if (!exactKeys(raw, expectedKeys)) return null
-  if (raw.schema !== 'keeper.memory_os.current_health.v18') return null
+  if (!exactKeys(raw, ['schema', 'generated_at', 'keepers', 'totals', 'alert_summary'])) return null
+  if (raw.schema !== 'keeper.memory_os.current_health.v19') return null
   const generated_at = finiteNumber(raw.generated_at)
   const keepers = Array.isArray(raw.keepers)
     ? raw.keepers.map(decodeKeeperMemoryHealthEntry)
@@ -1013,9 +563,6 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     'source_facts',
     'source_invalidations',
     'source_snapshot_bytes',
-    'librarian_unread_turns',
-    'librarian_continuity_unread_atoms',
-    'librarian_continuity_unmeasured',
     'librarian_failures',
     'vision_ingest_errors',
     'read_errors',
@@ -1032,18 +579,6 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     source_facts: sum(entry => entry.source_facts),
     source_invalidations: sum(entry => entry.source_invalidations),
     source_snapshot_bytes: sum(entry => entry.source_snapshot_bytes),
-    librarian_unread_turns: entries.reduce<number | null>((total, entry) => {
-      const { unread_atom_turns: atoms, unread_official_turns: official } = entry.librarian
-      return total === null || atoms === null || official === null
-        ? null : total + atoms + official
-    }, 0),
-    // Summed over the keepers it could be taken for, with the rest counted
-    // beside it: a total that went null on one unmeasured keeper would hide
-    // every keeper that can be measured, and most carry no snapshot at all.
-    librarian_continuity_unread_atoms: entries.reduce(
-      (total, entry) => total + (entry.librarian.continuity_unread_atoms ?? 0), 0),
-    librarian_continuity_unmeasured: entries.reduce(
-      (count, entry) => count + (entry.librarian.continuity_unread_atoms === null ? 1 : 0), 0),
     librarian_failures: sum(entry => entry.librarian_failures),
     vision_ingest_errors: sum(entry => entry.vision_ingest_errors),
     read_errors: sum(entry => entry.read_error === null ? 0 : 1),
@@ -1058,8 +593,6 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     'keepers_with_alerts',
     'snapshot_read_error_keepers',
     'source_snapshot_read_error_keepers',
-    'librarian_stopped_keepers',
-    'librarian_attention_required_keepers',
     'librarian_starving_keepers',
   ])) return null
   const totalAlerts = sum(entry => entry.alerts.length)
@@ -1073,14 +606,6 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     snapshot_read_error_keepers: sum(entry => entry.read_error === null ? 0 : 1),
     source_snapshot_read_error_keepers: sum(entry =>
       entry.source_read_error === null ? 0 : 1),
-    librarian_stopped_keepers: sum(entry =>
-      entry.librarian.state === 'lane_unconfigured'
-      || entry.librarian.state === 'not_committed'
-      || entry.librarian.state === 'stopped'
-      || entry.librarian.state === 'raised'
-        ? 1
-        : 0),
-    librarian_attention_required_keepers: sum(entry => entry.librarian.operator_action_required ? 1 : 0),
     librarian_starving_keepers: sum(entry =>
       entry.librarian_failures > 0 && !entry.snapshot_present ? 1 : 0),
   }

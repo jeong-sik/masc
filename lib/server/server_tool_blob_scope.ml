@@ -63,8 +63,6 @@ let lane_addons =
         ; tree Lane_addon_store.exact_requests_directory
         ; tree Lane_addon_store.tool_request_owners_directory
         ; tree Lane_addon_store.tool_request_bodies_directory
-        ; tree Lane_addon_store.history_fences_directory
-        ; tree Lane_addon_store.history_resolutions_directory
         ; no_reference Lane_addon_store.observations_directory
         ; no_reference Lane_addon_store.sequences_directory
         ; no_reference Lane_addon_asks.dirname
@@ -278,18 +276,6 @@ let config_keepers =
        key. *)
   ; M.Keeper_files
       { suffix = Keeper_memory_absorbed.suffix
-      ; reason = M.Writes_no_reference
-      }
-  ; M.Keeper_files
-      { suffix = Keeper_memory_admission_queue.suffix
-      ; reason = M.Writes_no_reference
-      }
-  ; M.Keeper_files
-      { suffix = Keeper_librarian_unread_ledger.suffix
-      ; reason = M.Writes_no_reference
-      }
-  ; M.Keeper_files
-      { suffix = ".turn-boundaries.jsonl"
       ; reason = M.Writes_no_reference
       }
     (* A commit log line carries facts, the write or adoption that caused it,

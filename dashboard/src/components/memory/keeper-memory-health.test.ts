@@ -55,11 +55,6 @@ function makeEntry(
     age_bins: null,
     facts_by_hour: [],
     changes_since_start: noMemoryChanges(),
-    context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, unread: { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [] } }, prepared: null, synthesis: null },
-    librarian: { state: 'drained', detail: null, pending: null, admission_wait: null, operator_action_required: false, measured_at: 1_699_999_950,
-      unread_atom_turns: 0, unread_official_turns: 0,
-      continuity_unread_atoms: 0,
-      last_success_at: null, last_failure_kind: null, stalled: null },
     writer: { kind: 'no_writer' },
     librarian_failures: 0,
     vision_ingest_errors: 0,
@@ -86,8 +81,6 @@ function makeAlertSummary(
     keepers_with_alerts: 0,
     snapshot_read_error_keepers: 0,
     source_snapshot_read_error_keepers: 0,
-    librarian_stopped_keepers: 0,
-    librarian_attention_required_keepers: 0,
     librarian_starving_keepers: 0,
     ...overrides,
   }
@@ -99,7 +92,7 @@ function makeResponse(
   alertSummary = makeAlertSummary(),
 ): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v18',
+    schema: 'keeper.memory_os.current_health.v19',
     generated_at: 1_700_000_000,
     keepers,
     totals: {
@@ -113,9 +106,6 @@ function makeResponse(
       source_facts: 0,
       source_invalidations: 0,
       source_snapshot_bytes: 0,
-      librarian_unread_turns: 0,
-      librarian_continuity_unread_atoms: 0,
-      librarian_continuity_unmeasured: 0,
       librarian_failures: 0,
       vision_ingest_errors: 0,
       read_errors: 0,
@@ -152,7 +142,7 @@ describe('KeeperMemoryHealth', () => {
   })
 
   it.each([
-    ['attention', 'success'], ['attention', 'failure'],
+    ['alert', 'success'], ['alert', 'failure'],
     ['failure', 'success'], ['failure', 'failure'],
   ] as const)('keeps the latest refresh %s after an older %s arrives', async (latest, olderOutcome) => {
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
@@ -164,25 +154,24 @@ describe('KeeperMemoryHealth', () => {
     await act(async () => { window.dispatchEvent(new Event('focus')) })
     expect(mockFetch).toHaveBeenCalledTimes(2)
 
-    const attention = makeEntry()
-    attention.librarian = { ...attention.librarian, operator_action_required: true,
-      state: 'pending', pending: { kind: 'worker', installation_id: 'original-installation',
-        request_id: 'original-request', wait: 'missing_after_dispatch' } }
-    attention.alerts = [{ code: 'librarian_attention_required', severity: 'warn',
-      target: 'librarian_attention_required', label: 'Librarian', message: 'Inspect the recovery evidence' }]
-    const payload = { ...makeResponse([attention], {}, makeAlertSummary({
-      total_alerts: 1, warn_alerts: 1, keepers_with_alerts: 1, librarian_attention_required_keepers: 1,
+    const degraded = makeEntry({
+      read_error: 'snapshot unreadable',
+      alerts: [{ code: 'snapshot_read_error', severity: 'warn',
+        target: 'snapshot_read_error', label: '읽기', message: 'snapshot unreadable' }],
+    })
+    const payload = { ...makeResponse([degraded], { read_errors: 1 }, makeAlertSummary({
+      total_alerts: 1, warn_alerts: 1, keepers_with_alerts: 1, snapshot_read_error_keepers: 1,
     })), generated_at: 1_700_000_010 }
     await act(async () => {
-      if (latest === 'attention') newer.resolve(payload)
+      if (latest === 'alert') newer.resolve(payload)
       else newer.reject(new Error('latest refresh failed'))
     })
     await waitFor(() => {
-      if (latest === 'attention') expect(statValue(container, 'librarian-attention-required')?.trim()).toBe('1')
+      if (latest === 'alert') expect(statValue(container, 'read-errors')?.trim()).toBe('1')
       else expect(screen.getByText('데이터 로드 실패: latest refresh failed')).not.toBeNull()
     })
     const acceptedObservation = container.querySelector('.kmh-refresh-label')?.textContent
-    if (latest === 'attention') expect(statValue(container, 'librarian-attention-required')?.trim()).toBe('1')
+    if (latest === 'alert') expect(statValue(container, 'read-errors')?.trim()).toBe('1')
     else expect(screen.getByText('데이터 로드 실패: latest refresh failed')).not.toBeNull()
 
     await act(async () => {
@@ -190,8 +179,8 @@ describe('KeeperMemoryHealth', () => {
       else older.reject(new Error('old failure'))
     })
     expect(screen.queryByText('old-healthy')).toBeNull()
-    if (latest === 'attention') {
-      expect(statValue(container, 'librarian-attention-required')?.trim()).toBe('1')
+    if (latest === 'alert') {
+      expect(statValue(container, 'read-errors')?.trim()).toBe('1')
       expect(container.querySelector('.kmh-refresh-label')?.textContent).toBe(acceptedObservation)
       expect(screen.queryByRole('alert')).toBeNull()
     } else expect(screen.getByText('데이터 로드 실패: latest refresh failed')).not.toBeNull()
@@ -229,7 +218,7 @@ describe('KeeperMemoryHealth', () => {
     expect(screen.queryByRole('alert')).toBeNull()
 
     if (failure === 'transport') mockGet.mockRejectedValueOnce(new Error('connection lost'))
-    else mockGet.mockResolvedValueOnce({ ...payload, schema: 'keeper.memory_os.current_health.v12' })
+    else mockGet.mockResolvedValueOnce({ ...payload, schema: 'keeper.memory_os.current_health.v18' })
     await act(async () => { window.dispatchEvent(new Event('focus')) })
     await waitFor(() => expect(screen.getByRole('alert')).not.toBeNull())
     expect(mockGet).toHaveBeenCalledTimes(2)
@@ -238,7 +227,7 @@ describe('KeeperMemoryHealth', () => {
       ? 'connection lost' : '유효하지 않은 keeper memory health payload')
     expect(screen.getByText('alpha')).not.toBeNull()
     expect(statValue(container, 'facts')).toBe('10')
-    expect(statValue(container, 'librarian-attention-required')?.trim()).toBe('0')
+    expect(statValue(container, 'read-errors')?.trim()).toBe('0')
     expect(container.querySelector('.kmh-refresh-label')!.textContent).toBe(lastObservation)
   })
 
@@ -265,6 +254,32 @@ describe('KeeperMemoryHealth', () => {
     expect(container.textContent).toContain('7')
   })
 
+  it('renders v2 Memory writer status, alarms, stop reason, and molt state', async () => {
+    mockFetch.mockResolvedValue(makeResponse([
+      makeEntry({
+        writer: {
+          kind: 'writer',
+          row: {
+            state: 'resting',
+            level: 'warn',
+            alarms: ['W1'],
+            stop: 'provider quota',
+            pending_molt: true,
+            pending_molt_categories: ['fact'],
+            available_acts: ['wake'],
+          },
+        },
+      }),
+    ]))
+    render(html`<${KeeperMemoryHealth} />`)
+
+    await waitFor(() => expect(screen.getByText('alpha')).not.toBeNull())
+    expect(screen.getByText('writer:resting (W1)')).not.toBeNull()
+    expect(screen.getByText('stop: provider quota')).not.toBeNull()
+    expect(screen.getByText('molt pending (fact)')).not.toBeNull()
+    expect(screen.getByText('acts: wake')).not.toBeNull()
+  })
+
   it('renders support retractions as observable state, not an alert', async () => {
     mockFetch.mockResolvedValue(
       makeResponse(
@@ -286,8 +301,6 @@ describe('KeeperMemoryHealth', () => {
       target: 'snapshot_read_error' as const,
       label: '읽기',
       message: 'invalid current snapshot',
-      value: 1,
-      threshold: 0,
     }
     mockFetch.mockResolvedValue(makeResponse(
       [makeEntry({ read_error: alert.message, alerts: [alert] })],
@@ -334,8 +347,6 @@ describe('KeeperMemoryHealth', () => {
       target: 'vision_ingest_errors' as const,
       label: 'Vision',
       message: 'Image ingestion failed 3 times.',
-      value: 3,
-      threshold: 0,
     }
     mockFetch.mockResolvedValue(makeResponse(
       [makeEntry({
@@ -361,92 +372,6 @@ describe('KeeperMemoryHealth', () => {
     expect(screen.getByText('Vision')).not.toBeNull()
   })
 
-  it('surfaces a stopped Librarian drain without inventing a retry or GC state', async () => {
-    const alert = {
-      code: 'librarian_stopped' as const,
-      severity: 'warn' as const,
-      target: 'librarian_stopped' as const,
-      label: 'Librarian',
-      message: 'current-memory selection deferred',
-      value: 3,
-      threshold: 0,
-    }
-    mockFetch.mockResolvedValue(makeResponse(
-      [makeEntry({ librarian: { state: 'not_committed', detail: null, pending: null, admission_wait: null, operator_action_required: false,
-          measured_at: 1_699_999_950, unread_atom_turns: 3, unread_official_turns: 0,
-          continuity_unread_atoms: 0,
-          last_success_at: null, last_failure_kind: null, stalled: null }, alerts: [alert] })],
-      { librarian_unread_turns: 3 },
-      makeAlertSummary({
-        total_alerts: 1,
-        warn_alerts: 1,
-        keepers_with_alerts: 1,
-        librarian_stopped_keepers: 1,
-      }),
-    ))
-    const { container } = render(html`<${KeeperMemoryHealth} />`)
-
-    await waitFor(() => expect(screen.getByText('alpha')).not.toBeNull())
-    expect(statValue(container, 'librarian-unread-turns')).toBe('3')
-    expect(screen.getByText('not_committed')).toBeTruthy()
-    expect(screen.getByText(`마지막 측정 ${new Date(1_699_999_950 * 1000).toLocaleString()}`)).toBeTruthy()
-    expect(screen.getByText('Librarian')).not.toBeNull()
-  })
-
-  it('renders unknown fleet unread as unknown, not zero', async () => {
-    mockFetch.mockResolvedValue(makeResponse(
-      [makeEntry({ librarian: { state: null, detail: null, pending: null, admission_wait: null, operator_action_required: false, measured_at: null,
-        unread_atom_turns: null, unread_official_turns: null,
-        continuity_unread_atoms: 0,
-        last_success_at: null, last_failure_kind: null, stalled: null } })],
-      { librarian_unread_turns: null },
-    ))
-    const { container } = render(html`<${KeeperMemoryHealth} />`)
-    await waitFor(() => expect(screen.getByText('alpha')).not.toBeNull())
-    expect(statValue(container, 'librarian-unread-turns')).toBe('?')
-  })
-
-  it('renders the continuity lag with how many keepers it could not be taken for', async () => {
-    mockFetch.mockResolvedValue(makeResponse(
-      [ makeEntry({ librarian: { state: 'drained', detail: null, pending: null, admission_wait: null, operator_action_required: false, measured_at: 1_699_999_950,
-          unread_atom_turns: 0, unread_official_turns: 0,
-          continuity_unread_atoms: null,
-          last_success_at: null, last_failure_kind: null, stalled: null } }),
-        makeEntry({ keeper_id: 'beta', librarian: { state: 'drained', detail: null, pending: null, admission_wait: null, operator_action_required: false,
-          measured_at: 1_699_999_950, unread_atom_turns: 0, unread_official_turns: 0,
-          continuity_unread_atoms: 3,
-          last_success_at: null, last_failure_kind: null, stalled: null } }) ],
-      { librarian_continuity_unread_atoms: 3, librarian_continuity_unmeasured: 1 },
-    ))
-    const { container } = render(html`<${KeeperMemoryHealth} />`)
-    await waitFor(() => expect(screen.getByText('beta')).not.toBeNull())
-    expect(statValue(container, 'librarian-continuity-behind')).toBe('3 (1 못 잼)')
-  })
-
-  it('names a one-atom gap as that atom and an unreadable file as not measured', async () => {
-    const librarian = (stalled: KeeperMemoryHealthKeeperEntry['librarian']['stalled']) => ({
-      state: 'drained' as const, detail: null, pending: null, admission_wait: null, operator_action_required: false, measured_at: 1_699_999_950,
-      unread_atom_turns: 0, unread_official_turns: 0, continuity_unread_atoms: 0,
-      last_success_at: null, last_failure_kind: null, stalled })
-    mockFetch.mockResolvedValue(makeResponse(
-      [ makeEntry({ librarian: librarian({ kind: 'gap', gap_start_atom: 5, gap_end_atom: 6 }) }),
-        makeEntry({ keeper_id: 'beta', librarian: librarian(
-          { kind: 'unmeasured', cause: 'read_position_unreadable', detail: 'bad json' }) }) ],
-      {},
-    ))
-    render(html`<${KeeperMemoryHealth} />`)
-    await waitFor(() => expect(screen.getByText('beta')).not.toBeNull())
-    expect(screen.getByText('밀림 atom 5')).toBeTruthy()
-    expect(screen.getByText('밀림 측정 못 함 · 읽은 위치 읽기 실패')).toBeTruthy()
-  })
-
-  it('renders a fully measured continuity lag without an unmeasured count', async () => {
-    mockFetch.mockResolvedValue(makeResponse([makeEntry()], {}))
-    const { container } = render(html`<${KeeperMemoryHealth} />`)
-    await waitFor(() => expect(screen.getByText('alpha')).not.toBeNull())
-    expect(statValue(container, 'librarian-continuity-behind')).toBe('0')
-  })
-
   it('renders librarian starvation as an error row, not a warning', async () => {
     const alert = {
       code: 'librarian_starvation' as const,
@@ -454,8 +379,6 @@ describe('KeeperMemoryHealth', () => {
       target: 'librarian_starvation' as const,
       label: 'Librarian',
       message: 'Librarian runs failed and no current-memory snapshot exists',
-      value: 4,
-      threshold: 0,
     }
     mockFetch.mockResolvedValue(makeResponse(
       [makeEntry({

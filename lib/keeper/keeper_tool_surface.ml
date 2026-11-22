@@ -419,15 +419,6 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                          ~keeper_name:name
                          "canonical turn store history reset watermark skipped: %s"
                          (Keeper_canonical_turn_store.store_error_to_string err));
-                    let marker = Keeper_history_clear.append_marker receipt
-                      ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name:name in
-                    let marker_fields = match marker with
-                      | Ok () -> []
-                      | Error detail ->
-                        Log.Keeper.error "%s: confirmed history/input clear has no restart marker: %s" name detail;
-                        Otel_metric_store.inc_counter Keeper_metrics.(to_string TurnBoundaryFailures)
-                          ~labels:["keeper",name;"site","clear"] ();
-                        ["history_restart_line_error",`String detail] in
                     Keeper_context_runtime.dispatch_keeper_phase_event ~config ~keeper_name:name
                       (Keeper_state_machine.Operator_clear_requested {preserve_system;reason});
                     ignore (Keeper_turn_failure_streak.reset ~base_path:config.base_path ~keeper_name:name);
@@ -440,7 +431,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                          "undecodable_checkpoint_removed",`Assoc ["checkpoint_path",`String checkpoint_path;
                            "decode_error",`String (Keeper_checkpoint_store.checkpoint_load_error_to_string undecodable)]] in
                     Log.Keeper.warn "%s: operator confirmed history and input clear (reason=%s)" name reason;
-                    tool_result_ok_data (`Assoc (history_fields @ marker_fields @
+                    tool_result_ok_data (`Assoc (history_fields @
                       ["name",`String name;"phase_before",`String phase_before;
                        "phase_after",`String (match Keeper_registry.get ~base_path:config.base_path name with
                          | Some entry -> Keeper_state_machine.phase_to_string entry.phase | None -> "unknown");

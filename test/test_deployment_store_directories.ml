@@ -57,17 +57,17 @@ let test_regular_siblings exe () = with_workspace (fun root keepers traces ->
     (read (Filename.concat traces "trace.checkpoint.lock")))
 
 let test_real_store_refusals exe () = with_workspace (fun root keepers traces ->
-  let boundary = Filename.concat keepers "keeper/turn-boundaries.jsonl" in
+  let turn_log = Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir:keepers ~keeper_id:"keeper" in
   let fragment = Filename.concat traces "trace/history.jsonl" in
-  write boundary "{invalid boundary}\n";
+  write turn_log "{invalid turn log}\n";
   write fragment "{invalid fragment}\n";
   let status, output = invoke exe root in
   check bool "malformed real stores still refuse deployment" true (status <> Unix.WEXITED 0);
   List.iter (fun expected ->
     check bool ("reports " ^ expected) true (String_util.contains_substring output expected))
-    ["keeper turn boundaries rows=1 refused=1";
+    ["keeper turn log rows=1 refused=1";
      "keeper official-client turn fragments rows=1 refused=1"];
-  check string "refused boundary preserved" "{invalid boundary}\n" (read boundary);
+  check string "refused turn log preserved" "{invalid turn log}\n" (read turn_log);
   check string "refused fragment preserved" "{invalid fragment}\n" (read fragment))
 
 (* #51587: #51429 moved a receipt's [arguments] to [{"known": _}] or
@@ -232,7 +232,8 @@ let without_timing output =
   |> List.map without_log_stamp
 
 let test_scan_jobs_do_not_change_the_report exe () = with_workspace (fun root keepers traces ->
-  write (Filename.concat keepers "keeper/turn-boundaries.jsonl") "{invalid boundary}\n";
+  write (Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir:keepers ~keeper_id:"keeper")
+    "{invalid turn log}\n";
   write (Filename.concat traces "trace/history.jsonl") "{invalid fragment}\n";
   let run jobs =
     invoke_with_args exe root
@@ -244,7 +245,7 @@ let test_scan_jobs_do_not_change_the_report exe () = with_workspace (fun root ke
   check bool ("four jobs refuse them too: " ^ parallel) true
     (parallel_status <> Unix.WEXITED 0);
   check bool "the refused rows are named" true
-    (String_util.contains_substring parallel "keeper turn boundaries rows=1 refused=1");
+    (String_util.contains_substring parallel "keeper turn log rows=1 refused=1");
   check (list string) "the report lines are the same" (without_timing sequential)
     (without_timing parallel))
 

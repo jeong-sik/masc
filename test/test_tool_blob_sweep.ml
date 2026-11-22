@@ -313,8 +313,6 @@ let test_empty_sqlite_and_lane_addon_stores_leave_sweep_classified () =
         ; "exact-requests"
         ; "tool-request-owners"
         ; "tool-request-bodies"
-        ; "keeper-librarian-history-fences"
-        ; "keeper-librarian-history-resolutions"
         ];
       let first = observe_ok ~base_path in
       Alcotest.(check (list string)) "all lane-addon subdirectories classified" []
@@ -374,8 +372,6 @@ let test_lane_addon_records_keep_embedded_tool_blobs_live () =
         ; Lane_addon_store.exact_requests_directory
         ; Lane_addon_store.tool_request_owners_directory
         ; Lane_addon_store.tool_request_bodies_directory
-        ; Lane_addon_store.history_fences_directory
-        ; Lane_addon_store.history_resolutions_directory
         ]
       in
       let references =

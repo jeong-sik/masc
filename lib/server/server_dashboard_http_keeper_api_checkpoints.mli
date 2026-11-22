@@ -60,12 +60,6 @@ type purge_error =
   | Purge_keeper_active of string
   | Purge_checkpoint_unavailable of string
   | Purge_checkpoint_invalid of string
-  | Purge_boundaries_unreadable of string
-      (** The turn-boundary log cannot be read, so which messages its lines
-          name, and so must stay byte-exact, is unknown. *)
-  | Purge_continuity_unreadable of string
-      (** The saved Librarian working state cannot be read, so whether it
-          fits the history and which prefix it holds is unknown. *)
   | Purge_turn_log_unreadable of string
       (** The Keeper's turn log, or the head it is compared with, cannot be
           read, so which messages its Memory writer reads from the head is

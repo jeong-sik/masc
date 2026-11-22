@@ -390,9 +390,7 @@ class Capture:
                 "running executable differs from the verified candidate digest"
             )
         self.report["effective_paths"] = paths
-        self.report["memory_execution_readiness"] = health.get(
-            "keeper_memory_execution"
-        )
+        self.report["memory_execution_readiness"] = health.get("librarian")
         self.save()
         if self.client is None:
             raise AcceptanceError("semantic assessment does not start a Keeper session")

@@ -360,24 +360,6 @@ let keeper_artifact_path config keeper_name artifact =
            (Config_dir_resolver.keepers_dir_for_base_path
               ~base_path:config.Workspace.base_path)
          ~keeper_id:keeper_name)
-  | Keeper_memory_admission_queue_artifact ->
-    Some
-      (Keeper_memory_admission_queue.path
-         ~keepers_dir:
-           (Config_dir_resolver.keepers_dir_for_base_path
-              ~base_path:config.Workspace.base_path)
-         ~keeper_id:keeper_name)
-  | Keeper_librarian_range_receipt_artifact ->
-    Some
-      (Keeper_memory_os_current.durable_range_receipt_path
-         ~keepers_dir:
-           (Config_dir_resolver.keepers_dir_for_base_path
-              ~base_path:config.Workspace.base_path)
-         ~keeper_id:keeper_name)
-  | Keeper_librarian_unread_ledger_artifact ->
-    Some (Keeper_memory_os_current.unread_ledger_path
-      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
-        ~base_path:config.Workspace.base_path) ~keeper_id:keeper_name)
   | Keeper_memory_epoch_artifact ->
     Some (Keeper_memory_os_current.epoch_path
       ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
@@ -458,24 +440,6 @@ let keeper_artifact_path config keeper_name artifact =
          ~keepers_dir:
            (Config_dir_resolver.keepers_dir_for_base_path
               ~base_path:config.Workspace.base_path)
-         ~keeper_id:keeper_name)
-  | Keeper_turn_boundaries_artifact ->
-    Some
-      (Keeper_turn_boundaries.path_for_keepers_dir
-         ~keepers_dir:(Workspace.keepers_runtime_dir config)
-         ~keeper_id:keeper_name)
-  | Keeper_librarian_progress_artifact ->
-    Some
-      (Keeper_librarian_progress.path_for_keepers_dir
-         ~keepers_dir:(Workspace.keepers_runtime_dir config)
-         ~keeper_id:keeper_name)
-  | Keeper_external_read_cursor_artifact ->
-    Some (Keeper_external_read_cursor.path_for_keepers_dir
-      ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name)
-  | Keeper_librarian_official_progress_artifact ->
-    Some
-      (Keeper_librarian_official_progress.path_for_keepers_dir
-         ~keepers_dir:(Workspace.keepers_runtime_dir config)
          ~keeper_id:keeper_name)
   | Keeper_playground_bundles_artifact -> None
   | Keeper_configuration_artifact ->
@@ -720,8 +684,6 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
      after the purge deleted it (RFC librarian-lifecycle section 8).
      [request_cancel] only accepts a request from the lane's owner domain. *)
   let remove_artifacts () =
-    Keeper_librarian_queue_refresh.forget_measurement ~config ~keeper_name;
-    Keeper_continuity_observation.forget ~config ~keeper_name;
     Keeper_request_start.forget ~config ~keeper_name;
     Keeper_acp_runtime.evict_keeper_for_workspace
       ~base_path:config.Workspace.base_path
@@ -777,9 +739,6 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
       | (( Keeper_metrics_store_artifact
          | Keeper_runtime_directory_artifact
          | Keeper_memory_current_artifact
-         | Keeper_librarian_range_receipt_artifact
-         | Keeper_librarian_unread_ledger_artifact
-         | Keeper_memory_admission_queue_artifact
          | Keeper_memory_epoch_artifact
          | Keeper_memory_publication_artifact
          | Keeper_memory_retraction_plan_artifact
@@ -793,10 +752,6 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
          | Keeper_memory_log_lock_artifact
          | Keeper_memory_writer_lock_artifact
          | Keeper_memory_events_artifact
-         | Keeper_turn_boundaries_artifact
-         | Keeper_librarian_progress_artifact
-         | Keeper_external_read_cursor_artifact
-         | Keeper_librarian_official_progress_artifact
          | Keeper_configuration_artifact
          | Keeper_chat_store_artifact
          | Keeper_antigravity_home_artifact _
@@ -815,9 +770,6 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
             | Keeper_root_logs_artifact
             | Keeper_runtime_directory_artifact
             | Keeper_memory_current_artifact
-            | Keeper_librarian_range_receipt_artifact
-            | Keeper_librarian_unread_ledger_artifact
-            | Keeper_memory_admission_queue_artifact
             | Keeper_memory_epoch_artifact
             | Keeper_memory_publication_artifact
             | Keeper_memory_retraction_plan_artifact
@@ -830,10 +782,6 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
             | Keeper_memory_log_lock_artifact
             | Keeper_memory_writer_lock_artifact
             | Keeper_memory_events_artifact
-            | Keeper_turn_boundaries_artifact
-            | Keeper_librarian_progress_artifact
-            | Keeper_external_read_cursor_artifact
-            | Keeper_librarian_official_progress_artifact
             | Keeper_playground_bundles_artifact
             | Keeper_runtime_configuration_artifact
             | Keeper_configuration_artifact
@@ -853,8 +801,6 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                Keeper_chat_store.purge_transcript path ~remove:remove_path_strict
              | Keeper_metrics_store_artifact | Keeper_root_logs_artifact
              | Keeper_runtime_directory_artifact | Keeper_memory_current_artifact
-             | Keeper_librarian_range_receipt_artifact | Keeper_memory_admission_queue_artifact
-             | Keeper_librarian_unread_ledger_artifact
              | Keeper_memory_epoch_artifact
              | Keeper_memory_publication_artifact | Keeper_memory_retraction_plan_artifact
              | Keeper_memory_source_current_artifact | Keeper_working_context_recall_artifact
@@ -863,9 +809,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
              | Keeper_memory_log_artifact
              | Keeper_memory_log_lock_artifact
              | Keeper_memory_writer_lock_artifact
-             | Keeper_memory_events_artifact | Keeper_turn_boundaries_artifact
-             | Keeper_librarian_progress_artifact | Keeper_external_read_cursor_artifact
-             | Keeper_librarian_official_progress_artifact | Keeper_playground_bundles_artifact
+             | Keeper_memory_events_artifact | Keeper_playground_bundles_artifact
              | Keeper_runtime_configuration_artifact
              | Keeper_board_attention_candidates_artifact
              | Keeper_board_attention_partitions_artifact | Agent_artifact_bundle _
@@ -878,12 +822,9 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                | Keeper_metrics_store_artifact
                | Keeper_root_logs_artifact
                | Keeper_memory_current_artifact
-               | Keeper_librarian_range_receipt_artifact
-               | Keeper_librarian_unread_ledger_artifact
-               | Keeper_memory_admission_queue_artifact
                | Keeper_memory_epoch_artifact
                | Keeper_memory_publication_artifact
-            | Keeper_memory_retraction_plan_artifact
+               | Keeper_memory_retraction_plan_artifact
                | Keeper_memory_source_current_artifact
                | Keeper_working_context_recall_artifact
                | Keeper_working_context_artifact
@@ -894,10 +835,6 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                | Keeper_memory_log_lock_artifact
                | Keeper_memory_writer_lock_artifact
                | Keeper_memory_events_artifact
-               | Keeper_turn_boundaries_artifact
-               | Keeper_librarian_progress_artifact
-               | Keeper_external_read_cursor_artifact
-            | Keeper_librarian_official_progress_artifact
                | Keeper_playground_bundles_artifact
                | Keeper_runtime_configuration_artifact
                | Keeper_configuration_artifact

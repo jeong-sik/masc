@@ -20,7 +20,6 @@ type history =
 type receipt =
   { authority : authority
   ; checkpoint : Keeper_checkpoint_ref.t option
-  ; marker : Keeper_checkpoint_ref.t option
   ; allow_turn_reset : bool
   ; history : history
   }
@@ -216,32 +215,19 @@ let execute plan =
       | None -> Store.save_agent_core_if_absent ~session_dir ~boundary candidate) in
     if not (Keeper_checkpoint_ref.equal checkpoint (Store.exact_snapshot_reference snapshot))
     then Error (Invalid_clear "installed history differs from its retained clear payload") else
-    Ok {authority;checkpoint=Some checkpoint;marker=Some checkpoint;allow_turn_reset;
+    Ok {authority;checkpoint=Some checkpoint;allow_turn_reset;
         history=Emptied {cleared_message_count;checkpoint_found=true}}
   | No_payload Undecodable ->
     let* removed = remove_undecodable ~session_dir ~session_id in
     let history = match removed with
       | Some undecodable -> Removed {checkpoint_path=Store.agent_core_checkpoint_path ~session_dir ~session_id;undecodable}
       | None -> Emptied {cleared_message_count=0;checkpoint_found=false} in
-    Ok {authority;checkpoint=authority.observed;marker=None;allow_turn_reset=false;history}
+    Ok {authority;checkpoint=authority.observed;allow_turn_reset=false;history}
   | No_payload (Absent | Superseded) ->
     let* current = canonical ~session_dir ~session_id in
     (match current with
      | Absent | Superseded ->
-       Ok {authority;checkpoint=authority.observed;marker=None;allow_turn_reset=false;
+       Ok {authority;checkpoint=authority.observed;allow_turn_reset=false;
            history=Emptied {cleared_message_count=0;checkpoint_found=false}}
      | Present _ | Undecodable -> Error (Invalid_clear "canonical history appeared before the no-payload clear"))
   | No_payload (Present _) -> Error (Invalid_clear "a decoded history requires a retained clear payload")
-
-let append_marker receipt ~keepers_dir ~keeper_name =
-  match receipt.marker with
-  | None -> Ok ()
-  | Some reference ->
-    let record : Keeper_turn_boundaries.record =
-      { recorded_at=Time_compat.now ();
-        event=Keeper_turn_boundaries.History_restarted {trace_id=Keeper_id.Trace_id.to_string reference.trace_id} } in
-    match Keeper_turn_boundaries.append ~keepers_dir ~keeper_id:keeper_name record with
-    | Ok () -> Ok ()
-    | Error error -> Error (Keeper_turn_boundaries.append_error_to_string error)
-    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-    | exception exn -> Error (Printexc.to_string exn)

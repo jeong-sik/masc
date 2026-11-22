@@ -24,21 +24,11 @@ module Row : sig
     ; source_facts : int
     ; source_invalidations : int
     ; source_snapshot_bytes : int
-    ; unread_atom_turns : int option
-    ; unread_official_turns : int option
-    ; continuity_unread_atoms : int option
     ; librarian_failures : int
     ; vision_ingest_errors : int
     ; read_error : bool
     ; source_read_error : bool
     ; snapshot_present : bool
-    ; librarian_stopped : bool
-        (** The Keeper's last durable Librarian pass ended without draining:
-            its lane is unconfigured, it did not commit, it stopped or it
-            raised. *)
-    ; librarian_attention_required : bool
-        (** Derived from the Keeper's durable and explicit-admission pending
-            observations, independently of its stopped-pass count. *)
     ; alerts : alert_severity list
     }
 end
@@ -54,15 +44,6 @@ type t =
   ; source_facts : int
   ; source_invalidations : int
   ; source_snapshot_bytes : int
-  ; librarian_unread_turns : int option
-      (** [None] when any row's unread turns were not measured: a sum over
-          the measured rows would read as the fleet's. *)
-  ; librarian_continuity_unread_atoms : int
-      (** Summed over the rows whose continuity lag is known; the others are
-          counted in [librarian_continuity_unmeasured]. Most Keepers carry no
-          continuity snapshot, so a total that went [None] on one would hide
-          the rest. *)
-  ; librarian_continuity_unmeasured : int
   ; librarian_failures : int
   ; vision_ingest_errors : int
   ; read_errors : int
@@ -73,8 +54,6 @@ type t =
   ; keepers_with_alerts : int
   ; snapshot_read_error_keepers : int
   ; source_snapshot_read_error_keepers : int
-  ; librarian_stopped_keepers : int
-  ; librarian_attention_required_keepers : int
   ; librarian_starving_keepers : int
       (** Rows with Librarian failures and no memory snapshot. *)
   }

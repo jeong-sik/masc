@@ -1455,78 +1455,6 @@ let test_admission_wait_survives_durable_measurement () =
       (Fs_compat.load_file memory_path))
 ;;
 
-let test_memory_attention_snapshot_joins_both_original_lanes () =
-  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
-  with_workspace @@ fun config ->
-  let module Pending = Masc.Keeper_librarian_pending in
-  let module Worker = Masc.Keeper_memory_admission_worker in
-  prepare_three_unread_turns config ~trace_id:"trace-attention-health";
-  let memory_path = seed_pending_memory config ~trace_id:"trace-attention-health" in
-  let memory_before = Fs_compat.load_file memory_path and progress_before = read_progress config in
-  let installation_id = "[\"configuration\",\"keeper-librarian\"]" in
-  let waiting request_id wait : Pending.worker = { installation_id; request_id; wait } in
-  let admission wait = Queue_refresh.For_testing.run_explicit_admission_with
-    ~base_path:config.base_path ~keeper_name
-    ~run:(fun () -> Worker.Awaiting_worker (waiting "admission-original" wait)) in
-  let durable wait = ignore (Queue_refresh.For_testing.run_durable_with_commit
-    ~config ~keeper_name ~commit:(fun _ -> Consumer.Memory_pending
-      (Pending.Worker (waiting "durable-original" wait)))) in
-  let snapshot () = Queue_refresh.attention_health_json ~config in
-  let field name value = Yojson.Safe.Util.member name value in
-  Fun.protect ~finally:(fun () -> Queue_refresh.forget_measurement ~config ~keeper_name) (fun () ->
-    admission Pending.Processing;
-    durable Pending.Processing;
-    check bool "normal processing needs no operator decision" false
-      (Yojson.Safe.Util.to_bool (field "operator_action_required" (snapshot ())));
-    durable Pending.Missing_after_dispatch;
-    check int "uncertain durable original names this Keeper once" 1
-      (Yojson.Safe.Util.to_int (field "attention_required_keepers" (snapshot ())));
-    admission Pending.Outcome_unknown;
-    let joined = snapshot () in
-    check int "both uncertain lanes still count one Keeper" 1
-      (Yojson.Safe.Util.to_int (field "attention_required_keepers" joined));
-    (match field "keepers" joined with
-     | `List [row] ->
-       check string "durable original identity is retained" "durable-original"
-         Yojson.Safe.Util.(row |> member "durable_pending" |> member "request_id" |> to_string);
-       check string "independent admission identity is retained" "admission-original"
-         Yojson.Safe.Util.(row |> member "admission_wait" |> member "request_id" |> to_string)
-     | _ -> fail "expected exactly the affected Keeper");
-    durable Pending.Processing;
-    check bool "admission uncertainty survives normal durable processing" true
-      (Yojson.Safe.Util.to_bool (field "operator_action_required" (snapshot ())));
-    let other = Queue_refresh.attention_health_json
-      ~config:(Workspace.default_config (config.base_path ^ "-other-workspace")) in
-    check int "another workspace cannot inherit the original attention" 0
-      (Yojson.Safe.Util.to_int (field "attention_required_keepers" other));
-    Queue_refresh.For_testing.run_explicit_admission_with ~base_path:config.base_path
-      ~keeper_name ~run:(fun () -> Worker.Idle);
-    check bool "new nonattention observations clear the action flag" false
-      (Yojson.Safe.Util.to_bool (field "operator_action_required" (snapshot ())));
-    (* A pass that ends with its own error is an observation too. *)
-    let refused = "admission pass refused its records" in
-    Queue_refresh.For_testing.run_explicit_admission_with ~base_path:config.base_path
-      ~keeper_name ~run:(fun () -> Worker.Unavailable refused);
-    let failed = snapshot () in
-    check int "a failed admission pass names this Keeper" 1
-      (Yojson.Safe.Util.to_int (field "attention_required_keepers" failed));
-    (match field "keepers" failed with
-     | `List [row] ->
-       check string "the pass's own error is retained" refused
-         Yojson.Safe.Util.(row |> member "admission_wait" |> member "detail" |> to_string)
-     | _ -> fail "expected exactly the affected Keeper");
-    check bool "the failure is the latest admission observation" true
-      (Queue_refresh.last_admission_wait ~config ~keeper_name
-       = Some (Pending.Admission_failed refused));
-    Queue_refresh.For_testing.run_explicit_admission_with ~base_path:config.base_path
-      ~keeper_name ~run:(fun () -> Worker.Idle);
-    check bool "a later finished pass clears the failure" false
-      (Yojson.Safe.Util.to_bool (field "operator_action_required" (snapshot ())));
-    check bool "attention observation grants no source ACK" true (read_progress config = progress_before);
-    check string "attention observation does not publish Memory" memory_before
-      (Fs_compat.load_file memory_path))
-;;
-
 let test_unconsumed_original_preserves_selection_and_memory ~replacement ~after_failure () =
   with_workspace @@ fun config ->
   let trace_id = "trace-pending-selection" in
@@ -3372,91 +3300,6 @@ let test_a_superseded_current_checkpoint_is_fresh_state () =
   check_settled "next pass";
   check int "the official turn is committed once" 1 !commits;
   check bool "the atom position is unchanged" true (read_progress config = atom_position)
-;;
-
-(* An official-client turn that failed after its tools ran: its input is a
-   fragment from the start of the turn, it kept no assistant text, and the
-   error path writes its tool observations and its end line. The Librarian
-   reads that turn like any other, and the turn after it too. *)
-let test_a_failed_official_turn_is_read ?(tool_only=false) () =
-  with_workspace
-  @@ fun config ->
-  let trace_id = "trace-official-failed" in
-  write_meta config trace_id;
-  let failed_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1 in
-  if not tool_only then History.persist_message ~keeper_name ~turn_ref:failed_ref ~source:Masc.Keeper_types_support.Direct_user
-    (session config trace_id) (message "q-failed");
-  let detail tool_name : Masc.Keeper_agent_result.tool_call_detail =
-    { tool_name
-    ; provider = "fixture"
-    ; execution_outcome = Tool_result.Ok
-    ; typed_outcome = None
-    ; latency_ms = 0.
-    ; task_id = None
-    ; route_evidence = None
-    ; input_fingerprint = None
-    ; output_fingerprint = None
-    }
-  in
-  Masc.Keeper_agent_run_finalize_response.record_errored_official_turn_boundary
-    ~task_context:(historical_task "task-failed" "goal-failed" "1")
-    ~config
-    ~meta:(meta trace_id)
-    ~turn_ref:failed_ref
-    ~session:(session config trace_id)
-    ~tool_observations:[ detail "fixture_effect" ]
-    ~history_at_start:Boundaries.Continued_history
-    ~restart_notice_pending:(Atomic.make false);
-  if tool_only then
-    Masc.Keeper_agent_run_finalize_response.record_errored_official_turn_boundary
-      ~task_context:(historical_task "task-second" "goal-second" "2")
-      ~config ~meta:(meta trace_id)
-      ~turn_ref:(Ids.Turn_ref.make ~trace_id ~absolute_turn:2)
-      ~session:(session config trace_id) ~tool_observations:[detail "second_effect"]
-      ~history_at_start:Boundaries.Continued_history
-      ~restart_notice_pending:(Atomic.make false)
-  else (
-    write_official_turn config ~trace_id ~turn:2 ~user:"q2" ~assistant:"a2" ~tools:[];
-    append_official_boundary config ~trace_id ~turn:2 ~recorded_at:(Time_compat.now ()));
-
-  let carried = ref [] in
-  let tools = ref [] in
-  (match
-     consume config (fun original ->
-       let input = Original.input original in
-       carried := text_markers input;
-       (match input.historical_task_contexts with
-        | first :: _ ->
-          check (pair int int) "failed turn message interval" (0,if tool_only then 0 else 1)
-            (first.first_message,first.after_message);
-          check (list string) "failed turn retains exact Task even without text"
-            ["task-failed"] (observed_task_ids [first]);
-          (match first.scope.attribution with
-           | Historical.Observed {turn_ref;_} -> check bool "failed turn reference" true (Ids.Turn_ref.equal failed_ref turn_ref)
-           | Historical.Unattributed -> fail "failed official attribution lost")
-        | [] -> fail "failed official context absent");
-       if tool_only then (
-         check (list string) "two tool-only turns retain separate Tasks"
-           ["task-failed";"task-second"] (observed_task_ids input.historical_task_contexts);
-         check (list (pair int int)) "two tool-only turns retain separate observation intervals"
-           [(0,1);(1,2)] (List.map (fun (entry : Historical.t) ->
-             entry.first_tool_observation,entry.after_tool_observation) input.historical_task_contexts));
-       tools :=
-         List.map
-           (fun (o : Masc.Keeper_librarian.tool_observation) -> o.tool_name)
-           input.tool_observations;
-       Consumer.Memory_committed)
-   with
-   | Consumer.Official_advanced { official; _ } ->
-     check int "the position passes both end lines" 2 official.boundary_line
-   | Consumer.Nothing_to_read
-   | Consumer.Baseline_advanced _
-   | Consumer.Progress_advanced _
-   | Consumer.Pending _
-   | Consumer.Memory_not_committed _ -> fail "the failed turn left nothing to read");
-  check (list string) "the failed turn's input, then the next turn" (if tool_only then [] else [ "q-failed"; "q2"; "a2" ])
-    !carried;
-  check (list string) "the tool the failed turn called" (if tool_only then ["fixture_effect";"second_effect"] else ["fixture_effect"]) !tools
 ;;
 
 (* RFC §10-3's counterexample: T1 Agent-Core, T2 official-client, T3
@@ -5621,10 +5464,6 @@ let () =
             test_an_official_only_keeper_is_read_from_its_fragments
         ; test_case "a superseded current checkpoint is fresh state" `Quick
             test_a_superseded_current_checkpoint_is_fresh_state
-        ; test_case "tool-only errored official turn retains admission" `Quick
-            (test_a_failed_official_turn_is_read ~tool_only:true)
-        ; test_case "a failed official turn is read" `Quick
-            (test_a_failed_official_turn_is_read ~tool_only:false)
         ; test_case "a mixed keeper is read in line order" `Quick
             test_a_mixed_keeper_is_read_in_line_order
         ; test_case "official receipt recovers failed cursor write" `Quick
@@ -5681,8 +5520,6 @@ let () =
     ; ( "production wake"
       , [ test_case "admission wait survives history observations" `Quick
             test_admission_wait_survives_durable_measurement
-        ; test_case "Memory attention joins both original lanes without consuming input" `Quick
-            test_memory_attention_snapshot_joins_both_original_lanes
         ; test_case "count overflow is reviewed without unread history" `Quick
             test_memory_count_cleanup_without_history
         ; test_case "saved count progress continues without an external wake" `Quick

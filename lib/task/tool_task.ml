@@ -709,10 +709,23 @@ let dispatch_internal ?created_by ctx ~name ~args =
   | None ->
     (match name with
      | "keeper_task_claim" ->
-       let task_id = get_string args "task_id" "" in
-       if String.equal task_id ""
-       then Some (handle_claim_next ~tool_name:name ~start_time:start ctx args)
-       else Some (handle_claim ~tool_name:name ~start_time:start ctx args)
+       (match Tool_task_args.parse_task_claim_request args with
+        | Ok Tool_task_args.Claim_next ->
+          Some (handle_claim_next ~tool_name:name ~start_time:start ctx args)
+        | Ok (Tool_task_args.Claim_specific task_id) ->
+          Some
+            (handle_claim
+               ~tool_name:name
+               ~start_time:start
+               ctx
+               (`Assoc [ "task_id", `String task_id ]))
+        | Error reason ->
+          Some
+            (Tool_result.error
+               ~failure_class:Tool_result.Workflow_rejection
+               ~tool_name:name
+               ~start_time:start
+               reason))
      | _ -> None)
 
 let dispatch ctx ~name ~args =

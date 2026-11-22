@@ -731,10 +731,7 @@ let handle_keeper_task_tool_with_outcome
                           ]
                         message)))))
     | Keeper_tooling.Name.Task_claim ->
-    let requested_task_id =
-      Safe_ops.json_string ~default:"" "task_id" args |> String.trim
-    in
-    let explicit_claim_result () =
+    let explicit_claim_result requested_task_id =
       match
         Workspace.claim_task_with_details_r
           config
@@ -755,15 +752,16 @@ let handle_keeper_task_tool_with_outcome
           (Printf.sprintf "unknown task_id: %s" requested_task_id)
       | Error e -> Workspace.Claim_next_error (Masc_domain.masc_error_to_string e)
     in
-    let claim_requested_task () =
-      if requested_task_id <> "" then
-        explicit_claim_result ()
-      else
+    let result =
+      match Masc_task_handlers.Tool_task_args.parse_task_claim_request args with
+      | Ok (Masc_task_handlers.Tool_task_args.Claim_specific requested_task_id) ->
+        explicit_claim_result requested_task_id
+      | Ok Masc_task_handlers.Tool_task_args.Claim_next ->
         Workspace.claim_next_r config ~agent_name:meta.name
           ~auto_start:true
           ()
+      | Error reason -> Workspace.Claim_next_error reason
     in
-    let result = claim_requested_task () in
     (match result with
      | Workspace.Claim_next_claimed { task_id; _ } ->
        sync_keeper_meta_current_task ~config ~meta ~task_id

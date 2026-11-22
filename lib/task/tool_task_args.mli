@@ -1,5 +1,17 @@
 (** Task-tool argument parsing helpers. *)
 
+type task_claim_request =
+  | Claim_next
+  | Claim_specific of string
+
+val parse_task_claim_request :
+  Yojson.Safe.t -> (task_claim_request, string) result
+(** Parse [keeper_task_claim] arguments without silent fallback to auto-claim.
+    Only an empty object (ignoring underscore-prefixed internal markers) yields
+    [Claim_next]. A non-blank string [task_id] yields [Claim_specific]. Blank,
+    non-string, duplicate [task_id], unknown keys, or non-object inputs are
+    rejected. *)
+
 val parse_task_creation_request_id :
   Yojson.Safe.t -> (Masc_domain.task_creation_request_id option, string) result
 (** Omitted means uncorrelated. Present blank, non-string, null or duplicate

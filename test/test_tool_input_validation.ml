@@ -2257,6 +2257,18 @@ let test_keeper_tool_schemas_pin_required_fields () =
      Tool_input_validation.validate_args
        ~schema:keeper_task_claim_schema
        ~name:"keeper_task_claim"
+       ~args:(`Assoc [])
+       ()
+   with
+   | Ok _ -> ()
+   | Error result ->
+     Alcotest.failf
+       "keeper_task_claim empty args should validate for auto-claim: %s"
+       (Yojson.Safe.to_string (Tool_result.data result)));
+  (match
+     Tool_input_validation.validate_args
+       ~schema:keeper_task_claim_schema
+       ~name:"keeper_task_claim"
        ~args:(`Assoc [ "task_id", `String "task-123" ])
        ()
    with
@@ -2265,6 +2277,22 @@ let test_keeper_tool_schemas_pin_required_fields () =
      Alcotest.failf
        "keeper_task_claim task_id should validate: %s"
        (Yojson.Safe.to_string (Tool_result.data result)));
+  (match
+     Tool_input_validation.validate_args
+       ~schema:keeper_task_claim_schema
+       ~name:"keeper_task_claim"
+       ~args:(`Assoc [ "task", `String "task-123" ])
+       ()
+   with
+   | Ok _ ->
+     Alcotest.fail
+       "keeper_task_claim must reject unsupported alias field 'task' rather than falling back to auto-claim"
+   | Error result ->
+     let msg = Yojson.Safe.to_string (Tool_result.data result) in
+     Alcotest.(check bool)
+       "keeper_task_claim rejection names unsupported field"
+       true
+       (string_contains msg "task"));
   assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "task_id";
   assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "result";
   assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "evidence_refs";

@@ -2757,6 +2757,131 @@ let test_keeper_task_claim_accepts_specific_task_id () =
         check string "assignee" meta.name assignee
       | _ -> fail "requested task should be claimed or auto-started")
 
+let test_keeper_task_claim_explicit_unclaimable_rejects_without_auto_claim () =
+  with_exec_fixture "keeper_tool_dispatch_unclaimable_task_claim"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      ignore (Workspace.init config ~agent_name:(Some meta.name));
+      ignore
+        (Workspace.add_task config ~title:"higher priority unclaimed task" ~priority:1
+           ~description:"must stay todo when an explicit claim is rejected");
+      ignore
+        (Workspace.add_task config ~title:"already claimed task" ~priority:3
+           ~description:"owned by another keeper");
+      ignore
+        (Workspace.add_task config ~title:"pending verification task" ~priority:3
+           ~description:"awaiting verdict");
+      (match Workspace.claim_task_r config ~agent_name:"other-keeper" ~task_id:"task-002" () with
+       | Ok _ -> ()
+       | Error err -> fail (Masc_domain.masc_error_to_string err));
+      let backlog = Workspace_backlog.read_backlog_r config |> Result.get_ok in
+      let updated_tasks =
+        List.map
+          (fun (task : Masc_domain.task) ->
+             if String.equal task.id "task-003"
+             then
+               { task with
+                 task_status =
+                   Masc_domain.AwaitingVerification
+                     { assignee = "other-keeper"
+                     ; started_at = "2026-11-22T00:00:00Z"
+                     ; submitted_at = "2026-11-22T00:01:00Z"
+                     ; verification_id = "vrf-test-003"
+                     }
+               }
+             else task)
+          backlog.tasks
+      in
+      Workspace_backlog.write_backlog config { backlog with tasks = updated_tasks };
+      let task_status task_id =
+        match
+          List.find_opt
+            (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+            (Workspace.get_tasks_raw config)
+        with
+        | None -> fail (Printf.sprintf "missing %s" task_id)
+        | Some task -> task.Masc_domain.task_status
+      in
+      let check_todo label =
+        match task_status "task-001" with
+        | Masc_domain.Todo -> ()
+        | _ -> fail (Printf.sprintf "%s: P1 task-001 was silently auto-claimed" label)
+      in
+      let run_claim input =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~publication_recovery
+          ~ctx_work
+          ~name:"keeper_task_claim"
+          ~input
+          ()
+      in
+      List.iter
+        (fun (label, input, expected_class) ->
+           let result = run_claim input in
+           (match result.disposition with
+            | Tool_result.Failed actual when actual = expected_class -> ()
+            | Tool_result.Failed other ->
+              failf
+                "%s: expected %s, got %s (%s)"
+                label
+                (Tool_result.tool_failure_class_to_string expected_class)
+                (Tool_result.tool_failure_class_to_string other)
+                result.raw_output
+            | Tool_result.Completed () | Tool_result.Deferred () ->
+              failf "%s: expected typed rejection, got %s" label result.raw_output);
+           check_todo label)
+        [ "already claimed task_id", `Assoc [ "task_id", `String "task-002" ], Tool_result.Workflow_rejection
+        ; "unknown task_id", `Assoc [ "task_id", `String "task-999" ], Tool_result.Workflow_rejection
+        ; "awaiting_verification task_id", `Assoc [ "task_id", `String "task-003" ], Tool_result.Workflow_rejection
+        ; "whitespace-only task_id", `Assoc [ "task_id", `String "   " ], Tool_result.Workflow_rejection
+        ; "unsupported alias field", `Assoc [ "task", `String "task-002" ], Tool_result.Policy_rejection
+        ])
+
+let test_keeper_task_claim_omitted_task_id_auto_claims_highest_priority () =
+  with_exec_fixture "keeper_tool_dispatch_auto_task_claim"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      ignore (Workspace.init config ~agent_name:(Some meta.name));
+      ignore
+        (Workspace.add_task config ~title:"higher priority task" ~priority:1
+           ~description:"must be auto-claimed when task_id is omitted");
+      ignore
+        (Workspace.add_task config ~title:"lower priority task" ~priority:3
+           ~description:"must remain todo");
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~publication_recovery
+          ~ctx_work
+          ~name:"keeper_task_claim"
+          ~input:(`Assoc [])
+          ()
+      in
+      check string "auto-claim outcome" "success" (outcome_label result.disposition);
+      let json = Yojson.Safe.from_string result.raw_output in
+      let claimed_task = Yojson.Safe.Util.member "claimed_task" json in
+      check string "auto-claimed highest priority task" "task-001"
+        Yojson.Safe.Util.(member "task_id" claimed_task |> to_string);
+      let tasks = Workspace.get_tasks_raw config in
+      let task_status task_id =
+        match
+          List.find_opt
+            (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+            tasks
+        with
+        | None -> fail (Printf.sprintf "missing %s" task_id)
+        | Some task -> task.Masc_domain.task_status
+      in
+      (match task_status "task-001" with
+       | Masc_domain.Claimed { assignee; _ }
+       | Masc_domain.InProgress { assignee; _ } ->
+         check string "assignee" meta.name assignee
+       | _ -> fail "highest priority task should be auto-claimed");
+      match task_status "task-002" with
+      | Masc_domain.Todo -> ()
+      | _ -> fail "lower priority task should remain todo")
+
 let test_unknown_tool_returns_exact_error () =
   with_exec_fixture "keeper_tool_dispatch_runtime_unknown_tool"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -8167,6 +8292,10 @@ let () =
         test_constitution_history_is_visible_to_later_keeper;
       test_case "keeper_task_claim accepts explicit task_id" `Quick
         test_keeper_task_claim_accepts_specific_task_id;
+      test_case "keeper_task_claim rejects unclaimable or malformed explicit task_id without auto-claim" `Quick
+        test_keeper_task_claim_explicit_unclaimable_rejects_without_auto_claim;
+      test_case "keeper_task_claim with omitted task_id auto-claims highest priority" `Quick
+        test_keeper_task_claim_omitted_task_id_auto_claims_highest_priority;
       test_case "unknown tool returns exact error" `Quick
         test_unknown_tool_returns_exact_error;
       test_case "model-visible WebSearch reaches misc runtime" `Quick

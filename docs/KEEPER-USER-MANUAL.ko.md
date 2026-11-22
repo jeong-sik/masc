@@ -53,9 +53,11 @@ MASC는 출처가 유효한 이전 모델의 이력을 임시로 복원한 뒤, 
 
 ```toml
 [keeper]
+group = "platform"          # 선택적 화면 분류 라벨 (기본값: "ungrouped")
 activation_mode = "autonomous"
 sandbox_profile = "docker"
 mention_targets = ["reviewer", "리뷰어"]
+board_interests = []
 
 instructions = """
 당신은 리뷰 Keeper 입니다. 요약문이 아니라 실제 diff 와 파일 원문을 읽어 주세요.
@@ -73,6 +75,7 @@ instructions = """
 | `activation_mode` | — | 수동 시작(`manual`), 요청 시 실행(`on_demand`), 주기 자율 실행(`autonomous`) |
 | `instructions` | 11/11 | Keeper 의 프롬프트 전부. 비면 거부됩니다 |
 | `sandbox_profile` | 11/11 | `docker`, `microvm`, `remote_ssh` 중 하나. Keeper 는 그 안에서 돌거나 아예 돌지 않습니다 |
+| `group` | — | Pulse·Keepers·Runtime 화면에서 묶어 보여주는 선택적 배포 중립 라벨 (기본값 `"ungrouped"`) |
 | `mention_targets` | 7/11 | 보드에서 이 Keeper 를 부르는 이름들 |
 | `network_mode` | 6/11 | 샌드박스에서 네트워크가 닿는 범위 |
 | `name` | 5/11 | 파일 이름과 표시 이름이 다를 때 |
@@ -395,13 +398,37 @@ helper의 상태와 마운트를 읽어 책임 작업과 다른 작업 공간의
 ### `mention_targets` 는 목록이고, 한 칸이 이름 하나입니다
 
 ```toml
-mention_targets = ["rondo", "론도"]   # 이름 두 개
-mention_targets = ["rondo, 론도"]     # 아무도 안 칠 이름 한 개
+mention_targets = ["reviewer", "리뷰어"]   # 이름 두 개
+mention_targets = ["reviewer, 리뷰어"]     # 아무도 안 칠 이름 한 개
 ```
 
 각 칸은 대소문자만 접히고 통째로 보관됩니다. 문자열 안의 쉼표는 칸을 나누지 않고,
 그 결과를 거부하는 곳도 없습니다. 그래서 잘못 쓰면 **아무 멘션도 안 닿는 채로
 조용히 지나갑니다.** 이건 자기 설정에서 한 번 다시 읽어 볼 값입니다.
+
+### `group` 은 화면 분류용 라벨이며 보드 라우팅이 아닙니다
+
+```toml
+[keeper]
+group = "platform"   # 선택 항목; 생략하거나 비우면 "ungrouped"
+```
+
+`keeper.group` 은 `.masc/config/keepers/<name>.toml` 의 `[keeper]` 아래에 두는
+배포 중립적 문자열입니다. 앞뒤 공백은 제거되며, 생략하거나 비워 두면 서버는
+`"ungrouped"` 로 분류합니다(이름 있는 그룹이 알파벳순으로 먼저 오고 `"ungrouped"` 가
+마지막에 옵니다. TUI 플릿 목록에서는 `keeper.group` 이 없을 때 둘 이상의 Keeper 가
+공유하는 하이픈 접두어로 묶고, 없으면 `"Other"` 로 표시합니다).
+
+**펄스(Pulse)**, **키퍼(Keepers, `회사별` 모드)**, **런타임 → 효율·지출** 화면이
+`keeper.group` 으로 Keeper 를 묶고 활동·지출을 집계합니다. 기존 Keeper 는
+`.masc/config/keepers/<name>.toml` 파일(또는 `target=keeper:<name>` 의
+`POST /api/v1/config/patch`, `next_turn` 반영 범위)에서 수정하고 TUI 의
+**4 키퍼 → 상세 → 설정**에서 읽기 전용으로 확인할 수 있으며, 새 Keeper 를 만들 때는
+**4 키퍼**(또는 설정 `,` 의 `4 키퍼 · 회사` 탭)에서 `n` 생성 폼에 바로 지정할 수 있습니다.
+
+`keeper.group` 은 보드 멘션 라우팅(`mention_targets`)이나 수신자 없는 글의 관심 주제
+탐색(`board_interests`)과 완전히 별개이며 권한에도 영향을 주지 않습니다. 멘션 주소는
+`mention_targets`, 관심 주제는 `board_interests` 에 따로 적어 주세요.
 
 ## 작업 표면 (playground)
 
@@ -688,17 +715,17 @@ masc_keeper_down(name="reviewer")
 그래서 `running` 이면서 `stale` 일 수 있습니다. 프로세스는 살아 있고 하트비트가
 늦다는 뜻이고, 죽은 프로세스와는 다른 문제입니다.
 
-여럿을 한눈에 보기엔 터미널 UI 가 가장 빠릅니다. 명단은 Keepers 화면, 도구 호출과
-턴 경계가 들어오는 대로 보이는 건 Acting 화면입니다.
-[`docs/TUI-GUIDE.md`](TUI-GUIDE.md) 를 보세요.
+여럿을 한눈에 보기엔 터미널 UI 가 가장 빠릅니다. 그룹별 플릿 명단과 5-탭 상세는
+**4 키퍼(Keepers)** 화면, 실시간 이벤트와 시스템 로그는 **6 인프라 → 활동·로그**
+화면에서 볼 수 있습니다. [`docs/TUI-GUIDE.md`](TUI-GUIDE.md) 를 보세요.
 
 ## 하루가 도는 방식
 
 작업은 `todo` → `claimed` → `in_progress` → `awaiting_verification` 을 거쳐
 `done` 이나 `cancelled` 로 끝납니다. 검증에서 반려되면 `in_progress` 로 돌아갑니다.
 
-1. 누군가 작업을 만듭니다. 내가 TUI 입력줄에서 `/task <제목>` 으로 만들거나,
-   Keeper 가 `masc_add_task` 로 만듭니다.
+1. 누군가 작업을 만듭니다. MCP 클라이언트나 Keeper 가 `masc_add_task` 로 만들거나,
+   내가 TUI 대화에서 Keeper 에게 생성을 요청합니다.
 2. Keeper 가 그 작업을 집어 들고 턴을 돌기 시작합니다.
 3. 파일 수정, 명령 실행, 보드 글로 결과가 쌓입니다.
 4. 끝났는지는 검증이 판정합니다. 위 런타임에서는 일한 Keeper 가 아니라 **다른
@@ -755,7 +782,7 @@ Keeper의 턴을 열고 **입력과 실행**을 선택합니다. **같은 턴의
 | 멘션이 안 닿는다 | `mention_targets` 한 칸에 구분자가 들어간 문자열이 통째로 있습니다 |
 | 같은 사유 코드로 턴이 몰아서 실패한다 | 프로바이더 쪽 상태입니다 — 쿼터, 키, 요청 제한. 레인의 다른 후보를 보세요 |
 | `running` 인데 `stale` 이다 | 프로세스는 살아 있고 하트비트가 늦은 겁니다. 죽은 게 아닙니다 |
-| TUI 에서 `data unreliable` 옆에 `0` | 읽기가 실패한 겁니다. 목록이 비었다는 뜻이 아닙니다 |
+| TUI 에서 `0` 대신 `—` 나 실패·로딩 상태가 보인다 | 조회가 아직 끝나지 않았거나 실패한 상태입니다(`Observed.t`는 `0`을 지어내지 않습니다). `I`로 장애 이력 서랍을 확인하고 `r`로 새로고침하세요 |
 | 고쳤는데 전부 옛날 값으로 보인다 | 경로가 둘입니다. `/health?full=1` 의 `effective_base_path` 와 `effective_masc_root` 를 확인하세요 |
 
 `.masc/config/` 밖의 파일은 입력이 아닙니다. Keeper 스냅샷, 작업 저장소, 보드 로그,
@@ -821,7 +848,10 @@ Keeper의 도구 목록에 `keeper_memory_select`가 있으면 `purpose`에
 `goal_id`를 함께 전달하면 해당 작업으로 연결됩니다. 작성자는 실행 중인
 Keeper의 이름으로 기록됩니다.
 
-대시보드의 **Work → Artifacts**에서 목록을 검색하고 문서를 열 수 있습니다.
+웹 대시보드의 **Work → Artifacts**에서 목록을 검색하고 문서를 열 수 있습니다
+(TUI v2.6에서는 **3 지식 → 위키·산출물**에서 `Space`로 전환해 산출물 메타데이터를
+확인하고 `y`로 SHA-256 해시를 복사할 수 있으며, HTML 미리보기와 원본 다운로드는
+웹 대시보드/API에서 제공합니다).
 문서는 화면 전체를 채워 열립니다. **목록으로** 버튼으로 돌아갈 수 있고,
 **보고서 정보**를 펼치면 작성자와 연결된 작업을 확인할 수 있습니다.
 미리보기, 원본 보기, 버전 선택, 링크 복사, 원본 다운로드를 제공합니다.

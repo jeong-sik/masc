@@ -224,7 +224,8 @@ See [the TUI guide](docs/TUI-GUIDE.md#troubleshooting) for the exit log details.
 Start with a concrete outcome: what should exist when the work is finished, and
 how it can be checked. Ask a Keeper to record it as a Goal with a metric and
 target, and break the work into Tasks. Follow the Goal and its linked Tasks in
-**Work**, conversations in **Keepers**, and shared discussion on the **Board**.
+**Work**, shared discussion on **Knowledge → Board**, and conversations in
+**Keepers**.
 
 A finished Task is submitted with evidence for verification. A Goal has its own
 completion check and final human confirmation; completed Tasks alone do not
@@ -232,29 +233,40 @@ prove it. Claims record ownership; they do not lock files.
 
 ## Terminal UI
 
-Run `masc` on an interactive terminal. The top strip has seven destinations:
+Run `masc` on an interactive terminal. The top rail has six workspaces (`1`–`6`,
+or `Ctrl+1`–`6` / `Alt+1`–`6` / `F1`–`F6`):
 
-| Surface | What you find there |
-|---|---|
-| **Dashboard** | Goal measurements, Task flow, usage coverage and items needing your attention |
-| **Work** | Goals, Tasks, review queues and recorded verdicts |
-| **Keepers** | Your agents, their conversations, tool calls, changes and per-Keeper details |
-| **Usage** | Provider quotas, costs, tokens and daily reports |
-| **Board** | Shared discussion, posts and comments |
-| **Workspace** | Registered repositories, files, diffs, history and code navigation |
-| **System** | Configuration, models, runtime lanes, tools, activity and server logs |
+| # | Workspace | What you find there |
+|---|---|---|
+| `1` | **Pulse** | Organization overview, KPI hero band, Attention queue, live fleet health, and 24h pulse |
+| `2` | **Work** | Four tabs: Pipeline (Goals & Verifications), Tasks & Schedules, Action Inbox (Asks, Tool Approvals, Gate), and Candle & Scorecard |
+| `3` | **Knowledge** | Three tabs: Board (Signal/All & Succession Chains), Wiki & Artifacts (`Space` toggles), and World Memory (Claims/Conflicts & Temporal Diff Scrubber) |
+| `4` | **Keepers** | Fleet roster (`Companies`, `Attention`, `24h Wall`) and 1-hop 5-tab Keeper Dive (Chat & Stream, Memory, Work & Candle, Sandbox, Config) |
+| `5` | **Runtime** | Four tabs: Quotas & Credits, Efficiency & Spend, Failover Lanes (cascades, `exact_lane_runs`, Fusion), and Tools & Connectors (Tools, Connectors, Browser Lane summary, MCP Clients) |
+| `6` | **Infra** | Three tabs: Sandboxes (MicroVM/SSH/Docker fleet + inspector), Repos & Changes, and Activity & Logs (live system logs + events) |
 
-Use `Tab` / `Shift-Tab` to move, `?` for help and `:` for the command palette.
-The composer sends messages to the selected Keeper. `/task <title>` creates a
-Task and sends its ID in the same message; `/queue clear` clears queued messages
-for a busy Keeper; `/listen` plays the newest audio or MIDI attachment in chat.
-Chat controls let you unfold tool results, reasoning, turn preparation and
-context when you need them. `/features` lists what the TUI can do — one line per
-feature with the command, key or name that opens it
-([the guide's first section](docs/TUI-GUIDE.md#what-can-i-do-here)).
+MASC TUI is **monitor-first**: while unfocused, bare keys navigate directly.
+Switch workspaces with `1`–`6`, cycle sub-tabs with `[` / `]` (or `Alt+[` /
+`Alt+]`), move selection or scroll with `↑`/`↓` (`j`/`k`), dive into an item
+with `Enter`, and focus the bottom composer with `i` (or press `c` on a Keeper
+to jump straight into Chat). Inside the composer, `Enter` sends/steers,
+`Shift+Enter` (or `Alt+Enter`) queues a follow-up, and `Ctrl+J` inserts a
+newline. `Esc` blurs the composer, pops a dive, or closes an overlay and never
+quits; `Ctrl+Q` quits cleanly.
 
-The [TUI guide](docs/TUI-GUIDE.md) covers every view, key, theme, browser lane,
-voice controls and troubleshooting.
+Global overlays and tools: `Ctrl+K` command/entity palette, `Ctrl+G` keeper
+switcher, `Ctrl+L` model/runtime switcher, `,` 2-pane Settings overlay, `Ctrl+T`
+Queue/Context/Schedules drawer, `I` historical incidents drawer, `J` jump to the
+most urgent blocked item, and `?` dynamic keymap help. Native terminal
+drag-select is on by default (mouse capture starts off); press `m` while
+unfocused to toggle mouse-wheel scrolling, and `y` to copy the current selection
+via OSC 52. In chat, `Ctrl+O` (or `/tools compact|results|full`) cycles tool
+details, `Alt+T` cycles thinking display, and `Ctrl+F` cycles origin metadata.
+See [the guide's first section](docs/TUI-GUIDE.md#what-can-i-do-here) for a
+walkthrough and slash-command reference.
+
+The [TUI guide](docs/TUI-GUIDE.md) covers every workspace, shortcut, recipe,
+theme, voice control, streaming architecture, and troubleshooting step.
 
 ## MCP client setup
 
@@ -299,16 +311,20 @@ Give each Keeper a concrete role in `instructions`, choose its sandbox and
 network access, and assign a model or lane in `runtime.toml`. Creating a Keeper
 starts it immediately; using an existing name reconfigures that Keeper.
 `manual` activation requires an explicit start, while `autonomous` enables
-periodic turns. Board mentions use `mention_targets`; `board_interests` routes
-unaddressed posts for relevance judgement. An empty interest list still allows
-explicit mentions and replies in threads the Keeper has joined.
+periodic turns. Optional `group` under `[keeper]` sets a deployment-neutral
+group label for **Pulse**, **Keepers**, and **Runtime** spend views (defaults to
+`"ungrouped"` when omitted or blank); it is display grouping only and stays
+separate from Board routing. Board mentions use `mention_targets`;
+`board_interests` routes unaddressed posts for relevance judgement. An empty
+interest list still allows explicit mentions and replies in threads the Keeper
+has joined.
 
 | Location under `<base-path>/.masc/` | Purpose |
 |---|---|
 | `config/runtime.toml` | Providers, model assignments, runtime lanes and TUI settings |
-| `config/keepers/<name>.toml` | Keeper instructions, activation, sandbox and tool settings |
+| `config/keepers/<name>.toml` | Keeper instructions, optional `group`, activation, sandbox and tool settings |
 | `config/sandbox-image-builds.toml` | Promoted sandbox builds on this host, managed by `masc sandbox-image` |
-| `config/repositories.toml` | Repositories shown in Workspace |
+| `config/repositories.toml` | Repositories shown in **Infra → Repos & Changes** |
 | `skills/<name>/SKILL.md` | Procedures a Keeper can use by name |
 | `wiki/` | Shared workspace wiki pages (`index.md`, `log.md`, and topic pages) |
 
@@ -361,9 +377,12 @@ Use MASC's tools to change tasks, records and approval state.
 See [server startup ownership](docs/guides/server-startup-ownership.md) for
 workspace lease and occupied-port behavior.
 
-The TUI starts a background server when nothing answers the port. Closing the
-TUI leaves the server running, so Keepers can continue working. To pause a
-Keeper, use its lifecycle controls in the Keepers view before closing the UI.
+The TUI starts a local server when nothing answers the port (unless
+`--no-auto-start` is passed). Closing the TUI with `Ctrl+Q` leaves an
+externally started server (`masc start` / `masc setup`) running so Keepers can
+continue working, while a server auto-started and owned by that TUI session is
+stopped on exit (`/restart` preserves an owned server). To stop a Keeper on a
+persistent server before closing the UI, use `masc_keeper_down`.
 
 ## Limits
 

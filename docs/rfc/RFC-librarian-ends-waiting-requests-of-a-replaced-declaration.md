@@ -125,7 +125,7 @@ related: ["0489", "0500", "librarian-history-unknown-resolution", "librarian-his
   - `test/test_lane_addon_host_cycle.ml` 의 `test_original_exact_semantic_dispatch_authority`. 새 revision 에서는 예전 요청을 실행하지 않는다. `enabled` 를 껐다 켜면 같은 요청이 실행된다.
 - 지금 계약은 "요청은 만든 선언 안에서만 실행된다. 선언을 되돌리면 그대로 이어진다"이다.
 - 되돌리지 않을 때의 끝은 정해져 있지 않다.
-- 설계 문서는 선언 파일의 바이트만 바뀐 것을 "기존 요청을 옮기거나 다시 쓸 이유가 아니다"라고 적는다(`docs/design/librarian-addon-execution.md` 257~264행). 선언 revision 이 바뀐 때에 옮길지 다시 쓸지는 적혀 있지 않다.
+- 기존 설계는 선언 파일의 바이트만 바뀐 것을 "기존 요청을 옮기거나 다시 쓸 이유가 아니다"라고 적었다. 선언 revision 이 바뀐 때에 옮길지 다시 쓸지는 적혀 있지 않다.
 
 ### 1.8 측정
 

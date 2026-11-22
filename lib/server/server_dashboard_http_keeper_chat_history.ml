@@ -64,8 +64,6 @@ let keeper_chat_trace_blocks config name =
     None
 ;;
 
-let attach_keeper_chat_skill_activations ~config:_ ~keeper_name:_ rows = rows ;;
-
 let render_keeper_chat_history config name messages autonomous_turns =
   let base_dir = (config : Workspace.config).base_path in
   let trace_block_by_turn_ref = keeper_chat_trace_blocks config name in
@@ -77,19 +75,16 @@ let render_keeper_chat_history config name messages autonomous_turns =
   let autonomous_rows =
     List.map autonomous_turn_json autonomous_turns
   in
-  let rows =
-    match autonomous_rows, chat_rows with
-    | [], _ -> chat_rows
-    | _ :: _, `List rows -> `List (rows @ autonomous_rows)
-    | _ :: _, other ->
-      Log.Keeper.warn
-        "dashboard keeper chat history: chat store for %s did not emit an array; %d \
-         autonomous turn(s) omitted"
-        name
-        (List.length autonomous_rows);
-      other
-  in
-  attach_keeper_chat_skill_activations ~config ~keeper_name:name rows
+  match autonomous_rows, chat_rows with
+  | [], _ -> chat_rows
+  | _ :: _, `List rows -> `List (rows @ autonomous_rows)
+  | _ :: _, other ->
+    Log.Keeper.warn
+      "dashboard keeper chat history: chat store for %s did not emit an array; %d \
+       autonomous turn(s) omitted"
+      name
+      (List.length autonomous_rows);
+    other
 ;;
 
 let keeper_chat_history_json config name =
@@ -111,7 +106,6 @@ let keeper_chat_history_page_json ?max_total config name ~cursor =
   let messages =
     Keeper_chat_store.to_json_array ~omit_stream_contract:true ~base_dir
       ?trace_block_by_turn_ref history_messages
-    |> attach_keeper_chat_skill_activations ~config ~keeper_name:name
   in
   Ok (`Assoc
     [ "schema", `String "masc.keeper_chat_history.page.v2"

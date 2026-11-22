@@ -261,7 +261,6 @@ export {
 
 export {
   parseDashboardKeeperWaitingSource,
-  normalizeSkillActivationProjection,
 } from './dashboard-tools-prompts'
 
 export {
@@ -305,14 +304,6 @@ export type {
   DashboardToolsRequestOptions,
   DashboardSkillReference,
   DashboardEffectiveKeeperSurface,
-  DashboardSkillInstructionOrigin,
-  DashboardSkillCompositionOrigin,
-  DashboardSkillActivationInvocation,
-  DashboardSkillActivation,
-  DashboardSkillTransitionRejection,
-  DashboardSkillActivationSummary,
-  DashboardSkillScopedSummary,
-  DashboardSkillActivationProjection,
   DashboardScheduleRunnerCounts,
   DashboardScheduleRunnerStatus,
   DashboardKeeperQueueStorageIntegrity,

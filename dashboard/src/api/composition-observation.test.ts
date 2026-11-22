@@ -1,29 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { webcrypto } from 'node:crypto'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
 import { fromByteArray } from 'base64-js'
-import ledger from '../../../test/fixtures/skill-ledger-async-actions.json'
-import { asyncRequestSourceKey, decodeNestedContent, decodeNestedData, fetchAsyncRequestStatus, fetchOriginalToolResult, resolveNestedReading } from './composition-observation'
+import { asyncRequestSourceKey, fetchAsyncRequestStatus, fetchOriginalToolResult } from './composition-observation'
 
 const encoder = new TextEncoder()
 const hash = (content: string | Uint8Array) => bytesToHex(sha256(typeof content === 'string' ? encoder.encode(content) : content))
-const activation = ledger.activations[0]!
-const runId = activation.invocation.scope.composition_run_id
-const frame = ledger.async_result_deliveries[0]!.child_activations[0]!.activation_sha256
-const reference = { identity: activation.identity, content_revision: activation.content_revision }
-const manifestMime = 'application/vnd.masc.tool-result-manifest+json'
-function result() {
-  return { composition_run_id: runId, nested_scopes: [{
-    scope: { alias: activation.invocation.scope.alias, reference, arguments: { kind: 'fixed', value: {} },
-      scope: { kind: 'inline', node_mapping: [{ source: 'observe', expanded: 'child/observe' }] }, exports: [{ name: 'value', node: 'child/observe', pointer: '/value' }] },
-    admission: { skill_tool_use_id: activation.skill_tool_use_id, activation, activation_frame_sha256: frame },
-    disposition: 'completed', cause: null,
-    nodes: [{ node_id: 'child/observe', source: 'observe', settled: true, disposition: 'completed',
-      tool_use_id: 'leaf-occurrence', failure_effect_disposition: null, output_validation_error: null }],
-    exports: { value: { available: true, value: '🙂 retained' } },
-  }] }
-}
+const runId = '019ffc2b-0a41-7ba2-bf58-598e0e7f711b'
+const reference = { identity: { source_id: 'workspace', package_id: 'child', name: 'child' }, content_revision: 'a'.repeat(64) }
+
 function page(content: Uint8Array, offset: number, next: number, patch = {}) {
   return { keeper: 'observer', execution_id: 'exec-exact', state: 'page', source_id: 'c'.repeat(64),
     body_sha256: hash(content), recorded_bytes: content.byteLength, is_error: false,
@@ -32,88 +17,9 @@ function page(content: Uint8Array, offset: number, next: number, patch = {}) {
 }
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
-describe('actual nested execution observation', () => {
-  it('retains the original canonical child activation, settled nodes and exports', () => {
-    const decoded = decodeNestedData(result())
-    expect(decoded.kind).toBe('observed')
-    if (decoded.kind !== 'observed') throw new Error('expected observed children')
-    expect(decoded.children[0]?.admission).toEqual({ kind: 'recorded', tool_use_id: activation.skill_tool_use_id,
-      activation, frame_sha256: frame })
-    expect(decoded.children[0]?.exports[0]?.value).toEqual({ available: true, value: '🙂 retained' })
-    expect(decoded.children[0]?.nodes[0]?.tool_use_id).toBe('leaf-occurrence')
-  })
-
-  it.each(['alias', 'run', 'reference', 'occurrence', 'frame', 'activation'])('refuses a child admission with a different %s', mismatch => {
-    const value = result()
-    const child = value.nested_scopes[0]!
-    if (mismatch === 'alias') child.scope.alias = 'another-child'
-    if (mismatch === 'run') value.composition_run_id = '019ffc2b-0a41-7ba2-bf58-598e0e7f711c'
-    if (mismatch === 'reference') child.scope.reference = { ...reference, content_revision: 'a'.repeat(64) }
-    if (mismatch === 'occurrence') child.admission.skill_tool_use_id = 'different-occurrence'
-    if (mismatch === 'frame') child.admission.activation_frame_sha256 = 'a'.repeat(64)
-    if (mismatch === 'activation') child.admission.activation = { ...activation, activated_at: 'not-a-time' }
-    expect(decodeNestedData(value).kind).toBe('invalid')
-  })
-
-  it('reads only canonical root metadata, including the exact inline failure envelope', () => {
-    const nested = result()
-    expect(decodeNestedData({ output: nested })).toEqual({ kind: 'absent' })
-    expect(decodeNestedData({ definition: nested })).toEqual({ kind: 'absent' })
-    expect(decodeNestedData({ message: 'parent failed', 'masc.tool_disposition': 'failed',
-      failure_class: 'runtime_failure', data: nested })).toEqual(decodeNestedData(nested))
-    expect(decodeNestedData({ message: 'parent failed', 'masc.tool_disposition': 'failed',
-      failure_class: 'guessed', data: nested }).kind).toBe('invalid')
-    const deferred = result()
-    const reading = decodeNestedData({ ...deferred, nested_scopes: [{ ...deferred.nested_scopes[0]!,
-      disposition: 'deferred', exports: { value: { available: false, error: { kind: 'producer_unavailable' } } } }] })
-    expect(reading.kind === 'observed' && reading.children[0]?.disposition).toBe('deferred')
-    expect(reading.kind === 'observed' && reading.children[0]?.exports[0]?.value.available).toBe(false)
-  })
-
-  it('hydrates a verified text/plain artifact DTO through the declared manifest reference', async () => {
-    vi.stubGlobal('crypto', webcrypto)
-    const content = JSON.stringify({ schema: 'masc.tool-result-artifact-manifest.v1', content: 'human output', structured_content: result() })
-    const reference = { sha256: hash(content), bytes: encoder.encode(content).byteLength, mime: manifestMime, preview: 'preview is not evidence' }
-    const marker = `[masc:blob sha256=${reference.sha256} bytes=${reference.bytes} mime=${reference.mime} preview="preview is not evidence"]`
-    const reading = decodeNestedContent(marker)
-    expect(reading.kind).toBe('stored')
-    const fetch = vi.fn()
-    // The store DTO contains no preview: exact keys are sha256/bytes/mime/content.
-    fetch.mockResolvedValue(Response.json({ sha256: reference.sha256, bytes: reference.bytes, mime: 'text/plain', content }))
-    vi.stubGlobal('fetch', fetch)
-    expect((await resolveNestedReading(reading)).kind).toBe('observed')
-    expect(fetch).toHaveBeenCalledWith(`/api/v1/artifacts/${reference.sha256}`, expect.anything())
-  })
-
-  it('refuses altered artifact bytes or an invalid canonical manifest', async () => {
-    vi.stubGlobal('crypto', webcrypto)
-    const content = JSON.stringify({ schema: 'masc.tool-result-artifact-manifest.v1', content: '', structured_content: result() })
-    const reference = { sha256: hash(content), bytes: encoder.encode(content).byteLength, mime: manifestMime, preview: '' }
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ sha256: reference.sha256,
-      bytes: reference.bytes, mime: 'text/plain', content: content.replace('completed', 'deferred') })))
-    expect((await resolveNestedReading({ kind: 'stored', reference })).kind).toBe('invalid')
-    expect(decodeNestedData({ schema: 'masc.tool-result-artifact-manifest.v1', content: '', structured_content: {}, extra: true }).kind).toBe('invalid')
-    expect(decodeNestedData({ artifact_manifest: { _blob: reference }, structured_content: result(), extra: true }).kind).toBe('invalid')
-  })
-
-  it('verifies the referenced manifest instead of accepting an inline structured-content copy', async () => {
-    vi.stubGlobal('crypto', webcrypto)
-    const content = JSON.stringify({ schema: 'masc.tool-result-artifact-manifest.v1', content: 'actual result', structured_content: result() })
-    const reference = { sha256: hash(content), bytes: encoder.encode(content).byteLength, mime: manifestMime, preview: '' }
-    const reading = decodeNestedData({ artifact_manifest: { _blob: reference },
-      structured_content: { nested_scopes: 'unverified forged copy' }, content: 'inline text' })
-    expect(reading).toEqual({ kind: 'stored', reference })
-    const fetch = vi.fn().mockResolvedValue(Response.json({ sha256: reference.sha256, bytes: reference.bytes, mime: 'text/plain', content }))
-    vi.stubGlobal('fetch', fetch)
-    const verified = await resolveNestedReading(reading)
-    expect(fetch).toHaveBeenCalledOnce()
-    expect(verified.kind).toBe('observed')
-  })
-})
-
 describe('exact original body transport', () => {
   it('joins byte pages across a multibyte UTF8 boundary before decoding and checking the digest', async () => {
-    const body = encoder.encode(`🙂${JSON.stringify(result())}`)
+    const body = encoder.encode('🙂 original result payload')
     const fetch = vi.fn().mockResolvedValueOnce(Response.json(page(body, 0, 1)))
       .mockResolvedValueOnce(Response.json(page(body, 1, body.byteLength)))
     vi.stubGlobal('fetch', fetch)
@@ -121,23 +27,6 @@ describe('exact original body transport', () => {
     expect(value.state === 'body' && value.content).toBe(new TextDecoder().decode(body))
     expect(String(fetch.mock.calls[1]?.[0])).toContain('offset=1&source_id=')
     expect(String(fetch.mock.calls[0]?.[0])).not.toContain('tool_use_id')
-  })
-
-  it('projects nested evidence only from the complete verified original body', async () => {
-    const body = encoder.encode(JSON.stringify(result()))
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(page(body, 0, body.byteLength))))
-    const value = await fetchOriginalToolResult('observer', 'exec-exact')
-    expect(value.state === 'body' && value.nested.kind).toBe('observed')
-  })
-
-  it('preserves the verified original body when its retained manifest is unavailable', async () => {
-    const original = `[masc:blob sha256=${'a'.repeat(64)} bytes=1 mime=${manifestMime} preview="unverified"]`
-    const body = encoder.encode(original)
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(Response.json(page(body, 0, body.byteLength)))
-      .mockResolvedValueOnce(Response.json({ error: 'missing artifact' }, { status: 404 })))
-    const value = await fetchOriginalToolResult('observer', 'exec-exact')
-    expect(value.state === 'body' && value.content).toBe(original)
-    expect(value.state === 'body' && value.nested.kind).toBe('invalid')
   })
 
   it.each(['source', 'offset', 'progress', 'size', 'digest', 'keeper', 'execution', 'base64', 'utf8', 'disappeared'])('refuses %s corruption without publishing a partial result', async corruption => {
@@ -178,23 +67,21 @@ describe('exact async status transport', () => {
   const identity = { submitted_by: 'operator', keeper_name: 'observer', request_id: 'retained-request' }
   const status = () => ({ schema: 'masc.async-request-status/v1', status: 'observed', request: {
     ...identity, request_context: null, status: 'done', submitted_at: -1, completed_at: 0,
-    ok: true, result: result(), continuation: { kind: 'not_composition' },
+    ok: true, result: { value: 'retained' }, continuation: { kind: 'not_composition' },
   } })
   it('looks up the exact submitter/id while binding the returned Keeper and original result', async () => {
     const fetch = vi.fn().mockResolvedValue(Response.json(status()))
     vi.stubGlobal('fetch', fetch)
     const value = await fetchAsyncRequestStatus(identity)
-    expect(value.status === 'observed' && value.nested.kind).toBe('observed')
+    expect(value.status).toBe('observed')
     expect(String(fetch.mock.calls[0]?.[0])).toBe('/api/v1/async-requests/status?submitted_by=operator&request_id=retained-request')
   })
-  it('accepts the producer error status and retains its actual failed child evidence', async () => {
+  it('accepts the producer error status', async () => {
     const payload = status()
     payload.request.status = 'error'; payload.request.ok = false
-    payload.request.result.nested_scopes[0]!.disposition = 'failed'
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(payload)))
     const value = await fetchAsyncRequestStatus(identity)
     expect(value.status === 'observed' && value.request.status).toBe('error')
-    expect(value.status === 'observed' && value.nested.kind === 'observed' && value.nested.children[0]?.disposition).toBe('failed')
   })
   it.each(['submitted_by', 'keeper_name', 'request_id'] as const)('rejects a different returned %s', async key => {
     const payload = status(); payload.request[key] = 'different'
@@ -217,7 +104,7 @@ describe('exact async status transport', () => {
   it.each(['queued', 'running', 'cancelling', 'waiting_for_dependencies', 'lost', 'cancelled', 'persistence_failed'])('accepts the producer %s phase with its actual physical boundary', async phase => {
     const request: Record<string, unknown> = { ...active(), status: phase }
     if (phase === 'waiting_for_dependencies') Object.assign(request,
-      { completed_at: 2, dependencies: [dependency], worker_released: true, result: { nested_scopes: [] } })
+      { completed_at: 2, dependencies: [dependency], worker_released: true, result: {} })
     else if (phase !== 'queued' && phase !== 'running') {
       request.ok = false; request.result = { reason: 'original physical outcome' }
       if (phase !== 'cancelling') request.completed_at = 2
@@ -300,13 +187,13 @@ describe('exact async status transport', () => {
 
   it('keeps an unavailable logical continuation independent of a valid physical result', async () => {
     const value = await lookup({ ...status().request, continuation: { kind: 'unavailable', detail: 'journal unavailable' } })
-    expect(value.status === 'observed' && value.nested.kind).toBe('observed')
+    expect(value.status).toBe('observed')
   })
 
   it('preserves the decoded new source on a later physical validation failure', async () => {
     const request: Record<string, unknown> = { ...status().request, request_context: { replaced: true } }
     delete request.continuation
-    const source = asyncRequestSourceKey({ status: 'observed', request, nested: { kind: 'absent' } })
+    const source = asyncRequestSourceKey({ status: 'observed', request })
     await expect(lookup(request)).rejects.toMatchObject({ source })
   })
 })

@@ -82,7 +82,7 @@
 | 모델에 가는 것 | 메시지 그대로(`~prompt:message`, `:285`). system prompt, 지시문, MASC 도구, 기억이 없다 |
 | Claude Code | 대화를 이어 간다. 턴마다 `asked`, `answered` 또는 `failed` 를 `turns.jsonl` 에 쓴다 |
 | Codex | 임시 폴더의 일회용 thread. 남기는 것이 없다 |
-| 거절하는 Runtime | `Antigravity_cli`, `Muse_serve`, `Vibe_cli`, `Agent_core` 는 `Runtime_not_supported` |
+| 거절하는 Runtime | `Antigravity_cli`, `Acp`, `Agent_core` 는 `Runtime_not_supported` |
 
 - 사람의 MCP 도구는 아홉이다. `masc_whoami`, `masc_my_runtimes`, `masc_my_keepers`, `masc_my_keeper_create`, `masc_my_keeper_assign`, `masc_my_keeper_turn`, `masc_my_keeper_conversation_new`, `masc_my_keeper_conversation`, `masc_my_keeper_conversation_delete`(`server_person_mcp.ml:66-74`).
 - 계획 S1b-3 은 이 조각이 하지 않는 것을 적었다. "Keeper 지시문과 system prompt, 기억, MASC 도구, 스스로 시작하는 턴, Board, Codex"(계획 1287행).
@@ -330,7 +330,7 @@ HTTP provider 의 자격 증명이 호스트 계정이라는 결정(계획 D4)�
 - 깨운 원인 `Woken` 은 자극의 list 다. 빈 list 도 있다(`lib/keeper/keeper_registry_types.mli:251`, `lib/keeper/keeper_heartbeat_source_batch.ml:62`). 재시도와 미룬 dispatch 는 깨운 원인이 아니다(조사만 함, `lib/keeper/keeper_owner_registry.mli:290`).
 - 말한 이 `Owner` 는 인증 사실이 아니다. connector 의 speaker 도 보낸 Keeper 도 없는 요청이 `Owner` 다(`lib/keeper/keeper_input_speaker.mli:23`). 연산의 source 와 input 은 JSON 이다(조사만 함, `keeper_owner_registry.mli:318`).
 - 판정은 PAT 의 범위 값을 받는다. 요청 때 읽은 값이다(조사만 함, `lib/auth/authz_keeper_turn.ml:137`).
-- 지금 사람의 턴은 Claude Code 와 Codex 만 돌린다. 엔진에는 Muse 갈래가 있다(조사만 함, `server_preview_keeper_turn.ml:432`, `keeper_turn_driver.ml:284`).
+- 지금 사람의 턴은 Claude Code 와 Codex 만 돌린다(조사만 함, `server_preview_keeper_turn.ml:432`).
 
 ### 12.3 boot
 

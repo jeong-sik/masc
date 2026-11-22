@@ -53,7 +53,7 @@ Terminal turn outcomes distinguish explicit model refusal from content-free
 stops (the `Refusal` stop reason vs an `Empty_completion` failure). Empty terminal completion
 without visible text or tool effects is recorded as an explicit empty-completion
 observation unless the active lane contract permits quiet completion (such as
-thinking-only or Muse code-lane turns that completed their side effect via
+thinking-only turns that completed their side effect via
 tools). Provider/model errors return as typed observations. They may cause the
 Keeper to choose a fallback runtime on a later action, but they do not
 increment a policy strike, create a cooldown, pause the Keeper, or stop its
@@ -97,13 +97,10 @@ The Keeper remains free to perform unrelated work while a request is pending.
 
 Long-running Tool, Connector, Scheduler, and Fusion activity becomes a Job.
 Keepers also own isolated Docker jobs (`keeper_job_start`, `keeper_job_status`,
-`keeper_job_output`, `keeper_job_cancel`, `keeper_job_list`) and prepared or
-named async tool compositions (`keeper_composition_run`,
-`keeper_composition_status`,
-`keeper_composition_cancel`) stored under `.masc/keepers/<name>/jobs/`.
-Submitting a Job or async composition returns its durable handle, and owned-job
-waits can suspend only the requesting composition step or yield back to the
-lane. Completion or failure appends a typed stimulus to the origin lane.
+`keeper_job_output`, `keeper_job_cancel`, `keeper_job_list`) stored under
+`.masc/keepers/<name>/jobs/`.
+Submitting a Job returns its durable handle, and owned-job waits yield back to
+the lane. Completion or failure appends a typed stimulus to the origin lane.
 Polling is allowed when the external system has no callback, but polling state
 is Job-local and never holds the Keeper fiber or a fleet-wide slot.
 

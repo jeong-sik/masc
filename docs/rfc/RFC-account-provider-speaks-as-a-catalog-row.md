@@ -255,7 +255,6 @@ let catalog_provider_id (provider : provider) =
 - `Runtime_exact_output_registry.check_publication` 이 버린 slot 을 돌려준다.
 - 문서
   - `docs/guides/provider-admission-fairness.md` 에 계정 provider 예와 `catalog-provider` 를 더한다. provider 표의 키를 모은 안내는 따로 없다.
-  - `docs/guides/keeper-memory-execution.md` 의 Librarian slot 안내에 계정 slot 예를 더한다. 실제 계정 이름은 쓰지 않는다.
 
 ## 7. 구현 층
 

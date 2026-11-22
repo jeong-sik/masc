@@ -246,38 +246,6 @@ val keeper_world_transcript_intro : string
 (** Durable direct-conversation transcript block, prepended to the quoted
     recent-conversation rows in the turn context. *)
 
-(** Managed recall instructions and external criterion policy. *)
-val keeper_recall_candidate : string
-val keeper_recall_candidate_possibly_needed : string
-val keeper_recall_candidate_not_needed : string
-val keeper_recall_time : string
-val keeper_recall_time_standing : string
-val keeper_recall_time_bound : string
-val keeper_recall_turn : string
-val keeper_recall_turn_yes : string
-val keeper_recall_turn_no : string
-val keeper_recall_turn_unsure : string
-
-(** The two blocks of the recall judgment: the status line a judged turn
-    always carries, and the body of the memories the judgment carried. *)
-val keeper_recall_status_selected : string
-val keeper_recall_status_selected_ids : string
-val keeper_recall_status_capacity_deferred : string
-val keeper_recall_status_none_found_needed : string
-val keeper_recall_status_none_found_unsure : string
-val keeper_recall_status_none_needed : string
-val keeper_recall_status_unavailable : string
-val keeper_recall_status_unavailable_turn_question : string
-val keeper_recall_status_partial : string
-val keeper_recall_status_search_hint : string
-val keeper_recall_status_search_hint_unavailable : string
-val keeper_recall_body_heading : string
-val keeper_recall_body_item : string
-val keeper_recall_body_source_board : string
-val keeper_recall_body_time_bound : string
-val keeper_recall_body_time_unjudged : string
-val keeper_recall_body_omitted : string
-
 val keeper_world_active_goals_unavailable : string
 val keeper_world_active_goals_heading : string
 val keeper_world_active_goals_criterion : string
@@ -325,12 +293,10 @@ val keeper_world_namespace_state_claimable_rows : string
 val keeper_world_namespace_state_claimable_more : string
 val keeper_world_namespace_state_unclaimed_not_offered : string
 val keeper_world_namespace_state_failed : string
-val keeper_world_namespace_state_running_fibers : string
 val keeper_world_autonomous_trigger_heading : string
 val keeper_world_autonomous_trigger_scheduler_scheduled : string
 val keeper_world_autonomous_trigger_scheduler_reactive : string
 val keeper_world_autonomous_trigger_reasons : string
-val keeper_world_autonomous_trigger_since_last : string
 
 val keeper_world_scheduled_automation_heading : string
 val keeper_world_scheduled_automation_counts : string

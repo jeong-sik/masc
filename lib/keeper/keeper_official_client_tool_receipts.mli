@@ -1,7 +1,7 @@
 (** Bind an official client's dynamic-tool block to its exact host
     invocation, and report the committed execution id for that block.
 
-    Every official client (Codex, Claude Code, Antigravity, Muse) opens one
+    Every official client (Codex, Claude Code, Antigravity, ACP) opens one
     stream block per MASC tool call, runs the call through
     {!Keeper_official_client_host.dynamic_tools}, then closes the block. Calls
     are keyed by the producer's call id, so concurrent calls with distinct ids

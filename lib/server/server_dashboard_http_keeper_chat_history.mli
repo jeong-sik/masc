@@ -1,16 +1,4 @@
-(** Keeper chat history for the dashboard: the tail window, the exact pages, and the
-    Skill activation projection attached to their rows. *)
-
-val attach_keeper_chat_skill_activations :
-  config:Workspace.config -> keeper_name:string -> Yojson.Safe.t -> Yojson.Safe.t
-(** Attach the exact-turn Skill activation projection to assistant chat rows.
-    A row that reports [keeper_skill] but has no matching retained activation
-    receives an explicit missing/unavailable status; no timestamp or row-order
-    inference is used. Each trace is read through the read-only ledger path
-    once per call, then grouped only for the requested assistant turns. Row and
-    activation order are preserved; nothing is cached across calls.
-    Exposed so the server JSON contract can be tested
-    without opening an HTTP listener. *)
+(** Keeper chat history for the dashboard: the tail window and the exact pages. *)
 
 val keeper_chat_history_json :
   Workspace.config -> string ->

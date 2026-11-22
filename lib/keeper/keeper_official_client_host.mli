@@ -288,7 +288,7 @@ val is_carried_on_resume : Agent_core.Types.message -> bool
 
 val is_canonical_source_snapshot_message : Agent_core.Types.message -> bool
 (** Whether a message belongs in a [Canonical_source_guard] history digest
-    (Antigravity, Muse): excludes both per-turn carried context
+    (Antigravity): excludes both per-turn carried context
     ({!is_carried_on_resume}) and uncheckpointed official-client turns bridged
     by {!Keeper_turn_bridge.uncheckpointed_official_turns}. Bridged turns still
     reach fresh Starts in [prepared.messages], while Resumes already witnessed
@@ -297,7 +297,7 @@ val is_canonical_source_snapshot_message : Agent_core.Types.message -> bool
 
 val standing_system_blocks : Prompt_block_id.t list
 (** Standing System observation kinds eligible for snapshot replacement on
-    official-client Resume. Shared by Codex, Antigravity, and Muse. *)
+    official-client Resume. Shared by Codex and Antigravity. *)
 
 val supported_standing_system_observation :
   Keeper_context_assembly.system_observation -> bool
@@ -324,7 +324,7 @@ val canonical_system_guard :
   composed_context:composed_context option ->
   canonical_system_guard
 (** Compute the System portion of a [Canonical_source_guard] digest for framed
-    official clients (Antigravity, Muse). When [composed_context] carries a
+    official clients (Antigravity). When [composed_context] carries a
     verified [system_prompt] matching [raw_system_prompt] byte-for-byte whose
     observations are all supported by {!supported_standing_system_observation},
     hashes [issued.base_text] joined with [static_notes] under an explicit
@@ -699,8 +699,8 @@ val start_range_projection :
     composed. [on_carried_front] gets the front once, with the range's bytes
     and where the request starts in the history
     ({!Keeper_request_start.sends_from}).
-    Source-specific projection runs after this range. Antigravity and Muse
-    Code can use the same projection with unbounded capacity. Without
+    Source-specific projection runs after this range. Antigravity
+    can use the same projection with unbounded capacity. Without
     [librarian_front] the turn has no read end.
 
     With [argument_projection], verified closed raw-seed arguments and

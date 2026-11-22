@@ -181,8 +181,8 @@ storage cost and remaining lifetime limits.
 
 ## Retained host attachment readings
 
-Keeper-history runs share the walk's H5 reader across Core, Codex, Claude Code,
-Antigravity and Muse. Their retained carrier is Text, so a normalized host audio
+Keeper-history runs share the walk's H5 reader across Core, Codex, Claude Code
+and Antigravity. Their retained carrier is Text, so a normalized host audio
 or document attachment needs a reading even when the selected runtime accepts
 native media elsewhere. Ordinary native history projection is unchanged.
 Completion review receives no retained-media reader.
@@ -204,10 +204,10 @@ Reading does not acknowledge a result or change its success/failure outcome.
 
 Core, Codex and Claude prepare all readings before freezing the run carrier.
 Their existing size-refusal hook stores and replaces the complete text, including
-the readings; retries reuse that same carrier. Antigravity and Muse prepare the
-same derived data in their direct context path, but have no carrier-address
+the readings; retries reuse that same carrier. Antigravity prepares the
+same derived data in its direct context path, but has no carrier-address
 shrink/retry mechanism. Large readings can enlarge those requests; this change
-does not establish a size guarantee for either lane.
+does not establish a size guarantee for that lane.
 
 Consumed receipts retain original artifact bytes. Artifact-only ownership does
 not retain the H5 disk cache: maintenance can evict a derived reading, and a

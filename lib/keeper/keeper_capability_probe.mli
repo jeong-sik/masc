@@ -231,11 +231,10 @@ val probe_official_client_invocation
     invocation, so a call is observed at the callback rather than inferred
     from response content.
 
-    Antigravity and Muse are refused with {!Tools_only_via_mcp_bridge}: its entry point
+    Antigravity is refused with {!Tools_only_via_mcp_bridge}: its entry point
     declares no tool list, so its surface exists only once the per-turn MCP
     bridge is up. Answering from MASC's descriptor table instead would repeat
-    the 2026-08-12 mistake of reading advertisement as consumption. Vibe is
-    refused with {!No_tool_channel}. *)
+    the 2026-08-12 mistake of reading advertisement as consumption. *)
 
 val probe_antigravity_invocation
   :  sw:Eio.Switch.t

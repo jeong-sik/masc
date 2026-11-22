@@ -2,7 +2,7 @@
 
 This optional package retains original HITL Auto Judge executions. The host owns
 the approval queue: the pending approval, the judge original
-(`Hitl_judge_original`, retained through `Hitl_judge_owner`), the decision,
+(`Hitl_judge_original`), the decision,
 terminalisation and consumption. The worker answers a request; it cannot approve,
 deny or consume anything, and no provider key or approval state lives here.
 
@@ -25,7 +25,7 @@ the host dispatch is not connected.
 The masc server carries this package. Declare it with `package = "hitl-auto-judge"`,
 then run `masc exact-addon-setup --declared --base-path <base-path>`, which writes
 the package under `<base-path>/.masc/packages/` and builds its image
-([Keeper Librarian install](../../docs/guides/keeper-memory-execution.md#install-the-package)).
+([TOML installation](../../docs/guides/lane-addon-toml.md#서버가-가진-exact-패키지)).
 A declaration that pins the package with `manifest_path` builds the image from
 the repository root instead:
 

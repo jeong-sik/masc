@@ -7901,8 +7901,6 @@ let test_keeper_setup_rpc_refusal_preserves_session ~responses ~methods ~error_t
     check int "setup refusal consumes no provider ordinal" before.turn_count after.turn_count;
     check bool "unsent changed System context cannot replace acknowledged context" true
       (after.context_frontier = before.context_frontier);
-    check bool "setup refusal preserves the host's last turn" true
-      (after.host_last_turn = before.host_last_turn);
     check bool "the original exact-session continuation remains admissible" true
       (Store.validate_continuation ~checkpoint ~expected:(Some after)
         ~client_kind:Codex ~runtime_id:before.runtime_id

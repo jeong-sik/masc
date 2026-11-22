@@ -3,7 +3,7 @@
    another person. Read it against plan D2. *)
 
 (** Whether a CLI may start on an official account (multi-account plan D2,
-    and D3 for Muse and the host clients).
+    and D3 for host clients).
 
     A captured account ({!Runtime_official_account.t}) holds the environment
     its CLI starts with, and that environment can hold a credential. A CLI
@@ -234,8 +234,7 @@ type refusal =
   | No_membership of Authz_types.User_id.t
   | Home_unresolved of string  (** The home of the account could not be spelled. *)
   | Not_a_declared_home
-      (** The account was captured from an inherited home, or a Muse process
-          would start on the environment of the process. *)
+      (** The account was captured from an inherited home. *)
   | Not_the_account_home of Authz_types.Provider_account_id.t
       (** The account was captured from another home than the one of this
           account of the person. *)
@@ -466,13 +465,13 @@ val api_admission_snapshot : api_sealed -> Llm_provider.Slot_scheduler.snapshot 
 (** {1 Native tools}
 
     An official CLI runs as the user of the server process, and its own tools
-    (Claude Code's Read, Codex's read-only sandbox, Muse's built-in tools)
+    (Claude Code's Read, Codex's read-only sandbox)
     reach what that user can read. In a multi-account process that includes
     the account homes of other people, with their login credentials. No
     measurement has shown yet that a native posture stays inside the turn's
     own files, so a multi-account process runs a model turn only without
-    native tools (plan D3c). Codex and Muse cannot drop their native tools,
-    so their model turns are refused there until a measurement opens a
+    native tools (plan D3c). Codex cannot drop its native tools,
+    so its model turns are refused there until a measurement opens a
     posture. A single-user process whose workspace keeps runtime roots of
     persons is in the same place for those roots (plan F3a-3). Calls that run
     no model turn (a login check, a usage read, a model list) take no native

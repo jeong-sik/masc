@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runtimeReservedProviderIdsFixture } from '../lib/runtime-config-receipt.test-fixture'
-import sharedAsyncSkillLedger from '../../../test/fixtures/skill-ledger-async-delivery.json'
 
 const devTokenMock = vi.hoisted(() => ({
   ensureDevToken: vi.fn(() => Promise.resolve()),
@@ -21,7 +20,6 @@ import {
   fetchDashboardTools,
   fetchKeeperWaitingInventory,
   parseDashboardKeeperWaitingSource,
-  normalizeSkillActivationProjection,
   fetchDashboardFullHealth,
   fetchKeeperToolCalls,
   toolCallCompletion,
@@ -1248,256 +1246,7 @@ describe('fetchTlcResults', () => {
   })
 })
 
-function validSkillActivationProjectionFixture() {
-  const reference = {
-    identity: {
-      source_id: 'workspace',
-      package_id: 'review-skill',
-      name: 'review-skill',
-    },
-    content_revision: 'a'.repeat(64),
-  }
-  const summary = {
-    instruction_invocations: 1,
-    skill_bodies_served: 1,
-    skill_resources_served: 0,
-    instruction_provider_deliveries: 1,
-    instruction_official_client_handoffs: 0,
-    instruction_actions_observed: 1,
-    composition_invocations: 0,
-    composition_provider_deliveries: 0,
-    composition_official_client_handoffs: 0,
-    composition_actions_observed: 0,
-    invalid_transitions: 0,
-  }
-  return {
-    status: 'available',
-    keeper_name: 'keeper/one',
-    summary,
-    scoped_summaries: [{
-      scope: {
-        snapshot_revision: 'b'.repeat(64),
-        turn_ref: 'trace-one#1',
-        invocation_runtime_id: 'openai.codex',
-        reference,
-      },
-      summary,
-      provider_delivery_runtime_counts: [{ runtime_id: 'anthropic.claude', count: 1 }],
-      official_client_handoff_runtime_counts: [],
-      action_runtime_counts: [{ runtime_id: 'anthropic.claude', count: 1 }],
-    }],
-    ledger: {
-      schema: 'masc.skill-activations/v8',
-        async_result_deliveries: [],
-        async_actions: [],
-      workspace_key: 'c'.repeat(64),
-      session_id: 'trace-one',
-      revision: 'd'.repeat(64),
-      activations: [{
-        ...reference,
-        snapshot_revision: 'b'.repeat(64),
-        turn_ref: 'trace-one#1',
-        runtime_id: 'openai.codex',
-        skill_tool_use_id: 'call-skill-1',
-        agent_core_turn: 0,
-        invocation: {
-          kind: 'instruction',
-          origin: { kind: 'task_instruction', task_ids: ['task-one', 'task-two'] },
-          served_content: { kind: 'skill_body', bytes: 12, sha256: 'e'.repeat(64) },
-        },
-        delivery: {
-          boundary: { kind: 'model_response', agent_core_turn: 1 },
-          runtime_id: 'anthropic.claude',
-          delivered_at: '2026-08-27T00:00:01Z',
-          content_bytes: 12,
-          content_sha256: 'e'.repeat(64),
-        },
-        actions: [{
-          identity: { kind: 'call_id', call_id: 'call-action-1' },
-          tool_name: 'keeper_lane_status',
-          runtime_id: 'anthropic.claude',
-          agent_core_turn: 1,
-          observed_at: '2026-08-27T00:00:02Z',
-        }],
-        activated_at: '2026-08-27T00:00:00Z',
-      }],
-      transition_rejections: [{
-        kind: 'delivery_order',
-        skill_tool_use_id: 'call-skill-1',
-        activation_turn_ref: 'trace-one#1',
-        observed_turn_ref: 'trace-one#2',
-        activation_agent_core_turn: 0,
-        observed_agent_core_turn: 1,
-        observed_at: '2026-08-27T00:00:03Z',
-      }],
-    },
-  }
-}
-
 describe('fetchDashboardTools', () => {
-  it('requires the original physical execution anchor on composition activations', () => {
-    const fixture = validSkillActivationProjectionFixture()
-    const invocation = {kind: 'composition', origin: {kind: 'session_composition'},
-      tool_name: 'keeper_compose_review', execution_id: 'physical-original'}
-    const projection = {...fixture, ledger: {...fixture.ledger, activations: [
-      {...fixture.ledger.activations[0], invocation},
-    ]}}
-    const normalized = normalizeSkillActivationProjection(projection)
-    expect(normalized?.status).toBe('available')
-    for (const execution_id of [undefined, '', ' ']) {
-      const malformed = {...projection, ledger: {...projection.ledger, activations: [
-        {...projection.ledger.activations[0], invocation: {...invocation, execution_id}},
-      ]}}
-      expect(() => normalizeSkillActivationProjection(malformed)).toThrow()
-    }
-  })
-
-  it('retains async child receipts across SDK turns without changing the original Task', () => {
-    const projection = { ...validSkillActivationProjectionFixture(), ledger: sharedAsyncSkillLedger }
-    const decoded = normalizeSkillActivationProjection(projection)
-    expect(decoded?.status).toBe('available')
-    if (decoded?.status !== 'available') throw new Error('async ledger unavailable')
-    expect(decoded.ledger).toEqual(sharedAsyncSkillLedger)
-    expect(decoded.ledger.activations[0]?.delivery).toBeNull()
-    for (const field of ['original_turn_ref', 'logical_parent_tool_use_id', 'child_activations'] as const) {
-      const invalid = structuredClone(projection)
-      const receipt = invalid.ledger.async_result_deliveries[0]
-      if (!receipt) throw new Error('shared async receipt missing')
-      if (field === 'child_activations') receipt[field] = [{ skill_tool_use_id: 'new-child', activation_sha256: 'e'.repeat(64) }]
-      else receipt[field] = field === 'original_turn_ref' ? 'trace-one#73' : 'different-original'
-      expect(() => normalizeSkillActivationProjection(invalid)).toThrow('original admitted child')
-    }
-    const invalid = structuredClone(projection)
-    const invalidReceipt = invalid.ledger.async_result_deliveries[0]
-    if (!invalidReceipt) throw new Error('shared async receipt missing')
-    invalidReceipt.status_invocation.turn = 2
-    expect(() => normalizeSkillActivationProjection(invalid)).toThrow('status occurrence')
-    const duplicate = structuredClone(projection)
-    const repeated = structuredClone(duplicate.ledger.async_result_deliveries[0])
-    if (!repeated) throw new Error('shared async receipt missing')
-    repeated.observed_at = '2026-10-14T12:00:01Z'
-    duplicate.ledger.async_result_deliveries.push(repeated)
-    expect(() => normalizeSkillActivationProjection(duplicate)).toThrow('physical handoff')
-    for (const source of ['transport', 'original_frame'] as const) {
-      const malformed = structuredClone(projection)
-      const receipt = malformed.ledger.async_result_deliveries[0]
-      if (!receipt) throw new Error('shared async receipt missing')
-      if (source === 'transport') receipt.receipt.content_sha256 = receipt.receipt.content_sha256.toUpperCase()
-      else {
-        const child = receipt.child_activations[0]
-        if (!child) throw new Error('shared original frame missing')
-        child.activation_sha256 = child.activation_sha256.toUpperCase()
-      }
-      expect(() => normalizeSkillActivationProjection(malformed)).toThrow('canonical sha256')
-    }
-    for (const [field, value] of [ ['physical_turn_ref', 'garbage'], ['composition_run_id', 'bad-run'],
-      ['observed_at', '2026-02-30T12:00:00Z'] ] as const) {
-      const malformed = structuredClone(projection)
-      const receipt = malformed.ledger.async_result_deliveries[0]
-      if (!receipt) throw new Error('shared async receipt missing')
-      receipt[field] = value
-      expect(() => normalizeSkillActivationProjection(malformed)).toThrow()
-    }
-  })
-
-  it('decodes nested composition activation with its exact parent and run scope', () => {
-    const projection = validSkillActivationProjectionFixture()
-    const scope = {
-      parent_tool_use_id: 'outer-run',
-      composition_run_id: '019ffc2b-0a41-7ba2-bf58-598e0e7f711b',
-      alias: 'child/~quoted',
-    }
-    const nested = {
-      ...projection,
-      ledger: {
-        ...projection.ledger,
-        activations: projection.ledger.activations.map(activation => ({
-          ...activation,
-          invocation: { kind: 'nested_composition', origin: { kind: 'session_composition' }, tool_name: 'keeper_compose_review', scope },
-        })),
-      },
-    }
-    expect(normalizeSkillActivationProjection(nested)).toEqual(nested)
-    for (const badScope of [
-      { ...scope, composition_run_id: 'not-a-run' },
-      { ...scope, parent_tool_use_id: 'call-skill-1' },
-      { ...scope, alias: '' },
-      { ...scope, unknown: true },
-    ]) {
-      const bad = { ...nested, ledger: { ...nested.ledger, activations: nested.ledger.activations.map(activation => ({
-        ...activation, invocation: { ...activation.invocation, scope: badScope },
-      })) } }
-      expect(() => normalizeSkillActivationProjection(bad)).toThrow()
-    }
-  })
-
-  it('hard-cuts stale Skill activation schemas before rendering', () => {
-    expect(() => normalizeSkillActivationProjection({
-      status: 'available',
-      keeper_name: 'keeper/one',
-      scoped_summaries: [],
-      ledger: { schema: 'masc.skill-activations/v3', activations: [] },
-    })).toThrow('skill_activations schema is not v7')
-  })
-
-  it('decodes every nested field of an available v5 Skill activation projection', () => {
-    const projection = validSkillActivationProjectionFixture()
-
-    expect(normalizeSkillActivationProjection(projection)).toEqual(projection)
-  })
-
-  it('rejects a null entry inside scoped delivery runtime counts', () => {
-    const projection = validSkillActivationProjectionFixture()
-    Object.assign(projection.scoped_summaries[0]!, { provider_delivery_runtime_counts: [null] })
-
-    expect(() => normalizeSkillActivationProjection(projection)).toThrow(
-      'available.scoped_summaries[0].provider_delivery_runtime_counts[0] is not an object',
-    )
-  })
-
-  it.each([
-    {
-      name: 'missing ledger session id',
-      mutate: (projection: ReturnType<typeof validSkillActivationProjectionFixture>) => {
-        delete (projection.ledger as Partial<typeof projection.ledger>).session_id
-      },
-      message: 'available.ledger.session_id must be a nonempty string',
-    },
-    {
-      name: 'null nested summary',
-      mutate: (projection: ReturnType<typeof validSkillActivationProjectionFixture>) => {
-        Object.assign(projection.scoped_summaries[0]!, { summary: null })
-      },
-      message: 'available.scoped_summaries[0].summary is not an object',
-    },
-    {
-      name: 'unknown action field',
-      mutate: (projection: ReturnType<typeof validSkillActivationProjectionFixture>) => {
-        Object.assign(projection.ledger.activations[0]!.actions[0]!, { unchecked: true })
-      },
-      message: 'available.ledger.activations[0].actions[0] has unexpected field unchecked',
-    },
-    {
-      name: 'negative served bytes',
-      mutate: (projection: ReturnType<typeof validSkillActivationProjectionFixture>) => {
-        projection.ledger.activations[0]!.invocation.served_content.bytes = -1
-      },
-      message: 'available.ledger.activations[0].invocation.served_content.bytes must be a nonnegative integer',
-    },
-    {
-      name: 'non-sha256 delivery digest',
-      mutate: (projection: ReturnType<typeof validSkillActivationProjectionFixture>) => {
-        projection.ledger.activations[0]!.delivery.content_sha256 = 'not-a-digest'
-      },
-      message: 'available.ledger.activations[0].delivery.content_sha256 must be a 64-character sha256',
-    },
-  ])('rejects malformed nested v4 evidence: $name', ({ mutate, message }) => {
-    const projection = validSkillActivationProjectionFixture()
-    mutate(projection)
-
-    expect(() => normalizeSkillActivationProjection(projection)).toThrow(message)
-  })
-
   it('requests an exact Keeper surface when selected', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
@@ -5900,7 +5649,7 @@ describe('official-client session API', () => {
     },
   }
 
-  it.each(['codex', 'claude_code', 'antigravity', 'muse'])(
+  it.each(['codex', 'claude_code', 'antigravity'])(
     'decodes %s recovery and settled session evidence', async (client_kind) => {
       for (const phase of [recoveryPayload.session.phase, {
         kind: 'settled', session_id: 'session-1', turn_id: 'turn-1',
@@ -5917,16 +5666,16 @@ describe('official-client session API', () => {
   )
 
   it.each(['spawn_resources_busy', 'owner_stopped_turn', 'retryable_turn_failed'])(
-    'retains Muse session evidence after %s', async (failure) => {
+    'retains official client session evidence after %s', async (failure) => {
       const release = { failure, owner_epoch: recoveryPayload.session.phase.owner_epoch, released_at: 1_786_230_001 }
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
         ...recoveryPayload,
-        session: { ...recoveryPayload.session, client_kind: 'muse',
-          phase: { kind: 'settled', session_id: 'muse-session', turn_id: 'muse-turn' },
+        session: { ...recoveryPayload.session, client_kind: 'antigravity',
+          phase: { kind: 'settled', session_id: 'ag-session', turn_id: 'ag-turn' },
           last_transient_release: release },
       }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
       const result = await fetchOfficialClientSession('sangsu')
-      expect(result.session?.client_kind).toBe('muse')
+      expect(result.session?.client_kind).toBe('antigravity')
       expect(result.session?.last_transient_release).toEqual(release)
     },
   )

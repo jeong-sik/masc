@@ -678,8 +678,7 @@ The note-versus-region distinction also appears in the
 `tempo 120`, `length 32` and `meter 3 4` set project timing. MIDI/WAV export refuses
 existing files. `level 100` and `pan 64` set the selected track's MIDI volume and
 pan (0–127; pan 64 is center). Dense mixes can clip; lower track levels when the
-preview/export reports clipped samples. The broader destination and remaining work are recorded in
-[the sequencer design](../../docs/design/tui/MUSIC-SEQUENCER.md).
+preview/export reports clipped samples.
 
 To compare voicings of existing notes, put the cursor inside the chord and use
 `:revoice Cmaj7 drop2 4 0`: symbol, close/drop2/rootless, optional octave and

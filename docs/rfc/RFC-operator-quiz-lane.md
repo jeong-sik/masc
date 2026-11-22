@@ -92,7 +92,7 @@ Why a test and not a digest: the retrieval-practice literature reports that taki
 - The parsed package record is `Lane_addon_types.package` (`lib/lane_addon/lane_addon_types.mli:56-79`).
 
 **Declarations.**
-- An installation is a TOML file under `<base-path>/.masc/config/lane-addons/` (`docs/guides/tui-lane-addons.md:127`).
+- An installation is a TOML file under `<base-path>/.masc/config/lane-addons/` (`docs/guides/lane-addon-toml.md`).
 - Its keys are `id`, `enabled`, `run_id`, `manifest_path` and `[binding]`; anything else is refused (`lib/lane_addon/lane_addon_config.ml:106-108`).
 - `enabled = false` removes the worker and keeps the TOML and retained observations (`docs/guides/lane-package-activity.md:3-20`).
 
@@ -123,11 +123,11 @@ Why a test and not a digest: the retrieval-practice literature reports that taki
 - Changing the runtime (Docker or Apple) of a persistent installation is refused; it needs a new installation id (`lib/lane_addon/lane_addon_runtime.ml:1631-1647`).
 
 **TUI.**
-- An instance detail has four tabs: Results, Links, Installation and Records (`docs/guides/tui-lane-addons.md:66-76`).
-- `interface.presentation` declares which row fields Results shows (`:78-80`; `lib/lane_addon/lane_addon_presentation.mli:1-16`).
-- The action menu `a` lists closed values from the action schema's `enum`/`const`. A schema with a required free-text field sends the operator to `A`, where they type `act {…}` as JSON (`docs/guides/tui-lane-addons.md:111-119`).
+- An instance detail has four tabs: Results, Links, Installation and Records.
+- `interface.presentation` declares which row fields Results shows (`lib/lane_addon/lane_addon_presentation.mli:1-16`).
+- The action menu `a` lists closed values from the action schema's `enum`/`const`. A schema with a required free-text field sends the operator to `A`, where they type `act {…}` as JSON.
 
-**Skills.** `[world.skills] directory` publishes read-only Skills into the Keeper Skill catalog (`lib/lane_addon/lane_addon_manifest.ml:81-85`; `docs/guides/tui-lane-addons.md:166-167`). They are for Keepers. This package ships none.
+**Skills.** `[world.skills] directory` publishes read-only Skills into the Keeper Skill catalog (`lib/lane_addon/lane_addon_manifest.ml:81-85`). They are for Keepers. This package ships none.
 
 **What a package may not do.**
 - The core does not interpret a package's domain meaning (`docs/design/lane-addon-v0.md:42`).
@@ -689,7 +689,7 @@ New host state is limited to the first three rows. Each one holds a fact that wo
 
 ### 6.4 Disputes
 
-- The operator sends `dispute {ask_id, question_id, note}`. In the TUI this is the add-on action command `A` with `act {…}`, because `note` is free text (`docs/guides/tui-lane-addons.md:116-119`). A Keeper can send the same action with `masc_lane_act`.
+- The operator sends `dispute {ask_id, question_id, note}`. In the TUI this is the add-on action command `A` with `act {…}`, because `note` is free text. A Keeper can send the same action with `masc_lane_act`.
 - The package lists a `grade` request with the note, the prior verdict and the retained source bytes. The result is a new `Judged`: correct, incorrect, or void when the question or key was wrong.
 - A `Judged` also overrides a key-based choice grade. Deterministic grading is the default, not a lock.
 - The reveal row shows the whole chain of judgments.
@@ -901,7 +901,7 @@ After L7 is deployed, the operator installs the package, binds `author` in the p
 - `AGENTS.md` and `docs/constitution.xml` in full.
 - The previous revision of this RFC and `docs/rfc/README.md`.
 - `docs/design/lane-addon-v0.md` and `lane-addon-model-boundary.md` in full; `lane-addon-tool-exports.md` in full.
-- `docs/guides/lane-world-actions.md`, `tui-lane-addons.md`, `machine-addon-state.md`, `lane-subscriptions.md` and `exact-lane-activity.md` in full; `lane-package-activity.md:1-20`.
+- `docs/guides/lane-world-actions.md`, `machine-addon-state.md`, `lane-subscriptions.md` and `exact-lane-activity.md` in full; `lane-package-activity.md:1-20`.
 - `lib/lane_addon/`: `lane_addon_manifest.ml` in full; the interfaces of `types`, `action`, `sources`, `sampling`, `worker_state`, `config`, `declaration`, `presentation`; parts of `slot.mli`, `worker.mli`, `runtime.mli`, `worker.ml:515-540`, `sources.ml:40-104`, `:386-416`, `runtime.ml:205-225`, `:1625-1680`, `types.ml:60-73`, `engine.ml` (network flags) and `worker_state.ml:1-32`.
 - Exact lanes: `standalone_lane.mli`, `runtime_exact_output_registry.mli` and `server_candle_appraiser.ml` in full; `runtime_toml.ml:2800-3007`; `runtime_schema.mli:360-392`, `:466-478`; `runtime_config_error.mli:30-110`; `runtime.ml:195-215`; `exact_lane_run_registry.mli` outline; `exact_output.mli:155-175`, `:540-560`; `config/runtime.toml:140-185`.
 - Ask: `keeper_ask.mli:1-240`, `keeper_ask_store.mli:1-80`, `server_routes_http_keeper_stream.ml:4150-4215`.

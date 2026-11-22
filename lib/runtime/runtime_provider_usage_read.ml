@@ -38,8 +38,7 @@ type readable =
    credential here would re-run alias selection against the process
    environment of the read.  runtime.toml refuses [usage-read] on an
    official-client protocol; a Codex app-server and the Antigravity CLI
-   answer without a turn. Claude Code states its windows only during one.
-   Muse Code is read only after a failed turn, via its selected account. *)
+   answer without a turn. Claude Code states its windows only during one. *)
 let how_of_runtime (rt : Runtime_instance.t) =
   match rt.execution with
   | Runtime_execution.Agent_core sealed ->

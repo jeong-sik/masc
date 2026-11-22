@@ -10,9 +10,9 @@
     client with the native posture of its default configuration, and
     {!Runtime_account_access.authorize_native} judges that posture. A Keeper
     turn ({!Server_preview_keeper_turn.run}) starts Claude Code and Codex the
-    same way, and takes no Muse Runtime at all. A multi-account process
+    same way. A multi-account process
     allows no native tools, so today the models of Claude Code are
-    [Allowed], and those of Codex and Muse are refused with
+    [Allowed], and those of Codex are refused with
     [Native_tools_reach_other_homes] (plan D3c), the reason a verification
     of them is refused. *)
 type calls =

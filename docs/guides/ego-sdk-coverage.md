@@ -222,8 +222,7 @@ pre/post CLI calls were rejected because they can delay command execution and
 receipt delivery.
 
 The Goal remains incomplete while any required SDK, Space, selection, recovery,
-installed Keeper or actual UI evidence is missing. See
-[`tui-browser-lanes.md`](tui-browser-lanes.md) for the current product flow.
+installed Keeper or actual UI evidence is missing.
 
 The Page context contract follows the pinned SDK's
 [`TabInventoryItem`](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L401).

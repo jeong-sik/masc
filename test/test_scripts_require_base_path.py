@@ -452,26 +452,6 @@ class BoardSlo(Workdir):
         self.assertIn(f'"basepath": "{base}"', result.stdout)
 
 
-class SkillUsage(Workdir):
-    SCRIPT = "skill-usage-stats.py"
-
-    def base_reported(self, *args, base=None):
-        result = self.run_python(self.SCRIPT, "--json", *args, base=base)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        return json.loads(result.stdout)["base_path"]
-
-    def test_stops_when_no_base_is_named(self):
-        self.assert_stops_unnamed(self.run_python(self.SCRIPT, "--json"), "--base-path")
-
-    def test_reads_the_base_the_environment_names(self):
-        base = self.root / "base"
-        self.assertEqual(self.base_reported(base=base), str(base))
-
-    def test_reads_the_base_the_flag_names(self):
-        flagged = self.root / "flagged"
-        self.assertEqual(self.base_reported("--base-path", str(flagged), base=self.root / "base"), str(flagged))
-
-
 class ExecuteFailures(Workdir):
     SCRIPT = "analyze-keeper-execute-failures.sh"
 

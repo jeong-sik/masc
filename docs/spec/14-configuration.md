@@ -48,7 +48,7 @@ operator choice. Configurability is not added speculatively.
 
 `.masc/config/runtime.toml` uses a five-table schema:
 
-1. `[providers.<id>]` — transport protocol (`openai`, `anthropic`, `gemini`, `codex-app-server`, `claude-code`, `antigravity-cli`, `muse-serve`, etc.), endpoint/command, and account or credential reference;
+1. `[providers.<id>]` — transport protocol (`openai`, `anthropic`, `gemini`, `codex-app-server`, `claude-code`, `antigravity-cli`, `acp`, etc.), endpoint/command, and account or credential reference;
 2. `[models.<id>]` — `api-name`, `max-context`, and model capability declarations;
 3. `[<provider>.<model>]` — concrete runtime binding combining a provider and model (with optional binding-level overrides such as `max-context`);
 4. `[runtime.lanes]` and `[runtime.exact_output_lanes]` — ordered candidate lists of `<provider>.<model>` bindings for general turns and structured exact-output system tasks;
@@ -102,7 +102,7 @@ Per-Keeper deployment files live at `<base-path>/.masc/config/keepers/<name>.tom
 and declare `[keeper]` (`instructions`, `mention_targets`, `board_interests`,
 `activation_mode`, `sandbox_profile`, `sandbox_image`), `[sandbox]`
 (`microvm_dns` `#43254`, resource/mount settings), and `[keeper.tools]` (such as
-Muse `native = "read" | "full"` posture). Additional workspace capability setup
+official-client `native = "read" | "full"` posture). Additional workspace capability setup
 is provided by `masc web-search-setup` and `masc browser-lane-setup`.
 
 Runtime declarations describe capabilities reported by agent core, including text,
@@ -183,157 +183,28 @@ reports whether the binding, provider, model or capability supplied the value,
 including capability clamping. Config edits preserve these declarations in the
 runtime TOML; account login does not change their precedence.
 
-### Official-client accounts and Muse Code
+### Official-client accounts
 
-Claude Code, Codex, Antigravity and Muse Code own their model/tool loops. MASC
-owns Keeper routing, durable session bindings, attached MASC tools and process
-lifetime. Select the account used by the server process; a browser login on a
-separate machine does not select that account.
+Claude Code, Codex, Antigravity and ACP official clients own their model/tool
+loops. MASC owns Keeper routing, durable session bindings, attached MASC tools
+and process lifetime. Select the account used by the server process; a browser
+login on a separate machine does not select that account.
 
 | Client | Provider protocol | Account selection |
 |---|---|---|
 | Claude Code | `claude-code` | `account-home` selects `CLAUDE_CONFIG_DIR` |
 | Codex | `codex-app-server` | `account-home` selects `CODEX_HOME` |
 | Antigravity | `antigravity-cli` | A file credential selects the OAuth source; MASC seeds a separate managed HOME for persistent sessions and uses a disposable per-call HOME for one-shot exact/panel calls (`#43401`, `#43404`) |
-| Muse Code | `muse-serve` | Required `account-home` selects the process HOME and native session/data roots; MASC supplies a managed configuration directory |
+| ACP (`agy`, `kimi`, `vibe-acp`) | `acp` | Driver-native login (e.g. host keyring / CLI config) or optional file credential (`oauth_source` for Antigravity) |
 
-For endpoint-owned Muse Keepers and account verification, MASC places the empty
-native workspace inside a private Git project. This stops Muse's project
-discovery before ancestor `.mcp.json`, instructions and skills. Only the
-session-scoped MASC MCP servers are attached; unrelated project credentials
-such as `ZAI_API_KEY` are not required. Git must be available to initialize
-this boundary. A failed initialization refuses the workspace.
-
-`masc setup` and the web model picker offer all four official clients. Declared
-`account-home` values survive setup unchanged. A new Claude Code, Codex or Muse
+`masc setup` and the web model picker offer the official clients. Declared
+`account-home` values survive setup unchanged. A new Claude Code or Codex
 connection first selects an existing account directory; the browser selects
 only the account declared on the server or its CLI default and retains an
 opaque account reference. It cannot send arbitrary credential paths or commands.
 The native wizard can select another absolute account directory and runs vendor
-sign-in with that selected `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `HOME`.
-
-Muse model discovery labels provider, bundled and configured catalog metadata;
-it does not prove account access or a successful invocation. Fake, unresolved
-and unknown catalog sources cannot admit a new setup connection.
+sign-in with that selected `CLAUDE_CONFIG_DIR` or `CODEX_HOME`.
 Saving a connection then requires the separate response and MCP tool challenge.
-
-
-For Muse, inspect the installation actions with
-`masc prerequisite-actions muse-code`, and install with
-`masc prerequisite-actions muse-code --execute muse_native_install`. Then sign in to the chosen account HOME using the vendor's sign-in flow. The
-selected HOME must contain the file-backed `.config/muse/auth.json` produced by
-that flow. MASC imports authentication into a managed generation and preserves
-vendor refreshes there; a changed source authentication file creates a new
-session generation. This does not establish a separate macOS Keychain identity.
-Source hooks, plugins and permission settings are not imported into the managed
-configuration.
-
-Sign in before assigning the runtime. The installer and the TUI (`/login muse`)
-both start the vendor's sign-in with the environment every Muse child gets
-(`Runtime_muse_serve.login_environment`): the account HOME and XDG roots, no
-ambient provider credentials or `TBH_*` overrides, and
-`TBH_CREDENTIAL_BACKEND=file`, which makes the client write the sign-in into
-`auth.json` instead of the macOS Keychain. From a shell, the same sign-in is:
-
-```sh
-masc runtime-account-login --client muse --account-home /absolute/path/to/muse-account
-```
-
-Running the vendor command by hand needs that environment. The vendor documents
-`TBH_CREDENTIAL_BACKEND` only in its SDK example harness (`isolatedHostEnv`);
-masc depends on it for every Muse child.
-
-```sh
-HOME=/absolute/path/to/muse-account \
-XDG_CONFIG_HOME=/absolute/path/to/muse-account/.config \
-XDG_DATA_HOME=/absolute/path/to/muse-account/.local/share \
-XDG_CACHE_HOME=/absolute/path/to/muse-account/.cache \
-XDG_STATE_HOME=/absolute/path/to/muse-account/.local/state \
-XDG_RUNTIME_DIR=/absolute/path/to/muse-account/.local/run \
-TBH_CREDENTIAL_BACKEND=file \
-MUSE_NO_AUTO_UPDATE=1 \
-muse login
-```
-
-The flow must leave `.config/muse/auth.json` under that HOME; MASC reads that
-file on first use (`Runtime_muse_home.prepare`). Owned account and
-credential-parent directories must not be group/other writable. Muse turn
-admission fails with a provider authentication error when:
-
-- the file is missing or has no Meta credentials: `Muse account has no
-  file-backed sign-in; sign in to the selected account home`;
-- the Meta slot is marked `storage: "keychain"` (a sign-in made without the
-  file backend on macOS): `Muse account keeps its sign-in in the macOS
-  Keychain, which masc cannot hand to a selected account; sign in again from
-  masc (/login muse in the TUI, or the installer's Muse sign-in)`;
-- the slot names any other `storage` value, which is refused the same way.
-
-A slot with no `storage` marker is read as holding its secrets inline; whether
-it really holds one is not checked until the client authenticates. There is no
-login probe: a completed Muse model turn is the evidence that sign-in worked.
-
-`masc runtime-muse-models --account-home /absolute/path/to/muse-account`
-queries the selected client's `model/list` without opening a session or making
-a model call. Its JSON preserves the catalog source, nullable context/output
-limits and reported reasoning tiers. A listed model is not evidence that this
-account can invoke it. `fakeCatalog`, `unresolvedCatalog` and unknown sources
-must not serve as setup admission evidence; absent context limits require an
-explicit verified value before setup. No token-to-byte conversion is inferred.
-The command deadline covers the cancellable metadata exchange; account
-preparation can outlast it if the selected account filesystem stalls.
-
-This template belongs in the selected base path's `.masc/config/runtime.toml`.
-Replace both uppercase placeholders with the selected vendor model's actual ID
-and documented context window before loading it.
-No runtime is assigned merely by adding a provider and binding.
-
-```toml
-[providers.muse_personal]
-protocol = "muse-serve"
-command = "muse"
-account-home = "/absolute/path/to/muse-account"
-is-non-interactive = true
-
-[models.muse_selected]
-api-name = "VENDOR_MODEL_ID"
-max-context = CONTEXT_WINDOW_TOKENS
-tools-support = true
-streaming = true
-
-[muse_personal.muse_selected]
-
-# Add this entry to the existing assignments table after validating the account.
-# [runtime.assignments]
-# my_keeper = "muse_personal.muse_selected"
-```
-
-Muse native posture is declared under `[keeper.tools]` in the Keeper TOML:
-`native = "read"` uses managed read policy and disables native writes and shell;
-`native = "full"` requires the Keeper's `yolo` tool-approval mode and enables
-native effects under the managed vendor policy. `native = "none"` is refused:
-MSP cannot remove all built-in tools. Native effects do not pass through MASC's
-tool approval gate. A native working directory is not a filesystem confinement
-boundary; read posture does not establish that files outside it are unreadable.
-
-For a Docker Keeper, native tools use the host directory mounted as its Keeper
-workspace. They still run in the official client's host execution environment.
-For an endpoint-owned microVM or SSH workspace, Muse uses a separate persistent
-host directory and receives an explicit context note; use MASC tools for the
-endpoint's actual files. This is not a claim that native execution moved into
-the Keeper's guest.
-
-Muse can carry text and declared image inputs, stream replies, call attached MASC
-tools and resume a settled Keeper session. MSP has no output-schema channel:
-Muse entries in exact-output lanes are rejected, and schema-constrained Fusion
-calls are refused before spawn. Login probes remain unsupported. A successful
-CLI start or metadata response is not evidence of an authenticated model turn;
-actual completion and tool-call evidence must come from a run using the selected
-account.
-
-`masc runtime-verify muse_personal.muse_selected` performs that readiness
-measurement using a private workspace and an authenticated MCP challenge.
-Success requires the selected model to call the tool and return its actual
-result; a model list or a fabricated result cannot satisfy the measurement.
 
 ## 4. Gate modes
 
@@ -402,15 +273,15 @@ Secrets are redacted at the typed secret boundary, not by substring matching.
 
 ### Interactive official-client account login
 
-The authenticated setup surface can sign in to Codex, Claude Code, Antigravity,
-and Muse from a TUI or browser connected to the server. Login runs in the
+The authenticated setup surface can sign in to Codex, Claude Code, and
+Antigravity from a TUI or browser connected to the server. Login runs in the
 selected account's environment. It never changes the server environment or sends
 operator input to a Keeper.
 
-In the TUI, `/login` opens the account panel on the four clients, each with its
+In the TUI, `/login` opens the account panel on the official clients, each with its
 number of configured accounts; Enter lists that client's accounts, by email,
-under a `+ 새 계정` row. `/login codex`, `/login claude`, `/login antigravity`,
-and `/login muse` open a client's accounts directly. Enter on `+ 새 계정` (or
+under a `+ 새 계정` row. `/login codex`, `/login claude`, and `/login antigravity`
+open a client's accounts directly. Enter on `+ 새 계정` (or
 `n`) starts a new account, Enter on an account signs in as that account, `D`
 previews removing it, and Esc goes back to the clients. Login codes stay
 masked in the panel and terminal keys are sent to that login process. Ctrl-C
@@ -460,9 +331,8 @@ transient and are not copied into logs or transcripts.
 - `GET /api/v1/setup/accounts/login/<id>` reads the private recovery receipt.
   Controls and receipts require the same authenticated actor and workspace.
 
-Codex and Claude expose an `authenticated` native observation. Muse reports
-`login_completed` after the successful official login and native credential
-validation. Antigravity reports `credential_captured`; this is not a network
+Codex and Claude expose an `authenticated` native observation. Antigravity reports
+`credential_captured`; this is not a network
 verification. All login receipts retain `invocation_verified:false`. The returned
 reference is used for model discovery and the existing response/tool verification
 before configuration publication. A save calls the runtimes it adds and the

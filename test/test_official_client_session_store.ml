@@ -1781,7 +1781,7 @@ let test_cooperative_resume_preserves_thread_after_newer_steering () =
       turn_id = "old-turn"; tool_surface_sha256 = empty_surface; frame = seed.frame } in
   let latest : t = { client_kind = Codex; runtime_id = observed.runtime_id;
     phase = Settled { session_id = observed.session_id; turn_id = "steering-turn" };
-    turn_count = 2; host_last_turn = Not_reported; tool_surface_sha256 = empty_surface;
+    turn_count = 2; tool_surface_sha256 = empty_surface;
     last_recovery_resolution = None; last_transient_release = None; context_frontier = None;
     updated_at = 2. } in
   let resumed = match Cooperative.For_testing.prepare_official_resume ~observed ~expected:(Some latest) with

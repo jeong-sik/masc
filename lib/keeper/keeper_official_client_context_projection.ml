@@ -275,7 +275,7 @@ let is_carried_on_resume message =
   is_composed_system_context message || Keeper_official_task_reference.is_reference message
 ;;
 
-(* Canonical source guards (Antigravity, Muse) hash only the unbridged,
+(* Canonical source guards (Antigravity) hash only the unbridged,
    non-carried canonical history. Uncheckpointed official-client turns bridged
    in by [Keeper_turn_bridge.uncheckpointed_official_turns] are still seeded
    into fresh Starts, while Resumes either already witnessed their own turns or

@@ -233,8 +233,7 @@ let refusal_to_string = function
     Printf.sprintf "%s has no membership" (Authz_types.User_id.to_string user_id)
   | Home_unresolved detail -> "the home of the account could not be spelled: " ^ detail
   | Not_a_declared_home ->
-    "the account was captured from an inherited home, or a Muse process would start on \
-     the environment of the process"
+    "the account was captured from an inherited home"
   | Not_the_account_home provider_account_id ->
     Printf.sprintf
       "the account was captured from another home than the one of %s"

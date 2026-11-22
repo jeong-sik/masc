@@ -69,7 +69,7 @@ instance, incarnation, 설치 revision, 완료된 관측 sequence와 보존된 �
 받기 전에는 초안을 만들 수 없다. schema가 바뀌면 새 입력 세트를 열고 기존 값은
 Retained package inputs에 보존한다. binding schema가 없는 패키지는 New TOML을 쓴다.
 
-로컬 파일 탐색은 기존 [TUI 탐색](tui-lane-addons.md)과 같은 서버 경계를 사용한다.
+로컬 파일 탐색은 서버의 선언 디렉터리 경계를 사용한다.
 조회 시 경로 검사는 동시 filesystem writer를 격리하는 원자적 sandbox가 아니다.
 
 ## 설정을 보존하며 켜고 끄기

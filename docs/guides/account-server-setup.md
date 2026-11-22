@@ -206,7 +206,7 @@ signed in: its panels 초대 링크 (invitations), 허용 목록 (the allowlist)
   owner.
 - The sign-in of the client runs on the server, and the console shows what
   it prints. The person opens the link in a browser of their own. Claude
-  Code waits for a code typed into the console; Codex and Muse Code print a
+  Code waits for a code typed into the console; Codex prints a
   code to enter or confirm on the page the link opens.
 - The server sets `BROWSER` for that client to a command that does nothing,
   the `true` of its own `PATH`. Claude Code 2.1.326 runs the command in
@@ -216,7 +216,7 @@ signed in: its panels 초대 링크 (invitations), 허용 목록 (the allowlist)
   no directory for it.
 - `GET /api/v1/auth/integrations` tells a signed-in person which
   subscriptions and models they may connect. A multi-account process calls
-  the models of Claude Code. It refuses those of Codex and Muse for their
+  the models of Claude Code. It refuses those of Codex for its
   native tools. It leaves out a model whose runtime.toml row declares no
   tool calling, and names it under `withheld` with the reason.
 - A subscription that is left with no model has none to check, so no new

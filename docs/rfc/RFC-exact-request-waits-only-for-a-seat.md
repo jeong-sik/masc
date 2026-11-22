@@ -336,7 +336,7 @@ Librarian lane 의 HTTP slot 이 선언 순서로 A(자리 8, Keeper 턴과 같�
 ## 6. 바뀌는 계약과 문서
 
 - `docs/rfc/RFC-operator-quiz-lane.md` §4.4 (§3.3 의 문장)
-- `docs/guides/lane-addon-toml.md` 38행·454행, `docs/guides/keeper-memory-execution.md` 223행
+- `docs/guides/lane-addon-toml.md` 38행·454행
 - `packages/agent_core/lib/llm_provider/provider_admission.mli` 의 `with_admission_until` 설명, `slot_scheduler.mli`
 - `lib/runtime/runtime_toml_bindings.ml` 의 `max-concurrent` 주석, `lib/runtime/runtime_toml.ml` 의 official client 거절 문구
 - worker 목록 약속(`exact_protocol`)을 적은 문서

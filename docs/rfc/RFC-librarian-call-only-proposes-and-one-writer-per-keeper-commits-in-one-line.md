@@ -2185,7 +2185,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 
 **j. 문서와 프롬프트.**
 
-- 다시 쓴다: Memory 안내 셋(`keeper-memory-execution.md`, `keeper-memory-limits.md`, `KEEPER-MEMORY-RECOVERY.md`)과 다른 문서의 Librarian 절. `docs/guides` 에서 Librarian 을 말하는 파일은 이 셋을 넣어 10개다.
+- 다시 쓴다: Memory 안내(`keeper-memory-limits.md`, `KEEPER-MEMORY-RECOVERY.md`)와 다른 문서의 Librarian 절.
 - 지우는 경로만 말하는 RFC 는 이 RFC 로 superseded 표시한다. 후보는 이 RFC 를 뺀 `docs/rfc/RFC-librarian-*.md` 여덟 개와 Librarian 절이 있는 번호 RFC 다. 컷 층이 하나씩 읽고 정한다. working-context pass 를 말하는 RFC 는 남는다.
 - `config/prompts/librarian.md` 는 답 schema 하나에 맞춰 다시 쓴다. `librarian.preflight.md` 는 지운다. `librarian.context_review.md` 는 남긴다.
 - `config/prompts/keeper.md` 와 `config/tools/keeper_memory_write.toml` 은 지금 일어나는 일을 평서문으로 다시 쓴다. 쓰기는 바로 저장된다는 것이다. 무엇이 없어졌는지는 적지 않는다. Librarian 을 말하는 줄은 `keeper.md` 에만 있다.

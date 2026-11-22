@@ -78,9 +78,7 @@ val render_compact_posed :
 val pixel : image -> x:int -> y:int -> rgb * int
 (** Colour and alpha of one pixel. [x] and [y] are clamped to the image. *)
 
-(** The colours a body's parts are painted in: the table this renderer paints
-    with, for one that draws the same candle another way
-    ({!Keeper_portrait_solid}). *)
+(** The colours a body's parts are painted in. *)
 type palette = {
   wax_rgb : rgb;
   drip_rgb : rgb;

@@ -391,7 +391,7 @@ related: ["a-persons-keeper-runs-on-the-engine", "board-has-one-writer-and-one-l
    결정: Admin 에게 연다. Keeper 기록이 섞인 경로는 Admin 에게도 「다룰 수 있는 Keeper」 값으로 거른다.
    비밀값을 내주는 호스트 경로 9개는 열지 않는다. `runtime.toml` 원문, Keeper 설정 내보내기, sandbox 로그 같은 경로다. 그중 쓰기 다섯은 응답에 비밀값이 실려서 걸렸다. 응답을 고치면 연다(L7).
    조사가 비밀값을 내준다고 적은 경로는 16개다. 나머지 7개 가운데 다섯은 단일 사용자의 자격이라 다계정에서 열지 않는다. 둘은 Keeper 턴을 멈추는 token 이라 그 Keeper 의 주인만 받는다.
-   비용: 다계정 Admin 은 Dashboard 에서 `runtime.toml` 원문을 읽어 고치지 못한다. 가이드는 exact lane 표를 원문을 읽고 미리 본 뒤 저장해서 바꾸라고 적는다(`docs/guides/keeper-memory-execution.md`). 다계정에서는 호스트 운영자가 파일을 고치고 서버를 다시 띄운다.
+   비용: 다계정 Admin 은 Dashboard 에서 `runtime.toml` 원문을 읽어 고치지 못한다. 가이드는 exact lane 표를 원문을 읽고 미리 본 뒤 저장해서 바꾸라고 적는다. 다계정에서는 호스트 운영자가 파일을 고치고 서버를 다시 띄운다.
    원문을 가려서 열지 않는다. 원문에 자격값이 같이 들어 있어서 닫는다. 자격값을 원문 밖으로 빼는 일은 따로 RFC 로 한다.
    고르지 않은 안: 누구에게도 열지 않는다. 그러면 다계정 설치의 설정은 호스트에서 파일과 CLI 로만 바꾼다.
 3. **Admin 이 남의 Keeper 의 것을 보나.**

@@ -11,19 +11,6 @@ type client_kind = Keeper_semantic_execution.official_client_kind =
   | Antigravity
   | Acp
 
-(** How the host ended a turn, as far as a Muse resume depends on it: a
-    completed turn ran its work; a failed, cancelled or host-died one did
-    not finish it. *)
-type host_turn_ending =
-  | Host_completed
-  | Host_uncompleted
-
-(** A turn the host ended, named by the id the host gave it. *)
-type host_ended_turn =
-  { turn_id : string
-  ; ending : host_turn_ending
-  }
-
 type settlement =
   { session_id : string
   ; turn_id : string
@@ -227,38 +214,11 @@ type context_frontier =
         held. *)
   }
 
-(** The host's own last ended turn for the session the binding names: the
-    settled one, the one a claim resumes, or the one a claim opened. Only Muse
-    reports it ([lastTurn] of [session/resume]), and a Muse resume is admitted
-    only against it. The host names turns by id, and ids stay stable across
-    compaction while its completed-turn count starts again from each
-    compaction boundary. [None] is a host that reported no ended turn: a
-    started session, or a resume without [lastTurn]. *)
-type host_last_turn =
-  | Not_reported
-      (** The client reports no last turn, or the binding names no session. *)
-  | Reported of host_ended_turn option
-      (** What the host reported when the session opened, or what a turn
-          ending MASC observed makes of it. *)
-  | Unobserved_after of { reported : host_ended_turn option; dispatched : string option }
-      (** A turn was dispatched after the host reported [reported], and MASC
-          did not see how it ended. [dispatched] is its id once the host
-          acknowledged it. The host's last turn is [reported], or the
-          dispatched turn however it ended; without its id, any turn the host
-          reports may be it. *)
-  | Retry_after of { reported : host_ended_turn option; failed : string option }
-      (** An operator retry re-sends the work of [failed], dispatched after
-          [reported]. The host's last turn is [reported], or [failed] ended
-          without completing (without its id, any turn that did). A host that
-          completed it already ran the work, and one that reports no last turn
-          shows nothing about it. *)
-
 type t =
   { client_kind : client_kind
   ; runtime_id : string
   ; phase : phase
   ; turn_count : int
-  ; host_last_turn : host_last_turn
   ; tool_surface_sha256 : string
   ; context_frontier : context_frontier option
   ; last_recovery_resolution : recovery_resolution_record option
@@ -314,9 +274,7 @@ val read_error_to_string : read_error -> string
 val load : base_path:string -> keeper_name:string -> (t option, read_error) result
 (** Only filesystem absence is [Ok None]; lookup and read failures are
     [Unreadable]. Malformed, retired, or ambiguous state is an
-    error and never degrades to a new session. A Muse binding that names a
-    session without the host's last turn for it is such an error, and so is a
-    binding of another client that records one. *)
+    error and never degrades to a new session. *)
 
 val load_for_runtime :
   base_path:string ->
@@ -493,12 +451,6 @@ val held_context_for_resume : claim_plan -> expected:t option -> held_context li
     acknowledge, or no frontier -- is [[]], so a resume that cannot show what
     the session holds re-sends every carried context. *)
 
-val resume_host_last_turn : claim_plan -> expected:t option -> host_last_turn
-(** The host's last turn for the session a claim plan resumes: the
-    [host_last_turn] stored with exactly that settlement. A fresh plan is
-    [Not_reported]. A claim stores this, and a Muse resume is checked against
-    it. *)
-
 val reconcile_context : claim_plan -> expected:t option -> snapshot_sha256:string -> claim_plan
 (** Fold an unproven canonical source into the plan, as
     {!reconcile_tool_surface} does for a moved tool surface. A settled session
@@ -567,20 +519,6 @@ val mark_active :
   session_id:string ->
   updated_at:float ->
   (t, string) result
-(** For a client that reports no host last turn; [host_last_turn] is
-    unchanged. A Muse binding is refused here: it opens through
-    {!mark_active_reported}. *)
-
-val mark_active_reported :
-  base_path:string ->
-  keeper_name:string ->
-  expected:t ->
-  session_id:string ->
-  last_turn:host_ended_turn option ->
-  updated_at:float ->
-  (t, string) result
-(** {!mark_active}, also recording the last turn the host reported when it
-    opened the session, [None] for a started one, as [Reported last_turn]. *)
 
 val mark_turn_starting :
   base_path:string ->
@@ -589,9 +527,6 @@ val mark_turn_starting :
   session_id:string ->
   updated_at:float ->
   (t, string) result
-(** From here the host may run the turn, so [Reported r] becomes
-    [Unobserved_after { reported = r; dispatched = None }] until a transition
-    records how the turn ended. *)
 
 val mark_turn_started :
   base_path:string ->
@@ -602,8 +537,7 @@ val mark_turn_started :
   turn_count:int ->
   updated_at:float ->
   (t, string) result
-(** Record the identity the host acknowledged for the in-flight turn. A Muse
-    binding's unobserved ending names it as [dispatched]. *)
+(** Record the identity the host acknowledged for the in-flight turn. *)
 
 val settle :
   base_path:string ->
@@ -613,10 +547,7 @@ val settle :
   turn_id:string ->
   updated_at:float ->
   (t, string) result
-(** Settle the identified in-flight turn. [host_last_turn] is unchanged: a
-    turn settled here, as a host stop is, ended without MASC seeing how the
-    host ended it. {!settle_completed_holding} settles a turn the host
-    reported completed. *)
+(** Settle the identified in-flight turn. *)
 
 val settle_holding :
   held_context:held_context list ->
@@ -632,19 +563,6 @@ val settle_holding :
     session holds after the claim was recorded, as when the client compacted
     the conversation and the copies it held are no longer there as sent. *)
 
-val settle_completed_holding :
-  held_context:held_context list ->
-  base_path:string ->
-  keeper_name:string ->
-  expected:t ->
-  session_id:string ->
-  turn_id:string ->
-  updated_at:float ->
-  (t, string) result
-(** {!settle_holding} for a turn whose [completed] terminal the host reported:
-    the dispatched turn is the host's last, so [Unobserved_after] becomes
-    [Reported] that turn, completed. [Not_reported] stays. *)
-
 val require_recovery :
   base_path:string ->
   keeper_name:string ->
@@ -655,9 +573,7 @@ val require_recovery :
   (t, string) result
 (** Convert the exact incomplete claim into an operator-visible failure
     observation. The next claim may supersede it atomically; an operator may
-    still resolve it first to choose the previous settlement or a fresh start.
-    [host_last_turn] is kept while a previous settlement remains to return to,
-    and is [Not_reported] otherwise. *)
+    still resolve it first to choose the previous settlement or a fresh start. *)
 
 val release_transient :
   base_path:string ->
@@ -670,12 +586,7 @@ val release_transient :
     [Transient]. The previous settlement, if any, is restored atomically.
     [Retryable_turn_failed] instead retains the acknowledged failed terminal's
     session and ordinal, with failure evidence in [last_transient_release].
-    It refuses a claim without an acknowledged turn identity.
-    [host_last_turn] follows what the host did: a reported failed terminal
-    makes the failed turn the host's last, uncompleted; a failure before
-    dispatch or a failed spawn leaves the last turn the host reported; any
-    other release, an owner stop among them, keeps [Unobserved_after]. A
-    release to [Ready] is [Not_reported]. *)
+    It refuses a claim without an acknowledged turn identity. *)
 
 val revert_claim :
   base_path:string ->
@@ -702,11 +613,6 @@ type process_restart_error =
   | Restart_recovery_unrecorded of string
       (** the claim belongs to an earlier epoch and its recovery could not be
           validated or written *)
-
-val process_restart_error_to_core_error : process_restart_error -> Agent_core.Error.t
-(** [Claim_held_by_current_epoch] is the session refusal
-    {!Keeper_official_client_session_refusal.Claim_held_by_this_process};
-    [Restart_recovery_unrecorded] is an internal error of the store. *)
 
 val reconcile_process_restart :
   base_path:string ->
@@ -743,9 +649,6 @@ val resolve_recovery :
 (** Resolve one exact recovery claim with compare-and-swap authority.
     [Retry_previous] restores the last settled session and drops only the turn
     that failed, so the next claim re-attempts the same ordinal against it.
-    The retry re-sends that turn's work, so it expects the host not to have
-    completed the failed turn ([Retry_after]): a host that completed it is
-    refused rather than running the work twice.
     A [Vendor_session_full] recovery has no [Retry_previous]: the same
     resume would be refused again.
     [Restart_fresh] abandons the conversation, so the ordinal restarts with it

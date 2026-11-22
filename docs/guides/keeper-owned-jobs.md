@@ -248,9 +248,7 @@ nodes wait while independent branches may complete. The server's maintenance
 pulse and durable producer-completion hint can continue the original ready run
 without a new Keeper model turn, subject to current admission and its original
 recorded continuation. A job-completion notification does not require another
-submission. If explicitly continuing a prepared draft, pass the same draft
-sha256 and original `composition_run_id` as `resume_run_id` to
-`keeper_composition_run`. The previous worker must have canonically settled
+submission. The previous worker must have canonically settled
 before another worker owns that run; an already-advanced owner refuses a stale
 continuation.
 When a prepared async attempt has only producer-owned job waits, its status is
@@ -457,9 +455,7 @@ release that same source for another attempt. Partial acceptance, reconciliation
 or fork uncertainty retains the reservation and the actual request ID when
 known. Canonical named membership and journal ownership decide acceptance;
 an incomplete phase-log tail cannot conceal an intact, accepted original source.
-Missing or corrupt source authority stays unresolved. Exact async child Skill
-nodes use these same producer receipts through the
-[nested Composition compiler](keeper-nested-compositions.md).
+Missing or corrupt source authority stays unresolved.
 
 Broker entry is fail-closed by decision. `begin_submit` writes the durable
 `Submitting {request_id = None}` phase before the broker records admission, and
@@ -492,8 +488,7 @@ manifest. A generic reader does not declare every child-specific export name.
 Failure stays failed and retains canonical diagnostics, partial outputs and
 artifact references. A missing or changed original source refuses the read.
 
-Explicit submit-then-read composition and exact async Skill child nodes in a
-`keeper_composition_run` recipe share the original admitted logical run. A binding identifies that run,
+Explicit submit-then-read composition shares the original admitted logical run. A binding identifies that run,
 including its canonically bound suspended successors. The current request codec
 is v5 and the execution journal codec is v3; unknown versions are refused.
 Finish or explicitly resolve pending v2 runs on their original runtime, preserve

@@ -933,8 +933,8 @@ type selected_start_range =
 
 (* Claude Code and a fresh Codex thread apply their capacity before choosing
    a carried front. The zero-history floor must survive that choice: a seed
-   would otherwise restore an atom the provider just refused. Antigravity and
-   Muse Code use the same composition with unbounded capacity. Codex/Claude
+   would otherwise restore an atom the provider just refused. Antigravity
+   uses the same composition with unbounded capacity. Codex/Claude
    Resume may compose per-turn context here, but send no history and must
    omit [argument_projection]. *)
 let start_range_projection ~input_source ?argument_projection

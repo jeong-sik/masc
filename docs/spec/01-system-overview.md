@@ -30,7 +30,7 @@ MASC가 명시적으로 **하지 않는 것**:
 |----------|------|
 | Production multi-tenant SaaS | 단일 머신, localhost-trust 모델. 인증/격리/과금 미구현. |
 | 범용 오케스트레이션 프레임워크 (Temporal/Airflow 대체) | 대상은 AI 에이전트 협업에 한정. DAG 스케줄링, 재시도 정책, 워커 풀 관리는 범위 밖. |
-| 모델 추론 서버 | LLM 호출은 `runtime.toml`과 `packages/agent_core`를 통해 외부 프로바이더(OpenAI, Anthropic, Google/Antigravity, GLM, Kimi, Ollama, llama-server) 및 공식 클라이언트 레인(Claude Code, Codex, Antigravity, Muse Code)으로 위임. 자체 GPU 추론 없음. |
+| 모델 추론 서버 | LLM 호출은 `runtime.toml`과 `packages/agent_core`를 통해 외부 프로바이더(OpenAI, Anthropic, Google/Antigravity, GLM, Kimi, Ollama, llama-server) 및 공식 클라이언트 레인(Claude Code, Codex, Antigravity, ACP)으로 위임. 자체 GPU 추론 없음. |
 | agent core Agent SDK 대체 | MASC는 `packages/agent_core`에 의존한다. Agent 실행 루프(run, checkpoint, context reduction)는 `agent_core` 책임. MASC는 workspace collaboration 및 Keeper 제품 계층. |
 | 범용 채팅/메시징 시스템 | Broadcast와 Board는 에이전트 간 조율 목적. 사람 간 커뮤니케이션 도구가 아님. |
 
@@ -80,7 +80,7 @@ MASC가 명시적으로 **하지 않는 것**:
 | Protocol | MCP JSON-RPC | `tools/call`, `tools/list` over SSE + POST (`/mcp`, `/mcp/operator`, `/mcp/managed`, `/mcp/play`). |
 | gRPC | grpc-direct (h2-eio) | Agent-to-Agent 통신. proto 정의: `proto/`. |
 | AI | `agent_core` (`packages/agent_core`) | Finite `Agent.run`, typed providers, tools, resource-bound wave scheduler, reasoning, multimodal values. |
-| Inference | Multi-Provider Runtime (`lib/runtime_model/`, `lib/runtime/`) | `runtime.toml`에 선언된 HTTP API 바인딩 및 공식 CLI 레인(Claude Code, Codex, Antigravity, Muse Code) 순서대로 failover; 할당량 소진 프로바이더는 후보 순서 뒤로 감우선순위화(#43375). |
+| Inference | Multi-Provider Runtime (`lib/runtime_model/`, `lib/runtime/`) | `runtime.toml`에 선언된 HTTP API 바인딩 및 공식 CLI 레인(Claude Code, Codex, Antigravity, ACP) 순서대로 failover; 할당량 소진 프로바이더는 후보 순서 뒤로 감우선순위화(#43375). |
 | Build | dune 3.13+ | `dune-project` 기반. opam package: `masc`. |
 | Coverage | bisect_ppx | `BISECT_FILE` 환경변수 필수. |
 | Dashboard | Preact + HTM + Vite | TypeScript SPA. `dashboard/` 소스, `assets/dashboard/` 빌드 산출물. |
@@ -178,7 +178,7 @@ MASC의 현재 canonical front door는 3가지다.
 | `agent_core` (`packages/agent_core`) | In-process (OCaml library) | Function call | Finite `Agent.run`, typed providers, tools, reasoning, multimodal values | MASC는 Keeper lifecycle과 durable product operation을 소유한다. |
 | Cloudflare Tunnel | `masc.crying.pictures` | HTTPS | 원격 dashboard 접근 | origin 은 8935 HTTP/1.1 이 기본이고 `http2Origin` 으로 8938 HTTP/2 가 된다(`docs/guides/https-and-http2.md`). |
 | Local LLM Runtime (`ollama`, `llama-server`) | configured local endpoint | OpenAI-compatible / Ollama API | 로컬 LLM 추론 및 Standalone exact-output 레인 | `runtime.toml` `[providers.*]` 바인딩. |
-| Cloud LLM Providers & Official CLI Lanes | OpenAI, Anthropic, Google/Antigravity, GLM (Z.AI), Kimi, Ollama Cloud | HTTPS / Official CLI subprocess | Keeper turn, Fusion, Verifier/Judge/Librarian 추론 | `[providers.<id>.credentials]` 및 공식 CLI 레인(`claude_code`, `codex_cli`, `antigravity`, `muse_code`). |
+| Cloud LLM Providers & Official CLI Lanes | OpenAI, Anthropic, Google/Antigravity, GLM (Z.AI), Kimi, Ollama Cloud | HTTPS / Official CLI subprocess | Keeper turn, Fusion, Verifier/Judge/Librarian 추론 | `[providers.<id>.credentials]` 및 공식 CLI 레인(`claude_code`, `codex_cli`, `antigravity`, `acp`). |
 
 ## 9. Invariants (System-Level)
 

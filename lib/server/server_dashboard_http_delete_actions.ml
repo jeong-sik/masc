@@ -542,7 +542,7 @@ let official_client_purge_warning_to_string = function
 ;;
 
 (* The official-client owner homes are named by a hash of the Keeper name and
-   an OAuth source (Antigravity) or account home (Muse) that lives in
+   an OAuth source (Antigravity) that lives in
    runtime.toml. Derive the paths across every candidate in the assigned lane
    before the removal loop commits keeper removal, which deletes the
    assignment this resolution reads; an unresolvable configuration logs a

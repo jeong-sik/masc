@@ -53,7 +53,6 @@ let snapshot_schemas = Operator_tool_toml.snapshot
 let digest_schemas = Operator_tool_toml.digest
 let board_attention_quarantine_requeue_schema = Operator_tool_toml.quarantine_requeue
 let task_recovery_schema = Operator_tool_toml.task_recovery_resolve
-let composition_resolution_schema = Operator_tool_toml.composition_resolution
 let action_schemas = Operator_tool_toml.action
 let confirm_schema = Operator_tool_toml.confirm
 
@@ -212,14 +211,6 @@ let task_recovery_result ~tool_name ~start_time (ctx : _ context) args =
 
 let judgment_write_schema = Operator_tool_toml.judgment_write
 
-let composition_resolution_result ~tool_name ~start_time (_ctx : _ context) _args =
-  Tool_result.make_err
-    ~tool_name
-    ~start_time
-    ~class_:Tool_result.Workflow_rejection
-    ~effect_disposition:Tool_result.Proven_pre_effect
-    "Composition execution journal has been retired"
-
 let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
   let start = Tool_timing.start () in
   Log.Misc.debug "operator_dispatch: tool=%s agent=%s" name ctx.agent_name;
@@ -245,7 +236,6 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
     | O.Operator_action -> `Action
     | O.Operator_board_attention_quarantine_requeue -> `Quarantine_requeue
     | O.Operator_task_recovery_resolve -> `Task_recovery
-    | O.Operator_composition_resolution -> `Composition_resolution
     | O.Operator_confirm -> `Confirm
     | O.Operator_judgment_write -> `Judgment_write
   in
@@ -285,8 +275,6 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
            args)
   | Some `Task_recovery ->
       Some (task_recovery_result ~tool_name:name ~start_time:start ctx args)
-  | Some `Composition_resolution ->
-      Some (composition_resolution_result ~tool_name:name ~start_time:start ctx args)
   | Some `Confirm ->
       Some
         (result_of_json ~tool_name:name ~start_time:start
@@ -369,13 +357,6 @@ let tool_def : Operator_name.t -> tool_def = function
   | Operator_name.Operator_task_recovery_resolve ->
     { schema = task_recovery_schema
     ; remote = Some task_recovery_schema
-    ; read_only = false
-    ; hidden = true
-    ; allow_direct_call_when_hidden = false
-    }
-  | Operator_name.Operator_composition_resolution ->
-    { schema = composition_resolution_schema
-    ; remote = Some composition_resolution_schema
     ; read_only = false
     ; hidden = true
     ; allow_direct_call_when_hidden = false

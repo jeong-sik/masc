@@ -2,10 +2,10 @@ import { html } from 'htm/preact'
 import type { Signal } from '@preact/signals'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AsyncRequestObservation, SkillEvidenceResponse, SkillReference, SkillsResponse } from '../api/dashboard-skills'
+import type { AsyncRequestObservation, SkillReference, SkillsResponse } from '../api/dashboard-skills'
 import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
 
-const api = vi.hoisted(() => ({ fetchSkills: vi.fn(), fetchAsyncRequestObservation: vi.fn(), fetchSkillEvidence: vi.fn(),
+const api = vi.hoisted(() => ({ fetchSkills: vi.fn(), fetchAsyncRequestObservation: vi.fn(),
   fetchWritableSkillSources: vi.fn(), createSkill: vi.fn(), readSkillSource: vi.fn(), previewSkillSource: vi.fn(), saveSkillSource: vi.fn() }))
 const exactRequests = vi.hoisted(() => ({ fetchAsyncRequestStatus: vi.fn() }))
 const workspace = vi.hoisted(() => ({ current: null as unknown as Signal<ExecutionWorkspaceAuthority | null> }))
@@ -37,17 +37,7 @@ function catalog(names = ['alpha', 'beta']): SkillsResponse {
 const observation = (id: string): AsyncRequestObservation => ({ schema: 'masc.async-request-observation/v1', status: 'ready',
   summary: { active: 1, runtime_owned: 1, ownership_unknown: 0, record_errors: 0 }, record_errors: [], startup_recovery: null,
   requests: [{ request_id: id, keeper_name: 'owner', submitted_by: 'operator', request_context: null, status: 'running', submitted_at: 1, worker_ownership: 'runtime_owned' }] })
-const evidence = (name: string, sessions: number): SkillEvidenceResponse => ({ schema: 'masc.skill-evidence/v9',
-  status: 'not_observed_in_retained_coverage', reference: reference(name), activation: null, composition: null,
-  composition_selection: { mode: 'latest_retained' }, composition_runs: [],
-  composition_statistics: { scope: 'exact_reference_retained_runs', duration_scope: 'stored_executor_result', percentile_method: 'nearest_rank',
-    records: 0, recorded_window: { first_recorded_at: null, last_recorded_at: null },
-    completed: { samples: 0, mean_ms: null, min_ms: null, p50_ms: null, p95_ms: null, max_ms: null },
-    failed: { samples: 0, mean_ms: null, min_ms: null, p50_ms: null, p95_ms: null, max_ms: null }, deferred: 0 },
-  coverage: { composition_scope: 'exact_reference_retained_runs', composition_runs_observed: 0, composition_unavailable: [], coverage_complete: false,
-    activation_scope: 'complete_retained_trace_snapshot', activation_sessions_inspected: sessions, activation_ledgers_loaded: 0, activation_gaps: [], activation_owner_gap_count: 0 } })
 const open = async (name: string) => fireEvent.click(await screen.findByRole('button', { name: `Read instructions for ${name}` }))
-const load = () => fireEvent.click(screen.getByRole('button', { name: 'Load' }))
 
 beforeEach(() => {
   expect(executionWorkspaceAuthority).toBe(workspace.current)
@@ -90,7 +80,7 @@ async function startSave() {
 describe('Skills observation owner', () => {
   it('retains the selected exact request after its active inventory row disappears', async () => {
     exactRequests.fetchAsyncRequestStatus.mockResolvedValue({ status: 'observed',
-      request: { request_id: 'current-request', submitted_by: 'operator', keeper_name: 'owner', request_context: null, status: 'done' }, nested: { kind: 'absent' } })
+      request: { request_id: 'current-request', submitted_by: 'operator', keeper_name: 'owner', request_context: null, status: 'done' } })
     render(html`<${SkillsPanel} />`)
     fireEvent.click(await screen.findByRole('button', { name: 'Inspect exact request' }))
     await screen.findByText('Request state: done')
@@ -161,51 +151,6 @@ describe('Skills observation owner', () => {
     await waitFor(() => expect(api.fetchSkills).toHaveBeenCalledTimes(2))
     await act(async () => fresh.resolve(catalog(['fresh'])))
     await screen.findByRole('button', { name: 'Read instructions for fresh' })
-  })
-
-  it('does not let an old row read finish the currently selected row loading', async () => {
-    const first = pending<SkillEvidenceResponse>(), second = pending<SkillEvidenceResponse>()
-    api.fetchSkillEvidence.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
-    render(html`<${SkillsPanel} />`)
-    await open('alpha'); load()
-    await open('beta'); load()
-    await act(async () => first.resolve(evidence('alpha', 1)))
-    expect((screen.getByRole('button', { name: 'Loading…' }) as HTMLButtonElement).disabled).toBe(true)
-    await act(async () => second.resolve(evidence('beta', 2)))
-    await screen.findByText(/2 retained sessions inspected/)
-  })
-
-  it('rejects evidence success and error from a prior A to B to A row visit', async () => {
-    const old = pending<SkillEvidenceResponse>(), fresh = pending<SkillEvidenceResponse>()
-    api.fetchSkillEvidence.mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise)
-    render(html`<${SkillsPanel} />`)
-    await open('alpha'); load()
-    await open('beta'); await open('alpha'); load()
-    await act(async () => fresh.resolve(evidence('alpha', 7)))
-    await screen.findByText(/7 retained sessions inspected/)
-    await act(async () => old.reject(new Error('retired row failure')))
-    expect(screen.queryByRole('alert')).toBeNull()
-    expect(screen.getByText(/7 retained sessions inspected/)).toBeTruthy()
-  })
-
-  it('reports an evidence contract failure from the API boundary', async () => {
-    const detail = 'evidence response disagrees with requested reference or selection'
-    api.fetchSkillEvidence.mockRejectedValue(new Error(detail))
-    render(html`<${SkillsPanel} />`)
-    await open('alpha'); load()
-    expect((await screen.findByRole('alert')).textContent).toContain(detail)
-    expect(api.fetchSkillEvidence).toHaveBeenCalledWith(reference('alpha'), undefined)
-  })
-
-  it('withdraws loaded evidence across credential changes', async () => {
-    api.fetchSkillEvidence.mockResolvedValue(evidence('alpha', 12))
-    render(html`<${SkillsPanel} />`)
-    await open('alpha'); load()
-    await screen.findByText(/12 retained sessions inspected/)
-    await act(async () => setStoredToken('credential-b'))
-    expect(screen.queryByText(/12 retained sessions inspected/)).toBeNull()
-    await open('alpha')
-    expect(screen.queryByText(/12 retained sessions inspected/)).toBeNull()
   })
 
   it('retains a sent create receipt across workspace change without refreshing the new workspace', async () => {

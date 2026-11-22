@@ -147,6 +147,25 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
            let context_metrics_unavailable =
              member_assoc "context_metrics_unavailable" keeper
            in
+           let context_provenance =
+             match member_assoc "context_provenance" keeper with
+             | `String _ as s -> s
+             | _ ->
+               if Option.is_some context_ratio
+               then `String "measured"
+               else `String "unavailable"
+           in
+           let context_metrics_unavailable_reason =
+             match member_assoc "context_metrics_unavailable_reason" keeper with
+             | `String _ as s -> s
+             | _ ->
+               (match member_assoc "reason" context_metrics_unavailable with
+                | `String _ as s -> s
+                | _ -> `Null)
+           in
+           let estimated_context_ratio =
+             member_assoc "estimated_context_ratio" keeper
+           in
            (* Parsed once into the closed surface vocabulary rather than
               compared as text twice. keeper_status_runtime's comment on that
               type names this ranker as one of the two sites that re-classified
@@ -215,7 +234,10 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
            ("candle_balance_milli", member_assoc "candle_balance_milli" keeper);
                       ("status", `String status);
                       ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
+                      ("context_provenance", context_provenance);
+                      ("estimated_context_ratio", estimated_context_ratio);
                       ("context_metrics_unavailable", context_metrics_unavailable);
+                      ("context_metrics_unavailable_reason", context_metrics_unavailable_reason);
                       ("last_turn_ago_s", member_assoc "last_turn_ago_s" keeper);
                       ("current_work", member_assoc "current_task_id" keeper);
                       ("tool_audit_at", member_assoc "tool_audit_at" keeper);

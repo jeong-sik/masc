@@ -496,6 +496,12 @@ let keeper_list_row_json_of_shape ~shape ~runtime_class config name =
         Json_util.string_opt_to_json
           (Json_util.get_string diagnostic "next_action_path")
       in
+      let context_obs_fields =
+        Keeper_context_observation_projection.context_fields
+          ~config
+          ~keeper_name:meta.name
+          ~current_trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      in
       Some
         (`Assoc (
           [
@@ -517,7 +523,8 @@ let keeper_list_row_json_of_shape ~shape ~runtime_class config name =
             ("activation_mode", Keeper_activation_mode.to_yojson meta.activation_mode);
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
             ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
-          ]))
+          ]
+          @ context_obs_fields))
 
 let keeper_list_row_json ~runtime_class config name =
   keeper_list_row_json_of_shape ~shape:Detail_row ~runtime_class config name

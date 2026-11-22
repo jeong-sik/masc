@@ -48,6 +48,7 @@ let dashboard_shell_bootstrap_json (config : Workspace.config) : Yojson.Safe.t =
           ; "total_runtimes", `Int 0
           ] )
     ; "configured_keepers", `Int 0
+    ; "capabilities", Server_health_public.capabilities_json
     ; "providers", `Assoc []
     ; "config_resolution", `Null
     ; "runtime_resolution", `Null

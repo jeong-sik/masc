@@ -730,6 +730,273 @@ let test_an_unplaced_row_leaves_with_its_day () =
     check int "the instant before, it counts" 1 (int_field "malformed_rows" (read (leaves -. 1.0)));
     check int "from that instant, it does not" 0 (int_field "malformed_rows" (read leaves)))
 
+let test_cache_telemetry_and_reconciliation () =
+  with_workspace "keeper_cost_cache_reconcile" (fun config ->
+    let now = Unix.gettimeofday () in
+    let ts = now -. 60.0 in
+    (* Keeper A: reports cache tokens on turn 1 (50% hit), omits them on turn 2,
+       and has 1 subscription null-cost turn. *)
+    append_metric config "cache-alpha"
+      (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+       @ [ "ts_unix", `Float ts
+         ; "channel", `String "turn"
+         ; "cost_usd", `Float 1.25
+         ; "latency_ms", `Int 120
+         ; ( "usage"
+           , `Assoc
+               [ "input_tokens", `Int 1000
+               ; "output_tokens", `Int 200
+               ; "cache_read_tokens", `Int 600
+               ; "cache_creation_tokens", `Int 150
+               ; "total_tokens", `Int 1200
+               ] )
+         ]);
+    append_metric config "cache-alpha"
+      (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+       @ [ "ts_unix", `Float ts
+         ; "channel", `String "turn"
+         ; "cost_usd", `Null
+         ; "latency_ms", `Int 180
+         ; ( "usage"
+           , `Assoc
+               [ "input_tokens", `Int 500
+               ; "output_tokens", `Int 100
+               ; "cache_read_tokens", `Null
+               ; "cache_creation_tokens", `Null
+               ; "total_tokens", `Int 600
+               ] )
+         ]);
+    (* Keeper B: never reports cache tokens; 1 explicit $0.0 turn + 1 null subscription turn. *)
+    append_metric config "sub-beta"
+      (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+       @ [ "ts_unix", `Float ts
+         ; "channel", `String "turn"
+         ; "cost_usd", `Float 0.0
+         ; "latency_ms", `Int 80
+         ; ( "usage"
+           , `Assoc
+               [ "input_tokens", `Int 400
+               ; "output_tokens", `Int 25
+               ; "total_tokens", `Int 425
+               ] )
+         ]);
+    append_metric config "sub-beta"
+      (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+       @ [ "ts_unix", `Float ts
+         ; "channel", `String "turn"
+         ; "cost_usd", `Null
+         ; "latency_ms", `Int 90
+         ; ( "usage"
+           , `Assoc
+               [ "input_tokens", `Int 800
+               ; "output_tokens", `Int 50
+               ; "total_tokens", `Int 850
+               ] )
+         ]);
+    let full =
+      Dashboard_http_keeper.keeper_cost_aggregates_json
+        ~config
+        ~keepers:[ make_meta "cache-alpha"; make_meta "sub-beta" ]
+        ~window_minutes:60
+        ~now_ts:now
+    in
+    let keepers =
+      match Yojson.Safe.Util.member "keepers" full with
+      | `List xs -> xs
+      | other -> fail ("expected keepers list, got: " ^ Yojson.Safe.to_string other)
+    in
+    let find_keeper name =
+      List.find (fun k -> String.equal (string_field "keeper_name" k) name) keepers
+    in
+    let alpha = find_keeper "cache-alpha" in
+    check int "alpha cache_read_tokens" 600 (int_field "cache_read_tokens" alpha);
+    check int "alpha cache_creation_tokens" 150 (int_field "cache_creation_tokens" alpha);
+    (* Paired-only cache_hit_pct: 600 / 1000 = 60.0%, NOT diluted by turn 2's 500 input tokens *)
+    check (float 0.0001) "alpha cache_hit_pct" 60.0 (float_field "cache_hit_pct" alpha);
+    let beta = find_keeper "sub-beta" in
+    (* Never fabricate 0.0 when cache telemetry is unreported *)
+    null_field "cache_read_tokens" beta;
+    null_field "cache_creation_tokens" beta;
+    null_field "cache_hit_pct" beta;
+    let reconciliation = Yojson.Safe.Util.member "reconciliation" full in
+    check (float 0.0001) "keeper_attributed_usd" 1.25
+      (float_field "keeper_attributed_usd" reconciliation);
+    (* $1.25 is metered; $0.0 + two null turns are subscription_zero_cost_turns (mutually exclusive!) *)
+    let metered = int_field "cost_reported_turns" reconciliation in
+    let sub_zero = int_field "subscription_zero_cost_turns" reconciliation in
+    let unread_cost = int_field "unread_cost_turns" reconciliation in
+    let total = int_field "total_turns" reconciliation in
+    check int "cost_reported_turns (metered only, excludes $0.0)" 1 metered;
+    check int "subscription_zero_cost_turns ($0.0 + null)" 3 sub_zero;
+    check int "unread_cost_turns = 0" 0 unread_cost;
+    check int "total_turns (window-accurate)" 4 total;
+    check int "metered + subscription_zero_cost + unread = total_turns" total
+      (metered + sub_zero + unread_cost);
+    check bool "stale total_turns_24h key absent" true
+      (Yojson.Safe.Util.member "total_turns_24h" reconciliation = `Null);
+    check bool "reconciliation note mentions /api/v1/models/metrics" true
+      (String.length (string_field "note" reconciliation) > 0))
+
+let test_metrics_snapshot_unreported_cache_roundtrip () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Masc_test_deps.init_eio_clock env;
+  let base_dir = temp_dir "keeper_cost_snapshot_roundtrip" in
+  let config = Workspace.default_config base_dir in
+  ignore (Workspace.init config ~agent_name:None);
+  let make_run_result ~usage ~inference_telemetry : Masc.Keeper_agent_run.run_result =
+    let stop_reason = Runtime_agent.Completed { provider_turn_ordinal = 0 } in
+    let prompt_metrics =
+      Masc.Keeper_agent_prompt_metrics.build_prompt_metrics
+        ~system_prompt:""
+        ~dynamic_context:""
+        ~user_message:""
+    in
+    let ctx_composition : Masc.Keeper_agent_prompt_metrics.ctx_composition_metrics =
+      { input_tokens = None
+      ; input_provenance = None
+      ; attribution =
+          Masc.Keeper_agent_prompt_metrics.Not_measured
+            Masc.Keeper_agent_prompt_metrics.Dispatch_not_reached
+      }
+    in
+    let tool_surface : Masc.Keeper_agent_tool_surface.tool_surface_metrics =
+      { turn_lane = Masc.Keeper_agent_tool_surface.Lane_tool_optional
+      ; config_root = ""
+      ; runtime_config_path = None
+      }
+    in
+    { response_text = "ok"
+    ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
+    ; terminal_effect_receipt = None
+    ; model_used = "test-model"
+    ; runtime_id = "test-runtime"
+    ; max_context = 1000
+    ; prompt_metrics
+    ; ctx_composition
+    ; runtime_observation = None
+    ; turn_count = 1
+    ; final_agent_core_turn_ordinal = Runtime_agent.final_provider_turn_ordinal stop_reason
+    ; usage
+    ; usage_reported = true
+    ; usage_scope = Runtime_usage_scope.Per_request
+    ; tool_calls = []
+    ; completion_contract_result =
+        Masc.Keeper_execution_receipt.Completion_tool_execution_observed
+    ; operator_disposition = None
+    ; official_client_settlement = None
+    ; checkpoint = None
+    ; cooperative_boundary = None
+    ; trace_ref = None
+    ; run_validation = None
+    ; stop_reason
+    ; inference_telemetry
+    ; wire_prompt_tokens = None
+    ; tool_surface
+    }
+  in
+  let append_turn ~meta ~turn_id ~usage ~inference_telemetry ~cost_usd =
+    let observation =
+      Masc.Keeper_world_observation.observe_direct_keeper_msg
+        ~config
+        ~meta
+        ~active_goals:(Ok [])
+    in
+    let usage_resolution : Masc.Keeper_usage_resolution.t =
+      { observation = Some usage
+      ; basis = Masc.Keeper_usage_resolution.Per_request
+      ; delta = Some usage
+      ; status = Masc.Keeper_usage_resolution.Exact
+      ; observed_at = Time_compat.now ()
+      }
+    in
+    Masc.Keeper_unified_metrics_snapshot.append_metrics_snapshot
+      ~config
+      ~meta
+      ~observation
+      ~keeper_turn_id:turn_id
+      ~result:(make_run_result ~usage ~inference_telemetry)
+      ~latency_ms:100
+      ~usage_resolution
+      ~turn_cost:cost_usd
+      ~channel:Masc.Keeper_world_observation.Reactive
+      ~checkpoint_bytes:None
+      ~message_count:None
+      ()
+  in
+  let meta_unrep = make_meta "snap-unreported" in
+  let meta_rep = make_meta "snap-reported" in
+  let unrep_usage : Agent_core.Types.api_usage =
+    { input_tokens = 1200
+    ; output_tokens = 250
+    ; cache_creation_input_tokens = 0
+    ; cache_read_input_tokens = 0
+    ; cost_usd = Some 0.15
+    }
+  in
+  (* Turn 1: no inference_telemetry at all -> cache tokens must serialize as null *)
+  append_turn ~meta:meta_unrep ~turn_id:1 ~usage:unrep_usage
+    ~inference_telemetry:None ~cost_usd:0.15;
+  (* Turn 2: telemetry with reported_cache_usage = None -> cache tokens must serialize as null *)
+  append_turn ~meta:meta_unrep ~turn_id:2 ~usage:unrep_usage
+    ~inference_telemetry:(Some Agent_core.Types.default_inference_telemetry) ~cost_usd:0.15;
+  (* Turn 3: telemetry reporting cache_read=750 only (creation=None) *)
+  let rep_usage : Agent_core.Types.api_usage =
+    { input_tokens = 1000
+    ; output_tokens = 200
+    ; cache_creation_input_tokens = 0
+    ; cache_read_input_tokens = 750
+    ; cost_usd = Some 0.20
+    }
+  in
+  append_turn ~meta:meta_rep ~turn_id:1 ~usage:rep_usage
+    ~inference_telemetry:
+      (Some
+         { Agent_core.Types.default_inference_telemetry with
+           reported_cache_usage =
+             Some
+               { Agent_core.Types.cache_creation_input_tokens = None
+               ; cache_read_input_tokens = Some 750
+               }
+         })
+    ~cost_usd:0.20;
+  let full =
+    Dashboard_http_keeper.keeper_cost_aggregates_json
+      ~config
+      ~keepers:[ meta_unrep; meta_rep ]
+      ~window_minutes:60
+      ~now_ts:(Time_compat.now () +. 1.0)
+  in
+  let keepers =
+    match Yojson.Safe.Util.member "keepers" full with
+    | `List xs -> xs
+    | other -> fail ("expected keepers list, got: " ^ Yojson.Safe.to_string other)
+  in
+  let find_keeper name =
+    List.find (fun k -> String.equal (string_field "keeper_name" k) name) keepers
+  in
+  let unrep = find_keeper "snap-unreported" in
+  check int "unreported keeper input_tokens summed" 2400 (int_field "total_input_tokens" unrep);
+  null_field "cache_read_tokens" unrep;
+  null_field "cache_creation_tokens" unrep;
+  null_field "cache_hit_pct" unrep;
+  let rep = find_keeper "snap-reported" in
+  check int "reported keeper cache_read_tokens" 750 (int_field "cache_read_tokens" rep);
+  null_field "cache_creation_tokens" rep;
+  check (float 0.0001) "reported keeper cache_hit_pct = 75.0" 75.0
+    (float_field "cache_hit_pct" rep);
+  let reconciliation = Yojson.Safe.Util.member "reconciliation" full in
+  check int "reconciliation cost_reported_turns" 3
+    (int_field "cost_reported_turns" reconciliation);
+  check int "reconciliation subscription_zero_cost_turns" 0
+    (int_field "subscription_zero_cost_turns" reconciliation);
+  check int "reconciliation unread_cost_turns" 0
+    (int_field "unread_cost_turns" reconciliation);
+  check bool "note quotes metered turn(s) when sub_zero = 0" true
+    (String.starts_with
+       ~prefix:"Per-keeper metrics attribute $0.50 across 3 metered turn(s)"
+       (string_field "note" reconciliation))
+
 let () =
   run "dashboard_keeper_cost_aggregates"
     [
@@ -771,5 +1038,9 @@ let () =
             test_unread_turn_rows_are_counted;
           test_case "rows of an unreadable kind are counted" `Quick
             test_rows_of_an_unreadable_kind_are_counted;
+          test_case "cache telemetry and reconciliation" `Quick
+            test_cache_telemetry_and_reconciliation;
+          test_case "metrics snapshot unreported cache roundtrip" `Quick
+            test_metrics_snapshot_unreported_cache_roundtrip;
         ] );
     ]

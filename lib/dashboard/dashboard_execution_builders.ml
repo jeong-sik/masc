@@ -236,6 +236,25 @@ let continuity_row_of_keeper ~(now_ts : float) keeper
   let context_metrics_unavailable =
     member_assoc "context_metrics_unavailable" keeper
   in
+  let context_provenance =
+    match member_assoc "context_provenance" keeper with
+    | `String _ as s -> s
+    | _ ->
+      if Option.is_some context_ratio
+      then `String "measured"
+      else `String "unavailable"
+  in
+  let context_metrics_unavailable_reason =
+    match member_assoc "context_metrics_unavailable_reason" keeper with
+    | `String _ as s -> s
+    | _ ->
+      (match member_assoc "reason" context_metrics_unavailable with
+       | `String _ as s -> s
+       | _ -> `Null)
+  in
+  let estimated_context_ratio =
+    member_assoc "estimated_context_ratio" keeper
+  in
   (* The last action is dated by the tool call log through [tool_audit_at],
      not by a keeper-meta mirror of it. The meta field this used to read was a
      lifetime string stamped on autonomous tool turns only, so a keeper acting
@@ -327,7 +346,10 @@ let continuity_row_of_keeper ~(now_ts : float) keeper
            ("last_signal_at", Json_util.string_opt_to_json last_signal_at);
            ("turn_count", member_assoc "turn_count" keeper);
            ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
+           ("context_provenance", context_provenance);
+           ("estimated_context_ratio", estimated_context_ratio);
            ("context_metrics_unavailable", context_metrics_unavailable);
+           ("context_metrics_unavailable_reason", context_metrics_unavailable_reason);
            ("continuity", `String continuity);
            ("lifecycle", `String (keeper_lifecycle_to_string lifecycle));
            ("recent_input_preview", Json_util.string_opt_to_json recent_input_preview);

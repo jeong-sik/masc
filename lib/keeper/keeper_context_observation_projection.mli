@@ -1,5 +1,14 @@
 (** Current Keeper context-observation wire projection. *)
 
+type context_provenance =
+  | Provenance_measured
+  | Provenance_estimated
+  | Provenance_unavailable
+
+val context_provenance_to_string : context_provenance -> string
+(** Wire string for {!context_provenance}: ["measured"], ["estimated"], or
+    ["unavailable"]. *)
+
 val missing_context_fields :
   unit ->
   (string * Yojson.Safe.t) list

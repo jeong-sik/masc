@@ -44,17 +44,34 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
   in
   let tools_used = Keeper_agent_result.tool_names result in
   let tool_call_count = Keeper_agent_result.tool_call_count result in
+  let reported_cache_tokens (delta : Keeper_usage_resolution.sample) =
+    match result.inference_telemetry with
+    | Some { reported_cache_usage = Some reported; _ } ->
+      let creation =
+        match reported.cache_creation_input_tokens with
+        | Some _ -> `Int delta.cache_creation_input_tokens
+        | None -> `Null
+      in
+      let read =
+        match reported.cache_read_input_tokens with
+        | Some _ -> `Int delta.cache_read_input_tokens
+        | None -> `Null
+      in
+      creation, read
+    | Some { reported_cache_usage = None; _ } | None -> `Null, `Null
+  in
   let usage_json =
     match usage_resolution.delta with
     | Some delta ->
+      let cache_creation_json, cache_read_json = reported_cache_tokens delta in
       `Assoc
         ([
           ( "usage_scope"
           , `String (Runtime_usage_scope.to_string result.usage_scope) );
           ("input_tokens", `Int delta.input_tokens);
           ("output_tokens", `Int delta.output_tokens);
-          ("cache_creation_tokens", `Int delta.cache_creation_input_tokens);
-          ("cache_read_tokens", `Int delta.cache_read_input_tokens);
+          ("cache_creation_tokens", cache_creation_json);
+          ("cache_read_tokens", cache_read_json);
           ("total_tokens",
            `Int (Inference_utils.total_tokens delta));
           ( "resolution_status"

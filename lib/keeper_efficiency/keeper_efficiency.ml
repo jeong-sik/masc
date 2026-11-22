@@ -5,6 +5,11 @@ type keeper_month = {
   turns : int;
   input_tokens : int;
   output_tokens : int;
+  cache_read_tokens : int option;
+  cache_creation_tokens : int option;
+  cache_paired_read_tokens : int;
+  cache_paired_input_tokens : int;
+  cache_hit_pct : float option;
   cost_usd : float;
   calls : int;
   failed : int;
@@ -19,6 +24,7 @@ type fleet = {
   output_tokens_per_turn : float;
   input_tokens_per_turn : float;
   cost_usd_per_turn : float;
+  cache_hit_pct : float option;
 }
 
 type month_view = {
@@ -29,7 +35,7 @@ type month_view = {
   fleet : fleet;
 }
 
-let cache_schema = "masc.keeper-efficiency-cache/v1"
+let cache_schema = "masc.keeper-efficiency-cache/v3"
 let view_schema = "masc.keeper-efficiency/v1"
 let cache_dirname = "keeper-efficiency"
 
@@ -101,6 +107,11 @@ let zero_keeper name =
   ; turns = 0
   ; input_tokens = 0
   ; output_tokens = 0
+  ; cache_read_tokens = None
+  ; cache_creation_tokens = None
+  ; cache_paired_read_tokens = 0
+  ; cache_paired_input_tokens = 0
+  ; cache_hit_pct = None
   ; cost_usd = 0.0
   ; calls = 0
   ; failed = 0
@@ -139,6 +150,35 @@ let saturating_add_float a b =
   else sum
 ;;
 
+let add_opt_int a b =
+  match a, b with
+  | None, None -> None
+  | Some x, None | None, Some x -> Some (non_negative_int x)
+  | Some x, Some y -> Some (saturating_add_int x y)
+;;
+
+let compute_cache_hit_pct ~paired_read_tokens ~paired_input_tokens =
+  if paired_input_tokens <= 0
+  then None
+  else (
+    let pct =
+      100.0
+      *. float_of_int (non_negative_int paired_read_tokens)
+      /. float_of_int paired_input_tokens
+    in
+    if Float.is_nan pct || not (Float.is_finite pct) then None
+    else Some (Float.min 100.0 (Float.max 0.0 pct)))
+;;
+
+let raw_non_neg_int_opt json name =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt name fields with
+     | Some (`Int value) when value >= 0 -> Some value
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
 let fold_cost_row acc json =
   match Cost_ledger.of_json json with
   | Error _ -> acc  (* malformed rows are skipped, as ledger reads skip them *)
@@ -170,10 +210,35 @@ let fold_cost_row acc json =
          let input_tokens = non_negative_int reported.input_tokens in
          let output_tokens = non_negative_int reported.output_tokens in
          let cost_usd = non_negative_finite_float reported.cost_usd in
+         let row_cache_read = raw_non_neg_int_opt json "cache_read_tokens" in
+         let row_cache_creation = raw_non_neg_int_opt json "cache_creation_tokens" in
+         let row_paired_read, row_paired_input =
+           match row_cache_read with
+           | Some read when input_tokens > 0 -> read, input_tokens
+           | Some _ | None -> 0, 0
+         in
          update_keeper acc agent (fun k ->
+             let cache_read_tokens = add_opt_int k.cache_read_tokens row_cache_read in
+             let cache_creation_tokens =
+               add_opt_int k.cache_creation_tokens row_cache_creation
+             in
+             let cache_paired_read_tokens =
+               saturating_add_int k.cache_paired_read_tokens row_paired_read
+             in
+             let cache_paired_input_tokens =
+               saturating_add_int k.cache_paired_input_tokens row_paired_input
+             in
              { k with
                input_tokens = saturating_add_int k.input_tokens input_tokens
              ; output_tokens = saturating_add_int k.output_tokens output_tokens
+             ; cache_read_tokens
+             ; cache_creation_tokens
+             ; cache_paired_read_tokens
+             ; cache_paired_input_tokens
+             ; cache_hit_pct =
+                 compute_cache_hit_pct
+                   ~paired_read_tokens:cache_paired_read_tokens
+                   ~paired_input_tokens:cache_paired_input_tokens
              ; cost_usd = saturating_add_float k.cost_usd cost_usd
              });
          acc)
@@ -361,6 +426,13 @@ let turn_ids_of_json fields =
   | _ -> None
 ;;
 
+let nullable_non_neg_int_member fields name =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Some None
+  | Some (`Int value) when value >= 0 -> Some (Some value)
+  | Some _ -> None
+;;
+
 let keeper_of_json = function
   | `Assoc fields ->
     (match
@@ -368,6 +440,16 @@ let keeper_of_json = function
        , non_neg_int_member fields "turns"
        , non_neg_int_member fields "input_tokens"
        , non_neg_int_member fields "output_tokens"
+       , nullable_non_neg_int_member fields "cache_read_tokens"
+       , nullable_non_neg_int_member fields "cache_creation_tokens"
+       , (match List.assoc_opt "cache_paired_read_tokens" fields with
+          | None -> Some 0
+          | Some (`Int v) when v >= 0 -> Some v
+          | Some _ -> None)
+       , (match List.assoc_opt "cache_paired_input_tokens" fields with
+          | None -> Some 0
+          | Some (`Int v) when v >= 0 -> Some v
+          | Some _ -> None)
        , non_neg_finite_float_member fields "cost_usd"
        , non_neg_int_member fields "calls"
        , non_neg_int_member fields "failed"
@@ -378,6 +460,10 @@ let keeper_of_json = function
        , Some turns
        , Some input_tokens
        , Some output_tokens
+       , Some cache_read_tokens
+       , Some cache_creation_tokens
+       , Some cache_paired_read_tokens
+       , Some cache_paired_input_tokens
        , Some cost_usd
        , Some calls
        , Some failed
@@ -389,6 +475,14 @@ let keeper_of_json = function
          ; turns
          ; input_tokens
          ; output_tokens
+         ; cache_read_tokens
+         ; cache_creation_tokens
+         ; cache_paired_read_tokens
+         ; cache_paired_input_tokens
+         ; cache_hit_pct =
+             compute_cache_hit_pct
+               ~paired_read_tokens:cache_paired_read_tokens
+               ~paired_input_tokens:cache_paired_input_tokens
          ; cost_usd
          ; calls
          ; failed
@@ -407,6 +501,10 @@ let keeper_has_cost_state (k : keeper_month) =
   k.turns > 0
   || k.input_tokens > 0
   || k.output_tokens > 0
+  || Option.is_some k.cache_read_tokens
+  || Option.is_some k.cache_creation_tokens
+  || k.cache_paired_read_tokens > 0
+  || k.cache_paired_input_tokens > 0
   || k.cost_usd > 0.0
   || (k.calls = 0 && k.failed = 0 && k.deferred = 0 && k.tool_ms = 0.0)
 ;;
@@ -502,6 +600,16 @@ let cursors_to_json name pairs =
          pairs) )
 ;;
 
+let int_opt_to_json = function
+  | Some v -> `Int v
+  | None -> `Null
+;;
+
+let float_opt_to_json = function
+  | Some v -> `Float v
+  | None -> `Null
+;;
+
 let section_to_json section =
   `Assoc
     [ ("day", `Int section.day)
@@ -521,6 +629,10 @@ let section_to_json section =
                   ; ("turns", `Int k.turns)
                   ; ("input_tokens", `Int k.input_tokens)
                   ; ("output_tokens", `Int k.output_tokens)
+                  ; ("cache_read_tokens", int_opt_to_json k.cache_read_tokens)
+                  ; ("cache_creation_tokens", int_opt_to_json k.cache_creation_tokens)
+                  ; ("cache_paired_read_tokens", `Int k.cache_paired_read_tokens)
+                  ; ("cache_paired_input_tokens", `Int k.cache_paired_input_tokens)
                   ; ("cost_usd", `Float k.cost_usd)
                   ; ("calls", `Int k.calls)
                   ; ("failed", `Int k.failed)
@@ -780,10 +892,28 @@ let compute_month ~costs_store ~tool_store ~month ~cache =
 (* Month view *)
 
 let add_keeper_months (a : keeper_month) (b : keeper_month) : keeper_month =
+  let cache_read_tokens = add_opt_int a.cache_read_tokens b.cache_read_tokens in
+  let cache_creation_tokens =
+    add_opt_int a.cache_creation_tokens b.cache_creation_tokens
+  in
+  let cache_paired_read_tokens =
+    saturating_add_int a.cache_paired_read_tokens b.cache_paired_read_tokens
+  in
+  let cache_paired_input_tokens =
+    saturating_add_int a.cache_paired_input_tokens b.cache_paired_input_tokens
+  in
   { keeper = b.keeper
   ; turns = saturating_add_int a.turns b.turns
   ; input_tokens = saturating_add_int a.input_tokens b.input_tokens
   ; output_tokens = saturating_add_int a.output_tokens b.output_tokens
+  ; cache_read_tokens
+  ; cache_creation_tokens
+  ; cache_paired_read_tokens
+  ; cache_paired_input_tokens
+  ; cache_hit_pct =
+      compute_cache_hit_pct
+        ~paired_read_tokens:cache_paired_read_tokens
+        ~paired_input_tokens:cache_paired_input_tokens
   ; cost_usd = saturating_add_float a.cost_usd b.cost_usd
   ; calls = saturating_add_int a.calls b.calls
   ; failed = saturating_add_int a.failed b.failed
@@ -810,10 +940,15 @@ let fleet_of keepers =
   ; output_tokens_per_turn = per_turn (float_of_int totals.output_tokens)
   ; input_tokens_per_turn = per_turn (float_of_int totals.input_tokens)
   ; cost_usd_per_turn = per_turn totals.cost_usd
+  ; cache_hit_pct =
+      compute_cache_hit_pct
+        ~paired_read_tokens:totals.cache_paired_read_tokens
+        ~paired_input_tokens:totals.cache_paired_input_tokens
   }
 ;;
 
 module Keeper_map = Map.Make (String)
+module String_set = Set.Make (String)
 
 let month_view_of_cache ~month ~generated_at (cache : month_cache) =
   let days_covered, merged =
@@ -838,13 +973,68 @@ let month_view_of_cache ~month ~generated_at (cache : month_cache) =
   { month; generated_at; days_covered; keepers; fleet = fleet_of keepers }
 ;;
 
-let month_view_to_json (view : month_view) =
+let iso8601_of_unix_utc time =
+  let tm = Unix.gmtime time in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900)
+    (tm.Unix.tm_mon + 1)
+    tm.Unix.tm_mday
+    tm.Unix.tm_hour
+    tm.Unix.tm_min
+    tm.Unix.tm_sec
+;;
+
+type window_kind =
+  | Month_mtd
+  | Month_complete
+
+let window_kind_to_string = function
+  | Month_mtd -> "month_mtd"
+  | Month_complete -> "month_complete"
+;;
+
+let window_bounds ~month ~generated_at =
+  let start_iso = Printf.sprintf "%s-01T00:00:00Z" month in
+  if String.equal month (month_of_unix_time generated_at)
+  then Month_mtd, start_iso, iso8601_of_unix_utc generated_at
+  else
+    Month_complete, start_iso, Printf.sprintf "%s-%02dT23:59:59Z" month (days_in_month month)
+;;
+
+let month_view_to_json ?registered_keepers ?(active_only = false) (view : month_view) =
+  let registered_set_opt = Option.map String_set.of_list registered_keepers in
+  let is_registered name =
+    match registered_set_opt with
+    | None -> None
+    | Some set -> Some (String_set.mem name set)
+  in
+  let keepers, fleet =
+    match active_only, registered_set_opt with
+    | true, Some set ->
+      let filtered =
+        List.filter (fun (k : keeper_month) -> String_set.mem k.keeper set) view.keepers
+      in
+      filtered, fleet_of filtered
+    | false, _ | true, None -> view.keepers, view.fleet
+  in
+  let window_kind, window_start, window_end =
+    window_bounds ~month:view.month ~generated_at:view.generated_at
+  in
   let keeper_json (k : keeper_month) =
+    let registered_json =
+      match is_registered k.keeper with
+      | Some b -> `Bool b
+      | None -> `Null
+    in
     `Assoc
       [ ("keeper", `String k.keeper)
+      ; ("registered", registered_json)
       ; ("turns", `Int k.turns)
       ; ("input_tokens", `Int k.input_tokens)
       ; ("output_tokens", `Int k.output_tokens)
+      ; ("cache_read_tokens", int_opt_to_json k.cache_read_tokens)
+      ; ("cache_creation_tokens", int_opt_to_json k.cache_creation_tokens)
+      ; ("cache_hit_pct", float_opt_to_json k.cache_hit_pct)
       ; ("cost_usd", `Float k.cost_usd)
       ; ("calls", `Int k.calls)
       ; ("failed", `Int k.failed)
@@ -855,18 +1045,23 @@ let month_view_to_json (view : month_view) =
   `Assoc
     [ ("schema", `String view_schema)
     ; ("month", `String view.month)
+    ; ("window_kind", `String (window_kind_to_string window_kind))
+    ; ("window_start", `String window_start)
+    ; ("window_end", `String window_end)
+    ; ("active_only", `Bool active_only)
     ; ("generated_at", `Float view.generated_at)
     ; ("days_covered", `Int view.days_covered)
     ; ( "fleet"
       , `Assoc
-          [ ("turns_total", `Int view.fleet.turns_total)
-          ; ("calls_per_turn", `Float view.fleet.calls_per_turn)
-          ; ("tool_s_per_turn", `Float view.fleet.tool_s_per_turn)
-          ; ("output_tokens_per_turn", `Float view.fleet.output_tokens_per_turn)
-          ; ("input_tokens_per_turn", `Float view.fleet.input_tokens_per_turn)
-          ; ("cost_usd_per_turn", `Float view.fleet.cost_usd_per_turn)
+          [ ("turns_total", `Int fleet.turns_total)
+          ; ("calls_per_turn", `Float fleet.calls_per_turn)
+          ; ("tool_s_per_turn", `Float fleet.tool_s_per_turn)
+          ; ("output_tokens_per_turn", `Float fleet.output_tokens_per_turn)
+          ; ("input_tokens_per_turn", `Float fleet.input_tokens_per_turn)
+          ; ("cost_usd_per_turn", `Float fleet.cost_usd_per_turn)
+          ; ("cache_hit_pct", float_opt_to_json fleet.cache_hit_pct)
           ] )
-    ; ("keepers", `List (List.map keeper_json view.keepers))
+    ; ("keepers", `List (List.map keeper_json keepers))
     ]
 ;;
 

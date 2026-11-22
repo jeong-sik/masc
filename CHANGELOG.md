@@ -4,8 +4,9 @@
 
 ### 요약
 
-- 이 릴리스는 직전 절 `0.78.0` 뒤 main 에 들어간 스무 PR(`0b961d5`→`0bea19f`, 첫-부모 20 커밋, 476 파일 `+12,217 / -33,655`)을 `0.79.0`(minor)으로 내보냅니다. 사용자가 직접 보는 변화는 두 묶음입니다: **Librarian 컷**(#54326·#54328·#54331·#54340 — 옛 `keeper-librarian`·`workspace-curator` Exact 패키지, `librarian_preflight` 판정, `masc-librarian-continuity` CLI 제거)과 **공급자 캐시·wire 파라미터 정합**(#54386·#54395).
+- 이 릴리스는 직전 절 `0.78.0` 뒤 main 에 들어간 스물네 PR(`0b961d5`→`1a14558`, 첫-부모 24 커밋, 631 파일 `+19,749 / -35,958`)을 `0.79.0`(minor)으로 내보냅니다. 사용자가 직접 보는 변화는 두 묶음입니다: **Librarian 컷**(#54326·#54328·#54331·#54340 — 옛 `keeper-librarian`·`workspace-curator` Exact 패키지, `librarian_preflight` 판정, `masc-librarian-continuity` CLI 제거)과 **공급자 캐시·wire 파라미터 정합**(#54386·#54395).
 - Stack D(`#54384`~`#54386`)와 그 적대 리뷰 후속(`#54394`)이 함께 들어갔고, `#54398` 이 그 위에서 overflow·cache thrash 회귀를 잡습니다.
+- Stack E(`#54392`: `#54389`/`#54390`/`#54391`) — Canonical Cross-Runtime Circulation / Tool Facade 축소 / Memory OS Gate Removal 이 이 릴리스에 함께 들어갔습니다(squash `b0390c92`·`d3edf01e`·`1a14558`).
 - 조각이 `### Exempt` 인 여섯(`#54335`·`#54341`·`#54342`·`#54393`·`#54396`·`#54397`)과 조각이 없는 시험 전용 `#54382` 는 그룹 절에 넣지 않고 마지막 `### Exempt` 에 모았습니다.
 - 이 절은 `changelog.d/` 조각 문구를 그대로 인용해 손으로 접었습니다. `scripts/changelog-fragments.py assemble` 은 실행하지 않았습니다 — 이 트리에는 이미 접힌 조각이 남아 있어 `assemble` 이 그것들을 `[Unreleased]` 로 다시 쏟는 문제가 있습니다(task-3920).
 
@@ -13,11 +14,16 @@
 
 - Completed provider prompt-cache wire support: folded and exposed Gemini `toolUsePromptTokenCount`, added opt-in Gemini explicit `cachedContents` resource lifecycle with automatic 404/TTL fallback to implicit caching, parsed and preserved Ollama/llama.cpp KV-cache telemetry (`prompt_eval_cached_count`, `cache_n`, `timings.cache_n`, `prompt_tokens_details.cached_tokens`) across sync and streaming paths, and enabled declarative session routing affinity (`X-Session-Id` / `prompt_cache_key`) for GLM and Kimi in `models.toml` (#54386).
 - Support OpenAI Responses `prompt_cache_retention` (`"in_memory"` | `"24h"` via `cache-retention`), `store`, and `truncation` (`"auto"` | `"disabled"`), Gemini `explicit-context-cache-ttl-s` wiring, Anthropic `anthropic-ratelimit-*` response header capture, and Ollama `/api/chat` `think` effort strings (`"low"` | `"medium"` | `"high"`) (#54395).
+- Add a per-Keeper canonical cross-runtime turn store (`<keepers_dir>/<keeper_id>.canonical-turns.db`, off-domain SQLite WAL with `PRAGMA auto_vacuum = INCREMENTAL`, registered in `Server_tool_blob_scope`) wired into both Agent Core HTTP and ACP/Official CLI turn completions, with `load_handoff_context` combining the latest compaction anchor and post-anchor verbatim turns, pruning on the compaction watermark / history reset and at the `max_retained_turns = 2000` cap with `PRAGMA incremental_vacuum(64)`, and Keeper purge cleanup through `delete_store` removing `.db` plus `-wal`, `-shm`, `-journal` sidecars (#54390).
+- Add a concurrency-safe hourly `Keeper_checkpoint_object_sweep.run_periodic` to server maintenance that skips sessions with active in-flight saves and unreached objects newer than the sweep grace interval (#54390).
 
 ### Changed
 
 - Purged dead `agent_core` facades (`eval_stats`, `runtime_store`, `skill_registry`, `zai_catalog`) and tiny runtime forwarding wrappers (`local_runtime_pool`, `runtime_{transport,build_version,candidate,host_lifecycle,path_rest_signal}`), consolidated tool input validation onto `Agent_core.Tool_input_validation`, evicted MASC domain hooks (`schema_observation`, `MASC_WIRE_PARSE_DUMP`) out of `packages/agent_core`, and removed hardcoded `api.deepseek.com` defaults (#54384).
 - Replaced the TOML-to-fake-env-string `Config_boot_overrides` round-trip with direct typed `Runtime_toml_namespace` decoding and immutable typed namespace records, added declarative `effort`/`efforts` parameterization in `config/runtime.toml` (collapsing 200+ duplicate model/binding triples), and tightened `Env_config_core` parsing to fail closed on malformed or out-of-range environment values (#54385).
+- Collapse 45 trivial forwarding stub modules — `lib/tool_schemas/` (24 files), `lib/tool_surface/` (16), `lib/provider_tool_support/` (3) and `lib/keeper/` (2) — into `Tools`/`Tool_bridge`, and lift the arbitrary 16 KiB `Body_too_large_to_read` refusal on `keeper_skill` body reads so larger `SKILL.md` bodies return through cache-stable structured blob handles (#54389).
+- Replace the 512 KiB (`Env_config.KeeperMemoryOs.facts_max_bytes` / `MASC_KEEPER_MEMORY_OS_FACTS_MAX_BYTES`) hard-reject commit gate in Memory OS with a non-blocking `Memory_growth_molt_requested` structural molt signal wired across both `Keeper_memory_os_current` and live `Librarian_machine` read/direct writes, with a 1-slot coalescing `pending_molt_mailbox` per Keeper, `Asking`/`Stopped` latching preserved across `resume`, a `4x` emergency hard backstop (default 2 MiB) applied only when the Librarian molt receiver is uninstalled or `Stopped`, explicit `molt_trigger:` / `world_index:` room wire lines, and an `observed`-only `basis` schema on `add`/`merge`/`revise` (#54391).
+- Isolate Memory OS reads and commits from nested file locks across `Domain_pool_ref` jobs with optimistic off-domain snapshot/journal reads, contention-safe retries and multi-phase CAS commits (#54391).
 
 ### Fixed
 
@@ -31,6 +37,7 @@
 - Claude Code and Antigravity CLI `Resume` overflows now roll over cleanly to a fresh session even with zero local checkpoint atoms, commit a `Keeper_compaction` anchor when history is evicted, preserve held standing context across Antigravity resumes, and record `on_refused_model_input` on official-client size refusals (#54398).
 - Anthropic direct API requests with strictly trailing ephemeral `System_context`/`Outside_context` blocks now place an explicit `cache_control` breakpoint on the last cacheable stable prefix block and omit top-level `cache_control`, eliminating per-turn volatile-tail cache-write overhead (#54398).
 - Provider `Retry-After` hints are now clamped to a 24-hour ceiling (`86_400.0s`), `Explicit_hard_limit` converts token limits to bytes safely, and mixed-size first failover commits a `Keeper_compaction` anchor when jumping to `From_turn_boundary` (#54398).
+- `transcript_caches` and `provenance_index` are now bounded by O(1) LRU caps, and `written_lineages` enforces per-Keeper byte isolation so one bloated Keeper sheds only its own cache without evicting sibling Keepers (#54390).
 
 ### Removed
 
@@ -50,6 +57,7 @@
 - 이 릴리스의 `Removed` 네 항목은 하나의 Librarian 컷 스택입니다. **레이어를 따로 설치하지 말고 스택 전체로 설치**하고, 하드 컷 설치 절차는 스택의 마지막 레이어에 있습니다(#54326·#54328·#54331·#54340).
 - `runtime.toml` 로딩은 모르는 키를 거부합니다. `[typesafeai]` 테이블에 `librarian_preflight` 가 남아 있는 파일은 이 빌드에서 **로드되지 않습니다**. 스택 전체를 설치할 때 그 줄을 지우는 절차가 마지막 레이어에 함께 있습니다(#54340).
 - Lane 선언에 `package = "keeper-librarian"` 또는 `package = "workspace-curator"` 가 남아 있으면 이 서버는 그 패키지를 갖고 있지 않다고 거부합니다. 두 패키지를 쓰던 자동화는 `candle-appraiser`·`hitl-auto-judge` 로 옮기거나 `Standard` 실행으로 바꿔야 합니다(#54326·#54328).
+- 새 per-Keeper `canonical-turns.db`(`<keepers_dir>/<keeper_id>.canonical-turns.db`, `-wal`/`-shm`/`-journal` sidecar 포함)가 Keeper 디렉터리에 생깁니다. Keeper purge 는 `delete_store` 로 이 파일들을 정리하므로 손으로 지울 필요가 없습니다. Memory OS 성장 임계값은 `MASC_KEEPER_MEMORY_OS_FACTS_MAX_BYTES`(기본 512 KiB)에서 조정하고, molt 수신자가 미설치이거나 `Stopped` 인 구간에서만 4x(기본 2 MiB) 비상 상한이 적용됩니다(#54390·#54391).
 
 ### Exempt
 

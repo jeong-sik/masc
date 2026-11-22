@@ -757,10 +757,18 @@ let with_payload_root ~log_path f =
 ;;
 
 let remove_files_in directory ~keep ~on_unlink =
+  let foreign = ref [] in
   Payload_directory.names directory
   |> List.iter (fun name ->
-    if not (String_set.mem name keep) && Payload_directory.unlink_entry directory name
-    then on_unlink ())
+    if not (String_set.mem name keep) then
+      match Payload_directory.unlink_entry directory name with
+      | true -> on_unlink ()
+      | false -> ()
+      | exception Unix.Unix_error (Unix.EISDIR, _, _) ->
+        (* This entry is not a leaf the registry creates. Never recurse into
+           it, but do not let it block the cleanup of sibling leaves either. *)
+        foreign := name :: !foreign);
+  List.rev !foreign
 ;;
 
 let warn_payload_removal ~run_id exn =
@@ -773,11 +781,16 @@ let warn_payload_removal ~run_id exn =
 let remove_payload_directory ~parent ~directory ~log_path ~run_id
       ~on_unlink ~on_directory_removed =
   try
-    remove_files_in directory ~keep:String_set.empty ~on_unlink;
-    if Payload_directory.remove_empty_child_checked parent run_id
+    let foreign = remove_files_in directory ~keep:String_set.empty ~on_unlink in
+    (match foreign with
+     | [] -> ()
+     | _ ->
+       warn_payload_removal ~run_id
+         (Unix.Unix_error (Unix.EISDIR, "retention_unlinkat", String.concat ", " foreign)));
+    if foreign = [] && Payload_directory.remove_empty_child_checked parent run_id
     then on_directory_removed ();
     Keeper_fs.invalidate_dir (payload_run_dir ~log_path ~run_id);
-    Ok ()
+    if foreign = [] then Ok () else Error ()
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | (Sys_error _ | Unix.Unix_error _) as exn ->
@@ -868,9 +881,10 @@ let sweep_payload_dirs t ~log_path =
         | Some keep ->
           (* Only the original retained digest names survive. A leaf link is
              either retained by that name or unlinked through the held parent;
-             its target is never opened for cleanup. *)
-          remove_files_in directory ~keep ~on_unlink;
-          Ok ()) with
+             its target is never opened for cleanup. A foreign entry is kept
+             and reported through [failed_root_entries], not swallowed. *)
+          let foreign = remove_files_in directory ~keep ~on_unlink in
+          if foreign = [] then Ok () else Error ()) with
       | Some result -> result
       | None ->
         (* Non-directory entries, including directory links, cannot be opened

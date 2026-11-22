@@ -78,7 +78,7 @@ let profile_of_driver = function
     ; mode_for_native_read = "default"
     ; mode_for_native_full = "auto"
     ; model_config_id = "model"
-    ; effort_config_id = Some "reasoning_effort"
+    ; effort_config_id = Some "thought_level"
     }
   | Kimi_code ->
     { driver = Kimi_code
@@ -95,7 +95,7 @@ let profile_of_driver = function
     ; mode_for_native_read = "plan"
     ; mode_for_native_full = "yolo"
     ; model_config_id = "model"
-    ; effort_config_id = Some "thought_level"
+    ; effort_config_id = Some "thinking"
     }
   | Mistral_vibe ->
     { driver = Mistral_vibe
@@ -138,6 +138,7 @@ let max_ndjson_line_bytes = 16 * 1024 * 1024
 let max_prompt_stream_bytes = 16 * 1024 * 1024
 let max_outbound_queue = 256
 let max_stderr_tail_bytes = 8192
+let max_tracked_tool_calls = 4096
 
 let nonneg n = if n < 0 then 0 else n
 
@@ -185,6 +186,7 @@ type agent_capabilities =
   { load_session : bool
   ; resume_session : bool
   ; close_session : bool
+  ; additional_directories : bool
   ; image_prompt : bool
   ; embedded_context : bool
   ; mcp_http : bool
@@ -204,6 +206,8 @@ type session_info =
   { session_id : string
   ; current_mode_id : string option
   ; available_modes : string list
+  ; current_model_id : string option
+  ; available_models : string list
   ; config_options : config_option list
   ; antigravity_tier : string option
   }
@@ -295,6 +299,25 @@ type prompt_block =
       ; base64_data : string
       }
 
+type mcp_server_qualifier =
+  | Explicit_server of string
+  | Implicit_mcp_kind
+
+type tool_call_identity =
+  | Mcp_tool of
+      { server : mcp_server_qualifier
+      ; tool_name : string
+      }
+  | Managed_mcp_schema_read of
+      { mcp_server_name : string
+      ; path : string
+      }
+  | Native_tool of
+      { name : string option
+      ; kind : string option
+      ; locations : string list
+      }
+
 type tool_call_status =
   | Tool_pending
   | Tool_in_progress
@@ -311,6 +334,7 @@ type stream_event =
       ; kind : string option
       ; status : tool_call_status
       ; raw_input : Yojson.Safe.t option
+      ; identity : tool_call_identity
       }
   | Tool_call_updated of
       { tool_call_id : string
@@ -516,7 +540,418 @@ let parse_config_options json =
   | Some items -> List.filter_map parse_config_option items
 ;;
 
-let parse_session_update params =
+let is_allowed_mcp_kind = function
+  | None | Some ("mcp" | "other") -> true
+  | Some _ -> false
+;;
+
+let is_read_only_tool_kind = function
+  | Some ("read" | "search" | "think") -> true
+  | Some _ | None -> false
+;;
+
+let first_non_empty_json_string keys json =
+  List.find_map
+    (fun key ->
+       match json_string_opt key json with
+       | Some s when String.trim s <> "" -> Some s
+       | _ -> None)
+    keys
+;;
+
+let index_of_sub ~needle haystack =
+  let h_len = String.length haystack in
+  let n_len = String.length needle in
+  if n_len = 0 || n_len > h_len
+  then None
+  else (
+    let rec scan i =
+      if i > h_len - n_len
+      then None
+      else if String.sub haystack i n_len = needle
+      then Some i
+      else scan (i + 1)
+    in
+    scan 0)
+;;
+
+type tool_call_wire =
+  { tool_call_id : string
+  ; title : string option
+  ; name : string option
+  ; kind : string option
+  ; meta_server_name : string option
+  ; meta_tool_name : string option
+  ; raw_input : Yojson.Safe.t option
+  ; locations : string list
+  }
+
+let parse_tool_call_wire (json : Yojson.Safe.t) : tool_call_wire =
+  let tool_call_id = Option.value (json_string_opt "toolCallId" json) ~default:"" in
+  let title = json_string_opt "title" json in
+  let name = json_string_opt "name" json in
+  let kind = json_string_opt "kind" json in
+  let meta = json_field "_meta" json in
+  let meta_server_name =
+    Option.bind
+      meta
+      (first_non_empty_json_string [ "server_name"; "serverName"; "mcp_server"; "mcpServer" ])
+  in
+  let meta_tool_name =
+    Option.bind meta (first_non_empty_json_string [ "tool_name"; "toolName" ])
+  in
+  let raw_input =
+    match json_field "rawInput" json with
+    | Some _ as v -> v
+    | None -> json_field "args" json
+  in
+  let locations =
+    match json_list_opt "locations" json with
+    | None -> []
+    | Some entries ->
+      List.filter_map
+        (fun item ->
+           match json_string_opt "path" item with
+           | Some p when String.trim p <> "" -> Some p
+           | _ -> None)
+        entries
+  in
+  { tool_call_id; title; name; kind; meta_server_name; meta_tool_name; raw_input; locations }
+;;
+
+let merge_tool_call_wire ~(prior : tool_call_wire) ~(incoming : tool_call_wire) : tool_call_wire =
+  let pick inc prev = match inc with Some _ -> inc | None -> prev in
+  { tool_call_id =
+      if incoming.tool_call_id <> "" then incoming.tool_call_id else prior.tool_call_id
+  ; title = pick incoming.title prior.title
+  ; name = pick incoming.name prior.name
+  ; kind = pick incoming.kind prior.kind
+  ; meta_server_name = pick incoming.meta_server_name prior.meta_server_name
+  ; meta_tool_name = pick incoming.meta_tool_name prior.meta_tool_name
+  ; raw_input = pick incoming.raw_input prior.raw_input
+  ; locations = if incoming.locations <> [] then incoming.locations else prior.locations
+  }
+;;
+
+let canonical_managed_schema_file ~schema_dir raw_path =
+  if String.trim raw_path = ""
+     || Filename.is_relative raw_path
+     || String.contains raw_path '\000'
+  then None
+  else (
+    try
+      let canonical = Unix.realpath raw_path in
+      let stat = Unix.lstat canonical in
+      let base = Filename.basename canonical in
+      if stat.Unix.st_kind = Unix.S_REG
+         && String.equal (Filename.dirname canonical) schema_dir
+         && Runtime_antigravity_policy.path_is_within ~root:schema_dir canonical
+         && (not (String.equal canonical schema_dir))
+         && (Filename.check_suffix base ".json" || String.equal base "instructions.md")
+      then Some canonical
+      else None
+    with
+    | Unix.Unix_error _ -> None)
+;;
+
+let schema_read_path_keys =
+  [ "Path"
+  ; "path"
+  ; "file_path"
+  ; "filePath"
+  ; "AbsolutePath"
+  ; "absolute_path"
+  ; "target_file"
+  ; "TargetFile"
+  ; "DirectoryPath"
+  ; "directory_path"
+  ; "SearchPath"
+  ; "search_path"
+  ]
+;;
+
+let extract_schema_read_paths (wire : tool_call_wire) =
+  let raw_input_paths =
+    match wire.raw_input with
+    | None -> Ok []
+    | Some (`Assoc []) -> Ok []
+    | Some (`Assoc fields) ->
+      let matched =
+        List.filter_map
+          (fun (k, v) ->
+             if List.mem k schema_read_path_keys
+             then Some v
+             else None)
+          fields
+      in
+      if matched = []
+      then Error ()
+      else (
+        let parsed =
+          List.map
+            (function
+              | `String s when String.trim s <> "" -> Some s
+              | _ -> None)
+            matched
+        in
+        if List.for_all Option.is_some parsed
+        then Ok (List.filter_map Fun.id parsed)
+        else Error ())
+    | Some _ -> Error ()
+  in
+  match raw_input_paths with
+  | Error () -> None
+  | Ok input_paths ->
+    let combined = wire.locations @ input_paths in
+    if combined = [] then None else Some combined
+;;
+
+let has_ascii_whitespace s =
+  String.exists (function ' ' | '\t' | '\n' | '\r' -> true | _ -> false) s
+;;
+
+let parse_qualified_mcp_identifier ?mcp_server_name ~kind candidate =
+  let trimmed = String.trim candidate in
+  if trimmed = "" || has_ascii_whitespace trimmed
+  then None
+  else if String.starts_with ~prefix:"mcp__" trimmed
+  then (
+    let rest = String.sub trimmed 5 (String.length trimmed - 5) in
+    match index_of_sub ~needle:"__" rest with
+    | Some idx when idx > 0 && idx + 2 < String.length rest ->
+      let srv = String.sub rest 0 idx in
+      let tool = String.sub rest (idx + 2) (String.length rest - idx - 2) in
+      Some (Mcp_tool { server = Explicit_server srv; tool_name = tool })
+    | _ -> None)
+  else if String.starts_with ~prefix:"mcp_" trimmed
+  then (
+    let rest = String.sub trimmed 4 (String.length trimmed - 4) in
+    match String.index_opt rest '.' with
+    | Some idx when idx > 0 && idx + 1 < String.length rest ->
+      let srv = String.sub rest 0 idx in
+      let tool = String.sub rest (idx + 1) (String.length rest - idx - 1) in
+      Some (Mcp_tool { server = Explicit_server srv; tool_name = tool })
+    | _ -> None)
+  else (
+    match String.index_opt trimmed ':' with
+    | Some idx when idx > 0 && idx + 1 < String.length trimmed ->
+      let srv = String.sub trimmed 0 idx in
+      let tool = String.sub trimmed (idx + 1) (String.length trimmed - idx - 1) in
+      Some (Mcp_tool { server = Explicit_server srv; tool_name = tool })
+    | _ ->
+      (match
+         if String.starts_with ~prefix:"/" trimmed
+         then None
+         else String.index_opt trimmed '/'
+       with
+       | Some idx when idx > 0 && idx + 1 < String.length trimmed ->
+         let srv = String.sub trimmed 0 idx in
+         let tool = String.sub trimmed (idx + 1) (String.length trimmed - idx - 1) in
+         Some (Mcp_tool { server = Explicit_server srv; tool_name = tool })
+       | _ ->
+         (match mcp_server_name with
+          | Some expected_srv
+            when expected_srv <> ""
+                 && String.starts_with ~prefix:(expected_srv ^ "_") trimmed
+                 && String.length trimmed > String.length expected_srv + 1 ->
+            let prefix_len = String.length expected_srv + 1 in
+            let tool = String.sub trimmed prefix_len (String.length trimmed - prefix_len) in
+            Some (Mcp_tool { server = Explicit_server expected_srv; tool_name = tool })
+          | _ ->
+            if Option.equal String.equal kind (Some "mcp")
+            then Some (Mcp_tool { server = Implicit_mcp_kind; tool_name = trimmed })
+            else None)))
+;;
+
+let classify_tool_call ?managed_schema_root ?mcp_server_name (wire : tool_call_wire)
+  : tool_call_identity
+  =
+  let fallback () =
+    let name =
+      match wire.meta_tool_name with
+      | Some _ as n -> n
+      | None ->
+        (match wire.name with
+         | Some _ as n -> n
+         | None -> wire.title)
+    in
+    Native_tool { name; kind = wire.kind; locations = wire.locations }
+  in
+  (* 1. Structured MCP proxy call (e.g. Antigravity [call_mcp_tool] carrying
+        explicit [ServerName] and [ToolName] in [rawInput]/[args]). *)
+  match wire.name with
+  | Some "call_mcp_tool" ->
+    let server =
+      Option.bind
+        wire.raw_input
+        (first_non_empty_json_string [ "ServerName"; "serverName"; "server_name" ])
+    in
+    let tool =
+      Option.bind
+        wire.raw_input
+        (first_non_empty_json_string [ "ToolName"; "toolName"; "tool_name" ])
+    in
+    (match server, tool with
+     | Some srv, Some tool_name ->
+       Mcp_tool { server = Explicit_server srv; tool_name }
+     | _ -> fallback ())
+  | _ ->
+    (* 2. Structured [_meta] server identity: whenever [_meta] names a server,
+          NEVER fall through to [Implicit_mcp_kind] so a foreign server cannot
+          bypass server checks by omitting [_meta.tool_name]. *)
+    (match wire.meta_server_name with
+     | Some srv ->
+       if not (is_allowed_mcp_kind wire.kind)
+       then fallback ()
+       else (
+         let candidate_tool =
+           let pick_non_empty = function
+             | Some s ->
+               let t = String.trim s in
+               if t <> "" && not (has_ascii_whitespace t) then Some t else None
+             | None -> None
+           in
+           match pick_non_empty wire.meta_tool_name with
+           | Some _ as found -> found
+           | None ->
+             (match pick_non_empty wire.name with
+              | Some _ as found -> found
+              | None -> pick_non_empty wire.title)
+         in
+         match candidate_tool with
+         | Some tool_name -> Mcp_tool { server = Explicit_server srv; tool_name }
+         | None -> fallback ())
+     | None ->
+       (* 3. Read-only lazy MCP schema read strictly targeting a single direct
+             child file inside this client's MASC-owned
+             [<gemini_dir>/antigravity-cli/mcp/<server>] folder. *)
+       let schema_read =
+         let allowed_read_tool_name =
+           match wire.name with
+           | None | Some "read_file" -> true
+           | Some _ -> false
+         in
+         match managed_schema_root, wire.kind with
+         | Some (srv, schema_dir), Some "read" when allowed_read_tool_name ->
+           (match extract_schema_read_paths wire with
+            | None -> None
+            | Some paths ->
+              let canonicalized =
+                List.map (canonical_managed_schema_file ~schema_dir) paths
+              in
+              (match canonicalized with
+               | Some first :: rest
+                 when List.for_all
+                        (function
+                          | Some p -> String.equal p first
+                          | None -> false)
+                        rest ->
+                 Some (Managed_mcp_schema_read { mcp_server_name = srv; path = first })
+               | _ -> None))
+         | _ -> None
+       in
+       (match schema_read with
+        | Some id -> id
+        | None ->
+          (* 4. Protocol-qualified MCP tool identifiers under non-mutating
+                ACP kinds (Kimi [mcp__<srv>__<tool>], Mistral Vibe
+                [_meta.tool_name = "mcp_<srv>.<tool>"], [<srv>:<tool>], etc.). *)
+          if is_allowed_mcp_kind wire.kind
+          then (
+            let candidate =
+              match wire.meta_tool_name with
+              | Some s -> Some s
+              | None ->
+                (match wire.name with
+                 | Some s -> Some s
+                 | None -> wire.title)
+            in
+            match
+              Option.bind
+                candidate
+                (parse_qualified_mcp_identifier ?mcp_server_name ~kind:wire.kind)
+            with
+            | Some id -> id
+            | None -> fallback ())
+          else fallback ()))
+;;
+
+let classify_tool_call_json ?managed_schema_root ?mcp_server_name json =
+  parse_tool_call_wire json |> classify_tool_call ?managed_schema_root ?mcp_server_name
+;;
+
+let should_allow_tool_call ~policy identity =
+  let matches_pinned ~mcp_server_name ~allowed_tool_names = function
+    | Mcp_tool { server = Explicit_server srv; tool_name } ->
+      String.equal srv mcp_server_name && List.mem tool_name allowed_tool_names
+    | Mcp_tool { server = Implicit_mcp_kind; tool_name } ->
+      List.mem tool_name allowed_tool_names
+    | Managed_mcp_schema_read { mcp_server_name = srv; path } ->
+      String.equal srv mcp_server_name
+      && allowed_tool_names <> []
+      &&
+      let base = Filename.basename path in
+      if String.equal base "instructions.md"
+      then true
+      else if Filename.check_suffix base ".json"
+      then List.mem (Filename.chop_suffix base ".json") allowed_tool_names
+      else false
+    | Native_tool _ -> false
+  in
+  match policy with
+  | Allow_all -> true
+  | Deny_all -> false
+  | Allow_masc_mcp_only { mcp_server_name; allowed_tool_names } ->
+    matches_pinned ~mcp_server_name ~allowed_tool_names identity
+  | Allow_read_and_masc_mcp { mcp_server_name; allowed_tool_names } ->
+    matches_pinned ~mcp_server_name ~allowed_tool_names identity
+    ||
+    (match identity with
+     | Native_tool { kind; _ } -> is_read_only_tool_kind kind
+     | Mcp_tool _ | Managed_mcp_schema_read _ -> false)
+;;
+
+let is_masc_mcp_tool ~mcp_server_name ~allowed_tool_names ~title ~kind =
+  let wire =
+    { tool_call_id = ""
+    ; title = Some title
+    ; name = None
+    ; kind
+    ; meta_server_name = None
+    ; meta_tool_name = None
+    ; raw_input = None
+    ; locations = []
+    }
+  in
+  let identity = classify_tool_call ~mcp_server_name wire in
+  should_allow_tool_call
+    ~policy:(Allow_masc_mcp_only { mcp_server_name; allowed_tool_names })
+    identity
+;;
+
+let should_allow_permission ~policy ~title ~kind =
+  let mcp_server_name =
+    match policy with
+    | Allow_masc_mcp_only { mcp_server_name; _ }
+    | Allow_read_and_masc_mcp { mcp_server_name; _ } -> Some mcp_server_name
+    | Allow_all | Deny_all -> None
+  in
+  let wire =
+    { tool_call_id = ""
+    ; title = Some title
+    ; name = None
+    ; kind
+    ; meta_server_name = None
+    ; meta_tool_name = None
+    ; raw_input = None
+    ; locations = []
+    }
+  in
+  let identity = classify_tool_call ?mcp_server_name wire in
+  should_allow_tool_call ~policy identity
+;;
+
+let parse_session_update_with ?managed_schema_root ?mcp_server_name ?merged_wire params =
   let update =
     match json_field "update" params with
     | Some u -> u
@@ -538,16 +973,23 @@ let parse_session_update params =
     in
     Option.map (fun s -> Thought_delta s) text
   | Some "tool_call" ->
-    let tool_call_id = Option.value (json_string_opt "toolCallId" update) ~default:"" in
-    let title = Option.value (json_string_opt "title" update) ~default:"tool_call" in
-    let kind = json_string_opt "kind" update in
+    let wire = Option.value merged_wire ~default:(parse_tool_call_wire update) in
+    let title = Option.value wire.title ~default:"tool_call" in
     let status =
       json_string_opt "status" update
       |> Option.map parse_tool_status
       |> Option.value ~default:Tool_pending
     in
-    let raw_input = json_field "rawInput" update in
-    Some (Tool_call_started { tool_call_id; title; kind; status; raw_input })
+    let identity = classify_tool_call ?managed_schema_root ?mcp_server_name wire in
+    Some
+      (Tool_call_started
+         { tool_call_id = wire.tool_call_id
+         ; title
+         ; kind = wire.kind
+         ; status
+         ; raw_input = wire.raw_input
+         ; identity
+         })
   | Some "tool_call_update" ->
     let tool_call_id = Option.value (json_string_opt "toolCallId" update) ~default:"" in
     let title = json_string_opt "title" update in
@@ -575,6 +1017,8 @@ let parse_session_update params =
     Some (Config_options_updated (parse_config_options update))
   | _ -> None
 ;;
+
+let parse_session_update params = parse_session_update_with params
 
 let parse_prompt_usage result_json =
   match json_field "usage" result_json with
@@ -605,6 +1049,12 @@ let parse_prompt_usage result_json =
     }
 ;;
 
+let capability_present key json =
+  match json_field key json with
+  | Some (`Bool true | `Assoc _) -> true
+  | Some _ | None -> false
+;;
+
 let parse_capabilities result_json =
   let caps = Option.value (json_field "agentCapabilities" result_json) ~default:(`Assoc []) in
   let prompt_caps = Option.value (json_field "promptCapabilities" caps) ~default:(`Assoc []) in
@@ -629,8 +1079,9 @@ let parse_capabilities result_json =
     |> json_string_opt "tier"
   in
   { load_session = json_bool_or ~default:false "loadSession" caps
-  ; resume_session = Option.is_some (json_field "resume" session_caps)
-  ; close_session = Option.is_some (json_field "close" session_caps)
+  ; resume_session = capability_present "resume" session_caps
+  ; close_session = capability_present "close" session_caps
+  ; additional_directories = capability_present "additionalDirectories" session_caps
   ; image_prompt = json_bool_or ~default:false "image" prompt_caps
   ; embedded_context = json_bool_or ~default:false "embeddedContext" prompt_caps
   ; mcp_http = json_bool_or ~default:false "http" mcp_caps
@@ -639,26 +1090,53 @@ let parse_capabilities result_json =
   }
 ;;
 
+let parse_session_modes result_json =
+  let modes_obj = json_field "modes" result_json in
+  let current_mode_id = Option.bind modes_obj (json_string_opt "currentModeId") in
+  let available_modes =
+    match Option.bind modes_obj (json_list_opt "availableModes") with
+    | None -> []
+    | Some entries -> List.filter_map (json_string_opt "id") entries
+  in
+  current_mode_id, available_modes
+;;
+
+let parse_session_models result_json =
+  let models_obj = json_field "models" result_json in
+  let current_model_id = Option.bind models_obj (json_string_opt "currentModelId") in
+  let available_models =
+    match Option.bind models_obj (json_list_opt "availableModels") with
+    | None -> []
+    | Some entries -> List.filter_map (json_string_opt "modelId") entries
+  in
+  current_model_id, available_models
+;;
+
+let parse_antigravity_tier result_json =
+  json_field "_meta" result_json
+  |> Option.value ~default:(`Assoc [])
+  |> json_field "antigravity"
+  |> Option.value ~default:(`Assoc [])
+  |> json_string_opt "tier"
+;;
+
 let parse_session_info result_json =
   match json_string_opt "sessionId" result_json with
   | None -> Error "session/new response missing sessionId"
   | Some session_id ->
-    let modes_obj = json_field "modes" result_json in
-    let current_mode_id = Option.bind modes_obj (json_string_opt "currentModeId") in
-    let available_modes =
-      match Option.bind modes_obj (json_list_opt "availableModes") with
-      | None -> []
-      | Some entries -> List.filter_map (json_string_opt "id") entries
-    in
+    let current_mode_id, available_modes = parse_session_modes result_json in
+    let current_model_id, available_models = parse_session_models result_json in
     let config_options = parse_config_options result_json in
-    let antigravity_tier =
-      json_field "_meta" result_json
-      |> Option.value ~default:(`Assoc [])
-      |> json_field "antigravity"
-      |> Option.value ~default:(`Assoc [])
-      |> json_string_opt "tier"
-    in
-    Ok { session_id; current_mode_id; available_modes; config_options; antigravity_tier }
+    let antigravity_tier = parse_antigravity_tier result_json in
+    Ok
+      { session_id
+      ; current_mode_id
+      ; available_modes
+      ; current_model_id
+      ; available_models
+      ; config_options
+      ; antigravity_tier
+      }
 ;;
 
 let mcp_server_to_acp_json (srv : mcp_http_server) : Yojson.Safe.t =
@@ -714,35 +1192,90 @@ let build_environment ~base_env ~driver ~extra_strip_env =
 
 let prepare_antigravity_gemini_dir ~oauth_source ~mcp_server =
   (* PID-tag temp dir so Orphan_hygiene_sweep reaps dead-PID leftovers on boot
-     while never deleting a live persistent ACP session's --gemini-dir (>24h). *)
-  let dir = Filename.temp_dir (Printf.sprintf "masc-agy-acp-%d-" (Unix.getpid ())) "" in
+     while never deleting a live persistent ACP session's --gemini-dir (>24h).
+     Canonicalize via [Unix.realpath] so macOS [/var] vs [/private/var] aliases
+     match Antigravity's own canonicalized paths in settings and locations. *)
+  let* dir =
+    try
+      let raw_dir =
+        Filename.temp_dir (Printf.sprintf "masc-agy-acp-%d-" (Unix.getpid ())) ""
+      in
+      try Ok (Unix.realpath raw_dir) with
+      | Unix.Unix_error (err, fn, arg) ->
+        (try Fs_compat.remove_tree raw_dir with Sys_error _ | Unix.Unix_error _ -> ());
+        Error
+          (Invalid_config
+             (Printf.sprintf
+                "failed to canonicalize Antigravity --gemini-dir (%s: %s %s)"
+                (Unix.error_message err)
+                fn
+                arg))
+    with
+    | Sys_error detail ->
+      Error (Invalid_config ("failed to create Antigravity --gemini-dir: " ^ detail))
+    | Unix.Unix_error (err, fn, arg) ->
+      Error
+        (Invalid_config
+           (Printf.sprintf
+              "failed to create Antigravity --gemini-dir (%s: %s %s)"
+              (Unix.error_message err)
+              fn
+              arg))
+  in
+  let remove_dir_best_effort () =
+    try Fs_compat.remove_tree dir with
+    | Sys_error _ | Unix.Unix_error _ -> ()
+  in
   try
+    let mcp_server_name = Option.map (fun (srv : mcp_http_server) -> srv.name) mcp_server in
+    (* Validate [gemini_dir] and [mcp_server.name] (safe leaf, no pattern syntax)
+       BEFORE creating any subdirectories or writing config files. *)
+    let* settings_json =
+      Runtime_antigravity_policy.acp_settings_json ?mcp_server_name ~gemini_dir:dir ()
+      |> Result.map_error (fun err ->
+        remove_dir_best_effort ();
+        Invalid_config (Runtime_antigravity_policy.error_to_string err))
+    in
     let config_dir = Filename.concat dir "config" in
     Fs_compat.mkdir_p config_dir;
-    (match mcp_server with
-     | None -> ()
-     | Some (srv : mcp_http_server) ->
-       (* Deliberately omit tools.<name>.eager so agy 1.5.1+ keeps every MASC
-          tool on its lazy list instead of truncating past ~62 KB. *)
-       let mcp_json =
-         `Assoc
-           [ ( "mcpServers"
-             , `Assoc
-                 [ ( srv.name
-                   , `Assoc
-                       [ "url", `String srv.url
-                       ; ( "headers"
-                         , `Assoc
-                             (List.map (fun (k, v) -> k, `String v) srv.headers) )
-                       ] )
-                 ] )
-           ]
-       in
-       let cfg_path = Filename.concat config_dir "mcp_config.json" in
-       Fs_compat.save_file cfg_path (Yojson.Safe.to_string mcp_json);
-       Unix.chmod cfg_path 0o600);
+    Unix.chmod config_dir 0o700;
     let agy_cli_dir = Filename.concat dir "antigravity-cli" in
     Fs_compat.mkdir_p agy_cli_dir;
+    Unix.chmod agy_cli_dir 0o700;
+    let settings_path = Filename.concat agy_cli_dir "settings.json" in
+    Fs_compat.save_file settings_path (Yojson.Safe.pretty_to_string settings_json);
+    Unix.chmod settings_path 0o600;
+    let managed_schema_root =
+      match mcp_server with
+      | None -> None
+      | Some (srv : mcp_http_server) ->
+        (* Deliberately omit tools.<name>.eager so agy 1.5.1+ keeps every MASC
+           tool on its lazy list instead of truncating past ~62 KB. *)
+        let mcp_json =
+          `Assoc
+            [ ( "mcpServers"
+              , `Assoc
+                  [ ( srv.name
+                    , `Assoc
+                        [ "url", `String srv.url
+                        ; ( "headers"
+                          , `Assoc
+                              (List.map (fun (k, v) -> k, `String v) srv.headers) )
+                        ] )
+                  ] )
+            ]
+        in
+        let cfg_path = Filename.concat config_dir "mcp_config.json" in
+        Fs_compat.save_file cfg_path (Yojson.Safe.to_string mcp_json);
+        Unix.chmod cfg_path 0o600;
+        let mcp_root = Filename.concat agy_cli_dir "mcp" in
+        Fs_compat.mkdir_p mcp_root;
+        Unix.chmod mcp_root 0o700;
+        let schema_dir = Filename.concat mcp_root srv.name in
+        Fs_compat.mkdir_p schema_dir;
+        Unix.chmod schema_dir 0o700;
+        Some (srv.name, schema_dir)
+    in
     let copy_oauth_file source_path =
       let dest = Filename.concat agy_cli_dir "antigravity-oauth-token" in
       let content = Fs_compat.load_file source_path in
@@ -764,13 +1297,13 @@ let prepare_antigravity_gemini_dir ~oauth_source ~mcp_server =
           in
           if Sys.file_exists token_file then copy_oauth_file token_file
         | None -> ()));
-    Ok dir
+    Ok (dir, managed_schema_root)
   with
   | Eio.Cancel.Cancelled _ as exn ->
-    (try Fs_compat.remove_tree dir with Sys_error _ | Unix.Unix_error _ -> ());
+    Eio.Cancel.protect remove_dir_best_effort;
     raise exn
   | exn ->
-    (try Fs_compat.remove_tree dir with Sys_error _ | Unix.Unix_error _ -> ());
+    remove_dir_best_effort ();
     Error (Invalid_config ("failed to prepare Antigravity --gemini-dir: " ^ Printexc.to_string exn))
 ;;
 
@@ -789,42 +1322,6 @@ let parse_permission_option_kind = function
   | "reject_once" -> Reject_once
   | "reject_always" -> Reject_always
   | other -> Other_option_kind other
-;;
-
-let is_allowed_mcp_kind = function
-  | None | Some ("mcp" | "other") -> true
-  | Some _ -> false
-;;
-
-let is_read_only_tool_kind = function
-  | Some ("read" | "search" | "think") -> true
-  | Some _ | None -> false
-;;
-
-let is_masc_mcp_tool ~mcp_server_name ~allowed_tool_names ~title ~kind =
-  if (not (is_allowed_mcp_kind kind)) || allowed_tool_names = []
-  then false
-  else (
-    let matches_tool tool_name =
-      String.equal title ("mcp__" ^ mcp_server_name ^ "__" ^ tool_name)
-      || String.equal title ("mcp_" ^ mcp_server_name ^ "." ^ tool_name)
-      || String.equal title (mcp_server_name ^ ":" ^ tool_name)
-      || String.equal title (mcp_server_name ^ "/" ^ tool_name)
-      || String.equal title (mcp_server_name ^ "_" ^ tool_name)
-      || (Option.equal String.equal kind (Some "mcp") && String.equal title tool_name)
-    in
-    List.exists matches_tool allowed_tool_names)
-;;
-
-let should_allow_permission ~policy ~title ~kind =
-  match policy with
-  | Allow_all -> true
-  | Deny_all -> false
-  | Allow_masc_mcp_only { mcp_server_name; allowed_tool_names } ->
-    is_masc_mcp_tool ~mcp_server_name ~allowed_tool_names ~title ~kind
-  | Allow_read_and_masc_mcp { mcp_server_name; allowed_tool_names } ->
-    is_masc_mcp_tool ~mcp_server_name ~allowed_tool_names ~title ~kind
-    || is_read_only_tool_kind kind
 ;;
 
 let choose_permission_option ~allow options_json =
@@ -858,6 +1355,8 @@ let choose_permission_option ~allow options_json =
 type active_turn_hooks =
   { session_id : string
   ; permission_policy : permission_policy
+  ; mcp_server_name : string option
+  ; tool_calls_by_id : (string, tool_call_wire) Hashtbl.t
   ; on_event : stream_event -> unit
   }
 
@@ -870,6 +1369,8 @@ type t =
   { driver : driver
   ; mutable capabilities : agent_capabilities
   ; mutable init_latency_ms : int
+  ; managed_schema_root : (string * string) option
+  ; mcp_server_name : string option
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; signal_term : unit -> unit
   ; signal_close : unit -> unit
@@ -882,6 +1383,9 @@ type t =
   ; mutable next_id : int
   ; pending : (int, rpc_response Eio.Promise.u) Hashtbl.t
   ; mutable active_turn : active_turn_hooks option
+  ; mutable session_config_observer : (string * (config_option list -> unit)) option
+  ; last_activity_ns : int64 Atomic.t
+  ; in_flight_external_work : int Atomic.t
   ; alive : bool Atomic.t
   ; closed : bool Atomic.t
   ; stderr_buf : Buffer.t
@@ -897,6 +1401,24 @@ let with_state_lock t f =
   | exception exn ->
     Stdlib.Mutex.unlock t.state_mutex;
     raise exn
+;;
+
+let monotonic_now_ns () = Mtime_clock.now_ns ()
+
+let note_activity t =
+  Atomic.set t.last_activity_ns (monotonic_now_ns ())
+;;
+
+let with_external_activity t f =
+  note_activity t;
+  Atomic.incr t.in_flight_external_work;
+  Fun.protect
+    ~finally:(fun () ->
+      (* Stamp liveness BEFORE decrementing in-flight count so a waking
+         watchdog never observes [in_flight = 0] paired with a pre-tool timestamp. *)
+      note_activity t;
+      Atomic.decr t.in_flight_external_work)
+    f
 ;;
 
 let driver t = t.driver
@@ -994,23 +1516,47 @@ let enqueue_outbound t json =
       close_internal ~await_reap:false t))
 ;;
 
+let record_turn_tool_call_wire (turn : active_turn_hooks) (incoming : tool_call_wire) =
+  if incoming.tool_call_id = ""
+  then incoming
+  else (
+    match Hashtbl.find_opt turn.tool_calls_by_id incoming.tool_call_id with
+    | Some prior ->
+      let merged = merge_tool_call_wire ~prior ~incoming in
+      Hashtbl.replace turn.tool_calls_by_id incoming.tool_call_id merged;
+      merged
+    | None ->
+      if Hashtbl.length turn.tool_calls_by_id < max_tracked_tool_calls
+      then Hashtbl.replace turn.tool_calls_by_id incoming.tool_call_id incoming;
+      incoming)
+;;
+
 let handle_permission_request t ~id ~params =
-  let active = with_state_lock t (fun () -> t.active_turn) in
   let req_session_id = json_string_opt "sessionId" params in
-  let policy =
-    match active, req_session_id with
-    | Some turn, Some sid when String.equal sid turn.session_id -> turn.permission_policy
-    | _ -> Deny_all
-  in
   let tool_call = Option.value (json_field "toolCall" params) ~default:(`Assoc []) in
-  let title =
-    match Option.bind (json_field "_meta" tool_call) (json_string_opt "tool_name") with
-    | Some structured_name -> structured_name
-    | None -> Option.value (json_string_opt "title" tool_call) ~default:""
+  let incoming_wire = parse_tool_call_wire tool_call in
+  let allow =
+    let matched_turn =
+      with_state_lock t (fun () ->
+        match t.active_turn, req_session_id with
+        | Some turn, Some sid when String.equal sid turn.session_id ->
+          let effective_wire = record_turn_tool_call_wire turn incoming_wire in
+          Some (turn.permission_policy, turn.mcp_server_name, effective_wire)
+        | _ -> None)
+    in
+    match matched_turn with
+    | None -> false
+    | Some (policy, mcp_server_name, effective_wire) ->
+      note_activity t;
+      let identity =
+        classify_tool_call
+          ?managed_schema_root:t.managed_schema_root
+          ?mcp_server_name
+          effective_wire
+      in
+      should_allow_tool_call ~policy identity
   in
-  let kind = json_string_opt "kind" tool_call in
   let options = Option.value (json_list_opt "options" params) ~default:[] in
-  let allow = should_allow_permission ~policy ~title ~kind in
   let outcome =
     match choose_permission_option ~allow options with
     | Some option_id ->
@@ -1049,17 +1595,73 @@ let dispatch_incoming_message t msg =
           Eio.Promise.resolve u (Rpc_ok result)))
   | Some "session/update", None ->
     let params = Option.value (json_field "params" msg) ~default:(`Assoc []) in
-    let event_opt = parse_session_update params in
-    let active = with_state_lock t (fun () -> t.active_turn) in
+    let req_session_id = json_string_opt "sessionId" params in
+    let update =
+      match json_field "update" params with
+      | Some u -> u
+      | None -> params
+    in
+    let update_kind = json_string_opt "sessionUpdate" update in
+    let active, config_observer, merged_wire =
+      with_state_lock t (fun () ->
+        let merged =
+          match t.active_turn, req_session_id, update_kind with
+          | Some turn, Some sid, Some "tool_call"
+            when String.equal sid turn.session_id ->
+            Some (record_turn_tool_call_wire turn (parse_tool_call_wire update))
+          | Some turn, Some sid, Some "tool_call_update"
+            when String.equal sid turn.session_id ->
+            ignore (record_turn_tool_call_wire turn (parse_tool_call_wire update) : tool_call_wire);
+            None
+          | _ -> None
+        in
+        t.active_turn, t.session_config_observer, merged)
+    in
+    let mcp_server_name =
+      match active with
+      | Some turn -> turn.mcp_server_name
+      | None -> t.mcp_server_name
+    in
+    let event_opt =
+      parse_session_update_with
+        ?managed_schema_root:t.managed_schema_root
+        ?mcp_server_name
+        ?merged_wire
+        params
+    in
+    (match config_observer, event_opt with
+     | Some (obs_sid, obs_fn), Some (Config_options_updated opts) ->
+       let matches_observer =
+         match req_session_id with
+         | None -> true
+         | Some sid -> String.equal sid obs_sid
+       in
+       if matches_observer
+       then (
+         try obs_fn opts with
+         | (Out_of_memory | Stack_overflow | Sys.Break | Eio.Cancel.Cancelled _) as exn ->
+           raise exn
+         | _ -> ())
+     | ( Some _
+       , Some
+           ( Text_delta _
+           | Thought_delta _
+           | Tool_call_started _
+           | Tool_call_updated _
+           | Usage_updated _
+           | Mode_updated _ ) )
+     | Some _, None
+     | None, (Some _ | None) -> ());
     (match event_opt, active with
      | Some event, Some turn ->
        let matches_session =
-         match json_string_opt "sessionId" params with
+         match req_session_id with
          | None -> true
          | Some sid -> String.equal sid turn.session_id
        in
        if matches_session
        then (
+         note_activity t;
          try turn.on_event event with
          | (Out_of_memory | Stack_overflow | Sys.Break | Eio.Cancel.Cancelled _) as exn ->
            raise exn
@@ -1085,13 +1687,59 @@ let dispatch_incoming_message t msg =
   | _ -> ()
 ;;
 
-let rpc_call_decoded
+let await_promise_with_idle_timeout
+      ~clock
+      ~stage
+      ~idle_timeout_s
+      ~last_activity_ns
+      ~in_flight_work
+      promise
+  =
+  let elapsed_since_last_activity_s () =
+    let last = Atomic.get last_activity_ns in
+    let now = monotonic_now_ns () in
+    Int64.to_float (Int64.max 0L (Int64.sub now last)) /. 1e9
+  in
+  let rec wait () =
+    match Eio.Promise.peek promise with
+    | Some resp -> Ok resp
+    | None ->
+      let remaining =
+        if Atomic.get in_flight_work > 0
+        then idle_timeout_s
+        else idle_timeout_s -. elapsed_since_last_activity_s ()
+      in
+      if remaining <= 0.0
+      then (
+        match Eio.Promise.peek promise with
+        | Some resp -> Ok resp
+        | None -> Error (Timeout { stage; timeout_s = idle_timeout_s }))
+      else (
+        let slice = Float.max 0.001 remaining in
+        match
+          Eio.Time.with_timeout clock slice (fun () -> Ok (Eio.Promise.await promise))
+        with
+        | Ok resp -> Ok resp
+        | Error `Timeout ->
+          (match Eio.Promise.peek promise with
+           | Some resp -> Ok resp
+           | None ->
+             if Atomic.get in_flight_work > 0
+             then wait ()
+             else if elapsed_since_last_activity_s () >= idle_timeout_s
+             then Error (Timeout { stage; timeout_s = idle_timeout_s })
+             else wait ()))
+  in
+  wait ()
+;;
+
+let rpc_call_with_wait
       (type a)
       t
       ~(method_name : string)
       ~(params : Yojson.Safe.t)
-      ~(timeout_s : float option)
       ~(decoder : a json_decoder)
+      ~(wait : rpc_response Eio.Promise.t -> (rpc_response, error) result)
   : (a, error) result
   =
   if not (is_alive t)
@@ -1121,16 +1769,7 @@ let rpc_call_decoded
       let remove_pending () =
         with_state_lock t (fun () -> Hashtbl.remove t.pending id)
       in
-      let await_result () =
-        Fun.protect ~finally:remove_pending (fun () ->
-          match timeout_s with
-          | None -> Ok (Eio.Promise.await promise)
-          | Some secs ->
-            (match Eio.Time.with_timeout t.clock secs (fun () -> Ok (Eio.Promise.await promise)) with
-             | Ok resp -> Ok resp
-             | Error `Timeout -> Error (Timeout { stage = method_name; timeout_s = secs })))
-      in
-      let* resp = await_result () in
+      let* resp = Fun.protect ~finally:remove_pending (fun () -> wait promise) in
       (match resp with
        | Rpc_ok json ->
          decoder.decode json
@@ -1138,6 +1777,28 @@ let rpc_call_decoded
        | Rpc_err (code, message) -> Error (Rpc_error { method_name; code; message })
        | Rpc_closed reason ->
          Error (Process_exited { detail = reason; stderr_tail = stderr_tail t })))
+;;
+
+let rpc_call_decoded
+      (type a)
+      t
+      ~(method_name : string)
+      ~(params : Yojson.Safe.t)
+      ~(timeout_s : float option)
+      ~(decoder : a json_decoder)
+  : (a, error) result
+  =
+  rpc_call_with_wait t ~method_name ~params ~decoder ~wait:(fun promise ->
+    match timeout_s with
+    | None -> Ok (Eio.Promise.await promise)
+    | Some secs when (not (Float.is_finite secs)) || secs <= 0.0 -> Ok (Eio.Promise.await promise)
+    | Some secs ->
+      (match Eio.Time.with_timeout t.clock secs (fun () -> Ok (Eio.Promise.await promise)) with
+       | Ok resp -> Ok resp
+       | Error `Timeout ->
+         (match Eio.Promise.peek promise with
+          | Some resp -> Ok resp
+          | None -> Error (Timeout { stage = method_name; timeout_s = secs }))))
 ;;
 
 let cancel t ~session_id =
@@ -1202,13 +1863,15 @@ let start ~sw ~proc_mgr ~clock ~(config : config) ?mcp_server () =
   then Error (Invalid_config "cwd must be non-empty")
   else (
     let profile = profile_of_driver config.driver in
-    let* temp_gemini_dir =
+    let* temp_gemini_dir, managed_schema_root =
       match profile.mcp_wiring with
       | Gemini_dir_mcp_config ->
-        Result.map Option.some
+        Result.map
+          (fun (dir, schema_root) -> Some dir, schema_root)
           (prepare_antigravity_gemini_dir ~oauth_source:config.oauth_source ~mcp_server)
-      | Session_new_http_mcp -> Ok None
+      | Session_new_http_mcp -> Ok (None, None)
     in
+    let mcp_server_name = Option.map (fun (srv : mcp_http_server) -> srv.name) mcp_server in
     let gemini_dir_cleaned = Atomic.make false in
     let cleanup_gemini_dir () =
       if Atomic.compare_and_set gemini_dir_cleaned false true
@@ -1286,6 +1949,7 @@ let start ~sw ~proc_mgr ~clock ~(config : config) ?mcp_server () =
                       { load_session = false
                       ; resume_session = false
                       ; close_session = false
+                      ; additional_directories = false
                       ; image_prompt = false
                       ; embedded_context = false
                       ; mcp_http = false
@@ -1293,6 +1957,8 @@ let start ~sw ~proc_mgr ~clock ~(config : config) ?mcp_server () =
                       ; antigravity_tier = None
                       }
                   ; init_latency_ms = 0
+                  ; managed_schema_root
+                  ; mcp_server_name
                   ; clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t)
                   ; signal_term
                   ; signal_close
@@ -1305,6 +1971,9 @@ let start ~sw ~proc_mgr ~clock ~(config : config) ?mcp_server () =
                   ; next_id = 1
                   ; pending = Hashtbl.create 16
                   ; active_turn = None
+                  ; session_config_observer = None
+                  ; last_activity_ns = Atomic.make (monotonic_now_ns ())
+                  ; in_flight_external_work = Atomic.make 0
                   ; alive = Atomic.make true
                   ; closed = Atomic.make false
                   ; stderr_buf = Buffer.create 512
@@ -1450,6 +2119,16 @@ let set_mode t ~session_id ~mode_id =
     ~decoder:{ decode = (fun _ -> Ok ()) }
 ;;
 
+let set_model t ~session_id ~model_id =
+  let params = `Assoc [ "sessionId", `String session_id; "modelId", `String model_id ] in
+  rpc_call_decoded
+    t
+    ~method_name:"session/set_model"
+    ~params
+    ~timeout_s:(Some init_timeout_s)
+    ~decoder:{ decode = (fun _ -> Ok ()) }
+;;
+
 let set_config_option t ~session_id ~config_id ~value =
   let params =
     `Assoc
@@ -1466,7 +2145,18 @@ let set_config_option t ~session_id ~config_id ~value =
     ~decoder:{ decode = (fun json -> Ok (parse_config_options json)) }
 ;;
 
-let resolve_option_value ~driver ~config_id ~requested ~(option : config_option) =
+let is_effort_category = function
+  | Some ("thought_level" | "thinking") -> true
+  | Some _ | None -> false
+;;
+
+let resolve_option_value_with
+      ~force_when_current_stale
+      ~driver
+      ~config_id
+      ~requested
+      ~(option : config_option)
+  =
   let profile = profile_of_driver driver in
   let trimmed = String.trim requested in
   if trimmed = ""
@@ -1480,7 +2170,7 @@ let resolve_option_value ~driver ~config_id ~requested ~(option : config_option)
     None
   else (
     let is_effort =
-      Option.equal String.equal option.category (Some "thought_level")
+      is_effort_category option.category
       ||
       match profile.effort_config_id with
       | Some eff_id -> String.equal config_id eff_id
@@ -1526,61 +2216,127 @@ let resolve_option_value ~driver ~config_id ~requested ~(option : config_option)
           None)
     in
     match candidate with
-    | Some value when not (String.equal value option.current_value) -> Some value
+    | Some value
+      when force_when_current_stale || not (String.equal value option.current_value) ->
+      Some value
     | Some _ | None -> None)
+;;
+
+let resolve_option_value ~driver ~config_id ~requested ~option =
+  resolve_option_value_with
+    ~force_when_current_stale:false
+    ~driver
+    ~config_id
+    ~requested
+    ~option
 ;;
 
 let apply_session_options t (info : session_info) ~mode ~model ~effort =
   let profile = profile_of_driver t.driver in
-  let* () =
+  let* current_mode_id =
     match mode with
-    | None -> Ok ()
+    | None -> Ok info.current_mode_id
     | Some desired when Option.equal String.equal info.current_mode_id (Some desired) ->
-      Ok ()
+      Ok info.current_mode_id
     | Some desired ->
       (* Only request set_mode when the CLI advertises modes (or list is empty). *)
       if info.available_modes = [] || List.mem desired info.available_modes
-      then set_mode t ~session_id:info.session_id ~mode_id:desired
-      else Ok ()
+      then
+        let* () = set_mode t ~session_id:info.session_id ~mode_id:desired in
+        Ok (Some desired)
+      else Ok info.current_mode_id
   in
   let find_option options opt_id =
     List.find_opt (fun (opt : config_option) -> String.equal opt.id opt_id) options
   in
-  let* config_options =
-    match model, find_option info.config_options profile.model_config_id with
-    | Some m, Some option ->
-      (match
-         resolve_option_value
-           ~driver:t.driver
-           ~config_id:profile.model_config_id
-           ~requested:m
-           ~option
-       with
-       | Some value ->
-         set_config_option
-           t
-           ~session_id:info.session_id
-           ~config_id:profile.model_config_id
-           ~value
-       | None -> Ok info.config_options)
-    | _ -> Ok info.config_options
+  let find_model_option options =
+    match find_option options profile.model_config_id with
+    | Some _ as found -> found
+    | None ->
+      List.find_opt
+        (fun (opt : config_option) ->
+           Option.equal String.equal opt.category (Some "model"))
+        options
+  in
+  let* current_model_id, config_options, effort_current_stale =
+    match model with
+    | None -> Ok (info.current_model_id, info.config_options, false)
+    | Some raw_model ->
+      let m = String.trim raw_model in
+      if m = "" || String.equal (String.lowercase_ascii m) "default"
+      then Ok (info.current_model_id, info.config_options, false)
+      else if List.mem m info.available_models
+      then (
+        (* Protocol-level ACP [models.availableModels] selection via
+           [session/set_model] (supports effort-qualified model IDs without
+           parsing model names). *)
+        if Option.equal String.equal info.current_model_id (Some m)
+        then Ok (info.current_model_id, info.config_options, false)
+        else (
+          let observed_config_options = Atomic.make None in
+          with_state_lock t (fun () ->
+            t.session_config_observer <-
+              Some
+                ( info.session_id
+                , fun opts -> Atomic.set observed_config_options (Some opts) ));
+          let clear_observer () =
+            with_state_lock t (fun () -> t.session_config_observer <- None)
+          in
+          let* () =
+            Fun.protect ~finally:clear_observer (fun () ->
+              set_model t ~session_id:info.session_id ~model_id:m)
+          in
+          match Atomic.get observed_config_options with
+          | Some (_ :: _ as updated) -> Ok (Some m, updated, false)
+          | Some [] | None -> Ok (Some m, info.config_options, true)))
+      else (
+        match find_model_option info.config_options with
+        | Some option ->
+          (match
+             resolve_option_value
+               ~driver:t.driver
+               ~config_id:option.id
+               ~requested:m
+               ~option
+           with
+           | Some value ->
+             let* updated =
+               set_config_option
+                 t
+                 ~session_id:info.session_id
+                 ~config_id:option.id
+                 ~value
+             in
+             (match updated with
+              | _ :: _ -> Ok (Some value, updated, false)
+              | [] -> Ok (Some value, info.config_options, true))
+           | None -> Ok (info.current_model_id, info.config_options, false))
+        | None ->
+          if info.available_models <> []
+          then
+            Log.Runtime_agent.warn
+              "skipping unsupported ACP model %S for %s (availableModels: [%s])"
+              m
+              (driver_to_string t.driver)
+              (String.concat ", " info.available_models);
+          Ok (info.current_model_id, info.config_options, false))
   in
   let* config_options =
-    match effort, profile.effort_config_id with
-    | Some eff, Some eff_id ->
+    match effort with
+    | Some eff ->
       let effort_opt =
-        match find_option config_options eff_id with
+        match Option.bind profile.effort_config_id (find_option config_options) with
         | Some _ as found -> found
         | None ->
           List.find_opt
-            (fun (opt : config_option) ->
-               Option.equal String.equal opt.category (Some "thought_level"))
+            (fun (opt : config_option) -> is_effort_category opt.category)
             config_options
       in
       (match effort_opt with
        | Some option ->
          (match
-            resolve_option_value
+            resolve_option_value_with
+              ~force_when_current_stale:effort_current_stale
               ~driver:t.driver
               ~config_id:option.id
               ~requested:eff
@@ -1590,9 +2346,9 @@ let apply_session_options t (info : session_info) ~mode ~model ~effort =
             set_config_option t ~session_id:info.session_id ~config_id:option.id ~value
           | None -> Ok config_options)
        | None -> Ok config_options)
-    | _ -> Ok config_options
+    | None -> Ok config_options
   in
-  Ok { info with config_options }
+  Ok { info with current_mode_id; current_model_id; config_options }
 ;;
 
 let mcp_servers_param_for_driver driver mcp_server =
@@ -1628,13 +2384,13 @@ let new_session
     | Framed_in_first_prompt, (Some _ | None) -> []
   in
   let extra_dir_fields =
-    match t.driver, additional_directories with
-    | Mistral_vibe, (_ :: _ as dirs) ->
+    match additional_directories with
+    | _ :: _ as dirs when t.capabilities.additional_directories || t.driver = Mistral_vibe ->
       let existing = List.filter (fun d -> String.trim d <> "" && Sys.file_exists d) dirs in
       if existing = []
       then []
       else [ "additionalDirectories", `List (List.map (fun d -> `String d) existing) ]
-    | Mistral_vibe, [] | (Antigravity | Kimi_code), ([] | _ :: _) -> []
+    | _ -> []
   in
   let params =
     `Assoc
@@ -1655,6 +2411,19 @@ let new_session
   apply_session_options t info ~mode ~model ~effort
 ;;
 
+let fallback_session_info ~session_id json =
+  let current_mode_id, available_modes = parse_session_modes json in
+  let current_model_id, available_models = parse_session_models json in
+  { session_id
+  ; current_mode_id
+  ; available_modes
+  ; current_model_id
+  ; available_models
+  ; config_options = parse_config_options json
+  ; antigravity_tier = parse_antigravity_tier json
+  }
+;;
+
 let load_session t ~session_id ~cwd ?mcp_server ?mode ?model ?effort () =
   let params =
     `Assoc
@@ -1672,14 +2441,7 @@ let load_session t ~session_id ~cwd ?mcp_server ?mode ?model ?effort () =
       ~decoder:{ decode = (fun json ->
         match parse_session_info json with
         | Ok info -> Ok info
-        | Error _ ->
-          Ok
-            { session_id
-            ; current_mode_id = None
-            ; available_modes = []
-            ; config_options = parse_config_options json
-            ; antigravity_tier = None
-            }) }
+        | Error _ -> Ok (fallback_session_info ~session_id json)) }
   in
   apply_session_options t info ~mode ~model ~effort
 ;;
@@ -1701,14 +2463,7 @@ let resume_session t ~session_id ~cwd ?mcp_server ?mode ?model ?effort () =
       ~decoder:{ decode = (fun json ->
         match parse_session_info json with
         | Ok info -> Ok info
-        | Error _ ->
-          Ok
-            { session_id
-            ; current_mode_id = None
-            ; available_modes = []
-            ; config_options = parse_config_options json
-            ; antigravity_tier = None
-            }) }
+        | Error _ -> Ok (fallback_session_info ~session_id json)) }
   in
   apply_session_options t info ~mode ~model ~effort
 ;;
@@ -1761,8 +2516,22 @@ let prompt
          });
     on_event event
   in
+  let turn_mcp_server_name =
+    match permission_policy with
+    | Allow_masc_mcp_only { mcp_server_name; _ }
+    | Allow_read_and_masc_mcp { mcp_server_name; _ } -> Some mcp_server_name
+    | Allow_all | Deny_all -> t.mcp_server_name
+  in
+  note_activity t;
   with_state_lock t (fun () ->
-    t.active_turn <- Some { session_id; permission_policy; on_event = handle_event });
+    t.active_turn <-
+      Some
+        { session_id
+        ; permission_policy
+        ; mcp_server_name = turn_mcp_server_name
+        ; tool_calls_by_id = Hashtbl.create 16
+        ; on_event = handle_event
+        });
   let clear_active_turn () =
     with_state_lock t (fun () -> t.active_turn <- None)
   in
@@ -1799,11 +2568,24 @@ let prompt
            Ok (stop_reason, merged_usage))
     }
   in
+  let wait_prompt promise =
+    match timeout_s with
+    | None -> Ok (Eio.Promise.await promise)
+    | Some secs when (not (Float.is_finite secs)) || secs <= 0.0 -> Ok (Eio.Promise.await promise)
+    | Some secs ->
+      await_promise_with_idle_timeout
+        ~clock:t.clock
+        ~stage:"session/prompt"
+        ~idle_timeout_s:secs
+        ~last_activity_ns:t.last_activity_ns
+        ~in_flight_work:t.in_flight_external_work
+        promise
+  in
   let result =
     Fun.protect ~finally:clear_active_turn (fun () ->
       try
         let res =
-          rpc_call_decoded t ~method_name:"session/prompt" ~params ~timeout_s ~decoder
+          rpc_call_with_wait t ~method_name:"session/prompt" ~params ~decoder ~wait:wait_prompt
         in
         (match res with
          | Error (Timeout _) -> cancel t ~session_id
@@ -1835,8 +2617,10 @@ module For_testing = struct
   let build_environment = build_environment
   let build_argv = build_argv
   let should_allow_permission = should_allow_permission
+  let classify_tool_call_json = classify_tool_call_json
   let choose_permission_option = choose_permission_option
   let parse_config_options = parse_config_options
+  let parse_session_info = parse_session_info
   let resolve_option_value = resolve_option_value
   let parse_session_update = parse_session_update
   let parse_prompt_usage = parse_prompt_usage

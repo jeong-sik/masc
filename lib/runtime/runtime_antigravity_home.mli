@@ -147,6 +147,23 @@ val mcp_server_name : string
     policy opens [<appDataDir>/mcp/<this name>], where agy keeps the lazily
     loaded tools' arguments, and grants every tool of this server. *)
 
+val path_is_within : root:string -> string -> bool
+(** Whole-component canonical path containment: [true] when [path] lies at or
+    below [root] ([/a/b] does not contain [/a/bc]). *)
+
+val acp_settings_json
+  :  ?mcp_server_name:string
+  -> gemini_dir:string
+  -> unit
+  -> (Yojson.Safe.t, error) result
+(** Build declarative Antigravity [settings.json] permissions for a managed
+    ACP [--gemini-dir]: always denies reading [<gemini_dir>/config],
+    [<gemini_dir>/antigravity-cli/antigravity-oauth-token], and wildcard
+    native URL tools ([read_url] and [execute_url]). When [mcp_server_name] is
+    provided, grants MCP tool calls on that server and recursive schema reads
+    under [<gemini_dir>/antigravity-cli/mcp/<server>]. Rejects relative,
+    NUL-bearing, or pattern-syntax paths and unsafe server names. *)
+
 type native_workspace = Shared_workspace of string | Private_workspace
 
 val canonical_workspace : string -> (string, error) result

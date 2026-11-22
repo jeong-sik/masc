@@ -106,6 +106,7 @@ type agent_capabilities =
   { load_session : bool
   ; resume_session : bool
   ; close_session : bool
+  ; additional_directories : bool
   ; image_prompt : bool
   ; embedded_context : bool
   ; mcp_http : bool
@@ -125,6 +126,8 @@ type session_info =
   { session_id : string
   ; current_mode_id : string option
   ; available_modes : string list
+  ; current_model_id : string option
+  ; available_models : string list
   ; config_options : config_option list
   ; antigravity_tier : string option
   }
@@ -171,6 +174,33 @@ type prompt_block =
       ; base64_data : string
       }
 
+type mcp_server_qualifier =
+  | Explicit_server of string
+      (** Wire payload explicitly named an MCP server (e.g. Antigravity
+          [call_mcp_tool] with [rawInput.ServerName], structured [_meta],
+          [mcp__<srv>__<tool>], [mcp_<srv>.<tool>], [<srv>:<tool>],
+          [<srv>/<tool>]). *)
+  | Implicit_mcp_kind
+      (** Wire payload declared ACP tool kind ["mcp"] with an unqualified tool
+          name. *)
+
+type tool_call_identity =
+  | Mcp_tool of
+      { server : mcp_server_qualifier
+      ; tool_name : string
+      }
+  | Managed_mcp_schema_read of
+      { mcp_server_name : string
+      ; path : string
+      }
+      (** Read-only lazy MCP schema file lookup strictly inside this client's
+          MASC-managed [<gemini_dir>/antigravity-cli/mcp/<server>] directory. *)
+  | Native_tool of
+      { name : string option
+      ; kind : string option
+      ; locations : string list
+      }
+
 type tool_call_status =
   | Tool_pending
   | Tool_in_progress
@@ -187,6 +217,7 @@ type stream_event =
       ; kind : string option
       ; status : tool_call_status
       ; raw_input : Yojson.Safe.t option
+      ; identity : tool_call_identity
       }
   | Tool_call_updated of
       { tool_call_id : string
@@ -223,15 +254,19 @@ val permission_policy_of_posture
   -> Runtime_native_tools.posture
   -> permission_policy
 
+val should_allow_tool_call : policy:permission_policy -> tool_call_identity -> bool
+(** Total permission decision over the closed {!tool_call_identity} variant. *)
+
 val is_masc_mcp_tool
   :  mcp_server_name:string
   -> allowed_tool_names:string list
   -> title:string
   -> kind:string option
   -> bool
-(** Strict membership predicate: returns [true] only when [title] identifies a
-    pinned MASC tool in [allowed_tool_names] on [mcp_server_name] and [kind] is
-    not a native execution/mutation tool kind. *)
+(** Strict membership predicate for callers that only hold [(title, kind)].
+    Prefer matching on {!tool_call_identity} from {!Tool_call_started} so
+    structured MCP calls and managed schema reads are classified without
+    display-title inspection. *)
 
 val is_read_only_tool_kind : string option -> bool
 (** True for read-only local ACP tool kinds (["read"], ["search"], ["think"]).
@@ -341,12 +376,24 @@ val resume_session
 
 val set_mode : t -> session_id:string -> mode_id:string -> (unit, error) result
 
+val set_model : t -> session_id:string -> model_id:string -> (unit, error) result
+(** Invoke standard ACP [session/set_model] for drivers that advertise
+    [models.availableModels] (e.g. Antigravity effort-qualified model IDs). *)
+
 val set_config_option
   :  t
   -> session_id:string
   -> config_id:string
   -> value:string
   -> (config_option list, error) result
+
+val note_activity : t -> unit
+(** Refresh the client's monotonic activity timestamp for idle-liveness checks. *)
+
+val with_external_activity : t -> (unit -> 'a) -> 'a
+(** Bracket caller-owned work (such as executing a loopback MASC MCP tool call)
+    so an active {!prompt} suspends its idle-silence deadline while the ACP
+    child is waiting on MASC, and refreshes liveness upon completion. *)
 
 val prompt
   :  t
@@ -360,7 +407,10 @@ val prompt
 (** Execute one [session/prompt] turn on an existing ACP session, streaming
     [session/update] notifications to [on_event] and answering server-initiated
     [session/request_permission] requests according to [permission_policy].
-    Cancelling the calling fiber or hitting [timeout_s] sends [session/cancel]. *)
+    [timeout_s] bounds inactivity (time with no session-matched ACP frames and
+    no in-flight {!with_external_activity} work) rather than cutting off
+    actively progressing multi-tool turns. Cancelling the calling fiber or
+    hitting the idle deadline sends [session/cancel]. *)
 
 val cancel : t -> session_id:string -> unit
 (** Send a best-effort [session/cancel] notification for [session_id]. *)
@@ -379,8 +429,16 @@ module For_testing : sig
 
   val build_argv : config -> temp_gemini_dir:string option -> string list
   val should_allow_permission : policy:permission_policy -> title:string -> kind:string option -> bool
+
+  val classify_tool_call_json
+    :  ?managed_schema_root:string * string
+    -> ?mcp_server_name:string
+    -> Yojson.Safe.t
+    -> tool_call_identity
+
   val choose_permission_option : allow:bool -> Yojson.Safe.t list -> string option
   val parse_config_options : Yojson.Safe.t -> config_option list
+  val parse_session_info : Yojson.Safe.t -> (session_info, string) result
 
   val resolve_option_value
     :  driver:driver

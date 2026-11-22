@@ -249,9 +249,7 @@ let mcp_server_name = "masc"
 
 (* agy reads these characters as pattern syntax inside a rule, so a path that
    holds one would widen or break the rule that names it. *)
-let has_permission_pattern_syntax path =
-  String.exists (function '*' | '?' | '[' | ']' | '(' | ')' -> true | _ -> false) path
-;;
+let has_permission_pattern_syntax = Runtime_antigravity_policy.has_permission_pattern_syntax
 
 (* The three managed paths a policy names besides the workspaces.
    agy lists a lazily loaded tool by name and keeps its arguments in
@@ -281,17 +279,7 @@ let policy_paths (t : t) =
   | None -> Ok paths
 ;;
 
-(* [path] lies at or below [root]. Both are canonical, so whole path
-   components compare; [/a/b] does not hold [/a/bc]. *)
-let path_is_within ~root path =
-  let parts value = String.split_on_char '/' value |> List.filter (fun part -> part <> "") in
-  let rec holds = function
-    | [], _ -> true
-    | root_part :: root_rest, part :: rest -> String.equal root_part part && holds (root_rest, rest)
-    | _ :: _, [] -> false
-  in
-  holds (parts root, parts path)
-;;
+let path_is_within = Runtime_antigravity_policy.path_is_within
 
 (* HIGH-RISK-UNREVIEWED: this table is the antigravity lane's permission
    boundary. Plan mode merely adds an instruction.
@@ -339,6 +327,12 @@ let native_settings_json ~policy ~posture ~workspaces =
    alongside the named secret paths. *)
 let settings_json policy =
   settings_permissions_json ~policy ~allow:[] ~deny:["read_file(*)"; "write_file(*)"; "command(*)"]
+;;
+
+let acp_settings_json ?mcp_server_name ~gemini_dir () =
+  Runtime_antigravity_policy.acp_settings_json ?mcp_server_name ~gemini_dir ()
+  |> Result.map_error (fun { Runtime_antigravity_policy.path; detail } ->
+    Unsafe_directory { path; detail })
 ;;
 
 let write_private_file ~make_error path contents =

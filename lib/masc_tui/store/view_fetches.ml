@@ -58,6 +58,7 @@ let fetches_for_keeper_tab ~force ~name ~tab (m : Model.t) =
         | Some obs -> needs_fetch ~force obs
       in
       []
+      |> add_if (needs_fetch ~force m.fleet.turns) Cmd.Get_keeper_turns
       |> add_if hist_needed
            (Cmd.Get_chat_history
               { keeper = name; limit = Some 80; cursor = None })

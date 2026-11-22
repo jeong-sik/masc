@@ -622,7 +622,13 @@ let test_compact_composer_and_drafts () =
            is_btw = false;
            chunk =
              Wire_fleet.Chunk_accepted
-               { operation_id = "op-1"; queued_count = 0; state = "accepted" };
+               {
+                 operation_id = "op-1";
+                 queued_count = 0;
+                 state = Wire_fleet.Accepted_running;
+                 interactive_outcome = None;
+                 control_token = None;
+               };
          })
   in
   let st_after_accept =
@@ -642,7 +648,11 @@ let test_compact_composer_and_drafts () =
            is_btw = false;
            chunk =
              Wire_fleet.Chunk_turn_done
-               { operation_id = "op-1"; turn_ref = "t-1"; reply = "ok" };
+               {
+                 operation_id = Some "op-1";
+                 turn_ref = Some "t-1";
+                 reply = Some "ok";
+               };
          })
   in
   let st_after_done =
@@ -676,6 +686,9 @@ let test_compact_composer_and_drafts () =
                              tool_call_id = None;
                              tool_call_name = None;
                              execution_id = None;
+                             operation_id = None;
+                             transcript_slot = None;
+                             failure_kind = None;
                            };
                          ];
                        has_more = false;
@@ -1182,6 +1195,9 @@ let test_verifier_regressions () =
       tool_call_id = None;
       tool_call_name = None;
       execution_id = None;
+      operation_id = None;
+      transcript_slot = None;
+      failure_kind = None;
     }
   in
   let m_hist, _ =
@@ -1230,7 +1246,13 @@ let test_verifier_regressions () =
            is_btw = false;
            chunk =
              Wire_fleet.Chunk_accepted
-               { operation_id = "op-dup"; queued_count = 0; state = "accepted" };
+               {
+                 operation_id = "op-dup";
+                 queued_count = 0;
+                 state = Wire_fleet.Accepted_running;
+                 interactive_outcome = None;
+                 control_token = None;
+               };
          })
   in
   (* Re-reading history containing ONLY old-u1 must NOT confirm new "continue" *)
@@ -1312,7 +1334,7 @@ let test_verifier_regressions () =
            is_btw = true;
            chunk =
              Wire_fleet.Chunk_text_delta
-               { operation_id = "op-b"; delta = "pong" };
+               { operation_id = Some "op-b"; delta = "pong" };
          })
   in
   let m_btw3, _ =
@@ -3356,6 +3378,9 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
             tool_call_id = None;
             tool_call_name = None;
             execution_id = None;
+            operation_id = None;
+            transcript_slot = None;
+            failure_kind = None;
           };
         ];
       has_more = false;
@@ -3402,7 +3427,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
              {
                req =
                  Cmd.Post_keeper_turn_interrupt
-                   { keeper = "alpha"; interrupt_token = "int-tok-7" };
+                   { keeper = "alpha"; target = `Turn_token "int-tok-7" };
                _;
              } ->
              true
@@ -3442,7 +3467,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
       |> Fleet_store.start_chat_stream ~keeper:"alpha" ~request_id:"old-req"
       |> Fleet_store.apply_chat_stream_chunk ~keeper:"alpha" ~request_id:"old-req"
            (Wire_fleet.Chunk_text_delta
-              { operation_id = "op-old"; delta = "Stale previous stream text" })
+              { operation_id = Some "op-old"; delta = "Stale previous stream text" })
       |> Fleet_store.finish_chat_stream ~keeper:"alpha" ~request_id:"old-req"
            ~error:None
     in
@@ -3984,6 +4009,9 @@ let test_nav_fix5_keeper_chat_scroll_direction_and_home_bound () =
           tool_call_id = None;
           tool_call_name = None;
           execution_id = None;
+          operation_id = None;
+          transcript_slot = None;
+          failure_kind = None;
         })
   in
   let m0 = Model.initial ~cols:120 ~rows:30 () in
@@ -4652,6 +4680,9 @@ let test_p1_chat_transcript_ssot_exact_bounds () =
       tool_call_id = None;
       tool_call_name;
       execution_id = None;
+      operation_id = None;
+      transcript_slot = None;
+      failure_kind = None;
     }
   in
   let json_1line =
@@ -4739,15 +4770,18 @@ let test_p1_chat_transcript_ssot_exact_bounds () =
 
   (* (b) Persisted finished stream is deduped (adds 0 rows) so Home+Down has 0 dead presses *)
   let fleet_persisted =
-    base_fleet
+    m0.fleet
+    |> Fleet_store.apply_keepers ~observed_at:t0 [ sample_keeper "alpha-1" ]
     |> Fleet_store.start_chat_stream ~keeper:"alpha-1" ~request_id:"r-dup"
     |> Fleet_store.apply_chat_stream_chunk ~keeper:"alpha-1" ~request_id:"r-dup"
          (Wire_fleet.Chunk_turn_done
             {
-              operation_id = "op-dup";
-              turn_ref = "t-dup";
-              reply = "Final persisted assistant reply.";
+              operation_id = Some "op-dup";
+              turn_ref = Some "t-dup";
+              reply = Some "Final persisted assistant reply.";
             })
+    |> Fleet_store.apply_chat_history ~observed_at:t0 ~keeper:"alpha-1"
+         { messages = md_msgs; has_more = false; next_cursor = None }
   in
   let m_persisted = make_chat_model fleet_persisted m0.drafts in
   let rows_persisted =
@@ -5584,6 +5618,637 @@ let test_tui_memory_os_internals_fetch_and_runtime_assignment_setup_cmds () =
          | _ -> false)
        (Cmd.flatten poll_cmds))
 
+let test_agui_chat_stream_lifecycle_15_bugs () =
+  let mk_msg ~id ~role ~content ?operation_id ?transcript_slot ?failure_kind
+      ?turn_ref ts : Wire_fleet.chat_message =
+    {
+      id;
+      role;
+      content;
+      ts_unix = ts;
+      turn_ref;
+      model_used = None;
+      tool_call_id = None;
+      tool_call_name = None;
+      execution_id = None;
+      operation_id;
+      transcript_slot;
+      failure_kind;
+    }
+  in
+  let m0 = Model.initial ~cols:120 ~rows:36 () in
+  let m0 =
+    {
+      m0 with
+      fleet =
+        m0.fleet
+        |> Fleet_store.apply_keepers ~observed_at:t0 [ sample_keeper "alpha-leader" ]
+        |> Fleet_store.apply_chat_history ~observed_at:t0 ~keeper:"alpha-leader"
+             {
+               messages =
+                 [
+                   mk_msg ~id:"old-1" ~role:Wire_fleet.Role_user ~content:"이전 질문" 10.0;
+                   mk_msg ~id:"old-2" ~role:Wire_fleet.Role_assistant ~content:"OK" 11.0;
+                 ];
+               has_more = false;
+               next_cursor = None;
+             }
+        |> Fleet_store.move_chat_scroll ~max_scroll:10 ~delta:5;
+      drafts = Drafts.set_active_keeper "alpha-leader" m0.drafts;
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha-leader"; tab = Nav.Keeper_chat } ];
+        };
+    }
+  in
+  (* BUG-12: Keeper_chat dive fetches Get_keeper_turns + Get_chat_history *)
+  let dive_cmds = View_fetches.fetches_for_current_view m0 in
+  Alcotest.(check bool) "Keeper_chat dive fetches Get_keeper_turns" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_keeper_turns; _ } -> true
+         | _ -> false)
+       (Cmd.flatten dive_cmds));
+
+  (* BUG-3, BUG-11, BUG-14: Idle submit gets Mode_direct, session-unique request_id, resets scroll *)
+  let m1 = { m0 with drafts = Drafts.insert_text "음" m0.drafts } in
+  let m2, _ = Update.execute_action ~now:t0 m1 Keymap.Submit_steer in
+  Alcotest.(check int) "submit_composer resets chat_scroll_offset to 0" 0
+    m2.fleet.chat_scroll_offset;
+  let tx_a =
+    match Drafts.active_tx_for_keeper ~keeper:"alpha-leader" m2.drafts with
+    | Some tx -> tx
+    | None -> Alcotest.fail "missing tx_a"
+  in
+  Alcotest.(check bool) "request_id is session-unique (not chat-1)" true
+    ((not (String.equal tx_a.request_id "chat-1"))
+    && String.starts_with ~prefix:"tui-" tx_a.request_id
+    && String.length tx_a.request_id <= 128);
+  Alcotest.(check bool) "idle send uses honest Mode_direct (no 조향)" true
+    (Drafts.equal_delivery_mode tx_a.mode Drafts.Mode_direct);
+  Alcotest.(check bool) "phase is Phase_sending" true
+    (Chat_transcript.equal_live_chat_phase
+       (Chat_transcript.live_chat_phase ~model:m2 ~keeper:"alpha-leader")
+       Chat_transcript.Phase_sending);
+
+  (* BUG-12: Chunk_accepted updates chat_control_token & transitions to Pending_processing *)
+  let m3, _ =
+    Update.step ~now:t1 m2
+      (Msg.Chat_stream_chunk
+         {
+           epoch = m2.epoch;
+           keeper = "alpha-leader";
+           request_id = tx_a.request_id;
+           is_btw = false;
+           chunk =
+             Wire_fleet.Chunk_accepted
+               {
+                 operation_id = tx_a.request_id;
+                 queued_count = 0;
+                 state = Wire_fleet.Accepted_running;
+                 interactive_outcome = Some Wire_fleet.Interactive_applied;
+                 control_token = Some "ctrl-tok-fresh";
+               };
+         })
+  in
+  Alcotest.(check (option string)) "Chunk_accepted updates chat_control_token"
+    (Some "ctrl-tok-fresh")
+    (Fleet_store.chat_control_token_for ~keeper:"alpha-leader" m3.fleet);
+
+  (* Live streaming phases: Thinking -> Tool_running -> Streaming *)
+  let m4, _ =
+    Update.step ~now:t1 m3
+      (Msg.Chat_stream_chunk
+         {
+           epoch = m3.epoch;
+           keeper = "alpha-leader";
+           request_id = tx_a.request_id;
+           is_btw = false;
+           chunk =
+             Wire_fleet.Chunk_thinking_delta
+               { operation_id = None; delta = "reasoning..." };
+         })
+  in
+  Alcotest.(check bool) "phase -> Phase_thinking" true
+    (Chat_transcript.equal_live_chat_phase
+       (Chat_transcript.live_chat_phase ~model:m4 ~keeper:"alpha-leader")
+       Chat_transcript.Phase_thinking);
+  let m5, _ =
+    Update.step ~now:t1 m4
+      (Msg.Chat_stream_chunk
+         {
+           epoch = m4.epoch;
+           keeper = "alpha-leader";
+           request_id = tx_a.request_id;
+           is_btw = false;
+           chunk =
+             Wire_fleet.Chunk_tool_start
+               {
+                 operation_id = None;
+                 tool_use_id = "scope-1-block-0";
+                 tool_name = "masc_status";
+                 args_preview = None;
+               };
+         })
+  in
+  Alcotest.(check bool) "phase -> Phase_tool_running" true
+    (Chat_transcript.equal_live_chat_phase
+       (Chat_transcript.live_chat_phase ~model:m5 ~keeper:"alpha-leader")
+       (Chat_transcript.Phase_tool_running "masc_status"));
+  let m6, _ =
+    Update.step ~now:t1 m5
+      (Msg.Chat_stream_chunk
+         {
+           epoch = m5.epoch;
+           keeper = "alpha-leader";
+           request_id = tx_a.request_id;
+           is_btw = false;
+           chunk =
+             Wire_fleet.Chunk_tool_end
+               {
+                 operation_id = None;
+                 tool_use_id = "scope-1-block-0";
+                 tool_name = None;
+                 ok = None;
+                 output_preview = None;
+               };
+         })
+  in
+  let m7, _ =
+    Update.step ~now:t1 m6
+      (Msg.Chat_stream_chunk
+         {
+           epoch = m6.epoch;
+           keeper = "alpha-leader";
+           request_id = tx_a.request_id;
+           is_btw = false;
+           chunk = Wire_fleet.Chunk_text_delta { operation_id = None; delta = "OK" };
+         })
+  in
+  Alcotest.(check bool) "phase -> Phase_streaming" true
+    (Chat_transcript.equal_live_chat_phase
+       (Chat_transcript.live_chat_phase ~model:m7 ~keeper:"alpha-leader")
+       Chat_transcript.Phase_streaming);
+
+  (* BUG-9 & BUG-4: Submitting Follow_up B while A is streaming does NOT wipe A's stream,
+     pending_txs_for_keeper is chronological [A; B], and active_tx_for_keeper stays A *)
+  let m8 = { m7 with drafts = Drafts.insert_text "..?" m7.drafts } in
+  let m9, _ = Update.execute_action ~now:t1 m8 Keymap.Submit_followup in
+  let keeper_txs = Drafts.pending_txs_for_keeper ~keeper:"alpha-leader" m9.drafts in
+  Alcotest.(check (list string)) "pending_txs_for_keeper is chronological (oldest-first)"
+    [ "음"; "..?" ]
+    (List.map (fun (tx : Drafts.pending_message) -> tx.body) keeper_txs);
+  let tx_b = List.nth keeper_txs 1 in
+  Alcotest.(check bool) "active_tx_for_keeper keeps oldest executing tx A (not newest B)"
+    true
+    (match Drafts.active_tx_for_keeper ~keeper:"alpha-leader" m9.drafts with
+    | Some tx -> String.equal tx.request_id tx_a.request_id
+    | None -> false);
+  let buf_after_followup =
+    Fleet_store.String_map.find "alpha-leader" m9.fleet.chat_streams
+  in
+  Alcotest.(check string) "Follow_up submit does NOT wipe active stream A"
+    tx_a.request_id buf_after_followup.request_id;
+  Alcotest.(check string) "Stream A text preserved" "OK" buf_after_followup.text;
+  let m10, _ =
+    Update.step ~now:t1 m9
+      (Msg.Chat_stream_chunk
+         {
+           epoch = m9.epoch;
+           keeper = "alpha-leader";
+           request_id = tx_b.request_id;
+           is_btw = false;
+           chunk =
+             Wire_fleet.Chunk_accepted
+               {
+                 operation_id = tx_b.request_id;
+                 queued_count = 1;
+                 state = Wire_fleet.Accepted_queued;
+                 interactive_outcome = None;
+                 control_token = None;
+               };
+         })
+  in
+  Alcotest.(check string) "Queued acceptance for B does NOT hijack active stream A"
+    tx_a.request_id
+    (Fleet_store.String_map.find "alpha-leader" m10.fleet.chat_streams).request_id;
+
+  (* BUG-5: Chat_transcript.project_transcript orders History -> Active User A -> Stream A -> Queued B *)
+  let sections = Chat_transcript.project_transcript ~model:m10 ~keeper:"alpha-leader" in
+  Alcotest.(check int) "4 chronological sections (hist, active user A, stream A, queued B)"
+    4 (List.length sections);
+  (match sections with
+  | [
+      Chat_transcript.Section_history _;
+      Chat_transcript.Section_pending [ { tx = pa; _ } ];
+      Chat_transcript.Section_stream sp;
+      Chat_transcript.Section_pending [ { tx = pb; _ } ];
+    ] ->
+      Alcotest.(check string) "pre-stream pending is A" tx_a.request_id pa.request_id;
+      Alcotest.(check string) "stream belongs to A" tx_a.request_id sp.buf.request_id;
+      Alcotest.(check string) "post-stream pending is queued B" tx_b.request_id pb.request_id
+  | _ -> Alcotest.fail "unexpected transcript section projection order");
+
+  (* BUG-13: Interrupt without active_turn sends request_id (NOT interrupt_token) and sets Interrupting *)
+  let m_int, cmds_int =
+    Update.step ~now:t1 m10 (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  let int_body_opt =
+    List.find_map
+      (function
+        | Cmd.Http_post { req = Cmd.Post_keeper_turn_interrupt _ as req; _ } ->
+            Some (Cmd.post_request_body req)
+        | _ -> None)
+      (Cmd.flatten cmds_int)
+  in
+  (match int_body_opt with
+  | Some (`Assoc fields) ->
+      Alcotest.(check bool) "interrupt without UUID turn sends request_id" true
+        (List.assoc_opt "request_id" fields = Some (`String tx_a.request_id));
+      Alcotest.(check bool) "interrupt without UUID turn omits interrupt_token" true
+        (Option.is_none (List.assoc_opt "interrupt_token" fields))
+  | _ -> Alcotest.fail "expected Post_keeper_turn_interrupt with request_id");
+  Alcotest.(check bool) "interrupt sets Phase_interrupting (not premature stream error)" true
+    (Chat_transcript.equal_live_chat_phase
+       (Chat_transcript.live_chat_phase ~model:m_int ~keeper:"alpha-leader")
+       Chat_transcript.Phase_interrupting);
+  Alcotest.(check (option string)) "no premature last_error before server ack" None
+    (Fleet_store.String_map.find "alpha-leader" m_int.fleet.chat_streams).last_error;
+
+  (* BUG-10: Short repeated reply "OK" (already in prior_msg_ids) does NOT prematurely vanish! *)
+  let m_done_a, _ =
+    Update.step ~now:t2 m10
+      (Msg.Chat_stream_chunk
+         {
+           epoch = m10.epoch;
+           keeper = "alpha-leader";
+           request_id = tx_a.request_id;
+           is_btw = false;
+           chunk =
+             Wire_fleet.Chunk_turn_done
+               { operation_id = Some tx_a.request_id; turn_ref = None; reply = None };
+         })
+  in
+  let buf_done_a =
+    Fleet_store.String_map.find "alpha-leader" m_done_a.fleet.chat_streams
+  in
+  let hist_old =
+    match Observed.to_option (Fleet_store.String_map.find "alpha-leader" m_done_a.fleet.chat_histories) with
+    | Some p -> p.messages
+    | None -> []
+  in
+  Alcotest.(check bool) "short repeated reply 'OK' in prior_msg_ids does NOT prematurely vanish"
+    false (Chat_transcript.stream_reply_already_persisted hist_old buf_done_a);
+
+  (* Finding #2: Back-to-back "OK" replies with distinct operation_ids do NOT cross-dedup
+     even when Turn 1's persisted row is NOT in Turn 2's prior_msg_ids *)
+  let buf_turn2_ok : Fleet_store.chat_stream_buffer =
+    {
+      buf_done_a with
+      request_id = "op-ok-2";
+      operation_id = Some "op-ok-2";
+      turn_ref = None;
+      text = "OK";
+      prior_msg_ids = Fleet_store.String_set.empty;
+    }
+  in
+  let hist_turn1_ok =
+    [
+      mk_msg ~id:"hist-ok-1" ~role:Wire_fleet.Role_assistant ~content:"OK"
+        ~operation_id:"op-ok-1" ~transcript_slot:"terminal_result" 30.0;
+    ]
+  in
+  Alcotest.(check bool)
+    "back-to-back 'OK' with different operation_id does NOT prematurely vanish"
+    false (Chat_transcript.stream_reply_already_persisted hist_turn1_ok buf_turn2_ok);
+  let hist_turn2_ok =
+    hist_turn1_ok
+    @ [
+        mk_msg ~id:"hist-ok-2" ~role:Wire_fleet.Role_assistant ~content:"OK"
+          ~operation_id:"op-ok-2" ~transcript_slot:"terminal_result" 31.0;
+      ]
+  in
+  Alcotest.(check bool)
+    "matching operation_id persists Turn 2's 'OK' cleanly"
+    true (Chat_transcript.stream_reply_already_persisted hist_turn2_ok buf_turn2_ok);
+
+  (* BUG-8: Now B starts executing (RUN_STARTED) and takes over chat_streams;
+     a late RUN_ERROR from older A MUST NOT clobber B's active stream! *)
+  let m_b_run, _ =
+    Update.step ~now:t2 m_done_a
+      (Msg.Chat_stream_chunk
+         {
+           epoch = m_done_a.epoch;
+           keeper = "alpha-leader";
+           request_id = tx_b.request_id;
+           is_btw = false;
+           chunk = Wire_fleet.Chunk_run_started { operation_id = Some tx_b.request_id };
+         })
+  in
+  let m_b_delta, _ =
+    Update.step ~now:t2 m_b_run
+      (Msg.Chat_stream_chunk
+         {
+           epoch = m_b_run.epoch;
+           keeper = "alpha-leader";
+           request_id = tx_b.request_id;
+           is_btw = false;
+           chunk = Wire_fleet.Chunk_text_delta { operation_id = None; delta = "응답 B" };
+         })
+  in
+  let m_late_err, cmds_late_err =
+    Update.step ~now:t2 m_b_delta
+      (Msg.Chat_stream_chunk
+         {
+           epoch = m_b_delta.epoch;
+           keeper = "alpha-leader";
+           request_id = tx_a.request_id;
+           is_btw = false;
+           chunk =
+             Wire_fleet.Chunk_error
+               {
+                 operation_id = Some tx_a.request_id;
+                 code = Some "turn_failed";
+                 message = "stale error from A";
+               };
+         })
+  in
+  let buf_after_late_err =
+    Fleet_store.String_map.find "alpha-leader" m_late_err.fleet.chat_streams
+  in
+  Alcotest.(check string) "Late RUN_ERROR from older A does NOT clobber active stream B"
+    tx_b.request_id buf_after_late_err.request_id;
+  Alcotest.(check string) "Active stream B text intact" "응답 B" buf_after_late_err.text;
+  Alcotest.(check (option string)) "Active stream B has no stale error" None
+    buf_after_late_err.last_error;
+  (* BUG-6 & BUG-14: Chunk_error triggers Get_chat_history *)
+  Alcotest.(check bool) "Chunk_error triggers Get_chat_history" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_chat_history { keeper = "alpha-leader"; _ }; _ } ->
+             true
+         | _ -> false)
+       (Cmd.flatten cmds_late_err));
+
+  (* BUG-6 & BUG-7: Persisted Role_user + Role_request_failure for A removes Failed_retryable A completely *)
+  let m_reconciled, _ =
+    Update.step ~now:t2 m_late_err
+      (Msg.Http_reply
+         {
+           epoch = m_late_err.epoch;
+           reply =
+             Msg.Reply_chat_history
+               {
+                 keeper = "alpha-leader";
+                 result =
+                   Ok
+                     {
+                       messages =
+                         [
+                           mk_msg ~id:"old-1" ~role:Wire_fleet.Role_user ~content:"이전 질문" 10.0;
+                           mk_msg ~id:"old-2" ~role:Wire_fleet.Role_assistant ~content:"OK" 11.0;
+                           mk_msg ~id:"srv-u-a" ~role:Wire_fleet.Role_user ~content:"음"
+                             ~operation_id:tx_a.request_id ~transcript_slot:"accepted_user" 20.0;
+                           mk_msg ~id:"srv-f-a" ~role:Wire_fleet.Role_request_failure
+                             ~content:"stale error from A" ~operation_id:tx_a.request_id
+                             ~transcript_slot:"settled_failure" ~failure_kind:"turn_exception" 21.0;
+                         ];
+                       has_more = false;
+                       next_cursor = None;
+                     };
+               };
+         })
+  in
+  Alcotest.(check (list string)) "Persisted Role_request_failure removes Failed_retryable tx A"
+    [ tx_b.request_id ]
+    (List.map
+       (fun (tx : Drafts.pending_message) -> tx.request_id)
+       (Drafts.pending_txs_for_keeper ~keeper:"alpha-leader" m_reconciled.drafts));
+
+  (* BUG-14: Embedded Keepers split-pane Keeper_chat receives SSE refresh on Chat_operation *)
+  let m_embedded =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Keepers; dive_stack = [] };
+      fleet =
+        m0.fleet
+        |> Fleet_store.select_keeper "alpha-leader"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_chat;
+    }
+  in
+  let _, emb_cmds =
+    Update.step ~now:t1 m_embedded
+      (Msg.Sse_event
+         {
+           epoch = m_embedded.epoch;
+           event =
+             Msg.Sse_observer_delivery
+               {
+                 cursor = Some 1;
+                 decoded =
+                   Wire_observer.Event
+                     (Wire_observer.Keeper_chat_appended
+                        {
+                          keeper = "alpha-leader";
+                          connector = None;
+                          at_unix = 101.0;
+                        });
+               };
+         })
+  in
+  Alcotest.(check bool) "Embedded Keepers chat preview refreshes on Keeper_chat_appended" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_chat_history { keeper = "alpha-leader"; _ }; _ } ->
+             true
+         | _ -> false)
+       (Cmd.flatten emb_cmds));
+
+  (* BUG-14: Confirming_delivery bounded retries on Tick settle cleanly; idle Tick emits 0 cmds *)
+  let _, idle_tick_cmds =
+    Update.step ~now:(Clock.Mono.after_s t0 5.0) m0 (Msg.Tick { wall_unix = 200.0 })
+  in
+  Alcotest.(check int) "Idle Tick emits 0 HTTP cmds" 0 (List.length idle_tick_cmds);
+  let m_conf =
+    let d =
+      m0.drafts
+      |> Drafts.insert_text "confirm me"
+      |> fun d0 ->
+      match
+        Drafts.enqueue_submission ~now:t0 ~keeper:"alpha-leader"
+          ~mode:Drafts.Mode_direct d0
+      with
+      | Some (d1, tx) -> Drafts.mark_confirming ~now:t0 ~request_id:tx.request_id d1
+      | None -> Alcotest.fail "enqueue failed"
+    in
+    { m0 with drafts = d }
+  in
+  (* Finding #1: Esc and Ctrl+X during Confirming_delivery pop cleanly & never corrupt tx state *)
+  let m_conf_esc, cmds_conf_esc =
+    Update.step ~now:t0 m_conf (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  Alcotest.(check bool) "Esc during Confirming_delivery pops Dive_keeper" true
+    (Option.is_none (Model.active_dive m_conf_esc));
+  Alcotest.(check bool) "Esc during Confirming_delivery emits 0 interrupt POSTs" false
+    (List.exists
+       (function
+         | Cmd.Http_post { req = Cmd.Post_keeper_turn_interrupt _; _ } -> true
+         | _ -> false)
+       (Cmd.flatten cmds_conf_esc));
+  Alcotest.(check bool) "Confirming_delivery tx state remains intact after Esc" true
+    (match Drafts.active_tx_for_keeper ~keeper:"alpha-leader" m_conf_esc.drafts with
+    | Some { state = Drafts.Confirming_delivery; _ } -> true
+    | _ -> false);
+  let m_conf_ctrlx, cmds_conf_ctrlx =
+    Update.step ~now:t0 m_conf
+      (Msg.Key_event (key ~ctrl:true (Keymap.Input.Char "x")))
+  in
+  Alcotest.(check bool) "Ctrl+X during Confirming_delivery emits 0 interrupt POSTs" false
+    (List.exists
+       (function
+         | Cmd.Http_post { req = Cmd.Post_keeper_turn_interrupt _; _ } -> true
+         | _ -> false)
+       (Cmd.flatten cmds_conf_ctrlx));
+  Alcotest.(check bool) "Confirming_delivery tx state remains intact after Ctrl+X" true
+    (match Drafts.active_tx_for_keeper ~keeper:"alpha-leader" m_conf_ctrlx.drafts with
+    | Some { state = Drafts.Confirming_delivery; _ } -> true
+    | _ -> false);
+
+  (* Finding #4 & #1: Accepted_queued keeps has_active_chat_stream = false;
+     Esc during Queued pops Dive_keeper cleanly without corrupting Queued state *)
+  let m_q_submit, _ =
+    Update.execute_action ~now:t0
+      { m0 with drafts = Drafts.insert_text "wait behind autonomous" m0.drafts }
+      Keymap.Submit_steer
+  in
+  let tx_q =
+    match Drafts.active_tx_for_keeper ~keeper:"alpha-leader" m_q_submit.drafts with
+    | Some tx -> tx
+    | None -> Alcotest.fail "missing queued tx"
+  in
+  let m_q_acc, _ =
+    Update.step ~now:t0 m_q_submit
+      (Msg.Chat_stream_chunk
+         {
+           epoch = m_q_submit.epoch;
+           keeper = "alpha-leader";
+           request_id = tx_q.request_id;
+           is_btw = false;
+           chunk =
+             Wire_fleet.Chunk_accepted
+               {
+                 operation_id = tx_q.request_id;
+                 queued_count = 1;
+                 state = Wire_fleet.Accepted_queued;
+                 interactive_outcome = None;
+                 control_token = None;
+               };
+         })
+  in
+  Alcotest.(check bool) "Accepted_queued sets has_active_chat_stream = false" false
+    (Fleet_store.has_active_chat_stream ~keeper:"alpha-leader" m_q_acc.fleet);
+  Alcotest.(check bool) "Accepted_queued phase is Phase_queued 1" true
+    (Chat_transcript.equal_live_chat_phase
+       (Chat_transcript.live_chat_phase ~model:m_q_acc ~keeper:"alpha-leader")
+       (Chat_transcript.Phase_queued 1));
+  let m_q_esc, cmds_q_esc =
+    Update.step ~now:t0 m_q_acc (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  Alcotest.(check bool) "Esc during Queued pops Dive_keeper cleanly" true
+    (Option.is_none (Model.active_dive m_q_esc));
+  Alcotest.(check bool) "Esc during Queued emits 0 interrupt POSTs" false
+    (List.exists
+       (function
+         | Cmd.Http_post { req = Cmd.Post_keeper_turn_interrupt _; _ } -> true
+         | _ -> false)
+       (Cmd.flatten cmds_q_esc));
+  Alcotest.(check bool) "Queued tx state stays Queued after Esc" true
+    (match Drafts.active_tx_for_keeper ~keeper:"alpha-leader" m_q_esc.drafts with
+    | Some { state = Drafts.Queued; _ } -> true
+    | _ -> false);
+  (* Finding #4: Terminal Accepted_succeeded keeps active=false, enters Confirming_delivery & fetches history *)
+  let m_acc_done, cmds_acc_done =
+    Update.step ~now:t0 m_q_submit
+      (Msg.Chat_stream_chunk
+         {
+           epoch = m_q_submit.epoch;
+           keeper = "alpha-leader";
+           request_id = tx_q.request_id;
+           is_btw = false;
+           chunk =
+             Wire_fleet.Chunk_accepted
+               {
+                 operation_id = tx_q.request_id;
+                 queued_count = 0;
+                 state = Wire_fleet.Accepted_succeeded;
+                 interactive_outcome = Some Wire_fleet.Interactive_replayed;
+                 control_token = None;
+               };
+         })
+  in
+  Alcotest.(check bool) "Accepted_succeeded sets has_active_chat_stream = false" false
+    (Fleet_store.has_active_chat_stream ~keeper:"alpha-leader" m_acc_done.fleet);
+  Alcotest.(check bool) "Accepted_succeeded moves tx to Confirming_delivery (not Pending_processing)" true
+    (match Drafts.active_tx_for_keeper ~keeper:"alpha-leader" m_acc_done.drafts with
+    | Some { state = Drafts.Confirming_delivery; _ } -> true
+    | _ -> false);
+  Alcotest.(check bool) "Accepted_succeeded triggers Get_chat_history" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_chat_history { keeper = "alpha-leader"; _ }; _ } ->
+             true
+         | _ -> false)
+       (Cmd.flatten cmds_acc_done));
+
+  let t_p3 = Clock.Mono.after_s t0 3.0 in
+  let m_c1, cmds_c1 = Update.step ~now:t_p3 m_conf (Msg.Tick { wall_unix = 203.0 }) in
+  Alcotest.(check int) "Confirming_delivery tick recheck emits 1 Get_chat_history"
+    1 (List.length cmds_c1);
+  let t_p6 = Clock.Mono.after_s t_p3 3.0 in
+  let m_c2, _ = Update.step ~now:t_p6 m_c1 (Msg.Tick { wall_unix = 206.0 }) in
+  let t_p9 = Clock.Mono.after_s t_p6 3.0 in
+  let m_c3, cmds_c3 = Update.step ~now:t_p9 m_c2 (Msg.Tick { wall_unix = 209.0 }) in
+  Alcotest.(check int) "Bounded Confirming_delivery settles after 3 rechecks (0 further polls)"
+    0 (List.length cmds_c3);
+  Alcotest.(check bool) "Settled unconfirmed tx is no longer stuck in Confirming_delivery"
+    false (Drafts.has_active_tx_for ~keeper:"alpha-leader" m_c3.drafts);
+  (* [X] dismisses failed pending txs cleanly in Dive Keeper_chat *)
+  let m_dismissed, _ =
+    Update.step ~now:t_p9 m_c3 (Msg.Key_event (char_key "X"))
+  in
+  Alcotest.(check int) "[X] dismisses failed pending txs in Keeper_chat" 0
+    (List.length (Drafts.pending_txs_for_keeper ~keeper:"alpha-leader" m_dismissed.drafts));
+  (* Finding #3: [X] also dismisses failed pending txs in Nav.Keepers embedded Keeper_chat *)
+  let m_emb_fail =
+    {
+      m_c3 with
+      nav = { m_c3.nav with workspace = Nav.Keepers; dive_stack = [] };
+      fleet =
+        m_c3.fleet
+        |> Fleet_store.select_keeper "alpha-leader"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_chat;
+    }
+  in
+  let m_emb_dismissed, _ =
+    Update.step ~now:t_p9 m_emb_fail (Msg.Key_event (char_key "X"))
+  in
+  Alcotest.(check int) "[X] dismisses failed pending txs in embedded Keepers Keeper_chat" 0
+    (List.length (Drafts.pending_txs_for_keeper ~keeper:"alpha-leader" m_emb_dismissed.drafts));
+  let m_emb_mem =
+    {
+      m_emb_fail with
+      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_memory m_emb_fail.fleet;
+    }
+  in
+  let m_emb_mem_x, _ =
+    Update.step ~now:t_p9 m_emb_mem (Msg.Key_event (char_key "X"))
+  in
+  Alcotest.(check int) "[X] does NOT dismiss chat errors when embedded tab is Keeper_memory" 1
+    (List.length (Drafts.pending_txs_for_keeper ~keeper:"alpha-leader" m_emb_mem_x.drafts))
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -5665,5 +6330,7 @@ let () =
             `Quick test_p2_grouped_top_header_row0_restoration;
           Alcotest.test_case "P2 #5: Schedules/Attention independent symmetric scroll & filter_focused guard"
             `Quick test_p2_schedules_attention_scroll_and_filter_guard;
+          Alcotest.test_case "AG-UI chat stream lifecycle, ownership, provenance dedup & SSOT phase (15 bugs)"
+            `Quick test_agui_chat_stream_lifecycle_15_bugs;
         ] );
     ]

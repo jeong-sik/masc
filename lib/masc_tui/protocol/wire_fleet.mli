@@ -285,6 +285,7 @@ type chat_role =
   | Role_assistant
   | Role_system
   | Role_tool
+  | Role_request_failure
 
 type chat_origin =
   | Origin_bare
@@ -331,6 +332,9 @@ type chat_message = {
   tool_call_id : string option;
   tool_call_name : string option;
   execution_id : string option;
+  operation_id : string option;
+  transcript_slot : string option;
+  failure_kind : string option;
 }
 
 type chat_history_page = {
@@ -339,37 +343,77 @@ type chat_history_page = {
   next_cursor : string option;
 }
 
+type accepted_state =
+  | Accepted_queued
+  | Accepted_running
+  | Accepted_succeeded
+  | Accepted_failed
+  | Accepted_cancelled
+
+type interactive_outcome =
+  | Interactive_applied
+  | Interactive_stale_control
+  | Interactive_paused
+  | Interactive_replayed
+
+type turn_interrupt_response = {
+  signalled : bool;
+  paused : bool;
+  chat_control_token : string option;
+  reason : string option;
+}
+
 type chat_stream_chunk =
   | Chunk_accepted of {
       operation_id : string;
       queued_count : int;
-      state : string;
+      state : accepted_state;
+      interactive_outcome : interactive_outcome option;
+      control_token : string option;
     }
-  | Chunk_text_delta of { operation_id : string; delta : string }
-  | Chunk_thinking_delta of { operation_id : string; delta : string }
+  | Chunk_run_started of { operation_id : string option }
+  | Chunk_text_delta of { operation_id : string option; delta : string }
+  | Chunk_thinking_delta of { operation_id : string option; delta : string }
+  | Chunk_thinking_snapshot of {
+      operation_id : string option;
+      snapshot : string;
+    }
   | Chunk_tool_start of {
-      operation_id : string;
+      operation_id : string option;
       tool_use_id : string;
       tool_name : string;
       args_preview : string option;
     }
-  | Chunk_tool_end of {
-      operation_id : string;
+  | Chunk_tool_args of {
+      operation_id : string option;
       tool_use_id : string;
-      tool_name : string;
-      ok : bool;
+      delta : string option;
+      snapshot : string option;
+    }
+  | Chunk_tool_end of {
+      operation_id : string option;
+      tool_use_id : string;
+      tool_name : string option;
+      ok : bool option;
       output_preview : string option;
     }
-  | Chunk_turn_done of {
-      operation_id : string;
-      turn_ref : string;
+  | Chunk_reply_details of {
+      operation_id : string option;
       reply : string;
+      turn_outcome : string option;
+      turn_ref : string option;
+    }
+  | Chunk_turn_done of {
+      operation_id : string option;
+      turn_ref : string option;
+      reply : string option;
     }
   | Chunk_error of {
       operation_id : string option;
       code : string option;
       message : string;
     }
+  | Chunk_ignored
 
 val encode_chat_submit_request : chat_submit_request -> Yojson.Safe.t
 (** Encode a strict allowlist request body for [POST /api/v1/keepers/chat/stream].
@@ -385,3 +429,11 @@ val decode_chat_history_page : Yojson.Safe.t -> (chat_history_page, string) resu
     [GET /api/v1/keepers/:name/chat/history/page]. *)
 
 val decode_chat_stream_chunk : Yojson.Safe.t -> (chat_stream_chunk, string) result
+(** Decode real server AG-UI SSE frames ([CUSTOM], [RUN_STARTED],
+    [TEXT_MESSAGE_CONTENT], [TOOL_CALL_*], [RUN_FINISHED], [RUN_ERROR]) as well
+    as legacy test aliases. Returns [Ok Chunk_ignored] for known non-visual
+    AG-UI lifecycle/diagnostic frames and [Error] for unknown/malformed frames. *)
+
+val decode_turn_interrupt_response :
+  Yojson.Safe.t -> (turn_interrupt_response, string) result
+(** Decode [POST /api/v1/keepers/turn/interrupt] JSON response. *)

@@ -27,17 +27,6 @@ let display_target_keeper_of_model (m : Model.t) =
       | Some k -> k.name
       | None -> Say.resolve m.lang (Say.make ~ko:"미선택" ~en:"none"))
 
-let pending_tx_of_drafts ~keeper (drafts : Drafts.t) =
-  match Drafts.active_tx_for_keeper ~keeper drafts with
-  | None -> Composer.Tx_idle
-  | Some tx -> (
-      match tx.state with
-      | Drafts.Queued -> Composer.Tx_queued
-      | Drafts.Sending -> Composer.Tx_sending
-      | Drafts.Pending_processing -> Composer.Tx_awaiting_turn
-      | Drafts.Confirming_delivery -> Composer.Tx_confirming
-      | Drafts.Delivered | Drafts.Failed_retryable _ -> Composer.Tx_idle)
-
 let voice_state_of_drafts (drafts : Drafts.t) =
   match drafts.voice with
   | Drafts.Voice_off | Drafts.Voice_speaking | Drafts.Voice_error _ ->
@@ -101,12 +90,13 @@ let composer_state_of_model (m : Model.t) : Composer.state =
   let lookup_keeper = target_keeper_of_model m in
   let target_keeper = display_target_keeper_of_model m in
   let draft = Drafts.current_draft m.drafts in
+  let phase = Chat_transcript.live_chat_phase ~model:m ~keeper:lookup_keeper in
   {
     Composer.target_keeper;
     draft = draft.text;
     cursor = draft.cursor;
     focused = Drafts.is_focused m.drafts;
-    pending_tx = pending_tx_of_drafts ~keeper:lookup_keeper m.drafts;
+    pending_tx = Chat_transcript.composer_pending_tx_of_phase phase;
     voice = voice_state_of_drafts m.drafts;
     popup = popup_of_draft m draft;
     draft_count_other_keepers = Drafts.other_keepers_draft_count m.drafts;

@@ -364,7 +364,7 @@ let keeper_live_status ~has_attention (k : Wire_fleet.keeper_summary) =
   if has_attention then
     ( Glyph.Action_required
     , Theme.Status_attention
-    , Say.make ~ko:"응답 대기" ~en:"Needs Action" )
+    , Say.make ~ko:"승인/질문 필요" ~en:"Needs Action" )
   else
     match k.health with
     | Wire_fleet.Keeper_failing ->

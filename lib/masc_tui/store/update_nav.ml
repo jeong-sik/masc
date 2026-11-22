@@ -1082,14 +1082,22 @@ let resolve_target_keeper (m : Model.t) =
 let build_chat_submit_cmd (m : Model.t) (tx : Drafts.pending_message) ~is_btw =
   let mode =
     match tx.mode with
-    | Drafts.Mode_follow_up -> Wire_fleet.Follow_up
+    | Drafts.Mode_direct | Drafts.Mode_follow_up -> Wire_fleet.Follow_up
     | Drafts.Mode_steer -> (
         match Fleet_store.chat_control_token_for ~keeper:tx.keeper m.fleet with
         | Some control_token ->
             let target =
               match Fleet_store.active_turn_for ~keeper:tx.keeper m.fleet with
               | Some turn -> Wire_fleet.Interrupt_turn_token turn.interrupt_token
-              | None -> Wire_fleet.Interrupt_none
+              | None -> (
+                  match
+                    Fleet_store.String_map.find_opt tx.keeper
+                      m.fleet.chat_streams
+                  with
+                  | Some s when s.active ->
+                      Wire_fleet.Interrupt_operation_id
+                        (Option.value s.operation_id ~default:s.request_id)
+                  | Some _ | None -> Wire_fleet.Interrupt_none)
             in
             Wire_fleet.Steer { control_token; target }
         | None -> Wire_fleet.Follow_up)

@@ -12,9 +12,15 @@ module Presenter = Masc_tui_term.Presenter
 type pending_tx =
   | Tx_idle
   | Tx_queued
+  | Tx_queued_count of int
   | Tx_sending
   | Tx_awaiting_turn
+  | Tx_thinking
+  | Tx_tool_running of string
+  | Tx_streaming
   | Tx_confirming
+  | Tx_interrupting
+  | Tx_failed of string
 
 type voice_state =
   | Voice_off
@@ -48,14 +54,142 @@ type state = {
   draft_count_other_keepers : int;
 }
 
-let pending_tx_rank = function
-  | Tx_idle -> 0
-  | Tx_queued -> 1
-  | Tx_sending -> 2
-  | Tx_awaiting_turn -> 3
-  | Tx_confirming -> 4
-
-let equal_pending_tx a b = Int.equal (pending_tx_rank a) (pending_tx_rank b)
+let equal_pending_tx a b =
+  match a, b with
+  | Tx_idle, Tx_idle
+  | Tx_queued, Tx_queued
+  | Tx_sending, Tx_sending
+  | Tx_awaiting_turn, Tx_awaiting_turn
+  | Tx_thinking, Tx_thinking
+  | Tx_streaming, Tx_streaming
+  | Tx_confirming, Tx_confirming
+  | Tx_interrupting, Tx_interrupting ->
+      true
+  | Tx_queued_count x, Tx_queued_count y -> Int.equal x y
+  | Tx_tool_running x, Tx_tool_running y | Tx_failed x, Tx_failed y ->
+      String.equal x y
+  | ( Tx_idle
+    , ( Tx_queued
+      | Tx_queued_count _
+      | Tx_sending
+      | Tx_awaiting_turn
+      | Tx_thinking
+      | Tx_tool_running _
+      | Tx_streaming
+      | Tx_confirming
+      | Tx_interrupting
+      | Tx_failed _ ) )
+  | ( Tx_queued
+    , ( Tx_idle
+      | Tx_queued_count _
+      | Tx_sending
+      | Tx_awaiting_turn
+      | Tx_thinking
+      | Tx_tool_running _
+      | Tx_streaming
+      | Tx_confirming
+      | Tx_interrupting
+      | Tx_failed _ ) )
+  | ( Tx_queued_count _
+    , ( Tx_idle
+      | Tx_queued
+      | Tx_sending
+      | Tx_awaiting_turn
+      | Tx_thinking
+      | Tx_tool_running _
+      | Tx_streaming
+      | Tx_confirming
+      | Tx_interrupting
+      | Tx_failed _ ) )
+  | ( Tx_sending
+    , ( Tx_idle
+      | Tx_queued
+      | Tx_queued_count _
+      | Tx_awaiting_turn
+      | Tx_thinking
+      | Tx_tool_running _
+      | Tx_streaming
+      | Tx_confirming
+      | Tx_interrupting
+      | Tx_failed _ ) )
+  | ( Tx_awaiting_turn
+    , ( Tx_idle
+      | Tx_queued
+      | Tx_queued_count _
+      | Tx_sending
+      | Tx_thinking
+      | Tx_tool_running _
+      | Tx_streaming
+      | Tx_confirming
+      | Tx_interrupting
+      | Tx_failed _ ) )
+  | ( Tx_thinking
+    , ( Tx_idle
+      | Tx_queued
+      | Tx_queued_count _
+      | Tx_sending
+      | Tx_awaiting_turn
+      | Tx_tool_running _
+      | Tx_streaming
+      | Tx_confirming
+      | Tx_interrupting
+      | Tx_failed _ ) )
+  | ( Tx_tool_running _
+    , ( Tx_idle
+      | Tx_queued
+      | Tx_queued_count _
+      | Tx_sending
+      | Tx_awaiting_turn
+      | Tx_thinking
+      | Tx_streaming
+      | Tx_confirming
+      | Tx_interrupting
+      | Tx_failed _ ) )
+  | ( Tx_streaming
+    , ( Tx_idle
+      | Tx_queued
+      | Tx_queued_count _
+      | Tx_sending
+      | Tx_awaiting_turn
+      | Tx_thinking
+      | Tx_tool_running _
+      | Tx_confirming
+      | Tx_interrupting
+      | Tx_failed _ ) )
+  | ( Tx_confirming
+    , ( Tx_idle
+      | Tx_queued
+      | Tx_queued_count _
+      | Tx_sending
+      | Tx_awaiting_turn
+      | Tx_thinking
+      | Tx_tool_running _
+      | Tx_streaming
+      | Tx_interrupting
+      | Tx_failed _ ) )
+  | ( Tx_interrupting
+    , ( Tx_idle
+      | Tx_queued
+      | Tx_queued_count _
+      | Tx_sending
+      | Tx_awaiting_turn
+      | Tx_thinking
+      | Tx_tool_running _
+      | Tx_streaming
+      | Tx_confirming
+      | Tx_failed _ ) )
+  | ( Tx_failed _
+    , ( Tx_idle
+      | Tx_queued
+      | Tx_queued_count _
+      | Tx_sending
+      | Tx_awaiting_turn
+      | Tx_thinking
+      | Tx_tool_running _
+      | Tx_streaming
+      | Tx_confirming
+      | Tx_interrupting ) ) ->
+      false
 
 let mode_rank = function
   | Auto_folded_pill -> 0
@@ -79,9 +213,20 @@ let empty ~target_keeper =
 let pending_tx_label = function
   | Tx_idle -> None
   | Tx_queued -> Some (Say.make ~ko:"전송 대기" ~en:"Queued")
+  | Tx_queued_count n ->
+      Some
+        (Say.make
+           ~ko:(if n > 1 then Printf.sprintf "대기열 %d" n else "전송 대기")
+           ~en:(if n > 1 then Printf.sprintf "Queued %d" n else "Queued"))
   | Tx_sending -> Some (Say.make ~ko:"전송 중" ~en:"Sending")
   | Tx_awaiting_turn -> Some (Say.make ~ko:"처리 대기" ~en:"Awaiting turn")
-  | Tx_confirming -> Some (Say.make ~ko:"확인 중" ~en:"Confirming")
+  | Tx_thinking -> Some (Say.make ~ko:"추론 중…" ~en:"Thinking…")
+  | Tx_tool_running tool ->
+      Some (Say.make ~ko:("도구 실행 · " ^ tool) ~en:("Tool · " ^ tool))
+  | Tx_streaming -> Some (Say.make ~ko:"생성 중…" ~en:"Streaming…")
+  | Tx_confirming -> Some (Say.make ~ko:"전송 확인 중" ~en:"Confirming")
+  | Tx_interrupting -> Some (Say.make ~ko:"중단 요청 중" ~en:"Interrupting")
+  | Tx_failed _ -> Some (Say.make ~ko:"전송 실패" ~en:"Send failed")
 
 let is_voice_active = function
   | Voice_off -> false
@@ -401,11 +546,26 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ~breakpoint (st : state)
         end;
         (match pending_tx_label st.pending_tx with
          | Some lbl ->
+             let glyph, tone =
+               match st.pending_tx with
+               | Tx_thinking -> (Glyph.Ai_spark, Theme.Status_ai)
+               | Tx_tool_running _ -> (Glyph.Tool_square, Theme.Status_active)
+               | Tx_failed _ -> (Glyph.Live_failing, Theme.Status_critical)
+               | Tx_interrupting -> (Glyph.Live_paused, Theme.Status_attention)
+               | Tx_queued | Tx_queued_count _ ->
+                   (Glyph.Live_working, Theme.Status_attention)
+               | Tx_idle
+               | Tx_sending
+               | Tx_awaiting_turn
+               | Tx_streaming
+               | Tx_confirming ->
+                   (Glyph.Live_working, Theme.Status_active)
+             in
              let text =
-               Glyph.to_utf8 Glyph.Live_working ^ " " ^ Say.resolve lang lbl
+               Glyph.to_utf8 glyph ^ " " ^ Say.resolve lang lbl
              in
              right_parts :=
-               (text, Typography.status ~bg ~bold:true theme Theme.Status_active)
+               (text, Typography.status ~bg ~bold:true theme tone)
                :: !right_parts
          | None -> ());
         let right_margin = if rect.w >= 32 then 1 else 0 in

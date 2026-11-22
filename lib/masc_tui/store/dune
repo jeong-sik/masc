@@ -11,4 +11,5 @@
   masc_tui_ui
   masc.sse_event
   masc.sse_wire
+  unix
   yojson))

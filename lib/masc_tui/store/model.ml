@@ -323,7 +323,10 @@ let composer_mode m =
     | Wide | Standard -> Collapsed_bar
     | Compact | Micro ->
         let keeper = Drafts.target_keeper_key m.drafts in
-        let has_tx = Drafts.has_active_tx_for ~keeper m.drafts in
+        let has_tx =
+          Drafts.has_active_tx_for ~keeper m.drafts
+          || Fleet_store.has_active_chat_stream ~keeper m.fleet
+        in
         if
           (not (Drafts.has_non_empty_draft m.drafts))
           && (not (is_in_keeper_chat m))

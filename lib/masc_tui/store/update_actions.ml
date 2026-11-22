@@ -73,7 +73,8 @@ let latest_keeper_reply_text (m : Model.t) : (string * string) option =
                       | Wire_fleet.Role_assistant
                       | Wire_fleet.Role_user
                       | Wire_fleet.Role_system
-                      | Wire_fleet.Role_tool ->
+                      | Wire_fleet.Role_tool
+                      | Wire_fleet.Role_request_failure ->
                           None)
                     (List.rev page.messages))))
 
@@ -579,24 +580,47 @@ and submit_composer ~now ~mode (m : Model.t) =
                           | Wire_fleet.Role_user -> Some msg.id
                           | Wire_fleet.Role_assistant
                           | Wire_fleet.Role_system
-                          | Wire_fleet.Role_tool ->
+                          | Wire_fleet.Role_tool
+                          | Wire_fleet.Role_request_failure ->
                               None)
                         page.messages)
             in
+            let keeper_is_busy =
+              Option.is_some (Fleet_store.active_turn_for ~keeper m.fleet)
+              || Fleet_store.has_active_chat_stream ~keeper m.fleet
+              || Drafts.has_active_tx_for ~keeper m.drafts
+            in
+            let effective_mode =
+              if not keeper_is_busy then Drafts.Mode_direct
+              else
+                match mode with
+                | Drafts.Mode_steer -> (
+                    match
+                      Fleet_store.chat_control_token_for ~keeper m.fleet
+                    with
+                    | Some _ -> Drafts.Mode_steer
+                    | None -> Drafts.Mode_follow_up)
+                | Drafts.Mode_follow_up -> Drafts.Mode_follow_up
+                | Drafts.Mode_direct -> Drafts.Mode_direct
+            in
             let drafts0 = Drafts.set_active_keeper keeper m.drafts in
             match
-              Drafts.enqueue_submission ~now ~keeper ~mode ~prior_user_msg_ids
-                drafts0
+              Drafts.enqueue_submission ~now ~keeper ~mode:effective_mode
+                ~prior_user_msg_ids drafts0
             with
             | None -> (m, [])
             | Some (drafts1, tx) ->
                 let drafts2 =
                   Drafts.mark_sending ~now ~request_id:tx.request_id drafts1
                 in
-                let fleet =
-                  Fleet_store.start_chat_stream ~keeper
-                    ~request_id:tx.request_id m.fleet
+                let fleet0 =
+                  if Fleet_store.has_active_chat_stream ~keeper m.fleet then
+                    m.fleet
+                  else
+                    Fleet_store.start_chat_stream ~keeper
+                      ~request_id:tx.request_id m.fleet
                 in
+                let fleet = Fleet_store.reset_chat_scroll fleet0 in
                 let cmd = Update_nav.build_chat_submit_cmd m tx ~is_btw:false in
                 ({ m with drafts = drafts2; fleet }, [ cmd ])))
 
@@ -1053,39 +1077,83 @@ and execute_action ~now (m : Model.t) action =
             else
               let active_chat_interrupt =
                 match Model.active_dive m with
-                | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }) -> (
-                    let active_stream_opt =
-                      match
-                        Fleet_store.String_map.find_opt name m.fleet.chat_streams
-                      with
-                      | Some s when s.active -> Some s
-                      | Some _ | None -> None
-                    in
-                    match
-                      Fleet_store.active_turn_for ~keeper:name m.fleet
-                    , active_stream_opt
-                    with
-                    | Some turn, stream_opt ->
+                | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }) ->
+                    let phase = Chat_transcript.live_chat_phase ~model:m ~keeper:name in
+                    if not (Chat_transcript.is_phase_interruptible phase) then None
+                    else
+                      let active_stream_opt =
+                        match
+                          Fleet_store.String_map.find_opt name m.fleet.chat_streams
+                        with
+                        | Some s when s.active && not s.interrupting -> Some s
+                        | Some _ | None -> None
+                      in
+                      let interruptible_tx_opt =
+                        match Drafts.active_tx_for_keeper ~keeper:name m.drafts with
+                        | Some ({ state = Drafts.Sending | Drafts.Pending_processing; _ } as tx) ->
+                            Some tx
+                        | Some
+                            {
+                              state =
+                                ( Drafts.Queued
+                                | Drafts.Confirming_delivery
+                                | Drafts.Interrupting
+                                | Drafts.Delivered
+                                | Drafts.Failed_retryable _ );
+                              _;
+                            }
+                        | None ->
+                            None
+                      in
+                      let mark_ui_interrupting stream_opt tx_opt =
                         let fleet =
                           match stream_opt with
-                          | Some s ->
-                              Fleet_store.finish_chat_stream ~keeper:name
-                                ~request_id:s.request_id
-                                ~error:(Some "Interrupted by operator") m.fleet
+                          | Some (s : Fleet_store.chat_stream_buffer) ->
+                              Fleet_store.mark_chat_stream_interrupting
+                                ~keeper:name ~request_id:s.request_id
+                                ~interrupting:true m.fleet
                           | None -> m.fleet
                         in
-                        Some (name, turn.interrupt_token, fleet)
-                    | None, Some s ->
-                        let token =
-                          Option.value s.operation_id ~default:s.request_id
+                        let drafts =
+                          match tx_opt with
+                          | Some (tx : Drafts.pending_message) ->
+                              Drafts.mark_interrupting ~now
+                                ~request_id:tx.request_id m.drafts
+                          | None -> m.drafts
                         in
-                        let fleet =
-                          Fleet_store.finish_chat_stream ~keeper:name
-                            ~request_id:s.request_id
-                            ~error:(Some "Interrupted by operator") m.fleet
-                        in
-                        Some (name, token, fleet)
-                    | None, None -> None)
+                        (fleet, drafts)
+                      in
+                      (match
+                         Fleet_store.active_turn_for ~keeper:name m.fleet
+                       , active_stream_opt
+                       , interruptible_tx_opt
+                       with
+                      | Some turn, stream_opt, tx_opt ->
+                          let fleet, drafts =
+                            mark_ui_interrupting stream_opt tx_opt
+                          in
+                          Some
+                            ( name
+                            , `Turn_token turn.interrupt_token
+                            , fleet
+                            , drafts )
+                      | None, Some s, tx_opt ->
+                          let op_id =
+                            Option.value s.operation_id ~default:s.request_id
+                          in
+                          let fleet, drafts =
+                            mark_ui_interrupting (Some s) tx_opt
+                          in
+                          Some (name, `Operation_id op_id, fleet, drafts)
+                      | None, None, Some tx ->
+                          let op_id =
+                            Option.value tx.operation_id ~default:tx.request_id
+                          in
+                          let fleet, drafts =
+                            mark_ui_interrupting None (Some tx)
+                          in
+                          Some (name, `Operation_id op_id, fleet, drafts)
+                      | None, None, None -> None)
                 | Some
                     ( Nav.Dive_keeper
                         {
@@ -1103,19 +1171,18 @@ and execute_action ~now (m : Model.t) action =
                     None
               in
               match active_chat_interrupt with
-              | Some (keeper, interrupt_token, fleet) ->
+              | Some (keeper, target, fleet, drafts) ->
                   ( Model.with_toast ~now ~level:Model.Toast_warning
                       (Say.make
                          ~ko:("키퍼 턴 중단 요청 전송: " ^ keeper)
                          ~en:("Interrupt requested for keeper turn: " ^ keeper))
-                      { m with fleet }
+                      { m with fleet; drafts }
                   , [
                       Cmd.Http_post
                         {
                           epoch = m.epoch;
                           req =
-                            Cmd.Post_keeper_turn_interrupt
-                              { keeper; interrupt_token };
+                            Cmd.Post_keeper_turn_interrupt { keeper; target };
                         };
                     ] )
               | None -> (

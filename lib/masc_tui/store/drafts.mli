@@ -9,6 +9,7 @@ open Masc_tui_core
 module String_map : Map.S with type key = string
 
 type delivery_mode =
+  | Mode_direct
   | Mode_follow_up
   | Mode_steer
 
@@ -17,6 +18,7 @@ type tx_state =
   | Sending
   | Pending_processing
   | Confirming_delivery
+  | Interrupting
   | Delivered
   | Failed_retryable of { reason : string }
 
@@ -27,6 +29,7 @@ type pending_message = {
   mode : delivery_mode;
   operation_id : string option;
   prior_user_msg_ids : string list;
+  user_persisted : bool;
   state : tx_state;
   created_at : Clock.Mono.t;
   updated_at : Clock.Mono.t;
@@ -34,8 +37,8 @@ type pending_message = {
 }
 (** Tracks exact identity [(request_id, keeper, body)] without normalizing or
     hashing message content, alongside pre-existing persisted user message IDs
-    at send time so repeated prompts cannot falsely confirm against older
-    history rows. *)
+    at send time and [user_persisted] reconciliation state so persisted user
+    rows are never duplicated in the transcript. *)
 
 type keeper_draft = {
   text : string;
@@ -143,17 +146,44 @@ val enqueue_submission :
 
 val mark_sending : now:Clock.Mono.t -> request_id:string -> t -> t
 
+val mark_queued :
+  now:Clock.Mono.t ->
+  request_id:string ->
+  operation_id:string option ->
+  t ->
+  t
+(** Transition a submission to {!Queued} when server acceptance reports the
+    operation queued behind an active turn. *)
+
 val mark_accepted :
   now:Clock.Mono.t ->
   request_id:string ->
   operation_id:string option ->
   t ->
   t
-(** Transition a submission to {!Pending_processing} on server acceptance. *)
+(** Transition a submission to {!Pending_processing} on server acceptance/run. *)
 
 val mark_confirming : now:Clock.Mono.t -> request_id:string -> t -> t
 (** Transition a submission to {!Confirming_delivery} while awaiting persisted
     history confirmation. *)
+
+val mark_interrupting : now:Clock.Mono.t -> request_id:string -> t -> t
+(** Transition a non-terminal submission to {!Interrupting} while awaiting
+    server interrupt settlement. *)
+
+val clear_interrupting : now:Clock.Mono.t -> request_id:string -> t -> t
+(** Restore an {!Interrupting} submission back to {!Pending_processing} when an
+    interrupt request fails or reports no cancellation. *)
+
+val mark_user_persisted :
+  request_id:string -> ?operation_id:string option -> t -> t
+(** Record that the user prompt row is already durably persisted in chat history
+    so transcript rendering does not duplicate the user prompt while the turn
+    remains in flight or failed without a persisted server failure row. *)
+
+val downgrade_mode_to_follow_up : request_id:string -> t -> t
+(** Downgrade a [Mode_steer] submission to [Mode_follow_up] when server
+    acceptance reports stale control token queueing. *)
 
 val mark_delivered :
   now:Clock.Mono.t ->
@@ -168,9 +198,29 @@ val mark_delivered :
 val mark_failed_retryable :
   now:Clock.Mono.t -> request_id:string -> reason:string -> t -> t
 
+val remove_tx : request_id:string -> t -> t
+(** Remove a settled transmission entry (e.g. once both user prompt and
+    [Role_request_failure] are durably persisted in history). *)
+
+val dismiss_failed_for_keeper : keeper:string -> t -> t * int
+(** Dismiss all [Failed_retryable] entries for [keeper], returning the updated
+    store and count of dismissed entries. *)
+
 val active_tx_for_keeper : keeper:string -> t -> pending_message option
+(** Return the oldest executing transmission for [keeper] prioritized by
+    [Interrupting > Pending_processing > Sending > Confirming_delivery > Queued]. *)
+
 val has_active_tx_for : keeper:string -> t -> bool
+val has_unreconciled_tx_for : keeper:string -> t -> bool
+val queued_count_for_keeper : keeper:string -> t -> int
+
 val pending_txs_for_keeper : keeper:string -> t -> pending_message list
+(** Return pending transmissions for [keeper] in chronological (oldest-first)
+    order. *)
+
+val tx_position_for_keeper : keeper:string -> request_id:string -> t -> int option
+(** Return the 0-based chronological index of [request_id] among [keeper]'s
+    retained transmissions, or [None] if absent. *)
 
 val is_voice_active : t -> bool
 val voice_start_recording : now:Clock.Mono.t -> t -> t

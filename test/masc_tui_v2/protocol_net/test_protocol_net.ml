@@ -2685,6 +2685,397 @@ let test_tui_memory_os_and_runtime_setup_codecs () =
   Alcotest.(check (option string)) "account keyring_host" (Some "keyring_host") recp.account;
   Alcotest.(check (option string)) "account_ref None" None recp.account_ref
 
+let test_agui_chat_stream_and_history_provenance () =
+  (* BUG-1: Real server AG-UI SSE frames *)
+  let accepted_running =
+    expect_ok "CUSTOM KEEPER_CHAT_OPERATION_ACCEPTED (Running + interactive)"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "CUSTOM",
+              "threadId": "default",
+              "timestamp": 1795252000.0,
+              "name": "KEEPER_CHAT_OPERATION_ACCEPTED",
+              "value": {
+                "operation_id": "tui-99-1",
+                "state": "Running",
+                "queued_count": 0,
+                "interactive": {
+                  "outcome": "applied",
+                  "chat_control_token": "ctrl-tok-77",
+                  "signalled": true,
+                  "resumed": false,
+                  "interrupt_error": null,
+                  "interrupt_error_code": null,
+                  "interrupt_incident_id": null
+                }
+              }
+            }|}))
+  in
+  (match accepted_running with
+  | Wire_fleet.Chunk_accepted
+      {
+        operation_id = "tui-99-1";
+        queued_count = 0;
+        state = Wire_fleet.Accepted_running;
+        interactive_outcome = Some Wire_fleet.Interactive_applied;
+        control_token = Some "ctrl-tok-77";
+      } ->
+      ()
+  | _ -> Alcotest.fail "unexpected Chunk_accepted decode");
+  let accepted_queued =
+    expect_ok "CUSTOM KEEPER_CHAT_OPERATION_ACCEPTED (Queued)"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "CUSTOM",
+              "threadId": "default",
+              "timestamp": 1795252000.5,
+              "name": "KEEPER_CHAT_OPERATION_ACCEPTED",
+              "value": {
+                "operation_id": "tui-99-2",
+                "state": "Queued",
+                "queued_count": 1
+              }
+            }|}))
+  in
+  (match accepted_queued with
+  | Wire_fleet.Chunk_accepted
+      {
+        operation_id = "tui-99-2";
+        queued_count = 1;
+        state = Wire_fleet.Accepted_queued;
+        interactive_outcome = None;
+        control_token = None;
+      } ->
+      ()
+  | _ -> Alcotest.fail "unexpected queued Chunk_accepted decode");
+  let run_started =
+    expect_ok "RUN_STARTED strips keeper-operation-run- prefix"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "RUN_STARTED",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252001.0,
+              "runId": "keeper-operation-run-tui-99-1"
+            }|}))
+  in
+  (match run_started with
+  | Wire_fleet.Chunk_run_started { operation_id = Some "tui-99-1" } -> ()
+  | _ -> Alcotest.fail "expected Chunk_run_started with stripped operation_id");
+  (* Finding #5: unprefixed arbitrary runId must NOT be treated as operation_id *)
+  let run_started_unprefixed =
+    expect_ok "RUN_STARTED with unprefixed runId yields operation_id=None"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "RUN_STARTED",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252001.0,
+              "runId": "arbitrary-run-42"
+            }|}))
+  in
+  (match run_started_unprefixed with
+  | Wire_fleet.Chunk_run_started { operation_id = None } -> ()
+  | _ -> Alcotest.fail "expected operation_id=None for unprefixed runId");
+  let text_delta =
+    expect_ok "TEXT_MESSAGE_CONTENT without operation_id"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "TEXT_MESSAGE_CONTENT",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252002.0,
+              "runId": "keeper-operation-run-tui-99-1",
+              "messageId": "msg-a",
+              "delta": "안녕하세요"
+            }|}))
+  in
+  (match text_delta with
+  | Wire_fleet.Chunk_text_delta { operation_id = Some "tui-99-1"; delta = "안녕하세요" }
+    ->
+      ()
+  | _ -> Alcotest.fail "expected Chunk_text_delta");
+  let text_delta_no_run =
+    expect_ok "TEXT_MESSAGE_CONTENT without runId or operation_id"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{"type":"TEXT_MESSAGE_CONTENT","threadId":"t","timestamp":1.0,"delta":"!"}|}))
+  in
+  (match text_delta_no_run with
+  | Wire_fleet.Chunk_text_delta { operation_id = None; delta = "!" } -> ()
+  | _ -> Alcotest.fail "expected Chunk_text_delta with None operation_id");
+  let think_delta =
+    expect_ok "CUSTOM KEEPER_THINKING_DELTA"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "CUSTOM",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252001.2,
+              "runId": "keeper-operation-run-tui-99-1",
+              "name": "KEEPER_THINKING_DELTA",
+              "value": { "index": 0, "delta": "checking logs" }
+            }|}))
+  in
+  (match think_delta with
+  | Wire_fleet.Chunk_thinking_delta { operation_id = Some "tui-99-1"; delta = "checking logs" }
+    ->
+      ()
+  | _ -> Alcotest.fail "expected Chunk_thinking_delta");
+  let think_snap =
+    expect_ok "CUSTOM KEEPER_THINKING_SNAPSHOT"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "CUSTOM",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252001.3,
+              "name": "KEEPER_THINKING_SNAPSHOT",
+              "value": { "index": 0, "snapshot": "full thought" }
+            }|}))
+  in
+  (match think_snap with
+  | Wire_fleet.Chunk_thinking_snapshot { snapshot = "full thought"; _ } -> ()
+  | _ -> Alcotest.fail "expected Chunk_thinking_snapshot");
+  (* TOOL_CALL_START / TOOL_CALL_ARGS / TOOL_CALL_END without toolCallId correlate by scope+block *)
+  let tc_start =
+    expect_ok "TOOL_CALL_START without toolCallId"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "TOOL_CALL_START",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252001.4,
+              "toolCallName": "masc_read_file",
+              "toolStreamScope": 2,
+              "toolCallBlockIndex": 1
+            }|}))
+  in
+  (match tc_start with
+  | Wire_fleet.Chunk_tool_start
+      { tool_use_id = "scope-2-block-1"; tool_name = "masc_read_file"; _ } ->
+      ()
+  | _ -> Alcotest.fail "expected Chunk_tool_start with scope-2-block-1");
+  let tc_args =
+    expect_ok "TOOL_CALL_ARGS"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "TOOL_CALL_ARGS",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252001.5,
+              "toolStreamScope": 2,
+              "toolCallBlockIndex": 1,
+              "delta": "{\"path\":\"README.md\"}"
+            }|}))
+  in
+  (match tc_args with
+  | Wire_fleet.Chunk_tool_args
+      { tool_use_id = "scope-2-block-1"; delta = Some "{\"path\":\"README.md\"}"; _ }
+    ->
+      ()
+  | _ -> Alcotest.fail "expected Chunk_tool_args");
+  let tc_end =
+    expect_ok "TOOL_CALL_END without tool_name/ok preserves ok=None"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "TOOL_CALL_END",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252001.6,
+              "toolStreamScope": 2,
+              "toolCallBlockIndex": 1
+            }|}))
+  in
+  (match tc_end with
+  | Wire_fleet.Chunk_tool_end
+      { tool_use_id = "scope-2-block-1"; tool_name = None; ok = None; _ } ->
+      ()
+  | _ -> Alcotest.fail "expected Chunk_tool_end with ok=None");
+  let tool_res =
+    expect_ok "CUSTOM KEEPER_TOOL_RESULT_READY"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "CUSTOM",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252001.7,
+              "name": "KEEPER_TOOL_RESULT_READY",
+              "value": { "toolStreamScope": 2, "toolCallBlockIndex": 1, "executionId": "ex-1" }
+            }|}))
+  in
+  (match tool_res with
+  | Wire_fleet.Chunk_tool_end { tool_use_id = "scope-2-block-1"; ok = None; _ } ->
+      ()
+  | _ -> Alcotest.fail "expected Chunk_tool_end from KEEPER_TOOL_RESULT_READY");
+  let native_start =
+    expect_ok "CUSTOM KEEPER_NATIVE_TOOL_START"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "CUSTOM",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252001.8,
+              "name": "KEEPER_NATIVE_TOOL_START",
+              "value": { "toolCallId": "nt-1", "toolCallName": "Bash", "toolStreamScope": 1, "toolCallBlockIndex": 0 }
+            }|}))
+  in
+  (match native_start with
+  | Wire_fleet.Chunk_tool_start { tool_use_id = "nt-1"; tool_name = "Bash"; _ } ->
+      ()
+  | _ -> Alcotest.fail "expected Chunk_tool_start from KEEPER_NATIVE_TOOL_START");
+  let native_end =
+    expect_ok "CUSTOM KEEPER_NATIVE_TOOL_END error_reported -> ok=Some false"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "CUSTOM",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252001.9,
+              "name": "KEEPER_NATIVE_TOOL_END",
+              "value": {
+                "toolCallId": "nt-1",
+                "toolCallName": "Bash",
+                "toolStreamScope": 1,
+                "toolCallBlockIndex": 0,
+                "completion": { "kind": "error_reported", "exit_code": 1 }
+              }
+            }|}))
+  in
+  (match native_end with
+  | Wire_fleet.Chunk_tool_end
+      { tool_use_id = "nt-1"; tool_name = Some "Bash"; ok = Some false; _ } ->
+      ()
+  | _ -> Alcotest.fail "expected Chunk_tool_end with ok=Some false");
+  let reply_details =
+    expect_ok "CUSTOM KEEPER_REPLY_DETAILS"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "CUSTOM",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252002.5,
+              "runId": "keeper-operation-run-tui-99-1",
+              "name": "KEEPER_REPLY_DETAILS",
+              "value": { "reply": "안녕하세요!", "turn_outcome": "completed", "turn_ref": "trace-1#5" }
+            }|}))
+  in
+  (match reply_details with
+  | Wire_fleet.Chunk_reply_details
+      {
+        operation_id = Some "tui-99-1";
+        reply = "안녕하세요!";
+        turn_outcome = Some "completed";
+        turn_ref = Some "trace-1#5";
+      } ->
+      ()
+  | _ -> Alcotest.fail "expected Chunk_reply_details");
+  let run_fin =
+    expect_ok "RUN_FINISHED without operation_id/turn_ref/reply"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "RUN_FINISHED",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252003.0,
+              "runId": "keeper-operation-run-tui-99-1"
+            }|}))
+  in
+  (match run_fin with
+  | Wire_fleet.Chunk_turn_done
+      { operation_id = Some "tui-99-1"; turn_ref = None; reply = None } ->
+      ()
+  | _ -> Alcotest.fail "expected Chunk_turn_done from RUN_FINISHED");
+  let run_err =
+    expect_ok "RUN_ERROR"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "RUN_ERROR",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252004.0,
+              "runId": "keeper-operation-run-tui-99-1",
+              "message": "provider unavailable",
+              "code": "turn_failed"
+            }|}))
+  in
+  (match run_err with
+  | Wire_fleet.Chunk_error
+      {
+        operation_id = Some "tui-99-1";
+        code = Some "turn_failed";
+        message = "provider unavailable";
+      } ->
+      ()
+  | _ -> Alcotest.fail "expected Chunk_error");
+  (* Known non-visual frames decode to Chunk_ignored; unknown frames return Error *)
+  Alcotest.(check bool) "TEXT_MESSAGE_START -> Chunk_ignored" true
+    (expect_ok "text start"
+       (Wire_fleet.decode_chat_stream_chunk
+          (parse_json {|{"type":"TEXT_MESSAGE_START","threadId":"t","timestamp":1.0,"messageId":"m1","role":"assistant"}|}))
+    = Wire_fleet.Chunk_ignored);
+  Alcotest.(check bool) "KEEPER_STREAM_PING -> Chunk_ignored" true
+    (expect_ok "ping"
+       (Wire_fleet.decode_chat_stream_chunk
+          (parse_json {|{"type":"CUSTOM","threadId":"t","timestamp":1.0,"name":"KEEPER_STREAM_PING","value":null}|}))
+    = Wire_fleet.Chunk_ignored);
+  ignore
+    (expect_err "unknown CUSTOM rejected"
+       (Wire_fleet.decode_chat_stream_chunk
+          (parse_json {|{"type":"CUSTOM","threadId":"t","timestamp":1.0,"name":"MYSTERY_FRAME","value":{}}|}))
+      : string);
+  (* BUG-2 & BUG-7: /chat/history/page with role=request_failure, delivery_key, transcript_slot, failure_kind *)
+  let page =
+    expect_ok "history page with request_failure & provenance"
+      (Wire_fleet.decode_chat_history_page
+         (parse_json
+            {|{
+              "messages": [
+                {
+                  "id": "msg-100-1",
+                  "role": "user",
+                  "content": "음",
+                  "ts": 1795252000.0,
+                  "delivery_key": { "kind": "operation", "operation_id": "tui-99-1" },
+                  "transcript_slot": { "kind": "accepted_user" }
+                },
+                {
+                  "id": "msg-100-2",
+                  "role": "request_failure",
+                  "content": "provider failed",
+                  "ts": 1795252005.0,
+                  "failure_kind": "turn_exception",
+                  "delivery_key": { "kind": "operation", "operation_id": "tui-99-1" },
+                  "transcript_slot": { "kind": "settled_failure" }
+                }
+              ],
+              "has_more": false,
+              "next_cursor": null
+            }|}))
+  in
+  Alcotest.(check int) "2 history rows decoded" 2 (List.length page.messages);
+  let u_msg = List.nth page.messages 0 in
+  let f_msg = List.nth page.messages 1 in
+  Alcotest.(check (option string)) "user operation_id" (Some "tui-99-1") u_msg.operation_id;
+  Alcotest.(check (option string)) "user transcript_slot" (Some "accepted_user") u_msg.transcript_slot;
+  Alcotest.(check bool) "failure role is Role_request_failure" true
+    (f_msg.role = Wire_fleet.Role_request_failure);
+  Alcotest.(check (option string)) "failure operation_id" (Some "tui-99-1") f_msg.operation_id;
+  Alcotest.(check (option string)) "failure transcript_slot" (Some "settled_failure") f_msg.transcript_slot;
+  Alcotest.(check (option string)) "failure_kind" (Some "turn_exception") f_msg.failure_kind;
+  (* Turn interrupt response decoder *)
+  let int_resp =
+    expect_ok "turn interrupt response"
+      (Wire_fleet.decode_turn_interrupt_response
+         (parse_json
+            {|{"request_id":"tui-99-1","chat_control_token":"ctrl-88","signalled":true}|}))
+  in
+  Alcotest.(check bool) "interrupt signalled" true int_resp.signalled;
+  Alcotest.(check (option string)) "interrupt chat_control_token"
+    (Some "ctrl-88") int_resp.chat_control_token
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -2692,6 +3083,8 @@ let () =
       , [
           Alcotest.test_case "wire_common" `Quick test_wire_common;
           Alcotest.test_case "wire_fleet" `Quick test_wire_fleet;
+          Alcotest.test_case "agui_chat_stream_and_history_provenance" `Quick
+            test_agui_chat_stream_and_history_provenance;
           Alcotest.test_case "wire_work" `Quick test_wire_work;
           Alcotest.test_case "wire_knowledge" `Quick test_wire_knowledge;
           Alcotest.test_case "wire_runtime" `Quick test_wire_runtime;

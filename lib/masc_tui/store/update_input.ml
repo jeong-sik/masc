@@ -330,64 +330,149 @@ let interrupt_active_keeper_turn ~now (m : Model.t) =
           m
       , [] )
   | Some keeper -> (
-      let active_stream_opt =
-        match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with
-        | Some s when s.active -> Some s
-        | Some _ | None -> None
-      in
-      match
-        Fleet_store.active_turn_for ~keeper m.fleet, active_stream_opt
-      with
-      | Some turn, stream_opt ->
-          let fleet =
-            match stream_opt with
-            | Some s ->
-                Fleet_store.finish_chat_stream ~keeper ~request_id:s.request_id
-                  ~error:(Some "Interrupted by operator") m.fleet
-            | None -> m.fleet
-          in
-          ( Model.with_toast ~now ~level:Model.Toast_warning
+      match Chat_transcript.live_chat_phase ~model:m ~keeper with
+      | Chat_transcript.Phase_interrupting ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
               (Say.make
-                 ~ko:("키퍼 턴 중단 요청 전송: " ^ keeper)
-                 ~en:("Interrupt requested for keeper turn: " ^ keeper))
-              { m with fleet }
-          , [
-              Cmd.Http_post
-                {
-                  epoch = m.epoch;
-                  req =
-                    Cmd.Post_keeper_turn_interrupt
-                      { keeper; interrupt_token = turn.interrupt_token };
-                };
-            ] )
-      | None, Some s ->
-          let interrupt_token =
-            Option.value s.operation_id ~default:s.request_id
-          in
-          let fleet =
-            Fleet_store.finish_chat_stream ~keeper ~request_id:s.request_id
-              ~error:(Some "Interrupted by operator") m.fleet
-          in
-          ( Model.with_toast ~now ~level:Model.Toast_warning
-              (Say.make
-                 ~ko:("키퍼 턴 중단 요청 전송: " ^ keeper)
-                 ~en:("Interrupt requested for keeper turn: " ^ keeper))
-              { m with fleet }
-          , [
-              Cmd.Http_post
-                {
-                  epoch = m.epoch;
-                  req =
-                    Cmd.Post_keeper_turn_interrupt { keeper; interrupt_token };
-                };
-            ] )
-      | None, None ->
+                 ~ko:("이미 중단 요청을 전송했습니다: " ^ keeper)
+                 ~en:("Interrupt already requested for " ^ keeper))
+              m
+          , [] )
+      | Chat_transcript.Phase_idle
+      | Chat_transcript.Phase_queued _
+      | Chat_transcript.Phase_confirming
+      | Chat_transcript.Phase_failed _ ->
           ( Model.with_toast ~now ~level:Model.Toast_info
               (Say.make
                  ~ko:("진행 중인 턴이 없습니다: " ^ keeper)
                  ~en:("No active turn running for " ^ keeper))
               m
-          , [] ))
+          , [] )
+      | Chat_transcript.Phase_sending
+      | Chat_transcript.Phase_awaiting_turn
+      | Chat_transcript.Phase_thinking
+      | Chat_transcript.Phase_tool_running _
+      | Chat_transcript.Phase_streaming ->
+          let active_stream_opt =
+            match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with
+            | Some s when s.active && not s.interrupting -> Some s
+            | Some _ | None -> None
+          in
+          let interruptible_tx_opt =
+            match Drafts.active_tx_for_keeper ~keeper m.drafts with
+            | Some
+                ({ state = Drafts.Sending | Drafts.Pending_processing; _ } as tx) ->
+                Some tx
+            | Some
+                {
+                  state =
+                    ( Drafts.Queued
+                    | Drafts.Confirming_delivery
+                    | Drafts.Interrupting
+                    | Drafts.Delivered
+                    | Drafts.Failed_retryable _ );
+                  _;
+                }
+            | None ->
+                None
+          in
+          let mark_ui_interrupting stream_opt tx_opt =
+            let fleet =
+              match stream_opt with
+              | Some (s : Fleet_store.chat_stream_buffer) ->
+                  Fleet_store.mark_chat_stream_interrupting ~keeper
+                    ~request_id:s.request_id ~interrupting:true m.fleet
+              | None -> m.fleet
+            in
+            let drafts =
+              match tx_opt with
+              | Some (tx : Drafts.pending_message) ->
+                  Drafts.mark_interrupting ~now ~request_id:tx.request_id
+                    m.drafts
+              | None -> m.drafts
+            in
+            (fleet, drafts)
+          in
+          match
+            Fleet_store.active_turn_for ~keeper m.fleet
+          , active_stream_opt
+          , interruptible_tx_opt
+          with
+          | Some turn, stream_opt, tx_opt ->
+              let fleet, drafts = mark_ui_interrupting stream_opt tx_opt in
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make
+                     ~ko:("키퍼 턴 중단 요청 전송: " ^ keeper)
+                     ~en:("Interrupt requested for keeper turn: " ^ keeper))
+                  { m with fleet; drafts }
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_keeper_turn_interrupt
+                          { keeper; target = `Turn_token turn.interrupt_token };
+                    };
+                ] )
+          | None, Some s, tx_opt ->
+              let op_id = Option.value s.operation_id ~default:s.request_id in
+              let fleet, drafts = mark_ui_interrupting (Some s) tx_opt in
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make
+                     ~ko:("키퍼 턴 중단 요청 전송: " ^ keeper)
+                     ~en:("Interrupt requested for keeper turn: " ^ keeper))
+                  { m with fleet; drafts }
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_keeper_turn_interrupt
+                          { keeper; target = `Operation_id op_id };
+                    };
+                ] )
+          | None, None, Some tx ->
+              let op_id = Option.value tx.operation_id ~default:tx.request_id in
+              let fleet, drafts = mark_ui_interrupting None (Some tx) in
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make
+                     ~ko:("키퍼 턴 중단 요청 전송: " ^ keeper)
+                     ~en:("Interrupt requested for keeper turn: " ^ keeper))
+                  { m with fleet; drafts }
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_keeper_turn_interrupt
+                          { keeper; target = `Operation_id op_id };
+                    };
+                ] )
+          | None, None, None ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:("진행 중인 턴이 없습니다: " ^ keeper)
+                     ~en:("No active turn running for " ^ keeper))
+                  m
+              , [] ))
+
+let dismiss_keeper_chat_errors ~now ~keeper (m : Model.t) =
+  let drafts, removed = Drafts.dismiss_failed_for_keeper ~keeper m.drafts in
+  let had_err_stream =
+    match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with
+    | Some b -> (not b.active) && Option.is_some b.last_error
+    | None -> false
+  in
+  let fleet = Fleet_store.clear_inactive_chat_stream_error ~keeper m.fleet in
+  if removed > 0 || had_err_stream then
+    let count = Int.max 1 removed in
+    ( Model.with_toast ~now ~level:Model.Toast_info
+        (Say.make
+           ~ko:(Printf.sprintf "실패 알림 %d건 닫힘" count)
+           ~en:(Printf.sprintf "Dismissed %d failed notice(s)" count))
+        { m with drafts; fleet }
+    , [] )
+  else (m, [])
 
 let open_goal_confirmation_proof_modal (m : Model.t) ~(goal_id : string)
     ~(criterion_revision : string) =
@@ -850,7 +935,8 @@ let latest_reply_for_tts (m : Model.t) =
                       | Wire_fleet.Role_assistant
                       | Wire_fleet.Role_user
                       | Wire_fleet.Role_system
-                      | Wire_fleet.Role_tool ->
+                      | Wire_fleet.Role_tool
+                      | Wire_fleet.Role_request_failure ->
                           None)
                     (List.rev page.messages))))
 
@@ -1055,6 +1141,8 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
           in
           Update_nav.open_overlay { m with config }
             (Nav.Settings Nav.Settings_keepers_companies)
+      | Nav.Keeper_chat, Some "X" ->
+          dismiss_keeper_chat_errors ~now ~keeper:name m
       | Nav.Keeper_chat, Some "S" -> (
           match latest_reply_for_tts m with
           | Some (keeper, text) ->
@@ -1181,6 +1269,17 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                          ~en:"Select a keeper first")
                       m
                   , [] ))
+          | Some "X" -> (
+              match m.fleet.keeper_dive_tab, Fleet_store.selected_keeper_summary m.fleet with
+              | Nav.Keeper_chat, Some k ->
+                  dismiss_keeper_chat_errors ~now ~keeper:k.name m
+              | ( ( Nav.Keeper_chat
+                  | Nav.Keeper_memory
+                  | Nav.Keeper_work_candle
+                  | Nav.Keeper_sandbox
+                  | Nav.Keeper_config )
+                , (Some _ | None) ) ->
+                  (m, []))
           | Some "S" -> (
               match latest_reply_for_tts m with
               | Some (keeper, text) ->

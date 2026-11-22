@@ -179,17 +179,68 @@ let step_raw ~now (m : Model.t) = function
   | Msg.Resize { cols; rows } -> apply_resize m ~cols ~rows
   | Msg.Tick { wall_unix } ->
       (* Zero idle HTTP polling: ticks only record wall time, expire toasts,
-         and update voice recording elapsed seconds. *)
+         update voice recording elapsed seconds, and advance bounded rechecks
+         for already-closed Confirming_delivery transmissions. *)
       let freshness =
         if wall_unix > m.freshness.last_wall_unix then
           { m.freshness with last_wall_unix = wall_unix }
         else m.freshness
       in
-      let next =
-        { m with freshness; drafts = Drafts.voice_tick_elapsed ~now m.drafts }
-        |> Model.expire_toast ~now
+      let drafts0 = Drafts.voice_tick_elapsed ~now m.drafts in
+      let drafts, keepers_to_recheck =
+        List.fold_left
+          (fun (acc, keepers) (tx : Drafts.pending_message) ->
+            match tx.state with
+            | Drafts.Confirming_delivery ->
+                let elapsed =
+                  Clock.Mono.seconds_since now ~since:tx.updated_at
+                in
+                if elapsed < 2.0 then (acc, keepers)
+                else if tx.recheck_count >= 3 then
+                  let acc' =
+                    if tx.user_persisted then
+                      Drafts.mark_delivered ~now ~request_id:tx.request_id
+                        ~keeper:tx.keeper ~body:tx.body acc
+                    else
+                      Drafts.mark_failed_retryable ~now
+                        ~request_id:tx.request_id
+                        ~reason:"Delivery confirmation timed out" acc
+                  in
+                  (acc', keepers)
+                else
+                  let acc' =
+                    Drafts.mark_confirming ~now ~request_id:tx.request_id acc
+                  in
+                  let keepers' =
+                    if List.exists (String.equal tx.keeper) keepers then keepers
+                    else tx.keeper :: keepers
+                  in
+                  (acc', keepers')
+            | Drafts.Queued
+            | Drafts.Sending
+            | Drafts.Pending_processing
+            | Drafts.Interrupting
+            | Drafts.Delivered
+            | Drafts.Failed_retryable _ ->
+                (acc, keepers))
+          (drafts0, []) drafts0.pending_txs
       in
-      (next, [])
+      let recheck_cmds =
+        List.rev_map
+          (fun keeper ->
+            Cmd.Http_get
+              {
+                epoch = m.epoch;
+                req =
+                  Cmd.Get_chat_history
+                    { keeper; limit = Some 80; cursor = None };
+              })
+          keepers_to_recheck
+      in
+      let next =
+        { m with freshness; drafts } |> Model.expire_toast ~now
+      in
+      (next, recheck_cmds)
   | Msg.Server_health_result { epoch; result } ->
       if not (Epoch.is_current ~current:m.epoch ~reply:epoch) then (m, [])
       else apply_server_health ~now m result
@@ -224,6 +275,11 @@ let step_raw ~now (m : Model.t) = function
       else
         Update_sse.apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw
           ~chunk m
+  | Msg.Chat_stream_decode_warning { epoch; keeper; request_id; reason } ->
+      if not (Epoch.is_current ~current:m.epoch ~reply:epoch) then (m, [])
+      else
+        Update_sse.apply_chat_stream_decode_warning ~now ~keeper ~request_id
+          ~reason m
   | Msg.Chat_stream_done { epoch; keeper; request_id; is_btw; result } ->
       if not (Epoch.is_current ~current:m.epoch ~reply:epoch) then (m, [])
       else

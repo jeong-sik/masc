@@ -16,9 +16,15 @@ module Presenter = Masc_tui_term.Presenter
 type pending_tx =
   | Tx_idle
   | Tx_queued           (** 전송 대기 / Queued *)
+  | Tx_queued_count of int (** 대기열 N / Queued N *)
   | Tx_sending          (** 전송 중 / Sending *)
   | Tx_awaiting_turn    (** 처리 대기 / Awaiting turn *)
-  | Tx_confirming       (** 확인 중 / Confirming *)
+  | Tx_thinking         (** 추론 중… / Thinking… *)
+  | Tx_tool_running of string (** 도구 실행 · <tool> / Tool · <tool> *)
+  | Tx_streaming        (** 생성 중… / Streaming… *)
+  | Tx_confirming       (** 전송 확인 중 / Confirming *)
+  | Tx_interrupting     (** 중단 요청 중 / Interrupting *)
+  | Tx_failed of string (** 전송 실패 / Send failed *)
 
 type voice_state =
   | Voice_off

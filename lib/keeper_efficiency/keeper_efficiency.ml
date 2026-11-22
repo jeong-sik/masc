@@ -984,14 +984,21 @@ let iso8601_of_unix_utc time =
     tm.Unix.tm_sec
 ;;
 
+type window_kind =
+  | Month_mtd
+  | Month_complete
+
+let window_kind_to_string = function
+  | Month_mtd -> "month_mtd"
+  | Month_complete -> "month_complete"
+;;
+
 let window_bounds ~month ~generated_at =
   let start_iso = Printf.sprintf "%s-01T00:00:00Z" month in
-  let end_iso =
-    if String.equal month (month_of_unix_time generated_at)
-    then iso8601_of_unix_utc generated_at
-    else Printf.sprintf "%s-%02dT23:59:59Z" month (days_in_month month)
-  in
-  start_iso, end_iso
+  if String.equal month (month_of_unix_time generated_at)
+  then Month_mtd, start_iso, iso8601_of_unix_utc generated_at
+  else
+    Month_complete, start_iso, Printf.sprintf "%s-%02dT23:59:59Z" month (days_in_month month)
 ;;
 
 let month_view_to_json ?registered_keepers ?(active_only = false) (view : month_view) =
@@ -1010,7 +1017,7 @@ let month_view_to_json ?registered_keepers ?(active_only = false) (view : month_
       filtered, fleet_of filtered
     | false, _ | true, None -> view.keepers, view.fleet
   in
-  let window_start, window_end =
+  let window_kind, window_start, window_end =
     window_bounds ~month:view.month ~generated_at:view.generated_at
   in
   let keeper_json (k : keeper_month) =
@@ -1038,7 +1045,7 @@ let month_view_to_json ?registered_keepers ?(active_only = false) (view : month_
   `Assoc
     [ ("schema", `String view_schema)
     ; ("month", `String view.month)
-    ; ("window_kind", `String "month_mtd")
+    ; ("window_kind", `String (window_kind_to_string window_kind))
     ; ("window_start", `String window_start)
     ; ("window_end", `String window_end)
     ; ("active_only", `Bool active_only)

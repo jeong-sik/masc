@@ -2665,11 +2665,26 @@ let test_track_a_hot_reload_and_hardened_secrets () =
     Alcotest.(check string) label expected got
   in
   check_scope "provider base-url is hot_reload" "hot_reload" "providers.openrouter.base-url";
+  check_scope "provider timeout inside providers is hot_reload" "hot_reload" "providers.openrouter.timeout_s";
   check_scope "provider binding is hot_reload" "hot_reload" "openrouter.sonnet.model";
+  check_scope "mixed-case provider binding is hot_reload" "hot_reload" "OpenRouter.sonnet.model";
   check_scope "model max_context is hot_reload" "hot_reload" "models.sample.max_context";
   check_scope "runtime lane is hot_reload" "hot_reload" "runtime.lanes.default.candidates";
-  check_scope "fusion toggle is hot_reload" "hot_reload" "fusion.enabled";
-  check_scope "timeout key is hot_reload" "hot_reload" "turn.request_timeout_s";
+  check_scope "media_readers is hot_reload" "hot_reload" "media_readers.doc.command";
+  check_scope "browser is hot_reload" "hot_reload" "browser.enabled";
+  check_scope "machines is hot_reload" "hot_reload" "machines.msx.enabled";
+  check_scope "typesafeai is hot_reload" "hot_reload" "typesafeai.board_attention";
+  check_scope "lsp.servers is hot_reload" "hot_reload" "lsp.servers.ocaml";
+  check_scope "lsp non-servers key stays restart_required" "restart_required" "lsp.timeout_ms";
+  check_scope "non-materialized fusion stays restart_required" "restart_required" "fusion.enabled";
+  check_scope "turn timeout stays restart_required" "restart_required" "turn.request_timeout_s";
+  check_scope "sandbox timeout stays restart_required" "restart_required" "sandbox.connect_timeout_sec";
+  check_scope "exec.ssh timeout stays restart_required" "restart_required" "exec.ssh.endpoints.box.connect_timeout_sec";
+  check_scope "slack retry stays restart_required" "restart_required" "slack.retry_limit";
+  check_scope "voice timeout stays restart_required" "restart_required" "voice.timeout_s";
+  check_scope "board retry stays restart_required" "restart_required" "board.retry_count";
+  check_scope "memory timeout stays restart_required" "restart_required" "memory.timeout_ms";
+  check_scope "otel timeout stays restart_required" "restart_required" "otel.export_timeout_s";
   check_scope "server.port stays restart_required" "restart_required" "server.port";
   check_scope "http.bind_host stays restart_required" "restart_required" "http.bind_host";
   check_scope "storage.data_dir stays restart_required" "restart_required" "storage.data_dir";
@@ -2763,7 +2778,109 @@ let test_track_a_hot_reload_and_hardened_secrets () =
     Alcotest.(check string)
       "server.port reload_scope = restart_required"
       "restart_required"
-      (json_string_exn "reload_scope" (find_field "server.port")))
+      (json_string_exn "reload_scope" (find_field "server.port"));
+    (* 5. Op_remove of a provider section + its binding still classifies as hot_reload
+          because config_patch_json unions known_provider_ids across disk_preimage and after_text;
+          and Op_set on a non-reloaded section timeout key classifies as restart_required. *)
+    let rt_snap = Runtime.For_testing.snapshot () in
+    let prev_catalog = Llm_provider.Catalog_snapshot.current () in
+    let catalog_path = Filename.concat base_path "model-catalog-p24.toml" in
+    write_file_raw
+      catalog_path
+      "[[models]]\n\
+       model_id = \"sample\"\n\
+       provider_name = \"local\"\n\
+       base = \"openai_chat\"\n\
+       max_context_tokens = 1024\n";
+    let models =
+      match Llm_provider.Model_catalog.load_file catalog_path with
+      | Ok m -> m
+      | Error msg -> Alcotest.fail ("fixture catalog failed: " ^ msg)
+    in
+    let test_catalog =
+      match Llm_provider.Catalog_snapshot.of_catalogs ~models:(Some models) ~providers:None with
+      | Ok snap -> snap
+      | Error err ->
+        Alcotest.fail ("of_catalogs failed: " ^ Llm_provider.Catalog_snapshot.error_to_string err)
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        Llm_provider.Catalog_snapshot.publish prev_catalog;
+        Runtime.For_testing.restore rt_snap)
+      (fun () ->
+         Llm_provider.Catalog_snapshot.publish test_catalog;
+         let removable_toml =
+           "[providers]\n\
+            local = { protocol = \"openai-compatible-http\", endpoint = \"http://127.0.0.1:1/v1\" }\n\
+            ExtraProv = { protocol = \"openai-compatible-http\", endpoint = \"http://127.0.0.1:2/v1\" }\n\
+            [models.sample]\n\
+            api-name = \"sample\"\n\
+            max-context = 1024\n\
+            [local.sample]\n\
+            [ExtraProv.sample]\n\
+            effort = \"low\"\n\
+            [runtime]\n\
+            default = \"local.sample\"\n\
+            [exec.ssh.endpoints.box]\n\
+            host = \"127.0.0.1\"\n\
+            user = \"masc\"\n\
+            remote_root = \"/srv/masc\"\n\
+            connect_timeout_sec = 10\n"
+         in
+         write_file_raw runtime_toml_path removable_toml;
+         let rm_sha = Env.sha256_hex removable_toml in
+         let rm_body =
+           Yojson.Safe.to_string
+             (`Assoc
+               [ "target", `String "runtime"
+               ; "expected_sha256", `String rm_sha
+               ; "dry_run", `Bool true
+               ; ( "changes"
+                 , `List
+                     [ `Assoc
+                         [ "key", `String "providers.ExtraProv"
+                         ; "op", `String "remove"
+                         ]
+                     ; `Assoc
+                         [ "key", `String "ExtraProv.sample.effort"
+                         ; "op", `String "remove"
+                         ]
+                     ] )
+               ])
+         in
+         let rm_data =
+           Candle_cfg_api.config_patch_json ~config ~actor:"tester" ~body_str:rm_body ()
+           |> ok_or_fail "POST patch Op_remove provider dry_run"
+           |> json_member_exn "data"
+         in
+         Alcotest.(check string)
+           "Op_remove removing provider from after_text still classifies binding as hot_reload"
+           "hot_reload"
+           (json_string_exn "reload_scope" rm_data);
+         let non_reloaded_timeout_body =
+           Yojson.Safe.to_string
+             (`Assoc
+               [ "target", `String "runtime"
+               ; "expected_sha256", `String rm_sha
+               ; "dry_run", `Bool true
+               ; ( "changes"
+                 , `List
+                     [ `Assoc
+                         [ "key", `String "exec.ssh.endpoints.box.connect_timeout_sec"
+                         ; "value", `Int 30
+                         ]
+                     ] )
+               ])
+         in
+         let timeout_data =
+           Candle_cfg_api.config_patch_json ~config ~actor:"tester" ~body_str:non_reloaded_timeout_body ()
+           |> ok_or_fail "POST patch exec.ssh timeout dry_run"
+           |> json_member_exn "data"
+         in
+         Alcotest.(check string)
+           "non-reloaded exec.ssh timeout patch reports restart_required"
+           "restart_required"
+           (json_string_exn "reload_scope" timeout_data)))
 ;;
 
 let test_track_a_task_goal_link_and_strict_claim () =

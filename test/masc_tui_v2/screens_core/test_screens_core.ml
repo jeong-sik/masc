@@ -579,6 +579,7 @@ let populated_model ~cols ~rows ~lang =
   let efficiency : Wire_runtime.efficiency_month =
     {
       month = "2026-11";
+      window_kind = Some Wire_runtime.Efficiency_month_mtd;
       generated_at_unix = now_unix;
       days_covered = 21;
       keepers =

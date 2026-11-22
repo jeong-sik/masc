@@ -48,10 +48,14 @@ val classify_runtime_key_reload_scope :
   ?known_provider_ids:(string, unit) Hashtbl.t ->
   string ->
   reload_scope
-(** Classify a non-Registry [runtime.toml] key as {!Hot_reload} (provider,
-    model, lane, binding, routing, and timeout/retry settings applied via
-    {!Server_runtime_config_broadcast}) vs {!Restart_required} (bind, port,
-    storage, listener, and domain/worker pool settings). *)
+(** Classify a non-Registry [runtime.toml] key as {!Hot_reload} only when it
+    belongs to a section republished into {!Runtime}'s materialized state by
+    {!Runtime.commit_config_text_locked} ([providers], [models], [runtime],
+    [media_readers], [browser], [machines], [typesafeai], [lsp.servers], or a
+    declared provider binding table), and {!Restart_required} otherwise
+    (including process-lifetime bind/port/storage/pool/TLS settings and
+    non-reloaded sections such as [sandbox.*], [exec.ssh.*], [slack.*],
+    [voice.*], [turn.*], [memory.*], and [board.*]). *)
 
 val is_secret_key : string -> bool
 (** True for keys whose raw values must always be masked (API keys, auth

@@ -266,6 +266,7 @@ type keeper_cost_row_stats =
   { attributed_usd : float
   ; metered_turns : int
   ; subscription_zero_cost_turns : int
+  ; unread_cost_turns : int
   ; sample_count : int
   }
 
@@ -375,6 +376,7 @@ let keeper_cost_row ~window_minutes ~now ~keeper_name reading =
     ; metered_turns
     ; subscription_zero_cost_turns =
         cost.unreported_samples + !zero_cost_reported_samples
+    ; unread_cost_turns = cost.unread_samples
     ; sample_count = !sample_count
     }
   in
@@ -431,30 +433,42 @@ let keeper_cost_aggregates_json
       readings
   in
   let keeper_rows = List.map fst row_pairs in
-  let total_attributed_usd, total_metered_turns, total_subscription_zero, total_turns =
+  let ( total_attributed_usd
+      , total_metered_turns
+      , total_subscription_zero
+      , total_unread_cost
+      , total_turns ) =
     List.fold_left
-      (fun (usd, metered, sub_zero, turns) (_, stats) ->
+      (fun (usd, metered, sub_zero, unread, turns) (_, stats) ->
         ( usd +. stats.attributed_usd
         , metered + stats.metered_turns
         , sub_zero + stats.subscription_zero_cost_turns
+        , unread + stats.unread_cost_turns
         , turns + stats.sample_count ))
-      (0.0, 0, 0, 0)
+      (0.0, 0, 0, 0, 0)
       row_pairs
+  in
+  let unread_suffix =
+    if total_unread_cost > 0
+    then Printf.sprintf "; %d turn(s) had unreadable cost fields" total_unread_cost
+    else ""
   in
   let reconciliation_note =
     if total_subscription_zero > 0
     then
       Printf.sprintf
-        "Per-keeper metrics attribute $%.2f across %d metered turn(s); %d of %d turn(s) had null/$0 subscription cost, and non-keeper system calls (verifier, librarian, harness, compaction) are reported only in /api/v1/models/metrics."
+        "Per-keeper metrics attribute $%.2f across %d metered turn(s); %d of %d turn(s) had null/$0 subscription cost%s, and non-keeper system calls (verifier, librarian, harness, compaction) are reported only in /api/v1/models/metrics."
         total_attributed_usd
         total_metered_turns
         total_subscription_zero
         total_turns
+        unread_suffix
     else
       Printf.sprintf
-        "Per-keeper metrics attribute $%.2f across %d turn(s); non-keeper system calls (verifier, librarian, harness, compaction) are reported only in /api/v1/models/metrics."
+        "Per-keeper metrics attribute $%.2f across %d metered turn(s)%s; non-keeper system calls (verifier, librarian, harness, compaction) are reported only in /api/v1/models/metrics."
         total_attributed_usd
-        total_turns
+        total_metered_turns
+        unread_suffix
   in
   `Assoc
     [ "keepers", `List keeper_rows
@@ -465,6 +479,7 @@ let keeper_cost_aggregates_json
           [ "keeper_attributed_usd", `Float total_attributed_usd
           ; "cost_reported_turns", `Int total_metered_turns
           ; "subscription_zero_cost_turns", `Int total_subscription_zero
+          ; "unread_cost_turns", `Int total_unread_cost
           ; "total_turns", `Int total_turns
           ; "note", `String reconciliation_note
           ] )

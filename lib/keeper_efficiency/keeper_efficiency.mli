@@ -70,6 +70,15 @@ type fleet = {
     [cache_hit_pct] is weighted over rows reporting cache reads and stays
     [None] when unreported. *)
 
+type window_kind =
+  | Month_mtd
+  | Month_complete
+(** Whether a month view spans the current in-progress UTC calendar month
+    ([Month_mtd], serialized as ["month_mtd"]) or a completed past month
+    ([Month_complete], serialized as ["month_complete"]). *)
+
+val window_kind_to_string : window_kind -> string
+
 type month_view = {
   month : string;  (** ["YYYY-MM"], as requested. *)
   generated_at : float;  (** Unix time of the aggregation that answered. *)

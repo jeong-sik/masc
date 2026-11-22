@@ -607,6 +607,47 @@ let cache_and_window_tests =
           (* Second read exercises v3 boundary cache round-trip *)
           let view2 = KE.read_month ~masc_root:root ~month |> Result.get_ok in
           check_view "cached" view2) )
+  ; ( "completed past month emits window_kind = month_complete while current month emits month_mtd"
+    , `Quick
+    , fun () ->
+        let open Yojson.Safe.Util in
+        let nov_2026_unix = 1795254000.0 (* 2026-11-22 UTC *) in
+        let empty_fleet : KE.fleet =
+          { turns_total = 0
+          ; calls_per_turn = 0.0
+          ; tool_s_per_turn = 0.0
+          ; output_tokens_per_turn = 0.0
+          ; input_tokens_per_turn = 0.0
+          ; cost_usd_per_turn = 0.0
+          ; cache_hit_pct = None
+          }
+        in
+        let past_view : KE.month_view =
+          { month = "2026-10"
+          ; generated_at = nov_2026_unix
+          ; days_covered = 31
+          ; keepers = []
+          ; fleet = empty_fleet
+          }
+        in
+        let past_json = KE.month_view_to_json past_view in
+        check string "past month window_kind" "month_complete"
+          (past_json |> member "window_kind" |> to_string);
+        check string "past month window_start" "2026-10-01T00:00:00Z"
+          (past_json |> member "window_start" |> to_string);
+        check string "past month window_end" "2026-10-31T23:59:59Z"
+          (past_json |> member "window_end" |> to_string);
+        let current_view : KE.month_view =
+          { past_view with month = KE.month_of_unix_time nov_2026_unix; days_covered = 22 }
+        in
+        let current_json = KE.month_view_to_json current_view in
+        check string "current month window_kind" "month_mtd"
+          (current_json |> member "window_kind" |> to_string);
+        check string "current month window_start" "2026-11-01T00:00:00Z"
+          (current_json |> member "window_start" |> to_string);
+        check bool "current month window_end uses generated_at, not end-of-month" true
+          (not (String.ends_with ~suffix:"-30T23:59:59Z"
+                  (current_json |> member "window_end" |> to_string))) )
   ]
 
 let () =

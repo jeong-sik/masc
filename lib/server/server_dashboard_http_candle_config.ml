@@ -1288,6 +1288,14 @@ let is_restart_only_runtime_key ~segs_norm ~leaf_norm =
   any_seg_is_restart || leaf_is_restart
 ;;
 
+let known_provider_mem (ids : (string, unit) Hashtbl.t) (top_lc : string) : bool =
+  Hashtbl.mem ids top_lc
+  || Hashtbl.fold
+       (fun k () acc -> acc || String.equal (String.lowercase_ascii k) top_lc)
+       ids
+       false
+;;
+
 let classify_runtime_key_reload_scope ?known_provider_ids (full_key : string) : reload_scope =
   let segs = split_dotted_key_segments full_key |> List.map strip_toml_quotes in
   let segs_norm =
@@ -1306,25 +1314,23 @@ let classify_runtime_key_reload_scope ?known_provider_ids (full_key : string) : 
       | top :: _ -> top
       | [] -> ""
     in
-    let top_lc = String.lowercase_ascii top_raw in
+    let top_lc = String.lowercase_ascii (String.trim top_raw) in
     let is_known_provider_binding =
       match known_provider_ids with
-      | Some ids -> Hashtbl.mem ids top_raw
+      | Some ids -> known_provider_mem ids top_lc
       | None -> false
     in
+    (* Only sections actually republished into [Runtime]'s materialized state
+       by [Runtime.commit_config_text_locked] ([set_loaded]) qualify as
+       [Hot_reload]; every other section defaults to [Restart_required]. *)
     let is_hot_reload_section =
-      match top_lc with
-      | "providers" | "models" | "runtime" | "routing" | "assignment"
-      | "assignments" | "lane" | "lanes" | "binding" | "bindings"
-      | "cascade" | "cascades" | "failover" | "fusion" -> true
+      match segs_norm with
+      | ("providers" | "models" | "runtime" | "media_readers"
+        | "browser" | "machines" | "typesafeai") :: _ -> true
+      | "lsp" :: "servers" :: _ -> true
       | _ -> is_known_provider_binding
     in
-    let is_timeout_or_retry_leaf =
-      String_util.contains_substring leaf_norm "timeout"
-      || String_util.contains_substring leaf_norm "retry"
-      || String_util.contains_substring leaf_norm "retries"
-    in
-    if is_hot_reload_section || is_timeout_or_retry_leaf
+    if is_hot_reload_section
     then Hot_reload
     else Restart_required)
 ;;
@@ -1410,18 +1416,20 @@ let collect_provider_catalog (doc : (string * Keeper_toml_loader.toml_value) lis
   List.iter
     (fun (full_key, v) ->
        match split_dotted_key_segments full_key with
-       | "providers" :: pid :: rest ->
+       | top :: pid :: rest
+         when String.equal (String.lowercase_ascii (strip_toml_quotes top)) "providers" ->
          let pid = strip_toml_quotes pid in
-         if not (String.equal pid "")
+         let pid_lc = String.lowercase_ascii pid in
+         if not (String.equal pid_lc "")
          then (
-           Hashtbl.replace ids pid ();
+           Hashtbl.replace ids pid_lc ();
            match rest, v with
            | [ leaf ], Keeper_toml_loader.Toml_string s ->
              let l = String.lowercase_ascii (strip_toml_quotes leaf) in
              let trimmed = String.trim s in
              if (String.equal l "display-name" || String.equal l "display_name")
                 && not (String.equal trimmed "")
-             then Hashtbl.replace names pid trimmed
+             then Hashtbl.replace names pid_lc trimmed
            | ( _
              , ( Keeper_toml_loader.Toml_string _
                | Keeper_toml_loader.Toml_int _
@@ -1441,10 +1449,27 @@ let collect_provider_catalog (doc : (string * Keeper_toml_loader.toml_value) lis
   ids, names
 ;;
 
+let collect_provider_ids_union (texts : string list) : (string, unit) Hashtbl.t =
+  let union : (string, unit) Hashtbl.t = Hashtbl.create 32 in
+  List.iter
+    (fun text ->
+       if not (String.equal (String.trim text) "")
+       then (
+         match Keeper_toml_loader.parse_toml text with
+         | Ok doc ->
+           let ids, _ = collect_provider_catalog doc in
+           Hashtbl.iter
+             (fun pid () -> Hashtbl.replace union (String.lowercase_ascii pid) ())
+             ids
+         | Error _ -> ()))
+    texts;
+  union
+;;
+
 let classify_entity_metadata ~known_provider_ids ~provider_display_names ~table ~key =
   let segs = split_dotted_key_segments table |> List.map strip_toml_quotes in
   let provider_title pid =
-    match Hashtbl.find_opt provider_display_names pid with
+    match Hashtbl.find_opt provider_display_names (String.lowercase_ascii pid) with
     | Some title -> title
     | None -> title_case_leaf pid
   in
@@ -1457,7 +1482,7 @@ let classify_entity_metadata ~known_provider_ids ~provider_display_names ~table 
         | sub_name :: _ -> Some (String.lowercase_ascii sub_name)
       in
       "provider:" ^ pid, provider_title pid, sub
-    | pid :: _ when Hashtbl.mem known_provider_ids pid ->
+    | pid :: _ when known_provider_mem known_provider_ids (String.lowercase_ascii pid) ->
       "provider:" ^ pid, provider_title pid, Some "model_bindings"
     | "models" :: mid :: rest when not (String.equal mid "") ->
       let sub =
@@ -2593,9 +2618,7 @@ let config_patch_json ?(now = Time_compat.now ()) ~config ~actor ~body_str () =
                      let known_provider_ids =
                        match target with
                        | Target_runtime ->
-                         (match Keeper_toml_loader.parse_toml after_text with
-                          | Ok doc -> Some (fst (collect_provider_catalog doc))
-                          | Error _ -> None)
+                         Some (collect_provider_ids_union [ disk_preimage; after_text ])
                        | Target_keeper _ | Target_keeper_create -> None
                      in
                      let r_scope =

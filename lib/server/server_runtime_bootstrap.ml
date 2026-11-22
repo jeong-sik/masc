@@ -1862,6 +1862,22 @@ let start_engine ~sw ~runtime_sw ~env ?input_base_path ~accept_store_quarantine 
   engine
 ;;
 
+let report_port_announcement_refusal rejection =
+  let message =
+    Printf.sprintf
+      "[FATAL] the HTTP port of this server is not announced to the host: %s"
+      (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+  in
+  Log.Server.error "%s" message;
+  (* [Console_sink.start] has already switched the console mirror to an
+     asynchronous writer thread before [run] executes, and [Console_sink] has
+     no [at_exit] drain. Write directly to stderr with flush (matching the
+     [Out_of_memory]/[Stack_overflow] convention in [bin/main_eio.ml]) so an
+     immediate [exit 1] cannot terminate before the mirror thread writes. *)
+  (try Printf.eprintf "%s\n%!" message with
+   | Sys_error _ -> ())
+;;
+
 let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user ~lease
     ?input_base_path ?on_ready ~accept_store_quarantine ~make_routes ~make_request_handler
     ~make_h2_request_handler ~make_h2_error_handler () =
@@ -2344,9 +2360,7 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
              p-8012d5c7). Exit directly with the regulated fatal code
              instead; the log line keeps the exact refusal wording so the
              port-cannot-be-announced tests can match it. *)
-          Log.Server.error
-            "[FATAL] the HTTP port of this server is not announced to the host: %s"
-            (Server_startup_takeover.base_path_lock_rejection_to_string rejection);
+          report_port_announcement_refusal rejection;
           exit 1));
     Eio.Promise.resolve publish_listener_bound ();
     (* The listener is bound. Persist only the desired connection, not readiness. *)

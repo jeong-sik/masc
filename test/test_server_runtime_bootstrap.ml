@@ -7015,6 +7015,57 @@ let main_eio_stops_when_its_port_cannot_be_announced ~serving_domain () =
              | Ok (Some (_ : Workspace_connection.port)) | Error (_ : Workspace_connection.error) ->
                false)))
 
+let test_port_announcement_refusal_reaches_stderr_when_console_mirror_stalled () =
+  with_temp_dir "port-refusal-stalled-mirror" (fun dir ->
+      let stderr_file = Filename.concat dir "stderr.log" in
+      let rejection =
+        Server_startup_takeover.Announcement_port_locked
+          {
+            path = Filename.concat dir "lease.single-user-server";
+            port = 18935;
+            holder = Some 42424;
+          }
+      in
+      let queued_after =
+        Fun.protect
+          ~finally:Console_sink.For_testing.reset
+          (fun () ->
+            Console_sink.For_testing.reset ();
+            Console_sink.For_testing.set_writer
+              (Some (fun _ -> Alcotest.fail "stalled mirror writer must not drain"));
+            Console_sink.For_testing.set_enqueue_active true;
+            flush stderr;
+            let saved_stderr = Unix.dup Unix.stderr in
+            let out_fd =
+              Unix.openfile stderr_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
+            in
+            Fun.protect
+              ~finally:(fun () ->
+                flush stderr;
+                Unix.dup2 saved_stderr Unix.stderr;
+                Unix.close saved_stderr;
+                Unix.close out_fd)
+              (fun () ->
+                Unix.dup2 out_fd Unix.stderr;
+                Server_runtime_bootstrap.report_port_announcement_refusal rejection;
+                Console_sink.For_testing.queued_count ()))
+      in
+      Alcotest.(check bool) "authoritative log line enqueued in stalled mirror" true
+        (queued_after >= 1);
+      let captured = read_file stderr_file in
+      let expected =
+        "[FATAL] the HTTP port of this server is not announced to the host: port \
+         announcement refused: the byte of port 18935 is locked by pid 42424"
+      in
+      if not (String_util.contains_substring captured expected)
+      then
+        Alcotest.failf
+          "expected refusal line on stderr even while console mirror is stalled\n\
+           expected substring: %s\n\
+           captured:\n\
+           %s"
+          expected captured)
+
 let require_startup_ready ~pid ~port ~log_file =
   require_server_reached ~what:"main_eio startup.phase=ready" ~timeout_s:10.0 ~log_file
     (fun ~timeout_s -> wait_for_startup_phase ~pid ~port ~timeout_s "ready")
@@ -8117,6 +8168,9 @@ let () =
           Alcotest.test_case
             "main_eio stops when its port cannot be announced, serving domain"
             `Slow (main_eio_stops_when_its_port_cannot_be_announced ~serving_domain:true);
+          Alcotest.test_case
+            "port announcement refusal reaches stderr while console mirror is stalled"
+            `Quick test_port_announcement_refusal_reaches_stderr_when_console_mirror_stalled;
           Alcotest.test_case
             "main_eio partial catalog excludes uncatalogued optional runtime"
             `Slow

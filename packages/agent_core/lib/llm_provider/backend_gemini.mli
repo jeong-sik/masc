@@ -37,8 +37,28 @@ type request_artifact
 val request_payload : request_artifact -> string
 val request_output_token_receipt : request_artifact -> Types.output_token_receipt
 
+(** Static request prefix eligible for Gemini explicit [cachedContents]
+    materialization ([systemInstruction], [tools], and [toolConfig]). *)
+type cacheable_prefix =
+  { system_instruction : Yojson.Safe.t option
+  ; tools_json : Yojson.Safe.t option
+  ; tool_config_json : Yojson.Safe.t option
+  }
+
+(** Extract the canonical [systemInstruction], [tools], and [toolConfig] JSON
+    fragments that {!build_request_artifact} would emit for [config],
+    [messages], and [tools]. Used by {!Gemini_context_cache} to hash and
+    materialize explicit [cachedContents] resources. *)
+val extract_cacheable_prefix
+  :  config:Provider_config.t
+  -> messages:Types.message list
+  -> ?tools:Yojson.Safe.t list
+  -> unit
+  -> cacheable_prefix
+
 val build_request_artifact
   :  ?stream:bool
+  -> ?cached_content:string
   -> config:Provider_config.t
   -> messages:Types.message list
   -> ?tools:Yojson.Safe.t list
@@ -46,10 +66,13 @@ val build_request_artifact
   -> request_artifact
 
 (** Build a Gemini [generateContent] request body from {!Provider_config.t}.
-    Returns a JSON string.  URL construction (including [?key=]) is handled
-    by {!Complete}; this function only produces the body. *)
+    When [cached_content] is [Some resource_name], emits ["cachedContent"] and
+    omits ["systemInstruction"], ["tools"], and ["toolConfig"] as required by
+    the Gemini API. URL construction is handled by {!Complete}; this function
+    only produces the body. *)
 val build_request
   :  ?stream:bool
+  -> ?cached_content:string
   -> config:Provider_config.t
   -> messages:Types.message list
   -> ?tools:Yojson.Safe.t list

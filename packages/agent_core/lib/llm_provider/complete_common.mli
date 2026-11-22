@@ -150,6 +150,17 @@ val serialize_http_request_body
   -> tools:Yojson.Safe.t list
   -> (string, Http_client.http_error) result
 
+(** Serialize a Gemini [generateContent] request referencing an explicit
+    [cachedContent] resource name, sealing its body digest and output-token
+    receipt through the same boundary as {!serialize_final_http_request_unadmitted}. *)
+val serialize_gemini_cached_http_request
+  :  stream:bool
+  -> cached_content:string
+  -> config:Provider_config.t
+  -> messages:Types.message list
+  -> tools:Yojson.Safe.t list
+  -> (serialized_http_request, Http_client.http_error) result
+
 val serialize_http_request
   :  stream:bool
   -> config:Provider_config.t

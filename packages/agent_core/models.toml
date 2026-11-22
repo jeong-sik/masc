@@ -3031,6 +3031,8 @@ kind = "glm"
 base_url = "https://api.z.ai/api/coding/paas/v4"
 request_path = "/chat/completions"
 auth = "api-key"
+cache_session_wire = "prompt_cache_key"
+cache_session_header = "x-session-id"
 capabilities_base = "glm"
 
 [[providers]]
@@ -3102,6 +3104,7 @@ base_url = "https://api.kimi.com/coding"
 request_path = "/v1/messages"
 auth = "api-key"
 supports_extended_cache_ttl = true
+cache_session_header = "x-session-id"
 capabilities_base = "kimi"
 
 [[providers]]
@@ -3111,6 +3114,7 @@ base_url = "https://api.kimi.com/coding"
 request_path = "/v1/messages"
 auth = "api-key"
 supports_extended_cache_ttl = true
+cache_session_header = "x-session-id"
 capabilities_base = "kimi"
 
 [[providers]]
@@ -3136,6 +3140,7 @@ base_url = "https://api.kimi.com/coding/v1"
 request_path = "/chat/completions"
 auth = "api-key"
 supports_extended_cache_ttl = true
+cache_session_header = "x-session-id"
 capabilities_base = "openai_chat_extended"
 
 [[providers]]
@@ -3145,6 +3150,8 @@ identity_kinds = ["glm", "openai_compat"]
 base_url = "https://api.z.ai/api/paas/v4"
 request_path = "/chat/completions"
 auth = "api-key"
+cache_session_wire = "prompt_cache_key"
+cache_session_header = "x-session-id"
 capabilities_base = "glm"
 
 # Image models use the explicit provider identity "zai-image".

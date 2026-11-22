@@ -554,7 +554,7 @@ let%test "response-received transport failures retain their observed status" =
 ;;
 
 let complete_http
-      ~sw:_
+      ~sw
       ~net
       ?clock
       ?(on_http_status :
@@ -617,7 +617,7 @@ let complete_http
          (Error err, None)
      | None -> Completion_outcome.before_serialization (Error err, None))
   | Ok (body_deadline, serialized) ->
-    let result =
+    let dispatch_serialized (serialized : Complete_common.serialized_http_request) =
     let http_codec = serialized.Complete_common.http_codec in
     let body_str = serialized.body in
     if requires_non_http_transport config.kind
@@ -877,7 +877,66 @@ let complete_http
         let latency_ms = latency_ms_int latency_counter in
         result, latency_ms))
     in
-    Completion_outcome.after_serialization ~request:serialized result
+    let resolve_gemini_explicit_cache () =
+      match
+        admitted_body,
+        serialized.Complete_common.http_codec,
+        Gemini_context_cache.explicit_cache_ttl_if_enabled ~config
+      with
+      | None, Provider_http_codec.Gemini_generate_content, Some ttl_s ->
+        (match Provider_config.resolve_auth_headers config with
+         | Error _ -> None
+         | Ok auth_headers ->
+           let prefix =
+             Backend_gemini.extract_cacheable_prefix ~config ~messages ~tools ()
+           in
+           Gemini_context_cache.resolve_or_create
+             ~sw
+             ~net
+             ?clock
+             ?connection_cache
+             ~config
+             ~auth_headers
+             ~ttl_s
+             ~prefix
+             ())
+      | (Some _ | None), _, None
+      | Some _, _, Some _
+      | None,
+        ( Provider_http_codec.Anthropic_messages
+        | Provider_http_codec.Openai_chat
+        | Provider_http_codec.Openai_responses
+        | Provider_http_codec.Ollama_chat
+        | Provider_http_codec.Glm_chat ),
+        Some _ -> None
+    in
+    let final_serialized, result =
+      match resolve_gemini_explicit_cache () with
+      | None -> serialized, dispatch_serialized serialized
+      | Some handle ->
+        (match
+           serialize_gemini_cached_http_request
+             ~stream:false
+             ~cached_content:handle.resource_name
+             ~config
+             ~messages
+             ~tools
+         with
+         | Error _ -> serialized, dispatch_serialized serialized
+         | Ok cached_serialized ->
+           (match dispatch_serialized cached_serialized with
+            | Error err, _ when Gemini_context_cache.is_cached_content_error err ->
+              Gemini_context_cache.invalidate ~key:handle.key;
+              Diag.warn
+                "gemini_context_cache"
+                "stale cachedContent %s rejected for model=%s; retrying with implicit \
+                 caching"
+                handle.resource_name
+                config.model_id;
+              serialized, dispatch_serialized serialized
+            | ((Ok _ | Error _), _) as outcome -> cached_serialized, outcome))
+    in
+    Completion_outcome.after_serialization ~request:final_serialized result
 ;;
 
 (* body_balanced else-branch *)

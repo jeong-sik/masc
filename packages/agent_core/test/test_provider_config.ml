@@ -3283,6 +3283,52 @@ let test_cache_session_header_override_and_guards () =
       ])
 ;;
 
+let test_glm_and_kimi_session_routing_affinity () =
+  with_repository_model_catalog (fun () ->
+    let session_key = "keeper-session-abc123" in
+    let base_headers = [ "Content-Type", "application/json" ] in
+    List.iter
+      (fun (provider_id, kind, model_id, base_url) ->
+         let cfg =
+           Provider_config.make
+             ~kind
+             ~provider_id
+             ~model_id
+             ~base_url
+             ~headers:base_headers
+             ~cache_session_key:session_key
+             ()
+         in
+         Alcotest.(check (option string))
+           (provider_id ^ " cache_session_header")
+           (Some "x-session-id")
+           (Provider_config.cache_session_header cfg);
+         check_headers
+           (provider_id ^ " effective_request_headers includes x-session-id")
+           [ "x-session-id", session_key; "Content-Type", "application/json" ]
+           (Provider_config.effective_request_headers cfg);
+         if kind = Provider_config.Glm
+         then (
+           Alcotest.(check bool)
+             (provider_id ^ " cache_session_wire is Prompt_cache_key")
+             true
+             (Provider_config.cache_session_wire cfg = Capabilities.Prompt_cache_key);
+           let body =
+             Backend_glm.build_request ~config:cfg ~messages:[ Types.user_msg "ping" ] ()
+             |> Yojson.Safe.from_string
+           in
+           check_string
+             (provider_id ^ " GLM body emits prompt_cache_key")
+             session_key
+             Yojson.Safe.Util.(body |> member "prompt_cache_key" |> to_string)))
+      [ "glm", Provider_config.Glm, "glm-5", "https://api.z.ai/api/paas/v4"
+      ; "glm-coding", Provider_config.Glm, "glm-5.3-flash", "https://api.z.ai/api/coding/paas/v4"
+      ; "kimi", Provider_config.Kimi, "kimi-for-coding", "https://api.kimi.com/coding"
+      ; "kimi_coding_anthropic", Provider_config.Kimi, "kimi-for-coding", "https://api.kimi.com/coding"
+      ; "kimi_coding", Provider_config.OpenAI_compat, "kimi-for-coding", "https://api.kimi.com/coding/v1"
+      ])
+;;
+
 let () =
   Alcotest.run
     "provider_config"
@@ -3329,6 +3375,10 @@ let () =
             "cache_session_header override and guards"
             `Quick
             test_cache_session_header_override_and_guards
+        ; Alcotest.test_case
+            "GLM and Kimi declarative session routing affinity"
+            `Quick
+            test_glm_and_kimi_session_routing_affinity
         ] )
     ; ( "explicit_values"
       , [ Alcotest.test_case "all options" `Quick test_make_with_all_options

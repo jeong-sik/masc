@@ -146,6 +146,9 @@ let ollama_chunk_to_events (state : openai_stream_state) (chunk : ollama_chunk)
              ~has_tool_blocks:(chunk.oll_tool_calls <> []))
     in
     List.iter emit (openai_open_block_stops state);
+    let reported_cache_read =
+      Option.bind chunk.oll_timings (fun t -> t.Types.cache_n)
+    in
     emit
       (MessageDelta
          { stop_reason
@@ -155,7 +158,7 @@ let ollama_chunk_to_events (state : openai_stream_state) (chunk : ollama_chunk)
                   { input_tokens = Some u.input_tokens
                   ; output_tokens = Some u.output_tokens
                   ; cache_creation_input_tokens = None
-                  ; cache_read_input_tokens = None
+                  ; cache_read_input_tokens = reported_cache_read
                   ; cost_usd = u.cost_usd
                   ; reasoning_tokens = None
                   ; cache_write_lifetime = None

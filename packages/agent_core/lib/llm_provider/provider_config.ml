@@ -77,6 +77,7 @@ type t =
   ; cache_system_prompt : bool
   ; system_prompt_cache_prefix : string option
   ; cache_extended_ttl : bool
+  ; explicit_context_cache_ttl_s : int option
   ; cache_session_key : string option
   ; provider_only : string list
   ; provider_ignore : string list
@@ -125,6 +126,7 @@ let make
       ?(cache_system_prompt = false)
       ?system_prompt_cache_prefix
       ?(cache_extended_ttl = false)
+      ?explicit_context_cache_ttl_s
       ?cache_session_key
       ?(provider_only = [])
       ?(provider_ignore = [])
@@ -190,6 +192,7 @@ let make
   ; cache_system_prompt
   ; system_prompt_cache_prefix
   ; cache_extended_ttl
+  ; explicit_context_cache_ttl_s
   ; cache_session_key
   ; provider_only
   ; provider_ignore

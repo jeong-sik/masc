@@ -658,11 +658,15 @@ let test_parse_total_token_fold_includes_tool_use_prompt () =
     (mismatch (parsed ~tool_use_prompt:7 ~total:52) = None);
   check bool "a real disagreement is still reported" true
     (mismatch (parsed ~tool_use_prompt:7 ~total:53) = Some (52, 53));
-  (* The observation is a value: it never re-sums [usage]. *)
-  match (parsed ~tool_use_prompt:7 ~total:53).Types.usage with
+  (* toolUsePromptTokenCount folds into input_tokens and is exposed on telemetry;
+     total_token_mismatch still never re-sums usage when totalTokenCount disagrees. *)
+  let disagreed = parsed ~tool_use_prompt:7 ~total:53 in
+  check (option int) "telemetry tool_use_prompt_tokens" (Some 7)
+    (Option.bind disagreed.Types.telemetry (fun t -> t.Types.tool_use_prompt_tokens));
+  match disagreed.Types.usage with
   | Some u ->
-    check int "input tokens unchanged" 10 u.input_tokens;
-    check int "output tokens unchanged" 35 u.output_tokens
+    check int "input tokens folds toolUsePromptTokenCount" 17 u.input_tokens;
+    check int "output tokens folds thoughtsTokenCount" 35 u.output_tokens
   | None -> fail "expected usage"
 ;;
 
@@ -1452,9 +1456,58 @@ let test_gemini_capabilities_named () =
   check bool "tools" true caps.supports_tools;
   check bool "audio" true caps.supports_audio_input;
   check bool "video" true caps.supports_video_input;
+  check bool "prompt caching" true caps.supports_prompt_caching;
+  check bool "explicit cachedContent wire" true
+    (caps.prompt_cache_wire = Capabilities.Gemini_explicit_cached_content);
   match caps.max_context_tokens with
   | Some n -> check int "1M context" 1_000_000 n
   | None -> fail "expected max_context_tokens"
+;;
+
+let test_explicit_cached_content_request_omits_prefix_fields () =
+  let config =
+    { (gemini_config ~system:"Large static system prompt." ()) with
+      tool_choice = Some Types.Auto
+    ; explicit_context_cache_ttl_s = Some 600
+    }
+  in
+  let tools =
+    [ `Assoc
+        [ "name", `String "lookup"
+        ; "description", `String "Look up documentation"
+        ; "input_schema", `Assoc [ "type", `String "object" ]
+        ]
+    ]
+  in
+  let messages = [ Types.user_msg "Hello" ] in
+  let prefix = Backend_gemini.extract_cacheable_prefix ~config ~messages ~tools () in
+  check bool "prefix extracts systemInstruction" true
+    (Option.is_some prefix.system_instruction);
+  check bool "prefix extracts tools" true (Option.is_some prefix.tools_json);
+  check bool "prefix extracts toolConfig" true (Option.is_some prefix.tool_config_json);
+  let body =
+    Backend_gemini.build_request
+      ~cached_content:"cachedContents/cache-xyz"
+      ~config
+      ~messages
+      ~tools
+      ()
+  in
+  let json = parse_body body in
+  check string "cachedContent set" "cachedContents/cache-xyz"
+    (json |> member "cachedContent" |> to_string);
+  check bool "systemInstruction omitted" true (json |> member "systemInstruction" = `Null);
+  check bool "tools omitted" true (json |> member "tools" = `Null);
+  check bool "toolConfig omitted" true (json |> member "toolConfig" = `Null);
+  check int "contents preserved" 1 (json |> member "contents" |> to_list |> List.length);
+  (* Prefix key isolates by api_key and model_id *)
+  let other_key_cfg = { config with api_key = Secret.of_string "other-key" } in
+  let other_model_cfg = { config with model_id = "gemini-3.8-flash" } in
+  let k1 = Gemini_context_cache.prefix_key ~config ~prefix in
+  let k2 = Gemini_context_cache.prefix_key ~config:other_key_cfg ~prefix in
+  let k3 = Gemini_context_cache.prefix_key ~config:other_model_cfg ~prefix in
+  check bool "different api_key produces distinct prefix key" true (not (String.equal k1 k2));
+  check bool "different model_id produces distinct prefix key" true (not (String.equal k1 k3))
 ;;
 
 let test_tool_choice_mapping () =
@@ -2219,6 +2272,11 @@ let () =
             test_gemini_stream_thoughts_token_count_finalizes
         ] )
     ; ( "capabilities"
-      , [ test_case "gemini capabilities" `Quick test_gemini_capabilities_named ] )
+      , [ test_case "gemini capabilities" `Quick test_gemini_capabilities_named
+        ; test_case
+            "explicit cachedContent omits prefix fields and isolates keys"
+            `Quick
+            test_explicit_cached_content_request_omits_prefix_fields
+        ] )
     ]
 ;;

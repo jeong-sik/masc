@@ -44,6 +44,35 @@ type ollama_ndjson_parse_result =
       ; raw : string
       }
 
+(** Wire semantics of a reported Ollama/llama.cpp KV-cache token count relative
+    to [prompt_eval_count]. *)
+type kv_cache_semantics =
+  | Exclusive_from_prompt_eval
+    (** Reported cached prefix tokens were skipped during prompt evaluation and
+        are excluded from [prompt_eval_count] (e.g. Ollama
+        [prompt_eval_cached_count] and llama.cpp [cache_n] / [timings.cache_n]). *)
+  | Inclusive_in_prompt_eval
+    (** Reported cached prefix tokens are already included in
+        [prompt_eval_count] (e.g. [prompt_tokens_details.cached_tokens]). *)
+
+type kv_cache_read =
+  { tokens : int
+  ; semantics : kv_cache_semantics
+  }
+
+(** Extract non-negative KV-cache reuse telemetry from an Ollama or llama.cpp
+    JSON response object. Returns [None] when no KV-cache field is present or
+    when a field carries a negative/non-integer value. *)
+val extract_kv_cache_read : Yojson.Safe.t -> kv_cache_read option
+
+(** Normalize [(prompt_eval_count, kv_cache_read)] into
+    [(inclusive_input_tokens, cache_read_input_tokens, reported_cache_read_opt)]
+    matching {!Types.api_usage}'s inclusive [input_tokens] contract. *)
+val resolve_prompt_tokens
+  :  prompt_eval_count:int
+  -> kv_cache_read:kv_cache_read option
+  -> int * int * int option
+
 (** Parse one NDJSON line without collapsing provider errors or malformed
     records into an absent chunk. The Ollama error envelope is a provider
     fact; missing or incorrectly typed data fields are wire failures. When a

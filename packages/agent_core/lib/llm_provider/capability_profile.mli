@@ -77,6 +77,7 @@ type prompt_cache_wire = Capability_vocab.prompt_cache_wire =
   | No_prompt_cache_wire
   | Openrouter_top_level_cache_control
   | Kimi_prompt_cache_options
+  | Gemini_explicit_cached_content
 
 type tool_schema_conformance = Capability_vocab.tool_schema_conformance =
   | Rich_json_schema

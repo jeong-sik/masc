@@ -1040,6 +1040,7 @@ let gemini_chunk ?(parts = []) ?finish_reason ?usage ?reasoning_tokens () : GW.g
       Option.map (fun reason -> GW.Gemini_candidate_finish_reason reason) finish_reason
   ; gem_usage = usage
   ; gem_reasoning_tokens = reasoning_tokens
+  ; gem_tool_use_prompt_tokens = None
   ; gem_total_token_mismatch = None
   }
 ;;
@@ -1144,7 +1145,16 @@ let test_gemini_total_token_invariant () =
     (gemini_usage_payload ~prompt:1 ~candidates:1 ~tool_use:3 ~total:5 ());
   verdict "a total short of the tool-use field is a disagreement"
     ~expect:(Some (5, 4))
-    (gemini_usage_payload ~prompt:1 ~candidates:1 ~tool_use:3 ~total:4 ())
+    (gemini_usage_payload ~prompt:1 ~candidates:1 ~tool_use:3 ~total:4 ());
+  (match parse_gemini_chunk (gemini_usage_payload ~prompt:10 ~candidates:5 ~tool_use:7 ~total:22 ()) with
+   | None -> fail "toolUsePromptTokenCount chunk should parse"
+   | Some chunk ->
+     check (option int) "gem_tool_use_prompt_tokens exposed" (Some 7)
+       chunk.GW.gem_tool_use_prompt_tokens;
+     (match chunk.GW.gem_usage with
+      | Some u ->
+        check int "streaming input_tokens folds toolUsePromptTokenCount" 17 u.input_tokens
+      | None -> fail "expected usage"))
 ;;
 
 let test_gemini_event_edge_branches () =

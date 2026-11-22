@@ -106,6 +106,12 @@ type t =
         authority. An absent, empty or nonmatching prefix keeps the single-block
         representation. Other provider wires ignore this internal hint. *)
   ; cache_extended_ttl : bool
+  ; explicit_context_cache_ttl_s : int option
+    (** Opt-in explicit context-cache TTL in seconds for providers whose
+        declared {!Capabilities.prompt_cache_wire} uses a resource-based cache
+        API (such as Gemini [cachedContents]). [None] leaves caching implicit.
+        Must be positive when declared; non-positive values fail closed at
+        request admission. *)
   ; cache_session_key : string option
     (** Optional caller-supplied session identifier used to bind multi-turn
         requests to a prompt-cache routing key (for example OpenRouter
@@ -275,6 +281,7 @@ val make
   -> ?cache_system_prompt:bool
   -> ?system_prompt_cache_prefix:string
   -> ?cache_extended_ttl:bool
+  -> ?explicit_context_cache_ttl_s:int
   -> ?cache_session_key:string
   -> ?provider_only:string list
   -> ?provider_ignore:string list

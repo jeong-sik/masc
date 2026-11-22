@@ -565,7 +565,8 @@ let build_request_assoc_artifact
         | None ->
           (* Never emit 0-breakpoint explicit mode when caching is enabled. *)
           provider_messages, [])
-    | Capabilities.No_prompt_cache_wire, false -> provider_messages, []
+    | Capabilities.No_prompt_cache_wire, false
+    | Capabilities.Gemini_explicit_cached_content, (true | false) -> provider_messages, []
   in
   (* Per-model capabilities ([caps] above) drive the [top_k] / [min_p]
      sampling-field gates further down; the output-token budget (clamp

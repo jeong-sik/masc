@@ -24,6 +24,11 @@ type gemini_chunk =
         When present and non-negative, it is also folded into
         [gem_usage.output_tokens] so billed output tokens match Gemini's
         output-rate pricing ([candidatesTokenCount + thoughtsTokenCount]). *)
+  ; gem_tool_use_prompt_tokens : int option
+    (** Optional [usageMetadata.toolUsePromptTokenCount] reported on this chunk.
+        When present and non-negative, it is also folded into
+        [gem_usage.input_tokens] so billed input tokens match Gemini's
+        input-rate pricing ([promptTokenCount + toolUsePromptTokenCount]). *)
   ; gem_total_token_mismatch : (int * int) option
     (** [(expected, reported)] when the response's
         [usageMetadata.totalTokenCount] disagrees with

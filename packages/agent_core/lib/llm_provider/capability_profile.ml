@@ -65,6 +65,7 @@ type prompt_cache_wire = Capability_vocab.prompt_cache_wire =
   | No_prompt_cache_wire
   | Openrouter_top_level_cache_control
   | Kimi_prompt_cache_options
+  | Gemini_explicit_cached_content
 
 type reasoning_replay_override = Capability_vocab.reasoning_replay_override =
   | Default_reasoning_replay
@@ -750,7 +751,8 @@ let gemini_capabilities =
        does not relabel it. *)
     supports_document_input = true
   ; supports_native_streaming = true
-  ; supports_prompt_caching = false
+  ; supports_prompt_caching = true
+  ; prompt_cache_wire = Gemini_explicit_cached_content
   ; (* Google Gemini's generateContent API documents [topK] as part of
      generationConfig (ai.google.dev/api/generate-content). The
      [backend_gemini.build_request] serializer already emits it at

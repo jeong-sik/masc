@@ -1078,7 +1078,8 @@ let grouped_exception_chip ~lang ~(theme : Theme.t) ~bg
 
 let draw_grouped_section_form grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
     ~pad_x ~(hdr : Form.section_header) ~(form_state : Form.state)
-    ~(schema_fields : Wire_config.schema_field list) ~(model : Model.t) =
+    ~(schema_fields : Wire_config.schema_field list) ~(model : Model.t)
+    ~insp_focused =
   if Rect.is_empty rect then ()
   else
     let bg_card = Color.of_rgb theme.surface_1 in
@@ -1104,7 +1105,9 @@ let draw_grouped_section_form grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
         let tmax = if pw > 0 && iw > pw + 4 then iw - pw - 2 else iw in
         let adv =
           Cell_grid.put_text ~clip:row0 grid ~x:ix ~y:rect.y
-            ~style:(Typography.anchor ~bg:bg_hdr theme)
+            ~style:
+              (if insp_focused then Typography.accent ~bg:bg_hdr ~bold:true theme
+               else Typography.structure ~bg:bg_hdr ~bold:true theme)
             (Grapheme.truncate_to_width ~max_width:tmax title)
         in
         if pw > 0 && adv + 2 < iw then begin
@@ -1155,25 +1158,30 @@ let draw_grouped_section_form grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
     let items_rev = ref [] in
     let prev_sg = ref None in
     let fields_arr = form_state.fields in
-    List.iteri
-      (fun idx (sf : Wire_config.schema_field) ->
-        if idx < Array.length fields_arr then begin
-          let sg = Config_store.field_sub_group model.config sf in
-          (match sg with
-           | Some g when not (Option.equal String.equal !prev_sg (Some g)) ->
-               items_rev :=
-                 Group_divider (Wire_config.sub_group_label ~lang g)
-                 :: !items_rev
-           | None when Option.is_some !prev_sg ->
-               items_rev :=
-                 Group_divider
-                   (Say.resolve lang (Say.make ~ko:"일반" ~en:"General"))
-                 :: !items_rev
-           | Some _ | None -> ());
-          prev_sg := sg;
-          items_rev := Group_field (idx, fields_arr.(idx)) :: !items_rev
-        end)
-      schema_fields;
+    if schema_fields = [] then
+      Array.iteri
+        (fun idx f -> items_rev := Group_field (idx, f) :: !items_rev)
+        fields_arr
+    else
+      List.iteri
+        (fun idx (sf : Wire_config.schema_field) ->
+          if idx < Array.length fields_arr then begin
+            let sg = Config_store.field_sub_group model.config sf in
+            (match sg with
+             | Some g when not (Option.equal String.equal !prev_sg (Some g)) ->
+                 items_rev :=
+                   Group_divider (Wire_config.sub_group_label ~lang g)
+                   :: !items_rev
+             | None when Option.is_some !prev_sg ->
+                 items_rev :=
+                   Group_divider
+                     (Say.resolve lang (Say.make ~ko:"일반" ~en:"General"))
+                   :: !items_rev
+             | Some _ | None -> ());
+            prev_sg := sg;
+            items_rev := Group_field (idx, fields_arr.(idx)) :: !items_rev
+          end)
+        schema_fields;
     let rows_arr = Array.of_list (List.rev !items_rev) in
     let total_vrows = Array.length rows_arr in
     let focused_vpos =
@@ -1227,7 +1235,8 @@ let draw_grouped_section_form grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
               ~y:!y ~theme;
             incr y
         | Group_field (idx, f) ->
-            let is_focused = Int.equal idx form_state.focused in
+            let is_selected = Int.equal idx form_state.focused in
+            let is_focused = is_selected && insp_focused in
             let row_bg_rgb =
               if is_focused then theme.selection_bg else theme.surface_1
             in
@@ -1241,6 +1250,7 @@ let draw_grouped_section_form grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
                 Glyph.Left_rail;
             let lbl_st =
               if is_focused then Typography.anchor ~bg:rbg theme
+              else if is_selected then Typography.primary ~bg:rbg theme
               else Typography.structure ~bg:rbg theme
             in
             ignore
@@ -1434,26 +1444,6 @@ let draw_grouped_section_form grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
           end
     end
 
-let count_distinct_sub_group_buckets ~(model : Model.t)
-    (fields : Wire_config.schema_field list) =
-  let seen = ref [] in
-  List.iter
-    (fun f ->
-      let sg = Config_store.field_sub_group model.config f in
-      if not (List.exists (Option.equal String.equal sg) !seen) then
-        seen := sg :: !seen)
-    fields;
-  List.length !seen
-
-let has_binding_sub_group ~(model : Model.t)
-    (fields : Wire_config.schema_field list) =
-  List.exists
-    (fun f ->
-      match Config_store.field_sub_group model.config f with
-      | Some sg -> String.starts_with ~prefix:"binding:" sg
-      | None -> false)
-    fields
-
 let render_settings_tree_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) =
   if Rect.is_empty rect then ()
@@ -1468,6 +1458,39 @@ let render_settings_tree_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
     let tree_focused =
       Config_store.equal_settings_pane model.config.settings_pane
         Config_store.Pane_tree
+    in
+    let body_r =
+      if rect.h >= 4 then begin
+        let hdr_r = Rect.make ~x:rect.x ~y:rect.y ~w:rect.w ~h:1 in
+        let hdr_bg =
+          Color.of_rgb (if tree_focused then theme.surface_2 else theme.surface_1)
+        in
+        Cell_grid.fill_rect ~clip:rect grid ~rect:hdr_r
+          ~style:(Typography.primary ~bg:hdr_bg theme) ();
+        if tree_focused then
+          Cell_grid.put_glyph ~clip:hdr_r grid ~x:rect.x ~y:rect.y
+            ~style:(Typography.accent ~bg:hdr_bg ~bold:true theme)
+            Glyph.Left_rail;
+        let hdr_lbl =
+          if tree_focused then
+            Say.resolve lang
+              (Say.make ~ko:"▸ 탐색 트리 · 활성" ~en:"▸ TREE · FOCUS")
+          else
+            Say.resolve lang
+              (Say.make ~ko:"  탐색 트리 [Tab]" ~en:"  Tree [Tab]")
+        in
+        let hdr_st =
+          if tree_focused then Typography.accent ~bg:hdr_bg ~bold:true theme
+          else Typography.whisper ~bg:hdr_bg theme
+        in
+        ignore
+          (Cell_grid.put_text ~clip:hdr_r grid ~x:(rect.x + 1) ~y:rect.y
+             ~style:hdr_st
+             (Grapheme.truncate_to_width ~max_width:(Int.max 0 (rect.w - 2))
+                hdr_lbl));
+        Rect.make ~x:rect.x ~y:(rect.y + 1) ~w:rect.w ~h:(rect.h - 1)
+      end
+      else rect
     in
     let sel_idx =
       if total <= 0 then 0
@@ -1501,19 +1524,16 @@ let render_settings_tree_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
       else match active_sec_row_idx with Some i -> i | None -> sel_idx
     in
     let start, _ =
-      Table.compute_viewport ~total_rows:total ~viewport_rows:rect.h
+      Table.compute_viewport ~total_rows:total ~viewport_rows:body_r.h
         ~scroll:model.config.tree_scroll_offset
         ~selected:(Some effective_sel_idx)
     in
-    let compact_tree = rect.w <= 25 in
-    let rail_color =
-      if tree_focused then theme.accent else theme.border_inactive
-    in
-    for i = 0 to rect.h - 1 do
+    let compact_tree = body_r.w <= 25 in
+    for i = 0 to body_r.h - 1 do
       let idx = start + i in
       if idx < total then begin
-        let py = rect.y + i in
-        let row_r = Rect.make ~x:rect.x ~y:py ~w:rect.w ~h:1 in
+        let py = body_r.y + i in
+        let row_r = Rect.make ~x:body_r.x ~y:py ~w:body_r.w ~h:1 in
         match arr.(idx) with
         | Config_store.Tree_category
             { category = _; tab; collapsed; section_count; field_count; dirty_count } ->
@@ -1522,12 +1542,12 @@ let render_settings_tree_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
               Color.of_rgb
                 (if is_sel then theme.selection_bg else theme.surface_1)
             in
-            Cell_grid.fill_rect ~clip:rect grid ~rect:row_r
+            Cell_grid.fill_rect ~clip:body_r grid ~rect:row_r
               ~style:(Typography.primary ~bg:rbg theme) ();
-            if is_sel then
-              Cell_grid.put_glyph ~clip:row_r grid ~x:rect.x ~y:py
+            if is_sel && tree_focused then
+              Cell_grid.put_glyph ~clip:row_r grid ~x:body_r.x ~y:py
                 ~style:
-                  (Style.make ~fg:(Color.of_rgb rail_color) ~bg:rbg
+                  (Style.make ~fg:(Color.of_rgb theme.accent) ~bg:rbg
                      ~attrs:Attr.bold ())
                 Glyph.Left_rail;
             let chev =
@@ -1551,14 +1571,15 @@ let render_settings_tree_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
             let right_w =
               Grapheme.display_width dirty_s + Grapheme.display_width count_s
             in
-            let left_x = rect.x + 1 in
-            let right_edge = Rect.right rect - 1 in
+            let left_x = body_r.x + 1 in
+            let right_edge = Rect.right body_r - 1 in
             let left_max =
               Int.max 0 (right_edge - left_x - right_w - (if right_w > 0 then 1 else 0))
             in
             let txt = Printf.sprintf "%s %d %s" chev num lbl in
             let txt_st =
-              if is_sel then Typography.anchor ~bg:rbg theme
+              if is_sel && tree_focused then Typography.anchor ~bg:rbg theme
+              else if is_sel then Typography.structure ~bg:rbg ~bold:true theme
               else Typography.structure ~bg:rbg ~bold:true theme
             in
             if left_max > 0 then
@@ -1588,12 +1609,12 @@ let render_settings_tree_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
               Color.of_rgb
                 (if is_sel then theme.selection_bg else theme.surface_1)
             in
-            Cell_grid.fill_rect ~clip:rect grid ~rect:row_r
+            Cell_grid.fill_rect ~clip:body_r grid ~rect:row_r
               ~style:(Typography.primary ~bg:rbg theme) ();
-            if is_sel then
-              Cell_grid.put_glyph ~clip:row_r grid ~x:rect.x ~y:py
+            if is_sel && tree_focused then
+              Cell_grid.put_glyph ~clip:row_r grid ~x:body_r.x ~y:py
                 ~style:
-                  (Style.make ~fg:(Color.of_rgb rail_color) ~bg:rbg
+                  (Style.make ~fg:(Color.of_rgb theme.accent) ~bg:rbg
                      ~attrs:Attr.bold ())
                 Glyph.Left_rail;
             let chev =
@@ -1606,12 +1627,12 @@ let render_settings_tree_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
                    ~ko:(Printf.sprintf "%s 모델 카탈로그 (%d개)" chev model_count)
                    ~en:(Printf.sprintf "%s Models Catalog (%d)" chev model_count))
             in
-            let left_x = rect.x + 3 in
-            let right_edge = Rect.right rect - 1 in
+            let left_x = body_r.x + 3 in
+            let right_edge = Rect.right body_r - 1 in
             let dirty_w = if dirty_count > 0 then 2 else 0 in
             let max_w = Int.max 0 (right_edge - left_x - dirty_w) in
             let st =
-              if is_sel then Typography.anchor ~bg:rbg theme
+              if is_sel && tree_focused then Typography.anchor ~bg:rbg theme
               else Typography.whisper ~bg:rbg theme
             in
             if max_w > 0 then
@@ -1630,17 +1651,17 @@ let render_settings_tree_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
               Color.of_rgb
                 (if is_sel then theme.selection_bg else theme.surface_1)
             in
-            Cell_grid.fill_rect ~clip:rect grid ~rect:row_r
+            Cell_grid.fill_rect ~clip:body_r grid ~rect:row_r
               ~style:(Typography.primary ~bg:rbg theme) ();
-            if is_sel then
-              Cell_grid.put_glyph ~clip:row_r grid ~x:rect.x ~y:py
+            if is_sel && tree_focused then
+              Cell_grid.put_glyph ~clip:row_r grid ~x:body_r.x ~y:py
                 ~style:
-                  (Style.make ~fg:(Color.of_rgb rail_color) ~bg:rbg
+                  (Style.make ~fg:(Color.of_rgb theme.accent) ~bg:rbg
                      ~attrs:Attr.bold ())
                 Glyph.Left_rail;
             let indent = if sec.is_catalog_group then 4 else 3 in
-            let left_x = rect.x + indent in
-            let right_edge = Rect.right rect - 1 in
+            let left_x = body_r.x + indent in
+            let right_edge = Rect.right body_r - 1 in
             let right_str, right_st =
               if sec.dirty_count > 0 then
                 ( Glyph.to_utf8 Glyph.Live_healthy,
@@ -1653,7 +1674,8 @@ let render_settings_tree_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
             let rw = Grapheme.display_width right_str in
             let max_w = Int.max 0 (right_edge - left_x - rw - 1) in
             let title_st =
-              if is_sel then Typography.anchor ~bg:rbg theme
+              if is_sel && tree_focused then Typography.anchor ~bg:rbg theme
+              else if is_sel then Typography.structure ~bg:rbg ~bold:true theme
               else Typography.primary ~bg:rbg theme
             in
             if max_w > 0 then
@@ -1757,8 +1779,96 @@ let render_settings_inspector_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
     let lang = model.lang in
     let bg = Color.of_rgb theme.surface_1 in
     let pad_x = if rect.w >= 50 then 2 else 1 in
+    let insp_focused =
+      Config_store.equal_settings_pane model.config.settings_pane
+        Config_store.Pane_inspector
+    in
     Cell_grid.fill_rect ~clip:rect grid ~rect
       ~style:(Typography.primary ~bg theme) ();
+    (* Pane Focus Header Bar so Tab switch between Tree and Inspector is unmistakable *)
+    let rect =
+      if rect.h >= 4 then begin
+        let hdr_r = Rect.make ~x:rect.x ~y:rect.y ~w:rect.w ~h:1 in
+        let hdr_bg =
+          Color.of_rgb (if insp_focused then theme.surface_2 else theme.surface_1)
+        in
+        Cell_grid.fill_rect ~clip:rect grid ~rect:hdr_r
+          ~style:(Typography.primary ~bg:hdr_bg theme) ();
+        if insp_focused then
+          Cell_grid.put_glyph ~clip:hdr_r grid ~x:rect.x ~y:rect.y
+            ~style:(Typography.accent ~bg:hdr_bg ~bold:true theme)
+            Glyph.Left_rail;
+        let hdr_lbl =
+          if insp_focused then
+            Say.resolve lang
+              (Say.make ~ko:"▸ 속성 검사기 · 활성  [Enter] 편집 · [Del] 삭제"
+                 ~en:"▸ INSPECTOR · FOCUS  [Enter] Edit · [Del] Remove")
+          else
+            Say.resolve lang
+              (Say.make ~ko:"  속성 검사기  [Tab]으로 포커스 이동"
+                 ~en:"  Inspector  [Tab] to focus")
+        in
+        let hdr_st =
+          if insp_focused then Typography.accent ~bg:hdr_bg ~bold:true theme
+          else Typography.whisper ~bg:hdr_bg theme
+        in
+        ignore
+          (Cell_grid.put_text ~clip:hdr_r grid ~x:(rect.x + pad_x) ~y:rect.y
+             ~style:hdr_st
+             (Grapheme.truncate_to_width
+                ~max_width:(Int.max 0 (rect.w - (2 * pad_x)))
+                hdr_lbl));
+        Rect.make ~x:rect.x ~y:(rect.y + 1) ~w:rect.w ~h:(rect.h - 1)
+      end
+      else rect
+    in
+    (* Optional 1-row New Keeper Name input banner when Target_keeper_create *)
+    let rect =
+      match model.config.target with
+      | Wire_config.Target_keeper_create when rect.h >= 5 ->
+          let kr = Rect.make ~x:rect.x ~y:rect.y ~w:rect.w ~h:1 in
+          let editing_name = Config_store.is_editing_new_keeper_name model.config in
+          let kbg =
+            Color.of_rgb (if editing_name then theme.selection_bg else theme.surface_2)
+          in
+          Cell_grid.fill_rect ~clip:rect grid ~rect:kr
+            ~style:(Typography.primary ~bg:kbg theme) ();
+          let kst, ktxt =
+            if editing_name then
+              ( Typography.anchor ~bg:kbg theme
+              , Say.resolve lang
+                  (Say.make
+                     ~ko:(Printf.sprintf "새 키퍼 이름: %s_  [Enter] 확정 · [Esc] 취소"
+                            model.config.editing_buffer)
+                     ~en:(Printf.sprintf "New keeper name: %s_  [Enter] Confirm · [Esc] Cancel"
+                            model.config.editing_buffer)) )
+            else if String.equal (String.trim model.config.new_keeper_name) "" then
+              ( Typography.status ~bg:kbg ~bold:true theme Theme.Status_attention
+              , Say.resolve lang
+                  (Say.make
+                     ~ko:"△ 새 키퍼 이름 미지정 — [n] 키로 이름을 입력하세요"
+                     ~en:"△ New keeper name unset — press [n] to enter name") )
+            else
+              ( Typography.status ~bg:kbg ~bold:true theme Theme.Status_ok
+              , Say.resolve lang
+                  (Say.make
+                     ~ko:(Printf.sprintf "✓ 새 키퍼: %s  ([n] 변경 · [Space] 검증 · [Ctrl+S] 생성)"
+                            model.config.new_keeper_name)
+                     ~en:(Printf.sprintf "✓ New keeper: %s  ([n] Rename · [Space] Diff · [Ctrl+S] Create)"
+                            model.config.new_keeper_name)) )
+          in
+          ignore
+            (Cell_grid.put_text ~clip:kr grid ~x:(rect.x + pad_x) ~y:rect.y
+               ~style:kst
+               (Grapheme.truncate_to_width
+                  ~max_width:(Int.max 0 (rect.w - (2 * pad_x)))
+                  ktxt));
+          Rect.make ~x:rect.x ~y:(rect.y + 1) ~w:rect.w ~h:(rect.h - 1)
+      | Wire_config.Target_keeper_create
+      | Wire_config.Target_runtime
+      | Wire_config.Target_keeper _ ->
+          rect
+    in
     (* Optional 1-row Save Receipt / Snapshot Banner at top when present *)
     let save_banner_opt =
       match model.config.save_state with
@@ -1907,17 +2017,9 @@ let render_settings_inspector_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
               ~max_width:(Int.max 0 (form_r.w - (2 * pad_x)))
               msg))
     end
-    else if
-      schema_fields <> []
-      && (count_distinct_sub_group_buckets ~model schema_fields >= 2
-          || has_binding_sub_group ~model schema_fields)
-    then
-      draw_grouped_section_form grid ~rect:form_r ~theme ~lang ~pad_x
-        ~hdr:section_header ~form_state ~schema_fields ~model
     else
-      ignore
-        (Form.draw grid ~rect:form_r ~theme ~lang ~pad_x ~section_header
-           ~show_row_badges:false ~show_help_footer:true form_state);
+      draw_grouped_section_form grid ~rect:form_r ~theme ~lang ~pad_x
+        ~hdr:section_header ~form_state ~schema_fields ~model ~insp_focused;
     if not (Rect.is_empty dry_r) then
       render_dry_run_pane grid ~rect:dry_r ~theme ~lang ~pad_x
         ~dry_run_preview:model.config.dry_run_preview
@@ -1960,8 +2062,8 @@ let render_settings grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     in
     let footer_hint =
       Say.resolve lang
-        (Say.make ~ko:"[Tab] 좌/우 전환 · [Enter] 편집 · [/] 전체 검색"
-           ~en:"[Tab] Switch pane · [Enter] Edit · [/] Global search")
+        (Say.make ~ko:"[Tab] 좌/우 전환 · [Enter] 편집 · [Del] 삭제 · [/] 검색"
+           ~en:"[Tab] Switch pane · [Enter] Edit · [Del] Remove · [/] Search")
     in
     let inner =
       Card.draw ~cache grid ~rect:modal_r ~theme
@@ -2000,8 +2102,10 @@ let render_settings grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         | Wire_config.Target_keeper name -> Printf.sprintf " keeper:%s " name
         | Wire_config.Target_keeper_create ->
             let kn =
-              if String.equal (String.trim model.config.new_keeper_name) "" then
-                "<new>"
+              if Config_store.is_editing_new_keeper_name model.config then
+                model.config.editing_buffer ^ "_"
+              else if String.equal (String.trim model.config.new_keeper_name) ""
+              then "<new: press n>"
               else model.config.new_keeper_name
             in
             Printf.sprintf " + %s " kn
@@ -2193,8 +2297,8 @@ let render_incidents_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     in
     let hotkey =
       Say.resolve lang
-        (Say.make ~ko:"[d] 숨김 · [D/c] 전체 비우기 · [Esc]"
-           ~en:"[d] Dismiss · [D/c] Clear · [Esc]")
+        (Say.make ~ko:"[d] 숨김 · [c/D] 전체 비우기 · [o] 리소스 이동 · [Esc]"
+           ~en:"[d] Dismiss · [c/D] Clear · [o] Jump · [Esc]")
     in
     let inner =
       Card.draw ~cache grid ~rect:drawer_r ~theme
@@ -2763,29 +2867,44 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
 
 (* ---------- Overlay 5: Inline Action & /btw Side-Query Modal ---------- *)
 
-let inline_action_title ~lang = function
-  | Nav.Btw_query ->
-      Say.resolve lang (Say.make ~ko:"임시 질문 (/btw)" ~en:"Side-Query (/btw)")
-  | Nav.Gate_reject id ->
-      Say.resolve lang
-        (Say.make ~ko:("게이트 거절 · " ^ id) ~en:("Gate Reject · " ^ id))
-  | Nav.Verification_reject id ->
-      Say.resolve lang
-        (Say.make ~ko:("검증 거절 · " ^ id) ~en:("Verification Reject · " ^ id))
-  | Nav.Harness_overrule id ->
-      Say.resolve lang
-        (Say.make ~ko:("판정 재정의 · " ^ id) ~en:("Harness Overrule · " ^ id))
-  | Nav.Task_cancel id ->
-      Say.resolve lang
-        (Say.make ~ko:("작업 취소 · " ^ id) ~en:("Cancel Task · " ^ id))
-  | Nav.Schedule_form ->
-      Say.resolve lang (Say.make ~ko:"새 일정 생성" ~en:"Create Schedule")
-  | Nav.Connector_form ->
-      Say.resolve lang (Say.make ~ko:"새 커넥터 연결" ~en:"Add Connector")
-  | Nav.Repo_add_form ->
-      Say.resolve lang (Say.make ~ko:"저장소 추가" ~en:"Add Repository")
-  | Nav.Board_new_post ->
-      Say.resolve lang (Say.make ~ko:"보드 새 글 작성" ~en:"New Board Post")
+let inline_action_title ~lang ~(modal : Model.inline_modal_state) kind =
+  let has_field key =
+    List.exists
+      (fun (f : Model.modal_form_field) -> String.equal f.key key)
+      modal.fields
+  in
+  if has_field "goal_title" then
+    Say.resolve lang (Say.make ~ko:"새 목표 생성" ~en:"Create Goal")
+  else if has_field "memory_act" then
+    Say.resolve lang (Say.make ~ko:"사서 기억 복구 (/memory/act)" ~en:"Memory Recovery Act")
+  else if has_field "wiki_slug" then
+    Say.resolve lang (Say.make ~ko:"위키 문서 편집" ~en:"Edit Wiki Page")
+  else if has_field "fusion_prompt" then
+    Say.resolve lang (Say.make ~ko:"퓨전 패널 실행" ~en:"Launch Fusion Panel")
+  else
+    match kind with
+    | Nav.Btw_query ->
+        Say.resolve lang (Say.make ~ko:"임시 질문 (/btw)" ~en:"Side-Query (/btw)")
+    | Nav.Gate_reject id ->
+        Say.resolve lang
+          (Say.make ~ko:("게이트 거절 · " ^ id) ~en:("Gate Reject · " ^ id))
+    | Nav.Verification_reject id ->
+        Say.resolve lang
+          (Say.make ~ko:("검증 거절 · " ^ id) ~en:("Verification Reject · " ^ id))
+    | Nav.Harness_overrule id ->
+        Say.resolve lang
+          (Say.make ~ko:("판정 재정의 · " ^ id) ~en:("Harness Overrule · " ^ id))
+    | Nav.Task_cancel id ->
+        Say.resolve lang
+          (Say.make ~ko:("작업 취소 · " ^ id) ~en:("Cancel Task · " ^ id))
+    | Nav.Schedule_form ->
+        Say.resolve lang (Say.make ~ko:"새 일정 생성" ~en:"Create Schedule")
+    | Nav.Connector_form ->
+        Say.resolve lang (Say.make ~ko:"새 커넥터 연결" ~en:"Add Connector")
+    | Nav.Repo_add_form ->
+        Say.resolve lang (Say.make ~ko:"저장소 추가" ~en:"Add Repository")
+    | Nav.Board_new_post ->
+        Say.resolve lang (Say.make ~ko:"보드 새 글 작성" ~en:"New Board Post")
 
 let form_of_inline_modal (modal : Model.inline_modal_state) =
   let fields =
@@ -2836,7 +2955,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   let modal_r = Rect.make ~x ~y ~w ~h in
   if Rect.is_empty modal_r then ()
   else
-    let title = inline_action_title ~lang kind in
+    let title = inline_action_title ~lang ~modal kind in
     let hotkey =
       Say.resolve lang
         (Say.make ~ko:"[Tab] 필드 · [Enter] 제출 · [Esc] 취소"

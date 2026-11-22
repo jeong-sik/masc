@@ -2679,6 +2679,628 @@ let test_v25_data_pipeline_and_settings_2pane () =
     (Some "binding:claude-opus-5-5")
     (Config_store.field_sub_group cfg_hashed f_cc1_bind2)
 
+let test_p0_actions_settings_safety_and_wired_cmds () =
+  let m0 = Model.initial () in
+  let step m ev = Update.step ~now:t0 m (Msg.Key_event ev) in
+  let has_cmd pred cmds = List.exists pred (Cmd.flatten cmds) in
+
+  (* 1. P1-11: Settings [n] NEVER triggers Save; Target_keeper_create edits name; Delete stages Remove_key *)
+  let schema_edit : Wire_config.config_schema =
+    {
+      target = Wire_config.Target_runtime;
+      keeper = None;
+      file_exists = true;
+      file_sha256 = "sha-rt-1";
+      sections =
+        [
+          {
+            id = "gen";
+            category = Wire_config.Cat_general_ui;
+            title = "General";
+            fields =
+              [
+                {
+                  table = "runtime";
+                  key = "default_route";
+                  full_key = "runtime.default_route";
+                  label = "Default Route";
+                  env = None;
+                  description = None;
+                  kind = Wire_config.Field_string;
+                  value = Wire_config.Val_string "sonnet";
+                  default_value = None;
+                  provenance = Wire_config.Prov_global;
+                  reload_scope = Wire_config.Hot_reload;
+                  secret = false;
+                  writable = true;
+                };
+              ];
+          };
+        ];
+    }
+  in
+  let cfg_dirty =
+    Config_store.empty
+    |> Config_store.set_tab Nav.Settings_general_ui
+    |> Config_store.apply_schema ~observed_at:t0 schema_edit
+    |> Config_store.stage_patch ~full_key:"runtime.default_route"
+         (Wire_config.Set_scalar
+            { table = "runtime"; key = "default_route"; value = "opus" })
+  in
+  let m_set =
+    {
+      m0 with
+      nav = { m0.nav with overlay = Some (Nav.Settings Nav.Settings_general_ui) };
+      config = cfg_dirty;
+    }
+  in
+  let _, cmds_n = step m_set (char_key "n") in
+  let is_any_patch = function
+    | Cmd.Http_post { req = Cmd.Post_config_patch _; _ } -> true
+    | _ -> false
+  in
+  Alcotest.(check bool) "bare [n] in Settings NEVER saves" false
+    (has_cmd is_any_patch cmds_n);
+  let _, cmds_ctrl_s = step m_set (char_key ~ctrl:true "s") in
+  Alcotest.(check bool) "Ctrl+S in Settings triggers dry_run=false save" true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             { req = Cmd.Post_config_patch { dry_run = false; _ }; _ } ->
+             true
+         | _ -> false)
+       cmds_ctrl_s);
+
+  (* Delete in Settings Inspector toggles Wire_config.Remove_key *)
+  let m_clean_insp =
+    {
+      m_set with
+      config =
+        Config_store.empty
+        |> Config_store.set_tab Nav.Settings_general_ui
+        |> Config_store.apply_schema ~observed_at:t0 schema_edit
+        |> Config_store.set_pane Config_store.Pane_inspector;
+    }
+  in
+  let m_after_del, _ = step m_clean_insp (key Keymap.Input.Delete) in
+  Alcotest.(check bool) "Delete stages Remove_key on writable field" true
+    (match
+       Config_store.String_map.find_opt "runtime.default_route"
+         m_after_del.config.dirty_fields
+     with
+    | Some (Wire_config.Remove_key { table = "runtime"; key = "default_route" }) ->
+        true
+    | _ -> false);
+
+  (* Target_keeper_create: [n] on Tab 4 enters keeper-name edit, typing + Enter calls set_new_keeper_name *)
+  let m_tab4 =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          overlay = Some (Nav.Settings Nav.Settings_keepers_companies);
+        };
+      config =
+        Config_store.empty
+        |> Config_store.set_tab Nav.Settings_keepers_companies;
+    }
+  in
+  let m_nk0, cmds_nk0 = step m_tab4 (char_key "n") in
+  Alcotest.(check bool) "[n] on Settings tab 4 never saves" false
+    (has_cmd is_any_patch cmds_nk0);
+  Alcotest.(check bool) "[n] on Settings tab 4 enters new_keeper_name edit" true
+    (Config_store.is_editing_new_keeper_name m_nk0.config);
+  let m_nk1 =
+    List.fold_left
+      (fun acc ch -> fst (step acc (char_key (String.make 1 ch))))
+      m_nk0
+      [ 'a'; 'l'; 'p'; 'h'; 'a'; '-'; '2' ]
+  in
+  let m_nk2, _ = step m_nk1 (key Keymap.Input.Enter) in
+  Alcotest.(check string) "new_keeper_name committed via set_new_keeper_name"
+    "alpha-2" m_nk2.config.new_keeper_name;
+  let create_schema =
+    { schema_edit with target = Wire_config.Target_keeper_create }
+  in
+  let cfg_create_ready =
+    m_nk2.config
+    |> Config_store.apply_schema ~observed_at:t0 create_schema
+    |> Config_store.stage_patch ~full_key:"runtime.default_route"
+         (Wire_config.Set_scalar
+            { table = "runtime"; key = "default_route"; value = "opus" })
+  in
+  (match Config_store.build_patch_request ~dry_run:false cfg_create_ready with
+  | Ok req ->
+      Alcotest.(check (option string)) "Target_keeper_create patch carries keeper_name"
+        (Some "alpha-2") req.keeper_name
+  | Error err -> Alcotest.fail ("Expected Target_keeper_create patch Ok: " ^ err));
+
+  (* 2. P0-3 & P0-4: Work Goal/Task/Verification modals & wired Cmds *)
+  let ver1 : Wire_work.verification_request =
+    {
+      request_id = "ver-100";
+      task_id = "task-100";
+      task_title = "Verify patch";
+      submitted_by = "alpha";
+      created_at_unix = None;
+      completion_contract = [];
+      required_artifacts = [];
+      submitted_evidence = [];
+      evidence_projection_error = None;
+      review_observation = None;
+    }
+  in
+  let task1 : Wire_work.task =
+    {
+      id = "task-100";
+      title = "Task 100";
+      description = Some "See https://example.com/pr/100";
+      priority = 1;
+      status = Wire_work.Todo;
+      goal_link = Wire_work.Linked "goal-100";
+      created_at = None;
+      updated_at = None;
+    }
+  in
+  let goal_confirm : Wire_work.goal =
+    {
+      id = "goal-100";
+      title = "Ship v2.5";
+      phase = Wire_work.Awaiting_confirmation;
+      priority = 1;
+      due_date = None;
+      measure = "All checks pass";
+      procedure = "Verify";
+      criterion_revision = Some "rev-7";
+      criterion_verdict = Wire_work.Criterion_valid;
+      last_review_note = None;
+      last_review_at = None;
+      created_at = None;
+      updated_at = None;
+      linked_task_count = Observed.value ~observed_at:t0 1;
+    }
+  in
+  let goal_exec = { goal_confirm with id = "goal-101"; phase = Wire_work.Executing } in
+  let ws_id : Wire_common.workspace_identity =
+    {
+      instance_id = Some "inst-9";
+      base_path = "/repo";
+      masc_root = "/repo/.masc";
+      workspace_sha256 = Some "ws-sha";
+    }
+  in
+  let m_work =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Work };
+      server_identity =
+        {
+          m0.server_identity with
+          workspace = Some ws_id;
+          observer_instance_id = Some "inst-9";
+        };
+      work =
+        Work_store.empty
+        |> Work_store.apply_planning ~observed_at:t0
+             { goals = [ goal_confirm; goal_exec ]; tasks = [ task1 ] }
+        |> Work_store.apply_verifications ~observed_at:t0 [ ver1 ];
+    }
+  in
+  (* [n] on Work_pipeline opens Goal modal (not Schedule); on Work_tasks_schedules opens Schedule *)
+  let m_goal_modal, _ = step m_work (char_key "n") in
+  Alcotest.(check bool) "[n] on Work_pipeline opens Goal modal" true
+    (match m_goal_modal.inline_modal with
+    | Some md ->
+        List.exists
+          (fun (f : Model.modal_form_field) -> String.equal f.key "goal_title")
+          md.fields
+    | None -> false);
+  let m_sched_tab =
+    { m_work with work = Work_store.set_tab Nav.Work_tasks_schedules m_work.work }
+  in
+  let m_sched_modal, _ = step m_sched_tab (char_key "n") in
+  Alcotest.(check bool) "[n] on Work_tasks_schedules opens Schedule_form" true
+    (Option.equal Nav.equal_overlay m_sched_modal.nav.overlay
+       (Some (Nav.Inline_action Nav.Schedule_form)));
+
+  (* Verification_dive: [a] approve, [x] -> Verification_reject modal -> submit, [h] -> Harness_overrule modal -> submit, [Space] JSON *)
+  let m_vdive =
+    {
+      m_work with
+      nav = { m_work.nav with dive_stack = [ Nav.Dive_work (Nav.Verification_dive "ver-100") ] };
+    }
+  in
+  let _, cmds_vapp = step m_vdive (char_key "a") in
+  Alcotest.(check bool) "Verification_dive [a] emits Verdict_approve" true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_verification_verdict
+                   {
+                     verification_id = "ver-100";
+                     verdict = Wire_work.Verdict_approve;
+                     _;
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       cmds_vapp);
+  let m_vrej, _ = step m_vdive (char_key "x") in
+  Alcotest.(check bool) "Verification_dive [x] opens Verification_reject modal" true
+    (Option.equal Nav.equal_overlay m_vrej.nav.overlay
+       (Some (Nav.Inline_action (Nav.Verification_reject "ver-100"))));
+  let m_vrej_typed, _ = step m_vrej (char_key "b") in
+  let _, cmds_vrej = step m_vrej_typed (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Verification_reject submit emits Verdict_reject" true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_verification_verdict
+                   {
+                     verification_id = "ver-100";
+                     verdict = Wire_work.Verdict_reject _;
+                     _;
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       cmds_vrej);
+  let m_hov, _ = step m_vdive (char_key "h") in
+  Alcotest.(check bool) "Verification_dive [h] opens Harness_overrule modal" true
+    (Option.equal Nav.equal_overlay m_hov.nav.overlay
+       (Some (Nav.Inline_action (Nav.Harness_overrule "task-100"))));
+  let m_hov_typed, _ = step m_hov (char_key "r") in
+  let _, cmds_hov = step m_hov_typed (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Harness_overrule submit emits Post_harness_overrule" true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             { req = Cmd.Post_harness_overrule { target_id = "task-100"; _ }; _ } ->
+             true
+         | _ -> false)
+       cmds_hov);
+  let m_vjson, _ = step m_vdive (char_key " ") in
+  Alcotest.(check bool) "Work_dive [Space] toggles show_raw_json" true
+    m_vjson.infra.show_raw_json;
+
+  (* Task_dive [x] -> Task_cancel modal -> submit *)
+  let m_tdive =
+    {
+      m_work with
+      nav = { m_work.nav with dive_stack = [ Nav.Dive_work (Nav.Task_dive "task-100") ] };
+    }
+  in
+  let m_tc, _ = step m_tdive (char_key "x") in
+  Alcotest.(check bool) "Task_dive [x] opens Task_cancel modal" true
+    (Option.equal Nav.equal_overlay m_tc.nav.overlay
+       (Some (Nav.Inline_action (Nav.Task_cancel "task-100"))));
+  let _, cmds_tc = step m_tc (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Task_cancel submit emits Post_task_cancel" true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             { req = Cmd.Post_task_cancel { task_id = "task-100"; _ }; _ } ->
+             true
+         | _ -> false)
+       cmds_tc);
+
+  (* Goal_dive: Awaiting_confirmation [a] -> Post_goal_confirmation; Executing [a]/[x] -> Post_goal_transition *)
+  let m_gdive_conf =
+    {
+      m_work with
+      nav = { m_work.nav with dive_stack = [ Nav.Dive_work (Nav.Goal_dive "goal-100") ] };
+    }
+  in
+  let _, cmds_gconf = step m_gdive_conf (char_key "a") in
+  Alcotest.(check bool) "Goal_dive [a] with server proof emits Post_goal_confirmation"
+    true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_goal_confirmation
+                   {
+                     goal_id = "goal-100";
+                     criterion_revision = "rev-7";
+                     verification_run_id = "ver-100";
+                     _;
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       cmds_gconf);
+  let m_gdive_exec =
+    {
+      m_work with
+      nav = { m_work.nav with dive_stack = [ Nav.Dive_work (Nav.Goal_dive "goal-101") ] };
+    }
+  in
+  let _, cmds_greq = step m_gdive_exec (char_key "a") in
+  Alcotest.(check bool) "Goal_dive Executing [a] emits Request_complete" true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_goal_transition
+                   { goal_id = "goal-101"; action = Wire_work.Request_complete; _ };
+               _;
+             } ->
+             true
+         | _ -> false)
+       cmds_greq);
+  let _, cmds_gpause = step m_gdive_exec (char_key "x") in
+  Alcotest.(check bool) "Goal_dive Executing [x] emits Pause" true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_goal_transition
+                   { goal_id = "goal-101"; action = Wire_work.Pause; _ };
+               _;
+             } ->
+             true
+         | _ -> false)
+       cmds_gpause);
+
+  (* 3. Knowledge: Memory [a] -> Post_memory_act, Wiki [e]/[Ctrl+E] -> Put_wiki_page / Edit_wiki_page, Board [R] -> Post_quarantine_requeue *)
+  let m_kmem =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Knowledge };
+      knowledge =
+        Knowledge_store.empty
+        |> Knowledge_store.set_tab Nav.Knowledge_memory
+        |> Knowledge_store.set_memory_diff_keeper (Some "alpha");
+    }
+  in
+  let _, cmds_mact = step m_kmem (char_key "a") in
+  Alcotest.(check bool) "Knowledge/Memory [a] emits Post_memory_act" true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_memory_act
+                   { keeper = "alpha"; act = Wire_knowledge.Act_resume };
+               _;
+             } ->
+             true
+         | _ -> false)
+       cmds_mact);
+  let wiki_page : Wire_knowledge.wiki_page_detail =
+    {
+      page = "guide";
+      slug = "guide";
+      file = "guide.md";
+      frontmatter =
+        {
+          title = "Guide";
+          summary = "Summary";
+          source = Wire_knowledge.Source_observation;
+          author = "alpha";
+          created = "2026-11-20";
+          updated = "2026-11-22";
+          revision = 3;
+          tags = [ "ops" ];
+        };
+      sha256 = "sha-w3";
+      body_markdown = "# Guide\nBody text";
+      outgoing_links = [];
+      backlinks = [];
+      lint_findings = [];
+    }
+  in
+  let m_wiki =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Knowledge;
+          dive_stack = [ Nav.Dive_knowledge (Nav.Wiki_dive "guide") ];
+        };
+      knowledge =
+        Knowledge_store.empty
+        |> Knowledge_store.apply_wiki_page ~observed_at:t0 wiki_page;
+    }
+  in
+  let m_wedit, _ = step m_wiki (char_key "e") in
+  let _, cmds_wput = step m_wedit (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Wiki [e] inline modal submit emits Put_wiki_page" true
+    (has_cmd
+       (function
+         | Cmd.Http_put
+             {
+               req =
+                 Cmd.Put_wiki_page
+                   { page = "guide"; request = { expected_revision = Some 3; _ } };
+               _;
+             } ->
+             true
+         | _ -> false)
+       cmds_wput);
+  let _, cmds_wext = step m_wiki (char_key ~ctrl:true "e") in
+  Alcotest.(check bool) "Wiki [Ctrl+E] emits Edit_wiki_page" true
+    (has_cmd
+       (function
+         | Cmd.Open_editor_escape_hatch (Cmd.Edit_wiki_page "guide") -> true
+         | _ -> false)
+       cmds_wext);
+
+  (* 4. Infra [p] -> Post_sandbox_probe; Runtime [f] -> Post_fusion_launch & [r] Quotas force=true *)
+  let m_infra =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Infra };
+      infra = Infra_store.set_tab Nav.Infra_sandboxes Infra_store.empty;
+    }
+  in
+  let _, cmds_probe = step m_infra (char_key "p") in
+  Alcotest.(check bool) "Infra Sandboxes [p] emits Post_sandbox_probe" true
+    (has_cmd
+       (function
+         | Cmd.Http_post { req = Cmd.Post_sandbox_probe _; _ } -> true
+         | _ -> false)
+       cmds_probe);
+  let m_rt =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Runtime };
+      runtime =
+        Runtime_store.empty
+        |> Runtime_store.set_tab Nav.Runtime_quotas_credits
+        |> Runtime_store.set_fusion_keeper (Some "alpha")
+        |> Runtime_store.set_fusion_prompt "Investigate latency";
+    }
+  in
+  let _, cmds_qref = step m_rt (char_key "r") in
+  Alcotest.(check bool) "Runtime Quotas [r] emits Get_runtime_probe force=true" true
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_runtime_probe { force = true }; _ } ->
+             true
+         | _ -> false)
+       cmds_qref);
+  let m_fmod, _ = step m_rt (char_key "f") in
+  let _, cmds_flaunch = step m_fmod (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Runtime [f] modal submit emits Post_fusion_launch" true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             { req = Cmd.Post_fusion_launch { keeper = "alpha"; _ }; _ } ->
+             true
+         | _ -> false)
+       cmds_flaunch);
+
+  (* 5. Keepers: active turn interrupt (Esc & Ctrl+X), Speak ([S]), Copy ([y]), [c] quick chat, Server_offline [s], /model *)
+  let chat_page : Wire_fleet.chat_history_page =
+    {
+      messages =
+        [
+          {
+            id = "m1";
+            role = Wire_fleet.Role_assistant;
+            content = "Latest assistant answer for clipboard and TTS";
+            ts_unix = 100.0;
+            turn_ref = None;
+            model_used = None;
+            tool_call_id = None;
+            tool_call_name = None;
+            execution_id = None;
+          };
+        ];
+      has_more = false;
+      next_cursor = None;
+    }
+  in
+  let m_kchat =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Keepers;
+          dive_stack = [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat } ];
+        };
+      fleet =
+        Fleet_store.empty
+        |> Fleet_store.apply_chat_history ~observed_at:t0 ~keeper:"alpha" chat_page
+        |> Fleet_store.apply_turns ~observed_at:t0
+             [
+               {
+                 keeper_name = "alpha";
+                 chat_control_token = Some "ctrl-1";
+                 state =
+                   Wire_fleet.Turn_active
+                     {
+                       lane = Wire_fleet.Lane_chat;
+                       started_at_unix = 100.0;
+                       interrupt_token = "int-tok-7";
+                       phase = Some "thinking";
+                       tool_in_flight = None;
+                       elapsed_ms = Some 500.0;
+                     };
+               };
+             ];
+    }
+  in
+  let _, cmds_int_esc = step m_kchat (key Keymap.Input.Escape) in
+  Alcotest.(check bool) "Keeper_chat active turn Esc emits Post_keeper_turn_interrupt"
+    true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_keeper_turn_interrupt
+                   { keeper = "alpha"; interrupt_token = "int-tok-7" };
+               _;
+             } ->
+             true
+         | _ -> false)
+       cmds_int_esc);
+  let _, cmds_int_cx = step m_kchat (char_key ~ctrl:true "x") in
+  Alcotest.(check bool) "Ctrl+X emits Post_keeper_turn_interrupt" true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             { req = Cmd.Post_keeper_turn_interrupt { keeper = "alpha"; _ }; _ } ->
+             true
+         | _ -> false)
+       cmds_int_cx);
+  let _, cmds_copy = step m_kchat (char_key "y") in
+  Alcotest.(check bool) "Keeper_chat [y] copies latest assistant reply" true
+    (has_cmd
+       (function
+         | Cmd.Copy_clipboard "Latest assistant answer for clipboard and TTS" ->
+             true
+         | _ -> false)
+       cmds_copy);
+  let _, cmds_speak = step m_kchat (char_key "S") in
+  Alcotest.(check bool) "Keeper_chat [S] emits Voice_cmd Speak" true
+    (has_cmd
+       (function
+         | Cmd.Voice_cmd
+             (Cmd.Speak
+                { text = "Latest assistant answer for clipboard and TTS"; _ }) ->
+             true
+         | _ -> false)
+       cmds_speak);
+  let m_offline =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          overlay = Some (Nav.System_gate Nav.Server_offline);
+        };
+    }
+  in
+  let _, cmds_start = step m_offline (char_key "s") in
+  Alcotest.(check bool) "Server_offline [s] emits Start_local_server" true
+    (has_cmd (function Cmd.Start_local_server -> true | _ -> false) cmds_start);
+  let m_mod, cmds_mod =
+    Update.execute_slash ~now:t0 m0 (Slash.Model (Some "sonnet-4"))
+  in
+  Alcotest.(check bool) "/model opens Settings on Providers/Models" true
+    (Option.equal Nav.equal_overlay m_mod.nav.overlay
+       (Some (Nav.Settings Nav.Settings_providers_models)));
+  Alcotest.(check string) "/model pre-fills Settings search query" "sonnet-4"
+    m_mod.config.search_query;
+  Alcotest.(check bool) "/model emits real cmds (never fake empty toast)" true
+    (Cmd.flatten cmds_mod <> [])
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -2727,5 +3349,7 @@ let () =
             `Quick test_round2_store_regressions;
           Alcotest.test_case "v2.5 data pipeline, 404 fallbacks, unreported toggle & 2-pane Settings"
             `Quick test_v25_data_pipeline_and_settings_2pane;
+          Alcotest.test_case "P0-3/P0-4/P1-11 Settings safety & all wired Cmd mutations"
+            `Quick test_p0_actions_settings_safety_and_wired_cmds;
         ] );
     ]

@@ -1213,6 +1213,65 @@ let test_exit_line_fd_and_local_tz_offset () =
     (tz >= -43200 && tz <= 50400);
   Alcotest.(check int) "tz_offset_sec is whole minutes" 0 (tz mod 60)
 
+let test_p2_voice_runner_ffmpeg_and_afplay () =
+  (* 1. Recorder resolution order: rec -> sox -> ffmpeg *)
+  let find_only target name =
+    if String.equal name target then Some ("/usr/local/bin/" ^ name) else None
+  in
+  (match Voice_runner.resolve_recorder_from ~find:(find_only "ffmpeg") with
+  | Some (Voice_runner.Recorder_ffmpeg, "/usr/local/bin/ffmpeg") -> ()
+  | _ -> Alcotest.fail "expected ffmpeg fallback when rec/sox absent");
+  (match Voice_runner.resolve_recorder_from ~find:(find_only "rec") with
+  | Some (Voice_runner.Recorder_rec, "/usr/local/bin/rec") -> ()
+  | _ -> Alcotest.fail "expected rec when present");
+  (match Voice_runner.resolve_recorder_from ~find:(fun _ -> None) with
+  | None -> ()
+  | Some _ -> Alcotest.fail "expected None when no recorder on PATH");
+
+  (* 2. ffmpeg recording command args match avfoundation 16kHz mono wav *)
+  let argv_default =
+    Voice_runner.build_record_argv ~kind:Voice_runner.Recorder_ffmpeg
+      ~bin_path:"/opt/homebrew/bin/ffmpeg" ~device:None ~out_path:"/tmp/ptt.wav"
+  in
+  Alcotest.(check (array string)) "ffmpeg default avfoundation argv"
+    [|
+      "/opt/homebrew/bin/ffmpeg";
+      "-y";
+      "-loglevel";
+      "error";
+      "-f";
+      "avfoundation";
+      "-i";
+      ":default";
+      "-ar";
+      "16000";
+      "-ac";
+      "1";
+      "-f";
+      "wav";
+      "/tmp/ptt.wav";
+    |]
+    argv_default;
+  let argv_dev =
+    Voice_runner.build_record_argv ~kind:Voice_runner.Recorder_ffmpeg
+      ~bin_path:"/opt/homebrew/bin/ffmpeg" ~device:(Some ":1")
+      ~out_path:"/tmp/ptt2.wav"
+  in
+  Alcotest.(check string) "ffmpeg honors explicit device" ":1" argv_dev.(7);
+
+  (* 3. Audio player resolution for speak: afplay -> ffplay -> aplay *)
+  Alcotest.(check (option (pair string string))) "afplay resolved first"
+    (Some ("afplay", "/usr/bin/afplay"))
+    (Voice_runner.resolve_audio_player_from
+       ~find:(fun n -> if String.equal n "afplay" then Some "/usr/bin/afplay" else None));
+  Alcotest.(check (option (pair string string))) "None when no player present"
+    None
+    (Voice_runner.resolve_audio_player_from ~find:(fun _ -> None));
+  Alcotest.(check (array string)) "afplay argv"
+    [| "/usr/bin/afplay"; "/tmp/reply.mp3" |]
+    (Voice_runner.build_player_argv ~player:"afplay"
+       ~bin_path:"/usr/bin/afplay" ~audio_path:"/tmp/reply.mp3")
+
 let () =
   Alcotest.run "masc_tui_app"
     [
@@ -1266,5 +1325,7 @@ let () =
             `Quick test_app_ctrl_c_and_voice_tick_gate;
           Alcotest.test_case "caller stderr exit line & local tz offset" `Quick
             test_exit_line_fd_and_local_tz_offset;
+          Alcotest.test_case "P2-1 Voice_runner ffmpeg avfoundation argv & afplay lookup"
+            `Quick test_p2_voice_runner_ffmpeg_and_afplay;
         ] );
     ]

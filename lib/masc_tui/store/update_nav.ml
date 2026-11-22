@@ -741,9 +741,22 @@ let dive_selected (m : Model.t) =
       | Nav.Runtime_efficiency_spend
       | Nav.Runtime_failover_lanes
       | Nav.Runtime_tools_connectors -> (
-          match Runtime_store.selected_lane m.runtime with
-          | Some lane -> push_dive m (Nav.Dive_infra (Nav.Lane_dive lane.id))
-          | None -> (m, [])))
+          match Runtime_store.to_fusion_launch_request m.runtime with
+          | Ok (keeper, request) ->
+              let runtime = Runtime_store.set_fusion_submitting true m.runtime in
+              ( { m with runtime }
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req = Cmd.Post_fusion_launch { keeper; request };
+                    };
+                ] )
+          | Error _ -> (
+              match Runtime_store.selected_lane m.runtime with
+              | Some lane ->
+                  push_dive m (Nav.Dive_infra (Nav.Lane_dive lane.id))
+              | None -> (m, []))))
   | Nav.Infra -> (
       match m.infra.active_tab with
       | Nav.Infra_sandboxes -> (
@@ -886,20 +899,242 @@ let submit_inline_modal ~now (m : Model.t) =
                     { epoch = m.epoch; req = Cmd.Post_repo_add { url; branch } };
                 ] )
           | Nav.Board_new_post ->
-              let title = Model.modal_field_value ~key:"title" modal in
-              let body = Model.modal_field_value ~key:"body" modal in
-              let hearth_raw = Model.modal_field_value ~key:"hearth" modal in
-              let hearth =
-                if String.equal hearth_raw "" then None else Some hearth_raw
+              let has_field key =
+                List.exists
+                  (fun (f : Model.modal_form_field) -> String.equal f.key key)
+                  modal.fields
               in
-              ( mark_submitting m
-              , [
-                  Cmd.Http_post
-                    {
-                      epoch = m.epoch;
-                      req = Cmd.Post_board_create { title; body; hearth };
-                    };
-                ] )))
+              let set_modal_error err =
+                ( { m with inline_modal = Some { modal with error = Some err } }
+                , [] )
+              in
+              if has_field "goal_title" then (
+                let title = Model.modal_field_value ~key:"goal_title" modal in
+                let measure =
+                  Model.modal_field_value ~key:"goal_measure" modal
+                in
+                let proc =
+                  Model.modal_field_value ~key:"goal_procedure" modal
+                in
+                let prio_raw =
+                  Model.modal_field_value ~key:"goal_priority" modal
+                in
+                let prio_res =
+                  if String.equal prio_raw "" then Ok 2
+                  else
+                    match int_of_string_opt prio_raw with
+                    | Some p when p >= 1 && p <= 5 -> Ok p
+                    | Some _ | None ->
+                        Error "Priority must be an integer between 1 and 5"
+                in
+                match prio_res with
+                | Error err -> set_modal_error err
+                | Ok prio ->
+                    let body =
+                      if String.equal proc "" then
+                        Printf.sprintf "Priority: P%d\nMeasure: %s" prio measure
+                      else
+                        Printf.sprintf
+                          "Priority: P%d\nMeasure: %s\nProcedure: %s" prio
+                          measure proc
+                    in
+                    ( mark_submitting m
+                    , [
+                        Cmd.Http_post
+                          {
+                            epoch = m.epoch;
+                            req =
+                              Cmd.Post_board_create
+                                {
+                                  title = "[Goal] " ^ title;
+                                  body;
+                                  hearth = Some "goals";
+                                };
+                          };
+                      ] ))
+              else if has_field "memory_act" then (
+                let keeper =
+                  Model.modal_field_value ~key:"memory_keeper" modal
+                in
+                let act_raw =
+                  String.lowercase_ascii
+                    (Model.modal_field_value ~key:"memory_act" modal)
+                in
+                let arg = Model.modal_field_value ~key:"memory_arg" modal in
+                let parsed_act =
+                  match act_raw with
+                  | "resume" -> Ok Wire_knowledge.Act_resume
+                  | "adopt" ->
+                      if String.equal arg "" then
+                        Error "Observed value is required for adopt"
+                      else Ok (Wire_knowledge.Act_adopt { observed = arg })
+                  | "restart_reading" ->
+                      if String.equal arg "" then
+                        Error "Observed value is required for restart_reading"
+                      else
+                        Ok
+                          (Wire_knowledge.Act_restart_reading { observed = arg })
+                  | "skip_item" -> (
+                      match String.rindex_opt arg ':' with
+                      | None ->
+                          Error "skip_item requires <turn_log>:<line> argument"
+                      | Some idx -> (
+                          let turn_log =
+                            String.trim (String.sub arg 0 idx)
+                          in
+                          let line_s =
+                            String.trim
+                              (String.sub arg (idx + 1)
+                                 (String.length arg - idx - 1))
+                          in
+                          match int_of_string_opt line_s with
+                          | Some line
+                            when line >= 1 && not (String.equal turn_log "") ->
+                              Ok
+                                (Wire_knowledge.Act_skip_item { turn_log; line })
+                          | Some _ | None ->
+                              Error
+                                "skip_item requires <turn_log>:<positive_line>"))
+                  | "skip_line" -> (
+                      match int_of_string_opt arg with
+                      | Some offset when offset >= 0 ->
+                          Ok (Wire_knowledge.Act_skip_line { offset })
+                      | Some _ | None ->
+                          Error "skip_line requires a non-negative byte offset")
+                  | _ ->
+                      Error
+                        "Unsupported act (use: resume | adopt | restart_reading \
+                         | skip_item | skip_line)"
+                in
+                match parsed_act with
+                | Error err -> set_modal_error err
+                | Ok act ->
+                    ( mark_submitting m
+                    , [
+                        Cmd.Http_post
+                          {
+                            epoch = m.epoch;
+                            req = Cmd.Post_memory_act { keeper; act };
+                          };
+                      ] ))
+              else if has_field "wiki_slug" then (
+                let slug = Model.modal_field_value ~key:"wiki_slug" modal in
+                let title = Model.modal_field_value ~key:"wiki_title" modal in
+                let summary =
+                  Model.modal_field_value ~key:"wiki_summary" modal
+                in
+                let body = Model.modal_field_value ~key:"wiki_body" modal in
+                let note_raw = Model.modal_field_value ~key:"wiki_note" modal in
+                let note =
+                  if String.equal note_raw "" then "TUI inline edit"
+                  else note_raw
+                in
+                let expected_revision, expected_sha256, source, tags =
+                  match Observed.to_option m.knowledge.wiki_page with
+                  | Some detail when String.equal detail.slug slug ->
+                      ( Some detail.frontmatter.revision
+                      , Some detail.sha256
+                      , detail.frontmatter.source
+                      , detail.frontmatter.tags )
+                  | Some _ | None -> (
+                      match Observed.to_option m.knowledge.wiki_index with
+                      | Some idx -> (
+                          match
+                            List.find_opt
+                              (fun (p : Wire_knowledge.wiki_page_summary) ->
+                                String.equal p.slug slug)
+                              idx.pages
+                          with
+                          | Some s ->
+                              ( Some s.revision
+                              , Some s.sha256
+                              , s.source
+                              , s.tags )
+                          | None ->
+                              (None, None, Wire_knowledge.Source_observation, []))
+                      | None ->
+                          (None, None, Wire_knowledge.Source_observation, []))
+                in
+                let request : Wire_knowledge.wiki_put_request =
+                  {
+                    expected_revision;
+                    expected_sha256;
+                    title;
+                    summary;
+                    source;
+                    tags;
+                    body;
+                    note;
+                  }
+                in
+                ( mark_submitting m
+                , [
+                    Cmd.Http_put
+                      {
+                        epoch = m.epoch;
+                        req = Cmd.Put_wiki_page { page = slug; request };
+                      };
+                  ] ))
+              else if has_field "fusion_prompt" then (
+                let keeper =
+                  Model.modal_field_value ~key:"fusion_keeper" modal
+                in
+                let prompt =
+                  Model.modal_field_value ~key:"fusion_prompt" modal
+                in
+                let topo_raw =
+                  String.lowercase_ascii
+                    (Model.modal_field_value ~key:"fusion_topology" modal)
+                in
+                let preset_raw =
+                  Model.modal_field_value ~key:"fusion_preset" modal
+                in
+                let topology_res =
+                  if String.equal topo_raw "" then Ok None
+                  else
+                    match Wire_runtime.fusion_topology_of_string topo_raw with
+                    | Some topo -> Ok (Some topo)
+                    | None ->
+                        Error
+                          "Unknown topology (use: simple | refine | conditional \
+                           | judge_of_judges | staged_judge_of_judges)"
+                in
+                match topology_res with
+                | Error err -> set_modal_error err
+                | Ok topology ->
+                    let preset =
+                      if String.equal preset_raw "" then None
+                      else Some preset_raw
+                    in
+                    let request : Wire_runtime.fusion_launch_request =
+                      { prompt; preset; topology; web_tools = false }
+                    in
+                    let runtime =
+                      Runtime_store.set_fusion_submitting true m.runtime
+                    in
+                    ( mark_submitting { m with runtime }
+                    , [
+                        Cmd.Http_post
+                          {
+                            epoch = m.epoch;
+                            req = Cmd.Post_fusion_launch { keeper; request };
+                          };
+                      ] ))
+              else
+                let title = Model.modal_field_value ~key:"title" modal in
+                let body = Model.modal_field_value ~key:"body" modal in
+                let hearth_raw = Model.modal_field_value ~key:"hearth" modal in
+                let hearth =
+                  if String.equal hearth_raw "" then None else Some hearth_raw
+                in
+                ( mark_submitting m
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req = Cmd.Post_board_create { title; body; hearth };
+                      };
+                  ] )))
 
 let move_delta = function
   | Keymap.Up -> -1

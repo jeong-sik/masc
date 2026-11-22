@@ -8,6 +8,191 @@ let next_theme_preset = function
   | Theme.Paper_light -> Theme.Mono
   | Theme.Mono -> Theme.Midnight
 
+let extract_first_http_url (text : string) : string option =
+  let len = String.length text in
+  let is_url_char = function
+    | ' ' | '\t' | '\n' | '\r' | '"' | '\'' | '<' | '>' | ')' | ']' | ',' | ';' ->
+        false
+    | _ -> true
+  in
+  let has_prefix pos prefix =
+    let plen = String.length prefix in
+    pos + plen <= len && String.equal (String.sub text pos plen) prefix
+  in
+  let rec scan i =
+    if i >= len then None
+    else if has_prefix i "https://" || has_prefix i "http://" then (
+      let rec find_end j =
+        if j < len && is_url_char text.[j] then find_end (j + 1) else j
+      in
+      let stop = find_end i in
+      let url = String.sub text i (stop - i) in
+      if String.length url > 8 then Some url else scan (stop + 1))
+    else scan (i + 1)
+  in
+  scan 0
+
+let latest_keeper_reply_text (m : Model.t) : (string * string) option =
+  let keeper_opt =
+    match Model.active_dive m with
+    | Some (Nav.Dive_keeper { name; _ }) -> Some name
+    | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _) | None -> (
+        match m.nav.workspace with
+        | Nav.Keepers ->
+            Option.map
+              (fun (k : Wire_fleet.keeper_summary) -> k.name)
+              (Fleet_store.selected_keeper_summary m.fleet)
+        | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Runtime | Nav.Infra -> None)
+  in
+  match keeper_opt with
+  | None -> None
+  | Some keeper -> (
+      let stream_text =
+        match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with
+        | Some s when not (String.equal (String.trim s.text) "") -> Some s.text
+        | Some _ | None -> None
+      in
+      match stream_text with
+      | Some txt -> Some (keeper, txt)
+      | None -> (
+          match
+            Fleet_store.String_map.find_opt keeper m.fleet.chat_histories
+          with
+          | None -> None
+          | Some obs -> (
+              match Observed.to_option obs with
+              | None -> None
+              | Some page ->
+                  List.find_map
+                    (fun (msg : Wire_fleet.chat_message) ->
+                      match msg.role with
+                      | Wire_fleet.Role_assistant
+                        when not (String.equal (String.trim msg.content) "") ->
+                          Some (keeper, msg.content)
+                      | Wire_fleet.Role_assistant
+                      | Wire_fleet.Role_user
+                      | Wire_fleet.Role_system
+                      | Wire_fleet.Role_tool ->
+                          None)
+                    (List.rev page.messages))))
+
+let find_writable_runtime_field (schema : Wire_config.config_schema) =
+  List.find_map
+    (fun (sec : Wire_config.schema_section) ->
+      List.find_map
+        (fun (f : Wire_config.schema_field) ->
+          let is_runtime_key =
+            String.equal f.key "runtime"
+            || String.equal f.key "runtime_id"
+            || String.equal f.key "model"
+            || String.equal f.key "default_route"
+          in
+          let is_string_like =
+            match f.kind with
+            | Wire_config.Field_string | Wire_config.Field_enum _ -> true
+            | Wire_config.Field_bool
+            | Wire_config.Field_int _
+            | Wire_config.Field_float _
+            | Wire_config.Field_string_list
+            | Wire_config.Field_structured
+            | Wire_config.Field_secret ->
+                false
+          in
+          if f.writable && is_runtime_key && is_string_like then Some f
+          else None)
+        sec.fields)
+    schema.sections
+
+let apply_model_selection ~now ~runtime_id (m : Model.t) =
+  let m0 = { m with nav = { m.nav with overlay = None } } in
+  let target_keeper =
+    match Model.active_dive m0 with
+    | Some (Nav.Dive_keeper { name; _ }) -> Some name
+    | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _) | None ->
+        None
+  in
+  let staged_keeper_dry_run =
+    match target_keeper, Observed.to_option m0.config.schema with
+    | Some keeper, Some schema
+      when Config_store.equal_config_target schema.target
+             (Wire_config.Target_keeper keeper) -> (
+        match find_writable_runtime_field schema with
+        | None -> None
+        | Some fld -> (
+            let config =
+              m0.config
+              |> Config_store.set_target (Wire_config.Target_keeper keeper)
+              |> Config_store.set_tab Nav.Settings_keepers_companies
+              |> Config_store.stage_patch ~full_key:fld.full_key
+                   (Wire_config.Set_scalar
+                      { table = fld.table; key = fld.key; value = runtime_id })
+            in
+            match Config_store.build_patch_request ~dry_run:true config with
+            | Error _ -> None
+            | Ok req ->
+                let config = Config_store.mark_dry_run_loading config in
+                let nav =
+                  {
+                    m0.nav with
+                    overlay =
+                      Some (Nav.Settings Nav.Settings_keepers_companies);
+                    filter_focused = false;
+                  }
+                in
+                let next =
+                  { m0 with nav; config }
+                  |> Model.with_toast ~now ~level:Model.Toast_info
+                       (Say.make
+                          ~ko:
+                            (Printf.sprintf
+                               "%s 런타임 변경 미리보기: %s (Ctrl+S 저장)"
+                               keeper runtime_id)
+                          ~en:
+                            (Printf.sprintf
+                               "Dry-run runtime switch for %s -> %s (Ctrl+S to \
+                                save)"
+                               keeper runtime_id))
+                in
+                Some
+                  ( next
+                  , [
+                      Cmd.Http_post
+                        { epoch = next.epoch; req = Cmd.Post_config_patch req };
+                    ] )))
+    | Some _, (Some _ | None) | None, (Some _ | None) -> None
+  in
+  match staged_keeper_dry_run with
+  | Some res -> res
+  | None ->
+      let config =
+        m0.config
+        |> Config_store.set_target Wire_config.Target_runtime
+        |> Config_store.set_tab Nav.Settings_providers_models
+        |> Config_store.set_search_query runtime_id
+      in
+      let next, view_cmds =
+        Update_nav.open_overlay { m0 with config }
+          (Nav.Settings Nav.Settings_providers_models)
+      in
+      let cmds =
+        match view_cmds with
+        | [] ->
+            [
+              Cmd.Http_get
+                {
+                  epoch = next.epoch;
+                  req = Cmd.Get_config_schema Wire_config.Target_runtime;
+                };
+            ]
+        | _ -> view_cmds
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_info
+          (Say.make
+             ~ko:("설정에서 런타임 확인/변경: " ^ runtime_id)
+             ~en:("Inspect/edit runtime in Settings: " ^ runtime_id))
+          next
+      , cmds )
+
 let find_actionable_ask (m : Model.t) =
   match Work_store.selected_open_ask m.work with
   | Some ask -> Some ask
@@ -56,13 +241,7 @@ let rec execute_slash ~now (m : Model.t) cmd =
       in
       (m2, cmds1 @ cmds2)
   | Slash.Model None -> Update_nav.open_palette m Model.Palette_models
-  | Slash.Model (Some runtime_id) ->
-      ( Model.with_toast ~now ~level:Model.Toast_info
-          (Say.make
-             ~ko:("런타임 모델 선택됨: " ^ runtime_id)
-             ~en:("Selected runtime model: " ^ runtime_id))
-          m
-      , [] )
+  | Slash.Model (Some runtime_id) -> apply_model_selection ~now ~runtime_id m
   | Slash.Config None -> Update_nav.open_global_settings m
   | Slash.Config (Some query) ->
       Update_nav.open_global_settings ~search_query:query m
@@ -247,15 +426,7 @@ and confirm_palette ~now (m : Model.t) =
           (Update_nav.clamp_index (List.length items) m.palette.selected)
       with
       | None -> ({ m with nav = { m.nav with overlay = None } }, [])
-      | Some r ->
-          let m_closed =
-            { m with nav = { m.nav with overlay = None } }
-            |> Model.with_toast ~now ~level:Model.Toast_info
-                 (Say.make
-                    ~ko:("선택된 런타임: " ^ r.id)
-                    ~en:("Selected runtime: " ^ r.id))
-          in
-          (m_closed, []))
+      | Some r -> apply_model_selection ~now ~runtime_id:r.id m)
 
 and execute_action ~now (m : Model.t) action =
   match action with
@@ -315,18 +486,30 @@ and execute_action ~now (m : Model.t) action =
         | Some Nav.Palette -> confirm_palette ~now m
         | Some (Nav.Inline_action _) -> Update_nav.submit_inline_modal ~now m
         | Some (Nav.Settings _) ->
-            if Config_store.is_editing_field m.config then
+            if Config_store.is_editing_field m.config then (
+              let was_new_keeper =
+                Config_store.is_editing_new_keeper_name m.config
+              in
               match Config_store.commit_edit_field m.config with
               | Ok config ->
-                  ( Model.with_toast ~now ~level:Model.Toast_info
-                      (Say.make ~ko:"변경값이 스테이징됨 (Space: 미리보기)"
-                         ~en:"Staged field change (Space: dry-run diff)")
-                      { m with config }
-                  , [] )
+                  let msg =
+                    if was_new_keeper then
+                      Say.make
+                        ~ko:
+                          ("새 키퍼 이름 설정됨: " ^ config.new_keeper_name
+                         ^ " (Ctrl+S 저장)")
+                        ~en:
+                          ("New keeper name set: " ^ config.new_keeper_name
+                         ^ " (Ctrl+S to save)")
+                    else
+                      Say.make ~ko:"변경값이 스테이징됨 (Space: 미리보기)"
+                        ~en:"Staged field change (Space: dry-run diff)"
+                  in
+                  (Model.with_toast ~now ~level:Model.Toast_info msg { m with config }, [])
               | Error reason ->
                   ( Model.with_toast ~now ~level:Model.Toast_warning
                       (Say.literal reason) m
-                  , [] )
+                  , [] ))
             else (
               match m.config.settings_pane with
               | Config_store.Pane_tree ->
@@ -394,18 +577,86 @@ and execute_action ~now (m : Model.t) action =
             ({ m with nav = { m.nav with filter_focused = false } }, [])
           else if Drafts.is_focused m.drafts then
             ({ m with drafts = Drafts.set_focus false m.drafts }, [])
-          else (
-            match m.nav.dive_stack with
-            | _ :: rest ->
-                let next =
-                  { m with nav = { m.nav with dive_stack = rest } }
-                  |> Update_nav.sync_config_for_keeper_view
-                in
-                (next, View_fetches.fetches_for_current_view next)
-            | [] ->
-                if not (String.equal (Update_nav.current_filter_query m) "") then
-                  (Update_nav.set_active_filter_query "" m, [])
-                else (m, [])))
+          else
+            let active_chat_interrupt =
+              match Model.active_dive m with
+              | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }) -> (
+                  let active_stream_opt =
+                    match
+                      Fleet_store.String_map.find_opt name m.fleet.chat_streams
+                    with
+                    | Some s when s.active -> Some s
+                    | Some _ | None -> None
+                  in
+                  match
+                    Fleet_store.active_turn_for ~keeper:name m.fleet
+                  , active_stream_opt
+                  with
+                  | Some turn, stream_opt ->
+                      let fleet =
+                        match stream_opt with
+                        | Some s ->
+                            Fleet_store.finish_chat_stream ~keeper:name
+                              ~request_id:s.request_id
+                              ~error:(Some "Interrupted by operator") m.fleet
+                        | None -> m.fleet
+                      in
+                      Some (name, turn.interrupt_token, fleet)
+                  | None, Some s ->
+                      let token =
+                        Option.value s.operation_id ~default:s.request_id
+                      in
+                      let fleet =
+                        Fleet_store.finish_chat_stream ~keeper:name
+                          ~request_id:s.request_id
+                          ~error:(Some "Interrupted by operator") m.fleet
+                      in
+                      Some (name, token, fleet)
+                  | None, None -> None)
+              | Some
+                  ( Nav.Dive_keeper
+                      {
+                        tab =
+                          ( Nav.Keeper_memory
+                          | Nav.Keeper_work_candle
+                          | Nav.Keeper_sandbox
+                          | Nav.Keeper_config );
+                        _;
+                      }
+                  | Nav.Dive_work _
+                  | Nav.Dive_knowledge _
+                  | Nav.Dive_infra _ )
+              | None ->
+                  None
+            in
+            match active_chat_interrupt with
+            | Some (keeper, interrupt_token, fleet) ->
+                ( Model.with_toast ~now ~level:Model.Toast_warning
+                    (Say.make
+                       ~ko:("키퍼 턴 중단 요청 전송: " ^ keeper)
+                       ~en:("Interrupt requested for keeper turn: " ^ keeper))
+                    { m with fleet }
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Post_keeper_turn_interrupt
+                            { keeper; interrupt_token };
+                      };
+                  ] )
+            | None -> (
+                match m.nav.dive_stack with
+                | _ :: rest ->
+                    let next =
+                      { m with nav = { m.nav with dive_stack = rest } }
+                      |> Update_nav.sync_config_for_keeper_view
+                    in
+                    (next, View_fetches.fetches_for_current_view next)
+                | [] ->
+                    if not (String.equal (Update_nav.current_filter_query m) "")
+                    then (Update_nav.set_active_filter_query "" m, [])
+                    else (m, [])))
   | Keymap.Open_settings -> Update_nav.open_global_settings m
   | Keymap.Teleport_blocked -> Update_nav.teleport_blocked ~now m
   | Keymap.Open_incidents ->
@@ -488,7 +739,7 @@ and execute_action ~now (m : Model.t) action =
           match Model.active_dive m with
           | Some (Nav.Dive_keeper { tab = Nav.Keeper_chat; _ }) ->
               ({ m with fleet = Fleet_store.toggle_turn_details m.fleet }, [])
-          | Some (Nav.Dive_infra _) ->
+          | Some (Nav.Dive_infra _ | Nav.Dive_work _) ->
               ({ m with infra = Infra_store.toggle_raw_json m.infra }, [])
           | Some
               ( Nav.Dive_keeper
@@ -500,7 +751,6 @@ and execute_action ~now (m : Model.t) action =
                       | Nav.Keeper_config );
                     _;
                   }
-              | Nav.Dive_work _
               | Nav.Dive_knowledge _ )
           | None -> (
               match m.nav.workspace with
@@ -567,19 +817,40 @@ and execute_action ~now (m : Model.t) action =
               | Nav.Pulse -> (m, []))))
   | Keymap.Create_new -> (
       match m.nav.overlay with
-      | Some (Nav.Settings _) -> (
-          match Config_store.build_patch_request ~dry_run:false m.config with
-          | Ok req ->
-              let config = Config_store.mark_save_in_flight m.config in
-              ( { m with config }
-              , [
-                  Cmd.Http_post
-                    { epoch = m.epoch; req = Cmd.Post_config_patch req };
-                ] )
-          | Error reason ->
-              ( Model.with_toast ~now ~level:Model.Toast_info
-                  (Say.literal reason) m
-              , [] ))
+      | Some (Nav.Settings _) ->
+          (* P1-11: NEVER trigger Save on bare [n] in Settings — Save is
+             strictly Ctrl+S. On Keepers tab or Target_keeper_create, [n]
+             starts typing the new keeper name; elsewhere it reminds the
+             operator to use Ctrl+S. *)
+          if
+            Config_store.equal_config_target m.config.target
+              Wire_config.Target_keeper_create
+            || Nav.equal_settings_tab m.config.active_tab
+                 Nav.Settings_keepers_companies
+          then
+            let config =
+              m.config
+              |> Config_store.set_target Wire_config.Target_keeper_create
+              |> Config_store.set_tab Nav.Settings_keepers_companies
+              |> Config_store.begin_edit_new_keeper_name
+            in
+            let nav =
+              {
+                m.nav with
+                overlay = Some (Nav.Settings Nav.Settings_keepers_companies);
+              }
+            in
+            ( Model.with_toast ~now ~level:Model.Toast_info
+                (Say.make ~ko:"새 키퍼 이름을 입력하고 Enter 를 누르세요"
+                   ~en:"Type new keeper name and press Enter")
+                { m with nav; config }
+            , [] )
+          else
+            ( Model.with_toast ~now ~level:Model.Toast_info
+                (Say.make ~ko:"설정 저장은 Ctrl+S 를 사용하세요"
+                   ~en:"Use Ctrl+S to save config changes")
+                m
+            , [] )
       | Some
           ( Nav.Palette
           | Nav.Incidents
@@ -591,12 +862,78 @@ and execute_action ~now (m : Model.t) action =
       | None -> (
           match m.nav.workspace with
           | Nav.Knowledge -> Update_nav.open_inline_modal m Nav.Board_new_post
-          | Nav.Work -> Update_nav.open_inline_modal m Nav.Schedule_form
+          | Nav.Work -> (
+              match m.work.active_tab with
+              | Nav.Work_pipeline ->
+                  let modal : Model.inline_modal_state =
+                    {
+                      kind = Nav.Board_new_post;
+                      fields =
+                        [
+                          {
+                            key = "goal_title";
+                            label = Say.make ~ko:"목표 제목" ~en:"Goal title";
+                            value = "";
+                            required = true;
+                          };
+                          {
+                            key = "goal_measure";
+                            label =
+                              Say.make ~ko:"달성 기준 (Measure)"
+                                ~en:"Success measure";
+                            value = "";
+                            required = true;
+                          };
+                          {
+                            key = "goal_procedure";
+                            label =
+                              Say.make ~ko:"검증 절차 (Procedure)"
+                                ~en:"Verification procedure";
+                            value = "";
+                            required = false;
+                          };
+                          {
+                            key = "goal_priority";
+                            label =
+                              Say.make ~ko:"우선순위 (1-5)" ~en:"Priority (1-5)";
+                            value = "2";
+                            required = false;
+                          };
+                        ];
+                      active_field = 0;
+                      submitting = false;
+                      error = None;
+                    }
+                  in
+                  let nav =
+                    {
+                      m.nav with
+                      overlay = Some (Nav.Inline_action Nav.Board_new_post);
+                      filter_focused = false;
+                    }
+                  in
+                  let drafts = Drafts.set_focus false m.drafts in
+                  ({ m with nav; drafts; inline_modal = Some modal }, [])
+              | Nav.Work_tasks_schedules ->
+                  Update_nav.open_inline_modal m Nav.Schedule_form
+              | Nav.Work_inbox | Nav.Work_candle_scorecard ->
+                  ( Model.with_toast ~now ~level:Model.Toast_info
+                      (Say.make
+                         ~ko:
+                           "목표 생성은 Pipeline 탭, 스케줄 생성은 Tasks/Schedules 탭에서 [n]을 누르세요"
+                         ~en:
+                           "Press [n] on Pipeline to add a goal or \
+                            Tasks/Schedules to add a schedule")
+                      m
+                  , [] ))
           | Nav.Runtime -> Update_nav.open_inline_modal m Nav.Connector_form
           | Nav.Infra -> Update_nav.open_inline_modal m Nav.Repo_add_form
           | Nav.Keepers ->
               let config =
-                Config_store.set_target Wire_config.Target_keeper_create m.config
+                m.config
+                |> Config_store.set_target Wire_config.Target_keeper_create
+                |> Config_store.set_tab Nav.Settings_keepers_companies
+                |> Config_store.begin_edit_new_keeper_name
               in
               Update_nav.open_overlay { m with config }
                 (Nav.Settings Nav.Settings_keepers_companies)
@@ -639,7 +976,7 @@ and execute_action ~now (m : Model.t) action =
         let view_cmds = View_fetches.fetches_for_current_view ~force:true next in
         let probe_cmd =
           match next.nav.workspace, next.runtime.active_tab with
-          | Nav.Runtime, Nav.Runtime_failover_lanes ->
+          | Nav.Runtime, (Nav.Runtime_failover_lanes | Nav.Runtime_quotas_credits) ->
               [
                 Cmd.Http_get
                   {
@@ -654,8 +991,7 @@ and execute_action ~now (m : Model.t) action =
               | Nav.Infra )
             , _ )
           | ( Nav.Runtime
-            , ( Nav.Runtime_quotas_credits
-              | Nav.Runtime_efficiency_spend
+            , ( Nav.Runtime_efficiency_spend
               | Nav.Runtime_tools_connectors ) ) ->
               []
         in
@@ -674,10 +1010,15 @@ and execute_action ~now (m : Model.t) action =
                   (Knowledge_store.selected_post m.knowledge)
             | Nav.Knowledge_wiki_artifacts -> (
                 match m.knowledge.wiki_artifacts_submode with
-                | `Wiki ->
-                    Option.map
-                      (fun (p : Wire_knowledge.wiki_page_summary) -> p.slug)
-                      (Knowledge_store.selected_wiki_page m.knowledge)
+                | `Wiki -> (
+                    match Observed.to_option m.knowledge.wiki_page with
+                    | Some detail
+                      when not (String.equal (String.trim detail.body_markdown) "") ->
+                        Some detail.body_markdown
+                    | Some _ | None ->
+                        Option.map
+                          (fun (p : Wire_knowledge.wiki_page_summary) -> p.slug)
+                          (Knowledge_store.selected_wiki_page m.knowledge))
                 | `Artifacts ->
                     Option.map
                       (fun (a : Wire_knowledge.artifact_entry) -> a.sha256)
@@ -701,10 +1042,19 @@ and execute_action ~now (m : Model.t) action =
                 Option.map
                   (fun (e : Wire_infra.system_log_entry) -> e.message)
                   (Infra_store.selected_log m.infra))
-        | Nav.Keepers | Nav.Pulse ->
-            Option.map
-              (fun (k : Wire_fleet.keeper_summary) -> k.name)
-              (Fleet_store.selected_keeper_summary m.fleet)
+        | Nav.Keepers | Nav.Pulse -> (
+            let in_chat =
+              Model.is_in_keeper_chat m
+              || (Nav.equal_workspace m.nav.workspace Nav.Keepers
+                  && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                       Nav.Keeper_chat)
+            in
+            match if in_chat then latest_keeper_reply_text m else None with
+            | Some (_, reply) -> Some reply
+            | None ->
+                Option.map
+                  (fun (k : Wire_fleet.keeper_summary) -> k.name)
+                  (Fleet_store.selected_keeper_summary m.fleet))
         | Nav.Work -> (
             match m.work.active_tab with
             | Nav.Work_pipeline -> (
@@ -762,25 +1112,100 @@ and execute_action ~now (m : Model.t) action =
                      ~en:"Create new keepers in Settings UI ($EDITOR escape hatch unavailable for new keepers)")
                   m
               , [] ))
+      | Some (Nav.System_gate Nav.Media_viewer) ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:"아티팩트 뷰어가 열려 있습니다 ([Esc] 닫기)"
+                 ~en:"Artifact viewer is already open ([Esc] to close)")
+              m
+          , [] )
       | Some
           ( Nav.Palette
           | Nav.Incidents
           | Nav.Queue_context _
           | Nav.Inline_action _
           | Nav.Help
-          | Nav.System_gate _ )
+          | Nav.System_gate
+              (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline) )
       | None -> (
-          match m.nav.workspace with
-          | Nav.Infra -> (
-              match Infra_store.selected_repository m.infra with
-              | Some repo -> (m, [ Cmd.Open_external_url repo.url ])
-              | None -> (m, []))
-          | Nav.Pulse
-          | Nav.Work
-          | Nav.Knowledge
-          | Nav.Keepers
-          | Nav.Runtime ->
-              (m, [])))
+          let open_url_or_notice url_opt =
+            match url_opt with
+            | Some url -> (m, [ Cmd.Open_external_url url ])
+            | None ->
+                ( Model.with_toast ~now ~level:Model.Toast_info
+                    (Say.make ~ko:"열 수 있는 외부 URL 이 없습니다"
+                       ~en:"No external http(s) URL on selected item")
+                    m
+                , [] )
+          in
+          let wiki_external_url () =
+            match Observed.to_option m.knowledge.wiki_page with
+            | None -> None
+            | Some detail -> (
+                match
+                  List.find_map
+                    (fun (lnk : Wire_knowledge.wiki_outgoing_link) ->
+                      extract_first_http_url lnk.target)
+                    detail.outgoing_links
+                with
+                | Some u -> Some u
+                | None -> extract_first_http_url detail.body_markdown)
+          in
+          match Model.active_dive m with
+          | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) ->
+              Update_nav.open_overlay m (Nav.System_gate Nav.Media_viewer)
+          | Some (Nav.Dive_knowledge (Nav.Wiki_dive _)) ->
+              open_url_or_notice (wiki_external_url ())
+          | Some
+              ( Nav.Dive_keeper _
+              | Nav.Dive_work _
+              | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Memory_diff_dive _)
+              | Nav.Dive_infra _ )
+          | None -> (
+              match m.nav.workspace with
+              | Nav.Infra -> (
+                  match Infra_store.selected_repository m.infra with
+                  | Some repo -> (m, [ Cmd.Open_external_url repo.url ])
+                  | None -> open_url_or_notice None)
+              | Nav.Knowledge -> (
+                  match m.knowledge.active_tab with
+                  | Nav.Knowledge_wiki_artifacts -> (
+                      match m.knowledge.wiki_artifacts_submode with
+                      | `Artifacts -> (
+                          match Knowledge_store.selected_artifact m.knowledge with
+                          | Some _ ->
+                              Update_nav.open_overlay m
+                                (Nav.System_gate Nav.Media_viewer)
+                          | None -> open_url_or_notice None)
+                      | `Wiki -> open_url_or_notice (wiki_external_url ()))
+                  | Nav.Knowledge_board ->
+                      let url_opt =
+                        Option.bind
+                          (Knowledge_store.selected_post m.knowledge)
+                          (fun (p : Wire_knowledge.board_post) ->
+                            extract_first_http_url p.body)
+                      in
+                      open_url_or_notice url_opt
+                  | Nav.Knowledge_memory -> open_url_or_notice None)
+              | Nav.Work ->
+                  let url_opt =
+                    match Work_store.selected_goal m.work with
+                    | Some g -> (
+                        match extract_first_http_url g.procedure with
+                        | Some u -> Some u
+                        | None -> extract_first_http_url g.measure)
+                    | None ->
+                        Option.bind (Work_store.selected_task m.work)
+                          (fun (t : Wire_work.task) ->
+                            Option.bind t.description extract_first_http_url)
+                  in
+                  open_url_or_notice url_opt
+              | Nav.Keepers ->
+                  let url_opt =
+                    Option.bind (latest_keeper_reply_text m) (fun (_, txt) ->
+                        extract_first_http_url txt)
+                  in
+                  open_url_or_notice url_opt
+              | Nav.Pulse | Nav.Runtime -> (m, []))))
   | Keymap.Toggle_zoom ->
       ({ m with nav = { m.nav with zoomed = not m.nav.zoomed } }, [])
   | Keymap.Quit_app -> (m, [ Cmd.Quit Exit_reason.Quit_key ])

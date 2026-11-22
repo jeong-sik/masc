@@ -27,6 +27,85 @@ type capabilities = {
   tts_available : bool;
 }
 
+type recorder_kind =
+  | Recorder_rec
+  | Recorder_sox
+  | Recorder_ffmpeg
+
+let resolve_recorder_from ~find =
+  match find "rec" with
+  | Some p -> Some (Recorder_rec, p)
+  | None -> (
+      match find "sox" with
+      | Some p -> Some (Recorder_sox, p)
+      | None -> (
+          match find "ffmpeg" with
+          | Some p -> Some (Recorder_ffmpeg, p)
+          | None -> None))
+
+let build_record_argv ~kind ~bin_path ~device ~out_path =
+  match (kind, device) with
+  | Recorder_rec, _ ->
+      [| bin_path; "-q"; "-r"; "16000"; "-c"; "1"; "-b"; "16"; out_path |]
+  | Recorder_sox, Some dev when not (String.equal (String.trim dev) "") ->
+      [|
+        bin_path;
+        "-q";
+        "-t";
+        "coreaudio";
+        String.trim dev;
+        "-r";
+        "16000";
+        "-c";
+        "1";
+        out_path;
+      |]
+  | Recorder_sox, (Some _ | None) ->
+      [| bin_path; "-q"; "-d"; "-r"; "16000"; "-c"; "1"; out_path |]
+  | Recorder_ffmpeg, _ ->
+      let input =
+        match device with
+        | Some dev when not (String.equal (String.trim dev) "") ->
+            let d = String.trim dev in
+            if String.contains d ':' then d else ":" ^ d
+        | Some _ | None -> ":default"
+      in
+      [|
+        bin_path;
+        "-y";
+        "-loglevel";
+        "error";
+        "-f";
+        "avfoundation";
+        "-i";
+        input;
+        "-ar";
+        "16000";
+        "-ac";
+        "1";
+        "-f";
+        "wav";
+        out_path;
+      |]
+
+let resolve_audio_player_from ~find =
+  match find "afplay" with
+  | Some p -> Some ("afplay", p)
+  | None -> (
+      match find "ffplay" with
+      | Some p -> Some ("ffplay", p)
+      | None -> (
+          match find "aplay" with
+          | Some p -> Some ("aplay", p)
+          | None -> None))
+
+let build_player_argv ~player ~bin_path ~audio_path =
+  match player with
+  | "ffplay" ->
+      [| bin_path; "-nodisp"; "-autoexit"; "-loglevel"; "quiet"; audio_path |]
+  | "aplay" -> [| bin_path; "-q"; audio_path |]
+  | _ -> [| bin_path; audio_path |]
+
 let ( let* ) = Result.bind
 
 let assoc_opt key = function
@@ -170,12 +249,7 @@ let http_and_local_backend ~io ~clock ~endpoint =
   let probe () =
     let recorder_cmd =
       Eio_unix.run_in_systhread (fun () ->
-          match find_on_path "rec" with
-          | Some _ as found -> found
-          | None -> (
-              match find_on_path "sox" with
-              | Some _ as found -> found
-              | None -> find_on_path "ffmpeg"))
+          Option.map snd (resolve_recorder_from ~find:find_on_path))
     in
     match
       Http_client.get_json ~io ~clock ~timeout_sec:3.0 endpoint
@@ -194,32 +268,16 @@ let http_and_local_backend ~io ~clock ~endpoint =
   let record_until_stopped ~device ~stop_signal ~on_level:_ =
     let recorder =
       Eio_unix.run_in_systhread (fun () ->
-          match find_on_path "rec" with
-          | Some p -> Some ("rec", p)
-          | None -> (
-              match find_on_path "sox" with
-              | Some p -> Some ("sox", p)
-              | None -> None))
+          resolve_recorder_from ~find:find_on_path)
     in
     match recorder with
-    | None -> Error "no supported audio recorder (rec/sox) found on PATH"
+    | None -> Error "no supported audio recorder (rec/sox/ffmpeg) found on PATH"
     | Some (kind, bin_path) ->
         let out_path =
           Eio_unix.run_in_systhread (fun () ->
               Filename.temp_file "masc_ptt_" ".wav")
         in
-        let argv =
-          match (kind, device) with
-          | "rec", _ ->
-              [| bin_path; "-q"; "-r"; "16000"; "-c"; "1"; "-b"; "16"; out_path |]
-          | _, Some dev ->
-              [|
-                bin_path; "-q"; "-t"; "coreaudio"; dev; "-r"; "16000"; "-c"; "1";
-                out_path;
-              |]
-          | _, None ->
-              [| bin_path; "-q"; "-d"; "-r"; "16000"; "-c"; "1"; out_path |]
-        in
+        let argv = build_record_argv ~kind ~bin_path ~device ~out_path in
         let pid_ref : int option Atomic.t = Atomic.make None in
         let reap_if_spawned () =
           match Atomic.exchange pid_ref None with
@@ -283,14 +341,70 @@ let http_and_local_backend ~io ~clock ~endpoint =
                   Error ("invalid transcribe JSON: " ^ msg)))
   in
   let speak ~text ~voice_id:_ =
-    let body = encode_tts_probe_request ~text in
-    match
-      Http_client.post_json ~io ~clock ~timeout_sec:15.0 endpoint
-        ~path:voice_probe_tts_path ~body
-        ~decode:(fun _ -> Ok ())
-    with
-    | Ok () -> Ok ()
-    | Error err -> Error (Http_client.http_error_to_string err)
+    let trimmed = String.trim text in
+    if String.equal trimmed "" then Error "empty text for TTS playback"
+    else
+      let player_opt =
+        Eio_unix.run_in_systhread (fun () ->
+            resolve_audio_player_from ~find:find_on_path)
+      in
+      match player_opt with
+      | None ->
+          Error
+            "no local audio player (afplay/ffplay/aplay) found on PATH"
+      | Some (player, bin_path) -> (
+          let body = encode_tts_probe_request ~text:trimmed in
+          let decode_audio_path json =
+            let opt_str key =
+              match assoc_opt key json with
+              | Some (`String s) when not (String.equal (String.trim s) "") ->
+                  Some (String.trim s)
+              | Some _ | None -> None
+            in
+            let path_opt =
+              match opt_str "audio_path" with
+              | Some _ as p -> p
+              | None -> opt_str "file"
+            in
+            Ok path_opt
+          in
+          match
+            Http_client.post_json ~io ~clock ~timeout_sec:15.0 endpoint
+              ~path:voice_probe_tts_path ~body ~decode:decode_audio_path
+          with
+          | Error err -> Error (Http_client.http_error_to_string err)
+          | Ok None -> Ok ()
+          | Ok (Some audio_path) ->
+              Eio_unix.run_in_systhread (fun () ->
+                  if not (Sys.file_exists audio_path) then Ok ()
+                  else
+                    let argv =
+                      build_player_argv ~player ~bin_path ~audio_path
+                    in
+                    match spawn_detached_sync ~bin_path ~argv with
+                    | Error _ as err -> err
+                    | Ok pid ->
+                        let rec wait () =
+                          match Unix.waitpid [] pid with
+                          | _, Unix.WEXITED 0 -> Ok ()
+                          | _, Unix.WEXITED code ->
+                              Error
+                                (Printf.sprintf "%s exited with status %d"
+                                   player code)
+                          | _, (Unix.WSIGNALED s | Unix.WSTOPPED s) ->
+                              Error
+                                (Printf.sprintf "%s stopped by signal %d" player
+                                   s)
+                          | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+                              wait ()
+                          | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
+                              Ok ()
+                          | exception Unix.Unix_error (e, fn, _) ->
+                              Error
+                                (Printf.sprintf "%s: %s" fn
+                                   (Unix.error_message e))
+                        in
+                        wait ()))
   in
   { probe; record_until_stopped; transcribe; speak; cleanup_audio }
 

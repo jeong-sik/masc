@@ -35,6 +35,34 @@ type capabilities = {
   tts_available : bool;
 }
 
+type recorder_kind =
+  | Recorder_rec
+  | Recorder_sox
+  | Recorder_ffmpeg
+
+val resolve_recorder_from :
+  find:(string -> string option) -> (recorder_kind * string) option
+(** Resolve the first supported local audio recorder in order
+    [rec -> sox -> ffmpeg]. Shared by both [probe] and [record_until_stopped]
+    so capability probing and recording never diverge. *)
+
+val build_record_argv :
+  kind:recorder_kind ->
+  bin_path:string ->
+  device:string option ->
+  out_path:string ->
+  string array
+(** Build deterministic 16 kHz mono WAV recording argv for [rec], [sox], or
+    [ffmpeg] (macOS [avfoundation] input [:default] or explicit device). *)
+
+val resolve_audio_player_from :
+  find:(string -> string option) -> (string * string) option
+(** Resolve an available local TTS audio player ([afplay -> ffplay -> aplay]). *)
+
+val build_player_argv :
+  player:string -> bin_path:string -> audio_path:string -> string array
+(** Build non-interactive playback argv for a resolved local audio player. *)
+
 val decode_voice_config :
   recorder_cmd:string option -> Yojson.Safe.t -> (capabilities, string) result
 (** Decode [GET /api/v1/voice/config] ([tts.active_endpoint.enabled] and

@@ -131,10 +131,10 @@ let render_opt_in_json_tree grid ~(rect : Rect.t) ~(theme : Theme.t)
     {
       (Card.default_spec
          ~title:
-           (Ops_common.say model ~ko:"구조화 JSON 트리 [J]"
-              ~en:"Structured Json_tree [J]"))
+           (Ops_common.say model ~ko:"구조화 JSON 트리 [Space]"
+              ~en:"Structured Json_tree [Space]"))
       with
-      hotkey = Some "[J] Hide";
+      hotkey = Some "[Space] Hide";
       elevated = false;
       focused = false;
     }
@@ -262,7 +262,7 @@ let render_goal_dive ~goal_id ~(model : Model.t) ~cache ~(rect : Rect.t)
         (Card.default_spec ~title) with
         subtitle = (match g_opt with Some g -> Some g.title | None -> None);
         badge;
-        hotkey = Some "[J] JSON · [Esc] Back";
+        hotkey = Some "[a] Confirm · [x] Pause · [Space] JSON · [Esc] Back";
         focused = true;
       }
     in
@@ -459,14 +459,38 @@ let render_goal_dive ~goal_id ~(model : Model.t) ~cache ~(rect : Rect.t)
             end
           end;
           if action_h = 1 then
+            let primary_lbl =
+              match g.phase with
+              | Wire_work.Awaiting_confirmation ->
+                  Ops_common.say model ~ko:"완료 확정" ~en:"Confirm"
+              | Wire_work.Paused _ ->
+                  Ops_common.say model ~ko:"재개" ~en:"Resume"
+              | Wire_work.Blocked _ ->
+                  Ops_common.say model ~ko:"차단 해제" ~en:"Unblock"
+              | Wire_work.Dropped ->
+                  Ops_common.say model ~ko:"다시 열기" ~en:"Reopen"
+              | Wire_work.Executing | Wire_work.Verifying | Wire_work.Completed ->
+                  Ops_common.say model ~ko:"검증 요청" ~en:"Verify"
+            in
+            let stop_lbl =
+              match g.phase with
+              | Wire_work.Paused _ -> Ops_common.say model ~ko:"중단" ~en:"Drop"
+              | Wire_work.Executing
+              | Wire_work.Verifying
+              | Wire_work.Awaiting_confirmation
+              | Wire_work.Blocked _
+              | Wire_work.Completed
+              | Wire_work.Dropped ->
+                  Ops_common.say model ~ko:"일시정지" ~en:"Pause"
+            in
             ignore
               (Ops_common.draw_keycap_bar grid
                  ~rect:(Rect.make ~x:content.x ~y:(bot - 1) ~w:content.w ~h:1)
                  ~theme ~bg
                  [
-                   ("L", Ops_common.say model ~ko:"작업 연결" ~en:"Link");
-                   ("c", Ops_common.say model ~ko:"검증 요청" ~en:"Verify");
-                   ("J", "JSON");
+                   ("a", primary_lbl);
+                   ("x", stop_lbl);
+                   ("Space", "JSON");
                    ("Esc", Ops_common.say model ~ko:"돌아가기" ~en:"Back");
                  ])
   end;
@@ -593,7 +617,7 @@ let render_task_dive ~task_id ~(model : Model.t) ~cache ~(rect : Rect.t)
         (Card.default_spec ~title) with
         subtitle = (match tk_opt with Some tk -> Some tk.title | None -> None);
         badge;
-        hotkey = Some "[J] JSON · [Esc] Back";
+        hotkey = Some "[x] Cancel · [h] Overrule · [Space] JSON · [Esc] Back";
         focused = true;
       }
     in
@@ -738,8 +762,9 @@ let render_task_dive ~task_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                  ~rect:(Rect.make ~x:content.x ~y:(bot - 1) ~w:content.w ~h:1)
                  ~theme ~bg
                  [
-                   ("L", Ops_common.say model ~ko:"목표 연결" ~en:"Link Goal");
-                   ("J", "JSON");
+                   ("x", Ops_common.say model ~ko:"작업 취소" ~en:"Cancel");
+                   ("h", Ops_common.say model ~ko:"판정 재정의" ~en:"Overrule");
+                   ("Space", "JSON");
                    ("Esc", Ops_common.say model ~ko:"돌아가기" ~en:"Back");
                  ])
   end;
@@ -787,7 +812,7 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
         (Card.default_spec ~title) with
         subtitle = (match v_opt with Some v -> Some v.task_title | None -> None);
         badge;
-        hotkey = Some "[a] Approve · [r] Reject · [J] JSON · [Esc] Back";
+        hotkey = Some "[a] Approve · [x] Reject · [h] Overrule · [Space] JSON · [Esc] Back";
         focused = true;
       }
     in
@@ -897,8 +922,9 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                  ~theme ~bg
                  [
                    ("a", Ops_common.say model ~ko:"승인" ~en:"Approve");
-                   ("r", Ops_common.say model ~ko:"반려" ~en:"Reject");
-                   ("J", "JSON");
+                   ("x", Ops_common.say model ~ko:"반려" ~en:"Reject");
+                   ("h", Ops_common.say model ~ko:"판정 재정의" ~en:"Overrule");
+                   ("Space", "JSON");
                    ("Esc", Ops_common.say model ~ko:"돌아가기" ~en:"Back");
                  ])
   end;

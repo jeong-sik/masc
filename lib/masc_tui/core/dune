@@ -1,0 +1,6 @@
+(include_subdirs no)
+
+(library
+ (name masc_tui_core)
+ (wrapped true)
+ (libraries mtime.clock.os))

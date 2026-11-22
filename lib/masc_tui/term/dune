@@ -1,0 +1,10 @@
+(include_subdirs no)
+
+(library
+ (name masc_tui_term)
+ (wrapped true)
+ (libraries masc_tui_core uucp uuseg unix threads.posix base64 eio)
+ (foreign_stubs
+  (language c)
+  (names termios_stubs palette_stubs))
+ (c_library_flags (-lncurses)))

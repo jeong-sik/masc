@@ -6565,6 +6565,7 @@ let test_a_working_state_beside_the_turn_carrier_passes_the_composition_check ()
     in
     (match
        Keeper_agent_prompt_metrics.provider_content_of_transmitted
+         ~outside_context_present:false
          ~prompt_context_present:true
          ~messages:(sent @ [ carrier ])
      with

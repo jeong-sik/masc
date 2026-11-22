@@ -310,9 +310,16 @@ let split_outside_context assembly =
   join host_parts, join outside_parts
 ;;
 
-let has_split_request_context assembly =
+type split_request_context_presence =
+  { system_context_present : bool
+  ; outside_context_present : bool
+  }
+
+let split_request_context_presence assembly =
   let host_ctx, outside_ctx = split_outside_context assembly in
-  Option.is_some host_ctx || Option.is_some outside_ctx
+  { system_context_present = Option.is_some host_ctx
+  ; outside_context_present = Option.is_some outside_ctx
+  }
 ;;
 
 let receipt_to_json (receipt : receipt) =

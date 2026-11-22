@@ -362,6 +362,7 @@ let test_provider_content_messages_removes_typed_prompt_carrier () =
     "typed prompt carrier is removed and projection suffix is retained"
     (Some [ "history"; "current user"; "typed gate replay payload" ])
     (KAPM.provider_content_messages
+       ~outside_context_present:false
        ~prompt_context_present:true
        ~projection_input:(history @ [ prompt_context ])
        ~projected_messages:(history @ [ prompt_context; gate_evidence ])
@@ -374,6 +375,7 @@ let test_provider_content_messages_removes_typed_prompt_carrier () =
     "typed identity works independently of carrier position"
     (Some [ "history"; "current user" ])
     (KAPM.provider_content_messages
+       ~outside_context_present:false
        ~prompt_context_present:true
        ~projection_input:middle_input
        ~projected_messages:middle_input
@@ -383,6 +385,7 @@ let test_provider_content_messages_removes_typed_prompt_carrier () =
     "no prompt carrier means every projected message remains"
     (Some [ "history"; "current user"; "typed gate replay payload" ])
     (KAPM.provider_content_messages
+       ~outside_context_present:false
        ~prompt_context_present:false
        ~projection_input:history
        ~projected_messages:(history @ [ gate_evidence ])
@@ -412,6 +415,7 @@ let test_provider_content_messages_keeps_the_working_state () =
     "the working state stays and the one carrier is removed"
     (Some [ "[Librarian working state] summary"; "history"; "current user" ])
     (KAPM.provider_content_messages
+       ~outside_context_present:false
        ~prompt_context_present:true
        ~projection_input:with_carrier
        ~projected_messages:with_carrier
@@ -422,6 +426,7 @@ let test_provider_content_messages_keeps_the_working_state () =
     "a working state with no carrier is not a carrier the hook never announced"
     (Some [ "[Librarian working state] summary"; "history"; "current user" ])
     (KAPM.provider_content_messages
+       ~outside_context_present:false
        ~prompt_context_present:false
        ~projection_input:without_carrier
        ~projected_messages:without_carrier
@@ -441,6 +446,7 @@ let test_provider_content_messages_rejects_prompt_carrier_mismatch () =
   let failure_line ~prompt_context_present messages =
     match
       KAPM.provider_content_messages
+        ~outside_context_present:false
         ~prompt_context_present
         ~projection_input:messages
         ~projected_messages:messages
@@ -474,6 +480,7 @@ let test_provider_content_messages_rejects_projection_rewrite () =
   let outcome ~projection_input ~projected_messages =
     match
       KAPM.provider_content_messages
+        ~outside_context_present:false
         ~prompt_context_present:false
         ~projection_input
         ~projected_messages
@@ -684,23 +691,27 @@ let test_transmitted_carrier_removal_ignores_a_prefix_cut () =
   check (option (list string)) "historical context is history, not a second carrier"
     (Some [ "previous context"; "surviving history"; "goal" ])
     (texts (KAPM.provider_content_of_transmitted
+      ~outside_context_present:false
       ~prompt_context_present:true ~messages:(historical :: transmitted)));
   check (option (list string)) "the carrier is removed by identity, not position"
     (Some [ "surviving history"; "goal" ])
     (texts
        (KAPM.provider_content_of_transmitted
+          ~outside_context_present:false
           ~prompt_context_present:true
           ~messages:transmitted));
   check (option (list string)) "and a turn without one passes through"
     (Some [ "surviving history"; "goal" ])
     (texts
        (KAPM.provider_content_of_transmitted
+          ~outside_context_present:false
           ~prompt_context_present:false
           ~messages:[ message "surviving history"; message "goal" ]));
   check string "a carrier the window cut away is a typed refusal"
     "prompt_context_presence_mismatch"
     (match
        KAPM.provider_content_of_transmitted
+         ~outside_context_present:false
          ~prompt_context_present:true
          ~messages:[ message "surviving history" ]
      with
@@ -780,9 +791,9 @@ let test_ctx_composition_preserves_input_measurement_boundary () =
 (* Post-tool rounds after #54350 can move every dynamic block onto
    [Outside_context] with no [System_context] carrier, while pre-tool rounds
    emit both carriers. Both carriers hold blocks already accounted for in
-   [prompt_blocks], so both must be stripped (at most one of each) without
-   triggering [Prompt_context_presence_mismatch] or double-counting bytes in
-   [Message_system]. *)
+   [prompt_blocks], so each channel is validated independently against its
+   expected flag and stripped without triggering [Prompt_context_presence_mismatch]
+   or double-counting bytes in [Message_system]. *)
 let test_provider_content_of_transmitted_handles_outside_context_carriers () =
   let texts result =
     Result.to_option result
@@ -790,9 +801,10 @@ let test_provider_content_of_transmitted_handles_outside_context_carriers () =
          (List.map (fun (m : Agent_core.Types.message) ->
             Agent_core.Types.text_of_content m.Agent_core.Types.content))
   in
-  let failure_line ~prompt_context_present messages =
+  let failure_line ?(outside_context_present = false) ~prompt_context_present messages =
     match
-      KAPM.provider_content_of_transmitted ~prompt_context_present ~messages
+      KAPM.provider_content_of_transmitted
+        ~outside_context_present ~prompt_context_present ~messages
     with
     | Ok retained -> Printf.sprintf "attributed(%d)" (List.length retained)
     | Error failure -> KAPM.provenance_failure_summary failure
@@ -811,13 +823,15 @@ let test_provider_content_of_transmitted_handles_outside_context_carriers () =
     (Some [ "user turn"; "reply" ])
     (texts
        (KAPM.provider_content_of_transmitted
-          ~prompt_context_present:true
+          ~outside_context_present:true
+          ~prompt_context_present:false
           ~messages:(conv @ [ out_ctx ])));
   check (option (list string))
     "both System_context and Outside_context are stripped together without repetition error"
     (Some [ "user turn"; "reply" ])
     (texts
        (KAPM.provider_content_of_transmitted
+          ~outside_context_present:true
           ~prompt_context_present:true
           ~messages:(conv @ [ sys_ctx; out_ctx ])));
   check (option (list string))
@@ -825,32 +839,54 @@ let test_provider_content_of_transmitted_handles_outside_context_carriers () =
     (Some [ "previous context"; "user turn"; "reply" ])
     (texts
        (KAPM.provider_content_of_transmitted
-          ~prompt_context_present:true
+          ~outside_context_present:true
+          ~prompt_context_present:false
           ~messages:((historical :: conv) @ [ out_ctx ])));
   check (option (list string))
-    "neither carrier present when prompt_context_present=false passes through"
+    "neither carrier present when both flags are false passes through"
     (Some [ "user turn"; "reply" ])
     (texts
        (KAPM.provider_content_of_transmitted
+          ~outside_context_present:false
           ~prompt_context_present:false
           ~messages:conv));
   check string
-    "unannounced Outside_context is rejected as presence mismatch"
+    "dual-carrier round missing Outside_context is rejected as presence mismatch"
+    "prompt_context_presence_mismatch carrier_observed=false prompt_context_present=true"
+    (failure_line ~outside_context_present:true ~prompt_context_present:true (conv @ [ sys_ctx ]));
+  check string
+    "dual-carrier round missing System_context is rejected as presence mismatch"
+    "prompt_context_presence_mismatch carrier_observed=false prompt_context_present=true"
+    (failure_line ~outside_context_present:true ~prompt_context_present:true (conv @ [ out_ctx ]));
+  check string
+    "unexpected Outside_context on System_context-only/official round is rejected"
     "prompt_context_presence_mismatch carrier_observed=true prompt_context_present=false"
-    (failure_line ~prompt_context_present:false (conv @ [ out_ctx ]));
+    (failure_line ~outside_context_present:false ~prompt_context_present:true
+       (conv @ [ sys_ctx; out_ctx ]));
+  check string
+    "unexpected System_context on Outside_context-only round is rejected"
+    "prompt_context_presence_mismatch carrier_observed=true prompt_context_present=false"
+    (failure_line ~outside_context_present:true ~prompt_context_present:false
+       (conv @ [ sys_ctx; out_ctx ]));
+  check string
+    "unannounced Outside_context when neither expected is rejected as presence mismatch"
+    "prompt_context_presence_mismatch carrier_observed=true prompt_context_present=false"
+    (failure_line ~outside_context_present:false ~prompt_context_present:false (conv @ [ out_ctx ]));
   check string
     "duplicate Outside_context is rejected as repeated carrier"
     "prompt_context_carrier_repeated"
-    (failure_line ~prompt_context_present:true (conv @ [ out_ctx; out_ctx ]));
+    (failure_line ~outside_context_present:true ~prompt_context_present:false
+       (conv @ [ out_ctx; out_ctx ]));
   check string
     "duplicate System_context alongside Outside_context is rejected as repeated carrier"
     "prompt_context_carrier_repeated"
-    (failure_line ~prompt_context_present:true (conv @ [ sys_ctx; out_ctx; sys_ctx ]))
+    (failure_line ~outside_context_present:true ~prompt_context_present:true
+       (conv @ [ sys_ctx; out_ctx; sys_ctx ]))
 ;;
 
 (* End-to-end projection attribution through [Keeper_run_prompt.assemble_request_context]
    -> [Keeper_context_assembly.split_outside_context] -> [Agent_core.Agent_turn.prepare_messages]
-   -> [Keeper_context_assembly.has_split_request_context] -> [provider_content_of_transmitted]
+   -> [Keeper_context_assembly.split_request_context_presence] -> [provider_content_of_transmitted]
    -> [build_ctx_segments]: verifies the exact live post-tool Outside_context-only
    round, pre-tool dual-carrier round, and empty/whitespace-only round. *)
 let test_split_outside_context_end_to_end_attribution () =
@@ -885,11 +921,14 @@ let test_split_outside_context_end_to_end_attribution () =
     let prepared =
       Agent_core.Agent_turn.prepare_messages ~messages:history ~turn_params ()
     in
-    let prompt_context_present =
-      Masc.Keeper_context_assembly.has_split_request_context assembly
+    let presence =
+      Masc.Keeper_context_assembly.split_request_context_presence assembly
     in
-    extra_system_context, extra_outside_context, prompt_context_present, prepared,
-    KAPM.provider_content_of_transmitted ~prompt_context_present ~messages:prepared
+    extra_system_context, extra_outside_context, presence, prepared,
+    KAPM.provider_content_of_transmitted
+      ~outside_context_present:presence.outside_context_present
+      ~prompt_context_present:presence.system_context_present
+      ~messages:prepared
   in
   (* 1. Post-tool round with only Outside_text blocks (Active_goals + Arrived_stimuli). *)
   let goal_text = "## Active goals\n- goal-outside-only" in
@@ -907,12 +946,15 @@ let test_split_outside_context_end_to_end_attribution () =
         ; Prompt_block_id.Arrived_stimuli, stimuli_text
         ]
   in
-  let host_ctx, out_ctx, present, _prepared, content =
+  let host_ctx, out_ctx, presence, _prepared, content =
     run_projection ~assembly:post_tool_assembly ~history:tool_history
   in
   check (option string) "post-tool host carrier is None" None host_ctx;
   check bool "post-tool outside carrier is Some" true (Option.is_some out_ctx);
-  check bool "post-tool split reports prompt context present" true present;
+  check bool "post-tool split reports system_context_present=false" false
+    presence.system_context_present;
+  check bool "post-tool split reports outside_context_present=true" true
+    presence.outside_context_present;
   (match content with
    | Error failure ->
      failf "unexpected provenance failure on Outside_context-only round: %s"
@@ -958,12 +1000,15 @@ let test_split_outside_context_end_to_end_attribution () =
         ; Prompt_block_id.Active_goals, goal_text
         ]
   in
-  let host_ctx2, out_ctx2, present2, prepared2, content2 =
+  let host_ctx2, out_ctx2, presence2, prepared2, content2 =
     run_projection ~assembly:dual_assembly ~history:tool_history
   in
   check bool "dual round emits System_context" true (Option.is_some host_ctx2);
   check bool "dual round emits Outside_context" true (Option.is_some out_ctx2);
-  check bool "dual round reports prompt context present" true present2;
+  check bool "dual round reports system_context_present=true" true
+    presence2.system_context_present;
+  check bool "dual round reports outside_context_present=true" true
+    presence2.outside_context_present;
   check int "prepared has history + 2 carriers" (List.length tool_history + 2)
     (List.length prepared2);
   (match content2 with
@@ -984,12 +1029,15 @@ let test_split_outside_context_end_to_end_attribution () =
       ~existing_extra_system_context:None
       ~blocks:[ Prompt_block_id.Operator_note, "   " ]
   in
-  let host_ctx3, out_ctx3, present3, prepared3, content3 =
+  let host_ctx3, out_ctx3, presence3, prepared3, content3 =
     run_projection ~assembly:empty_assembly ~history:tool_history
   in
   check (option string) "whitespace-only block emits no host carrier" None host_ctx3;
   check (option string) "whitespace-only block emits no outside carrier" None out_ctx3;
-  check bool "whitespace-only block reports no split carrier present" false present3;
+  check bool "whitespace-only block reports system_context_present=false" false
+    presence3.system_context_present;
+  check bool "whitespace-only block reports outside_context_present=false" false
+    presence3.outside_context_present;
   check int "prepared has only durable history" (List.length tool_history)
     (List.length prepared3);
   (match content3 with

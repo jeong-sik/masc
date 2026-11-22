@@ -455,7 +455,7 @@ let batched_replay_admission () = with_directory (fun root ->
   Alcotest.(check bool) "missing first evidence is restored before the surviving second" true
     (restored_first = [ original; first_message; tagged_second; later ]);
   let content = Masc.Keeper_agent_prompt_metrics.provider_content_of_transmitted
-    ~prompt_context_present:false ~messages:restored_first |> unwrap in
+    ~outside_context_present:false ~prompt_context_present:false ~messages:restored_first |> unwrap in
   Alcotest.(check bool) "input attribution retains ordered inserted evidence" true
     (content = restored_first);
   let unchanged = Masc.Keeper_run_tools_hooks.project_model_input ~base_path:root

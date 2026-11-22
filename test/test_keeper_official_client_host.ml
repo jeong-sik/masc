@@ -1614,6 +1614,7 @@ let test_extra_system_context_keeps_typed_provenance () =
       (carrier.origin = Agent_core.Types.System_context);
     (match
        Keeper_agent_prompt_metrics.provider_content_messages
+         ~outside_context_present:false
          ~prompt_context_present:true
          ~projection_input:messages
          ~projected_messages:messages
@@ -3440,7 +3441,7 @@ let test_an_authority_only_carrier_is_not_expected_among_the_messages () =
   let expected = Option.is_some (Host.transmitted_carrier_receipt assembly) in
   check bool "the turn expects no carrier" false expected;
   match Keeper_agent_prompt_metrics.provider_content_of_transmitted
-      ~prompt_context_present:expected ~messages:prepared.messages with
+      ~outside_context_present:false ~prompt_context_present:expected ~messages:prepared.messages with
   | Ok _ -> ()
   | Error failure ->
     fail ("transmitted input provenance: "
@@ -3985,6 +3986,39 @@ let test_partial_resumes_in_a_row_send_one_row_each () =
   ()
 ;;
 
+let test_extra_outside_context_is_rejected_fail_closed () =
+  let hooks =
+    { Agent_core.Hooks.empty with
+      before_turn_params =
+        Some
+          (function
+            | Agent_core.Hooks.BeforeTurnParams { current_params; _ } ->
+              Agent_core.Hooks.AdjustParams
+                { current_params with
+                  extra_outside_context = Some "## Active goals\n- unprojected outside text"
+                }
+            | _ -> Agent_core.Hooks.Continue)
+    }
+  in
+  let result =
+    Host.prepare_turn ~composed_context:None
+      ~runtime_label:"Fixture"
+      ~keeper_name:"outside-context-fixture"
+      ~turn_count:1
+      ~system_prompt:"SYS"
+      ~tools:[]
+      ~initial_messages:[ msg Agent_core.Types.User "history" ]
+      ~model_input_projection:None
+      ~hooks:(Some hooks)
+      ~configured_reasoning_effort:None
+  in
+  match result with
+  | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field = "extra_outside_context"; _ })) ->
+    ()
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok _ -> fail "official-client prepare_turn silently accepted extra_outside_context"
+;;
+
 let test_unsupported_choice_refuses_before_projection () =
   let projected = ref false in
   let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
@@ -4054,8 +4088,11 @@ let () =
   run
     "keeper official-client host"
     [ ( "prepared tool authority"
-      , [test_case "unsupported choice refuses before projection" `Quick
-           test_unsupported_choice_refuses_before_projection] )
+      , [ test_case "unsupported choice refuses before projection" `Quick
+            test_unsupported_choice_refuses_before_projection
+        ; test_case "extra_outside_context is rejected fail-closed" `Quick
+            test_extra_outside_context_is_rejected_fail_closed
+        ] )
     ; ( "carried context summaries"
       , [ test_case "issued prefix and held delivery" `Quick
             test_issued_prefix_delivery_preserves_held_semantics

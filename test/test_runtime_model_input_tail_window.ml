@@ -1223,8 +1223,12 @@ let test_outside_context_pinned_and_excluded_from_atoms () =
       ~role:Types.User
       "## Active goals\n- ephemeral per-request outside context"
   in
-  Alcotest.(check bool) "Outside_context is classified as extra context" true
-    (Window.is_extra_context outside_context);
+  Alcotest.(check bool) "Outside_context is NOT is_extra_context (does not reopen turn or suppress ledger samples)"
+    false (Window.is_extra_context outside_context);
+  Alcotest.(check bool) "Outside_context satisfies is_outside_context"
+    true (Window.is_outside_context outside_context);
+  Alcotest.(check bool) "System_context does not satisfy is_outside_context"
+    false (Window.is_outside_context extra_context);
   let durable = [ user 0; assistant 1; tool 1 ] in
   let durable_count, durable_digest = Window.atom_opening_index durable in
   let with_outside = durable @ [ outside_context ] in

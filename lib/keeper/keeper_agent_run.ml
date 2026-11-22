@@ -1342,10 +1342,14 @@ let run_turn
     let source_model_input_projection =
       s.Keeper_run_tools.model_input_projection
     in
-    let agent_core_prompt_context_present () =
+    let agent_core_prompt_context_presence () =
       match acc.Keeper_run_tools_hook_accumulator.extra_system_context_assembly with
-      | None -> false
-      | Some assembly -> Keeper_context_assembly.has_split_request_context assembly
+      | None ->
+        { Keeper_context_assembly.system_context_present = false
+        ; outside_context_present = false
+        }
+      | Some assembly ->
+        Keeper_context_assembly.split_request_context_presence assembly
     in
     let model_input_projection messages =
       (* [messages] is the current provider attempt's transmission view: the
@@ -1364,10 +1368,13 @@ let run_turn
             !request_evidence_ref;
         error
       | Ok projected_messages as result ->
-        let prompt_context_present = agent_core_prompt_context_present () in
+        let { Keeper_context_assembly.system_context_present; outside_context_present } =
+          agent_core_prompt_context_presence ()
+        in
         let provider_content =
           Keeper_agent_prompt_metrics.provider_content_of_transmitted
-            ~prompt_context_present
+            ~outside_context_present
+            ~prompt_context_present:system_context_present
             ~messages:projected_messages
         in
         (* The failure is kept, not only logged. A warn line tells an operator
@@ -1422,6 +1429,7 @@ let run_turn
             (fun failure ->
                Keeper_agent_prompt_metrics.Input_provenance_unresolved failure)
             (Keeper_agent_prompt_metrics.provider_content_of_transmitted
+               ~outside_context_present:false
                ~prompt_context_present
                ~messages)
       in
@@ -1772,8 +1780,14 @@ let run_turn
                              match Request_evidence.projection !request_evidence_ref,
                                    projected_messages with
                              | Request_evidence.Projected (Ok _), Some messages ->
+                               let { Keeper_context_assembly.system_context_present
+                                   ; outside_context_present
+                                   } =
+                                 agent_core_prompt_context_presence ()
+                               in
                                Some (Keeper_agent_prompt_metrics.provider_content_of_transmitted
-                                 ~prompt_context_present:(agent_core_prompt_context_present ())
+                                 ~outside_context_present
+                                 ~prompt_context_present:system_context_present
                                  ~messages)
                              | Request_evidence.Projected (Error _ as failure), _ -> Some failure
                              | Request_evidence.Unprojected, _

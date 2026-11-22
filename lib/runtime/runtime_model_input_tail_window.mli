@@ -57,11 +57,20 @@ val preamble_marker_key : string
     state. *)
 
 val is_extra_context : Agent_core.Types.message -> bool
-(** Whether the per-turn context assembler authored the message as an
-    ephemeral request carrier ([System_context] or [Outside_context]). Such a
-    message is {!Pinned} (never counted as a durable history atom), and a
-    request carrying it is not a sample of the carried history's size. The
-    Librarian working state is not this context; see {!is_working_state}. *)
+(** Whether the per-turn context assembler authored the message as the
+    host-owned [System_context] carrier. Such a message is {!Pinned} (never
+    counted as a durable history atom), and a request carrying it opens a turn
+    and is not a sample of the carried history's size. Ephemeral
+    [Outside_context] carriers use {!is_outside_context} instead, so post-tool
+    rounds carrying [Active_goals] on [Outside_context] remain ledger samples
+    and do not reopen a turn mid-flight. The Librarian working state is not
+    this context; see {!is_working_state}. *)
+
+val is_outside_context : Agent_core.Types.message -> bool
+(** Whether the message is an ephemeral per-request [Outside_context] carrier.
+    Such a message is {!Pinned} (never counted as a durable history atom and
+    preserved across tail cuts) without marking the request as
+    {!is_extra_context}. *)
 
 val working_state_marker_key : string
 (** Metadata key tagging the Librarian working state that opens a

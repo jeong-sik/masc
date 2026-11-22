@@ -347,6 +347,11 @@ let recent_ints_json () =
    [Dos_machine.create] 와 복원의 [Dos_snapshot.restore] — 에서 각각 단다. *)
 let attach_int_observer m = Dos_machine.on_int m record_int
 
+(* 도구 스레드가 부르는 읽기 입구. 기록은 레인 잠금 안에서만 일어나므로
+   읽기도 같은 잠금을 짧게 잡는다 — 잠금 없이 읽으면 진행 중인 실행의
+   링 쓰기와 경합한다. 잠금을 이미 잡은 경로에서 부르면 안 된다. *)
+let int_trail_json () = locked recent_ints_json
+
 (* ---------- the resume mark ----------
 
    A file beside the autosave that records one durable fact: the autosave holds

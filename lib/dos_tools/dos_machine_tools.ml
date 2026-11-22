@@ -1150,7 +1150,7 @@ let image_capture_failed ~tool_name ~start_time message =
    PNG encode. [include_ints] adds the lane's recent INT-entry trail — the
    same view dosboot's --int-trace gives, read after the fact instead of
    streamed. *)
-let int_trail_field () = ("ints", Dos_lane.recent_ints_json ())
+let int_trail_field () = ("ints", Dos_lane.int_trail_json ())
 
 let handle_screen ~tool_name ~start_time ~base_path args =
   let extra = if get_bool args "include_ints" false then int_trail_field () :: [ core_field ] else [ core_field ] in

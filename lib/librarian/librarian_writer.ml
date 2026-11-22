@@ -38,7 +38,7 @@ type event =
   | Turn_closed
   | Pulse
   | Declaration_changed
-  | Compaction_epoch_advanced of { epoch_id : int }
+  | Molt_wake
   (* The writer reads the declaration when it takes this: of two that come
      close together, the one taken last carries the newer value. *)
   | Ask_ended of
@@ -83,6 +83,7 @@ type t =
   ; ask_room : Librarian_ask.room_input -> Librarian_room_result.t
   ; start_turn_log : unit -> (unit, string) result
   ; mailbox : event Eio.Stream.t
+  ; pending_molt_mailbox : Librarian_lifecycle.molt_trigger option Atomic.t
   ; held : held Atomic.t
   ; between : status option Atomic.t
   (* The status while the fiber waits for its next event; [None] while it
@@ -268,7 +269,7 @@ type step =
 let answer_stopped event (stop : Store.stop) =
   let tell reply answer = ignore (Eio.Promise.try_resolve reply answer : bool) in
   match event with
-  | Turn_closed | Pulse | Declaration_changed | Compaction_epoch_advanced _ | Ask_ended _ -> ()
+  | Turn_closed | Pulse | Declaration_changed | Molt_wake | Ask_ended _ -> ()
   | Write { reply; _ } -> tell reply (Machine.Unavailable (Store_stopped stop))
   | Resume reply
   | Adopt { reply; _ }
@@ -398,8 +399,10 @@ let live t ~sw =
     | Turn_closed -> decided Machine.Turn_closed
     | Pulse -> decided Machine.Pulse
     | Declaration_changed -> decided (Machine.Declaration_changed (t.declared ()))
-    | Compaction_epoch_advanced { epoch_id } ->
-      decided (Machine.Compaction_epoch_advanced { epoch_id })
+    | Molt_wake ->
+      (match Atomic.exchange t.pending_molt_mailbox None with
+       | None -> Next state
+       | Some trigger -> decided (Machine.Molt_requested trigger))
     | Ask_ended { ask; result } -> decided (Machine.Ask_ended { ask; result })
     | Write { by; trace; write; reply } ->
       let next, answer =
@@ -517,6 +520,7 @@ let create ?on_world_promotions ~now ~registered ~declared ~stores ~ask ~ask_roo
   ; ask_room
   ; start_turn_log
   ; mailbox
+  ; pending_molt_mailbox = Atomic.make None
   ; held = Atomic.make Held_booting
   ; between = Atomic.make None
   ; settled = Eio.Condition.create ()
@@ -560,8 +564,22 @@ let turn_closed t = Eio.Stream.add t.mailbox Turn_closed
 let pulse t = Eio.Stream.add t.mailbox Pulse
 let declaration_changed t = Eio.Stream.add t.mailbox Declaration_changed
 
+let rec request_molt t ~trigger =
+  let before = Atomic.get t.pending_molt_mailbox in
+  let after = Machine.latch_pending_molt before trigger in
+  if Atomic.compare_and_set t.pending_molt_mailbox before after
+  then (
+    (* Enqueue at most ONE wake token into [t.mailbox] on the [None -> Some]
+       transition so bursts of growth-molt writes while [Asking] coalesce in
+       O(1) space without growing the stream. *)
+    match before with
+    | None -> Eio.Stream.add t.mailbox Molt_wake
+    | Some _ -> ())
+  else request_molt t ~trigger
+;;
+
 let compaction_epoch_advanced t ~epoch_id =
-  Eio.Stream.add t.mailbox (Compaction_epoch_advanced { epoch_id })
+  request_molt t ~trigger:(Librarian_lifecycle.Compaction_epoch_advanced { epoch_id })
 ;;
 let write t ~by ~trace write = ask t (fun reply -> Write { by; trace; write; reply })
 let resume t = ask t (fun reply -> Resume reply)

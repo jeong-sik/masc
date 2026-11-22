@@ -82,6 +82,11 @@ val read_program_journal_target_locked :
 val find_removal :
   keepers_dir:string -> keeper_id:string -> string -> removal_lookup
 
+val find_removal_inline :
+  keepers_dir:string -> keeper_id:string -> string -> removal_lookup
+(** Synchronous variant for callers already holding Memory OS file locks;
+    never dispatches a [Domain_pool_ref] job under locks. *)
+
 type archived_fact =
   { original : fact
   ; removal : removal

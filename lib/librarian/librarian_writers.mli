@@ -120,6 +120,17 @@ val pulse : t -> string list -> unit
 (** Notify a Keeper's writer that its anchored compaction epoch advanced. *)
 val compaction_epoch_advanced : t -> string -> epoch_id:int -> unit
 
+(** Non-blocking structural molt notification (e.g. Memory OS growth past soft
+    consolidation threshold) routed to the Keeper's Librarian writer via its
+    coalescing 1-slot molt mailbox. *)
+val request_molt : t -> string -> trigger:Librarian_lifecycle.molt_trigger -> unit
+
+(** Return [true] iff the Keeper currently has a live writer entry whose state
+    is [Stopped _]. Read-only inspection: never spawns a writer. Used by Memory
+    OS commits to engage the emergency hard backstop when consolidation is
+    stopped. *)
+val is_stopped : t -> string -> bool
+
 (** The writers this table holds, by Keeper, with what each one shows. A
     reading only: it makes no writer. *)
 val statuses : t -> (string * Librarian_writer.status) list

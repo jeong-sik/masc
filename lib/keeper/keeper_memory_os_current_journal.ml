@@ -25,6 +25,31 @@ let parse path content =
     Error (Printf.sprintf "%s: invalid JSON: %s" path message)
 ;;
 
+type file_stamp =
+  (Unix.file_kind * int * int * int * float * float) option
+
+let stat_identity_result path : (file_stamp, string) result =
+  match Unix.stat path with
+  | st ->
+    Ok
+      (Some
+         ( st.Unix.st_kind
+         , st.Unix.st_dev
+         , st.Unix.st_ino
+         , st.Unix.st_size
+         , st.Unix.st_mtime
+         , st.Unix.st_ctime ))
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | exception Unix.Unix_error (code, fn, arg) ->
+    Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+;;
+
+let yield_for_concurrent_writer () =
+  match Eio_guard.execution_context () with
+  | Eio_guard.Eio_fiber -> Eio.Fiber.yield ()
+  | Eio_guard.Non_eio -> Domain.cpu_relax ()
+;;
+
 let publication_read_guard ~keepers_dir ~keeper_id =
   match Fs_compat.load_file_opt (publication_receipt_path ~keepers_dir ~keeper_id) with
   | None -> Ok ()
@@ -39,28 +64,87 @@ type read_classified =
 
 let read_classified ~keepers_dir ~keeper_id =
   let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-  try
-    match publication_read_guard ~keepers_dir ~keeper_id with
-    | Error detail -> Io_unreadable {detail}
-    | Ok () ->
-    let observed = match Fs_compat.load_file_opt snapshot_path with
+  let classify_bytes = function
     | None -> No_snapshot
     | Some content ->
       (match parse snapshot_path content with
        | Ok snapshot -> Readable snapshot
-       | Error rejection -> Undecodable { rejection }) in
-    (match publication_read_guard ~keepers_dir ~keeper_id with
-     | Ok () -> observed | Error detail -> Io_unreadable {detail})
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Sys_error message ->
-    Io_unreadable
-      { detail =
-          Printf.sprintf
-            "current Memory OS read failed path=%s: %s"
-            snapshot_path
-            message
-      }
+       | Error rejection -> Undecodable { rejection })
+  in
+  let max_optimistic_attempts = 4 in
+  let max_locked_attempts = 8 in
+  let rec optimistic attempt =
+    (* Lock-free read-only snapshot read executed off-domain so main Eio fibers
+       neither acquire write locks nor parse 150-330 KB JSON synchronously. *)
+    let observed =
+      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+        try
+          match publication_read_guard ~keepers_dir ~keeper_id with
+          | Error detail -> `Pending detail
+          | Ok () ->
+            (match stat_identity_result snapshot_path with
+             | Error detail -> `Done (Io_unreadable { detail })
+             | Ok snap_before ->
+               let bytes = Fs_compat.load_file_opt snapshot_path in
+               (match publication_read_guard ~keepers_dir ~keeper_id with
+                | Error detail -> `Pending detail
+                | Ok () ->
+                  (match stat_identity_result snapshot_path with
+                   | Error detail -> `Done (Io_unreadable { detail })
+                   | Ok snap_after ->
+                     if snap_before = snap_after
+                     then `Done (classify_bytes bytes)
+                     else `Changed)))
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | Sys_error message ->
+          `Done
+            (Io_unreadable
+               { detail =
+                   Printf.sprintf
+                     "current Memory OS read failed path=%s: %s"
+                     snapshot_path
+                     message
+               }))
+    in
+    match observed with
+    | `Done result -> result
+    | (`Changed | `Pending _) when attempt < max_optimistic_attempts ->
+      yield_for_concurrent_writer ();
+      optimistic (attempt + 1)
+    | `Changed | `Pending _ -> locked_fallback 0
+  and locked_fallback attempt =
+    (* Contended fallback only: wait behind any active Phase 3 writer under
+       short locks (ZERO Domain_pool_ref jobs inside), copy raw bytes, then
+       parse off-domain. Read-only: never mutates or recovers receipts. *)
+    let copied =
+      try
+        Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
+          File_lock_eio.with_lock snapshot_path (fun () ->
+            match publication_read_guard ~keepers_dir ~keeper_id with
+            | Error detail -> `Pending detail
+            | Ok () -> `Bytes (Fs_compat.load_file_opt snapshot_path)))
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | Sys_error message ->
+        `Error
+          (Printf.sprintf
+             "current Memory OS read failed path=%s: %s"
+             snapshot_path
+             message)
+      | Unix.Unix_error (code, fn, arg) ->
+        `Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+    in
+    match copied with
+    | `Bytes bytes ->
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+        classify_bytes bytes)
+    | `Pending _ when attempt < max_locked_attempts ->
+      yield_for_concurrent_writer ();
+      locked_fallback (attempt + 1)
+    | `Pending detail | `Error detail -> Io_unreadable { detail }
+  in
+  optimistic 0
 ;;
 
 let librarian_failure_kind_to_string = Journal_codec.librarian_failure_kind_to_string

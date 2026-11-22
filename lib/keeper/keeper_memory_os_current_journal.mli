@@ -22,6 +22,13 @@ val snapshot_sha256 : t -> string
 val parse :
   string -> string -> (t, string) result
 
+type file_stamp =
+  (Unix.file_kind * int * int * int * float * float) option
+
+val stat_identity_result : string -> (file_stamp, string) result
+
+val yield_for_concurrent_writer : unit -> unit
+
 val publication_read_guard :
   keepers_dir:string -> keeper_id:string -> (unit, string) result
 

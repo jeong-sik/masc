@@ -116,8 +116,15 @@ val pulse : t -> unit
 val declaration_changed : t -> unit
 
 (** Notify the writer that the Keeper's anchored compaction epoch advanced,
-    scheduling proactive declarative molting and synthesis when open. *)
+    scheduling proactive declarative molting and synthesis when open via the
+    coalescing 1-slot molt mailbox. *)
 val compaction_epoch_advanced : t -> epoch_id:int -> unit
+
+(** Non-blocking structural molt notification (e.g., Memory OS growth past
+    soft consolidation threshold). Coalesces atomically into a 1-slot per-Keeper
+    [pending_molt_mailbox] using {!Librarian_machine.latch_pending_molt}
+    precedence and enqueues at most one wake token into the writer's mailbox. *)
+val request_molt : t -> trigger:Librarian_lifecycle.molt_trigger -> unit
 
 type 'answer asked =
   | Answered of 'answer

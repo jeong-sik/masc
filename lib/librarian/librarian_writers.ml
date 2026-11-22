@@ -217,6 +217,19 @@ let compaction_epoch_advanced t keeper ~epoch_id =
   Option.iter (fun w -> Writer.compaction_epoch_advanced w ~epoch_id) (ensure t keeper)
 ;;
 
+let request_molt t keeper ~trigger =
+  Option.iter (fun w -> Writer.request_molt w ~trigger) (ensure t keeper)
+;;
+
+let is_stopped t keeper =
+  match By_keeper.find_opt keeper (Atomic.get t.writers) with
+  | None -> false
+  | Some writer ->
+    (match Writer.status writer with
+     | Stopped _ -> true
+     | Booting | Open _ | Retired -> false)
+;;
+
 let statuses t =
   List.map
     (fun (keeper, writer) -> keeper, Writer.status writer)

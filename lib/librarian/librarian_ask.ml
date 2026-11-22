@@ -351,9 +351,18 @@ let ask_room env (input : room_input) =
   let* tail, memory =
     read_memory room_unread ~tail:input.tail ~snapshot_path:(snapshot_path input.place)
   in
+  let world_index =
+    World_memory.read_index_snapshot_for_librarian ~base_path:env.base_dir
+  in
   let room =
-    Librarian_question.make_room ~lane:input.lane.question ~from:tail ~memory
+    Librarian_question.make_room
+      ?world_index
+      ?molt_trigger:input.asked.molt_trigger
+      ~lane:input.lane.question
+      ~from:tail
+      ~memory
       ~trace:input.asked.trace
+      ()
   in
   let* walked =
     walk_lane env ~lane:input.lane ~resolved:input.resolved ~known:[] ~schema:room.schema

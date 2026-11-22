@@ -83,7 +83,8 @@ let declared ?(prompt = "memory prompt") () : Machine.declared =
   }
 ;;
 
-let machine ?(lane = Some (declared ())) ?last_read ?last_room ?(read_alone = false) state
+let machine ?(lane = Some (declared ())) ?last_read ?last_room ?(read_alone = false)
+    ?(pending_molt = None) state
   : Machine.t
   =
   { state
@@ -94,6 +95,7 @@ let machine ?(lane = Some (declared ())) ?last_read ?last_room ?(read_alone = fa
   ; last_read
   ; last_room
   ; read_alone
+  ; pending_molt
   }
 ;;
 

@@ -133,9 +133,9 @@ let read_committed_program ~keepers_dir ~keeper_id ~transaction_id =
         (match Fs_compat.load_file_opt (path_for_keepers_dir ~keepers_dir ~keeper_id) with
          | Some bytes -> Ok (Some bytes)
          | None -> Error "ordered transaction snapshot disappeared under serialization") in
-    let* target=Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+    let* target =
       Keeper_memory_os_current_read_anchor.read_program_journal_target_locked
-        ~keepers_dir ~keeper_id ~transaction_id ~snapshot_content snapshot) in
+        ~keepers_dir ~keeper_id ~transaction_id ~snapshot_content snapshot in
     match target with
     | None -> Ok None
     | Some (publication,target) ->
@@ -200,8 +200,8 @@ let read_with_revision_evidence_for_keepers_dir ~keepers_dir ~keeper_id ~after_r
                    | Error detail, _ | _, Error detail -> Some (Error detail))
                 | _ -> Some (Error "revision evidence exceeds the current snapshot") in
         let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-        let* result = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-          Dated_jsonl.find_latest_entry_in_file_result path visit)
+        let* result =
+          Dated_jsonl.find_latest_entry_in_file_result path visit
           |> Result.map_error Dated_jsonl.read_error_to_string in
         let+ () = match result with None -> Ok () | Some result -> result in
         snapshot, !rows)
@@ -263,19 +263,18 @@ let live_admission_bindings ~keepers_dir ~keeper_id (snapshot : t) bindings =
   let oldest = List.fold_left (fun oldest (revision, _) -> min oldest revision)
     snapshot.revision applicable in
   if oldest = snapshot.revision then Ok (List.map snd applicable)
-  else
-    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-      let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-      let* projection = read_recall_journal_projection ~path ~oldest in
-      let* () = match projection.invalid with None -> Ok () | Some detail -> Error detail in
-      if projection.highest > snapshot.revision then
-        Error "admission recall journal is ahead of the current snapshot"
-      else if Recall_revision_set.cardinal projection.revisions <> snapshot.revision - oldest then
-        Error "admission recall lacks complete intervening Memory revision history"
-      else Ok (List.filter_map (fun (born_revision, binding) ->
-        match Identity_map.find_opt binding.target_memory_id projection.retired with
-        | Some removed_revision when removed_revision > born_revision -> None
-        | Some _ | None -> Some binding) applicable))
+  else (
+    let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+    let* projection = read_recall_journal_projection ~path ~oldest in
+    let* () = match projection.invalid with None -> Ok () | Some detail -> Error detail in
+    if projection.highest > snapshot.revision then
+      Error "admission recall journal is ahead of the current snapshot"
+    else if Recall_revision_set.cardinal projection.revisions <> snapshot.revision - oldest then
+      Error "admission recall lacks complete intervening Memory revision history"
+    else Ok (List.filter_map (fun (born_revision, binding) ->
+      match Identity_map.find_opt binding.target_memory_id projection.retired with
+      | Some removed_revision when removed_revision > born_revision -> None
+      | Some _ | None -> Some binding) applicable))
 ;;
 
 let read_with_admission_recall_status_for_keepers_dir ~keepers_dir ~keeper_id =
@@ -333,16 +332,15 @@ let read_recall_transitions ~keepers_dir ~keeper_id ~after_revision ~through_rev
   match pending with
   | Some _ -> Error "successor recall journal finalization is pending"
   | None ->
-    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-      let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-      let* projection = read_recall_journal_projection ~path ~oldest:after_revision in
-      let* () = match projection.invalid with None -> Ok () | Some detail -> Error detail in
-      if projection.highest > through_revision then Error "journal exceeds current revision"
-      else
-        (* Keep every actual rewrite, including duplicate revisions: the pure
-           validator must still distinguish equal replay from conflicting
-           transition evidence. Unchanged observations cannot supply edges. *)
-        Ok (List.rev projection.rewrites_rev))
+    let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+    let* projection = read_recall_journal_projection ~path ~oldest:after_revision in
+    let* () = match projection.invalid with None -> Ok () | Some detail -> Error detail in
+    if projection.highest > through_revision then Error "journal exceeds current revision"
+    else
+      (* Keep every actual rewrite, including duplicate revisions: the pure
+         validator must still distinguish equal replay from conflicting
+         transition evidence. Unchanged observations cannot supply edges. *)
+      Ok (List.rev projection.rewrites_rev)
 ;;
 
 let read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id =

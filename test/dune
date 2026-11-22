@@ -7724,3 +7724,5 @@
 (include stanzas/test_stack_c_living_memory_circulation.inc)
 
 (include stanzas/test_schema_observation.inc)
+
+(include stanzas/test_stack_e_cross_runtime_circulation.inc)

@@ -108,24 +108,38 @@ let preflight_file_unix ?(allow_missing_ancestors=false) path =
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception ((Unix.Unix_error _ | Sys_error _) as exn) ->
       Error (parent ^ ": " ^ Printexc.to_string exn) in
-  try
-    let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
-    let channel = Unix.in_channel_of_descr fd in
-    Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
-      if (Unix.fstat fd).Unix.st_kind <> Unix.S_REG then
-        Error (path ^ ": not a regular file")
-      else Ok (Some (In_channel.input_all channel)))
-  with
-  | Unix.Unix_error (Unix.ENOENT, _, _) ->
-    (match Unix.lstat path with
-     | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-       inspect_parent (Filename.dirname path)
-     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-     | exception ((Unix.Unix_error _ | Sys_error _) as exn) ->
-       Error (path ^ ": " ^ Printexc.to_string exn)
-     | _ -> Error (path ^ ": file target is absent"))
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | (Unix.Unix_error _ | Sys_error _) as exn -> Error (path ^ ": " ^ Printexc.to_string exn)
+  let rec open_or_inspect attempts_left =
+    try
+      let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+      let channel = Unix.in_channel_of_descr fd in
+      Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+        if (Unix.fstat fd).Unix.st_kind <> Unix.S_REG then
+          Error (path ^ ": not a regular file")
+        else Ok (Some (In_channel.input_all channel)))
+    with
+    | Unix.Unix_error (Unix.ENOENT, _, _) ->
+      (match Unix.lstat path with
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+         inspect_parent (Filename.dirname path)
+       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+       | exception ((Unix.Unix_error _ | Sys_error _) as exn) ->
+         Error (path ^ ": " ^ Printexc.to_string exn)
+       | { Unix.st_kind = Unix.S_REG; _ } ->
+         (* A concurrent atomic rename created a regular file between
+            [openfile] and [lstat]; retry opening instead of misclassifying
+            the race as a dangling symlink. *)
+         if attempts_left > 0 then
+           open_or_inspect (attempts_left - 1)
+         else
+           inspect_parent (Filename.dirname path)
+       | { Unix.st_kind = Unix.S_LNK; _ } ->
+         Error (path ^ ": file target is absent")
+       | { Unix.st_kind = Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK; _ } ->
+         Error (path ^ ": not a regular file"))
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | (Unix.Unix_error _ | Sys_error _) as exn -> Error (path ^ ": " ^ Printexc.to_string exn)
+  in
+  open_or_inspect 8
 
 let preflight_file ?(allow_missing_ancestors=false) path =
   let result =
@@ -221,17 +235,18 @@ let write_publication ~keepers_dir ~keeper_id receipt =
   Fs_compat.save_file_atomic_strict (publication_receipt_path ~keepers_dir ~keeper_id)
     (Yojson.Safe.to_string json)
 
+(* Called under the aggregate + snapshot locks; run directly so nested file
+   locks are never held across a Domain_pool_ref wait. *)
 let remove_publication ~sync_parent ~keepers_dir ~keeper_id =
-  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-    try
-      (try Unix.unlink (publication_receipt_path ~keepers_dir ~keeper_id)
-       with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
-      let fd = Unix.openfile keepers_dir [Unix.O_RDONLY] 0 in
-      Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> sync_parent fd);
-      Ok ()
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error ("publication receipt removal failed: " ^ Printexc.to_string exn))
+  try
+    (try Unix.unlink (publication_receipt_path ~keepers_dir ~keeper_id)
+     with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+    let fd = Unix.openfile keepers_dir [Unix.O_RDONLY] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> sync_parent fd);
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error ("publication receipt removal failed: " ^ Printexc.to_string exn)
 
 (* Check companion evidence before any recovery mutates a store. Older committed
    consumption identities remain valid, but another prepared transaction cannot
@@ -378,6 +393,10 @@ let dispatch_publication ~sync_parent ~keepers_dir ~keeper_id receipt =
       match current with
       | None -> Ok ()
       | Some current when current = receipt -> remove_publication ~sync_parent ~keepers_dir ~keeper_id
+      | Some current when current.target_revision > receipt.target_revision ->
+        (* A newer revision already superseded [receipt] after another caller
+           dispatched and removed it; keep the newer receipt intact. *)
+        Ok ()
       | Some _ -> Error "publication changed during notification dispatch; receipt preserved"))
 
 let recover_publication_with_sync ~sync_parent ~keepers_dir ~keeper_id =

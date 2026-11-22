@@ -20,22 +20,25 @@ template_variables: []
 
 ## 질문 입력 순서와 모드 (`Librarian_question.make`, RFC #53148 §6.1, §5.5)
 
-이 프롬프트는 별도 system prompt 없이(`system_prompt = ""`) **단일 User 메시지의 첫 부분**으로 놓이며, 바로 뒤에 줄마다 compact JSON 하나씩 다음 다섯 줄이 고정 순서로 옵니다. 질문에는 별도 현재 시각(`now`)이 실리지 않습니다. **판단 기준으로서의 「지금」은 질문에 실린 단위 가운데 가장 마지막 단위의 `closed_at` 시각입니다.**
+이 프롬프트는 별도 system prompt 없이(`system_prompt = ""`) **단일 User 메시지의 첫 부분**으로 놓이며, 바로 뒤에 줄마다 compact JSON 하나씩 아래 줄들이 고정 순서로 옵니다(`world_index:`는 World Memory 인덱스가 있을 때만 포함됩니다). 질문에는 별도 현재 시각(`now`)이 실리지 않습니다. **판단 기준으로서의 「지금」은 질문에 실린 단위 가운데 가장 마지막 단위의 `closed_at` 시각입니다.**
 
-1. `question: <앞 절반>` — 질문 ID의 32자 소문자 hex 앞 절반(선언·`memory:`·`working_state:` 해시)
+1. `question: <앞 절반>` — 질문 ID의 32자 소문자 hex 앞 절반(선언·`memory:`·`working_state:`·`world_index:` 해시)
 2. `memory: [...]` — 현재 Memory fact 배열(`name`: `"m1"`…`"mN"`, `claim`, `category`, `basis`: `"observed"` 또는 `"derived"`+`derivations`, `first_seen`, `last_seen`)
 3. `working_state: ...` — 마지막 `Committed` 반영 줄의 `working_state` 문자열 또는 `null`
-4. `units: [...]` — 단위 배열(`name`: `"u1"`…`"uK"`). 각 단위는 `kind`(`"turn"` | `"reset"`), `closed_at`, `missing`(`bundle`/`history_bytes`/`internal_bytes`/`chat_bytes`/`external_rows`/undecodable 종류와 크기만 표기 — 빠진 내용을 추측해 채우지 마세요)를 실으며 다음 구조를 따릅니다.
-   - `kind = "turn"`: `turn`(정수 ID), `runtime`, `outcome`(`"completed"`·`"errored"`·`"cancelled"`·`"save_failed"`·`"stale_save"`·`"close_missing"`·`"process_exited"`), `task`(`kind`: `"no_task"` | `"task_source_unavailable"` | `"task"`의 `task`와 `goals`: `[{"goal":...,"shown":...}]`), `stimuli`, `unattributed` 배열, 그리고 `own` 배열(단, `outcome`이 `"close_missing"` 또는 `"process_exited"`이면 입실 뒤 정리분인 `closed_after_admission` 배열로 나뉩니다). 턴을 연 줄을 읽지 못한 턴은 `runtime`·`task`·`stimuli` 대신 `opened`: `"unreadable"` 을 싣고, 항목이 모두 `unattributed` 에 실립니다. 그 턴의 `runtime`·`task`·`stimuli` 를 추측해 채우지 마세요.
-   - `kind = "reset"`: `cause`(`"cleared"` | `"recovered"`), `items` 배열.
-   - 항목(`items`/`unattributed`/`own`/`closed_after_admission`)은 `index`와 `kind`를 갖습니다:
-     - `"message"`: `role`, `speaker`(User일 때) + `content`(`"text"`, `"tool_use"`, `"tool_result"`, `"image"`, `"document"`, `"audio"`; thinking 제외). 단, 런타임이 다시 넣어 준 기억·안내·복구 단서는 내용을 빼고 **`"runtime_context"`** 만 실으므로 **Keeper가 새로 본 관측으로 치지 마세요.**
-     - `"chat"`: `role`, `speaker` / `content` / `tool_call`(`id`, `name`); 깨진 줄은 `"chat_unreadable"`.
-     - `"external"`: `actor`, `source`, `urgency`, `content`.
-     - `"tool_observation"`: `tool_name`, `outcome`(`"succeeded"` | `"failed"` | `"unknown"`); `"untagged"`.
-   - `Read_item_alone`(단일 항목 초과 시)에는 앞 Memory·`working_state` 없이 `u1` 한 항목만 실립니다.
-   - `Make_room`에는 `units:` 줄 대신 `make_room: "..."` 줄이 실립니다. 값은 방금 읽은 항목이 이 Memory 와 함께는 어느 slot 에도 들어가지 않아 그 항목만 따로 읽었다는 문장 하나입니다. 몇 개로, 몇 바이트로 줄이라는 목표는 없습니다.
-5. `question-end: <뒤 절반>` — 질문 ID의 32자 소문자 hex 뒤 절반(`units:` 줄 해시, `Make_room`에서는 `make_room:` 줄 해시)
+4. `world_index: "..."` *(선택, `With_memory` 및 `Make_room` / `Molt_and_synthesize`에서 World Memory 인덱스가 있을 때만 포함)* — 여러 Keeper가 공유하는 읽기 전용 World Memory 인덱스 스냅샷. 이미 World Memory에 승격된 사실과 중복 제안을 피하는 데 참고하세요.
+5. 본문 줄(모드에 따라 아래 셋 중 정확히 하나):
+   - **`Read_range` / `Read_item_alone`**: `units: [...]` — 단위 배열(`name`: `"u1"`…`"uK"`). 각 단위는 `kind`(`"turn"` | `"reset"`), `closed_at`, `missing`(`bundle`/`history_bytes`/`internal_bytes`/`chat_bytes`/`external_rows`/undecodable 종류와 크기만 표기 — 빠진 내용을 추측해 채우지 마세요)를 실으며 다음 구조를 따릅니다.
+     - `kind = "turn"`: `turn`(정수 ID), `runtime`, `outcome`(`"completed"`·`"errored"`·`"cancelled"`·`"save_failed"`·`"stale_save"`·`"close_missing"`·`"process_exited"`), `task`(`kind`: `"no_task"` | `"task_source_unavailable"` | `"task"`의 `task`와 `goals`: `[{"goal":...,"shown":...}]`), `stimuli`, `unattributed` 배열, 그리고 `own` 배열(단, `outcome`이 `"close_missing"` 또는 `"process_exited"`이면 입실 뒤 정리분인 `closed_after_admission` 배열로 나뉩니다). 턴을 연 줄을 읽지 못한 턴은 `runtime`·`task`·`stimuli` 대신 `opened`: `"unreadable"` 을 싣고, 항목이 모두 `unattributed` 에 실립니다. 그 턴의 `runtime`·`task`·`stimuli` 를 추측해 채우지 마세요.
+     - `kind = "reset"`: `cause`(`"cleared"` | `"recovered"`), `items` 배열.
+     - 항목(`items`/`unattributed`/`own`/`closed_after_admission`)은 `index`와 `kind`를 갖습니다:
+       - `"message"`: `role`, `speaker`(User일 때) + `content`(`"text"`, `"tool_use"`, `"tool_result"`, `"image"`, `"document"`, `"audio"`; thinking 제외). 단, 런타임이 다시 넣어 준 기억·안내·복구 단서는 내용을 빼고 **`"runtime_context"`** 만 실으므로 **Keeper가 새로 본 관측으로 치지 마세요.**
+       - `"chat"`: `role`, `speaker` / `content` / `tool_call`(`id`, `name`); 깨진 줄은 `"chat_unreadable"`.
+       - `"external"`: `actor`, `source`, `urgency`, `content`.
+       - `"tool_observation"`: `tool_name`, `outcome`(`"succeeded"` | `"failed"` | `"unknown"`); `"untagged"`.
+     - `Read_item_alone`(단일 항목 초과 시)에는 앞 Memory·`working_state`·`world_index` 없이 `u1` 한 항목만 실립니다.
+   - **`Make_room`**: `units:` 줄 대신 `make_room: "..."` 줄이 실립니다. 값은 방금 읽은 항목이 이 Memory 와 함께는 어느 slot 에도 들어가지 않아 그 항목만 따로 읽었다는 문장 하나입니다. 몇 개로, 몇 바이트로 줄이라는 목표는 없습니다.
+   - **`Molt_and_synthesize`**: `units:` / `make_room:` 줄 대신 `molt_trigger: {"kind": ...}` 줄이 실립니다(`"compaction_epoch_advanced"` | `"synthesis_cycle_completed"` | `"memory_growth_molt_requested"`). 구조적 생애주기 경계에서 대체·일시 잡음 기억을 `molt`로 차가운 아카이브로 탈피하고, 교차 카테고리 통찰은 `synthesize`, 공유 가치가 검증된 지식은 `promote_to_world`로 정리하세요.
+6. `question-end: <뒤 절반>` — 질문 ID의 32자 소문자 hex 뒤 절반(`units:` / `make_room:` / `molt_trigger:` 줄 해시)
 
 ### 모드별 허용 범위
 
@@ -113,7 +116,7 @@ template_variables: []
 - **변경 연산 한 기억 한 번 규칙**: `revise`·`merge`·`seen`·`drop`·`molt`는 한 응답의 `ops` 전체에서 같은 `mN`에 **최대 한 번만** 이름 붙입니다(`Ref_used_twice`). 읽기 전용 전제 인용인 `synthesize`·`promote_to_world`는 같은 응답 안에서 함께 살아남는 전제 `mN`을 공유할 수 있습니다.
 - **`merge`/`synthesize`/`molt`/`promote_to_world`의 `refs`**: 1개 이상의 서로 다른 `mN`을 적습니다. 빈 배열이나 중복 `mN`은 `Schema_violation`입니다.
 - **`from`**: 이 질문에 실제 실린 단위 이름(`"u1"`, …)만 적습니다. 단위가 없는 `Make_room` / `Molt_and_synthesize` 정리는 `"from": []`를 씁니다(질문 밖 단위는 `Source_outside_question`).
-- **`basis`**: `observed`(`{"kind": "observed"}` 또는 Board 출처 포함)와 `derived`(`{"kind": "derived", "derivations": [{"rule_id": "...", "premise_ids": ["sha256:..."]}]}`)를 모두 허용합니다. 단, `mN` 짧은 이름으로 교차 합성할 때는 `synthesize` 연산을 사용하세요.
+- **`basis`**: `add`·`revise`·`merge`의 `basis`는 **`observed`만 허용**합니다(`{"kind": "observed"}` 또는 Board 출처 포함). 파생(`derived`) 기억은 `mN` 전제 이름을 그대로 쓰는 전용 **`synthesize`** 연산으로만 생성하세요.
 - **`derived` 전제 보호**: 현재 Memory에 `basis.kind = "derived"`인 fact가 있으면, 그 `derivations` 전제가 끊어지지 않는지 확인하세요(`Support_lost` / `Successor_unsupported` 방지).
 - **`claim`과 `reason`**: 공백이 아닌 비어 있지 않은 문자열이어야 합니다.
 - **숫자 임계값 금지**: 감쇠 상수·importance 점수·횟수 문턱값은 두지 않습니다.

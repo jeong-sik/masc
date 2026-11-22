@@ -126,23 +126,114 @@ let store_anchor ~epoch ~snapshot ~bytes =
   ({epoch; snapshot; journal_length=String.length bytes; journal_sha256=sha256 bytes}
     : Keeper_memory_os_program_types.store_anchor)
 
+let ensure_epoch_if_missing ~keepers_dir ~keeper_id =
+  let* existing = read_epoch ~keepers_dir ~keeper_id in
+  match existing with
+  | Some epoch -> Ok epoch
+  | None ->
+    Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
+      File_lock_eio.with_lock (path_for_keepers_dir ~keepers_dir ~keeper_id) (fun () ->
+        ensure_epoch ~keepers_dir ~keeper_id))
+;;
+
+let max_optimistic_anchor_attempts = 4
+let max_locked_anchor_attempts = 8
+
 let capture_program_anchor ~keepers_dir ~keeper_id =
   Fs_compat.mkdir_p keepers_dir;
   let* () = recover_publication ~keepers_dir ~keeper_id in
-  Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
-    File_lock_eio.with_lock (path_for_keepers_dir ~keepers_dir ~keeper_id) (fun () ->
-      let* () = publication_read_guard ~keepers_dir ~keeper_id in
-      let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-      let* snapshot = match Fs_compat.load_file_opt path with
-        | None -> Ok None
-        | Some bytes -> let+ current = parse path bytes in Some (current,bytes,sha256 bytes) in
-      let* epoch = ensure_epoch ~keepers_dir ~keeper_id in
-      let* bytes = program_journal_bytes ~keepers_dir ~keeper_id in
-      let* _ = decode_program_journal bytes in
-      Ok {anchor_keeper=keeper_id; anchor_snapshot=Option.map (fun (current,_,_) -> current) snapshot;
-        anchor_snapshot_bytes=Option.map (fun (_,bytes,_) -> bytes) snapshot;
-        anchor_identity=store_anchor ~epoch
-          ~snapshot:(Option.map (fun (current,_,digest) -> current.revision,digest) snapshot) ~bytes}))
+  let* _ = ensure_epoch_if_missing ~keepers_dir ~keeper_id in
+  let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let journal_path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let build_anchor ~epoch ~snap_bytes ~journal_bytes =
+    let* snapshot =
+      match snap_bytes with
+      | None -> Ok None
+      | Some bytes ->
+        let+ current = parse snapshot_path bytes in
+        Some (current, bytes, sha256 bytes)
+    in
+    let* _ = decode_program_journal journal_bytes in
+    Ok
+      { anchor_keeper = keeper_id
+      ; anchor_snapshot = Option.map (fun (current, _, _) -> current) snapshot
+      ; anchor_snapshot_bytes = Option.map (fun (_, bytes, _) -> bytes) snapshot
+      ; anchor_identity =
+          store_anchor
+            ~epoch
+            ~snapshot:
+              (Option.map
+                 (fun (current, _, digest) -> current.revision, digest)
+                 snapshot)
+            ~bytes:journal_bytes
+      }
+  in
+  let rec capture_optimistic attempt =
+    (* Read, verify bracket, and decode/hash snapshot + full journal off-domain
+       without holding Memory OS write locks; transient publication receipts or
+       file identity shifts retry cleanly before falling back to short locks. *)
+    let observed =
+      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+        match publication_read_guard ~keepers_dir ~keeper_id with
+        | Error _ -> Ok `Changed
+        | Ok () ->
+          let* epoch_before = read_epoch ~keepers_dir ~keeper_id in
+          let* snap_before = stat_identity_result snapshot_path in
+          let* journal_before = stat_identity_result journal_path in
+          (match epoch_before with
+           | None -> Ok `Changed
+           | Some epoch ->
+             let snap_bytes = Fs_compat.load_file_opt snapshot_path in
+             let* journal_bytes = program_journal_bytes ~keepers_dir ~keeper_id in
+             (match publication_read_guard ~keepers_dir ~keeper_id with
+              | Error _ -> Ok `Changed
+              | Ok () ->
+                let* epoch_after = read_epoch ~keepers_dir ~keeper_id in
+                let* snap_after = stat_identity_result snapshot_path in
+                let* journal_after = stat_identity_result journal_path in
+                if
+                  epoch_after = Some epoch
+                  && snap_before = snap_after
+                  && journal_before = journal_after
+                then
+                  let+ anchor = build_anchor ~epoch ~snap_bytes ~journal_bytes in
+                  `Captured anchor
+                else Ok `Changed)))
+    in
+    match observed with
+    | Ok (`Captured anchor) -> Ok anchor
+    | Ok `Changed when attempt < max_optimistic_anchor_attempts ->
+      yield_for_concurrent_writer ();
+      capture_optimistic (attempt + 1)
+    | Ok `Changed -> capture_locked 0
+    | Error _ as err -> err
+  and capture_locked attempt =
+    (* Under sustained write contention, recover any transient notification
+       receipt, copy raw bytes under short locks with ZERO Domain_pool jobs
+       held inside, then decode/hash off-domain. *)
+    let* () = recover_publication ~keepers_dir ~keeper_id in
+    let* copied =
+      Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
+        File_lock_eio.with_lock snapshot_path (fun () ->
+          match publication_read_guard ~keepers_dir ~keeper_id with
+          | Error detail -> Ok (`Pending detail)
+          | Ok () ->
+            let* epoch = ensure_epoch ~keepers_dir ~keeper_id in
+            let snap_bytes = Fs_compat.load_file_opt snapshot_path in
+            let* journal_bytes = program_journal_bytes ~keepers_dir ~keeper_id in
+            Ok (`Copied (epoch, snap_bytes, journal_bytes))))
+    in
+    match copied with
+    | `Copied (epoch, snap_bytes, journal_bytes) ->
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+        build_anchor ~epoch ~snap_bytes ~journal_bytes)
+    | `Pending _ when attempt < max_locked_anchor_attempts ->
+      yield_for_concurrent_writer ();
+      capture_locked (attempt + 1)
+    | `Pending detail -> Error detail
+  in
+  capture_optimistic 0
+;;
 
 let verify_program_state ~bytes ~(original : Keeper_memory_os_program_types.store_anchor) ~initial_facts ~protected_ids
     ~snapshot_content previous =
@@ -227,18 +318,97 @@ let verify_program_anchor ~keepers_dir ~keeper_id anchor ~snapshot_content previ
     ~initial_current:program.Keeper_memory_os_program_types.initial_current
 
 let resume_program_anchor ~keepers_dir ~keeper_id (Program_anchor_evidence anchor) =
-  let* ()=recover_publication ~keepers_dir ~keeper_id in
-  Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
-    File_lock_eio.with_lock (path_for_keepers_dir ~keepers_dir ~keeper_id) (fun () ->
-      let* ()=publication_read_guard ~keepers_dir ~keeper_id in
-      let* observed=match Fs_compat.load_file_opt (path_for_keepers_dir ~keepers_dir ~keeper_id) with
-        | None -> Ok None
-        | Some bytes -> let+ snapshot=parse (path_for_keepers_dir ~keepers_dir ~keeper_id) bytes in
-          Some (snapshot,bytes) in
-      let* _=verify_program_anchor_current ~keepers_dir ~keeper_id anchor
-        ~snapshot_content:(Option.map snd observed) (Option.map fst observed)
-        ~initial_current:(Option.map (fun (snapshot : t) -> snapshot.facts) anchor.anchor_snapshot) in
-      Ok anchor))
+  let* () = recover_publication ~keepers_dir ~keeper_id in
+  let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let journal_path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let verify_observed ~epoch ~snap_bytes ~journal_bytes =
+    let* () =
+      if anchor.anchor_keeper = keeper_id && epoch = Some anchor.anchor_identity.epoch
+      then Ok ()
+      else Error "Memory program incarnation changed since inference"
+    in
+    let* observed =
+      match snap_bytes with
+      | None -> Ok None
+      | Some bytes ->
+        let+ snapshot = parse snapshot_path bytes in
+        Some (snapshot, bytes)
+    in
+    let initial_facts =
+      Option.fold ~none:[] ~some:(fun (snapshot : t) -> snapshot.facts) anchor.anchor_snapshot
+    in
+    let protected_ids = Set_util.StringSet.of_list (List.map memory_id initial_facts) in
+    let* _ =
+      verify_program_state
+        ~bytes:journal_bytes
+        ~original:anchor.anchor_identity
+        ~initial_facts
+        ~protected_ids
+        ~snapshot_content:(Option.map snd observed)
+        (Option.map fst observed)
+    in
+    Ok anchor
+  in
+  let rec resume_optimistic attempt =
+    (* Lock-free off-domain verification: read, verify bracket, and replay the
+       journal suffix off the main Eio domain without acquiring Memory OS write
+       locks; transient publication receipts or identity shifts retry cleanly. *)
+    let outcome =
+      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+        match publication_read_guard ~keepers_dir ~keeper_id with
+        | Error _ -> Ok `Changed
+        | Ok () ->
+          let* epoch_before = read_epoch ~keepers_dir ~keeper_id in
+          let* snap_before = stat_identity_result snapshot_path in
+          let* journal_before = stat_identity_result journal_path in
+          let snap_bytes = Fs_compat.load_file_opt snapshot_path in
+          let* journal_bytes = program_journal_bytes ~keepers_dir ~keeper_id in
+          (match publication_read_guard ~keepers_dir ~keeper_id with
+           | Error _ -> Ok `Changed
+           | Ok () ->
+             let* epoch_after = read_epoch ~keepers_dir ~keeper_id in
+             let* snap_after = stat_identity_result snapshot_path in
+             let* journal_after = stat_identity_result journal_path in
+             if
+               epoch_before = epoch_after
+               && snap_before = snap_after
+               && journal_before = journal_after
+             then
+               let+ verified = verify_observed ~epoch:epoch_before ~snap_bytes ~journal_bytes in
+               `Verified verified
+             else Ok `Changed))
+    in
+    match outcome with
+    | Ok (`Verified verified) -> Ok verified
+    | Ok `Changed when attempt < max_optimistic_anchor_attempts ->
+      yield_for_concurrent_writer ();
+      resume_optimistic (attempt + 1)
+    | Ok `Changed -> resume_locked 0
+    | Error _ as err -> err
+  and resume_locked attempt =
+    let* () = recover_publication ~keepers_dir ~keeper_id in
+    let* copied =
+      Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
+        File_lock_eio.with_lock snapshot_path (fun () ->
+          match publication_read_guard ~keepers_dir ~keeper_id with
+          | Error detail -> Ok (`Pending detail)
+          | Ok () ->
+            let* epoch = read_epoch ~keepers_dir ~keeper_id in
+            let snap_bytes = Fs_compat.load_file_opt snapshot_path in
+            let* journal_bytes = program_journal_bytes ~keepers_dir ~keeper_id in
+            Ok (`Copied (epoch, snap_bytes, journal_bytes))))
+    in
+    match copied with
+    | `Copied (epoch, snap_bytes, journal_bytes) ->
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+        verify_observed ~epoch ~snap_bytes ~journal_bytes)
+    | `Pending _ when attempt < max_locked_anchor_attempts ->
+      yield_for_concurrent_writer ();
+      resume_locked (attempt + 1)
+    | `Pending detail -> Error detail
+  in
+  resume_optimistic 0
+;;
 
 
 let read_program_journal_target_locked ~keepers_dir ~keeper_id ~transaction_id ~snapshot_content current =
@@ -305,7 +475,7 @@ let drop_reason_for ~(dropped : dropped_statement list option)
     if List.exists (fun held -> fact_payload held=fact_payload fact) publication.execution.initial_facts
     then original_occurrence publication.execution.stages else None
 
-let find_removal ~keepers_dir ~keeper_id target =
+let find_removal_inline ~keepers_dir ~keeper_id target =
   let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
   let is_target fact = String.equal (Keeper_memory_os_types.memory_id fact) target in
   let mention = function
@@ -335,14 +505,16 @@ let find_removal ~keepers_dir ~keeper_id target =
   if not (Sys.file_exists path)
   then No_removal_recorded
   else (
-    match
-      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-        Dated_jsonl.find_latest_entry_in_file_result path mention)
-    with
+    match Dated_jsonl.find_latest_entry_in_file_result path mention with
     | Ok (Some (Mentioned_as_removed removal)) -> Removed removal
     | Ok (Some Mentioned_as_current | None) -> No_removal_recorded
     | Ok (Some (Mention_unreadable detail)) -> Journal_unreadable detail
     | Error error -> Journal_unreadable (Dated_jsonl.read_error_to_string error))
+;;
+
+let find_removal ~keepers_dir ~keeper_id target =
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+    find_removal_inline ~keepers_dir ~keeper_id target)
 ;;
 
 type archived_fact =
@@ -485,21 +657,45 @@ type retirement_context =
   | Retirement_archive of (archived_fact list, string) result
 
 let read_retirement_context ~keepers_dir ~keeper_id ~expected_revision ~current_facts =
-  try
-    let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-    Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
-      File_lock_eio.with_lock path (fun () ->
-        match read_classified ~keepers_dir ~keeper_id with
-        | Readable snapshot when Some snapshot.revision = expected_revision
-            && snapshot.facts = current_facts ->
-            Retirement_archive (read_dropped ~keepers_dir ~keeper_id ~current_facts)
-        | No_snapshot when expected_revision = None && current_facts = [] ->
-            Retirement_archive (read_dropped ~keepers_dir ~keeper_id ~current_facts)
-        | Undecodable {rejection} when expected_revision = None && current_facts = [] ->
-            Retirement_archive (Error rejection)
-        | Readable _ | No_snapshot | Undecodable _ -> Retirement_source_changed
-        | Io_unreadable {detail} -> Retirement_source_unavailable detail))
-  with
+  (* Lock-free optimistic bracketing: read-only retirement inspection avoids
+     holding nested flocks across the off-domain [read_dropped] journal scan.
+     Re-verifying the classified snapshot after [read_dropped] detects any
+     concurrent commit cleanly; transient contention during active commits
+     retries before surfacing [Retirement_source_unavailable]. *)
+  let check_snapshot () =
+    match read_classified ~keepers_dir ~keeper_id with
+    | Readable snapshot
+      when Some snapshot.revision = expected_revision
+           && snapshot.facts = current_facts -> `Matches
+    | No_snapshot when expected_revision = None && current_facts = [] -> `Matches
+    | Undecodable { rejection } when expected_revision = None && current_facts = [] ->
+      `Undecodable_empty rejection
+    | Readable _ | No_snapshot | Undecodable _ -> `Changed
+    | Io_unreadable { detail } -> `Unavailable detail
+  in
+  let rec attempt n =
+    match check_snapshot () with
+    | `Undecodable_empty rejection -> Retirement_archive (Error rejection)
+    | `Changed -> Retirement_source_changed
+    | `Unavailable detail ->
+      if n < max_optimistic_anchor_attempts
+      then (
+        yield_for_concurrent_writer ();
+        attempt (n + 1))
+      else Retirement_source_unavailable detail
+    | `Matches ->
+      let archive = read_dropped ~keepers_dir ~keeper_id ~current_facts in
+      (match check_snapshot (), archive with
+       | `Changed, _ -> Retirement_source_changed
+       | `Undecodable_empty rejection, _ -> Retirement_archive (Error rejection)
+       | `Matches, Ok _ -> Retirement_archive archive
+       | (`Matches, Error _ | `Unavailable _, _) when n < max_optimistic_anchor_attempts ->
+         yield_for_concurrent_writer ();
+         attempt (n + 1)
+       | `Matches, Error _ -> Retirement_archive archive
+       | `Unavailable detail, _ -> Retirement_source_unavailable detail)
+  in
+  try attempt 0 with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Retirement_source_unavailable (Printexc.to_string exn)
 ;;
@@ -508,70 +704,71 @@ let read_retirement_context ~keepers_dir ~keeper_id ~expected_revision ~current_
    adding back in the same line. Read newest first and stopped at the first
    line at or below [revision], so it costs the commits since the decision,
    not the journal's length. [None] reads every line: the decision saw no
-   snapshot. [held] is the revision of the snapshot the caller holds locked.
-   Once Memory moved after the decision, an empty set is a proof only if the
-   journal holds a rewriting line for every revision in between: a commit
-   without drop reasons appends its line best-effort, so a lost line can hide
-   a removal that a later line adds back. Revisions restart after a
-   quarantine, so a quarantine in that window ends the proof too. Caller holds
-   the aggregate and snapshot locks, as for [read_dropped]. *)
+   snapshot. [held] is the revision of the snapshot the caller holds or
+   observed. Once Memory moved after the decision, an empty set is a proof
+   only if the journal holds a rewriting line for every revision in between:
+   a commit without drop reasons appends its line best-effort, so a lost line
+   can hide a removal that a later line adds back. Revisions restart after a
+   quarantine, so a quarantine in that window ends the proof too. Executed
+   off-domain so callers never scan 10-13 MB journals on the main Eio domain. *)
 let targets_retired_since ~keepers_dir ~keeper_id ~revision ~held targets =
   let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
   (* Snapshot revisions start at 1, so 0 stands for no snapshot. *)
   let decided = Option.value revision ~default:0 in
   let held = Option.value held ~default:0 in
   let moved = held > decided in
-  let retired = ref Set_util.StringSet.empty in
-  let rewritten = ref Recall_revision_set.empty in
-  let newer line_revision = match revision with
-    | None -> true
-    | Some decided -> line_revision > decided in
-  let visit = function
-    | Dated_jsonl.Malformed_json { detail; _ } -> Some (Error detail)
-    | Dated_jsonl.Parsed json ->
-      match Journal_codec.journal_entry_of_json json with
-      | Error detail -> Some (Error detail)
-      | Ok (Journal_failed _) -> None
-      | Ok (Journal_quarantined _) ->
-        if moved
-        then Some (Error "a quarantine restarted Memory revisions after the admission decision")
-        else None
-      | Ok (Journal_committed { revision = line_revision; change; program; _ }) ->
-        if not (newer line_revision) then Some (Ok ())
-        else if moved && line_revision > held then
-          Some (Error (Printf.sprintf
-            "journal revision %d is ahead of the locked snapshot revision %d"
-            line_revision held))
-        else (
-          if line_revision > decided && Journal_codec.journal_line_rewrote json then
-            rewritten := Recall_revision_set.add line_revision !rewritten;
-          List.iter (fun identity ->
-            if Set_util.StringSet.mem identity targets then retired := Set_util.StringSet.add identity !retired)
-            (retired_identities change);
-          Option.iter (fun proof -> List.iter (fun identity ->
-            if Set_util.StringSet.mem identity targets then retired := Set_util.StringSet.add identity !retired)
-            (Keeper_memory_os_program_publication.touched_ids proof)) program;
-          None) in
-  (* Lines above [held] were refused and the scan stopped at the decision, so
-     the count proves each revision in between. *)
-  let proven () =
-    if (not moved) || Recall_revision_set.cardinal !rewritten = held - decided
-    then Ok !retired
-    else
-      Error (Printf.sprintf
-        "journal lacks a Memory revision between the admission decision %d and the locked snapshot %d"
-        decided held) in
   if held < decided then
     Error (Printf.sprintf
       "the locked snapshot revision %d is behind the admission decision %d" held decided)
   else
-    match Unix.lstat path with
-    | _ ->
-      (match Dated_jsonl.find_latest_entry_in_file_result path visit with
-       | Ok (None | Some (Ok ())) -> proven ()
-       | Ok (Some (Error detail)) -> Error detail
-       | Error error -> Error (Dated_jsonl.read_error_to_string error))
-    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> proven ()
-    | exception Unix.Unix_error (code, fn, arg) ->
-      Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+      let retired = ref Set_util.StringSet.empty in
+      let rewritten = ref Recall_revision_set.empty in
+      let newer line_revision = match revision with
+        | None -> true
+        | Some decided -> line_revision > decided in
+      let visit = function
+        | Dated_jsonl.Malformed_json { detail; _ } -> Some (Error detail)
+        | Dated_jsonl.Parsed json ->
+          match Journal_codec.journal_entry_of_json json with
+          | Error detail -> Some (Error detail)
+          | Ok (Journal_failed _) -> None
+          | Ok (Journal_quarantined _) ->
+            if moved
+            then Some (Error "a quarantine restarted Memory revisions after the admission decision")
+            else None
+          | Ok (Journal_committed { revision = line_revision; change; program; _ }) ->
+            if not (newer line_revision) then Some (Ok ())
+            else if moved && line_revision > held then
+              Some (Error (Printf.sprintf
+                "journal revision %d is ahead of the locked snapshot revision %d"
+                line_revision held))
+            else (
+              if line_revision > decided && Journal_codec.journal_line_rewrote json then
+                rewritten := Recall_revision_set.add line_revision !rewritten;
+              List.iter (fun identity ->
+                if Set_util.StringSet.mem identity targets then retired := Set_util.StringSet.add identity !retired)
+                (retired_identities change);
+              Option.iter (fun proof -> List.iter (fun identity ->
+                if Set_util.StringSet.mem identity targets then retired := Set_util.StringSet.add identity !retired)
+                (Keeper_memory_os_program_publication.touched_ids proof)) program;
+              None) in
+      (* Lines above [held] were refused and the scan stopped at the decision, so
+         the count proves each revision in between. *)
+      let proven () =
+        if (not moved) || Recall_revision_set.cardinal !rewritten = held - decided
+        then Ok !retired
+        else
+          Error (Printf.sprintf
+            "journal lacks a Memory revision between the admission decision %d and the locked snapshot %d"
+            decided held) in
+      match Unix.lstat path with
+      | _ ->
+        (match Dated_jsonl.find_latest_entry_in_file_result path visit with
+         | Ok (None | Some (Ok ())) -> proven ()
+         | Ok (Some (Error detail)) -> Error detail
+         | Error error -> Error (Dated_jsonl.read_error_to_string error))
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> proven ()
+      | exception Unix.Unix_error (code, fn, arg) ->
+        Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)))
 ;;

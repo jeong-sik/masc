@@ -38,6 +38,10 @@ val lifecycle_of_string : string -> lifecycle option
 type molt_trigger =
   | Compaction_epoch_advanced of { epoch_id : int }
   | Synthesis_cycle_completed
+  | Memory_growth_molt_requested of
+      { current_bytes : int
+      ; threshold_bytes : int
+      }
 
 val molt_trigger_to_json : molt_trigger -> Yojson.Safe.t
 val molt_trigger_of_json : Yojson.Safe.t -> (molt_trigger, wire_error) result

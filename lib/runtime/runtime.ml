@@ -1390,7 +1390,7 @@ let set_loaded
   in
   List.iter
     (fun overlap ->
-       Log.Runtime.warn "%s" (librarian_keeper_seat_overlap_to_string overlap))
+       Log.Runtime.debug "%s" (librarian_keeper_seat_overlap_to_string overlap))
     overlaps;
   (* Before the runtimes are published, so a request on a new runtime is
      admitted under the account allowance it was configured with. *)

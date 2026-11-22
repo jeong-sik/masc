@@ -26,6 +26,18 @@ type decision_audit_entry = {
   summary : string;
 }
 
+type task_status_filter =
+  | Status_all
+  | Status_active
+  | Status_awaiting_verification
+  | Status_todo
+  | Status_unlinked
+  | Status_done
+  | Status_schedules
+(** Tasks & Schedules status chip. [Status_all] shows tasks and schedules,
+    [Status_schedules] shows only schedules, and every other chip shows only
+    the tasks in that status. *)
+
 type t = {
   active_tab : Nav.work_tab;
   planning : Wire_work.planning_snapshot Observed.t;
@@ -46,6 +58,7 @@ type t = {
   pulse_goal_index : int;
   schedules_scroll_offset : int;
   filter_query : string;
+  task_status_filter : task_status_filter;
   verification_view : [ `Pending | `All ];
   expanded_ids : String_set.t;
 }
@@ -102,9 +115,7 @@ val goals : t -> Wire_work.goal list
 val filtered_goals : t -> Wire_work.goal list
 val tasks : t -> Wire_work.task list
 val filtered_tasks : t -> Wire_work.task list
-(** Canonical SSOT task filter supporting status keywords (["active"],
-    ["verify"], ["todo"], ["unlinked"], ["done"], ["sched"]/["schedules"]) and
-    substring matching on title/id. *)
+(** Tasks in [task_status_filter] whose title or id contains [filter_query]. *)
 val verifications_list : t -> Wire_work.verification_request list
 val filtered_verifications : t -> Wire_work.verification_request list
 val schedules_list : t -> Wire_work.schedule_row list
@@ -137,6 +148,13 @@ val move_selection :
 val jump_tasks_schedules_pane : pane_index:int -> t -> t
 val reset_detail_scroll : t -> t
 val set_filter : string -> t -> t
+val equal_task_status_filter : task_status_filter -> task_status_filter -> bool
+val all_task_status_filters : task_status_filter list
+(** Chip order on the Tasks & Schedules tab. *)
+
+val set_task_status_filter : task_status_filter -> t -> t
+val cycle_task_status_filter : t -> t
+(** Next chip in {!all_task_status_filters} order, wrapping to [Status_all]. *)
 val toggle_verification_view : t -> t
 val toggle_expanded : string -> t -> t
 val mark_stale_all : t -> t

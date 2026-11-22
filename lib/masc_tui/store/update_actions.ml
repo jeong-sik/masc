@@ -1145,6 +1145,24 @@ and execute_action ~now (m : Model.t) action =
                       else if
                         not (String.equal (Update_nav.current_filter_query m) "")
                       then (Update_nav.set_active_filter_query "" m, [])
+                      else if
+                        Nav.equal_workspace m.nav.workspace Nav.Work
+                        && Nav.equal_work_tab m.work.active_tab
+                             Nav.Work_tasks_schedules
+                        && not
+                             (Work_store.equal_task_status_filter
+                                m.work.task_status_filter Work_store.Status_all)
+                      then
+                        (* The status chip narrows the list like the filter
+                           does, so the last Esc returns it to All. *)
+                        ( {
+                            m with
+                            nav = { m.nav with pane_index = 0 };
+                            work =
+                              Work_store.set_task_status_filter
+                                Work_store.Status_all m.work;
+                          }
+                        , [] )
                       else (m, [])))
   | Keymap.Open_settings -> Update_nav.open_global_settings m
   | Keymap.Teleport_blocked -> Update_nav.teleport_blocked ~now m
@@ -1316,10 +1334,26 @@ and execute_action ~now (m : Model.t) action =
                       let work = Work_store.toggle_verification_view m.work in
                       let next = { m with work } in
                       (next, View_fetches.fetches_for_current_view next)
-                  | Nav.Work_tasks_schedules
-                  | Nav.Work_inbox
-                  | Nav.Work_candle_scorecard ->
-                      (m, []))
+                  | Nav.Work_tasks_schedules ->
+                      let next =
+                        {
+                          m with
+                          work = Work_store.cycle_task_status_filter m.work;
+                        }
+                      in
+                      let max_pane =
+                        Int.max 0 (Model.focusable_pane_count next - 1)
+                      in
+                      ( {
+                          next with
+                          nav =
+                            {
+                              next.nav with
+                              pane_index = Int.min next.nav.pane_index max_pane;
+                            };
+                        }
+                      , [] )
+                  | Nav.Work_inbox | Nav.Work_candle_scorecard -> (m, []))
               | Nav.Infra -> (
                   match m.infra.active_tab with
                   | Nav.Infra_activity_logs ->

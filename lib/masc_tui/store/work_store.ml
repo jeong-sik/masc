@@ -22,6 +22,15 @@ type decision_audit_entry = {
   summary : string;
 }
 
+type task_status_filter =
+  | Status_all
+  | Status_active
+  | Status_awaiting_verification
+  | Status_todo
+  | Status_unlinked
+  | Status_done
+  | Status_schedules
+
 type t = {
   active_tab : Nav.work_tab;
   planning : Wire_work.planning_snapshot Observed.t;
@@ -42,6 +51,7 @@ type t = {
   pulse_goal_index : int;
   schedules_scroll_offset : int;
   filter_query : string;
+  task_status_filter : task_status_filter;
   verification_view : [ `Pending | `All ];
   expanded_ids : String_set.t;
 }
@@ -69,6 +79,7 @@ let empty =
     pulse_goal_index = 0;
     schedules_scroll_offset = 0;
     filter_query = "";
+    task_status_filter = Status_all;
     verification_view = `Pending;
     expanded_ids = String_set.empty;
   }
@@ -351,43 +362,36 @@ let filtered_goals t =
         || contains_ci ~needle:q g.measure)
       (goals t)
 
+let task_matches_status filter (tk : Wire_work.task) =
+  match filter with
+  | Status_all -> true
+  | Status_schedules -> false
+  | Status_active -> task_is_active tk.status
+  | Status_awaiting_verification -> task_is_awaiting_verification tk.status
+  | Status_todo -> (
+      match tk.status with
+      | Wire_work.Todo -> true
+      | Wire_work.Claimed _
+      | Wire_work.InProgress _
+      | Wire_work.AwaitingVerification _
+      | Wire_work.Done _
+      | Wire_work.Cancelled _ ->
+          false)
+  | Status_unlinked -> (
+      match tk.goal_link with
+      | Wire_work.Unlinked -> true
+      | Wire_work.Linked _ -> false)
+  | Status_done -> task_is_done tk.status
+
 let filtered_tasks t =
-  let q_low = String.lowercase_ascii (String.trim t.filter_query) in
-  let all = tasks t in
-  if String.equal q_low "" then all
-  else if String.equal q_low "schedules" || String.equal q_low "sched" then []
-  else if String.equal q_low "active" then
-    List.filter (fun (tk : Wire_work.task) -> task_is_active tk.status) all
-  else if String.equal q_low "verify" then
-    List.filter
-      (fun (tk : Wire_work.task) -> task_is_awaiting_verification tk.status)
-      all
-  else if String.equal q_low "todo" then
-    List.filter
-      (fun (tk : Wire_work.task) ->
-        match tk.status with
-        | Wire_work.Todo -> true
-        | Wire_work.Claimed _
-        | Wire_work.InProgress _
-        | Wire_work.AwaitingVerification _
-        | Wire_work.Done _
-        | Wire_work.Cancelled _ ->
-            false)
-      all
-  else if String.equal q_low "unlinked" then
-    List.filter
-      (fun (tk : Wire_work.task) ->
-        match tk.goal_link with
-        | Wire_work.Unlinked -> true
-        | Wire_work.Linked _ -> false)
-      all
-  else if String.equal q_low "done" then
-    List.filter (fun (tk : Wire_work.task) -> task_is_done tk.status) all
-  else
-    List.filter
-      (fun (task : Wire_work.task) ->
-        contains_ci ~needle:q_low task.title || contains_ci ~needle:q_low task.id)
-      all
+  let q = String.trim t.filter_query in
+  List.filter
+    (fun (task : Wire_work.task) ->
+      task_matches_status t.task_status_filter task
+      && (String.equal q ""
+         || contains_ci ~needle:q task.title
+         || contains_ci ~needle:q task.id))
+    (tasks t)
 
 let filtered_verifications t =
   let q = String.trim t.filter_query in
@@ -404,12 +408,17 @@ let filtered_verifications t =
 
 let filtered_schedules t =
   let q_low = String.lowercase_ascii (String.trim t.filter_query) in
-  let all = schedules_list t in
-  if
-    String.equal q_low ""
-    || String.equal q_low "schedules"
-    || String.equal q_low "sched"
-  then all
+  let all =
+    match t.task_status_filter with
+    | Status_all | Status_schedules -> schedules_list t
+    | Status_active
+    | Status_awaiting_verification
+    | Status_todo
+    | Status_unlinked
+    | Status_done ->
+        []
+  in
+  if String.equal q_low "" then all
   else
     List.filter
       (fun (s : Wire_work.schedule_row) ->
@@ -632,6 +641,60 @@ let set_filter filter_query t =
     detail_scroll_offset = 0;
     schedules_scroll_offset = 0;
   }
+
+let equal_task_status_filter a b =
+  match a, b with
+  | Status_all, Status_all
+  | Status_active, Status_active
+  | Status_awaiting_verification, Status_awaiting_verification
+  | Status_todo, Status_todo
+  | Status_unlinked, Status_unlinked
+  | Status_done, Status_done
+  | Status_schedules, Status_schedules ->
+      true
+  | ( ( Status_all
+      | Status_active
+      | Status_awaiting_verification
+      | Status_todo
+      | Status_unlinked
+      | Status_done
+      | Status_schedules ),
+      _ ) ->
+      false
+
+let all_task_status_filters =
+  [
+    Status_all;
+    Status_active;
+    Status_awaiting_verification;
+    Status_todo;
+    Status_unlinked;
+    Status_done;
+    Status_schedules;
+  ]
+
+let set_task_status_filter task_status_filter t =
+  {
+    t with
+    task_status_filter;
+    selected_index = 0;
+    scroll_offset = 0;
+    detail_scroll_offset = 0;
+    schedules_scroll_offset = 0;
+  }
+
+let cycle_task_status_filter t =
+  let next =
+    match t.task_status_filter with
+    | Status_all -> Status_active
+    | Status_active -> Status_awaiting_verification
+    | Status_awaiting_verification -> Status_todo
+    | Status_todo -> Status_unlinked
+    | Status_unlinked -> Status_done
+    | Status_done -> Status_schedules
+    | Status_schedules -> Status_all
+  in
+  set_task_status_filter next t
 
 let toggle_verification_view t =
   let verification_view =

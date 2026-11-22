@@ -1339,7 +1339,19 @@ let test_axis_a_screen_dive_matrix () =
               Alcotest.(check bool)
                 (tag ^ " Space never bleeds work.verification_view")
                 true
-                (m'.work.verification_view = m.work.verification_view)
+                (m'.work.verification_view = m.work.verification_view);
+            let is_work_tasks =
+              Option.is_none dive_before
+              && Option.is_none m.nav.overlay
+              && Nav.equal_workspace m.nav.workspace Nav.Work
+              && Nav.equal_work_tab m.work.active_tab Nav.Work_tasks_schedules
+            in
+            if not is_work_tasks then
+              Alcotest.(check bool)
+                (tag ^ " Space never bleeds work.task_status_filter")
+                true
+                (Work_store.equal_task_status_filter m'.work.task_status_filter
+                   m.work.task_status_filter)
           end;
           (* Invariant 6: Zero 'f' Fusion bleed outside Runtime_failover_lanes *)
           if String.equal kname "f" then begin

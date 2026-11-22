@@ -4142,19 +4142,48 @@ let test_nav_fix6_work_inbox_filter_and_split_pane_clamping () =
     |> Work_store.apply_schedules ~observed_at:t0
          ([ mk_sched "s-1"; mk_sched "s-2" ], None)
   in
-  Alcotest.(check int) "filter 'active' returns 1 claimed/in-progress task" 1
+  let with_status st = Work_store.set_task_status_filter st w_ts in
+  Alcotest.(check int) "Active chip returns 1 claimed/in-progress task" 1
+    (List.length (Work_store.filtered_tasks (with_status Work_store.Status_active)));
+  Alcotest.(check int) "Todo chip returns 1 todo task" 1
+    (List.length (Work_store.filtered_tasks (with_status Work_store.Status_todo)));
+  Alcotest.(check int) "Done chip returns 1 done task" 1
+    (List.length (Work_store.filtered_tasks (with_status Work_store.Status_done)));
+  Alcotest.(check int) "Done chip hides schedules" 0
+    (List.length (Work_store.filtered_schedules (with_status Work_store.Status_done)));
+  Alcotest.(check int) "text 'active' is a plain search, not a status chip" 0
     (List.length (Work_store.filtered_tasks (Work_store.set_filter "active" w_ts)));
-  Alcotest.(check int) "filter 'todo' returns 1 todo task" 1
-    (List.length (Work_store.filtered_tasks (Work_store.set_filter "todo" w_ts)));
-  Alcotest.(check int) "filter 'done' returns 1 done task" 1
-    (List.length (Work_store.filtered_tasks (Work_store.set_filter "done" w_ts)));
-  let w_sched = Work_store.set_filter "sched" w_ts in
-  Alcotest.(check int) "filter 'sched' returns 0 tasks" 0
+  let w_sched = with_status Work_store.Status_schedules in
+  Alcotest.(check int) "Schedules chip returns 0 tasks" 0
     (List.length (Work_store.filtered_tasks w_sched));
-  Alcotest.(check int) "filter 'sched' has 2 schedules" 2
-    (List.length (Work_store.schedules_list w_sched));
+  Alcotest.(check int) "Schedules chip has 2 schedules" 2
+    (List.length (Work_store.filtered_schedules w_sched));
+  let w_cycled =
+    List.fold_left
+      (fun w _ -> Work_store.cycle_task_status_filter w)
+      w_ts Work_store.all_task_status_filters
+  in
+  Alcotest.(check bool) "cycling every chip wraps back to All" true
+    (Work_store.equal_task_status_filter Work_store.Status_all
+       w_cycled.task_status_filter);
+  let m_tasks =
+    let m = Model.initial ~cols:140 ~rows:40 () in
+    { m with nav = { m.nav with workspace = Nav.Work }; work = w_ts }
+  in
+  let m_space, _ =
+    Update.step ~now:t0 m_tasks (Msg.Key_event (char_key " "))
+  in
+  Alcotest.(check bool) "Space on Tasks & Schedules selects the Active chip" true
+    (Work_store.equal_task_status_filter Work_store.Status_active
+       m_space.work.task_status_filter);
+  let m_chip_esc, _ =
+    Update.step ~now:t0 m_space (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  Alcotest.(check bool) "Esc on a non-All chip returns it to All" true
+    (Work_store.equal_task_status_filter Work_store.Status_all
+       m_chip_esc.work.task_status_filter);
   let w_sched_clamped = Work_store.move_selection ~delta:99 w_sched in
-  Alcotest.(check int) "filter 'sched' clamps cleanly at 1 (no dead zone)" 1
+  Alcotest.(check int) "Schedules chip clamps cleanly at 1 (no dead zone)" 1
     w_sched_clamped.selected_index;
 
   (* 3. Split-pane dead-zone clamping on Tab (Work_pipeline, Runtime_tools_connectors, Knowledge_memory) *)

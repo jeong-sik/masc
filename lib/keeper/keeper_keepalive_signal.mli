@@ -277,11 +277,16 @@ val adaptive_idle_after_self_wake :
     backs off the same way. *)
 
 val adaptive_idle_after_served_boundary :
+  ?base_interval_sec:float -> now:float -> adaptive_idle_state -> adaptive_idle_state
+(** A completed due schedule served the boundary (#54338). The stage returns to
+    [Idle_30m] and the next self-wake is one start interval after [now]. A
+    schedule turn is not a reaction, so it keeps [since_self_wake]. *)
+
+val adaptive_idle_after_reaction_at_boundary :
   ?base_interval_sec:float -> now:float -> unit -> adaptive_idle_state
-(** A turn other than a self-wake served the due boundary: a completed due
-    schedule (#54338) or a reaction cycle that opened at the boundary. The
-    stage returns to [Idle_30m] and the next self-wake is one start interval
-    after [now]. *)
+(** A reaction turn opened at the due boundary and served it. The stage
+    returns to [Idle_30m], the next self-wake is one start interval after
+    [now], and that self-wake sees the reaction. *)
 
 val adaptive_idle_pull_in_on_reactive :
   ?base_interval_sec:float -> now:float -> adaptive_idle_state -> adaptive_idle_state

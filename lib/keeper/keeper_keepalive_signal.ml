@@ -207,9 +207,14 @@ type idle_backoff_stage =
   | Idle_1h
   | Idle_2h
 
+type idle_activity =
+  | Quiet_since_self_wake
+  | Reacted_since_self_wake
+
 type adaptive_idle_state =
   { stage : idle_backoff_stage
   ; next_spontaneous_at : float
+  ; since_self_wake : idle_activity
   }
 
 let default_stagger_tick_sec = 300.0
@@ -368,11 +373,22 @@ let adaptive_idle_after_self_wake
 let adaptive_idle_after_served_boundary
       ?(base_interval_sec = adaptive_idle_30m_sec)
       ~now
+      state
+  =
+  { stage = Idle_30m
+  ; next_spontaneous_at = now +. adaptive_idle_interval ~base_interval_sec Idle_30m
+  ; since_self_wake = state.since_self_wake
+  }
+;;
+
+let adaptive_idle_after_reaction_at_boundary
+      ?(base_interval_sec = adaptive_idle_30m_sec)
+      ~now
       ()
   =
   { stage = Idle_30m
   ; next_spontaneous_at = now +. adaptive_idle_interval ~base_interval_sec Idle_30m
-  ; since_self_wake = Quiet_since_self_wake
+  ; since_self_wake = Reacted_since_self_wake
   }
 ;;
 

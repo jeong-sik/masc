@@ -607,7 +607,7 @@ let record_crashed_cycle_failure
     (if String.equal backtrace "" then "" else "\n" ^ backtrace)
 ;;
 
-let interrupted_cycle_outcome ~(meta : keeper_meta) =
+let interrupted_cycle_outcome ~(meta : keeper_meta) ~decided_channel =
   Log.Keeper.info
     ~keeper_name:meta.name
     "%s: keeper cycle interrupted by operator; no turn failure recorded"
@@ -617,13 +617,13 @@ let interrupted_cycle_outcome ~(meta : keeper_meta) =
   ; stimuli_acked = false
   ; after_failure = None
   ; due_schedule = No_due_schedule_served
-  ; decided_channel = None
+  ; decided_channel
   }
 ;;
 
-let handle_cycle_exception ~registry_entry ~(meta : keeper_meta) exn =
+let handle_cycle_exception ~registry_entry ~(meta : keeper_meta) ~decided_channel exn =
   if Keeper_registry_types.is_operator_interrupt exn
-  then interrupted_cycle_outcome ~meta
+  then interrupted_cycle_outcome ~meta ~decided_channel
   else (
     record_crashed_cycle_failure
       ~registry_entry
@@ -633,7 +633,7 @@ let handle_cycle_exception ~registry_entry ~(meta : keeper_meta) exn =
     ; stimuli_acked = false
     ; after_failure = None
     ; due_schedule = No_due_schedule_served
-    ; decided_channel = None
+    ; decided_channel
     })
 ;;
 
@@ -1032,11 +1032,39 @@ let periodic_cadence_after_cycle ~periodic_due ~due_schedule ~now cadence =
   | false, No_due_schedule_served -> cadence
 ;;
 
-(* RFC keeper-reaction-and-queue §4.4. The decision's channel says whether the
-   cycle was a reaction; the wake label separates a deferred suffix from a
-   self-wake on the same channel. The turn's result does not choose the arm: a
-   failed self-wake backs off like a finished one, and a failed reaction leaves
-   its rows in the queue for the pulled-in boundary to retry.
+(* RFC keeper-reaction-and-queue §4.4: a reaction turn is a turn the decision
+   opened on the reactive channel, whether it finished, failed, crashed or was
+   interrupted. A reactive decision whose turn never ran (the phase gate
+   cancelled or skipped it, or the provider rests) is not one. *)
+type idle_cycle =
+  | Reaction_turn
+  | Not_a_reaction
+  | Undecided
+
+let idle_cycle_of ~cycle_status ~decided_channel =
+  match decided_channel with
+  | None -> Undecided
+  | Some Keeper_world_observation.Scheduled_autonomous -> Not_a_reaction
+  | Some Keeper_world_observation.Reactive ->
+    (match cycle_status with
+     | Turn_cycle_turn_succeeded
+     | Turn_cycle_turn_failed
+     | Turn_cycle_crashed
+     | Turn_cycle_interrupted -> Reaction_turn
+     (* Lifecycle block, owner rejection and a busy owner end the cycle before
+        a decision, so they arrive with [None]; they are listed for the
+        exhaustive match. *)
+     | Turn_cycle_without_turn
+     | Turn_cycle_rested
+     | Turn_cycle_lifecycle_blocked
+     | Turn_cycle_owner_rejected
+     | Turn_cycle_busy _ -> Not_a_reaction)
+;;
+
+(* The one transition of the next self-wake. The wake label separates a
+   deferred suffix from a self-wake at the same boundary. A self-wake backs off
+   whether its turn finished, failed or never opened; a reaction that failed
+   leaves its rows in the queue for the pulled-in boundary to retry.
    [cycle_wake] pairs a due boundary with [Periodic_tick] or
    [Deferred_runtime_lane] and a boundary not yet due with [Attention_wake] or
    [Deferred_runtime_lane]; the other pairs are listed with the arm they would
@@ -1044,6 +1072,7 @@ let periodic_cadence_after_cycle ~periodic_due ~due_schedule ~now cadence =
 let adaptive_idle_after_cycle
       ~periodic_due
       ~(wake : Keeper_world_observation.cycle_wake)
+      ~cycle_status
       ~decided_channel
       ~due_schedule
       ~base_interval_sec
@@ -1059,59 +1088,57 @@ let adaptive_idle_after_cycle
   match due_schedule with
   | Due_schedule_served ->
     (* #54338: a completed due schedule fills the boundary. *)
-    Keeper_keepalive_signal.adaptive_idle_after_served_boundary ~base_interval_sec ~now ()
+    Keeper_keepalive_signal.adaptive_idle_after_served_boundary ~base_interval_sec ~now state
   | No_due_schedule_served ->
-    (match periodic_due, decided_channel, wake with
+    (match periodic_due, idle_cycle_of ~cycle_status ~decided_channel, wake with
      (* A reaction took the due boundary. *)
-     | true, Some Keeper_world_observation.Reactive,
-       (Keeper_world_observation.Periodic_tick
-       | Keeper_world_observation.Attention_wake
-       | Keeper_world_observation.Deferred_runtime_lane) ->
-       Keeper_keepalive_signal.adaptive_idle_after_served_boundary ~base_interval_sec ~now ()
-     (* A self-wake at the due boundary: it ran, failed, or its verdict skipped. *)
-     | true, Some Keeper_world_observation.Scheduled_autonomous,
-       (Keeper_world_observation.Periodic_tick | Keeper_world_observation.Attention_wake) ->
+     | true, Reaction_turn,
+       (Keeper_world_observation.Periodic_tick | Keeper_world_observation.Attention_wake | Keeper_world_observation.Deferred_runtime_lane) ->
+       Keeper_keepalive_signal.adaptive_idle_after_reaction_at_boundary
+         ~base_interval_sec ~now ()
+     (* A self-wake at the due boundary: its turn finished, failed or never
+        opened. *)
+     | true, Not_a_reaction, (Keeper_world_observation.Periodic_tick | Keeper_world_observation.Attention_wake) ->
        Keeper_keepalive_signal.adaptive_idle_after_self_wake ~base_interval_sec ~now state
      (* A deferred suffix took the due boundary. Continuing a failed turn is
         neither a reaction nor a quiet self-wake, so the stage holds. *)
-     | true, Some Keeper_world_observation.Scheduled_autonomous,
-       Keeper_world_observation.Deferred_runtime_lane -> hold_stage ()
+     | true, Not_a_reaction, Keeper_world_observation.Deferred_runtime_lane -> hold_stage ()
      (* The cycle ended before a decision: warmup, lifecycle block, busy owner,
-        owner rejection, interrupt or crash. The boundary is consumed unjudged. *)
-     | true, None,
-       (Keeper_world_observation.Periodic_tick
-       | Keeper_world_observation.Attention_wake
-       | Keeper_world_observation.Deferred_runtime_lane) -> hold_stage ()
+        owner rejection, or an interrupt or crash before the decision. The
+        boundary is consumed unjudged. *)
+     | true, Undecided,
+       (Keeper_world_observation.Periodic_tick | Keeper_world_observation.Attention_wake | Keeper_world_observation.Deferred_runtime_lane) -> hold_stage ()
      (* A reaction off the boundary pulls the next self-wake in, never out. *)
-     | false, Some Keeper_world_observation.Reactive,
-       (Keeper_world_observation.Periodic_tick
-       | Keeper_world_observation.Attention_wake
-       | Keeper_world_observation.Deferred_runtime_lane) ->
+     | false, Reaction_turn,
+       (Keeper_world_observation.Periodic_tick | Keeper_world_observation.Attention_wake | Keeper_world_observation.Deferred_runtime_lane) ->
        Keeper_keepalive_signal.adaptive_idle_pull_in_on_reactive ~base_interval_sec ~now state
-     (* Off the boundary without a reaction: bootstrap, a due schedule the turn
-        did not serve, or a deferred suffix. The boundary stays where it is. *)
-     | false, Some Keeper_world_observation.Scheduled_autonomous,
-       (Keeper_world_observation.Periodic_tick
-       | Keeper_world_observation.Attention_wake
-       | Keeper_world_observation.Deferred_runtime_lane)
-     | false, None,
-       (Keeper_world_observation.Periodic_tick
-       | Keeper_world_observation.Attention_wake
-       | Keeper_world_observation.Deferred_runtime_lane) -> state)
+     (* Off the boundary without a reaction turn: bootstrap, a due schedule the
+        turn did not serve, a deferred suffix, or a reactive decision whose turn
+        never ran. The boundary stays where it is. *)
+     | false, (Not_a_reaction | Undecided),
+       (Keeper_world_observation.Periodic_tick | Keeper_world_observation.Attention_wake | Keeper_world_observation.Deferred_runtime_lane) -> state)
 ;;
 
-(* A cycle whose turn took its batch and did not finish leaves that batch in
-   the queue. The batch retries at the periodic boundary, which a reaction has
-   already pulled within one start interval. Capping the sleep at the next tick
-   would retry it every tick (RFC keeper-reaction-and-queue §4.4). *)
-let cycle_left_its_batch = function
-  | Turn_cycle_turn_failed | Turn_cycle_crashed | Turn_cycle_interrupted -> true
-  | Turn_cycle_turn_succeeded
-  | Turn_cycle_without_turn
-  | Turn_cycle_lifecycle_blocked
-  | Turn_cycle_owner_rejected
-  | Turn_cycle_busy _
-  | Turn_cycle_rested -> false
+(* A reaction turn that took its batch and did not finish leaves that batch in
+   the queue. [adaptive_idle_after_cycle] has already pulled the next self-wake
+   within one start interval, and the batch retries there. Capping the sleep at
+   the next tick would retry it every tick (RFC keeper-reaction-and-queue
+   §4.4). Any other cycle keeps the tick cap. *)
+let sleeps_to_the_pulled_boundary ~cycle_status ~decided_channel =
+  let left_its_batch =
+    match cycle_status with
+    | Turn_cycle_turn_failed | Turn_cycle_crashed | Turn_cycle_interrupted -> true
+    | Turn_cycle_turn_succeeded
+    | Turn_cycle_without_turn
+    | Turn_cycle_lifecycle_blocked
+    | Turn_cycle_owner_rejected
+    | Turn_cycle_busy _
+    | Turn_cycle_rested -> false
+  in
+  match left_its_batch, idle_cycle_of ~cycle_status ~decided_channel with
+  | true, Reaction_turn -> true
+  | true, (Not_a_reaction | Undecided)
+  | false, (Reaction_turn | Not_a_reaction | Undecided) -> false
 ;;
 
 (* A cycle that raises leaves no outcome to settle the deferred lane from.
@@ -1160,6 +1187,10 @@ let run_keepalive_unified_turn
     ; decided_channel = None
     })
   else
+    (* A turn that crashes or is interrupted after the decision still reports
+       the decision's channel, so a reaction it leaves in the queue pulls the
+       next self-wake in. *)
+    let decided_channel = ref None in
     match
       Keeper_owner_registry.run_autonomous_if_idle
         ~base_path:ctx.config.base_path
@@ -1301,6 +1332,7 @@ let run_keepalive_unified_turn
           obs
       in
       let turn_decision = scheduling.turn_decision in
+      decided_channel := Some turn_decision.channel;
       let should_run_turn =
         should_run_turn_after_event_intake
           ~scheduled:scheduling.should_run_turn
@@ -1619,7 +1651,7 @@ let run_keepalive_unified_turn
             ~batch_has_due_schedule:
               (batch_has_due_schedule
                  (Keeper_heartbeat_source_batch.selections !source_batch))
-      ; decided_channel = Some turn_decision.channel
+      ; decided_channel = !decided_channel
       }
     with
     | exn when Keeper_registry_types.is_operator_interrupt exn ->
@@ -1642,10 +1674,12 @@ let run_keepalive_unified_turn
       handle_cycle_exception
         ~registry_entry
         ~meta:meta_after_triage
+        ~decided_channel:!decided_channel
         exn)))
     with
   | Ok (`Ran outcome) -> outcome
-  | Ok `Interrupted -> interrupted_cycle_outcome ~meta:meta_after_triage
+  | Ok `Interrupted ->
+    interrupted_cycle_outcome ~meta:meta_after_triage ~decided_channel:!decided_channel
   | Ok (`Busy ((Keeper_owner.Turn_busy (Some in_flight)) as block)) ->
     Log.Keeper.info
       ~keeper_name:meta_after_triage.name
@@ -2104,6 +2138,7 @@ let run_heartbeat_loop
           adaptive_idle_after_cycle
             ~periodic_due
             ~wake
+            ~cycle_status:turn_outcome.cycle_status
             ~decided_channel:turn_outcome.decided_channel
             ~due_schedule:turn_outcome.due_schedule
             ~base_interval_sec
@@ -2170,7 +2205,10 @@ let run_heartbeat_loop
                 ~now:(cadence_now ())
                 !adaptive_idle
             in
-            if (not (cycle_left_its_batch turn_outcome.cycle_status))
+            if (not
+                  (sleeps_to_the_pulled_boundary
+                     ~cycle_status:turn_outcome.cycle_status
+                     ~decided_channel:turn_outcome.decided_channel))
                && pending_at_tick_stimulus_remains ~ctx ~keeper_name:m.name
             then
               let wall_now = Time_compat.now () in
@@ -2252,5 +2290,5 @@ module For_testing = struct
   let cycle_wake = cycle_wake
   let periodic_cadence_after_cycle = periodic_cadence_after_cycle
   let adaptive_idle_after_cycle = adaptive_idle_after_cycle
-  let cycle_left_its_batch = cycle_left_its_batch
+  let sleeps_to_the_pulled_boundary = sleeps_to_the_pulled_boundary
 end

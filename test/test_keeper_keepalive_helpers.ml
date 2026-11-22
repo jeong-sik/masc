@@ -1942,10 +1942,11 @@ let test_staggered_tick_and_adaptive_pull_in_backoff () =
 let test_adaptive_idle_backs_off_quiet_self_wakes_and_resets_on_reactions () =
   let module L = Keeper_heartbeat_loop in
   let module WO = Keeper_world_observation in
-  let step ~periodic_due ~wake ~decided_channel ?(due_schedule = L.No_due_schedule_served)
-      ~now state =
-    L.For_testing.adaptive_idle_after_cycle ~periodic_due ~wake ~decided_channel
-      ~due_schedule ~base_interval_sec:1800.0 ~now state
+  let step ~periodic_due ~wake ~decided_channel
+      ?(cycle_status = L.Turn_cycle_turn_succeeded)
+      ?(due_schedule = L.No_due_schedule_served) ~now state =
+    L.For_testing.adaptive_idle_after_cycle ~periodic_due ~wake ~cycle_status
+      ~decided_channel ~due_schedule ~base_interval_sec:1800.0 ~now state
   in
   let self_wake ~now state =
     step ~periodic_due:true ~wake:WO.Periodic_tick
@@ -1983,8 +1984,33 @@ let test_adaptive_idle_backs_off_quiet_self_wakes_and_resets_on_reactions () =
     (at_boundary.stage = KKS.Idle_30m);
   check (float 0.01) "the served boundary moves to now+30m" 21800.0
     at_boundary.next_spontaneous_at;
-  check bool "after a served boundary the next quiet self-wake backs off" true
-    ((self_wake ~now:21800.0 at_boundary).stage = KKS.Idle_1h);
+  let after_boundary_reaction = self_wake ~now:21800.0 at_boundary in
+  check bool "the self-wake after a reaction at the boundary stays at 30m" true
+    (after_boundary_reaction.stage = KKS.Idle_30m);
+  check bool "the quiet self-wake after that backs off" true
+    ((self_wake ~now:23600.0 after_boundary_reaction).stage = KKS.Idle_1h);
+  let failed_reaction =
+    step ~periodic_due:false ~wake:WO.Attention_wake ~decided_channel:(Some WO.Reactive)
+      ~cycle_status:L.Turn_cycle_turn_failed ~now:17000.0 quiet_again
+  in
+  check bool "a failed reaction turn returns the stage to 30m" true
+    (failed_reaction.stage = KKS.Idle_30m);
+  check (float 0.01) "a failed reaction turn retries within 30m" 18800.0
+    failed_reaction.next_spontaneous_at;
+  List.iter
+    (fun (label, cycle_status) ->
+       check bool
+         (label ^ ": a reactive decision whose turn never ran leaves the state alone")
+         true
+         (step ~periodic_due:false ~wake:WO.Attention_wake
+            ~decided_channel:(Some WO.Reactive) ~cycle_status ~now:17000.0 quiet_again
+          = quiet_again))
+    [ "phase gate", L.Turn_cycle_without_turn; "provider rest", L.Turn_cycle_rested ];
+  check bool "a reactive decision that rested at the boundary backs off like a self-wake"
+    true
+    ((step ~periodic_due:true ~wake:WO.Periodic_tick ~decided_channel:(Some WO.Reactive)
+        ~cycle_status:L.Turn_cycle_rested ~now:20000.0 quiet_again).stage
+     = KKS.Idle_2h);
   let deferred =
     step ~periodic_due:true ~wake:WO.Deferred_runtime_lane
       ~decided_channel:(Some WO.Scheduled_autonomous) ~now:20000.0 quiet_again
@@ -2019,16 +2045,24 @@ let test_adaptive_idle_backs_off_quiet_self_wakes_and_resets_on_reactions () =
   check (float 0.01) "a served due schedule moves the deadline to now+base" 6800.0
     after_schedule.next_spontaneous_at;
   check bool "a served due schedule returns the stage to 30m" true
-    (after_schedule.stage = KKS.Idle_30m)
+    (after_schedule.stage = KKS.Idle_30m);
+  let reacted_then_schedule =
+    step ~periodic_due:false ~wake:WO.Attention_wake
+      ~decided_channel:(Some WO.Scheduled_autonomous)
+      ~due_schedule:L.Due_schedule_served ~now:13500.0 reacted
+  in
+  check bool "a served due schedule keeps an earlier reaction for the next self-wake"
+    true
+    ((self_wake ~now:15300.0 reacted_then_schedule).stage = KKS.Idle_30m)
 ;;
 
-(* A turn that took its batch and did not finish sleeps to the boundary, not
-   the next tick, so a failing input is retried once per start interval. *)
-let test_a_cycle_that_left_its_batch_sleeps_to_the_boundary () =
+(* A reaction that took its batch and did not finish sleeps to the pulled-in
+   boundary, not the next tick, so a failing input is retried once per start
+   interval. Every other cycle keeps the tick cap. *)
+let test_a_reaction_that_left_its_batch_sleeps_to_the_boundary () =
   let module L = Keeper_heartbeat_loop in
-  List.iter
-    (fun (label, status, left) ->
-       check bool label left (L.For_testing.cycle_left_its_batch status))
+  let module WO = Keeper_world_observation in
+  let statuses =
     [ "failed turn", L.Turn_cycle_turn_failed, true
     ; "crashed cycle", L.Turn_cycle_crashed, true
     ; "interrupted cycle", L.Turn_cycle_interrupted, true
@@ -2039,6 +2073,21 @@ let test_a_cycle_that_left_its_batch_sleeps_to_the_boundary () =
     ; "owner busy", L.Turn_cycle_busy Keeper_owner.Admission_paused, false
     ; "rested", L.Turn_cycle_rested, false
     ]
+  in
+  List.iter
+    (fun (label, cycle_status, left_its_batch) ->
+       List.iter
+         (fun (channel_label, decided_channel, is_reaction) ->
+            check bool
+              (Printf.sprintf "%s, %s" label channel_label)
+              (left_its_batch && is_reaction)
+              (L.For_testing.sleeps_to_the_pulled_boundary ~cycle_status
+                 ~decided_channel))
+         [ "reaction", Some WO.Reactive, true
+         ; "self-wake or schedule", Some WO.Scheduled_autonomous, false
+         ; "undecided", None, false
+         ])
+    statuses
 ;;
 
 let test_at_tick_pending_interrupts_long_sleep_at_staggered_tick () =
@@ -2232,8 +2281,8 @@ let () =
             test_staggered_tick_and_adaptive_pull_in_backoff
         ; test_case "quiet self-wakes back off and reactions reset" `Quick
             test_adaptive_idle_backs_off_quiet_self_wakes_and_resets_on_reactions
-        ; test_case "a cycle that left its batch sleeps to the boundary" `Quick
-            test_a_cycle_that_left_its_batch_sleeps_to_the_boundary
+        ; test_case "a reaction that left its batch sleeps to the boundary" `Quick
+            test_a_reaction_that_left_its_batch_sleeps_to_the_boundary
         ; test_case "At_tick pending interrupts long sleep at staggered tick" `Quick
             test_at_tick_pending_interrupts_long_sleep_at_staggered_tick
         ; test_case "board signal enqueues policy urgency before wake" `Quick

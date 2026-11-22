@@ -8,7 +8,6 @@
 
 | 질문 | 정본과 소비자 | 별도로 유지할 사실 |
 | --- | --- | --- |
-| Muse 세션을 이어도 되는가? | [Runtime_muse_serve.resume_last_turn](../../lib/runtime/runtime_muse_serve.mli) → session/resume admission | 완료 턴 개수는 압축 때 다시 센다. 정확한 턴 ID·끝난 상태·미확정 dispatch의 관계가 재개 근거다. |
 | 공식 클라이언트가 어떤 문맥을 보유하는가? | [Keeper_official_client_session_store](../../lib/keeper/keeper_official_client_session_store.mli)의 frontier·settlement·held_context → 각 adapter | 정본 입력, 전송한 입력, 완료를 확인한 입력, vendor가 보존하는 문맥은 서로 다른 사실이다. |
 | 채팅 턴이 끝났는가? | [Keeper_chat_run_signal](../../lib/keeper/keeper_chat_run_signal.mli) → TUI·connector·journal 소비자 | 한 provider 후보의 StreamIncomplete/진단은 전체 턴의 종료가 아니다. |
 | provider가 생산 중인가? | [Streaming](../../packages/agent_core/lib/llm_provider/streaming.mli)의 first-token·deliverable predicates → [Keeper_agent_run_turn_helpers](../../lib/keeper/keeper_agent_run_turn_helpers.mli) watchdog | reasoning 생산은 진행이다. 이를 최종 답으로 전달할 수 있는지는 완료 시 accept gate가 판정한다. |
@@ -23,7 +22,6 @@
 
 | 수리 | 원래 고장 | 후속 변경에서 유지할 경계 |
 | --- | --- | --- |
-| [#48054](https://github.com/jeong-sik/masc/pull/48054) | Muse 압축 후 줄어든 count를 세션 불일치로 처리 | 관측용 count를 세션 identity로 쓰지 않는다. 마지막 턴 ID와 끝난 상태를 검증한다. |
 | [#48737](https://github.com/jeong-sik/masc/pull/48737) | Codex 압축이 보존한 standing System의 receipt를 지워 전체 System 재주입 | 실제로 보존된 System과 재전달할 문맥을 구분한다. 미확정 전송을 성공 receipt로 바꾸지는 않는다. |
 | [#35986](https://github.com/jeong-sik/masc/pull/35986) | 후보 실패를 Event_error로 전송해 다음 후보의 답 수신을 중단 | 실패 범위는 후보이며 최종 턴 판정 전까지 소비자가 계속 읽는다. |
 | [#36169](https://github.com/jeong-sik/masc/pull/36169) | reasoning이 계속 와도 본문이 없어 진행 없음 timeout | watchdog의 생산 신호와 최종 답 수락 조건을 구분한다. ping·빈 carrier는 생산 증거가 아니다. |
@@ -32,9 +30,9 @@
 | L3: canonical cleanup 진단 수리 | abort·terminal receipt 실패 뒤의 Eio debug 출력 오류가 선택된 reserved 원본 예외를 덮음 | 실행 journal의 정산과 예외 선택은 `Agent_execution_runner`가 소유한다. 일반 진단 실패는 그 선택을 바꾸지 않고, 새 reserved 진단 예외는 기존 `Reserved_exn`으로 전파한다. HostStop의 모든 원인 판정과 Reserved의 한 원인 포함 판정을 합치지 않는다. 연결된 helper 캡처의 범위와 public Agent 실행 검증을 구분한다. |
 | [#47097](https://github.com/jeong-sik/masc/pull/47097) → [#52487](https://github.com/jeong-sik/masc/pull/52487) | 누락된 최신 답의 거짓 성공을 막는 history 검증이 정상 압축을 거짓 실패로 처리 | 정확한 최종 답 검증을 유지하면서 압축된 앞부분과 훼손된 범위를 typed coverage로 구분한다. |
 
-이력에 같은 단어가 있어도 기존 guard를 그대로 지우지 않는다. Muse의 압축 count와
-Agent Core의 checkpoint/durable turn count는 다른 계약이다. 후자는 실행 단계와
-소유권을 검증하며, [#52341](https://github.com/jeong-sik/masc/issues/52341)의 복구는 그 단계에 맞춰야 한다.
+이력에 같은 단어가 있어도 기존 guard를 그대로 지우지 않는다. Agent Core의
+checkpoint/durable turn count는 실행 단계와 소유권을 검증하며,
+[#52341](https://github.com/jeong-sik/masc/issues/52341)의 복구는 그 단계에 맞춰야 한다.
 
 ## 변경을 확인하는 방법
 
@@ -64,7 +62,7 @@ Agent Core의 checkpoint/durable turn count는 다른 계약이다. 후자는 �
   일반 진단 실패로 삼키지 않는지 확인한다. low-level `TRACER.with_span` 직접 호출과
   preferred `Tracing.with_span`의 격리 계약은 구분한다.
 
-기존 실행 시험은 `test_runtime_muse_serve`, `test_keeper_codex_current_context`,
+기존 실행 시험은 `test_keeper_codex_current_context`,
 `test_keeper_stream_tool_accum`, `test_keeper_run_tools_hooks`, `test_pipeline`,
 `test_agent_advanced`에서 찾는다. tracer의 결과·예외·trace-context·wrapped reserved
 경계는 [test_tracing.ml](../../packages/agent_core/test/test_tracing.ml), 실제 Fmt 고장과
@@ -79,18 +77,13 @@ production progress probe·stall 판정·완료 응답 accept까지 잇는 시�
 `test_keeper_turn_driver_accept`에 있다. fixture의 stream과 제어 시계가 실제 provider
 호출·watchdog fiber 실행을 대신 증명하지는 않는다.
 
-native Muse 압축·세션 재적재 실측은
-완료 턴 수 3→1과 같은 마지막 턴 ID, release 후 reload·다음 턴 완료를 확인한다.
-같은 host 프로세스에서 측정했으며 MASC adapter 실행·서버 재시작 복구 증거는 아니다.
-
 ## Native System 갱신의 검증 범위
 
 issued 관측을 공통 Resume projection이 별도로 고른다는 사실만으로 native adapter가
 전체 지시문을 다시 보내지 않거나 같은 세션을 유지한다고 결론 내리지 않는다.
-Codex는 변경된 지시문을 model-visible Developer 주입으로 반영하고, Muse는 전체
-System을 포함한 canonical source가 바뀌면 새 세션을 선택할 수 있다.
-Muse가 Start turn text에 합치는 instruction frame과 Codex의 Developer role은 서로
-다른 전송 계약이다. 둘을 같은 native System 설정이라고 부르지 않는다.
+Codex는 변경된 지시문을 model-visible Developer 주입으로 반영하며, framed
+`Canonical_source_guard` 어댑터가 Start turn text에 합치는 instruction frame과는
+서로 다른 전송 계약이다. 둘을 같은 native System 설정이라고 부르지 않는다.
 
 Codex의 분해 가능한 issued System은 base와 현재 standing 관측의 전달을 따로
 계획한다. 정확한 base와 native posture의 정산된 receipt가 있으면 새 operation이나
@@ -101,7 +94,7 @@ User 본문에 중복하지 않으며, Completion Authority 같은 턴별 관측
 native compaction용 developerInstructions는 현재 전체 System을 그대로 유지한다.
 알려진 compaction의 재구성 계약과 단순 token estimate/window-fill 관측은 구분한다.
 
-Antigravity와 Muse 같은 framed `Canonical_source_guard` 어댑터도 같은
+Antigravity 같은 framed `Canonical_source_guard` 어댑터도 같은
 `Keeper_official_client_host.canonical_system_guard` 규칙을 공유한다.
 분해 가능한 issued System(`issued.text = raw_system_prompt`, 지원 standing 관측인
 `Constitution_amendments`·`Active_goals`·`Direct_input_source`만 포함)은

@@ -27,7 +27,7 @@ boundary, never a branch in Workspace policy.
 | Goal | objective, typed state, version, Task references | Task results arrive as observations |
 | Board | posts, comments, reactions, mentions | publishes typed stimuli; never mutates Keeper lifecycle |
 | Channel / Connector | scoped external conversation identity | space and participant identity remain explicit |
-| Job | Keeper-owned isolated Docker job (`keeper_job_start`/`status`/`result`/`cancel`) and async composition handle (`keeper_composition_*`) | durable handle survives turn/server restarts; completion wakes or is polled by the originating lane |
+| Job | Keeper-owned isolated Docker job (`keeper_job_start`/`status`/`result`/`cancel`) | durable handle survives turn/server restarts; completion wakes or is polled by the originating lane |
 | Gate | durable pending/resolved decision | never blocks unrelated work or another Keeper lane |
 | Fusion | panel, runs, results, Judge result | asynchronous Job; no quorum authority |
 

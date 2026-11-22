@@ -153,7 +153,7 @@ status: reference
   위 테두리에는 카드 이름, 상태(기호와 낱말), 개수를 적는다. 아래 테두리에는 카드가 잘라 낸 줄 수를
   `외 N`(`N more`)으로 적는다. 본문에는 데이터만 두고 좌우로 한 칸씩 띄운다. 카드는 자기 색을 갖지
   않는다 — 호출자가 초점 테두리(`border.focused`)까지 style 코드를 넘기므로 어느 팔레트에서도 같은
-  카드로 읽힌다([RFC tui-one-screen-grammar](../rfc/RFC-tui-one-screen-grammar.md) §2).
+  카드로 읽힌다.
   - 배치: 카드는 열마다 쌓이고, 열들은 같은 행에서 끝난다. 짧은 열의 맨 아래 카드가 남는 높이를
     받으므로 화면은 높이가 제각각인 상자가 아니라 바닥이 반듯한 한 덩어리다(`Masc_tui_card.grid`).
   - 이름 경계: Card는 화면 전체를 감싸는 테두리가 아니다. 읽을거리가 하나뿐인 화면에는 상자를
@@ -163,8 +163,6 @@ status: reference
     이 단위가 아니다.
   - 좁은 칸: `min_width`·`min_height`보다 작으면 상자를 그리지 않고 그만큼의 빈 행을 돌려준다.
     행 수를 세는 호출자의 셈이 어긋나지 않는다.
-  → [Masc_tui_card](../../bin/masc_tui_card.mli) ·
-  [LAYOUT-LANGUAGE](../design/tui/LAYOUT-LANGUAGE.md)
 
 **Surface**
 : 같은 MASC 상태에 접근하고 관찰하는 사용자 표면. TUI, MCP, Dashboard처럼 서로 다른
@@ -197,9 +195,7 @@ status: reference
   - 뷰포트 적응: 터미널 높이가 짧은 화면에서는 의사결정과 Continue 행이 부가 컨텍스트(Health/완료 작업)보다
     화면 예산을 우선 할당받으며, 160열 이상의 넓은 터미널에서도 Recent 패널은 기본 닫힘 상태를
     유지한다(`Ctrl-L`로 명시적 열기).
-  → [Masc_tui_types](../../bin/masc_tui_types.ml) ·
-  [docs/TUI-GUIDE.md](../TUI-GUIDE.md) ·
-  [docs/design/tui/HOME-JOURNEY-ACCEPTANCE.md](../design/tui/HOME-JOURNEY-ACCEPTANCE.md)
+  → [docs/TUI-GUIDE.md](../TUI-GUIDE.md)
 
 **Music Library (/music, 음악 라이브러리)**
 : TUI에서 프레이즈·어레인지먼트·녹음 테이크를 골라 열고 고치는 음악 작업 표면. Dashboard **s**
@@ -228,8 +224,7 @@ status: reference
     음을 쓰는 편집본이고 Arrangement는 소스를 배치하는 편집본이다. 낱편집 재생은 둘이
     따로 돌지만, Phrase를 backing으로 틀면 재생은 `Arrangement` transport가 맡는다
     (`:arrange`, README "Move phrase experiments into backing").
-  → [tools/alphatex/README.md](../../tools/alphatex/README.md) ·
-  [alphaTex 악보 안내](../guides/alphatex-tab.md)
+  → [tools/alphatex/README.md](../../tools/alphatex/README.md)
 
 **Arrangement (어레인지먼트)**
 : 보관된 WAV/MIDI 소스를 한 시간축 위에 `Region`으로 놓는 편집본. `masc-alphatex --arrange`,
@@ -459,21 +454,17 @@ status: reference
   `editMidiSourceMeters`). 새 이벤트의 보조 두 값은 클릭당 24 MIDI 클록과 4분음당 8표기
   32분음이 기본값이고, 분자·분모만 고치면 보조 값은 그대로 남는다.
   - 위치 단위: 자리는 PPQ면 4분음표 박, SMPTE면 프레임이다. 박자표를 고쳐도 음의 tick,
-    tempo 적분, 재생 초는 바뀌지 않는다(MUSIC-SEQUENCER.md: "Positions remain quarter-note
-    beats for PPQ and frames for SMPTE, without changing note timestamps, tempo integration
-    or playback seconds").
+    tempo 적분, 재생 초는 바뀌지 않는다.
   - 이름 경계: tempo map(`editMidiSourceTempos`, Set Tempo FF51)은 다른 메타데이터 종류다.
     alphaTex 악보의 `\ts` 헤더는 표기 텍스트 층이라 이 지도와 다른 층이다. 어레인지먼트의
     `meter`(분자·분모 쌍, `editArrangement`의 `meter` 편집)는 프로젝트 값이고, 소스에서
     넘겨받을 때 편집기와 같은 마지막 tick 0 박자표를 읽는다. 다만 count-in 같은 실제 클록
     입장은 그 범위 밖 박자를 거절할 수 있다.
-  - 아직 아닌 것: 마디 기반 이동이나 메트로놈을 더하지 않는다(MUSIC-SEQUENCER.md: "This
-    edits SMF metadata; it does not add bar-based navigation or a metronome"). 같은 tick 에
+  - 아직 아닌 것: 마디 기반 이동이나 메트로놈을 더하지 않는다. 같은 tick 에
     박자표가 여럿이면 이벤트를 명시적으로 골라야 하고, 알아보지 못한 메타데이터는 불투명한
     채로 남는다.
   → [tools/alphatex/midi-source.mjs](../../tools/alphatex/midi-source.mjs) ·
-  [tools/alphatex/midi-source-editor.mjs](../../tools/alphatex/midi-source-editor.mjs) ·
-  [docs/design/tui/MUSIC-SEQUENCER.md](../../docs/design/tui/MUSIC-SEQUENCER.md)
+  [tools/alphatex/midi-source-editor.mjs](../../tools/alphatex/midi-source-editor.mjs)
 
 **Source port (소스 포트)**
 : 소스 파일 안에 적힌 0–127 번호의 MIDI 라우팅 정체성. 물리 출력 장치 UID가 아니고,
@@ -816,7 +807,7 @@ status: reference
   보내지 않는다. 그래서 resume 턴의 세션 기록 `context_frontier.delivery`는
   `held_by_vendor_session`이고, 세션을 처음 여는 턴은 `prepared_start_context`다.
   이 두 전달 방식의 프런티어에는 canonical 대화 전체의 해시를 만들거나 저장하지
-  않는다. `snapshot_sha256`은 Muse·Antigravity의 `canonical_source_guard`만 가지며,
+  않는다. `snapshot_sha256`은 Antigravity의 `canonical_source_guard`만 가지며,
   정확히 정산된 턴이 인정한 원본과 다음 원본을 비교하는 권위다. 메시지 수와
   전달한 맥락 조각의 해시(`held_context`)는 각 전달 방식에 그대로 기록한다.
   세션 저장 schema `masc.keeper.official-client-session.v2`의 필드는 전달 방식별로
@@ -855,9 +846,6 @@ status: reference
   [Keeper_portrait_item](../../lib/keeper_portrait/keeper_portrait_item.mli) ·
   [Keeper_portrait_equipment](../../lib/keeper_portrait/keeper_portrait_equipment.mli) ·
   [Keeper_portrait_draw](../../lib/keeper_portrait/keeper_portrait_draw.mli) ·
-  [Keeper_portrait_solid](../../lib/keeper_portrait/keeper_portrait_solid.mli) ·
-  [Masc_tui_keeper_portrait](../../bin/masc_tui_keeper_portrait.mli) ·
-  [Masc_tui_chat_portrait](../../bin/masc_tui_chat_portrait.mli) ·
   [TUI candle styles](../TUI-GUIDE.md)
 
 **Agent Input Wait (에이전트 입력 대기)**
@@ -1304,8 +1292,8 @@ status: reference
   [Keeper_counterpart_observation](../../lib/keeper/keeper_counterpart_observation.mli)
 
 **Turn Row Source (턴 행 출처)**
-: 채팅 transcript가 한 turn의 행을 그리는 출처. 코드의 타입 이름이 아니라 이 문서와
-  [pane 해부도](../diagrams/tui-chat-pane-anatomy.html)가 쓰는 라벨이다. 한 turn의 행은
+: 채팅 transcript가 한 turn의 행을 그리는 출처. 코드의 타입 이름이 아니라 이 문서가 쓰는
+  라벨이다. 한 turn의 행은
   한 번에 한 출처에서만 나온다. 넷이다 — `live`(이 pane이 연 요청의 SSE stream),
   `observed`(이 pane이 열지 않았거나, 열었다가 stream을 잃은 turn: operation journal을
   읽어 따라간다), `settled`(stream이나 journal이 끝을 전한 held log), `committed only`(그
@@ -1340,8 +1328,7 @@ status: reference
     `Ctrl-T`)을 제공하며, 작성 도중 `Esc`로 다른 화면을 탐색하더라도 대기열 상태와 입력
     드래프트는 파기되지 않고 유지된다. `/queue clear`는 이 TUI가 화면의 Keeper에 대해 추적하는
     대기 메시지를 한 번에 취소한다. 아직 보내지 않은 것은 버리고, 전송 작업에 넘겼으나 첫
-    POST가 나가기 전인 것은 거둬들이고, 서버 큐에 들어 있는 것은 서버에 취소를 요청한다
-    (사용법: `docs/guides/tui-chat-queue.md`).
+    POST가 나가기 전인 것은 거둬들이고, 서버 큐에 들어 있는 것은 서버에 취소를 요청한다.
   - 검증과 증거: OCaml 생애주기 테스트(`test/test_tui_chat_queue_wiring.ml`,
     `test/test_tui_chat_activity.ml`)가 재연결 불확실성·Keeper 이동 후 복귀 계약을
     다룬다.
@@ -1655,12 +1642,7 @@ status: reference
     `account/rateLimits/read` 를 한 번 읽어 표를 갱신한다. 거절된 호출의 `limit_id`를
     식별할 수 없으므로 단일 버킷도 휴식 시각으로 쓰지 않고 기존 `Observed`를 유지한다(#39997).
     HTTP 403 뒤 읽기는 과거 리셋으로 거절 증거를 지우지 않는다.
-    Muse의 모델 오류 뒤 `usage/read`는 선택된 계정의 소진 창을 확인해
-    `Runtime_quota_window`에 기록하고, 같은 보고가 실은 롤링·주간 두 창을 이 표에
-    기록한다(#39810, #41360). `usage/changed`와 `usage/read`는 같은 두 창을 말하므로
-    한 출처(`muse.subscription_usage`)이고, 어느 쪽이든 완전한 보고는 다른 쪽의 행을
-    대체한다. 실패한 turn은 재전송하지 않는다. 소진율이나 리셋 시각만으로 일반
-    가용성을 추론하는 것은 아니다.
+    소진율이나 리셋 시각만으로 일반 가용성을 추론하는 것은 아니다.
     거절 없이 한 직접 읽기(시작 때 읽기, `usage-read.refresh-s` 주기 읽기)도 같은 규칙을
     따른다. 완전한 보고에서 모델 호출을 막는 창이 한도까지 소진됐을 때만
     `Runtime_quota_window`에 기록한다(`Runtime_provider_usage_window.rest_scope`).
@@ -2610,22 +2592,15 @@ status: reference
 
 **Composition**
 : Tool 노드의 실행 선후 관계와 결과 참조 등 구조를 검사한 실행 계획. 합성 Skill은
-  허용된 계획을 `keeper_compose_<name>` Tool로 노출하며, 즉석(ad-hoc) 계획은
-  `keeper_composition_run`의 `recipe`에 넣어 한 호출로 검증·저장·실행한다. 결과의 draft
-  참조 `sha256`으로 같은 draft를 다시 실행하거나 이어 간다.
-  - 주소: `execution`이 `async`이면 접수 응답이 durable `request_id`를 주고,
-    `keeper_composition_status`·`keeper_composition_cancel`은 그 `request_id`로 조회·취소한다.
-    `composition_run_id`는 그 실행의 논리 run id이며, 앞 요청이 확정적으로 끝난 뒤
-    이어 갈 때만 같은 draft `sha256`과 함께 `resume_run_id`로 넘긴다. `run_id`라는 이름으로
-    status·cancel을 부르지 않는다.
-  - 접수는 완료가 아니다. 이름 붙은 async 제출은 `result_wait` 바인딩을 돌려주고, 결과는
-    그 바인딩을 `keeper_composition_result`의 `binding`에 그대로 넣어 읽는다(→ result_wait).
+  허용된 계획을 `keeper_compose_<name>` Tool로 노출한다.
+  - 주소: `execution`이 `async`이면 접수 응답이 durable `request_id`와 그 실행의 논리 run id인
+    `composition_run_id`를 준다.
+  - 접수는 완료가 아니다. 이름 붙은 async 제출은 `result_wait` 바인딩을 돌려준다(→ result_wait).
   - 노드 중 `keeper_job_start`가 시작한 소유 격리 작업(`job_id`)은 같은 합성 실행 안에서
     `keeper_job_status`·`keeper_job_result`가 완료까지 기다릴 수 있다. 준비된 의존성 대기
     (`waiting_for_dependencies`)는 원래 의존성(`owned_job` 또는 `composition_result`)을
     이름하며, 서버는 그 결과가 준비되고 실행이 허용되면 새 모델 턴 없이 원래 run을 이어 간다.
-  → [선언 문법](../../lib/keeper/keeper_tool_composition_catalog.mli),
-  [실행 계획](../../lib/keeper/keeper_tool_plan.mli),
+  → [실행 계획](../../lib/keeper/keeper_tool_plan.mli),
   [durable async 요청 저장소](../../lib/keeper/keeper_msg_async.mli),
   [합성 의존성](../../lib/keeper/keeper_composition_dependency.mli)
 
@@ -2764,8 +2739,7 @@ status: reference
   - 길이를 바꾸지 않는 주법 표기는 그리지 않고 그 음 뒤에 `*`만 붙인다.
   - `\tempo`·`\ts`·`\title`은 악보 위 한 줄 헤더(`♩=96 · 4/4 · "Riff"`, 있는 것만)로 그리고,
     줄 묶음마다 맨 위에 마디 번호 줄을 둔다(#43163).
-  → [사용 가이드](../guides/alphatex-tab.md), [Masc_tui_alphatex](../../bin/masc_tui_alphatex.mli),
-  [Masc_tui_alphatex_score](../../bin/masc_tui_alphatex_score.mli)
+  → [tools/alphatex/README.md](../../tools/alphatex/README.md)
 
 **Karma**
 : 다른 에이전트가 내 글이나 댓글에 준 upvote 한 번마다 생기는 `karma_event`의 합.
@@ -3239,8 +3213,7 @@ status: reference
      `operation_id`를 덧붙여 말단에 위치한 아티팩트 객체나 코드 블록을 복원할 수 있게 한다(단, 조회
      경로는 operation 기록이 보존되어 있을 때 유효하며, 보존 기간 만료 등으로 기록 부재 시 원문 복원은 불가).
   2. 비동기 컴포지션 완료(`Composition_completed`): 성공 시에는 중복 적재를 막기 위해 본문을 비우고,
-     실패나 취소 상세가 480 바이트를 초과하면 `keeper_composition_status` 조회 경로와 `request_id`를
-     덧붙여 침묵 절단을 방지한다.
+     실패나 취소 상세가 480 바이트를 초과하면 `request_id`와 함께 침묵 절단을 방지한다.
   3. Fusion 심판 완료(`Fusion_completed`): 결과 메시지를 480 바이트 상한으로 자르되, 싱크가 증거
      게시글을 작성하여 `board_post_id`가 존재하는 경우에 한해 `masc_fusion_status` 조회 경로와
      `run_id`를 덧붙인다. `board_post_id`가 빈 문자열(`""`)인 종단 실패나 취소의 경우, 영속 증거가
@@ -3533,7 +3506,7 @@ status: reference
 
 **Composition Skill**
 : 본문의 `toml composition` fence가 도구 노드와 입력 연결을 선언하는 Skill.
-  검증된 계획이 `keeper_compose_<name>` 도구가 되며, 그 선언의 `execution = "async"`가 호출 방식을 정한다(호출 인자로 고르지 않는다). 비동기 선언의 호출은 접수 영수증을 돌려주며, 영수증은 durable `request_id`와 그 실행의 논리 id인 `composition_run_id`를 싣고, 이름 붙은 제출이면 `result_wait` 바인딩도 함께 준다. `keeper_composition_status`·`keeper_composition_cancel`은 그 `request_id`로 조회·취소하고, 결과는 `result_wait`를 `keeper_composition_result`의 `binding`에 그대로 넣어 읽는다. 응답에 `run_id`라는 이름의 핸들은 없다. 즉석(ad-hoc) 계획도 `keeper_composition_run`의 `recipe`로 실행할 수 있다. 실행기는 선언된 입력과
+  검증된 계획이 `keeper_compose_<name>` 도구가 되며, 그 선언의 `execution = "async"`가 호출 방식을 정한다(호출 인자로 고르지 않는다). 비동기 선언의 호출은 접수 영수증을 돌려주며, 영수증은 durable `request_id`와 그 실행의 논리 id인 `composition_run_id`를 싣고, 이름 붙은 제출이면 `result_wait` 바인딩도 함께 준다. 응답에 `run_id`라는 이름의 핸들은 없다. 실행기는 선언된 입력과
   의존 관계를 따르며, 노드 사이의 새 모델 판단을 대신하지 않는다. 필요한 노드
   도구가 Keeper의 현재 표면에 없으면 합성 도구도 그 턴에 제공하지 않는다.
 
@@ -3550,7 +3523,6 @@ status: reference
   번째 worker는 시작하지 않는다 — 단, 정확한 Skill·묶인 인자·원래 Task가
   같아야 한다.
   → [keeper_composition_result 도구 정의](../../config/tools/keeper_composition_result.toml) ·
-  [Keeper_composition_named_run](../../lib/keeper/keeper_composition_named_run.mli) ·
   [가이드: named async 대기](../guides/keeper-owned-jobs.md)
 
 **Isolated Job (격리 Job)**
@@ -3573,8 +3545,7 @@ status: reference
     - `Continue_independent`: 한 노드가 실패하면 그 노드의 하류 자손들만 차단하고, 독립된 다른 분기의 실행과 완료는 정상 진행한다.
   - **직렬 체인 대기 해제 불변식 (Serial Chain Stand-Down)**: 직렬(`serial`) 및 종단(`terminal`) 노드는 정적 계획 순서대로 단독 실행된다. 선행 직렬 노드가 실패하거나 지연(`Deferred`, 원인 존재)되거나 건너뛰어지면, 분기 실패 정책과 무관하게 후속 직렬 체인의 모든 노드는 도구를 발송하지 않고 즉시 실행 대기를 해제(stand down)하며, 실패한 직렬 선행자가 계획 인덱스 순서에 따라 실패 원인(`cause`)을 끝까지 운반한다.
   - **결정론적 완료 순서 (Canonical Plan Order)**: 실행 완료된 결과는 비감소 `planned_index` 순서로 정규 보고되며, 진행 중인(in-flight) 노드가 모두 정착된 후에 가장 낮은 계획 인덱스를 가진 실패 원인을 최종 선정한다.
-  → [Keeper_tool_plan](../../lib/keeper/keeper_tool_plan.mli) ·
-  [Keeper_tool_plan_executor](../../lib/keeper/keeper_tool_plan_executor.mli)
+  → [Keeper_tool_plan](../../lib/keeper/keeper_tool_plan.mli)
 
 **Skill Reference**
 : source, package, name으로 이뤄진 신원과 content revision의 조합
@@ -3631,9 +3602,6 @@ status: reference
     보존 실행의 집계다 — 한쪽으로 다른 쪽을 판정하지 않는다.
   - Dashboard → Monitor → Skills도 같은 typed I/O와 보존 증거를 쓰며, Composition 행을
     펼쳐 선언된 입력·출력 경로와 executor 성능·결과 막대를 같은 revision 결속으로 읽는다.
-  → [Tui_decode_skill_evidence](../../lib/tui_decode_skill_evidence.mli) ·
-  [Masc_tui_render_tools](../../bin/masc_tui_render_tools.ml) ·
-  [가이드: Tools에서 Skill 보기](../guides/TUI-SKILL-OBSERVABILITY.md)
 
 ## Repository Execution
 

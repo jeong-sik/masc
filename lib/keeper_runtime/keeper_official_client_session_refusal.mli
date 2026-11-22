@@ -1,4 +1,4 @@
-(** Why an official-client runtime (Antigravity, Claude Code, Codex, Muse)
+(** Why an official-client runtime (Antigravity, Claude Code, Codex, ACP)
     refused a turn because of the state of its durable vendor session, before
     provider dispatch (#38402).
 

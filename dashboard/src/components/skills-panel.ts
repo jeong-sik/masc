@@ -4,10 +4,7 @@ import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { SkillSourceInspector } from './skill-source-inspector'
-import { SkillAsyncEvidenceView } from './skill-async-evidence-view'
-import { SkillNodeEvidenceView } from './skill-node-evidence-view'
 import { SkillFlowView } from './skill-flow-view'
-import { SkillRunHistory } from './skill-run-history'
 import { SkillCreateForm, createReceiptMessage } from './skill-create-form'
 import { AsyncRequestDetails } from './composition-observation-view'
 import type { AsyncRequestIdentity } from '../api/composition-observation'
@@ -15,12 +12,10 @@ import {
   classifySkillEditorError,
   fetchAsyncRequestObservation,
   fetchSkills,
-  fetchSkillEvidence,
   previewSkillSource,
   readSkillSource,
   saveSkillSource,
   type SkillCreateReceipt,
-  type SkillEvidenceResponse,
   type SkillEditorLoaded,
   type SkillEditorPreview,
   type SkillEditorSaveReceipt,
@@ -195,168 +190,6 @@ function SkillIoView({ profile }: { profile: SkillSurfaceProfile }) {
       ${profile.io.exports.length === 0
         ? html`<div class="ss-muted">Complete execution result (no selected exports)</div>`
         : profile.io.exports.map(route => html`<div class="mono text-3xs" key=${route.name}>${route.name} ← ${route.node_id} · ${route.pointer || '(root)'}</div>`)}
-    </div>
-  `
-}
-
-function recordedTimestamp(value: number | null): string {
-  if (value === null) return 'unobserved'
-  const date = new Date(value * 1000)
-  return Number.isFinite(date.getTime()) ? date.toISOString() : `${value} Unix seconds`
-}
-
-function SkillPerformanceView({ statistics, io }: {
-  statistics: SkillEvidenceResponse['composition_statistics']
-  io: SkillSurfaceProfile['io'] | null
-}) {
-  const modelOrchestrated = io?.kind === 'model_orchestrated'
-  const applicability = modelOrchestrated
-    ? html`<p>Executor timing: N/A for this model-orchestrated declaration. Retained executor results, when present, remain evidence below.</p>` : null
-  if (modelOrchestrated && (statistics === null || statistics.records === 0)) {
-    return html`<section aria-label="Skill performance" class="rounded border border-[var(--color-border-default)] p-3">
-      <strong>Executor performance</strong>${applicability}
-      <p class="ss-muted">${statistics === null ? 'Retained executor statistics unavailable.' : 'No retained executor runs for this exact revision.'}</p>
-    </section>`
-  }
-  if (!statistics) return null
-  const durations = [
-    { label: 'Completed', ...statistics.completed, color: 'var(--color-status-ok)' },
-    { label: 'Failed', ...statistics.failed, color: 'var(--color-status-err)' },
-  ]
-  const outcomes = [
-    { label: 'Completed', count: statistics.completed.samples, color: 'var(--color-status-ok)' },
-    { label: 'Failed', count: statistics.failed.samples, color: 'var(--color-status-err)' },
-    { label: 'Deferred', count: statistics.deferred, color: 'var(--color-status-warn)' },
-  ]
-  return html`
-    <section class="space-y-3 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3" aria-label="Skill performance">
-      <div class="flex flex-wrap justify-between gap-2"><strong>Executor performance</strong><span>${statistics.records} retained runs</span></div>
-      ${applicability}
-      <div class="ss-muted text-3xs">Same revision · all Keepers · one result per original run</div>
-      <div class="ss-muted text-3xs">${statistics.recorded_window.first_recorded_at === null
-        ? 'Recorded result window: unobserved'
-        : `Recorded result window (UTC): ${recordedTimestamp(statistics.recorded_window.first_recorded_at)} → ${recordedTimestamp(statistics.recorded_window.last_recorded_at)}`}</div>
-      <div class="overflow-x-auto"><table class="ss-table" aria-label="Executor duration distribution">
-        <thead><tr><th>Outcome</th><th>Mean · samples</th><th>P50</th><th>P95</th><th>Min → max</th></tr></thead>
-        <tbody>${durations.map(row => html`
-          <tr key=${row.label}>
-            <th scope="row">${row.label}</th>
-            <td class="mono text-3xs">${row.mean_ms === null ? 'unobserved' : `${row.mean_ms.toFixed(1)}ms`} · n=${row.samples}</td>
-            <td class="mono text-3xs">${row.p50_ms === null ? '—' : `${row.p50_ms.toFixed(1)}ms`}</td>
-            <td class="mono text-3xs">${row.p95_ms === null ? '—' : `${row.p95_ms.toFixed(1)}ms`}</td>
-            <td class="mono text-3xs">${row.min_ms === null ? '—' : `${row.min_ms.toFixed(1)} → ${row.max_ms?.toFixed(1)}ms`}</td>
-          </tr>
-        `)}</tbody>
-      </table></div>
-      <div class="ss-muted text-3xs">P50/P95: nearest rank of observed samples; recorded timestamps describe stored results, not execution start/end.</div>
-      <div class="ss-muted text-3xs">Outcome distribution · retained runs</div>
-      ${outcomes.map(row => html`
-        <div class="grid grid-cols-[6rem_minmax(0,1fr)_auto] items-center gap-2" key=${row.label}>
-          <span>${row.label}</span>
-          <div class="h-2 overflow-hidden rounded bg-[var(--color-border-default)]" aria-hidden="true"><div class="h-full rounded" style=${{ width: `${statistics.records > 0 ? row.count / statistics.records * 100 : 0}%`, backgroundColor: row.color }} /></div>
-          <span class="mono text-3xs">${row.count} · ${statistics.records > 0 ? (row.count / statistics.records * 100).toFixed(1) : '—'}${statistics.records > 0 ? '%' : ''}</span>
-        </div>
-      `)}
-      <div class="ss-muted text-3xs">Executor outcome is not business verification. Deferred excluded from durations. Queue/dependency waits and model latency are separate.</div>
-    </section>
-  `
-}
-
-
-function runField(run: Record<string, unknown>, name: string): string {
-  const value = run[name]
-  if (typeof value === 'string') return value
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-  return ''
-}
-
-function runDuration(run: Record<string, unknown>): string {
-  const value = run.duration_ms
-  return typeof value === 'number' && Number.isFinite(value)
-    ? `${Math.round(value)}ms`
-    : '?ms'
-}
-
-function runOutput(value: unknown): string {
-  if (typeof value !== 'string') return JSON.stringify(value, null, 2)
-  try {
-    return JSON.stringify(JSON.parse(value), null, 2)
-  } catch {
-    return value
-  }
-}
-
-function compositionCoverageLabel(scope: SkillEvidenceResponse['coverage']['composition_scope']): string {
-  switch (scope) {
-    case 'exact_reference_retained_runs':
-      return 'composition exact-reference retained runs'
-    case 'unavailable':
-      return 'composition exact-reference retained runs unavailable'
-  }
-}
-
-function SkillEvidenceView({ result, io }: { result: SkillEvidenceResponse | null; io: SkillSurfaceProfile['io'] | null }) {
-  if (!result) return html`<div class="ss-muted">Load retained exact-revision evidence.</div>`
-  const activationGapCount = result.coverage.activation_gaps.length
-  const coverageSummary = html`${result.coverage.activation_sessions_inspected} retained sessions inspected · ${result.coverage.activation_ledgers_loaded} activation ledgers loaded · ${activationGapCount} activation gaps · ${result.coverage.activation_owner_gap_count} owner gaps · ${result.coverage.composition_runs_observed} original composition runs observed · ${compositionCoverageLabel(result.coverage.composition_scope)}`
-  if (result.status === 'not_observed_in_retained_coverage') {
-    return html`
-      <${SkillPerformanceView} statistics=${result.composition_statistics} io=${io} />
-      <div class="text-[var(--color-status-warn)]">No exact-revision run was found in the retained coverage. This is not proof that it never ran.</div>
-      <div class="ss-muted text-3xs">${coverageSummary} · ${result.coverage.activation_scope}</div>
-      ${result.coverage.composition_unavailable.length > 0 ? html`<div class="text-[var(--color-status-warn)] text-3xs">Composition unavailable: ${result.coverage.composition_unavailable.join(' · ')}</div>` : null}
-    `
-  }
-  const activationEvidence = result.activation === null
-    ? []
-    : result.activation.selection === 'most_recent_observed'
-      ? [result.activation.evidence]
-      : result.activation.evidence
-  const composition = result.composition
-  const compositionNodeCount = composition?.executor_settlements.length ?? 0
-  const output = composition?.result.data
-  return html`
-    <div class="space-y-2" data-testid="skill-retained-evidence">
-      <${SkillPerformanceView} statistics=${result.composition_statistics} io=${io} />
-      ${activationEvidence.map((item, index) => {
-        const activation = item.activation
-        const actions = Array.isArray(activation.actions) ? activation.actions.length : 0
-        const delivered = activation.delivery !== null && activation.delivery !== undefined
-        const ownerClaims = item.owner.claims.map(claim => claim.keeper).join(', ') || 'unclaimed'
-        return html`
-          <div key=${JSON.stringify([item.trace_id, runField(activation, 'skill_tool_use_id')])}>
-            <div class="font-semibold">Latest independent activation · ${delivered ? '✓ delivered' : '◌ invoked'} · ${ownerClaims} · ${actions} original-turn actions${activationEvidence.length > 1 ? ` · equal-time candidate ${index + 1}/${activationEvidence.length}` : ''}</div>
-            <div class="ss-muted mono">${runField(activation, 'activated_at')} · tool use ${runField(activation, 'skill_tool_use_id')} · trace ${item.trace_id} · owner ${item.owner.status}</div>
-            <div class="ss-muted mono">original ${runField(activation, 'turn_ref')} · runtime ${runField(activation, 'runtime_id')}</div>
-            <${SkillAsyncEvidenceView} evidence=${item} />
-          </div>
-        `
-      })}
-      ${composition ? html`
-        <div>
-          <div class="font-semibold">
-            ${runField(composition.result, 'disposition') === 'completed' ? '✓ completed' : runField(composition.result, 'disposition')}
-            · ${runDuration(composition.result)}
-            · ${composition.keeper}
-          </div>
-          <div class="ss-muted mono">${composition.composition_run_id} · ${compositionNodeCount} typed node settlements</div>
-          <div class="ss-muted mono text-3xs">Recorded result ${recordedTimestamp(composition.recorded_at)} · ${composition.composition_execution} · request ${composition.request_id ?? 'inline'}
-            · parent tool use ${composition.parent_tool_use_id || '(empty)'} · turn ${composition.parent_turn} · planned index ${composition.parent_planned_index}</div>
-          ${composition.result.disposition === 'failed' ? html`
-            <div class="mt-2 rounded border border-[var(--color-status-err)] p-2" role="note" aria-label="Composition failure">
-              <strong>Composition failed</strong>
-              <pre class="whitespace-pre-wrap text-3xs">${runField(composition.result, 'message')}</pre>
-              <div class="ss-muted text-3xs">Failure class: ${runField(composition.result, 'failure_class')} · effect evidence: ${runField(composition.result, 'effect_disposition')}</div>
-            </div>` : null}
-          <div class="mt-2 font-semibold">Composition output</div>
-          <pre class="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-raised)] p-2 text-3xs">${runOutput(output)}</pre>
-          <${SkillNodeEvidenceView} nodes=${composition.executor_settlements} />
-        </div>
-      ` : null}
-      <div class="ss-muted text-3xs">
-        coverage ${coverageSummary} · ${result.coverage.activation_scope}
-        ${result.coverage.composition_unavailable.length > 0 ? html` · ⚠ ${result.coverage.composition_unavailable.join(' · ')}` : null}
-      </div>
     </div>
   `
 }
@@ -730,45 +563,6 @@ export function SkillsPanel() {
   </div>`
 }
 
-function SkillEvidenceLoader({ reference, io, isCurrent }: {
-  reference: SkillReference
-  io: SkillSurfaceProfile['io'] | null
-  isCurrent: () => boolean
-}) {
-  const result = useSignal<SkillEvidenceResponse | null>(null)
-  const error = useSignal<string | null>(null)
-  const loading = useSignal(false)
-  const active = useRef(true)
-  const requestGeneration = useRef(0)
-  useEffect(() => () => { active.current = false; requestGeneration.current += 1 }, [])
-  const load = async (runId?: string) => {
-    if (!active.current || !isCurrent()) return
-    const generation = ++requestGeneration.current
-    loading.value = true
-    error.value = null
-    try {
-      const evidence = await fetchSkillEvidence(reference, runId)
-      if (!active.current || !isCurrent() || generation !== requestGeneration.current) return
-      result.value = evidence
-    } catch (cause) {
-      if (active.current && isCurrent() && generation === requestGeneration.current) {
-        error.value = cause instanceof Error ? cause.message : String(cause)
-      }
-    } finally {
-      if (active.current && isCurrent() && generation === requestGeneration.current) loading.value = false
-    }
-  }
-  return html`<div>
-    <div class="mb-2 flex items-center justify-between"><strong>Retained evidence</strong>
-      <button class="ss-btn" type="button" disabled=${loading.value} onClick=${() => { void load() }}>${loading.value ? 'Loading…' : 'Load'}</button>
-    </div>
-    ${loading.value && result.value ? html`<p role="status">Loading requested selection; previous observation retained.</p>` : null}
-    ${error.value ? html`<div role="alert" class="text-[var(--color-status-err)]">${error.value}</div>` : null}
-    ${result.value ? html`<${SkillRunHistory} result=${result.value} onSelect=${(runId?: string) => { void load(runId) }} />` : null}
-    <${SkillEvidenceView} result=${result.value} io=${io} />
-  </div>`
-}
-
 function SkillsObservationPanel({ owner, onMutation }: {
   owner: SkillsObservationOwner
   onMutation: (result: SkillMutationResult) => void
@@ -987,8 +781,6 @@ function SkillsObservationPanel({ owner, onMutation }: {
                     : html`<p role="status">Exact source unavailable: this Skill has no published source reference.</p>`}
                   <div class="grid min-w-0 gap-3 p-2">
                     <div><strong>Execution flow</strong>${row.surface && row.surface.kind !== 'unavailable' ? html`<${SkillFlowView} profile=${row.surface.profile} /><${SkillIoView} profile=${row.surface.profile} />` : html`<div class="ss-muted">No profile</div>`}</div>
-                    ${row.surface ? html`<${SkillEvidenceLoader} key=${rowKey}
-                      reference=${row.surface.reference} io=${row.surface.kind === 'unavailable' ? null : row.surface.profile.io} isCurrent=${current} />` : null}
                   </div>
                   ${row.surface ? html`
                     <${SkillSourceEditor}

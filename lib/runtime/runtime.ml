@@ -4059,7 +4059,7 @@ let first_run_runtime_text ?(fallback_runtime_ids = []) ?(bind_imp = false) ~run
         (match runtime.binding.Runtime_schema.max_concurrent with
          | Some (_ : int) -> [], [ runtime_id ]
          | None -> [], [])
-      (* A client with no output-schema channel (Muse Code) becomes the
+      (* A client with no output-schema channel becomes the
          default and its lane without being written into any slot. *)
       | None -> [], []
     in

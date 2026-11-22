@@ -41,13 +41,13 @@ related: ["librarian-read-waits-and-shrinks-no-further-than-the-refusal-says", "
 
 - 0.2.6 전의 worker 는 기다리는 요청이 frame 을 채우면 submit 에 `capacity_wait` 로 답한다. 기록을 쓰기 전에 답한다(병합 전 `addons/exact_worker.py` 417행).
 - 새 서버는 `absent`·`pending`·`finished` 말고는 모르는 상태로 읽는다(`lib/lane_addon/lane_addon_submit_once.ml` 36~59행). submit 의 답을 읽지 못하면 원본을 `Dispatch_pending` 에 둔다(259~270행). 다음 pass 에 worker 는 그 요청이 없다고 답하고, 원본은 기다림으로만 남는다(215~217행).
-- 선언을 바꿔도 이 원본은 풀리지 않는다. `docs/guides/keeper-memory-execution.md` 의 "still wait" 목록에 「`Dispatch_pending` original its worker has no record of」가 있다.
+- 선언을 바꿔도 이 원본은 풀리지 않는다. 「`Dispatch_pending` original its worker has no record of」가 그 경우다.
 - 17:02~17:11 시스템 로그에는 명시적 기억 접수가 이 상태로 멈췄다는 문장이 없었다. durable 원본은 따로 세지 않았다.
 - 병합된 안내서와 #52731 조각은 「서버를 먼저 올린다」고 적었다. 그 순서가 이 창을 연다. #52762 가 순서를 뒤집었다.
 
 ### 1.2 지금 구조
 
-- Exact worker package 넷(keeper-librarian, workspace-curator, candle-appraiser, hitl-auto-judge)은 `addons/` 아래에 있다. 운영자가 이미지를 빌드하고, package 를 `<base>/.masc/packages/<id>-<revision>/` 에 복사하고, 선언의 `manifest_path` 를 바꾼다(`keeper-memory-execution.md`).
+- Exact worker package 넷(keeper-librarian, workspace-curator, candle-appraiser, hitl-auto-judge)은 `addons/` 아래에 있다. 운영자가 이미지를 빌드하고, package 를 `<base>/.masc/packages/<id>-<revision>/` 에 복사하고, 선언의 `manifest_path` 를 바꾼다.
 - 서버 판과 package 판을 맞추는 일은 운영자 몫이다. 서버를 올리는 일과 package 를 고르는 일은 서로를 모른다.
 - 운영 설치는 11-17 17:11 뒤로 keeper-librarian 0.2.6, workspace-curator 0.1.3, candle-appraiser 0.1.2 다. 17:11 전의 keeper-librarian(0.2.3-oversize-b584e032)과 curator·candle 은 `capacity_wait` 를 도입한 #44911(10-22) 뒤의 판이다.
 - 서버는 maintenance 박자마다 선언 폴더를 다시 읽는다(`lib/lane_addon/lane_addon_runtime.ml` 4833~4860행). 그래서 서버가 도는 중에 package 나 선언이 바뀌면 그 서버가 바로 새 짝을 만든다.
@@ -102,7 +102,7 @@ type package_source =
   - 요구 label 은 선언이 `Lane_addon_types.container` 에 싣는다. manifest 는 싣지 않는다. 요구 label 은 worker 입력이라 의미 revision 에 들어가고, 없을 때는 키를 적지 않으므로 `manifest_path` 선언의 revision 은 그대로다.
 - docker 가 없거나 빌드가 실패하면 그 package 는 실패로 알린다. 서버는 이미지를 찾지 못해 worker 를 띄우지 못하고, 요청은 보내지지 않은 채 기다린다.
 - setup 은 선언 파일을 쓰지 않는다. 선언이 `package = "<id>"` 로 바뀌는 일은 한 번, 운영자가 한다(§6).
-- 선언이 없으면 만들지 않는다. Exact Add-on 은 운영자가 고르는 설정이고, exact lane 연결도 따로 필요하다(`keeper-memory-execution.md`).
+- 선언이 없으면 만들지 않는다. Exact Add-on 은 운영자가 고르는 설정이고, exact lane 연결도 따로 필요하다.
 
 ### 3.4 규약 판 (D4)
 
@@ -157,7 +157,7 @@ S(n) 을 n 번째 서버 빌드, C(n) 을 그 빌드가 실은 package 묶음, p
 | L1 | D1·D2. 싣기, `package` 선언 키와 `package_source` 합타입, 실은 package 풀기 | `lib/embedded_exact_addons/`, `lib/lane_addon/lane_addon_config.ml` |
 | L2 | D3. `masc exact-addon-setup`, 두 설치 스크립트, 붙일 때 이미지 label 확인 | `bin/main_eio.ml`, `lib/exact_addon_setup.ml`, `scripts/install-local-build.sh`, `scripts/install.sh`, `lib/lane_addon/lane_addon_worker.ml` |
 | L3 | §3.5. worker 시작 때 기록 판 훑기 | `addons/exact_worker.py` |
-| L4 | 안내서. 선언 예시를 `package = "<id>"` 로, 고정 package 는 판을 맞추라고 | `docs/guides/keeper-memory-execution.md`, 네 README |
+| L4 | 안내서. 선언 예시를 `package = "<id>"` 로, 고정 package 는 판을 맞추라고 | `docs/guides/lane-addon-toml.md`, 네 README |
 
 - L0 과 L1·L2 는 한 번에 설치한다. L0 만 들어가면 운영 Exact 설치가 모두 붙지 않는다.
 - L3 은 따로 들어가도 된다.

@@ -525,7 +525,7 @@ let parse_credit_url ~path ~transport ~shape tbl =
 
 (* The read sends the API key the runtime's HTTP execution was built with,
    and its windows are recorded under the quota scope of that key.  An
-   official-client runtime (Codex, Claude Code, Antigravity, Muse Code, Vibe) logs
+   official-client runtime (Codex, Claude Code, Antigravity, ACP) logs
    in with the vendor's subscription, and its quota scope names no API key
    (Antigravity's names the OAuth file of that login), so an API-key read
    there would file one account's usage under another.  Codex and

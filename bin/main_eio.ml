@@ -2301,7 +2301,7 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
 let runtime_verify_cmd =
   let runtime_id = Arg.(required & pos 0 (some string) None & info [] ~docv:"RUNTIME_ID") in
   let timeout = Arg.(value & opt float runtime_verification_timeout_s & info ["timeout"] ~docv:"SECONDS"
-    ~doc:"Deadline for cancellable client admission and model/tool exchange; blocking Muse account preparation can delay it.") in
+    ~doc:"Deadline for cancellable client admission and model/tool exchange.") in
   Cmd.v (Cmd.info "runtime-verify" ~doc:"Verify the selected model response and a harmless tool-result roundtrip.")
     Term.(const runtime_verify_cmd_exit $ base_path $ runtime_id $ timeout)
 

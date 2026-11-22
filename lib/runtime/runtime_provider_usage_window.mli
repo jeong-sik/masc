@@ -77,8 +77,7 @@ type window_role = Runtime_provider_usage_types.window_role =
       (** Spending it refuses model calls on the account: Claude and Codex
           windows, OpenRouter's API key credit limit, Z.AI's TOKENS_LIMIT, both Kimi
           counts, Ollama's session and weekly allowance while its purchased
-          balance is zero, Antigravity's 5-hour and weekly buckets, Muse
-          Code's rolling and weekly windows. Antigravity's buckets belong to a
+          balance is zero, and Antigravity's 5-hour and weekly buckets. Antigravity's buckets belong to a
           model group each (Gemini; Claude and GPT), so there a spent bucket
           refuses only the calls of its own group: {!gate_coverage}. *)
   | Counts_other_use

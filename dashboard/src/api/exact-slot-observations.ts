@@ -156,7 +156,7 @@ function cliFailure(value: unknown): SlotOutcome {
   const [tag, payload] = variant(raw.cause)
   switch (tag) {
     case 'Native_failed': return { kind: 'cli_failed', cause: `${tag} / ${nullary(payload,
-      ['Codex', 'Claude', 'Claude_admission', 'Antigravity', 'Muse', 'Vibe', 'Host'])}` }
+      ['Codex', 'Claude', 'Claude_admission', 'Antigravity', 'Host'])}` }
     case 'Codex_context_refused': case 'Claude_context_refused': {
       const detail = object(payload)
       if (typeof detail.message !== 'string') invalid()

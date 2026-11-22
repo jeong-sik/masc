@@ -328,7 +328,7 @@ v1 이 재지 못하는 것: 운영자가 읽었는가, 읽고 나서 더 잘 �
 **읽지 않음:**
 - `quiz_flow.py`, `quiz_log.py` 의 본문 대부분. 직접 읽은 곳은 `quiz_flow.py:288-302, 420-468, 695-714, 746-754` 와 `quiz_log.py:830-834, 905-911` 이다. §5 의 나머지는 리뷰 보고에 기댄다.
 - `lib/lane_addon/` 의 host 코드 대부분. 리뷰가 든 좌표 가운데 `lane_addon_manifest.ml:343-368` 과 `lane_addon_exact.ml:250` 만 직접 읽었다.
-- Results 화면이 긴 글을 그리는 코드(`docs/guides/tui-lane-addons.md` "Reading multiline results" 절이 있다는 것만 확인했다).
+- Results 화면이 긴 글을 그리는 코드.
 
 **확신:**
 - core 를 고치지 않아도 된다: 높다. 쓰는 요청은 모두 퀴즈가 쓰는 것이다.

@@ -327,7 +327,7 @@ L1 이 먼저다. L2 를 먼저 넣으면 접은 범위가 frame 안에 처음 �
 | L1 | D1. 접수, 여러 장 목록과 그 manifest 선언, 모든 장을 걷는 pass, `capacity_wait` 삭제, 네 package revision | `addons/exact_worker.py`, 네 Add-on package, `lib/lane_addon/lane_addon_manifest.ml`, `lane_addon_types.ml`, `lib/lane_addon/lane_addon_runtime.ml`, `lane_addon_host_walk.ml`, `lane_addon_host_request.ml`, `lane_addon_submit_once.ml`, `lane_addon_types.mli`, §3.1 "지우는 것"의 파일 |
 | L2 | D2. 폭 타입, 합쳐 고르는 함수, 절반 접기와 풀기, 접은 뒤 다음 회차 걸기 | `lib/keeper/keeper_librarian_range.ml`, `keeper_librarian_durable_consumer.ml`, `keeper_librarian_durable_execution.ml`, `keeper_librarian_durable_capture.ml`, `keeper_librarian_floor_descent.ml`, `bin/masc_librarian_replay.ml` |
 
-- L1 은 package 를 올린다. 기다리던 원본이 막히는 문제(#51278)는 #52622·#52674·#52695 가 풀었다. 그래도 기다리는 원본은 `docs/guides/keeper-memory-execution.md` 의 업그레이드 절에 있다.
+- L1 은 package 를 올린다. 기다리던 원본이 막히는 문제(#51278)는 #52622·#52674·#52695 가 풀었다. 그래도 기다리는 원본은 업그레이드 절차에서 따로 다룬다.
 - L2 는 host 코드만 바꾼다. package 를 올리지 않는다.
 - L1 은 서버를 멈추고 선언을 바꾼 뒤 새 서버를 띄운다(§4.4).
 - L1 은 처음에 `next` 판(#52728·#52729·#52731, keeper-librarian 0.2.6)으로 병합됐다. 그 판은 장에 `next` 를 더해서 §4.5 의 논증이 닫히지 않았다. 요청 id 커서 판(0.2.7)이 그 뒤를 잇는다.

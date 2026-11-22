@@ -842,7 +842,7 @@ verification sends it back to `in_progress`.
 1. Someone creates a task — an MCP client or Keeper through `masc_add_task`,
    or you by asking a Keeper in TUI chat.
 2. A Keeper claims it and starts taking turns.
-3. Work lands as file edits, commands, and board posts (plus optional isolated Docker background jobs via `keeper_job_*` or multi-Keeper compositions via `keeper_composition_*`).
+3. Work lands as file edits, commands, and board posts (plus optional isolated Docker background jobs via `keeper_job_*`).
 4. Verification decides whether it is finished. On the runtime measured here
    that was a separate actor, not the Keeper that did the work: the two most
    frequent board authors were `system` and `verifier_exact`.

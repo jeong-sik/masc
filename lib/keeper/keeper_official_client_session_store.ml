@@ -4,15 +4,6 @@ type client_kind = Keeper_semantic_execution.official_client_kind =
   | Antigravity
   | Acp
 
-type host_turn_ending =
-  | Host_completed
-  | Host_uncompleted
-
-type host_ended_turn =
-  { turn_id : string
-  ; ending : host_turn_ending
-  }
-
 type settlement =
   { session_id : string
   ; turn_id : string
@@ -186,18 +177,11 @@ type context_frontier =
   ; held_context : held_context list
   }
 
-type host_last_turn =
-  | Not_reported
-  | Reported of host_ended_turn option
-  | Unobserved_after of { reported : host_ended_turn option; dispatched : string option }
-  | Retry_after of { reported : host_ended_turn option; failed : string option }
-
 type t =
   { client_kind : client_kind
   ; runtime_id : string
   ; phase : phase
   ; turn_count : int
-  ; host_last_turn : host_last_turn
   ; tool_surface_sha256 : string
   ; context_frontier : context_frontier option
   ; last_recovery_resolution : recovery_resolution_record option
@@ -420,73 +404,6 @@ let validate_phase = function
   | Settled settlement -> validate_settlement settlement
 ;;
 
-(* Whether the client reports its own last ended turn to this store. *)
-let reports_host_last_turn = function
-  | Codex | Claude_code | Antigravity | Acp -> false
-;;
-
-let validate_host_ended_turn = function
-  | None -> Ok ()
-  | Some ({ turn_id; ending = Host_completed | Host_uncompleted } : host_ended_turn) ->
-    non_empty "host last turn_id" turn_id
-;;
-
-let validate_host_turn_id = function
-  | None -> Ok ()
-  | Some turn_id -> non_empty "host turn_id" turn_id
-;;
-
-(* A Muse binding records the host's last turn exactly when its phase names a
-   session: a resume is admitted only against it, and a turn kept for no
-   session would describe one nobody resumes. An opened session holds what
-   the host reported, and a dispatched turn's ending is unobserved until a
-   transition records it; the in-flight turn is the one it names. *)
-let validate_host_last_turn binding =
-  let* () =
-    match binding.host_last_turn with
-    | Not_reported -> Ok ()
-    | Reported reported -> validate_host_ended_turn reported
-    | Unobserved_after { reported; dispatched = turn_id }
-    | Retry_after { reported; failed = turn_id } ->
-      let* () = validate_host_ended_turn reported in
-      validate_host_turn_id turn_id
-  in
-  if not (reports_host_last_turn binding.client_kind)
-  then (
-    match binding.host_last_turn with
-    | Not_reported -> Ok ()
-    | Reported _ | Unobserved_after _ | Retry_after _ ->
-      Error "only a Muse binding records the host's last turn")
-  else
-    match binding.phase, binding.host_last_turn with
-    | ( ( Ready
-        | Start { previous_settlement = None; _ }
-        | Recovery_required { previous_settlement = None; _ } )
-      , Not_reported ) -> Ok ()
-    | ( ( Ready
-        | Start { previous_settlement = None; _ }
-        | Recovery_required { previous_settlement = None; _ } )
-      , (Reported _ | Unobserved_after _ | Retry_after _) ) ->
-      Error "a Muse binding that names no session records no host last turn"
-    | Active _, Reported _ -> Ok ()
-    | Active _, (Not_reported | Unobserved_after _ | Retry_after _) ->
-      Error "an opened Muse session records the last turn its host reported"
-    | Turn_inflight { turn_id; _ }, Unobserved_after { dispatched; _ } ->
-      if Option.equal String.equal turn_id dispatched then Ok ()
-      else Error "an in-flight Muse turn's unobserved ending names another turn"
-    | Turn_inflight _, (Not_reported | Reported _ | Retry_after _) ->
-      Error "an in-flight Muse turn has an unobserved ending"
-    | ( ( Start { previous_settlement = Some _; _ }
-        | Recovery_required { previous_settlement = Some _; _ }
-        | Settled _ )
-      , (Reported _ | Unobserved_after _ | Retry_after _) ) -> Ok ()
-    | ( ( Start { previous_settlement = Some _; _ }
-        | Recovery_required { previous_settlement = Some _; _ }
-        | Settled _ )
-      , Not_reported ) ->
-      Error "a resumable Muse session must record its host's last turn"
-;;
-
 let carried_context_rank = function
   | Context_block _ -> 0
   | Context_section _ -> 1
@@ -538,7 +455,6 @@ let compare_carried_context a b =
 let validate binding =
   let* () = non_empty "runtime_id" binding.runtime_id in
   let* () = validate_phase binding.phase in
-  let* () = validate_host_last_turn binding in
   let* () =
     match binding.last_recovery_resolution with
     | None -> Ok ()
@@ -949,102 +865,24 @@ let context_frontier_of_yojson json =
      | _ -> Error "invalid context frontier fields")
   | _ -> Error "invalid context frontier"
 
-let host_ended_turn_to_yojson = function
-  | None -> `Null
-  | Some ({ turn_id; ending } : host_ended_turn) ->
-    let ending =
-      match ending with
-      | Host_completed -> "completed"
-      | Host_uncompleted -> "uncompleted"
-    in
-    `Assoc [ "ending", `String ending; "turn_id", `String turn_id ]
-;;
-
-let host_ended_turn_of_yojson = function
-  | `Null -> Ok None
-  | `Assoc fields ->
-    (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
-     | [ "ending", `String "completed"; "turn_id", `String turn_id ] ->
-       Ok (Some ({ turn_id; ending = Host_completed } : host_ended_turn))
-     | [ "ending", `String "uncompleted"; "turn_id", `String turn_id ] ->
-       Ok (Some ({ turn_id; ending = Host_uncompleted } : host_ended_turn))
-     | _ -> Error "official-client host last turn fields are not exact")
-  | _ -> Error "official-client host last turn must be null or a JSON object"
-;;
-
-let host_turn_id_to_yojson = function
-  | None -> `Null
-  | Some turn_id -> `String turn_id
-;;
-
-let host_turn_id_of_yojson = function
-  | `Null -> Ok None
-  | `String turn_id -> Ok (Some turn_id)
-  | _ -> Error "official-client host turn id must be null or a string"
-;;
-
-let host_last_turn_to_yojson = function
-  | Not_reported -> None
-  | Reported reported ->
-    Some (`Assoc [ "kind", `String "reported"; "last_turn", host_ended_turn_to_yojson reported ])
-  | Unobserved_after { reported; dispatched } ->
-    Some
-      (`Assoc
-         [ "dispatched", host_turn_id_to_yojson dispatched
-         ; "kind", `String "unobserved_after"
-         ; "last_turn", host_ended_turn_to_yojson reported
-         ])
-  | Retry_after { reported; failed } ->
-    Some
-      (`Assoc
-         [ "failed", host_turn_id_to_yojson failed
-         ; "kind", `String "retry_after"
-         ; "last_turn", host_ended_turn_to_yojson reported
-         ])
-;;
-
-let host_last_turn_of_yojson = function
-  | `Assoc fields ->
-    (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
-     | [ "kind", `String "reported"; "last_turn", reported ] ->
-       let* reported = host_ended_turn_of_yojson reported in
-       Ok (Reported reported)
-     | [ "dispatched", dispatched; "kind", `String "unobserved_after"; "last_turn", reported ] ->
-       let* reported = host_ended_turn_of_yojson reported in
-       let* dispatched = host_turn_id_of_yojson dispatched in
-       Ok (Unobserved_after { reported; dispatched })
-     | [ "failed", failed; "kind", `String "retry_after"; "last_turn", reported ] ->
-       let* reported = host_ended_turn_of_yojson reported in
-       let* failed = host_turn_id_of_yojson failed in
-       Ok (Retry_after { reported; failed })
-     | _ -> Error "official-client host last turn fields are not exact")
-  | _ -> Error "official-client host last turn must be a JSON object"
-;;
-
 let to_yojson binding =
-  let host_last_turn =
-    match host_last_turn_to_yojson binding.host_last_turn with
-    | None -> []
-    | Some json -> [ "host_last_turn", json ]
-  in
   `Assoc
-    ([ ( "client_kind"
-       , `String
-           (Keeper_semantic_execution.official_client_kind_to_string binding.client_kind) )
-     ; "context_frontier", context_frontier_to_yojson binding.context_frontier
-     ; ( "last_recovery_resolution"
-       , recovery_resolution_record_opt_to_yojson
-           binding.last_recovery_resolution )
-     ; ( "last_transient_release"
-       , transient_release_record_opt_to_yojson binding.last_transient_release )
-     ; "runtime_id", `String binding.runtime_id
-     ; "phase", phase_to_yojson binding.phase
-     ; "schema", `String schema
-     ; "tool_surface_sha256", `String binding.tool_surface_sha256
-     ; "turn_count", `Int binding.turn_count
-     ; "updated_at", `Float binding.updated_at
-     ]
-     @ host_last_turn)
+    [ ( "client_kind"
+      , `String
+          (Keeper_semantic_execution.official_client_kind_to_string binding.client_kind) )
+    ; "context_frontier", context_frontier_to_yojson binding.context_frontier
+    ; ( "last_recovery_resolution"
+      , recovery_resolution_record_opt_to_yojson
+          binding.last_recovery_resolution )
+    ; ( "last_transient_release"
+      , transient_release_record_opt_to_yojson binding.last_transient_release )
+    ; "runtime_id", `String binding.runtime_id
+    ; "phase", phase_to_yojson binding.phase
+    ; "schema", `String schema
+    ; "tool_surface_sha256", `String binding.tool_surface_sha256
+    ; "turn_count", `Int binding.turn_count
+    ; "updated_at", `Float binding.updated_at
+    ]
 ;;
 
 let of_yojson = function
@@ -1057,15 +895,6 @@ let of_yojson = function
       | [] -> Ok None
       | [(_, json)] -> context_frontier_of_yojson json
       | _ -> Error "duplicate context frontier proof" in
-    (* The host's last turn is written only when it was reported, so absence
-       is [Not_reported]. [validate] refuses a Muse binding that names a
-       session without it. *)
-    let host_last_turn_fields, fields = List.partition (fun (name, _) ->
-      String.equal name "host_last_turn") fields in
-    let* host_last_turn = match host_last_turn_fields with
-      | [] -> Ok Not_reported
-      | [(_, json)] -> host_last_turn_of_yojson json
-      | _ -> Error "duplicate host last turn" in
     (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
      | [ "client_kind", `String client_kind_json
        ; "last_recovery_resolution", last_resolution_json
@@ -1096,7 +925,6 @@ let of_yojson = function
            ; runtime_id
            ; phase
            ; turn_count
-           ; host_last_turn
            ; tool_surface_sha256
            ; context_frontier
            ; last_recovery_resolution
@@ -1115,7 +943,6 @@ let equal left right =
   && String.equal left.runtime_id right.runtime_id
   && left.phase = right.phase
   && Int.equal left.turn_count right.turn_count
-  && left.host_last_turn = right.host_last_turn
   && String.equal left.tool_surface_sha256 right.tool_surface_sha256
   && left.context_frontier = right.context_frontier
   && left.last_recovery_resolution = right.last_recovery_resolution
@@ -1969,13 +1796,6 @@ let held_context_for_resume plan ~expected =
       when resumed = settled && settled = receipt -> frontier.held_context
   | Some _, Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ | Settled _; _ } | Some _, None | None, _ -> []
 
-let resume_host_last_turn plan ~expected =
-  match plan.previous_settlement, expected with
-  | Some resumed, Some { phase = Settled settled; host_last_turn; _ } when resumed = settled ->
-    host_last_turn
-  | Some _, Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ | Settled _; _ }
-  | Some _, None | None, _ -> Not_reported
-
 let reconcile_context plan ~expected ~snapshot_sha256 =
   match plan.previous_settlement with
   | None -> plan
@@ -2112,7 +1932,6 @@ let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expec
       ; runtime_id
       ; phase = Start { owner_epoch; previous_settlement = plan.previous_settlement }
       ; turn_count = plan.turn_count
-      ; host_last_turn = resume_host_last_turn plan ~expected
       ; tool_surface_sha256
       ; context_frontier
       ; last_recovery_resolution
@@ -2139,7 +1958,7 @@ let claim ~base_path ~keeper_name ~expected ~client_kind ~owner_epoch ~runtime_i
     ~expected ~client_kind ~owner_epoch ~runtime_id ~tool_surface_sha256 ~updated_at
 ;;
 
-let open_session ~host_last_turn ~base_path ~keeper_name ~expected ~session_id ~updated_at =
+let mark_active ~base_path ~keeper_name ~expected ~session_id ~updated_at =
   match expected.phase with
   | Start { owner_epoch; previous_settlement } ->
     transition
@@ -2148,38 +1967,16 @@ let open_session ~host_last_turn ~base_path ~keeper_name ~expected ~session_id ~
       ~expected:(Some expected)
       { expected with
         phase = Active { owner_epoch; session_id; previous_settlement }
-      ; host_last_turn
       ; updated_at
       }
   | Ready | Active _ | Turn_inflight _ | Recovery_required _ | Settled _ ->
     Error "official-client session can become active only from start"
 ;;
 
-let mark_active ~base_path ~keeper_name ~expected ~session_id ~updated_at =
-  if reports_host_last_turn expected.client_kind
-  then Error "a Muse session becomes active only with the last turn its host reported"
-  else
-    open_session ~host_last_turn:expected.host_last_turn ~base_path ~keeper_name ~expected
-      ~session_id ~updated_at
-;;
-
-let mark_active_reported ~base_path ~keeper_name ~expected ~session_id ~last_turn
-    ~updated_at =
-  open_session ~host_last_turn:(Reported last_turn) ~base_path ~keeper_name ~expected
-    ~session_id ~updated_at
-;;
-
 let mark_turn_starting ~base_path ~keeper_name ~expected ~session_id ~updated_at =
   match expected.phase with
   | Active { owner_epoch; session_id = active_session_id; previous_settlement }
     when String.equal active_session_id session_id ->
-    let* host_last_turn =
-      match expected.host_last_turn with
-      | Not_reported -> Ok Not_reported
-      | Reported reported -> Ok (Unobserved_after { reported; dispatched = None })
-      | Unobserved_after _ | Retry_after _ ->
-        Error "official-client turn cannot start before its host reported its last turn"
-    in
     transition
       ~base_path
       ~keeper_name
@@ -2188,7 +1985,6 @@ let mark_turn_starting ~base_path ~keeper_name ~expected ~session_id ~updated_at
         phase =
           Turn_inflight
             { owner_epoch; session_id; turn_id = None; previous_settlement }
-      ; host_last_turn
       ; updated_at
       }
   | Active _ -> Error "official-client session identity changed before turn start"
@@ -2206,14 +2002,6 @@ let mark_turn_started ~base_path ~keeper_name ~expected ~session_id ~turn_id
       ; previous_settlement
       }
     when String.equal inflight_session_id session_id ->
-    let* host_last_turn =
-      match expected.host_last_turn with
-      | Not_reported -> Ok Not_reported
-      | Unobserved_after { reported; dispatched = None } ->
-        Ok (Unobserved_after { reported; dispatched = Some turn_id })
-      | Unobserved_after { dispatched = Some _; _ } | Reported _ | Retry_after _ ->
-        Error "official-client turn identity can follow only an unobserved host ending"
-    in
     if turn_count < expected.turn_count
     then Error "official-client observed turn count regressed after turn start"
     else
@@ -2230,7 +2018,6 @@ let mark_turn_started ~base_path ~keeper_name ~expected ~session_id ~turn_id
               ; previous_settlement
               }
         ; turn_count
-        ; host_last_turn
         ; updated_at
         }
   | Turn_inflight { turn_id = None; _ } ->
@@ -2247,25 +2034,7 @@ type held_update =
   | Keep_held
   | Hold of held_context list
 
-(* Whether the host reported the settled turn's terminal as [completed]. *)
-type host_ending =
-  | Completed_reported
-  | Ending_unobserved
-
-let host_last_turn_after_settlement ~host_ending ~turn_id host_last_turn =
-  match host_ending, host_last_turn with
-  | Ending_unobserved, host_last_turn -> Ok host_last_turn
-  | Completed_reported, Not_reported -> Ok Not_reported
-  | Completed_reported, Unobserved_after { dispatched = Some dispatched; _ }
-    when String.equal dispatched turn_id ->
-    Ok (Reported (Some ({ turn_id; ending = Host_completed } : host_ended_turn)))
-  | Completed_reported, Unobserved_after _ ->
-    Error "official-client host completed a turn other than the dispatched one"
-  | Completed_reported, (Reported _ | Retry_after _) ->
-    Error "official-client turn completed without being dispatched"
-;;
-
-let settle_turn ~held_update ~host_ending ~base_path ~keeper_name ~expected ~session_id
+let settle_turn ~held_update ~base_path ~keeper_name ~expected ~session_id
     ~turn_id ~updated_at =
   match expected.phase with
   | Turn_inflight
@@ -2275,14 +2044,11 @@ let settle_turn ~held_update ~host_ending ~base_path ~keeper_name ~expected ~ses
       }
     when String.equal inflight_session_id session_id
          && String.equal inflight_turn_id turn_id ->
-    let* host_last_turn =
-      host_last_turn_after_settlement ~host_ending ~turn_id expected.host_last_turn
-    in
     transition
       ~base_path
       ~keeper_name
       ~expected:(Some expected)
-      { expected with phase = Settled { session_id; turn_id }; host_last_turn; updated_at;
+      { expected with phase = Settled { session_id; turn_id }; updated_at;
         context_frontier = Option.map (fun frontier ->
           { frontier with
             acknowledged_turn = Some {session_id; turn_id}
@@ -2298,19 +2064,13 @@ let settle_turn ~held_update ~host_ending ~base_path ~keeper_name ~expected ~ses
 ;;
 
 let settle ~base_path ~keeper_name ~expected ~session_id ~turn_id ~updated_at =
-  settle_turn ~held_update:Keep_held ~host_ending:Ending_unobserved ~base_path ~keeper_name
+  settle_turn ~held_update:Keep_held ~base_path ~keeper_name
     ~expected ~session_id ~turn_id ~updated_at
 ;;
 
 let settle_holding ~held_context ~base_path ~keeper_name ~expected ~session_id ~turn_id
     ~updated_at =
-  settle_turn ~held_update:(Hold held_context) ~host_ending:Ending_unobserved ~base_path
-    ~keeper_name ~expected ~session_id ~turn_id ~updated_at
-;;
-
-let settle_completed_holding ~held_context ~base_path ~keeper_name ~expected ~session_id
-    ~turn_id ~updated_at =
-  settle_turn ~held_update:(Hold held_context) ~host_ending:Completed_reported ~base_path
+  settle_turn ~held_update:(Hold held_context) ~base_path
     ~keeper_name ~expected ~session_id ~turn_id ~updated_at
 ;;
 
@@ -2348,16 +2108,11 @@ let require_recovery ~base_path ~keeper_name ~expected ~failure ~detail
     }
   in
   let* () = validate_recovery recovery in
-  let host_last_turn =
-    match previous_settlement with
-    | None -> Not_reported
-    | Some _ -> expected.host_last_turn
-  in
   transition
     ~base_path
     ~keeper_name
     ~expected:(Some expected)
-    { expected with phase = Recovery_required recovery; host_last_turn; updated_at = required_at }
+    { expected with phase = Recovery_required recovery; updated_at = required_at }
 ;;
 
 let incomplete_claim = function
@@ -2392,31 +2147,6 @@ let frontier_restored_to previous_settlement frontier =
        certify those digests; the retry must be allowed to send them again. *)
     { frontier with acknowledged_turn = previous_settlement; held_context = [] }
   | Prepared_start_context | Held_by_vendor_session -> frontier
-;;
-
-(* The host's last turn once a claim ends unsettled with [failure]. Only a
-   turn this claim dispatched ([Turn_inflight]) changes it; before that it is
-   the one the session opened with, or the one the claim inherited. A
-   retryable failed terminal is one the host reported, so the failed turn is
-   the host's last, uncompleted. A failure before dispatch reached no host
-   turn. Any other release keeps the ending unobserved: an owner stop can
-   land after the host finished the turn, as one did on 2026-10-20. *)
-let host_last_turn_after_release ~phase failure host_last_turn =
-  match phase with
-  | Ready | Start _ | Active _ | Recovery_required _ | Settled _ -> host_last_turn
-  | Turn_inflight _ ->
-    (match failure, host_last_turn with
-     | Retryable_turn_failed, Unobserved_after { dispatched = Some turn_id; _ } ->
-       Reported (Some ({ turn_id; ending = Host_uncompleted } : host_ended_turn))
-     | (Pre_dispatch_failed | Spawn_resources_busy | Spawn_refused_same_input | Spawn_failed_cause_unknown), Unobserved_after { reported; _ } ->
-       Reported reported
-     | Retryable_turn_failed
-       , (Unobserved_after { dispatched = None; _ } | Not_reported | Reported _ | Retry_after _)
-     | (Pre_dispatch_failed | Spawn_resources_busy | Spawn_refused_same_input | Spawn_failed_cause_unknown), (Not_reported | Reported _ | Retry_after _)
-     | ( ( Owner_stopped_turn | Transport_interrupted | Protocol_failed | Provider_rejected
-         | Input_rejected _ | Host_hook_failed | State_persistence_failed | Process_restarted
-         | Vendor_session_full _ )
-       , (Not_reported | Reported _ | Unobserved_after _ | Retry_after _) ) -> host_last_turn)
 ;;
 
 let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =
@@ -2462,12 +2192,6 @@ let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =
       ; context_frontier =
           Option.map (frontier_restored_to previous_settlement) expected.context_frontier
       ; turn_count
-      ; host_last_turn =
-          (match previous_settlement with
-           | None -> Not_reported
-           | Some _ ->
-             host_last_turn_after_release ~phase:expected.phase failure
-               expected.host_last_turn)
       ; last_transient_release = Some { failure; owner_epoch; released_at }
       ; updated_at = released_at
       }
@@ -2635,25 +2359,6 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
            made the next turn fail [mark_turn_started]'s regression guard. *)
         Ok (None, 0)
     in
-    (* A retry re-sends the failed turn's work, so it expects the host not to
-       have completed that turn: its last turn is the one it reported when the
-       failed claim opened the session, or the failed turn ended uncompleted.
-       A host that completed it already ran the work, and the resume is
-       refused rather than running it twice. A claim that opened no session
-       ([observed_session_id = None]) ran no turn, so the last turn it
-       inherited stands. *)
-    let host_last_turn =
-      match restored_settlement, recovery.observed_session_id, current.host_last_turn with
-      | None, (Some _ | None), (Not_reported | Reported _ | Unobserved_after _ | Retry_after _) ->
-        Not_reported
-      | Some _, Some _, Unobserved_after { reported; dispatched } ->
-        Retry_after { reported; failed = dispatched }
-      | Some _, Some _, ((Not_reported | Reported _ | Retry_after _) as host_last_turn)
-      | ( Some _
-        , None
-        , ((Not_reported | Reported _ | Unobserved_after _ | Retry_after _) as host_last_turn) ) ->
-        host_last_turn
-    in
     let resolved =
       { current with
         phase = restored_phase restored_settlement
@@ -2662,7 +2367,6 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
       ; context_frontier =
           Option.map (frontier_restored_to restored_settlement) current.context_frontier
       ; turn_count
-      ; host_last_turn
       ; last_recovery_resolution =
           Some
             { recovery_id

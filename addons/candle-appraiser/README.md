@@ -82,7 +82,7 @@ the input body. Deploy this revision with the
 The masc server carries this package. Declare it with `package = "candle-appraiser"`,
 then run `masc exact-addon-setup --declared --base-path <base-path>`, which writes
 the package under `<base-path>/.masc/packages/` and builds its image
-([Keeper Librarian install](../../docs/guides/keeper-memory-execution.md#install-the-package)).
+([TOML installation](../../docs/guides/lane-addon-toml.md#서버가-가진-exact-패키지)).
 State that still holds worker record v1 needs the hard cut above before the move.
 A declaration that pins the package with `manifest_path` builds the image from
 the repository root instead:
@@ -91,9 +91,8 @@ the repository root instead:
 docker build -f addons/candle-appraiser/Dockerfile -t masc-lane-candle-appraiser:0.1.8 addons
 ```
 
-Select this revision with the server stopped, in the order the
-[Keeper Librarian upgrade](../../docs/guides/keeper-memory-execution.md#upgrade-an-existing-installation)
-gives. This revision names `[world] exact_protocol = 1`.
+Select this revision with the server stopped (see
+[TOML installation](../../docs/guides/lane-addon-toml.md)). This revision names `[world] exact_protocol = 1`.
 A server that knows `exact_protocol` refuses a manifest that does not name the
 protocol it speaks, and a server that does not know the key refuses this one.
 A revision before 0.1.6 answers `capacity_wait`, which a server that

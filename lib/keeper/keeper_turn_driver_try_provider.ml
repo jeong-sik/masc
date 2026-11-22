@@ -4191,7 +4191,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
 (* #27320: same-runtime retry stage for a typed provider context overflow on
    the official-client lanes ([Keeper_claude_code_runtime],
    [Keeper_codex_runtime]). Their first request carries the whole windowed
-   history, or the start-prompt ceiling a Muse or Antigravity runtime derives
+   history, or the start-prompt ceiling an Antigravity runtime derives
    from its declared window ([Runtime_instance.prompt_capacity_bytes]).
    A ContextOverflow there means that view is more than the client carries,
    not that the request was malformed: a smaller view of the SAME

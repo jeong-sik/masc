@@ -1,4 +1,4 @@
-(* The installer's sign-in for a Codex, Claude Code or Muse Code account home
+(* The installer's sign-in for a Codex or Claude Code account home
    that runtime.toml already declares. The installer runs this instead of the
    official client, so the login child gets the environment /login gives that
    client (Runtime_setup_login_client). The client's exit code is this

@@ -179,9 +179,8 @@ type provider =
   ; max_context : int option
     (** Provider context default; a binding override takes precedence, then the model default. *)
   ; account_home : string option
-    (** Absolute, operator-owned CLI state directory for Claude Code, Codex
-        or Muse Code. Muse requires an explicit value at materialization;
-        the other two may resolve their native account environment. *)
+    (** Absolute, operator-owned CLI state directory for Claude Code or Codex;
+        when omitted they resolve their native account environment. *)
   ; capabilities : capabilities option
   ; healthcheck_path : string option
   ; headers : (string * string) list option

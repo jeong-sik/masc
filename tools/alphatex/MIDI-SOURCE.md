@@ -54,9 +54,8 @@ new events use track zero for SMF0/1 or the selected SMF2 pattern. The existing
 overlay, export and expression-order membership code carries these edits.
 Only these two supported metadata types are editable — Set Tempo (FF51) and time
 signature (FF58); port, end markers and opaque metadata remain preserved source
-data. Time-signature insertion, movement and removal (`editMidiSourceMeters`,
-`:meters`/`:meter`) are documented in
-[the sequencer design](../../docs/design/tui/MUSIC-SEQUENCER.md#imported-time-signature-maps).
+data. Time-signature insertion, movement and removal use `editMidiSourceMeters`
+and `:meters`/`:meter`.
 Positive BPM is rounded to SMF's positive
 24-bit microsecond representation. PPQ seconds follow the edited map, while
 SMPTE seconds derive directly from absolute frame ticks, independently of tempo
@@ -66,7 +65,6 @@ The source editor connects note, expression and tempo experiments to explicit-ou
 audition, source-state-aware pause/resume/seek and immutable arrangement variants.
 Its tests do not establish full MIDI or physical-device support. General metadata,
 overdub and MIDI 2.0 editing remain separate work.
-See [the sequencer design](../../docs/design/tui/MUSIC-SEQUENCER.md).
 
 References: [MIDI Association SMF reference index](https://midi.org/standard-midi-files-specification),
 [JZZ SMF API](https://jazz-soft.net/doc/JZZ/midifile.html) and its pinned 1.9.9

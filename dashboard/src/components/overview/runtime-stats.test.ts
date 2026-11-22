@@ -148,11 +148,10 @@ it('shows each official client account once with its provider-reported usage', a
   expect(view.getByTestId('overview-client-codex_two').textContent).toContain('로그인 미측정')
   expect(post).toHaveBeenCalledWith('/api/v1/runtime/official-client/probe', { runtime_id: 'claude_one.shared' })
 })
-it('omits ordinary HTTP/local and Muse rows without a usage-window producer', async () => {
+it('omits ordinary HTTP/local rows without a usage-window producer', async () => {
   catalogMock.value = { status: 'loaded', data: [
     { provider: 'plain.model', provider_id: 'plain', protocol: 'openai-compatible-http', usage_read_configured: false, models: [] },
     { provider: 'local.model', provider_id: 'local', protocol: 'ollama-http', models: [] },
-    { provider: 'muse.model', provider_id: 'muse', protocol: 'muse-serve', models: [] },
   ] }
   vi.mocked(get).mockResolvedValue(response)
   const view = render(html`<${OverviewRuntimeStats} />`)

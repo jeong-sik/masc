@@ -238,12 +238,11 @@ activation 기록과 마지막으로 끝난 합성 실행을 `/api/v1/skills/evi
 ```mermaid
 flowchart TD
   M["모델이 도구 호출"] --> K{"어느 도구?"}
-  K -->|"keeper_compose_&lt;name&gt; / keeper_composition_run"| CR["합성 실행<br/>plan + descriptor가 동시성 결정<br/>execution=async면 durable broker"]
+  K -->|"keeper_compose_&lt;name&gt;"| CR["합성 실행<br/>plan + descriptor가 동시성 결정<br/>execution=async면 durable broker"]
   K -->|"keeper_skill(exact reference[, file])"| IR["지시 본문/리소스 원문 반환<br/>exact activation 기록"]
   CR --> EV["tool_calls 스토어<br/>노드 행 + composition_run 종결 행"]
   IR --> EV
   EV --> SSE["SSE keeper_tool_call_evidence_committed"]
-  CR -.->|"async"| ST["keeper_composition_status / _result / _cancel 로 조회·회수·취소"]
 ```
 
 - 합성 스킬은 plan이다. 같은 dependency layer에서도 `Ordinary Concurrent` descriptor
@@ -252,11 +251,8 @@ flowchart TD
   `Keeper_prepared_inline_files`가 실제 자원을 준비하면 별도 자원 순서를 쓴다.
   Read끼리의 공유는 허용하고 겹치는 Write는 앞선 소유자 뒤에서 실행한다. 명시적인
   의존성·실패 정책은 그대로 적용된다. 지원 범위는
-  [Read/Edit 자원](guides/PREPARED-EDIT-RESOURCES.md)을 따른다. 재사용 Skill로 고정하지
-  않는 작업별(ad-hoc) 레시피는 `keeper_composition_run`의 `recipe`로
-  검증·실행한다. `execution = "async"`면 기존 durable broker로 흐르고
-  `keeper_composition_status`/`keeper_composition_result`/`keeper_composition_cancel`로
-  조회·회수·취소한다. 접수 결과와 각 노드의 실제 실행 결과는 별도로 확인한다.
+  [Read/Edit 자원](guides/PREPARED-EDIT-RESOURCES.md)을 따른다. `execution = "async"`면
+  기존 durable broker로 흐르며, 접수 결과와 각 노드의 실제 실행 결과는 별도로 확인한다.
 - 모든 실행은 `tool_calls` 스토어(`lib/keeper_tool_call_log.ml`)에 노드 단위로 남고
   (`composition_tool`, `composition_run_id`, `composition_node_id`) SSE
   `keeper_tool_call_evidence_committed`로도 흐른다. 이 SSE에는 노드의 `success`,

@@ -203,12 +203,10 @@ name = "query"
 - 앞선 결과를 쓰거나 작업 순서 자체가 의미 있을 때 `after`를 선언하고, 앞선 출력으로
   인자를 만들 때는 `input` 템플릿에도 그 관계를 적는다. 파일 자원과 승인 권한은 실행기가
   판단한다. 문서나 모델 인자로 자원 범위를 선언할 수 없다. 이 준비 경로는 named inline
-  Skill에 적용되며, 작업용 `keeper_composition_run.recipe`는 일반 도구 스케줄을 쓴다.
+  Skill에 적용된다.
 - input template 의 `kind` 는 `literal` / `output` / `param` / `object` / `array` 다.
 - `execution = "inline"` 은 결과를 그 자리에서 돌려주고, `"async"` 는 durable broker 로
-  넘긴 뒤 `keeper_composition_status` / `keeper_composition_result` / `keeper_composition_cancel` 로
-  조회·회수·취소한다. 재사용 Skill로 고정하지 않는 작업별(ad-hoc) 레시피는
-  `keeper_composition_run` 의 `recipe` 로 검증·실행한다.
+  넘겨 비동기로 실행한다.
 - `defer_loading = true` 는 Agent Core 의 초기 호출 스키마에서 제외할 수 있는 선언이다.
   사용 이력이나 아직 소비되지 않은 로드 영수증이 있으면 이미 로드된 상태로 시작할 수 있다.
   `keeper_tool_search` 목록은 이름만 보여 주며, 정확한 이름을 넘기면 같은 Agent 의 다음
@@ -241,8 +239,7 @@ Instruction 은 검색 결과의 `reference.identity` 를 `keeper_skill` 의 `id
 스킬을 읽는다). revision 을 고정할 때는 `reference.content_revision` 을 선택 인자
 `content_revision` 으로 넘긴다. `reference` 라는 인자는 없다.
 inline Composition 은 호출 응답에서 노드별 결과를 확인한다. async 응답은 제출 영수증이며
-완료 증거가 아니다. 완료 알림을 받으면 영수증의 `request_id` 를 `keeper_composition_status` 나
-`keeper_composition_result` 에 넘겨 완료 상태와 노드별 결과를 확인한다. 해당 스키마가 아직 없으면 먼저 로드한다.
+완료 증거가 아니다. 완료 알림과 영수증의 `request_id` 로 완료 상태와 노드별 결과를 확인한다.
 `defer_loading`, 비동기 실행, 노드의 `Deferred` 결과는 서로 다른 상태다.
 
 ### 합성 본문은 Keeper 에게 안 보인다

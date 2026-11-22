@@ -8,7 +8,6 @@
     the installed clients' files:
     - Codex: [auth.json] [tokens.id_token], OpenID claim [email]
     - Claude Code: [.claude.json] [oauthAccount.emailAddress]
-    - Muse Code: [.config/muse/auth.json] [providers.meta.user_email]
     - Antigravity: the email {!Runtime_antigravity_oauth_credential.account_email}
       reads, the same value that selects the account generation: the agy
       1.2.x [id_token]'s OpenID claim [email] or the agy 1.5.x
@@ -67,7 +66,7 @@ val observe_providers :
 
 val of_provider : Runtime_schema.provider -> (t, missing) result option
 (** Reads, now, the login file of the account a declared provider runs on. A
-    Codex, Claude Code or Muse Code provider runs on its [account-home], or
+    Codex or Claude Code provider runs on its [account-home], or
     without one on the home it inherits from this server's environment; the
     file is found there the way that client finds it. An Antigravity provider
     has an account only with a file credential. [None] for a provider with no

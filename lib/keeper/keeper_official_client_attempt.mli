@@ -1,6 +1,6 @@
 (** One official-client candidate attempt as the lane walk receives it.
 
-    The four official-client adapters (Antigravity, Claude Code, Codex, Muse)
+    The official-client adapters (Antigravity, Claude Code, Codex, ACP)
     return this one outcome and record into this one effect cell. What makes a
     client's reading an effect stays in its adapter; how readings combine is
     decided here. *)

@@ -1367,7 +1367,7 @@ export type DashboardOfficialClientRecoveryFailure =
   | 'vendor_session_full_no_activity'
   | 'vendor_session_full_after_activity'
 
-export type DashboardOfficialClientKind = 'codex' | 'claude_code' | 'antigravity' | 'muse'
+export type DashboardOfficialClientKind = 'codex' | 'claude_code' | 'antigravity'
 
 export interface DashboardOfficialClientSettlement {
   session_id: string
@@ -1518,7 +1518,6 @@ const OFFICIAL_CLIENT_KINDS = new Set<DashboardOfficialClientKind>([
   'codex',
   'claude_code',
   'antigravity',
-  'muse',
 ])
 
 const OFFICIAL_CLIENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

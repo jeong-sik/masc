@@ -121,7 +121,7 @@ let workspace =
          the text of its routes. *)
     ; no_reference Runtime_account_home_layout.accounts_dir
       (* Operator and Keeper vendor CLI homes under [.masc/official-clients/]
-         (codex, claude, muse, antigravity, codex-workspaces) hold logins,
+         (codex, claude, antigravity, codex-workspaces) hold logins,
          caches, symlinks, and vendor logs that MASC never resolves blobs from.
          MASC's own official-client outbox and consumed tool results sit under
          [keepers/], which remains in scope. *)

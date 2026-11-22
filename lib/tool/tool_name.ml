@@ -159,7 +159,6 @@ module Operator_name = struct
   type t =
     | Operator_action
     | Operator_board_attention_quarantine_requeue
-    | Operator_composition_resolution
     | Operator_confirm
     | Operator_digest
     | Operator_judgment_write
@@ -172,7 +171,6 @@ module Operator_name = struct
     | Operator_board_attention_quarantine_requeue ->
       "masc_operator_board_attention_quarantine_requeue"
     | Operator_confirm -> "masc_operator_confirm"
-    | Operator_composition_resolution -> "masc_operator_composition_resolution"
     | Operator_digest -> "masc_operator_digest"
     | Operator_judgment_write -> "masc_operator_judgment_write"
     | Operator_snapshot -> "masc_operator_snapshot"

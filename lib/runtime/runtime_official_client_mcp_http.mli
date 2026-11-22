@@ -72,8 +72,8 @@ val client_phase : t -> Runtime_official_client_mcp.phase
 
 val endpoint : t -> endpoint
 (** The single source of the bridge's URL and header. {!mcp_config_json}
-    builds from it, and so does a client that takes its MCP servers as typed
-    values (Muse Code's [session/start]). *)
+    builds from it, and so does any client that takes its MCP servers as typed
+    values. *)
 
 (** Remote-MCP configuration for Antigravity CLI: [url] and [headers] as
     measured against 1.1.11. The returned JSON carries {!endpoint}, so it

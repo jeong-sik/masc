@@ -2,7 +2,7 @@
     the wire, measured from the bytes written: their count and SHA-256, and
     where the context-bearing values sit among them.
 
-    Codex and Muse write compact JSON lines to stdin. Claude Code writes a
+    Codex writes compact JSON lines to stdin. Claude Code writes a
     stream-json line to stdin and a system prompt file. Antigravity writes the
     prompt itself to stdin. A receipt is built from the exact bytes a runtime
     writes and reaches its observer only after the write completed. It is
@@ -71,7 +71,7 @@ val raw : string -> t
 (** A write whose bytes are the given text: one [Whole_write] slot. *)
 
 val turn_input : selection
-(** The selection Codex, Muse and Claude Code share for a turn's input list:
+(** The selection Codex and Claude Code share for a turn's input list:
     each [{"type":"text"}] element's [text] is [Turn_text] of the element's
     position. Other elements are carried. *)
 

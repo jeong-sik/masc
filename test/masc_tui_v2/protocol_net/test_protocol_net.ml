@@ -2412,6 +2412,68 @@ let test_efficiency_null_cache_hit_pct_preserved () =
        (Wire_runtime.decode_efficiency_month ~observed_at:t0 bad_window_kind)
       : string)
 
+let test_p1_7_wire_fleet_offline_vs_failing_ssot () =
+  let mk ~name ~health ~paused ~keepalive_running : Wire_fleet.keeper_summary =
+    {
+      name;
+      group = Some "MASC Core";
+      company = "MASC Core";
+      health;
+      paused;
+      keepalive_running;
+      activation_mode = Wire_fleet.Activation_autonomous;
+      runtime_id = "sonnet";
+      model_id = Some "claude-sonnet-4";
+      current_task_id = None;
+      context_ratio = Observed.unreported;
+      total_turns = Observed.unreported;
+      total_tokens = Observed.unreported;
+      cost_24h_usd = Observed.unreported;
+      last_turn_at_unix = None;
+      active_turn = None;
+      activity_sparkline_24h = [];
+    }
+  in
+  let keepers =
+    [
+      mk ~name:"k-working" ~health:Wire_fleet.Keeper_working ~paused:false
+        ~keepalive_running:true;
+      mk ~name:"k-healthy" ~health:Wire_fleet.Keeper_healthy ~paused:false
+        ~keepalive_running:true;
+      mk ~name:"k-degraded" ~health:Wire_fleet.Keeper_degraded ~paused:false
+        ~keepalive_running:true;
+      (* Live 8935 bug: failing keeper with keepalive_running=true MUST NOT inflate running_count *)
+      mk ~name:"k-failing" ~health:Wire_fleet.Keeper_failing ~paused:false
+        ~keepalive_running:true;
+      (* Ordinary stopped/offline keepers MUST NOT inflate failing_count or running_count *)
+      mk ~name:"k-offline-1" ~health:Wire_fleet.Keeper_offline ~paused:false
+        ~keepalive_running:false;
+      mk ~name:"k-offline-2" ~health:Wire_fleet.Keeper_offline ~paused:false
+        ~keepalive_running:true;
+      mk ~name:"k-paused" ~health:Wire_fleet.Keeper_paused ~paused:true
+        ~keepalive_running:false;
+      (* Verifier #243 finding 4: paused=true must match Fleet_store.fleet_health_counts precedence
+         without double-counting into working_count or failing/offline into paused_count. *)
+      mk ~name:"k-work-paused" ~health:Wire_fleet.Keeper_working ~paused:true
+        ~keepalive_running:true;
+      mk ~name:"k-fail-paused" ~health:Wire_fleet.Keeper_failing ~paused:true
+        ~keepalive_running:false;
+      mk ~name:"k-off-paused" ~health:Wire_fleet.Keeper_offline ~paused:true
+        ~keepalive_running:false;
+    ]
+  in
+  let groups = Wire_fleet.group_by_company keepers in
+  Alcotest.(check int) "1 company group" 1 (List.length groups);
+  let cg = List.hd groups in
+  Alcotest.(check int) "running_count excludes failing/offline/paused" 3
+    cg.running_count;
+  Alcotest.(check int) "failing_count counts ONLY Keeper_failing (including paused=true)" 2
+    cg.failing_count;
+  Alcotest.(check int) "paused_count excludes failing & offline (no double count)" 2
+    cg.paused_count;
+  Alcotest.(check int) "working_count excludes paused working keeper (<= running_count)" 1
+    cg.working_count
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -2435,6 +2497,8 @@ let () =
             test_v25_data_pipeline_decoders;
           Alcotest.test_case "efficiency_null_cache_hit_pct_and_window_kind" `Quick
             test_efficiency_null_cache_hit_pct_preserved;
+          Alcotest.test_case "P1-7 wire_fleet offline vs failing SSOT" `Quick
+            test_p1_7_wire_fleet_offline_vs_failing_ssot;
         ] );
       ( "net"
       , [

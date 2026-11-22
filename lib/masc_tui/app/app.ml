@@ -141,6 +141,41 @@ let is_ctrl_c (ev : Input_decoder.key_event) =
   | Input_decoder.Function _ ->
       false
 
+let default_mouse_capture = false
+
+let mouse_capture_seq enabled =
+  if enabled then "\x1b[?1000h\x1b[?1006h"
+  else "\x1b[?1000l\x1b[?1002l\x1b[?1006l"
+
+let is_mouse_toggle_key (kev : Input_decoder.key_event) =
+  (not kev.mods.ctrl) && (not kev.mods.alt) && (not kev.mods.shift)
+  &&
+  match kev.key with
+  | Input_decoder.Char "m" -> true
+  | Input_decoder.Char _
+  | Input_decoder.Enter
+  | Input_decoder.Tab
+  | Input_decoder.Backspace
+  | Input_decoder.Escape
+  | Input_decoder.Delete
+  | Input_decoder.Insert
+  | Input_decoder.Up
+  | Input_decoder.Down
+  | Input_decoder.Left
+  | Input_decoder.Right
+  | Input_decoder.Home
+  | Input_decoder.End
+  | Input_decoder.Page_up
+  | Input_decoder.Page_down
+  | Input_decoder.Function _ ->
+      false
+
+let should_toggle_mouse_capture (m : Model.t) (kev : Input_decoder.key_event) =
+  is_mouse_toggle_key kev
+  && (not (Model.is_too_small_viewport m.viewport))
+  && Option.is_none m.nav.overlay
+  && not (Model.is_text_capture_active m)
+
 let should_emit_tick ~now_ns ~last_voice_tick_ns ~toast_expires_ns
     ~voice_recording =
   let toast_expired =
@@ -373,14 +408,27 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
         Eio.Switch.on_release sw restore_raw;
 
         let caps = detect_capabilities () in
+        (* Keep mouse tracking OFF by default so native terminal drag-select and
+           copy ALWAYS work cleanly; operator may opt in/out at runtime via [m]. *)
+        let mouse_capture = ref default_mouse_capture in
+        let set_mouse_capture enabled =
+          mouse_capture := enabled;
+          Terminal_out.write (mouse_capture_seq enabled);
+          Terminal_out.flush ()
+        in
+        let write_enter_screen () =
+          Terminal_out.write
+            (Terminal_out.enter_screen_seq ~kitty_keyboard:caps.kitty_keyboard
+               ~mouse:false ~bracketed_paste:true);
+          if !mouse_capture then
+            Terminal_out.write (mouse_capture_seq true);
+          Terminal_out.flush ()
+        in
         Terminal_out.set_on_write_lost (fun () ->
             Wake_bell.ring bell Wake_bell.Ui_bus);
         Eio.Switch.on_release sw (fun () ->
             Terminal_out.set_on_write_lost (fun () -> ()));
-        Terminal_out.write
-          (Terminal_out.enter_screen_seq ~kitty_keyboard:caps.kitty_keyboard
-             ~mouse:true ~bracketed_paste:true);
-        Terminal_out.flush ();
+        write_enter_screen ();
         Terminal_out.install_switch_teardown ~sw
           ~kitty_keyboard:caps.kitty_keyboard ();
 
@@ -441,11 +489,7 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
               (fun () ->
                 Signals.clear_interrupts signals;
                 enter_raw ();
-                Terminal_out.write
-                  (Terminal_out.enter_screen_seq
-                     ~kitty_keyboard:caps.kitty_keyboard ~mouse:true
-                     ~bracketed_paste:true);
-                Terminal_out.flush ();
+                write_enter_screen ();
                 Presenter.invalidate presenter;
                 Card.Cache.clear card_cache;
                 input_handle :=
@@ -476,11 +520,51 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
               executor);
 
         let apply_msg ~now msg =
-          let next_model, cmds = Update.step ~now !model msg in
-          model := next_model;
-          scheduler :=
-            Frame_scheduler.mark_dirty ~pace:(msg_pace msg) !scheduler;
-          if cmds <> [] then Cmd_executor.execute_all executor cmds
+          let toggle_mouse =
+            match msg with
+            | Msg.Key_event kev -> should_toggle_mouse_capture !model kev
+            | Msg.Boot
+            | Msg.Paste_text _
+            | Msg.Mouse_event _
+            | Msg.Resize _
+            | Msg.Tick _
+            | Msg.Server_health_result _
+            | Msg.Server_start_result _
+            | Msg.Http_reply _
+            | Msg.Sse_event _
+            | Msg.Sse_freshness _
+            | Msg.Chat_stream_chunk _
+            | Msg.Chat_stream_done _
+            | Msg.Voice_event _
+            | Msg.Stream_gap _ ->
+                false
+          in
+          if toggle_mouse then begin
+            let next_enabled = not !mouse_capture in
+            set_mouse_capture next_enabled;
+            let notice =
+              if next_enabled then
+                Say.make
+                  ~ko:"마우스 휠 모드 켜짐 ([m]으로 드래그 선택 복귀)"
+                  ~en:"Mouse wheel mode ON (press [m] for native drag-select)"
+              else
+                Say.make
+                  ~ko:"네이티브 드래그 선택 모드 (마우스 캡처 꺼짐)"
+                  ~en:"Native terminal drag-select ON (mouse capture OFF)"
+            in
+            model :=
+              Model.with_toast ~now ~level:Model.Toast_info notice !model;
+            scheduler :=
+              Frame_scheduler.mark_dirty
+                ~pace:Frame_scheduler.Pace_interactive !scheduler
+          end
+          else begin
+            let next_model, cmds = Update.step ~now !model msg in
+            model := next_model;
+            scheduler :=
+              Frame_scheduler.mark_dirty ~pace:(msg_pace msg) !scheduler;
+            if cmds <> [] then Cmd_executor.execute_all executor cmds
+          end
         in
 
         let last_resize_gen = ref (Signals.resize_generation signals) in

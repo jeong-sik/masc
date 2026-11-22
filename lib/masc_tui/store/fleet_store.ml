@@ -148,8 +148,60 @@ let keeper_live_state (k : Wire_fleet.keeper_summary) =
       Health.Degraded { reason = Say.make ~ko:"성능 저하" ~en:"Degraded" }
   | Wire_fleet.Keeper_failing ->
       Health.Down { reason = Say.make ~ko:"실행 실패" ~en:"Failing" }
-  | Wire_fleet.Keeper_offline ->
-      Health.Down { reason = Say.make ~ko:"오프라인" ~en:"Offline" }
+  | Wire_fleet.Keeper_offline -> Health.Idle
+
+type fleet_health_counts = {
+  total : int;
+  active : int;
+  working : int;
+  healthy : int;
+  degraded : int;
+  failing : int;
+  paused : int;
+  offline : int;
+}
+
+let fleet_health_counts (ks : Wire_fleet.keeper_summary list) :
+    fleet_health_counts =
+  List.fold_left
+    (fun acc (k : Wire_fleet.keeper_summary) ->
+      let total = acc.total + 1 in
+      match k.health with
+      | Wire_fleet.Keeper_failing ->
+          { acc with total; failing = acc.failing + 1 }
+      | Wire_fleet.Keeper_offline ->
+          { acc with total; offline = acc.offline + 1 }
+      | Wire_fleet.Keeper_paused ->
+          { acc with total; paused = acc.paused + 1 }
+      | Wire_fleet.Keeper_healthy
+      | Wire_fleet.Keeper_working
+      | Wire_fleet.Keeper_booting
+      | Wire_fleet.Keeper_idle
+      | Wire_fleet.Keeper_degraded
+      | Wire_fleet.Keeper_recovering
+        when k.paused ->
+          { acc with total; paused = acc.paused + 1 }
+      | Wire_fleet.Keeper_working | Wire_fleet.Keeper_booting ->
+          { acc with total; active = acc.active + 1; working = acc.working + 1 }
+      | Wire_fleet.Keeper_degraded | Wire_fleet.Keeper_recovering ->
+          { acc with total; active = acc.active + 1; degraded = acc.degraded + 1 }
+      | Wire_fleet.Keeper_healthy ->
+          { acc with total; active = acc.active + 1; healthy = acc.healthy + 1 }
+      | Wire_fleet.Keeper_idle ->
+          if k.keepalive_running then
+            { acc with total; active = acc.active + 1; healthy = acc.healthy + 1 }
+          else { acc with total; offline = acc.offline + 1 })
+    {
+      total = 0;
+      active = 0;
+      working = 0;
+      healthy = 0;
+      degraded = 0;
+      failing = 0;
+      paused = 0;
+      offline = 0;
+    }
+    ks
 
 let contains_ci ~needle haystack =
   let n_len = String.length needle in

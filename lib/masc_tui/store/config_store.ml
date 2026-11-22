@@ -1027,7 +1027,40 @@ let string_of_staged_op = function
   | Wire_config.Set_string_array { values; _ } -> String.concat ", " values
   | Wire_config.Remove_key _ -> ""
 
+let new_keeper_name_field_key = "__masc_new_keeper_name__"
+
 let is_editing_field t = Option.is_some t.editing_field_key
+
+let is_editing_new_keeper_name t =
+  match t.editing_field_key with
+  | Some k -> String.equal k new_keeper_name_field_key
+  | None -> false
+
+let begin_edit_new_keeper_name t =
+  {
+    t with
+    editing_field_key = Some new_keeper_name_field_key;
+    editing_buffer = t.new_keeper_name;
+  }
+
+let stage_remove_selected t =
+  match selected_field t with
+  | None -> Error "No configuration field selected"
+  | Some f when not f.writable ->
+      Error (Printf.sprintf "Field %s is read-only" f.full_key)
+  | Some f -> (
+      match String_map.find_opt f.full_key t.dirty_fields with
+      | Some (Wire_config.Remove_key _) ->
+          Ok (unstage_patch ~full_key:f.full_key t)
+      | Some
+          ( Wire_config.Set_scalar _
+          | Wire_config.Set_int _
+          | Wire_config.Set_float _
+          | Wire_config.Set_bool _
+          | Wire_config.Set_string_array _ )
+      | None ->
+          let op = Wire_config.Remove_key { table = f.table; key = f.key } in
+          Ok (stage_patch ~full_key:f.full_key op t))
 
 let begin_edit_selected t =
   match selected_field t with
@@ -1130,9 +1163,30 @@ let parse_strict_bool s =
   | "false" -> Ok false
   | other -> Error (Printf.sprintf "Expected true or false, got %S" other)
 
+let is_valid_keeper_name s =
+  let len = String.length s in
+  len > 0 && len <= 64
+  &&
+  let rec check i =
+    if i >= len then true
+    else
+      match s.[i] with
+      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' -> check (i + 1)
+      | _ -> false
+  in
+  check 0
+
 let commit_edit_field t =
   match t.editing_field_key with
   | None -> Error "Not currently editing a field"
+  | Some key when String.equal key new_keeper_name_field_key ->
+      let trimmed = String.trim t.editing_buffer in
+      if not (is_valid_keeper_name trimmed) then
+        Error
+          "Keeper name must be 1..64 ASCII letters, digits, '-' or '_'"
+      else
+        let updated = set_new_keeper_name trimmed t in
+        Ok { updated with editing_field_key = None; editing_buffer = "" }
   | Some key -> (
       let all_fields =
         match Observed.to_option t.schema with

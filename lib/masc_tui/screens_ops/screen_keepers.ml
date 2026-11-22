@@ -32,27 +32,45 @@ type fleet_counts = {
   healthy : int;
   failing : int;
   paused_idle : int;
+  offline : int;
 }
 
+let keeper_row_status ~has_attention (k : Wire_fleet.keeper_summary) =
+  if has_attention then Ops_common.keeper_live_status ~has_attention k
+  else
+    match k.health with
+    | Wire_fleet.Keeper_offline ->
+        ( Glyph.Live_idle
+        , Theme.Status_historical
+        , Say.make ~ko:"오프라인" ~en:"Offline" )
+    | Wire_fleet.Keeper_healthy
+    | Wire_fleet.Keeper_working
+    | Wire_fleet.Keeper_idle
+    | Wire_fleet.Keeper_degraded
+    | Wire_fleet.Keeper_recovering
+    | Wire_fleet.Keeper_failing
+    | Wire_fleet.Keeper_paused
+    | Wire_fleet.Keeper_booting ->
+        Ops_common.keeper_live_status ~has_attention:false k
+
 let count_fleet ~(model : Model.t) (ks : Wire_fleet.keeper_summary list) =
-  List.fold_left
-    (fun acc (k : Wire_fleet.keeper_summary) ->
-      if Ops_common.keeper_has_attention model.attention k.name then
-        { acc with attn = acc.attn + 1 }
-      else
-        match k.health with
-        | Wire_fleet.Keeper_failing | Wire_fleet.Keeper_offline ->
-            { acc with failing = acc.failing + 1 }
-        | Wire_fleet.Keeper_working
-        | Wire_fleet.Keeper_booting
-        | Wire_fleet.Keeper_degraded
-        | Wire_fleet.Keeper_recovering ->
-            { acc with working = acc.working + 1 }
-        | Wire_fleet.Keeper_healthy -> { acc with healthy = acc.healthy + 1 }
-        | Wire_fleet.Keeper_paused | Wire_fleet.Keeper_idle ->
-            { acc with paused_idle = acc.paused_idle + 1 })
-    { attn = 0; working = 0; healthy = 0; failing = 0; paused_idle = 0 }
-    ks
+  let attn_n, non_attn =
+    List.fold_left
+      (fun (a, rest) (k : Wire_fleet.keeper_summary) ->
+        if Ops_common.keeper_has_attention model.attention k.name then
+          (a + 1, rest)
+        else (a, k :: rest))
+      (0, []) ks
+  in
+  let hc = Fleet_store.fleet_health_counts non_attn in
+  {
+    attn = attn_n;
+    working = hc.working + hc.degraded;
+    healthy = hc.healthy;
+    failing = hc.failing;
+    paused_idle = hc.paused;
+    offline = hc.offline;
+  }
 
 let company_groups_for_model ~(model : Model.t) =
   let attn_items = attention_items_for_grouping model.attention in
@@ -88,7 +106,7 @@ let context_ratio_cell ~lang (obs : float Observed.t) : Table.cell_content =
 let keeper_table_row ~(model : Model.t) ~(theme : Theme.t) ~indent_name
     (k : Wire_fleet.keeper_summary) : Table.row =
   let has_attn = Ops_common.keeper_has_attention model.attention k.name in
-  let glyph, tone, _ = Ops_common.keeper_live_status ~has_attention:has_attn k in
+  let glyph, tone, _ = keeper_row_status ~has_attention:has_attn k in
   let infra_txt, infra_tone = Ops_common.keeper_sandbox_tag ~model k.name in
   let trail_n = Ops_common.keeper_incident_count model.incidents k.name in
   let trail_cell =
@@ -280,6 +298,7 @@ let format_fleet_counts (c : fleet_counts) =
   add Glyph.Live_working c.working;
   add Glyph.Live_healthy c.healthy;
   add Glyph.Live_paused c.paused_idle;
+  add Glyph.Live_idle c.offline;
   Buffer.contents buf
 
 let format_company_infra_mix (grp : Wire_fleet.company_group) =
@@ -341,6 +360,7 @@ let draw_semantic_fleet_counts grid ~clip ~x ~y ~(theme : Theme.t) ~bg
       (Glyph.Live_working, c.working, Theme.Status_active);
       (Glyph.Live_healthy, c.healthy, Theme.Status_ok);
       (Glyph.Live_paused, c.paused_idle, Theme.Status_historical);
+      (Glyph.Live_idle, c.offline, Theme.Status_historical);
     ]
     |> List.filter (fun (_, n, _) -> n > 0)
   in
@@ -570,7 +590,7 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
           Cell_grid.fill_rect ~clip:rect grid ~rect:row_rect ~style:base_st ();
           let has_attn = Ops_common.keeper_has_attention model.attention k.name in
           let glyph, tone, _ =
-            Ops_common.keeper_live_status ~has_attention:has_attn k
+            keeper_row_status ~has_attention:has_attn k
           in
           (* Calm v2.5 selection: Left_rail (▎) in accent Bold, NEVER whitewash semantic glyph! *)
           if is_sel then
@@ -778,7 +798,7 @@ let render_full_width_roster grid ~(rect : Rect.t) ~(theme : Theme.t)
               0 ks
           in
           let strip =
-            Printf.sprintf "%s %s %d  %s  %s %s %d  %s  %s %s %d  %s  %s %d %s"
+            Printf.sprintf "%s %s %d  %s  %s %s %d  %s  %s %s %d  %s  %s %s %d  %s  %s %d %s"
               (Glyph.to_utf8 Glyph.Action_required)
               (Ops_common.say model ~ko:"즉시 조치/장애" ~en:"Action/Fault")
               (counts.attn + counts.failing)
@@ -788,8 +808,12 @@ let render_full_width_roster grid ~(rect : Rect.t) ~(theme : Theme.t)
               counts.working
               (Glyph.to_utf8 Glyph.Separator_dot)
               (Glyph.to_utf8 Glyph.Live_healthy)
-              (Ops_common.say model ~ko:"정상/유휴" ~en:"Healthy/Idle")
-              (counts.healthy + counts.paused_idle)
+              (Ops_common.say model ~ko:"정상" ~en:"Healthy")
+              counts.healthy
+              (Glyph.to_utf8 Glyph.Separator_dot)
+              (Glyph.to_utf8 Glyph.Live_idle)
+              (Ops_common.say model ~ko:"정지/대기" ~en:"Offline/Paused")
+              (counts.offline + counts.paused_idle)
               (Glyph.to_utf8 Glyph.Separator_dot)
               (Glyph.to_utf8 Glyph.Recovered)
               total_trail
@@ -846,6 +870,22 @@ let render_full_width_roster grid ~(rect : Rect.t) ~(theme : Theme.t)
                     acc)
               0.0 samples
           in
+          let avg_obs =
+            let sum, cnt =
+              Array.fold_left
+                (fun (s, c) sample ->
+                  match sample with
+                  | Chart.Series.Value v when Float.is_finite v -> (s +. v, c + 1)
+                  | Chart.Series.Zero -> (s, c + 1)
+                  | Chart.Series.Value _ | Chart.Series.Unread | Chart.Series.Absent ->
+                      (s, c))
+                (0.0, 0) samples
+            in
+            if cnt > 0 then
+              Observed.value ~observed_at:Clock.Mono.zero
+                (sum /. float_of_int cnt)
+            else Observed.absent
+          in
           let spec : Chart.Spec.t =
             {
               title =
@@ -861,7 +901,7 @@ let render_full_width_roster grid ~(rect : Rect.t) ~(theme : Theme.t)
                         samples;
                         current = latest;
                         peak = Observed.value ~observed_at:Clock.Mono.zero peak_v;
-                        avg = Observed.unreported;
+                        avg = avg_obs;
                         delta_pct = None;
                       };
                     scale = Chart.Scale.Auto_ceil { floor = 0.0; nice_step = true };
@@ -981,6 +1021,7 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                      ~en:"Select a keeper from the fleet roster"))
       | _ -> ()
     else
+      let hc = Fleet_store.fleet_health_counts all_ks in
       let counts = count_fleet ~model all_ks in
       let roster_spec : Card.spec =
         {
@@ -1002,9 +1043,7 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                     (if counts.attn + counts.failing > 0 then
                        Glyph.Action_required
                      else Glyph.Live_healthy);
-                text =
-                  Printf.sprintf "%d/%d" (counts.working + counts.healthy)
-                    (List.length all_ks);
+                text = Printf.sprintf "%d/%d" hc.active hc.total;
                 tone =
                   Some
                     (if counts.attn + counts.failing > 0 then

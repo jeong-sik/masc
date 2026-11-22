@@ -855,7 +855,15 @@ let draw_wiki_preview ~target_slug ~grid ~cache ~(rect : Rect.t)
   let inner =
     Card.draw ~cache grid ~rect ~theme
       (H.card_spec ?badge ~focused
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[Enter] 전체보기" ~en:"[Enter] Dive"))
+         ~hotkey:
+           (Say.resolve lang
+              (match target_slug with
+               | Some _ ->
+                   Say.make ~ko:"[e] 편집 · [Ctrl+E] $EDITOR · [Esc] 뒤로"
+                     ~en:"[e] Edit · [Ctrl+E] $EDITOR · [Esc] Back"
+               | None ->
+                   Say.make ~ko:"[Enter] 전체보기 · [e] 편집"
+                     ~en:"[Enter] Dive · [e] Edit"))
          title)
   in
   if Rect.is_empty inner then ()
@@ -1698,7 +1706,7 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
                 (H.put_link ~grid ~clip:content ~x:content.x ~y:!y
                    ~max_w:content.w ~style:(H.accent_style ~theme ()) ~uri
                    (Printf.sprintf "[o] %s (%s)"
-                      (Say.resolve lang (Say.make ~ko:"열기" ~en:"Open"))
+                      (Say.resolve lang (Say.make ~ko:"뷰어 열기" ~en:"Open Viewer"))
                       (H.short_hash ~len:12 a.sha256)))
             end
       end
@@ -1792,6 +1800,7 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   let inner =
     Card.draw ~cache grid ~rect ~theme
       (H.card_spec ?badge ~focused
+         ~hotkey:(Say.resolve lang (Say.make ~ko:"[a] 사서 복구 · [A] 상세" ~en:"[a] Recover · [A] Act"))
          (Say.resolve lang
             (Say.make ~ko:"월드 MVCC 메모리 · 경합 충돌"
                ~en:"World MVCC Memory & Conflicts")))
@@ -2982,8 +2991,8 @@ let render_dive_artifact ~sha256 ~(model : Model.t) ~cache ~(rect : Rect.t)
                 ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
                 ~uri:("masc://artifact/" ^ a.sha256)
                 (Say.resolve lang
-                   (Say.make ~ko:"[o] 브라우저에서 아티팩트 열기"
-                      ~en:"[o] Open artifact in browser")));
+                   (Say.make ~ko:"[o] 아티팩트 뷰어 열기"
+                      ~en:"[o] Open artifact viewer")));
            incr y
          end);
     if artifacts <> [] && !y + 1 < bottom then begin

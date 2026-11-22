@@ -1860,10 +1860,14 @@ let test_board_signal_pagination_and_full_succession_chains () =
   (* 2. End-to-end payload: interleaved noise pagination + full-board succession chains *)
   with_temp_workspace (fun config ->
     Eio_main.run (fun _env ->
+      let reset_board () =
+        Board_dispatch.reset_for_test ();
+        Board.reset_global_for_test ()
+      in
       Fun.protect
-        ~finally:Board_dispatch.reset_for_test
+        ~finally:reset_board
         (fun () ->
-           Board_dispatch.reset_for_test ();
+           reset_board ();
            (match
               Board_dispatch.init_jsonl
                 ~base_path:config.Workspace.base_path
@@ -2458,10 +2462,14 @@ let test_track_a_scorecard_and_capabilities () =
       ];
     (* Non-light mode observes recent unvoted board posts via Board_dispatch.Recent *)
     Eio_main.run (fun _env ->
+      let reset_board () =
+        Board_dispatch.reset_for_test ();
+        Board.reset_global_for_test ()
+      in
       Fun.protect
-        ~finally:Board_dispatch.reset_for_test
+        ~finally:reset_board
         (fun () ->
-           Board_dispatch.reset_for_test ();
+           reset_board ();
            (match
               Board_dispatch.init_jsonl
                 ~base_path:config.Workspace.base_path

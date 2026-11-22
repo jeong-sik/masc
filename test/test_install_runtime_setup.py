@@ -1218,7 +1218,7 @@ class NamedCatalogSources(unittest.TestCase):
          'origin': 'runtime_config', 'setup_support': 'existing_binding',
          'verification_support': 'response_tool', 'endpoint': 'https://example.test/v1',
          'api_key_env': 'ALREADY_API_KEY'},
-        {'id': 'wrongwire', 'display_name': 'wrongwire', 'protocol': 'messages-http',
+        {'id': 'wrongwire', 'display_name': 'wrongwire', 'protocol': 'unknown-http',
          'origin': 'agent_core_catalog', 'setup_support': 'new_connection',
          'verification_support': 'response_tool', 'endpoint': 'https://example.test',
          'api_key_env': 'EXAMPLE_API_KEY'},
@@ -1242,6 +1242,33 @@ class NamedCatalogSources(unittest.TestCase):
         self.assertEqual(source['api_key_env'], 'OPENROUTER_API_KEY')
         self.assertEqual(source['credential_kind'], 'env')
         self.assertEqual(source['rows'], [])
+
+    def test_messages_gemini_vertex_and_acp_protocols_are_supported_choices(self):
+        inventory = {'runtimes': [], 'integrations': [
+            {'id': 'kimi_coding_anthropic', 'display_name': 'Kimi Coding', 'protocol': 'messages-http',
+             'origin': 'agent_core_catalog', 'setup_support': 'new_connection',
+             'verification_support': 'response_tool', 'endpoint': 'https://api.kimi.com/coding',
+             'api_key_env': 'KIMI_API_KEY', 'provider_kind': 'kimi'},
+            {'id': 'gemini', 'display_name': 'Gemini', 'protocol': 'gemini-http',
+             'origin': 'agent_core_catalog', 'setup_support': 'new_connection',
+             'verification_support': 'response_tool', 'endpoint': 'https://generativelanguage.googleapis.com/v1beta',
+             'api_key_env': 'GEMINI_API_KEY', 'provider_kind': 'gemini'},
+            {'id': 'vertex_gemini', 'display_name': 'Vertex AI Gemini', 'protocol': 'vertex-gemini',
+             'origin': 'masc_integration', 'setup_support': 'new_connection',
+             'verification_support': 'response_tool', 'endpoint': 'https://us-central1-aiplatform.googleapis.com',
+             'api_key_env': 'GOOGLE_CLOUD_PROJECT'},
+        ]}
+        sources = self.catalog_sources(inventory)
+        by_id = {source['provider_id']: source['choice'] for source in sources}
+        self.assertEqual(by_id['kimi_coding_anthropic'], 'messages')
+        self.assertEqual(by_id['gemini'], 'gemini')
+        self.assertEqual(SETUP.choice_for_protocol('acp', 'vibe_acp', 'vibe-acp'), 'mistral_vibe')
+        self.assertEqual(SETUP.choice_for_protocol('acp', 'kimi_acp', 'kimi'), 'kimi_acp')
+        self.assertEqual(SETUP.choice_for_protocol('acp', 'antigravity_acp', 'agy'), 'antigravity_acp')
+        self.assertEqual(SETUP.choice_for_protocol('vertex-gemini', 'vertex_gemini'), 'vertex_gemini')
+        self.assertEqual(SETUP.OFFICIAL_CLIENTS['mistral_vibe'], 'mistral-vibe')
+        self.assertEqual(SETUP.OFFICIAL_CLIENTS['kimi_acp'], 'kimi-code')
+        self.assertEqual(SETUP.OFFICIAL_CLIENTS['antigravity_acp'], 'antigravity')
 
     def test_an_older_binary_without_integrations_yields_no_catalog_sources(self):
         self.assertEqual(self.catalog_sources({'runtimes': []}), [])

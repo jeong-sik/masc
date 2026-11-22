@@ -261,6 +261,10 @@ export type KeeperMemoryWriter =
       state: KeeperMemoryWriterState
       level: KeeperMemoryWriterLevel
       alarms: KeeperMemoryWriterAlarm[]
+      stop?: string
+      available_acts?: string[]
+      pending_molt?: boolean
+      pending_molt_categories?: string[]
     }
   }
 
@@ -805,7 +809,26 @@ function decodeKeeperMemoryWriter(raw: unknown): KeeperMemoryWriter | null {
     alarms.push(alarm)
   }
   if (state === null || level === null) return null
-  return { kind: 'writer', row: { state, level, alarms } }
+  const stop = typeof raw.row.stop === 'string' && raw.row.stop.trim() !== '' ? raw.row.stop : undefined
+  const available_acts = Array.isArray(raw.row.available_acts)
+    ? raw.row.available_acts.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+    : undefined
+  const pending_molt = raw.row.pending_molt !== undefined && raw.row.pending_molt !== null ? true : undefined
+  const pending_molt_categories = Array.isArray(raw.row.pending_molt_categories)
+    ? raw.row.pending_molt_categories.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+    : undefined
+  return {
+    kind: 'writer',
+    row: {
+      state,
+      level,
+      alarms,
+      ...(stop === undefined ? {} : { stop }),
+      ...(available_acts === undefined ? {} : { available_acts }),
+      ...(pending_molt === undefined ? {} : { pending_molt }),
+      ...(pending_molt_categories === undefined ? {} : { pending_molt_categories }),
+    },
+  }
 }
 
 function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEntry | null {

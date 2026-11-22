@@ -2,8 +2,9 @@
     Scope is a digest of the canonical workspace and authenticated actor. *)
 type status = Running | Complete of Runtime_setup_login_client.observation
   | Failed | Cancelled | Interrupted
-(** Where the account of a login is. A complete receipt has a [Published] or
-    a [Linked] one, and only a complete receipt has a [Linked] one. *)
+(** Where the account of a login is. A complete receipt has a [Published],
+    [Linked], or [Keyring_host] one, and only a complete receipt has a [Linked]
+    one. *)
 type account =
   | Unselected  (** No account was selected or made yet. *)
   | Published of Runtime_setup_accounts.reference
@@ -14,6 +15,11 @@ type account =
           account, whose id is the login id, to the person, and the setup
           registry does not hold it (plan D1-4; [account] is [linked] in the
           JSON). *)
+  | Keyring_host
+      (** A single-user OS-keyring / host-store ACP login (e.g. Mistral Vibe,
+          Kimi Code, Antigravity ACP): the CLI stores credentials directly in
+          the host keyring/CLI store and publishes no setup registry copy
+          ([account] is [keyring_host] in the JSON). *)
 type t = {
   login_id : string;
   integration_id : string;

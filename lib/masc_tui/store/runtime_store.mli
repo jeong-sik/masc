@@ -71,6 +71,9 @@ type t = {
   models_metrics : Wire_runtime.models_metrics_snapshot Observed.t;
   runtime_metrics : Wire_runtime.runtime_metrics_snapshot Observed.t;
   runtime_resolved : Wire_runtime.runtime_resolved_snapshot Observed.t;
+  runtime_config_raw : Wire_runtime.runtime_config_raw_meta Observed.t;
+  setup_inventory : Wire_runtime.setup_inventory Observed.t;
+  setup_login_receipt : Wire_runtime.setup_login_receipt option;
   runtime_probe : Wire_runtime.runtime_probe_snapshot Observed.t;
   exact_lane_runs : Wire_runtime.exact_lane_run list Observed.t;
   fusion_runs : Wire_runtime.fusion_run list Observed.t;
@@ -108,6 +111,11 @@ val apply_runtime_metrics :
   observed_at:Clock.Mono.t -> Wire_runtime.runtime_metrics_snapshot -> t -> t
 val apply_runtime_resolved :
   observed_at:Clock.Mono.t -> Wire_runtime.runtime_resolved_snapshot -> t -> t
+val apply_runtime_config_raw :
+  observed_at:Clock.Mono.t -> Wire_runtime.runtime_config_raw_meta -> t -> t
+val apply_setup_inventory :
+  observed_at:Clock.Mono.t -> Wire_runtime.setup_inventory -> t -> t
+val apply_setup_login_receipt : Wire_runtime.setup_login_receipt -> t -> t
 val apply_runtime_probe :
   observed_at:Clock.Mono.t -> Wire_runtime.runtime_probe_snapshot -> t -> t
 val apply_exact_lane_runs :

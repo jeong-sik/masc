@@ -1933,14 +1933,26 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 (fun (w : Wire_knowledge.librarian_writer_row) ->
                   if !y < bottom - reserve_acts then begin
                     let g, tone, lbl = writer_state_display ~lang w.state in
+                    let snap_s =
+                      match w.snapshot_file with
+                      | Some (Wire_knowledge.Snapshot_file_present { sha; _ }) ->
+                          let short =
+                            if String.length sha > 8 then String.sub sha 0 8
+                            else sha
+                          in
+                          " · snap:" ^ short
+                      | Some (Wire_knowledge.Snapshot_file_fault f) ->
+                          " · snap:" ^ f
+                      | None -> ""
+                    in
                     let acts_s =
                       match w.available_act_tokens with
                       | [] -> ""
                       | xs -> String.concat ", " xs
                     in
                     let left_s =
-                      Printf.sprintf "  %s %s · %s" (Glyph.to_utf8 g) w.keeper
-                        (Say.resolve lang lbl)
+                      Printf.sprintf "  %s %s · %s%s" (Glyph.to_utf8 g) w.keeper
+                        (Say.resolve lang lbl) snap_s
                     in
                     let aw = Grapheme.display_width acts_s in
                     ignore
@@ -1971,7 +1983,7 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               match writer_status with
               | Some
                   (Wire_knowledge.Keeper_writer_active
-                     { state = _; available_act_tokens }) ->
+                     { state = _; available_act_tokens; snapshot_file = _ }) ->
                   available_act_tokens
               | Some
                   ( Wire_knowledge.Keeper_writer_none_in_process
@@ -2160,6 +2172,59 @@ let draw_temporal_memory_diff ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                ~show_title:false heat_spec);
           y := !y + 2
         end;
+        (* Memory OS Internals compact telemetry line (Compaction · Canonical · Digest · Molt) *)
+        (match k.memory_diff_keeper, Observed.to_option k.memory_os_internals with
+        | Some kp, Some intr when String.equal intr.keeper kp && !y < bottom ->
+            let comp_s =
+              if intr.compaction.present then
+                Printf.sprintf "cmp:%dep/%dt/%dB" intr.compaction.epoch_count
+                  intr.compaction.archived_turns_count intr.compaction.anchor_bytes
+              else "cmp:none"
+            in
+            let ct_s =
+              if intr.canonical_turns.present then
+                let rk =
+                  Option.value intr.canonical_turns.latest_runtime_kind
+                    ~default:"?"
+                in
+                Printf.sprintf "turns:%d(%s,rst:%d)"
+                  intr.canonical_turns.turn_count rk
+                  intr.canonical_turns.history_resets_count
+              else "turns:none"
+            in
+            let dig_s =
+              if intr.memory_digest.present then
+                let rev_s =
+                  match intr.memory_digest.revision with
+                  | Some r -> Printf.sprintf "r%d" r
+                  | None -> "r?"
+                in
+                Printf.sprintf "dig:%s/%df/%dB" rev_s
+                  intr.memory_digest.fact_count intr.memory_digest.bytes
+              else "dig:none"
+            in
+            let molt_s =
+              match intr.librarian_molt.pending_molt_kind with
+              | Some mk ->
+                  let cats =
+                    if intr.librarian_molt.pending_molt_categories = [] then ""
+                    else
+                      "("
+                      ^ String.concat ","
+                          intr.librarian_molt.pending_molt_categories
+                      ^ ")"
+                  in
+                  "molt:" ^ mk ^ cats
+              | None -> "molt:clear"
+            in
+            let line =
+              Printf.sprintf "OS %s · %s · %s · %s" comp_s ct_s dig_s molt_s
+            in
+            ignore
+              (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                 ~max_w:content.w ~style:(H.secondary_style ~theme ()) line);
+            incr y
+        | _ -> ());
         if !y < bottom then begin
           H.draw_divider ~grid ~rect:content ~y:!y ~theme ();
           incr y

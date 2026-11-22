@@ -38,6 +38,19 @@ type handoff_context =
   ; messages : Agent_core.Types.message list
   }
 
+type stats =
+  { present : bool
+  ; turn_count : int
+  ; latest_turn_id : Turn_id.t option
+  ; latest_runtime_kind : runtime_kind option
+  ; latest_runtime_id : string option
+  ; latest_created_at : float option
+  ; compaction_watermark_seq : int64 option
+  ; compaction_watermark_epoch : int option
+  ; history_resets_count : int
+  ; latest_reset_at : float option
+  }
+
 type store_error =
   | Sqlite_error of
       { operation : string
@@ -359,6 +372,129 @@ let decode_opt_int64_column ~context stmt col =
   | Sqlite3.Data.TEXT _
   | Sqlite3.Data.BLOB _ ->
     Error (Corrupt_record { context; detail = "expected INTEGER or NULL column" })
+;;
+
+let inspect_stats ~keepers_dir ~keeper_id =
+  let* res =
+    with_db ~create:false ~keepers_dir ~keeper_id (fun db ->
+      let* has_turns = table_exists db "canonical_turns" in
+      let* turn_count, latest_turn_id, latest_runtime_kind, latest_runtime_id, latest_created_at =
+        if not has_turns
+        then Ok (0, None, None, None, None)
+        else (
+          let* count =
+            with_stmt db "count_canonical_turns" "SELECT COUNT(*) FROM canonical_turns" (fun stmt ->
+              let rc = Sqlite3.step stmt in
+              if rc = Sqlite3.Rc.ROW
+              then Ok (Int64.to_int (Sqlite3.column_int64 stmt 0))
+              else if rc = Sqlite3.Rc.DONE
+              then Ok 0
+              else Error (sqlite_err db "count_canonical_turns" rc))
+          in
+          let* latest =
+            with_stmt
+              db
+              "latest_canonical_turn_meta"
+              "SELECT turn_id, runtime_kind, runtime_id, created_at \
+               FROM canonical_turns ORDER BY seq DESC LIMIT 1"
+              (fun stmt ->
+                 let rc = Sqlite3.step stmt in
+                 if rc = Sqlite3.Rc.ROW
+                 then (
+                   let tid = Turn_id.of_string (Sqlite3.column_text stmt 0) in
+                   let rk_raw = Sqlite3.column_text stmt 1 in
+                   let* rk =
+                     runtime_kind_of_string rk_raw
+                     |> Result.map_error (fun detail ->
+                       Corrupt_record { context = "inspect_stats.runtime_kind"; detail })
+                   in
+                   let rid = Sqlite3.column_text stmt 2 in
+                   let created_at = Sqlite3.column_double stmt 3 in
+                   Ok (Some tid, Some rk, Some rid, Some created_at))
+                 else if rc = Sqlite3.Rc.DONE
+                 then Ok (None, None, None, None)
+                 else Error (sqlite_err db "latest_canonical_turn_meta" rc))
+          in
+          let tid, rk, rid, cat = latest in
+          Ok (count, tid, rk, rid, cat))
+      in
+      let* has_watermarks = table_exists db "compaction_watermarks" in
+      let* compaction_watermark_seq, compaction_watermark_epoch =
+        if not has_watermarks
+        then Ok (None, None)
+        else
+          with_stmt
+            db
+            "latest_compaction_watermark_meta"
+            "SELECT cutoff_seq, epoch_id FROM compaction_watermarks ORDER BY epoch_id DESC LIMIT 1"
+            (fun stmt ->
+               let rc = Sqlite3.step stmt in
+               if rc = Sqlite3.Rc.ROW
+               then
+                 Ok
+                   ( Some (Sqlite3.column_int64 stmt 0)
+                   , Some (Int64.to_int (Sqlite3.column_int64 stmt 1)) )
+               else if rc = Sqlite3.Rc.DONE
+               then Ok (None, None)
+               else Error (sqlite_err db "latest_compaction_watermark_meta" rc))
+      in
+      let* has_resets = table_exists db "history_resets" in
+      let* history_resets_count, latest_reset_at =
+        if not has_resets
+        then Ok (0, None)
+        else
+          with_stmt
+            db
+            "inspect_history_resets"
+            "SELECT COUNT(*), MAX(recorded_at) FROM history_resets"
+            (fun stmt ->
+               let rc = Sqlite3.step stmt in
+               if rc = Sqlite3.Rc.ROW
+               then (
+                 let cnt = Int64.to_int (Sqlite3.column_int64 stmt 0) in
+                 let ts =
+                   match Sqlite3.column stmt 1 with
+                   | Sqlite3.Data.FLOAT f -> Some f
+                   | Sqlite3.Data.INT i -> Some (Int64.to_float i)
+                   | Sqlite3.Data.NULL
+                   | Sqlite3.Data.NONE
+                   | Sqlite3.Data.TEXT _
+                   | Sqlite3.Data.BLOB _ -> None
+                 in
+                 Ok (cnt, ts))
+               else if rc = Sqlite3.Rc.DONE
+               then Ok (0, None)
+               else Error (sqlite_err db "inspect_history_resets" rc))
+      in
+      Ok
+        (Some
+           { present = true
+           ; turn_count
+           ; latest_turn_id
+           ; latest_runtime_kind
+           ; latest_runtime_id
+           ; latest_created_at
+           ; compaction_watermark_seq
+           ; compaction_watermark_epoch
+           ; history_resets_count
+           ; latest_reset_at
+           }))
+  in
+  match res with
+  | Some s -> Ok s
+  | None ->
+    Ok
+      { present = false
+      ; turn_count = 0
+      ; latest_turn_id = None
+      ; latest_runtime_kind = None
+      ; latest_runtime_id = None
+      ; latest_created_at = None
+      ; compaction_watermark_seq = None
+      ; compaction_watermark_epoch = None
+      ; history_resets_count = 0
+      ; latest_reset_at = None
+      }
 ;;
 
 let decode_row stmt =

@@ -85,4 +85,60 @@ let boundaries () = Eio_main.run (fun env ->
           (request router ~token:(Some admin) ~method_:"POST" ~path:"/api/v1/setup/accounts/login"
              ~body:(Printf.sprintf {|{"integration_id":%S}|} integration)))
         ["codex"; "antigravity"])))
-let () = run "setup-account-login-routes" ["boundaries", [test_case "admin and request boundaries" `Quick boundaries]]
+
+let acp_person_refusals () =
+  let cfg_toml = {|[runtime]
+default = "vibe_acp.devstral-2"
+
+[providers.vibe_acp]
+display-name = "Mistral Vibe"
+protocol = "acp"
+driver = "mistral_vibe"
+command = "vibe-acp"
+is-non-interactive = true
+
+[providers.kimi_acp]
+display-name = "Kimi Code"
+protocol = "acp"
+driver = "kimi_code"
+command = "kimi"
+is-non-interactive = true
+
+[providers.agy_acp]
+display-name = "Antigravity ACP"
+protocol = "acp"
+driver = "antigravity"
+command = "agy"
+is-non-interactive = true
+
+[models."devstral-2"]
+api-name = "devstral-2"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[vibe_acp."devstral-2"]
+|} in
+  let cfg = match Runtime_toml.parse_string cfg_toml with
+    | Ok c -> c | Error _ -> fail "valid ACP config must parse" in
+  let check_acp integration expected_client expected_name forbid_antigravity =
+    match Server_setup_account_login.person_target cfg ~integration_id:integration with
+    | Error (Server_setup_account_login.Host_keyring_without_owner client as refusal) ->
+      check bool (integration ^ " client matches") true (client = expected_client);
+      let msg = Server_setup_account_login.person_refusal_message refusal in
+      check bool (integration ^ " message names " ^ expected_name) true
+        (String_util.contains_substring msg expected_name);
+      if forbid_antigravity then
+        check bool (integration ^ " message must not blame Antigravity") false
+          (String_util.contains_substring msg "Antigravity")
+    | Error other ->
+      fail (integration ^ " unexpected refusal: " ^ Server_setup_account_login.person_refusal_message other)
+    | Ok _ -> fail (integration ^ " host-keyring ACP must be refused for multi-account person")
+  in
+  check_acp "vibe_acp" Runtime_setup_login_client.Mistral_vibe "Mistral Vibe" true;
+  check_acp "kimi_acp" Runtime_setup_login_client.Kimi_code "Kimi Code" true;
+  check_acp "agy_acp" Runtime_setup_login_client.Antigravity_acp "Antigravity" false
+
+let () = run "setup-account-login-routes" [
+  "boundaries", [test_case "admin and request boundaries" `Quick boundaries];
+  "acp_refusals", [test_case "client-specific host-keyring refusal messages" `Quick acp_person_refusals]]

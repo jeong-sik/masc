@@ -554,20 +554,23 @@ let test_account_reference () = fixture (fun base _runtime binary _net ->
       = Error Actions.Invalid_request))
 (* Proves the connection kind comes from the declared provider's typed
    api_format and transport, not from a protocol string table: a Gemini
-   provider is refused by the exhaustive api_format arm and a Messages
-   provider over a CLI transport by the transport arm, before any child
-   process or network request. A new api_format constructor breaks the
-   compile of [choice_of_api_format] instead of falling into a wildcard. *)
+   provider is now supported via [Runtime_setup_spec.Gemini] (discovering
+   catalog models without hitting the network) while a Messages provider over
+   a CLI transport is refused by the transport arm before any child process or
+   network request. *)
 let test_declared_provider_variants () = fixture (fun base runtime binary net ->
   let append text = Out_channel.with_open_gen [Open_append;Open_binary] 0o600 runtime
     (fun channel -> output_string channel text) in
   append "\n[providers.gemini]\ndisplay-name = \"Gemini\"\nprotocol = \"gemini-http\"\nendpoint = \"http://127.0.0.1:19002\"\n";
   append "\n[providers.messages-cli]\ndisplay-name = \"Messages CLI\"\nprotocol = \"messages-cli\"\ncommand = \"messages\"\n";
   Eio.Switch.run (fun sw ->
-    List.iter (fun id ->
-      Alcotest.check Alcotest.bool (id ^ " is refused by its typed variant") true
-        (Actions.discover ~binary ~sw ~net ~base_path:base (`Assoc ["integration_id",`String id])
-         = Error Actions.Unsupported_connection)) ["gemini";"messages-cli"]))
+    (match Actions.discover ~binary ~sw ~net ~base_path:base (`Assoc ["integration_id",`String "gemini"]) with
+     | Ok _ -> ()
+     | Error Actions.Unsupported_connection -> Alcotest.fail "gemini-http must be supported"
+     | Error _ -> ());
+    Alcotest.check Alcotest.bool "messages-cli is refused by its typed variant" true
+      (Actions.discover ~binary ~sw ~net ~base_path:base (`Assoc ["integration_id",`String "messages-cli"])
+       = Error Actions.Unsupported_connection)))
 (* Proves the route status is a function of the error sum rather than a
    blanket 400: a server whose Eio context has no net answers 503 through
    [Network_unavailable], a moved setup revision 409, an upstream discovery
@@ -783,6 +786,81 @@ let test_unread_configuration_keeps_its_reason () = Eio_main.run (fun _env -> Ei
       (Actions.status_of_error error = `Service_unavailable);
     Alcotest.check Alcotest.string "the person gets the same sentence for either reason"
       "The workspace configuration could not be read." (Actions.error_message error)) [missing;broken]))
+
+let test_inventory_and_actions_single_source_gemini_vertex_acp () =
+  fixture (fun base runtime binary net ->
+    Out_channel.with_open_gen [Open_append; Open_binary] 0o600 runtime (fun out ->
+      output_string out {|
+[providers.gemini]
+display-name = "Google Gemini"
+protocol = "gemini-http"
+endpoint = "https://generativelanguage.googleapis.com/v1beta"
+
+[providers.vertex_gemini]
+display-name = "Vertex AI Gemini"
+protocol = "vertex-gemini"
+endpoint = "https://us-central1-aiplatform.googleapis.com/v1/projects/demo/locations/us-central1/publishers/google"
+
+[providers.vibe_acp]
+display-name = "Mistral Vibe"
+protocol = "acp"
+driver = "mistral_vibe"
+command = "vibe-acp"
+is-non-interactive = true
+
+[providers.kimi_acp]
+display-name = "Kimi Code"
+protocol = "acp"
+driver = "kimi_code"
+command = "kimi"
+is-non-interactive = true
+
+[providers.antigravity_acp]
+display-name = "Antigravity ACP"
+protocol = "acp"
+driver = "antigravity"
+command = "agy"
+is-non-interactive = true
+|});
+    let cfg = Runtime_toml.parse_file runtime |> Result.get_ok in
+    let inv = Runtime_wizard_inventory.to_json cfg in
+    let open Yojson.Safe.Util in
+    let rows = inv |> member "integrations" |> to_list in
+    let row_of id =
+      List.find (fun r -> r |> member "id" |> to_string = id) rows
+    in
+    List.iter (fun (id, expected_proto) ->
+      let row = row_of id in
+      let support = row |> member "setup_support" |> to_string in
+      Alcotest.check Alcotest.bool (id ^ " supported in inventory (got " ^ support ^ ")") true
+        (support = "new_connection" || support = "existing_binding");
+      Alcotest.check Alcotest.string (id ^ " protocol in inventory") expected_proto
+        (row |> member "protocol" |> to_string))
+      [ "gemini", "gemini-http"
+      ; "vertex_gemini", "vertex-gemini"
+      ; "vibe_acp", "acp"
+      ; "kimi_acp", "acp"
+      ; "antigravity_acp", "acp"
+      ];
+    (* Single-source invariant: no provider advertised supported=true may ever fail with Unsupported_connection *)
+    Eio.Switch.run (fun sw ->
+      List.iter (fun id ->
+        let res = Actions.discover ~binary ~sw ~net ~base_path:base (`Assoc ["integration_id", `String id]) in
+        Alcotest.check Alcotest.bool (id ^ " discover is not Unsupported_connection") false
+          (res = Error Actions.Unsupported_connection))
+        [ "gemini"; "vertex_gemini"; "vibe_acp"; "kimi_acp"; "antigravity_acp" ]);
+    List.iter (fun (id, expected_client) ->
+      match Actions.login_target_of_config cfg ~integration_id:id with
+      | Ok target ->
+        Alcotest.check Alcotest.bool (id ^ " login_target client matches") true
+          (target.client = expected_client)
+      | Error err ->
+        Alcotest.fail (id ^ " login_target_of_config failed: " ^ Actions.error_message err))
+      [ "vibe_acp", Runtime_setup_login_client.Mistral_vibe
+      ; "kimi_acp", Runtime_setup_login_client.Kimi_code
+      ; "antigravity_acp", Runtime_setup_login_client.Antigravity_acp
+      ])
+
 let () = Alcotest.run "web setup actions" ["request boundary",[
   Alcotest.test_case "repeated web sources share one provider and credential without changing indexes" `Quick test_repeated_web_source_shares_one_credential;
   Alcotest.test_case "different web source keys and endpoints remain separate" `Quick test_distinct_web_sources_remain_separate;
@@ -807,4 +885,5 @@ let () = Alcotest.run "web setup actions" ["request boundary",[
   Alcotest.test_case "native save rechecks image capability" `Quick test_native_save_rechecks_image_capabilities;
   Alcotest.test_case "named default route survives HTTP save" `Quick test_named_lane_save;
   Alcotest.test_case "route status follows the error sum" `Quick test_status_of_error;
-  Alcotest.test_case "unusable runtime.toml keeps its reason behind one 503 sentence" `Quick test_unread_configuration_keeps_its_reason]]
+  Alcotest.test_case "unusable runtime.toml keeps its reason behind one 503 sentence" `Quick test_unread_configuration_keeps_its_reason;
+  Alcotest.test_case "single-source inventory & actions for Gemini, Vertex, and ACP drivers" `Quick test_inventory_and_actions_single_source_gemini_vertex_acp]]

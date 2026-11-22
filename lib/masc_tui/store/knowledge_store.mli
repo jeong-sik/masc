@@ -50,6 +50,7 @@ type t = {
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
   world_memory : Wire_knowledge.world_memory Observed.t;
   memory_diff : Wire_knowledge.memory_diff Observed.t;
+  memory_os_internals : Wire_knowledge.memory_os_internals Observed.t;
   memory_diff_window : memory_diff_window;
   memory_diff_keeper : string option;
   last_memory_act_answer : (string * Wire_knowledge.memory_act_answer) option;
@@ -101,6 +102,8 @@ val apply_world_memory :
   observed_at:Clock.Mono.t -> Wire_knowledge.world_memory -> t -> t
 val apply_memory_diff :
   observed_at:Clock.Mono.t -> Wire_knowledge.memory_diff -> t -> t
+val apply_memory_os_internals :
+  observed_at:Clock.Mono.t -> Wire_knowledge.memory_os_internals -> t -> t
 val record_memory_act_answer :
   keeper:string -> Wire_knowledge.memory_act_answer -> t -> t
 

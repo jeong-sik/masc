@@ -4,11 +4,28 @@
     consume its ID before choosing/defaulting a new connection, rather than
     reimplement JSON canonicalization. Existing declared IDs remain unchanged. *)
 type t
-type choice = Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex | Antigravity | Mistral_vibe
+type choice =
+  | Ollama
+  | Llama_cpp
+  | Vllm
+  | Openai_compatible
+  | Messages
+  | Gemini
+  | Vertex_gemini
+  | Claude_code
+  | Codex
+  | Antigravity
+  | Mistral_vibe
+  | Kimi_acp
+  | Antigravity_acp
 val choice_name : choice -> string
 (** The "choice" spelling [of_json] reads back. *)
 val http : choice -> bool
 (** HTTP endpoint connections; the others are product client commands. *)
+val choice_of_provider : Runtime_schema.provider -> choice option
+(** Single-source setup choice for a declared provider, checking both
+    [api_format]/[acp.driver] and transport alignment (HTTP vs CLI). Returns
+    [None] for providers that have no web/CLI setup spec (e.g. [messages-cli]). *)
 type error = Invalid_spec of string
 val error_message : error -> string
 val of_json : ?home_dir:string -> Yojson.Safe.t -> (t, error) result

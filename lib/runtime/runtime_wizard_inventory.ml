@@ -49,7 +49,7 @@ let protocol_of_catalog_kind = function
   | Llm_provider.Provider_config.Anthropic | Kimi -> Some "messages-http"
   | OpenAI_compat | Glm -> Some "openai-compatible-http"
   | Ollama -> Some "ollama-http"
-  | Gemini -> None
+  | Gemini -> Some "gemini-http"
 ;;
 
 let credential_fields ~include_credential_references = function
@@ -77,12 +77,11 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
   let catalog = Catalog_binding.all () in
   let configured =
     List.map (fun (provider : Runtime_schema.provider) ->
-      let supported =
-        match provider.api_format with
-        | Runtime_schema.Antigravity_cli_runtime | Acp_runtime | Messages_api | Chat_completions_api | Ollama_api
-        | Codex_app_server_runtime | Claude_code_runtime
-        | Gemini_api | Vertex_gemini_api -> true
-      in
+      (* Single source of truth: a configured provider is advertised as
+         setup-supported if and only if [Runtime_setup_spec.choice_of_provider]
+         admits it (so inventory never advertises [supported=true] for a
+         provider that setup actions would refuse with [Unsupported_connection]). *)
+      let supported = Option.is_some (Runtime_setup_spec.choice_of_provider provider) in
       let fields =
         match provider.transport with
         | Runtime_schema.Http endpoint -> endpoint_fields endpoint
@@ -128,6 +127,9 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
     ; "claude-code", "Claude Code", "claude-code", Some "claude", true
     ; "antigravity", "Antigravity", "antigravity-cli", Some "agy", true
     ; "vibe_acp", "Mistral Vibe", "acp", Some "vibe-acp", true
+    ; "kimi_acp", "Kimi Code ACP", "acp", Some "kimi", true
+    ; "antigravity_acp", "Antigravity ACP", "acp", Some "agy", true
+    ; "vertex_gemini", "Vertex AI Gemini", "vertex-gemini", None, true
     ; "vllm", "vLLM", "openai-compatible-http", None, true
     ; "rapid-mlx", "RapidMLX", "openai-compatible-http", None, true
     ; "llama-cpp", "llama.cpp", "openai-compatible-http", None, true

@@ -60,6 +60,9 @@ type t = {
   models_metrics : Wire_runtime.models_metrics_snapshot Observed.t;
   runtime_metrics : Wire_runtime.runtime_metrics_snapshot Observed.t;
   runtime_resolved : Wire_runtime.runtime_resolved_snapshot Observed.t;
+  runtime_config_raw : Wire_runtime.runtime_config_raw_meta Observed.t;
+  setup_inventory : Wire_runtime.setup_inventory Observed.t;
+  setup_login_receipt : Wire_runtime.setup_login_receipt option;
   runtime_probe : Wire_runtime.runtime_probe_snapshot Observed.t;
   exact_lane_runs : Wire_runtime.exact_lane_run list Observed.t;
   fusion_runs : Wire_runtime.fusion_run list Observed.t;
@@ -97,6 +100,9 @@ let empty =
     models_metrics = Observed.unreported;
     runtime_metrics = Observed.unreported;
     runtime_resolved = Observed.unreported;
+    runtime_config_raw = Observed.unreported;
+    setup_inventory = Observed.unreported;
+    setup_login_receipt = None;
     runtime_probe = Observed.unreported;
     exact_lane_runs = Observed.unreported;
     fusion_runs = Observed.unreported;
@@ -215,6 +221,15 @@ let apply_runtime_resolved ~observed_at (snap : Wire_runtime.runtime_resolved_sn
     runtime_resolved = Observed.value ~observed_at snap;
     usage_windows;
   }
+
+let apply_runtime_config_raw ~observed_at meta t =
+  { t with runtime_config_raw = Observed.value ~observed_at meta }
+
+let apply_setup_inventory ~observed_at inv t =
+  { t with setup_inventory = Observed.value ~observed_at inv }
+
+let apply_setup_login_receipt receipt t =
+  { t with setup_login_receipt = Some receipt }
 
 let apply_runtime_probe ~observed_at probe t =
   { t with runtime_probe = Observed.value ~observed_at probe }
@@ -878,6 +893,8 @@ let mark_stale_all t =
     models_metrics = Observed.mark_stale t.models_metrics;
     runtime_metrics = Observed.mark_stale t.runtime_metrics;
     runtime_resolved = Observed.mark_stale t.runtime_resolved;
+    runtime_config_raw = Observed.mark_stale t.runtime_config_raw;
+    setup_inventory = Observed.mark_stale t.setup_inventory;
     runtime_probe = Observed.mark_stale t.runtime_probe;
     exact_lane_runs = Observed.mark_stale t.exact_lane_runs;
     fusion_runs = Observed.mark_stale t.fusion_runs;

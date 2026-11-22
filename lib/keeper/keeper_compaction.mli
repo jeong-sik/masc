@@ -263,6 +263,22 @@ val list_epochs
   -> keeper_id:string
   -> (compaction_anchor list, store_error) result
 
+(** Read-only summary of [<keepers_dir>/<keeper_id>.compaction.db] for
+    dashboard/TUI Memory OS internals observability. Never creates a missing
+    database file. *)
+type stats =
+  { present : bool
+  ; epoch_count : int
+  ; latest_anchor : compaction_anchor option
+  ; archived_turns_count : int
+  ; anchor_bytes : int
+  }
+
+val inspect_stats
+  :  keepers_dir:string
+  -> keeper_id:string
+  -> (stats, store_error) result
+
 (** Losslessly retrieve an archived verbatim turn by its canonical
     {!Ids.Turn_id.t} pointer from the compaction WAL store. *)
 val load_archived_turn

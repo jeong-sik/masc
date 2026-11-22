@@ -221,3 +221,34 @@ let load_or_compile ~keepers_dir ~keeper_id ~revision ~facts =
 let render_for_snapshot ~keepers_dir ~keeper_id ~revision ~facts =
   (load_or_compile ~keepers_dir ~keeper_id ~revision ~facts).rendered
 ;;
+
+type cached_meta =
+  { present : bool
+  ; revision : int option
+  ; digest_sha256 : string option
+  ; bytes : int
+  ; fact_count : int
+  ; derived_count : int
+  }
+
+let read_cached_meta ~keepers_dir ~keeper_id =
+  let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+    match load_cached_sync path with
+    | None ->
+      { present = false
+      ; revision = None
+      ; digest_sha256 = None
+      ; bytes = 0
+      ; fact_count = 0
+      ; derived_count = 0
+      }
+    | Some cached ->
+      { present = true
+      ; revision = Some cached.revision
+      ; digest_sha256 = Some cached.digest_sha256
+      ; bytes = String.length cached.rendered
+      ; fact_count = cached.fact_count
+      ; derived_count = cached.derived_count
+      })
+;;

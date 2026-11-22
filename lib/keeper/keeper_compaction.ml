@@ -1259,6 +1259,70 @@ let list_epochs ~keepers_dir ~keeper_id =
   Ok (Option.value ~default:[] res)
 ;;
 
+type stats =
+  { present : bool
+  ; epoch_count : int
+  ; latest_anchor : compaction_anchor option
+  ; archived_turns_count : int
+  ; anchor_bytes : int
+  }
+
+let query_count db ~op ~sql =
+  with_stmt db op sql (fun stmt ->
+    let rc = Sqlite3.step stmt in
+    if rc = Sqlite3.Rc.ROW
+    then Ok (Int64.to_int (Sqlite3.column_int64 stmt 0))
+    else if rc = Sqlite3.Rc.DONE
+    then Ok 0
+    else Error (sqlite_err db op rc))
+;;
+
+let inspect_stats ~keepers_dir ~keeper_id =
+  let* res =
+    with_db ~create:false ~keepers_dir ~keeper_id (fun db ->
+      let* epoch_count =
+        query_count db ~op:"count_compaction_epochs" ~sql:"SELECT COUNT(*) FROM compaction_epochs"
+      in
+      let* archived_turns_count =
+        query_count db ~op:"count_archived_turns" ~sql:"SELECT COUNT(*) FROM archived_turns"
+      in
+      let* latest_anchor, anchor_bytes =
+        with_stmt
+          db
+          "inspect_latest_anchor"
+          "SELECT anchor_json FROM compaction_epochs ORDER BY epoch_id DESC LIMIT 1"
+          (fun stmt ->
+             let rc = Sqlite3.step stmt in
+             if rc = Sqlite3.Rc.ROW
+             then (
+               let raw = Sqlite3.column_text stmt 0 in
+               let* anchor = decode_anchor_string ~context:"inspect_stats" raw in
+               Ok (Some anchor, String.length raw))
+             else if rc = Sqlite3.Rc.DONE
+             then Ok (None, 0)
+             else Error (sqlite_err db "inspect_latest_anchor" rc))
+      in
+      Ok
+        (Some
+           { present = true
+           ; epoch_count
+           ; latest_anchor
+           ; archived_turns_count
+           ; anchor_bytes
+           }))
+  in
+  match res with
+  | Some s -> Ok s
+  | None ->
+    Ok
+      { present = false
+      ; epoch_count = 0
+      ; latest_anchor = None
+      ; archived_turns_count = 0
+      ; anchor_bytes = 0
+      }
+;;
+
 let load_archived_turn ~keepers_dir ~keeper_id ~turn_id =
   with_db ~create:false ~keepers_dir ~keeper_id (fun db ->
     with_stmt

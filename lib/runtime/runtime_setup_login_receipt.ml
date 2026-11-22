@@ -4,6 +4,7 @@ type account =
   | Unselected
   | Published of Runtime_setup_accounts.reference
   | Linked
+  | Keyring_host
 type t = {
   login_id : string;
   integration_id : string;
@@ -19,6 +20,7 @@ let observation_name = function
   | Credential_captured -> "credential_captured"
 
 let linked_label = "linked"
+let keyring_host_label = "keyring_host"
 
 let to_json t =
   let status, authentication = match t.status with
@@ -30,7 +32,8 @@ let to_json t =
   let account = match t.account with
     | Unselected -> []
     | Published reference -> ["account_ref", `String (Runtime_setup_accounts.reference_to_string reference)]
-    | Linked -> ["account", `String linked_label] in
+    | Linked -> ["account", `String linked_label]
+    | Keyring_host -> ["account", `String keyring_host_label] in
   `Assoc (["login_id", `String t.login_id; "integration_id", `String t.integration_id;
     "status", `String status; "invocation_verified", `Bool false] @ account @ authentication)
 
@@ -93,6 +96,7 @@ let decode ~login_id = function
       | Some (`String value), None -> Runtime_setup_accounts.reference_of_string value
           |> Result.map (fun reference -> Published reference) |> Result.map_error (fun _ -> Unavailable)
       | None, Some (`String label) when String.equal label linked_label -> Ok Linked
+      | None, Some (`String label) when String.equal label keyring_host_label -> Ok Keyring_host
       | _ -> Error Unavailable in
     let* status = match List.assoc_opt "status" fields, List.assoc_opt "authentication" fields with
       | Some (`String "running"), None -> Ok Running
@@ -106,8 +110,8 @@ let decode ~login_id = function
     (match status, account with
      | Complete _, Unselected -> Error Unavailable
      | (Running | Failed | Cancelled | Interrupted), Linked -> Error Unavailable
-     | Complete _, (Published _ | Linked)
-     | (Running | Failed | Cancelled | Interrupted), (Unselected | Published _) ->
+     | Complete _, (Published _ | Linked | Keyring_host)
+     | (Running | Failed | Cancelled | Interrupted), (Unselected | Published _ | Keyring_host) ->
        Ok {login_id; integration_id; account; status})
   | _ -> Error Unavailable
 

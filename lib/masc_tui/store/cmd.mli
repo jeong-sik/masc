@@ -52,12 +52,16 @@ type get_request =
       keeper : string option;
       window : Knowledge_store.memory_diff_window;
     }
+  | Get_keeper_memory_os_internals of { keeper : string }
   | Get_provider_usage of { days : int }
   | Get_keeper_costs of { window_minutes : int }
   | Get_efficiency of { month : string option }
   | Get_models_metrics of { window_minutes : int; bucket_minutes : int }
   | Get_runtime_metrics
   | Get_runtime_resolved
+  | Get_runtime_config_raw
+  | Get_setup_inventory
+  | Get_setup_login_status of { login_id : string }
   | Get_runtime_probe of { force : bool }
   | Get_exact_lane_runs of { lane : string option; limit : int option }
   | Get_fusion_runs
@@ -120,6 +124,18 @@ type post_request =
   | Post_fusion_launch of {
       keeper : string;
       request : Wire_runtime.fusion_launch_request;
+    }
+  | Post_runtime_assignment of {
+      keeper_name : string;
+      runtime_id : string option;
+      source_revision : string option;
+      previous_runtime_id : string option;
+    }
+  | Post_runtime_default_route of { runtime_id : string }
+  | Post_setup_account_key of { integration_id : string; key : string }
+  | Post_setup_login_start of {
+      integration_id : string;
+      account_ref : string option;
     }
   | Post_sandbox_probe of [ `All | `Keeper of string | `Ssh_pool of string ]
   | Post_config_patch of Wire_config.patch_request

@@ -25,6 +25,7 @@ type keeper_route =
   | Working_context
   | Memory_facts
   | Memory_journal
+  | Memory_os_internals
   | Operator_note
   | Next_request
   | Last_prompt

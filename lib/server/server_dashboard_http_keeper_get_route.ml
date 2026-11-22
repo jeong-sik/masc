@@ -22,6 +22,7 @@ type keeper_route =
   | Working_context
   | Memory_facts
   | Memory_journal
+  | Memory_os_internals
   | Operator_note
   | Next_request
   | Last_prompt
@@ -67,6 +68,7 @@ let suffix = function
   | Working_context -> Types.keeper_suffix_working_context
   | Memory_facts -> "/memory-facts"
   | Memory_journal -> "/memory-journal"
+  | Memory_os_internals -> "/memory-os-internals"
   | Operator_note -> Types.keeper_suffix_operator_note
   | Next_request -> "/next-request"
   | Last_prompt -> "/last-prompt"
@@ -126,7 +128,7 @@ let permission ?(include_thinking = false) = function
      (* Counts, runtimes, times and byte sizes of two requests, the kind the
         turn records already serve, and no request content: the snapshot
         comparison returns where the two inputs differ, never what they hold. *)
-     | Cache_outcome -> Some Masc_domain.CanReadState
+     | Cache_outcome | Memory_os_internals -> Some Masc_domain.CanReadState
      | Checkpoints
      | Paused_work
      | Github_identity

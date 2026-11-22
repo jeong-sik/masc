@@ -710,6 +710,13 @@ let execute_get t ~epoch req =
                    ~decode:Wire_knowledge.decode_memory_diff)
             in
             Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_memory_os_internals _ ->
+            let reply =
+              Msg.Reply_keeper_memory_os_internals
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_knowledge.decode_memory_os_internals)
+            in
+            Msg.Http_reply { epoch; reply }
         | Cmd.Get_provider_usage _ ->
             let reply =
               Msg.Reply_provider_usage_history
@@ -750,6 +757,27 @@ let execute_get t ~epoch req =
               Msg.Reply_runtime_resolved
                 (fetch_and_decode_get t ~path
                    ~decode:Wire_runtime.decode_runtime_resolved)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_runtime_config_raw ->
+            let reply =
+              Msg.Reply_runtime_config_raw
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_runtime_config_raw_meta)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_setup_inventory ->
+            let reply =
+              Msg.Reply_setup_inventory
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_setup_inventory)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_setup_login_status _ ->
+            let reply =
+              Msg.Reply_setup_login_receipt
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_setup_login_receipt)
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_runtime_probe _ ->
@@ -1015,6 +1043,57 @@ let execute_post t ~epoch req =
         | Cmd.Post_fusion_launch _ ->
             let result = post_ack t ~path ~body in
             Msg.Reply_fusion_launch result
+        | Cmd.Post_runtime_assignment { keeper_name; runtime_id; _ } ->
+            let result = post_ack t ~path ~body in
+            Msg.Reply_runtime_assignment { keeper_name; runtime_id; result }
+        | Cmd.Post_runtime_default_route { runtime_id } ->
+            let result = post_ack t ~path ~body in
+            Msg.Reply_runtime_routing { runtime_id; result }
+        | Cmd.Post_setup_account_key { integration_id; _ } ->
+            let result = post_ack t ~path ~body in
+            Msg.Reply_setup_account_key { integration_id; result }
+        | Cmd.Post_setup_login_start _ ->
+            let ep = Atomic.get t.endpoint in
+            let body_str = Yojson.Safe.to_string body in
+            let sse_decoder = Sse_wire.create_decoder () in
+            let latest_receipt = ref None in
+            let on_response ~status:_ ~headers:_ = () in
+            let on_chunk raw =
+              let frames = Sse_wire.feed sse_decoder raw in
+              List.iter
+                (fun (frame : Sse_wire.frame) ->
+                  match Yojson.Safe.from_string frame.data with
+                  | json -> (
+                      match Wire_runtime.decode_setup_login_receipt json with
+                      | Ok receipt ->
+                          latest_receipt := Some receipt;
+                          Ui_bus.publish_stream t.bus
+                            (Msg.Http_reply
+                               {
+                                 epoch;
+                                 reply =
+                                   Msg.Reply_setup_login_receipt (Ok receipt);
+                               })
+                      | Error _ -> ())
+                  | exception Yojson.Json_error _ -> ())
+                frames
+            in
+            let stream_res =
+              Http_client.post_stream ~io:t.io ~clock:t.clock
+                ~content_type:"application/json" ~body:body_str ~on_response
+                ~on_chunk ep ~path
+              |> Result.map_error msg_error_of_http
+            in
+            let result =
+              match !latest_receipt, stream_res with
+              | Some r, _ -> Ok r
+              | None, Error err -> Error err
+              | None, Ok () ->
+                  Error
+                    (Msg.Decode_error
+                       "setup login stream closed without a login receipt")
+            in
+            Msg.Reply_setup_login_receipt result
         | Cmd.Post_sandbox_probe _ ->
             let result = post_ack t ~path ~body in
             Msg.Reply_action_ack

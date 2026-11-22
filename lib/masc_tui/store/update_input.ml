@@ -639,6 +639,69 @@ let open_fusion_launch_modal (m : Model.t) =
       };
     ]
 
+let open_runtime_assign_modal (m : Model.t) ?(keeper_default = "")
+    ?(runtime_default = "") () =
+  open_custom_inline_modal m
+    [
+      {
+        key = "assign_keeper";
+        label =
+          Say.make ~ko:"대상 키퍼 (비우거나 default 입력 시 기본 경로 변경)"
+            ~en:"Target keeper (blank or 'default' sets default route)";
+        value = keeper_default;
+        required = false;
+      };
+      {
+        key = "assign_runtime_id";
+        label =
+          Say.make ~ko:"런타임 또는 레인 ID (키퍼 배정 해제 시 비움)"
+            ~en:"Runtime or lane ID (leave blank to clear keeper assignment)";
+        value = runtime_default;
+        required = false;
+      };
+    ]
+
+let open_setup_account_key_modal (m : Model.t) ?(integration_default = "") () =
+  open_custom_inline_modal m
+    [
+      {
+        key = "setup_key_integration";
+        label =
+          Say.make ~ko:"프로바이더/통합 ID (예: anthropic, openai, gemini)"
+            ~en:"Integration ID (e.g. anthropic, openai, gemini)";
+        value = integration_default;
+        required = true;
+      };
+      {
+        key = "setup_key_secret";
+        label = Say.make ~ko:"API 키" ~en:"API key";
+        value = "";
+        required = true;
+      };
+    ]
+
+let open_setup_login_modal (m : Model.t) ?(integration_default = "") () =
+  open_custom_inline_modal m
+    [
+      {
+        key = "setup_login_integration";
+        label =
+          Say.make
+            ~ko:"로그인 통합 ID (예: claude-code, codex, vibe_acp, kimi_acp)"
+            ~en:"Login integration ID (e.g. claude-code, codex, vibe_acp, kimi_acp)";
+        value = integration_default;
+        required = true;
+      };
+      {
+        key = "setup_login_account_ref";
+        label =
+          Say.make ~ko:"기존 계정 참조 (선택, 새 로그인 시 비움)"
+            ~en:"Existing account_ref (optional, blank for new login)";
+        value = "";
+        required = false;
+      };
+    ]
+
 let latest_reply_for_tts (m : Model.t) =
   let keeper_opt =
     match Model.active_dive m with
@@ -831,6 +894,13 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
             ] )
       | Nav.Keeper_memory, Some "A" ->
           open_memory_act_modal m ~keeper_default:name
+      | Nav.Keeper_config, Some "a" ->
+          let runtime_default =
+            match Observed.to_option m.runtime.runtime_config_raw with
+            | Some meta -> Option.value (List.assoc_opt name meta.assignments) ~default:""
+            | None -> ""
+          in
+          open_runtime_assign_modal m ~keeper_default:name ~runtime_default ()
       | Nav.Keeper_chat, Some "c" ->
           let drafts =
             m.drafts |> Drafts.set_active_keeper name |> Drafts.set_focus true
@@ -888,6 +958,44 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                   runtime = Runtime_store.toggle_unreported_accounts m.runtime;
                 }
               , [] )
+          | Some "a" ->
+              let keeper_default =
+                Option.value (Update_nav.resolve_target_keeper m) ~default:""
+              in
+              let runtime_default =
+                match Runtime_store.selected_lane m.runtime with
+                | Some lane -> lane.id
+                | None -> (
+                    match Observed.to_option m.runtime.runtime_resolved with
+                    | Some snap -> Option.value snap.default_route ~default:""
+                    | None -> "")
+              in
+              open_runtime_assign_modal m ~keeper_default ~runtime_default ()
+          | Some "K" ->
+              let integration_default =
+                match Observed.to_option m.runtime.setup_inventory with
+                | Some { integrations = first :: _; _ } -> first.id
+                | Some { integrations = []; _ } | None -> ""
+              in
+              open_setup_account_key_modal m ~integration_default ()
+          | Some "l" -> open_setup_login_modal m ()
+          | Some "L" -> (
+              match m.runtime.setup_login_receipt with
+              | Some r ->
+                  ( Model.with_toast ~now ~level:Model.Toast_info
+                      (Say.make
+                         ~ko:("로그인 영수증 상태 조회: " ^ r.login_id)
+                         ~en:("Polling login status: " ^ r.login_id))
+                      m
+                  , [
+                      Cmd.Http_get
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Get_setup_login_status { login_id = r.login_id };
+                        };
+                    ] )
+              | None -> open_setup_login_modal m ())
           | Some "f" -> open_fusion_launch_modal m
           | _ -> (m, []))
       | Nav.Infra -> (

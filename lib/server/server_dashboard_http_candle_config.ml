@@ -1377,6 +1377,15 @@ let human_leaf_label_en ~table ~key : string =
   | "capabilities", "streaming" -> "Streaming"
   | "capabilities", "vision" -> "Vision"
   | "capabilities", ("prompt-caching" | "prompt_caching") -> "Prompt Caching"
+  | _, ("tools-support" | "tools_support") -> "Tool Calling"
+  | _, ("supports-image-input" | "supports_image_input") -> "Vision"
+  | _, ("supports-prompt-caching" | "supports_prompt_caching") -> "Prompt Caching"
+  | _, "streaming" -> "Streaming"
+  | _, ("cache-retention" | "cache_retention") -> "Cache Retention"
+  | _, ("explicit-context-cache-ttl-s" | "explicit_context_cache_ttl_s") ->
+    "Explicit Cache TTL (s)"
+  | _, "store" -> "Server Response Store"
+  | _, "efforts" -> "Effort Variants"
   | _, ("display-name" | "display_name") -> "Display Name"
   | _, "protocol" -> "Protocol"
   | _, "endpoint" -> "Endpoint URL"
@@ -1734,10 +1743,12 @@ let runtime_schema_json ~now ~base_path =
       (fun row ->
          Option.iter (fun k -> Hashtbl.replace known_keys k ()) (Registry.toml_key_opt row))
       Registry.all;
+    let cache_retention_enums = [ "5m"; "1h"; "in_memory"; "24h" ] in
     List.iter
       (fun (full_key, toml_v) ->
          if not (Hashtbl.mem known_keys full_key)
          then (
+           Hashtbl.replace known_keys full_key ();
            let table, key = split_table_key full_key in
            let sec = is_secret_key full_key in
            let cat =
@@ -1768,9 +1779,14 @@ let runtime_schema_json ~now ~base_path =
              then Cat_observability_ops
              else Cat_runtime_providers
            in
+           let is_cache_retention =
+             String.equal (String.lowercase_ascii (strip_toml_quotes key)) "cache-retention"
+           in
            let type_str =
              if sec
              then "secret"
+             else if is_cache_retention
+             then "enum"
              else (
                match toml_v with
                | Keeper_toml_loader.Toml_bool _ -> "boolean"
@@ -1786,6 +1802,11 @@ let runtime_schema_json ~now ~base_path =
                | Keeper_toml_loader.Toml_local_datetime _
                | Keeper_toml_loader.Toml_local_date _
                | Keeper_toml_loader.Toml_local_time _ -> "structured")
+           in
+           let enum_member =
+             if is_cache_retention
+             then [ "enum_values", `List (List.map (fun s -> `String s) cache_retention_enums) ]
+             else []
            in
            let r_scope =
              classify_runtime_key_reload_scope ~known_provider_ids full_key
@@ -1805,8 +1826,149 @@ let runtime_schema_json ~now ~base_path =
                 ; "writable", `Bool (not (String.equal type_str "structured"))
                 ; "description", `String ("Declared runtime.toml key " ^ full_key)
                 ]
+                @ enum_member
                 @ entity_meta_fields ~table ~key))))
       doc;
+    (* 4. Expose optional runtime schema descriptors for declared providers, models, and bindings
+       so Settings/TUI operators can discover and edit cache-retention, explicit-context-cache-ttl-s,
+       store, and efforts even when omitted from runtime.toml (including empty binding tables). *)
+    let seen_providers : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+    let seen_models : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+    let seen_bindings : (string * string, unit) Hashtbl.t = Hashtbl.create 32 in
+    let provider_order = ref [] in
+    let model_order = ref [] in
+    let binding_order = ref [] in
+    let add_provider pid =
+      if (not (String.equal pid "")) && not (Hashtbl.mem seen_providers pid)
+      then (
+        Hashtbl.replace seen_providers pid ();
+        provider_order := pid :: !provider_order)
+    in
+    let add_model mid =
+      if (not (String.equal mid "")) && not (Hashtbl.mem seen_models mid)
+      then (
+        Hashtbl.replace seen_models mid ();
+        model_order := mid :: !model_order)
+    in
+    let add_binding pid mid =
+      let pair = pid, mid in
+      if (not (String.equal pid ""))
+         && (not (String.equal mid ""))
+         && not (Hashtbl.mem seen_bindings pair)
+      then (
+        Hashtbl.replace seen_bindings pair ();
+        binding_order := pair :: !binding_order)
+    in
+    (match Runtime_toml.parse_string raw_text with
+     | Ok cfg ->
+       List.iter (fun (p : Runtime_schema.provider) -> add_provider p.id) cfg.providers;
+       List.iter (fun (m : Runtime_schema.model_spec) -> add_model m.id) cfg.models;
+       List.iter
+         (fun (b : Runtime_schema.binding) -> add_binding b.provider_id b.model_id)
+         cfg.bindings
+     | Error _ -> ());
+    List.iter
+      (fun (full_key, _) ->
+         let table, _ = split_table_key full_key in
+         let segs = split_dotted_key_segments table |> List.map strip_toml_quotes in
+         match segs with
+         | "providers" :: pid :: _ -> add_provider pid
+         | "models" :: mid :: _ -> add_model mid
+         | [ pid; mid ]
+           when known_provider_mem known_provider_ids (String.lowercase_ascii pid) ->
+           add_binding pid mid
+         | _ -> ())
+      doc;
+    let push_optional_descriptor ~table ~key ~type_str ?enum_values ?range_json ~description () =
+      let full_key = table ^ "." ^ key in
+      if not (Hashtbl.mem known_keys full_key)
+      then (
+        Hashtbl.replace known_keys full_key ();
+        let enum_member =
+          match enum_values with
+          | Some vals -> [ "enum_values", `List (List.map (fun s -> `String s) vals) ]
+          | None -> []
+        in
+        let range_member =
+          match range_json with
+          | Some r -> [ "range", r ]
+          | None -> []
+        in
+        push
+          Cat_runtime_providers
+          (`Assoc
+            ([ "table", `String table
+             ; "key", `String key
+             ; "full_key", `String full_key
+             ; "type", `String type_str
+             ; "current_value", `Null
+             ; "default_value", `Null
+             ; "provenance", `String (provenance_to_string Prov_default)
+             ; "reload_scope", `String (reload_scope_to_string Hot_reload)
+             ; "secret", `Bool false
+             ; "writable", `Bool true
+             ; "description", `String description
+             ]
+             @ enum_member
+             @ range_member
+             @ entity_meta_fields ~table ~key)))
+    in
+    let positive_int_range =
+      `Assoc [ "kind", `String "integer"; "min_inclusive", `Int 1; "max_inclusive", `Null ]
+    in
+    List.iter
+      (fun pid ->
+         let table = "providers." ^ Toml_line_editor.render_key pid in
+         push_optional_descriptor
+           ~table
+           ~key:Runtime_schema.store_key
+           ~type_str:"boolean"
+           ~description:"Enable server-side response storage (OpenAI Responses API)"
+           ();
+         push_optional_descriptor
+           ~table
+           ~key:Runtime_schema.explicit_context_cache_ttl_s_key
+           ~type_str:"integer"
+           ~range_json:positive_int_range
+           ~description:"Provider-level explicit context cache TTL in seconds"
+           ())
+      (List.rev !provider_order);
+    List.iter
+      (fun mid ->
+         let table = "models." ^ Toml_line_editor.render_key mid in
+         push_optional_descriptor
+           ~table
+           ~key:Runtime_schema.explicit_context_cache_ttl_s_key
+           ~type_str:"integer"
+           ~range_json:positive_int_range
+           ~description:"Model-level explicit context cache TTL in seconds"
+           ();
+         push_optional_descriptor
+           ~table
+           ~key:"efforts"
+           ~type_str:"string_list"
+           ~description:"Parameterized reasoning effort variants expanded into <id>@<effort> runtimes"
+           ())
+      (List.rev !model_order);
+    List.iter
+      (fun (pid, mid) ->
+         let table =
+           Toml_line_editor.render_key pid ^ "." ^ Toml_line_editor.render_key mid
+         in
+         push_optional_descriptor
+           ~table
+           ~key:"cache-retention"
+           ~type_str:"enum"
+           ~enum_values:cache_retention_enums
+           ~description:"Prompt cache retention tier (5m | 1h | in_memory | 24h)"
+           ();
+         push_optional_descriptor
+           ~table
+           ~key:"efforts"
+           ~type_str:"string_list"
+           ~description:"Parameterized reasoning effort variants for this provider binding"
+           ())
+      (List.rev !binding_order);
     let categories_json =
       List.map
         (fun cat ->
@@ -1834,7 +1996,71 @@ let runtime_schema_json ~now ~base_path =
     Ok (Env.ok ~now data))
 ;;
 
-let keeper_schema_fields ~doc ~is_create =
+let read_keeper_runtime_assignment_context ~base_path ~keeper_name_opt =
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  if not (Sys.file_exists runtime_path)
+  then None, []
+  else (
+    match Fs_compat.load_file runtime_path with
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception Sys_error _ -> None, []
+    | raw ->
+      let assigned_runtime_opt =
+        match keeper_name_opt, Keeper_toml_loader.parse_toml raw with
+        | Some name, Ok doc ->
+          (match List.assoc_opt ("runtime.assignments." ^ name) doc with
+           | Some (Keeper_toml_loader.Toml_string s) ->
+             let trimmed = String.trim s in
+             if String.equal trimmed "" then None else Some trimmed
+           | Some
+               ( Keeper_toml_loader.Toml_int _
+               | Keeper_toml_loader.Toml_float _
+               | Keeper_toml_loader.Toml_bool _
+               | Keeper_toml_loader.Toml_string_array _
+               | Keeper_toml_loader.Toml_array _
+               | Keeper_toml_loader.Toml_table _
+               | Keeper_toml_loader.Toml_inline_table _
+               | Keeper_toml_loader.Toml_table_array _
+               | Keeper_toml_loader.Toml_offset_datetime _
+               | Keeper_toml_loader.Toml_local_datetime _
+               | Keeper_toml_loader.Toml_local_date _
+               | Keeper_toml_loader.Toml_local_time _ )
+           | None -> None)
+        | None, _ | Some _, Error _ -> None
+      in
+      let runtime_choices =
+        match Runtime_toml.parse_string raw with
+        | Error _ -> []
+        | Ok cfg ->
+          let lane_ids =
+            List.map (fun (l : Runtime_schema.lane_decl) -> l.id) cfg.lane_decls
+          in
+          let binding_ids =
+            List.filter_map
+              (fun (b : Runtime_schema.binding) ->
+                 if b.enabled then Some (Runtime_schema.binding_key b) else None)
+              cfg.bindings
+          in
+          let base = lane_ids @ binding_ids in
+          let with_assigned =
+            match assigned_runtime_opt with
+            | Some cur when not (List.mem cur base) -> cur :: base
+            | Some _ | None -> base
+          in
+          let seen = Hashtbl.create 32 in
+          List.filter
+            (fun id ->
+               if Hashtbl.mem seen id
+               then false
+               else (
+                 Hashtbl.replace seen id ();
+                 true))
+            with_assigned
+      in
+      assigned_runtime_opt, runtime_choices)
+;;
+
+let keeper_schema_fields ~doc ~is_create ~assigned_runtime_opt ~runtime_choices =
   let lookup full_key = List.assoc_opt full_key doc in
   let prov_of full_key =
     if is_create
@@ -1880,6 +2106,35 @@ let keeper_schema_fields ~doc ~is_create =
   let sandbox_enums = Sandbox_profile.valid_sandbox_profile_strings in
   let network_enums = Sandbox_profile.valid_network_mode_strings in
   let microvm_enums = Keeper_microvm_backend.valid_strings in
+  let runtime_assignment_field =
+    let type_str, enum_member =
+      if runtime_choices <> []
+      then "enum", [ "enum_values", `List (List.map (fun s -> `String s) runtime_choices) ]
+      else "string", []
+    in
+    let prov =
+      if is_create || Option.is_none assigned_runtime_opt
+      then Prov_default
+      else Prov_project
+    in
+    ( Cat_runtime_providers
+    , `Assoc
+        ([ "table", `String "runtime.assignments"
+         ; "key", `String "runtime"
+         ; "full_key", `String "runtime.assignments.runtime"
+         ; "type", `String type_str
+         ; "current_value", Json_util.string_opt_to_json assigned_runtime_opt
+         ; "default_value", `Null
+         ; "provenance", `String (provenance_to_string prov)
+         ; "reload_scope", `String (reload_scope_to_string Next_turn)
+         ; "secret", `Bool false
+         ; "writable", `Bool true
+         ; ( "description"
+           , `String
+               "Assigned runtime or failover lane stored in runtime.toml [runtime.assignments]" )
+         ]
+         @ enum_member) )
+  in
   [ field
       ~cat:Cat_keepers_autonomy
       ~table:"keeper"
@@ -1891,6 +2146,7 @@ let keeper_schema_fields ~doc ~is_create =
       ~secret:false
       ~description:"Canonical Keeper identifier matching filename <name>.toml"
       ()
+  ; runtime_assignment_field
   ; field
       ~cat:Cat_keepers_autonomy
       ~table:"keeper"
@@ -2082,6 +2338,9 @@ let keeper_schema_json ~now ~base_path ~is_create ~keeper_name_opt =
     let file_sha256 = Env.sha256_hex raw_text in
     let by_cat : (config_category, Yojson.Safe.t list) Hashtbl.t = Hashtbl.create 8 in
     List.iter (fun c -> Hashtbl.replace by_cat c []) all_config_categories;
+    let assigned_runtime_opt, runtime_choices =
+      read_keeper_runtime_assignment_context ~base_path ~keeper_name_opt
+    in
     List.iter
       (fun (cat, fjson) ->
          let prev =
@@ -2090,7 +2349,7 @@ let keeper_schema_json ~now ~base_path ~is_create ~keeper_name_opt =
            | None -> []
          in
          Hashtbl.replace by_cat cat (fjson :: prev))
-      (keeper_schema_fields ~doc ~is_create);
+      (keeper_schema_fields ~doc ~is_create ~assigned_runtime_opt ~runtime_choices);
     let categories_json =
       List.map
         (fun cat ->
@@ -2582,48 +2841,163 @@ let config_patch_json ?(now = Time_compat.now ()) ~config ~actor ~body_str () =
              match cas_check with
              | Error _ as err -> err
              | Ok () ->
-               let applied_res =
-                 List.fold_left
-                   (fun acc op ->
-                      match acc with
-                      | Error _ as err -> err
-                      | Ok txt -> apply_patch_op txt op)
-                   (Ok edit_base_text)
-                   ops
+               let is_keeper_assignment_op ~keeper_name = function
+                 | Op_set { table = "runtime.assignments"; key; _ }
+                 | Op_remove { table = "runtime.assignments"; key } ->
+                   String.equal key "runtime" || String.equal key keeper_name
+                 | Op_set { table = "keeper"; key = "runtime"; _ }
+                 | Op_remove { table = "keeper"; key = "runtime" } -> true
+                 | Op_set _ | Op_remove _ -> false
                in
-               (match applied_res with
-                | Error msg -> error_result Env.Validation_failed msg
-                | Ok after_text ->
-                  (match
+               let assignment_ops, file_ops =
+                 match target, expected_keeper_name with
+                 | (Target_keeper _ | Target_keeper_create), Some keeper_name ->
+                   List.partition (is_keeper_assignment_op ~keeper_name) ops
+                 | Target_runtime, _ | (Target_keeper _ | Target_keeper_create), None ->
+                   [], ops
+               in
+               let assignment_target_res =
+                 match assignment_ops with
+                 | [] -> Ok None
+                 | _ ->
+                   List.fold_left
+                     (fun acc op ->
+                        match acc with
+                        | Error _ as err -> err
+                        | Ok _ ->
+                          (match op with
+                           | Op_remove _ -> Ok (Some None)
+                           | Op_set { value = Val_string s; _ } ->
+                             let trimmed = String.trim s in
+                             if String.equal trimmed ""
+                             then Ok (Some None)
+                             else Ok (Some (Some trimmed))
+                           | Op_set
+                               { value =
+                                   Val_int _
+                                   | Val_float _
+                                   | Val_bool _
+                                   | Val_string_list _
+                               ; _
+                               } ->
+                             Error
+                               "keeper runtime assignment must be a string runtime/lane ID"))
+                     (Ok None)
+                     assignment_ops
+               in
+               let prepared_res =
+                 let open Result.Syntax in
+                 let* desired_assignment_opt = assignment_target_res in
+                 let* after_text =
+                   List.fold_left
+                     (fun acc op ->
+                        let* txt = acc in
+                        apply_patch_op txt op)
+                     (Ok edit_base_text)
+                     file_ops
+                 in
+                 let* runtime_assign_preview =
+                   match desired_assignment_opt, expected_keeper_name with
+                   | None, _ | _, None -> Ok None
+                   | Some assign_val, Some keeper_name ->
+                     let runtime_path =
+                       Config_dir_resolver.runtime_toml_path_for_base_path ~base_path
+                     in
+                     if not (Sys.file_exists runtime_path)
+                     then
+                       Error "runtime.toml does not exist; cannot assign keeper runtime"
+                     else (
+                       match Fs_compat.load_file runtime_path with
+                       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+                       | exception Sys_error msg ->
+                         Error ("runtime.toml read failed: " ^ msg)
+                       | rt_before ->
+                         let rt_after =
+                           Toml_line_editor.edit_table_scalar
+                             rt_before
+                             ~path:"runtime.assignments"
+                             ~key:keeper_name
+                             ~value:assign_val
+                         in
+                         let* () =
+                           Runtime.validate_config_text
+                             ~runtime_config_path:runtime_path
+                             rt_after
+                           |> Result.map_error (fun msg ->
+                             "runtime assignment validation failed: " ^ msg)
+                         in
+                         let rt_diff, rt_hunks =
+                           compute_unified_diff
+                             ~before_label:"a/runtime.toml"
+                             ~after_label:"b/runtime.toml"
+                             ~before:rt_before
+                             ~after:rt_after
+                         in
+                         let rt_changed = not (String.equal rt_before rt_after) in
+                         Ok
+                           (Some
+                              ( runtime_path
+                              , keeper_name
+                              , assign_val
+                              , rt_changed
+                              , rt_diff
+                              , rt_hunks )))
+                 in
+                 let* warnings =
+                   if file_ops = []
+                      && target <> Target_keeper_create
+                      && Option.is_some runtime_assign_preview
+                   then Ok []
+                   else
                      validate_patched_toml
                        ~target
                        ~expected_keeper_name
                        ~after_text
                        ~target_path
-                   with
-                   | Error msg -> error_result Env.Validation_failed msg
-                   | Ok warnings ->
-                     let after_sha256 = Env.sha256_hex after_text in
-                     let changed =
-                       target = Target_keeper_create
-                       || not (String.equal disk_preimage after_text)
-                     in
-                     let diff_text, diff_hunks =
+                 in
+                 Ok (after_text, warnings, runtime_assign_preview)
+               in
+               (match prepared_res with
+                | Error msg -> error_result Env.Validation_failed msg
+                | Ok (after_text, warnings, runtime_assign_preview) ->
+                  (let after_sha256 = Env.sha256_hex after_text in
+                   let file_changed =
+                     target = Target_keeper_create
+                     || not (String.equal disk_preimage after_text)
+                   in
+                   let rt_changed, rt_diff, rt_hunks =
+                     match runtime_assign_preview with
+                     | None -> false, "", []
+                     | Some (_, _, _, c, d, h) -> c, d, h
+                   in
+                   let changed = file_changed || rt_changed in
+                   let file_diff, file_hunks =
+                     if file_changed
+                     then
                        compute_unified_diff
                          ~before_label:("a/" ^ target_label)
                          ~after_label:("b/" ^ target_label)
                          ~before:disk_preimage
                          ~after:after_text
-                     in
-                     let known_provider_ids =
-                       match target with
-                       | Target_runtime ->
-                         Some (collect_provider_ids_union [ disk_preimage; after_text ])
-                       | Target_keeper _ | Target_keeper_create -> None
-                     in
-                     let r_scope =
-                       reload_scope_for_ops ?known_provider_ids ~target ops
-                     in
+                     else "", []
+                   in
+                   let diff_text =
+                     match String.equal file_diff "", String.equal rt_diff "" with
+                     | true, true -> ""
+                     | false, true -> file_diff
+                     | true, false -> rt_diff
+                     | false, false -> file_diff ^ "\n" ^ rt_diff
+                   in
+                   let diff_hunks = file_hunks @ rt_hunks in
+                   let known_provider_ids =
+                     match target with
+                     | Target_runtime ->
+                       Some (collect_provider_ids_union [ disk_preimage; after_text ])
+                     | Target_keeper _ | Target_keeper_create -> None
+                   in
+                   let r_scope =
+                     reload_scope_for_ops ?known_provider_ids ~target ops
+                   in
                      if dry_run
                      then
                        Ok
@@ -2696,14 +3070,47 @@ let config_patch_json ?(now = Time_compat.now ()) ~config ~actor ~body_str () =
                                      ("runtime config commit failed: "
                                       ^ Fs_compat.atomic_replace_failure_to_string failure))
                               | Target_keeper _ | Target_keeper_create ->
-                                (match Fs_compat.save_file_atomic target_path after_text with
-                                 | Error msg ->
-                                   error_result
-                                     Env.Store_unavailable
-                                     ("atomic config write failed: " ^ msg)
+                                let keeper_write =
+                                  if file_ops = [] && target <> Target_keeper_create
+                                  then Ok ()
+                                  else (
+                                    match Fs_compat.save_file_atomic target_path after_text with
+                                    | Error msg ->
+                                      error_result
+                                        Env.Store_unavailable
+                                        ("atomic config write failed: " ^ msg)
+                                    | Ok () ->
+                                      Keeper_types_profile.invalidate_keeper_profile_snapshots ();
+                                      Ok ())
+                                in
+                                (match keeper_write with
+                                 | Error _ as err -> err
                                  | Ok () ->
-                                   Keeper_types_profile.invalidate_keeper_profile_snapshots ();
-                                   Ok ())
+                                   (match runtime_assign_preview with
+                                    | None -> Ok ()
+                                    | Some (runtime_path, keeper_name, assign_val, _, _, _) ->
+                                      let assign_res =
+                                        match assign_val with
+                                        | Some runtime_id ->
+                                          Runtime.set_runtime_id_for_keeper
+                                            ~runtime_config_path:runtime_path
+                                            ~keeper_name
+                                            ~runtime_id
+                                            ()
+                                        | None ->
+                                          Runtime.clear_runtime_id_for_keeper
+                                            ~runtime_config_path:runtime_path
+                                            ~keeper_name
+                                            ()
+                                      in
+                                      (match assign_res with
+                                       | Ok _ ->
+                                         Workspace_dataset_event.announce
+                                           ~base_path
+                                           Workspace_dataset_event.Runtime_config;
+                                         Ok ()
+                                       | Error msg ->
+                                         error_result Env.Validation_failed msg)))
                             in
                             (match write_res with
                              | Error _ as err -> err

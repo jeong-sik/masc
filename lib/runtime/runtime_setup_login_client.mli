@@ -1,7 +1,7 @@
 (** Official-client login adapters. The caller owns and reaps the login process
     before calling [observe]; authentication and invocation are
     separate observations. No operation changes the host process environment. *)
-type client = Codex | Claude | Antigravity | Mistral_vibe
+type client = Codex | Claude | Antigravity | Mistral_vibe | Kimi_code | Antigravity_acp
 type native = Runtime_account_home_layout.client = Codex_home | Claude_home
 (** A client that signs in to an account home. *)
 type t

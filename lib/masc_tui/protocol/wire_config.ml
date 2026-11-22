@@ -676,11 +676,25 @@ let field_leaf_label ~lang (f : schema_field) =
       pick ~ko:"사용량 조회 URL" ~en:"Usage Poll URL"
   | ("usage-read" | "usage_read"), ("kind" | "type") ->
       pick ~ko:"사용량 파서" ~en:"Usage Format"
-  | "capabilities", "tools" -> pick ~ko:"도구 호출 지원" ~en:"Tool Calling"
+  | "capabilities", ("tools-support" | "tools_support" | "tools") ->
+      pick ~ko:"도구 호출 지원" ~en:"Tool Calling"
   | "capabilities", "streaming" -> pick ~ko:"스트리밍 지원" ~en:"Streaming"
-  | "capabilities", "vision" -> pick ~ko:"비전(이미지) 지원" ~en:"Vision"
-  | "capabilities", ("prompt-caching" | "prompt_caching") ->
+  | "capabilities", ("supports-image-input" | "supports_image_input" | "vision") ->
+      pick ~ko:"비전(이미지) 지원" ~en:"Vision (Image Input)"
+  | "capabilities", ("supports-prompt-caching" | "supports_prompt_caching" | "prompt-caching" | "prompt_caching") ->
       pick ~ko:"프롬프트 캐싱" ~en:"Prompt Caching"
+  | _, ("tools-support" | "tools_support") ->
+      pick ~ko:"도구 호출 지원" ~en:"Tool Calling"
+  | _, ("supports-image-input" | "supports_image_input") ->
+      pick ~ko:"비전(이미지) 지원" ~en:"Vision (Image Input)"
+  | _, ("supports-prompt-caching" | "supports_prompt_caching") ->
+      pick ~ko:"프롬프트 캐싱" ~en:"Prompt Caching"
+  | _, ("cache-retention" | "cache_retention") ->
+      pick ~ko:"프롬프트 캐시 유지" ~en:"Cache Retention"
+  | _, ("explicit-context-cache-ttl-s" | "explicit_context_cache_ttl_s") ->
+      pick ~ko:"명시적 컨텍스트 캐시 TTL (초)" ~en:"Explicit Context Cache TTL (s)"
+  | _, "store" -> pick ~ko:"Responses 서버 저장 (store)" ~en:"Responses Store"
+  | _, "efforts" -> pick ~ko:"추론 강도 변형 목록" ~en:"Reasoning Effort Variants"
   | _, ("display-name" | "display_name") ->
       pick ~ko:"표시 이름" ~en:"Display Name"
   | _, "protocol" -> pick ~ko:"프로토콜" ~en:"Protocol"

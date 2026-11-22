@@ -5,6 +5,15 @@ open Wire_common
 let ( let* ) = Result.bind
 
 let runtime_resolved_path = "/api/v1/runtime/resolved"
+let runtime_config_raw_path = "/api/v1/runtime/config/raw"
+let runtime_assignment_path = "/api/v1/runtime/config/assignment"
+let runtime_routing_path = "/api/v1/runtime/config/routing"
+let setup_inventory_path = "/api/v1/setup/inventory"
+let setup_accounts_key_path = "/api/v1/setup/accounts/key"
+let setup_accounts_login_path = "/api/v1/setup/accounts/login"
+
+let setup_accounts_login_status_path ~login_id =
+  "/api/v1/setup/accounts/login/" ^ percent_encode login_id
 
 let runtime_probe_path ?(force = false) () =
   Printf.sprintf "/api/v1/dashboard/runtime-probe?force=%b" force
@@ -1100,8 +1109,10 @@ type failover_lane = {
 
 type runtime_option = {
   id : string;
+  provider_id : string;
   provider : string;
   model : string option;
+  declared_reasoning_effort : string option;
   transport : string option;
   is_default : bool;
 }
@@ -1129,12 +1140,26 @@ let decode_failover_lane json =
 let decode_runtime_option ~default_route json =
   let* id = required_nonblank_string json "id" in
   let* provider = required_nonblank_string json "provider" in
+  let* provider_id_opt = optional_nonblank_string json "provider_id" in
+  let provider_id = Option.value provider_id_opt ~default:provider in
   let* model = optional_nonblank_string json "model" in
+  let* declared_reasoning_effort =
+    optional_nonblank_string json "declared_reasoning_effort"
+  in
   let* transport = optional_nonblank_string json "transport" in
   let is_default =
     match default_route with Some d -> String.equal d id | None -> false
   in
-  Ok { id; provider; model; transport; is_default }
+  Ok
+    {
+      id;
+      provider_id;
+      provider;
+      model;
+      declared_reasoning_effort;
+      transport;
+      is_default;
+    }
 
 let decode_runtime_resolved json =
   let* _, body = unwrap_v2_or_raw json in
@@ -1204,7 +1229,11 @@ let binding_tag_for_provider ~runtimes provider_id =
   let low_pid = String.lowercase_ascii (String.trim provider_id) in
   List.find_map
     (fun (rt : runtime_option) ->
-      if not (String.equal rt.provider provider_id) then None
+      if
+        not
+          (String.equal rt.provider_id provider_id
+          || String.equal rt.provider provider_id)
+      then None
       else
         let id = String.trim rt.id in
         match String.index_opt id '.' with
@@ -1349,11 +1378,19 @@ let human_runtime_slot_label ?(runtimes = []) runtime_id =
       runtimes
   with
   | Some rt -> (
-      let prov = human_provider_id_label ~runtimes rt.provider in
+      let prov =
+        human_provider_id_label ~runtimes ~display_name:rt.provider rt.provider_id
+      in
+      let effort_suffix =
+        match rt.declared_reasoning_effort with
+        | Some e when not (String.equal (String.trim e) "") ->
+            "@" ^ String.trim e
+        | Some _ | None -> ""
+      in
       match rt.model with
       | Some mdl when not (String.equal (String.trim mdl) "") ->
-          Printf.sprintf "%s · %s" prov (String.trim mdl)
-      | Some _ | None -> prov)
+          Printf.sprintf "%s · %s%s" prov (String.trim mdl) effort_suffix
+      | Some _ | None -> prov ^ effort_suffix)
   | None -> (
       match String.index_opt raw '.' with
       | Some dot when dot > 0 && dot + 1 < String.length raw ->
@@ -1901,3 +1938,219 @@ let decode_mcp_clients json =
   let* _, body = unwrap_v2_or_raw json in
   let* items = required_list_field body "clients" in
   decode_list "clients" decode_mcp_client_row items
+
+type runtime_config_raw_meta = {
+  source_revision : string;
+  assignments : (string * string) list;
+}
+
+let strip_toml_comment line =
+  let len = String.length line in
+  let rec scan i in_dq in_sq escaped =
+    if i >= len then line
+    else
+      let c = line.[i] in
+      if escaped then scan (i + 1) in_dq in_sq false
+      else if in_dq then
+        if Char.equal c '\\' then scan (i + 1) true false true
+        else if Char.equal c '"' then scan (i + 1) false false false
+        else scan (i + 1) true false false
+      else if in_sq then
+        if Char.equal c '\'' then scan (i + 1) false false false
+        else scan (i + 1) false true false
+      else if Char.equal c '"' then scan (i + 1) true false false
+      else if Char.equal c '\'' then scan (i + 1) false true false
+      else if Char.equal c '#' then String.sub line 0 i
+      else scan (i + 1) false false false
+  in
+  scan 0 false false false
+
+let unquote_toml_string raw =
+  let s = String.trim raw in
+  let len = String.length s in
+  if len >= 2 && Char.equal s.[0] '"' && Char.equal s.[len - 1] '"' then
+    Some (String.sub s 1 (len - 2))
+  else if len >= 2 && Char.equal s.[0] '\'' && Char.equal s.[len - 1] '\'' then
+    Some (String.sub s 1 (len - 2))
+  else if len > 0 then Some s
+  else None
+
+let parse_runtime_assignments_from_toml source_text =
+  let lines = String.split_on_char '\n' source_text in
+  let in_assignments = ref false in
+  let acc = ref [] in
+  List.iter
+    (fun raw_line ->
+      let line = String.trim (strip_toml_comment raw_line) in
+      if String.equal line "" then ()
+      else if Char.equal line.[0] '[' then
+        in_assignments := String.equal line "[runtime.assignments]"
+      else if !in_assignments then
+        match String.index_opt line '=' with
+        | None -> ()
+        | Some eq_idx -> (
+            let raw_k = String.sub line 0 eq_idx in
+            let raw_v =
+              String.sub line (eq_idx + 1) (String.length line - eq_idx - 1)
+            in
+            match unquote_toml_string raw_k, unquote_toml_string raw_v with
+            | Some k, Some v
+              when (not (String.equal (String.trim k) ""))
+                   && not (String.equal (String.trim v) "") ->
+                acc := (String.trim k, String.trim v) :: !acc
+            | _ -> ()))
+    lines;
+  List.rev !acc
+
+let decode_runtime_config_raw_meta json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* source_revision = required_nonblank_string body "source_revision" in
+  let from_toml =
+    match optional_string_field body "source_text" with
+    | Ok (Some text) -> parse_runtime_assignments_from_toml text
+    | Ok None | Error _ -> []
+  in
+  let assignments =
+    if from_toml <> [] then from_toml
+    else
+      match optional_object_field body "model_bindings" with
+      | Ok (Some mb) -> (
+          match optional_list_field mb "assignments" with
+          | Ok rows ->
+              List.filter_map
+                (fun row ->
+                  match
+                    optional_nonblank_string row "keeper_name",
+                    optional_nonblank_string row "runtime_id"
+                  with
+                  | Ok (Some k), Ok (Some r) -> Some (k, r)
+                  | (Ok (Some _ | None) | Error _), (Ok None | Error _)
+                  | (Ok None | Error _), Ok (Some _) ->
+                      None)
+                rows
+          | Error _ -> [])
+      | Ok None | Error _ -> []
+  in
+  Ok { source_revision; assignments }
+
+let encode_runtime_assignment ~keeper_name ~runtime_id ~source_revision
+    ~previous_runtime_id () =
+  let expected_rev =
+    match source_revision with
+    | None -> `Assoc [ ("state", `String "runtime_config_missing") ]
+    | Some rev ->
+        let assignment =
+          match previous_runtime_id with
+          | None -> `Assoc [ ("state", `String "missing") ]
+          | Some prev_id ->
+              `Assoc
+                [ ("state", `String "assigned"); ("runtime_id", `String prev_id) ]
+        in
+        `Assoc
+          [
+            ("state", `String "runtime_config_present");
+            ("source_revision", `String rev);
+            ("assignment", assignment);
+          ]
+  in
+  `Assoc
+    [
+      ("keeper_name", `String keeper_name);
+      ( "runtime_id"
+      , match runtime_id with Some id -> `String id | None -> `Null );
+      ("expected_assignment_revision", expected_rev);
+    ]
+
+let encode_runtime_default_route ~runtime_id =
+  `Assoc [ ("lane", `String "default"); ("runtime_id", `String runtime_id) ]
+
+type setup_integration = {
+  id : string;
+  display_name : string;
+  protocol : string option;
+  origin : string;
+  setup_support : string;
+  enabled : bool;
+  credential_kind : string option;
+  configured_runtime_ids : string list;
+}
+
+type setup_inventory = {
+  default_runtime_id : string option;
+  integrations : setup_integration list;
+}
+
+let decode_setup_integration json =
+  let* id = required_nonblank_string json "id" in
+  let* display_name = required_nonblank_string json "display_name" in
+  let* protocol = optional_nonblank_string json "protocol" in
+  let* origin = required_nonblank_string json "origin" in
+  let* setup_support = required_nonblank_string json "setup_support" in
+  let* enabled =
+    match optional_bool_field json "enabled" with
+    | Ok (Some b) -> Ok b
+    | Ok None -> Ok true
+    | Error _ as err -> err
+  in
+  let* credential_kind = optional_nonblank_string json "credential_kind" in
+  let* configured_runtime_ids =
+    optional_string_list json "configured_runtime_ids"
+  in
+  Ok
+    {
+      id;
+      display_name;
+      protocol;
+      origin;
+      setup_support;
+      enabled;
+      credential_kind;
+      configured_runtime_ids;
+    }
+
+let decode_setup_inventory json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* default_runtime_id = optional_nonblank_string body "default_runtime_id" in
+  let* items = optional_list_field body "integrations" in
+  let* integrations = decode_list "integrations" decode_setup_integration items in
+  Ok { default_runtime_id; integrations }
+
+type setup_login_receipt = {
+  login_id : string;
+  integration_id : string;
+  status : string;
+  account : string option;
+  account_ref : string option;
+  authentication : string option;
+}
+
+let decode_setup_login_receipt json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* login_id = required_nonblank_string body "login_id" in
+  let* integration_id = required_nonblank_string body "integration_id" in
+  let* account = optional_nonblank_string body "account" in
+  let* account_ref = optional_nonblank_string body "account_ref" in
+  let* authentication = optional_nonblank_string body "authentication" in
+  let* status =
+    match optional_nonblank_string body "status" with
+    | Ok (Some s) -> Ok s
+    | Ok None -> (
+        match optional_nonblank_string body "error" with
+        | Ok (Some _) -> Ok "failed"
+        | Ok None | Error _ ->
+            if Option.is_some authentication then Ok "complete" else Ok "running")
+    | Error _ as err -> err
+  in
+  Ok { login_id; integration_id; status; account; account_ref; authentication }
+
+let encode_setup_account_key ~integration_id ~key =
+  `Assoc [ ("integration_id", `String integration_id); ("key", `String key) ]
+
+let encode_setup_account_login_start ~integration_id ?account_ref () =
+  `Assoc
+    (("integration_id", `String integration_id)
+    ::
+    (match account_ref with
+    | Some r when not (String.equal (String.trim r) "") ->
+        [ ("account_ref", `String (String.trim r)) ]
+    | Some _ | None -> []))

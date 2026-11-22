@@ -110,6 +110,26 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
             ? html`<span class="kmh-badge kmh-badge--warn">${unread}</span>`
             : html`<span class="kmh-badge kmh-badge--ok">0</span>`}
         <div><small>${entry.librarian.state ?? '아직 측정 전'}</small></div>
+        ${entry.writer.kind === 'writer'
+          ? html`<div>
+              <span class=${entry.writer.row.level === 'error'
+                ? 'kmh-badge kmh-badge--error'
+                : entry.writer.row.level === 'warn'
+                  ? 'kmh-badge kmh-badge--warn'
+                  : 'kmh-badge kmh-badge--ok'}
+                title=${entry.writer.row.stop ?? `writer: ${entry.writer.row.state}`}
+              >writer:${entry.writer.row.state}${entry.writer.row.alarms.length > 0 ? ` (${entry.writer.row.alarms.join(',')})` : ''}</span>
+              ${entry.writer.row.stop
+                ? html`<div><small>stop: ${entry.writer.row.stop}</small></div>`
+                : ''}
+              ${entry.writer.row.pending_molt
+                ? html`<div><small>molt pending${entry.writer.row.pending_molt_categories?.length ? ` (${entry.writer.row.pending_molt_categories.join(', ')})` : ''}</small></div>`
+                : ''}
+              ${entry.writer.row.available_acts && entry.writer.row.available_acts.length > 0
+                ? html`<div><small>acts: ${entry.writer.row.available_acts.join(', ')}</small></div>`
+                : ''}
+            </div>`
+          : ''}
         ${entry.librarian.operator_action_required
           ? html`<div><span class="kmh-badge kmh-badge--warn">조치 필요 · Librarian 처리·관측 원인과 복구 근거를 확인하세요</span></div>`
           : ''}

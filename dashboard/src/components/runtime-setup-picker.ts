@@ -61,7 +61,7 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
     const group = groupFor(id)
     if (!group) return fallback
     const client = protocol === 'codex-app-server' ? 'Codex' : protocol === 'claude-code' ? 'Claude Code'
-      : protocol === 'muse-serve' ? 'Muse Code' : protocol === 'antigravity-cli' ? 'Antigravity' : fallback
+      : protocol === 'acp' ? 'ACP' : protocol === 'antigravity-cli' ? 'Antigravity' : fallback
     const members = integrations.filter(row => group.integration_ids.includes(row.id))
     const emails = [...new Set((inventory.account_emails ?? []).flatMap(row =>
       group.integration_ids.includes(row.integration_id) && row.state === 'read' && row.email.trim()
@@ -73,10 +73,10 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
   }
   const runtimeLabel = (row: RuntimeRow) => `${accountLabel(row.provider_id, row.display_name, row.protocol)} · 연결 ${row.id} · ${row.model}${row.max_context == null ? '' : ` · ${row.max_context.toLocaleString()} context`}`
   const integration = integrations.find(row => row.id === provider && selectable(row))
-  const officialClient = integration && ['codex-app-server', 'claude-code', 'muse-serve', 'antigravity-cli'].includes(integration.protocol ?? '')
-  const http = integration && ['openai-compatible-http', 'messages-http', 'ollama-http'].includes(integration.protocol ?? '')
+  const officialClient = integration && ['codex-app-server', 'claude-code', 'antigravity-cli', 'acp'].includes(integration.protocol ?? '')
+  const http = integration && ['openai-compatible-http', 'messages-http', 'ollama-http', 'gemini-http', 'vertex-gemini'].includes(integration.protocol ?? '')
   const documentedContext = integration?.protocol === 'codex-app-server' || integration?.protocol === 'claude-code'
-  const client = integration && (['codex-app-server', 'claude-code', 'muse-serve'].includes(integration.protocol ?? '')
+  const client = integration && (['codex-app-server', 'claude-code', 'acp'].includes(integration.protocol ?? '')
     || (integration.protocol === 'antigravity-cli' && (integration.credential_kind === 'file' || selectedAccount?.account_ref)))
   function invalidateDiscovery() { setModels([]); setMarked([]); setSource(null); setDiscoveryRevision(null) }
   function chooseProvider(id: string) { setSelectedAccount(null); setProvider(id); setEndpoint(''); setKey(''); invalidateDiscovery(); setNotice('') }
@@ -103,7 +103,7 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
     let selected: Source = { integration_id: integration.id, ...(http ? { endpoint: integration.endpoint ?? endpoint } : {}), ...(http && key ? { api_key: key } : {}) }
     try {
       if (selectedAccount?.integration_id === integration.id && selectedAccount.account_ref) selected = selectedAccount
-      else if (integration.protocol !== 'antigravity-cli' && client) selected = await selectSetupAccount(integration.id, { signal: controller.signal })
+      else if (integration.protocol !== 'antigravity-cli' && integration.protocol !== 'acp' && client) selected = await selectSetupAccount(integration.id, { signal: controller.signal })
       if (!currentRequest(controller) || controller.signal.aborted) return
       if (selected.account_ref) setSelectedAccount(selected)
       const discovered = await discoverSetupModels(selected, { signal: controller.signal })
@@ -206,22 +206,20 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
       ${http ? html`${!integration?.endpoint ? html`<label>서버 API 주소 <input type="url" value=${endpoint} onInput=${(event: Event) => editEndpoint((event.currentTarget as HTMLInputElement).value)} /></label>` : null}
         <label>새 연결 API 키 <input type="password" autoComplete="off" value=${key} onInput=${(event: Event) => editKey((event.currentTarget as HTMLInputElement).value)} /></label>
         <p class="set-hint">기존 인증을 사용하려면 키를 비워 두세요.</p><button type="button" class="btn" onClick=${discover} disabled=${!integration?.endpoint && !endpoint}>모델 목록 확인</button>`
-        : client ? html`<p class="set-hint">${integration?.protocol === 'claude-code' ? 'MASC의 Claude 모델 카탈로그에서 선택합니다.' : '서버에 선언된 계정 또는 CLI 기본 계정을 선택하여 모델 목록을 확인합니다.'} 계정 응답과 도구 사용은 저장할 때 검증합니다.</p><button type="button" class="btn" onClick=${discover}>${selectedAccount?.account_ref ? '선택한 계정 모델 목록 새로고침' : '서버 계정 선택 후 모델 목록 확인'}</button>`
+        : client ? html`<p class="set-hint">${integration?.protocol === 'claude-code' ? 'MASC의 Claude 모델 카탈로그에서 선택합니다.' : integration?.protocol === 'acp' ? '이 MASC 서버의 ACP CLI 로그인 계정을 사용해 모델 목록을 확인합니다.' : '서버에 선언된 계정 또는 CLI 기본 계정을 선택하여 모델 목록을 확인합니다.'} 계정 응답과 도구 사용은 저장할 때 검증합니다.</p><button type="button" class="btn" onClick=${discover}>${selectedAccount?.account_ref ? '선택한 계정 모델 목록 새로고침' : integration?.protocol === 'acp' ? 'ACP 모델 목록 확인' : '서버 계정 선택 후 모델 목록 확인'}</button>`
         : integration?.protocol === 'antigravity-cli' ? html`<p class="set-hint">아래에서 Antigravity 새 계정에 로그인하거나 서버에 이미 로그인된 계정을 가져오세요. 모델 선택과 검증은 이 화면에서 이어갑니다.</p>`
         : integration ? html`<p class="set-hint">이 CLI 계정은 터미널의 masc setup에서 로그인하고 모델을 선택하세요. 이미 선언한 연결은 위 목록에서 선택할 수 있습니다.</p>` : null}
       ${integration?.protocol === 'antigravity-cli' ? html`<p class="set-hint">브라우저 계정이 아니라 이 MASC 서버에 로그인된 Antigravity 계정을 사용합니다.</p><button type="button" class="btn" onClick=${importAccount}>서버의 로그인된 Antigravity 계정 사용</button>` : null}
       ${models.length ? html`<fieldset><legend>추가할 모델 · 여러 개 선택 가능</legend>${models.map(model => html`<div key=${model.id}><label class="v2-mobile-operator-target"><input type="checkbox"
         disabled=${model.context === null || model.tools === false} checked=${marked.includes(model.id)} onChange=${() => setMarked(current => current.includes(model.id) ? current.filter(id => id !== model.id) : [...current, model.id])} />
-        ${model.label}${model.source?.startsWith('muse_') ? ` · ${model.source.slice(5)} 카탈로그 (응답 미검증)` : ''}${model.context === null ? ' · 실행 context 확인 필요' : ''}${model.tools === false ? ' · 도구 호출 미지원' : ''}</label>
+        ${model.label}${model.context === null ? ' · 실행 context 확인 필요' : ''}${model.tools === false ? ' · 도구 호출 미지원' : ''}</label>
         ${model.default_reasoning_effort !== undefined ? html`<p class="set-hint">추론 노력 · 기본: ${model.default_reasoning_effort} · 지원: ${model.supported_reasoning_efforts?.join(', ') || '보고된 선택지 없음'}</p>` : null}
         ${model.context === null && model.tools !== false ? documentedContext
           ? html`<${ModelContextEntry} model=${model} onApply=${(context: number) => {
               setModels(current => current.map(row => row.id === model.id ? { ...row, context } : row))
               setNotice(`${model.label} context를 ${context} tokens로 설정했습니다. 저장 시 모델 응답과 도구 호출을 검증합니다.`)
             }} />`
-          : integration?.protocol === 'muse-serve'
-            ? html`<p class="set-hint">Muse가 이 모델의 context를 보고하지 않았습니다. CLI 모델 카탈로그를 확인한 뒤 선택한 계정의 모델 목록을 새로고침하세요.</p>`
-            : html`<button type="button" class="btn" onClick=${() => prepare(model)}>이 모델만 준비</button>`
+          : html`<button type="button" class="btn" onClick=${() => prepare(model)}>이 모델만 준비</button>`
           : null}</div>`)}
         <button type="button" class="btn" disabled=${!marked.length} onClick=${addModels}>선택한 모델 추가</button></fieldset>` : null}</fieldset>
     ${officialClient ? html`<${SetupAccountLogin} key=${integration.id} integrationId=${integration.id} selected=${selectedAccount} busy=${disabled || busy}

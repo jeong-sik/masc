@@ -1362,8 +1362,8 @@ let test_acp_overflow_shrink_handoff_and_vibe_operator_login () =
          ~cli_path:"vibe-acp"
          home
      with
-     | Ok Runtime_setup_login_receipt.Unselected -> ()
-     | Ok (Published _ | Linked) -> fail "expected Unselected for Mistral_vibe operator initial account"
+     | Ok Runtime_setup_login_receipt.Keyring_host -> ()
+     | Ok (Published _ | Linked | Unselected) -> fail "expected Keyring_host for Mistral_vibe operator initial account"
      | Error err -> failf "Mistral_vibe operator initial account failed: %s" err);
     (match
        Server_setup_account_login.For_testing.finish_login
@@ -1375,8 +1375,8 @@ let test_acp_overflow_shrink_handoff_and_vibe_operator_login () =
          ~login_id:"vibe-op-login-1"
          home
      with
-     | Ok Runtime_setup_login_receipt.Unselected -> ()
-     | Ok (Published _ | Linked) -> fail "expected Unselected for Mistral_vibe operator finish_login"
+     | Ok Runtime_setup_login_receipt.Keyring_host -> ()
+     | Ok (Published _ | Linked | Unselected) -> fail "expected Keyring_host for Mistral_vibe operator finish_login"
      | Error err -> failf "Mistral_vibe operator finish_login failed: %s" err))
 ;;
 

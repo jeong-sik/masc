@@ -1128,10 +1128,22 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
                ~en:"Librarian Writer & Recovery")
           grid ~rect:writer_c ~y:writer_c.y ~theme;
         let py = writer_c.y + 1 in
+        let format_snap = function
+          | Some (Wire_knowledge.Snapshot_file_present { sha; _ }) ->
+              let short =
+                if String.length sha > 8 then String.sub sha 0 8 else sha
+              in
+              " · snap:" ^ short
+          | Some (Wire_knowledge.Snapshot_file_fault f) -> " · snap:" ^ f
+          | None -> ""
+        in
         let status_line, tone =
           match ws_opt with
-          | Some (Wire_knowledge.Keeper_writer_active { state; available_act_tokens }) ->
+          | Some
+              (Wire_knowledge.Keeper_writer_active
+                 { state; available_act_tokens; snapshot_file }) ->
               let g, t, lbl = writer_state_badge state in
+              let snap = format_snap snapshot_file in
               let acts =
                 if available_act_tokens = [] then ""
                 else
@@ -1140,7 +1152,7 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
                   ^ String.concat " "
                       (List.map (fun tok -> "[" ^ tok ^ "]") available_act_tokens)
               in
-              (Glyph.to_utf8 g ^ " " ^ Say.resolve model.lang lbl ^ acts, t)
+              (Glyph.to_utf8 g ^ " " ^ Say.resolve model.lang lbl ^ snap ^ acts, t)
           | Some Wire_knowledge.Keeper_writer_none ->
               ( Glyph.to_utf8 Glyph.Missing_absent ^ " "
                 ^ Ops_common.say model ~ko:"활성 라이터 없음" ~en:"No active writer"
@@ -1163,6 +1175,7 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
                       with
                       | Some row ->
                           let g, t, lbl = writer_state_badge row.state in
+                          let snap = format_snap row.snapshot_file in
                           let acts =
                             if row.available_act_tokens = [] then ""
                             else
@@ -1171,7 +1184,9 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
                                   (List.map (fun tk -> "[" ^ tk ^ "]")
                                      row.available_act_tokens)
                           in
-                          (Glyph.to_utf8 g ^ " " ^ Say.resolve model.lang lbl ^ acts, t)
+                          ( Glyph.to_utf8 g ^ " " ^ Say.resolve model.lang lbl
+                            ^ snap ^ acts
+                          , t )
                       | None ->
                           ( Glyph.to_utf8 Glyph.Live_idle ^ " "
                             ^ Ops_common.say model ~ko:"대기 중" ~en:"Standing by"
@@ -1267,6 +1282,79 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
                      summary_line);
                 incr y
               end;
+              (* Memory OS Internals strip (Compaction · Canonical Turns · Digest · Librarian Molt) *)
+              (match Observed.to_option model.knowledge.memory_os_internals with
+              | Some intr when String.equal intr.keeper name && !y < bottom ->
+                  let comp_s =
+                    if intr.compaction.present then
+                      Printf.sprintf "compaction:%dep/%dt/%dB"
+                        intr.compaction.epoch_count
+                        intr.compaction.archived_turns_count
+                        intr.compaction.anchor_bytes
+                    else "compaction:none"
+                  in
+                  let ct_s =
+                    if intr.canonical_turns.present then
+                      let rk =
+                        Option.value intr.canonical_turns.latest_runtime_kind
+                          ~default:"?"
+                      in
+                      let wm =
+                        match intr.canonical_turns.compaction_watermark_seq with
+                        | Some s -> Printf.sprintf ",wm:%d" s
+                        | None -> ""
+                      in
+                      Printf.sprintf "turns:%d(%s%s,rst:%d)"
+                        intr.canonical_turns.turn_count rk wm
+                        intr.canonical_turns.history_resets_count
+                    else "turns:none"
+                  in
+                  let dig_s =
+                    if intr.memory_digest.present then
+                      let rev_s =
+                        match intr.memory_digest.revision with
+                        | Some r -> Printf.sprintf "r%d" r
+                        | None -> "r?"
+                      in
+                      let sha_s =
+                        match intr.memory_digest.digest_sha256 with
+                        | Some s when String.length s > 8 ->
+                            "#" ^ String.sub s 0 8
+                        | Some s -> "#" ^ s
+                        | None -> ""
+                      in
+                      Printf.sprintf "digest:%s%s/%df/%dB" rev_s sha_s
+                        intr.memory_digest.fact_count intr.memory_digest.bytes
+                    else "digest:none"
+                  in
+                  let molt_s =
+                    match intr.librarian_molt.pending_molt_kind with
+                    | Some mk ->
+                        let cats =
+                          if intr.librarian_molt.pending_molt_categories = []
+                          then ""
+                          else
+                            "("
+                            ^ String.concat ","
+                                intr.librarian_molt.pending_molt_categories
+                            ^ ")"
+                        in
+                        "molt:" ^ mk ^ cats
+                    | None -> "molt:clear"
+                  in
+                  let os_line =
+                    Printf.sprintf "OS %s %s %s %s %s %s %s"
+                      comp_s (Glyph.to_utf8 Glyph.Separator_dot)
+                      ct_s (Glyph.to_utf8 Glyph.Separator_dot)
+                      dig_s (Glyph.to_utf8 Glyph.Separator_dot)
+                      molt_s
+                  in
+                  ignore
+                    (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                       ~max_w:content.w ~style:(Typography.structure ~bg theme)
+                       os_line);
+                  incr y
+              | _ -> ());
               (* Visual Tier Breakdown Bar (Chart.Stacked_bar, ~show_title:false) *)
               let heat_total = heat.hot + heat.warm + heat.cold + heat.never_retrieved in
               if heat_total > 0 && bottom - !y >= 4 then begin

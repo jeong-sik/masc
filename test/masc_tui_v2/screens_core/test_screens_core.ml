@@ -649,15 +649,19 @@ let populated_model ~cols ~rows ~lang =
         [
           {
             id = "claude-sonnet";
+            provider_id = "anthropic";
             provider = "anthropic";
             model = Some "claude-sonnet-4";
+            declared_reasoning_effort = None;
             transport = Some "http";
             is_default = true;
           };
           {
             id = "glm-5-3";
+            provider_id = "zai";
             provider = "zai";
             model = Some "glm-5.3-flash";
+            declared_reasoning_effort = None;
             transport = Some "http";
             is_default = false;
           };

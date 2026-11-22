@@ -54,6 +54,10 @@ type person_refusal =
   | Copy_without_owner
       (** Antigravity: its credential copy lives in the setup registry, which
           has no owner. *)
+  | Host_keyring_without_owner of Runtime_setup_login_client.client
+      (** Host OS-keyring / CLI-store ACP clients (Mistral Vibe, Kimi Code,
+          Antigravity ACP): their credentials are shared on the host rather than
+          isolated per multi-account person. *)
 
 (** The sentence {!start} answers a person with. *)
 val person_refusal_message : person_refusal -> string

@@ -477,7 +477,7 @@ let%test
     Provider_config.make
       ~kind:Glm
       ~model_id:"glm-5"
-      ~base_url:Zai_catalog.coding_base_url
+      ~base_url:"https://api.z.ai/api/coding/paas/v4"
       ~enable_thinking:true
       ~preserve_thinking:true
       ()
@@ -486,14 +486,14 @@ let%test
     Provider_config.make
       ~kind:Glm
       ~model_id:"glm-5"
-      ~base_url:Zai_catalog.coding_base_url
+      ~base_url:"https://api.z.ai/api/coding/paas/v4"
       ()
   in
   let clearing =
     Provider_config.make
       ~kind:Glm
       ~model_id:"glm-5"
-      ~base_url:Zai_catalog.coding_base_url
+      ~base_url:"https://api.z.ai/api/coding/paas/v4"
       ~preserve_thinking:false
       ()
   in
@@ -534,7 +534,7 @@ let%test "build_request preserves ZAI GLM OpenAI-compatible replay and tool cont
     Provider_config.make
       ~kind:Glm
       ~model_id:"glm-5-turbo"
-      ~base_url:Zai_catalog.coding_base_url
+      ~base_url:"https://api.z.ai/api/coding/paas/v4"
       ~enable_thinking:true
       ~preserve_thinking:true
       ()

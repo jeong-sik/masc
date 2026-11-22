@@ -1,3 +1,5 @@
+module Types = Agent_core.Types
+
 type object_id = int64
 type mode = Disabled | Identity_only | Timed
 type completion = Returned | Returned_error | Raised | Cancelled
@@ -747,3 +749,46 @@ let report_of_json json =
   else Ok {report_observer_id; report_mode; clock_origin_ns; failures; active_spans
           ; probe_calls; bookkeeping; events}
 ;;
+
+module Sdk_hooks : Agent_core.Base.Tool_schema_hooks.S = struct
+  let map_site = function
+    | Agent_core.Base.Tool_schema_hooks.Prepare_json -> Sdk_prepare_json
+    | Wire_json -> Sdk_wire_json
+    | Byte_count_lookup -> Sdk_byte_count_lookup
+    | Byte_count_encode -> Sdk_byte_count_encode
+    | Byte_count_publication -> Sdk_byte_count_publication
+  ;;
+
+  let map_json_lookup = function
+    | Agent_core.Base.Tool_schema_hooks.Existing_json -> Existing_json
+    | Created_json -> Created_json
+  ;;
+
+  let map_cache_outcome = function
+    | Agent_core.Base.Tool_schema_hooks.Json_lookup outcome ->
+      Json_lookup (map_json_lookup outcome)
+    | Byte_lookup { json; count } ->
+      let count =
+        match count with
+        | Existing_byte_count -> Existing_byte_count
+        | Missing_byte_count -> Missing_byte_count
+      in
+      Byte_lookup { json = map_json_lookup json; count }
+    | Byte_publication outcome ->
+      let outcome =
+        match outcome with
+        | Published_byte_count -> Published_byte_count
+        | Concurrent_byte_count_won -> Concurrent_byte_count_won
+      in
+      Byte_publication outcome
+  ;;
+
+  let with_provider_turn = with_provider_turn
+  let with_site site operation = with_site (map_site site) operation
+  let measure ~site ?schema operation = measure ~site:(map_site site) ?schema operation
+  let encode ~site ~schema operation = encode ~site:(map_site site) ~schema operation
+  let surface ~site keys = surface ~site:(map_site site) keys
+  let cache ~schema outcome = cache ~schema (map_cache_outcome outcome)
+end
+
+let () = Agent_core.Base.Tool_schema_hooks.install (Some (module Sdk_hooks))

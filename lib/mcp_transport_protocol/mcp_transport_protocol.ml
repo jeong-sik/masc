@@ -182,7 +182,7 @@ let initialize_protocol_version params =
    negotiated version is not threaded down to this builder. *)
 (* Every result identifies the server (2026-07-28 basic/index, per-response
    protocol fields). Built here from [Build_version], the leaf every layer can
-   reach, rather than restated: [Runtime_build_version] exists because a
+   reach, rather than restated: [Build_version] exists because a
    connector that could not reach the version carried a literal and it drifted.
 
    Injected in [make_response] for the same reason [resultType] is -- 22 call

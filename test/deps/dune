@@ -77,7 +77,6 @@
   (re_export masc.keeper_efficiency)
   (re_export masc.keeper_hooks_agent_core_types)
   (re_export masc.keeper_sandbox_image)
-  (re_export masc.local_runtime_pool)
   (re_export masc.lockfree_atomic)
   (re_export masc.otel_dispatch_hook)
   (re_export masc.otel_genai)

@@ -291,7 +291,7 @@ let dispatch_message
              ; ( "serverInfo"
                , `Assoc
                    [ "name", `String server_name
-                   ; "version", `String Runtime_build_version.current
+                   ; "version", `String Build_version.current
                    ] )
              ])
       in

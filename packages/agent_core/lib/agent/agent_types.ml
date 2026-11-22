@@ -78,7 +78,6 @@ type options =
   ; raw_trace : Raw_trace.t option
   ; context_injector : Hooks.context_injector option
   ; event_bus : Event_bus.t option
-  ; skill_registry : Skill_registry.t option
   ; elicitation : Hooks.elicitation_callback option
   ; tool_approval : Hooks.tool_approval_callback option
   ; description : string option
@@ -145,7 +144,6 @@ let default_options =
   ; raw_trace = None
   ; context_injector = None
   ; event_bus = None
-  ; skill_registry = None
   ; elicitation = None
   ; tool_approval = None
   ; description = None
@@ -323,15 +321,7 @@ let card ~supported_interfaces t =
     | Some config -> [ typed_provider_name config ]
     | None -> []
   in
-  let skills =
-    match t.options.skill_registry with
-    | Some reg ->
-      List.map
-        (fun (s : Skill_document.t) ->
-           { Agent_card.name = s.name; description = Some s.description })
-        (Skill_registry.list reg)
-    | None -> []
-  in
+  let skills = [] in
   Agent_card.of_info
     { agent_name = t.state.config.name
     ; agent_description = t.options.description

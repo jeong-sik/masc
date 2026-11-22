@@ -5,7 +5,7 @@
     attribution live in [Env_config_snapshot] inside the
     [masc_config] sub-library. This wrapper adds root-runtime
     metadata that is only available from the main server library
-    ([Runtime_build_version.current], [Server_startup_state.elapsed_since_start],
+    ([Build_version.current], [Server_startup_state.elapsed_since_start],
     [Sys.ocaml_version], the live PID, and the build-time commit stamp
     surfaced by [Build_identity]).
 

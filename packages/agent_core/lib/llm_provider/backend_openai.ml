@@ -81,7 +81,7 @@ let[@warning "-32"] declared_deepseek_config ?enable_thinking ?reasoning_effort 
   Provider_config.make
     ~kind:OpenAI_compat
     ~model_id
-    ~base_url:"https://api.deepseek.com"
+    ~base_url:"https://provider.example.invalid"
     ?enable_thinking
     ?reasoning_effort
     ~model_capabilities_override:deepseek_v4_capabilities
@@ -112,7 +112,7 @@ let%test "glm rejects named forced tool_choice" =
     Provider_config.make
       ~kind:Provider_config.Glm
       ~model_id:"glm-5"
-      ~base_url:Zai_catalog.general_base_url
+      ~base_url:"https://api.z.ai/api/paas/v4"
       ~tool_choice:(Tool "calculator")
       ()
   in
@@ -129,7 +129,7 @@ let%test "glm passes tool_choice any through (no coerce)" =
     Provider_config.make
       ~kind:Provider_config.Glm
       ~model_id:"glm-5"
-      ~base_url:Zai_catalog.general_base_url
+      ~base_url:"https://api.z.ai/api/paas/v4"
       ~tool_choice:Any
       ()
   in
@@ -141,7 +141,7 @@ let%test "glm drops tool_choice none" =
     Provider_config.make
       ~kind:Provider_config.Glm
       ~model_id:"glm-5"
-      ~base_url:Zai_catalog.general_base_url
+      ~base_url:"https://api.z.ai/api/paas/v4"
       ~tool_choice:None_
       ()
   in
@@ -153,7 +153,7 @@ let%test "glm drops tools when tool_choice none" =
     Provider_config.make
       ~kind:Provider_config.Glm
       ~model_id:"glm-5"
-      ~base_url:Zai_catalog.general_base_url
+      ~base_url:"https://api.z.ai/api/paas/v4"
       ~tool_choice:None_
       ()
   in
@@ -185,7 +185,7 @@ let%test "glm drops min_p when model does not support it" =
     Provider_config.make
       ~kind:Provider_config.Glm
       ~model_id:"glm-5.1"
-      ~base_url:Zai_catalog.general_base_url
+      ~base_url:"https://api.z.ai/api/paas/v4"
       ~min_p:0.05
       ()
   in
@@ -199,7 +199,7 @@ let%test "glm drops top_k when model does not support it" =
     Provider_config.make
       ~kind:Provider_config.Glm
       ~model_id:"glm-5.1"
-      ~base_url:Zai_catalog.general_base_url
+      ~base_url:"https://api.z.ai/api/paas/v4"
       ~top_k:40
       ()
   in
@@ -417,7 +417,7 @@ let%test "build_request rejects ToolResult outside role Tool" =
     Provider_config.make
       ~kind:Provider_config.Glm
       ~model_id:"glm-5.1"
-      ~base_url:Zai_catalog.general_base_url
+      ~base_url:"https://api.z.ai/api/paas/v4"
       ()
   in
   let messages =
@@ -1049,7 +1049,7 @@ let%test "glm build_request rejects unsupported forced tool_choice" =
     Provider_config.make
       ~kind:Provider_config.Glm
       ~model_id:"glm-5.1"
-      ~base_url:Zai_catalog.coding_base_url
+      ~base_url:"https://api.z.ai/api/coding/paas/v4"
       ~tool_choice:(Tool "calc")
       ()
   in
@@ -1091,7 +1091,7 @@ let%test
     Provider_config.make
       ~kind:Provider_config.Glm
       ~model_id:"glm-5.1"
-      ~base_url:Zai_catalog.coding_base_url
+      ~base_url:"https://api.z.ai/api/coding/paas/v4"
       ~enable_thinking:true
       ~preserve_thinking:true
       ()
@@ -1284,7 +1284,7 @@ let%test "openai compat does not infer ZAI thinking from bare GLM model or URL" 
     Provider_config.make
       ~kind:OpenAI_compat
       ~model_id:"glm-5"
-      ~base_url:Zai_catalog.coding_base_url
+      ~base_url:"https://api.z.ai/api/coding/paas/v4"
       ~enable_thinking:true
       ~preserve_thinking:true
       ()
@@ -1300,7 +1300,7 @@ let%test "openai compat does not infer ZAI preserve control from bare GLM model 
     Provider_config.make
       ~kind:OpenAI_compat
       ~model_id:"glm-5"
-      ~base_url:Zai_catalog.coding_base_url
+      ~base_url:"https://api.z.ai/api/coding/paas/v4"
       ~enable_thinking:true
       ~preserve_thinking:true
       ()
@@ -1380,7 +1380,7 @@ let%test "max_tokens clamped to capability ceiling when caller exceeds cap" =
     Provider_config.make
       ~kind:Provider_config.Glm
       ~model_id:"glm-4-flash"
-      ~base_url:Zai_catalog.general_base_url
+      ~base_url:"https://api.z.ai/api/paas/v4"
       ~max_tokens:8_000
       ()
   in
@@ -1395,7 +1395,7 @@ let%test "max_tokens passed through when within capability cap" =
     Provider_config.make
       ~kind:Provider_config.Glm
       ~model_id:"glm-4-flash"
-      ~base_url:Zai_catalog.general_base_url
+      ~base_url:"https://api.z.ai/api/paas/v4"
       ~max_tokens:2_000
       ()
   in
@@ -1416,7 +1416,7 @@ let%test "max_tokens omitted on caller None even when the catalog declares a cap
     Provider_config.make
       ~kind:Provider_config.Glm
       ~model_id:"glm-4-flash"
-      ~base_url:Zai_catalog.general_base_url
+      ~base_url:"https://api.z.ai/api/paas/v4"
       ()
   in
   let body = build_request ~config ~messages:[] () in
@@ -1530,7 +1530,7 @@ let%test "build_request rejects explicit seed when model does not support it" =
     Provider_config.make
       ~kind:Provider_config.Glm
       ~model_id:"glm-5.1"
-      ~base_url:Zai_catalog.general_base_url
+      ~base_url:"https://api.z.ai/api/paas/v4"
       ~seed:42
       ()
   in

@@ -125,10 +125,13 @@ type run_result = {
 (* ================================================================ *)
 
 let provider_caps_of_config =
-  Runtime_transport.provider_caps_of_config
+  Agent_core.Provider_runtime_binding.capabilities_for_provider_config
 
-let provider_label =
-  Runtime_transport.provider_label
+let provider_label (provider_cfg : Llm_provider.Provider_config.t) =
+  Printf.sprintf
+    "%s:%s"
+    (Llm_provider.Provider_config.string_of_provider_kind provider_cfg.kind)
+    provider_cfg.model_id
 
 let provider_resource_observation_transport
     ~(kind : Fd_accountant.kind)

@@ -84,3 +84,10 @@ val candidate_backpressure : now:float -> candidate:candidate -> candidate_backp
     its usable Retry-After (RFC-exact-lane-waits-for-a-stated-reset).
     Retry-After is retained when usable; no-hint rate limits and failed
     attempts have no invented deadline and are cleared by success. *)
+
+val install_rest_observer : (unit -> unit) -> unit
+(** Install a process-local callback notified whenever candidate backpressure
+    or quota-window rest state is recorded or cleared. *)
+
+val notify_rest_recorded : unit -> unit
+(** Invoke the currently installed rest observer, if any. *)

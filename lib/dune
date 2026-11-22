@@ -224,7 +224,6 @@
   masc.voice_runtime_overlay
   masc.voice_bridge_core
   masc.discovery_cache
-  masc.local_runtime_pool
   masc.attribution
   masc.exec_policy
   masc.keeper_registry

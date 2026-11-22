@@ -217,7 +217,7 @@ let launch_volume_gc (state : Masc_tui_types.state) ~mailbox request =
         | None ->
             Result.map_error failed
               (Masc_tui_http.open_mcp_session ~host ~port
-                 ~client_version:Runtime_build_version.current)
+                 ~client_version:Build_version.current)
       in
       let* () =
         Masc_tui_transport.Workspace_admission.admit_request

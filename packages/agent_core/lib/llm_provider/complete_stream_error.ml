@@ -5,7 +5,7 @@
    credentials (Bearer tokens, API keys, URL userinfo), and the excerpt redacts
    before it bounds. *)
 
-type refused_frame =
+type refused_frame = Complete_stream_diagnostic.refused_frame =
   { wire_format : Http_client.provider_wire_format
   ; reason : string
   ; raw : string

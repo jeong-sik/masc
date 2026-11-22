@@ -795,10 +795,10 @@ let memoize_message_measurement measure =
    shared CPU-weighted [Domain_pool]; non-Eio/unit callers retain the typed
    inline fallback owned by [Domain_pool_ref]. *)
 let offload_model_input_cpu f =
-  let work = Agent_core.Base.Schema_observation.capture (fun () ->
-    Agent_core.Base.Schema_observation.measure ~site:Worker_work f)
+  let work = Schema_observation.capture (fun () ->
+    Schema_observation.measure ~site:Worker_work f)
   in
-  Agent_core.Base.Schema_observation.measure ~site:Worker_queue_and_await
+  Schema_observation.measure ~site:Worker_queue_and_await
     (fun () -> Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ work)
 
 (* The request bytes that are not conversation history, measured with the
@@ -806,7 +806,7 @@ let offload_model_input_cpu f =
    against the window before any atom is considered. *)
 let declared_request_reserve_bytes ~system_prompt ~tools =
   let tool_schema_bytes =
-    Agent_core.Base.Schema_observation.with_site Reserve_encode (fun () ->
+    Schema_observation.with_site Reserve_encode (fun () ->
       List.fold_left
         (fun acc tool ->
            acc
@@ -2073,7 +2073,7 @@ let bounded_model_input_projection
       Keeper_agent_tool_surface.on_the_wire ~agent_cell ~built:ctx.tools
       |> Agent_core.Tool_set.of_list |> Agent_core.Tool_set.to_list
       |> fun tools ->
-      Agent_core.Base.Schema_observation.surface ~site:Request_surface
+      Schema_observation.surface ~site:Request_surface
         (fun () -> List.map (fun (tool : Agent_core.Tool.t) -> tool.schema) tools);
       tools
       |> List.map Agent_core.Tool.schema_to_json
@@ -2971,12 +2971,12 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
   let permit_wait = Atomic.make Llm_provider.Provider_admission.Before_any_wait in
   let config_result =
     let base_config =
-      Runtime_candidate.default_config
+      Runtime_agent.default_config
         ~media_store:ctx.media_store
         ~name:ctx.name
+        ~provider_cfg:candidate
         ~system_prompt:ctx.system_prompt
         ~tools:ctx.tools
-        candidate
     in
     (* The gate's pre_tool_use runs before whatever hooks the turn brought:
        composed as [outer], so a call it holds never reaches them, and a call
@@ -4168,11 +4168,9 @@ let persist_dropped_response
    no-thinking retry below must strip it from the candidate — otherwise the
    retry dies in request validation instead of continuing the turn it was
    meant to rescue. *)
-let candidate_without_reasoning_effort (candidate : Runtime_candidate.t) : Runtime_candidate.t =
-  Runtime_candidate.of_provider_config
-    { (Runtime_candidate.provider_cfg candidate) with
-      Llm_provider.Provider_config.reasoning_effort = None
-    }
+let candidate_without_reasoning_effort
+    (candidate : Llm_provider.Provider_config.t) : Llm_provider.Provider_config.t =
+  { candidate with Llm_provider.Provider_config.reasoning_effort = None }
 ;;
 
 (* Asked of the request the retry would actually send, not of an approximation
@@ -4186,9 +4184,9 @@ let candidate_without_reasoning_effort (candidate : Runtime_candidate.t) : Runti
    [thinking_control_request_rejection] calls a row whose thinking control
    lives on a separate capability axis unable to disable, when that wire turns
    thinking off by sending no thinking field at all. *)
-let retry_without_thinking_admitted (candidate : Runtime_candidate.t) =
+let retry_without_thinking_admitted (candidate : Llm_provider.Provider_config.t) =
   let retry_cfg =
-    { (Runtime_candidate.provider_cfg (candidate_without_reasoning_effort candidate)) with
+    { (candidate_without_reasoning_effort candidate) with
       Llm_provider.Provider_config.enable_thinking = Some false
     ; preserve_thinking = Some false
     }

@@ -5666,10 +5666,7 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
             (Printf.sprintf "%s provider_config max_concurrent_requests" id)
             expected
             (agent_core_provider_config rt).max_concurrent_requests;
-          let selected_provider_config =
-            Runtime_candidate.of_provider_config (agent_core_provider_config rt)
-            |> Runtime_candidate.provider_cfg
-          in
+          let selected_provider_config = agent_core_provider_config rt in
           check
             (option int)
             (Printf.sprintf "%s selected provider config admission" id)

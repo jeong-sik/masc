@@ -46,7 +46,7 @@ let launch_task_creation_read (state : T.state) ~mailbox =
         let* ()=Admission.admit_request state ~mailbox ~authority ~identity ~host ~port ()
           |> Result.map_error kept_back in
         let* session_id=(match session with Some id -> Ok id
-          | None -> Masc_tui_http.open_mcp_session ~host ~port ~client_version:Runtime_build_version.current)
+          | None -> Masc_tui_http.open_mcp_session ~host ~port ~client_version:Build_version.current)
           |> Result.map_error (fun detail -> Masc_tui_original_task_read.Read_failed detail) in
         let* ()=Admission.admit_request ~prior_contact:Masc_tui_server_lifecycle.Server_reached
           state ~mailbox ~authority ~identity ~host ~port () |> Result.map_error kept_back in
@@ -171,7 +171,7 @@ let launch_task_dispatch (state : T.state) ~mailbox ~keeper_name ~title ~body ~o
         let* () = admit () in
         let* session_id = match session with
           | Some session_id -> Ok session_id
-          | None -> Masc_tui_http.open_mcp_session ~host ~port ~client_version:Runtime_build_version.current
+          | None -> Masc_tui_http.open_mcp_session ~host ~port ~client_version:Build_version.current
               |> Result.map_error (fun detail -> Masc_tui_task_dispatch.Preparation_failed detail) in
         let* () = admit ~prior_contact:Masc_tui_server_lifecycle.Server_reached () in
         Ok session_id)

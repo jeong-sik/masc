@@ -111,7 +111,7 @@ let fixture_script ?(await_dynamic_tools = true) ?(close_before_turn = false) ?(
       output_string output
         (Printf.sprintf
            "printf '%%s' \"$request\" | grep -F %s >/dev/null || exit 97\n"
-           (shell_quote (Printf.sprintf {|"version":"%s"|} Runtime_build_version.current)));
+           (shell_quote (Printf.sprintf {|"version":"%s"|} Build_version.current)));
     Option.iter
       (fun capture_path ->
          output_string

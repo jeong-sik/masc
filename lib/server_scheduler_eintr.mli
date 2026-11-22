@@ -31,7 +31,7 @@ type context = {
   ocaml_version : string;
       (** [Sys.ocaml_version]. *)
   masc_version : string;
-      (** [Runtime_build_version.current]. *)
+      (** [Build_version.current]. *)
   git_commit : string option;
       (** Binary commit stamp ([Build_identity.embedded_commit], a pure
           constant — the probing [Build_identity.current] is unsafe on a

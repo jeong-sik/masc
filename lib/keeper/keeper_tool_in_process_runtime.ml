@@ -2282,11 +2282,31 @@ let handle_masc_file_with_outcome ~name ~args () =
   | _, _, Error refusal -> masc_file_failure (Runtime_account_access.refusal_to_string refusal)
   | Some sw, Some net, Ok host -> (
     let require_env = require_env host in
+    let resolve_files_base_url () =
+      match Env_config_core.raw_value_opt "DEEPSEEK_BASE_URL" with
+      | Some url when String.trim url <> "" -> Ok (String.trim url)
+      | Some _ | None ->
+        (match Runtime.source_config () with
+         | Some cfg ->
+           (match
+              List.find_opt
+                (fun (p : Runtime_schema.provider) -> String.equal p.id "deepseek")
+                cfg.providers
+            with
+            | Some { transport = Runtime_schema.Http url; _ }
+              when String.trim url <> "" -> Ok (String.trim url)
+            | Some { transport = Runtime_schema.Http _ | Runtime_schema.Cli _; _ } | None ->
+              Error
+                "masc_file requires an HTTP endpoint on [providers.deepseek] in runtime.toml (or DEEPSEEK_BASE_URL)")
+         | None ->
+           Error
+             "masc_file requires runtime.toml [providers.deepseek] endpoint (or DEEPSEEK_BASE_URL)")
+    in
     match name with
     | "masc_file_upload" -> (
-      match require_env "DEEPSEEK_API_KEY" with
-      | Error msg -> masc_file_failure msg
-      | Ok api_key ->
+      match require_env "DEEPSEEK_API_KEY", resolve_files_base_url () with
+      | Error msg, _ | _, Error msg -> masc_file_failure msg
+      | Ok api_key, Ok base_url ->
         let filename = Tool_args.get_string args "filename" "" in
         let content_base64 = Tool_args.get_string args "content_base64" "" in
         let purpose = Tool_args.get_string args "purpose" "user_data" in
@@ -2296,7 +2316,7 @@ let handle_masc_file_with_outcome ~name ~args () =
           (* The boundary only needs to be unique within one request body. *)
           let boundary = "masc-file-" ^ string_of_int (int_of_float (Unix.time ())) in
           match
-            Llm_provider.Provider_files.upload ~sw ~net ~api_key ~boundary
+            Llm_provider.Provider_files.upload ~sw ~net ~base_url ~api_key ~boundary
               ~filename ~purpose ~content:content_base64 ()
           with
           | Error msg -> masc_file_failure msg
@@ -2315,13 +2335,13 @@ let handle_masc_file_with_outcome ~name ~args () =
                  ()))
         )
     | "masc_file_delete" -> (
-      match require_env "DEEPSEEK_API_KEY" with
-      | Error msg -> masc_file_failure msg
-      | Ok api_key ->
+      match require_env "DEEPSEEK_API_KEY", resolve_files_base_url () with
+      | Error msg, _ | _, Error msg -> masc_file_failure msg
+      | Ok api_key, Ok base_url ->
         let file_id = Tool_args.get_string args "file_id" "" in
         if file_id = "" then masc_file_failure "file_id is required"
         else
-          match Llm_provider.Provider_files.delete ~sw ~net ~api_key ~file_id () with
+          match Llm_provider.Provider_files.delete ~sw ~net ~base_url ~api_key ~file_id () with
           | Error msg -> masc_file_failure msg
           | Ok true ->
             Keeper_tool_execution.of_tool_result
@@ -2333,10 +2353,10 @@ let handle_masc_file_with_outcome ~name ~args () =
           | Ok false -> masc_file_failure "deletion not confirmed"
       )
     | "masc_file_list" -> (
-      match require_env "DEEPSEEK_API_KEY" with
-      | Error msg -> masc_file_failure msg
-      | Ok api_key ->
-        (match Llm_provider.Provider_files.list_files ~sw ~net ~api_key () with
+      match require_env "DEEPSEEK_API_KEY", resolve_files_base_url () with
+      | Error msg, _ | _, Error msg -> masc_file_failure msg
+      | Ok api_key, Ok base_url ->
+        (match Llm_provider.Provider_files.list_files ~sw ~net ~base_url ~api_key () with
          | Error msg -> masc_file_failure msg
          | Ok files ->
            let rows =

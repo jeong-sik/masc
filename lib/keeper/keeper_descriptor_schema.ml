@@ -19,7 +19,7 @@ let memoizes descriptor =
 let construct descriptor =
   match Keeper_tool_descriptor.keeper_model_names descriptor with
   | [name] ->
-    Agent_core.Base.Schema_observation.constructor
+    Schema_observation.constructor
       ~site:Bridge_execution_env_constructor
       (fun () ->
         Agent_core.Types.tool_schema_of_input_schema

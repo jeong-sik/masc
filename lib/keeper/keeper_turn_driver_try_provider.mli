@@ -813,7 +813,7 @@ val run_try_provider_with_truncation_recovery :
   ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
   ?continuation_checkpoint:Agent_core.Checkpoint.t ->
   try_provider_ctx ->
-  Runtime_candidate.t ->
+  Llm_provider.Provider_config.t ->
   (Runtime_agent.run_result, Agent_core.Error.t) result
   * Agent_core.Checkpoint.t option
   * (string * Obj.t) option
@@ -961,13 +961,13 @@ module For_testing : sig
   (** The candidate a no-thinking truncation retry dispatches to: identical
       but for [reasoning_effort = None], because the wires that admit effort
       reject it with thinking disabled. *)
-  val candidate_without_reasoning_effort : Runtime_candidate.t -> Runtime_candidate.t
+  val candidate_without_reasoning_effort : Llm_provider.Provider_config.t -> Llm_provider.Provider_config.t
 
   (** Whether the no-thinking retry would be admitted on this candidate, asked
       of the request it would send and answered by the admission every request
       meets ([Complete_common.validate_all]). This is what
       {!truncation_recovery} reads as [thinking_can_be_disabled]. *)
-  val retry_without_thinking_admitted : Runtime_candidate.t -> bool
+  val retry_without_thinking_admitted : Llm_provider.Provider_config.t -> bool
 
   val apply_accept :
     runtime_id:string ->

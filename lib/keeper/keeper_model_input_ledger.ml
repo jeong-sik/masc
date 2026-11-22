@@ -494,7 +494,7 @@ let prefix_digest ~system_prompt ~tools =
     List.map
       (fun tool ->
          let json = Agent_core.Tool.schema_to_json tool in
-         part (Agent_core.Base.Schema_observation.encode
+         part (Schema_observation.encode
                  ~site:Prefix_digest_encode ~schema:tool.Agent_core.Tool.schema
                  (fun () -> Yojson.Safe.to_string json)))
       tools

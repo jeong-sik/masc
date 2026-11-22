@@ -20,7 +20,6 @@ module Code = Masc.Keeper_turn_terminal_code
 module EC = Masc.Keeper_error_classify
 module KFR = Keeper_runtime_failure_route
 module KTD = Masc.Keeper_turn_driver
-module RC = Runtime_candidate
 module CoreError = Agent_core.Error
 module Retry = Agent_core.Retry
 module Http = Llm_provider.Http_client

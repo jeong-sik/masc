@@ -509,12 +509,12 @@ let test_default_zai_base_urls () =
   let reg = Provider_registry.default () in
   (match Provider_registry.find reg "glm" with
    | Some e ->
-     check string "glm base_url" Zai_catalog.general_base_url e.defaults.base_url;
+     check string "glm base_url" "https://api.z.ai/api/paas/v4" e.defaults.base_url;
      check bool "glm requires_api_key" true e.defaults.requires_api_key
    | None -> fail "glm should exist");
   (match Provider_registry.find reg "glm-coding" with
    | Some e ->
-     check string "glm-coding base_url" Zai_catalog.coding_base_url e.defaults.base_url;
+     check string "glm-coding base_url" "https://api.z.ai/api/coding/paas/v4" e.defaults.base_url;
      check bool "glm-coding requires_api_key" true e.defaults.requires_api_key
    | None -> fail "glm-coding should exist");
   match Provider_registry.find reg "kimi" with

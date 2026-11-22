@@ -98,7 +98,7 @@ let standing_moved ~before ~after =
 let install ~sw ~clock ~(config : Workspace.config) =
   let wake = Eio.Stream.create 1 in
   let wake_mu = Stdlib.Mutex.create () in
-  Runtime_path_rest_signal.install (fun () ->
+  Runtime_candidate_backpressure.install_rest_observer (fun () ->
     Stdlib.Mutex.protect wake_mu (fun () ->
       if Eio.Stream.is_empty wake then Eio.Stream.add wake ()));
   let read ~before =

@@ -775,7 +775,6 @@ let test_build_request_with_thinking () =
 
 let test_constants_cache_truncation_and_endpoints () =
   Alcotest.(check int) "cache ttl" 300 Constants.Cache.default_ttl_sec;
-  Alcotest.(check int) "truncate" 200 Constants.Truncation.max_error_body_length;
   Alcotest.(check int) "llama port" 8085 Constants.Endpoints.default_llama_port;
   Alcotest.(check string)
     "default url"

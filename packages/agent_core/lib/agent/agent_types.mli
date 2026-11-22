@@ -215,9 +215,6 @@ type options =
   ; raw_trace : Raw_trace.t option
   ; context_injector : Hooks.context_injector option
   ; event_bus : Event_bus.t option
-  ; skill_registry : Skill_registry.t option
-    (** Discovery/metadata path only.  Surfaced via {!Agent.card} for
-          A2A negotiation.  Does not affect runtime prompt composition. *)
   ; elicitation : Hooks.elicitation_callback option
   ; tool_approval : Hooks.tool_approval_callback option
     (** Closed synchronous exact-tool approval callback. *)

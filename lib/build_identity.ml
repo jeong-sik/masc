@@ -1222,8 +1222,8 @@ let current () =
       , commit_resolution.repo_head_commit_source
       , observation.repo_head_unix_ts )
   in
-  { release_version = Runtime_build_version.current
-  ; binary_version = Runtime_build_version.current
+  { release_version = Build_version.current
+  ; binary_version = Build_version.current
   ; repo_version
   ; commit = commit_resolution.commit
   ; commit_source = commit_resolution.commit_source

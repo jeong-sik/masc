@@ -1106,7 +1106,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                        when receipt = Workspace.read_precondition_admission_header
                             && String.equal runtime.base_path scope.config.base_path ->
                          Sse_wire.observer_identity_headers
-                           { version = Runtime_build_version.current
+                           { version = Build_version.current
                            ; binary_commit = Build_identity.embedded_commit }
                      | (Sse.Observer | Sse.Agent_stream | Sse.Presence), _, _, _ -> [])
               in

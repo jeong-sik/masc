@@ -12,17 +12,29 @@ let safe_discovery_endpoints () =
     Printexc.raise_with_backtrace cancelled (Printexc.get_raw_backtrace ())
   | _ -> None
 
+let default_pool_label = "local64"
+
+let runtime_port base_url =
+  try Uri.of_string base_url |> Uri.port with Failure _ -> None
+
+let runtime_id_of_base_url base_url =
+  match runtime_port base_url with
+  | Some port -> Printf.sprintf "local-%d" port
+  | None ->
+      let digest = Digest.string base_url |> Digest.to_hex in
+      Printf.sprintf "local-%s" (String.sub digest 0 8)
+
 let select_endpoint_urls_for_pool ?runtime_pool endpoint_urls =
   match Option.bind runtime_pool String_util.trim_nonempty with
   | None -> if endpoint_urls = [] then None else Some endpoint_urls
   | Some pool
-    when String.equal pool Local_runtime_pool.default_pool_label
+    when String.equal pool default_pool_label
          || String.equal pool "default" ->
       if endpoint_urls = [] then None else Some endpoint_urls
   | Some pool ->
       let matches url =
         String.equal pool url
-        || String.equal pool (Local_runtime_pool.runtime_id_of_base_url url)
+        || String.equal pool (runtime_id_of_base_url url)
       in
       (match List.filter matches endpoint_urls with
        | [] -> None
@@ -265,7 +277,7 @@ let verify_discovered ?expected_slots ?expected_ctx ?expected_model endpoints =
             [
               ( "runtime_id",
                 `String
-                  (Local_runtime_pool.runtime_id_of_base_url endpoint.url) );
+                  (runtime_id_of_base_url endpoint.url) );
               ("base_url", `String endpoint.url);
               ("provider_reachable", `Bool provider_ok_row);
               ( "provider_error",

@@ -85,7 +85,6 @@ module Event_envelope = Event_envelope
 module Event_bus = Event_bus
 module Telemetry_bus = Telemetry_bus
 module Skill_document = Skill_document
-module Skill_registry = Skill_registry
 module Structured = Structured
 module Checkpoint = Checkpoint
 module Checkpoint_snapshot = Checkpoint_snapshot
@@ -112,8 +111,6 @@ module Sessions = Sessions
 module Trajectory = Trajectory
 module Metrics = Metrics
 module Async_agent = Async_agent
-module Eval_stats = Eval_stats
-module Runtime_store = Runtime_store
 module Tool_input_validation = Tool_input_validation
 
 (* runtime_query/query removed — CLI Runtime purge *)

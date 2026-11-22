@@ -1,4 +1,4 @@
-module Observation = Agent_core.Base.Schema_observation
+module Observation = Schema_observation
 
 module Descriptors = Ephemeron.K1.Make (struct
   type t = Keeper_tool_descriptor.t

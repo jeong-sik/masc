@@ -74,7 +74,7 @@ let parse_args () =
   let tool_visibility = ref "compact" in
 
   let specs = [
-    ("--version", Arg.Unit (fun () -> print_endline Runtime_build_version.current; exit 0),
+    ("--version", Arg.Unit (fun () -> print_endline Build_version.current; exit 0),
       "Print this executable's build version and exit");
     ("--build-commit", Arg.Unit (fun () ->
         match Build_commit_generated.commit with

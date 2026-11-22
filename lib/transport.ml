@@ -470,7 +470,7 @@ module Rest = struct
           `Assoc
             [
               ("title", `String "MASC Agent Control Contract");
-              ("version", `String Runtime_build_version.current);
+              ("version", `String Build_version.current);
               ( "description",
                 `String
                   "Internal AGENT_CORE export for MASC MCP agent control. Use x-mcp-operations for canonical MCP operation metadata and x-agent-core-tools for the current agent-core projections." );

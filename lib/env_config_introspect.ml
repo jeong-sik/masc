@@ -9,7 +9,7 @@ let server_meta () =
   let git_commit = (Build_identity.current ()).Build_identity.binary_commit in
   `Assoc
     [
-      ("version", `String Runtime_build_version.current);
+      ("version", `String Build_version.current);
       ("git_commit", Json_util.string_opt_to_json git_commit);
       ("ocaml_version", `String Sys.ocaml_version);
       ("uptime_seconds", `Float (Server_startup_state.elapsed_since_start ()));

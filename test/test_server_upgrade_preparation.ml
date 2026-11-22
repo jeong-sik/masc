@@ -738,7 +738,7 @@ let test_the_public_probe_is_a_version_the_command_line_reads () =
       (Server_health_public.health_json ~ready:false ~phase:Masc.Server_startup_state.Blocking)
   in
   Alcotest.(check (option string)) "the command line reads the release version"
-    (Some Runtime_build_version.current) (Upgrade.compact_health_version body);
+    (Some Build_version.current) (Upgrade.compact_health_version body);
   Alcotest.(check (option string)) "it is not an account server's answer" None
     (Server_accounts.health_version body)
 let () = Alcotest.run "upgrade preparation"

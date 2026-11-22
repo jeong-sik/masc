@@ -474,6 +474,8 @@ let error_shape (error : Tool_input_validation.field_error) =
     | Tool_input_validation.Expected_types types -> "types:" ^ String.concat "," types
     | Tool_input_validation.Expected_enum _ -> "enum"
     | Tool_input_validation.Expected_const _ -> "const"
+    | Tool_input_validation.Expected_min_items { min_items } ->
+      Printf.sprintf "min_items:%d" min_items
   in
   let actual =
     match error.actual with
@@ -541,7 +543,8 @@ let test_enum_violation_names_allowed_values () =
      | Tool_input_validation.Expected_types _
      | Tool_input_validation.Expected_const _
      | Tool_input_validation.Expected_required
-     | Tool_input_validation.Expected_declared_field _ ->
+     | Tool_input_validation.Expected_declared_field _
+     | Tool_input_validation.Expected_min_items _ ->
        fail "expected the enum constraint to be reported");
     let msg =
       Tool_input_validation.format_errors_inline ~tool_name:"test_tool" ~args:input errors

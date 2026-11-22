@@ -2250,7 +2250,7 @@ let test_provider_name_of_config_glm_general () =
     Provider_config.make
       ~kind:Glm
       ~model_id:"glm-5.1"
-      ~base_url:Zai_catalog.general_base_url
+      ~base_url:"https://api.z.ai/api/paas/v4"
       ()
   in
   check_string "glm general" "glm" (Provider_registry.provider_name_of_config cfg)
@@ -2261,7 +2261,7 @@ let test_provider_name_of_config_glm_coding () =
     Provider_config.make
       ~kind:Glm
       ~model_id:"glm-5.1"
-      ~base_url:Zai_catalog.coding_base_url
+      ~base_url:"https://api.z.ai/api/coding/paas/v4"
       ()
   in
   check_string

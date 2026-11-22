@@ -10,7 +10,7 @@ type attribution =
     (** The lane attempt that assembled this request. A turn that failed over
         settles on a different runtime, and the record keeps both so a reader
         compares instead of assuming. *)
-  ; schema_observation_scope : Agent_core.Base.Schema_observation.scope option
+  ; schema_observation_scope : Schema_observation.scope option
   ; prompt_blocks : Turn_record.prompt_block list
   ; provider_content :
       ( Agent_core.Types.message list
@@ -33,7 +33,7 @@ type attribution =
 
 type wire_evidence =
   { wire_observation : Turn_record.request_wire_observation
-  ; wire_schema_observation_scope : Agent_core.Base.Schema_observation.scope option
+  ; wire_schema_observation_scope : Schema_observation.scope option
   ; serialized_observation :
       Llm_provider.Request_wire_observer.observation option
   ; wire_projected_messages : Agent_core.Types.message list option

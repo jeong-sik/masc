@@ -1,7 +1,7 @@
 (** Consolidated constants for the llm_provider library.
 
-    Centralises cache TTL, error-body truncation, and endpoint defaults
-    so they are defined once and referenced everywhere.
+    Centralises cache TTL and local endpoint defaults so they are defined once
+    and referenced consistently.
 
     @since 0.99.0 *)
 
@@ -9,12 +9,6 @@
 
 module Cache = struct
   let default_ttl_sec = 300
-end
-
-(* ── HTTP response body truncation ───────────────── *)
-
-module Truncation = struct
-  let max_error_body_length = 200
 end
 
 (* ── Endpoints ──────────────────────────────────── *)

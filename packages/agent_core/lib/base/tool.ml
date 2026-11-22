@@ -289,20 +289,20 @@ let wire_json_of_schema_uncached (schema : Types.tool_schema) =
    bookkeeping consumes it only after that mutex has been released. *)
 let wire_schema_entry_locked schema =
   match Wire_schema_cache.find_opt wire_schema_cache schema with
-  | Some entry -> entry, Schema_observation.Existing_json
+  | Some entry -> entry, Tool_schema_hooks.Existing_json
   | None ->
     let entry = Json_only (wire_json_of_schema_uncached schema) in
     Wire_schema_cache.add wire_schema_cache schema entry;
-    entry, Schema_observation.Created_json
+    entry, Tool_schema_hooks.Created_json
 ;;
 
 let wire_json_of_schema schema =
   let entry, outcome =
-    Schema_observation.measure ~site:Sdk_wire_json ~schema (fun () ->
+    Tool_schema_hooks.measure ~site:Wire_json ~schema (fun () ->
       Stdlib.Mutex.protect wire_schema_cache_mutex (fun () ->
         wire_schema_entry_locked schema))
   in
-  Schema_observation.cache ~schema (Json_lookup outcome);
+  Tool_schema_hooks.cache ~schema (Json_lookup outcome);
   match entry with
   | Json_only json | Json_with_byte_count { json; _ } -> json
 ;;
@@ -314,14 +314,14 @@ let wire_json_of_schema schema =
    7,239 it sends. *)
 let wire_bytes_of_schema schema =
   let entry, json =
-    Schema_observation.measure ~site:Sdk_byte_count_lookup ~schema (fun () ->
+    Tool_schema_hooks.measure ~site:Byte_count_lookup ~schema (fun () ->
       Stdlib.Mutex.protect wire_schema_cache_mutex (fun () ->
         wire_schema_entry_locked schema))
   in
   let count = match entry with
-    | Json_with_byte_count _ -> Schema_observation.Existing_byte_count
-    | Json_only _ -> Schema_observation.Missing_byte_count in
-  Schema_observation.cache ~schema (Byte_lookup {json; count});
+    | Json_with_byte_count _ -> Tool_schema_hooks.Existing_byte_count
+    | Json_only _ -> Tool_schema_hooks.Missing_byte_count in
+  Tool_schema_hooks.cache ~schema (Byte_lookup {json; count});
   match entry with
   | Json_with_byte_count { byte_count; _ } -> byte_count
   | Json_only json ->
@@ -330,20 +330,20 @@ let wire_bytes_of_schema schema =
        Only the integer survives, not the temporary compact string. *)
     let byte_count =
       String.length
-        (Schema_observation.encode ~site:Sdk_byte_count_encode ~schema (fun () ->
+        (Tool_schema_hooks.encode ~site:Byte_count_encode ~schema (fun () ->
            Yojson.Safe.to_string json)) in
     let byte_count, publication =
-      Schema_observation.measure ~site:Sdk_byte_count_publication ~schema (fun () ->
+      Tool_schema_hooks.measure ~site:Byte_count_publication ~schema (fun () ->
         Stdlib.Mutex.protect wire_schema_cache_mutex (fun () ->
           let entry, _ = wire_schema_entry_locked schema in
           match entry with
           | Json_with_byte_count { byte_count; _ } ->
-            byte_count, Schema_observation.Concurrent_byte_count_won
+            byte_count, Tool_schema_hooks.Concurrent_byte_count_won
           | Json_only json ->
             Wire_schema_cache.replace
               wire_schema_cache schema (Json_with_byte_count { json; byte_count });
-            byte_count, Schema_observation.Published_byte_count)) in
-    Schema_observation.cache ~schema (Byte_publication publication);
+            byte_count, Tool_schema_hooks.Published_byte_count)) in
+    Tool_schema_hooks.cache ~schema (Byte_publication publication);
     byte_count
 ;;
 

@@ -1803,28 +1803,36 @@ let start_startup_watchdog ~sw ~clock =
     `Stop_daemon)
 ;;
 
-(* The first mark is ServerBootstrap's resolved line. Each later mark names
-   the time since the previous mark and since resolved; a stage that stalls
-   leaves its .begin line as the last boot timing record. *)
+(* Each later mark names the time since the previous mark and since the first
+   mark; a stage that stalls leaves its .begin line as the last boot timing
+   record. Uses [Atomic.t] because the serving-domain arm and owner
+   initialization fiber can record stages from different domains. *)
 let boot_stage_recorder () =
-  let times = ref None in
+  let times = Atomic.make None in
   fun stage ->
     let now = Mtime_clock.now () in
-    match !times with
-    | None ->
-      times := Some (now, now);
-      Log.Server.info "boot stage=%s elapsed_ms=%.1f total_ms=%.1f" stage 0.0 0.0
-    | Some (started, previous) ->
-      let elapsed_ms =
-        Mtime.Span.to_float_ns (Mtime.span previous now) /. 1_000_000.0
+    let rec record () =
+      let current = Atomic.get times in
+      let next, elapsed_ms, total_ms =
+        match current with
+        | None -> Some (now, now), 0.0, 0.0
+        | Some (started, previous) ->
+          let elapsed_ms =
+            Mtime.Span.to_float_ns (Mtime.span previous now) /. 1_000_000.0
+          in
+          let total_ms =
+            Mtime.Span.to_float_ns (Mtime.span started now) /. 1_000_000.0
+          in
+          Some (started, now), elapsed_ms, total_ms
       in
-      let total_ms =
-        Mtime.Span.to_float_ns (Mtime.span started now) /. 1_000_000.0
-      in
-      times := Some (started, now);
-      Log.Server.info
-        "boot stage=%s elapsed_ms=%.1f total_ms=%.1f"
-        stage elapsed_ms total_ms
+      if Atomic.compare_and_set times current next
+      then
+        Log.Server.info
+          "boot stage=%s elapsed_ms=%.1f total_ms=%.1f"
+          stage elapsed_ms total_ms
+      else record ()
+    in
+    record ()
 ;;
 
 (* The engine on an access its caller published: the four steps the stdio
@@ -1894,10 +1902,12 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
      its own fiber. *)
   Web_dashboard.log_bundle_freshness_warning ();
   Rate_limit.start_global_cleanup_loop ~sw ~clock;
+  let boot_stage = boot_stage_recorder () in
   (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
   let config = Server_bootstrap_http.make_http_config ~address ~port in
   (* The certificate is loaded or generated before anything
      binds, so a configuration the listener cannot use refuses the boot. *)
+  boot_stage "serve.https_material.begin";
   let https =
     match
       Server_bootstrap_http.https_listener_of_env ~base_path ~bind_host:config.host
@@ -1906,6 +1916,7 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
     | Error reason ->
       raise (Env_config_core.Config_error ("HTTPS listener: " ^ reason))
   in
+  boot_stage "serve.https_material.end";
   (* The listener identity comes only from the effective CLI/bootstrap config
      above.  A public identity is additional trust only when the operator
      explicitly configured MASC_HTTP_BASE_URL; deriving it again from env
@@ -1948,7 +1959,6 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
   clear_server_state ();
   Server_startup_state.reset ();
   let listener_bound, publish_listener_bound = Eio.Promise.create () in
-  let boot_stage = boot_stage_recorder () in
 
   (* 2. Run owner initialization outside the accept loop. The state and
      long-lived owner fibers attach to the parent switch because HTTP request
@@ -2334,12 +2344,14 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
        runs before the socket closes. Both listener branches reach here once,
        after the bind and the route table. A refused announcement stops the
        boot before [on_ready] runs and before the port is recorded. *)
+    boot_stage "serve.announce.begin";
     (match Server_startup_takeover.loopback_listener ~address ~port:config.port with
      | Error unreached ->
        Log.Server.warn
          "the HTTP port of this server is not announced to the host (%s): a command line on \
           this host finds no server for this workspace and sends it no credential"
-         (Server_startup_takeover.loopback_unreached_to_string unreached)
+         (Server_startup_takeover.loopback_unreached_to_string unreached);
+       boot_stage "serve.announce.unreached"
      | Ok listener ->
        (match
           Server_startup_takeover.announce_single_user_server
@@ -2347,7 +2359,7 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
             listener
             ~withdraw_with:(Eio.Switch.on_release sw)
         with
-        | Ok () -> ()
+        | Ok () -> boot_stage "serve.announce.ok"
         | Error rejection ->
           (* A refused announcement is a fatal boot error: the boot must stop
              before [on_ready] runs and before the port is recorded, and the
@@ -2361,6 +2373,7 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
              instead; the log line keeps the exact refusal wording so the
              port-cannot-be-announced tests can match it. *)
           report_port_announcement_refusal rejection;
+          boot_stage "serve.announce.refused";
           exit 1));
     Eio.Promise.resolve publish_listener_bound ();
     (* The listener is bound. Persist only the desired connection, not readiness. *)
@@ -2412,6 +2425,7 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
           let https_listener =
             Server_bootstrap_http.listen_https_socket ~sw:serving_sw ~net ~address ~config https
           in
+          boot_stage "serve.listeners.bound";
           let trust_policy = request_trust_policy ~https_port:(bound_https_port https_listener) in
           (* Handlers run on the main domain, so the table is built there,
              with the main switch for what handlers fork. *)
@@ -2427,6 +2441,7 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
           let request_handler = make_request_handler ~trust_policy routes in
           let h2_request_handler = make_h2_request_handler ~trust_policy ~routes in
           let h2_error_handler = make_h2_error_handler () in
+          boot_stage "serve.routes_built";
           run_serving
             ~sw:serving_sw
             ~socket
@@ -2438,6 +2453,7 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
   else (
     let socket = Server_bootstrap_http.listen_socket ~sw ~net ~address config in
     let https_listener = Server_bootstrap_http.listen_https_socket ~sw ~net ~address ~config https in
+    boot_stage "serve.listeners.bound";
     let trust_policy = request_trust_policy ~https_port:(bound_https_port https_listener) in
     let routes =
       make_routes ~port:config.port ~host:config.host ~sw ~transport_sw:sw ~clock
@@ -2445,6 +2461,7 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
     let request_handler = make_request_handler ~trust_policy routes in
     let h2_request_handler = make_h2_request_handler ~trust_policy ~routes in
     let h2_error_handler = make_h2_error_handler () in
+    boot_stage "serve.routes_built";
     run_serving
       ~sw
       ~socket

@@ -200,8 +200,8 @@ let dispatch_system_gate_key ~now (m : Model.t) gate
   | (Nav.Server_offline | Nav.Auth_gate), Keymap.Input.Char "r"
     when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m Keymap.Refresh)
-  | Nav.Media_viewer, Keymap.Input.Char "o" when is_printable_key norm ->
-      Some (Update_actions.execute_action ~now m Keymap.Open_external)
+  | Nav.Media_viewer, Keymap.Input.Char "y" when is_printable_key norm ->
+      Some (Update_actions.execute_action ~now m Keymap.Copy_selected)
   | ( ( Nav.Server_offline
       | Nav.Auth_gate
       | Nav.Media_viewer
@@ -298,19 +298,49 @@ let interrupt_active_keeper_turn ~now (m : Model.t) =
               m
           , [] ))
 
-let find_verification_for_goal (m : Model.t) (goal_id : string) =
-  let linked_task_ids =
-    List.filter_map
-      (fun (t : Wire_work.task) ->
-        match t.goal_link with
-        | Wire_work.Linked gid when String.equal gid goal_id -> Some t.id
-        | Wire_work.Linked _ | Wire_work.Unlinked -> None)
-      (Work_store.tasks m.work)
-  in
-  List.find_opt
-    (fun (v : Wire_work.verification_request) ->
-      List.exists (String.equal v.task_id) linked_task_ids)
-    (Work_store.verifications_list m.work)
+let open_goal_confirmation_proof_modal (m : Model.t) ~(goal_id : string)
+    ~(criterion_revision : string) =
+  (* Never fabricate request_id, verification_run_id, or operator_id: ask the
+     operator to supply exact server-issued confirmation proof fields. *)
+  open_custom_inline_modal m
+    [
+      {
+        key = "confirm_goal_id";
+        label = Say.make ~ko:"목표 ID" ~en:"Goal ID";
+        value = goal_id;
+        required = true;
+      };
+      {
+        key = "confirm_criterion_revision";
+        label = Say.make ~ko:"기준 리비전 (criterion_revision)" ~en:"Criterion revision";
+        value = criterion_revision;
+        required = true;
+      };
+      {
+        key = "confirm_request_id";
+        label =
+          Say.make ~ko:"서버 발급 request_id (GET /goals/confirmation)"
+            ~en:"Server-issued request_id (GET /goals/confirmation)";
+        value = "";
+        required = true;
+      };
+      {
+        key = "confirm_verification_run_id";
+        label =
+          Say.make ~ko:"서버 발급 verification_run_id"
+            ~en:"Server-issued verification_run_id";
+        value = "";
+        required = true;
+      };
+      {
+        key = "confirm_operator_id";
+        label =
+          Say.make ~ko:"운영자 ID (expected_operator_id)"
+            ~en:"Operator ID (expected_operator_id)";
+        value = "";
+        required = true;
+      };
+    ]
 
 let goal_action_on_approve ~now (m : Model.t) (g : Wire_work.goal) =
   match g.phase with
@@ -327,45 +357,18 @@ let goal_action_on_approve ~now (m : Model.t) (g : Wire_work.goal) =
             Some (String.trim id)
         | Some _ | None -> None
       in
-      let ver_opt = find_verification_for_goal m g.id in
-      match rev_opt, ws_opt, inst_opt, ver_opt with
-      | Some criterion_revision, Some ws, Some inst_id, Some v ->
-          let operator_id =
-            match Sys.getenv_opt "USER" with
-            | Some u when not (String.equal (String.trim u) "") -> String.trim u
-            | Some _ | None -> "operator"
-          in
-          let req : Wire_work.goal_confirmation_request =
-            {
-              goal_id = g.id;
-              criterion_revision;
-              request_id =
-                Printf.sprintf "goal-confirm-%s-%s" g.id criterion_revision;
-              verification_run_id = v.request_id;
-              expected_workspace =
-                { base_path = ws.base_path; masc_root = ws.masc_root };
-              expected_operator_id = operator_id;
-              expected_runtime_instance_id = inst_id;
-            }
-          in
-          ( Model.with_toast ~now ~level:Model.Toast_info
-              (Say.make
-                 ~ko:("목표 완료 확정 전송: " ^ g.title)
-                 ~en:("Submitting goal completion confirmation: " ^ g.title))
-              m
-          , [
-              Cmd.Http_post
-                { epoch = m.epoch; req = Cmd.Post_goal_confirmation req };
-            ] )
+      match rev_opt, ws_opt, inst_opt with
+      | Some criterion_revision, Some _, Some _ ->
+          open_goal_confirmation_proof_modal m ~goal_id:g.id ~criterion_revision
       | _ ->
           ( Model.with_toast ~now ~level:Model.Toast_warning
               (Say.make
                  ~ko:
-                   "완료 확정에 필요한 서버 검증 증명(criterion_revision / \
-                    검증 실행 / 워크스페이스)이 아직 모두 로드되지 않았습니다"
+                   "완료 확정에는 서버 발급 증명(criterion_revision / 워크스페이스 \
+                    / 런타임 인스턴스)이 필요합니다"
                  ~en:
-                   "Missing server proof (criterion_revision / verification \
-                    run / workspace) for goal confirmation")
+                   "Goal confirmation requires loaded server identity \
+                    (criterion_revision / workspace / runtime instance)")
               m
           , [] ))
   | Wire_work.Executing ->
@@ -647,7 +650,7 @@ let latest_reply_for_tts (m : Model.t) =
   | None -> None
   | Some keeper -> (
       match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with
-      | Some s when not (String.equal (String.trim s.text) "") ->
+      | Some s when s.active && not (String.equal (String.trim s.text) "") ->
           Some (keeper, s.text)
       | Some _ | None -> (
           match
@@ -729,7 +732,7 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                       };
                 };
             ] )
-      | Some ("x" | "N"), _ ->
+      | Some "x", _ ->
           Update_nav.open_inline_modal m (Nav.Verification_reject req_id)
       | Some ("h" | "X"), Some v ->
           Update_nav.open_inline_modal m (Nav.Harness_overrule v.task_id)
@@ -1033,11 +1036,21 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
       | Nav.Work -> (
           match m.work.active_tab with
           | Nav.Work_pipeline -> (
-              match
-                Work_store.selected_goal m.work
-              , Work_store.selected_verification m.work
-              with
-              | Some g, _ -> (
+              let verif_focused = Int.equal (m.nav.pane_index mod 2) 1 in
+              let active_target =
+                match
+                  verif_focused
+                , Work_store.selected_goal m.work
+                , Work_store.selected_verification m.work
+                with
+                | true, _, Some v -> `Verification v
+                | false, Some g, _ -> `Goal g
+                | true, Some g, None -> `Goal g
+                | false, None, Some v -> `Verification v
+                | (true | false), None, None -> `None
+              in
+              match active_target with
+              | `Goal g -> (
                   match printable_char with
                   | Some "a" -> goal_action_on_approve ~now m g
                   | Some "c" ->
@@ -1061,7 +1074,7 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                         ] )
                   | Some "x" -> goal_action_on_stop ~now m g
                   | _ -> (m, []))
-              | None, Some v -> (
+              | `Verification v -> (
                   match printable_char with
                   | Some "a" ->
                       ( Model.with_toast ~now ~level:Model.Toast_info
@@ -1083,14 +1096,14 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                                   };
                             };
                         ] )
-                  | Some ("x" | "N") ->
+                  | Some "x" ->
                       Update_nav.open_inline_modal m
                         (Nav.Verification_reject v.request_id)
                   | Some ("h" | "X") ->
                       Update_nav.open_inline_modal m
                         (Nav.Harness_overrule v.task_id)
                   | _ -> (m, []))
-              | None, None -> (m, []))
+              | `None -> (m, []))
           | Nav.Work_tasks_schedules -> (
               match Work_store.selected_task m.work, printable_char with
               | Some task, Some "x" ->

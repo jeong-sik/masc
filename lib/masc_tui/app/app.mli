@@ -28,6 +28,19 @@ val is_ctrl_c : Input_decoder.key_event -> bool
 (** [true] iff [ev] represents [Ctrl+C] (e.g. Kitty [CSI u] [\x1b[99;5u]] or
     raw control byte). *)
 
+val default_mouse_capture : bool
+(** Default terminal mouse tracking state ([false] so native drag-select copy
+    works out of the box; toggled at runtime via bare [m]). *)
+
+val mouse_capture_seq : bool -> string
+(** Exact escape sequence emitted when toggling/restoring mouse tracking:
+    enables button/wheel SGR reporting ([\x1b[?1000h\x1b[?1006h], never
+    [?1002h] drag hijack) when [true], and disables all mouse modes when [false]. *)
+
+val should_toggle_mouse_capture : Model.t -> Input_decoder.key_event -> bool
+(** [true] iff [ev] is unmodified bare [m] while no overlay, text-capture
+    surface, or micro/too-small viewport gate is active. *)
+
 val should_emit_tick :
   now_ns:int64 ->
   last_voice_tick_ns:int64 ->

@@ -2789,6 +2789,15 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
   let m_nk0, cmds_nk0 = step m_tab4 (char_key "n") in
   Alcotest.(check bool) "[n] on Settings tab 4 never saves" false
     (has_cmd is_any_patch cmds_nk0);
+  Alcotest.(check bool) "[n] on Settings tab 4 fetches Target_keeper_create schema"
+    true
+    (has_cmd
+       (function
+         | Cmd.Http_get
+             { req = Cmd.Get_config_schema Wire_config.Target_keeper_create; _ } ->
+             true
+         | _ -> false)
+       cmds_nk0);
   Alcotest.(check bool) "[n] on Settings tab 4 enters new_keeper_name edit" true
     (Config_store.is_editing_new_keeper_name m_nk0.config);
   let m_nk1 =
@@ -2887,15 +2896,42 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
         |> Work_store.apply_verifications ~observed_at:t0 [ ver1 ];
     }
   in
-  (* [n] on Work_pipeline opens Goal modal (not Schedule); on Work_tasks_schedules opens Schedule *)
+  (* [n] on Work_pipeline opens honest #goals proposal modal (not Schedule); on Work_tasks_schedules opens Schedule *)
   let m_goal_modal, _ = step m_work (char_key "n") in
-  Alcotest.(check bool) "[n] on Work_pipeline opens Goal modal" true
+  Alcotest.(check bool) "[n] on Work_pipeline opens #goals Board proposal modal" true
     (match m_goal_modal.inline_modal with
     | Some md ->
         List.exists
-          (fun (f : Model.modal_form_field) -> String.equal f.key "goal_title")
+          (fun (f : Model.modal_form_field) ->
+            String.equal f.key "proposal_title")
           md.fields
     | None -> false);
+  (* Work_pipeline pane_index=1 reaches Verification hotkeys & dive even when Goals exist *)
+  let m_work_vp = { m_work with nav = { m_work.nav with pane_index = 1 } } in
+  let _, cmds_wp_vapp = step m_work_vp (char_key "a") in
+  Alcotest.(check bool) "Work_pipeline pane 1 [a] approves verification" true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_verification_verdict
+                   {
+                     verification_id = "ver-100";
+                     verdict = Wire_work.Verdict_approve;
+                     _;
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       cmds_wp_vapp);
+  let m_wp_vdive, _ = step m_work_vp (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Work_pipeline pane 1 Enter dives into Verification_dive"
+    true
+    (match Model.active_dive m_wp_vdive with
+    | Some (Nav.Dive_work (Nav.Verification_dive "ver-100")) -> true
+    | _ -> false);
   let m_sched_tab =
     { m_work with work = Work_store.set_tab Nav.Work_tasks_schedules m_work.work }
   in
@@ -2934,7 +2970,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     (Option.equal Nav.equal_overlay m_vrej.nav.overlay
        (Some (Nav.Inline_action (Nav.Verification_reject "ver-100"))));
   let m_vrej_typed, _ = step m_vrej (char_key "b") in
-  let _, cmds_vrej = step m_vrej_typed (key Keymap.Input.Enter) in
+  let m_vrej_done, cmds_vrej = step m_vrej_typed (key Keymap.Input.Enter) in
   Alcotest.(check bool) "Verification_reject submit emits Verdict_reject" true
     (has_cmd
        (function
@@ -2952,6 +2988,10 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
              true
          | _ -> false)
        cmds_vrej);
+  Alcotest.(check bool) "Verification_reject closes modal cleanly on submit (no hang)"
+    true
+    (Option.is_none m_vrej_done.inline_modal
+     && Option.is_none m_vrej_done.nav.overlay);
   let m_hov, _ = step m_vdive (char_key "h") in
   Alcotest.(check bool) "Verification_dive [h] opens Harness_overrule modal" true
     (Option.equal Nav.equal_overlay m_hov.nav.overlay
@@ -2991,15 +3031,58 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
          | _ -> false)
        cmds_tc);
 
-  (* Goal_dive: Awaiting_confirmation [a] -> Post_goal_confirmation; Executing [a]/[x] -> Post_goal_transition *)
+  (* Goal_dive: Awaiting_confirmation [a] NEVER fabricates proof — opens explicit server-proof modal *)
   let m_gdive_conf =
     {
       m_work with
       nav = { m_work.nav with dive_stack = [ Nav.Dive_work (Nav.Goal_dive "goal-100") ] };
     }
   in
-  let _, cmds_gconf = step m_gdive_conf (char_key "a") in
-  Alcotest.(check bool) "Goal_dive [a] with server proof emits Post_goal_confirmation"
+  let m_gconf_mod, cmds_gconf0 = step m_gdive_conf (char_key "a") in
+  Alcotest.(check bool) "Goal_dive [a] never fires fabricated Post_goal_confirmation directly"
+    false
+    (has_cmd
+       (function
+         | Cmd.Http_post { req = Cmd.Post_goal_confirmation _; _ } -> true
+         | _ -> false)
+       cmds_gconf0);
+  Alcotest.(check bool) "Goal_dive [a] opens explicit proof modal with empty server-issued fields"
+    true
+    (match m_gconf_mod.inline_modal with
+    | Some md ->
+        String.equal (Model.modal_field_value ~key:"confirm_request_id" md) ""
+        && String.equal
+             (Model.modal_field_value ~key:"confirm_verification_run_id" md)
+             ""
+        && String.equal (Model.modal_field_value ~key:"confirm_operator_id" md) ""
+    | None -> false);
+  (* Empty proof submit is rejected without POST *)
+  let m_gconf_err, cmds_gconf_empty = step m_gconf_mod (key Keymap.Input.Enter) in
+  Alcotest.(check int) "empty proof modal emits 0 cmds" 0
+    (List.length (Cmd.flatten cmds_gconf_empty));
+  Alcotest.(check bool) "empty proof modal sets validation error" true
+    (match m_gconf_err.inline_modal with
+    | Some { error = Some _; _ } -> true
+    | _ -> false);
+  (* Operator supplies genuine server-issued proof fields -> submits & closes modal *)
+  let m_gconf_filled =
+    match m_gconf_mod.inline_modal with
+    | None -> Alcotest.fail "expected proof modal"
+    | Some md ->
+        let fields =
+          List.map
+            (fun (f : Model.modal_form_field) ->
+              match f.key with
+              | "confirm_request_id" -> { f with value = "srv-req-42" }
+              | "confirm_verification_run_id" -> { f with value = "srv-run-99" }
+              | "confirm_operator_id" -> { f with value = "op-admin" }
+              | _ -> f)
+            md.fields
+        in
+        { m_gconf_mod with inline_modal = Some { md with fields } }
+  in
+  let m_gconf_done, cmds_gconf = step m_gconf_filled (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Goal confirmation modal with operator proof emits Post_goal_confirmation"
     true
     (has_cmd
        (function
@@ -3010,7 +3093,10 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
                    {
                      goal_id = "goal-100";
                      criterion_revision = "rev-7";
-                     verification_run_id = "ver-100";
+                     request_id = "srv-req-42";
+                     verification_run_id = "srv-run-99";
+                     expected_operator_id = "op-admin";
+                     expected_runtime_instance_id = "inst-9";
                      _;
                    };
                _;
@@ -3018,6 +3104,9 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
              true
          | _ -> false)
        cmds_gconf);
+  Alcotest.(check bool) "Goal confirmation modal closes on submit" true
+    (Option.is_none m_gconf_done.inline_modal
+     && Option.is_none m_gconf_done.nav.overlay);
   let m_gdive_exec =
     {
       m_work with
@@ -3116,7 +3205,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     }
   in
   let m_wedit, _ = step m_wiki (char_key "e") in
-  let _, cmds_wput = step m_wedit (key Keymap.Input.Enter) in
+  let m_wedit_done, cmds_wput = step m_wedit (key Keymap.Input.Enter) in
   Alcotest.(check bool) "Wiki [e] inline modal submit emits Put_wiki_page" true
     (has_cmd
        (function
@@ -3130,6 +3219,21 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
              true
          | _ -> false)
        cmds_wput);
+  Alcotest.(check bool) "Wiki [e] modal closes on submit (no hang)" true
+    (Option.is_none m_wedit_done.inline_modal
+     && Option.is_none m_wedit_done.nav.overlay);
+  let m_mact_mod, _ = step m_kmem (char_key "A") in
+  let m_mact_done, cmds_mact_mod = step m_mact_mod (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Memory [A] modal closes on submit and emits Post_memory_act"
+    true
+    (Option.is_none m_mact_done.inline_modal
+     && Option.is_none m_mact_done.nav.overlay
+     && has_cmd
+          (function
+            | Cmd.Http_post { req = Cmd.Post_memory_act { keeper = "alpha"; _ }; _ } ->
+                true
+            | _ -> false)
+          cmds_mact_mod);
   let _, cmds_wext = step m_wiki (char_key ~ctrl:true "e") in
   Alcotest.(check bool) "Wiki [Ctrl+E] emits Edit_wiki_page" true
     (has_cmd
@@ -3173,7 +3277,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
          | _ -> false)
        cmds_qref);
   let m_fmod, _ = step m_rt (char_key "f") in
-  let _, cmds_flaunch = step m_fmod (key Keymap.Input.Enter) in
+  let m_fmod_done, cmds_flaunch = step m_fmod (key Keymap.Input.Enter) in
   Alcotest.(check bool) "Runtime [f] modal submit emits Post_fusion_launch" true
     (has_cmd
        (function
@@ -3182,6 +3286,34 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
              true
          | _ -> false)
        cmds_flaunch);
+  Alcotest.(check bool) "Fusion modal closes cleanly on submit (no hang)" true
+    (Option.is_none m_fmod_done.inline_modal
+     && Option.is_none m_fmod_done.nav.overlay);
+  (* Runtime Enter with non-empty fusion_launch_draft dives into Lane_dive, NEVER fires Post_fusion_launch *)
+  let rt_with_lane =
+    m_rt.runtime
+    |> Runtime_store.apply_runtime_resolved ~observed_at:t0
+         {
+           generated_at_iso = "2026-11-22T00:00:00Z";
+           config_path = None;
+           default_route = Some "lane-default";
+           lanes = [ { id = "lane-default"; declared = true; runtime_ids = [ "sonnet-4" ] } ];
+           runtimes = [];
+           usage_windows = None;
+         }
+  in
+  let m_rt_lane = { m_rt with runtime = rt_with_lane } in
+  let m_rt_enter, cmds_rt_enter = step m_rt_lane (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Runtime Enter does NOT hijack with Post_fusion_launch" false
+    (has_cmd
+       (function
+         | Cmd.Http_post { req = Cmd.Post_fusion_launch _; _ } -> true
+         | _ -> false)
+       cmds_rt_enter);
+  Alcotest.(check bool) "Runtime Enter dives into Lane_dive" true
+    (match Model.active_dive m_rt_enter with
+    | Some (Nav.Dive_infra (Nav.Lane_dive "lane-default")) -> true
+    | _ -> false);
 
   (* 5. Keepers: active turn interrupt (Esc & Ctrl+X), Speak ([S]), Copy ([y]), [c] quick chat, Server_offline [s], /model *)
   let chat_page : Wire_fleet.chat_history_page =
@@ -3277,6 +3409,65 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
              true
          | _ -> false)
        cmds_speak);
+  (* P2-7a: Finished (active=false) chat_streams MUST NOT shadow newer chat_histories *)
+  let m_kchat_stale_stream =
+    let fleet =
+      m_kchat.fleet
+      |> Fleet_store.start_chat_stream ~keeper:"alpha" ~request_id:"old-req"
+      |> Fleet_store.apply_chat_stream_chunk ~keeper:"alpha" ~request_id:"old-req"
+           (Wire_fleet.Chunk_text_delta
+              { operation_id = "op-old"; delta = "Stale previous stream text" })
+      |> Fleet_store.finish_chat_stream ~keeper:"alpha" ~request_id:"old-req"
+           ~error:None
+    in
+    { m_kchat with fleet }
+  in
+  let _, cmds_copy_fresh = step m_kchat_stale_stream (char_key "y") in
+  Alcotest.(check bool) "finished stream does NOT shadow newer history on [y]" true
+    (has_cmd
+       (function
+         | Cmd.Copy_clipboard "Latest assistant answer for clipboard and TTS" ->
+             true
+         | _ -> false)
+       cmds_copy_fresh);
+  let _, cmds_speak_fresh = step m_kchat_stale_stream (char_key "S") in
+  Alcotest.(check bool) "finished stream does NOT shadow newer history on [S]" true
+    (has_cmd
+       (function
+         | Cmd.Voice_cmd
+             (Cmd.Speak
+                { text = "Latest assistant answer for clipboard and TTS"; _ }) ->
+             true
+         | _ -> false)
+       cmds_speak_fresh);
+  (* P2-7b: Media_viewer [y] copies selected artifact SHA256 *)
+  let art1 : Wire_knowledge.artifact_entry =
+    {
+      sha256 = "deadbeef0123456789";
+      name = "report.png";
+      mime_type = "image/png";
+      bytes = 1024;
+      created_at_unix = None;
+      producer = Some "alpha";
+      title = Some "Report";
+    }
+  in
+  let m_mv =
+    {
+      m0 with
+      nav = { m0.nav with overlay = Some (Nav.System_gate Nav.Media_viewer) };
+      knowledge =
+        Knowledge_store.empty
+        |> Knowledge_store.apply_artifacts ~observed_at:t0 [ art1 ];
+    }
+  in
+  let _, cmds_mv_y = step m_mv (char_key "y") in
+  Alcotest.(check bool) "Media_viewer [y] copies artifact SHA256" true
+    (has_cmd
+       (function
+         | Cmd.Copy_clipboard "deadbeef0123456789" -> true
+         | _ -> false)
+       cmds_mv_y);
   let m_offline =
     {
       m0 with

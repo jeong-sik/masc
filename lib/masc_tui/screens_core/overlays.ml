@@ -2867,44 +2867,72 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
 
 (* ---------- Overlay 5: Inline Action & /btw Side-Query Modal ---------- *)
 
-let inline_action_title ~lang ~(modal : Model.inline_modal_state) kind =
-  let has_field key =
-    List.exists
-      (fun (f : Model.modal_form_field) -> String.equal f.key key)
-      modal.fields
-  in
-  if has_field "goal_title" then
-    Say.resolve lang (Say.make ~ko:"새 목표 생성" ~en:"Create Goal")
-  else if has_field "memory_act" then
-    Say.resolve lang (Say.make ~ko:"사서 기억 복구 (/memory/act)" ~en:"Memory Recovery Act")
-  else if has_field "wiki_slug" then
-    Say.resolve lang (Say.make ~ko:"위키 문서 편집" ~en:"Edit Wiki Page")
-  else if has_field "fusion_prompt" then
-    Say.resolve lang (Say.make ~ko:"퓨전 패널 실행" ~en:"Launch Fusion Panel")
-  else
-    match kind with
-    | Nav.Btw_query ->
-        Say.resolve lang (Say.make ~ko:"임시 질문 (/btw)" ~en:"Side-Query (/btw)")
-    | Nav.Gate_reject id ->
-        Say.resolve lang
-          (Say.make ~ko:("게이트 거절 · " ^ id) ~en:("Gate Reject · " ^ id))
-    | Nav.Verification_reject id ->
-        Say.resolve lang
-          (Say.make ~ko:("검증 거절 · " ^ id) ~en:("Verification Reject · " ^ id))
-    | Nav.Harness_overrule id ->
-        Say.resolve lang
-          (Say.make ~ko:("판정 재정의 · " ^ id) ~en:("Harness Overrule · " ^ id))
-    | Nav.Task_cancel id ->
-        Say.resolve lang
-          (Say.make ~ko:("작업 취소 · " ^ id) ~en:("Cancel Task · " ^ id))
-    | Nav.Schedule_form ->
-        Say.resolve lang (Say.make ~ko:"새 일정 생성" ~en:"Create Schedule")
-    | Nav.Connector_form ->
-        Say.resolve lang (Say.make ~ko:"새 커넥터 연결" ~en:"Add Connector")
-    | Nav.Repo_add_form ->
-        Say.resolve lang (Say.make ~ko:"저장소 추가" ~en:"Add Repository")
-    | Nav.Board_new_post ->
-        Say.resolve lang (Say.make ~ko:"보드 새 글 작성" ~en:"New Board Post")
+type inline_form_kind =
+  | Form_standard of Nav.inline_action_kind
+  | Form_board_goal_proposal
+  | Form_goal_confirmation_proof
+  | Form_memory_act
+  | Form_wiki_edit
+  | Form_fusion_launch
+
+let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
+  match modal.kind with
+  | Nav.Board_new_post -> (
+      match modal.fields with
+      | { key = "proposal_title"; _ } :: _ -> Form_board_goal_proposal
+      | { key = "confirm_goal_id"; _ } :: _ -> Form_goal_confirmation_proof
+      | { key = "memory_keeper"; _ } :: _ -> Form_memory_act
+      | { key = "wiki_slug"; _ } :: _ -> Form_wiki_edit
+      | { key = "fusion_keeper"; _ } :: _ -> Form_fusion_launch
+      | _ -> Form_standard Nav.Board_new_post)
+  | ( Nav.Btw_query
+    | Nav.Gate_reject _
+    | Nav.Verification_reject _
+    | Nav.Harness_overrule _
+    | Nav.Task_cancel _
+    | Nav.Schedule_form
+    | Nav.Connector_form
+    | Nav.Repo_add_form ) as std ->
+      Form_standard std
+
+let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
+  match classify_inline_form modal with
+  | Form_board_goal_proposal ->
+      Say.resolve lang
+        (Say.make ~ko:"#goals 보드 제안 작성" ~en:"Board #goals Proposal")
+  | Form_goal_confirmation_proof ->
+      Say.resolve lang
+        (Say.make ~ko:"목표 완료 확정 증명 입력"
+           ~en:"Goal Confirmation Proof")
+  | Form_memory_act ->
+      Say.resolve lang
+        (Say.make ~ko:"사서 기억 복구 (/memory/act)" ~en:"Memory Recovery Act")
+  | Form_wiki_edit ->
+      Say.resolve lang (Say.make ~ko:"위키 문서 편집" ~en:"Edit Wiki Page")
+  | Form_fusion_launch ->
+      Say.resolve lang (Say.make ~ko:"퓨전 패널 실행" ~en:"Launch Fusion Panel")
+  | Form_standard Nav.Btw_query ->
+      Say.resolve lang (Say.make ~ko:"임시 질문 (/btw)" ~en:"Side-Query (/btw)")
+  | Form_standard (Nav.Gate_reject id) ->
+      Say.resolve lang
+        (Say.make ~ko:("게이트 거절 · " ^ id) ~en:("Gate Reject · " ^ id))
+  | Form_standard (Nav.Verification_reject id) ->
+      Say.resolve lang
+        (Say.make ~ko:("검증 거절 · " ^ id) ~en:("Verification Reject · " ^ id))
+  | Form_standard (Nav.Harness_overrule id) ->
+      Say.resolve lang
+        (Say.make ~ko:("판정 재정의 · " ^ id) ~en:("Harness Overrule · " ^ id))
+  | Form_standard (Nav.Task_cancel id) ->
+      Say.resolve lang
+        (Say.make ~ko:("작업 취소 · " ^ id) ~en:("Cancel Task · " ^ id))
+  | Form_standard Nav.Schedule_form ->
+      Say.resolve lang (Say.make ~ko:"새 일정 생성" ~en:"Create Schedule")
+  | Form_standard Nav.Connector_form ->
+      Say.resolve lang (Say.make ~ko:"새 커넥터 연결" ~en:"Add Connector")
+  | Form_standard Nav.Repo_add_form ->
+      Say.resolve lang (Say.make ~ko:"저장소 추가" ~en:"Add Repository")
+  | Form_standard Nav.Board_new_post ->
+      Say.resolve lang (Say.make ~ko:"보드 새 글 작성" ~en:"New Board Post")
 
 let form_of_inline_modal (modal : Model.inline_modal_state) =
   let fields =
@@ -3640,8 +3668,8 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               hotkey =
                 Some
                   (Say.resolve lang
-                     (Say.make ~ko:"[o] 외부 열기 · [Esc] 닫기"
-                        ~en:"[o] Open · [Esc] Close"));
+                     (Say.make ~ko:"[y] 해시 복사 · [Esc] 닫기"
+                        ~en:"[y] Copy SHA256 · [Esc] Close"));
               focused = true;
               elevated = true;
             }
@@ -3660,8 +3688,8 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                     (Grapheme.truncate_to_width ~max_width:32 art.sha256) );
                 ( pri_st,
                   Say.resolve lang
-                    (Say.make ~ko:"프레임버퍼 안전 영역 내 미리보기 대기"
-                       ~en:"Fenced inside framebuffer lifecycle · [o] open externally") );
+                    (Say.make ~ko:"프레임버퍼 안전 영역 내 미리보기 · [y] 해시 복사 · [Esc] 닫기"
+                       ~en:"Fenced inside framebuffer lifecycle · [y] copy SHA256 · [Esc] close") );
               ]
           | None ->
               [

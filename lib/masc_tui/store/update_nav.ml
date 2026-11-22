@@ -651,13 +651,28 @@ let dive_selected (m : Model.t) =
   | Nav.Work -> (
       match m.work.active_tab with
       | Nav.Work_pipeline -> (
-          match Work_store.selected_goal m.work with
-          | Some g -> push_dive m (Nav.Dive_work (Nav.Goal_dive g.id))
-          | None -> (
-              match Work_store.selected_verification m.work with
-              | Some v ->
-                  push_dive m (Nav.Dive_work (Nav.Verification_dive v.request_id))
-              | None -> (m, [])))
+          let dive_goal () =
+            match Work_store.selected_goal m.work with
+            | Some g -> push_dive m (Nav.Dive_work (Nav.Goal_dive g.id))
+            | None -> (m, [])
+          in
+          let dive_verif () =
+            match Work_store.selected_verification m.work with
+            | Some v ->
+                push_dive m (Nav.Dive_work (Nav.Verification_dive v.request_id))
+            | None -> (m, [])
+          in
+          let verif_focused = Int.equal (m.nav.pane_index mod 2) 1 in
+          match
+            verif_focused
+          , Work_store.selected_goal m.work
+          , Work_store.selected_verification m.work
+          with
+          | true, _, Some _ -> dive_verif ()
+          | false, Some _, _ -> dive_goal ()
+          | true, Some _, None -> dive_goal ()
+          | false, None, Some _ -> dive_verif ()
+          | (true | false), None, None -> (m, []))
       | Nav.Work_tasks_schedules -> (
           match Work_store.selected_task m.work with
           | Some task -> push_dive m (Nav.Dive_work (Nav.Task_dive task.id))
@@ -741,22 +756,9 @@ let dive_selected (m : Model.t) =
       | Nav.Runtime_efficiency_spend
       | Nav.Runtime_failover_lanes
       | Nav.Runtime_tools_connectors -> (
-          match Runtime_store.to_fusion_launch_request m.runtime with
-          | Ok (keeper, request) ->
-              let runtime = Runtime_store.set_fusion_submitting true m.runtime in
-              ( { m with runtime }
-              , [
-                  Cmd.Http_post
-                    {
-                      epoch = m.epoch;
-                      req = Cmd.Post_fusion_launch { keeper; request };
-                    };
-                ] )
-          | Error _ -> (
-              match Runtime_store.selected_lane m.runtime with
-              | Some lane ->
-                  push_dive m (Nav.Dive_infra (Nav.Lane_dive lane.id))
-              | None -> (m, []))))
+          match Runtime_store.selected_lane m.runtime with
+          | Some lane -> push_dive m (Nav.Dive_infra (Nav.Lane_dive lane.id))
+          | None -> (m, [])))
   | Nav.Infra -> (
       match m.infra.active_tab with
       | Nav.Infra_sandboxes -> (
@@ -765,6 +767,34 @@ let dive_selected (m : Model.t) =
               push_dive m (Nav.Dive_infra (Nav.Sandbox_dive keeper))
           | None -> (m, []))
       | Nav.Infra_repos_changes | Nav.Infra_activity_logs -> (m, []))
+
+type inline_form_kind =
+  | Form_standard of Nav.inline_action_kind
+  | Form_board_goal_proposal
+  | Form_goal_confirmation_proof
+  | Form_memory_act
+  | Form_wiki_edit
+  | Form_fusion_launch
+
+let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
+  match modal.kind with
+  | Nav.Board_new_post -> (
+      match modal.fields with
+      | { key = "proposal_title"; _ } :: _ -> Form_board_goal_proposal
+      | { key = "confirm_goal_id"; _ } :: _ -> Form_goal_confirmation_proof
+      | { key = "memory_keeper"; _ } :: _ -> Form_memory_act
+      | { key = "wiki_slug"; _ } :: _ -> Form_wiki_edit
+      | { key = "fusion_keeper"; _ } :: _ -> Form_fusion_launch
+      | _ -> Form_standard Nav.Board_new_post)
+  | ( Nav.Btw_query
+    | Nav.Gate_reject _
+    | Nav.Verification_reject _
+    | Nav.Harness_overrule _
+    | Nav.Task_cancel _
+    | Nav.Schedule_form
+    | Nav.Connector_form
+    | Nav.Repo_add_form ) as std ->
+      Form_standard std
 
 let submit_inline_modal ~now (m : Model.t) =
   match m.inline_modal with
@@ -789,11 +819,23 @@ let submit_inline_modal ~now (m : Model.t) =
               inline_modal = Some { modal with submitting = true; error = None };
             }
           in
-          match modal.kind with
-          | Nav.Btw_query ->
+          (* Mutations whose replies route through Reply_work_mutation,
+             Reply_wiki_put, Reply_memory_act, or Reply_fusion_launch emit
+             toasts in Update_http without clearing inline_modal, so close the
+             modal immediately with an honest in-flight toast to prevent hang. *)
+          let close_with_inflight_toast ~msg (m_in : Model.t) =
+            let nav = { m_in.nav with overlay = None; filter_focused = false } in
+            { m_in with nav; inline_modal = None }
+            |> Model.with_toast ~now ~level:Model.Toast_info msg
+          in
+          let set_modal_error err =
+            ({ m with inline_modal = Some { modal with error = Some err } }, [])
+          in
+          match classify_inline_form modal with
+          | Form_standard Nav.Btw_query ->
               let prompt = Model.modal_field_value ~key:"prompt" modal in
               start_btw_query ~now ~prompt m
-          | Nav.Gate_reject id ->
+          | Form_standard (Nav.Gate_reject id) ->
               let reason = Model.modal_field_value ~key:"reason" modal in
               ( mark_submitting m
               , [
@@ -805,7 +847,7 @@ let submit_inline_modal ~now (m : Model.t) =
                           { id; approved = false; reason = Some reason };
                     };
                 ] )
-          | Nav.Verification_reject verification_id -> (
+          | Form_standard (Nav.Verification_reject verification_id) -> (
               let reason = Model.modal_field_value ~key:"reason" modal in
               let notes_raw = Model.modal_field_value ~key:"notes" modal in
               let notes =
@@ -818,14 +860,16 @@ let submit_inline_modal ~now (m : Model.t) =
                   (Work_store.verifications_list m.work)
               with
               | None ->
-                  let err =
-                    Printf.sprintf "Verification request %s not found"
-                      verification_id
-                  in
-                  ( { m with inline_modal = Some { modal with error = Some err } }
-                  , [] )
+                  set_modal_error
+                    (Printf.sprintf "Verification request %s not found"
+                       verification_id)
               | Some v ->
-                  ( mark_submitting m
+                  ( close_with_inflight_toast
+                      ~msg:
+                        (Say.make
+                           ~ko:("검증 거절 전송 중: " ^ v.task_title)
+                           ~en:("Submitting verification rejection: " ^ v.task_title))
+                      m
                   , [
                       Cmd.Http_post
                         {
@@ -840,7 +884,7 @@ let submit_inline_modal ~now (m : Model.t) =
                               };
                         };
                     ] ))
-          | Nav.Harness_overrule target_id ->
+          | Form_standard (Nav.Harness_overrule target_id) ->
               let reason = Model.modal_field_value ~key:"reason" modal in
               ( mark_submitting m
               , [
@@ -850,7 +894,7 @@ let submit_inline_modal ~now (m : Model.t) =
                       req = Cmd.Post_harness_overrule { target_id; reason };
                     };
                 ] )
-          | Nav.Task_cancel task_id ->
+          | Form_standard (Nav.Task_cancel task_id) ->
               let reason_raw = Model.modal_field_value ~key:"reason" modal in
               let reason =
                 if String.equal reason_raw "" then None else Some reason_raw
@@ -863,7 +907,7 @@ let submit_inline_modal ~now (m : Model.t) =
                       req = Cmd.Post_task_cancel { task_id; reason };
                     };
                 ] )
-          | Nav.Schedule_form ->
+          | Form_standard Nav.Schedule_form ->
               let keeper = Model.modal_field_value ~key:"keeper" modal in
               let recurrence = Model.modal_field_value ~key:"recurrence" modal in
               let prompt = Model.modal_field_value ~key:"prompt" modal in
@@ -876,7 +920,7 @@ let submit_inline_modal ~now (m : Model.t) =
                         Cmd.Post_schedule_create { keeper; recurrence; prompt };
                     };
                 ] )
-          | Nav.Connector_form ->
+          | Form_standard Nav.Connector_form ->
               let connector = Model.modal_field_value ~key:"connector" modal in
               let channel = Model.modal_field_value ~key:"channel" modal in
               ( mark_submitting m
@@ -887,7 +931,7 @@ let submit_inline_modal ~now (m : Model.t) =
                       req = Cmd.Post_connector_create { connector; channel };
                     };
                 ] )
-          | Nav.Repo_add_form ->
+          | Form_standard Nav.Repo_add_form ->
               let url = Model.modal_field_value ~key:"url" modal in
               let branch_raw = Model.modal_field_value ~key:"branch" modal in
               let branch =
@@ -898,243 +942,288 @@ let submit_inline_modal ~now (m : Model.t) =
                   Cmd.Http_post
                     { epoch = m.epoch; req = Cmd.Post_repo_add { url; branch } };
                 ] )
-          | Nav.Board_new_post ->
-              let has_field key =
-                List.exists
-                  (fun (f : Model.modal_form_field) -> String.equal f.key key)
-                  modal.fields
+          | Form_standard Nav.Board_new_post ->
+              let title = Model.modal_field_value ~key:"title" modal in
+              let body = Model.modal_field_value ~key:"body" modal in
+              let hearth_raw = Model.modal_field_value ~key:"hearth" modal in
+              let hearth =
+                if String.equal hearth_raw "" then None else Some hearth_raw
               in
-              let set_modal_error err =
-                ( { m with inline_modal = Some { modal with error = Some err } }
-                , [] )
+              ( mark_submitting m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req = Cmd.Post_board_create { title; body; hearth };
+                    };
+                ] )
+          | Form_board_goal_proposal -> (
+              let title = Model.modal_field_value ~key:"proposal_title" modal in
+              let measure =
+                Model.modal_field_value ~key:"proposal_measure" modal
               in
-              if has_field "goal_title" then (
-                let title = Model.modal_field_value ~key:"goal_title" modal in
-                let measure =
-                  Model.modal_field_value ~key:"goal_measure" modal
-                in
-                let proc =
-                  Model.modal_field_value ~key:"goal_procedure" modal
-                in
-                let prio_raw =
-                  Model.modal_field_value ~key:"goal_priority" modal
-                in
-                let prio_res =
-                  if String.equal prio_raw "" then Ok 2
-                  else
-                    match int_of_string_opt prio_raw with
-                    | Some p when p >= 1 && p <= 5 -> Ok p
-                    | Some _ | None ->
-                        Error "Priority must be an integer between 1 and 5"
-                in
-                match prio_res with
-                | Error err -> set_modal_error err
-                | Ok prio ->
-                    let body =
-                      if String.equal proc "" then
-                        Printf.sprintf "Priority: P%d\nMeasure: %s" prio measure
-                      else
-                        Printf.sprintf
-                          "Priority: P%d\nMeasure: %s\nProcedure: %s" prio
-                          measure proc
-                    in
-                    ( mark_submitting m
-                    , [
-                        Cmd.Http_post
-                          {
-                            epoch = m.epoch;
-                            req =
-                              Cmd.Post_board_create
-                                {
-                                  title = "[Goal] " ^ title;
-                                  body;
-                                  hearth = Some "goals";
-                                };
-                          };
-                      ] ))
-              else if has_field "memory_act" then (
-                let keeper =
-                  Model.modal_field_value ~key:"memory_keeper" modal
-                in
-                let act_raw =
-                  String.lowercase_ascii
-                    (Model.modal_field_value ~key:"memory_act" modal)
-                in
-                let arg = Model.modal_field_value ~key:"memory_arg" modal in
-                let parsed_act =
-                  match act_raw with
-                  | "resume" -> Ok Wire_knowledge.Act_resume
-                  | "adopt" ->
-                      if String.equal arg "" then
-                        Error "Observed value is required for adopt"
-                      else Ok (Wire_knowledge.Act_adopt { observed = arg })
-                  | "restart_reading" ->
-                      if String.equal arg "" then
-                        Error "Observed value is required for restart_reading"
-                      else
-                        Ok
-                          (Wire_knowledge.Act_restart_reading { observed = arg })
-                  | "skip_item" -> (
-                      match String.rindex_opt arg ':' with
-                      | None ->
-                          Error "skip_item requires <turn_log>:<line> argument"
-                      | Some idx -> (
-                          let turn_log =
-                            String.trim (String.sub arg 0 idx)
-                          in
-                          let line_s =
-                            String.trim
-                              (String.sub arg (idx + 1)
-                                 (String.length arg - idx - 1))
-                          in
-                          match int_of_string_opt line_s with
-                          | Some line
-                            when line >= 1 && not (String.equal turn_log "") ->
-                              Ok
-                                (Wire_knowledge.Act_skip_item { turn_log; line })
-                          | Some _ | None ->
-                              Error
-                                "skip_item requires <turn_log>:<positive_line>"))
-                  | "skip_line" -> (
-                      match int_of_string_opt arg with
-                      | Some offset when offset >= 0 ->
-                          Ok (Wire_knowledge.Act_skip_line { offset })
-                      | Some _ | None ->
-                          Error "skip_line requires a non-negative byte offset")
-                  | _ ->
-                      Error
-                        "Unsupported act (use: resume | adopt | restart_reading \
-                         | skip_item | skip_line)"
-                in
-                match parsed_act with
-                | Error err -> set_modal_error err
-                | Ok act ->
-                    ( mark_submitting m
-                    , [
-                        Cmd.Http_post
-                          {
-                            epoch = m.epoch;
-                            req = Cmd.Post_memory_act { keeper; act };
-                          };
-                      ] ))
-              else if has_field "wiki_slug" then (
-                let slug = Model.modal_field_value ~key:"wiki_slug" modal in
-                let title = Model.modal_field_value ~key:"wiki_title" modal in
-                let summary =
-                  Model.modal_field_value ~key:"wiki_summary" modal
-                in
-                let body = Model.modal_field_value ~key:"wiki_body" modal in
-                let note_raw = Model.modal_field_value ~key:"wiki_note" modal in
-                let note =
-                  if String.equal note_raw "" then "TUI inline edit"
-                  else note_raw
-                in
-                let expected_revision, expected_sha256, source, tags =
-                  match Observed.to_option m.knowledge.wiki_page with
-                  | Some detail when String.equal detail.slug slug ->
-                      ( Some detail.frontmatter.revision
-                      , Some detail.sha256
-                      , detail.frontmatter.source
-                      , detail.frontmatter.tags )
-                  | Some _ | None -> (
-                      match Observed.to_option m.knowledge.wiki_index with
-                      | Some idx -> (
-                          match
-                            List.find_opt
-                              (fun (p : Wire_knowledge.wiki_page_summary) ->
-                                String.equal p.slug slug)
-                              idx.pages
-                          with
-                          | Some s ->
-                              ( Some s.revision
-                              , Some s.sha256
-                              , s.source
-                              , s.tags )
-                          | None ->
-                              (None, None, Wire_knowledge.Source_observation, []))
-                      | None ->
-                          (None, None, Wire_knowledge.Source_observation, []))
-                in
-                let request : Wire_knowledge.wiki_put_request =
-                  {
-                    expected_revision;
-                    expected_sha256;
-                    title;
-                    summary;
-                    source;
-                    tags;
-                    body;
-                    note;
-                  }
-                in
-                ( mark_submitting m
-                , [
-                    Cmd.Http_put
-                      {
-                        epoch = m.epoch;
-                        req = Cmd.Put_wiki_page { page = slug; request };
-                      };
-                  ] ))
-              else if has_field "fusion_prompt" then (
-                let keeper =
-                  Model.modal_field_value ~key:"fusion_keeper" modal
-                in
-                let prompt =
-                  Model.modal_field_value ~key:"fusion_prompt" modal
-                in
-                let topo_raw =
-                  String.lowercase_ascii
-                    (Model.modal_field_value ~key:"fusion_topology" modal)
-                in
-                let preset_raw =
-                  Model.modal_field_value ~key:"fusion_preset" modal
-                in
-                let topology_res =
-                  if String.equal topo_raw "" then Ok None
-                  else
-                    match Wire_runtime.fusion_topology_of_string topo_raw with
-                    | Some topo -> Ok (Some topo)
+              let proc =
+                Model.modal_field_value ~key:"proposal_procedure" modal
+              in
+              let prio_raw =
+                Model.modal_field_value ~key:"proposal_priority" modal
+              in
+              let prio_res =
+                if String.equal prio_raw "" then Ok 2
+                else
+                  match int_of_string_opt prio_raw with
+                  | Some p when p >= 1 && p <= 5 -> Ok p
+                  | Some _ | None ->
+                      Error "Priority must be an integer between 1 and 5"
+              in
+              match prio_res with
+              | Error err -> set_modal_error err
+              | Ok prio ->
+                  let body =
+                    if String.equal proc "" then
+                      Printf.sprintf "Priority: P%d\nMeasure: %s" prio measure
+                    else
+                      Printf.sprintf
+                        "Priority: P%d\nMeasure: %s\nProcedure: %s" prio measure
+                        proc
+                  in
+                  ( mark_submitting m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_board_create
+                              {
+                                title = "[Goal Proposal] " ^ title;
+                                body;
+                                hearth = Some "goals";
+                              };
+                        };
+                    ] ))
+          | Form_goal_confirmation_proof -> (
+              let goal_id =
+                Model.modal_field_value ~key:"confirm_goal_id" modal
+              in
+              let criterion_revision =
+                Model.modal_field_value ~key:"confirm_criterion_revision" modal
+              in
+              let request_id =
+                Model.modal_field_value ~key:"confirm_request_id" modal
+              in
+              let verification_run_id =
+                Model.modal_field_value ~key:"confirm_verification_run_id" modal
+              in
+              let expected_operator_id =
+                Model.modal_field_value ~key:"confirm_operator_id" modal
+              in
+              match
+                expected_workspace_of m, m.server_identity.observer_instance_id
+              with
+              | Some expected_workspace, Some inst_id
+                when not (String.equal (String.trim inst_id) "") ->
+                  let req : Wire_work.goal_confirmation_request =
+                    {
+                      goal_id;
+                      criterion_revision;
+                      request_id;
+                      verification_run_id;
+                      expected_workspace;
+                      expected_operator_id;
+                      expected_runtime_instance_id = String.trim inst_id;
+                    }
+                  in
+                  ( close_with_inflight_toast
+                      ~msg:
+                        (Say.make
+                           ~ko:("목표 완료 확정 전송 중: " ^ goal_id)
+                           ~en:("Submitting goal confirmation: " ^ goal_id))
+                      m
+                  , [
+                      Cmd.Http_post
+                        { epoch = m.epoch; req = Cmd.Post_goal_confirmation req };
+                    ] )
+              | _ ->
+                  set_modal_error
+                    "Server workspace and runtime instance identity must be \
+                     loaded before confirming a goal")
+          | Form_memory_act -> (
+              let keeper =
+                Model.modal_field_value ~key:"memory_keeper" modal
+              in
+              let act_raw =
+                String.lowercase_ascii
+                  (Model.modal_field_value ~key:"memory_act" modal)
+              in
+              let arg = Model.modal_field_value ~key:"memory_arg" modal in
+              let parsed_act =
+                match act_raw with
+                | "resume" -> Ok Wire_knowledge.Act_resume
+                | "adopt" ->
+                    if String.equal arg "" then
+                      Error "Observed value is required for adopt"
+                    else Ok (Wire_knowledge.Act_adopt { observed = arg })
+                | "restart_reading" ->
+                    if String.equal arg "" then
+                      Error "Observed value is required for restart_reading"
+                    else
+                      Ok
+                        (Wire_knowledge.Act_restart_reading { observed = arg })
+                | "skip_item" -> (
+                    match String.rindex_opt arg ':' with
                     | None ->
-                        Error
-                          "Unknown topology (use: simple | refine | conditional \
-                           | judge_of_judges | staged_judge_of_judges)"
-                in
-                match topology_res with
-                | Error err -> set_modal_error err
-                | Ok topology ->
-                    let preset =
-                      if String.equal preset_raw "" then None
-                      else Some preset_raw
-                    in
-                    let request : Wire_runtime.fusion_launch_request =
-                      { prompt; preset; topology; web_tools = false }
-                    in
-                    let runtime =
-                      Runtime_store.set_fusion_submitting true m.runtime
-                    in
-                    ( mark_submitting { m with runtime }
-                    , [
-                        Cmd.Http_post
-                          {
-                            epoch = m.epoch;
-                            req = Cmd.Post_fusion_launch { keeper; request };
-                          };
-                      ] ))
-              else
-                let title = Model.modal_field_value ~key:"title" modal in
-                let body = Model.modal_field_value ~key:"body" modal in
-                let hearth_raw = Model.modal_field_value ~key:"hearth" modal in
-                let hearth =
-                  if String.equal hearth_raw "" then None else Some hearth_raw
-                in
-                ( mark_submitting m
-                , [
-                    Cmd.Http_post
-                      {
-                        epoch = m.epoch;
-                        req = Cmd.Post_board_create { title; body; hearth };
-                      };
-                  ] )))
+                        Error "skip_item requires <turn_log>:<line> argument"
+                    | Some idx -> (
+                        let turn_log = String.trim (String.sub arg 0 idx) in
+                        let line_s =
+                          String.trim
+                            (String.sub arg (idx + 1)
+                               (String.length arg - idx - 1))
+                        in
+                        match int_of_string_opt line_s with
+                        | Some line
+                          when line >= 1 && not (String.equal turn_log "") ->
+                            Ok (Wire_knowledge.Act_skip_item { turn_log; line })
+                        | Some _ | None ->
+                            Error
+                              "skip_item requires <turn_log>:<positive_line>"))
+                | "skip_line" -> (
+                    match int_of_string_opt arg with
+                    | Some offset when offset >= 0 ->
+                        Ok (Wire_knowledge.Act_skip_line { offset })
+                    | Some _ | None ->
+                        Error "skip_line requires a non-negative byte offset")
+                | _ ->
+                    Error
+                      "Unsupported act (use: resume | adopt | restart_reading \
+                       | skip_item | skip_line)"
+              in
+              match parsed_act with
+              | Error err -> set_modal_error err
+              | Ok act ->
+                  ( close_with_inflight_toast
+                      ~msg:
+                        (Say.make
+                           ~ko:("사서 기억 복구 전송 중: " ^ keeper)
+                           ~en:("Submitting memory recovery act: " ^ keeper))
+                      m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req = Cmd.Post_memory_act { keeper; act };
+                        };
+                    ] ))
+          | Form_wiki_edit ->
+              let slug = Model.modal_field_value ~key:"wiki_slug" modal in
+              let title = Model.modal_field_value ~key:"wiki_title" modal in
+              let summary = Model.modal_field_value ~key:"wiki_summary" modal in
+              let body = Model.modal_field_value ~key:"wiki_body" modal in
+              let note_raw = Model.modal_field_value ~key:"wiki_note" modal in
+              let note =
+                if String.equal note_raw "" then "TUI inline edit" else note_raw
+              in
+              let expected_revision, expected_sha256, source, tags =
+                match Observed.to_option m.knowledge.wiki_page with
+                | Some detail when String.equal detail.slug slug ->
+                    ( Some detail.frontmatter.revision
+                    , Some detail.sha256
+                    , detail.frontmatter.source
+                    , detail.frontmatter.tags )
+                | Some _ | None -> (
+                    match Observed.to_option m.knowledge.wiki_index with
+                    | Some idx -> (
+                        match
+                          List.find_opt
+                            (fun (p : Wire_knowledge.wiki_page_summary) ->
+                              String.equal p.slug slug)
+                            idx.pages
+                        with
+                        | Some s ->
+                            ( Some s.revision
+                            , Some s.sha256
+                            , s.source
+                            , s.tags )
+                        | None ->
+                            (None, None, Wire_knowledge.Source_observation, []))
+                    | None ->
+                        (None, None, Wire_knowledge.Source_observation, []))
+              in
+              let request : Wire_knowledge.wiki_put_request =
+                {
+                  expected_revision;
+                  expected_sha256;
+                  title;
+                  summary;
+                  source;
+                  tags;
+                  body;
+                  note;
+                }
+              in
+              ( close_with_inflight_toast
+                  ~msg:
+                    (Say.make
+                       ~ko:("위키 문서 저장 중: " ^ slug)
+                       ~en:("Saving wiki page: " ^ slug))
+                  m
+              , [
+                  Cmd.Http_put
+                    {
+                      epoch = m.epoch;
+                      req = Cmd.Put_wiki_page { page = slug; request };
+                    };
+                ] )
+          | Form_fusion_launch -> (
+              let keeper =
+                Model.modal_field_value ~key:"fusion_keeper" modal
+              in
+              let prompt =
+                Model.modal_field_value ~key:"fusion_prompt" modal
+              in
+              let topo_raw =
+                String.lowercase_ascii
+                  (Model.modal_field_value ~key:"fusion_topology" modal)
+              in
+              let preset_raw =
+                Model.modal_field_value ~key:"fusion_preset" modal
+              in
+              let topology_res =
+                if String.equal topo_raw "" then Ok None
+                else
+                  match Wire_runtime.fusion_topology_of_string topo_raw with
+                  | Some topo -> Ok (Some topo)
+                  | None ->
+                      Error
+                        "Unknown topology (use: simple | refine | conditional \
+                         | judge_of_judges | staged_judge_of_judges)"
+              in
+              match topology_res with
+              | Error err -> set_modal_error err
+              | Ok topology ->
+                  let preset =
+                    if String.equal preset_raw "" then None
+                    else Some preset_raw
+                  in
+                  let request : Wire_runtime.fusion_launch_request =
+                    { prompt; preset; topology; web_tools = false }
+                  in
+                  let runtime =
+                    Runtime_store.set_fusion_submitting true m.runtime
+                  in
+                  ( close_with_inflight_toast
+                      ~msg:
+                        (Say.make
+                           ~ko:("퓨전 패널 실행 요청 중: " ^ keeper)
+                           ~en:("Launching fusion run for " ^ keeper))
+                      { m with runtime }
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req = Cmd.Post_fusion_launch { keeper; request };
+                        };
+                    ] ))))
 
 let move_delta = function
   | Keymap.Up -> -1

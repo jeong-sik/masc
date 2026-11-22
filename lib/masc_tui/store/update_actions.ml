@@ -49,7 +49,8 @@ let latest_keeper_reply_text (m : Model.t) : (string * string) option =
   | Some keeper -> (
       let stream_text =
         match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with
-        | Some s when not (String.equal (String.trim s.text) "") -> Some s.text
+        | Some s when s.active && not (String.equal (String.trim s.text) "") ->
+            Some s.text
         | Some _ | None -> None
       in
       match stream_text with
@@ -840,11 +841,48 @@ and execute_action ~now (m : Model.t) action =
                 overlay = Some (Nav.Settings Nav.Settings_keepers_companies);
               }
             in
-            ( Model.with_toast ~now ~level:Model.Toast_info
-                (Say.make ~ko:"새 키퍼 이름을 입력하고 Enter 를 누르세요"
-                   ~en:"Type new keeper name and press Enter")
-                { m with nav; config }
-            , [] )
+            let next =
+              { m with nav; config }
+              |> Model.with_toast ~now ~level:Model.Toast_info
+                   (Say.make ~ko:"새 키퍼 이름을 입력하고 Enter 를 누르세요"
+                      ~en:"Type new keeper name and press Enter")
+            in
+            let view_cmds = View_fetches.fetches_for_current_view next in
+            let create_schema_path =
+              Wire_config.config_schema_path Wire_config.Target_keeper_create
+            in
+            let has_create_schema =
+              List.exists
+                (function
+                  | Cmd.Http_get { req; _ } ->
+                      String.equal (Cmd.get_request_path req) create_schema_path
+                  | Cmd.Batch _
+                  | Cmd.Http_post _
+                  | Cmd.Http_put _
+                  | Cmd.Http_post_stream _
+                  | Cmd.Sync_streams _
+                  | Cmd.Update_workspace_guard _
+                  | Cmd.Voice_cmd _
+                  | Cmd.Copy_clipboard _
+                  | Cmd.Open_external_url _
+                  | Cmd.Open_editor_escape_hatch _
+                  | Cmd.Start_local_server
+                  | Cmd.Restart_tui
+                  | Cmd.Quit _ ->
+                      false)
+                (Cmd.flatten view_cmds)
+            in
+            let cmds =
+              if has_create_schema then view_cmds
+              else
+                Cmd.Http_get
+                  {
+                    epoch = next.epoch;
+                    req = Cmd.Get_config_schema Wire_config.Target_keeper_create;
+                  }
+                :: view_cmds
+            in
+            (next, cmds)
           else
             ( Model.with_toast ~now ~level:Model.Toast_info
                 (Say.make ~ko:"설정 저장은 Ctrl+S 를 사용하세요"
@@ -871,21 +909,23 @@ and execute_action ~now (m : Model.t) action =
                       fields =
                         [
                           {
-                            key = "goal_title";
-                            label = Say.make ~ko:"목표 제목" ~en:"Goal title";
+                            key = "proposal_title";
+                            label =
+                              Say.make ~ko:"#goals 제안 제목"
+                                ~en:"Proposal title (#goals)";
                             value = "";
                             required = true;
                           };
                           {
-                            key = "goal_measure";
+                            key = "proposal_measure";
                             label =
-                              Say.make ~ko:"달성 기준 (Measure)"
+                              Say.make ~ko:"성공 기준 (Measure)"
                                 ~en:"Success measure";
                             value = "";
                             required = true;
                           };
                           {
-                            key = "goal_procedure";
+                            key = "proposal_procedure";
                             label =
                               Say.make ~ko:"검증 절차 (Procedure)"
                                 ~en:"Verification procedure";
@@ -893,7 +933,7 @@ and execute_action ~now (m : Model.t) action =
                             required = false;
                           };
                           {
-                            key = "goal_priority";
+                            key = "proposal_priority";
                             label =
                               Say.make ~ko:"우선순위 (1-5)" ~en:"Priority (1-5)";
                             value = "2";
@@ -920,9 +960,9 @@ and execute_action ~now (m : Model.t) action =
                   ( Model.with_toast ~now ~level:Model.Toast_info
                       (Say.make
                          ~ko:
-                           "목표 생성은 Pipeline 탭, 스케줄 생성은 Tasks/Schedules 탭에서 [n]을 누르세요"
+                           "#goals 보드 제안은 Pipeline 탭, 스케줄 생성은 Tasks/Schedules 탭에서 [n]을 누르세요"
                          ~en:
-                           "Press [n] on Pipeline to add a goal or \
+                           "Press [n] on Pipeline to post a #goals proposal or \
                             Tasks/Schedules to add a schedule")
                       m
                   , [] ))
@@ -1001,7 +1041,22 @@ and execute_action ~now (m : Model.t) action =
         , view_cmds @ probe_cmd )
   | Keymap.Copy_selected -> (
       let text_opt =
-        match m.nav.workspace with
+        match m.nav.overlay with
+        | Some (Nav.System_gate Nav.Media_viewer) ->
+            Option.map
+              (fun (a : Wire_knowledge.artifact_entry) -> a.sha256)
+              (Knowledge_store.selected_artifact m.knowledge)
+        | Some
+            ( Nav.Palette
+            | Nav.Settings _
+            | Nav.Incidents
+            | Nav.Queue_context _
+            | Nav.Inline_action _
+            | Nav.Help
+            | Nav.System_gate
+                (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline) )
+        | None -> (
+            match m.nav.workspace with
         | Nav.Knowledge -> (
             match m.knowledge.active_tab with
             | Nav.Knowledge_board ->
@@ -1088,7 +1143,7 @@ and execute_action ~now (m : Model.t) action =
         | Nav.Runtime ->
             Option.map
               (fun (l : Wire_runtime.failover_lane) -> l.id)
-              (Runtime_store.selected_lane m.runtime)
+              (Runtime_store.selected_lane m.runtime))
       in
       match text_opt with
       | Some txt ->

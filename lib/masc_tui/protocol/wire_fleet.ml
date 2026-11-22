@@ -354,14 +354,21 @@ let group_by_company ?(attention = []) ?(sandbox_profiles = [])
         let cost_24h_usd = ref 0.0 in
         List.iter
           (fun (k : keeper_summary) ->
-            if k.keepalive_running then incr running_count;
-            if k.paused then incr paused_count;
             (match k.health with
-            | Keeper_working -> incr working_count
             | Keeper_failing -> incr failing_count
-            | Keeper_healthy | Keeper_idle | Keeper_degraded | Keeper_recovering
-            | Keeper_paused | Keeper_offline | Keeper_booting ->
-                ());
+            | Keeper_offline -> ()
+            | Keeper_paused -> incr paused_count
+            | Keeper_healthy | Keeper_working | Keeper_booting | Keeper_idle
+            | Keeper_degraded | Keeper_recovering
+              when k.paused ->
+                incr paused_count
+            | Keeper_working | Keeper_booting ->
+                incr running_count;
+                incr working_count
+            | Keeper_healthy | Keeper_degraded | Keeper_recovering ->
+                incr running_count
+            | Keeper_idle ->
+                if k.keepalive_running then incr running_count);
             attention_count := !attention_count + attn_for_keeper k.name;
             (match Hashtbl.find_opt profile_tbl k.name with
             | Some Profile_microvm -> incr microvm_count

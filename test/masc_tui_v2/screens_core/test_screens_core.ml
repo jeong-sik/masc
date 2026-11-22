@@ -579,6 +579,7 @@ let populated_model ~cols ~rows ~lang =
   let efficiency : Wire_runtime.efficiency_month =
     {
       month = "2026-11";
+      window_kind = Some Wire_runtime.Efficiency_month_mtd;
       generated_at_unix = now_unix;
       days_covered = 21;
       keepers =
@@ -2497,9 +2498,22 @@ let test_v25_round55_attention_bar_5companies_fail_and_settings_polish () =
             ~label:(Printf.sprintf "r55_5co_%s_%dx%d" fault_label cols rows)
             g;
           let txt = grid_all_text g in
-          assert_contains
-            ~label:(Printf.sprintf "r55_5co_%s_fail_banner_%dx%d" fault_label cols rows)
-            ~needle:"실시간 오류:" txt;
+          (match fault_health with
+          | Wire_fleet.Keeper_failing ->
+              assert_contains
+                ~label:
+                  (Printf.sprintf "r55_5co_%s_fail_banner_%dx%d" fault_label
+                     cols rows)
+                ~needle:"실시간 오류:" txt
+          | Wire_fleet.Keeper_offline
+          | Wire_fleet.Keeper_degraded
+          | Wire_fleet.Keeper_healthy
+          | Wire_fleet.Keeper_working
+          | Wire_fleet.Keeper_idle
+          | Wire_fleet.Keeper_recovering
+          | Wire_fleet.Keeper_paused
+          | Wire_fleet.Keeper_booting ->
+              ());
           List.iter
             (fun co ->
               assert_contains
@@ -2681,6 +2695,99 @@ let test_v25_round55_attention_bar_5companies_fail_and_settings_polish () =
   assert_contains ~label:"r55_inspector_binding_opus"
     ~needle:"모델 바인딩 · claude-opus-5-5" full_txt
 
+let test_p0_toast_above_active_overlay_and_settings_tab_focus () =
+  let base_ko = populated_model ~lang:Say.Lang_ko ~cols:140 ~rows:40 in
+  let base_en = populated_model ~lang:Say.Lang_en ~cols:140 ~rows:40 in
+  (* (a) P0-5: Active toasts MUST render ABOVE Settings and Palette overlays *)
+  let m_set_toast =
+    {
+      base_ko with
+      nav =
+        {
+          base_ko.nav with
+          overlay = Some (Nav.Settings Nav.Settings_general_ui);
+        };
+    }
+    |> Model.with_toast ~now:Clock.Mono.zero ~level:Model.Toast_warning
+         (Say.make ~ko:"저장 전 미리보기 경고" ~en:"Dry-run warning toast")
+  in
+  let g_set_toast, _ = render_full ~model:m_set_toast ~cols:140 ~rows:40 in
+  assert_clean_grid ~label:"p0_5_toast_above_settings" g_set_toast;
+  assert_contains ~label:"p0_5_toast_visible_above_settings"
+    ~needle:"저장 전 미리보기 경고" (grid_all_text g_set_toast);
+
+  let m_pal_toast =
+    {
+      base_en with
+      nav = { base_en.nav with overlay = Some Nav.Palette };
+    }
+    |> Model.with_toast ~now:Clock.Mono.zero ~level:Model.Toast_error
+         (Say.make ~ko:"검증 오류 토스트" ~en:"Validation error toast")
+  in
+  let g_pal_toast, _ = render_full ~model:m_pal_toast ~cols:140 ~rows:40 in
+  assert_clean_grid ~label:"p0_5_toast_above_palette" g_pal_toast;
+  assert_contains ~label:"p0_5_toast_visible_above_palette"
+    ~needle:"Validation error toast" (grid_all_text g_pal_toast);
+
+  (* (b) P1-11: Pressing Tab in Settings produces unmistakable pane focus diff *)
+  let m_insp_ko =
+    {
+      base_ko with
+      nav =
+        {
+          base_ko.nav with
+          overlay = Some (Nav.Settings Nav.Settings_providers_models);
+        };
+      config =
+        base_ko.config
+        |> Config_store.set_tab Nav.Settings_providers_models
+        |> Config_store.set_pane Config_store.Pane_inspector;
+    }
+  in
+  let m_tree_ko =
+    { m_insp_ko with config = Config_store.toggle_pane m_insp_ko.config }
+  in
+  let g_insp_ko, _ = render_full ~model:m_insp_ko ~cols:140 ~rows:40 in
+  let g_tree_ko, _ = render_full ~model:m_tree_ko ~cols:140 ~rows:40 in
+  assert_clean_grid ~label:"p1_11_settings_insp_ko" g_insp_ko;
+  assert_clean_grid ~label:"p1_11_settings_tree_ko" g_tree_ko;
+  let txt_insp_ko = grid_all_text g_insp_ko in
+  let txt_tree_ko = grid_all_text g_tree_ko in
+  Alcotest.(check bool) "Tab changes Settings rendered grid (KO)" true
+    (not (String.equal txt_insp_ko txt_tree_ko));
+  assert_contains ~label:"p1_11_insp_focus_ko" ~needle:"속성 검사기 · 활성"
+    txt_insp_ko;
+  assert_not_contains ~label:"p1_11_tree_inactive_ko" ~needle:"탐색 트리 · 활성"
+    txt_insp_ko;
+  assert_contains ~label:"p1_11_tree_focus_ko" ~needle:"탐색 트리 · 활성"
+    txt_tree_ko;
+  assert_not_contains ~label:"p1_11_insp_inactive_ko" ~needle:"속성 검사기 · 활성"
+    txt_tree_ko;
+
+  let m_insp_en =
+    {
+      base_en with
+      nav =
+        {
+          base_en.nav with
+          overlay = Some (Nav.Settings Nav.Settings_providers_models);
+        };
+      config =
+        base_en.config
+        |> Config_store.set_tab Nav.Settings_providers_models
+        |> Config_store.set_pane Config_store.Pane_inspector;
+    }
+  in
+  let m_tree_en =
+    { m_insp_en with config = Config_store.toggle_pane m_insp_en.config }
+  in
+  let g_insp_en, _ = render_full ~model:m_insp_en ~cols:140 ~rows:40 in
+  let g_tree_en, _ = render_full ~model:m_tree_en ~cols:140 ~rows:40 in
+  assert_contains ~label:"p1_11_insp_focus_en" ~needle:"INSPECTOR · FOCUS"
+    (grid_all_text g_insp_en);
+  assert_contains ~label:"p1_11_tree_focus_en" ~needle:"TREE · FOCUS"
+    (grid_all_text g_tree_en)
+
 let () =
   Alcotest.run "masc_tui_screens_core"
     [
@@ -2728,5 +2835,7 @@ let () =
             `Quick test_v25_settings_grouped_scroll_1subgroup_and_single_highlight;
           Alcotest.test_case "v2.5 Round 5.5 attention bar no-collision, 5 companies with fail banner, and human Settings providers/bindings"
             `Quick test_v25_round55_attention_bar_5companies_fail_and_settings_polish;
+          Alcotest.test_case "P0-5 toast above active overlay & P1-11 Settings Tab pane focus"
+            `Quick test_p0_toast_above_active_overlay_and_settings_tab_focus;
         ] );
     ]

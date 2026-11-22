@@ -84,6 +84,25 @@ val equal_memory_display : memory_display -> memory_display -> bool
 val keeper_live_state : Wire_fleet.keeper_summary -> Health.live_state
 (** Project authoritative [keeper_health] onto Channel 2 {!Health.live_state}. *)
 
+type fleet_health_counts = {
+  total : int;
+  active : int;
+  working : int;
+  healthy : int;
+  degraded : int;
+  failing : int;
+  paused : int;
+  offline : int;
+}
+(** Single-source-of-truth health breakdown across Pulse Hero, Pulse Companies,
+    and Keepers Fleet. Strictly separates [offline] (ordinary stopped keepers)
+    from [failing] (true live execution faults).
+    Invariant: [active = working + healthy + degraded] and
+    [active + failing + paused + offline = total]. *)
+
+val fleet_health_counts : Wire_fleet.keeper_summary list -> fleet_health_counts
+(** Compute {!fleet_health_counts} over a keeper list. *)
+
 val filtered_keepers : t -> Wire_fleet.keeper_summary list
 val company_groups :
   ?attention:Wire_fleet.attention_item list ->

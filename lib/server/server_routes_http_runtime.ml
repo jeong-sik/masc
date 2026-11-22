@@ -702,6 +702,7 @@ let make_health_fields ?(listener = default_listener) ?section_timings_ref
   let string_list reasons = `List (List.map (fun reason -> `String reason) reasons) in
   sections
   @ [
+      ("capabilities", Server_health_public.capabilities_json);
       ("overall_status", `String rollup.Server_health_rollup.overall_status);
       ( "operator_action_required",
         `Bool rollup.Server_health_rollup.operator_action_required );

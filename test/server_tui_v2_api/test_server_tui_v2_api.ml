@@ -1860,10 +1860,14 @@ let test_board_signal_pagination_and_full_succession_chains () =
   (* 2. End-to-end payload: interleaved noise pagination + full-board succession chains *)
   with_temp_workspace (fun config ->
     Eio_main.run (fun _env ->
+      let reset_board () =
+        Board_dispatch.reset_for_test ();
+        Board.reset_global_for_test ()
+      in
       Fun.protect
-        ~finally:Board_dispatch.reset_for_test
+        ~finally:reset_board
         (fun () ->
-           Board_dispatch.reset_for_test ();
+           reset_board ();
            (match
               Board_dispatch.init_jsonl
                 ~base_path:config.Workspace.base_path
@@ -2365,6 +2369,688 @@ let test_v25_neutral_keeper_groups_and_config_entity_metadata () =
       (json_string_exn "key" hdr_field))
 ;;
 
+(* ── 7. Track A Red-Team Audit Fixes (A3, A4, A5, A6, A7) ─────────────── *)
+
+let test_track_a_scorecard_and_capabilities () =
+  let now = 1_760_000_000.0 in
+  (* Empty registry returns None (never fabricates 0/0) *)
+  Alcotest.(check (option (pair int int)))
+    "empty verification runs -> None"
+    None
+    (Server_dashboard_http_core.verifications_24h_of_runs ~now []);
+  let make_run ~id ~started_at status : Masc.Verification_run_registry.run =
+    { verification_id = id
+    ; task_id = "task-" ^ id
+    ; producer = "alpha"
+    ; authority_kind = "system_verifier"
+    ; authority_actor = "verifier"
+    ; started_at
+    ; status
+    }
+  in
+  let runs =
+    [ make_run ~id:"v1" ~started_at:(now -. 3600.0)
+        (Masc.Verification_run_registry.Completed
+           { outcome = Approved { reason = "ok" }
+           ; evaluator_runtime = None
+           ; elapsed_s = 10.0
+           ; tools = []
+           })
+    ; make_run ~id:"v2" ~started_at:(now -. 1800.0)
+        (Masc.Verification_run_registry.Completed
+           { outcome = Rejected { reason = "missing proof" }
+           ; evaluator_runtime = None
+           ; elapsed_s = 5.0
+           ; tools = []
+           })
+    ; make_run ~id:"v3" ~started_at:(now -. 172_800.0)
+        (Masc.Verification_run_registry.Completed
+           { outcome = Approved { reason = "stale" }
+           ; evaluator_runtime = None
+           ; elapsed_s = 1.0
+           ; tools = []
+           })
+    ; make_run ~id:"v4" ~started_at:(now -. 100.0) Masc.Verification_run_registry.Running
+    ]
+  in
+  Alcotest.(check (option (pair int int)))
+    "trailing 24h passed/rejected counts"
+    (Some (1, 1))
+    (Server_dashboard_http_core.verifications_24h_of_runs ~now runs);
+  (* Capabilities advertised on shell payload and bootstrap, NOT on unauthenticated public health *)
+  let expected_caps =
+    [ "memory_v2"; "infra_sandboxes"; "candle_ledger"; "config_schema"; "task_goal_link" ]
+  in
+  Alcotest.(check (list string))
+    "Server_health_public.capabilities list"
+    expected_caps
+    Server_health_public.capabilities;
+  let pub_health =
+    Server_health_public.health_json ~ready:true ~phase:Masc.Server_startup_state.Ready
+  in
+  Alcotest.(check bool)
+    "unauthenticated public health_json stays strictly 5 keys"
+    true
+    (match pub_health with `Assoc fs -> List.length fs = 5 | _ -> false);
+  with_temp_workspace (fun config ->
+    let boot =
+      Server_dashboard_http_core_shell_bootstrap.dashboard_shell_bootstrap_json config
+    in
+    let boot_caps =
+      json_list_exn "capabilities" boot
+      |> List.map (function `String s -> s | _ -> "")
+    in
+    Alcotest.(check (list string)) "bootstrap shell capabilities" expected_caps boot_caps;
+    let shell = Server_dashboard_http_core.dashboard_shell_payload_json ~light:true config in
+    let shell_caps =
+      json_list_exn "capabilities" shell
+      |> List.map (function `String s -> s | _ -> "")
+    in
+    Alcotest.(check (list string)) "shell payload capabilities" expected_caps shell_caps;
+    let sc = json_member_exn "scorecard_24h" shell in
+    (* All four additive keys present; null when unobserved in fresh workspace *)
+    List.iter
+      (fun k ->
+         Alcotest.(check bool)
+           ("scorecard_24h has key " ^ k)
+           true
+           (match sc with `Assoc fs -> List.mem_assoc k fs | _ -> false))
+      [ "verifications_passed_24h"
+      ; "verifications_rejected_24h"
+      ; "board_posts_24h"
+      ; "cost_24h_usd"
+      ];
+    (* Non-light mode observes recent unvoted board posts via Board_dispatch.Recent *)
+    Eio_main.run (fun _env ->
+      let reset_board () =
+        Board_dispatch.reset_for_test ();
+        Board.reset_global_for_test ()
+      in
+      Fun.protect
+        ~finally:reset_board
+        (fun () ->
+           reset_board ();
+           (match
+              Board_dispatch.init_jsonl
+                ~base_path:config.Workspace.base_path
+                ~recipient_lookup:Recipient_lookup.none_declared
+                ()
+            with
+            | Ok () -> ()
+            | Error _ -> Alcotest.fail "Board_dispatch.init_jsonl failed");
+           (match
+              Board_dispatch.create_post
+                ~author:"operator"
+                ~title:"Recent unvoted post"
+                ~content:"fresh signal"
+                ~post_kind:Board.Human_post
+                ()
+            with
+            | Ok _ -> ()
+            | Error _ -> Alcotest.fail "Board_dispatch.create_post failed");
+           let full_shell =
+             Server_dashboard_http_core.dashboard_shell_payload_json ~light:false config
+           in
+           let full_sc = json_member_exn "scorecard_24h" full_shell in
+           Alcotest.(check int)
+             "board_posts_24h counts recent unvoted post in non-light mode"
+             1
+             (json_int_exn "board_posts_24h" full_sc);
+           let light_shell =
+             Server_dashboard_http_core.dashboard_shell_payload_json ~light:true config
+           in
+           let light_sc = json_member_exn "scorecard_24h" light_shell in
+           Alcotest.(check bool)
+             "board_posts_24h stays null in light mode"
+             true
+             (json_member_exn "board_posts_24h" light_sc = `Null))))
+;;
+
+let test_track_a_memory_diff_human_claim_text () =
+  with_temp_workspace (fun config ->
+    let base_path = config.Workspace.base_path in
+    let now = 1_760_100_000.0 in
+    let ts_iso = Masc_domain.iso8601_of_unix_seconds (now -. 300.0) in
+    let fact_claim = "OCaml 5.5 Eio server uses single-domain cooperative scheduling" in
+    let sha = Env.sha256_hex fact_claim in
+    let fact_ref = Workspace_memory_ledger.Ordinary { keeper_id = "alpha"; claim_sha256 = sha } in
+    let ledger =
+      match
+        Workspace_memory_ledger.apply
+          Workspace_memory_ledger.empty
+          ~selected:[ { Workspace_memory_ledger.fact = fact_ref; claim = fact_claim } ]
+          [ { Workspace_memory_ledger.fact = fact_ref
+            ; decision = Workspace_memory_ledger.Create_claim fact_claim
+            }
+          ]
+      with
+      | Ok l -> l
+      | Error err -> Alcotest.fail (Workspace_memory_ledger.apply_error_to_string err)
+    in
+    (match Workspace_memory_ledger.save ~base_path ledger with
+     | Ok () -> ()
+     | Error err -> Alcotest.fail err);
+    let claim_id = fst (List.hd (Workspace_memory_ledger.claims ledger)) in
+    let retracted_id = "claim-retracted-deadbeef" in
+    let retracted_text = "Stale hypothesis removed after verification" in
+    let log_path = Workspace_memory_log.log_path ~base_path in
+    (match
+       Workspace_memory_log.append_batch
+         ~path:log_path
+         ~header:
+           { batch_id = "batch-human-1"
+           ; author = "workspace-memory-curator"
+           ; started_at = ts_iso
+           ; expected_changes = 4
+           }
+         ~changes:
+           [ { seq = 1
+             ; batch_id = "batch-human-1"
+             ; fact_id = "claim:" ^ claim_id
+             ; summary = Printf.sprintf "Joined claim %s" claim_id
+             ; payload =
+                 `Assoc
+                   [ "kind", `String "claim_joined"
+                   ; "claim_id", `String claim_id
+                   ; "fact", Workspace_memory_ledger.fact_ref_to_json fact_ref
+                   ]
+             ; recorded_at = ts_iso
+             }
+           ; { seq = 2
+             ; batch_id = "batch-human-1"
+             ; fact_id = "claim:" ^ retracted_id
+             ; summary = Printf.sprintf "Created claim %s" retracted_id
+             ; payload =
+                 `Assoc
+                   [ "kind", `String "claim_created"
+                   ; "claim_id", `String retracted_id
+                   ; "claim", `String retracted_text
+                   ]
+             ; recorded_at = ts_iso
+             }
+           ; { seq = 3
+             ; batch_id = "batch-human-1"
+             ; fact_id = "claim:" ^ retracted_id
+             ; summary =
+                 Printf.sprintf
+                   "Claim %s retracted after losing all supporting Keepers"
+                   retracted_id
+             ; payload =
+                 `Assoc
+                   [ "kind", `String "claim_retracted"
+                   ; "claim_id", `String retracted_id
+                   ]
+             ; recorded_at = ts_iso
+             }
+           ; { seq = 4
+             ; batch_id = "batch-human-1"
+             ; fact_id = "claim:" ^ claim_id
+             ; summary = Printf.sprintf "Claim %s support shrank (2 -> 1)" claim_id
+             ; payload =
+                 `Assoc
+                   [ "kind", `String "claim_shrank"
+                   ; "claim_id", `String claim_id
+                   ; "before", `String "Earlier phrasing before update"
+                   ; "vanished_keepers", `List [ `String "beta" ]
+                   ]
+             ; recorded_at = ts_iso
+             }
+           ]
+         ~committed_at:ts_iso
+     with
+     | Ok _ -> ()
+     | Error err -> Alcotest.fail (Workspace_memory_log.error_to_string err));
+    let diff =
+      Memory_api.diff_json
+        ~now
+        ~config
+        ~scope:Memory_api.Scope_world
+        ~range:(Memory_api.Range_window Memory_api.Window_24h)
+        ()
+      |> ok_or_fail "GET /api/v1/memory/diff world human text"
+      |> json_member_exn "data"
+    in
+    let added = json_list_exn "added" diff in
+    let updated = json_list_exn "updated" diff in
+    let retracted = json_list_exn "retracted" diff in
+    Alcotest.(check int) "2 added entries" 2 (List.length added);
+    Alcotest.(check int) "1 updated (shrank) entry" 1 (List.length updated);
+    Alcotest.(check int) "1 retracted entry" 1 (List.length retracted);
+    let joined_entry =
+      List.find (fun e -> json_int_exn "seq" e = 1) added
+    in
+    Alcotest.(check string)
+      "joined claim resolves human claim_text from ledger"
+      fact_claim
+      (json_string_exn "claim_text" joined_entry);
+    Alcotest.(check string)
+      "joined claim resolves author_keeper"
+      "alpha"
+      (json_string_exn "author_keeper" joined_entry);
+    Alcotest.(check bool)
+      "joined summary contains human text, not raw UUID only"
+      true
+      (contains_substr ~needle:fact_claim (json_string_exn "summary" joined_entry));
+    let retracted_entry = List.hd retracted in
+    Alcotest.(check string)
+      "retracted claim recovers historical claim_text from prior create"
+      retracted_text
+      (json_string_exn "claim_text" retracted_entry);
+    let updated_entry = List.hd updated in
+    Alcotest.(check string)
+      "updated claim resolves claim_text"
+      fact_claim
+      (json_string_exn "claim_text" updated_entry);
+    Alcotest.(check string)
+      "updated claim resolves before_text"
+      "Earlier phrasing before update"
+      (json_string_exn "before_text" updated_entry);
+    Alcotest.(check string)
+      "updated claim resolves author_keeper from vanished_keepers"
+      "beta"
+      (json_string_exn "author_keeper" updated_entry))
+;;
+
+let test_track_a_hot_reload_and_hardened_secrets () =
+  (* 1. Hot-reload classification *)
+  let known_providers = Hashtbl.create 4 in
+  Hashtbl.replace known_providers "openrouter" ();
+  let check_scope label expected key =
+    let got =
+      Candle_cfg_api.classify_runtime_key_reload_scope
+        ~known_provider_ids:known_providers
+        key
+      |> Candle_cfg_api.reload_scope_to_string
+    in
+    Alcotest.(check string) label expected got
+  in
+  check_scope "provider base-url is hot_reload" "hot_reload" "providers.openrouter.base-url";
+  check_scope "provider timeout inside providers is hot_reload" "hot_reload" "providers.openrouter.timeout_s";
+  check_scope "provider binding is hot_reload" "hot_reload" "openrouter.sonnet.model";
+  check_scope "mixed-case provider binding is hot_reload" "hot_reload" "OpenRouter.sonnet.model";
+  check_scope "model max_context is hot_reload" "hot_reload" "models.sample.max_context";
+  check_scope "runtime lane is hot_reload" "hot_reload" "runtime.lanes.default.candidates";
+  check_scope "media_readers is hot_reload" "hot_reload" "media_readers.doc.command";
+  check_scope "browser is hot_reload" "hot_reload" "browser.enabled";
+  check_scope "machines is hot_reload" "hot_reload" "machines.msx.enabled";
+  check_scope "typesafeai is hot_reload" "hot_reload" "typesafeai.board_attention";
+  check_scope "lsp.servers is hot_reload" "hot_reload" "lsp.servers.ocaml";
+  check_scope "lsp non-servers key stays restart_required" "restart_required" "lsp.timeout_ms";
+  check_scope "non-materialized fusion stays restart_required" "restart_required" "fusion.enabled";
+  check_scope "turn timeout stays restart_required" "restart_required" "turn.request_timeout_s";
+  check_scope "sandbox timeout stays restart_required" "restart_required" "sandbox.connect_timeout_sec";
+  check_scope "exec.ssh timeout stays restart_required" "restart_required" "exec.ssh.endpoints.box.connect_timeout_sec";
+  check_scope "slack retry stays restart_required" "restart_required" "slack.retry_limit";
+  check_scope "voice timeout stays restart_required" "restart_required" "voice.timeout_s";
+  check_scope "board retry stays restart_required" "restart_required" "board.retry_count";
+  check_scope "memory timeout stays restart_required" "restart_required" "memory.timeout_ms";
+  check_scope "otel timeout stays restart_required" "restart_required" "otel.export_timeout_s";
+  check_scope "server.port stays restart_required" "restart_required" "server.port";
+  check_scope "http.bind_host stays restart_required" "restart_required" "http.bind_host";
+  check_scope "storage.data_dir stays restart_required" "restart_required" "storage.data_dir";
+  check_scope "domain_pool.pool_size stays restart_required" "restart_required" "domain_pool.pool_size";
+  check_scope "kebab domain-pool.request_timeout_s stays restart_required" "restart_required" "domain-pool.request_timeout_s";
+  check_scope "kebab executor-pool.retry_limit stays restart_required" "restart_required" "executor-pool.retry_limit";
+  check_scope "nested runtime.tls.cert_file stays restart_required" "restart_required" "runtime.tls.cert_file";
+  check_scope "nested runtime.ssl.ca_bundle stays restart_required" "restart_required" "runtime.ssl.ca_bundle";
+  check_scope "nested runtime.storage.backend stays restart_required" "restart_required" "runtime.storage.backend";
+  check_scope "nested runtime.pool.max_workers stays restart_required" "restart_required" "runtime.pool.max_workers";
+  check_scope "runtime.socket_path stays restart_required" "restart_required" "runtime.socket_path";
+  check_scope "runtime.listen_address stays restart_required" "restart_required" "runtime.listen_address";
+  check_scope "runtime.storage_path stays restart_required" "restart_required" "runtime.storage_path";
+  check_scope "runtime.tls_cert stays restart_required" "restart_required" "runtime.tls_cert";
+  check_scope "runtime.ssl_verify stays restart_required" "restart_required" "runtime.ssl_verify";
+  (* 2. Hardened is_secret_key *)
+  List.iter
+    (fun k ->
+       Alcotest.(check bool) ("secret key caught: " ^ k) true (Candle_cfg_api.is_secret_key k))
+    [ "providers.foo.headers.\"x-custom-auth\""
+    ; "providers.foo.headers.\"x-goog-key\""
+    ; "providers.foo.headers.\"x-access-key\""
+    ; "providers.foo.headers.cookie"
+    ; "providers.foo.headers.\"set-cookie\""
+    ; "providers.foo.headers.\"x-session\""
+    ; "providers.foo.headers.\"x-session-id\""
+    ; "webhooks.github.hmac"
+    ; "webhooks.github.x-hmac-sha256"
+    ; "webhooks.github.webhook_sig"
+    ];
+  List.iter
+    (fun k ->
+       Alcotest.(check bool) ("non-secret key preserved: " ^ k) false (Candle_cfg_api.is_secret_key k))
+    [ "db.primary_key"
+    ; "db.sort_key"
+    ; "crypto.public_key"
+    ; "meta.author"
+    ; "meta.authority"
+    ; "exec.ssh.max_sessions"
+    ; "providers.openrouter.headers.\"x-api.version\""
+    ; "providers.openrouter.credentials.api_key_env"
+    ; "providers.openrouter.credentials.token-path"
+    ];
+  (* 3. URL userinfo & query-string secret redaction *)
+  let leaky_url =
+    "https://alice:hunter2pass@proxy.example.com/v1/chat?key=goog-secret-1&token=tok-2&api_key=ak-3&mode=fast"
+  in
+  let redacted = Candle_cfg_api.redact_value_secrets leaky_url in
+  Alcotest.(check bool) "userinfo password redacted" false (contains_substr ~needle:"hunter2pass" redacted);
+  Alcotest.(check bool) "query ?key= redacted" false (contains_substr ~needle:"goog-secret-1" redacted);
+  Alcotest.(check bool) "query &token= redacted" false (contains_substr ~needle:"tok-2" redacted);
+  Alcotest.(check bool) "query &api_key= redacted" false (contains_substr ~needle:"ak-3" redacted);
+  Alcotest.(check bool) "benign query param preserved" true (contains_substr ~needle:"mode=fast" redacted);
+  (* 4. Runtime schema reflects hot_reload and redacted webhook URL *)
+  with_temp_workspace (fun config ->
+    let base_path = config.Workspace.base_path in
+    let runtime_toml_path = Filename.concat base_path ".masc/config/runtime.toml" in
+    write_file_raw
+      runtime_toml_path
+      "[providers.openrouter]\n\
+       display-name = \"OpenRouter\"\n\
+       endpoint = \"https://bot:topsecretpw@openrouter.ai/api?api_key=secret-qs-999&v=1\"\n\
+       [providers.openrouter.headers]\n\
+       \"x-custom-auth\" = \"Bearer raw-custom-auth-123\"\n\
+       [openrouter.sonnet]\n\
+       model = \"anthropic/claude-sonnet-4.6\"\n\
+       [server]\n\
+       port = 8935\n";
+    let schema =
+      Candle_cfg_api.config_schema_json ~base_path ~target:Target_runtime ()
+      |> ok_or_fail "GET schema hardened"
+    in
+    let serialized = Yojson.Safe.to_string schema in
+    Alcotest.(check bool) "schema never leaks userinfo pw" false (contains_substr ~needle:"topsecretpw" serialized);
+    Alcotest.(check bool) "schema never leaks query api_key" false (contains_substr ~needle:"secret-qs-999" serialized);
+    Alcotest.(check bool) "schema never leaks x-custom-auth" false (contains_substr ~needle:"raw-custom-auth-123" serialized);
+    let categories = json_list_exn "categories" (json_member_exn "data" schema) in
+    let find_field fk =
+      List.find_map
+        (fun cat ->
+           List.find_opt
+             (fun f -> String.equal (json_string_exn "full_key" f) fk)
+             (json_list_exn "fields" cat))
+        categories
+      |> Option.get
+    in
+    Alcotest.(check string)
+      "provider binding reload_scope = hot_reload"
+      "hot_reload"
+      (json_string_exn "reload_scope" (find_field "openrouter.sonnet.model"));
+    Alcotest.(check string)
+      "server.port reload_scope = restart_required"
+      "restart_required"
+      (json_string_exn "reload_scope" (find_field "server.port"));
+    (* 5. Op_remove of a provider section + its binding still classifies as hot_reload
+          because config_patch_json unions known_provider_ids across disk_preimage and after_text;
+          and Op_set on a non-reloaded section timeout key classifies as restart_required. *)
+    let rt_snap = Runtime.For_testing.snapshot () in
+    let prev_catalog = Llm_provider.Catalog_snapshot.current () in
+    let catalog_path = Filename.concat base_path "model-catalog-p24.toml" in
+    write_file_raw
+      catalog_path
+      "[[models]]\n\
+       model_id = \"sample\"\n\
+       provider_name = \"local\"\n\
+       base = \"openai_chat\"\n\
+       max_context_tokens = 1024\n";
+    let models =
+      match Llm_provider.Model_catalog.load_file catalog_path with
+      | Ok m -> m
+      | Error msg -> Alcotest.fail ("fixture catalog failed: " ^ msg)
+    in
+    let test_catalog =
+      match Llm_provider.Catalog_snapshot.of_catalogs ~models:(Some models) ~providers:None with
+      | Ok snap -> snap
+      | Error err ->
+        Alcotest.fail ("of_catalogs failed: " ^ Llm_provider.Catalog_snapshot.error_to_string err)
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        Llm_provider.Catalog_snapshot.publish prev_catalog;
+        Runtime.For_testing.restore rt_snap)
+      (fun () ->
+         Llm_provider.Catalog_snapshot.publish test_catalog;
+         let removable_toml =
+           "[providers]\n\
+            local = { protocol = \"openai-compatible-http\", endpoint = \"http://127.0.0.1:1/v1\" }\n\
+            ExtraProv = { protocol = \"openai-compatible-http\", endpoint = \"http://127.0.0.1:2/v1\" }\n\
+            [models.sample]\n\
+            api-name = \"sample\"\n\
+            max-context = 1024\n\
+            [local.sample]\n\
+            [ExtraProv.sample]\n\
+            effort = \"low\"\n\
+            [runtime]\n\
+            default = \"local.sample\"\n\
+            [exec.ssh.endpoints.box]\n\
+            host = \"127.0.0.1\"\n\
+            user = \"masc\"\n\
+            remote_root = \"/srv/masc\"\n\
+            connect_timeout_sec = 10\n"
+         in
+         write_file_raw runtime_toml_path removable_toml;
+         let rm_sha = Env.sha256_hex removable_toml in
+         let rm_body =
+           Yojson.Safe.to_string
+             (`Assoc
+               [ "target", `String "runtime"
+               ; "expected_sha256", `String rm_sha
+               ; "dry_run", `Bool true
+               ; ( "changes"
+                 , `List
+                     [ `Assoc
+                         [ "key", `String "providers.ExtraProv"
+                         ; "op", `String "remove"
+                         ]
+                     ; `Assoc
+                         [ "key", `String "ExtraProv.sample.effort"
+                         ; "op", `String "remove"
+                         ]
+                     ] )
+               ])
+         in
+         let rm_data =
+           Candle_cfg_api.config_patch_json ~config ~actor:"tester" ~body_str:rm_body ()
+           |> ok_or_fail "POST patch Op_remove provider dry_run"
+           |> json_member_exn "data"
+         in
+         Alcotest.(check string)
+           "Op_remove removing provider from after_text still classifies binding as hot_reload"
+           "hot_reload"
+           (json_string_exn "reload_scope" rm_data);
+         let non_reloaded_timeout_body =
+           Yojson.Safe.to_string
+             (`Assoc
+               [ "target", `String "runtime"
+               ; "expected_sha256", `String rm_sha
+               ; "dry_run", `Bool true
+               ; ( "changes"
+                 , `List
+                     [ `Assoc
+                         [ "key", `String "exec.ssh.endpoints.box.connect_timeout_sec"
+                         ; "value", `Int 30
+                         ]
+                     ] )
+               ])
+         in
+         let timeout_data =
+           Candle_cfg_api.config_patch_json ~config ~actor:"tester" ~body_str:non_reloaded_timeout_body ()
+           |> ok_or_fail "POST patch exec.ssh timeout dry_run"
+           |> json_member_exn "data"
+         in
+         Alcotest.(check string)
+           "non-reloaded exec.ssh timeout patch reports restart_required"
+           "restart_required"
+           (json_string_exn "reload_scope" timeout_data)))
+;;
+
+let test_track_a_task_goal_link_and_strict_claim () =
+  (* 1. Path parser *)
+  Alcotest.(check (option string))
+    "valid task link-goal path"
+    (Some "task-123")
+    (Server_routes_http_routes_verification.parse_link_task_goal_path
+       "/api/v1/tasks/task-123/link-goal");
+  Alcotest.(check (option string))
+    "URL-encoded task id decoded"
+    (Some "task 42")
+    (Server_routes_http_routes_verification.parse_link_task_goal_path
+       "/api/v1/tasks/task%2042/link-goal");
+  Alcotest.(check (option string))
+    "wrong suffix rejected"
+    None
+    (Server_routes_http_routes_verification.parse_link_task_goal_path
+       "/api/v1/tasks/task-123/other");
+  Alcotest.(check (option string))
+    "nested slash rejected"
+    None
+    (Server_routes_http_routes_verification.parse_link_task_goal_path
+       "/api/v1/tasks/a/b/link-goal");
+  with_temp_workspace (fun config ->
+    ignore (Workspace.init config ~agent_name:(Some "operator"));
+    (* Create two open goals and two todo tasks *)
+    let condition =
+      match Goal_measure.make_label "verified" with
+      | Ok l -> l
+      | Error e -> Alcotest.fail e
+    in
+    let mk_goal title =
+      match
+        Goal_store.upsert_goal_with_events
+          config
+          ~actor:"operator"
+          ~title
+          ~priority:1
+          ~measure:(Goal_measure.done_when ~condition)
+          ~procedure:"check"
+          ()
+      with
+      | Ok (goal, _, _) -> goal.Goal_store.id
+      | Error _ -> Alcotest.fail ("upsert_goal_with_events failed for " ^ title)
+    in
+    let goal1 = mk_goal "Goal One" in
+    let goal2 = mk_goal "Goal Two" in
+    let mk_task title priority =
+      match Workspace.add_task_with_result config ~title ~priority ~description:"desc" with
+      | Ok res -> res.task_id
+      | Error err -> Alcotest.fail (Workspace.add_task_error_to_string err)
+    in
+    let t_high = mk_task "High priority task" 1 in
+    let t_low = mk_task "Low priority task" 3 in
+    (* 2. Valid POST /api/v1/tasks/:id/link-goal with workspace precondition *)
+    let good_ws =
+      `Assoc
+        [ "base_path", `String (Unix.realpath config.Workspace.base_path)
+        ; "masc_root", `String (Unix.realpath (Workspace.masc_dir config))
+        ]
+    in
+    let st_ok, body_ok =
+      Server_routes_http_routes_verification.commit_link_task_goal_json
+        ~config
+        ~operator_id:"operator"
+        ~task_id:t_low
+        (`Assoc [ "goal_id", `String goal1; "expected_workspace", good_ws ])
+      |> Server_routes_http_routes_verification.link_task_goal_response
+    in
+    Alcotest.(check int) "link-goal 200 OK" 200 (Httpun.Status.to_code st_ok);
+    Alcotest.(check string) "linked task_id" t_low (json_string_exn "task_id" body_ok);
+    Alcotest.(check string) "linked goal_id" goal1 (json_string_exn "goal_id" body_ok);
+    (* Missing expected_workspace precondition -> 400 Bad Request *)
+    let st_missing_ws, body_missing_ws =
+      Server_routes_http_routes_verification.commit_link_task_goal_json
+        ~config
+        ~operator_id:"operator"
+        ~task_id:t_low
+        (`Assoc [ "goal_id", `String goal1 ])
+      |> Server_routes_http_routes_verification.link_task_goal_response
+    in
+    Alcotest.(check int)
+      "missing expected_workspace -> 400"
+      400
+      (Httpun.Status.to_code st_missing_ws);
+    Alcotest.(check bool)
+      "missing precondition error mentions expected_workspace"
+      true
+      (contains_substr ~needle:"expected_workspace" (json_string_exn "error" body_missing_ws));
+    (* Idempotent retry returns 200 *)
+    let st_idem, _ =
+      Server_routes_http_routes_verification.commit_link_task_goal_json
+        ~config
+        ~operator_id:"operator"
+        ~task_id:t_low
+        (`Assoc [ "goal_id", `String goal1; "expected_workspace", good_ws ])
+      |> Server_routes_http_routes_verification.link_task_goal_response
+    in
+    Alcotest.(check int) "idempotent retry 200 OK" 200 (Httpun.Status.to_code st_idem);
+    (* Reassignment to different goal -> 409 Conflict *)
+    let st_conflict, _ =
+      Server_routes_http_routes_verification.commit_link_task_goal_json
+        ~config
+        ~operator_id:"operator"
+        ~task_id:t_low
+        (`Assoc [ "goal_id", `String goal2; "expected_workspace", good_ws ])
+      |> Server_routes_http_routes_verification.link_task_goal_response
+    in
+    Alcotest.(check int) "already assigned -> 409" 409 (Httpun.Status.to_code st_conflict);
+    (* Missing task -> 404 *)
+    let st_no_task, _ =
+      Server_routes_http_routes_verification.commit_link_task_goal_json
+        ~config
+        ~operator_id:"operator"
+        ~task_id:"task-does-not-exist"
+        (`Assoc [ "goal_id", `String goal1; "expected_workspace", good_ws ])
+      |> Server_routes_http_routes_verification.link_task_goal_response
+    in
+    Alcotest.(check int) "unknown task -> 404" 404 (Httpun.Status.to_code st_no_task);
+    (* Missing goal -> 404 *)
+    let st_no_goal, _ =
+      Server_routes_http_routes_verification.commit_link_task_goal_json
+        ~config
+        ~operator_id:"operator"
+        ~task_id:t_high
+        (`Assoc [ "goal_id", `String "goal-missing"; "expected_workspace", good_ws ])
+      |> Server_routes_http_routes_verification.link_task_goal_response
+    in
+    Alcotest.(check int) "unknown goal -> 404" 404 (Httpun.Status.to_code st_no_goal);
+    (* Workspace mismatch -> 409 *)
+    let bad_ws =
+      `Assoc [ "base_path", `String "/wrong/ws"; "masc_root", `String "/wrong/ws/.masc" ]
+    in
+    let st_ws, _ =
+      Server_routes_http_routes_verification.commit_link_task_goal_json
+        ~config
+        ~operator_id:"operator"
+        ~task_id:t_high
+        (`Assoc [ "goal_id", `String goal1; "expected_workspace", bad_ws ])
+      |> Server_routes_http_routes_verification.link_task_goal_response
+    in
+    Alcotest.(check int) "workspace mismatch -> 409" 409 (Httpun.Status.to_code st_ws);
+    (* 3. keeper_task_claim with explicit missing task_id fails WITHOUT claiming t_high *)
+    let ctx : Masc.Task.Tool.context =
+      { config; agent_name = "alpha"; sw = None }
+    in
+    (match
+       Masc.Task.Tool.dispatch
+         ctx
+         ~name:"keeper_task_claim"
+         ~args:(`Assoc [ "task_id", `String "task-nonexistent-999" ])
+     with
+     | Some res ->
+       Alcotest.(check bool)
+         "explicit missing task_id rejected"
+         true
+         (Option.is_some (Tool_result.failure_class res))
+     | None -> Alcotest.fail "keeper_task_claim must dispatch");
+    (* Verify t_high is STILL Todo and untouched *)
+    let tasks_after = Workspace.get_tasks_raw config in
+    let high_after =
+      List.find (fun (t : Masc_domain.task) -> String.equal t.id t_high) tasks_after
+    in
+    Alcotest.(check bool)
+      "higher-priority task stays Todo after failed explicit claim"
+      true
+      (high_after.task_status = Masc_domain.Todo))
+;;
+
 let () =
   Alcotest.run
     "server_tui_v2_api"
@@ -2375,11 +3061,14 @@ let () =
     ; ( "infra_sandboxes"
       , [ Alcotest.test_case "non-blocking fleet + 24h failures" `Quick test_infra_sandboxes_api ] )
     ; ( "memory_v2"
-      , [ Alcotest.test_case "world conflicts + keeper diff + heat" `Quick test_memory_v2_world_and_diff ] )
+      , [ Alcotest.test_case "world conflicts + keeper diff + heat" `Quick test_memory_v2_world_and_diff
+        ; Alcotest.test_case "Track A4 human-readable claim text in world diff" `Quick test_track_a_memory_diff_human_claim_text
+        ] )
     ; ( "candle_and_config"
       , [ Alcotest.test_case "candle ledger root-cause diagnostics" `Quick test_candle_ledger_diagnostics
         ; Alcotest.test_case "config schema redaction + atomic patch" `Quick test_config_schema_redaction_and_patch_roundtrip
         ; Alcotest.test_case "config schema registry + routing_failover categories" `Quick test_config_schema_registry_and_routing_failover
+        ; Alcotest.test_case "Track A6 hot-reload classification + hardened secret redaction" `Quick test_track_a_hot_reload_and_hardened_secrets
         ] )
     ; ( "signal_and_scorecard"
       , [ Alcotest.test_case "board signal_only + succession chains" `Quick test_board_signal_and_succession_chains
@@ -2387,6 +3076,9 @@ let () =
         ; Alcotest.test_case "board succession chains shared cache + bounded scope" `Quick test_board_succession_chains_shared_cache_and_bounded_scope
         ; Alcotest.test_case "dashboard 24h rollup + groups" `Quick test_dashboard_24h_rollup_and_groups
         ; Alcotest.test_case "v2.5 neutral keeper.group grouping + config entity metadata" `Quick test_v25_neutral_keeper_groups_and_config_entity_metadata
+        ; Alcotest.test_case "Track A3/A5 scorecard_24h + capabilities advertisement" `Quick test_track_a_scorecard_and_capabilities
         ] )
+    ; ( "task_goal_link"
+      , [ Alcotest.test_case "Track A7 link-goal API + strict keeper_task_claim" `Quick test_track_a_task_goal_link_and_strict_claim ] )
     ]
 ;;

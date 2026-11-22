@@ -1220,7 +1220,7 @@ let test_work_dives_and_json_tree () =
                 (non_empty_row_count g2 >= 8);
               let t2 = grid_all_text g2 in
               Alcotest.(check bool) "Json_tree card header shown" true
-                (contains_sub ~needle:"[J]" t2))
+                (contains_sub ~needle:"[Space]" t2))
             targets)
         langs)
     viewports
@@ -2404,6 +2404,7 @@ let test_p2_standard_viewport_keepers_split_and_kpi_visibility () =
           context_ratio = Observed.value ~observed_at:now_mono 0.42;
           total_turns = Observed.value ~observed_at:now_mono 120;
           cost_24h_usd = Observed.value ~observed_at:now_mono 6.75;
+          activity_sparkline_24h = [];
         }
       in
       let fleet =
@@ -2530,6 +2531,89 @@ let test_degenerate_empty_and_tiny_rects () =
         ])
     tiny_sizes
 
+let test_p0_keeper_dive_honest_24h_vs_lifetime_turns () =
+  (* P0-1: Keeper preview MUST NEVER label lifetime total_turns (e.g. 20.4k) as "24h 턴" *)
+  let m0_ko = make_populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_ko in
+  let m0_en = make_populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en in
+  let k_with_spark =
+    {
+      (List.hd sample_keepers) with
+      total_turns = Observed.value ~observed_at:now_mono 20_400;
+      activity_sparkline_24h = [ 10.0; 15.0 ];
+    }
+  in
+  let k_no_spark =
+    {
+      (List.hd sample_keepers) with
+      total_turns = Observed.value ~observed_at:now_mono 20_400;
+      activity_sparkline_24h = [];
+    }
+  in
+  (* Case 1: non-empty sparkline -> shows "24h 턴" / "24h Turns" with sum 25, NOT 20.4k *)
+  let m_spark_ko =
+    {
+      m0_ko with
+      fleet =
+        Fleet_store.apply_keepers ~observed_at:now_mono
+          (k_with_spark :: List.tl sample_keepers)
+          m0_ko.fleet;
+    }
+  in
+  let g_spark_ko =
+    render_to_grid ~cols:140 ~rows:40 (Screen_keepers.render ~model:m_spark_ko)
+  in
+  let txt_spark_ko = grid_all_text g_spark_ko in
+  Alcotest.(check bool) "sparkline non-empty shows 24h 턴 label" true
+    (contains_sub ~needle:"24h 턴" txt_spark_ko);
+  Alcotest.(check bool) "sparkline non-empty shows true 24h sum 25" true
+    (contains_sub ~needle:"25" txt_spark_ko);
+  Alcotest.(check bool) "sparkline non-empty does NOT print 20.4k as 24h turns" false
+    (contains_sub ~needle:"20.4k" txt_spark_ko);
+
+  (* Case 2: empty sparkline -> explicitly labels lifetime total_turns as 누적 턴 / Total turns, NEVER 24h 턴 *)
+  let m_life_ko =
+    {
+      m0_ko with
+      fleet =
+        Fleet_store.apply_keepers ~observed_at:now_mono
+          (k_no_spark :: List.tl sample_keepers)
+          m0_ko.fleet;
+    }
+  in
+  let g_life_ko =
+    render_to_grid ~cols:140 ~rows:40 (Screen_keepers.render ~model:m_life_ko)
+  in
+  let txt_life_ko = grid_all_text g_life_ko in
+  Alcotest.(check bool) "empty sparkline shows 누적 턴 label" true
+    (contains_sub ~needle:"누적 턴" txt_life_ko);
+  Alcotest.(check bool) "empty sparkline shows 20.4k lifetime turns" true
+    (contains_sub ~needle:"20.4k" txt_life_ko);
+  Alcotest.(check bool) "empty sparkline NEVER labels lifetime as 24h 턴" false
+    (contains_sub ~needle:"24h 턴" txt_life_ko);
+
+  let m_life_en =
+    {
+      m0_en with
+      fleet =
+        Fleet_store.apply_keepers ~observed_at:now_mono
+          (k_no_spark :: List.tl sample_keepers)
+          m0_en.fleet;
+    }
+  in
+  let g_life_en =
+    render_to_grid ~cols:140 ~rows:40 (Screen_keepers.render ~model:m_life_en)
+  in
+  let txt_life_en = grid_all_text g_life_en in
+  Alcotest.(check bool) "EN empty sparkline shows Total turns label" true
+    (contains_sub ~needle:"Total turns" txt_life_en);
+  Alcotest.(check bool) "EN empty sparkline NEVER shows 24h Turns" false
+    (contains_sub ~needle:"24h Turns" txt_life_en);
+  (* P0-4: Voice PTT hint uses uppercase [V], never dead lowercase [v] *)
+  Alcotest.(check bool) "Preview uses uppercase [V] PTT hint" true
+    (contains_sub ~needle:"[V]" txt_life_en);
+  Alcotest.(check bool) "Preview never shows lowercase [v] PTT hint" false
+    (contains_sub ~needle:"[v]" txt_life_en)
+
 let () =
   Alcotest.run "masc_tui_screens_ops"
     [
@@ -2555,6 +2639,8 @@ let () =
             `Quick test_p2_tool_modes_ctrl_o_hint_and_origin_modes;
           Alcotest.test_case "P2 Standard (104/112) Keepers 36/64 split & unclipped Korean KPIs"
             `Quick test_p2_standard_viewport_keepers_split_and_kpi_visibility;
+          Alcotest.test_case "P0-1 Keeper Dive honest 24h vs lifetime turns & uppercase [V] hint"
+            `Quick test_p0_keeper_dive_honest_24h_vs_lifetime_turns;
         ] );
       ( "work"
       , [

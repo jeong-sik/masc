@@ -154,8 +154,17 @@ val dirty_count : t -> int
 val build_patch_request :
   dry_run:bool -> t -> (Wire_config.patch_request, string) result
 
+val new_keeper_name_field_key : string
+(** Sentinel [editing_field_key] used while typing [new_keeper_name] for
+    {!Wire_config.Target_keeper_create}. *)
+
 val is_editing_field : t -> bool
+val is_editing_new_keeper_name : t -> bool
+val begin_edit_new_keeper_name : t -> t
 val begin_edit_selected : t -> (t, string) result
+val stage_remove_selected : t -> (t, string) result
+(** Stage (or unstage if already staged) a {!Wire_config.Remove_key} patch op
+    for the currently selected writable field. *)
 val update_edit_buffer : string -> t -> t
 val append_edit_char : string -> t -> t
 val backspace_edit_buffer : t -> t

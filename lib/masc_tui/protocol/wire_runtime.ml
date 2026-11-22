@@ -442,14 +442,28 @@ type token_velocity_sample = {
   output_tok_per_min : float Observed.t;
 }
 
+type efficiency_window_kind =
+  | Efficiency_month_mtd
+  | Efficiency_month_complete
+
 type efficiency_month = {
   month : string;
+  window_kind : efficiency_window_kind option;
   generated_at_unix : float;
   days_covered : int;
   keepers : keeper_efficiency_row list;
   fleet : fleet_efficiency;
   velocity : token_velocity_sample list;
 }
+
+let decode_efficiency_window_kind json =
+  let* raw = optional_string_field json "window_kind" in
+  match raw with
+  | None -> Ok None
+  | Some "month_mtd" -> Ok (Some Efficiency_month_mtd)
+  | Some "month_complete" -> Ok (Some Efficiency_month_complete)
+  | Some other ->
+      Error (Printf.sprintf "unexpected efficiency window_kind %S" other)
 
 let compute_cache_hit_pct ~input_tokens ~cache_read_tokens =
   if input_tokens <= 0 || cache_read_tokens < 0 then None
@@ -471,14 +485,15 @@ let decode_keeper_efficiency_row ~observed_at json =
   let* explicit_cache_pct = observed_float ~observed_at json "cache_hit_pct" in
   let cache_hit_pct =
     match (explicit_cache_pct, Observed.to_option cache_read_tokens) with
-    | Observed.Value _, _ -> explicit_cache_pct
-    | (Observed.Loading _ | Observed.Absent | Observed.Unreported | Observed.Failed _),
-      Some read_tok -> (
+    | Observed.Unreported, Some read_tok -> (
+        (* Legacy fallback strictly when an older server omitted the
+           [cache_hit_pct] key; an explicit JSON [null] ([Observed.Absent]) is
+           authoritative (e.g. unpaired rows) and must never be recomputed. *)
         match compute_cache_hit_pct ~input_tokens ~cache_read_tokens:read_tok with
         | Some pct -> Observed.value ~observed_at pct
         | None -> Observed.absent)
-    | (Observed.Loading _ | Observed.Absent | Observed.Unreported | Observed.Failed _),
-      None ->
+    | Observed.Unreported, None
+    | (Observed.Value _ | Observed.Loading _ | Observed.Absent | Observed.Failed _), _ ->
         explicit_cache_pct
   in
   let* cost_usd = required_nonnegative_float json "cost_usd" in
@@ -523,6 +538,7 @@ let decode_efficiency_month ~observed_at json =
     else Error (Printf.sprintf "unexpected efficiency schema %S" schema)
   in
   let* month = required_nonblank_string body "month" in
+  let* window_kind = decode_efficiency_window_kind body in
   let* generated_at_unix = required_nonnegative_float body "generated_at" in
   let* days_covered = required_nonnegative_int_field body "days_covered" in
   let* keeper_items = required_list_field body "keepers" in
@@ -549,8 +565,10 @@ let decode_efficiency_month ~observed_at json =
   in
   let fleet_cache_hit_pct =
     match fleet_cache_hit_pct_raw with
-    | Observed.Value _ -> fleet_cache_hit_pct_raw
-    | Observed.Loading _ | Observed.Absent | Observed.Unreported | Observed.Failed _ ->
+    | Observed.Unreported ->
+        (* Legacy fallback strictly when an older server omitted
+           [fleet.cache_hit_pct]; explicit JSON [null] ([Observed.Absent]) is
+           authoritative and must not be overwritten with unpaired totals. *)
         let sum_in, sum_cr =
           List.fold_left
             (fun (acc_in, acc_cr) (k : keeper_efficiency_row) ->
@@ -563,6 +581,8 @@ let decode_efficiency_month ~observed_at json =
         (match compute_cache_hit_pct ~input_tokens:sum_in ~cache_read_tokens:sum_cr with
         | Some pct -> Observed.value ~observed_at pct
         | None -> fleet_cache_hit_pct_raw)
+    | Observed.Value _ | Observed.Loading _ | Observed.Absent | Observed.Failed _ ->
+        fleet_cache_hit_pct_raw
   in
   let* velocity_items = optional_list_field body "velocity" in
   let* velocity =
@@ -571,6 +591,7 @@ let decode_efficiency_month ~observed_at json =
   Ok
     {
       month;
+      window_kind;
       generated_at_unix;
       days_covered;
       keepers;

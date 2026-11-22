@@ -1336,15 +1336,16 @@ let render_frame ~(model : Model.t) ~cache ~render_body ~render_overlay grid =
     else ();
     render_footer grid ~rect:layout.footer ~theme ~model
       ~breakpoint:layout.breakpoint ~composer_folded:layout.composer_folded;
-    if Option.is_none model.nav.overlay then
-      render_toast_pill grid ~body_rect:layout.body ~theme ~model;
     match model.nav.overlay with
-    | None -> comp_cursor
+    | None ->
+        render_toast_pill grid ~body_rect:layout.body ~theme ~model;
+        comp_cursor
     | Some _ ->
         let overlay_rect =
           Rect.make ~x:0 ~y:layout.top_rail.h ~w:cols
             ~h:(Int.max 0 (rows - layout.top_rail.h - layout.footer.h))
         in
         render_overlay overlay_rect grid;
+        render_toast_pill grid ~body_rect:overlay_rect ~theme ~model;
         Presenter.hidden_cursor
   end

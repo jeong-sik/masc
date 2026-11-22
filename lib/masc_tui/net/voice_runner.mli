@@ -35,6 +35,54 @@ type capabilities = {
   tts_available : bool;
 }
 
+type recorder_kind =
+  | Recorder_rec
+  | Recorder_sox
+  | Recorder_ffmpeg
+
+val resolve_recorder_from :
+  find:(string -> string option) -> (recorder_kind * string) option
+(** Resolve the first supported local audio recorder in order
+    [rec -> sox -> ffmpeg]. Shared by both [probe] and [record_until_stopped]
+    so capability probing and recording never diverge. *)
+
+val build_record_argv :
+  kind:recorder_kind ->
+  bin_path:string ->
+  device:string option ->
+  out_path:string ->
+  string array
+(** Build deterministic 16 kHz mono WAV recording argv for [rec], [sox], or
+    [ffmpeg] (macOS [avfoundation] input [:default] or explicit device). *)
+
+type audio_player =
+  | Player_afplay
+  | Player_paplay
+  | Player_aplay
+  | Player_ffplay
+
+val audio_player_name : audio_player -> string
+
+val resolve_audio_player_from :
+  find:(string -> string option) -> (audio_player * string) option
+(** Resolve an available local TTS audio player in order
+    [afplay -> paplay -> aplay -> ffplay]. *)
+
+val build_player_argv :
+  player:audio_player -> bin_path:string -> audio_path:string -> string array
+(** Build non-interactive playback argv for a resolved local audio player. *)
+
+type tts_probe_outcome =
+  | Tts_audio_file of string
+  | Tts_probe_answered_no_audio of { endpoint_id : string; detail : string }
+  | Tts_probe_failed of string
+
+val decode_tts_probe_outcome : Yojson.Safe.t -> (tts_probe_outcome, string) result
+(** Decode [POST /api/v1/voice/probe/tts] JSON strictly: distinguishes a
+    playable [audio_path]/[file], a probe [endpoints] answer that returned no
+    audio artifact, and refused/skipped/empty probe results (never silently
+    reporting success on refusal). *)
+
 val decode_voice_config :
   recorder_cmd:string option -> Yojson.Safe.t -> (capabilities, string) result
 (** Decode [GET /api/v1/voice/config] ([tts.active_endpoint.enabled] and

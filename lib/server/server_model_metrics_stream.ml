@@ -29,18 +29,44 @@ type snapshot = {
   retry_read : bool;
 }
 
-let read_snapshot ~base_path ~(request : request) ~now kept =
+let cost_usd_of_aggregate (agg : Model_inference_metrics.aggregate) : float option =
+  match agg.cost_read with
+  | Error _ -> None
+  | Ok _ ->
+    let sum, count =
+      List.fold_left
+        (fun (acc, n) (s : Model_inference_metrics.model_stats) ->
+           match s.total_cost_usd with
+           | Some v when Float.is_finite v && v >= 0.0 -> acc +. v, n + 1
+           | Some _ | None -> acc, n)
+        (0.0, 0)
+        agg.models
+    in
+    if count > 0 then Some sum else None
+;;
+
+let read_snapshot_with_cost ~base_path ~(request : request) ~now kept =
   let next, reading = Model_inference_metrics_kept.refresh ~base_path ~now
       ~window_minutes:request.window_minutes kept in
   let result = Model_inference_metrics.aggregate_reading
       ~window_minutes:request.window_minutes ~bucket_minutes:request.bucket_minutes reading in
+  let cost_opt =
+    match result with
+    | Ok agg -> cost_usd_of_aggregate agg
+    | Error _ -> None
+  in
   let snapshot = Result.map (fun aggregate ->
     { json = Model_inference_metrics.to_json aggregate
     ; next_change_at = Model_inference_metrics_kept.next_change next
         ~window_minutes:request.window_minutes ~after:now
     ; retry_read = (match reading.cost_read with Ok _ -> false | Error _ -> true)
     }) result in
-  next, Result.map_error Model_inference_metrics.read_error_to_string snapshot
+  next, cost_opt, Result.map_error Model_inference_metrics.read_error_to_string snapshot
+;;
+
+let read_snapshot ~base_path ~(request : request) ~now kept =
+  let next, _cost_opt, res = read_snapshot_with_cost ~base_path ~request ~now kept in
+  next, res
 ;;
 
 module Window_map = Map.Make (struct
@@ -53,6 +79,7 @@ end)
 
 type cached_kept_entry =
   { kept_value : Model_inference_metrics_kept.t
+  ; kept_cost_usd : float option
   ; kept_access_seq : int
   ; kept_updated_at : float
   }
@@ -123,7 +150,7 @@ let load_shared_kept ~base_path ~window_minutes ~now ~fallback =
     | Some _ | None -> { state with entries }, fallback)
 ;;
 
-let store_shared_kept ~base_path ~window_minutes ~now kept_value =
+let store_shared_kept ~base_path ~window_minutes ~now ?cost_usd kept_value =
   let key = base_path, window_minutes in
   update_shared_kept_state (fun state ->
     let entries = prune_stale_shared_kept ~now state.entries in
@@ -135,7 +162,7 @@ let store_shared_kept ~base_path ~window_minutes ~now kept_value =
       let entries =
         Window_map.add
           key
-          { kept_value; kept_access_seq; kept_updated_at = now }
+          { kept_value; kept_cost_usd = cost_usd; kept_access_seq; kept_updated_at = now }
           entries
         |> evict_excess_shared_kept
       in
@@ -147,9 +174,34 @@ let read_cached_snapshot ~base_path ~(request : request) ~now =
     load_shared_kept ~base_path ~window_minutes:request.window_minutes ~now
       ~fallback:Model_inference_metrics_kept.empty
   in
-  let next, result = read_snapshot ~base_path ~request ~now previous in
-  store_shared_kept ~base_path ~window_minutes:request.window_minutes ~now next;
+  let next, cost_usd, result =
+    read_snapshot_with_cost ~base_path ~request ~now previous
+  in
+  store_shared_kept ~base_path ~window_minutes:request.window_minutes ~now ?cost_usd next;
   result
+;;
+
+let peek_cached_cost_24h_usd ~base_path ~now =
+  let state = Atomic.get shared_kept_state in
+  match Window_map.find_opt (base_path, 1440) state.entries with
+  | Some entry
+    when now < entry.kept_updated_at
+         || now -. entry.kept_updated_at <= max_cached_staleness_s ->
+    entry.kept_cost_usd
+  | Some _ | None -> None
+;;
+
+let read_cost_24h_usd ~base_path ~now =
+  let request = { window_minutes = 1440; bucket_minutes = 0 } in
+  let previous =
+    load_shared_kept ~base_path ~window_minutes:1440 ~now
+      ~fallback:Model_inference_metrics_kept.empty
+  in
+  let next, cost_usd, _result =
+    read_snapshot_with_cost ~base_path ~request ~now previous
+  in
+  store_shared_kept ~base_path ~window_minutes:1440 ~now ?cost_usd next;
+  cost_usd
 ;;
 
 let observation_dataset = Workspace_dataset_event.dataset_name
@@ -226,9 +278,11 @@ let serve ~sw ~clock ~owner ~request reqd =
               load_shared_kept ~base_path ~window_minutes:request.window_minutes
                 ~now ~fallback
             in
-            let next, result = read_snapshot ~base_path ~request ~now previous in
+            let next, cost_usd, result =
+              read_snapshot_with_cost ~base_path ~request ~now previous
+            in
             store_shared_kept ~base_path ~window_minutes:request.window_minutes
-              ~now next;
+              ~now ?cost_usd next;
             now, next, result)) in
           kept := (next_at, next);
           match result with

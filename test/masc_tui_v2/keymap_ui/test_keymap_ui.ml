@@ -1634,6 +1634,118 @@ let test_v25_chart_full_width_braille_stretch () =
   Alcotest.(check bool) "single-point series renders at right edge" true
     (one_right_edge > 0)
 
+let test_p0_2_dual_independent_usd_axis () =
+  let theme = Theme.default in
+  let caps = Presenter.default_capabilities in
+  let calls_24 =
+    Array.init 24 (fun i ->
+        Chart.Series.Value (800.0 +. (float_of_int ((i * 5) mod 13) *. 280.0)))
+  in
+  let spend_24 =
+    Array.init 24 (fun i ->
+        Chart.Series.Value (0.45 +. (float_of_int ((i * 7) mod 11) *. 0.567)))
+  in
+  let upper : Chart.Series.t =
+    {
+      label = Say.make ~ko:"호출" ~en:"Calls";
+      unit = Format_val.Count;
+      gradient = Chart.Gradient.Cool_flow;
+      samples = calls_24;
+      current = Observed.value ~observed_at:Clock.Mono.zero 1840.0;
+      peak = Observed.value ~observed_at:Clock.Mono.zero 4160.0;
+      avg = Observed.value ~observed_at:Clock.Mono.zero 2100.0;
+      delta_pct = None;
+    }
+  in
+  let lower : Chart.Series.t =
+    {
+      label = Say.make ~ko:"지출" ~en:"Spend";
+      unit = Format_val.Usd;
+      gradient = Chart.Gradient.Thermal;
+      samples = spend_24;
+      current = Observed.value ~observed_at:Clock.Mono.zero 2.34;
+      peak = Observed.value ~observed_at:Clock.Mono.zero 6.12;
+      avg = Observed.value ~observed_at:Clock.Mono.zero 3.15;
+      delta_pct = None;
+    }
+  in
+  let spec : Chart.Spec.t =
+    {
+      title = Say.make ~ko:"24h 처리량 · 비용" ~en:"24h Volume & Cost";
+      hotkey_hint = None;
+      kind =
+        Chart.Spec.Dual_inverted
+          {
+            upper;
+            lower;
+            scale =
+              Chart.Scale.Dual_independent
+                {
+                  top_min = 0.0;
+                  top_max = 5000.0;
+                  bot_min = 0.0;
+                  bot_max = 6.12;
+                };
+            window = Chart.Time_window.Last_24h;
+          };
+    }
+  in
+  List.iter
+    (fun lang ->
+      let grid = Cell_grid.create ~cols:68 ~rows:10 in
+      let mode =
+        Chart.draw grid ~rect:(Rect.make ~x:0 ~y:0 ~w:68 ~h:10) ~theme ~caps
+          ~lang ~show_title:false spec
+      in
+      (match mode with
+      | Chart.Render_mode.Dual_mirror_chart _ -> ()
+      | Chart.Render_mode.Full_area_chart _
+      | Chart.Render_mode.Half_block_gauge _
+      | Chart.Render_mode.Inline_sparkline _
+      | Chart.Render_mode.Numeric_delta_pill ->
+          Alcotest.fail "expected Dual_mirror_chart for 68x10");
+      let upper_axis_row = grid_row_text grid ~y:1 in
+      let lower_axis_row = grid_row_text grid ~y:7 in
+      let all_rows =
+        String.concat "\n" (List.init 10 (fun y -> grid_row_text grid ~y))
+      in
+      let hdr_row = grid_row_text grid ~y:0 in
+      Alcotest.(check bool) "upper Calls axis formats as 5.0k" true
+        (contains_sub ~needle:"5.0k" ~haystack:upper_axis_row);
+      Alcotest.(check bool) "lower Spend axis formats independently as $6.12"
+        true
+        (contains_sub ~needle:"$6.12" ~haystack:lower_axis_row);
+      Alcotest.(check bool) "lower Spend axis NEVER prints ▼5.0k (1000x lie)"
+        false
+        (contains_sub ~needle:"▼5.0k" ~haystack:all_rows
+        || contains_sub ~needle:"▼200" ~haystack:all_rows);
+      Alcotest.(check bool)
+        "Dual_mirror with show_title:false omits redundant 24h window suffix"
+        false
+        (contains_sub ~needle:"24h" ~haystack:hdr_row);
+      let count_b ~y0 ~y1 =
+        let n = ref 0 in
+        for y = y0 to y1 do
+          for x = 8 to 67 do
+            match (Cell_grid.get grid ~x ~y).glyph with
+            | Cell_grid.Braille m when m <> 0 -> incr n
+            | Cell_grid.Braille _
+            | Cell_grid.Empty
+            | Cell_grid.Ascii _
+            | Cell_grid.Utf8 _
+            | Cell_grid.Continuation ->
+                ()
+          done
+        done;
+        !n
+      in
+      Alcotest.(check bool) "upper half renders Braille samples" true
+        (count_b ~y0:1 ~y1:3 >= 20);
+      Alcotest.(check bool) "lower USD half renders Braille samples independently"
+        true
+        (count_b ~y0:5 ~y1:7 >= 20))
+    [ Say.Lang_ko; Say.Lang_en ]
+
 let () =
   Alcotest.run "masc_tui_keymap_ui"
     [
@@ -1668,6 +1780,8 @@ let () =
         [
           Alcotest.test_case "adaptive mode degradation, tiers & Unread/Absent semantics"
             `Quick test_chart_degradation_and_tiers;
+          Alcotest.test_case "P0-2 Dual_independent upper Calls + lower USD axis honesty"
+            `Quick test_p0_2_dual_independent_usd_axis;
         ] );
       ( "table",
         [

@@ -40,6 +40,19 @@ val read_cached_snapshot :
     lane; atomic CAS state updates touch only the in-memory table, never disk
     I/O. *)
 
+val peek_cached_cost_24h_usd :
+  base_path:string -> now:float -> float option
+(** Zero-I/O peek of the most recently computed 24h provider total cost in USD
+    for [base_path] from the shared retained-row LRU. Returns [None] when no
+    fresh 24h observation is cached or when no model reported cost. *)
+
+val read_cost_24h_usd :
+  base_path:string -> now:float -> float option
+(** Refresh or read the 24h provider total cost in USD for [base_path] using
+    the shared 1440-minute retained-row cursor. Returns [None] when the store
+    is unreadable or no model in the window reported cost (never fabricates
+    [0.0]). *)
+
 val is_invalidation : Masc.Sse.external_event -> bool
 (** Select the existing typed [Model_metrics] input. Workspace authority is
     admitted by {!Masc.Sse.subscribe_external} before the initial read. *)

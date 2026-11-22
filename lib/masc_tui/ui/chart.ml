@@ -60,6 +60,12 @@ module Scale = struct
     | Fixed_bounds of { floor : float; ceiling : float }
     | Auto_ceil of { floor : float; nice_step : bool }
     | Synced_pair
+    | Dual_independent of {
+        top_min : float;
+        top_max : float;
+        bot_min : float;
+        bot_max : float;
+      }
 
   let nice_ceiling raw =
     if (not (Float.is_finite raw)) || raw <= 0.0 then 1.0
@@ -475,6 +481,31 @@ let compute_bounds ~scale max_val =
   | Scale.Synced_pair ->
       let raw = if max_val > 0.0 then max_val else 1.0 in
       (0.0, Scale.nice_ceiling raw)
+  | Scale.Dual_independent { top_min; top_max; _ } ->
+      let floor = if Float.is_finite top_min then top_min else 0.0 in
+      let ceil =
+        if Float.is_finite top_max && top_max > floor then top_max
+        else if max_val > floor then Scale.nice_ceiling max_val
+        else floor +. 1.0
+      in
+      (floor, ceil)
+
+let format_dual_axis_value unit_kind v =
+  if not (Float.is_finite v) then Glyph.to_utf8 Glyph.Missing_unreported
+  else
+    match unit_kind with
+    | Format_val.Usd ->
+        if v >= 100.0 then Printf.sprintf "$%.0f" v
+        else if v > 0.0 && v < 0.01 then Printf.sprintf "$%.3f" v
+        else Format_val.format_value Format_val.Usd v
+    | Format_val.Count
+    | Format_val.Rate_per_sec
+    | Format_val.Percent
+    | Format_val.Milliseconds
+    | Format_val.Bytes
+    | Format_val.Tokens
+    | Format_val.Candles ->
+        Format_val.format_value unit_kind v
 
 let draw_sparkline_run ?clip grid ~x ~y ~width ~(theme : Theme.t) ~bg ~unicode
     ~gradient samples =
@@ -673,13 +704,20 @@ let draw_dual_header grid ~clip ~x ~y ~w ~(theme : Theme.t) ~bg ~lang ~show_titl
         (win_str, whisper_style);
       ]
     else
-      [
-        (Glyph.to_utf8 Glyph.Delta_up ^ " " ^ Say.resolve lang upper.label, up_style);
-        (Typography.sep_dot, dot_style);
-        (Glyph.to_utf8 Glyph.Delta_down ^ " " ^ Say.resolve lang lower.label, dn_style);
-        (Typography.sep_dot, dot_style);
-        (win_str, whisper_style);
-      ]
+      let ul = String.trim (Say.resolve lang upper.label) in
+      let dl = String.trim (Say.resolve lang lower.label) in
+      match (String.length ul > 0, String.length dl > 0) with
+      | true, true ->
+          [
+            (Glyph.to_utf8 Glyph.Delta_up ^ " " ^ ul, up_style);
+            (Typography.sep_dot, dot_style);
+            (Glyph.to_utf8 Glyph.Delta_down ^ " " ^ dl, dn_style);
+          ]
+      | true, false ->
+          [ (Glyph.to_utf8 Glyph.Delta_up ^ " " ^ ul, up_style) ]
+      | false, true ->
+          [ (Glyph.to_utf8 Glyph.Delta_down ^ " " ^ dl, dn_style) ]
+      | false, false -> []
   in
   let right_runs =
     if not show_inline_legend then []
@@ -1017,31 +1055,54 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~(caps : Presenter.capabilitie
              ~loading:
                (series_is_all_unread upper.samples && series_is_all_unread lower.samples)
          else begin
-           let max_v =
-             Float.max (series_max_value upper.samples) (series_max_value lower.samples)
+           let up_floor, up_ceil, dn_floor, dn_ceil =
+             match scale with
+             | Scale.Dual_independent { top_min; top_max; bot_min; bot_max } ->
+                 let uf = if Float.is_finite top_min then top_min else 0.0 in
+                 let uc =
+                   if Float.is_finite top_max && top_max > uf then top_max
+                   else
+                     let mu = series_max_value upper.samples in
+                     if mu > uf then Scale.nice_ceiling mu else uf +. 1.0
+                 in
+                 let df = if Float.is_finite bot_min then bot_min else 0.0 in
+                 let dc =
+                   if Float.is_finite bot_max && bot_max > df then bot_max
+                   else
+                     let ml = series_max_value lower.samples in
+                     if ml > df then Scale.nice_ceiling ml else df +. 1.0
+                 in
+                 (uf, uc, df, dc)
+             | Scale.Fixed_bounds _ | Scale.Auto_ceil _ | Scale.Synced_pair ->
+                 let max_v =
+                   Float.max (series_max_value upper.samples)
+                     (series_max_value lower.samples)
+                 in
+                 let floor, ceiling = compute_bounds ~scale max_v in
+                 (floor, ceiling, floor, ceiling)
            in
-           let floor, ceiling = compute_bounds ~scale max_v in
            if show_y_axis then begin
-             let ceil_str = Format_val.format_value upper.unit ceiling in
+             let up_ceil_str = format_dual_axis_value upper.unit up_ceil in
+             let dn_ceil_str = format_dual_axis_value lower.unit dn_ceil in
              draw_y_axis_label grid ~clip:rect ~x:rect.x ~y:up_y ~gutter ~theme ~bg
-               (Glyph.to_utf8 Glyph.Delta_up ^ ceil_str);
+               (Glyph.to_utf8 Glyph.Delta_up ^ up_ceil_str);
              if has_zero_line then
                draw_y_axis_label grid ~clip:rect ~x:rect.x ~y:zero_y ~gutter ~theme ~bg "0";
              draw_y_axis_label grid ~clip:rect ~x:rect.x
                ~y:(down_y + half_rows - 1) ~gutter ~theme ~bg
-               (Glyph.to_utf8 Glyph.Delta_down ^ ceil_str)
+               (Glyph.to_utf8 Glyph.Delta_down ^ dn_ceil_str)
            end;
            paint_area_rows grid ~clip:rect ~x:plot_x ~y:up_y ~cols:plot_cols
-             ~rows:half_rows ~down:false ~glyphs ~floor ~ceiling ~theme ~bg
-             ~gradient:upper.gradient upper.samples;
+             ~rows:half_rows ~down:false ~glyphs ~floor:up_floor ~ceiling:up_ceil
+             ~theme ~bg ~gradient:upper.gradient upper.samples;
            if has_zero_line then begin
              let zero_rect = Rect.make ~x:plot_x ~y:zero_y ~w:plot_cols ~h:1 in
              Card.draw_hairline ~unicode:caps.unicode_blocks ~bg grid
                ~rect:zero_rect ~y:zero_y ~theme
            end;
            paint_area_rows grid ~clip:rect ~x:plot_x ~y:down_y ~cols:plot_cols
-             ~rows:half_rows ~down:true ~glyphs ~floor ~ceiling ~theme ~bg
-             ~gradient:lower.gradient lower.samples;
+             ~rows:half_rows ~down:true ~glyphs ~floor:dn_floor ~ceiling:dn_ceil
+             ~theme ~bg ~gradient:lower.gradient lower.samples;
            if down_y + half_rows < Rect.bottom rect then
              draw_x_ticks grid ~clip:rect ~x:plot_x ~y:(down_y + half_rows)
                ~cols:plot_cols ~theme ~bg window

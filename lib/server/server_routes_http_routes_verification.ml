@@ -284,6 +284,129 @@ let commit_operator_cancel_json ~config ~operator_id json =
   | _ -> invalid "request body must be a JSON object"
 ;;
 
+type link_task_goal_error =
+  | Link_invalid_request of string
+  | Link_workspace_conflict of string
+  | Link_assignment_error of Task.Goal_assignment.set_task_goal_error
+
+let task_route_prefix = "/api/v1/tasks/"
+let task_link_goal_suffix = "/link-goal"
+
+let parse_link_task_goal_path (path : string) : string option =
+  if not (String.starts_with ~prefix:task_route_prefix path)
+     || not (String.ends_with ~suffix:task_link_goal_suffix path)
+  then None
+  else (
+    let prefix_len = String.length task_route_prefix in
+    let suffix_len = String.length task_link_goal_suffix in
+    let middle_len = String.length path - prefix_len - suffix_len in
+    if middle_len <= 0
+    then None
+    else (
+      let raw_segment = String.sub path prefix_len middle_len in
+      if String.contains raw_segment '/'
+      then None
+      else (
+        let decoded = Uri.pct_decode raw_segment |> String.trim in
+        if String.equal decoded "" || String.contains decoded '/'
+        then None
+        else Some decoded)))
+;;
+
+let commit_link_task_goal_json ~config ~operator_id ~task_id json
+  : (Yojson.Safe.t, link_task_goal_error) result
+  =
+  let task_id = String.trim task_id in
+  if String.equal task_id ""
+  then Error (Link_invalid_request "task_id is required")
+  else (
+    match json with
+    | `Assoc fields ->
+      let names = List.map fst fields in
+      let allowed = [ "goal_id"; "expected_workspace" ] in
+      if List.exists (fun name -> not (List.mem name allowed)) names
+         || List.length names <> List.length (List.sort_uniq String.compare names)
+      then Error (Link_invalid_request "unknown or duplicate link-goal fields")
+      else (
+        let open Result.Syntax in
+        let* () =
+          if not (List.mem_assoc "expected_workspace" fields)
+          then Error (Link_invalid_request "expected_workspace precondition is required")
+          else (
+            match Workspace.validate_expected_workspace ~config json with
+            | Ok _ -> Ok ()
+            | Error Workspace.Invalid_workspace_precondition ->
+              Error (Link_invalid_request "invalid expected_workspace precondition")
+            | Error Workspace.Workspace_precondition_failed ->
+              Error (Link_workspace_conflict "workspace precondition failed"))
+        in
+        let* goal_id =
+          match non_empty_string_field fields "goal_id" with
+          | Ok value -> Ok value
+          | Error msg -> Error (Link_invalid_request msg)
+        in
+        match Task.Goal_assignment.set_task_goal config ~task_id ~goal_id with
+        | Ok () ->
+          let actor =
+            let trimmed = String.trim operator_id in
+            if String.equal trimmed "" then "operator" else trimmed
+          in
+          Audit_log.log_action
+            config
+            ~agent_id:actor
+            ~action:(Audit_log.Custom "task_link_goal")
+            ~details:
+              (`Assoc
+                [ "task_id", `String task_id
+                ; "goal_id", `String goal_id
+                ])
+            ~outcome:Audit_log.Success
+            ();
+          Ok
+            (`Assoc
+              [ "ok", `Bool true
+              ; "task_id", `String task_id
+              ; "goal_id", `String goal_id
+              ])
+        | Error err -> Error (Link_assignment_error err))
+    | _ -> Error (Link_invalid_request "request body must be a JSON object"))
+;;
+
+let commit_link_task_goal_body ~config ~operator_id ~task_id body =
+  match Yojson.Safe.from_string body with
+  | json -> commit_link_task_goal_json ~config ~operator_id ~task_id json
+  | exception Yojson.Json_error detail ->
+    Error (Link_invalid_request ("invalid JSON: " ^ detail))
+;;
+
+let link_task_goal_response result : Httpun.Status.t * Yojson.Safe.t =
+  match result with
+  | Ok json -> `OK, json
+  | Error (Link_invalid_request detail) -> `Bad_request, error_json detail
+  | Error (Link_workspace_conflict detail) -> `Conflict, error_json detail
+  | Error (Link_assignment_error (Task.Goal_assignment.Goal_source_unavailable unavailable)) ->
+    `Service_unavailable, Goal_unavailable_envelope.to_yojson unavailable
+  | Error
+      (Link_assignment_error
+         (( Task.Goal_assignment.Unknown_task _
+          | Task.Goal_assignment.Unknown_goal _ ) as err)) ->
+    `Not_found, error_json (Task.Goal_assignment.set_task_goal_error_to_string err)
+  | Error
+      (Link_assignment_error
+         (( Task.Goal_assignment.Ambiguous_task _
+          | Task.Goal_assignment.Ambiguous_goal _
+          | Task.Goal_assignment.Goal_closed _
+          | Task.Goal_assignment.Task_finished _
+          | Task.Goal_assignment.Already_assigned _ ) as err)) ->
+    `Conflict, error_json (Task.Goal_assignment.set_task_goal_error_to_string err)
+  | Error
+      (Link_assignment_error
+         (( Task.Goal_assignment.Goal_lock_failed _
+          | Task.Goal_assignment.Backlog_read_failed _
+          | Task.Goal_assignment.Link_write_failed _ ) as err)) ->
+    `Service_unavailable, error_json (Task.Goal_assignment.set_task_goal_error_to_string err)
+;;
+
 let add_routes router =
   router
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/goals/confirmation" (fun state operator_id req reqd ->
@@ -422,6 +545,24 @@ let add_routes router =
                    request
                    reqd
                    (error_json message)))
+  |> Server_route.prefix_post (Server_route.Token_permission Masc_domain.CanAdmin) task_route_prefix (fun state operator_id request reqd ->
+           let path = Http.Request.path request in
+           match parse_link_task_goal_path path with
+           | None ->
+             respond_json_value_with_cors
+               ~status:`Not_found
+               request
+               reqd
+               (error_json "unknown task action endpoint")
+           | Some task_id ->
+             let config = Mcp_server.workspace_config state in
+             Http.Request.read_body_async reqd (fun body ->
+               let status, json =
+                 Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+                   commit_link_task_goal_body ~config ~operator_id ~task_id body
+                   |> link_task_goal_response)
+               in
+               respond_json_value_with_cors ~status request reqd json))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/tasks/cancel" (fun state operator_id request reqd ->
            Http.Request.read_body_async reqd (fun body ->
              let result =

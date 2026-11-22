@@ -44,6 +44,40 @@ val commit_goal_confirmation_body :
 val goal_confirmation_response :
   (Yojson.Safe.t, confirmation_error) result -> Httpun.Status.t * Yojson.Safe.t
 
+(** [POST /api/v1/tasks/:id/link-goal] failures. Validation and workspace
+    precondition errors map to 400/409; assignment failures preserve the typed
+    {!Task.Goal_assignment.set_task_goal_error} classification (404 for unknown
+    task/goal, 409 for closed goal / finished task / already assigned, 503 for
+    unavailable stores). *)
+type link_task_goal_error =
+  | Link_invalid_request of string
+  | Link_workspace_conflict of string
+  | Link_assignment_error of Task.Goal_assignment.set_task_goal_error
+
+val parse_link_task_goal_path : string -> string option
+(** Extract the URL-decoded task id from ["/api/v1/tasks/<task_id>/link-goal"].
+    Returns [None] for non-matching paths, blank ids, or nested slashes. *)
+
+val commit_link_task_goal_json :
+  config:Workspace.config ->
+  operator_id:string ->
+  task_id:string ->
+  Yojson.Safe.t ->
+  (Yojson.Safe.t, link_task_goal_error) result
+(** Validate and commit a task-to-goal link. Requires both [goal_id] and an
+    [expected_workspace] precondition object matching [config] (consistent with
+    sibling operator mutation endpoints). *)
+
+val commit_link_task_goal_body :
+  config:Workspace.config ->
+  operator_id:string ->
+  task_id:string ->
+  string ->
+  (Yojson.Safe.t, link_task_goal_error) result
+
+val link_task_goal_response :
+  (Yojson.Safe.t, link_task_goal_error) result -> Httpun.Status.t * Yojson.Safe.t
+
 val add_routes :
   Http_server_eio.Router.t -> Http_server_eio.Router.t
 

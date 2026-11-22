@@ -27,6 +27,106 @@ type capabilities = {
   tts_available : bool;
 }
 
+type recorder_kind =
+  | Recorder_rec
+  | Recorder_sox
+  | Recorder_ffmpeg
+
+let resolve_recorder_from ~find =
+  match find "rec" with
+  | Some p -> Some (Recorder_rec, p)
+  | None -> (
+      match find "sox" with
+      | Some p -> Some (Recorder_sox, p)
+      | None -> (
+          match find "ffmpeg" with
+          | Some p -> Some (Recorder_ffmpeg, p)
+          | None -> None))
+
+let build_record_argv ~kind ~bin_path ~device ~out_path =
+  match (kind, device) with
+  | Recorder_rec, _ ->
+      [| bin_path; "-q"; "-r"; "16000"; "-c"; "1"; "-b"; "16"; out_path |]
+  | Recorder_sox, Some dev when not (String.equal (String.trim dev) "") ->
+      [|
+        bin_path;
+        "-q";
+        "-t";
+        "coreaudio";
+        String.trim dev;
+        "-r";
+        "16000";
+        "-c";
+        "1";
+        out_path;
+      |]
+  | Recorder_sox, (Some _ | None) ->
+      [| bin_path; "-q"; "-d"; "-r"; "16000"; "-c"; "1"; out_path |]
+  | Recorder_ffmpeg, _ ->
+      let input =
+        match device with
+        | Some dev when not (String.equal (String.trim dev) "") ->
+            let d = String.trim dev in
+            if String.contains d ':' then d else ":" ^ d
+        | Some _ | None -> ":default"
+      in
+      [|
+        bin_path;
+        "-y";
+        "-loglevel";
+        "error";
+        "-f";
+        "avfoundation";
+        "-i";
+        input;
+        "-ar";
+        "16000";
+        "-ac";
+        "1";
+        "-f";
+        "wav";
+        out_path;
+      |]
+
+type audio_player =
+  | Player_afplay
+  | Player_paplay
+  | Player_aplay
+  | Player_ffplay
+
+let audio_player_name = function
+  | Player_afplay -> "afplay"
+  | Player_paplay -> "paplay"
+  | Player_aplay -> "aplay"
+  | Player_ffplay -> "ffplay"
+
+let resolve_audio_player_from ~find =
+  match find "afplay" with
+  | Some p -> Some (Player_afplay, p)
+  | None -> (
+      match find "paplay" with
+      | Some p -> Some (Player_paplay, p)
+      | None -> (
+          match find "aplay" with
+          | Some p -> Some (Player_aplay, p)
+          | None -> (
+              match find "ffplay" with
+              | Some p -> Some (Player_ffplay, p)
+              | None -> None)))
+
+let build_player_argv ~player ~bin_path ~audio_path =
+  match player with
+  | Player_afplay -> [| bin_path; audio_path |]
+  | Player_paplay -> [| bin_path; audio_path |]
+  | Player_aplay -> [| bin_path; "-q"; audio_path |]
+  | Player_ffplay ->
+      [| bin_path; "-nodisp"; "-autoexit"; "-loglevel"; "quiet"; audio_path |]
+
+type tts_probe_outcome =
+  | Tts_audio_file of string
+  | Tts_probe_answered_no_audio of { endpoint_id : string; detail : string }
+  | Tts_probe_failed of string
+
 let ( let* ) = Result.bind
 
 let assoc_opt key = function
@@ -60,6 +160,64 @@ let decode_voice_config ~recorder_cmd json =
     }
 
 let encode_tts_probe_request ~text = `Assoc [ ("message", `String text) ]
+
+let decode_tts_probe_outcome json =
+  let* _, body = Wire_common.unwrap_v2_or_raw json in
+  let opt_str key obj =
+    match assoc_opt key obj with
+    | Some (`String s) when not (String.equal (String.trim s) "") ->
+        Some (String.trim s)
+    | Some _ | None -> None
+  in
+  let file_path_opt =
+    match opt_str "audio_path" body with
+    | Some _ as p -> p
+    | None -> opt_str "file" body
+  in
+  match file_path_opt with
+  | Some path -> Ok (Tts_audio_file path)
+  | None -> (
+      match assoc_opt "endpoints" body with
+      | Some (`List []) ->
+          Ok (Tts_probe_failed "no TTS endpoints configured on server")
+      | Some (`List items) ->
+          let answered = ref None in
+          let failures = ref [] in
+          List.iter
+            (fun item ->
+              let ep_id =
+                Option.value (opt_str "endpoint_id" item) ~default:"endpoint"
+              in
+              let state =
+                Option.value (opt_str "state" item) ~default:"unknown"
+              in
+              let detail = Option.value (opt_str "detail" item) ~default:"" in
+              match state with
+              | "answered" -> (
+                  match !answered with
+                  | None -> answered := Some (ep_id, detail)
+                  | Some _ -> ())
+              | _ ->
+                  let summary =
+                    if String.equal detail "" then
+                      Printf.sprintf "%s: %s" ep_id state
+                    else Printf.sprintf "%s: %s (%s)" ep_id state detail
+                  in
+                  failures := summary :: !failures)
+            items;
+          (match !answered with
+          | Some (endpoint_id, detail) ->
+              Ok (Tts_probe_answered_no_audio { endpoint_id; detail })
+          | None ->
+              let reason =
+                match List.rev !failures with
+                | [] -> "TTS probe did not report an answered endpoint"
+                | xs -> String.concat "; " xs
+              in
+              Ok (Tts_probe_failed reason))
+      | Some _ -> Error "TTS probe endpoints field must be a list"
+      | None ->
+          Ok (Tts_probe_failed "TTS response contained neither audio file nor endpoints"))
 
 type event =
   | Phase_changed of phase
@@ -170,12 +328,7 @@ let http_and_local_backend ~io ~clock ~endpoint =
   let probe () =
     let recorder_cmd =
       Eio_unix.run_in_systhread (fun () ->
-          match find_on_path "rec" with
-          | Some _ as found -> found
-          | None -> (
-              match find_on_path "sox" with
-              | Some _ as found -> found
-              | None -> find_on_path "ffmpeg"))
+          Option.map snd (resolve_recorder_from ~find:find_on_path))
     in
     match
       Http_client.get_json ~io ~clock ~timeout_sec:3.0 endpoint
@@ -194,32 +347,16 @@ let http_and_local_backend ~io ~clock ~endpoint =
   let record_until_stopped ~device ~stop_signal ~on_level:_ =
     let recorder =
       Eio_unix.run_in_systhread (fun () ->
-          match find_on_path "rec" with
-          | Some p -> Some ("rec", p)
-          | None -> (
-              match find_on_path "sox" with
-              | Some p -> Some ("sox", p)
-              | None -> None))
+          resolve_recorder_from ~find:find_on_path)
     in
     match recorder with
-    | None -> Error "no supported audio recorder (rec/sox) found on PATH"
+    | None -> Error "no supported audio recorder (rec/sox/ffmpeg) found on PATH"
     | Some (kind, bin_path) ->
         let out_path =
           Eio_unix.run_in_systhread (fun () ->
               Filename.temp_file "masc_ptt_" ".wav")
         in
-        let argv =
-          match (kind, device) with
-          | "rec", _ ->
-              [| bin_path; "-q"; "-r"; "16000"; "-c"; "1"; "-b"; "16"; out_path |]
-          | _, Some dev ->
-              [|
-                bin_path; "-q"; "-t"; "coreaudio"; dev; "-r"; "16000"; "-c"; "1";
-                out_path;
-              |]
-          | _, None ->
-              [| bin_path; "-q"; "-d"; "-r"; "16000"; "-c"; "1"; out_path |]
-        in
+        let argv = build_record_argv ~kind ~bin_path ~device ~out_path in
         let pid_ref : int option Atomic.t = Atomic.make None in
         let reap_if_spawned () =
           match Atomic.exchange pid_ref None with
@@ -282,15 +419,102 @@ let http_and_local_backend ~io ~clock ~endpoint =
               | exception Yojson.Json_error msg ->
                   Error ("invalid transcribe JSON: " ^ msg)))
   in
+  let play_audio_file_cancel_safe ~player ~bin_path ~audio_path =
+    let exists =
+      Eio_unix.run_in_systhread (fun () -> Sys.file_exists audio_path)
+    in
+    if not exists then Error ("TTS audio file not found: " ^ audio_path)
+    else
+      let player_lbl = audio_player_name player in
+      let argv = build_player_argv ~player ~bin_path ~audio_path in
+      let pid_ref : int option Atomic.t = Atomic.make None in
+      let reap_if_spawned () =
+        match Atomic.exchange pid_ref None with
+        | None -> ()
+        | Some pid ->
+            Eio_unix.run_in_systhread (fun () -> stop_and_reap_pid_sync pid)
+      in
+      let spawn_res =
+        Eio_unix.run_in_systhread (fun () ->
+            match spawn_detached_sync ~bin_path ~argv with
+            | Ok pid ->
+                Atomic.set pid_ref (Some pid);
+                Ok pid
+            | Error _ as err -> err)
+      in
+      match spawn_res with
+      | Error _ as err -> err
+      | Ok pid ->
+          let rec poll () =
+            let status_opt =
+              Eio_unix.run_in_systhread (fun () ->
+                  match Unix.waitpid [ Unix.WNOHANG ] pid with
+                  | 0, _ -> Ok None
+                  | _, st ->
+                      Atomic.set pid_ref None;
+                      Ok (Some st)
+                  | exception Unix.Unix_error (Unix.EINTR, _, _) -> Ok None
+                  | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
+                      Atomic.set pid_ref None;
+                      Ok (Some (Unix.WEXITED 0))
+                  | exception Unix.Unix_error (e, fn, _) ->
+                      Atomic.set pid_ref None;
+                      Error
+                        (Printf.sprintf "%s: %s" fn (Unix.error_message e)))
+            in
+            match status_opt with
+            | Error _ as err -> err
+            | Ok None ->
+                Eio.Time.sleep clock 0.025;
+                poll ()
+            | Ok (Some (Unix.WEXITED 0)) -> Ok ()
+            | Ok (Some (Unix.WEXITED code)) ->
+                Error
+                  (Printf.sprintf "%s exited with status %d" player_lbl code)
+            | Ok (Some (Unix.WSIGNALED s | Unix.WSTOPPED s)) ->
+                Error
+                  (Printf.sprintf "%s stopped by signal %d" player_lbl s)
+          in
+          (match poll () with
+          | res ->
+              Eio.Cancel.protect reap_if_spawned;
+              res
+          | exception (Eio.Cancel.Cancelled _ as cancelled) ->
+              Eio.Cancel.protect reap_if_spawned;
+              raise cancelled)
+  in
   let speak ~text ~voice_id:_ =
-    let body = encode_tts_probe_request ~text in
-    match
-      Http_client.post_json ~io ~clock ~timeout_sec:15.0 endpoint
-        ~path:voice_probe_tts_path ~body
-        ~decode:(fun _ -> Ok ())
-    with
-    | Ok () -> Ok ()
-    | Error err -> Error (Http_client.http_error_to_string err)
+    let trimmed = String.trim text in
+    if String.equal trimmed "" then Error "empty text for TTS playback"
+    else
+      let player_opt =
+        Eio_unix.run_in_systhread (fun () ->
+            resolve_audio_player_from ~find:find_on_path)
+      in
+      match player_opt with
+      | None ->
+          Error
+            "no local audio player (afplay/paplay/aplay/ffplay) found on PATH"
+      | Some (player, bin_path) -> (
+          let body = encode_tts_probe_request ~text:trimmed in
+          match
+            Http_client.post_json ~io ~clock ~timeout_sec:15.0 endpoint
+              ~path:voice_probe_tts_path ~body ~decode:decode_tts_probe_outcome
+          with
+          | Error err -> Error (Http_client.http_error_to_string err)
+          | Ok (Tts_audio_file audio_path) ->
+              play_audio_file_cancel_safe ~player ~bin_path ~audio_path
+          | Ok (Tts_probe_answered_no_audio { endpoint_id; detail }) ->
+              let detail_suffix =
+                if String.equal detail "" then "" else " (" ^ detail ^ ")"
+              in
+              Error
+                (Printf.sprintf
+                   "TTS probe %s answered%s without downloadable audio; local \
+                    playback requires a synthesis audio file"
+                   endpoint_id detail_suffix)
+          | Ok (Tts_probe_failed reason) ->
+              Error ("TTS probe failed: " ^ reason))
   in
   { probe; record_until_stopped; transcribe; speak; cleanup_audio }
 

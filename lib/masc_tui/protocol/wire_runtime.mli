@@ -178,8 +178,13 @@ type token_velocity_sample = {
   output_tok_per_min : float Observed.t;
 }
 
+type efficiency_window_kind =
+  | Efficiency_month_mtd
+  | Efficiency_month_complete
+
 type efficiency_month = {
   month : string;
+  window_kind : efficiency_window_kind option;
   generated_at_unix : float;
   days_covered : int;
   keepers : keeper_efficiency_row list;

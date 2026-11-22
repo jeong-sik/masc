@@ -150,6 +150,12 @@ val tasks_24h_rollup_json :
     [tasks_in_progress], [tasks_claimed], [tasks_awaiting_verification],
     [tasks_todo], and [tasks_cancelled]. *)
 
+val verifications_24h_of_runs :
+  now:float -> Verification_run_registry.run list -> (int * int) option
+(** Count completed [Approved] and [Rejected] verification runs within the
+    trailing 24h window. Returns [None] when [runs] is empty (unobserved) so
+    callers never fabricate zero counts. *)
+
 val keeper_groups_json : (string * string option) list -> Yojson.Safe.t
 (** Deployment-neutral grouping of configured keepers by their optional
     [keeper.group] TOML field (trimmed; absent or blank maps to

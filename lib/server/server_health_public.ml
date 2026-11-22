@@ -28,3 +28,14 @@ let health_json ~ready ~phase =
 
 let liveness_json = `Assoc [ live_field, `Bool true ]
 let readiness_json ~ready ~phase = `Assoc (readiness_fields ~ready ~phase)
+
+let capabilities =
+  [ "memory_v2"
+  ; "infra_sandboxes"
+  ; "candle_ledger"
+  ; "config_schema"
+  ; "task_goal_link"
+  ]
+;;
+
+let capabilities_json = `List (List.map (fun cap -> `String cap) capabilities)

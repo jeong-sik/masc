@@ -262,7 +262,7 @@ let month_tests =
           let tool_size = (Unix.stat tool_path).Unix.st_size in
           let broken_cursors =
             Printf.sprintf
-              {|{"schema":"masc.keeper-efficiency-cache/v1","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":"corrupt","tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
+              {|{"schema":"masc.keeper-efficiency-cache/v3","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":"corrupt","tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
               (today_month ()) day_num day_num tool_path tool_size
           in
           Fs_compat.save_file cache broken_cursors;
@@ -277,7 +277,7 @@ let month_tests =
              cursorless ledger on top of cached totals. *)
           let missing_cost_cursor_only =
             Printf.sprintf
-              {|{"schema":"masc.keeper-efficiency-cache/v1","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[],"tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
+              {|{"schema":"masc.keeper-efficiency-cache/v3","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[],"tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
               (today_month ()) day_num day_num tool_path tool_size
           in
           Fs_compat.save_file cache missing_cost_cursor_only;
@@ -298,7 +298,7 @@ let month_tests =
           let cost_size = (Unix.stat cost_path).Unix.st_size in
           let empty_turn_ids_with_turn =
             Printf.sprintf
-              {|{"schema":"masc.keeper-efficiency-cache/v1","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[{"path":%S,"boundary":%d}],"tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
+              {|{"schema":"masc.keeper-efficiency-cache/v3","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[{"path":%S,"boundary":%d}],"tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
               (today_month ()) day_num day_num cost_path cost_size tool_path tool_size
           in
           Fs_compat.save_file cache empty_turn_ids_with_turn;
@@ -321,7 +321,7 @@ let month_tests =
           let cost_size_now = (Unix.stat cost_path).Unix.st_size in
           let dup_tool_cursors =
             Printf.sprintf
-              {|{"schema":"masc.keeper-efficiency-cache/v1","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[{"path":%S,"boundary":%d}],"tool_cursors":[{"path":%S,"boundary":0},{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":8,"output_tokens":10,"cost_usd":0.40,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
+              {|{"schema":"masc.keeper-efficiency-cache/v3","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[{"path":%S,"boundary":%d}],"tool_cursors":[{"path":%S,"boundary":0},{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":8,"output_tokens":10,"cost_usd":0.40,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
               (today_month ()) day_num day_num cost_path cost_size_now
               tool_path tool_path tool_size
           in
@@ -345,7 +345,7 @@ let month_tests =
           let rotated_size = (Unix.stat rotated_tool_path).Unix.st_size in
           let missing_second_tool_cursor =
             Printf.sprintf
-              {|{"schema":"masc.keeper-efficiency-cache/v1","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[{"path":%S,"boundary":%d}],"tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":8,"output_tokens":10,"cost_usd":0.40,"calls":2,"failed":0,"deferred":0,"tool_ms":20.0}]}}]}|}
+              {|{"schema":"masc.keeper-efficiency-cache/v3","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[{"path":%S,"boundary":%d}],"tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":8,"output_tokens":10,"cost_usd":0.40,"calls":2,"failed":0,"deferred":0,"tool_ms":20.0}]}}]}|}
               (today_month ()) day_num day_num cost_path cost_size_now
               rotated_tool_path rotated_size
           in
@@ -495,6 +495,165 @@ let os_mutex_tests =
                 Alcotest.failf "the read raised %s" (Printexc.to_string exn))) )
   ]
 
+let cache_and_window_tests =
+  [ ( "emits nullable cache telemetry, MTD window bounds, and registered/active_only filtering"
+    , `Quick
+    , fun () ->
+      with_masc_root (fun root ->
+          let costs = costs_store root in
+          (* Active keeper with cache tokens reported on turn 1 (75% hit) and absent on turn 2 *)
+          Dated_jsonl.append costs
+            (CL.to_json
+               ~extra_fields:
+                 [ "cache_read_tokens", `Int 750
+                 ; "cache_creation_tokens", `Int 100
+                 ]
+               (cost_row ~agent:"active-keeper" ~turn:1 ~input_tokens:1000
+                  ~output_tokens:100 ~cost_usd:0.50 Resolved));
+          Dated_jsonl.append costs
+            (CL.to_json
+               (cost_row ~agent:"active-keeper" ~turn:2 ~input_tokens:500
+                  ~output_tokens:50 ~cost_usd:0.25 Resolved));
+          (* Retired keeper with no cache telemetry reported at all *)
+          Dated_jsonl.append costs
+            (CL.to_json
+               (cost_row ~agent:"retired-keeper" ~turn:1 ~input_tokens:400
+                  ~output_tokens:40 ~cost_usd:0.10 Resolved));
+          let month = today_month () in
+          let view = KE.read_month ~masc_root:root ~month |> Result.get_ok in
+          let active_row = keeper_row view "active-keeper" |> Option.get in
+          check (option int) "active cache_read_tokens" (Some 750)
+            active_row.KE.cache_read_tokens;
+          check (option int) "active cache_creation_tokens" (Some 100)
+            active_row.KE.cache_creation_tokens;
+          (* Paired input is 1000 (not 1500), so cache_hit_pct = 75.0 *)
+          near "active cache_hit_pct" 75.0 (Option.get active_row.KE.cache_hit_pct);
+          let retired_row = keeper_row view "retired-keeper" |> Option.get in
+          check (option int) "retired cache_read_tokens stays None" None
+            retired_row.KE.cache_read_tokens;
+          check (option int) "retired cache_creation_tokens stays None" None
+            retired_row.KE.cache_creation_tokens;
+          check bool "retired cache_hit_pct stays None" true
+            (Option.is_none retired_row.KE.cache_hit_pct);
+          let open Yojson.Safe.Util in
+          (* Full JSON with registered_keepers *)
+          let full_json =
+            KE.month_view_to_json ~registered_keepers:[ "active-keeper" ] view
+          in
+          check string "window_kind" "month_mtd" (full_json |> member "window_kind" |> to_string);
+          check string "window_start" (month ^ "-01T00:00:00Z")
+            (full_json |> member "window_start" |> to_string);
+          check bool "window_end non-empty ISO" true
+            (String.length (full_json |> member "window_end" |> to_string) >= 20);
+          check bool "active_only false" false (full_json |> member "active_only" |> to_bool);
+          let rows = full_json |> member "keepers" |> to_list in
+          check int "both keepers present when active_only=false" 2 (List.length rows);
+          let find_json name =
+            List.find (fun r -> String.equal (r |> member "keeper" |> to_string) name) rows
+          in
+          check bool "active registered=true" true
+            (find_json "active-keeper" |> member "registered" |> to_bool);
+          check bool "retired registered=false" false
+            (find_json "retired-keeper" |> member "registered" |> to_bool);
+          check bool "retired cache_hit_pct serialized as null" true
+            (find_json "retired-keeper" |> member "cache_hit_pct" = `Null);
+          (* Filtered JSON with active_only=true *)
+          let filtered_json =
+            KE.month_view_to_json
+              ~registered_keepers:[ "active-keeper" ]
+              ~active_only:true
+              view
+          in
+          check bool "active_only true" true (filtered_json |> member "active_only" |> to_bool);
+          let filtered_rows = filtered_json |> member "keepers" |> to_list in
+          check int "only active keeper returned" 1 (List.length filtered_rows);
+          check int "fleet turns_total recomputed for active_only" 2
+            (filtered_json |> member "fleet" |> member "turns_total" |> to_int);
+          near "fleet cache_hit_pct" 75.0
+            (filtered_json |> member "fleet" |> member "cache_hit_pct" |> to_float)) )
+  ; ( "unpaired cache_read with zero input_tokens never inflates cache_hit_pct across cache reload"
+    , `Quick
+    , fun () ->
+        with_masc_root (fun root ->
+          let costs = costs_store root in
+          (* Turn 1: paired 200/1000 = 20.0% *)
+          Dated_jsonl.append costs
+            (CL.to_json
+               ~extra_fields:[ "cache_read_tokens", `Int 200 ]
+               (cost_row ~agent:"paired-keeper" ~turn:1 ~input_tokens:1000
+                  ~output_tokens:100 ~cost_usd:0.50 Resolved));
+          (* Turn 2: input_tokens=0 with cache_read_tokens=800 must NOT inflate cache_hit_pct to 100% *)
+          Dated_jsonl.append costs
+            (CL.to_json
+               ~extra_fields:[ "cache_read_tokens", `Int 800 ]
+               (cost_row ~agent:"paired-keeper" ~turn:2 ~input_tokens:0
+                  ~output_tokens:50 ~cost_usd:0.10 Resolved));
+          let month = today_month () in
+          let check_view label view =
+            let row = keeper_row view "paired-keeper" |> Option.get in
+            check (option int) (label ^ " total cache_read_tokens") (Some 1000)
+              row.KE.cache_read_tokens;
+            check int (label ^ " cache_paired_read_tokens") 200
+              row.KE.cache_paired_read_tokens;
+            check int (label ^ " cache_paired_input_tokens") 1000
+              row.KE.cache_paired_input_tokens;
+            near (label ^ " keeper cache_hit_pct stays 20.0") 20.0
+              (Option.get row.KE.cache_hit_pct);
+            near (label ^ " fleet cache_hit_pct stays 20.0") 20.0
+              (Option.get view.KE.fleet.KE.cache_hit_pct)
+          in
+          let view1 = KE.read_month ~masc_root:root ~month |> Result.get_ok in
+          check_view "fresh" view1;
+          (* Second read exercises v3 boundary cache round-trip *)
+          let view2 = KE.read_month ~masc_root:root ~month |> Result.get_ok in
+          check_view "cached" view2) )
+  ; ( "completed past month emits window_kind = month_complete while current month emits month_mtd"
+    , `Quick
+    , fun () ->
+        let open Yojson.Safe.Util in
+        let nov_2026_unix = 1795254000.0 (* 2026-11-22 UTC *) in
+        let empty_fleet : KE.fleet =
+          { turns_total = 0
+          ; calls_per_turn = 0.0
+          ; tool_s_per_turn = 0.0
+          ; output_tokens_per_turn = 0.0
+          ; input_tokens_per_turn = 0.0
+          ; cost_usd_per_turn = 0.0
+          ; cache_hit_pct = None
+          }
+        in
+        let past_view : KE.month_view =
+          { month = "2026-10"
+          ; generated_at = nov_2026_unix
+          ; days_covered = 31
+          ; keepers = []
+          ; fleet = empty_fleet
+          }
+        in
+        let past_json = KE.month_view_to_json past_view in
+        check string "past month window_kind" "month_complete"
+          (past_json |> member "window_kind" |> to_string);
+        check string "past month window_start" "2026-10-01T00:00:00Z"
+          (past_json |> member "window_start" |> to_string);
+        check string "past month window_end" "2026-10-31T23:59:59Z"
+          (past_json |> member "window_end" |> to_string);
+        let current_view : KE.month_view =
+          { past_view with month = KE.month_of_unix_time nov_2026_unix; days_covered = 22 }
+        in
+        let current_json = KE.month_view_to_json current_view in
+        check string "current month window_kind" "month_mtd"
+          (current_json |> member "window_kind" |> to_string);
+        check string "current month window_start" "2026-11-01T00:00:00Z"
+          (current_json |> member "window_start" |> to_string);
+        check bool "current month window_end uses generated_at, not end-of-month" true
+          (not (String.ends_with ~suffix:"-30T23:59:59Z"
+                  (current_json |> member "window_end" |> to_string))) )
+  ]
+
 let () =
   run "Keeper_efficiency"
-    [ ("month", month_tests); ("overlap", overlap_tests); ("os_mutex", os_mutex_tests) ]
+    [ ("month", month_tests)
+    ; ("cache_and_window", cache_and_window_tests)
+    ; ("overlap", overlap_tests)
+    ; ("os_mutex", os_mutex_tests)
+    ]

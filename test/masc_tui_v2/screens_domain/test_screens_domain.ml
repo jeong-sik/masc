@@ -819,6 +819,7 @@ let make_rich_model ~lang ~cols ~rows =
   let efficiency : Wire_runtime.efficiency_month =
     {
       month = "2026-11";
+      window_kind = Some Wire_runtime.Efficiency_month_mtd;
       generated_at_unix = now_unix;
       days_covered = 21;
       keepers =

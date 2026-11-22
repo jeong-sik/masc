@@ -2285,6 +2285,133 @@ let test_v25_data_pipeline_decoders () =
   Alcotest.(check string) "EN max-concurrent leaf label" "Max Concurrent"
     (Wire_config.field_leaf_label ~lang:Say.Lang_en f_bind_quoted)
 
+let test_efficiency_null_cache_hit_pct_preserved () =
+  let t0 = Clock.Mono.of_ns 5_000_000_000L in
+  (* 1. Explicit cache_hit_pct: null with non-zero input_tokens + cache_read_tokens
+        must stay Observed.Absent (NEVER recomputed from unpaired totals). *)
+  let unpaired_json =
+    parse_json
+      {|{
+        "schema": "masc.keeper-efficiency/v1",
+        "month": "2026-10",
+        "window_kind": "month_complete",
+        "generated_at": 1795254000.0,
+        "days_covered": 31,
+        "fleet": {
+          "turns_total": 2,
+          "calls_per_turn": 1.0,
+          "tool_s_per_turn": 0.5,
+          "output_tokens_per_turn": 100.0,
+          "input_tokens_per_turn": 5000.0,
+          "cost_usd_per_turn": 0.10,
+          "cache_hit_pct": null
+        },
+        "keepers": [
+          {
+            "keeper": "unpaired-alpha",
+            "turns": 2,
+            "input_tokens": 10000,
+            "output_tokens": 200,
+            "cache_read_tokens": 500,
+            "cache_creation_tokens": null,
+            "cache_hit_pct": null,
+            "cost_usd": 0.20,
+            "calls": 2,
+            "failed": 0,
+            "deferred": 0,
+            "tool_ms": 1000.0
+          }
+        ]
+      }|}
+  in
+  let eff =
+    expect_ok "decode unpaired null efficiency"
+      (Wire_runtime.decode_efficiency_month ~observed_at:t0 unpaired_json)
+  in
+  Alcotest.(check bool) "window_kind = Some Efficiency_month_complete" true
+    (eff.window_kind = Some Wire_runtime.Efficiency_month_complete);
+  Alcotest.(check bool) "fleet explicit null cache_hit_pct stays Absent" true
+    (match eff.fleet.fleet_cache_hit_pct with
+    | Observed.Absent -> true
+    | Observed.Value _ | Observed.Unreported | Observed.Loading _ | Observed.Failed _ ->
+        false);
+  (match eff.keepers with
+  | [ row ] ->
+      Alcotest.(check bool) "keeper explicit null cache_hit_pct stays Absent" true
+        (match row.cache_hit_pct with
+        | Observed.Absent -> true
+        | Observed.Value _ | Observed.Unreported | Observed.Loading _ | Observed.Failed _ ->
+            false)
+  | _ -> Alcotest.fail "expected 1 keeper efficiency row");
+  (* 2. Omitted cache_hit_pct key (legacy server) still falls back to computed ratio. *)
+  let legacy_json =
+    parse_json
+      {|{
+        "schema": "masc.keeper-efficiency/v1",
+        "month": "2026-11",
+        "window_kind": "month_mtd",
+        "generated_at": 1795254000.0,
+        "days_covered": 22,
+        "fleet": {
+          "turns_total": 1,
+          "calls_per_turn": 1.0,
+          "tool_s_per_turn": 0.5,
+          "output_tokens_per_turn": 100.0,
+          "input_tokens_per_turn": 1000.0,
+          "cost_usd_per_turn": 0.10
+        },
+        "keepers": [
+          {
+            "keeper": "legacy-beta",
+            "turns": 1,
+            "input_tokens": 1000,
+            "output_tokens": 100,
+            "cache_read_tokens": 400,
+            "cache_creation_tokens": 0,
+            "cost_usd": 0.10,
+            "calls": 1,
+            "failed": 0,
+            "deferred": 0,
+            "tool_ms": 500.0
+          }
+        ]
+      }|}
+  in
+  let legacy_eff =
+    expect_ok "decode legacy missing cache_hit_pct"
+      (Wire_runtime.decode_efficiency_month ~observed_at:t0 legacy_json)
+  in
+  Alcotest.(check bool) "window_kind = Some Efficiency_month_mtd" true
+    (legacy_eff.window_kind = Some Wire_runtime.Efficiency_month_mtd);
+  Alcotest.(check (option (float 0.01))) "legacy missing fleet cache_hit_pct computes 40.0"
+    (Some 40.0) (Observed.to_option legacy_eff.fleet.fleet_cache_hit_pct);
+  (match legacy_eff.keepers with
+  | [ row ] ->
+      Alcotest.(check (option (float 0.01))) "legacy missing keeper cache_hit_pct computes 40.0"
+        (Some 40.0) (Observed.to_option row.cache_hit_pct)
+  | _ -> Alcotest.fail "expected 1 legacy keeper efficiency row");
+  (* 3. Unknown window_kind rejected strictly *)
+  let bad_window_kind =
+    parse_json
+      {|{
+        "schema": "masc.keeper-efficiency/v1",
+        "month": "2026-11",
+        "window_kind": "quarter_to_date",
+        "generated_at": 1795254000.0,
+        "days_covered": 22,
+        "fleet": {
+          "turns_total": 0, "calls_per_turn": 0.0, "tool_s_per_turn": 0.0,
+          "output_tokens_per_turn": 0.0, "input_tokens_per_turn": 0.0,
+          "cost_usd_per_turn": 0.0, "cache_hit_pct": null
+        },
+        "keepers": []
+      }|}
+  in
+  ignore
+    (expect_err "unknown efficiency window_kind rejected"
+       (Wire_runtime.decode_efficiency_month ~observed_at:t0 bad_window_kind)
+      : string)
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -2306,6 +2433,8 @@ let () =
             test_round3_wire_config_unset_sentinels;
           Alcotest.test_case "v25_data_pipeline_decoders" `Quick
             test_v25_data_pipeline_decoders;
+          Alcotest.test_case "efficiency_null_cache_hit_pct_and_window_kind" `Quick
+            test_efficiency_null_cache_hit_pct_preserved;
         ] );
       ( "net"
       , [

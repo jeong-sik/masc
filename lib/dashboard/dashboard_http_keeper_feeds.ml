@@ -42,6 +42,19 @@ let token_reading_of_row json =
   | Some _
   | None -> Unread
 
+(* Cache token fields ([cache_read_tokens], [cache_creation_tokens]) are
+   optional additive integers inside [usage]. Absent or [null] stays
+   [Unreported] so cache telemetry is never fabricated as 0. *)
+let cache_token_reading_of_row field json =
+  match Json_util.assoc_member_opt "usage" json with
+  | Some (`Assoc _ as usage) ->
+      (match Json_util.assoc_member_opt field usage with
+       | Some (`Int value) when value >= 0 -> Reported value
+       | Some `Null | None -> Unreported
+       | Some _ -> Unread)
+  | Some _
+  | None -> Unread
+
 type 'a tally =
   { mutable reported : 'a
   ; mutable reported_samples : int
@@ -101,6 +114,8 @@ type timed_row =
       ; latency_ms : float
       ; cost : float reading
       ; tokens : token_counts reading
+      ; cache_read : int reading
+      ; cache_creation : int reading
       }
   | Unread_turn of { ts : float }
       (** A row that may have been a turn, at a readable time, whose kind or
@@ -144,6 +159,8 @@ let add_file_row rows = function
                     ; latency_ms = float_of_int latency_ms
                     ; cost = cost_reading_of_row json
                     ; tokens = token_reading_of_row json
+                    ; cache_read = cache_token_reading_of_row "cache_read_tokens" json
+                    ; cache_creation = cache_token_reading_of_row "cache_creation_tokens" json
                     }
                 in
                 { rows with timed = sample :: rows.timed }
@@ -245,10 +262,24 @@ let keeper_costs_next_change ~base_path ~now =
             earliest rows.timed))
     (kept_for ~base_path) None
 
+type keeper_cost_row_stats =
+  { attributed_usd : float
+  ; metered_turns : int
+  ; subscription_zero_cost_turns : int
+  ; unread_cost_turns : int
+  ; sample_count : int
+  }
+
 let keeper_cost_row ~window_minutes ~now ~keeper_name reading =
   let window_sec = window_seconds window_minutes in
   let cost = empty_tally 0.0 in
   let tokens = empty_tally { input = 0; output = 0; total = 0 } in
+  let cache_read = empty_tally 0 in
+  let cache_creation = empty_tally 0 in
+  let paired_cache_read = ref 0 in
+  let paired_cache_input = ref 0 in
+  let paired_cache_samples = ref 0 in
+  let zero_cost_reported_samples = ref 0 in
   let sample_count = ref 0 in
   let latencies_rev = ref [] in
   let metrics_read =
@@ -270,13 +301,27 @@ let keeper_cost_row ~window_minutes ~now ~keeper_name reading =
                       incr sample_count;
                       latencies_rev := sample.latency_ms :: !latencies_rev;
                       add_reading cost ~add:( +. ) sample.cost;
+                      (match sample.cost with
+                       | Reported v when Float.compare v 0.0 = 0 ->
+                           incr zero_cost_reported_samples
+                       | Reported _ | Unreported | Unread -> ());
                       add_reading tokens
                         ~add:(fun sum counts ->
                           { input = sum.input + counts.input
                           ; output = sum.output + counts.output
                           ; total = sum.total + counts.total
                           })
-                        sample.tokens)
+                        sample.tokens;
+                      add_reading cache_read ~add:( + ) sample.cache_read;
+                      add_reading cache_creation ~add:( + ) sample.cache_creation;
+                      (match sample.tokens, sample.cache_read with
+                       | Reported { input; _ }, Reported read when input > 0 ->
+                           paired_cache_read := !paired_cache_read + read;
+                           paired_cache_input := !paired_cache_input + input;
+                           incr paired_cache_samples
+                       | Reported _, Reported _
+                       | Reported _, (Unreported | Unread)
+                       | (Unreported | Unread), _ -> ()))
               rows.timed
           end);
         `Assoc
@@ -294,21 +339,48 @@ let keeper_cost_row ~window_minutes ~now ~keeper_name reading =
     if Array.length latency_arr = 0 then None
     else Some (percentile_sorted_float latency_arr p)
   in
-  `Assoc
-    ([ "keeper_name", `String keeper_name
-     ; "total_cost_usd", reported_sum_json cost (fun sum -> `Float sum)
-     ]
-     @ tally_count_fields "cost" cost
-     @ [ "total_input_tokens", reported_sum_json tokens (fun sum -> `Int sum.input)
-       ; "total_output_tokens", reported_sum_json tokens (fun sum -> `Int sum.output)
-       ; "total_tokens", reported_sum_json tokens (fun sum -> `Int sum.total)
+  let cache_hit_pct =
+    if !paired_cache_samples = 0 || !paired_cache_input <= 0
+    then None
+    else
+      let pct =
+        100.0 *. float_of_int !paired_cache_read /. float_of_int !paired_cache_input
+      in
+      if Float.is_nan pct || not (Float.is_finite pct)
+      then None
+      else Some (Float.min 100.0 (Float.max 0.0 pct))
+  in
+  let json =
+    `Assoc
+      ([ "keeper_name", `String keeper_name
+       ; "total_cost_usd", reported_sum_json cost (fun sum -> `Float sum)
        ]
-     @ tally_count_fields "tokens" tokens
-     @ [ "p50_latency_ms", Json_util.float_opt_to_json (percentile 50.0)
-       ; "p95_latency_ms", Json_util.float_opt_to_json (percentile 95.0)
-       ; "sample_count", `Int !sample_count
-       ; "metrics_read", metrics_read
-       ])
+       @ tally_count_fields "cost" cost
+       @ [ "total_input_tokens", reported_sum_json tokens (fun sum -> `Int sum.input)
+         ; "total_output_tokens", reported_sum_json tokens (fun sum -> `Int sum.output)
+         ; "total_tokens", reported_sum_json tokens (fun sum -> `Int sum.total)
+         ; "cache_read_tokens", reported_sum_json cache_read (fun sum -> `Int sum)
+         ; "cache_creation_tokens", reported_sum_json cache_creation (fun sum -> `Int sum)
+         ; "cache_hit_pct", Json_util.float_opt_to_json cache_hit_pct
+         ]
+       @ tally_count_fields "tokens" tokens
+       @ [ "p50_latency_ms", Json_util.float_opt_to_json (percentile 50.0)
+         ; "p95_latency_ms", Json_util.float_opt_to_json (percentile 95.0)
+         ; "sample_count", `Int !sample_count
+         ; "metrics_read", metrics_read
+         ])
+  in
+  let metered_turns = max 0 (cost.reported_samples - !zero_cost_reported_samples) in
+  let stats =
+    { attributed_usd = cost.reported
+    ; metered_turns
+    ; subscription_zero_cost_turns =
+        cost.unreported_samples + !zero_cost_reported_samples
+    ; unread_cost_turns = cost.unread_samples
+    ; sample_count = !sample_count
+    }
+  in
+  json, stats
 
 (** Per-keeper cost/latency aggregates for the O4 cost dashboard.
 
@@ -354,15 +426,63 @@ let keeper_cost_aggregates_json
   keep_only ~base_path:config.base_path
     ~names:(List.map (fun (m : Keeper_meta_contract.keeper_meta) -> m.name) keepers);
   (Atomic.get kept_changed) ~base_path:config.base_path;
+  let row_pairs =
+    List.map
+      (fun (keeper_name, reading) ->
+        keeper_cost_row ~window_minutes ~now:now_ts ~keeper_name reading)
+      readings
+  in
+  let keeper_rows = List.map fst row_pairs in
+  let ( total_attributed_usd
+      , total_metered_turns
+      , total_subscription_zero
+      , total_unread_cost
+      , total_turns ) =
+    List.fold_left
+      (fun (usd, metered, sub_zero, unread, turns) (_, stats) ->
+        ( usd +. stats.attributed_usd
+        , metered + stats.metered_turns
+        , sub_zero + stats.subscription_zero_cost_turns
+        , unread + stats.unread_cost_turns
+        , turns + stats.sample_count ))
+      (0.0, 0, 0, 0, 0)
+      row_pairs
+  in
+  let unread_suffix =
+    if total_unread_cost > 0
+    then Printf.sprintf "; %d turn(s) had unreadable cost fields" total_unread_cost
+    else ""
+  in
+  let reconciliation_note =
+    if total_subscription_zero > 0
+    then
+      Printf.sprintf
+        "Per-keeper metrics attribute $%.2f across %d metered turn(s); %d of %d turn(s) had null/$0 subscription cost%s, and non-keeper system calls (verifier, librarian, harness, compaction) are reported only in /api/v1/models/metrics."
+        total_attributed_usd
+        total_metered_turns
+        total_subscription_zero
+        total_turns
+        unread_suffix
+    else
+      Printf.sprintf
+        "Per-keeper metrics attribute $%.2f across %d metered turn(s)%s; non-keeper system calls (verifier, librarian, harness, compaction) are reported only in /api/v1/models/metrics."
+        total_attributed_usd
+        total_metered_turns
+        unread_suffix
+  in
   `Assoc
-    [ ( "keepers"
-      , `List
-          (List.map
-             (fun (keeper_name, reading) ->
-               keeper_cost_row ~window_minutes ~now:now_ts ~keeper_name reading)
-             readings) )
+    [ "keepers", `List keeper_rows
     ; "window_minutes", `Int window_minutes
     ; "generated_at", `Float now_ts
+    ; ( "reconciliation"
+      , `Assoc
+          [ "keeper_attributed_usd", `Float total_attributed_usd
+          ; "cost_reported_turns", `Int total_metered_turns
+          ; "subscription_zero_cost_turns", `Int total_subscription_zero
+          ; "unread_cost_turns", `Int total_unread_cost
+          ; "total_turns", `Int total_turns
+          ; "note", `String reconciliation_note
+          ] )
     ]
 ;;
 

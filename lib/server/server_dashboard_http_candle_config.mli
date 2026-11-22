@@ -44,9 +44,28 @@ type reload_scope =
 
 val reload_scope_to_string : reload_scope -> string
 
+val classify_runtime_key_reload_scope :
+  ?known_provider_ids:(string, unit) Hashtbl.t ->
+  string ->
+  reload_scope
+(** Classify a non-Registry [runtime.toml] key as {!Hot_reload} only when it
+    belongs to a section republished into {!Runtime}'s materialized state by
+    {!Runtime.commit_config_text_locked} ([providers], [models], [runtime],
+    [media_readers], [browser], [machines], [typesafeai], [lsp.servers], or a
+    declared provider binding table), and {!Restart_required} otherwise
+    (including process-lifetime bind/port/storage/pool/TLS settings and
+    non-reloaded sections such as [sandbox.*], [exec.ssh.*], [slack.*],
+    [voice.*], [turn.*], [memory.*], and [board.*]). *)
+
 val is_secret_key : string -> bool
-(** True for keys whose raw values must always be masked (API keys, tokens,
-    passwords, secrets, private keys). *)
+(** True for keys whose raw values must always be masked (API keys, auth
+    headers, cookies, sessions, HMAC/signing keys, tokens, passwords, secrets,
+    private keys). *)
+
+val redact_value_secrets : string -> string
+(** Redact secret patterns, URL userinfo ([user:pass@]), and sensitive URL
+    query parameters ([?key=], [?token=], [?api_key=], etc.) from a scalar
+    value or TOML line. *)
 
 val redact_diff_line : string -> string
 (** Redact any sensitive assignment value or secret-shaped token in a diff line. *)

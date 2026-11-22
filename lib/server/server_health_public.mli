@@ -27,3 +27,11 @@ val liveness_json : Yojson.Safe.t
 
 val readiness_json : ready:bool -> phase:Server_startup_state.phase -> Yojson.Safe.t
 (** [{ready; phase}]. *)
+
+val capabilities : string list
+(** Additive server API capability flags advertised on [/api/v1/dashboard/shell]
+    and authenticated [/health]. Never added to the unauthenticated public
+    {!health_json} probe. *)
+
+val capabilities_json : Yojson.Safe.t
+(** JSON string array encoding of {!capabilities}. *)

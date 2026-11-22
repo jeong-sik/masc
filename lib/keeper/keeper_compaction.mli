@@ -340,3 +340,21 @@ val compact_evicted_messages
   -> evicted_messages:Agent_core.Types.message list
   -> unit
   -> (compaction_anchor option, store_error) result
+
+(** Return the live post-compaction suffix of [messages] strictly after
+    [anchor.covers_through_turn] (or strictly after the last inline compaction
+    anchor message if present in [messages]). Returns [messages] unchanged if
+    [anchor.covers_through_turn] does not match any atom/turn in [messages]. *)
+val messages_after_anchor
+  :  anchor:compaction_anchor
+  -> Agent_core.Types.message list
+  -> Agent_core.Types.message list
+
+(** Read {!latest_anchor} for [keeper_id] and return {!messages_after_anchor}
+    when a committed compaction epoch exists; otherwise returns [messages]
+    unchanged (failing open on absent/unreadable store). *)
+val live_history_after_latest_anchor
+  :  keepers_dir:string
+  -> keeper_id:string
+  -> Agent_core.Types.message list
+  -> Agent_core.Types.message list

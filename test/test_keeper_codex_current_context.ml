@@ -1819,8 +1819,94 @@ let test_p0_7_codex_post_claim_exception_settles_session () =
   successful (run ~instructions:"Keeper instructions" ~world:"world" ())
 ;;
 
+let test_p1_7_endpoint_owned_rejects_symlinks_without_chmod () =
+  let make_temp_dir prefix =
+    let dir = Filename.temp_file prefix "" in
+    Sys.remove dir;
+    Unix.mkdir dir 0o755;
+    dir
+  in
+  let rec rm_rf path =
+    if Sys.file_exists path || (try ignore (Unix.lstat path); true with Unix.Unix_error _ -> false)
+    then
+      match (Unix.lstat path).Unix.st_kind with
+      | Unix.S_DIR ->
+        Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+        Unix.rmdir path
+      | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
+        Unix.unlink path
+  in
+  let outside = make_temp_dir "codex-symlink-outside-" in
+  Unix.chmod outside 0o755;
+  let base_leaf = make_temp_dir "codex-symlink-leaf-" in
+  let base_parent = make_temp_dir "codex-symlink-parent-" in
+  let base_clean = make_temp_dir "codex-clean-owned-" in
+  Fun.protect
+    ~finally:(fun () ->
+      rm_rf outside;
+      rm_rf base_leaf;
+      rm_rf base_parent;
+      rm_rf base_clean)
+    (fun () ->
+       let keeper_name = "codex-symlink-keeper" in
+       let identity = Agent_core_sha256.(to_hex (digest_string keeper_name)) in
+       (* 1. Leaf symlink at codex-workspaces/<identity> must be refused BEFORE chmod. *)
+       let workspaces_leaf =
+         List.fold_left Filename.concat (Common.masc_dir_from_base_path ~base_path:base_leaf)
+           [ "official-clients"; "codex-workspaces" ]
+       in
+       Fs_compat.mkdir_p workspaces_leaf;
+       Unix.symlink outside (Filename.concat workspaces_leaf identity);
+       (match
+          Keeper_codex_runtime.For_testing.native_cwd
+            ~base_path:base_leaf ~keeper_name ~sandbox_profile:None
+        with
+        | Ok path -> fail ("leaf symlink was accepted as Codex cwd: " ^ path)
+        | Error _ -> ());
+       check int "leaf symlink refusal never chmods outside target" 0o755
+         ((Unix.stat outside).Unix.st_perm land 0o777);
+       (* 2. Intermediate symlink at codex-workspaces must be refused BEFORE mkdir_p/chmod. *)
+       let official_parent =
+         Filename.concat (Common.masc_dir_from_base_path ~base_path:base_parent) "official-clients"
+       in
+       Fs_compat.mkdir_p official_parent;
+       Unix.symlink outside (Filename.concat official_parent "codex-workspaces");
+       (match
+          Keeper_codex_runtime.For_testing.native_cwd
+            ~base_path:base_parent
+            ~keeper_name
+            ~sandbox_profile:(Some Keeper_types_profile_sandbox.Micro_vm)
+        with
+        | Ok path -> fail ("intermediate symlink was accepted as Codex cwd: " ^ path)
+        | Error _ -> ());
+       check bool "intermediate symlink refusal does not create dir inside target" false
+         (Sys.file_exists (Filename.concat outside identity));
+       check int "intermediate symlink refusal preserves outside permissions" 0o755
+         ((Unix.stat outside).Unix.st_perm land 0o777);
+       (* 3. Clean Endpoint_owned directory succeeds with 0o700 permissions. *)
+       match
+         Keeper_codex_runtime.For_testing.native_cwd
+           ~base_path:base_clean
+           ~keeper_name
+           ~sandbox_profile:(Some Keeper_types_profile_sandbox.Micro_vm)
+       with
+       | Error err -> fail ("clean Endpoint_owned workspace failed: " ^ Agent_core.Error.to_string err)
+       | Ok cwd ->
+         let expected =
+           List.fold_left
+             Filename.concat
+             (Common.masc_dir_from_base_path ~base_path:(Unix.realpath base_clean))
+             [ "official-clients"; "codex-workspaces"; identity ]
+         in
+         check string "clean workspace returns canonical private dir" expected cwd;
+         check int "clean workspace sets 0o700 permissions" 0o700
+           ((Unix.lstat cwd).Unix.st_perm land 0o777))
+;;
+
 let () =
   run "Keeper current Codex context" ["native requests",[
+  test_case "P1-7 Endpoint_owned rejects symlinks before chmod and secures clean dir" `Quick
+    test_p1_7_endpoint_owned_rejects_symlinks_without_chmod;
   test_case "overflow compaction anchor commits strictly on actual eviction" `Quick
     test_codex_overflow_anchor_commits_only_on_actual_eviction;
   test_case "P0-7 post-claim exception settles session instead of bricking" `Quick

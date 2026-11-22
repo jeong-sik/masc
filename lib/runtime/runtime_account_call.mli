@@ -53,3 +53,23 @@ val one_call_of
     a call of the same account waits for itself and never runs;
     {!one_call_of} gives [busy] there. *)
 val call_in_turn_of : Authz_types.Provider_account_id.t -> (t -> 'a) -> 'a
+
+(** Bounded FIFO acquisition of the account's call slot.
+
+    Behaves like {!call_in_turn_of} (preserving strict FIFO mutex ordering
+    among waiters and never jumping ahead of a queued fiber), but bounds ONLY
+    the slot-admission wait by [timeout_s] using [clock]. Once the slot is
+    acquired, [f] runs outside the wait timeout so a healthy long turn is
+    never cancelled by the admission budget.
+
+    Returns [Account_busy account_id] if the wait budget expires before the
+    slot becomes available (or when [timeout_s] is non-positive or non-finite,
+    in which case it delegates to {!try_acquire}). On timeout or outer fiber
+    cancellation, [entry.users] is decremented and any lock acquired right at
+    the handover boundary is released cleanly before returning or re-raising. *)
+val call_in_turn_of_with_timeout
+  :  clock:_ Eio.Time.clock
+  -> timeout_s:float
+  -> Authz_types.Provider_account_id.t
+  -> (t -> 'a)
+  -> 'a acquire_result

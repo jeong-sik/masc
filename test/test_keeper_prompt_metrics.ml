@@ -1049,6 +1049,186 @@ let test_split_outside_context_end_to_end_attribution () =
        (List.length tool_history) (List.length retained))
 ;;
 
+(* Official clients (Codex, Claude Code, Antigravity, ACP) do NOT split
+   [Outside_context] out of [extra_system_context] ([Keeper_run_tools_hooks]
+   returns [ctx, None] and [Keeper_official_client_host.prepare_turn] appends
+   only a single [System_context] carrier). Expecting the Agent Core split
+   presence on an official-client attempt caused false
+   [prompt_context_presence_mismatch carrier_observed=false prompt_context_present=true]
+   warnings whenever any outside-authored block was assembled. *)
+let test_prompt_context_presence_for_owner_distinguishes_official_client () =
+  let system =
+    Masc.Keeper_turn_system.resend
+      ~held:None ~runtime_id:"test" ~current:[] ~articles_at:(fun _ -> Ok None)
+      "Base system prompt"
+    |> Result.get_ok |> fst
+  in
+  let assembly =
+    KRP.assemble_request_context
+      ~checkpoint_owner:Runtime_execution.Official_client
+      ~system
+      ~post_tool_round:false
+      ~previous_assembly:None
+      ~dynamic_context_partition:None
+      ~existing_extra_system_context:None
+      ~blocks:
+        [ Prompt_block_id.Temporal_summary, "[Temporal] now=2026-11-22T01:00Z"
+        ; Prompt_block_id.Memory_os_recall, "recalled fact"
+        ]
+  in
+  let official_presence =
+    KAR.prompt_context_presence_for_owner
+      ~checkpoint_owner:(Some Runtime_execution.Official_client)
+      (Some assembly)
+  in
+  check bool "Official_client expects unsplit System_context" true
+    official_presence.system_context_present;
+  check bool "Official_client expects no Outside_context carrier" false
+    official_presence.outside_context_present;
+  let core_presence =
+    KAR.prompt_context_presence_for_owner
+      ~checkpoint_owner:(Some Runtime_execution.Masc_agent_core)
+      (Some assembly)
+  in
+  check bool "Masc_agent_core expects split System_context" true
+    core_presence.system_context_present;
+  check bool "Masc_agent_core expects split Outside_context" true
+    core_presence.outside_context_present;
+  let official_messages =
+    [ message "user turn"
+    ; prompt_carrier (Option.get assembly.extra_system_context)
+    ]
+  in
+  (match
+    KAPM.provider_content_of_transmitted
+      ~outside_context_present:official_presence.outside_context_present
+      ~prompt_context_present:official_presence.system_context_present
+      ~messages:official_messages
+  with
+  | Error failure ->
+    failf "unexpected official-client presence mismatch: %s"
+      (KAPM.provenance_failure_summary failure)
+  | Ok retained ->
+    check int "Official_client unsplit System_context stripped cleanly" 1
+      (List.length retained));
+  (* Turn-block-only (Completion_authority / Goals_awaiting_proof) and mixed
+     assemblies must agree between [Host.prepare_turn] and
+     [prompt_context_presence_for_owner] on BOTH official-client projection
+     patterns:
+       - Codex / Claude Code: [~model_input_projection:(Some ...)] inside
+         [Host.prepare_turn]
+       - Antigravity CLI / ACP: [~model_input_projection:None] inside
+         [Host.prepare_turn], projecting [prepared.messages] right after. *)
+  let check_official_prepare_turn_paths label ~blocks ~expect_carrier =
+    let case_assembly =
+      KRP.assemble_request_context
+        ~checkpoint_owner:Runtime_execution.Official_client
+        ~system
+        ~post_tool_round:false
+        ~previous_assembly:None
+        ~dynamic_context_partition:None
+        ~existing_extra_system_context:None
+        ~blocks
+    in
+    let presence =
+      KAR.prompt_context_presence_for_owner
+        ~checkpoint_owner:(Some Runtime_execution.Official_client)
+        (Some case_assembly)
+    in
+    check bool (label ^ ": system_context_present matches transmitted_carrier_receipt")
+      expect_carrier presence.system_context_present;
+    check bool (label ^ ": outside_context_present is false for Official_client")
+      false presence.outside_context_present;
+    let hooks =
+      { Agent_core.Hooks.empty with
+        before_turn_params =
+          Some
+            (function
+              | Agent_core.Hooks.BeforeTurnParams { current_params; _ } ->
+                Agent_core.Hooks.AdjustParams
+                  { current_params with
+                    extra_system_context = case_assembly.extra_system_context
+                  ; system_prompt_override =
+                      Masc.Keeper_context_assembly.system_prompt_override
+                        ~previous:current_params.system_prompt_override
+                        case_assembly
+                  }
+              | _ -> Agent_core.Hooks.Continue)
+      }
+    in
+    let check_projection path_label projected_messages =
+      match
+        KAPM.provider_content_of_transmitted
+          ~outside_context_present:presence.outside_context_present
+          ~prompt_context_present:presence.system_context_present
+          ~messages:projected_messages
+      with
+      | Error failure ->
+        failf "%s (%s): unexpected provenance failure: %s" label path_label
+          (KAPM.provenance_failure_summary failure)
+      | Ok retained ->
+        check int (label ^ " (" ^ path_label ^ "): durable user message retained") 1
+          (List.length retained)
+    in
+    (* Path A: Codex / Claude Code (projection runs inside Host.prepare_turn) *)
+    let inside_projected = ref None in
+    (match
+       Masc.Keeper_official_client_host.prepare_turn
+         ~runtime_label:"codex-claude-path"
+         ~keeper_name:"test-keeper"
+         ~turn_count:1
+         ~system_prompt:"Base system prompt"
+         ~tools:[]
+         ~initial_messages:[ message "user turn" ]
+         ~model_input_projection:
+           (Some
+              (fun ~tools:_ msgs ->
+                 inside_projected := Some msgs;
+                 Ok msgs))
+         ~hooks:(Some hooks)
+         ~composed_context:(Some (fun () -> Some case_assembly))
+         ~configured_reasoning_effort:None
+     with
+     | Error err ->
+       failf "%s (inside prepare_turn): %s" label (Agent_core.Error.to_string err)
+     | Ok _ ->
+       check_projection "Codex/Claude inside prepare_turn"
+         (Option.get !inside_projected));
+    (* Path B: Antigravity CLI / ACP (projection runs after Host.prepare_turn) *)
+    match
+      Masc.Keeper_official_client_host.prepare_turn
+        ~runtime_label:"antigravity-acp-path"
+        ~keeper_name:"test-keeper"
+        ~turn_count:1
+        ~system_prompt:"Base system prompt"
+        ~tools:[]
+        ~initial_messages:[ message "user turn" ]
+        ~model_input_projection:None
+        ~hooks:(Some hooks)
+        ~composed_context:(Some (fun () -> Some case_assembly))
+        ~configured_reasoning_effort:None
+    with
+    | Error err ->
+      failf "%s (after prepare_turn): %s" label (Agent_core.Error.to_string err)
+    | Ok prepared ->
+      check_projection "Antigravity/ACP after prepare_turn" prepared.messages
+  in
+  check_official_prepare_turn_paths
+    "turn-block-only (Completion_authority + Goals_awaiting_proof)"
+    ~blocks:
+      [ Prompt_block_id.Completion_authority, "Approved task-1"
+      ; Prompt_block_id.Goals_awaiting_proof, "Goal-1 awaiting proof"
+      ]
+    ~expect_carrier:false;
+  check_official_prepare_turn_paths
+    "mixed (Dynamic_context + Completion_authority)"
+    ~blocks:
+      [ Prompt_block_id.Dynamic_context, "FLEET-WORLD"
+      ; Prompt_block_id.Completion_authority, "Approved task-1"
+      ]
+    ~expect_carrier:true
+;;
+
 let () =
   run "keeper_prompt_metrics"
     [
@@ -1113,6 +1293,8 @@ let () =
             test_provider_content_of_transmitted_handles_outside_context_carriers;
           test_case "split_outside_context end-to-end attribution (outside-only, dual, empty)" `Quick
             test_split_outside_context_end_to_end_attribution;
+          test_case "Official_client unsplit carrier presence avoids Outside_context mismatch" `Quick
+            test_prompt_context_presence_for_owner_distinguishes_official_client;
           test_case "a resumed client session is its own reason" `Quick
             test_client_session_gap_is_its_own_reason;
         ] );

@@ -293,6 +293,42 @@ let raw_trace_reference_for_turn ~turn_trace_ref ~sink =
 
 let terminal_effect_boundary_decision = Keeper_tool_terminal_boundary.decision
 
+let prompt_context_presence_for_owner
+      ~(checkpoint_owner : Runtime_execution.checkpoint_owner option)
+      (assembly_opt : Keeper_context_assembly.t option)
+  : Keeper_context_assembly.split_request_context_presence
+  =
+  match assembly_opt with
+  | None ->
+    { Keeper_context_assembly.system_context_present = false
+    ; outside_context_present = false
+    }
+  | Some assembly ->
+    (match checkpoint_owner with
+     | Some Runtime_execution.Official_client ->
+       (* All four official-client runtimes (Codex, Claude Code, Antigravity CLI,
+          ACP) run [Keeper_official_client_host.project_start_system] before
+          [model_input_projection], moving [Completion_authority] and
+          [Goals_awaiting_proof] out of the [System_context] carrier and into
+          [start_context]/[turn_observation]. Match
+          [record_transmitted_model_input] by checking
+          [transmitted_carrier_receipt]: [None] when those were the carrier's
+          only blocks. *)
+       { Keeper_context_assembly.system_context_present =
+           Option.is_some
+             (Keeper_official_client_host.transmitted_carrier_receipt assembly)
+       ; outside_context_present = false
+       }
+     | Some Runtime_execution.Masc_agent_core | None ->
+       Keeper_context_assembly.split_request_context_presence assembly)
+;;
+
+let live_stream_consumer_for_turn ~(turn_kind : Turn_record.turn_kind) ~on_event =
+  match turn_kind with
+  | Turn_record.Direct -> Option.is_some on_event
+  | Turn_record.Autonomous -> false
+;;
+
 (* A terminal tool that fails inside the provider loop ends the run with Agent
    Core's error, whose detail is the tool result's text and whose class is
    none of MASC's. The bundle recorded the same failure typed, so the run's
@@ -390,6 +426,7 @@ module For_testing = struct
     dispatch_after_provider_transcript_admission
   let turn_record_raw_trace_run_ref = turn_record_raw_trace_run_ref
   let raw_trace_reference_for_turn = raw_trace_reference_for_turn
+  let live_stream_consumer_for_turn = live_stream_consumer_for_turn
 end
 
 let capture_skill_snapshot ~base_path =
@@ -1350,15 +1387,13 @@ let run_turn
     let source_model_input_projection =
       s.Keeper_run_tools_hooks.model_input_projection
     in
-    let agent_core_prompt_context_presence () =
-      match acc.Keeper_run_tools_hook_accumulator.extra_system_context_assembly with
-      | None ->
-        { Keeper_context_assembly.system_context_present = false
-        ; outside_context_present = false
-        }
-      | Some assembly ->
-        Keeper_context_assembly.split_request_context_presence assembly
-    in
+    (* The owner of the last candidate this turn dispatched. Lifted before
+       [model_input_projection] so the projection expects the unsplit single
+       [System_context] carrier for [Official_client] attempts and the split
+       [System_context]/[Outside_context] carriers for [Masc_agent_core]
+       attempts; the error path below also reads this when no [run_result]
+       is returned. *)
+    let last_dispatched_checkpoint_owner = ref None in
     let model_input_projection messages =
       (* [messages] is the current provider attempt's transmission view: the
          carried range [Keeper_turn_driver_try_provider.bounded_model_input_projection]
@@ -1377,7 +1412,9 @@ let run_turn
         error
       | Ok projected_messages as result ->
         let { Keeper_context_assembly.system_context_present; outside_context_present } =
-          agent_core_prompt_context_presence ()
+          prompt_context_presence_for_owner
+            ~checkpoint_owner:!last_dispatched_checkpoint_owner
+            acc.Keeper_run_tools_hook_accumulator.extra_system_context_assembly
         in
         let provider_content =
           Keeper_agent_prompt_metrics.provider_content_of_transmitted
@@ -1453,6 +1490,9 @@ let run_turn
         Request_evidence.observe_attribution attribution !request_evidence_ref
     in
     (* 8. Run Agent *)
+    let live_stream_consumer =
+      live_stream_consumer_for_turn ~turn_kind ~on_event
+    in
     let record_turn_progress, on_yield, on_resume, on_event =
       Turn_helpers.turn_progress_callbacks
         ~preview
@@ -1470,10 +1510,6 @@ let run_turn
     (
        (* Section 3: Dispatch — call Keeper_turn_driver.run_named / Agent.run. *)
        let raw_trace = raw_trace_for_dispatch ~config ~meta in
-       (* The owner of the last candidate this turn dispatched. A turn that
-          fails returns no [run_result] and so no [checkpoint_owner]; this is
-          how the error path below knows the turn ran on an official client. *)
-       let last_dispatched_checkpoint_owner = ref None in
        let turn_result =
          let on_official_client_tool_boundary ~tool_name =
            official_client_tool_boundary ~repetition_execution ~tool_name
@@ -1683,6 +1719,7 @@ let run_turn
                       ?on_deferred_runtime_consumed
                       ~temperature
                       ~accept:Keeper_tooling.Response.accepts_response
+                      ~live_stream_consumer
                       ?on_event
                       ~on_yield
                       ~on_resume
@@ -1791,7 +1828,9 @@ let run_turn
                                let { Keeper_context_assembly.system_context_present
                                    ; outside_context_present
                                    } =
-                                 agent_core_prompt_context_presence ()
+                                 prompt_context_presence_for_owner
+                                   ~checkpoint_owner:(Some Runtime_execution.Masc_agent_core)
+                                   acc.Keeper_run_tools_hook_accumulator.extra_system_context_assembly
                                in
                                Some (Keeper_agent_prompt_metrics.provider_content_of_transmitted
                                  ~outside_context_present

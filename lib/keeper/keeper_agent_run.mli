@@ -130,6 +130,16 @@ module For_testing : sig
       sink's last finished run covers that case, since a keeper sink holds one
       turn. *)
 
+  val live_stream_consumer_for_turn
+    :  turn_kind:Turn_record.turn_kind
+    -> on_event:'a option
+    -> bool
+  (** Whether [on_event] feeds a live user-facing chat stream whose emitted
+      tokens cannot be replayed by a backup candidate. Direct turns with a
+      caller-supplied [on_event] return [true]; autonomous turns return
+      [false] because [Keeper_autonomous_stream] isolates runtime attempts
+      behind [response_scope]. *)
+
 end
 
 (** {1 Turn execution} *)
@@ -286,3 +296,16 @@ val resolve_turn_walk_owner
 (** Resolves the typed turn walk owner and channel in single-user or
     multi-account mode. Disallowed channels and missing/mismatched person
     callers fail closed without constructing a fleet walk owner. *)
+
+val prompt_context_presence_for_owner
+  :  checkpoint_owner:Runtime_execution.checkpoint_owner option
+  -> Keeper_context_assembly.t option
+  -> Keeper_context_assembly.split_request_context_presence
+(** Expected per-request prompt context carriers for [model_input_projection].
+    [Masc_agent_core] splits host-state ([System_context]) and outside-text
+    ([Outside_context]) carriers via
+    {!Keeper_context_assembly.split_request_context_presence};
+    [Official_client] carries only an unsplit [System_context] carrier whose
+    presence after {!Keeper_official_client_host.prepare_turn} matches
+    {!Keeper_official_client_host.transmitted_carrier_receipt}, and never
+    emits [Outside_context]. *)

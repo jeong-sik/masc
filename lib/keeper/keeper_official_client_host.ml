@@ -1208,26 +1208,6 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
               (Yojson.Safe.to_string
                  (Agent_core.Types.tool_choice_to_json choice))))
   in
-  let* messages =
-    match model_input_projection with
-    | None -> Ok messages
-    | Some project ->
-      (try
-         (* The projection names its own failure. Wrapping it as
-            [InvalidConfig { field = "model_input_projection" }] renamed a
-            per-candidate capacity bound into a request defect, and no reader
-            of that field ever existed. *)
-         project ~tools messages
-       with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
-       | exn ->
-         Error
-           (internal_error
-              (runtime_label
-               ^ " runtime model input projection raised: "
-               ^ Printexc.to_string exn)))
-  in
   let system_prompt =
     Option.value turn_params.system_prompt_override ~default:system_prompt
   in
@@ -1289,8 +1269,33 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
       ~enable_thinking:turn_params.enable_thinking
       ~reasoning_effort:turn_params.reasoning_effort
   in
+  (* Run [project_start_system] before [model_input_projection] so all four
+     official-client runtimes (Codex & Claude Code passing a projection here,
+     plus Antigravity CLI & ACP projecting right after [prepare_turn]) observe
+     the exact same post-split [System_context] carrier state matching
+     [transmitted_carrier_receipt]. *)
   let messages, start_context, composed_context, turn_observation =
     project_start_system ~system_prompt ~composed_context messages in
+  let* messages =
+    match model_input_projection with
+    | None -> Ok messages
+    | Some project ->
+      (try
+         (* The projection names its own failure. Wrapping it as
+            [InvalidConfig { field = "model_input_projection" }] renamed a
+            per-candidate capacity bound into a request defect, and no reader
+            of that field ever existed. *)
+         project ~tools messages
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+       | exn ->
+         Error
+           (internal_error
+              (runtime_label
+               ^ " runtime model input projection raised: "
+               ^ Printexc.to_string exn)))
+  in
   Ok
     { messages
     ; system_prompt

@@ -83,3 +83,51 @@ let call_in_turn_of provider_account_id f =
       Eio.Fiber.check ();
       f call))
 ;;
+
+let call_in_turn_of_with_timeout ~clock ~timeout_s provider_account_id f =
+  if not (Float.is_finite timeout_s) || timeout_s <= 0.0
+  then try_acquire provider_account_id f
+  else
+    with_entry provider_account_id (fun entry ->
+      (* Match [call_in_turn_of]: fail outside an Eio fiber or if already
+         cancelled before touching [entry.lock]. *)
+      Eio.Fiber.check ();
+      (* [Eio.Mutex.unlock] keeps the lock held across handover to queued
+         waiters, so [try_lock] succeeds only when the slot is uncontended and
+         no fiber is waiting ahead of us. *)
+      if Eio.Mutex.try_lock entry.lock
+      then
+        Acquired
+          (holding entry provider_account_id (fun call ->
+             Eio.Fiber.check ();
+             f call))
+      else (
+        let acquired = ref false in
+        let timed_out =
+          try
+            match
+              Eio.Time.with_timeout clock timeout_s (fun () ->
+                Eio.Mutex.lock entry.lock;
+                acquired := true;
+                Ok ())
+            with
+            | Ok () -> false
+            | Error `Timeout -> true
+          with
+          | exn ->
+            let bt = Printexc.get_raw_backtrace () in
+            if !acquired then Eio.Mutex.unlock entry.lock;
+            Printexc.raise_with_backtrace exn bt
+        in
+        if !acquired
+        then
+          holding entry provider_account_id (fun call ->
+            if timed_out
+            then Account_busy provider_account_id
+            else (
+              Eio.Fiber.check ();
+              Acquired (f call)))
+        else (
+          Eio.Fiber.check ();
+          Account_busy provider_account_id)))
+;;

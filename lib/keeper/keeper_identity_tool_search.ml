@@ -406,11 +406,32 @@ let observe_turn ~keeper_name ~usage () =
    the conversation the same way an attached one does. *)
 module Tool_name_set = Set.Make (String)
 
+(* Scope [History_carry] discovery to the current compaction epoch: if [history]
+   carries one or more inline compaction anchor messages, discard everything up
+   through the latest anchor so accumulated non-Anthropic MCP schemas reset
+   cleanly across compaction boundaries while staying strictly append-only
+   within an epoch (never busting prompt cache mid-epoch). *)
+let live_tail_after_compaction_anchor (history : Agent_core.Types.message list) =
+  let rec walk last_after = function
+    | [] -> last_after
+    | msg :: rest ->
+      let next_after =
+        if Runtime_model_input_tail_window.is_compaction_anchor msg
+        then Some rest
+        else last_after
+      in
+      walk next_after rest
+  in
+  match walk None history with
+  | Some tail -> tail
+  | None -> history
+;;
+
 let carry_from_history ~carry_window ~entries history =
+  let live_history = live_tail_after_compaction_anchor history in
   (* One membership set for the offering rather than a scan per block:
-     [observe] runs on every ToolUse block in the whole history, built-ins
-     included, and history is not pruned, so a scan here is the attached list
-     (145 tools on the largest measured Keeper) times the conversation. *)
+     [observe] runs on every ToolUse block in the current compaction epoch,
+     built-ins included. *)
   let offered_names =
     List.fold_left
       (fun acc (entry : entry) -> Tool_name_set.add entry.name acc)
@@ -439,11 +460,13 @@ let carry_from_history ~carry_window ~entries history =
          earlier -- which is what keeps a re-used name from re-entering the
          carry without the rest of it being measured. *)
       let grown = (name, ordinal) :: others in
-      (* Append-only session tool loading: never evict previously loaded tools
-         mid-session. Evicting tools from the position-0 [tools] array
+      (* Append-only within a compaction epoch: never evict previously loaded
+         tools mid-epoch. Evicting tools from the position-0 [tools] array
          invalidated the entire prompt cache (system prompt + full conversation
-         history) on every LRU boundary. Tool sets reset cleanly on session
-         rollover / compaction. *)
+         history) on every LRU boundary. Tool sets reset cleanly when
+         [live_tail_after_compaction_anchor] (or a persisted compaction anchor
+         cut in [Keeper_tools_agent_core_bundle]) advances past a compaction
+         boundary. *)
       let _ = carry_window in
       grown, ever_set, ever_rev, ordinal)
   in
@@ -466,7 +489,7 @@ let carry_from_history ~carry_window ~entries history =
            acc
            message.Agent_core.Types.content)
       ([], Tool_name_set.empty, [], 0)
-      history
+      live_history
   in
   let carried_names = List.map (fun (carried_name, _) -> carried_name) carried in
   let held_set = Tool_name_set.of_list carried_names in

@@ -1087,14 +1087,44 @@ let native_cwd ~base_path ~keeper_name ~sandbox_profile =
       then Ok canonical
       else unusable "the Keeper host tree must not traverse symbolic links"
     | Some (_, Keeper_types_profile_sandbox.Endpoint_owned) | None ->
+      let canonical_base = Unix.realpath base_path in
       let identity = Agent_core_sha256.(to_hex (digest_string keeper_name)) in
-      let dir =
-        List.fold_left Filename.concat (Common.masc_dir_from_base_path ~base_path)
-          [ "official-clients"; "codex-workspaces"; identity ]
+      let segments =
+        [ Common.masc_dirname; "official-clients"; "codex-workspaces"; identity ]
       in
-      Fs_compat.mkdir_p dir;
-      Unix.chmod dir 0o700;
-      Ok (Unix.realpath dir)
+      let rec ensure_no_symlink_in_prefix current = function
+        | [] -> Ok ()
+        | segment :: rest ->
+          let next = Filename.concat current segment in
+          (match Unix.lstat next with
+           | st ->
+             if st.Unix.st_kind <> Unix.S_DIR
+             then unusable "the Keeper Codex workspace must not traverse symbolic links"
+             else ensure_no_symlink_in_prefix next rest
+           | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ())
+      in
+      (match ensure_no_symlink_in_prefix canonical_base segments with
+       | Error _ as err -> err
+       | Ok () ->
+         let dir =
+           List.fold_left
+             Filename.concat
+             (Common.masc_dir_from_base_path ~base_path:canonical_base)
+             [ "official-clients"; "codex-workspaces"; identity ]
+         in
+         Fs_compat.mkdir_p dir;
+         let st = Unix.lstat dir in
+         if st.Unix.st_kind <> Unix.S_DIR
+         then unusable "the Keeper Codex workspace must not traverse symbolic links"
+         else if st.Unix.st_uid <> Unix.geteuid ()
+         then unusable "the Keeper Codex workspace must be owned by the current user"
+         else (
+           let canonical = Unix.realpath dir in
+           if not (String.equal canonical (Env_config_core.strip_trailing_slashes dir))
+           then unusable "the Keeper Codex workspace must not traverse symbolic links"
+           else (
+             Unix.chmod canonical 0o700;
+             Ok canonical)))
   with
   | Sys_error detail -> unusable detail
   | Unix.Unix_error (error, _, _) -> unusable (Unix.error_message error)
@@ -2478,4 +2508,5 @@ module For_testing = struct
   ;;
 
   let unbounded_capacity_bytes = unbounded_model_input_capacity_bytes
+  let native_cwd = native_cwd
 end

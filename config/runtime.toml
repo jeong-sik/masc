@@ -2514,21 +2514,15 @@ strip-env = ["MISTRAL_API_KEY"]
 is-non-interactive = true
 timeout-s = 180.0
 
-[models.acp-vibe-default]
-api-name = "default"
-max-context = 400000
+[models.acp-vibe-mistral-medium-3-5]
+api-name = "mistral-medium-3.5"
+max-context = 262144
 tools-support = true
 thinking-support = true
 streaming = true
 
-[vibe_acp.acp-vibe-default]
+[models.acp-vibe-mistral-medium-3-5.capabilities]
+supports-image-input = true
+
+[vibe_acp.acp-vibe-mistral-medium-3-5]
 wizard-default = true
-
-[models.acp-vibe-devstral-2]
-api-name = "devstral-2"
-max-context = 400000
-tools-support = true
-thinking-support = true
-streaming = true
-
-[vibe_acp.acp-vibe-devstral-2]

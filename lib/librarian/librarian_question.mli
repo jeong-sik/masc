@@ -126,6 +126,7 @@ type room =
 val make_room
   :  ?world_index:string
   -> ?molt_trigger:Librarian_lifecycle.molt_trigger
+  -> ?category_filter:Keeper_memory_os_types.category
   -> lane:Librarian_memory_lane.question_side
   -> from:Librarian_log.line
   -> memory:Keeper_memory_os_current_types.t

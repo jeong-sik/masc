@@ -1,4 +1,4 @@
-type client = Codex | Claude | Antigravity
+type client = Codex | Claude | Antigravity | Mistral_vibe
 type native = Runtime_account_home_layout.client = Codex_home | Claude_home
 type browser = Host_browser | Idle_command of string
 type login =
@@ -8,6 +8,9 @@ type login =
       ; timeout_s : float
       ; host : Runtime_account_access.host_account
           (** The start the access allowed when the login home was prepared. *)
+      }
+  | Mistral_vibe_keyring of
+      { host : Runtime_account_access.host_account
       }
 (* A login and the browser decided for its sign-in. Whatever makes a login
    takes the browser, so a sign-in that was refused one has no home made for
@@ -28,7 +31,8 @@ let new_home ~runtime_root ~account_id ~client =
 let account_home_path ~runtime_root ~account_id ~client =
   let* native = match client with
     | Codex -> Ok Codex_home | Claude -> Ok Claude_home
-    | Antigravity -> Error "An Antigravity login keeps no account home." in
+    | Antigravity -> Error "An Antigravity login keeps no account home."
+    | Mistral_vibe -> Error "A Mistral Vibe login stores credentials in the host OS keyring and keeps no account home." in
   filesystem (fun () -> Runtime_account_home_layout.home ~runtime_root native ~account_id)
 
 let account_home ~runtime_root ~account_id ~client =
@@ -83,6 +87,16 @@ let login_of ~runtime_root ~account_id ~client ~existing =
       | Some (Runtime_setup_accounts.Native_home _) ->
         Error "The selected account belongs to another client transport."
     in Ok (Antigravity_home {home; timeout_s; host})
+  | Mistral_vibe ->
+    let* host =
+      Runtime_account_access.authorize_host
+        (Runtime_account_access.Acp_client Runtime_acp_client.Mistral_vibe)
+      |> Result.map_error Runtime_account_access.refusal_to_string
+    in
+    (match existing with
+     | None -> Ok (Mistral_vibe_keyring { host })
+     | Some (Runtime_setup_accounts.Native_home _ | Runtime_setup_accounts.Antigravity_account _) ->
+       Error "The selected account belongs to another client transport.")
 
 let prepare ~browser ~runtime_root ~account_id ~client ~existing =
   Result.map (fun login -> { login; browser })
@@ -91,11 +105,14 @@ let prepare ~browser ~runtime_root ~account_id ~client ~existing =
 let home_dir t = match t.login with
   | Native {account_home; _} -> account_home
   | Antigravity_home {home; _} -> Runtime_antigravity_setup.home_dir home
+  | Mistral_vibe_keyring _ ->
+    Option.value (Env_config_core.raw_value_opt "HOME") ~default:"/"
 
 let argv ~cli_path t = match t.login with
   | Native {client=Codex_home; _} -> [cli_path; "login"; "--device-auth"]
   | Native {client=Claude_home; _} -> [cli_path; "auth"; "login"]
   | Antigravity_home _ -> [cli_path]
+  | Mistral_vibe_keyring _ -> [cli_path; "--setup"]
 
 let client_environment = function
   | Native {client=Codex_home; account_home} ->
@@ -105,6 +122,12 @@ let client_environment = function
     Runtime_claude_code.login_environment ~account_home
     |> Result.map_error Runtime_claude_code.error_to_string
   | Antigravity_home {home; _} -> Ok (Runtime_antigravity_setup.environment home)
+  | Mistral_vibe_keyring _ ->
+    Ok
+      (Runtime_acp_client.For_testing.build_environment
+         ~base_env:(Unix.environment ())
+         ~driver:Runtime_acp_client.Mistral_vibe
+         ~extra_strip_env:[])
 
 (* The variable that names the command an official client runs to open a
    link. Claude Code 2.1.326 runs the file it names, with the link as its one
@@ -160,10 +183,12 @@ let handed browser environment =
 
 let environment t = Result.map (handed t.browser) (client_environment t.login)
 
-let is_pty t = match t.login with Native _ -> false | Antigravity_home _ -> true
+let is_pty t = match t.login with
+  | Native _ -> false
+  | Antigravity_home _ | Mistral_vibe_keyring _ -> true
 
 let saved_login_check t = match t.login with
-  | Native _ -> None
+  | Native _ | Mistral_vibe_keyring _ -> None
   | Antigravity_home {home; _} -> Some (fun () ->
       match Runtime_antigravity_setup.login_saved home with
       | Ok saved -> Ok saved
@@ -203,11 +228,23 @@ let observe ~mgr ~clock ~cwd ~cli_path ~account_request t = match t.login with
     Runtime_antigravity_setup.capture_login home
     |> Result.map (fun () -> Credential_captured)
     |> Result.map_error Runtime_antigravity_setup.error_message
+  | Mistral_vibe_keyring { host = _ } ->
+    let spawn_path =
+      Runtime_official_cli_install.spawn_path
+        Runtime_official_cli_install.Mistral_vibe
+        ~command:cli_path
+    in
+    (match Process_eio.run_argv_with_status_split_or_refusal [ spawn_path; "--version" ] with
+     | Ok (Unix.WEXITED 0, _, _) -> Ok Login_completed
+     | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _) | Error _ ->
+       Error "Mistral Vibe CLI did not report a healthy version after setup.")
 
 let publish ~workspace ~integration_id ~cli_path t = match t.login with
   | Native {account_home; _} ->
     Runtime_setup_accounts.register_home ~workspace ~integration_id ~cli_path ~account_home
     |> Result.map_error Runtime_setup_accounts.error_message
+  | Mistral_vibe_keyring _ ->
+    Error "Mistral Vibe stores credentials in the host OS keyring and publishes no separate setup credential copy."
   | Antigravity_home {home; timeout_s; host} ->
     let* credential = Runtime_antigravity_setup.credential_reference home
       |> Result.map_error Runtime_antigravity_setup.error_message in

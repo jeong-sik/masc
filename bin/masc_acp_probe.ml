@@ -271,10 +271,16 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override (driver : Runtime_acp_
         ; dangerously_skip_permissions = true
         }
       in
+      let proc_mgr =
+        Runtime_acp_client.foreground_process_mgr
+          ~clock:(Eio.Stdenv.clock env)
+          ~grace_seconds:5.0
+          ()
+      in
       match
         Runtime_acp_client.start
           ~sw
-          ~proc_mgr:(Eio.Stdenv.process_mgr env)
+          ~proc_mgr
           ~clock:(Eio.Stdenv.clock env)
           ~config
           ~mcp_server

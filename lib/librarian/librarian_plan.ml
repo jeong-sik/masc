@@ -4,7 +4,96 @@ module Effects = Librarian_effects
 module Lifecycle = Librarian_lifecycle
 module Ids = Set_util.StringSet
 module By_id = Set_util.StringMap
-module Op_numbers = Set.Make (Int)
+module Op_numbers = Map.Make (Int)
+
+let max_promotions_per_answer = 4
+let max_promotion_claim_bytes = 512
+let max_promotion_scope_bytes = 64
+let max_promotion_facets = 8
+let max_promotion_facet_bytes = 48
+
+let has_control_char s =
+  let len = String.length s in
+  let rec loop i =
+    if i >= len
+    then false
+    else (
+      let code = Char.code (String.unsafe_get s i) in
+      if code < 32 || code = 127 then true else loop (i + 1))
+  in
+  loop 0
+;;
+
+let validate_and_redact_promotion ~redact (promo : Lifecycle.world_promotion) =
+  let scope = String.trim (Keeper_secret_redaction.redact_text redact promo.scope) in
+  let claim = String.trim (Keeper_secret_redaction.redact_text redact promo.claim) in
+  let facets =
+    List.map (fun f -> String.trim (Keeper_secret_redaction.redact_text redact f)) promo.facets
+  in
+  let scope_ok =
+    scope <> ""
+    && String.length scope <= max_promotion_scope_bytes
+    && not (has_control_char scope)
+  in
+  let claim_ok =
+    claim <> ""
+    && String.length claim <= max_promotion_claim_bytes
+    && not (String.contains claim '\000')
+  in
+  let facets_ok =
+    List.length facets <= max_promotion_facets
+    && List.for_all
+         (fun f ->
+            f <> ""
+            && String.length f <= max_promotion_facet_bytes
+            && not (has_control_char f))
+         facets
+  in
+  if scope_ok && claim_ok && facets_ok
+  then Ok { promo with scope; claim; facets }
+  else Error Effects.Promotion_refused
+;;
+
+type private_provenance =
+  | Clean
+  | Private_board of observation
+  | Unresolved_premise
+
+(* Fail-closed transitive provenance check: a promotion citing ANY fact whose
+   direct or transitive derivation chain touches an [Observed (Board _)] post
+   without explicit public-board clearance — or any unresolvable premise ID —
+   is refused. *)
+let inspect_private_provenance ~is_public_board_post ~fact_by_id source_ids =
+  let rec walk visited unresolved = function
+    | [] -> if unresolved then Unresolved_premise else Clean
+    | id :: rest ->
+      if Ids.mem id visited
+      then walk visited unresolved rest
+      else (
+        let visited = Ids.add id visited in
+        match By_id.find_opt id fact_by_id with
+        | None -> walk visited true rest
+        | Some (fact : fact) ->
+          (match fact.basis with
+           | Observed Transcript -> walk visited unresolved rest
+           | Observed (Board { post_id; _ } as board_src) ->
+             if is_public_board_post post_id
+             then walk visited unresolved rest
+             else Private_board board_src
+           | Derived derivations ->
+             let premise_ids =
+               List.concat_map (fun (d : derivation) -> d.premise_ids) derivations
+             in
+             walk visited unresolved (premise_ids @ rest)))
+  in
+  walk Ids.empty false source_ids
+;;
+
+let has_private_board_provenance ~is_public_board_post ~fact_by_id source_ids =
+  match inspect_private_provenance ~is_public_board_post ~fact_by_id source_ids with
+  | Clean -> false
+  | Private_board _ | Unresolved_premise -> true
+;;
 
 type read =
   | Range of
@@ -95,7 +184,18 @@ let replaced ids ~by removal =
   List.filter_map (fun id -> if String.equal id by then None else Some (id, removal)) ids
 ;;
 
-let screen ~shown ~current ~removed_since ~named_before number op =
+let screen
+      ~is_public_board_post
+      ~redact
+      ~by_id
+      ~promotions_accepted
+      ~shown
+      ~current
+      ~removed_since
+      ~named_before
+      number
+      op
+  =
   let* table =
     match shown, op with
     | ( Read (Item_alone _)
@@ -147,9 +247,31 @@ let screen ~shown ~current ~removed_since ~named_before number op =
       let* seen = resolve_one table ref_ ~missing:Effects.Unknown_ref in
       let* offsets = units from_units in
       Ok (Some (Seen_again (seen, offsets)), None)
-    | Add fact | Merge { into = fact; _ } | Revise { into = fact; _ } ->
+    | Add fact ->
       let* offsets = units fact.from_units in
       Ok (Some (New_claim (memory_id_of_claim fact.claim, fact, offsets)), None)
+    | Merge { into = fact; _ } | Revise { into = fact; _ } ->
+      let* offsets = units fact.from_units in
+      let basis_already_private =
+        match fact.basis with
+        | Observed (Board { post_id; _ }) -> not (is_public_board_post post_id)
+        | Observed Transcript -> false
+        | Derived derivations ->
+          let premise_ids =
+            List.concat_map (fun (d : derivation) -> d.premise_ids) derivations
+          in
+          has_private_board_provenance ~is_public_board_post ~fact_by_id:by_id premise_ids
+      in
+      let* preserved_fact =
+        if basis_already_private
+        then Ok fact
+        else (
+          match inspect_private_provenance ~is_public_board_post ~fact_by_id:by_id mutating_named with
+          | Clean -> Ok fact
+          | Private_board board_src -> Ok { fact with basis = Observed board_src }
+          | Unresolved_premise -> Error Effects.Promotion_refused)
+      in
+      Ok (Some (New_claim (memory_id_of_claim preserved_fact.claim, preserved_fact, offsets)), None)
     | Synthesize { claim; category; rule_id; from_units; _ } ->
       let* offsets = units from_units in
       let derivation = normalize_derivation { rule_id; premise_ids = readonly_named } in
@@ -158,10 +280,16 @@ let screen ~shown ~current ~removed_since ~named_before number op =
       in
       Ok (Some (New_claim (memory_id_of_claim claim, synth_fact, offsets)), None)
     | Promote_to_world { scope; claim; category; facets; _ } ->
-      let promo : Lifecycle.world_promotion =
-        { source_fact_ids = readonly_named; claim; category; facets; scope }
-      in
-      Ok (None, Some promo)
+      if promotions_accepted >= max_promotions_per_answer
+      then Error Effects.Promotion_refused
+      else if has_private_board_provenance ~is_public_board_post ~fact_by_id:by_id readonly_named
+      then Error Effects.Promotion_refused
+      else (
+        let raw_promo : Lifecycle.world_promotion =
+          { source_fact_ids = readonly_named; claim; category; facets; scope }
+        in
+        let* promo = validate_and_redact_promotion ~redact raw_promo in
+        Ok (None, Some promo))
     | Drop _ | Molt _ -> Ok (None, None)
   in
   let removes =
@@ -259,7 +387,16 @@ let sources_of stated =
     stated
 ;;
 
-let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
+let of_answer
+      ?(is_public_board_post = fun (_ : Board_types.Post_id.t) -> false)
+      ?(redact = Keeper_secret_redaction.empty)
+      ~shown
+      ~facts
+      ~removed_since
+      ~at
+      ~trace_id
+      (answer : Answer.t)
+  =
   let current = ids_of facts in
   let by_id =
     List.fold_left (fun by_id fact -> By_id.add (memory_id fact) fact by_id) By_id.empty facts
@@ -270,14 +407,35 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
       By_id.empty
       removed_since
   in
-  let screened, refused, (_ : Ids.t) =
+  let screened, refused, (_ : Ids.t), (_ : int) =
     List.fold_left
-      (fun (screened, refused, named_before) (number, op) ->
-         match screen ~shown ~current ~removed_since ~named_before number op with
-         | Ok (op, named) ->
-           op :: screened, refused, List.fold_left (fun ids id -> Ids.add id ids) named_before named
-         | Error why -> screened, (number, why, stated_fact op) :: refused, named_before)
-      ([], [], Ids.empty)
+      (fun (screened, refused, named_before, promotions_accepted) (number, op) ->
+         match
+           screen
+             ~is_public_board_post
+             ~redact
+             ~by_id
+             ~promotions_accepted
+             ~shown
+             ~current
+             ~removed_since
+             ~named_before
+             number
+             op
+         with
+         | Ok (screened_op, named) ->
+           let promotions_accepted =
+             if Option.is_some screened_op.promotion
+             then promotions_accepted + 1
+             else promotions_accepted
+           in
+           ( screened_op :: screened
+           , refused
+           , List.fold_left (fun ids id -> Ids.add id ids) named_before named
+           , promotions_accepted )
+         | Error why ->
+           screened, (number, why, stated_fact op) :: refused, named_before, promotions_accepted)
+      ([], [], Ids.empty, 0)
       (List.mapi (fun number op -> number, op) answer.ops)
   in
   let screened = List.rev screened in
@@ -332,30 +490,41 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
       Keeper_memory_os_support_core.maintain_supported_facts (kept @ added)
     in
     let supported_ids = ids_of supported in
-    let lost_successor =
-      List.filter
+    let supported_by_id =
+      List.fold_left (fun acc fact -> By_id.add (memory_id fact) fact acc) By_id.empty supported
+    in
+    let lost_ops =
+      List.filter_map
         (fun op ->
            let state_lost =
              match op.states with
              | Some stating -> not (Ids.mem (fst (kept_and_units stating)) supported_ids)
              | None -> false
            in
-           let promo_lost =
+           if state_lost
+           then Some (op.number, Effects.Successor_unsupported)
+           else (
              match op.promotion with
+             | None -> None
              | Some promo ->
-               not (List.for_all (fun id -> Ids.mem id supported_ids) promo.source_fact_ids)
-             | None -> false
-           in
-           state_lost || promo_lost)
+               if not (List.for_all (fun id -> Ids.mem id supported_ids) promo.source_fact_ids)
+               then Some (op.number, Effects.Successor_unsupported)
+               else if
+                 has_private_board_provenance
+                   ~is_public_board_post
+                   ~fact_by_id:supported_by_id
+                   promo.source_fact_ids
+               then Some (op.number, Effects.Promotion_refused)
+               else None))
         live
     in
-    match lost_successor with
+    match lost_ops with
     | _ :: _ ->
       settle
         (List.fold_left
-           (fun withdrawn op -> Op_numbers.add op.number withdrawn)
+           (fun withdrawn (op_num, why) -> Op_numbers.add op_num why withdrawn)
            withdrawn
-           lost_successor)
+           lost_ops)
     | [] ->
       let removed_by_ops =
         List.filter_map
@@ -374,15 +543,15 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
       let withdrawn_ops =
         List.filter_map
           (fun op ->
-             if Op_numbers.mem op.number withdrawn
-             then
+             match Op_numbers.find_opt op.number withdrawn with
+             | Some why ->
                Some
                  ( op.number
-                 , Effects.Successor_unsupported
+                 , why
                  , match op.states with
                    | Some (New_claim ((_ : string), fact, (_ : int list))) -> Some fact
                    | Some (Seen_again _) | None -> None )
-             else None)
+             | None -> None)
           screened
       in
       let promotions = List.filter_map (fun op -> op.promotion) live in

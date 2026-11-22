@@ -25,6 +25,7 @@ type why_not =
   | Not_valid_alone
   | Not_valid_in_room
   | Successor_unsupported
+  | Promotion_refused
 
 type t =
   { added : fact list
@@ -53,6 +54,7 @@ let why_not_kind = function
   | Not_valid_alone -> "not_valid_alone"
   | Not_valid_in_room -> "not_valid_in_room"
   | Successor_unsupported -> "successor_unsupported"
+  | Promotion_refused -> "promotion_refused"
 ;;
 
 let apply ~at facts effects =

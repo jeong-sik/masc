@@ -258,6 +258,28 @@ let scope_of_codex_home =
     ~default_subdir:(Runtime_official_account.default_directory Codex)
 ;;
 
+let scope_of_acp_driver ~driver =
+  let client = "acp:" ^ driver in
+  let home_opt =
+    match driver with
+    | "mistral_vibe" ->
+      (match Env_config_core.raw_value_opt "VIBE_HOME" with
+       | Some path when String.trim path <> "" -> Some path
+       | Some _ | None ->
+         Option.map (fun home -> Filename.concat home ".vibe") (Env_config_core.raw_value_opt "HOME"))
+    | "kimi_code" ->
+      Option.map (fun home -> Filename.concat home ".kimi") (Env_config_core.raw_value_opt "HOME")
+    | "antigravity" ->
+      Option.map
+        (fun home -> Filename.concat home ".gemini/antigravity-cli")
+        (Env_config_core.raw_value_opt "HOME")
+    | _ -> None
+  in
+  match Option.bind home_opt (fun p -> Result.to_option (Runtime_account_home.of_string p)) with
+  | Some home -> Official_client_home (client, home)
+  | None -> Provider_row client
+;;
+
 let scope_of_credential ~provider_id (credential : Runtime_schema.credential option) =
   match credential with
   | Some (Runtime_schema.Env key) -> Credential_env key

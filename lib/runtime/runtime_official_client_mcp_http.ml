@@ -36,6 +36,22 @@ type tool_admission =
   | Admission_open
   | Admission_closed of Runtime_official_client_tool.host_stop
 
+type turn_stop_state =
+  { boundary : Runtime_official_client_tool.host_stop Eio.Promise.t
+  ; signal : Runtime_official_client_tool.host_stop -> unit
+  ; mutable stop : Runtime_official_client_tool.host_stop option
+  }
+
+let make_turn_stop () =
+  let boundary, resolve_boundary = Eio.Promise.create () in
+  let signalled = Atomic.make false in
+  let signal stop =
+    if Atomic.compare_and_set signalled false true
+    then Eio.Promise.resolve resolve_boundary stop
+  in
+  { boundary; signal; stop = None }
+;;
+
 let unresolved promises = List.filter (fun promise -> Eio.Promise.peek promise=None) promises
 
 type t =
@@ -49,8 +65,7 @@ type t =
   ; mutable tool_schedule : tool_schedule
   ; mutable pending_reservations : unit Eio.Promise.t list
   ; mutable admission : tool_admission
-  ; stop_response_boundary : unit Eio.Promise.t
-  ; signal_stop_response_boundary : unit -> unit
+  ; mutable turn_stop : turn_stop_state
   }
 
 type tool_response =
@@ -226,34 +241,60 @@ let reserve_tool t execution_mode =
   reservation
 ;;
 
-let close_admission t stop =
-  Eio.Cancel.protect (fun () ->
-    Eio.Mutex.use_ro t.dispatch_mutex (fun () ->
-      t.admission <- Admission_closed (match t.admission with
-        | Admission_open -> stop
-        | Admission_closed previous ->
-          if Runtime_official_client_tool.host_stop_failed stop
-             && not (Runtime_official_client_tool.host_stop_failed previous)
-          then stop else previous)))
+let merge_host_stop previous stop =
+  if Runtime_official_client_tool.host_stop_failed stop
+     && not (Runtime_official_client_tool.host_stop_failed previous)
+  then stop
+  else previous
 ;;
 
-let run_reserved t reservation ~on_stop call =
+let close_admission t (turn_stop : turn_stop_state) stop =
+  Eio.Cancel.protect (fun () ->
+    Eio.Mutex.use_ro t.dispatch_mutex (fun () ->
+      let next_turn_stop =
+        match turn_stop.stop with
+        | None -> stop
+        | Some previous -> merge_host_stop previous stop
+      in
+      turn_stop.stop <- Some next_turn_stop;
+      if t.turn_stop == turn_stop
+      then
+        t.admission <-
+          Admission_closed
+            (match t.admission with
+             | Admission_open -> stop
+             | Admission_closed previous -> merge_host_stop previous stop)))
+;;
+
+let run_reserved t turn_stop reservation ~on_stop call =
   Fun.protect ~finally:reservation.finish (fun () ->
     List.iter Eio.Promise.await reservation.predecessors;
     let response = call () in
     Option.iter (fun response -> Option.iter (fun stop ->
-      on_stop ();
-      close_admission t stop) response.stop) response;
+      on_stop stop;
+      close_admission t turn_stop stop) response.stop) response;
     response)
 ;;
 
-let await_host_stop t =
-  Eio.Promise.await t.stop_response_boundary;
+let begin_turn t =
   let pending = Eio.Mutex.use_ro t.dispatch_mutex (fun () -> t.pending_reservations) in
   List.iter Eio.Promise.await pending;
-  Eio.Mutex.use_ro t.dispatch_mutex (fun () -> match t.admission with
-    | Admission_closed stop -> stop
-    | Admission_open -> assert false)
+  Eio.Mutex.use_rw ~protect:true t.dispatch_mutex (fun () ->
+    prune_schedule t;
+    t.admission <- Admission_open;
+    t.turn_stop <- make_turn_stop ())
+;;
+
+let await_host_stop t =
+  let turn_stop = Eio.Mutex.use_ro t.dispatch_mutex (fun () -> t.turn_stop) in
+  let boundary_stop = Eio.Promise.await turn_stop.boundary in
+  let pending = Eio.Mutex.use_ro t.dispatch_mutex (fun () -> t.pending_reservations) in
+  List.iter Eio.Promise.await pending;
+  Eio.Mutex.use_ro t.dispatch_mutex (fun () ->
+    match turn_stop.stop, t.admission with
+    | Some stop, _ -> stop
+    | None, Admission_closed stop -> stop
+    | None, Admission_open -> boundary_stop)
 ;;
 
 let turn_closed_result : Runtime_official_client_mcp.tool_result =
@@ -301,10 +342,11 @@ let dispatch t ~request ~tool_specs ~tool_execution_mode ~call_tool message =
             (match t.admission with
              | Admission_closed _ -> Some turn_closed_result
              | Admission_open ->
+               let turn_stop = t.turn_stop in
                let reservation = reserve_tool t execution_mode in
                release_protocol ();
-               match run_reserved t reservation
-                   ~on_stop:(fun () -> response_boundary := t.signal_stop_response_boundary)
+               match run_reserved t turn_stop reservation
+                   ~on_stop:(fun stop -> response_boundary := (fun () -> turn_stop.signal stop))
                    (fun () -> call_tool ~name ~call_id ~arguments) with
                | None -> None
                | Some response ->
@@ -566,11 +608,6 @@ let start ~sw ~net ~secure_random ~server_name ~tool_specs ~tool_execution_mode 
     ; listener_failure = None
     }
   in
-  let stop_response_boundary, resolve_stop_response_boundary = Eio.Promise.create () in
-  let boundary_signalled = Atomic.make false in
-  let signal_stop_response_boundary () =
-    if Atomic.compare_and_set boundary_signalled false true
-    then Eio.Promise.resolve resolve_stop_response_boundary () in
   let t =
     { endpoint = Printf.sprintf "http://127.0.0.1:%d%s" port path
     ; server_name
@@ -582,8 +619,7 @@ let start ~sw ~net ~secure_random ~server_name ~tool_specs ~tool_execution_mode 
     ; tool_schedule = {serial_barrier=[];concurrent=[]}
     ; pending_reservations=[]
     ; admission=Admission_open
-    ; stop_response_boundary
-    ; signal_stop_response_boundary
+    ; turn_stop = make_turn_stop ()
     }
   in
   let server =

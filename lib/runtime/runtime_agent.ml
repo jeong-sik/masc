@@ -739,9 +739,9 @@ let apply_runtime_model_input_capabilities
 
 (* A model declaration cannot make its host transport carry a media block.
    The official-client adapters accept text plus inline images for Codex,
-   Claude and Muse Code, and text only for Antigravity
-   (Keeper_official_client_host). Vibe takes text only: Runtime_vibe_cli
-   hands it the prompt as one text file. *)
+   Claude, and ACP clients (e.g. Mistral Vibe 3.1.0, Kimi Code, Antigravity ACP)
+   when the model declares image support, and text only for legacy
+   antigravity-cli (Keeper_official_client_host). *)
 let apply_execution_input_capabilities execution
     (caps : Llm_provider.Capabilities.capabilities) =
   match execution with

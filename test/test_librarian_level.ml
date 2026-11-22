@@ -96,6 +96,7 @@ let machine ?(lane = Some (declared ())) ?last_read ?last_room ?(read_alone = fa
   ; last_room
   ; read_alone
   ; pending_molt
+  ; pending_molt_categories = None
   }
 ;;
 

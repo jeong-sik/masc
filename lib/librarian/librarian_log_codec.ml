@@ -286,6 +286,7 @@ type why_kind =
   | Kind_not_valid_alone
   | Kind_not_valid_in_room
   | Kind_successor_unsupported
+  | Kind_promotion_refused
 
 let why_kind_of : Effects.why_not -> why_kind = function
   | Unknown_ref -> Kind_unknown_ref
@@ -295,6 +296,7 @@ let why_kind_of : Effects.why_not -> why_kind = function
   | Not_valid_alone -> Kind_not_valid_alone
   | Not_valid_in_room -> Kind_not_valid_in_room
   | Successor_unsupported -> Kind_successor_unsupported
+  | Promotion_refused -> Kind_promotion_refused
 ;;
 
 (* The token a line carries is the one a metric label carries. *)
@@ -306,6 +308,7 @@ let why_kind_token = function
   | Kind_not_valid_alone -> Effects.why_not_kind Not_valid_alone
   | Kind_not_valid_in_room -> Effects.why_not_kind Not_valid_in_room
   | Kind_successor_unsupported -> Effects.why_not_kind Successor_unsupported
+  | Kind_promotion_refused -> Effects.why_not_kind Promotion_refused
 ;;
 
 let why_kinds =
@@ -316,6 +319,7 @@ let why_kinds =
   ; Kind_not_valid_alone
   ; Kind_not_valid_in_room
   ; Kind_successor_unsupported
+  ; Kind_promotion_refused
   ]
 ;;
 
@@ -506,7 +510,7 @@ let why_to_json (why : Effects.why_not) =
   match why with
   | Removed_during_flight { seq } -> `Assoc [ token; f_seq, `Int seq ]
   | Unknown_ref | Ref_used_twice | Source_outside_question | Not_valid_alone | Not_valid_in_room
-  | Successor_unsupported -> `Assoc [ token ]
+  | Successor_unsupported | Promotion_refused -> `Assoc [ token ]
 ;;
 
 let effects_to_json (effects : Effects.t) =
@@ -903,6 +907,7 @@ let why_of_json json : (Effects.why_not, wire_error) result =
   | Kind_not_valid_alone -> alone Effects.Not_valid_alone
   | Kind_not_valid_in_room -> alone Effects.Not_valid_in_room
   | Kind_successor_unsupported -> alone Effects.Successor_unsupported
+  | Kind_promotion_refused -> alone Effects.Promotion_refused
   | Kind_removed_during_flight ->
     let* () = exact_field_names_result [ f_kind; f_seq ] fields in
     let* seq = count_field f_seq fields in

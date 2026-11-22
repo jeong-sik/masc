@@ -184,3 +184,25 @@ val key_account_home_kind_at
   :  base_path:string
   -> integration_id:Authz_types.Integration_id.t
   -> Runtime_key_account_files.home_kind
+
+module For_testing : sig
+  val initial_account_for_login
+    :  owner
+    -> Runtime_setup_login_client.client
+    -> Runtime_setup_accounts.reference option
+    -> base_path:string
+    -> integration_id:string
+    -> cli_path:string
+    -> Runtime_setup_login_client.t
+    -> (Runtime_setup_login_receipt.account, string) result
+
+  val finish_login
+    :  owner
+    -> client:Runtime_setup_login_client.client
+    -> base_path:string
+    -> integration_id:string
+    -> cli_path:string
+    -> login_id:string
+    -> Runtime_setup_login_client.t
+    -> (Runtime_setup_login_receipt.account, string) result
+end

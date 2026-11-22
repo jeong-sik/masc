@@ -257,8 +257,8 @@ api-name = "kimi-code/k3.1-pro"
 max-context = 1048576
 
 [models.m_vibe]
-api-name = "devstral-2"
-max-context = 400000
+api-name = "mistral-medium-3.5"
+max-context = 262144
 
 [agy_test.m_agy]
 [kimi_test.m_kimi]
@@ -763,7 +763,596 @@ let test_pool_key_switch_evicts_superseded_keeper_entry () =
   Pool.evict_keeper pool ~keeper_name:"alice" ~close:close_fake_entry;
   check bool "evict_keeper closed alice" true !prev.closed;
   check int "only bob remains" 1 (Pool.count pool);
-  check bool "bob still alive" false bob_1.closed
+  check bool "bob still alive" false bob_1.closed;
+  (* evict_idle evicts old idle entries while preserving busy or fresh entries. *)
+  let carol_key = { bob_key with keeper_name = "carol" } in
+  let carol_1 = make_fake_entry 200 in
+  ignore
+    (Pool.install_for_keeper
+       pool
+       ~key:carol_key
+       ~fresh:carol_1
+       ~is_alive:(fun e -> e.alive)
+       ~close:close_fake_entry);
+  Pool.evict_idle
+    pool
+    ~now:5000.0
+    ~idle_ttl_s:1800.0
+    ~last_used_at:(fun e -> if e.id = 100 then 1000.0 else 4500.0)
+    ~is_busy:(fun e -> e.id = 100)
+    ~close:close_fake_entry;
+  check bool "busy old entry bob is NOT evicted by evict_idle" false bob_1.closed;
+  check bool "fresh idle entry carol is NOT evicted by evict_idle" false carol_1.closed;
+  Pool.evict_idle
+    pool
+    ~now:5000.0
+    ~idle_ttl_s:1800.0
+    ~last_used_at:(fun e -> if e.id = 100 then 1000.0 else 4500.0)
+    ~is_busy:(fun _ -> false)
+    ~close:close_fake_entry;
+  check bool "idle old entry bob IS evicted by evict_idle" true bob_1.closed;
+  check bool "fresh idle entry carol remains pooled" false carol_1.closed;
+  (* evict_all drains all remaining entries. *)
+  Pool.evict_all pool ~close:close_fake_entry;
+  check bool "evict_all closed carol" true carol_1.closed;
+  check int "pool empty after evict_all" 0 (Pool.count pool)
+;;
+
+let rec rm_rf path =
+  if Sys.file_exists path
+  then (
+    if Sys.is_directory path
+    then (
+      Array.iter (fun name -> rm_rf (Filename.concat path name)) (Sys.readdir path);
+      Sys.rmdir path)
+    else Sys.remove path)
+;;
+
+let read_file_text path =
+  In_channel.with_open_text path In_channel.input_all
+;;
+
+let test_acp_80_pct_rollover_marker_and_overflow_classification () =
+  let should = Keeper_acp_runtime.For_testing.should_rollover_context in
+  check bool "below 80% threshold does not trigger rollover" false
+    (should ~context_used:(Some 200_000) ~context_size:None ~max_context_tokens:262_144);
+  check bool "at/above 80% threshold triggers rollover" true
+    (should ~context_used:(Some 210_000) ~context_size:None ~max_context_tokens:262_144);
+  check bool "smaller advertised context_size governs 80% rollover" true
+    (should ~context_used:(Some 80_000) ~context_size:(Some 100_000) ~max_context_tokens:262_144);
+  check bool "missing context_used does not trigger rollover" false
+    (should ~context_used:None ~context_size:(Some 100_000) ~max_context_tokens:262_144);
+  (* Durable rollover marker roundtrip under <masc_root>/runtime/acp-rollover/
+     (classified by Server_tool_blob_scope so Tool_blob_sweep.reclaim is never blocked). *)
+  let base_path = Filename.temp_dir "acp-rollover-" "" in
+  Fun.protect ~finally:(fun () -> rm_rf base_path) (fun () ->
+    Keeper_acp_runtime.For_testing.record_rollover_marker
+      ~base_path ~keeper_id:"k1" ~runtime_id:"vibe_acp.m1" ~session_id:"sess-1";
+    check bool "exact rollover marker matches" true
+      (Keeper_acp_runtime.For_testing.rollover_marker_matches
+         ~base_path ~keeper_id:"k1" ~runtime_id:"vibe_acp.m1" ~session_id:"sess-1");
+    check bool "different session_id does not match" false
+      (Keeper_acp_runtime.For_testing.rollover_marker_matches
+         ~base_path ~keeper_id:"k1" ~runtime_id:"vibe_acp.m1" ~session_id:"sess-2");
+    check bool "different runtime_id does not match" false
+      (Keeper_acp_runtime.For_testing.rollover_marker_matches
+         ~base_path ~keeper_id:"k1" ~runtime_id:"agy.m1" ~session_id:"sess-1");
+    (match
+       Tool_blob_maintenance.unclassified_entries
+         ~base_path
+         Server_tool_blob_scope.scope
+     with
+     | Ok entries ->
+       check (list string) "armed rollover marker leaves zero unclassified entries in blob scope"
+         []
+         (List.map Tool_blob_maintenance.unclassified_entry_to_string entries)
+     | Error err ->
+       failf "unclassified_entries failed: %s"
+         (Tool_blob_maintenance.error_to_string err));
+    Keeper_acp_runtime.For_testing.clear_rollover_marker ~base_path ~keeper_id:"k1";
+    check bool "cleared marker no longer matches" false
+      (Keeper_acp_runtime.For_testing.rollover_marker_matches
+         ~base_path ~keeper_id:"k1" ~runtime_id:"vibe_acp.m1" ~session_id:"sess-1");
+    (* evict_keeper_for_workspace also clears armed rollover marker on teardown *)
+    Keeper_acp_runtime.For_testing.record_rollover_marker
+      ~base_path ~keeper_id:"k1" ~runtime_id:"vibe_acp.m1" ~session_id:"sess-1";
+    Keeper_acp_runtime.evict_keeper_for_workspace ~base_path ~keeper_name:"k1";
+    check bool "evict_keeper_for_workspace clears armed rollover marker" false
+      (Keeper_acp_runtime.For_testing.rollover_marker_matches
+         ~base_path ~keeper_id:"k1" ~runtime_id:"vibe_acp.m1" ~session_id:"sess-1"));
+  (* Atom-boundary-safe split_older_for_rollover: never splits Assistant(tool_use)+Tool(tool_result)
+     and never counts/evicts existing compaction anchors or System/Pinned messages. *)
+  let open Agent_core.Types in
+  let conv_msg role content : message =
+    { origin = Agent_core.Llm_provider.Types.Conversation
+    ; role; content; name = None; tool_call_id = None; metadata = []
+    }
+  in
+  let existing_anchor_msg =
+    { (conv_msg User [ Text "preserve existing anchor" ]) with
+      origin = Agent_core.Llm_provider.Types.Agent_instruction
+    ; metadata = Runtime_model_input_tail_window.compaction_anchor_metadata
+    }
+  in
+  check bool "fixture message is recognized as compaction anchor" true
+    (Runtime_model_input_tail_window.is_compaction_anchor existing_anchor_msg);
+  (* 4 conversation atoms total:
+     atom 0: User "u0"
+     atom 1: Assistant(tool_use "call-1") + Tool(tool_result "call-1")
+     atom 2: User "u2"
+     atom 3: Assistant "a3"
+     With 4 atoms, keep_recent = max 2 (4/4) = 2, evict_atoms = 2 -> atoms 0 and 1.
+     Crucially atom 1's Assistant(tool_use) AND Tool(tool_result) must BOTH be evicted
+     together (never split!), and existing_anchor_msg must NOT be evicted or counted. *)
+  let tool_use_msg =
+    conv_msg Assistant
+      [ ToolUse { id = "call-1"; name = "masc_probe_ping"; input = `Assoc [] } ]
+  in
+  let tool_result_msg =
+    { (conv_msg Tool
+         [ ToolResult
+             { tool_use_id = "call-1"
+             ; content = "pong"
+             ; outcome = Tool_succeeded
+             ; json = None
+             ; content_blocks = None
+             }
+         ])
+      with
+      tool_call_id = Some "call-1"
+    }
+  in
+  let rollover_input =
+    [ existing_anchor_msg
+    ; conv_msg User [ Text "u0" ]
+    ; tool_use_msg
+    ; tool_result_msg
+    ; conv_msg User [ Text "u2" ]
+    ; conv_msg Assistant [ Text "a3" ]
+    ]
+  in
+  let evicted = Keeper_acp_runtime.For_testing.split_older_for_rollover rollover_input in
+  check bool "existing compaction anchor is never evicted by split_older_for_rollover" false
+    (List.exists
+       (fun (m : message) -> Runtime_model_input_tail_window.is_compaction_anchor m)
+       evicted);
+  let has_tool_use =
+    List.exists
+      (fun (m : message) ->
+         List.exists (function ToolUse { id = "call-1"; _ } -> true | _ -> false) m.content)
+      evicted
+  in
+  let has_tool_result =
+    List.exists
+      (fun (m : message) ->
+         List.exists (function ToolResult { tool_use_id = "call-1"; _ } -> true | _ -> false) m.content)
+      evicted
+  in
+  check bool "Assistant(tool_use) and Tool(tool_result) are never split across rollover boundary"
+    true (has_tool_use = has_tool_result && has_tool_use);
+  check int "evicted prefix contains exactly atom 0 (User) + atom 1 (Assistant+Tool) = 3 messages"
+    3 (List.length evicted);
+  (* Typed context-overflow RPC classification *)
+  let overflow_err =
+    Runtime_acp_client.Rpc_error
+      { method_name = "session/prompt"
+      ; code = -32000
+      ; message = "Prompt is too long: maximum context length exceeded"
+      }
+  in
+  check bool "overflow RPC detected" true
+    (Runtime_acp_client.is_context_overflow_rpc_error
+       ~method_name:"session/prompt"
+       ~code:(-32000)
+       ~message:"Prompt is too long: maximum context length exceeded");
+  (match Keeper_acp_runtime.For_testing.acp_error_to_core_error overflow_err with
+   | Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _) -> ()
+   | other -> failf "expected Api ContextOverflow, got %s" (Agent_core.Error.to_string other));
+  (match Keeper_acp_runtime.For_testing.recovery_failure_of_acp_error overflow_err with
+   | Keeper_official_client_session_store.Input_rejected
+       Keeper_official_client_session_store.Bootstrap_floor_exceeded -> ()
+   | other ->
+     failf "expected Input_rejected Bootstrap_floor_exceeded, got %s"
+       (Keeper_official_client_session_store.recovery_failure_to_string other));
+  let plain_err =
+    Runtime_acp_client.Rpc_error
+      { method_name = "session/prompt"; code = -32602; message = "invalid params" }
+  in
+  (match Keeper_acp_runtime.For_testing.recovery_failure_of_acp_error plain_err with
+   | Keeper_official_client_session_store.Provider_rejected -> ()
+   | other ->
+     failf "expected Provider_rejected for ordinary RPC error, got %s"
+       (Keeper_official_client_session_store.recovery_failure_to_string other))
+;;
+
+let test_vibe_310_config_options_and_permission_hardening () =
+  let cfg_json =
+    `Assoc
+      [ ( "configOptions"
+        , `List
+            [ `Assoc
+                [ "id", `String "model"
+                ; "category", `String "model"
+                ; "currentValue", `String "mistral-medium-3.5"
+                ; ( "options"
+                  , `List
+                      [ `Assoc
+                          [ "group", `String "Mistral"
+                          ; ( "options"
+                            , `List
+                                [ `Assoc [ "value", `String "mistral-medium-3.5"; "name", `String "Mistral Medium 3.5" ]
+                                ; `Assoc [ "value", `String "mistral-large-latest"; "name", `String "Mistral Large" ]
+                                ] )
+                          ]
+                      ] )
+                ]
+            ; `Assoc
+                [ "id", `String "thinking"
+                ; "category", `String "thought_level"
+                ; "currentValue", `String "off"
+                ; ( "options"
+                  , `List
+                      [ `Assoc [ "value", `String "off"; "name", `String "Off" ]
+                      ; `Assoc [ "value", `String "high"; "name", `String "High" ]
+                      ] )
+                ]
+            ] )
+      ]
+  in
+  let opts = Runtime_acp_client.For_testing.parse_config_options cfg_json in
+  check int "parsed two configOptions" 2 (List.length opts);
+  let model_opt = List.nth opts 0 in
+  let effort_opt = List.nth opts 1 in
+  check (list string) "grouped model available_values parsed"
+    [ "mistral-medium-3.5"; "mistral-large-latest" ]
+    model_opt.available_values;
+  check (list string) "flat effort available_values parsed"
+    [ "off"; "high" ]
+    effort_opt.available_values;
+  let resolve = Runtime_acp_client.For_testing.resolve_option_value in
+  check (option string) "default model sentinel is skipped" None
+    (resolve ~driver:Mistral_vibe ~config_id:"model" ~requested:"default" ~option:model_opt);
+  check (option string) "retired devstral-2 is skipped when unsupported" None
+    (resolve ~driver:Mistral_vibe ~config_id:"model" ~requested:"devstral-2" ~option:model_opt);
+  check (option string) "already-current Vibe 3.1.0 model skips redundant RPC" None
+    (resolve ~driver:Mistral_vibe ~config_id:"model" ~requested:"mistral-medium-3.5" ~option:model_opt);
+  check (option string) "supported Vibe 3.1.0 model switch resolves" (Some "mistral-large-latest")
+    (resolve ~driver:Mistral_vibe ~config_id:"model" ~requested:"mistral-large-latest" ~option:model_opt);
+  check (option string) "none effort skips redundant RPC when currentValue is already off" None
+    (resolve ~driver:Mistral_vibe ~config_id:"thinking" ~requested:"none" ~option:effort_opt);
+  let effort_opt_high = { effort_opt with current_value = "high" } in
+  check (option string) "none effort maps to off when switching from high" (Some "off")
+    (resolve ~driver:Mistral_vibe ~config_id:"thinking" ~requested:"none" ~option:effort_opt_high);
+  check (option string) "medium effort clamps to high on Vibe [off; high]" (Some "high")
+    (resolve ~driver:Mistral_vibe ~config_id:"thinking" ~requested:"medium" ~option:effort_opt);
+  (* Permission hardening: no Allow_always fallback, no fetch under Native_read, positive kind allowlist *)
+  let only_always_and_reject =
+    [ `Assoc [ "optionId", `String "opt_always"; "kind", `String "allow_always" ]
+    ; `Assoc [ "optionId", `String "opt_reject"; "kind", `String "reject_once" ]
+    ]
+  in
+  check (option string) "allow:true NEVER falls back to allow_always" None
+    (Runtime_acp_client.For_testing.choose_permission_option ~allow:true only_always_and_reject);
+  check (option string) "allow:false chooses reject_once" (Some "opt_reject")
+    (Runtime_acp_client.For_testing.choose_permission_option ~allow:false only_always_and_reject);
+  let read_and_mcp =
+    Runtime_acp_client.Allow_read_and_masc_mcp
+      { mcp_server_name = "masc"; allowed_tool_names = [ "masc_probe_ping" ] }
+  in
+  let allow = Runtime_acp_client.For_testing.should_allow_permission in
+  check bool "fetch is DENIED under Allow_read_and_masc_mcp (egress/SSRF boundary)" false
+    (allow ~policy:read_and_mcp ~title:"fetch_url" ~kind:(Some "fetch"));
+  check bool "unknown native tool kind is DENIED even with masc prefix" false
+    (allow ~policy:read_and_mcp ~title:"mcp__masc__masc_probe_ping" ~kind:(Some "browser_eval"));
+  (* Negative usage values are clamped to non-negative *)
+  let neg_usage =
+    `Assoc
+      [ "usage", `Assoc [ "inputTokens", `Int (-50); "outputTokens", `Int (-10); "totalTokens", `Int (-60) ] ]
+    |> Runtime_acp_client.For_testing.parse_prompt_usage
+  in
+  check int "negative inputTokens clamped to 0" 0 neg_usage.input_tokens;
+  check int "negative outputTokens clamped to 0" 0 neg_usage.output_tokens
+;;
+
+let pid_alive pid = Sys.command (Printf.sprintf "kill -0 %d 2>/dev/null" pid) = 0
+
+let test_mock_acp_child_pgid_reap_session_perm_and_pid_tagged_dir () =
+  let tmp = Filename.temp_dir "acp-e2e-" "" in
+  let grandchild_pid_file = Filename.concat tmp "grandchild.pid" in
+  let parent_pid_file = Filename.concat tmp "parent.pid" in
+  let gemini_dir_file = Filename.concat tmp "gemini_dir.txt" in
+  let perm_log_file = Filename.concat tmp "perm_outcomes.txt" in
+  let mock_script = Filename.concat tmp "mock_acp.py" in
+  let script_body =
+    Printf.sprintf
+      {|#!/usr/bin/env python3
+import json, os, subprocess, sys
+
+gdir = ""
+for i, a in enumerate(sys.argv):
+    if a == "--gemini-dir" and i + 1 < len(sys.argv):
+        gdir = sys.argv[i + 1]
+with open(%S, "w") as f:
+    f.write(gdir)
+with open(%S, "w") as f:
+    f.write(str(os.getppid()))
+
+grandchild = subprocess.Popen(["sleep", "60"])
+with open(%S, "w") as f:
+    f.write(str(grandchild.pid))
+
+def send(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+perm_outcomes = {}
+pending_prompt_id = None
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    if "method" in msg:
+        m = msg["method"]
+        req_id = msg.get("id")
+        if m == "initialize":
+            send({"jsonrpc": "2.0", "id": req_id, "result": {
+                "protocolVersion": 1,
+                "agentCapabilities": {"loadSession": True}
+            }})
+        elif m == "session/new":
+            send({"jsonrpc": "2.0", "id": req_id, "result": {
+                "sessionId": "sess-1",
+                "configOptions": []
+            }})
+        elif m == "session/prompt":
+            pending_prompt_id = req_id
+            # Send valid permission request AND spoofed wrong-sessionId permission request
+            send({"jsonrpc": "2.0", "id": 9001, "method": "session/request_permission", "params": {
+                "sessionId": "sess-1",
+                "toolCall": {"title": "mcp__masc__masc_probe_ping", "kind": "mcp"},
+                "options": [
+                    {"optionId": "allow_once_id", "kind": "allow_once"},
+                    {"optionId": "reject_once_id", "kind": "reject_once"}
+                ]
+            }})
+            send({"jsonrpc": "2.0", "id": 9002, "method": "session/request_permission", "params": {
+                "sessionId": "sess-spoofed",
+                "toolCall": {"title": "mcp__masc__masc_probe_ping", "kind": "mcp"},
+                "options": [
+                    {"optionId": "allow_once_id", "kind": "allow_once"},
+                    {"optionId": "reject_once_id", "kind": "reject_once"}
+                ]
+            }})
+            send({"jsonrpc": "2.0", "method": "session/update", "params": {
+                "sessionId": "sess-1",
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "ok-from-mock"}}
+            }})
+    else:
+        rid = msg.get("id")
+        if rid in (9001, 9002):
+            perm_outcomes[str(rid)] = msg.get("result", {}).get("outcome", {})
+            if len(perm_outcomes) == 2 and pending_prompt_id is not None:
+                with open(%S, "w") as f:
+                    json.dump(perm_outcomes, f)
+                send({"jsonrpc": "2.0", "id": pending_prompt_id, "result": {
+                    "stopReason": "end_turn",
+                    "usage": {"inputTokens": 100, "outputTokens": 20, "totalTokens": 120}
+                }})
+                pending_prompt_id = None
+|}
+      gemini_dir_file
+      parent_pid_file
+      grandchild_pid_file
+      perm_log_file
+  in
+  Out_channel.with_open_text mock_script (fun oc -> output_string oc script_body);
+  Fun.protect ~finally:(fun () -> rm_rf tmp) (fun () ->
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      let proc_mgr =
+        Runtime_acp_client.foreground_process_mgr ~clock ~grace_seconds:1.0 ()
+      in
+      let cfg =
+        { (Runtime_acp_client.default_config ~driver:Antigravity ~cwd:tmp) with
+          cli_path = "python3"
+        ; args = [ mock_script ]
+        ; admission_timeout_s = 10.0
+        }
+      in
+      Eio.Switch.run (fun sw ->
+        let client =
+          match Runtime_acp_client.start ~sw ~proc_mgr ~clock ~config:cfg () with
+          | Ok c -> c
+          | Error err -> failf "mock ACP start failed: %s" (Runtime_acp_client.error_to_string err)
+        in
+        let gdir = String.trim (read_file_text gemini_dir_file) in
+        let parent_pid = String.trim (read_file_text parent_pid_file) in
+        let expected_prefix = Printf.sprintf "masc-agy-acp-%s-" parent_pid in
+        check bool "PID-tagged --gemini-dir prefix (#239 interlock)" true
+          (String.starts_with ~prefix:expected_prefix (Filename.basename gdir));
+        check bool "--gemini-dir exists while client is alive" true (Sys.file_exists gdir);
+        let session =
+          match Runtime_acp_client.new_session client ~cwd:tmp () with
+          | Ok s -> s
+          | Error err -> failf "new_session failed: %s" (Runtime_acp_client.error_to_string err)
+        in
+        let policy =
+          Runtime_acp_client.Allow_masc_mcp_only
+            { mcp_server_name = "masc"; allowed_tool_names = [ "masc_probe_ping" ] }
+        in
+        let prompt_res =
+          match
+            Runtime_acp_client.prompt
+              client
+              ~session_id:session.session_id
+              ~blocks:[ Runtime_acp_client.Text_block "hello" ]
+              ~permission_policy:policy
+              ()
+          with
+          | Ok r -> r
+          | Error err -> failf "prompt failed: %s" (Runtime_acp_client.error_to_string err)
+        in
+        check string "prompt text received" "ok-from-mock" prompt_res.text;
+        let open Yojson.Safe.Util in
+        let perms = Yojson.Safe.from_file perm_log_file in
+        check (option string) "matching sessionId permission allowed with allow_once"
+          (Some "allow_once_id")
+          (perms |> member "9001" |> member "optionId" |> to_string_option);
+        check (option string) "mismatched sessionId permission denied with reject_once"
+          (Some "reject_once_id")
+          (perms |> member "9002" |> member "optionId" |> to_string_option);
+        let gpid = int_of_string (String.trim (read_file_text grandchild_pid_file)) in
+        check bool "grandchild alive before close" true (pid_alive gpid);
+        Runtime_acp_client.close client;
+        (* Wait briefly for OS reaping of grandchild process group *)
+        let rec wait_dead attempts =
+          if not (pid_alive gpid) || attempts <= 0
+          then ()
+          else (
+            Eio.Time.sleep clock 0.05;
+            wait_dead (attempts - 1))
+        in
+        wait_dead 40;
+        check bool "PGID reaping killed grandchild on close" false (pid_alive gpid);
+        check bool "PID-tagged --gemini-dir cleaned up on close" false (Sys.file_exists gdir))))
+;;
+
+let test_acp_overflow_shrink_handoff_and_vibe_operator_login () =
+  (* 1. Shrink retry with force_fresh_retry=true (previous_settlement=None) loads
+        compacted handoff anchor and compacts at most ONCE across shrink retries. *)
+  check bool "force_fresh_retry alone enables prefer_handoff" true
+    (Keeper_acp_runtime.For_testing.prefer_handoff_for_start
+       ~planned_fresh_rollover:false ~force_fresh_retry:true);
+  check bool "normal cold start does not prefer_handoff" false
+    (Keeper_acp_runtime.For_testing.prefer_handoff_for_start
+       ~planned_fresh_rollover:false ~force_fresh_retry:false);
+  let base_path = Filename.temp_dir "acp-shrink-handoff-" "" in
+  Fun.protect ~finally:(fun () -> rm_rf base_path) (fun () ->
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+    let mk_msg role text : Agent_core.Types.message =
+      { origin = Agent_core.Llm_provider.Types.Conversation
+      ; role
+      ; content = [ Agent_core.Types.Text text ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    in
+    let initial_messages =
+      [ mk_msg Agent_core.Types.User "turn-1 build auth middleware"
+      ; mk_msg Agent_core.Types.Assistant "turn-1 done"
+      ; mk_msg Agent_core.Types.User "turn-2 add rate limiter"
+      ; mk_msg Agent_core.Types.Assistant "turn-2 done"
+      ; mk_msg Agent_core.Types.User "turn-3 harden SQLite WAL"
+      ; mk_msg Agent_core.Types.Assistant "turn-3 done"
+      ; mk_msg Agent_core.Types.User "turn-4 current prompt"
+      ; mk_msg Agent_core.Types.Assistant "turn-4 partial"
+      ]
+    in
+    let already_compacted = ref false in
+    for attempt = 1 to 3 do
+      Keeper_acp_runtime.For_testing.compact_once_for_overflow
+        ~already_compacted
+        ~keepers_dir
+        ~keeper_id:"k-shrink"
+        ~starting_capacity_bytes:100_000
+        ~effective_max_context_tokens:25_000
+        ~previous_capacity:(100_000 / attempt)
+        ~capacity:(50_000 / attempt)
+        ~initial_messages
+    done;
+    let epochs =
+      Masc.Keeper_compaction.list_epochs ~keepers_dir ~keeper_id:"k-shrink"
+      |> Result.get_ok
+    in
+    check int "overflow shrink emits exactly 1 compaction epoch across 3 retries"
+      1 (List.length epochs);
+    let anchor = List.hd epochs in
+    let hydrated_retry =
+      Keeper_acp_runtime.For_testing.hydrate_start_messages
+        ~keepers_dir ~keeper_id:"k-shrink" ~prefer_handoff:true initial_messages
+    in
+    let contains_sub ~needle haystack =
+      let nlen = String.length needle in
+      let hlen = String.length haystack in
+      let rec loop i =
+        if i + nlen > hlen then false
+        else if String.sub haystack i nlen = needle then true
+        else loop (i + 1)
+      in
+      nlen = 0 || loop 0
+    in
+    let has_anchor_msg msgs =
+      List.exists
+        (fun (m : Agent_core.Types.message) ->
+           let text =
+             Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json m)
+           in
+           contains_sub ~needle:anchor.active_intent text
+           && m.metadata <> [])
+        msgs
+    in
+    check bool "prefer_handoff:true loads compacted anchor even with existing conversation messages"
+      true (has_anchor_msg hydrated_retry);
+    let hydrated_normal =
+      Keeper_acp_runtime.For_testing.hydrate_start_messages
+        ~keepers_dir ~keeper_id:"k-shrink" ~prefer_handoff:false initial_messages
+    in
+    check bool "prefer_handoff:false does not inject anchor over existing messages"
+      false (has_anchor_msg hydrated_normal);
+
+    (* 2. Mistral Vibe operator login prep & finish succeed with Receipt.Unselected
+          (never failing on Client.publish because Vibe uses host OS keyring). *)
+    let () =
+      Eio_main.run (fun _env ->
+        ignore
+          (Runtime_account_access.publish_host_tool
+             ~base_path
+             ~config_dir:(Some (Filename.concat base_path "config"))
+           : (unit, string * string list) result))
+    in
+    let runtime_root = Filename.concat base_path "runtime-root" in
+    let home =
+      match
+        Runtime_setup_login_client.prepare
+          ~browser:Runtime_setup_login_client.host_browser
+          ~runtime_root
+          ~account_id:"vibe-op-login-1"
+          ~client:Runtime_setup_login_client.Mistral_vibe
+          ~existing:None
+      with
+      | Ok h -> h
+      | Error detail -> failf "Mistral_vibe prepare failed: %s" detail
+    in
+    let owner = Server_setup_account_login.Operator { actor = "admin" } in
+    (match
+       Server_setup_account_login.For_testing.initial_account_for_login
+         owner
+         Runtime_setup_login_client.Mistral_vibe
+         None
+         ~base_path
+         ~integration_id:"vibe_acp"
+         ~cli_path:"vibe-acp"
+         home
+     with
+     | Ok Runtime_setup_login_receipt.Unselected -> ()
+     | Ok (Published _ | Linked) -> fail "expected Unselected for Mistral_vibe operator initial account"
+     | Error err -> failf "Mistral_vibe operator initial account failed: %s" err);
+    (match
+       Server_setup_account_login.For_testing.finish_login
+         owner
+         ~client:Runtime_setup_login_client.Mistral_vibe
+         ~base_path
+         ~integration_id:"vibe_acp"
+         ~cli_path:"vibe-acp"
+         ~login_id:"vibe-op-login-1"
+         home
+     with
+     | Ok Runtime_setup_login_receipt.Unselected -> ()
+     | Ok (Published _ | Linked) -> fail "expected Unselected for Mistral_vibe operator finish_login"
+     | Error err -> failf "Mistral_vibe operator finish_login failed: %s" err))
 ;;
 
 let () =
@@ -781,8 +1370,18 @@ let () =
     ; ( "pool_lifecycle"
       , [ test_case "cancelled turn evicts poisoned entry & recovers" `Quick
             test_cancelled_turn_evicts_entry_and_recovers
-        ; test_case "key switch evicts superseded keeper entry only" `Quick
+        ; test_case "key switch, evict_idle & evict_all lifecycle" `Quick
             test_pool_key_switch_evicts_superseded_keeper_entry
+        ; test_case "mock ACP child PGID reap, sessionId perm check & PID-tagged gemini dir" `Quick
+            test_mock_acp_child_pgid_reap_session_perm_and_pid_tagged_dir
+        ] )
+    ; ( "rollover_and_vibe310"
+      , [ test_case "80% hysteresis rollover, durable marker & ContextOverflow classification" `Quick
+            test_acp_80_pct_rollover_marker_and_overflow_classification
+        ; test_case "Vibe 3.1.0 configOptions clamping & permission hardening" `Quick
+            test_vibe_310_config_options_and_permission_hardening
+        ; test_case "ACP overflow shrink handoff single-epoch & Vibe operator login prep/finish" `Quick
+            test_acp_overflow_shrink_handoff_and_vibe_operator_login
         ] )
     ; ( "wire"
       , [ test_case "session update & usage parsing" `Quick test_parse_wire_updates_and_usage

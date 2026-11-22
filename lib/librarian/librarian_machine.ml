@@ -52,7 +52,79 @@ type t =
   ; last_room : Last.room option
   ; read_alone : bool
   ; pending_molt : Librarian_lifecycle.molt_trigger option
+  ; pending_molt_categories :
+      (Librarian_lifecycle.molt_trigger option * Keeper_memory_os_types.category list) option
   }
+
+let is_public_board_post (post_id : Board_types.Post_id.t) =
+  if String.equal (Board_dispatch.backend_name ()) "uninitialized"
+  then false
+  else (
+    match
+      Board_dispatch.read_post
+        ~reader:Masc_board_handlers.Board_access.Anonymous
+        ~post_id:(Board_types.Post_id.to_string post_id)
+    with
+    | Ok post ->
+      (match post.visibility with
+       | Board_types.Public -> true
+       | Board_types.Unlisted | Board_types.Internal | Board_types.Direct -> false)
+    | Error _ -> false)
+;;
+
+let strip_trailing_slashes path =
+  let rec loop len =
+    if len > 1 && path.[len - 1] = '/' then loop (len - 1) else len
+  in
+  let len = loop (String.length path) in
+  if len = String.length path then path else String.sub path 0 len
+;;
+
+let base_path_of_masc_subdir dir =
+  let rec walk current =
+    let cleaned = strip_trailing_slashes current in
+    if String.equal (Filename.basename cleaned) ".masc"
+    then Some (Filename.dirname cleaned)
+    else (
+      let parent = Filename.dirname cleaned in
+      if String.equal parent cleaned then None else walk parent)
+  in
+  walk dir
+;;
+
+let secret_redaction_of_place (place : place) =
+  match base_path_of_masc_subdir place.memory_dir with
+  | Some base_path ->
+    Keeper_secret_redaction.snapshot ~base_path ~keeper_name:place.keeper_id
+  | None -> Keeper_secret_redaction.empty
+;;
+
+let stop_machine t stop =
+  { t with state = Stopped stop; pending_molt_categories = None }
+;;
+
+let distinct_categories_of_facts (facts : Keeper_memory_os_types.fact list) =
+  let seen = Hashtbl.create 8 in
+  List.fold_left
+    (fun acc (fact : Keeper_memory_os_types.fact) ->
+       let key = Keeper_memory_os_types.category_to_string fact.category in
+       if Hashtbl.mem seen key
+       then acc
+       else (
+         Hashtbl.add seen key ();
+         fact.category :: acc))
+    []
+    facts
+  |> List.rev
+;;
+
+let category_has_facts store cat =
+  let target = Keeper_memory_os_types.category_to_string cat in
+  List.exists
+    (fun (fact : Keeper_memory_os_types.fact) ->
+       String.equal (Keeper_memory_os_types.category_to_string fact.category) target)
+    (Store.memory store).facts
+;;
 
 let boot { memory_dir; turns_dir; keeper_id } ~at =
   Store.boot ~memory_dir ~turns_dir ~keeper_id ~at
@@ -78,11 +150,46 @@ let start_molt t ~at store ~(declared : declared) trigger =
     ; since = at
     ; lane = declared
     ; removed_since = []
-    ; asked = Room { trace = molt_trace ~ask trigger; molt_trigger = Some trigger }
+    ; asked =
+        Room
+          { trace = molt_trace ~ask trigger
+          ; molt_trigger = Some trigger
+          ; category_filter = None
+          }
     ; bottom = t.bottom
     }
   in
-  { t with state = Asking { store; asking }; last_ask = ask; pending_molt = None }
+  { t with
+    state = Asking { store; asking }
+  ; last_ask = ask
+  ; pending_molt = None
+  ; pending_molt_categories = None
+  }
+;;
+
+let start_chunked_room t ~at store ~(declared : declared) ~molt_trigger ~trace ~category ~rest =
+  let ask = t.last_ask + 1 in
+  let cat_token = Keeper_memory_os_types.category_to_string category in
+  let chunk_trace =
+    match molt_trigger with
+    | Some trigger -> Printf.sprintf "%s-cat-%s" (molt_trace ~ask trigger) cat_token
+    | None -> Printf.sprintf "%s-cat-%s" trace cat_token
+  in
+  let asking : asking =
+    { ask
+    ; since = at
+    ; lane = declared
+    ; removed_since = []
+    ; asked = Room { trace = chunk_trace; molt_trigger; category_filter = Some category }
+    ; bottom = t.bottom
+    }
+  in
+  let pending_molt_categories =
+    match rest with
+    | [] -> None
+    | _ :: _ -> Some (molt_trigger, rest)
+  in
+  { t with state = Asking { store; asking }; last_ask = ask; pending_molt_categories }
 ;;
 
 let growth_molt_trigger ~keeper_id ~before_facts ~after_facts =
@@ -195,7 +302,7 @@ let ask_room t ~at store ~(declared : declared) ~trace =
             ; since = at
             ; lane = declared
             ; removed_since = []
-            ; asked = Room { trace; molt_trigger = None }
+            ; asked = Room { trace; molt_trigger = None; category_filter = None }
             ; bottom = t.bottom
             }
         }
@@ -204,10 +311,10 @@ let ask_room t ~at store ~(declared : declared) ~trace =
 ;;
 
 (* The width memory says how wide; the head item alone is asked only from
-   the bottom's verdict. If a structural molt request was latched while an
-   earlier ask was running (or while no lane was declared), dispatch it once
-   before resuming normal turn reading. *)
-let next_ask place t ~at store =
+   the bottom's verdict. If a chunked per-category molt pass is in progress,
+   drain its remaining non-empty categories first; otherwise dispatch any
+   latched structural molt request before resuming normal turn reading. *)
+let next_ask_after_chunks place t ~at store =
   match t.pending_molt, t.lane with
   | Some trigger, Some declared when pending_molt_still_needed place store trigger ->
     start_molt t ~at store ~declared trigger
@@ -216,6 +323,24 @@ let next_ask place t ~at store =
       ~asked:(Read_range (Librarian_width.next t.narrowing))
   | (Some _ | None), None | None, Some _ ->
     ask place t ~at store ~asked:(Read_range (Librarian_width.next t.narrowing))
+;;
+
+let rec drain_chunked_categories place t ~at store ~declared ~molt_trigger = function
+  | [] -> next_ask_after_chunks place { t with pending_molt_categories = None } ~at store
+  | cat :: rest ->
+    if category_has_facts store cat
+    then
+      start_chunked_room t ~at store ~declared ~molt_trigger ~trace:"chunked-room"
+        ~category:cat ~rest
+    else drain_chunked_categories place t ~at store ~declared ~molt_trigger rest
+;;
+
+let next_ask place t ~at store =
+  match t.pending_molt_categories, t.lane with
+  | Some (molt_trigger, cats), Some declared ->
+    drain_chunked_categories place t ~at store ~declared ~molt_trigger cats
+  | (Some _ | None), None | None, Some _ ->
+    next_ask_after_chunks place t ~at store
 ;;
 
 let stopped_with_pending ~lane ~last_ask ~pending_molt stop =
@@ -228,6 +353,7 @@ let stopped_with_pending ~lane ~last_ask ~pending_molt stop =
   ; last_room = None
   ; read_alone = false
   ; pending_molt
+  ; pending_molt_categories = None
   }
 ;;
 
@@ -249,6 +375,7 @@ let booted_with_pending place ~at ~lane ~last_ask ~pending_molt (opened : (Store
       ; last_room = None
       ; read_alone = false
       ; pending_molt
+      ; pending_molt_categories = None
       }
       ~at store
 ;;
@@ -309,8 +436,8 @@ let settled t store ~after (committed : Store.committed) =
   match committed with
   | Committed { store; line = (_ : Librarian_log.commit) } -> after store
   | Committed_without_snapshot (_ : Librarian_log.commit) ->
-    { t with state = Stopped Store_unwritable }
-  | Stopped stop -> { t with state = Stopped stop }
+    stop_machine t Store_unwritable
+  | Stopped stop -> stop_machine t stop
   | Not_a_snapshot (_ : Librarian_envelope.refusal) -> { t with state = Resting store }
 ;;
 
@@ -325,7 +452,7 @@ let moved t ~narrowing = { t with narrowing; bottom = Librarian_bottom.empty }
 let after_skip place t ~at ~narrowing ~last : (Store.skipped, Store.stop) result -> t = function
   | Ok { store; line = (_ : Librarian_log.commit) } ->
     next_ask place { (moved t ~narrowing) with last_read = Some last } ~at store
-  | Error stop -> { t with state = Stopped stop }
+  | Error stop -> stop_machine t stop
 ;;
 
 (* §7.3 「Refused_by_lane, Silent_lane」 and §7.4: only the slots the lane
@@ -462,8 +589,15 @@ let ended_read place t ~at store (asking : asking) ~(asked : Read_result.asked)
   | Answered { question; answer; slot } ->
     let before_facts = (Store.memory store).facts in
     let plan =
-      Librarian_plan.of_answer ~shown:(Read question.shown) ~facts:before_facts
-        ~removed_since:asking.removed_since ~at ~trace_id:question.trace answer
+      Librarian_plan.of_answer
+        ~is_public_board_post
+        ~redact:(secret_redaction_of_place place)
+        ~shown:(Read question.shown)
+        ~facts:before_facts
+        ~removed_since:asking.removed_since
+        ~at
+        ~trace_id:question.trace
+        answer
     in
     let narrowing =
       Librarian_width.committed t.narrowing
@@ -513,10 +647,10 @@ let ended_read place t ~at store (asking : asking) ~(asked : Read_result.asked)
     after_skip place t ~at ~narrowing:t.narrowing ~last:Last.Committed
       (Store.commit_skip store ~at ~hole:(Unknown_span { before; after = reach.covered }) reach)
   | Memory_diverged { expected; observed } ->
-    { t with state = Stopped (Log_diverged { expected; observed }) }
+    stop_machine t (Log_diverged { expected; observed })
   (* A file the store does not open does not mend itself: the store stops
      as boot and a commit stop it for the same file. *)
-  | Snapshot_fault fault -> { t with state = Stopped (Store.stop_of_snapshot_fault fault) }
+  | Snapshot_fault fault -> stop_machine t (Store.stop_of_snapshot_fault fault)
   | Input_fault fault -> { t with state = Resting store; last_read = Some (Last.Input_fault fault) }
   | Ask_failed failed -> { t with state = Resting store; last_read = Some (Last.Ask_failed failed) }
 ;;
@@ -601,8 +735,14 @@ let ended_room place t ~at store (asking : asking) : Room_result.t -> t = functi
        next_ask place { t with last_room = Some Last.Stale } ~at store
      | [] ->
        let plan =
-         Librarian_plan.of_answer ~shown:(Room { memory = question.memory })
-           ~facts:(Store.memory store).facts ~removed_since:[] ~at ~trace_id:question.trace
+         Librarian_plan.of_answer
+           ~is_public_board_post
+           ~redact:(secret_redaction_of_place place)
+           ~shown:(Room { memory = question.memory })
+           ~facts:(Store.memory store).facts
+           ~removed_since:[]
+           ~at
+           ~trace_id:question.trace
            answer
        in
        if Store.changes store plan
@@ -640,21 +780,39 @@ let ended_room place t ~at store (asking : asking) : Room_result.t -> t = functi
             slots));
     (* Fits_none only when every slot declared now refused it for its input:
        the same fold the head item's verdict is, over Memory alone. *)
-    let room =
+    let room, fits_none_declared =
       match t.lane with
       | Some declared ->
         (match Librarian_bottom.fold declared.value slots with
-         | Input -> Last.Fits_none { memory = question.basis; lane = asking.lane.value }
-         | All_not_input | Not_all -> Last.Not_judged)
-      | None -> Last.Not_judged
+         | Input ->
+           Last.Fits_none { memory = question.basis; lane = asking.lane.value }, Some declared
+         | All_not_input | Not_all -> Last.Not_judged, None)
+      | None -> Last.Not_judged, None
     in
-    next_ask place { t with last_room = Some room } ~at store
+    let is_unchunked_room =
+      match asking.asked with
+      | Room { category_filter = None; _ } -> true
+      | Room { category_filter = Some _; _ } | Read _ -> false
+    in
+    (match fits_none_declared, is_unchunked_room with
+     | Some declared, true ->
+       (match distinct_categories_of_facts (Store.memory store).facts with
+        | first_cat :: (_ :: _ as rest) ->
+          Log.Keeper.info ~keeper_name:place.keeper_id
+            "librarian make room hit Fits_none on full memory; falling back to per-category \
+             chunked consolidation (%d categories)"
+            (1 + List.length rest);
+          start_chunked_room { t with last_room = Some room } ~at store ~declared
+            ~molt_trigger:None ~trace:question.trace ~category:first_cat ~rest
+        | [] | [ _ ] -> next_ask place { t with last_room = Some room } ~at store)
+     | None, (true | false) | Some _, false ->
+       next_ask place { t with last_room = Some room } ~at store)
   | Room_memory_diverged { expected; observed } ->
     count_room place Store_stopped;
-    { t with state = Stopped (Log_diverged { expected; observed }) }
+    stop_machine t (Log_diverged { expected; observed })
   | Room_snapshot_fault fault ->
     count_room place Store_stopped;
-    { t with state = Stopped (Store.stop_of_snapshot_fault fault) }
+    stop_machine t (Store.stop_of_snapshot_fault fault)
   | Room_failed (_ : Read_result.failed) ->
     count_room place Failed;
     next_ask place { t with last_room = Some Last.Not_judged } ~at store
@@ -670,8 +828,14 @@ let ended_molt place t ~at store (asking : asking) ~trigger : Room_result.t -> t
        next_ask place { t with last_room = Some Last.Stale } ~at store
      | [] ->
        let plan =
-         Librarian_plan.of_answer ~shown:(Molt { memory = question.memory; trigger })
-           ~facts:(Store.memory store).facts ~removed_since:[] ~at ~trace_id:question.trace
+         Librarian_plan.of_answer
+           ~is_public_board_post
+           ~redact:(secret_redaction_of_place place)
+           ~shown:(Molt { memory = question.memory; trigger })
+           ~facts:(Store.memory store).facts
+           ~removed_since:[]
+           ~at
+           ~trace_id:question.trace
            answer
        in
        if Store.changes store plan
@@ -716,21 +880,39 @@ let ended_molt place t ~at store (asking : asking) ~trigger : Room_result.t -> t
             (fun ((key : Lane.slot_key), outcome) ->
                Printf.sprintf "%s:%s" key.id (unanswered_token outcome))
             slots));
-    let room =
+    let room, fits_none_declared =
       match t.lane with
       | Some declared ->
         (match Librarian_bottom.fold declared.value slots with
-         | Input -> Last.Fits_none { memory = question.basis; lane = asking.lane.value }
-         | All_not_input | Not_all -> Last.Not_judged)
-      | None -> Last.Not_judged
+         | Input ->
+           Last.Fits_none { memory = question.basis; lane = asking.lane.value }, Some declared
+         | All_not_input | Not_all -> Last.Not_judged, None)
+      | None -> Last.Not_judged, None
     in
-    next_ask place { t with last_room = Some room } ~at store
+    let is_unchunked_room =
+      match asking.asked with
+      | Room { category_filter = None; _ } -> true
+      | Room { category_filter = Some _; _ } | Read _ -> false
+    in
+    (match fits_none_declared, is_unchunked_room with
+     | Some declared, true ->
+       (match distinct_categories_of_facts (Store.memory store).facts with
+        | first_cat :: (_ :: _ as rest) ->
+          Log.Keeper.info ~keeper_name:place.keeper_id
+            "librarian molt hit Fits_none on full memory; falling back to per-category chunked \
+             molt (%d categories)"
+            (1 + List.length rest);
+          start_chunked_room { t with last_room = Some room } ~at store ~declared
+            ~molt_trigger:(Some trigger) ~trace:question.trace ~category:first_cat ~rest
+        | [] | [ _ ] -> next_ask place { t with last_room = Some room } ~at store)
+     | None, (true | false) | Some _, false ->
+       next_ask place { t with last_room = Some room } ~at store)
   | Room_memory_diverged { expected; observed } ->
     count_room place Store_stopped;
-    { t with state = Stopped (Log_diverged { expected; observed }) }
+    stop_machine t (Log_diverged { expected; observed })
   | Room_snapshot_fault fault ->
     count_room place Store_stopped;
-    { t with state = Stopped (Store.stop_of_snapshot_fault fault) }
+    stop_machine t (Store.stop_of_snapshot_fault fault)
   | Room_failed (_ : Read_result.failed) ->
     count_room place Failed;
     next_ask place { t with last_room = Some Last.Not_judged } ~at store
@@ -740,9 +922,9 @@ let ended place t ~at store (asking : asking) = function
   | Read_ended { asked; result } -> ended_read place t ~at store asking ~asked result
   | Room_ended result ->
     (match asking.asked with
-     | Room { molt_trigger = Some trigger; trace = (_ : string) } ->
+     | Room { molt_trigger = Some trigger; _ } ->
        ended_molt place t ~at store asking ~trigger result
-     | Room { molt_trigger = None; trace = (_ : string) } | Read (_ : Read_result.asked) ->
+     | Room { molt_trigger = None; _ } | Read (_ : Read_result.asked) ->
        ended_room place t ~at store asking result)
 ;;
 
@@ -908,8 +1090,8 @@ let write place t ~at ~by ~trace write =
          in
          after store line growth, Written line
        | Committed_without_snapshot line ->
-         { t with state = Stopped Store_unwritable }, Written line
-       | Stopped stop -> { t with state = Stopped stop }, Unavailable (Store_stopped stop)
+         stop_machine t Store_unwritable, Written line
+       | Stopped stop -> stop_machine t stop, Unavailable (Store_stopped stop)
        | Not_a_snapshot refusal -> t, Not_a_snapshot refusal)
   in
   let maybe_start_growth_molt ~fallback store growth =
@@ -1007,7 +1189,9 @@ let adopt { memory_dir; turns_dir; keeper_id } t ~at ~by ~observed =
   | Stopped (Log_diverged _ | Log_unreadable) ->
     (match Store.adopt ~memory_dir ~turns_dir ~keeper_id ~at ~by ~observed with
      | Ok store ->
-       next_ask { memory_dir; turns_dir; keeper_id } { t with narrowing = Librarian_width.empty }
+       next_ask
+         { memory_dir; turns_dir; keeper_id }
+         { t with narrowing = Librarian_width.empty; pending_molt_categories = None }
          ~at store
        , Done
      | Error Snapshot_mismatch -> t, Not_done Snapshot_mismatch
@@ -1089,7 +1273,7 @@ let restart_reading place t ~at ~observed =
         | Error stop ->
           (* §9.2: the line is not on disk, so the act is refused as the
              store stops. *)
-          { t with state = Stopped stop }, Not_done (Act_unavailable (Store_stopped stop))))
+          stop_machine t stop, Not_done (Act_unavailable (Store_stopped stop))))
 ;;
 
 (* What a skip of the head passes, read from the disk when it is taken the
@@ -1164,7 +1348,7 @@ let skip_item place ~stores t ~at ~by ~target =
         | Error stop ->
           (* §9.2: the line is not on disk, so the act is refused as the
              store stops. *)
-          { t with state = Stopped stop }, Not_done (Act_unavailable (Store_stopped stop))))
+          stop_machine t stop, Not_done (Act_unavailable (Store_stopped stop))))
 ;;
 
 (* Whether the turn log still grows with the line at [offset] left where it
@@ -1253,7 +1437,7 @@ let skip_line place t ~at ~offset =
         | Error stop ->
           (* §9.2: the line is not on disk, so the act is refused as the
              store stops. *)
-          { t with state = Stopped stop }, Not_done (Act_unavailable (Store_stopped stop))))
+          stop_machine t stop, Not_done (Act_unavailable (Store_stopped stop))))
 ;;
 
 type fiber_change =

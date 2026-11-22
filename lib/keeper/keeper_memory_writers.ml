@@ -1,7 +1,12 @@
 module By_workspace = Map.Make (String)
 module Registry = Runtime_exact_output_registry
 
-let tables : Librarian_writers.t By_workspace.t Atomic.t = Atomic.make By_workspace.empty
+type workspace_entry =
+  { memory_dir : string
+  ; writers : Librarian_writers.t
+  }
+
+let tables : workspace_entry By_workspace.t Atomic.t = Atomic.make By_workspace.empty
 
 let rec update change =
   let before = Atomic.get tables in
@@ -10,10 +15,21 @@ let rec update change =
 
 let workspace_key ~base_path = Keeper_registry_types.canonical_base_path_exn base_path
 
+let rec canonicalize_path path =
+  try Unix.realpath path with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Unix.Unix_error _ | Sys_error _ ->
+    let parent = Filename.dirname path in
+    if String.equal parent path
+    then path
+    else Filename.concat (canonicalize_path parent) (Filename.basename path)
+;;
+
 let start ~sw ~ask ~ask_room ~start_turn_log ~(config : Workspace.config) =
   let base_path = config.base_path in
   let key = workspace_key ~base_path in
   let memory_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let canonical_memory_dir = canonicalize_path memory_dir in
   let turns_dir = Workspace.keepers_runtime_dir config in
   let table =
     Librarian_writers.create
@@ -34,21 +50,24 @@ let start ~sw ~ask ~ask_room ~start_turn_log ~(config : Workspace.config) =
     (Some
        (fun ~keeper_id promotions ->
           World_memory.promote_from_librarian ~base_path ~keeper_id promotions));
-  update (By_workspace.add key table);
+  update (By_workspace.add key { memory_dir = canonical_memory_dir; writers = table });
   Keeper_compaction.set_on_epoch_committed
     (Some
-       (fun ~keeper_id (anchor : Keeper_compaction.compaction_anchor) ->
+       (fun ~keepers_dir ~keeper_id (anchor : Keeper_compaction.compaction_anchor) ->
+          let target_dir = canonicalize_path keepers_dir in
           By_workspace.iter
-            (fun (_ : string) writers ->
-               Librarian_writers.compaction_epoch_advanced writers keeper_id
-                 ~epoch_id:anchor.epoch_id)
+            (fun (_ : string) entry ->
+               if String.equal entry.memory_dir target_dir
+               then
+                 Librarian_writers.compaction_epoch_advanced entry.writers keeper_id
+                   ~epoch_id:anchor.epoch_id)
             (Atomic.get tables)));
   Keeper_memory_os_render.set_on_molt_requested
     (Some
        (fun ~keeper_id (budget : Keeper_memory_os_render.facts_budget) ->
           By_workspace.iter
-            (fun (_ : string) writers ->
-               Librarian_writers.request_molt writers keeper_id
+            (fun (_ : string) entry ->
+               Librarian_writers.request_molt entry.writers keeper_id
                  ~trigger:
                    (Librarian_lifecycle.Memory_growth_molt_requested
                       { current_bytes = budget.total_bytes
@@ -61,14 +80,14 @@ let start ~sw ~ask ~ask_room ~start_turn_log ~(config : Workspace.config) =
           let current_tables = Atomic.get tables in
           By_workspace.is_empty current_tables
           || By_workspace.exists
-               (fun (_ : string) writers ->
-                  Librarian_writers.is_stopped writers keeper_id)
+               (fun (_ : string) entry ->
+                  Librarian_writers.is_stopped entry.writers keeper_id)
                current_tables));
   (* A later start may have replaced this table; only its own entry goes. *)
   Eio.Switch.on_release sw (fun () ->
     update (fun tables ->
       match By_workspace.find_opt key tables with
-      | Some current when current == table -> By_workspace.remove key tables
+      | Some current when current.writers == table -> By_workspace.remove key tables
       | Some _ | None -> tables);
     if By_workspace.is_empty (Atomic.get tables)
     then (
@@ -78,7 +97,9 @@ let start ~sw ~ask ~ask_room ~start_turn_log ~(config : Workspace.config) =
   table
 ;;
 
-let find ~base_path = By_workspace.find_opt (workspace_key ~base_path) (Atomic.get tables)
+let find ~base_path =
+  Option.map (fun entry -> entry.writers) (By_workspace.find_opt (workspace_key ~base_path) (Atomic.get tables))
+;;
 
 let registered ~base_path =
   List.map

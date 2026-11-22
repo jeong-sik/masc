@@ -181,6 +181,34 @@ let test_explicit_relative_commands_survive_workspace_change () =
       [Install.Codex; Install.Claude; Install.Antigravity])
 ;;
 
+let test_vibe_and_kimi_vendor_and_uv_tool_bin_dir () =
+  with_home @@ fun home ->
+  Masc_test_deps.with_process_env "UV_TOOL_BIN_DIR" None @@ fun () ->
+  Fs_compat.mkdir_p (Filename.concat home ".local/bin");
+  let local_vibe = Filename.concat home ".local/bin/vibe-acp" in
+  let local_kimi = Filename.concat home ".local/bin/kimi" in
+  executable local_vibe;
+  executable local_kimi;
+  with_path [] @@ fun () ->
+  check (option string) "vibe-acp found in ~/.local/bin when PATH is empty"
+    (Some local_vibe)
+    (Install.locate Install.Mistral_vibe ~command:"vibe-acp");
+  check string "spawn_path resolves vibe-acp to ~/.local/bin/vibe-acp"
+    local_vibe
+    (Install.spawn_path Install.Mistral_vibe ~command:"vibe-acp");
+  check (option string) "kimi found in ~/.local/bin when PATH is empty"
+    (Some local_kimi)
+    (Install.locate Install.Kimi_code ~command:"kimi");
+  let uv_bin = Filename.concat home "uv-bin" in
+  Fs_compat.mkdir_p uv_bin;
+  let uv_vibe = Filename.concat uv_bin "vibe-acp" in
+  executable uv_vibe;
+  Masc_test_deps.with_process_env "UV_TOOL_BIN_DIR" (Some uv_bin) @@ fun () ->
+  check (option string) "UV_TOOL_BIN_DIR wins over ~/.local/bin for vibe-acp"
+    (Some uv_vibe)
+    (Install.locate Install.Mistral_vibe ~command:"vibe-acp")
+;;
+
 let () =
   run
     "runtime_official_cli_install"
@@ -200,6 +228,8 @@ let () =
             test_codex_install_dir_replaces_the_vendor_directory
         ; test_case "explicit relative commands survive workspace changes" `Quick
             test_explicit_relative_commands_survive_workspace_change
+        ; test_case "vibe-acp and kimi resolve via UV_TOOL_BIN_DIR and ~/.local/bin" `Quick
+            test_vibe_and_kimi_vendor_and_uv_tool_bin_dir
         ] )
     ]
 ;;

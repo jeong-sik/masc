@@ -127,20 +127,34 @@ let person_target config ~integration_id =
         | Error error -> Error (No_login error)
         | Ok target ->
           (match target.Server_runtime_setup_actions.client with
-           | Client.Antigravity -> Error Copy_without_owner
+           | Client.Antigravity | Client.Mistral_vibe -> Error Copy_without_owner
            | Client.Codex | Client.Claude -> Ok target)))
 
 (* What a confirmed login leaves behind. An operator's account is published to
-   the setup registry, from which setup selects it. A person's account is
-   linked to them in the authorization log, and the registry, which has no
-   owner, does not hear of it. *)
-let finish owner ~base_path ~integration_id ~cli_path ~login_id home =
-  match owner with
-  | Operator _ ->
+   the setup registry, from which setup selects it (except Mistral Vibe, which
+   stores credentials in the host OS keyring and publishes no setup copy). A
+   person's account is linked to them in the authorization log, and the
+   registry, which has no owner, does not hear of it. *)
+let initial_account_for_login owner client reference ~base_path ~integration_id ~cli_path home =
+  match owner, client, reference with
+  | Operator _, Client.Antigravity, Some reference -> Ok (Receipt.Published reference)
+  | Operator _, Client.Antigravity, None -> Ok Receipt.Unselected
+  | Operator _, Client.Mistral_vibe, (None | Some _) -> Ok Receipt.Unselected
+  | Operator _, (Codex | Claude), (None | Some _) ->
+    Client.publish ~workspace:base_path ~integration_id ~cli_path home
+    |> Result.map (fun reference -> Receipt.Published reference)
+  | Person _, (Client.Antigravity | Codex | Claude | Mistral_vibe), (None | Some _) ->
+    Ok Receipt.Unselected
+;;
+
+let finish owner ~client ~base_path ~integration_id ~cli_path ~login_id home =
+  match owner, client with
+  | Operator _, Client.Mistral_vibe -> Ok Receipt.Unselected
+  | Operator _, (Client.Codex | Client.Claude | Client.Antigravity) ->
     Client.publish ~workspace:base_path ~integration_id ~cli_path home
     |> Result.map (fun reference -> Receipt.Published reference)
     |> Result.map_error (fun _ -> "The selected account could not be published. Retry account recovery.")
-  | Person { zone; user_id; namespace = _ } ->
+  | Person { zone; user_id; namespace = _ }, (Client.Codex | Client.Claude | Client.Antigravity | Client.Mistral_vibe) ->
     let* provider_account_id =
       Authz_types.Provider_account_id.of_string login_id
       |> Result.map_error (fun _ -> account_failure) in
@@ -191,18 +205,14 @@ let start ~owner ~base_path ~body request reqd =
           ~account_id:(Session.id session) ~client ~existing in
         let* () = match client, existing with
           | Client.Antigravity, Some _ -> Ok ()
-          | (Codex | Claude | Antigravity), _ ->
+          | (Codex | Claude | Antigravity | Mistral_vibe), _ ->
             let* account_key = canonical_account_key (Client.home_dir home) in
             Session.bind_account session ~account_key
             |> Result.map_error Session.error_message in
         let* child_env = Client.environment home in
-        let* account = match owner, client, reference with
-          | Operator _, Client.Antigravity, Some reference -> Ok (Receipt.Published reference)
-          | Operator _, Client.Antigravity, None -> Ok Receipt.Unselected
-          | Operator _, (Codex | Claude), (None | Some _) ->
-            Client.publish ~workspace:base_path ~integration_id ~cli_path home
-            |> Result.map (fun reference -> Receipt.Published reference)
-          | Person _, (Client.Antigravity | Codex | Claude), (None | Some _) -> Ok Receipt.Unselected in
+        let* account =
+          initial_account_for_login owner client reference ~base_path ~integration_id ~cli_path home
+        in
         let receipt = { Receipt.login_id = Session.id session; integration_id;
           account; status = Receipt.Running } in
         let* () = Receipt.save ~workspace:base_path ~actor receipt
@@ -256,7 +266,7 @@ let start ~owner ~base_path ~body request reqd =
              Antigravity needs capture: native homes were published before spawn.
              Capturing here makes no successful-login or invocation claim. *)
           let account = match client with
-            | Client.Codex | Claude -> !receipt.account
+            | Client.Codex | Claude | Mistral_vibe -> !receipt.account
             | Antigravity ->
               (match observe () with
                | Error _ -> !receipt.account
@@ -301,7 +311,7 @@ let start ~owner ~base_path ~body request reqd =
                      detail of a verification does ([log_detail]). *)
                   Log.Server.warn "Setup login %s was not confirmed: %s" (Session.id session) detail;
                   Receipt.Failed, "The official client did not confirm the selected account. Retry login or verify the account.") in
-                let* account = finish owner ~base_path ~integration_id ~cli_path
+                let* account = finish owner ~client ~base_path ~integration_id ~cli_path
                     ~login_id:(Session.id session) home
                   |> Result.map_error (fun message -> Receipt.Failed, message) in
                 save { !receipt with account; status = Receipt.Complete observed }
@@ -677,3 +687,8 @@ let verify ~person ~base_path ~body request reqd =
   match answer with
   | Error (status, message, code) -> respond ?code ~status ~request reqd message
   | Ok json -> Http.Response.json_value ~request ~extra_headers:["cache-control", "no-store"] json reqd
+
+module For_testing = struct
+  let initial_account_for_login = initial_account_for_login
+  let finish_login = finish
+end

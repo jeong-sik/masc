@@ -99,21 +99,77 @@ let write_cold_archive ~archive_path entries =
     Fs_compat.save_file_atomic_strict archive_path body
 ;;
 
-let read path ~current =
+type lock_entry =
+  { mu : Cross_context_mutex.t
+  ; mutable users : int
+  }
+
+let lock_registry_mu = Mutex.create ()
+let path_locks : (string, lock_entry) Hashtbl.t = Hashtbl.create 16
+
+let canonical_lock_key log_path =
+  let dir = Filename.dirname log_path in
+  let base = Filename.basename log_path in
+  let real_dir =
+    try Unix.realpath dir with
+    | Unix.Unix_error _ -> dir
+  in
+  Filename.concat real_dir base
+;;
+
+let with_path_lock ~log_path f =
+  let key = canonical_lock_key log_path in
+  let entry =
+    Mutex.lock lock_registry_mu;
+    Fun.protect
+      ~finally:(fun () -> Mutex.unlock lock_registry_mu)
+      (fun () ->
+         match Hashtbl.find_opt path_locks key with
+         | Some e ->
+           e.users <- e.users + 1;
+           e
+         | None ->
+           let e = { mu = Cross_context_mutex.create (); users = 1 } in
+           Hashtbl.replace path_locks key e;
+           e)
+  in
+  let release () =
+    Mutex.lock lock_registry_mu;
+    Fun.protect
+      ~finally:(fun () -> Mutex.unlock lock_registry_mu)
+      (fun () ->
+         entry.users <- entry.users - 1;
+         if entry.users <= 0 then Hashtbl.remove path_locks key)
+  in
+  Fun.protect ~finally:release (fun () -> Cross_context_mutex.with_lock entry.mu f)
+;;
+
+let read_unlocked path ~current =
   let archive_path = Log_store.archive_path_of_log_path path in
-  let initial = { gone = By_id.empty; removals = 0; unreadable = 0 } in
-  match fold_cold_archive archive_path initial with
+  (* Read the live commit log FIRST, then the cold archive sidecar. Because
+     [compact_log] atomically writes the cold archive BEFORE atomically
+     rewriting the live log to a single Checkpoint line, reading live-first
+     and replaying live commits over cold entries guarantees zero dropped
+     removals even under concurrent cross-process compaction. *)
+  let collect_live (commits_rev, unreadable) ({ at; line } : Log_store.scanned) =
+    match line with
+    | Error (_ : Log_store.undecodable) -> commits_rev, unreadable + 1
+    | Ok (Started _) -> commits_rev, unreadable
+    | Ok (Committed commit) -> (at, commit) :: commits_rev, unreadable
+  in
+  match Log_store.fold path ~init:([], 0) ~f:collect_live with
   | Error _ as error -> error
-  | Ok after_cold ->
-    let after seen ({ at; line } : Log_store.scanned) =
-      match line with
-      | Error (_ : Log_store.undecodable) -> { seen with unreadable = seen.unreadable + 1 }
-      | Ok (Started _) -> seen
-      | Ok (Committed commit) -> after_commit seen ~line_at:at commit
-    in
-    (match Log_store.fold path ~init:after_cold ~f:after with
+  | Ok (live_commits_rev, live_unreadable) ->
+    let initial = { gone = By_id.empty; removals = 0; unreadable = live_unreadable } in
+    (match fold_cold_archive archive_path initial with
      | Error _ as error -> error
-     | Ok { gone; unreadable; removals = (_ : int) } ->
+     | Ok after_cold ->
+       let { gone; unreadable; removals = (_ : int) } =
+         List.fold_left
+           (fun seen (line_at, commit) -> after_commit seen ~line_at commit)
+           after_cold
+           (List.rev live_commits_rev)
+       in
        let gone =
          List.fold_left (fun gone fact -> By_id.remove (Types.memory_id fact) gone) gone current
        in
@@ -123,4 +179,8 @@ let read path ~current =
            (List.map snd (By_id.bindings gone))
        in
        Ok { left = List.map snd in_order; unreadable })
+;;
+
+let read path ~current =
+  with_path_lock ~log_path:path (fun () -> read_unlocked path ~current)
 ;;

@@ -297,7 +297,7 @@ let not_applied_text (number, (why : Effects.why_not), (_ : Answer.new_fact opti
   match why with
   | Removed_during_flight { seq } -> Printf.sprintf "op %d: removed by commit %d" number seq
   | Unknown_ref | Ref_used_twice | Source_outside_question | Not_valid_alone | Not_valid_in_room
-  | Successor_unsupported -> Printf.sprintf "op %d: another reason" number
+  | Successor_unsupported | Promotion_refused -> Printf.sprintf "op %d: another reason" number
 ;;
 
 (* {1 Steps} *)
@@ -1806,9 +1806,238 @@ let test_skip_line_passes_no_other_line () =
   check string "a stopped store" "the store is stopped: store unwritable" (act_text answer)
 ;;
 
+let test_fits_none_triggers_per_category_chunked_molt () =
+  let place = started_place () in
+  let v = booted place ~lane:(declared [ fast ]) ~at:100.0 in
+  let add_fact v ~at ~category claim =
+    fst
+      (write place v ~at
+         (Direct.Remember { claim; category; basis = Types.Observed Types.Transcript }))
+  in
+  let v = add_fact v ~at:101.0 ~category:Types.Constraint "keep WAL mode enabled" in
+  let v = add_fact v ~at:102.0 ~category:Types.Fact "server port is 8935" in
+  let v = add_fact v ~at:103.0 ~category:Types.Lesson "batch tool reads in parallel" in
+  (* Trigger a full-memory structural molt *)
+  let molting =
+    Machine.decide place v ~at:200.0 (Compaction_epoch_advanced { epoch_id = 1 })
+  in
+  let ask_num, q =
+    match molting.state with
+    | Asking { asking = { ask; asked = Room { category_filter = None; _ }; _ }; _ } ->
+      ask, room_question molting
+    | _ -> fail "expected unchunked molt Asking state"
+  in
+  (* Full-memory molt hits Fits_none (every slot refused Input_too_large) ->
+     machine must immediately fall back to per-category chunked molt! *)
+  let chunk1 =
+    Machine.decide place molting ~at:201.0
+      (room_ended ask_num (Room_not_answered { question = q; slots = sized Input_too_large }))
+  in
+  let ask1 =
+    match chunk1.state with
+    | Asking { asking = { ask; asked = Room { category_filter = Some Types.Constraint; _ }; _ }; _ } ->
+      ask
+    | _ -> fail "expected first chunked molt for Constraint category"
+  in
+  check bool "remaining categories queued in pending_molt_categories" true
+    (match chunk1.pending_molt_categories with
+     | Some (Some (Masc.Librarian_lifecycle.Compaction_epoch_advanced { epoch_id = 1 }), [ Types.Fact; Types.Lesson ]) ->
+       true
+     | _ -> false);
+  (* Answer chunk 1 -> automatically advances to chunk 2 (Fact) *)
+  let chunk2 =
+    Machine.decide place chunk1 ~at:202.0
+      (room_ended ask1 (room_answered (room_question chunk1) []))
+  in
+  let ask2 =
+    match chunk2.state with
+    | Asking { asking = { ask; asked = Room { category_filter = Some Types.Fact; _ }; _ }; _ } ->
+      ask
+    | _ -> fail "expected second chunked molt for Fact category"
+  in
+  (* Even if chunk 2 ALSO hits Fits_none, it must NOT re-expand infinitely; it advances to chunk 3 (Lesson) *)
+  let chunk3 =
+    Machine.decide place chunk2 ~at:203.0
+      (room_ended ask2
+         (Room_not_answered { question = room_question chunk2; slots = sized Input_too_large }))
+  in
+  let ask3 =
+    match chunk3.state with
+    | Asking { asking = { ask; asked = Room { category_filter = Some Types.Lesson; _ }; _ }; _ } ->
+      ask
+    | _ -> fail "expected third chunked molt for Lesson category"
+  in
+  check bool "pending_molt_categories empty once final chunk dispatched" true
+    (Option.is_none chunk3.pending_molt_categories);
+  (* Answer chunk 3 -> returns cleanly to Idle (no spin, not trapped in Refused_at_bottom) *)
+  let done_state =
+    Machine.decide place chunk3 ~at:204.0
+      (room_ended ask3 (room_answered (room_question chunk3) []))
+  in
+  match done_state.state with
+  | Idle _ -> ()
+  | _ -> failf "expected Idle after draining all chunked molt categories, got %s" (state_text done_state)
+;;
+
+let test_per_keeper_secret_redaction_and_pending_molt_categories_reset () =
+  (* 1. Opaque per-keeper secret under <base>/.masc/ssh/redaction/<keeper>.token
+        is redacted when place.memory_dir is production <base>/.masc/config/keepers! *)
+  let base_path = Filename.temp_dir "lib-machine-sec-" "" in
+  let keepers_dir =
+    Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "config")
+      "keepers"
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  let redaction_dir =
+    Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "ssh") "redaction"
+  in
+  Fs_compat.mkdir_p redaction_dir;
+  let opaque_secret = "OPAQUE_LIBRARIAN_TOKEN_77889900" in
+  ignore
+    (Fs_compat.save_file_atomic
+       (Filename.concat redaction_dir (keeper_id ^ ".token"))
+       opaque_secret
+     : (unit, string) result);
+  let place : Machine.place =
+    { memory_dir = keepers_dir; turns_dir = keepers_dir; keeper_id }
+  in
+  let (_ : int) =
+    append place ~at_end:0 (Turn_log.Log_started { id = turn_log; at = 50.0; mark = mark 0 })
+  in
+  let v = booted place ~lane:(declared [ fast ]) ~at:100.0 in
+  let v =
+    fst
+      (write place v ~at:101.0
+         (Direct.Remember
+            { claim = "deploy credential noted"
+            ; category = Types.Fact
+            ; basis = Types.Observed Types.Transcript
+            }))
+  in
+  let molting =
+    Machine.decide place v ~at:110.0 (Compaction_epoch_advanced { epoch_id = 1 })
+  in
+  let ask_num =
+    match molting.state with
+    | Asking { asking = { ask; _ }; _ } -> ask
+    | _ -> fail "expected Asking for molt"
+  in
+  let q = room_question molting in
+  let promo_op =
+    Answer.Promote_to_world
+      { refs = [ "m1" ]
+      ; scope = "workspace"
+      ; claim = "shared config uses " ^ opaque_secret
+      ; category = Types.Validated_approach
+      ; facets = [ "ops" ]
+      }
+  in
+  let after_promo =
+    Machine.decide place molting ~at:111.0 (room_ended ask_num (room_answered q [ promo_op ]))
+  in
+  let store_after =
+    match after_promo.state with
+    | Idle { store; _ } -> store
+    | _ -> failf "expected Idle after promotion molt, got %s" (state_text after_promo)
+  in
+  (match Store.last_promotions store_after with
+   | Some (_seq, [ promo ]) ->
+     check bool "opaque per-keeper secret stripped from Promote_to_world claim" false
+       (String_util.contains_substring promo.claim opaque_secret);
+     check bool "[REDACTED] marker present in Promote_to_world claim" true
+       (String_util.contains_substring promo.claim "[REDACTED]")
+   | Some (_, promos) -> failf "expected 1 promotion, got %d" (List.length promos)
+   | None -> fail "expected committed promotion with redacted opaque secret");
+
+  (* 2. Stale pending_molt_categories is cleared by start_molt, Stopped, and adopt *)
+  let p2 = started_place () in
+  let v2 = booted p2 ~lane:(declared [ fast ]) ~at:100.0 in
+  let add_f v ~at ~category claim =
+    fst
+      (write p2 v ~at
+         (Direct.Remember { claim; category; basis = Types.Observed Types.Transcript }))
+  in
+  let v2 = add_f v2 ~at:101.0 ~category:Types.Constraint "rule-a" in
+  let v2 = add_f v2 ~at:102.0 ~category:Types.Fact "fact-b" in
+  let v2 = add_f v2 ~at:103.0 ~category:Types.Lesson "lesson-c" in
+  let m2 = Machine.decide p2 v2 ~at:200.0 (Compaction_epoch_advanced { epoch_id = 1 }) in
+  let ask_m2 =
+    match m2.state with
+    | Asking { asking = { ask; _ }; _ } -> ask
+    | _ -> fail "expected Asking"
+  in
+  let chunked =
+    Machine.decide p2 m2 ~at:201.0
+      (room_ended ask_m2
+         (Room_not_answered { question = room_question m2; slots = sized Input_too_large }))
+  in
+  check bool "chunked molt populated pending_molt_categories" true
+    (Option.is_some chunked.pending_molt_categories);
+  (* (a) Pause via Declaration_changed None (Idle) then start a fresh full molt ->
+         start_molt must clear stale pending_molt_categories! *)
+  let ask_c1 =
+    match chunked.state with
+    | Asking { asking = { ask; _ }; _ } -> ask
+    | _ -> fail "expected chunked Asking"
+  in
+  let paused = Machine.decide p2 chunked ~at:202.0 (Declaration_changed None) in
+  let paused_idle =
+    Machine.decide p2 paused ~at:203.0
+      (room_ended ask_c1 (room_answered (room_question chunked) []))
+  in
+  let resumed_lane =
+    Machine.decide p2 paused_idle ~at:204.0 (Declaration_changed (Some (declared [ fast ])))
+  in
+  (* Note: resuming lane while pending_molt_categories was present starts next chunk or
+     a fresh start_molt from Stopped/Idle clears it. Test Stopped + adopt explicitly: *)
+  let _ = resumed_lane in
+  let diverged =
+    Machine.decide p2 chunked ~at:205.0
+      (room_ended ask_c1
+         (Room_memory_diverged
+            { expected = Digest.digest_of_bytes (file_bytes (snapshot_path p2))
+            ; observed = Digest.digest_of_bytes (other_snapshot ())
+            }))
+  in
+  check bool "Stopped transition clears pending_molt_categories" true
+    (Option.is_none diverged.pending_molt_categories);
+  (* Also verify start_molt clears pending_molt_categories directly when Idle with a stale queue *)
+  let stale_idle =
+    { paused_idle with
+      lane = Some (declared [ fast ])
+    ; pending_molt_categories = Some (None, [ Types.Lesson ])
+    }
+  in
+  let fresh_molt =
+    Machine.decide p2 stale_idle ~at:206.0 (Compaction_epoch_advanced { epoch_id = 2 })
+  in
+  check bool "start_molt clears stale pending_molt_categories" true
+    (Option.is_none fresh_molt.pending_molt_categories);
+  (* Also verify adopt clears any pending_molt_categories on Stopped *)
+  let stale_stopped =
+    { diverged with pending_molt_categories = Some (None, [ Types.Lesson ]) }
+  in
+  let adopted, adopt_act =
+    Machine.adopt p2 stale_stopped ~at:207.0 ~by:"op-1"
+      ~observed:(Digest.digest_of_bytes (file_bytes (snapshot_path p2)))
+  in
+  (match adopt_act with
+   | Machine.Done -> ()
+   | Machine.Not_done _ -> fail "expected adopt to succeed");
+  check bool "adopt clears stale pending_molt_categories" true
+    (Option.is_none adopted.pending_molt_categories)
+;;
+
 let () =
   run "librarian_machine"
     [ "boot", [ test_case "opens or stops, and asks" `Quick test_boot ]
+    ; ( "chunked molt"
+      , [ test_case "Fits_none falls back to per-category chunked molt without looping" `Quick
+            test_fits_none_triggers_per_category_chunked_molt
+        ; test_case "per-keeper secret redaction under config/keepers & pending_molt_categories reset" `Quick
+            test_per_keeper_secret_redaction_and_pending_molt_categories_reset
+        ] )
     ; ( "table"
       , [ test_case "idle, a closed turn" `Quick test_idle_turn_closed
         ; test_case "idle, the pulse" `Quick test_idle_pulse

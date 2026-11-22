@@ -169,6 +169,10 @@ type t =
   (** A structural molt request latched while an ask was in flight (or while
       no lane was declared), dispatched as soon as the active ask settles
       without ever spinning from [ended_molt] itself. *)
+  ; pending_molt_categories :
+      (Librarian_lifecycle.molt_trigger option * Keeper_memory_os_types.category list) option
+  (** Remaining per-category chunks to molt/consolidate after a full-memory
+      room/molt ask hit [Fits_none] across all declared slots. *)
   }
 
 (** Structural molt trigger precedence latch: unconditional triggers

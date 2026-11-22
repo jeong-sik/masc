@@ -120,9 +120,10 @@ val store_error_to_string : store_error -> string
 
 (** Register a process-wide callback notified whenever a new immutable
     compaction epoch commits (used by {!Keeper_memory_writers} to drive
-    structural Librarian molting without a module cycle). *)
+    structural Librarian molting without a module cycle). Carries [keepers_dir]
+    so multi-workspace hosts notify only the matching workspace. *)
 val set_on_epoch_committed :
-  (keeper_id:string -> compaction_anchor -> unit) option -> unit
+  (keepers_dir:string -> keeper_id:string -> compaction_anchor -> unit) option -> unit
 
 (** Register an internal canonical-turn watermark observer notified with the
     exact [keepers_dir], [keeper_id], committed [anchor], and [evicted_turns]
@@ -173,6 +174,11 @@ val deterministic_fold
   -> evicted:canonical_turn list
   -> (compaction_anchor, string) result
 
+(** Fallback anchor byte ceiling used when a [Provider_context_overflow]
+    trigger does not report an explicit provider token limit so pinned anchors
+    never grow unbounded across compaction epochs. *)
+val default_anchor_max_bytes : int
+
 (** Structural byte ceiling for a pinned compaction anchor derived strictly from
     the explicit provider window ([capacity_bytes - reserved_bytes]), preventing
     monotonic anchor growth from crowding out the live retained tail. *)
@@ -204,7 +210,8 @@ val bound_anchor_to_budget
     {!compact_evicted_messages} for eviction anchoring/archiving alongside
     {!Keeper_model_input_demotion} and {!Tool_blob_store} capture. *)
 val microcompact_turns
-  :  blob_store:Tool_blob_store.t
+  :  ?redact:Keeper_secret_redaction.t
+  -> blob_store:Tool_blob_store.t
   -> keep_recent_turns:int
   -> canonical_turn list
   -> microcompaction_outcome
@@ -216,7 +223,8 @@ val microcompact_turns
     is supplied), and finally splits off the minimal oldest prefix that allows
     the newest suffix to fit instead of cliff-dropping to zero turns. *)
 val project_for_provider
-  :  ?blob_store:Tool_blob_store.t
+  :  ?redact:Keeper_secret_redaction.t
+  -> ?blob_store:Tool_blob_store.t
   -> ?keep_recent_turns:int
   -> anchor:compaction_anchor option
   -> measure_message_bytes:(Agent_core.Types.message -> int)
@@ -272,7 +280,8 @@ val load_archived_turns_for_epoch
   -> (canonical_turn list, store_error) result
 
 (** Atomically commit an immutable compaction epoch together with its verbatim
-    archived turns inside a single SQLite WAL transaction off-domain. *)
+    archived turns inside a single SQLite WAL transaction off-domain. Applies
+    {!Keeper_secret_redaction} before persisting raw messages and anchor text. *)
 val commit_epoch
   :  keepers_dir:string
   -> keeper_id:string
@@ -291,7 +300,8 @@ val commit_epoch
     notifying [on_epoch_committed] (for Librarian structural molting), and
     returning the ready-to-send provider-neutral message list. *)
 val compact_and_project
-  :  ?blob_store:Tool_blob_store.t
+  :  ?redact:Keeper_secret_redaction.t
+  -> ?blob_store:Tool_blob_store.t
   -> ?keep_recent_turns:int
   -> ?force_trigger:compaction_trigger
   -> ?summarize:
@@ -310,15 +320,17 @@ val compact_and_project
 (** Fold an evicted prefix of raw conversation messages (partitioned by
     {!Runtime_model_input_tail_window.annotate} atoms into canonical turns) onto
     the Keeper's latest persisted compaction anchor and commit a new immutable
-    epoch into [<keepers_dir>/<keeper_id>.compaction.db]. Raw pre-microcompaction
-    evicted turns are archived verbatim independent of {!Tool_blob_store}.
-    When [max_anchor_bytes] is provided (or derivable structurally from
-    [trigger]), {!bound_anchor_to_budget} bounds the committed anchor without
-    losing archived epoch history. Idempotent: atoms already covered by
+    epoch into [<keepers_dir>/<keeper_id>.compaction.db] inside a single
+    [BEGIN IMMEDIATE] SQLite transaction off-domain. Raw pre-microcompaction
+    evicted turns are secret-redacted and archived verbatim independent of
+    {!Tool_blob_store}. Always bounds the committed anchor via
+    {!bound_anchor_to_budget} (falling back to {!default_anchor_max_bytes} when
+    no provider limit is known). Idempotent: atoms already covered by
     [latest_anchor.covers_through_turn] are skipped, and an empty newly-evicted
     span returns [Ok None]. *)
 val compact_evicted_messages
-  :  ?blob_store:Tool_blob_store.t
+  :  ?redact:Keeper_secret_redaction.t
+  -> ?blob_store:Tool_blob_store.t
   -> ?max_anchor_bytes:int
   -> ?measure_message_bytes:(Agent_core.Types.message -> int)
   -> ?on_epoch_committed:(compaction_anchor -> unit)

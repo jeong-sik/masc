@@ -21,8 +21,17 @@ type t =
   ; unreadable : int
   }
 
-(** [current] is the Memory the snapshot holds now. Reads cold compacted
-    entries (if [<archive_path>] exists) followed by the live commit log. *)
+(** Serialize cold-archive reads and [compact_log] rewrites for the same
+    commit-log path across domains/fibers in this process. *)
+val with_path_lock : log_path:string -> (unit -> 'a) -> 'a
+
+(** Same as {!read} when the caller already holds {!with_path_lock} for [path]. *)
+val read_unlocked : string -> current:fact list -> (t, Private_jsonl_scan.error) result
+
+(** [current] is the Memory the snapshot holds now. Reads the live commit log
+    first and then the cold compacted archive (if present), replaying the live
+    log on top of cold entries so concurrent log compaction can never drop an
+    entry in the gap between archive write and log rewrite. *)
 val read : string -> current:fact list -> (t, Private_jsonl_scan.error) result
 
 (** Atomically persist compacted cold archive entries to [archive_path]

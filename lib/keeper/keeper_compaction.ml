@@ -92,7 +92,9 @@ let store_error_to_string = function
       smallest_turn_bytes
 ;;
 
-let global_on_epoch_committed : (keeper_id:string -> compaction_anchor -> unit) option Atomic.t =
+let global_on_epoch_committed
+    : (keepers_dir:string -> keeper_id:string -> compaction_anchor -> unit) option Atomic.t
+  =
   Atomic.make None
 ;;
 
@@ -126,7 +128,7 @@ let notify_global_epoch_committed ~keepers_dir ~keeper_id ~evicted_turns anchor 
   match Atomic.get global_on_epoch_committed with
   | None -> ()
   | Some cb ->
-    (try cb ~keeper_id anchor with
+    (try cb ~keepers_dir ~keeper_id anchor with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
        Log.Keeper.warn
@@ -515,6 +517,16 @@ let deterministic_fold ~previous ~evicted =
 
 (* --- Structural Anchor Budget & Lossless Roll-Off --- *)
 
+let default_anchor_max_bytes = 32_768
+
+let saturating_mul a b =
+  if a <= 0 || b <= 0
+  then 0
+  else if a > max_int / b
+  then max_int
+  else a * b
+;;
+
 let anchor_budget_for_window ~capacity_bytes ~reserved_bytes =
   max 0 ((capacity_bytes - reserved_bytes) / 4)
 ;;
@@ -545,17 +557,11 @@ let truncate_intent_to_budget s budget =
   else utf8_safe_prefix s (budget - 3) ^ "..."
 ;;
 
-let pair_list_weight pairs =
-  List.fold_left
-    (fun acc (text, tid) ->
-       acc + String.length text + String.length (Turn_id.to_string tid) + 12)
-    0
-    pairs
+let pair_weight (text, tid) =
+  String.length text + String.length (Turn_id.to_string tid) + 12
 ;;
 
-let string_list_weight items =
-  List.fold_left (fun acc s -> acc + String.length s + 4) 0 items
-;;
+let string_weight s = String.length s + 4
 
 let mark_rolled_off (a : compaction_anchor) =
   let rolled_epoch = if a.epoch_id > 1 then a.epoch_id - 1 else max 1 a.epoch_id in
@@ -567,51 +573,200 @@ let mark_rolled_off (a : compaction_anchor) =
   { a with archived_epochs_through }
 ;;
 
+let truncate_empty_anchor_intent ~measure_message_bytes ~ceiling (a : compaction_anchor) =
+  if String.equal a.active_intent ""
+  then a
+  else (
+    let empty_intent = { a with active_intent = "" } in
+    let header_bytes = measure_message_bytes (anchor_to_message empty_intent) in
+    let intent_budget = max 0 (ceiling - header_bytes) in
+    let truncated = truncate_intent_to_budget a.active_intent intent_budget in
+    if String.equal truncated a.active_intent then a else { a with active_intent = truncated })
+;;
+
+(* O(N) precomputed drop schedule + O(log N) binary search over
+   [measure_message_bytes], preserving the exact heaviest-section oldest-first
+   eviction order without O(N^2) weight rescans or full buffer re-renders. *)
 let bound_anchor_to_budget ~measure_message_bytes ~max_anchor_bytes (anchor : compaction_anchor) =
   let ceiling = max 0 max_anchor_bytes in
   let fits a = measure_message_bytes (anchor_to_message a) <= ceiling in
   if fits anchor
   then anchor
   else (
-    let rec drop_loop (a : compaction_anchor) =
-      if fits a
-      then a
+    let rolled = mark_rolled_off anchor in
+    if fits rolled
+    then rolled
+    else (
+      let facts_arr = Array.of_list rolled.verified_facts_and_files in
+      let decisions_arr = Array.of_list rolled.decisions_made in
+      let threads_arr = Array.of_list rolled.open_threads in
+      let nf = Array.length facts_arr in
+      let nd = Array.length decisions_arr in
+      let nt = Array.length threads_arr in
+      let total = nf + nd + nt in
+      if total = 0
+      then truncate_empty_anchor_intent ~measure_message_bytes ~ceiling rolled
       else (
-        let fw = pair_list_weight a.verified_facts_and_files in
-        let dw = pair_list_weight a.decisions_made in
-        let tw = string_list_weight a.open_threads in
-        match a.verified_facts_and_files, a.decisions_made, a.open_threads with
-        | [], [], [] ->
-          if String.equal a.active_intent ""
-          then a
+        let fw = ref 0 in
+        for i = 0 to nf - 1 do
+          fw := !fw + pair_weight facts_arr.(i)
+        done;
+        let dw = ref 0 in
+        for i = 0 to nd - 1 do
+          dw := !dw + pair_weight decisions_arr.(i)
+        done;
+        let tw = ref 0 in
+        for i = 0 to nt - 1 do
+          tw := !tw + string_weight threads_arr.(i)
+        done;
+        let drop_f = Array.make (total + 1) 0 in
+        let drop_d = Array.make (total + 1) 0 in
+        let drop_t = Array.make (total + 1) 0 in
+        let fi = ref 0 in
+        let di = ref 0 in
+        let ti = ref 0 in
+        for step = 1 to total do
+          let has_f = !fi < nf in
+          let has_d = !di < nd in
+          let has_t = !ti < nt in
+          if has_d && !dw >= !fw && !dw >= !tw
+          then (
+            dw := !dw - pair_weight decisions_arr.(!di);
+            incr di)
+          else if has_f && !fw >= !dw && !fw >= !tw
+          then (
+            fw := !fw - pair_weight facts_arr.(!fi);
+            incr fi)
+          else if has_t
+          then (
+            tw := !tw - string_weight threads_arr.(!ti);
+            incr ti)
+          else if has_f
+          then (
+            fw := !fw - pair_weight facts_arr.(!fi);
+            incr fi)
+          else if has_d
+          then (
+            dw := !dw - pair_weight decisions_arr.(!di);
+            incr di);
+          drop_f.(step) <- !fi;
+          drop_d.(step) <- !di;
+          drop_t.(step) <- !ti
+        done;
+        let slice_list arr start len =
+          if start >= len then [] else Array.to_list (Array.sub arr start (len - start))
+        in
+        let anchor_at step =
+          { rolled with
+            verified_facts_and_files = slice_list facts_arr drop_f.(step) nf
+          ; decisions_made = slice_list decisions_arr drop_d.(step) nd
+          ; open_threads = slice_list threads_arr drop_t.(step) nt
+          }
+        in
+        let rec bsearch lo hi =
+          if lo >= hi
+          then lo
           else (
-            let empty_intent = { a with active_intent = "" } in
-            let header_bytes = measure_message_bytes (anchor_to_message empty_intent) in
-            let intent_budget = max 0 (ceiling - header_bytes) in
-            let truncated = truncate_intent_to_budget a.active_intent intent_budget in
-            if String.equal truncated a.active_intent
-            then a
-            else { a with active_intent = truncated })
-        | _, _ :: d_rest, _ when dw >= fw && dw >= tw ->
-          drop_loop { a with decisions_made = d_rest }
-        | _ :: f_rest, _, _ when fw >= dw && fw >= tw ->
-          drop_loop { a with verified_facts_and_files = f_rest }
-        | _, _, _ :: t_rest ->
-          drop_loop { a with open_threads = t_rest }
-        | _ :: f_rest, _, [] ->
-          drop_loop { a with verified_facts_and_files = f_rest }
-        | [], _ :: d_rest, [] ->
-          drop_loop { a with decisions_made = d_rest })
-    in
-    drop_loop (mark_rolled_off anchor))
+            let mid = lo + ((hi - lo) / 2) in
+            if fits (anchor_at mid) then bsearch lo mid else bsearch (mid + 1) hi)
+        in
+        let best_step = bsearch 1 total in
+        let candidate = anchor_at best_step in
+        if fits candidate
+        then candidate
+        else truncate_empty_anchor_intent ~measure_message_bytes ~ceiling candidate)))
+;;
+
+(* --- Secret Redaction at Compaction & Microcompaction Storage Boundaries --- *)
+
+let strip_trailing_slashes path =
+  let rec loop len =
+    if len > 1 && path.[len - 1] = '/' then loop (len - 1) else len
+  in
+  let len = loop (String.length path) in
+  if len = String.length path then path else String.sub path 0 len
+;;
+
+let base_path_of_masc_subdir dir =
+  let rec walk current =
+    let cleaned = strip_trailing_slashes current in
+    if String.equal (Filename.basename cleaned) ".masc"
+    then Some (Filename.dirname cleaned)
+    else (
+      let parent = Filename.dirname cleaned in
+      if String.equal parent cleaned then None else walk parent)
+  in
+  walk dir
+;;
+
+let default_redact_for_keepers_dir ~keepers_dir ~keeper_id =
+  match base_path_of_masc_subdir keepers_dir with
+  | Some base_path ->
+    Keeper_secret_redaction.snapshot ~base_path ~keeper_name:keeper_id
+  | None -> Keeper_secret_redaction.empty
+;;
+
+let resolve_redact ?redact ~keepers_dir ~keeper_id () =
+  match redact with
+  | Some r -> Keeper_secret_redaction.copy_for_current_domain r
+  | None -> default_redact_for_keepers_dir ~keepers_dir ~keeper_id
+;;
+
+let rec redact_content_block redact (block : Agent_core.Types.content_block) =
+  match block with
+  | Agent_core.Types.Text s ->
+    Agent_core.Types.Text (Keeper_secret_redaction.redact_text redact s)
+  | Thinking t ->
+    Thinking { t with content = Keeper_secret_redaction.redact_text redact t.content }
+  | RedactedThinking s ->
+    RedactedThinking (Keeper_secret_redaction.redact_text redact s)
+  | ToolUse tu ->
+    ToolUse { tu with input = Keeper_secret_redaction.redact_json redact tu.input }
+  | ToolResult tr ->
+    ToolResult
+      { tr with
+        content = Keeper_secret_redaction.redact_text redact tr.content
+      ; json = Option.map (Keeper_secret_redaction.redact_json redact) tr.json
+      ; content_blocks = Option.map (List.map (redact_content_block redact)) tr.content_blocks
+      }
+  | (ToolReference _ | ReasoningDetails _ | Image _ | Document _ | Audio _) as unchanged ->
+    unchanged
+;;
+
+let redact_message redact (msg : Agent_core.Types.message) =
+  { msg with content = List.map (redact_content_block redact) msg.content }
+;;
+
+let redact_turn redact (turn : canonical_turn) =
+  { turn with messages = List.map (redact_message redact) turn.messages }
+;;
+
+let redact_anchor redact (a : compaction_anchor) =
+  { a with
+    active_intent = Keeper_secret_redaction.redact_text redact a.active_intent
+  ; verified_facts_and_files =
+      List.map
+        (fun (text, tid) -> Keeper_secret_redaction.redact_text redact text, tid)
+        a.verified_facts_and_files
+  ; decisions_made =
+      List.map
+        (fun (text, tid) -> Keeper_secret_redaction.redact_text redact text, tid)
+        a.decisions_made
+  ; open_threads = List.map (Keeper_secret_redaction.redact_text redact) a.open_threads
+  }
 ;;
 
 (* --- Deterministic Microcompaction --- *)
 
-let externalize_body ~blob_store body =
+let externalize_body ?redact ~blob_store body =
   match Tool_output.decode_any_handle body with
   | Tool_output.Decoded _ | Tool_output.Invalid_marker _ -> None
   | Tool_output.Not_marker ->
+    let body =
+      match redact with
+      | None -> body
+      | Some r -> Keeper_secret_redaction.redact_text r body
+    in
     let preview = Tool_blob_store.make_preview body in
     let digest = Agent_core_sha256.(digest_string body |> to_hex) in
     (match
@@ -639,11 +794,11 @@ let externalize_body ~blob_store body =
          | exception Sys_error _ -> None))
 ;;
 
-let microcompact_block ~blob_store (block : Agent_core.Types.content_block) =
+let microcompact_block ?redact ~blob_store (block : Agent_core.Types.content_block) =
   match block with
   | Agent_core.Types.ToolResult tr ->
     let content, c_refs, c_saved =
-      match externalize_body ~blob_store tr.content with
+      match externalize_body ?redact ~blob_store tr.content with
       | Some (handle, ref_, saved) -> handle, [ ref_ ], saved
       | None -> tr.content, [], 0
     in
@@ -656,7 +811,7 @@ let microcompact_block ~blob_store (block : Agent_core.Types.content_block) =
             (fun (acc_b, acc_r, acc_s) blk ->
                match blk with
                | Agent_core.Types.Text s ->
-                 (match externalize_body ~blob_store s with
+                 (match externalize_body ?redact ~blob_store s with
                   | Some (handle, ref_, ds) ->
                     Agent_core.Types.Text handle :: acc_b, ref_ :: acc_r, acc_s + ds
                   | None -> blk :: acc_b, acc_r, acc_s)
@@ -678,11 +833,11 @@ let microcompact_block ~blob_store (block : Agent_core.Types.content_block) =
     block, [], 0
 ;;
 
-let microcompact_message ~blob_store (msg : Agent_core.Types.message) =
+let microcompact_message ?redact ~blob_store (msg : Agent_core.Types.message) =
   let rev_content, rev_refs, saved =
     List.fold_left
       (fun (acc_c, acc_r, acc_s) blk ->
-         let blk', refs, ds = microcompact_block ~blob_store blk in
+         let blk', refs, ds = microcompact_block ?redact ~blob_store blk in
          blk' :: acc_c, List.rev_append refs acc_r, acc_s + ds)
       ([], [], 0)
       msg.content
@@ -692,7 +847,7 @@ let microcompact_message ~blob_store (msg : Agent_core.Types.message) =
   else { msg with content = List.rev rev_content }, List.rev rev_refs, saved
 ;;
 
-let microcompact_turns ~blob_store ~keep_recent_turns turns =
+let microcompact_turns ?redact ~blob_store ~keep_recent_turns turns =
   let total = List.length turns in
   let eligible_count = max 0 (total - max 0 keep_recent_turns) in
   let rec loop idx acc_turns acc_refs acc_saved = function
@@ -710,7 +865,7 @@ let microcompact_turns ~blob_store ~keep_recent_turns turns =
         let rev_msgs, refs, saved =
           List.fold_left
             (fun (m_acc, r_acc, s_acc) msg ->
-               let msg', r, ds = microcompact_message ~blob_store msg in
+               let msg', r, ds = microcompact_message ?redact ~blob_store msg in
                msg' :: m_acc, List.rev_append r r_acc, s_acc + ds)
             ([], [], 0)
             turn.messages
@@ -756,6 +911,7 @@ let split_to_fit ~measure_message_bytes ~available_bytes turns =
 ;;
 
 let project_for_provider
+      ?redact
       ?blob_store
       ?(keep_recent_turns = 2)
       ~anchor
@@ -787,7 +943,7 @@ let project_for_provider
       match blob_store with
       | None -> turns, None
       | Some store ->
-        let outcome = microcompact_turns ~blob_store:store ~keep_recent_turns turns in
+        let outcome = microcompact_turns ?redact ~blob_store:store ~keep_recent_turns turns in
         outcome.turns, Some outcome
     in
     let working_turn_bytes =
@@ -950,13 +1106,71 @@ let init_schema db =
        ref_json TEXT NOT NULL)")
 ;;
 
+let sqlite_companions_absent path =
+  let rec check = function
+    | [] -> Ok true
+    | suffix :: rest ->
+      (match Unix.lstat (path ^ suffix) with
+       | _ -> Ok false
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> check rest
+       | exception Unix.Unix_error (code, fn, arg) ->
+         Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)))
+  in
+  check
+    [ Common.sqlite_journal_suffix
+    ; Common.sqlite_wal_suffix
+    ; Common.sqlite_shm_suffix
+    ]
+;;
+
+let ensure_dir_result dir =
+  try
+    Fs_compat.mkdir_p dir;
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Sys_error detail -> Error (Sqlite_error { operation = "mkdir_p"; detail })
+  | Unix.Unix_error (code, fn, arg) ->
+    Error
+      (Sqlite_error
+         { operation = "mkdir_p"
+         ; detail = Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
+         })
+;;
+
 let with_db ~create ~keepers_dir ~keeper_id f =
   let path = db_path ~keepers_dir ~keeper_id in
   Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-    if (not create) && not (Sys.file_exists path)
+    let should_open =
+      if create
+      then
+        let* () = ensure_dir_result keepers_dir in
+        Ok true
+      else (
+        match Unix.lstat path with
+        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+        | exception Unix.Unix_error (code, fn, arg) ->
+          Error
+            (Sqlite_error
+               { operation = "lstat"
+               ; detail = Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
+               })
+        | { Unix.st_size = 0; _ } ->
+          (match sqlite_companions_absent path with
+           | Ok true -> Ok false
+           | Ok false ->
+             Error
+               (Sqlite_error
+                  { operation = "db_open"
+                  ; detail = "empty compaction database with present sqlite companions"
+                  })
+           | Error detail -> Error (Sqlite_error { operation = "lstat_companion"; detail }))
+        | _ -> Ok true)
+    in
+    let* open_now = should_open in
+    if not open_now
     then Ok None
     else (
-      if create then Fs_compat.mkdir_p keepers_dir;
       match
         if create
         then Sqlite3.db_open path
@@ -1159,43 +1373,93 @@ let sync_active_microcompacted_handles ~keepers_dir ~keeper_id handles =
     Ok ()
 ;;
 
-let sqlite_companions_absent path =
-  let rec check = function
-    | [] -> Ok true
-    | suffix :: rest ->
-      (match Unix.lstat (path ^ suffix) with
-       | _ -> Ok false
-       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> check rest
-       | exception Unix.Unix_error (code, fn, arg) ->
-         Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)))
-  in
-  check
-    [ Common.sqlite_journal_suffix
-    ; Common.sqlite_wal_suffix
-    ; Common.sqlite_shm_suffix
-    ]
+(* Stream-extract ONLY live blob/media references (plus any malformed refs so
+   sweep fails closed) from each SQLite JSON row and discard the full row AST
+   immediately, avoiding O(entire-archive) RAM allocation. *)
+let history_tool_payload_key fields =
+  match List.assoc_opt "type" fields with
+  | Some (`String "tool_use") -> Some "input"
+  | Some (`String "tool_result") -> Some "tool_result_json"
+  | _ -> None
 ;;
 
-let collect_json_column db ~operation ~table ~sql acc_rev =
+let rec extract_blob_refs_from_json ~history_media ~seen ~acc_rev (json : Yojson.Safe.t) =
+  match json with
+  | `String text ->
+    (match Tool_output.decode_any_handle text with
+     | Tool_output.Not_marker -> ()
+     | Tool_output.Decoded ref_ ->
+       let key = "s:" ^ ref_.sha256 ^ ":" ^ ref_.mime ^ ":" ^ text in
+       if not (Hashtbl.mem seen key)
+       then (
+         Hashtbl.add seen key ();
+         acc_rev := `String text :: !acc_rev)
+     | Tool_output.Invalid_marker _ ->
+       (* Preserve invalid markers so Tool_blob_maintenance still fails closed. *)
+       acc_rev := `String text :: !acc_rev)
+  | `Assoc fields ->
+    (match Tool_output.normalized_artifact_ref_of_json json with
+     | Tool_output.Decoded_normalized_artifact_ref ref_ ->
+       let key = "a:" ^ ref_.sha256 ^ ":" ^ ref_.mime in
+       if not (Hashtbl.mem seen key)
+       then (
+         Hashtbl.add seen key ();
+         acc_rev := json :: !acc_rev)
+     | Tool_output.Invalid_normalized_artifact_ref _ -> acc_rev := json :: !acc_rev
+     | Tool_output.Not_normalized_artifact_ref ->
+       let media_decoded =
+         if history_media
+         then Agent_core_base.History.stored_source_of_json json
+         else Agent_core_base.History.Not_stored_source
+       in
+       (match media_decoded with
+        | Agent_core_base.History.Decoded_stored_source { stored; media_type = _ } ->
+          let key = "m:" ^ stored.sha256 in
+          if not (Hashtbl.mem seen key)
+          then (
+            Hashtbl.add seen key ();
+            acc_rev := json :: !acc_rev)
+        | Agent_core_base.History.Invalid_stored_source _ -> acc_rev := json :: !acc_rev
+        | Agent_core_base.History.Not_stored_source ->
+          let skipped_media_key = if history_media then history_tool_payload_key fields else None in
+          List.iter
+            (fun (k, v) ->
+               let child_media =
+                 history_media
+                 &&
+                 match skipped_media_key with
+                 | Some skip -> not (String.equal k skip)
+                 | None -> true
+               in
+               extract_blob_refs_from_json ~history_media:child_media ~seen ~acc_rev v)
+            fields))
+  | `List items ->
+    List.iter (extract_blob_refs_from_json ~history_media ~seen ~acc_rev) items
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ -> ()
+;;
+
+let stream_blob_refs_from_column db ~operation ~table ~sql ~seen ~acc_rev =
   let* present = table_exists db table in
   if not present
-  then Ok acc_rev
+  then Ok ()
   else
     with_stmt db operation sql (fun stmt ->
-      let rec loop acc =
+      let rec loop () =
         let rc = Sqlite3.step stmt in
         if rc = Sqlite3.Rc.ROW
         then (
           let raw = Sqlite3.column_text stmt 0 in
           match Yojson.Safe.from_string raw with
-          | json -> loop (json :: acc)
+          | json ->
+            extract_blob_refs_from_json ~history_media:true ~seen ~acc_rev json;
+            loop ()
           | exception Yojson.Json_error detail ->
             Error (Corrupt_record { context = operation; detail }))
         else if rc = Sqlite3.Rc.DONE
-        then Ok acc
+        then Ok ()
         else Error (sqlite_err db operation rc)
       in
-      loop acc_rev)
+      loop ())
 ;;
 
 let decode_live_blob_references_json path =
@@ -1226,32 +1490,37 @@ let decode_live_blob_references_json path =
                   ignore (exec_sql db "rollback_read_tx" "ROLLBACK;" : (unit, store_error) result)
                 in
                 let work () =
-                  let* items =
-                    collect_json_column
+                  let seen = Hashtbl.create 32 in
+                  let acc_rev = ref [] in
+                  let* () =
+                    stream_blob_refs_from_column
                       db
                       ~operation:"scan_active_handles"
                       ~table:"active_microcompacted_handles"
                       ~sql:"SELECT ref_json FROM active_microcompacted_handles ORDER BY sha256 ASC"
-                      []
+                      ~seen
+                      ~acc_rev
                   in
-                  let* items =
-                    collect_json_column
+                  let* () =
+                    stream_blob_refs_from_column
                       db
                       ~operation:"scan_epochs"
                       ~table:"compaction_epochs"
                       ~sql:"SELECT anchor_json FROM compaction_epochs ORDER BY epoch_id ASC"
-                      items
+                      ~seen
+                      ~acc_rev
                   in
-                  let* items =
-                    collect_json_column
+                  let* () =
+                    stream_blob_refs_from_column
                       db
                       ~operation:"scan_archived_turns"
                       ~table:"archived_turns"
                       ~sql:"SELECT messages_json FROM archived_turns ORDER BY epoch_id ASC, sequence_ord ASC"
-                      items
+                      ~seen
+                      ~acc_rev
                   in
                   let* () = exec_sql db "commit_read_tx" "COMMIT;" in
-                  match List.rev items with
+                  match List.rev !acc_rev with
                   | [] -> Ok None
                   | non_empty -> Ok (Some (`List non_empty))
                 in
@@ -1267,86 +1536,213 @@ let decode_live_blob_references_json path =
               Result.map_error store_error_to_string res)))
 ;;
 
-let commit_epoch_with_handles ~active_handles ~keepers_dir ~keeper_id ~trigger ~anchor ~evicted_turns =
+let latest_anchor_in_tx db =
+  with_stmt
+    db
+    "select_latest_anchor_tx"
+    "SELECT anchor_json FROM compaction_epochs ORDER BY epoch_id DESC LIMIT 1"
+    (fun stmt ->
+       let rc = Sqlite3.step stmt in
+       if rc = Sqlite3.Rc.ROW
+       then (
+         let raw = Sqlite3.column_text stmt 0 in
+         let* anchor = decode_anchor_string ~context:"latest_anchor" raw in
+         Ok (Some anchor))
+       else if rc = Sqlite3.Rc.DONE
+       then Ok None
+       else Error (sqlite_err db "select_latest_anchor_tx" rc))
+;;
+
+let archived_turn_exists_in_tx db turn_id_str =
+  with_stmt
+    db
+    "check_archived_turn_exists"
+    "SELECT 1 FROM archived_turns WHERE turn_id = ?1 LIMIT 1"
+    (fun stmt ->
+       let* () = bind_values db "bind_check_turn_id" stmt [ Sqlite3.Data.TEXT turn_id_str ] in
+       let rc = Sqlite3.step stmt in
+       if rc = Sqlite3.Rc.ROW
+       then Ok true
+       else if rc = Sqlite3.Rc.DONE
+       then Ok false
+       else Error (sqlite_err db "check_archived_turn_exists" rc))
+;;
+
+let disambiguate_turns_in_tx db ~next_epoch turns =
+  let used_in_batch = Hashtbl.create (max 4 (List.length turns)) in
+  let rec find_unique_id base idx attempt =
+    let candidate =
+      if attempt = 0
+      then base
+      else if attempt = 1
+      then Printf.sprintf "%s-ep%d-%d" base next_epoch idx
+      else Printf.sprintf "%s-ep%d-%d-%d" base next_epoch idx attempt
+    in
+    if Hashtbl.mem used_in_batch candidate
+    then find_unique_id base idx (attempt + 1)
+    else
+      let* exists = archived_turn_exists_in_tx db candidate in
+      if exists
+      then find_unique_id base idx (attempt + 1)
+      else (
+        Hashtbl.add used_in_batch candidate ();
+        Ok (Turn_id.of_string candidate))
+  in
+  let rec loop idx acc = function
+    | [] -> Ok (List.rev acc)
+    | (turn : canonical_turn) :: rest ->
+      let* unique_id = find_unique_id (Turn_id.to_string turn.turn_id) idx 0 in
+      loop (idx + 1) ({ turn with turn_id = unique_id } :: acc) rest
+  in
+  loop 0 [] turns
+;;
+
+let insert_epoch_and_turns_in_tx db ~active_handles ~trigger ~anchor ~evicted_turns =
+  let evicted_ids_json =
+    Yojson.Safe.to_string
+      (`List (List.map (fun t -> Turn_id.to_yojson t.turn_id) evicted_turns))
+  in
+  let prev_epoch_data =
+    if anchor.epoch_id > 1
+    then Sqlite3.Data.INT (Int64.of_int (anchor.epoch_id - 1))
+    else Sqlite3.Data.NULL
+  in
+  let* () =
+    with_stmt
+      db
+      "insert_epoch"
+      "INSERT INTO compaction_epochs \
+       (epoch_id, covers_through_turn, anchor_json, trigger_json, evicted_turn_ids_json, previous_epoch_id) \
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
+      (fun stmt ->
+         let* () =
+           bind_values
+             db
+             "bind_epoch"
+             stmt
+             [ Sqlite3.Data.INT (Int64.of_int anchor.epoch_id)
+             ; Sqlite3.Data.TEXT (Turn_id.to_string anchor.covers_through_turn)
+             ; Sqlite3.Data.TEXT (Yojson.Safe.to_string (anchor_to_json anchor))
+             ; Sqlite3.Data.TEXT (Yojson.Safe.to_string (trigger_to_json trigger))
+             ; Sqlite3.Data.TEXT evicted_ids_json
+             ; prev_epoch_data
+             ]
+         in
+         let rc = Sqlite3.step stmt in
+         if rc = Sqlite3.Rc.DONE
+         then Ok ()
+         else Error (sqlite_err db "insert_epoch" rc))
+  in
+  let* () =
+    with_stmt
+      db
+      "insert_archived_turn"
+      "INSERT INTO archived_turns (turn_id, epoch_id, sequence_ord, messages_json) \
+       VALUES (?1, ?2, ?3, ?4)"
+      (fun stmt ->
+         let rec insert_all idx = function
+           | [] -> Ok ()
+           | (turn : canonical_turn) :: rest ->
+             let* () =
+               bind_values
+                 db
+                 "bind_archived_turn"
+                 stmt
+                 [ Sqlite3.Data.TEXT (Turn_id.to_string turn.turn_id)
+                 ; Sqlite3.Data.INT (Int64.of_int anchor.epoch_id)
+                 ; Sqlite3.Data.INT (Int64.of_int idx)
+                 ; Sqlite3.Data.TEXT (encode_messages turn.messages)
+                 ]
+             in
+             let rc = Sqlite3.step stmt in
+             if rc = Sqlite3.Rc.DONE
+             then (
+               let rc = Sqlite3.reset stmt in
+               if Sqlite3.Rc.is_success rc
+               then insert_all (idx + 1) rest
+               else Error (sqlite_err db "reset_archived_turn" rc))
+             else Error (sqlite_err db "insert_archived_turn" rc)
+         in
+         insert_all 0 evicted_turns)
+  in
+  match active_handles with
+  | None -> Ok ()
+  | Some handles -> replace_active_microcompacted_handles_in_tx db handles
+;;
+
+let remap_anchor_for_disambiguated_turns
+      ~(original_evicted : canonical_turn list)
+      ~(disambiguated_evicted : canonical_turn list)
+      (anchor : compaction_anchor)
+  =
+  let remap : (string, Turn_id.t) Hashtbl.t = Hashtbl.create 4 in
+  List.iter2
+    (fun (orig : canonical_turn) (disamb : canonical_turn) ->
+       let old_s = Turn_id.to_string orig.turn_id in
+       let new_s = Turn_id.to_string disamb.turn_id in
+       if not (String.equal old_s new_s)
+       then Hashtbl.replace remap old_s disamb.turn_id)
+    original_evicted
+    disambiguated_evicted;
+  if Hashtbl.length remap = 0
+  then anchor
+  else (
+    let map_id tid =
+      match Hashtbl.find_opt remap (Turn_id.to_string tid) with
+      | Some mapped -> mapped
+      | None -> tid
+    in
+    { anchor with
+      covers_through_turn = map_id anchor.covers_through_turn
+    ; verified_facts_and_files =
+        List.map (fun (text, tid) -> text, map_id tid) anchor.verified_facts_and_files
+    ; decisions_made =
+        List.map (fun (text, tid) -> text, map_id tid) anchor.decisions_made
+    })
+;;
+
+let commit_epoch_with_handles_full
+      ~rebound
+      ~redact
+      ~active_handles
+      ~keepers_dir
+      ~keeper_id
+      ~trigger
+      ~anchor
+      ~evicted_turns
+  =
   let* res =
     with_db ~create:true ~keepers_dir ~keeper_id (fun db ->
+      let effective_redact = resolve_redact ?redact ~keepers_dir ~keeper_id () in
+      let redacted_anchor = redact_anchor effective_redact anchor in
+      let redacted_evicted = List.map (redact_turn effective_redact) evicted_turns in
       let* () = exec_sql db "begin_tx" "BEGIN IMMEDIATE;" in
       let rollback () = ignore (exec_sql db "rollback_tx" "ROLLBACK;" : (unit, store_error) result) in
       let work () =
-        let evicted_ids_json =
-          Yojson.Safe.to_string
-            (`List (List.map (fun t -> Turn_id.to_yojson t.turn_id) evicted_turns))
+        let* disambiguated_evicted =
+          disambiguate_turns_in_tx db ~next_epoch:redacted_anchor.epoch_id redacted_evicted
         in
-        let prev_epoch_data =
-          if anchor.epoch_id > 1
-          then Sqlite3.Data.INT (Int64.of_int (anchor.epoch_id - 1))
-          else Sqlite3.Data.NULL
+        let remapped_anchor =
+          remap_anchor_for_disambiguated_turns
+            ~original_evicted:redacted_evicted
+            ~disambiguated_evicted
+            redacted_anchor
+        in
+        let final_anchor =
+          match rebound with
+          | None -> remapped_anchor
+          | Some bound_fn -> bound_fn remapped_anchor
         in
         let* () =
-          with_stmt
+          insert_epoch_and_turns_in_tx
             db
-            "insert_epoch"
-            "INSERT INTO compaction_epochs \
-             (epoch_id, covers_through_turn, anchor_json, trigger_json, evicted_turn_ids_json, previous_epoch_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
-            (fun stmt ->
-               let* () =
-                 bind_values
-                   db
-                   "bind_epoch"
-                   stmt
-                   [ Sqlite3.Data.INT (Int64.of_int anchor.epoch_id)
-                   ; Sqlite3.Data.TEXT (Turn_id.to_string anchor.covers_through_turn)
-                   ; Sqlite3.Data.TEXT (Yojson.Safe.to_string (anchor_to_json anchor))
-                   ; Sqlite3.Data.TEXT (Yojson.Safe.to_string (trigger_to_json trigger))
-                   ; Sqlite3.Data.TEXT evicted_ids_json
-                   ; prev_epoch_data
-                   ]
-               in
-               let rc = Sqlite3.step stmt in
-               if rc = Sqlite3.Rc.DONE
-               then Ok ()
-               else Error (sqlite_err db "insert_epoch" rc))
-        in
-        let* () =
-          with_stmt
-            db
-            "insert_archived_turn"
-            "INSERT OR REPLACE INTO archived_turns (turn_id, epoch_id, sequence_ord, messages_json) \
-             VALUES (?1, ?2, ?3, ?4)"
-            (fun stmt ->
-               let rec insert_all idx = function
-                 | [] -> Ok ()
-                 | (turn : canonical_turn) :: rest ->
-                   let* () =
-                     bind_values
-                       db
-                       "bind_archived_turn"
-                       stmt
-                       [ Sqlite3.Data.TEXT (Turn_id.to_string turn.turn_id)
-                       ; Sqlite3.Data.INT (Int64.of_int anchor.epoch_id)
-                       ; Sqlite3.Data.INT (Int64.of_int idx)
-                       ; Sqlite3.Data.TEXT (encode_messages turn.messages)
-                       ]
-                   in
-                   let rc = Sqlite3.step stmt in
-                   if rc = Sqlite3.Rc.DONE
-                   then (
-                     let rc = Sqlite3.reset stmt in
-                     if Sqlite3.Rc.is_success rc
-                     then insert_all (idx + 1) rest
-                     else Error (sqlite_err db "reset_archived_turn" rc))
-                   else Error (sqlite_err db "insert_archived_turn" rc)
-               in
-               insert_all 0 evicted_turns)
-        in
-        let* () =
-          match active_handles with
-          | None -> Ok ()
-          | Some handles -> replace_active_microcompacted_handles_in_tx db handles
+            ~active_handles
+            ~trigger
+            ~anchor:final_anchor
+            ~evicted_turns:disambiguated_evicted
         in
         let* () = exec_sql db "commit_tx" "COMMIT;" in
-        Ok (Some anchor)
+        Ok (Some (final_anchor, disambiguated_evicted))
       in
       match work () with
       | Ok _ as ok -> ok
@@ -1358,17 +1754,41 @@ let commit_epoch_with_handles ~active_handles ~keepers_dir ~keeper_id ~trigger ~
         raise exn)
   in
   match res with
-  | Some committed ->
-    notify_global_epoch_committed ~keepers_dir ~keeper_id ~evicted_turns committed;
-    Ok committed
+  | Some (committed, committed_evicted) ->
+    notify_global_epoch_committed ~keepers_dir ~keeper_id ~evicted_turns:committed_evicted committed;
+    Ok (committed, committed_evicted)
   | None ->
     Error
       (Sqlite_error
          { operation = "commit_epoch"; detail = "unexpected empty database result" })
 ;;
 
+let commit_epoch_with_handles
+      ~redact
+      ~active_handles
+      ~keepers_dir
+      ~keeper_id
+      ~trigger
+      ~anchor
+      ~evicted_turns
+  =
+  let* committed, (_ : canonical_turn list) =
+    commit_epoch_with_handles_full
+      ~rebound:None
+      ~redact
+      ~active_handles
+      ~keepers_dir
+      ~keeper_id
+      ~trigger
+      ~anchor
+      ~evicted_turns
+  in
+  Ok committed
+;;
+
 let commit_epoch ~keepers_dir ~keeper_id ~trigger ~anchor ~evicted_turns =
   commit_epoch_with_handles
+    ~redact:None
     ~active_handles:None
     ~keepers_dir
     ~keeper_id
@@ -1416,6 +1836,7 @@ let structured_handles_in_turns (turns : canonical_turn list) =
 (* --- End-to-End Compaction + Projection --- *)
 
 let compact_and_project
+      ?redact
       ?blob_store
       ?(keep_recent_turns = 2)
       ?force_trigger
@@ -1428,9 +1849,11 @@ let compact_and_project
       ~reserved_bytes
       turns
   =
+  let effective_redact = resolve_redact ?redact ~keepers_dir ~keeper_id () in
   let* existing_anchor = latest_anchor ~keepers_dir ~keeper_id in
   let step =
     project_for_provider
+      ~redact:effective_redact
       ?blob_store
       ~keep_recent_turns
       ~anchor:existing_anchor
@@ -1464,11 +1887,13 @@ let compact_and_project
        history is 100% self-contained verbatim content and can never dangle on
        externalized Tool_blob_store files if a blob sweep deletes them later. *)
     let raw_evicted_turns = raw_evicted_of evicted_turns in
+    let redacted_evicted = List.map (redact_turn effective_redact) raw_evicted_turns in
     let* raw_anchor =
-      fold_evicted_span ?previous_anchor ~evicted_turns:raw_evicted_turns ~summarize ()
+      fold_evicted_span ?previous_anchor ~evicted_turns:redacted_evicted ~summarize ()
       |> Result.map_error (fun detail ->
         Corrupt_record { context = "fold_evicted_span"; detail })
     in
+    let redacted_anchor = redact_anchor effective_redact raw_anchor in
     let retained_bytes =
       List.fold_left (fun acc t -> acc + measure_turn ~measure_message_bytes t) 0 retained_turns
     in
@@ -1479,7 +1904,7 @@ let compact_and_project
       else window_budget
     in
     let new_anchor =
-      bound_anchor_to_budget ~measure_message_bytes ~max_anchor_bytes raw_anchor
+      bound_anchor_to_budget ~measure_message_bytes ~max_anchor_bytes redacted_anchor
     in
     let projected_messages = flatten_messages ~anchor:(Some new_anchor) retained_turns in
     let projected_bytes =
@@ -1495,15 +1920,18 @@ let compact_and_project
            })
     else (
       let retained_handles = structured_handles_in_turns retained_turns in
-      let* committed =
-        commit_epoch_with_handles
+      let* committed, committed_evicted =
+        commit_epoch_with_handles_full
+          ~rebound:(Some (bound_anchor_to_budget ~measure_message_bytes ~max_anchor_bytes))
+          ~redact:(Some effective_redact)
           ~active_handles:(Some retained_handles)
           ~keepers_dir
           ~keeper_id
           ~trigger
           ~anchor:new_anchor
-          ~evicted_turns:raw_evicted_turns
+          ~evicted_turns:redacted_evicted
       in
+      let final_messages = flatten_messages ~anchor:(Some committed) retained_turns in
       Option.iter (fun cb -> cb committed) on_epoch_committed;
       let mc_count =
         match microcompacted with
@@ -1514,8 +1942,8 @@ let compact_and_project
         { anchor = Some committed
         ; compacted_new_epoch = true
         ; retained_turns
-        ; evicted_turns = raw_evicted_turns
-        ; messages = projected_messages
+        ; evicted_turns = committed_evicted
+        ; messages = final_messages
         ; microcompacted_results = mc_count
         })
   in
@@ -1590,7 +2018,6 @@ let compact_and_project
 
 let canonical_turns_of_evicted_messages (messages : Agent_core.Types.message list) =
   let labelled, _ = Runtime_model_input_tail_window.annotate messages in
-  let digest_at = Runtime_model_input_tail_window.atom_opening_digest messages in
   let tbl : (int, Agent_core.Types.message list) Hashtbl.t = Hashtbl.create 16 in
   let order = ref [] in
   List.iter
@@ -1604,16 +2031,16 @@ let canonical_turns_of_evicted_messages (messages : Agent_core.Types.message lis
     labelled;
   List.rev !order
   |> List.map (fun idx ->
-    let turn_id =
-      match digest_at idx with
-      | Some d when String.length d >= 16 ->
-        Turn_id.of_string (Printf.sprintf "atom-%d-%s" idx (String.sub d 0 16))
-      | Some d when not (String.equal d "") ->
-        Turn_id.of_string (Printf.sprintf "atom-%d-%s" idx d)
-      | Some _ | None ->
-        Turn_id.of_string (Printf.sprintf "atom-%d" idx)
-    in
     let msgs = Option.value ~default:[] (Hashtbl.find_opt tbl idx) |> List.rev in
+    (* Hash the FULL atom messages rather than only the opener so distinct turns
+       that share an identical opener like "Continue." never collide on the same
+       [turn_id] in [archived_turns]. *)
+    let full_hex = Agent_core_sha256.(digest_string (encode_messages msgs) |> to_hex) in
+    let turn_id =
+      if String.length full_hex >= 16
+      then Turn_id.of_string (Printf.sprintf "atom-%d-%s" idx (String.sub full_hex 0 16))
+      else Turn_id.of_string (Printf.sprintf "atom-%d-%s" idx full_hex)
+    in
     { turn_id; messages = msgs })
 ;;
 
@@ -1650,6 +2077,7 @@ let default_anchor_message_bytes (msg : Agent_core.Types.message) =
 ;;
 
 let compact_evicted_messages
+      ?redact
       ?blob_store:_
       ?max_anchor_bytes
       ?(measure_message_bytes = default_anchor_message_bytes)
@@ -1664,44 +2092,93 @@ let compact_evicted_messages
   match all_turns with
   | [] -> Ok None
   | _ :: _ ->
-    let* existing_anchor = latest_anchor ~keepers_dir ~keeper_id in
-    let newly_evicted = drop_covered_turns ~previous_anchor:existing_anchor all_turns in
-    (match newly_evicted with
-     | [] -> Ok None
-     | _ :: _ ->
-       (* Persist raw pre-microcompaction evicted turns verbatim into SQLite so
-          archived turns never dangle on external Tool_blob_store sweep roots. *)
-       let* raw_anchor =
-         fold_evicted_span ?previous_anchor:existing_anchor ~evicted_turns:newly_evicted
-           ~summarize:deterministic_fold ()
-         |> Result.map_error (fun detail ->
-           Corrupt_record { context = "compact_evicted_messages"; detail })
-       in
-       let effective_budget =
-         match max_anchor_bytes with
-         | Some n -> Some (max 0 n)
-         | None ->
-           (match trigger with
-            | Explicit_hard_limit { capacity_bytes; _ } ->
-              Some (anchor_budget_for_window ~capacity_bytes ~reserved_bytes:0)
-            | Provider_context_overflow { provider_limit_tokens = Some tok } ->
-              Some (max 0 (tok / 4))
-            | Provider_context_overflow { provider_limit_tokens = None } -> None)
-       in
-       let new_anchor =
-         match effective_budget with
-         | None -> raw_anchor
-         | Some max_bytes ->
-           bound_anchor_to_budget ~measure_message_bytes ~max_anchor_bytes:max_bytes raw_anchor
-       in
-       let* committed =
-         commit_epoch
-           ~keepers_dir
-           ~keeper_id
-           ~trigger
-           ~anchor:new_anchor
-           ~evicted_turns:newly_evicted
-       in
+    (* Always bound the committed anchor even when the provider omits a token
+       limit; convert provider token limits to bytes (tok * 4) before applying
+       the structural 1/4 anchor window ratio. *)
+    let effective_budget =
+      match max_anchor_bytes with
+      | Some n -> max 0 n
+      | None ->
+        (match trigger with
+         | Explicit_hard_limit { capacity_bytes; _ } ->
+           anchor_budget_for_window ~capacity_bytes ~reserved_bytes:0
+         | Provider_context_overflow { provider_limit_tokens = Some tok } ->
+           let capacity_bytes = saturating_mul (max 0 tok) 4 in
+           anchor_budget_for_window ~capacity_bytes ~reserved_bytes:0
+         | Provider_context_overflow { provider_limit_tokens = None } ->
+           default_anchor_max_bytes)
+    in
+    (* Perform latest_anchor read, idempotency check, collision disambiguation,
+       secret redaction, incremental fold, budget roll-off, and SQLite commit
+       atomically inside ONE [BEGIN IMMEDIATE] transaction off-domain so
+       concurrent callers serialize without [PRIMARY KEY] races or main-domain
+       CPU stalls. *)
+    let* committed_opt =
+      with_db ~create:true ~keepers_dir ~keeper_id (fun db ->
+        let effective_redact = resolve_redact ?redact ~keepers_dir ~keeper_id () in
+        let* () = exec_sql db "begin_tx" "BEGIN IMMEDIATE;" in
+        let rollback () =
+          ignore (exec_sql db "rollback_tx" "ROLLBACK;" : (unit, store_error) result)
+        in
+        let work () =
+          let* existing_anchor = latest_anchor_in_tx db in
+          let newly_evicted = drop_covered_turns ~previous_anchor:existing_anchor all_turns in
+          match newly_evicted with
+          | [] ->
+            let* () = exec_sql db "commit_noop_tx" "COMMIT;" in
+            Ok None
+          | _ :: _ ->
+            let next_epoch =
+              match existing_anchor with
+              | None -> 1
+              | Some prev -> prev.epoch_id + 1
+            in
+            let* disambiguated = disambiguate_turns_in_tx db ~next_epoch newly_evicted in
+            let redacted_evicted = List.map (redact_turn effective_redact) disambiguated in
+            let* raw_anchor =
+              fold_evicted_span
+                ?previous_anchor:existing_anchor
+                ~evicted_turns:redacted_evicted
+                ~summarize:deterministic_fold
+                ()
+              |> Result.map_error (fun detail ->
+                Corrupt_record { context = "compact_evicted_messages"; detail })
+            in
+            let redacted_anchor = redact_anchor effective_redact raw_anchor in
+            let new_anchor =
+              bound_anchor_to_budget
+                ~measure_message_bytes
+                ~max_anchor_bytes:effective_budget
+                redacted_anchor
+            in
+            let* () =
+              insert_epoch_and_turns_in_tx
+                db
+                ~active_handles:None
+                ~trigger
+                ~anchor:new_anchor
+                ~evicted_turns:redacted_evicted
+            in
+            let* () = exec_sql db "commit_tx" "COMMIT;" in
+            Ok (Some (new_anchor, redacted_evicted))
+        in
+        match work () with
+        | Ok _ as ok -> ok
+        | Error _ as err ->
+          rollback ();
+          err
+        | exception exn ->
+          rollback ();
+          raise exn)
+    in
+    (match committed_opt with
+     | None -> Ok None
+     | Some (committed, committed_evicted) ->
+       notify_global_epoch_committed
+         ~keepers_dir
+         ~keeper_id
+         ~evicted_turns:committed_evicted
+         committed;
        Option.iter (fun cb -> cb committed) on_epoch_committed;
        Ok (Some committed))
 ;;

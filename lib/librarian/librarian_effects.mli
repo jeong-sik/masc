@@ -51,6 +51,11 @@ type why_not =
       derived fact, and its premises are not there. Usually the same answer
       removed them. A fact whose premises were already gone before the
       answer is recorded the same way when an op states it. *)
+  | Promotion_refused
+  (** A [Promote_to_world] op was refused by the promotion boundary: its
+      direct or transitive provenance includes a non-public Board post, it
+      exceeded per-answer count/size/facet bounds, or its redacted claim/scope
+      was blank or malformed. *)
 
 type t =
   { added : fact list

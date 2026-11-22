@@ -519,7 +519,7 @@ let test_cli_reuse_requires_non_interactive () =
     ["codex", ["account_home", `String "/fixture/codex"];
      "claude_code", ["account_home", `String "/fixture/claude"];
      "antigravity", ["credential_file", `String "/fixture/oauth.json"; "timeout_s", `Int 60];
-     "muse", ["account_home", `String "/fixture/muse"]]
+     "mistral_vibe", ["timeout_s", `Int 120]]
 
 let test_existing_inline_selection () =
   let parse extra = Runtime_setup_spec.of_json (`Assoc (["choice",`String "openai_compatible";
@@ -699,7 +699,56 @@ let test_named_selection_requires_exact_provider_model_membership () =
   Alcotest.(check bool) "ordinary explicit provider selection retains its custom-model admission" true
     (Result.is_ok (Runtime_setup_spec.resolve_provider custom [provider]))
 
+let test_mistral_vibe_setup_spec_and_quota_scope () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"choice":"mistral_vibe","model":"mistral-medium-3.5","max_context":262144,"tools":true,"streaming":true,"supports_image_input":true}|}
+  in
+  let spec =
+    match Runtime_setup_spec.of_json json with
+    | Ok s -> s
+    | Error err -> Alcotest.fail (Runtime_setup_spec.error_message err)
+  in
+  let rendered = Runtime_setup_spec.render spec in
+  let whole =
+    "[runtime]\ndefault = "
+    ^ Yojson.Safe.to_string (`String rendered.runtime_id)
+    ^ "\n"
+    ^ rendered.runtime_toml
+  in
+  let config =
+    match Runtime_toml.parse_string whole with
+    | Ok c -> c
+    | Error errs ->
+      Alcotest.fail
+        (String.concat "; "
+           (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errs))
+  in
+  let provider = List.hd config.Runtime_schema.providers in
+  let model = List.hd config.Runtime_schema.models in
+  Alcotest.(check bool) "provider api_format is Acp_runtime" true
+    (provider.api_format = Runtime_schema.Acp_runtime);
+  (match provider.acp with
+   | Some acp ->
+     Alcotest.(check bool) "provider ACP driver is Mistral_vibe" true
+       (acp.driver = Runtime_schema.Mistral_vibe);
+     Alcotest.(check (list string)) "provider strips MISTRAL_API_KEY"
+       [ "MISTRAL_API_KEY" ] acp.strip_env
+   | None -> Alcotest.fail "expected ACP config on rendered mistral_vibe provider");
+  Alcotest.(check string) "model api_name is mistral-medium-3.5" "mistral-medium-3.5" model.api_name;
+  Alcotest.(check (option int)) "model max_context is 262144" (Some 262144) model.max_context;
+  Alcotest.(check (option bool)) "model supports image input" (Some true)
+    (Option.bind model.capabilities (fun c -> c.Runtime_schema.supports_image_input));
+  (* Deterministic quota scope grouping for ACP drivers *)
+  let s1 = Runtime_quota_window.scope_of_acp_driver ~driver:"mistral_vibe" in
+  let s2 = Runtime_quota_window.scope_of_acp_driver ~driver:"mistral_vibe" in
+  let s3 = Runtime_quota_window.scope_of_acp_driver ~driver:"antigravity" in
+  Alcotest.(check bool) "identical ACP driver yields same quota scope" true (s1 = s2);
+  Alcotest.(check bool) "distinct ACP drivers yield distinct quota scopes" false (s1 = s3)
+;;
+
 let () = Alcotest.run "native runtime setup spec" ["contract",[
+  Alcotest.test_case "Mistral Vibe 3.1.0 setup spec renders valid ACP TOML and quota scope" `Quick test_mistral_vibe_setup_spec_and_quota_scope;
   Alcotest.test_case "named model membership is exact without restricting custom selections" `Quick test_named_selection_requires_exact_provider_model_membership;
   Alcotest.test_case "named catalog selection reaches native rendering" `Quick test_named_catalog_selection_reaches_native_rendering;
   Alcotest.test_case "named selection revalidates the configured provider" `Quick test_named_catalog_selection_revalidates_existing_provider;

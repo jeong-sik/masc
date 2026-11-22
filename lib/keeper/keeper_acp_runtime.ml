@@ -9,6 +9,18 @@ module Acp = Runtime_acp_client
 let mcp_server_name = "masc"
 let config_error = Host.config_error
 let internal_error = Host.internal_error
+let rollover_threshold = 0.80
+let default_acp_max_context_tokens = 262_144
+let idle_ttl_s = 1800.0
+let rollover_subdir = "acp-rollover"
+
+let valid_rollover_keeper_id keeper_id =
+  keeper_id <> ""
+  && keeper_id <> "."
+  && keeper_id <> ".."
+  && not (String.contains keeper_id '/')
+  && not (String.contains keeper_id '\\')
+;;
 
 (* In an append-only ACP session, a strict drop in reported context occupancy
    between consecutive turns structurally indicates native compaction/reset. *)
@@ -16,6 +28,135 @@ let compaction_detected ~prev_used ~cur_used =
   match prev_used, cur_used with
   | Some prev, Some cur when prev > 0 && cur > 0 -> cur < prev
   | _ -> false
+;;
+
+let should_rollover_context ~context_used ~context_size ~max_context_tokens =
+  let effective_limit =
+    match context_size with
+    | Some s when s > 0 -> s
+    | _ -> max_context_tokens
+  in
+  match context_used with
+  | Some used when used > 0 && effective_limit > 0 ->
+    Float.of_int used /. Float.of_int effective_limit >= rollover_threshold
+  | _ -> false
+;;
+
+let capacity_bytes_of_tokens tokens =
+  let effective = if tokens > 0 then tokens else default_acp_max_context_tokens in
+  if effective > max_int / 4 then max_int else effective * 4
+;;
+
+let resolve_max_context_tokens ~runtime_id ~override =
+  match override with
+  | Some n when n > 0 -> n
+  | _ ->
+    (match Runtime.get_runtime_by_id runtime_id with
+     | Some rt ->
+       (match Runtime_instance.resolve_max_context_of_runtime rt with
+        | Some (tokens, _) when tokens > 0 -> tokens
+        | _ -> default_acp_max_context_tokens)
+     | None -> default_acp_max_context_tokens)
+;;
+
+let rollover_dir_for_base_path ~base_path =
+  Filename.concat
+    (Filename.concat
+       (Common.masc_dir_from_base_path ~base_path)
+       Config_dir_resolver.runtime_dirname)
+    rollover_subdir
+;;
+
+let rollover_marker_path ~base_path ~keeper_id =
+  Filename.concat (rollover_dir_for_base_path ~base_path) (keeper_id ^ ".json")
+;;
+
+let record_rollover_marker ~base_path ~keeper_id ~runtime_id ~session_id =
+  if valid_rollover_keeper_id keeper_id
+  then (
+    let dir = rollover_dir_for_base_path ~base_path in
+    let path = rollover_marker_path ~base_path ~keeper_id in
+    let payload =
+      `Assoc [ "runtime_id", `String runtime_id; "session_id", `String session_id ]
+      |> Yojson.Safe.to_string
+    in
+    try
+      Fs_compat.mkdir_p dir;
+      ignore (Fs_compat.save_file_atomic path payload : (unit, string) result)
+    with
+    | Sys_error _ | Unix.Unix_error _ -> ())
+;;
+
+let rollover_marker_matches ~base_path ~keeper_id ~runtime_id ~session_id =
+  if not (valid_rollover_keeper_id keeper_id)
+  then false
+  else (
+    let path = rollover_marker_path ~base_path ~keeper_id in
+    if not (Sys.file_exists path)
+    then false
+    else (
+      match Fs_compat.load_file path with
+      | raw ->
+        (match Yojson.Safe.from_string raw with
+         | `Assoc fields ->
+           (match List.assoc_opt "runtime_id" fields, List.assoc_opt "session_id" fields with
+            | Some (`String rt), Some (`String sid) ->
+              String.equal rt runtime_id && String.equal sid session_id
+            | _ -> false)
+         | _ -> false
+         | exception (Yojson.Json_error _ | Failure _) -> false)
+      | exception (Sys_error _ | Unix.Unix_error _) -> false))
+;;
+
+let clear_rollover_marker ~base_path ~keeper_id =
+  if valid_rollover_keeper_id keeper_id
+  then (
+    let path = rollover_marker_path ~base_path ~keeper_id in
+    try if Sys.file_exists path then Unix.unlink path with
+    | Sys_error _ | Unix.Unix_error _ -> ())
+;;
+
+let prefer_handoff_for_start ~planned_fresh_rollover ~force_fresh_retry =
+  planned_fresh_rollover || force_fresh_retry
+;;
+
+let hydrate_start_messages ~keepers_dir ~keeper_id ~prefer_handoff messages =
+  if prefer_handoff
+  then (
+    match Keeper_canonical_turn_store.load_handoff_context ~keepers_dir ~keeper_id with
+    | Ok handoff when handoff.messages <> [] ->
+      let carried_system =
+        List.filter
+          (fun (m : Agent_core.Types.message) ->
+             m.role = Agent_core.Types.System || Host.is_carried_on_resume m)
+          messages
+      in
+      carried_system @ handoff.messages
+    | Ok _ | Error _ ->
+      (match
+         Keeper_canonical_turn_store.hydrate_missing_turns
+           ~keepers_dir
+           ~keeper_id
+           ~existing_messages:messages
+       with
+       | Ok [] -> messages
+       | Ok extra_msgs -> messages @ extra_msgs
+       | Error _ -> messages))
+  else (
+    match
+      Keeper_canonical_turn_store.hydrate_missing_turns
+        ~keepers_dir
+        ~keeper_id
+        ~existing_messages:messages
+    with
+    | Ok [] -> messages
+    | Ok extra_msgs -> messages @ extra_msgs
+    | Error err ->
+      Log.Keeper.warn
+        ~keeper_name:keeper_id
+        "canonical handoff context load skipped for ACP start: %s"
+        (Keeper_canonical_turn_store.store_error_to_string err);
+      messages)
 ;;
 
 let runtime_label_of_driver driver =
@@ -35,6 +176,14 @@ let acp_error_to_core_error = function
     Agent_core.Error.Provider
       (Llm_provider.Error.ParseError
          { detail = Printf.sprintf "ACP protocol error (%s): %s" stage detail })
+  | Acp.Rpc_error { method_name; code; message }
+    when Acp.is_context_overflow_rpc_error ~method_name ~code ~message ->
+    Agent_core.Error.Api
+      (Agent_core.Retry.ContextOverflow
+         { message =
+             Printf.sprintf "ACP RPC %s context overflow (%d): %s" method_name code message
+         ; limit = None
+         })
   | Acp.Rpc_error { method_name; code; message } ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderReportedError
@@ -67,6 +216,9 @@ let recovery_failure_of_acp_error = function
   | Acp.Invalid_config _ -> Session_store.Pre_dispatch_failed
   | Acp.Spawn_refused refusal -> Session_store.recovery_failure_of_spawn_refusal refusal
   | Acp.Protocol_error _ -> Session_store.Protocol_failed
+  | Acp.Rpc_error { method_name; code; message }
+    when Acp.is_context_overflow_rpc_error ~method_name ~code ~message ->
+    Session_store.Input_rejected Session_store.Bootstrap_floor_exceeded
   | Acp.Rpc_error _ -> Session_store.Provider_rejected
   | Acp.Timeout _ -> Session_store.Transport_interrupted
   | Acp.Process_exited _ -> Session_store.Transport_interrupted
@@ -122,7 +274,6 @@ type active_turn_binding =
   ; on_tool_started :
       call_id:string -> tool_name:string -> arguments:Yojson.Safe.t -> unit
   ; on_tool_finished : call_id:string -> unit
-  ; resolve_host_stop : Host.host_stop -> unit
   }
 
 module Pool_key = struct
@@ -225,20 +376,53 @@ module Keeper_pool = struct
     in
     List.iter close matching
   ;;
+
+  let evict_all t ~close =
+    let entries =
+      with_lock t (fun () ->
+        let all = Pool_tbl.fold (fun _ entry acc -> entry :: acc) t.table [] in
+        Pool_tbl.clear t.table;
+        all)
+    in
+    List.iter close entries
+  ;;
+
+  let evict_idle t ~now ~idle_ttl_s ~last_used_at ~is_busy ~close =
+    let stale =
+      with_lock t (fun () ->
+        let entries =
+          Pool_tbl.fold
+            (fun key entry acc ->
+               if (not (is_busy entry)) && now -. last_used_at entry >= idle_ttl_s
+               then (key, entry) :: acc
+               else acc)
+            t.table
+            []
+        in
+        List.iter (fun (key, _) -> Pool_tbl.remove t.table key) entries;
+        List.map snd entries)
+    in
+    List.iter close stale
+  ;;
 end
 
 type pool_entry =
   { client : Acp.t
+  ; bridge : Runtime_official_client_mcp_http.t
   ; mcp_server : Acp.mcp_http_server
   ; turn_slot : active_turn_binding option ref
   ; turn_slot_mutex : Stdlib.Mutex.t
   ; turn_mutex : Eio.Mutex.t
+  ; in_flight : bool Atomic.t
+  ; mutable last_used_at : float
   ; mutable session_id : string option
   ; mutable last_context_used : int option
   ; stop_owner : unit -> unit
   }
 
 let pool : pool_entry Keeper_pool.t = Keeper_pool.create ()
+let root_switch_mu = Stdlib.Mutex.create ()
+let registered_root_switch : Eio.Switch.t option ref = ref None
 
 let close_pool_entry (entry : pool_entry) =
   Eio.Cancel.protect (fun () ->
@@ -263,6 +447,34 @@ let evict_entry_if_same key (target : pool_entry) =
 
 let evict_keeper ~keeper_name =
   Keeper_pool.evict_keeper pool ~keeper_name ~close:close_pool_entry
+;;
+
+let evict_keeper_for_workspace ~base_path ~keeper_name =
+  evict_keeper ~keeper_name;
+  clear_rollover_marker ~base_path ~keeper_id:keeper_name
+;;
+
+let evict_all () =
+  Keeper_pool.evict_all pool ~close:close_pool_entry
+;;
+
+let ensure_root_switch_cleanup root_sw =
+  let needs_register =
+    Stdlib.Mutex.protect root_switch_mu (fun () ->
+      match !registered_root_switch with
+      | Some existing when existing == root_sw -> false
+      | Some _ | None ->
+        registered_root_switch := Some root_sw;
+        true)
+  in
+  if needs_register
+  then
+    Eio.Switch.on_release root_sw (fun () ->
+      Stdlib.Mutex.protect root_switch_mu (fun () ->
+        match !registered_root_switch with
+        | Some existing when existing == root_sw -> registered_root_switch := None
+        | Some _ | None -> ());
+      evict_all ())
 ;;
 
 (* Serialize turns on a pooled entry's [Eio.Mutex.t].
@@ -321,12 +533,11 @@ let start_mcp_bridge ~sw ~env ~pinned_tool_specs ~turn_slot ~turn_slot_mutex =
             ~finally:(fun () -> b.on_tool_finished ~call_id)
             (fun () ->
               let result = tool.call ~call_id arguments in
-              Option.iter b.resolve_host_stop result.abort_turn;
               let on_response_sent =
                 Runtime_official_client_tool.response_observer Mcp result
               in
               { Runtime_official_client_mcp_http.outcome = tool_result result
-              ; stop = None
+              ; stop = result.abort_turn
               ; after_response_sent =
                   (fun () ->
                     Runtime_official_client_tool.notify_response_sent on_response_sent)
@@ -388,33 +599,44 @@ let spawn_persistent_entry
   Eio.Fiber.fork_daemon ~sw:root_sw (fun () ->
     (try
        Eio.Switch.run (fun keeper_sw ->
-         let bridge =
-           start_mcp_bridge
-             ~sw:keeper_sw
-             ~env
-             ~pinned_tool_specs
-             ~turn_slot
-             ~turn_slot_mutex
-         in
-         let mcp_server = mcp_server_of_bridge bridge in
-         match Acp.start ~sw:keeper_sw ~proc_mgr ~clock ~config:acp_config ~mcp_server () with
-         | Error err -> Eio.Promise.resolve resolve_ready (Error err)
-         | Ok client ->
-           let entry =
-             { client
-             ; mcp_server
-             ; turn_slot
-             ; turn_slot_mutex
-             ; turn_mutex = Eio.Mutex.create ()
-             ; session_id = None
-             ; last_context_used = None
-             ; stop_owner
-             }
+         if Atomic.get stop_flag
+         then Eio.Promise.resolve resolve_ready (Error Acp.Client_closed)
+         else (
+           let bridge =
+             start_mcp_bridge
+               ~sw:keeper_sw
+               ~env
+               ~pinned_tool_specs
+               ~turn_slot
+               ~turn_slot_mutex
            in
-           Eio.Switch.on_release keeper_sw (fun () ->
-             Keeper_pool.evict_if_same pool ~key ~target:entry ~close:ignore);
-           Eio.Promise.resolve resolve_ready (Ok entry);
-           Eio.Promise.await shutdown_promise)
+           let mcp_server = mcp_server_of_bridge bridge in
+           match Acp.start ~sw:keeper_sw ~proc_mgr ~clock ~config:acp_config ~mcp_server () with
+           | Error err -> Eio.Promise.resolve resolve_ready (Error err)
+           | Ok client ->
+             if Atomic.get stop_flag
+             then (
+               Acp.close client;
+               Eio.Promise.resolve resolve_ready (Error Acp.Client_closed))
+             else (
+               let entry =
+                 { client
+                 ; bridge
+                 ; mcp_server
+                 ; turn_slot
+                 ; turn_slot_mutex
+                 ; turn_mutex = Eio.Mutex.create ()
+                 ; in_flight = Atomic.make false
+                 ; last_used_at = Time_compat.now ()
+                 ; session_id = None
+                 ; last_context_used = None
+                 ; stop_owner
+                 }
+               in
+               Eio.Switch.on_release keeper_sw (fun () ->
+                 Keeper_pool.evict_if_same pool ~key ~target:entry ~close:ignore);
+               Eio.Promise.resolve resolve_ready (Ok entry);
+               Eio.Promise.await shutdown_promise)))
      with
      | Eio.Cancel.Cancelled _ as exn ->
        (match Eio.Promise.peek ready_promise with
@@ -429,7 +651,14 @@ let spawn_persistent_entry
             (Error (Acp.Protocol_error { stage = "persistent_spawn"; detail = Printexc.to_string exn }))
         | Some _ -> ()));
     `Stop_daemon);
-  Eio.Promise.await ready_promise
+  try Eio.Promise.await ready_promise with
+  | Eio.Cancel.Cancelled _ as exn ->
+    Eio.Cancel.protect (fun () ->
+      stop_owner ();
+      match Eio.Promise.peek ready_promise with
+      | Some (Ok entry) -> close_pool_entry entry
+      | Some (Error _) | None -> ());
+    raise exn
 ;;
 
 let acquire_persistent_entry
@@ -443,6 +672,14 @@ let acquire_persistent_entry
       ~(config : Runtime_execution.acp_client)
   : (pool_entry, Acp.error) result
   =
+  ensure_root_switch_cleanup root_sw;
+  Keeper_pool.evict_idle
+    pool
+    ~now:(Time_compat.now ())
+    ~idle_ttl_s
+    ~last_used_at:(fun entry -> entry.last_used_at)
+    ~is_busy:(fun entry -> Atomic.get entry.in_flight)
+    ~close:close_pool_entry;
   let existing = Keeper_pool.find_opt pool key in
   match existing with
   | Some entry when Acp.is_alive entry.client -> Ok entry
@@ -662,11 +899,121 @@ let make_stream_projection
   { on_acp_event; on_tool_started; on_tool_finished; observed_tool_calls }
 ;;
 
+(* ── Proactive compaction & shrink-retry helpers ─────────────────────────── *)
+
+let split_older_for_rollover (messages : Agent_core.Types.message list) =
+  (* Ignore synthetic preambles and slice strictly on [Runtime_model_input_tail_window]
+     [Atom] boundaries so pinned entries (System, compaction anchors, working state,
+     outside context) are never counted/evicted and [Assistant(tool_use)] +
+     [Tool(tool_result)] pairs are never split apart. *)
+  let without_preamble =
+    List.filter
+      (fun (m : Agent_core.Types.message) ->
+         not (Runtime_model_input_tail_window.is_synthetic_preamble m))
+      messages
+  in
+  let labelled, atom_count = Runtime_model_input_tail_window.annotate without_preamble in
+  if atom_count <= 2
+  then []
+  else (
+    let keep_recent = max 2 (atom_count / 4) in
+    let evict_atoms = max 1 (atom_count - keep_recent) in
+    List.filter_map
+      (fun (m, label) ->
+         match label with
+         | Runtime_model_input_tail_window.Atom idx when idx < evict_atoms -> Some m
+         | Runtime_model_input_tail_window.Atom _ | Runtime_model_input_tail_window.Pinned ->
+           None)
+      labelled)
+;;
+
+let compact_for_rollover
+      ~keepers_dir
+      ~keeper_id
+      ~effective_limit_tokens
+      ~context_used
+      ~fallback_messages
+  =
+  let source_messages =
+    match Keeper_canonical_turn_store.load_handoff_context ~keepers_dir ~keeper_id with
+    | Ok handoff when handoff.messages <> [] -> handoff.messages
+    | Ok _ | Error _ -> fallback_messages
+  in
+  let evicted_messages = split_older_for_rollover source_messages in
+  if evicted_messages = []
+  then ()
+  else (
+    let trigger =
+      Keeper_compaction.Explicit_hard_limit
+        { capacity_bytes = capacity_bytes_of_tokens effective_limit_tokens
+        ; observed_bytes = capacity_bytes_of_tokens context_used
+        }
+    in
+    match
+      Keeper_compaction.compact_evicted_messages
+        ~keepers_dir
+        ~keeper_id
+        ~trigger
+        ~evicted_messages
+        ()
+    with
+    | Ok _ -> ()
+    | Error err ->
+      Log.Keeper.warn
+        ~keeper_name:keeper_id
+        "proactive 80%% ACP context rollover compaction skipped: %s"
+        (Keeper_compaction.store_error_to_string err))
+;;
+
+let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id () =
+  match
+    Session_store.load_reconciled_for_runtime
+      ~base_path
+      ~keeper_name
+      ~client_kind:Acp
+      ~runtime_id
+      ~current_owner_epoch:(Session_store.process_epoch ())
+      ~required_at:(Time_compat.now ())
+  with
+  | Ok (Some ({ phase = Session_store.Recovery_required { recovery_id; failure; _ }; _ } as expected)) ->
+    (match failure with
+     | Session_store.Input_rejected _ ->
+       ignore
+         (Session_store.resolve_recovery
+            ~base_path
+            ~keeper_name
+            ~expected
+            ~recovery_id
+            ~resolution:Session_store.Restart_fresh
+            ~resolved_by:"acp_shrink_retry"
+            ~resolved_at:(Time_compat.now ()))
+     | Pre_dispatch_failed | Spawn_resources_busy | Spawn_refused_same_input
+     | Spawn_failed_cause_unknown | Owner_stopped_turn | Retryable_turn_failed
+     | Transport_interrupted | Protocol_failed | Provider_rejected | Host_hook_failed
+     | State_persistence_failed | Process_restarted | Vendor_session_full _ -> ())
+  | Ok
+      (Some
+         { phase =
+             ( Session_store.Ready
+             | Session_store.Start _
+             | Session_store.Active _
+             | Session_store.Turn_inflight _
+             | Session_store.Settled _ )
+         ; _
+         })
+  | Ok None
+  | Error _ -> ()
+;;
+
 (* ── Main Keeper ACP turn execution ───────────────────────────────────────── *)
 
 let run_without_lifecycle
       ~on_guidance_prepared
       ~result_scope
+      ~capacity_bytes
+      ~unbounded_capacity_bytes
+      ~max_context_tokens
+      ~force_fresh_retry
       ~input_source
       ~media_store
       ~argument_source
@@ -720,22 +1067,23 @@ let run_without_lifecycle
   let runtime_label = runtime_label_of_driver config.driver in
   let profile = Acp.profile_of_driver config.driver in
   let hooks = Option.value hooks ~default:Agent_core.Hooks.empty in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let* env =
     match Eio_context.get_env_opt () with
     | Some env -> Ok env
     | None -> Error (internal_error "Eio standard environment is not initialized for ACP runtime")
   in
   let clock = Eio.Stdenv.clock env in
-  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let proc_mgr = Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:5.0 in
   let owner_epoch = Session_store.process_epoch () in
   let* stored_session =
-    Session_store.load_for_runtime
+    Session_store.load_reconciled_for_runtime
       ~base_path
       ~keeper_name
       ~client_kind:Acp
       ~runtime_id
-    |> Result.map_error (fun err ->
-      internal_error ("ACP session store unreadable: " ^ Session_store.read_error_to_string err))
+      ~current_owner_epoch:owner_epoch
+      ~required_at:(Time_compat.now ())
   in
   let* claim_plan =
     Session_store.plan_claim ~expected:stored_session ~client_kind:Acp ~runtime_id
@@ -807,98 +1155,106 @@ let run_without_lifecycle
     Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:outbox_viewer
     |> Result.map_error internal_error
   in
-  let is_resume = Option.is_some claim_plan.previous_settlement in
-  (* Hydrate any missing post-checkpoint/post-anchor canonical turns BEFORE
-     [Host.carried_history_projection] so hydrated history goes through the
-     full model-input projection, window observation, and context bounding,
-     including when [prepared.messages] holds a stale earlier HTTP checkpoint. *)
-  let prepared =
-    if is_resume
-    then prepared
-    else (
-      let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-      match
-        Keeper_canonical_turn_store.hydrate_missing_turns
-          ~keepers_dir
-          ~keeper_id:keeper_name
-          ~existing_messages:prepared.messages
-      with
-      | Ok [] -> prepared
-      | Ok extra_msgs ->
-        { prepared with Host.messages = prepared.messages @ extra_msgs }
-      | Error err ->
-        Log.Keeper.warn
-          ~keeper_name
-          "canonical handoff context load skipped for ACP start: %s"
-          (Keeper_canonical_turn_store.store_error_to_string err);
-        prepared)
+  let planned_fresh_rollover =
+    Option.is_none official_client_continuation
+    &&
+    match claim_plan.previous_settlement with
+    | None -> false
+    | Some { session_id; _ } ->
+      force_fresh_retry
+      || rollover_marker_matches ~base_path ~keeper_id:keeper_name ~runtime_id ~session_id
+  in
+  let is_resume = Option.is_some claim_plan.previous_settlement && not planned_fresh_rollover in
+  let raw_prepared_messages = prepared.messages in
+  let outbox_message =
+    Keeper_client_tool_outbox.context_message
+      ~read_media:read_retained_media
+      tool_outbox
+  in
+  let reserved_bytes =
+    String.length prepared.system_prompt
+    + String.length goal_text
+    + Option.fold ~none:0 ~some:Host.measure_message_bytes outbox_message
+  in
+  let project_start_messages ~prefer_handoff messages =
+    let hydrated =
+      hydrate_start_messages ~keepers_dir ~keeper_id:keeper_name ~prefer_handoff messages
+    in
+    let* ranged =
+      Host.start_range_projection
+        ~input_source
+        ?argument_projection:
+          (Option.bind argument_source (fun source ->
+             Host.argument_projection source ~tools:prepared.tools ~history_prefix:[]))
+        ~measure_message_bytes:Host.measure_message_bytes
+        ~capacity_bytes
+        ~unbounded_capacity_bytes
+        ~reserved_bytes
+        ?on_model_input_window_observation
+        ?carried_front_seed
+        ?librarian_front
+        ?on_carried_front
+        ~turn_start
+        ~keeper_name
+        ~runtime_id
+        hydrated
+    in
+    let source_project = Host.project_source model_input_projection in
+    let* projected =
+      try source_project ranged with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+      | exn ->
+        Llm_provider.Reserved_exn.reraise_if_reserved exn;
+        Error
+          (internal_error
+             (runtime_label ^ " model input projection raised: " ^ Printexc.to_string exn))
+    in
+    Ok (projected @ Option.to_list outbox_message)
   in
   let* prepared =
     if is_resume
     then (
       match model_input_projection with
-      | None -> Ok prepared
+      | None ->
+        Ok { prepared with Host.messages = prepared.messages @ Option.to_list outbox_message }
       | Some project ->
         let* messages =
           try project prepared.messages with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
           | exn ->
+            Llm_provider.Reserved_exn.reraise_if_reserved exn;
             Error
               (internal_error
                  (runtime_label ^ " model input projection raised: " ^ Printexc.to_string exn))
         in
-        Ok { prepared with messages })
+        Ok { prepared with Host.messages = messages @ Option.to_list outbox_message })
     else (
-      let project =
-        Host.carried_history_projection
-          ~input_source
-          ?argument_projection:
-            (Option.bind argument_source (fun source ->
-               Host.argument_projection source ~tools:prepared.tools ~history_prefix:[]))
-          ?on_model_input_window_observation
-          ?carried_front_seed
-          ?librarian_front
-          ?on_carried_front
-          ~turn_start
-          ~keeper_name
-          ~runtime_id
-          model_input_projection
+      let prefer_handoff =
+        prefer_handoff_for_start ~planned_fresh_rollover ~force_fresh_retry
       in
       let* messages =
-        try project prepared.messages with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
-        | exn ->
-          Error
-            (internal_error
-               (runtime_label ^ " model input projection raised: " ^ Printexc.to_string exn))
+        project_start_messages ~prefer_handoff raw_prepared_messages
       in
-      Ok { prepared with messages })
-  in
-  let prepared =
-    { prepared with
-      Host.messages =
-        prepared.messages
-        @ Option.to_list
-            (Keeper_client_tool_outbox.context_message
-               ~read_media:read_retained_media
-               tool_outbox)
-    }
+      Ok { prepared with Host.messages = messages })
   in
   let composed_context = prepared.composed_context in
   let goal_with_handoff =
-    match claim_plan.previous_settlement with
-    | None -> goal_text
-    | Some { session_id; _ } ->
-      Keeper_turn_bridge.prepend_resume_handoff
-        ~input_source
-        ~base_path
-        ~keeper_name
-        ~client_kind:Acp
-        ~runtime_id
-        ~session_id
-        ~goal:goal_text
+    if not is_resume
+    then goal_text
+    else (
+      match claim_plan.previous_settlement with
+      | None -> goal_text
+      | Some { session_id; _ } ->
+        Keeper_turn_bridge.prepend_resume_handoff
+          ~input_source
+          ~base_path
+          ~keeper_name
+          ~client_kind:Acp
+          ~runtime_id
+          ~session_id
+          ~goal:goal_text)
   in
   (* Proper ~held delta tracking for ALL 3 ACP drivers: eliminates repeated
      World State / context-carrier resend on resume (fixing the 11.4M prompt
@@ -1102,7 +1458,17 @@ let run_without_lifecycle
         (native_posture = Runtime_native_tools.Native_full)
     }
   in
+  let skills_dirs = discover_skills_dirs ~base_path config in
+  let fallback_start_messages_ref = ref prepared.messages in
   let build_fallback_start_prompt () =
+    (* Resume fallback must run the same canonical hydration + bounded Start
+       range projection as a fresh Start, using plain [goal_text] without
+       prepending a redundant resume handoff onto the full history. *)
+    let* projected_msgs =
+      project_start_messages ~prefer_handoff:false raw_prepared_messages
+    in
+    fallback_start_messages_ref := projected_msgs;
+    let fallback_prepared = { prepared with Host.messages = projected_msgs } in
     match profile.system_prompt_channel with
     | Acp.Meta_antigravity_append ->
       let history_lines =
@@ -1110,25 +1476,28 @@ let run_without_lifecycle
           (fun msg ->
              Host.history_role_label msg.Agent_core.Types.role
              ^ Host.encode_start_message ~started_at:(Time_compat.now ()) msg)
-          prepared.messages
+          projected_msgs
       in
       let body =
         match history_lines with
-        | [] -> goal_with_handoff
-        | lines -> String.concat "\n\n" lines ^ "\n\n" ^ goal_with_handoff
+        | [] -> goal_text
+        | lines -> String.concat "\n\n" lines ^ "\n\n" ^ goal_text
       in
-      let with_obs = Host.start_prompt prepared body in
-      Ok (Keeper_context_submission_link.text with_obs, Some prepared.system_prompt)
+      let with_obs = Host.start_prompt fallback_prepared body in
+      Ok
+        ( Keeper_context_submission_link.text with_obs
+        , Some fallback_prepared.system_prompt
+        , projected_msgs )
     | Acp.Framed_in_first_prompt ->
       let* framed =
         Host.framed_prompt_for_turn
           ?composed_context
           ~held:[]
           ~delivery:(Host.Framed_start { started_at = Time_compat.now () })
-          ~goal:goal_with_handoff
-          prepared
+          ~goal:goal_text
+          fallback_prepared
       in
-      Ok (framed, None)
+      Ok (framed, None, projected_msgs)
   in
   let blocks_of_prompt text =
     Acp.Text_block text
@@ -1142,72 +1511,27 @@ let run_without_lifecycle
     run_serialized_turn
       ~mutex:entry.turn_mutex
       ~on_holder_exception:(fun () ->
-        if persistent then evict_entry_if_same key entry)
+        Atomic.set entry.in_flight false;
+        if persistent then evict_entry_if_same key entry else Acp.close entry.client)
       (fun () ->
-      let host_stop_promise, resolve_host_stop_u = Eio.Promise.create () in
-      let host_stop_fired = Atomic.make false in
-      let resolve_host_stop stop =
-        if Atomic.compare_and_set host_stop_fired false true
-        then Eio.Promise.resolve resolve_host_stop_u stop
-      in
+      Atomic.set entry.in_flight true;
+      Fun.protect
+        ~finally:(fun () ->
+          entry.last_used_at <- Time_compat.now ();
+          Atomic.set entry.in_flight false)
+        (fun () ->
+      Runtime_official_client_mcp_http.begin_turn entry.bridge;
       (* Establish or reuse the ACP session on the persistent child. *)
-      let* session_id, resumed, active_prompt_text =
-        match claim_plan.previous_settlement, entry.session_id with
-        | Some { session_id; _ }, Some open_sid when String.equal session_id open_sid ->
-          Ok (open_sid, true, prompt_text)
-        | Some { session_id; _ }, _ ->
-          let caps = Acp.capabilities entry.client in
-          let resume_res =
-            if caps.resume_session
-            then
-              Acp.resume_session
-                entry.client
-                ~session_id
-                ~cwd:base_path
-                ~mcp_server:entry.mcp_server
-                ()
-            else if caps.load_session
-            then
-              Acp.load_session
-                entry.client
-                ~session_id
-                ~cwd:base_path
-                ~mcp_server:entry.mcp_server
-                ()
-            else Error (Acp.Protocol_error { stage = "resume"; detail = "unsupported" })
-          in
-          (match resume_res with
-           | Ok info ->
-             entry.session_id <- Some info.session_id;
-             Ok (info.session_id, true, prompt_text)
-           | Error _ ->
-             (* Child restarted or prior session gone: open a clean session with
-                full start prompt + system prompt so zero context is lost. *)
-             let* fallback_prompt, fallback_sys = build_fallback_start_prompt () in
-             let* info =
-               Acp.new_session
-                 entry.client
-                 ~cwd:base_path
-                 ?system_prompt_append:fallback_sys
-                 ~mcp_server:entry.mcp_server
-                 ~mode:effective_mode
-                 ~model:config.model
-                 ?effort:effective_effort
-                 ()
-               |> Result.map_error (fun err ->
-                 recovery_failure := recovery_failure_of_acp_error err;
-                 acp_error_to_core_error err)
-             in
-             entry.session_id <- Some info.session_id;
-             entry.last_context_used <- None;
-             Ok (info.session_id, false, fallback_prompt))
-        | None, _ ->
+      let* session_id, resumed, active_prompt_text, transmitted_messages =
+        if not is_resume
+        then (
           let* info =
             Acp.new_session
               entry.client
               ~cwd:base_path
               ?system_prompt_append
               ~mcp_server:entry.mcp_server
+              ~additional_directories:skills_dirs
               ~mode:effective_mode
               ~model:config.model
               ?effort:effective_effort
@@ -1218,7 +1542,85 @@ let run_without_lifecycle
           in
           entry.session_id <- Some info.session_id;
           entry.last_context_used <- None;
-          Ok (info.session_id, false, prompt_text)
+          Ok (info.session_id, false, prompt_text, prepared.messages))
+        else (
+          match claim_plan.previous_settlement, entry.session_id with
+          | Some { session_id; _ }, Some open_sid when String.equal session_id open_sid ->
+            Ok (open_sid, true, prompt_text, prepared.messages)
+          | Some { session_id; _ }, _ ->
+            let caps = Acp.capabilities entry.client in
+            let resume_res =
+              if caps.resume_session
+              then
+                Acp.resume_session
+                  entry.client
+                  ~session_id
+                  ~cwd:base_path
+                  ~mcp_server:entry.mcp_server
+                  ~mode:effective_mode
+                  ~model:config.model
+                  ?effort:effective_effort
+                  ()
+              else if caps.load_session
+              then
+                Acp.load_session
+                  entry.client
+                  ~session_id
+                  ~cwd:base_path
+                  ~mcp_server:entry.mcp_server
+                  ~mode:effective_mode
+                  ~model:config.model
+                  ?effort:effective_effort
+                  ()
+              else Error (Acp.Protocol_error { stage = "resume"; detail = "unsupported" })
+            in
+            (match resume_res with
+             | Ok info ->
+               entry.session_id <- Some info.session_id;
+               Ok (info.session_id, true, prompt_text, prepared.messages)
+             | Error _ ->
+               (* Child restarted or prior session gone: open a clean session with
+                  bounded hydrated start prompt + system prompt so zero context is lost. *)
+               let* fallback_prompt, fallback_sys, fallback_msgs =
+                 build_fallback_start_prompt ()
+               in
+               let* info =
+                 Acp.new_session
+                   entry.client
+                   ~cwd:base_path
+                   ?system_prompt_append:fallback_sys
+                   ~mcp_server:entry.mcp_server
+                   ~additional_directories:skills_dirs
+                   ~mode:effective_mode
+                   ~model:config.model
+                   ?effort:effective_effort
+                   ()
+                 |> Result.map_error (fun err ->
+                   recovery_failure := recovery_failure_of_acp_error err;
+                   acp_error_to_core_error err)
+               in
+               entry.session_id <- Some info.session_id;
+               entry.last_context_used <- None;
+               Ok (info.session_id, false, fallback_prompt, fallback_msgs))
+          | None, _ ->
+            let* info =
+              Acp.new_session
+                entry.client
+                ~cwd:base_path
+                ?system_prompt_append
+                ~mcp_server:entry.mcp_server
+                ~additional_directories:skills_dirs
+                ~mode:effective_mode
+                ~model:config.model
+                ?effort:effective_effort
+                ()
+              |> Result.map_error (fun err ->
+                recovery_failure := recovery_failure_of_acp_error err;
+                acp_error_to_core_error err)
+            in
+            entry.session_id <- Some info.session_id;
+            entry.last_context_used <- None;
+            Ok (info.session_id, false, prompt_text, prepared.messages))
       in
       let prompt_blocks = blocks_of_prompt active_prompt_text in
       let position =
@@ -1263,14 +1665,13 @@ let run_without_lifecycle
       on_transmitted_model_input
         (if resumed
          then Host.Held_by_client_session
-         else Host.Whole_input_transmitted prepared.messages);
+         else Host.Whole_input_transmitted transmitted_messages);
       with_slot_lock entry.turn_slot_mutex (fun () ->
         entry.turn_slot :=
           Some
             { tools = dynamic_tools
             ; on_tool_started = stream.on_tool_started
             ; on_tool_finished = stream.on_tool_finished
-            ; resolve_host_stop
             });
       let clear_slot () =
         with_slot_lock entry.turn_slot_mutex (fun () -> entry.turn_slot := None)
@@ -1297,23 +1698,37 @@ let run_without_lifecycle
                      ~on_event:stream.on_acp_event
                      ()))
               ~watcher:(fun () ->
-                let stop = Eio.Promise.await host_stop_promise in
+                let stop = Runtime_official_client_mcp_http.await_host_stop entry.bridge in
                 Acp.cancel entry.client ~session_id;
                 `Abort stop))
       in
       match outcome with
-      | `Abort stop -> Ok (`Stopped (session_id, stop, stream.observed_tool_calls ()))
+      | `Abort stop ->
+        (* Evict/close the cancelled ACP session deterministically so late
+           Turn N session/update frames never bleed into Turn N+1. *)
+        if persistent then evict_entry_if_same key entry else Acp.close entry.client;
+        Ok (`Stopped (session_id, resumed, stop, stream.observed_tool_calls ()))
       | `Runtime (Ok prompt_res) ->
         let prev_used = entry.last_context_used in
         let cur_used = prompt_res.usage.context_used in
         entry.last_context_used <- cur_used;
         let compacted = compaction_detected ~prev_used ~cur_used in
+        let rollover_needed =
+          should_rollover_context
+            ~context_used:cur_used
+            ~context_size:prompt_res.usage.context_size
+            ~max_context_tokens
+        in
+        if rollover_needed
+        then (if persistent then evict_entry_if_same key entry else Acp.close entry.client);
         close_delivery_frontier ();
-        Ok (`Completed (prompt_res, resumed, compacted, stream.observed_tool_calls ()))
+        Ok
+          (`Completed
+              (prompt_res, resumed, compacted, rollover_needed, stream.observed_tool_calls ()))
       | `Runtime (Error err) ->
-        if persistent then evict_entry_if_same key entry;
+        if persistent then evict_entry_if_same key entry else Acp.close entry.client;
         recovery_failure := recovery_failure_of_acp_error err;
-        Error (acp_error_to_core_error err))
+        Error (acp_error_to_core_error err)))
   in
   let pinned_tool_specs = List.map tool_spec dynamic_tools in
   let run_client () =
@@ -1363,10 +1778,13 @@ let run_without_lifecycle
         in
         let entry =
           { client
+          ; bridge
           ; mcp_server
           ; turn_slot
           ; turn_slot_mutex
           ; turn_mutex = Eio.Mutex.create ()
+          ; in_flight = Atomic.make false
+          ; last_used_at = Time_compat.now ()
           ; session_id = None
           ; last_context_used = None
           ; stop_owner = ignore
@@ -1408,7 +1826,7 @@ let run_without_lifecycle
     try
       match run_client () with
       | Error err -> Error err
-      | Ok (`Stopped (session_id, stop, acp_tool_calls_json)) ->
+      | Ok (`Stopped (session_id, resumed, stop, acp_tool_calls_json)) ->
         let turn_id = provider_turn_identity ~session_id ~turn_count:hook_turn_count in
         let* () =
           update_session "host-stop turn identity" (fun expected ->
@@ -1450,16 +1868,33 @@ let run_without_lifecycle
         in
         recovery_failure := Session_store.State_persistence_failed;
         let* settled =
-          Session_store.settle
-            ~base_path
-            ~keeper_name
-            ~expected:!session_state
-            ~session_id
-            ~turn_id
-            ~updated_at:(Time_compat.now ())
+          (if Option.is_some claim_plan.previous_settlement && not resumed
+           then
+             Session_store.settle_holding
+               ~held_context:
+                 (Host.start_held_context
+                    ~turn_observation:prepared.turn_observation
+                    ?composed_context
+                    !fallback_start_messages_ref)
+               ~base_path
+               ~keeper_name
+               ~expected:!session_state
+               ~session_id
+               ~turn_id
+               ~updated_at:(Time_compat.now ())
+           else
+             Session_store.settle
+               ~base_path
+               ~keeper_name
+               ~expected:!session_state
+               ~session_id
+               ~turn_id
+               ~updated_at:(Time_compat.now ()))
           |> Result.map_error (fun detail ->
             internal_error ("ACP host-stop settlement failed: " ^ detail))
         in
+        if planned_fresh_rollover || force_fresh_retry
+        then clear_rollover_marker ~base_path ~keeper_id:keeper_name;
         session_state := settled;
         on_session_settled settled;
         (* Commit settled non-error host-stopped turns (e.g. terminal surface
@@ -1474,7 +1909,7 @@ let run_without_lifecycle
              ~usage_json:(`Assoc [])
          | Error _ -> ());
         projected
-      | Ok (`Completed (prompt_res, resumed, compacted, acp_tool_calls_json)) ->
+      | Ok (`Completed (prompt_res, resumed, compacted, rollover_needed, acp_tool_calls_json)) ->
         natural_completion := true;
         let session_id = prompt_res.session_id in
         let turn_id = provider_turn_identity ~session_id ~turn_count:hook_turn_count in
@@ -1561,7 +1996,7 @@ let run_without_lifecycle
            planned resume fell back to a fresh ACP session, record the fresh start
            held_context so the next resume diffs against what this session holds. *)
         let* settled =
-          (if compacted
+          (if compacted || rollover_needed
            then
              Session_store.settle_holding
                ~held_context:[]
@@ -1578,7 +2013,7 @@ let run_without_lifecycle
                  (Host.start_held_context
                     ~turn_observation:prepared.turn_observation
                     ?composed_context
-                    prepared.messages)
+                    !fallback_start_messages_ref)
                ~base_path
                ~keeper_name
                ~expected:!session_state
@@ -1614,6 +2049,28 @@ let run_without_lifecycle
            ~tool_calls_json:acp_tool_calls_json
            ~assistant_output:prompt_res.text
            ~usage_json);
+        if rollover_needed
+        then (
+          let effective_limit_tokens =
+            match prompt_res.usage.context_size with
+            | Some s when s > 0 -> s
+            | _ -> max_context_tokens
+          in
+          let context_used = Option.value prompt_res.usage.context_used ~default:effective_limit_tokens in
+          compact_for_rollover
+            ~keepers_dir
+            ~keeper_id:keeper_name
+            ~effective_limit_tokens
+            ~context_used
+            ~fallback_messages:prepared.messages;
+          record_rollover_marker ~base_path ~keeper_id:keeper_name ~runtime_id ~session_id;
+          Log.Keeper.info
+            ~keeper_name
+            "ACP context occupancy reached >=80%% (%d/%d tokens); compacted anchor and armed fresh session rollover"
+            context_used
+            effective_limit_tokens)
+        else if planned_fresh_rollover || force_fresh_retry
+        then clear_rollover_marker ~base_path ~keeper_id:keeper_name;
         let capture, _metrics =
           Runtime_observation.runtime_metrics_for_candidates ~runtime_id ~keeper_name ()
         in
@@ -1654,6 +2111,22 @@ let run_without_lifecycle
       Eio.Cancel.protect (fun () ->
         Host.finish_raw_error ~keeper_name raw_trace_run (internal_error "ACP turn cancelled"));
       Printexc.raise_with_backtrace exn bt
+    | exn when Keeper_owner_signals.is_owner_cancel_reason exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      recovery_failure := Session_store.Owner_stopped_turn;
+      ignore (Eio.Cancel.protect (fun () -> settle_failed_claim "ACP turn stopped by owner"));
+      Eio.Cancel.protect (fun () ->
+        Host.finish_raw_error ~keeper_name raw_trace_run (internal_error "ACP turn stopped by owner"));
+      Printexc.raise_with_backtrace exn bt
+    | exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      Llm_provider.Reserved_exn.reraise_if_reserved exn;
+      let detail = "ACP turn raised unexpected exception: " ^ Printexc.to_string exn in
+      recovery_failure := Session_store.Transport_interrupted;
+      ignore (Eio.Cancel.protect (fun () -> settle_failed_claim detail));
+      Eio.Cancel.protect (fun () ->
+        Host.finish_raw_error ~keeper_name raw_trace_run (internal_error detail));
+      Printexc.raise_with_backtrace exn bt
   in
   let turn_result =
     let* result = turn_result in
@@ -1662,31 +2135,65 @@ let run_without_lifecycle
       (Some (Keeper_client_tool_outbox.pending_consumption (tool_outbox :: produced)));
     Ok result
   in
-  let turn_result =
-    match turn_result with
-    | Ok result -> Ok (Host.finish_raw_success ~keeper_name raw_trace_run result)
-    | Error err ->
-      Host.finish_raw_error ~keeper_name raw_trace_run err;
-      Error err
-  in
   let _ = official_task_reference in
   match turn_result with
-  | Ok _ -> turn_result
+  | Ok result -> Ok (Host.finish_raw_success ~keeper_name raw_trace_run result)
   | Error original_error ->
     let original_detail = Agent_core.Error.to_string original_error in
-    (match Eio.Cancel.protect (fun () -> settle_failed_claim original_detail) with
-     | Ok () -> turn_result
-     | Error recovery_detail ->
-       Error
-         (internal_error
-            (Printf.sprintf
-               "ACP turn failed and recovery persistence also failed: original=%s recovery=%s"
-               original_detail
-               recovery_detail)))
+    let final_error =
+      match Eio.Cancel.protect (fun () -> settle_failed_claim original_detail) with
+      | Ok () -> original_error
+      | Error recovery_detail ->
+        internal_error
+          (Printf.sprintf
+             "ACP turn failed and recovery persistence also failed: original=%s recovery=%s"
+             original_detail
+             recovery_detail)
+    in
+    Eio.Cancel.protect (fun () ->
+      Host.finish_raw_error ~keeper_name raw_trace_run final_error);
+    Error final_error
+;;
+
+let compact_once_for_overflow
+      ~already_compacted
+      ~keepers_dir
+      ~keeper_id
+      ~starting_capacity_bytes
+      ~effective_max_context_tokens
+      ~previous_capacity
+      ~capacity
+      ~initial_messages
+  =
+  if not !already_compacted
+  then (
+    let evicted_messages = split_older_for_rollover initial_messages in
+    if evicted_messages <> []
+    then (
+      let trigger =
+        if previous_capacity = starting_capacity_bytes
+        then
+          Keeper_compaction.Provider_context_overflow
+            { provider_limit_tokens = Some effective_max_context_tokens }
+        else
+          Keeper_compaction.Explicit_hard_limit
+            { capacity_bytes = capacity; observed_bytes = previous_capacity }
+      in
+      match
+        Keeper_compaction.compact_evicted_messages
+          ~keepers_dir
+          ~keeper_id
+          ~trigger
+          ~evicted_messages
+          ()
+      with
+      | Ok (Some _) -> already_compacted := true
+      | Ok None | Error _ -> ()))
 ;;
 
 let run
       ?(on_guidance_prepared = fun () -> Ok ())
+      ?max_context_tokens
       ~input_source
       ~media_store
       ?argument_source
@@ -1733,6 +2240,14 @@ let run
       ~config
       ()
   =
+  let effective_max_context_tokens =
+    resolve_max_context_tokens ~runtime_id ~override:max_context_tokens
+  in
+  let starting_capacity_bytes = capacity_bytes_of_tokens effective_max_context_tokens in
+  let min_reserve_bytes = String.length system_prompt + String.length goal in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let force_fresh_retry = ref false in
+  let compacted_for_overflow = ref false in
   Keeper_official_client_attempt.run
     ~event_bus
     ~keeper_name
@@ -1747,57 +2262,92 @@ let run
        let observe_effect_unavailable () =
          Keeper_official_client_attempt.Effect_cell.unobserved effect_cell
        in
-       run_without_lifecycle
-         ~on_guidance_prepared
-         ~result_scope
-         ~input_source
-         ~media_store
-         ~argument_source
-         ~official_task_reference
-         ~composed_context
-         ~accepts_image_input
-         ~on_session_settled
-         ~on_results_ready
-         ~official_client_continuation
-         ~outbox_viewer
-         ~read_retained_media
-         ~required_native_posture
-         ~runtime_id
-         ~host
-         ~configured_reasoning_effort
-         ~turn_timeout_s
-         ~keeper_name
-         ~on_model_input_window_observation
-         ~carried_front_seed
-         ~librarian_front
-         ~on_carried_front
-         ~turn_start
-         ~pre_tool_rejects
-         ~base_path
-         ~goal
-         ~goal_blocks
-         ~system_prompt
-         ~tools
-         ~loading_plan
-         ~initial_messages
-         ~model_input_projection
-         ~on_transmitted_model_input
-         ~hooks
-         ~context_injector
-         ~context
-         ~terminal_effect_state
-         ~on_official_client_tool_boundary
-         ~on_official_client_result_handoff
-         ~on_native_tool_completion
-         ~on_native_action
-         ~on_usage_report
-         ~on_tool_execution
-         ~event_bus
-         ~raw_trace
-         ~on_event
-         ~observe_effect_attempted
-         ~observe_effect_unavailable
-         ~config)
+       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
+         ~starting_capacity:starting_capacity_bytes
+         ~same_run_retry_authorized:(fun () ->
+           match input_source with
+           | Keeper_request_source.Completion_review -> false
+           | Keeper_request_source.Keeper_history _ ->
+             Keeper_official_client_attempt.Effect_cell.read effect_cell
+             = Keeper_provider_attempt_effect.No_effect_observed)
+         ~shrink_admits_history:(fun ~capacity -> capacity > min_reserve_bytes)
+         ~on_shrink_retry:
+           (fun ~shrink_attempt ~previous_capacity ~capacity ->
+              resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ();
+              evict_keeper_for_workspace ~base_path ~keeper_name;
+              force_fresh_retry := true;
+              compact_once_for_overflow
+                ~already_compacted:compacted_for_overflow
+                ~keepers_dir
+                ~keeper_id:keeper_name
+                ~starting_capacity_bytes
+                ~effective_max_context_tokens
+                ~previous_capacity
+                ~capacity
+                ~initial_messages;
+              Log.Keeper.warn
+                ~keeper_name
+                "ACP typed context overflow; shrinking start history on fresh session: attempt=%d previous_capacity_bytes=%d capacity_bytes=%d"
+                shrink_attempt
+                previous_capacity
+                capacity)
+         ~attempt:(fun ~capacity:capacity_bytes ->
+           run_without_lifecycle
+             ~on_guidance_prepared
+             ~result_scope
+             ~capacity_bytes
+             ~unbounded_capacity_bytes:starting_capacity_bytes
+             ~max_context_tokens:effective_max_context_tokens
+             ~force_fresh_retry:!force_fresh_retry
+             ~input_source
+             ~media_store
+             ~argument_source
+             ~official_task_reference
+             ~composed_context
+             ~accepts_image_input
+             ~on_session_settled
+             ~on_results_ready
+             ~official_client_continuation
+             ~outbox_viewer
+             ~read_retained_media
+             ~required_native_posture
+             ~runtime_id
+             ~host
+             ~configured_reasoning_effort
+             ~turn_timeout_s
+             ~keeper_name
+             ~on_model_input_window_observation
+             ~carried_front_seed
+             ~librarian_front
+             ~on_carried_front
+             ~turn_start
+             ~pre_tool_rejects
+             ~base_path
+             ~goal
+             ~goal_blocks
+             ~system_prompt
+             ~tools
+             ~loading_plan
+             ~initial_messages
+             ~model_input_projection
+             ~on_transmitted_model_input
+             ~hooks
+             ~context_injector
+             ~context
+             ~terminal_effect_state
+             ~on_official_client_tool_boundary
+             ~on_official_client_result_handoff
+             ~on_native_tool_completion
+             ~on_native_action
+             ~on_usage_report
+             ~on_tool_execution
+             ~event_bus
+             ~raw_trace
+             ~on_event
+             ~observe_effect_attempted
+             ~observe_effect_unavailable
+             ~config)
+         ())
 ;;
 
 module For_testing = struct
@@ -1806,6 +2356,15 @@ module For_testing = struct
   let api_usage_of_acp_usage = api_usage_of_acp_usage
   let stop_reason_of_acp_stop_reason = stop_reason_of_acp_stop_reason
   let compaction_detected = compaction_detected
+  let should_rollover_context = should_rollover_context
+  let rollover_threshold = rollover_threshold
+  let record_rollover_marker = record_rollover_marker
+  let rollover_marker_matches = rollover_marker_matches
+  let clear_rollover_marker = clear_rollover_marker
+  let split_older_for_rollover = split_older_for_rollover
+  let prefer_handoff_for_start = prefer_handoff_for_start
+  let hydrate_start_messages = hydrate_start_messages
+  let compact_once_for_overflow = compact_once_for_overflow
 
   let start_mcp_bridge_for_specs ~sw ~env ~pinned_tool_specs =
     let turn_slot = ref None in

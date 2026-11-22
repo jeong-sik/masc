@@ -3,6 +3,7 @@ module Digest = Agent_core.Checkpoint_objects
 type asked =
   { trace : string
   ; molt_trigger : Librarian_lifecycle.molt_trigger option
+  ; category_filter : Keeper_memory_os_types.category option
   }
 
 type question =

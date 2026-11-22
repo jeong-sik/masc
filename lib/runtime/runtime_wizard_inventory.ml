@@ -127,6 +127,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
     [ "codex", "Codex", "codex-app-server", Some "codex", true
     ; "claude-code", "Claude Code", "claude-code", Some "claude", true
     ; "antigravity", "Antigravity", "antigravity-cli", Some "agy", true
+    ; "vibe_acp", "Mistral Vibe", "acp", Some "vibe-acp", true
     ; "vllm", "vLLM", "openai-compatible-http", None, true
     ; "rapid-mlx", "RapidMLX", "openai-compatible-http", None, true
     ; "llama-cpp", "llama.cpp", "openai-compatible-http", None, true
@@ -158,11 +159,22 @@ let account_scope (provider : Runtime_schema.provider) =
       native (Runtime_official_account.resolve_home ~client:Claude_code ~declaration:provider.account_home
         |> Result.to_option)
         (fun home -> Runtime_quota_window.scope_of_claude_code_home (Some home))
-  | Antigravity_cli_runtime | Acp_runtime ->
+  | Antigravity_cli_runtime ->
       (match provider.credentials with
        | Some (Runtime_schema.File _) ->
            Some (Runtime_quota_window.scope_of_credential ~provider_id:provider.id provider.credentials)
        | Some (Env _ | Inline _) | None -> None)
+  | Acp_runtime ->
+      (match provider.credentials with
+       | Some (Runtime_schema.File _) ->
+           Some (Runtime_quota_window.scope_of_credential ~provider_id:provider.id provider.credentials)
+       | Some (Env _ | Inline _) | None ->
+           let driver =
+             match provider.acp with
+             | Some opts -> Runtime_acp_client.driver_to_string opts.driver
+             | None -> provider.id
+           in
+           Some (Runtime_quota_window.scope_of_acp_driver ~driver))
   | Chat_completions_api | Messages_api | Ollama_api | Gemini_api | Vertex_gemini_api -> None
 ;;
 

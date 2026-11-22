@@ -5,6 +5,8 @@ let client_arg =
     [ "claude-code", Install.Claude
     ; "codex", Install.Codex
     ; "antigravity", Install.Antigravity
+    ; "mistral-vibe", Install.Mistral_vibe
+    ; "kimi-code", Install.Kimi_code
     ]
 ;;
 
@@ -12,6 +14,8 @@ let client_name = function
   | Install.Claude -> "claude-code"
   | Install.Codex -> "codex"
   | Install.Antigravity -> "antigravity"
+  | Install.Mistral_vibe -> "mistral-vibe"
+  | Install.Kimi_code -> "kimi-code"
 ;;
 
 let to_json ~client ~command ~path =

@@ -27,6 +27,7 @@ let call_posture : Client.client -> Runtime_native_tools.posture = function
   | Client.Claude -> Runtime_native_tools.claude_code_default
   | Client.Codex -> Runtime_native_tools.codex_default
   | Client.Antigravity -> Runtime_native_tools.antigravity_default
+  | Client.Mistral_vibe -> Runtime_native_tools.Native_none
 ;;
 
 let calls_of client =

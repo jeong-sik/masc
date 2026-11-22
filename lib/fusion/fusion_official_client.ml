@@ -805,81 +805,119 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
         ~default_timeout_s:execution.timeout_s
     in
     let profile = Runtime_acp_client.profile_of_driver execution.driver in
-    let* prompt_text, system_prompt_append =
-      match profile.system_prompt_channel, system_prompt with
-      | Runtime_acp_client.Meta_antigravity_append, Some sp -> Ok (prompt, Some sp)
-      | Runtime_acp_client.Meta_antigravity_append, None -> Ok (prompt, None)
-      | Runtime_acp_client.Framed_in_first_prompt, sp ->
-        framed_prompt ~system_prompt:sp ~prompt
-        |> Result.map (fun framed -> framed, None)
-        |> Result.map_error (fun detail -> Setup_failure detail)
-    in
-    let blocks =
-      Runtime_acp_client.Text_block prompt_text
-      :: List.map
-           (fun (img : image_input) ->
-              Runtime_acp_client.Image_block
-                { mime_type = img.media_type; base64_data = img.base64_data })
-           images
-    in
-    let acp_config : Runtime_acp_client.config =
-      { driver = execution.driver
-      ; cli_path = execution.cli_path
-      ; args = execution.args
-      ; strip_env = execution.strip_env
-      ; skills_dirs = execution.skills_dirs
-      ; cwd = base_dir
-      ; oauth_source = execution.oauth_source
-      ; dangerously_skip_permissions = false
-      ; admission_timeout_s = Runtime_acp_client.init_timeout_s
-      }
+    let effective_effort =
+      match execution.effort with
+      | Some _ as e -> e
+      | None ->
+        Option.map Llm_provider.Reasoning_effort.to_string runtime.model.reasoning_effort
     in
     Eio.Switch.run
     @@ fun sw ->
-    (match Runtime_acp_client.start ~sw ~proc_mgr:mgr ~clock ~config:acp_config () with
+    (match Runtime_acp_client.create_isolated_workspace ~sw ~prefix:"fusion" () with
      | Error err -> acp_failed err
-     | Ok client ->
-       (match
-          Runtime_acp_client.validate_prompt_blocks
-            ~driver:execution.driver
-            ~capabilities:(Runtime_acp_client.capabilities client)
-            blocks
-        with
-        | Error err -> acp_failed err
-        | Ok () ->
-          let mode =
-            Option.value execution.mode
-              ~default:
-                (Runtime_acp_client.mode_of_posture
-                   execution.driver
-                   Runtime_native_tools.Native_none)
-          in
-          (match
-             Runtime_acp_client.new_session
-               client
-               ~cwd:base_dir
-               ?system_prompt_append
-               ~mode
-               ~model:execution.model
-               ?effort:execution.effort
-               ()
-           with
-           | Error err -> acp_failed err
-           | Ok session ->
-             (match
-                Runtime_acp_client.prompt
-                  client
-                  ~session_id:session.session_id
-                  ~blocks
-                  ~timeout_s:effective_timeout_s
-                  ~permission_policy:Runtime_acp_client.Deny_all
-                  ()
+     | Ok isolated_cwd ->
+       let acp_config : Runtime_acp_client.config =
+         { driver = execution.driver
+         ; cli_path = execution.cli_path
+         ; args = execution.args
+         ; strip_env = execution.strip_env
+         ; skills_dirs = []
+         ; cwd = isolated_cwd
+         ; oauth_source = execution.oauth_source
+         ; dangerously_skip_permissions = false
+         ; admission_timeout_s = Runtime_acp_client.init_timeout_s
+         }
+       in
+       match
+         Runtime_acp_client.start
+           ~sw
+           ~proc_mgr:mgr
+           ~clock
+           ~fs:(Eio.Stdenv.fs env)
+           ~config:acp_config
+           ~native_posture:Runtime_native_tools.Native_none
+           ()
+       with
+       | Error err -> acp_failed err
+       | Ok client ->
+         Fun.protect
+           ~finally:(fun () -> Runtime_acp_client.close client)
+           (fun () ->
+              let caps = Runtime_acp_client.capabilities client in
+              let use_meta_append =
+                profile.system_prompt_channel = Runtime_acp_client.Meta_antigravity_append
+                && caps.antigravity_system_prompt_append
+              in
+              let* prompt_text, system_prompt_append =
+                match use_meta_append, system_prompt with
+                | true, Some sp -> Ok (prompt, Some sp)
+                | true, None -> Ok (prompt, None)
+                | false, sp ->
+                  framed_prompt ~system_prompt:sp ~prompt
+                  |> Result.map (fun framed -> framed, None)
+                  |> Result.map_error (fun detail -> Setup_failure detail)
+              in
+              let blocks =
+                Runtime_acp_client.Text_block prompt_text
+                :: List.map
+                     (fun (img : image_input) ->
+                        Runtime_acp_client.Image_block
+                          { mime_type = img.media_type; base64_data = img.base64_data })
+                     images
+              in
+              match
+                Runtime_acp_client.validate_prompt_blocks
+                  ~driver:execution.driver
+                  ~capabilities:caps
+                  blocks
               with
               | Error err -> acp_failed err
-              | Ok res ->
-                let usage = acp_usage ~driver:execution.driver res.usage in
-                on_usage usage;
-                succeeded { text = res.text; model = execution.model; usage }))))
+              | Ok () ->
+                let mode =
+                  Runtime_acp_client.resolve_mode_for_posture
+                    ~driver:execution.driver
+                    ~posture:Runtime_native_tools.Native_none
+                    ~configured_mode:execution.mode
+                in
+                (match
+                   Runtime_acp_client.new_session
+                     client
+                     ~cwd:isolated_cwd
+                     ?system_prompt_append
+                     ~mode
+                     ~model:execution.model
+                     ?effort:effective_effort
+                     ()
+                 with
+                 | Error err -> acp_failed err
+                 | Ok session ->
+                   (match
+                      Runtime_acp_client.prompt
+                        client
+                        ~session_id:session.session_id
+                        ~blocks
+                        ~timeout_s:effective_timeout_s
+                        ~permission_policy:Runtime_acp_client.Deny_all
+                        ()
+                    with
+                    | Error err -> acp_failed err
+                    | Ok res ->
+                      if caps.close_session && Runtime_acp_client.is_alive client
+                      then
+                        ignore
+                          (Runtime_acp_client.close_session
+                             ~timeout_s:1.5
+                             client
+                             ~session_id:session.session_id
+                           : (unit, Runtime_acp_client.error) result);
+                      let usage = acp_usage ~driver:execution.driver res.usage in
+                      on_usage usage;
+                      let observed_model =
+                        match session.current_model_id with
+                        | Some m when String.trim m <> "" -> m
+                        | Some _ | None -> execution.model
+                      in
+                      succeeded { text = res.text; model = observed_model; usage }))))
 ;;
 
 let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema ~prompt () =

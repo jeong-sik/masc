@@ -22,6 +22,8 @@ val path_is_within : root:string -> string -> bool
 
 val acp_settings_json
   :  ?mcp_server_name:string
+  -> ?deny_read_roots:string list
+  -> ?deny_writes_and_commands:bool
   -> gemini_dir:string
   -> unit
   -> (Yojson.Safe.t, error) result
@@ -30,5 +32,9 @@ val acp_settings_json
     [<gemini_dir>/antigravity-cli/antigravity-oauth-token], and wildcard
     native URL tools ([read_url] and [execute_url]). When [mcp_server_name] is
     provided, grants MCP tool calls on that server and recursive schema reads
-    under [<gemini_dir>/antigravity-cli/mcp/<server>]. Rejects relative,
-    NUL-bearing, or pattern-syntax paths and unsafe server names. *)
+    under [<gemini_dir>/antigravity-cli/mcp/<server>]. Optional
+    [deny_read_roots] adds explicit recursive [read_file(<root>)] denies
+    (refusing any root that would shadow [gemini_dir]); optional
+    [deny_writes_and_commands] adds wildcard [write_file] and [command] denies
+    for [Native_none]/[Native_read] postures. Rejects relative, NUL-bearing,
+    or pattern-syntax paths and unsafe server names. *)

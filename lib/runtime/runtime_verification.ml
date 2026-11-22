@@ -673,7 +673,7 @@ let runtime_refusal (runtime : Runtime_instance.t) =
   if Runtime_tool_support.declares_tools runtime then None else Some Tools_not_declared
 ;;
 
-let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~account_request (runtime : Runtime_instance.t) =
+let verify ~secure_random ~sw ~net ~mgr ~clock ?fs ~cwd ~cwd_path ~timeout_s ~account_request (runtime : Runtime_instance.t) =
   (* The refusal the client's latest report amounts to. Whichever ends the
      run first -- this window or the client's own timeout -- reads it. *)
   let refusal_before_deadline = ref None in
@@ -688,55 +688,6 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
          | Error failure -> Error failure
          | Ok _host ->
            Eio.Switch.run (fun acp_sw ->
-             let bridge =
-               Runtime_official_client_mcp_http.start
-                 ~sw:acp_sw
-                 ~net
-                 ~secure_random
-                 ~server_name:"masc"
-                 ~tool_specs:(fun () ->
-                   [ `Assoc
-                       [ "name", `String tool.name
-                       ; "description", `String tool.description
-                       ; "inputSchema", tool.input_schema
-                       ]
-                   ])
-                 ~tool_execution_mode:(fun ~name ~arguments ->
-                   if String.equal name tool.name
-                   then Some (tool.execution_mode arguments)
-                   else None)
-                 ~call_tool:(fun ~name ~call_id ~arguments ->
-                   if String.equal name tool.name
-                   then (
-                     let res = tool.call ~call_id arguments in
-                     Some
-                       { Runtime_official_client_mcp_http.outcome =
-                           { Runtime_official_client_mcp.success = res.success
-                           ; content = res.content
-                           ; content_blocks = res.content_blocks
-                           }
-                       ; stop = res.abort_turn
-                       ; after_response_sent = ignore
-                       })
-                   else None)
-                 ()
-             in
-             let ep = Runtime_official_client_mcp_http.endpoint bridge in
-             let mcp_server : Runtime_acp_client.mcp_http_server =
-               { name = "masc"; url = ep.url; headers = ep.headers }
-             in
-             let acp_config : Runtime_acp_client.config =
-               { driver = execution.driver
-               ; cli_path = execution.cli_path
-               ; args = execution.args
-               ; strip_env = execution.strip_env
-               ; skills_dirs = execution.skills_dirs
-               ; cwd = cwd_path
-               ; oauth_source = execution.oauth_source
-               ; dangerously_skip_permissions = false
-               ; admission_timeout_s = Float.min timeout_s execution.timeout_s
-               }
-             in
              let map_err = function
                | Runtime_acp_client.Spawn_refused _ as err ->
                  Error (Unavailable (Client_not_started (Runtime_acp_client.error_to_string err)))
@@ -749,27 +700,135 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
                  | Runtime_acp_client.Client_closed ) as err ->
                  Error (Provider_rejected (Runtime_acp_client.error_to_string err))
              in
-             match Runtime_acp_client.start ~sw:acp_sw ~proc_mgr:mgr ~clock ~config:acp_config ~mcp_server () with
+             match Runtime_acp_client.create_isolated_workspace ~sw:acp_sw ~prefix:"verify" () with
              | Error err -> map_err err
-             | Ok client ->
-               let mode =
-                 Option.value execution.mode
-                   ~default:(Runtime_acp_client.mode_of_posture execution.driver Runtime_native_tools.Native_none)
+             | Ok isolated_cwd ->
+               let active_client : Runtime_acp_client.t option Atomic.t = Atomic.make None in
+               let bridge =
+                 Runtime_official_client_mcp_http.start
+                   ~sw:acp_sw
+                   ~net
+                   ~secure_random
+                   ~server_name:"masc"
+                   ~tool_specs:(fun () ->
+                     [ `Assoc
+                         [ "name", `String tool.name
+                         ; "description", `String tool.description
+                         ; "inputSchema", tool.input_schema
+                         ]
+                     ])
+                   ~tool_execution_mode:(fun ~name ~arguments ->
+                     if String.equal name tool.name
+                     then Some (tool.execution_mode arguments)
+                     else None)
+                   ~call_tool:(fun ~name ~call_id ~arguments ->
+                     if String.equal name tool.name
+                     then (
+                       let run_call () = tool.call ~call_id arguments in
+                       let res =
+                         match Atomic.get active_client with
+                         | Some client -> Runtime_acp_client.with_external_activity client run_call
+                         | None -> run_call ()
+                       in
+                       Some
+                         { Runtime_official_client_mcp_http.outcome =
+                             { Runtime_official_client_mcp.success = res.success
+                             ; content = res.content
+                             ; content_blocks = res.content_blocks
+                             }
+                         ; stop = res.abort_turn
+                         ; after_response_sent = ignore
+                         })
+                     else None)
+                   ()
                in
-               (match Runtime_acp_client.new_session client ~cwd:cwd_path ~mcp_server ~mode ~model:execution.model ?effort:execution.effort () with
-                | Error err -> map_err err
-                | Ok session ->
-                  (match Runtime_acp_client.prompt client ~session_id:session.session_id
-                           ~blocks:[ Runtime_acp_client.Text_block prompt ]
-                           ~timeout_s:(Some timeout_s)
-                           ~permission_policy:
-                             (Runtime_acp_client.Allow_masc_mcp_only
-                                { mcp_server_name = "masc"
-                                ; allowed_tool_names = [ tool.name ]
-                                })
-                           () with
-                   | Error err -> map_err err
-                   | Ok res -> Ok { model = execution.model; text = res.text }))))
+               let ep = Runtime_official_client_mcp_http.endpoint bridge in
+               let mcp_server : Runtime_acp_client.mcp_http_server =
+                 { name = "masc"; url = ep.url; headers = ep.headers }
+               in
+               let acp_config : Runtime_acp_client.config =
+                 { driver = execution.driver
+                 ; cli_path = execution.cli_path
+                 ; args = execution.args
+                 ; strip_env = execution.strip_env
+                 ; skills_dirs = []
+                 ; cwd = isolated_cwd
+                 ; oauth_source = execution.oauth_source
+                 ; dangerously_skip_permissions = false
+                 ; admission_timeout_s = Float.min timeout_s execution.timeout_s
+                 }
+               in
+               match
+                 Runtime_acp_client.start
+                   ~sw:acp_sw
+                   ~proc_mgr:mgr
+                   ~clock
+                   ?fs
+                   ~config:acp_config
+                   ~mcp_server
+                   ~native_posture:Runtime_native_tools.Native_none
+                   ()
+               with
+               | Error err -> map_err err
+               | Ok client ->
+                 Atomic.set active_client (Some client);
+                 let mode =
+                   Runtime_acp_client.resolve_mode_for_posture
+                     ~driver:execution.driver
+                     ~posture:Runtime_native_tools.Native_none
+                     ~configured_mode:execution.mode
+                 in
+                 let effort =
+                   match execution.effort with
+                   | Some _ as e -> e
+                   | None ->
+                     Option.map Llm_provider.Reasoning_effort.to_string runtime.model.reasoning_effort
+                 in
+                 Fun.protect
+                   ~finally:(fun () ->
+                     Atomic.set active_client None;
+                     Runtime_acp_client.close client)
+                   (fun () ->
+                      match
+                        Runtime_acp_client.new_session
+                          client
+                          ~cwd:isolated_cwd
+                          ~mcp_server
+                          ~mode
+                          ~model:execution.model
+                          ?effort
+                          ()
+                      with
+                      | Error err -> map_err err
+                      | Ok session ->
+                        (match
+                           Runtime_acp_client.prompt
+                             client
+                             ~session_id:session.session_id
+                             ~blocks:[ Runtime_acp_client.Text_block prompt ]
+                             ~timeout_s:(Some timeout_s)
+                             ~permission_policy:
+                               (Runtime_acp_client.Allow_masc_mcp_only
+                                  { mcp_server_name = "masc"
+                                  ; allowed_tool_names = [ tool.name ]
+                                  })
+                             ()
+                         with
+                         | Error err -> map_err err
+                         | Ok res ->
+                           if (Runtime_acp_client.capabilities client).close_session
+                              && Runtime_acp_client.is_alive client
+                           then
+                             ignore
+                               (Runtime_acp_client.close_session
+                                  ~timeout_s:1.5
+                                  client
+                                  ~session_id:session.session_id
+                                : (unit, Runtime_acp_client.error) Stdlib.result);
+                           let observed_model =
+                             Option.value session.current_model_id ~default:execution.model
+                           in
+                           Ok { model = observed_model; text = res.text }))))
       | Runtime_execution.Antigravity_cli execution ->
         (match authorize_host Runtime_account_access.Antigravity with
          | Error failure -> Error failure
@@ -1159,6 +1218,7 @@ let verify_as_command ~env ~sw ~private_dir ~timeout_s ~account_request runtime 
     ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
       ~grace_seconds:Process_eio.child_exit_grace_seconds)
     ~clock
+    ~fs:(Eio.Stdenv.fs env)
     ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_dir)
     ~cwd_path:private_dir
     ~timeout_s

@@ -128,11 +128,49 @@ let mode_of_posture driver (posture : Runtime_native_tools.posture) =
   | Runtime_native_tools.Native_full -> profile.mode_for_native_full
 ;;
 
+let resolve_mode_for_posture ~driver ~(posture : Runtime_native_tools.posture) ~configured_mode =
+  let profile = profile_of_driver driver in
+  let desired_opt =
+    match configured_mode with
+    | None -> None
+    | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed = "" then None else Some trimmed
+  in
+  match posture with
+  | Runtime_native_tools.Native_none ->
+    (match desired_opt with
+     | Some m when not (String.equal m profile.mode_for_native_none) ->
+       Log.Runtime_agent.warn
+         "clamping configured ACP mode %S to %S for %s under Native_none posture"
+         m
+         profile.mode_for_native_none
+         (driver_to_string driver)
+     | Some _ | None -> ());
+    profile.mode_for_native_none
+  | Runtime_native_tools.Native_read ->
+    (match desired_opt with
+     | Some m
+       when String.equal m profile.mode_for_native_none
+            || String.equal m profile.mode_for_native_read -> m
+     | Some m ->
+       Log.Runtime_agent.warn
+         "clamping configured ACP mode %S to %S for %s under Native_read posture"
+         m
+         profile.mode_for_native_read
+         (driver_to_string driver);
+       profile.mode_for_native_read
+     | None -> profile.mode_for_native_read)
+  | Runtime_native_tools.Native_full ->
+    Option.value desired_opt ~default:profile.mode_for_native_full
+;;
+
 (* ── Named protocol constants ─────────────────────────────────────────────── *)
 
 let protocol_version = 1
 let default_timeout_s = 180.0
 let init_timeout_s = 30.0
+let cancel_write_timeout_s = 1.0
 let default_reap_grace_seconds = 5.0
 let max_ndjson_line_bytes = 16 * 1024 * 1024
 let max_prompt_stream_bytes = 16 * 1024 * 1024
@@ -210,6 +248,8 @@ type session_info =
   ; available_models : string list
   ; config_options : config_option list
   ; antigravity_tier : string option
+  ; replayed_context_used : int option
+  ; replayed_context_size : int option
   }
 
 type usage =
@@ -348,6 +388,8 @@ type stream_event =
       ; prompt_tokens : int option
       ; completion_tokens : int option
       ; cached_tokens : int option
+      ; cached_write_tokens : int option
+      ; thought_tokens : int option
       ; total_tokens : int option
       }
   | Mode_updated of string
@@ -1298,15 +1340,19 @@ let parse_session_update_with ?managed_schema_root ?mcp_server_name ?merged_wire
     let used = json_int_opt "used" update |> nonneg_opt in
     let size = json_int_opt "size" update |> nonneg_opt in
     let meta = json_field "_meta" update in
-    let meta_int k = Option.bind meta (json_int_opt k) |> nonneg_opt in
+    let meta_first keys =
+      Option.bind meta (fun m -> List.find_map (fun k -> json_int_opt k m) keys) |> nonneg_opt
+    in
     Some
       (Usage_updated
          { used
          ; size
-         ; prompt_tokens = meta_int "promptTokens"
-         ; completion_tokens = meta_int "completionTokens"
-         ; cached_tokens = meta_int "cachedTokens"
-         ; total_tokens = meta_int "totalTokens"
+         ; prompt_tokens = meta_first [ "promptTokens"; "inputTokens" ]
+         ; completion_tokens = meta_first [ "completionTokens"; "outputTokens" ]
+         ; cached_tokens = meta_first [ "cachedTokens"; "cachedReadTokens" ]
+         ; cached_write_tokens = meta_first [ "cachedWriteTokens" ]
+         ; thought_tokens = meta_first [ "thoughtTokens" ]
+         ; total_tokens = meta_first [ "totalTokens" ]
          })
   | Some "current_mode_update" ->
     Option.map (fun m -> Mode_updated m) (json_string_opt "currentModeId" update)
@@ -1433,6 +1479,8 @@ let parse_session_info result_json =
       ; available_models
       ; config_options
       ; antigravity_tier
+      ; replayed_context_used = None
+      ; replayed_context_size = None
       }
 ;;
 
@@ -1487,7 +1535,139 @@ let build_environment ~base_env ~driver ~extra_strip_env =
   Array.of_list (filtered @ additions)
 ;;
 
-let prepare_antigravity_gemini_dir ~oauth_source ~mcp_server =
+let write_private_file_0600 path content =
+  let fd =
+    Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL; Unix.O_CLOEXEC ] 0o600
+  in
+  Fs_compat.write_all_and_close fd content
+;;
+
+let read_private_oauth_file ~strict_mode source_path =
+  if String.trim source_path = ""
+     || Filename.is_relative source_path
+     || String.contains source_path '\000'
+  then Error (Printf.sprintf "oauth_source %S must be a non-empty absolute path" source_path)
+  else (
+    try
+      let euid = Unix.geteuid () in
+      let lstat = Unix.lstat source_path in
+      if lstat.Unix.st_kind <> Unix.S_REG
+      then
+        Error
+          (Printf.sprintf
+             "oauth_source %S must be a regular file (not symlink or special file)"
+             source_path)
+      else if lstat.Unix.st_uid <> euid
+      then
+        Error
+          (Printf.sprintf
+             "oauth_source %S is owned by uid %d, expected %d"
+             source_path
+             lstat.Unix.st_uid
+             euid)
+      else if strict_mode && (lstat.Unix.st_perm land 0o077) <> 0
+      then
+        Error
+          (Printf.sprintf
+             "oauth_source %S has unsafe permissions %04o (expected 0600/0400)"
+             source_path
+             (lstat.Unix.st_perm land 0o7777))
+      else (
+        let fd =
+          Unix.openfile source_path [ Unix.O_RDONLY; Unix.O_CLOEXEC; Unix.O_NONBLOCK ] 0
+        in
+        Fun.protect
+          ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
+          (fun () ->
+             let fstat = Unix.fstat fd in
+             if fstat.Unix.st_kind <> Unix.S_REG
+                || fstat.Unix.st_dev <> lstat.Unix.st_dev
+                || fstat.Unix.st_ino <> lstat.Unix.st_ino
+                || fstat.Unix.st_uid <> euid
+                || (strict_mode && (fstat.Unix.st_perm land 0o077) <> 0)
+             then
+               Error
+                 (Printf.sprintf
+                    "oauth_source %S changed or became unsafe during open"
+                    source_path)
+             else (
+               let buf = Buffer.create (min (max fstat.Unix.st_size 64) 65536) in
+               let tmp = Bytes.create 4096 in
+               let rec read_chunk () =
+                 try Unix.read fd tmp 0 (Bytes.length tmp) with
+                 | Unix.Unix_error (Unix.EINTR, _, _) -> read_chunk ()
+               in
+               let rec loop total =
+                 let n = read_chunk () in
+                 if n = 0
+                 then Ok (Buffer.contents buf)
+                 else if total + n > 1024 * 1024
+                 then Error (Printf.sprintf "oauth_source %S exceeds 1 MiB limit" source_path)
+                 else (
+                   Buffer.add_subbytes buf tmp 0 n;
+                   loop (total + n))
+               in
+               loop 0)))
+    with
+    | Unix.Unix_error (err, fn, arg) ->
+      Error
+        (Printf.sprintf
+           "oauth_source %S unreadable (%s: %s %s)"
+           source_path
+           (Unix.error_message err)
+           fn
+           arg))
+;;
+
+let sanitize_temp_prefix raw =
+  let cleaned =
+    String.to_seq raw
+    |> Seq.filter (function
+      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' -> true
+      | _ -> false)
+    |> String.of_seq
+  in
+  if cleaned = "" then "acp" else cleaned
+;;
+
+let create_isolated_workspace ~sw ?(prefix = "acp") () =
+  let safe = sanitize_temp_prefix prefix in
+  let tag = Printf.sprintf "masc-acp-iso-%s-%d-" safe (Unix.getpid ()) in
+  let* dir =
+    try
+      let raw_dir = Filename.temp_dir ~perms:0o700 tag "" in
+      try Ok (Unix.realpath raw_dir) with
+      | Unix.Unix_error (err, fn, arg) ->
+        (try Fs_compat.remove_tree raw_dir with Sys_error _ | Unix.Unix_error _ -> ());
+        Error
+          (Invalid_config
+             (Printf.sprintf
+                "failed to canonicalize isolated ACP workspace (%s: %s %s)"
+                (Unix.error_message err)
+                fn
+                arg))
+    with
+    | Sys_error detail ->
+      Error (Invalid_config ("failed to create isolated ACP workspace: " ^ detail))
+    | Unix.Unix_error (err, fn, arg) ->
+      Error
+        (Invalid_config
+           (Printf.sprintf
+              "failed to create isolated ACP workspace (%s: %s %s)"
+              (Unix.error_message err)
+              fn
+              arg))
+  in
+  let cleaned = Atomic.make false in
+  Eio.Switch.on_release sw (fun () ->
+    if Atomic.compare_and_set cleaned false true
+    then (
+      try Fs_compat.remove_tree dir with
+      | Sys_error _ | Unix.Unix_error _ -> ()));
+  Ok dir
+;;
+
+let prepare_antigravity_gemini_dir ~oauth_source ~mcp_server ~cwd ~native_posture =
   (* PID-tag temp dir so Orphan_hygiene_sweep reaps dead-PID leftovers on boot
      while never deleting a live persistent ACP session's --gemini-dir (>24h).
      Canonicalize via [Unix.realpath] so macOS [/var] vs [/private/var] aliases
@@ -1495,7 +1675,7 @@ let prepare_antigravity_gemini_dir ~oauth_source ~mcp_server =
   let* dir =
     try
       let raw_dir =
-        Filename.temp_dir (Printf.sprintf "masc-agy-acp-%d-" (Unix.getpid ())) ""
+        Filename.temp_dir ~perms:0o700 (Printf.sprintf "masc-agy-acp-%d-" (Unix.getpid ())) ""
       in
       try Ok (Unix.realpath raw_dir) with
       | Unix.Unix_error (err, fn, arg) ->
@@ -1525,23 +1705,91 @@ let prepare_antigravity_gemini_dir ~oauth_source ~mcp_server =
   in
   try
     let mcp_server_name = Option.map (fun (srv : mcp_http_server) -> srv.name) mcp_server in
-    (* Validate [gemini_dir] and [mcp_server.name] (safe leaf, no pattern syntax)
+    let* deny_read_roots, deny_writes_and_commands =
+      match native_posture with
+      | Some Runtime_native_tools.Native_none ->
+        (try
+           let canonical_cwd = Unix.realpath cwd in
+           let stat = Unix.lstat canonical_cwd in
+           if stat.Unix.st_kind <> Unix.S_DIR
+           then (
+             remove_dir_best_effort ();
+             Error
+               (Invalid_config
+                  (Printf.sprintf "Native_none ACP cwd %S is not a directory" canonical_cwd)))
+           else Ok ([ canonical_cwd ], true)
+         with
+         | Unix.Unix_error (err, fn, arg) ->
+           remove_dir_best_effort ();
+           Error
+             (Invalid_config
+                (Printf.sprintf
+                   "Native_none ACP cwd %S could not be canonicalized (%s: %s %s)"
+                   cwd
+                   (Unix.error_message err)
+                   fn
+                   arg)))
+      | Some Runtime_native_tools.Native_read -> Ok ([], true)
+      | Some Runtime_native_tools.Native_full | None -> Ok ([], false)
+    in
+    (* Validate [gemini_dir], [mcp_server.name], and [deny_read_roots]
        BEFORE creating any subdirectories or writing config files. *)
     let* settings_json =
-      Runtime_antigravity_policy.acp_settings_json ?mcp_server_name ~gemini_dir:dir ()
+      Runtime_antigravity_policy.acp_settings_json
+        ?mcp_server_name
+        ~deny_read_roots
+        ~deny_writes_and_commands
+        ~gemini_dir:dir
+        ()
       |> Result.map_error (fun err ->
         remove_dir_best_effort ();
         Invalid_config (Runtime_antigravity_policy.error_to_string err))
     in
+    (* Validate and read explicit oauth_source BEFORE materializing files.
+       Never silently fall back to $HOME when an explicit oauth_source is missing or unsafe. *)
+    let* oauth_bytes_opt =
+      match oauth_source with
+      | Some source_path ->
+        (match read_private_oauth_file ~strict_mode:true source_path with
+         | Ok bytes -> Ok (Some bytes)
+         | Error detail ->
+           remove_dir_best_effort ();
+           Error (Invalid_config detail))
+      | None ->
+        (* Keep antigravity-cli/ isolated per child so Keeper runs never mutate
+           the operator's writable ~/.gemini/antigravity-cli sessions/settings
+           or inherit unrelated MCP configs. Copy only the single OAuth token
+           file if present on disk (macOS agy authenticates via OS Keychain). *)
+        (match Sys.getenv_opt "HOME" with
+         | None -> Ok None
+         | Some home ->
+           let token_file =
+             Filename.concat home ".gemini/antigravity-cli/antigravity-oauth-token"
+           in
+           (match Unix.lstat token_file with
+            | _ ->
+              (match read_private_oauth_file ~strict_mode:false token_file with
+               | Ok bytes -> Ok (Some bytes)
+               | Error detail ->
+                 remove_dir_best_effort ();
+                 Error (Invalid_config detail))
+            | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+            | exception Unix.Unix_error (err, fn, arg) ->
+              remove_dir_best_effort ();
+              Error
+                (Invalid_config
+                   (Printf.sprintf
+                      "failed to inspect default Antigravity OAuth token (%s: %s %s)"
+                      (Unix.error_message err)
+                      fn
+                      arg))))
+    in
     let config_dir = Filename.concat dir "config" in
-    Fs_compat.mkdir_p config_dir;
-    Unix.chmod config_dir 0o700;
+    Unix.mkdir config_dir 0o700;
     let agy_cli_dir = Filename.concat dir "antigravity-cli" in
-    Fs_compat.mkdir_p agy_cli_dir;
-    Unix.chmod agy_cli_dir 0o700;
+    Unix.mkdir agy_cli_dir 0o700;
     let settings_path = Filename.concat agy_cli_dir "settings.json" in
-    Fs_compat.save_file settings_path (Yojson.Safe.pretty_to_string settings_json);
-    Unix.chmod settings_path 0o600;
+    write_private_file_0600 settings_path (Yojson.Safe.pretty_to_string settings_json);
     let managed_schema_root =
       match mcp_server with
       | None -> None
@@ -1563,37 +1811,18 @@ let prepare_antigravity_gemini_dir ~oauth_source ~mcp_server =
             ]
         in
         let cfg_path = Filename.concat config_dir "mcp_config.json" in
-        Fs_compat.save_file cfg_path (Yojson.Safe.to_string mcp_json);
-        Unix.chmod cfg_path 0o600;
+        write_private_file_0600 cfg_path (Yojson.Safe.to_string mcp_json);
         let mcp_root = Filename.concat agy_cli_dir "mcp" in
-        Fs_compat.mkdir_p mcp_root;
-        Unix.chmod mcp_root 0o700;
+        Unix.mkdir mcp_root 0o700;
         let schema_dir = Filename.concat mcp_root srv.name in
-        Fs_compat.mkdir_p schema_dir;
-        Unix.chmod schema_dir 0o700;
+        Unix.mkdir schema_dir 0o700;
         Some (srv.name, schema_dir)
     in
-    let copy_oauth_file source_path =
-      let dest = Filename.concat agy_cli_dir "antigravity-oauth-token" in
-      let content = Fs_compat.load_file source_path in
-      Fs_compat.save_file dest content;
-      Unix.chmod dest 0o600
-    in
-    (match oauth_source with
-     | Some source_path when Sys.file_exists source_path ->
-       copy_oauth_file source_path
-     | Some _ | None ->
-       (* Keep antigravity-cli/ isolated per child so Keeper runs never mutate
-          the operator's writable ~/.gemini/antigravity-cli sessions/settings
-          or inherit unrelated MCP configs. Copy only the single OAuth token
-          file if present on disk (macOS agy authenticates via OS Keychain). *)
-       (match Sys.getenv_opt "HOME" with
-        | Some home ->
-          let token_file =
-            Filename.concat home ".gemini/antigravity-cli/antigravity-oauth-token"
-          in
-          if Sys.file_exists token_file then copy_oauth_file token_file
-        | None -> ()));
+    Option.iter
+      (fun content ->
+         let dest = Filename.concat agy_cli_dir "antigravity-oauth-token" in
+         write_private_file_0600 dest content)
+      oauth_bytes_opt;
     Ok (dir, managed_schema_root)
   with
   | Eio.Cancel.Cancelled _ as exn ->
@@ -1668,6 +1897,7 @@ type t =
   ; mutable init_latency_ms : int
   ; managed_schema_root : (string * string) option
   ; mcp_server_name : string option
+  ; mutable stderr_secrets : string list
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; signal_term : unit -> unit
   ; signal_close : unit -> unit
@@ -1680,7 +1910,10 @@ type t =
   ; mutable next_id : int
   ; pending : (int, rpc_response Eio.Promise.u) Hashtbl.t
   ; mutable active_turn : active_turn_hooks option
-  ; mutable session_config_observer : (string * (config_option list -> unit)) option
+  ; session_observers : (string, stream_event -> unit) Hashtbl.t
+  ; mutable cached_available_modes : string list
+  ; mutable cached_available_models : string list
+  ; mutable cached_config_options : config_option list
   ; last_activity_ns : int64 Atomic.t
   ; in_flight_external_work : int Atomic.t
   ; alive : bool Atomic.t
@@ -1723,11 +1956,99 @@ let capabilities t = t.capabilities
 let init_latency_ms t = t.init_latency_ms
 let is_alive t = Atomic.get t.alive && not (Atomic.get t.closed)
 
+let utf8_safe_suffix ~max_bytes s =
+  let len = String.length s in
+  if max_bytes <= 0
+  then ""
+  else if len <= max_bytes
+  then s
+  else (
+    let i = ref (len - max_bytes) in
+    while !i < len && (Char.code s.[!i] land 0xC0) = 0x80 do
+      incr i
+    done;
+    String.sub s !i (len - !i))
+;;
+
+let replace_exact_substring ~needle ~replacement haystack =
+  let n_len = String.length needle in
+  let h_len = String.length haystack in
+  if n_len = 0 || n_len > h_len
+  then haystack
+  else (
+    let buf = Buffer.create h_len in
+    let rec loop pos =
+      if pos > h_len - n_len
+      then Buffer.add_substring buf haystack pos (h_len - pos)
+      else if String.sub haystack pos n_len = needle
+      then (
+        Buffer.add_string buf replacement;
+        loop (pos + n_len))
+      else (
+        Buffer.add_char buf haystack.[pos];
+        loop (pos + 1))
+    in
+    loop 0;
+    Buffer.contents buf)
+;;
+
+let redact_stderr_text ?(extra_secrets = []) text =
+  let scrubbed =
+    List.fold_left
+      (fun acc secret ->
+         if String.length secret >= 8
+         then replace_exact_substring ~needle:secret ~replacement:"[REDACTED]" acc
+         else acc)
+      text
+      extra_secrets
+  in
+  Secret_patterns.redact_text scrubbed
+;;
+
+let stderr_secrets_of_mcp_server = function
+  | None -> []
+  | Some (srv : mcp_http_server) ->
+    let url_secrets =
+      let u = String.trim srv.url in
+      if String.length u >= 8 then [ u ] else []
+    in
+    let header_secrets =
+      List.concat_map
+        (fun (_k, raw_v) ->
+           let v = String.trim raw_v in
+           let stripped =
+             if String.length v > 7
+                && String.equal (String.lowercase_ascii (String.sub v 0 7)) "bearer "
+             then String.trim (String.sub v 7 (String.length v - 7))
+             else ""
+           in
+           List.filter (fun s -> String.length s >= 8) [ v; stripped ])
+        srv.headers
+    in
+    List.sort_uniq String.compare (url_secrets @ header_secrets)
+;;
+
+let register_stderr_secrets t mcp_server =
+  let fresh = stderr_secrets_of_mcp_server mcp_server in
+  if fresh <> []
+  then (
+    Stdlib.Mutex.lock t.stderr_mutex;
+    let merged =
+      List.fold_left
+        (fun acc s -> if List.mem s acc then acc else s :: acc)
+        t.stderr_secrets
+        fresh
+    in
+    t.stderr_secrets <- merged;
+    Stdlib.Mutex.unlock t.stderr_mutex)
+;;
+
 let stderr_tail t =
   Stdlib.Mutex.lock t.stderr_mutex;
   let s = Buffer.contents t.stderr_buf in
+  let secrets = t.stderr_secrets in
   Stdlib.Mutex.unlock t.stderr_mutex;
-  s
+  redact_stderr_text ~extra_secrets:secrets s
 ;;
 
 let append_stderr t chunk =
@@ -1738,7 +2059,10 @@ let append_stderr t chunk =
   then Buffer.add_string t.stderr_buf chunk
   else (
     let combined = Buffer.contents t.stderr_buf ^ chunk in
-    let keep = String.sub combined (String.length combined - max_stderr_tail_bytes) max_stderr_tail_bytes in
+    (* Redact BEFORE slicing so a secret straddling the ring-buffer boundary
+       cannot lose its prefix and leak an unrecognized suffix. *)
+    let redacted = redact_stderr_text ~extra_secrets:t.stderr_secrets combined in
+    let keep = utf8_safe_suffix ~max_bytes:max_stderr_tail_bytes redacted in
     Buffer.clear t.stderr_buf;
     Buffer.add_string t.stderr_buf keep);
   Stdlib.Mutex.unlock t.stderr_mutex
@@ -1778,14 +2102,13 @@ let close_internal ~await_reap t =
   if Atomic.compare_and_set t.closed false true
   then (
     Atomic.set t.alive false;
-    (try Eio.Resource.close t.to_stdin with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | Eio.Io _ | Unix.Unix_error _ | Invalid_argument _ -> ());
-    (try t.signal_term () with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | Eio.Io _ | Unix.Unix_error _ -> ());
-    fail_all_pending t "client closed";
-    t.signal_close ());
+    Eio.Cancel.protect (fun () ->
+      (try Eio.Resource.close t.to_stdin with
+       | Eio.Io _ | Unix.Unix_error _ | Invalid_argument _ -> ());
+      (try t.signal_term () with
+       | Eio.Io _ | Unix.Unix_error _ -> ());
+      fail_all_pending t "client closed";
+      t.signal_close ()));
   if await_reap then t.await_reaped ()
 ;;
 
@@ -1910,7 +2233,7 @@ let dispatch_incoming_message t msg =
       | None -> params
     in
     let update_kind = json_string_opt "sessionUpdate" update in
-    let active, config_observer, merged_wire =
+    let active, session_observer, merged_wire =
       with_state_lock t (fun () ->
         let merged =
           match t.active_turn, req_session_id, update_kind with
@@ -1923,13 +2246,26 @@ let dispatch_incoming_message t msg =
             None
           | _ -> None
         in
-        t.active_turn, t.session_config_observer, merged)
+        let observer =
+          Option.bind req_session_id (fun sid -> Hashtbl.find_opt t.session_observers sid)
+        in
+        t.active_turn, observer, merged)
     in
     let mcp_server_name =
       match active with
       | Some turn -> turn.mcp_server_name
       | None -> t.mcp_server_name
     in
+    let matches_observer = Option.is_some session_observer in
+    let matches_active =
+      match active, req_session_id with
+      | Some turn, Some sid -> String.equal sid turn.session_id
+      | _ -> false
+    in
+    (* Refresh idle liveness on ANY session-matched [session/update] frame,
+       including non-event replay frames such as [user_message_chunk], [plan],
+       and [available_commands_update]. *)
+    if matches_observer || matches_active then note_activity t;
     let event_opt =
       parse_session_update_with
         ?managed_schema_root:t.managed_schema_root
@@ -1937,43 +2273,32 @@ let dispatch_incoming_message t msg =
         ?merged_wire
         params
     in
-    (match config_observer, event_opt with
-     | Some (obs_sid, obs_fn), Some (Config_options_updated opts) ->
-       let matches_observer =
-         match req_session_id with
-         | None -> true
-         | Some sid -> String.equal sid obs_sid
-       in
-       if matches_observer
-       then (
-         try obs_fn opts with
-         | (Out_of_memory | Stack_overflow | Sys.Break | Eio.Cancel.Cancelled _) as exn ->
-           raise exn
-         | _ -> ())
-     | ( Some _
-       , Some
-           ( Text_delta _
-           | Thought_delta _
-           | Tool_call_started _
-           | Tool_call_updated _
-           | Usage_updated _
-           | Mode_updated _ ) )
-     | Some _, None
-     | None, (Some _ | None) -> ());
+    (match event_opt with
+     | Some (Config_options_updated (_ :: _ as opts))
+       when matches_observer || matches_active ->
+       with_state_lock t (fun () -> t.cached_config_options <- opts)
+     | Some
+         ( Text_delta _
+         | Thought_delta _
+         | Tool_call_started _
+         | Tool_call_updated _
+         | Usage_updated _
+         | Mode_updated _
+         | Config_options_updated _ )
+     | None -> ());
+    (match session_observer, event_opt with
+     | Some obs_fn, Some event ->
+       (try obs_fn event with
+        | (Out_of_memory | Stack_overflow | Sys.Break | Eio.Cancel.Cancelled _) as exn ->
+          raise exn
+        | _ -> ())
+     | Some _, None | None, (Some _ | None) -> ());
     (match event_opt, active with
-     | Some event, Some turn ->
-       let matches_session =
-         match req_session_id with
-         | None -> true
-         | Some sid -> String.equal sid turn.session_id
-       in
-       if matches_session
-       then (
-         note_activity t;
-         try turn.on_event event with
-         | (Out_of_memory | Stack_overflow | Sys.Break | Eio.Cancel.Cancelled _) as exn ->
-           raise exn
-         | _ -> ())
+     | Some event, Some turn when matches_active ->
+       (try turn.on_event event with
+        | (Out_of_memory | Stack_overflow | Sys.Break | Eio.Cancel.Cancelled _) as exn ->
+          raise exn
+        | _ -> ())
      | _ -> ())
   | Some "session/request_permission", Some id ->
     let params = Option.value (json_field "params" msg) ~default:(`Assoc []) in
@@ -2109,6 +2434,45 @@ let rpc_call_decoded
           | None -> Error (Timeout { stage = method_name; timeout_s = secs }))))
 ;;
 
+let send_json_bounded t ~timeout_s json =
+  let line = Yojson.Safe.to_string json ^ "\n" in
+  let write_result =
+    Eio.Time.with_timeout t.clock timeout_s (fun () ->
+      Eio.Mutex.use_rw ~protect:true t.write_mutex (fun () ->
+        if Atomic.get t.closed
+        then Ok (Error Client_closed)
+        else (
+          match
+            Eio.Time.with_timeout t.clock timeout_s (fun () ->
+              try
+                Eio.Flow.copy_string line t.to_stdin;
+                Ok (Ok ())
+              with
+              | (Out_of_memory | Stack_overflow | Sys.Break | Eio.Cancel.Cancelled _) as exn ->
+                raise exn
+              | exn ->
+                Atomic.set t.alive false;
+                Ok
+                  (Error
+                     (Process_exited
+                        { detail = "stdin write failed: " ^ Printexc.to_string exn
+                        ; stderr_tail = stderr_tail t
+                        })))
+          with
+          | Ok res -> Ok res
+          | Error `Timeout -> Error `Timeout)))
+  in
+  match write_result with
+  | Ok res -> res
+  | Error `Timeout ->
+    close_internal ~await_reap:false t;
+    Error (Timeout { stage = "stdin_write"; timeout_s })
+;;
+
+(* Send [session/cancel] synchronously under [write_mutex] with a strict write
+   bound so it is strictly ordered on stdin before any subsequent
+   [session/prompt] or [close], yet cannot hang indefinitely if a wedged child
+   stops draining stdin (closing the wedged client on timeout). *)
 let cancel t ~session_id =
   if is_alive t
   then (
@@ -2119,7 +2483,7 @@ let cancel t ~session_id =
         ; "params", `Assoc [ "sessionId", `String session_id ]
         ]
     in
-    enqueue_outbound t notif)
+    ignore (send_json_bounded t ~timeout_s:cancel_write_timeout_s notif : (unit, error) result))
 ;;
 
 let install_client_of_driver = function
@@ -2130,7 +2494,7 @@ let install_client_of_driver = function
 
 (* ── Lifecycle: spawn + initialize ────────────────────────────────────────── *)
 
-let build_argv (config : config) ~temp_gemini_dir =
+let build_argv ?native_posture (config : config) ~temp_gemini_dir =
   let profile = profile_of_driver config.driver in
   let base_args = if config.args <> [] then config.args else profile.default_args in
   match config.driver with
@@ -2140,16 +2504,26 @@ let build_argv (config : config) ~temp_gemini_dir =
       | Some dir -> [ "--gemini-dir"; dir ]
       | None -> []
     in
+    let allow_skip_perm =
+      match native_posture with
+      | Some (Runtime_native_tools.Native_none | Runtime_native_tools.Native_read) -> false
+      | Some Runtime_native_tools.Native_full | None -> config.dangerously_skip_permissions
+    in
     let skip_perm =
-      if config.dangerously_skip_permissions
-      then [ "--dangerously-skip-permissions" ]
-      else []
+      if allow_skip_perm then [ "--dangerously-skip-permissions" ] else []
     in
     (config.cli_path :: base_args) @ gemini_args @ skip_perm
   | Kimi_code ->
-    (* kimi requires global options such as --skills-dir BEFORE the `acp` subcommand. *)
+    (* kimi requires global options such as --skills-dir BEFORE the `acp` subcommand.
+       Under [Native_none], suppress --skills-dir so no host filesystem paths are exposed. *)
+    let suppress_skills_dir =
+      match native_posture with
+      | Some Runtime_native_tools.Native_none -> true
+      | Some (Runtime_native_tools.Native_read | Runtime_native_tools.Native_full) | None ->
+        false
+    in
     let pre_args =
-      if profile.supports_skills_dir_flag
+      if profile.supports_skills_dir_flag && not suppress_skills_dir
       then
         List.concat_map
           (fun dir -> if Sys.file_exists dir then [ "--skills-dir"; dir ] else [])
@@ -2164,7 +2538,7 @@ let foreground_process_mgr ~clock ?(grace_seconds = default_reap_grace_seconds) 
   Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds
 ;;
 
-let start ~sw ~proc_mgr ~clock ~(config : config) ?mcp_server () =
+let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_posture () =
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must be non-empty")
   else if String.trim config.cwd = ""
@@ -2176,10 +2550,15 @@ let start ~sw ~proc_mgr ~clock ~(config : config) ?mcp_server () =
       | Gemini_dir_mcp_config ->
         Result.map
           (fun (dir, schema_root) -> Some dir, schema_root)
-          (prepare_antigravity_gemini_dir ~oauth_source:config.oauth_source ~mcp_server)
+          (prepare_antigravity_gemini_dir
+             ~oauth_source:config.oauth_source
+             ~mcp_server
+             ~cwd:config.cwd
+             ~native_posture)
       | Session_new_http_mcp -> Ok (None, None)
     in
     let mcp_server_name = Option.map (fun (srv : mcp_http_server) -> srv.name) mcp_server in
+    let stderr_secrets = stderr_secrets_of_mcp_server mcp_server in
     let gemini_dir_cleaned = Atomic.make false in
     let cleanup_gemini_dir () =
       if Atomic.compare_and_set gemini_dir_cleaned false true
@@ -2202,11 +2581,27 @@ let start ~sw ~proc_mgr ~clock ~(config : config) ?mcp_server () =
         (install_client_of_driver config.driver)
         ~command:config.cli_path
     in
-    let argv = build_argv { config with cli_path = resolved_cli_path } ~temp_gemini_dir in
-    let cwd_path =
-      match Eio_context.get_env_opt () with
-      | Some eio_env -> Some Eio.Path.(Eio.Stdenv.fs eio_env / config.cwd)
-      | None -> None
+    let argv =
+      build_argv ?native_posture { config with cli_path = resolved_cli_path } ~temp_gemini_dir
+    in
+    let* cwd_path =
+      let resolved =
+        match fs with
+        | Some fs_root -> Some Eio.Path.(fs_root / config.cwd)
+        | None ->
+          (match Eio_context.get_env_opt () with
+           | Some eio_env -> Some Eio.Path.(Eio.Stdenv.fs eio_env / config.cwd)
+           | None ->
+             Option.map (fun fs_root -> Eio.Path.(fs_root / config.cwd)) (Fs_compat.get_fs_opt ()))
+      in
+      match resolved, native_posture with
+      | None, Some Runtime_native_tools.Native_none ->
+        cleanup_gemini_dir ();
+        Error
+          (Invalid_config
+             "Native_none ACP isolation requires ~fs or an initialized Eio filesystem to bind child cwd")
+      | None, (Some (Runtime_native_tools.Native_read | Runtime_native_tools.Native_full) | None)
+      | Some _, (Some _ | None) -> Ok resolved
     in
     let started_at = Time_compat.now () in
     let close_promise, resolve_close = Eio.Promise.create () in
@@ -2267,6 +2662,7 @@ let start ~sw ~proc_mgr ~clock ~(config : config) ?mcp_server () =
                   ; init_latency_ms = 0
                   ; managed_schema_root
                   ; mcp_server_name
+                  ; stderr_secrets
                   ; clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t)
                   ; signal_term
                   ; signal_close
@@ -2279,7 +2675,10 @@ let start ~sw ~proc_mgr ~clock ~(config : config) ?mcp_server () =
                   ; next_id = 1
                   ; pending = Hashtbl.create 16
                   ; active_turn = None
-                  ; session_config_observer = None
+                  ; session_observers = Hashtbl.create 4
+                  ; cached_available_modes = []
+                  ; cached_available_models = []
+                  ; cached_config_options = []
                   ; last_activity_ns = Atomic.make (monotonic_now_ns ())
                   ; in_flight_external_work = Atomic.make 0
                   ; alive = Atomic.make true
@@ -2453,6 +2852,49 @@ let set_config_option t ~session_id ~config_id ~value =
     ~decoder:{ decode = (fun json -> Ok (parse_config_options json)) }
 ;;
 
+let close_session ?(timeout_s = init_timeout_s) t ~session_id =
+  let params = `Assoc [ "sessionId", `String session_id ] in
+  rpc_call_decoded
+    t
+    ~method_name:"session/close"
+    ~params
+    ~timeout_s:(Some timeout_s)
+    ~decoder:{ decode = (fun _ -> Ok ()) }
+;;
+
+let with_session_observer t ~session_id ~on_event f =
+  with_state_lock t (fun () -> Hashtbl.replace t.session_observers session_id on_event);
+  Fun.protect
+    ~finally:(fun () -> with_state_lock t (fun () -> Hashtbl.remove t.session_observers session_id))
+    f
+;;
+
+let merge_with_cached_session_catalog t (info : session_info) : session_info =
+  with_state_lock t (fun () ->
+    if info.available_modes <> [] then t.cached_available_modes <- info.available_modes;
+    if info.available_models <> [] then t.cached_available_models <- info.available_models;
+    if info.config_options <> [] then t.cached_config_options <- info.config_options;
+    (* When a driver returns empty [configOptions] (e.g. [{}] on [session/load] or
+       [session/resume]), reuse cached option schemas/allowed values ONLY while
+       clearing [current_value] so a prior session's active value never causes
+       [apply_session_options] to silently skip [session/set_config_option]. *)
+    let config_options =
+      if info.config_options <> []
+      then info.config_options
+      else
+        List.map
+          (fun (opt : config_option) -> { opt with current_value = "" })
+          t.cached_config_options
+    in
+    { info with
+      available_modes =
+        if info.available_modes <> [] then info.available_modes else t.cached_available_modes
+    ; available_models =
+        if info.available_models <> [] then info.available_models else t.cached_available_models
+    ; config_options
+    })
+;;
+
 let is_effort_category = function
   | Some ("thought_level" | "thinking") -> true
   | Some _ | None -> false
@@ -2544,15 +2986,27 @@ let apply_session_options t (info : session_info) ~mode ~model ~effort =
   let* current_mode_id =
     match mode with
     | None -> Ok info.current_mode_id
-    | Some desired when Option.equal String.equal info.current_mode_id (Some desired) ->
-      Ok info.current_mode_id
-    | Some desired ->
-      (* Only request set_mode when the CLI advertises modes (or list is empty). *)
-      if info.available_modes = [] || List.mem desired info.available_modes
+    | Some raw_desired ->
+      let desired = String.trim raw_desired in
+      if desired = ""
+      then Ok info.current_mode_id
+      else if Option.equal String.equal info.current_mode_id (Some desired)
+      then Ok info.current_mode_id
+      else if info.available_modes = [] || List.mem desired info.available_modes
       then
         let* () = set_mode t ~session_id:info.session_id ~mode_id:desired in
         Ok (Some desired)
-      else Ok info.current_mode_id
+      else
+        Error
+          (Protocol_error
+             { stage = "session/set_mode"
+             ; detail =
+                 Printf.sprintf
+                   "requested ACP mode %S is not advertised by %s (available: [%s])"
+                   desired
+                   (driver_to_string t.driver)
+                   (String.concat ", " info.available_modes)
+             })
   in
   let find_option options opt_id =
     List.find_opt (fun (opt : config_option) -> String.equal opt.id opt_id) options
@@ -2565,6 +3019,12 @@ let apply_session_options t (info : session_info) ~mode ~model ~effort =
         (fun (opt : config_option) ->
            Option.equal String.equal opt.category (Some "model"))
         options
+  in
+  let update_option_current_value options ~config_id ~value =
+    List.map
+      (fun (opt : config_option) ->
+         if String.equal opt.id config_id then { opt with current_value = value } else opt)
+      options
   in
   let* current_model_id, config_options, effort_current_stale =
     match model with
@@ -2582,17 +3042,20 @@ let apply_session_options t (info : session_info) ~mode ~model ~effort =
         then Ok (info.current_model_id, info.config_options, false)
         else (
           let observed_config_options = Atomic.make None in
-          with_state_lock t (fun () ->
-            t.session_config_observer <-
-              Some
-                ( info.session_id
-                , fun opts -> Atomic.set observed_config_options (Some opts) ));
-          let clear_observer () =
-            with_state_lock t (fun () -> t.session_config_observer <- None)
-          in
           let* () =
-            Fun.protect ~finally:clear_observer (fun () ->
-              set_model t ~session_id:info.session_id ~model_id:m)
+            with_session_observer
+              t
+              ~session_id:info.session_id
+              ~on_event:(function
+                | Config_options_updated opts ->
+                  Atomic.set observed_config_options (Some opts)
+                | Text_delta _
+                | Thought_delta _
+                | Tool_call_started _
+                | Tool_call_updated _
+                | Usage_updated _
+                | Mode_updated _ -> ())
+              (fun () -> set_model t ~session_id:info.session_id ~model_id:m)
           in
           match Atomic.get observed_config_options with
           | Some (_ :: _ as updated) -> Ok (Some m, updated, false)
@@ -2617,7 +3080,11 @@ let apply_session_options t (info : session_info) ~mode ~model ~effort =
              in
              (match updated with
               | _ :: _ -> Ok (Some value, updated, false)
-              | [] -> Ok (Some value, info.config_options, true))
+              | [] ->
+                Ok
+                  ( Some value
+                  , update_option_current_value info.config_options ~config_id:option.id ~value
+                  , true ))
            | None -> Ok (info.current_model_id, info.config_options, false))
         | None ->
           if info.available_models <> []
@@ -2651,12 +3118,24 @@ let apply_session_options t (info : session_info) ~mode ~model ~effort =
               ~option
           with
           | Some value ->
-            set_config_option t ~session_id:info.session_id ~config_id:option.id ~value
+            let* updated =
+              set_config_option t ~session_id:info.session_id ~config_id:option.id ~value
+            in
+            (match updated with
+             | _ :: _ -> Ok updated
+             | [] -> Ok (update_option_current_value config_options ~config_id:option.id ~value))
           | None -> Ok config_options)
        | None -> Ok config_options)
     | None -> Ok config_options
   in
+  if config_options <> []
+  then with_state_lock t (fun () -> t.cached_config_options <- config_options);
   Ok { info with current_mode_id; current_model_id; config_options }
+;;
+
+let reconfigure_session t info ?mode ?model ?effort () =
+  let merged = merge_with_cached_session_catalog t info in
+  apply_session_options t merged ~mode ~model ~effort
 ;;
 
 let mcp_servers_param_for_driver driver mcp_server =
@@ -2665,6 +3144,16 @@ let mcp_servers_param_for_driver driver mcp_server =
   | Session_new_http_mcp, Some srv -> `List [ mcp_server_to_acp_json srv ]
   | Session_new_http_mcp, None -> `List []
   | Gemini_dir_mcp_config, _ -> `List []
+;;
+
+let extra_dir_fields_for_client t additional_directories =
+  match additional_directories with
+  | _ :: _ as dirs when t.capabilities.additional_directories || t.driver = Mistral_vibe ->
+    let existing = List.filter (fun d -> String.trim d <> "" && Sys.file_exists d) dirs in
+    if existing = []
+    then []
+    else [ "additionalDirectories", `List (List.map (fun d -> `String d) existing) ]
+  | _ -> []
 ;;
 
 let new_session
@@ -2678,6 +3167,7 @@ let new_session
       ?effort
       ()
   =
+  register_stderr_secrets t mcp_server;
   let profile = profile_of_driver t.driver in
   let meta_fields =
     match profile.system_prompt_channel, system_prompt_append with
@@ -2691,15 +3181,7 @@ let new_session
     | Meta_antigravity_append, (Some _ | None)
     | Framed_in_first_prompt, (Some _ | None) -> []
   in
-  let extra_dir_fields =
-    match additional_directories with
-    | _ :: _ as dirs when t.capabilities.additional_directories || t.driver = Mistral_vibe ->
-      let existing = List.filter (fun d -> String.trim d <> "" && Sys.file_exists d) dirs in
-      if existing = []
-      then []
-      else [ "additionalDirectories", `List (List.map (fun d -> `String d) existing) ]
-    | _ -> []
-  in
+  let extra_dir_fields = extra_dir_fields_for_client t additional_directories in
   let params =
     `Assoc
       ([ "cwd", `String cwd
@@ -2716,7 +3198,8 @@ let new_session
       ~timeout_s:(Some init_timeout_s)
       ~decoder:{ decode = parse_session_info }
   in
-  apply_session_options t info ~mode ~model ~effort
+  let merged = merge_with_cached_session_catalog t info in
+  apply_session_options t merged ~mode ~model ~effort
 ;;
 
 let fallback_session_info ~session_id json =
@@ -2729,51 +3212,142 @@ let fallback_session_info ~session_id json =
   ; available_models
   ; config_options = parse_config_options json
   ; antigravity_tier = parse_antigravity_tier json
+  ; replayed_context_used = None
+  ; replayed_context_size = None
   }
 ;;
 
-let load_session t ~session_id ~cwd ?mcp_server ?mode ?model ?effort () =
+let attach_existing_session
+      t
+      ~method_name
+      ~use_idle_liveness
+      ~session_id
+      ~cwd
+      ?mcp_server
+      ?(additional_directories = [])
+      ?mode
+      ?model
+      ?effort
+      ()
+  =
+  register_stderr_secrets t mcp_server;
+  let extra_dir_fields = extra_dir_fields_for_client t additional_directories in
   let params =
     `Assoc
-      [ "sessionId", `String session_id
-      ; "cwd", `String cwd
-      ; "mcpServers", mcp_servers_param_for_driver t.driver mcp_server
-      ]
+      ([ "sessionId", `String session_id
+       ; "cwd", `String cwd
+       ; "mcpServers", mcp_servers_param_for_driver t.driver mcp_server
+       ]
+       @ extra_dir_fields)
   in
-  let* info =
-    rpc_call_decoded
-      t
-      ~method_name:"session/load"
-      ~params
-      ~timeout_s:(Some init_timeout_s)
-      ~decoder:{ decode = (fun json ->
-        match parse_session_info json with
-        | Ok info -> Ok info
-        | Error _ -> Ok (fallback_session_info ~session_id json)) }
+  let replayed_mode = Atomic.make None in
+  let replayed_config_options = Atomic.make None in
+  let replayed_used = Atomic.make None in
+  let replayed_size = Atomic.make None in
+  let on_replay_event = function
+    | Mode_updated m -> Atomic.set replayed_mode (Some m)
+    | Config_options_updated (_ :: _ as opts) ->
+      Atomic.set replayed_config_options (Some opts)
+    | Usage_updated { used; size; _ } ->
+      (match used with Some _ as u -> Atomic.set replayed_used u | None -> ());
+      (match size with Some _ as s -> Atomic.set replayed_size s | None -> ())
+    | Text_delta _
+    | Thought_delta _
+    | Tool_call_started _
+    | Tool_call_updated _
+    | Config_options_updated [] -> ()
   in
-  apply_session_options t info ~mode ~model ~effort
+  let decoder =
+    { decode =
+        (fun json ->
+           match parse_session_info json with
+           | Ok info -> Ok info
+           | Error _ -> Ok (fallback_session_info ~session_id json))
+    }
+  in
+  note_activity t;
+  let* raw_info =
+    with_session_observer t ~session_id ~on_event:on_replay_event (fun () ->
+      if use_idle_liveness
+      then
+        rpc_call_with_wait t ~method_name ~params ~decoder ~wait:(fun promise ->
+          await_promise_with_idle_timeout
+            ~clock:t.clock
+            ~stage:method_name
+            ~idle_timeout_s:init_timeout_s
+            ~last_activity_ns:t.last_activity_ns
+            ~in_flight_work:t.in_flight_external_work
+            promise)
+      else
+        rpc_call_decoded t ~method_name ~params ~timeout_s:(Some init_timeout_s) ~decoder)
+  in
+  let with_replay =
+    { raw_info with
+      current_mode_id =
+        (match raw_info.current_mode_id with
+         | Some _ as m -> m
+         | None -> Atomic.get replayed_mode)
+    ; config_options =
+        (match raw_info.config_options, Atomic.get replayed_config_options with
+         | _ :: _, _ -> raw_info.config_options
+         | [], Some opts -> opts
+         | [], None -> [])
+    ; replayed_context_used = Atomic.get replayed_used
+    ; replayed_context_size = Atomic.get replayed_size
+    }
+  in
+  let merged = merge_with_cached_session_catalog t with_replay in
+  apply_session_options t merged ~mode ~model ~effort
 ;;
 
-let resume_session t ~session_id ~cwd ?mcp_server ?mode ?model ?effort () =
-  let params =
-    `Assoc
-      [ "sessionId", `String session_id
-      ; "cwd", `String cwd
-      ; "mcpServers", mcp_servers_param_for_driver t.driver mcp_server
-      ]
-  in
-  let* info =
-    rpc_call_decoded
+let load_session
       t
-      ~method_name:"session/resume"
-      ~params
-      ~timeout_s:(Some init_timeout_s)
-      ~decoder:{ decode = (fun json ->
-        match parse_session_info json with
-        | Ok info -> Ok info
-        | Error _ -> Ok (fallback_session_info ~session_id json)) }
-  in
-  apply_session_options t info ~mode ~model ~effort
+      ~session_id
+      ~cwd
+      ?mcp_server
+      ?(additional_directories = [])
+      ?mode
+      ?model
+      ?effort
+      ()
+  =
+  attach_existing_session
+    t
+    ~method_name:"session/load"
+    ~use_idle_liveness:true
+    ~session_id
+    ~cwd
+    ?mcp_server
+    ~additional_directories
+    ?mode
+    ?model
+    ?effort
+    ()
+;;
+
+let resume_session
+      t
+      ~session_id
+      ~cwd
+      ?mcp_server
+      ?(additional_directories = [])
+      ?mode
+      ?model
+      ?effort
+      ()
+  =
+  attach_existing_session
+    t
+    ~method_name:"session/resume"
+    ~use_idle_liveness:false
+    ~session_id
+    ~cwd
+    ?mcp_server
+    ~additional_directories
+    ?mode
+    ?model
+    ?effort
+    ()
 ;;
 
 (* ── Prompt execution with streaming & cancellation ───────────────────────── *)
@@ -2809,7 +3383,15 @@ let prompt
      | Tool_call_started _ -> incr tool_calls
      | Tool_call_updated _ | Mode_updated _ | Config_options_updated _ -> ()
      | Usage_updated
-         { used; size; prompt_tokens; completion_tokens; cached_tokens; total_tokens } ->
+         { used
+         ; size
+         ; prompt_tokens
+         ; completion_tokens
+         ; cached_tokens
+         ; cached_write_tokens
+         ; thought_tokens
+         ; total_tokens
+         } ->
        (match used with Some _ as u -> last_context_used := u | None -> ());
        (match size with Some _ as s -> last_context_size := s | None -> ());
        let prev = !streamed_usage in
@@ -2817,8 +3399,9 @@ let prompt
          { input_tokens = Option.value prompt_tokens ~default:prev.input_tokens
          ; output_tokens = Option.value completion_tokens ~default:prev.output_tokens
          ; cached_read_tokens = Option.value cached_tokens ~default:prev.cached_read_tokens
-         ; cached_write_tokens = prev.cached_write_tokens
-         ; thought_tokens = prev.thought_tokens
+         ; cached_write_tokens =
+             Option.value cached_write_tokens ~default:prev.cached_write_tokens
+         ; thought_tokens = Option.value thought_tokens ~default:prev.thought_tokens
          ; total_tokens = Option.value total_tokens ~default:prev.total_tokens
          ; context_used = !last_context_used
          ; context_size = !last_context_size
@@ -2925,6 +3508,8 @@ let prompt
 module For_testing = struct
   let build_environment = build_environment
   let build_argv = build_argv
+  let utf8_safe_suffix = utf8_safe_suffix
+  let redact_stderr_text = redact_stderr_text
   let should_allow_permission = should_allow_permission
   let classify_tool_call_json = classify_tool_call_json
   let choose_permission_option = choose_permission_option

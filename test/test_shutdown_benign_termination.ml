@@ -56,6 +56,25 @@ let test_combined_with_real_error_is_not_benign () =
 let test_empty_multiple_is_not_benign () =
   check "an empty Multiple asserts nothing and is not benign" false (Eio.Exn.Multiple [])
 
+(* The fatal-error arm of the entrypoint's [run_server] arms the process
+   deadline watchdog exactly when [is_benign_termination] rejects the
+   exception (#54366). Benign shutdown wrappers must stay unarmed so a slow
+   clean shutdown is never cut down by [_exit]. *)
+let arm_worthy exn = not (Shutdown.is_benign_termination ~benign exn)
+
+let test_fatal_arm_skips_benign_shutdown_wrappers () =
+  Alcotest.(check bool) "bare Graceful_shutdown does not arm" false (arm_worthy Graceful_shutdown);
+  Alcotest.(check bool) "Finally_raised (Cancelled _) does not arm" false (arm_worthy finalizer_exn);
+  Alcotest.(check bool)
+    "Eio-combined shutdown wrappers do not arm" false (arm_worthy combined_shutdown)
+
+let test_fatal_arm_arms_genuine_errors () =
+  Alcotest.(check bool) "a bare error arms" true (arm_worthy (Failure "boom"));
+  let combined =
+    fst (Eio.Exn.combine (with_bt Graceful_shutdown) (with_bt (Failure "disk full")))
+  in
+  Alcotest.(check bool) "an error combined with shutdown arms" true (arm_worthy combined)
+
 let () =
   Alcotest.run
     "shutdown_benign_termination"
@@ -68,5 +87,11 @@ let () =
         ; Alcotest.test_case "combined with real error" `Quick
             test_combined_with_real_error_is_not_benign
         ; Alcotest.test_case "empty multiple" `Quick test_empty_multiple_is_not_benign
+        ] )
+    ; ( "fatal_watchdog_arm"
+      , [ Alcotest.test_case "benign shutdown wrappers stay unarmed" `Quick
+            test_fatal_arm_skips_benign_shutdown_wrappers
+        ; Alcotest.test_case "genuine errors arm" `Quick
+            test_fatal_arm_arms_genuine_errors
         ] )
     ]

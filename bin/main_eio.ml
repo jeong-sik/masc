@@ -68,6 +68,17 @@ module Server_runtime_bootstrap = Server_runtime_bootstrap
 module Server_routes_http_runtime = Server_routes_http_runtime
 module Server_startup_takeover = Server_startup_takeover
 
+(** Graceful shutdown exception.
+
+    Raised from the main [Switch.run] fiber after shutdown phases complete.
+    This causes [Eio.Switch.run] to fail the switch, which cancels every
+    remaining background fiber and waits for them to finish.  Returning
+    normally would leave non-daemon background fibers running and make
+    [Switch.run] wait forever.  Declared above [run_server] so its catch
+    can use it in the benign-termination leaf list, which must match
+    [start]'s benign arm exactly. *)
+exception Graceful_shutdown
+
 (** Main server loop *)
 let run_server ~sw ~runtime_sw ~env ~address ~port ~judged ~input_base_path ~on_ready ~accept_store_quarantine =
   (* Service fibers attach to the session switch. Graceful shutdown fails
@@ -83,9 +94,43 @@ let run_server ~sw ~runtime_sw ~env ~address ~port ~judged ~input_base_path ~on_
       ()
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
+  | exn
+    when not
+           (Masc.Shutdown.is_benign_termination
+              ~benign:(function
+                | Graceful_shutdown | Eio.Cancel.Cancelled _ -> true
+                | _ -> false)
+              exn) ->
     Log.Server.error "[main] the server stopped with an exception: %s" (Printexc.to_string exn);
+    (* A fatal server error must still end the process. The re-raise below
+       crosses [Server_session_switch.run]'s switch teardown, which waits for
+       every fiber on the session switch — including the
+       owner-initialization fiber that [Server_runtime_bootstrap.run_single_user]
+       forks before serving starts. When that fiber sits in a non-cancellable
+       stretch, teardown outlives the error and the [FATAL] handler in [start]
+       is never reached: the process keeps booting with its port held (run
+       44946173785, head 21a49d25, "the server went on booting with its port
+       held"; the same case hung 600s at 3b90e7a). Arm the existing process
+       deadline watchdog so a fatal error always exits nonzero even when
+       teardown stalls.
+
+       A normal graceful shutdown must not arm it: failing the session switch
+       to end shutdown cancels in-flight fibers, and a cancellable finalizer
+       then surfaces [Fun.Finally_raised Cancelled] or an [Eio.Exn.Multiple]
+       of such members into this arm. [is_benign_termination] unwraps those
+       structures, and the benign leaf list — [Graceful_shutdown] and
+       [Cancelled] — is exactly the leaf list [start]'s benign arm uses, so
+       benign wrappers fall through to the arm below and re-raise silently;
+       [start] still ends the shutdown with "shutdown complete". The deadline
+       is the normal force budget [force_timeout_s] plus 5s: it only bounds
+       an abnormal fatal unwind, never a clean shutdown, and deriving it
+       keeps the two budgets from silently crossing if one changes later. *)
+    let (_ : Masc.Shutdown.watchdog) =
+      Masc.Shutdown.start_process_deadline_watchdog_or_exit
+        ~timeout_s:(Masc.Shutdown.default_config.force_timeout_s +. 5.0)
+    in
     raise exn
+  | exn -> raise exn
 
 (** CLI options *)
 let port_argument =
@@ -237,15 +282,6 @@ let login_expiry_hours =
      cannot be combined with --no-expiry."
   in
   Arg.(value & opt (some int) None & info ["expiry-hours"] ~docv:"HOURS" ~doc)
-
-(** Graceful shutdown exception.
-
-    Raised from the main [Switch.run] fiber after shutdown phases complete.
-    This causes [Eio.Switch.run] to fail the switch, which cancels every
-    remaining background fiber and waits for them to finish.  Returning
-    normally would leave non-daemon background fibers running and make
-    [Switch.run] wait forever. *)
-exception Graceful_shutdown
 
 let announce_wait_for_previous_owner ~base_path owner =
   let recorded =

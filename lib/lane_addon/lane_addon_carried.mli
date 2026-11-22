@@ -7,7 +7,7 @@
     and the packages it carries come from one commit, so they speak the same
     Exact protocol. *)
 
-type id = Workspace_curator | Candle_appraiser | Hitl_auto_judge
+type id = Candle_appraiser | Hitl_auto_judge
 
 val all : id list
 

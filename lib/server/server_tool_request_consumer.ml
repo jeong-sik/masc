@@ -1,5 +1,4 @@
 type t =
-  | Workspace_curator
   | Completion_review
   | Goal_proof_review
   | Candle_appraisal
@@ -7,7 +6,6 @@ type t =
 [@@deriving enumerate]
 
 let scope = function
-  | Workspace_curator -> Workspace_memory_execution_capture.scope
   | Completion_review -> Verifier_review_owner.scope
   | Goal_proof_review -> Goal_verifier_worker.scope
   | Candle_appraisal -> Server_candle_appraiser.scope

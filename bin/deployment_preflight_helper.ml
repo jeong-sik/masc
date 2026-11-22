@@ -848,8 +848,7 @@ let validate_tool_request () =
        | Error detail -> L.Body_unreadable detail
        | Ok record ->
          match consumer with
-         | Tool_request_consumer.Workspace_curator -> decoded (Masc.Workspace_memory_execution_capture.check_retained record)
-         | Completion_review -> decoded (Masc.Verifier_review_owner.check_retained record)
+         | Tool_request_consumer.Completion_review -> decoded (Masc.Verifier_review_owner.check_retained record)
          | Goal_proof_review -> decoded (Masc.Goal_verifier_worker.check_retained record)
          | Media_reading -> decoded (Masc.Keeper_media_reading_owner.check_retained record)
          (* Candle reads its originals back by request ID and decodes nothing

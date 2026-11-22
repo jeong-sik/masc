@@ -48,9 +48,6 @@ val startup_sweep_microvm_guests : Mcp_server.server_state -> unit
 (** Collect abandoned guests with the runtime lifecycle lock. Failure is
     logged without failing server readiness. *)
 
-val startup_sweep_unowned_exact : Mcp_server.server_state -> unit
-(** Run {!Server_unowned_exact_sweep} on a worker domain and log one line. *)
-
 val startup_count_superseded_lanes : Mcp_server.server_state -> unit
 (** Log one {!Lane_addon_superseded_census} line: the bytes of the retained
     Lane instances {!Lane_addon_superseded.plan} finds eligible for deletion,
@@ -92,7 +89,6 @@ val report_unarmed_typesafeai_destinations : unit -> unit
 type task =
   | Jsonl_retention
   | Microvm_guest_sweep
-  | Unowned_exact_sweep
   | Superseded_lane_census
 
 val start_maintenance :

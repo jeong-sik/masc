@@ -202,8 +202,14 @@ let test_bind_leaves_non_board_tools_alone () =
 
 let identity_json_keys raw =
   match Masc.Server_utils.board_actor_identity_json raw with
-  | `Assoc fields -> List.map fst fields
+  | `Assoc fields -> List.sort String.compare (List.map fst fields)
   | _ -> []
+
+(* The exact key set the projection is allowed to publish. A new field cannot
+   arrive without this list changing, so the check below fails on anything the
+   Board would newly learn about an author. *)
+let expected_identity_keys =
+  [ "display_name"; "id"; "key"; "kind"; "raw"; "source" ]
 
 let test_identity_json_hides_engine_name () =
   List.iter
@@ -215,7 +221,10 @@ let test_identity_json_hides_engine_name () =
         (List.exists
            (fun key ->
              String.length key >= 7 && String.sub key 0 7 = "engine_")
-           keys))
+           keys);
+      check (list string)
+        (Printf.sprintf "%s: the published key set is exactly the six" raw)
+        expected_identity_keys keys)
     [ "xi-hammer"; "keeper:xi-hammer"; "delta"; "claude_code:delta" ]
 
 let () =

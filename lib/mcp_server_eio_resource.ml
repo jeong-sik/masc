@@ -533,6 +533,19 @@ let authorize_keeper_memory_caller ~resource_label ~caller ~keeper =
         , resource_label ^ " requires admin permission or matching keeper identity" )
 ;;
 
+(* The board reader a keeper-memory read acts as: the one Keeper named in the
+   request. A workspace Admin is an operations role, not a reader of every
+   [Direct] post (Board_access.Workspace_member), so handing an Admin the
+   [Operator] reader here would reopen the delivery bypass that N2-B1 closed on
+   the HTTP and MCP tool paths. Missing readership metadata stays fail-closed. *)
+let keeper_memory_board_reader ~config ~keeper =
+  match Keeper_meta_store.read_effective_meta_presence config keeper with
+  | Ok (Keeper_meta_store.Meta_present meta) ->
+    Ok (Keeper_board_audience.reader_for_keeper meta)
+  | Ok (Keeper_meta_store.Meta_absent | Keeper_meta_store.Meta_not_current _) | Error _ ->
+    Error (Mcp_error_code.Insufficient_scope, "Keeper readership metadata unavailable")
+;;
+
 let read_keeper_memory_inputs_blocking ~config ~caller ~keeper =
   let base_path = config.Workspace.base_path in
   let reader_res =
@@ -540,21 +553,17 @@ let read_keeper_memory_inputs_blocking ~config ~caller ~keeper =
     | Error _ as err -> err
     | Ok () ->
       (match caller with
-       | Operator_admin -> Ok Masc_board_handlers.Board_access.Operator
+       | Operator_admin -> keeper_memory_board_reader ~config ~keeper
        | Anonymous_reader ->
          Error (Mcp_error_code.Auth_error, "Keeper memory resource requires authentication")
        | Authenticated_reader { agent_name = _; board_reader } ->
-         (match Keeper_meta_store.read_effective_meta_presence config keeper with
-          | Ok (Keeper_meta_store.Meta_present meta) ->
-            (match board_reader with
-             | Masc_board_handlers.Board_access.Anonymous ->
-               Ok Masc_board_handlers.Board_access.Anonymous
-             | Masc_board_handlers.Board_access.Named _
-             | Masc_board_handlers.Board_access.Workspace_member _
-             | Masc_board_handlers.Board_access.Operator ->
-               Ok (Keeper_board_audience.reader_for_keeper meta))
-          | Ok (Keeper_meta_store.Meta_absent | Keeper_meta_store.Meta_not_current _) | Error _ ->
-            Error (Mcp_error_code.Insufficient_scope, "Keeper readership metadata unavailable")))
+         (match board_reader with
+          | Masc_board_handlers.Board_access.Anonymous ->
+            Ok Masc_board_handlers.Board_access.Anonymous
+          | Masc_board_handlers.Board_access.Named _
+          | Masc_board_handlers.Board_access.Workspace_member _
+          | Masc_board_handlers.Board_access.Operator ->
+            keeper_memory_board_reader ~config ~keeper))
   in
   match reader_res with
   | Error _ as err -> err

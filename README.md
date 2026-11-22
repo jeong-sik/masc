@@ -250,9 +250,11 @@ Switch workspaces with `1`–`6`, cycle sub-tabs with `[` / `]` (or `←` / `→
 unfocused, `Alt+[` / `Alt+]`), move selection or scroll with `↑`/`↓` (`j`/`k`), dive into an item
 with `Enter`, and focus the bottom composer with `i` (or press `c` on a Keeper
 to jump straight into Chat). Inside the composer, `Enter` sends/steers,
-`Shift+Enter` (or `Alt+Enter`) queues a follow-up, and `Ctrl+J` inserts a
-newline. `Esc` blurs the composer, pops a dive, or closes an overlay and never
-quits; `Ctrl+Q` quits cleanly.
+`Alt+Enter` (or `Ctrl+Enter`) queues a follow-up, and `Shift+Enter` (or `Ctrl+J`)
+inserts a newline. Type `/` or `@` inside the composer to open the interactive
+command/mention popup (`↑`/`↓` select, `Tab` complete, `Enter` run/insert,
+`Esc` dismiss). `Esc` blurs the composer, pops a dive, or closes an overlay and
+never quits; `Ctrl+Q` quits cleanly.
 
 Global overlays and tools: `Ctrl+K` command/entity palette, `Ctrl+G` keeper
 switcher, `Ctrl+L` model/runtime switcher, `,` 2-pane Settings overlay, `Ctrl+T`

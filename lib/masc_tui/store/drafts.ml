@@ -77,6 +77,8 @@ type t = {
   voice : voice_phase;
   voice_caps : voice_capabilities option;
   btw : btw_status;
+  popup_selected : int;
+  popup_dismissed : bool;
 }
 
 let default_keeper_key = "_default"
@@ -96,6 +98,8 @@ let empty =
     voice = Voice_off;
     voice_caps = None;
     btw = Btw_idle;
+    popup_selected = 0;
+    popup_dismissed = false;
   }
 
 let equal_delivery_mode a b =
@@ -188,7 +192,7 @@ let next_utf8_boundary s idx =
     in
     step (i + 1)
 
-let with_current_draft f t =
+let with_current_draft ?(reset_popup = true) f t =
   let key = target_keeper_key t in
   let prev = draft_for ~keeper:key t in
   let next = f prev in
@@ -199,7 +203,9 @@ let with_current_draft f t =
     then String_map.remove key t.by_keeper
     else String_map.add key next t.by_keeper
   in
-  { t with by_keeper }
+  if reset_popup then
+    { t with by_keeper; popup_selected = 0; popup_dismissed = false }
+  else { t with by_keeper }
 
 let set_active_keeper name t =
   let trimmed = String.trim name in
@@ -219,9 +225,17 @@ let set_active_keeper name t =
           | Some _, _ | None, _ -> t.by_keeper)
       | Some _ -> t.by_keeper
     in
-    { t with active_keeper = Some trimmed; by_keeper }
+    {
+      t with
+      active_keeper = Some trimmed;
+      by_keeper;
+      popup_selected = 0;
+      popup_dismissed = false;
+    }
 
-let set_focus focused t = { t with focused }
+let set_focus focused t =
+  if Bool.equal t.focused focused then t
+  else { t with focused; popup_selected = 0; popup_dismissed = false }
 let is_focused t = t.focused
 
 let has_non_empty_draft t =
@@ -253,6 +267,16 @@ let insert_text snippet t =
           cursor = c + String.length snippet;
         })
       t
+
+let set_current_text text t =
+  with_current_draft
+    (fun d -> { d with text; cursor = String.length text })
+    t
+
+let set_current_text_and_cursor ~text ~cursor t =
+  with_current_draft
+    (fun d -> { d with text; cursor = clamp_cursor text cursor })
+    t
 
 let insert_newline t = insert_text "\n" t
 
@@ -305,8 +329,26 @@ let kill_word t =
         { d with text = before ^ after; cursor = start })
     t
 
-let move_cursor dir t =
+let kill_line_start t =
   with_current_draft
+    (fun d ->
+      let c = clamp_cursor d.text d.cursor in
+      if c <= 0 then d
+      else
+        let rec find_nl i =
+          if i <= 0 then 0
+          else if Char.equal d.text.[i - 1] '\n' then i
+          else find_nl (i - 1)
+        in
+        let line_start = find_nl c in
+        let start = if line_start = c && c > 0 then prev_utf8_boundary d.text c else line_start in
+        let before = String.sub d.text 0 start in
+        let after = String.sub d.text c (String.length d.text - c) in
+        { d with text = before ^ after; cursor = start })
+    t
+
+let move_cursor dir t =
+  with_current_draft ~reset_popup:false
     (fun d ->
       let len = String.length d.text in
       let c = clamp_cursor d.text d.cursor in
@@ -320,11 +362,88 @@ let move_cursor dir t =
       { d with cursor })
     t
 
+let move_cursor_word dir t =
+  with_current_draft ~reset_popup:false
+    (fun d ->
+      let len = String.length d.text in
+      let c = clamp_cursor d.text d.cursor in
+      let cursor =
+        match dir with
+        | `Left ->
+            let rec skip_ws i =
+              if i <= 0 then 0
+              else if is_space_char d.text.[i - 1] then skip_ws (i - 1)
+              else i
+            in
+            let rec skip_word i =
+              if i <= 0 then 0
+              else if is_space_char d.text.[i - 1] then i
+              else skip_word (prev_utf8_boundary d.text i)
+            in
+            skip_word (skip_ws c)
+        | `Right ->
+            let rec skip_word i =
+              if i >= len then len
+              else if is_space_char d.text.[i] then i
+              else skip_word (next_utf8_boundary d.text i)
+            in
+            let rec skip_ws i =
+              if i >= len then len
+              else if is_space_char d.text.[i] then skip_ws (i + 1)
+              else i
+            in
+            skip_ws (skip_word c)
+      in
+      { d with cursor })
+    t
+
+let move_cursor_line dir t =
+  with_current_draft ~reset_popup:false
+    (fun d ->
+      let len = String.length d.text in
+      let c = clamp_cursor d.text d.cursor in
+      let cursor =
+        match dir with
+        | `Start ->
+            let rec scan i =
+              if i <= 0 then 0
+              else if Char.equal d.text.[i - 1] '\n' then i
+              else scan (i - 1)
+            in
+            scan c
+        | `End ->
+            let rec scan i =
+              if i >= len then len
+              else if Char.equal d.text.[i] '\n' then i
+              else scan (i + 1)
+            in
+            scan c
+      in
+      { d with cursor })
+    t
+
 let clear_current_draft t =
   with_current_draft (fun d -> { d with text = ""; cursor = 0 }) t
 
 let set_preferred_mode preferred_mode t =
-  with_current_draft (fun d -> { d with preferred_mode }) t
+  with_current_draft ~reset_popup:false (fun d -> { d with preferred_mode }) t
+
+let move_popup ~delta ~count ~wrap t =
+  if count <= 0 then { t with popup_selected = 0 }
+  else
+    let cur = Store_scroll.clamp_index count t.popup_selected in
+    let next =
+      if wrap then
+        let r = (cur + delta) mod count in
+        if r < 0 then r + count else r
+      else Store_scroll.clamp_index count (cur + delta)
+    in
+    { t with popup_selected = next; popup_dismissed = false }
+
+let set_popup_selected idx t =
+  { t with popup_selected = max 0 idx; popup_dismissed = false }
+
+let dismiss_popup t = { t with popup_dismissed = true }
 
 let fresh_request_id prefix seq =
   Printf.sprintf "%s-%d" prefix seq
@@ -358,7 +477,16 @@ let enqueue_submission ~now ~keeper ~mode ?(prior_user_msg_ids = []) t =
         String_map.add keeper { d with text = ""; cursor = 0 } t.by_keeper
     in
     let pending_txs = List.take max_retained_txs (msg :: t.pending_txs) in
-    Some ({ t with by_keeper; pending_txs; next_request_seq = next_seq }, msg)
+    Some
+      ( {
+          t with
+          by_keeper;
+          pending_txs;
+          next_request_seq = next_seq;
+          popup_selected = 0;
+          popup_dismissed = false;
+        }
+      , msg )
 
 let is_terminal_tx_state = function
   | Delivered | Failed_retryable _ -> true

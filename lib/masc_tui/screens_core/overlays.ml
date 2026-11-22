@@ -34,269 +34,80 @@ type palette_row =
       tone : Theme.status_token option;
     }
 
+let palette_section_header ~lang = function
+  | Update_nav.Pal_sec_commands ->
+      Say.resolve lang (Say.make ~ko:"명령" ~en:"Commands")
+  | Update_nav.Pal_sec_workspaces ->
+      Say.resolve lang (Say.make ~ko:"워크스페이스" ~en:"Workspaces")
+  | Update_nav.Pal_sec_keepers ->
+      Say.resolve lang (Say.make ~ko:"키퍼" ~en:"Keepers")
+  | Update_nav.Pal_sec_companies ->
+      Say.resolve lang (Say.make ~ko:"조직" ~en:"Companies")
+  | Update_nav.Pal_sec_goals_tasks ->
+      Say.resolve lang (Say.make ~ko:"목표 · 작업" ~en:"Goals & Tasks")
+  | Update_nav.Pal_sec_board_wiki ->
+      Say.resolve lang (Say.make ~ko:"보드 · 위키" ~en:"Board & Wiki")
+  | Update_nav.Pal_sec_sandboxes ->
+      Say.resolve lang (Say.make ~ko:"샌드박스" ~en:"Sandboxes")
+  | Update_nav.Pal_sec_settings ->
+      Say.resolve lang (Say.make ~ko:"설정 키" ~en:"Settings Keys")
+  | Update_nav.Pal_sec_slash ->
+      Say.resolve lang
+        (Say.make
+           ~ko:(Printf.sprintf "슬래시 명령 (%d)" (List.length Slash.all))
+           ~en:(Printf.sprintf "Slash Commands (%d)" (List.length Slash.all)))
+
+let equal_palette_section a b =
+  match a, b with
+  | Update_nav.Pal_sec_commands, Update_nav.Pal_sec_commands
+  | Update_nav.Pal_sec_workspaces, Update_nav.Pal_sec_workspaces
+  | Update_nav.Pal_sec_keepers, Update_nav.Pal_sec_keepers
+  | Update_nav.Pal_sec_companies, Update_nav.Pal_sec_companies
+  | Update_nav.Pal_sec_goals_tasks, Update_nav.Pal_sec_goals_tasks
+  | Update_nav.Pal_sec_board_wiki, Update_nav.Pal_sec_board_wiki
+  | Update_nav.Pal_sec_sandboxes, Update_nav.Pal_sec_sandboxes
+  | Update_nav.Pal_sec_settings, Update_nav.Pal_sec_settings
+  | Update_nav.Pal_sec_slash, Update_nav.Pal_sec_slash ->
+      true
+  | ( Update_nav.Pal_sec_commands
+    | Update_nav.Pal_sec_workspaces
+    | Update_nav.Pal_sec_keepers
+    | Update_nav.Pal_sec_companies
+    | Update_nav.Pal_sec_goals_tasks
+    | Update_nav.Pal_sec_board_wiki
+    | Update_nav.Pal_sec_sandboxes
+    | Update_nav.Pal_sec_settings
+    | Update_nav.Pal_sec_slash )
+    , _ ->
+      false
+
 let build_universal_palette_rows (m : Model.t) =
   let lang = m.lang in
-  let q = String.trim m.palette.query in
-  let fuzzy_opt s = Render_util.fuzzy_score ~query:q s in
+  let entries = Update_nav.palette_entries m in
   let rows = ref [] in
-  let push_section header items =
-    if items <> [] then begin
-      rows := Palette_header header :: !rows;
-      List.iter (fun item -> rows := item :: !rows) items
-    end
-  in
-  let cmds = Update_nav.palette_filtered_commands m in
-  let cmd_items =
-    List.mapi
-      (fun idx (c : Keymap.palette_command) ->
-        let slash_s =
-          match c.slash_twin with Some s -> " " ^ s | None -> ""
-        in
+  let prev_sec = ref None in
+  List.iteri
+    (fun idx (e : Update_nav.palette_entry) ->
+      let changed =
+        match !prev_sec with
+        | Some s -> not (equal_palette_section s e.section)
+        | None -> true
+      in
+      if changed then begin
+        rows := Palette_header (palette_section_header ~lang e.section) :: !rows;
+        prev_sec := Some e.section
+      end;
+      rows :=
         Palette_item
           {
             selectable_idx = Some idx;
-            badge = c.shortcut;
-            title = c.title;
-            meta = String.trim slash_s;
-            tone = Some Theme.Status_active;
-          })
-      cmds
-  in
-  let take n xs =
-    let rec go k acc = function
-      | _ when k <= 0 -> List.rev acc
-      | [] -> List.rev acc
-      | x :: rest -> go (k - 1) (x :: acc) rest
-    in
-    go n [] xs
-  in
-  push_section
-    (Say.resolve lang (Say.make ~ko:"명령" ~en:"Commands"))
-    cmd_items;
-  let ws_items =
-    Nav.all_workspaces
-    |> List.filter_map (fun ws ->
-           let lbl = Say.resolve lang (Nav.workspace_label ws) in
-           let idx = Nav.workspace_index ws in
-           let search_s = Printf.sprintf "%d %s" idx lbl in
-           match fuzzy_opt search_s with
-           | None -> None
-           | Some _ ->
-               Some
-                 (Palette_item
-                    {
-                      selectable_idx = None;
-                      badge = Printf.sprintf "[%d]" idx;
-                      title = lbl;
-                      meta =
-                        Say.resolve lang
-                          (Say.make ~ko:"워크스페이스" ~en:"Workspace");
-                      tone = Some Theme.Status_ok;
-                    }))
-  in
-  push_section
-    (Say.resolve lang (Say.make ~ko:"워크스페이스" ~en:"Workspaces"))
-    (take (if String.equal q "" then 3 else 6) ws_items);
-  let keeper_items =
-    Fleet_store.filtered_keepers { m.fleet with filter_query = "" }
-    |> List.filter_map (fun (k : Wire_fleet.keeper_summary) ->
-           match fuzzy_opt (k.name ^ " " ^ k.company) with
-           | None -> None
-           | Some _ ->
-               let g, tone = Render_util.keeper_health_glyph_and_tone k.health in
-               Some
-                 (Palette_item
-                    {
-                      selectable_idx = None;
-                      badge = Glyph.to_utf8 g;
-                      title = k.name;
-                      meta = Printf.sprintf "%s · %s" k.company k.runtime_id;
-                      tone = Some tone;
-                    }))
-  in
-  push_section
-    (Say.resolve lang (Say.make ~ko:"키퍼" ~en:"Keepers"))
-    (take (if String.equal q "" then 3 else 6) keeper_items);
-  let company_items =
-    Fleet_store.company_groups m.fleet
-    |> List.filter_map (fun (g : Wire_fleet.company_group) ->
-           match fuzzy_opt g.company with
-           | None -> None
-           | Some _ ->
-               Some
-                 (Palette_item
-                    {
-                      selectable_idx = None;
-                      badge = "CO";
-                      title = g.company;
-                      meta = Printf.sprintf "%d keepers" (List.length g.keepers);
-                      tone = None;
-                    }))
-  in
-  push_section
-    (Say.resolve lang (Say.make ~ko:"조직" ~en:"Companies"))
-    (take (if String.equal q "" then 2 else 5) company_items);
-  let goal_items =
-    Work_store.goals m.work
-    |> List.filter_map (fun (g : Wire_work.goal) ->
-           match fuzzy_opt (g.id ^ " " ^ g.title) with
-           | None -> None
-           | Some _ ->
-               Some
-                 (Palette_item
-                    {
-                      selectable_idx = None;
-                      badge = "G";
-                      title = g.title;
-                      meta = Wire_work.goal_phase_to_string g.phase;
-                      tone = Some Theme.Status_ok;
-                    }))
-  in
-  let task_items =
-    Work_store.tasks m.work
-    |> List.filter_map (fun (t : Wire_work.task) ->
-           match fuzzy_opt (t.id ^ " " ^ t.title) with
-           | None -> None
-           | Some _ ->
-               Some
-                 (Palette_item
-                    {
-                      selectable_idx = None;
-                      badge = "T";
-                      title = t.title;
-                      meta = t.id;
-                      tone = None;
-                    }))
-  in
-  push_section
-    (Say.resolve lang (Say.make ~ko:"목표 · 작업" ~en:"Goals & Tasks"))
-    (take (if String.equal q "" then 2 else 5) (goal_items @ task_items));
-  let board_items =
-    Knowledge_store.filtered_posts m.knowledge
-    |> List.filter_map (fun (p : Wire_knowledge.board_post) ->
-           match fuzzy_opt (p.title ^ " " ^ p.author) with
-           | None -> None
-           | Some _ ->
-               Some
-                 (Palette_item
-                    {
-                      selectable_idx = None;
-                      badge = "#";
-                      title = p.title;
-                      meta = p.author;
-                      tone = None;
-                    }))
-  in
-  let wiki_items =
-    match Observed.to_option m.knowledge.wiki_index with
-    | None -> []
-    | Some wi ->
-        wi.pages
-        |> List.filter_map (fun (p : Wire_knowledge.wiki_page_summary) ->
-               match fuzzy_opt (p.slug ^ " " ^ p.title) with
-               | None -> None
-               | Some _ ->
-                   Some
-                     (Palette_item
-                        {
-                          selectable_idx = None;
-                          badge = "W";
-                          title = p.title;
-                          meta = p.slug;
-                          tone = Some Theme.Status_active;
-                        }))
-  in
-  push_section
-    (Say.resolve lang (Say.make ~ko:"보드 · 위키" ~en:"Board & Wiki"))
-    (take (if String.equal q "" then 2 else 5) (board_items @ wiki_items));
-  let sandbox_items =
-    match Observed.to_option m.infra.sandboxes with
-    | None -> []
-    | Some sb ->
-        let vms =
-          List.filter_map
-            (fun (g : Wire_infra.microvm_guest) ->
-              match fuzzy_opt (g.keeper ^ " " ^ g.guest_name) with
-              | None -> None
-              | Some _ ->
-                  Some
-                    (Palette_item
-                       {
-                         selectable_idx = None;
-                         badge = "VM";
-                         title = g.keeper;
-                         meta = g.backend;
-                         tone = Some Theme.Status_active;
-                       }))
-            sb.microvm_guests
-        in
-        let sshs =
-          List.filter_map
-            (fun (p : Wire_infra.ssh_pool) ->
-              match fuzzy_opt (p.pool_name ^ " " ^ p.host) with
-              | None -> None
-              | Some _ ->
-                  Some
-                    (Palette_item
-                       {
-                         selectable_idx = None;
-                         badge = "SSH";
-                         title = p.pool_name;
-                         meta = Printf.sprintf "%s:%d" p.host p.port;
-                         tone = Some Theme.Status_active;
-                       }))
-            sb.ssh_pools
-        in
-        vms @ sshs
-  in
-  push_section
-    (Say.resolve lang (Say.make ~ko:"샌드박스" ~en:"Sandboxes"))
-    (take (if String.equal q "" then 2 else 4) sandbox_items);
-  let settings_items =
-    match Observed.to_option m.config.schema with
-    | None -> []
-    | Some sc ->
-        sc.sections
-        |> List.concat_map (fun (s : Wire_config.schema_section) -> s.fields)
-        |> List.filter_map (fun (f : Wire_config.schema_field) ->
-               let leaf = Config_store.field_label ~lang f in
-               match fuzzy_opt (f.full_key ^ " " ^ leaf) with
-               | None -> None
-               | Some _ ->
-                   Some
-                     (Palette_item
-                        {
-                          selectable_idx = None;
-                          badge = "CFG";
-                          title = leaf;
-                          meta = f.full_key;
-                          tone = None;
-                        }))
-  in
-  push_section
-    (Say.resolve lang (Say.make ~ko:"설정 키" ~en:"Settings Keys"))
-    (take (if String.equal q "" then 2 else 5) settings_items);
-  let slash_items =
-    Slash.filter ~query:q ~lang
-    |> List.map (fun (s : Slash.spec) ->
-           Palette_item
-             {
-               selectable_idx = None;
-               badge = s.name;
-               title = Say.resolve lang s.description;
-               meta =
-                 (match s.arg_hint with
-                  | Some h -> Say.resolve lang h
-                  | None -> "");
-               tone = Some Theme.Status_active;
-             })
-  in
-  push_section
-    (Say.resolve lang
-       (Say.make
-          ~ko:(Printf.sprintf "슬래시 명령 (%d)" (List.length Slash.all))
-          ~en:(Printf.sprintf "Slash Commands (%d)" (List.length Slash.all))))
-    (take (if String.equal q "" then 4 else 8) slash_items);
+            badge = e.badge;
+            title = e.title;
+            meta = e.meta;
+            tone = e.tone;
+          }
+        :: !rows)
+    entries;
   List.rev !rows
 
 let render_palette grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
@@ -733,80 +544,33 @@ let apply_staged_op_to_value ~(kind : Wire_config.field_kind)
       | Wire_config.Field_secret ->
           Form.Text_val value)
 
-let general_ui_fallback_fields (m : Model.t) =
-  let theme_opts =
-    List.map
-      (fun p -> (Theme.preset_name p, Theme.preset_label p))
-      Theme.all_presets
-  in
-  let theme_idx =
-    let rec find i = function
-      | [] -> 0
-      | p :: _ when Theme.equal_preset p m.theme_preset -> i
-      | _ :: rest -> find (i + 1) rest
-    in
-    find 0 Theme.all_presets
-  in
-  let lang_idx =
-    match m.lang with Say.Lang_ko -> 0 | Say.Lang_en -> 1
-  in
-  let prefs = Observed.to_option m.config.preferences in
-  let reduce_motion =
-    match prefs with Some { reduce_motion = Some b; _ } -> b | _ -> false
-  in
-  let hints_visible =
-    match prefs with Some { hints_visible = Some b; _ } -> b | _ -> true
-  in
-  let audio_dev =
-    match prefs with
-    | Some { audio_input_device = Some d; _ } -> d
-    | _ -> "default"
-  in
-  [
-    Form.make_field ~key:"tui.theme"
-      ~label:(Say.make ~ko:"테마 프리셋" ~en:"Theme Preset")
-      ~help:
-        (Say.make ~ko:"WCAG >= 4.5:1 Oklab 4단계 표면 대비 보장 프리셋"
-           ~en:"WCAG >= 4.5:1 Oklab 4-surface contrast theme preset")
-      ~provenance:Form.Prov_tui_pref ~reload_scope:Form.Hot_reload
-      (Form.enum_val ~selected:theme_idx theme_opts);
-    Form.make_field ~key:"tui.language"
-      ~label:(Say.make ~ko:"UI 언어" ~en:"UI Language")
-      ~help:
-        (Say.make ~ko:"KO / EN 전체 화면 원자적 전환"
-           ~en:"Atomic KO / EN switch across all screens")
-      ~provenance:Form.Prov_tui_pref ~reload_scope:Form.Hot_reload
-      (Form.enum_val ~selected:lang_idx
-         [
-           ("ko", Say.make ~ko:"한국어" ~en:"Korean (KO)");
-           ("en", Say.make ~ko:"English" ~en:"English (EN)");
-         ]);
-    Form.make_field ~key:"tui.hints_visible"
-      ~label:(Say.make ~ko:"하단 단축키 힌트" ~en:"Footer Key Hints")
-      ~help:
-        (Say.make ~ko:"하단 키캡 단축키 안내 표시 여부"
-           ~en:"Show quiet keycap hints in the bottom chrome bar")
-      ~provenance:Form.Prov_tui_pref ~reload_scope:Form.Hot_reload
-      (Form.Bool_val hints_visible);
-    Form.make_field ~key:"tui.reduce_motion"
-      ~label:(Say.make ~ko:"모션 줄이기" ~en:"Reduce Motion")
-      ~help:
-        (Say.make ~ko:"스피너·애니메이션 프레임 빈도 감소"
-           ~en:"Reduce spinner and animation frame cadence")
-      ~provenance:Form.Prov_tui_pref ~reload_scope:Form.Hot_reload
-      (Form.Bool_val reduce_motion);
-    Form.make_field ~key:"tui.audio_input_device"
-      ~label:(Say.make ~ko:"음성 입력 장치" ~en:"Audio Input Device")
-      ~help:
-        (Say.make ~ko:"음성 PTT 녹음에 사용할 오디오 입력 장치"
-           ~en:"Audio input device used for Voice PTT recording")
-      ~provenance:Form.Prov_tui_pref ~reload_scope:Form.Hot_reload
-      (Form.Text_val audio_dev);
-  ]
-
 let form_field_of_schema_field ~(m : Model.t) (f : Wire_config.schema_field) :
     Form.field =
-  let initial = form_value_of_wire_field f in
+  let initial =
+    if String.equal f.full_key "tui.theme" then
+      let opts =
+        List.map
+          (fun p -> (Theme.preset_name p, Theme.preset_label p))
+          Theme.all_presets
+      in
+      let idx =
+        let rec find i = function
+          | [] -> 0
+          | p :: _ when Theme.equal_preset p m.theme_preset -> i
+          | _ :: rest -> find (i + 1) rest
+        in
+        find 0 Theme.all_presets
+      in
+      Form.enum_val ~selected:idx opts
+    else if String.equal f.full_key "tui.language" then
+      let idx = match m.lang with Say.Lang_ko -> 0 | Say.Lang_en -> 1 in
+      Form.enum_val ~selected:idx
+        [
+          ("ko", Say.make ~ko:"한국어" ~en:"Korean (KO)");
+          ("en", Say.make ~ko:"English" ~en:"English (EN)");
+        ]
+    else form_value_of_wire_field f
+  in
   let value =
     match m.config.editing_field_key with
     | Some ek when String.equal ek f.full_key -> (
@@ -847,12 +611,14 @@ let form_field_of_schema_field ~(m : Model.t) (f : Wire_config.schema_field) :
       ~ko:(Config_store.field_label ~lang:Say.Lang_ko f)
       ~en:(Config_store.field_label ~lang:Say.Lang_en f)
   in
+  let provenance =
+    if Config_store.is_tui_pref_key f.full_key then Form.Prov_tui_pref
+    else form_provenance_of_wire ~target:m.config.target ~env:f.env f.provenance
+  in
   let base =
     Form.make_field ~key:f.full_key ~label:leaf_label
       ?help:(Option.map Say.literal f.description)
-      ~provenance:
-        (form_provenance_of_wire ~target:m.config.target ~env:f.env
-           f.provenance)
+      ~provenance
       ~reload_scope:(form_reload_of_wire f.reload_scope)
       ~validators ~read_only:(not f.writable || f.secret) initial
   in
@@ -860,20 +626,11 @@ let form_field_of_schema_field ~(m : Model.t) (f : Wire_config.schema_field) :
   { updated with error = Form.validate_field updated }
 
 let inspector_schema_fields (m : Model.t) =
-  match Config_store.selected_section_fields m.config with
-  | _ :: _ as fs -> fs
-  | [] -> Config_store.visible_fields m.config
+  Config_store.inspector_fields m.config
 
 let settings_form_of_model (m : Model.t) : Form.state =
   let schema_fields = inspector_schema_fields m in
-  let fields =
-    if
-      schema_fields = []
-      && Nav.equal_settings_tab m.config.active_tab Nav.Settings_general_ui
-      && String.equal (String.trim m.config.search_query) ""
-    then general_ui_fallback_fields m
-    else List.map (form_field_of_schema_field ~m) schema_fields
-  in
+  let fields = List.map (form_field_of_schema_field ~m) schema_fields in
   let st0 = Form.create fields in
   let n = Array.length st0.fields in
   let focused =
@@ -2061,9 +1818,14 @@ let render_settings grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
              ~en:"[Space] Dry-run · [Ctrl+S] Save · [Esc] Close")
     in
     let footer_hint =
-      Say.resolve lang
-        (Say.make ~ko:"[Tab] 좌/우 전환 · [Enter] 편집 · [Del] 삭제 · [/] 검색"
-           ~en:"[Tab] Switch pane · [Enter] Edit · [Del] Remove · [/] Search")
+      if modal_r.w >= 74 then
+        Say.resolve lang
+          (Say.make ~ko:"[Tab] 좌/우 전환 · [Enter] 편집 · [Del] 삭제 · [/] 검색"
+             ~en:"[Tab] Switch pane · [Enter] Edit · [Del] Remove · [/] Search")
+      else
+        Say.resolve lang
+          (Say.make ~ko:"[Enter] 편집 · [Del] 삭제 · [/] 검색"
+             ~en:"[Enter] Edit · [Del] Remove · [/] Search")
     in
     let inner =
       Card.draw ~cache grid ~rect:modal_r ~theme
@@ -2324,16 +2086,35 @@ let render_incidents_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           ~w:(Int.max 0 (inner.w - (2 * pad_x)))
           ~h:1
       in
+      let q_inc = String.trim model.incidents.filter_query in
+      let filter_pill, filter_st =
+        if model.nav.filter_focused then
+          ( Printf.sprintf " / %s_ " model.incidents.filter_query,
+            Typography.anchor ~bg:(Color.of_rgb theme.selection_bg) theme )
+        else if not (String.equal q_inc "") then
+          ( Printf.sprintf " / %s (%d) " q_inc (List.length entries),
+            Typography.accent ~bg:(Color.of_rgb theme.surface_1) ~bold:true theme )
+        else
+          ( Say.resolve lang (Say.make ~ko:"[/] 필터" ~en:"[/] Filter"),
+            whisper_st )
+      in
+      let fp_w = Grapheme.display_width filter_pill in
       let note =
         Say.resolve lang
           (Say.make
              ~ko:"과거/해결 이력은 실시간 상태 표시줄을 붉게 물들이지 않습니다."
              ~en:"Historical Channel-3 trail — never taints live SSOT health.")
       in
+      let note_max = Int.max 0 (hdr_r.w - fp_w - 2) in
+      if note_max > 8 then
+        ignore
+          (Cell_grid.put_text ~clip:hdr_r grid ~x:hdr_r.x ~y:inner.y
+             ~style:whisper_st
+             (Grapheme.truncate_to_width ~max_width:note_max note));
+      let fpx = Int.max hdr_r.x (Rect.right hdr_r - fp_w) in
       ignore
-        (Cell_grid.put_text ~clip:hdr_r grid ~x:hdr_r.x ~y:inner.y
-           ~style:whisper_st
-           (Grapheme.truncate_to_width ~max_width:hdr_r.w note));
+        (Cell_grid.put_text ~clip:hdr_r grid ~x:fpx ~y:inner.y ~style:filter_st
+           (Grapheme.truncate_to_width ~max_width:hdr_r.w filter_pill));
       let content_r =
         Rect.make ~x:inner.x ~y:(inner.y + 1) ~w:inner.w
           ~h:(Int.max 0 (inner.h - 1))
@@ -2514,7 +2295,8 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           hotkey =
             Some
               (Say.resolve lang
-                 (Say.make ~ko:"[ ] 탭 · [Esc] 닫기" ~en:"[ ] Tab · [Esc] Close"));
+                 (Say.make ~ko:"[Tab/←→] 탭 · [Esc] 닫기"
+                    ~en:"[Tab/←→] Tabs · [Esc] Close"));
           focused = true;
           elevated = true;
         }
@@ -3145,7 +2927,12 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
 
 (* ---------- Overlay 6: ? Dynamic SSOT Help (2-Column with v-hairline & keycaps) ---------- *)
 
-let render_help_column grid ~(rect : Rect.t) ~(theme : Theme.t)
+type help_line =
+  | Help_header of string
+  | Help_entry of Keymap.help_entry
+  | Help_blank
+
+let render_help_column grid ~(rect : Rect.t) ~(theme : Theme.t) ?(scroll = 0)
     (groups : Keymap.help_group list) =
   if Rect.is_empty rect then ()
   else
@@ -3154,57 +2941,62 @@ let render_help_column grid ~(rect : Rect.t) ~(theme : Theme.t)
     let key_st = Typography.anchor ~bg:keycap_bg theme in
     let desc_st = Typography.primary ~bg theme in
     let whisper_st = Typography.whisper ~bg theme in
-    let y = ref rect.y in
-    let bottom = Rect.bottom rect in
-    List.iter
-      (fun (grp : Keymap.help_group) ->
-        if !y < bottom then begin
-          Card.draw_hairline ~pad_x:0 ~label:grp.title ~bg grid ~rect ~y:!y
-            ~theme;
-          incr y;
-          List.iter
-            (fun (e : Keymap.help_entry) ->
-              if !y < bottom then begin
-                let rr = Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:1 in
-                let keys_s =
-                  let shown_keys =
-                    match e.keys with
-                    | a :: b :: _ -> [ a; b ]
-                    | xs -> xs
-                  in
-                  " " ^ String.concat "/" shown_keys ^ " "
-                in
-                let key_col_w = Int.min 18 (Int.max 9 (rect.w / 3)) in
-                ignore
-                  (Cell_grid.put_text ~clip:rr grid ~x:(rect.x + 1) ~y:!y
-                     ~style:key_st
-                     (Grapheme.truncate_to_width ~max_width:key_col_w keys_s));
-                let dx = rect.x + 2 + key_col_w in
-                let slash_s =
-                  match e.slash_twin with Some s -> " " ^ s | None -> ""
-                in
-                let slash_w = Grapheme.display_width slash_s in
-                let sx = Rect.right rect - slash_w in
-                let dw =
-                  Int.max 0
-                    ((if slash_w > 0 && sx > dx + 8 then sx - 1
-                      else Rect.right rect)
-                     - dx)
-                in
-                if dw > 0 then
-                  ignore
-                    (Cell_grid.put_text ~clip:rr grid ~x:dx ~y:!y ~style:desc_st
-                       (Grapheme.truncate_to_width ~max_width:dw e.desc));
-                if slash_w > 0 && sx > dx + 8 then
-                  ignore
-                    (Cell_grid.put_text ~clip:rr grid ~x:sx ~y:!y
-                       ~style:whisper_st slash_s);
-                incr y
-              end)
-            grp.entries;
-          if !y < bottom then incr y
-        end)
-      groups
+    let lines =
+      List.concat_map
+        (fun (grp : Keymap.help_group) ->
+          (Help_header grp.title
+           :: List.map (fun e -> Help_entry e) grp.entries)
+          @ [ Help_blank ])
+        groups
+    in
+    let arr = Array.of_list lines in
+    let total = Array.length arr in
+    let max_scroll = Int.max 0 (total - rect.h) in
+    let start = Int.max 0 (Int.min max_scroll scroll) in
+    for i = 0 to rect.h - 1 do
+      let idx = start + i in
+      if idx < total then
+        let py = rect.y + i in
+        match arr.(idx) with
+        | Help_blank -> ()
+        | Help_header title ->
+            Card.draw_hairline ~pad_x:0 ~label:title ~bg grid ~rect ~y:py ~theme
+        | Help_entry e ->
+            let rr = Rect.make ~x:rect.x ~y:py ~w:rect.w ~h:1 in
+            let keys_s =
+              let shown_keys =
+                match e.keys with
+                | a :: b :: _ -> [ a; b ]
+                | xs -> xs
+              in
+              " " ^ String.concat "/" shown_keys ^ " "
+            in
+            let key_col_w = Int.min 18 (Int.max 9 (rect.w / 3)) in
+            ignore
+              (Cell_grid.put_text ~clip:rr grid ~x:(rect.x + 1) ~y:py
+                 ~style:key_st
+                 (Grapheme.truncate_to_width ~max_width:key_col_w keys_s));
+            let dx = rect.x + 2 + key_col_w in
+            let slash_s =
+              match e.slash_twin with Some s -> " " ^ s | None -> ""
+            in
+            let slash_w = Grapheme.display_width slash_s in
+            let sx = Rect.right rect - slash_w in
+            let dw =
+              Int.max 0
+                ((if slash_w > 0 && sx > dx + 8 then sx - 1
+                  else Rect.right rect)
+                 - dx)
+            in
+            if dw > 0 then
+              ignore
+                (Cell_grid.put_text ~clip:rr grid ~x:dx ~y:py ~style:desc_st
+                   (Grapheme.truncate_to_width ~max_width:dw e.desc));
+            if slash_w > 0 && sx > dx + 8 then
+              ignore
+                (Cell_grid.put_text ~clip:rr grid ~x:sx ~y:py ~style:whisper_st
+                   slash_s)
+    done
 
 let compact_help_group ~lang (grp : Keymap.help_group) : Keymap.help_group =
   let seen_ws = ref false in
@@ -3263,11 +3055,20 @@ let compact_help_group ~lang (grp : Keymap.help_group) : Keymap.help_group =
             Some
               {
                 e with
-                keys = [ "S-Enter"; "Alt+↵" ];
+                keys = [ "Alt+↵"; "Ctrl+↵" ];
                 desc =
                   Say.resolve lang
                     (Say.make ~ko:"턴 종료 후 후속 메시지 예약"
                        ~en:"Queue end-of-turn follow-up");
+              }
+        | Keymap.Composer_newline ->
+            Some
+              {
+                e with
+                keys = [ "S-Enter"; "Ctrl+J" ];
+                desc =
+                  Say.resolve lang
+                    (Say.make ~ko:"줄바꿈 삽입" ~en:"Insert newline");
               }
         | Keymap.Pop_back_or_close ->
             Some
@@ -3381,7 +3182,6 @@ let compact_help_group ~lang (grp : Keymap.help_group) : Keymap.help_group =
         | Keymap.Open_model_switcher
         | Keymap.Toggle_tool_details
         | Keymap.Composer_kill_word
-        | Keymap.Composer_newline
         | Keymap.Submit_steer
         | Keymap.Toggle_expand
         | Keymap.Create_new
@@ -3413,7 +3213,8 @@ let render_help_overlay grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           hotkey =
             Some
               (Say.resolve lang
-                 (Say.make ~ko:"[Esc / ?] 닫기" ~en:"[Esc / ?] Close"));
+                 (Say.make ~ko:"[↑↓] 스크롤 · [Esc / ?] 닫기"
+                    ~en:"[↑↓] Scroll · [Esc / ?] Close"));
           focused = true;
           elevated = true;
         }
@@ -3421,6 +3222,7 @@ let render_help_overlay grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     let pad_x = if inner.w >= 72 then 2 else 1 in
     let content = Card.pad_inner ~pad_x inner in
     if not (Rect.is_empty content) then begin
+      let scroll = model.nav.help_scroll_offset in
       let groups =
         Keymap.help_entries ~scope_chain:Keymap.all_scopes ~lang
         |> List.map (compact_help_group ~lang)
@@ -3442,14 +3244,14 @@ let render_help_overlay grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       if content.w >= 72 then
         match Layout.split_h ~gap:3 content [ Layout.Flex 1; Layout.Flex 1 ] with
         | [ l_r; r_r ] ->
-            render_help_column grid ~rect:l_r ~theme left_groups;
+            render_help_column grid ~rect:l_r ~theme ~scroll left_groups;
             Card.draw_v_hairline ~bg:(Color.of_rgb theme.surface_2) grid
               ~x:(Rect.right l_r + 1) ~y:content.y ~h:content.h ~theme;
-            render_help_column grid ~rect:r_r ~theme right_groups
+            render_help_column grid ~rect:r_r ~theme ~scroll right_groups
         | _ -> ()
       else
         let prioritized = right_groups @ left_groups in
-        render_help_column grid ~rect:content ~theme prioritized
+        render_help_column grid ~rect:content ~theme ~scroll prioritized
     end
 
 (* ---------- Overlay 7: System / Auth / Media Gate Overlay ---------- *)

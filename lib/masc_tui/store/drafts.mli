@@ -87,6 +87,8 @@ type t = {
   voice : voice_phase;
   voice_caps : voice_capabilities option;
   btw : btw_status;
+  popup_selected : int;
+  popup_dismissed : bool;
 }
 
 val default_keeper_key : string
@@ -111,13 +113,22 @@ val current_draft_is_multiline : t -> bool
 val other_keepers_draft_count : t -> int
 
 val insert_text : string -> t -> t
+val set_current_text : string -> t -> t
+val set_current_text_and_cursor : text:string -> cursor:int -> t -> t
 val insert_newline : t -> t
 val backspace : t -> t
 val delete_forward : t -> t
 val kill_word : t -> t
+val kill_line_start : t -> t
 val move_cursor : [ `Left | `Right | `Home | `End ] -> t -> t
+val move_cursor_word : [ `Left | `Right ] -> t -> t
+val move_cursor_line : [ `Start | `End ] -> t -> t
 val clear_current_draft : t -> t
 val set_preferred_mode : delivery_mode -> t -> t
+
+val move_popup : delta:int -> count:int -> wrap:bool -> t -> t
+val set_popup_selected : int -> t -> t
+val dismiss_popup : t -> t
 
 val enqueue_submission :
   now:Clock.Mono.t ->

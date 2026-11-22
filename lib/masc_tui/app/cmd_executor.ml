@@ -857,11 +857,15 @@ let execute_get t ~epoch req =
                    ~decode:Wire_infra.decode_repositories)
             in
             Msg.Http_reply { epoch; reply }
-        | Cmd.Get_file_changes _ ->
+        | Cmd.Get_file_changes { keeper; _ } ->
             let reply =
               Msg.Reply_file_changes
-                (fetch_and_decode_get t ~path
-                   ~decode:(Wire_infra.decode_file_changes ~observed_at))
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:(Wire_infra.decode_file_changes ~observed_at);
+                }
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_system_logs _ ->

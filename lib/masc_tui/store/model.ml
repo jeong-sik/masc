@@ -25,7 +25,15 @@ type nav_state = {
   pane_index : int;
   zoomed : bool;
   filter_focused : bool;
+  dive_scroll_offset : int;
+  help_scroll_offset : int;
 }
+
+type pulse_pane =
+  | Pulse_attention
+  | Pulse_companies
+  | Pulse_goals
+  | Pulse_world
 
 type freshness_state = {
   observer : Health.source_freshness;
@@ -157,6 +165,19 @@ let equal_mismatch_state a b =
   | Mismatch_halted, (Mismatch_none | Mismatch_recovering) ->
       false
 
+let equal_pulse_pane a b =
+  match a, b with
+  | Pulse_attention, Pulse_attention
+  | Pulse_companies, Pulse_companies
+  | Pulse_goals, Pulse_goals
+  | Pulse_world, Pulse_world ->
+      true
+  | Pulse_attention, (Pulse_companies | Pulse_goals | Pulse_world)
+  | Pulse_companies, (Pulse_attention | Pulse_goals | Pulse_world)
+  | Pulse_goals, (Pulse_attention | Pulse_companies | Pulse_world)
+  | Pulse_world, (Pulse_attention | Pulse_companies | Pulse_goals) ->
+      false
+
 let classify_viewport { cols; rows } =
   if cols >= 140 && rows >= 36 then Wide
   else if cols >= 100 && rows >= 28 then Standard
@@ -187,6 +208,8 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
         pane_index = 0;
         zoomed = false;
         filter_focused = false;
+        dive_scroll_offset = 0;
+        help_scroll_offset = 0;
       };
     freshness =
       {
@@ -225,6 +248,18 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
 let active_dive m =
   match m.nav.dive_stack with d :: _ -> Some d | [] -> None
 
+let pulse_panes m =
+  if Attention.is_empty m.attention then
+    [ Pulse_companies; Pulse_goals; Pulse_world ]
+  else [ Pulse_attention; Pulse_companies; Pulse_goals; Pulse_world ]
+
+let active_pulse_pane m =
+  let panes = pulse_panes m in
+  let idx = Store_scroll.clamp_index (List.length panes) m.nav.pane_index in
+  match List.nth_opt panes idx with
+  | Some p -> p
+  | None -> Pulse_companies
+
 let is_in_keeper_chat m =
   match active_dive m with
   | Some (Nav.Dive_keeper { tab = Nav.Keeper_chat; _ }) -> true
@@ -255,9 +290,27 @@ let fast_approval_strip_item m =
         | Nav.Incidents
         | Nav.Queue_context _
         | Nav.Inline_action _
-        | Nav.Help )
-    | None ->
+        | Nav.Help ) ->
         Attention.top_fast_path m.attention
+    | None ->
+        if
+          m.nav.dive_stack = []
+          && Nav.equal_workspace m.nav.workspace Nav.Work
+          && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
+        then
+          match
+            Attention.current_filtered_item ~query:m.work.filter_query
+              m.attention
+          with
+          | Some e when not (Attention.is_in_flight ~id:e.id m.attention) -> (
+              match e.payload with
+              | Attention.Payload_tool_approval _
+              | Attention.Payload_gate _
+              | Attention.Payload_goal_confirmation _ ->
+                  Some e
+              | Attention.Payload_ask _ | Attention.Payload_quarantine _ -> None)
+          | Some _ | None -> None
+        else Attention.top_fast_path m.attention
 
 let composer_mode m =
   if
@@ -278,6 +331,160 @@ let composer_mode m =
         then Auto_folded_pill
         else Collapsed_bar
 
+let outer_margin_for = function
+  | Wide | Standard -> 1
+  | Compact | Micro -> 0
+
+let inner_body_width m =
+  let cols = max 0 m.viewport.cols in
+  let margin = outer_margin_for m.breakpoint in
+  if margin <= 0 || cols <= margin * 2 then cols else cols - (margin * 2)
+
+let has_sub_tab_bar_for_model m =
+  match active_dive m with
+  | Some _ -> true
+  | None -> (
+      match m.nav.workspace with
+      | Nav.Pulse -> false
+      | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Runtime | Nav.Infra -> true)
+
+let inner_body_height m =
+  let rows = max 0 m.viewport.rows in
+  let top_rail_h = if rows >= 1 then 1 else 0 in
+  let footer_h = if rows >= 2 then 1 else 0 in
+  if is_too_small_viewport m.viewport || equal_breakpoint m.breakpoint Micro
+  then max 0 (rows - top_rail_h - footer_h)
+  else
+    let sub_h = if has_sub_tab_bar_for_model m && rows >= 5 then 1 else 0 in
+    let top_h = top_rail_h + sub_h in
+    let avail = max 0 (rows - top_h - footer_h) in
+    let raw_comp_h =
+      match composer_mode m with
+      | Auto_folded_pill -> 0
+      | Collapsed_bar -> 1
+      | Expanded_multiline ->
+          let max_h = max 2 (min 6 (rows / 4)) in
+          let cap = max 1 (min 6 max_h) in
+          let draft_lines =
+            List.length
+              (String.split_on_char '\n' (Drafts.current_draft m.drafts).text)
+          in
+          let extra = if Drafts.is_voice_active m.drafts then 1 else 0 in
+          max 2 (min cap (draft_lines + 1 + extra))
+    in
+    let comp_h = min raw_comp_h (max 0 (avail - 3)) in
+    let approval_h =
+      if Option.is_some (fast_approval_strip_item m) && avail - comp_h >= 4 then
+        1
+      else 0
+    in
+    let footer_sep_h =
+      if
+        equal_breakpoint m.breakpoint Wide
+        && rows >= 36
+        && avail - comp_h - approval_h >= 24
+      then 1
+      else 0
+    in
+    let approval_y = rows - footer_h - footer_sep_h - comp_h - approval_h in
+    max 0 (approval_y - top_h)
+
+let work_pipeline_has_linked_card m =
+  inner_body_width m >= 96 && inner_body_height m >= 14
+
+let can_zoom_current_view m =
+  if
+    is_too_small_viewport m.viewport
+    || equal_breakpoint m.breakpoint Micro
+    || Option.is_some m.nav.overlay
+    || Option.is_some (active_dive m)
+  then false
+  else
+    match m.nav.workspace with
+    | Nav.Keepers -> Option.is_some (Fleet_store.selected_keeper_summary m.fleet)
+    | Nav.Knowledge -> (
+        match m.knowledge.active_tab with
+        | Nav.Knowledge_board | Nav.Knowledge_memory -> true
+        | Nav.Knowledge_wiki_artifacts -> (
+            match m.knowledge.wiki_artifacts_submode with
+            | `Wiki -> true
+            | `Artifacts -> false))
+    | Nav.Pulse | Nav.Work | Nav.Runtime | Nav.Infra -> false
+
+let focusable_pane_count m =
+  if is_too_small_viewport m.viewport || equal_breakpoint m.breakpoint Micro then
+    1
+  else
+    match m.nav.overlay with
+    | Some (Nav.Settings _) ->
+        if Config_store.is_two_pane_width ~cols:m.viewport.cols then 2 else 1
+    | Some
+        ( Nav.Palette
+        | Nav.Incidents
+        | Nav.Queue_context _
+        | Nav.Inline_action _
+        | Nav.Help
+        | Nav.System_gate _ ) ->
+        1
+    | None -> (
+        if Option.is_some (active_dive m) || (m.nav.zoomed && can_zoom_current_view m)
+        then 1
+        else
+          match m.nav.workspace with
+          | Nav.Pulse -> List.length (pulse_panes m)
+          | Nav.Work -> (
+              match m.work.active_tab with
+              | Nav.Work_pipeline ->
+                  if work_pipeline_has_linked_card m then 3 else 2
+              | Nav.Work_tasks_schedules ->
+                  if
+                    Work_store.filtered_tasks m.work <> []
+                    && Work_store.filtered_schedules m.work <> []
+                  then 2
+                  else 1
+              | Nav.Work_inbox ->
+                  if
+                    Attention.filtered_items ~query:m.work.filter_query
+                      m.attention
+                    = []
+                  then 1
+                  else 2
+              | Nav.Work_candle_scorecard -> 1)
+          | Nav.Knowledge -> 2
+          | Nav.Keepers ->
+              if
+                (equal_breakpoint m.breakpoint Wide
+                 || equal_breakpoint m.breakpoint Standard)
+                && inner_body_width m >= 104
+              then 2
+              else 1
+          | Nav.Runtime -> (
+              match m.runtime.active_tab with
+              | Nav.Runtime_efficiency_spend -> 1
+              | Nav.Runtime_quotas_credits
+              | Nav.Runtime_failover_lanes
+              | Nav.Runtime_tools_connectors ->
+                  2)
+          | Nav.Infra -> (
+              match m.infra.active_tab with
+              | Nav.Infra_sandboxes ->
+                  if inner_body_width m >= 100 then 2 else 1
+              | Nav.Infra_activity_logs -> 2
+              | Nav.Infra_repos_changes ->
+                  let has_changes_for_repo =
+                    match Infra_store.selected_repository m.infra with
+                    | Some r -> (
+                        r.keepers <> []
+                        &&
+                        match m.infra.file_changes_keeper with
+                        | Some k ->
+                            List.exists (String.equal k) r.keepers
+                            && Infra_store.filtered_file_changes m.infra <> []
+                        | None -> false)
+                    | None -> Infra_store.filtered_file_changes m.infra <> []
+                  in
+                  if has_changes_for_repo then 3 else 2))
+
 let active_focus_scope m =
   if is_too_small_viewport m.viewport then
     Nav.Overlay_focused (Nav.System_gate Nav.Micro_viewport)
@@ -295,7 +502,10 @@ let active_focus_scope m =
                 && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
                 &&
                 if not (Attention.is_empty m.attention) then
-                  match Attention.current_triage_item m.attention with
+                  match
+                    Attention.current_filtered_item ~query:m.work.filter_query
+                      m.attention
+                  with
                   | Some { payload = Attention.Payload_ask _; id; _ } ->
                       not (Attention.is_in_flight ~id m.attention)
                   | Some
@@ -314,7 +524,21 @@ let active_focus_scope m =
               else Nav.Workspace_focused m.nav.workspace)
 
 let focus_scope_chain m =
-  let approval_strip_active = Option.is_some (fast_approval_strip_item m) in
+  let approval_strip_active =
+    if
+      (not (is_too_small_viewport m.viewport))
+      && Option.is_none m.nav.overlay
+      && m.nav.dive_stack = []
+      && Nav.equal_workspace m.nav.workspace Nav.Work
+      && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
+    then
+      match
+        Attention.current_filtered_item ~query:m.work.filter_query m.attention
+      with
+      | Some e -> not (Attention.is_in_flight ~id:e.id m.attention)
+      | None -> false
+    else Option.is_some (fast_approval_strip_item m)
+  in
   Keymap.scope_chain_of_focus ~approval_strip_active (active_focus_scope m)
 
 let is_text_capture_active m =

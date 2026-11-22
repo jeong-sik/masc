@@ -26,6 +26,8 @@ type t = {
   keeper_sandbox : Wire_infra.keeper_sandbox_response Observed.t;
   repositories : Wire_infra.repository list Observed.t;
   file_changes : Wire_infra.file_change list Observed.t;
+  file_changes_keeper : string option;
+  requested_file_changes_keeper : string option;
   logs : Wire_infra.system_log_entry list;
   logs_loaded : bool;
   last_log_seq : int option;
@@ -36,6 +38,10 @@ type t = {
   show_raw_json : bool;
   selected_index : int;
   scroll_offset : int;
+  diff_scroll_offset : int;
+  change_selected_index : int;
+  change_scroll_offset : int;
+  detail_scroll_offset : int;
   filter_query : string;
 }
 
@@ -47,6 +53,8 @@ let empty =
     keeper_sandbox = Observed.absent;
     repositories = Observed.unreported;
     file_changes = Observed.unreported;
+    file_changes_keeper = None;
+    requested_file_changes_keeper = None;
     logs = [];
     logs_loaded = false;
     last_log_seq = None;
@@ -57,34 +65,27 @@ let empty =
     show_raw_json = false;
     selected_index = 0;
     scroll_offset = 0;
+    diff_scroll_offset = 0;
+    change_selected_index = 0;
+    change_scroll_offset = 0;
+    detail_scroll_offset = 0;
     filter_query = "";
   }
 
-let contains_ci ~needle haystack =
-  let n_len = String.length needle in
-  if n_len = 0 then true
-  else
-    let h_len = String.length haystack in
-    if n_len > h_len then false
-    else
-      let n_low = String.lowercase_ascii needle in
-      let h_low = String.lowercase_ascii haystack in
-      let limit = h_len - n_len in
-      let rec scan i =
-        if i > limit then false
-        else if String.equal (String.sub h_low i n_len) n_low then true
-        else scan (i + 1)
-      in
-      scan 0
-
-let clamp_index len idx =
-  if len <= 0 then 0
-  else if idx < 0 then 0
-  else if idx >= len then len - 1
-  else idx
+let contains_ci = Store_scroll.contains_ci
+let clamp_index = Store_scroll.clamp_index
 
 let set_tab active_tab t =
-  { t with active_tab; selected_index = 0; scroll_offset = 0 }
+  {
+    t with
+    active_tab;
+    selected_index = 0;
+    scroll_offset = 0;
+    diff_scroll_offset = 0;
+    change_selected_index = 0;
+    change_scroll_offset = 0;
+    detail_scroll_offset = 0;
+  }
 
 let cycle_tab dir t =
   let next_tab =
@@ -253,8 +254,38 @@ let apply_keeper_sandbox ~observed_at keeper_sandbox t =
 let apply_repositories ~observed_at repositories t =
   { t with repositories = Observed.value ~observed_at repositories }
 
-let apply_file_changes ~observed_at file_changes t =
-  { t with file_changes = Observed.value ~observed_at file_changes }
+let apply_file_changes ?keeper ~observed_at file_changes t =
+  let file_changes_keeper =
+    match keeper with
+    | Some k -> Some k
+    | None -> (
+        match file_changes with
+        | (fc : Wire_infra.file_change) :: _ -> fc.keeper
+        | [] -> t.file_changes_keeper)
+  in
+  {
+    t with
+    file_changes = Observed.value ~observed_at file_changes;
+    file_changes_keeper;
+    requested_file_changes_keeper = None;
+    change_selected_index = 0;
+    change_scroll_offset = 0;
+    diff_scroll_offset = 0;
+  }
+
+let clear_file_changes t =
+  {
+    t with
+    file_changes = Observed.unreported;
+    file_changes_keeper = None;
+    requested_file_changes_keeper = None;
+    change_selected_index = 0;
+    change_scroll_offset = 0;
+    diff_scroll_offset = 0;
+  }
+
+let mark_file_changes_requested ~keeper t =
+  { t with requested_file_changes_keeper = Some keeper }
 
 let max_seq_of entries =
   List.fold_left
@@ -360,72 +391,206 @@ let set_log_keeper_filter log_keeper_filter t =
 
 let toggle_raw_json t = { t with show_raw_json = not t.show_raw_json }
 
-let sandbox_keeper_names t =
+let filtered_sandbox_keepers t =
+  let q = String.trim t.filter_query in
   match Observed.to_option t.sandboxes with
   | None -> []
   | Some s ->
+      let matches haystack =
+        String.equal q "" || contains_ci ~needle:q haystack
+      in
       let microvms =
-        List.map (fun (g : Wire_infra.microvm_guest) -> g.keeper) s.microvm_guests
+        List.filter_map
+          (fun (g : Wire_infra.microvm_guest) ->
+            if matches (g.keeper ^ " " ^ g.guest_name ^ " " ^ g.backend) then
+              Some g.keeper
+            else None)
+          s.microvm_guests
       in
       let ssh_bound =
         List.concat_map
           (fun (p : Wire_infra.ssh_pool) ->
-            List.map
-              (fun (ks : Wire_infra.ssh_keeper_session) -> ks.keeper)
+            List.filter_map
+              (fun (ks : Wire_infra.ssh_keeper_session) ->
+                if matches (ks.keeper ^ " " ^ p.pool_name ^ " " ^ p.host ^ " ssh")
+                then Some ks.keeper
+                else None)
               p.keeper_sessions)
           s.ssh_pools
       in
       let ssh_unbound =
-        List.map
-          (fun (u : Wire_infra.ssh_unbound_keeper) -> u.keeper)
+        List.filter_map
+          (fun (u : Wire_infra.ssh_unbound_keeper) ->
+            if matches (u.keeper ^ " " ^ u.backend ^ " ssh") then Some u.keeper
+            else None)
           s.ssh_unbound_keepers
       in
       let docker =
-        List.map (fun (d : Wire_infra.docker_keeper) -> d.keeper) s.docker_keepers
+        List.filter_map
+          (fun (d : Wire_infra.docker_keeper) ->
+            if matches (d.keeper ^ " " ^ d.backend ^ " docker") then
+              Some d.keeper
+            else None)
+          s.docker_keepers
       in
       microvms @ ssh_bound @ ssh_unbound @ docker
 
+let filtered_repositories t =
+  let all =
+    match Observed.to_option t.repositories with Some rs -> rs | None -> []
+  in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then all
+  else
+    List.filter
+      (fun (r : Wire_infra.repository) ->
+        contains_ci ~needle:q r.name
+        || contains_ci ~needle:q r.url
+        || contains_ci ~needle:q r.default_branch
+        || List.exists (fun kp -> contains_ci ~needle:q kp) r.keepers)
+      all
+
+let filtered_file_changes t =
+  let all =
+    match Observed.to_option t.file_changes with Some xs -> xs | None -> []
+  in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then all
+  else
+    List.filter
+      (fun (fc : Wire_infra.file_change) ->
+        contains_ci ~needle:q fc.path
+        ||
+        match fc.keeper with
+        | Some kp -> contains_ci ~needle:q kp
+        | None -> false)
+      all
+
 let selected_sandbox_keeper t =
-  let names = sandbox_keeper_names t in
+  let names = filtered_sandbox_keepers t in
   List.nth_opt names (clamp_index (List.length names) t.selected_index)
 
 let selected_repository t =
-  match Observed.to_option t.repositories with
-  | None -> None
-  | Some repos ->
-      List.nth_opt repos (clamp_index (List.length repos) t.selected_index)
+  let repos = filtered_repositories t in
+  List.nth_opt repos (clamp_index (List.length repos) t.selected_index)
+
+let selected_file_change t =
+  let changes = filtered_file_changes t in
+  List.nth_opt changes (clamp_index (List.length changes) t.change_selected_index)
 
 let selected_log t =
   let vis = visible_logs t in
   List.nth_opt vis (clamp_index (List.length vis) t.selected_index)
 
-let active_list_len t =
+let adjust_scroll = Store_scroll.adjust_scroll
+
+let reset_detail_scroll t = { t with detail_scroll_offset = 0; diff_scroll_offset = 0 }
+
+let move_selection ?(pane_index = 0) ?viewport_rows ~delta t =
   match t.active_tab with
-  | Nav.Infra_sandboxes -> List.length (sandbox_keeper_names t)
+  | Nav.Infra_sandboxes ->
+      if pane_index = 1 then
+        let detail_scroll_offset =
+          Store_scroll.clamp_scroll ~max_scroll:64
+            (t.detail_scroll_offset + delta)
+        in
+        { t with detail_scroll_offset }
+      else
+        let len = List.length (filtered_sandbox_keepers t) in
+        let selected_index = clamp_index len (t.selected_index + delta) in
+        let scroll_offset =
+          adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
+        in
+        let detail_scroll_offset =
+          if Int.equal selected_index t.selected_index then
+            t.detail_scroll_offset
+          else 0
+        in
+        { t with selected_index; scroll_offset; detail_scroll_offset }
   | Nav.Infra_repos_changes -> (
-      match Observed.to_option t.repositories with
-      | Some rs -> List.length rs
-      | None -> 0)
-  | Nav.Infra_activity_logs -> List.length (visible_logs t)
-
-let default_viewport_rows = 15
-
-let adjust_scroll ?(viewport_rows = default_viewport_rows) ~scroll selected =
-  let vr = max 1 viewport_rows in
-  if selected < scroll then selected
-  else if selected >= scroll + vr then max 0 (selected - vr + 1)
-  else scroll
-
-let move_selection ?viewport_rows ~delta t =
-  let len = active_list_len t in
-  let selected_index = clamp_index len (t.selected_index + delta) in
-  let scroll_offset =
-    adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
-  in
-  { t with selected_index; scroll_offset }
+      match pane_index with
+      | 1 ->
+          let max_scroll =
+            match selected_file_change t with
+            | Some fc -> (
+                match fc.diff_preview with
+                | Some dp when not (String.equal dp "") ->
+                    max 1 (List.length (String.split_on_char '\n' dp) - 1)
+                | Some _ | None -> 64)
+            | None -> 64
+          in
+          let diff_scroll_offset =
+            Store_scroll.clamp_scroll ~max_scroll (t.diff_scroll_offset + delta)
+          in
+          { t with diff_scroll_offset }
+      | 2 ->
+          let len = List.length (filtered_file_changes t) in
+          let change_selected_index =
+            clamp_index len (t.change_selected_index + delta)
+          in
+          let change_scroll_offset =
+            adjust_scroll ?viewport_rows ~scroll:t.change_scroll_offset
+              change_selected_index
+          in
+          let diff_scroll_offset =
+            if Int.equal change_selected_index t.change_selected_index then
+              t.diff_scroll_offset
+            else 0
+          in
+          {
+            t with
+            change_selected_index;
+            change_scroll_offset;
+            diff_scroll_offset;
+          }
+      | _ ->
+          let len = List.length (filtered_repositories t) in
+          let selected_index = clamp_index len (t.selected_index + delta) in
+          let scroll_offset =
+            adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
+          in
+          if Int.equal selected_index t.selected_index then
+            { t with selected_index; scroll_offset }
+          else
+            {
+              t with
+              selected_index;
+              scroll_offset;
+              change_selected_index = 0;
+              change_scroll_offset = 0;
+              diff_scroll_offset = 0;
+            })
+  | Nav.Infra_activity_logs ->
+      if pane_index = 1 then
+        let detail_scroll_offset =
+          Store_scroll.clamp_scroll ~max_scroll:64
+            (t.detail_scroll_offset + delta)
+        in
+        { t with detail_scroll_offset }
+      else
+        let len = List.length (visible_logs t) in
+        let selected_index = clamp_index len (t.selected_index + delta) in
+        let scroll_offset =
+          adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
+        in
+        let detail_scroll_offset =
+          if Int.equal selected_index t.selected_index then
+            t.detail_scroll_offset
+          else 0
+        in
+        { t with selected_index; scroll_offset; detail_scroll_offset }
 
 let set_filter filter_query t =
-  { t with filter_query; selected_index = 0; scroll_offset = 0 }
+  {
+    t with
+    filter_query;
+    selected_index = 0;
+    scroll_offset = 0;
+    diff_scroll_offset = 0;
+    change_selected_index = 0;
+    change_scroll_offset = 0;
+    detail_scroll_offset = 0;
+  }
 
 let mark_stale_all t =
   {

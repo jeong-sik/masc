@@ -150,7 +150,9 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
           let md_h = Int.max 0 (bottom - !y - comment_rows) in
           if md_h > 0 then begin
             let md_rect = Rect.make ~x:content.x ~y:!y ~w:content.w ~h:md_h in
-            ignore (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true p.body);
+            ignore
+              (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true
+                 ~scroll:k.detail_scroll_offset p.body);
             y := !y + md_h
           end;
           if comment_rows > 0 && !y < bottom then begin
@@ -688,7 +690,7 @@ let extract_markdown_headings (md : string) : (int * string) list =
            Some (1, String.trim (String.sub s 2 (String.length s - 2)))
          else None)
 
-let draw_wiki_preview ~target_slug ~grid ~cache ~(rect : Rect.t)
+let draw_wiki_preview ~target_slug ~scroll ~grid ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp ~lang ~(k : Knowledge_store.t) ~focused =
   let sel_summary =
     match target_slug with
@@ -798,7 +800,7 @@ let draw_wiki_preview ~target_slug ~grid ~cache ~(rect : Rect.t)
           |> H.pad_content ~bp
         in
         if not (Rect.is_empty md_rect) then
-          ignore (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true d.body)
+          ignore (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true ~scroll d.body)
     | None -> (
         match page_detail with
         | Some d ->
@@ -846,7 +848,7 @@ let draw_wiki_preview ~target_slug ~grid ~cache ~(rect : Rect.t)
                 if not (Rect.is_empty prose_rect) then
                   ignore
                     (Markdown.draw grid ~rect:prose_rect ~theme ~osc8:true
-                       d.body_markdown);
+                       ~scroll d.body_markdown);
                 if not (Rect.is_empty rail_rect) then begin
                   let ry = ref rail_rect.y and rbot = Rect.bottom rail_rect in
                   let headings = extract_markdown_headings d.body_markdown in
@@ -983,7 +985,7 @@ let draw_wiki_preview ~target_slug ~grid ~cache ~(rect : Rect.t)
                     Rect.make ~x:content.x ~y:!y ~w:content.w ~h:md_h
                   in
                   ignore
-                    (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true
+                    (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true ~scroll
                        d.body_markdown)
               end
             end
@@ -1029,7 +1031,8 @@ let draw_wiki_preview ~target_slug ~grid ~cache ~(rect : Rect.t)
                     Rect.make ~x:content.x ~y:!y ~w:content.w ~h:md_h
                   in
                   ignore
-                    (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true s.summary)
+                    (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true ~scroll
+                       s.summary)
             | None -> (
                 let content = H.pad_content ~bp inner in
                 match target_slug with
@@ -1181,7 +1184,8 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
   match k.wiki_artifacts_submode with
   | `Wiki ->
       if model.nav.zoomed then
-        draw_wiki_preview ~target_slug:None ~grid ~cache ~rect:body_rect ~theme
+        draw_wiki_preview ~target_slug:None ~scroll:k.detail_scroll_offset
+          ~grid ~cache ~rect:body_rect ~theme
           ~bp ~lang ~k ~focused:true
       else
         let left_rect, right_rect =
@@ -1427,8 +1431,9 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
               (H.safe_take (log_rows - 1) log_entries)
           end
         end;
-        draw_wiki_preview ~target_slug:None ~grid ~cache ~rect:right_rect ~theme
-          ~bp ~lang ~k ~focused:(model.nav.pane_index = 1)
+        draw_wiki_preview ~target_slug:None ~scroll:k.detail_scroll_offset
+          ~grid ~cache ~rect:right_rect ~theme ~bp ~lang ~k
+          ~focused:(model.nav.pane_index = 1)
   | `Artifacts ->
       let left_rect, right_rect =
         Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.56
@@ -1780,24 +1785,47 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         end;
         (* MVCC Conflict A/B Comparison using Violet & Amber Left Rails (ZERO nested boxes!) *)
         let writer_reserve = if bottom - !y >= 6 then 4 else 2 in
-        if wm.active_conflicts <> [] && !y + writer_reserve < bottom then begin
+        let conflicts = Knowledge_store.filtered_memory_conflicts k in
+        if conflicts <> [] && !y + writer_reserve < bottom then begin
           H.draw_divider ~grid ~rect:content ~y:!y ~theme
             ~label:
               (Printf.sprintf "%s %s (%d)"
                  (Glyph.to_utf8 Glyph.Action_required)
                  (Say.resolve lang
                     (Say.make ~ko:"경합 주장 비교" ~en:"Competing Claims"))
-                 (List.length wm.active_conflicts))
+                 (List.length conflicts))
             ();
           incr y;
           let conflict_budget = Int.max 0 (bottom - !y - writer_reserve) in
           let two_line_claims = conflict_budget >= 5 in
           let max_conflicts = if conflict_budget >= 11 then 2 else 1 in
-          List.iter
-            (fun (c : Wire_knowledge.memory_conflict) ->
+          let total_c = List.length conflicts in
+          let sel_c = H.clamp_index total_c k.selected_index in
+          let start_c, _ =
+            Table.compute_viewport ~total_rows:total_c
+              ~viewport_rows:max_conflicts ~scroll:k.scroll_offset
+              ~selected:(Some sel_c)
+          in
+          List.iteri
+            (fun local_i (c : Wire_knowledge.memory_conflict) ->
+              let idx = start_c + local_i in
               if !y + writer_reserve < bottom then begin
+                let is_sel = Int.equal idx sel_c && focused in
+                let row_bg =
+                  if is_sel then theme.selection_bg else theme.surface_1
+                in
+                if is_sel then begin
+                  let r_rect =
+                    Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1
+                  in
+                  H.paint_selected_row_bg ~grid ~clip:content ~row_rect:r_rect
+                    ~theme ()
+                end;
+                let prefix =
+                  if is_sel then Glyph.to_utf8 Glyph.Focus_caret ^ " " else ""
+                in
                 let hdr =
-                  Printf.sprintf "%s #%s (%d) %s"
+                  Printf.sprintf "%s%s #%s (%d) %s" prefix
                     (Glyph.to_utf8 Glyph.Action_required)
                     (H.short_hash ~len:8 c.conflict_id)
                     c.member_count c.description
@@ -1806,7 +1834,7 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
                      ~max_w:content.w
                      ~style:
-                       (H.status_style ~theme ~attrs:Attr.bold
+                       (H.status_style ~theme ~bg:row_bg ~attrs:Attr.bold
                           Theme.Status_attention)
                      hdr);
                 incr y;
@@ -1882,7 +1910,20 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | [ a ] -> draw_claim_rail ~tag:"A" ~tone:Theme.Status_ai a
                 | [] -> ()
               end)
-            (H.safe_take max_conflicts wm.active_conflicts)
+            (Store_scroll.drop start_c conflicts |> H.safe_take max_conflicts)
+        end
+        else if
+          wm.active_conflicts <> []
+          && not (String.equal (String.trim k.filter_query) "")
+          && !y + writer_reserve < bottom
+        then begin
+          ignore
+            (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+               ~max_w:content.w ~style:(H.whisper_style ~theme ())
+               (Say.resolve lang
+                  (Say.make ~ko:"필터에 일치하는 경합 충돌 없음"
+                     ~en:"No competing conflicts match filter")));
+          incr y
         end;
         (* Librarian Writer Health & Real Server /memory/act Recovery Acts *)
         if !y < bottom then begin
@@ -2230,149 +2271,178 @@ let draw_temporal_memory_diff ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           incr y
         end;
         (* Temporal Diff Entries with semantic Left Rails & Tier-4 Italic timestamps *)
+        let q = String.trim k.filter_query in
+        let matches s = Knowledge_store.memory_diff_matches_filter k s in
         (match diff.body with
          | Wire_knowledge.Keeper_diff { added; updated; retracted; invalidated; _ }
            ->
+             let added =
+               List.filter
+                 (fun (f : Wire_knowledge.memory_fact_entry) ->
+                   matches (f.category ^ " " ^ f.origin ^ " " ^ f.text))
+                 added
+             in
+             let updated =
+               List.filter
+                 (fun (u : Wire_knowledge.memory_updated_fact) ->
+                   matches
+                     (u.after.category ^ " " ^ u.before.text ^ " " ^ u.after.text))
+                 updated
+             in
+             let retracted =
+               List.filter
+                 (fun (r : Wire_knowledge.memory_retracted_fact) ->
+                   matches (r.category ^ " " ^ r.removed_by ^ " " ^ r.text))
+                 retracted
+             in
+             let invalidated =
+               List.filter
+                 (fun (inv : Wire_knowledge.memory_invalidated_fact) ->
+                   matches
+                     (inv.text ^ " " ^ String.concat " " inv.missing_premise_ids))
+                 invalidated
+             in
+             let items =
+               List.map (fun x -> `K_add x) added
+               @ List.map (fun x -> `K_upd x) updated
+               @ List.map (fun x -> `K_ret x) retracted
+               @ List.map (fun x -> `K_inv x) invalidated
+             in
+             let skip =
+               Int.min (Int.max 0 (List.length items - 1)) (Int.max 0 k.diff_scroll_offset)
+             in
              List.iter
-               (fun (f : Wire_knowledge.memory_fact_entry) ->
-                 if !y < bottom then begin
-                   let rows_n = if !y + 1 < bottom then 2 else 1 in
-                   Card.draw_left_rail ~tone:Theme.Status_ok grid ~x:content.x
-                     ~y:!y ~h:rows_n ~theme;
-                   let heat_lbl, heat_tone =
-                     heat_pill_spec ~count:f.retrieval_count f.heat
-                   in
-                   let age = H.format_age ~now_unix f.first_seen_unix in
-                   let tx = content.x + 2 and tw = Int.max 0 (content.w - 2) in
-                   let hw = Grapheme.display_width heat_lbl in
-                   let aw = Grapheme.display_width age in
-                   let left_txt =
-                     Printf.sprintf "+ [%s] %s" f.category f.origin
-                   in
-                   ignore
-                     (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y
-                        ~max_w:(Int.max 6 (tw - hw - aw - 4))
-                        ~style:
-                          (H.status_style ~theme ~attrs:Attr.bold
-                             Theme.Status_ok)
-                        left_txt);
-                   ignore
-                     (H.put_right ~grid ~clip:content
-                        ~right_x:(Rect.right content - aw - 2) ~y:!y ~max_w:hw
-                        ~style:(H.status_style ~theme heat_tone) heat_lbl);
-                   ignore
-                     (H.put_right ~grid ~clip:content
-                        ~right_x:(Rect.right content) ~y:!y ~max_w:aw
-                        ~style:(H.whisper_style ~theme ()) age);
-                   incr y;
-                   if !y < bottom && rows_n >= 2 then begin
-                     ignore
-                       (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
-                          ~style:(H.text_style ~theme ()) f.text);
-                     incr y
-                   end
-                 end)
-               added;
-             List.iter
-               (fun (u : Wire_knowledge.memory_updated_fact) ->
-                 if !y < bottom then begin
-                   let rows_n = Int.min 3 (bottom - !y) in
-                   Card.draw_left_rail ~tone:Theme.Status_active grid
-                     ~x:content.x ~y:!y ~h:rows_n ~theme;
-                   let heat_lbl, heat_tone =
-                     heat_pill_spec ~count:u.after.retrieval_count u.after.heat
-                   in
-                   let tx = content.x + 2 and tw = Int.max 0 (content.w - 2) in
-                   let hw = Grapheme.display_width heat_lbl in
-                   let hdr =
-                     Printf.sprintf "~ [%s] %s @r%d" u.after.category
-                       (relation_label u.relation)
-                       u.at_rev
-                   in
-                   ignore
-                     (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y
-                        ~max_w:(Int.max 6 (tw - hw - 2))
-                        ~style:
-                          (H.status_style ~theme ~attrs:Attr.bold
-                             Theme.Status_active)
-                        hdr);
-                   ignore
-                     (H.put_right ~grid ~clip:content
-                        ~right_x:(Rect.right content) ~y:!y ~max_w:hw
-                        ~style:(H.status_style ~theme heat_tone) heat_lbl);
-                   incr y;
-                   if !y < bottom then begin
-                     ignore
-                       (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
-                          ~style:(H.status_style ~theme Theme.Status_critical)
-                          ("- " ^ u.before.text));
-                     incr y
-                   end;
-                   if !y < bottom then begin
-                     ignore
-                       (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
-                          ~style:(H.status_style ~theme Theme.Status_ok)
-                          ("+ " ^ u.after.text));
-                     incr y
-                   end
-                 end)
-               updated;
-             List.iter
-               (fun (r : Wire_knowledge.memory_retracted_fact) ->
-                 if !y < bottom then begin
-                   let rows_n = if !y + 1 < bottom then 2 else 1 in
-                   Card.draw_left_rail ~tone:Theme.Status_critical grid
-                     ~x:content.x ~y:!y ~h:rows_n ~theme;
-                   let tx = content.x + 2 and tw = Int.max 0 (content.w - 2) in
-                   let why =
-                     match r.drop_reason with Some s -> " · " ^ s | None -> ""
-                   in
-                   let hdr =
-                     Printf.sprintf "- [%s] %s @r%d · %s%s" r.category
-                       (Say.resolve lang (Say.make ~ko:"대체/철회" ~en:"retracted"))
-                       r.removed_at_rev r.removed_by why
-                   in
-                   ignore
-                     (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
-                        ~style:(H.status_style ~theme Theme.Status_critical) hdr);
-                   incr y;
-                   if !y < bottom && rows_n >= 2 then begin
-                     ignore
-                       (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
-                          ~style:(H.whisper_style ~theme ()) ("- " ^ r.text));
-                     incr y
-                   end
-                 end)
-               retracted;
-             List.iter
-               (fun (inv : Wire_knowledge.memory_invalidated_fact) ->
-                 if !y < bottom then begin
-                   let rows_n = if !y + 1 < bottom then 2 else 1 in
-                   Card.draw_left_rail ~tone:Theme.Status_attention grid
-                     ~x:content.x ~y:!y ~h:rows_n ~theme;
-                   let tx = content.x + 2 and tw = Int.max 0 (content.w - 2) in
-                   let prems = String.concat ", " inv.missing_premise_ids in
-                   let hdr =
-                     Printf.sprintf "! [invalidated] @r%d missing: %s"
-                       inv.at_rev prems
-                   in
-                   ignore
-                     (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
-                        ~style:(H.status_style ~theme Theme.Status_attention)
-                        hdr);
-                   incr y;
-                   if !y < bottom && rows_n >= 2 then begin
-                     ignore
-                       (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
-                          ~style:(H.whisper_style ~theme ()) ("- " ^ inv.text));
-                     incr y
-                   end
-                 end)
-               invalidated;
-             if
-               added = [] && updated = [] && retracted = [] && invalidated = []
-               && !y < bottom
-             then
+               (function
+                 | `K_add (f : Wire_knowledge.memory_fact_entry) ->
+                     if !y < bottom then begin
+                       let rows_n = if !y + 1 < bottom then 2 else 1 in
+                       Card.draw_left_rail ~tone:Theme.Status_ok grid ~x:content.x
+                         ~y:!y ~h:rows_n ~theme;
+                       let heat_lbl, heat_tone =
+                         heat_pill_spec ~count:f.retrieval_count f.heat
+                       in
+                       let age = H.format_age ~now_unix f.first_seen_unix in
+                       let tx = content.x + 2 and tw = Int.max 0 (content.w - 2) in
+                       let hw = Grapheme.display_width heat_lbl in
+                       let aw = Grapheme.display_width age in
+                       let left_txt =
+                         Printf.sprintf "+ [%s] %s" f.category f.origin
+                       in
+                       ignore
+                         (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y
+                            ~max_w:(Int.max 6 (tw - hw - aw - 4))
+                            ~style:
+                              (H.status_style ~theme ~attrs:Attr.bold
+                                 Theme.Status_ok)
+                            left_txt);
+                       ignore
+                         (H.put_right ~grid ~clip:content
+                            ~right_x:(Rect.right content - aw - 2) ~y:!y ~max_w:hw
+                            ~style:(H.status_style ~theme heat_tone) heat_lbl);
+                       ignore
+                         (H.put_right ~grid ~clip:content
+                            ~right_x:(Rect.right content) ~y:!y ~max_w:aw
+                            ~style:(H.whisper_style ~theme ()) age);
+                       incr y;
+                       if !y < bottom && rows_n >= 2 then begin
+                         ignore
+                           (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
+                              ~style:(H.text_style ~theme ()) f.text);
+                         incr y
+                       end
+                     end
+                 | `K_upd (u : Wire_knowledge.memory_updated_fact) ->
+                     if !y < bottom then begin
+                       let rows_n = Int.min 3 (bottom - !y) in
+                       Card.draw_left_rail ~tone:Theme.Status_active grid
+                         ~x:content.x ~y:!y ~h:rows_n ~theme;
+                       let heat_lbl, heat_tone =
+                         heat_pill_spec ~count:u.after.retrieval_count u.after.heat
+                       in
+                       let tx = content.x + 2 and tw = Int.max 0 (content.w - 2) in
+                       let hw = Grapheme.display_width heat_lbl in
+                       let hdr =
+                         Printf.sprintf "~ [%s] %s @r%d" u.after.category
+                           (relation_label u.relation)
+                           u.at_rev
+                       in
+                       ignore
+                         (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y
+                            ~max_w:(Int.max 6 (tw - hw - 2))
+                            ~style:
+                              (H.status_style ~theme ~attrs:Attr.bold
+                                 Theme.Status_active)
+                            hdr);
+                       ignore
+                         (H.put_right ~grid ~clip:content
+                            ~right_x:(Rect.right content) ~y:!y ~max_w:hw
+                            ~style:(H.status_style ~theme heat_tone) heat_lbl);
+                       incr y;
+                       if !y < bottom then begin
+                         ignore
+                           (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
+                              ~style:(H.status_style ~theme Theme.Status_critical)
+                              ("- " ^ u.before.text));
+                         incr y
+                       end;
+                       if !y < bottom then begin
+                         ignore
+                           (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
+                              ~style:(H.status_style ~theme Theme.Status_ok)
+                              ("+ " ^ u.after.text));
+                         incr y
+                       end
+                     end
+                 | `K_ret (r : Wire_knowledge.memory_retracted_fact) ->
+                     if !y < bottom then begin
+                       let rows_n = if !y + 1 < bottom then 2 else 1 in
+                       Card.draw_left_rail ~tone:Theme.Status_critical grid
+                         ~x:content.x ~y:!y ~h:rows_n ~theme;
+                       let tx = content.x + 2 and tw = Int.max 0 (content.w - 2) in
+                       let why =
+                         match r.drop_reason with Some s -> " · " ^ s | None -> ""
+                       in
+                       let hdr =
+                         Printf.sprintf "- [%s] %s @r%d · %s%s" r.category
+                           (Say.resolve lang (Say.make ~ko:"대체/철회" ~en:"retracted"))
+                           r.removed_at_rev r.removed_by why
+                       in
+                       ignore
+                         (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
+                            ~style:(H.status_style ~theme Theme.Status_critical) hdr);
+                       incr y;
+                       if !y < bottom && rows_n >= 2 then begin
+                         ignore
+                           (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
+                              ~style:(H.whisper_style ~theme ()) ("- " ^ r.text));
+                         incr y
+                       end
+                     end
+                 | `K_inv (inv : Wire_knowledge.memory_invalidated_fact) ->
+                     if !y < bottom then begin
+                       let rows_n = if !y + 1 < bottom then 2 else 1 in
+                       Card.draw_left_rail ~tone:Theme.Status_attention grid
+                         ~x:content.x ~y:!y ~h:rows_n ~theme;
+                       let tx = content.x + 2 and tw = Int.max 0 (content.w - 2) in
+                       let prems = String.concat ", " inv.missing_premise_ids in
+                       let hdr =
+                         Printf.sprintf "! [invalidated] @r%d missing: %s"
+                           inv.at_rev prems
+                       in
+                       ignore
+                         (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
+                            ~style:(H.status_style ~theme Theme.Status_attention)
+                            hdr);
+                       incr y;
+                       if !y < bottom && rows_n >= 2 then begin
+                         ignore
+                           (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
+                              ~style:(H.whisper_style ~theme ()) ("- " ^ inv.text));
+                         incr y
+                       end
+                     end)
+               (Store_scroll.drop skip items);
+             if items = [] && !y < bottom then
                H.draw_empty_notice ~grid
                  ~rect:
                    (Rect.make ~x:content.x ~y:!y ~w:content.w
@@ -2380,113 +2450,144 @@ let draw_temporal_memory_diff ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                  ~theme
                  ~hint:
                    (Say.resolve lang
-                      (Say.make ~ko:"[Space] 시간 범위를 7d로 확장"
-                         ~en:"[Space] Expand window to 7d"))
+                      (if String.equal q "" then
+                         Say.make ~ko:"[Space] 시간 범위를 7d로 확장"
+                           ~en:"[Space] Expand window to 7d"
+                       else
+                         Say.make ~ko:"[Esc] 필터 초기화"
+                           ~en:"[Esc] Clear filter"))
                  (Say.resolve lang
-                    (Say.make ~ko:"이 기간 내 메모리 변동 없음"
-                       ~en:"No memory changes in this window"))
+                    (if String.equal q "" then
+                       Say.make ~ko:"이 기간 내 메모리 변동 없음"
+                         ~en:"No memory changes in this window"
+                     else
+                       Say.make ~ko:"필터에 일치하는 메모리 변동 없음"
+                         ~en:"No memory changes match filter"))
          | Wire_knowledge.World_diff { added; updated; retracted; _ } ->
+             let added =
+               List.filter
+                 (fun (e : Wire_knowledge.world_change_entry) ->
+                   matches (e.fact_id ^ " " ^ e.summary))
+                 added
+             in
+             let updated =
+               List.filter
+                 (fun (u : Wire_knowledge.world_updated_entry) ->
+                   matches (u.fact_id ^ " " ^ u.summary))
+                 updated
+             in
+             let retracted =
+               List.filter
+                 (fun (r : Wire_knowledge.world_change_entry) ->
+                   matches (r.fact_id ^ " " ^ r.summary))
+                 retracted
+             in
+             let items =
+               List.map (fun x -> `W_add x) added
+               @ List.map (fun x -> `W_upd x) updated
+               @ List.map (fun x -> `W_ret x) retracted
+             in
+             let skip =
+               Int.min (Int.max 0 (List.length items - 1)) (Int.max 0 k.diff_scroll_offset)
+             in
              List.iter
-               (fun (e : Wire_knowledge.world_change_entry) ->
-                 if !y < bottom then begin
-                   Card.draw_left_rail ~tone:Theme.Status_ok grid ~x:content.x
-                     ~y:!y ~h:1 ~theme;
-                   let tx = content.x + 2 and tw = Int.max 0 (content.w - 2) in
-                   let ts = H.extract_hhmmss e.recorded_at in
-                   let tw_ts = Grapheme.display_width ts in
-                   let line =
-                     Printf.sprintf "+ #%d [%s] %s" e.seq
-                       (H.short_hash ~len:8 e.fact_id)
-                       e.summary
-                   in
-                   ignore
-                     (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y
-                        ~max_w:(Int.max 6 (tw - tw_ts - 2))
-                        ~style:(H.status_style ~theme Theme.Status_ok) line);
-                   ignore
-                     (H.put_right ~grid ~clip:content
-                        ~right_x:(Rect.right content) ~y:!y ~max_w:tw_ts
-                        ~style:(H.whisper_style ~theme ()) ts);
-                   incr y
-                 end)
-               added;
-             List.iter
-               (fun (u : Wire_knowledge.world_updated_entry) ->
-                 if !y < bottom then begin
-                   let rows_n = Int.min 3 (bottom - !y) in
-                   Card.draw_left_rail ~tone:Theme.Status_active grid
-                     ~x:content.x ~y:!y ~h:rows_n ~theme;
-                   let tx = content.x + 2 and tw = Int.max 0 (content.w - 2) in
-                   let ts = H.extract_hhmmss u.recorded_at in
-                   let tw_ts = Grapheme.display_width ts in
-                   let hdr =
-                     Printf.sprintf "~ #%d [%s] %s" u.seq
-                       (H.short_hash ~len:8 u.fact_id)
-                       u.summary
-                   in
-                   ignore
-                     (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y
-                        ~max_w:(Int.max 6 (tw - tw_ts - 2))
-                        ~style:
-                          (H.status_style ~theme ~attrs:Attr.bold
-                             Theme.Status_active)
-                        hdr);
-                   ignore
-                     (H.put_right ~grid ~clip:content
-                        ~right_x:(Rect.right content) ~y:!y ~max_w:tw_ts
-                        ~style:(H.whisper_style ~theme ()) ts);
-                   incr y;
-                   let b_s =
-                     H.json_kv_summary u.before |> H.safe_take 3
-                     |> List.map (fun (k, v) -> k ^ "=" ^ v)
-                     |> String.concat " · "
-                   in
-                   let a_s =
-                     H.json_kv_summary u.after |> H.safe_take 3
-                     |> List.map (fun (k, v) -> k ^ "=" ^ v)
-                     |> String.concat " · "
-                   in
-                   if !y < bottom && not (String.equal b_s "") then begin
-                     ignore
-                       (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
-                          ~style:(H.status_style ~theme Theme.Status_critical)
-                          ("- " ^ b_s));
-                     incr y
-                   end;
-                   if !y < bottom && not (String.equal a_s "") then begin
-                     ignore
-                       (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
-                          ~style:(H.status_style ~theme Theme.Status_ok)
-                          ("+ " ^ a_s));
-                     incr y
-                   end
-                 end)
-               updated;
-             List.iter
-               (fun (r : Wire_knowledge.world_change_entry) ->
-                 if !y < bottom then begin
-                   Card.draw_left_rail ~tone:Theme.Status_critical grid
-                     ~x:content.x ~y:!y ~h:1 ~theme;
-                   let tx = content.x + 2 and tw = Int.max 0 (content.w - 2) in
-                   let ts = H.extract_hhmmss r.recorded_at in
-                   let tw_ts = Grapheme.display_width ts in
-                   let line =
-                     Printf.sprintf "- #%d [%s] %s" r.seq
-                       (H.short_hash ~len:8 r.fact_id)
-                       r.summary
-                   in
-                   ignore
-                     (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y
-                        ~max_w:(Int.max 6 (tw - tw_ts - 2))
-                        ~style:(H.status_style ~theme Theme.Status_critical) line);
-                   ignore
-                     (H.put_right ~grid ~clip:content
-                        ~right_x:(Rect.right content) ~y:!y ~max_w:tw_ts
-                        ~style:(H.whisper_style ~theme ()) ts);
-                   incr y
-                 end)
-               retracted;
-             if added = [] && updated = [] && retracted = [] && !y < bottom then
+               (function
+                 | `W_add (e : Wire_knowledge.world_change_entry) ->
+                     if !y < bottom then begin
+                       Card.draw_left_rail ~tone:Theme.Status_ok grid ~x:content.x
+                         ~y:!y ~h:1 ~theme;
+                       let tx = content.x + 2 and tw = Int.max 0 (content.w - 2) in
+                       let ts = H.extract_hhmmss e.recorded_at in
+                       let tw_ts = Grapheme.display_width ts in
+                       let line =
+                         Printf.sprintf "+ #%d [%s] %s" e.seq
+                           (H.short_hash ~len:8 e.fact_id)
+                           e.summary
+                       in
+                       ignore
+                         (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y
+                            ~max_w:(Int.max 6 (tw - tw_ts - 2))
+                            ~style:(H.status_style ~theme Theme.Status_ok) line);
+                       ignore
+                         (H.put_right ~grid ~clip:content
+                            ~right_x:(Rect.right content) ~y:!y ~max_w:tw_ts
+                            ~style:(H.whisper_style ~theme ()) ts);
+                       incr y
+                     end
+                 | `W_upd (u : Wire_knowledge.world_updated_entry) ->
+                     if !y < bottom then begin
+                       let rows_n = Int.min 3 (bottom - !y) in
+                       Card.draw_left_rail ~tone:Theme.Status_active grid
+                         ~x:content.x ~y:!y ~h:rows_n ~theme;
+                       let tx = content.x + 2 and tw = Int.max 0 (content.w - 2) in
+                       let ts = H.extract_hhmmss u.recorded_at in
+                       let tw_ts = Grapheme.display_width ts in
+                       let hdr =
+                         Printf.sprintf "~ #%d [%s] %s" u.seq
+                           (H.short_hash ~len:8 u.fact_id)
+                           u.summary
+                       in
+                       ignore
+                         (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y
+                            ~max_w:(Int.max 6 (tw - tw_ts - 2))
+                            ~style:
+                              (H.status_style ~theme ~attrs:Attr.bold
+                                 Theme.Status_active)
+                            hdr);
+                       ignore
+                         (H.put_right ~grid ~clip:content
+                            ~right_x:(Rect.right content) ~y:!y ~max_w:tw_ts
+                            ~style:(H.whisper_style ~theme ()) ts);
+                       incr y;
+                       let b_s =
+                         H.json_kv_summary u.before |> H.safe_take 3
+                         |> List.map (fun (k, v) -> k ^ "=" ^ v)
+                         |> String.concat " · "
+                       in
+                       let a_s =
+                         H.json_kv_summary u.after |> H.safe_take 3
+                         |> List.map (fun (k, v) -> k ^ "=" ^ v)
+                         |> String.concat " · "
+                       in
+                       if !y < bottom && not (String.equal b_s "") then begin
+                         ignore
+                           (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
+                              ~style:(H.status_style ~theme Theme.Status_critical)
+                              ("- " ^ b_s));
+                         incr y
+                       end;
+                       if !y < bottom && not (String.equal a_s "") then begin
+                         ignore
+                           (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
+                              ~style:(H.status_style ~theme Theme.Status_ok)
+                              ("+ " ^ a_s));
+                         incr y
+                       end
+                     end
+                 | `W_ret (r : Wire_knowledge.world_change_entry) ->
+                     if !y < bottom then begin
+                       Card.draw_left_rail ~tone:Theme.Status_critical grid
+                         ~x:content.x ~y:!y ~h:1 ~theme;
+                       let tx = content.x + 2 and tw = Int.max 0 (content.w - 2) in
+                       let ts = H.extract_hhmmss r.recorded_at in
+                       let tw_ts = Grapheme.display_width ts in
+                       let line =
+                         Printf.sprintf "- #%d [%s] %s" r.seq
+                           (H.short_hash ~len:8 r.fact_id)
+                           r.summary
+                       in
+                       ignore
+                         (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y
+                            ~max_w:(Int.max 6 (tw - tw_ts - 2))
+                            ~style:(H.status_style ~theme Theme.Status_critical) line);
+                       ignore
+                         (H.put_right ~grid ~clip:content
+                            ~right_x:(Rect.right content) ~y:!y ~max_w:tw_ts
+                            ~style:(H.whisper_style ~theme ()) ts);
+                       incr y
+                     end)
+               (Store_scroll.drop skip items);
+             if items = [] && !y < bottom then
                H.draw_empty_notice ~grid
                  ~rect:
                    (Rect.make ~x:content.x ~y:!y ~w:content.w
@@ -2494,11 +2595,19 @@ let draw_temporal_memory_diff ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                  ~theme
                  ~hint:
                    (Say.resolve lang
-                      (Say.make ~ko:"[Space] 시간 범위를 7d로 확장"
-                         ~en:"[Space] Expand window to 7d"))
+                      (if String.equal q "" then
+                         Say.make ~ko:"[Space] 시간 범위를 7d로 확장"
+                           ~en:"[Space] Expand window to 7d"
+                       else
+                         Say.make ~ko:"[Esc] 필터 초기화"
+                           ~en:"[Esc] Clear filter"))
                  (Say.resolve lang
-                    (Say.make ~ko:"이 기간 내 월드 메모리 변동 없음"
-                       ~en:"No world memory changes in this window")))
+                    (if String.equal q "" then
+                       Say.make ~ko:"이 기간 내 월드 메모리 변동 없음"
+                         ~en:"No world memory changes in this window"
+                     else
+                       Say.make ~ko:"필터에 일치하는 월드 메모리 변동 없음"
+                         ~en:"No world memory changes match filter")))
     | ( Observed.Loading _
       | Observed.Absent
       | Observed.Unreported
@@ -2752,7 +2861,9 @@ let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
           let body_h = Int.max 0 (bottom - !y - comments_h) in
           if body_h > 0 then begin
             let md_rect = Rect.make ~x:content.x ~y:!y ~w:content.w ~h:body_h in
-            ignore (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true p.body);
+            ignore
+              (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true
+                 ~scroll:model.nav.dive_scroll_offset p.body);
             y := !y + body_h
           end;
           if comments_h > 0 && !y < bottom then begin
@@ -2806,8 +2917,8 @@ let render_dive_wiki ~slug ~(model : Model.t) ~cache ~(rect : Rect.t)
     Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.66
       ~top_ratio:0.68 bp rect
   in
-  draw_wiki_preview ~target_slug:(Some slug) ~grid ~cache ~rect:main_rect ~theme
-    ~bp ~lang ~k ~focused:true;
+  draw_wiki_preview ~target_slug:(Some slug) ~scroll:model.nav.dive_scroll_offset
+    ~grid ~cache ~rect:main_rect ~theme ~bp ~lang ~k ~focused:true;
   let side_inner =
     Card.draw ~cache grid ~rect:side_rect ~theme
       (H.card_spec ~subtitle:slug
@@ -2967,6 +3078,11 @@ let render_dive_artifact ~sha256 ~(model : Model.t) ~cache ~(rect : Rect.t)
              (Say.make ~ko:"아티팩트 리비전 목록" ~en:"Artifact Revisions"))
         ();
       incr y;
+      let rev_skip =
+        Int.min
+          (Int.max 0 (List.length artifacts - 1))
+          (Int.max 0 model.nav.dive_scroll_offset)
+      in
       List.iter
         (fun (a : Wire_knowledge.artifact_entry) ->
           if !y < bottom then begin
@@ -2994,7 +3110,7 @@ let render_dive_artifact ~sha256 ~(model : Model.t) ~cache ~(rect : Rect.t)
                  ~max_w:(Int.max 0 (content.w - 2)) ~style line);
             incr y
           end)
-        artifacts
+        (Store_scroll.drop rev_skip artifacts)
     end
 
 let render_dive_memory ~keeper ~from_rev ~to_rev ~(model : Model.t) ~cache
@@ -3004,9 +3120,16 @@ let render_dive_memory ~keeper ~from_rev ~to_rev ~(model : Model.t) ~cache
       model.knowledge with
       memory_diff_keeper = keeper;
       memory_diff_window = Knowledge_store.Window_revs { from_rev; to_rev };
+      diff_scroll_offset = model.nav.dive_scroll_offset;
     }
   in
-  let scoped_model = { model with knowledge = k_scoped } in
+  let scoped_model =
+    {
+      model with
+      nav = { model.nav with pane_index = 1 };
+      knowledge = k_scoped;
+    }
+  in
   render_memory ~model:scoped_model ~cache ~rect ~theme ~bp grid
 
 let render_dive ~(target : Nav.knowledge_dive_target) ~(model : Model.t) ~cache

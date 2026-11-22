@@ -228,11 +228,15 @@ let apply_model_selection ~now ~runtime_id (m : Model.t) =
 
 let find_actionable_ask (m : Model.t) =
   let on_work_inbox =
-    Nav.equal_workspace m.nav.workspace Nav.Work
+    Option.is_none m.nav.overlay
+    && m.nav.dive_stack = []
+    && Nav.equal_workspace m.nav.workspace Nav.Work
     && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
   in
   if on_work_inbox && not (Attention.is_empty m.attention) then
-    match Attention.current_triage_item m.attention with
+    match
+      Attention.current_filtered_item ~query:m.work.filter_query m.attention
+    with
     | Some { payload = Attention.Payload_ask ask; id; _ }
       when not (Attention.is_in_flight ~id m.attention) ->
         Some ask
@@ -280,6 +284,90 @@ let find_actionable_ask (m : Model.t) =
                       None)
               m.attention.items)
 
+let schema_has_field_key (config : Config_store.t) key =
+  match Observed.to_option config.schema with
+  | None -> false
+  | Some s ->
+      List.exists
+        (fun (sec : Wire_config.schema_section) ->
+          List.exists
+            (fun (f : Wire_config.schema_field) -> String.equal f.full_key key)
+            sec.fields)
+        s.sections
+
+let apply_staged_tui_pref_if_needed ~now ~key (m : Model.t)
+    (config : Config_store.t) : (Model.t * Cmd.t list) option =
+  if not (Config_store.is_tui_pref_key key) then None
+  else
+    match Config_store.String_map.find_opt key config.dirty_fields with
+    | None -> None
+    | Some op ->
+        let config1 =
+          Config_store.apply_tui_pref_op ~observed_at:now ~full_key:key op config
+        in
+        let config2 =
+          if schema_has_field_key config1 key then config1
+          else Config_store.unstage_patch ~full_key:key config1
+        in
+        let m1 = { m with config = config2 } in
+        let m2, cmds =
+          match op with
+          | Wire_config.Set_scalar { value; _ } when String.equal key "tui.theme"
+            -> (
+              match Theme.preset_of_name value with
+              | Some preset ->
+                  ( { m1 with theme_preset = preset }
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_tui_preference
+                              (Wire_config.Pref_theme
+                                 (Some (Theme.preset_name preset)));
+                        };
+                    ] )
+              | None -> (m1, []))
+          | Wire_config.Set_scalar { value; _ }
+            when String.equal key "tui.language" ->
+              let lang =
+                if String.equal (String.lowercase_ascii (String.trim value)) "en"
+                then Say.Lang_en
+                else Say.Lang_ko
+              in
+              ( { m1 with lang }
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_tui_preference (Wire_config.Pref_language lang);
+                    };
+                ] )
+          | Wire_config.Set_scalar _
+          | Wire_config.Set_bool _
+          | Wire_config.Set_int _
+          | Wire_config.Set_float _
+          | Wire_config.Set_string_array _
+          | Wire_config.Remove_key _ ->
+              (m1, [])
+        in
+        Some
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:"TUI 환경설정이 적용되었습니다"
+                 ~en:"TUI preference updated")
+              m2
+          , cmds )
+
+let focus_composer_for_slash (m : Model.t) =
+  let cur = (Drafts.current_draft m.drafts).text in
+  let drafts =
+    if String.equal (String.trim cur) "" then
+      m.drafts |> Drafts.set_focus true |> Drafts.set_current_text "/"
+    else Drafts.set_focus true m.drafts
+  in
+  ({ m with nav = { m.nav with filter_focused = false }; drafts }, [])
+
 let rec execute_slash ~now (m : Model.t) cmd =
   match cmd with
   | Slash.Pulse -> Update_nav.switch_workspace m Nav.Pulse
@@ -315,18 +403,37 @@ let rec execute_slash ~now (m : Model.t) cmd =
   | Slash.Tools (Some mode) ->
       ({ m with fleet = Fleet_store.set_tools_mode mode m.fleet }, [])
   | Slash.Clear ->
+      let draft_was_empty =
+        String.equal (String.trim (Drafts.current_draft m.drafts).text) ""
+      in
       let drafts = Drafts.clear_current_draft m.drafts in
       let fleet = Fleet_store.reset_chat_scroll m.fleet in
-      ( Model.with_toast ~now ~level:Model.Toast_info
-          (Say.make ~ko:"현재 초안이 비워졌습니다" ~en:"Cleared current draft")
-          { m with drafts; fleet }
-      , [] )
+      let base = { m with drafts; fleet } in
+      let cleared, msg =
+        if
+          draft_was_empty
+          && not (String.equal (Update_nav.current_filter_query base) "")
+        then
+          ( Update_nav.set_active_filter_query "" base
+          , Say.make ~ko:"현재 초안 및 화면 필터가 초기화되었습니다"
+              ~en:"Cleared draft and active filter" )
+        else
+          ( base
+          , Say.make ~ko:"현재 초안이 비워졌습니다" ~en:"Cleared current draft" )
+      in
+      (Model.with_toast ~now ~level:Model.Toast_info msg cleared, [])
   | Slash.Theme opt ->
       let preset =
         match opt with Some p -> p | None -> next_theme_preset m.theme_preset
       in
+      let config =
+        Config_store.apply_tui_pref_op ~observed_at:now ~full_key:"tui.theme"
+          (Wire_config.Set_scalar
+             { table = "tui"; key = "theme"; value = Theme.preset_name preset })
+          m.config
+      in
       let next =
-        { m with theme_preset = preset }
+        { m with theme_preset = preset; config }
         |> Model.with_toast ~now ~level:Model.Toast_info
              (Say.concat ~sep:": "
                 [
@@ -353,8 +460,15 @@ let rec execute_slash ~now (m : Model.t) cmd =
             | Say.Lang_ko -> Say.Lang_en
             | Say.Lang_en -> Say.Lang_ko)
       in
+      let lang_s = match lang with Say.Lang_ko -> "ko" | Say.Lang_en -> "en" in
+      let config =
+        Config_store.apply_tui_pref_op ~observed_at:now ~full_key:"tui.language"
+          (Wire_config.Set_scalar
+             { table = "tui"; key = "language"; value = lang_s })
+          m.config
+      in
       let next =
-        { m with lang }
+        { m with lang; config }
         |> Model.with_toast ~now ~level:Model.Toast_info
              (Say.make ~ko:"언어: 한국어" ~en:"Language: English")
       in
@@ -370,99 +484,179 @@ let rec execute_slash ~now (m : Model.t) cmd =
   | Slash.Restart -> (m, [ Cmd.Restart_tui ])
   | Slash.Quit -> (m, [ Cmd.Quit Exit_reason.Quit_key ])
 
+and submit_slash_text ~now (m : Model.t) trimmed =
+  match Slash.parse trimmed with
+  | Ok parsed ->
+      let m_cleared =
+        {
+          m with
+          drafts =
+            m.drafts |> Drafts.clear_current_draft |> Drafts.set_focus false;
+        }
+      in
+      execute_slash ~now m_cleared parsed
+  | Error err ->
+      let msg =
+        match err with
+        | Slash.Not_a_slash_command | Slash.Empty_command ->
+            Say.make ~ko:"슬래시 명령어를 입력하세요" ~en:"Enter a slash command"
+        | Slash.Unknown_command name ->
+            Say.make
+              ~ko:("알 수 없는 명령어: " ^ name)
+              ~en:("Unknown command: " ^ name)
+        | Slash.Unexpected_argument { command; arg } ->
+            Say.make
+              ~ko:(Printf.sprintf "%s 명령은 인자(%s)를 받지 않습니다" command arg)
+              ~en:(Printf.sprintf "%s takes no argument (%s)" command arg)
+        | Slash.Invalid_argument { command; expected; got } ->
+            Say.make
+              ~ko:
+                (Printf.sprintf "%s 잘못된 인자 %s (기대: %s)" command got
+                   expected.ko)
+              ~en:
+                (Printf.sprintf "Invalid %s argument %s (expected: %s)" command
+                   got expected.en)
+      in
+      (Model.with_toast ~now ~level:Model.Toast_warning msg m, [])
+
 and submit_composer ~now ~mode (m : Model.t) =
   let draft = Drafts.current_draft m.drafts in
   let trimmed = String.trim draft.text in
-  if String.equal trimmed "" then (m, [])
-  else if Char.equal trimmed.[0] '/' then
-    match Slash.parse trimmed with
-    | Ok parsed ->
-        let m_cleared =
-          {
-            m with
-            drafts =
-              m.drafts |> Drafts.clear_current_draft |> Drafts.set_focus false;
-          }
-        in
-        execute_slash ~now m_cleared parsed
-    | Error err ->
-        let msg =
-          match err with
-          | Slash.Not_a_slash_command | Slash.Empty_command ->
-              Say.make ~ko:"슬래시 명령어를 입력하세요" ~en:"Enter a slash command"
-          | Slash.Unknown_command name ->
-              Say.make
-                ~ko:("알 수 없는 명령어: " ^ name)
-                ~en:("Unknown command: " ^ name)
-          | Slash.Unexpected_argument { command; arg } ->
-              Say.make
-                ~ko:(Printf.sprintf "%s 명령은 인자(%s)를 받지 않습니다" command arg)
-                ~en:(Printf.sprintf "%s takes no argument (%s)" command arg)
-          | Slash.Invalid_argument { command; expected; got } ->
-              Say.make
-                ~ko:
-                  (Printf.sprintf "%s 잘못된 인자 %s (기대: %s)" command got
-                     expected.ko)
-                ~en:
-                  (Printf.sprintf "Invalid %s argument %s (expected: %s)" command
-                     got expected.en)
-        in
-        (Model.with_toast ~now ~level:Model.Toast_warning msg m, [])
-  else
-    match Update_nav.resolve_target_keeper m with
-    | None ->
-        ( Model.with_toast ~now ~level:Model.Toast_warning
-            (Say.make ~ko:"대상 키퍼를 먼저 선택하세요"
-               ~en:"Select a target keeper first")
-            m
-        , [] )
-    | Some keeper -> (
-        let prior_user_msg_ids =
-          match Fleet_store.String_map.find_opt keeper m.fleet.chat_histories with
-          | None -> []
-          | Some obs -> (
-              match Observed.to_option obs with
+  match Update_nav.resolve_composer_popup m with
+  | Update_nav.Composer_popup_slash { items; selected; _ } -> (
+      match List.nth_opt items selected with
+      | Some { kind = Update_nav.Popup_slash_cmd spec; _ } ->
+          if Update_nav.slash_spec_requires_arg spec then
+            ( {
+                m with
+                drafts = Drafts.set_current_text (spec.name ^ " ") m.drafts;
+              }
+            , [] )
+          else submit_slash_text ~now m spec.name
+      | Some { kind = Update_nav.Popup_slash_arg { full_text; _ }; _ } ->
+          let target_text =
+            if
+              m.drafts.popup_selected = 0
+              && List.exists
+                   (fun (cand : Update_nav.popup_candidate) ->
+                     String.equal
+                       (String.lowercase_ascii cand.trigger)
+                       (String.lowercase_ascii trimmed))
+                   items
+            then trimmed
+            else full_text
+          in
+          submit_slash_text ~now m target_text
+      | Some { kind = Update_nav.Popup_mention _; _ } | None -> (m, []))
+  | Update_nav.Composer_popup_mention { items; selected; _ } -> (
+      match List.nth_opt items selected with
+      | Some cand -> (Update_nav.apply_popup_completion cand m, [])
+      | None -> (m, []))
+  | Update_nav.Composer_popup_none -> (
+      if String.equal trimmed "" then (m, [])
+      else if Char.equal trimmed.[0] '/' then submit_slash_text ~now m trimmed
+      else
+        match Update_nav.resolve_target_keeper m with
+        | None ->
+            ( Model.with_toast ~now ~level:Model.Toast_warning
+                (Say.make ~ko:"대상 키퍼를 먼저 선택하세요"
+                   ~en:"Select a target keeper first")
+                m
+            , [] )
+        | Some keeper -> (
+            let prior_user_msg_ids =
+              match
+                Fleet_store.String_map.find_opt keeper m.fleet.chat_histories
+              with
               | None -> []
-              | Some page ->
-                  List.filter_map
-                    (fun (msg : Wire_fleet.chat_message) ->
-                      match msg.role with
-                      | Wire_fleet.Role_user -> Some msg.id
-                      | Wire_fleet.Role_assistant
-                      | Wire_fleet.Role_system
-                      | Wire_fleet.Role_tool ->
-                          None)
-                    page.messages)
-        in
-        let drafts0 = Drafts.set_active_keeper keeper m.drafts in
-        match
-          Drafts.enqueue_submission ~now ~keeper ~mode ~prior_user_msg_ids
-            drafts0
-        with
-        | None -> (m, [])
-        | Some (drafts1, tx) ->
-            let drafts2 =
-              Drafts.mark_sending ~now ~request_id:tx.request_id drafts1
+              | Some obs -> (
+                  match Observed.to_option obs with
+                  | None -> []
+                  | Some page ->
+                      List.filter_map
+                        (fun (msg : Wire_fleet.chat_message) ->
+                          match msg.role with
+                          | Wire_fleet.Role_user -> Some msg.id
+                          | Wire_fleet.Role_assistant
+                          | Wire_fleet.Role_system
+                          | Wire_fleet.Role_tool ->
+                              None)
+                        page.messages)
             in
-            let fleet =
-              Fleet_store.start_chat_stream ~keeper ~request_id:tx.request_id
-                m.fleet
-            in
-            let cmd = Update_nav.build_chat_submit_cmd m tx ~is_btw:false in
-            ({ m with drafts = drafts2; fleet }, [ cmd ]))
+            let drafts0 = Drafts.set_active_keeper keeper m.drafts in
+            match
+              Drafts.enqueue_submission ~now ~keeper ~mode ~prior_user_msg_ids
+                drafts0
+            with
+            | None -> (m, [])
+            | Some (drafts1, tx) ->
+                let drafts2 =
+                  Drafts.mark_sending ~now ~request_id:tx.request_id drafts1
+                in
+                let fleet =
+                  Fleet_store.start_chat_stream ~keeper
+                    ~request_id:tx.request_id m.fleet
+                in
+                let cmd = Update_nav.build_chat_submit_cmd m tx ~is_btw:false in
+                ({ m with drafts = drafts2; fleet }, [ cmd ])))
 
 and confirm_palette ~now (m : Model.t) =
   match m.palette.mode with
   | Model.Palette_commands -> (
-      let items = Update_nav.palette_filtered_commands m in
+      let items = Update_nav.palette_entries m in
       match
         List.nth_opt items
           (Update_nav.clamp_index (List.length items) m.palette.selected)
       with
       | None -> ({ m with nav = { m.nav with overlay = None } }, [])
-      | Some cmd ->
+      | Some entry -> (
           let m_closed = { m with nav = { m.nav with overlay = None } } in
-          execute_action ~now m_closed cmd.action)
+          match entry.action with
+          | Update_nav.Pal_keymap_action act -> execute_action ~now m_closed act
+          | Update_nav.Pal_switch_workspace ws ->
+              Update_nav.switch_workspace m_closed ws
+          | Update_nav.Pal_dive_keeper name ->
+              Update_nav.push_dive m_closed
+                (Nav.Dive_keeper { name; tab = Nav.Keeper_chat })
+          | Update_nav.Pal_select_company company ->
+              let fleet = Fleet_store.set_filter company m_closed.fleet in
+              Update_nav.switch_workspace { m_closed with fleet } Nav.Keepers
+          | Update_nav.Pal_dive_goal id ->
+              Update_nav.push_dive m_closed (Nav.Dive_work (Nav.Goal_dive id))
+          | Update_nav.Pal_dive_task id ->
+              Update_nav.push_dive m_closed (Nav.Dive_work (Nav.Task_dive id))
+          | Update_nav.Pal_dive_thread id ->
+              Update_nav.push_dive m_closed
+                (Nav.Dive_knowledge (Nav.Thread_dive id))
+          | Update_nav.Pal_dive_wiki slug ->
+              Update_nav.push_dive m_closed
+                (Nav.Dive_knowledge (Nav.Wiki_dive slug))
+          | Update_nav.Pal_dive_sandbox keeper ->
+              Update_nav.push_dive m_closed
+                (Nav.Dive_infra (Nav.Sandbox_dive keeper))
+          | Update_nav.Pal_open_infra_sandboxes pool ->
+              let infra =
+                m_closed.infra
+                |> Infra_store.set_tab Nav.Infra_sandboxes
+                |> Infra_store.set_filter pool
+              in
+              Update_nav.switch_workspace { m_closed with infra } Nav.Infra
+          | Update_nav.Pal_open_setting { full_key; tab } ->
+              let config =
+                m_closed.config
+                |> Config_store.set_target Wire_config.Target_runtime
+                |> Config_store.set_tab tab
+                |> Config_store.set_search_query full_key
+              in
+              Update_nav.open_overlay { m_closed with config }
+                (Nav.Settings config.active_tab)
+          | Update_nav.Pal_slash_spec spec ->
+              if Slash.equal_command_id spec.id Slash.Cmd_btw then
+                Update_nav.open_inline_modal m_closed Nav.Btw_query
+              else
+                match Slash.parse spec.name with
+                | Ok parsed -> execute_slash ~now m_closed parsed
+                | Error _ -> (m_closed, [])))
   | Model.Palette_keepers -> (
       let items = Update_nav.palette_filtered_keepers m in
       match
@@ -490,55 +684,179 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Cycle_focus_pane dir -> (
       match m.nav.overlay with
       | Some (Nav.Settings _) ->
-          ({ m with config = Config_store.toggle_pane m.config }, [])
-      | Some
-          ( Nav.Palette
-          | Nav.Incidents
-          | Nav.Queue_context _
-          | Nav.Inline_action _
-          | Nav.Help
-          | Nav.System_gate _ )
+          if not (Config_store.is_two_pane_width ~cols:m.viewport.cols) then
+            (m, [])
+          else if Config_store.is_editing_field m.config then
+            let editing_key_opt = m.config.editing_field_key in
+            match Config_store.commit_edit_field m.config with
+            | Ok c -> (
+                match
+                  Option.bind editing_key_opt (fun key ->
+                      apply_staged_tui_pref_if_needed ~now ~key m c)
+                with
+                | Some (m1, cmds) ->
+                    ( { m1 with config = Config_store.toggle_pane m1.config }
+                    , cmds )
+                | None -> ({ m with config = Config_store.toggle_pane c }, []))
+            | Error _ ->
+                let cfg0 = Config_store.cancel_edit_field m.config in
+                ({ m with config = Config_store.toggle_pane cfg0 }, [])
+          else ({ m with config = Config_store.toggle_pane m.config }, [])
+      | Some Nav.Palette ->
+          let len = Update_nav.palette_len m in
+          if len <= 0 then (m, [])
+          else
+            let delta = match dir with Keymap.Next -> 1 | Keymap.Prev -> -1 in
+            let cur = Update_nav.clamp_index len m.palette.selected in
+            let selected = (cur + delta + len) mod len in
+            ({ m with palette = { m.palette with selected } }, [])
+      | Some (Nav.Queue_context _) -> Update_nav.cycle_sub_tab m dir
+      | Some (Nav.Inline_action _) -> (
+          match m.inline_modal with
+          | None -> (m, [])
+          | Some modal ->
+              let editable =
+                (not modal.submitting)
+                &&
+                match modal.kind, m.drafts.btw with
+                | Nav.Btw_query, Drafts.Btw_idle -> true
+                | ( Nav.Btw_query
+                  , ( Drafts.Btw_sending _
+                    | Drafts.Btw_streaming _
+                    | Drafts.Btw_answered _
+                    | Drafts.Btw_failed _ ) ) ->
+                    false
+                | ( ( Nav.Gate_reject _
+                    | Nav.Verification_reject _
+                    | Nav.Harness_overrule _
+                    | Nav.Task_cancel _
+                    | Nav.Schedule_form
+                    | Nav.Connector_form
+                    | Nav.Repo_add_form
+                    | Nav.Board_new_post )
+                  , _ ) ->
+                    true
+              in
+              if not editable then (m, [])
+              else
+                let delta =
+                  match dir with Keymap.Next -> 1 | Keymap.Prev -> -1
+                in
+                ( {
+                    m with
+                    inline_modal = Some (Model.modal_cycle_field ~delta modal);
+                  }
+                , [] ))
+      | Some (Nav.Help | Nav.Incidents | Nav.System_gate _) -> (m, [])
       | None ->
-          let delta = match dir with Keymap.Next -> 1 | Keymap.Prev -> -1 in
-          let next_pane = (m.nav.pane_index + delta + 3) mod 3 in
-          let next =
-            Update_nav.clamp_for_pane
-              { m with nav = { m.nav with pane_index = next_pane } }
-          in
-          (next, []))
+          let n = Model.focusable_pane_count m in
+          if n <= 1 then (m, [])
+          else
+            let delta = match dir with Keymap.Next -> 1 | Keymap.Prev -> -1 in
+            let next_pane = (m.nav.pane_index + delta + n) mod n in
+            let work =
+              if
+                m.nav.dive_stack = []
+                && Nav.equal_workspace m.nav.workspace Nav.Work
+                && Nav.equal_work_tab m.work.active_tab
+                     Nav.Work_tasks_schedules
+              then Work_store.jump_tasks_schedules_pane ~pane_index:next_pane m.work
+              else m.work
+            in
+            let next =
+              Update_nav.clamp_for_pane
+                { m with nav = { m.nav with pane_index = next_pane }; work }
+            in
+            (next, []))
   | Keymap.Focus_composer -> (
-      match m.nav.overlay with
-      | Some
-          (Nav.System_gate
-             (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline)) ->
-          (m, [])
-      | Some
-          ( Nav.Help
-          | Nav.Palette
-          | Nav.Settings _
-          | Nav.Incidents
-          | Nav.Queue_context _
-          | Nav.Inline_action _
-          | Nav.System_gate Nav.Media_viewer )
-      | None ->
-          let nav = { m.nav with overlay = None; filter_focused = false } in
-          ( {
-              m with
-              nav;
-              inline_modal = None;
-              drafts = Drafts.set_focus true m.drafts;
-            }
-          , [] ))
-  | Keymap.Focus_filter ->
-      ( {
-          m with
-          nav = { m.nav with filter_focused = true };
-          drafts = Drafts.set_focus false m.drafts;
-        }
-      , [] )
+      if
+        Model.is_too_small_viewport m.viewport
+        || Model.equal_breakpoint m.breakpoint Model.Micro
+      then (m, [])
+      else
+        match m.nav.overlay with
+        | Some
+            (Nav.System_gate
+               (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline)) ->
+            (m, [])
+        | Some
+            ( Nav.Help
+            | Nav.Palette
+            | Nav.Settings _
+            | Nav.Incidents
+            | Nav.Queue_context _
+            | Nav.Inline_action _
+            | Nav.System_gate Nav.Media_viewer )
+        | None ->
+            let nav = { m.nav with overlay = None; filter_focused = false } in
+            ( {
+                m with
+                nav;
+                inline_modal = None;
+                drafts = Drafts.set_focus true m.drafts;
+              }
+            , [] ))
+  | Keymap.Focus_filter -> (
+      if
+        Model.is_too_small_viewport m.viewport
+        || Model.equal_breakpoint m.breakpoint Model.Micro
+      then (m, [])
+      else
+        match m.nav.overlay with
+        | Some (Nav.Settings _ | Nav.Incidents) ->
+            ( {
+                m with
+                nav = { m.nav with filter_focused = true };
+                drafts = Drafts.set_focus false m.drafts;
+              }
+            , [] )
+        | Some
+            ( Nav.Palette
+            | Nav.Queue_context _
+            | Nav.Inline_action _
+            | Nav.Help
+            | Nav.System_gate _ ) ->
+            (m, [])
+        | None -> (
+            match Model.active_dive m with
+            | Some (Nav.Dive_keeper { tab = Nav.Keeper_config; _ }) ->
+                ( {
+                    m with
+                    nav = { m.nav with filter_focused = true };
+                    drafts = Drafts.set_focus false m.drafts;
+                  }
+                , [] )
+            | Some
+                ( Nav.Dive_keeper
+                    {
+                      tab =
+                        ( Nav.Keeper_chat
+                        | Nav.Keeper_memory
+                        | Nav.Keeper_work_candle
+                        | Nav.Keeper_sandbox );
+                      _;
+                    }
+                | Nav.Dive_work _
+                | Nav.Dive_knowledge _
+                | Nav.Dive_infra _ ) ->
+                focus_composer_for_slash m
+            | None -> (
+                match m.nav.workspace with
+                | Nav.Pulse -> focus_composer_for_slash m
+                | Nav.Work
+                | Nav.Knowledge
+                | Nav.Keepers
+                | Nav.Runtime
+                | Nav.Infra ->
+                    ( {
+                        m with
+                        nav = { m.nav with filter_focused = true };
+                        drafts = Drafts.set_focus false m.drafts;
+                      }
+                    , [] ))))
   | Keymap.Dive_selected -> Update_nav.dive_selected m
   | Keymap.Confirm_selected -> (
-      if Drafts.is_focused m.drafts then
+      if Option.is_none m.nav.overlay && Drafts.is_focused m.drafts then
         submit_composer ~now ~mode:Drafts.Mode_steer m
       else
         match m.nav.overlay with
@@ -549,37 +867,62 @@ and execute_action ~now (m : Model.t) action =
               let was_new_keeper =
                 Config_store.is_editing_new_keeper_name m.config
               in
+              let editing_key_opt = m.config.editing_field_key in
               match Config_store.commit_edit_field m.config with
-              | Ok config ->
-                  let msg =
-                    if was_new_keeper then
-                      Say.make
-                        ~ko:
-                          ("새 키퍼 이름 설정됨: " ^ config.new_keeper_name
-                         ^ " (Ctrl+S 저장)")
-                        ~en:
-                          ("New keeper name set: " ^ config.new_keeper_name
-                         ^ " (Ctrl+S to save)")
-                    else
-                      Say.make ~ko:"변경값이 스테이징됨 (Space: 미리보기)"
-                        ~en:"Staged field change (Space: dry-run diff)"
-                  in
-                  (Model.with_toast ~now ~level:Model.Toast_info msg { m with config }, [])
+              | Ok config -> (
+                  match
+                    Option.bind editing_key_opt (fun key ->
+                        apply_staged_tui_pref_if_needed ~now ~key m config)
+                  with
+                  | Some res -> res
+                  | None ->
+                      let msg =
+                        if was_new_keeper then
+                          Say.make
+                            ~ko:
+                              ("새 키퍼 이름 설정됨: " ^ config.new_keeper_name
+                             ^ " (Ctrl+S 저장)")
+                            ~en:
+                              ("New keeper name set: " ^ config.new_keeper_name
+                             ^ " (Ctrl+S to save)")
+                        else
+                          Say.make ~ko:"변경값이 스테이징됨 (Space: 미리보기)"
+                            ~en:"Staged field change (Space: dry-run diff)"
+                      in
+                      ( Model.with_toast ~now ~level:Model.Toast_info msg
+                          { m with config }
+                      , [] ))
               | Error reason ->
                   ( Model.with_toast ~now ~level:Model.Toast_warning
                       (Say.literal reason) m
                   , [] ))
-            else (
-              match m.config.settings_pane with
+            else
+              let cfg0 =
+                if not (Config_store.is_two_pane_width ~cols:m.viewport.cols)
+                then Config_store.set_pane Config_store.Pane_inspector m.config
+                else m.config
+              in
+              (match cfg0.settings_pane with
               | Config_store.Pane_tree ->
-                  let config = Config_store.toggle_tree_node m.config in
+                  let config = Config_store.toggle_tree_node cfg0 in
                   let nav =
                     { m.nav with overlay = Some (Nav.Settings config.active_tab) }
                   in
                   ({ m with nav; config }, [])
               | Config_store.Pane_inspector -> (
-                  match Config_store.begin_edit_selected m.config with
-                  | Ok config -> ({ m with config }, [])
+                  let sel_key_opt =
+                    Option.map
+                      (fun (f : Wire_config.schema_field) -> f.full_key)
+                      (Config_store.selected_field cfg0)
+                  in
+                  match Config_store.begin_edit_selected cfg0 with
+                  | Ok config -> (
+                      match
+                        Option.bind sel_key_opt (fun key ->
+                            apply_staged_tui_pref_if_needed ~now ~key m config)
+                      with
+                      | Some res -> res
+                      | None -> ({ m with config }, []))
                   | Error reason ->
                       ( Model.with_toast ~now ~level:Model.Toast_info
                           (Say.literal reason) m
@@ -600,29 +943,71 @@ and execute_action ~now (m : Model.t) action =
              (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline)) ->
           (m, [])
       | Some (Nav.Settings _) ->
-          let closed =
-            {
+          if not (String.equal m.config.search_query "") then
+            ( {
+                m with
+                nav = { m.nav with filter_focused = false };
+                config = Config_store.set_search_query "" m.config;
+              }
+            , [] )
+          else
+            let closed =
+              {
+                m with
+                nav = { m.nav with overlay = None; filter_focused = false };
+                inline_modal = None;
+              }
+              |> Update_nav.sync_config_for_keeper_view
+            in
+            let target_changed =
+              not
+                (Config_store.equal_config_target m.config.target
+                   closed.config.target)
+            in
+            let cmds =
+              if target_changed then View_fetches.fetches_for_current_view closed
+              else []
+            in
+            (closed, cmds)
+      | Some Nav.Incidents ->
+          if not (String.equal m.incidents.filter_query "") then
+            ( {
+                m with
+                nav = { m.nav with filter_focused = false };
+                incidents = Incidents.set_filter "" m.incidents;
+              }
+            , [] )
+          else
+            ( {
+                m with
+                nav = { m.nav with overlay = None; filter_focused = false };
+                inline_modal = None;
+              }
+            , [] )
+      | Some (Nav.Inline_action kind) ->
+          let drafts =
+            match kind with
+            | Nav.Btw_query -> Drafts.clear_btw m.drafts
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Harness_overrule _
+            | Nav.Task_cancel _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post ->
+                m.drafts
+          in
+          ( {
               m with
               nav = { m.nav with overlay = None; filter_focused = false };
+              drafts;
               inline_modal = None;
             }
-            |> Update_nav.sync_config_for_keeper_view
-          in
-          let target_changed =
-            not
-              (Config_store.equal_config_target m.config.target
-                 closed.config.target)
-          in
-          let cmds =
-            if target_changed then View_fetches.fetches_for_current_view closed
-            else []
-          in
-          (closed, cmds)
+          , [] )
       | Some
           ( Nav.Palette
-          | Nav.Incidents
           | Nav.Queue_context _
-          | Nav.Inline_action _
           | Nav.Help
           | Nav.System_gate Nav.Media_viewer ) ->
           ( {
@@ -633,89 +1018,129 @@ and execute_action ~now (m : Model.t) action =
           , [] )
       | None ->
           if m.nav.filter_focused then
-            ({ m with nav = { m.nav with filter_focused = false } }, [])
+            let cleared = Update_nav.set_active_filter_query "" m in
+            ({ cleared with nav = { cleared.nav with filter_focused = false } }, [])
           else if Drafts.is_focused m.drafts then
-            ({ m with drafts = Drafts.set_focus false m.drafts }, [])
+            match Update_nav.resolve_composer_popup m with
+            | Update_nav.Composer_popup_slash _
+            | Update_nav.Composer_popup_mention _ ->
+                ({ m with drafts = Drafts.dismiss_popup m.drafts }, [])
+            | Update_nav.Composer_popup_none ->
+                ({ m with drafts = Drafts.set_focus false m.drafts }, [])
           else
-            let active_chat_interrupt =
+            let keeper_config_has_search =
               match Model.active_dive m with
-              | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }) -> (
-                  let active_stream_opt =
-                    match
-                      Fleet_store.String_map.find_opt name m.fleet.chat_streams
-                    with
-                    | Some s when s.active -> Some s
-                    | Some _ | None -> None
-                  in
-                  match
-                    Fleet_store.active_turn_for ~keeper:name m.fleet
-                  , active_stream_opt
-                  with
-                  | Some turn, stream_opt ->
-                      let fleet =
-                        match stream_opt with
-                        | Some s ->
-                            Fleet_store.finish_chat_stream ~keeper:name
-                              ~request_id:s.request_id
-                              ~error:(Some "Interrupted by operator") m.fleet
-                        | None -> m.fleet
-                      in
-                      Some (name, turn.interrupt_token, fleet)
-                  | None, Some s ->
-                      let token =
-                        Option.value s.operation_id ~default:s.request_id
-                      in
-                      let fleet =
-                        Fleet_store.finish_chat_stream ~keeper:name
-                          ~request_id:s.request_id
-                          ~error:(Some "Interrupted by operator") m.fleet
-                      in
-                      Some (name, token, fleet)
-                  | None, None -> None)
+              | Some (Nav.Dive_keeper { tab = Nav.Keeper_config; _ }) ->
+                  not (String.equal m.config.search_query "")
               | Some
                   ( Nav.Dive_keeper
                       {
                         tab =
-                          ( Nav.Keeper_memory
+                          ( Nav.Keeper_chat
+                          | Nav.Keeper_memory
                           | Nav.Keeper_work_candle
-                          | Nav.Keeper_sandbox
-                          | Nav.Keeper_config );
+                          | Nav.Keeper_sandbox );
                         _;
                       }
                   | Nav.Dive_work _
                   | Nav.Dive_knowledge _
                   | Nav.Dive_infra _ )
               | None ->
-                  None
+                  false
             in
-            match active_chat_interrupt with
-            | Some (keeper, interrupt_token, fleet) ->
-                ( Model.with_toast ~now ~level:Model.Toast_warning
-                    (Say.make
-                       ~ko:("키퍼 턴 중단 요청 전송: " ^ keeper)
-                       ~en:("Interrupt requested for keeper turn: " ^ keeper))
-                    { m with fleet }
-                , [
-                    Cmd.Http_post
-                      {
-                        epoch = m.epoch;
-                        req =
-                          Cmd.Post_keeper_turn_interrupt
-                            { keeper; interrupt_token };
-                      };
-                  ] )
-            | None -> (
-                match m.nav.dive_stack with
-                | _ :: rest ->
-                    let next =
-                      { m with nav = { m.nav with dive_stack = rest } }
-                      |> Update_nav.sync_config_for_keeper_view
+            if keeper_config_has_search then
+              ({ m with config = Config_store.set_search_query "" m.config }, [])
+            else
+              let active_chat_interrupt =
+                match Model.active_dive m with
+                | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }) -> (
+                    let active_stream_opt =
+                      match
+                        Fleet_store.String_map.find_opt name m.fleet.chat_streams
+                      with
+                      | Some s when s.active -> Some s
+                      | Some _ | None -> None
                     in
-                    (next, View_fetches.fetches_for_current_view next)
-                | [] ->
-                    if not (String.equal (Update_nav.current_filter_query m) "")
-                    then (Update_nav.set_active_filter_query "" m, [])
-                    else (m, [])))
+                    match
+                      Fleet_store.active_turn_for ~keeper:name m.fleet
+                    , active_stream_opt
+                    with
+                    | Some turn, stream_opt ->
+                        let fleet =
+                          match stream_opt with
+                          | Some s ->
+                              Fleet_store.finish_chat_stream ~keeper:name
+                                ~request_id:s.request_id
+                                ~error:(Some "Interrupted by operator") m.fleet
+                          | None -> m.fleet
+                        in
+                        Some (name, turn.interrupt_token, fleet)
+                    | None, Some s ->
+                        let token =
+                          Option.value s.operation_id ~default:s.request_id
+                        in
+                        let fleet =
+                          Fleet_store.finish_chat_stream ~keeper:name
+                            ~request_id:s.request_id
+                            ~error:(Some "Interrupted by operator") m.fleet
+                        in
+                        Some (name, token, fleet)
+                    | None, None -> None)
+                | Some
+                    ( Nav.Dive_keeper
+                        {
+                          tab =
+                            ( Nav.Keeper_memory
+                            | Nav.Keeper_work_candle
+                            | Nav.Keeper_sandbox
+                            | Nav.Keeper_config );
+                          _;
+                        }
+                    | Nav.Dive_work _
+                    | Nav.Dive_knowledge _
+                    | Nav.Dive_infra _ )
+                | None ->
+                    None
+              in
+              match active_chat_interrupt with
+              | Some (keeper, interrupt_token, fleet) ->
+                  ( Model.with_toast ~now ~level:Model.Toast_warning
+                      (Say.make
+                         ~ko:("키퍼 턴 중단 요청 전송: " ^ keeper)
+                         ~en:("Interrupt requested for keeper turn: " ^ keeper))
+                      { m with fleet }
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_keeper_turn_interrupt
+                              { keeper; interrupt_token };
+                        };
+                    ] )
+              | None -> (
+                  match m.nav.dive_stack with
+                  | _ :: rest ->
+                      let next =
+                        {
+                          m with
+                          nav =
+                            {
+                              m.nav with
+                              dive_stack = rest;
+                              pane_index = 0;
+                              zoomed = false;
+                              dive_scroll_offset = 0;
+                            };
+                        }
+                        |> Update_nav.sync_config_for_keeper_view
+                      in
+                      (next, View_fetches.fetches_for_current_view next)
+                  | [] ->
+                      if
+                        not (String.equal (Update_nav.current_filter_query m) "")
+                      then (Update_nav.set_active_filter_query "" m, [])
+                      else (m, [])))
   | Keymap.Open_settings -> Update_nav.open_global_settings m
   | Keymap.Teleport_blocked -> Update_nav.teleport_blocked ~now m
   | Keymap.Open_incidents ->
@@ -810,20 +1235,30 @@ and execute_action ~now (m : Model.t) action =
                       | Nav.Keeper_config );
                     _;
                   }
-              | Nav.Dive_knowledge _ )
+              | Nav.Dive_knowledge _ ) ->
+              (m, [])
           | None -> (
               match m.nav.workspace with
-              | Nav.Keepers -> (
-                  match Fleet_store.selected_keeper_summary m.fleet with
-                  | Some k ->
-                      ( {
-                          m with
-                          fleet =
-                            Fleet_store.toggle_company_collapsed k.company
-                              m.fleet;
-                        }
-                      , [] )
-                  | None -> (m, []))
+              | Nav.Keepers ->
+                  if
+                    m.nav.pane_index = 1
+                    && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                         Nav.Keeper_chat
+                  then
+                    ( { m with fleet = Fleet_store.toggle_turn_details m.fleet }
+                    , [] )
+                  else if m.nav.pane_index = 0 then
+                    match Fleet_store.selected_keeper_summary m.fleet with
+                    | Some k ->
+                        ( {
+                            m with
+                            fleet =
+                              Fleet_store.toggle_company_collapsed k.company
+                                m.fleet;
+                          }
+                        , [] )
+                    | None -> (m, [])
+                  else (m, [])
               | Nav.Knowledge -> (
                   match m.knowledge.active_tab with
                   | Nav.Knowledge_board -> (
@@ -845,6 +1280,7 @@ and execute_action ~now (m : Model.t) action =
                   | Nav.Knowledge_wiki_artifacts ->
                       ( {
                           m with
+                          nav = { m.nav with zoomed = false };
                           knowledge =
                             Knowledge_store.toggle_wiki_artifacts_submode
                               m.knowledge;
@@ -856,23 +1292,38 @@ and execute_action ~now (m : Model.t) action =
                       in
                       let next = { m with knowledge } in
                       (next, View_fetches.fetches_for_current_view next))
-              | Nav.Runtime ->
-                  ( {
-                      m with
-                      runtime =
-                        Runtime_store.toggle_outside_lane_probes m.runtime;
-                    }
-                  , [] )
-              | Nav.Work ->
-                  let work = Work_store.toggle_verification_view m.work in
-                  let next = { m with work } in
-                  (next, View_fetches.fetches_for_current_view next)
-              | Nav.Infra ->
-                  ( {
-                      m with
-                      infra = Infra_store.cycle_log_level_filter m.infra;
-                    }
-                  , [] )
+              | Nav.Runtime -> (
+                  match m.runtime.active_tab with
+                  | Nav.Runtime_failover_lanes ->
+                      ( {
+                          m with
+                          runtime =
+                            Runtime_store.toggle_outside_lane_probes m.runtime;
+                        }
+                      , [] )
+                  | Nav.Runtime_quotas_credits
+                  | Nav.Runtime_efficiency_spend
+                  | Nav.Runtime_tools_connectors ->
+                      (m, []))
+              | Nav.Work -> (
+                  match m.work.active_tab with
+                  | Nav.Work_pipeline ->
+                      let work = Work_store.toggle_verification_view m.work in
+                      let next = { m with work } in
+                      (next, View_fetches.fetches_for_current_view next)
+                  | Nav.Work_tasks_schedules
+                  | Nav.Work_inbox
+                  | Nav.Work_candle_scorecard ->
+                      (m, []))
+              | Nav.Infra -> (
+                  match m.infra.active_tab with
+                  | Nav.Infra_activity_logs ->
+                      ( {
+                          m with
+                          infra = Infra_store.cycle_log_level_filter m.infra;
+                        }
+                      , [] )
+                  | Nav.Infra_sandboxes | Nav.Infra_repos_changes -> (m, []))
               | Nav.Pulse -> (m, []))))
   | Keymap.Create_new -> (
       match m.nav.overlay with
@@ -956,93 +1407,115 @@ and execute_action ~now (m : Model.t) action =
           | Nav.System_gate _ ) ->
           (m, [])
       | None -> (
-          match m.nav.workspace with
-          | Nav.Knowledge -> Update_nav.open_inline_modal m Nav.Board_new_post
-          | Nav.Work -> (
-              match m.work.active_tab with
-              | Nav.Work_pipeline ->
-                  let modal : Model.inline_modal_state =
-                    {
-                      kind = Nav.Board_new_post;
-                      fields =
-                        [
-                          {
-                            key = "proposal_title";
-                            label =
-                              Say.make ~ko:"#goals 제안 제목"
-                                ~en:"Proposal title (#goals)";
-                            value = "";
-                            required = true;
-                            secret = false;
-                          };
-                          {
-                            key = "proposal_measure";
-                            label =
-                              Say.make ~ko:"성공 기준 (Measure)"
-                                ~en:"Success measure";
-                            value = "";
-                            required = true;
-                            secret = false;
-                          };
-                          {
-                            key = "proposal_procedure";
-                            label =
-                              Say.make ~ko:"검증 절차 (Procedure)"
-                                ~en:"Verification procedure";
-                            value = "";
-                            required = false;
-                            secret = false;
-                          };
-                          {
-                            key = "proposal_priority";
-                            label =
-                              Say.make ~ko:"우선순위 (1-5)" ~en:"Priority (1-5)";
-                            value = "2";
-                            required = false;
-                            secret = false;
-                          };
-                        ];
-                      active_field = 0;
-                      submitting = false;
-                      error = None;
-                    }
+          match Model.active_dive m with
+          | Some _ -> (m, [])
+          | None -> (
+              match m.nav.workspace with
+              | Nav.Knowledge -> (
+                  match m.knowledge.active_tab with
+                  | Nav.Knowledge_board ->
+                      Update_nav.open_inline_modal m Nav.Board_new_post
+                  | Nav.Knowledge_wiki_artifacts | Nav.Knowledge_memory ->
+                      (m, []))
+              | Nav.Work -> (
+                  match m.work.active_tab with
+                  | Nav.Work_pipeline ->
+                      let modal : Model.inline_modal_state =
+                        {
+                          kind = Nav.Board_new_post;
+                          fields =
+                            [
+                              {
+                                key = "proposal_title";
+                                label =
+                                  Say.make ~ko:"#goals 제안 제목"
+                                    ~en:"Proposal title (#goals)";
+                                value = "";
+                                required = true;
+                                secret = false;
+                              };
+                              {
+                                key = "proposal_measure";
+                                label =
+                                  Say.make ~ko:"성공 기준 (Measure)"
+                                    ~en:"Success measure";
+                                value = "";
+                                required = true;
+                                secret = false;
+                              };
+                              {
+                                key = "proposal_procedure";
+                                label =
+                                  Say.make ~ko:"검증 절차 (Procedure)"
+                                    ~en:"Verification procedure";
+                                value = "";
+                                required = false;
+                                secret = false;
+                              };
+                              {
+                                key = "proposal_priority";
+                                label =
+                                  Say.make ~ko:"우선순위 (1-5)"
+                                    ~en:"Priority (1-5)";
+                                value = "2";
+                                required = false;
+                                secret = false;
+                              };
+                            ];
+                          active_field = 0;
+                          submitting = false;
+                          error = None;
+                        }
+                      in
+                      let nav =
+                        {
+                          m.nav with
+                          overlay = Some (Nav.Inline_action Nav.Board_new_post);
+                          filter_focused = false;
+                        }
+                      in
+                      let drafts = Drafts.set_focus false m.drafts in
+                      ({ m with nav; drafts; inline_modal = Some modal }, [])
+                  | Nav.Work_tasks_schedules ->
+                      Update_nav.open_inline_modal m Nav.Schedule_form
+                  | Nav.Work_inbox | Nav.Work_candle_scorecard ->
+                      ( Model.with_toast ~now ~level:Model.Toast_info
+                          (Say.make
+                             ~ko:
+                               "#goals 보드 제안은 Pipeline 탭, 스케줄 생성은 Tasks/Schedules 탭에서 [n]을 누르세요"
+                             ~en:
+                               "Press [n] on Pipeline to post a #goals proposal \
+                                or Tasks/Schedules to add a schedule")
+                          m
+                      , [] ))
+              | Nav.Runtime -> (
+                  match m.runtime.active_tab with
+                  | Nav.Runtime_tools_connectors ->
+                      Update_nav.open_inline_modal m Nav.Connector_form
+                  | Nav.Runtime_quotas_credits
+                  | Nav.Runtime_efficiency_spend
+                  | Nav.Runtime_failover_lanes ->
+                      (m, []))
+              | Nav.Infra -> (
+                  match m.infra.active_tab with
+                  | Nav.Infra_repos_changes ->
+                      Update_nav.open_inline_modal m Nav.Repo_add_form
+                  | Nav.Infra_sandboxes | Nav.Infra_activity_logs -> (m, []))
+              | Nav.Keepers ->
+                  let config =
+                    m.config
+                    |> Config_store.set_target Wire_config.Target_keeper_create
+                    |> Config_store.set_tab Nav.Settings_keepers_companies
+                    |> Config_store.begin_edit_new_keeper_name
                   in
-                  let nav =
-                    {
-                      m.nav with
-                      overlay = Some (Nav.Inline_action Nav.Board_new_post);
-                      filter_focused = false;
-                    }
-                  in
-                  let drafts = Drafts.set_focus false m.drafts in
-                  ({ m with nav; drafts; inline_modal = Some modal }, [])
-              | Nav.Work_tasks_schedules ->
-                  Update_nav.open_inline_modal m Nav.Schedule_form
-              | Nav.Work_inbox | Nav.Work_candle_scorecard ->
-                  ( Model.with_toast ~now ~level:Model.Toast_info
-                      (Say.make
-                         ~ko:
-                           "#goals 보드 제안은 Pipeline 탭, 스케줄 생성은 Tasks/Schedules 탭에서 [n]을 누르세요"
-                         ~en:
-                           "Press [n] on Pipeline to post a #goals proposal or \
-                            Tasks/Schedules to add a schedule")
-                      m
-                  , [] ))
-          | Nav.Runtime -> Update_nav.open_inline_modal m Nav.Connector_form
-          | Nav.Infra -> Update_nav.open_inline_modal m Nav.Repo_add_form
-          | Nav.Keepers ->
-              let config =
-                m.config
-                |> Config_store.set_target Wire_config.Target_keeper_create
-                |> Config_store.set_tab Nav.Settings_keepers_companies
-                |> Config_store.begin_edit_new_keeper_name
-              in
-              Update_nav.open_overlay { m with config }
-                (Nav.Settings Nav.Settings_keepers_companies)
-          | Nav.Pulse -> Update_nav.open_inline_modal m Nav.Board_new_post))
+                  Update_nav.open_overlay { m with config }
+                    (Nav.Settings Nav.Settings_keepers_companies)
+              | Nav.Pulse -> Update_nav.open_inline_modal m Nav.Board_new_post)))
   | Keymap.Refresh ->
       let needs_handshake =
         m.freshness.server_offline
+        || Option.equal Nav.equal_overlay m.nav.overlay
+             (Some (Nav.System_gate Nav.Auth_gate))
         ||
         match m.server_identity.mismatch_state with
         | Model.Mismatch_halted -> true
@@ -1116,110 +1589,197 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Inline_action _
             | Nav.Help
             | Nav.System_gate
-                (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline) )
+                (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline) ) ->
+            None
         | None -> (
-            match m.nav.workspace with
-        | Nav.Knowledge -> (
-            match m.knowledge.active_tab with
-            | Nav.Knowledge_board ->
-                Option.map
-                  (fun (p : Wire_knowledge.board_post) -> p.body)
-                  (Knowledge_store.selected_post m.knowledge)
-            | Nav.Knowledge_wiki_artifacts -> (
-                match m.knowledge.wiki_artifacts_submode with
-                | `Wiki -> (
+            match Model.active_dive m with
+            | Some (Nav.Dive_keeper { name; tab }) -> (
+                match tab with
+                | Nav.Keeper_chat -> (
+                    match latest_keeper_reply_text m with
+                    | Some (_, reply) -> Some reply
+                    | None -> Some name)
+                | Nav.Keeper_memory
+                | Nav.Keeper_work_candle
+                | Nav.Keeper_sandbox
+                | Nav.Keeper_config ->
+                    Some name)
+            | Some (Nav.Dive_work wd) -> (
+                match wd with
+                | Nav.Goal_dive id -> (
+                    match
+                      List.find_opt
+                        (fun (g : Wire_work.goal) -> String.equal g.id id)
+                        (Work_store.goals m.work)
+                    with
+                    | Some g -> Some g.title
+                    | None -> Some id)
+                | Nav.Task_dive id -> (
+                    match
+                      List.find_opt
+                        (fun (tk : Wire_work.task) -> String.equal tk.id id)
+                        (Work_store.tasks m.work)
+                    with
+                    | Some tk -> Some tk.title
+                    | None -> Some id)
+                | Nav.Verification_dive id -> (
+                    match
+                      List.find_opt
+                        (fun (v : Wire_work.verification_request) ->
+                          String.equal v.request_id id)
+                        (Work_store.verifications_list m.work)
+                    with
+                    | Some v -> Some v.task_title
+                    | None -> Some id))
+            | Some (Nav.Dive_knowledge kd) -> (
+                match kd with
+                | Nav.Thread_dive id -> (
+                    match
+                      List.find_opt
+                        (fun (p : Wire_knowledge.board_post) ->
+                          String.equal p.id id)
+                        (Knowledge_store.filtered_posts m.knowledge)
+                    with
+                    | Some p -> Some p.body
+                    | None -> Some id)
+                | Nav.Wiki_dive slug -> (
                     match Observed.to_option m.knowledge.wiki_page with
                     | Some detail
-                      when not (String.equal (String.trim detail.body_markdown) "") ->
+                      when String.equal detail.slug slug
+                           && not (String.equal (String.trim detail.body_markdown) "")
+                      ->
                         Some detail.body_markdown
-                    | Some _ | None ->
+                    | Some _ | None -> Some slug)
+                | Nav.Artifact_dive sha -> Some sha
+                | Nav.Memory_diff_dive _ -> (
+                    match Observed.to_option m.knowledge.world_memory with
+                    | Some wm -> wm.briefing.text
+                    | None -> None))
+            | Some (Nav.Dive_infra idive) -> (
+                match idive with
+                | Nav.Sandbox_dive keeper -> Some keeper
+                | Nav.Lane_dive lane_id -> Some lane_id
+                | Nav.Incident_dive id -> Some (Int.to_string id))
+            | None -> (
+                match m.nav.workspace with
+                | Nav.Knowledge -> (
+                    match m.knowledge.active_tab with
+                    | Nav.Knowledge_board ->
                         Option.map
-                          (fun (p : Wire_knowledge.wiki_page_summary) -> p.slug)
-                          (Knowledge_store.selected_wiki_page m.knowledge))
-                | `Artifacts ->
+                          (fun (p : Wire_knowledge.board_post) -> p.body)
+                          (Knowledge_store.selected_post m.knowledge)
+                    | Nav.Knowledge_wiki_artifacts -> (
+                        match m.knowledge.wiki_artifacts_submode with
+                        | `Wiki -> (
+                            match Knowledge_store.selected_wiki_page m.knowledge with
+                            | None -> None
+                            | Some sel -> (
+                                match Observed.to_option m.knowledge.wiki_page with
+                                | Some detail
+                                  when String.equal detail.slug sel.slug
+                                       && not
+                                            (String.equal
+                                               (String.trim detail.body_markdown)
+                                               "") ->
+                                    Some detail.body_markdown
+                                | Some _ | None -> Some sel.slug))
+                        | `Artifacts ->
+                            Option.map
+                              (fun (a : Wire_knowledge.artifact_entry) ->
+                                a.sha256)
+                              (Knowledge_store.selected_artifact m.knowledge))
+                    | Nav.Knowledge_memory -> (
+                        match Observed.to_option m.knowledge.world_memory with
+                        | Some wm -> (
+                            match wm.briefing.text with
+                            | Some txt -> Some txt
+                            | None -> (
+                                match wm.claims with
+                                | c :: _ -> Some c.claim
+                                | [] -> None))
+                        | None -> None))
+                | Nav.Infra -> (
+                    match m.infra.active_tab with
+                    | Nav.Infra_sandboxes ->
+                        Infra_store.selected_sandbox_keeper m.infra
+                    | Nav.Infra_repos_changes ->
+                        Option.map
+                          (fun (r : Wire_infra.repository) -> r.url)
+                          (Infra_store.selected_repository m.infra)
+                    | Nav.Infra_activity_logs ->
+                        Option.map
+                          (fun (e : Wire_infra.system_log_entry) -> e.message)
+                          (Infra_store.selected_log m.infra))
+                | Nav.Keepers | Nav.Pulse -> (
+                    let in_chat =
+                      Nav.equal_workspace m.nav.workspace Nav.Keepers
+                      && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                           Nav.Keeper_chat
+                    in
+                    match if in_chat then latest_keeper_reply_text m else None with
+                    | Some (_, reply) -> Some reply
+                    | None ->
+                        Option.map
+                          (fun (k : Wire_fleet.keeper_summary) -> k.name)
+                          (Fleet_store.selected_keeper_summary m.fleet))
+                | Nav.Work -> (
+                    match m.work.active_tab with
+                    | Nav.Work_pipeline -> (
+                        match m.nav.pane_index with
+                        | 1 when Model.work_pipeline_has_linked_card m ->
+                            Option.map
+                              (fun (v : Wire_work.verification_request) ->
+                                v.task_title)
+                              (Work_store.selected_verification m.work)
+                        | _ ->
+                            Option.map
+                              (fun (g : Wire_work.goal) -> g.title)
+                              (Work_store.selected_goal m.work))
+                    | Nav.Work_tasks_schedules -> (
+                        match Work_store.selected_task m.work with
+                        | Some task -> Some task.title
+                        | None ->
+                            Option.map
+                              (fun (s : Wire_work.schedule_row) ->
+                                s.schedule_id)
+                              (Work_store.selected_schedule m.work))
+                    | Nav.Work_inbox -> (
+                        if
+                          Attention.filtered_items ~query:m.work.filter_query
+                            m.attention
+                          <> []
+                        then
+                          match
+                            Attention.current_filtered_item
+                              ~query:m.work.filter_query m.attention
+                          with
+                          | Some { payload = Attention.Payload_ask a; _ } ->
+                              Some a.ask_id
+                          | Some
+                              {
+                                payload =
+                                  ( Attention.Payload_tool_approval _
+                                  | Attention.Payload_gate _
+                                  | Attention.Payload_goal_confirmation _
+                                  | Attention.Payload_quarantine _ );
+                                summary;
+                                _;
+                              } ->
+                              Some summary
+                          | None -> None
+                        else
+                          Option.map
+                            (fun (a : Wire_work.ask_row) -> a.ask_id)
+                            (Work_store.selected_open_ask m.work))
+                    | Nav.Work_candle_scorecard -> (
+                        let rows = Work_store.filtered_candle_balances m.work in
+                        match List.nth_opt rows m.work.selected_index with
+                        | Some row -> Some row.keeper
+                        | None -> None))
+                | Nav.Runtime ->
                     Option.map
-                      (fun (a : Wire_knowledge.artifact_entry) -> a.sha256)
-                      (Knowledge_store.selected_artifact m.knowledge))
-            | Nav.Knowledge_memory -> (
-                match Observed.to_option m.knowledge.world_memory with
-                | Some wm -> (
-                    match wm.briefing.text with
-                    | Some txt -> Some txt
-                    | None -> (
-                        match wm.claims with c :: _ -> Some c.claim | [] -> None))
-                | None -> None))
-        | Nav.Infra -> (
-            match m.infra.active_tab with
-            | Nav.Infra_sandboxes -> Infra_store.selected_sandbox_keeper m.infra
-            | Nav.Infra_repos_changes ->
-                Option.map
-                  (fun (r : Wire_infra.repository) -> r.url)
-                  (Infra_store.selected_repository m.infra)
-            | Nav.Infra_activity_logs ->
-                Option.map
-                  (fun (e : Wire_infra.system_log_entry) -> e.message)
-                  (Infra_store.selected_log m.infra))
-        | Nav.Keepers | Nav.Pulse -> (
-            let in_chat =
-              Model.is_in_keeper_chat m
-              || (Nav.equal_workspace m.nav.workspace Nav.Keepers
-                  && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
-                       Nav.Keeper_chat)
-            in
-            match if in_chat then latest_keeper_reply_text m else None with
-            | Some (_, reply) -> Some reply
-            | None ->
-                Option.map
-                  (fun (k : Wire_fleet.keeper_summary) -> k.name)
-                  (Fleet_store.selected_keeper_summary m.fleet))
-        | Nav.Work -> (
-            match m.work.active_tab with
-            | Nav.Work_pipeline -> (
-                match Work_store.selected_goal m.work with
-                | Some g -> Some g.title
-                | None ->
-                    Option.map
-                      (fun (v : Wire_work.verification_request) -> v.task_title)
-                      (Work_store.selected_verification m.work))
-            | Nav.Work_tasks_schedules -> (
-                match Work_store.selected_task m.work with
-                | Some task -> Some task.title
-                | None ->
-                    Option.map
-                      (fun (s : Wire_work.schedule_row) -> s.schedule_id)
-                      (Work_store.selected_schedule m.work))
-            | Nav.Work_inbox -> (
-                if not (Attention.is_empty m.attention) then
-                  match Attention.current_triage_item m.attention with
-                  | Some { payload = Attention.Payload_ask a; _ } ->
-                      Some a.ask_id
-                  | Some
-                      {
-                        payload =
-                          ( Attention.Payload_tool_approval _
-                          | Attention.Payload_gate _
-                          | Attention.Payload_goal_confirmation _
-                          | Attention.Payload_quarantine _ );
-                        summary;
-                        _;
-                      } ->
-                      Some summary
-                  | None -> None
-                else
-                  Option.map
-                    (fun (a : Wire_work.ask_row) -> a.ask_id)
-                    (Work_store.selected_open_ask m.work))
-            | Nav.Work_candle_scorecard -> (
-                match Observed.to_option m.work.candle_ledger with
-                | Some l -> (
-                    match List.nth_opt l.balances m.work.selected_index with
-                    | Some row -> Some row.keeper
-                    | None -> None)
-                | None -> None))
-        | Nav.Runtime ->
-            Option.map
-              (fun (l : Wire_runtime.failover_lane) -> l.id)
-              (Runtime_store.selected_lane m.runtime))
+                      (fun (l : Wire_runtime.failover_lane) -> l.id)
+                      (Runtime_store.selected_lane m.runtime)))
       in
       match text_opt with
       | Some txt ->
@@ -1256,7 +1816,8 @@ and execute_action ~now (m : Model.t) action =
           | Nav.Inline_action _
           | Nav.Help
           | Nav.System_gate
-              (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline) )
+              (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline) ) ->
+          (m, [])
       | None -> (
           let open_url_or_notice url_opt =
             match url_opt with
@@ -1268,10 +1829,9 @@ and execute_action ~now (m : Model.t) action =
                     m
                 , [] )
           in
-          let wiki_external_url () =
+          let wiki_external_url ~expected_slug () =
             match Observed.to_option m.knowledge.wiki_page with
-            | None -> None
-            | Some detail -> (
+            | Some detail when String.equal detail.slug expected_slug -> (
                 match
                   List.find_map
                     (fun (lnk : Wire_knowledge.wiki_outgoing_link) ->
@@ -1280,23 +1840,80 @@ and execute_action ~now (m : Model.t) action =
                 with
                 | Some u -> Some u
                 | None -> extract_first_http_url detail.body_markdown)
+            | Some _ | None -> None
           in
           match Model.active_dive m with
           | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) ->
               Update_nav.open_overlay m (Nav.System_gate Nav.Media_viewer)
-          | Some (Nav.Dive_knowledge (Nav.Wiki_dive _)) ->
-              open_url_or_notice (wiki_external_url ())
+          | Some (Nav.Dive_knowledge (Nav.Wiki_dive slug)) ->
+              open_url_or_notice (wiki_external_url ~expected_slug:slug ())
+          | Some (Nav.Dive_knowledge (Nav.Thread_dive id)) ->
+              let url_opt =
+                Option.bind
+                  (List.find_opt
+                     (fun (p : Wire_knowledge.board_post) ->
+                       String.equal p.id id)
+                     (Knowledge_store.filtered_posts m.knowledge))
+                  (fun (p : Wire_knowledge.board_post) ->
+                    extract_first_http_url p.body)
+              in
+              open_url_or_notice url_opt
+          | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive _)) ->
+              open_url_or_notice None
+          | Some (Nav.Dive_keeper { tab = Nav.Keeper_chat; _ }) ->
+              let url_opt =
+                Option.bind (latest_keeper_reply_text m) (fun (_, txt) ->
+                    extract_first_http_url txt)
+              in
+              open_url_or_notice url_opt
           | Some
-              ( Nav.Dive_keeper _
-              | Nav.Dive_work _
-              | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Memory_diff_dive _)
-              | Nav.Dive_infra _ )
+              (Nav.Dive_keeper
+                 {
+                   tab =
+                     ( Nav.Keeper_memory
+                     | Nav.Keeper_work_candle
+                     | Nav.Keeper_sandbox
+                     | Nav.Keeper_config );
+                   _;
+                 }) ->
+              (m, [])
+          | Some (Nav.Dive_work (Nav.Goal_dive id)) ->
+              let url_opt =
+                Option.bind
+                  (List.find_opt
+                     (fun (g : Wire_work.goal) -> String.equal g.id id)
+                     (Work_store.goals m.work))
+                  (fun (g : Wire_work.goal) ->
+                    match extract_first_http_url g.procedure with
+                    | Some u -> Some u
+                    | None -> extract_first_http_url g.measure)
+              in
+              open_url_or_notice url_opt
+          | Some (Nav.Dive_work (Nav.Task_dive id)) ->
+              let url_opt =
+                Option.bind
+                  (List.find_opt
+                     (fun (tk : Wire_work.task) -> String.equal tk.id id)
+                     (Work_store.tasks m.work))
+                  (fun (tk : Wire_work.task) ->
+                    Option.bind tk.description extract_first_http_url)
+              in
+              open_url_or_notice url_opt
+          | Some (Nav.Dive_work (Nav.Verification_dive _)) -> (m, [])
+          | Some
+              (Nav.Dive_infra
+                 (Nav.Sandbox_dive _ | Nav.Lane_dive _ | Nav.Incident_dive _))
+            ->
+              (m, [])
           | None -> (
               match m.nav.workspace with
               | Nav.Infra -> (
-                  match Infra_store.selected_repository m.infra with
-                  | Some repo -> (m, [ Cmd.Open_external_url repo.url ])
-                  | None -> open_url_or_notice None)
+                  match m.infra.active_tab with
+                  | Nav.Infra_repos_changes -> (
+                      match Infra_store.selected_repository m.infra with
+                      | Some repo -> (m, [ Cmd.Open_external_url repo.url ])
+                      | None -> open_url_or_notice None)
+                  | Nav.Infra_sandboxes | Nav.Infra_activity_logs -> (m, []))
               | Nav.Knowledge -> (
                   match m.knowledge.active_tab with
                   | Nav.Knowledge_wiki_artifacts -> (
@@ -1307,7 +1924,12 @@ and execute_action ~now (m : Model.t) action =
                               Update_nav.open_overlay m
                                 (Nav.System_gate Nav.Media_viewer)
                           | None -> open_url_or_notice None)
-                      | `Wiki -> open_url_or_notice (wiki_external_url ()))
+                      | `Wiki -> (
+                          match Knowledge_store.selected_wiki_page m.knowledge with
+                          | Some sel ->
+                              open_url_or_notice
+                                (wiki_external_url ~expected_slug:sel.slug ())
+                          | None -> open_url_or_notice None))
                   | Nav.Knowledge_board ->
                       let url_opt =
                         Option.bind
@@ -1317,19 +1939,25 @@ and execute_action ~now (m : Model.t) action =
                       in
                       open_url_or_notice url_opt
                   | Nav.Knowledge_memory -> open_url_or_notice None)
-              | Nav.Work ->
-                  let url_opt =
-                    match Work_store.selected_goal m.work with
-                    | Some g -> (
-                        match extract_first_http_url g.procedure with
-                        | Some u -> Some u
-                        | None -> extract_first_http_url g.measure)
-                    | None ->
+              | Nav.Work -> (
+                  match m.work.active_tab with
+                  | Nav.Work_pipeline ->
+                      let url_opt =
+                        Option.bind (Work_store.selected_goal m.work)
+                          (fun (g : Wire_work.goal) ->
+                            match extract_first_http_url g.procedure with
+                            | Some u -> Some u
+                            | None -> extract_first_http_url g.measure)
+                      in
+                      open_url_or_notice url_opt
+                  | Nav.Work_tasks_schedules ->
+                      let url_opt =
                         Option.bind (Work_store.selected_task m.work)
                           (fun (t : Wire_work.task) ->
                             Option.bind t.description extract_first_http_url)
-                  in
-                  open_url_or_notice url_opt
+                      in
+                      open_url_or_notice url_opt
+                  | Nav.Work_inbox | Nav.Work_candle_scorecard -> (m, []))
               | Nav.Keepers ->
                   let url_opt =
                     Option.bind (latest_keeper_reply_text m) (fun (_, txt) ->
@@ -1338,5 +1966,11 @@ and execute_action ~now (m : Model.t) action =
                   open_url_or_notice url_opt
               | Nav.Pulse | Nav.Runtime -> (m, []))))
   | Keymap.Toggle_zoom ->
-      ({ m with nav = { m.nav with zoomed = not m.nav.zoomed } }, [])
+      if not (Model.can_zoom_current_view m) then
+        if m.nav.zoomed then ({ m with nav = { m.nav with zoomed = false } }, [])
+        else (m, [])
+      else
+        let zoomed = not m.nav.zoomed in
+        let pane_index = if zoomed then 0 else m.nav.pane_index in
+        ({ m with nav = { m.nav with zoomed; pane_index } }, [])
   | Keymap.Quit_app -> (m, [ Cmd.Quit Exit_reason.Quit_key ])

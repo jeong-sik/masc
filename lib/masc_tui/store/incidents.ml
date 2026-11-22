@@ -23,22 +23,7 @@ let empty =
     unread_count = 0;
   }
 
-let contains_ci ~needle haystack =
-  let n_len = String.length needle in
-  if n_len = 0 then true
-  else
-    let h_len = String.length haystack in
-    if n_len > h_len then false
-    else
-      let n_low = String.lowercase_ascii needle in
-      let h_low = String.lowercase_ascii haystack in
-      let limit = h_len - n_len in
-      let rec scan i =
-        if i > limit then false
-        else if String.equal (String.sub h_low i n_len) n_low then true
-        else scan (i + 1)
-      in
-      scan 0
+let contains_ci = Store_scroll.contains_ci
 
 let source_label = function
   | Health.Source_keeper k -> "keeper:" ^ k
@@ -66,11 +51,7 @@ let visible_entries t =
       status_ok && matches_filter t.filter_query inc)
     t.entries
 
-let clamp_index len idx =
-  if len <= 0 then 0
-  else if idx < 0 then 0
-  else if idx >= len then len - 1
-  else idx
+let clamp_index = Store_scroll.clamp_index
 
 let push ~occurred_at_unix ~source ~summary ~detail ~status t =
   let incident : Health.incident =
@@ -130,13 +111,7 @@ let mark_all_read t = { t with unread_count = 0 }
 let find_by_id id t =
   List.find_opt (fun (inc : Health.incident) -> Int.equal inc.id id) t.entries
 
-let default_viewport_rows = 15
-
-let adjust_scroll ?(viewport_rows = default_viewport_rows) ~scroll selected =
-  let vr = max 1 viewport_rows in
-  if selected < scroll then selected
-  else if selected >= scroll + vr then max 0 (selected - vr + 1)
-  else scroll
+let adjust_scroll = Store_scroll.adjust_scroll
 
 let move_selection ?viewport_rows ~delta t =
   let vis_len = List.length (visible_entries t) in

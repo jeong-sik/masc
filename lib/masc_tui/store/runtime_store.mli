@@ -88,6 +88,10 @@ type t = {
   show_unreported_accounts : bool;
   selected_index : int;
   scroll_offset : int;
+  quota_scroll_offset : int;
+  connector_selected_index : int;
+  connector_scroll_offset : int;
+  detail_scroll_offset : int;
   filter_query : string;
 }
 
@@ -142,6 +146,7 @@ val toggle_outside_lane_probes : t -> t
 val toggle_unreported_accounts : t -> t
 val set_show_unreported_accounts : bool -> t -> t
 
+val filtered_accounts : t -> Wire_runtime.account_usage list
 val partition_accounts : t -> partitioned_accounts
 (** Signal-first 3-tier account partition for [Quotas & Credits]:
     1. [exhausted_and_credits] (Exhausted first, then metered USD balances by
@@ -248,10 +253,15 @@ val clear_fusion_draft : t -> t
 val to_fusion_launch_request :
   t -> (string * Wire_runtime.fusion_launch_request, string) result
 
+val filtered_lanes : t -> Wire_runtime.failover_lane list
+val filtered_tools : t -> Wire_runtime.tool_summary list
+val filtered_connectors : t -> Wire_runtime.connector_row list
 val selected_lane : t -> Wire_runtime.failover_lane option
+val selected_connector : t -> Wire_runtime.connector_row option
 val runtime_options : t -> Wire_runtime.runtime_option list
 
 val move_selection :
   ?pane_index:int -> ?viewport_rows:int -> delta:int -> t -> t
+val reset_detail_scroll : t -> t
 val set_filter : string -> t -> t
 val mark_stale_all : t -> t

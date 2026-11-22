@@ -614,7 +614,10 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
     | Fleet_store.Display_origin_bare -> Fleet_store.Display_origin_bare
     | Fleet_store.Display_origin_row -> Fleet_store.Display_origin_row
   in
-  let tools_mode = model.fleet.chat_tools_mode in
+  let tools_mode =
+    if model.fleet.chat_turn_details_expanded then Slash.Tools_full
+    else model.fleet.chat_tools_mode
+  in
   let expanded_tools =
     match tools_mode with
     | Slash.Tools_compact -> false

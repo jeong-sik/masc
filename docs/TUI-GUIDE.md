@@ -24,14 +24,12 @@ context-aware dynamic keymap help generated directly from the keymap SSOT
 (`lib/masc_tui/keymap/keymap.ml`). You can also print the full static reference
 table from a checkout with `bin/masc_tui_keys_doc_cli.exe`.
 
-Press `Ctrl+K` to open the **Universal Command & Entity Palette** — filter by
-action title, shortcut, or bound slash twin (`/pulse`, `/work`, `/knowledge`,
-`/keepers`, `/runtime`, `/infra`, `/keeper`, `/model`, `/config`, `/incidents`,
-`/jump`, `/voice`, `/queue`, `/tools`, `/help`, `/quit`) and press `Enter` to
-run `Keymap.palette_commands`. Slash-only commands without a palette keymap
-binding (`/context`, `/theme`, `/lang`, `/btw`, `/clear`, `/restart`) run in
-the focused **composer** (`i`). Use `Ctrl+G` to jump straight to any Keeper's
-chat, and `Ctrl+L` to inspect or switch model runtimes.
+Press `Ctrl+K` to open the **Universal Command & Entity Palette** — filter across
+all 9 sections (Commands, Workspaces, Keepers, Companies, Goals/Tasks, Board/Wiki,
+Sandboxes, Settings Keys, and all 22 Slash Commands including `/theme`, `/lang`,
+`/btw`, `/clear`, `/context`, `/restart`) and press `Enter` to execute or jump
+directly. Use `Ctrl+G` to jump straight to any Keeper's chat, and `Ctrl+L` to
+inspect or switch model runtimes.
 
 ## Quick Start
 
@@ -82,10 +80,10 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
 | `[` / `]` (or `←` / `→` unfocused, `Alt+[` / `Alt+]`) | Unfocused / Global | Cycle sub-tabs (Workspaces, 5-tab Keeper Dive, Queue/Context drawer; inside the composer `←`/`→` move the text cursor, and in Settings they collapse/expand tree categories) |
 | `↑` / `↓` or `j` / `k` | Unfocused / Overlay | Move list selection or scroll Keeper Chat |
 | `PgUp` / `PgDn`, `Home` (`g`) / `End` (`G`) | Unfocused / Overlay | Page scroll or jump to top / bottom |
-| `Tab` / `Shift+Tab` | Unfocused / Overlay | Cycle focus pane (or toggle Tree / Inspector in Settings) |
+| `Tab` / `Shift+Tab` | Unfocused / Overlay | Cycle active focus panes on multi-pane views (omitted on single-pane views and narrow layouts; cycles tabs in Queue/Context, selection in Palette, or Tree / Inspector in Settings) |
 | `Enter` | Unfocused | 1-hop Dive into selected entity (Keeper, Goal, Task, Verification, Board Thread, Wiki, Artifact, Memory Diff, Lane, Sandbox) |
 | `Space` | Unfocused | Context toggle (expand/collapse group or succession chain, Wiki/Artifacts mode, Memory diff window, Verification view, log level filter, Keeper Chat turn details, Settings dry-run diff) |
-| `/` | Unfocused / Settings / Incidents | Focus inline filter box (`Enter` or `Esc` exits filter input) |
+| `/` | Unfocused / Settings / Incidents | Focus inline filter box (`↑`/`↓` move selection live, `Enter`/`Tab` apply & blur, `Esc` clear & blur; on views without a filter bar such as Pulse or Keeper Chat, focuses the composer with `/`) |
 | `z` | Unfocused | Toggle detail pane zoom |
 | `r` | Unfocused | Force refresh active view from server SSOT (triggers `force=1` probe on Runtime Quotas/Failover) |
 | `n` | Unfocused / Settings | Create new item in current workspace (Board post, `#goals` proposal, Schedule, Connector, Repo, or new Keeper) |
@@ -131,12 +129,13 @@ composer dispatches navigation or overlay shortcuts (`1`–`6`, `,`, `I`, `?`,
 2. Press `i` to focus the bottom composer.
 3. Type your message (or paste directly — bracketed paste while unfocused also
    focuses the composer and inserts text cleanly):
-   - **`Enter`** — Send message (or **Steer** an active turn if the Keeper is busy and has a chat control token).
-   - **`Shift+Enter`** or **`Alt+Enter`** — Queue as an end-of-turn **Follow-up**.
-   - **`Ctrl+J`** — Insert a literal newline inside the composer.
-   - **`Ctrl+W`** — Delete the previous word.
-   - **`←` / `→` / `Home` / `End`** — Move the editing cursor inside the draft.
-   - **`Esc`** — Blur the composer while preserving your per-Keeper draft.
+   - **`Enter`** — Send message (or **Steer** an active turn if the Keeper is busy and has a chat control token; when the `/` or `@` popup is open, executes or inserts the highlighted item).
+   - **`Alt+Enter`** or **`Ctrl+Enter`** — Queue as an end-of-turn **Follow-up**.
+   - **`Shift+Enter`** or **`Ctrl+J`** — Insert a literal newline inside the composer.
+   - **`/` or `@` popup** — Type `/` (command or argument completion) or `@` (Keeper mention) to open the interactive popup: `↑`/`↓` (`PgUp`/`PgDn`, `Home`/`End`) move selection, `Tab` completes, `Enter` executes or inserts, and `Esc` dismisses the popup while keeping the composer focused (second `Esc` blurs).
+   - **`Ctrl+W`** / **`Alt+Backspace`** — Delete the previous word; **`Ctrl+U`** clears to line start; **`Ctrl+A`/`E`** jump to line start/end.
+   - **`←` / `→` / `Home` / `End`** — Move the editing cursor inside the draft (`Ctrl+←/→` or `Alt+←/→` jump by word).
+   - **`Esc`** — Dismiss open `/` or `@` popup first, then blur the composer while preserving your per-Keeper draft.
 4. While reading Chat (unfocused):
    - **`Ctrl+O`** or **`/tools [compact|results|full]`** — Cycle or set tool call detail mode.
    - **`Alt+T`** — Cycle thinking/reasoning display (`folded` → `full` → `hidden`).
@@ -188,7 +187,7 @@ Type a `/` command in the focused composer and press `Enter`
 | `/btw <question>` | Ask an ephemeral side-query to the target Keeper without polluting chat history |
 | `/queue`, `/context` | Open the Queue or Context tab of the Queue/Context drawer |
 | `/tools [compact\|results\|full]` | Cycle or set tool call detail mode |
-| `/clear` | Clear active composer draft and reset chat scroll |
+| `/clear` | Clear active composer draft and reset chat scroll (also clears active view filter when draft is empty) |
 | `/theme [midnight\|arcade_hi\|paper_light\|mono]` | Cycle or set color theme preset (persisted via `/api/v1/tui/preferences`) |
 | `/lang [ko\|en]` | Toggle or set UI language (persisted via `/api/v1/tui/preferences`) |
 | `/help` | Open dynamic keymap help |

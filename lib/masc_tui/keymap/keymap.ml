@@ -310,12 +310,9 @@ let normalize_key_event (ev : Input.key_event) : Input.key_event =
       let ch = s.[0] in
       if ev.mods.ctrl || ev.mods.alt then
         let lower = Char.lowercase_ascii ch in
-        let shift =
-          if lower >= 'a' && lower <= 'z' then false else ev.mods.shift
-        in
         {
           key = Input.Char (String.make 1 lower);
-          mods = { ev.mods with shift };
+          mods = ev.mods;
         }
       else if ev.mods.shift && ch >= 'a' && ch <= 'z' then
         {
@@ -340,6 +337,35 @@ let normalize_key_event (ev : Input.key_event) : Input.key_event =
   | Input.Page_down
   | Input.Function _ ->
       ev
+
+let replay_ime_event (ev : Input.key_event) : Input.key_event =
+  let norm = normalize_key_event ev in
+  if (not norm.mods.ctrl) && not norm.mods.alt then
+    match norm.key with
+    | Input.Char s when String.length s > 1 -> (
+        match Input.Ime.single_latin_key s with
+        | Some latin ->
+            normalize_key_event
+              { key = Input.Char latin; mods = Input.no_mods }
+        | None -> norm)
+    | Input.Char _
+    | Input.Enter
+    | Input.Tab
+    | Input.Backspace
+    | Input.Escape
+    | Input.Delete
+    | Input.Insert
+    | Input.Up
+    | Input.Down
+    | Input.Left
+    | Input.Right
+    | Input.Home
+    | Input.End
+    | Input.Page_up
+    | Input.Page_down
+    | Input.Function _ ->
+        norm
+  else norm
 
 let mk_chord ?(ctrl = false) ?(alt = false) ?(shift = false) key : Input.key_event =
   normalize_key_event { key; mods = { ctrl; alt; shift } }
@@ -598,20 +624,25 @@ let bindings : binding list =
         ~help_desc:(Say.make ~ko:"메시지 전송 또는 턴 중 Steer" ~en:"Send message or steer active turn")
         ~footer_priority:1 (mk_chord Input.Enter);
       bind ~scope:Composer_focused ~tier:Modern_accel ~category:Cat_composer
-        ~action:Submit_followup ~key_display:"Shift+Enter"
-        ~hint_label:(Say.make ~ko:"후속 큐" ~en:"Follow-up")
-        ~help_desc:(Say.make ~ko:"현재 턴 종료 후 후속 메시지로 예약" ~en:"Queue as end-of-turn follow-up")
+        ~action:Composer_newline ~key_display:"Shift+Enter"
+        ~hint_label:(Say.make ~ko:"줄바꿈" ~en:"Newline")
+        ~help_desc:(Say.make ~ko:"컴포저에 줄바꿈 삽입" ~en:"Insert literal newline")
         ~footer_priority:2 (mk_chord ~shift:true Input.Enter);
       bind ~scope:Composer_focused ~tier:Modern_accel ~category:Cat_composer
         ~action:Submit_followup ~key_display:"Alt+Enter"
         ~hint_label:(Say.make ~ko:"후속 큐" ~en:"Follow-up")
         ~help_desc:(Say.make ~ko:"현재 턴 종료 후 후속 메시지로 예약" ~en:"Queue as end-of-turn follow-up")
-        ~footer_priority:2 (mk_chord ~alt:true Input.Enter);
+        ~footer_priority:3 (mk_chord ~alt:true Input.Enter);
+      bind ~scope:Composer_focused ~tier:Modern_accel ~category:Cat_composer
+        ~action:Submit_followup ~key_display:"Ctrl+Enter"
+        ~hint_label:(Say.make ~ko:"후속 큐" ~en:"Follow-up")
+        ~help_desc:(Say.make ~ko:"현재 턴 종료 후 후속 메시지로 예약" ~en:"Queue as end-of-turn follow-up")
+        ~footer_priority:0 (mk_chord ~ctrl:true Input.Enter);
       bind ~scope:Composer_focused ~tier:Universal_ctrl ~category:Cat_composer
         ~action:Composer_newline ~key_display:"Ctrl+J"
         ~hint_label:(Say.make ~ko:"줄바꿈" ~en:"Newline")
         ~help_desc:(Say.make ~ko:"컴포저에 줄바꿈 삽입" ~en:"Insert literal newline")
-        ~footer_priority:4 (ctrl_char 'j');
+        ~footer_priority:0 (ctrl_char 'j');
       bind ~scope:Composer_focused ~tier:Universal_ctrl ~category:Cat_composer
         ~action:Composer_kill_word ~key_display:"Ctrl+W"
         ~hint_label:(Say.make ~ko:"단어 삭제" ~en:"Kill word")
@@ -769,7 +800,19 @@ let scope_chain_of_focus ?(approval_strip_active = false)
       [ Approval_strip_focused; Approval_strip_chords; Unfocused_nav; Global ]
   | Nav.Composer_focused ->
       [ Composer_focused ] @ approval_chords_only @ [ Global ]
-  | Nav.Overlay_focused _ -> [ Overlay_focused; Global ]
+  | Nav.Overlay_focused
+      (Nav.System_gate (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline))
+    ->
+      [ Overlay_focused ]
+  | Nav.Overlay_focused
+      ( Nav.Palette
+      | Nav.Settings _
+      | Nav.Incidents
+      | Nav.Queue_context _
+      | Nav.Inline_action _
+      | Nav.Help
+      | Nav.System_gate Nav.Media_viewer ) ->
+      [ Overlay_focused; Global ]
 
 let allows_ime_replay = function
   | Unfocused_nav | Ask_choice_focused | Approval_strip_focused -> true
@@ -958,14 +1001,22 @@ let palette_commands ~lang =
       else
         let is_palette_eligible =
           match b.action with
-          | Move _ | Ask_select_choice _ | Confirm_selected -> false
+          | Move _
+          | Ask_select_choice _
+          | Confirm_selected
+          | Submit_steer
+          | Submit_followup
+          | Composer_newline
+          | Composer_kill_word
+          | Open_palette
+          | Pop_back_or_close ->
+              false
           | Switch_workspace _
           | Sub_tab _
           | Cycle_focus_pane _
           | Focus_composer
           | Focus_filter
           | Dive_selected
-          | Pop_back_or_close
           | Open_settings
           | Teleport_blocked
           | Open_incidents
@@ -973,17 +1024,12 @@ let palette_commands ~lang =
           | Fast_approve_top
           | Fast_deny_top
           | Open_help
-          | Open_palette
           | Open_keeper_switcher
           | Open_model_switcher
           | Toggle_tool_details
           | Open_queue_context
           | Toggle_thinking
           | Cycle_origin_mode
-          | Composer_kill_word
-          | Composer_newline
-          | Submit_steer
-          | Submit_followup
           | Toggle_expand
           | Create_new
           | Refresh

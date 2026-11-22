@@ -94,6 +94,12 @@ let entry_keeper_name = function
   | Entry_ssh_unbound u -> u.keeper
   | Entry_docker d -> d.keeper
 
+let entry_search_haystack = function
+  | Entry_microvm g -> g.keeper ^ " " ^ g.guest_name ^ " " ^ g.backend
+  | Entry_ssh_bound (p, ks) -> ks.keeper ^ " " ^ p.pool_name ^ " " ^ p.host ^ " ssh"
+  | Entry_ssh_unbound u -> u.keeper ^ " " ^ u.backend ^ " ssh"
+  | Entry_docker d -> d.keeper ^ " " ^ d.backend ^ " docker"
+
 let entry_metrics = function
   | Entry_microvm g -> g.metrics_24h
   | Entry_ssh_bound (_, ks) -> ks.metrics_24h
@@ -108,8 +114,9 @@ let keeper_company_of ~(model : Model.t) keeper =
         (Wire_fleet.classify_company_single ~group:None keeper)
 
 (* Rich 4-Section Inspector Body — zero nested Card.draw (reused in Sandboxes tab & Sandbox Dive!) *)
-let draw_sandbox_inspector_body ~grid ~(inner : Rect.t) ~(theme : Theme.t) ~bp
-    ~lang ~(model : Model.t) (entry : fleet_sandbox_entry) =
+let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
+    ~(theme : Theme.t) ~bp ~lang ~(model : Model.t) (entry : fleet_sandbox_entry)
+    =
   if Rect.is_empty inner then ()
   else
     let keeper = entry_keeper_name entry in
@@ -470,8 +477,7 @@ let draw_sandbox_inspector_body ~grid ~(inner : Rect.t) ~(theme : Theme.t) ~bp
                  ~y:(empty_box.y + 1) ~max_w:(Int.max 0 (empty_box.w - 2))
                  ~style:(H.whisper_style ~theme ())
                  (Say.resolve lang
-                    (Say.make ~ko:"[Enter] 전체 상세 · [Space] 속성 트리"
-                       ~en:"[Enter] Full dive · [Space] Json_tree")))
+                    (Say.make ~ko:"[Enter] 전체 상세" ~en:"[Enter] Full dive")))
         end
         else begin
           let log_bg_rgb = theme.surface_0 in
@@ -479,65 +485,77 @@ let draw_sandbox_inspector_body ~grid ~(inner : Rect.t) ~(theme : Theme.t) ~bp
           let box = Rect.make ~x:content.x ~y:!y ~w:content.w ~h:rem_rows in
           Cell_grid.fill_rect ~clip:content grid ~rect:box
             ~style:(H.whisper_style ~theme ~bg:log_bg_rgb ()) ();
+          let combined =
+            List.map (fun e -> `Log e) display_logs
+            @ List.map (fun ev -> `Act ev) keeper_acts
+          in
+          let skip =
+            Int.min
+              (Int.max 0 (List.length combined - rem_rows))
+              (Int.max 0 scroll)
+          in
           let ly = ref !y in
           List.iter
-            (fun (e : Wire_infra.system_log_entry) ->
-              if !ly < bottom then begin
-                let lvl_s, tone = log_level_badge e.level in
-                Card.draw_left_rail ~bg:log_bg ~tone grid ~x:box.x ~y:!ly ~h:1
-                  ~theme;
-                let ts =
-                  H.format_local_hhmmss ~tz_offset_sec:model.tz_offset_sec e.ts
-                in
-                let x_ts = box.x + 2 in
-                let tw =
-                  H.put_clipped ~grid ~clip:box ~x:x_ts ~y:!ly ~max_w:8
-                    ~style:(H.whisper_style ~theme ~bg:log_bg_rgb ())
-                    ts
-                in
-                let x_lvl = x_ts + tw + 1 in
-                let lw =
-                  H.put_clipped ~grid ~clip:box ~x:x_lvl ~y:!ly ~max_w:4
-                    ~style:
-                      (H.status_style ~theme ~bg:log_bg_rgb ~attrs:Attr.bold
-                         tone)
-                    lvl_s
-                in
-                let x_msg = x_lvl + lw + 1 in
-                let msg_w = Int.max 0 (Rect.right box - x_msg - 1) in
-                ignore
-                  (H.put_clipped ~grid ~clip:box ~x:x_msg ~y:!ly ~max_w:msg_w
-                     ~style:(H.text_style ~theme ~bg:log_bg_rgb ())
-                     (H.sanitize_single_line e.message));
-                incr ly
-              end)
-            (H.safe_take rem_rows display_logs);
-          List.iter
-            (fun (ev : Infra_store.activity_row) ->
-              if !ly < bottom then begin
-                Card.draw_left_rail ~bg:log_bg ~tone:Theme.Status_active grid
-                  ~x:box.x ~y:!ly ~h:1 ~theme;
-                let age =
-                  H.format_age ~now_unix:model.freshness.last_wall_unix ev.at_unix
-                in
-                let aw =
-                  H.put_clipped ~grid ~clip:box ~x:(box.x + 2) ~y:!ly ~max_w:7
-                    ~style:(H.whisper_style ~theme ~bg:log_bg_rgb ())
-                    age
-                in
-                ignore
-                  (H.put_clipped ~grid ~clip:box ~x:(box.x + 3 + aw) ~y:!ly
-                     ~max_w:(Int.max 0 (Rect.right box - (box.x + 4 + aw)))
-                     ~style:(H.secondary_style ~theme ~bg:log_bg_rgb ())
-                     ev.summary);
-                incr ly
-              end)
-            (H.safe_take (Int.max 0 (bottom - !ly)) keeper_acts)
+            (function
+              | `Log (e : Wire_infra.system_log_entry) ->
+                  if !ly < bottom then begin
+                    let lvl_s, tone = log_level_badge e.level in
+                    Card.draw_left_rail ~bg:log_bg ~tone grid ~x:box.x ~y:!ly
+                      ~h:1 ~theme;
+                    let ts =
+                      H.format_local_hhmmss ~tz_offset_sec:model.tz_offset_sec
+                        e.ts
+                    in
+                    let x_ts = box.x + 2 in
+                    let tw =
+                      H.put_clipped ~grid ~clip:box ~x:x_ts ~y:!ly ~max_w:8
+                        ~style:(H.whisper_style ~theme ~bg:log_bg_rgb ())
+                        ts
+                    in
+                    let x_lvl = x_ts + tw + 1 in
+                    let lw =
+                      H.put_clipped ~grid ~clip:box ~x:x_lvl ~y:!ly ~max_w:4
+                        ~style:
+                          (H.status_style ~theme ~bg:log_bg_rgb ~attrs:Attr.bold
+                             tone)
+                        lvl_s
+                    in
+                    let x_msg = x_lvl + lw + 1 in
+                    let msg_w = Int.max 0 (Rect.right box - x_msg - 1) in
+                    ignore
+                      (H.put_clipped ~grid ~clip:box ~x:x_msg ~y:!ly ~max_w:msg_w
+                         ~style:(H.text_style ~theme ~bg:log_bg_rgb ())
+                         (H.sanitize_single_line e.message));
+                    incr ly
+                  end
+              | `Act (ev : Infra_store.activity_row) ->
+                  if !ly < bottom then begin
+                    Card.draw_left_rail ~bg:log_bg ~tone:Theme.Status_active grid
+                      ~x:box.x ~y:!ly ~h:1 ~theme;
+                    let age =
+                      H.format_age ~now_unix:model.freshness.last_wall_unix
+                        ev.at_unix
+                    in
+                    let aw =
+                      H.put_clipped ~grid ~clip:box ~x:(box.x + 2) ~y:!ly
+                        ~max_w:7
+                        ~style:(H.whisper_style ~theme ~bg:log_bg_rgb ())
+                        age
+                    in
+                    ignore
+                      (H.put_clipped ~grid ~clip:box ~x:(box.x + 3 + aw) ~y:!ly
+                         ~max_w:(Int.max 0 (Rect.right box - (box.x + 4 + aw)))
+                         ~style:(H.secondary_style ~theme ~bg:log_bg_rgb ())
+                         ev.summary);
+                    incr ly
+                  end)
+            (Store_scroll.drop skip combined |> H.safe_take rem_rows)
         end
       end
 
-let draw_sandbox_inspector ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
-    ~lang ~(model : Model.t) (entry_opt : fleet_sandbox_entry option)
+let draw_sandbox_inspector ?(scroll = 0) ~grid ~cache ~(rect : Rect.t)
+    ~(theme : Theme.t) ~bp ~lang ~(model : Model.t)
+    (entry_opt : fleet_sandbox_entry option)
     (obs : Wire_infra.sandboxes_snapshot Observed.t) ~focused =
   let subtitle = Option.map entry_keeper_name entry_opt in
   let inner =
@@ -553,7 +571,8 @@ let draw_sandbox_inspector ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
         H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner) ~theme
           ~lang obs
     | Some entry ->
-        draw_sandbox_inspector_body ~grid ~inner ~theme ~bp ~lang ~model entry
+        draw_sandbox_inspector_body ~scroll ~grid ~inner ~theme ~bp ~lang ~model
+          entry
 
 let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp grid =
@@ -963,10 +982,18 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
        in
        H.draw_observed_placeholder ~grid ~rect:ci ~theme ~lang obs);
   (* Bottom Main Split: 58% Left 8-Column Fleet Table / 42% Right 4-Section Inspector *)
-  let entries =
+  let all_entries =
     match Observed.to_option inf.sandboxes with
     | Some s -> fleet_entries_of_snapshot s
     | None -> []
+  in
+  let filter_q = String.trim inf.filter_query in
+  let entries =
+    if String.equal filter_q "" then all_entries
+    else
+      List.filter
+        (fun e -> H.contains_ci ~needle:filter_q (entry_search_haystack e))
+        all_entries
   in
   let sel_entry =
     List.nth_opt entries (H.clamp_index (List.length entries) inf.selected_index)
@@ -990,7 +1017,12 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
                ~en:(Printf.sprintf "Keeper Sandbox Fleet (%d)" (List.length entries)))))
   in
   if not (Rect.is_empty tbl_inner) then begin
-    if entries = [] then
+    if entries = [] && not (String.equal filter_q "") && all_entries <> [] then
+      H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp tbl_inner) ~theme
+        (Say.resolve lang
+           (Say.make ~ko:"필터에 일치하는 샌드박스 없음"
+              ~en:"No sandboxes match filter"))
+    else if entries = [] then
       H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp tbl_inner)
         ~theme ~lang inf.sandboxes
     else
@@ -1246,8 +1278,9 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
            ~columns rows)
   end;
   if not (Rect.is_empty insp_rect) then
-    draw_sandbox_inspector ~grid ~cache ~rect:insp_rect ~theme ~bp ~lang ~model
-      sel_entry inf.sandboxes ~focused:(model.nav.pane_index = 1)
+    draw_sandbox_inspector ~scroll:inf.detail_scroll_offset ~grid ~cache
+      ~rect:insp_rect ~theme ~bp ~lang ~model sel_entry inf.sandboxes
+      ~focused:(model.nav.pane_index = 1)
 
 (* --- 2. Sub-Tab 2: Repos & Read-Only Syntax-Highlighted Diffs --- *)
 
@@ -1296,8 +1329,9 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
          (Say.resolve lang (Say.make ~ko:"등록된 Git 저장소" ~en:"Registered Repos")))
   in
   if not (Rect.is_empty repos_inner) then begin
+    let repos = Infra_store.filtered_repositories inf in
     match inf.repositories with
-    | Observed.Value { data = repos; _ } when repos <> [] ->
+    | Observed.Value _ when repos <> [] ->
         let columns : Table.column list =
           [
             {
@@ -1353,8 +1387,12 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
     | Observed.Value _ ->
         H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp repos_inner) ~theme
           (Say.resolve lang
-             (Say.make ~ko:"등록된 저장소가 없습니다 · [n] 추가"
-                ~en:"No registered repos · [n] Add"))
+             (if String.equal (String.trim inf.filter_query) "" then
+                Say.make ~ko:"등록된 저장소가 없습니다 · [n] 추가"
+                  ~en:"No registered repos · [n] Add"
+              else
+                Say.make ~ko:"필터에 일치하는 저장소 없음"
+                  ~en:"No repositories match filter"))
     | ( Observed.Loading _
       | Observed.Absent
       | Observed.Unreported
@@ -1362,36 +1400,25 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
         H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp repos_inner)
           ~theme ~lang obs
   end;
-  let changes =
-    match Observed.to_option inf.file_changes with Some xs -> xs | None -> []
-  in
+  let all_changes = Infra_store.filtered_file_changes inf in
   let sel_repo = Infra_store.selected_repository inf in
-  let repo_matching_changes =
+  let changes =
     match sel_repo with
-    | Some r when r.keepers <> [] ->
-        List.filter
-          (fun (fc : Wire_infra.file_change) ->
-            match fc.keeper with
-            | Some kp -> List.exists (String.equal kp) r.keepers
-            | None -> false)
-          changes
-    | Some _ | None -> []
-  in
-  let preferred_pool =
-    if repo_matching_changes <> [] then repo_matching_changes else changes
+    | Some r -> (
+        if r.keepers = [] then []
+        else
+          match inf.file_changes_keeper with
+          | Some k when List.exists (String.equal k) r.keepers -> all_changes
+          | Some _ | None -> [])
+    | None -> all_changes
   in
   let active_change =
-    match
-      List.find_opt
-        (fun (fc : Wire_infra.file_change) -> Option.is_some fc.diff_preview)
-        preferred_pool
-    with
-    | Some fc -> Some fc
-    | None -> (match preferred_pool with fc :: _ -> Some fc | [] -> None)
+    List.nth_opt changes
+      (H.clamp_index (List.length changes) inf.change_selected_index)
   in
   let ch_inner =
     Card.draw ~cache grid ~rect:changes_rect ~theme
-      (H.card_spec
+      (H.card_spec ~focused:(model.nav.pane_index = 2)
          (Say.resolve lang
             (Say.make
                ~ko:(Printf.sprintf "키퍼 파일 변경 (%d)" (List.length changes))
@@ -1399,18 +1426,33 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   if not (Rect.is_empty ch_inner) then begin
     if changes = [] then
-      H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp ch_inner) ~theme
-        ~lang inf.file_changes
+      if not (String.equal (String.trim inf.filter_query) "") then
+        H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp ch_inner) ~theme
+          (Say.resolve lang
+             (Say.make ~ko:"필터에 일치하는 파일 변경 없음"
+                ~en:"No file changes match filter"))
+      else
+        H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp ch_inner)
+          ~theme ~lang inf.file_changes
     else
+      let total_ch = List.length changes in
+      let sel_ch_idx = H.clamp_index total_ch inf.change_selected_index in
+      let start_ch, _ =
+        Table.compute_viewport ~total_rows:total_ch ~viewport_rows:ch_inner.h
+          ~scroll:inf.change_scroll_offset ~selected:(Some sel_ch_idx)
+      in
       let y = ref ch_inner.y and bot = Rect.bottom ch_inner in
       let pad_r = if ch_inner.w >= 24 then 2 else 1 in
-      List.iter
-        (fun (fc : Wire_infra.file_change) ->
+      List.iteri
+        (fun local_i (fc : Wire_infra.file_change) ->
+          let idx = start_ch + local_i in
           if !y < bot then begin
             let is_active =
-              match active_change with
-              | Some ac -> String.equal ac.path fc.path
-              | None -> false
+              if model.nav.pane_index = 2 then Int.equal idx sel_ch_idx
+              else
+                match active_change with
+                | Some ac -> String.equal ac.path fc.path
+                | None -> false
             in
             let row_rect = Rect.make ~x:ch_inner.x ~y:!y ~w:ch_inner.w ~h:1 in
             let row_bg =
@@ -1458,7 +1500,7 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
                    r_meta);
             incr y
           end)
-        changes
+        (Store_scroll.drop start_ch changes)
   end;
   (* Right Card: Read-Only Syntax-Highlighted Unified Diff *)
   let diff_subtitle =
@@ -1470,7 +1512,7 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
   let diff_inner =
     Card.draw ~cache grid ~rect:right_rect ~theme
       (H.card_spec ?subtitle:diff_subtitle ~focused:(model.nav.pane_index = 1)
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[o] IDE 열기" ~en:"[o] Open IDE"))
+         ~hotkey:(Say.resolve lang (Say.make ~ko:"[o] URL 열기" ~en:"[o] Open URL"))
          (Say.resolve lang
             (Say.make ~ko:"읽기 전용 Unified Diff" ~en:"Read-Only Unified Diff")))
   in
@@ -1531,12 +1573,9 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
             let numbered = H.parse_unified_diff raw_diff in
             let language = Code_lexer.language_of_path fc.path in
             if not (Rect.is_empty diff_content) then begin
-              let diff_scroll =
-                if model.nav.pane_index = 1 then inf.scroll_offset else 0
-              in
               ignore
                 (Diff.draw grid ~rect:diff_content ~theme ?language
-                   ~scroll:diff_scroll numbered)
+                   ~scroll:inf.diff_scroll_offset numbered)
             end
         | Some _ | None ->
             H.draw_empty_notice ~grid ~rect:diff_content ~theme
@@ -1911,7 +1950,9 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
             let lines =
               Json_tree.flatten ~max_depth:4 ~redact_secrets:true e.details
             in
-            ignore (Json_tree.draw grid ~rect:tree_rect ~theme lines)
+            ignore
+              (Json_tree.draw grid ~rect:tree_rect ~theme
+                 ~scroll:inf.detail_scroll_offset lines)
           end
         end
   end
@@ -2007,7 +2048,7 @@ let json_of_sandbox_entry = function
           ("metrics_24h", json_of_metrics d.metrics_24h);
         ]
 
-let draw_tail_logs ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
+let draw_tail_logs ?(scroll = 0) ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
     ~tz_offset_sec ~filter_opt (logs : Wire_infra.system_log_entry list) =
   if Rect.is_empty rect then ()
   else
@@ -2030,6 +2071,11 @@ let draw_tail_logs ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
         (Say.resolve lang
            (Say.make ~ko:"일치하는 최근 로그 없음" ~en:"No matching tail logs"))
     else
+      let skip =
+        Int.min
+          (Int.max 0 (List.length matching - rect.h))
+          (Int.max 0 scroll)
+      in
       let y = ref rect.y and bot = Rect.bottom rect in
       List.iter
         (fun (e : Wire_infra.system_log_entry) ->
@@ -2053,7 +2099,7 @@ let draw_tail_logs ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
                     (H.sanitize_single_line e.message)));
             incr y
           end)
-        (H.safe_take rect.h matching)
+        (Store_scroll.drop skip matching |> H.safe_take rect.h)
 
 let entry_of_keeper_detail ~(sandboxes : Wire_infra.sandboxes_snapshot option)
     (detail : Wire_infra.keeper_sandbox_detail) : fleet_sandbox_entry =
@@ -2144,7 +2190,8 @@ let render_dive_sandbox ~keeper ~(model : Model.t) ~cache ~(rect : Rect.t)
               (json_of_sandbox_entry entry)
           in
           ignore
-            (Json_tree.draw grid ~rect:(H.pad_content ~bp inner) ~theme lines)
+            (Json_tree.draw grid ~rect:(H.pad_content ~bp inner) ~theme
+               ~scroll:model.nav.dive_scroll_offset lines)
         else
           let top_rect, body_rect =
             match Layout.split_v inner [ Layout.Fixed 3; Layout.Flex 1 ] with
@@ -2185,8 +2232,8 @@ let render_dive_sandbox ~keeper ~(model : Model.t) ~cache ~(rect : Rect.t)
             (Chart.draw grid ~rect:(H.pad_content ~bp top_rect) ~theme
                ~caps:H.default_caps ~lang ~show_title:false err_spec);
           (* ZERO nested Card.draw: paints rich 4-section inspector body directly *)
-          draw_sandbox_inspector_body ~grid ~inner:body_rect ~theme ~bp ~lang
-            ~model entry
+          draw_sandbox_inspector_body ~scroll:model.nav.dive_scroll_offset ~grid
+            ~inner:body_rect ~theme ~bp ~lang ~model entry
 
 let render_dive_lane ~lane_id ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp grid =
@@ -2237,7 +2284,9 @@ let render_dive_lane ~lane_id ~(model : Model.t) ~cache ~(rect : Rect.t)
               ]
           in
           let lines = Json_tree.flatten ~max_depth:4 ~redact_secrets:true json in
-          ignore (Json_tree.draw grid ~rect:content ~theme lines)
+          ignore
+            (Json_tree.draw grid ~rect:content ~theme
+               ~scroll:model.nav.dive_scroll_offset lines)
         else
           let probe_of rid =
             List.find_opt
@@ -2337,8 +2386,9 @@ let render_dive_lane ~lane_id ~(model : Model.t) ~cache ~(rect : Rect.t)
               Rect.make ~x:tail_rect.x ~y:(tail_rect.y + 1) ~w:tail_rect.w
                 ~h:(Int.max 0 (tail_rect.h - 1))
             in
-            draw_tail_logs ~grid ~rect:log_area ~theme ~lang
-              ~tz_offset_sec:model.tz_offset_sec ~filter_opt:None inf.logs
+            draw_tail_logs ~scroll:model.nav.dive_scroll_offset ~grid
+              ~rect:log_area ~theme ~lang ~tz_offset_sec:model.tz_offset_sec
+              ~filter_opt:None inf.logs
           end
 
 let incident_source_display = function
@@ -2411,7 +2461,9 @@ let render_dive_incident ~incident_id ~(model : Model.t) ~cache ~(rect : Rect.t)
               @ detail_fields)
           in
           let lines = Json_tree.flatten ~max_depth:5 ~redact_secrets:true json in
-          ignore (Json_tree.draw grid ~rect:(H.pad_content ~bp inner) ~theme lines)
+          ignore
+            (Json_tree.draw grid ~rect:(H.pad_content ~bp inner) ~theme
+               ~scroll:model.nav.dive_scroll_offset lines)
         else
           let pad_x = Layout.card_pad_x bp in
           let band_h = if inner.h >= 6 then 2 else 1 in
@@ -2459,7 +2511,9 @@ let render_dive_incident ~incident_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                        Json_tree.flatten ~max_depth:4 ~redact_secrets:true
                          parsed_json
                      in
-                     ignore (Json_tree.draw grid ~rect:tree_rect ~theme lines)
+                     ignore
+                       (Json_tree.draw grid ~rect:tree_rect ~theme
+                          ~scroll:model.nav.dive_scroll_offset lines)
                    end
                | None ->
                    let md_rect =
@@ -2468,7 +2522,7 @@ let render_dive_incident ~incident_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                    let safe_detail = H.redact_secrets_in_text inc.detail in
                    ignore
                      (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true
-                        safe_detail));
+                        ~scroll:model.nav.dive_scroll_offset safe_detail));
               y := !y + detail_h
             end;
             if !y < bot then begin

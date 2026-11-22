@@ -3284,9 +3284,18 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
              true
          | _ -> false)
        cmds_qref);
-  let m_fmod, _ = step m_rt (char_key "f") in
+  let m_q_f, _ = step m_rt (char_key "f") in
+  Alcotest.(check bool) "Runtime Quotas [f] does NOT bleed Fusion modal" true
+    (Option.is_none m_q_f.inline_modal);
+  let m_rt_failover =
+    {
+      m_rt with
+      runtime = Runtime_store.set_tab Nav.Runtime_failover_lanes m_rt.runtime;
+    }
+  in
+  let m_fmod, _ = step m_rt_failover (char_key "f") in
   let m_fmod_done, cmds_flaunch = step m_fmod (key Keymap.Input.Enter) in
-  Alcotest.(check bool) "Runtime [f] modal submit emits Post_fusion_launch" true
+  Alcotest.(check bool) "Runtime Failover [f] modal submit emits Post_fusion_launch" true
     (has_cmd
        (function
          | Cmd.Http_post
@@ -3297,9 +3306,9 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
   Alcotest.(check bool) "Fusion modal closes cleanly on submit (no hang)" true
     (Option.is_none m_fmod_done.inline_modal
      && Option.is_none m_fmod_done.nav.overlay);
-  (* Runtime Enter with non-empty fusion_launch_draft dives into Lane_dive, NEVER fires Post_fusion_launch *)
+  (* Runtime Failover Enter with non-empty fusion_launch_draft dives into Lane_dive, NEVER fires Post_fusion_launch *)
   let rt_with_lane =
-    m_rt.runtime
+    m_rt_failover.runtime
     |> Runtime_store.apply_runtime_resolved ~observed_at:t0
          {
            generated_at_iso = "2026-11-22T00:00:00Z";
@@ -3310,7 +3319,16 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
            usage_windows = None;
          }
   in
-  let m_rt_lane = { m_rt with runtime = rt_with_lane } in
+  let m_rt_quotas_with_lane =
+    {
+      m_rt with
+      runtime = Runtime_store.set_tab Nav.Runtime_quotas_credits rt_with_lane;
+    }
+  in
+  let m_rt_q_enter, _ = step m_rt_quotas_with_lane (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Runtime Quotas Enter does NOT dive stale Lane_dive" true
+    (Option.is_none (Model.active_dive m_rt_q_enter));
+  let m_rt_lane = { m_rt_failover with runtime = rt_with_lane } in
   let m_rt_enter, cmds_rt_enter = step m_rt_lane (key Keymap.Input.Enter) in
   Alcotest.(check bool) "Runtime Enter does NOT hijack with Post_fusion_launch" false
     (has_cmd
@@ -3318,7 +3336,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
          | Cmd.Http_post { req = Cmd.Post_fusion_launch _; _ } -> true
          | _ -> false)
        cmds_rt_enter);
-  Alcotest.(check bool) "Runtime Enter dives into Lane_dive" true
+  Alcotest.(check bool) "Runtime Failover Enter dives into Lane_dive" true
     (match Model.active_dive m_rt_enter with
     | Some (Nav.Dive_infra (Nav.Lane_dive "lane-default")) -> true
     | _ -> false);
@@ -4177,8 +4195,17 @@ let test_nav_fix6_work_inbox_filter_and_split_pane_clamping () =
   in
   Alcotest.(check int) "Tab switches pane_index 0 -> 1" 1
     m_pipe_tab.nav.pane_index;
-  Alcotest.(check int) "Tab clamps Work_pipeline selected_index to verifs max (1)"
-    1 m_pipe_tab.work.selected_index;
+  Alcotest.(check int) "Tab preserves Goals selected_index (4)" 4
+    m_pipe_tab.work.selected_index;
+  Alcotest.(check int) "Tab keeps verif_selected_index clamped (0)" 0
+    m_pipe_tab.work.verif_selected_index;
+  let m_pipe_dn, _ =
+    Update.step ~now:t0 m_pipe_tab (Msg.Key_event (key Keymap.Input.Down))
+  in
+  Alcotest.(check int) "Down on pane 1 moves verif_selected_index to 1" 1
+    m_pipe_dn.work.verif_selected_index;
+  Alcotest.(check int) "Down on pane 1 preserves Goals selected_index (4)" 4
+    m_pipe_dn.work.selected_index;
 
   (* Runtime_tools_connectors: 6 tools on pane 0, 2 connectors on pane 1 *)
   let tools6 =
@@ -4220,8 +4247,17 @@ let test_nav_fix6_work_inbox_filter_and_split_pane_clamping () =
   let m_tc_tab, _ =
     Update.step ~now:t0 m_tc_end (Msg.Key_event (key Keymap.Input.Tab))
   in
-  Alcotest.(check int) "Tab clamps Runtime connectors selected_index to 1" 1
+  Alcotest.(check int) "Tab preserves Tools selected_index (5)" 5
     m_tc_tab.runtime.selected_index;
+  Alcotest.(check int) "Tab keeps Connectors index clamped (0)" 0
+    m_tc_tab.runtime.connector_selected_index;
+  let m_tc_dn, _ =
+    Update.step ~now:t0 m_tc_tab (Msg.Key_event (key Keymap.Input.Down))
+  in
+  Alcotest.(check int) "Down on pane 1 moves connector_selected_index to 1" 1
+    m_tc_dn.runtime.connector_selected_index;
+  Alcotest.(check int) "Down on pane 1 preserves Tools selected_index (5)" 5
+    m_tc_dn.runtime.selected_index;
 
   (* Knowledge_memory: 4 conflicts on pane 0, 1 diff entry on pane 1 *)
   let conflicts4 =
@@ -4331,8 +4367,10 @@ let test_nav_fix6_work_inbox_filter_and_split_pane_clamping () =
   let m_km_tab, _ =
     Update.step ~now:t0 m_km_end (Msg.Key_event (key Keymap.Input.Tab))
   in
-  Alcotest.(check int) "Tab clamps Knowledge_memory pane 1 selected_index to 0" 0
-    m_km_tab.knowledge.selected_index
+  Alcotest.(check int) "Tab preserves Knowledge_memory conflict selected_index (3)"
+    3 m_km_tab.knowledge.selected_index;
+  Alcotest.(check int) "Tab keeps Knowledge_memory diff_scroll_offset clamped (0)"
+    0 m_km_tab.knowledge.diff_scroll_offset
 
 let test_nav_fix7_symmetric_viewport_scrolling_all_stores () =
   (* Verify smooth symmetric scroll with explicit ?viewport_rows:5:
@@ -5260,7 +5298,8 @@ let test_p2_schedules_attention_scroll_and_filter_guard () =
   Alcotest.(check int) "Attention Up past top edge pulls triage_scroll_offset=3"
     3 att_up_past.triage_scroll_offset;
 
-  (* 3. Update_nav.apply_move no-ops when nav.filter_focused = true *)
+  (* 3. Update_nav.apply_move allows live Up/Down while filter_focused = true,
+     and blocks Left/Right so cursor/tab cycling never hijacks filter typing *)
   let m0 = Model.initial ~cols:140 ~rows:40 () in
   let m_filt =
     {
@@ -5270,7 +5309,7 @@ let test_p2_schedules_attention_scroll_and_filter_guard () =
     }
   in
   let m_after_dn, _ = Update_nav.apply_move m_filt Keymap.Down in
-  Alcotest.(check int) "apply_move Down no-ops when filter_focused=true" 0
+  Alcotest.(check int) "apply_move Down moves live when filter_focused=true" 1
     m_after_dn.work.selected_index;
   let m_after_r, _ = Update_nav.apply_move m_filt Keymap.Right in
   Alcotest.(check bool) "apply_move Right does not cycle tab when filter_focused=true"

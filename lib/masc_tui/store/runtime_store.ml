@@ -77,6 +77,10 @@ type t = {
   show_unreported_accounts : bool;
   selected_index : int;
   scroll_offset : int;
+  quota_scroll_offset : int;
+  connector_selected_index : int;
+  connector_scroll_offset : int;
+  detail_scroll_offset : int;
   filter_query : string;
 }
 
@@ -117,27 +121,28 @@ let empty =
     show_unreported_accounts = false;
     selected_index = 0;
     scroll_offset = 0;
+    quota_scroll_offset = 0;
+    connector_selected_index = 0;
+    connector_scroll_offset = 0;
+    detail_scroll_offset = 0;
     filter_query = "";
   }
 
-let default_viewport_rows = 15
-
-let adjust_grouped_scroll ?(viewport_rows = default_viewport_rows) ~scroll
-    ~header_row vis_row =
-  let vr = max 1 viewport_rows in
-  let top_row = if vr >= 2 then min header_row vis_row else vis_row in
-  if top_row < scroll then top_row
-  else if vis_row >= scroll + vr then max 0 (vis_row - vr + 1)
-  else scroll
-
-let clamp_index len idx =
-  if len <= 0 then 0
-  else if idx < 0 then 0
-  else if idx >= len then len - 1
-  else idx
+let contains_ci = Store_scroll.contains_ci
+let adjust_grouped_scroll = Store_scroll.adjust_grouped_scroll
+let clamp_index = Store_scroll.clamp_index
 
 let set_tab active_tab t =
-  { t with active_tab; selected_index = 0; scroll_offset = 0 }
+  {
+    t with
+    active_tab;
+    selected_index = 0;
+    scroll_offset = 0;
+    quota_scroll_offset = 0;
+    connector_selected_index = 0;
+    connector_scroll_offset = 0;
+    detail_scroll_offset = 0;
+  }
 
 let cycle_tab dir t =
   let next_tab =
@@ -329,8 +334,24 @@ let credit_remaining_ratio (acc : Wire_runtime.account_usage) =
   | Wire_runtime.Account_reported_no_windows _ ->
       1.0
 
+let filtered_accounts t =
+  let all = all_accounts t in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then all
+  else
+    List.filter
+      (fun (acc : Wire_runtime.account_usage) ->
+        List.exists
+          (fun (p : Wire_runtime.usage_provider_ref) ->
+            contains_ci ~needle:q p.id || contains_ci ~needle:q p.display_name)
+          acc.providers
+        || contains_ci ~needle:q acc.scope
+        || contains_ci ~needle:q acc.scope_id
+        || contains_ci ~needle:q (account_display_name t acc))
+      all
+
 let partition_accounts t =
-  let accounts = all_accounts t in
+  let accounts = filtered_accounts t in
   let credits = ref [] in
   let subs = ref [] in
   let unreported = ref [] in
@@ -645,53 +666,62 @@ let keeper_spend_rows t : keeper_spend_row list =
         Option.value ~default:"Other"
           (Wire_fleet.classify_company_single ~group:None name)
   in
-  match Observed.to_option t.efficiency with
-  | Some eff when eff.keepers <> [] ->
-      List.map
-        (fun (k : Wire_runtime.keeper_efficiency_row) : keeper_spend_row ->
-          {
-            keeper = k.keeper;
-            company = company_of k.keeper;
-            calls = k.calls;
-            turns = k.turns;
-            input_tokens = k.input_tokens;
-            output_tokens = k.output_tokens;
-            cache_hit_pct = k.cache_hit_pct;
-            cost_usd = k.cost_usd;
-            cost_per_turn_usd =
-              (if k.turns > 0 then Some (k.cost_usd /. Float.of_int k.turns)
-              else None);
-          })
-        eff.keepers
-      |> List.stable_sort compare_keeper_spend
-  | Some _ | None -> (
-      match Observed.to_option t.keeper_costs with
-      | None -> []
-      | Some kc ->
-          List.map
-            (fun (r : Wire_runtime.keeper_cost_row) : keeper_spend_row ->
-              let cost_usd =
-                Option.value ~default:0.0 (Observed.to_option r.total_cost_usd)
-              in
-              let tok =
-                Option.value ~default:0 (Observed.to_option r.total_tokens)
-              in
-              {
-                keeper = r.keeper_name;
-                company = company_of r.keeper_name;
-                calls = r.sample_count;
-                turns = r.sample_count;
-                input_tokens = tok;
-                output_tokens = 0;
-                cache_hit_pct = Observed.unreported;
-                cost_usd;
-                cost_per_turn_usd =
-                  (if r.sample_count > 0 then
-                     Some (cost_usd /. Float.of_int r.sample_count)
-                  else None);
-              })
-            kc.rows
-          |> List.stable_sort compare_keeper_spend)
+  let raw =
+    match Observed.to_option t.efficiency with
+    | Some eff when eff.keepers <> [] ->
+        List.map
+          (fun (k : Wire_runtime.keeper_efficiency_row) : keeper_spend_row ->
+            {
+              keeper = k.keeper;
+              company = company_of k.keeper;
+              calls = k.calls;
+              turns = k.turns;
+              input_tokens = k.input_tokens;
+              output_tokens = k.output_tokens;
+              cache_hit_pct = k.cache_hit_pct;
+              cost_usd = k.cost_usd;
+              cost_per_turn_usd =
+                (if k.turns > 0 then Some (k.cost_usd /. Float.of_int k.turns)
+                else None);
+            })
+          eff.keepers
+        |> List.stable_sort compare_keeper_spend
+    | Some _ | None -> (
+        match Observed.to_option t.keeper_costs with
+        | None -> []
+        | Some kc ->
+            List.map
+              (fun (r : Wire_runtime.keeper_cost_row) : keeper_spend_row ->
+                let cost_usd =
+                  Option.value ~default:0.0 (Observed.to_option r.total_cost_usd)
+                in
+                let tok =
+                  Option.value ~default:0 (Observed.to_option r.total_tokens)
+                in
+                {
+                  keeper = r.keeper_name;
+                  company = company_of r.keeper_name;
+                  calls = r.sample_count;
+                  turns = r.sample_count;
+                  input_tokens = tok;
+                  output_tokens = 0;
+                  cache_hit_pct = Observed.unreported;
+                  cost_usd;
+                  cost_per_turn_usd =
+                    (if r.sample_count > 0 then
+                       Some (cost_usd /. Float.of_int r.sample_count)
+                    else None);
+                })
+              kc.rows
+            |> List.stable_sort compare_keeper_spend)
+  in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then raw
+  else
+    List.filter
+      (fun (r : keeper_spend_row) ->
+        contains_ci ~needle:q r.keeper || contains_ci ~needle:q r.company)
+      raw
 
 let grouped_keeper_spend_rows t : company_spend_group list =
   let rows = keeper_spend_rows t in
@@ -790,40 +820,105 @@ let to_fusion_launch_request t =
               web_tools = d.web_tools;
             } )
 
-let selected_lane t =
-  match Observed.to_option t.runtime_resolved with
-  | None -> None
-  | Some snap ->
-      List.nth_opt snap.lanes
-        (clamp_index (List.length snap.lanes) t.selected_index)
+let filtered_lanes t =
+  let lanes =
+    match Observed.to_option t.runtime_resolved with
+    | Some snap -> snap.lanes
+    | None -> []
+  in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then lanes
+  else
+    List.filter
+      (fun (l : Wire_runtime.failover_lane) ->
+        contains_ci ~needle:q l.id
+        || List.exists (fun rid -> contains_ci ~needle:q rid) l.runtime_ids)
+      lanes
 
-let active_list_len ?(pane_index = 0) t =
-  match t.active_tab with
-  | Nav.Runtime_quotas_credits ->
-      let p = partition_accounts t in
-      let base =
-        List.length p.exhausted_and_credits + List.length p.active_subscriptions
-      in
-      let extra =
-        match p.unreported with
-        | [] -> 0
-        | xs -> if t.show_unreported_accounts then 1 + List.length xs else 1
-      in
-      base + extra
-  | Nav.Runtime_efficiency_spend -> List.length (keeper_spend_display_rows t)
-  | Nav.Runtime_failover_lanes -> (
-      match Observed.to_option t.runtime_resolved with
-      | Some r -> List.length r.lanes
-      | None -> 0)
-  | Nav.Runtime_tools_connectors ->
-      if Int.equal (pane_index mod 2) 0 then
-        match Observed.to_option t.tools_catalog with
-        | Some xs -> List.length xs
-        | None -> 0
-      else
-        match Observed.to_option t.connectors with
-        | Some xs -> List.length xs
-        | None -> 0
+let filtered_tools t =
+  let tools =
+    match Observed.to_option t.tools_catalog with
+    | Some xs -> xs
+    | None -> []
+  in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then tools
+  else
+    List.filter
+      (fun (tool : Wire_runtime.tool_summary) ->
+        contains_ci ~needle:q tool.name
+        ||
+        match tool.description with
+        | Some d -> contains_ci ~needle:q d
+        | None -> false)
+      tools
+
+let filtered_connectors t =
+  let cs =
+    match Observed.to_option t.connectors with
+    | Some xs -> xs
+    | None -> []
+  in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then cs
+  else
+    List.filter
+      (fun (c : Wire_runtime.connector_row) ->
+        contains_ci ~needle:q c.connector_id
+        || contains_ci ~needle:q c.display_name
+        || (match c.channel with
+            | Some ch -> contains_ci ~needle:q ch
+            | None -> false)
+        ||
+        match c.error with
+        | Some err -> contains_ci ~needle:q err
+        | None -> false)
+      cs
+
+let selected_lane t =
+  let lanes = filtered_lanes t in
+  List.nth_opt lanes (clamp_index (List.length lanes) t.selected_index)
+
+let selected_connector t =
+  let cs = filtered_connectors t in
+  List.nth_opt cs (clamp_index (List.length cs) t.connector_selected_index)
+
+let subscription_window_count t =
+  List.fold_left
+    (fun acc (acc_row : Wire_runtime.account_usage) ->
+      match acc_row.state with
+      | Wire_runtime.Account_reported ws ->
+          let sub_n =
+            List.fold_left
+              (fun n (w : Wire_runtime.usage_window) ->
+                match w.utilization with
+                | Wire_runtime.Util_fraction _
+                | Wire_runtime.Util_percent _
+                | Wire_runtime.Util_credit_unlimited ->
+                    n + 1
+                | Wire_runtime.Util_usd _
+                | Wire_runtime.Util_credit_balance _
+                | Wire_runtime.Util_credit_retracted ->
+                    n)
+              0 ws
+          in
+          acc + sub_n
+      | Wire_runtime.Account_not_reported_since_start
+      | Wire_runtime.Account_reported_no_windows _ ->
+          acc)
+    0 (filtered_accounts t)
+
+let credits_list_len t =
+  let p = partition_accounts t in
+  let base =
+    List.length p.exhausted_and_credits + List.length p.active_subscriptions
+  in
+  let extra =
+    match p.unreported with
+    | [] -> 0
+    | xs -> if t.show_unreported_accounts then 1 + List.length xs else 1
+  in
+  base + extra
 
 let visual_row_for_selection t ~selected_index =
   match t.active_tab with
@@ -840,36 +935,94 @@ let visual_row_for_selection t ~selected_index =
             else walk (vis_row + 1 + n) (item_idx + n) rest
       in
       walk 0 0 groups
-  | Nav.Runtime_failover_lanes -> (
-      match Observed.to_option t.runtime_resolved with
-      | None -> (selected_index, selected_index)
-      | Some snap ->
-          let rec walk vis_row idx = function
-            | [] -> (vis_row, vis_row)
-            | (lane : Wire_runtime.failover_lane) :: rest ->
-                if idx >= selected_index then (vis_row, vis_row)
-                else
-                  walk
-                    (vis_row + 1 + List.length lane.runtime_ids)
-                    (idx + 1) rest
-          in
-          walk 0 0 snap.lanes)
+  | Nav.Runtime_failover_lanes ->
+      let lanes = filtered_lanes t in
+      let rec walk vis_row idx = function
+        | [] -> (vis_row, vis_row)
+        | (lane : Wire_runtime.failover_lane) :: rest ->
+            if idx >= selected_index then (vis_row, vis_row)
+            else
+              walk
+                (vis_row + 1 + List.length lane.runtime_ids)
+                (idx + 1) rest
+      in
+      walk 0 0 lanes
   | Nav.Runtime_quotas_credits | Nav.Runtime_tools_connectors ->
       (selected_index, selected_index)
 
-let move_selection ?pane_index ?viewport_rows ~delta t =
-  let len = active_list_len ?pane_index t in
-  let selected_index = clamp_index len (t.selected_index + delta) in
-  let header_row, vis_row = visual_row_for_selection t ~selected_index in
-  let scroll_offset =
-    adjust_grouped_scroll ?viewport_rows ~scroll:t.scroll_offset ~header_row
-      vis_row
-  in
-  { t with selected_index; scroll_offset }
+let reset_detail_scroll t = { t with detail_scroll_offset = 0 }
+
+let move_selection ?(pane_index = 0) ?viewport_rows ~delta t =
+  match t.active_tab with
+  | Nav.Runtime_quotas_credits ->
+      if pane_index = 0 then
+        let total = subscription_window_count t in
+        let max_scroll = max 0 (total - 1) in
+        let quota_scroll_offset =
+          Store_scroll.clamp_scroll ~max_scroll (t.quota_scroll_offset + delta)
+        in
+        { t with quota_scroll_offset }
+      else
+        let len = credits_list_len t in
+        let selected_index = clamp_index len (t.selected_index + delta) in
+        let scroll_offset =
+          Store_scroll.adjust_scroll ?viewport_rows ~scroll:t.scroll_offset
+            selected_index
+        in
+        { t with selected_index; scroll_offset }
+  | Nav.Runtime_efficiency_spend ->
+      let len = List.length (keeper_spend_display_rows t) in
+      let selected_index = clamp_index len (t.selected_index + delta) in
+      let header_row, vis_row = visual_row_for_selection t ~selected_index in
+      let scroll_offset =
+        adjust_grouped_scroll ?viewport_rows ~scroll:t.scroll_offset ~header_row
+          vis_row
+      in
+      { t with selected_index; scroll_offset }
+  | Nav.Runtime_failover_lanes ->
+      if pane_index = 1 then
+        let detail_scroll_offset =
+          Store_scroll.clamp_scroll ~max_scroll:64
+            (t.detail_scroll_offset + delta)
+        in
+        { t with detail_scroll_offset }
+      else
+        let len = List.length (filtered_lanes t) in
+        let selected_index = clamp_index len (t.selected_index + delta) in
+        let header_row, vis_row = visual_row_for_selection t ~selected_index in
+        let scroll_offset =
+          adjust_grouped_scroll ?viewport_rows ~scroll:t.scroll_offset
+            ~header_row vis_row
+        in
+        let detail_scroll_offset =
+          if Int.equal selected_index t.selected_index then
+            t.detail_scroll_offset
+          else 0
+        in
+        { t with selected_index; scroll_offset; detail_scroll_offset }
+  | Nav.Runtime_tools_connectors ->
+      if pane_index = 1 then
+        let len = List.length (filtered_connectors t) in
+        let connector_selected_index =
+          clamp_index len (t.connector_selected_index + delta)
+        in
+        let connector_scroll_offset =
+          Store_scroll.adjust_scroll ?viewport_rows
+            ~scroll:t.connector_scroll_offset connector_selected_index
+        in
+        { t with connector_selected_index; connector_scroll_offset }
+      else
+        let len = List.length (filtered_tools t) in
+        let selected_index = clamp_index len (t.selected_index + delta) in
+        let scroll_offset =
+          Store_scroll.adjust_scroll ?viewport_rows ~scroll:t.scroll_offset
+            selected_index
+        in
+        { t with selected_index; scroll_offset }
 
 let set_show_unreported_accounts show_unreported_accounts t =
   let next = { t with show_unreported_accounts } in
-  let len = active_list_len next in
+  let len = credits_list_len next in
   let selected_index = clamp_index len next.selected_index in
   let scroll_offset =
     if selected_index < next.scroll_offset then selected_index
@@ -881,7 +1034,16 @@ let toggle_unreported_accounts t =
   set_show_unreported_accounts (not t.show_unreported_accounts) t
 
 let set_filter filter_query t =
-  { t with filter_query; selected_index = 0; scroll_offset = 0 }
+  {
+    t with
+    filter_query;
+    selected_index = 0;
+    scroll_offset = 0;
+    quota_scroll_offset = 0;
+    connector_selected_index = 0;
+    connector_scroll_offset = 0;
+    detail_scroll_offset = 0;
+  }
 
 let mark_stale_all t =
   {

@@ -150,7 +150,11 @@ let draw_subscription_windows ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     let total_sub = List.length sub_rows in
     let truncated = total_sub > content.h && content.h >= 2 in
     let visible_limit = if truncated then content.h - 1 else content.h in
-    let visible_rows = H.safe_take visible_limit sub_rows in
+    let max_scroll = Int.max 0 (total_sub - visible_limit) in
+    let start_idx = Int.min max_scroll (Int.max 0 rt.quota_scroll_offset) in
+    let visible_rows =
+      Store_scroll.drop start_idx sub_rows |> H.safe_take visible_limit
+    in
     let row_bottom = if truncated then bottom - 1 else bottom in
     List.iter
       (fun (row : flat_sub_window) ->
@@ -227,12 +231,31 @@ let draw_subscription_windows ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         end)
       visible_rows;
     if truncated then begin
-      let hidden_n = Int.max 0 (total_sub - List.length visible_rows) in
+      let hidden_below =
+        Int.max 0 (total_sub - start_idx - List.length visible_rows)
+      in
       let more_txt =
-        Say.resolve lang
-          (Say.make
-             ~ko:(Printf.sprintf "%s %d개 더" (Glyph.to_utf8 Glyph.Delta_down) hidden_n)
-             ~en:(Printf.sprintf "%s %d more" (Glyph.to_utf8 Glyph.Delta_down) hidden_n))
+        if start_idx > 0 && hidden_below > 0 then
+          Say.resolve lang
+            (Say.make
+               ~ko:
+                 (Printf.sprintf "%s %d · %s %d개 더"
+                    (Glyph.to_utf8 Glyph.Delta_up) start_idx
+                    (Glyph.to_utf8 Glyph.Delta_down) hidden_below)
+               ~en:
+                 (Printf.sprintf "%s %d · %s %d more"
+                    (Glyph.to_utf8 Glyph.Delta_up) start_idx
+                    (Glyph.to_utf8 Glyph.Delta_down) hidden_below))
+        else if start_idx > 0 then
+          Say.resolve lang
+            (Say.make
+               ~ko:(Printf.sprintf "%s %d개 위" (Glyph.to_utf8 Glyph.Delta_up) start_idx)
+               ~en:(Printf.sprintf "%s %d above" (Glyph.to_utf8 Glyph.Delta_up) start_idx))
+        else
+          Say.resolve lang
+            (Say.make
+               ~ko:(Printf.sprintf "%s %d개 더" (Glyph.to_utf8 Glyph.Delta_down) hidden_below)
+               ~en:(Printf.sprintf "%s %d more" (Glyph.to_utf8 Glyph.Delta_down) hidden_below))
       in
       ignore
         (H.put_right ~grid ~clip:content ~right_x:(Rect.right content)
@@ -1194,11 +1217,7 @@ let render_quotas_credits ~(model : Model.t) ~cache ~(rect : Rect.t)
   let rt = model.runtime in
   let now_unix = model.freshness.last_wall_unix in
   let part = Runtime_store.partition_accounts rt in
-  let accounts =
-    match Observed.to_option rt.usage_windows with
-    | Some uw -> uw.accounts
-    | None -> []
-  in
+  let accounts = Runtime_store.filtered_accounts rt in
   let buckets = compute_quota_health_buckets part in
   let bar_rect, body_rect =
     match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
@@ -2258,10 +2277,11 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
   let rt = model.runtime in
   let now_unix = model.freshness.last_wall_unix in
   let active_probes, outside_probes = Runtime_store.active_and_outside_probes rt in
-  let lanes, runtimes =
+  let lanes = Runtime_store.filtered_lanes rt in
+  let runtimes =
     match Observed.to_option rt.runtime_resolved with
-    | Some snap -> (snap.lanes, snap.runtimes)
-    | None -> ([], [])
+    | Some snap -> snap.runtimes
+    | None -> []
   in
   let runtimes_tbl : (string, Wire_runtime.runtime_option) Hashtbl.t =
     Hashtbl.create 32
@@ -2362,16 +2382,19 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
   let cascade_inner =
     Card.draw ~cache grid ~rect:left_rect ~theme
       (H.card_spec ~focused:(model.nav.pane_index = 0)
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[Enter] 상세" ~en:"[Enter] Dive"))
+         ~hotkey:
+           (Say.resolve lang
+              (Say.make ~ko:"[Enter] 상세 · [f] 퓨전"
+                 ~en:"[Enter] Dive · [f] Fusion"))
          (Say.resolve lang
             (Say.make ~ko:"페일오버 캐스케이드" ~en:"Failover Cascade")))
   in
   let pad_r = if cascade_inner.w >= 24 then 2 else 1 in
   if not (Rect.is_empty cascade_inner) then begin
     match rt.runtime_resolved with
-    | Observed.Value { data = snap; _ } when snap.lanes <> [] ->
+    | Observed.Value _ when lanes <> [] ->
         let bottom = Rect.bottom cascade_inner in
-        let sel_idx = H.clamp_index (List.length snap.lanes) rt.selected_index in
+        let sel_idx = H.clamp_index (List.length lanes) rt.selected_index in
         let reserve_ext =
           if rt.show_outside_lane_probes && outside_probes <> [] then
             Int.min 5 (1 + List.length outside_probes)
@@ -2390,7 +2413,7 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
               (fun si rid ->
                 visual_rows := `Slot (si, slot_n, rid, is_sel) :: !visual_rows)
               lane.runtime_ids)
-          snap.lanes;
+          lanes;
         let v_arr = Array.of_list (List.rev !visual_rows) in
         let total_v = Array.length v_arr in
         let start_v, _ =
@@ -2608,8 +2631,12 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
     | Observed.Value _ ->
         H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp cascade_inner) ~theme
           (Say.resolve lang
-             (Say.make ~ko:"선언된 페일오버 레인 없음"
-                ~en:"No failover lanes declared"))
+             (if String.equal (String.trim rt.filter_query) "" then
+                Say.make ~ko:"선언된 페일오버 레인 없음"
+                  ~en:"No failover lanes declared"
+              else
+                Say.make ~ko:"필터에 일치하는 레인 없음"
+                  ~en:"No failover lanes match filter"))
     | ( Observed.Loading _
       | Observed.Absent
       | Observed.Unreported
@@ -2747,8 +2774,15 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
               ();
             incr y
           end;
+          let avail_slot_rows = Int.max 1 (bot - !y) in
+          let slot_skip =
+            Int.min
+              (Int.max 0 (slot_n - avail_slot_rows))
+              (Int.max 0 rt.detail_scroll_offset)
+          in
           List.iteri
-            (fun idx rid ->
+            (fun local_idx rid ->
+              let idx = slot_skip + local_idx in
               if !y < bot then begin
                 let lbl = Wire_runtime.human_runtime_slot_label ~runtimes rid in
                 let transport_s =
@@ -2796,7 +2830,7 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
                      right_s);
                 incr y
               end)
-            lane.runtime_ids
+            (Store_scroll.drop slot_skip lane.runtime_ids)
         end
   end;
   (* Bottom Right Card: Unified Exact Output + Fusion Panel Fan-Out *)
@@ -3119,8 +3153,9 @@ let render_tools_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
          (Say.resolve lang (Say.make ~ko:"도구 카탈로그" ~en:"Tools Catalog")))
   in
   if not (Rect.is_empty tools_inner) then begin
+    let tools = Runtime_store.filtered_tools rt in
     match rt.tools_catalog with
-    | Observed.Value { data = tools; _ } when tools <> [] ->
+    | Observed.Value _ when tools <> [] ->
         let columns : Table.column list =
           [
             {
@@ -3187,7 +3222,11 @@ let render_tools_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
     | Observed.Value _ ->
         H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp tools_inner) ~theme
           (Say.resolve lang
-             (Say.make ~ko:"등록된 도구 없음" ~en:"No tools registered"))
+             (if String.equal (String.trim rt.filter_query) "" then
+                Say.make ~ko:"등록된 도구 없음" ~en:"No tools registered"
+              else
+                Say.make ~ko:"필터에 일치하는 도구 없음"
+                  ~en:"No tools match filter"))
     | ( Observed.Loading _
       | Observed.Absent
       | Observed.Unreported
@@ -3214,32 +3253,70 @@ let render_tools_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
         ();
       incr y
     end;
-    (match rt.connectors with
-     | Observed.Value { data = cs; _ } when cs <> [] ->
-         List.iter
-           (fun (c : Wire_runtime.connector_row) ->
+    (let cs = Runtime_store.filtered_connectors rt in
+     match rt.connectors with
+     | Observed.Value _ when cs <> [] ->
+         let total_cs = List.length cs in
+         let max_conn_rows =
+           Int.max 1 (Int.min total_cs (Int.max 4 (bottom - !y - 4)))
+         in
+         let sel_c = H.clamp_index total_cs rt.connector_selected_index in
+         let start_c, _ =
+           Table.compute_viewport ~total_rows:total_cs
+             ~viewport_rows:max_conn_rows ~scroll:rt.connector_scroll_offset
+             ~selected:(Some sel_c)
+         in
+         let conn_focused = model.nav.pane_index = 1 in
+         List.iteri
+           (fun local_i (c : Wire_runtime.connector_row) ->
+             let idx = start_c + local_i in
              if !y < bottom then begin
+               let is_sel = Int.equal idx sel_c in
+               let row_bg =
+                 if is_sel && conn_focused then theme.selection_bg
+                 else theme.surface_1
+               in
+               if is_sel && conn_focused then begin
+                 let r_rect =
+                   Rect.make ~x:right_content.x ~y:!y ~w:right_content.w ~h:1
+                 in
+                 H.paint_selected_row_bg ~grid ~clip:right_content
+                   ~row_rect:r_rect ~theme ()
+               end;
                let g, tone, st = connector_status_display ~lang c.connection in
                let ch = match c.channel with Some s -> " #" ^ s | None -> "" in
                let err = match c.error with Some e -> " · " ^ e | None -> "" in
+               let prefix =
+                 if is_sel && conn_focused then
+                   Glyph.to_utf8 Glyph.Focus_caret ^ " "
+                 else ""
+               in
                let line =
-                 Printf.sprintf "%s %s (%s%s · %d bind)%s" (Glyph.to_utf8 g)
-                   c.display_name st ch c.binding_count err
+                 Printf.sprintf "%s%s %s (%s%s · %d bind)%s" prefix
+                   (Glyph.to_utf8 g) c.display_name st ch c.binding_count err
+               in
+               let style =
+                 if is_sel && conn_focused then
+                   H.status_style ~theme ~bg:row_bg ~attrs:Attr.bold tone
+                 else H.status_style ~theme ~bg:row_bg tone
                in
                ignore
                  (H.put_clipped ~grid ~clip:right_content ~x:right_content.x
-                    ~y:!y ~max_w:right_content.w
-                    ~style:(H.status_style ~theme tone) line);
+                    ~y:!y ~max_w:right_content.w ~style line);
                incr y
              end)
-           (H.safe_take 4 cs)
+           (Store_scroll.drop start_c cs |> H.safe_take max_conn_rows)
      | Observed.Value _ ->
          if !y < bottom then begin
            ignore
              (H.put_clipped ~grid ~clip:right_content ~x:right_content.x ~y:!y
                 ~max_w:right_content.w ~style:(H.whisper_style ~theme ())
                 (Say.resolve lang
-                   (Say.make ~ko:"커넥터 없음" ~en:"No connectors")));
+                   (if String.equal (String.trim rt.filter_query) "" then
+                      Say.make ~ko:"커넥터 없음" ~en:"No connectors"
+                    else
+                      Say.make ~ko:"필터에 일치하는 커넥터 없음"
+                        ~en:"No connectors match filter")));
            incr y
          end
      | ( Observed.Loading _

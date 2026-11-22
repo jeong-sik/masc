@@ -8,7 +8,6 @@ type render_frame =
   model:Model.t -> cache:Card.Cache.t -> Cell_grid.t -> Presenter.cursor
 
 let drain_budget_ns = 3_000_000L
-let esc_flush_timeout_s = 0.025
 let voice_tick_interval_ns = 100_000_000L
 
 let local_tz_offset_sec ?(at = Unix.time ()) () =
@@ -152,6 +151,10 @@ let is_mouse_toggle_key (kev : Input_decoder.key_event) =
   &&
   match kev.key with
   | Input_decoder.Char "m" -> true
+  | Input_decoder.Char s when String.length s > 1 -> (
+      match Input_decoder.Ime.single_latin_key s with
+      | Some "m" -> true
+      | Some _ | None -> false)
   | Input_decoder.Char _
   | Input_decoder.Enter
   | Input_decoder.Tab
@@ -232,6 +235,32 @@ type input_reader_handle = {
   stopped : unit Eio.Promise.t;
 }
 
+let dispatch_decoded_events ~signals ~bell ~input_queue events =
+  let pushed = ref false in
+  List.iter
+    (function
+      | Input_decoder.Key kev when is_ctrl_c kev ->
+          Signals.record_interrupt signals;
+          Wake_bell.ring bell Wake_bell.Interrupt
+      | Input_decoder.Key kev ->
+          Signals.withdraw_interrupt signals;
+          Eio.Stream.add input_queue (Msg.Key_event kev);
+          pushed := true
+      | Input_decoder.Paste { text; _ } ->
+          Signals.withdraw_interrupt signals;
+          Eio.Stream.add input_queue (Msg.Paste_text text);
+          pushed := true
+      | Input_decoder.Mouse mev ->
+          Signals.withdraw_interrupt signals;
+          Eio.Stream.add input_queue (Msg.Mouse_event mev);
+          pushed := true
+      | Input_decoder.Reply _
+      | Input_decoder.Unknown_escape
+      | Input_decoder.Invalid_utf8 ->
+          ())
+    events;
+  if !pushed then Wake_bell.ring bell Wake_bell.Ui_bus
+
 let start_input_reader ~sw ~clock ~signals ~bell ~input_queue =
   Eio.Switch.check sw;
   let stop_p, stop_u = Eio.Promise.create () in
@@ -240,30 +269,7 @@ let start_input_reader ~sw ~clock ~signals ~bell ~input_queue =
   Eio.Fiber.fork_daemon ~sw (fun () ->
       let decoder = Input_decoder.create () in
       let buf = Bytes.create 256 in
-      let emit_events events =
-        let pushed = ref false in
-        List.iter
-          (function
-            | Input_decoder.Key kev when is_ctrl_c kev ->
-                Signals.record_interrupt signals;
-                Wake_bell.ring bell Wake_bell.Interrupt
-            | Input_decoder.Key kev ->
-                Signals.withdraw_interrupt signals;
-                Eio.Stream.add input_queue (Msg.Key_event kev);
-                pushed := true
-            | Input_decoder.Paste { text; _ } ->
-                Eio.Stream.add input_queue (Msg.Paste_text text);
-                pushed := true
-            | Input_decoder.Mouse mev ->
-                Eio.Stream.add input_queue (Msg.Mouse_event mev);
-                pushed := true
-            | Input_decoder.Reply _
-            | Input_decoder.Unknown_escape
-            | Input_decoder.Invalid_utf8 ->
-                ())
-          events;
-        if !pushed then Wake_bell.ring bell Wake_bell.Ui_bus
-      in
+      let emit_events = dispatch_decoded_events ~signals ~bell ~input_queue in
       let rec loop () =
         Eio.Switch.check sw;
         if Eio.Promise.is_resolved stop_p then begin
@@ -281,7 +287,8 @@ let start_input_reader ~sw ~clock ~signals ~bell ~input_queue =
                   (fun () ->
                     Eio.Promise.await stop_p;
                     `Stop)
-            | Some _ ->
+            | Some pending_kind ->
+                let timeout_s = Input_decoder.idle_timeout_s pending_kind in
                 Eio.Fiber.first
                   (fun () ->
                     Eio_unix.await_readable Unix.stdin;
@@ -289,7 +296,7 @@ let start_input_reader ~sw ~clock ~signals ~bell ~input_queue =
                   (fun () ->
                     Eio.Fiber.first
                       (fun () ->
-                        Eio.Time.sleep clock esc_flush_timeout_s;
+                        Eio.Time.sleep clock timeout_s;
                         `Idle_flush)
                       (fun () ->
                         Eio.Promise.await stop_p;
@@ -484,10 +491,12 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                 ignore
                   (Terminal_out.drain ~within_s:Terminal_out.handoff_limit_s
                     : Terminal_out.drained);
-                restore_raw ());
+                restore_raw ();
+                Signals.suspend_sigtstp_guard signals);
             resume_terminal =
               (fun () ->
                 Signals.clear_interrupts signals;
+                Signals.resume_sigtstp_guard signals;
                 enter_raw ();
                 write_enter_screen ();
                 Presenter.invalidate presenter;
@@ -623,11 +632,12 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
             let now_ns = Clock.Mono.to_ns now in
 
             (* 1. Process POSIX exit signals. *)
-            (match Signals.poll_exit signals with
+            (match Signals.poll_exit ~now signals with
             | Signals.Continue -> ()
             | Signals.Interrupt_armed ->
                 model :=
-                  Model.with_toast ~now ~duration_s:3.0 ~level:Model.Toast_warning
+                  Model.with_toast ~now ~duration_s:Signals.interrupt_arm_window_s
+                    ~level:Model.Toast_warning
                     (Say.make
                        ~ko:"종료하려면 Ctrl+C 를 한 번 더 누르세요"
                        ~en:"Press Ctrl+C again to quit")
@@ -714,6 +724,11 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                   if minute_due then last_clock_minute := cur_minute;
                   apply_msg ~now:now_after (Msg.Tick { wall_unix = wall_now })
                 end;
+                ignore (Signals.expire_interrupt ~now:now_after signals : bool);
+                let interrupt_deadline =
+                  Option.map Clock.Mono.to_ns
+                    (Signals.interrupt_armed_deadline signals)
+                in
                 let extra_after =
                   if should_tick_now then
                     let post_toast_expires =
@@ -727,8 +742,13 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                         ~last_voice_tick_ns:!last_voice_tick_ns
                         ~toast_expires_ns:post_toast_expires ~voice_recording
                     in
-                    earliest_opt next_extra (Some minute_deadline)
-                  else earliest_opt extra (Some minute_deadline)
+                    earliest_opt
+                      (earliest_opt next_extra (Some minute_deadline))
+                      interrupt_deadline
+                  else
+                    earliest_opt
+                      (earliest_opt extra (Some minute_deadline))
+                      interrupt_deadline
                 in
                 scheduler :=
                   Frame_scheduler.set_extra_deadline extra_after !scheduler;

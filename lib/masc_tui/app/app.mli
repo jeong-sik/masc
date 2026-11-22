@@ -38,8 +38,19 @@ val mouse_capture_seq : bool -> string
     [?1002h] drag hijack) when [true], and disables all mouse modes when [false]. *)
 
 val should_toggle_mouse_capture : Model.t -> Input_decoder.key_event -> bool
-(** [true] iff [ev] is unmodified bare [m] while no overlay, text-capture
-    surface, or micro/too-small viewport gate is active. *)
+(** [true] iff [ev] is unmodified bare [m] (or its Korean 2-bulsik IME
+    equivalent ['ㅡ']) while no overlay, text-capture surface, or
+    micro/too-small viewport gate is active. *)
+
+val dispatch_decoded_events :
+  signals:Signals.t ->
+  bell:Wake_bell.t ->
+  input_queue:Msg.t Eio.Stream.t ->
+  Input_decoder.event list ->
+  unit
+(** Route decoded terminal input events into {!Signals}, {!Wake_bell}, and
+    [input_queue]. [Ctrl+C] arms/confirms interrupt; ordinary keys, bracketed
+    pastes, and mouse events withdraw an armed interrupt. *)
 
 val should_emit_tick :
   now_ns:int64 ->

@@ -2,4 +2,10 @@
 
 (test
  (name test_core_term)
+ (modules test_core_term)
  (libraries masc_tui_core masc_tui_term unix threads alcotest))
+
+(test
+ (name test_input_decoder_matrix)
+ (modules test_input_decoder_matrix)
+ (libraries masc_tui_core masc_tui_term masc_tui_keymap unix alcotest))

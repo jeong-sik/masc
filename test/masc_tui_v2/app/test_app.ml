@@ -425,12 +425,155 @@ let test_signals_state_machine_and_restore () =
         "[masc-tui] exit: normal (signal SIGTERM)"
         (Exit_reason.wire_line reason)
   | None -> Alcotest.fail "expected Terminate exit reason");
-  (* Switch install/restore roundtrip. *)
-  Eio_main.run @@ fun _env ->
-  Eio.Switch.run @@ fun sw ->
-  let bell2 = Wake_bell.create () in
-  let sigs2 = Signals.create ~bell:bell2 in
-  Signals.install ~sw sigs2
+  (* Switch install/restore roundtrip including SIGTSTP guard suspend/resume
+     for $EDITOR handoff. *)
+  let sentinel_hits = ref 0 in
+  let orig_sigtstp =
+    Sys.signal Sys.sigtstp (Sys.Signal_handle (fun _ -> incr sentinel_hits))
+  in
+  Fun.protect
+    ~finally:(fun () -> Sys.set_signal Sys.sigtstp orig_sigtstp)
+    (fun () ->
+      Eio_main.run @@ fun _env ->
+      Eio.Switch.run (fun sw ->
+          let bell2 = Wake_bell.create () in
+          let sigs2 = Signals.create ~bell:bell2 in
+          Signals.install ~sw sigs2;
+          Alcotest.(check bool) "SIGTSTP guarded after install" true
+            (Signals.is_sigtstp_guarded sigs2);
+          (* Sending SIGTSTP while guarded must NOT stop or invoke prior handler. *)
+          Unix.kill (Unix.getpid ()) Sys.sigtstp;
+          Alcotest.(check int) "prior SIGTSTP handler suppressed while guarded"
+            0 !sentinel_hits;
+          (* $EDITOR pause_terminal suspends guard, restoring prior disposition. *)
+          Signals.suspend_sigtstp_guard sigs2;
+          Alcotest.(check bool) "SIGTSTP unguarded while suspended" false
+            (Signals.is_sigtstp_guarded sigs2);
+          Unix.kill (Unix.getpid ()) Sys.sigtstp;
+          Alcotest.(check int) "prior SIGTSTP handler active while suspended"
+            1 !sentinel_hits;
+          (* $EDITOR resume_terminal re-installs guard before raw mode resumes. *)
+          Signals.resume_sigtstp_guard sigs2;
+          Alcotest.(check bool) "SIGTSTP guarded again after resume" true
+            (Signals.is_sigtstp_guarded sigs2);
+          Unix.kill (Unix.getpid ()) Sys.sigtstp;
+          Alcotest.(check int) "prior SIGTSTP handler suppressed again after resume"
+            1 !sentinel_hits);
+      (* Switch release restores prior SIGTSTP disposition. *)
+      Unix.kill (Unix.getpid ()) Sys.sigtstp;
+      Alcotest.(check int) "prior SIGTSTP handler restored on switch release"
+        2 !sentinel_hits)
+
+let test_ctrl_c_arm_expire_and_withdraw_on_paste_mouse () =
+  let t0 = Clock.Mono.of_ns 10_000_000_000L in
+  let bell = Wake_bell.create () in
+  let sigs = Signals.create ~bell in
+  let queue : Msg.t Eio.Stream.t = Eio.Stream.create max_int in
+  let ctrl_c_ev =
+    Masc_tui_term.Input_decoder.Key
+      {
+        key = Masc_tui_term.Input_decoder.Char "c";
+        mods = { ctrl = true; alt = false; shift = false };
+      }
+  in
+
+  (* 1. First Ctrl+C arms for 3s; confirm inside window succeeds. *)
+  App.dispatch_decoded_events ~signals:sigs ~bell ~input_queue:queue [ ctrl_c_ev ];
+  Alcotest.(check bool) "first Ctrl+C arms" true
+    (Signals.equal_exit_verdict (Signals.poll_exit ~now:t0 sigs) Signals.Interrupt_armed);
+  Alcotest.(check bool) "armed at t0" true (Signals.is_interrupt_armed ~now:t0 sigs);
+  let t_before = Clock.Mono.after_s t0 2.9 in
+  Alcotest.(check bool) "does not expire at +2.9s" false
+    (Signals.expire_interrupt ~now:t_before sigs);
+  App.dispatch_decoded_events ~signals:sigs ~bell ~input_queue:queue [ ctrl_c_ev ];
+  Alcotest.(check bool) "second Ctrl+C at +2.9s confirms exit" true
+    (Signals.equal_exit_verdict
+       (Signals.poll_exit ~now:t_before sigs)
+       Signals.Interrupt_confirmed);
+  Alcotest.(check bool) "disarmed after confirm" false
+    (Signals.is_interrupt_armed ~now:t_before sigs);
+
+  (* 2. Auto-expiry after 3s toast window (explicit expire_interrupt on Tick). *)
+  App.dispatch_decoded_events ~signals:sigs ~bell ~input_queue:queue [ ctrl_c_ev ];
+  Alcotest.(check bool) "re-armed at t0" true
+    (Signals.equal_exit_verdict (Signals.poll_exit ~now:t0 sigs) Signals.Interrupt_armed);
+  let t_expired = Clock.Mono.after_s t0 Signals.interrupt_arm_window_s in
+  Alcotest.(check bool) "expire_interrupt fires at +3.0s" true
+    (Signals.expire_interrupt ~now:t_expired sigs);
+  Alcotest.(check bool) "disarmed after +3.0s" false
+    (Signals.is_interrupt_armed ~now:t_expired sigs);
+  Alcotest.(check bool) "armed deadline cleared" true
+    (Option.is_none (Signals.interrupt_armed_deadline sigs));
+  App.dispatch_decoded_events ~signals:sigs ~bell ~input_queue:queue [ ctrl_c_ev ];
+  Alcotest.(check bool) "stray Ctrl+C after expiry re-arms instead of quitting" true
+    (Signals.equal_exit_verdict
+       (Signals.poll_exit ~now:t_expired sigs)
+       Signals.Interrupt_armed);
+
+  (* 3. Auto-expiry directly on next poll_exit minutes later even without intermediate Tick. *)
+  let t_minutes_later = Clock.Mono.after_s t_expired 300.0 in
+  App.dispatch_decoded_events ~signals:sigs ~bell ~input_queue:queue [ ctrl_c_ev ];
+  Alcotest.(check bool) "Ctrl+C 5 minutes later re-arms instead of quitting" true
+    (Signals.equal_exit_verdict
+       (Signals.poll_exit ~now:t_minutes_later sigs)
+       Signals.Interrupt_armed);
+
+  (* 4. Bracketed Paste withdraws armed interrupt. *)
+  App.dispatch_decoded_events ~signals:sigs ~bell ~input_queue:queue
+    [ Masc_tui_term.Input_decoder.Paste { text = "hello paste"; dropped_bytes = 0 } ];
+  Alcotest.(check bool) "Paste disarms interrupt" false
+    (Signals.is_interrupt_armed ~now:t_minutes_later sigs);
+  (match Eio.Stream.take_nonblocking queue with
+  | Some (Msg.Paste_text "hello paste") -> ()
+  | Some _ | None -> Alcotest.fail "expected Paste_text queued");
+  let t_soon = Clock.Mono.after_s t_minutes_later 0.5 in
+  App.dispatch_decoded_events ~signals:sigs ~bell ~input_queue:queue [ ctrl_c_ev ];
+  Alcotest.(check bool) "Ctrl+C after Paste re-arms instead of quitting" true
+    (Signals.equal_exit_verdict
+       (Signals.poll_exit ~now:t_soon sigs)
+       Signals.Interrupt_armed);
+
+  (* 5. Mouse events (Wheel and Left_press) withdraw armed interrupt. *)
+  App.dispatch_decoded_events ~signals:sigs ~bell ~input_queue:queue
+    [
+      Masc_tui_term.Input_decoder.Mouse
+        (Masc_tui_term.Input_decoder.Wheel
+           { dir = Masc_tui_term.Input_decoder.Wheel_down; col = 4; row = 8 });
+    ];
+  Alcotest.(check bool) "Mouse wheel disarms interrupt" false
+    (Signals.is_interrupt_armed ~now:t_soon sigs);
+  (match Eio.Stream.take_nonblocking queue with
+  | Some (Msg.Mouse_event (Masc_tui_term.Input_decoder.Wheel _)) -> ()
+  | Some _ | None -> Alcotest.fail "expected Mouse_event queued");
+  App.dispatch_decoded_events ~signals:sigs ~bell ~input_queue:queue [ ctrl_c_ev ];
+  Alcotest.(check bool) "re-armed before Left_press" true
+    (Signals.equal_exit_verdict
+       (Signals.poll_exit ~now:t_soon sigs)
+       Signals.Interrupt_armed);
+  App.dispatch_decoded_events ~signals:sigs ~bell ~input_queue:queue
+    [
+      Masc_tui_term.Input_decoder.Mouse
+        (Masc_tui_term.Input_decoder.Left_press { col = 2; row = 3 });
+    ];
+  Alcotest.(check bool) "Mouse press disarms interrupt" false
+    (Signals.is_interrupt_armed ~now:t_soon sigs);
+  (match Eio.Stream.take_nonblocking queue with
+  | Some (Msg.Mouse_event (Masc_tui_term.Input_decoder.Left_press _)) -> ()
+  | Some _ | None -> Alcotest.fail "expected Left_press queued");
+
+  (* 6. Noise events (Unknown_escape / Invalid_utf8) do NOT withdraw armed interrupt. *)
+  App.dispatch_decoded_events ~signals:sigs ~bell ~input_queue:queue [ ctrl_c_ev ];
+  Alcotest.(check bool) "re-armed before noise" true
+    (Signals.equal_exit_verdict
+       (Signals.poll_exit ~now:t_soon sigs)
+       Signals.Interrupt_armed);
+  App.dispatch_decoded_events ~signals:sigs ~bell ~input_queue:queue
+    [
+      Masc_tui_term.Input_decoder.Unknown_escape;
+      Masc_tui_term.Input_decoder.Invalid_utf8;
+    ];
+  Alcotest.(check bool) "noise preserves armed state" true
+    (Signals.is_interrupt_armed ~now:t_soon sigs)
 
 (* -------------------------------------------------------------------------- *)
 (* 4. Cmd_executor                                                            *)
@@ -1345,7 +1488,76 @@ let test_p2_voice_runner_ffmpeg_and_afplay () =
     }
   in
   Alcotest.(check bool) "[m] blocked while composer focused" false
-    (App.should_toggle_mouse_capture m_comp bare_m)
+    (App.should_toggle_mouse_capture m_comp bare_m);
+
+  (* Korean 2-bulsik IME replay for bare 'm' ('ㅡ' U+3161 and NFD U+1173). *)
+  let dec_ime = Masc_tui_term.Input_decoder.create () in
+  let bare_eu =
+    match Masc_tui_term.Input_decoder.feed_string dec_ime "ㅡ" with
+    | [ Masc_tui_term.Input_decoder.Key kev ] -> kev
+    | _ -> Alcotest.fail "expected single Key event for Korean ㅡ"
+  in
+  let bare_eu_nfd : Masc_tui_term.Input_decoder.key_event =
+    {
+      key = Masc_tui_term.Input_decoder.Char "\xe1\x85\xb3";
+      mods = Masc_tui_term.Input_decoder.no_mods;
+    }
+  in
+  let shift_eu : Masc_tui_term.Input_decoder.key_event =
+    {
+      key = Masc_tui_term.Input_decoder.Char "ㅡ";
+      mods = { ctrl = false; alt = false; shift = true };
+    }
+  in
+  let syllable_meu : Masc_tui_term.Input_decoder.key_event =
+    {
+      key = Masc_tui_term.Input_decoder.Char "므";
+      mods = Masc_tui_term.Input_decoder.no_mods;
+    }
+  in
+  let jamo_giyeok : Masc_tui_term.Input_decoder.key_event =
+    {
+      key = Masc_tui_term.Input_decoder.Char "ㄱ";
+      mods = Masc_tui_term.Input_decoder.no_mods;
+    }
+  in
+  let m_filter =
+    { m_norm with nav = { m_norm.nav with filter_focused = true } }
+  in
+  let m_settings =
+    {
+      m_norm with
+      nav = { m_norm.nav with overlay = Some (Masc_tui_core.Nav.Settings Masc_tui_core.Nav.Settings_general_ui) };
+    }
+  in
+  let m_inline =
+    {
+      m_norm with
+      nav = { m_norm.nav with overlay = Some (Masc_tui_core.Nav.Inline_action Masc_tui_core.Nav.Btw_query) };
+    }
+  in
+  Alcotest.(check bool) "[ㅡ] toggles mouse on normal unfocused view" true
+    (App.should_toggle_mouse_capture m_norm bare_eu);
+  Alcotest.(check bool) "[U+1173] NFD toggles mouse on normal unfocused view" true
+    (App.should_toggle_mouse_capture m_norm bare_eu_nfd);
+  Alcotest.(check bool) "[Shift+ㅡ] does not toggle mouse" false
+    (App.should_toggle_mouse_capture m_norm shift_eu);
+  Alcotest.(check bool) "composed [므] does not toggle mouse" false
+    (App.should_toggle_mouse_capture m_norm syllable_meu);
+  Alcotest.(check bool) "unrelated [ㄱ] does not toggle mouse" false
+    (App.should_toggle_mouse_capture m_norm jamo_giyeok);
+  Alcotest.(check bool) "[ㅡ] blocked on too-small viewport" false
+    (App.should_toggle_mouse_capture m_tiny bare_eu);
+  Alcotest.(check bool) "[ㅡ] blocked while Palette overlay active" false
+    (App.should_toggle_mouse_capture m_ov bare_eu);
+  Alcotest.(check bool) "[ㅡ] blocked while Settings overlay active" false
+    (App.should_toggle_mouse_capture m_settings bare_eu);
+  Alcotest.(check bool) "[ㅡ] blocked while Inline_action overlay active" false
+    (App.should_toggle_mouse_capture m_inline bare_eu);
+  Alcotest.(check bool) "[ㅡ] blocked while composer focused" false
+    (App.should_toggle_mouse_capture m_comp bare_eu);
+  Alcotest.(check bool) "[ㅡ] blocked while filter focused" false
+    (App.should_toggle_mouse_capture m_filter bare_eu)
 
 let () =
   Alcotest.run "masc_tui_app"
@@ -1379,6 +1591,8 @@ let () =
             test_wake_bell_signal_pipe_and_timeout;
           Alcotest.test_case "POSIX signal state machine & switch restore"
             `Quick test_signals_state_machine_and_restore;
+          Alcotest.test_case "Ctrl+C arm, 3s auto-expire & withdraw on Paste/Mouse"
+            `Quick test_ctrl_c_arm_expire_and_withdraw_on_paste_mouse;
         ] );
       ( "cmd_executor"
       , [

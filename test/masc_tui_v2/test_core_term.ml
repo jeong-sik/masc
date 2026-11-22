@@ -242,6 +242,16 @@ let test_input_decoder () =
   check_single_key "Alt+v CSI u" (mk ~alt:true (Char "v")) "\x1b[118;3u";
   check_single_key "Alt+i CSI u" (mk ~alt:true (Char "i")) "\x1b[105;3u";
 
+  (* Kitty CSI u shifted punctuation & modifier preservation *)
+  check_single_key "Kitty ? shifted subparam" (mk (Char "?")) "\x1b[47:63;2u";
+  check_single_key "Kitty : shifted subparam" (mk (Char ":")) "\x1b[59:58;2u";
+  check_single_key "Kitty Ctrl+Shift+Q preserves shift"
+    (mk ~ctrl:true ~shift:true (Char "q")) "\x1b[113;6u";
+
+  (* Modified SS3 & rxvt SS3 *)
+  check_single_key "SS3 Shift+F1 (ESC O 2 P)" (mk ~shift:true (Function 1)) "\x1bO2P";
+  check_single_key "rxvt SS3 Ctrl+Up (ESC O a)" (mk ~ctrl:true Up) "\x1bOa";
+
   (* Kitty release event must be ignored cleanly *)
   let dec_rel = create () in
   Alcotest.(check int) "kitty release ignored" 0

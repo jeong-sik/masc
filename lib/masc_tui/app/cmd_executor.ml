@@ -710,6 +710,13 @@ let execute_get t ~epoch req =
                    ~decode:Wire_knowledge.decode_memory_diff)
             in
             Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_memory_os_internals _ ->
+            let reply =
+              Msg.Reply_keeper_memory_os_internals
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_knowledge.decode_memory_os_internals)
+            in
+            Msg.Http_reply { epoch; reply }
         | Cmd.Get_provider_usage _ ->
             let reply =
               Msg.Reply_provider_usage_history
@@ -750,6 +757,27 @@ let execute_get t ~epoch req =
               Msg.Reply_runtime_resolved
                 (fetch_and_decode_get t ~path
                    ~decode:Wire_runtime.decode_runtime_resolved)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_runtime_config_raw ->
+            let reply =
+              Msg.Reply_runtime_config_raw
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_runtime_config_raw_meta)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_setup_inventory ->
+            let reply =
+              Msg.Reply_setup_inventory
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_setup_inventory)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_setup_login_status _ ->
+            let reply =
+              Msg.Reply_setup_login_receipt
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_setup_login_receipt)
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_runtime_probe _ ->
@@ -875,23 +903,66 @@ let execute_get t ~epoch req =
       in
       Ui_bus.publish_snapshot t.bus ~key:(Key_get path) msg)
 
+let is_terminal_setup_login_status status =
+  match String.lowercase_ascii (String.trim status) with
+  | "complete" | "completed" | "failed" | "cancelled" | "interrupted" -> true
+  | _ -> false
+
+let run_setup_login_stream
+    ~(publish :
+       (Wire_runtime.setup_login_receipt, Msg.http_error) result -> unit)
+    ~(stream : on_chunk:(string -> unit) -> (unit, Msg.http_error) result) :
+    unit =
+  let sse_decoder = Sse_wire.create_decoder () in
+  let saw_receipt = ref false in
+  let terminal_published = ref false in
+  let on_chunk raw =
+    let frames = Sse_wire.feed sse_decoder raw in
+    List.iter
+      (fun (frame : Sse_wire.frame) ->
+        match Yojson.Safe.from_string frame.data with
+        | json -> (
+            match Wire_runtime.decode_setup_login_receipt json with
+            | Ok receipt ->
+                saw_receipt := true;
+                if is_terminal_setup_login_status receipt.status then (
+                  if not !terminal_published then (
+                    terminal_published := true;
+                    publish (Ok receipt)))
+                else if not !terminal_published then publish (Ok receipt)
+            | Error _ -> ())
+        | exception Yojson.Json_error _ -> ())
+      frames
+  in
+  let stream_res = stream ~on_chunk in
+  match !terminal_published, !saw_receipt, stream_res with
+  | true, _, _ -> ()
+  | false, _, Error err -> publish (Error err)
+  | false, true, Ok () -> ()
+  | false, false, Ok () ->
+      publish
+        (Error
+           (Msg.Decode_error
+              "setup login stream closed without a login receipt"))
+
 let execute_post t ~epoch req =
   let path = Cmd.post_request_path req in
   let body = Cmd.post_request_body req in
   fork_safe t (fun () ->
-      let reply =
+      let reply_opt =
         match req with
         | Cmd.Post_ask_answer { keeper; ask_id; _ } ->
             let result = post_ack t ~path ~body in
-            Msg.Reply_work_mutation
-              {
-                label = Say.make ~ko:"질문 응답 완료" ~en:"Ask answered";
-                attention_id = Some ("ask:" ^ ask_id);
-                decision_kind = Some Work_store.Decision_ask_answered;
-                target_id = Some ask_id;
-                keeper = Some keeper;
-                result;
-              }
+            Some
+              (Msg.Reply_work_mutation
+                 {
+                   label = Say.make ~ko:"질문 응답 완료" ~en:"Ask answered";
+                   attention_id = Some ("ask:" ^ ask_id);
+                   decision_kind = Some Work_store.Decision_ask_answered;
+                   target_id = Some ask_id;
+                   keeper = Some keeper;
+                   result;
+                 })
         | Cmd.Post_tool_approval { keeper; approval_id; decision; _ } ->
             let result = post_ack t ~path ~body in
             let label, decision_kind =
@@ -903,15 +974,16 @@ let execute_post t ~epoch req =
                   ( Say.make ~ko:"도구 호출 거절됨" ~en:"Tool call denied"
                   , Work_store.Decision_tool_denied )
             in
-            Msg.Reply_work_mutation
-              {
-                label;
-                attention_id = Some ("tool:" ^ approval_id);
-                decision_kind = Some decision_kind;
-                target_id = Some approval_id;
-                keeper = Some keeper;
-                result;
-              }
+            Some
+              (Msg.Reply_work_mutation
+                 {
+                   label;
+                   attention_id = Some ("tool:" ^ approval_id);
+                   decision_kind = Some decision_kind;
+                   target_id = Some approval_id;
+                   keeper = Some keeper;
+                   result;
+                 })
         | Cmd.Post_gate_resolution { id; approved; _ } ->
             let result = post_ack t ~path ~body in
             let label, decision_kind =
@@ -922,33 +994,36 @@ let execute_post t ~epoch req =
                 ( Say.make ~ko:"게이트 거절됨" ~en:"Gate rejected"
                 , Work_store.Decision_gate_rejected )
             in
-            Msg.Reply_work_mutation
-              {
-                label;
-                attention_id = Some ("gate:" ^ id);
-                decision_kind = Some decision_kind;
-                target_id = Some id;
-                keeper = None;
-                result;
-              }
+            Some
+              (Msg.Reply_work_mutation
+                 {
+                   label;
+                   attention_id = Some ("gate:" ^ id);
+                   decision_kind = Some decision_kind;
+                   target_id = Some id;
+                   keeper = None;
+                   result;
+                 })
         | Cmd.Post_goal_transition _ ->
             let result = post_ack t ~path ~body in
-            Msg.Reply_action_ack
-              {
-                label = Say.make ~ko:"목표 상태 변경됨" ~en:"Goal transitioned";
-                result;
-              }
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label = Say.make ~ko:"목표 상태 변경됨" ~en:"Goal transitioned";
+                   result;
+                 })
         | Cmd.Post_goal_confirmation confirm ->
             let result = post_ack t ~path ~body in
-            Msg.Reply_work_mutation
-              {
-                label = Say.make ~ko:"목표 완료 확정됨" ~en:"Goal confirmed";
-                attention_id = Some ("goal:" ^ confirm.goal_id);
-                decision_kind = Some Work_store.Decision_goal_confirmed;
-                target_id = Some confirm.goal_id;
-                keeper = None;
-                result;
-              }
+            Some
+              (Msg.Reply_work_mutation
+                 {
+                   label = Say.make ~ko:"목표 완료 확정됨" ~en:"Goal confirmed";
+                   attention_id = Some ("goal:" ^ confirm.goal_id);
+                   decision_kind = Some Work_store.Decision_goal_confirmed;
+                   target_id = Some confirm.goal_id;
+                   keeper = None;
+                   result;
+                 })
         | Cmd.Post_verification_verdict { verification_id; verdict; _ } ->
             let result = post_ack t ~path ~body in
             let label, decision_kind =
@@ -960,27 +1035,29 @@ let execute_post t ~epoch req =
                   ( Say.make ~ko:"검증 반려됨" ~en:"Verification rejected"
                   , Work_store.Decision_verification_rejected )
             in
-            Msg.Reply_work_mutation
-              {
-                label;
-                attention_id = None;
-                decision_kind = Some decision_kind;
-                target_id = Some verification_id;
-                keeper = None;
-                result;
-              }
+            Some
+              (Msg.Reply_work_mutation
+                 {
+                   label;
+                   attention_id = None;
+                   decision_kind = Some decision_kind;
+                   target_id = Some verification_id;
+                   keeper = None;
+                   result;
+                 })
         | Cmd.Post_quarantine_requeue { keeper; quarantine_id; _ } ->
             let result = post_ack t ~path ~body in
-            Msg.Reply_work_mutation
-              {
-                label =
-                  Say.make ~ko:"격리 후보 재큐잉 완료" ~en:"Quarantine requeued";
-                attention_id = Some ("quarantine:" ^ quarantine_id);
-                decision_kind = None;
-                target_id = Some quarantine_id;
-                keeper = Some keeper;
-                result;
-              }
+            Some
+              (Msg.Reply_work_mutation
+                 {
+                   label =
+                     Say.make ~ko:"격리 후보 재큐잉 완료" ~en:"Quarantine requeued";
+                   attention_id = Some ("quarantine:" ^ quarantine_id);
+                   decision_kind = None;
+                   target_id = Some quarantine_id;
+                   keeper = Some keeper;
+                   result;
+                 })
         | Cmd.Post_memory_act { keeper; _ } ->
             let ep = Atomic.get t.endpoint in
             let body_str = Yojson.Safe.to_string body in
@@ -1011,85 +1088,124 @@ let execute_post t ~epoch req =
                    | Http_client.Decode_error _ ) as err) ->
                   Error (msg_error_of_http err)
             in
-            Msg.Reply_memory_act { keeper; result }
+            Some (Msg.Reply_memory_act { keeper; result })
         | Cmd.Post_fusion_launch _ ->
             let result = post_ack t ~path ~body in
-            Msg.Reply_fusion_launch result
+            Some (Msg.Reply_fusion_launch result)
+        | Cmd.Post_runtime_assignment { keeper_name; runtime_id; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_runtime_assignment { keeper_name; runtime_id; result })
+        | Cmd.Post_runtime_default_route { runtime_id } ->
+            let result = post_ack t ~path ~body in
+            Some (Msg.Reply_runtime_routing { runtime_id; result })
+        | Cmd.Post_setup_account_key { integration_id; _ } ->
+            let result = post_ack t ~path ~body in
+            Some (Msg.Reply_setup_account_key { integration_id; result })
+        | Cmd.Post_setup_login_start _ ->
+            let ep = Atomic.get t.endpoint in
+            let body_str = Yojson.Safe.to_string body in
+            let publish res =
+              Ui_bus.publish_stream t.bus
+                (Msg.Http_reply
+                   { epoch; reply = Msg.Reply_setup_login_receipt res })
+            in
+            run_setup_login_stream ~publish
+              ~stream:(fun ~on_chunk ->
+                Http_client.post_stream ~io:t.io ~clock:t.clock
+                  ~content_type:"application/json" ~body:body_str
+                  ~on_response:(fun ~status:_ ~headers:_ -> ())
+                  ~on_chunk ep ~path
+                |> Result.map_error msg_error_of_http);
+            None
         | Cmd.Post_sandbox_probe _ ->
             let result = post_ack t ~path ~body in
-            Msg.Reply_action_ack
-              {
-                label =
-                  Say.make ~ko:"샌드박스 프로브 요청됨"
-                    ~en:"Sandbox probe requested";
-                result;
-              }
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label =
+                     Say.make ~ko:"샌드박스 프로브 요청됨"
+                       ~en:"Sandbox probe requested";
+                   result;
+                 })
         | Cmd.Post_config_patch patch_req ->
             let result =
               post_and_decode t ~path ~body
                 ~decode:Wire_config.decode_patch_response
             in
-            Msg.Reply_config_patch { dry_run = patch_req.dry_run; result }
+            Some
+              (Msg.Reply_config_patch { dry_run = patch_req.dry_run; result })
         | Cmd.Post_tui_preference _ ->
             let result = post_ack t ~path ~body in
-            Msg.Reply_action_ack
-              {
-                label = Say.make ~ko:"TUI 설정 저장됨" ~en:"Preferences saved";
-                result;
-              }
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label = Say.make ~ko:"TUI 설정 저장됨" ~en:"Preferences saved";
+                   result;
+                 })
         | Cmd.Post_keeper_turn_interrupt _ ->
             let result = post_ack t ~path ~body in
-            Msg.Reply_action_ack
-              {
-                label = Say.make ~ko:"턴 중단 요청됨" ~en:"Turn interrupted";
-                result;
-              }
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label = Say.make ~ko:"턴 중단 요청됨" ~en:"Turn interrupted";
+                   result;
+                 })
         | Cmd.Post_board_create _ ->
             let result = post_ack t ~path ~body in
-            Msg.Reply_action_ack
-              {
-                label = Say.make ~ko:"게시글 작성 완료" ~en:"Board post created";
-                result;
-              }
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label = Say.make ~ko:"게시글 작성 완료" ~en:"Board post created";
+                   result;
+                 })
         | Cmd.Post_schedule_create _ ->
             let result = post_ack t ~path ~body in
-            Msg.Reply_action_ack
-              {
-                label = Say.make ~ko:"일정 생성 완료" ~en:"Schedule created";
-                result;
-              }
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label = Say.make ~ko:"일정 생성 완료" ~en:"Schedule created";
+                   result;
+                 })
         | Cmd.Post_connector_create _ ->
             let result = post_ack t ~path ~body in
-            Msg.Reply_action_ack
-              {
-                label = Say.make ~ko:"커넥터 연결 완료" ~en:"Connector bound";
-                result;
-              }
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label = Say.make ~ko:"커넥터 연결 완료" ~en:"Connector bound";
+                   result;
+                 })
         | Cmd.Post_repo_add _ ->
             let result = post_ack t ~path ~body in
-            Msg.Reply_action_ack
-              {
-                label = Say.make ~ko:"저장소 추가 완료" ~en:"Repository added";
-                result;
-              }
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label = Say.make ~ko:"저장소 추가 완료" ~en:"Repository added";
+                   result;
+                 })
         | Cmd.Post_task_cancel _ ->
             let result = post_ack t ~path ~body in
-            Msg.Reply_action_ack
-              {
-                label = Say.make ~ko:"작업 취소 완료" ~en:"Task cancelled";
-                result;
-              }
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label = Say.make ~ko:"작업 취소 완료" ~en:"Task cancelled";
+                   result;
+                 })
         | Cmd.Post_harness_overrule _ ->
             let result = post_ack t ~path ~body in
-            Msg.Reply_action_ack
-              {
-                label =
-                  Say.make ~ko:"하네스 판정 재지정 완료"
-                    ~en:"Harness label updated";
-                result;
-              }
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label =
+                     Say.make ~ko:"하네스 판정 재지정 완료"
+                       ~en:"Harness label updated";
+                   result;
+                 })
       in
-      Ui_bus.publish_stream t.bus (Msg.Http_reply { epoch; reply }))
+      Option.iter
+        (fun reply ->
+          Ui_bus.publish_stream t.bus (Msg.Http_reply { epoch; reply }))
+        reply_opt)
 
 let execute_put t ~epoch req =
   let path = Cmd.put_request_path req in

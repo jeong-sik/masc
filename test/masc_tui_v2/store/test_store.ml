@@ -157,12 +157,16 @@ let has_get_health cmds =
               | Cmd.Get_artifacts
               | Cmd.Get_world_memory
               | Cmd.Get_memory_diff _
+              | Cmd.Get_keeper_memory_os_internals _
               | Cmd.Get_provider_usage _
               | Cmd.Get_keeper_costs _
               | Cmd.Get_efficiency _
               | Cmd.Get_models_metrics _
               | Cmd.Get_runtime_metrics
               | Cmd.Get_runtime_resolved
+              | Cmd.Get_runtime_config_raw
+              | Cmd.Get_setup_inventory
+              | Cmd.Get_setup_login_status _
               | Cmd.Get_runtime_probe _
               | Cmd.Get_exact_lane_runs _
               | Cmd.Get_fusion_runs
@@ -1454,6 +1458,10 @@ let test_verifier_regressions () =
         | Cmd.Post_quarantine_requeue _
         | Cmd.Post_memory_act _
         | Cmd.Post_fusion_launch _
+        | Cmd.Post_runtime_assignment _
+        | Cmd.Post_runtime_default_route _
+        | Cmd.Post_setup_account_key _
+        | Cmd.Post_setup_login_start _
         | Cmd.Post_sandbox_probe _
         | Cmd.Post_tui_preference _
         | Cmd.Post_keeper_turn_interrupt _
@@ -5269,6 +5277,245 @@ let test_p2_schedules_attention_scroll_and_filter_guard () =
     true
     (Nav.equal_work_tab m_after_r.work.active_tab Nav.Work_tasks_schedules)
 
+let test_tui_memory_os_internals_fetch_and_runtime_assignment_setup_cmds () =
+  let t0 = Clock.Mono.of_ns 10_000_000_000L in
+  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  (* 1. Keeper_memory dive triggers Get_keeper_memory_os_internals *)
+  let m_kmem =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory } ];
+        };
+    }
+  in
+  let kmem_cmds = Cmd.flatten (View_fetches.fetches_for_current_view ~force:false m_kmem) in
+  Alcotest.(check bool) "Keeper_memory fetches Get_keeper_memory_os_internals" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_keeper_memory_os_internals { keeper = "alpha" }; _ } -> true
+         | _ -> false)
+       kmem_cmds);
+  (* 2. Nav.Runtime triggers Get_runtime_config_raw and Get_setup_inventory *)
+  let m_rt =
+    { m0 with nav = { m0.nav with workspace = Nav.Runtime } }
+  in
+  let rt_cmds = Cmd.flatten (View_fetches.fetches_for_current_view ~force:false m_rt) in
+  Alcotest.(check bool) "Runtime workspace fetches Get_runtime_config_raw" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_runtime_config_raw; _ } -> true
+         | _ -> false)
+       rt_cmds);
+  Alcotest.(check bool) "Runtime workspace fetches Get_setup_inventory" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_setup_inventory; _ } -> true
+         | _ -> false)
+       rt_cmds);
+  (* 3. Runtime assignment modal [a], API key modal [k], Login start [l] + status poll [L] *)
+  let m_raw, _ =
+    Update.step ~now:t0 m_rt
+      (Msg.Http_reply
+         {
+           epoch = m_rt.epoch;
+           reply =
+             Msg.Reply_runtime_config_raw
+               (Ok
+                  {
+                    Wire_runtime.source_revision = "rev-cas-42";
+                    assignments = [ "alpha", "old.slot" ];
+                  });
+         })
+  in
+  let m_assign_modal, _ =
+    Update.step ~now:t0 m_raw (Msg.Key_event (key (Keymap.Input.Char "a")))
+  in
+  (match m_assign_modal.nav.overlay with
+  | Some (Nav.Inline_action _) -> ()
+  | _ -> Alcotest.fail "Runtime [a] must open inline assignment modal");
+  (* Fill keeper="" and runtime="primary" -> Post_runtime_default_route *)
+  let m_assign_filled =
+    match m_assign_modal.inline_modal with
+    | None -> Alcotest.fail "inline_modal missing"
+    | Some st ->
+        let fields =
+          List.map
+            (fun (f : Model.modal_form_field) ->
+              if String.equal f.key "assign_keeper" then { f with value = "alpha" }
+              else if String.equal f.key "assign_runtime_id" then
+                { f with value = "vibe_acp.devstral-2" }
+              else f)
+            st.fields
+        in
+        { m_assign_modal with inline_modal = Some { st with fields } }
+  in
+  let _, assign_cmds =
+    Update.step ~now:t0 m_assign_filled (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "Submitting [a] modal emits Post_runtime_assignment with CAS" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_runtime_assignment
+                   {
+                     keeper_name = "alpha";
+                     runtime_id = Some "vibe_acp.devstral-2";
+                     source_revision = Some "rev-cas-42";
+                     previous_runtime_id = Some "old.slot";
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       (Cmd.flatten assign_cmds));
+  (* [K] API key modal: secret field masked + submits to /api/v1/setup/credential with source_revision *)
+  let m_key_modal, _ =
+    Update.step ~now:t0 m_raw (Msg.Key_event (key (Keymap.Input.Char "K")))
+  in
+  let m_key_filled =
+    match m_key_modal.inline_modal with
+    | None -> Alcotest.fail "key inline_modal missing"
+    | Some st ->
+        let secret_field =
+          List.find (fun (f : Model.modal_form_field) -> String.equal f.key "setup_key_secret")
+            st.fields
+        in
+        Alcotest.(check bool) "setup_key_secret marked secret=true for masking" true
+          secret_field.secret;
+        let fields =
+          List.map
+            (fun (f : Model.modal_form_field) ->
+              if String.equal f.key "setup_key_integration" then
+                { f with value = "gemini" }
+              else if String.equal f.key "setup_key_secret" then
+                { f with value = "test-api-key-value" }
+              else f)
+            st.fields
+        in
+        { m_key_modal with inline_modal = Some { st with fields } }
+  in
+  let _, key_cmds =
+    Update.step ~now:t0 m_key_filled (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  let expected_key_req =
+    Cmd.Post_setup_account_key
+      {
+        integration_id = "gemini";
+        key = "test-api-key-value";
+        source_revision = "rev-cas-42";
+      }
+  in
+  Alcotest.(check bool) "Submitting [K] modal emits Post_setup_account_key with source_revision" true
+    (List.exists
+       (function
+         | Cmd.Http_post { req; _ } when req = expected_key_req -> true
+         | _ -> false)
+       (Cmd.flatten key_cmds));
+  Alcotest.(check string) "Post_setup_account_key targets operator /api/v1/setup/credential"
+    "/api/v1/setup/credential" (Cmd.post_request_path expected_key_req);
+  Alcotest.(check string) "Post_setup_account_key encodes exact 3-field operator payload"
+    {|{"provider_id":"gemini","secret":"test-api-key-value","source_revision":"rev-cas-42"}|}
+    (Yojson.Safe.to_string (Cmd.post_request_body expected_key_req));
+  (* Without loaded runtime_config_raw, [K] blocks submission with modal error instead of posting *)
+  let m_key_no_rev =
+    {
+      m_key_filled with
+      runtime = { m_key_filled.runtime with runtime_config_raw = Observed.unreported };
+    }
+  in
+  let m_key_blocked, blocked_cmds =
+    Update.step ~now:t0 m_key_no_rev (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check int) "Missing source_revision emits zero HTTP commands" 0
+    (List.length (Cmd.flatten blocked_cmds));
+  Alcotest.(check bool) "Missing source_revision keeps inline modal open with error" true
+    (match m_key_blocked.inline_modal with
+     | Some st -> Option.is_some st.error
+     | None -> false);
+  let _, key_ok_cmds =
+    Update.step ~now:t0 m_raw
+      (Msg.Http_reply
+         {
+           epoch = m_raw.epoch;
+           reply = Msg.Reply_setup_account_key { integration_id = "gemini"; result = Ok () };
+         })
+  in
+  Alcotest.(check bool) "Successful [K] reply refetches runtime_config_raw for fresh CAS revision"
+    true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_runtime_config_raw; _ } -> true
+         | _ -> false)
+       (Cmd.flatten key_ok_cmds));
+  (* [l] Login start modal + Reply_setup_login_receipt + [L] poll *)
+  let m_login_modal, _ =
+    Update.step ~now:t0 m_raw (Msg.Key_event (key (Keymap.Input.Char "l")))
+  in
+  let m_login_filled =
+    match m_login_modal.inline_modal with
+    | None -> Alcotest.fail "login inline_modal missing"
+    | Some st ->
+        let fields =
+          List.map
+            (fun (f : Model.modal_form_field) ->
+              if String.equal f.key "setup_login_integration" then
+                { f with value = "vibe_acp" }
+              else f)
+            st.fields
+        in
+        { m_login_modal with inline_modal = Some { st with fields } }
+  in
+  let m_after_login, login_cmds =
+    Update.step ~now:t0 m_login_filled (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "Submitting [l] modal emits Post_setup_login_start" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_setup_login_start
+                   { integration_id = "vibe_acp"; account_ref = None };
+               _;
+             } ->
+             true
+         | _ -> false)
+       (Cmd.flatten login_cmds));
+  let m_with_recp, _ =
+    Update.step ~now:t0 m_after_login
+      (Msg.Http_reply
+         {
+           epoch = m_after_login.epoch;
+           reply =
+             Msg.Reply_setup_login_receipt
+               (Ok
+                  {
+                    Wire_runtime.login_id = "login-99";
+                    integration_id = "vibe_acp";
+                    status = "running";
+                    account = Some "keyring_host";
+                    account_ref = None;
+                    authentication = None;
+                  });
+         })
+  in
+  let _, poll_cmds =
+    Update.step ~now:t0 m_with_recp (Msg.Key_event (key (Keymap.Input.Char "L")))
+  in
+  Alcotest.(check bool) "[L] polls Get_setup_login_status for active login_id" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_setup_login_status { login_id = "login-99" }; _ } ->
+             true
+         | _ -> false)
+       (Cmd.flatten poll_cmds))
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -5319,6 +5566,8 @@ let () =
             `Quick test_v25_data_pipeline_and_settings_2pane;
           Alcotest.test_case "P0-3/P0-4/P1-11 Settings safety & all wired Cmd mutations"
             `Quick test_p0_actions_settings_safety_and_wired_cmds;
+          Alcotest.test_case "Memory OS internals fetch + Runtime assignment/key/login setup cmds"
+            `Quick test_tui_memory_os_internals_fetch_and_runtime_assignment_setup_cmds;
         ] );
       ( "arrow_nav_display_order"
       , [

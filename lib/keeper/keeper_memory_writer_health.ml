@@ -236,6 +236,94 @@ let shown ~state ~alarms ~request fields =
        @ fields) )
 ;;
 
+let available_acts_of_machine ~alarms (machine : Machine.t) : string list =
+  let open_store =
+    match machine.state with
+    | Idle _ | Asking _ | Resting _ | Refused_at_bottom _ -> true
+    | Stopped _ -> false
+  in
+  let can_resume =
+    match machine.state with
+    | Stopped _ | Resting _ | Refused_at_bottom _ -> true
+    | Idle _ | Asking _ -> false
+  in
+  let can_adopt =
+    match machine.state with
+    | Stopped (Log_diverged _ | Log_unreadable) -> true
+    | Stopped (Memory_unreadable | Store_unwritable | Raised _)
+    | Idle _ | Asking _ | Resting _ | Refused_at_bottom _ -> false
+  in
+  let can_restart_reading =
+    open_store
+    &&
+    match machine.last_read with
+    | Some (Input_fault (Turn_log_replaced _ | Position_lost _)) -> true
+    | Some
+        ( Committed
+        | Refused_not_all_sized _
+        | Lane _
+        | Ask_failed _
+        | Input_fault (Line_unreadable _ | Content_unreadable _) )
+    | None -> false
+  in
+  let can_skip_item =
+    open_store
+    && ((match machine.state with
+         | Refused_at_bottom _ -> true
+         | Idle _ | Asking _ | Resting _ | Stopped _ -> false)
+        || List.mem Level.E2 alarms
+        || List.mem Level.E4 alarms
+        ||
+        match machine.last_read with
+        | Some (Input_fault (Content_unreadable _)) | Some (Refused_not_all_sized _) -> true
+        | Some
+            ( Committed
+            | Lane _
+            | Ask_failed _
+            | Input_fault (Line_unreadable _ | Turn_log_replaced _ | Position_lost _) )
+        | None -> false)
+  in
+  let can_skip_line =
+    open_store
+    &&
+    match machine.last_read with
+    | Some (Input_fault (Line_unreadable _)) -> true
+    | Some
+        ( Committed
+        | Refused_not_all_sized _
+        | Lane _
+        | Ask_failed _
+        | Input_fault (Turn_log_replaced _ | Position_lost _ | Content_unreadable _) )
+    | None -> false
+  in
+  List.filter_map
+    (fun (ok, name) -> if ok then Some name else None)
+    [ can_resume, "resume"
+    ; can_adopt, "adopt"
+    ; can_restart_reading, "restart_reading"
+    ; can_skip_item, "skip_item"
+    ; can_skip_line, "skip_line"
+    ]
+;;
+
+let molt_fields (machine : Machine.t) =
+  let pending_molt =
+    Option.fold ~none:`Null ~some:Librarian_lifecycle.molt_trigger_to_json machine.pending_molt
+  in
+  let pending_molt_categories =
+    match machine.pending_molt_categories with
+    | None -> `List []
+    | Some (_trigger, categories) ->
+      `List
+        (List.map
+           (fun c -> `String (Keeper_memory_os_types.category_to_string c))
+           categories)
+  in
+  [ "pending_molt", pending_molt
+  ; "pending_molt_categories", pending_molt_categories
+  ]
+;;
+
 (* The row passes the view it shows to the standing, so the standing is
    about the read end the row names and reading the row makes no writer. A
    writer without an open store has no view. *)
@@ -245,13 +333,20 @@ let row_with_level ~config ~keeper : Librarian_writer.held -> Level.level * Yojs
       ~state:"booting"
       ~alarms:(Level.alarms Booting)
       ~request:(Request_start.standing ~config ~keeper_name:keeper None)
-      [ "unread", `Null ]
+      [ "unread", `Null
+      ; "available_acts", `List []
+      ; "pending_molt", `Null
+      ; "pending_molt_categories", `List []
+      ]
   | Held_retired ->
     shown
       ~state:"retired"
       ~alarms:(Level.alarms Retired)
       ~request:(Request_start.standing ~config ~keeper_name:keeper None)
-      []
+      [ "available_acts", `List []
+      ; "pending_molt", `Null
+      ; "pending_molt_categories", `List []
+      ]
   | Held machine ->
     (* An open store shows where reading stands and Memory; a stopped one
        shows why it stopped. *)
@@ -284,9 +379,11 @@ let row_with_level ~config ~keeper : Librarian_writer.held -> Level.level * Yojs
       | Unknown_until_next_request | View_unavailable | No_read_end | Not_behind _ | Not_comparable _ ->
         false
     in
+    let alarms = Level.alarms (Running { machine; unread; request_behind }) in
+    let available_acts = available_acts_of_machine ~alarms machine in
     shown
       ~state:(state_token machine.state)
-      ~alarms:(Level.alarms (Running { machine; unread; request_behind }))
+      ~alarms
       ~request
       ([ "unread", (match store with Some _ -> `Bool unread | None -> `Null)
        ; "lane", `Bool (Option.is_some machine.lane)
@@ -294,7 +391,9 @@ let row_with_level ~config ~keeper : Librarian_writer.held -> Level.level * Yojs
        ; "last_read", Option.fold ~none:`Null ~some:(read_json machine) machine.last_read
        ; "last_room", Option.fold ~none:`Null ~some:(room_json machine) machine.last_room
        ; "read_alone", `Bool machine.read_alone
+       ; "available_acts", `List (List.map (fun act -> `String act) available_acts)
        ]
+       @ molt_fields machine
        @ place)
 ;;
 

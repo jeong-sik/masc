@@ -138,6 +138,27 @@ val list_turns
   -> keeper_id:string
   -> (canonical_turn list, store_error) result
 
+(** Read-only summary of [<keepers_dir>/<keeper_id>.canonical-turns.db] for
+    dashboard/TUI Memory OS internals observability. Never creates a missing
+    database file. *)
+type stats =
+  { present : bool
+  ; turn_count : int
+  ; latest_turn_id : Turn_id.t option
+  ; latest_runtime_kind : runtime_kind option
+  ; latest_runtime_id : string option
+  ; latest_created_at : float option
+  ; compaction_watermark_seq : int64 option
+  ; compaction_watermark_epoch : int option
+  ; history_resets_count : int
+  ; latest_reset_at : float option
+  }
+
+val inspect_stats
+  :  keepers_dir:string
+  -> keeper_id:string
+  -> (stats, store_error) result
+
 (** Load canonical turns strictly after [after_turn_id] in commit sequence
     order. If [after_turn_id] is not present in the canonical store (for
     example, when an anchor covers turns recorded before canonical persistence),

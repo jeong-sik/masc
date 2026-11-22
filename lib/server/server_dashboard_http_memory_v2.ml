@@ -230,11 +230,268 @@ let briefing_json ~briefing ~building =
     ]
 ;;
 
+let rfc3339_of_unix ts =
+  match Ptime.of_float_s ts with
+  | Some p -> Ptime.to_rfc3339 ~tz_offset_s:0 p
+  | None -> ""
+;;
+
+let world_fact_supporting_keepers (fact : World_memory_types.world_fact) =
+  match fact.provenance with
+  | World_memory_types.Proposed_by { keeper_id; _ } -> [ keeper_id ]
+  | World_memory_types.Cross_keeper_synthesized { keeper_ids; _ } -> keeper_ids
+;;
+
+let world_fact_as_competing_claim_json (fact : World_memory_types.world_fact) =
+  let keeper_id =
+    match world_fact_supporting_keepers fact with
+    | first :: _ -> first
+    | [] -> "world"
+  in
+  `Assoc
+    [ "store_kind", `String "world_memory_db"
+    ; "keeper_id", `String keeper_id
+    ; "path", `Null
+    ; "claim_sha256", `String fact.fact_id
+    ; "resolved", `Bool true
+    ; "claim", `String fact.claim
+    ; "category", `String (Types.category_to_string fact.category)
+    ; "origin", `String (World_memory_types.lifecycle_to_string fact.lifecycle)
+    ; "first_seen_unix", `Null
+    ; "last_seen_unix", `Null
+    ]
+;;
+
+let summary_references_private_scope (summary : string) : bool =
+  let lower = String.lowercase_ascii summary in
+  String_util.contains_substring lower "scope=keeper:"
+  || String_util.contains_substring lower "scope=private:"
+;;
+
+let build_private_change_filter (snapshot : World_memory_store.consistent_snapshot) =
+  let private_fact_ids : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+  let private_fact_id_list = ref [] in
+  List.iter
+    (fun (f : World_memory_types.world_fact) ->
+       if World_memory_types.is_private_scope f.scope
+       then (
+         Hashtbl.replace private_fact_ids f.fact_id ();
+         private_fact_id_list := f.fact_id :: !private_fact_id_list))
+    snapshot.facts;
+  let private_edge_seqs : (int, unit) Hashtbl.t = Hashtbl.create 16 in
+  List.iter
+    (fun (e : World_memory_types.world_edge) ->
+       if Hashtbl.mem private_fact_ids e.from_fact_id
+          || Hashtbl.mem private_fact_ids e.to_fact_id
+       then Hashtbl.replace private_edge_seqs e.created_seq ())
+    snapshot.edges;
+  let private_ids = !private_fact_id_list in
+  let is_visible (ev : World_memory_types.change_event) : bool =
+    if Hashtbl.mem private_fact_ids ev.target_id
+    then false
+    else if summary_references_private_scope ev.summary
+    then false
+    else (
+      match ev.kind with
+      | World_memory_types.Edge_added ->
+        if Hashtbl.mem private_edge_seqs ev.seq
+        then false
+        else
+          not
+            (List.exists
+               (fun pid -> String_util.contains_substring ev.summary pid)
+               private_ids)
+      | Fact_upserted | Fact_lifecycle_changed | Index_upserted | Digest_committed ->
+        not
+          (List.exists
+             (fun pid -> String_util.contains_substring ev.summary pid)
+             private_ids))
+  in
+  is_visible
+;;
+
+let world_json_from_mvcc_db ~now ~base_path ~writer_health =
+  (* Read with [include_inactive:true] so [Superseded]/[Molted] keeper-private
+     facts still seed [private_fact_ids] and never leak through change-log rows,
+     while [public_facts] stays filtered to active shared workspace facts. *)
+  match World_memory_store.read_snapshot ~include_inactive:true ~base_path () with
+  | Error err ->
+    error_result
+      Env.Store_unavailable
+      ("world memory db unavailable: " ^ World_memory_store.error_to_string err)
+  | Ok snapshot ->
+    (* Never leak keeper-private scoped facts into workspace-shared World Memory views. *)
+    let public_facts =
+      List.filter
+        (fun (f : World_memory_types.world_fact) ->
+           (not (World_memory_types.is_private_scope f.scope))
+           && World_memory_types.is_active_lifecycle f.lifecycle)
+        snapshot.facts
+    in
+    let public_fact_tbl : (string, World_memory_types.world_fact) Hashtbl.t =
+      Hashtbl.create (max 16 (List.length public_facts))
+    in
+    List.iter
+      (fun (f : World_memory_types.world_fact) -> Hashtbl.replace public_fact_tbl f.fact_id f)
+      public_facts;
+    let is_visible_change = build_private_change_filter snapshot in
+    let public_edges =
+      List.filter
+        (fun (e : World_memory_types.world_edge) ->
+           Hashtbl.mem public_fact_tbl e.from_fact_id
+           && Hashtbl.mem public_fact_tbl e.to_fact_id)
+        snapshot.edges
+    in
+    let active_conflicts_json =
+      public_edges
+      |> List.filter_map (fun (e : World_memory_types.world_edge) ->
+           match e.kind with
+           | World_memory_types.Contradicts ->
+             let members =
+               List.filter_map
+                 (Hashtbl.find_opt public_fact_tbl)
+                 [ e.from_fact_id; e.to_fact_id ]
+             in
+             Some
+               (`Assoc
+                 [ "conflict_id", `String (e.from_fact_id ^ ":" ^ e.to_fact_id)
+                 ; "description", `String e.reason
+                 ; "member_count", `Int (List.length members)
+                 ; ( "competing_claims"
+                   , `List (List.map world_fact_as_competing_claim_json members) )
+                 ])
+           | Supersedes | Refines | Synthesizes_from -> None)
+    in
+    let claims_json =
+      List.map
+        (fun (fact : World_memory_types.world_fact) ->
+           let keepers = world_fact_supporting_keepers fact in
+           `Assoc
+             [ "claim_id", `String fact.fact_id
+             ; "claim", `String fact.claim
+             ; "stage", `String (World_memory_types.lifecycle_to_string fact.lifecycle)
+             ; "supporting_keepers", `List (List.map (fun k -> `String k) keepers)
+             ; "support_count", `Int (max 1 (List.length keepers))
+             ; "has_source_bound", `Bool false
+             ; "category", `String (Types.category_to_string fact.category)
+             ; "scope", `String fact.scope
+             ; "facets", `List (List.map (fun fc -> `String fc) fact.facets)
+             ; "revision", `Int fact.revision
+             ])
+        public_facts
+    in
+    let briefing_obj, digest_sha256, mvcc_summary =
+      match snapshot.digest with
+      | None ->
+        ( `Assoc
+            [ "status", `String "missing"
+            ; "text", `Null
+            ; "source_ids_count", `Int 0
+            ; "error", `Null
+            ; "building_pass", `Null
+            ]
+        , `Null
+        , `Assoc
+            [ "digest_revision", `Null
+            ; "digest_sha256", `Null
+            ; "edges_count", `Int (List.length public_edges)
+            ; "index_count", `Int (List.length snapshot.entries)
+            ; "canonical_count", `Int 0
+            ; "wiki_count", `Int 0
+            ; "artifact_count", `Int 0
+            ; "resource_count", `Int 0
+            ] )
+      | Some d ->
+        ( `Assoc
+            [ "status", `String "current"
+            ; "text", `String d.rendered
+            ; "source_ids_count", `Int d.fact_count
+            ; "error", `Null
+            ; "building_pass", `Null
+            ]
+        , `String d.digest_sha256
+        , `Assoc
+            [ "digest_revision", `Int d.digest_revision
+            ; "digest_sha256", `String d.digest_sha256
+            ; "edges_count", `Int (List.length public_edges)
+            ; "index_count", `Int (List.length snapshot.entries)
+            ; "canonical_count", `Int d.canonical_count
+            ; "wiki_count", `Int d.wiki_count
+            ; "artifact_count", `Int d.artifact_count
+            ; "resource_count", `Int d.resource_count
+            ] )
+    in
+    let log_report_json =
+      match World_memory_store.read_change_log_tail ~base_path ~limit:200 with
+      | Error err ->
+        `Assoc
+          [ "status", `String "unavailable"
+          ; "error", `String (World_memory_store.error_to_string err)
+          ; "last_committed_seq", `Int 0
+          ; "committed_changes_count", `Int 0
+          ; "incomplete_batches_count", `Int 0
+          ; "aborted_batches_count", `Int 0
+          ; "recent_changes", `List []
+          ]
+      | Ok (events, max_seq) ->
+        let visible_events = List.filter is_visible_change events in
+        let recent =
+          visible_events
+          |> List.rev
+          |> Server_utils.take 20
+          |> List.map (fun (ev : World_memory_types.change_event) ->
+               `Assoc
+                 [ "seq", `Int ev.seq
+                 ; ( "batch_id"
+                   , `String (World_memory_types.change_event_kind_to_string ev.kind) )
+                 ; "fact_id", `String ev.target_id
+                 ; "summary", `String ev.summary
+                 ; "recorded_at", `String (rfc3339_of_unix ev.recorded_at)
+                 ])
+        in
+        `Assoc
+          [ "status", `String "available"
+          ; "error", `Null
+          ; "last_committed_seq", `Int max_seq
+          ; "committed_changes_count", `Int (List.length visible_events)
+          ; "incomplete_batches_count", `Int 0
+          ; "aborted_batches_count", `Int 0
+          ; "recent_changes", `List recent
+          ]
+    in
+    let data =
+      `Assoc
+        [ "source", `String "world_memory_db"
+        ; "ledger_state", `String "available"
+        ; ( "inventory"
+          , `Assoc
+              [ "ledger_sha256", digest_sha256
+              ; "claims_count", `Int (List.length claims_json)
+              ; "facts_count", `Int (List.length public_facts)
+              ; "classified_count", `Int (List.length public_facts)
+              ; "conflicts_count", `Int (List.length active_conflicts_json)
+              ; "excluded_count", `Int 0
+              ; "ordinary_absence", `Null
+              ] )
+        ; "world_mvcc", mvcc_summary
+        ; "claims", `List claims_json
+        ; "active_conflicts", `List active_conflicts_json
+        ; "briefing", briefing_obj
+        ; "recent_batches", log_report_json
+        ; "librarian_writers", writer_health
+        ]
+    in
+    Ok (Env.ok ~now data)
+;;
+
 let world_json ?(now = Time_compat.now ()) ~config () =
   let base_path = config.Workspace.base_path in
+  let writer_health = Keeper_memory_writer_health.section_json ~config in
+  if World_memory_store.exists ~base_path
+  then world_json_from_mvcc_db ~now ~base_path ~writer_health
+  else (
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let obs = Ledger.observe ~base_path in
-  let writer_health = Keeper_memory_writer_health.section_json ~config in
   let log_report_json =
     match Wlog.recover_file ~path:(Wlog.log_path ~base_path) with
     | Error err ->
@@ -386,7 +643,7 @@ let world_json ?(now = Time_compat.now ()) ~config () =
            ; "librarian_writers", writer_health
            ]
        in
-       Ok (Env.ok ~now data))
+       Ok (Env.ok ~now data)))
 ;;
 
 type heat_stats =
@@ -595,10 +852,45 @@ let keeper_diff_json ~now ~config ~keeper_id ~range =
        in
        let failures_in_window = ref (count_ts_in_scope !failure_timestamps) in
        let quarantines_in_window = ref (count_ts_in_scope !quarantine_timestamps) in
-       (* Pair explicit revision links into structured [updated] entries *)
+       (* Classify revision/absorption relations from [Keeper_memory_activity] so
+          [program_absorption] and [program_revision] fire accurately in TUI/Dashboard. *)
+       let activity = Keeper_memory_activity.read ~keepers_dir ~keeper_id ~limit:200 in
+       let relation_by_pair : (string * string, string) Hashtbl.t = Hashtbl.create 32 in
+       let absorption_pairs_rev : (string * string * int) list ref = ref [] in
+       List.iter
+         (fun (ev : Keeper_memory_activity.event) ->
+            match ev.kind with
+            | Keeper_memory_activity.Absorbed ->
+              List.iter
+                (fun (b : Keeper_memory_activity.fact) ->
+                   List.iter
+                     (fun (a : Keeper_memory_activity.fact) ->
+                        Hashtbl.replace relation_by_pair (b.memory_id, a.memory_id) "program_absorption";
+                        absorption_pairs_rev := (b.memory_id, a.memory_id, ev.revision) :: !absorption_pairs_rev)
+                     ev.after)
+                ev.before
+            | Keeper_memory_activity.Revised ->
+              let rel =
+                match ev.reason with
+                | Some r when String_util.contains_substring (String.lowercase_ascii r) "program" ->
+                  "program_revision"
+                | _ ->
+                  if List.length ev.before > 1 then "program_revision" else "revision"
+              in
+              List.iter
+                (fun (b : Keeper_memory_activity.fact) ->
+                   List.iter
+                     (fun (a : Keeper_memory_activity.fact) ->
+                        if not (Hashtbl.mem relation_by_pair (b.memory_id, a.memory_id))
+                        then Hashtbl.replace relation_by_pair (b.memory_id, a.memory_id) rel)
+                     ev.after)
+                ev.before
+            | Created | Reobserved | Retracted | Removed | Invalidated | Relation_unavailable -> ())
+         activity.events;
+       (* Pair explicit revision and absorption links into structured [updated] entries *)
        let paired_old = Hashtbl.create 16 in
        let paired_new = Hashtbl.create 16 in
-       let updated_json =
+       let revision_updated_json =
          List.filter_map
            (fun (rev_link : Types.revision) ->
               match
@@ -608,9 +900,16 @@ let keeper_diff_json ~now ~config ~keeper_id ~range =
               | Some (old_f, _old_rev, _src, _reason), Some (new_f, new_rev) ->
                 Hashtbl.replace paired_old rev_link.superseded ();
                 Hashtbl.replace paired_new rev_link.superseded_by ();
+                let relation =
+                  match
+                    Hashtbl.find_opt relation_by_pair (rev_link.superseded, rev_link.superseded_by)
+                  with
+                  | Some rel -> rel
+                  | None -> "revision"
+                in
                 Some
                   (`Assoc
-                    [ "relation", `String "revision"
+                    [ "relation", `String relation
                     ; "at_rev", `Int new_rev
                     ; "before", fact_diff_entry_json ~heat_lookup old_f
                     ; "after", fact_diff_entry_json ~heat_lookup new_f
@@ -618,6 +917,35 @@ let keeper_diff_json ~now ~config ~keeper_id ~range =
               | _ -> None)
            lineage_revisions
        in
+       let current_facts_by_id = Hashtbl.create (max 16 (List.length current_facts)) in
+       List.iter (fun f -> Hashtbl.replace current_facts_by_id (Types.memory_id f) f) current_facts;
+       let absorption_updated_json =
+         !absorption_pairs_rev
+         |> List.rev
+         |> List.filter_map (fun (old_id, new_id, ev_rev) ->
+              if Hashtbl.mem paired_old old_id
+              then None
+              else (
+                match
+                  ( Hashtbl.find_opt removed_map old_id
+                  , match Hashtbl.find_opt added_map new_id with
+                    | Some (f, rev) -> Some (f, rev)
+                    | None ->
+                      Option.map (fun f -> f, ev_rev) (Hashtbl.find_opt current_facts_by_id new_id) )
+                with
+                | Some (old_f, _old_rev, _src, _reason), Some (new_f, new_rev) ->
+                  Hashtbl.replace paired_old old_id ();
+                  Hashtbl.replace paired_new new_id ();
+                  Some
+                    (`Assoc
+                      [ "relation", `String "program_absorption"
+                      ; "at_rev", `Int new_rev
+                      ; "before", fact_diff_entry_json ~heat_lookup old_f
+                      ; "after", fact_diff_entry_json ~heat_lookup new_f
+                      ])
+                | _ -> None))
+       in
+       let updated_json = revision_updated_json @ absorption_updated_json in
        let added_json =
          Hashtbl.fold
            (fun id (fact, rev) acc ->
@@ -820,9 +1148,204 @@ let claim_id_of_change_entry (c : Wlog.change_entry) =
     else None
 ;;
 
+let fleet_retrieval_heat_json ~now ~keepers_dir =
+  let keeper_ids = Cur.list_keeper_ids_for_keepers_dir ~keepers_dir in
+  let hot = ref 0 in
+  let warm = ref 0 in
+  let cold = ref 0 in
+  let never = ref 0 in
+  let total_events = ref 0 in
+  let unreadable_events = ref 0 in
+  List.iter
+    (fun kid ->
+       let lookup, ev_c, unr_c = build_event_heat_table ~now ~keepers_dir ~keeper_id:kid in
+       total_events := !total_events + ev_c;
+       unreadable_events := !unreadable_events + unr_c;
+       match Cur.read_for_keepers_dir ~keepers_dir ~keeper_id:kid with
+       | Ok (Some snap) ->
+         List.iter
+           (fun fact ->
+              match (lookup (Types.memory_id fact)).heat with
+              | Heat_hot -> incr hot
+              | Heat_warm -> incr warm
+              | Heat_cold -> incr cold
+              | Heat_never -> incr never)
+           snap.facts
+       | Ok None | Error _ -> ())
+    keeper_ids;
+  `Assoc
+    [ "hot", `Int !hot
+    ; "warm", `Int !warm
+    ; "cold", `Int !cold
+    ; "never_retrieved", `Int !never
+    ; "total_events", `Int !total_events
+    ; "unreadable_event_lines", `Int !unreadable_events
+    ]
+;;
+
+let world_diff_json_from_mvcc_db ~now ~base_path ~keepers_dir ~range =
+  match World_memory_store.read_snapshot ~include_inactive:true ~base_path () with
+  | Error err ->
+    error_result
+      Env.Store_unavailable
+      ("world memory db unavailable: " ^ World_memory_store.error_to_string err)
+  | Ok snapshot ->
+    let change_log_res =
+      match range with
+      | Range_window _ -> World_memory_store.read_change_log_tail ~base_path ~limit:500
+      | Range_revs { from_rev; _ } ->
+        World_memory_store.read_change_log ~base_path ~since_seq:(max 0 (from_rev - 1)) ~limit:500
+    in
+    (match change_log_res with
+     | Error err ->
+       error_result
+         Env.Store_unavailable
+         ("world memory change log unavailable: " ^ World_memory_store.error_to_string err)
+     | Ok (events, max_seq) ->
+       let is_visible_change = build_private_change_filter snapshot in
+       let public_fact_tbl : (string, World_memory_types.world_fact) Hashtbl.t = Hashtbl.create 32 in
+       let active_public_count = ref 0 in
+       List.iter
+         (fun (f : World_memory_types.world_fact) ->
+            if not (World_memory_types.is_private_scope f.scope)
+            then (
+              Hashtbl.replace public_fact_tbl f.fact_id f;
+              if World_memory_types.is_active_lifecycle f.lifecycle
+              then incr active_public_count))
+         snapshot.facts;
+       let visible_events = List.filter is_visible_change events in
+       let from_unix_opt, to_unix_opt, from_rev_opt, to_rev_opt, window_label =
+         match range with
+         | Range_window w ->
+           let span = window_seconds w in
+           Some (now -. span), Some now, None, None, Some (window_to_string w)
+         | Range_revs { from_rev; to_rev } ->
+           None, None, Some from_rev, Some (Option.value to_rev ~default:max_seq), None
+       in
+       let selected =
+         List.filter
+           (fun (ev : World_memory_types.change_event) ->
+              match range with
+              | Range_window _ ->
+                (match from_unix_opt, to_unix_opt with
+                 | Some lo, Some hi ->
+                   Float.compare ev.recorded_at lo >= 0 && Float.compare ev.recorded_at hi <= 0
+                 | None, _ | _, None -> false)
+              | Range_revs _ ->
+                (match from_rev_opt, to_rev_opt with
+                 | Some lo, Some hi -> ev.seq >= lo && ev.seq <= hi
+                 | None, _ | _, None -> false))
+           visible_events
+       in
+       let added = ref [] in
+       let updated = ref [] in
+       let retracted = ref [] in
+       let revisions = ref [] in
+       List.iter
+         (fun (ev : World_memory_types.change_event) ->
+            let fact_opt = Hashtbl.find_opt public_fact_tbl ev.target_id in
+            let op_kind =
+              match ev.kind with
+              | World_memory_types.Fact_lifecycle_changed ->
+                (match fact_opt with
+                 | Some { lifecycle = Superseded | Molted; _ } -> "retracted"
+                 | Some { lifecycle = Working | Consolidated | Canonical; _ } | None -> "updated")
+              | Fact_upserted ->
+                (match fact_opt with
+                 | Some f when f.revision > 1 -> "updated"
+                 | Some _ | None -> "added")
+              | Edge_added | Index_upserted | Digest_committed -> "added"
+            in
+            let claim_text_opt = Option.map (fun (f : World_memory_types.world_fact) -> f.claim) fact_opt in
+            let recorded_iso = rfc3339_of_unix ev.recorded_at in
+            let payload_json = World_memory_types.change_event_to_json ev in
+            let enrichment_fields =
+              [ "claim_id", `String ev.target_id
+              ; "claim_text", Json_util.string_opt_to_json claim_text_opt
+              ; "before_text", `Null
+              ; "author_keeper", `String ev.actor
+              ; "ts", `Float ev.recorded_at
+              ]
+            in
+            let entry_json =
+              `Assoc
+                ([ "seq", `Int ev.seq
+                 ; "batch_id", `String (World_memory_types.change_event_kind_to_string ev.kind)
+                 ; "fact_id", `String ev.target_id
+                 ; "summary", `String ev.summary
+                 ; "recorded_at", `String recorded_iso
+                 ; "payload", payload_json
+                 ]
+                 @ enrichment_fields)
+            in
+            revisions
+            := `Assoc
+                 [ "rev", `Int ev.seq
+                 ; "batch_id", `String (World_memory_types.change_event_kind_to_string ev.kind)
+                 ; "fact_id", `String ev.target_id
+                 ; "recorded_at", `String recorded_iso
+                 ; "op", `String op_kind
+                 ]
+               :: !revisions;
+            if String.equal op_kind "retracted"
+            then retracted := entry_json :: !retracted
+            else if String.equal op_kind "updated"
+            then
+              updated
+              := `Assoc
+                   ([ "seq", `Int ev.seq
+                    ; "fact_id", `String ev.target_id
+                    ; "summary", `String ev.summary
+                    ; "recorded_at", `String recorded_iso
+                    ; "before", `Null
+                    ; "after", payload_json
+                    ]
+                    @ enrichment_fields)
+                 :: !updated
+            else added := entry_json :: !added)
+         selected;
+       let data =
+         `Assoc
+           [ "source", `String "world_memory_db"
+           ; "scope", `Assoc [ "kind", `String "world" ]
+           ; ( "range"
+             , `Assoc
+                 [ "window", Json_util.string_opt_to_json window_label
+                 ; "from_rev", Json_util.int_opt_to_json from_rev_opt
+                 ; ( "to_rev"
+                   , Json_util.int_opt_to_json
+                       (match to_rev_opt with
+                        | Some _ as t -> t
+                        | None -> Some max_seq) )
+                 ; "from_unix", Json_util.float_opt_to_json from_unix_opt
+                 ; "to_unix", Json_util.float_opt_to_json to_unix_opt
+                 ] )
+           ; ( "counts"
+             , `Assoc
+                 [ "total_claims_now", `Int !active_public_count
+                 ; "added", `Int (List.length !added)
+                 ; "updated", `Int (List.length !updated)
+                 ; "retracted", `Int (List.length !retracted)
+                 ; "incomplete_batches", `Int 0
+                 ; "aborted_batches", `Int 0
+                 ] )
+           ; "retrieval_heat", fleet_retrieval_heat_json ~now ~keepers_dir
+           ; "revisions", `List (List.rev !revisions)
+           ; "added", `List (List.rev !added)
+           ; "updated", `List (List.rev !updated)
+           ; "retracted", `List (List.rev !retracted)
+           ; "unparseable_timestamps", `Int 0
+           ]
+       in
+       Ok (Env.ok ~now data))
+;;
+
 let world_diff_json ~now ~config ~range =
   let base_path = config.Workspace.base_path in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  if World_memory_store.exists ~base_path
+  then world_diff_json_from_mvcc_db ~now ~base_path ~keepers_dir ~range
+  else
   match Wlog.recover_file ~path:(Wlog.log_path ~base_path) with
   | Error err ->
     error_result

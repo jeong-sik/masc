@@ -1159,6 +1159,74 @@ let test_bus_key_hash_and_stream_frames () =
     (Cmd_executor.is_health_body_ready
        {|{"ok":true,"ready":true,"status":"ok","version":"0.1.0"}|})
 
+let test_setup_login_stream_error_and_single_delivery () =
+  let sse_frame json = "data: " ^ json ^ "\n\n" in
+  let running_json =
+    {|{"login_id":"login-001","integration_id":"vibe_acp","status":"running","account":"keyring_host"}|}
+  in
+  let complete_json =
+    {|{"login_id":"login-001","integration_id":"vibe_acp","status":"complete","account":"keyring_host","authentication":"login_completed"}|}
+  in
+  let failed_json =
+    {|{"login_id":"login-001","integration_id":"vibe_acp","status":"failed"}|}
+  in
+  let collect ~stream =
+    let emitted = ref [] in
+    Cmd_executor.run_setup_login_stream
+      ~publish:(fun res -> emitted := res :: !emitted)
+      ~stream;
+    List.rev !emitted
+  in
+  (* 1. SSE error after non-terminal "running" receipt MUST propagate Error *)
+  let err_after_running =
+    collect ~stream:(fun ~on_chunk ->
+        on_chunk (sse_frame running_json);
+        Error (Msg.Transport (Health.Other_io "connection reset")))
+  in
+  Alcotest.(check int) "running + stream error emits 2 events" 2
+    (List.length err_after_running);
+  (match err_after_running with
+  | [ Ok r; Error (Msg.Transport (Health.Other_io msg)) ] ->
+      Alcotest.(check string) "first event is running receipt" "running" r.status;
+      Alcotest.(check string) "second event propagates stream error"
+        "connection reset" msg
+  | _ ->
+      Alcotest.fail
+        "expected [Ok running; Error Transport] when SSE drops after running");
+  (* 2. Normal "running" -> "complete" stream emits "complete" EXACTLY ONCE *)
+  let normal =
+    collect ~stream:(fun ~on_chunk ->
+        on_chunk (sse_frame running_json);
+        on_chunk (sse_frame complete_json);
+        Ok ())
+  in
+  Alcotest.(check int) "running -> complete emits exactly 2 events (no duplicate complete)" 2
+    (List.length normal);
+  (match normal with
+  | [ Ok r1; Ok r2 ] ->
+      Alcotest.(check string) "first is running" "running" r1.status;
+      Alcotest.(check string) "second is complete" "complete" r2.status
+  | _ -> Alcotest.fail "expected [Ok running; Ok complete]");
+  (* 3. Terminal receipt followed by post-terminal transport error preserves terminal receipt once *)
+  let after_terminal_err =
+    collect ~stream:(fun ~on_chunk ->
+        on_chunk (sse_frame running_json);
+        on_chunk (sse_frame failed_json);
+        Error (Msg.Transport Health.Stream_eof))
+  in
+  Alcotest.(check int) "terminal failed suppresses trailing EOF error" 2
+    (List.length after_terminal_err);
+  (match after_terminal_err with
+  | [ Ok r1; Ok r2 ] ->
+      Alcotest.(check string) "first is running" "running" r1.status;
+      Alcotest.(check string) "second is terminal failed" "failed" r2.status
+  | _ -> Alcotest.fail "expected [Ok running; Ok failed]");
+  (* 4. Empty clean stream close emits Decode_error *)
+  let empty_ok = collect ~stream:(fun ~on_chunk:_ -> Ok ()) in
+  (match empty_ok with
+  | [ Error (Msg.Decode_error _) ] -> ()
+  | _ -> Alcotest.fail "expected single Decode_error on empty login stream")
+
 let test_app_ctrl_c_and_voice_tick_gate () =
   (* P1-3: Kitty CSI u Ctrl+C (\x1b[99;5u) is recognized as Ctrl+C. *)
   let dec = Masc_tui_term.Input_decoder.create () in
@@ -1607,6 +1675,8 @@ let () =
             `Quick test_remote_editor_escape_hatch_blocked;
           Alcotest.test_case "bus_key hash invariant, batch log stream & health readiness"
             `Quick test_bus_key_hash_and_stream_frames;
+          Alcotest.test_case "setup login stream propagates non-terminal error & delivers terminal receipt once"
+            `Quick test_setup_login_stream_error_and_single_delivery;
         ] );
       ( "app"
       , [

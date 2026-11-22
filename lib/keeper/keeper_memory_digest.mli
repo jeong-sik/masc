@@ -64,3 +64,17 @@ val render_for_snapshot
   -> revision:int
   -> facts:Keeper_memory_os_types.fact list
   -> string
+
+(** Read-only metadata inspection of [<keepers_dir>/<keeper_id>.memory-digest.json]
+    off-domain via {!Domain_pool_ref.submit_io_or_inline}. Never writes or
+    compiles a missing file. *)
+type cached_meta =
+  { present : bool
+  ; revision : int option
+  ; digest_sha256 : string option
+  ; bytes : int
+  ; fact_count : int
+  ; derived_count : int
+  }
+
+val read_cached_meta : keepers_dir:string -> keeper_id:string -> cached_meta

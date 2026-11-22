@@ -389,3 +389,166 @@ let handle_journal_get state req reqd name =
          ] @ activity))
       reqd)
 ;;
+
+let memory_os_internals_json ~(config : Workspace.config) ~keeper_id =
+  let keepers_dir = memory_os_keepers_dir config in
+  let compaction_json =
+    match Keeper_compaction.inspect_stats ~keepers_dir ~keeper_id with
+    | Error err ->
+      `Assoc
+        [ "present", `Bool false
+        ; "epoch_count", `Int 0
+        ; "archived_turns_count", `Int 0
+        ; "anchor_bytes", `Int 0
+        ; "latest_epoch_id", `Null
+        ; "covers_through_turn", `Null
+        ; "archived_epochs_through", `Null
+        ; "verified_facts_count", `Int 0
+        ; "decisions_count", `Int 0
+        ; "open_threads_count", `Int 0
+        ; "read_error", `String (Keeper_compaction.store_error_to_string err)
+        ]
+    | Ok s ->
+      let ( latest_epoch_id
+          , covers_through_turn
+          , archived_epochs_through
+          , verified_facts_count
+          , decisions_count
+          , open_threads_count ) =
+        match s.latest_anchor with
+        | None -> `Null, `Null, `Null, 0, 0, 0
+        | Some a ->
+          ( `Int a.epoch_id
+          , `String (Ids.Turn_id.to_string a.covers_through_turn)
+          , Json_util.int_opt_to_json a.archived_epochs_through
+          , List.length a.verified_facts_and_files
+          , List.length a.decisions_made
+          , List.length a.open_threads )
+      in
+      `Assoc
+        [ "present", `Bool s.present
+        ; "epoch_count", `Int s.epoch_count
+        ; "archived_turns_count", `Int s.archived_turns_count
+        ; "anchor_bytes", `Int s.anchor_bytes
+        ; "latest_epoch_id", latest_epoch_id
+        ; "covers_through_turn", covers_through_turn
+        ; "archived_epochs_through", archived_epochs_through
+        ; "verified_facts_count", `Int verified_facts_count
+        ; "decisions_count", `Int decisions_count
+        ; "open_threads_count", `Int open_threads_count
+        ; "read_error", `Null
+        ]
+  in
+  let canonical_turns_json =
+    match Keeper_canonical_turn_store.inspect_stats ~keepers_dir ~keeper_id with
+    | Error err ->
+      `Assoc
+        [ "present", `Bool false
+        ; "turn_count", `Int 0
+        ; "latest_turn_id", `Null
+        ; "latest_runtime_kind", `Null
+        ; "latest_runtime_id", `Null
+        ; "latest_created_at", `Null
+        ; "compaction_watermark_seq", `Null
+        ; "compaction_watermark_epoch", `Null
+        ; "history_resets_count", `Int 0
+        ; "latest_reset_at", `Null
+        ; "read_error", `String (Keeper_canonical_turn_store.store_error_to_string err)
+        ]
+    | Ok s ->
+      `Assoc
+        [ "present", `Bool s.present
+        ; "turn_count", `Int s.turn_count
+        ; ( "latest_turn_id"
+          , Json_util.string_opt_to_json (Option.map Ids.Turn_id.to_string s.latest_turn_id) )
+        ; ( "latest_runtime_kind"
+          , Json_util.string_opt_to_json
+              (Option.map Keeper_canonical_turn_store.runtime_kind_to_string s.latest_runtime_kind) )
+        ; "latest_runtime_id", Json_util.string_opt_to_json s.latest_runtime_id
+        ; "latest_created_at", Json_util.float_opt_to_json s.latest_created_at
+        ; ( "compaction_watermark_seq"
+          , match s.compaction_watermark_seq with
+            | None -> `Null
+            | Some seq -> `Int (Int64.to_int seq) )
+        ; "compaction_watermark_epoch", Json_util.int_opt_to_json s.compaction_watermark_epoch
+        ; "history_resets_count", `Int s.history_resets_count
+        ; "latest_reset_at", Json_util.float_opt_to_json s.latest_reset_at
+        ; "read_error", `Null
+        ]
+  in
+  let digest_meta = Keeper_memory_digest.read_cached_meta ~keepers_dir ~keeper_id in
+  let memory_digest_json =
+    `Assoc
+      [ "present", `Bool digest_meta.present
+      ; "revision", Json_util.int_opt_to_json digest_meta.revision
+      ; "digest_sha256", Json_util.string_opt_to_json digest_meta.digest_sha256
+      ; "bytes", `Int digest_meta.bytes
+      ; "fact_count", `Int digest_meta.fact_count
+      ; "derived_count", `Int digest_meta.derived_count
+      ]
+  in
+  let writer_row =
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+      Keeper_memory_writer_health.keeper_rows ~config keeper_id)
+  in
+  let librarian_molt_json =
+    match writer_row with
+    | `Assoc fields ->
+      (match List.assoc_opt "kind" fields, List.assoc_opt "row" fields with
+       | Some (`String "writer"), Some (`Assoc row_fields) ->
+         `Assoc
+           [ "writer_kind", `String "writer"
+           ; "writer_state", Option.value ~default:`Null (List.assoc_opt "state" row_fields)
+           ; "pending_molt", Option.value ~default:`Null (List.assoc_opt "pending_molt" row_fields)
+           ; ( "pending_molt_categories"
+             , Option.value ~default:(`List []) (List.assoc_opt "pending_molt_categories" row_fields) )
+           ; ( "available_acts"
+             , Option.value ~default:(`List []) (List.assoc_opt "available_acts" row_fields) )
+           ]
+       | Some (`String kind), _ ->
+         `Assoc
+           [ "writer_kind", `String kind
+           ; "writer_state", `Null
+           ; "pending_molt", `Null
+           ; "pending_molt_categories", `List []
+           ; "available_acts", `List []
+           ]
+       | _ ->
+         `Assoc
+           [ "writer_kind", `String "unknown"
+           ; "writer_state", `Null
+           ; "pending_molt", `Null
+           ; "pending_molt_categories", `List []
+           ; "available_acts", `List []
+           ])
+    | _ ->
+      `Assoc
+        [ "writer_kind", `String "unknown"
+        ; "writer_state", `Null
+        ; "pending_molt", `Null
+        ; "pending_molt_categories", `List []
+        ; "available_acts", `List []
+        ]
+  in
+  `Assoc
+    [ "keeper", `String keeper_id
+    ; "dashboard_surface", `String "/api/v1/keepers/:name/memory-os-internals"
+    ; "compaction", compaction_json
+    ; "canonical_turns", canonical_turns_json
+    ; "memory_digest", memory_digest_json
+    ; "librarian_molt", librarian_molt_json
+    ]
+;;
+
+let handle_memory_os_internals_get state req reqd name =
+  if not (Keeper_config.validate_name name)
+  then
+    Http.Response.json_value ~status:`Bad_request
+      (`Assoc
+         [ "error", `String (Printf.sprintf "invalid keeper name: %s" name) ])
+      reqd
+  else (
+    let config = Mcp_server.workspace_config state in
+    let json = memory_os_internals_json ~config ~keeper_id:name in
+    Http.Response.json_value ~compress:true ~request:req json reqd)
+;;

@@ -406,10 +406,15 @@ type memory_conflict = {
   competing_claims : competing_claim list;
 }
 
+type snapshot_file_status =
+  | Snapshot_file_present of { sha : string; bytes : int }
+  | Snapshot_file_fault of string
+
 type librarian_writer_row = {
   keeper : string;
   state : writer_state;
   available_act_tokens : string list;
+  snapshot_file : snapshot_file_status option;
 }
 
 type librarian_writers_section =
@@ -536,6 +541,7 @@ type keeper_writer_status =
   | Keeper_writer_active of {
       state : writer_state;
       available_act_tokens : string list;
+      snapshot_file : snapshot_file_status option;
     }
 
 type world_diff_counts = {
@@ -615,3 +621,61 @@ val decode_memory_diff : Yojson.Safe.t -> (memory_diff, string) result
 val encode_memory_act_request : memory_recovery_act -> Yojson.Safe.t
 val decode_memory_act_answer :
   status_code:int -> Yojson.Safe.t -> (memory_act_answer, string) result
+
+(** {1 Per-Keeper Memory OS Internals ([/api/v1/keepers/:name/memory-os-internals])} *)
+
+val keeper_memory_os_internals_path : keeper:string -> string
+
+type compaction_internals = {
+  present : bool;
+  epoch_count : int;
+  archived_turns_count : int;
+  anchor_bytes : int;
+  latest_epoch_id : int option;
+  covers_through_turn : string option;
+  archived_epochs_through : int option;
+  verified_facts_count : int;
+  decisions_count : int;
+  open_threads_count : int;
+  read_error : string option;
+}
+
+type canonical_turns_internals = {
+  present : bool;
+  turn_count : int;
+  latest_turn_id : string option;
+  latest_runtime_kind : string option;
+  latest_runtime_id : string option;
+  compaction_watermark_seq : int option;
+  compaction_watermark_epoch : int option;
+  history_resets_count : int;
+  read_error : string option;
+}
+
+type memory_digest_internals = {
+  present : bool;
+  revision : int option;
+  digest_sha256 : string option;
+  bytes : int;
+  fact_count : int;
+  derived_count : int;
+}
+
+type librarian_molt_internals = {
+  writer_kind : string;
+  writer_state : string option;
+  pending_molt_kind : string option;
+  pending_molt_categories : string list;
+  available_act_tokens : string list;
+}
+
+type memory_os_internals = {
+  keeper : string;
+  compaction : compaction_internals;
+  canonical_turns : canonical_turns_internals;
+  memory_digest : memory_digest_internals;
+  librarian_molt : librarian_molt_internals;
+}
+
+val decode_memory_os_internals :
+  Yojson.Safe.t -> (memory_os_internals, string) result

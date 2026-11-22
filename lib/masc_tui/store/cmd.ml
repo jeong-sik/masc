@@ -46,12 +46,16 @@ type get_request =
       keeper : string option;
       window : Knowledge_store.memory_diff_window;
     }
+  | Get_keeper_memory_os_internals of { keeper : string }
   | Get_provider_usage of { days : int }
   | Get_keeper_costs of { window_minutes : int }
   | Get_efficiency of { month : string option }
   | Get_models_metrics of { window_minutes : int; bucket_minutes : int }
   | Get_runtime_metrics
   | Get_runtime_resolved
+  | Get_runtime_config_raw
+  | Get_setup_inventory
+  | Get_setup_login_status of { login_id : string }
   | Get_runtime_probe of { force : bool }
   | Get_exact_lane_runs of { lane : string option; limit : int option }
   | Get_fusion_runs
@@ -114,6 +118,22 @@ type post_request =
   | Post_fusion_launch of {
       keeper : string;
       request : Wire_runtime.fusion_launch_request;
+    }
+  | Post_runtime_assignment of {
+      keeper_name : string;
+      runtime_id : string option;
+      source_revision : string option;
+      previous_runtime_id : string option;
+    }
+  | Post_runtime_default_route of { runtime_id : string }
+  | Post_setup_account_key of {
+      integration_id : string;
+      key : string;
+      source_revision : string;
+    }
+  | Post_setup_login_start of {
+      integration_id : string;
+      account_ref : string option;
     }
   | Post_sandbox_probe of [ `All | `Keeper of string | `Ssh_pool of string ]
   | Post_config_patch of Wire_config.patch_request
@@ -217,6 +237,8 @@ let get_request_path = function
       | Knowledge_store.Window_30d ->
           let window = Knowledge_store.memory_diff_window_query window in
           Wire_knowledge.memory_diff_path ~keeper ?window ())
+  | Get_keeper_memory_os_internals { keeper } ->
+      Wire_knowledge.keeper_memory_os_internals_path ~keeper
   | Get_provider_usage { days } ->
       Wire_runtime.provider_usage_history_path ~days
   | Get_keeper_costs { window_minutes } ->
@@ -226,6 +248,10 @@ let get_request_path = function
       Wire_runtime.models_metrics_path ~window_minutes ~bucket_minutes ()
   | Get_runtime_metrics -> Wire_runtime.runtime_metrics_path
   | Get_runtime_resolved -> Wire_runtime.runtime_resolved_path
+  | Get_runtime_config_raw -> Wire_runtime.runtime_config_raw_path
+  | Get_setup_inventory -> Wire_runtime.setup_inventory_path
+  | Get_setup_login_status { login_id } ->
+      Wire_runtime.setup_accounts_login_status_path ~login_id
   | Get_runtime_probe { force } -> Wire_runtime.runtime_probe_path ~force ()
   | Get_exact_lane_runs { lane; limit } ->
       Wire_runtime.exact_lane_runs_path ?lane ?limit ()
@@ -260,6 +286,10 @@ let post_request_path = function
   | Post_memory_act { keeper; _ } ->
       Wire_knowledge.keeper_memory_act_path ~keeper
   | Post_fusion_launch { keeper; _ } -> Wire_runtime.fusion_launch_path ~keeper
+  | Post_runtime_assignment _ -> Wire_runtime.runtime_assignment_path
+  | Post_runtime_default_route _ -> Wire_runtime.runtime_routing_path
+  | Post_setup_account_key _ -> Wire_runtime.setup_credential_path
+  | Post_setup_login_start _ -> Wire_runtime.setup_accounts_login_path
   | Post_sandbox_probe _ -> Wire_infra.infra_sandboxes_probe_path
   | Post_config_patch _ -> Wire_config.config_patch_path
   | Post_tui_preference _ -> Wire_config.tui_preferences_path
@@ -290,6 +320,18 @@ let post_request_body = function
       Wire_knowledge.encode_quarantine_requeue_request ~quarantine_id ~reason
   | Post_memory_act { act; _ } -> Wire_knowledge.encode_memory_act_request act
   | Post_fusion_launch { request; _ } -> Wire_runtime.encode_fusion_launch request
+  | Post_runtime_assignment
+      { keeper_name; runtime_id; source_revision; previous_runtime_id } ->
+      Wire_runtime.encode_runtime_assignment ~keeper_name ~runtime_id
+        ~source_revision ~previous_runtime_id ()
+  | Post_runtime_default_route { runtime_id } ->
+      Wire_runtime.encode_runtime_default_route ~runtime_id
+  | Post_setup_account_key { integration_id; key; source_revision } ->
+      Wire_runtime.encode_setup_credential ~provider_id:integration_id
+        ~secret:key ~source_revision
+  | Post_setup_login_start { integration_id; account_ref } ->
+      Wire_runtime.encode_setup_account_login_start ~integration_id ?account_ref
+        ()
   | Post_sandbox_probe target -> Wire_infra.encode_sandbox_probe_request target
   | Post_config_patch req -> Wire_config.encode_patch_request req
   | Post_tui_preference change ->

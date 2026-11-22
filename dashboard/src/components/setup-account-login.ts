@@ -75,8 +75,10 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onRep
     const receipt = await fetchLoginReceipt(id, integrationId, operation.controller.signal)
     if (!current(operation)) return
     if (receipt.account_ref) setRecovered({ integration_id: integrationId, account_ref: receipt.account_ref })
-    if (receipt.status === 'complete' && receipt.account_ref) {
-      const source = { integration_id: integrationId, account_ref: receipt.account_ref }
+    if (receipt.status === 'complete' && (receipt.account_ref || receipt.account === 'keyring_host')) {
+      const source: Source = receipt.account_ref
+        ? { integration_id: integrationId, account_ref: receipt.account_ref }
+        : { integration_id: integrationId }
       const changed = settle(source)
       setNotice('로그인 절차가 완료되었습니다. 모델의 응답과 도구 호출은 저장할 때 검증합니다.')
       // `onComplete` reads the account's models. Another account always

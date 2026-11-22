@@ -57,6 +57,17 @@ let alarms row =
   | other -> failf "alarms is not a list: %s" (Yojson.Safe.to_string other)
 ;;
 
+let string_list key row =
+  match member key row with
+  | `List xs ->
+    List.map
+      (function
+        | `String s -> s
+        | other -> failf "%s item is not a string: %s" key (Yojson.Safe.to_string other))
+      xs
+  | other -> failf "%s is not a list: %s" key (Yojson.Safe.to_string other)
+;;
+
 let writers config =
   match Masc.Keeper_memory_writers.find ~base_path:config.Masc.Workspace.base_path with
   | Some writers -> writers
@@ -150,6 +161,10 @@ let test_an_open_writer () =
     check string "its state" "idle" (text "state" row);
     check string "its level" "ok" (text "level" row);
     check (list string) "no alarm" [] (alarms row);
+    check (list string) "idle writer has no recovery acts" [] (string_list "available_acts" row);
+    check bool "idle writer has no pending molt" true (member "pending_molt" row = `Null);
+    check (list string) "idle writer has no pending molt categories" []
+      (string_list "pending_molt_categories" row);
     check bool "no lane value" true (member "lane" row = `Bool false);
     check bool "nothing unread" true (member "unread" row = `Bool false);
     check string "reading stands at the log's start" "started" (text "last_line" row);
@@ -191,6 +206,9 @@ let test_a_stopped_writer () =
     check string "an error" "error" (text "level" row);
     check string "why" "store_stopped_log_unreadable" (text "stop" row);
     check string "the snapshot file" "absent" (text "fault" (member "snapshot_file" row));
+    let stopped_acts = string_list "available_acts" row in
+    check bool "stopped writer offers adopt" true (List.mem "adopt" stopped_acts);
+    check bool "stopped writer offers resume" true (List.mem "resume" stopped_acts);
     let krow = keeper_row_of config keeper in
     check string "the Keeper's row shows the same stopped store"
       (Yojson.Safe.to_string row) (Yojson.Safe.to_string (member "row" krow));
@@ -275,6 +293,9 @@ let test_a_writer_resting_on_an_input_fault () =
     let row = row_of config in
     check string "its state" "resting" (text "state" row);
     check (list string) "E3" [ "E3" ] (alarms row);
+    let e3_acts = string_list "available_acts" row in
+    check bool "input fault offers resume" true (List.mem "resume" e3_acts);
+    check bool "input fault offers skip_line" true (List.mem "skip_line" e3_acts);
     let read = member "last_read" row in
     check string "the ask ended on an input fault" "input_fault" (text "ended" read);
     let fault = member "fault" read in
@@ -389,6 +410,9 @@ let test_a_writer_every_slot_refused () =
     let row = row_of config in
     check string "its state" "resting" (text "state" row);
     check (list string) "E4, and W1 for what is still unread" [ "E4"; "W1" ] (alarms row);
+    let e4_acts = string_list "available_acts" row in
+    check bool "E4 offers resume" true (List.mem "resume" e4_acts);
+    check bool "E4 offers skip_item" true (List.mem "skip_item" e4_acts);
     check string "the refusal has its own end, about the lane value declared now"
       (Yojson.Safe.to_string (wire ~about_lane_now:true))
       (Yojson.Safe.to_string (member "last_read" row));

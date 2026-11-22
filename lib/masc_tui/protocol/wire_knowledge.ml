@@ -86,6 +86,9 @@ let wiki_lint_path = "/api/v1/wiki/lint"
 let world_memory_path = "/api/v1/memory/world"
 let workspace_memory_inventory_path = "/api/v1/dashboard/workspace-memory-inventory"
 
+let keeper_memory_os_internals_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/memory-os-internals" (percent_encode keeper)
+
 let memory_diff_path ~keeper ?window ?from_rev ?to_rev () =
   let params =
     (match keeper with
@@ -976,10 +979,15 @@ type memory_conflict = {
   competing_claims : competing_claim list;
 }
 
+type snapshot_file_status =
+  | Snapshot_file_present of { sha : string; bytes : int }
+  | Snapshot_file_fault of string
+
 type librarian_writer_row = {
   keeper : string;
   state : writer_state;
   available_act_tokens : string list;
+  snapshot_file : snapshot_file_status option;
 }
 
 type librarian_writers_section =
@@ -1106,6 +1114,7 @@ type keeper_writer_status =
   | Keeper_writer_active of {
       state : writer_state;
       available_act_tokens : string list;
+      snapshot_file : snapshot_file_status option;
     }
 
 type world_diff_counts = {
@@ -1201,12 +1210,16 @@ let decode_writer_state_string json field =
   | "no_writer" -> Ok Writer_no_writer
   | "stopped" ->
       let* reason =
-        match optional_nonblank_string json "stopped" with
+        match optional_nonblank_string json "stop" with
         | Ok (Some r) -> Ok r
         | Ok None -> (
-            match optional_nonblank_string json "stop_reason" with
+            match optional_nonblank_string json "stopped" with
             | Ok (Some r) -> Ok r
-            | Ok None -> Ok "stopped"
+            | Ok None -> (
+                match optional_nonblank_string json "stop_reason" with
+                | Ok (Some r) -> Ok r
+                | Ok None -> Ok "stopped"
+                | Error _ as err -> err)
             | Error _ as err -> err)
         | Error _ as err -> err
       in
@@ -1257,12 +1270,30 @@ let decode_conflict json =
   in
   Ok { conflict_id; description; member_count; competing_claims }
 
+let decode_snapshot_file_opt json =
+  match optional_object_field json "snapshot_file" with
+  | Ok None -> Ok None
+  | Error _ as err -> err
+  | Ok (Some sf) -> (
+      match optional_nonblank_string sf "sha", optional_int_field sf "bytes" with
+      | Ok (Some sha), Ok (Some bytes) ->
+          Ok (Some (Snapshot_file_present { sha; bytes = max 0 bytes }))
+      | Ok (Some sha), Ok None ->
+          Ok (Some (Snapshot_file_present { sha; bytes = 0 }))
+      | Ok None, _ -> (
+          match optional_nonblank_string sf "fault" with
+          | Ok (Some f) -> Ok (Some (Snapshot_file_fault f))
+          | Ok None -> Ok None
+          | Error _ as err -> err)
+      | Error _ as err, _ | _, (Error _ as err) -> err)
+
 let decode_librarian_writer_entry json =
   let* keeper = required_nonblank_string json "keeper" in
   let* row_obj = required_object_field json "row" in
   let* state = decode_writer_state_string row_obj "state" in
   let* available_act_tokens = optional_string_list row_obj "available_acts" in
-  Ok { keeper; state; available_act_tokens }
+  let* snapshot_file = decode_snapshot_file_opt row_obj in
+  Ok { keeper; state; available_act_tokens; snapshot_file }
 
 let decode_librarian_writers_section json =
   let* writers_mode = required_nonblank_string json "writers" in
@@ -1534,7 +1565,8 @@ let decode_keeper_writer_status json =
       let* row = required_object_field json "row" in
       let* state = decode_writer_state_string row "state" in
       let* available_act_tokens = optional_string_list row "available_acts" in
-      Ok (Keeper_writer_active { state; available_act_tokens })
+      let* snapshot_file = decode_snapshot_file_opt row in
+      Ok (Keeper_writer_active { state; available_act_tokens; snapshot_file })
   | other -> Error (Printf.sprintf "unknown keeper writer_status kind %S" other)
 
 let decode_world_revision_tick json =
@@ -1743,3 +1775,173 @@ let decode_memory_act_answer ~status_code json =
   | other ->
       Error
         (Printf.sprintf "unexpected status code %d for keeper memory act" other)
+
+type compaction_internals = {
+  present : bool;
+  epoch_count : int;
+  archived_turns_count : int;
+  anchor_bytes : int;
+  latest_epoch_id : int option;
+  covers_through_turn : string option;
+  archived_epochs_through : int option;
+  verified_facts_count : int;
+  decisions_count : int;
+  open_threads_count : int;
+  read_error : string option;
+}
+
+type canonical_turns_internals = {
+  present : bool;
+  turn_count : int;
+  latest_turn_id : string option;
+  latest_runtime_kind : string option;
+  latest_runtime_id : string option;
+  compaction_watermark_seq : int option;
+  compaction_watermark_epoch : int option;
+  history_resets_count : int;
+  read_error : string option;
+}
+
+type memory_digest_internals = {
+  present : bool;
+  revision : int option;
+  digest_sha256 : string option;
+  bytes : int;
+  fact_count : int;
+  derived_count : int;
+}
+
+type librarian_molt_internals = {
+  writer_kind : string;
+  writer_state : string option;
+  pending_molt_kind : string option;
+  pending_molt_categories : string list;
+  available_act_tokens : string list;
+}
+
+type memory_os_internals = {
+  keeper : string;
+  compaction : compaction_internals;
+  canonical_turns : canonical_turns_internals;
+  memory_digest : memory_digest_internals;
+  librarian_molt : librarian_molt_internals;
+}
+
+let decode_memory_os_internals json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* keeper = required_nonblank_string body "keeper" in
+  let* comp_obj = required_object_field body "compaction" in
+  let* comp_present = required_bool_field comp_obj "present" in
+  let* epoch_count = required_nonnegative_int_field comp_obj "epoch_count" in
+  let* archived_turns_count =
+    required_nonnegative_int_field comp_obj "archived_turns_count"
+  in
+  let* anchor_bytes = required_nonnegative_int_field comp_obj "anchor_bytes" in
+  let* latest_epoch_id = optional_int_field comp_obj "latest_epoch_id" in
+  let* covers_through_turn =
+    optional_nonblank_string comp_obj "covers_through_turn"
+  in
+  let* archived_epochs_through =
+    optional_int_field comp_obj "archived_epochs_through"
+  in
+  let* verified_facts_count =
+    optional_nonnegative_count comp_obj "verified_facts_count"
+  in
+  let* decisions_count =
+    optional_nonnegative_count comp_obj "decisions_count"
+  in
+  let* open_threads_count =
+    optional_nonnegative_count comp_obj "open_threads_count"
+  in
+  let* comp_read_error = optional_nonblank_string comp_obj "read_error" in
+  let* turns_obj = required_object_field body "canonical_turns" in
+  let* turns_present = required_bool_field turns_obj "present" in
+  let* turn_count = required_nonnegative_int_field turns_obj "turn_count" in
+  let* latest_turn_id = optional_nonblank_string turns_obj "latest_turn_id" in
+  let* latest_runtime_kind =
+    optional_nonblank_string turns_obj "latest_runtime_kind"
+  in
+  let* latest_runtime_id =
+    optional_nonblank_string turns_obj "latest_runtime_id"
+  in
+  let* compaction_watermark_seq =
+    optional_int_field turns_obj "compaction_watermark_seq"
+  in
+  let* compaction_watermark_epoch =
+    optional_int_field turns_obj "compaction_watermark_epoch"
+  in
+  let* history_resets_count =
+    optional_nonnegative_count turns_obj "history_resets_count"
+  in
+  let* turns_read_error = optional_nonblank_string turns_obj "read_error" in
+  let* dig_obj = required_object_field body "memory_digest" in
+  let* dig_present = required_bool_field dig_obj "present" in
+  let* revision = optional_int_field dig_obj "revision" in
+  let* digest_sha256 = optional_nonblank_string dig_obj "digest_sha256" in
+  let* bytes = optional_nonnegative_count dig_obj "bytes" in
+  let* fact_count = optional_nonnegative_count dig_obj "fact_count" in
+  let* derived_count = optional_nonnegative_count dig_obj "derived_count" in
+  let* molt_obj = required_object_field body "librarian_molt" in
+  let* writer_kind = required_nonblank_string molt_obj "writer_kind" in
+  let* writer_state = optional_nonblank_string molt_obj "writer_state" in
+  let* pending_molt_kind =
+    match optional_object_field molt_obj "pending_molt" with
+    | Ok None -> Ok None
+    | Ok (Some pm) -> (
+        match optional_nonblank_string pm "kind" with
+        | Ok (Some k) -> Ok (Some k)
+        | Ok None -> Ok (Some "pending")
+        | Error _ as err -> err)
+    | Error _ -> optional_nonblank_string molt_obj "pending_molt"
+  in
+  let* pending_molt_categories =
+    optional_string_list molt_obj "pending_molt_categories"
+  in
+  let* available_act_tokens = optional_string_list molt_obj "available_acts" in
+  Ok
+    {
+      keeper;
+      compaction =
+        {
+          present = comp_present;
+          epoch_count;
+          archived_turns_count;
+          anchor_bytes;
+          latest_epoch_id;
+          covers_through_turn;
+          archived_epochs_through;
+          verified_facts_count;
+          decisions_count;
+          open_threads_count;
+          read_error = comp_read_error;
+        };
+      canonical_turns =
+        {
+          present = turns_present;
+          turn_count;
+          latest_turn_id;
+          latest_runtime_kind;
+          latest_runtime_id;
+          compaction_watermark_seq;
+          compaction_watermark_epoch;
+          history_resets_count;
+          read_error = turns_read_error;
+        };
+      memory_digest =
+        {
+          present = dig_present;
+          revision;
+          digest_sha256;
+          bytes;
+          fact_count;
+          derived_count;
+        };
+      librarian_molt =
+        {
+          writer_kind;
+          writer_state;
+          pending_molt_kind;
+          pending_molt_categories;
+          available_act_tokens;
+        };
+    }

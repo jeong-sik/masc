@@ -156,7 +156,8 @@ let takes_no_key =
 
 let takes_key : Client.client -> bool = function
   | Client.Claude -> true
-  | Client.Codex | Client.Antigravity | Client.Mistral_vibe -> false
+  | Client.Codex | Client.Antigravity | Client.Mistral_vibe
+  | Client.Kimi_code | Client.Antigravity_acp -> false
 ;;
 
 let http_takes_key = Runtime_account_runtime.http_provider_takes_key
@@ -183,7 +184,8 @@ let key_target config ~integration_id =
          ( Login.Invalid_integration
          | Login.Not_declared
          | Login.No_login (_ : Server_runtime_setup_actions.error)
-         | Login.Copy_without_owner ) ->
+         | Login.Copy_without_owner
+         | Login.Host_keyring_without_owner (_ : Client.client) ) ->
        Error takes_no_key
      | Ok { Server_runtime_setup_actions.client; cli_path = _; spawn_path = _ } ->
        if takes_key client then Ok Runtime_key_account_files.Claude_home else Error takes_no_key)

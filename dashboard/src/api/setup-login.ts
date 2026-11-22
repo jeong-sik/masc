@@ -9,6 +9,7 @@ export interface LoginReceipt {
   login_id: string
   integration_id: string
   status: 'running' | 'complete' | 'failed' | 'cancelled' | 'interrupted'
+  account?: 'linked' | 'keyring_host'
   account_ref?: string
   authentication?: Authentication
   invocation_verified: false
@@ -19,10 +20,12 @@ export type LoginEvent =
   /** The whole screen of a CLI that runs in a terminal; it replaces the one before. */
   | { event: 'screen'; text: string }
   | { event: 'input_ready' }
-  | { event: 'complete'; source: Source; authentication: Authentication }
+  | { event: 'complete'; source: Source; authentication: Authentication; keyringHost?: true }
   | { event: 'error'; login_id?: string; source?: Source }
 const path = '/api/v1/setup/accounts/login'
 const reference = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
+const keyringHost = (value: unknown): boolean => value === 'keyring_host'
+const accountKind = (value: unknown): boolean => value === 'linked' || value === 'keyring_host'
 const authentication = (value: unknown): value is Authentication => ['authenticated', 'login_completed', 'credential_captured'].includes(String(value))
 
 export async function streamSetupLogin(source: Source, onEvent: (event: LoginEvent) => void, signal: AbortSignal): Promise<void> {
@@ -49,7 +52,8 @@ export async function streamSetupLogin(source: Source, onEvent: (event: LoginEve
         const payload: unknown = JSON.parse(data)
         if (!isRecord(payload) || terminal) throw new Error('Invalid login stream')
         if (event === 'started' && !started && reference(payload.login_id) && payload.integration_id === source.integration_id
-          && (payload.account_ref === undefined || reference(payload.account_ref))) {
+          && (payload.account_ref === undefined || reference(payload.account_ref))
+          && (payload.account === undefined || accountKind(payload.account))) {
           started = true
           onEvent({ event, login_id: payload.login_id, integration_id: source.integration_id, account_ref: payload.account_ref as string | undefined })
         } else if (event === 'output' && started && (payload.stream === 'stdout' || payload.stream === 'stderr') && typeof payload.text === 'string') {
@@ -58,10 +62,19 @@ export async function streamSetupLogin(source: Source, onEvent: (event: LoginEve
           onEvent({ event, text: payload.text })
         } else if (event === 'input_ready' && started) {
           onEvent({ event })
-        } else if (event === 'complete' && started && payload.integration_id === source.integration_id && reference(payload.account_ref)
+        } else if (event === 'complete' && started && payload.integration_id === source.integration_id
+          && (reference(payload.account_ref) || (payload.account_ref === undefined && keyringHost(payload.account)))
           && authentication(payload.authentication) && payload.invocation_verified === false) {
           terminal = true
-          onEvent({ event, source: { integration_id: source.integration_id, account_ref: payload.account_ref }, authentication: payload.authentication })
+          const hasRef = reference(payload.account_ref)
+          onEvent({
+            event,
+            source: hasRef
+              ? { integration_id: source.integration_id, account_ref: payload.account_ref as string }
+              : { integration_id: source.integration_id },
+            authentication: payload.authentication,
+            ...(!hasRef && keyringHost(payload.account) ? { keyringHost: true as const } : {}),
+          })
         } else if (event === 'error') {
           if (payload.account_ref !== undefined && (!reference(payload.account_ref) || payload.integration_id !== source.integration_id)) throw new Error('Invalid login account')
           if (payload.login_id !== undefined && (!reference(payload.login_id) || payload.integration_id !== source.integration_id)) throw new Error('Invalid login identity')
@@ -93,7 +106,10 @@ export async function fetchLoginReceipt(id: string, integrationId: string, signa
   if (!isRecord(value) || value.login_id !== id || value.integration_id !== integrationId || value.invocation_verified !== false
     || !['running', 'complete', 'failed', 'cancelled', 'interrupted'].includes(String(value.status))
     || (value.account_ref !== undefined && !reference(value.account_ref))
+    || (value.account !== undefined && !accountKind(value.account))
     || (value.authentication !== undefined && !authentication(value.authentication))
-    || (value.status === 'complete' && (!reference(value.account_ref) || !authentication(value.authentication)))) throw new Error('Login state unavailable')
+    || (value.status === 'complete'
+      && (!(reference(value.account_ref) || (value.account_ref === undefined && keyringHost(value.account)))
+        || !authentication(value.authentication)))) throw new Error('Login state unavailable')
   return value as unknown as LoginReceipt
 }

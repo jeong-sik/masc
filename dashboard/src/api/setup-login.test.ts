@@ -15,7 +15,7 @@ function serve(body: string, size = 7) {
     controller.close()
   } }), { status: 200 })))
 }
-it.each(['codex', 'claude', 'antigravity', 'muse'])('streams fragmented %s login and keeps invocation unverified', async integration_id => {
+it.each(['codex', 'claude', 'antigravity'])('streams fragmented %s login and keeps invocation unverified', async integration_id => {
   serve(frame('started', { login_id: id, integration_id, account_ref: account })
     + frame('output', { stream: 'stdout', text: '계정 안내 🌐' }) + frame('screen', { text: 'Select login method:\n> 1. Google OAuth' })
     + frame('input_ready', {})
@@ -55,14 +55,27 @@ it('sends codes only through the scoped input endpoint with cancellation', async
   await expect(sendLoginInput('../other', { kind: 'key', key: 'eof' })).rejects.toThrow('Invalid login identity')
   await expect(sendLoginInput(id, { kind: 'text', text: '가'.repeat(23000) })).rejects.toThrow('too large')
 })
+it('accepts OS-keyring host login completion without account_ref for ACP clients', async () => {
+  serve(frame('started', { login_id: id, integration_id: 'vibe_acp', account: 'keyring_host' })
+    + frame('complete', { integration_id: 'vibe_acp', account: 'keyring_host', authentication: 'login_completed', invocation_verified: false }))
+  const events: LoginEvent[] = []
+  await streamSetupLogin({ integration_id: 'vibe_acp' }, event => events.push(event), new AbortController().signal)
+  expect(events.map(event => event.event)).toEqual(['started', 'complete'])
+  expect(events[1]).toEqual({ event: 'complete', source: { integration_id: 'vibe_acp' }, authentication: 'login_completed', keyringHost: true })
+  vi.mocked(get).mockResolvedValue({ login_id: id, integration_id: 'vibe_acp', status: 'complete', account: 'keyring_host',
+    authentication: 'login_completed', invocation_verified: false })
+  const receipt = await fetchLoginReceipt(id, 'vibe_acp')
+  expect(receipt.account).toBe('keyring_host')
+  expect(receipt.account_ref).toBeUndefined()
+})
 it('validates durable receipt identity and proof before recovery', async () => {
   const signal = new AbortController().signal
-  vi.mocked(get).mockResolvedValue({ login_id: id, integration_id: 'muse', status: 'complete', account_ref: account,
+  vi.mocked(get).mockResolvedValue({ login_id: id, integration_id: 'codex', status: 'complete', account_ref: account,
     authentication: 'login_completed', invocation_verified: false })
-  expect((await fetchLoginReceipt(id, 'muse', signal)).account_ref).toBe(account)
+  expect((await fetchLoginReceipt(id, 'codex', signal)).account_ref).toBe(account)
   expect(get).toHaveBeenCalledWith(`/api/v1/setup/accounts/login/${id}`, { signal })
-  vi.mocked(get).mockResolvedValue({ login_id: id, integration_id: 'muse', status: 'complete', invocation_verified: true })
-  await expect(fetchLoginReceipt(id, 'muse')).rejects.toThrow('Login state unavailable')
+  vi.mocked(get).mockResolvedValue({ login_id: id, integration_id: 'codex', status: 'complete', invocation_verified: true })
+  await expect(fetchLoginReceipt(id, 'codex')).rejects.toThrow('Login state unavailable')
 })
 it('retains a receipt identity when process launch fails before started', async () => {
   serve(frame('error', { login_id: id, integration_id: 'codex', account_ref: account, status: 'failed', invocation_verified: false }))

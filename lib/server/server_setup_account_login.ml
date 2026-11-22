@@ -104,6 +104,15 @@ type person_refusal =
   | Not_declared
   | No_login of Server_runtime_setup_actions.error
   | Copy_without_owner
+  | Host_keyring_without_owner of Runtime_setup_login_client.client
+
+let client_display_name = function
+  | Client.Codex -> "Codex"
+  | Client.Claude -> "Claude Code"
+  | Client.Antigravity -> "Antigravity"
+  | Client.Mistral_vibe -> "Mistral Vibe"
+  | Client.Kimi_code -> "Kimi Code"
+  | Client.Antigravity_acp -> "Antigravity ACP"
 
 let person_refusal_message = function
   | Invalid_integration ->
@@ -115,6 +124,11 @@ let person_refusal_message = function
   | Copy_without_owner ->
     "Antigravity is not connected in multi-account mode: its credential is a copy in the \
      setup registry, which has no owner."
+  | Host_keyring_without_owner client ->
+    Printf.sprintf
+      "%s is not connected in multi-account mode: its credentials are stored in the shared \
+       host OS keyring/CLI store, which has no per-user isolation."
+      (client_display_name client)
 
 let person_target config ~integration_id =
   match Authz_types.Integration_id.of_string integration_id with
@@ -127,34 +141,41 @@ let person_target config ~integration_id =
         | Error error -> Error (No_login error)
         | Ok target ->
           (match target.Server_runtime_setup_actions.client with
-           | Client.Antigravity | Client.Mistral_vibe -> Error Copy_without_owner
+           | Client.Antigravity -> Error Copy_without_owner
+           | (Client.Mistral_vibe | Client.Kimi_code | Client.Antigravity_acp) as client ->
+             Error (Host_keyring_without_owner client)
            | Client.Codex | Client.Claude -> Ok target)))
 
 (* What a confirmed login leaves behind. An operator's account is published to
-   the setup registry, from which setup selects it (except Mistral Vibe, which
-   stores credentials in the host OS keyring and publishes no setup copy). A
-   person's account is linked to them in the authorization log, and the
-   registry, which has no owner, does not hear of it. *)
+   the setup registry, from which setup selects it (except OS-keyring ACP
+   clients, which store credentials in the host OS keyring/CLI store and emit
+   [Receipt.Keyring_host]). A person's account is linked to them in the
+   authorization log, and the registry, which has no owner, does not hear of
+   it. *)
 let initial_account_for_login owner client reference ~base_path ~integration_id ~cli_path home =
   match owner, client, reference with
   | Operator _, Client.Antigravity, Some reference -> Ok (Receipt.Published reference)
   | Operator _, Client.Antigravity, None -> Ok Receipt.Unselected
-  | Operator _, Client.Mistral_vibe, (None | Some _) -> Ok Receipt.Unselected
+  | Operator _, (Client.Mistral_vibe | Client.Kimi_code | Client.Antigravity_acp), (None | Some _) ->
+    Ok Receipt.Keyring_host
   | Operator _, (Codex | Claude), (None | Some _) ->
     Client.publish ~workspace:base_path ~integration_id ~cli_path home
     |> Result.map (fun reference -> Receipt.Published reference)
-  | Person _, (Client.Antigravity | Codex | Claude | Mistral_vibe), (None | Some _) ->
+  | Person _, (Client.Antigravity | Codex | Claude | Mistral_vibe | Kimi_code | Antigravity_acp), (None | Some _) ->
     Ok Receipt.Unselected
 ;;
 
 let finish owner ~client ~base_path ~integration_id ~cli_path ~login_id home =
   match owner, client with
-  | Operator _, Client.Mistral_vibe -> Ok Receipt.Unselected
+  | Operator _, (Client.Mistral_vibe | Client.Kimi_code | Client.Antigravity_acp) ->
+    Ok Receipt.Keyring_host
   | Operator _, (Client.Codex | Client.Claude | Client.Antigravity) ->
     Client.publish ~workspace:base_path ~integration_id ~cli_path home
     |> Result.map (fun reference -> Receipt.Published reference)
     |> Result.map_error (fun _ -> "The selected account could not be published. Retry account recovery.")
-  | Person { zone; user_id; namespace = _ }, (Client.Codex | Client.Claude | Client.Antigravity | Client.Mistral_vibe) ->
+  | Person { zone; user_id; namespace = _ },
+    (Client.Codex | Client.Claude | Client.Antigravity | Client.Mistral_vibe
+     | Client.Kimi_code | Client.Antigravity_acp) ->
     let* provider_account_id =
       Authz_types.Provider_account_id.of_string login_id
       |> Result.map_error (fun _ -> account_failure) in
@@ -205,7 +226,7 @@ let start ~owner ~base_path ~body request reqd =
           ~account_id:(Session.id session) ~client ~existing in
         let* () = match client, existing with
           | Client.Antigravity, Some _ -> Ok ()
-          | (Codex | Claude | Antigravity | Mistral_vibe), _ ->
+          | (Codex | Claude | Antigravity | Mistral_vibe | Kimi_code | Antigravity_acp), _ ->
             let* account_key = canonical_account_key (Client.home_dir home) in
             Session.bind_account session ~account_key
             |> Result.map_error Session.error_message in
@@ -266,7 +287,7 @@ let start ~owner ~base_path ~body request reqd =
              Antigravity needs capture: native homes were published before spawn.
              Capturing here makes no successful-login or invocation claim. *)
           let account = match client with
-            | Client.Codex | Claude | Mistral_vibe -> !receipt.account
+            | Client.Codex | Claude | Mistral_vibe | Kimi_code | Antigravity_acp -> !receipt.account
             | Antigravity ->
               (match observe () with
                | Error _ -> !receipt.account

@@ -1218,7 +1218,7 @@ class NamedCatalogSources(unittest.TestCase):
          'origin': 'runtime_config', 'setup_support': 'existing_binding',
          'verification_support': 'response_tool', 'endpoint': 'https://example.test/v1',
          'api_key_env': 'ALREADY_API_KEY'},
-        {'id': 'wrongwire', 'display_name': 'wrongwire', 'protocol': 'messages-http',
+        {'id': 'wrongwire', 'display_name': 'wrongwire', 'protocol': 'unknown-http',
          'origin': 'agent_core_catalog', 'setup_support': 'new_connection',
          'verification_support': 'response_tool', 'endpoint': 'https://example.test',
          'api_key_env': 'EXAMPLE_API_KEY'},
@@ -1242,6 +1242,33 @@ class NamedCatalogSources(unittest.TestCase):
         self.assertEqual(source['api_key_env'], 'OPENROUTER_API_KEY')
         self.assertEqual(source['credential_kind'], 'env')
         self.assertEqual(source['rows'], [])
+
+    def test_messages_gemini_vertex_and_acp_protocols_are_supported_choices(self):
+        inventory = {'runtimes': [], 'integrations': [
+            {'id': 'kimi_coding_anthropic', 'display_name': 'Kimi Coding', 'protocol': 'messages-http',
+             'origin': 'agent_core_catalog', 'setup_support': 'new_connection',
+             'verification_support': 'response_tool', 'endpoint': 'https://api.kimi.com/coding',
+             'api_key_env': 'KIMI_API_KEY', 'provider_kind': 'kimi'},
+            {'id': 'gemini', 'display_name': 'Gemini', 'protocol': 'gemini-http',
+             'origin': 'agent_core_catalog', 'setup_support': 'new_connection',
+             'verification_support': 'response_tool', 'endpoint': 'https://generativelanguage.googleapis.com/v1beta',
+             'api_key_env': 'GEMINI_API_KEY', 'provider_kind': 'gemini'},
+            {'id': 'vertex_gemini', 'display_name': 'Vertex AI Gemini', 'protocol': 'vertex-gemini',
+             'origin': 'masc_integration', 'setup_support': 'new_connection',
+             'verification_support': 'response_tool', 'endpoint': 'https://us-central1-aiplatform.googleapis.com',
+             'api_key_env': 'GOOGLE_CLOUD_PROJECT'},
+        ]}
+        sources = self.catalog_sources(inventory)
+        by_id = {source['provider_id']: source['choice'] for source in sources}
+        self.assertEqual(by_id['kimi_coding_anthropic'], 'messages')
+        self.assertEqual(by_id['gemini'], 'gemini')
+        self.assertEqual(SETUP.choice_for_protocol('acp', 'vibe_acp', 'vibe-acp'), 'mistral_vibe')
+        self.assertEqual(SETUP.choice_for_protocol('acp', 'kimi_acp', 'kimi'), 'kimi_acp')
+        self.assertEqual(SETUP.choice_for_protocol('acp', 'antigravity_acp', 'agy'), 'antigravity_acp')
+        self.assertEqual(SETUP.choice_for_protocol('vertex-gemini', 'vertex_gemini'), 'vertex_gemini')
+        self.assertEqual(SETUP.OFFICIAL_CLIENTS['mistral_vibe'], 'mistral-vibe')
+        self.assertEqual(SETUP.OFFICIAL_CLIENTS['kimi_acp'], 'kimi-code')
+        self.assertEqual(SETUP.OFFICIAL_CLIENTS['antigravity_acp'], 'antigravity')
 
     def test_an_older_binary_without_integrations_yields_no_catalog_sources(self):
         self.assertEqual(self.catalog_sources({'runtimes': []}), [])
@@ -2438,6 +2465,72 @@ class WorkspaceChildEnvironment(unittest.TestCase):
         dual_creds = dict(base, credential_file='/private/owned-api-key')
         with self.assertRaisesRegex(SETUP.SetupError, 'cannot declare both'):
             SETUP.render(dual_creds)
+
+
+class AcpAndGeminiWizardFlows(unittest.TestCase):
+    def test_protocol_choices_include_messages_http_gemini_and_acp(self):
+        self.assertEqual(SETUP.PROTOCOL_CHOICES['messages-http'], 'messages')
+        self.assertEqual(SETUP.PROTOCOL_CHOICES['gemini-http'], 'gemini')
+        self.assertEqual(SETUP.PROTOCOL_CHOICES['vertex-gemini'], 'vertex_gemini')
+        self.assertEqual(SETUP.choice_for_protocol('acp', 'vibe_acp', 'vibe-acp'), 'mistral_vibe')
+        self.assertEqual(SETUP.choice_for_protocol('acp', 'kimi_acp', 'kimi'), 'kimi_acp')
+        self.assertEqual(SETUP.choice_for_protocol('acp', 'antigravity_acp', 'agy'), 'antigravity_acp')
+
+    def test_acp_prepare_connection_skips_native_account_selection(self):
+        for choice, cmd in [
+            ('mistral_vibe', 'vibe-acp'),
+            ('kimi_acp', 'kimi'),
+            ('antigravity_acp', 'agy'),
+        ]:
+            with self.subTest(choice=choice):
+                source = dict(
+                    choice=choice,
+                    provider_id=choice,
+                    command=cmd,
+                    account_home='/stale/should-be-cleared',
+                )
+                creds = SETUP.PendingCredentials('/fixture/masc')
+                with patch.object(
+                    SETUP, 'official_client_path', return_value='/usr/local/bin/' + cmd
+                ), patch.object(
+                    SETUP,
+                    'select_native_account',
+                    side_effect=AssertionError('ACP must not call select_native_account'),
+                ):
+                    prepared = SETUP.prepare_connection('/fixture/masc', source, creds)
+                self.assertNotIn('account_home', prepared)
+
+    def test_acp_and_gemini_source_models_never_call_native_discover_models(self):
+        for choice in ('mistral_vibe', 'kimi_acp', 'antigravity_acp'):
+            with self.subTest(choice=choice):
+                source = dict(choice=choice, provider_id=choice, rows=[])
+                with patch.object(
+                    SETUP,
+                    'native_discover_models',
+                    side_effect=AssertionError('ACP must not call native_discover_models'),
+                ):
+                    rows, origin = SETUP.source_models('/fixture/masc', source, 10)
+                self.assertGreater(len(rows), 0)
+                self.assertIn('ACP model catalog', origin)
+        for choice, provider_id in [
+            ('gemini', 'gemini'),
+            ('vertex_gemini', 'vertex_gemini'),
+        ]:
+            with self.subTest(choice=choice):
+                source = dict(choice=choice, provider_id=provider_id, rows=[])
+                fake_rows = [dict(id='gemini-2.5-pro', label='Gemini 2.5 Pro', max_context=1048576)]
+                with patch.object(
+                    SETUP,
+                    'native_discover_models',
+                    side_effect=AssertionError('Gemini must not call native_discover_models'),
+                ), patch.object(
+                    SETUP, 'provider_catalog_models', return_value=fake_rows
+                ) as catalog_call:
+                    rows, origin = SETUP.source_models('/fixture/masc', source, 10)
+                self.assertEqual([r['id'] for r in rows], ['gemini-2.5-pro'])
+                self.assertEqual(rows[0]['context'], 1048576)
+                self.assertIn('catalog', origin)
+                catalog_call.assert_called_once_with('/fixture/masc', provider_id)
 
 
 if __name__ == '__main__':

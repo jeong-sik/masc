@@ -28,3 +28,16 @@ val handle_journal_get :
     journal reads do not read the absorption archive. An invalid keeper name
     answers 400. A journal that exists and cannot be read answers 500 with
     [read_error]. *)
+
+val memory_os_internals_json :
+  config:Workspace.config -> keeper_id:string -> Yojson.Safe.t
+(** Read-only Memory OS internals projection for [keeper_id]:
+    {!Keeper_compaction}, {!Keeper_canonical_turn_store},
+    {!Keeper_memory_digest}, and {!Librarian_machine} pending molt state.
+    Never creates missing database or digest files. *)
+
+val handle_memory_os_internals_get :
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
+(** Answer [GET /api/v1/keepers/<name>/memory-os-internals] with read-only
+    compaction, canonical turn store, frozen memory digest, and librarian molt
+    metadata. An invalid keeper name answers 400. *)

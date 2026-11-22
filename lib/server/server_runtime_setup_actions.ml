@@ -63,47 +63,35 @@ let config ~base_path =
     | Ok parsed -> Ok parsed | Error errors -> unread (Unparsable errors))
 let declared_provider (config:Runtime_schema.config) id =
   List.find_opt (fun (p:Runtime_schema.provider) -> p.id=id) config.providers
-(* Web setup drives the connection kinds Runtime_setup_spec renders; Gemini
-   needs its own setup path, and ACP web setup supports Mistral Vibe. Adding an
-   api_format makes this a compile error. *)
+(* Single source of truth for declared providers: [Runtime_setup_spec.choice_of_provider]
+   is shared with [Runtime_wizard_inventory], so inventory never advertises
+   [supported=true] for a provider that setup actions refuse. *)
 let choice_of_api_format : Runtime_schema.api_format -> (Runtime_setup_spec.choice,error) result = function
   | Runtime_schema.Chat_completions_api -> Ok Runtime_setup_spec.Openai_compatible
   | Runtime_schema.Messages_api -> Ok Runtime_setup_spec.Messages
   | Runtime_schema.Ollama_api -> Ok Runtime_setup_spec.Ollama
+  | Runtime_schema.Gemini_api -> Ok Runtime_setup_spec.Gemini
+  | Runtime_schema.Vertex_gemini_api -> Ok Runtime_setup_spec.Vertex_gemini
   | Runtime_schema.Codex_app_server_runtime -> Ok Runtime_setup_spec.Codex
   | Runtime_schema.Claude_code_runtime -> Ok Runtime_setup_spec.Claude_code
   | Runtime_schema.Antigravity_cli_runtime -> Ok Runtime_setup_spec.Antigravity
-  | Runtime_schema.Gemini_api | Runtime_schema.Vertex_gemini_api
   | Runtime_schema.Acp_runtime -> Error Unsupported_connection
 let choice_of_provider (provider : Runtime_schema.provider) =
-  match provider.api_format with
-  | Runtime_schema.Acp_runtime ->
-    (match provider.acp with
-     | Some { driver = Runtime_schema.Mistral_vibe; _ } ->
-       Ok Runtime_setup_spec.Mistral_vibe
-     | Some { driver = Runtime_schema.Antigravity | Runtime_schema.Kimi_code; _ } | None ->
-       choice_of_api_format Runtime_schema.Acp_runtime)
-  | ( Runtime_schema.Chat_completions_api
-    | Runtime_schema.Messages_api
-    | Runtime_schema.Ollama_api
-    | Runtime_schema.Codex_app_server_runtime
-    | Runtime_schema.Claude_code_runtime
-    | Runtime_schema.Antigravity_cli_runtime
-    | Runtime_schema.Gemini_api
-    | Runtime_schema.Vertex_gemini_api ) as api_format ->
-    choice_of_api_format api_format
+  match Runtime_setup_spec.choice_of_provider provider with
+  | Some choice -> Ok choice
+  | None -> Error Unsupported_connection
 let choice config ~id ~protocol =
   match declared_provider config id with
-  | Some provider ->
-    let* choice = choice_of_provider provider in
-    (match (provider.transport : Runtime_schema.transport), Runtime_setup_spec.http choice with
-     | Runtime_schema.Http _,true | Runtime_schema.Cli _,false -> Ok choice
-     | Runtime_schema.Http _,false | Runtime_schema.Cli _,true -> Error Unsupported_connection)
+  | Some provider -> choice_of_provider provider
   | None ->
     (* Catalog prototypes and product client identities carry no declared
        provider; their protocol label is read by the runtime.toml parser. *)
-    if String.equal protocol "acp" && (String.equal id "vibe_acp" || String.equal id "mistral-vibe")
-    then Ok Runtime_setup_spec.Mistral_vibe
+    if String.equal protocol "acp" then
+      match id with
+      | "vibe_acp" | "mistral-vibe" -> Ok Runtime_setup_spec.Mistral_vibe
+      | "kimi_acp" | "kimi-code" -> Ok Runtime_setup_spec.Kimi_acp
+      | "antigravity_acp" -> Ok Runtime_setup_spec.Antigravity_acp
+      | _ -> Error Unsupported_connection
     else
       (match Runtime_toml.api_format_of_protocol protocol with
        | Ok api_format -> choice_of_api_format api_format
@@ -211,8 +199,9 @@ let source_template_of_source ?(use=Observe_source) ~sw ~pending ~workspace conf
          (match value "api_key_env" selected with
           | `String name when name<>"" -> Ok ["api_key_env",`String name] | _ -> Ok [])) in
   let* timeout = match choice with
-    | Runtime_setup_spec.Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex -> Ok []
-    | Mistral_vibe ->
+    | Runtime_setup_spec.Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
+    | Gemini | Vertex_gemini | Claude_code | Codex -> Ok []
+    | Mistral_vibe | Kimi_acp | Antigravity_acp ->
       (match declared_provider config id with
        | Some { acp = Some acp; _ } -> Ok ["timeout_s", `Float acp.timeout_s]
        | Some _ | None -> Ok [])
@@ -234,7 +223,8 @@ let source_template_of_source ?(use=Observe_source) ~sw ~pending ~workspace conf
        | None -> Ok [])
     | (Runtime_setup_spec.Claude_code | Codex),Some (Runtime_setup_accounts.Antigravity_account _) ->
       Error Invalid_request
-    | (Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity | Mistral_vibe),_ -> Ok [] in
+    | (Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Gemini | Vertex_gemini
+      | Antigravity | Mistral_vibe | Kimi_acp | Antigravity_acp),_ -> Ok [] in
   Ok (("choice",`String (Runtime_setup_spec.choice_name choice))::transport @ metadata @ credentials @ timeout @ account_home,id,choice,existing_inline)
 let source_template ?use ~sw ~pending ~workspace config request =
   let* source = source_of_json request in
@@ -361,7 +351,9 @@ let select_account ~base_path request =
       (match (Runtime_official_account.resolve_home ~client:Codex ~declaration:configured
         |> Result.to_option) with
        | Some home -> Ok home | None -> Error Credential_unavailable)
-    | Antigravity | Mistral_vibe | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> Error Unsupported_connection in
+    | Antigravity | Mistral_vibe | Kimi_acp | Antigravity_acp
+    | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
+    | Gemini | Vertex_gemini -> Error Unsupported_connection in
   let* cli_path=text (value "command" selected) in
   let* reference=Runtime_setup_accounts.register_home ~workspace:base_path
       ~integration_id ~cli_path ~account_home:home
@@ -391,13 +383,18 @@ let login_target_of_config config ~integration_id =
     | Claude_code -> Ok Runtime_setup_login_client.Claude
     | Antigravity -> Ok Runtime_setup_login_client.Antigravity
     | Mistral_vibe -> Ok Runtime_setup_login_client.Mistral_vibe
-    | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> Error Unsupported_connection in
+    | Kimi_acp -> Ok Runtime_setup_login_client.Kimi_code
+    | Antigravity_acp -> Ok Runtime_setup_login_client.Antigravity_acp
+    | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
+    | Gemini | Vertex_gemini -> Error Unsupported_connection in
   let* command = text (value "command" selected) in
   let install_client = match client with
     | Runtime_setup_login_client.Codex -> Runtime_official_cli_install.Codex
     | Runtime_setup_login_client.Claude -> Runtime_official_cli_install.Claude
     | Runtime_setup_login_client.Antigravity -> Runtime_official_cli_install.Antigravity
-    | Runtime_setup_login_client.Mistral_vibe -> Runtime_official_cli_install.Mistral_vibe in
+    | Runtime_setup_login_client.Mistral_vibe -> Runtime_official_cli_install.Mistral_vibe
+    | Runtime_setup_login_client.Kimi_code -> Runtime_official_cli_install.Kimi_code
+    | Runtime_setup_login_client.Antigravity_acp -> Runtime_official_cli_install.Antigravity in
   let spawn_path = Runtime_official_cli_install.spawn_path install_client ~command in
   Ok {client; cli_path = command; spawn_path}
 
@@ -419,13 +416,16 @@ let bound_model_names (config : Runtime_schema.config) template id choice =
     | Claude_code ->
       Runtime_official_account.resolve_home ~client:Claude_code ~declaration:home
       |> Result.to_option
-    | Antigravity | Mistral_vibe | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> None in
+    | Antigravity | Mistral_vibe | Kimi_acp | Antigravity_acp
+    | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
+    | Gemini | Vertex_gemini -> None in
   let selected_home = effective_home
       (match value "account_home" template with `String home -> Some home | _ -> None) in
   let selected_credential = match choice, value "credential_file" template with
-    | Runtime_setup_spec.Antigravity, `String path -> Some path
+    | Runtime_setup_spec.(Antigravity | Antigravity_acp), `String path -> Some path
     | ( Runtime_setup_spec.Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
-      | Claude_code | Codex | Antigravity | Mistral_vibe ), _ -> None in
+      | Gemini | Vertex_gemini | Claude_code | Codex | Antigravity
+      | Mistral_vibe | Kimi_acp | Antigravity_acp ), _ -> None in
   let same_account (provider : Runtime_schema.provider) =
     provider.enabled
     && (match choice_of_provider provider with
@@ -508,6 +508,94 @@ let discover ~binary ~sw:_ ~net ~base_path request =
         ]
       in
       Ok (client_models_json ~source:"mistral_vibe_acp_catalog" models)
+    | Kimi_acp ->
+      let models =
+        [ { id = "kimi-code/k3.1-pro"; label = "Kimi K3.1 Pro (ACP)"; context = Some 1048576
+          ; reasoning_efforts = None; supports_image_input = Some true }
+        ; { id = "kimi-code/k3.1-pro-highspeed"; label = "Kimi K3.1 Pro Highspeed (ACP)"; context = Some 1048576
+          ; reasoning_efforts = None; supports_image_input = Some true }
+        ; { id = "kimi-code/k3"; label = "Kimi K3 (ACP)"; context = Some 1048576
+          ; reasoning_efforts = None; supports_image_input = Some true }
+        ; { id = "kimi-code/k3-256k"; label = "Kimi K3 256K (ACP)"; context = Some 262144
+          ; reasoning_efforts = None; supports_image_input = Some true }
+        ; { id = "kimi-code/kimi-for-coding"; label = "Kimi for Coding (ACP)"; context = Some 1048576
+          ; reasoning_efforts = None; supports_image_input = Some true }
+        ; { id = "kimi-code/kimi-for-coding-highspeed"; label = "Kimi for Coding Highspeed (ACP)"; context = Some 1048576
+          ; reasoning_efforts = None; supports_image_input = Some true }
+        ]
+      in
+      Ok (client_models_json ~source:"kimi_acp_catalog" models)
+    | Antigravity_acp ->
+      let models =
+        [ { id = "gemini-4-neon-medium"; label = "Gemini 4 Neon Medium (ACP)"; context = Some 1048576
+          ; reasoning_efforts = None; supports_image_input = Some true }
+        ; { id = "gemini-4-neon-high"; label = "Gemini 4 Neon High (ACP)"; context = Some 1048576
+          ; reasoning_efforts = None; supports_image_input = Some true }
+        ; { id = "gemini-4-carbon-high"; label = "Gemini 4 Carbon High (ACP)"; context = Some 1048576
+          ; reasoning_efforts = None; supports_image_input = Some true }
+        ; { id = "gemini-4-argon-high"; label = "Gemini 4 Argon High (ACP)"; context = Some 1048576
+          ; reasoning_efforts = None; supports_image_input = Some true }
+        ; { id = "gemini-4-hydrogen-high"; label = "Gemini 4 Hydrogen High (ACP)"; context = Some 1048576
+          ; reasoning_efforts = None; supports_image_input = Some true }
+        ; { id = "gemini-4-hydrogen-xhigh"; label = "Gemini 4 Hydrogen XHigh (ACP)"; context = Some 1048576
+          ; reasoning_efforts = None; supports_image_input = Some true }
+        ; { id = "claude-opus-5-5-thinking"; label = "Claude Opus 5.5 Thinking (ACP)"; context = Some 1000000
+          ; reasoning_efforts = None; supports_image_input = Some true }
+        ; { id = "claude-sonnet-5-5-thinking"; label = "Claude Sonnet 5.5 Thinking (ACP)"; context = Some 1000000
+          ; reasoning_efforts = None; supports_image_input = Some true }
+        ; { id = "gemini-3.8-flash-high"; label = "Gemini 3.8 Flash High (ACP)"; context = Some 1048576
+          ; reasoning_efforts = None; supports_image_input = Some true }
+        ]
+      in
+      Ok (client_models_json ~source:"antigravity_acp_catalog" models)
+    | Gemini | Vertex_gemini ->
+      let catalog_id =
+        match Runtime_wizard_inventory.provider_model_rows id with
+        | Ok (`List (_ :: _) as rows) -> Ok rows
+        | Ok _ | Error _ -> Runtime_wizard_inventory.provider_model_rows "gemini"
+      in
+      let* raw_rows =
+        match catalog_id with
+        | Ok (`List rows) -> Ok rows
+        | Ok _ | Error _ -> Error Unsupported_connection
+      in
+      let models =
+        List.filter_map
+          (function
+            | `Assoc row ->
+              (match value "id" row with
+               | `String model_id when model_id <> "" ->
+                 let label = match value "label" row with `String s when s <> "" -> s | _ -> model_id in
+                 let context = positive (value "max_context" row) in
+                 let supports_image_input =
+                   match List.assoc_opt "supports_image_input" row with
+                   | Some (`Bool b) -> Some b
+                   | _ -> None
+                 in
+                 let reasoning_efforts =
+                   match List.assoc_opt "accepted_reasoning_efforts" row,
+                         List.assoc_opt "default_reasoning_effort" row with
+                   | Some (`List rungs), Some (`String default) ->
+                     let supported =
+                       List.filter_map (function `String s when s <> "" -> Some s | _ -> None) rungs
+                     in
+                     Some { supported; default }
+                   | _ -> None
+                 in
+                 Some { id = model_id; label; context; reasoning_efforts; supports_image_input }
+               | _ -> None)
+            | _ -> None)
+          raw_rows
+      in
+      let source =
+        match choice with
+        | Runtime_setup_spec.Vertex_gemini -> "vertex_gemini_provider_catalog"
+        | Runtime_setup_spec.Gemini
+        | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
+        | Claude_code | Codex | Antigravity | Mistral_vibe | Kimi_acp | Antigravity_acp ->
+          "gemini_provider_catalog"
+      in
+      Ok (client_models_json ~source models)
     | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages ->
       let* connection=Runtime_model_discovery.connection_of_json (`Assoc (("provider_id",`String id)::template))
         |> Result.map_error (fun _ -> Unsupported_connection) in
@@ -525,7 +613,8 @@ let context ~binary:_ ~net ~base_path request =
        catalog, which would answer in place of the refusal. *)
     let* () = http_account choice in
     let observed = match choice with
-      | Runtime_setup_spec.Antigravity | Mistral_vibe | Codex | Claude_code -> Error Unsupported_connection
+      | Runtime_setup_spec.Antigravity | Mistral_vibe | Kimi_acp | Antigravity_acp
+      | Codex | Claude_code | Gemini | Vertex_gemini -> Error Unsupported_connection
       | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages ->
         let* connection=Runtime_model_discovery.connection_of_json (`Assoc (("provider_id",`String id)::template))
           |> Result.map_error (fun _ -> Unsupported_connection) in
@@ -540,12 +629,22 @@ let context ~binary:_ ~net ~base_path request =
          (* API catalog metadata is provider-scoped. Local transports and CLI
             windows must be observed; they never inherit model architecture. *)
          let declared = match choice with
-           | Runtime_setup_spec.Openai_compatible | Messages ->
+           | Runtime_setup_spec.Openai_compatible | Messages | Gemini | Vertex_gemini ->
              (match Llm_provider.Model_catalog.load_default () with
               | Error _ -> None
-              | Ok catalog -> Runtime_model_context_metadata.find ~provider_id:id ~model
-                  (Llm_provider.Model_catalog.model_entries catalog))
-           | Ollama | Llama_cpp | Vllm | Claude_code | Codex | Antigravity | Mistral_vibe -> None in
+              | Ok catalog ->
+                let entries = Llm_provider.Model_catalog.model_entries catalog in
+                (match Runtime_model_context_metadata.find ~provider_id:id ~model entries with
+                 | Some _ as found -> found
+                 | None ->
+                   (match choice with
+                    | Runtime_setup_spec.Gemini | Vertex_gemini ->
+                      Runtime_model_context_metadata.find ~provider_id:"gemini" ~model entries
+                    | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
+                    | Claude_code | Codex | Antigravity | Mistral_vibe
+                    | Kimi_acp | Antigravity_acp -> None)))
+           | Ollama | Llama_cpp | Vllm | Claude_code | Codex | Antigravity
+           | Mistral_vibe | Kimi_acp | Antigravity_acp -> None in
          match declared with
          | Some context -> Ok (`Assoc ["model",`String model;"context",`Int context;
              "context_source",`String "installed_provider_catalog";"tools",`Null])
@@ -612,7 +711,8 @@ let save ~binary ~base_path request =
           | Runtime_setup_spec.Claude_code -> native_client_models "claude-code"
           | Codex -> native_client_models "codex"
           | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
-          | Antigravity | Mistral_vibe -> Ok None in
+          | Gemini | Vertex_gemini | Antigravity | Mistral_vibe
+          | Kimi_acp | Antigravity_acp -> Ok None in
         let rec specs = function [] -> Ok [] | model::tail ->
           let* spec=model_spec ~reported_models template model in
           let* spec = match existing_inline with

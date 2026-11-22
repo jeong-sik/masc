@@ -7,6 +7,13 @@
 open Masc_tui_core
 
 val runtime_resolved_path : string
+val runtime_config_raw_path : string
+val runtime_assignment_path : string
+val runtime_routing_path : string
+val setup_inventory_path : string
+val setup_credential_path : string
+val setup_accounts_login_path : string
+val setup_accounts_login_status_path : login_id:string -> string
 val runtime_probe_path : ?force:bool -> unit -> string
 val provider_usage_history_path : days:int -> string
 val keeper_costs_path : window_minutes:int -> string
@@ -313,8 +320,10 @@ type failover_lane = {
 
 type runtime_option = {
   id : string;
+  provider_id : string;
   provider : string;
   model : string option;
+  declared_reasoning_effort : string option;
   transport : string option;
   is_default : bool;
 }
@@ -541,3 +550,59 @@ type mcp_client_row = {
 }
 
 val decode_mcp_clients : Yojson.Safe.t -> (mcp_client_row list, string) result
+
+(** {1 Runtime Assignment, Routing & Setup Inventory / Login} *)
+
+type runtime_config_raw_meta = {
+  source_revision : string;
+  assignments : (string * string) list;
+}
+
+val decode_runtime_config_raw_meta :
+  Yojson.Safe.t -> (runtime_config_raw_meta, string) result
+
+val encode_runtime_assignment :
+  keeper_name:string ->
+  runtime_id:string option ->
+  source_revision:string option ->
+  previous_runtime_id:string option ->
+  unit ->
+  Yojson.Safe.t
+
+val encode_runtime_default_route : runtime_id:string -> Yojson.Safe.t
+
+type setup_integration = {
+  id : string;
+  display_name : string;
+  protocol : string option;
+  origin : string;
+  setup_support : string;
+  enabled : bool;
+  credential_kind : string option;
+  configured_runtime_ids : string list;
+}
+
+type setup_inventory = {
+  default_runtime_id : string option;
+  integrations : setup_integration list;
+}
+
+val decode_setup_inventory : Yojson.Safe.t -> (setup_inventory, string) result
+
+type setup_login_receipt = {
+  login_id : string;
+  integration_id : string;
+  status : string;
+  account : string option;
+  account_ref : string option;
+  authentication : string option;
+}
+
+val decode_setup_login_receipt :
+  Yojson.Safe.t -> (setup_login_receipt, string) result
+
+val encode_setup_credential :
+  provider_id:string -> secret:string -> source_revision:string -> Yojson.Safe.t
+
+val encode_setup_account_login_start :
+  integration_id:string -> ?account_ref:string -> unit -> Yojson.Safe.t

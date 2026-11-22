@@ -554,12 +554,14 @@ let make_rich_model ~lang ~cols ~rows =
                   keeper = "e-masc-the-leader";
                   state = Wire_knowledge.Writer_idle;
                   available_act_tokens = [ "resume"; "adopt" ];
+                  snapshot_file = None;
                 };
                 {
                   keeper = "wkbl-growth";
                   state = Wire_knowledge.Writer_resting;
                   available_act_tokens =
                     [ "resume"; "restart_reading"; "skip_item"; "skip_line" ];
+                  snapshot_file = None;
                 };
               ];
           };
@@ -677,6 +679,7 @@ let make_rich_model ~lang ~cols ~rows =
                    {
                      state = Wire_knowledge.Writer_idle;
                      available_act_tokens = [ "resume"; "adopt" ];
+                     snapshot_file = None;
                    });
           };
     }
@@ -883,15 +886,19 @@ let make_rich_model ~lang ~cols ~rows =
         [
           {
             id = "claude-sonnet-5";
+            provider_id = "anthropic";
             provider = "anthropic";
             model = Some "claude-sonnet-5";
+            declared_reasoning_effort = None;
             transport = Some "http";
             is_default = true;
           };
           {
             id = "glm-5-3";
+            provider_id = "zhipu";
             provider = "zhipu";
             model = Some "glm-5.3-flash";
+            declared_reasoning_effort = None;
             transport = Some "http";
             is_default = false;
           };
@@ -2379,8 +2386,10 @@ let test_v25_runtime_quotas_aliases_and_collapsed_unreported () =
         [
           {
             id = "alice.opus";
+            provider_id = "claude_code_1c0558f0";
             provider = "claude_code_1c0558f0";
             model = Some "opus";
+            declared_reasoning_effort = None;
             transport = Some "cli";
             is_default = true;
           };
@@ -3123,10 +3132,10 @@ let test_p1_9_p1_10_quotas_max_window_buckets_and_human_cooldowns () =
   in
   let runtimes : Wire_runtime.runtime_option list =
     [
-      { id = "slot-ollama"; provider = "ollama_cloud"; model = Some "qwen3"; transport = Some "http"; is_default = false };
-      { id = "slot-5d"; provider = "claude_code_sat"; model = Some "sonnet"; transport = Some "cli"; is_default = true };
-      { id = "slot-43h"; provider = "cd_43h"; model = Some "glm"; transport = Some "http"; is_default = false };
-      { id = "slot-12m"; provider = "cd_12m"; model = Some "kimi"; transport = Some "http"; is_default = false };
+      { id = "slot-ollama"; provider_id = "ollama_cloud"; provider = "ollama_cloud"; model = Some "qwen3"; declared_reasoning_effort = None; transport = Some "http"; is_default = false };
+      { id = "slot-5d"; provider_id = "claude_code_sat"; provider = "claude_code_sat"; model = Some "sonnet"; declared_reasoning_effort = None; transport = Some "cli"; is_default = true };
+      { id = "slot-43h"; provider_id = "cd_43h"; provider = "cd_43h"; model = Some "glm"; declared_reasoning_effort = None; transport = Some "http"; is_default = false };
+      { id = "slot-12m"; provider_id = "cd_12m"; provider = "cd_12m"; model = Some "kimi"; declared_reasoning_effort = None; transport = Some "http"; is_default = false };
     ]
   in
   let resolved : Wire_runtime.runtime_resolved_snapshot =

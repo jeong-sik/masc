@@ -371,33 +371,27 @@ it('does not mistake cancelled account import for missing authentication', async
   expect(screen.queryByText(/계정을 가져오지 못했습니다/)).toBeNull()
 })
 
-it('asks no Muse input byte budget and retains account reference through verified save', async () => {
-  const account_ref = 'c'.repeat(64)
+it('supports ACP integrations (Mistral Vibe / Kimi ACP) without account_select and saves selected models', async () => {
   vi.mocked(post).mockImplementation(async path => {
-    if (path.endsWith('/accounts/select')) return { schema: 'masc.web_setup_account_selection.v1', account_selected: true, invocation_verified: false, account_ref }
-    if (path.endsWith('/models')) return { source: 'muse_providerCatalog', models: [
-      { id: 'muse-selected', label: 'Muse Selected', context: 8192, tools: null },
-      { id: 'unknown', label: 'Muse Unknown', context: null, tools: null }] }
-    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable', warnings: [] }, readiness: 'verified', runtime_id: 'muse.selected', runtime_ids: ['muse.selected'] }
+    if (path.endsWith('/models')) return { source: 'acp_catalog', models: [
+      { id: 'devstral-2', label: 'Devstral 2', context: 131072, tools: true },
+      { id: 'unknown', label: 'Unknown', context: null, tools: null }] }
+    if (path.endsWith('/connections')) return { configured: true, commit: { durability: 'durable', warnings: [] }, readiness: 'verified', runtime_id: 'vibe_acp.devstral-2', runtime_ids: ['vibe_acp.devstral-2'] }
     return { runtime_ready: true, exact_output_authority_available: true, model_setup: { status: 'available' } }
   })
-  const cli = { ...inventory, integrations: [{ id: 'muse-code', display_name: 'Muse Code', protocol: 'muse-serve', setup_support: 'new_connection' }] }
+  const cli = { ...inventory, integrations: [{ id: 'vibe_acp', display_name: 'Mistral Vibe', protocol: 'acp', command: 'vibe-acp', setup_support: 'new_connection' }] }
   render(html`<${RuntimeSetupPicker} inventory=${cli} onSaved=${vi.fn()} />`)
-  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'muse-code' } })
-  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인'))
-  await screen.findByLabelText(/Muse Selected/)
-  expect((screen.getByLabelText(/Muse Unknown/) as HTMLInputElement).disabled).toBe(true)
-  expect(screen.queryByText('이 모델만 준비')).toBeNull()
-  expect(screen.queryByText('context 적용')).toBeNull()
-  expect(screen.getByText(/Muse가 이 모델의 context를 보고하지 않았습니다/)).toBeTruthy()
-  // Muse asks for no input byte limit: selecting a reported model is enough.
-  expect(screen.queryByLabelText('Muse 입력 한도 (bytes)')).toBeNull()
-  fireEvent.click(screen.getByLabelText(/Muse Selected/))
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'vibe_acp' } })
+  fireEvent.click(screen.getByText('ACP 모델 목록 확인'))
+  await screen.findByLabelText(/Devstral 2/)
+  expect(post).not.toHaveBeenCalledWith('/api/v1/setup/accounts/select', expect.anything())
+  expect((screen.getByLabelText(/Unknown/) as HTMLInputElement).disabled).toBe(true)
+  fireEvent.click(screen.getByLabelText(/Devstral 2/))
   expect((screen.getByText('선택한 모델 추가') as HTMLButtonElement).disabled).toBe(false)
   fireEvent.click(screen.getByText('선택한 모델 추가')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
   await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/setup/connections', {
-    revision: 'paired-revision', connections: [{ source: { integration_id: 'muse-code', account_ref },
-      models: [{ id: 'muse-selected', context: 8192, streaming: true }] }],
+    revision: 'paired-revision', connections: [{ source: { integration_id: 'vibe_acp' },
+      models: [{ id: 'devstral-2', context: 131072, streaming: true }] }],
     selection: [{ connection: 0, model: 0 }] }))
 })
 

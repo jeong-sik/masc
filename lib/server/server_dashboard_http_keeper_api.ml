@@ -496,6 +496,8 @@ let handle_keeper_get_subroutes state req request reqd =
     Memory_reads.handle_facts_get state req reqd name
   | Some Route.(Keeper (Memory_journal, name)) ->
     Memory_reads.handle_journal_get state req reqd name
+  | Some Route.(Keeper (Memory_os_internals, name)) ->
+    Memory_reads.handle_memory_os_internals_get state req reqd name
   | Some Route.(Keeper (Operator_note, name)) -> (
     (* Read-only here: the operator asks whether a note is pending or
        which turn consumed it. The write surface belongs to the operator control

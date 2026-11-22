@@ -34,9 +34,14 @@ CHOICES = {
     'vllm': ('openai-compatible-http', None),
     'openai_compatible': ('openai-compatible-http', None),
     'messages': ('messages-http', None),
+    'gemini': ('gemini-http', None),
+    'vertex_gemini': ('vertex-gemini', None),
     'claude_code': ('claude-code', 'claude'),
     'codex': ('codex-app-server', 'codex'),
     'antigravity': ('antigravity-cli', 'agy'),
+    'mistral_vibe': ('acp', 'vibe-acp'),
+    'kimi_acp': ('acp', 'kimi'),
+    'antigravity_acp': ('acp', 'agy'),
 }
 
 
@@ -716,13 +721,40 @@ def pick(title, labels, multiple=False, defaults=(), allow_empty=False):
         termios.tcsetattr(fd, termios.TCSADRAIN, original)
 
 
-PROTOCOL_CHOICES = {'ollama-http': 'ollama', 'openai-compatible-http': 'openai_compatible',
-                    'claude-code': 'claude_code', 'codex-app-server': 'codex',
-                    'antigravity-cli': 'antigravity'}
+PROTOCOL_CHOICES = {
+    'ollama-http': 'ollama',
+    'openai-compatible-http': 'openai_compatible',
+    'messages-http': 'messages',
+    'gemini-http': 'gemini',
+    'vertex-gemini': 'vertex_gemini',
+    'claude-code': 'claude_code',
+    'codex-app-server': 'codex',
+    'antigravity-cli': 'antigravity',
+}
 
-# The three official clients, by the name `masc prerequisite-actions` and
+# Official CLI clients, by the name `masc prerequisite-actions` and
 # `masc runtime-client-path` take.
-OFFICIAL_CLIENTS = {'claude_code': 'claude-code', 'codex': 'codex', 'antigravity': 'antigravity'}
+OFFICIAL_CLIENTS = {
+    'claude_code': 'claude-code',
+    'codex': 'codex',
+    'antigravity': 'antigravity',
+    'mistral_vibe': 'mistral-vibe',
+    'kimi_acp': 'kimi-code',
+    'antigravity_acp': 'antigravity',
+}
+
+
+def choice_for_protocol(protocol, provider_id=None, command=None):
+    """Map an inventory protocol (and optional ACP driver identity/command) to a CHOICES key."""
+    if protocol == 'acp':
+        if provider_id in ('vibe_acp', 'mistral-vibe') or command in ('vibe-acp', 'vibe'):
+            return 'mistral_vibe'
+        if provider_id in ('kimi_acp', 'kimi-code') or command == 'kimi':
+            return 'kimi_acp'
+        if provider_id == 'antigravity_acp' or command == 'agy':
+            return 'antigravity_acp'
+        return None
+    return PROTOCOL_CHOICES.get(protocol)
 
 
 def official_client_path(binary, choice, command):
@@ -755,7 +787,8 @@ def connection_sources(binary, inventory):
         source = next((item for item in sources if item['provider_id'] == row['provider_id']), None)
         if source is None:
             source = dict(provider_id=row['provider_id'], label=row['display_name'],
-                          choice=PROTOCOL_CHOICES.get(row['protocol']), endpoint=row.get('endpoint') or '',
+                          choice=choice_for_protocol(row['protocol'], row['provider_id'], row.get('command')),
+                          endpoint=row.get('endpoint') or '',
                           command=row.get('command') or '', api_key_env=row.get('api_key_env') or '',
                           credential_kind=row.get('credential_kind', 'unknown'),
                           credential_file=row.get('credential_file'), provider_timeout_s=row.get('provider_timeout_s'),
@@ -770,7 +803,7 @@ def connection_sources(binary, inventory):
             existing['origin'] = integration['origin']
             continue
         source = dict(provider_id=integration['id'], label=integration['display_name'],
-                      choice=PROTOCOL_CHOICES.get(integration.get('protocol')),
+                      choice=choice_for_protocol(integration.get('protocol'), integration['id'], integration.get('command')),
                       endpoint=integration.get('endpoint') or '', command=integration.get('command') or '',
                       api_key_env=integration.get('api_key_env') or '',
                       requires_api_key=bool(integration.get('requires_api_key')),
@@ -1429,6 +1462,9 @@ def prepare_connection(binary, source, credentials):
         source['command'] = command if source.get('origin') == 'runtime_config' else path
         if source['choice'] == 'antigravity':
             return prepare_antigravity_account(source, credentials)
+        if source['choice'] in ('mistral_vibe', 'kimi_acp', 'antigravity_acp'):
+            source.pop('account_home', None)
+            return source
         return select_native_account(source)
     if not source['endpoint']:
         urls = ['http://127.0.0.1:8000/v1', 'http://127.0.0.1:8080/v1']
@@ -1572,6 +1608,34 @@ def model_choice_label(model):
     return label + ' — ' + kind + ' ' + released + suffix
 
 
+ACP_CURATED_MODELS = {
+    'mistral_vibe': [
+        dict(id='mistral-medium-3.5', label='Mistral Medium 3.5 (Vibe 3.1.0)',
+             context=262144, supports_image_input=True,
+             supported_reasoning_efforts=['off', 'high'], default_reasoning_effort='high'),
+    ],
+    'kimi_acp': [
+        dict(id='kimi-code/k3.1-pro', label='Kimi K3.1 Pro (ACP)', context=1048576, supports_image_input=True),
+        dict(id='kimi-code/k3.1-pro-highspeed', label='Kimi K3.1 Pro Highspeed (ACP)', context=1048576, supports_image_input=True),
+        dict(id='kimi-code/k3', label='Kimi K3 (ACP)', context=1048576, supports_image_input=True),
+        dict(id='kimi-code/k3-256k', label='Kimi K3 256K (ACP)', context=262144, supports_image_input=True),
+        dict(id='kimi-code/kimi-for-coding', label='Kimi for Coding (ACP)', context=1048576, supports_image_input=True),
+        dict(id='kimi-code/kimi-for-coding-highspeed', label='Kimi for Coding Highspeed (ACP)', context=1048576, supports_image_input=True),
+    ],
+    'antigravity_acp': [
+        dict(id='gemini-4-neon-medium', label='Gemini 4 Neon Medium (ACP)', context=1048576, supports_image_input=True),
+        dict(id='gemini-4-neon-high', label='Gemini 4 Neon High (ACP)', context=1048576, supports_image_input=True),
+        dict(id='gemini-4-carbon-high', label='Gemini 4 Carbon High (ACP)', context=1048576, supports_image_input=True),
+        dict(id='gemini-4-argon-high', label='Gemini 4 Argon High (ACP)', context=1048576, supports_image_input=True),
+        dict(id='gemini-4-hydrogen-high', label='Gemini 4 Hydrogen High (ACP)', context=1048576, supports_image_input=True),
+        dict(id='gemini-4-hydrogen-xhigh', label='Gemini 4 Hydrogen XHigh (ACP)', context=1048576, supports_image_input=True),
+        dict(id='claude-opus-5-5-thinking', label='Claude Opus 5.5 Thinking (ACP)', context=1000000, supports_image_input=True),
+        dict(id='claude-sonnet-5-5-thinking', label='Claude Sonnet 5.5 Thinking (ACP)', context=1000000, supports_image_input=True),
+        dict(id='gemini-3.8-flash-high', label='Gemini 3.8 Flash High (ACP)', context=1048576, supports_image_input=True),
+    ],
+}
+
+
 def source_models(binary, source, timeout, refresh=False, base_path=None):
     """One source's model list: discovery belongs to the native runtime;
     curated catalog rows lead, workspace bindings are matched onto the rest."""
@@ -1592,6 +1656,23 @@ def source_models(binary, source, timeout, refresh=False, base_path=None):
         observed = catalog_models(binary, choice)
         origin = ('Installed MASC model catalog (suggestions; model response is not yet verified)' if observed
                   else 'Model list unavailable. Check account access, API credit or the running server, then refresh.')
+    elif choice in ACP_CURATED_MODELS:
+        observed = [dict(row) for row in ACP_CURATED_MODELS[choice]]
+        origin = 'Installed MASC ACP model catalog (suggestions; model response is not yet verified)'
+    elif choice in ('gemini', 'vertex_gemini'):
+        gemini_rows = []
+        if binary:
+            if source.get('provider_id'):
+                gemini_rows = provider_catalog_models(binary, source['provider_id'])
+            if not gemini_rows:
+                gemini_rows = provider_catalog_models(binary, 'gemini')
+        observed = [dict(id=row['id'], label=row.get('label') or row['id'],
+                         context=row.get('max_context'),
+                         supports_image_input=row.get('supports_image_input'),
+                         release=row.get('release'))
+                    for row in gemini_rows if isinstance(row, dict) and model_text(row.get('id'))]
+        origin = ('Installed MASC model catalog (suggestions; model response is not yet verified)' if observed
+                  else 'Configured models')
     else:
         can_discover = choice and (source.get('credential_kind', 'none') in ('none', 'env') or source.get('credential_file'))
         observed, origin = native_discover_models(binary, source, timeout) if can_discover else ([], 'Configured models')
@@ -1728,7 +1809,8 @@ def resolve_model_spec(source, model, timeout, binary=None, base_path=None):
             answer = ask_text('Configured context tokens (for example, 8192 only if your server declares that limit)')
             context = int(answer) if answer.isascii() and answer.isdigit() else None
     spec = dict(choice=choice, model=model['id'], max_context=context, tools=True,
-                streaming=choice in ('claude_code', 'codex', 'antigravity'))
+                streaming=choice in ('claude_code', 'codex', 'antigravity',
+                                     'mistral_vibe', 'kimi_acp', 'antigravity_acp'))
     if type(image_input) is bool:
         spec['supports_image_input'] = image_input
     if choice in ('claude_code', 'codex') and binary:
@@ -1743,7 +1825,7 @@ def resolve_model_spec(source, model, timeout, binary=None, base_path=None):
         spec.update({key: source[key] for key in ('api_key_env', 'credential_file', 'provider_kind', 'request_path') if source.get(key)})
     elif source['command']:
         spec['command'] = source['command']
-    if source.get('account_home'):
+    if source.get('account_home') and choice in ('claude_code', 'codex'):
         spec['account_home'] = source['account_home']
     if choice == 'antigravity':
         spec.update(credential_file=source['credential_file'], timeout_s=source['provider_timeout_s'])
@@ -1866,7 +1948,10 @@ def login_command(binary, runtime_id, specs, inventory, base_path=None):
         row = next((row for row in inventory['runtimes'] if row['id'] == runtime_id), None)
         if row is None:
             return None
-        choice, command = PROTOCOL_CHOICES.get(row['protocol']), row.get('command')
+        choice, command = choice_for_protocol(row['protocol'], row.get('provider_id'), row.get('command')), row.get('command')
+    if choice in ('mistral_vibe', 'kimi_acp', 'antigravity_acp') and command:
+        acp_args = {'mistral_vibe': ['--setup'], 'kimi_acp': ['login'], 'antigravity_acp': []}[choice]
+        return [command] + acp_args
     client = ACCOUNT_LOGIN_CLIENTS.get(choice)
     if not command or client is None:
         return None

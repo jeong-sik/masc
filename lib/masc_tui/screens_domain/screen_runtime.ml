@@ -370,7 +370,7 @@ let probe_quota_status ~now_unix ~runtimes_tbl ~usage_windows
     (p : Wire_runtime.provider_probe_row) : provider_quota_state =
   match Hashtbl.find_opt runtimes_tbl p.runtime_id with
   | Some (r : Wire_runtime.runtime_option) ->
-      provider_quota_status ~now_unix ~provider:r.provider usage_windows
+      provider_quota_status ~now_unix ~provider:r.provider_id usage_windows
   | None -> Quota_ok
 
 let is_probe_effectively_ok ~now_unix ~runtimes_tbl ~usage_windows
@@ -2454,7 +2454,7 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
                     ~style:(H.text_style ~theme ~bg:row_bg ()) ();
                 let prov_id =
                   match Hashtbl.find_opt runtimes_tbl rid with
-                  | Some r -> Some r.provider
+                  | Some r -> Some r.provider_id
                   | None -> None
                 in
                 let human_lbl =
@@ -2626,10 +2626,41 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
     | _ -> (right_rect, Rect.empty)
   in
   let sel_lane = Runtime_store.selected_lane rt in
+  let setup_hint =
+    let inv_part =
+      match Observed.to_option rt.setup_inventory with
+      | Some inv ->
+          let supported_n =
+            List.fold_left
+              (fun acc (i : Wire_runtime.setup_integration) ->
+                if not (String.equal i.setup_support "unsupported") then acc + 1
+                else acc)
+              0 inv.integrations
+          in
+          Printf.sprintf "%d setup" supported_n
+      | None -> ""
+    in
+    let login_part =
+      match rt.setup_login_receipt with
+      | Some r -> Printf.sprintf "login:%s(%s)" r.integration_id r.status
+      | None -> ""
+    in
+    let extra =
+      [ inv_part; login_part ]
+      |> List.filter (fun s -> not (String.equal s ""))
+      |> String.concat " · "
+    in
+    let keys =
+      Say.resolve lang
+        (Say.make ~ko:"[a]배정 [K]키 [l]로그인" ~en:"[a]Assign [K]Key [l]Login")
+    in
+    if String.equal extra "" then keys else extra ^ " · " ^ keys
+  in
   let insp_inner =
     Card.draw ~cache grid ~rect:insp_rect ~theme
       (H.card_spec ~focused:(model.nav.pane_index = 1)
          ?subtitle:(Option.map (fun (l : Wire_runtime.failover_lane) -> l.id) sel_lane)
+         ~hotkey:setup_hint
          (Say.resolve lang
             (Say.make ~ko:"선택 레인 상세 · 헬스" ~en:"Selected Lane Health")))
   in
@@ -2642,7 +2673,7 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
         let slot_quota_st rid =
           match Hashtbl.find_opt runtimes_tbl rid with
           | Some r ->
-              provider_quota_status ~now_unix ~provider:r.provider
+              provider_quota_status ~now_unix ~provider:r.provider_id
                 (Observed.to_option rt.usage_windows)
           | None -> Quota_ok
         in

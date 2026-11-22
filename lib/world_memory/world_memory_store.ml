@@ -1079,6 +1079,55 @@ let read_change_log ~base_path ~since_seq ~limit =
     Ok (Option.value ~default:([], 0) res))
 ;;
 
+let read_change_log_tail ~base_path ~limit =
+  let safe_limit = max 1 limit in
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+    let* res =
+      open_db ~create_if_missing:false ~base_path (fun db ->
+        with_read_tx db (fun db ->
+          let* last_seq =
+            with_stmt db "SELECT COALESCE(MAX(seq), 0) FROM world_change_log" (fun stmt ->
+              let rc = Sqlite3.step stmt in
+              if rc = Sqlite3.Rc.ROW
+              then Ok (Sqlite3.column_int stmt 0)
+              else Error (sqlite_err db "max change_log seq"))
+          in
+          let* events =
+            with_stmt db
+              "SELECT seq, kind, target_id, summary, actor, recorded_at \
+               FROM world_change_log ORDER BY seq DESC LIMIT ?1"
+              (fun stmt ->
+                 let* () =
+                   check db "bind limit" (Sqlite3.bind stmt 1 (Sqlite3.Data.INT (Int64.of_int safe_limit)))
+                 in
+                 (* Reading DESC and prepending naturally returns ASC order. *)
+                 let rec loop acc =
+                   let rc = Sqlite3.step stmt in
+                   if rc = Sqlite3.Rc.ROW
+                   then (
+                     let seq = Sqlite3.column_int stmt 0 in
+                     let kind_raw = Sqlite3.column_text stmt 1 in
+                     let target_id = Sqlite3.column_text stmt 2 in
+                     let summary = Sqlite3.column_text stmt 3 in
+                     let actor = Sqlite3.column_text stmt 4 in
+                     let recorded_at = Sqlite3.column_double stmt 5 in
+                     let* kind =
+                       match change_event_kind_of_string kind_raw with
+                       | Some k -> Ok k
+                       | None -> Error (Invalid_state ("unknown change event kind: " ^ kind_raw))
+                     in
+                     loop ({ seq; kind; target_id; summary; actor; recorded_at } :: acc))
+                   else if rc = Sqlite3.Rc.DONE
+                   then Ok acc
+                   else Error (sqlite_err db "read world_change_log tail")
+                 in
+                 loop [])
+          in
+          Ok (events, last_seq)))
+    in
+    Ok (Option.value ~default:([], 0) res))
+;;
+
 (* --- Atomic Off-Domain Writes (Shared In-Transaction Primitives) --- *)
 
 type index_sync_input =

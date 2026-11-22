@@ -3051,6 +3051,431 @@ let test_track_a_task_goal_link_and_strict_claim () =
       (high_after.task_status = Masc_domain.Todo))
 ;;
 
+let test_memory_os_world_mvcc_and_keeper_internals () =
+  with_temp_workspace (fun config ->
+    let base_path = config.Workspace.base_path in
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+    mkdir_p keepers_dir;
+    let now = 1_760_000_000.0 in
+    (* 1. Real World_memory_store (world_memory.db) with 1 public + 1 private fact *)
+    let public_claim = "Shared workspace architecture uses OCaml 5.5 Eio" in
+    let private_claim = "PRIVATE_SECRET_DO_NOT_LEAK_ALPHA_NOTE" in
+    let pub_id = World_memory_types.fact_id_of_claim ~scope:"workspace" ~claim:public_claim in
+    let priv_id = World_memory_types.fact_id_of_claim ~scope:"keeper:alpha" ~claim:private_claim in
+    (match
+       World_memory_store.upsert_fact ~base_path ~now:(now -. 60.0) ~actor:"alpha"
+         ~fact_id:pub_id ~claim:public_claim ~category:Keeper_memory_os_types.Fact
+         ~facets:[ "architecture" ] ~scope:"workspace"
+         ~provenance:(Proposed_by { keeper_id = "alpha"; source_fact_ids = [ "sha256:aaa" ] })
+         ~lifecycle:Canonical
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail ("upsert public world fact: " ^ World_memory_store.error_to_string e));
+    (match
+       World_memory_store.upsert_fact ~base_path ~now:(now -. 30.0) ~actor:"alpha"
+         ~fact_id:priv_id ~claim:private_claim ~category:Keeper_memory_os_types.Fact
+         ~facets:[ "private" ] ~scope:"keeper:alpha"
+         ~provenance:(Proposed_by { keeper_id = "alpha"; source_fact_ids = [ "sha256:bbb" ] })
+         ~lifecycle:Working
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail ("upsert private world fact: " ^ World_memory_store.error_to_string e));
+    (* Add a public->private edge and transition the private fact to terminal Molted;
+       neither the inactive private fact nor the edge's reason/target may leak! *)
+    let private_edge_secret = "PRIVATE_EDGE_SECRET_DO_NOT_LEAK" in
+    (match
+       World_memory_store.add_edge ~base_path ~now:(now -. 25.0) ~actor:"alpha"
+         ~from_fact_id:pub_id ~to_fact_id:priv_id
+         ~kind:World_memory_types.Refines ~reason:private_edge_secret
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail ("add_edge public->private: " ^ World_memory_store.error_to_string e));
+    let private_molt_reason = "PRIVATE_MOLT_REASON_SECRET" in
+    (match
+       World_memory_store.transition_fact_lifecycle ~base_path ~now:(now -. 20.0)
+         ~actor:"alpha" ~fact_id:priv_id ~to_lifecycle:World_memory_types.Molted
+         ~reason:private_molt_reason
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail ("transition private fact to Molted: " ^ World_memory_store.error_to_string e));
+    let world_resp =
+      Memory_api.world_json ~now ~config () |> ok_or_fail "GET /api/v1/memory/world (MVCC)"
+    in
+    let world_str = Yojson.Safe.to_string world_resp in
+    Alcotest.(check bool) "world_json includes public world_memory.db fact" true
+      (contains_substr ~needle:public_claim world_str);
+    Alcotest.(check bool) "world_json NEVER leaks private fact, ID, edge reason, or molt reason" false
+      (contains_substr ~needle:private_claim world_str
+       || contains_substr ~needle:priv_id world_str
+       || contains_substr ~needle:private_edge_secret world_str
+       || contains_substr ~needle:private_molt_reason world_str);
+    let world_data = json_member_exn "data" world_resp in
+    Alcotest.(check string) "world_json source = world_memory_db" "world_memory_db"
+      (json_string_exn "source" world_data);
+    ignore (json_member_exn "world_mvcc" world_data);
+    Alcotest.(check int) "world_json claims has only 1 public fact" 1
+      (List.length (json_list_exn "claims" world_data));
+    let world_diff =
+      Memory_api.diff_json ~now ~config ~scope:Scope_world
+        ~range:(Range_window Window_24h) ()
+      |> ok_or_fail "GET /api/v1/memory/diff?scope=world (MVCC)"
+    in
+    let world_diff_str = Yojson.Safe.to_string world_diff in
+    Alcotest.(check bool) "world diff includes public fact_id" true
+      (contains_substr ~needle:pub_id world_diff_str);
+    Alcotest.(check bool) "world diff NEVER leaks private fact, ID, edge reason, or molt reason" false
+      (contains_substr ~needle:private_claim world_diff_str
+       || contains_substr ~needle:priv_id world_diff_str
+       || contains_substr ~needle:private_edge_secret world_diff_str
+       || contains_substr ~needle:private_molt_reason world_diff_str);
+    (* 1b. >205 change-log rows: world_json returns newest tail (not frozen at seq 1..200)
+       and Range_revs with high from_rev returns recent rows instead of empty *)
+    for i = 1 to 210 do
+      let claim = Printf.sprintf "Bulk public architecture fact #%03d" i in
+      let fid = World_memory_types.fact_id_of_claim ~scope:"workspace" ~claim in
+      match
+        World_memory_store.upsert_fact ~base_path ~now:(now -. 10.0 +. (float_of_int i *. 0.01))
+          ~actor:"alpha" ~fact_id:fid ~claim ~category:Keeper_memory_os_types.Fact
+          ~facets:[ "bulk" ] ~scope:"workspace"
+          ~provenance:(Proposed_by { keeper_id = "alpha"; source_fact_ids = [] })
+          ~lifecycle:Canonical
+      with
+      | Ok _ -> ()
+      | Error e -> Alcotest.fail ("bulk upsert world fact: " ^ World_memory_store.error_to_string e)
+    done;
+    let world_tail_resp =
+      Memory_api.world_json ~now ~config () |> ok_or_fail "GET /api/v1/memory/world (tail > 200)"
+    in
+    let world_tail_str = Yojson.Safe.to_string world_tail_resp in
+    Alcotest.(check bool) "world_json >200 events still never leaks private data" false
+      (contains_substr ~needle:priv_id world_tail_str
+       || contains_substr ~needle:private_edge_secret world_tail_str);
+    let world_tail_data = json_member_exn "data" world_tail_resp in
+    let log_report = json_member_exn "recent_batches" world_tail_data in
+    let last_committed_seq = json_int_exn "last_committed_seq" log_report in
+    Alcotest.(check bool) "world_json recent_batches.last_committed_seq > 210" true
+      (last_committed_seq > 210);
+    let recent_changes = json_list_exn "recent_changes" log_report in
+    Alcotest.(check bool) "world_json recent_changes surfaces newest last_committed_seq tail" true
+      (List.exists (fun ev -> json_int_exn "seq" ev = last_committed_seq) recent_changes);
+    let high_rev_diff =
+      Memory_api.diff_json ~now ~config ~scope:Scope_world
+        ~range:(Range_revs { from_rev = 205; to_rev = None }) ()
+      |> ok_or_fail "GET /api/v1/memory/diff?scope=world&from_rev=205"
+    in
+    let high_rev_added =
+      high_rev_diff |> json_member_exn "data" |> json_list_exn "added"
+    in
+    Alcotest.(check bool) "world diff Range_revs from_rev=205 returns recent rows" true
+      (List.length high_rev_added >= 5);
+    Alcotest.(check bool) "world diff Range_revs never leaks private data" false
+      (let s = Yojson.Safe.to_string high_rev_diff in
+       contains_substr ~needle:priv_id s || contains_substr ~needle:private_edge_secret s);
+    (* 2. Per-keeper Memory OS Internals (compaction + canonical turns + digest + librarian molt) *)
+    let turn_id = Ids.Turn_id.of_string "turn-001" in
+    let anchor : Keeper_compaction.compaction_anchor =
+      { epoch_id = 1
+      ; covers_through_turn = turn_id
+      ; archived_epochs_through = None
+      ; active_intent = "Verify Memory OS internals"
+      ; verified_facts_and_files = [ "server_dashboard_http_memory_v2.ml", turn_id ]
+      ; decisions_made = [ "Expose read-only stats off-domain", turn_id ]
+      ; open_threads = []
+      }
+    in
+    let evicted_turn : Keeper_compaction.canonical_turn =
+      { turn_id; messages = [] }
+    in
+    (match
+       Keeper_compaction.commit_epoch ~keepers_dir ~keeper_id:"alpha"
+         ~trigger:(Explicit_hard_limit { capacity_bytes = 64000; observed_bytes = 70000 })
+         ~anchor ~evicted_turns:[ evicted_turn ]
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail ("commit_epoch: " ^ Keeper_compaction.store_error_to_string e));
+    (match
+       Keeper_canonical_turn_store.commit_turn ~keepers_dir ~keeper_id:"alpha"
+         ~turn_id ~runtime_kind:Acp_cli ~runtime_id:"vibe_acp.devstral-2"
+         ~user_input:"Run compaction check" ~tool_calls_json:(`List [])
+         ~assistant_output:"Compacted cleanly" ~usage_json:(`Assoc [])
+         ~compaction_epoch_id:1 ~created_at:(now -. 20.0) ()
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail ("commit_turn: " ^ Keeper_canonical_turn_store.store_error_to_string e));
+    let origin = Keeper_memory_os_types.{ kind = Authored; trace_id = "trace-int" } in
+    let df1 = Keeper_memory_os_types.observed ~claim:"Digest fact 1" ~category:Fact ~now ~origin in
+    let df2 = Keeper_memory_os_types.observed ~claim:"Digest fact 2" ~category:Constraint ~now ~origin in
+    ignore (Keeper_memory_digest.load_or_compile ~keepers_dir ~keeper_id:"alpha" ~revision:3 ~facts:[ df1; df2 ]);
+    let internals =
+      Server_dashboard_http_keeper_memory_reads.memory_os_internals_json ~config ~keeper_id:"alpha"
+    in
+    let comp = json_member_exn "compaction" internals in
+    Alcotest.(check bool) "compaction present" true (json_bool_exn "present" comp);
+    Alcotest.(check int) "compaction epoch_count" 1 (json_int_exn "epoch_count" comp);
+    Alcotest.(check int) "compaction archived_turns_count" 1 (json_int_exn "archived_turns_count" comp);
+    Alcotest.(check bool) "compaction anchor_bytes > 0" true (json_int_exn "anchor_bytes" comp > 0);
+    let turns = json_member_exn "canonical_turns" internals in
+    Alcotest.(check bool) "canonical_turns present" true (json_bool_exn "present" turns);
+    Alcotest.(check int) "canonical_turns turn_count" 1 (json_int_exn "turn_count" turns);
+    Alcotest.(check string) "canonical_turns latest_runtime_kind" "acp_cli"
+      (json_string_exn "latest_runtime_kind" turns);
+    Alcotest.(check string) "canonical_turns latest_runtime_id" "vibe_acp.devstral-2"
+      (json_string_exn "latest_runtime_id" turns);
+    let dig = json_member_exn "memory_digest" internals in
+    Alcotest.(check bool) "memory_digest present" true (json_bool_exn "present" dig);
+    Alcotest.(check int) "memory_digest revision" 3 (json_int_exn "revision" dig);
+    Alcotest.(check int) "memory_digest fact_count" 2 (json_int_exn "fact_count" dig);
+    Alcotest.(check bool) "memory_digest bytes > 0" true (json_int_exn "bytes" dig > 0);
+    let molt = json_member_exn "librarian_molt" internals in
+    Alcotest.(check string) "librarian_molt writer_kind" "none_in_process"
+      (json_string_exn "writer_kind" molt);
+    (* 3. Program absorption relation fires in keeper diff via Keeper_memory_activity *)
+    let old_a = Keeper_memory_os_types.observed ~claim:"Old partial fact A" ~category:Fact ~now:(now -. 40.0) ~origin in
+    let succ_a = Keeper_memory_os_types.observed ~claim:"Synthesized combined fact" ~category:Fact ~now:(now -. 10.0) ~origin in
+    let absorbed_rec : Keeper_memory_absorbed.record =
+      { recorded_at = now -. 10.0
+      ; trace_id = "trace-absorb"
+      ; memory_id = Keeper_memory_os_types.memory_id old_a
+      ; into = Keeper_memory_os_types.memory_id succ_a
+      ; fact = old_a
+      }
+    in
+    (match Keeper_memory_absorbed.append_all ~keepers_dir ~keeper_id:"alpha" [ absorbed_rec ] with
+     | Ok () -> ()
+     | Error e -> Alcotest.fail ("append_all absorbed: " ^ Keeper_memory_absorbed.append_error_to_string e));
+    let journal_snap : Keeper_memory_os_current.t =
+      { revision = 1
+      ; updated_at = now -. 10.0
+      ; source = { kind = Librarian; trace_id = "trace-absorb" }
+      ; facts = [ succ_a ]
+      ; change = { added = [ succ_a ]; removed = [ old_a ]; retained = 0; invalidated = [] }
+      }
+    in
+    let snap_json = Keeper_memory_os_current.to_json journal_snap in
+    let journal_row =
+      `Assoc
+        [ "outcome", `String "committed"
+        ; "recorded_at", `Float (now -. 10.0)
+        ; "revision", `Int 1
+        ; "source", Yojson.Safe.Util.member "source" snap_json
+        ; "change", Yojson.Safe.Util.member "change" snap_json
+        ; "commit_effect", `String "rewritten"
+        ]
+    in
+    write_file_raw (Keeper_memory_os_current.path_for_keepers_dir ~keepers_dir ~keeper_id:"alpha")
+      (Yojson.Safe.to_string snap_json ^ "\n");
+    write_file_raw (Keeper_memory_os_current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"alpha")
+      (Yojson.Safe.to_string journal_row ^ "\n");
+    let kdiff =
+      Memory_api.diff_json ~now ~config ~scope:(Scope_keeper "alpha")
+        ~range:(Range_window Window_24h) ()
+      |> ok_or_fail "GET /api/v1/memory/diff?scope=keeper:alpha (absorption)"
+      |> json_member_exn "data"
+    in
+    let updated = json_list_exn "updated" kdiff in
+    Alcotest.(check bool) "keeper diff emits program_absorption relation" true
+      (List.exists (fun u -> json_string_exn "relation" u = "program_absorption") updated))
+;;
+
+let test_candle_config_optional_descriptors_and_keeper_runtime_assignment () =
+  with_temp_workspace (fun config ->
+    let base_path = config.Workspace.base_path in
+    let runtime_toml_path = Filename.concat base_path ".masc/config/runtime.toml" in
+    write_file_raw runtime_toml_path
+      {|[runtime]
+default = "primary"
+
+[runtime.lanes.primary]
+candidates = ["claude.claude-sonnet-5"]
+
+[providers.claude]
+display-name = "Anthropic"
+protocol = "messages-http"
+endpoint = "https://api.anthropic.com"
+
+[models."claude-sonnet-5"]
+api-name = "claude-sonnet-5"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[claude."claude-sonnet-5"]
+
+[models."claude-sonnet-4.5"]
+api-name = "claude-sonnet-4-5"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[claude."claude-sonnet-4.5"]
+|};
+    let keeper_toml_path = Filename.concat base_path ".masc/config/keepers/alpha.toml" in
+    let keeper_orig =
+      "[keeper]\nname = \"alpha\"\ninstructions = \"Be concise\"\nactivation_mode = \"on_demand\"\n"
+    in
+    write_file_raw keeper_toml_path keeper_orig;
+    let rt_data =
+      Candle_cfg_api.config_schema_json ~base_path ~target:Target_runtime ()
+      |> ok_or_fail "GET runtime schema optional descriptors"
+      |> json_member_exn "data"
+    in
+    let rt_sha = json_string_exn "file_sha256" rt_data in
+    let rt_fields =
+      json_list_exn "categories" rt_data
+      |> List.concat_map (fun c -> json_list_exn "fields" c)
+    in
+    let has_field key =
+      List.exists (fun f -> json_string_exn "full_key" f = key) rt_fields
+    in
+    List.iter
+      (fun k ->
+         Alcotest.(check bool) ("optional descriptor exposed: " ^ k) true (has_field k))
+      [ "providers.claude.store"
+      ; "providers.claude.explicit-context-cache-ttl-s"
+      ; "models.claude-sonnet-5.explicit-context-cache-ttl-s"
+      ; "models.claude-sonnet-5.efforts"
+      ; "claude.claude-sonnet-5.cache-retention"
+      ; "claude.claude-sonnet-5.efforts"
+      ; "models.\"claude-sonnet-4.5\".efforts"
+      ; "claude.\"claude-sonnet-4.5\".cache-retention"
+      ];
+    let cache_ret_field =
+      List.find
+        (fun f -> json_string_exn "full_key" f = "claude.claude-sonnet-5.cache-retention")
+        rt_fields
+    in
+    Alcotest.(check string) "cache-retention is enum" "enum" (json_string_exn "type" cache_ret_field);
+    (* Patch dotted/quoted model & binding tables directly through /api/v1/config/patch *)
+    let dotted_patch_body ~dry_run =
+      Yojson.Safe.to_string
+        (`Assoc
+          [ "target", `String "runtime"
+          ; "expected_sha256", `String rt_sha
+          ; "dry_run", `Bool dry_run
+          ; ( "changes"
+            , `List
+                [ `Assoc
+                    [ "table", `String "models.\"claude-sonnet-4.5\""
+                    ; "key", `String "efforts"
+                    ; "value", `List [ `String "low"; `String "high" ]
+                    ]
+                ; `Assoc
+                    [ "table", `String "claude.\"claude-sonnet-4.5\""
+                    ; "key", `String "efforts"
+                    ; "value", `List [ `String "low"; `String "high" ]
+                    ]
+                ; `Assoc
+                    [ "table", `String "claude.\"claude-sonnet-4.5\""
+                    ; "key", `String "cache-retention"
+                    ; "value", `String "1h"
+                    ]
+                ] )
+          ])
+    in
+    ignore
+      (Candle_cfg_api.config_patch_json ~config ~actor:"tester"
+         ~body_str:(dotted_patch_body ~dry_run:true) ()
+       |> ok_or_fail "POST dry_run dotted model table patch");
+    ignore
+      (Candle_cfg_api.config_patch_json ~config ~actor:"tester"
+         ~body_str:(dotted_patch_body ~dry_run:false) ()
+       |> ok_or_fail "POST commit dotted model table patch");
+    let patched_dotted_rt = read_file_raw runtime_toml_path in
+    (match Runtime_toml.parse_string patched_dotted_rt with
+     | Ok cfg ->
+       Alcotest.(check bool) "dotted table patch expanded claude-sonnet-4.5-high binding" true
+         (List.exists
+            (fun (b : Runtime_schema.binding) ->
+               b.provider_id = "claude" && b.model_id = "claude-sonnet-4.5-high")
+            cfg.bindings)
+     | Error errs ->
+       Alcotest.fail
+         (Printf.sprintf "dotted table patched runtime.toml parse failed (%d errors)\n%s"
+            (List.length errs) patched_dotted_rt));
+    Alcotest.(check bool) "dotted binding patch wrote cache-retention" true
+      (contains_substr ~needle:"cache-retention = \"1h\"" patched_dotted_rt);
+    let k_data =
+      Candle_cfg_api.config_schema_json ~base_path ~target:(Target_keeper "alpha") ()
+      |> ok_or_fail "GET keeper:alpha schema"
+      |> json_member_exn "data"
+    in
+    let k_sha = json_string_exn "file_sha256" k_data in
+    let k_fields =
+      json_list_exn "categories" k_data
+      |> List.concat_map (fun c -> json_list_exn "fields" c)
+    in
+    let assign_field =
+      List.find (fun f -> json_string_exn "full_key" f = "runtime.assignments.runtime") k_fields
+    in
+    Alcotest.(check bool) "runtime.assignments.runtime writable" true
+      (json_bool_exn "writable" assign_field);
+    let enum_vals =
+      json_list_exn "enum_values" assign_field
+      |> List.map (function `String s -> s | _ -> "")
+    in
+    Alcotest.(check bool) "enum_values includes lane primary" true (List.mem "primary" enum_vals);
+    (* Dual-file failure must NEVER partially mutate alpha.toml *)
+    let bad_dual_body =
+      Yojson.Safe.to_string
+        (`Assoc
+          [ "target", `String "keeper:alpha"
+          ; "expected_sha256", `String k_sha
+          ; "dry_run", `Bool false
+          ; ( "changes"
+            , `List
+                [ `Assoc
+                    [ "table", `String "keeper"
+                    ; "key", `String "instructions"
+                    ; "value", `String "MUST_NOT_BE_WRITTEN"
+                    ]
+                ; `Assoc
+                    [ "key", `String "runtime.assignments.runtime"
+                    ; "value", `String "nonexistent-lane-xyz"
+                    ]
+                ] )
+          ])
+    in
+    (match Candle_cfg_api.config_patch_json ~config ~actor:"tester" ~body_str:bad_dual_body () with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "invalid runtime.assignments.runtime must fail");
+    Alcotest.(check string) "failed dual-file patch leaves alpha.toml untouched" keeper_orig
+      (read_file_raw keeper_toml_path);
+    let patch_body ~dry_run =
+      Yojson.Safe.to_string
+        (`Assoc
+          [ "target", `String "keeper:alpha"
+          ; "expected_sha256", `String k_sha
+          ; "dry_run", `Bool dry_run
+          ; ( "changes"
+            , `List
+                [ `Assoc
+                    [ "key", `String "runtime.assignments.runtime"
+                    ; "value", `String "primary"
+                    ]
+                ] )
+          ])
+    in
+    ignore
+      (Candle_cfg_api.config_patch_json ~config ~actor:"tester" ~body_str:(patch_body ~dry_run:true) ()
+       |> ok_or_fail "POST dry_run keeper runtime assignment");
+    ignore
+      (Candle_cfg_api.config_patch_json ~config ~actor:"tester" ~body_str:(patch_body ~dry_run:false) ()
+       |> ok_or_fail "POST commit keeper runtime assignment");
+    Alcotest.(check string) "keeper alpha.toml stays untouched" keeper_orig
+      (read_file_raw keeper_toml_path);
+    let updated_rt = read_file_raw runtime_toml_path in
+    let parsed_rt =
+      match Runtime_toml.parse_string updated_rt with
+      | Ok c -> c
+      | Error errs ->
+        Alcotest.fail
+          (Printf.sprintf "updated runtime.toml parse failed (%d errors)\n--- text ---\n%s"
+             (List.length errs) updated_rt)
+    in
+    Alcotest.(check (option string)) "runtime.toml keeper_assignments has alpha -> primary"
+      (Some "primary") (List.assoc_opt "alpha" parsed_rt.keeper_assignments))
+;;
+
 let () =
   Alcotest.run
     "server_tui_v2_api"
@@ -3063,12 +3488,16 @@ let () =
     ; ( "memory_v2"
       , [ Alcotest.test_case "world conflicts + keeper diff + heat" `Quick test_memory_v2_world_and_diff
         ; Alcotest.test_case "Track A4 human-readable claim text in world diff" `Quick test_track_a_memory_diff_human_claim_text
+        ; Alcotest.test_case "World_memory_store MVCC + keeper Memory OS internals + program_absorption" `Quick
+            test_memory_os_world_mvcc_and_keeper_internals
         ] )
     ; ( "candle_and_config"
       , [ Alcotest.test_case "candle ledger root-cause diagnostics" `Quick test_candle_ledger_diagnostics
         ; Alcotest.test_case "config schema redaction + atomic patch" `Quick test_config_schema_redaction_and_patch_roundtrip
         ; Alcotest.test_case "config schema registry + routing_failover categories" `Quick test_config_schema_registry_and_routing_failover
         ; Alcotest.test_case "Track A6 hot-reload classification + hardened secret redaction" `Quick test_track_a_hot_reload_and_hardened_secrets
+        ; Alcotest.test_case "optional runtime descriptors + keeper runtime.assignments dual-file patch" `Quick
+            test_candle_config_optional_descriptors_and_keeper_runtime_assignment
         ] )
     ; ( "signal_and_scorecard"
       , [ Alcotest.test_case "board signal_only + succession chains" `Quick test_board_signal_and_succession_chains

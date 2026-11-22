@@ -112,8 +112,40 @@ let apply_model_selection ~now ~runtime_id (m : Model.t) =
     | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _) | None ->
         None
   in
+  let direct_keeper_assignment =
+    match target_keeper, Observed.to_option m0.runtime.runtime_config_raw with
+    | Some keeper, Some meta ->
+        let previous_runtime_id = List.assoc_opt keeper meta.assignments in
+        let next =
+          Model.with_toast ~now ~level:Model.Toast_info
+            (Say.make
+               ~ko:(Printf.sprintf "%s 런타임 변경 요청: %s" keeper runtime_id)
+               ~en:(Printf.sprintf "Assigning runtime for %s -> %s" keeper runtime_id))
+            m0
+        in
+        Some
+          ( next
+          , [
+              Cmd.Http_post
+                {
+                  epoch = next.epoch;
+                  req =
+                    Cmd.Post_runtime_assignment
+                      {
+                        keeper_name = keeper;
+                        runtime_id = Some runtime_id;
+                        source_revision = Some meta.source_revision;
+                        previous_runtime_id;
+                      };
+                };
+            ] )
+    | Some _, None | None, (Some _ | None) -> None
+  in
   let staged_keeper_dry_run =
-    match target_keeper, Observed.to_option m0.config.schema with
+    match direct_keeper_assignment with
+    | Some _ as direct -> direct
+    | None -> (
+        match target_keeper, Observed.to_option m0.config.schema with
     | Some keeper, Some schema
       when Config_store.equal_config_target schema.target
              (Wire_config.Target_keeper keeper) -> (
@@ -160,7 +192,7 @@ let apply_model_selection ~now ~runtime_id (m : Model.t) =
                       Cmd.Http_post
                         { epoch = next.epoch; req = Cmd.Post_config_patch req };
                     ] )))
-    | Some _, (Some _ | None) | None, (Some _ | None) -> None
+    | Some _, (Some _ | None) | None, (Some _ | None) -> None)
   in
   match staged_keeper_dry_run with
   | Some res -> res
@@ -941,6 +973,7 @@ and execute_action ~now (m : Model.t) action =
                                 ~en:"Proposal title (#goals)";
                             value = "";
                             required = true;
+                            secret = false;
                           };
                           {
                             key = "proposal_measure";
@@ -949,6 +982,7 @@ and execute_action ~now (m : Model.t) action =
                                 ~en:"Success measure";
                             value = "";
                             required = true;
+                            secret = false;
                           };
                           {
                             key = "proposal_procedure";
@@ -957,6 +991,7 @@ and execute_action ~now (m : Model.t) action =
                                 ~en:"Verification procedure";
                             value = "";
                             required = false;
+                            secret = false;
                           };
                           {
                             key = "proposal_priority";
@@ -964,6 +999,7 @@ and execute_action ~now (m : Model.t) action =
                               Say.make ~ko:"우선순위 (1-5)" ~en:"Priority (1-5)";
                             value = "2";
                             required = false;
+                            secret = false;
                           };
                         ];
                       active_field = 0;

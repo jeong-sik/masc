@@ -141,15 +141,28 @@ let open_palette (m : Model.t) mode =
   let next = { m with nav; drafts; palette } in
   let extra_cmds =
     match mode with
-    | Model.Palette_models -> (
-        match m.runtime.runtime_resolved with
-        | Observed.Value { stale = false; _ } -> []
-        | Observed.Loading _
-        | Observed.Value { stale = true; _ }
-        | Observed.Absent
-        | Observed.Unreported
-        | Observed.Failed _ ->
-            [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_resolved } ])
+    | Model.Palette_models ->
+        let resolved_cmd =
+          match m.runtime.runtime_resolved with
+          | Observed.Value { stale = false; _ } -> []
+          | Observed.Loading _
+          | Observed.Value { stale = true; _ }
+          | Observed.Absent
+          | Observed.Unreported
+          | Observed.Failed _ ->
+              [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_resolved } ]
+        in
+        let raw_cmd =
+          match m.runtime.runtime_config_raw with
+          | Observed.Value { stale = false; _ } -> []
+          | Observed.Loading _
+          | Observed.Value { stale = true; _ }
+          | Observed.Absent
+          | Observed.Unreported
+          | Observed.Failed _ ->
+              [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_config_raw } ]
+        in
+        resolved_cmd @ raw_cmd
     | Model.Palette_commands | Model.Palette_keepers -> []
   in
   (next, extra_cmds)
@@ -782,6 +795,9 @@ type inline_form_kind =
   | Form_memory_act
   | Form_wiki_edit
   | Form_fusion_launch
+  | Form_runtime_assign
+  | Form_setup_account_key
+  | Form_setup_login_start
 
 let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
   match modal.kind with
@@ -792,6 +808,9 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
       | { key = "memory_keeper"; _ } :: _ -> Form_memory_act
       | { key = "wiki_slug"; _ } :: _ -> Form_wiki_edit
       | { key = "fusion_keeper"; _ } :: _ -> Form_fusion_launch
+      | { key = "assign_keeper"; _ } :: _ -> Form_runtime_assign
+      | { key = "setup_key_integration"; _ } :: _ -> Form_setup_account_key
+      | { key = "setup_login_integration"; _ } :: _ -> Form_setup_login_start
       | _ -> Form_standard Nav.Board_new_post)
   | ( Nav.Btw_query
     | Nav.Gate_reject _
@@ -1230,7 +1249,130 @@ let submit_inline_modal ~now (m : Model.t) =
                           epoch = m.epoch;
                           req = Cmd.Post_fusion_launch { keeper; request };
                         };
-                    ] ))))
+                    ] ))
+          | Form_runtime_assign -> (
+              let keeper_raw =
+                String.trim (Model.modal_field_value ~key:"assign_keeper" modal)
+              in
+              let runtime_raw =
+                String.trim (Model.modal_field_value ~key:"assign_runtime_id" modal)
+              in
+              if String.equal keeper_raw "" || String.equal (String.lowercase_ascii keeper_raw) "default" then
+                if String.equal runtime_raw "" then
+                  set_modal_error "runtime_id is required when setting the default route"
+                else
+                  ( close_with_inflight_toast
+                      ~msg:
+                        (Say.make
+                           ~ko:("기본 런타임 변경 전송 중: " ^ runtime_raw)
+                           ~en:("Updating default route: " ^ runtime_raw))
+                      m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_runtime_default_route
+                              { runtime_id = runtime_raw };
+                        };
+                    ] )
+              else
+                let runtime_id =
+                  if String.equal runtime_raw "" then None else Some runtime_raw
+                in
+                let source_revision, previous_runtime_id =
+                  match Observed.to_option m.runtime.runtime_config_raw with
+                  | Some meta ->
+                      ( Some meta.source_revision
+                      , List.assoc_opt keeper_raw meta.assignments )
+                  | None -> (None, None)
+                in
+                ( close_with_inflight_toast
+                    ~msg:
+                      (Say.make
+                         ~ko:
+                           (Printf.sprintf "키퍼 런타임 배정 전송 중: %s -> %s"
+                              keeper_raw
+                              (Option.value runtime_id ~default:"(default)"))
+                         ~en:
+                           (Printf.sprintf "Assigning runtime for %s -> %s"
+                              keeper_raw
+                              (Option.value runtime_id ~default:"(default)")))
+                    m
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Post_runtime_assignment
+                            {
+                              keeper_name = keeper_raw;
+                              runtime_id;
+                              source_revision;
+                              previous_runtime_id;
+                            };
+                      };
+                  ] ))
+          | Form_setup_account_key -> (
+              let integration_id =
+                String.trim
+                  (Model.modal_field_value ~key:"setup_key_integration" modal)
+              in
+              let key =
+                String.trim (Model.modal_field_value ~key:"setup_key_secret" modal)
+              in
+              match Observed.to_option m.runtime.runtime_config_raw with
+              | None ->
+                  set_modal_error
+                    "Runtime config revision not loaded yet — press [r] to refresh"
+              | Some meta ->
+                  ( close_with_inflight_toast
+                      ~msg:
+                        (Say.make
+                           ~ko:("API 키 등록 요청 중: " ^ integration_id)
+                           ~en:("Registering API key for " ^ integration_id))
+                      m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_setup_account_key
+                              {
+                                integration_id;
+                                key;
+                                source_revision = meta.source_revision;
+                              };
+                        };
+                    ] ))
+          | Form_setup_login_start ->
+              let integration_id =
+                String.trim
+                  (Model.modal_field_value ~key:"setup_login_integration" modal)
+              in
+              let account_ref_raw =
+                String.trim
+                  (Model.modal_field_value ~key:"setup_login_account_ref" modal)
+              in
+              let account_ref =
+                if String.equal account_ref_raw "" then None
+                else Some account_ref_raw
+              in
+              ( close_with_inflight_toast
+                  ~msg:
+                    (Say.make
+                       ~ko:("계정 로그인 시작 요청 중: " ^ integration_id)
+                       ~en:("Starting official CLI login for " ^ integration_id))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_setup_login_start
+                          { integration_id; account_ref };
+                    };
+                ] )))
 
 let move_delta = function
   | Keymap.Up -> -1

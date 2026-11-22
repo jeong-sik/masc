@@ -120,6 +120,8 @@ type http_reply =
   | Reply_artifacts of (Wire_knowledge.artifact_entry list, http_error) result
   | Reply_world_memory of (Wire_knowledge.world_memory, http_error) result
   | Reply_memory_diff of (Wire_knowledge.memory_diff, http_error) result
+  | Reply_keeper_memory_os_internals of
+      (Wire_knowledge.memory_os_internals, http_error) result
   | Reply_memory_act of {
       keeper : string;
       result : (Wire_knowledge.memory_act_answer, http_error) result;
@@ -136,6 +138,24 @@ type http_reply =
       (Wire_runtime.runtime_metrics_snapshot, http_error) result
   | Reply_runtime_resolved of
       (Wire_runtime.runtime_resolved_snapshot, http_error) result
+  | Reply_runtime_config_raw of
+      (Wire_runtime.runtime_config_raw_meta, http_error) result
+  | Reply_setup_inventory of (Wire_runtime.setup_inventory, http_error) result
+  | Reply_setup_login_receipt of
+      (Wire_runtime.setup_login_receipt, http_error) result
+  | Reply_runtime_assignment of {
+      keeper_name : string;
+      runtime_id : string option;
+      result : (unit, http_error) result;
+    }
+  | Reply_runtime_routing of {
+      runtime_id : string;
+      result : (unit, http_error) result;
+    }
+  | Reply_setup_account_key of {
+      integration_id : string;
+      result : (unit, http_error) result;
+    }
   | Reply_runtime_probe of
       (Wire_runtime.runtime_probe_snapshot, http_error) result
   | Reply_exact_lane_runs of

@@ -2037,9 +2037,9 @@ let test_v25_data_pipeline_decoders () =
   (* 4. Human provider alias resolution *)
   let runtimes : Wire_runtime.runtime_option list =
     [
-      { id = "alice.opus"; provider = "claude_code_a1b2c3d4"; model = Some "claude-opus-4-6"; transport = Some "cli"; is_default = true };
-      { id = "bob.sonnet"; provider = "claude_code_b2c3d4e5"; model = Some "claude-sonnet-4-6"; transport = Some "cli"; is_default = false };
-      { id = "carol.sonnet"; provider = "claude_code_c3d4e5f6"; model = Some "claude-sonnet-4-6"; transport = Some "cli"; is_default = false };
+      { id = "alice.opus"; provider_id = "claude_code_a1b2c3d4"; provider = "claude_code_a1b2c3d4"; model = Some "claude-opus-4-6"; declared_reasoning_effort = None; transport = Some "cli"; is_default = true };
+      { id = "bob.sonnet"; provider_id = "claude_code_b2c3d4e5"; provider = "claude_code_b2c3d4e5"; model = Some "claude-sonnet-4-6"; declared_reasoning_effort = None; transport = Some "cli"; is_default = false };
+      { id = "carol.sonnet"; provider_id = "claude_code_c3d4e5f6"; provider = "claude_code_c3d4e5f6"; model = Some "claude-sonnet-4-6"; declared_reasoning_effort = None; transport = Some "cli"; is_default = false };
     ]
   in
   let mk_acct ?(display_name = "") scope_id pids : Wire_runtime.account_usage =
@@ -2244,8 +2244,10 @@ let test_v25_data_pipeline_decoders () =
     [
       {
         id = "alice.opus";
+        provider_id = "claude_code_deadbeef";
         provider = "claude_code_deadbeef";
         model = Some "claude-opus-4-6";
+        declared_reasoning_effort = None;
         transport = Some "cli";
         is_default = false;
       };
@@ -2474,6 +2476,215 @@ let test_p1_7_wire_fleet_offline_vs_failing_ssot () =
   Alcotest.(check int) "working_count excludes paused working keeper (<= running_count)" 1
     cg.working_count
 
+let test_tui_memory_os_and_runtime_setup_codecs () =
+  (* 1. Writer health canonical stop + snapshot_file + available_acts *)
+  let diff_json =
+    parse_json
+      {|{
+        "schema_version": 1, "instance_id": "srv-1", "generated_at_unix": 1795252092.0,
+        "data": {
+          "scope": { "kind": "keeper", "keeper": "alpha" },
+          "range": { "window": "24h", "from_rev": null, "to_rev": 1, "from_unix": 1795165692.0, "to_unix": 1795252092.0 },
+          "counts": {
+            "total_facts_now": 2, "added": 0, "updated": 0, "retracted": 0,
+            "invalidated": 0, "journal_failures_in_window": 0,
+            "journal_quarantines_in_window": 0, "undecodable_journal_lines": 0
+          },
+          "retrieval_heat": { "hot": 0, "warm": 0, "cold": 0, "never_retrieved": 2, "total_events": 0, "unreadable_event_lines": 0 },
+          "revisions": [], "added": [], "updated": [], "retracted": [], "invalidated": [],
+          "writer_status": {
+            "kind": "writer",
+            "row": {
+              "state": "stopped",
+              "stop": "store_stopped_log_unreadable",
+              "alarms": ["E1"],
+              "available_acts": ["adopt", "restart_reading"],
+              "snapshot_file": { "sha": "abcdef0123456789", "bytes": 512 }
+            }
+          }
+        }
+      }|}
+  in
+  let decoded_diff = expect_ok "memory diff with canonical stop & snapshot_file"
+      (Wire_knowledge.decode_memory_diff diff_json) in
+  (match decoded_diff.body with
+  | Wire_knowledge.Keeper_diff
+      {
+        writer_status =
+          Some
+            (Wire_knowledge.Keeper_writer_active
+               { state; available_act_tokens; snapshot_file });
+        _;
+      } ->
+      Alcotest.(check bool) "state decodes canonical stop field" true
+        (state = Wire_knowledge.Writer_stopped "store_stopped_log_unreadable");
+      Alcotest.(check (list string)) "available_acts decoded"
+        [ "adopt"; "restart_reading" ] available_act_tokens;
+      Alcotest.(check bool) "snapshot_file present decoded" true
+        (snapshot_file = Some (Wire_knowledge.Snapshot_file_present { sha = "abcdef0123456789"; bytes = 512 }))
+  | _ -> Alcotest.fail "expected Keeper_diff with Keeper_writer_active");
+  (* 2. decode_memory_os_internals *)
+  let internals_json =
+    parse_json
+      {|{
+        "keeper": "alpha",
+        "compaction": {
+          "present": true, "epoch_count": 2, "archived_turns_count": 14,
+          "anchor_bytes": 2048, "latest_epoch_id": 2,
+          "covers_through_turn": "turn-14", "archived_epochs_through": 1,
+          "verified_facts_count": 5, "decisions_count": 3, "open_threads_count": 1
+        },
+        "canonical_turns": {
+          "present": true, "turn_count": 18, "latest_turn_id": "turn-18",
+          "latest_runtime_kind": "acp_cli", "latest_runtime_id": "vibe_acp.devstral-2",
+          "compaction_watermark_seq": 14, "compaction_watermark_epoch": 2,
+          "history_resets_count": 0
+        },
+        "memory_digest": {
+          "present": true, "revision": 7, "digest_sha256": "deadbeef12345678",
+          "bytes": 1024, "fact_count": 11, "derived_count": 2
+        },
+        "librarian_molt": {
+          "writer_kind": "writer", "writer_state": "idle",
+          "pending_molt": { "kind": "structural", "epoch_id": 2 },
+          "pending_molt_categories": ["fact", "lesson"],
+          "available_acts": ["resume"]
+        }
+      }|}
+  in
+  let mi = expect_ok "memory_os_internals"
+      (Wire_knowledge.decode_memory_os_internals internals_json) in
+  Alcotest.(check string) "internals keeper" "alpha" mi.keeper;
+  Alcotest.(check int) "compaction epochs" 2 mi.compaction.epoch_count;
+  Alcotest.(check (option string)) "canonical runtime_kind" (Some "acp_cli")
+    mi.canonical_turns.latest_runtime_kind;
+  Alcotest.(check (option int)) "digest revision" (Some 7) mi.memory_digest.revision;
+  Alcotest.(check (option string)) "pending molt kind" (Some "structural")
+    mi.librarian_molt.pending_molt_kind;
+  Alcotest.(check (list string)) "pending molt categories" [ "fact"; "lesson" ]
+    mi.librarian_molt.pending_molt_categories;
+  (* 3. Wire_runtime provider_id + declared_reasoning_effort + @effort label *)
+  let resolved_json =
+    parse_json
+      {|{
+        "generated_at_iso": "2026-11-22T12:00:00Z",
+        "source": "/api/v1/runtime/resolved",
+        "config_path": null,
+        "default_route": "primary",
+        "lanes": [{ "id": "primary", "declared": true, "runtime_ids": ["ollama_cloud.qwen3-high"] }],
+        "runtimes": [{
+          "id": "ollama_cloud.qwen3-high",
+          "provider_id": "ollama_cloud",
+          "provider": "Ollama Cloud",
+          "model": "qwen3-coder",
+          "declared_reasoning_effort": "high",
+          "transport": "http",
+          "is_default": true
+        }]
+      }|}
+  in
+  let res = expect_ok "runtime_resolved with effort & provider_id"
+      (Wire_runtime.decode_runtime_resolved resolved_json) in
+  let rt0 = List.hd res.runtimes in
+  Alcotest.(check string) "provider_id preserved" "ollama_cloud" rt0.provider_id;
+  Alcotest.(check (option string)) "declared_reasoning_effort decoded"
+    (Some "high") rt0.declared_reasoning_effort;
+  let slot_lbl = Wire_runtime.human_runtime_slot_label ~runtimes:res.runtimes rt0.id in
+  Alcotest.(check bool) "human_runtime_slot_label appends @high" true
+    (String.length slot_lbl >= 5
+     && String.sub slot_lbl (String.length slot_lbl - 5) 5 = "@high");
+  (* 4. Wire_config fixed capability & new TOML key labels *)
+  let mk_cfg_field k : Wire_config.schema_field =
+    {
+      table = "models.sonnet";
+      key = k;
+      full_key = "models.sonnet." ^ k;
+      label = k;
+      env = None;
+      description = None;
+      kind = Wire_config.Field_bool;
+      value = Wire_config.Val_null;
+      default_value = None;
+      provenance = Wire_config.Prov_default;
+      reload_scope = Wire_config.Hot_reload;
+      secret = false;
+      writable = true;
+    }
+  in
+  List.iter
+    (fun k ->
+      let fld = mk_cfg_field k in
+      let ko_lbl = Wire_config.field_leaf_label ~lang:Say.Lang_ko fld in
+      let en_lbl = Wire_config.field_leaf_label ~lang:Say.Lang_en fld in
+      Alcotest.(check bool) ("field_leaf_label has KO/EN dictionary hit for " ^ k) true
+        (not (String.equal ko_lbl en_lbl) && not (String.equal en_lbl k)))
+    [
+      "supports-image-input";
+      "supports-prompt-caching";
+      "tools-support";
+      "cache-retention";
+      "explicit-context-cache-ttl-s";
+      "store";
+      "efforts";
+    ];
+  (* 5. Runtime config raw meta, assignment CAS encoder, setup inventory & keyring_host receipt *)
+  let raw_json =
+    parse_json
+      {|{
+        "source_revision": "sha-rev-99",
+        "source_text": "[runtime]\ndefault = \"primary\"\n[runtime.assignments]\nalpha = \"ollama_cloud.qwen3-high\"\n\"beta-1\" = \"primary\"\n"
+      }|}
+  in
+  let meta = expect_ok "runtime_config_raw_meta"
+      (Wire_runtime.decode_runtime_config_raw_meta raw_json) in
+  Alcotest.(check string) "raw source_revision" "sha-rev-99" meta.source_revision;
+  Alcotest.(check (option string)) "assignment alpha"
+    (Some "ollama_cloud.qwen3-high") (List.assoc_opt "alpha" meta.assignments);
+  Alcotest.(check (option string)) "assignment beta-1"
+    (Some "primary") (List.assoc_opt "beta-1" meta.assignments);
+  let assign_body =
+    Wire_runtime.encode_runtime_assignment ~keeper_name:"alpha"
+      ~runtime_id:(Some "primary") ~source_revision:(Some "sha-rev-99")
+      ~previous_runtime_id:(Some "ollama_cloud.qwen3-high") ()
+  in
+  Alcotest.(check bool) "assignment CAS body carries expected_assignment_revision" true
+    (Yojson.Safe.Util.member "expected_assignment_revision" assign_body <> `Null);
+  let inv_json =
+    parse_json
+      {|{
+        "default_runtime_id": "primary",
+        "integrations": [{
+          "id": "vibe_acp",
+          "display_name": "Mistral Vibe",
+          "protocol": "acp",
+          "origin": "configured",
+          "setup_support": "existing_binding",
+          "enabled": true,
+          "credential_kind": "none",
+          "configured_runtime_ids": ["vibe_acp.devstral-2"]
+        }]
+      }|}
+  in
+  let inv = expect_ok "setup_inventory" (Wire_runtime.decode_setup_inventory inv_json) in
+  Alcotest.(check int) "1 setup integration" 1 (List.length inv.integrations);
+  Alcotest.(check string) "vibe_acp setup_support" "existing_binding"
+    (List.hd inv.integrations).setup_support;
+  let receipt_json =
+    parse_json
+      {|{
+        "login_id": "login-vibe-1",
+        "integration_id": "vibe_acp",
+        "account": "keyring_host",
+        "account_ref": null,
+        "authentication": "login_completed"
+      }|}
+  in
+  let recp = expect_ok "setup_login_receipt keyring_host SSE"
+      (Wire_runtime.decode_setup_login_receipt receipt_json) in
+  Alcotest.(check string) "inferred status complete" "complete" recp.status;
+  Alcotest.(check (option string)) "account keyring_host" (Some "keyring_host") recp.account;
+  Alcotest.(check (option string)) "account_ref None" None recp.account_ref
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -2499,6 +2710,8 @@ let () =
             test_efficiency_null_cache_hit_pct_preserved;
           Alcotest.test_case "P1-7 wire_fleet offline vs failing SSOT" `Quick
             test_p1_7_wire_fleet_offline_vs_failing_ssot;
+          Alcotest.test_case "Memory OS internals, effort labels, capability keys & setup codecs" `Quick
+            test_tui_memory_os_and_runtime_setup_codecs;
         ] );
       ( "net"
       , [

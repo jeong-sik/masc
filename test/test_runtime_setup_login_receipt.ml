@@ -27,7 +27,9 @@ let lost_complete () = fixture (fun root ->
   let read () = Receipt.load ~workspace:root ~actor:owner ~login_id:initial.login_id |> ok in
   let pending = read () in
   check bool "prepared account recoverable before spawn" true
-    (match pending.account with Receipt.Published _ -> true | Receipt.Unselected | Receipt.Linked -> false);
+    (match pending.account with
+     | Receipt.Published _ -> true
+     | Receipt.Unselected | Receipt.Linked | Receipt.Keyring_host -> false);
   check bool "reference is not authentication proof" true (pending.status = Receipt.Running);
   let completed = {initial with status = Receipt.Complete Runtime_setup_login_client.Authenticated} in
   Receipt.save ~workspace:root ~actor:owner completed |> ok;
@@ -110,8 +112,30 @@ let a_persons_linked_completion () = fixture (fun root ->
   check bool "linked before completion rejected" true
     (Receipt.load ~workspace:root ~actor:person ~login_id = Error Receipt.Unavailable))
 
+let keyring_host_completion () = fixture (fun root ->
+  let login_id = Auth.generate_token () in
+  let running = {Receipt.login_id; integration_id = "vibe_acp";
+    account = Receipt.Keyring_host; status = Receipt.Running} in
+  Receipt.save ~workspace:root ~actor:owner running |> ok;
+  let read_running = Receipt.load ~workspace:root ~actor:owner ~login_id |> ok in
+  check bool "keyring_host running round-trips" true (read_running = running);
+  let completed = {running with status = Receipt.Complete Runtime_setup_login_client.Login_completed} in
+  Receipt.save ~workspace:root ~actor:owner completed |> ok;
+  let read_done = Receipt.load ~workspace:root ~actor:owner ~login_id |> ok in
+  check bool "keyring_host complete round-trips" true (read_done = completed);
+  let json = Receipt.to_json read_done in
+  check bool "account is keyring_host" true (Yojson.Safe.Util.member "account" json = `String "keyring_host");
+  check bool "account_ref is null" true (Yojson.Safe.Util.member "account_ref" json = `Null);
+  check bool "authentication is login_completed" true
+    (Yojson.Safe.Util.member "authentication" json = `String "login_completed");
+  let bad_unselected = {completed with account = Receipt.Unselected} in
+  Receipt.save ~workspace:root ~actor:owner bad_unselected |> ok;
+  check bool "unselected completion still rejected" true
+    (Receipt.load ~workspace:root ~actor:owner ~login_id = Error Receipt.Unavailable))
+
 let () = run "official login recovery" ["receipts", [
   test_case "lost complete and cancellation" `Quick lost_complete;
   test_case "actor workspace and private storage" `Quick owner_scope_and_storage;
   test_case "corrupt completion rejected" `Quick corrupt_evidence;
-  test_case "a person's linked completion" `Quick a_persons_linked_completion]]
+  test_case "a person's linked completion" `Quick a_persons_linked_completion;
+  test_case "keyring host ACP completion" `Quick keyring_host_completion]]

@@ -309,12 +309,14 @@ let open_goal_confirmation_proof_modal (m : Model.t) ~(goal_id : string)
         label = Say.make ~ko:"목표 ID" ~en:"Goal ID";
         value = goal_id;
         required = true;
+        secret = false;
       };
       {
         key = "confirm_criterion_revision";
         label = Say.make ~ko:"기준 리비전 (criterion_revision)" ~en:"Criterion revision";
         value = criterion_revision;
         required = true;
+        secret = false;
       };
       {
         key = "confirm_request_id";
@@ -323,6 +325,7 @@ let open_goal_confirmation_proof_modal (m : Model.t) ~(goal_id : string)
             ~en:"Server-issued request_id (GET /goals/confirmation)";
         value = "";
         required = true;
+        secret = false;
       };
       {
         key = "confirm_verification_run_id";
@@ -331,6 +334,7 @@ let open_goal_confirmation_proof_modal (m : Model.t) ~(goal_id : string)
             ~en:"Server-issued verification_run_id";
         value = "";
         required = true;
+        secret = false;
       };
       {
         key = "confirm_operator_id";
@@ -339,6 +343,7 @@ let open_goal_confirmation_proof_modal (m : Model.t) ~(goal_id : string)
             ~en:"Operator ID (expected_operator_id)";
         value = "";
         required = true;
+        secret = false;
       };
     ]
 
@@ -532,6 +537,7 @@ let open_memory_act_modal (m : Model.t) ~(keeper_default : string) =
         label = Say.make ~ko:"대상 키퍼" ~en:"Target keeper";
         value = keeper_default;
         required = true;
+        secret = false;
       };
       {
         key = "memory_act";
@@ -540,6 +546,7 @@ let open_memory_act_modal (m : Model.t) ~(keeper_default : string) =
             ~en:"Recovery act (resume|adopt|restart_reading|skip_item|skip_line)";
         value = "resume";
         required = true;
+        secret = false;
       };
       {
         key = "memory_arg";
@@ -548,6 +555,7 @@ let open_memory_act_modal (m : Model.t) ~(keeper_default : string) =
             ~en:"Argument (observed / turn_log:line / offset)";
         value = "";
         required = false;
+        secret = false;
       };
     ]
 
@@ -568,30 +576,35 @@ let open_wiki_edit_modal (m : Model.t) ~(slug : string) =
         label = Say.make ~ko:"위키 슬러그" ~en:"Wiki slug";
         value = slug;
         required = true;
+        secret = false;
       };
       {
         key = "wiki_title";
         label = Say.make ~ko:"제목" ~en:"Title";
         value = title;
         required = true;
+        secret = false;
       };
       {
         key = "wiki_summary";
         label = Say.make ~ko:"요약" ~en:"Summary";
         value = summary;
         required = false;
+        secret = false;
       };
       {
         key = "wiki_body";
         label = Say.make ~ko:"본문 (Markdown)" ~en:"Body (Markdown)";
         value = body;
         required = true;
+        secret = false;
       };
       {
         key = "wiki_note";
         label = Say.make ~ko:"변경 메모" ~en:"Edit note";
         value = "";
         required = false;
+        secret = false;
       };
     ]
 
@@ -616,12 +629,14 @@ let open_fusion_launch_modal (m : Model.t) =
         label = Say.make ~ko:"실행 키퍼" ~en:"Keeper";
         value = keeper_default;
         required = true;
+        secret = false;
       };
       {
         key = "fusion_prompt";
         label = Say.make ~ko:"Fusion 프롬프트" ~en:"Fusion prompt";
         value = draft.prompt;
         required = true;
+        secret = false;
       };
       {
         key = "fusion_topology";
@@ -630,12 +645,83 @@ let open_fusion_launch_modal (m : Model.t) =
             ~en:"Topology (optional: simple|refine|conditional|judge_of_judges)";
         value = topo_default;
         required = false;
+        secret = false;
       };
       {
         key = "fusion_preset";
         label = Say.make ~ko:"프리셋 (선택)" ~en:"Preset (optional)";
         value = preset_default;
         required = false;
+        secret = false;
+      };
+    ]
+
+let open_runtime_assign_modal (m : Model.t) ?(keeper_default = "")
+    ?(runtime_default = "") () =
+  open_custom_inline_modal m
+    [
+      {
+        key = "assign_keeper";
+        label =
+          Say.make ~ko:"대상 키퍼 (비우거나 default 입력 시 기본 경로 변경)"
+            ~en:"Target keeper (blank or 'default' sets default route)";
+        value = keeper_default;
+        required = false;
+        secret = false;
+      };
+      {
+        key = "assign_runtime_id";
+        label =
+          Say.make ~ko:"런타임 또는 레인 ID (키퍼 배정 해제 시 비움)"
+            ~en:"Runtime or lane ID (leave blank to clear keeper assignment)";
+        value = runtime_default;
+        required = false;
+        secret = false;
+      };
+    ]
+
+let open_setup_account_key_modal (m : Model.t) ?(integration_default = "") () =
+  open_custom_inline_modal m
+    [
+      {
+        key = "setup_key_integration";
+        label =
+          Say.make ~ko:"프로바이더/통합 ID (예: anthropic, openai, gemini)"
+            ~en:"Integration ID (e.g. anthropic, openai, gemini)";
+        value = integration_default;
+        required = true;
+        secret = false;
+      };
+      {
+        key = "setup_key_secret";
+        label = Say.make ~ko:"API 키" ~en:"API key";
+        value = "";
+        required = true;
+        secret = true;
+      };
+    ]
+
+let open_setup_login_modal (m : Model.t) ?(integration_default = "") () =
+  open_custom_inline_modal m
+    [
+      {
+        key = "setup_login_integration";
+        label =
+          Say.make
+            ~ko:"로그인 통합 ID (예: claude-code, codex, vibe_acp, kimi_acp)"
+            ~en:"Login integration ID (e.g. claude-code, codex, vibe_acp, kimi_acp)";
+        value = integration_default;
+        required = true;
+        secret = false;
+      };
+      {
+        key = "setup_login_account_ref";
+        label =
+          Say.make ~ko:"기존 계정 참조 (선택, 새 로그인 시 비움)"
+            ~en:"Existing account_ref (optional, blank for new login)";
+        value = "";
+        required = false;
+        secret = false;
       };
     ]
 
@@ -831,6 +917,13 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
             ] )
       | Nav.Keeper_memory, Some "A" ->
           open_memory_act_modal m ~keeper_default:name
+      | Nav.Keeper_config, Some "a" ->
+          let runtime_default =
+            match Observed.to_option m.runtime.runtime_config_raw with
+            | Some meta -> Option.value (List.assoc_opt name meta.assignments) ~default:""
+            | None -> ""
+          in
+          open_runtime_assign_modal m ~keeper_default:name ~runtime_default ()
       | Nav.Keeper_chat, Some "c" ->
           let drafts =
             m.drafts |> Drafts.set_active_keeper name |> Drafts.set_focus true
@@ -888,6 +981,44 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                   runtime = Runtime_store.toggle_unreported_accounts m.runtime;
                 }
               , [] )
+          | Some "a" ->
+              let keeper_default =
+                Option.value (Update_nav.resolve_target_keeper m) ~default:""
+              in
+              let runtime_default =
+                match Runtime_store.selected_lane m.runtime with
+                | Some lane -> lane.id
+                | None -> (
+                    match Observed.to_option m.runtime.runtime_resolved with
+                    | Some snap -> Option.value snap.default_route ~default:""
+                    | None -> "")
+              in
+              open_runtime_assign_modal m ~keeper_default ~runtime_default ()
+          | Some "K" ->
+              let integration_default =
+                match Observed.to_option m.runtime.setup_inventory with
+                | Some { integrations = first :: _; _ } -> first.id
+                | Some { integrations = []; _ } | None -> ""
+              in
+              open_setup_account_key_modal m ~integration_default ()
+          | Some "l" -> open_setup_login_modal m ()
+          | Some "L" -> (
+              match m.runtime.setup_login_receipt with
+              | Some r ->
+                  ( Model.with_toast ~now ~level:Model.Toast_info
+                      (Say.make
+                         ~ko:("로그인 영수증 상태 조회: " ^ r.login_id)
+                         ~en:("Polling login status: " ^ r.login_id))
+                      m
+                  , [
+                      Cmd.Http_get
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Get_setup_login_status { login_id = r.login_id };
+                        };
+                    ] )
+              | None -> open_setup_login_modal m ())
           | Some "f" -> open_fusion_launch_modal m
           | _ -> (m, []))
       | Nav.Infra -> (

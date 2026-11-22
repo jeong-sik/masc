@@ -77,6 +77,17 @@ let fetches_for_keeper_tab ~force ~name ~tab (m : Model.t) =
         | Observed.Failed _ ->
             needs_fetch ~force m.knowledge.memory_diff
       in
+      let internals_needed =
+        match m.knowledge.memory_os_internals with
+        | Observed.Value { data; stale = false; _ } ->
+            force || not (String.equal data.keeper name)
+        | Observed.Loading _
+        | Observed.Value { stale = true; _ }
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ->
+            needs_fetch ~force m.knowledge.memory_os_internals
+      in
       []
       |> add_if diff_needed
            (Cmd.Get_memory_diff
@@ -84,6 +95,8 @@ let fetches_for_keeper_tab ~force ~name ~tab (m : Model.t) =
                 keeper = Some name;
                 window = m.knowledge.memory_diff_window;
               })
+      |> add_if internals_needed
+           (Cmd.Get_keeper_memory_os_internals { keeper = name })
   | Nav.Keeper_work_candle ->
       []
       |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
@@ -262,7 +275,26 @@ let fetches_for_workspace ~force (m : Model.t) =
           |> add_if (needs_fetch ~force m.knowledge.wiki_lint) Cmd.Get_wiki_lint
           |> add_if (needs_fetch ~force m.knowledge.artifacts) Cmd.Get_artifacts
       | Nav.Knowledge_memory ->
-          []
+          let internals_reqs =
+            match m.knowledge.memory_diff_keeper with
+            | None -> []
+            | Some keeper ->
+                let needed =
+                  match m.knowledge.memory_os_internals with
+                  | Observed.Value { data; stale = false; _ } ->
+                      force || not (String.equal data.keeper keeper)
+                  | Observed.Loading _
+                  | Observed.Value { stale = true; _ }
+                  | Observed.Absent
+                  | Observed.Unreported
+                  | Observed.Failed _ ->
+                      needs_fetch ~force m.knowledge.memory_os_internals
+                in
+                if needed then
+                  [ Cmd.Get_keeper_memory_os_internals { keeper } ]
+                else []
+          in
+          ([]
           |> add_if
                (needs_fetch ~force m.knowledge.world_memory)
                Cmd.Get_world_memory
@@ -273,6 +305,7 @@ let fetches_for_workspace ~force (m : Model.t) =
                     keeper = m.knowledge.memory_diff_keeper;
                     window = m.knowledge.memory_diff_window;
                   }))
+          @ internals_reqs)
   | Nav.Keepers ->
       let embedded_dive_reqs =
         match Fleet_store.selected_keeper_summary m.fleet with
@@ -293,6 +326,12 @@ let fetches_for_workspace ~force (m : Model.t) =
           |> add_if
                (needs_fetch ~force m.runtime.runtime_resolved)
                Cmd.Get_runtime_resolved
+          |> add_if
+               (needs_fetch ~force m.runtime.runtime_config_raw)
+               Cmd.Get_runtime_config_raw
+          |> add_if
+               (needs_fetch ~force m.runtime.setup_inventory)
+               Cmd.Get_setup_inventory
           |> add_if
                (needs_fetch ~force m.runtime.usage_history)
                (Cmd.Get_provider_usage { days = 7 })
@@ -324,6 +363,12 @@ let fetches_for_workspace ~force (m : Model.t) =
           |> add_if
                (needs_fetch ~force m.runtime.runtime_resolved)
                Cmd.Get_runtime_resolved
+          |> add_if
+               (needs_fetch ~force m.runtime.runtime_config_raw)
+               Cmd.Get_runtime_config_raw
+          |> add_if
+               (needs_fetch ~force m.runtime.setup_inventory)
+               Cmd.Get_setup_inventory
           |> add_if
                (needs_fetch ~force m.runtime.runtime_probe)
                (Cmd.Get_runtime_probe { force = false })

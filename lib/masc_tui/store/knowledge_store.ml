@@ -44,6 +44,7 @@ type t = {
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
   world_memory : Wire_knowledge.world_memory Observed.t;
   memory_diff : Wire_knowledge.memory_diff Observed.t;
+  memory_os_internals : Wire_knowledge.memory_os_internals Observed.t;
   memory_diff_window : memory_diff_window;
   memory_diff_keeper : string option;
   last_memory_act_answer : (string * Wire_knowledge.memory_act_answer) option;
@@ -72,6 +73,7 @@ let empty =
     artifacts = Observed.unreported;
     world_memory = Observed.unreported;
     memory_diff = Observed.unreported;
+    memory_os_internals = Observed.unreported;
     memory_diff_window = Window_24h;
     memory_diff_keeper = None;
     last_memory_act_answer = None;
@@ -437,7 +439,12 @@ let cycle_memory_diff_window t =
   set_memory_diff_window next t
 
 let set_memory_diff_keeper memory_diff_keeper t =
-  { t with memory_diff_keeper; memory_diff = Observed.mark_stale t.memory_diff }
+  {
+    t with
+    memory_diff_keeper;
+    memory_diff = Observed.mark_stale t.memory_diff;
+    memory_os_internals = Observed.mark_stale t.memory_os_internals;
+  }
 
 let apply_board ~observed_at feed t =
   let prev_id =
@@ -516,6 +523,9 @@ let apply_world_memory ~observed_at mem t =
 
 let apply_memory_diff ~observed_at diff t =
   { t with memory_diff = Observed.value ~observed_at diff }
+
+let apply_memory_os_internals ~observed_at internals t =
+  { t with memory_os_internals = Observed.value ~observed_at internals }
 
 let record_memory_act_answer ~keeper ans t =
   { t with last_memory_act_answer = Some (keeper, ans) }
@@ -648,4 +658,5 @@ let mark_stale_all t =
     artifacts = Observed.mark_stale t.artifacts;
     world_memory = Observed.mark_stale t.world_memory;
     memory_diff = Observed.mark_stale t.memory_diff;
+    memory_os_internals = Observed.mark_stale t.memory_os_internals;
   }

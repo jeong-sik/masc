@@ -638,6 +638,7 @@ let sample_memory_diff : Wire_knowledge.memory_diff =
                  {
                    state = Wire_knowledge.Writer_open;
                    available_act_tokens = [ "resume"; "adopt" ];
+                   snapshot_file = None;
                  });
         };
   }

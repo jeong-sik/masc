@@ -2873,6 +2873,9 @@ type inline_form_kind =
   | Form_memory_act
   | Form_wiki_edit
   | Form_fusion_launch
+  | Form_runtime_assign
+  | Form_setup_account_key
+  | Form_setup_login_start
 
 let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
   match modal.kind with
@@ -2883,6 +2886,9 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
       | { key = "memory_keeper"; _ } :: _ -> Form_memory_act
       | { key = "wiki_slug"; _ } :: _ -> Form_wiki_edit
       | { key = "fusion_keeper"; _ } :: _ -> Form_fusion_launch
+      | { key = "assign_keeper"; _ } :: _ -> Form_runtime_assign
+      | { key = "setup_key_integration"; _ } :: _ -> Form_setup_account_key
+      | { key = "setup_login_integration"; _ } :: _ -> Form_setup_login_start
       | _ -> Form_standard Nav.Board_new_post)
   | ( Nav.Btw_query
     | Nav.Gate_reject _
@@ -2910,6 +2916,16 @@ let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
       Say.resolve lang (Say.make ~ko:"위키 문서 편집" ~en:"Edit Wiki Page")
   | Form_fusion_launch ->
       Say.resolve lang (Say.make ~ko:"퓨전 패널 실행" ~en:"Launch Fusion Panel")
+  | Form_runtime_assign ->
+      Say.resolve lang
+        (Say.make ~ko:"키퍼 런타임 배정 / 기본 경로"
+           ~en:"Assign Keeper Runtime / Default Route")
+  | Form_setup_account_key ->
+      Say.resolve lang
+        (Say.make ~ko:"프로바이더 API 키 등록" ~en:"Register Provider API Key")
+  | Form_setup_login_start ->
+      Say.resolve lang
+        (Say.make ~ko:"공식 CLI 계정 로그인" ~en:"Start Official CLI Login")
   | Form_standard Nav.Btw_query ->
       Say.resolve lang (Say.make ~ko:"임시 질문 (/btw)" ~en:"Side-Query (/btw)")
   | Form_standard (Nav.Gate_reject id) ->
@@ -2938,9 +2954,11 @@ let form_of_inline_modal (modal : Model.inline_modal_state) =
     List.map
       (fun (f : Model.modal_form_field) ->
         let validators = if f.required then [ Form.Required ] else [] in
+        let value =
+          if f.secret then Form.secret_val f.value else Form.Text_val f.value
+        in
         Form.make_field ~key:f.key ~label:f.label ~validators
-          ~provenance:Form.Prov_tui_pref ~reload_scope:Form.Hot_reload
-          (Form.Text_val f.value))
+          ~provenance:Form.Prov_tui_pref ~reload_scope:Form.Hot_reload value)
       modal.fields
   in
   let st = Form.create fields in

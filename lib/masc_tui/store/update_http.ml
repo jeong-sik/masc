@@ -495,6 +495,28 @@ let apply_http_reply ~now (m : Model.t) reply =
   | Msg.Reply_memory_diff (Error err) ->
       err_reply ~source:Health.Source_client_http ~ko:"기억 변화 조회"
         ~en:"Memory diff fetch" err
+  | Msg.Reply_keeper_memory_os_internals (Ok internals) ->
+      ( {
+          m with
+          knowledge =
+            Knowledge_store.apply_memory_os_internals ~observed_at:now internals
+              m.knowledge;
+        }
+      , [] )
+  | Msg.Reply_keeper_memory_os_internals (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          let knowledge =
+            {
+              m.knowledge with
+              memory_os_internals = Observed.absent;
+            }
+          in
+          ({ m with knowledge }, [])
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply ~source:Health.Source_client_http ~ko:"메모리 OS 내부 상태 조회"
+            ~en:"Memory OS internals fetch" err)
   | Msg.Reply_memory_act { keeper; result = Ok ans } ->
       let knowledge =
         Knowledge_store.record_memory_act_answer ~keeper ans m.knowledge
@@ -611,6 +633,177 @@ let apply_http_reply ~now (m : Model.t) reply =
   | Msg.Reply_runtime_resolved (Error err) ->
       err_reply ~source:(Health.Source_runtime "resolved") ~ko:"페일오버 레인 조회"
         ~en:"Runtime lanes fetch" err
+  | Msg.Reply_runtime_config_raw (Ok meta) ->
+      ( {
+          m with
+          runtime =
+            Runtime_store.apply_runtime_config_raw ~observed_at:now meta
+              m.runtime;
+        }
+      , [] )
+  | Msg.Reply_runtime_config_raw (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403 | 404; _ } ->
+          let runtime =
+            {
+              m.runtime with
+              runtime_config_raw =
+                Observed.failed ~reason:(Msg.http_error_detail err)
+                  ~retryable:false ~at:now;
+            }
+          in
+          ({ m with runtime }, [])
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply ~source:(Health.Source_runtime "config_raw")
+            ~ko:"런타임 설정 원본 조회" ~en:"Runtime raw config fetch" err)
+  | Msg.Reply_setup_inventory (Ok inv) ->
+      ( {
+          m with
+          runtime =
+            Runtime_store.apply_setup_inventory ~observed_at:now inv m.runtime;
+        }
+      , [] )
+  | Msg.Reply_setup_inventory (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403 | 404; _ } ->
+          let runtime =
+            {
+              m.runtime with
+              setup_inventory =
+                Observed.failed ~reason:(Msg.http_error_detail err)
+                  ~retryable:false ~at:now;
+            }
+          in
+          ({ m with runtime }, [])
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply ~source:(Health.Source_runtime "setup_inventory")
+            ~ko:"셋업 인벤토리 조회" ~en:"Setup inventory fetch" err)
+  | Msg.Reply_setup_login_receipt (Ok receipt) ->
+      let runtime =
+        Runtime_store.apply_setup_login_receipt receipt m.runtime
+      in
+      let status_lc = String.lowercase_ascii receipt.status in
+      let is_done =
+        String.equal status_lc "complete" || String.equal status_lc "completed"
+      in
+      let level =
+        if is_done then Model.Toast_success
+        else if String.equal status_lc "failed" || String.equal status_lc "cancelled" then
+          Model.Toast_error
+        else Model.Toast_info
+      in
+      let detail =
+        match receipt.account with
+        | Some acc ->
+            Printf.sprintf "%s [%s/%s] (%s)" receipt.integration_id
+              receipt.status acc receipt.login_id
+        | None ->
+            Printf.sprintf "%s [%s] (%s)" receipt.integration_id receipt.status
+              receipt.login_id
+      in
+      let next =
+        { m with runtime }
+        |> Model.with_toast ~now ~level
+             (Say.make ~ko:("로그인 상태: " ^ detail) ~en:("Login: " ^ detail))
+      in
+      let refresh_cmds =
+        if is_done then
+          [
+            Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_setup_inventory };
+            Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_resolved };
+          ]
+        else []
+      in
+      (next, refresh_cmds)
+  | Msg.Reply_setup_login_receipt (Error err) ->
+      let next, cmds =
+        record_http_incident ~now ~source:(Health.Source_runtime "setup_login")
+          ~context:(Say.make ~ko:"계정 로그인" ~en:"Account login")
+          err m
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_runtime_assignment { keeper_name; runtime_id; result = Ok () } ->
+      let target_str = Option.value runtime_id ~default:"(default)" in
+      let next =
+        Model.with_toast ~now ~level:Model.Toast_success
+          (Say.make
+             ~ko:(Printf.sprintf "키퍼 런타임 배정 완료: %s -> %s" keeper_name target_str)
+             ~en:(Printf.sprintf "Assigned runtime: %s -> %s" keeper_name target_str))
+          m
+      in
+      ( next
+      , [
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_resolved };
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_config_raw };
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_keepers_roster };
+        ] )
+  | Msg.Reply_runtime_assignment { keeper_name; result = Error err; _ } ->
+      let next, cmds =
+        record_http_incident ~now ~source:(Health.Source_runtime "assignment")
+          ~context:
+            (Say.make
+               ~ko:("키퍼 런타임 배정: " ^ keeper_name)
+               ~en:("Keeper runtime assignment: " ^ keeper_name))
+          err m
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_runtime_routing { runtime_id; result = Ok () } ->
+      let next =
+        Model.with_toast ~now ~level:Model.Toast_success
+          (Say.make
+             ~ko:("기본 런타임 경로 변경 완료: " ^ runtime_id)
+             ~en:("Default route updated: " ^ runtime_id))
+          m
+      in
+      ( next
+      , [
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_resolved };
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_config_raw };
+        ] )
+  | Msg.Reply_runtime_routing { runtime_id; result = Error err } ->
+      let next, cmds =
+        record_http_incident ~now ~source:(Health.Source_runtime "routing")
+          ~context:
+            (Say.make
+               ~ko:("기본 런타임 변경: " ^ runtime_id)
+               ~en:("Default route update: " ^ runtime_id))
+          err m
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_setup_account_key { integration_id; result = Ok () } ->
+      let next =
+        Model.with_toast ~now ~level:Model.Toast_success
+          (Say.make
+             ~ko:("API 키 등록 완료: " ^ integration_id)
+             ~en:("API key registered: " ^ integration_id))
+          m
+      in
+      ( next
+      , [
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_setup_inventory };
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_resolved };
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_config_raw };
+        ] )
+  | Msg.Reply_setup_account_key { integration_id; result = Error err } ->
+      let next, cmds =
+        record_http_incident ~now ~source:(Health.Source_runtime "setup_key")
+          ~context:
+            (Say.make
+               ~ko:("API 키 등록: " ^ integration_id)
+               ~en:("Register API key: " ^ integration_id))
+          err m
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
   | Msg.Reply_runtime_probe (Ok probe) ->
       ( {
           m with

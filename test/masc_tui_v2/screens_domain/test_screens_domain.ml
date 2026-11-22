@@ -2849,6 +2849,7 @@ let test_p0_1_p0_2_runtime_spend_provenance_mtd_and_dual_usd () =
   | Runtime_store.Spend_window_24h { window_minutes = 1440 } -> ()
   | Runtime_store.Spend_window_24h _
   | Runtime_store.Spend_window_mtd _
+  | Runtime_store.Spend_window_month_complete _
   | Runtime_store.Spend_window_none ->
       Alcotest.fail "expected Spend_window_24h(1440)");
   (* 2. Add models/metrics ($82.57 24h provider total, peak 4200 calls & $6.12/h)
@@ -2922,6 +2923,7 @@ let test_p0_1_p0_2_runtime_spend_provenance_mtd_and_dual_usd () =
   let eff_mtd : Wire_runtime.efficiency_month =
     {
       month = "2026-11";
+      window_kind = Some Wire_runtime.Efficiency_month_mtd;
       generated_at_unix = now_unix;
       days_covered = 22;
       keepers = eff_rows;
@@ -2956,6 +2958,7 @@ let test_p0_1_p0_2_runtime_spend_provenance_mtd_and_dual_usd () =
   (match Runtime_store.keeper_spend_table_window rt_full with
   | Runtime_store.Spend_window_mtd { month = "2026-11"; days_covered = 22 } -> ()
   | Runtime_store.Spend_window_mtd _
+  | Runtime_store.Spend_window_month_complete _
   | Runtime_store.Spend_window_24h _
   | Runtime_store.Spend_window_none ->
       Alcotest.fail "expected Spend_window_mtd(2026-11, 22)");
@@ -2980,7 +2983,37 @@ let test_p0_1_p0_2_runtime_spend_provenance_mtd_and_dual_usd () =
   (* Deduplicated Chart B title vs row+1 legend: border must not repeat '호출'/'지출' *)
   Alcotest.(check bool)
     "Chart B outer title avoids repeating legend '▲ 호출 · ▼ 지출'" false
-    (contains_sub ~needle:"24h 모델 호출 · 지출" ~haystack:txt)
+    (contains_sub ~needle:"24h 모델 호출 · 지출" ~haystack:txt);
+  (* Completed past month emits Spend_window_month_complete & '월간 마감' badge *)
+  let eff_complete =
+    {
+      eff_mtd with
+      month = "2026-10";
+      days_covered = 31;
+      window_kind = Some Wire_runtime.Efficiency_month_complete;
+    }
+  in
+  let rt_complete =
+    Runtime_store.apply_efficiency ~observed_at:now_mono eff_complete rt_full
+  in
+  (match Runtime_store.keeper_spend_table_window rt_complete with
+  | Runtime_store.Spend_window_month_complete { month = "2026-10"; days_covered = 31 } -> ()
+  | Runtime_store.Spend_window_month_complete _
+  | Runtime_store.Spend_window_mtd _
+  | Runtime_store.Spend_window_24h _
+  | Runtime_store.Spend_window_none ->
+      Alcotest.fail "expected Spend_window_month_complete(2026-10, 31)");
+  let g_complete =
+    render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+        Screen_runtime.render
+          ~model:{ m0 with freshness; fleet; runtime = rt_complete }
+          ~cache ~rect gr)
+  in
+  let txt_complete = grid_all_text g_complete in
+  Alcotest.(check bool) "completed month badged 월간 마감" true
+    (contains_sub ~needle:"월간 마감" ~haystack:txt_complete);
+  Alcotest.(check bool) "completed month NOT mislabeled as MTD" false
+    (contains_sub ~needle:"월간 누계 (MTD)" ~haystack:txt_complete)
 
 let test_p1_9_p1_10_quotas_max_window_buckets_and_human_cooldowns () =
   (* Saturated Subscription_zero account: 5h=0%, 7d=100% (max across ALL windows!) *)

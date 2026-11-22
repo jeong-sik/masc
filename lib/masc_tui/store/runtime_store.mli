@@ -163,6 +163,7 @@ type spend_24h_breakdown = {
 
 type spend_table_window =
   | Spend_window_mtd of { month : string; days_covered : int }
+  | Spend_window_month_complete of { month : string; days_covered : int }
   | Spend_window_24h of { window_minutes : int }
   | Spend_window_none
 

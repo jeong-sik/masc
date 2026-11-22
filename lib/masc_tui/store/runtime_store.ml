@@ -392,6 +392,7 @@ type spend_24h_breakdown = {
 
 type spend_table_window =
   | Spend_window_mtd of { month : string; days_covered : int }
+  | Spend_window_month_complete of { month : string; days_covered : int }
   | Spend_window_24h of { window_minutes : int }
   | Spend_window_none
 
@@ -451,8 +452,14 @@ let spend_24h_breakdown t =
 
 let keeper_spend_table_window t =
   match Observed.to_option t.efficiency with
-  | Some eff when eff.keepers <> [] ->
-      Spend_window_mtd { month = eff.month; days_covered = eff.days_covered }
+  | Some eff when eff.keepers <> [] -> (
+      match eff.window_kind with
+      | Some Wire_runtime.Efficiency_month_complete ->
+          Spend_window_month_complete
+            { month = eff.month; days_covered = eff.days_covered }
+      | Some Wire_runtime.Efficiency_month_mtd | None ->
+          Spend_window_mtd
+            { month = eff.month; days_covered = eff.days_covered })
   | Some _ | None -> (
       match Observed.to_option t.keeper_costs with
       | Some kc when kc.rows <> [] ->

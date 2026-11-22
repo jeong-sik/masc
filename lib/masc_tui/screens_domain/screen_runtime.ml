@@ -1911,6 +1911,22 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
           else (act, ret + 1))
         (0, 0) spend_rows
   in
+  let monthly_subtitle ~month ~days_covered =
+    if active_roster_loaded && retired_in_tbl > 0 then
+      Say.resolve lang
+        (Say.make
+           ~ko:
+             (Printf.sprintf "%s (%dd) · %d 활성 · %d 이력" month
+                days_covered active_in_tbl retired_in_tbl)
+           ~en:
+             (Printf.sprintf "%s (%dd) · %d active · %d retired" month
+                days_covered active_in_tbl retired_in_tbl))
+    else
+      Say.resolve lang
+        (Say.make
+           ~ko:(Printf.sprintf "%s (%dd) · 5개 자율 조직" month days_covered)
+           ~en:(Printf.sprintf "%s (%dd) · 5 Companies" month days_covered))
+  in
   let tbl_badge, tbl_subtitle =
     match Runtime_store.keeper_spend_table_window rt with
     | Runtime_store.Spend_window_mtd { month; days_covered } ->
@@ -1919,23 +1935,14 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
             (Say.resolve lang
                (Say.make ~ko:"월간 누계 (MTD)" ~en:"Month-to-Date (MTD)"))
         in
-        let sub =
-          if active_roster_loaded && retired_in_tbl > 0 then
-            Say.resolve lang
-              (Say.make
-                 ~ko:
-                   (Printf.sprintf "%s (%dd) · %d 활성 · %d 이력" month
-                      days_covered active_in_tbl retired_in_tbl)
-                 ~en:
-                   (Printf.sprintf "%s (%dd) · %d active · %d retired" month
-                      days_covered active_in_tbl retired_in_tbl))
-          else
-            Say.resolve lang
-              (Say.make
-                 ~ko:(Printf.sprintf "%s (%dd) · 5개 자율 조직" month days_covered)
-                 ~en:(Printf.sprintf "%s (%dd) · 5 Companies" month days_covered))
+        (Some badge, monthly_subtitle ~month ~days_covered)
+    | Runtime_store.Spend_window_month_complete { month; days_covered } ->
+        let badge =
+          H.make_badge ~tone:Theme.Status_ai
+            (Say.resolve lang
+               (Say.make ~ko:"월간 마감" ~en:"Month Complete"))
         in
-        (Some badge, sub)
+        (Some badge, monthly_subtitle ~month ~days_covered)
     | Runtime_store.Spend_window_24h { window_minutes } ->
         let hrs = Int.max 1 (window_minutes / 60) in
         let badge =

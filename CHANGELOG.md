@@ -1,5 +1,93 @@
 ## [Unreleased]
 
+## [0.79.0] - 2026-11-22
+
+### 요약
+
+- 이 릴리스는 `v0.78.0`(태그 `0b961d5`) 뒤 main `0bea19fd639` 까지 들어간 **20 PR** 을 `0.79.0`(minor)으로 내보냅니다. 그중 여덟은 문서·시험·주석·changelog 전용(`### Exempt` 조각 일곱 `#54335`·`#54341`·`#54342`·`#54373`·`#54393`·`#54396`·`#54397`, 조각 없는 시험 전용 `#54382`)이라 절에 넣지 않았고, 아래 절이 나머지 열세 PR 을 담습니다(Added 2·Changed 2·Fixed 10·Removed 10·Upgrade notes 4 불릿).
+- minor 인 이유는 새 기능 두 건입니다: 공급자 프롬프트 캐시 와이어 보강(`#54386`)과 OpenAI Responses 파라미터·Gemini `explicit-context-cache-ttl-s`·Anthropic rate-limit 헤더·Ollama `think` effort(`#54395`). 나머지는 Librarian·curator 옛 add-on 을 지우는 리팩터 네 건(`#54326`·`#54328`·`#54331`·`#54340`), agent_core 정화와 typed `runtime.toml` 두 건(`#54384`·`#54385`), 수리 여섯 건(`#54381`·`#54383`·`#54388`·`#54394`·`#54398`과 `#54395` 의 SSOT 정합)입니다.
+- Librarian 컷은 스택의 한 층씩 들어와 있습니다. Librarian 컷 네 층(`#54326`·`#54328`·`#54331`·`#54340`)의 Upgrade notes 가 말하는 설치 단계는 아직 main 에 없습니다. 이 절은 불릿을 조각에서 그대로 옮겼고, 조각 파일은 발행 절차(`bump-version.sh` 의 `assemble --into 0.79.0`)가 지웁니다.
+
+### Added
+
+- Completed provider prompt-cache wire support: folded and exposed Gemini `toolUsePromptTokenCount`, added opt-in Gemini explicit `cachedContents` resource lifecycle with automatic 404/TTL fallback to implicit caching, parsed and preserved Ollama/llama.cpp KV-cache telemetry (`prompt_eval_cached_count`, `cache_n`, `timings.cache_n`, `prompt_tokens_details.cached_tokens`) across sync and streaming paths, and enabled declarative session routing affinity (`X-Session-Id` / `prompt_cache_key`) for GLM and Kimi in `models.toml` (#54386).
+- Support OpenAI Responses `prompt_cache_retention` (`"in_memory"` | `"24h"` via `cache-retention`), `store`, and `truncation` (`"auto"` | `"disabled"`), Gemini `explicit-context-cache-ttl-s` wiring, Anthropic `anthropic-ratelimit-*` response header capture, and Ollama `/api/chat` `think` effort strings (`"low"` | `"medium"` | `"high"`) (#54395).
+
+### Changed
+
+- Purged dead `agent_core` facades (`eval_stats`, `runtime_store`, `skill_registry`, `zai_catalog`) and tiny runtime forwarding wrappers (`local_runtime_pool`, `runtime_{transport,build_version,candidate,host_lifecycle,path_rest_signal}`), consolidated tool input validation onto `Agent_core.Tool_input_validation`, evicted MASC domain hooks (`schema_observation`, `MASC_WIRE_PARSE_DUMP`) out of `packages/agent_core`, and removed hardcoded `api.deepseek.com` defaults (#54384).
+- Replaced the TOML-to-fake-env-string `Config_boot_overrides` round-trip with direct typed `Runtime_toml_namespace` decoding and immutable typed namespace records, added declarative `effort`/`efforts` parameterization in `config/runtime.toml` (collapsing 200+ duplicate model/binding triples), and tightened `Env_config_core` parsing to fail closed on malformed or out-of-range environment values (#54385).
+
+### Fixed
+
+- `keeper_composition_result` no longer declares a composable `Json_output` its retired dispatch handler can never emit, so `composable_output_contract` stops demanding a producer probe for a tool that refuses every call (#54381).
+- Ephemeral per-request `Outside_context` carriers introduced by #54350 are now pinned via `Runtime_model_input_tail_window.is_outside_context` inside `is_pinned` instead of being numbered as durable conversation atoms, stopping `Keeper_model_input_ledger.history_holds` from dropping the working ledger on every round while keeping `is_extra_context` limited to `System_context` so post-tool rounds carrying `Active_goals` on `Outside_context` still measure provider token samples and do not reopen a turn mid-flight. `Keeper_agent_prompt_metrics.remove_prompt_context` now validates and strips `System_context` and `Outside_context` independently (`~outside_context_present` paired with `Keeper_context_assembly.split_request_context_presence`), fixing `prompt_context_presence_mismatch` attribution losses on `Outside_context`-only post-tool rounds, eliminating double-counting on dual-carrier rounds, and catching missing-one-of-two or unexpected-second-carrier anomalies. `Keeper_run_tools_hooks` now scopes `split_outside_context` to `Masc_agent_core` so `Official_client` lanes retain outside-authored context blocks, and `Keeper_official_client_host.prepare_turn` fails closed on `extra_outside_context` (#54383).
+- `exact_lane_run_registry` payload sweep no longer stops at one foreign directory entry: `EISDIR` entries are kept and counted through `failed_root_entries` while the remaining regular payload leaves of the same run are still unlinked (#54388).
+- Hardened Stack D (`#54384`–`#54386`) across `agent_core`, `runtime`, and `config`: eliminated `Effect.Unhandled` double execution in `Complete_stream_diagnostic.with_refused_frame_sink`, removed un-wired lane-level `effort` declarations and the dead `Config_boot_overrides.typed_namespaces` shadow cell, added fail-closed checks on `efforts`-expanded defaults/duplicates and typed `Env_config_core.get_string`, enabled Gemini explicit `cachedContents` on admitted/serialized production paths with Vertex AI endpoints, `403` stale-cache fallback, credential-isolated keys, custom header forwarding, and clean single-observation/status telemetry, unified `Backend_gemini.extract_cacheable_prefix_result`, and clamped negative Ollama `prompt_eval_count` sentinels while guarding non-object JSON (#54394).
+- Reconcile `models.toml` and `config/runtime.toml` SSOT drift (`kimi-for-coding`, `glm-5-3`, Codex GPT context windows, `kimi_coding_anthropic` ignored sampling parameters, Gemini 4 `prompt_cache_wire = "none"`, Gemini 65,536 default output ceiling, Ollama IPv4 loopback + `keep-alive = "30m"`) and unify `OLLAMA_HOST`, Z.AI/GLM error codes, and `anthropic-version` headers (#54395).
+- Agent Core HTTP turns now recover from pre-generation `ContextOverflow` and `413` body refusals on both `Body_only` and `Require_exact_fit` paths by narrowing the request in-run, demoting/previewing closed current-turn tool payloads, and dropping oldest closed tool rounds with a committed `Keeper_compaction` anchor instead of failing the turn (#54398).
+- Official-client `Input_rejected` recoveries (`Effect_fenced` and `Bootstrap_floor_exceeded`) now auto-supersede on the next turn into a fresh (or minimal anchor-only) session, and per-candidate `Official_client_recovery_required` rotates to backup lane candidates before exhausting visible-alive (#54398).
+- Claude Code and Antigravity CLI `Resume` overflows now roll over cleanly to a fresh session even with zero local checkpoint atoms, commit a `Keeper_compaction` anchor when history is evicted, preserve held standing context across Antigravity resumes, and record `on_refused_model_input` on official-client size refusals (#54398).
+- Anthropic direct API requests with strictly trailing ephemeral `System_context`/`Outside_context` blocks now place an explicit `cache_control` breakpoint on the last cacheable stable prefix block and omit top-level `cache_control`, eliminating per-turn volatile-tail cache-write overhead (#54398).
+- Provider `Retry-After` hints are now clamped to a 24-hour ceiling (`86_400.0s`), `Explicit_hard_limit` converts token limits to bytes safely, and mixed-size first failover commits a `Keeper_compaction` anchor when jumping to `From_turn_boundary` (#54398).
+
+### Removed
+
+- The server no longer carries, installs or wakes the `keeper-librarian`
+  Exact worker package. `masc exact-addon-setup` writes and builds only
+  `workspace-curator`, `candle-appraiser` and `hitl-auto-judge`, a Lane
+  declaration with `package = "keeper-librarian"` is refused as a package
+  this server does not carry, and every Lane Add-on Exact request runs as
+  `Standard` (#54326).
+- Tool request originals under the old Librarian scopes have no consumer: the
+  startup settled-archive pass and the install preflight refuse a live record
+  there as a scope no owner claims (#54326).
+- The server no longer carries, embeds or sets up the `workspace-curator`
+  Exact worker package. `masc exact-addon-setup` writes and builds only
+  `candle-appraiser` and `hitl-auto-judge`, and a Lane declaration with
+  `package = "workspace-curator"` is refused as a package this server does not
+  carry (#54328).
+- Tool request originals under the old curator scope have no consumer: the
+  startup settled-archive pass and the install preflight refuse a live record
+  there as a scope no owner claims (#54328).
+- The server no longer sweeps unowned Exact run files at startup. Every Lane
+  Add-on Exact request runs as `Standard` with the schema check alone, because
+  no carried package checks its answers or its dispatch any more (#54328).
+- The `GET /api/v1/keepers/<name>/provider-input/continuity` route and the
+  `masc-librarian-continuity` CLI are gone. A Keeper request no longer writes
+  the old continuity request and observation rows; it records only where it
+  starts, which the Memory writer row reads (#54331).
+- The TUI measurement view reads only the temporal continuity harness view,
+  not the old Librarian continuity report. The harness no longer has the
+  `await_summary` step or the `prefix_omission` judgment, and its view no
+  longer carries them (#54331).
+- Old workspace-curator run records are not read: the run identity
+  `workspace_curator_exact` is gone from the Exact run registry and the TUI
+  (#54331).
+- The `librarian_preflight` key of the `[typesafeai]` table is gone, with the
+  no-change judgment it turned on, that judgment's prompt and the
+  `masc-librarian-preflight-eval` CLI. The retired Librarian pass no longer
+  skips generation on that judgment (#54340).
+- The TUI Lanes run detail no longer decodes a Librarian run's judgment
+  reading above its output, and the `[d]` key that folded the output behind
+  it is gone; the detail shows the recorded output as for every other lane
+  (#54340).
+
+### Upgrade notes
+
+- This is the first layer of the Librarian cut stack. Install it only with the
+  whole stack; the stack's last layer carries the hard-cut install steps
+  (#54326).
+- This is the second layer of the Librarian cut stack. Install it only with
+  the whole stack; the stack's last layer carries the hard-cut install steps
+  (#54328).
+- This is a layer of the Librarian cut stack. Install it only with the whole
+  stack; the stack's last layer carries the hard-cut install steps (#54331).
+- `runtime.toml` loading refuses unknown keys, so a file whose `[typesafeai]`
+  table still sets `librarian_preflight` does not load on this build. This is
+  a layer of the Librarian cut stack: install it only with the whole stack,
+  whose last layer carries the install steps that remove the line (#54340).
+
 ## [0.78.0] - 2026-11-22
 
 ### 요약

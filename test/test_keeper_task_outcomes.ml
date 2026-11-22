@@ -1818,7 +1818,10 @@ let test_keeper_task_claim_handler_and_tool_task_forbid_silent_fallback () =
              | Tool_result.Completed () | Tool_result.Deferred () ->
                failf "%s: expected failure, got %s" label execution.raw_output);
             let json = Yojson.Safe.from_string execution.raw_output in
-            check string (label ^ " typed_outcome.kind") "error"
+            (* typed_outcome.kind is serialized as "Error" (PascalCase), the
+               same casing as the rest of the tool-result JSON; produced by
+               Keeper_tool_outcome.Error via Keeper_tool_outcome.to_json. *)
+            check string (label ^ " typed_outcome.kind") "Error"
               (json |> U.member "typed_outcome" |> U.member "kind" |> U.to_string);
             check_todo ("keeper handler " ^ label) "task-001";
             check_todo ("keeper handler " ^ label) "task-002")

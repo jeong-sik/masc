@@ -121,7 +121,7 @@ let test_stdio_controller () =
               check bool "int trail stays opt-in" true (member "ints" state_only = `Null);
               let with_ints = call "masc_dos_screen"
                 (`Assoc ["include_frame", `Bool false; "include_ints", `Bool true]) in
-              let trail = Yojson.Safe.Util.(member "ints" with_ints |> to_list) in
+              let trail = Yojson.Safe.Util.to_list (member "ints" with_ints) in
               check bool "booted program left an int trail" true (trail <> []);
               check bool "trail entries carry the entry registers" true
                 (List.for_all

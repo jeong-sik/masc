@@ -18,17 +18,7 @@ let process_promotions_sync ~base_path ~now ~keeper_id promotions =
 ;;
 
 let supersede_fact_sync ~base_path ~now ~actor ~old_fact_id ~new_fact_id ~reason =
-  let* (_ : world_edge) =
-    Store.add_edge ~base_path ~now ~actor
-      ~from_fact_id:new_fact_id ~to_fact_id:old_fact_id
-      ~kind:Supersedes ~reason
-  in
-  let* (_ : world_fact) =
-    Store.transition_fact_lifecycle ~base_path ~now ~actor
-      ~fact_id:old_fact_id ~to_lifecycle:Superseded ~reason
-  in
-  let* digest, (_ : bool) = Store.commit_digest ~base_path ~now ~actor () in
-  Ok digest
+  Store.supersede_fact ~base_path ~now ~actor ~old_fact_id ~new_fact_id ~reason
 ;;
 
 let builtin_mcp_resource_inputs : Store.index_sync_input list =
@@ -84,9 +74,12 @@ let collect_index_inputs_off_domain ~base_path : Store.index_sync_input list =
            let topic =
              if Filename.check_suffix file ".md" then Filename.chop_suffix file ".md" else file
            in
-           match Fs_compat.load_file path with
-           | exception Sys_error _ -> None
-           | raw ->
+           (* Re-verify lstat S_REG + O_NOFOLLOW + max_page_bytes at read time so
+              a symlink swap between list_pages and read can never disclose host
+              files or cause unbounded memory allocation. *)
+           match Tool_wiki.load_regular_page path with
+           | Error _ -> None
+           | Ok raw ->
              let sha = Agent_core_sha256.(digest_string raw |> to_hex) in
              let title, summary, facets =
                match Tool_wiki.parse_frontmatter raw with

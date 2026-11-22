@@ -18,12 +18,14 @@ let test_dir () =
 ;;
 
 let rec rm_rf path =
-  match Sys.is_directory path with
-  | true ->
-    Sys.readdir path |> Array.iter (fun e -> rm_rf (Filename.concat path e));
-    Unix.rmdir path
-  | false -> Sys.remove path
-  | exception Sys_error _ -> ()
+  match Unix.lstat path with
+  | st ->
+    if st.Unix.st_kind = Unix.S_DIR
+    then (
+      Sys.readdir path |> Array.iter (fun e -> rm_rf (Filename.concat path e));
+      Unix.rmdir path)
+    else Unix.unlink path
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 ;;
 
 let write path content =
@@ -464,6 +466,213 @@ let test_unlistable_wiki_root_lists_no_pages () =
     check int "no wiki pages" 0 (List.length (listed state)))
 ;;
 
+let test_symlinks_and_oversized_pages_are_rejected_across_wiki_and_curator () =
+  with_wiki ~documents:contract_documents (fun state ->
+    let base_path = (Lib.Mcp_server.workspace_config state).Lib.Workspace.base_path in
+    let wiki_dir = Lib.Tool_wiki.wiki_root ~base_path in
+    let secret_outside = Filename.concat base_path "host-secret-file.txt" in
+    write secret_outside "SECRET_HOST_CONTENT_DO_NOT_LEAK\n";
+    let link_page = Filename.concat wiki_dir "leaked.md" in
+    Unix.symlink secret_outside link_page;
+    let link_log = Filename.concat wiki_dir "log.md" in
+    Unix.symlink secret_outside link_log;
+    let oversized_page = Filename.concat wiki_dir "huge.md" in
+    write oversized_page (String.make (Lib.Tool_wiki.max_page_bytes + 1024) 'Z');
+    (* 1. Tool_wiki.list_pages excludes symlinks and oversized pages. *)
+    let listed_paths = Lib.Tool_wiki.list_pages ~base_path in
+    check bool "list_pages excludes symlink" false (List.mem link_page listed_paths);
+    check bool "list_pages excludes oversized file" false (List.mem oversized_page listed_paths);
+    (* 2. Tool_wiki.load_regular_page rejects symlink and oversized page directly. *)
+    check bool "load_regular_page rejects symlink" true
+      (Result.is_error (Lib.Tool_wiki.load_regular_page link_page));
+    check bool "load_regular_page rejects oversized page" true
+      (Result.is_error (Lib.Tool_wiki.load_regular_page oversized_page));
+    (* 3. MCP resources refuse masc://wiki/leaked, masc://wiki/leaked.json,
+       masc://wiki/huge, and symlinked masc://wiki/log. *)
+    List.iter
+      (fun uri ->
+         let resp = read_resource state uri in
+         check (option string) (uri ^ " serves no content") None (served_text resp);
+         check int (uri ^ " returns -32602") (-32602)
+           Yojson.Safe.Util.(resp |> member "error" |> member "code" |> to_int))
+      [ "masc://wiki/leaked"
+      ; "masc://wiki/leaked.json"
+      ; "masc://wiki/huge"
+      ; "masc://wiki/huge.json"
+      ; "masc://wiki/log"
+      ];
+    (* 4. wiki_resources listing omits symlinked page, oversized page, and symlinked log. *)
+    let resources = listed state in
+    check bool "symlinked page not listed" true
+      (Option.is_none (find_listed "masc://wiki/leaked" resources));
+    check bool "oversized page not listed" true
+      (Option.is_none (find_listed "masc://wiki/huge" resources));
+    check bool "symlinked log not listed" true
+      (Option.is_none (find_listed "masc://wiki/log" resources));
+    (* 5. World_memory_curator wiki indexing never indexes symlinks or oversized files. *)
+    (match Lib.World_memory_curator.sync_wiki_and_artifacts_sync ~base_path ~now:10.0 () with
+     | Error err -> fail (Lib.World_memory_store.error_to_string err)
+     | Ok _ ->
+       (match Lib.World_memory_store.list_index ~kind:Wiki_page ~base_path () with
+        | Error err -> fail (Lib.World_memory_store.error_to_string err)
+        | Ok entries ->
+          check bool "curator skipped symlink wiki page" false
+            (List.exists
+               (fun (e : Lib.World_memory_types.index_entry) ->
+                  String.equal e.entry_id "wiki:leaked")
+               entries);
+          check bool "curator skipped oversized wiki page" false
+            (List.exists
+               (fun (e : Lib.World_memory_types.index_entry) ->
+                  String.equal e.entry_id "wiki:huge")
+               entries);
+          check bool "curator still indexed valid regular wiki page" true
+            (List.exists
+               (fun (e : Lib.World_memory_types.index_entry) ->
+                  String.equal e.entry_id "wiki:alpha")
+               entries))))
+;;
+
+let test_symlinked_wiki_root_and_log_append_are_rejected () =
+  (* Part A: symlinked .masc/wiki -> outside_dir is rejected by create, update,
+     lint, wiki_resources, and masc://wiki/log without disclosing or writing to outside_dir. *)
+  let dir = test_dir () in
+  let outside_dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      rm_rf dir;
+      rm_rf outside_dir)
+    (fun () ->
+       let outside_page = Filename.concat outside_dir "victim.md" in
+       let victim_original =
+         "---\n\
+          title: Victim\n\
+          summary: Secret outside page\n\
+          source: observation\n\
+          author: host\n\
+          created: 2026-11-20\n\
+          updated: 2026-11-20\n\
+          revision: 1\n\
+          tags: [host]\n\
+          ---\n\
+          OUTSIDE_SECRET_BODY_DO_NOT_DISCLOSE\n"
+       in
+       write outside_page victim_original;
+       let outside_log = Filename.concat outside_dir "log.md" in
+       write outside_log "## [2026-11-20 00:00] create r1 | victim | host | outside log\n";
+       let masc_dir = Filename.concat dir ".masc" in
+       Unix.mkdir masc_dir 0o755;
+       Unix.symlink outside_dir (Filename.concat masc_dir "wiki");
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let ctx : Lib.Tool_wiki.context = { base_path = dir; agent_name = "alice" } in
+       let call_wiki name args =
+         match Lib.Tool_wiki.dispatch ctx ~name ~args with
+         | Some r -> r
+         | None -> fail ("tool not dispatched: " ^ name)
+       in
+       let is_failed (r : Tool_result.result) =
+         Option.is_some (Tool_result.failure_class r)
+       in
+       let create_res =
+         call_wiki "masc_wiki_create"
+           (`Assoc
+              [ "page", `String "escaped"
+              ; "title", `String "Escaped"
+              ; "summary", `String "Should fail"
+              ; "source", `String "observation"
+              ; "body", `String "attacker body"
+              ])
+       in
+       check bool "masc_wiki_create rejects symlinked .masc/wiki" true (is_failed create_res);
+       check bool "no page written into outside_dir" false
+         (Sys.file_exists (Filename.concat outside_dir "escaped.md"));
+       check bool "no .wiki.lock created inside outside_dir" false
+         (Sys.file_exists (Filename.concat outside_dir ".wiki.lock"));
+       let update_res =
+         call_wiki "masc_wiki_update"
+           (`Assoc
+              [ "page", `String "victim"
+              ; "base_revision", `Int 999
+              ; "note", `String "probe"
+              ; "body", `String "overwrite"
+              ])
+       in
+       check bool "masc_wiki_update rejects symlinked .masc/wiki" true (is_failed update_res);
+       check bool "masc_wiki_update error does not disclose outside page body" false
+         (String_util.contains_substring (Yojson.Safe.to_string (Tool_result.to_json update_res))
+            "OUTSIDE_SECRET_BODY_DO_NOT_DISCLOSE");
+       check string "outside victim page unchanged" victim_original
+         (In_channel.with_open_text outside_page In_channel.input_all);
+       let lint_res = call_wiki "masc_wiki_lint" (`Assoc []) in
+       check bool "masc_wiki_lint rejects symlinked .masc/wiki" true (is_failed lint_res);
+       let resources = Lib.Mcp_server_eio_resource.wiki_resources ~base_path:dir in
+       check int "wiki_resources lists 0 entries (including no log) for symlinked .masc/wiki"
+         0 (List.length resources);
+       let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
+       check (option string) "masc://wiki/log refused on symlinked .masc/wiki" None
+         (served_text (read_resource state "masc://wiki/log")));
+  (* Part B: inside a real .masc/wiki, dangling symlink at <page>.md is rejected by
+     masc_wiki_create, and symlinked log.md -> outside_file cannot be appended to. *)
+  let dir2 = test_dir () in
+  let outside_dir2 = test_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      rm_rf dir2;
+      rm_rf outside_dir2)
+    (fun () ->
+       let masc_dir = Filename.concat dir2 ".masc" in
+       let wiki_dir = Filename.concat masc_dir "wiki" in
+       Unix.mkdir masc_dir 0o755;
+       Unix.mkdir wiki_dir 0o755;
+       let outside_target = Filename.concat outside_dir2 "do-not-append.txt" in
+       let original_target = "ORIGINAL_OUTSIDE_LOG_TARGET\n" in
+       write outside_target original_target;
+       Unix.symlink outside_target (Filename.concat wiki_dir "log.md");
+       Unix.symlink (Filename.concat outside_dir2 "nonexistent.md")
+         (Filename.concat wiki_dir "dangling.md");
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let ctx : Lib.Tool_wiki.context = { base_path = dir2; agent_name = "alice" } in
+       let call_wiki name args =
+         match Lib.Tool_wiki.dispatch ctx ~name ~args with
+         | Some r -> r
+         | None -> fail ("tool not dispatched: " ^ name)
+       in
+       let is_failed (r : Tool_result.result) =
+         Option.is_some (Tool_result.failure_class r)
+       in
+       let dangling_res =
+         call_wiki "masc_wiki_create"
+           (`Assoc
+              [ "page", `String "dangling"
+              ; "title", `String "Dangling"
+              ; "summary", `String "Must reject dangling symlink"
+              ; "source", `String "observation"
+              ; "body", `String "body"
+              ])
+       in
+       check bool "masc_wiki_create rejects dangling symlink at page path" true
+         (is_failed dangling_res);
+       check bool "dangling symlink target was not created outside wiki" false
+         (Sys.file_exists (Filename.concat outside_dir2 "nonexistent.md"));
+       let create_with_symlink_log =
+         call_wiki "masc_wiki_create"
+           (`Assoc
+              [ "page", `String "fresh"
+              ; "title", `String "Fresh"
+              ; "summary", `String "Log append must reject symlink"
+              ; "source", `String "observation"
+              ; "body", `String "fresh body"
+              ])
+       in
+       check bool "masc_wiki_create reports failure when log.md is a symlink" true
+         (is_failed create_with_symlink_log);
+       check string "symlinked log.md target outside wiki was NOT appended to"
+         original_target
+         (In_channel.with_open_text outside_target In_channel.input_all))
+;;
+
 let () =
   run
     "wiki_resource_topic"
@@ -501,6 +710,14 @@ let () =
             "an unreadable page answers an error envelope"
             `Quick
             test_unreadable_page_answers_an_error_envelope
+        ; test_case
+            "symlinks and oversized pages are rejected across wiki, MCP, and world curator"
+            `Quick
+            test_symlinks_and_oversized_pages_are_rejected_across_wiki_and_curator
+        ; test_case
+            "symlinked wiki root and symlinked log.md append are rejected"
+            `Quick
+            test_symlinked_wiki_root_and_log_append_are_rejected
         ] )
     ; ( "listing"
       , [ test_case

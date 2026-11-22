@@ -71,7 +71,47 @@ type world_fact =
   ; updated_seq : int
   }
 
-(** Deterministic content-addressed world fact ID derived from [(scope, claim)]. *)
+(** Security and resource bounds for World Memory fields and promotion batches. *)
+val max_scope_bytes : int
+val max_claim_bytes : int
+val max_facet_bytes : int
+val max_facets_per_fact : int
+val max_promotion_batch_size : int
+val max_change_log_summary_bytes : int
+
+(** Validate and normalize [scope]: non-empty, at most {!max_scope_bytes}, and
+    free of ASCII control characters including ['\n'], ['\r'], and ['\000']. *)
+val validate_scope : string -> (string, string) result
+
+(** Extract the owning keeper ID when [scope] is keeper-private (prefixed with
+    [keeper:] or [private:], case-insensitively after trimming). Returns
+    [None] for shared workspace scopes. *)
+val private_scope_owner : string -> string option
+
+(** True when [scope] is keeper-private (i.e. {!private_scope_owner} returns
+    [Some _]) and must never be leaked into workspace-shared digests, FTS
+    indices, or sibling Keeper views. *)
+val is_private_scope : string -> bool
+
+(** True when [id] is a World Memory fact identifier ([wf-...] or [wf_syn_...]),
+    as opposed to a Keeper-local Memory OS fact ID. *)
+val is_world_fact_id : string -> bool
+
+(** Validate and normalize a single facet tag: non-empty, at most
+    {!max_facet_bytes}, and free of ASCII control characters including ['\n'],
+    ['\r'], and ['\000']. *)
+val validate_facet : string -> (string, string) result
+
+(** Validate, deduplicate, and sort a fact's facets, enforcing at most
+    {!max_facets_per_fact} distinct facets. *)
+val validate_facets : string list -> (string list, string) result
+
+(** Validate and normalize a claim: non-empty, at most {!max_claim_bytes}, and
+    free of NUL or non-whitespace ASCII control characters. *)
+val validate_claim : string -> (string, string) result
+
+(** Deterministic content-addressed world fact ID derived unambiguously from
+    [(scope, claim)] via JSON array encoding (immune to delimiter collisions). *)
 val fact_id_of_claim : scope:string -> claim:string -> string
 
 val world_fact_to_json : world_fact -> Yojson.Safe.t

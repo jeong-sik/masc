@@ -183,12 +183,94 @@ let briefing_to_json = function
       ]
 ;;
 
+let authorize_world_memory_caller ~require_admin ~resource_label ~caller =
+  match caller with
+  | Operator_admin -> Ok ()
+  | Anonymous_reader ->
+    Error (Mcp_error_code.Auth_error, resource_label ^ " requires authentication")
+  | Authenticated_reader _ ->
+    if require_admin
+    then
+      Error
+        ( Mcp_error_code.Insufficient_scope
+        , resource_label ^ " requires admin permission" )
+    else Ok ()
+;;
+
+let world_scope_visible_to_caller ~caller (scope : string) =
+  match caller with
+  | Operator_admin -> true
+  | Anonymous_reader -> false
+  | Authenticated_reader { agent_name; _ } ->
+    (match World_memory_types.private_scope_owner scope with
+     | None -> true
+     | Some owner -> owner <> "" && String.equal owner agent_name)
+;;
+
+let scrub_fact_for_caller ~caller (fact : World_memory_types.world_fact) =
+  match caller with
+  | Operator_admin -> fact
+  | Anonymous_reader -> fact
+  | Authenticated_reader { agent_name; _ } ->
+    let provenance =
+      match fact.provenance with
+      | World_memory_types.Proposed_by { keeper_id; source_fact_ids } ->
+        let filtered_ids =
+          if String.equal keeper_id agent_name then source_fact_ids else []
+        in
+        World_memory_types.Proposed_by { keeper_id; source_fact_ids = filtered_ids }
+      | World_memory_types.Cross_keeper_synthesized { keeper_ids; source_world_fact_ids } ->
+        (* Keep only world fact IDs [wf-... / wf_syn_...]; withhold sibling
+           Keepers' local Memory OS source_fact_ids from non-admin callers. *)
+        let filtered_ids =
+          List.filter World_memory_types.is_world_fact_id source_world_fact_ids
+        in
+        World_memory_types.Cross_keeper_synthesized
+          { keeper_ids; source_world_fact_ids = filtered_ids }
+    in
+    { fact with provenance }
+;;
+
+let legacy_fact_ref_visible_to_caller ~caller (fact_ref : Workspace_memory_ledger.fact_ref) =
+  match caller with
+  | Operator_admin -> true
+  | Anonymous_reader -> false
+  | Authenticated_reader { agent_name; _ } ->
+    (match fact_ref with
+     | Workspace_memory_ledger.Ordinary { keeper_id; _ }
+     | Workspace_memory_ledger.Source_bound { keeper_id; _ } ->
+       String.equal keeper_id agent_name)
+;;
+
 (* Storage read/decode errors have no narrower variant in [Mcp_error_code.t]
    than [Internal_error] (unlike malformed URIs or unknown keepers, which use
    [Invalid_params]). *)
-let read_world_memory_mvcc_claims_json ~base_path =
+let read_world_memory_mvcc_claims_json ~caller ~base_path =
   match World_memory_store.read_snapshot ~include_inactive:false ~base_path () with
   | Ok { facts; edges; digest = digest_opt; _ } ->
+    let visible_facts =
+      facts
+      |> List.filter (fun (f : World_memory_types.world_fact) ->
+        world_scope_visible_to_caller ~caller f.scope)
+      |> List.map (scrub_fact_for_caller ~caller)
+    in
+    let visible_ids =
+      List.fold_left
+        (fun acc (f : World_memory_types.world_fact) ->
+           Set_util.StringSet.add f.fact_id acc)
+        Set_util.StringSet.empty
+        visible_facts
+    in
+    let visible_edges =
+      match caller with
+      | Operator_admin -> edges
+      | Anonymous_reader | Authenticated_reader _ ->
+        List.filter
+          (fun (e : World_memory_types.world_edge) ->
+             Set_util.StringSet.mem e.from_fact_id visible_ids
+             && Set_util.StringSet.mem e.to_fact_id visible_ids)
+          edges
+    in
     let digest_json =
       match digest_opt with
       | None -> `Assoc [ "status", `String "pending" ]
@@ -204,9 +286,9 @@ let read_world_memory_mvcc_claims_json ~base_path =
       (`Assoc
          [ "status", `String "available"
          ; "backend", `String "sqlite_wal_mvcc"
-         ; "fact_count", `Int (List.length facts)
-         ; "claims", `List (List.map World_memory_types.world_fact_to_json facts)
-         ; "edges", `List (List.map World_memory_types.world_edge_to_json edges)
+         ; "fact_count", `Int (List.length visible_facts)
+         ; "claims", `List (List.map World_memory_types.world_fact_to_json visible_facts)
+         ; "edges", `List (List.map World_memory_types.world_edge_to_json visible_edges)
          ; "briefing", digest_json
          ])
   | Error err ->
@@ -245,20 +327,36 @@ let read_world_memory_index_json ~base_path =
          ])
 ;;
 
-let read_world_memory_fact_json ~base_path ~fact_id =
-  match World_memory_store.read_fact_with_edges ~base_path ~fact_id with
+let read_world_memory_fact_json ~caller ~base_path ~fact_id =
+  let visible_scope =
+    match caller with
+    | Operator_admin -> None
+    | Anonymous_reader | Authenticated_reader _ ->
+      Some (world_scope_visible_to_caller ~caller)
+  in
+  match
+    World_memory_store.read_fact_with_edges ~include_inactive:false ?visible_scope
+      ~base_path ~fact_id ()
+  with
   | Error err ->
     Error (Mcp_error_code.Internal_error, World_memory_store.error_to_string err)
   | Ok None -> Ok None
   | Ok (Some (fact, edges)) ->
-    Ok
-      (Some
-         (`Assoc
-            [ "status", `String "available"
-            ; "backend", `String "sqlite_wal_mvcc"
-            ; "fact", World_memory_types.world_fact_to_json fact
-            ; "edges", `List (List.map World_memory_types.world_edge_to_json edges)
-            ]))
+    if not (world_scope_visible_to_caller ~caller fact.scope)
+    then
+      Error
+        ( Mcp_error_code.Insufficient_scope
+        , "World memory fact scope is restricted to its owning keeper or admin" )
+    else
+      let scrubbed = scrub_fact_for_caller ~caller fact in
+      Ok
+        (Some
+           (`Assoc
+              [ "status", `String "available"
+              ; "backend", `String "sqlite_wal_mvcc"
+              ; "fact", World_memory_types.world_fact_to_json scrubbed
+              ; "edges", `List (List.map World_memory_types.world_edge_to_json edges)
+              ]))
 ;;
 
 let read_world_memory_mvcc_log_json ~since_seq ~limit ~base_path =
@@ -283,7 +381,7 @@ let read_world_memory_mvcc_log_json ~since_seq ~limit ~base_path =
          ])
 ;;
 
-let rec read_world_memory_claims_json ?(attempt = 1) ~briefing_template ~base_path () =
+let rec read_world_memory_claims_json ?(attempt = 1) ~caller ~briefing_template ~base_path () =
   match Workspace_memory_ledger.observe_with_briefing_template ~briefing_template ~base_path with
   | Workspace_memory_ledger.Missing ->
     Ok
@@ -302,14 +400,17 @@ let rec read_world_memory_claims_json ?(attempt = 1) ~briefing_template ~base_pa
        if not (String.equal (Workspace_memory_ledger.sha256 ledger) descriptor.ledger_sha256)
        then
          if attempt < 2 then
-           read_world_memory_claims_json ~attempt:(attempt + 1) ~briefing_template ~base_path ()
+           read_world_memory_claims_json ~attempt:(attempt + 1) ~caller ~briefing_template ~base_path ()
          else
            Error (Mcp_error_code.Internal_error, "workspace ledger changed during the read")
        else
          let module String_map = Map.Make (String) in
          let add_member map id fact_ref =
-           let prev = Option.value ~default:[] (String_map.find_opt id map) in
-           String_map.add id (Workspace_memory_ledger.fact_ref_to_json fact_ref :: prev) map
+           if legacy_fact_ref_visible_to_caller ~caller fact_ref
+           then
+             let prev = Option.value ~default:[] (String_map.find_opt id map) in
+             String_map.add id (Workspace_memory_ledger.fact_ref_to_json fact_ref :: prev) map
+           else map
          in
          let claim_members, conflict_members =
            List.fold_left
@@ -795,15 +896,55 @@ end
    whole file, so a header longer than the bound is listed exactly as before. *)
 let frontmatter_read_limit = 8192
 
+let regular_file_size_nofollow path =
+  match Unix.lstat path with
+  | st ->
+    if st.Unix.st_kind = Unix.S_REG && st.Unix.st_size >= 0
+    then Some st.Unix.st_size
+    else None
+  | exception Unix.Unix_error _ -> None
+;;
+
 let read_listing_header ~path ~size =
-  if size <= frontmatter_read_limit
-  then Fs_compat.load_file path
-  else begin
-    let prefix = Fs_compat.read_slice ~path ~from:0 ~len:frontmatter_read_limit in
+  if size > Tool_wiki.max_page_bytes
+  then raise (Sys_error "wiki page exceeds max_page_bytes")
+  else if size <= frontmatter_read_limit
+  then (
+    match Tool_wiki.load_regular_page path with
+    | Ok content -> content
+    | Error detail -> raise (Sys_error detail))
+  else (
+    let fd =
+      try Tool_blob_store.open_readonly_nofollow_nonblock path with
+      | Unix.Unix_error (err, op, _) ->
+        raise (Sys_error (Printf.sprintf "%s: %s" op (Unix.error_message err)))
+    in
+    let prefix =
+      let ic =
+        try Unix.in_channel_of_descr fd with
+        | exn ->
+          let bt = Printexc.get_raw_backtrace () in
+          (try Unix.close fd with Unix.Unix_error _ -> ());
+          Printexc.raise_with_backtrace exn bt
+      in
+      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+        let st =
+          try Unix.fstat fd with
+          | Unix.Unix_error (err, op, _) ->
+            raise (Sys_error (Printf.sprintf "%s: %s" op (Unix.error_message err)))
+        in
+        if st.st_kind <> Unix.S_REG || st.st_size > Tool_wiki.max_page_bytes
+        then raise (Sys_error "wiki page is not a bounded regular file");
+        let buf = Bytes.create frontmatter_read_limit in
+        let n = input ic buf 0 frontmatter_read_limit in
+        Bytes.sub_string buf 0 n)
+    in
     match Tool_wiki.parse_frontmatter prefix with
     | Ok _ -> prefix
-    | Error _ -> Fs_compat.load_file path
-  end
+    | Error _ ->
+      (match Tool_wiki.load_regular_page path with
+       | Ok full -> full
+       | Error detail -> raise (Sys_error detail)))
 ;;
 
 (* The log is append-only and grows without bound, so an explicit read returns
@@ -819,15 +960,47 @@ let read_listing_header ~path ~size =
 let log_read_limit = 65536
 
 let read_log_tail ~path ~size =
-  if size <= log_read_limit
-  then Fs_compat.load_file path
-  else begin
-    let from = size - log_read_limit in
-    let text = Fs_compat.read_slice ~path ~from ~len:log_read_limit in
-    match String.index_opt text '\n' with
-    | Some i -> String.sub text (i + 1) (String.length text - i - 1)
-    | None -> text
-  end
+  let fd =
+    try Tool_blob_store.open_readonly_nofollow_nonblock path with
+    | Unix.Unix_error (err, op, _) ->
+      raise (Sys_error (Printf.sprintf "%s: %s" op (Unix.error_message err)))
+  in
+  let ic =
+    try Unix.in_channel_of_descr fd with
+    | exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      (try Unix.close fd with Unix.Unix_error _ -> ());
+      Printexc.raise_with_backtrace exn bt
+  in
+  Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+    let st =
+      try Unix.fstat fd with
+      | Unix.Unix_error (err, op, _) ->
+        raise (Sys_error (Printf.sprintf "%s: %s" op (Unix.error_message err)))
+    in
+    if st.st_kind <> Unix.S_REG
+    then raise (Sys_error "wiki log is not a regular file");
+    let actual_size = min size st.st_size in
+    let read_len = min actual_size log_read_limit in
+    let from = max 0 (actual_size - read_len) in
+    seek_in ic from;
+    let buf = Bytes.create read_len in
+    let rec fill off =
+      if off >= read_len
+      then off
+      else
+        match input ic buf off (read_len - off) with
+        | 0 -> off
+        | n -> fill (off + n)
+    in
+    let got = fill 0 in
+    let text = Bytes.sub_string buf 0 got in
+    if actual_size <= log_read_limit
+    then text
+    else
+      match String.index_opt text '\n' with
+      | Some i -> String.sub text (i + 1) (String.length text - i - 1)
+      | None -> text)
 ;;
 
 (* One listed resource per page, or [None] when the name is not a valid page
@@ -840,11 +1013,12 @@ let page_resource path : Mcp_server.mcp_resource option =
   match Tool_wiki.validate_page_name topic with
   | Error _ -> None
   | Ok _ ->
-    (match Fs_compat.file_size path with
+    (match regular_file_size_nofollow path with
      | None -> None
+     | Some size when size > Tool_wiki.max_page_bytes -> None
      | Some size ->
        (match read_listing_header ~path ~size with
-        | exception Sys_error _ -> None
+        | exception (Sys_error _ | Unix.Unix_error _) -> None
         | content ->
           let uri = "masc://" ^ wiki_topic_prefix ^ topic in
           (match Tool_wiki.parse_frontmatter content with
@@ -884,40 +1058,53 @@ let page_resource path : Mcp_server.mcp_resource option =
    longer than one page is no longer cut off at its end, where the wiki entries
    sort. An explicit [masc://wiki/log] read now returns the log's tail
    ([log_read_limit]) instead of the whole file. *)
+let is_regular_dir_nofollow path =
+  match Unix.lstat path with
+  | st -> st.Unix.st_kind = Unix.S_DIR
+  | exception Unix.Unix_error _ -> false
+;;
+
 let wiki_resources ~base_path : Mcp_server.mcp_resource list =
   run_blocking_resource_io (fun () ->
-    let uri_of_topic topic = "masc://" ^ wiki_topic_prefix ^ topic in
-    (* [list_pages] raises [Sys_error] when the wiki root cannot be listed
-       (a regular file in its place, or a stat failure other than ENOENT).
-       The listing keeps every other resource and lists no wiki pages; the
-       wiki tools report the failure itself. *)
-    let pages =
-      match Tool_wiki.list_pages ~base_path with
-      | paths -> List.filter_map page_resource paths
-      | exception Sys_error _ -> []
-    in
-    let log_path =
-      Filename.concat (Tool_wiki.wiki_root ~base_path) Wiki_journal.log_file
-    in
-    let log =
-      match Fs_compat.file_size log_path with
-      | None -> []
-      | Some size ->
-        [ Mcp_server.make_resource
-            ~title:"Wiki log"
-            ~size
-            ~uri:(uri_of_topic wiki_log_topic)
-            ~name:wiki_log_topic
-            ~description:
-              "One line per wiki page creation or update, oldest first. Lines \
-               are only appended. A read returns the tail: the last 65536 bytes, \
-               starting at a line boundary; the size below is the whole file."
-            ~mime_type:"text/markdown"
-            ()
-        ]
-    in
-    log @ pages)
+    let wiki_root = Tool_wiki.wiki_root ~base_path in
+    let masc_root = Filename.dirname wiki_root in
+    if not (is_regular_dir_nofollow masc_root && is_regular_dir_nofollow wiki_root)
+    then []
+    else (
+      let uri_of_topic topic = "masc://" ^ wiki_topic_prefix ^ topic in
+      (* [list_pages] raises [Sys_error] when the wiki root cannot be listed
+         (a regular file or symlink in its place, or a stat failure other than
+         ENOENT). The listing keeps every other resource and lists no wiki
+         pages; the wiki tools report the failure itself. *)
+      let pages =
+        match Tool_wiki.list_pages ~base_path with
+        | paths -> List.filter_map page_resource paths
+        | exception (Sys_error _ | Unix.Unix_error _) -> []
+      in
+      let log_path = Filename.concat wiki_root Wiki_journal.log_file in
+      let log =
+        match regular_file_size_nofollow log_path with
+        | None -> []
+        | Some size ->
+          [ Mcp_server.make_resource
+              ~title:"Wiki log"
+              ~size
+              ~uri:(uri_of_topic wiki_log_topic)
+              ~name:wiki_log_topic
+              ~description:
+                "One line per wiki page creation or update, oldest first. Lines \
+                 are only appended. A read returns the tail: the last 65536 bytes, \
+                 starting at a line boundary; the size below is the whole file."
+              ~mime_type:"text/markdown"
+              ()
+          ]
+      in
+      log @ pages))
 ;;
+
+let max_messages_resource_limit = 500
+let max_events_resource_limit = 500
+let clamp_resource_limit ~max_limit raw = min max_limit (max 0 raw)
 
 let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
   match params with
@@ -934,7 +1121,8 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
         let read_messages_json ~since_seq ~limit =
           run_blocking_resource_io (fun () ->
             let msgs_path = Workspace.messages_dir config in
-            if Sys.file_exists msgs_path then
+            if limit <= 0 || not (Sys.file_exists msgs_path) then `List []
+            else
               let extract_seq name =
                 match String.index_opt name '_' with
                 | None -> 0
@@ -944,9 +1132,15 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
                     (String.sub name 0 idx)
               in
               let files =
-                Sys.readdir msgs_path
-                |> Array.to_list
-                |> List.sort (fun a b -> compare (extract_seq b) (extract_seq a))
+                try
+                  Sys.readdir msgs_path
+                  |> Array.to_list
+                  |> List.sort (fun a b -> compare (extract_seq b) (extract_seq a))
+                with
+                | Sys_error detail ->
+                  Log.legacy_traceln ~level:Log.Warn ~module_name:"MCP"
+                    (Printf.sprintf "[WARN] Failed to list messages dir %s: %s" msgs_path detail);
+                  []
               in
               let count = ref 0 in
               let msgs = ref [] in
@@ -955,57 +1149,76 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
                    if !count < limit
                    then (
                      let path = Filename.concat msgs_path name in
-                     let json = Workspace.read_json config path in
-                     match Masc_domain.message_of_yojson json with
-                     | Ok msg when msg.Masc_domain.seq > since_seq ->
-                       msgs := Masc_domain.message_to_yojson msg :: !msgs;
-                       incr count
-                     | Ok _ -> ()
-                     | Error detail ->
+                     match Workspace.read_json config path with
+                     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+                     | exception ((Sys_error _ | Unix.Unix_error _ | Yojson.Json_error _) as exn) ->
                        Log.legacy_traceln
                          ~level:Log.Warn
                          ~module_name:"MCP"
                          (Printf.sprintf
-                            "[WARN] Failed to decode message resource %s: %s"
+                            "[WARN] Failed to read message resource %s: %s"
                             path
-                            detail)))
+                            (Printexc.to_string exn))
+                     | json ->
+                       (match Masc_domain.message_of_yojson json with
+                        | Ok msg when msg.Masc_domain.seq > since_seq ->
+                          msgs := Masc_domain.message_to_yojson msg :: !msgs;
+                          incr count
+                        | Ok _ -> ()
+                        | Error detail ->
+                          Log.legacy_traceln
+                            ~level:Log.Warn
+                            ~module_name:"MCP"
+                            (Printf.sprintf
+                               "[WARN] Failed to decode message resource %s: %s"
+                               path
+                               detail))))
                 files;
-              `List (List.rev !msgs)
-            else `List [])
+              `List (List.rev !msgs))
         in
 
         let read_events_json ~limit =
           run_blocking_resource_io (fun () ->
-            let lines = Mcp_server.read_event_lines config ~limit in
-            let events =
-              List.filter_map
-                (fun line ->
-                   match Yojson.Safe.from_string line with
-                   | json -> Some json
-                   | exception Yojson.Json_error msg ->
-                     let preview =
-                       String_util.utf8_safe ~max_bytes:53 ~suffix:"..." line
-                       |> String_util.to_string
-                     in
-                     Log.legacy_traceln
-                       ~level:Log.Warn
-                       ~module_name:"MCP"
-                       (Printf.sprintf
-                          "[WARN] Failed to parse event JSON: %s (line: %s)"
-                          msg
-                          preview);
-                     None)
-                lines
-            in
-            `List events)
+            if limit <= 0 then `List []
+            else
+              let lines =
+                try Mcp_server.read_event_lines config ~limit with
+                | Sys_error _ | Unix.Unix_error _ -> []
+              in
+              let events =
+                List.filter_map
+                  (fun line ->
+                     match Yojson.Safe.from_string line with
+                     | json -> Some json
+                     | exception Yojson.Json_error msg ->
+                       let preview =
+                         String_util.utf8_safe ~max_bytes:53 ~suffix:"..." line
+                         |> String_util.to_string
+                       in
+                       Log.legacy_traceln
+                         ~level:Log.Warn
+                         ~module_name:"MCP"
+                         (Printf.sprintf
+                            "[WARN] Failed to parse event JSON: %s (line: %s)"
+                            msg
+                            preview);
+                       None)
+                  lines
+              in
+              `List events)
         in
 
         let read_events_markdown ~limit =
           run_blocking_resource_io (fun () ->
-            let lines = Mcp_server.read_event_lines config ~limit in
-            if lines = []
-            then "(no events)"
-            else String.concat "\n" (List.map (fun line -> "- " ^ line) lines))
+            if limit <= 0 then "(no events)"
+            else
+              let lines =
+                try Mcp_server.read_event_lines config ~limit with
+                | Sys_error _ | Unix.Unix_error _ -> []
+              in
+              if lines = []
+              then "(no events)"
+              else String.concat "\n" (List.map (fun line -> "- " ^ line) lines))
         in
 
         let read_wiki_resource ~is_json ~topic =
@@ -1035,13 +1248,14 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
               (* The same header rules as the wiki tools: a document that
                  does not read is named with its reason, never given a title
                  or a source it does not have. A file that vanishes between
-                 the listing and the read is left out, as the tools do. *)
+                 the listing and the read (or is swapped to a symlink or exceeds
+                 [Tool_wiki.max_page_bytes]) is left out, as the tools do. *)
               let read_documents () =
                 Tool_wiki.list_pages ~base_path
                 |> List.filter_map (fun path ->
-                  match Fs_compat.load_file path with
-                  | content -> Some (path, Tool_wiki.parse_frontmatter content)
-                  | exception Sys_error _ -> None)
+                  match Tool_wiki.load_regular_page path with
+                  | Ok content -> Some (path, Tool_wiki.parse_frontmatter content)
+                  | Error _ -> None)
               in
               let metadata_fields (fm : Tool_wiki.frontmatter) =
                 [ ("title", `String (fm.title :> string))
@@ -1101,14 +1315,11 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
               end else if is_json then begin
                 match wiki_page_path topic with
                 | Some path ->
-                  (* A page can be listed and then become unreadable before
-                     this read: deleted, or its permissions changed. Answer
-                     with an error envelope rather than letting [Sys_error]
-                     escape the handler, as the index and log branches
-                     already do (the [.mli] promises [Never raises]). *)
-                  (match Fs_compat.load_file path with
-                   | exception Sys_error _ -> ("application/json", None)
-                   | raw ->
+                  (* Re-verify lstat S_REG + O_NOFOLLOW + max_page_bytes at read
+                     time so symlinks and oversized files can never be served. *)
+                  (match Tool_wiki.load_regular_page path with
+                   | Error _ -> ("application/json", None)
+                   | Ok raw ->
                      let described =
                        match Tool_wiki.parse_frontmatter raw with
                        | Ok fm -> metadata_fields fm
@@ -1124,28 +1335,26 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
               end else begin
                 match wiki_page_path topic with
                 | Some path ->
-                  (match Fs_compat.load_file path with
-                   | content -> ("text/markdown", Some content)
-                   | exception Sys_error _ -> ("text/markdown", None))
+                  (match Tool_wiki.load_regular_page path with
+                   | Ok content -> ("text/markdown", Some content)
+                   | Error _ -> ("text/markdown", None))
                 | None when String.equal topic wiki_log_topic ->
                   (* The log is not a page, so the listing above has no
                      entry for it. The path is the constant file name, never
-                     the client's topic. The log is append-only and grows
-                     without bound, so the read returns its tail rather than
-                     the whole file (task-2309). *)
+                     the client's topic. Reject symlinks via lstat + O_NOFOLLOW. *)
                   let log_path = Filename.concat wiki_dir Wiki_journal.log_file in
-                  (match Fs_compat.file_size log_path with
+                  (match regular_file_size_nofollow log_path with
                    | None -> ("text/markdown", None)
-                   | Some size ->
-                     (match read_log_tail ~path:log_path ~size with
-                      | text -> ("text/markdown", Some text)
-                      | exception Sys_error _ -> ("text/markdown", None)))
-                | None -> ("text/markdown", None)
-              end
-              end)
-          with
-          | read -> Ok (match read with _, None -> None | mime_type, Some text -> Some (mime_type, text))
-          | exception Sys_error _ -> Ok None
+                    | Some size ->
+                      (match read_log_tail ~path:log_path ~size with
+                       | text -> ("text/markdown", Some text)
+                       | exception (Sys_error _ | Unix.Unix_error _) -> ("text/markdown", None)))
+                 | None -> ("text/markdown", None)
+               end
+               end)
+           with
+           | read -> Ok (match read with _, None -> None | mime_type, Some text -> Some (mime_type, text))
+           | exception (Sys_error _ | Unix.Unix_error _) -> Ok None
         in
 
         let resource_outcome =
@@ -1199,23 +1408,32 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
               let statuses = Session.get_agent_statuses registry in
               Ok (Some ("application/json", Yojson.Safe.pretty_to_string (`List statuses)))
           | Messages_markdown ->
-              let since_seq = Mcp_server.int_query_param uri "since_seq" ~default:0 in
-              let limit = Mcp_server.int_query_param uri "limit" ~default:10 in
-              Ok
-                (Some
-                  ( "text/markdown"
-                  , run_blocking_resource_io (fun () ->
-                      Workspace.get_messages config ~since_seq ~limit) ))
+              let since_seq = max 0 (Mcp_server.int_query_param uri "since_seq" ~default:0) in
+              let limit =
+                clamp_resource_limit ~max_limit:max_messages_resource_limit
+                  (Mcp_server.int_query_param uri "limit" ~default:10)
+              in
+              run_blocking_resource_result (fun () ->
+                Ok (Some ("text/markdown", Workspace.get_messages config ~since_seq ~limit)))
           | Messages_json ->
-              let since_seq = Mcp_server.int_query_param uri "since_seq" ~default:0 in
-              let limit = Mcp_server.int_query_param uri "limit" ~default:10 in
+              let since_seq = max 0 (Mcp_server.int_query_param uri "since_seq" ~default:0) in
+              let limit =
+                clamp_resource_limit ~max_limit:max_messages_resource_limit
+                  (Mcp_server.int_query_param uri "limit" ~default:10)
+              in
               let json = read_messages_json ~since_seq ~limit in
               Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
           | Events_markdown ->
-              let limit = Mcp_server.int_query_param uri "limit" ~default:50 in
+              let limit =
+                clamp_resource_limit ~max_limit:max_events_resource_limit
+                  (Mcp_server.int_query_param uri "limit" ~default:50)
+              in
               Ok (Some ("text/markdown", read_events_markdown ~limit))
           | Events_json ->
-              let limit = Mcp_server.int_query_param uri "limit" ~default:50 in
+              let limit =
+                clamp_resource_limit ~max_limit:max_events_resource_limit
+                  (Mcp_server.int_query_param uri "limit" ~default:50)
+              in
               let json = read_events_json ~limit in
               Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
           | Wiki_index_markdown -> read_wiki_resource ~is_json:false ~topic:""
@@ -1223,51 +1441,82 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
           | Wiki_page_markdown topic -> read_wiki_resource ~is_json:false ~topic
           | Wiki_page_json topic -> read_wiki_resource ~is_json:true ~topic
           | World_memory_claims ->
-              if World_memory_store.exists ~base_path:config.base_path then
-                (match read_world_memory_mvcc_claims_json ~base_path:config.base_path with
-                 | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
-                 | Error err -> Error err)
-              else
-                let briefing_template =
-                  (Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing).effective
-                in
-                (match
-                   run_blocking_resource_result (fun () ->
-                     read_world_memory_claims_json ~briefing_template ~base_path:config.base_path ())
-                 with
-                 | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
-                 | Error err -> Error err)
+              (match
+                 authorize_world_memory_caller ~require_admin:false
+                   ~resource_label:"World memory claims resource" ~caller
+               with
+               | Error err -> Error err
+               | Ok () ->
+                 if World_memory_store.exists ~base_path:config.base_path then
+                   (match read_world_memory_mvcc_claims_json ~caller ~base_path:config.base_path with
+                    | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                    | Error err -> Error err)
+                 else
+                   let briefing_template =
+                     (Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing).effective
+                   in
+                   (match
+                      run_blocking_resource_result (fun () ->
+                        read_world_memory_claims_json ~caller ~briefing_template
+                          ~base_path:config.base_path ())
+                    with
+                    | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                    | Error err -> Error err))
           | World_memory_digest ->
-              (match read_world_memory_digest_json ~base_path:config.base_path with
-               | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
-               | Error err -> Error err)
+              (match
+                 authorize_world_memory_caller ~require_admin:false
+                   ~resource_label:"World memory digest resource" ~caller
+               with
+               | Error err -> Error err
+               | Ok () ->
+                 (match read_world_memory_digest_json ~base_path:config.base_path with
+                  | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                  | Error err -> Error err))
           | World_memory_index ->
-              (match read_world_memory_index_json ~base_path:config.base_path with
-               | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
-               | Error err -> Error err)
+              (match
+                 authorize_world_memory_caller ~require_admin:false
+                   ~resource_label:"World memory index resource" ~caller
+               with
+               | Error err -> Error err
+               | Ok () ->
+                 (match read_world_memory_index_json ~base_path:config.base_path with
+                  | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                  | Error err -> Error err))
           | World_memory_fact fact_id ->
-              (match read_world_memory_fact_json ~base_path:config.base_path ~fact_id with
-               | Ok None -> Ok None
-               | Ok (Some json) ->
-                 Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
-               | Error err -> Error err)
+              (match
+                 authorize_world_memory_caller ~require_admin:false
+                   ~resource_label:"World memory fact resource" ~caller
+               with
+               | Error err -> Error err
+               | Ok () ->
+                 (match read_world_memory_fact_json ~caller ~base_path:config.base_path ~fact_id with
+                  | Ok None -> Ok None
+                  | Ok (Some json) ->
+                    Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                  | Error err -> Error err))
           | World_memory_log ->
-              let since_seq = max 0 (Mcp_server.int_query_param uri "since_seq" ~default:0) in
-              let limit =
-                min max_world_memory_log_limit
-                  (max 1 (Mcp_server.int_query_param uri "limit" ~default:default_world_memory_log_limit))
-              in
-              if World_memory_store.exists ~base_path:config.base_path then
-                (match read_world_memory_mvcc_log_json ~since_seq ~limit ~base_path:config.base_path with
-                 | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
-                 | Error err -> Error err)
-              else
-                (match
-                   run_blocking_resource_result (fun () ->
-                     read_world_memory_log_json ~since_seq ~limit ~base_path:config.base_path)
-                 with
-                 | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
-                 | Error err -> Error err)
+              (match
+                 authorize_world_memory_caller ~require_admin:true
+                   ~resource_label:"World memory change log resource" ~caller
+               with
+               | Error err -> Error err
+               | Ok () ->
+                 let since_seq = max 0 (Mcp_server.int_query_param uri "since_seq" ~default:0) in
+                 let limit =
+                   min max_world_memory_log_limit
+                     (max 1 (Mcp_server.int_query_param uri "limit" ~default:default_world_memory_log_limit))
+                 in
+                 if World_memory_store.exists ~base_path:config.base_path then
+                   (match read_world_memory_mvcc_log_json ~since_seq ~limit ~base_path:config.base_path with
+                    | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                    | Error err -> Error err)
+                 else
+                   (match
+                      run_blocking_resource_result (fun () ->
+                        read_world_memory_log_json ~since_seq ~limit ~base_path:config.base_path)
+                    with
+                    | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                    | Error err -> Error err))
           | Keeper_memory keeper ->
               (match read_keeper_memory_json ~config ~caller ~keeper with
                | Ok None -> Ok None

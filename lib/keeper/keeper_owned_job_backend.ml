@@ -972,20 +972,128 @@ let capture_file_snapshot prepared ~capture_directory ~path ~byte_length =
     then Ok snapshot
     else Error (Log_publication_failed "capture file owner, permissions or EOF length differs")
 
+let unlink_if_present path =
+  try Unix.unlink path with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+  | Unix.Unix_error (error, operation, _) ->
+    Log.Keeper.warn "owned job redacted log cleanup failed for %s (%s: %s)"
+      path operation (Unix.error_message error)
+
+let redact_and_publish_capture_blocking
+      ~(prepared : preparation)
+      ~capture_directory
+      ~blobs
+      ~redaction
+      ~expected_snapshot:(before : Fs_compat.owned_regular_file_snapshot)
+      ~path
+      ~byte_length
+  =
+  let redaction = Keeper_secret_redaction.copy_for_current_domain redaction in
+  let redacted_path =
+    Filename.concat capture_directory.path
+      (Printf.sprintf "redacted-%s-%d.log"
+         (Uuidm.to_string (Uuidm.v4_gen (Random.State.make_self_init ()) ()))
+         (Unix.getpid ()))
+  in
+  let open_source () =
+    let fd = Tool_blob_store.open_readonly_nofollow_nonblock path in
+    match Unix.in_channel_of_descr fd with
+    | ic -> fd, ic
+    | exception exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      (try Unix.close fd with Unix.Unix_error _ -> ());
+      Printexc.raise_with_backtrace exn bt
+  in
+  let open_dest () =
+    let fd =
+      Unix.openfile redacted_path
+        [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL; Unix.O_CLOEXEC ]
+        0o600
+    in
+    match Unix.out_channel_of_descr fd with
+    | oc -> oc
+    | exception exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      (try Unix.close fd with Unix.Unix_error _ -> ());
+      Printexc.raise_with_backtrace exn bt
+  in
+  let same_source_stat (st : Unix.stats) =
+    st.st_kind = Unix.S_REG
+    && st.st_dev = before.device
+    && st.st_ino = before.inode
+    && st.st_uid = prepared.uid
+    && st.st_perm land 0o077 = 0
+    && st.st_size = byte_length
+    && Float.equal st.st_mtime before.modified_at
+    && Float.equal st.st_ctime before.changed_at
+  in
+  (* fun-protect-finally-ok: synchronous file cleanup inside blocking worker. *)
+  Fun.protect ~finally:(fun () -> unlink_if_present redacted_path) (fun () ->
+    let src_fd, src_ic = open_source () in
+    let redacted_sha256, redacted_bytes =
+      Fun.protect ~finally:(fun () -> close_in_noerr src_ic) (fun () ->
+        if not (same_source_stat (Unix.fstat src_fd))
+        then raise (Sys_error "capture file identity changed before redaction");
+        let dst_oc = open_dest () in
+        Fun.protect ~finally:(fun () -> close_out_noerr dst_oc) (fun () ->
+          let state = Keeper_secret_redaction.create_stream_state redaction in
+          let buf = Bytes.create Sys.io_buffer_size in
+          let out_digest = ref Agent_core_sha256.empty in
+          let out_bytes = ref 0 in
+          let emit_out s =
+            if String.length s > 0 then (
+              output_string dst_oc s;
+              out_digest := Agent_core_sha256.feed_string !out_digest s;
+              out_bytes := !out_bytes + String.length s)
+          in
+          let rec loop read_total =
+            match input src_ic buf 0 (Bytes.length buf) with
+            | 0 -> read_total
+            | count ->
+              let chunk = Bytes.sub_string buf 0 count in
+              emit_out (Keeper_secret_redaction.redact_stream_chunk state chunk);
+              loop (read_total + count)
+          in
+          let total_read = loop 0 in
+          emit_out (Keeper_secret_redaction.redact_stream_finish state);
+          flush dst_oc;
+          if total_read <> byte_length || not (same_source_stat (Unix.fstat src_fd))
+          then raise (Sys_error "capture file changed during redaction");
+          close_out dst_oc;
+          Agent_core_sha256.(to_hex (get !out_digest)), !out_bytes))
+    in
+    let reference =
+      Tool_blob_store.put_file_durable_blocking blobs ~path:redacted_path ~mime:"text/plain"
+    in
+    if String.equal reference.Tool_output.sha256 redacted_sha256
+       && reference.bytes = redacted_bytes
+    then reference
+    else raise (Sys_error "redacted capture changed during durable publication"))
+
 let publish_log_file prepared ~capture_directory blobs (path, byte_length) =
   let* before = capture_file_snapshot prepared ~capture_directory ~path ~byte_length in
-  let* sha256 = Fs_compat.sha256_owned_regular_file ~ownership_root:prepared.spec.base_path path
-    |> Result.map_error (fun error -> Log_publication_failed (Fs_compat.owned_regular_file_read_error_to_string error)) in
-  let* sha256 = match sha256 with Some value -> Ok value
-    | None -> Error (Log_publication_failed "complete capture disappeared before publication") in
+  let redaction =
+    Keeper_secret_redaction.snapshot
+      ~base_path:prepared.spec.base_path
+      ~keeper_name:prepared.spec.keeper_name
+  in
+  let run f =
+    match Domain_pool_ref.get () with
+    | Some _ -> Domain_pool_ref.submit_cpu_or_inline ~name:"owned-job-publish-log" f
+    | None -> Eio_guard.run_in_systhread ~label:"owned-job-publish-log" f
+  in
   let* reference =
-    try Ok (Tool_blob_store.put_file_durable blobs ~path ~mime:"text/plain") with
+    try
+      Ok
+        (run (fun () ->
+           redact_and_publish_capture_blocking ~prepared ~capture_directory ~blobs
+             ~redaction ~expected_snapshot:before ~path ~byte_length))
+    with
     | Sys_error detail -> Error (Log_publication_failed detail)
     | Unix.Unix_error (error, operation, _) ->
       Error (Log_publication_failed (operation ^ ": " ^ Unix.error_message error)) in
   let* after = capture_file_snapshot prepared ~capture_directory ~path ~byte_length in
   if Fs_compat.equal_owned_regular_file_snapshot before after
-    && reference.Tool_output.sha256 = sha256 && reference.bytes = byte_length
   then Ok reference
   else Error (Log_publication_failed "complete capture changed during durable publication")
 

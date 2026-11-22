@@ -149,6 +149,11 @@ val put_prepared_durable_reuse :
     exact byte comparisons, strict syncs, repair and publication checks are
     the same as [put_durable_reuse]. Preparation alone authorizes no reuse. *)
 
+val open_readonly_nofollow_nonblock : string -> Unix.file_descr
+(** Open [path] read-only with [O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC].
+    Refuses symbolic links atomically with [Unix.Unix_error (ELOOP, ...)] and
+    never blocks on FIFOs. Callers must still check [Unix.fstat] for [S_REG]. *)
+
 val put_file_durable_blocking : t -> path:string -> mime:string -> Tool_output.artifact_ref
 (** The same durable file ingestion, executed synchronously on the caller.
     Only use inside an existing blocking job or CPU worker; it does not

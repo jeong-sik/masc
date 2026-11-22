@@ -2813,11 +2813,32 @@ let test_sha256_rejects_path_component () =
 
 (* --- Entry point --- *)
 
+let test_durable_puts_run_hashing_off_main_domain () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let pool = Domain_pool.create ~sw ~domain_count:2 (Eio.Stdenv.domain_mgr env) in
+  Domain_pool_ref.set pool;
+  Fun.protect ~finally:Domain_pool_ref.clear_for_tests (fun () ->
+    with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let payload = String.make 200_000 'H' in
+      let r1 = B.put_durable store ~bytes:payload ~mime:"application/octet-stream" in
+      let r2 = B.put_durable_reuse store ~bytes:payload ~mime:"application/octet-stream" in
+      let r3 = B.put_durable_reuse store ~bytes:payload ~mime:"application/octet-stream" in
+      Alcotest.(check string) "put_durable and put_durable_reuse agree on sha256"
+        r1.O.sha256 r2.O.sha256;
+      Alcotest.(check string) "warm streaming put_durable_reuse agrees on sha256"
+        r2.O.sha256 r3.O.sha256;
+      Alcotest.(check (option string)) "stored payload fetches cleanly" (Some payload)
+        (fetch_ok store ~sha256:r1.O.sha256)))
+
 let () =
   Alcotest.run "tool_blob_store"
     [
       ( "tool_output round-trip",
         [
+          Alcotest.test_case "durable puts run SHA-256 hashing off main domain" `Quick
+            test_durable_puts_run_hashing_off_main_domain;
           Alcotest.test_case "stored" `Quick test_stored_roundtrip;
           Alcotest.test_case "trailing bytes after the marker are rejected"
             `Quick test_trailing_bytes_after_the_marker_are_rejected;

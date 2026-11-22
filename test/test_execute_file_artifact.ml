@@ -142,6 +142,21 @@ let test_fifo_is_rejected_without_waiting_for_a_writer () =
     | _ -> Alcotest.fail "a FIFO became a completed file artifact"
     | exception Sys_error _ -> ())
 
+let test_symlink_is_rejected_by_put_file_durable () =
+  with_directory (fun base_path ->
+    let target = Filename.concat base_path "host-secret.txt" in
+    let link = Filename.concat base_path "symlink-spool.txt" in
+    Out_channel.with_open_bin target (fun c -> output_string c "TOP-SECRET-HOST-FILE\n");
+    Unix.symlink target link;
+    let store = B.create ~base_path in
+    (match B.put_file_durable store ~path:link ~mime:"text/plain" with
+     | _ -> Alcotest.fail "put_file_durable followed a symbolic link"
+     | exception Sys_error _ -> ());
+    (match B.put_file_durable_blocking store ~path:link ~mime:"text/plain" with
+     | _ -> Alcotest.fail "put_file_durable_blocking followed a symbolic link"
+     | exception Sys_error _ -> ());
+    Alcotest.(check (list string)) "rejected symlink published no blob" [] (B.list_all store))
+
 let () =
   Alcotest.run "Execute file artifacts"
     [ "whole output",
@@ -157,5 +172,7 @@ let () =
           test_storage_failure_keeps_the_source_for_retry
       ; Alcotest.test_case "a pipe cannot block file ingestion" `Quick
           test_fifo_is_rejected_without_waiting_for_a_writer
+      ; Alcotest.test_case "a symbolic link is rejected via O_NOFOLLOW" `Quick
+          test_symlink_is_rejected_by_put_file_durable
       ]
     ]

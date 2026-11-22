@@ -1985,7 +1985,7 @@ let run_without_lifecycle
           ~session_id
           ~goal:goal_text)
   in
-  let build_start_prompt ~use_meta_append ~goal:start_goal ~prepared:start_prepared =
+  let build_start_prompt ~use_meta_append ~goal:start_goal ~prepared:(start_prepared : Host.prepared_turn) =
     if use_meta_append
     then (
       (* Deliver standing system prompt natively via _meta.antigravity.systemPrompt.append;

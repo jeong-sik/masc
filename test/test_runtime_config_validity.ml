@@ -3001,15 +3001,17 @@ let test_runtime_toml_rejects_non_positive_repeat_penalty () =
            String.equal err.path "local.sample.repeat-penalty")
          errs)
 
-(* The RFC's table, read from the one function the lanes' call sites use. *)
-let test_judgment_lanes_join_the_priority_queue () =
+(* Interactive chat turns reserve [Priority] via [admission_class_of_caller];
+   standalone verdict lanes run as [Standard] and memory/curation lanes run as
+   [Background]. Read from the one function the lanes' call sites use. *)
+let test_standalone_lanes_admission_classes () =
   check
     (list (pair string string))
     "admission class per lane"
     [ "librarian_exact", "background"
-    ; "hitl_auto_judge", "priority"
-    ; "board_attention_exact", "priority"
-    ; "verifier_exact", "priority"
+    ; "hitl_auto_judge", "standard"
+    ; "board_attention_exact", "standard"
+    ; "verifier_exact", "standard"
     ; "candle_appraiser", "standard"
     ; "librarian_memory", "background"
     ; "workspace_memory_curator", "background"
@@ -3018,12 +3020,27 @@ let test_judgment_lanes_join_the_priority_queue () =
        (fun lane ->
           ( Standalone_lane.to_id lane
           , Llm_provider.Admission_class.to_string (Standalone_lane.admission_class lane) ))
-       Standalone_lane.all)
+       Standalone_lane.all);
+  check
+    string
+    "interactive chat reserves priority admission"
+    "priority"
+    (Llm_provider.Admission_class.to_string
+       (Standalone_lane.admission_class_of_caller Standalone_lane.Interactive_chat));
+  List.iter
+    (fun lane ->
+       check
+         string
+         (Standalone_lane.to_id lane ^ " caller class matches standalone class")
+         (Llm_provider.Admission_class.to_string (Standalone_lane.admission_class lane))
+         (Llm_provider.Admission_class.to_string
+            (Standalone_lane.admission_class_of_caller (Standalone_lane.Standalone lane))))
+    Standalone_lane.all
 
 (* The seed declares the run limit on glm-coding; every runtime built from a
    glm-coding binding carries it with that binding's permit count, and its
-   ordinary requests stay [Standard]. Only the judgment lanes ask for
-   [Priority]. *)
+   ordinary requests stay [Standard]. Interactive chat turns reserve [Priority];
+   standalone verdict lanes run as [Standard]. *)
 let test_repo_glm_coding_runtimes_carry_the_priority_run_limit () =
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
   match load_list_text ~config_path:path with
@@ -8385,8 +8402,8 @@ let () =
             test_a_resume_changes_an_admitted_allowance_live;
           test_case "runtimes on one account that disagree are refused" `Quick
             test_runtimes_on_one_account_that_disagree_are_refused;
-          test_case "judgment lanes join the priority queue" `Quick
-            test_judgment_lanes_join_the_priority_queue;
+          test_case "standalone lanes use standard/background while chat reserves priority" `Quick
+            test_standalone_lanes_admission_classes;
           test_case "repetition samplers off the ollama wire are rejected" `Quick
             test_runtime_toml_rejects_repetition_samplers_off_the_ollama_wire;
           test_case "repetition samplers on the ollama wire still parse" `Quick

@@ -5624,6 +5624,101 @@ let test_a_dated_quota_refusal_is_a_rest () =
               ~assignment_id:"quota_lane" None))))
 ;;
 
+let test_attempt_context_tracks_remaining_untried_candidates () =
+  let observed = ref [] in
+  let busy_err =
+    Keeper_provider_refusal.core_error
+      (Keeper_provider_refusal.Account_busy { provider = "p1"; account_id = "acct-1" })
+  in
+  let _ =
+    Driver.For_testing.attempt_runtime_candidates
+      ~walk_owner:Driver.One_shot_walk
+      ~runtime_id:"seat_lane"
+      ~runtime_id_of:Fun.id
+      ~candidate_dispatchable:(fun _ -> true)
+      ~on_attempt_context:(fun ~has_remaining_candidates ->
+        observed := has_remaining_candidates :: !observed)
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
+        attempt_without_effect (Error busy_err) None)
+      [ "primary.m"; "backup.m" ]
+  in
+  Alcotest.(check (list bool))
+    "primary sees remaining untried backup; final candidate sees none"
+    [ true; false ]
+    (List.rev !observed);
+  let observed_resumed = ref [] in
+  let _ =
+    Driver.For_testing.attempt_runtime_candidates
+      ~walk_owner:Driver.One_shot_walk
+      ~runtime_id:"seat_lane"
+      ~runtime_id_of:Fun.id
+      ~candidate_dispatchable:(fun _ -> true)
+      ~member_of:(fun id ->
+        if String.equal id "already_failed.m" then Driver.Failed_last else Driver.Untried)
+      ~on_attempt_context:(fun ~has_remaining_candidates ->
+        observed_resumed := has_remaining_candidates :: !observed_resumed)
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
+        attempt_without_effect (Error busy_err) None)
+      [ "last_untried.m"; "already_failed.m" ]
+  in
+  Alcotest.(check (list bool))
+    "Failed_last tail does not count as an untried backup candidate"
+    [ false; false ]
+    (List.rev !observed_resumed)
+;;
+
+let test_seat_contention_rest_of_failure_is_non_fault_backoff () =
+  let now = 1_700_000_000.0 in
+  let account_busy =
+    Keeper_provider_refusal.core_error
+      (Keeper_provider_refusal.Account_busy { provider = "claude"; account_id = "acct-seat-1" })
+  in
+  let key_refused =
+    Keeper_provider_refusal.core_error
+      (Keeper_provider_refusal.Key_refused { provider = "openai"; detail = "401" })
+  in
+  (match
+     Driver.seat_contention_rest_of_failure
+       ~now ~error:account_busy ~assignment_id:"lane-a" None
+   with
+   | Some { Driver.release_at; waiting_on; basis = Driver.Failure_response } ->
+     Alcotest.(check bool) "rest releases strictly in the future" true (release_at > now);
+     Alcotest.(check string) "waiting_on identifies contended account" "acct-seat-1" waiting_on
+   | Some { Driver.basis = Driver.Observed_path_rest; _ } | None ->
+     Alcotest.fail "expected non-fault contention rest for Account_busy without deferred suffix");
+  let deferred =
+    Driver.For_testing.make_deferred_runtime_lane
+      ~assignment_id:"lane-a"
+      ~failed_runtime_id:"a.m"
+      ~next_runtime_id:"b.m"
+      ~later_runtime_ids:[]
+      ~failure:account_busy
+  in
+  Alcotest.(check bool)
+    "deferred backup suffix does not rest on Account_busy"
+    true
+    (Option.is_none
+       (Driver.seat_contention_rest_of_failure
+          ~now ~error:account_busy ~assignment_id:"lane-a" (Some deferred)));
+  Alcotest.(check bool)
+    "Key_refused is not classified as seat contention backoff"
+    true
+    (Option.is_none
+       (Driver.seat_contention_rest_of_failure
+          ~now ~error:key_refused ~assignment_id:"lane-a" None));
+  Alcotest.(check bool)
+    "ordinary server error is not classified as seat contention backoff"
+    true
+    (Option.is_none
+       (Driver.seat_contention_rest_of_failure
+          ~now
+          ~error:(Agent_core.Error.Api (Llm_provider.Retry.ServerError { status = 500; message = "err" }))
+          ~assignment_id:"lane-a"
+          None))
+;;
+
 (* RFC-provider-path-rest §3.4: the chat lane's deferred retry reads the same
    next dispatch as the heartbeat. A suffix whose walk head serves is claimable
    at once; a resting head holds the retry until its release; a provider's
@@ -9070,5 +9165,13 @@ let () =
             "a pipeline refusal is not a dispatched attempt"
             `Quick
             test_a_pipeline_refusal_is_not_a_dispatched_attempt;
+          Alcotest.test_case
+            "P1-2 attempt context tracks remaining untried candidates"
+            `Quick
+            test_attempt_context_tracks_remaining_untried_candidates;
+          Alcotest.test_case
+            "P1-2 Account_busy seat contention yields non-fault contention backoff"
+            `Quick
+            test_seat_contention_rest_of_failure_is_non_fault_backoff;
         ] );
     ]

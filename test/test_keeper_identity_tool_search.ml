@@ -1732,6 +1732,58 @@ let test_reference_history_places_tools_without_carry_or_receipts () =
   check (list string) "losing the reference drops the next placement" [] (placed_names without_reference)
 ;;
 
+let make_compaction_anchor_msg epoch_id =
+  Keeper_compaction.anchor_to_message
+    { Keeper_compaction.epoch_id
+    ; covers_through_turn = Ids.Turn_id.of_string (Printf.sprintf "turn-ep-%d" epoch_id)
+    ; archived_epochs_through = None
+    ; active_intent = "post-compaction intent"
+    ; verified_facts_and_files = []
+    ; decisions_made = []
+    ; open_threads = []
+    }
+;;
+
+let test_compaction_anchor_resets_history_carry_while_keeping_epoch_append_only () =
+  let anchor1 = make_compaction_anchor_msg 1 in
+  let anchor2 = make_compaction_anchor_msg 2 in
+  (* Pre-compaction calls are dropped at the compaction boundary while
+     post-compaction calls stay placed. *)
+  let history_after_compaction =
+    [ called "atlassian_jira_search"
+    ; called "atlassian_confluence_search"
+    ; anchor1
+    ; called "atlassian_jira_create"
+    ]
+  in
+  check
+    (list string)
+    "inline compaction anchor resets pre-compaction History_carry tools"
+    [ "atlassian_jira_create" ]
+    (already_used ~carry_window:10 ~history:history_after_compaction (offered three_offered));
+  (* Within the post-compaction epoch, carry remains strictly append-only so
+     prompt cache never busts mid-epoch. *)
+  let history_same_epoch_grown =
+    history_after_compaction @ filler 40 @ [ called "atlassian_jira_search" ]
+  in
+  check
+    (list string)
+    "post-compaction epoch stays append-only without mid-epoch eviction"
+    [ "atlassian_jira_create"; "atlassian_jira_search" ]
+    (already_used ~carry_window:10 ~history:history_same_epoch_grown (offered three_offered));
+  (* A second compaction anchor resets the carry again to empty when no tool
+     calls follow it. *)
+  let history_after_second_compaction = history_same_epoch_grown @ [ anchor2 ] in
+  check
+    (list string)
+    "latest compaction anchor scopes carry strictly to the post-anchor tail"
+    []
+    (already_used
+       ~carry_window:10
+       ~history:history_after_second_compaction
+       (offered three_offered))
+;;
+
 let () =
   run
     "keeper_identity_tool_search"
@@ -1810,6 +1862,8 @@ let () =
             test_a_returning_tool_keeps_its_place
         ; test_case "places everything when it is zero" `Quick
             test_a_zero_window_places_everything
+        ; test_case "compaction anchor resets History_carry while keeping epoch append-only" `Quick
+            test_compaction_anchor_resets_history_carry_while_keeping_epoch_append_only
         ] )
     ; ( "tool references"
       , [ test_case "load result has unique references and fallback" `Quick

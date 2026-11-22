@@ -165,6 +165,12 @@ val run :
      that opened it. *)
   event_bus:Agent_core.Event_bus.t option ->
   raw_trace:Agent_core.Raw_trace.t option ->
+  ?live_stream_consumer:bool ->
+  (* Whether [on_event] forwards user-visible text deltas to a live consumer
+     (e.g., SSE/TUI chat stream). Defaults to [Option.is_some on_event]. When
+     true, emitting non-empty [Text_delta] fences same-turn failover so a
+     backup candidate cannot splice a duplicate reply onto already-streamed
+     tokens. *)
   on_event:(Agent_core.Types.sse_event -> unit) option ->
   account:Runtime_claude_code.authorized_account ->
   (* The account the CLI starts on ({!Runtime_account_access.authorize}). The

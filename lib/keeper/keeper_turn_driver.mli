@@ -335,6 +335,18 @@ val provider_rest_of_failure :
     attempted a tool effect, or could not observe one, is fenced and routes
     as [Exhausted_visible_alive], so it is [None]. *)
 
+val seat_contention_rest_of_failure :
+  now:float ->
+  error:Agent_core.Error.t ->
+  assignment_id:string ->
+  deferred_runtime_lane option ->
+  provider_rest option
+(** Non-fault contention backoff for autonomous keepalive when the lane
+    exhausted its final candidate solely on {!Keeper_provider_refusal.Account_busy}
+    after bounded FIFO admission timed out (and no deferred lane suffix
+    remains). Returns [Some] short bounded {!provider_rest} so healthy Keepers
+    sharing one person seat back off cleanly without incrementing crash streaks. *)
+
 val equal_deferred_runtime_lane :
   deferred_runtime_lane -> deferred_runtime_lane -> bool
 
@@ -454,6 +466,12 @@ val run_named :
   ?hooks:Agent_core.Hooks.hooks ->
   ?approval_gate:Keeper_tool_approval_gate.t ->
   raw_trace:Agent_core.Raw_trace.t option ->
+  ?live_stream_consumer:bool ->
+  (* Whether [on_event] delivers user-visible text deltas to a live consumer
+     (e.g. SSE/TUI chat stream). Defaults to [Option.is_some on_event]. When
+     true, emitting any non-empty user-visible text delta fences same-turn
+     failover so a backup candidate cannot splice a duplicate reply onto
+     already-streamed tokens. *)
   ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
@@ -878,6 +896,7 @@ module For_testing : sig
     ?candidate_dispatchable:('candidate -> bool) ->
     ?read_usage_after_account_refusal:('candidate -> unit) ->
     ?member_of:('candidate -> resumed_member) ->
+    ?on_attempt_context:(has_remaining_candidates:bool -> unit) ->
     walk_owner:walk_owner ->
     runtime_id:string ->
     runtime_id_of:('candidate -> string) ->
@@ -959,5 +978,10 @@ module For_testing : sig
   (** Maps HTTP 401 [AuthError] failures on a person's API key account to
       {!Keeper_provider_refusal.Key_refused}, leaving HTTP 403
       [AuthorizationError] and host/operator seals unchanged. *)
+
+  val with_account_call_wait_timeout_sec : float -> (unit -> 'a) -> 'a
+  (** Temporarily overrides the bounded FIFO wait timeout used on the final
+      candidate's account-slot admission so unit tests can exercise wait and
+      timeout paths deterministically without sleeping for the default budget. *)
 
 end

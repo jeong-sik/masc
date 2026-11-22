@@ -1669,6 +1669,130 @@ let test_per_keeper_ssh_redaction_under_config_keepers_and_compact_and_project (
     (Ids.Turn_id.to_string anchor_ep2.covers_through_turn)
 ;;
 
+let test_p1_5_live_history_after_latest_anchor_scopes_tool_carry () =
+  with_temp_dir @@ fun base_path ->
+  let keepers_dir =
+    Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "config") "keepers"
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  let turn_atom ~prompt ~tool_name ~answer : Agent_core.Types.message list =
+    let call_id = "call-" ^ tool_name in
+    [ { origin = Agent_core.Llm_provider.Types.Conversation
+      ; role = Agent_core.Types.User
+      ; content = [ Agent_core.Types.Text prompt ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; { origin = Agent_core.Llm_provider.Types.Conversation
+      ; role = Agent_core.Types.Assistant
+      ; content = [ Agent_core.Types.ToolUse { id = call_id; name = tool_name; input = `Assoc [] } ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; { origin = Agent_core.Llm_provider.Types.Conversation
+      ; role = Agent_core.Types.Tool
+      ; content =
+          [ Agent_core.Types.ToolResult
+              { tool_use_id = call_id
+              ; content = "ok"
+              ; outcome = Agent_core.Types.Tool_succeeded
+              ; json = None
+              ; content_blocks = None
+              }
+          ]
+      ; name = None
+      ; tool_call_id = Some call_id
+      ; metadata = []
+      }
+    ; { origin = Agent_core.Llm_provider.Types.Conversation
+      ; role = Agent_core.Types.Assistant
+      ; content = [ Agent_core.Types.Text answer ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  let atom0 = turn_atom ~prompt:"epoch1 turn 0" ~tool_name:"svc_old_a" ~answer:"done a" in
+  let atom1 = turn_atom ~prompt:"epoch1 turn 1" ~tool_name:"svc_old_b" ~answer:"done b" in
+  let atom2 = turn_atom ~prompt:"epoch2 turn 2" ~tool_name:"svc_live_c" ~answer:"done c" in
+  let full_history = atom0 @ atom1 @ atom2 in
+  (* Before any compaction anchor exists, full history is returned unchanged. *)
+  check int "without anchor, full durable history is preserved"
+    (List.length full_history)
+    (List.length
+       (Keeper_compaction.live_history_after_latest_anchor
+          ~keepers_dir ~keeper_id:"k-tool-carry" full_history));
+  (* Commit compaction covering atoms 0 and 1. *)
+  let anchor =
+    match
+      Keeper_compaction.compact_evicted_messages
+        ~keepers_dir
+        ~keeper_id:"k-tool-carry"
+        ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = Some 4096 })
+        ~evicted_messages:(atom0 @ atom1)
+        ()
+    with
+    | Ok (Some a) -> a
+    | Ok None -> fail "expected committed compaction anchor"
+    | Error err -> fail (Keeper_compaction.store_error_to_string err)
+  in
+  let live_tail =
+    Keeper_compaction.live_history_after_latest_anchor
+      ~keepers_dir ~keeper_id:"k-tool-carry" full_history
+  in
+  let tool_names_in msgs =
+    msgs
+    |> List.concat_map (fun (m : Agent_core.Types.message) ->
+      List.filter_map
+        (function
+          | Agent_core.Types.ToolUse { name; _ } -> Some name
+          | Text _ | Thinking _ | RedactedThinking _ | ToolResult _
+          | ToolReference _ | Image _ | Document _ | Audio _ | ReasoningDetails _ -> None)
+        m.content)
+  in
+  check (list string) "persisted anchor drops pre-compaction ToolUse atoms and keeps live tail"
+    [ "svc_live_c" ]
+    (tool_names_in live_tail);
+  (* Disambiguated covers_through_turn suffix (-ep2-0) also matches atom 1 cleanly. *)
+  let disambiguated_anchor =
+    { anchor with
+      covers_through_turn =
+        Ids.Turn_id.of_string (Ids.Turn_id.to_string anchor.covers_through_turn ^ "-ep2-0")
+    }
+  in
+  check (list string) "disambiguated covers_through_turn matches and slices live tail"
+    [ "svc_live_c" ]
+    (tool_names_in (Keeper_compaction.messages_after_anchor ~anchor:disambiguated_anchor full_history));
+  (* Non-prefix re-indexed eviction (e.g., atom 1 compacted alone as atom-0-<hash>)
+     still matches atom 1 by content hash and slices strictly to atom 2. *)
+  let reindexed_anchor =
+    match
+      Keeper_compaction.compact_evicted_messages
+        ~keepers_dir
+        ~keeper_id:"k-tool-carry-reindexed"
+        ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = Some 4096 })
+        ~evicted_messages:atom1
+        ()
+    with
+    | Ok (Some a) -> a
+    | Ok None -> fail "expected reindexed compaction anchor"
+    | Error err -> fail (Keeper_compaction.store_error_to_string err)
+  in
+  check (list string) "reindexed evicted atom still slices strictly after atom 1"
+    [ "svc_live_c" ]
+    (tool_names_in (Keeper_compaction.messages_after_anchor ~anchor:reindexed_anchor full_history));
+  (* Unmatched covers_through_turn fails open to full history so live turns are never dropped. *)
+  let unrelated_anchor =
+    { anchor with covers_through_turn = Ids.Turn_id.of_string "turn-not-in-history" }
+  in
+  check (list string) "unmatched anchor fails open to full history"
+    [ "svc_old_a"; "svc_old_b"; "svc_live_c" ]
+    (tool_names_in (Keeper_compaction.messages_after_anchor ~anchor:unrelated_anchor full_history))
+;;
+
 let () =
   run
     "keeper_compaction"
@@ -1697,6 +1821,8 @@ let () =
             test_canonical_turn_multi_epoch_watermark_monotonicity
         ; test_case "canonical turn disk lifecycle: auto_vacuum, prune, retention cap & delete_store" `Quick
             test_canonical_turn_disk_lifecycle_prune_and_delete
+        ; test_case "P1-5 live_history_after_latest_anchor scopes non-Anthropic tool carry across compaction" `Quick
+            test_p1_5_live_history_after_latest_anchor_scopes_tool_carry
         ] )
     ]
 ;;

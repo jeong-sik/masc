@@ -194,4 +194,12 @@ module For_testing : sig
 
   val unbounded_capacity_bytes : int
   (** [capacity_bytes] of a first attempt: nothing is cut but the range. *)
+
+  val native_cwd
+    :  base_path:string
+    -> keeper_name:string
+    -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile option
+    -> (string, Agent_core.Error.t) result
+  (** Resolves and validates the Codex native working directory without
+      following symbolic links or modifying foreign-owned paths. *)
 end

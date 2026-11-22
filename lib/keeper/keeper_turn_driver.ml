@@ -382,13 +382,45 @@ let provider_account_id_of_attempt ~(runtime : Runtime_instance.t) =
   | Runtime_execution.Antigravity_cli _ | Runtime_execution.Acp _ -> None
 ;;
 
-let with_account_call_slot ~(runtime : Runtime_instance.t) ~on_busy f =
+let account_call_wait_timeout_override_sec : float option ref = ref None
+
+let account_call_wait_timeout_sec () =
+  match !account_call_wait_timeout_override_sec with
+  | Some timeout_s -> timeout_s
+  | None -> Env_config_keeper.KeeperLaneGate.admission_wait_budget_sec ()
+;;
+
+let with_account_call_wait_timeout_sec timeout_s f =
+  let previous = !account_call_wait_timeout_override_sec in
+  account_call_wait_timeout_override_sec := Some timeout_s;
+  Fun.protect f ~finally:(fun () ->
+    account_call_wait_timeout_override_sec := previous)
+;;
+
+let with_account_call_slot ~has_remaining_candidates ~(runtime : Runtime_instance.t) ~on_busy f =
   match provider_account_id_of_attempt ~runtime with
   | None -> f ()
   | Some account_id ->
-    (match
-       Runtime_account_call.try_acquire account_id (fun (_call : Runtime_account_call.t) -> f ())
-     with
+    let acquired =
+      if has_remaining_candidates
+      then
+        Runtime_account_call.try_acquire
+          account_id
+          (fun (_call : Runtime_account_call.t) -> f ())
+      else (
+        match Fs_compat.execution_context (), Eio_context.get_clock_opt () with
+        | Fs_compat.Eio_fiber, Some clock ->
+          Runtime_account_call.call_in_turn_of_with_timeout
+            ~clock
+            ~timeout_s:(account_call_wait_timeout_sec ())
+            account_id
+            (fun (_call : Runtime_account_call.t) -> f ())
+        | Fs_compat.Non_eio, _ | Fs_compat.Eio_fiber, None ->
+          Runtime_account_call.try_acquire
+            account_id
+            (fun (_call : Runtime_account_call.t) -> f ()))
+    in
+    (match acquired with
      | Runtime_account_call.Acquired value -> value
      | Runtime_account_call.Account_busy busy_id ->
        let err =
@@ -908,6 +940,28 @@ let provider_rest_of_failure ~now ~route ~assignment_id deferred =
       } -> None
 ;;
 
+(* Short non-fault backoff when autonomous keepalive exhausts its final
+   candidate on pure single-seat contention ([Account_busy]) after bounded FIFO
+   admission timed out. Keeps healthy Keepers sharing one seat out of
+   [Failing]/[Crashed] crash streaks while letting them re-attempt promptly. *)
+let seat_contention_backoff_sec = 10.0
+
+let seat_contention_rest_of_failure ~now ~error ~assignment_id deferred =
+  match deferred, Keeper_provider_refusal.of_core_error error with
+  | None, Some (Keeper_provider_refusal.Account_busy { account_id; _ }) ->
+    let waiting_on =
+      if String.equal (String.trim account_id) "" then assignment_id else account_id
+    in
+    Some
+      { release_at = now +. seat_contention_backoff_sec
+      ; waiting_on
+      ; basis = Failure_response
+      }
+  | Some _, _
+  | None, Some (Keeper_provider_refusal.Key_refused _ | Keeper_provider_refusal.Spawn_refused _)
+  | None, None -> None
+;;
+
 (* Two lanes name the same hint. The order a resumed lane fixed is not part of
    the hint. *)
 let equal_deferred_runtime_lane left right =
@@ -1043,6 +1097,7 @@ let attempt_runtime_candidates
     ?candidate_dispatchable
     ?read_usage_after_account_refusal
     ?(member_of = fun _ -> Untried)
+    ?(on_attempt_context = fun ~has_remaining_candidates:_ -> ())
     ~walk_owner
     ~runtime_id ~runtime_id_of
     ~(emit_runtime_manifest :
@@ -1140,6 +1195,17 @@ let attempt_runtime_candidates
     | candidate :: rest -> attempt ~observed_overflow ~untried idx candidate rest
   and attempt ~observed_overflow ~untried idx candidate rest =
     let is_last = rest = [] in
+    let has_remaining_candidates =
+      List.exists
+        (fun remaining ->
+           candidate_dispatchable remaining
+           &&
+           match member_of remaining with
+           | Untried -> true
+           | Retry_of_tried | Failed_last -> false)
+        rest
+    in
+    on_attempt_context ~has_remaining_candidates;
     let untried =
       match untried, member_of candidate with
       | Untried_attempted, (Untried | Retry_of_tried | Failed_last)
@@ -2463,6 +2529,7 @@ let run_named
     ?hooks
     ?approval_gate
     ~raw_trace
+    ?live_stream_consumer
     ?on_event
     ?on_yield
     ?on_resume
@@ -2523,6 +2590,11 @@ let run_named
     ()
   : (named_run_result, Agent_core.Error.t) result =
   Runtime_response_identity_scope.without_identity (fun () ->
+  let live_stream_consumer =
+    match live_stream_consumer with
+    | Some flag -> flag
+    | None -> Option.is_some on_event
+  in
   let masc_tools_enabled =
     masc_enabled
     &&
@@ -2925,30 +2997,31 @@ let run_named
     | Some t -> t
     | None -> Masc_grpc_transport.from_env ()
   in
-  (* The vision delegation must not spend this turn's candidates twice. Its own
-     candidate set is the global media list, and the quota window moves an
-     account that answered a hard rejection behind the live ones without
-     removing it -- so a walk that just collected 402s would ask those same
-     accounts once more through the projector before the text fallback starts
-     (#34829).
-     The excluded set is the walk's declared candidates rather than the prefix
-     it has reached: every one of them has either been dispatched to already or
-     is about to be by this same walk, so a delegation to either is work the
-     walk is doing anyway. Fixing it here keeps the walk's [run_attempt]
-     signature and its mutable state out of the delegation. *)
-  let project_images =
-    let project = Keeper_vision_ingest.fallback_projector
-      ~base_path
-      ~media_store
-      ~exclude_runtime_ids:lane_candidate_ids
-      ~keeper_name
-      () in
+  (* The vision delegation must not spend candidates this walk has already
+     tried (or the non-vision candidate currently executing). Excluding every
+     declared lane candidate up front wrongly suppressed unattempted vision
+     candidates sitting later in the lane tail when a non-vision head needed
+     mid-turn [media_failover]. Track only actually attempted runtime IDs (plus
+     the current candidate) and build the attempt's projector against that
+     prefix. *)
+  let attempted_runtime_ids = ref [] in
+  let make_attempt_project_images ~exclude_runtime_ids =
+    let project =
+      Keeper_vision_ingest.fallback_projector
+        ~base_path
+        ~media_store
+        ~exclude_runtime_ids
+        ~keeper_name
+        ()
+    in
     fun ~mode blocks ->
       (* Exact-lane admission also owns provider selection for image evidence:
          retain unread artifacts, but never dispatch an out-of-lane vision call. *)
-      let mode = match output_contract with
+      let mode =
+        match output_contract with
         | Provider_default -> mode
-        | Tool_verdict -> Keeper_vision_ingest.Store_only in
+        | Tool_verdict -> Keeper_vision_ingest.Store_only
+      in
       project ~mode blocks
   in
   (* H5 readings belong to the walk. History projections and retained Text
@@ -2968,6 +3041,7 @@ let run_named
       ?source_reader:(Option.map
         (fun (readers : Keeper_media_reading.source_readers) -> readers.read) media_readers)
       ~input_source media_projector in
+  let current_has_remaining_candidates = ref false in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
      move to the next candidate; on success we record completion and return. *)
   attempt_runtime_candidates
@@ -2979,6 +3053,8 @@ let run_named
     ?attempt_continuation
     ?on_attempt_error:on_runtime_attempt_error
     ?on_lane_terminal_error:on_runtime_lane_terminal_error
+    ~on_attempt_context:(fun ~has_remaining_candidates ->
+      current_has_remaining_candidates := has_remaining_candidates)
     ~allow_retry:(fun ~runtime_id:attempt_runtime_id ~attempt error ->
       let allowed =
         Keeper_turn_driver_try_provider.same_run_retry_allowed
@@ -3023,6 +3099,71 @@ let run_named
     ~provider_answered:(fun (named : named_run_result) -> run_result_answered named.run_result)
     ~emit_runtime_manifest
     ~run_attempt:(observe_native_attempt ?on_request_observation native_binding (fun ?on_request_evidence ~idx ~runtime_id:attempt_runtime_id candidate ->
+      if not (List.exists (String.equal attempt_runtime_id) !attempted_runtime_ids)
+      then attempted_runtime_ids := attempt_runtime_id :: !attempted_runtime_ids;
+      let project_images =
+        make_attempt_project_images ~exclude_runtime_ids:!attempted_runtime_ids
+      in
+      let streamed_user_text = ref false in
+      let attempt_on_event =
+        match on_event with
+        | None -> None
+        | Some forward ->
+          Some
+            (fun (event : Agent_core.Types.sse_event) ->
+               (if live_stream_consumer
+                then
+                  match event with
+                  | Agent_core.Types.ContentBlockDelta
+                      { delta =
+                          ( Agent_core.Types.TextDelta text
+                          | Agent_core.Types.TextSnapshot text )
+                      ; _
+                      } ->
+                    if not (String.equal text "") then streamed_user_text := true
+                  | Agent_core.Types.ContentBlockDelta
+                      { delta =
+                          ( Agent_core.Types.ThinkingDelta _
+                          | Agent_core.Types.ThinkingSnapshot _
+                          | Agent_core.Types.ThinkingSignatureDelta _
+                          | Agent_core.Types.RedactedThinkingSnapshot _
+                          | Agent_core.Types.ReasoningDetailsDelta _
+                          | Agent_core.Types.InputJsonDelta _
+                          | Agent_core.Types.InputJsonSnapshot _
+                          | Agent_core.Types.MediaDelta _ )
+                      ; _
+                      }
+                  | Agent_core.Types.MessageStart _
+                  | Agent_core.Types.ContentBlockStart _
+                  | Agent_core.Types.ContentBlockStop _
+                  | Agent_core.Types.MessageDelta _
+                  | Agent_core.Types.MessageStop
+                  | Agent_core.Types.InlineContentReplay _
+                  | Agent_core.Types.ResponsesOutputItems _
+                  | Agent_core.Types.Ping
+                  | Agent_core.Types.Connected
+                  | Agent_core.Types.SSEError _
+                  | Agent_core.Types.NDJSONError _
+                  | Agent_core.Types.SSEParseFailed _
+                  | Agent_core.Types.NDJSONParseFailed _
+                  | Agent_core.Types.SSEUnknownEventType _
+                  | Agent_core.Types.SSEUnsupportedPart _
+                  | Agent_core.Types.SSEUnsupportedResponse _
+                  | Agent_core.Types.Timeout _
+                  | Agent_core.Types.StreamIncomplete _ -> ());
+               forward event)
+      in
+      let fence_if_streamed_user_text effect_disposition =
+        if !streamed_user_text
+        then
+          match effect_disposition with
+          | Keeper_provider_attempt_effect.No_effect_observed ->
+            Keeper_provider_attempt_effect.Observation_unavailable
+          | Keeper_provider_attempt_effect.Observation_unavailable
+          | Keeper_provider_attempt_effect.Effect_attempted ->
+            effect_disposition
+        else effect_disposition
+      in
       let native_admission = match native_binding with
         | None -> Ok None
         | Some binding ->
@@ -3397,6 +3538,7 @@ let run_named
         in
         let run_codex ~initial_messages () =
           with_account_call_slot
+            ~has_remaining_candidates:!current_has_remaining_candidates
             ~runtime
             ~on_busy:(fun error ->
               { Keeper_codex_runtime.outcome =
@@ -3474,7 +3616,7 @@ let run_named
             ?on_usage_report:on_official_client_usage_report
             ~event_bus
             ~raw_trace
-            ~on_event
+            ~on_event:attempt_on_event
             ~account
             ~config
             ())
@@ -3570,7 +3712,7 @@ let run_named
          | Ok _ | Error _ -> ());
         ( selected_runtime_result ?official_client_settlement:codex_attempt.outcome.settled_session runtime ~lane_attempt_index:idx codex_result
         , None
-        , codex_attempt.outcome.effect_disposition
+        , fence_if_streamed_user_text codex_attempt.outcome.effect_disposition
         , official_client_dispatch ~provider_config_transform codex_result )
       | Runtime_execution.Antigravity_cli config ->
         let ( reset_model_input_observation
@@ -3645,7 +3787,7 @@ let run_named
             ?on_usage_report:on_official_client_usage_report
             ~event_bus
             ~raw_trace
-            ~on_event
+            ~on_event:attempt_on_event
             ~config
             ()
         in
@@ -3702,7 +3844,7 @@ let run_named
          | Ok _ | Error _ -> ());
         ( selected_runtime_result ?official_client_settlement:antigravity_attempt.settled_session runtime ~lane_attempt_index:idx antigravity_result
         , None
-        , antigravity_attempt.effect_disposition
+        , fence_if_streamed_user_text antigravity_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform antigravity_result )
       | Runtime_execution.Acp config ->
         let ( reset_model_input_observation
@@ -3774,7 +3916,7 @@ let run_named
               ?on_usage_report:on_official_client_usage_report
               ~event_bus
               ~raw_trace
-              ~on_event
+              ~on_event:attempt_on_event
               ~config
               ()
         in
@@ -3809,7 +3951,7 @@ let run_named
          | Ok _ | Error _ -> ());
         ( selected_runtime_result ?official_client_settlement:acp_attempt.settled_session runtime ~lane_attempt_index:idx acp_result
         , None
-        , acp_attempt.effect_disposition
+        , fence_if_streamed_user_text acp_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform acp_result )
       | Runtime_execution.Claude_code config ->
         let ( reset_model_input_observation
@@ -3821,6 +3963,7 @@ let run_named
         in
         let run_claude ~initial_messages () =
           with_account_call_slot
+            ~has_remaining_candidates:!current_has_remaining_candidates
             ~runtime
             ~on_busy:Keeper_official_client_attempt.refused_before_dispatch
             (fun () ->
@@ -3915,7 +4058,8 @@ let run_named
             ?on_usage_report:on_official_client_usage_report
             ~event_bus
             ~raw_trace
-            ~on_event
+            ~live_stream_consumer
+            ~on_event:attempt_on_event
             ~account
             ~config
             ())
@@ -3975,11 +4119,12 @@ let run_named
          | Ok _ | Error _ -> ());
         ( selected_runtime_result ?official_client_settlement:claude_attempt.settled_session runtime ~lane_attempt_index:idx claude_result
         , None
-        , claude_attempt.effect_disposition
+        , fence_if_streamed_user_text claude_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform claude_result )
       | Runtime_execution.Agent_core sealed ->
        let request_input = Eio.Lazy.force continuity in
        with_account_call_slot
+         ~has_remaining_candidates:!current_has_remaining_candidates
          ~runtime
          ~on_busy:(fun err ->
            Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
@@ -4176,7 +4321,7 @@ let run_named
             ; trace_link
             ; sw
             ; net
-            ; on_event
+            ; on_event = attempt_on_event
             ; on_yield
             ; on_resume
             ; agent_ref
@@ -4214,7 +4359,7 @@ let run_named
           in
           ( selected_runtime_result runtime ~lane_attempt_index:idx turn_result
           , checkpoint_after
-          , Keeper_provider_attempt_effect.No_effect_observed
+          , fence_if_streamed_user_text Keeper_provider_attempt_effect.No_effect_observed
           , provider_attempt_dispatch ~request_serialized:!request_serialized
               turn_result ))))))
        ))))
@@ -4285,5 +4430,6 @@ module For_testing = struct
   let official_continuation_admission = official_continuation_admission
 
   let translate_person_api_result = translate_person_api_result
+  let with_account_call_wait_timeout_sec = with_account_call_wait_timeout_sec
 
 end

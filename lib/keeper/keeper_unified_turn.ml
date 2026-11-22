@@ -933,11 +933,22 @@ let run_keeper_cycle
                       err
                   in
                   let provider_rest =
-                    Keeper_turn_driver.provider_rest_of_failure
-                      ~now:(Time_compat.now ())
-                      ~route:failure_route
-                      ~assignment_id:(Keeper_meta_contract.runtime_id_of_meta meta)
-                      turn_state.deferred_runtime_lane
+                    let now = Time_compat.now () in
+                    let assignment_id = Keeper_meta_contract.runtime_id_of_meta meta in
+                    match
+                      Keeper_turn_driver.provider_rest_of_failure
+                        ~now
+                        ~route:failure_route
+                        ~assignment_id
+                        turn_state.deferred_runtime_lane
+                    with
+                    | Some _ as rest -> rest
+                    | None ->
+                      Keeper_turn_driver.seat_contention_rest_of_failure
+                        ~now
+                        ~error:err
+                        ~assignment_id
+                        turn_state.deferred_runtime_lane
                   in
                   let is_transient = EC.is_transient_network_error err in
                   (match err with

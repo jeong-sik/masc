@@ -5827,8 +5827,8 @@ let test_incomplete_user_write_timeout_is_fenced_only_when_built_ins_can_act () 
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
     with_fixture_yolo ~base_path ~keeper_name:"claude-pre-dispatch" (fun () ->
       run ~required_native_posture:Runtime_native_tools.Native_full base_path
-      |> check_disposition "full: incomplete write before any tool stays rotatable"
-           Keeper_provider_attempt_effect.No_effect_observed));
+      |> check_disposition "full: unknown delivery is recorded"
+           Keeper_provider_attempt_effect.Observation_unavailable));
   let base_path = temp_workspace () in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
     run base_path
@@ -5838,8 +5838,9 @@ let test_incomplete_user_write_timeout_is_fenced_only_when_built_ins_can_act () 
 
 (* Under [none] the stream decides. A read-only MASC call and the granted
    schema lookup leave the attempt rotatable after the client goes away;
-   response text the operator already received, and a built-in the grant does
-   not name, keep it fenced. Under [full] the closed transport alone fences. *)
+   non-empty response text emitted to a live stream consumer, and a built-in
+   the grant does not name, keep it fenced. Under [full] the closed transport
+   alone fences because unintercepted mutating built-ins can run. *)
 let test_a_closed_transport_is_judged_by_what_the_stream_showed () =
   let marker_param : Agent_core.Types.tool_param =
     { name = "marker"; description = "Fixture marker"; param_type = String; required = true }
@@ -5858,12 +5859,12 @@ let test_a_closed_transport_is_judged_by_what_the_stream_showed () =
         incr read_only_calls;
         Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
   in
-  let attempt ?required_native_posture ~tools steps =
+  let attempt ?required_native_posture ?on_event ~tools steps =
     let base_path = temp_workspace () in
     Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
       with_fixture (steps @ [ Close_transport ]) (fun cli_path ->
         let run () =
-          run_direct_attempt ?required_native_posture ~base_path ~cli_path
+          run_direct_attempt ?required_native_posture ?on_event ~base_path ~cli_path
             ~goal:"CLOSE_AFTER_STREAM" ~tools ()
         in
         let attempt =
@@ -5893,14 +5894,26 @@ let test_a_closed_transport_is_judged_by_what_the_stream_showed () =
     [ Emit (native_tool_call_block ~turn_id:"write" ~call_id:"write-call" ~tool_name:"Write") ]
   |> check_disposition "none: a built-in outside the grant fences" Keeper_provider_attempt_effect.Effect_attempted;
   attempt ~tools:[] [ Emit (assistant ~turn_id:"partial" "PARTIAL_ANSWER") ]
-  |> check_disposition "none: partial response text without tools stays rotatable" Keeper_provider_attempt_effect.No_effect_observed;
+  |> check_disposition "none: partial text without live stream consumer stays rotatable"
+       Keeper_provider_attempt_effect.No_effect_observed;
+  attempt ~on_event:(fun _ -> ()) ~tools:[] [ Emit (assistant ~turn_id:"partial" "PARTIAL_ANSWER") ]
+  |> check_disposition "none: non-empty Text_delta to live stream consumer fences failover"
+       Keeper_provider_attempt_effect.Observation_unavailable;
   attempt ~required_native_posture:Runtime_native_tools.Native_full ~tools:[] []
-  |> check_disposition "full: closed transport without tool call stays rotatable" Keeper_provider_attempt_effect.No_effect_observed
+  |> check_disposition "full: closed transport alone fences because built-ins can mutate"
+       Keeper_provider_attempt_effect.Observation_unavailable
 ;;
 
 (* A one-shot walk over a two-candidate Claude Code lane: the first CLI, then
    the second. Returns the candidates attempted, in order, and the outcome. *)
-let run_claude_failover_lane ~base_path ~first_cli ~second_cli =
+let run_claude_failover_lane_with_stream
+      ?live_stream_consumer
+      ?on_event
+      ~base_path
+      ~first_cli
+      ~second_cli
+      ()
+  =
   Masc_test_deps.declare_fixture_keeper
     ~base_path ~sandbox_profile:None "claude-fixture";
   let runtime_snapshot = Runtime.For_testing.snapshot () in
@@ -5964,6 +5977,8 @@ let run_claude_failover_lane ~base_path ~first_cli ~second_cli =
                     ~agent_core_tools:[]
                     ~initial_messages:[]
                     ~raw_trace:None
+                    ?live_stream_consumer
+                    ?on_event
                     ~on_runtime_attempt:(fun (attempt : Keeper_turn_driver.runtime_attempt) ->
                       attempted := !attempted @ [ attempt.runtime_id ])
                     ~sw
@@ -5971,6 +5986,77 @@ let run_claude_failover_lane ~base_path ~first_cli ~second_cli =
                     ()
                 in
                 !attempted, outcome))))
+;;
+
+let run_claude_failover_lane ~base_path ~first_cli ~second_cli =
+  run_claude_failover_lane_with_stream ~base_path ~first_cli ~second_cli ()
+;;
+
+let test_streamed_text_to_live_consumer_fences_failover () =
+  let base_path_live = temp_workspace () in
+  let base_path_bg = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_tree base_path_live;
+      cleanup_tree base_path_bg)
+    (fun () ->
+       with_fixture
+         [ Emit (assistant ~turn_id:"partial-live" "ALREADY_STREAMED_TO_USER")
+         ; Close_transport
+         ]
+         (fun partial_cli ->
+            with_fixture
+              [ Emit (assistant ~turn_id:"backup-answer" "DUPLICATE_BACKUP_REPLY")
+              ; Emit (result ~turn_id:"backup-answer" "DUPLICATE_BACKUP_REPLY")
+              ]
+              (fun backup_cli ->
+                 let streamed = ref [] in
+                 let attempted_live, outcome_live =
+                   run_claude_failover_lane_with_stream
+                     ~on_event:(function
+                       | Agent_core.Types.ContentBlockDelta { delta = TextDelta t; _ } ->
+                         streamed := t :: !streamed
+                       | _ -> ())
+                     ~base_path:base_path_live
+                     ~first_cli:partial_cli
+                     ~second_cli:backup_cli
+                     ()
+                 in
+                 check (list string) "live consumer received candidate 1 text"
+                   [ "ALREADY_STREAMED_TO_USER" ] (List.rev !streamed);
+                 check (list string)
+                   "live stream consumer fences same-turn failover after Text_delta"
+                   [ "claude_first.claude" ]
+                   attempted_live;
+                 (match outcome_live with
+                  | Ok _ -> fail "fenced streamed turn unexpectedly rotated and succeeded"
+                  | Error err ->
+                    (match Keeper_internal_error.classify_masc_internal_error err with
+                     | Some (Keeper_internal_error.Provider_attempt_effect_fenced _) -> ()
+                     | _ ->
+                       fail ("expected Provider_attempt_effect_fenced, got: "
+                             ^ Agent_core.Error.to_string err)));
+                 (* Without a live stream consumer (e.g. autonomous turn with progress-only
+                    observer), zero-tool partial text under Native_none still rotates cleanly. *)
+                 let attempted_bg, outcome_bg =
+                   run_claude_failover_lane_with_stream
+                     ~live_stream_consumer:false
+                     ~on_event:(fun _ -> ())
+                     ~base_path:base_path_bg
+                     ~first_cli:partial_cli
+                     ~second_cli:backup_cli
+                     ()
+                 in
+                 check (list string)
+                   "non-live progress observer still rotates on zero-tool Native_none transport drop"
+                   [ "claude_first.claude"; "claude_second.claude" ]
+                   attempted_bg;
+                 match outcome_bg with
+                 | Error err -> fail (Agent_core.Error.to_string err)
+                 | Ok selected ->
+                   check string "backup candidate answered"
+                     "DUPLICATE_BACKUP_REPLY"
+                     (keeper_response_text selected.run_result))))
 ;;
 
 (* #47787: the first candidate's auth document is cut on every probe. The
@@ -7908,6 +7994,8 @@ let () =
             test_incomplete_user_write_timeout_is_fenced_only_when_built_ins_can_act
         ; test_case "a closed transport is judged by what the stream showed" `Quick
             test_a_closed_transport_is_judged_by_what_the_stream_showed
+        ; test_case "non-empty streamed Text_delta to live consumer fences same-turn failover" `Quick
+            test_streamed_text_to_live_consumer_fences_failover
         ; test_case
             "a process exit before turn admission rotates to the next lane candidate"
             `Quick

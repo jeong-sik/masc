@@ -949,14 +949,35 @@ let recording_effect_attempt ~effect_cell =
     ~observe_effect_attempted:(fun () -> Effect_cell.attempted effect_cell)
 ;;
 
-(* Same-turn failover is fenced ONLY when an actual side-effecting tool call
-   began executing ([Effect_attempted]). Sending a prompt or streaming text
-   deltas with zero tool calls never fences same-turn rotation on transport
-   drops or timeouts. An ungranted built-in tool call actually starting under
-   [Client_default] (or outside [Granted names]) records [Effect_attempted]. *)
-let observe_stream_effect ~built_ins ~effect_cell
-    (event : Runtime_claude_code.stream_event) =
+(* Under [none] and [read] ([Granted _]), the CLI may run only the read-only
+   built-ins its [--tools] list grants, so every mutating effect of the turn
+   passes through a MASC handler that [recording_effect_attempt] observes.
+   Under [full] ([Client_default]), the client's own mutating built-ins can
+   act out of MASC's sight from the moment a prompt write starts, so unknown
+   prompt delivery, transport interruptions, and post-admission exits must
+   fence same-turn failover as [Observation_unavailable]. *)
+let note_uncertainty_beyond_masc_tools ~built_ins effect_cell =
+  match built_ins with
+  | Runtime_native_tools.Granted _ -> ()
+  | Runtime_native_tools.Client_default -> Effect_cell.unobserved effect_cell
+;;
+
+(* What the stream itself shows:
+   - An ungranted built-in tool call starting under [Client_default] (or
+     outside [Granted names]) records [Effect_attempted].
+   - Non-empty user-visible [Text_delta] emitted to a live stream consumer
+     fences same-turn failover ([Observation_unavailable]) so a backup
+     candidate never silently splices a duplicate reply onto already-streamed
+     tokens.
+   - A tool call wrapping a MASC tool is judged by its handler. *)
+let observe_stream_effect ~built_ins ~live_stream_consumer ~streamed_user_text
+    ~effect_cell (event : Runtime_claude_code.stream_event) =
   match event with
+  | Runtime_claude_code.Text_delta { text; _ } ->
+    if live_stream_consumer && not (String.equal text "")
+    then (
+      streamed_user_text := true;
+      Effect_cell.unobserved effect_cell)
   | Runtime_claude_code.Native_tool_started
       { Runtime_native_tools.origin = Runtime_native_tools.Mcp_wrapper; _ } -> ()
   | Runtime_claude_code.Native_tool_started
@@ -967,7 +988,6 @@ let observe_stream_effect ~built_ins ~effect_cell
      | Runtime_native_tools.Granted _, None
      | Runtime_native_tools.Client_default, (Some _ | None) ->
        Effect_cell.attempted effect_cell)
-  | Runtime_claude_code.Text_delta _
   | Runtime_claude_code.Turn_started _
   | Runtime_claude_code.Thinking_delta _
   | Runtime_claude_code.Child_content_observed _
@@ -988,7 +1008,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~loading_plan ~initial_messages ~model_input_projection_for
     ~on_transmitted_model_input ~hooks ~context_injector
-    ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_cell
+    ~context ~terminal_effect_state ~event_bus ~raw_trace ~live_stream_consumer ~on_event ~effect_cell
     ~context_overflow_retry_safe
     ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_progress ~on_native_tool_completion ~on_native_task_observation ~on_child_content_observation
     ~on_provider_retry ~on_usage_report ~on_tool_execution
@@ -1640,11 +1660,21 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
           | None, None -> None
           | Some _, _ | _, Some _ -> Some (Keeper_claude_task_binding.create ()) in
         let built_ins = Runtime_native_tools.claude_code_built_ins native_posture in
+        let streamed_user_text = ref false in
         let on_input_observation
             (observation : Runtime_claude_input_attribution.observation) =
-          (* An interrupted user-message write before any tool starts does not
-             fence same-turn failover: only an observed side-effecting tool call
-             sets [Effect_attempted]. *)
+          (* An interrupted user-message write has unknown delivery even when
+             its timeout escapes before [on_prompt_sent]. Under a posture whose
+             effects can bypass MASC ([Client_default]) that delivery is safety
+             evidence; under [Granted _] no mutating built-in can run without
+             MASC interception. *)
+          (match observation.phase with
+           | Runtime_claude_input_attribution.Write_unknown ->
+             note_uncertainty_beyond_masc_tools ~built_ins effect_cell
+           | Runtime_claude_input_attribution.Prepared
+           | Runtime_claude_input_attribution.Written
+           | Runtime_claude_input_attribution.Consumed
+           | Runtime_claude_input_attribution.Settled _ -> ());
           Option.iter
             (fun binding -> Keeper_claude_task_binding.observe_input binding observation)
             task_binding
@@ -1677,7 +1707,12 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
         let on_stream_event =
           Some
             (fun event ->
-              observe_stream_effect ~built_ins ~effect_cell event;
+              observe_stream_effect
+                ~built_ins
+                ~live_stream_consumer
+                ~streamed_user_text
+                ~effect_cell
+                event;
               Option.iter (fun forward -> forward event) on_stream_event)
         in
         let client_result =
@@ -1697,7 +1732,9 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
                    ~expected
                    ~session_id
                    ~updated_at:(Time_compat.now ())))
-             ~on_prompt_sent:(fun () -> report_transmitted_input ())
+             ~on_prompt_sent:(fun () ->
+               note_uncertainty_beyond_masc_tools ~built_ins effect_cell;
+               report_transmitted_input ())
              ~on_context_submission:(fun submission ->
                Host.record_context_submission ~keeper_name ~raw_trace_run
                  ~runtime_profile:runtime_id ~client_turn_ordinal:turn_count
@@ -1791,12 +1828,10 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
                 { tool_effect_attempted = false; response_emitted = false; _ }
             | Runtime_claude_code.Context_window_exceeded
                 { tool_effect_attempted = false; response_emitted = false; _ } ->
-              Effect_cell.quiet effect_cell
+              if not !streamed_user_text then Effect_cell.quiet effect_cell
             | Runtime_claude_code.Turn_transport_interrupted _
             | Runtime_claude_code.Process_exited { turn_admitted = true; _ } ->
-              (* Transport interruption or process exit with zero tool calls
-                 never fences same-turn failover. *)
-              ()
+              note_uncertainty_beyond_masc_tools ~built_ins effect_cell
             | Runtime_claude_code.Turn_failed_with_observation _
             | Runtime_claude_code.Quota_blocked _
             | Runtime_claude_code.Context_window_exceeded _
@@ -1963,8 +1998,13 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
     ?on_native_action
     ?on_usage_report
     ?on_tool_execution
-    ~event_bus ~raw_trace ~on_event ~(account : Runtime_claude_code.authorized_account)
+    ~event_bus ~raw_trace ?live_stream_consumer ~on_event ~(account : Runtime_claude_code.authorized_account)
     ~(config : Runtime_execution.claude_code) () =
+  let live_stream_consumer =
+    match live_stream_consumer with
+    | Some flag -> flag
+    | None -> Option.is_some on_event
+  in
   let quota_scope =
     Runtime_quota_window.scope_of_claude_code_home
       (Some (Runtime_official_account.home (Runtime_account_access.account account)))
@@ -2125,6 +2165,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
           ~terminal_effect_state
           ~event_bus
             ~raw_trace
+            ~live_stream_consumer
             ~on_event
             ~effect_cell
             ~context_overflow_retry_safe

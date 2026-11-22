@@ -99,6 +99,16 @@ val summary_of : string -> string
 
 val tool_name : string
 
+(** Returns the live history tail strictly after the most recent inline
+    compaction anchor ({!Runtime_model_input_tail_window.is_compaction_anchor}),
+    or [history] unchanged when no compaction anchor message is present.
+    Used by [History_carry] so non-Anthropic tool discovery stays append-only
+    within a compaction epoch while resetting cleanly across compaction
+    boundaries. *)
+val live_tail_after_compaction_anchor
+  :  Agent_core.Types.message list
+  -> Agent_core.Types.message list
+
 type placement_policy =
   | History_carry
   | Tool_references

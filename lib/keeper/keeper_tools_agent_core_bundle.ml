@@ -804,7 +804,16 @@ let make_tool_bundle_for_descriptors_with_policy
                | Some current -> Ok current.current_task_id))
           ~surface:receipt_surface
       in
-      Some (surface, receipts)
+      let history_carry_tail =
+        let keepers_dir =
+          Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+        in
+        Keeper_compaction.live_history_after_latest_anchor
+          ~keepers_dir
+          ~keeper_id:meta.name
+          surface.Keeper_tools_agent_core.history
+      in
+      Some (surface, receipts, history_carry_tail)
   in
   let listings = ref [] in
   let make_identity_listing ?held_schemas ?(identity_tools = identity_agent_tools)
@@ -812,7 +821,7 @@ let make_tool_bundle_for_descriptors_with_policy
         ~admitted ~carried () =
     match identity_listing_data with
     | None -> None
-    | Some (surface, receipts) ->
+    | Some (surface, receipts, history_carry_tail) ->
       let deferred = List.map deferred_entry (identity_tools @ deferred_builtin_tools) in
       let listing = Keeper_identity_tool_search.make ~placement_policy ~carried ?held_schemas
         ~keeper_name:meta.Keeper_meta_contract.name
@@ -826,7 +835,7 @@ let make_tool_bundle_for_descriptors_with_policy
                 eager tools, never a reference retained by canonical history. *)
              | Keeper_identity_tool_search.Tool_references -> []
              | Keeper_identity_tool_search.History_carry ->
-               surface.Keeper_tools_agent_core.history)
+               history_carry_tail)
         ; carry_window = Keeper_config.keeper_tool_carry_window ()
         ; receipts
         } in

@@ -224,6 +224,146 @@ let test_try_acquire_returns_account_busy_without_blocking () =
     fail "account was not released after holder completed"
 ;;
 
+let test_call_in_turn_of_with_timeout_preserves_fifo_order () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let ran = ref [] in
+  let first_may_end, end_first = Eio.Promise.create () in
+  Eio.Switch.run (fun sw ->
+    Eio.Fiber.fork ~sw (fun () ->
+      match
+        Call.call_in_turn_of_with_timeout ~clock ~timeout_s:5.0 one (fun _ ->
+          Eio.Promise.await first_may_end;
+          ran := 0 :: !ran)
+      with
+      | Call.Acquired () -> ()
+      | Call.Account_busy _ -> fail "first holder unexpectedly busy");
+    Eio.Fiber.yield ();
+    List.iter
+      (fun n ->
+         Eio.Fiber.fork ~sw (fun () ->
+           match
+             Call.call_in_turn_of_with_timeout ~clock ~timeout_s:5.0 one (fun _ ->
+               ran := n :: !ran)
+           with
+           | Call.Acquired () -> ()
+           | Call.Account_busy _ -> fail "queued waiter unexpectedly timed out");
+         Eio.Fiber.yield ())
+      [ 1; 2; 3 ];
+    check (list int) "no queued waiter ran before holder released" [] !ran;
+    check bool "non-blocking caller cannot jump queued waiters" false (free one);
+    Eio.Promise.resolve end_first ());
+  check (list int) "bounded FIFO waiters ran in arrival order" [ 0; 1; 2; 3 ] (List.rev !ran);
+  check bool "account free after all bounded waiters finish" true (free one)
+;;
+
+let test_call_in_turn_of_with_timeout_expires_and_cleans_up () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let held, mark_held = Eio.Promise.create () in
+  let release, do_release = Eio.Promise.create () in
+  let ran_timed_out = ref false in
+  Eio.Switch.run (fun sw ->
+    Eio.Fiber.fork ~sw (fun () ->
+      Call.call_in_turn_of one (fun _ ->
+        Eio.Promise.resolve mark_held ();
+        Eio.Promise.await release));
+    Eio.Promise.await held;
+    (match
+       Call.call_in_turn_of_with_timeout ~clock ~timeout_s:0.05 one (fun _ ->
+         ran_timed_out := true;
+         "should-not-run")
+     with
+     | Call.Account_busy acct ->
+       check bool "timeout reports busy account id" true (Id.equal one acct)
+     | Call.Acquired _ -> fail "waiter acquired slot despite active holder");
+    check bool "timed-out work did not execute" false !ran_timed_out;
+    Eio.Promise.resolve do_release ());
+  check bool "account is reusable and entry cleaned up after timeout" true (free one)
+;;
+
+let test_call_in_turn_of_with_timeout_does_not_cancel_long_work () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  (match
+     Call.call_in_turn_of_with_timeout ~clock ~timeout_s:0.02 one (fun _ ->
+       Eio.Time.sleep clock 0.08;
+       "completed-past-admission-timeout")
+   with
+   | Call.Acquired v ->
+     check string "healthy work outlives admission wait budget"
+       "completed-past-admission-timeout" v
+   | Call.Account_busy _ -> fail "uncontended work failed to acquire");
+  check bool "account free after long work finishes" true (free one)
+;;
+
+let test_call_in_turn_of_with_timeout_cancel_during_wait () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let ran = ref [] in
+  let first_may_end, end_first = Eio.Promise.create () in
+  Eio.Switch.run (fun sw ->
+    Eio.Fiber.fork ~sw (fun () ->
+      Call.call_in_turn_of one (fun _ ->
+        Eio.Promise.await first_may_end;
+        ran := "first" :: !ran));
+    Eio.Fiber.yield ();
+    (match
+       Eio.Switch.run (fun waiter_sw ->
+         Eio.Fiber.fork ~sw:waiter_sw (fun () ->
+           ignore
+             (Call.call_in_turn_of_with_timeout ~clock ~timeout_s:5.0 one (fun _ ->
+                ran := "cancelled" :: !ran)));
+         Eio.Fiber.yield ();
+         Eio.Switch.fail waiter_sw Cancel_waiter)
+     with
+     | () -> fail "switch failure did not surface"
+     | exception Cancel_waiter -> ());
+    Eio.Fiber.fork ~sw (fun () ->
+      match
+        Call.call_in_turn_of_with_timeout ~clock ~timeout_s:5.0 one (fun _ ->
+          ran := "next" :: !ran)
+      with
+      | Call.Acquired () -> ()
+      | Call.Account_busy _ -> fail "subsequent waiter unexpectedly timed out");
+    Eio.Fiber.yield ();
+    Eio.Promise.resolve end_first ());
+  check (list string) "cancelled bounded waiter skipped and next waiter ran"
+    [ "first"; "next" ] (List.rev !ran);
+  check bool "account free after cancelled bounded waiter" true (free one)
+;;
+
+let test_call_in_turn_of_with_timeout_non_positive_delegates_to_try_acquire () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let held, mark_held = Eio.Promise.create () in
+  let release, do_release = Eio.Promise.create () in
+  Eio.Switch.run (fun sw ->
+    Eio.Fiber.fork ~sw (fun () ->
+      Call.call_in_turn_of one (fun _ ->
+        Eio.Promise.resolve mark_held ();
+        Eio.Promise.await release));
+    Eio.Promise.await held;
+    check bool "zero timeout returns Account_busy immediately" true
+      (match Call.call_in_turn_of_with_timeout ~clock ~timeout_s:0.0 one (fun _ -> ()) with
+       | Call.Account_busy acct -> Id.equal one acct
+       | Call.Acquired () -> false);
+    check bool "NaN timeout returns Account_busy immediately" true
+      (match Call.call_in_turn_of_with_timeout ~clock ~timeout_s:Float.nan one (fun _ -> ()) with
+       | Call.Account_busy acct -> Id.equal one acct
+       | Call.Acquired () -> false);
+    Eio.Promise.resolve do_release ());
+  check bool "zero timeout succeeds when free" true
+    (match Call.call_in_turn_of_with_timeout ~clock ~timeout_s:0.0 one (fun _ -> "ok") with
+     | Call.Acquired "ok" -> true
+     | Call.Acquired _ | Call.Account_busy _ -> false)
+;;
+
 let () =
   run
     "runtime_account_call"
@@ -233,6 +373,26 @@ let () =
             "try_acquire returns typed Account_busy without blocking"
             `Quick
             test_try_acquire_returns_account_busy_without_blocking
+        ; test_case
+            "call_in_turn_of_with_timeout preserves FIFO order"
+            `Quick
+            test_call_in_turn_of_with_timeout_preserves_fifo_order
+        ; test_case
+            "call_in_turn_of_with_timeout expires with Account_busy and cleans up"
+            `Quick
+            test_call_in_turn_of_with_timeout_expires_and_cleans_up
+        ; test_case
+            "call_in_turn_of_with_timeout does not cancel healthy long work"
+            `Quick
+            test_call_in_turn_of_with_timeout_does_not_cancel_long_work
+        ; test_case
+            "call_in_turn_of_with_timeout propagates outer cancellation and keeps slot usable"
+            `Quick
+            test_call_in_turn_of_with_timeout_cancel_during_wait
+        ; test_case
+            "call_in_turn_of_with_timeout non-positive timeout delegates to try_acquire"
+            `Quick
+            test_call_in_turn_of_with_timeout_non_positive_delegates_to_try_acquire
         ; test_case "another account is not held" `Quick test_another_account_is_not_held
         ; test_case "free after the work raises" `Quick test_free_after_the_work_raises
         ; test_case

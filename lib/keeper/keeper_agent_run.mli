@@ -286,3 +286,14 @@ val resolve_turn_walk_owner
 (** Resolves the typed turn walk owner and channel in single-user or
     multi-account mode. Disallowed channels and missing/mismatched person
     callers fail closed without constructing a fleet walk owner. *)
+
+val prompt_context_presence_for_owner
+  :  checkpoint_owner:Runtime_execution.checkpoint_owner option
+  -> Keeper_context_assembly.t option
+  -> Keeper_context_assembly.split_request_context_presence
+(** Expected per-request prompt context carriers for [model_input_projection].
+    [Masc_agent_core] splits host-state ([System_context]) and outside-text
+    ([Outside_context]) carriers via
+    {!Keeper_context_assembly.split_request_context_presence};
+    [Official_client] carries only an unsplit [System_context] carrier and
+    never emits [Outside_context]. *)

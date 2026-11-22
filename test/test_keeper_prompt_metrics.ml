@@ -1049,6 +1049,70 @@ let test_split_outside_context_end_to_end_attribution () =
        (List.length tool_history) (List.length retained))
 ;;
 
+(* Official clients (Codex, Claude Code, Antigravity, ACP) do NOT split
+   [Outside_context] out of [extra_system_context] ([Keeper_run_tools_hooks]
+   returns [ctx, None] and [Keeper_official_client_host.prepare_turn] appends
+   only a single [System_context] carrier). Expecting the Agent Core split
+   presence on an official-client attempt caused false
+   [prompt_context_presence_mismatch carrier_observed=false prompt_context_present=true]
+   warnings whenever any outside-authored block was assembled. *)
+let test_prompt_context_presence_for_owner_distinguishes_official_client () =
+  let system =
+    Masc.Keeper_turn_system.resend
+      ~held:None ~runtime_id:"test" ~current:[] ~articles_at:(fun _ -> Ok None)
+      "Base system prompt"
+    |> Result.get_ok |> fst
+  in
+  let assembly =
+    KRP.assemble_request_context
+      ~checkpoint_owner:Runtime_execution.Official_client
+      ~system
+      ~post_tool_round:false
+      ~previous_assembly:None
+      ~dynamic_context_partition:None
+      ~existing_extra_system_context:None
+      ~blocks:
+        [ Prompt_block_id.Temporal_summary, "[Temporal] now=2026-11-22T01:00Z"
+        ; Prompt_block_id.Memory_os_recall, "recalled fact"
+        ]
+  in
+  let official_presence =
+    KAR.prompt_context_presence_for_owner
+      ~checkpoint_owner:(Some Runtime_execution.Official_client)
+      (Some assembly)
+  in
+  check bool "Official_client expects unsplit System_context" true
+    official_presence.system_context_present;
+  check bool "Official_client expects no Outside_context carrier" false
+    official_presence.outside_context_present;
+  let core_presence =
+    KAR.prompt_context_presence_for_owner
+      ~checkpoint_owner:(Some Runtime_execution.Masc_agent_core)
+      (Some assembly)
+  in
+  check bool "Masc_agent_core expects split System_context" true
+    core_presence.system_context_present;
+  check bool "Masc_agent_core expects split Outside_context" true
+    core_presence.outside_context_present;
+  let official_messages =
+    [ message "user turn"
+    ; prompt_carrier (Option.get assembly.extra_system_context)
+    ]
+  in
+  match
+    KAPM.provider_content_of_transmitted
+      ~outside_context_present:official_presence.outside_context_present
+      ~prompt_context_present:official_presence.system_context_present
+      ~messages:official_messages
+  with
+  | Error failure ->
+    failf "unexpected official-client presence mismatch: %s"
+      (KAPM.provenance_failure_summary failure)
+  | Ok retained ->
+    check int "Official_client unsplit System_context stripped cleanly" 1
+      (List.length retained)
+;;
+
 let () =
   run "keeper_prompt_metrics"
     [
@@ -1113,6 +1177,8 @@ let () =
             test_provider_content_of_transmitted_handles_outside_context_carriers;
           test_case "split_outside_context end-to-end attribution (outside-only, dual, empty)" `Quick
             test_split_outside_context_end_to_end_attribution;
+          test_case "Official_client unsplit carrier presence avoids Outside_context mismatch" `Quick
+            test_prompt_context_presence_for_owner_distinguishes_official_client;
           test_case "a resumed client session is its own reason" `Quick
             test_client_session_gap_is_its_own_reason;
         ] );

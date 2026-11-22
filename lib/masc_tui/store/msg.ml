@@ -172,7 +172,10 @@ type http_reply =
   | Reply_keeper_sandbox of
       (Wire_infra.keeper_sandbox_response, http_error) result
   | Reply_repositories of (Wire_infra.repository list, http_error) result
-  | Reply_file_changes of (Wire_infra.file_change list, http_error) result
+  | Reply_file_changes of {
+      keeper : string;
+      result : (Wire_infra.file_change list, http_error) result;
+    }
   | Reply_system_logs of (Wire_infra.system_log_entry list, http_error) result
   | Reply_tui_preferences of (Wire_config.tui_preferences, http_error) result
   | Reply_config_schema of (Wire_config.config_schema, http_error) result

@@ -238,8 +238,9 @@ let draw_popup grid ~(anchor : Rect.t) ~(theme : Theme.t) ~lang (popup : popup) 
         let max_rows = Int.min 8 (Int.min count (anchor.y - 2)) in
         if max_rows <= 0 then None
         else
+          let selected = Int.max 0 (Int.min (count - 1) selected) in
           let pop_h = max_rows + 2 in
-          let pop_w = Int.min anchor.w (Int.max 32 (anchor.w * 2 / 3)) in
+          let pop_w = Int.min anchor.w (Int.max 44 (anchor.w * 3 / 4)) in
           let pop_rect =
             Rect.make ~x:anchor.x ~y:(anchor.y - pop_h) ~w:pop_w ~h:pop_h
           in
@@ -257,10 +258,24 @@ let draw_popup grid ~(anchor : Rect.t) ~(theme : Theme.t) ~lang (popup : popup) 
                      ~en:(Printf.sprintf "Mention @%s" query))
             | Popup_none -> ""
           in
+          let counter_badge : Card.badge =
+            {
+              glyph = None;
+              text = Printf.sprintf "%d/%d" (selected + 1) count;
+              tone = Some Theme.Status_active;
+            }
+          in
+          let footer_hint =
+            Say.resolve lang
+              (Say.make ~ko:"↑↓ 선택 · Tab 완성 · Enter 실행 · Esc 닫기"
+                 ~en:"↑↓ Select · Tab Complete · Enter Run · Esc Close")
+          in
           let inner =
             Card.draw grid ~rect:pop_rect ~theme
               {
                 (Card.default_spec ~title) with
+                badge = Some counter_badge;
+                footer_hint = Some footer_hint;
                 focused = true;
                 elevated = true;
               }

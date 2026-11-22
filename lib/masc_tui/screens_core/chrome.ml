@@ -526,12 +526,29 @@ let compact_infra_tab_label ~(lang : Say.lang) ~compact tab =
     | Nav.Infra_activity_logs -> Say.resolve lang (Say.make ~ko:"활동·로그" ~en:"Logs")
 
 let active_filter_text (m : Model.t) =
-  match m.nav.workspace with
-  | Nav.Pulse | Nav.Keepers -> m.fleet.filter_query
-  | Nav.Work -> m.work.filter_query
-  | Nav.Knowledge -> m.knowledge.filter_query
-  | Nav.Runtime -> m.runtime.filter_query
-  | Nav.Infra -> m.infra.filter_query
+  match Model.active_dive m with
+  | Some (Nav.Dive_keeper { tab = Nav.Keeper_config; _ }) ->
+      m.config.search_query
+  | Some
+      ( Nav.Dive_keeper
+          {
+            tab =
+              ( Nav.Keeper_chat
+              | Nav.Keeper_memory
+              | Nav.Keeper_work_candle
+              | Nav.Keeper_sandbox );
+            _;
+          }
+      | Nav.Dive_work _
+      | Nav.Dive_knowledge _
+      | Nav.Dive_infra _ )
+  | None -> (
+      match m.nav.workspace with
+      | Nav.Pulse | Nav.Keepers -> m.fleet.filter_query
+      | Nav.Work -> m.work.filter_query
+      | Nav.Knowledge -> m.knowledge.filter_query
+      | Nav.Runtime -> m.runtime.filter_query
+      | Nav.Infra -> m.infra.filter_query)
 
 let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~breakpoint =
@@ -550,6 +567,46 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
     let lang = model.lang in
     let gap = Layout.sub_tab_gap breakpoint in
     let left_pad = Layout.outer_margin breakpoint + 1 in
+    let filter_q = String.trim (active_filter_text model) in
+    let filter_active =
+      model.nav.filter_focused || not (String.equal filter_q "")
+    in
+    let right_text, right_style =
+      if model.nav.filter_focused then
+        ( Printf.sprintf " / %s_ " filter_q,
+          Typography.anchor ~bg:(Color.of_rgb theme.selection_bg) theme )
+      else if not (String.equal filter_q "") then
+        ( Printf.sprintf " / %s " filter_q,
+          Typography.accent ~bg:pill_bg ~bold:true theme )
+      else if Option.is_some (Model.active_dive model) then
+        let txt =
+          if compact then "[Esc]"
+          else Say.resolve lang (Say.make ~ko:"[Esc] 뒤로" ~en:"[Esc] Back")
+        in
+        (txt, whisper_style)
+      else
+        let txt =
+          if compact then "[←→]"
+          else
+            Say.resolve lang
+              (Say.make ~ko:"[/] 검색  [←→] 탭" ~en:"[/] Filter  [←→] Tabs")
+        in
+        (txt, whisper_style)
+    in
+    let right_pad = Layout.outer_margin breakpoint + 1 in
+    let max_right_w = Int.max 8 (rect.w / 2) in
+    let fitted_right =
+      if filter_active then
+        Grapheme.truncate_to_width ~max_width:max_right_w right_text
+      else right_text
+    in
+    let rw = Grapheme.display_width fitted_right in
+    let rx = Int.max (rect.x + left_pad) (Rect.right rect - right_pad - rw) in
+    let tabs_clip =
+      if filter_active then
+        Rect.make ~x:rect.x ~y:rect.y ~w:(Int.max 0 (rx - rect.x - 1)) ~h:1
+      else rect
+    in
     let x = ref (rect.x + left_pad) in
     let draw_tab_list tabs =
       let rec loop first = function
@@ -560,19 +617,19 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
               (* Calm elevated marker: Left_rail accent + Bold underlined
                  text_bright on surface_2 with symmetric 1-space padding. *)
               let a0 =
-                Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y
+                Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
                   ~style:(Typography.accent ~bg:pill_bg ~bold:true theme)
                   (Glyph.to_utf8 Glyph.Left_rail ^ " ")
               in
               x := !x + a0;
               let a1 =
-                Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y
+                Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
                   ~style:(Typography.anchor ~bg:pill_bg ~underline:true theme)
                   label
               in
               x := !x + a1;
               let a2 =
-                Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y
+                Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
                   ~style:(Typography.anchor ~bg:pill_bg theme)
                   " "
               in
@@ -580,7 +637,7 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
             end
             else begin
               let adv =
-                Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y
+                Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
                   ~style:base_style label
               in
               x := !x + adv
@@ -598,8 +655,8 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
              (Grapheme.truncate_to_width ~max_width:20 name)
          in
          let adv =
-           Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y ~style:crumb_style
-             crumb
+           Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
+             ~style:crumb_style crumb
          in
          x := !x + adv + 2;
          let tabs =
@@ -627,8 +684,8 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
              label
          in
          let adv =
-           Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y ~style:crumb_style
-             crumb
+           Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
+             ~style:crumb_style crumb
          in
          x := !x + adv
      | Some (Nav.Dive_knowledge target) ->
@@ -657,8 +714,8 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
              label
          in
          let adv =
-           Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y ~style:crumb_style
-             crumb
+           Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
+             ~style:crumb_style crumb
          in
          x := !x + adv
      | Some (Nav.Dive_infra target) ->
@@ -680,8 +737,8 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
              label
          in
          let adv =
-           Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y ~style:crumb_style
-             crumb
+           Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
+             ~style:crumb_style crumb
          in
          x := !x + adv
      | None -> (
@@ -743,37 +800,11 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
                  Nav.all_infra_tabs
              in
              draw_tab_list tabs));
-    (* Right-aligned filter pill or Tier-4 italic hint *)
-    let filter_q = String.trim (active_filter_text model) in
-    let right_text, right_style =
-      if model.nav.filter_focused then
-        ( Printf.sprintf " / %s_ " filter_q,
-          Typography.anchor ~bg:(Color.of_rgb theme.selection_bg) theme )
-      else if not (String.equal filter_q "") then
-        ( Printf.sprintf " / %s " filter_q,
-          Typography.accent ~bg:pill_bg ~bold:true theme )
-      else if Option.is_some (Model.active_dive model) then
-        let txt =
-          if compact then "[Esc]"
-          else Say.resolve lang (Say.make ~ko:"[Esc] 뒤로" ~en:"[Esc] Back")
-        in
-        (txt, whisper_style)
-      else
-        let txt =
-          if compact then "[ ]"
-          else
-            Say.resolve lang
-              (Say.make ~ko:"[/] 검색  [ ] 탭" ~en:"[/] Filter  [ ] Tabs")
-        in
-        (txt, whisper_style)
-    in
-    let rw = Grapheme.display_width right_text in
-    let right_pad = Layout.outer_margin breakpoint + 1 in
-    let rx = Rect.right rect - right_pad - rw in
-    if rx > !x + 2 then
+    (* Always anchor active / query_ pill on right; hide idle hint only if tight *)
+    if filter_active || rx > !x + 2 then
       ignore
         (Cell_grid.put_text ~clip:rect grid ~x:rx ~y:rect.y ~style:right_style
-           right_text)
+           fitted_right)
 
 let render_approval_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) =
@@ -949,28 +980,47 @@ let render_approval_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
 
 let footer_right_status_hint ~(model : Model.t) =
   let lang = model.lang in
-  match model.nav.overlay with
-  | Some (Nav.Settings _) ->
-      Say.resolve lang
-        (Say.make ~ko:"Tab 좌/우 전환 · / 전체 검색"
-           ~en:"Tab tree/inspector · / search all")
-  | Some Nav.Palette ->
-      Say.resolve lang
-        (Say.make ~ko:"↑↓ 이동 · Enter 실행" ~en:"↑↓ select · Enter run")
-  | Some Nav.Incidents ->
-      Say.resolve lang
-        (Say.make ~ko:"Ch 3 과거 이력 · 실시간 상태 무관"
-           ~en:"Ch 3 historical trail · live SSOT unaffected")
-  | Some (Nav.Queue_context _ | Nav.Inline_action _ | Nav.Help | Nav.System_gate _) ->
-      Say.resolve lang (Say.make ~ko:"Esc 돌아가기" ~en:"Esc return")
-  | None -> (
-      let _, fresh_lbl, _ = Render_util.freshness_pill ~model ~compact:true in
-      match workspace_basename model with
-      | Some ws ->
-          Printf.sprintf "SSE %s %s %s" fresh_lbl
-            (Glyph.to_utf8 Glyph.Separator_dot)
-            (Grapheme.truncate_to_width ~max_width:14 ws)
-      | None -> Printf.sprintf "SSE %s" fresh_lbl)
+  if model.nav.filter_focused then
+    Say.resolve lang
+      (Say.make ~ko:"필터 입력 중 · Esc 초기화" ~en:"Filtering · Esc clear")
+  else
+    match model.nav.overlay with
+    | Some (Nav.Settings _) ->
+        if Config_store.is_two_pane_width ~cols:model.viewport.cols then
+          Say.resolve lang
+            (Say.make ~ko:"Tab 좌/우 전환 · / 전체 검색"
+               ~en:"Tab tree/inspector · / search all")
+        else
+          Say.resolve lang
+            (Say.make ~ko:"↑↓ 이동 · / 전체 검색" ~en:"↑↓ move · / search all")
+    | Some Nav.Palette ->
+        Say.resolve lang
+          (Say.make ~ko:"↑↓ 이동 · Enter 실행" ~en:"↑↓ select · Enter run")
+    | Some Nav.Incidents ->
+        Say.resolve lang
+          (Say.make ~ko:"Ch 3 과거 이력 · 실시간 상태 무관"
+             ~en:"Ch 3 historical trail · live SSOT unaffected")
+    | Some (Nav.System_gate (Nav.Auth_gate | Nav.Server_offline)) ->
+        Say.resolve lang
+          (Say.make ~ko:"r 재시도 · Ctrl+Q 종료" ~en:"r Retry · Ctrl+Q Quit")
+    | Some (Nav.System_gate Nav.Micro_viewport) ->
+        Say.resolve lang
+          (Say.make ~ko:"터미널 >= 40x12 · Ctrl+Q 종료"
+             ~en:"Resize >= 40x12 · Ctrl+Q Quit")
+    | Some
+        ( Nav.Queue_context _
+        | Nav.Inline_action _
+        | Nav.Help
+        | Nav.System_gate Nav.Media_viewer ) ->
+        Say.resolve lang (Say.make ~ko:"Esc 돌아가기" ~en:"Esc return")
+    | None -> (
+        let _, fresh_lbl, _ = Render_util.freshness_pill ~model ~compact:true in
+        match workspace_basename model with
+        | Some ws ->
+            Printf.sprintf "SSE %s %s %s" fresh_lbl
+              (Glyph.to_utf8 Glyph.Separator_dot)
+              (Grapheme.truncate_to_width ~max_width:14 ws)
+        | None -> Printf.sprintf "SSE %s" fresh_lbl)
 
 let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     ~breakpoint ~composer_folded =
@@ -1023,8 +1073,45 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     let max_pairs = if compact then 6 else 7 in
     let pair_gap = if compact && rect.w < 84 then 1 else 2 in
     let candidates =
-      Keymap.footer_hints ~scope_chain ~max_width:(remaining_w + 24)
-        ~lang:model.lang
+      if model.nav.filter_focused then
+        let mk key ko en action : Keymap.footer_hint =
+          {
+            Keymap.key_display = key;
+            label = Say.resolve model.lang (Say.make ~ko ~en);
+            action;
+            priority = 1;
+          }
+        in
+        [
+          mk "↑↓" "이동" "Move" (Keymap.Move Keymap.Down);
+          mk "Enter" "적용" "Apply" Keymap.Confirm_selected;
+          mk "Tab" "완료" "Done" (Keymap.Cycle_focus_pane Keymap.Next);
+          mk "Esc" "초기화" "Clear" Keymap.Pop_back_or_close;
+        ]
+      else
+        let raw =
+          Keymap.footer_hints ~scope_chain ~max_width:(remaining_w + 24)
+            ~lang:model.lang
+        in
+        let show_tab_hint =
+          match model.nav.overlay with
+          | Some (Nav.Help | Nav.Incidents | Nav.System_gate _) -> false
+          | Some (Nav.Settings _) ->
+              Config_store.is_two_pane_width ~cols:model.viewport.cols
+          | Some (Nav.Palette | Nav.Queue_context _ | Nav.Inline_action _) ->
+              true
+          | None -> Model.focusable_pane_count model > 1
+        in
+        if show_tab_hint then raw
+        else
+          List.filter
+            (fun (h : Keymap.footer_hint) ->
+              not
+                (Keymap.equal_action h.action
+                   (Keymap.Cycle_focus_pane Keymap.Next)
+                 || Keymap.equal_action h.action
+                      (Keymap.Cycle_focus_pane Keymap.Prev)))
+            raw
     in
     let rec draw_keycaps count = function
       | [] -> ()

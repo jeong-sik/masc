@@ -68,7 +68,13 @@ val top_fast_path : t -> entry option
 val current_triage_item : t -> entry option
 (** Currently focused item for rapid 1-key Inbox / Ask triage. *)
 
-val move_triage : ?viewport_rows:int -> delta:int -> t -> t
+val filtered_items : query:string -> t -> entry list
+(** Filter queue entries case-insensitively by title, summary, keeper, or id. *)
+
+val current_filtered_item : query:string -> t -> entry option
+(** Currently focused item within {!filtered_items}. *)
+
+val move_triage : ?query:string -> ?viewport_rows:int -> delta:int -> t -> t
 val select_triage_index : int -> t -> t
 val set_auto_advance : bool -> t -> t
 

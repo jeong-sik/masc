@@ -73,9 +73,9 @@ let apply_server_health ~now (m : Model.t)
       let freshness = { m.freshness with server_offline = false } in
       let overlay =
         match m.nav.overlay with
-        | Some (Nav.System_gate Nav.Server_offline) -> None
+        | Some (Nav.System_gate (Nav.Server_offline | Nav.Auth_gate)) -> None
         | Some
-            ( Nav.System_gate (Nav.Micro_viewport | Nav.Auth_gate | Nav.Media_viewer)
+            ( Nav.System_gate (Nav.Micro_viewport | Nav.Media_viewer)
             | Nav.Palette
             | Nav.Settings _
             | Nav.Incidents
@@ -102,12 +102,16 @@ let apply_server_health ~now (m : Model.t)
   | Error (Msg.Transport Health.Connect_refused as err) ->
       let freshness = { m.freshness with server_offline = true } in
       let nav =
-        { m.nav with overlay = Some (Nav.System_gate Nav.Server_offline) }
+        {
+          m.nav with
+          overlay = Some (Nav.System_gate Nav.Server_offline);
+          filter_focused = false;
+        }
       in
       let m1, _ =
         Update_http.record_http_incident ~now ~source:Health.Source_client_http
           ~context:(Say.make ~ko:"서버 헬스 확인" ~en:"Server health check")
-          err { m with freshness; nav }
+          err { m with freshness; nav; inline_modal = None }
       in
       if not m1.server_identity.autostart_attempted then
         let server_identity =

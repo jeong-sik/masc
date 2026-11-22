@@ -40,6 +40,10 @@ type t = {
   candle_fallback_404 : bool;
   selected_index : int;
   scroll_offset : int;
+  verif_selected_index : int;
+  verif_scroll_offset : int;
+  detail_scroll_offset : int;
+  pulse_goal_index : int;
   schedules_scroll_offset : int;
   filter_query : string;
   verification_view : [ `Pending | `All ];
@@ -102,7 +106,13 @@ val filtered_tasks : t -> Wire_work.task list
     ["verify"], ["todo"], ["unlinked"], ["done"], ["sched"]/["schedules"]) and
     substring matching on title/id. *)
 val verifications_list : t -> Wire_work.verification_request list
+val filtered_verifications : t -> Wire_work.verification_request list
 val schedules_list : t -> Wire_work.schedule_row list
+val filtered_schedules : t -> Wire_work.schedule_row list
+val filtered_candle_balances : t -> Wire_work.candle_balance_row list
+val pulse_active_goals : t -> Wire_work.goal list
+val selected_pulse_goal : t -> Wire_work.goal option
+val move_pulse_goal : ?viewport_rows:int -> delta:int -> t -> t
 val asks_list : t -> Wire_work.ask_row list
 val open_asks : t -> Wire_work.ask_row list
 val tool_approvals_list : t -> Wire_work.held_tool_approval list
@@ -118,7 +128,14 @@ val selected_schedule : t -> Wire_work.schedule_row option
 val selected_open_ask : t -> Wire_work.ask_row option
 
 val move_selection :
-  ?pane_index:int -> ?viewport_rows:int -> delta:int -> t -> t
+  ?pane_index:int ->
+  ?has_linked_card:bool ->
+  ?viewport_rows:int ->
+  delta:int ->
+  t ->
+  t
+val jump_tasks_schedules_pane : pane_index:int -> t -> t
+val reset_detail_scroll : t -> t
 val set_filter : string -> t -> t
 val toggle_verification_view : t -> t
 val toggle_expanded : string -> t -> t

@@ -145,7 +145,9 @@ let render_opt_in_json_tree grid ~(rect : Rect.t) ~(theme : Theme.t)
     let content = Card.pad_inner ~pad_x inner in
     let scrubbed = Ops_common.scrub_json_secrets json in
     let lines = Json_tree.flatten ~max_depth:4 ~redact_secrets:true scrubbed in
-    ignore (Json_tree.draw grid ~rect:content ~theme lines)
+    ignore
+      (Json_tree.draw grid ~rect:content ~theme
+         ~scroll:model.nav.dive_scroll_offset lines)
   end
 
 let draw_evidence_checklist grid ~(rect : Rect.t) ~(theme : Theme.t)
@@ -347,7 +349,9 @@ let render_goal_dive ~goal_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                 (Ops_common.say model ~ko:"측정 절차" ~en:"Procedure")
                 (Ops_common.rewrite_masc_links_for_markdown g.procedure)
             in
-            ignore (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true md_src);
+            ignore
+              (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true
+                 ~scroll:model.nav.dive_scroll_offset md_src);
             y := !y + md_h
           end;
           let rest_rect =
@@ -455,6 +459,7 @@ let render_goal_dive ~goal_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                   if not (Rect.is_empty diff_r) then
                     ignore
                       (Diff.draw grid ~rect:diff_r ~theme
+                         ~scroll:model.nav.dive_scroll_offset
                          (Work_views.build_rejection_diff_rows ~model v))
             end
           end;
@@ -728,6 +733,7 @@ let render_task_dive ~task_id ~(model : Model.t) ~cache ~(rect : Rect.t)
               in
               ignore
                 (Markdown.draw grid ~rect:dr ~theme ~osc8:true
+                   ~scroll:model.nav.dive_scroll_offset
                    (Ops_common.rewrite_masc_links_for_markdown d));
               y := !y + actual_h
           | Some _ | None -> ());
@@ -754,6 +760,7 @@ let render_task_dive ~task_id ~(model : Model.t) ~cache ~(rect : Rect.t)
               if not (Rect.is_empty diff_r) then
                 ignore
                   (Diff.draw grid ~rect:diff_r ~theme
+                     ~scroll:model.nav.dive_scroll_offset
                      (Work_views.build_rejection_diff_rows ~model v))
           | Some _ | None -> ());
           if action_h = 1 then
@@ -913,6 +920,7 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
             in
             ignore
               (Diff.draw grid ~rect:dr ~theme
+                 ~scroll:model.nav.dive_scroll_offset
                  (Work_views.build_rejection_diff_rows ~model v))
           end;
           if action_h = 1 then

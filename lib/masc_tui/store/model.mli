@@ -31,7 +31,15 @@ type nav_state = {
   pane_index : int;
   zoomed : bool;
   filter_focused : bool;
+  dive_scroll_offset : int;
+  help_scroll_offset : int;
 }
+
+type pulse_pane =
+  | Pulse_attention
+  | Pulse_companies
+  | Pulse_goals
+  | Pulse_world
 
 type freshness_state = {
   observer : Health.source_freshness;
@@ -125,6 +133,34 @@ val equal_breakpoint : breakpoint -> breakpoint -> bool
 val equal_composer_mode : composer_mode -> composer_mode -> bool
 val equal_palette_mode : palette_mode -> palette_mode -> bool
 val equal_mismatch_state : mismatch_state -> mismatch_state -> bool
+val equal_pulse_pane : pulse_pane -> pulse_pane -> bool
+
+val pulse_panes : t -> pulse_pane list
+(** Ordered interactive panes rendered on [1 Pulse] (omitting [Pulse_attention]
+    when the human action queue is empty). *)
+
+val active_pulse_pane : t -> pulse_pane
+(** Currently focused {!pulse_pane} derived from [m.nav.pane_index] and
+    {!pulse_panes}. *)
+
+val inner_body_width : t -> int
+(** Exact inset body width matching [Layout.inset_body] / [Chrome.compute_layout]. *)
+
+val inner_body_height : t -> int
+(** Exact inset body height matching [Chrome.compute_layout]. *)
+
+val work_pipeline_has_linked_card : t -> bool
+(** [true] iff [2 Work > Pipeline] renders the bottom-left Linked Tasks &
+    Verifications card ([inner_body_width >= 96 && inner_body_height >= 14]). *)
+
+val can_zoom_current_view : t -> bool
+(** [true] iff [z] ([Toggle_zoom]) renders a zoomed view on the active screen
+    ([Keepers] with a selected keeper, or [Knowledge] Board/Wiki/Memory). *)
+
+val focusable_pane_count : t -> int
+(** Single source of truth for the exact number of interactive focusable panes
+    currently rendered for [m]'s active view, sub-tab, breakpoint, zoom, and
+    data state. Returns [1] when pane cycling is a no-op (never ghost panes). *)
 
 val classify_viewport : viewport -> breakpoint
 val is_too_small_viewport : viewport -> bool

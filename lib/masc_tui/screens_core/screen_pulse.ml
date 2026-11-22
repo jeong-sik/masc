@@ -110,18 +110,6 @@ let latest_velocity_pair (m : Model.t) =
           | Some u, Some d -> Some (u, d)
           | Some _, None | None, Some _ | None, None -> None))
 
-let active_goals_list (m : Model.t) =
-  List.filter
-    (fun (g : Wire_work.goal) ->
-      match g.phase with
-      | Wire_work.Executing | Wire_work.Verifying
-      | Wire_work.Awaiting_confirmation ->
-          true
-      | Wire_work.Completed | Wire_work.Dropped | Wire_work.Paused _
-      | Wire_work.Blocked _ ->
-          false)
-    (Work_store.goals m.work)
-
 let goal_linked_progress ~(model : Model.t) (g : Wire_work.goal) =
   let tasks = Work_store.tasks model.work in
   let linked, done_n =
@@ -939,7 +927,9 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             (Card.default_spec ~title) with
             badge = Some badge;
             hotkey = Some hotkey;
-            focused = Int.equal model.nav.pane_index 0;
+            focused =
+              Model.equal_pulse_pane (Model.active_pulse_pane model)
+                Model.Pulse_attention;
             elevated = true;
           }
       in
@@ -1188,7 +1178,9 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           (Card.default_spec ~title) with
           subtitle = Some subtitle;
           hotkey = Some hotkey;
-          focused = Int.equal model.nav.pane_index 1;
+          focused =
+            Model.equal_pulse_pane (Model.active_pulse_pane model)
+              Model.Pulse_companies;
         }
     in
     if not (Rect.is_empty inner) then begin
@@ -1510,7 +1502,10 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
   if Rect.is_empty rect then ()
   else
     let lang = model.lang in
-    let goals = active_goals_list model in
+    let goals = Work_store.pulse_active_goals model.work in
+    let pane_focused =
+      Model.equal_pulse_pane (Model.active_pulse_pane model) Model.Pulse_goals
+    in
     let title =
       Say.resolve lang
         (Say.make ~ko:"진행 중인 목표 · 일일 성과" ~en:"Active Goals · 24h Output")
@@ -1538,7 +1533,7 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
             Some
               (Say.resolve lang
                  (Say.make ~ko:"[2] 파이프라인" ~en:"[2] Pipeline"));
-          focused = Int.equal model.nav.pane_index 2;
+          focused = pane_focused;
         }
     in
     let pad_x = Layout.card_pad_x bp in
@@ -1548,8 +1543,6 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
       let pri_st = Typography.primary ~bg theme in
       let struct_st = Typography.structure ~bg theme in
       let whisper_st = Typography.whisper ~bg theme in
-      let ok_st = Typography.status ~bg ~bold:true theme Theme.Status_ok in
-      let act_st = Typography.status ~bg ~bold:true theme Theme.Status_active in
       let attn_st =
         Typography.status ~bg ~bold:true theme Theme.Status_attention
       in
@@ -1580,23 +1573,54 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
         else
           let arr = Array.of_list goals in
           let n_goals = Array.length arr in
+          let sel_goal_idx =
+            if n_goals <= 0 then 0
+            else Int.max 0 (Int.min (n_goals - 1) model.work.pulse_goal_index)
+          in
           let show_measure = goals_budget >= (n_goals * 2) in
-          for i = 0 to n_goals - 1 do
+          let rows_per_goal = if show_measure then 2 else 1 in
+          let vis_goals = Int.max 1 (goals_budget / rows_per_goal) in
+          let start_goal_idx =
+            if n_goals <= vis_goals then 0
+            else
+              Int.max 0
+                (Int.min (n_goals - vis_goals) (sel_goal_idx - vis_goals + 1))
+          in
+          for i = start_goal_idx to n_goals - 1 do
             if !y < goals_bottom then begin
               let g = arr.(i) in
               let py = !y in
+              let is_sel = pane_focused && Int.equal i sel_goal_idx in
+              let rbg =
+                Color.of_rgb
+                  (if is_sel then theme.selection_bg else theme.surface_1)
+              in
+              let row_full = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
+              if is_sel then begin
+                Cell_grid.fill_rect ~clip:inner grid ~rect:row_full
+                  ~style:(Typography.primary ~bg:rbg theme) ();
+                Cell_grid.put_glyph ~clip:row_full grid ~x:inner.x ~y:py
+                  ~style:(Typography.accent ~bg:rbg ~bold:true theme)
+                  Glyph.Left_rail
+              end;
               let row_r = Rect.make ~x:content.x ~y:py ~w:content.w ~h:1 in
               let phase_g, phase_st =
                 match g.phase with
                 | Wire_work.Awaiting_confirmation ->
-                    (Glyph.Action_required, attn_st)
-                | Wire_work.Verifying -> (Glyph.Live_working, act_st)
+                    ( Glyph.Action_required,
+                      Typography.status ~bg:rbg ~bold:true theme
+                        Theme.Status_attention )
+                | Wire_work.Verifying ->
+                    ( Glyph.Live_working,
+                      Typography.status ~bg:rbg ~bold:true theme
+                        Theme.Status_active )
                 | Wire_work.Executing
                 | Wire_work.Completed
                 | Wire_work.Dropped
                 | Wire_work.Paused _
                 | Wire_work.Blocked _ ->
-                    (Glyph.Live_healthy, ok_st)
+                    ( Glyph.Live_healthy,
+                      Typography.status ~bg:rbg ~bold:true theme Theme.Status_ok )
               in
               let done_n, decl_n, ratio = goal_linked_progress ~model g in
               let cnt_txt =
@@ -1631,27 +1655,29 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
                 ignore
                   (Cell_grid.put_text ~clip:row_r grid ~x:tx ~y:py
                      ~style:
-                       (match g.phase with
-                        | Wire_work.Awaiting_confirmation ->
-                            Typography.anchor ~bg theme
-                        | Wire_work.Executing
-                        | Wire_work.Verifying
-                        | Wire_work.Completed
-                        | Wire_work.Dropped
-                        | Wire_work.Paused _
-                        | Wire_work.Blocked _ ->
-                            pri_st)
+                       (if is_sel then Typography.anchor ~bg:rbg theme
+                        else
+                          match g.phase with
+                          | Wire_work.Awaiting_confirmation ->
+                              Typography.anchor ~bg:rbg theme
+                          | Wire_work.Executing
+                          | Wire_work.Verifying
+                          | Wire_work.Completed
+                          | Wire_work.Dropped
+                          | Wire_work.Paused _
+                          | Wire_work.Blocked _ ->
+                              Typography.primary ~bg:rbg theme)
                      (Grapheme.truncate_to_width ~max_width:title_w g.title));
               if bar_w > 0 && right_x > tx then
                 ignore
                   (Chart.draw_ratio_bar_run ~clip:row_r grid ~x:right_x ~y:py
-                     ~width:bar_w ~theme ~bg ~unicode:caps.unicode_blocks
+                     ~width:bar_w ~theme ~bg:rbg ~unicode:caps.unicode_blocks
                      ~gradient:Chart.Gradient.Efficiency ~ratio);
               let cx = Rect.right content - cnt_w in
               if cx > tx then
                 ignore
                   (Cell_grid.put_text ~clip:row_r grid ~x:cx ~y:py
-                     ~style:struct_st cnt_txt);
+                     ~style:(Typography.structure ~bg:rbg theme) cnt_txt);
               incr y;
               if show_measure && !y < goals_bottom && not (String.equal (String.trim g.measure) "") then begin
                 let mr = Rect.make ~x:(content.x + 2) ~y:!y ~w:(Int.max 0 (content.w - 2)) ~h:1 in
@@ -1842,23 +1868,6 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
 
 (* ---------- Panel D: World Pulse (Signal-First Board + World Memory & Candle Footer) ---------- *)
 
-let hottest_signal_threads (m : Model.t) =
-  match Observed.to_option m.knowledge.board with
-  | None -> []
-  | Some feed ->
-      feed.posts
-      |> List.filter (fun (p : Wire_knowledge.board_post) ->
-             p.is_signal
-             && Wire_knowledge.is_signal_board_post ~post_kind:p.post_kind
-                  ~hearth:p.hearth ~title:p.title ~body:p.body)
-      |> List.sort
-           (fun (a : Wire_knowledge.board_post) (b : Wire_knowledge.board_post)
-            ->
-             let sa = (a.comment_count * 3) + a.score in
-             let sb = (b.comment_count * 3) + b.score in
-             if sb <> sa then Int.compare sb sa
-             else Float.compare b.created_at_unix a.created_at_unix)
-
 let one_line_excerpt s =
   s
   |> String.trim
@@ -1869,7 +1878,10 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   if Rect.is_empty rect then ()
   else
     let lang = model.lang in
-    let threads = hottest_signal_threads model in
+    let threads = Knowledge_store.hottest_signal_threads model.knowledge in
+    let pane_focused =
+      Model.equal_pulse_pane (Model.active_pulse_pane model) Model.Pulse_world
+    in
     let title =
       Say.resolve lang
         (Say.make ~ko:"월드 펄스 · 핵심 토론" ~en:"World Pulse · Signal Threads")
@@ -1892,7 +1904,7 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           (Card.default_spec ~title) with
           badge = Some badge;
           hotkey = Some hotkey;
-          focused = Int.equal model.nav.pane_index 3;
+          focused = pane_focused;
         }
     in
     let pad_x = Layout.card_pad_x bp in
@@ -1900,11 +1912,9 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     if not (Rect.is_empty content) then begin
       let bg = Color.of_rgb theme.surface_1 in
       let pill_bg = Color.of_rgb theme.surface_2 in
-      let anchor_st = Typography.anchor ~bg theme in
       let pri_st = Typography.primary ~bg theme in
       let struct_st = Typography.structure ~bg theme in
       let whisper_st = Typography.whisper ~bg theme in
-      let acc_st = Typography.accent ~bg ~bold:true theme in
       let ok_st = Typography.status ~bg ~bold:true theme Theme.Status_ok in
       let attn_st =
         Typography.status ~bg ~bold:true theme Theme.Status_attention
@@ -1940,12 +1950,40 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             else
               let arr = Array.of_list threads in
               let total = Array.length arr in
+              let sel_thread_idx =
+                if total <= 0 then 0
+                else
+                  Int.max 0
+                    (Int.min (total - 1) model.knowledge.pulse_thread_index)
+              in
               let rich_mode = thread_rows >= 8 && content.w >= 48 in
+              let rows_per_thread = if rich_mode then 3 else 1 in
+              let vis_threads = Int.max 1 (thread_rows / rows_per_thread) in
+              let start_thread_idx =
+                if total <= vis_threads then 0
+                else
+                  Int.max 0
+                    (Int.min (total - vis_threads)
+                       (sel_thread_idx - vis_threads + 1))
+              in
               let rec draw_thread i =
                 if i >= total || !y >= thread_bottom then ()
                 else begin
                   let p = arr.(i) in
                   let py = !y in
+                  let is_sel = pane_focused && Int.equal i sel_thread_idx in
+                  let rbg =
+                    Color.of_rgb
+                      (if is_sel then theme.selection_bg else theme.surface_1)
+                  in
+                  let row_full = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
+                  if is_sel then begin
+                    Cell_grid.fill_rect ~clip:inner grid ~rect:row_full
+                      ~style:(Typography.primary ~bg:rbg theme) ();
+                    Cell_grid.put_glyph ~clip:row_full grid ~x:inner.x ~y:py
+                      ~style:(Typography.accent ~bg:rbg ~bold:true theme)
+                      Glyph.Left_rail
+                  end;
                   let row_r = Rect.make ~x:content.x ~y:py ~w:content.w ~h:1 in
                   let x = ref content.x in
                   (* Subtle hearth pill *)
@@ -1966,7 +2004,8 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                    | Some d when d > 1 ->
                        let c_adv =
                          Cell_grid.put_text ~clip:row_r grid ~x:!x ~y:py
-                           ~style:acc_st (Printf.sprintf "[x%d] " d)
+                           ~style:(Typography.accent ~bg:rbg ~bold:true theme)
+                           (Printf.sprintf "[x%d] " d)
                        in
                        x := !x + c_adv
                    | Some _ | None -> ());
@@ -1989,7 +2028,7 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                     if title_w > 3 then
                       ignore
                         (Cell_grid.put_text ~clip:row_r grid ~x:!x ~y:py
-                           ~style:anchor_st
+                           ~style:(Typography.anchor ~bg:rbg theme)
                            (Grapheme.truncate_to_width ~max_width:title_w p.title));
                     incr y;
                     (* Line 2: @author · excerpt ... reply_cnt · italic age *)
@@ -2070,20 +2109,23 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                     if title_w > 3 then
                       ignore
                         (Cell_grid.put_text ~clip:row_r grid ~x:!x ~y:py
-                           ~style:(if i = 0 then anchor_st else pri_st)
+                           ~style:
+                             (if is_sel || i = 0 then
+                                Typography.anchor ~bg:rbg theme
+                              else Typography.primary ~bg:rbg theme)
                            (Grapheme.truncate_to_width ~max_width:title_w p.title));
                     if meta_w > 0 && right_x > !x then begin
                       let mx = ref right_x in
                       if not (String.equal reply_txt "") then begin
                         let a =
                           Cell_grid.put_text ~clip:row_r grid ~x:!mx ~y:py
-                            ~style:struct_st reply_txt
+                            ~style:(Typography.structure ~bg:rbg theme) reply_txt
                         in
                         mx := !mx + a;
                         if not (String.equal age_txt "") then
                           let s =
                             Cell_grid.put_text ~clip:row_r grid ~x:!mx ~y:py
-                              ~style:(Typography.whisper ~bg ~italic:false theme)
+                              ~style:(Typography.whisper ~bg:rbg ~italic:false theme)
                               Typography.sep_dot
                           in
                           mx := !mx + s
@@ -2091,14 +2133,14 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                       if not (String.equal age_txt "") then
                         ignore
                           (Cell_grid.put_text ~clip:row_r grid ~x:!mx ~y:py
-                             ~style:whisper_st age_txt)
+                             ~style:(Typography.whisper ~bg:rbg theme) age_txt)
                     end;
                     incr y;
                     draw_thread (i + 1)
                   end
                 end
               in
-              draw_thread 0
+              draw_thread start_thread_idx
       end;
       (* Footer Hairline Band: Live World Memory + Candle Highlight *)
       let mem_y = Rect.bottom content - mem_rows in

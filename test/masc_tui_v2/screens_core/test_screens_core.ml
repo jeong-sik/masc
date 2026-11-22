@@ -1398,24 +1398,38 @@ let find_focused_row_containing ~needle (grid : Cell_grid.t) =
 
 let test_palette_high_selection_and_sync () =
   let base = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en in
-  let cmds = Update_nav.palette_filtered_commands base in
-  Alcotest.(check bool) "keymap palette has > 15 commands" true
-    (List.length cmds > 15);
-  let cmd15 = List.nth cmds 15 in
-  let last_cmd = List.nth cmds (List.length cmds - 1) in
+  let m_pal_base =
+    {
+      base with
+      nav = { base.nav with overlay = Some Nav.Palette };
+      palette = { mode = Model.Palette_commands; query = ""; selected = 0 };
+    }
+  in
+  let entries = Update_nav.palette_entries m_pal_base in
+  Alcotest.(check bool) "unified palette has > 25 entries across all sections"
+    true (List.length entries > 25);
+  let entry15 =
+    match List.nth_opt entries 15 with
+    | Some e -> e
+    | None -> Alcotest.fail "expected at least 16 palette entries"
+  in
+  let last_entry =
+    match List.nth_opt entries (List.length entries - 1) with
+    | Some e -> e
+    | None -> Alcotest.fail "expected non-empty palette entries"
+  in
   List.iter
     (fun (cols, rows) ->
       let m15 =
         {
-          base with
-          nav = { base.nav with overlay = Some Nav.Palette };
+          m_pal_base with
           palette = { mode = Model.Palette_commands; query = ""; selected = 15 };
         }
       in
       let g15, _ = render_full ~model:m15 ~cols ~rows in
       assert_clean_grid ~label:"palette_sel15" g15;
       let prefix15 =
-        String.sub cmd15.title 0 (Int.min 12 (String.length cmd15.title))
+        String.sub entry15.title 0 (Int.min 12 (String.length entry15.title))
       in
       (match find_focused_row_containing ~needle:prefix15 g15 with
        | Some _ -> ()
@@ -1424,25 +1438,25 @@ let test_palette_high_selection_and_sync () =
              (Printf.sprintf
                 "palette_sel15 (%dx%d): expected focused row containing %S:\n%s"
                 cols rows prefix15 (grid_all_text g15)));
-      (* Out-of-bounds selection clamps to last selectable command *)
+      (* Out-of-bounds selection clamps to last selectable unified entry *)
       let m_oob =
         {
-          base with
-          nav = { base.nav with overlay = Some Nav.Palette };
+          m_pal_base with
           palette = { mode = Model.Palette_commands; query = ""; selected = 999 };
         }
       in
       let g_oob, _ = render_full ~model:m_oob ~cols ~rows in
       assert_clean_grid ~label:"palette_oob" g_oob;
       let prefix_last =
-        String.sub last_cmd.title 0 (Int.min 12 (String.length last_cmd.title))
+        String.sub last_entry.title 0
+          (Int.min 12 (String.length last_entry.title))
       in
       (match find_focused_row_containing ~needle:prefix_last g_oob with
        | Some _ -> ()
        | None ->
            Alcotest.fail
              (Printf.sprintf
-                "palette_oob (%dx%d): expected clamped last command %S:\n%s"
+                "palette_oob (%dx%d): expected clamped last entry %S:\n%s"
                 cols rows prefix_last (grid_all_text g_oob))))
     [ (140, 40); (90, 28) ];
   (* Palette_keepers & Palette_models stay in sync with Update_nav *)
@@ -1739,7 +1753,7 @@ let test_round1_local_clock_pills_and_compact_fit () =
   let sub_w90 = grid_row_text g_w90 1 in
   assert_contains ~label:"work_90_symmetric_pill" ~needle:" 파이프라인 " sub_w90;
   assert_contains ~label:"work_90_candle_not_clipped" ~needle:"캔들·성과" sub_w90;
-  assert_contains ~label:"work_90_compact_hint" ~needle:"[ ]" sub_w90;
+  assert_contains ~label:"work_90_compact_hint" ~needle:"[←→]" sub_w90;
   assert_not_contains ~label:"work_90_no_long_hint" ~needle:"탭 전환" sub_w90;
 
   let m_set_90 =

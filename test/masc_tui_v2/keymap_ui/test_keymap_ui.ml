@@ -173,10 +173,14 @@ let test_keymap_scopes_and_3_tiers () =
   Alcotest.(check bool) "Ctrl+J newline in Composer" true
     (Option.equal Keymap.equal_action (Some Keymap.Composer_newline)
        (Keymap.dispatch ~scope_chain:comp_strip_chain (char_ev ~ctrl:true 'j')));
-  Alcotest.(check bool) "Shift+Enter followup in Composer" true
-    (Option.equal Keymap.equal_action (Some Keymap.Submit_followup)
+  Alcotest.(check bool) "Shift+Enter newline in Composer" true
+    (Option.equal Keymap.equal_action (Some Keymap.Composer_newline)
        (Keymap.dispatch ~scope_chain:comp_strip_chain
           (key_ev ~shift:true Input.Enter)));
+  Alcotest.(check bool) "Ctrl+Enter followup in Composer" true
+    (Option.equal Keymap.equal_action (Some Keymap.Submit_followup)
+       (Keymap.dispatch ~scope_chain:comp_strip_chain
+          (key_ev ~ctrl:true Input.Enter)));
   Alcotest.(check bool) "Alt+Enter followup in Composer" true
     (Option.equal Keymap.equal_action (Some Keymap.Submit_followup)
        (Keymap.dispatch ~scope_chain:comp_strip_chain
@@ -187,6 +191,10 @@ let test_keymap_scopes_and_3_tiers () =
   Alcotest.(check bool) "Ctrl+Q quits" true
     (Option.equal Keymap.equal_action (Some Keymap.Quit_app)
        (Keymap.dispatch ~scope_chain:comp_strip_chain (char_ev ~ctrl:true 'q')));
+  Alcotest.(check bool) "Ctrl+Shift+Q does NOT quit" true
+    (Option.is_none
+       (Keymap.dispatch ~scope_chain:comp_strip_chain
+          (char_ev ~ctrl:true ~shift:true 'q')));
   (* Modern accelerators *)
   Alcotest.(check bool) "Ctrl+, settings" true
     (Option.equal Keymap.equal_action (Some Keymap.Open_settings)

@@ -149,7 +149,14 @@ val bindings : binding list
 val normalize_key_event : Input.key_event -> Input.key_event
 (** Normalize Kitty [CSI u] and legacy VT100 variants of the same keystroke
     (e.g., uppercase ASCII with or without [shift = true]) to the canonical
-    chord stored in {!bindings}. *)
+    chord stored in {!bindings}, preserving [shift] on [Ctrl+Shift+<letter>]
+    chords so [Ctrl+Shift+Q] never aliases [Ctrl+Q]. *)
+
+val replay_ime_event : Input.key_event -> Input.key_event
+(** Translate a single printable Korean 2-bulsik Hangul jamo/keystroke into its
+    corresponding normalized Latin command keystroke for unfocused command and
+    overlay hotkey dispatch. Non-single-key or modified events are returned
+    unchanged. *)
 
 val scope_chain_of_focus :
   ?approval_strip_active:bool -> Nav.focus_scope -> scope list

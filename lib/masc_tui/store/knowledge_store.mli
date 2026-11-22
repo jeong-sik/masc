@@ -56,6 +56,9 @@ type t = {
   last_memory_act_answer : (string * Wire_knowledge.memory_act_answer) option;
   selected_index : int;
   scroll_offset : int;
+  diff_scroll_offset : int;
+  detail_scroll_offset : int;
+  pulse_thread_index : int;
   filter_query : string;
 }
 
@@ -143,11 +146,19 @@ val wiki_display_pages : t -> Wire_knowledge.wiki_page_summary list
 (** Flattened visual display order matching {!cluster_wiki_pages}. *)
 
 val quarantines_list : t -> Wire_knowledge.quarantine_candidate list
+val filtered_memory_conflicts : t -> Wire_knowledge.memory_conflict list
+val filtered_memory_claims : t -> Wire_knowledge.world_claim list
+val memory_diff_matches_filter : t -> string -> bool
+val memory_diff_entry_count : t -> int
+val hottest_signal_threads : t -> Wire_knowledge.board_post list
+val selected_pulse_thread : t -> Wire_knowledge.board_post option
+val move_pulse_thread : ?viewport_rows:int -> delta:int -> t -> t
 val selected_post : t -> Wire_knowledge.board_post option
 val selected_wiki_page : t -> Wire_knowledge.wiki_page_summary option
 val selected_artifact : t -> Wire_knowledge.artifact_entry option
 
 val move_selection :
   ?pane_index:int -> ?viewport_rows:int -> delta:int -> t -> t
+val reset_detail_scroll : t -> t
 val set_filter : string -> t -> t
 val mark_stale_all : t -> t

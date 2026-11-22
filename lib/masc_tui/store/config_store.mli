@@ -85,6 +85,9 @@ val empty : t
 val equal_config_target :
   Wire_config.config_target -> Wire_config.config_target -> bool
 val equal_settings_pane : settings_pane -> settings_pane -> bool
+val is_two_pane_width : cols:int -> bool
+(** [true] when the Settings modal's inner body width ([cols - 2]) reaches the
+    [72]-column threshold for rendering the 2-pane Tree + Property Inspector. *)
 
 val set_tab : Nav.settings_tab -> t -> t
 val cycle_tab : Keymap.cycle_dir -> t -> t
@@ -144,7 +147,18 @@ val field_sub_group : t -> Wire_config.schema_field -> string option
     falling back to quote-aware {!Wire_config.field_sub_group}. *)
 
 val visible_fields : t -> Wire_config.schema_field list
+val inspector_fields : t -> Wire_config.schema_field list
+(** Exact fields displayed in the Right-Pane Property Inspector, including
+    synthesized [tui.*] preference fallback rows when [General & UI] has no
+    server schema section and [search_query = ""]. *)
+val is_tui_pref_key : string -> bool
 val selected_field : t -> Wire_config.schema_field option
+val apply_tui_pref_op :
+  observed_at:Clock.Mono.t ->
+  full_key:string ->
+  Wire_config.patch_op ->
+  t ->
+  t
 
 val stage_patch : full_key:string -> Wire_config.patch_op -> t -> t
 val unstage_patch : full_key:string -> t -> t

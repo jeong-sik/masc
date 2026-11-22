@@ -942,21 +942,41 @@ let apply_http_reply ~now (m : Model.t) reply =
       err_reply ~source:(Health.Source_sandbox "keeper") ~ko:"키퍼 샌드박스 조회"
         ~en:"Keeper sandbox fetch" err
   | Msg.Reply_repositories (Ok repos) ->
-      ( {
-          m with
-          infra = Infra_store.apply_repositories ~observed_at:now repos m.infra;
-        }
-      , [] )
+      let infra =
+        Infra_store.apply_repositories ~observed_at:now repos m.infra
+      in
+      let next = { m with infra } in
+      let extra_cmds =
+        if
+          Nav.equal_workspace next.nav.workspace Nav.Infra
+          && Nav.equal_infra_tab next.infra.active_tab Nav.Infra_repos_changes
+        then View_fetches.fetches_for_current_view next
+        else []
+      in
+      (next, extra_cmds)
   | Msg.Reply_repositories (Error err) ->
       err_reply ~source:Health.Source_client_http ~ko:"저장소 목록 조회"
         ~en:"Repositories fetch" err
-  | Msg.Reply_file_changes (Ok changes) ->
-      ( {
-          m with
-          infra = Infra_store.apply_file_changes ~observed_at:now changes m.infra;
-        }
-      , [] )
-  | Msg.Reply_file_changes (Error err) ->
+  | Msg.Reply_file_changes { keeper; result = Ok changes } ->
+      let expected =
+        match Infra_store.selected_repository m.infra with
+        | Some { keepers = k :: _; _ } -> Some k
+        | Some { keepers = []; _ } -> None
+        | None ->
+            Option.map
+              (fun (k : Wire_fleet.keeper_summary) -> k.name)
+              (Fleet_store.selected_keeper_summary m.fleet)
+      in
+      if Option.equal String.equal expected (Some keeper) then
+        ( {
+            m with
+            infra =
+              Infra_store.apply_file_changes ~keeper ~observed_at:now changes
+                m.infra;
+          }
+        , [] )
+      else (m, [])
+  | Msg.Reply_file_changes { keeper = _; result = Error err } ->
       err_reply ~source:Health.Source_client_http ~ko:"파일 변경 조회"
         ~en:"File changes fetch" err
   | Msg.Reply_system_logs (Ok entries) ->

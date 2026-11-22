@@ -102,8 +102,12 @@ let concise_tool_preview ~max_w raw =
     in
     Grapheme.truncate_to_width ~max_width:(Int.max 8 max_w) one_line
 
+let effective_tools_mode (model : Model.t) =
+  if model.fleet.chat_turn_details_expanded then Slash.Tools_full
+  else model.fleet.chat_tools_mode
+
 let preview_tool_output_rows ~(theme : Theme.t) ~(model : Model.t) ~width raw =
-  let tools_mode = model.fleet.chat_tools_mode in
+  let tools_mode = effective_tools_mode model in
   let max_preview, show_expand_hint =
     match tools_mode with
     | Slash.Tools_compact -> (0, false)
@@ -331,7 +335,7 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
                 | None -> Ops_common.say model ~ko:"도구" ~en:"tool"
               in
               let expanded =
-                match model.fleet.chat_tools_mode with
+                match effective_tools_mode model with
                 | Slash.Tools_compact -> false
                 | Slash.Tools_results | Slash.Tools_full -> true
               in
@@ -434,7 +438,7 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
   end;
   (* 2. Collapsible Elevated Tool Cards (surface_2 header + recessed surface_0 preview) *)
   let expanded_tools =
-    match model.fleet.chat_tools_mode with
+    match effective_tools_mode model with
     | Slash.Tools_compact -> false
     | Slash.Tools_results | Slash.Tools_full -> true
   in
@@ -832,8 +836,8 @@ let render_empty_chat_context grid ~(rect : Rect.t) ~(theme : Theme.t)
             ~ko:"\"최근 24시간 기억 변경 사항과 핵심 결정을 알려줘\""
             ~en:"\"What changed in your memory over the last 24h?\"";
           Ops_common.say model
-            ~ko:"\"/status  ·  [i] 메시지 입력  ·  [V] 음성 PTT\""
-            ~en:"\"/status  ·  [i] Compose message  ·  [V] Voice PTT\"";
+            ~ko:"\"/help  ·  [i] 메시지 입력  ·  [V] 음성 PTT\""
+            ~en:"\"/help  ·  [i] Compose message  ·  [V] Voice PTT\"";
         ]
       in
       List.iter
@@ -1391,8 +1395,11 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
                   incr y
                 end
               end;
+              let skipped = ref 0 in
+              let scroll = model.nav.dive_scroll_offset in
               let emit_railed ?rail_tone ~fg ~attrs line =
-                if !y < bottom then begin
+                if !skipped < scroll then incr skipped
+                else if !y < bottom then begin
                   let x0 =
                     match rail_tone with
                     | Some tok ->
@@ -1538,10 +1545,22 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
         (fun (p : Wire_knowledge.board_post) -> String.equal p.author name)
         (Knowledge_store.filtered_posts model.knowledge)
     in
+    let skip = Int.max 0 model.nav.dive_scroll_offset in
+    let vrow = ref 0 in
     let y = ref l_content.y in
     let bottom = Rect.bottom l_content in
+    let emit_hairline label =
+      let cur = !vrow in
+      incr vrow;
+      if cur >= skip && !y < bottom then begin
+        Card.draw_hairline ~pad_x:0 ~bg ~label grid ~rect:l_content ~y:!y ~theme;
+        incr y
+      end
+    in
     let emit ~fg ~attrs line =
-      if !y < bottom then begin
+      let cur = !vrow in
+      incr vrow;
+      if cur >= skip && !y < bottom then begin
         let st = Style.make ~fg:(Color.of_rgb fg) ~bg ~attrs () in
         ignore
           (Ops_common.put_line ~clip:l_content grid ~x:l_content.x ~y:!y
@@ -1550,21 +1569,18 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
       end
     in
     let total_tasks = List.length keeper_tasks in
-    let shown_tasks = List.take 5 keeper_tasks in
+    let shown_tasks =
+      if skip > 0 then keeper_tasks else List.take 5 keeper_tasks
+    in
     let tasks_count_lbl =
       if total_tasks > List.length shown_tasks then
         Printf.sprintf "%d/%d" (List.length shown_tasks) total_tasks
       else Int.to_string total_tasks
     in
-    if !y < bottom then begin
-      Card.draw_hairline ~pad_x:0 ~bg
-        ~label:
-          (Printf.sprintf "%s (%s)"
-             (Ops_common.say model ~ko:"할당 작업" ~en:"Assigned Tasks")
-             tasks_count_lbl)
-        grid ~rect:l_content ~y:!y ~theme;
-      incr y
-    end;
+    emit_hairline
+      (Printf.sprintf "%s (%s)"
+         (Ops_common.say model ~ko:"할당 작업" ~en:"Assigned Tasks")
+         tasks_count_lbl);
     if keeper_tasks = [] then
       emit ~fg:theme.text_muted ~attrs:Attr.italic
         (Ops_common.say model ~ko:"할당된 작업이 없습니다" ~en:"No assigned tasks")
@@ -1583,21 +1599,18 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
             (Printf.sprintf "%s %s %s %s" (Glyph.to_utf8 g) tk.id tk.title gl))
         shown_tasks;
     let total_scheds = List.length keeper_scheds in
-    let shown_scheds = List.take 4 keeper_scheds in
+    let shown_scheds =
+      if skip > 0 then keeper_scheds else List.take 4 keeper_scheds
+    in
     let scheds_count_lbl =
       if total_scheds > List.length shown_scheds then
         Printf.sprintf "%d/%d" (List.length shown_scheds) total_scheds
       else Int.to_string total_scheds
     in
-    if !y < bottom then begin
-      Card.draw_hairline ~pad_x:0 ~bg
-        ~label:
-          (Printf.sprintf "%s (%s)"
-             (Ops_common.say model ~ko:"예약 일정" ~en:"Schedules")
-             scheds_count_lbl)
-        grid ~rect:l_content ~y:!y ~theme;
-      incr y
-    end;
+    emit_hairline
+      (Printf.sprintf "%s (%s)"
+         (Ops_common.say model ~ko:"예약 일정" ~en:"Schedules")
+         scheds_count_lbl);
     if keeper_scheds = [] then
       emit ~fg:theme.text_muted ~attrs:Attr.italic
         (Ops_common.say model ~ko:"등록된 일정이 없습니다" ~en:"No scheduled jobs")
@@ -1616,7 +1629,7 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
         shown_scheds;
     let total_posts = List.length keeper_posts in
     let avail_post_rows = Int.max 0 (bottom - (!y + 1)) in
-    let posts_overflow = total_posts > avail_post_rows in
+    let posts_overflow = skip = 0 && total_posts > avail_post_rows in
     let shown_post_limit =
       if posts_overflow then Int.max 0 (avail_post_rows - 1) else total_posts
     in
@@ -1626,15 +1639,10 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
         Printf.sprintf "%d/%d" (List.length shown_posts) total_posts
       else Int.to_string total_posts
     in
-    if !y < bottom then begin
-      Card.draw_hairline ~pad_x:0 ~bg
-        ~label:
-          (Printf.sprintf "%s (%s)"
-             (Ops_common.say model ~ko:"최근 보드 글" ~en:"Recent Board Posts")
-             posts_count_lbl)
-        grid ~rect:l_content ~y:!y ~theme;
-      incr y
-    end;
+    emit_hairline
+      (Printf.sprintf "%s (%s)"
+         (Ops_common.say model ~ko:"최근 보드 글" ~en:"Recent Board Posts")
+         posts_count_lbl);
     if keeper_posts = [] then
       emit ~fg:theme.text_muted ~attrs:Attr.italic
         (Ops_common.say model ~ko:"최근 보드 작성 글 없음"
@@ -2337,6 +2345,12 @@ let render_sandbox_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                (Ops_common.say model ~ko:"수신된 샌드박스 로그가 없습니다"
                   ~en:"No sandbox logs captured for this keeper"))
         else
+          let max_skip =
+            Int.max 0 (List.length keeper_logs - Int.max 1 body_logs.h)
+          in
+          let skip =
+            Int.min max_skip (Int.max 0 model.nav.dive_scroll_offset)
+          in
           List.iteri
             (fun idx (l : Wire_infra.system_log_entry) ->
               let py = body_logs.y + idx in
@@ -2367,7 +2381,7 @@ let render_sandbox_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                      ~style:(Typography.primary ~bg theme)
                      msg)
               end)
-            (List.take body_logs.h keeper_logs)
+            (List.take body_logs.h (Store_scroll.drop skip keeper_logs))
       end
 
 (* --- Tab 5: Config (Scoped In-TUI Settings via v2.5 Form.draw, ZERO $EDITOR) --- *)
@@ -2737,8 +2751,34 @@ let build_keeper_form_state ~(model : Model.t) ~name ~target_matches
   let filter = if target_matches then cfg.search_query else "" in
   let st0 = { (Form.create fields) with filter } in
   let vis = Form.visible_indices st0 in
+  let in_config_view =
+    match Model.active_dive model with
+    | Some (Nav.Dive_keeper { tab = Nav.Keeper_config; _ }) -> true
+    | Some
+        ( Nav.Dive_keeper
+            {
+              tab =
+                ( Nav.Keeper_chat
+                | Nav.Keeper_memory
+                | Nav.Keeper_work_candle
+                | Nav.Keeper_sandbox );
+              _;
+            }
+        | Nav.Dive_work _
+        | Nav.Dive_knowledge _
+        | Nav.Dive_infra _ ) ->
+        false
+    | None ->
+        Nav.equal_workspace model.nav.workspace Nav.Keepers
+        && Nav.equal_keeper_tab model.fleet.keeper_dive_tab Nav.Keeper_config
+  in
   let focused =
-    if not target_matches then 0
+    let vlen = List.length vis in
+    if vlen = 0 then 0
+    else if in_config_view || model.nav.dive_scroll_offset > 0 then
+      let clamped = Int.max 0 (Int.min (vlen - 1) model.nav.dive_scroll_offset) in
+      match List.nth_opt vis clamped with Some idx -> idx | None -> 0
+    else if not target_matches then 0
     else
       let matched_by_store_sel =
         match Config_store.selected_field cfg with
@@ -2754,14 +2794,11 @@ let build_keeper_form_state ~(model : Model.t) ~name ~target_matches
       in
       match matched_by_store_sel with
       | Some idx -> idx
-      | None -> (
-          let vlen = List.length vis in
-          if vlen = 0 then 0
-          else
-            let clamped =
-              Int.max 0 (Int.min (vlen - 1) cfg.selected_field_index)
-            in
-            match List.nth_opt vis clamped with Some idx -> idx | None -> 0)
+      | None ->
+          let clamped =
+            Int.max 0 (Int.min (vlen - 1) cfg.selected_field_index)
+          in
+          (match List.nth_opt vis clamped with Some idx -> idx | None -> 0)
   in
   {
     st0 with
@@ -2785,13 +2822,13 @@ let render_config_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
     in
     let hdr_str =
       Printf.sprintf "%s %s %s %s %d %s"
-        (Ops_common.say model ~ko:"인라인 키퍼 설정" ~en:"Scoped Keeper Settings")
+        (Ops_common.say model ~ko:"키퍼 설정 요약" ~en:"Scoped Keeper Settings")
         (Glyph.to_utf8 Glyph.Separator_dot)
         name
         (Glyph.to_utf8 Glyph.Separator_dot)
         dirty_n
-        (Ops_common.say model ~ko:"건 변경 대기 · [Ctrl+S] 저장 · [$EDITOR 불필요]"
-           ~en:"staged · [Ctrl+S] Save · [Zero $EDITOR]")
+        (Ops_common.say model ~ko:"건 변경 대기 · [e] Settings에서 편집 · [/] 검색"
+           ~en:"staged · [e] Edit in Settings · [/] Search")
     in
     let hdr_st =
       if dirty_n > 0 then Typography.status ~bg ~bold:true theme Theme.Status_attention
@@ -2850,7 +2887,7 @@ let render_config_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
     else
       ignore
         (Form.draw grid ~rect:form_rect ~theme ~lang:model.lang ~pad_x
-           ~section_header ~show_row_badges:false ~show_help_footer:true form_st);
+           ~section_header ~show_row_badges:false ~show_help_footer:false form_st);
     match server_diff_opt with
     | Some resp when diff_h >= 2 ->
         let diff_c = Card.pad_inner ~pad_x diff_rect in
@@ -3080,12 +3117,12 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
              ~en:"[Ctrl+T] Queue · [z] Zoom")
       else if Nav.equal_keeper_tab tab Nav.Keeper_chat && has_running_turn then
         Some
-          (Ops_common.say model ~ko:"[Esc/Ctrl+X] 턴 중단 · [y] 복사 · [ ] 탭"
-             ~en:"[Esc/Ctrl+X] Interrupt · [y] Copy · [ ] Tab")
+          (Ops_common.say model ~ko:"[Esc/Ctrl+X] 턴 중단 · [y] 복사 · [←→] 탭"
+             ~en:"[Esc/Ctrl+X] Interrupt · [y] Copy · [←→] Tabs")
       else
         Some
-          (Ops_common.say model ~ko:"[ ] 탭 · [y] 응답 복사 · [Esc] 목록"
-             ~en:"[ ] Tab · [y] Copy · [Esc] Fleet")
+          (Ops_common.say model ~ko:"[←→] 탭 · [y] 응답 복사 · [Esc] 목록"
+             ~en:"[←→] Tabs · [y] Copy · [Esc] Fleet")
     in
     let footer_hint =
       if embedded then

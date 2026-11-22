@@ -50,6 +50,9 @@ type t = {
   last_memory_act_answer : (string * Wire_knowledge.memory_act_answer) option;
   selected_index : int;
   scroll_offset : int;
+  diff_scroll_offset : int;
+  detail_scroll_offset : int;
+  pulse_thread_index : int;
   filter_query : string;
 }
 
@@ -79,6 +82,9 @@ let empty =
     last_memory_act_answer = None;
     selected_index = 0;
     scroll_offset = 0;
+    diff_scroll_offset = 0;
+    detail_scroll_offset = 0;
+    pulse_thread_index = 0;
     filter_query = "";
   }
 
@@ -100,38 +106,9 @@ let equal_memory_diff_window a b =
   | Window_revs _, (Window_24h | Window_7d | Window_30d) ->
       false
 
-let contains_ci ~needle haystack =
-  let n_len = String.length needle in
-  if n_len = 0 then true
-  else
-    let h_len = String.length haystack in
-    if n_len > h_len then false
-    else
-      let n_low = String.lowercase_ascii needle in
-      let h_low = String.lowercase_ascii haystack in
-      let limit = h_len - n_len in
-      let rec scan i =
-        if i > limit then false
-        else if String.equal (String.sub h_low i n_len) n_low then true
-        else scan (i + 1)
-      in
-      scan 0
-
-let default_viewport_rows = 15
-
-let adjust_grouped_scroll ?(viewport_rows = default_viewport_rows) ~scroll
-    ~header_row vis_row =
-  let vr = max 1 viewport_rows in
-  let top_row = if vr >= 2 then min header_row vis_row else vis_row in
-  if top_row < scroll then top_row
-  else if vis_row >= scroll + vr then max 0 (vis_row - vr + 1)
-  else scroll
-
-let clamp_index len idx =
-  if len <= 0 then 0
-  else if idx < 0 then 0
-  else if idx >= len then len - 1
-  else idx
+let contains_ci = Store_scroll.contains_ci
+let adjust_grouped_scroll = Store_scroll.adjust_grouped_scroll
+let clamp_index = Store_scroll.clamp_index
 
 type succession_group = {
   chain_root_id : string option;
@@ -365,7 +342,14 @@ let index_of_wiki_slug slug (pages : Wire_knowledge.wiki_page_summary list) =
   find 0 pages
 
 let set_tab active_tab t =
-  { t with active_tab; selected_index = 0; scroll_offset = 0 }
+  {
+    t with
+    active_tab;
+    selected_index = 0;
+    scroll_offset = 0;
+    diff_scroll_offset = 0;
+    detail_scroll_offset = 0;
+  }
 
 let cycle_tab dir t =
   let next_tab =
@@ -379,7 +363,13 @@ let toggle_wiki_artifacts_submode t =
   let wiki_artifacts_submode =
     match t.wiki_artifacts_submode with `Wiki -> `Artifacts | `Artifacts -> `Wiki
   in
-  { t with wiki_artifacts_submode; selected_index = 0; scroll_offset = 0 }
+  {
+    t with
+    wiki_artifacts_submode;
+    selected_index = 0;
+    scroll_offset = 0;
+    detail_scroll_offset = 0;
+  }
 
 let toggle_signal_only t =
   {
@@ -599,7 +589,146 @@ let selected_artifact t =
   let items = artifacts_filtered t in
   List.nth_opt items (clamp_index (List.length items) t.selected_index)
 
-let active_list_len ?(pane_index = 0) t =
+let memory_diff_matches_filter t text =
+  let q = String.trim t.filter_query in
+  String.equal q "" || contains_ci ~needle:q text
+
+let filtered_memory_conflicts t =
+  let all =
+    match Observed.to_option t.world_memory with
+    | Some w -> w.active_conflicts
+    | None -> []
+  in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then all
+  else
+    List.filter
+      (fun (c : Wire_knowledge.memory_conflict) ->
+        contains_ci ~needle:q c.conflict_id
+        || contains_ci ~needle:q c.description
+        || List.exists
+             (fun (cl : Wire_knowledge.competing_claim) ->
+               contains_ci ~needle:q cl.keeper_id
+               ||
+               match cl.claim with
+               | Some s -> contains_ci ~needle:q s
+               | None -> false)
+             c.competing_claims)
+      all
+
+let filtered_memory_claims t =
+  let all =
+    match Observed.to_option t.world_memory with
+    | Some w -> w.claims
+    | None -> []
+  in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then all
+  else
+    List.filter
+      (fun (c : Wire_knowledge.world_claim) ->
+        contains_ci ~needle:q c.claim
+        || contains_ci ~needle:q c.claim_id
+        || List.exists (contains_ci ~needle:q) c.supporting_keepers)
+      all
+
+let hottest_signal_threads t =
+  match Observed.to_option t.board with
+  | None -> []
+  | Some feed ->
+      feed.posts
+      |> List.filter (fun (p : Wire_knowledge.board_post) ->
+             p.is_signal
+             && Wire_knowledge.is_signal_board_post ~post_kind:p.post_kind
+                  ~hearth:p.hearth ~title:p.title ~body:p.body)
+      |> List.sort
+           (fun (a : Wire_knowledge.board_post) (b : Wire_knowledge.board_post)
+            ->
+             let sa = (a.comment_count * 3) + a.score in
+             let sb = (b.comment_count * 3) + b.score in
+             if sb <> sa then Int.compare sb sa
+             else Float.compare b.created_at_unix a.created_at_unix)
+
+let selected_pulse_thread t =
+  let ts = hottest_signal_threads t in
+  List.nth_opt ts (clamp_index (List.length ts) t.pulse_thread_index)
+
+let move_pulse_thread ?viewport_rows:_ ~delta t =
+  let len = List.length (hottest_signal_threads t) in
+  let pulse_thread_index = clamp_index len (t.pulse_thread_index + delta) in
+  { t with pulse_thread_index }
+
+let memory_diff_entry_count t =
+  match Observed.to_option t.memory_diff with
+  | Some
+      {
+        body =
+          Wire_knowledge.Keeper_diff
+            { added; updated; retracted; invalidated; _ };
+        _;
+      } ->
+      let cnt_added =
+        List.length
+          (List.filter
+             (fun (f : Wire_knowledge.memory_fact_entry) ->
+               memory_diff_matches_filter t (f.category ^ " " ^ f.text ^ " " ^ f.origin))
+             added)
+      in
+      let cnt_updated =
+        List.length
+          (List.filter
+             (fun (u : Wire_knowledge.memory_updated_fact) ->
+               memory_diff_matches_filter t
+                 (u.before.text ^ " " ^ u.after.text ^ " " ^ u.after.category))
+             updated)
+      in
+      let cnt_retracted =
+        List.length
+          (List.filter
+             (fun (r : Wire_knowledge.memory_retracted_fact) ->
+               memory_diff_matches_filter t (r.category ^ " " ^ r.text ^ " " ^ r.removed_by))
+             retracted)
+      in
+      let cnt_inv =
+        List.length
+          (List.filter
+             (fun (inv : Wire_knowledge.memory_invalidated_fact) ->
+               memory_diff_matches_filter t inv.text)
+             invalidated)
+      in
+      cnt_added + cnt_updated + cnt_retracted + cnt_inv
+  | Some
+      {
+        body = Wire_knowledge.World_diff { added; updated; retracted; _ };
+        _;
+      } ->
+      let cnt_a =
+        List.length
+          (List.filter
+             (fun (e : Wire_knowledge.world_change_entry) ->
+               memory_diff_matches_filter t (e.fact_id ^ " " ^ e.summary))
+             added)
+      in
+      let cnt_u =
+        List.length
+          (List.filter
+             (fun (u : Wire_knowledge.world_updated_entry) ->
+               memory_diff_matches_filter t (u.fact_id ^ " " ^ u.summary))
+             updated)
+      in
+      let cnt_r =
+        List.length
+          (List.filter
+             (fun (e : Wire_knowledge.world_change_entry) ->
+               memory_diff_matches_filter t (e.fact_id ^ " " ^ e.summary))
+             retracted)
+      in
+      cnt_a + cnt_u + cnt_r
+  | None -> 0
+
+let reset_detail_scroll t = { t with detail_scroll_offset = 0 }
+
+let active_list_len t =
   match t.active_tab with
   | Nav.Knowledge_board -> List.length (board_display_posts t)
   | Nav.Knowledge_wiki_artifacts -> (
@@ -607,43 +736,77 @@ let active_list_len ?(pane_index = 0) t =
       | `Wiki -> List.length (wiki_display_pages t)
       | `Artifacts -> List.length (artifacts_filtered t))
   | Nav.Knowledge_memory ->
-      if Int.equal (pane_index mod 2) 1 then
-        match Observed.to_option t.memory_diff with
-        | Some
-            {
-              body =
-                Wire_knowledge.Keeper_diff
-                  { added; updated; retracted; invalidated; _ };
-              _;
-            } ->
-            List.length added + List.length updated + List.length retracted
-            + List.length invalidated
-        | Some
-            {
-              body = Wire_knowledge.World_diff { added; updated; retracted; _ };
-              _;
-            } ->
-            List.length added + List.length updated + List.length retracted
-        | None -> 0
-      else
-        match Observed.to_option t.world_memory with
-        | Some w ->
-            if w.active_conflicts <> [] then List.length w.active_conflicts
-            else List.length w.claims
-        | None -> 0
+      let conflicts = filtered_memory_conflicts t in
+      if conflicts <> [] then List.length conflicts
+      else List.length (filtered_memory_claims t)
 
-let move_selection ?pane_index ?viewport_rows ~delta t =
-  let len = active_list_len ?pane_index t in
-  let selected_index = clamp_index len (t.selected_index + delta) in
-  let header_row, vis_row = visual_row_for_selection t ~selected_index in
-  let scroll_offset =
-    adjust_grouped_scroll ?viewport_rows ~scroll:t.scroll_offset ~header_row
-      vis_row
-  in
-  { t with selected_index; scroll_offset }
+let move_selection ?(pane_index = 0) ?viewport_rows ~delta t =
+  match t.active_tab with
+  | Nav.Knowledge_board | Nav.Knowledge_wiki_artifacts ->
+      if pane_index = 1 then
+        let max_scroll =
+          match t.active_tab with
+          | Nav.Knowledge_board -> (
+              match selected_post t with
+              | Some p ->
+                  max 16 (List.length (String.split_on_char '\n' p.body) + 16)
+              | None -> 80)
+          | Nav.Knowledge_wiki_artifacts -> (
+              match t.wiki_artifacts_submode with
+              | `Wiki -> (
+                  match Observed.to_option t.wiki_page with
+                  | Some p ->
+                      max 24
+                        (List.length (String.split_on_char '\n' p.body_markdown)
+                         + 24)
+                  | None -> 120)
+              | `Artifacts -> 80)
+          | Nav.Knowledge_memory -> 80
+        in
+        let detail_scroll_offset =
+          Store_scroll.clamp_scroll ~max_scroll (t.detail_scroll_offset + delta)
+        in
+        { t with detail_scroll_offset }
+      else
+        let len = active_list_len t in
+        let selected_index = clamp_index len (t.selected_index + delta) in
+        let header_row, vis_row = visual_row_for_selection t ~selected_index in
+        let scroll_offset =
+          adjust_grouped_scroll ?viewport_rows ~scroll:t.scroll_offset
+            ~header_row vis_row
+        in
+        let detail_scroll_offset =
+          if Int.equal selected_index t.selected_index then
+            t.detail_scroll_offset
+          else 0
+        in
+        { t with selected_index; scroll_offset; detail_scroll_offset }
+  | Nav.Knowledge_memory ->
+      if pane_index = 1 then
+        let total = memory_diff_entry_count t in
+        let max_scroll = max 0 (total - 1) in
+        let diff_scroll_offset =
+          Store_scroll.clamp_scroll ~max_scroll (t.diff_scroll_offset + delta)
+        in
+        { t with diff_scroll_offset }
+      else
+        let len = active_list_len t in
+        let selected_index = clamp_index len (t.selected_index + delta) in
+        let scroll_offset =
+          Store_scroll.adjust_scroll ?viewport_rows ~scroll:t.scroll_offset
+            selected_index
+        in
+        { t with selected_index; scroll_offset }
 
 let set_filter filter_query t =
-  { t with filter_query; selected_index = 0; scroll_offset = 0 }
+  {
+    t with
+    filter_query;
+    selected_index = 0;
+    scroll_offset = 0;
+    diff_scroll_offset = 0;
+    detail_scroll_offset = 0;
+  }
 
 let mark_stale_all t =
   {

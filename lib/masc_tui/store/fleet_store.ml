@@ -205,38 +205,9 @@ let fleet_health_counts (ks : Wire_fleet.keeper_summary list) :
     }
     ks
 
-let contains_ci ~needle haystack =
-  let n_len = String.length needle in
-  if n_len = 0 then true
-  else
-    let h_len = String.length haystack in
-    if n_len > h_len then false
-    else
-      let n_low = String.lowercase_ascii needle in
-      let h_low = String.lowercase_ascii haystack in
-      let limit = h_len - n_len in
-      let rec scan i =
-        if i > limit then false
-        else if String.equal (String.sub h_low i n_len) n_low then true
-        else scan (i + 1)
-      in
-      scan 0
-
-let default_viewport_rows = 15
-
-let adjust_scroll ?(viewport_rows = default_viewport_rows) ~scroll selected =
-  let vr = max 1 viewport_rows in
-  if selected < scroll then selected
-  else if selected >= scroll + vr then max 0 (selected - vr + 1)
-  else scroll
-
-let adjust_grouped_scroll ?(viewport_rows = default_viewport_rows) ~scroll
-    ~header_row vis_row =
-  let vr = max 1 viewport_rows in
-  let top_row = if vr >= 2 then min header_row vis_row else vis_row in
-  if top_row < scroll then top_row
-  else if vis_row >= scroll + vr then max 0 (vis_row - vr + 1)
-  else scroll
+let contains_ci = Store_scroll.contains_ci
+let adjust_scroll = Store_scroll.adjust_scroll
+let adjust_grouped_scroll = Store_scroll.adjust_grouped_scroll
 
 let keepers_list t =
   match Observed.to_option t.keepers with Some ks -> ks | None -> []
@@ -335,11 +306,7 @@ let find_keeper ~name t =
     (fun (k : Wire_fleet.keeper_summary) -> String.equal k.name name)
     (keepers_list t)
 
-let clamp_index len idx =
-  if len <= 0 then 0
-  else if idx < 0 then 0
-  else if idx >= len then len - 1
-  else idx
+let clamp_index = Store_scroll.clamp_index
 
 let selected_keeper_summary t =
   let ks = filtered_keepers t in
@@ -885,6 +852,8 @@ let toggle_company_collapsed company t =
     ~clear_if_empty:false next
 
 let select_keeper name t =
+  let changed = not (Option.equal String.equal t.selected_keeper (Some name)) in
+  let chat_scroll_offset = if changed then 0 else t.chat_scroll_offset in
   let ks = filtered_keepers t in
   match index_of_keeper_name name ks with
   | Some idx ->
@@ -895,8 +864,14 @@ let select_keeper name t =
       let scroll_offset =
         adjust_grouped_scroll ~scroll:t.scroll_offset ~header_row vis_row
       in
-      { t with selected_keeper; selected_index = idx; scroll_offset }
-  | None -> { t with selected_keeper = Some name }
+      {
+        t with
+        selected_keeper;
+        selected_index = idx;
+        scroll_offset;
+        chat_scroll_offset;
+      }
+  | None -> { t with selected_keeper = Some name; chat_scroll_offset }
 
 let move_selection ?viewport_rows ~delta t =
   let ks = filtered_keepers t in
@@ -906,21 +881,31 @@ let move_selection ?viewport_rows ~delta t =
   let selected_keeper =
     match List.nth_opt ks selected_index with
     | Some k -> Some k.name
-    | None -> t.selected_keeper
+    | None -> None
   in
+  let changed = not (Option.equal String.equal t.selected_keeper selected_keeper) in
+  let chat_scroll_offset = if changed then 0 else t.chat_scroll_offset in
   let header_row, vis_row =
     visual_row_for_selection t ~selected_index ~selected_keeper
   in
   let scroll_offset =
-    adjust_grouped_scroll ?viewport_rows ~scroll:t.scroll_offset ~header_row
-      vis_row
+    if len = 0 then 0
+    else
+      adjust_grouped_scroll ?viewport_rows ~scroll:t.scroll_offset ~header_row
+        vis_row
   in
-  { t with selected_index; scroll_offset; selected_keeper }
+  {
+    t with
+    selected_index;
+    scroll_offset;
+    selected_keeper;
+    chat_scroll_offset;
+  }
 
 let move_company_selection ?viewport_rows ~delta t =
   let groups = company_groups t in
   let total = List.length groups in
-  if total = 0 then t
+  if total = 0 then { t with pulse_scroll_offset = 0 }
   else
     let current_group_idx =
       let sel_name =
@@ -953,8 +938,13 @@ let move_company_selection ?viewport_rows ~delta t =
       | None -> clamp_index total t.selected_index
     in
     let target_idx = clamp_index total (current_group_idx + delta) in
+    let vr =
+      max 1 (Option.value ~default:Store_scroll.default_viewport_rows viewport_rows)
+    in
+    let max_pulse_scroll = max 0 (total - vr) in
     let pulse_scroll_offset =
-      adjust_scroll ?viewport_rows ~scroll:t.pulse_scroll_offset target_idx
+      adjust_scroll ~viewport_rows:vr ~scroll:t.pulse_scroll_offset target_idx
+      |> Store_scroll.clamp_scroll ~max_scroll:max_pulse_scroll
     in
     match List.nth_opt groups target_idx with
     | None -> { t with pulse_scroll_offset }
@@ -969,6 +959,12 @@ let move_company_selection ?viewport_rows ~delta t =
               | None -> clamp_index (List.length ks) t.selected_index
             in
             let selected_keeper = Some lead.name in
+            let changed =
+              not (Option.equal String.equal t.selected_keeper selected_keeper)
+            in
+            let chat_scroll_offset =
+              if changed then 0 else t.chat_scroll_offset
+            in
             let header_row, vis_row =
               visual_row_for_selection t ~selected_index ~selected_keeper
             in
@@ -981,6 +977,7 @@ let move_company_selection ?viewport_rows ~delta t =
               scroll_offset;
               pulse_scroll_offset;
               selected_keeper;
+              chat_scroll_offset;
             })
 
 let move_chat_scroll ?max_scroll ~delta t =

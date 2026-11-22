@@ -268,12 +268,34 @@ let fetches_for_workspace ~force (m : Model.t) =
                     offset = None;
                   })
       | Nav.Knowledge_wiki_artifacts ->
-          []
+          let selected_wiki_req =
+            match m.knowledge.wiki_artifacts_submode with
+            | `Wiki -> (
+                match Knowledge_store.selected_wiki_page m.knowledge with
+                | None -> []
+                | Some p ->
+                    let page_matches =
+                      match m.knowledge.wiki_page with
+                      | Observed.Value { data; stale = false; _ } ->
+                          String.equal data.slug p.slug && not force
+                      | Observed.Loading _
+                      | Observed.Value { stale = true; _ }
+                      | Observed.Absent
+                      | Observed.Unreported
+                      | Observed.Failed _ ->
+                          false
+                    in
+                    if page_matches then []
+                    else [ Cmd.Get_wiki_page { page = p.slug } ])
+            | `Artifacts -> []
+          in
+          ([]
           |> add_if
                (needs_fetch ~force m.knowledge.wiki_index)
                (Cmd.Get_wiki_index { tag = None; source = None; sort = None })
           |> add_if (needs_fetch ~force m.knowledge.wiki_lint) Cmd.Get_wiki_lint
-          |> add_if (needs_fetch ~force m.knowledge.artifacts) Cmd.Get_artifacts
+          |> add_if (needs_fetch ~force m.knowledge.artifacts) Cmd.Get_artifacts)
+          @ selected_wiki_req
       | Nav.Knowledge_memory ->
           let internals_reqs =
             match m.knowledge.memory_diff_keeper with
@@ -399,11 +421,34 @@ let fetches_for_workspace ~force (m : Model.t) =
       match m.infra.active_tab with
       | Nav.Infra_sandboxes ->
           [] |> add_if (needs_fetch ~force m.infra.sandboxes) Cmd.Get_sandboxes
-      | Nav.Infra_repos_changes ->
-          []
-          |> add_if
-               (needs_fetch ~force m.infra.repositories)
-               Cmd.Get_repositories
+      | Nav.Infra_repos_changes -> (
+          let base_reqs =
+            []
+            |> add_if
+                 (needs_fetch ~force m.infra.repositories)
+                 Cmd.Get_repositories
+          in
+          let target_keeper =
+            match Infra_store.selected_repository m.infra with
+            | Some { keepers = k :: _; _ } -> Some k
+            | Some { keepers = []; _ } -> None
+            | None ->
+                Option.map
+                  (fun (k : Wire_fleet.keeper_summary) -> k.name)
+                  (Fleet_store.selected_keeper_summary m.fleet)
+          in
+          match target_keeper with
+          | Some keeper ->
+              let keeper_mismatch =
+                not
+                  (Option.equal String.equal m.infra.file_changes_keeper
+                     (Some keeper))
+              in
+              base_reqs
+              |> add_if
+                   (needs_fetch ~force m.infra.file_changes || keeper_mismatch)
+                   (Cmd.Get_file_changes { keeper; window_hours = Some 24.0 })
+          | None -> base_reqs)
       | Nav.Infra_activity_logs ->
           []
           |> add_if

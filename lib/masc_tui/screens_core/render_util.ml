@@ -86,61 +86,16 @@ let fuzzy_score ~query target =
       in
       match_seq 0 0 100 false
 
-let popup_of_draft (m : Model.t) (draft : Drafts.keeper_draft) =
-  if not (Drafts.is_focused m.drafts) then Composer.Popup_none
-  else
-    let text = draft.text in
-    let len = String.length text in
-    if len > 0 && Char.equal text.[0] '/' && not (String.contains text '\n') then
-      let query =
-        match String.index_opt text ' ' with
-        | None -> String.sub text 1 (len - 1)
-        | Some _ -> ""
-      in
-      if String.contains text ' ' then Composer.Popup_none
-      else
-        let specs = Slash.filter ~query ~lang:m.lang in
-        let items =
-          List.map
-            (fun (s : Slash.spec) ->
-              {
-                Composer.trigger = s.name;
-                label = Say.resolve m.lang s.description;
-                detail = Option.map (Say.resolve m.lang) s.arg_hint;
-              })
-            specs
-        in
-        if items = [] then Composer.Popup_none
-        else Composer.Popup_slash { query; items; selected = 0 }
-    else
-      match String.rindex_opt text '@' with
-      | Some idx
-        when idx = 0
-             || Char.equal text.[idx - 1] ' '
-             || Char.equal text.[idx - 1] '\n' ->
-          let after = String.sub text (idx + 1) (len - idx - 1) in
-          if String.contains after ' ' || String.contains after '\n' then
-            Composer.Popup_none
-          else
-            let keepers =
-              Fleet_store.filtered_keepers { m.fleet with filter_query = "" }
-              |> List.filter (fun (k : Wire_fleet.keeper_summary) ->
-                     contains_ci ~needle:after k.name
-                     || contains_ci ~needle:after k.company)
-            in
-            let items =
-              List.map
-                (fun (k : Wire_fleet.keeper_summary) ->
-                  {
-                    Composer.trigger = "@" ^ k.name;
-                    label = k.company;
-                    detail = Some k.runtime_id;
-                  })
-                keepers
-            in
-            if items = [] then Composer.Popup_none
-            else Composer.Popup_mention { query = after; items; selected = 0 }
-      | Some _ | None -> Composer.Popup_none
+let popup_of_draft (m : Model.t) (_draft : Drafts.keeper_draft) =
+  let to_item (c : Update_nav.popup_candidate) : Composer.popup_item =
+    { Composer.trigger = c.trigger; label = c.label; detail = c.detail }
+  in
+  match Update_nav.resolve_composer_popup m with
+  | Update_nav.Composer_popup_none -> Composer.Popup_none
+  | Update_nav.Composer_popup_slash { query; items; selected } ->
+      Composer.Popup_slash { query; items = List.map to_item items; selected }
+  | Update_nav.Composer_popup_mention { query; items; selected } ->
+      Composer.Popup_mention { query; items = List.map to_item items; selected }
 
 let composer_state_of_model (m : Model.t) : Composer.state =
   let lookup_keeper = target_keeper_of_model m in

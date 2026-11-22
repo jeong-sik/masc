@@ -362,6 +362,8 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
             tone = Some Theme.Status_active;
           }
     in
+    let all_filtered_verifs = Work_store.filtered_verifications model.work in
+    let verif_focused = model.nav.pane_index = 1 in
     let spec : Card.spec =
       {
         (Card.default_spec
@@ -371,8 +373,13 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
         with
         subtitle = (match sel_goal with Some g -> Some g.id | None -> None);
         badge;
-        hotkey = Some (Ops_common.say model ~ko:"[Enter] 상세" ~en:"[Enter] Dive");
-        focused = false;
+        hotkey =
+          Some
+            (if verif_focused then
+               Ops_common.say model ~ko:"[a] 승인 · [x] 반려 · [Enter] 상세"
+                 ~en:"[a] Approve · [x] Reject · [Enter] Dive"
+             else Ops_common.say model ~ko:"[Tab] 검증 선택" ~en:"[Tab] Select");
+        focused = verif_focused;
       }
     in
     let inner = Card.draw ~cache grid ~rect ~theme spec in
@@ -388,17 +395,114 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
       let body_h = Int.max 0 (content.h - footer_h) in
       let y = ref content.y in
       let body_bot = content.y + body_h in
+      let draw_verifs_section verifs =
+        if verifs <> [] && !y + 1 < body_bot then begin
+          Card.draw_hairline ~pad_x:0 ~bg
+            ~label:
+              (Printf.sprintf "%s (%d)"
+                 (Ops_common.say model ~ko:"검증 결과" ~en:"Verifications")
+                 (List.length verifs))
+            grid ~rect:content ~y:!y ~theme;
+          incr y;
+          let avail = Int.max 0 (body_bot - !y) in
+          let arr = Array.of_list verifs in
+          let total = Array.length arr in
+          let sel_v =
+            if total <= 0 then 0
+            else
+              Int.max 0
+                (Int.min (total - 1) model.work.verif_selected_index)
+          in
+          let start, _ =
+            Table.compute_viewport ~total_rows:total ~viewport_rows:avail
+              ~scroll:model.work.verif_scroll_offset ~selected:(Some sel_v)
+          in
+          let max_show = Int.min avail (Int.max 0 (total - start)) in
+          for i = 0 to max_show - 1 do
+            let idx = start + i in
+            let v : Wire_work.verification_request = arr.(idx) in
+            let py = !y in
+            let is_sel = verif_focused && Int.equal idx sel_v in
+            let rbg =
+              Color.of_rgb
+                (if is_sel then theme.selection_bg else theme.surface_1)
+            in
+            let row_full = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
+            if is_sel then begin
+              Cell_grid.fill_rect ~clip:inner grid ~rect:row_full
+                ~style:(Typography.primary ~bg:rbg theme) ();
+              Cell_grid.put_glyph ~clip:row_full grid ~x:inner.x ~y:py
+                ~style:(Typography.accent ~bg:rbg ~bold:true theme)
+                Glyph.Left_rail
+            end;
+            let vg, vtok, vlbl, detail =
+              match v.review_observation with
+              | Some obs ->
+                  let g, t, l = Ops_common.review_state_badge obs.state in
+                  (g, t, l, obs.detail)
+              | None ->
+                  ( Glyph.Action_required
+                  , Theme.Status_attention
+                  , Say.make ~ko:"대기" ~en:"Pending"
+                  , match v.evidence_projection_error with
+                    | Some e -> e
+                    | None -> v.task_title )
+            in
+            let head =
+              Printf.sprintf "%s %s  %s  " (Glyph.to_utf8 vg)
+                (Say.resolve model.lang vlbl) v.task_id
+            in
+            let adv =
+              Ops_common.put_line ~clip:content grid ~x:content.x ~y:py
+                ~max_w:content.w
+                ~style:(Typography.status ~bg:rbg ~bold:true theme vtok)
+                head
+            in
+            let det_st =
+              if is_sel then Typography.anchor ~bg:rbg theme
+              else
+                match vtok with
+                | Theme.Status_critical ->
+                    Typography.status ~bg:rbg theme Theme.Status_critical
+                | Theme.Status_ok
+                | Theme.Status_active
+                | Theme.Status_attention
+                | Theme.Status_ai
+                | Theme.Status_historical ->
+                    Typography.whisper ~bg:rbg theme
+            in
+            ignore
+              (Ops_common.put_line ~clip:content grid
+                 ~x:(content.x + adv) ~y:py
+                 ~max_w:(Int.max 0 (content.w - adv))
+                 ~style:det_st detail);
+            incr y
+          done
+        end
+      in
+      let verifs_to_render =
+        if verif_focused || Option.is_none sel_goal then all_filtered_verifs
+        else related_verifs
+      in
       (* 1. Linked tasks rows *)
       (match sel_goal with
       | None ->
-          Ops_common.draw_observed_empty grid ~rect:content ~theme
-            ~lang:model.lang model.work.planning
-            ~empty_msg:
-              (Say.make ~ko:"목표를 선택하면 연결 작업이 표시됩니다"
-                 ~en:"Select a goal to view linked tasks")
+          if verifs_to_render <> [] then draw_verifs_section verifs_to_render
+          else
+            Ops_common.draw_observed_empty grid ~rect:content ~theme
+              ~lang:model.lang model.work.planning
+              ~empty_msg:
+                (Say.make ~ko:"목표를 선택하면 연결 작업이 표시됩니다"
+                   ~en:"Select a goal to view linked tasks")
       | Some _ ->
           if linked = [] then begin
-            if !y < body_bot then begin
+            let verif_reserve =
+              if verifs_to_render <> [] && body_bot - !y >= 4 then
+                Int.min (List.length verifs_to_render + 1)
+                  (Int.max 2 ((body_bot - !y) / 2))
+              else 0
+            in
+            if !y < body_bot - verif_reserve then begin
               Card.draw_left_rail ~bg ~tone:Theme.Status_attention grid
                 ~x:content.x ~y:!y ~h:1 ~theme;
               ignore
@@ -417,9 +521,9 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
                      match tk.goal_link with
                      | Wire_work.Unlinked -> Ops_common.task_is_active tk.status
                      | Wire_work.Linked _ -> false)
-              |> List.take (Int.max 0 (body_bot - !y - 1))
+              |> List.take (Int.max 0 (body_bot - verif_reserve - !y - 1))
             in
-            if candidates <> [] && !y < body_bot then begin
+            if candidates <> [] && !y < body_bot - verif_reserve then begin
               Card.draw_hairline ~pad_x:0 ~bg
                 ~label:
                   (Ops_common.say model ~ko:"연결 가능 활성 작업"
@@ -428,7 +532,7 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
               incr y;
               List.iter
                 (fun (tk : Wire_work.task) ->
-                  if !y < body_bot then begin
+                  if !y < body_bot - verif_reserve then begin
                     let tg, ttok, _ = Ops_common.task_status_badge tk.status in
                     let who =
                       match Ops_common.task_assignee_opt tk.status with
@@ -461,12 +565,14 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
                     incr y
                   end)
                 candidates
-            end
+            end;
+            draw_verifs_section verifs_to_render
           end
           else begin
             let verif_reserve =
-              if related_verifs <> [] && body_bot - !y >= 5 then
-                Int.min (List.length related_verifs + 1) (Int.max 2 ((body_bot - !y) / 2))
+              if verifs_to_render <> [] && body_bot - !y >= 5 then
+                Int.min (List.length verifs_to_render + 1)
+                  (Int.max 2 ((body_bot - !y) / 2))
               else 0
             in
             let task_limit = Int.max 1 (body_bot - !y - verif_reserve) in
@@ -556,60 +662,7 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
                 end)
               (List.take task_limit linked);
             (* 2. Verifications subsection *)
-            if related_verifs <> [] && !y + 1 < body_bot then begin
-              Card.draw_hairline ~pad_x:0 ~bg
-                ~label:
-                  (Printf.sprintf "%s (%d)"
-                     (Ops_common.say model ~ko:"검증 결과" ~en:"Verifications")
-                     (List.length related_verifs))
-                grid ~rect:content ~y:!y ~theme;
-              incr y;
-              List.iter
-                (fun (v : Wire_work.verification_request) ->
-                  if !y < body_bot then begin
-                    let vg, vtok, vlbl, detail =
-                      match v.review_observation with
-                      | Some obs ->
-                          let g, t, l = Ops_common.review_state_badge obs.state in
-                          (g, t, l, obs.detail)
-                      | None ->
-                          ( Glyph.Action_required
-                          , Theme.Status_attention
-                          , Say.make ~ko:"대기" ~en:"Pending"
-                          , match v.evidence_projection_error with
-                            | Some e -> e
-                            | None -> v.task_title )
-                    in
-                    let head =
-                      Printf.sprintf "%s %s  %s  " (Glyph.to_utf8 vg)
-                        (Say.resolve model.lang vlbl) v.task_id
-                    in
-                    let adv =
-                      Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
-                        ~max_w:content.w
-                        ~style:(Typography.status ~bg ~bold:true theme vtok)
-                        head
-                    in
-                    let det_st =
-                      match vtok with
-                      | Theme.Status_critical ->
-                          Typography.status ~bg theme Theme.Status_critical
-                      | Theme.Status_ok
-                      | Theme.Status_active
-                      | Theme.Status_attention
-                      | Theme.Status_ai
-                      | Theme.Status_historical ->
-                          Typography.whisper ~bg theme
-                    in
-                    ignore
-                      (Ops_common.put_line ~clip:content grid
-                         ~x:(content.x + adv) ~y:!y
-                         ~max_w:(Int.max 0 (content.w - adv))
-                         ~style:det_st detail);
-                    incr y
-                  end)
-                (List.take (Int.max 0 (body_bot - !y)) related_verifs)
-            end
+            draw_verifs_section verifs_to_render
           end);
       (* 3. Pinned bottom unlinked backlog bar (hairline + Amber left rail, ZERO nested box!) *)
       if show_unlinked_footer then begin
@@ -701,7 +754,7 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     (* Anti-Void Adaptive Height: clamp(goal_count + 4, 6, 12) for Goals,
        reclaiming the entire bottom-left space for Linked Tasks & Verifications! *)
     let goals_rect, linked_card_rect =
-      if rect.w >= 96 && left_rect.h >= 14 then
+      if Model.work_pipeline_has_linked_card model && rect.w >= 96 && left_rect.h >= 14 then
         let want_h =
           Layout.adaptive_list_height ~items:(List.length goals) ~overhead:4
             ~min_h:6 ~max_h:12 ()
@@ -869,7 +922,9 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                   };
               hotkey =
                 Some (Ops_common.say model ~ko:"[Enter] 상세" ~en:"[Enter] Dive");
-              focused = model.nav.pane_index = 1;
+              focused =
+                (if Rect.is_empty linked_card_rect then model.nav.pane_index = 1
+                 else model.nav.pane_index = 2);
             }
           in
           let r_inner = Card.draw ~cache grid ~rect:right_rect ~theme r_spec in
@@ -1071,7 +1126,9 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                   (Ops_common.say model ~ko:"측정 절차" ~en:"Procedure")
                   (Ops_common.rewrite_masc_links_for_markdown g.procedure)
               in
-              ignore (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true md_src);
+              ignore
+                (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true
+                   ~scroll:model.work.detail_scroll_offset md_src);
               y := !y + md_h
             end
             else if md_avail >= 1 then begin
@@ -1082,7 +1139,9 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 Ops_common.rewrite_masc_links_for_markdown
                   (g.measure ^ " · " ^ g.procedure)
               in
-              ignore (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true md_src);
+              ignore
+                (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true
+                   ~scroll:model.work.detail_scroll_offset md_src);
               y := !y + md_avail
             end;
             (* 7. Acceptance Evidence or Structured Rejection Diff (strictly scoped to THIS goal!) *)
@@ -1099,7 +1158,9 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                     ~h:(Int.max 0 (Int.min (diff_h - 1) (body_bot - !y)))
                 in
                 let rows = build_rejection_diff_rows ~model rv in
-                ignore (Diff.draw grid ~rect:drect ~theme rows);
+                ignore
+                  (Diff.draw grid ~rect:drect ~theme
+                     ~scroll:model.work.detail_scroll_offset rows);
                 y := !y + drect.h
             | Some _ | None -> (
                 match related_verifs with
@@ -1127,26 +1188,47 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
               if action_h >= 2 then
                 Card.draw_hairline ~pad_x:0 ~bg grid ~rect:content
                   ~y:(bottom - 2) ~theme;
+              let stop_lbl =
+                match g.phase with
+                | Wire_work.Paused _ -> Ops_common.say model ~ko:"중단" ~en:"Drop"
+                | Wire_work.Executing
+                | Wire_work.Verifying
+                | Wire_work.Awaiting_confirmation
+                | Wire_work.Blocked _
+                | Wire_work.Completed
+                | Wire_work.Dropped ->
+                    Ops_common.say model ~ko:"일시정지" ~en:"Pause"
+              in
               let keys =
                 match g.phase with
                 | Wire_work.Awaiting_confirmation ->
                     [
                       ("a", Ops_common.say model ~ko:"완료 확정" ~en:"Confirm");
                       ("Enter", Ops_common.say model ~ko:"상세" ~en:"Dive");
-                      ("L", Ops_common.say model ~ko:"작업 연결" ~en:"Link");
-                      ("x", Ops_common.say model ~ko:"중단" ~en:"Drop");
+                      ("x", stop_lbl);
                     ]
-                | Wire_work.Executing
-                | Wire_work.Verifying
-                | Wire_work.Completed
-                | Wire_work.Dropped
-                | Wire_work.Paused _
+                | Wire_work.Paused _ ->
+                    [
+                      ("a", Ops_common.say model ~ko:"재개" ~en:"Resume");
+                      ("Enter", Ops_common.say model ~ko:"상세" ~en:"Dive");
+                      ("x", stop_lbl);
+                    ]
                 | Wire_work.Blocked _ ->
                     [
+                      ("a", Ops_common.say model ~ko:"차단 해제" ~en:"Unblock");
                       ("Enter", Ops_common.say model ~ko:"상세" ~en:"Dive");
-                      ("L", Ops_common.say model ~ko:"작업 연결" ~en:"Link");
+                      ("x", stop_lbl);
+                    ]
+                | Wire_work.Completed | Wire_work.Dropped ->
+                    [
+                      ("a", Ops_common.say model ~ko:"다시 열기" ~en:"Reopen");
+                      ("Enter", Ops_common.say model ~ko:"상세" ~en:"Dive");
+                    ]
+                | Wire_work.Executing | Wire_work.Verifying ->
+                    [
+                      ("Enter", Ops_common.say model ~ko:"상세" ~en:"Dive");
                       ("c", Ops_common.say model ~ko:"검증 요청" ~en:"Verify");
-                      ("x", Ops_common.say model ~ko:"중단" ~en:"Drop");
+                      ("x", stop_lbl);
                     ]
               in
               ignore
@@ -1275,8 +1357,9 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         String.equal q_low "schedules" || String.equal q_low "sched"
       in
       let filtered_tasks = Work_store.filtered_tasks model.work in
+      let filtered_scheds = Work_store.filtered_schedules model.work in
       let n_tasks = List.length filtered_tasks in
-      let n_scheds = List.length all_scheds in
+      let n_scheds = List.length filtered_scheds in
       let task_sel_opt, sched_sel_opt =
         if is_sched_filter then
           if n_scheds > 0 then
@@ -1433,7 +1516,9 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       (* 2. Task / Schedule Detail Inspector *)
       if not (Rect.is_empty detail_rect) then begin
         let sel_task = Option.bind task_sel_opt (List.nth_opt filtered_tasks) in
-        let sel_sched = Option.bind sched_sel_opt (List.nth_opt all_scheds) in
+        let sel_sched =
+          Option.bind sched_sel_opt (List.nth_opt filtered_scheds)
+        in
         let d_title, d_badge =
           match sel_task, sel_sched with
           | Some tk, _ ->
@@ -1762,7 +1847,7 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         in
         let s_inner = Card.draw ~cache grid ~rect:sched_rect ~theme s_spec in
         if not (Rect.is_empty s_inner) then begin
-          if all_scheds = [] then
+          if filtered_scheds = [] then
             Ops_common.draw_observed_empty grid ~rect:s_inner ~theme
               ~lang:model.lang model.work.schedules
               ~empty_msg:
@@ -1857,7 +1942,7 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                         ("out", Table.text_cell summary);
                       ];
                   })
-                all_scheds
+                filtered_scheds
             in
             ignore
               (Table.draw grid ~rect:s_inner ~theme ~caps:Ops_common.default_caps
@@ -2167,6 +2252,9 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     if Attention.is_empty model.attention then
       render_inbox_empty ~model ~cache ~rect ~theme grid
     else
+      let filtered_attn =
+        Attention.filtered_items ~query:model.work.filter_query model.attention
+      in
       let left_rect, right_rect =
         if rect.w >= 96 then
           match
@@ -2188,13 +2276,13 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                (Printf.sprintf "%s (%d)"
                   (Ops_common.say model ~ko:"긴급도순 대기열"
                      ~en:"Urgency Queue")
-                  (Attention.count model.attention)))
+                  (List.length filtered_attn)))
           with
           badge =
             Some
               {
                 Card.glyph = Some Glyph.Action_required;
-                text = Int.to_string (Attention.count model.attention);
+                text = Int.to_string (List.length filtered_attn);
                 tone = Some Theme.Status_attention;
               };
           focused = model.nav.pane_index = 0;
@@ -2202,92 +2290,107 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       in
       let l_inner = Card.draw ~cache grid ~rect:left_rect ~theme q_spec in
       if not (Rect.is_empty l_inner) then begin
-        let cols : Table.column list =
-          [
-            {
-              id = "kind";
-              header = Say.make ~ko:"유형" ~en:"Type";
-              priority = 0;
-              min_width = 7;
-              max_width = Some 8;
-              weight = 1;
-              align = Table.Left;
-            };
-            {
-              id = "title";
-              header = Say.make ~ko:"내용" ~en:"Item";
-              priority = 0;
-              min_width = 14;
-              max_width = None;
-              weight = 4;
-              align = Table.Left;
-            };
-            {
-              id = "keeper";
-              header = Say.make ~ko:"키퍼" ~en:"Keeper";
-              priority = 1;
-              min_width = 10;
-              max_width = Some 16;
-              weight = 2;
-              align = Table.Left;
-            };
-            {
-              id = "age";
-              header = Say.make ~ko:"경과" ~en:"Age";
-              priority = 2;
-              min_width = 5;
-              max_width = Some 8;
-              weight = 1;
-              align = Table.Right;
-            };
-          ]
-        in
-        let rows =
-          List.map
-            (fun (e : Attention.entry) ->
-              let tag, tok = attention_tag e.kind in
-              let inflight =
-                if Attention.is_in_flight ~id:e.id model.attention then " …"
-                else ""
-              in
-              let age_s =
-                match e.created_at_unix with
-                | Some ts ->
-                    Ops_common.format_age
-                      ~now_unix:model.freshness.last_wall_unix ts
-                      ~lang:model.lang
-                | None -> Glyph.to_utf8 Glyph.Missing_absent
-              in
+        if filtered_attn = [] then
+          Ops_common.draw_observed_empty grid ~rect:l_inner ~theme
+            ~lang:model.lang (Observed.value ~observed_at:Clock.Mono.zero ())
+            ~empty_msg:
+              (Say.make ~ko:"필터와 일치하는 수신함 항목이 없습니다"
+                 ~en:"No inbox items match the filter")
+        else
+          let cols : Table.column list =
+            [
               {
-                Table.id = e.id;
-                cells =
-                  [
-                    ( "kind"
-                    , Table.Badge
-                        {
-                          glyph = Some Glyph.Action_required;
-                          text = tag;
-                          tone = tok;
-                        } );
-                    ("title", Table.text_cell (e.title ^ inflight));
-                    ( "keeper"
-                    , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
-                        (match e.keeper with Some k -> k | None -> "-") );
-                    ( "age"
-                    , Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
-                        ~attrs:Attr.italic age_s );
-                  ];
-              })
-            model.attention.items
-        in
-        ignore
-          (Table.draw grid ~rect:l_inner ~theme ~caps:Ops_common.default_caps
-             ~lang:model.lang ~scroll:model.attention.triage_scroll_offset
-             ~selected:model.attention.triage_index
-             ~col_gap:(Layout.table_col_gap bp) ~columns:cols rows)
+                id = "kind";
+                header = Say.make ~ko:"유형" ~en:"Type";
+                priority = 0;
+                min_width = 7;
+                max_width = Some 8;
+                weight = 1;
+                align = Table.Left;
+              };
+              {
+                id = "title";
+                header = Say.make ~ko:"내용" ~en:"Item";
+                priority = 0;
+                min_width = 14;
+                max_width = None;
+                weight = 4;
+                align = Table.Left;
+              };
+              {
+                id = "keeper";
+                header = Say.make ~ko:"키퍼" ~en:"Keeper";
+                priority = 1;
+                min_width = 10;
+                max_width = Some 16;
+                weight = 2;
+                align = Table.Left;
+              };
+              {
+                id = "age";
+                header = Say.make ~ko:"경과" ~en:"Age";
+                priority = 2;
+                min_width = 5;
+                max_width = Some 8;
+                weight = 1;
+                align = Table.Right;
+              };
+            ]
+          in
+          let rows =
+            List.map
+              (fun (e : Attention.entry) ->
+                let tag, tok = attention_tag e.kind in
+                let inflight =
+                  if Attention.is_in_flight ~id:e.id model.attention then " …"
+                  else ""
+                in
+                let age_s =
+                  match e.created_at_unix with
+                  | Some ts ->
+                      Ops_common.format_age
+                        ~now_unix:model.freshness.last_wall_unix ts
+                        ~lang:model.lang
+                  | None -> Glyph.to_utf8 Glyph.Missing_absent
+                in
+                {
+                  Table.id = e.id;
+                  cells =
+                    [
+                      ( "kind"
+                      , Table.Badge
+                          {
+                            glyph = Some Glyph.Action_required;
+                            text = tag;
+                            tone = tok;
+                          } );
+                      ("title", Table.text_cell (e.title ^ inflight));
+                      ( "keeper"
+                      , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
+                          (match e.keeper with Some k -> k | None -> "-") );
+                      ( "age"
+                      , Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
+                          ~attrs:Attr.italic age_s );
+                    ];
+                })
+              filtered_attn
+          in
+          let sel_attn =
+            Int.max 0
+              (Int.min (List.length filtered_attn - 1)
+                 model.attention.triage_index)
+          in
+          ignore
+            (Table.draw grid ~rect:l_inner ~theme ~caps:Ops_common.default_caps
+               ~lang:model.lang ~scroll:model.attention.triage_scroll_offset
+               ~selected:sel_attn ~col_gap:(Layout.table_col_gap bp)
+               ~columns:cols rows)
       end;
       if not (Rect.is_empty right_rect) then
-        match Attention.current_triage_item model.attention with
+        match
+          Attention.current_filtered_item ~query:model.work.filter_query
+            model.attention
+        with
         | None -> ()
         | Some entry ->
             let tag, tok = attention_tag entry.kind in
@@ -2307,7 +2410,7 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                       tone = Some tok;
                     };
                 hotkey = Some "[Y] Approve · [N] Deny · [1..4] Choice";
-                focused = true;
+                focused = model.nav.pane_index = 1;
               }
             in
             let r_inner = Card.draw ~cache grid ~rect:right_rect ~theme p_spec in
@@ -2379,7 +2482,9 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                     let lines =
                       Json_tree.flatten ~max_depth:3 ~redact_secrets:true json
                     in
-                    ignore (Json_tree.draw grid ~rect:jt_rect ~theme lines)
+                    ignore
+                      (Json_tree.draw grid ~rect:jt_rect ~theme
+                         ~scroll:model.work.detail_scroll_offset lines)
                   end;
                   if bot > r_inner.y then
                     ignore
@@ -2410,7 +2515,9 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                     Json_tree.flatten ~max_depth:3 ~redact_secrets:true
                       (parse_json_or_wrap ~key:"input" raw_in)
                   in
-                  ignore (Json_tree.draw grid ~rect:jt_rect ~theme lines);
+                  ignore
+                    (Json_tree.draw grid ~rect:jt_rect ~theme
+                       ~scroll:model.work.detail_scroll_offset lines);
                   if bot > r_inner.y then
                     ignore
                       (Ops_common.draw_keycap_bar grid
@@ -2455,7 +2562,7 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                     in
                     ignore
                       (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true
-                         prompt_md);
+                         ~scroll:model.work.detail_scroll_offset prompt_md);
                     y := !y + md_h
                   end;
                   (match q_opt with
@@ -2537,6 +2644,7 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                   in
                   ignore
                     (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true
+                       ~scroll:model.work.detail_scroll_offset
                        (Ops_common.rewrite_masc_links_for_markdown
                           (g.measure ^ "\n\n" ^ g.procedure)));
                   if bot > r_inner.y then
@@ -2982,21 +3090,28 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 Rect.make ~x:b_inner.x ~y:tbl_y ~w:b_inner.w
                   ~h:(Int.max 0 (Rect.bottom rest_r - tbl_y))
               in
-              if ledger.balances = [] then begin
+              let filtered_balances = Work_store.filtered_candle_balances model.work in
+              if filtered_balances = [] then begin
                 let empty_r = Card.pad_inner ~pad_x tbl_r in
                 if not (Rect.is_empty empty_r) then begin
                   Card.draw_left_rail ~bg ~tone:Theme.Status_attention grid
                     ~x:empty_r.x ~y:empty_r.y ~h:1 ~theme;
                   let msg =
-                    Ops_common.say model
-                      ~ko:
-                        (Printf.sprintf
-                           "발행된 잔액 없음 · 미연결 작업 %d건을 목표에 연결하면 캔들이 발행됩니다"
-                           unlinked_n)
-                      ~en:
-                        (Printf.sprintf
-                           "No minted balances · link %d unlinked tasks to Goals to mint Candles"
-                           unlinked_n)
+                    if not (String.equal (String.trim model.work.filter_query) "")
+                    then
+                      Ops_common.say model
+                        ~ko:"필터와 일치하는 캔들 잔액이 없습니다"
+                        ~en:"No candle balances match the filter"
+                    else
+                      Ops_common.say model
+                        ~ko:
+                          (Printf.sprintf
+                             "발행된 잔액 없음 · 미연결 작업 %d건을 목표에 연결하면 캔들이 발행됩니다"
+                             unlinked_n)
+                        ~en:
+                          (Printf.sprintf
+                             "No minted balances · link %d unlinked tasks to Goals to mint Candles"
+                             unlinked_n)
                   in
                   ignore
                     (Ops_common.put_line ~clip:empty_r grid ~x:(empty_r.x + 2)
@@ -3011,7 +3126,7 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                   List.fold_left
                     (fun acc (b : Wire_work.candle_balance_row) ->
                       Int.max acc b.balance_milli)
-                    1 ledger.balances
+                    1 filtered_balances
                 in
                 let cols : Table.column list =
                   [
@@ -3087,7 +3202,7 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                                 ~attrs:Attr.italic items_s );
                           ];
                       })
-                    ledger.balances
+                    filtered_balances
                 in
                 ignore
                   (Table.draw grid ~rect:tbl_r ~theme

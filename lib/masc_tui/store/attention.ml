@@ -61,19 +61,8 @@ let compare_entry (a : entry) (b : entry) =
     let c_time = compare_opt_float a.created_at_unix b.created_at_unix in
     if c_time <> 0 then c_time else String.compare a.id b.id
 
-let default_viewport_rows = 15
-
-let adjust_scroll ?(viewport_rows = default_viewport_rows) ~scroll selected =
-  let vr = max 1 viewport_rows in
-  if selected < scroll then selected
-  else if selected >= scroll + vr then max 0 (selected - vr + 1)
-  else scroll
-
-let clamp_index len idx =
-  if len <= 0 then 0
-  else if idx < 0 then 0
-  else if idx >= len then len - 1
-  else idx
+let adjust_scroll = Store_scroll.adjust_scroll
+let clamp_index = Store_scroll.clamp_index
 
 let sort_and_dedup entries =
   let sorted = List.stable_sort compare_entry entries in
@@ -237,11 +226,29 @@ let clear_in_flight ~id t =
 let top_fast_path t =
   List.find_opt (fun (e : entry) -> not (is_in_flight ~id:e.id t)) t.items
 
-let current_triage_item t =
-  List.nth_opt t.items (clamp_index (List.length t.items) t.triage_index)
+let filtered_items ~query t =
+  let q = String.trim query in
+  if String.equal q "" then t.items
+  else
+    List.filter
+      (fun (e : entry) ->
+        Store_scroll.contains_ci ~needle:q e.title
+        || Store_scroll.contains_ci ~needle:q e.summary
+        || Store_scroll.contains_ci ~needle:q e.id
+        ||
+        match e.keeper with
+        | Some k -> Store_scroll.contains_ci ~needle:q k
+        | None -> false)
+      t.items
 
-let move_triage ?viewport_rows ~delta t =
-  let len = List.length t.items in
+let current_filtered_item ~query t =
+  let xs = filtered_items ~query t in
+  List.nth_opt xs (clamp_index (List.length xs) t.triage_index)
+
+let current_triage_item t = current_filtered_item ~query:"" t
+
+let move_triage ?(query = "") ?viewport_rows ~delta t =
+  let len = List.length (filtered_items ~query t) in
   if len <= 0 then { t with triage_index = 0; triage_scroll_offset = 0 }
   else
     let triage_index = clamp_index len (t.triage_index + delta) in

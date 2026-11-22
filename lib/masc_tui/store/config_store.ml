@@ -120,28 +120,8 @@ let empty =
     editing_buffer = "";
   }
 
-let contains_ci ~needle haystack =
-  let n_len = String.length needle in
-  if n_len = 0 then true
-  else
-    let h_len = String.length haystack in
-    if n_len > h_len then false
-    else
-      let n_low = String.lowercase_ascii needle in
-      let h_low = String.lowercase_ascii haystack in
-      let limit = h_len - n_len in
-      let rec scan i =
-        if i > limit then false
-        else if String.equal (String.sub h_low i n_len) n_low then true
-        else scan (i + 1)
-      in
-      scan 0
-
-let clamp_index len idx =
-  if len <= 0 then 0
-  else if idx < 0 then 0
-  else if idx >= len then len - 1
-  else idx
+let contains_ci = Store_scroll.contains_ci
+let clamp_index = Store_scroll.clamp_index
 
 let equal_config_target a b =
   match a, b with
@@ -158,6 +138,8 @@ let equal_settings_pane a b =
   match (a, b) with
   | Pane_tree, Pane_tree | Pane_inspector, Pane_inspector -> true
   | Pane_tree, Pane_inspector | Pane_inspector, Pane_tree -> false
+
+let is_two_pane_width ~cols = cols >= 74
 
 let equal_config_category a b =
   String.equal
@@ -182,7 +164,17 @@ let title_case_segment s =
   |> List.map String.capitalize_ascii
   |> String.concat " "
 
-let field_label ~lang f = Wire_config.field_leaf_label ~lang f
+let field_label ~lang (f : Wire_config.schema_field) =
+  match f.full_key with
+  | "tui.theme" -> Say.resolve lang (Say.make ~ko:"테마 프리셋" ~en:"Theme Preset")
+  | "tui.language" -> Say.resolve lang (Say.make ~ko:"UI 언어" ~en:"UI Language")
+  | "tui.hints_visible" ->
+      Say.resolve lang (Say.make ~ko:"하단 단축키 힌트" ~en:"Footer Key Hints")
+  | "tui.reduce_motion" ->
+      Say.resolve lang (Say.make ~ko:"모션 줄이기" ~en:"Reduce Motion")
+  | "tui.audio_input_device" ->
+      Say.resolve lang (Say.make ~ko:"음성 입력 장치" ~en:"Audio Input Device")
+  | _ -> Wire_config.field_leaf_label ~lang f
 
 let field_sub_group t (f : Wire_config.schema_field) =
   match String_map.find_opt f.full_key t.field_meta with
@@ -753,13 +745,7 @@ let enter_inspector t =
 
 let leave_inspector t = { t with settings_pane = Pane_tree }
 
-let default_viewport_rows = 15
-
-let adjust_scroll ?(viewport_rows = default_viewport_rows) ~scroll selected =
-  let vr = max 1 viewport_rows in
-  if selected < scroll then selected
-  else if selected >= scroll + vr then max 0 (selected - vr + 1)
-  else scroll
+let adjust_scroll = Store_scroll.adjust_scroll
 
 let move_tree_selection ?viewport_rows ~delta t =
   let rows = visible_tree_rows t in
@@ -938,14 +924,134 @@ let visible_fields t =
       if String.equal q "" then fields
       else List.filter (field_matches_query ~q) fields
 
+let is_tui_pref_key = function
+  | "tui.theme"
+  | "tui.language"
+  | "tui.hints_visible"
+  | "tui.reduce_motion"
+  | "tui.audio_input_device" ->
+      true
+  | _ -> false
+
+let default_tui_preferences : Wire_config.tui_preferences =
+  {
+    theme = Some (Theme.preset_name Theme.Midnight);
+    language = Some Say.Lang_ko;
+    board_sort = None;
+    reduce_motion = Some false;
+    hints_visible = Some true;
+    coalesce_queued_input = None;
+    send_on_stop = None;
+    audio_input_device = Some "default";
+  }
+
+let general_ui_fallback_schema_fields t : Wire_config.schema_field list =
+  let prefs =
+    match Observed.to_option t.preferences with
+    | Some p -> p
+    | None -> default_tui_preferences
+  in
+  let theme_val =
+    match prefs.theme with
+    | Some s when not (String.equal (String.trim s) "") -> s
+    | Some _ | None -> Theme.preset_name Theme.Midnight
+  in
+  let lang_val =
+    match prefs.language with
+    | Some Say.Lang_en -> "en"
+    | Some Say.Lang_ko | None -> "ko"
+  in
+  let hints_val = Option.value prefs.hints_visible ~default:true in
+  let reduce_val = Option.value prefs.reduce_motion ~default:false in
+  let audio_val = Option.value prefs.audio_input_device ~default:"default" in
+  let mk ~key ~label ~desc ~kind ~value : Wire_config.schema_field =
+    {
+      table = "tui";
+      key;
+      full_key = "tui." ^ key;
+      label;
+      env = None;
+      description = Some desc;
+      kind;
+      value;
+      default_value = None;
+      provenance = Wire_config.Prov_global;
+      reload_scope = Wire_config.Hot_reload;
+      secret = false;
+      writable = true;
+    }
+  in
+  [
+    mk ~key:"theme" ~label:"Theme Preset"
+      ~desc:"WCAG >= 4.5:1 Oklab 4-surface contrast theme preset"
+      ~kind:(Wire_config.Field_enum (List.map Theme.preset_name Theme.all_presets))
+      ~value:(Wire_config.Val_string theme_val);
+    mk ~key:"language" ~label:"UI Language"
+      ~desc:"Atomic KO / EN switch across all screens"
+      ~kind:(Wire_config.Field_enum [ "ko"; "en" ])
+      ~value:(Wire_config.Val_string lang_val);
+    mk ~key:"hints_visible" ~label:"Footer Key Hints"
+      ~desc:"Show quiet keycap hints in the bottom chrome bar"
+      ~kind:Wire_config.Field_bool ~value:(Wire_config.Val_bool hints_val);
+    mk ~key:"reduce_motion" ~label:"Reduce Motion"
+      ~desc:"Reduce spinner and animation frame cadence"
+      ~kind:Wire_config.Field_bool ~value:(Wire_config.Val_bool reduce_val);
+    mk ~key:"audio_input_device" ~label:"Audio Input Device"
+      ~desc:"Audio input device used for Voice PTT recording"
+      ~kind:Wire_config.Field_string ~value:(Wire_config.Val_string audio_val);
+  ]
+
 let inspector_fields t =
-  match selected_section_fields t with
-  | _ :: _ as fs -> fs
-  | [] -> visible_fields t
+  let base =
+    match selected_section_fields t with
+    | _ :: _ as fs -> fs
+    | [] -> visible_fields t
+  in
+  if base <> [] then base
+  else if
+    Nav.equal_settings_tab t.active_tab Nav.Settings_general_ui
+    && String.equal (String.trim t.search_query) ""
+  then general_ui_fallback_schema_fields t
+  else []
 
 let selected_field t =
   let fs = inspector_fields t in
   List.nth_opt fs (clamp_index (List.length fs) t.selected_field_index)
+
+let apply_tui_pref_op ~observed_at ~full_key op t =
+  let prefs0 =
+    match Observed.to_option t.preferences with
+    | Some p -> p
+    | None -> default_tui_preferences
+  in
+  let prefs =
+    match op with
+    | Wire_config.Set_scalar { value; _ } ->
+        if String.equal full_key "tui.theme" then
+          { prefs0 with theme = Some value }
+        else if String.equal full_key "tui.language" then
+          let lang =
+            if String.equal (String.lowercase_ascii (String.trim value)) "en"
+            then Say.Lang_en
+            else Say.Lang_ko
+          in
+          { prefs0 with language = Some lang }
+        else if String.equal full_key "tui.audio_input_device" then
+          { prefs0 with audio_input_device = Some value }
+        else prefs0
+    | Wire_config.Set_bool { value; _ } ->
+        if String.equal full_key "tui.hints_visible" then
+          { prefs0 with hints_visible = Some value }
+        else if String.equal full_key "tui.reduce_motion" then
+          { prefs0 with reduce_motion = Some value }
+        else prefs0
+    | Wire_config.Set_int _
+    | Wire_config.Set_float _
+    | Wire_config.Set_string_array _
+    | Wire_config.Remove_key _ ->
+        prefs0
+  in
+  { t with preferences = Observed.value ~observed_at prefs }
 
 let stage_patch ~full_key op t =
   {
@@ -976,9 +1082,15 @@ let build_patch_request ~dry_run t =
   let ops =
     String_map.fold (fun _ op acc -> op :: acc) t.dirty_fields [] |> List.rev
   in
+  let empty_ops_allowed =
+    match t.target with
+    | Wire_config.Target_keeper_create -> true
+    | Wire_config.Target_runtime | Wire_config.Target_keeper _ -> false
+  in
   match ops with
-  | [] -> Error "No staged configuration changes to patch"
-  | _ :: _ -> (
+  | [] when not empty_ops_allowed ->
+      Error "No staged configuration changes to patch"
+  | _ -> (
       match t.target with
       | Wire_config.Target_keeper_create
         when String.equal (String.trim t.new_keeper_name) "" ->
@@ -1197,12 +1309,13 @@ let commit_edit_field t =
         Ok { updated with editing_field_key = None; editing_buffer = "" }
   | Some key -> (
       let all_fields =
-        match Observed.to_option t.schema with
+        (match Observed.to_option t.schema with
         | Some s ->
             List.concat_map
               (fun (sec : Wire_config.schema_section) -> sec.fields)
               s.sections
-        | None -> []
+        | None -> [])
+        @ general_ui_fallback_schema_fields t
       in
       let field_opt =
         List.find_opt

@@ -31,6 +31,8 @@ type t = {
   keeper_sandbox : Wire_infra.keeper_sandbox_response Observed.t;
   repositories : Wire_infra.repository list Observed.t;
   file_changes : Wire_infra.file_change list Observed.t;
+  file_changes_keeper : string option;
+  requested_file_changes_keeper : string option;
   logs : Wire_infra.system_log_entry list;
   logs_loaded : bool;
   last_log_seq : int option;
@@ -41,6 +43,10 @@ type t = {
   show_raw_json : bool;
   selected_index : int;
   scroll_offset : int;
+  diff_scroll_offset : int;
+  change_selected_index : int;
+  change_scroll_offset : int;
+  detail_scroll_offset : int;
   filter_query : string;
 }
 
@@ -67,7 +73,13 @@ val apply_keeper_sandbox :
 val apply_repositories :
   observed_at:Clock.Mono.t -> Wire_infra.repository list -> t -> t
 val apply_file_changes :
-  observed_at:Clock.Mono.t -> Wire_infra.file_change list -> t -> t
+  ?keeper:string ->
+  observed_at:Clock.Mono.t ->
+  Wire_infra.file_change list ->
+  t ->
+  t
+val clear_file_changes : t -> t
+val mark_file_changes_requested : keeper:string -> t -> t
 
 val apply_log_snapshot : Wire_infra.system_log_entry list -> t -> t
 val append_log : Wire_infra.system_log_entry -> t -> t
@@ -81,10 +93,16 @@ val set_log_keeper_filter : string option -> t -> t
 
 val toggle_raw_json : t -> t
 
+val filtered_sandbox_keepers : t -> string list
+val filtered_repositories : t -> Wire_infra.repository list
+val filtered_file_changes : t -> Wire_infra.file_change list
 val selected_sandbox_keeper : t -> string option
 val selected_repository : t -> Wire_infra.repository option
+val selected_file_change : t -> Wire_infra.file_change option
 val selected_log : t -> Wire_infra.system_log_entry option
 
-val move_selection : ?viewport_rows:int -> delta:int -> t -> t
+val move_selection :
+  ?pane_index:int -> ?viewport_rows:int -> delta:int -> t -> t
+val reset_detail_scroll : t -> t
 val set_filter : string -> t -> t
 val mark_stale_all : t -> t

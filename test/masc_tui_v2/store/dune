@@ -2,11 +2,28 @@
 
 (test
  (name test_store)
+ (modules test_store)
  (libraries
   masc_tui_core
   masc_tui_keymap
   masc_tui_protocol
   masc_tui_store
   masc_tui_term
+  yojson
+  alcotest))
+
+(test
+ (name test_keymap_matrix)
+ (modules test_keymap_matrix)
+ (libraries
+  masc_tui_core
+  masc_tui_keymap
+  masc_tui_protocol
+  masc_tui_term
+  masc_tui_ui
+  masc_tui_store
+  masc_tui_screens_core
+  masc_tui_screens_ops
+  masc_tui_screens_domain
   yojson
   alcotest))

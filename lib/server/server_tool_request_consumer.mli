@@ -13,8 +13,8 @@
     One that is missing here stops the pass at every boot from its first live
     record, and the next install preflight refuses that record. *)
 
-(** A consumer that keeps every original under one scope. *)
-type one_scope =
+(** Each consumer keeps every original under one scope. *)
+type t =
   | Workspace_curator
   | Completion_review
   | Goal_proof_review
@@ -22,12 +22,7 @@ type one_scope =
   | Media_reading
 [@@deriving enumerate]
 
-type t =
-  | Librarian of Keeper_librarian_store_preflight.purpose
-      (** A Librarian scope is named by the producer that owns its kind. *)
-  | One_scope of one_scope
-
-val scope : one_scope -> string
+val scope : t -> string
 (** The scope the consumer's own module retains its originals under. *)
 
 val of_scope : string -> t option

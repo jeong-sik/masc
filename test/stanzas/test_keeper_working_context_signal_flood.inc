@@ -1,6 +1,6 @@
 (test
- (name test_keeper_librarian_context_queue_signal)
- (modules test_keeper_librarian_context_queue_signal)
+ (name test_keeper_working_context_signal_flood)
+ (modules test_keeper_working_context_signal_flood)
  (deps masc-antigravity-path-hook (source_tree %{workspace_root}/config/prompts))
  (libraries goal_measure_fixture masc.goal_measure masc.prompt_registry
   exact_output_fixture masc_test_deps masc_schedule bigstringaf

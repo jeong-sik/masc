@@ -5304,7 +5304,7 @@ let check_memory_cleanup_wakes ~category_cap ~item_cap ~initial ~decisions
   let module Current = Masc.Keeper_memory_os_current in
   let module Memory = Masc.Keeper_memory_os_types in
   let module Lane = Masc.Keeper_memory_lane in
-  let module Signal = Masc.Keeper_librarian_queue_signal in
+  let module Signal = Masc.Keeper_working_context_signal in
   Masc_test_deps.with_process_env Env_config_keeper.KeeperMemoryOs.librarian_env_key
     (Some "true") @@ fun () ->
   Masc_test_deps.with_process_env Env_config_keeper.KeeperMemoryOs.category_cap_env_key

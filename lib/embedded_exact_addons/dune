@@ -4,7 +4,6 @@
  (name embedded_exact_addons)
  (public_name masc.embedded_exact_addons)
  (modules
-  embedded_keeper_librarian
   embedded_workspace_curator
   embedded_candle_appraiser
   embedded_hitl_auto_judge
@@ -23,17 +22,6 @@
 ; under the package and its Dockerfile. A README, an editor's backup file or a
 ; Finder's .DS_Store in the source directory is not a dependency, so it is not
 ; in the sandbox and never reaches an operator's machine.
-
-(rule
- (target embedded_keeper_librarian.ml)
- (deps
-  (sandbox always)
-  (glob_files_rec ../../addons/keeper-librarian/*.{toml,json,py})
-  ../../addons/keeper-librarian/Dockerfile)
- (action
-  (with-stdout-to
-   %{target}
-   (run ocaml-crunch -m plain ../../addons/keeper-librarian))))
 
 (rule
  (target embedded_workspace_curator.ml)

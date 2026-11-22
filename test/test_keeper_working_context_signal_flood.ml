@@ -41,11 +41,11 @@ let test_queue_wakes_coalesce_without_waiting_for_librarian () =
       ~sources selected));
     if !calls = 2 then Eio.Promise.resolve finish ()
   in
-  Keeper_librarian_queue_signal.install (fun ~base_path ~keeper_name ->
+  Keeper_working_context_signal.install (fun ~base_path ~keeper_name ->
     ignore (Keeper_memory_lane.submit ~base_path ~keeper_name organize));
-  Eio.Switch.on_release sw (fun () -> Keeper_librarian_queue_signal.install
+  Eio.Switch.on_release sw (fun () -> Keeper_working_context_signal.install
     (fun ~base_path:_ ~keeper_name:_ -> ()));
-  let signal () = Keeper_librarian_queue_signal.changed ~base_path:keepers_dir ~keeper_name:"flood" in
+  let signal () = Keeper_working_context_signal.changed ~base_path:keepers_dir ~keeper_name:"flood" in
   signal ();
   Eio.Promise.await started;
   List.iter (fun event -> original := !original @ [event]; signal ()) (List.tl events @ [question]);
@@ -59,6 +59,6 @@ let test_queue_wakes_coalesce_without_waiting_for_librarian () =
 
 let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
-  run "keeper_librarian_context_queue_signal"
+  run "keeper_working_context_signal_flood"
   ["scenarios", [
     test_case "queue wake flood does not wait for librarian" `Quick test_queue_wakes_coalesce_without_waiting_for_librarian]]

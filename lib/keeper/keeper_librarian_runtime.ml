@@ -2353,7 +2353,7 @@ let run_pass
                    coverage advances. An unfit source or model failure cannot
                    create a private retry loop. *)
                 if made_progress && remaining then
-                  Keeper_librarian_queue_signal.changed ~base_path ~keeper_name:keeper_id
+                  Keeper_working_context_signal.changed ~base_path ~keeper_name:keeper_id
               | Error detail ->
                 context_write := Write_failed detail;
                 Log.Keeper.warn ~keeper_name:keeper_id

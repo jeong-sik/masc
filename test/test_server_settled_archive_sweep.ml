@@ -9,10 +9,6 @@ let get = function Ok value -> value | Error detail -> Alcotest.fail detail
 let owned value = get (Result.map_error Owner.error_to_string value)
 let date = "2026-10-27"
 let curator = Workspace_memory_execution_capture.scope
-let history = "keeper-librarian-history-execution-owner"
-let history_gate = "keeper-librarian-durable-gate/owner"
-let floor = "keeper-librarian-floor-step-owner"
-let floor_gate = "keeper-librarian-floor-step-gate/owner"
 
 let with_store f =
   let parent = Filename.temp_dir "settled-sweep" "" in
@@ -41,10 +37,6 @@ let settle store original =
   | Error error -> Alcotest.fail (Owner.settle_error_to_string error)
 (* A record nothing names, settled beside the named one in the same scope. *)
 let settle_stray store ~scope = settle store (retain store ~scope "stray")
-let gate_request ~kind ~id ~execution = `Assoc [
-  "version",`Int 3;"kind",`String kind;"request_id",`String id;"owner",`Null;
-  "execution_id",`String execution;"execution_digest",`String "parent-digest";
-  "proposal",`Null;"authority",`Null;"guidance",`Null;"predecessor",`Null]
 let run store = match Sweep.run ~store with
   | Ok report -> report
   | Error error -> Alcotest.fail (Sweep.error_to_string error)
@@ -80,10 +72,10 @@ let test_curator_successor_is_named () = with_store (fun root store ->
   check_named_stays root ~scope:curator ~named:"child" report;
   Alcotest.(check int) "the live parent is the only live record" 1 report.live_records)
 
-(* Keeper_librarian_durable_execution asks for a confirmed replacement. *)
-let test_history_replacement_is_named () = with_store (fun root store ->
-  let child = retain store ~scope:history "replacement" in
-  let parent = retain store ~scope:history "conflicted" in
+(* A live record also names the replacement its progress observed. *)
+let test_replacement_is_named () = with_store (fun root store ->
+  let child = retain store ~scope:curator "replacement" in
+  let parent = retain store ~scope:curator "conflicted" in
   let parent = advance store parent Progress.Dispatch_intended in
   let parent = advance store parent (Progress.Judgment_retained (`String "judged")) in
   let parent = advance store parent
@@ -93,19 +85,8 @@ let test_history_replacement_is_named () = with_store (fun root store ->
       (Progress.Replacement_intended {request_id="replacement";request=request "replacement"}) in
   ignore (advance store parent (Progress.Replacement_observed "replacement"));
   settle store child;
-  settle_stray store ~scope:history;
-  check_named_stays root ~scope:history ~named:"replacement" (run store))
-
-(* The history and floor gate inventories ask for the execution their
-   records name. The floor gate scope also starts with the floor step
-   prefix, so this is read as a gate only when gates are asked first. *)
-let gate_names_its_execution ~gate_scope ~kind ~execution_scope () = with_store (fun root store ->
-  let execution = retain store ~scope:execution_scope "execution" in
-  ignore (retain store ~scope:gate_scope "gate"
-    ~request_json:(gate_request ~kind ~id:"gate" ~execution:"execution"));
-  settle store execution;
-  settle_stray store ~scope:execution_scope;
-  check_named_stays root ~scope:execution_scope ~named:"execution" (run store))
+  settle_stray store ~scope:curator;
+  check_named_stays root ~scope:curator ~named:"replacement" (run store))
 
 (* A settle archives only the record, so the pass deletes any body in the
    archive. *)
@@ -120,9 +101,9 @@ let test_archived_body_is_deleted () = with_store (fun root store ->
   Alcotest.(check bool) "the body file is gone" false (Sys.file_exists body))
 
 (* A consumer that settles nothing still has live records, and the pass reads
-   every live record. Each consumer of one scope is asked, so one added to the
-   type is asked too. *)
-let test_every_one_scope_consumer_lets_the_pass_run () =
+   every live record. Each consumer is asked, so one added to the type is
+   asked too. *)
+let test_every_consumer_lets_the_pass_run () =
   List.iter (fun consumer -> with_store (fun root store ->
     let scope = Consumer.scope consumer in
     ignore (retain store ~scope "original");
@@ -133,7 +114,7 @@ let test_every_one_scope_consumer_lets_the_pass_run () =
       report.removed_records;
     Alcotest.(check bool) (scope ^ ": the stray record is gone") false
       (archived root ~scope:curator "stray")))
-    Consumer.all_of_one_scope
+    Consumer.all
 
 let consumer_name = function
   | Consumer.Workspace_curator -> "Workspace_curator"
@@ -143,17 +124,15 @@ let consumer_name = function
   | Consumer.Media_reading -> "Media_reading"
 
 let found_name scope = match Consumer.of_scope scope with
-  | Some (Consumer.One_scope found) -> consumer_name found
-  | Some (Consumer.Librarian _) -> "a Librarian producer"
+  | Some found -> consumer_name found
   | None -> "no consumer"
 
-(* No two consumers share a scope, and no Librarian producer claims the scope
-   of another consumer. *)
-let test_a_one_scope_consumer_is_found_by_its_scope () =
+(* No two consumers share a scope. *)
+let test_a_consumer_is_found_by_its_scope () =
   List.iter (fun consumer ->
     Alcotest.(check string) (Consumer.scope consumer) (consumer_name consumer)
       (found_name (Consumer.scope consumer)))
-    Consumer.all_of_one_scope
+    Consumer.all
 
 (* The scope each owner module retains its originals under. *)
 let test_an_owner_scope_has_its_consumer () =
@@ -180,18 +159,14 @@ let test_unknown_archive_directory_refuses () = with_store (fun root store ->
 
 let () = Alcotest.run "settled archive sweep" ["sweep", [
   Alcotest.test_case "a Curator successor keeps its settled record" `Quick test_curator_successor_is_named;
-  Alcotest.test_case "a history replacement keeps its settled record" `Quick test_history_replacement_is_named;
-  Alcotest.test_case "a history gate keeps its settled execution" `Quick
-    (gate_names_its_execution ~gate_scope:history_gate ~kind:"librarian-durable-gate" ~execution_scope:history);
-  Alcotest.test_case "a floor step gate keeps its settled execution" `Quick
-    (gate_names_its_execution ~gate_scope:floor_gate ~kind:"librarian-floor-step-gate" ~execution_scope:floor);
+  Alcotest.test_case "a replacement keeps its settled record" `Quick test_replacement_is_named;
   Alcotest.test_case "an archived body is deleted" `Quick test_archived_body_is_deleted;
-  Alcotest.test_case "a live record of each one-scope consumer lets the pass run" `Quick
-    test_every_one_scope_consumer_lets_the_pass_run;
+  Alcotest.test_case "a live record of each consumer lets the pass run" `Quick
+    test_every_consumer_lets_the_pass_run;
   Alcotest.test_case "a scope no owner claims refuses the pass" `Quick test_unclaimed_scope_refuses;
   Alcotest.test_case "an unknown archive directory refuses the pass" `Quick test_unknown_archive_directory_refuses;
 ]; "consumers", [
-  Alcotest.test_case "a one-scope consumer is found by its scope" `Quick
-    test_a_one_scope_consumer_is_found_by_its_scope;
+  Alcotest.test_case "a consumer is found by its scope" `Quick
+    test_a_consumer_is_found_by_its_scope;
   Alcotest.test_case "an owner's scope has its consumer" `Quick test_an_owner_scope_has_its_consumer;
 ]]

@@ -22,7 +22,6 @@ step in other Keeper activity.
 | [dos-world](dos-world/README.md) | Runs a homebrew DOS counter, accepts an optional action and emits guest-state and screen artifacts. | Owns its DOS/WASM machine inside its worker; replacement starts a new machine. |
 | [operator-quiz](operator-quiz/README.md) | Asks the operator multiple-choice questions written from granted Board and repository records, and grades each answer by its key. | Keeps sessions, keys and attempts in a log on its persistent volume; the host retains the read pages, exact outputs, questions and answers. |
 | [operator-lesson](operator-lesson/README.md) | Writes short lesson scenes from granted Board, repository, wiki and pull-request records, each paragraph quoting its record. | Keeps sessions, outline entries and scenes in a log on its persistent volume; the host retains the read pages and exact outputs. |
-| [keeper-librarian](../docs/guides/keeper-memory-execution.md) | Proposes explicit-memory admission and completed-history derivation through two exact outputs. | Worker retains original requests; source consumption, Memory commits and acknowledgements stay with the host. |
 | [fusion-compute](fusion-compute/README.md) | Executes Fusion compute requests in an isolated worker and returns structured artifacts and receipts. | Owns its compute worker; credentials, publication and durable delivery stay in the existing host. |
 | [fusion-results](fusion-results/README.md) | Projects captured Fusion status and exact-run Board evidence into named outputs for downstream packages. | Owns its projection worker; Fusion compute, credentials and durable delivery stay in the existing host. |
 | [fusion-report](fusion-report/README.md) | Produces readable reports from Fusion outputs, preserving failures, incomplete input and exact evidence lineage. | Owns its report worker; publication and Keeper delivery remain host operations. |
@@ -36,8 +35,8 @@ retains committed output and host-owned evidence after either kind of removal.
 The package's `lane.toml` declares its image, command, contributions, resource
 envelope and optional `world` connections. A separate workspace declaration
 selects the package with `id`, `run_id`, `manifest_path` and `[binding]`.
-The masc server carries four Exact worker packages (`keeper-librarian`,
-`workspace-curator`, `candle-appraiser`, `hitl-auto-judge`). A declaration
+The masc server carries three Exact worker packages (`workspace-curator`,
+`candle-appraiser`, `hitl-auto-judge`). A declaration
 selects one of them with `package = "<name>"` instead of `manifest_path`, and
 `masc exact-addon-setup` writes its folder and builds its image
 ([TOML installation](../docs/guides/lane-addon-toml.md)).

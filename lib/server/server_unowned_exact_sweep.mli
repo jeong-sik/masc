@@ -4,9 +4,8 @@
     original owns.
 
     Only a configured declaration whose package needs an original is swept:
-    {!Server_workspace_memory_addon_validation.original_required} or
-    {!Server_librarian_addon_validation.original_required}, the same answers
-    the Exact authority gives. A request of that declaration without a live
+    {!Server_workspace_memory_addon_validation.original_required}, the same
+    answer the Exact authority gives. A request of that declaration without a live
     original ends as [Unowned] and no original can grant it later, so a
     rerun ends as [Not_allowed] with or without its record and link.
 

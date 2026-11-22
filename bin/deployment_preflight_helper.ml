@@ -833,21 +833,17 @@ module Tool_request_consumer = Server_tool_request_consumer
 
 (* Each check is the decoding that consumer's own reader applies, so a hard
    cut of its records stops the install instead of stopping that consumer on
-   its first pass after the deploy (#49587). A Librarian original is also
-   checked against the Exact files its consumer reads. *)
+   its first pass after the deploy (#49587). Every consumer decodes only the
+   original's own body, so the scan's other readers are not asked. *)
 let validate_tool_request () =
-  let librarian = Masc.Keeper_librarian_store_preflight.preflight () in
   let decoded = function
     | Ok () -> L.Payload_valid
     | Error detail -> L.Payload_invalid detail
   in
-  fun ~read ~read_scope ~read_records ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact
-    (original : L.original) ->
+  fun ~read:_ ~read_scope:_ ~read_records:_ ~read_body:_ ~read_archive:_ ~read_fence:_ ~read_resolution:_
+    ~read_exact:_ (original : L.original) ->
     match Tool_request_consumer.of_scope (Masc.Lane_addon_tool_request_owner.Record.scope original.record) with
-    | Some (Tool_request_consumer.Librarian (_ : Masc.Keeper_librarian_store_preflight.purpose)) ->
-      librarian ~read ~read_scope ~read_records ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact
-        original
-    | Some (Tool_request_consumer.One_scope consumer) ->
+    | Some consumer ->
       (match original.restore () with
        | Error detail -> L.Body_unreadable detail
        | Ok record ->

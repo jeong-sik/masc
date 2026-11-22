@@ -2257,6 +2257,18 @@ let test_keeper_tool_schemas_pin_required_fields () =
      Tool_input_validation.validate_args
        ~schema:keeper_task_claim_schema
        ~name:"keeper_task_claim"
+       ~args:(`Assoc [])
+       ()
+   with
+   | Ok _ -> ()
+   | Error result ->
+     Alcotest.failf
+       "keeper_task_claim empty args should validate for auto-claim: %s"
+       (Yojson.Safe.to_string (Tool_result.data result)));
+  (match
+     Tool_input_validation.validate_args
+       ~schema:keeper_task_claim_schema
+       ~name:"keeper_task_claim"
        ~args:(`Assoc [ "task_id", `String "task-123" ])
        ()
    with
@@ -2264,6 +2276,27 @@ let test_keeper_tool_schemas_pin_required_fields () =
    | Error result ->
      Alcotest.failf
        "keeper_task_claim task_id should validate: %s"
+       (Yojson.Safe.to_string (Tool_result.data result)));
+  (match
+     Tool_input_validation.validate_args
+       ~schema:keeper_task_claim_schema
+       ~name:"keeper_task_claim"
+       ~args:(`Assoc [ "task", `String "task-123" ])
+       ()
+   with
+   | Ok _ ->
+     (* keeper_task_claim is an in-process-only (Mod_keeper_task) tool: the MCP
+        endpoint refuses every call with "use the keeper in-process task
+        handler" before any handler runs, and the in-process parser
+        (Tool_task_args.parse_task_claim_request) rejects unknown keys with
+        "unsupported argument(s)", so the TOML schema must not pre-empt that
+        routing contract with [additional_properties = false]. The alias field
+        is rejected at the parser layer instead (test_keeper_task_outcomes
+        "unsupported alias field"). *)
+     ()
+   | Error result ->
+     Alcotest.failf
+       "keeper_task_claim schema-level validation must not pre-empt the Mod_keeper_task routing refusal: %s"
        (Yojson.Safe.to_string (Tool_result.data result)));
   assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "task_id";
   assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "result";

@@ -50,6 +50,44 @@ let handoff_example_evidence_ref =
 let is_internal_marker key =
   String.length key > 0 && Char.equal key.[0] '_'
 
+type task_claim_request =
+  | Claim_next
+  | Claim_specific of string
+
+let parse_task_claim_request = function
+  | `Assoc fields ->
+    let visible_fields =
+      List.filter (fun (key, _) -> not (is_internal_marker key)) fields
+    in
+    let unknown_keys =
+      List.filter_map
+        (fun (key, _) -> if String.equal key "task_id" then None else Some key)
+        visible_fields
+    in
+    if unknown_keys <> [] then
+      Error
+        (Printf.sprintf
+           "unsupported argument(s) for keeper_task_claim: %s (accepted: task_id)"
+           (String.concat ", " unknown_keys))
+    else
+      (match
+         List.filter (fun (key, _) -> String.equal key "task_id") visible_fields
+       with
+       | [] -> Ok Claim_next
+       | [ _, `String raw ] ->
+         let trimmed = String.trim raw in
+         if String.equal trimmed "" then
+           Error
+             "task_id must be a non-empty string when provided (omit task_id to auto-claim the next task)"
+         else
+           Ok (Claim_specific trimmed)
+       | [ _, (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) ] ->
+         Error
+           "task_id must be a non-empty string when provided (omit task_id to auto-claim the next task)"
+       | _ :: _ :: _ -> Error "duplicate task_id argument")
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    Error "keeper_task_claim arguments must be a JSON object"
+
 let unknown_args ~valid_keys args =
   match args with
   | `Assoc kvs ->

@@ -1754,6 +1754,110 @@ let test_release_sources_reach_the_next_owner () =
        check string "successor reads the original author's attribution" owner.name
          (visible |> U.member "updated_by" |> U.to_string))
 
+let test_keeper_task_claim_handler_and_tool_task_forbid_silent_fallback () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = keeper_meta () in
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~title:"High priority backlog task"
+            ~priority:1
+            ~description:"must stay todo when explicit or malformed claim is rejected");
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~title:"Lower priority backlog task"
+            ~priority:3
+            ~description:"secondary task");
+       let task_status task_id =
+         match
+           List.find_opt
+             (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+             (Masc.Workspace.get_tasks_raw config)
+         with
+         | None -> fail (Printf.sprintf "missing %s" task_id)
+         | Some task -> task.Masc_domain.task_status
+       in
+       let check_todo label task_id =
+         match task_status task_id with
+         | Masc_domain.Todo -> ()
+         | _ -> fail (Printf.sprintf "%s: expected %s to remain Todo" label task_id)
+       in
+       let invalid_inputs =
+         [ "empty task_id", `Assoc [ "task_id", `String "" ]
+         ; "whitespace task_id", `Assoc [ "task_id", `String "   " ]
+         ; "null task_id", `Assoc [ "task_id", `Null ]
+         ; "integer task_id", `Assoc [ "task_id", `Int 2 ]
+         ; "unsupported alias field", `Assoc [ "task", `String "task-002" ]
+         ; ( "extra unknown field alongside task_id"
+           , `Assoc [ "task_id", `String "task-002"; "extra", `Bool true ] )
+         ; "non-object args", `List []
+         ]
+       in
+       List.iter
+         (fun (label, args) ->
+            let execution =
+              Task.handle_keeper_task_tool_with_outcome
+                ~config
+                ~meta
+                ~name:"keeper_task_claim"
+                ~args
+            in
+            (match execution.disposition with
+             | Tool_result.Failed Tool_result.Workflow_rejection -> ()
+             | Tool_result.Failed other ->
+               failf
+                 "%s: expected Workflow_rejection, got %s"
+                 label
+                 (Tool_result.tool_failure_class_to_string other)
+             | Tool_result.Completed () | Tool_result.Deferred () ->
+               failf "%s: expected failure, got %s" label execution.raw_output);
+            let json = Yojson.Safe.from_string execution.raw_output in
+            (* typed_outcome.kind is serialized as "Error" (PascalCase), the
+               same casing as the rest of the tool-result JSON; produced by
+               Keeper_tool_outcome.Error via Keeper_tool_outcome.to_json. *)
+            check string (label ^ " typed_outcome.kind") "Error"
+              (json |> U.member "typed_outcome" |> U.member "kind" |> U.to_string);
+            check_todo ("keeper handler " ^ label) "task-001";
+            check_todo ("keeper handler " ^ label) "task-002")
+         invalid_inputs;
+       let tool_ctx : Masc.Task.Tool.context =
+         { Masc.Task.Tool.config; agent_name = meta.name; sw = None }
+       in
+       List.iter
+         (fun (label, args) ->
+            match
+              Masc.Task.Tool.dispatch tool_ctx ~name:"keeper_task_claim" ~args
+            with
+            | None -> failf "Tool_task.dispatch %s returned None" label
+            | Some res ->
+              check bool ("Tool_task.dispatch " ^ label ^ " rejected") false
+                (Tool_result.is_success res);
+              check bool ("Tool_task.dispatch " ^ label ^ " Workflow_rejection") true
+                (Tool_result.failure_class res = Some Tool_result.Workflow_rejection);
+              check_todo ("Tool_task.dispatch " ^ label) "task-001";
+              check_todo ("Tool_task.dispatch " ^ label) "task-002")
+         (("retired agent_role", `Assoc [ "agent_role", `String "worker" ])
+          :: invalid_inputs);
+       match
+         Masc.Task.Tool.dispatch tool_ctx ~name:"keeper_task_claim" ~args:(`Assoc [])
+       with
+       | None -> fail "Tool_task.dispatch empty args returned None"
+       | Some res ->
+         check bool "Tool_task.dispatch empty args auto-claims" true
+           (Tool_result.is_success res);
+         (match task_status "task-001" with
+          | Masc_domain.Claimed { assignee; _ }
+          | Masc_domain.InProgress { assignee; _ } ->
+            check string "auto-claimed highest priority assignee" meta.name assignee
+          | _ -> fail "expected task-001 to be auto-claimed");
+         check_todo "Tool_task.dispatch auto-claim leaves lower priority" "task-002")
+
 let () =
   Eio_main.run
   @@ fun env ->
@@ -1837,5 +1941,7 @@ let () =
             `Quick test_done_without_notes_stays_absent
         ; test_case "malformed notes fail before workspace mutation" `Quick
             test_done_rejects_malformed_notes
+        ; test_case "keeper_task_claim forbids silent auto-claim fallback on malformed args" `Quick
+            test_keeper_task_claim_handler_and_tool_task_forbid_silent_fallback
         ] )
     ]

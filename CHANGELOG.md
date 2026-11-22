@@ -44,6 +44,13 @@
 - Decouple shared non-TUI helpers into `lib/server_lifecycle/`, `lib/cli_editor/`, `lib/json_field/json_decode_fields`, and `lib/keeper_contract/keeper_boot_refusal` so server and CLI binaries no longer depend on legacy TUI modules (#54399).
 - Replace the legacy TUI monolith (`bin/masc_tui*.ml`, `lib/tui_decode*`) with the ground-up OCaml 5.5 + Eio MASC TUI v2.5 (`bin/masc_tui.ml`, `lib/masc_tui/*`), featuring 6 visible workspaces (`Pulse`, `Work`, `Knowledge`, `Keepers`, `Runtime`, `Infra`), 4 unified 1-hop dives, 7 non-overlapping overlays, 2-pane categorized in-TUI Settings, 3-domain multiplexed SSE (`0.00 req/s` idle polling), CSI 2026 differential rendering, and 4-surface WCAG AA themes (#54402).
 - Update `.github/workflows/tui-native-proof.yml`, `.github/workflows/test.yml`, `docs/guides/NATIVE-TUI-PROOF.md`, `docs/TUI-GUIDE.md`, `CONTRIBUTING.md`, and `docs/guides/CONTRIBUTOR-WORKFLOW.{md,ko.md}` for MASC TUI v2.5 (#54402).
+- When a Keeper's turns switch between Agent Core and an official client, the
+  turns carried across are read from the Keeper's turn log and from a ledger
+  of turns an official client answered
+  (`official-client-runtime/client-turns.jsonl`), not from the old turn index.
+  A session's last ledger line is where its resume handoff starts. A turn log
+  line that does not decode, or breaks the order of turns, refuses the bridge
+  instead of being skipped (#54346).
 
 ### Fixed
 
@@ -79,6 +86,10 @@
 - Unify MASC TUI Arrow Up/Down/Left/Right navigation around single-source-of-truth display-order projections across Keepers (`Fleet_companies` grouped order + collapse/poll/mode re-sync), Pulse (strict 1-company-row stepping, collapsed-company highlight/dive via `selected_company_keeper`, independent `pulse_scroll_offset`), Runtime Efficiency & Spend (company-grouped spend order), and Knowledge (Board succession chains and language-neutral Wiki clusters) (#54422).
 - Extract a shared `Chat_transcript` SSOT module for exact Markdown/JSON-tree/Chrome/Composer viewport geometry, secret scrubbing, and stream deduplication across `Keeper_dive` and `Update_nav`, fixing Keeper Chat scroll direction and eliminating `Home` overshoot dead presses (#54422).
 - Synchronize Work Inbox Ask/Approval focus scope, choice submission, copy target, and `triage_scroll_offset` strictly with `Attention.current_triage_item`, unify `Work_store.filtered_tasks`, add independent `schedules_scroll_offset`, split-pane `Tab` clamping, `filter_focused` guard, smooth symmetric viewport scrolling with grouped top-header row-0 restoration, and unfocused `←`/`→` sub-tab cycling with updated TUI docs (#54422).
+- An image read no longer ends when one candidate refuses the request locally (`AcceptRejected`); the walk tries the next candidate, and the last refusal is reported when every candidate refuses (#54339).
+- The `openai-responses` replay guard now decides identity by the item's own non-blank `id`, not by the key each capture path happens to use. The `response.output_item.done` frame keys by the event's `output_index` while the terminal `response.completed` echo keys by array position, and a blank `id` was exempt from the identity check, so two different reasoning items could be compared as one delivery and fail a whole turn with `responses_replay:conflicting_reasoning_item`. Ciphertext is now compared only when both deliveries carry the same non-blank id; otherwise the stored done item — the one OpenAI names as authoritative for replay — is kept. The terminal echo reuses the index recorded for its id and is captured in index order; an item whose id was never recorded (a text item that only ever arrived as deltas, an id-less done frame) keeps its order but takes the lowest index no identified item claims, so the two rules cannot hand two items the same index. `SSEParseFailed` records the output index, item id, byte length and a ciphertext digest prefix instead of an empty `raw`, clipped to 240 bytes so the operator-facing excerpt keeps both digests even for a full-length `rs_...` id, and never copies ciphertext, prompt or reasoning text. (#54375)
+- `keeper_task_claim` rejects blank, malformed, non-object, and unsupported argument keys with a typed rejection instead of falling back to auto-claiming the highest-priority todo task (#54376).
+- The MCP keeper-memory resource no longer hands an authenticated workspace Admin the `Operator` board reader, which reads every `Direct` post regardless of author or audience. The resource reads the memory of the one Keeper named in the request, so an Admin now gets that Keeper's own reader (`Keeper_board_audience.reader_for_keeper`), the same reader the authenticated non-Admin branch already used; missing readership metadata stays fail-closed with `Insufficient_scope`. This closes the remaining Admin DM bypass after the HTTP and MCP tool paths were narrowed in N2-B1. (#54377)
 
 ### Removed
 
@@ -99,6 +110,7 @@
 
 - Add wrapped OCaml 5.5 TUI v2.5 foundation libraries `masc_tui_core`, `masc_tui_term`, `masc_tui_keymap`, and `masc_tui_ui` with 4-surface WCAG AA themes, 4-tier typography, zero-alloc 2D `Cell_grid` + CSI 2026 differential presenter, Single-SSOT keymap, adaptive full-width 24h Braille chart grammar, and pure Alcotest suites (#54400).
 - Add wrapped OCaml 5.5 TUI v2.5 application layers `masc_tui_protocol`, `masc_tui_net`, `masc_tui_store`, `masc_tui_screens_{core,ops,domain}`, and `masc_tui_app` with 3-domain Eio SSE multiplexing, immutable TEA state, live telemetry selectors, 6 workspaces, 4 unified dives, 7 overlays, 2-pane Settings, and pure Alcotest suites (#54401).
+- Dated the [0.78.0] heading by the tag day (2026-11-22 UTC) so the release-body `--expect-date` check accepts the section; RC8 run 44971302284 failed on the one-day mismatch (#54380).
 
 ### Upgrade notes
 
@@ -108,6 +120,10 @@
 - 새 per-Keeper `canonical-turns.db`(`<keepers_dir>/<keeper_id>.canonical-turns.db`, `-wal`/`-shm`/`-journal` sidecar 포함)가 Keeper 디렉터리에 생깁니다. Keeper purge 는 `delete_store` 로 이 파일들을 정리하므로 손으로 지울 필요가 없습니다. Memory OS 성장 임계값은 `MASC_KEEPER_MEMORY_OS_FACTS_MAX_BYTES`(기본 512 KiB)에서 조정하고, molt 수신자가 미설치이거나 `Stopped` 인 구간에서만 4x(기본 2 MiB) 비상 상한이 적용됩니다(#54390·#54391).
 - CLI flags `--reasoning` and `--tool-view` were removed in v2.5 and now exit with code `2` (`Parse_error`) with a migration hint to runtime `Toggle_thinking` (`Ctrl-R`) and `/tools compact|results|full` (#54402).
 - TUI Settings and `[tui]` preferences are now server-backed via `/api/v1/config/{schema,patch}` and `/api/v1/tui/preferences` and require a running MASC server; offline workspaces cannot read or save Settings locally and use session-only `--theme` / `--lang` flags (#54402).
+- The ledger of official-client turns starts empty, so each official-client
+  session's first resume after the upgrade carries no handoff of the turns
+  that ran before it. `official-client-runtime/bridge-cursors.json` is left in
+  place and no longer read (#54346).
 
 ### Exempt
 

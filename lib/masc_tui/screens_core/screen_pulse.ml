@@ -314,10 +314,22 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                  ~ko:(Printf.sprintf "%d 조직" (Int.max hero.company_count (List.length groups)))
                  ~en:(Printf.sprintf "%d cos" (Int.max hero.company_count (List.length groups))))
     in
-    let failing_total =
-      List.fold_left
-        (fun acc (g : Wire_fleet.company_group) -> acc + g.failing_count)
-        0 groups
+    let roster_ks =
+      match Observed.to_option model.fleet.keepers with
+      | Some ks -> ks
+      | None -> []
+    in
+    let fleet_hc = Fleet_store.fleet_health_counts roster_ks in
+    let hero_active_k, hero_total_k, failing_total =
+      if fleet_hc.total > 0 then
+        (fleet_hc.active, fleet_hc.total, fleet_hc.failing)
+      else
+        let ft =
+          List.fold_left
+            (fun acc (g : Wire_fleet.company_group) -> acc + g.failing_count)
+            0 groups
+        in
+        (hero.running_keepers, hero.total_keepers, ft)
     in
     let turns_str =
       match Observed.to_option hero.turns_24h with
@@ -364,8 +376,9 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
       | Observed.Loading _ | Observed.Absent | Observed.Unreported ->
           whisper_st
     in
+    let spend_bd = Runtime_store.spend_24h_breakdown model.runtime in
     let spend_obs =
-      match hero.spend_24h_usd with
+      match spend_bd.total_usd with
       | Observed.Value _ as v -> v
       | Observed.Loading _ | Observed.Absent | Observed.Unreported
       | Observed.Failed _ -> (
@@ -382,6 +395,17 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
       | Observed.Failed _ -> crit_st
       | Observed.Loading _ | Observed.Absent | Observed.Unreported ->
           whisper_st
+    in
+    let spend_kpi_label =
+      match spend_bd.source with
+      | Runtime_store.Spend_provider_24h ->
+          Say.resolve lang
+            (Say.make ~ko:"24h 캐시 · 프로바이더" ~en:"24h Cache · Prov")
+      | Runtime_store.Spend_keeper_turns_24h ->
+          Say.resolve lang
+            (Say.make ~ko:"24h 캐시 · 키퍼 귀속" ~en:"24h Cache · Keeper")
+      | Runtime_store.Spend_unreported ->
+          Say.resolve lang (Say.make ~ko:"24h 캐시 · 비용" ~en:"24h Cache & Cost")
     in
     let calls_p95_str, calls_p95_st =
       match
@@ -502,10 +526,9 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
       candle_hero_display ~lang ~theme ~bg ~model ~hero
     in
     let unattrib_n = candle_unattributed_count model in
-    let wm_opt = Observed.to_option model.knowledge.world_memory in
-    let wm_hero_str, wm_conf_str, wm_conf_st =
-      match wm_opt with
-      | Some wm ->
+    let wm_hero_str, wm_hero_st, wm_conf_str, wm_conf_st =
+      match model.knowledge.world_memory with
+      | Observed.Value { data = wm; _ } ->
           let main =
             Say.resolve lang
               (Say.make
@@ -530,15 +553,32 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                      ~en:(Printf.sprintf "%s 0 conflicts" (Glyph.to_utf8 Glyph.Live_healthy))),
                 ok_st )
           in
-          (main, conf_s, conf_st)
-      | None ->
+          (main, anchor_st, conf_s, conf_st)
+      | Observed.Failed { reason; _ } ->
+          ( Printf.sprintf "%s %s" (Glyph.to_utf8 Glyph.Live_failing)
+              (Say.resolve lang (Say.make ~ko:"기억 조회 실패" ~en:"Memory failed")),
+            crit_st,
+            reason,
+            crit_st )
+      | Observed.Loading _ ->
           let wiki_s =
             match Observed.to_option model.knowledge.wiki_index with
             | Some wi -> Printf.sprintf "Wiki %dp" wi.pages_total
             | None ->
-                Say.resolve lang (Say.make ~ko:"기억 동기화" ~en:"Memory sync")
+                Printf.sprintf "%s %s"
+                  (Glyph.to_utf8 Glyph.Transport_reconnecting)
+                  (Say.resolve lang (Say.make ~ko:"기억 동기화" ~en:"Memory sync"))
           in
-          (wiki_s, "", whisper_st)
+          (wiki_s, anchor_st, "", whisper_st)
+      | Observed.Unreported | Observed.Absent ->
+          let wiki_s =
+            match Observed.to_option model.knowledge.wiki_index with
+            | Some wi -> Printf.sprintf "Wiki %dp" wi.pages_total
+            | None ->
+                Say.resolve lang
+                  (Say.make ~ko:"기억 미보고" ~en:"Memory unreported")
+          in
+          (wiki_s, whisper_st, "", whisper_st)
     in
     if compact || rect.h <= 3 then begin
       (* Compact 2x2 KPI Strip (h=3: 2 KPI rows + 1 bottom border_subtle hairline) *)
@@ -562,7 +602,7 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                ~left_text:
                  (Printf.sprintf "%s %d/%d · %s"
                     (Say.resolve lang (Say.make ~ko:"플릿" ~en:"Fleet"))
-                    hero.running_keepers hero.total_keepers infra_mix)
+                    hero_active_k hero_total_k infra_mix)
                ~left_style:anchor_st ~right_text:turns_str ~right_style:struct_st;
              put_left_right grid ~clip:(Rect.make ~x:rc.x ~y:rc.y ~w:rc.w ~h:1)
                ~y:rc.y
@@ -598,7 +638,7 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                ~left_style:pri_st ~right_text:ver_badge_str
                ~right_style:ver_badge_st;
              put_left_right grid ~clip:(Rect.make ~x:rc.x ~y:y2 ~w:rc.w ~h:1)
-               ~y:y2 ~left_text:wm_hero_str ~left_style:pri_st
+               ~y:y2 ~left_text:wm_hero_str ~left_style:wm_hero_st
                ~right_text:candle_str ~right_style:candle_st
            end
        | _ -> ());
@@ -653,8 +693,7 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
               if body_h >= 2 then
                 put_left_right grid ~clip:r1 ~y:r1.y
                   ~left_text:
-                    (Printf.sprintf "%d/%d" hero.running_keepers
-                       hero.total_keepers)
+                    (Printf.sprintf "%d/%d" hero_active_k hero_total_k)
                   ~left_style:anchor_st ~right_text:infra_mix
                   ~right_style:act_st;
               if body_h >= 3 then begin
@@ -681,10 +720,9 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                   | Some _ | None -> ()
               end
           | 1 ->
-              (* KPI 2: 24h Cache & Spend *)
+              (* KPI 2: 24h Cache & Spend with explicit provenance *)
               put_left_right grid ~clip:r0 ~y:r0.y
-                ~left_text:
-                  (Say.resolve lang (Say.make ~ko:"24h 캐시 · 비용" ~en:"24h Cache & Cost"))
+                ~left_text:spend_kpi_label
                 ~left_style:struct_st ~right_text:spend_str ~right_style:spend_st;
               if body_h >= 2 then
                 put_left_right grid ~clip:r1 ~y:r1.y ~left_text:cache_str
@@ -692,17 +730,34 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                   ~right_text:calls_p95_str ~right_style:calls_p95_st;
               if body_h >= 3 then begin
                 let right_meta =
-                  match latest_velocity_pair model with
-                  | Some (u, d) ->
-                      Printf.sprintf "%s%s %s%s"
-                        (Glyph.to_utf8 Glyph.Delta_up)
-                        (Format_val.format_value Format_val.Count u)
-                        (Glyph.to_utf8 Glyph.Delta_down)
-                        (Format_val.format_value Format_val.Count d)
-                  | None -> (
-                      match Observed.to_option hero.tool_error_rate_pct with
-                      | Some e -> Printf.sprintf "%.1f%% err" e
-                      | None -> "24h")
+                  let fallback_meta () =
+                    match latest_velocity_pair model with
+                    | Some (u, d) ->
+                        Printf.sprintf "%s%s %s%s"
+                          (Glyph.to_utf8 Glyph.Delta_up)
+                          (Format_val.format_value Format_val.Count u)
+                          (Glyph.to_utf8 Glyph.Delta_down)
+                          (Format_val.format_value Format_val.Count d)
+                    | None -> (
+                        match Observed.to_option hero.tool_error_rate_pct with
+                        | Some e -> Printf.sprintf "%.1f%% err" e
+                        | None -> "24h")
+                  in
+                  match spend_bd.source with
+                  | Runtime_store.Spend_provider_24h -> (
+                      match
+                        ( Observed.to_option spend_bd.keeper_attributed_usd
+                        , spend_bd.system_unattributed_usd )
+                      with
+                      | Some kp_usd, Some _ ->
+                          Printf.sprintf "%s %s"
+                            (Say.resolve lang (Say.make ~ko:"키퍼" ~en:"Kp"))
+                            (Format_val.format_value Format_val.Usd kp_usd)
+                      | Some _, None | None, (Some _ | None) ->
+                          fallback_meta ())
+                  | Runtime_store.Spend_keeper_turns_24h
+                  | Runtime_store.Spend_unreported ->
+                      fallback_meta ()
                 in
                 let rm_w =
                   Int.min (r2.w / 2) (Grapheme.display_width right_meta)
@@ -793,7 +848,7 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                 ~right_style:candle_st;
               if body_h >= 2 then
                 put_left_right grid ~clip:r1 ~y:r1.y ~left_text:wm_hero_str
-                  ~left_style:anchor_st ~right_text:"" ~right_style:struct_st;
+                  ~left_style:wm_hero_st ~right_text:"" ~right_style:struct_st;
               if body_h >= 3 then begin
                 let right_note, right_st =
                   if unattrib_n > 0 then
@@ -1061,7 +1116,17 @@ let live_failing_keepers_of_groups (groups : Wire_fleet.company_group list) =
     (fun (g : Wire_fleet.company_group) ->
       List.filter
         (fun (k : Wire_fleet.keeper_summary) ->
-          Health.is_live_fault (Fleet_store.keeper_live_state k))
+          match k.health with
+          | Wire_fleet.Keeper_failing -> true
+          | Wire_fleet.Keeper_healthy
+          | Wire_fleet.Keeper_working
+          | Wire_fleet.Keeper_idle
+          | Wire_fleet.Keeper_degraded
+          | Wire_fleet.Keeper_recovering
+          | Wire_fleet.Keeper_paused
+          | Wire_fleet.Keeper_offline
+          | Wire_fleet.Keeper_booting ->
+              false)
         g.keepers)
     groups
 
@@ -1095,11 +1160,23 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
            ~ko:(Printf.sprintf "%d개 자율 조직" (List.length groups))
            ~en:(Printf.sprintf "%d Autonomous Companies" (List.length groups)))
     in
+    let spend_bd = Runtime_store.spend_24h_breakdown model.runtime in
     let subtitle =
-      Say.resolve lang
-        (Say.make
-           ~ko:(Printf.sprintf "%d 키퍼" total_keepers)
-           ~en:(Printf.sprintf "%d Keepers" total_keepers))
+      match spend_bd.system_unattributed_usd with
+      | Some sys_usd ->
+          Say.resolve lang
+            (Say.make
+               ~ko:
+                 (Printf.sprintf "%d 키퍼 · 시스템 %s" total_keepers
+                    (Format_val.format_value Format_val.Usd sys_usd))
+               ~en:
+                 (Printf.sprintf "%d Keepers · Sys %s" total_keepers
+                    (Format_val.format_value Format_val.Usd sys_usd)))
+      | None ->
+          Say.resolve lang
+            (Say.make
+               ~ko:(Printf.sprintf "%d 키퍼" total_keepers)
+               ~en:(Printf.sprintf "%d Keepers" total_keepers))
     in
     let hotkey =
       Say.resolve lang
@@ -1324,13 +1401,13 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 (Cell_grid.put_text ~clip:row_r grid ~x:!x ~y:py ~style:name_st
                    (Grapheme.truncate_to_width ~max_width:name_w g.company));
               x := !x + name_w + 1;
-              let total_k = List.length g.keepers in
-              let act_s = Printf.sprintf "%d/%d" g.running_count total_k in
+              let hc = Fleet_store.fleet_health_counts g.keepers in
+              let act_s = Printf.sprintf "%d/%d" hc.active hc.total in
               let act_st =
-                if g.failing_count > 0 then
+                if hc.failing > 0 then
                   Typography.status ~bg:rbg ~bold:true theme
                     Theme.Status_attention
-                else if g.running_count > 0 then
+                else if hc.active > 0 then
                   Typography.status ~bg:rbg theme Theme.Status_ok
                 else Typography.whisper ~bg:rbg ~italic:false theme
               in
@@ -1353,11 +1430,10 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                     (Cell_grid.put_text ~clip:row_r grid ~x:!x ~y:py ~style:st s);
                   x := !x + 3
                 in
-                let ready_n = Int.max 0 (g.running_count - g.working_count) in
                 put_count g.attention_count attn_fg;
-                put_count g.working_count work_fg;
-                put_count ready_n ok_fg;
-                put_count g.failing_count crit_fg;
+                put_count (hc.working + hc.degraded) work_fg;
+                put_count hc.healthy ok_fg;
+                put_count hc.failing crit_fg;
                 x := !x + 2
               end;
               if show_spark then begin
@@ -2033,19 +2109,59 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         let row1 = Rect.make ~x:content.x ~y:mem_y ~w:content.w ~h:1 in
         let hero = Model.pulse_hero_metrics model in
         let unattrib = candle_unattributed_count model in
-        match Observed.to_option model.knowledge.world_memory with
-        | None ->
-            let fallback =
-              Say.resolve lang
-                (Say.make ~ko:"월드 기억 스냅샷 대기 중"
-                   ~en:"World Memory awaiting snapshot")
+        match model.knowledge.world_memory with
+        | Observed.Failed { reason; _ } ->
+            let err_st =
+              Typography.status ~bg ~bold:true theme Theme.Status_critical
+            in
+            let err_msg =
+              Printf.sprintf "%s %s: %s"
+                (Glyph.to_utf8 Glyph.Live_failing)
+                (Say.resolve lang
+                   (Say.make ~ko:"월드 기억 조회 실패" ~en:"World Memory failed"))
+                reason
             in
             let candle_s, candle_st =
               candle_hero_display ~lang ~theme ~bg ~model ~hero
             in
-            put_left_right grid ~clip:row1 ~y:mem_y ~left_text:fallback
+            put_left_right grid ~clip:row1 ~y:mem_y ~left_text:err_msg
+              ~left_style:err_st ~right_text:candle_s ~right_style:candle_st
+        | Observed.Loading _ ->
+            let loading_msg =
+              Printf.sprintf "%s %s"
+                (Glyph.to_utf8 Glyph.Transport_reconnecting)
+                (Say.resolve lang
+                   (Say.make ~ko:"월드 기억 스냅샷 불러오는 중…"
+                      ~en:"Loading World Memory snapshot…"))
+            in
+            let candle_s, candle_st =
+              candle_hero_display ~lang ~theme ~bg ~model ~hero
+            in
+            put_left_right grid ~clip:row1 ~y:mem_y ~left_text:loading_msg
               ~left_style:whisper_st ~right_text:candle_s ~right_style:candle_st
-        | Some wm ->
+        | Observed.Unreported | Observed.Absent ->
+            let unrep_msg =
+              match model.knowledge.world_memory with
+              | Observed.Unreported ->
+                  Printf.sprintf "%s %s"
+                    (Glyph.to_utf8 Glyph.Missing_unreported)
+                    (Say.resolve lang
+                       (Say.make ~ko:"월드 기억 미보고 (Legacy API)"
+                          ~en:"World Memory unreported (Legacy API)"))
+              | Observed.Absent | Observed.Loading _ | Observed.Failed _
+              | Observed.Value _ ->
+                  Printf.sprintf "%s %s"
+                    (Glyph.to_utf8 Glyph.Missing_absent)
+                    (Say.resolve lang
+                       (Say.make ~ko:"월드 기억 비어 있음"
+                          ~en:"World Memory empty"))
+            in
+            let candle_s, candle_st =
+              candle_hero_display ~lang ~theme ~bg ~model ~hero
+            in
+            put_left_right grid ~clip:row1 ~y:mem_y ~left_text:unrep_msg
+              ~left_style:whisper_st ~right_text:candle_s ~right_style:candle_st
+        | Observed.Value { data = wm; _ } ->
             let headline =
               match wm.briefing.text with
               | Some txt when not (String.equal (String.trim txt) "") -> (

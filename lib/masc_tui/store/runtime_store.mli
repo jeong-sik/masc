@@ -148,9 +148,37 @@ val effective_cache_hit_pct : t -> float Observed.t
 (** Authoritative 24h/fleet prompt cache hit % from [runtime_metrics],
     [models_metrics], or [efficiency] (first available reported value). *)
 
+type spend_24h_source =
+  | Spend_provider_24h
+  | Spend_keeper_turns_24h
+  | Spend_unreported
+
+type spend_24h_breakdown = {
+  source : spend_24h_source;
+  total_usd : float Observed.t;
+  provider_usd : float Observed.t;
+  keeper_attributed_usd : float Observed.t;
+  system_unattributed_usd : float option;
+}
+
+type spend_table_window =
+  | Spend_window_mtd of { month : string; days_covered : int }
+  | Spend_window_month_complete of { month : string; days_covered : int }
+  | Spend_window_24h of { window_minutes : int }
+  | Spend_window_none
+
 val effective_spend_24h_usd : t -> float Observed.t
 (** Authoritative 24h USD spend from [models_metrics], [runtime_metrics], or
     summed [keeper_costs]. *)
+
+val spend_24h_breakdown : t -> spend_24h_breakdown
+(** Typed 24h spend provenance separating provider-wide inference spend
+    ([/api/v1/models/metrics]) from keeper-turn attributed spend
+    ([/api/v1/dashboard/keeper-costs]) and the unattributed system delta. *)
+
+val keeper_spend_table_window : t -> spend_table_window
+(** Authoritative time-window provenance of {!keeper_spend_rows} so monthly MTD
+    ([/api/v1/keeper-efficiency]) is never mislabeled as 24h. *)
 
 val tool_series_totals : t -> (int * int * float option) option
 (** [(total_calls, total_failures, latest_or_max_p95_ms)] across the 24h tool

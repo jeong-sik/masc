@@ -1213,6 +1213,140 @@ let test_exit_line_fd_and_local_tz_offset () =
     (tz >= -43200 && tz <= 50400);
   Alcotest.(check int) "tz_offset_sec is whole minutes" 0 (tz mod 60)
 
+let test_p2_voice_runner_ffmpeg_and_afplay () =
+  (* 1. Recorder resolution order: rec -> sox -> ffmpeg *)
+  let find_only target name =
+    if String.equal name target then Some ("/usr/local/bin/" ^ name) else None
+  in
+  (match Voice_runner.resolve_recorder_from ~find:(find_only "ffmpeg") with
+  | Some (Voice_runner.Recorder_ffmpeg, "/usr/local/bin/ffmpeg") -> ()
+  | _ -> Alcotest.fail "expected ffmpeg fallback when rec/sox absent");
+  (match Voice_runner.resolve_recorder_from ~find:(find_only "rec") with
+  | Some (Voice_runner.Recorder_rec, "/usr/local/bin/rec") -> ()
+  | _ -> Alcotest.fail "expected rec when present");
+  (match Voice_runner.resolve_recorder_from ~find:(fun _ -> None) with
+  | None -> ()
+  | Some _ -> Alcotest.fail "expected None when no recorder on PATH");
+
+  (* 2. ffmpeg recording command args match avfoundation 16kHz mono wav *)
+  let argv_default =
+    Voice_runner.build_record_argv ~kind:Voice_runner.Recorder_ffmpeg
+      ~bin_path:"/opt/homebrew/bin/ffmpeg" ~device:None ~out_path:"/tmp/ptt.wav"
+  in
+  Alcotest.(check (array string)) "ffmpeg default avfoundation argv"
+    [|
+      "/opt/homebrew/bin/ffmpeg";
+      "-y";
+      "-loglevel";
+      "error";
+      "-f";
+      "avfoundation";
+      "-i";
+      ":default";
+      "-ar";
+      "16000";
+      "-ac";
+      "1";
+      "-f";
+      "wav";
+      "/tmp/ptt.wav";
+    |]
+    argv_default;
+  let argv_dev =
+    Voice_runner.build_record_argv ~kind:Voice_runner.Recorder_ffmpeg
+      ~bin_path:"/opt/homebrew/bin/ffmpeg" ~device:(Some ":1")
+      ~out_path:"/tmp/ptt2.wav"
+  in
+  Alcotest.(check string) "ffmpeg honors explicit device" ":1" argv_dev.(7);
+
+  (* 3. Audio player resolution for speak: closed sum afplay -> paplay -> aplay -> ffplay *)
+  (match
+     Voice_runner.resolve_audio_player_from
+       ~find:(fun n ->
+         if String.equal n "afplay" then Some "/usr/bin/afplay" else None)
+   with
+  | Some (Voice_runner.Player_afplay, "/usr/bin/afplay") -> ()
+  | _ -> Alcotest.fail "expected Player_afplay");
+  (match
+     Voice_runner.resolve_audio_player_from
+       ~find:(fun n ->
+         if String.equal n "paplay" then Some "/usr/bin/paplay" else None)
+   with
+  | Some (Voice_runner.Player_paplay, "/usr/bin/paplay") -> ()
+  | _ -> Alcotest.fail "expected Player_paplay");
+  (match Voice_runner.resolve_audio_player_from ~find:(fun _ -> None) with
+  | None -> ()
+  | Some _ -> Alcotest.fail "expected None when no player present");
+  Alcotest.(check (array string)) "afplay argv"
+    [| "/usr/bin/afplay"; "/tmp/reply.mp3" |]
+    (Voice_runner.build_player_argv ~player:Voice_runner.Player_afplay
+       ~bin_path:"/usr/bin/afplay" ~audio_path:"/tmp/reply.mp3");
+  Alcotest.(check (array string)) "ffplay argv"
+    [| "/usr/bin/ffplay"; "-nodisp"; "-autoexit"; "-loglevel"; "quiet"; "/tmp/reply.mp3" |]
+    (Voice_runner.build_player_argv ~player:Voice_runner.Player_ffplay
+       ~bin_path:"/usr/bin/ffplay" ~audio_path:"/tmp/reply.mp3");
+
+  (* 4. Honest /api/v1/voice/probe/tts outcome decoding (never fakes Ok () on refusal or no-audio probe) *)
+  let probe_answered_json =
+    Yojson.Safe.from_string
+      {|{"endpoints":[{"endpoint_id":"elevenlabs-1","kind":"elevenlabs","state":"answered","detail":"200 OK (4120 bytes)"}]}|}
+  in
+  (match Voice_runner.decode_tts_probe_outcome probe_answered_json with
+  | Ok (Voice_runner.Tts_probe_answered_no_audio { endpoint_id = "elevenlabs-1"; _ }) ->
+      ()
+  | _ -> Alcotest.fail "expected Tts_probe_answered_no_audio");
+  let probe_refused_json =
+    Yojson.Safe.from_string
+      {|{"endpoints":[{"endpoint_id":"elevenlabs-1","kind":"elevenlabs","state":"refused","detail":"missing api key"}]}|}
+  in
+  (match Voice_runner.decode_tts_probe_outcome probe_refused_json with
+  | Ok (Voice_runner.Tts_probe_failed msg) ->
+      Alcotest.(check bool) "refused reason preserved" true
+        (String.length msg > 0)
+  | _ -> Alcotest.fail "expected Tts_probe_failed on refused probe");
+  let probe_file_json =
+    Yojson.Safe.from_string {|{"audio_path":"/tmp/synth.wav"}|}
+  in
+  (match Voice_runner.decode_tts_probe_outcome probe_file_json with
+  | Ok (Voice_runner.Tts_audio_file "/tmp/synth.wav") -> ()
+  | _ -> Alcotest.fail "expected Tts_audio_file");
+
+  (* 5. P1-13 / P2-7d: Mouse capture OFF by default, no ?1002h hijack, guarded [m] toggle *)
+  Alcotest.(check bool) "mouse capture defaults OFF for native drag-select" false
+    App.default_mouse_capture;
+  Alcotest.(check string) "mouse ON enables ?1000h?1006h without ?1002h"
+    "\x1b[?1000h\x1b[?1006h" (App.mouse_capture_seq true);
+  Alcotest.(check string) "mouse OFF disables ?1000l?1002l?1006l"
+    "\x1b[?1000l\x1b[?1002l\x1b[?1006l" (App.mouse_capture_seq false);
+  let bare_m : Masc_tui_term.Input_decoder.key_event =
+    {
+      key = Masc_tui_term.Input_decoder.Char "m";
+      mods = Masc_tui_term.Input_decoder.no_mods;
+    }
+  in
+  let m_norm = Masc_tui_store.Model.initial ~cols:140 ~rows:40 () in
+  Alcotest.(check bool) "[m] toggles mouse on normal unfocused view" true
+    (App.should_toggle_mouse_capture m_norm bare_m);
+  let m_tiny = Masc_tui_store.Model.initial ~cols:30 ~rows:10 () in
+  Alcotest.(check bool) "[m] blocked on too-small viewport" false
+    (App.should_toggle_mouse_capture m_tiny bare_m);
+  let m_ov =
+    {
+      m_norm with
+      nav = { m_norm.nav with overlay = Some Masc_tui_core.Nav.Palette };
+    }
+  in
+  Alcotest.(check bool) "[m] blocked while overlay active" false
+    (App.should_toggle_mouse_capture m_ov bare_m);
+  let m_comp =
+    {
+      m_norm with
+      drafts = Masc_tui_store.Drafts.set_focus true m_norm.drafts;
+    }
+  in
+  Alcotest.(check bool) "[m] blocked while composer focused" false
+    (App.should_toggle_mouse_capture m_comp bare_m)
+
 let () =
   Alcotest.run "masc_tui_app"
     [
@@ -1266,5 +1400,7 @@ let () =
             `Quick test_app_ctrl_c_and_voice_tick_gate;
           Alcotest.test_case "caller stderr exit line & local tz offset" `Quick
             test_exit_line_fd_and_local_tz_offset;
+          Alcotest.test_case "P2-1 Voice_runner ffmpeg avfoundation argv & afplay lookup"
+            `Quick test_p2_voice_runner_ffmpeg_and_afplay;
         ] );
     ]

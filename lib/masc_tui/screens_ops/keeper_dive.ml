@@ -828,8 +828,11 @@ let render_empty_chat_context grid ~(rect : Rect.t) ~(theme : Theme.t)
       end;
       if !y < bot then begin
         Ops_common.draw_kv_row grid ~rect:spec_r ~y:!y ~theme ~bg ~label_w:12
-          ~key:(Ops_common.say model ~ko:"활동 · 캔들" ~en:"Activity · Candle")
-          ~value:(Printf.sprintf "%s turns  ·  %s" turns_s candle_s)
+          ~key:(Ops_common.say model ~ko:"누적 턴 · 캔들" ~en:"Total · Candle")
+          ~value:
+            (Printf.sprintf "%s %s  ·  %s" turns_s
+               (Ops_common.say model ~ko:"누적 턴" ~en:"total turns")
+               candle_s)
           ~val_fg:theme.status_ai ();
         incr y
       end;
@@ -879,8 +882,8 @@ let render_empty_chat_context grid ~(rect : Rect.t) ~(theme : Theme.t)
             ~ko:"\"최근 24시간 기억 변경 사항과 핵심 결정을 알려줘\""
             ~en:"\"What changed in your memory over the last 24h?\"";
           Ops_common.say model
-            ~ko:"\"/status  ·  [i] 메시지 입력  ·  [v] 음성 PTT\""
-            ~en:"\"/status  ·  [i] Compose message  ·  [v] Voice PTT\"";
+            ~ko:"\"/status  ·  [i] 메시지 입력  ·  [V] 음성 PTT\""
+            ~en:"\"/status  ·  [i] Compose message  ·  [V] Voice PTT\"";
         ]
       in
       List.iter
@@ -1026,7 +1029,7 @@ let draw_keeper_status_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
               ignore
                 (Ops_common.put_line ~clip:rect grid ~x:gx ~y:rect.y
                    ~max_w:ctx_block_w ~style:(Typography.whisper ~bg theme)
-                   "Ctx —  [v] PTT")
+                   "Ctx —  [V] PTT")
         end
 
 let stream_reply_already_persisted (hist_msgs : Wire_fleet.chat_message list)
@@ -2842,6 +2845,17 @@ let render_config_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
 
 (* --- Embedded Live Keeper Preview Header + 4-Metric Telemetry Strip --- *)
 
+let keeper_turns_24h_opt (k : Wire_fleet.keeper_summary) =
+  match k.activity_sparkline_24h with
+  | [] -> None
+  | slots ->
+      let sum =
+        List.fold_left
+          (fun acc v -> if Float.is_finite v && v > 0.0 then acc +. v else acc)
+          0.0 slots
+      in
+      Some (int_of_float (Float.round sum))
+
 let draw_embedded_preview_header grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~name (k : Wire_fleet.keeper_summary) =
   let bg = Color.of_rgb theme.surface_1 in
@@ -2876,10 +2890,18 @@ let draw_embedded_preview_header grid ~(rect : Rect.t) ~(theme : Theme.t)
         [ Layout.Flex 1; Layout.Flex 1; Layout.Flex 1; Layout.Flex 1 ]
     in
     let ctx_ratio_opt = Observed.to_option k.context_ratio in
-    let turns_s =
-      Format_val.format_observed Format_val.Count
-        (Observed.map Float.of_int k.total_turns)
-        ~lang:model.lang
+    let turns_label, turns_short, turns_s =
+      match keeper_turns_24h_opt k with
+      | Some n24 ->
+          ( Ops_common.say model ~ko:"24h 턴" ~en:"24h Turns"
+          , Ops_common.say model ~ko:"24h" ~en:"24h"
+          , Format_val.format_value Format_val.Count (Float.of_int n24) )
+      | None ->
+          ( Ops_common.say model ~ko:"누적 턴" ~en:"Total turns"
+          , Ops_common.say model ~ko:"누적" ~en:"Tot"
+          , Format_val.format_observed Format_val.Count
+              (Observed.map Float.of_int k.total_turns)
+              ~lang:model.lang )
     in
     let cost_s =
       Format_val.format_observed Format_val.Usd
@@ -2933,10 +2955,9 @@ let draw_embedded_preview_header grid ~(rect : Rect.t) ~(theme : Theme.t)
                          ~max_w:cr.w ~style:(Typography.whisper ~bg theme)
                          (Ops_common.say model ~ko:"미보고" ~en:"unreported")))
           | 1 ->
-              (* 24h Turns + mini sparkline *)
+              (* Honest 24h Turns (from 24h sparkline) or explicit Total turns *)
               Ops_common.draw_kpi_line grid ~rect:cr ~y:cr.y ~theme ~bg
-                ~label:(Ops_common.say model ~ko:"24h 턴" ~en:"Turns")
-                ~short_label:(Ops_common.say model ~ko:"턴" ~en:"Trn")
+                ~label:turns_label ~short_label:turns_short
                 ~value:turns_s ~val_style:(Typography.anchor ~bg theme);
               if cr.h >= 2 then
                 let samples = Ops_common.samples_of_floats k.activity_sparkline_24h in
@@ -2949,7 +2970,7 @@ let draw_embedded_preview_header grid ~(rect : Rect.t) ~(theme : Theme.t)
                   ignore
                     (Ops_common.put_line ~clip:cr grid ~x:cr.x ~y:(cr.y + 1)
                        ~max_w:cr.w ~style:(Typography.whisper ~bg theme)
-                       (Ops_common.say model ~ko:"24h 펄스" ~en:"24h pulse"))
+                       (Ops_common.say model ~ko:"누적 합계" ~en:"lifetime total"))
           | 2 ->
               (* 24h Cost *)
               Ops_common.draw_kpi_line grid ~rect:cr ~y:cr.y ~theme ~bg
@@ -3020,22 +3041,33 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
           (Glyph.to_utf8 Glyph.Prompt_caret)
           name
     in
+    let has_running_turn =
+      Option.is_some (Fleet_store.active_turn_for ~keeper:name model.fleet)
+      ||
+      match Fleet_store.String_map.find_opt name model.fleet.chat_streams with
+      | Some buf -> buf.active
+      | None -> false
+    in
     let hotkey =
       if embedded then
         Some
           (Ops_common.say model ~ko:"[Ctrl+T] 큐 · [z] 확대"
              ~en:"[Ctrl+T] Queue · [z] Zoom")
+      else if Nav.equal_keeper_tab tab Nav.Keeper_chat && has_running_turn then
+        Some
+          (Ops_common.say model ~ko:"[Esc/Ctrl+X] 턴 중단 · [y] 복사 · [ ] 탭"
+             ~en:"[Esc/Ctrl+X] Interrupt · [y] Copy · [ ] Tab")
       else
         Some
-          (Ops_common.say model ~ko:"[ ] 탭 · [Esc] 목록"
-             ~en:"[ ] Tab · [Esc] Fleet")
+          (Ops_common.say model ~ko:"[ ] 탭 · [y] 응답 복사 · [Esc] 목록"
+             ~en:"[ ] Tab · [y] Copy · [Esc] Fleet")
     in
     let footer_hint =
       if embedded then
         Some
           (Ops_common.say model
-             ~ko:"[Enter] Dive · [c] 바로 채팅 · [v] 음성 PTT"
-             ~en:"[Enter] Dive · [c] Quick Chat · [v] Voice PTT")
+             ~ko:"[Enter] Dive · [c] 바로 채팅 · [V] 음성 PTT"
+             ~en:"[Enter] Dive · [c] Quick Chat · [V] Voice PTT")
       else None
     in
     let card_spec : Card.spec =

@@ -54,6 +54,12 @@ module Scale : sig
     | Fixed_bounds of { floor : float; ceiling : float }
     | Auto_ceil of { floor : float; nice_step : bool }
     | Synced_pair
+    | Dual_independent of {
+        top_min : float;
+        top_max : float;
+        bot_min : float;
+        bot_max : float;
+      }
 
   val nice_ceiling : float -> float
   (** Round a positive ceiling up to a clean 1-2-5 step. *)

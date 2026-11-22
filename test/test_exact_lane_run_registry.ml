@@ -1554,8 +1554,9 @@ let test_startup_sweep_reports_partial_removal_without_conflating_units () =
      check int "two root entries examined" 2 counts.examined_root_entries;
      check int "one partially failed root entry" 1 counts.failed_root_entries;
      check int "no rmdir succeeded" 0 counts.removed_run_directories;
-     let actual_unlinks = if Sys.file_exists removable then 1 else 2 in
-     check int "successful unlinks survive the later error" actual_unlinks counts.unlinked_entries
+     (* remove_files_in no longer stops at the foreign directory: the regular
+        leaf is always unlinked beside it, deterministically. *)
+     check int "successful unlinks survive the later error" 2 counts.unlinked_entries
    | R.Not_attempted | R.Replay_not_trusted | R.Root_absent | R.Root_unavailable
    | R.Sweep_scope_failed _ ->
      fail "expected an observed sweep with partial failure");
@@ -1565,6 +1566,72 @@ let test_startup_sweep_reports_partial_removal_without_conflating_units () =
   Unix.rmdir blocker;
   Unix.rmdir orphan;
   Unix.rmdir root;
+  remove_if_exists path
+;;
+
+let test_foreign_directory_does_not_block_sibling_payload_removal () =
+  let path = fresh_log_path "exact-foreign-directory-sweep-" in
+  Fs_compat.save_file path "";
+  let root = Filename.concat (Filename.dirname path) R.payload_dirname in
+  Unix.mkdir root 0o700;
+  let orphan = Filename.concat root "orphan" in
+  Unix.mkdir orphan 0o700;
+  let input_leaf = Filename.concat orphan "input-0000000000000000000000000000000000000000000000000000000000000000.json" in
+  Fs_compat.save_file input_leaf "{}";
+  (* A foreign directory left behind by something outside the registry.
+     readdir order is unspecified, so the assertions are order-independent:
+     both regular leaves must survive the sweep beside it. *)
+  let foreign = Filename.concat orphan "foreign" in
+  Unix.mkdir foreign 0o700;
+  let output_leaf = Filename.concat orphan "output-0000000000000000000000000000000000000000000000000000000000000000.json" in
+  Fs_compat.save_file output_leaf "{}";
+  let replayed = R.replay path in
+  (match (R.startup_observation replayed).payload_sweep with
+   | R.Swept counts ->
+     check int "one root entry examined" 1 counts.examined_root_entries;
+     check int "both registry leaves unlinked" 2 counts.unlinked_entries;
+     check int "no rmdir succeeded" 0 counts.removed_run_directories;
+     check int "foreign entry counts as failed" 1 counts.failed_root_entries
+   | R.Not_attempted | R.Replay_not_trusted | R.Root_absent | R.Root_unavailable
+   | R.Sweep_scope_failed _ ->
+     fail "expected an observed sweep");
+  check bool "input leaf removed beside the foreign directory" false (Sys.file_exists input_leaf);
+  check bool "output leaf removed beside the foreign directory" false (Sys.file_exists output_leaf);
+  check bool "foreign directory remains" true (Sys.file_exists foreign);
+  Unix.rmdir foreign;
+  Unix.rmdir orphan;
+  Unix.rmdir root;
+  remove_if_exists path
+;;
+
+let test_retained_run_stale_leaf_is_removed_beside_foreign_directory () =
+  let path = fresh_log_path "exact-retained-stale-leaf-foreign-" in
+  let registry = R.create ~path () in
+  R.register_running registry ~run_id:"retained" ~lane:R.Librarian ~actor:"fixture"
+    ~started_at:1.0 ~input:(R.Exact_input (`String "original retained input"));
+  let run_dir = payload_run_dir path ~run_id:"retained" in
+  (* A stale leaf the store no longer references, plus a foreign directory.
+     The referenced input leaf is kept by name; the stale leaf is removed
+     beside the foreign directory; the foreign entry is reported, not
+     swallowed. *)
+  let stale = Filename.concat run_dir "stale-leaf.json" in
+  Fs_compat.save_file stale "{}";
+  let foreign = Filename.concat run_dir "foreign" in
+  Unix.mkdir foreign 0o700;
+  let replayed = R.replay path in
+  (match (R.startup_observation replayed).payload_sweep with
+   | R.Swept counts ->
+     check int "foreign entry counts as failed" 1 counts.failed_root_entries
+   | R.Not_attempted | R.Replay_not_trusted | R.Root_absent | R.Root_unavailable
+   | R.Sweep_scope_failed _ ->
+     fail "expected an observed sweep");
+  check bool "stale leaf removed beside the foreign directory" false (Sys.file_exists stale);
+  check bool "foreign directory remains" true (Sys.file_exists foreign);
+  let retained = R.get replayed ~run_id:"retained" |> Option.get in
+  check bool "actual referenced input remains readable" true
+    (retained.input_availability = R.Available);
+  remove_if_exists stale;
+  Unix.rmdir foreign;
   remove_if_exists path
 ;;
 
@@ -1808,6 +1875,10 @@ let () =
             test_startup_observation_is_immutable_and_distinguishes_absence
         ; test_case "startup sweep reports partial effects in separate units" `Quick
             test_startup_sweep_reports_partial_removal_without_conflating_units
+        ; test_case "foreign directory does not block sibling payload removal" `Quick
+            test_foreign_directory_does_not_block_sibling_payload_removal
+        ; test_case "retained run stale leaf is removed beside a foreign directory" `Quick
+            test_retained_run_stale_leaf_is_removed_beside_foreign_directory
         ; test_case "startup sweep reports unavailable root" `Quick
             test_startup_sweep_reports_unavailable_root
         ; test_case "durable exact evidence" `Quick test_round_trip_preserves_exact_evidence

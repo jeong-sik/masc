@@ -886,7 +886,7 @@ let failure_detail ~absorbed = function
      | Typesafeai_config.Lane_disabled | Typesafeai_config.Access_unpublished
      | Typesafeai_config.Host_account_not_shared | Typesafeai_config.No_armed_destination
      | Typesafeai_config.Board_attention_disabled | Typesafeai_config.Context_review_disabled
-     | Typesafeai_config.Skill_applicability_disabled | Typesafeai_config.Librarian_preflight_disabled
+     | Typesafeai_config.Skill_applicability_disabled
      | Typesafeai_config.Workspace_memory_selection_disabled
      | Typesafeai_config.Memory_recall_disabled ->
        Some ("enabled absorb judgment unavailable: " ^
@@ -1263,7 +1263,6 @@ let replay_authority_of_yojson (json : Yojson.Safe.t) : (replay_authority, strin
           | "board_attention_disabled" -> Typesafeai_config.Board_attention_disabled
           | "context_review_disabled" -> Typesafeai_config.Context_review_disabled
           | "skill_applicability_disabled" -> Typesafeai_config.Skill_applicability_disabled
-          | "librarian_preflight_disabled" -> Typesafeai_config.Librarian_preflight_disabled
           | "workspace_memory_selection_disabled" -> Typesafeai_config.Workspace_memory_selection_disabled
           | "memory_recall_disabled" -> Typesafeai_config.Memory_recall_disabled
           | "keeper_excluded" -> Typesafeai_config.Keeper_excluded
@@ -1295,7 +1294,7 @@ let restore_with ~missing ~guidance ~authority ~cited_observations ~facts ~new_c
         | Typesafeai_config.Lane_disabled | Typesafeai_config.Access_unpublished
         | Typesafeai_config.Host_account_not_shared | Typesafeai_config.No_armed_destination
         | Typesafeai_config.Board_attention_disabled | Typesafeai_config.Context_review_disabled
-        | Typesafeai_config.Skill_applicability_disabled | Typesafeai_config.Librarian_preflight_disabled
+        | Typesafeai_config.Skill_applicability_disabled
         | Typesafeai_config.Workspace_memory_selection_disabled
         | Typesafeai_config.Memory_recall_disabled -> [] in
       finish (Skipped { reason = Unavailable reason; absorbed = applied })
@@ -1637,7 +1636,6 @@ let run_resolved
          ((Typesafeai_config.Board_attention_disabled
           | Typesafeai_config.Context_review_disabled
           | Typesafeai_config.Skill_applicability_disabled
-          | Typesafeai_config.Librarian_preflight_disabled
           | Typesafeai_config.Workspace_memory_selection_disabled
           | Typesafeai_config.Memory_recall_disabled) as reason)
        ->

@@ -19,7 +19,6 @@ type unavailable_reason =
   | Board_attention_disabled  (** [\[typesafeai\] board_attention = false] *)
   | Context_review_disabled
   | Skill_applicability_disabled
-  | Librarian_preflight_disabled
   | Workspace_memory_selection_disabled
   | Memory_recall_disabled
       (** [\[typesafeai\] memory_recall = false], the default, or the keeper is
@@ -62,10 +61,6 @@ val absorb_gate_destinations : keeper_id:string -> (destinations, unavailable_re
     the keeper's exclusion. The lane defaults to on when a key is present; the
     absorb gate requires explicit opt-in because it sends the librarian's
     memories to the vendor. *)
-
-val librarian_preflight_destinations : keeper_id:string -> (destinations, unavailable_reason) result
-(** Explicit opt-in for no-change judgment. Keeper exclusions and lane
-    credentials still apply; disabled by default. *)
 
 val workspace_memory_selection_destinations :
   keeper_id:string -> (destinations, unavailable_reason) result

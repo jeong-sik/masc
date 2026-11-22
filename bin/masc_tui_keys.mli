@@ -487,8 +487,7 @@ val footer_hints_fusion_detail : lang:Masc_tui_types.ui_language -> string
     fitter gives up key items from the back, and a position is the one item
     on the row that [?] cannot recover. *)
 
-val footer_hints_lanes_run_detail_for :
-  lang:Masc_tui_types.ui_language -> preflight:bool -> string
+val footer_hints_lanes_run_detail_for : lang:Masc_tui_types.ui_language -> string
 (** The Lanes run-detail footer. The window the stacked Input/Output list drew
     travels the way the Fusion detail footer's does; the split panes name
     theirs in their own titles and pass none. *)

@@ -601,8 +601,6 @@ type typesafeai =
   ; absorb_gate : bool
   ; context_review : bool
   ; skill_applicability : bool
-  ; librarian_preflight : bool
-      (** Opt-in JEV no-change judgment for Memory-only passes. *)
   ; workspace_memory_selection_enabled : bool
       (** Independent opt-in to send current input/task context and shared-memory
           interpretations/source details for host retrieval. Defaults to false. *)

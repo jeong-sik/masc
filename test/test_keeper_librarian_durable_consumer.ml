@@ -5269,7 +5269,7 @@ let test_memory_count_cleanup_without_history () =
     incr calls;
     check int "no invented conversation for a count review" 0 (List.length input.messages);
     check bool "no queue context admitted" true
-      (Masc.Keeper_librarian_context.shows_no_working_context input.working_context);
+      (input.working_context.sources = [] && input.working_context.unavailable = []);
     check int "complete current facts supplied" 2
       (match input.current with Some current -> List.length current.facts | None -> 0);
     commit [] in

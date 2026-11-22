@@ -1306,12 +1306,13 @@ let test_volatile_message_floor ?native ~failure () =
   check int "every successful message has a recorded volatile outcome"
     (match failure with None -> 2 | Some _ -> 3) (List.length volatile_runs);
   List.iter (fun run ->
-    let decoded = Masc.Tui_decode.decode_lane_run_detail
-      (Exact_output_fixture.lane_run_detail run) |> get in
-    let reading = decoded.lrd_librarian_preflight |> some in
-    check bool "actual volatile run is readable as context-only" true (reading.lp_memory_scope = Masc.Tui_decode.Context_only_scope);
+    let output = U.member "output" (U.member "run" (Exact_output_fixture.lane_run_detail run)) in
+    check bool "actual volatile run is readable as context-only" true
+      (U.member "memory_write" output = `String "skipped_context_only"
+       && U.member "memory_inference" output = `Null);
     check bool "actual volatile run cannot claim continuity publication" true
-      (reading.lp_side_writes = [Masc.Tui_decode.Continuity_write, Masc.Tui_decode.Side_not_attempted]))
+      (U.member "status" (U.member "continuity_write" output) = `String "not_attempted"
+       && U.member "context_write" output = `Null))
     volatile_runs
 
 type context_hole_case =

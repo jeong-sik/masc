@@ -1,0 +1,5 @@
+(include_subdirs no)
+
+(test
+ (name test_keymap_ui)
+ (libraries masc_tui_core masc_tui_term masc_tui_keymap masc_tui_ui yojson alcotest))

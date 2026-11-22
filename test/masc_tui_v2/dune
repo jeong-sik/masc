@@ -1,0 +1,5 @@
+(include_subdirs no)
+
+(test
+ (name test_core_term)
+ (libraries masc_tui_core masc_tui_term unix threads alcotest))

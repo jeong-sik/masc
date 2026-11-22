@@ -361,6 +361,17 @@ val judge
   -> base_path:string
   -> (judged, judge_refusal) result
 
+(** Records a refused HTTP port announcement in the authoritative server log
+    and writes the same [[FATAL]] line directly to [stderr] with flush.
+
+    {!Console_sink.start} switches the console mirror to an asynchronous writer
+    thread before {!run} executes, and {!Console_sink} has no [at_exit] drain.
+    Writing directly to [stderr] (matching the [Out_of_memory]/[Stack_overflow]
+    convention in [bin/main_eio.ml]) guarantees that callers capturing fd 2
+    observe the refusal before an immediate [exit 1]. *)
+val report_port_announcement_refusal :
+  Server_startup_takeover.base_path_lock_rejection -> unit
+
 (** Runs what [judged] names. A single user gets the owner state and the
     routes of [make_routes]. An active multi-account installation gets
     {!Server_accounts.run} on the same [address] and [port], with its own

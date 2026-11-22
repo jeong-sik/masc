@@ -192,6 +192,41 @@ let test_bind_leaves_non_board_tools_alone () =
     (Yojson.Safe.to_string args)
     (Yojson.Safe.to_string bound)
 
+(* --- N2-B2: the Board-facing actor identity never carries an engine name --- *)
+
+(* The account work (N2-B2) asks that the Board-facing identity projection hide
+   which engine (vendor/model) runs a Keeper. Nothing in the projection emits
+   that field today, so the risk is a future field riding along unnoticed: this
+   case fails as soon as any key named [engine_name] or prefixed [engine_]
+   appears in the JSON the Board surfaces hand to a reader. *)
+
+let identity_json_keys raw =
+  match Masc.Server_utils.board_actor_identity_json raw with
+  | `Assoc fields -> List.sort String.compare (List.map fst fields)
+  | _ -> []
+
+(* The exact key set the projection is allowed to publish. A new field cannot
+   arrive without this list changing, so the check below fails on anything the
+   Board would newly learn about an author. *)
+let expected_identity_keys =
+  [ "display_name"; "id"; "key"; "kind"; "raw"; "source" ]
+
+let test_identity_json_hides_engine_name () =
+  List.iter
+    (fun raw ->
+      let keys = identity_json_keys raw in
+      check bool (Printf.sprintf "%s: no engine_name key" raw) false
+        (List.mem "engine_name" keys);
+      check bool (Printf.sprintf "%s: no engine_* key at all" raw) false
+        (List.exists
+           (fun key ->
+             String.length key >= 7 && String.sub key 0 7 = "engine_")
+           keys);
+      check (list string)
+        (Printf.sprintf "%s: the published key set is exactly the six" raw)
+        expected_identity_keys keys)
+    [ "xi-hammer"; "keeper:xi-hammer"; "delta"; "claude_code:delta" ]
+
 let () =
   run "board_author_identity_10297"
     [
@@ -220,5 +255,10 @@ let () =
             test_bind_covers_every_declared_field;
           test_case "a non-board tool is left alone" `Quick
             test_bind_leaves_non_board_tools_alone;
+        ] );
+      ( "engine-name-hidden",
+        [
+          test_case "the Board-facing identity carries no engine name" `Quick
+            test_identity_json_hides_engine_name;
         ] );
     ]

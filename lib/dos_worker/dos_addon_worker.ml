@@ -207,6 +207,7 @@ let create ~base_path () =
             | Ok None -> `Assoc ["kind", `String "missing"; "saves_name", `String saves_name]
             | Error message -> `Assoc ["kind", `String "invalid"; "message", `String message] in
       ["pad", value] in
+    let ints = if Tool_args.get_bool arguments "include_ints" false then [Machine.int_trail_field ()] else [] in
     (* [include_frame=false]: the invite list and the pad read need only the
        controller or the pad, so they skip the frame capture and PNG encode. *)
     if not (Tool_args.get_bool arguments "include_frame" true) then
@@ -214,7 +215,7 @@ let create ~base_path () =
       | Error error -> lane_failure error
       | Ok observation ->
           response (Machine.of_lane ~base_path ~tool_name ~start_time
-            ~extra:([Machine.core_field] @ pad observation) (Ok observation))
+            ~extra:([Machine.core_field] @ pad observation @ ints) (Ok observation))
     else
     match Machine.capture_png () with
     | Error (Machine.Lane error) -> lane_failure error
@@ -223,7 +224,7 @@ let create ~base_path () =
     | Ok {observation; width; height; png} ->
         response ~extra_content:[png_content png]
           (Machine.of_lane ~base_path ~tool_name ~start_time
-            ~extra:(Machine.png_fields ~width ~height ~png @ [Machine.core_field] @ pad observation) (Ok observation)) in
+            ~extra:(Machine.png_fields ~width ~height ~png @ [Machine.core_field] @ pad observation @ ints) (Ok observation)) in
   let schemas = schemas () in
   let server = Server.create ~name:"masc-dos-addon" ~version:Build_version.current () in
   let server = List.fold_left (fun server (tool, (schema : Masc_domain.tool_schema)) ->

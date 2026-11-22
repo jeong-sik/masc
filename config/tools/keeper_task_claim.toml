@@ -9,7 +9,6 @@ mention, board item, or keeper_tasks_list row identifies it; if that task \
 cannot be claimed (including awaiting_verification, which returns the typed \
 pending-verdict refusal), returns a typed rejection without claiming another \
 task."""
-additional_properties = false
 
 [[params]]
 name = "task_id"

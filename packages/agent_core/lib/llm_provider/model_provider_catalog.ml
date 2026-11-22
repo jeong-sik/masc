@@ -31,6 +31,7 @@ type entry =
   ; capability_policy : capability_policy
   ; supports_parallel_tool_suppression : bool
   ; supports_extended_cache_ttl : bool
+  ; supports_prompt_cache_retention : bool
   ; cache_session_wire : Capability_vocab.cache_session_wire
   ; cache_session_header : string option
   ; supports_provider_routing_filter : bool
@@ -116,6 +117,7 @@ let known_keys =
   ; "capabilities_base_by_identity_kind"
   ; "supports_parallel_tool_suppression"
   ; "supports_extended_cache_ttl"
+  ; "supports_prompt_cache_retention"
   ; "cache_session_wire"
   ; "cache_session_header"
   ; "supports_provider_routing_filter"
@@ -382,6 +384,15 @@ let parse_entry provider_toml =
       Error (Printf.sprintf
         "provider entry %S field \"supports_extended_cache_ttl\" expected bool" id)
   in
+  let* supports_prompt_cache_retention =
+    match Otoml.find_opt provider_toml Otoml.get_boolean
+            [ "supports_prompt_cache_retention" ] with
+    | Some supported -> Ok supported
+    | None -> Ok false
+    | exception Otoml.Type_error _ ->
+      Error (Printf.sprintf
+        "provider entry %S field \"supports_prompt_cache_retention\" expected bool" id)
+  in
   let* cache_session_wire =
     match exact_non_empty_string_field ~entry_id:id "cache_session_wire" provider_toml with
     | Error _ as e -> e
@@ -438,6 +449,7 @@ let parse_entry provider_toml =
     ; capability_policy
     ; supports_parallel_tool_suppression
     ; supports_extended_cache_ttl
+    ; supports_prompt_cache_retention
     ; cache_session_wire
     ; cache_session_header
     ; supports_provider_routing_filter

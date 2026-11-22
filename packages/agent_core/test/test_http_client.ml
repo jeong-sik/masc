@@ -1192,6 +1192,75 @@ let test_safe_cohttp_response_flow_multi_refill_large_payload () =
     (Buffer.contents buf)
 ;;
 
+let test_anthropic_rate_limit_headers_parsing () =
+  let empty = Http.Header.init () in
+  Alcotest.(check bool) "empty headers -> None" true
+    (Http_client.rate_limit_headers_of_response_headers empty = None);
+  let unrelated =
+    Http.Header.of_list [ "content-type", "application/json"; "retry-after", "5" ]
+  in
+  Alcotest.(check bool) "unrelated headers -> None" true
+    (Http_client.rate_limit_headers_of_response_headers unrelated = None);
+  let full =
+    Http.Header.of_list
+      [ "Anthropic-Ratelimit-Requests-Limit", " 1000 "
+      ; "anthropic-ratelimit-requests-remaining", "999"
+      ; "anthropic-ratelimit-requests-reset", " 2026-11-22T04:00:00Z "
+      ; "anthropic-ratelimit-input-tokens-limit", "400000"
+      ; "anthropic-ratelimit-input-tokens-remaining", "350000"
+      ; "anthropic-ratelimit-input-tokens-reset", "2026-11-22T04:00:01Z"
+      ; "anthropic-ratelimit-output-tokens-limit", "80000"
+      ; "anthropic-ratelimit-output-tokens-remaining", "75000"
+      ; "anthropic-ratelimit-output-tokens-reset", "2026-11-22T04:00:02Z"
+      ; "anthropic-ratelimit-tokens-limit", "480000"
+      ; "anthropic-ratelimit-tokens-remaining", "425000"
+      ; "anthropic-ratelimit-tokens-reset", "2026-11-22T04:00:03Z"
+      ]
+  in
+  (match Http_client.rate_limit_headers_of_response_headers full with
+   | None -> Alcotest.fail "expected Some rate_limit_headers"
+   | Some h ->
+     Alcotest.(check (option int)) "requests_limit" (Some 1000) h.requests_limit;
+     Alcotest.(check (option int)) "requests_remaining" (Some 999) h.requests_remaining;
+     Alcotest.(check (option string)) "requests_reset" (Some "2026-11-22T04:00:00Z") h.requests_reset;
+     Alcotest.(check (option int)) "input_tokens_limit" (Some 400000) h.input_tokens_limit;
+     Alcotest.(check (option int)) "input_tokens_remaining" (Some 350000) h.input_tokens_remaining;
+     Alcotest.(check (option string)) "input_tokens_reset" (Some "2026-11-22T04:00:01Z") h.input_tokens_reset;
+     Alcotest.(check (option int)) "output_tokens_limit" (Some 80000) h.output_tokens_limit;
+     Alcotest.(check (option int)) "output_tokens_remaining" (Some 75000) h.output_tokens_remaining;
+     Alcotest.(check (option string)) "output_tokens_reset" (Some "2026-11-22T04:00:02Z") h.output_tokens_reset;
+     Alcotest.(check (option int)) "tokens_limit" (Some 480000) h.tokens_limit;
+     Alcotest.(check (option int)) "tokens_remaining" (Some 425000) h.tokens_remaining;
+     Alcotest.(check (option string)) "tokens_reset" (Some "2026-11-22T04:00:03Z") h.tokens_reset);
+  let zero_remaining =
+    Http.Header.of_list [ "anthropic-ratelimit-tokens-remaining", "0" ]
+  in
+  (match Http_client.rate_limit_headers_of_response_headers zero_remaining with
+   | Some h ->
+     Alcotest.(check (option int)) "zero remaining preserved" (Some 0) h.tokens_remaining;
+     Alcotest.(check (option int)) "unset fields remain None" None h.requests_limit
+   | None -> Alcotest.fail "expected Some for single valid header");
+  let malformed =
+    Http.Header.of_list
+      [ "anthropic-ratelimit-requests-limit", "-5"
+      ; "anthropic-ratelimit-tokens-remaining", "not-an-int"
+      ; "anthropic-ratelimit-requests-reset", "   "
+      ]
+  in
+  Alcotest.(check bool) "all malformed/negative/blank headers -> None" true
+    (Http_client.rate_limit_headers_of_response_headers malformed = None);
+  let duplicate_reset =
+    Http.Header.of_list
+      [ "anthropic-ratelimit-requests-reset", "2026-11-22T04:00:00Z"
+      ; "anthropic-ratelimit-requests-reset", "2026-11-22T05:00:00Z"
+      ; "anthropic-ratelimit-requests-limit", "100"
+      ; "anthropic-ratelimit-requests-limit", "200"
+      ]
+  in
+  Alcotest.(check bool) "ambiguous duplicate rate-limit headers are rejected" true
+    (Http_client.rate_limit_headers_of_response_headers duplicate_reset = None)
+;;
+
 (* ── Test runner ────────────────────────────────── *)
 
 let () =
@@ -1358,6 +1427,12 @@ let () =
       , [ Alcotest.test_case "full roundtrip" `Quick test_error_domain_full_roundtrip
         ; Alcotest.test_case "retryable classification" `Quick test_error_domain_retryable
         ; Alcotest.test_case "error context" `Quick test_error_domain_context
+        ] )
+    ; ( "rate_limit_headers"
+      , [ Alcotest.test_case
+            "anthropic-ratelimit-* header parsing"
+            `Quick
+            test_anthropic_rate_limit_headers_parsing
         ] )
     ]
 ;;

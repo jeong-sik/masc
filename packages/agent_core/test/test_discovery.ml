@@ -91,6 +91,49 @@ let test_resolve_ollama_endpoint_reads_getenv () =
        ())
 ;;
 
+let test_resolve_ollama_endpoint_normalizes_bare_host_port () =
+  let resolve value =
+    Discovery.resolve_ollama_endpoint
+      ~getenv:(test_getenv [ Discovery.ollama_host_env_var, value ])
+      ()
+  in
+  Alcotest.(check string)
+    "bare host:port prepends http://"
+    "http://127.0.0.1:11434"
+    (resolve "127.0.0.1:11434");
+  Alcotest.(check string)
+    "wildcard 0.0.0.0:11434 normalizes to loopback IPv4"
+    "http://127.0.0.1:11434"
+    (resolve " 0.0.0.0:11434/ ");
+  Alcotest.(check string)
+    "wildcard 0.0.0.0 without port uses default Ollama port"
+    "http://127.0.0.1:11434"
+    (resolve "0.0.0.0");
+  Alcotest.(check string)
+    "IPv6 wildcard [::]:11434 normalizes to loopback IPv4"
+    "http://127.0.0.1:11434"
+    (resolve "[::]:11434");
+  Alcotest.(check string)
+    "port-only :11434 expands to loopback IPv4"
+    "http://127.0.0.1:11434"
+    (resolve ":11434");
+  Alcotest.(check string)
+    "localhost normalizes to loopback IPv4"
+    "http://127.0.0.1:11434"
+    (resolve "HTTP://localhost:11434/");
+  Alcotest.(check string)
+    "https scheme preserved"
+    "https://ollama.internal:11434"
+    (resolve "https://ollama.internal:11434/");
+  List.iter
+    (fun bad ->
+       Alcotest.(check string)
+         (Printf.sprintf "malformed OLLAMA_HOST %S falls back to default" bad)
+         Discovery.default_ollama_endpoint
+         (resolve bad))
+    [ "   "; "///"; "http://"; "https://"; "http:///"; ":0"; ":abc"; "ftp://127.0.0.1:11434" ]
+;;
+
 let test_fallback_endpoint_constants_ignore_env () =
   with_env Discovery.local_llm_url_env_var "http://127.0.0.1:19101" (fun () ->
     Alcotest.(check string)
@@ -513,6 +556,10 @@ let () =
             "resolve ollama endpoint from getenv"
             `Quick
             test_resolve_ollama_endpoint_reads_getenv
+        ; Alcotest.test_case
+            "resolve ollama endpoint normalizes bare host:port"
+            `Quick
+            test_resolve_ollama_endpoint_normalizes_bare_host_port
         ; Alcotest.test_case
             "fallback endpoint constants ignore env"
             `Quick

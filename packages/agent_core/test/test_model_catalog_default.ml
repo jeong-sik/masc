@@ -1660,11 +1660,119 @@ cache_session_header = %S
     ]
 ;;
 
+let test_vendor_docs_ssot_catalog_alignment () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"vendor docs SSOT alignment"
+  in
+  let snapshot =
+    Agent_core_test_deps.admit_catalogs ~models:(Some catalog) ~providers:None
+  in
+  with_clean_model_catalog_override (fun () ->
+    Llm_provider.Catalog_snapshot.publish snapshot;
+    (* Gemini 4 does not support explicit cachedContents; Gemini 3 does. *)
+    List.iter
+      (fun model_id ->
+         match Capabilities.for_model_id model_id with
+         | None -> failf "missing Gemini 4 catalog row %s" model_id
+         | Some caps ->
+           check bool (model_id ^ " opts out of explicit cachedContents") true
+             (caps.prompt_cache_wire = Capabilities.No_prompt_cache_wire))
+      [ "gemini-4-neon"; "gemini-4-hydrogen"; "gemini-4-carbon"; "gemini-4-argon" ];
+    (match Capabilities.for_model_id "gemini-3.8-flash" with
+     | None -> fail "missing gemini-3.8-flash catalog row"
+     | Some caps ->
+       check bool "gemini-3.8-flash keeps explicit cachedContents" true
+         (caps.prompt_cache_wire = Capabilities.Gemini_explicit_cached_content);
+       check (option int) "gemini-3.8-flash max_output_tokens is 65536" (Some 65_536)
+         caps.max_output_tokens);
+    (* kimi_coding_anthropic rows omit temperature and top_p on the wire. *)
+    List.iter
+      (fun model_id ->
+         match
+           Capabilities.for_provider_model_id
+             ~wire:None
+             ~provider:(Model_catalog.Declared_provider "kimi_coding_anthropic")
+             ~model_id
+         with
+         | None -> failf "missing kimi_coding_anthropic row %s" model_id
+         | Some caps ->
+           let dialect = Llm_provider.Reasoning_dialect.of_capabilities caps in
+           check bool (model_id ^ " ignores temperature") true
+             (Llm_provider.Reasoning_dialect.ignores_sampling_param
+                dialect ~enable_thinking:None Capabilities.Temperature);
+           check bool (model_id ^ " ignores top_p") true
+             (Llm_provider.Reasoning_dialect.ignores_sampling_param
+                dialect ~enable_thinking:None Capabilities.Top_p))
+      [ "kimi-for-coding"; "kimi-for-coding-highspeed"; "k3.1-pro"; "k3.1-pro-highspeed" ];
+    (* Reconciled bare model SSOT rows. *)
+    (match
+       Model_catalog.lookup catalog
+         (Llm_provider.Model_identifiers.Model_id.of_string_exn "kimi-for-coding")
+     with
+     | None -> fail "missing bare kimi-for-coding row"
+     | Some entry ->
+       check (option int) "bare kimi-for-coding context is 1M" (Some 1_048_576)
+         entry.max_context_tokens;
+       check (option int) "bare kimi-for-coding max_output_tokens is 131072" (Some 131_072)
+         entry.max_output_tokens);
+    (match
+       Model_catalog.lookup catalog
+         (Llm_provider.Model_identifiers.Model_id.of_string_exn "gpt-6.1-sol")
+     with
+     | None -> fail "missing bare gpt-6.1-sol row"
+     | Some entry ->
+       check (option int) "gpt-6.1-sol context is 500000" (Some 500_000)
+         entry.max_context_tokens);
+    List.iter
+      (fun model_id ->
+         match
+           Model_catalog.lookup catalog
+             (Llm_provider.Model_identifiers.Model_id.of_string_exn model_id)
+         with
+         | None -> failf "missing %s row" model_id
+         | Some entry ->
+           check (option (list string)) (model_id ^ " Ollama think efforts")
+             (Some [ "low"; "medium"; "high" ])
+             entry.accepted_reasoning_efforts)
+      [ "gpt-oss:20b"; "gpt-oss-120b"; "gpt-oss:120b" ];
+    (* Provider supports_prompt_cache_retention capability flag. *)
+    check bool "openai-responses supports prompt_cache_retention" true
+      (Llm_provider.Catalog_snapshot.supports_prompt_cache_retention
+         snapshot ~provider_id:"openai-responses");
+    List.iter
+      (fun provider_id ->
+         check bool (provider_id ^ " does not declare prompt_cache_retention") false
+           (Llm_provider.Catalog_snapshot.supports_prompt_cache_retention
+              snapshot ~provider_id))
+      [ "claude"; "openrouter"; "kimi_coding"; "gemini"; "ollama" ];
+    match
+      Model_catalog.of_toml_string ~source:"invalid prompt_cache_retention"
+        {|[[providers]]
+id = "bad-retention"
+kind = "openai_compat"
+base_url = "https://example.invalid"
+request_path = "/v1/responses"
+auth = "none"
+capabilities_base = "openai_chat"
+supports_prompt_cache_retention = "yes"
+|}
+    with
+    | Error msg ->
+      check string "non-bool supports_prompt_cache_retention fails closed"
+        "provider entry \"bad-retention\" field \"supports_prompt_cache_retention\" expected bool"
+        msg
+    | Ok _ -> fail "non-bool supports_prompt_cache_retention must fail closed")
+;;
+
 let () =
   run
     "model catalog default"
     [ ( "embedded catalog"
       , [ test_case "load_default" `Quick test_load_default_catalog
+        ; test_case
+            "vendor docs SSOT catalog alignment"
+            `Quick
+            test_vendor_docs_ssot_catalog_alignment
         ; test_case
             "anthropic rows price cache tokens"
             `Quick

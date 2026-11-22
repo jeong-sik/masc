@@ -1577,6 +1577,7 @@ let test_repo_runtime_toml_declares_no_clamped_max_context () =
             (Runtime_instance.resolve_max_context_of_runtime runtime
              |> Option.map (fun (n, source) -> n, Runtime_instance.max_context_source_to_string source)))
       [ "deepseek.deepseek-v4-flash", 1048576
+      ; "kimi_coding.kimi-for-coding", 1048576
       ; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash", 1048576
       ; "ollama_cloud.ollama-cloud-deepseek-v4-pro", 1048576
       ; "ollama_cloud.ollama-cloud-glm-5-2", 1048576
@@ -1903,7 +1904,7 @@ let catalog_decided_capability_pairs
    the seed got tidier. *)
 let seed_catalog_decided_capability_lines = 0
 
-let seed_models_whose_capabilities_the_catalog_decides = [ "glm-5-3"; "minimax-m3" ]
+let seed_models_whose_capabilities_the_catalog_decides = [ "glm-5-3-flash"; "minimax-m3" ]
 
 (* Prints every seed line that writes one of the twelve next to the value the
    runtime resolves, and fails when the two disagree. A disagreement is not a
@@ -2283,6 +2284,74 @@ let discover_boot_path_fixture_runtime_tomls () =
       let candidate = Filename.concat (Filename.concat root entry) "runtime.toml" in
       if Sys.file_exists candidate then Some ("scripts/fixtures/" ^ entry ^ "/runtime.toml", candidate)
       else None)
+;;
+
+let test_repo_runtime_toml_vendor_ssot_alignment () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  let cfg =
+    match Runtime_toml.parse_file path with
+    | Ok cfg -> cfg
+    | Error errors -> failf "repo runtime.toml parse failed: %s" (render_runtime_toml_errors errors)
+  in
+  let runtimes =
+    match load_list_text ~config_path:path with
+    | Ok (runtimes, _, _, _, _) -> runtimes
+    | Error msg -> failf "repo runtime.toml load failed: %s" msg
+  in
+  (match
+     List.find_opt
+       (fun (p : Runtime_schema.provider) -> String.equal p.id "ollama")
+       cfg.providers
+   with
+   | None -> fail "missing [providers.ollama] in config/runtime.toml"
+   | Some provider ->
+     (match provider.transport with
+      | Runtime_schema.Http endpoint ->
+        check string "Ollama seed uses IPv4 loopback SSOT (never localhost)"
+          "http://127.0.0.1:11434" endpoint
+      | Runtime_schema.Cli _ -> fail "expected HTTP transport for ollama"));
+  List.iter
+    (fun runtime_id ->
+       match find_runtime runtimes runtime_id with
+       | None -> failf "missing Ollama seed runtime %s" runtime_id
+       | Some runtime ->
+         check (option string) (runtime_id ^ " sets keep-alive = 30m") (Some "30m")
+           runtime.binding.keep_alive)
+    [ "ollama.gemma4-26b-a4b-qat"; "ollama.gemma4-e2b-it-qat" ];
+  (match find_runtime runtimes "glm-coding.glm-5-3" with
+   | None -> fail "missing glm-coding.glm-5-3 in seed"
+   | Some runtime ->
+     check bool "glm-5-3 drops contradictory seed capabilities override" true
+       (Option.is_none runtime.model.capabilities);
+     match
+       Llm_provider.Provider_config.capabilities_for_config_model
+         (agent_core_provider_config runtime)
+     with
+     | Some caps ->
+       check (option int) "glm-5-3 resolves catalog max_output_tokens = 131072"
+         (Some 131072) caps.max_output_tokens
+     | None -> fail "expected glm-5-3 resolved capabilities");
+  List.iter
+    (fun (model_id, expected_ctx) ->
+       match
+         List.find_opt
+           (fun (m : Runtime_schema.model_spec) -> String.equal m.id model_id)
+           cfg.models
+       with
+       | None -> failf "missing Codex seed model %s" model_id
+       | Some model ->
+         check (option int) (model_id ^ " max-context matches models.toml")
+           (Some expected_ctx) model.max_context)
+    [ "codex-gpt-5-6", 1050000
+    ; "codex-gpt-6-sol-high", 1050000
+    ; "codex-gpt-6-luna-high", 1050000
+    ; "codex-gpt-5-6-sol-high", 1050000
+    ; "codex-gpt-5-6-terra-high", 1050000
+    ; "codex-gpt-5-6-luna-high", 1050000
+    ; "codex-gpt-5-5-high", 1050000
+    ; "codex-gpt-6-1-sol-high", 500000
+    ]
 ;;
 
 let test_repo_runtime_toml_declares_mandatory_exact_output_lanes () =
@@ -8218,6 +8287,8 @@ let () =
             test_model_rejects_unknown_key;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
+          test_case "repo runtime.toml vendor SSOT alignment" `Quick
+            test_repo_runtime_toml_vendor_ssot_alignment;
           test_case "seed Codex profiles preserve advertised efforts" `Quick
             test_seed_codex_profiles_preserve_advertised_efforts;
           test_case "seed capability keys the catalog row decides agree with it" `Quick

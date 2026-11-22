@@ -4864,6 +4864,124 @@ let test_openai_responses_mixed_reference_image_falls_back_to_text () =
     (Yojson.Safe.Util.to_string output)
 ;;
 
+let test_responses_prompt_cache_retention_store_and_truncation () =
+  let messages = [ msg User [ Text "hello" ] ] in
+  (* Legacy pre-5.6 model (gpt-5.5, supports_explicit_cache_opt_out = false)
+     cleanly emits prompt_cache_retention ("in_memory" | "24h"), store, and
+     truncation with no conflicting prompt_cache_options. *)
+  let legacy_default_cfg =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~provider_id:"openai-responses"
+      ~model_id:"gpt-5.5"
+      ~base_url:"https://api.openai.com/v1"
+      ~request_path:"/responses"
+      ()
+  in
+  let default_json =
+    Responses.build_request ~config:legacy_default_cfg ~messages () |> Yojson.Safe.from_string
+  in
+  check_bool "omitted prompt_cache_retention absent" true
+    (member "prompt_cache_retention" default_json = `Null);
+  check_bool "omitted store absent" true (member "store" default_json = `Null);
+  check_bool "omitted truncation absent" true (member "truncation" default_json = `Null);
+  let stateless_cfg =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~provider_id:"openai-responses"
+      ~model_id:"gpt-5.5"
+      ~base_url:"https://api.openai.com/v1"
+      ~request_path:"/responses"
+      ~prompt_cache_retention:Provider_config.Prompt_cache_in_memory
+      ~store:false
+      ~truncation:Provider_config.Truncation_disabled
+      ()
+  in
+  let stateless_json =
+    Responses.build_request ~config:stateless_cfg ~messages () |> Yojson.Safe.from_string
+  in
+  check_string "in_memory retention serialized on gpt-5.5" "in_memory"
+    (member "prompt_cache_retention" stateless_json |> to_string);
+  check_bool "legacy gpt-5.5 emits no conflicting prompt_cache_options" true
+    (member "prompt_cache_options" stateless_json = `Null);
+  check_bool "store=false serialized" false
+    (Yojson.Safe.Util.(member "store" stateless_json |> to_bool));
+  check_string "truncation=disabled serialized" "disabled"
+    (member "truncation" stateless_json |> to_string);
+  let extended_cfg =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~provider_id:"openai-responses"
+      ~model_id:"gpt-5.5"
+      ~base_url:"https://api.openai.com/v1"
+      ~request_path:"/responses"
+      ~prompt_cache_retention:Provider_config.Prompt_cache_24h
+      ~store:true
+      ~truncation:Provider_config.Truncation_auto
+      ()
+  in
+  let extended_json =
+    Responses.build_request ~config:extended_cfg ~messages () |> Yojson.Safe.from_string
+  in
+  check_string "24h retention serialized on gpt-5.5" "24h"
+    (member "prompt_cache_retention" extended_json |> to_string);
+  check_bool "store=true serialized" true
+    (Yojson.Safe.Util.(member "store" extended_json |> to_bool));
+  check_string "truncation=auto serialized" "auto"
+    (member "truncation" extended_json |> to_string);
+  (* GPT-5.6+ / GPT-6 models (supports_explicit_cache_opt_out = true) use
+     prompt_cache_options and must refuse legacy prompt_cache_retention
+     fail-closed, while still accepting store and truncation. *)
+  let gpt6_store_cfg =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~provider_id:"openai-responses"
+      ~model_id:"gpt-6-sol"
+      ~base_url:"https://api.openai.com/v1"
+      ~request_path:"/responses"
+      ~store:false
+      ~truncation:Provider_config.Truncation_disabled
+      ()
+  in
+  let gpt6_json =
+    Responses.build_request ~config:gpt6_store_cfg ~messages () |> Yojson.Safe.from_string
+  in
+  check_bool "gpt-6-sol accepts store=false" false
+    (Yojson.Safe.Util.(member "store" gpt6_json |> to_bool));
+  check_string "gpt-6-sol accepts truncation=disabled" "disabled"
+    (member "truncation" gpt6_json |> to_string);
+  List.iter
+    (fun retention ->
+       let cfg =
+         Provider_config.make
+           ~kind:OpenAI_compat
+           ~provider_id:"openai-responses"
+           ~model_id:"gpt-6-sol"
+           ~base_url:"https://api.openai.com/v1"
+           ~request_path:"/responses"
+           ~prompt_cache_retention:retention
+           ()
+       in
+       expect_invalid_arg
+         ("gpt-6-sol rejects legacy prompt_cache_retention="
+          ^ Provider_config.prompt_cache_retention_to_string retention)
+         (fun () -> Responses.build_request ~config:cfg ~messages ()))
+    [ Provider_config.Prompt_cache_in_memory; Provider_config.Prompt_cache_24h ];
+  check_bool "prompt_cache_retention_of_string roundtrip" true
+    (Provider_config.prompt_cache_retention_of_string "in_memory"
+     = Some Provider_config.Prompt_cache_in_memory
+     && Provider_config.prompt_cache_retention_of_string "24h"
+        = Some Provider_config.Prompt_cache_24h
+     && Provider_config.prompt_cache_retention_of_string "1h" = None
+     && Provider_config.prompt_cache_retention_of_string "5m" = None);
+  check_bool "responses_truncation_of_string roundtrip" true
+    (Provider_config.responses_truncation_of_string "auto"
+     = Some Provider_config.Truncation_auto
+     && Provider_config.responses_truncation_of_string "disabled"
+        = Some Provider_config.Truncation_disabled
+     && Provider_config.responses_truncation_of_string "truncate" = None)
+;;
+
 let () =
   Alcotest.run
     "backend_openai_codec"
@@ -5161,6 +5279,10 @@ let () =
             "top-level unsupported schema keywords are dropped"
             `Quick
             test_top_level_unsupported_keywords_are_dropped
+        ; Alcotest.test_case
+            "build request emits prompt_cache_retention, store, and truncation"
+            `Quick
+            test_responses_prompt_cache_retention_store_and_truncation
         ] )
     ]
 ;;

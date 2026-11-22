@@ -81,8 +81,96 @@ end
 (** {1 Local MODEL Server Configuration} *)
 
 module Ollama = struct
-  let server_url =
-    get_string ~default:Masc_network_defaults.ollama_default_url "OLLAMA_SERVER_URL"
+  let host_env_var = "OLLAMA_HOST"
+
+  let has_scheme_separator s =
+    let len = String.length s in
+    let rec loop i =
+      if i + 2 >= len
+      then false
+      else if s.[i] = ':' && s.[i + 1] = '/' && s.[i + 2] = '/'
+      then true
+      else loop (i + 1)
+    in
+    loop 0
+  ;;
+
+  let parse_port_only raw =
+    let port_str =
+      String.sub raw 1 (String.length raw - 1)
+      |> Masc_network_defaults.trim_trailing_slashes
+    in
+    match int_of_string_opt port_str with
+    | Some port
+      when port >= 1 && port <= 65535 && String.equal (string_of_int port) port_str ->
+      Some port
+    | Some _ | None -> None
+  ;;
+
+  let normalize_host_url raw =
+    let trimmed = String.trim raw in
+    if trimmed = ""
+    then None
+    else (
+      let lower = String.lowercase_ascii trimmed in
+      let has_http_scheme =
+        String.starts_with ~prefix:"http://" lower
+        || String.starts_with ~prefix:"https://" lower
+      in
+      if (not has_http_scheme) && has_scheme_separator trimmed
+      then None
+      else if (not has_http_scheme) && String.starts_with ~prefix:":" trimmed
+      then
+        Option.map
+          (fun port ->
+             Printf.sprintf "http://%s:%d" Masc_network_defaults.masc_http_default_host port)
+          (parse_port_only trimmed)
+      else (
+        let candidate =
+          if has_http_scheme
+          then trimmed
+          else (
+            let bare = Masc_network_defaults.trim_trailing_slashes trimmed in
+            if bare = "" then "" else "http://" ^ bare)
+        in
+        if candidate = ""
+        then None
+        else (
+          let uri = Uri.of_string candidate in
+          match Uri.host uri with
+          | None -> None
+          | Some host when String.trim host = "" -> None
+          | Some host ->
+            let uri =
+              Uri.with_scheme uri (Option.map String.lowercase_ascii (Uri.scheme uri))
+            in
+            let uri =
+              if (not has_http_scheme) && Option.is_none (Uri.port uri)
+              then
+                Uri.with_port
+                  uri
+                  (Uri.port (Uri.of_string Masc_network_defaults.ollama_default_url))
+              else uri
+            in
+            let normalized_host = Masc_network_defaults.normalize_advertised_host host in
+            let uri =
+              if String.equal normalized_host host
+              then uri
+              else Uri.with_host uri (Some normalized_host)
+            in
+            Some (Uri.to_string uri |> Masc_network_defaults.trim_trailing_slashes))))
+  ;;
+
+  let resolve_server_url ?(getenv = Sys.getenv_opt) () =
+    match getenv host_env_var with
+    | Some raw ->
+      Option.value
+        ~default:Masc_network_defaults.ollama_default_url
+        (normalize_host_url raw)
+    | None -> Masc_network_defaults.ollama_default_url
+  ;;
+
+  let server_url = resolve_server_url ()
 
   let default_model =
     get_string ~default:"" "OLLAMA_DEFAULT_MODEL"

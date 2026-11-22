@@ -71,6 +71,21 @@ type capabilities =
 val connect_timeout_s_key : string
 val exact_body_timeout_s_key : string
 val admission_priority_run_limit_key : string
+val store_key : string
+val truncation_key : string
+val explicit_context_cache_ttl_s_key : string
+
+(** OpenAI Responses API [truncation] policy re-exported from AGENT_CORE so
+    variant changes remain compiler-checked.
+    Ref: https://developers.openai.com/api/reference/cli/resources/responses/methods/create *)
+type responses_truncation =
+  Llm_provider.Provider_config.responses_truncation =
+  | Truncation_auto
+  | Truncation_disabled
+[@@deriving show, eq]
+
+val responses_truncation_to_string : responses_truncation -> string
+val responses_truncation_of_string : string -> responses_truncation option
 
 type antigravity_effort =
   | Antigravity_low
@@ -199,6 +214,20 @@ type provider =
     (** Present exactly when [protocol = "acp"]. *)
   ; usage_read : usage_read option
     (** [providers.<id>.usage-read]; [None] when not declared. *)
+  ; store : bool option
+    (** [providers.<id>.store] — OpenAI Responses API server-side persistence
+        flag ([false] for stateless ZDR workflows). Valid only on Responses API
+        providers; refused on all other protocols. *)
+  ; truncation : responses_truncation option
+    (** [providers.<id>.truncation] — OpenAI Responses API server-side
+        truncation policy (["auto"] | ["disabled"]). Valid only on Responses
+        API providers; refused on all other protocols. *)
+  ; explicit_context_cache_ttl_s : int option
+    (** [providers.<id>.explicit-context-cache-ttl-s] — positive TTL in seconds
+        for Gemini/Vertex explicit [cachedContents] resources. Valid only on
+        Gemini/Vertex providers; models whose catalog row declares
+        [prompt_cache_wire = No_prompt_cache_wire] (such as Gemini 4) stay
+        implicit-only. *)
   }
 [@@deriving show, eq]
 
@@ -332,6 +361,11 @@ type model_spec =
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
        [@equal fun a b -> a = b]
   ; turn_timeout_s : float option
+  ; explicit_context_cache_ttl_s : int option
+    (** [models.<id>.explicit-context-cache-ttl-s] — positive TTL in seconds for
+        Gemini/Vertex explicit [cachedContents] resources, overriding the
+        provider setting. Refused on non-Gemini protocols or models that do not
+        declare [Gemini_explicit_cached_content] (such as Gemini 4). *)
   ; capabilities : model_capabilities option
   }
 [@@deriving show, eq]
@@ -346,14 +380,18 @@ val thinking_request : model_spec -> bool option
 (** How long the provider keeps the request prefix it caches, declared as a
     binding's [cache-retention]. *)
 type cache_retention =
-  | Five_minutes  (** ["5m"]: the provider's default lifetime, declared. *)
+  | Five_minutes  (** ["5m"]: the provider's default lifetime (Anthropic/Kimi/OpenRouter). *)
   | One_hour
-      (** ["1h"]: every cache write is priced above a five-minute one, and a
-          prefix stays readable across pauses of up to an hour. *)
+      (** ["1h"]: one-hour lifetime (Anthropic/Kimi/OpenRouter); every cache
+          write is priced above a five-minute one. *)
+  | In_memory
+      (** ["in_memory"]: OpenAI Responses API in-memory prompt cache retention. *)
+  | Twenty_four_hours
+      (** ["24h"]: OpenAI Responses API extended 24-hour prompt cache retention. *)
 [@@deriving show, eq]
 
 val cache_retention_to_string : cache_retention -> string
-(** The declared spelling: ["5m"] or ["1h"]. *)
+(** The declared spelling: ["5m"], ["1h"], ["in_memory"], or ["24h"]. *)
 
 val cache_retention_of_string : string -> cache_retention option
 (** [None] for any other spelling. *)

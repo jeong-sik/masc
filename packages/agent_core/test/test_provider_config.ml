@@ -3329,6 +3329,80 @@ let test_glm_and_kimi_session_routing_affinity () =
       ])
 ;;
 
+let test_ollama_think_effort_strings_and_precedence () =
+  with_repository_model_catalog (fun () ->
+    let messages = [ Types.text_message Types.User "hello" ] in
+    let make ?(model_id = "gpt-oss:20b") ?model_capabilities_override ?enable_thinking
+        ?reasoning_effort () =
+      Provider_config.make
+        ~kind:Ollama
+        ~model_id
+        ~base_url:"http://127.0.0.1:11434"
+        ?model_capabilities_override
+        ?enable_thinking
+        ?reasoning_effort
+        ()
+    in
+    let think_of cfg =
+      Backend_ollama.build_request ~config:cfg ~messages ()
+      |> Yojson.Safe.from_string
+      |> Yojson.Safe.Util.member "think"
+    in
+    let expect_refused label cfg =
+      match think_of cfg with
+      | _ -> Alcotest.failf "%s must fail closed" label
+      | exception Invalid_argument _ -> ()
+    in
+    check_bool "omitted thinking leaves think absent" true (think_of (make ()) = `Null);
+    check_bool "enable_thinking=true without effort emits bool true" true
+      (think_of (make ~enable_thinking:true ()) = `Bool true);
+    check_bool "enable_thinking=false with accepted effort emits bool false" true
+      (think_of (make ~enable_thinking:false ~reasoning_effort:Reasoning_effort.High ())
+       = `Bool false);
+    List.iter
+      (fun (effort, wire) ->
+         check_bool ("effort " ^ wire ^ " without enable_thinking emits string") true
+           (think_of (make ~reasoning_effort:effort ()) = `String wire);
+         check_bool ("effort " ^ wire ^ " with enable_thinking=true emits string") true
+           (think_of (make ~enable_thinking:true ~reasoning_effort:effort ()) = `String wire))
+      [ Reasoning_effort.Low, "low"
+      ; Reasoning_effort.Medium, "medium"
+      ; Reasoning_effort.High, "high"
+      ];
+    (* gpt-oss:20b declares ["low"; "medium"; "high"] (no "none"), so None_ and
+       higher rungs fail closed even when enable_thinking = Some false. *)
+    List.iter
+      (fun effort ->
+         let label = Reasoning_effort.to_string effort in
+         expect_refused ("gpt-oss:20b effort " ^ label) (make ~reasoning_effort:effort ());
+         expect_refused ("gpt-oss:20b enable_thinking=false + effort " ^ label)
+           (make ~enable_thinking:false ~reasoning_effort:effort ()))
+      [ Reasoning_effort.None_; Minimal; XHigh; Max; Ultra ];
+    (* Boolean-only Ollama model (accepted_reasoning_efforts = None) rejects
+       effort strings while preserving boolean think control. *)
+    check_bool "boolean-only model accepts enable_thinking=true" true
+      (think_of (make ~model_id:"gemma4:31b" ~enable_thinking:true ()) = `Bool true);
+    check_bool "boolean-only model accepts enable_thinking=false" true
+      (think_of (make ~model_id:"gemma4:31b" ~enable_thinking:false ()) = `Bool false);
+    expect_refused "boolean-only model rejects reasoning_effort=Low"
+      (make ~model_id:"gemma4:31b" ~reasoning_effort:Reasoning_effort.Low ());
+    (* A model explicitly declaring None_ in accepted_reasoning_efforts maps
+       None_ -> "think": false. *)
+    let caps_with_none =
+      { Capabilities.ollama_capabilities with
+        accepted_reasoning_efforts =
+          Some [ Reasoning_effort.None_; Low; Medium; High ]
+      }
+    in
+    check_bool "explicitly accepted effort none maps to bool false" true
+      (think_of
+         (make
+            ~model_capabilities_override:caps_with_none
+            ~reasoning_effort:Reasoning_effort.None_
+            ())
+       = `Bool false))
+;;
+
 let () =
   Alcotest.run
     "provider_config"
@@ -3822,6 +3896,12 @@ let () =
             "reported model remains distinct from configured fallback"
             `Quick
             test_reported_model_survives_normalization_without_inventing_missing_evidence
+        ] )
+    ; ( "ollama_think"
+      , [ Alcotest.test_case
+            "effort strings, boolean fallback, and fail-closed validation"
+            `Quick
+            test_ollama_think_effort_strings_and_precedence
         ] )
     ]
 ;;

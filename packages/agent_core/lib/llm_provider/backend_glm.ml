@@ -97,6 +97,30 @@ let classify_glm_error ~code : glm_error_class option =
   | _unknown_code -> None
 ;;
 
+let is_quota_code code =
+  match classify_glm_error ~code with
+  | Some Glm_quota_exceeded -> true
+  | Some
+      ( Glm_rate_limited
+      | Glm_auth_error
+      | Glm_server_error
+      | Glm_invalid_request
+      | Glm_context_overflow )
+  | None -> false
+;;
+
+let is_context_overflow_code code =
+  match classify_glm_error ~code with
+  | Some Glm_context_overflow -> true
+  | Some
+      ( Glm_quota_exceeded
+      | Glm_rate_limited
+      | Glm_auth_error
+      | Glm_server_error
+      | Glm_invalid_request )
+  | None -> false
+;;
+
 let http_code_of_glm_error_class = function
   | Glm_quota_exceeded -> 429
   | Glm_rate_limited -> 429

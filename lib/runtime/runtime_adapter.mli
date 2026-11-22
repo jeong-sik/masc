@@ -129,9 +129,23 @@ val materialize_provider_binding
     whose catalog provider row declares [supports_extended_cache_ttl], or a
     Chat Completions runtime whose catalog provider row declares
     [supports_extended_cache_ttl] and whose catalog model row declares
-    [prompt_cache_wire = Openrouter_top_level_cache_control], carries it as
-    [Provider_config.cache_extended_ttl]; every other runtime refuses a
-    declared value.
+    [prompt_cache_wire = Openrouter_top_level_cache_control | Kimi_prompt_cache_options],
+    carries ["5m"] / ["1h"] as [Provider_config.cache_extended_ttl]. An OpenAI
+    Responses runtime whose catalog provider row declares
+    [supports_prompt_cache_retention] carries ["in_memory"] / ["24h"] as
+    [Provider_config.prompt_cache_retention] only for pre-5.6 models without
+    [supports_explicit_cache_opt_out] (models that declare
+    [supports_explicit_cache_opt_out] use [prompt_cache_options] instead and
+    fail closed on legacy [prompt_cache_retention]). Every other combination
+    fails closed.
+
+    OpenAI Responses [store] and [truncation] on [provider] are accepted only
+    on Responses API targets. Gemini/Vertex [explicit-context-cache-ttl-s] on
+    [provider] or [model] is wired to
+    [Provider_config.explicit_context_cache_ttl_s] only when the resolved
+    model declares [Gemini_explicit_cached_content]; non-Gemini protocols and
+    explicit model-level declarations on unsupported models (such as Gemini 4)
+    fail closed.
 
     The binding's [provider_only] and [provider_ignore] lists are request
     policy too. Only a Chat Completions runtime whose catalog provider row

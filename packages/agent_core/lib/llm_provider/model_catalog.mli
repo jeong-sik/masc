@@ -109,6 +109,7 @@ type provider_entry = Model_provider_catalog.entry =
   ; capability_policy : Model_provider_catalog.capability_policy
   ; supports_parallel_tool_suppression : bool
   ; supports_extended_cache_ttl : bool
+  ; supports_prompt_cache_retention : bool
   ; cache_session_wire : Capability_vocab.cache_session_wire
   ; cache_session_header : string option
   ; supports_provider_routing_filter : bool

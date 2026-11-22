@@ -280,7 +280,7 @@ refresh-s = 600.0
 [providers.ollama]
 display-name = "Local Ollama"
 protocol = "ollama-http"
-endpoint = "http://localhost:11434"
+endpoint = "http://127.0.0.1:11434"
 # Setup can point the exact-output lanes at this provider. Without this key
 # such a slot is left out at boot and reported, and a save adding one is
 # refused (#38779).
@@ -491,7 +491,7 @@ is-non-interactive = true
 
 [models.codex-gpt-5-6]
 api-name = "gpt-5.6-sol"
-max-context = 272000
+max-context = 1050000
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -531,7 +531,7 @@ supports-image-input = true
 
 [models.codex-gpt-6-sol]
 api-name = "gpt-6-sol"
-max-context = 272000
+max-context = 1050000
 tools-support = true
 streaming = true
 efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
@@ -541,7 +541,7 @@ supports-image-input = true
 
 [models.codex-gpt-6-luna]
 api-name = "gpt-6-luna"
-max-context = 272000
+max-context = 1050000
 tools-support = true
 streaming = true
 efforts = ["low", "medium", "high", "xhigh", "max"]
@@ -551,7 +551,7 @@ supports-image-input = true
 
 [models.codex-gpt-5-6-sol]
 api-name = "gpt-5.6-sol"
-max-context = 272000
+max-context = 1050000
 tools-support = true
 streaming = true
 efforts = ["medium", "high", "xhigh", "max", "ultra"]
@@ -561,7 +561,7 @@ supports-image-input = true
 
 [models.codex-gpt-5-6-terra]
 api-name = "gpt-5.6-terra"
-max-context = 272000
+max-context = 1050000
 tools-support = true
 streaming = true
 efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
@@ -571,7 +571,7 @@ supports-image-input = true
 
 [models.codex-gpt-5-6-luna]
 api-name = "gpt-5.6-luna"
-max-context = 272000
+max-context = 1050000
 tools-support = true
 streaming = true
 efforts = ["low", "medium", "high", "xhigh", "max"]
@@ -581,7 +581,7 @@ supports-image-input = true
 
 [models.codex-gpt-5-5]
 api-name = "gpt-5.5"
-max-context = 272000
+max-context = 1050000
 tools-support = true
 streaming = true
 efforts = ["low", "medium", "high", "xhigh"]
@@ -992,9 +992,6 @@ thinking-support = true
 preserve-thinking = true
 streaming = true
 
-[models.glm-5-3.capabilities]
-max-output-tokens = 128000
-
 [glm-coding.glm-5-3]
 max-concurrent = 4
 # One of several glm-coding bindings now, so the wizard's pick is named.
@@ -1101,10 +1098,10 @@ max-concurrent = 4
 
 # Kimi For Coding — second slot of the exact-output judgement lanes since the
 # 2026-08-28 swap (json_schema+strict probed live; quota independent of
-# ollama.com).
+# ollama.com). Context window (1048576) and output ceiling (131072) come from
+# packages/agent_core/models.toml.
 [models.kimi-for-coding]
 api-name = "kimi-for-coding"
-max-context = 262144
 tools-support = true
 streaming = true
 
@@ -1567,12 +1564,18 @@ supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-nemotron-3-ultra]
 
+# Keep local Ollama models resident for 30m so multi-turn KV caches are not
+# evicted after Ollama's 5m server default. Operators can also set `num-ctx`
+# per binding to allocate a larger context window matching local VRAM.
+# https://docs.ollama.com/api/chat
 [ollama.gemma4-26b-a4b-qat]
 wizard-default = true
 max-concurrent = 1
+keep-alive = "30m"
 
 [ollama.gemma4-e2b-it-qat]
 max-concurrent = 1
+keep-alive = "30m"
 
 
 # ── Runtime candidate orders ─────────────────────────────────

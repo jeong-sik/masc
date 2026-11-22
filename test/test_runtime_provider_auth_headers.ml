@@ -64,6 +64,9 @@ let runpod_provider =
   ; acp = None
   ; account_home = None
   ; usage_read = None
+  ; store = None
+  ; truncation = None
+  ; explicit_context_cache_ttl_s = None
   }
 
 let qwen_model =
@@ -81,6 +84,7 @@ let qwen_model =
   ; reasoning_uncontrolled = false
   ; reasoning_effort = None
   ; turn_timeout_s = None
+  ; explicit_context_cache_ttl_s = None
   ; capabilities = None
   }
 
@@ -659,6 +663,16 @@ let test_runtime_adapter_materializes_kimi_messages_http () =
          "api key"
          "test-kimi-key"
          (Llm_provider.Secret.header_value provider_cfg.api_key);
+       check
+         (option string)
+         "Kimi messages-http includes canonical anthropic-version header"
+         (Some Llm_provider.Api_common.api_version)
+         (normalized_header_value "anthropic-version" provider_cfg.headers);
+       check
+         (list (pair string string))
+         "Kimi and Anthropic share default headers SSOT"
+         (Runtime_provider_binding.default_headers_for_kind Llm_provider.Provider_config.Anthropic)
+         (Runtime_provider_binding.default_headers_for_kind Llm_provider.Provider_config.Kimi);
        (match provider_cfg.kind with
         | Llm_provider.Provider_config.Kimi -> ()
         | other ->
@@ -4108,6 +4122,423 @@ let test_dashboard_probe_preserves_unrequired_selection ~auth () =
       ~credential_required:false ~auth_present:false ~authorization:None
       (snapshot_auth_runtime ()))
 
+let test_openai_responses_cache_retention_store_and_truncation () =
+  let parse_ok toml =
+    match Runtime_toml.parse_string toml with
+    | Ok cfg -> cfg
+    | Error errors ->
+      failf "expected TOML to parse: %s"
+        (String.concat "; "
+           (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors))
+  in
+  let responses_toml ?(model_id = "gpt-5.5") ?(provider_extra = "") ?(binding_extra = "") () =
+    Printf.sprintf
+      {|[runtime]
+default = "openai-responses.probe"
+
+[providers.openai-responses]
+protocol = "openai-compatible-http"
+endpoint = "https://api.openai.com/v1"
+request-path = "/responses"
+%s
+
+[providers.openai-responses.credentials]
+type = "inline"
+value = "sk-fixture"
+
+[models.probe]
+api-name = "%s"
+tools-support = true
+streaming = true
+
+[openai-responses.probe]
+%s
+|}
+      provider_extra model_id binding_extra
+  in
+  (* Pre-5.6 Responses model (gpt-5.5) accepts prompt_cache_retention + store + truncation. *)
+  List.iter
+    (fun (raw, expected) ->
+       let cfg =
+         parse_ok
+           (responses_toml
+              ~model_id:"gpt-5.5"
+              ~provider_extra:"store = false\ntruncation = \"disabled\""
+              ~binding_extra:(Printf.sprintf "cache-retention = %S" raw)
+              ())
+       in
+       match cfg.bindings with
+       | [ binding ] ->
+         (match provider_config_for_binding cfg binding with
+          | Error msg -> failf "openai-responses gpt-5.5 %s rejected: %s" raw msg
+          | Ok pc ->
+            check bool (raw ^ " keeps cache_extended_ttl false") false pc.cache_extended_ttl;
+            check bool (raw ^ " wires prompt_cache_retention") true
+              (pc.prompt_cache_retention = Some expected);
+            check (option bool) "store = false wired" (Some false) pc.store;
+            check bool "truncation = disabled wired" true
+              (pc.truncation = Some Llm_provider.Provider_config.Truncation_disabled))
+       | _ -> fail "expected one binding")
+    [ "in_memory", Llm_provider.Provider_config.Prompt_cache_in_memory
+    ; "24h", Llm_provider.Provider_config.Prompt_cache_24h
+    ];
+  (* GPT-5.6+ / GPT-6 Responses models (supports_explicit_cache_opt_out = true)
+     accept store/truncation while failing closed on legacy prompt_cache_retention. *)
+  (let cfg =
+     parse_ok
+       (responses_toml
+          ~model_id:"gpt-6-sol"
+          ~provider_extra:"store = false\ntruncation = \"disabled\""
+          ())
+   in
+   match provider_config_for_binding cfg (List.hd cfg.bindings) with
+   | Error msg -> failf "openai-responses gpt-6-sol store/truncation rejected: %s" msg
+   | Ok pc ->
+     check (option bool) "gpt-6-sol store = false wired" (Some false) pc.store;
+     check bool "gpt-6-sol truncation = disabled wired" true
+       (pc.truncation = Some Llm_provider.Provider_config.Truncation_disabled));
+  List.iter
+    (fun raw ->
+       let cfg =
+         parse_ok
+           (responses_toml
+              ~model_id:"gpt-6-sol"
+              ~binding_extra:(Printf.sprintf "cache-retention = %S" raw)
+              ())
+       in
+       match provider_config_for_binding cfg (List.hd cfg.bindings) with
+       | Error msg ->
+         check bool ("gpt-6-sol refusal mentions prompt_cache_options for " ^ raw) true
+           (String_util.contains_substring msg "prompt_cache_options")
+       | Ok _ -> failf "gpt-6-sol must reject legacy prompt_cache_retention = %S" raw)
+    [ "in_memory"; "24h" ];
+  (* Anthropic TTLs ("5m" | "1h") must fail closed on OpenAI Responses. *)
+  List.iter
+    (fun raw ->
+       let cfg = parse_ok (responses_toml ~binding_extra:(Printf.sprintf "cache-retention = %S" raw) ()) in
+       match provider_config_for_binding cfg (List.hd cfg.bindings) with
+       | Error _ -> ()
+       | Ok _ -> failf "openai-responses must reject cache-retention = %S" raw)
+    [ "5m"; "1h" ];
+  (* OpenAI retentions ("in_memory" | "24h") must fail closed on Anthropic, OpenRouter, Kimi. *)
+  List.iter
+    (fun (provider_id, protocol, model_id) ->
+       List.iter
+         (fun raw ->
+            let cfg, binding =
+              parallel_policy_runtime ~provider_id ~protocol ~model_id
+                ~policy:(Printf.sprintf "cache-retention = %S" raw)
+            in
+            match provider_config_for_binding cfg binding with
+            | Error _ -> ()
+            | Ok _ ->
+              failf "%s (%s) must reject OpenAI cache-retention = %S" provider_id model_id raw)
+         [ "in_memory"; "24h" ])
+    [ "claude", "messages-http", "claude-sonnet-5-5"
+    ; "openrouter", "openai-compatible-http", "anthropic/claude-opus-5"
+    ; "kimi_coding", "openai-compatible-http", "kimi-for-coding"
+    ];
+  (* Invalid cache-retention error names all four valid spellings. *)
+  (match Runtime_toml.parse_string (responses_toml ~binding_extra:"cache-retention = \"2h\"" ()) with
+   | Ok _ -> fail "invalid cache-retention must fail at TOML parse"
+   | Error errors ->
+     check bool "cache-retention error lists 5m, 1h, in_memory, 24h" true
+       (List.exists
+          (fun (e : Runtime_toml.parse_error) ->
+             String.equal e.path "openai-responses.probe.cache-retention"
+             && String_util.contains_substring e.message "\"in_memory\""
+             && String_util.contains_substring e.message "\"24h\""
+             && String_util.contains_substring e.message "\"5m\""
+             && String_util.contains_substring e.message "\"1h\"")
+          errors));
+  (* store/truncation must fail closed on non-Responses protocols and invalid values. *)
+  (match Runtime_toml.parse_string (responses_toml ~provider_extra:"truncation = \"drop\"" ()) with
+   | Ok _ -> fail "invalid truncation value must fail closed"
+   | Error errors ->
+     check bool "invalid truncation names key" true
+       (List.exists (fun (e : Runtime_toml.parse_error) ->
+          String.equal e.path "providers.openai-responses.truncation") errors));
+  List.iter
+    (fun (provider_id, protocol, endpoint, model_id) ->
+       let toml =
+         Printf.sprintf
+           {|[runtime]
+default = "%s.probe"
+[providers.%s]
+protocol = "%s"
+endpoint = "%s"
+store = false
+truncation = "auto"
+[providers.%s.credentials]
+type = "inline"
+value = "fixture-key"
+[models.probe]
+api-name = "%s"
+max-context = 65536
+[%s.probe]
+|}
+           provider_id provider_id protocol endpoint provider_id model_id provider_id
+       in
+       let cfg = parse_ok toml in
+       match provider_config_for_binding cfg (List.hd cfg.bindings) with
+       | Error _ -> ()
+       | Ok _ -> failf "%s (%s) must reject Responses store/truncation" provider_id protocol)
+    [ "claude", "messages-http", "https://api.anthropic.com", "claude-sonnet-5-5"
+    ; "openai", "openai-compatible-http", "https://api.openai.com/v1", "gpt-5.5"
+    ; "gemini", "gemini-http", "https://generativelanguage.googleapis.com/v1beta", "gemini-3.8-flash"
+    ; "ollama", "ollama-http", "http://127.0.0.1:11434", "gemma4:26b"
+    ];
+  (* A non-OpenAI_compat wire kind (e.g. Glm) must fail closed on store,
+     truncation, and prompt_cache_retention even when request-path is "/v1/responses". *)
+  let glm_responses_path_toml ?(provider_extra = "") ?(binding_extra = "") () =
+    Printf.sprintf
+      {|[runtime]
+default = "glm-coding.probe"
+[providers.glm-coding]
+protocol = "openai-compatible-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+request-path = "/v1/responses"
+%s
+[providers.glm-coding.credentials]
+type = "inline"
+value = "fixture-glm-key"
+[models.probe]
+api-name = "glm-5.3"
+[glm-coding.probe]
+%s
+|}
+      provider_extra binding_extra
+  in
+  let cfg_glm_opts =
+    parse_ok (glm_responses_path_toml ~provider_extra:"store = false\ntruncation = \"disabled\"" ())
+  in
+  (match provider_config_for_binding cfg_glm_opts (List.hd cfg_glm_opts.bindings) with
+   | Error _ -> ()
+   | Ok _ -> fail "Glm provider with /v1/responses must reject Responses store/truncation");
+  let glm_catalog =
+    {|[[providers]]
+id = "glm-coding"
+kind = "glm"
+capabilities_base = "glm"
+base_url = "https://api.z.ai/api/coding/paas/v4"
+request_path = "/v1/responses"
+auth = "none"
+supports_prompt_cache_retention = true
+|}
+  in
+  with_model_catalog glm_catalog (fun () ->
+    List.iter
+      (fun raw ->
+         let cfg_glm_ret =
+           parse_ok (glm_responses_path_toml ~binding_extra:(Printf.sprintf "cache-retention = %S" raw) ())
+         in
+         match provider_config_for_binding cfg_glm_ret (List.hd cfg_glm_ret.bindings) with
+         | Error _ -> ()
+         | Ok _ ->
+           failf "Glm provider with /v1/responses must reject cache-retention = %S" raw)
+      [ "in_memory"; "24h" ])
+;;
+
+let test_gemini_explicit_context_cache_ttl_wiring () =
+  let parse_ok toml =
+    match Runtime_toml.parse_string toml with
+    | Ok cfg -> cfg
+    | Error errors ->
+      failf "expected Gemini TOML to parse: %s"
+        (String.concat "; "
+           (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors))
+  in
+  let gemini_toml ?(provider_extra = "") ?(model_extra = "") ~model_id () =
+    Printf.sprintf
+      {|[runtime]
+default = "gemini.probe"
+
+[providers.gemini]
+protocol = "gemini-http"
+endpoint = "https://generativelanguage.googleapis.com/v1beta"
+%s
+
+[providers.gemini.credentials]
+type = "inline"
+value = "fixture-gemini-key"
+
+[models.probe]
+api-name = "%s"
+tools-support = true
+streaming = true
+%s
+
+[gemini.probe]
+|}
+      provider_extra model_id model_extra
+  in
+  (* Gemini 3 inherits provider TTL and honors model override. *)
+  let cfg_prov =
+    parse_ok (gemini_toml ~provider_extra:"explicit-context-cache-ttl-s = 600" ~model_id:"gemini-3.8-flash" ())
+  in
+  (match provider_config_for_binding cfg_prov (List.hd cfg_prov.bindings) with
+   | Ok pc ->
+     check (option int) "gemini-3.8-flash inherits provider TTL" (Some 600)
+       pc.explicit_context_cache_ttl_s
+   | Error msg -> fail ("gemini-3.8-flash provider TTL failed: " ^ msg));
+  let cfg_model =
+    parse_ok
+      (gemini_toml
+         ~provider_extra:"explicit-context-cache-ttl-s = 600"
+         ~model_extra:"explicit-context-cache-ttl-s = 1200"
+         ~model_id:"gemini-3.8-flash"
+         ())
+  in
+  (match provider_config_for_binding cfg_model (List.hd cfg_model.bindings) with
+   | Ok pc ->
+     check (option int) "model TTL overrides provider TTL" (Some 1200)
+       pc.explicit_context_cache_ttl_s
+   | Error msg -> fail ("gemini-3.8-flash model TTL failed: " ^ msg));
+  (* Gemini 4 does not support explicit caching: provider TTL stays None,
+     while explicit model-level TTL fails closed. *)
+  let cfg_g4_prov =
+    parse_ok (gemini_toml ~provider_extra:"explicit-context-cache-ttl-s = 600" ~model_id:"gemini-4-neon" ())
+  in
+  (match provider_config_for_binding cfg_g4_prov (List.hd cfg_g4_prov.bindings) with
+   | Ok pc ->
+     check (option int) "gemini-4-neon skips provider-level explicit cache TTL" None
+       pc.explicit_context_cache_ttl_s
+   | Error msg -> fail ("gemini-4-neon under shared Gemini provider TTL failed: " ^ msg));
+  let cfg_g4_model =
+    parse_ok (gemini_toml ~model_extra:"explicit-context-cache-ttl-s = 600" ~model_id:"gemini-4-neon" ())
+  in
+  (match provider_config_for_binding cfg_g4_model (List.hd cfg_g4_model.bindings) with
+   | Error _ -> ()
+   | Ok _ -> fail "gemini-4-neon must reject model-level explicit-context-cache-ttl-s");
+  (* Vertex AI (protocol = "vertex-gemini" without catalog-provider) resolves
+     Gemini catalog capabilities so Gemini 3 wires explicit-context-cache-ttl-s
+     and Gemini 4 skips provider TTL / refuses model TTL. *)
+  let vertex_toml ?(provider_extra = "") ?(model_extra = "") ~model_id () =
+    Printf.sprintf
+      {|[runtime]
+default = "vertex.probe"
+
+[providers.vertex]
+protocol = "vertex-gemini"
+endpoint = "https://us-central1-aiplatform.googleapis.com/v1/projects/fixture-project/locations/us-central1/publishers/google"
+%s
+
+[models.probe]
+api-name = "%s"
+tools-support = true
+streaming = true
+%s
+
+[vertex.probe]
+|}
+      provider_extra model_id model_extra
+  in
+  let cfg_v_prov =
+    parse_ok (vertex_toml ~provider_extra:"explicit-context-cache-ttl-s = 600" ~model_id:"gemini-3.8-flash" ())
+  in
+  (match provider_config_for_binding cfg_v_prov (List.hd cfg_v_prov.bindings) with
+   | Ok pc ->
+     check (option int) "vertex gemini-3.8-flash inherits provider TTL" (Some 600)
+       pc.explicit_context_cache_ttl_s;
+     (match Llm_provider.Provider_config.capabilities_for_config_model pc with
+      | Some caps ->
+        check bool "vertex gemini-3.8-flash resolves Gemini_explicit_cached_content" true
+          (caps.prompt_cache_wire = Llm_provider.Capabilities.Gemini_explicit_cached_content)
+      | None -> fail "vertex gemini-3.8-flash must resolve Gemini catalog capabilities")
+   | Error msg -> fail ("vertex gemini-3.8-flash provider TTL failed: " ^ msg));
+  let cfg_v_model =
+    parse_ok
+      (vertex_toml
+         ~provider_extra:"explicit-context-cache-ttl-s = 600"
+         ~model_extra:"explicit-context-cache-ttl-s = 1200"
+         ~model_id:"gemini-3.8-flash"
+         ())
+  in
+  (match provider_config_for_binding cfg_v_model (List.hd cfg_v_model.bindings) with
+   | Ok pc ->
+     check (option int) "vertex gemini-3.8-flash model TTL overrides provider TTL" (Some 1200)
+       pc.explicit_context_cache_ttl_s
+   | Error msg -> fail ("vertex gemini-3.8-flash model TTL failed: " ^ msg));
+  let cfg_v_g4_prov =
+    parse_ok (vertex_toml ~provider_extra:"explicit-context-cache-ttl-s = 600" ~model_id:"gemini-4-neon" ())
+  in
+  (match provider_config_for_binding cfg_v_g4_prov (List.hd cfg_v_g4_prov.bindings) with
+   | Ok pc ->
+     check (option int) "vertex gemini-4-neon skips provider-level explicit cache TTL" None
+       pc.explicit_context_cache_ttl_s
+   | Error msg -> fail ("vertex gemini-4-neon under shared provider TTL failed: " ^ msg));
+  let cfg_v_g4_model =
+    parse_ok (vertex_toml ~model_extra:"explicit-context-cache-ttl-s = 600" ~model_id:"gemini-4-neon" ())
+  in
+  (match provider_config_for_binding cfg_v_g4_model (List.hd cfg_v_g4_model.bindings) with
+   | Error _ -> ()
+   | Ok _ -> fail "vertex gemini-4-neon must reject model-level explicit-context-cache-ttl-s");
+  (* Non-Gemini provider rejects explicit-context-cache-ttl-s. *)
+  let cfg_non_gemini =
+    parse_ok
+      {|[runtime]
+default = "openai.probe"
+[providers.openai]
+protocol = "openai-compatible-http"
+endpoint = "https://api.openai.com/v1"
+explicit-context-cache-ttl-s = 600
+[providers.openai.credentials]
+type = "inline"
+value = "sk-fixture"
+[models.probe]
+api-name = "gpt-5.5"
+[openai.probe]
+|}
+  in
+  (match provider_config_for_binding cfg_non_gemini (List.hd cfg_non_gemini.bindings) with
+   | Error _ -> ()
+   | Ok _ -> fail "non-Gemini provider must reject explicit-context-cache-ttl-s");
+  (* Non-positive TTL fails closed at TOML parse time. *)
+  match Runtime_toml.parse_string (gemini_toml ~provider_extra:"explicit-context-cache-ttl-s = 0" ~model_id:"gemini-3.8-flash" ()) with
+  | Ok _ -> fail "zero explicit-context-cache-ttl-s must fail at TOML parse"
+  | Error errors ->
+    check bool "zero TTL names provider field" true
+      (List.exists (fun (e : Runtime_toml.parse_error) ->
+         String.equal e.path "providers.gemini.explicit-context-cache-ttl-s") errors)
+;;
+
+let test_ollama_host_env_var_ssot () =
+  check string "Env_config_runtime.Ollama uses OLLAMA_HOST" "OLLAMA_HOST"
+    Env_config_runtime.Ollama.host_env_var;
+  check string "Env_config_runtime and Discovery share the exact Ollama env var"
+    Llm_provider.Discovery.ollama_host_env_var
+    Env_config_runtime.Ollama.host_env_var;
+  let getenv bindings key = List.assoc_opt key bindings in
+  let resolve value =
+    Env_config_runtime.Ollama.resolve_server_url
+      ~getenv:(getenv [ "OLLAMA_HOST", value ]) ()
+  in
+  check string "bare host:port normalized to http://"
+    "http://127.0.0.1:11434" (resolve "127.0.0.1:11434");
+  check string "wildcard 0.0.0.0:11434 normalized to loopback IPv4"
+    "http://127.0.0.1:11434" (resolve "0.0.0.0:11434");
+  check string "wildcard 0.0.0.0 without port uses default port"
+    "http://127.0.0.1:11434" (resolve "0.0.0.0");
+  check string "IPv6 wildcard [::]:11434 normalized to loopback IPv4"
+    "http://127.0.0.1:11434" (resolve "[::]:11434");
+  check string "localhost normalized to loopback IPv4"
+    "http://127.0.0.1:11434" (resolve "HTTP://localhost:11434/");
+  check string "port-only :11434 expands to loopback IPv4"
+    "http://127.0.0.1:11434" (resolve ":11434");
+  check string "https scheme preserved and trailing slash stripped"
+    "https://ollama.local:11434" (resolve "https://ollama.local:11434/");
+  check string "legacy OLLAMA_SERVER_URL is not consulted"
+    Masc_network_defaults.ollama_default_url
+    (Env_config_runtime.Ollama.resolve_server_url
+       ~getenv:(getenv [ "OLLAMA_SERVER_URL", "http://legacy.invalid:11434" ]) ());
+  List.iter
+    (fun bad ->
+       check string (Printf.sprintf "malformed OLLAMA_HOST %S falls back to default" bad)
+         Masc_network_defaults.ollama_default_url
+         (resolve bad))
+    [ "   "; "///"; "http://"; "https://"; "http:///"; ":0"; ":abc"; "ftp://127.0.0.1:11434" ]
+;;
+
 let () =
   run "runtime_provider_auth_headers"
     [ ( "selected dashboard probe"
@@ -4155,6 +4586,12 @@ let () =
             `Quick test_parallel_policy_requires_provider_contract
         ; test_case "cache retention requires a provider contract"
             `Quick test_cache_retention_requires_a_provider_contract
+        ; test_case "OpenAI Responses cache retention, store, and truncation"
+            `Quick test_openai_responses_cache_retention_store_and_truncation
+        ; test_case "Gemini explicit-context-cache-ttl-s wiring and Gemini 4 guard"
+            `Quick test_gemini_explicit_context_cache_ttl_wiring
+        ; test_case "Ollama host env var SSOT and bare host:port normalization"
+            `Quick test_ollama_host_env_var_ssot
         ; test_case "provider routing filter requires a provider contract"
             `Quick test_provider_routing_filter_requires_a_provider_contract
         ; test_case "a declared provider reads bare rows only when it serves them"

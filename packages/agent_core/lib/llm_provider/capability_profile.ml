@@ -735,7 +735,7 @@ let glm_capabilities =
 let gemini_capabilities =
   { default_capabilities with
     max_context_tokens = Some 1_000_000
-  ; max_output_tokens = Some 65_000
+  ; max_output_tokens = Some 65_536
   ; supports_tools = true
   ; supports_tool_choice = true
   ; supports_required_tool_choice = true

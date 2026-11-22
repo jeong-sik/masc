@@ -495,6 +495,31 @@ val create_cache
 (** Snapshot of current cache statistics. *)
 val cache_stats : cache -> cache_stats
 
+(** Proactive rate-limit response headers captured from provider responses
+    (Anthropic [anthropic-ratelimit-*] headers: requests, input tokens, output
+    tokens, and combined tokens limit / remaining / reset timestamp).
+    Ref: https://platform.claude.com/docs/en/api/rate-limits *)
+type rate_limit_headers =
+  { requests_limit : int option
+  ; requests_remaining : int option
+  ; requests_reset : string option
+  ; input_tokens_limit : int option
+  ; input_tokens_remaining : int option
+  ; input_tokens_reset : string option
+  ; output_tokens_limit : int option
+  ; output_tokens_remaining : int option
+  ; output_tokens_reset : string option
+  ; tokens_limit : int option
+  ; tokens_remaining : int option
+  ; tokens_reset : string option
+  }
+
+(** Parse [anthropic-ratelimit-*] headers case-insensitively from an HTTP
+    response header map. Returns [None] when none of those headers are present
+    (or all present values are invalid/blank). Negative or non-integer numeric
+    values are ignored ([None]). *)
+val rate_limit_headers_of_response_headers : Http.Header.t -> rate_limit_headers option
+
 (** Raw response from a synchronous dispatch
     ({!get_sync}, {!post_sync}, {!post_sync_once}). No provider-specific body parsing or
     retry policy has run. *)
@@ -506,6 +531,9 @@ type raw_sync_response =
         (** Raw [Content-Type] response header, trimmed, or [None] when the
           response carried none. Kept unparsed: deciding whether a body is the
           media the caller asked for belongs to the caller, not to transport. *)
+  ; rate_limit_headers : rate_limit_headers option
+        (** Parsed [anthropic-ratelimit-*] headers when carried by the response,
+          otherwise [None]. *)
   }
 
 (** GET a URL synchronously, returning the full response.
@@ -758,6 +786,7 @@ val with_post_stream
   -> ?connect_timeout_s:float
   -> ?first_event_timeout_s:float
   -> ?on_response_status:(int -> unit)
+  -> ?on_rate_limit_headers:(rate_limit_headers -> unit)
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> url:string
   -> headers:(string * string) list

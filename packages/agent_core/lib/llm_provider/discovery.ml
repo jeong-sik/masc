@@ -82,9 +82,99 @@ let resolve_default_endpoint ?(getenv = fun name -> Cli_common_env.get name) () 
 
 let ollama_endpoint = default_ollama_endpoint
 
+let strip_trailing_slashes s =
+  let len = ref (String.length s) in
+  while !len > 0 && s.[!len - 1] = '/' do
+    decr len
+  done;
+  String.sub s 0 !len
+;;
+
+let default_ollama_port = 11434
+
+let has_scheme_separator s =
+  let len = String.length s in
+  let rec loop i =
+    if i + 2 >= len
+    then false
+    else if s.[i] = ':' && s.[i + 1] = '/' && s.[i + 2] = '/'
+    then true
+    else loop (i + 1)
+  in
+  loop 0
+;;
+
+let parse_port_only raw =
+  let port_str =
+    strip_trailing_slashes (String.sub raw 1 (String.length raw - 1))
+  in
+  match int_of_string_opt port_str with
+  | Some port
+    when port >= 1 && port <= 65535 && String.equal (string_of_int port) port_str ->
+    Some port
+  | Some _ | None -> None
+;;
+
+let normalize_ollama_dial_host host =
+  match String.lowercase_ascii (String.trim host) with
+  | "0.0.0.0" | "::" | "localhost" | "::1" -> "127.0.0.1"
+  | _ -> String.trim host
+;;
+
+let normalize_ollama_host_value raw =
+  let trimmed = String.trim raw in
+  if trimmed = ""
+  then None
+  else (
+    let lower = String.lowercase_ascii trimmed in
+    let has_http_scheme =
+      String.starts_with ~prefix:"http://" lower
+      || String.starts_with ~prefix:"https://" lower
+    in
+    if (not has_http_scheme) && has_scheme_separator trimmed
+    then None
+    else if (not has_http_scheme) && String.starts_with ~prefix:":" trimmed
+    then
+      Option.map
+        (fun port -> Printf.sprintf "http://127.0.0.1:%d" port)
+        (parse_port_only trimmed)
+    else (
+      let candidate =
+        if has_http_scheme
+        then trimmed
+        else (
+          let bare = strip_trailing_slashes trimmed in
+          if bare = "" then "" else "http://" ^ bare)
+      in
+      if candidate = ""
+      then None
+      else (
+        let uri = Uri.of_string candidate in
+        match Uri.host uri with
+        | None -> None
+        | Some host when String.trim host = "" -> None
+        | Some host ->
+          let uri =
+            Uri.with_scheme uri (Option.map String.lowercase_ascii (Uri.scheme uri))
+          in
+          let uri =
+            if (not has_http_scheme) && Option.is_none (Uri.port uri)
+            then Uri.with_port uri (Some default_ollama_port)
+            else uri
+          in
+          let dial_host = normalize_ollama_dial_host host in
+          let uri =
+            if String.equal dial_host host
+            then uri
+            else Uri.with_host uri (Some dial_host)
+          in
+          Some (strip_trailing_slashes (Uri.to_string uri)))))
+;;
+
 let resolve_ollama_endpoint ?(getenv = fun name -> Cli_common_env.get name) () =
   match env_get_non_empty ~getenv ollama_host_env_var with
-  | Some url -> url
+  | Some url ->
+    Option.value ~default:default_ollama_endpoint (normalize_ollama_host_value url)
   | None -> default_ollama_endpoint
 ;;
 

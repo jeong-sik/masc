@@ -130,10 +130,18 @@ let install_plan_if_source
       observed_ref := Some candidate_ref;
       on_checkpoint_commit_observer candidate_ref
     in
+    let canonical_path_for_pin =
+      agent_core_checkpoint_path
+        ~session_dir
+        ~session_id:(Keeper_id.Trace_id.to_string expected_session_id)
+    in
     let outcome =
       try
         `Returned
-          (with_checkpoint_cas_lock ~session_dir (fun session_dir ->
+          (Keeper_checkpoint_store_lineage.with_active_lineage
+             ~canonical_path:canonical_path_for_pin
+             (fun () ->
+                with_checkpoint_cas_lock ~session_dir (fun session_dir ->
          let source =
            match canonical_source_locked ~session_dir ~expected_source_ref with
            | Error error -> Error (Source_unavailable error)
@@ -175,7 +183,7 @@ let install_plan_if_source
                     that fact. *)
                  publish ~canonical_path []
                | Ok (Keeper_fs.Committed_but_observer_failed failure) ->
-                 publish ~canonical_path [ Commit_observer_failed failure ]))))
+                 publish ~canonical_path [ Commit_observer_failed failure ])))))
       with
       | Eio.Cancel.Cancelled _ as cancelled ->
         Printexc.raise_with_backtrace cancelled (Printexc.get_raw_backtrace ())

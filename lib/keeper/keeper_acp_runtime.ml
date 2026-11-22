@@ -498,6 +498,7 @@ type stream_projection =
   ; on_tool_started :
       call_id:string -> tool_name:string -> arguments:Yojson.Safe.t -> unit
   ; on_tool_finished : call_id:string -> unit
+  ; observed_tool_calls : unit -> Yojson.Safe.t
   }
 
 let make_stream_projection
@@ -517,6 +518,8 @@ let make_stream_projection
   let text_index = ref None in
   let thought_index = ref None in
   let tool_indices : (string, int) Hashtbl.t = Hashtbl.create 8 in
+  let tool_calls_rev : Yojson.Safe.t list ref = ref [] in
+  let tool_calls_mu = Stdlib.Mutex.create () in
   let emit event = Option.iter (fun f -> f event) on_event in
   let close_open_text () =
     match !text_index with
@@ -620,6 +623,15 @@ let make_stream_projection
     | Acp.Config_options_updated _ -> ()
   in
   let on_tool_started ~call_id ~tool_name ~arguments =
+    Stdlib.Mutex.protect tool_calls_mu (fun () ->
+      let entry =
+        `Assoc
+          [ "call_id", `String call_id
+          ; "tool_name", `String tool_name
+          ; "arguments", arguments
+          ]
+      in
+      tool_calls_rev := entry :: !tool_calls_rev);
     close_open_text ();
     close_open_thought ();
     let idx = alloc_index () in
@@ -644,7 +656,10 @@ let make_stream_projection
       Hashtbl.remove tool_indices call_id;
       emit (Agent_core.Types.ContentBlockStop { index = idx })
   in
-  { on_acp_event; on_tool_started; on_tool_finished }
+  let observed_tool_calls () =
+    Stdlib.Mutex.protect tool_calls_mu (fun () -> `List (List.rev !tool_calls_rev))
+  in
+  { on_acp_event; on_tool_started; on_tool_finished; observed_tool_calls }
 ;;
 
 (* ── Main Keeper ACP turn execution ───────────────────────────────────────── *)
@@ -793,6 +808,31 @@ let run_without_lifecycle
     |> Result.map_error internal_error
   in
   let is_resume = Option.is_some claim_plan.previous_settlement in
+  (* Hydrate any missing post-checkpoint/post-anchor canonical turns BEFORE
+     [Host.carried_history_projection] so hydrated history goes through the
+     full model-input projection, window observation, and context bounding,
+     including when [prepared.messages] holds a stale earlier HTTP checkpoint. *)
+  let prepared =
+    if is_resume
+    then prepared
+    else (
+      let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+      match
+        Keeper_canonical_turn_store.hydrate_missing_turns
+          ~keepers_dir
+          ~keeper_id:keeper_name
+          ~existing_messages:prepared.messages
+      with
+      | Ok [] -> prepared
+      | Ok extra_msgs ->
+        { prepared with Host.messages = prepared.messages @ extra_msgs }
+      | Error err ->
+        Log.Keeper.warn
+          ~keeper_name
+          "canonical handoff context load skipped for ACP start: %s"
+          (Keeper_canonical_turn_store.store_error_to_string err);
+        prepared)
+  in
   let* prepared =
     if is_resume
     then (
@@ -1262,14 +1302,14 @@ let run_without_lifecycle
                 `Abort stop))
       in
       match outcome with
-      | `Abort stop -> Ok (`Stopped (session_id, stop))
+      | `Abort stop -> Ok (`Stopped (session_id, stop, stream.observed_tool_calls ()))
       | `Runtime (Ok prompt_res) ->
         let prev_used = entry.last_context_used in
         let cur_used = prompt_res.usage.context_used in
         entry.last_context_used <- cur_used;
         let compacted = compaction_detected ~prev_used ~cur_used in
         close_delivery_frontier ();
-        Ok (`Completed (prompt_res, resumed, compacted))
+        Ok (`Completed (prompt_res, resumed, compacted, stream.observed_tool_calls ()))
       | `Runtime (Error err) ->
         if persistent then evict_entry_if_same key entry;
         recovery_failure := recovery_failure_of_acp_error err;
@@ -1334,11 +1374,41 @@ let run_without_lifecycle
         in
         execute_with_entry entry ~persistent:false)
   in
+  let commit_acp_canonical_turn ~turn_id ~tool_calls_json ~assistant_output ~usage_json =
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+    let compaction_epoch_id =
+      match Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:keeper_name with
+      | Ok (Some anchor) -> Some anchor.Keeper_compaction.epoch_id
+      | Ok None | Error _ -> None
+    in
+    match
+      Keeper_canonical_turn_store.commit_turn
+        ~keepers_dir
+        ~keeper_id:keeper_name
+        ~turn_id:(Ids.Turn_id.of_string turn_id)
+        ~runtime_kind:Keeper_canonical_turn_store.Acp_cli
+        ~runtime_id
+        ~user_input:goal
+        ~tool_calls_json
+        ~assistant_output
+        ~usage_json
+        ?compaction_epoch_id
+        ~created_at:(Time_compat.now ())
+        ()
+    with
+    | Ok _ -> ()
+    | Error err ->
+      Log.Keeper.warn
+        ~keeper_name
+        "canonical turn store commit skipped for ACP turn_id=%s: %s"
+        turn_id
+        (Keeper_canonical_turn_store.store_error_to_string err)
+  in
   let turn_result =
     try
       match run_client () with
       | Error err -> Error err
-      | Ok (`Stopped (session_id, stop)) ->
+      | Ok (`Stopped (session_id, stop, acp_tool_calls_json)) ->
         let turn_id = provider_turn_identity ~session_id ~turn_count:hook_turn_count in
         let* () =
           update_session "host-stop turn identity" (fun expected ->
@@ -1392,8 +1462,19 @@ let run_without_lifecycle
         in
         session_state := settled;
         on_session_settled settled;
+        (* Commit settled non-error host-stopped turns (e.g. terminal surface
+           post / durable receipt wait) with empty visible prose so finalize's
+           [bind_turn_ref] rebinds them cleanly instead of dropping the turn. *)
+        (match projected with
+         | Ok _ ->
+           commit_acp_canonical_turn
+             ~turn_id
+             ~tool_calls_json:acp_tool_calls_json
+             ~assistant_output:""
+             ~usage_json:(`Assoc [])
+         | Error _ -> ());
         projected
-      | Ok (`Completed (prompt_res, resumed, compacted)) ->
+      | Ok (`Completed (prompt_res, resumed, compacted, acp_tool_calls_json)) ->
         natural_completion := true;
         let session_id = prompt_res.session_id in
         let turn_id = provider_turn_identity ~session_id ~turn_count:hook_turn_count in
@@ -1517,6 +1598,22 @@ let run_without_lifecycle
         in
         session_state := settled;
         on_session_settled settled;
+        (* Commit canonically into per-Keeper SQLite WAL so ACP turns preserve
+           full unbroken dialogue & tool continuity across ACP <-> HTTP failover. *)
+        (let usage_json =
+           `Assoc
+             [ "input_tokens", `Int usage.Agent_core.Types.input_tokens
+             ; "output_tokens", `Int usage.Agent_core.Types.output_tokens
+             ; "cache_creation_input_tokens", `Int usage.Agent_core.Types.cache_creation_input_tokens
+             ; "cache_read_input_tokens", `Int usage.Agent_core.Types.cache_read_input_tokens
+             ; "total_tokens", `Int prompt_res.usage.total_tokens
+             ]
+         in
+         commit_acp_canonical_turn
+           ~turn_id
+           ~tool_calls_json:acp_tool_calls_json
+           ~assistant_output:prompt_res.text
+           ~usage_json);
         let capture, _metrics =
           Runtime_observation.runtime_metrics_for_candidates ~runtime_id ~keeper_name ()
         in

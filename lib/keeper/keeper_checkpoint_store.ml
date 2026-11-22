@@ -195,5 +195,7 @@ module For_testing = struct
   ;;
 
   let default_max_retained_lineage_bytes = default_max_retained_lineage_bytes
+  let default_max_retained_lineage_bytes_per_keeper = default_max_retained_lineage_bytes_per_keeper
   let with_written_lineage_limits = with_written_lineage_limits
+  let with_per_keeper_lineage_limit = with_per_keeper_lineage_limit
 end

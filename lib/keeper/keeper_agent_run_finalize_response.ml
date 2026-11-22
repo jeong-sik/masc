@@ -198,6 +198,7 @@ let finalize
     ~raw_response_text
     ~turn_outcome
     ~terminal_effect_receipt
+    ~user_message
     ~capture_replay_response =
   let completion_contract_result = acc.receipt_completion_contract_result in
   let control_checkpoint =
@@ -436,6 +437,97 @@ let finalize
     | Runtime_execution.Official_client, None -> Ok None
   in
   let* saved_checkpoint = saved_checkpoint_result in
+    (* Commit canonically into per-Keeper SQLite WAL for cross-runtime failover
+       continuity using [Ids.Turn_ref.to_string turn_ref] so Agent Core
+       checkpoints, [Keeper_turn_bridge], and [Keeper_canonical_turn_store]
+       share one structural turn identity. ACP turns commit natively inside
+       [Keeper_acp_runtime] and are rebound here to [turn_ref] (with
+       [suppress_visible_response] applied so suppressed terminal-effect prose
+       is never resurrected into replay). *)
+    let keepers_dir =
+      Config_dir_resolver.keepers_dir_for_base_path
+        ~base_path:config.Workspace.base_path
+    in
+    let canonical_turn_id =
+      Ids.Turn_id.of_string (Ids.Turn_ref.to_string turn_ref)
+    in
+    (match official_client_settlement with
+     | Some
+         { Keeper_official_client_session_store.client_kind = Acp
+         ; phase =
+             Keeper_official_client_session_store.Settled
+               { Keeper_official_client_session_store.turn_id = acp_turn_id; _ }
+         ; _
+         } ->
+       (match
+          Keeper_canonical_turn_store.bind_turn_ref
+            ~keepers_dir
+            ~keeper_id:meta.name
+            ~from_turn_id:(Ids.Turn_id.of_string acp_turn_id)
+            ~to_turn_id:canonical_turn_id
+            ~suppress_assistant_output:suppress_visible_response
+            ()
+        with
+        | Ok () -> ()
+        | Error err ->
+          Log.Keeper.warn
+            ~keeper_name:meta.name
+            "canonical turn store ACP turn_ref bind skipped turn=%d: %s"
+            manifest_keeper_turn_id
+            (Keeper_canonical_turn_store.store_error_to_string err))
+     | Some { Keeper_official_client_session_store.client_kind = Acp; phase = (Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _); _ } -> ()
+     | Some
+         { Keeper_official_client_session_store.client_kind =
+             Codex | Claude_code | Antigravity
+         ; _
+         }
+     | None ->
+       let runtime_kind =
+         match checkpoint_owner with
+         | Runtime_execution.Masc_agent_core -> Keeper_canonical_turn_store.Agent_core_http
+         | Runtime_execution.Official_client -> Keeper_canonical_turn_store.Official_cli
+       in
+       let tool_calls_json =
+         `List (List.map tool_call_detail_to_json (List.rev acc.tool_calls))
+       in
+       let usage_json =
+         `Assoc
+           [ "input_tokens", `Int usage.Agent_core.Types.input_tokens
+           ; "output_tokens", `Int usage.Agent_core.Types.output_tokens
+           ; "cache_creation_input_tokens", `Int usage.Agent_core.Types.cache_creation_input_tokens
+           ; "cache_read_input_tokens", `Int usage.Agent_core.Types.cache_read_input_tokens
+           ]
+       in
+       let compaction_epoch_id =
+         match Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:meta.name with
+         | Ok (Some anchor) -> Some anchor.Keeper_compaction.epoch_id
+         | Ok None | Error _ -> None
+       in
+       let canonical_assistant_output =
+         if suppress_visible_response then "" else response_text
+       in
+       (match
+          Keeper_canonical_turn_store.commit_turn
+            ~keepers_dir
+            ~keeper_id:meta.name
+            ~turn_id:canonical_turn_id
+            ~runtime_kind
+            ~runtime_id:runtime_id_string
+            ~user_input:user_message
+            ~tool_calls_json
+            ~assistant_output:canonical_assistant_output
+            ~usage_json
+            ?compaction_epoch_id
+            ~created_at:(Time_compat.now ())
+            ()
+        with
+        | Ok _ -> ()
+        | Error err ->
+          Log.Keeper.warn
+            ~keeper_name:meta.name
+            "canonical turn store commit skipped turn=%d: %s"
+            manifest_keeper_turn_id
+            (Keeper_canonical_turn_store.store_error_to_string err)));
     let (_ : boundary_recording) = record_turn_boundary
       ~task_context
       ~config

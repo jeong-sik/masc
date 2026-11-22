@@ -914,7 +914,14 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                  | Path_removed -> "removed");
               remove rest))
     in
-    remove artifacts
+    match remove artifacts with
+    | Error _ as error -> error
+    | Ok () ->
+      let keepers_dir =
+        Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
+      in
+      Keeper_canonical_turn_store.delete_store ~keepers_dir ~keeper_id:keeper_name
+      |> Result.map_error Keeper_canonical_turn_store.store_error_to_string
   in
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path

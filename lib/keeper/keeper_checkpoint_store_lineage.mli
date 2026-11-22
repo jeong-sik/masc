@@ -19,6 +19,10 @@ open Keeper_checkpoint_store_summary
 
 val default_max_retained_lineage_bytes : int
 
+val default_max_retained_lineage_bytes_per_keeper : int
+(** Per-Keeper isolated byte ceiling so one bloated Keeper sheds its own
+    lineage cache instead of evicting innocent sibling Keepers. *)
+
 (** The checkpoint a save wrote and the identity of the file it was written
     to. *)
 type written_value =
@@ -75,5 +79,15 @@ val keep_read_lineage :
 
 val with_active_lineage : canonical_path:string -> (unit -> 'a) -> 'a
 
+val has_active_lineage_for_session : session_id:string -> bool
+(** True when any in-flight checkpoint save is currently pinning a canonical
+    file belonging to [session_id]. Used by periodic object sweep to avoid
+    racing live checkpoint writes. *)
+
 val with_written_lineage_limits :
   max_entries:int -> max_bytes:int -> (unit -> 'a) -> 'a
+
+val with_per_keeper_lineage_limit :
+  max_bytes_per_keeper:int -> max_bytes:int -> (unit -> 'a) -> 'a
+(** Temporarily override per-Keeper isolated and fleet-wide byte ceilings for
+    deterministic isolation testing. *)

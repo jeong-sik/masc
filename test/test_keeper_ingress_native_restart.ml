@@ -159,7 +159,7 @@ let check_original_input (checkpoint : Agent_core.Checkpoint.t) =
   check int "original User input occurs once" 1 (List.length original);
   let message = List.hd original in
   check bool "original speaker metadata survives" true
-    (message.metadata = Keeper_input_speaker.metadata speaker)
+    (Keeper_input_speaker.classify message.metadata = Keeper_input_speaker.Present speaker)
 
 let check_repetition (checkpoint : Agent_core.Checkpoint.t) =
   let frame = Keeper_repetition_context.load checkpoint.context |> require "direct repetition context" in

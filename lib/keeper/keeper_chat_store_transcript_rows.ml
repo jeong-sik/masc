@@ -26,12 +26,109 @@ type transcript_cache =
   ; redaction : Keeper_secret_redaction.t
   }
 
+let default_max_cached_transcripts = 64
+let default_max_entry_bytes = 8 * 1024 * 1024
+let default_max_total_bytes = 64 * 1024 * 1024
+
+type lru_node =
+  { key : string
+  ; mutable weight_bytes : int
+  ; mutable prev : lru_node option
+  ; mutable next : lru_node option
+  }
+
 let transcript_caches : (string, transcript_cache) Hashtbl.t = Hashtbl.create 16
+let lru_nodes : (string, lru_node) Hashtbl.t = Hashtbl.create 16
+let lru_head : lru_node option ref = ref None
+let lru_tail : lru_node option ref = ref None
+let lru_total_bytes = ref 0
+let lru_max_entries = ref default_max_cached_transcripts
+let lru_max_entry_bytes = ref default_max_entry_bytes
+let lru_max_total_bytes = ref default_max_total_bytes
 let transcript_caches_mu = Stdlib.Mutex.create ()
 
-let remember_transcript path cache =
+(* Caller holds [transcript_caches_mu]. O(1) unlink from doubly-linked LRU. *)
+let lru_unlink_locked node =
+  (match node.prev with
+   | Some p -> p.next <- node.next
+   | None -> lru_head := node.next);
+  (match node.next with
+   | Some n -> n.prev <- node.prev
+   | None -> lru_tail := node.prev);
+  node.prev <- None;
+  node.next <- None
+;;
+
+(* Caller holds [transcript_caches_mu]. O(1) push to head (most recently used). *)
+let lru_push_head_locked node =
+  node.prev <- None;
+  node.next <- !lru_head;
+  (match !lru_head with
+   | Some h -> h.prev <- Some node
+   | None -> lru_tail := Some node);
+  lru_head := Some node
+;;
+
+let remove_locked path =
+  Hashtbl.remove transcript_caches path;
+  match Hashtbl.find_opt lru_nodes path with
+  | None -> ()
+  | Some node ->
+    lru_unlink_locked node;
+    lru_total_bytes := max 0 (!lru_total_bytes - node.weight_bytes);
+    Hashtbl.remove lru_nodes path
+;;
+
+let evict_excess_locked () =
+  let rec loop () =
+    let over_count = Hashtbl.length lru_nodes > !lru_max_entries in
+    let over_bytes = !lru_total_bytes > !lru_max_total_bytes in
+    if over_count || over_bytes
+    then (
+      match !lru_tail with
+      | None -> ()
+      | Some victim ->
+        remove_locked victim.key;
+        loop ())
+  in
+  loop ()
+;;
+
+let upsert_locked path (cache : transcript_cache) =
+  let weight = max 0 cache.parsed_end in
+  if weight > !lru_max_entry_bytes || !lru_max_entries <= 0 || !lru_max_total_bytes <= 0
+  then remove_locked path
+  else (
+    Hashtbl.replace transcript_caches path cache;
+    (match Hashtbl.find_opt lru_nodes path with
+     | Some node ->
+       lru_total_bytes := max 0 (!lru_total_bytes - node.weight_bytes) + weight;
+       node.weight_bytes <- weight;
+       lru_unlink_locked node;
+       lru_push_head_locked node
+     | None ->
+       let node = { key = path; weight_bytes = weight; prev = None; next = None } in
+       Hashtbl.replace lru_nodes path node;
+       lru_total_bytes := !lru_total_bytes + weight;
+       lru_push_head_locked node);
+    evict_excess_locked ())
+;;
+
+let lookup_transcript path =
   Stdlib.Mutex.protect transcript_caches_mu (fun () ->
-    Hashtbl.replace transcript_caches path cache)
+    match Hashtbl.find_opt transcript_caches path with
+    | None -> None
+    | Some cache ->
+      (match Hashtbl.find_opt lru_nodes path with
+       | Some node ->
+         lru_unlink_locked node;
+         lru_push_head_locked node
+       | None -> ());
+      Some cache)
+;;
+
+let remember_transcript path cache =
+  Stdlib.Mutex.protect transcript_caches_mu (fun () -> upsert_locked path cache)
 ;;
 
 (* The registration of a load that went on from [from]. It stands only while
@@ -40,12 +137,41 @@ let remember_transcript path cache =
 let advance_transcript path ~from cache =
   Stdlib.Mutex.protect transcript_caches_mu (fun () ->
     match Hashtbl.find_opt transcript_caches path with
-    | Some held when held == from -> Hashtbl.replace transcript_caches path cache
+    | Some held when held == from -> upsert_locked path cache
     | Some _ | None -> ())
 ;;
 
 let forget_transcript path =
-  Stdlib.Mutex.protect transcript_caches_mu (fun () -> Hashtbl.remove transcript_caches path)
+  Stdlib.Mutex.protect transcript_caches_mu (fun () -> remove_locked path)
+;;
+
+let with_transcript_cache_limits ~max_entries ~max_entry_bytes ~max_total_bytes f =
+  let prev =
+    Stdlib.Mutex.protect transcript_caches_mu (fun () ->
+      let prev = !lru_max_entries, !lru_max_entry_bytes, !lru_max_total_bytes in
+      lru_max_entries := max 0 max_entries;
+      lru_max_entry_bytes := max 0 max_entry_bytes;
+      lru_max_total_bytes := max 0 max_total_bytes;
+      (* Shed any single entries now over [max_entry_bytes]. *)
+      let oversized =
+        Hashtbl.fold
+          (fun key node acc -> if node.weight_bytes > !lru_max_entry_bytes then key :: acc else acc)
+          lru_nodes
+          []
+      in
+      List.iter remove_locked oversized;
+      evict_excess_locked ();
+      prev)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      let prev_entries, prev_entry_bytes, prev_total_bytes = prev in
+      Stdlib.Mutex.protect transcript_caches_mu (fun () ->
+        lru_max_entries := prev_entries;
+        lru_max_entry_bytes := prev_entry_bytes;
+        lru_max_total_bytes := prev_total_bytes;
+        evict_excess_locked ()))
+    f
 ;;
 
 let transcript_identity path =

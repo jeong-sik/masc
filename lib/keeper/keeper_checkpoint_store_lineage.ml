@@ -34,6 +34,7 @@ open Keeper_checkpoint_store_summary
    displace each other while their combined weight fits. This logical byte
    weight excludes decoded OCaml records and is not a process heap limit. *)
 let default_max_retained_lineage_bytes = 128 * 1024 * 1024
+let default_max_retained_lineage_bytes_per_keeper = 32 * 1024 * 1024
 
 type written_value =
   { written_identity : canonical_identity
@@ -62,19 +63,23 @@ type lineage_state =
   ; in_flight : int String_map.t
   ; max_entries : int option
   ; max_bytes : int
+  ; max_bytes_per_keeper : int option
   ; next_seq : int
   }
 
 (* Lock-free immutable state swapped via CAS, safe across Eio fibers and pool
    domains without holding a lock across encoding or disk I/O. In-flight save
    paths pin their canonical key until the write settles so concurrent saves
-   cannot evict an actively saving Keeper's memo mid-turn. *)
+   cannot evict an actively saving Keeper's memo mid-turn. Each Keeper is
+   isolated under [max_bytes_per_keeper] so one bloated Keeper sheds its own
+   oversized cache rather than evicting sibling Keepers. *)
 let written_lineages_state : lineage_state Atomic.t =
   Atomic.make
     { entries = String_map.empty
     ; in_flight = String_map.empty
     ; max_entries = None
     ; max_bytes = default_max_retained_lineage_bytes
+    ; max_bytes_per_keeper = Some default_max_retained_lineage_bytes_per_keeper
     ; next_seq = 0
     }
 
@@ -117,7 +122,20 @@ let oldest_evictable_lineage_key state =
     None
   |> Option.map fst
 
-let rec evict_excess_lineages state =
+let shed_overweight_keepers state =
+  match state.max_bytes_per_keeper with
+  | None -> state
+  | Some per_keeper_limit ->
+    let entries =
+      String_map.filter
+        (fun key lineage ->
+           is_pinned state key || lineage.lineage_retained_bytes <= per_keeper_limit)
+        state.entries
+    in
+    { state with entries }
+;;
+
+let rec evict_fleet_excess state =
   let count = String_map.cardinal state.entries in
   let over_count = Option.fold ~none:false ~some:(fun limit -> count > limit) state.max_entries in
   let over_bytes = count > 1 && total_retained_bytes state.entries > state.max_bytes in
@@ -126,9 +144,17 @@ let rec evict_excess_lineages state =
     match oldest_evictable_lineage_key state with
     | None -> state
     | Some oldest_key ->
-      evict_excess_lineages
+      evict_fleet_excess
         { state with entries = String_map.remove oldest_key state.entries })
   else state
+;;
+
+let evict_excess_lineages state =
+  (* Per-Keeper isolation first: a bloated Keeper sheds its own oversized
+     lineage before the fleet-wide safety cap ever considers evicting an
+     innocent sibling Keeper. *)
+  evict_fleet_excess (shed_overweight_keepers state)
+;;
 
 let same_lineage_owner left right =
   String.equal left.owner_session_root right.owner_session_root
@@ -284,19 +310,52 @@ let keep_read_lineage ~canonical_path ~identity_before ~memo ~keeper_name checkp
       (Some checkpoint)
   | Some _, (Some _ | None) | None, (Some _ | None) -> ()
 
+let has_active_lineage_for_session ~session_id =
+  let state = Atomic.get written_lineages_state in
+  String_map.exists
+    (fun key count ->
+       count > 0 && String.equal (Filename.basename (Filename.dirname key)) session_id)
+    state.in_flight
+;;
+
 let with_written_lineage_limits ~max_entries ~max_bytes f =
   let max_entries = Some (max 1 max_entries) in
   let max_bytes = max 0 max_bytes in
   let previous =
     update_lineage_state (fun state ->
-      let prev = state.max_entries, state.max_bytes in
-      evict_excess_lineages { state with max_entries; max_bytes }, prev)
+      let prev = state.max_entries, state.max_bytes, state.max_bytes_per_keeper in
+      ( evict_excess_lineages
+          { state with max_entries; max_bytes; max_bytes_per_keeper = None }
+      , prev ))
   in
   Fun.protect
     ~finally:(fun () ->
-      let prev_entries, prev_bytes = previous in
+      let prev_entries, prev_bytes, prev_per_keeper = previous in
       update_lineage_state (fun state ->
-        evict_excess_lineages
-          { state with max_entries = prev_entries; max_bytes = prev_bytes }
-        , ()))
+        ( evict_excess_lineages
+            { state with
+              max_entries = prev_entries
+            ; max_bytes = prev_bytes
+            ; max_bytes_per_keeper = prev_per_keeper
+            }
+        , () )))
     f
+;;
+
+let with_per_keeper_lineage_limit ~max_bytes_per_keeper ~max_bytes f =
+  let max_bytes_per_keeper = Some (max 0 max_bytes_per_keeper) in
+  let max_bytes = max 0 max_bytes in
+  let previous =
+    update_lineage_state (fun state ->
+      let prev = state.max_bytes_per_keeper, state.max_bytes in
+      evict_excess_lineages { state with max_bytes_per_keeper; max_bytes }, prev)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      let prev_per_keeper, prev_bytes = previous in
+      update_lineage_state (fun state ->
+        ( evict_excess_lineages
+            { state with max_bytes_per_keeper = prev_per_keeper; max_bytes = prev_bytes }
+        , () )))
+    f
+;;

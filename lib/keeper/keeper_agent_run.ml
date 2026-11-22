@@ -823,6 +823,14 @@ let run_turn
     ~execution_scope:schema_execution_scope
     ~cause:None @@ fun () ->
   let turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:manifest_keeper_turn_id in
+  let input_metadata =
+    ( Keeper_canonical_turn_store.canonical_turn_id_metadata_key
+    , `String (Ids.Turn_ref.to_string turn_ref) )
+    :: List.filter
+         (fun (k, _) ->
+            not (String.equal k Keeper_canonical_turn_store.canonical_turn_id_metadata_key))
+         input_metadata
+  in
   (* From here to the end of the function is the turn the log names. Its
      [Opened] is written once the turn's context is prepared and before
      the turn dispatches, and its [Closed] on every way out of what
@@ -2098,6 +2106,7 @@ let run_turn
                              ~raw_response_text:response_text
                              ~turn_outcome
                              ~terminal_effect_receipt
+                             ~user_message
                              ~capture_replay_response:
                                (fun ~response_text ->
                                  (* Phase O observability: capture the exact

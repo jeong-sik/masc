@@ -59,10 +59,7 @@ let load_observation ~base_dir ~keeper_name =
     Keeper_chat_observation_index.empty)
   else
     let redaction = redaction_for ~base_dir ~keeper_name in
-    let cached =
-      Stdlib.Mutex.protect transcript_caches_mu (fun () ->
-        Hashtbl.find_opt transcript_caches path)
-    in
+    let cached = lookup_transcript path in
     let continuation =
       match cached, transcript_identity path with
       | Some cache, Some (device, inode, size)

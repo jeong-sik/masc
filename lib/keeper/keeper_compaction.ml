@@ -98,7 +98,31 @@ let global_on_epoch_committed : (keeper_id:string -> compaction_anchor -> unit) 
 
 let set_on_epoch_committed cb = Atomic.set global_on_epoch_committed cb
 
-let notify_global_epoch_committed ~keeper_id anchor =
+let global_on_canonical_epoch_committed
+    : (keepers_dir:string
+       -> keeper_id:string
+       -> anchor:compaction_anchor
+       -> evicted_turns:canonical_turn list
+       -> unit)
+        option
+        Atomic.t
+  =
+  Atomic.make None
+;;
+
+let set_on_canonical_epoch_committed cb = Atomic.set global_on_canonical_epoch_committed cb
+
+let notify_global_epoch_committed ~keepers_dir ~keeper_id ~evicted_turns anchor =
+  (match Atomic.get global_on_canonical_epoch_committed with
+   | None -> ()
+   | Some cb ->
+     (try cb ~keepers_dir ~keeper_id ~anchor ~evicted_turns with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Log.Keeper.warn
+          ~keeper_name:keeper_id
+          "compaction canonical watermark observer failed: %s"
+          (Printexc.to_string exn)));
   match Atomic.get global_on_epoch_committed with
   | None -> ()
   | Some cb ->
@@ -1335,7 +1359,7 @@ let commit_epoch_with_handles ~active_handles ~keepers_dir ~keeper_id ~trigger ~
   in
   match res with
   | Some committed ->
-    notify_global_epoch_committed ~keeper_id committed;
+    notify_global_epoch_committed ~keepers_dir ~keeper_id ~evicted_turns committed;
     Ok committed
   | None ->
     Error

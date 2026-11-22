@@ -409,6 +409,16 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                   match Keeper_owner_registry.commit_history_clear ~base_path:config.base_path ~keeper_name:name ~writer ~receipt with
                   | Error error -> after_effect (Keeper_owner_registry.command_error_to_string error)
                   | Ok () ->
+                    (let keepers_dir =
+                       Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+                     in
+                     match Keeper_canonical_turn_store.record_history_reset ~keepers_dir ~keeper_id:name with
+                     | Ok () -> ()
+                     | Error err ->
+                       Log.Keeper.warn
+                         ~keeper_name:name
+                         "canonical turn store history reset watermark skipped: %s"
+                         (Keeper_canonical_turn_store.store_error_to_string err));
                     let marker = Keeper_history_clear.append_marker receipt
                       ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name:name in
                     let marker_fields = match marker with

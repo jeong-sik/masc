@@ -984,6 +984,65 @@ let test_autonomous_turn_sends_the_run_context_base_prompt () =
       world_state prompt_ctx.Keeper_run_prompt.dynamic_context
 ;;
 
+(* Production ACP -> Agent Core HTTP failover proof: a Keeper with an existing
+   HTTP checkpoint ("hello" / "saved memory") runs an ACP turn recorded in
+   Keeper_canonical_turn_store; the next HTTP prepare_run_context hydrates ONLY
+   the missing ACP turn into ctx_work without duplicating the earlier checkpoint. *)
+let test_prepare_run_context_hydrates_acp_canonical_turn () =
+  with_run_checkpoint
+  @@ fun ~config ~meta ~base_dir:_ ~session_dir:_ ~checkpoint:_ ~path:_ ~prepare ->
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
+  in
+  let require_c = function
+    | Ok v -> v
+    | Error err -> fail (Keeper_canonical_turn_store.store_error_to_string err)
+  in
+  ignore
+    (Keeper_canonical_turn_store.commit_turn
+       ~keepers_dir
+       ~keeper_id:meta.name
+       ~turn_id:(Ids.Turn_id.of_string "trace-http:1")
+       ~runtime_kind:Keeper_canonical_turn_store.Agent_core_http
+       ~runtime_id:"glm:1"
+       ~user_input:"hello"
+       ~tool_calls_json:(`List [])
+       ~assistant_output:"saved memory"
+       ~usage_json:(`Assoc [])
+       ~created_at:10.0
+       ()
+     |> require_c);
+  ignore
+    (Keeper_canonical_turn_store.commit_turn
+       ~keepers_dir
+       ~keeper_id:meta.name
+       ~turn_id:(Ids.Turn_id.of_string "acp:sess-failover:2")
+       ~runtime_kind:Keeper_canonical_turn_store.Acp_cli
+       ~runtime_id:"antigravity_acp:opus"
+       ~user_input:"ACP failover user prompt"
+       ~tool_calls_json:(`List [])
+       ~assistant_output:"ACP failover assistant conclusion"
+       ~usage_json:(`Assoc [])
+       ~created_at:20.0
+       ()
+     |> require_c);
+  match prepare () with
+  | Error error -> fail (prepare_error_to_string error)
+  | Ok ctx ->
+    let msgs = Keeper_context_runtime.messages_of_context ctx.ctx_work in
+    let texts =
+      msgs
+      |> List.concat_map (fun (m : Agent_core.Types.message) ->
+        List.filter_map (function Agent_core.Types.Text s -> Some s | _ -> None) m.content)
+    in
+    let count needle =
+      List.length (List.filter (fun s -> String_util.contains_substring s needle) texts)
+    in
+    check int "checkpoint HTTP turn appears once (not duplicated)" 1 (count "saved memory");
+    check int "canonical ACP failover turn hydrated into HTTP ctx_work" 1
+      (count "ACP failover assistant conclusion")
+;;
+
 let test_unreadable_path_is_not_an_absent_checkpoint () =
   with_run_checkpoint
   @@ fun ~config:_ ~meta:_ ~base_dir:_ ~session_dir:_ ~checkpoint:_ ~path ~prepare ->
@@ -3696,5 +3755,7 @@ let () =
             test_a_summary_shows_the_head_and_the_newest_text;
           test_case "a summary isolates exceptions and propagates cancellation" `Quick
             test_a_summary_isolates_exceptions_and_propagates_cancellation;
+          test_case "prepare_run_context hydrates ACP canonical turn without duplicating checkpoint" `Quick
+            test_prepare_run_context_hydrates_acp_canonical_turn;
         ] );
     ]

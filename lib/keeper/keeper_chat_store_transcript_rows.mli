@@ -44,9 +44,12 @@ type transcript_cache =
   ; redaction : Keeper_secret_redaction.t
   }
 
-val transcript_caches : (string, transcript_cache) Hashtbl.t
+val default_max_cached_transcripts : int
+val default_max_entry_bytes : int
+val default_max_total_bytes : int
 
-val transcript_caches_mu : Mutex.t
+val lookup_transcript : string -> transcript_cache option
+(** O(1) LRU lookup promoting [path] to most-recently-used on hit. *)
 
 val remember_transcript : string -> transcript_cache -> unit
 
@@ -57,6 +60,10 @@ val advance_transcript : string -> from:transcript_cache -> transcript_cache -> 
     there is another one; either way nothing is registered. *)
 
 val forget_transcript : string -> unit
+
+val with_transcript_cache_limits :
+  max_entries:int -> max_entry_bytes:int -> max_total_bytes:int -> (unit -> 'a) -> 'a
+(** Temporarily override transcript cache bounds for deterministic testing. *)
 
 val transcript_identity : string -> (int * int * int) option
 

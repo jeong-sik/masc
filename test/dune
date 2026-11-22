@@ -167,7 +167,6 @@
  (name test_server_lane_addon_sampling)
  (modules test_server_lane_addon_sampling)
  (libraries masc_test_deps masc.server mcp_protocol eio_main unix))
-(include stanzas/test_librarian_continuity_snapshot.inc)
 
 (rule
  (alias runtest-test_dashboard_observation_quota)
@@ -389,7 +388,6 @@
 (include stanzas/test_keeper_waiting_observer_scope.inc)
 
 (include stanzas/test_server_dashboard_http_keeper_get_route.inc)
-(include stanzas/test_server_dashboard_http_keeper_memory_health_librarian_sections.inc)
 
 (include stanzas/test_sse_queue_inventory.inc)
 
@@ -1260,7 +1258,6 @@
   masc_test_deps
   masc.embedded_config masc.config))
 
-(include stanzas/test_keeper_supervisor_turn_boundaries.inc)
 
 (test
  (name test_channel_gate_connector_routes)
@@ -1329,7 +1326,6 @@
   (setenv MASC_TEST_CHECKPOINT_PURGE_EXE %{dep:../bin/masc_checkpoint_purge.exe}
    (run %{test}))))
 
-(include stanzas/test_keeper_checkpoint_purge_librarian_stores.inc)
 
 (test
  (name test_exec_dispatch_file_redirect)
@@ -2306,7 +2302,6 @@
  (modules test_server_health_rollup)
  (libraries alcotest masc masc_server yojson))
 
-(include stanzas/test_server_health_rollup_librarian_pending.inc)
 
 ; A rejected keeper boot is only diagnosable from the log line: the sentence
 ; explaining it goes to the HTTP response, which the TUI shows and drops.
@@ -2369,7 +2364,6 @@
  (modules test_keeper_no_request_body_gate)
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
 
-(include stanzas/test_keeper_no_request_body_gate_turn_boundaries.inc)
 
 ; A run_named turn queued behind a held admission permit ends as Queue at the
 ; keeper's deadline: the admission bound ends the wait and the watchdog stands
@@ -2720,7 +2714,6 @@
 
 (include stanzas/test_keeper_list_truncation.inc)
 (include stanzas/test_keeper_portrait.inc)
-(include stanzas/test_keeper_purge_turn_log_librarian_progress.inc)
 
 (include stanzas/test_keeper_census_outputs.inc)
 (include stanzas/test_keeper_shim_fleet.inc)
@@ -3291,7 +3284,6 @@
 (include stanzas/test_keeper_memory_admission_export.inc)
 (include stanzas/test_keeper_memory_admission_replay.inc)
 (include stanzas/test_keeper_memory_admission_queue.inc)
-(include stanzas/test_keeper_memory_lane_librarian_durable.inc)
 (include stanzas/test_keeper_memory_write.inc)
 (include stanzas/test_keeper_memory_write_absorbed.inc)
 (include stanzas/test_keeper_memory_write_growth_probe.inc)
@@ -3306,7 +3298,6 @@
 (include stanzas/test_keeper_task_outcomes.inc)
 (include stanzas/test_task_outcome_measurement.inc)
 (include stanzas/test_keeper_store_boot_reconcile.inc)
-(include stanzas/test_keeper_store_boot_reconcile_admission_preflight.inc)
 
 (include stanzas/test_keeper_task_create_typed_failure.inc)
 
@@ -3346,7 +3337,6 @@
 (include stanzas/test_keeper_metrics_announce.inc)
 (include stanzas/test_keeper_oauth_attempts_announce.inc)
 (include stanzas/test_memory_health_input_announce.inc)
-(include stanzas/test_memory_health_input_announce_librarian_stores.inc)
 (include stanzas/test_harness_verdicts_announce.inc)
 (include stanzas/test_runtime_config_commit_announce.inc)
 (include stanzas/test_gate_change_notify.inc)
@@ -3443,7 +3433,6 @@
 (include stanzas/test_official_client_result_time.inc)
 (include stanzas/test_keeper_tool_definition_source.inc)
 (include stanzas/test_runtime_codex_app_server.inc)
-(include stanzas/test_runtime_codex_app_server_turn_boundaries.inc)
 (include stanzas/test_keeper_codex_tool_outbox_wake.inc)
 (include stanzas/test_keeper_agent_core_result_outbox.inc)
 (include stanzas/test_keeper_agent_core_retained_carrier.inc)
@@ -3991,9 +3980,7 @@
 (include stanzas/test_keeper_turn_attempt_observer.inc)
 (include stanzas/test_keeper_memory_age_bins.inc)
 (include stanzas/test_keeper_turn_pulse.inc)
-(include stanzas/test_keeper_turn_log_turn_task_context.inc)
 (include stanzas/test_keeper_decoded_rows.inc)
-(include stanzas/test_keeper_turn_boundaries.inc)
 (include stanzas/test_keeper_context_core_history.inc)
 (include stanzas/test_keeper_turn_fragments.inc)
 (include stanzas/test_keeper_turn_fragments_librarian_range.inc)
@@ -4003,14 +3990,11 @@
 (include stanzas/test_keeper_unsettled_spend.inc)
 
 (include stanzas/test_keeper_clear_admission.inc)
-(include stanzas/test_keeper_clear_admission_turn_boundaries.inc)
 (include stanzas/test_keeper_librarian_progress.inc)
 (include stanzas/test_keeper_librarian_store_scope.inc)
-(include stanzas/test_keeper_librarian_store_scope_progress_and_queue.inc)
 (include stanzas/test_keeper_librarian_range.inc)
 (include stanzas/test_keeper_librarian_durable_consumer.inc)
 (include stanzas/test_keeper_librarian_floor_step_request.inc)
-(include stanzas/test_librarian_replay_cli.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)
 (include stanzas/test_keeper_gate_auto_judge_labels.inc)
 (include stanzas/test_keeper_gate_replay.inc)
@@ -4519,7 +4503,6 @@
 (include stanzas/test_browser_interaction.inc)
 
 (include stanzas/test_keeper_nerdctl_image_admission.inc)
-(include stanzas/test_keeper_next_request_forecast_turn_boundaries_and_progress.inc)
 
 (include stanzas/test_keeper_kata_inventory.inc)
 (include stanzas/test_keeper_kata_vmm_identity.inc)
@@ -5278,7 +5261,6 @@
   librarian_run_tui_reading eio_main))
 
 (include stanzas/test_keeper_continuity_request_view.inc)
-(include stanzas/test_keeper_continuity_request_view_turn_boundaries.inc)
 
 (include stanzas/test_keeper_librarian_continuity.inc)
 (include stanzas/test_keeper_working_context_signal_flood.inc)
@@ -5538,7 +5520,6 @@
  (name test_completion_review_immutable_input)
  (modules test_completion_review_immutable_input)
  (libraries alcotest masc_test_deps eio_main unix))
-(include stanzas/test_keeper_memory_execution_availability.inc)
 
 (include stanzas/test_browser_native_workflow.inc)
 

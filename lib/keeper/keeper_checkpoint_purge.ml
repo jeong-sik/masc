@@ -34,8 +34,6 @@ type purge_error =
       { before : int
       ; after : int
       }
-  | Kept_atom_rewritten of { atom : int }
-  | Continuity_no_longer_fits of Librarian_continuity_snapshot.error
 
 let purge_error_to_string = function
   | Repetition_boundary_invalid detail -> "repetition boundary invalid: " ^ detail
@@ -47,14 +45,6 @@ let purge_error_to_string = function
     ^ Keeper_transcript_unit.show_structural_error structural
   | Atom_count_changed { before; after } ->
     Printf.sprintf "purge changed the atom count (%d -> %d)" before after
-  | Kept_atom_rewritten { atom } ->
-    Printf.sprintf
-      "purge rewrote the message opening atom %d, which the history's end or a \
-       turn-boundary line names"
-      atom
-  | Continuity_no_longer_fits error ->
-    "the Librarian working state fits the history before the purge and not after it: "
-    ^ Librarian_continuity_snapshot.error_to_string error
 ;;
 
 (* One purge work item: an ordinary message or a whole closed tool cycle.
@@ -145,26 +135,6 @@ let clear_tool_result_blocks (message : Agent_core.Types.message) =
   { message with Agent_core.Types.content }, !cleared_count
 ;;
 
-type boundary_line =
-  int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result
-
-(* The atom each completed turn of [trace_id] ended on, [end_atom - 1]: its
-   turn-boundary line holds the digest of that atom's opening message, and
-   the request front, the Librarian's range and its witness lookup all find
-   the line by that digest. A line that cannot be read names nothing anyone
-   can match, so it adds nothing to keep. *)
-let atoms_named_by_boundaries ~trace_id (lines : boundary_line list) =
-  List.filter_map
-    (fun ((_line, decoded) : boundary_line) ->
-       match decoded with
-       | Error (_ : Keeper_turn_boundaries.read_error) -> None
-       | Ok record ->
-         (match Keeper_turn_boundaries.atom_position_stated ~trace_id record with
-          | Some (_turn_ref, end_atom, _digest) when end_atom >= 1 -> Some (end_atom - 1)
-          | Some _ | None -> None))
-    lines
-;;
-
 (* The reasoning strip over one assistant message, never emptying it. A
    message whose only content is unsigned reasoning opens an atom; removing it
    would renumber every atom after it (goo-yang-bong, 2026-09-22), and
@@ -184,7 +154,7 @@ let strip_reasoning_keeping_the_message message =
 let shrinks_the_head ~dropped_at_break = dropped_at_break > 0
 ;;
 
-let purge_messages ~config ~trace_id ~boundary_lines ~continuity ~named messages =
+let purge_messages ~config ~named messages =
   if config.keep_recent_messages < 0
   then
     Error
@@ -237,67 +207,7 @@ let purge_messages ~config ~trace_id ~boundary_lines ~continuity ~named messages
                 | Some _ -> ())
              | Runtime_model_input_tail_window.Pinned -> ())
           labelled;
-        (* The atoms whose opening message is kept byte-exact, because a record
-           names each by that message's digest: the last atom, which every
-           position at the history's end names, and the atom each completed
-           turn ended on, which its boundary line names. Everything else may be
-           rewritten; none of it is removed. *)
-        let kept_atoms =
-          (if atom_count > 0 then [ atom_count - 1 ] else [])
-          @ List.filter
-              (fun atom -> atom < atom_count)
-              (atoms_named_by_boundaries ~trace_id boundary_lines)
-          |> List.sort_uniq Int.compare
-        in
         let kept_message = Array.make (List.length retained) false in
-        List.iter
-          (fun atom ->
-             Option.iter (fun index -> kept_message.(index) <- true) opener_of_atom.(atom))
-          kept_atoms;
-        (* A continuity snapshot that fits this history holds a digest of the
-           bytes of the atoms it covers, and once caught up it is the request's
-           front: the turn sends its working state in place of those atoms.
-           Rewritten, the snapshot would stop fitting ([Prefix_changed]) and the
-           Librarian would write a working state again, from atom 0 and one
-           completed turn per round, and each request until it caught up would
-           carry no working state; a snapshot still catching up would start
-           over. So everything ahead of its end stays byte-exact. A snapshot
-           that does not fit is written again from atom 0 whatever the purge
-           does, so it holds nothing back. *)
-        let fitting_continuity =
-          match continuity with
-          | None -> Ok None
-          | Some snapshot ->
-            (match
-               Librarian_continuity_snapshot.restore
-                 ~trace_id
-                 ~lines:boundary_lines
-                 ~messages
-                 snapshot
-             with
-             | Ok _ -> Ok (Some snapshot)
-             | Error error ->
-               if snapshot.unread_messages = [] then Ok None
-               else Error (Continuity_no_longer_fits error))
-        in
-        match fitting_continuity with
-        | Error error -> Error error
-        | Ok fitting_continuity ->
-        Option.iter
-          (fun (snapshot : Librarian_continuity_snapshot.t) ->
-             let covered_until =
-               match
-                 if snapshot.end_atom < atom_count
-                 then opener_of_atom.(snapshot.end_atom)
-                 else None
-               with
-               | Some opener -> opener
-               | None -> List.length retained
-             in
-             for index = 0 to covered_until - 1 do
-               kept_message.(index) <- true
-             done)
-          fitting_continuity;
         (* A message the turn log has not named is read from this head by the
            next unit, so it goes out as it is. A purge that shrinks the head
            gets the [Reset] line that names all the head holds, before the
@@ -373,42 +283,18 @@ let purge_messages ~config ~trace_id ~boundary_lines ~continuity ~named messages
               unit_messages)
         in
         let purged = List.concat_map purge_item items @ protected_suffix in
-        (* The rules above keep every atom, every kept opener and a fitting
-           snapshot's bytes; this states it rather than trusting them to go on
-           doing so. *)
-        let kept_atoms_intact () =
+        let atom_count_intact () =
           let _labelled, purged_atom_count =
             Runtime_model_input_tail_window.annotate purged
           in
           if purged_atom_count <> atom_count
           then Error (Atom_count_changed { before = atom_count; after = purged_atom_count })
-          else (
-            let before = Runtime_model_input_tail_window.atom_opening_digest retained in
-            let after = Runtime_model_input_tail_window.atom_opening_digest purged in
-            match
-              List.find_opt
-                (fun atom -> not (Option.equal String.equal (before atom) (after atom)))
-                kept_atoms
-            with
-            | Some atom -> Error (Kept_atom_rewritten { atom })
-            | None ->
-              (match fitting_continuity with
-               | None -> Ok ()
-               | Some snapshot ->
-                 (match
-                    Librarian_continuity_snapshot.restore
-                      ~trace_id
-                      ~lines:boundary_lines
-                      ~messages:purged
-                      snapshot
-                  with
-                  | Ok _ -> Ok ()
-                  | Error error -> Error (Continuity_no_longer_fits error))))
+          else Ok ()
         in
         (match Keeper_transcript_unit.validate purged with
          | Error structural -> Error (Invalid_output_structure structural)
          | Ok () ->
-           (match kept_atoms_intact () with
+           (match atom_count_intact () with
             | Error _ as error -> error
             | Ok () ->
               Ok
@@ -423,15 +309,10 @@ let purge_messages ~config ~trace_id ~boundary_lines ~continuity ~named messages
 
 let purge
       ~config
-      ~trace_id
-      ~boundary_lines
-      ~continuity
       ~named
       (ckpt : Agent_core.Checkpoint.t)
   =
-  match
-    purge_messages ~config ~trace_id ~boundary_lines ~continuity ~named ckpt.messages
-  with
+  match purge_messages ~config ~named ckpt.messages with
   | Error error -> Error error
   | Ok (messages, report) ->
     if report.messages_dropped_at_structural_break = 0 then

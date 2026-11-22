@@ -326,35 +326,3 @@ val origin_to_json : origin -> Yojson.Safe.t
     [covered] with [end_atom];
     [turn_start] with [end_atom]; or
     [turn_start_unknown] with [reason]. *)
-
-(** The atoms that are in neither the request nor memory while a request
-    starts at [gap_end_atom], past everything the Librarian covers (RFC
-    librarian-lifecycle §4.10, rule 3). [gap_end_atom] is excluded. *)
-type librarian_gap =
-  { gap_start_atom : int
-  ; gap_end_atom : int
-  }
-
-val librarian_gap
-  :  snapshot_cut:int option
-  -> read_position:int option
-  -> accepted_start:int
-  -> librarian_gap option
-(** The one rule for the gap. What the Librarian covers ends at the later of
-    its continuity snapshot's cut and its durable read position: the atoms
-    before the cut are summarized, the atoms before the read position are
-    in memory. The gap runs from there to just before [accepted_start], the
-    start the provider last accepted. [None] when [accepted_start] is at or
-    before that end, or when neither position is known. A request that
-    starts past its Librarian point therefore need not leave a gap: a
-    snapshot cut S behind a read position R, with the request starting at R,
-    skips only atoms the Librarian has already read.
-
-    [snapshot_cut] is taken as covered whether or not the snapshot fits the
-    current history. A snapshot that no longer fits stays in its file with
-    nothing on disk marking it: the turn driver finds the mismatch only by
-    comparing it with the checkpoint on each request, and then sends no
-    working state. So while such a snapshot remains, with its cut past the
-    read position, this counts the gap short: from the cut rather than from
-    the read position. Telling the two apart needs that history comparison,
-    and the alarm does not make it. *)

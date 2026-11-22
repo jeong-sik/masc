@@ -876,7 +876,6 @@ let run_scan ~base_path = function
   | Lane_addon_scan store ->
     Lane_addon_outcome
       (L.scan ~validate_tool_request
-         ~validate_history_resolution:Masc.Keeper_librarian_history_resolution_intent.check_published_file
          store ~base_path)
 ;;
 
@@ -1221,13 +1220,6 @@ let judge_runtime_config ~base_path ~config_root path =
         | _ :: _ -> Error (exact_slot_degradation_to_string degradation)
       in
       Server_runtime_bootstrap.check_exact_output_registry ~config_root ();
-      (* This is a dependency observation, not an automatic installation or a
-         new deployment/turn gate. Explicitly disabled Memory stays disabled;
-         a route admitted here still has no running worker/provider proof. *)
-      let memory = Masc.Keeper_memory_execution_availability.snapshot
-          ~config:(Masc.Workspace.default_config base_path) ~mode:`Preflight
-        |> Masc.Keeper_memory_execution_availability.to_json in
-      Printf.printf "memory execution preflight: %s\n%!" (Yojson.Safe.to_string memory);
       Ok ()
     with
     | Env_config_core.Config_error detail -> Error detail

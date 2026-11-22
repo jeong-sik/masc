@@ -252,8 +252,6 @@ type purge_error =
   | Purge_keeper_active of string
   | Purge_checkpoint_unavailable of string
   | Purge_checkpoint_invalid of string
-  | Purge_boundaries_unreadable of string
-  | Purge_continuity_unreadable of string
   | Purge_turn_log_unreadable of string
   | Purge_librarian_cancel_failed of string
   | Purge_backup_failed of string
@@ -274,10 +272,6 @@ let purge_error_to_string = function
     "checkpoint unavailable: " ^ detail
   | Purge_checkpoint_invalid detail ->
     "checkpoint purge refused: " ^ detail
-  | Purge_boundaries_unreadable detail ->
-    "checkpoint purge refused: turn-boundary log unreadable: " ^ detail
-  | Purge_continuity_unreadable detail ->
-    "checkpoint purge refused: Librarian working state unreadable: " ^ detail
   | Purge_turn_log_unreadable detail ->
     "checkpoint purge refused: turn log unreadable: " ^ detail
   | Purge_librarian_cancel_failed detail ->
@@ -355,29 +349,22 @@ let turn_log_place config ~keeper_name ~trace_id ~session_dir : Keeper_turn_log_
 (* Reads what the purge reads and computes the purged checkpoint. Nothing is
    written. *)
 let purge_compute config ~keeper_name ~trace_id ~session_dir =
-  let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
   (match
-     ( Keeper_turn_boundaries.read
-         ~keepers_dir:runtime_keepers_dir
-         ~keeper_id:keeper_name
-     , Keeper_librarian_continuity.read ~config ~keeper_name
-     , Keeper_checkpoint_store.load_agent_core_exact_snapshot
+     ( Keeper_checkpoint_store.load_agent_core_exact_snapshot
          ~session_dir
          ~session_id:trace_id
      , Keeper_turn_log_recorder.named
          (turn_log_place config ~keeper_name ~trace_id ~session_dir) )
    with
-   | Error detail, _, _, _ -> Error (Purge_boundaries_unreadable detail)
-   | Ok _, Error detail, _, _ -> Error (Purge_continuity_unreadable detail)
-   | Ok _, Ok _, Error error, _ ->
+   | Error error, _ ->
      Error
        (Purge_checkpoint_unavailable
           (checkpoint_ref_load_error_to_string error))
-   | Ok _, Ok _, Ok _, Error not_read ->
+   | Ok _, Error not_read ->
      Error
        (Purge_turn_log_unreadable
           (Keeper_turn_log_recorder.not_recorded_to_string not_read))
-   | Ok boundary_lines, Ok continuity, Ok snapshot, Ok named ->
+   | Ok snapshot, Ok named ->
      let source_ref = Keeper_checkpoint_store.exact_snapshot_reference snapshot in
      let source = Keeper_checkpoint_store.exact_snapshot_checkpoint snapshot in
      (* The report measures the whole checkpoint in the value codec's
@@ -397,9 +384,6 @@ let purge_compute config ~keeper_name ~trace_id ~session_dir =
            (match
               Keeper_checkpoint_purge.purge
                 ~config:Keeper_checkpoint_purge.default_config
-                ~trace_id
-                ~boundary_lines
-                ~continuity
                 ~named
                 checkpoint
             with
@@ -633,7 +617,7 @@ let purge_current config ~keeper_name ~apply =
               released. *)
            match
              Eio_context.run_on_owner_domain (fun () ->
-               Keeper_librarian_queue_refresh.with_purge_then_catch_up
+               Keeper_memory_lane.with_librarian_purge
                  ~base_path:config.Workspace.base_path
                  ~keeper_name
                  (fun () -> purge_current_unlocked config ~keeper_name ~apply:true))

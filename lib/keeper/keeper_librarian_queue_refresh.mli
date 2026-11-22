@@ -44,15 +44,6 @@ val forget_measurement : config:Workspace.config -> keeper_name:string -> unit
     capacity, cannot outlive its identity. Also discards the previous verified
     unread count and retires any older pass's measurement publication token. *)
 
-val attention_health_json : config:Workspace.config -> Yojson.Safe.t
-(** Nonblocking process-local projection for full health. Read durable-pass
-    measurements and independent admission waits together under their lock,
-    using {!Keeper_librarian_pending.attention_required}. Each Keeper appears
-    once, with both original observations and the durable measurement time.
-    Counts cover only observations in this process, not unmeasured Keepers or
-    admission passes that neither wait on a worker nor fail. No file, worker, provider or
-    domain mutation is performed; an empty projection is not proof of drain. *)
-
 val install : unit -> unit
 (** Install after the detached memory executor. Queue producers never wait for
     this extraction; source selection happens when the latest unit runs. *)

@@ -263,26 +263,6 @@ let librarian_range_receipt_store =
   }
 ;;
 
-let memory_admission_queue_store =
-  { store = "keeper explicit memory admission queue"
-  ; on_refusal =
-      "explicit Memory writes and pending admission refuse the queue; candidates \
-       remain untouched and cannot be treated as absent or consumed"
-  ; scan =
-      (fun ~base_path ->
-         let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-         let* keeper_ids = Keeper_memory_admission_queue.list_keeper_ids ~keepers_dir in
-         Ok
-           (List.fold_left
-              (fun report keeper_id ->
-                 count_row report
-                   (Keeper_memory_admission_queue.read_pending ~keepers_dir ~keeper_id
-                    |> Result.map (fun _ -> ())
-                    |> Result.map_error (fun detail -> keeper_id ^ ": " ^ detail)))
-              empty_report keeper_ids))
-  }
-;;
-
 let memory_source_current_store =
   { store = "memory-source current claims"
   ; on_refusal =
@@ -705,100 +685,6 @@ let memory_log_store =
   }
 ;;
 
-let turn_boundary_store =
-  { store = "keeper turn boundaries"
-  ; on_refusal =
-      "the Librarian round stops at the line and journals it, so the keeper's \
-       turns after it are not read until the line is readable"
-  ; scan =
-      (fun ~base_path ->
-         let keepers_dir = runtime_keepers_dir ~base_path in
-         scan_keeper_dirs ~base_path (fun report ~keeper_id ->
-           match Keeper_turn_boundaries.read ~keepers_dir ~keeper_id with
-           | Error detail -> count_row report (Error (keeper_id ^ ": " ^ detail))
-           | Ok lines ->
-             List.fold_left
-               (fun report (line, decoded) ->
-                  match decoded with
-                  | Ok _ -> count_row report (Ok ())
-                  | Error Keeper_turn_boundaries.Incomplete_line -> report
-                  | Error
-                      (( Keeper_turn_boundaries.Not_json _
-                       | Keeper_turn_boundaries.Malformed _ ) as error) ->
-                    count_row
-                      report
-                      (Error
-                         (Printf.sprintf
-                            "%s line %d: %s"
-                            keeper_id
-                            line
-                            (Keeper_turn_boundaries.read_error_to_string error))))
-               report
-               lines))
-  }
-;;
-
-let librarian_progress_store =
-  { store = "keeper Librarian progress"
-  ; on_refusal =
-      "the read position is an error, never \"not read yet\", so the keeper's \
-       history is neither read again from zero nor read further until the \
-       file is readable"
-  ; scan =
-      (fun ~base_path ->
-         let keepers_dir = runtime_keepers_dir ~base_path in
-         scan_keeper_dirs ~base_path (fun report ~keeper_id ->
-           match Keeper_librarian_progress.read ~keepers_dir ~keeper_id with
-           | Ok None -> report
-           | Ok (Some _) -> count_row report (Ok ())
-           | Error error ->
-             count_row
-               report
-               (Error
-                  (keeper_id
-                   ^ ": "
-                   ^ Keeper_librarian_progress.read_error_to_string error))))
-  }
-;;
-
-let librarian_external_cursor_store =
-  { store = "keeper external admission read cursor"
-  ; on_refusal = "external evidence consumption stops until its cursor is readable; malformed state never means unread"
-  ; scan = (fun ~base_path ->
-      let keepers_dir = runtime_keepers_dir ~base_path in
-      scan_keeper_dirs ~base_path (fun report ~keeper_id ->
-        match Keeper_external_read_cursor.inspect ~keepers_dir ~keeper_id with
-        | Ok false -> report
-        | Ok true -> count_row report (Ok ())
-        | Error detail -> count_row report (Error (keeper_id ^ ": " ^ detail))))
-  }
-;;
-
-let librarian_official_progress_store =
-  { store = "keeper official-client Librarian progress"
-  ; on_refusal =
-      "the official-client read position is an error, never \"not read yet\", so the \
-       keeper's official turns are not read until the file is readable"
-  ; scan =
-      (fun ~base_path ->
-         let keepers_dir = runtime_keepers_dir ~base_path in
-         scan_keeper_dirs ~base_path (fun report ~keeper_id ->
-           match
-             Keeper_librarian_official_progress.read ~keepers_dir ~keeper_id
-           with
-           | Ok None -> report
-           | Ok (Some _) -> count_row report (Ok ())
-           | Error error ->
-             count_row
-               report
-               (Error
-                  (keeper_id
-                   ^ ": "
-                   ^ Keeper_librarian_official_progress.read_error_to_string
-                       error))))
-  }
-;;
-
 let turn_fragment_store =
   { store = "keeper official-client turn fragments"
   ; on_refusal =
@@ -1127,19 +1013,14 @@ module Id = struct
     | Memory_journal
     | Goal_store
     | Librarian_range_receipts
-    | Memory_admission_queue
     | Memory_source_current
     | Disposition_receipts
     | Board_posts
     | Board_attention_partitions
     | Provider_inputs
     | Turn_records
-    | Turn_boundaries
     | Turn_log
     | Memory_log
-    | Librarian_progress
-    | Librarian_external_cursor
-    | Librarian_official_progress
     | Turn_fragments
     | Memory_absorbed
     | Memory_os_events
@@ -1181,7 +1062,6 @@ let reader : Id.t -> reader = function
   | Id.Official_client_session ->
     Refuse_boot (Refusing.Official_client_session, official_client_session_store)
 
-  | Id.Memory_admission_queue -> Preflight_only memory_admission_queue_store
   | Id.Librarian_range_receipts -> Preflight_only librarian_range_receipt_store
   | Id.Memory_source_current -> Preflight_only memory_source_current_store
   | Id.Disposition_receipts -> Preflight_only disposition_receipt_store
@@ -1189,12 +1069,8 @@ let reader : Id.t -> reader = function
   | Id.Board_attention_partitions -> Preflight_only board_attention_partition_store
   | Id.Provider_inputs -> Preflight_only provider_input_store
   | Id.Turn_records -> Preflight_only turn_record_store
-  | Id.Turn_boundaries -> Preflight_only turn_boundary_store
   | Id.Turn_log -> Preflight_only turn_log_store
   | Id.Memory_log -> Preflight_only memory_log_store
-  | Id.Librarian_progress -> Preflight_only librarian_progress_store
-  | Id.Librarian_external_cursor -> Preflight_only librarian_external_cursor_store
-  | Id.Librarian_official_progress -> Preflight_only librarian_official_progress_store
   | Id.Turn_fragments -> Preflight_only turn_fragment_store
   | Id.Memory_absorbed -> Preflight_only memory_absorbed_store
   | Id.Memory_os_events -> Preflight_only memory_os_events_store

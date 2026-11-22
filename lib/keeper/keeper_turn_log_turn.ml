@@ -31,28 +31,51 @@ let ending exit closing_save : Writer.ending =
   | (Returned_error | Raised), (None | Some Saved) -> Errored
 ;;
 
-(* The same two values today's Librarian question shows for a Goal. *)
-let goal_shown (goal : Keeper_turn_task_context.goal) : Turn_log.goal_shown =
-  { goal = goal.goal_id
+(* The same two values the Librarian question shows for a Goal. *)
+let goal_shown ~goal_id (goal : Goal_store.goal) : Turn_log.goal_shown =
+  { goal = goal_id
   ; shown =
       Yojson.Safe.to_string
         (`Assoc
             [ "phase", Goal_phase.to_yojson goal.phase
-            ; "criterion", Goal_store.criterion_to_yojson goal.criterion
+            ; "criterion", Goal_store.criterion_to_yojson (Goal_store.criterion_of_goal goal)
             ])
   }
 ;;
 
-let task_evidence : Keeper_turn_task_context.t -> Turn_log.task_evidence = function
-  | No_task -> No_task
-  (* [Admission_not_recorded] is what an old boundary line decodes to. A
-     context captured for a turn is never that; either way the Task is not
-     known. *)
-  | Admission_not_recorded | Task_source_unavailable (_ : string) -> Task_source_unavailable
-  | Task { task_id; goals = Ok goals } ->
-    Task { task = task_id; goals = Some (List.map goal_shown goals) }
-  | Task { task_id; goals = Error (_ : Keeper_turn_task_context.source_error) } ->
-    Task { task = task_id; goals = None }
+let task_evidence ~config : (Keeper_id.Task_id.t option, string) result -> Turn_log.task_evidence =
+  function
+  | Error (_ : string) -> Task_source_unavailable
+  | Ok None -> No_task
+  | Ok (Some task_id) ->
+    let goals =
+      let open Result.Syntax in
+      let* links = Workspace_goal_index.read_goal_task_links_authoritative_r config in
+      let task_goal_map =
+        Workspace_goal_index.build_task_goal_map ~goal_task_links:links ()
+      in
+      let ids =
+        Workspace_goal_index.goals_for_task_in_map
+          task_goal_map
+          ~task_id:(Keeper_id.Task_id.to_string task_id)
+      in
+      if ids = []
+      then Ok []
+      else
+        let* goals_by_id =
+          Goal_store.load_goals_by_id_result config
+          |> Result.map_error Goal_store.unavailable_to_string
+        in
+        let rec resolve acc = function
+          | [] -> Ok (List.rev acc)
+          | goal_id :: rest ->
+            (match Goal_store.Goal_id_map.find_opt goal_id goals_by_id with
+             | None -> Error ("linked Goal is missing: " ^ goal_id)
+             | Some goal -> resolve (goal_shown ~goal_id goal :: acc) rest)
+        in
+        resolve [] ids
+    in
+    Task { task = task_id; goals = Result.to_option goals }
 ;;
 
 let board_item ~post (signal : Keeper_event_queue.board_stimulus) : Turn_log.board_item =

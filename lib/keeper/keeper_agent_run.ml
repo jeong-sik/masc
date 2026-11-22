@@ -883,7 +883,7 @@ let run_turn
       }
     ~turn_ref
     ~runtime:runtime_id_string
-    ~task:(Keeper_turn_log_turn.task_evidence ctx.task_context)
+    ~task:ctx.task_evidence
     ~stimuli:(List.map Keeper_turn_log_turn.stimulus woken_by)
     ~succeeded:(fun (settlement : Keeper_agent_result.turn_settlement) ->
       Result.is_ok settlement.result)
@@ -923,42 +923,12 @@ let run_turn
           , `Bool (Keeper_run_context.loaded_checkpoint_present ctx)
           ]))
     Keeper_runtime_manifest.Checkpoint_loaded;
-  (* [ctx.ctx_work] is the history this turn starts from; the [ctx_work] bound
-     below already carries this turn's input. *)
-  let history_at_start =
-    Keeper_turn_boundaries.history_at_start_of_messages
-      (Keeper_context_runtime.messages_of_context ctx.ctx_work)
-  in
   (* Capture before prompt/Gate/provider admission can synthesize a missing
      ToolResult. Native journal recovery starts from its retained initial seed,
      not the latest checkpoint that may already contain replayed settlements. *)
   let argument_demotion_seed = match native_resume with
     | Some resumed -> Keeper_direct_native_continuation.initial_messages resumed
     | None -> Keeper_context_runtime.messages_of_context ctx.ctx_work
-  in
-  (* RFC librarian-lifecycle 4.6: a restart line must not be ahead of the
-     restart. A turn that knows the saved history holds no atom says so now; a
-     turn whose checkpoint version was superseded says so after the first stage
-     save the store accepts ([checkpoint_sink] below). *)
-  let restart_notice_after_first_save =
-    let stated =
-      match history_at_start with
-      | Keeper_turn_boundaries.Fresh_history ->
-        Turn_helpers.history_stated_by_log ~config ~keeper_name:meta.name ~trace_id
-      | Keeper_turn_boundaries.Continued_history
-      | Keeper_turn_boundaries.Continued_history_from _ ->
-        Keeper_turn_boundaries.History_may_hold_atoms
-    in
-    match Turn_helpers.restart_notice history_at_start ctx.saved_history stated with
-    | Turn_helpers.No_restart_notice -> Atomic.make false
-    | Turn_helpers.Notice_at_turn_start ->
-      Turn_helpers.record_history_restart
-        ~config
-        ~keeper_name:meta.name
-        ~trace_id
-        Turn_helpers.At_turn_start;
-      Atomic.make false
-    | Turn_helpers.Notice_after_first_save -> Atomic.make true
   in
   (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
      and user message append — Keeper_run_prompt. *)
@@ -1629,13 +1599,6 @@ let run_turn
                 match save_result with
                 | Ok (Keeper_checkpoint_store.Saved { checkpoint = stored; _ }) ->
                   last_persisted_checkpoint_ref := Some stored;
-                  if Atomic.compare_and_set restart_notice_after_first_save true false
-                  then
-                    Turn_helpers.record_history_restart
-                      ~config
-                      ~keeper_name:meta.name
-                      ~trace_id
-                      Turn_helpers.After_first_save;
                   Keeper_turn_driver_try_provider.observe_checkpoint_saved
                     checkpoint_progress
                     snapshot.stage;
@@ -2119,7 +2082,6 @@ let run_turn
                          | Error e -> Error e
                          | Ok (turn_outcome, terminal_effect_receipt) ->
                            Keeper_agent_run_finalize_response.finalize
-                             ~task_context:ctx.task_context
                              ~config ~meta
                              ~manifest_keeper_turn_id
                              ~session ~append_manifest
@@ -2135,8 +2097,6 @@ let run_turn
                              ~runtime_id_string:selected_runtime_id
                              ~max_context:selected_max_context
                              ~checkpoint_owner
-                             ~history_at_start
-                             ~restart_notice_pending:restart_notice_after_first_save
                              ~official_client_settlement:selected_run.official_client_settlement
                              ~history_messages
                              ~prompt_metrics ~ctx_composition ~usage
@@ -2164,26 +2124,17 @@ let run_turn
                                    ())
                              )))
                in
-       (* [finalize] writes the end line of a turn that settles. An
-          official-client turn that fails never reaches it, and without that
-          line the Librarian has nothing that names the turn: its input is
-          already a fragment and its tools may already have acted, but no round
-          reads them (RFC librarian-lifecycle §10-3, I3). An Agent-Core turn
-          needs no line here -- its stage saves hold its atoms and the next end
-          line covers them. With no dispatched candidate there is no owner to
-          name the line's kind; such a turn reached no model and ran no tool,
-          and its input fragment is left unnamed (#38827). *)
+       (* An official-client turn that fails never reaches [finalize], yet its
+          input is already a fragment and its tools may already have acted.
+          Persist its tool observations and client-turn ledger line here. *)
        (match turn_result, !last_dispatched_checkpoint_owner with
         | Error _, Some Runtime_execution.Official_client ->
-          Keeper_agent_run_finalize_response.record_errored_official_turn_boundary
-            ~task_context:ctx.task_context
+          Keeper_agent_run_finalize_response.record_errored_official_turn
             ~config
             ~meta
             ~turn_ref
             ~session
             ~tool_observations:(List.rev acc.tool_calls)
-            ~history_at_start
-            ~restart_notice_pending:restart_notice_after_first_save
         | Error _, (Some Runtime_execution.Masc_agent_core | None) | Ok _, _ -> ());
        (* The lane this turn leaves behind, and the lane an earlier turn left
           for this one. They used to be merged into one runtime slot with the

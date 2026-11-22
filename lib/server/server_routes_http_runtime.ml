@@ -567,25 +567,7 @@ let make_health_fields ?(listener = default_listener) ?section_timings_ref
          ~exact_registry_stale:(Runtime.exact_output_registry_stale ())
          (Runtime.startup_degradation ())
   in
-  let memory_execution_json =
-    compute_section ~name:"keeper_memory_execution" ?section_timings_ref (fun () ->
-      match server_state with
-      | None -> `Assoc ["status",`String "snapshot_not_ready";
-          "operator_action_required",`Bool false]
-      | Some state ->
-        Keeper_memory_execution_availability.snapshot
-          ~config:(Mcp_server.workspace_config state) ~mode:`Live
-        |> Keeper_memory_execution_availability.to_json)
-  in
   let keeper_config_operator_action_required = keeper_config_schema_blocking in
-  let memory_attention_json =
-    compute_section ~name:"keeper_memory_attention" ?section_timings_ref (fun () ->
-      match server_state with
-      | None -> `Assoc ["status", `String "snapshot_not_ready";
-          "operator_action_required", `Bool false]
-      | Some state -> Keeper_librarian_queue_refresh.attention_health_json
-          ~config:(Mcp_server.workspace_config state))
-  in
   (* The Memory writers' rows (RFC librarian-call-only-proposes §12.3), read
      from what each writer holds when the full health snapshot is refreshed. *)
   let librarian_json =
@@ -642,8 +624,6 @@ let make_health_fields ?(listener = default_listener) ?section_timings_ref
     ("server_hibernation", Server_hibernation.status_json ());
     ("keeper_fleet_safety", keeper_fleet_safety);
     ("keeper_identity_drift", keeper_identity_drift_json);
-    ("keeper_memory_execution", memory_execution_json);
-    ("keeper_memory_attention", memory_attention_json);
     ("librarian", librarian_json);
     ("publication_recovery_activation", publication_recovery_activation_json);
     ("keeper_reaction_ledger", reaction_ledger_json);
@@ -840,12 +820,6 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ( "keeper_reaction_ledger",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "keeper_reaction_ledger" );
-    ( "keeper_memory_execution",
-      full_health_component_placeholder ~component_timed_out ~status
-        "keeper_memory_execution" );
-    ( "keeper_memory_attention",
-      full_health_component_placeholder ?error ~component_timed_out ~status
-        "keeper_memory_attention" );
     ( "keeper_owner",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "keeper_owner" );

@@ -183,27 +183,6 @@ let test_an_undecodable_file_is_an_error_not_an_empty_state () =
   | Ok _ -> fail "read a file without its fields"
 ;;
 
-(* A purge has to take the position together with the turn boundary log it is
-   a position in. *)
-let test_purge_plan_removes_the_progress_file () =
-  let module Shutdown = Masc.Keeper_shutdown_types in
-  let context = { Shutdown.requested_name = keeper_id } in
-  let plan = Shutdown.dashboard_purge_artifact_plan ~keeper_name:keeper_id context in
-  let has artifact = List.exists (fun entry -> entry = artifact) plan in
-  check bool "plan removes the progress file" true
-    (has Shutdown.Keeper_librarian_progress_artifact);
-  check bool "plan removes the committed-range receipt" true
-    (has Shutdown.Keeper_librarian_range_receipt_artifact);
-  check bool "plan removes an interrupted retraction plan" true
-    (has Shutdown.Keeper_memory_retraction_plan_artifact);
-  check bool "plan removes the official-turn position" true
-    (has Shutdown.Keeper_librarian_official_progress_artifact);
-  check bool "plan removes the external admission cursor" true
-    (has Shutdown.Keeper_external_read_cursor_artifact);
-  check bool "and the log it is a position in" true
-    (has Shutdown.Keeper_turn_boundaries_artifact)
-;;
-
 let () =
   run
     "keeper_librarian_progress"
@@ -223,8 +202,6 @@ let () =
             test_a_value_no_reader_decodes_is_not_written
         ; test_case "an undecodable file is an error, not an empty state" `Quick
             test_an_undecodable_file_is_an_error_not_an_empty_state
-        ; test_case "the purge plan removes the progress file" `Quick
-            test_purge_plan_removes_the_progress_file
         ] )
     ]
 ;;

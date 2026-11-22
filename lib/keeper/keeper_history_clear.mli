@@ -2,7 +2,7 @@
     Planning reads exact canonical and retained input bytes before any official
     session effect. Execution retains the cleared payload before canonical CAS.
     This module does not publish input ownership; the Owner must consume its
-    receipt with the same original authority, then append the restart marker.
+    receipt with the same original authority.
     Filesystem and SQLite commits are separate and partial evidence survives. *)
 type authority
 type plan
@@ -56,8 +56,4 @@ val belongs_to : receipt -> authority -> bool
 val checkpoint : receipt -> Keeper_checkpoint_ref.t option
 val allows_turn_reset : receipt -> bool
 val history : receipt -> history
-val append_marker : receipt -> keepers_dir:string -> keeper_name:string ->
-  (unit, string) result
-(** Call only after the Owner confirms input publication. No-payload clears need
-    no restart marker. Marker failure does not undo either confirmed commit. *)
 val error_to_string : error -> string

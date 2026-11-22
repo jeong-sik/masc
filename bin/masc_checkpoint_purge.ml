@@ -94,9 +94,7 @@ let purge_error_text = function
        keeper_checkpoint_purge, nothing was written: %s"
       (structural_error_text structural)
   | ( Purge.Repetition_boundary_invalid _
-    | Purge.Atom_count_changed _
-    | Purge.Kept_atom_rewritten _
-    | Purge.Continuity_no_longer_fits _ ) as purge_error ->
+    | Purge.Atom_count_changed _ ) as purge_error ->
     Purge.purge_error_to_string purge_error
 
 let timestamp_utc () =
@@ -346,24 +344,6 @@ let () =
       let checkpoint =
         { source with Agent_core.Checkpoint.context = Agent_core.Context.copy source.context }
       in
-      let boundary_lines =
-        match
-          Masc.Keeper_turn_boundaries.read
-            ~keepers_dir:runtime_keepers_dir
-            ~keeper_id:keeper_name
-        with
-        | Ok lines -> lines
-        | Error detail -> error ("turn-boundary log unreadable: " ^ detail)
-      in
-      let continuity =
-        match
-          Masc.Keeper_librarian_continuity.read_in
-            ~keepers_dir:runtime_keepers_dir
-            ~keeper_name:keeper_name
-        with
-        | Ok continuity -> continuity
-        | Error detail -> error ("Librarian working state unreadable: " ^ detail)
-      in
       let named =
         match Masc.Keeper_turn_log_recorder.named place with
         | Ok named -> named
@@ -375,9 +355,6 @@ let () =
       (match
          Purge.purge
            ~config:!config
-           ~trace_id:trace
-           ~boundary_lines
-           ~continuity
            ~named
            checkpoint
        with

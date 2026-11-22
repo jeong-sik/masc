@@ -58,6 +58,35 @@ let needed ~keepers_dir ~keeper_name
     changed || needs_reconsideration
 ;;
 
+let goal_context_for_task ~config = function
+  | None -> Keeper_librarian.No_task
+  | Some task ->
+    let task_id = Keeper_id.Task_id.to_string task in
+    let open Result.Syntax in
+    let criteria =
+      let* links = Workspace_goal_index.read_goal_task_links_authoritative_r config in
+      let ids =
+        List.filter_map
+          (fun (goal_id, tasks) -> if List.mem task_id tasks then Some goal_id else None)
+          links
+      in
+      let* goals_by_id =
+        Result.map_error Goal_store.unavailable_to_string
+          (Goal_store.load_goals_by_id_result config)
+      in
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | id :: rest ->
+          (match Goal_store.Goal_id_map.find_opt id goals_by_id with
+           | None -> Error ("Linked Goal is missing: " ^ id)
+           | Some goal ->
+             loop ((id, goal.phase, Goal_store.criterion_of_goal goal) :: acc) rest)
+      in
+      loop [] ids
+    in
+    Keeper_librarian.Task_goals { task_id; criteria }
+;;
+
 (* The pass organizes the inputs pending now, with no turn range, so the
    Keeper's current task is the task these inputs belong to. It organizes
    pending sources only and reads no Memory, so its input carries no current
@@ -68,8 +97,10 @@ let input ~config ~keeper_id ~(meta : Keeper_meta_contract.keeper_meta)
   ; turn_ref = Ids.Turn_ref.make
       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       ~absolute_turn:meta.runtime.last_turn_id
-  ; historical_task_contexts = []; goal_context = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-      Keeper_librarian_input_sources.goal_context_for_task ~config meta.current_task_id)
+  ; historical_task_contexts = []
+  ; goal_context =
+      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+        goal_context_for_task ~config meta.current_task_id)
   ; keeper_instructions = meta.instructions
   ; current = None
   ; working_context

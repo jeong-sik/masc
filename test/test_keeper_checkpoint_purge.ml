@@ -61,23 +61,16 @@ let filler n =
 
 let no_tail_config = { Purge.default_config with keep_recent_messages = 0 }
 
-(* A purge with no boundary log, no Librarian working state and no turn log:
-   only the history's own end names a message. *)
+(* A purge with no turn log: only the history's own end names a message. *)
 let purge_plain ~config messages =
   Purge.purge_messages
     ~config
-    ~trace_id:"trace-purge-plain"
-    ~boundary_lines:[]
-    ~continuity:None
     ~named:Writer.No_log
     messages
 
 let purge_checkpoint ~config (checkpoint : Agent_core.Checkpoint.t) =
   Purge.purge
     ~config
-    ~trace_id:checkpoint.session_id
-    ~boundary_lines:[]
-    ~continuity:None
     ~named:Writer.No_log
     checkpoint
 
@@ -438,8 +431,6 @@ let test_checkpoint_fields_pass_through () =
       checkpoint.turn_count
       purged.Agent_core.Checkpoint.turn_count
 
-let fixture_trace = (checkpoint_fixture ()).Agent_core.Checkpoint.session_id
-
 let rec workspace_contents dir =
   Sys.readdir dir
   |> Array.to_list
@@ -739,13 +730,10 @@ let test_cli_recovery_writes_the_turn_log_line () =
   Alcotest.(check int) "the source was backed up" 1 (List.length (backups ()))
 ;;
 
-let purge_with ?(named = Writer.No_log) ~boundary_lines ~continuity messages =
+let purge_with ?(named = Writer.No_log) messages =
   match
     Purge.purge_messages
       ~config:no_tail_config
-      ~trace_id:fixture_trace
-      ~boundary_lines
-      ~continuity
       ~named
       messages
   with
@@ -806,7 +794,7 @@ let test_a_purge_rewrites_only_what_the_turn_log_named () =
   let named_turn = turn "read" "a" "one" in
   let unread_turn = turn "not read yet" "b" "two" in
   let messages = named_turn @ unread_turn in
-  let purge named = purge_with ~named ~boundary_lines:[] ~continuity:None messages in
+  let purge named = purge_with ~named messages in
   let shown messages = List.map Types.show_message messages in
   let purged, report = purge (Writer.Named_below (List.length named_turn)) in
   Alcotest.(check (list string)) "the turn past the mark goes out as it is"
@@ -835,7 +823,7 @@ let test_a_recovery_rewrites_past_the_mark () =
     @ overlapping_cycles ()
   in
   let recovered, report =
-    purge_with ~named:(Writer.Named_below 0) ~boundary_lines:[] ~continuity:None messages
+    purge_with ~named:(Writer.Named_below 0) messages
   in
   Alcotest.(check int) "the break is dropped" (List.length (overlapping_cycles ()))
     report.messages_dropped_at_structural_break;

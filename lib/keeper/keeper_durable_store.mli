@@ -44,19 +44,14 @@ module Id : sig
     | Memory_journal
     | Goal_store
     | Librarian_range_receipts
-    | Memory_admission_queue
     | Memory_source_current
     | Disposition_receipts
     | Board_posts
     | Board_attention_partitions
     | Provider_inputs
     | Turn_records
-    | Turn_boundaries
     | Turn_log
     | Memory_log
-    | Librarian_progress
-    | Librarian_external_cursor
-    | Librarian_official_progress
     | Turn_fragments
     | Memory_absorbed
     | Memory_os_events

@@ -1,7 +1,6 @@
 open Alcotest
 
 module Workspace = Masc.Workspace
-module Turn = Masc.Keeper_agent_run_turn_helpers
 
 let keeper_name = "scope-keeper"
 

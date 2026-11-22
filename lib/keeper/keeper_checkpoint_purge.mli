@@ -19,48 +19,9 @@
     {2 The atom sequence is kept}
 
     Every [User] and [Assistant] message opens an atom
-    ({!Runtime_model_input_tail_window.annotate}), and four stores count in
-    atoms: the turn-boundary log, the Librarian position, the continuity
-    snapshot and the carried-front seed. A purge that removed an atom would
-    renumber every one after it, and each of those stores would describe a
-    history that is no longer there. goo-yang-bong's purge on 2026-09-22
-    dropped 825 repeated wake cues and 6 reasoning-only replies, the history
-    went from 13,550 atoms to 12,719, nothing that counted in atoms matched
-    it any more, and every turn sent the whole 16 MB history until one
-    finally completed. So no rule here removes an atom-opening message.
-
-    {2 The messages a record names are kept}
-
-    A position is an atom index and the digest of the message that opens
-    that atom. Keeping the count is not enough: a completed turn usually ends
-    on an assistant reply, the reasoning strip rewrites it, and the turn's
-    boundary line would stop matching. With no working state that fits, the
-    request front starts at the last completed turn that still matches, and
-    at the oldest atom when none does. So these stay byte-exact:
-    - the last atom, returned whole along with the tail. Every position at
-      the history's end names it.
-    - the opening message of the atom each completed turn of the trace ended
-      on, which its [Turn_ended] line names. A failed turn can leave the
-      checkpoint past the last such line, so the end alone does not cover
-      it.
-    - everything ahead of the end of a Librarian working state
-      ({!Librarian_continuity_snapshot}) that fits the history. Once caught
-      up, the turn sends that working state in place of the atoms it covers,
-      and the snapshot holds a digest of their bytes; rewritten, the snapshot would
-      stop fitting ([Prefix_changed]) and the Librarian would write it again
-      from atom 0, one completed turn per round, with no working state in
-      any request until it caught up; a snapshot still catching up would
-      start over. Those atoms do not go out in a request, so leaving them
-      only costs disk.
-    {!purge_messages} checks all three against the history it returns — the
-    atom count, each kept opener's digest, and the working state through
-    {!Librarian_continuity_snapshot.restore} — and returns an error instead
-    of a history they no longer describe.
-
-    A carried-front seed ({!Keeper_carried_front}) names whatever atom a
-    front moved to, and is not kept: when the purge rewrote that atom's
-    opening message the seed no longer matches, and the request starts where
-    the last completed turn ended.
+    ({!Runtime_model_input_tail_window.annotate}). No rule here removes an
+    atom-opening message, and the last atom is returned whole along with the
+    protected tail.
 
     {2 What the turn log has not named is kept}
 
@@ -81,14 +42,7 @@
     tail goes ({!Keeper_turn_log_reset}), so on a recovery the turn log holds
     nothing back either. {!turn_log_line} asks for that line when the report's
     [messages_dropped_at_structural_break] is above 0, and the rule above is
-    lifted on that same answer. A working state that covers the dropped tail no longer
-    fits, and the recovery is refused; with the server stopped, removing that
-    working state (the keeper's [librarian-continuity.json]) lets it through,
-    and the Librarian writes it again from atom 0. The Librarian position is
-    not read or moved, so a recovery can leave it past the new end. The
-    server no longer starts the lane that read atoms from it; the Memory
-    health response still reads it, for its [read_position] and [stalled]
-    values.
+    lifted on that same answer.
 
     Tool protocol cycles are never split, reordered, or dropped. The last
     [keep_recent_messages] messages and the structurally protected suffix
@@ -154,43 +108,21 @@ type purge_error =
       }
       (** The output has a different number of atoms than the history it
           keeps. No rule removes an atom, so this is a bug in the transform. *)
-  | Kept_atom_rewritten of { atom : int }
-      (** The message opening [atom], which the history's end or a boundary
-          line names, came out different. A bug in the transform. *)
-  | Continuity_no_longer_fits of Librarian_continuity_snapshot.error
-      (** A hole-bearing snapshot does not fit its input, or a fitting
-          working state no longer fits the output. On a sound input this is
-          a bug in the transform; on a recovery the dropped tail was part of
-          what it covers. *)
 
 val purge_error_to_string : purge_error -> string
 
-type boundary_line =
-  int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result
-(** One line of {!Keeper_turn_boundaries.read}. *)
-
 val purge_messages
   :  config:config
-  -> trace_id:string
-  -> boundary_lines:boundary_line list
-  -> continuity:Librarian_continuity_snapshot.t option
   -> named:Keeper_turn_log_writer.named
   -> Agent_core.Types.message list
   -> (Agent_core.Types.message list * report, purge_error) result
-(** Pure message-list transform behind {!purge}. [boundary_lines] is the
-    keeper's turn-boundary log, [continuity] its saved Librarian working
-    state and [named] how far its turn log has named the head, all as they
-    are when the result is installed: they say which messages stay
-    byte-exact. A hole-bearing snapshot that no longer fits refuses purge
-    instead of being treated as absent. Its unread source bytes remain
-    protected along with the covered prefix.
+(** Pure message-list transform behind {!purge}. [named] is how far the
+    keeper's turn log has named the head when the result is installed:
+    messages past that mark stay byte-exact when no break is dropped.
     Exposed for tests. *)
 
 val purge
   :  config:config
-  -> trace_id:string
-  -> boundary_lines:boundary_line list
-  -> continuity:Librarian_continuity_snapshot.t option
   -> named:Keeper_turn_log_writer.named
   -> Agent_core.Checkpoint.t
   -> (Agent_core.Checkpoint.t * report, purge_error) result

@@ -1,28 +1,18 @@
 open Result.Syntax
-module Pending = Keeper_librarian_pending
 
 type cause =
-  | Memory_attention of { keeper : string; durable : Pending.t option;
-      admission : Pending.admission option; measured_at : float option }
   | Shutdown_fenced_backlog of { count : int; keepers : (string * int) list option; complete : bool }
   | Other_reported
 
 type t = { component : string; reason : string; cause : cause }
 let other ~component ~reason = { component; reason; cause = Other_reported }
 let diagnostic item = item.component ^ ":" ^ item.reason
-let memory_attention ~keeper ~durable ~admission ~measured_at =
-  { component = "keeper_memory_attention"; reason = keeper ^ ":librarian_attention_required"
-  ; cause = Memory_attention {keeper; durable; admission; measured_at} }
 let shutdown_fenced_backlog ~count ~keepers ~complete =
   { component = "keeper_event_queue"; reason = Printf.sprintf "shutdown_fenced_backlog=%d" count
   ; cause = Shutdown_fenced_backlog {count; keepers; complete} }
 let equal (left : t) right = left = right
 let int = function `Int n when n >= 0 -> Ok n | _ -> Error "expected a nonnegative count"
 let bool = function `Bool value -> Ok value | _ -> Error "expected a boolean"
-let time = function
-  | `Int value when value >= 0 -> Ok (float_of_int value)
-  | `Float value when Float.is_finite value && value >= 0. -> Ok value
-  | _ -> Error "expected an observed finite timestamp"
 let context = "operator action"
 let field name decode = Candle_json.field ~context name decode
 let finish = Candle_json.finish ~context
@@ -45,13 +35,6 @@ let queue_keepers ~count json =
 let to_json item =
   let optional encode = function None -> `Null | Some value -> encode value in
   let kind, fields = match item.cause with
-    | Memory_attention {keeper; durable; admission; measured_at} ->
-        "memory_attention",
-        ["keeper_id", `String keeper;
-         "durable_pending", optional Pending.to_json durable;
-         "admission_wait", optional (fun admission ->
-           Pending.to_json (Pending.admission_pending admission)) admission;
-         "measured_at", optional (fun at -> `Float at) measured_at]
     | Shutdown_fenced_backlog {count; keepers; complete} ->
         "shutdown_fenced_backlog",
         ["count", `Int count; "counts_complete", `Bool complete;
@@ -60,8 +43,6 @@ let to_json item =
     | Other_reported -> "reported", []
   in `Assoc (["schema", `String "masc.operator_action.v1";
                "kind", `String kind; "component", `String item.component; "reason", `String item.reason] @ fields)
-let admission json =
-  let* pending = Pending.of_json json in Pending.admission_of_pending pending
 let of_json json =
   let* fields = Candle_json.object_fields ~context json in
   let* schema, fields = field "schema" Candle_json.as_string fields in
@@ -70,14 +51,6 @@ let of_json json =
   let* component, fields = field "component" Candle_json.as_non_blank fields in
   let* reason, fields = field "reason" Candle_json.as_string fields in
   let* item, fields = match kind with
-    | "memory_attention" ->
-        let* keeper, fields = field "keeper_id" Candle_json.as_non_blank fields in
-        let* durable, fields = field "durable_pending" (Candle_json.as_nullable Pending.of_json) fields in
-        let* admission, fields = field "admission_wait" (Candle_json.as_nullable admission) fields in
-        let* measured_at, fields = field "measured_at" (Candle_json.as_nullable time) fields in
-        let* () = if Pending.attention_required ~durable ~admission then Ok ()
-          else Error "memory action has no observed attention cause" in
-        Ok (memory_attention ~keeper ~durable ~admission ~measured_at, fields)
     | "shutdown_fenced_backlog" ->
         let* count, fields = field "count" int fields in
         let* complete, fields = field "counts_complete" bool fields in

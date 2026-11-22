@@ -34,9 +34,12 @@ type exit =
     turn, and only then the way the body ended. *)
 val ending : exit -> closing_save option -> Keeper_turn_log_writer.ending
 
-(** The Task a turn ran for, as the turn log keeps it. A Goal is kept as the
-    text of its phase and criterion, encoded by the Goal's own encoders. *)
-val task_evidence : Keeper_turn_task_context.t -> Keeper_turn_log.task_evidence
+(** Capture the Task a turn ran for, as the turn log keeps it. A Goal is kept as
+    the text of its phase and criterion, encoded by the Goal's own encoders. *)
+val task_evidence
+  :  config:Workspace.config
+  -> (Keeper_id.Task_id.t option, string) result
+  -> Keeper_turn_log.task_evidence
 
 (** One entry of the Keeper's event queue as the turn log keeps it: its id
     and the names it carries. Every kind of entry has a line type of its

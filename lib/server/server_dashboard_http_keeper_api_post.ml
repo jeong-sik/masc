@@ -647,8 +647,6 @@ let handle_keeper_checkpoints_post state req reqd body_str =
              | Purge_checkpoint_invalid _
              | Purge_source_changed -> `Conflict
              | Purge_checkpoint_unavailable _
-             | Purge_boundaries_unreadable _
-             | Purge_continuity_unreadable _
              | Purge_turn_log_unreadable _
              | Purge_librarian_cancel_failed _
              | Purge_backup_failed _

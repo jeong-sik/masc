@@ -101,10 +101,22 @@ module For_testing : sig
 
   val compaction_detected : prev_used:int option -> cur_used:int option -> bool
 
+  val effective_context_limit_tokens
+    :  context_size:int option
+    -> max_context_tokens:int
+    -> int
+
   val should_rollover_context
     :  context_used:int option
     -> context_size:int option
     -> max_context_tokens:int
+    -> bool
+
+  val should_fence_tool_call_started
+    :  native_posture:Runtime_native_tools.posture
+    -> mcp_server_name:string
+    -> allowed_tool_names:string list
+    -> Runtime_acp_client.tool_call_identity
     -> bool
 
   val rollover_threshold : float

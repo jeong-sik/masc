@@ -33,9 +33,12 @@ type turn_report =
 
 type driver_report =
   { driver : Runtime_acp_client.driver
+  ; posture : Runtime_native_tools.posture
   ; passed : bool
   ; init_ms : int
   ; session_id : string option
+  ; negotiated_model : string option
+  ; negotiated_mode : string option
   ; session_reused : bool
   ; mcp_phase : string
   ; ping_tool_called : bool
@@ -166,7 +169,16 @@ let default_model_for_driver = function
   | Runtime_acp_client.Mistral_vibe -> None
 ;;
 
-let probe_one_driver ~env ~cwd ~timeout_s ~model_override (driver : Runtime_acp_client.driver)
+let parse_posture raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "none" | "native_none" -> Ok Runtime_native_tools.Native_none
+  | "read" | "native_read" -> Ok Runtime_native_tools.Native_read
+  | "full" | "native_full" -> Ok Runtime_native_tools.Native_full
+  | other ->
+    Error (Printf.sprintf "unknown posture %S (expected none, read, or full)" other)
+;;
+
+let probe_one_driver ~env ~cwd ~timeout_s ~model_override ~posture (driver : Runtime_acp_client.driver)
   : driver_report
   =
   let driver_name = Runtime_acp_client.driver_to_string driver in
@@ -268,7 +280,7 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override (driver : Runtime_acp_
       let config : Runtime_acp_client.config =
         { base_cfg with
           skills_dirs
-        ; dangerously_skip_permissions = true
+        ; dangerously_skip_permissions = (posture = Runtime_native_tools.Native_full)
         }
       in
       let proc_mgr =
@@ -288,9 +300,12 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override (driver : Runtime_acp_
       with
       | Error err ->
         { driver
+        ; posture
         ; passed = false
         ; init_ms = 0
         ; session_id = None
+        ; negotiated_model = None
+        ; negotiated_mode = None
         ; session_reused = false
         ; mcp_phase = mcp_phase_to_string (Runtime_official_client_mcp_http.client_phase bridge)
         ; ping_tool_called = false
@@ -316,9 +331,7 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override (driver : Runtime_acp_
           | Some _ as m -> m
           | None -> default_model_for_driver driver
         in
-        let mode =
-          Runtime_acp_client.mode_of_posture driver Runtime_native_tools.Native_full
-        in
+        let mode = Runtime_acp_client.mode_of_posture driver posture in
         match
           Runtime_acp_client.new_session
             client
@@ -332,9 +345,12 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override (driver : Runtime_acp_
         | Error err ->
           Runtime_acp_client.close client;
           { driver
+          ; posture
           ; passed = false
           ; init_ms
           ; session_id = None
+          ; negotiated_model = None
+          ; negotiated_mode = None
           ; session_reused = false
           ; mcp_phase =
               mcp_phase_to_string (Runtime_official_client_mcp_http.client_phase bridge)
@@ -348,11 +364,13 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override (driver : Runtime_acp_
           }
         | Ok session ->
           let session_id = session.session_id in
+          let negotiated_model = session.current_model_id in
+          let negotiated_mode = session.current_mode_id in
           let permission_policy =
-            Runtime_acp_client.Allow_masc_mcp_only
-              { mcp_server_name
-              ; allowed_tool_names = [ "masc_probe_ping"; "keeper_skill" ]
-              }
+            Runtime_acp_client.permission_policy_of_posture
+              ~mcp_server_name
+              ~allowed_tool_names:[ "masc_probe_ping"; "keeper_skill" ]
+              posture
           in
           let turn1_prompt =
             Printf.sprintf
@@ -374,9 +392,12 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override (driver : Runtime_acp_
            | Error err ->
              Runtime_acp_client.close client;
              { driver
+             ; posture
              ; passed = false
              ; init_ms
              ; session_id = Some session_id
+             ; negotiated_model
+             ; negotiated_mode
              ; session_reused = false
              ; mcp_phase =
                  mcp_phase_to_string (Runtime_official_client_mcp_http.client_phase bridge)
@@ -424,9 +445,12 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override (driver : Runtime_acp_
              (match turn2_res with
               | Error err ->
                 { driver
+                ; posture
                 ; passed = false
                 ; init_ms
                 ; session_id = Some session_id
+                ; negotiated_model
+                ; negotiated_mode
                 ; session_reused = false
                 ; mcp_phase
                 ; ping_tool_called = Atomic.get ping_called && Atomic.get ping_nonce_matched
@@ -457,9 +481,12 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override (driver : Runtime_acp_
                 let skill_ok = Atomic.get skill_called && skill_reply_verified in
                 let session_reused = String.equal r1.session_id r2.session_id in
                 { driver
+                ; posture
                 ; passed = ping_ok && skill_ok && session_reused
                 ; init_ms
                 ; session_id = Some session_id
+                ; negotiated_model
+                ; negotiated_mode
                 ; session_reused
                 ; mcp_phase
                 ; ping_tool_called = Atomic.get ping_called && Atomic.get ping_nonce_matched
@@ -474,9 +501,12 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override (driver : Runtime_acp_
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     { driver
+    ; posture
     ; passed = false
     ; init_ms = 0
     ; session_id = None
+    ; negotiated_model = None
+    ; negotiated_mode = None
     ; session_reused = false
     ; mcp_phase = "error"
     ; ping_tool_called = Atomic.get ping_called && Atomic.get ping_nonce_matched
@@ -527,9 +557,12 @@ let turn_report_to_yojson ~driver (t : turn_report) : Yojson.Safe.t =
 let driver_report_to_yojson (r : driver_report) : Yojson.Safe.t =
   `Assoc
     [ "driver", `String (Runtime_acp_client.driver_to_string r.driver)
+    ; "posture", `String (Runtime_native_tools.to_string r.posture)
     ; "passed", `Bool r.passed
     ; "init_ms", `Int r.init_ms
     ; "session_id", (match r.session_id with Some s -> `String s | None -> `Null)
+    ; "negotiated_model", (match r.negotiated_model with Some s -> `String s | None -> `Null)
+    ; "negotiated_mode", (match r.negotiated_mode with Some s -> `String s | None -> `Null)
     ; "session_reused", `Bool r.session_reused
     ; "mcp_phase", `String r.mcp_phase
     ; "ping_tool_called", `Bool r.ping_tool_called
@@ -573,18 +606,29 @@ let () =
   let cwd_arg = ref (Sys.getcwd ()) in
   let timeout_s_arg = ref default_turn_timeout_s in
   let model_arg = ref "" in
+  let posture_arg = ref "none" in
   let json_only = ref false in
   let specs =
     [ ( "--drivers"
       , Arg.Set_string drivers_arg
       , "Comma-separated ACP drivers (default: antigravity,kimi_code,mistral_vibe)" )
     ; "--cwd", Arg.Set_string cwd_arg, "Working directory with .agents/skills (default: cwd)"
-    ; "--timeout-s", Arg.Set_float timeout_s_arg, "Per-turn timeout in seconds (default: 120)"
+    ; "--timeout-s", Arg.Set_float timeout_s_arg, "Per-turn idle timeout in seconds (default: 120)"
     ; "--model", Arg.Set_string model_arg, "Optional model override for all selected drivers"
+    ; ( "--posture"
+      , Arg.Set_string posture_arg
+      , "Native tool posture: none, read, or full (default: none)" )
     ; "--json", Arg.Set json_only, "Emit JSON report only"
     ]
   in
   Arg.parse specs (fun _ -> ()) "masc-acp-probe [OPTIONS]";
+  let posture =
+    match parse_posture !posture_arg with
+    | Ok p -> p
+    | Error msg ->
+      Printf.eprintf "masc-acp-probe: %s\n" msg;
+      exit 2
+  in
   let drivers =
     match parse_drivers !drivers_arg with
     | Ok (_ :: _ as ds) -> ds
@@ -606,13 +650,15 @@ let () =
            if not !json_only
            then
              Printf.eprintf
-               "[masc-acp-probe] running live 2-turn probe for %s...\n%!"
-               (Runtime_acp_client.driver_to_string driver);
+               "[masc-acp-probe] running live 2-turn probe for %s (posture=%s)...\n%!"
+               (Runtime_acp_client.driver_to_string driver)
+               (Runtime_native_tools.to_string posture);
            probe_one_driver
              ~env
              ~cwd:!cwd_arg
              ~timeout_s:!timeout_s_arg
              ~model_override
+             ~posture
              driver)
         drivers)
   in

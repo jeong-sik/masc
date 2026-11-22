@@ -147,6 +147,16 @@ val split_outside_context : t -> string option * string option
     text is separated onto the [Outside_context] wire channel while host-owned
     state stays on [System_context]. *)
 
+type split_request_context_presence =
+  { system_context_present : bool
+  ; outside_context_present : bool
+  }
+
+val split_request_context_presence : t -> split_request_context_presence
+(** Which per-request carriers ({!Agent_core.Types.System_context} and/or
+    {!Agent_core.Types.Outside_context}) {!split_outside_context} produces
+    for AGENT_CORE. *)
+
 val receipt_to_json : receipt -> Yojson.Safe.t
 (** V2 adds a renderer-issued dynamic subpartition only when the exact block
     bytes match. Missing or stale renderer evidence is explicitly unavailable.

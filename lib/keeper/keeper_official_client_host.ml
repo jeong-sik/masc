@@ -1297,6 +1297,9 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
   in
   let* () = unsupported_parameter "temperature" turn_params.temperature in
   let* () = unsupported_parameter "preserve_thinking" turn_params.preserve_thinking in
+  let* () =
+    unsupported_parameter "extra_outside_context" turn_params.extra_outside_context
+  in
   let* reasoning_effort =
     resolve_reasoning_effort
       ~enable_thinking:turn_params.enable_thinking

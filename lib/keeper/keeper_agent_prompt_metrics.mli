@@ -128,31 +128,42 @@ val attributed_bytes : ctx_attribution -> int option
     [Not_measured] and say so in its own output. *)
 
 (** Return concrete provider content messages only when their provenance is
-    unambiguous. The AGENT_CORE-generated [extra_system_context] carrier is removed by
-    its typed metadata identity, never by position or content. Its presence must
-    exactly agree with [prompt_context_present]. Projection-only messages remain
-    included when the projection preserves the exact input prefix; a rewrite,
-    reorder, missing carrier, or duplicate/invalid carrier returns the matching
+    unambiguous. The AGENT_CORE-generated per-request turn context carriers
+    ([System_context] and/or [Outside_context], at most one of each) are
+    removed by their typed {!Agent_core.Types.message_origin}, never by
+    position or content. Each channel's presence is validated independently:
+    [System_context] must agree with [prompt_context_present], and
+    [Outside_context] must agree with [outside_context_present].
+    Projection-only messages remain included when the projection preserves the
+    exact input prefix; a rewrite, reorder, missing carrier, unannounced
+    carrier, or repeated carrier of either kind returns the matching
     {!provenance_failure}. *)
 val provider_content_messages :
+  outside_context_present:bool ->
   prompt_context_present:bool ->
   projection_input:Agent_core.Types.message list ->
   projected_messages:Agent_core.Types.message list ->
   (Agent_core.Types.message list, provenance_failure) result
 
-(** Remove the AGENT_CORE-generated [extra_system_context] carrier from a list a
-    runtime actually transmitted, by the carrier's typed metadata identity.
+(** Remove the AGENT_CORE-generated per-request turn context carriers
+    ([System_context] and/or [Outside_context], at most one of each) from a
+    list a runtime actually transmitted, by their typed
+    {!Agent_core.Types.message_origin}.
 
     Ordering is not checked. {!provider_content_messages} compares a
     projection against the list it was handed; a caller holding only the
     transmitted list has no such pair, and on a lane whose tail window drops
     the head by design that comparison refuses every turn. What remains
-    checkable here is carrier identity: an invalid, duplicated, repeated, or
-    unexpectedly absent carrier returns the matching {!provenance_failure}.
+    checkable here is independent per-channel carrier identity: [System_context]
+    must agree with [prompt_context_present], [Outside_context] must agree with
+    [outside_context_present], and a repeated carrier of either kind or an
+    unexpectedly absent or unannounced carrier returns the matching
+    {!provenance_failure}.
 
     A carrier the window cut away returns
     [Prompt_context_presence_mismatch]. *)
 val provider_content_of_transmitted :
+  outside_context_present:bool ->
   prompt_context_present:bool ->
   messages:Agent_core.Types.message list ->
   (Agent_core.Types.message list, provenance_failure) result

@@ -669,6 +669,83 @@ let test_an_uncounted_request_leaves_its_turn_out () =
     (Some (2_600 + 600)) (Ledger.next_turn_peak ledger)
 ;;
 
+(* Regression for #54350 live bug: ephemeral [Outside_context] appended at the
+   request tail is absent from durable history on the next round, AND carries
+   [Active_goals] on every post-tool round. Because [Runtime_model_input_tail_window]
+   pins [Outside_context] via [is_outside_context] without setting [is_extra_context]:
+   (1) [Outside_context] is excluded from durable atoms so [Ledger.holds] succeeds
+   across consecutive rounds without dropping the working ledger, and
+   (2) post-tool rounds carrying only [Outside_context] keep [turn_context = false],
+   so [Ledger.observe] still measures provider token counts instead of discarding
+   every sample forever. *)
+let test_ephemeral_outside_context_does_not_drop_working_ledger () =
+  let module Types = Agent_core.Types in
+  let module Window = Runtime_model_input_tail_window in
+  let msg ?(origin = Types.Conversation) role text : Types.message =
+    { origin; role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
+  in
+  let user_0 = msg Types.User "check open PRs" in
+  let sys_r0 = msg ~origin:Types.System_context Types.User "[system context] [Temporal]" in
+  let outside_r0 = msg ~origin:Types.Outside_context Types.User "## Active goals\n- round 0" in
+  let assistant_1 = msg Types.Assistant "calling list_prs" in
+  let tool_1 = msg Types.Tool "pr list result" in
+  let outside_r1 = msg ~origin:Types.Outside_context Types.User "## Active goals\n- round 1" in
+  let assistant_2 = msg Types.Assistant "calling inspect_pr" in
+  let tool_2 = msg Types.Tool "pr diff result" in
+  let outside_r2 = msg ~origin:Types.Outside_context Types.User "## Active goals\n- round 2" in
+  let build_request messages =
+    let atom_count, digest_at = Window.atom_opening_index messages in
+    let turn_context = List.exists Window.is_extra_context messages in
+    ( digest_at
+    , { Ledger.prefix_digest = prefix
+      ; first_atom = 0
+      ; atom_count
+      ; ends = ends_in digest_at ~first_atom:0 ~atom_count
+      ; tail_bytes = 256
+      ; turn_context
+      ; demote_before = 0
+      ; working_state = None
+      } )
+  in
+  (* Round 0: turn opener carries both System_context (Temporal_summary) and Outside_context. *)
+  let round0_msgs = [ user_0; sys_r0; outside_r0 ] in
+  let digest_r0, req_r0 = build_request round0_msgs in
+  check int "round 0 counts only durable atoms (excludes System_context and Outside_context)"
+    1 req_r0.atom_count;
+  check bool "round 0 marks turn_context=true from System_context" true req_r0.turn_context;
+  let o0 = Ledger.observe ~digest_at:digest_r0 None req_r0 (Some (usage 2_000)) in
+  check string "round 0 starts ledger" "started" (Ledger.event_to_string o0.event);
+  check (option int) "round 0 turn-context request does not set total_tokens sample"
+    None o0.ledger.total_tokens;
+  (* Round 1: post-tool round carrying only Outside_context (Active_goals).
+     sys_r0 and outside_r0 are gone from durable history; assistant_1 + tool_1 took their place. *)
+  let round1_msgs = [ user_0; assistant_1; tool_1; outside_r1 ] in
+  let digest_r1, req_r1 = build_request round1_msgs in
+  check bool "round 1 durable history holds round 0 ledger" true
+    (Ledger.holds ~digest_at:digest_r1 o0.ledger);
+  check int "round 1 counts 2 durable atoms (excludes Outside_context)" 2 req_r1.atom_count;
+  check bool "round 1 Outside_context-only post-tool round keeps turn_context=false"
+    false req_r1.turn_context;
+  let o1 = Ledger.observe ~digest_at:digest_r1 (Some o0.ledger) req_r1 (Some (usage 1_200)) in
+  check string "round 1 establishes first measured sample without History_reset"
+    "appended_unmeasured" (Ledger.event_to_string o1.event);
+  check (option int) "round 1 records total_tokens sample" (Some 1_200) o1.ledger.total_tokens;
+  (* Round 2: post-tool round STILL carrying outside_r2; outside_r1 is gone from
+     agent.state.messages and replaced at that index by assistant_2 + tool_2. *)
+  let round2_msgs = [ user_0; assistant_1; tool_1; assistant_2; tool_2; outside_r2 ] in
+  let digest_r2, req_r2 = build_request round2_msgs in
+  check bool "round 2 durable history holds round 1 ledger (no working-ledger drop)" true
+    (Ledger.holds ~digest_at:digest_r2 o1.ledger);
+  check int "round 2 counts 3 durable atoms (excludes outside_r2)" 3 req_r2.atom_count;
+  check bool "round 2 carrying outside_r2 keeps turn_context=false" false req_r2.turn_context;
+  let o2 = Ledger.observe ~digest_at:digest_r2 (Some o1.ledger) req_r2 (Some (usage 1_500)) in
+  check string "round 2 measures appended block without History_reset" "appended_measured"
+    (Ledger.event_to_string o2.event);
+  check (option int) "round 2 records total_tokens sample" (Some 1_500) o2.ledger.total_tokens;
+  check (option int) "round 2 measures delta_tokens across rounds" (Some 300) o2.delta_tokens;
+  check int "round 2 known_tokens accumulates measured block" 300 (Ledger.known_tokens o2.ledger)
+;;
+
 let () =
   Eio_main.run @@ fun _ ->
   run
@@ -714,6 +791,8 @@ let () =
         ; test_case "lookup without the appended atom" `Quick
             test_a_lookup_without_the_appended_atom_restarts
         ; test_case "both positions hold" `Quick test_both_positions_holding_keeps_appending
+        ; test_case "ephemeral Outside_context does not drop working ledger" `Quick
+            test_ephemeral_outside_context_does_not_drop_working_ledger
         ; test_case "provider-observed front checked at its position" `Quick
             test_a_provider_observed_front_is_checked_at_its_own_position
         ] )

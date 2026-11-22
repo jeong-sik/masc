@@ -35,9 +35,10 @@
     refills toward it, the same sawtooth an atom-count window had, now
     bounded in the unit the target actually refuses on.
 
-    Messages carrying AGENT_CORE extra-system-context provenance are never counted
-    as atoms and never dropped; that block is re-assembled fresh each turn by
-    the keeper hooks and must survive the cut. When the cut leaves a
+    Messages carrying AGENT_CORE per-request turn context ([System_context] or
+    ephemeral [Outside_context]) are never counted as atoms and never dropped;
+    those carriers are re-assembled fresh each request by the keeper hooks and
+    must survive the cut. When the cut leaves a
     non-[User] message at the head of the transmitted history, a constant
     synthetic [User] preamble is prepended so providers that require a
     [User]-first conversation accept the request; being constant, it does not
@@ -56,11 +57,20 @@ val preamble_marker_key : string
     state. *)
 
 val is_extra_context : Agent_core.Types.message -> bool
-(** Whether the per-turn context assembler authored the message: any
-    extra-system-context provenance, including an [Invalid] or [Duplicate]
-    tag. Such a message is {!Pinned}, and a request carrying it is not a
-    sample of the carried history's size. The Librarian working state is
-    not this context; see {!is_working_state}. *)
+(** Whether the per-turn context assembler authored the message as the
+    host-owned [System_context] carrier. Such a message is {!Pinned} (never
+    counted as a durable history atom), and a request carrying it opens a turn
+    and is not a sample of the carried history's size. Ephemeral
+    [Outside_context] carriers use {!is_outside_context} instead, so post-tool
+    rounds carrying [Active_goals] on [Outside_context] remain ledger samples
+    and do not reopen a turn mid-flight. The Librarian working state is not
+    this context; see {!is_working_state}. *)
+
+val is_outside_context : Agent_core.Types.message -> bool
+(** Whether the message is an ephemeral per-request [Outside_context] carrier.
+    Such a message is {!Pinned} (never counted as a durable history atom and
+    preserved across tail cuts) without marking the request as
+    {!is_extra_context}. *)
 
 val working_state_marker_key : string
 (** Metadata key tagging the Librarian working state that opens a
@@ -95,8 +105,9 @@ val is_compaction_anchor : Agent_core.Types.message -> bool
 type label =
   | Pinned
       (** Survives every cut: [System] entries other than historical
-          context, messages carrying extra-system-context provenance, and
-          the Librarian working state, all re-assembled fresh each request. *)
+          context, per-request context carriers ([System_context] and
+          [Outside_context]), and the Librarian working state, all
+          re-assembled fresh each request. *)
   | Atom of int  (** Zero-based index of the atom this message belongs to. *)
 
 val annotate

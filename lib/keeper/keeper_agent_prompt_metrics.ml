@@ -148,39 +148,65 @@ let attributed_bytes = function
    in [provider_content_messages] compare a projection against what it was
    handed; a caller holding the list a runtime actually transmitted has no
    such pair, and on a lane whose tail window cuts the head by design those
-   checks would refuse every turn. *)
-let remove_prompt_context ~prompt_context_present messages =
-  let rec walk seen rev_retained = function
+   checks would refuse every turn.
+
+   AGENT_CORE splits per-request turn context into at most one [System_context]
+   (host-owned state) and at most one [Outside_context] (outside-authored
+   context) carrier. Both channels carry blocks already attributed in
+   [prompt_blocks], so both are stripped here and validated independently
+   against [prompt_context_present] and [outside_context_present]: dropping
+   either expected carrier or emitting an unannounced second carrier fails
+   with [Prompt_context_presence_mismatch], and repeating either channel fails
+   with [Prompt_context_carrier_repeated]. *)
+let remove_prompt_context ~outside_context_present ~prompt_context_present messages =
+  let rec walk seen_system seen_outside rev_retained = function
     | [] ->
-      if Bool.equal seen prompt_context_present
+      if Bool.equal seen_system prompt_context_present
+         && Bool.equal seen_outside outside_context_present
       then Ok (List.rev rev_retained)
       else
+        let carrier_observed, prompt_context_present =
+          if not (Bool.equal seen_system prompt_context_present)
+          then seen_system, prompt_context_present
+          else seen_outside, outside_context_present
+        in
         Error
           (Prompt_context_presence_mismatch
-             { carrier_observed = seen; prompt_context_present })
+             { carrier_observed; prompt_context_present })
     | (message : Agent_core.Types.message) :: rest ->
-      (match
-         message.origin
-       with
+      (match message.origin with
        | Agent_core.Types.Conversation
        | Agent_core.Types.Historical_system_context
-       | Recovery_instruction | Tool_result_followup | Agent_instruction | Outside_context ->
-         walk seen (message :: rev_retained) rest
-       | Agent_core.Types.System_context
-         when prompt_context_present && not seen -> walk true rev_retained rest
+       | Recovery_instruction | Tool_result_followup | Agent_instruction ->
+         walk seen_system seen_outside (message :: rev_retained) rest
        | Agent_core.Types.System_context ->
-         if seen
+         if seen_system
          then Error Prompt_context_carrier_repeated
-         else
+         else if not prompt_context_present
+         then
            Error
              (Prompt_context_presence_mismatch
-                { carrier_observed = true; prompt_context_present }))
+                { carrier_observed = true; prompt_context_present = false })
+         else walk true seen_outside rev_retained rest
+       | Agent_core.Types.Outside_context ->
+         if seen_outside
+         then Error Prompt_context_carrier_repeated
+         else if not outside_context_present
+         then
+           Error
+             (Prompt_context_presence_mismatch
+                { carrier_observed = true; prompt_context_present = false })
+         else walk seen_system true rev_retained rest)
   in
-  walk false [] messages
+  walk false false [] messages
 ;;
 
-let provider_content_of_transmitted ~prompt_context_present ~messages =
-  remove_prompt_context ~prompt_context_present messages
+let provider_content_of_transmitted
+      ~outside_context_present
+      ~prompt_context_present
+      ~messages
+  =
+  remove_prompt_context ~outside_context_present ~prompt_context_present messages
 ;;
 
 (* The index is reported rather than a bare "not equal" because the two
@@ -200,6 +226,7 @@ let first_divergent_index prefix input =
 ;;
 
 let provider_content_messages
+      ~outside_context_present
       ~prompt_context_present
       ~(projection_input : Agent_core.Types.message list)
       ~(projected_messages : Agent_core.Types.message list)
@@ -219,7 +246,10 @@ let provider_content_messages
      | None ->
        Result.map
          (fun retained_input -> retained_input @ projection_suffix)
-         (remove_prompt_context ~prompt_context_present projection_input))
+         (remove_prompt_context
+            ~outside_context_present
+            ~prompt_context_present
+            projection_input))
 ;;
 
 let prompt_segment_metrics_of_sanitized_text (text : string) : prompt_segment_metrics =

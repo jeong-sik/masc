@@ -123,9 +123,13 @@ let budget_error_to_core_error error =
        { message = budget_error_to_string error; limit = None })
 ;;
 
-(* Current runtime context and the Librarian working state survive cuts.
-   Historical system context and outside context are ordinary replay history
-   and may be trimmed. *)
+(* Current runtime host context ([System_context]), ephemeral per-request
+   outside context ([Outside_context]), the Librarian working state, and the
+   compaction anchor all survive cuts and are never counted as durable
+   conversation atoms. Only [System_context] satisfies [is_extra_context] so
+   post-tool rounds carrying only [Outside_context] (such as [Active_goals])
+   still act as ledger token samples and do not reopen a turn mid-flight.
+   Historical system context is ordinary replay history and may be trimmed. *)
 let is_extra_context (msg : Agent_core.Types.message) =
   match msg.origin with
   | System_context -> true
@@ -133,8 +137,18 @@ let is_extra_context (msg : Agent_core.Types.message) =
   | Tool_result_followup | Agent_instruction | Outside_context -> false
 ;;
 
+let is_outside_context (msg : Agent_core.Types.message) =
+  match msg.origin with
+  | Outside_context -> true
+  | Conversation | System_context | Historical_system_context
+  | Recovery_instruction | Tool_result_followup | Agent_instruction -> false
+;;
+
 let is_pinned msg =
-  is_extra_context msg || is_working_state msg || is_compaction_anchor msg
+  is_extra_context msg
+  || is_outside_context msg
+  || is_working_state msg
+  || is_compaction_anchor msg
 ;;
 
 type label =

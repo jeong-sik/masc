@@ -1216,6 +1216,53 @@ let test_measured_history_releases_source_graphs () =
   ignore (Sys.opaque_identity measured)
 ;;
 
+let test_outside_context_pinned_and_excluded_from_atoms () =
+  let outside_context =
+    message
+      ~origin:Types.Outside_context
+      ~role:Types.User
+      "## Active goals\n- ephemeral per-request outside context"
+  in
+  Alcotest.(check bool) "Outside_context is NOT is_extra_context (does not reopen turn or suppress ledger samples)"
+    false (Window.is_extra_context outside_context);
+  Alcotest.(check bool) "Outside_context satisfies is_outside_context"
+    true (Window.is_outside_context outside_context);
+  Alcotest.(check bool) "System_context does not satisfy is_outside_context"
+    false (Window.is_outside_context extra_context);
+  let durable = [ user 0; assistant 1; tool 1 ] in
+  let durable_count, durable_digest = Window.atom_opening_index durable in
+  let with_outside = durable @ [ outside_context ] in
+  let labelled, outside_count = Window.annotate with_outside in
+  let with_outside_count, with_outside_digest =
+    Window.atom_opening_index with_outside
+  in
+  Alcotest.(check int) "Outside_context adds zero durable atoms"
+    durable_count outside_count;
+  Alcotest.(check int) "atom_opening_index matches annotate count"
+    durable_count with_outside_count;
+  Alcotest.(check bool) "Outside_context is labelled Pinned" true
+    (match List.rev labelled with
+     | (m, Window.Pinned) :: _ -> m == outside_context
+     | [] | (_, Window.Atom _) :: _ -> false);
+  for i = 0 to durable_count do
+    Alcotest.(check (option string))
+      (Printf.sprintf "atom %d opening digest unchanged by trailing Outside_context" i)
+      (durable_digest i) (with_outside_digest i)
+  done;
+  let with_both = durable @ [ extra_context; outside_context ] in
+  let both_count, both_digest = Window.atom_opening_index with_both in
+  Alcotest.(check int) "System_context + Outside_context both add zero atoms"
+    durable_count both_count;
+  Alcotest.(check (option string)) "newest durable atom opener unchanged with both carriers"
+    (durable_digest (durable_count - 1)) (both_digest (both_count - 1));
+  let projected =
+    ok_exn ~what:"outside context pinned across cut"
+      (project ~capacity_bytes:60_000 (atoms (4 * k) @ [ outside_context ]))
+  in
+  Alcotest.(check bool) "Outside_context survives tail window cut" true
+    (List.exists (fun (m : Types.message) -> m.origin = Types.Outside_context) projected)
+;;
+
 let () =
   Alcotest.run
     "runtime_model_input_tail_window"
@@ -1290,6 +1337,8 @@ let () =
             test_no_preamble_when_nothing_is_cut
         ; Alcotest.test_case "extra context pinned" `Quick
             test_extra_context_pinned
+        ; Alcotest.test_case "outside context pinned and excluded from atoms" `Quick
+            test_outside_context_pinned_and_excluded_from_atoms
         ; Alcotest.test_case "stored historical context leaves with its span" `Quick
             test_stored_historical_context_leaves_with_its_span
         ; Alcotest.test_case "pinned bytes are charged before atoms" `Quick

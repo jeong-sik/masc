@@ -96,7 +96,8 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
   2. Exit the `/` filter box or blur the bottom composer (`i`).
   3. In **Keeper Chat** with an active turn/stream running, send a turn-interrupt request (`Post_keeper_turn_interrupt`; `Ctrl+X` also interrupts directly).
   4. Pop one level off the dive stack back to the parent workspace.
-  5. Clear an active workspace filter query when at top level.
+  5. Restore the split layout when a panel is zoomed with `z`.
+  6. Clear an active workspace filter query when at top level.
 - **`Ctrl+Q`** (or `/quit` in the composer, or a double `Ctrl+C`) exits MASC TUI
   cleanly. An externally started server (`masc start` / `masc setup`) keeps
   running; a local server auto-started and owned by this TUI session is stopped

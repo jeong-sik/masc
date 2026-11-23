@@ -41,6 +41,7 @@ type get_request =
   | Get_wiki_search of { query : string; limit : int option }
   | Get_wiki_lint
   | Get_artifacts
+  | Get_artifact_detail of { id : string; revision : int option }
   | Get_world_memory
   | Get_memory_diff of {
       keeper : string option;
@@ -66,6 +67,7 @@ type get_request =
   | Get_tools_catalog of { keeper : string option }
   | Get_connectors
   | Get_browser_lane
+  | Get_lane_addons
   | Get_mcp_clients
   | Get_sandboxes
   | Get_keeper_sandbox of { keeper : string }
@@ -157,6 +159,7 @@ type post_request =
       reason : string option;
       expected_workspace : Wire_work.expected_workspace;
     }
+  | Post_browser_tabs of { client_id : string }
 
 type put_request =
   | Put_wiki_page of { page : string; request : Wire_knowledge.wiki_put_request }
@@ -205,6 +208,20 @@ type t =
       chart : Masc_tui_ui.Memory_lineage.chart;
     }
   | Cancel_memory_diagram
+  | Fetch_artifact_and_copy of {
+      epoch : Epoch.t;
+      id : string;
+      revision : int option;
+    }
+  | Export_artifact of {
+      epoch : Epoch.t;
+      id : string;
+      revision : int option;
+      filename_stem : string;
+      ext : string;
+      content_opt : string option;
+      open_after : bool;
+    }
   | Open_external_url of string
   | Open_editor_escape_hatch of editor_target
   | Start_local_server
@@ -243,7 +260,9 @@ let get_request_path = function
   | Get_wiki_search { query; limit } ->
       Wire_knowledge.wiki_search_path ~query ?limit ()
   | Get_wiki_lint -> Wire_knowledge.wiki_lint_path
-  | Get_artifacts -> "/api/v1/published-artifacts"
+  | Get_artifacts -> Wire_knowledge.published_artifacts_path
+  | Get_artifact_detail { id; revision } ->
+      Wire_knowledge.published_artifact_detail_path ~id ?revision ()
   | Get_world_memory -> Wire_knowledge.world_memory_path
   | Get_memory_diff { keeper; window } -> (
       match window with
@@ -284,6 +303,7 @@ let get_request_path = function
   | Get_tools_catalog { keeper } -> Wire_runtime.dashboard_tools_path ?keeper ()
   | Get_connectors -> Wire_runtime.connectors_path
   | Get_browser_lane -> Wire_runtime.browser_lane_path
+  | Get_lane_addons -> Wire_runtime.lane_addons_path
   | Get_mcp_clients -> Wire_runtime.mcp_clients_path
   | Get_sandboxes -> Wire_infra.infra_sandboxes_path
   | Get_keeper_sandbox { keeper } ->
@@ -321,6 +341,7 @@ let post_request_path = function
       Wire_runtime.connector_bind_path ~connector
   | Post_repo_add _ -> Wire_infra.repositories_path
   | Post_task_cancel _ -> "/api/v1/dashboard/tasks/cancel"
+  | Post_browser_tabs _ -> Wire_runtime.browser_lane_read_path
 
 let post_request_body = function
   | Post_ask_answer { keeper; ask_id; answers } ->
@@ -386,6 +407,8 @@ let post_request_body = function
       `Assoc fields
   | Post_task_cancel { task_id; reason; expected_workspace } ->
       Wire_work.encode_task_cancel ~task_id ~reason ~expected_workspace
+  | Post_browser_tabs { client_id } ->
+      Wire_runtime.encode_browser_tabs_request ~client_id
 
 let put_request_path = function
   | Put_wiki_page { page; _ } -> Wire_knowledge.wiki_page_path ~page
@@ -405,6 +428,8 @@ let rec flatten_one acc = function
     | Copy_clipboard _
     | Render_memory_diagram _
     | Cancel_memory_diagram
+    | Fetch_artifact_and_copy _
+    | Export_artifact _
     | Open_external_url _
     | Open_editor_escape_hatch _
     | Start_local_server

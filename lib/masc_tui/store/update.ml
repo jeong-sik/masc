@@ -19,6 +19,8 @@ let has_explicit_sync_streams cmds =
       | Cmd.Copy_clipboard _
       | Cmd.Render_memory_diagram _
       | Cmd.Cancel_memory_diagram
+      | Cmd.Fetch_artifact_and_copy _
+      | Cmd.Export_artifact _
       | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _
       | Cmd.Start_local_server
@@ -338,8 +340,24 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
     }
 
 let step ~now m msg =
-  let next, cmds = step_raw ~now m msg in
-  let next = leave_old_epoch ~now ~before:m next in
+  let next0, cmds = step_raw ~now m msg in
+  let next0 = leave_old_epoch ~now ~before:m next0 in
+  let view_stream_changed =
+    not
+      (Option.equal Subscriptions.equal_stream_kind
+         (Subscriptions.view_scoped_stream m)
+         (Subscriptions.view_scoped_stream next0))
+  in
+  let next1 =
+    if view_stream_changed && Option.is_some next0.freshness.view_stream then
+      { next0 with freshness = { next0.freshness with view_stream = None } }
+    else next0
+  in
+  let last_mono = Clock.Mono.max next1.freshness.last_mono now in
+  let next =
+    if Clock.Mono.equal last_mono next1.freshness.last_mono then next1
+    else { next1 with freshness = { next1.freshness with last_mono } }
+  in
   let final_cmds =
     cmds
     |> reconcile_streams ~before:m ~after:next

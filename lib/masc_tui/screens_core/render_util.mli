@@ -24,8 +24,13 @@ val freshness_pill :
   model:Model.t ->
   compact:bool ->
   Glyph.t * string * Theme.status_token
-(** Project authoritative transport freshness into a single width-1 geometric
-    glyph, localized label, and semantic status token. *)
+(** Project authoritative per-view SSOT telemetry provenance into a single
+    width-1 geometric glyph, localized label, and semantic status token. *)
+
+val footer_ssot_hint : model:Model.t -> string
+(** Exact right-aligned footer hint reflecting whether the active surface is
+    backed by live SSE push, observer-synced HTTP snapshot, or manual-refresh
+    HTTP snapshot. *)
 
 val attention_kind_tag : Health.attention_kind -> Say.t
 val attention_kind_keeper : Health.attention_kind -> string option

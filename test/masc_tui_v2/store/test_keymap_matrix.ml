@@ -498,23 +498,38 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
   let artifacts : Wire_knowledge.artifact_entry list =
     [
       {
-        id = "artifact-aaaa1111bbbb2222aaaa1111bbbb2222";
+        id = "art-matrix-report";
+        url = Some "/api/v1/published-artifacts/art-matrix-report";
         revision = 1;
-        title = "Matrix Report";
-        summary = "Keymap matrix report";
-        author = "alpha";
-        created_at_unix = 1700000000.0;
-        body =
-          { sha256 = "aaaa1111bbbb2222"; bytes = 4096; mime = "text/markdown" };
+        format = `Markdown;
+        summary = Some "Matrix summary";
+        preview = Some "# Matrix Report\n\nBody preview";
+        sha256 = "aaaa1111bbbb2222";
+        name = "matrix-report.md";
+        mime_type = "text/markdown";
+        bytes = 4096;
+        created_at_unix = Some 1700000000.0;
+        producer = Some "alpha";
+        title = Some "Matrix Report";
+        task_id = None;
+        goal_id = None;
       };
       {
-        id = "artifact-cccc3333dddd4444cccc3333dddd4444";
-        revision = 2;
-        title = "Perf Trace";
-        summary = "Trace export";
-        author = "beta";
-        created_at_unix = 1700000100.0;
-        body = { sha256 = "cccc3333dddd4444"; bytes = 8192; mime = "text/html" };
+        id = "art-perf-trace";
+        url = Some "/api/v1/published-artifacts/art-perf-trace";
+        revision = 1;
+        format = `Html;
+        summary = Some "Perf summary";
+        preview = Some "<html><body>Perf Trace</body></html>";
+        sha256 = "cccc3333dddd4444";
+        name = "perf-trace.html";
+        mime_type = "text/html";
+        bytes = 8192;
+        created_at_unix = Some 1700000100.0;
+        producer = Some "beta";
+        title = Some "Perf Trace";
+        task_id = None;
+        goal_id = None;
       };
     ]
   in
@@ -1186,6 +1201,12 @@ let test_axis_a_screen_dive_matrix () =
           runtime =
             Runtime_store.set_tab Nav.Runtime_tools_connectors base.runtime;
         } );
+      ( "Runtime/AddonsBrowser/Wide"
+      , {
+          (with_ws Nav.Runtime base) with
+          runtime =
+            Runtime_store.set_tab Nav.Runtime_addons_browser base.runtime;
+        } );
       ( "Infra/Sandboxes/Wide"
       , {
           (with_ws Nav.Infra base) with
@@ -1272,7 +1293,7 @@ let test_axis_a_screen_dive_matrix () =
       ("x", char_key "x");
     ]
   in
-  Alcotest.(check int) "Axis A contexts" 34 (List.length contexts);
+  Alcotest.(check int) "Axis A contexts" 35 (List.length contexts);
   Alcotest.(check int) "Axis C keys" 20 (List.length keys);
   List.iter
     (fun (ctx_name, (m : Model.t)) ->
@@ -1382,7 +1403,19 @@ let test_axis_a_screen_dive_matrix () =
                 (tag ^ " Space never bleeds work.task_status_filter")
                 true
                 (Work_store.equal_task_status_filter m'.work.task_status_filter
-                   m.work.task_status_filter)
+                   m.work.task_status_filter);
+            let is_runtime_ab =
+              Option.is_none dive_before
+              && Option.is_none m.nav.overlay
+              && Nav.equal_workspace m.nav.workspace Nav.Runtime
+              && Nav.equal_runtime_tab m.runtime.active_tab
+                   Nav.Runtime_addons_browser
+            in
+            if not is_runtime_ab then
+              Alcotest.(check bool)
+                (tag ^ " Space never bleeds runtime.browser_right_focus")
+                true
+                (m'.runtime.browser_right_focus = m.runtime.browser_right_focus)
           end;
           (* Invariant 6: Zero 'f' Fusion bleed outside Runtime_failover_lanes *)
           if String.equal kname "f" then begin
@@ -1434,6 +1467,9 @@ let test_axis_a_screen_dive_matrix () =
                   || (Nav.equal_workspace m.nav.workspace Nav.Knowledge
                       && Nav.equal_knowledge_tab m.knowledge.active_tab
                            Nav.Knowledge_wiki_artifacts)
+                  || (Nav.equal_workspace m.nav.workspace Nav.Runtime
+                      && Nav.equal_runtime_tab m.runtime.active_tab
+                           Nav.Runtime_addons_browser)
             in
             if not is_valid_o then
               Alcotest.(check bool) (tag ^ " 'o' never emits Open_external_url")
@@ -1775,6 +1811,14 @@ let test_dynamic_rendered_hint_contracts () =
               nav = { m_base.nav with workspace = Nav.Runtime };
               runtime =
                 Runtime_store.set_tab Nav.Runtime_tools_connectors
+                  m_base.runtime;
+            } );
+          ( "Runtime/AddonsBrowser"
+          , {
+              m_base with
+              nav = { m_base.nav with workspace = Nav.Runtime };
+              runtime =
+                Runtime_store.set_tab Nav.Runtime_addons_browser
                   m_base.runtime;
             } );
           ( "Infra/Sandboxes"
@@ -4000,18 +4044,21 @@ let test_pillar2_scroll_bounds_all_surfaces () =
   let many_artifacts =
     List.init 60 (fun i : Wire_knowledge.artifact_entry ->
         {
-          id = Printf.sprintf "artifact-%032d" i;
+          id = Printf.sprintf "art-%04d" i;
+          url = Some (Printf.sprintf "/api/v1/published-artifacts/art-%04d" i);
           revision = 1;
-          title = Printf.sprintf "Artifact Report %02d" i;
-          summary = "Scroll fixture";
-          author = "alpha";
-          created_at_unix = 1700000000.0;
-          body =
-            {
-              sha256 = Printf.sprintf "sha-%04d-abcdef" i;
-              bytes = 1024 * (i + 1);
-              mime = "text/markdown";
-            };
+          format = `Markdown;
+          summary = None;
+          preview = None;
+          sha256 = Printf.sprintf "sha-%04d-abcdef" i;
+          name = Printf.sprintf "artifact-%02d.log" i;
+          title = Some (Printf.sprintf "Artifact Report %02d" i);
+          mime_type = "text/plain";
+          bytes = 1024 * (i + 1);
+          created_at_unix = Some 1700000000.0;
+          producer = Some "alpha";
+          task_id = None;
+          goal_id = None;
         })
   in
   let m_art_tall =
@@ -4267,6 +4314,230 @@ let test_pillar2_scroll_bounds_all_surfaces () =
     Alcotest.(check bool) (label ^ ": render_full at End shows bottom sentinel " ^ needle)
       true (Store_scroll.contains_ci ~needle txt)
   in
+  (* 10-wave1-a. Runtime > Addons & Browser: Left Addons, Right Clients, Right Tabs + compact clamp *)
+  let many_addons : Wire_runtime.lane_addons_snapshot =
+    {
+      configuration_complete = true;
+      declarations = [];
+      issues = [];
+      instances =
+        List.init 30 (fun i : Wire_runtime.addon_instance ->
+            {
+              runtime_presence = Wire_runtime.Addon_live;
+              instance_id = Printf.sprintf "inst-ab-%02d" i;
+              addon_id = Printf.sprintf "addon-ab-%02d" i;
+              title = Printf.sprintf "Addon Title %02d" i;
+              revision = "r1";
+              phase = Wire_runtime.Addon_observing;
+              execution_kind = Some "host_process";
+              resolved_image = None;
+              observation_seq = i;
+              rows_count = i;
+              observation_pending = false;
+              visibility_kind = Some "shared";
+              visibility_keeper = None;
+              host_cycles = Some i;
+              host_waiting_count = 0;
+              host_issue_kind = None;
+              action_names = [ "observe" ];
+              config_declaration_id = None;
+            });
+    }
+  in
+  let many_clients : Wire_runtime.browser_lane_status =
+    {
+      ok = true;
+      available = true;
+      inventory_complete = false;
+      client_count = 30;
+      issue_count = 2;
+      automatic_browse_ok = true;
+      detail = None;
+      clients =
+        List.init 30 (fun i : Wire_runtime.browser_client_row ->
+            {
+              client_id = Printf.sprintf "ego-client-%02d" i;
+              browser = "Ego";
+              version = "131";
+              engine_version = "131";
+              transport = "ego";
+              space = Some { space_id = i + 1; space_name = Printf.sprintf "space-%02d" i };
+              ownership = Some "agent";
+              presence_state = Some "present";
+              presence_reason = None;
+              interactions = [];
+              last_activities = [];
+            });
+      issues =
+        [
+          {
+            kind = "ego_user_owned_space";
+            instance_id = Some "inst-0";
+            client_id = None;
+            space = Some "personal";
+            space_id = None;
+            message = "personal space";
+          };
+          {
+            kind = "ego_space_missing";
+            instance_id = Some "inst-1";
+            client_id = None;
+            space = Some "missing";
+            space_id = Some 9;
+            message = "missing space";
+          };
+        ];
+    }
+  in
+  let many_tabs : Wire_runtime.browser_tabs_response =
+    {
+      client_id = Some "ego-client-00";
+      complete = true;
+      unavailable_count = 0;
+      error = None;
+      tabs =
+        List.init 25 (fun i : Wire_runtime.browser_tab_row ->
+            {
+              id = 100 + i;
+              title = Printf.sprintf "TabSentinel-%02d" i;
+              url = Printf.sprintf "https://example.com/tab-%02d" i;
+              active = i = 0;
+              window_id = Some 1;
+              opened_by = Some Wire_runtime.Tab_origin_agent;
+              label = None;
+              dialog_present = false;
+              dialog_kind = None;
+            });
+    }
+  in
+  let m_ab_base =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Runtime; pane_index = 0 };
+      runtime =
+        base.runtime
+        |> Runtime_store.set_tab Nav.Runtime_addons_browser
+        |> Runtime_store.apply_lane_addons ~observed_at:t0 many_addons
+        |> Runtime_store.apply_browser_lane ~observed_at:t0 many_clients
+        |> Runtime_store.apply_browser_tabs ~observed_at:t0
+             ~client_id:"ego-client-00" many_tabs;
+    }
+  in
+  let m_ab_l_end, _ = step m_ab_base (mk_key Keymap.Input.End) in
+  Alcotest.(check int) "AddonsBrowser Left End selects last addon (29)" 29
+    m_ab_l_end.runtime.addon_selected_index;
+  Alcotest.(check bool) "AddonsBrowser Left End scrolls addon_scroll_offset > 0"
+    true (m_ab_l_end.runtime.addon_scroll_offset > 0);
+  let txt_ab_l = grid_all_text (render_full ~model:m_ab_l_end) in
+  Alcotest.(check bool) "AddonsBrowser Left End renders Addon Title 29" true
+    (Store_scroll.contains_ci ~needle:"Addon Title 29" txt_ab_l);
+  let m_ab_cl =
+    { m_ab_base with nav = { m_ab_base.nav with pane_index = 1 } }
+  in
+  let m_ab_cl_end, _ = step m_ab_cl (mk_key Keymap.Input.End) in
+  Alcotest.(check int) "AddonsBrowser Right Clients End selects last client (29)"
+    29 m_ab_cl_end.runtime.browser_client_selected_index;
+  Alcotest.(check bool)
+    "AddonsBrowser Right Clients End scrolls browser_client_scroll_offset > 15 (exact clients_h)"
+    true (m_ab_cl_end.runtime.browser_client_scroll_offset > 15);
+  let txt_ab_cl = grid_all_text (render_full ~model:m_ab_cl_end) in
+  Alcotest.(check bool) "AddonsBrowser Right Clients End renders space-29" true
+    (Store_scroll.contains_ci ~needle:"space-29" txt_ab_cl);
+  let m_ab_tb =
+    {
+      m_ab_cl with
+      runtime = Runtime_store.toggle_browser_right_focus m_ab_cl.runtime;
+    }
+  in
+  let m_ab_tb_end, _ = step m_ab_tb (mk_key Keymap.Input.End) in
+  Alcotest.(check int) "AddonsBrowser Right Tabs End selects last tab (24)" 24
+    m_ab_tb_end.runtime.browser_tab_selected_index;
+  Alcotest.(check bool)
+    "AddonsBrowser Right Tabs End scrolls browser_tab_scroll_offset > 10"
+    true (m_ab_tb_end.runtime.browser_tab_scroll_offset > 10);
+  let txt_ab_tb = grid_all_text (render_full ~model:m_ab_tb_end) in
+  Alcotest.(check bool) "AddonsBrowser Right Tabs End renders TabSentinel-24" true
+    (Store_scroll.contains_ci ~needle:"TabSentinel-24" txt_ab_tb);
+  (* Compact short viewport clamp check: must never overflow or raise *)
+  let m_ab_short =
+    {
+      m_ab_cl with
+      viewport = { cols = 72; rows = 16 };
+      breakpoint = Model.Compact;
+    }
+  in
+  ignore (render_full ~model:m_ab_short);
+  (* 10-wave1-b. Infra > Activity & Logs pane 1 Entry_event multi-line wrap parity *)
+  let evt_long_detail =
+    (List.init 35 (fun i ->
+         Printf.sprintf "line-%02d: longtoken_without_spaces_%s" i
+           (String.make 45 'x'))
+     |> String.concat "\n")
+    ^ "\nEVT_BOTTOM_SENTINEL"
+  in
+  let m_evt_det =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Infra; pane_index = 1 };
+      infra =
+        Infra_store.empty
+        |> Infra_store.set_tab Nav.Infra_activity_logs
+        |> Infra_store.push_activity
+             {
+               Infra_store.at_unix = 1795400000.0;
+               kind = Infra_store.Activity_tool_call;
+               keeper = Some "alpha";
+               summary = "Summary line 1\nSummary line 2";
+               detail = Some evt_long_detail;
+             };
+    }
+  in
+  assert_scroll_exact ~label:"Infra/Logs pane 1 Entry_event"
+    ~needle:"EVT_BOTTOM_SENTINEL"
+    ~get_off:(fun m -> m.infra.detail_scroll_offset)
+    m_evt_det;
+  (* 10-wave1-c. Media_viewer overlay scroll bounds & bottom render *)
+  let mv_preview =
+    (List.init 24 (fun i -> Printf.sprintf "<p>Media preview line %02d</p>" i)
+     |> String.concat "\n")
+    ^ "\n<p>MEDIA_BOTTOM_SENTINEL</p>"
+  in
+  let mv_art : Wire_knowledge.artifact_entry =
+    {
+      id = "artifact-mv01";
+      url = Some "/api/v1/published-artifacts/artifact-mv01";
+      revision = 1;
+      sha256 = "sha-mv-01";
+      name = "media-scroll.html";
+      mime_type = "text/html";
+      bytes = String.length mv_preview;
+      format = `Html;
+      summary = None;
+      preview = Some mv_preview;
+      created_at_unix = Some 1795254000.0;
+      producer = Some "alpha";
+      title = Some "Media Scroll Test";
+      task_id = None;
+      goal_id = None;
+    }
+  in
+  let m_mv =
+    {
+      base with
+      nav = { base.nav with overlay = Some (Nav.System_gate Nav.Media_viewer) };
+      knowledge =
+        Knowledge_store.empty
+        |> Knowledge_store.apply_artifacts ~observed_at:t0 [ mv_art ];
+    }
+  in
+  assert_scroll_exact ~label:"Overlay/Media_viewer"
+    ~needle:"MEDIA_BOTTOM_SENTINEL"
+    ~get_off:(fun m -> m.knowledge.detail_scroll_offset)
+    m_mv;
+  let m_mv_end, _ = step m_mv (mk_key Keymap.Input.End) in
+  let m_mv_home, _ = step m_mv_end (mk_key Keymap.Input.Home) in
+  Alcotest.(check int) "Overlay/Media_viewer Home resets detail_scroll_offset to 0"
+    0 m_mv_home.knowledge.detail_scroll_offset;
   (* 10a. 5 Runtime > Quotas pane 0: 20 windows (> 14-row 52% sub_rect) *)
   let twenty_quota_accts : Wire_runtime.account_usage list =
     List.init 20 (fun i : Wire_runtime.account_usage ->

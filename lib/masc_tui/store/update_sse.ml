@@ -421,6 +421,21 @@ let apply_dataset_invalidation (m : Model.t) ds =
       ({ m with fleet }, [ get_cmd e Cmd.Get_keepers_roster ])
   | Wire_observer.Dataset_health ->
       (m, [ get_cmd e Cmd.Get_dashboard_shell ])
+  | Wire_observer.Dataset_lane_addons ->
+      let runtime =
+        {
+          m.runtime with
+          lane_addons = Observed.mark_stale m.runtime.lane_addons;
+          browser_lane = Observed.mark_stale m.runtime.browser_lane;
+        }
+      in
+      let cmds =
+        match ws with
+        | Nav.Runtime ->
+            [ get_cmd e Cmd.Get_lane_addons; get_cmd e Cmd.Get_browser_lane ]
+        | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Infra -> []
+      in
+      ({ m with runtime }, cmds)
   | Wire_observer.Dataset_logs
   | Wire_observer.Dataset_activity
   | Wire_observer.Dataset_other _ ->
@@ -898,28 +913,42 @@ let apply_sse_event ~now (m : Model.t) = function
       ({ m with runtime; infra }, [])
 
 let apply_sse_freshness ~now ~stream ~freshness (m : Model.t) =
-  let updated_freshness =
-    match stream with
-    | Subscriptions.Stream_observer ->
-        { m.freshness with observer = freshness }
-    | Subscriptions.Stream_fleet -> { m.freshness with fleet = freshness }
-    | Subscriptions.Stream_model_metrics
-    | Subscriptions.Stream_tool_metrics_series
-    | Subscriptions.Stream_logs _ ->
-        { m.freshness with view_stream = Some freshness }
-  in
-  let next = { m with freshness = updated_freshness } in
-  match freshness with
-  | Health.Workspace_mismatch { expected_instance; observed_instance } ->
-      Update_http.handle_workspace_mismatch ~now
-        ~expected:(Some expected_instance) ~observed:(Some observed_instance)
-        ~message:"SSE stream reported 409 workspace_mismatch" next
-  | Health.Connecting
-  | Health.Live _
-  | Health.Reconnecting _
-  | Health.Stale _
-  | Health.Disconnected _ ->
-      (next, [])
+  match stream with
+  | Subscriptions.Stream_model_metrics
+  | Subscriptions.Stream_tool_metrics_series
+  | Subscriptions.Stream_logs _
+    when not
+           (Option.equal Subscriptions.equal_stream_kind
+              (Subscriptions.view_scoped_stream m)
+              (Some stream)) ->
+      (m, [])
+  | Subscriptions.Stream_observer
+  | Subscriptions.Stream_fleet
+  | Subscriptions.Stream_model_metrics
+  | Subscriptions.Stream_tool_metrics_series
+  | Subscriptions.Stream_logs _ -> (
+      let updated_freshness =
+        match stream with
+        | Subscriptions.Stream_observer ->
+            { m.freshness with observer = freshness }
+        | Subscriptions.Stream_fleet -> { m.freshness with fleet = freshness }
+        | Subscriptions.Stream_model_metrics
+        | Subscriptions.Stream_tool_metrics_series
+        | Subscriptions.Stream_logs _ ->
+            { m.freshness with view_stream = Some freshness }
+      in
+      let next = { m with freshness = updated_freshness } in
+      match freshness with
+      | Health.Workspace_mismatch { expected_instance; observed_instance } ->
+          Update_http.handle_workspace_mismatch ~now
+            ~expected:(Some expected_instance) ~observed:(Some observed_instance)
+            ~message:"SSE stream reported 409 workspace_mismatch" next
+      | Health.Connecting
+      | Health.Live _
+      | Health.Reconnecting _
+      | Health.Stale _
+      | Health.Disconnected _ ->
+          (next, []))
 
 let allow_stream_takeover ~keeper ~request_id (m : Model.t) =
   match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with

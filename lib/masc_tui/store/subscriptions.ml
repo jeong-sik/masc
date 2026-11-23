@@ -99,18 +99,24 @@ let is_blocked_by_gate (m : Model.t) =
       false
 
 let view_scoped_stream (m : Model.t) : stream_id option =
-  match m.nav.workspace with
-  | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers -> None
-  | Nav.Runtime -> (
-      match m.runtime.active_tab with
-      | Nav.Runtime_quotas_credits | Nav.Runtime_failover_lanes -> None
-      | Nav.Runtime_efficiency_spend -> Some Stream_model_metrics
-      | Nav.Runtime_tools_connectors -> Some Stream_tool_metrics_series)
-  | Nav.Infra -> (
-      match m.infra.active_tab with
-      | Nav.Infra_sandboxes | Nav.Infra_repos_changes -> None
-      | Nav.Infra_activity_logs ->
-          Some (Stream_logs { since_seq = m.infra.last_log_seq }))
+  match Model.active_dive m with
+  | Some _ -> None
+  | None -> (
+      match m.nav.workspace with
+      | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers -> None
+      | Nav.Runtime -> (
+          match m.runtime.active_tab with
+          | Nav.Runtime_quotas_credits
+          | Nav.Runtime_failover_lanes
+          | Nav.Runtime_addons_browser ->
+              None
+          | Nav.Runtime_efficiency_spend -> Some Stream_model_metrics
+          | Nav.Runtime_tools_connectors -> Some Stream_tool_metrics_series)
+      | Nav.Infra -> (
+          match m.infra.active_tab with
+          | Nav.Infra_sandboxes | Nav.Infra_repos_changes -> None
+          | Nav.Infra_activity_logs ->
+              Some (Stream_logs { since_seq = m.infra.last_log_seq })))
 
 let plan (m : Model.t) =
   if is_blocked_by_gate m then []

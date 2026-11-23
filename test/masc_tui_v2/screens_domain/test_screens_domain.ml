@@ -455,19 +455,21 @@ let make_rich_model ~lang ~cols ~rows =
   in
   let artifact_1 : Wire_knowledge.artifact_entry =
     {
-      id = "artifact-e3b0c44298fc1c149afbf4c8996fb924";
-      revision = 3;
-      title = "일일 성과 리포트";
-      summary = "2026-11-21 경기 지표 요약";
-      author = "wkbl-web-leader";
-      created_at_unix = now_unix -. 1200.0;
-      body =
-        {
-          sha256 =
-            "e3b0c44298fc1c149afbf4c8996fb924e3b0c44298fc1c149afbf4c8996fb924";
-          bytes = 48_120;
-          mime = "text/html";
-        };
+      id = "art-daily-scorecard";
+      url = Some "/api/v1/published-artifacts/art-daily-scorecard";
+      revision = 2;
+      format = `Html;
+      summary = Some "일일 성과 요약";
+      preview = Some "<html><body><h1>Daily Scorecard</h1></body></html>";
+      sha256 = "e3b0c44298fc1c149afbf4c8996fb924";
+      name = "daily-scorecard-2026-11-21.html";
+      mime_type = "text/html";
+      bytes = 48_120;
+      created_at_unix = Some (now_unix -. 1200.0);
+      producer = Some "wkbl-web-leader";
+      title = Some "일일 성과 리포트";
+      task_id = None;
+      goal_id = None;
     }
   in
   let world_memory : Wire_knowledge.world_memory =
@@ -1053,10 +1055,101 @@ let make_rich_model ~lang ~cols ~rows =
            ok = true;
            available = true;
            inventory_complete = true;
-           client_count = 2;
+           client_count = 1;
            issue_count = 0;
            automatic_browse_ok = true;
            detail = Some "chromium-ready";
+           clients =
+             [
+               {
+                 client_id = "ego-space-1";
+                 browser = "Ego Browser";
+                 version = "131.0";
+                 engine_version = "131.0.6778";
+                 transport = "ego";
+                 space = Some { space_id = 1; space_name = "research" };
+                 ownership = Some "agent";
+                 presence_state = Some "live";
+                 presence_reason = None;
+                 interactions =
+                   [
+                     {
+                       request_id = "req-1";
+                       actor = Some "e-masc-the-leader";
+                       action = "navigate";
+                       tab_id = Some 42;
+                       phase = "active";
+                     };
+                   ];
+                 last_activities = [];
+               };
+             ];
+           issues = [];
+         }
+    |> Runtime_store.apply_lane_addons ~observed_at:now_mono
+         {
+           configuration_complete = true;
+           declarations =
+             [
+               {
+                 id = "browser-ego";
+                 source_path = ".masc/config/addons/browser-ego.toml";
+                 enabled = true;
+                 source_revision = "rev-1";
+                 desired_revision = "rev-1";
+                 applied_revision = Some "rev-1";
+                 instance_id = Some "inst-browser-1";
+                 application_kind = "applied";
+                 application_messages = [];
+                 ui_category = Some "browser";
+               };
+             ];
+           instances =
+             [
+               {
+                 runtime_presence = Wire_runtime.Addon_live;
+                 instance_id = "inst-browser-1";
+                 addon_id = "browser-ego";
+                 title = "Browser Ego Addon";
+                 revision = "rev-1";
+                 phase = Wire_runtime.Addon_observing;
+                 execution_kind = Some "native";
+                 resolved_image = None;
+                 observation_seq = 18;
+                 rows_count = 3;
+                 observation_pending = false;
+                 visibility_kind = Some "workspace";
+                 visibility_keeper = None;
+                 host_cycles = Some 18;
+                 host_waiting_count = 0;
+                 host_issue_kind = None;
+                 action_names = [ "navigate"; "read_tabs" ];
+                 config_declaration_id = Some "browser-ego";
+               };
+             ];
+           issues = [];
+         }
+    |> Runtime_store.apply_browser_tabs ~observed_at:now_mono
+         ~client_id:"ego-space-1"
+         {
+           client_id = Some "ego-space-1";
+           tabs =
+             [
+               {
+                 id = 42;
+                 title = "MASC Dashboard";
+                 url = "https://github.com/jeong-sik/masc";
+                 active = true;
+                 window_id = Some 1;
+                 opened_by = Some Wire_runtime.Tab_origin_agent;
+                 label = Some "research";
+                 dialog_present = false;
+                 dialog_kind = None;
+               };
+             ];
+           complete = true;
+           unavailable_count = 0;
+           error = None;
          }
     |> Runtime_store.apply_mcp_clients ~observed_at:now_mono
          [
@@ -1537,6 +1630,7 @@ let test_runtime_all_tabs_and_invariants () =
       Nav.Runtime_efficiency_spend;
       Nav.Runtime_failover_lanes;
       Nav.Runtime_tools_connectors;
+      Nav.Runtime_addons_browser;
     ]
   in
   List.iter
@@ -1642,7 +1736,12 @@ let test_runtime_all_tabs_and_invariants () =
                   Alcotest.(check bool)
                     (lbl ^ " renders 4-bucket error classes") true
                     (contains_sub ~needle:"policy_rejection" ~haystack:text
-                    || contains_sub ~needle:"Slack #masc-ops" ~haystack:text))
+                    || contains_sub ~needle:"Slack #masc-ops" ~haystack:text)
+              | Nav.Runtime_addons_browser ->
+                  Alcotest.(check bool)
+                    (lbl ^ " renders Addon Lanes & Browser panels") true
+                    (contains_sub ~needle:"Addon" ~haystack:text
+                    || contains_sub ~needle:"애드온" ~haystack:text))
             tabs)
         langs)
     sizes
@@ -1913,24 +2012,40 @@ let test_p1_p2_verifier_regressions () =
     (contains_sub ~needle:"릴리스 런북" ~haystack:txt_wf);
   let art_a : Wire_knowledge.artifact_entry =
     {
-      id = "artifact-aaaa111122223333aaaa111122223333";
+      id = "art-alpha";
+      url = Some "/api/v1/published-artifacts/art-alpha";
       revision = 1;
-      title = "Alpha Report";
-      summary = "First report";
-      author = "alpha-writer";
-      created_at_unix = now_unix -. 600.0;
-      body = { sha256 = "aaaa111122223333"; bytes = 1024; mime = "text/html" };
+      format = `Html;
+      summary = None;
+      preview = Some "<p>Alpha</p>";
+      sha256 = "aaaa111122223333";
+      name = "alpha-report.html";
+      mime_type = "text/html";
+      bytes = 1024;
+      created_at_unix = None;
+      producer = None;
+      title = Some "Alpha Report";
+      task_id = None;
+      goal_id = None;
     }
   in
   let art_b : Wire_knowledge.artifact_entry =
     {
-      id = "artifact-bbbb444455556666bbbb444455556666";
+      id = "art-beta";
+      url = Some "/api/v1/published-artifacts/art-beta";
       revision = 1;
-      title = "Beta Report";
-      summary = "Second report";
-      author = "alpha-writer";
-      created_at_unix = now_unix -. 300.0;
-      body = { sha256 = "bbbb444455556666"; bytes = 2048; mime = "text/html" };
+      format = `Html;
+      summary = None;
+      preview = Some "<p>Beta</p>";
+      sha256 = "bbbb444455556666";
+      name = "beta-report.html";
+      mime_type = "text/html";
+      bytes = 2048;
+      created_at_unix = None;
+      producer = None;
+      title = Some "Beta Report";
+      task_id = None;
+      goal_id = None;
     }
   in
   let m_art_f =
@@ -3573,6 +3688,93 @@ let test_nav_display_order_monotonic_screen_rows () =
   let wiki_ys = collect_wiki_ys kw0 3 [] in
   assert_strictly_increasing ~label:"Knowledge Wiki ▎ row y" wiki_ys
 
+let test_feature_wave1_domain_renders () =
+  let m_base = make_rich_model ~lang:Say.Lang_en ~cols:140 ~rows:40 in
+  (* 1. Artifacts right pane renders HTML body preview & truthful [y] HTML / [e] .html / [H] hints *)
+  let sel_art =
+    match Knowledge_store.selected_artifact m_base.knowledge with
+    | Some a -> a
+    | None -> Alcotest.fail "expected sample artifact in make_rich_model"
+  in
+  let detail : Wire_knowledge.published_artifact_detail =
+    {
+      artifact = sel_art;
+      content = "<!doctype html>\n<h1>Daily Scorecard HTML Body</h1>";
+      revisions = [];
+      shared = false;
+      share_version = 0;
+    }
+  in
+  let m_art =
+    {
+      m_base with
+      nav = { m_base.nav with workspace = Nav.Knowledge };
+      knowledge =
+        m_base.knowledge
+        |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts
+        |> Knowledge_store.toggle_wiki_artifacts_submode
+        |> Knowledge_store.apply_artifact_detail ~observed_at:now_mono detail;
+    }
+  in
+  let g_art =
+    render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+        Screen_knowledge.render ~model:m_art ~cache ~rect gr)
+  in
+  assert_grid_invariants ~label:"Wave1/Artifacts" g_art;
+  let txt_art = grid_all_text g_art in
+  Alcotest.(check bool) "Artifacts right pane shows HTML body preview" true
+    (contains_sub ~needle:"Daily Scorecard HTML Body" ~haystack:txt_art);
+  Alcotest.(check bool) "Artifacts right pane shows [y] Copy HTML & [e] .html" true
+    (contains_sub ~needle:"HTML" ~haystack:txt_art
+     && contains_sub ~needle:".html" ~haystack:txt_art);
+
+  (* 2. Runtime_addons_browser renders Addon Lanes table + Browser Clients + Open Tabs + badges *)
+  let m_ab =
+    {
+      m_base with
+      nav = { m_base.nav with workspace = Nav.Runtime };
+      runtime = Runtime_store.set_tab Nav.Runtime_addons_browser m_base.runtime;
+    }
+  in
+  let g_ab =
+    render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+        Screen_runtime.render ~model:m_ab ~cache ~rect gr)
+  in
+  assert_grid_invariants ~label:"Wave1/AddonsBrowser" g_ab;
+  let txt_ab = grid_all_text g_ab in
+  Alcotest.(check bool) "Addons table shows Browser Ego Addon" true
+    (contains_sub ~needle:"Browser Ego Addon" ~haystack:txt_ab);
+  Alcotest.(check bool) "Browser clients show research/ego-space-1" true
+    (contains_sub ~needle:"research" ~haystack:txt_ab);
+  Alcotest.(check bool) "Open Tabs table shows MASC Dashboard & #42" true
+    (contains_sub ~needle:"MASC Dashboard" ~haystack:txt_ab
+     && contains_sub ~needle:"#42" ~haystack:txt_ab);
+  Alcotest.(check bool) "Mixed-mode badges SYNCED & SNAPSHOT present" true
+    (contains_sub ~needle:"SYNCED" ~haystack:txt_ab
+     && contains_sub ~needle:"SNAPSHOT" ~haystack:txt_ab);
+
+  (* 3. Infra Activity & Logs renders SRC column (LOG/EVT) & right detail for Entry_event *)
+  let m_logs =
+    {
+      m_base with
+      nav = { m_base.nav with workspace = Nav.Infra };
+      infra =
+        m_base.infra
+        |> Infra_store.set_tab Nav.Infra_activity_logs
+        |> Infra_store.set_source_filter Infra_store.Source_events;
+    }
+  in
+  let g_logs =
+    render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+        Screen_infra.render ~model:m_logs ~cache ~rect gr)
+  in
+  assert_grid_invariants ~label:"Wave1/InfraEvents" g_logs;
+  let txt_logs = grid_all_text g_logs in
+  Alcotest.(check bool) "Infra Activity & Logs shows EVT badge" true
+    (contains_sub ~needle:"EVT" ~haystack:txt_logs);
+  Alcotest.(check bool) "Infra Activity & Logs renders MASC Events pill" true
+    (contains_sub ~needle:"MASC Events" ~haystack:txt_logs)
+
 let () =
   Alcotest.run "masc_tui_screens_domain"
     [
@@ -3636,5 +3838,8 @@ let () =
           Alcotest.test_case
             "Nav display-order monotonic Left_rail row progression (Runtime Efficiency & Wiki)"
             `Quick test_nav_display_order_monotonic_screen_rows;
+          Alcotest.test_case
+            "Feature Wave 1: Artifacts HTML preview, Addons & Browser tables, Unified LOG/EVT"
+            `Quick test_feature_wave1_domain_renders;
         ] );
     ]

@@ -75,6 +75,14 @@ let wiki_search_path ~query ?limit () =
   "/api/v1/wiki/search?" ^ String.concat "&" params
 
 let wiki_lint_path = "/api/v1/wiki/lint"
+let published_artifacts_path = "/api/v1/published-artifacts"
+
+let published_artifact_detail_path ~id ?revision () =
+  let base = "/api/v1/published-artifacts/" ^ percent_encode id in
+  match revision with
+  | Some r when r > 0 -> Printf.sprintf "%s?revision=%d" base r
+  | Some _ | None -> base
+
 let world_memory_path = "/api/v1/memory/world"
 let workspace_memory_inventory_path = "/api/v1/dashboard/workspace-memory-inventory"
 
@@ -906,52 +914,262 @@ let encode_wiki_put_request req =
         ("note", `String req.note);
       ])
 
-type artifact_body = {
-  sha256 : string;
-  bytes : int;
-  mime : string;
-}
+type artifact_format = [ `Html | `Markdown ]
 
 type artifact_entry = {
   id : string;
+  url : string option;
+  revision : int;
+  sha256 : string;
+  name : string;
+  mime_type : string;
+  bytes : int;
+  format : artifact_format;
+  summary : string option;
+  preview : string option;
+  created_at_unix : float option;
+  producer : string option;
+  title : string option;
+  task_id : string option;
+  goal_id : string option;
+}
+
+type artifact_revision_summary = {
   revision : int;
   title : string;
   summary : string;
+  format : artifact_format;
   author : string;
-  created_at_unix : float;
-  body : artifact_body;
+  created_at_unix : float option;
+  sha256 : string;
+  bytes : int;
+  mime_type : string;
+  preview : string option;
+  task_id : string option;
+  goal_id : string option;
 }
 
-(* A row is [Published_artifact.summary_to_json]: the latest revision of one
-   artifact, its body a content-addressed [_blob] reference. *)
-let decode_artifact_body json =
-  let* blob = required_object_field json "_blob" in
-  let* sha256 = required_nonblank_string blob "sha256" in
-  let* bytes = required_nonnegative_int_field blob "bytes" in
-  let* mime = required_nonblank_string blob "mime" in
-  Ok ({ sha256; bytes; mime } : artifact_body)
+type published_artifact_detail = {
+  artifact : artifact_entry;
+  content : string;
+  revisions : artifact_revision_summary list;
+  shared : bool;
+  share_version : int;
+}
+
+let artifact_extension = function
+  | `Html -> ".html"
+  | `Markdown -> ".md"
+
+let decode_artifact_format ~mime_type json =
+  match optional_nonblank_string json "format" with
+  | Error _ as err -> err
+  | Ok (Some raw) -> (
+      match String.lowercase_ascii (String.trim raw) with
+      | "html" -> Ok `Html
+      | "markdown" | "md" -> Ok `Markdown
+      | other -> Error ("unknown artifact format: " ^ other))
+  | Ok None ->
+      let lower_mime = String.lowercase_ascii (String.trim mime_type) in
+      if
+        String.starts_with ~prefix:"text/html" lower_mime
+        || String.starts_with ~prefix:"application/xhtml" lower_mime
+      then Ok `Html
+      else Ok `Markdown
+
+let decode_optional_text_field json key =
+  match member key json with
+  | `Null -> Ok None
+  | `String s -> Ok (Some s)
+  | bad -> field_type_error key "a string or null" bad
+
+let decode_artifact_created_at json =
+  let* ts_primary = decode_optional_timestamp_unix json "created_at" in
+  match ts_primary with
+  | Some _ as hit -> Ok hit
+  | None -> decode_optional_timestamp_unix json "created_at_unix"
 
 let decode_artifact_entry json =
-  let* id = required_nonblank_string json "id" in
+  let* body_opt = optional_object_field json "body" in
+  match body_opt with
+  | Some body_obj ->
+      (* Live GET /api/v1/published-artifacts shape: Published_artifact.summary_to_json
+         wraps body under [body._blob.{sha256,bytes,mime,preview}] via
+         [Tool_output.normalized_artifact_ref_to_json], while direct-body fixtures
+         may place fields directly under [body.{...}]. *)
+      let* blob_opt = optional_object_field body_obj "_blob" in
+      let blob_obj = Option.value ~default:body_obj blob_opt in
+      let* id = required_nonblank_string json "id" in
+      let* url = optional_nonblank_string json "url" in
+      let* rev_opt = optional_int_field json "revision" in
+      let* revision =
+        match rev_opt with
+        | Some r when r >= 1 -> Ok r
+        | Some r ->
+            Error (Printf.sprintf "field \"revision\" must be >= 1, got %d" r)
+        | None -> Ok 1
+      in
+      let* title = optional_nonblank_string json "title" in
+      let* summary = optional_nonblank_string json "summary" in
+      let* author = optional_nonblank_string json "author" in
+      let* producer_fallback = optional_nonblank_string json "producer" in
+      let producer =
+        match author with Some _ as a -> a | None -> producer_fallback
+      in
+      let* created_at_unix = decode_artifact_created_at json in
+      let* sha256 = required_nonblank_string blob_obj "sha256" in
+      let* bytes = required_nonnegative_int_field blob_obj "bytes" in
+      let* mime_opt = optional_nonblank_string blob_obj "mime" in
+      let* mime_type =
+        match mime_opt with
+        | Some m -> Ok m
+        | None -> required_nonblank_string blob_obj "mime_type"
+      in
+      let* preview = decode_optional_text_field blob_obj "preview" in
+      let* format = decode_artifact_format ~mime_type json in
+      let* task_id = optional_nonblank_string json "task_id" in
+      let* goal_id = optional_nonblank_string json "goal_id" in
+      let* explicit_name = optional_nonblank_string json "name" in
+      let name =
+        match explicit_name, title with
+        | Some n, _ -> n
+        | None, Some t -> t
+        | None, None -> id
+      in
+      Ok
+        {
+          id;
+          url;
+          revision;
+          sha256;
+          name;
+          mime_type;
+          bytes;
+          format;
+          summary;
+          preview;
+          created_at_unix;
+          producer;
+          title;
+          task_id;
+          goal_id;
+        }
+  | None ->
+      (* Flat-field fallback for legacy fixtures *)
+      let* sha256 = required_nonblank_string json "sha256" in
+      let* name = required_nonblank_string json "name" in
+      let* mime_type = required_nonblank_string json "mime_type" in
+      let* bytes = required_nonnegative_int_field json "bytes" in
+      let* id_opt = optional_nonblank_string json "id" in
+      let id = Option.value ~default:sha256 id_opt in
+      let* url = optional_nonblank_string json "url" in
+      let* rev_opt = optional_int_field json "revision" in
+      let* revision =
+        match rev_opt with
+        | Some r when r >= 1 -> Ok r
+        | Some r ->
+            Error (Printf.sprintf "field \"revision\" must be >= 1, got %d" r)
+        | None -> Ok 1
+      in
+      let* format = decode_artifact_format ~mime_type json in
+      let* summary = optional_nonblank_string json "summary" in
+      let* preview = decode_optional_text_field json "preview" in
+      let* created_at_unix = decode_artifact_created_at json in
+      let* producer_opt = optional_nonblank_string json "producer" in
+      let* author_opt = optional_nonblank_string json "author" in
+      let producer =
+        match producer_opt with Some _ as p -> p | None -> author_opt
+      in
+      let* title = optional_nonblank_string json "title" in
+      let* task_id = optional_nonblank_string json "task_id" in
+      let* goal_id = optional_nonblank_string json "goal_id" in
+      Ok
+        {
+          id;
+          url;
+          revision;
+          sha256;
+          name;
+          mime_type;
+          bytes;
+          format;
+          summary;
+          preview;
+          created_at_unix;
+          producer;
+          title;
+          task_id;
+          goal_id;
+        }
+
+let decode_artifact_revision_summary json =
   let* revision = required_int_field json "revision" in
-  let* () =
-    if revision >= 1 then Ok ()
-    else Error (Printf.sprintf "field \"revision\" must be >= 1, got %d" revision)
+  let* title_opt = optional_nonblank_string json "title" in
+  let title = Option.value ~default:"" title_opt in
+  let* summary_opt = optional_string_field json "summary" in
+  let summary = Option.value ~default:"" summary_opt in
+  let* author_opt = optional_nonblank_string json "author" in
+  let author = Option.value ~default:"" author_opt in
+  let* created_at_unix = decode_artifact_created_at json in
+  let* body_opt = optional_object_field json "body" in
+  let* src =
+    match body_opt with
+    | None -> Ok json
+    | Some body_obj ->
+        let* blob_opt = optional_object_field body_obj "_blob" in
+        Ok (Option.value ~default:body_obj blob_opt)
   in
-  let* title = required_nonblank_string json "title" in
-  let* summary = required_nonblank_string json "summary" in
-  let* author = required_nonblank_string json "author" in
-  let* created_at_unix = decode_timestamp_unix json "created_at" in
-  let* body_obj = required_object_field json "body" in
-  let* body = decode_artifact_body body_obj in
+  let* sha256 = required_nonblank_string src "sha256" in
+  let* bytes = required_nonnegative_int_field src "bytes" in
+  let* mime_opt = optional_nonblank_string src "mime" in
+  let* mime_type =
+    match mime_opt with
+    | Some m -> Ok m
+    | None -> (
+        match optional_nonblank_string src "mime_type" with
+        | Ok (Some m) -> Ok m
+        | Ok None -> Ok "text/plain"
+        | Error _ as err -> err)
+  in
+  let* preview = decode_optional_text_field src "preview" in
+  let* format = decode_artifact_format ~mime_type json in
+  let* task_id = optional_nonblank_string json "task_id" in
+  let* goal_id = optional_nonblank_string json "goal_id" in
   Ok
-    ({ id; revision; title; summary; author; created_at_unix; body }
-      : artifact_entry)
+    {
+      revision;
+      title;
+      summary;
+      format;
+      author;
+      created_at_unix;
+      sha256;
+      bytes;
+      mime_type;
+      preview;
+      task_id;
+      goal_id;
+    }
 
 let decode_artifacts_list json =
   let* _, body = unwrap_v2_or_raw json in
   let* items = required_list_field body "artifacts" in
   decode_list "artifacts" decode_artifact_entry items
+
+let decode_published_artifact_detail json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* artifact_json = required_object_field body "artifact" in
+  let* artifact = decode_artifact_entry artifact_json in
+  let* content = required_string_field body "content" in
+  let* rev_items = optional_list_field body "revisions" in
+  let* revisions =
+    decode_list "revisions" decode_artifact_revision_summary rev_items
+  in
+  let* shared_opt = optional_bool_field body "shared" in
+  let shared = Option.value ~default:false shared_opt in
+  let* share_ver_opt = optional_int_field body "share_version" in
+  let share_version = Option.value ~default:0 share_ver_opt in
+  Ok { artifact; content; revisions; shared; share_version }
 
 type world_ledger_state =
   | World_ledger_missing

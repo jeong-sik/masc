@@ -1318,19 +1318,22 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
                 List.map
                   (fun (a : Wire_knowledge.artifact_entry) ->
                     {
-                      Table.id = a.id;
+                      Table.id =
+                        if not (String.equal a.id "") then a.id else a.sha256;
                       cells =
                         [
-                          ("name", Table.text_cell a.title);
+                          ("name", Table.text_cell (Option.value ~default:a.name a.title));
                           ( "mime"
                           , Table.text_cell
                               ~fg:(Color.of_rgb theme.text_secondary)
-                              a.body.mime );
+                              a.mime_type );
                           ( "size"
                           , Table.text_cell
                               (Format_val.format_value Format_val.Bytes
-                                 (float_of_int a.body.bytes)) );
-                          ("author", Table.text_cell a.author);
+                                 (float_of_int a.bytes)) );
+                          ( "author"
+                          , Table.text_cell
+                              (Option.value ~default:"—" a.producer) );
                         ];
                     })
                   visible_items
@@ -1349,48 +1352,101 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
             H.draw_observed_placeholder ~grid
               ~rect:(H.pad_content ~bp left_inner) ~theme ~lang obs
       end;
+      let sel_art = Knowledge_store.selected_artifact k in
+      let art_hotkey =
+        let fmt_tok, ext_tok =
+          match sel_art with
+          | Some { format = `Html; _ } -> ("HTML", ".html")
+          | Some { format = `Markdown; _ } | None -> ("MD", ".md")
+        in
+        Say.resolve lang
+          (Say.make
+             ~ko:
+               (Printf.sprintf
+                  "[y] %s 복사 · [e] %s 내보내기 · [o] 열기 · [H] SHA · [Enter] 상세"
+                  fmt_tok ext_tok)
+             ~en:
+               (Printf.sprintf
+                  "[y] Copy %s · [e] Export %s · [o] Open · [H] SHA · [Enter] Dive"
+                  fmt_tok ext_tok))
+      in
       let right_inner =
         Card.draw ~cache grid ~rect:right_rect ~theme
           (H.card_spec ~focused:(Model.pane_focused model 1)
-             ~hotkey:(Say.resolve lang (Say.make ~ko:"[Enter] 상세" ~en:"[Enter] Dive"))
+             ~hotkey:art_hotkey
              (Say.resolve lang (Say.make ~ko:"아티팩트 상세" ~en:"Artifact Detail")))
       in
       if not (Rect.is_empty right_inner) then begin
-        match Knowledge_store.selected_artifact k with
+        match sel_art with
         | None ->
             H.draw_observed_placeholder ~grid
               ~rect:(H.pad_content ~bp right_inner) ~theme ~lang k.artifacts
         | Some a ->
             let pad_x = Layout.card_pad_x bp in
+            let title_s = Option.value ~default:a.name a.title in
+            let fmt_tok, ext_tok =
+              match a.format with
+              | `Html -> ("HTML", ".html")
+              | `Markdown -> ("MD", ".md")
+            in
             let band_h = if right_inner.h >= 7 then 2 else 1 in
             Card.draw_section_band ~pad_x grid
               ~rect:(Rect.make ~x:right_inner.x ~y:right_inner.y
                        ~w:right_inner.w ~h:band_h)
-              ~theme ~left_title:a.title
+              ~theme ~left_title:title_s
               ~right_meta:
-                (Format_val.format_value Format_val.Bytes
-                   (float_of_int a.body.bytes))
-              ?subtitle:(if band_h >= 2 then Some a.body.mime else None)
+                (Format_val.format_value Format_val.Bytes (float_of_int a.bytes))
+              ?subtitle:
+                (if band_h >= 2 then
+                   Some (Printf.sprintf "%s · r%d · %s" fmt_tok a.revision a.mime_type)
+                 else None)
               ();
             let content =
               Rect.make ~x:right_inner.x ~y:(right_inner.y + band_h)
                 ~w:right_inner.w ~h:(Int.max 0 (right_inner.h - band_h))
               |> H.pad_content ~bp
             in
-            (* Update_nav.knowledge_detail_max_scroll counts these rows. *)
-            let rows =
-              [
-                `Kv ("ID", a.id);
-                `Kv ("SHA-256", a.body.sha256);
-                `Kv
-                  ( Say.resolve lang (Say.make ~ko:"작성자" ~en:"Author"),
-                    a.author );
-                `Kv
-                  ( Say.resolve lang (Say.make ~ko:"생성" ~en:"Created"),
-                    Wire_common.format_unix_rfc3339 a.created_at_unix );
-                `Link (a.id, a.body.sha256);
-              ]
+            let detail_opt = Knowledge_store.artifact_detail_for_entry a k in
+            let preview_lines =
+              Knowledge_store.artifact_preview_lines a detail_opt
             in
+            let rows_acc = ref [] in
+            let push_kv key value = rows_acc := `Kv (key, value) :: !rows_acc in
+            push_kv "ID" (Printf.sprintf "%s (r%d)" a.id a.revision);
+            push_kv (Say.resolve lang (Say.make ~ko:"파일" ~en:"File")) a.name;
+            push_kv "SHA-256" a.sha256;
+            (match a.producer with
+             | Some p ->
+                 push_kv
+                   (Say.resolve lang (Say.make ~ko:"생성자" ~en:"Producer"))
+                   p
+             | None -> ());
+            (match a.created_at_unix with
+             | Some ts ->
+                 push_kv
+                   (Say.resolve lang (Say.make ~ko:"생성" ~en:"Created"))
+                   (Wire_common.format_unix_rfc3339 ts)
+             | None -> ());
+            (match a.summary with
+             | Some s ->
+                 push_kv (Say.resolve lang (Say.make ~ko:"요약" ~en:"Summary")) s
+             | None -> ());
+            rows_acc := `Actions (a.id, fmt_tok, ext_tok) :: !rows_acc;
+            if preview_lines <> [] then begin
+              rows_acc :=
+                `Divider
+                  (Say.resolve lang
+                     (Say.make
+                        ~ko:(Printf.sprintf "%s 본문 미리보기 (%d줄)" fmt_tok
+                               (List.length preview_lines))
+                        ~en:(Printf.sprintf "%s Body Preview (%d lines)" fmt_tok
+                               (List.length preview_lines))))
+                :: !rows_acc;
+              List.iter
+                (fun line -> rows_acc := `Body_line line :: !rows_acc)
+                preview_lines
+            end;
+            let rows = List.rev !rows_acc in
             let vis_h = Int.max 1 content.h in
             let max_skip = Int.max 0 (List.length rows - vis_h) in
             let skip = Int.min max_skip (Int.max 0 k.detail_scroll_offset) in
@@ -1403,17 +1459,36 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
                         ~max_w:content.w ~theme ~key_w:9 ~key value;
                       incr y
                     end
-                | `Link (id, sha) ->
+                | `Actions (id, ft, et) ->
                     if !y < bottom then begin
                       let uri = "masc://artifact/" ^ id in
                       ignore
                         (H.put_link ~grid ~clip:content ~x:content.x ~y:!y
                            ~max_w:content.w ~style:(H.accent_style ~theme ())
                            ~uri
-                           (Printf.sprintf "[o] %s (%s)"
-                              (Say.resolve lang
-                                 (Say.make ~ko:"뷰어 열기" ~en:"Open Viewer"))
-                              (H.short_hash ~len:12 sha)));
+                           (Say.resolve lang
+                              (Say.make
+                                 ~ko:
+                                   (Printf.sprintf
+                                      "[y] %s 복사 · [e] %s 저장 · [o] 브라우저 열기 · [H] SHA"
+                                      ft et)
+                                 ~en:
+                                   (Printf.sprintf
+                                      "[y] Copy %s · [e] Export %s · [o] Open · [H] SHA"
+                                      ft et))));
+                      incr y
+                    end
+                | `Divider lbl ->
+                    if !y < bottom then begin
+                      H.draw_divider ~grid ~rect:content ~y:!y ~theme ~label:lbl
+                        ();
+                      incr y
+                    end
+                | `Body_line line ->
+                    if !y < bottom then begin
+                      ignore
+                        (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                           ~max_w:content.w ~style:(H.text_style ~theme ()) line);
                       incr y
                     end)
               (Store_scroll.drop skip rows)
@@ -2018,7 +2093,8 @@ let draw_temporal_memory_diff ~(model : Model.t) ~grid ~cache ~(rect : Rect.t)
             (Say.make ~ko:"시간축 메모리 Diff 스크러버"
                ~en:"Temporal Memory Diff Scrubber")
         , Say.resolve lang
-            (Say.make ~ko:"[Space] 창 전환" ~en:"[Space] Window") )
+            (Say.make ~ko:"[Space] 창 · [g] 흐름/총량"
+               ~en:"[Space] Window · [g] Flow/Net") )
   in
   let inner =
     Card.draw ~cache grid ~rect ~theme
@@ -2480,96 +2556,162 @@ let render_dive_artifact ~id ~(model : Model.t) ~cache ~(rect : Rect.t)
   let artifacts =
     match Observed.to_option k.artifacts with Some xs -> xs | None -> []
   in
-  let target = Knowledge_store.artifact_by_id k id in
+  let target = Knowledge_store.find_artifact_by_id_or_sha id k in
+  let fmt_tok, ext_tok =
+    match target with
+    | Some { format = `Html; _ } -> ("HTML", ".html")
+    | Some { format = `Markdown; _ } | None -> ("MD", ".md")
+  in
   let inner =
     Card.draw ~cache grid ~rect ~theme
-      (H.card_spec ~focused:(Model.body_has_focus model) ~subtitle:id
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[Esc] 뒤로" ~en:"[Esc] Back"))
+      (H.card_spec ~focused:(Model.body_has_focus model)
+         ~subtitle:(H.short_hash ~len:14 id)
+         ~hotkey:
+           (Say.resolve lang
+              (Say.make
+                 ~ko:
+                   (Printf.sprintf
+                      "[y] %s 복사 · [e] %s 내보내기 · [o] 열기 · [H] SHA · [Esc] 뒤로"
+                      fmt_tok ext_tok)
+                 ~en:
+                   (Printf.sprintf
+                      "[y] Copy %s · [e] Export %s · [o] Open · [H] SHA · [Esc] Back"
+                      fmt_tok ext_tok)))
          (Say.resolve lang
             (Say.make ~ko:"지식 > 아티팩트 뷰어" ~en:"Knowledge > Artifact Viewer")))
   in
   let content = H.pad_content ~bp inner in
   if Rect.is_empty content then ()
   else
-    let y = ref content.y and bottom = Rect.bottom content in
+    let rows_acc = ref [] in
+    let push r = rows_acc := r :: !rows_acc in
     (match target with
-     | None ->
-         H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang k.artifacts
+     | None -> ()
      | Some a ->
-         let put_row key v =
-           if !y < bottom then begin
-             H.put_kv ~grid ~clip:content ~x:content.x ~y:!y ~max_w:content.w
-               ~theme ~key_w:9 ~key v;
-             incr y
-           end
+         let detail_opt = Knowledge_store.artifact_detail_for_entry a k in
+         let preview_lines =
+           Knowledge_store.artifact_preview_lines a detail_opt
          in
-         (* Update_nav.dive_max_scroll counts these rows. *)
-         put_row (Say.resolve lang (Say.make ~ko:"제목" ~en:"Title")) a.title;
-         put_row (Say.resolve lang (Say.make ~ko:"요약" ~en:"Summary")) a.summary;
-         put_row
-           (Say.resolve lang (Say.make ~ko:"리비전" ~en:"Revision"))
-           (Printf.sprintf "r%d" a.revision);
-         put_row "MIME" a.body.mime;
-         put_row
-           (Say.resolve lang (Say.make ~ko:"크기" ~en:"Size"))
-           (Format_val.format_value Format_val.Bytes
-              (float_of_int a.body.bytes));
-         put_row "SHA-256" a.body.sha256;
-         put_row (Say.resolve lang (Say.make ~ko:"작성자" ~en:"Author")) a.author;
-         put_row
-           (Say.resolve lang (Say.make ~ko:"생성" ~en:"Created"))
-           (Wire_common.format_unix_rfc3339 a.created_at_unix);
-         if !y < bottom then begin
-           ignore
-             (H.put_link ~grid ~clip:content ~x:content.x ~y:!y ~max_w:content.w
-                ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
-                ~uri:("masc://artifact/" ^ a.id)
+         push (`Kv ("ID", Printf.sprintf "%s (r%d)" a.id a.revision));
+         push (`Kv (Say.resolve lang (Say.make ~ko:"이름" ~en:"Name"), a.name));
+         (match a.title with
+          | Some t ->
+              push (`Kv (Say.resolve lang (Say.make ~ko:"제목" ~en:"Title"), t))
+          | None -> ());
+         push (`Kv ("MIME", a.mime_type));
+         push
+           (`Kv
+              ( Say.resolve lang (Say.make ~ko:"크기" ~en:"Size")
+              , Format_val.format_value Format_val.Bytes (float_of_int a.bytes)
+              ));
+         push (`Kv ("SHA-256", a.sha256));
+         (match a.producer with
+          | Some p ->
+              push
+                (`Kv (Say.resolve lang (Say.make ~ko:"생성자" ~en:"Producer"), p))
+          | None -> ());
+         (match a.summary with
+          | Some s ->
+              push (`Kv (Say.resolve lang (Say.make ~ko:"요약" ~en:"Summary"), s))
+          | None -> ());
+         push (`Actions (a.id, fmt_tok, ext_tok));
+         if preview_lines <> [] then begin
+           push
+             (`Divider
                 (Say.resolve lang
-                   (Say.make ~ko:"[o] 아티팩트 뷰어 열기"
-                      ~en:"[o] Open artifact viewer")));
-           incr y
+                   (Say.make
+                      ~ko:(Printf.sprintf "%s 본문 미리보기 (%d줄)" fmt_tok
+                             (List.length preview_lines))
+                      ~en:(Printf.sprintf "%s Body Preview (%d lines)" fmt_tok
+                             (List.length preview_lines)))));
+           List.iter (fun l -> push (`Body_line l)) preview_lines
          end);
-    if artifacts <> [] && !y + 1 < bottom then begin
-      H.draw_divider ~grid ~rect:content ~y:!y ~theme
-        ~label:
-          (Say.resolve lang
-             (Say.make ~ko:"발행 아티팩트 목록" ~en:"Published Artifacts"))
-        ();
-      incr y;
-      let rev_vis_h = Int.max 1 (bottom - !y) in
-      let rev_skip =
-        Int.min
-          (Int.max 0 (List.length artifacts - rev_vis_h))
-          (Int.max 0 model.nav.dive_scroll_offset)
-      in
+    if artifacts <> [] then begin
+      push
+        (`Divider
+           (Say.resolve lang
+              (Say.make ~ko:"발행 아티팩트 목록" ~en:"Published Artifacts")));
+      List.iter (fun a -> push (`Rev a)) artifacts
+    end;
+    let rows = List.rev !rows_acc in
+    if rows = [] then
+      H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang k.artifacts
+    else
+      let vis_h = Int.max 1 content.h in
+      let max_skip = Int.max 0 (List.length rows - vis_h) in
+      let skip = Int.min max_skip (Int.max 0 model.nav.dive_scroll_offset) in
+      let y = ref content.y and bottom = Rect.bottom content in
       List.iter
-        (fun (a : Wire_knowledge.artifact_entry) ->
-          if !y < bottom then begin
-            let is_cur = String.equal a.id id in
-            let row_rect =
-              Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1
-            in
-            let row_bg =
-              if is_cur then theme.selection_bg else theme.surface_1
-            in
-            if is_cur then
-              H.paint_selected_row_bg ~grid ~clip:content ~row_rect ~theme ();
-            let style =
-              if is_cur then H.anchor_style ~theme ~bg:row_bg ()
-              else H.secondary_style ~theme ~bg:row_bg ()
-            in
-            let line =
-              Printf.sprintf "r%d · %s · %s" a.revision a.title
-                (Format_val.format_value Format_val.Bytes
-                   (float_of_int a.body.bytes))
-            in
-            ignore
-              (H.put_clipped ~grid ~clip:content ~x:(content.x + 2) ~y:!y
-                 ~max_w:(Int.max 0 (content.w - 2)) ~style line);
-            incr y
-          end)
-        (Store_scroll.drop rev_skip artifacts)
-    end
+        (function
+          | `Kv (key, v) ->
+              if !y < bottom then begin
+                H.put_kv ~grid ~clip:content ~x:content.x ~y:!y ~max_w:content.w
+                  ~theme ~key_w:9 ~key v;
+                incr y
+              end
+          | `Actions (art_id, ft, et) ->
+              if !y < bottom then begin
+                ignore
+                  (H.put_link ~grid ~clip:content ~x:content.x ~y:!y
+                     ~max_w:content.w
+                     ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
+                     ~uri:("masc://artifact/" ^ art_id)
+                     (Say.resolve lang
+                        (Say.make
+                           ~ko:
+                             (Printf.sprintf
+                                "[y] %s 본문 복사 · [e] %s 저장 · [o] 기본 앱 열기 · [H] SHA 복사"
+                                ft et)
+                           ~en:
+                             (Printf.sprintf
+                                "[y] Copy %s body · [e] Export %s · [o] Open default · [H] Copy SHA"
+                                ft et))));
+                incr y
+              end
+          | `Divider lbl ->
+              if !y < bottom then begin
+                H.draw_divider ~grid ~rect:content ~y:!y ~theme ~label:lbl ();
+                incr y
+              end
+          | `Body_line l ->
+              if !y < bottom then begin
+                ignore
+                  (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                     ~max_w:content.w ~style:(H.text_style ~theme ()) l);
+                incr y
+              end
+          | `Rev (a : Wire_knowledge.artifact_entry) ->
+              if !y < bottom then begin
+                let is_cur =
+                  String.equal a.id id || String.equal a.sha256 id
+                in
+                let row_rect =
+                  Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1
+                in
+                let row_bg =
+                  if is_cur then theme.selection_bg else theme.surface_1
+                in
+                if is_cur then
+                  H.paint_selected_row_bg ~grid ~clip:content ~row_rect ~theme
+                    ();
+                let style =
+                  if is_cur then H.anchor_style ~theme ~bg:row_bg ()
+                  else H.secondary_style ~theme ~bg:row_bg ()
+                in
+                let line =
+                  Printf.sprintf "%s · r%d · %s · %s"
+                    (H.short_hash ~len:10 a.sha256)
+                    a.revision
+                    (Option.value ~default:a.name a.title)
+                    (Format_val.format_value Format_val.Bytes
+                       (float_of_int a.bytes))
+                in
+                ignore
+                  (H.put_clipped ~grid ~clip:content ~x:(content.x + 2) ~y:!y
+                     ~max_w:(Int.max 0 (content.w - 2)) ~style line);
+                incr y
+              end)
+        (Store_scroll.drop skip rows)
 
 let render_dive_memory ~keeper ~from_rev ~to_rev ~(model : Model.t) ~cache
     ~(rect : Rect.t) ~(theme : Theme.t) ~bp grid =

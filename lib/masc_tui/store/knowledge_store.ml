@@ -149,6 +149,7 @@ type t = {
   wiki_lint : Wire_knowledge.wiki_lint_report Observed.t;
   wiki_edit_base : wiki_edit_base option;
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
+  active_artifact_detail : Wire_knowledge.published_artifact_detail Observed.t;
   world_memory : Wire_knowledge.world_memory Observed.t;
   memory_diffs : Wire_knowledge.memory_diff Observed.t Memory_diff_map.t;
   memory_os_internals :
@@ -169,6 +170,7 @@ type t = {
   memory_reading_scroll : int;
   memory_diagram : memory_diagram_state option;
   memory_diagram_seq : int;
+  memory_flow_mode : Masc_tui_ui.Memory_flow.chart_mode;
   last_memory_act_answer : (string * Wire_knowledge.memory_act_answer) option;
   selected_index : int;
   scroll_offset : int;
@@ -195,6 +197,7 @@ let empty =
     wiki_lint = Observed.unreported;
     wiki_edit_base = None;
     artifacts = Observed.unreported;
+    active_artifact_detail = Observed.absent;
     world_memory = Observed.unreported;
     memory_diffs = Memory_diff_map.empty;
     memory_os_internals = String_map.empty;
@@ -214,6 +217,7 @@ let empty =
     memory_reading_scroll = 0;
     memory_diagram = None;
     memory_diagram_seq = 0;
+    memory_flow_mode = Masc_tui_ui.Memory_flow.Flow_io;
     last_memory_act_answer = None;
     selected_index = 0;
     scroll_offset = 0;
@@ -1409,9 +1413,15 @@ let artifacts_filtered t =
   else
     List.filter
       (fun (a : Wire_knowledge.artifact_entry) ->
-        contains_ci ~needle:q a.title
-        || contains_ci ~needle:q a.id
-        || contains_ci ~needle:q a.body.sha256)
+        contains_ci ~needle:q a.id
+        || contains_ci ~needle:q a.name
+        || contains_ci ~needle:q a.sha256
+        || contains_ci ~needle:q a.mime_type
+        || (match a.title with Some s -> contains_ci ~needle:q s | None -> false)
+        ||
+        match a.producer with
+        | Some s -> contains_ci ~needle:q s
+        | None -> false)
       items
 
 let selected_artifact t =
@@ -1426,6 +1436,116 @@ let artifact_by_id t id =
         items
   | None -> None
 
+let find_artifact_by_id_or_sha target t =
+  let items =
+    match Observed.to_option t.artifacts with Some xs -> xs | None -> []
+  in
+  List.find_opt
+    (fun (a : Wire_knowledge.artifact_entry) ->
+      String.equal a.id target || String.equal a.sha256 target)
+    items
+
+let artifact_detail_for_entry (a : Wire_knowledge.artifact_entry) t =
+  match Observed.to_option t.active_artifact_detail with
+  | Some detail
+    when String.equal detail.artifact.id a.id
+         || String.equal detail.artifact.sha256 a.sha256 ->
+      Some detail
+  | Some _ | None -> None
+
+let artifact_preview_lines (a : Wire_knowledge.artifact_entry)
+    (detail_opt : Wire_knowledge.published_artifact_detail option) =
+  let raw_opt =
+    match detail_opt with
+    | Some d when not (String.equal d.content "") -> Some d.content
+    | Some _ | None -> (
+        match a.preview with
+        | Some p when not (String.equal p "") -> Some p
+        | Some _ | None -> None)
+  in
+  match raw_opt with
+  | None -> []
+  | Some raw ->
+      String.split_on_char '\n' raw
+      |> List.map (fun line ->
+             let len = String.length line in
+             if len > 0 && Char.equal line.[len - 1] '\r' then
+               String.sub line 0 (len - 1)
+             else line)
+
+let toggle_memory_flow_mode t =
+  {
+    t with
+    memory_flow_mode = Masc_tui_ui.Memory_flow.toggle_mode t.memory_flow_mode;
+  }
+
+let apply_artifact_detail ~observed_at detail t =
+  { t with active_artifact_detail = Observed.value ~observed_at detail }
+
+let mark_artifact_detail_failed ~at ~reason ~retryable t =
+  { t with active_artifact_detail = Observed.failed ~reason ~retryable ~at }
+
+let memory_flow_input_of_diff (diff : Wire_knowledge.memory_diff)
+    (window : memory_diff_window) : Masc_tui_ui.Memory_flow.input =
+  let win_kind =
+    match window with
+    | Window_24h -> Masc_tui_ui.Memory_flow.Window_24h
+    | Window_7d -> Masc_tui_ui.Memory_flow.Window_7d
+    | Window_30d -> Masc_tui_ui.Memory_flow.Window_30d
+    | Window_revs { from_rev; to_rev } ->
+        Masc_tui_ui.Memory_flow.Window_revs { from_rev; to_rev }
+  in
+  match diff.body with
+  | Wire_knowledge.Keeper_diff { counts; revisions; _ } ->
+      let revs =
+        List.map
+          (fun (r : Wire_knowledge.memory_revision_tick) ->
+            {
+              Masc_tui_ui.Memory_flow.rev = r.rev;
+              at_unix = r.at_unix;
+              added = r.added;
+              removed = r.removed + r.invalidated;
+            })
+          revisions
+      in
+      {
+        Masc_tui_ui.Memory_flow.revisions = revs;
+        from_unix = diff.range.from_unix;
+        to_unix = diff.range.to_unix;
+        total_now = counts.total_facts_now;
+        is_world = false;
+        window = win_kind;
+      }
+  | Wire_knowledge.World_diff { counts; revisions; _ } ->
+      let revs =
+        List.filter_map
+          (fun (r : Wire_knowledge.world_revision_tick) ->
+            match Wire_common.parse_rfc3339_unix r.recorded_at with
+            | Error _ -> None
+            | Ok at_unix ->
+                let added, removed =
+                  match String.lowercase_ascii (String.trim r.op) with
+                  | "added" | "updated" -> (1, 0)
+                  | "retracted" -> (0, 1)
+                  | _ -> (0, 0)
+                in
+                Some
+                  {
+                    Masc_tui_ui.Memory_flow.rev = r.rev;
+                    at_unix;
+                    added;
+                    removed;
+                  })
+          revisions
+      in
+      {
+        Masc_tui_ui.Memory_flow.revisions = revs;
+        from_unix = diff.range.from_unix;
+        to_unix = diff.range.to_unix;
+        total_now = counts.total_claims_now;
+        is_world = true;
+        window = win_kind;
+      }
 let memory_diff_matches_filter t text =
   let q = String.trim t.filter_query in
   String.equal q "" || contains_ci ~needle:q text
@@ -1915,7 +2035,18 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
                       | None -> 0)
                   | `Artifacts -> (
                       match selected_artifact t with
-                      | Some _ -> max 0 (12 - vis)
+                      | Some a ->
+                          let body_lines =
+                            match artifact_detail_for_entry a t with
+                            | Some d ->
+                                List.length (String.split_on_char '\n' d.content)
+                            | None -> (
+                                match a.preview with
+                                | Some p ->
+                                    List.length (String.split_on_char '\n' p)
+                                | None -> 0)
+                          in
+                          max 0 (8 + body_lines - vis)
                       | None -> 0))
               | Nav.Knowledge_memory -> 0)
         in
@@ -2021,6 +2152,7 @@ let mark_stale_all t =
     wiki_log = Observed.mark_stale t.wiki_log;
     wiki_lint = Observed.mark_stale t.wiki_lint;
     artifacts = Observed.mark_stale t.artifacts;
+    active_artifact_detail = Observed.mark_stale t.active_artifact_detail;
     world_memory = Observed.mark_stale t.world_memory;
     memory_diffs = Memory_diff_map.map Observed.mark_stale t.memory_diffs;
     memory_os_internals =

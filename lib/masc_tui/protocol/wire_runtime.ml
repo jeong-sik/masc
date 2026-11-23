@@ -71,6 +71,8 @@ let connectors_path = "/api/v1/gate/connectors"
 let connector_bind_path ~connector =
   "/api/v1/gate/connector/bind?name=" ^ percent_encode connector
 let browser_lane_path = "/api/v1/dashboard/browser-lane/clients"
+let browser_lane_read_path = "/api/v1/dashboard/browser-lane/read"
+let lane_addons_path = "/api/v1/lane-addons"
 let mcp_clients_path = "/api/v1/dashboard/clients"
 
 type usage_window_kind =
@@ -2055,6 +2057,46 @@ let encode_connector_bind ~channel_id ~keeper_name =
   `Assoc
     [ ("channel_id", `String channel_id); ("keeper_name", `String keeper_name) ]
 
+type browser_space_ref = {
+  space_id : int;
+  space_name : string;
+}
+
+type browser_interaction_row = {
+  request_id : string;
+  actor : string option;
+  action : string;
+  tab_id : int option;
+  phase : string;
+}
+
+type browser_settled_activity = {
+  work : browser_interaction_row;
+  outcome : string;
+}
+
+type browser_client_row = {
+  client_id : string;
+  browser : string;
+  version : string;
+  engine_version : string;
+  transport : string;
+  space : browser_space_ref option;
+  ownership : string option;
+  presence_state : string option;
+  presence_reason : string option;
+  interactions : browser_interaction_row list;
+  last_activities : browser_settled_activity list;
+}
+
+type browser_inventory_issue = {
+  kind : string;
+  instance_id : string option;
+  client_id : string option;
+  space : string option;
+  space_id : int option;
+  message : string;
+}
 type browser_lane_status = {
   ok : bool;
   available : bool;
@@ -2063,7 +2105,145 @@ type browser_lane_status = {
   issue_count : int;
   automatic_browse_ok : bool;
   detail : string option;
+  clients : browser_client_row list;
+  issues : browser_inventory_issue list;
 }
+
+let decode_browser_interaction json =
+  let* request_id = required_nonblank_string json "requestId" in
+  let* actor = optional_nonblank_string json "actor" in
+  let* action = required_nonblank_string json "action" in
+  let* tab_id = optional_int_field json "tabId" in
+  let* phase = required_nonblank_string json "phase" in
+  Ok { request_id; actor; action; tab_id; phase }
+
+let decode_browser_settled_activity json =
+  let* work_json = required_object_field json "work" in
+  let* work = decode_browser_interaction work_json in
+  let* outcome = required_nonblank_string json "outcome" in
+  Ok { work; outcome }
+
+let decode_browser_client_row json =
+  let* client_id = required_nonblank_string json "clientId" in
+  let* browser_opt = optional_nonblank_string json "browser" in
+  let* version_opt = optional_nonblank_string json "version" in
+  let* engine_opt = optional_nonblank_string json "engineVersion" in
+  let* transport_opt = optional_nonblank_string json "transport" in
+  let* space_opt = optional_object_field json "space" in
+  let* space =
+    match space_opt with
+    | None -> Ok None
+    | Some sp ->
+        let* space_id = required_int_field sp "id" in
+        let* space_name = required_nonblank_string sp "name" in
+        Ok (Some { space_id; space_name })
+  in
+  let* obs_opt = optional_object_field json "spaceObservation" in
+  let* ownership_obs, space_from_obs =
+    match obs_opt with
+    | None -> Ok (None, None)
+    | Some obs ->
+        let* own = optional_nonblank_string obs "ownership" in
+        let* sp_id = optional_int_field obs "spaceId" in
+        let* sp_name = optional_nonblank_string obs "spaceName" in
+        let sp =
+          match sp_id, sp_name with
+          | Some space_id, Some space_name -> Some { space_id; space_name }
+          | _ -> None
+        in
+        Ok (own, sp)
+  in
+  let* ownership_top = optional_nonblank_string json "ownership" in
+  let ownership =
+    match ownership_obs with Some _ -> ownership_obs | None -> ownership_top
+  in
+  let space = match space with Some _ -> space | None -> space_from_obs in
+  let* pres_opt =
+    match optional_object_field json "spacePresence" with
+    | Ok (Some _ as p) -> Ok p
+    | Ok None -> optional_object_field json "presence"
+    | Error _ as err -> err
+  in
+  let* presence_state, presence_reason =
+    match pres_opt with
+    | None -> Ok (None, None)
+    | Some pres ->
+        let* st = optional_nonblank_string pres "state" in
+        let* reason_obj = optional_object_field pres "reason" in
+        let* reason_str =
+          match reason_obj with
+          | None -> Ok None
+          | Some ro -> (
+              let* rk = optional_nonblank_string ro "kind" in
+              let* rd = optional_nonblank_string ro "detail" in
+              match rk, rd with
+              | Some k, Some d -> Ok (Some (k ^ ": " ^ d))
+              | Some k, None -> Ok (Some k)
+              | None, Some d -> Ok (Some d)
+              | None, None -> Ok None)
+        in
+        Ok (st, reason_str)
+  in
+  let* interactions_raw = optional_list_field json "interactions" in
+  let* interactions =
+    decode_list "interactions" decode_browser_interaction interactions_raw
+  in
+  let* settled_raw = optional_list_field json "lastActivities" in
+  let* last_activities =
+    decode_list "lastActivities" decode_browser_settled_activity settled_raw
+  in
+  Ok
+    {
+      client_id;
+      browser = Option.value ~default:"browser" browser_opt;
+      version = Option.value ~default:"" version_opt;
+      engine_version = Option.value ~default:"" engine_opt;
+      transport = Option.value ~default:"" transport_opt;
+      space;
+      ownership;
+      presence_state;
+      presence_reason;
+      interactions;
+      last_activities;
+    }
+
+let decode_browser_inventory_issue json =
+  let* kind_opt = optional_nonblank_string json "kind" in
+  let kind = Option.value ~default:"issue" kind_opt in
+  let* instance_id = optional_nonblank_string json "instanceId" in
+  let* client_id = optional_nonblank_string json "clientId" in
+  let* space = optional_nonblank_string json "space" in
+  let* space_id = optional_int_field json "spaceId" in
+  let* msg_opt = optional_nonblank_string json "message" in
+  let instances_list =
+    match optional_list_field json "instances" with
+    | Ok xs ->
+        List.filter_map
+          (function `String s when String.trim s <> "" -> Some s | _ -> None)
+          xs
+    | Error _ -> []
+  in
+  let message =
+    match msg_opt with
+    | Some m -> m
+    | None -> (
+        match kind, instance_id, space, space_id, client_id with
+        | "ego_user_owned_space", Some inst, Some sp, _, _ ->
+            Printf.sprintf "%s: space %s is user-owned" inst sp
+        | "ego_space_missing", Some inst, Some sp, Some sid, _ ->
+            Printf.sprintf "%s: space #%d (%s) missing" inst sid sp
+        | "duplicate_client", _, _, _, Some cid ->
+            Printf.sprintf "duplicate client %s (%s)" cid
+              (String.concat ", " instances_list)
+        | "duplicate_ego_space", _, _, Some sid, _ ->
+            Printf.sprintf "duplicate space #%d (%s)" sid
+              (String.concat ", " instances_list)
+        | _ -> (
+            match instance_id with
+            | Some inst -> Printf.sprintf "%s: %s" inst kind
+            | None -> kind))
+  in
+  Ok { kind; instance_id; client_id; space; space_id; message }
 
 let decode_browser_lane json =
   let* _, body = unwrap_v2_or_raw json in
@@ -2079,11 +2259,17 @@ let decode_browser_lane json =
         issue_count = 0;
         automatic_browse_ok = false;
         detail = err;
+        clients = [];
+        issues = [];
       }
   else
     let* data = required_object_field body "data" in
-    let* clients = required_list_field data "clients" in
-    let* issues = required_list_field data "inventoryIssues" in
+    let* clients_raw = required_list_field data "clients" in
+    let* clients = decode_list "clients" decode_browser_client_row clients_raw in
+    let* issues_raw = required_list_field data "inventoryIssues" in
+    let* issues =
+      decode_list "inventoryIssues" decode_browser_inventory_issue issues_raw
+    in
     let* inventory_complete = required_bool_field data "inventoryComplete" in
     let* automatic = required_object_field data "automatic" in
     let* browse = required_object_field automatic "browse" in
@@ -2106,7 +2292,404 @@ let decode_browser_lane json =
         issue_count = List.length issues;
         automatic_browse_ok;
         detail;
+        clients;
+        issues;
       }
+
+type browser_tab_origin =
+  | Tab_origin_agent
+  | Tab_origin_unknown
+
+type browser_tab_row = {
+  id : int;
+  title : string;
+  url : string;
+  active : bool;
+  window_id : int option;
+  opened_by : browser_tab_origin option;
+  label : string option;
+  dialog_present : bool;
+  dialog_kind : string option;
+}
+
+type browser_tabs_response = {
+  client_id : string option;
+  tabs : browser_tab_row list;
+  complete : bool;
+  unavailable_count : int;
+  error : string option;
+}
+
+let encode_browser_tabs_request ~client_id =
+  `Assoc [ ("lane", `String "live"); ("clientId", `String client_id) ]
+
+let decode_browser_tab_row json =
+  let* id = required_int_field json "id" in
+  let* title = required_string_field json "title" in
+  let* url = required_string_field json "url" in
+  let* active = required_bool_field json "active" in
+  let* window_id = optional_int_field json "windowId" in
+  let* ego_page_opt = optional_object_field json "egoPage" in
+  let* opened_by, label =
+    match ego_page_opt with
+    | None -> Ok (None, None)
+    | Some ep ->
+        let* lbl = optional_nonblank_string ep "label" in
+        let* ob_raw = optional_nonblank_string ep "openedBy" in
+        let ob =
+          match ob_raw with
+          | Some "agent" -> Some Tab_origin_agent
+          | Some _ -> Some Tab_origin_unknown
+          | None -> None
+        in
+        Ok (ob, lbl)
+  in
+  let* dialog_opt = optional_object_field json "dialog" in
+  let* dialog_present, dialog_kind =
+    match dialog_opt with
+    | None -> Ok (false, None)
+    | Some dlg ->
+        let* dk = optional_nonblank_string dlg "type" in
+        Ok (true, dk)
+  in
+  Ok
+    {
+      id;
+      title;
+      url;
+      active;
+      window_id;
+      opened_by;
+      label;
+      dialog_present;
+      dialog_kind;
+    }
+
+let decode_browser_tabs_response json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* ok_opt = optional_bool_field body "ok" in
+  match ok_opt with
+  | Some false ->
+      let* error = optional_nonblank_string body "error" in
+      Ok
+        {
+          client_id = None;
+          tabs = [];
+          complete = false;
+          unavailable_count = 0;
+          error;
+        }
+  | Some true | None ->
+      let* data =
+        match optional_object_field body "data" with
+        | Ok (Some d) -> Ok d
+        | Ok None -> Ok body
+        | Error _ as err -> err
+      in
+      let* client_id = optional_nonblank_string data "clientId" in
+      let* tabs_raw = required_list_field data "tabs" in
+      let* tabs = decode_list "tabs" decode_browser_tab_row tabs_raw in
+      let* complete_opt = optional_bool_field data "complete" in
+      let complete = Option.value ~default:true complete_opt in
+      let* unavail_raw = optional_list_field data "unavailableTabs" in
+      Ok
+        {
+          client_id;
+          tabs;
+          complete;
+          unavailable_count = List.length unavail_raw;
+          error = None;
+        }
+
+type addon_runtime_presence =
+  | Addon_live
+  | Addon_retained
+
+type addon_phase =
+  | Addon_attached
+  | Addon_observing
+  | Addon_detaching
+  | Addon_detached
+  | Addon_failed
+  | Addon_phase_other of string
+
+type addon_declaration = {
+  id : string;
+  source_path : string;
+  enabled : bool;
+  source_revision : string;
+  desired_revision : string;
+  applied_revision : string option;
+  instance_id : string option;
+  application_kind : string;
+  application_messages : string list;
+  ui_category : string option;
+}
+
+type addon_instance = {
+  runtime_presence : addon_runtime_presence;
+  instance_id : string;
+  addon_id : string;
+  title : string;
+  revision : string;
+  phase : addon_phase;
+  execution_kind : string option;
+  resolved_image : string option;
+  observation_seq : int;
+  rows_count : int;
+  observation_pending : bool;
+  visibility_kind : string option;
+  visibility_keeper : string option;
+  host_cycles : int option;
+  host_waiting_count : int;
+  host_issue_kind : string option;
+  action_names : string list;
+  config_declaration_id : string option;
+}
+
+type lane_addons_issue = {
+  source_path : string;
+  id : string option;
+  message : string;
+}
+
+type lane_addons_snapshot = {
+  configuration_complete : bool;
+  declarations : addon_declaration list;
+  instances : addon_instance list;
+  issues : lane_addons_issue list;
+}
+
+let decode_addon_phase = function
+  | "attached" -> Addon_attached
+  | "observing" -> Addon_observing
+  | "detaching" -> Addon_detaching
+  | "detached" -> Addon_detached
+  | "failed" -> Addon_failed
+  | other -> Addon_phase_other other
+
+let decode_addon_declaration json =
+  let* id = required_nonblank_string json "id" in
+  let* source_path_opt = optional_nonblank_string json "source_path" in
+  let source_path = Option.value ~default:"" source_path_opt in
+  let* enabled = required_bool_field json "enabled" in
+  let* src_rev_opt = optional_nonblank_string json "source_revision" in
+  let* desired_rev_opt = optional_nonblank_string json "desired_revision" in
+  let* applied_revision = optional_nonblank_string json "applied_revision" in
+  let* instance_id = optional_nonblank_string json "instance_id" in
+  let* app_opt = optional_object_field json "application" in
+  let* application_kind, application_messages =
+    match app_opt with
+    | None -> Ok ("unknown", [])
+    | Some app ->
+        let* kind_opt = optional_nonblank_string app "kind" in
+        let msgs =
+          match optional_list_field app "messages" with
+          | Ok xs ->
+              List.filter_map
+                (function
+                  | `String s when String.trim s <> "" -> Some s | _ -> None)
+                xs
+          | Error _ -> []
+        in
+        Ok (Option.value ~default:"unknown" kind_opt, msgs)
+  in
+  let* ui_category = optional_nonblank_string json "ui_category" in
+  Ok
+    {
+      id;
+      source_path;
+      enabled;
+      source_revision = Option.value ~default:"" src_rev_opt;
+      desired_revision = Option.value ~default:"" desired_rev_opt;
+      applied_revision;
+      instance_id;
+      application_kind;
+      application_messages;
+      ui_category;
+    }
+
+let extract_action_names_from_schema schema_json =
+  let collect_one = function
+    | `Assoc fields -> (
+        match List.assoc_opt "properties" fields with
+        | Some (`Assoc props) -> (
+            match List.assoc_opt "action" props with
+            | Some (`Assoc af) -> (
+                match List.assoc_opt "enum" af with
+                | Some (`List items) ->
+                    List.filter_map
+                      (function `String s -> Some s | _ -> None)
+                      items
+                | _ -> (
+                    match List.assoc_opt "const" af with
+                    | Some (`String s) -> [ s ]
+                    | _ -> List.map fst props))
+            | _ -> List.map fst props)
+        | _ -> (
+            match List.assoc_opt "title" fields with
+            | Some (`String s) when String.trim s <> "" -> [ s ]
+            | _ -> []))
+    | _ -> []
+  in
+  let raw =
+    match schema_json with
+    | `Assoc fields -> (
+        let direct = collect_one schema_json in
+        let from_one_of =
+          match List.assoc_opt "oneOf" fields with
+          | Some (`List branches) -> List.concat_map collect_one branches
+          | _ -> []
+        in
+        let from_any_of =
+          match List.assoc_opt "anyOf" fields with
+          | Some (`List branches) -> List.concat_map collect_one branches
+          | _ -> []
+        in
+        direct @ from_one_of @ from_any_of)
+    | _ -> []
+  in
+  let seen = Hashtbl.create 8 in
+  List.filter
+    (fun s ->
+      let t = String.trim s in
+      if String.equal t "" || Hashtbl.mem seen t then false
+      else begin
+        Hashtbl.add seen t ();
+        true
+      end)
+    raw
+
+let decode_addon_instance json =
+  let* presence_raw = optional_nonblank_string json "runtime_presence" in
+  let* runtime_presence =
+    match presence_raw with
+    | None | Some "live" -> Ok Addon_live
+    | Some "retained" -> Ok Addon_retained
+    | Some other -> Error ("unknown addon runtime_presence: " ^ other)
+  in
+  let* instance_id = required_nonblank_string json "instance_id" in
+  let* addon_id = required_nonblank_string json "addon_id" in
+  let* title_opt = optional_nonblank_string json "title" in
+  let title = Option.value ~default:addon_id title_opt in
+  let* rev_opt = optional_nonblank_string json "revision" in
+  let* phase =
+    match member "phase" json with
+    | `Assoc _ as obj ->
+        let* kind = required_nonblank_string obj "kind" in
+        Ok (decode_addon_phase (String.lowercase_ascii kind))
+    | `String s when not (String.equal (String.trim s) "") ->
+        Ok (decode_addon_phase (String.lowercase_ascii (String.trim s)))
+    | `Null | `String _ -> Ok Addon_attached
+    | bad -> field_type_error "phase" "an object {kind} or string" bad
+  in
+  let* auth_opt = optional_object_field json "execution_authority" in
+  let* execution_kind =
+    match auth_opt with
+    | None -> Ok None
+    | Some auth -> optional_nonblank_string auth "kind"
+  in
+  let resolved_image =
+    match member "resolved_image" json with
+    | `String s when String.trim s <> "" -> Some (String.trim s)
+    | `Assoc _ as obj -> (
+        match optional_nonblank_string obj "digest" with
+        | Ok (Some d) -> Some d
+        | Ok None | Error _ -> (
+            match optional_nonblank_string obj "runtime" with
+            | Ok (Some r) -> Some r
+            | Ok None | Error _ -> None))
+    | _ -> None
+  in
+  let* obs_seq_opt = optional_int_field json "observation_seq" in
+  let* rows_cnt_opt = optional_int_field json "rows_count" in
+  let* obs_pend_opt = optional_bool_field json "observation_pending" in
+  let* vis_opt = optional_object_field json "visibility" in
+  let* visibility_kind, visibility_keeper =
+    match vis_opt with
+    | None -> Ok (None, None)
+    | Some vis ->
+        let* vk = optional_nonblank_string vis "kind" in
+        let* kp = optional_nonblank_string vis "keeper" in
+        Ok (vk, kp)
+  in
+  let* host_opt = optional_object_field json "host_requests" in
+  let* host_cycles, host_waiting_count, host_issue_kind =
+    match host_opt with
+    | None -> Ok (None, 0, None)
+    | Some hr ->
+        let* cyc = optional_int_field hr "cycles" in
+        let wait_n =
+          match optional_list_field hr "waiting" with
+          | Ok xs -> List.length xs
+          | Error _ -> 0
+        in
+        let* issue_k =
+          match optional_object_field hr "issue" with
+          | Ok (Some iss) -> optional_nonblank_string iss "kind"
+          | Ok None -> Ok None
+          | Error _ -> Ok None
+        in
+        Ok (cyc, wait_n, issue_k)
+  in
+  let action_names =
+    match member "action_schema" json with
+    | `Null -> []
+    | schema_json -> extract_action_names_from_schema schema_json
+  in
+  let* cfg_opt = optional_object_field json "configuration" in
+  let* config_declaration_id =
+    match cfg_opt with
+    | None -> Ok None
+    | Some cfg -> optional_nonblank_string cfg "id"
+  in
+  Ok
+    {
+      runtime_presence;
+      instance_id;
+      addon_id;
+      title;
+      revision = Option.value ~default:"" rev_opt;
+      phase;
+      execution_kind;
+      resolved_image;
+      observation_seq = Option.value ~default:0 obs_seq_opt;
+      rows_count = Option.value ~default:0 rows_cnt_opt;
+      observation_pending = Option.value ~default:false obs_pend_opt;
+      visibility_kind;
+      visibility_keeper;
+      host_cycles;
+      host_waiting_count;
+      host_issue_kind;
+      action_names;
+      config_declaration_id;
+    }
+
+let decode_lane_addons_issue json =
+  let* sp = optional_nonblank_string json "source_path" in
+  let* id = optional_nonblank_string json "id" in
+  let* message = required_nonblank_string json "message" in
+  Ok { source_path = Option.value ~default:"" sp; id; message }
+
+let decode_lane_addons json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* cfg_opt = optional_object_field body "configuration" in
+  let* configuration_complete, declarations, issues =
+    match cfg_opt with
+    | None -> Ok (true, [], [])
+    | Some cfg ->
+        let* comp_opt = optional_bool_field cfg "complete" in
+        let* decls_raw = optional_list_field cfg "declarations" in
+        let* decls =
+          decode_list "declarations" decode_addon_declaration decls_raw
+        in
+        let* iss_raw = optional_list_field cfg "issues" in
+        let* iss = decode_list "issues" decode_lane_addons_issue iss_raw in
+        Ok (Option.value ~default:true comp_opt, decls, iss)
+  in
+  let* inst_raw = optional_list_field body "instances" in
+  let* instances = decode_list "instances" decode_addon_instance inst_raw in
+  Ok { configuration_complete; declarations; instances; issues }
 
 type mcp_client_row = {
   name : string;

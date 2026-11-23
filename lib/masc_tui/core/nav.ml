@@ -27,6 +27,7 @@ type runtime_tab =
   | Runtime_efficiency_spend
   | Runtime_failover_lanes
   | Runtime_tools_connectors
+  | Runtime_addons_browser
 
 type infra_tab =
   | Infra_sandboxes
@@ -195,6 +196,7 @@ let all_runtime_tabs =
     Runtime_efficiency_spend;
     Runtime_failover_lanes;
     Runtime_tools_connectors;
+    Runtime_addons_browser;
   ]
 
 let runtime_tab_label = function
@@ -202,18 +204,21 @@ let runtime_tab_label = function
   | Runtime_efficiency_spend -> Say.make ~ko:"효율 · 지출" ~en:"Efficiency & Spend"
   | Runtime_failover_lanes -> Say.make ~ko:"페일오버 레인" ~en:"Failover Lanes"
   | Runtime_tools_connectors -> Say.make ~ko:"도구 · 커넥터" ~en:"Tools & Connectors"
+  | Runtime_addons_browser -> Say.make ~ko:"애드온 · 브라우저" ~en:"Addons & Browser"
 
 let next_runtime_tab = function
   | Runtime_quotas_credits -> Runtime_efficiency_spend
   | Runtime_efficiency_spend -> Runtime_failover_lanes
   | Runtime_failover_lanes -> Runtime_tools_connectors
-  | Runtime_tools_connectors -> Runtime_quotas_credits
+  | Runtime_tools_connectors -> Runtime_addons_browser
+  | Runtime_addons_browser -> Runtime_quotas_credits
 
 let prev_runtime_tab = function
-  | Runtime_quotas_credits -> Runtime_tools_connectors
+  | Runtime_quotas_credits -> Runtime_addons_browser
   | Runtime_efficiency_spend -> Runtime_quotas_credits
   | Runtime_failover_lanes -> Runtime_efficiency_spend
   | Runtime_tools_connectors -> Runtime_failover_lanes
+  | Runtime_addons_browser -> Runtime_tools_connectors
 
 let all_infra_tabs =
   [ Infra_sandboxes; Infra_repos_changes; Infra_activity_logs ]
@@ -344,6 +349,7 @@ let runtime_tab_index = function
   | Runtime_efficiency_spend -> 1
   | Runtime_failover_lanes -> 2
   | Runtime_tools_connectors -> 3
+  | Runtime_addons_browser -> 4
 
 let equal_runtime_tab a b =
   Int.equal (runtime_tab_index a) (runtime_tab_index b)

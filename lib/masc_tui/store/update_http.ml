@@ -850,12 +850,47 @@ let apply_http_reply ~now (m : Model.t) reply =
           (Msg.http_error_summary err) next
       , cmds )
   | Msg.Reply_artifacts (Ok items) ->
-      ( {
-          m with
-          knowledge =
-            Knowledge_store.apply_artifacts ~observed_at:now items m.knowledge;
-        }
-      , [] )
+      let knowledge =
+        Knowledge_store.apply_artifacts ~observed_at:now items m.knowledge
+      in
+      let next = { m with knowledge } in
+      let detail_cmds =
+        let viewing_artifacts =
+          match Model.active_dive next with
+          | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) -> true
+          | Some
+              ( Nav.Dive_keeper _
+              | Nav.Dive_work _
+              | Nav.Dive_infra _
+              | Nav.Dive_knowledge
+                  ( Nav.Thread_dive _
+                  | Nav.Wiki_dive _
+                  | Nav.Memory_diff_dive _ ) ) ->
+              false
+          | None ->
+              Nav.equal_workspace next.nav.workspace Nav.Knowledge
+              && Nav.equal_knowledge_tab next.knowledge.active_tab
+                   Nav.Knowledge_wiki_artifacts
+              && next.knowledge.wiki_artifacts_submode = `Artifacts
+        in
+        if not viewing_artifacts then []
+        else
+          match Knowledge_store.selected_artifact next.knowledge with
+          | Some a
+            when Option.is_none
+                   (Knowledge_store.artifact_detail_for_entry a next.knowledge) ->
+              [
+                Cmd.Http_get
+                  {
+                    epoch = next.epoch;
+                    req =
+                      Cmd.Get_artifact_detail
+                        { id = a.id; revision = Some a.revision };
+                  };
+              ]
+          | Some _ | None -> []
+      in
+      (next, detail_cmds)
   | Msg.Reply_artifacts (Error err) ->
       err_reply
         ~fail:
@@ -863,6 +898,76 @@ let apply_http_reply ~now (m : Model.t) reply =
                { x with artifacts = failed_slot err x.artifacts }))
         ~source:Health.Source_client_http ~ko:"산출물 목록 조회"
         ~en:"Artifacts fetch" err
+  | Msg.Reply_artifact_detail { id; result = Ok detail } ->
+      (* Guard against stale out-of-order responses after selection changed. *)
+      let matches_active =
+        let matches_target t =
+          String.equal t id
+          || String.equal t detail.artifact.id
+          || String.equal t detail.artifact.sha256
+        in
+        match Model.active_dive m with
+        | Some (Nav.Dive_knowledge (Nav.Artifact_dive target)) ->
+            matches_target target
+        | Some
+            ( Nav.Dive_keeper _
+            | Nav.Dive_work _
+            | Nav.Dive_infra _
+            | Nav.Dive_knowledge
+                ( Nav.Thread_dive _
+                | Nav.Wiki_dive _
+                | Nav.Memory_diff_dive _ ) )
+        | None -> (
+            match Knowledge_store.selected_artifact m.knowledge with
+            | Some sel -> matches_target sel.id || matches_target sel.sha256
+            | None -> true)
+      in
+      if not matches_active then (m, [])
+      else
+        ( {
+            m with
+            knowledge =
+              Knowledge_store.apply_artifact_detail ~observed_at:now detail
+                m.knowledge;
+          }
+        , [] )
+  | Msg.Reply_artifact_detail { id; result = Error err } ->
+      let matches_active =
+        match Model.active_dive m with
+        | Some (Nav.Dive_knowledge (Nav.Artifact_dive target)) -> (
+            String.equal target id
+            ||
+            match Knowledge_store.find_artifact_by_id_or_sha target m.knowledge with
+            | Some art -> String.equal art.id id || String.equal art.sha256 id
+            | None -> false)
+        | Some
+            ( Nav.Dive_keeper _
+            | Nav.Dive_work _
+            | Nav.Dive_infra _
+            | Nav.Dive_knowledge
+                ( Nav.Thread_dive _
+                | Nav.Wiki_dive _
+                | Nav.Memory_diff_dive _ ) )
+        | None -> (
+            match Knowledge_store.selected_artifact m.knowledge with
+            | Some sel -> String.equal sel.id id || String.equal sel.sha256 id
+            | None -> false)
+      in
+      if not matches_active then (m, [])
+      else
+        let retryable =
+          match err with
+          | Msg.Transport _ -> true
+          | Msg.Http_error { status; _ } -> status >= 500 || status = 429
+          | Msg.Workspace_mismatch _ | Msg.Decode_error _ -> false
+        in
+        let knowledge =
+          Knowledge_store.mark_artifact_detail_failed ~at:now
+            ~reason:(Msg.http_error_detail err) ~retryable m.knowledge
+        in
+        record_http_incident ~now ~source:Health.Source_client_http
+          ~context:(Say.make ~ko:"산출물 본문 조회" ~en:"Artifact detail fetch")
+          err { m with knowledge }
   | Msg.Reply_world_memory (Ok wm) ->
       ( {
           m with
@@ -1573,12 +1678,43 @@ let apply_http_reply ~now (m : Model.t) reply =
         ~source:(Health.Source_runtime "connectors") ~ko:"커넥터 조회"
         ~en:"Connectors fetch" err
   | Msg.Reply_browser_lane (Ok bl) ->
-      ( {
-          m with
-          runtime =
-            Runtime_store.apply_browser_lane ~observed_at:now bl m.runtime;
-        }
-      , [] )
+      let runtime =
+        Runtime_store.apply_browser_lane ~observed_at:now bl m.runtime
+      in
+      let next = { m with runtime } in
+      let tab_cmds =
+        if
+          Option.is_none (Model.active_dive next)
+          && Nav.equal_workspace next.nav.workspace Nav.Runtime
+          && Nav.equal_runtime_tab next.runtime.active_tab
+               Nav.Runtime_addons_browser
+        then
+          match Runtime_store.selected_browser_client next.runtime with
+          | Some cl ->
+              let already_loaded =
+                match next.runtime.browser_tabs with
+                | Observed.Value { data = cid, _; stale = false; _ } ->
+                    String.equal cid cl.client_id
+                | Observed.Loading _
+                | Observed.Value { stale = true; _ }
+                | Observed.Absent
+                | Observed.Unreported
+                | Observed.Failed _ ->
+                    false
+              in
+              if already_loaded then []
+              else
+                [
+                  Cmd.Http_post
+                    {
+                      epoch = next.epoch;
+                      req = Cmd.Post_browser_tabs { client_id = cl.client_id };
+                    };
+                ]
+          | None -> []
+        else []
+      in
+      (next, tab_cmds)
   | Msg.Reply_browser_lane (Error err) ->
       err_reply
         ~fail:
@@ -1586,6 +1722,70 @@ let apply_http_reply ~now (m : Model.t) reply =
                { x with browser_lane = failed_slot err x.browser_lane }))
         ~source:(Health.Source_runtime "browser") ~ko:"브라우저 레인 조회"
         ~en:"Browser lane fetch" err
+  | Msg.Reply_browser_tabs { client_id; result = Ok resp } ->
+      (* Guard against stale tab responses after the operator selected another client. *)
+      let matches_selected =
+        match Runtime_store.selected_browser_client m.runtime with
+        | Some cl -> String.equal cl.client_id client_id
+        | None -> false
+      in
+      if not matches_selected then (m, [])
+      else
+        ( {
+            m with
+            runtime =
+              Runtime_store.apply_browser_tabs ~observed_at:now ~client_id resp
+                m.runtime;
+          }
+        , [] )
+  | Msg.Reply_browser_tabs { client_id; result = Error err } ->
+      let matches_selected =
+        match Runtime_store.selected_browser_client m.runtime with
+        | Some cl -> String.equal cl.client_id client_id
+        | None -> false
+      in
+      if not matches_selected then (m, [])
+      else
+        let retryable =
+          match err with
+          | Msg.Transport _ -> true
+          | Msg.Http_error { status; _ } -> status >= 500 || status = 429
+          | Msg.Workspace_mismatch _ | Msg.Decode_error _ -> false
+        in
+        let runtime =
+          Runtime_store.mark_browser_tabs_failed ~at:now
+            ~reason:(Msg.http_error_detail err) ~retryable m.runtime
+        in
+        record_http_incident ~now ~source:(Health.Source_runtime "browser_tabs")
+          ~context:(Say.make ~ko:"브라우저 탭 목록 조회" ~en:"Browser tabs fetch")
+          err { m with runtime }
+  | Msg.Reply_lane_addons (Ok snap) ->
+      ( {
+          m with
+          runtime =
+            Runtime_store.apply_lane_addons ~observed_at:now snap m.runtime;
+        }
+      , [] )
+  | Msg.Reply_lane_addons (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403 | 404; _ } ->
+          let runtime =
+            {
+              m.runtime with
+              lane_addons =
+                Observed.failed ~reason:(Msg.http_error_detail err)
+                  ~retryable:false ~at:now;
+            }
+          in
+          ({ m with runtime }, [])
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:
+              (on_runtime (fun (x : Runtime_store.t) ->
+                   { x with lane_addons = failed_slot err x.lane_addons }))
+            ~source:(Health.Source_runtime "lane_addons")
+            ~ko:"애드온 레인 조회" ~en:"Lane addons fetch" err)
   | Msg.Reply_mcp_clients (Ok clients) ->
       ( {
           m with

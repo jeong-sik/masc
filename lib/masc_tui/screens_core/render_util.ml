@@ -96,6 +96,16 @@ let composer_state_of_model (m : Model.t) : Composer.state =
     draft_count_other_keepers = Drafts.other_keepers_draft_count m.drafts;
   }
 
+let snapshot_age_str ~(model : Model.t) (obs_opt : Clock.Mono.t option) =
+  match obs_opt with
+  | None -> None
+  | Some obs ->
+      if Clock.Mono.equal obs Clock.Mono.zero then None
+      else if Clock.Mono.compare model.freshness.last_mono obs >= 0 then
+        let age_s = Clock.Mono.seconds_since model.freshness.last_mono ~since:obs in
+        Some (Format_val.format_duration_s (Float.max 0.0 age_s))
+      else None
+
 let freshness_pill ~(model : Model.t) ~compact =
   let lang = model.lang in
   let mismatch =
@@ -114,42 +124,160 @@ let freshness_pill ~(model : Model.t) ~compact =
     let lbl = Say.resolve lang (Say.make ~ko:"오프라인" ~en:"OFFLINE") in
     (Glyph.Live_idle, lbl, Theme.Status_critical)
   else
-    match model.freshness.observer with
-    | Health.Live _ ->
-        let lbl = Say.resolve lang (Say.make ~ko:"LIVE" ~en:"LIVE") in
-        (Glyph.Live_healthy, lbl, Theme.Status_ok)
-    | Health.Connecting ->
-        let lbl =
-          Say.resolve lang
-            (if compact then Say.make ~ko:"연결" ~en:"SYNC"
-             else Say.make ~ko:"연결 중" ~en:"CONNECTING")
+    match Model.active_view_ssot_mode model with
+    | Model.Live_sse { freshness; live_count; planned_count; _ } -> (
+        match freshness with
+        | Health.Live _ ->
+            let lbl =
+              if compact then Say.resolve lang (Say.make ~ko:"LIVE" ~en:"LIVE")
+              else Printf.sprintf "LIVE SSE %d/%d" live_count planned_count
+            in
+            (Glyph.Live_healthy, lbl, Theme.Status_ok)
+        | Health.Connecting ->
+            let lbl =
+              Say.resolve lang
+                (if compact then Say.make ~ko:"연결" ~en:"SYNC"
+                 else Say.make ~ko:"연결 중" ~en:"CONNECTING")
+            in
+            (Glyph.Transport_reconnecting, lbl, Theme.Status_active)
+        | Health.Reconnecting { attempt; _ } ->
+            let lbl =
+              Say.resolve lang
+                (if compact then Say.make ~ko:"재연결" ~en:"RECON"
+                 else
+                   Say.make
+                     ~ko:(Printf.sprintf "재연결 #%d" attempt)
+                     ~en:(Printf.sprintf "RECON #%d" attempt))
+            in
+            (Glyph.Transport_reconnecting, lbl, Theme.Status_attention)
+        | Health.Stale { age_sec; _ } ->
+            let lbl =
+              if compact then Say.resolve lang (Say.make ~ko:"지연" ~en:"STALE")
+              else
+                Printf.sprintf "%s %s"
+                  (Say.resolve lang (Say.make ~ko:"지연" ~en:"STALE"))
+                  (Format_val.format_duration_s age_sec)
+            in
+            (Glyph.Transport_stale, lbl, Theme.Status_attention)
+        | Health.Disconnected _ ->
+            let lbl = Say.resolve lang (Say.make ~ko:"오프라인" ~en:"OFFLINE") in
+            (Glyph.Live_idle, lbl, Theme.Status_critical)
+        | Health.Workspace_mismatch _ ->
+            let lbl = Say.resolve lang (Say.make ~ko:"불일치" ~en:"MISMATCH") in
+            (Glyph.Transport_stale, lbl, Theme.Status_critical))
+    | Model.Synced_snapshot { observer; observed_at } -> (
+        let age_suffix =
+          match snapshot_age_str ~model observed_at with
+          | Some a -> " " ^ Glyph.to_utf8 Glyph.Separator_dot ^ " " ^ a
+          | None -> ""
         in
-        (Glyph.Transport_reconnecting, lbl, Theme.Status_active)
-    | Health.Reconnecting { attempt; _ } ->
+        match observer with
+        | Health.Live _ ->
+            let lbl =
+              if compact then Say.resolve lang (Say.make ~ko:"동기화" ~en:"SYNCED")
+              else
+                Say.resolve lang (Say.make ~ko:"동기화" ~en:"SYNCED") ^ age_suffix
+            in
+            (Glyph.Live_working, lbl, Theme.Status_active)
+        | Health.Connecting ->
+            let lbl =
+              Say.resolve lang
+                (if compact then Say.make ~ko:"연결" ~en:"SYNC"
+                 else Say.make ~ko:"동기화 중" ~en:"SYNCING")
+            in
+            (Glyph.Transport_reconnecting, lbl, Theme.Status_active)
+        | Health.Reconnecting { attempt; _ } ->
+            let lbl =
+              if compact then Say.resolve lang (Say.make ~ko:"재연결" ~en:"RECON")
+              else
+                Printf.sprintf "%s #%d"
+                  (Say.resolve lang (Say.make ~ko:"재연결" ~en:"RECON"))
+                  attempt
+            in
+            (Glyph.Transport_reconnecting, lbl, Theme.Status_attention)
+        | Health.Stale { age_sec; _ } ->
+            let lbl =
+              if compact then Say.resolve lang (Say.make ~ko:"지연" ~en:"STALE")
+              else
+                Printf.sprintf "%s %s"
+                  (Say.resolve lang (Say.make ~ko:"동기화 지연" ~en:"SYNCED STALE"))
+                  (Format_val.format_duration_s age_sec)
+            in
+            (Glyph.Transport_stale, lbl, Theme.Status_attention)
+        | Health.Disconnected _ ->
+            let lbl = Say.resolve lang (Say.make ~ko:"오프라인" ~en:"OFFLINE") in
+            (Glyph.Live_idle, lbl, Theme.Status_critical)
+        | Health.Workspace_mismatch _ ->
+            let lbl = Say.resolve lang (Say.make ~ko:"불일치" ~en:"MISMATCH") in
+            (Glyph.Transport_stale, lbl, Theme.Status_critical))
+    | Model.Snapshot_only { observed_at } ->
         let lbl =
-          Say.resolve lang
-            (if compact then Say.make ~ko:"재연결" ~en:"RECON"
-             else
-               Say.make
-                 ~ko:(Printf.sprintf "재연결 #%d" attempt)
-                 ~en:(Printf.sprintf "RECONNECTING #%d" attempt))
-        in
-        (Glyph.Transport_reconnecting, lbl, Theme.Status_attention)
-    | Health.Stale { age_sec; _ } ->
-        let lbl =
-          if compact then Say.resolve lang (Say.make ~ko:"지연" ~en:"STALE")
+          if compact then Say.resolve lang (Say.make ~ko:"스냅샷" ~en:"SNAP")
           else
-            Printf.sprintf "%s %s"
-              (Say.resolve lang (Say.make ~ko:"지연" ~en:"STALE"))
-              (Format_val.format_duration_s age_sec)
+            match snapshot_age_str ~model observed_at with
+            | Some a ->
+                Printf.sprintf "%s %s %s r"
+                  (Say.resolve lang (Say.make ~ko:"스냅샷" ~en:"SNAPSHOT"))
+                  a
+                  (Glyph.to_utf8 Glyph.Separator_dot)
+            | None ->
+                Printf.sprintf "%s %s r"
+                  (Say.resolve lang (Say.make ~ko:"스냅샷" ~en:"SNAPSHOT"))
+                  (Glyph.to_utf8 Glyph.Separator_dot)
         in
-        (Glyph.Transport_stale, lbl, Theme.Status_attention)
-    | Health.Disconnected _ ->
-        let lbl = Say.resolve lang (Say.make ~ko:"오프라인" ~en:"OFFLINE") in
-        (Glyph.Live_idle, lbl, Theme.Status_critical)
-    | Health.Workspace_mismatch _ ->
-        let lbl = Say.resolve lang (Say.make ~ko:"불일치" ~en:"MISMATCH") in
-        (Glyph.Transport_stale, lbl, Theme.Status_critical)
+        (Glyph.Live_idle, lbl, Theme.Status_historical)
+
+let footer_ssot_hint ~(model : Model.t) =
+  let lang = model.lang in
+  let dot = Glyph.to_utf8 Glyph.Separator_dot in
+  if model.freshness.server_offline then
+    Say.resolve lang (Say.make ~ko:"오프라인" ~en:"OFFLINE")
+  else
+    match Model.active_view_ssot_mode model with
+    | Model.Live_sse { stream_name; freshness; live_count; planned_count } -> (
+        match freshness with
+        | Health.Live _ ->
+            Printf.sprintf "LIVE SSE %d/%d %s %s" live_count planned_count dot
+              stream_name
+        | Health.Connecting ->
+            Printf.sprintf "SYNC %s %s" dot stream_name
+        | Health.Reconnecting { attempt; _ } ->
+            Printf.sprintf "RECON #%d %s %s" attempt dot stream_name
+        | Health.Stale { age_sec; _ } ->
+            Printf.sprintf "STALE %s %s %s"
+              (Format_val.format_duration_s age_sec)
+              dot stream_name
+        | Health.Disconnected _ ->
+            Printf.sprintf "OFFLINE %s %s" dot stream_name
+        | Health.Workspace_mismatch _ ->
+            Printf.sprintf "MISMATCH %s %s" dot stream_name)
+    | Model.Synced_snapshot { observer; observed_at } ->
+        let age_s =
+          match snapshot_age_str ~model observed_at with
+          | Some a -> " " ^ a
+          | None -> ""
+        in
+        let state_lbl =
+          match observer with
+          | Health.Live _ -> "SYNCED" ^ age_s
+          | Health.Connecting -> "SYNCING"
+          | Health.Reconnecting { attempt; _ } ->
+              Printf.sprintf "RECON #%d" attempt
+          | Health.Stale { age_sec; _ } ->
+              "STALE " ^ Format_val.format_duration_s age_sec
+          | Health.Disconnected _ -> "OFFLINE"
+          | Health.Workspace_mismatch _ -> "MISMATCH"
+        in
+        Printf.sprintf "%s %s [r] %s" state_lbl dot
+          (Say.resolve lang (Say.make ~ko:"새로고침" ~en:"refresh"))
+    | Model.Snapshot_only { observed_at } ->
+        let age_s =
+          match snapshot_age_str ~model observed_at with
+          | Some a -> " " ^ a
+          | None -> ""
+        in
+        Printf.sprintf "SNAPSHOT%s %s [r] %s" age_s dot
+          (Say.resolve lang (Say.make ~ko:"새로고침" ~en:"refresh"))
 
 let attention_kind_tag = function
   | Health.Pending_ask _ -> Say.make ~ko:"질문" ~en:"ASK"

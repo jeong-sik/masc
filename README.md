@@ -240,10 +240,10 @@ or `Ctrl+1`–`6` / `Alt+1`–`6` / `F1`–`F6`):
 |---|---|---|
 | `1` | **Pulse** | Organization overview, KPI hero band, Attention queue, live fleet health, and 24h pulse |
 | `2` | **Work** | Four tabs: Pipeline (Goals & Verifications), Tasks & Schedules, Action Inbox (Asks, Tool Approvals, Gate), and Candle & Scorecard |
-| `3` | **Knowledge** | Three tabs: Board (Signal/All & Succession Chains), Wiki & Artifacts (`Space` toggles), and World Memory (Claims/Conflicts & Temporal Diff Scrubber) |
-| `4` | **Keepers** | Fleet roster (`Companies`, `Attention`, `24h Wall`) and 1-hop 5-tab Keeper Dive (Chat & Stream, Memory, Work & Candle, Sandbox, in-place editable Config) |
-| `5` | **Runtime** | Four tabs: Quotas & Credits, Efficiency & Spend, Failover Lanes (cascades, `exact_lane_runs`, Fusion), and Tools & Connectors (Tools, Connectors, Browser Lane summary, MCP Clients) |
-| `6` | **Infra** | Three tabs: Sandboxes (MicroVM/SSH/Docker fleet + inspector), Repos & Changes, and Activity & Logs (live system logs + events) |
+| `3` | **Knowledge** | Three tabs: Board (Signal/All & Succession Chains), Wiki & Artifacts (`Space` toggles; HTML/Markdown body preview, `y` raw copy, `e` local export, `o` open in browser, `H` SHA-256), and World Memory (Claims/Conflicts, Braille Memory Flow chart `g`, Temporal Diff Scrubber) |
+| `4` | **Keepers** | Fleet roster (`Companies`, `Attention`, `24h Wall`) and 1-hop 5-tab Keeper Dive (Chat & Stream, Memory with Braille Flow chart, Work & Candle, Sandbox, in-place editable Config) |
+| `5` | **Runtime** | Five tabs: Quotas & Credits, Efficiency & Spend, Failover Lanes (cascades, `exact_lane_runs`, Fusion), Tools & Connectors (Tools, Connectors, Browser/Addons summary, MCP Clients), and Addons & Browser (Addon Lanes table + Browser Clients & Per-Tab listing) |
+| `6` | **Infra** | Three tabs: Sandboxes (MicroVM/SSH/Docker fleet + inspector), Repos & Changes, and Activity & Logs (unified `ALL`/`LOGS`/`EVENTS` timeline `[s]` + structured K/V detail) |
 
 MASC TUI is **monitor-first**: while unfocused, bare keys navigate directly.
 Switch workspaces with `1`–`6`, cycle sub-tabs with `[` / `]` (or `←` / `→`

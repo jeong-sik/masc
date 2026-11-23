@@ -42,8 +42,22 @@ type freshness_state = {
   view_stream : Health.source_freshness option;
   last_observer_cursor : int option;
   last_wall_unix : float;
+  last_mono : Clock.Mono.t;
   server_offline : bool;
 }
+
+type view_ssot_mode =
+  | Live_sse of {
+      stream_name : string;
+      freshness : Health.source_freshness;
+      live_count : int;
+      planned_count : int;
+    }
+  | Synced_snapshot of {
+      observer : Health.source_freshness;
+      observed_at : Clock.Mono.t option;
+    }
+  | Snapshot_only of { observed_at : Clock.Mono.t option }
 
 type mismatch_state =
   | Mismatch_none
@@ -220,6 +234,7 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
         view_stream = None;
         last_observer_cursor = None;
         last_wall_unix;
+        last_mono = Clock.Mono.zero;
         server_offline = false;
       };
     server_identity =
@@ -476,7 +491,8 @@ let focusable_pane_count m =
               | Nav.Runtime_efficiency_spend -> 1
               | Nav.Runtime_quotas_credits
               | Nav.Runtime_failover_lanes
-              | Nav.Runtime_tools_connectors ->
+              | Nav.Runtime_tools_connectors
+              | Nav.Runtime_addons_browser ->
                   2)
           | Nav.Infra -> (
               match m.infra.active_tab with
@@ -665,7 +681,11 @@ let active_focus_label m =
                 | Nav.Runtime_tools_connectors ->
                     if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"커넥터·MCP" ~en:"Connectors"
-                    else pane_prefix ~ko:"도구 목록" ~en:"Tools")
+                    else pane_prefix ~ko:"도구 목록" ~en:"Tools"
+                | Nav.Runtime_addons_browser ->
+                    if m.nav.pane_index = 1 then
+                      pane_prefix ~ko:"브라우저·탭" ~en:"Browser"
+                    else pane_prefix ~ko:"애드온 레인" ~en:"Addons")
             | Nav.Infra -> (
                 match m.infra.active_tab with
                 | Nav.Infra_sandboxes ->
@@ -1192,3 +1212,403 @@ let sync_effective_scorecard ~now:_ m =
   let eff = effective_scorecard m in
   let fleet = Fleet_store.enrich_scorecard (fun _ -> eff) m.fleet in
   { m with fleet }
+
+let observed_at_opt = function
+  | Observed.Value { observed_at; _ } -> Some observed_at
+  | Observed.Loading _
+  | Observed.Absent
+  | Observed.Unreported
+  | Observed.Failed _ ->
+      None
+
+let latest_observed_at xs =
+  List.fold_left
+    (fun acc ts_opt ->
+      match acc, ts_opt with
+      | None, Some t -> Some t
+      | Some a, Some b -> Some (Clock.Mono.max a b)
+      | (Some _ | None), None -> acc)
+    None xs
+
+let is_freshness_live = function
+  | Health.Live _ -> true
+  | Health.Connecting
+  | Health.Reconnecting _
+  | Health.Stale _
+  | Health.Disconnected _
+  | Health.Workspace_mismatch _ ->
+      false
+
+let freshness_severity = function
+  | Health.Live _ -> 0
+  | Health.Connecting -> 1
+  | Health.Stale _ -> 2
+  | Health.Reconnecting _ -> 3
+  | Health.Disconnected _ -> 4
+  | Health.Workspace_mismatch _ -> 5
+
+let worse_freshness a b =
+  if freshness_severity b > freshness_severity a then b else a
+
+let active_view_ssot_mode m =
+  let blocked =
+    m.freshness.server_offline
+    || (match m.server_identity.mismatch_state with
+       | Mismatch_none -> false
+       | Mismatch_recovering | Mismatch_halted -> true)
+    ||
+    match m.nav.overlay with
+    | Some (Nav.System_gate (Nav.Auth_gate | Nav.Server_offline)) -> true
+    | Some
+        ( Nav.System_gate (Nav.Micro_viewport | Nav.Media_viewer)
+        | Nav.Palette
+        | Nav.Settings _
+        | Nav.Incidents
+        | Nav.Queue_context _
+        | Nav.Inline_action _
+        | Nav.Help )
+    | None ->
+        false
+  in
+  let has_view_stream =
+    match active_dive m with
+    | Some _ -> false
+    | None -> (
+        match m.nav.workspace with
+        | Nav.Runtime -> (
+            match m.runtime.active_tab with
+            | Nav.Runtime_efficiency_spend | Nav.Runtime_tools_connectors -> true
+            | Nav.Runtime_quotas_credits
+            | Nav.Runtime_failover_lanes
+            | Nav.Runtime_addons_browser ->
+                false)
+        | Nav.Infra -> (
+            match m.infra.active_tab with
+            | Nav.Infra_activity_logs -> true
+            | Nav.Infra_sandboxes | Nav.Infra_repos_changes -> false)
+        | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers -> false)
+  in
+  let planned_count = if blocked then 0 else if has_view_stream then 3 else 2 in
+  let live_count =
+    if blocked then 0
+    else
+      (if is_freshness_live m.freshness.observer then 1 else 0)
+      + (if is_freshness_live m.freshness.fleet then 1 else 0)
+      +
+      if
+        has_view_stream
+        && Option.fold ~none:false ~some:is_freshness_live m.freshness.view_stream
+      then 1
+      else 0
+  in
+  let view_or_connecting =
+    match m.freshness.view_stream with
+    | Some f -> f
+    | None -> Health.Connecting
+  in
+  match active_dive m with
+  | Some (Nav.Dive_keeper { tab = Nav.Keeper_chat; _ }) ->
+      Live_sse
+        {
+          stream_name = "fleet/stream";
+          freshness = m.freshness.fleet;
+          live_count;
+          planned_count;
+        }
+  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
+      Synced_snapshot
+        {
+          observer = m.freshness.observer;
+          observed_at =
+            latest_observed_at
+              [
+                observed_at_opt
+                  (Knowledge_store.memory_diff_for ~keeper:(Some name)
+                     ~window:m.knowledge.memory_diff_window m.knowledge);
+                observed_at_opt
+                  (Knowledge_store.memory_os_internals_for ~keeper:name
+                     m.knowledge);
+              ];
+        }
+  | Some (Nav.Dive_keeper { tab = Nav.Keeper_work_candle; _ }) ->
+      Synced_snapshot
+        {
+          observer = m.freshness.observer;
+          observed_at =
+            latest_observed_at
+              [
+                observed_at_opt m.work.planning;
+                observed_at_opt m.work.candle_ledger;
+              ];
+        }
+  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_sandbox }) ->
+      Synced_snapshot
+        {
+          observer = m.freshness.observer;
+          observed_at =
+            latest_observed_at
+              [
+                observed_at_opt
+                  (Infra_store.keeper_sandbox_for ~keeper:name m.infra);
+                observed_at_opt m.infra.sandboxes;
+              ];
+        }
+  | Some (Nav.Dive_keeper { tab = Nav.Keeper_config; _ }) ->
+      Synced_snapshot
+        {
+          observer = m.freshness.observer;
+          observed_at =
+            latest_observed_at
+              [
+                observed_at_opt m.runtime.runtime_config_raw;
+                observed_at_opt m.config.schema;
+              ];
+        }
+  | Some (Nav.Dive_work _) ->
+      Synced_snapshot
+        {
+          observer = m.freshness.observer;
+          observed_at =
+            latest_observed_at
+              [
+                observed_at_opt m.work.planning;
+                observed_at_opt m.work.verifications;
+              ];
+        }
+  | Some (Nav.Dive_knowledge target) -> (
+      match target with
+      | Nav.Thread_dive _ ->
+          Synced_snapshot
+            {
+              observer = m.freshness.observer;
+              observed_at =
+                latest_observed_at
+                  [
+                    observed_at_opt m.knowledge.active_thread;
+                    observed_at_opt m.knowledge.board;
+                  ];
+            }
+      | Nav.Wiki_dive slug ->
+          Snapshot_only
+            {
+              observed_at =
+                observed_at_opt
+                  (Knowledge_store.wiki_page_for ~slug m.knowledge);
+            }
+      | Nav.Artifact_dive _ ->
+          Snapshot_only
+            {
+              observed_at =
+                latest_observed_at
+                  [
+                    observed_at_opt m.knowledge.active_artifact_detail;
+                    observed_at_opt m.knowledge.artifacts;
+                  ];
+            }
+      | Nav.Memory_diff_dive { keeper; from_rev; to_rev } ->
+          Synced_snapshot
+            {
+              observer = m.freshness.observer;
+              observed_at =
+                observed_at_opt
+                  (Knowledge_store.memory_diff_for ~keeper
+                     ~window:(Knowledge_store.Window_revs { from_rev; to_rev })
+                     m.knowledge);
+            })
+  | Some (Nav.Dive_infra target) -> (
+      match target with
+      | Nav.Sandbox_dive keeper ->
+          Synced_snapshot
+            {
+              observer = m.freshness.observer;
+              observed_at =
+                latest_observed_at
+                  [
+                    observed_at_opt
+                      (Infra_store.keeper_sandbox_for ~keeper m.infra);
+                    observed_at_opt m.infra.sandboxes;
+                  ];
+            }
+      | Nav.Lane_dive _ ->
+          Synced_snapshot
+            {
+              observer = m.freshness.observer;
+              observed_at = observed_at_opt m.runtime.runtime_resolved;
+            }
+      | Nav.Incident_dive _ -> Snapshot_only { observed_at = None })
+  | None -> (
+      match m.nav.workspace with
+      | Nav.Pulse ->
+          Live_sse
+            {
+              stream_name = "fleet+observer";
+              freshness = worse_freshness m.freshness.observer m.freshness.fleet;
+              live_count;
+              planned_count;
+            }
+      | Nav.Keepers ->
+          Live_sse
+            {
+              stream_name = "fleet/stream";
+              freshness = m.freshness.fleet;
+              live_count;
+              planned_count;
+            }
+      | Nav.Work ->
+          let observed_at =
+            match m.work.active_tab with
+            | Nav.Work_pipeline ->
+                latest_observed_at
+                  [
+                    observed_at_opt m.work.planning;
+                    observed_at_opt m.work.verifications;
+                  ]
+            | Nav.Work_tasks_schedules ->
+                latest_observed_at
+                  [
+                    observed_at_opt m.work.planning;
+                    observed_at_opt m.work.schedules;
+                  ]
+            | Nav.Work_inbox ->
+                latest_observed_at
+                  [
+                    observed_at_opt m.work.asks;
+                    observed_at_opt m.work.tool_approvals;
+                    observed_at_opt m.work.gate_pending;
+                  ]
+            | Nav.Work_candle_scorecard ->
+                observed_at_opt m.work.candle_ledger
+          in
+          Synced_snapshot { observer = m.freshness.observer; observed_at }
+      | Nav.Knowledge -> (
+          match m.knowledge.active_tab with
+          | Nav.Knowledge_board ->
+              Synced_snapshot
+                {
+                  observer = m.freshness.observer;
+                  observed_at = observed_at_opt m.knowledge.board;
+                }
+          | Nav.Knowledge_wiki_artifacts -> (
+              match m.knowledge.wiki_artifacts_submode with
+              | `Wiki ->
+                  let page_obs_at =
+                    match Knowledge_store.selected_wiki_page m.knowledge with
+                    | Some p ->
+                        observed_at_opt
+                          (Knowledge_store.wiki_page_for ~slug:p.slug
+                             m.knowledge)
+                    | None -> None
+                  in
+                  Synced_snapshot
+                    {
+                      observer = m.freshness.observer;
+                      observed_at =
+                        latest_observed_at
+                          [
+                            observed_at_opt m.knowledge.wiki_index;
+                            page_obs_at;
+                          ];
+                    }
+              | `Artifacts ->
+                  Synced_snapshot
+                    {
+                      observer = m.freshness.observer;
+                      observed_at =
+                        latest_observed_at
+                          [
+                            observed_at_opt m.knowledge.artifacts;
+                            observed_at_opt m.knowledge.active_artifact_detail;
+                          ];
+                    })
+          | Nav.Knowledge_memory ->
+              Synced_snapshot
+                {
+                  observer = m.freshness.observer;
+                  observed_at =
+                    latest_observed_at
+                      [
+                        observed_at_opt m.knowledge.world_memory;
+                        observed_at_opt
+                          (Knowledge_store.current_memory_diff m.knowledge);
+                      ];
+                })
+      | Nav.Runtime -> (
+          match m.runtime.active_tab with
+          | Nav.Runtime_efficiency_spend ->
+              Live_sse
+                {
+                  stream_name = "models/metrics";
+                  freshness = view_or_connecting;
+                  live_count;
+                  planned_count;
+                }
+          | Nav.Runtime_tools_connectors ->
+              Live_sse
+                {
+                  stream_name = "tool-metrics";
+                  freshness = view_or_connecting;
+                  live_count;
+                  planned_count;
+                }
+          | Nav.Runtime_quotas_credits ->
+              Synced_snapshot
+                {
+                  observer = m.freshness.observer;
+                  observed_at =
+                    latest_observed_at
+                      [
+                        observed_at_opt m.runtime.usage_history;
+                        observed_at_opt m.runtime.usage_windows;
+                        observed_at_opt m.runtime.runtime_resolved;
+                      ];
+                }
+          | Nav.Runtime_failover_lanes ->
+              Synced_snapshot
+                {
+                  observer = m.freshness.observer;
+                  observed_at =
+                    latest_observed_at
+                      [
+                        observed_at_opt m.runtime.runtime_resolved;
+                        observed_at_opt m.runtime.runtime_probe;
+                      ];
+                }
+          | Nav.Runtime_addons_browser ->
+              Synced_snapshot
+                {
+                  observer = m.freshness.observer;
+                  observed_at =
+                    latest_observed_at
+                      [
+                        observed_at_opt m.runtime.lane_addons;
+                        observed_at_opt m.runtime.browser_lane;
+                      ];
+                })
+      | Nav.Infra -> (
+          match m.infra.active_tab with
+          | Nav.Infra_activity_logs ->
+              Live_sse
+                {
+                  stream_name = "logs/stream";
+                  freshness = view_or_connecting;
+                  live_count;
+                  planned_count;
+                }
+          | Nav.Infra_sandboxes ->
+              Synced_snapshot
+                {
+                  observer = m.freshness.observer;
+                  observed_at = observed_at_opt m.infra.sandboxes;
+                }
+          | Nav.Infra_repos_changes ->
+              Snapshot_only
+                {
+                  observed_at =
+                    latest_observed_at
+                      [
+                        observed_at_opt m.infra.repositories;
+                        (match Infra_store.selected_repo_activity m.infra with
+                        | Some (_, obs) -> observed_at_opt obs
+                        | None -> None);
+                      ];
+                }))

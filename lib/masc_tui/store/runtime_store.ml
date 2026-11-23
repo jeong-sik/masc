@@ -71,6 +71,8 @@ type t = {
   tools_catalog : Wire_runtime.tool_summary list Observed.t;
   connectors : Wire_runtime.connector_row list Observed.t;
   browser_lane : Wire_runtime.browser_lane_status Observed.t;
+  browser_tabs : (string * Wire_runtime.browser_tabs_response) Observed.t;
+  lane_addons : Wire_runtime.lane_addons_snapshot Observed.t;
   mcp_clients : Wire_runtime.mcp_client_row list Observed.t;
   keeper_companies : string String_map.t;
   show_outside_lane_probes : bool;
@@ -80,6 +82,13 @@ type t = {
   quota_scroll_offset : int;
   connector_selected_index : int;
   connector_scroll_offset : int;
+  addon_selected_index : int;
+  addon_scroll_offset : int;
+  browser_client_selected_index : int;
+  browser_client_scroll_offset : int;
+  browser_tab_selected_index : int;
+  browser_tab_scroll_offset : int;
+  browser_right_focus : [ `Clients | `Tabs ];
   detail_scroll_offset : int;
   filter_query : string;
 }
@@ -115,6 +124,8 @@ let empty =
     tools_catalog = Observed.unreported;
     connectors = Observed.unreported;
     browser_lane = Observed.unreported;
+    browser_tabs = Observed.absent;
+    lane_addons = Observed.unreported;
     mcp_clients = Observed.unreported;
     keeper_companies = String_map.empty;
     show_outside_lane_probes = false;
@@ -124,6 +135,13 @@ let empty =
     quota_scroll_offset = 0;
     connector_selected_index = 0;
     connector_scroll_offset = 0;
+    addon_selected_index = 0;
+    addon_scroll_offset = 0;
+    browser_client_selected_index = 0;
+    browser_client_scroll_offset = 0;
+    browser_tab_selected_index = 0;
+    browser_tab_scroll_offset = 0;
+    browser_right_focus = `Clients;
     detail_scroll_offset = 0;
     filter_query = "";
   }
@@ -141,6 +159,13 @@ let set_tab active_tab t =
     quota_scroll_offset = 0;
     connector_selected_index = 0;
     connector_scroll_offset = 0;
+    addon_selected_index = 0;
+    addon_scroll_offset = 0;
+    browser_client_selected_index = 0;
+    browser_client_scroll_offset = 0;
+    browser_tab_selected_index = 0;
+    browser_tab_scroll_offset = 0;
+    browser_right_focus = `Clients;
     detail_scroll_offset = 0;
   }
 
@@ -267,8 +292,33 @@ let apply_connectors ~observed_at connectors t =
 let apply_browser_lane ~observed_at lane t =
   { t with browser_lane = Observed.value ~observed_at lane }
 
+let apply_browser_tabs ~observed_at ~client_id resp t =
+  {
+    t with
+    browser_tabs = Observed.value ~observed_at (client_id, resp);
+    browser_tab_selected_index = 0;
+    browser_tab_scroll_offset = 0;
+  }
+
+let mark_browser_tabs_loading ~since t =
+  { t with browser_tabs = Observed.loading ~since_ns:since }
+
+let mark_browser_tabs_failed ~at ~reason ~retryable t =
+  { t with browser_tabs = Observed.failed ~reason ~retryable ~at }
+
+let apply_lane_addons ~observed_at snap t =
+  { t with lane_addons = Observed.value ~observed_at snap }
+
 let apply_mcp_clients ~observed_at clients t =
   { t with mcp_clients = Observed.value ~observed_at clients }
+
+let toggle_browser_right_focus t =
+  let browser_right_focus =
+    match t.browser_right_focus with
+    | `Clients -> `Tabs
+    | `Tabs -> `Clients
+  in
+  { t with browser_right_focus }
 
 let active_and_outside_probes t =
   match
@@ -914,6 +964,98 @@ let filtered_connectors t =
         | None -> false)
       cs
 
+let filtered_addon_instances t =
+  let items =
+    match Observed.to_option t.lane_addons with
+    | Some snap -> snap.instances
+    | None -> []
+  in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then items
+  else
+    List.filter
+      (fun (inst : Wire_runtime.addon_instance) ->
+        contains_ci ~needle:q inst.title
+        || contains_ci ~needle:q inst.addon_id
+        || contains_ci ~needle:q inst.instance_id
+        || (match inst.execution_kind with
+            | Some k -> contains_ci ~needle:q k
+            | None -> false)
+        || List.exists (contains_ci ~needle:q) inst.action_names)
+      items
+
+let declaration_for_addon (inst : Wire_runtime.addon_instance) t =
+  match Observed.to_option t.lane_addons with
+  | None -> None
+  | Some snap ->
+      List.find_opt
+        (fun (d : Wire_runtime.addon_declaration) ->
+          Option.equal String.equal d.instance_id (Some inst.instance_id)
+          || Option.equal String.equal inst.config_declaration_id (Some d.id)
+          || String.equal d.id inst.addon_id)
+        snap.declarations
+
+let selected_addon_instance t =
+  let items = filtered_addon_instances t in
+  List.nth_opt items (clamp_index (List.length items) t.addon_selected_index)
+
+let filtered_browser_clients t =
+  let items =
+    match Observed.to_option t.browser_lane with
+    | Some bl -> bl.clients
+    | None -> []
+  in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then items
+  else
+    List.filter
+      (fun (c : Wire_runtime.browser_client_row) ->
+        contains_ci ~needle:q c.client_id
+        || contains_ci ~needle:q c.browser
+        || contains_ci ~needle:q c.transport
+        || (match c.space with
+            | Some sp -> contains_ci ~needle:q sp.space_name
+            | None -> false)
+        || (match c.ownership with
+            | Some o -> contains_ci ~needle:q o
+            | None -> false)
+        || List.exists
+             (fun (act : Wire_runtime.browser_interaction_row) ->
+               contains_ci ~needle:q act.action
+               ||
+               match act.actor with
+               | Some a -> contains_ci ~needle:q a
+               | None -> false)
+             c.interactions)
+      items
+
+let selected_browser_client t =
+  let items = filtered_browser_clients t in
+  List.nth_opt items
+    (clamp_index (List.length items) t.browser_client_selected_index)
+
+let filtered_browser_tabs t =
+  match selected_browser_client t, Observed.to_option t.browser_tabs with
+  | Some cl, Some (cid, resp) when String.equal cid cl.client_id ->
+      let q = String.trim t.filter_query in
+      if String.equal q "" then resp.tabs
+      else
+        List.filter
+          (fun (tb : Wire_runtime.browser_tab_row) ->
+            contains_ci ~needle:q tb.title
+            || contains_ci ~needle:q tb.url
+            ||
+            match tb.label with
+            | Some l -> contains_ci ~needle:q l
+            | None -> false)
+          resp.tabs
+  | Some _, Some _ | Some _, None | None, (Some _ | None) -> []
+
+let selected_browser_tab t =
+  let items = filtered_browser_tabs t in
+  List.nth_opt items
+    (clamp_index (List.length items) t.browser_tab_selected_index)
+
 let selected_lane t =
   let lanes = filtered_lanes t in
   List.nth_opt lanes (clamp_index (List.length lanes) t.selected_index)
@@ -984,7 +1126,9 @@ let visual_row_for_selection t ~selected_index =
             else walk (vis_row + 1 + slot_n) (idx + 1) rest
       in
       walk 0 0 lanes
-  | Nav.Runtime_quotas_credits | Nav.Runtime_tools_connectors ->
+  | Nav.Runtime_quotas_credits
+  | Nav.Runtime_tools_connectors
+  | Nav.Runtime_addons_browser ->
       (selected_index, selected_index)
 
 let reset_detail_scroll t = { t with detail_scroll_offset = 0 }
@@ -1078,6 +1222,53 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
             selected_index
         in
         { t with selected_index; scroll_offset }
+  | Nav.Runtime_addons_browser ->
+      if pane_index = 1 then
+        match t.browser_right_focus with
+        | `Clients ->
+            let len = List.length (filtered_browser_clients t) in
+            let browser_client_selected_index =
+              clamp_index len (t.browser_client_selected_index + delta)
+            in
+            let browser_client_scroll_offset =
+              Store_scroll.adjust_scroll ?viewport_rows
+                ~scroll:t.browser_client_scroll_offset
+                browser_client_selected_index
+            in
+            let changed =
+              not
+                (Int.equal browser_client_selected_index
+                   t.browser_client_selected_index)
+            in
+            {
+              t with
+              browser_client_selected_index;
+              browser_client_scroll_offset;
+              browser_tab_selected_index =
+                (if changed then 0 else t.browser_tab_selected_index);
+              browser_tab_scroll_offset =
+                (if changed then 0 else t.browser_tab_scroll_offset);
+            }
+        | `Tabs ->
+            let len = List.length (filtered_browser_tabs t) in
+            let browser_tab_selected_index =
+              clamp_index len (t.browser_tab_selected_index + delta)
+            in
+            let browser_tab_scroll_offset =
+              Store_scroll.adjust_scroll ?viewport_rows
+                ~scroll:t.browser_tab_scroll_offset browser_tab_selected_index
+            in
+            { t with browser_tab_selected_index; browser_tab_scroll_offset }
+      else
+        let len = List.length (filtered_addon_instances t) in
+        let addon_selected_index =
+          clamp_index len (t.addon_selected_index + delta)
+        in
+        let addon_scroll_offset =
+          Store_scroll.adjust_scroll ?viewport_rows ~scroll:t.addon_scroll_offset
+            addon_selected_index
+        in
+        { t with addon_selected_index; addon_scroll_offset }
 
 let set_show_unreported_accounts show_unreported_accounts t =
   let next = { t with show_unreported_accounts } in
@@ -1101,6 +1292,12 @@ let set_filter filter_query t =
     quota_scroll_offset = 0;
     connector_selected_index = 0;
     connector_scroll_offset = 0;
+    addon_selected_index = 0;
+    addon_scroll_offset = 0;
+    browser_client_selected_index = 0;
+    browser_client_scroll_offset = 0;
+    browser_tab_selected_index = 0;
+    browser_tab_scroll_offset = 0;
     detail_scroll_offset = 0;
   }
 
@@ -1123,5 +1320,7 @@ let mark_stale_all t =
     tools_catalog = Observed.mark_stale t.tools_catalog;
     connectors = Observed.mark_stale t.connectors;
     browser_lane = Observed.mark_stale t.browser_lane;
+    browser_tabs = Observed.mark_stale t.browser_tabs;
+    lane_addons = Observed.mark_stale t.lane_addons;
     mcp_clients = Observed.mark_stale t.mcp_clients;
   }

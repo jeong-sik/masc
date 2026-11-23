@@ -26,6 +26,8 @@ val wiki_page_path : page:string -> string
 val wiki_log_path : ?limit:int -> ?before_idx:int -> ?page:string -> unit -> string
 val wiki_search_path : query:string -> ?limit:int -> unit -> string
 val wiki_lint_path : string
+val published_artifacts_path : string
+val published_artifact_detail_path : id:string -> ?revision:int -> unit -> string
 val world_memory_path : string
 val workspace_memory_inventory_path : string
 
@@ -349,27 +351,57 @@ val decode_wiki_put_result : Yojson.Safe.t -> (wiki_put_result, string) result
 
 (** {1 Artifacts} *)
 
-(** The content-addressed body of an artifact's latest revision. *)
-type artifact_body = {
-  sha256 : string;
-  bytes : int;
-  mime : string;
-}
+type artifact_format = [ `Html | `Markdown ]
 
 (** One [GET /api/v1/published-artifacts] row: the latest revision of a
-    published artifact. [id] is the stable [artifact-<32hex>] key; [body]
-    changes with every revision. *)
+    published artifact. [id] is the stable [artifact-<32hex>] key; [sha256],
+    [bytes], [mime_type] and [preview] come from its content-addressed
+    [body._blob] reference. *)
 type artifact_entry = {
   id : string;
+  url : string option;
+  revision : int;
+  sha256 : string;
+  name : string;
+  mime_type : string;
+  bytes : int;
+  format : artifact_format;
+  summary : string option;
+  preview : string option;
+  created_at_unix : float option;
+  producer : string option;
+  title : string option;
+  task_id : string option;
+  goal_id : string option;
+}
+
+type artifact_revision_summary = {
   revision : int;
   title : string;
   summary : string;
+  format : artifact_format;
   author : string;
-  created_at_unix : float;
-  body : artifact_body;
+  created_at_unix : float option;
+  sha256 : string;
+  bytes : int;
+  mime_type : string;
+  preview : string option;
+  task_id : string option;
+  goal_id : string option;
 }
 
+type published_artifact_detail = {
+  artifact : artifact_entry;
+  content : string;
+  revisions : artifact_revision_summary list;
+  shared : bool;
+  share_version : int;
+}
+
+val artifact_extension : artifact_format -> string
 val decode_artifacts_list : Yojson.Safe.t -> (artifact_entry list, string) result
+val decode_published_artifact_detail :
+  Yojson.Safe.t -> (published_artifact_detail, string) result
 
 (** {1 World Memory, Temporal Memory Diff & Keeper Memory Recovery Acts} *)
 

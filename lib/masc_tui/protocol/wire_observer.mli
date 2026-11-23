@@ -1,7 +1,8 @@
 (** Typed SSE Observer event and handshake decoder.
 
-    Built over {!Sse_wire} and {!Sse_event}, stripping dead legacy MSX,
-    lane-addon, and skill-activation events into {!Ignored_legacy}. *)
+    Built over {!Sse_wire} and {!Sse_event}, routing live [lane_addon*] events
+    into {!Dataset_lane_addons} while stripping dead legacy MSX and
+    skill-activation events into {!Ignored_legacy}. *)
 
 val observer_stream_path : string
 val initialize_request_body : client_version:string -> string
@@ -45,6 +46,7 @@ type dataset_invalidation =
   | Dataset_activity
   | Dataset_gate
   | Dataset_keepers
+  | Dataset_lane_addons
   | Dataset_other of string
 
 type agent_core_kind =

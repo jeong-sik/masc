@@ -606,14 +606,18 @@ let test_published_artifact_roundtrip () =
   | Ok [ a ] ->
       Alcotest.(check string) "id" id a.id;
       Alcotest.(check int) "revision" 2 a.revision;
-      Alcotest.(check string) "title" "Weekly report" a.title;
-      Alcotest.(check string) "summary" "Throughput and failures" a.summary;
-      Alcotest.(check string) "author" "e-masc-the-leader" a.author;
-      Alcotest.(check (float 0.001))
-        "created_at reads the RFC3339 string" 1795395723.0 a.created_at_unix;
-      Alcotest.(check string) "body sha256" sha256 a.body.sha256;
-      Alcotest.(check int) "body bytes" 2048 a.body.bytes;
-      Alcotest.(check string) "body mime" "text/markdown" a.body.mime
+      Alcotest.(check (option string)) "title" (Some "Weekly report") a.title;
+      Alcotest.(check (option string))
+        "summary" (Some "Throughput and failures") a.summary;
+      Alcotest.(check (option string))
+        "author" (Some "e-masc-the-leader") a.producer;
+      Alcotest.(check (option (float 0.001)))
+        "created_at reads the RFC3339 string" (Some 1795395723.0)
+        a.created_at_unix;
+      Alcotest.(check string) "body sha256" sha256 a.sha256;
+      Alcotest.(check int) "body bytes" 2048 a.bytes;
+      Alcotest.(check string) "body mime" "text/markdown" a.mime_type;
+      Alcotest.(check bool) "format" true (a.format = `Markdown)
   | Ok rows ->
       Alcotest.fail
         (Printf.sprintf "expected one artifact row, got %d" (List.length rows))

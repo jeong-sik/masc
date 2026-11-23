@@ -80,15 +80,15 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
 | `1`–`6` (or `Ctrl+1`–`6`, `Alt+1`–`6`, `F1`–`F6`) | Unfocused / Global | Switch to workspace `1 Pulse`, `2 Work`, `3 Knowledge`, `4 Keepers`, `5 Runtime`, `6 Infra` |
 | `[` / `]` (or `←` / `→` unfocused, `Alt+[` / `Alt+]`) | Unfocused / Global | Cycle sub-tabs (Workspaces, 5-tab Keeper Dive, Queue/Context drawer; inside the composer `←`/`→` move the text cursor, in Settings Tree they collapse/expand categories, and in Settings Inspector or Keeper Config they cycle enum/bool/numeric values while `[` / `]` switch tabs) |
 | `↑` / `↓` or `j` / `k` | Unfocused / Overlay | Move list selection or scroll Keeper Chat |
-| `PgUp` / `PgDn`, `Home` (`g`) / `End` (`G`) | Unfocused / Overlay | Page scroll or jump to top / bottom |
+| `PgUp` / `PgDn`, `Home` (`g`) / `End` (`G`) | Unfocused / Overlay | Page scroll or jump to top / bottom (on Memory screens — World Memory, `Memory_diff_dive`, and `Keeper_memory` — `g` toggles the Memory Flow Braille chart `Flow ▲/▼` vs `Net Total`, overriding the global `Home` / jump-to-top binding; use `Home` to jump to top) |
 | `Tab` / `Shift+Tab` | Unfocused / Overlay | Cycle active focus panes on multi-pane views (omitted on single-pane views and narrow layouts; cycles tabs in Queue/Context, selection in Palette, or Tree / Inspector in Settings) |
 | `Enter` | Unfocused | 1-hop Dive into selected entity (Keeper, Goal, Task, Verification, Board Thread, Wiki, Artifact, Memory Diff, Lane, Sandbox) |
-| `Space` | Unfocused | Context toggle (expand/collapse group or succession chain, Wiki/Artifacts mode, Memory diff window, Verification view, Tasks status chip, log level filter, Keeper Chat turn details, Settings dry-run diff) |
+| `Space` | Unfocused | Context toggle (expand/collapse group or succession chain, Wiki/Artifacts mode, Memory diff window, Verification view, Tasks status chip, Addons & Browser Clients/Tabs subfocus, log level filter, Keeper Chat turn details, Settings dry-run diff) |
 | `/` | Unfocused / Settings / Incidents | Focus inline filter box (`↑`/`↓` move selection live, `Enter`/`Tab` apply & blur, `Esc` clear & blur; on views without a filter bar such as Pulse or Keeper Chat, focuses the composer with `/`) |
 | `z` | Unfocused | Toggle detail pane zoom |
 | `r` | Unfocused | Force refresh active view from server SSOT (triggers `force=1` probe on Runtime Quotas/Failover) |
 | `n` | Unfocused / Settings | Create new item in current workspace (Board post, `#goals` proposal, Schedule, Connector, Repo, or new Keeper) |
-| `o` | Unfocused / Settings | Open linked `http(s)` URL externally, open Artifact Viewer on Artifacts, or open local TOML in `$EDITOR` from Settings |
+| `o` | Unfocused / Settings | Open linked `http(s)` URL externally (Repos, Wiki, Browser Lane tabs), export & open HTML/Markdown artifact in the default browser on Artifacts / Artifact Dive / Media Viewer, or open local TOML in `$EDITOR` from Settings |
 | `.` / `Ctrl+O` / `v` | Memory Explorer (Unfocused) | `.` opens the Pele 3-stage SVG card (with Mermaid fallback) for the selected evolution event/fact; `Ctrl+O` opens the Formation Tree (Pele Graph / `Memory_tree`); while a diagram is open, `v` cycles `Auto (Pele)` → `Mermaid` → `Tree`, `y` copies diagram source, `r` retries, and `Esc` closes |
 
 ### `Esc` vs `Ctrl+Q`
@@ -164,10 +164,10 @@ composer dispatches navigation or overlay shortcuts (`1`–`6`, `,`, `I`, `?`,
   - **Keeper Chat**: latest assistant reply
   - **Board**: selected post body
   - **Wiki**: open page Markdown (or selected page slug)
-  - **Artifacts / Media Viewer**: selected artifact SHA-256
+  - **Artifacts / Artifact Dive / Media Viewer**: `y` copies full raw HTML/Markdown body via OSC 52 (fetching `GET /api/v1/published-artifacts/<id>` on demand if not yet cached); `H` copies SHA-256; `e` saves locally as `.html`/`.md` to `$HOME/Downloads/masc-artifacts/` (or `<base-path>/.masc/exports/` if `Downloads` is absent); `o` exports and opens the file in your default browser
   - **World Memory / Memory Diagram**: briefing text or top claim; when a Memory Diagram is open, copies its Mermaid source or Formation Tree text
-  - **Sandboxes / Repos / Logs**: keeper name, repository URL, or log message
-  - **Work / Runtime**: goal/task title, schedule ID, ask ID, candle keeper, or lane ID
+  - **Sandboxes / Repos / Logs**: keeper name, repository URL, or selected log message / MASC event detail
+  - **Work / Runtime**: goal/task title, schedule ID, ask ID, candle keeper, lane ID, addon instance ID, or selected browser tab URL
 
   OSC 52 has no acknowledgement channel; terminal clipboard support depends on
   your terminal emulator (and `allow-passthrough` / `set-clipboard` inside
@@ -291,15 +291,21 @@ Three sub-tabs (`[` / `]` or `←` / `→`):
      copies Markdown body, `o` opens the first `http(s)` URL. A save toasts the
      revision it wrote, as a warning when the journal or index write failed,
      and the page is read again.
-   - **Artifacts mode**: `Enter` opens Artifact Dive (title, summary,
-     revision, MIME, size, SHA-256, author, created time, and the list of
-     published artifacts), `o` opens the Media & Artifact Viewer overlay, `y`
-     copies the body SHA-256 via OSC 52.
+   - **Artifacts mode**: live published artifacts (`GET /api/v1/published-artifacts`
+     + on-demand `GET /api/v1/published-artifacts/<id>`) with scrollable HTML/Markdown
+     body preview in the right pane (`Tab` to focus & scroll). `Enter` opens
+     Artifact Dive (metadata, body preview, revision list), `y` copies raw
+     HTML/Markdown body via OSC 52, `e` atomically exports `.html`/`.md` locally,
+     `o` exports and opens in the default browser, and `H` copies SHA-256.
 3. **Memory**: World Memory overview, Claims/Conflicts, Librarian writer status
    (`a` quick `resume`, `A` recovery act modal supporting `resume`, `adopt`,
-   `restart_reading`, `skip_item`, `skip_line`), and the **Temporal Diff
-   Scrubber** (`Space` cycles `24h` → `7d` → `30d`; `Enter` dives into
-   `rev A..B` revision diff).
+   `restart_reading`, `skip_item`, `skip_line`), the **Memory Flow** Braille
+   time-series chart over observed revisions (`g` toggles `Flow ▲/▼` added vs
+   removed/retracted and `Net Total`, overriding the global `Home` / jump-to-top
+   binding on Memory screens including `Memory_diff_dive` and `Keeper_memory`;
+   use `Home` to jump to top), and the **Temporal Diff Scrubber**
+   (`Space` cycles `24h` → `7d` → `30d`; `Enter` dives into `rev A..B` revision
+   diff).
 
 ### `4` Keepers
 
@@ -330,9 +336,12 @@ the **5-tab Keeper Dive** (`[` / `]` cycles tabs):
    per-Keeper durable drafts, pending-delivery states (`Queued`, `Sending`,
    `Pending_processing`, `Confirming_delivery`), tool/thinking/origin toggles,
    and turn interrupt (`Ctrl+X` or `Esc` during an active turn).
-2. **Memory**: Keeper-scoped Temporal Diff (`24h`/`7d`/`30d`), **Retrieval
-   Heat** stacked bar (`HOT`, `WARM`, `COLD`, `0x` never retrieved, total hit
-   count), and Librarian recovery hotkeys (`a` resume, `A` recovery modal).
+2. **Memory**: Keeper-scoped Temporal Diff (`24h`/`7d`/`30d`), **Memory Flow**
+   Braille chart (`g` toggles `Flow ▲/▼` vs `Net Total`, overriding the global
+   `Home` / jump-to-top binding on `Keeper_memory` and `Memory_diff_dive`; use
+   `Home` to jump to top), **Retrieval Heat**
+   stacked bar (`HOT`, `WARM`, `COLD`, `0x` never retrieved, total hit count),
+   and Librarian recovery hotkeys (`a` resume, `A` recovery modal).
 3. **Work & Candle**: Keeper's linked Tasks, Goals, and Candle balance/equipped
    portrait items.
 4. **Sandbox**: Keeper's sandbox backend, network mode, agent socket, shim
@@ -350,7 +359,7 @@ the **5-tab Keeper Dive** (`[` / `]` cycles tabs):
 
 ### `5` Runtime
 
-Four sub-tabs (`[` / `]` or `←` / `→`):
+Five sub-tabs (`[` / `]` or `←` / `→`):
 
 1. **Quotas & Credits**: provider quota windows, 7-day usage history, and
    unreported accounts toggle (`u`, or `Enter` on the unreported toggle row;
@@ -366,8 +375,22 @@ Four sub-tabs (`[` / `]` or `←` / `→`):
 4. **Tools & Connectors**: 24h tool metrics series (live updates via
    view-scoped `tool-metrics/series/stream` SSE), Tools catalog, Channel Gate
    Connectors (`n` opens the Connector bind form: connector name such as
-   `discord`, channel ID, and the Keeper to bind), **Browser Lane** summary, and
-   **Connected MCP Clients**.
+   `discord`, channel ID, and the Keeper to bind), 2-line **Browser & Addons**
+   summary, and **Connected MCP Clients**.
+5. **Addons & Browser**: dedicated 2-pane inspector (`Tab` switches panes):
+   - **Left pane — Addon Lanes**: `GET /api/v1/lane-addons` table (`Addon`,
+     `Presence` `LIVE`/`RETAINED`, `Phase`, `Exec`, `Obs#/Rows`, `Decl`) with
+     bottom detail strip (`instance_id`, `host_requests`, `visibility`,
+     `action_schema`; observer-synced via `lane_addon*` events).
+   - **Right pane — Browser Clients & Open Tabs**: top table shows connected
+     clients (`GET /api/v1/dashboard/browser-lane/clients`: `Space/Client`,
+     `Browser/Ver`, `Presence/Owner`, `Active Actor·Action`) plus
+     `inventoryIssues` warning rails; bottom table shows per-tab listings
+     (`POST /api/v1/dashboard/browser-lane/read`: `#ID`, active dot, origin,
+     title, URL, dialog badge) fetched on client selection and on-demand with
+     `t` (zero idle polling). Press `Space` on the right pane to toggle focus
+     between Clients and Tabs, `y` to copy the selected addon ID or tab URL,
+     and `o` to open the selected tab's `http(s)` URL.
 
 ### `6` Infra
 
@@ -382,11 +405,14 @@ Three sub-tabs (`[` / `]` or `←` / `→`):
    repository's file-writing tool calls from the last 24 hours, with the
    recorded text in the preview pane. Calls the server could not read are
    counted in the changes card's subtitle.
-3. **Activity & Logs**: unified live **System Logs** stream (view-scoped
-   `logs/stream` SSE) + **Live Events** strip (`observer/stream` activity
-   events) + structured key/value detail pane (`Space` cycles log level filter
-   `All` / `ERR` / `WRN` / `INF`, `/` filters text, `y` copies selected log
-   message, and `Stream_gap` pill surfaces any dropped events honestly).
+3. **Activity & Logs**: unified chronological **All / Server Logs / MASC
+   Events** timeline merging live `logs/stream` SSE (`LOG`) and
+   `observer/stream` activity events (`EVT`), with `SRC` badge column and
+   scrollable right-hand **Structured K/V Detail** pane (`Tab` to scroll).
+   Press `s` to cycle `ALL` → `LOGS` → `EVENTS`, `Space` to cycle log level
+   filter (`All` / `ERR` / `WRN` / `INF`), `/` to filter text across both logs
+   and events, and `y` to copy the selected log message or event detail
+   (`Stream_gap` pill surfaces any dropped events honestly).
 
 ### Global 2-Pane Settings Overlay (`,`)
 
@@ -442,7 +468,7 @@ Settings `,`), you can set `keeper.group` directly in the creation form.
   completely separate from `mention_targets` (Board `@mention` addresses) and
   `board_interests` (topic keywords for targetless Board discovery).
 
-### Viewing & Editing Addon Lanes and Exact-Output Lanes
+### Viewing & Editing Addon Lanes, Browser Clients & Open Tabs
 
 - **Configuration**: press `,` to open **Settings**, select category **`3`
   Routing & Failover** (or press `/` and search `addon_exact_lanes` /
@@ -450,32 +476,38 @@ Settings `,`), you can set `keeper.group` directly in the creation form.
   (`Exact · <id>`) and `runtime.addon_exact_lanes.<id>` (`Addon · <id>`) table
   from `runtime.toml`. Edit fields with `Enter`, preview with `Space`, and save
   with `Ctrl+S`.
-- **Runtime execution**: open **`5` Runtime → Failover Lanes** (`[ ]`) to view
+- **Addon Lanes & Browser Lane Runtime (`5` Runtime → Addons & Browser)**:
+  - **Left pane**: live `GET /api/v1/lane-addons` table (`LIVE`/`RETAINED`,
+    `phase`, `execution_authority`, `observation_seq`/`rows_count`, declaration
+    status) with a detail strip showing `instance_id`, `host_requests`,
+    `visibility`, and declared `action_schema` actions. `lane_addon*` events on
+    `observer/stream` automatically refresh the table when viewing `5 Runtime`.
+  - **Right pane**: connected browser clients (`GET /api/v1/dashboard/browser-lane/clients`)
+    with `inventoryIssues` warning rails on top, and per-tab listings
+    (`POST /api/v1/dashboard/browser-lane/read`) for the selected client below.
+    Press `Tab` to switch panes, `Space` to switch Clients/Tabs focus, `t` to
+    refresh open tabs on demand, `y` to copy the selected addon ID or tab URL,
+    and `o` to open the selected tab's `http(s)` URL.
+- **Exact-Output Runs**: open **`5` Runtime → Failover Lanes** (`[ ]`) to view
   deduplicated recent **`exact_lane_runs`** alongside failover lane cascades
-  and Fusion runs.
-
-### Viewing Browser Lane Status
-
-Open **`5` Runtime → Tools & Connectors** (`[ ]`). The right column renders the
-**Browser Lane** summary card (`GET /api/v1/dashboard/browser-lane/clients`)
-showing availability (`avail`), connected client count (`clients`), issue count
-(`issues`), automatic-browse readiness (`auto`), and any diagnostic detail.
-
-> **Current boundary:** Individual open browser tabs and interactive page
-> readers are **not** listed inside TUI v2.6 yet. Use the Browser Lane CLI/tools
-> or `masc browser-lane-setup` for tab-level operations.
+  and Fusion runs. A 2-line Browser & Addons status summary also appears on
+  **`5` Runtime → Tools & Connectors**.
 
 ### Viewing Memory Evolution
 
-- **Workspace-wide**: open **`3` Knowledge → Memory**. Press **`Space`** to
-  cycle the **Temporal Diff Scrubber** (`24h` → `7d` → `30d`) and press
-  **`Enter`** to open a `rev A..B` revision-range dive. Inspect Librarian
-  writer states and press `a` (quick `resume`) or `A` (recovery modal for
-  `adopt`, `restart_reading`, `skip_item`, `skip_line`) when a writer is
-  stopped.
+- **Workspace-wide**: open **`3` Knowledge → Memory**. The **Memory Flow**
+  Braille chart plots real observed revisions from `memory_diff.revisions`
+  (zero fabricated points): default `Flow ▲/▼` shows added facts/claims upward
+  and removed/invalidated/retracted downward; press **`g`** to toggle to the
+  backward-anchored `Net Total` curve. Press **`Space`** to cycle the
+  **Temporal Diff Scrubber** (`24h` → `7d` → `30d`) and press **`Enter`** to
+  open a `rev A..B` revision-range dive. Inspect Librarian writer states and
+  press `a` (quick `resume`) or `A` (recovery modal for `adopt`,
+  `restart_reading`, `skip_item`, `skip_line`) when a writer is stopped.
 - **Per-Keeper**: open **`4` Keepers → select Keeper → `Enter` → Memory** tab
-  (`[ ]`). View that Keeper's scoped diff, **Retrieval Heat** stacked bar
-  (`HOT` / `WARM` / `COLD` / `0x` hits), and per-Keeper Librarian recovery.
+  (`[ ]`). View that Keeper's scoped diff, **Memory Flow** Braille chart (`g`
+  toggles `Flow ▲/▼` / `Net Total`), **Retrieval Heat** stacked bar (`HOT` /
+  `WARM` / `COLD` / `0x` hits), and per-Keeper Librarian recovery.
 - **Pele / Mermaid / Formation Tree Diagrams** (in **`3` Knowledge → Memory**
   with a Keeper selected, or **`4` Keepers → Keeper → Memory**):
   - Press **`.`** on an evolution event (or ordinary fact linked to an evolution
@@ -490,29 +522,41 @@ showing availability (`avail`), connected client count (`clients`), issue count
 
 ### Viewing Unified Logs & Live Events
 
-Open **`6` Infra → Activity & Logs**. The left pane streams live server logs
-(`GET /api/v1/dashboard/logs/stream`) alongside the **Live Events** strip from
-`observer/stream`; the right pane shows structured key/value details for the
-selected entry. Press `Space` to cycle severity filters (`All` / `ERR` / `WRN`
-/ `INF`), `/` to filter by text, and `y` to copy the selected log message.
+Open **`6` Infra → Activity & Logs**. The left pane merges live server logs
+(`GET /api/v1/dashboard/logs/stream`, tagged `LOG`) and MASC `observer/stream`
+activity events (tagged `EVT`) into one chronological feed; the right pane
+shows structured key/value details for whichever entry is selected (`Tab` to
+scroll). Press `s` to cycle `ALL` → `LOGS` → `EVENTS`, `Space` to cycle log
+severity filters (`All` / `ERR` / `WRN` / `INF`), `/` to filter text across
+both sources, and `y` to copy the selected log message or event detail.
 
-### Viewing Artifacts
+### Viewing, Copying & Exporting Artifacts
 
 Open **`3` Knowledge → Wiki & Artifacts**, then press **`Space`** to switch
-from Wiki to **Artifacts**. Press `Enter` for Artifact Dive (title, summary,
-revision, MIME, size, SHA-256, author, created time, and the list of published
-artifacts), `o` to open the **Media & Artifact Viewer** overlay, and **`y`** to
-copy the **SHA-256** of the selected artifact's body via OSC 52.
+from Wiki to **Artifacts**. Selecting an artifact automatically fetches its
+full content (`GET /api/v1/published-artifacts/<id>`) and renders a scrollable
+HTML/Markdown body preview in the right pane (`Tab` to scroll). Across the
+Artifacts list, **Artifact Dive** (`Enter`), and **Media Viewer**:
 
-> **Current boundary:** TUI v2.6 displays artifact metadata and copies SHA-256
-> hashes; inline HTML rendering and full HTML/file content export or copy are
-> **not yet implemented** in the TUI (use the web dashboard or HTTP API when
-> you need rendered HTML or file download).
+- **`y`** — Copy the full raw HTML or Markdown body to your clipboard via OSC 52
+  (fetching on demand if detail has not loaded yet; toasts byte count).
+- **`e`** — Atomically export `.html`/`.md` to `$HOME/Downloads/masc-artifacts/`
+  (or `<base-path>/.masc/exports/` when `$HOME/Downloads` does not exist) and
+  toast the exact saved path.
+- **`o`** — Export to the safe export directory and open the `.html`/`.md` file
+  in your default browser.
+- **`H`** — Copy the artifact's SHA-256 digest via OSC 52.
 
 ## Streaming vs On-Demand Architecture (Zero Idle Polling)
 
 MASC TUI v2.6 enforces a strict connection budget in
-`lib/masc_tui/store/subscriptions.ml` and `lib/masc_tui/store/update.ml`:
+`lib/masc_tui/store/subscriptions.ml` and `lib/masc_tui/store/update.ml`, and
+reflects the **actual** data mode of the active view in the top bar and footer:
+
+- **Honest Per-View SSOT Mode (`Model.active_view_ssot_mode`)**:
+  - **`● LIVE SSE`** — active view is directly fed by a live SSE stream (`1 Pulse`, `4 Keepers` fleet/chat, `5 Runtime → Efficiency & Spend`, `5 Runtime → Tools & Connectors`, `6 Infra → Activity & Logs`), showing stream count or `↻ RECON` / `⚠ STALE` honestly on degradation.
+  - **`◐ SYNCED · <age>`** — snapshot view whose datasets are invalidated and refreshed by `observer/stream` events (e.g., `2 Work`, `3 Knowledge → Board / Wiki / Artifacts / Memory`, `5 Runtime → Quotas / Failover / Addons & Browser`, `6 Infra → Sandboxes`).
+  - **`○ SNAPSHOT <age> · r`** — pure on-demand snapshot view with no active SSE or observer invalidation for that surface (e.g., `6 Infra → Repos & Changes`, `Artifact Dive`, `Wiki Dive`); press `r` to refresh. Mixed-mode views (`Tools & Connectors`, `Addons & Browser`) also show per-pane `LIVE SSE` / `SYNCED` / `SNAPSHOT` badges.
 
 - **2 Persistent SSE Streams (`max_persistent_streams = 2`)** — open whenever
   the server is healthy and not gated:

@@ -3681,6 +3681,276 @@ let test_account_cost_state_credit_and_quota () =
   Alcotest.(check string) "NaN fraction quota + $0 credit" "$0 Exhausted"
     (cost [ window (Wire_runtime.Util_fraction Float.nan); credit_zero ])
 
+let test_feature_wave1_wire_decoders () =
+  (* 1. Live GET /api/v1/published-artifacts native body._blob + direct body + legacy flat fallback *)
+  let live_artifacts =
+    expect_ok "live published-artifacts native body._blob + direct + flat"
+      (Wire_knowledge.decode_artifacts_list
+         (parse_json
+            {|{
+              "artifacts": [
+                {
+                  "id": "artifact-0123456789abcdef0123456789abcdef",
+                  "url": "/api/v1/published-artifacts/artifact-0123456789abcdef0123456789abcdef",
+                  "revision": 3,
+                  "title": "Weekly HTML Brief",
+                  "summary": "Executive summary",
+                  "format": "html",
+                  "author": "alpha-leader",
+                  "created_at_unix": 1795254000.0,
+                  "task_id": "task-42",
+                  "goal_id": "goal-7",
+                  "body": {
+                    "_blob": {
+                      "sha256": "abc123def456",
+                      "bytes": 2048,
+                      "mime": "text/html",
+                      "preview": "<!doctype html><h1>Weekly</h1>"
+                    }
+                  }
+                },
+                {
+                  "id": "art-direct-body",
+                  "url": "/api/v1/published-artifacts/art-direct-body",
+                  "revision": 1,
+                  "title": "Direct Body Note",
+                  "format": "markdown",
+                  "author": "artifact-author",
+                  "created_at_unix": 1795254001.0,
+                  "body": {
+                    "sha256": "direct777",
+                    "bytes": 128,
+                    "mime": "text/markdown",
+                    "preview": "# Direct"
+                  }
+                },
+                {
+                  "sha256": "legacy999",
+                  "name": "legacy-note.md",
+                  "mime_type": "text/markdown",
+                  "bytes": 512,
+                  "producer": "alpha"
+                }
+              ]
+            }|}))
+  in
+  Alcotest.(check int) "3 artifacts decoded" 3 (List.length live_artifacts);
+  let a0 = List.nth live_artifacts 0 in
+  let a1 = List.nth live_artifacts 1 in
+  let a2 = List.nth live_artifacts 2 in
+  Alcotest.(check string) "live id" "artifact-0123456789abcdef0123456789abcdef" a0.id;
+  Alcotest.(check int) "live revision" 3 a0.revision;
+  Alcotest.(check bool) "live format = Html" true (a0.format = `Html);
+  Alcotest.(check string) "live _blob sha256" "abc123def456" a0.sha256;
+  Alcotest.(check int) "live _blob bytes" 2048 a0.bytes;
+  Alcotest.(check string) "live _blob mime" "text/html" a0.mime_type;
+  Alcotest.(check (option string)) "live _blob preview"
+    (Some "<!doctype html><h1>Weekly</h1>") a0.preview;
+  Alcotest.(check (option string)) "live task_id" (Some "task-42") a0.task_id;
+  Alcotest.(check (option string)) "live goal_id" (Some "goal-7") a0.goal_id;
+  Alcotest.(check string) "direct body fallback sha" "direct777" a1.sha256;
+  Alcotest.(check string) "legacy fallback sha" "legacy999" a2.sha256;
+  Alcotest.(check bool) "legacy format = Markdown" true (a2.format = `Markdown);
+  Alcotest.(check string) "detail path with revision"
+    "/api/v1/published-artifacts/art-weekly-01?revision=3"
+    (Wire_knowledge.published_artifact_detail_path ~id:"art-weekly-01" ~revision:3 ());
+  let detail =
+    expect_ok "published artifact detail with native body._blob"
+      (Wire_knowledge.decode_published_artifact_detail
+         (parse_json
+            {|{
+              "artifact": {
+                "id": "artifact-0123456789abcdef0123456789abcdef",
+                "url": "/api/v1/published-artifacts/artifact-0123456789abcdef0123456789abcdef",
+                "revision": 3,
+                "title": "Weekly HTML Brief",
+                "format": "html",
+                "author": "alpha-leader",
+                "created_at_unix": 1795254000.0,
+                "body": { "_blob": { "sha256": "abc123def456", "bytes": 42, "mime": "text/html" } }
+              },
+              "content": "<!doctype html><h1>Weekly Full HTML</h1>",
+              "revisions": [
+                {
+                  "revision": 2,
+                  "title": "Weekly HTML Brief",
+                  "summary": "Rev 2",
+                  "format": "html",
+                  "author": "alpha-leader",
+                  "created_at_unix": 1795250000.0,
+                  "body": { "_blob": { "sha256": "prevsha", "bytes": 30, "mime": "text/html" } }
+                }
+              ],
+              "shared": true,
+              "share_version": 2
+            }|}))
+  in
+  Alcotest.(check string) "detail content"
+    "<!doctype html><h1>Weekly Full HTML</h1>" detail.content;
+  Alcotest.(check int) "detail revisions" 1 (List.length detail.revisions);
+  Alcotest.(check string) "detail revision _blob sha" "prevsha"
+    (List.hd detail.revisions).sha256;
+  Alcotest.(check bool) "detail shared" true detail.shared;
+
+  (* 2. Rich Browser Lane clients + inventoryIssues + per-tab read *)
+  let bl =
+    expect_ok "rich browser lane clients"
+      (Wire_runtime.decode_browser_lane
+         (parse_json
+            {|{
+              "ok": true,
+              "data": {
+                "clients": [
+                  {
+                    "clientId": "ego-space-1",
+                    "browser": "Ego Browser",
+                    "version": "131.0",
+                    "engineVersion": "131.0.6778",
+                    "transport": "ego",
+                    "space": { "id": 1, "name": "research" },
+                    "spaceObservation": { "ownership": "agent", "spaceId": 1, "spaceName": "research" },
+                    "spacePresence": { "state": "present" },
+                    "interactions": [
+                      { "requestId": "req-1", "actor": "alpha", "action": "navigate", "tabId": 42, "phase": "running" }
+                    ],
+                    "lastActivities": []
+                  }
+                ],
+                "inventoryIssues": [
+                  { "kind": "ego_user_owned_space", "instanceId": "inst-1", "space": "personal" }
+                ],
+                "inventoryComplete": false,
+                "automatic": { "browse": { "ok": true, "data": {} } }
+              }
+            }|}))
+  in
+  Alcotest.(check int) "1 browser client decoded" 1 (List.length bl.clients);
+  let c0 = List.hd bl.clients in
+  Alcotest.(check string) "client id" "ego-space-1" c0.client_id;
+  Alcotest.(check (option string)) "client ownership" (Some "agent") c0.ownership;
+  Alcotest.(check (option string)) "client presence" (Some "present") c0.presence_state;
+  Alcotest.(check int) "1 inventory issue decoded" 1 (List.length bl.issues);
+  Alcotest.(check string) "tabs request json"
+    {|{"lane":"live","clientId":"ego-space-1"}|}
+    (Yojson.Safe.to_string
+       (Wire_runtime.encode_browser_tabs_request ~client_id:"ego-space-1"));
+  let tabs_resp =
+    expect_ok "browser tabs read response"
+      (Wire_runtime.decode_browser_tabs_response
+         (parse_json
+            {|{
+              "ok": true,
+              "data": {
+                "clientId": "ego-space-1",
+                "complete": true,
+                "unavailableTabs": [],
+                "tabs": [
+                  {
+                    "id": 42,
+                    "title": "MASC Repo",
+                    "url": "https://github.com/jeong-sik/masc",
+                    "active": true,
+                    "windowId": 1,
+                    "egoPage": { "openedBy": "agent", "label": "research" },
+                    "dialog": { "type": "confirm" }
+                  }
+                ]
+              }
+            }|}))
+  in
+  Alcotest.(check int) "1 browser tab decoded" 1 (List.length tabs_resp.tabs);
+  let t0_row = List.hd tabs_resp.tabs in
+  Alcotest.(check bool) "tab dialog present" true t0_row.dialog_present;
+  Alcotest.(check (option string)) "tab dialog kind" (Some "confirm") t0_row.dialog_kind;
+
+  (* 3. Lane Addons decoder (live object phase:{kind,...}) + Wire_observer routing *)
+  let addons =
+    expect_ok "lane addons snapshot with live object phase"
+      (Wire_runtime.decode_lane_addons
+         (parse_json
+            {|{
+              "configuration": {
+                "complete": true,
+                "declarations": [
+                  {
+                    "id": "browser-ego",
+                    "source_path": ".masc/config/addons/browser-ego.toml",
+                    "enabled": true,
+                    "source_revision": "r1",
+                    "desired_revision": "r1",
+                    "applied_revision": "r1",
+                    "instance_id": "inst-b1",
+                    "application": { "kind": "applied", "messages": [] },
+                    "ui_category": "browser"
+                  }
+                ],
+                "issues": []
+              },
+              "instances": [
+                {
+                  "runtime_presence": "live",
+                  "instance_id": "inst-b1",
+                  "addon_id": "browser-ego",
+                  "title": "Browser Ego Addon",
+                  "revision": "r1",
+                  "phase": { "kind": "observing" },
+                  "execution_authority": { "kind": "host_process" },
+                  "observation_seq": 12,
+                  "rows_count": 4,
+                  "observation_pending": false,
+                  "visibility": { "kind": "shared" },
+                  "host_requests": { "cycles": 12, "waiting": [] },
+                  "action_schema": {
+                    "type": "object",
+                    "properties": { "action": { "enum": ["navigate", "read_tabs"] } }
+                  },
+                  "configuration": { "id": "browser-ego" }
+                },
+                {
+                  "runtime_presence": "retained",
+                  "instance_id": "inst-b2",
+                  "addon_id": "browser-failed",
+                  "title": "Failed Addon",
+                  "revision": "r1",
+                  "phase": { "kind": "failed", "message": "socket closed" },
+                  "execution_authority": { "kind": "container" },
+                  "observation_seq": 3,
+                  "rows_count": 0,
+                  "observation_pending": false,
+                  "visibility": { "kind": "operator" },
+                  "host_requests": { "cycles": 3, "waiting": [] }
+                }
+              ]
+            }|}))
+  in
+  Alcotest.(check int) "1 addon declaration" 1 (List.length addons.declarations);
+  Alcotest.(check int) "2 addon instances" 2 (List.length addons.instances);
+  let inst0 = List.nth addons.instances 0 in
+  let inst1 = List.nth addons.instances 1 in
+  Alcotest.(check bool) "inst0 phase = Addon_observing" true
+    (inst0.phase = Wire_runtime.Addon_observing);
+  Alcotest.(check bool) "inst1 phase = Addon_failed" true
+    (inst1.phase = Wire_runtime.Addon_failed);
+  Alcotest.(check int) "2 action_schema actions" 2 (List.length inst0.action_names);
+  (match
+     Wire_observer.event_of_json
+       (parse_json {|{"type":"lane_addon_changed","addon_id":"browser-ego"}|})
+   with
+  | Ok (Wire_observer.Dataset_changed Wire_observer.Dataset_lane_addons) -> ()
+  | _ -> Alcotest.fail "expected lane_addon_changed -> Dataset_lane_addons");
+  (match
+     Wire_observer.event_of_json
+       (parse_json {|{"type":"masc:lane:updated"}|})
+   with
+  | Ok (Wire_observer.Dataset_changed Wire_observer.Dataset_lane_addons) -> ()
+  | _ -> Alcotest.fail "expected masc:lane:updated -> Dataset_lane_addons");
+  (match
+     Wire_observer.event_of_json
+       (parse_json {|{"type":"workspace_dataset_changed","dataset":"browser_observation"}|})
+   with
+  | Ok (Wire_observer.Dataset_changed Wire_observer.Dataset_lane_addons) -> ()
+  | _ -> Alcotest.fail "expected browser_observation -> Dataset_lane_addons")
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -3718,6 +3988,8 @@ let () =
             test_tui_memory_os_and_runtime_setup_codecs;
           Alcotest.test_case "Keeper memory facts, activity (8 kinds) & v19 health fleet codecs" `Quick
             test_keeper_memory_facts_activity_and_health_decoders;
+          Alcotest.test_case "Feature Wave 1: Artifacts, Browser clients/tabs, Lane Addons & observer routing" `Quick
+            test_feature_wave1_wire_decoders;
         ] );
       ( "net"
       , [

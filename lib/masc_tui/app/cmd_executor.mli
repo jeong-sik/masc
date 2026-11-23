@@ -50,6 +50,24 @@ val is_safe_external_url : string -> bool
 (** [true] only for [http://] or [https://] URLs free of ASCII control
     characters and whitespace. *)
 
+val resolve_artifact_export_dir :
+  ?getenv:(string -> string option) ->
+  ?is_dir:(string -> bool) ->
+  base_path:string ->
+  unit ->
+  string
+(** Resolve dynamic local artifact export directory (zero hardcoded home paths):
+    [$HOME/Downloads/masc-artifacts] when [$HOME/Downloads] exists and is a
+    directory, otherwise [<base_path>/.masc/exports]. *)
+
+val build_artifact_export_filename :
+  filename_stem:string -> id:string -> ext:string -> string
+(** Build a sanitized filename ([<safe_stem>-<short_id>.html|.md]) rejecting
+    extensions outside [.html] and [.md]. *)
+
+val is_safe_local_export_file : string -> bool
+(** [true] iff [path] is an existing regular file ending in [.html] or [.md]. *)
+
 val is_health_body_ready : string -> bool
 (** Pure [/health] readiness predicate: [true] iff [body] decodes via
     {!Masc_tui_protocol.Wire_common.decode_server_health} with [ok = true] and

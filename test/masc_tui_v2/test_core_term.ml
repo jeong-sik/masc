@@ -477,7 +477,7 @@ let test_observed_and_format_val () =
   Alcotest.(check int) "6 workspaces" 6 (List.length Nav.all_workspaces);
   Alcotest.(check int) "4 work tabs" 4 (List.length Nav.all_work_tabs);
   Alcotest.(check int) "3 knowledge tabs" 3 (List.length Nav.all_knowledge_tabs);
-  Alcotest.(check int) "4 runtime tabs" 4 (List.length Nav.all_runtime_tabs);
+  Alcotest.(check int) "5 runtime tabs" 5 (List.length Nav.all_runtime_tabs);
   Alcotest.(check int) "3 infra tabs" 3 (List.length Nav.all_infra_tabs);
   Alcotest.(check int) "5 keeper tabs" 5 (List.length Nav.all_keeper_tabs);
   Alcotest.(check int) "7 settings tabs" 7 (List.length Nav.all_settings_tabs);

@@ -47,6 +47,7 @@ type get_request =
   | Get_wiki_search of { query : string; limit : int option }
   | Get_wiki_lint
   | Get_artifacts
+  | Get_artifact_detail of { id : string; revision : int option }
   | Get_world_memory
   | Get_memory_diff of {
       keeper : string option;
@@ -72,6 +73,7 @@ type get_request =
   | Get_tools_catalog of { keeper : string option }
   | Get_connectors
   | Get_browser_lane
+  | Get_lane_addons
   | Get_mcp_clients
   | Get_sandboxes
   | Get_keeper_sandbox of { keeper : string }
@@ -163,6 +165,7 @@ type post_request =
       reason : string option;
       expected_workspace : Wire_work.expected_workspace;
     }
+  | Post_browser_tabs of { client_id : string }
 
 type put_request =
   | Put_wiki_page of { page : string; request : Wire_knowledge.wiki_put_request }
@@ -211,6 +214,20 @@ type t =
       chart : Masc_tui_ui.Memory_lineage.chart;
     }
   | Cancel_memory_diagram
+  | Fetch_artifact_and_copy of {
+      epoch : Epoch.t;
+      id : string;
+      revision : int option;
+    }
+  | Export_artifact of {
+      epoch : Epoch.t;
+      id : string;
+      revision : int option;
+      filename_stem : string;
+      ext : string;
+      content_opt : string option;
+      open_after : bool;
+    }
   | Open_external_url of string
   | Open_editor_escape_hatch of editor_target
   | Start_local_server

@@ -14,6 +14,18 @@ let needs_fetch ~force obs =
     | Observed.Failed { retryable = true; _ } ->
         true
 
+let needs_target_fetch ~force ~holds_target obs =
+  if force then true
+  else
+    match obs with
+    | Observed.Value { data; stale = false; _ } when holds_target data -> false
+    | Observed.Value _
+    | Observed.Loading _
+    | Observed.Absent
+    | Observed.Unreported
+    | Observed.Failed _ ->
+        true
+
 let add_if cond req acc = if cond then req :: acc else acc
 
 (* Once the ledger route has answered 404, the Candle panels read the
@@ -201,9 +213,23 @@ let fetches_for_dive ~force (m : Model.t) =
             Cmd.Get_wiki_page { page = slug };
             Cmd.Get_wiki_log { limit = Some 30; page = Some slug };
           ]
-      | Nav.Artifact_dive _ ->
+      | Nav.Artifact_dive target ->
+          let detail_needed =
+            needs_target_fetch ~force
+              ~holds_target:
+                (fun (d : Wire_knowledge.published_artifact_detail) ->
+                  String.equal d.artifact.id target
+                  || String.equal d.artifact.sha256 target)
+              m.knowledge.active_artifact_detail
+          in
+          let art_id, rev =
+            match Knowledge_store.find_artifact_by_id_or_sha target m.knowledge with
+            | Some a -> (a.id, Some a.revision)
+            | None -> (target, None)
+          in
           []
           |> add_if (needs_fetch ~force m.knowledge.artifacts) Cmd.Get_artifacts
+          |> add_if detail_needed (Cmd.Get_artifact_detail { id = art_id; revision = rev })
       | Nav.Memory_diff_dive { keeper; from_rev; to_rev } ->
           [
             Cmd.Get_memory_diff
@@ -337,6 +363,27 @@ let fetches_for_workspace ~force (m : Model.t) =
                     offset = None;
                   })
       | Nav.Knowledge_wiki_artifacts ->
+          let selected_artifact_req =
+            match (Model.active_dive m, m.knowledge.wiki_artifacts_submode) with
+            | Some _, (`Wiki | `Artifacts) | None, `Wiki -> []
+            | None, `Artifacts -> (
+                match Knowledge_store.selected_artifact m.knowledge with
+                | None -> []
+                | Some a ->
+                    if
+                      needs_target_fetch ~force
+                        ~holds_target:
+                          (fun (d : Wire_knowledge.published_artifact_detail) ->
+                            String.equal d.artifact.id a.id
+                            || String.equal d.artifact.sha256 a.sha256)
+                        m.knowledge.active_artifact_detail
+                    then
+                      [
+                        Cmd.Get_artifact_detail
+                          { id = a.id; revision = Some a.revision };
+                      ]
+                    else [])
+          in
           ([]
           |> add_if
                (needs_fetch ~force m.knowledge.wiki_index)
@@ -344,6 +391,7 @@ let fetches_for_workspace ~force (m : Model.t) =
           |> add_if (needs_fetch ~force m.knowledge.wiki_lint) Cmd.Get_wiki_lint
           |> add_if (needs_fetch ~force m.knowledge.artifacts) Cmd.Get_artifacts)
           @ selected_wiki_page_reqs ~force m
+          @ selected_artifact_req
       | Nav.Knowledge_memory ->
           let keeper_scoped_reqs =
             match m.knowledge.memory_diff_keeper with
@@ -492,8 +540,19 @@ let fetches_for_workspace ~force (m : Model.t) =
                (needs_fetch ~force m.runtime.browser_lane)
                Cmd.Get_browser_lane
           |> add_if
+               (needs_fetch ~force m.runtime.lane_addons)
+               Cmd.Get_lane_addons
+          |> add_if
                (needs_fetch ~force m.runtime.mcp_clients)
-               Cmd.Get_mcp_clients)
+               Cmd.Get_mcp_clients
+      | Nav.Runtime_addons_browser ->
+          []
+          |> add_if
+               (needs_fetch ~force m.runtime.lane_addons)
+               Cmd.Get_lane_addons
+          |> add_if
+               (needs_fetch ~force m.runtime.browser_lane)
+               Cmd.Get_browser_lane)
   | Nav.Infra -> (
       match m.infra.active_tab with
       | Nav.Infra_sandboxes ->
@@ -528,7 +587,39 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
     @ fetches_for_overlay ~force m
     |> dedup_reqs
   in
-  List.map (fun req -> Cmd.Http_get { epoch = m.epoch; req }) reqs
+  let get_cmds = List.map (fun req -> Cmd.Http_get { epoch = m.epoch; req }) reqs in
+  let post_cmds =
+    if
+      Option.is_none (Model.active_dive m)
+      && Nav.equal_workspace m.nav.workspace Nav.Runtime
+      && Nav.equal_runtime_tab m.runtime.active_tab Nav.Runtime_addons_browser
+    then
+      match Runtime_store.selected_browser_client m.runtime with
+      | None -> []
+      | Some cl ->
+          let tabs_fresh =
+            match m.runtime.browser_tabs with
+            | Observed.Value { data = cid, _; stale = false; _ } ->
+                String.equal cid cl.client_id && not force
+            | Observed.Loading _
+            | Observed.Value { stale = true; _ }
+            | Observed.Absent
+            | Observed.Unreported
+            | Observed.Failed _ ->
+                false
+          in
+          if tabs_fresh then []
+          else
+            [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req = Cmd.Post_browser_tabs { client_id = cl.client_id };
+                };
+            ]
+    else []
+  in
+  get_cmds @ post_cmds
 
 let overlay_fetches (m : Model.t) =
   List.map

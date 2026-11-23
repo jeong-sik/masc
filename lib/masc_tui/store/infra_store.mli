@@ -31,6 +31,14 @@ type repo_activity = {
   activity : Wire_infra.repository_activity Observed.t;
 }
 
+type activity_source_filter =
+  | Source_all
+  | Source_logs
+  | Source_events
+
+type timeline_entry =
+  | Entry_log of Wire_infra.system_log_entry
+  | Entry_event of activity_row
 type t = {
   active_tab : Nav.infra_tab;
   sandboxes : Wire_infra.sandboxes_snapshot Observed.t;
@@ -45,6 +53,7 @@ type t = {
   stream_gap_count : int;
   log_level_filter : Wire_infra.log_level option;
   log_keeper_filter : string option;
+  source_filter : activity_source_filter;
   activity_events : activity_row list;
   show_raw_json : bool;
   selected_index : int;
@@ -116,6 +125,10 @@ val push_activity : activity_row -> t -> t
 val record_stream_gap : int -> t -> t
 
 val visible_logs : t -> Wire_infra.system_log_entry list
+val visible_activity_events : t -> activity_row list
+val visible_timeline : t -> timeline_entry list
+val set_source_filter : activity_source_filter -> t -> t
+val cycle_source_filter : t -> t
 val set_log_level_filter : Wire_infra.log_level option -> t -> t
 val cycle_log_level_filter : t -> t
 val set_log_keeper_filter : string option -> t -> t
@@ -145,6 +158,7 @@ val change_preview_rows : Wire_infra.file_change -> Masc_tui_ui.Diff.numbered li
     written body, or the inserted text, numbered where the row records the
     position. A materialized blob has no text to show. *)
 val selected_log : t -> Wire_infra.system_log_entry option
+val selected_timeline_entry : t -> timeline_entry option
 val sandbox_inspector_event_count : keeper:string -> t -> int
 (** Exact combined log + activity row count rendered in the sandbox inspector
     tail pane for [keeper]. *)

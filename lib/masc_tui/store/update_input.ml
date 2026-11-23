@@ -65,22 +65,32 @@ let stage_remove_settings_key ~now (m : Model.t) =
           , [] ))
 
 let extract_embedded_json_opt s =
-  let len = String.length s in
-  let rec find_delim i =
-    if i >= len then None
-    else
-      match s.[i] with
-      | '{' | '[' -> Some i
-      | _ -> find_delim (i + 1)
-  in
-  match find_delim 0 with
-  | None -> None
-  | Some idx -> (
-      let prefix = String.trim (String.sub s 0 idx) in
-      let rest = String.sub s idx (len - idx) in
-      match Yojson.Safe.from_string rest with
-      | json -> Some (prefix, json)
-      | exception Yojson.Json_error _ -> None)
+  let trimmed = String.trim s in
+  let len = String.length trimmed in
+  if len < 2 then None
+  else
+    let rec try_from i =
+      if i >= len then None
+      else if Char.equal trimmed.[i] '{' || Char.equal trimmed.[i] '[' then
+        let rest = String.sub trimmed i (len - i) in
+        match Yojson.Safe.from_string rest with
+        | (`Assoc _ | `List _) as json ->
+            let raw_prefix =
+              if i = 0 then "" else String.trim (String.sub trimmed 0 i)
+            in
+            let plen = String.length raw_prefix in
+            let prefix =
+              if plen > 0 && Char.equal raw_prefix.[plen - 1] ':' then
+                String.trim (String.sub raw_prefix 0 (plen - 1))
+              else raw_prefix
+            in
+            Some (prefix, json)
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ ->
+            try_from (i + 1)
+        | exception Yojson.Json_error _ -> try_from (i + 1)
+      else try_from (i + 1)
+    in
+    try_from 0
 
 let patch_response_diff_row_count (resp : Wire_config.patch_response) =
   if resp.diff_hunks <> [] then
@@ -504,8 +514,74 @@ let dispatch_system_gate_key ~now (m : Model.t) gate
   | (Nav.Server_offline | Nav.Auth_gate), Keymap.Input.Char "r"
     when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m Keymap.Refresh)
+  | Nav.Media_viewer, Keymap.Input.Up
+    when (not norm.mods.ctrl) && not norm.mods.alt ->
+      Some (Update_nav.apply_move m Keymap.Up)
+  | Nav.Media_viewer, Keymap.Input.Down
+    when (not norm.mods.ctrl) && not norm.mods.alt ->
+      Some (Update_nav.apply_move m Keymap.Down)
+  | Nav.Media_viewer, Keymap.Input.Page_up
+    when (not norm.mods.ctrl) && not norm.mods.alt ->
+      Some (Update_nav.apply_move m Keymap.Page_up)
+  | Nav.Media_viewer, Keymap.Input.Page_down
+    when (not norm.mods.ctrl) && not norm.mods.alt ->
+      Some (Update_nav.apply_move m Keymap.Page_down)
+  | Nav.Media_viewer, Keymap.Input.Home
+    when (not norm.mods.ctrl) && not norm.mods.alt ->
+      Some (Update_nav.apply_move m Keymap.Home)
+  | Nav.Media_viewer, Keymap.Input.End
+    when (not norm.mods.ctrl) && not norm.mods.alt ->
+      Some (Update_nav.apply_move m Keymap.End)
+  | Nav.Media_viewer, Keymap.Input.Char "k" when is_printable_key norm ->
+      Some (Update_nav.apply_move m Keymap.Up)
+  | Nav.Media_viewer, Keymap.Input.Char "j" when is_printable_key norm ->
+      Some (Update_nav.apply_move m Keymap.Down)
+  | Nav.Media_viewer, Keymap.Input.Char "g" when is_printable_key norm ->
+      Some (Update_nav.apply_move m Keymap.Home)
+  | Nav.Media_viewer, Keymap.Input.Char "G" when is_printable_key norm ->
+      Some (Update_nav.apply_move m Keymap.End)
   | Nav.Media_viewer, Keymap.Input.Char "y" when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m Keymap.Copy_selected)
+  | Nav.Media_viewer, Keymap.Input.Char "H" when is_printable_key norm -> (
+      match Knowledge_store.selected_artifact m.knowledge with
+      | Some art ->
+          Some
+            ( Model.with_toast ~now ~level:Model.Toast_info
+                (Say.make ~ko:"SHA-256 복사됨" ~en:"Copied SHA-256")
+                m
+            , [ Cmd.Copy_clipboard art.sha256 ] )
+      | None -> Some (m, []))
+  | Nav.Media_viewer, Keymap.Input.Char "e" when is_printable_key norm -> (
+      match Knowledge_store.selected_artifact m.knowledge with
+      | Some art ->
+          let ext = Wire_knowledge.artifact_extension art.format in
+          let filename_stem = Option.value ~default:art.name art.title in
+          let content_opt =
+            Option.map
+              (fun (d : Wire_knowledge.published_artifact_detail) -> d.content)
+              (Knowledge_store.artifact_detail_for_entry art m.knowledge)
+          in
+          Some
+            ( Model.with_toast ~now ~level:Model.Toast_info
+                (Say.make
+                   ~ko:(Printf.sprintf "%s 파일 내보내는 중…" ext)
+                   ~en:(Printf.sprintf "Exporting %s…" ext))
+                m
+            , [
+                Cmd.Export_artifact
+                  {
+                    epoch = m.epoch;
+                    id = art.id;
+                    revision = Some art.revision;
+                    filename_stem;
+                    ext;
+                    content_opt;
+                    open_after = false;
+                  };
+              ] )
+      | None -> Some (m, []))
+  | Nav.Media_viewer, Keymap.Input.Char "o" when is_printable_key norm ->
+      Some (Update_actions.execute_action ~now m Keymap.Open_external)
   | ( ( Nav.Server_offline
       | Nav.Auth_gate
       | Nav.Media_viewer
@@ -1333,8 +1409,46 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
           | Nav.Keeper_config )
         , (Some _ | None) ) ->
           (m, []))
+  | Some (Nav.Dive_knowledge (Nav.Artifact_dive target)) -> (
+      let art_opt =
+        match Knowledge_store.find_artifact_by_id_or_sha target m.knowledge with
+        | Some _ as hit -> hit
+        | None -> Knowledge_store.selected_artifact m.knowledge
+      in
+      match printable_char, art_opt with
+      | Some "e", Some art ->
+          let ext = Wire_knowledge.artifact_extension art.format in
+          let filename_stem = Option.value ~default:art.name art.title in
+          let content_opt =
+            Option.map
+              (fun (d : Wire_knowledge.published_artifact_detail) -> d.content)
+              (Knowledge_store.artifact_detail_for_entry art m.knowledge)
+          in
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make
+                 ~ko:(Printf.sprintf "%s 파일 내보내는 중…" ext)
+                 ~en:(Printf.sprintf "Exporting %s…" ext))
+              m
+          , [
+              Cmd.Export_artifact
+                {
+                  epoch = m.epoch;
+                  id = art.id;
+                  revision = Some art.revision;
+                  filename_stem;
+                  ext;
+                  content_opt;
+                  open_after = false;
+                };
+            ] )
+      | Some "H", Some art ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:"SHA-256 복사됨" ~en:"Copied SHA-256")
+              m
+          , [ Cmd.Copy_clipboard art.sha256 ] )
+      | _ -> (m, []))
   | Some
-      ( Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Artifact_dive _ | Nav.Memory_diff_dive _)
+      ( Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Memory_diff_dive _)
       | Nav.Dive_infra (Nav.Lane_dive _ | Nav.Incident_dive _) ) ->
       (m, [])
   | None -> (
@@ -1588,7 +1702,43 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                         match printable_char with
                         | Some "e" -> open_wiki_edit_modal ~now m ~slug:p.slug
                         | _ -> (m, [])))
-              | `Artifacts -> (m, []))
+              | `Artifacts -> (
+                  match printable_char, Knowledge_store.selected_artifact m.knowledge with
+                  | Some "e", Some art ->
+                      let ext = Wire_knowledge.artifact_extension art.format in
+                      let filename_stem =
+                        Option.value ~default:art.name art.title
+                      in
+                      let content_opt =
+                        Option.map
+                          (fun (d : Wire_knowledge.published_artifact_detail) ->
+                            d.content)
+                          (Knowledge_store.artifact_detail_for_entry art
+                             m.knowledge)
+                      in
+                      ( Model.with_toast ~now ~level:Model.Toast_info
+                          (Say.make
+                             ~ko:(Printf.sprintf "%s 파일 내보내는 중…" ext)
+                             ~en:(Printf.sprintf "Exporting %s…" ext))
+                          m
+                      , [
+                          Cmd.Export_artifact
+                            {
+                              epoch = m.epoch;
+                              id = art.id;
+                              revision = Some art.revision;
+                              filename_stem;
+                              ext;
+                              content_opt;
+                              open_after = false;
+                            };
+                        ] )
+                  | Some "H", Some art ->
+                      ( Model.with_toast ~now ~level:Model.Toast_info
+                          (Say.make ~ko:"SHA-256 복사됨" ~en:"Copied SHA-256")
+                          m
+                      , [ Cmd.Copy_clipboard art.sha256 ] )
+                  | _ -> (m, [])))
           | Nav.Knowledge_board -> (m, []))
       | Nav.Work -> (
           match m.work.active_tab with
@@ -2313,7 +2463,67 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         && Option.equal String.equal (key_char_opt norm.key)
                              (Some "x")
                       in
+                      let is_memory_flow_toggle_g =
+                        (not (Drafts.is_focused m.drafts))
+                        && (not m.nav.filter_focused)
+                        && Option.is_none m.nav.overlay
+                        && Option.is_none (Memory_diagram.active_diagram m)
+                        && Option.is_none m.knowledge.memory_reading
+                        && (not norm.mods.ctrl) && (not norm.mods.alt)
+                        && (not norm.mods.shift)
+                        && Option.equal String.equal (key_char_opt norm.key)
+                             (Some "g")
+                        &&
+                        match Model.active_dive m with
+                        | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive _)) ->
+                            true
+                        | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ }) ->
+                            true
+                        | Some
+                            ( Nav.Dive_keeper
+                                {
+                                  tab =
+                                    ( Nav.Keeper_chat
+                                    | Nav.Keeper_work_candle
+                                    | Nav.Keeper_sandbox
+                                    | Nav.Keeper_config );
+                                  _;
+                                }
+                            | Nav.Dive_work _
+                            | Nav.Dive_infra _
+                            | Nav.Dive_knowledge
+                                ( Nav.Thread_dive _
+                                | Nav.Wiki_dive _
+                                | Nav.Artifact_dive _ ) ) ->
+                            false
+                        | None ->
+                            (Nav.equal_workspace m.nav.workspace Nav.Knowledge
+                             && Nav.equal_knowledge_tab m.knowledge.active_tab
+                                  Nav.Knowledge_memory)
+                            || (Nav.equal_workspace m.nav.workspace Nav.Keepers
+                                && Nav.equal_keeper_tab
+                                     m.fleet.keeper_dive_tab Nav.Keeper_memory
+                                && m.nav.pane_index = 1)
+                      in
                       if is_ctrl_x then interrupt_active_keeper_turn ~now m
+                      else if is_memory_flow_toggle_g then
+                        let knowledge =
+                          Knowledge_store.toggle_memory_flow_mode m.knowledge
+                        in
+                        let lbl =
+                          Masc_tui_ui.Memory_flow.mode_label
+                            knowledge.memory_flow_mode
+                        in
+                        ( Model.with_toast ~now ~level:Model.Toast_info
+                            (Say.make
+                               ~ko:
+                                 ("기억 그래프 모드: "
+                                 ^ Say.resolve Say.Lang_ko lbl)
+                               ~en:
+                                 ("Memory chart mode: "
+                                 ^ Say.resolve Say.Lang_en lbl))
+                            { m with knowledge }
+                        , [] )
                       else
                         (* 3. Single-SSOT Keymap dispatch *)
                     match
@@ -2506,16 +2716,18 @@ let apply_paste ~now:_ (m : Model.t) text =
 let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
   if Model.is_too_small_viewport m.viewport then (m, [])
   else
-    let m =
+    let cancel_edit (m : Model.t) =
       if Config_store.is_editing_field m.config then
         { m with config = Config_store.cancel_edit_field m.config }
       else m
     in
     match ev with
     | Keymap.Input.Wheel { dir = Keymap.Input.Wheel_up; _ } ->
-        Update_actions.execute_action ~now m (Keymap.Move Keymap.Up)
+        Update_actions.execute_action ~now (cancel_edit m)
+          (Keymap.Move Keymap.Up)
     | Keymap.Input.Wheel { dir = Keymap.Input.Wheel_down; _ } ->
-        Update_actions.execute_action ~now m (Keymap.Move Keymap.Down)
+        Update_actions.execute_action ~now (cancel_edit m)
+          (Keymap.Move Keymap.Down)
     | Keymap.Input.Left_press _
     | Keymap.Input.Left_drag _
     | Keymap.Input.Left_release _ ->

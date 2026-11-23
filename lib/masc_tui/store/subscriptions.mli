@@ -29,6 +29,10 @@ val equal_stream_kind : stream_id -> stream_id -> bool
 val equal_plan : stream_id list -> stream_id list -> bool
 (** Compare plans by logical stream identity ({!equal_stream_kind}). *)
 
+val view_scoped_stream : Model.t -> stream_id option
+(** Active view-scoped stream for [model], if any. Returns [None] while any
+    dive is open or on views backed strictly by observer/snapshot reads. *)
+
 val plan : Model.t -> stream_id list
 (** Compute the exact bounded set of active GET SSE streams for [model].
     Returns [[]] while waiting for authentication, server startup, or active

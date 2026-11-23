@@ -39,6 +39,8 @@ val connectors_path : string
 val connector_bind_path : connector:string -> string
 (** [POST /api/v1/gate/connector/bind?name=<connector>]. *)
 val browser_lane_path : string
+val browser_lane_read_path : string
+val lane_addons_path : string
 val mcp_clients_path : string
 
 (** {1 Provider-Free Quotas, Subscription Windows & Credit Balances} *)
@@ -592,6 +594,46 @@ val encode_connector_bind :
 (** Body for {!connector_bind_path}: the channel to bind and the Keeper that
     answers it. *)
 
+type browser_space_ref = {
+  space_id : int;
+  space_name : string;
+}
+
+type browser_interaction_row = {
+  request_id : string;
+  actor : string option;
+  action : string;
+  tab_id : int option;
+  phase : string;
+}
+
+type browser_settled_activity = {
+  work : browser_interaction_row;
+  outcome : string;
+}
+
+type browser_client_row = {
+  client_id : string;
+  browser : string;
+  version : string;
+  engine_version : string;
+  transport : string;
+  space : browser_space_ref option;
+  ownership : string option;
+  presence_state : string option;
+  presence_reason : string option;
+  interactions : browser_interaction_row list;
+  last_activities : browser_settled_activity list;
+}
+
+type browser_inventory_issue = {
+  kind : string;
+  instance_id : string option;
+  client_id : string option;
+  space : string option;
+  space_id : int option;
+  message : string;
+}
 type browser_lane_status = {
   ok : bool;
   available : bool;
@@ -600,9 +642,100 @@ type browser_lane_status = {
   issue_count : int;
   automatic_browse_ok : bool;
   detail : string option;
+  clients : browser_client_row list;
+  issues : browser_inventory_issue list;
 }
 
 val decode_browser_lane : Yojson.Safe.t -> (browser_lane_status, string) result
+
+type browser_tab_origin =
+  | Tab_origin_agent
+  | Tab_origin_unknown
+
+type browser_tab_row = {
+  id : int;
+  title : string;
+  url : string;
+  active : bool;
+  window_id : int option;
+  opened_by : browser_tab_origin option;
+  label : string option;
+  dialog_present : bool;
+  dialog_kind : string option;
+}
+
+type browser_tabs_response = {
+  client_id : string option;
+  tabs : browser_tab_row list;
+  complete : bool;
+  unavailable_count : int;
+  error : string option;
+}
+
+val encode_browser_tabs_request : client_id:string -> Yojson.Safe.t
+val decode_browser_tabs_response :
+  Yojson.Safe.t -> (browser_tabs_response, string) result
+
+type addon_runtime_presence =
+  | Addon_live
+  | Addon_retained
+
+type addon_phase =
+  | Addon_attached
+  | Addon_observing
+  | Addon_detaching
+  | Addon_detached
+  | Addon_failed
+  | Addon_phase_other of string
+
+type addon_declaration = {
+  id : string;
+  source_path : string;
+  enabled : bool;
+  source_revision : string;
+  desired_revision : string;
+  applied_revision : string option;
+  instance_id : string option;
+  application_kind : string;
+  application_messages : string list;
+  ui_category : string option;
+}
+
+type addon_instance = {
+  runtime_presence : addon_runtime_presence;
+  instance_id : string;
+  addon_id : string;
+  title : string;
+  revision : string;
+  phase : addon_phase;
+  execution_kind : string option;
+  resolved_image : string option;
+  observation_seq : int;
+  rows_count : int;
+  observation_pending : bool;
+  visibility_kind : string option;
+  visibility_keeper : string option;
+  host_cycles : int option;
+  host_waiting_count : int;
+  host_issue_kind : string option;
+  action_names : string list;
+  config_declaration_id : string option;
+}
+
+type lane_addons_issue = {
+  source_path : string;
+  id : string option;
+  message : string;
+}
+
+type lane_addons_snapshot = {
+  configuration_complete : bool;
+  declarations : addon_declaration list;
+  instances : addon_instance list;
+  issues : lane_addons_issue list;
+}
+
+val decode_lane_addons : Yojson.Safe.t -> (lane_addons_snapshot, string) result
 
 type mcp_client_row = {
   name : string;

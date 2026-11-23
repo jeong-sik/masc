@@ -3692,6 +3692,12 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           Say.resolve lang
             (Say.make ~ko:"미디어 · 아티팩트 뷰어" ~en:"Media & Artifact Viewer")
         in
+        let sel_art = Knowledge_store.selected_artifact model.knowledge in
+        let fmt_tok, ext_tok =
+          match sel_art with
+          | Some { format = `Html; _ } -> ("HTML", ".html")
+          | Some { format = `Markdown; _ } | None -> ("MD", ".md")
+        in
         let inner =
           Card.draw ~cache grid ~rect:modal_r ~theme
             {
@@ -3699,29 +3705,65 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               hotkey =
                 Some
                   (Say.resolve lang
-                     (Say.make ~ko:"[y] 해시 복사 · [Esc] 닫기"
-                        ~en:"[y] Copy SHA256 · [Esc] Close"));
+                     (Say.make
+                        ~ko:
+                          (Printf.sprintf
+                             "[y] %s 복사 · [e] %s 내보내기 · [o] 열기 · [H] SHA · [Esc] 닫기"
+                             fmt_tok ext_tok)
+                        ~en:
+                          (Printf.sprintf
+                             "[y] Copy %s · [e] Export %s · [o] Open · [H] SHA · [Esc] Close"
+                             fmt_tok ext_tok)));
               focused = true;
               elevated = true;
             }
         in
         let media_lines =
-          match Knowledge_store.selected_artifact model.knowledge with
+          match sel_art with
           | Some art ->
-              [
-                (anchor_st, art.title);
-                ( struct_st,
-                  Printf.sprintf "MIME: %s · Size: %s" art.body.mime
-                    (Format_val.format_value Format_val.Bytes
-                       (float_of_int art.body.bytes)) );
-                ( whisper_st,
-                  Printf.sprintf "SHA256: %s"
-                    (Grapheme.truncate_to_width ~max_width:32 art.body.sha256) );
-                ( pri_st,
-                  Say.resolve lang
-                    (Say.make ~ko:"프레임버퍼 안전 영역 내 미리보기 · [y] 해시 복사 · [Esc] 닫기"
-                       ~en:"Fenced inside framebuffer lifecycle · [y] copy SHA256 · [Esc] close") );
-              ]
+              let detail_opt =
+                Knowledge_store.artifact_detail_for_entry art model.knowledge
+              in
+              let preview =
+                Knowledge_store.artifact_preview_lines art detail_opt
+              in
+              let header =
+                [
+                  (anchor_st, Option.value ~default:art.name art.title);
+                  ( struct_st,
+                    Printf.sprintf "ID: %s · r%d · %s · %s" art.id art.revision
+                      art.mime_type
+                      (Format_val.format_value Format_val.Bytes
+                         (float_of_int art.bytes)) );
+                  ( whisper_st,
+                    Printf.sprintf "SHA256: %s"
+                      (Grapheme.truncate_to_width ~max_width:40 art.sha256) );
+                  ( acc_st,
+                    Say.resolve lang
+                      (Say.make
+                         ~ko:
+                           (Printf.sprintf
+                              "[y] %s 본문 복사 · [e] %s 저장 · [o] 기본 앱 열기 · [H] SHA 복사"
+                              fmt_tok ext_tok)
+                         ~en:
+                           (Printf.sprintf
+                              "[y] Copy %s body · [e] Export %s · [o] Open default · [H] Copy SHA"
+                              fmt_tok ext_tok)) );
+                ]
+              in
+              let body_rows =
+                if preview = [] then
+                  [
+                    ( whisper_st,
+                      Say.resolve lang
+                        (Say.make ~ko:"본문 불러오는 중 또는 미리보기 없음"
+                           ~en:"Loading body or no inline preview") );
+                  ]
+                else
+                  (whisper_st, "── " ^ fmt_tok ^ " Preview ──")
+                  :: List.map (fun l -> (pri_st, l)) preview
+              in
+              header @ body_rows
           | None ->
               [
                 ( whisper_st,
@@ -3732,7 +3774,16 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   Say.resolve lang (Say.make ~ko:"[Esc] 돌아가기" ~en:"[Esc] Return") );
               ]
         in
-        draw_lines inner ~rail_tone:(Some Theme.Status_active) media_lines
+        let pad_y = if inner.h >= 7 then 1 else 0 in
+        let content_h = Int.max 0 (inner.h - (2 * pad_y)) in
+        let max_scroll =
+          Int.max 0 (List.length media_lines - Int.max 1 content_h)
+        in
+        let skip =
+          Int.min max_scroll (Int.max 0 model.knowledge.detail_scroll_offset)
+        in
+        let visible_lines = List.drop skip media_lines in
+        draw_lines inner ~rail_tone:(Some Theme.Status_active) visible_lines
     | Nav.Micro_viewport ->
         let title =
           Say.resolve lang

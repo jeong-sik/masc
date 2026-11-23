@@ -1666,7 +1666,9 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
   let lang = model.lang in
   let inf = model.infra in
   let vis_logs = Infra_store.visible_logs inf in
-  let events_n = List.length inf.activity_events in
+  let vis_events = Infra_store.visible_activity_events inf in
+  let vis_timeline = Infra_store.visible_timeline inf in
+  let events_n = List.length vis_events in
   let logs_n = List.length vis_logs in
   let bar_rect, body_rect =
     match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
@@ -1683,6 +1685,22 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
     Option.equal (fun a b -> Int.equal (log_level_rank a) (log_level_rank b))
       inf.log_level_filter lvl
   in
+  let src_is_all =
+    match inf.source_filter with
+    | Infra_store.Source_all -> true
+    | Infra_store.Source_logs | Infra_store.Source_events -> false
+  in
+  let src_is_logs =
+    match inf.source_filter with
+    | Infra_store.Source_logs -> true
+    | Infra_store.Source_all | Infra_store.Source_events -> false
+  in
+  let src_is_events =
+    match inf.source_filter with
+    | Infra_store.Source_events -> true
+    | Infra_store.Source_all | Infra_store.Source_logs -> false
+  in
+  let narrow_bar = bar_rect.w < 115 in
   let pills =
     [
       {
@@ -1690,41 +1708,64 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
           Printf.sprintf "%s (%d)"
             (Say.resolve lang (Say.make ~ko:"전체" ~en:"All"))
             (events_n + logs_n);
-        active = Option.is_none inf.log_level_filter;
+        active = src_is_all;
         tone = Some Theme.Status_active;
         glyph = Some Glyph.Live_healthy;
       };
       {
-        H.label = Printf.sprintf "Events (%d)" events_n;
-        active = false;
-        tone = None;
-        glyph = None;
-      };
-      {
-        H.label = Printf.sprintf "Logs (%d)" logs_n;
-        active = false;
-        tone = None;
-        glyph = None;
-      };
-      {
-        H.label = "ERR";
-        active = level_active (Some Wire_infra.Log_error);
-        tone = Some Theme.Status_critical;
-        glyph = None;
-      };
-      {
-        H.label = "WRN";
-        active = level_active (Some Wire_infra.Log_warn);
-        tone = Some Theme.Status_attention;
-        glyph = None;
-      };
-      {
-        H.label = "INF";
-        active = level_active (Some Wire_infra.Log_info);
+        H.label =
+          Printf.sprintf "%s (%d)"
+            (Say.resolve lang
+               (if narrow_bar then Say.make ~ko:"로그" ~en:"Logs"
+                else Say.make ~ko:"서버 로그" ~en:"Server Logs"))
+            logs_n;
+        active = src_is_logs;
         tone = Some Theme.Status_ok;
         glyph = None;
       };
+      {
+        H.label =
+          Printf.sprintf "%s (%d)"
+            (Say.resolve lang
+               (if narrow_bar then Say.make ~ko:"이벤트" ~en:"Events"
+                else Say.make ~ko:"MASC 이벤트" ~en:"MASC Events"))
+            events_n;
+        active = src_is_events;
+        tone = Some Theme.Status_ai;
+        glyph = None;
+      };
     ]
+    @ (if inf.stream_gap_count > 0 then
+         [
+           {
+             H.label =
+               Printf.sprintf "Stream_gap: %d dropped" inf.stream_gap_count;
+             active = true;
+             tone = Some Theme.Status_attention;
+             glyph = Some Glyph.Warning_triangle;
+           };
+         ]
+       else [])
+    @ [
+        {
+          H.label = "ERR";
+          active = level_active (Some Wire_infra.Log_error);
+          tone = Some Theme.Status_critical;
+          glyph = None;
+        };
+        {
+          H.label = "WRN";
+          active = level_active (Some Wire_infra.Log_warn);
+          tone = Some Theme.Status_attention;
+          glyph = None;
+        };
+        {
+          H.label = "INF";
+          active = level_active (Some Wire_infra.Log_info);
+          tone = Some Theme.Status_ok;
+          glyph = None;
+        };
+      ]
     @ (match inf.log_keeper_filter with
        | Some kp ->
            [
@@ -1736,29 +1777,24 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
              };
            ]
        | None -> [])
-    @ (if String.equal (String.trim inf.filter_query) "" then []
-       else
-         [
-           {
-             H.label = "/" ^ inf.filter_query;
-             active = true;
-             tone = Some Theme.Status_active;
-             glyph = None;
-           };
-         ])
     @
-    if inf.stream_gap_count > 0 then
+    if String.equal (String.trim inf.filter_query) "" then []
+    else
       [
         {
-          H.label = Printf.sprintf "Stream_gap: %d dropped" inf.stream_gap_count;
+          H.label = "/" ^ inf.filter_query;
           active = true;
-          tone = Some Theme.Status_attention;
-          glyph = Some Glyph.Warning_triangle;
+          tone = Some Theme.Status_active;
+          glyph = None;
         };
       ]
-    else []
   in
-  ignore (H.draw_pills ~grid ~rect:bar_rect ~theme pills);
+  let bar_right_hint =
+    if bar_rect.w >= 120 then Some "logs/stream + observer SSE · [s]"
+    else if bar_rect.w >= 96 && inf.stream_gap_count = 0 then Some "[s] source"
+    else None
+  in
+  ignore (H.draw_pills ~grid ~rect:bar_rect ~theme ?right_hint:bar_right_hint pills);
   let left_rect, right_rect =
     Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.62
       ~top_ratio:0.56 bp body_rect
@@ -1768,30 +1804,22 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
       (H.card_spec ~focused:(Model.pane_focused model 0)
          ~hotkey:
            (Say.resolve lang
-              (Say.make ~ko:"[Space] 레벨 · [/] 필터" ~en:"[Space] Level · [/] Filter"))
+              (Say.make ~ko:"[s] 소스 · [Space] 레벨 · [/] 필터"
+                 ~en:"[s] Source · [Space] Level · [/] Filter"))
          (Say.resolve lang
             (Say.make ~ko:"실시간 활동 · 시스템 로그" ~en:"Activity & System Logs")))
   in
   if not (Rect.is_empty stream_inner) then begin
-    let ev_rows =
-      if inf.activity_events <> [] && stream_inner.h >= 8 then
-        Int.min 3 (1 + List.length inf.activity_events)
-      else 0
-    in
-    let log_h = Int.max 0 (stream_inner.h - ev_rows) in
-    let log_rect =
-      Rect.make ~x:stream_inner.x ~y:stream_inner.y ~w:stream_inner.w ~h:log_h
-    in
-    if vis_logs = [] then
-      H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp log_rect) ~theme
-        (if inf.logs_loaded then
+    if vis_timeline = [] then
+      H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp stream_inner) ~theme
+        (if inf.logs_loaded || inf.activity_events <> [] then
            Say.resolve lang
-             (Say.make ~ko:"필터에 일치하는 로그가 없습니다"
-                ~en:"No logs match active filters")
+             (Say.make ~ko:"필터에 일치하는 항목이 없습니다"
+                ~en:"No entries match active filters")
          else
            Say.resolve lang
-             (Say.make ~ko:"로그 스트림 연결 대기 중…"
-                ~en:"Waiting for log stream…"))
+             (Say.make ~ko:"로그·이벤트 스트림 연결 대기 중…"
+                ~en:"Waiting for log & event streams…"))
     else begin
       let columns : Table.column list =
         [
@@ -1805,8 +1833,17 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
             align = Table.Left;
           };
           {
+            id = "src";
+            header = Say.make ~ko:"출처" ~en:"SRC";
+            priority = 1;
+            min_width = 4;
+            max_width = Some 5;
+            weight = 1;
+            align = Table.Left;
+          };
+          {
             id = "lvl";
-            header = Say.make ~ko:"레벨" ~en:"Lvl";
+            header = Say.make ~ko:"종류" ~en:"Lvl";
             priority = 1;
             min_width = 4;
             max_width = Some 5;
@@ -1826,8 +1863,8 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
             id = "keeper";
             header = Say.make ~ko:"키퍼" ~en:"Keeper";
             priority = 1;
-            min_width = 16;
-            max_width = Some 24;
+            min_width = 14;
+            max_width = Some 22;
             weight = 2;
             align = Table.Left;
           };
@@ -1843,106 +1880,127 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
         ]
       in
       let rows =
-        List.map
-          (fun (e : Wire_infra.system_log_entry) ->
-            let lvl_txt, lvl_tone = log_level_badge e.level in
-            let keeper_txt =
-              match e.keeper with
-              | Some k when not (String.equal (String.trim k) "") -> k
-              | Some _ | None -> Glyph.to_utf8 Glyph.Missing_absent
-            in
-            let comp_txt =
-              if not (String.equal (String.trim e.module_name) "") then
-                e.module_name
-              else e.source
-            in
-            {
-              Table.id = string_of_int e.seq;
-              cells =
-                [
-                  (* Tier-4 Italic timestamps *)
-                  ( "time"
-                  , Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
-                      ~attrs:Attr.italic
-                      (H.format_local_hhmmss ~tz_offset_sec:model.tz_offset_sec
-                         e.ts) );
-                  ("lvl", Table.Badge { glyph = None; text = lvl_txt; tone = lvl_tone });
-                  ( "comp"
-                  , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
-                      comp_txt );
-                  ( "keeper"
-                  , Table.text_cell ~fg:(Color.of_rgb theme.accent) keeper_txt );
-                  ("summary", Table.text_cell (H.sanitize_single_line e.message));
-                ];
-            })
-          vis_logs
+        List.mapi
+          (fun idx entry ->
+            match entry with
+            | Infra_store.Entry_log e ->
+                let lvl_txt, lvl_tone = log_level_badge e.level in
+                let keeper_txt =
+                  match e.keeper with
+                  | Some k when not (String.equal (String.trim k) "") -> k
+                  | Some _ | None -> Glyph.to_utf8 Glyph.Missing_absent
+                in
+                let comp_txt =
+                  if not (String.equal (String.trim e.module_name) "") then
+                    e.module_name
+                  else e.source
+                in
+                {
+                  Table.id = Printf.sprintf "log:%d" e.seq;
+                  cells =
+                    [
+                      ( "time"
+                      , Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
+                          ~attrs:Attr.italic
+                          (H.format_local_hhmmss
+                             ~tz_offset_sec:model.tz_offset_sec e.ts) );
+                      ( "src"
+                      , Table.Badge
+                          {
+                            glyph = None;
+                            text = "LOG";
+                            tone = Theme.Status_historical;
+                          } );
+                      ( "lvl"
+                      , Table.Badge
+                          { glyph = None; text = lvl_txt; tone = lvl_tone } );
+                      ( "comp"
+                      , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
+                          comp_txt );
+                      ( "keeper"
+                      , Table.text_cell ~fg:(Color.of_rgb theme.accent)
+                          keeper_txt );
+                      ( "summary"
+                      , Table.text_cell (H.sanitize_single_line e.message) );
+                    ];
+                }
+            | Infra_store.Entry_event ev ->
+                let kind_lbl = activity_kind_label ev.kind in
+                let kind_tone =
+                  match ev.kind with
+                  | Infra_store.Activity_stream_gap -> Theme.Status_attention
+                  | Infra_store.Activity_tool_call
+                  | Infra_store.Activity_turn_complete
+                  | Infra_store.Activity_agent_core ->
+                      Theme.Status_active
+                in
+                let keeper_txt =
+                  match ev.keeper with
+                  | Some k when not (String.equal (String.trim k) "") -> k
+                  | Some _ | None -> Glyph.to_utf8 Glyph.Missing_absent
+                in
+                let ts_str =
+                  if Float.is_finite ev.at_unix && ev.at_unix > 0.0 then
+                    H.format_local_hhmmss ~tz_offset_sec:model.tz_offset_sec
+                      (Wire_common.format_unix_rfc3339 ev.at_unix)
+                  else Glyph.to_utf8 Glyph.Missing_absent
+                in
+                {
+                  Table.id = Printf.sprintf "evt:%d" idx;
+                  cells =
+                    [
+                      ( "time"
+                      , Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
+                          ~attrs:Attr.italic ts_str );
+                      ( "src"
+                      , Table.Badge
+                          { glyph = None; text = "EVT"; tone = Theme.Status_ai } );
+                      ( "lvl"
+                      , Table.Badge
+                          { glyph = None; text = kind_lbl; tone = kind_tone } );
+                      ( "comp"
+                      , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
+                          "observer" );
+                      ( "keeper"
+                      , Table.text_cell ~fg:(Color.of_rgb theme.accent)
+                          keeper_txt );
+                      ( "summary"
+                      , Table.text_cell (H.sanitize_single_line ev.summary) );
+                    ];
+                })
+          vis_timeline
       in
+      let sel = H.clamp_index (List.length vis_timeline) inf.selected_index in
       ignore
-        (Table.draw grid ~rect:log_rect ~theme ~caps:H.default_caps ~lang
+        (Table.draw grid ~rect:stream_inner ~theme ~caps:H.default_caps ~lang
            ~col_gap:(Layout.table_col_gap bp) ~scroll:inf.scroll_offset
-           ~selected:inf.selected_index ~columns rows)
-    end;
-    if ev_rows > 0 then begin
-      let pad_x = Layout.card_pad_x bp in
-      let ev_rect =
-        Rect.make ~x:stream_inner.x ~y:(stream_inner.y + log_h)
-          ~w:stream_inner.w ~h:ev_rows
-      in
-      let ey = ref ev_rect.y and ebot = Rect.bottom ev_rect in
-      H.draw_divider ~grid ~rect:ev_rect ~y:!ey ~theme ~pad_x
-        ~label:
-          (Printf.sprintf "%s (%d)"
-             (Say.resolve lang (Say.make ~ko:"실시간 이벤트" ~en:"Live Events"))
-             events_n)
-        ();
-      incr ey;
-      List.iter
-        (fun (ev : Infra_store.activity_row) ->
-          if !ey < ebot then begin
-            let kp =
-              match ev.keeper with Some k -> "@" ^ k ^ " " | None -> ""
-            in
-            let tone =
-              match ev.kind with
-              | Infra_store.Activity_stream_gap -> Theme.Status_attention
-              | Infra_store.Activity_tool_call
-              | Infra_store.Activity_turn_complete
-              | Infra_store.Activity_agent_core ->
-                  Theme.Status_active
-            in
-            let line =
-              Printf.sprintf "[%s] %s%s" (activity_kind_label ev.kind) kp
-                ev.summary
-            in
-            ignore
-              (H.put_clipped ~grid ~clip:ev_rect ~x:(ev_rect.x + pad_x) ~y:!ey
-                 ~max_w:(Int.max 0 (ev_rect.w - (2 * pad_x)))
-                 ~style:(H.status_style ~theme tone) line);
-            incr ey
-          end)
-        (H.safe_take (ev_rows - 1) inf.activity_events)
+           ~selected:sel ~columns rows)
     end
   end;
-  (* Right: Structured K/V Detail Card *)
-  let sel_log = Infra_store.selected_log inf in
+  (* Right: Structured K/V Detail Card for both Server Logs and MASC Events *)
+  let sel_entry = Infra_store.selected_timeline_entry inf in
   let det_subtitle =
-    Option.map (fun (e : Wire_infra.system_log_entry) -> "#" ^ string_of_int e.seq)
-      sel_log
+    match sel_entry with
+    | Some (Infra_store.Entry_log e) -> Some ("LOG #" ^ string_of_int e.seq)
+    | Some (Infra_store.Entry_event ev) ->
+        Some ("EVT · " ^ activity_kind_label ev.kind)
+    | None -> None
   in
   let det_inner =
     Card.draw ~cache grid ~rect:right_rect ~theme
       (H.card_spec ?subtitle:det_subtitle ~focused:(Model.pane_focused model 1)
+         ~hotkey:(Say.resolve lang (Say.make ~ko:"[y] 복사" ~en:"[y] Copy"))
          (Say.resolve lang
             (Say.make ~ko:"구조화 K/V 상세" ~en:"Structured K/V Detail")))
   in
   if not (Rect.is_empty det_inner) then begin
-    match sel_log with
+    match sel_entry with
     | None ->
         H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp det_inner) ~theme
           (Say.resolve lang
-             (Say.make ~ko:"로그 항목을 선택하면 구조화 속성이 표시됩니다"
-                ~en:"Select a log entry to inspect structured fields"))
-    | Some e ->
+             (Say.make ~ko:"로그·이벤트 항목을 선택하면 상세 속성이 표시됩니다"
+                ~en:"Select a log or event entry to inspect structured fields"))
+    | Some (Infra_store.Entry_log e) ->
         let pad_x = Layout.card_pad_x bp in
         let lvl_txt, lvl_tone = log_level_badge e.level in
         let local_ts =
@@ -1963,7 +2021,7 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
         Card.draw_section_band ~pad_x grid
           ~rect:(Rect.make ~x:det_inner.x ~y:det_inner.y ~w:det_inner.w ~h:band_h)
           ~theme
-          ~left_title:(Printf.sprintf "[%s] %s/%s" lvl_txt e.source e.module_name)
+          ~left_title:(Printf.sprintf "[LOG/%s] %s/%s" lvl_txt e.source e.module_name)
           ~right_meta:local_ts
           ?subtitle:(if band_h >= 2 then Some (kp ^ turn ^ cat) else None)
           ();
@@ -2012,6 +2070,100 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
               (Json_tree.draw grid ~rect:tree_rect ~theme
                  ~scroll:inf.detail_scroll_offset lines)
           end
+        end
+    | Some (Infra_store.Entry_event ev) ->
+        let pad_x = Layout.card_pad_x bp in
+        let kind_lbl = activity_kind_label ev.kind in
+        let kind_tone =
+          match ev.kind with
+          | Infra_store.Activity_stream_gap -> Theme.Status_attention
+          | Infra_store.Activity_tool_call
+          | Infra_store.Activity_turn_complete
+          | Infra_store.Activity_agent_core ->
+              Theme.Status_ai
+        in
+        let local_ts =
+          if Float.is_finite ev.at_unix && ev.at_unix > 0.0 then
+            H.format_local_datetime ~tz_offset_sec:model.tz_offset_sec
+              (Wire_common.format_unix_rfc3339 ev.at_unix)
+          else Glyph.to_utf8 Glyph.Missing_absent
+        in
+        let kp =
+          match ev.keeper with
+          | Some k -> "@" ^ k
+          | None -> Glyph.to_utf8 Glyph.Missing_absent
+        in
+        let band_h = if det_inner.h >= 6 then 2 else 1 in
+        Card.draw_section_band ~pad_x grid
+          ~rect:(Rect.make ~x:det_inner.x ~y:det_inner.y ~w:det_inner.w ~h:band_h)
+          ~theme
+          ~left_title:(Printf.sprintf "[EVT/%s] observer SSE" kind_lbl)
+          ~right_meta:local_ts
+          ?subtitle:(if band_h >= 2 then Some (kp ^ " · /mcp?sse_kind=observer") else None)
+          ();
+        let content =
+          Rect.make ~x:det_inner.x ~y:(det_inner.y + band_h) ~w:det_inner.w
+            ~h:(Int.max 0 (det_inner.h - band_h))
+          |> H.pad_content ~bp
+        in
+        if not (Rect.is_empty content) then begin
+          let sum_lines =
+            Chat_transcript.wrap_plain_lines ~width:(Int.max 1 (content.w - 2))
+              ev.summary
+          in
+          let detail_lines =
+            match ev.detail with
+            | Some d when not (String.equal (String.trim d) "") ->
+                Chat_transcript.wrap_plain_lines
+                  ~width:(Int.max 1 (content.w - 2))
+                  d
+            | Some _ | None -> []
+          in
+          let all_rows =
+            List.map (fun l -> `Summary l) sum_lines
+            @ [
+                `Kv (Say.resolve lang (Say.make ~ko:"소스" ~en:"Origin"), "MASC Observer SSE");
+                `Kv (Say.resolve lang (Say.make ~ko:"키퍼" ~en:"Keeper"), kp);
+                `Divider (Say.resolve lang (Say.make ~ko:"이벤트 상세" ~en:"Event Detail"));
+              ]
+            @ List.map (fun l -> `Detail l) detail_lines
+          in
+          let vis_h = Int.max 1 content.h in
+          let max_skip = Int.max 0 (List.length all_rows - vis_h) in
+          let skip = Int.min max_skip (Int.max 0 inf.detail_scroll_offset) in
+          let y = ref content.y and bot = Rect.bottom content in
+          List.iter
+            (function
+              | `Summary line ->
+                  if !y < bot then begin
+                    Card.draw_left_rail ~tone:kind_tone grid ~x:content.x ~y:!y
+                      ~h:1 ~theme;
+                    ignore
+                      (H.put_clipped ~grid ~clip:content ~x:(content.x + 2)
+                         ~y:!y ~max_w:(Int.max 0 (content.w - 2))
+                         ~style:(H.text_style ~theme ()) line);
+                    incr y
+                  end
+              | `Kv (k, v) ->
+                  if !y < bot then begin
+                    H.put_kv ~grid ~clip:content ~x:content.x ~y:!y
+                      ~max_w:content.w ~theme ~key_w:9 ~key:k v;
+                    incr y
+                  end
+              | `Divider lbl ->
+                  if !y < bot then begin
+                    H.draw_divider ~grid ~rect:content ~y:!y ~theme ~label:lbl ();
+                    incr y
+                  end
+              | `Detail line ->
+                  if !y < bot then begin
+                    ignore
+                      (H.put_clipped ~grid ~clip:content ~x:(content.x + 2)
+                         ~y:!y ~max_w:(Int.max 0 (content.w - 2))
+                         ~style:(H.secondary_style ~theme ()) line);
+                    incr y
+                  end)
+            (Store_scroll.drop skip all_rows)
         end
   end
 

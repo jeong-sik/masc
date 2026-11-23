@@ -28,6 +28,8 @@ module Time_window : sig
     | Last_24h
     | Last_7d
     | Last_14d
+    | Last_30d
+    | Rev_span of { from_rev : int; to_rev : int }
 
   val label : t -> string
   val ticks : t -> string * string * string

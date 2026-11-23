@@ -48,8 +48,22 @@ type freshness_state = {
   view_stream : Health.source_freshness option;
   last_observer_cursor : int option;
   last_wall_unix : float;
+  last_mono : Clock.Mono.t;
   server_offline : bool;
 }
+
+type view_ssot_mode =
+  | Live_sse of {
+      stream_name : string;
+      freshness : Health.source_freshness;
+      live_count : int;
+      planned_count : int;
+    }
+  | Synced_snapshot of {
+      observer : Health.source_freshness;
+      observed_at : Clock.Mono.t option;
+    }
+  | Snapshot_only of { observed_at : Clock.Mono.t option }
 
 type mismatch_state =
   | Mismatch_none
@@ -268,3 +282,7 @@ val pulse_hero_metrics : t -> pulse_hero_metrics
 val sync_effective_scorecard : now:Clock.Mono.t -> t -> t
 (** Project {!effective_scorecard} back onto [fleet.shell.scorecard_24h] when
     shell is loaded so legacy and v2.5 Pulse views read consistent metrics. *)
+
+val active_view_ssot_mode : t -> view_ssot_mode
+(** Honest per-view SSOT telemetry provenance derived purely from [(m.nav,
+    m.freshness)] and the active surface's primary {!Observed.t} timestamp. *)

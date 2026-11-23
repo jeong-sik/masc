@@ -515,14 +515,6 @@ let decode_keeper_turns json =
   in
   decode_list "keepers" decode_keeper_turn_row rows
 
-let decode_float_list json key =
-  let* items = optional_list_field json key in
-  decode_list key
-    (function
-      | `Float f when Float.is_finite f -> Ok f
-      | `Int i -> Ok (Float.of_int i)
-      | bad -> field_type_error key "a finite number" bad)
-    items
 
 let decode_turn_slot slot =
   let* starts_at = required_int_field slot "starts_at" in
@@ -535,7 +527,12 @@ let decode_turn_slot slot =
   let* chat = count "chat" in
   let* own = count "own" in
   let* unknown = count "unknown" in
-  Ok { starts_at; ok; rested; failed; scheduled; reacted; chat; own; unknown }
+  if starts_at mod turn_slot_seconds <> 0 then
+    Error (Printf.sprintf "recent_turns slot %d is not on a half-hour boundary" starts_at)
+  else if scheduled + reacted + chat + own + unknown <> ok + rested + failed then
+    Error
+      (Printf.sprintf "recent_turns slot %d: causes do not add up to its outcomes" starts_at)
+  else Ok { starts_at; ok; rested; failed; scheduled; reacted; chat; own; unknown }
 
 let decode_turn_pulse json =
   match optional_object_field json "recent_turns" with
@@ -548,7 +545,15 @@ let decode_turn_pulse json =
       let oldest_first =
         List.sort (fun (a : turn_slot) b -> Int.compare a.starts_at b.starts_at) slots
       in
-      Ok (Some { known_since; slots = oldest_first })
+      let rec repeated = function
+        | (a : turn_slot) :: (b :: _ as rest) ->
+            if a.starts_at = b.starts_at then Some a.starts_at else repeated rest
+        | [ _ ] | [] -> None
+      in
+      (match repeated oldest_first with
+       | Some starts_at ->
+           Error (Printf.sprintf "recent_turns holds slot %d twice" starts_at)
+       | None -> Ok (Some { known_since; slots = oldest_first }))
 
 (* Turns that ran ([ok] and [failed], as the server's fleet total counts them)
    per slot from the oldest stored slot to the newest. The server stores only
@@ -667,13 +672,8 @@ let decode_keeper_summary ~observed_at json =
         let* t = decode_active_turn obj in
         Ok (Some t)
   in
-  let* explicit_sparkline = decode_float_list json "activity_sparkline_24h" in
-  let* activity_sparkline_24h =
-    if explicit_sparkline <> [] then Ok explicit_sparkline
-    else
-      let* pulse = decode_turn_pulse json in
-      Ok (Option.fold ~none:[] ~some:sparkline_of_pulse pulse)
-  in
+  let* pulse = decode_turn_pulse json in
+  let activity_sparkline_24h = Option.fold ~none:[] ~some:sparkline_of_pulse pulse in
   let company =
     match classify_company_single ~group name with
     | Some c -> c
@@ -822,7 +822,7 @@ let decode_keepers_roster_extras json =
           (match extract_candle_balance_opt item with
           | Some b -> balances := (name, b) :: !balances
           | None -> ());
-          (* A malformed pulse already fails the roster decode
+          (* A malformed pulse fails the roster decode
              ([decode_keeper_summary]), so it never reaches here. *)
           (match decode_turn_pulse item with
           | Ok (Some pulse) -> pulses := (name, pulse) :: !pulses

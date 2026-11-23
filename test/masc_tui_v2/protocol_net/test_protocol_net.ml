@@ -2221,9 +2221,9 @@ let test_v25_data_pipeline_decoders () =
             "recent_turns": {
               "known_since": 1795166000,
               "slots": [
-                { "starts_at": 1795253600, "ok": 3, "rested": 0, "failed": 1,
+                { "starts_at": 1795251600, "ok": 3, "rested": 0, "failed": 1,
                   "scheduled": 2, "reacted": 1, "chat": 1, "own": 0, "unknown": 0 },
-                { "starts_at": 1795250000, "ok": 1, "rested": 0, "failed": 0,
+                { "starts_at": 1795248000, "ok": 1, "rested": 0, "failed": 0,
                   "scheduled": 0, "reacted": 0, "chat": 0, "own": 1, "unknown": 0 }
               ]
             }

@@ -7743,7 +7743,30 @@ let test_infra_changes_follow_the_selected_repository () =
       inf3
   in
   Alcotest.(check (list string)) "the moved-to repository's answer is listed"
-    [ "README.md" ] (paths inf4)
+    [ "README.md" ] (paths inf4);
+  (* Typing into the Repos filter can move the cursor too. *)
+  let m0 = Model.initial () in
+  let on_repos =
+    { m0 with nav = { m0.nav with workspace = Nav.Infra }; infra = inf1 }
+  in
+  let activity_gets cmds =
+    List.filter_map
+      (function
+        | Cmd.Http_get { req = Cmd.Get_repository_activity { repo_id }; _ } ->
+            Some repo_id
+        | _ -> None)
+      cmds
+  in
+  let m_docs, cmds_docs = Update_nav.set_active_filter_query "docs" on_repos in
+  Alcotest.(check (list string))
+    "a filter that moves the cursor asks for that repository's activity"
+    [ "docs" ] (activity_gets cmds_docs);
+  Alcotest.(check bool) "the changes panel waits for docs" true
+    (is_waiting m_docs.infra);
+  let _, cmds_doc = Update_nav.set_active_filter_query "doc" m_docs in
+  Alcotest.(check (list string))
+    "a filter edit that keeps the cursor asks for nothing" []
+    (activity_gets cmds_doc)
 
 let () =
   Alcotest.run "masc_tui_store"

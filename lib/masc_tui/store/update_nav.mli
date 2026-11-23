@@ -125,7 +125,9 @@ val enter_hint : Model.t -> enter_hint
     footer offers Enter only where the key acts and names what it does. *)
 
 val current_filter_query : Model.t -> string
-val set_active_filter_query : string -> Model.t -> Model.t
+val set_active_filter_query : string -> Model.t -> Model.t * Cmd.t list
+(** Set the filter of what is on screen. When the filter moves the Repos
+    cursor to another repository, the commands ask for its activity. *)
 
 val palette_filtered_commands : Model.t -> Keymap.palette_command list
 val palette_filtered_keepers : Model.t -> Wire_fleet.keeper_summary list

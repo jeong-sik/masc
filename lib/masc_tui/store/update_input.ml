@@ -2019,9 +2019,9 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
         if m.nav.filter_focused then
           match norm.key with
           | Keymap.Input.Escape ->
-              let cleared = Update_nav.set_active_filter_query "" m in
+              let cleared, cmds = Update_nav.set_active_filter_query "" m in
               ( { cleared with nav = { cleared.nav with filter_focused = false } }
-              , [] )
+              , cmds )
           | Keymap.Input.Enter | Keymap.Input.Tab ->
               ({ m with nav = { m.nav with filter_focused = false } }, [])
           | Keymap.Input.Up when (not norm.mods.ctrl) && not norm.mods.alt ->
@@ -2036,10 +2036,10 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
               let q =
                 Update_nav.drop_last_utf8 (Update_nav.current_filter_query m)
               in
-              (Update_nav.set_active_filter_query q m, [])
+              Update_nav.set_active_filter_query q m
           | Keymap.Input.Char s when is_printable_key norm ->
               let q = Update_nav.current_filter_query m ^ s in
-              (Update_nav.set_active_filter_query q m, [])
+              Update_nav.set_active_filter_query q m
           | Keymap.Input.Char _
           | Keymap.Input.Delete
           | Keymap.Input.Insert
@@ -2574,7 +2574,7 @@ let apply_paste ~now:_ (m : Model.t) text =
         , [] )
     | Some (Nav.Settings _ | Nav.Incidents) when m.nav.filter_focused ->
         let q = Update_nav.current_filter_query m ^ strip_newlines text in
-        (Update_nav.set_active_filter_query q m, [])
+        Update_nav.set_active_filter_query q m
     | Some
         ( Nav.Settings _
         | Nav.Incidents
@@ -2585,7 +2585,7 @@ let apply_paste ~now:_ (m : Model.t) text =
     | None ->
         if m.nav.filter_focused then
           let q = Update_nav.current_filter_query m ^ strip_newlines text in
-          (Update_nav.set_active_filter_query q m, [])
+          Update_nav.set_active_filter_query q m
         else if
           Model.is_keeper_config_active m && Config_store.is_editing_field m.config
         then

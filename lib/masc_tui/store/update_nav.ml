@@ -863,6 +863,35 @@ let current_filter_query (m : Model.t) =
         | Nav.Runtime -> m.runtime.filter_query
         | Nav.Infra -> m.infra.filter_query
 
+(* The changes panel answers for one repository. When a step leaves the
+   Repos cursor on a repository the slot does not answer for (a cursor move,
+   a filter edit), point the slot at it and ask for its activity. *)
+let follow_selected_repository (m : Model.t) =
+  let shown =
+    Nav.equal_workspace m.nav.workspace Nav.Infra
+    && Option.is_none (Model.active_dive m)
+    && Nav.equal_infra_tab m.infra.active_tab Nav.Infra_repos_changes
+  in
+  let slot_answers_for repo_id =
+    match m.infra.repo_activity with
+    | Some slot -> String.equal slot.repo_id repo_id
+    | None -> false
+  in
+  match Infra_store.selected_repository m.infra with
+  | Some repo when shown && not (slot_answers_for repo.id) ->
+      ( {
+          m with
+          infra = Infra_store.request_repo_activity ~repo_id:repo.id m.infra;
+        },
+        [
+          Cmd.Http_get
+            {
+              epoch = m.epoch;
+              req = Cmd.Get_repository_activity { repo_id = repo.id };
+            };
+        ] )
+  | Some _ | None -> (m, [])
+
 let set_active_filter_query q (m : Model.t) =
   let updated =
     match m.nav.overlay with
@@ -895,9 +924,10 @@ let set_active_filter_query q (m : Model.t) =
           | Nav.Infra -> { m with infra = Infra_store.set_filter q m.infra }
   in
   let max_pane = max 0 (Model.focusable_pane_count updated - 1) in
-  if updated.nav.pane_index > max_pane then
-    { updated with nav = { updated.nav with pane_index = max_pane } }
-  else updated
+  follow_selected_repository
+    (if updated.nav.pane_index > max_pane then
+       { updated with nav = { updated.nav with pane_index = max_pane } }
+     else updated)
 
 let palette_filtered_commands (m : Model.t) =
   let q = String.trim m.palette.query in
@@ -5519,7 +5549,6 @@ let apply_move (m : Model.t) dir =
                       }
                     , [] )
                 | Nav.Infra ->
-                    let prev_repo = Infra_store.selected_repository m.infra in
                     let eff_delta =
                       if pane_index = 1 then scroll_delta dir else delta
                     in
@@ -5527,41 +5556,10 @@ let apply_move (m : Model.t) dir =
                       if pane_index = 1 then Some (infra_detail_max_scroll m)
                       else None
                     in
-                    let infra0 =
-                      Infra_store.move_selection ~pane_index ~viewport_rows
-                        ?max_detail_scroll ~delta:eff_delta m.infra
-                    in
-                    let infra, cmds =
-                      if
-                        Nav.equal_infra_tab infra0.active_tab
-                          Nav.Infra_repos_changes
-                        && pane_index = 0
-                      then
-                        match
-                          (prev_repo, Infra_store.selected_repository infra0)
-                        with
-                        | prev, Some cur
-                          when not
-                                 (Option.equal
-                                    (fun (a : Wire_infra.repository) b ->
-                                      String.equal a.id b.id)
-                                    prev (Some cur)) ->
-                            ( Infra_store.request_repo_activity ~repo_id:cur.id
-                                infra0
-                            , [
-                                Cmd.Http_get
-                                  {
-                                    epoch = m.epoch;
-                                    req =
-                                      Cmd.Get_repository_activity
-                                        { repo_id = cur.id };
-                                  };
-                              ] )
-                        | Some _, Some _
-                        | None, Some _
-                        | Some _, None
-                        | None, None ->
-                            (infra0, [])
-                      else (infra0, [])
-                    in
-                    ({ m with infra }, cmds))))
+                    follow_selected_repository
+                      {
+                        m with
+                        infra =
+                          Infra_store.move_selection ~pane_index ~viewport_rows
+                            ?max_detail_scroll ~delta:eff_delta m.infra;
+                      })))

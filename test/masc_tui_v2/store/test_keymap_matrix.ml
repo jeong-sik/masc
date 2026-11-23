@@ -2927,7 +2927,7 @@ let test_journeys_tab_multipane_dives_safety () =
         work = Work_store.set_tab Nav.Work_inbox base.work;
       }
     in
-    Update_nav.set_active_filter_query "zzz-no-match" m0
+    fst (Update_nav.set_active_filter_query "zzz-no-match" m0)
   in
   Alcotest.(check int) "R8 Work_inbox filtered-empty => focusable_pane_count = 1" 1
     (Model.focusable_pane_count m_inb_empty);

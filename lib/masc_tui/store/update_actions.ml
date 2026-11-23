@@ -583,7 +583,7 @@ let rec execute_slash ~now (m : Model.t) cmd =
       let drafts = Drafts.clear_current_draft m.drafts in
       let fleet = Fleet_store.reset_chat_scroll m.fleet in
       let base = { m with drafts; fleet } in
-      let cleared, msg =
+      let (cleared, cmds), msg =
         if
           draft_was_empty
           && not (String.equal (Update_nav.current_filter_query base) "")
@@ -592,10 +592,10 @@ let rec execute_slash ~now (m : Model.t) cmd =
           , Say.make ~ko:"현재 초안 및 화면 필터가 초기화되었습니다"
               ~en:"Cleared draft and active filter" )
         else
-          ( base
+          ( (base, [])
           , Say.make ~ko:"현재 초안이 비워졌습니다" ~en:"Cleared current draft" )
       in
-      (Model.with_toast ~now ~level:Model.Toast_info msg cleared, [])
+      (Model.with_toast ~now ~level:Model.Toast_info msg cleared, cmds)
   | Slash.Theme opt ->
       let preset =
         match opt with Some p -> p | None -> next_theme_preset m.theme_preset
@@ -1275,8 +1275,9 @@ and execute_action ~now (m : Model.t) action =
           (closed, cmds)
       | None ->
           if m.nav.filter_focused then
-            let cleared = Update_nav.set_active_filter_query "" m in
-            ({ cleared with nav = { cleared.nav with filter_focused = false } }, [])
+            let cleared, cmds = Update_nav.set_active_filter_query "" m in
+            ( { cleared with nav = { cleared.nav with filter_focused = false } },
+              cmds )
           else if Drafts.is_focused m.drafts then
             match Update_nav.resolve_composer_popup m with
             | Update_nav.Composer_popup_slash _
@@ -1452,7 +1453,7 @@ and execute_action ~now (m : Model.t) action =
                         ({ m with nav = { m.nav with pane_index = 0 } }, [])
                       else if
                         not (String.equal (Update_nav.current_filter_query m) "")
-                      then (Update_nav.set_active_filter_query "" m, [])
+                      then Update_nav.set_active_filter_query "" m
                       else if
                         Nav.equal_workspace m.nav.workspace Nav.Work
                         && Nav.equal_work_tab m.work.active_tab

@@ -1,6 +1,6 @@
-(** Non-blocking Voice PTT recording, STT transcription, and TTS probe/playback
-    command runner executing on {!Io_domain} and short systhreads (never
-    occupying the CPU {!Worker_pool}).
+(** Non-blocking Voice PTT recording and STT transcription command runner
+    executing on {!Io_domain} and short systhreads (never occupying the CPU
+    {!Worker_pool}).
 
     Dispatching any command returns immediately without blocking the UI domain.
     All external audio/process work is injected through {!backend} so tests can
@@ -11,28 +11,24 @@ open Masc_tui_core
 
 val voice_config_path : string
 val voice_transcribe_path : string
-val voice_probe_tts_path : string
 val voice_probe_stt_path : string
 
 type phase =
   | Voice_idle
   | Voice_recording of { started_ns : Clock.Mono.t; level_db : float option }
   | Voice_transcribing
-  | Voice_speaking
   | Voice_failed of string
 
 type command =
   | Start_ptt of { device : string option }
   | Stop_ptt
   | Cancel_ptt
-  | Speak of { text : string; voice_id : string option }
   | Probe_capabilities
 
 type capabilities = {
   recorder_available : bool;
   recorder_cmd : string option;
   stt_available : bool;
-  tts_available : bool;
 }
 
 type recorder_kind =
@@ -55,47 +51,15 @@ val build_record_argv :
 (** Build deterministic 16 kHz mono WAV recording argv for [rec], [sox], or
     [ffmpeg] (macOS [avfoundation] input [:default] or explicit device). *)
 
-type audio_player =
-  | Player_afplay
-  | Player_paplay
-  | Player_aplay
-  | Player_ffplay
-
-val audio_player_name : audio_player -> string
-
-val resolve_audio_player_from :
-  find:(string -> string option) -> (audio_player * string) option
-(** Resolve an available local TTS audio player in order
-    [afplay -> paplay -> aplay -> ffplay]. *)
-
-val build_player_argv :
-  player:audio_player -> bin_path:string -> audio_path:string -> string array
-(** Build non-interactive playback argv for a resolved local audio player. *)
-
-type tts_probe_outcome =
-  | Tts_audio_file of string
-  | Tts_probe_answered_no_audio of { endpoint_id : string; detail : string }
-  | Tts_probe_failed of string
-
-val decode_tts_probe_outcome : Yojson.Safe.t -> (tts_probe_outcome, string) result
-(** Decode [POST /api/v1/voice/probe/tts] JSON strictly: distinguishes a
-    playable [audio_path]/[file], a probe [endpoints] answer that returned no
-    audio artifact, and refused/skipped/empty probe results (never silently
-    reporting success on refusal). *)
-
 val decode_voice_config :
   recorder_cmd:string option -> Yojson.Safe.t -> (capabilities, string) result
-(** Decode [GET /api/v1/voice/config] ([tts.active_endpoint.enabled] and
-    [stt.active_endpoint.enabled]) into {!capabilities}. *)
-
-val encode_tts_probe_request : text:string -> Yojson.Safe.t
-(** Encode [POST /api/v1/voice/probe/tts] body ([{ "message": text }]). *)
+(** Decode [GET /api/v1/voice/config] ([stt.active_endpoint.enabled]) into
+    {!capabilities}. *)
 
 type event =
   | Phase_changed of phase
   | Level_meter of float
   | Transcript_ready of string
-  | Speak_done
   | Capabilities of capabilities
   | Voice_error of string
 
@@ -107,7 +71,6 @@ type backend = {
     on_level:(float -> unit) ->
     (string, string) result;
   transcribe : audio_path:string -> (string, string) result;
-  speak : text:string -> voice_id:string option -> (unit, string) result;
   cleanup_audio : audio_path:string -> unit;
 }
 

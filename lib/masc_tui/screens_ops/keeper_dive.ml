@@ -1034,8 +1034,6 @@ let draw_keeper_status_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
           Printf.sprintf "%sREC %.1fs" sep elapsed_s
       | Drafts.Voice_transcribing ->
           sep ^ Ops_common.say model ~ko:"음성 변환 중" ~en:"Transcribing"
-      | Drafts.Voice_speaking ->
-          sep ^ Ops_common.say model ~ko:"음성 출력" ~en:"Speaking"
       | Drafts.Voice_error e ->
           sep ^ "Voice " ^ Glyph.to_utf8 Glyph.Live_failing ^ " " ^ e
       | Drafts.Voice_off -> ""
@@ -1048,7 +1046,6 @@ let draw_keeper_status_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
       | Drafts.Voice_recording _
       | Drafts.Voice_off
       | Drafts.Voice_transcribing
-      | Drafts.Voice_speaking
       | Drafts.Voice_error _ ->
           None
     in

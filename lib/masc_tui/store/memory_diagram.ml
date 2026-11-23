@@ -188,7 +188,7 @@ let model_bp_of_layout = function
 
 let voice_state_of_drafts (drafts : Drafts.t) =
   match drafts.voice with
-  | Drafts.Voice_off | Drafts.Voice_speaking | Drafts.Voice_error _ ->
+  | Drafts.Voice_off | Drafts.Voice_error _ ->
       Composer.Voice_off
   | Drafts.Voice_recording { levels; elapsed_s; _ } ->
       Composer.Voice_recording { levels = Array.of_list levels; elapsed_s }

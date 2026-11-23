@@ -1097,43 +1097,6 @@ let open_setup_login_modal (m : Model.t) ?(integration_default = "") () =
       };
     ]
 
-let latest_reply_for_tts (m : Model.t) =
-  let keeper_opt =
-    match Model.active_dive m with
-    | Some (Nav.Dive_keeper { name; _ }) -> Some name
-    | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _) | None ->
-        Update_nav.resolve_target_keeper m
-  in
-  match keeper_opt with
-  | None -> None
-  | Some keeper -> (
-      match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with
-      | Some s when s.active && not (String.equal (String.trim s.text) "") ->
-          Some (keeper, s.text)
-      | Some _ | None -> (
-          match
-            Fleet_store.String_map.find_opt keeper m.fleet.chat_histories
-          with
-          | None -> None
-          | Some obs -> (
-              match Observed.to_option obs with
-              | None -> None
-              | Some page ->
-                  List.find_map
-                    (fun (msg : Wire_fleet.chat_message) ->
-                      match msg.role with
-                      | Wire_fleet.Role_assistant
-                        when not (String.equal (String.trim msg.content) "") ->
-                          Some (keeper, msg.content)
-                      | Wire_fleet.Role_assistant
-                      | Wire_fleet.Role_user
-                      | Wire_fleet.Role_peer _
-                      | Wire_fleet.Role_system
-                      | Wire_fleet.Role_tool
-                      | Wire_fleet.Role_request_failure ->
-                          None)
-                    (List.rev page.messages))))
-
 let key_char_opt = function
   | Keymap.Input.Char s -> Some s
   | Keymap.Input.Enter
@@ -1364,21 +1327,6 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
             (Nav.Settings Nav.Settings_keepers_companies)
       | Nav.Keeper_chat, Some "X" ->
           dismiss_keeper_chat_errors ~now ~keeper:name m
-      | Nav.Keeper_chat, Some "S" -> (
-          match latest_reply_for_tts m with
-          | Some (keeper, text) ->
-              ( Model.with_toast ~now ~level:Model.Toast_info
-                  (Say.make
-                     ~ko:("음성 읽기 시작: " ^ keeper)
-                     ~en:("Speaking latest reply from " ^ keeper))
-                  m
-              , [ Cmd.Voice_cmd (Cmd.Speak { text; voice_id = None }) ] )
-          | None ->
-              ( Model.with_toast ~now ~level:Model.Toast_info
-                  (Say.make ~ko:"읽을 최근 키퍼 응답이 없습니다"
-                     ~en:"No recent keeper reply to speak")
-                  m
-              , [] ))
       | ( ( Nav.Keeper_chat
           | Nav.Keeper_memory
           | Nav.Keeper_work_candle
@@ -1561,21 +1509,6 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
               match Fleet_store.selected_keeper_summary m.fleet with
               | Some k -> dismiss_keeper_chat_errors ~now ~keeper:k.name m
               | None -> (m, []))
-          | _, _, Some "S" -> (
-              match latest_reply_for_tts m with
-              | Some (keeper, text) ->
-                  ( Model.with_toast ~now ~level:Model.Toast_info
-                      (Say.make
-                         ~ko:("음성 읽기 시작: " ^ keeper)
-                         ~en:("Speaking latest reply from " ^ keeper))
-                      m
-                  , [ Cmd.Voice_cmd (Cmd.Speak { text; voice_id = None }) ] )
-              | None ->
-                  ( Model.with_toast ~now ~level:Model.Toast_info
-                      (Say.make ~ko:"읽을 최근 키퍼 응답이 없습니다"
-                         ~en:"No recent keeper reply to speak")
-                      m
-                  , [] ))
           | ( (Some _ | None)
             , ( Nav.Keeper_chat
               | Nav.Keeper_memory

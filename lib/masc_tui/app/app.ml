@@ -1120,7 +1120,6 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                   | Drafts.Voice_recording _ -> true
                   | Drafts.Voice_off
                   | Drafts.Voice_transcribing
-                  | Drafts.Voice_speaking
                   | Drafts.Voice_error _ ->
                       last_voice_tick_ns := 0L;
                       false

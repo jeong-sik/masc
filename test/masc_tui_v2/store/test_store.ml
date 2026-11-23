@@ -3774,7 +3774,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     | Some (Nav.Dive_infra (Nav.Lane_dive "lane-default")) -> true
     | _ -> false);
 
-  (* 5. Keepers: active turn interrupt (Esc & Ctrl+X), Speak ([S]), Copy ([y]), [c] quick chat, Server_offline [s], /model *)
+  (* 5. Keepers: active turn interrupt (Esc & Ctrl+X), Copy ([y]), [c] quick chat, Server_offline [s], /model *)
   let chat_page : Wire_fleet.chat_history_page =
     {
       messages =
@@ -3782,7 +3782,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
           {
             id = "m1";
             role = Wire_fleet.Role_assistant;
-            content = "Latest assistant answer for clipboard and TTS";
+            content = "Latest assistant answer for clipboard";
             ts_unix = 100.0;
             turn_ref = None;
             model_used = None;
@@ -3857,20 +3857,10 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
   Alcotest.(check bool) "Keeper_chat [y] copies latest assistant reply" true
     (has_cmd
        (function
-         | Cmd.Copy_clipboard "Latest assistant answer for clipboard and TTS" ->
+         | Cmd.Copy_clipboard "Latest assistant answer for clipboard" ->
              true
          | _ -> false)
        cmds_copy);
-  let _, cmds_speak = step m_kchat (char_key "S") in
-  Alcotest.(check bool) "Keeper_chat [S] emits Voice_cmd Speak" true
-    (has_cmd
-       (function
-         | Cmd.Voice_cmd
-             (Cmd.Speak
-                { text = "Latest assistant answer for clipboard and TTS"; _ }) ->
-             true
-         | _ -> false)
-       cmds_speak);
   (* P2-7a: Finished (active=false) chat_streams MUST NOT shadow newer chat_histories *)
   let m_kchat_stale_stream =
     let fleet =
@@ -3888,20 +3878,10 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
   Alcotest.(check bool) "finished stream does NOT shadow newer history on [y]" true
     (has_cmd
        (function
-         | Cmd.Copy_clipboard "Latest assistant answer for clipboard and TTS" ->
+         | Cmd.Copy_clipboard "Latest assistant answer for clipboard" ->
              true
          | _ -> false)
        cmds_copy_fresh);
-  let _, cmds_speak_fresh = step m_kchat_stale_stream (char_key "S") in
-  Alcotest.(check bool) "finished stream does NOT shadow newer history on [S]" true
-    (has_cmd
-       (function
-         | Cmd.Voice_cmd
-             (Cmd.Speak
-                { text = "Latest assistant answer for clipboard and TTS"; _ }) ->
-             true
-         | _ -> false)
-       cmds_speak_fresh);
   (* P2-7b: Media_viewer [y] copies selected artifact SHA256 *)
   let art1 : Wire_knowledge.artifact_entry =
     {

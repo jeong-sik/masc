@@ -206,7 +206,6 @@ let dynamic_voice_backend ~io ~clock ~endpoint_ref : Voice_runner.backend =
       (fun ~device ~stop_signal ~on_level ->
         (current ()).record_until_stopped ~device ~stop_signal ~on_level);
     transcribe = (fun ~audio_path -> (current ()).transcribe ~audio_path);
-    speak = (fun ~text ~voice_id -> (current ()).speak ~text ~voice_id);
     cleanup_audio =
       (fun ~audio_path -> (current ()).cleanup_audio ~audio_path);
   }
@@ -217,19 +216,16 @@ let msg_of_voice_event = function
       Msg.Voice_started
   | Voice_runner.Phase_changed Voice_runner.Voice_transcribing ->
       Msg.Voice_transcribing
-  | Voice_runner.Phase_changed Voice_runner.Voice_speaking -> Msg.Voice_speaking
   | Voice_runner.Phase_changed (Voice_runner.Voice_failed reason) ->
       Msg.Voice_failed reason
   | Voice_runner.Level_meter db -> Msg.Voice_level db
   | Voice_runner.Transcript_ready text -> Msg.Voice_transcript text
-  | Voice_runner.Speak_done -> Msg.Voice_idle
   | Voice_runner.Capabilities c ->
       Msg.Voice_capabilities
         {
           recorder_available = c.recorder_available;
           recorder_cmd = c.recorder_cmd;
           stt_available = c.stt_available;
-          tts_available = c.tts_available;
         }
   | Voice_runner.Voice_error reason -> Msg.Voice_failed reason
 
@@ -1432,7 +1428,6 @@ let voice_cmd_of_store = function
   | Cmd.Start_ptt { device } -> Voice_runner.Start_ptt { device }
   | Cmd.Stop_ptt -> Voice_runner.Stop_ptt
   | Cmd.Cancel_ptt -> Voice_runner.Cancel_ptt
-  | Cmd.Speak { text; voice_id } -> Voice_runner.Speak { text; voice_id }
   | Cmd.Probe_capabilities -> Voice_runner.Probe_capabilities
 
 let rec wait_reap_pid pid =

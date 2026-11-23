@@ -197,7 +197,6 @@ type voice_event =
   | Voice_started
   | Voice_level of float
   | Voice_transcribing
-  | Voice_speaking
   | Voice_idle
   | Voice_transcript of string
   | Voice_capabilities of Drafts.voice_capabilities

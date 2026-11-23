@@ -709,7 +709,6 @@ let test_cmd_executor_dispatch_and_cancellation () =
       recorder_available = true;
       recorder_cmd = Some "rec";
       stt_available = true;
-      tts_available = false;
     }
   in
   let fake_voice : Voice_runner.backend =
@@ -720,7 +719,6 @@ let test_cmd_executor_dispatch_and_cancellation () =
           Eio.Promise.await stop_signal;
           Error "stopped");
       transcribe = (fun ~audio_path:_ -> Ok "hello");
-      speak = (fun ~text:_ ~voice_id:_ -> Ok ());
       cleanup_audio = (fun ~audio_path:_ -> ());
     }
   in
@@ -784,7 +782,6 @@ let test_cmd_executor_dispatch_and_cancellation () =
                      | Msg.Voice_started
                      | Msg.Voice_level _
                      | Msg.Voice_transcribing
-                     | Msg.Voice_speaking
                      | Msg.Voice_idle
                      | Msg.Voice_transcript _
                      | Msg.Voice_failed _ )
@@ -876,14 +873,12 @@ let test_remote_editor_escape_hatch_blocked () =
                   recorder_available = false;
                   recorder_cmd = None;
                   stt_available = false;
-                  tts_available = false;
                 });
           record_until_stopped =
             (fun ~device:_ ~stop_signal ~on_level:_ ->
               Eio.Promise.await stop_signal;
               Error "stopped");
           transcribe = (fun ~audio_path:_ -> Error "unused");
-          speak = (fun ~text:_ ~voice_id:_ -> Error "unused");
           cleanup_audio = (fun ~audio_path:_ -> ());
         }
       in
@@ -1477,7 +1472,7 @@ let test_exit_line_fd_and_local_tz_offset () =
     (tz >= -43200 && tz <= 50400);
   Alcotest.(check int) "tz_offset_sec is whole minutes" 0 (tz mod 60)
 
-let test_p2_voice_runner_ffmpeg_and_afplay () =
+let test_p2_voice_runner_ffmpeg_and_mouse_capture () =
   (* 1. Recorder resolution order: rec -> sox -> ffmpeg *)
   let find_only target name =
     if String.equal name target then Some ("/usr/local/bin/" ^ name) else None
@@ -1523,59 +1518,7 @@ let test_p2_voice_runner_ffmpeg_and_afplay () =
   in
   Alcotest.(check string) "ffmpeg honors explicit device" ":1" argv_dev.(7);
 
-  (* 3. Audio player resolution for speak: closed sum afplay -> paplay -> aplay -> ffplay *)
-  (match
-     Voice_runner.resolve_audio_player_from
-       ~find:(fun n ->
-         if String.equal n "afplay" then Some "/usr/bin/afplay" else None)
-   with
-  | Some (Voice_runner.Player_afplay, "/usr/bin/afplay") -> ()
-  | _ -> Alcotest.fail "expected Player_afplay");
-  (match
-     Voice_runner.resolve_audio_player_from
-       ~find:(fun n ->
-         if String.equal n "paplay" then Some "/usr/bin/paplay" else None)
-   with
-  | Some (Voice_runner.Player_paplay, "/usr/bin/paplay") -> ()
-  | _ -> Alcotest.fail "expected Player_paplay");
-  (match Voice_runner.resolve_audio_player_from ~find:(fun _ -> None) with
-  | None -> ()
-  | Some _ -> Alcotest.fail "expected None when no player present");
-  Alcotest.(check (array string)) "afplay argv"
-    [| "/usr/bin/afplay"; "/tmp/reply.mp3" |]
-    (Voice_runner.build_player_argv ~player:Voice_runner.Player_afplay
-       ~bin_path:"/usr/bin/afplay" ~audio_path:"/tmp/reply.mp3");
-  Alcotest.(check (array string)) "ffplay argv"
-    [| "/usr/bin/ffplay"; "-nodisp"; "-autoexit"; "-loglevel"; "quiet"; "/tmp/reply.mp3" |]
-    (Voice_runner.build_player_argv ~player:Voice_runner.Player_ffplay
-       ~bin_path:"/usr/bin/ffplay" ~audio_path:"/tmp/reply.mp3");
-
-  (* 4. Honest /api/v1/voice/probe/tts outcome decoding (never fakes Ok () on refusal or no-audio probe) *)
-  let probe_answered_json =
-    Yojson.Safe.from_string
-      {|{"endpoints":[{"endpoint_id":"elevenlabs-1","kind":"elevenlabs","state":"answered","detail":"200 OK (4120 bytes)"}]}|}
-  in
-  (match Voice_runner.decode_tts_probe_outcome probe_answered_json with
-  | Ok (Voice_runner.Tts_probe_answered_no_audio { endpoint_id = "elevenlabs-1"; _ }) ->
-      ()
-  | _ -> Alcotest.fail "expected Tts_probe_answered_no_audio");
-  let probe_refused_json =
-    Yojson.Safe.from_string
-      {|{"endpoints":[{"endpoint_id":"elevenlabs-1","kind":"elevenlabs","state":"refused","detail":"missing api key"}]}|}
-  in
-  (match Voice_runner.decode_tts_probe_outcome probe_refused_json with
-  | Ok (Voice_runner.Tts_probe_failed msg) ->
-      Alcotest.(check bool) "refused reason preserved" true
-        (String.length msg > 0)
-  | _ -> Alcotest.fail "expected Tts_probe_failed on refused probe");
-  let probe_file_json =
-    Yojson.Safe.from_string {|{"audio_path":"/tmp/synth.wav"}|}
-  in
-  (match Voice_runner.decode_tts_probe_outcome probe_file_json with
-  | Ok (Voice_runner.Tts_audio_file "/tmp/synth.wav") -> ()
-  | _ -> Alcotest.fail "expected Tts_audio_file");
-
-  (* 5. P1-13 / P2-7d: Mouse capture OFF by default, no ?1002h hijack, guarded [m] toggle *)
+  (* 3. P1-13 / P2-7d: Mouse capture OFF by default, no ?1002h hijack, guarded [m] toggle *)
   Alcotest.(check bool) "mouse capture defaults OFF for native drag-select" false
     App.default_mouse_capture;
   Alcotest.(check string) "mouse ON enables ?1000h?1006h without ?1002h"
@@ -1792,7 +1735,7 @@ let () =
             `Quick test_app_ctrl_c_and_voice_tick_gate;
           Alcotest.test_case "caller stderr exit line & local tz offset" `Quick
             test_exit_line_fd_and_local_tz_offset;
-          Alcotest.test_case "P2-1 Voice_runner ffmpeg avfoundation argv & afplay lookup"
-            `Quick test_p2_voice_runner_ffmpeg_and_afplay;
+          Alcotest.test_case "P2-1 Voice_runner ffmpeg avfoundation argv & mouse capture toggle"
+            `Quick test_p2_voice_runner_ffmpeg_and_mouse_capture;
         ] );
     ]

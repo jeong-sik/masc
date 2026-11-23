@@ -184,7 +184,6 @@ type voice_cmd =
   | Start_ptt of { device : string option }
   | Stop_ptt
   | Cancel_ptt
-  | Speak of { text : string; voice_id : string option }
   | Probe_capabilities
 
 type editor_target =

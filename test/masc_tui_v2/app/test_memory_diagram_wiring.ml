@@ -120,10 +120,17 @@ let sample_keeper name : Wire_fleet.keeper_summary =
     runtime_id = "claude-sonnet";
     model_id = Some "claude-sonnet";
     current_task_id = None;
-    context_ratio = obs 0.25;
+    context =
+      obs
+        (Wire_fleet.Context_measured
+           {
+             ratio = Some 0.25;
+             tokens = 50_000;
+             window = Some 200_000;
+             absolute_turn = None;
+             measured_at_unix = None;
+           });
     total_turns = obs 10;
-    total_tokens = obs 1000;
-    cost_24h_usd = obs 0.5;
     last_turn_at_unix = Some 1_700_000_300.0;
     active_turn = None;
     activity_sparkline_24h = [];

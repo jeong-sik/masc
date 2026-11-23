@@ -7792,6 +7792,8 @@ let sent_get req cmds =
       | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
+      | Cmd.Render_memory_diagram _
+      | Cmd.Cancel_memory_diagram
       | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _
       | Cmd.Start_local_server

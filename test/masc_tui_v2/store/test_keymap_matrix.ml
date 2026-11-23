@@ -1561,7 +1561,7 @@ let test_axis_b_overlay_isolation_matrix () =
       ("Ctrl+A", char_key ~ctrl:true "a");
     ]
   in
-  Alcotest.(check int) "Axis B states" 33 (List.length states);
+  Alcotest.(check int) "Axis B states" 32 (List.length states);
   Alcotest.(check int) "Axis B isolation keys" 14 (List.length iso_keys);
   List.iter
     (fun (sname, (m : Model.t)) ->
@@ -5242,7 +5242,7 @@ let () =
         ] );
       ( "axis_b_overlay_focus_x_isolation"
       , [
-          Alcotest.test_case "33 states x 14 isolation keys (462 cases)" `Quick
+          Alcotest.test_case "32 states x 14 isolation keys (448 cases)" `Quick
             test_axis_b_overlay_isolation_matrix;
         ] );
       ( "dynamic_rendered_hints"

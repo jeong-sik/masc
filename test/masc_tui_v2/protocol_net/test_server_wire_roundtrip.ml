@@ -978,9 +978,6 @@ let () =
             test_published_artifact_roundtrip;
           Alcotest.test_case "wiki page links -> decode_wiki_page_detail"
             `Quick test_wiki_page_links_roundtrip;
-        ] );
-      ( "knowledge",
-        [
           Alcotest.test_case "wiki PUT answer -> decode_wiki_put_result" `Quick
             test_wiki_put_roundtrip;
         ] );

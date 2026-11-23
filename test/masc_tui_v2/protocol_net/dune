@@ -52,6 +52,7 @@
   masc.masc_schedule
   masc.masc_tool_blob_store
   masc.masc_tool_surface
+  masc.masc_types
   masc.server
   masc_tui_core
   masc_tui_protocol

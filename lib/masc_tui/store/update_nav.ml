@@ -2229,19 +2229,27 @@ let submit_inline_modal ~now (m : Model.t) =
                       req = Cmd.Post_harness_overrule { target_id; reason };
                     };
                 ] )
-          | Form_standard (Nav.Task_cancel task_id) ->
+          | Form_standard (Nav.Task_cancel task_id) -> (
               let reason_raw = Model.modal_field_value ~key:"reason" modal in
               let reason =
                 if String.equal reason_raw "" then None else Some reason_raw
               in
-              ( mark_submitting m
-              , [
-                  Cmd.Http_post
-                    {
-                      epoch = m.epoch;
-                      req = Cmd.Post_task_cancel { task_id; reason };
-                    };
-                ] )
+              match expected_workspace_of m with
+              | None ->
+                  set_modal_error
+                    "Server workspace identity must be loaded before \
+                     cancelling a task"
+              | Some expected_workspace ->
+                  ( mark_submitting m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_task_cancel
+                              { task_id; reason; expected_workspace };
+                        };
+                    ] ))
           | Form_standard Nav.Schedule_form ->
               let keeper = Model.modal_field_value ~key:"keeper" modal in
               let recurrence = Model.modal_field_value ~key:"recurrence" modal in

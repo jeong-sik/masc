@@ -100,6 +100,7 @@ type post_request =
       goal_id : string;
       action : Wire_work.goal_action;
       note : string option;
+      expected_workspace : Wire_work.expected_workspace;
     }
   | Post_goal_confirmation of Wire_work.goal_confirmation_request
   | Post_verification_verdict of {
@@ -157,7 +158,11 @@ type post_request =
     }
   | Post_connector_create of { connector : string; channel : string }
   | Post_repo_add of { url : string; branch : string option }
-  | Post_task_cancel of { task_id : string; reason : string option }
+  | Post_task_cancel of {
+      task_id : string;
+      reason : string option;
+      expected_workspace : Wire_work.expected_workspace;
+    }
   | Post_harness_overrule of { target_id : string; reason : string }
 
 type put_request =
@@ -336,8 +341,9 @@ let post_request_body = function
         ~decision ?expected_workspace ()
   | Post_gate_resolution { id; approved; reason } ->
       Wire_work.encode_gate_resolution ~id ~approved ~reason
-  | Post_goal_transition { goal_id; action; note } ->
+  | Post_goal_transition { goal_id; action; note; expected_workspace } ->
       Wire_work.encode_goal_transition ~goal_id ~action ~note
+        ~expected_workspace
   | Post_goal_confirmation req -> Wire_work.encode_goal_confirmation req
   | Post_verification_verdict { task_id; verification_id; verdict; notes } ->
       Wire_work.encode_verification_verdict ~task_id ~verification_id ~verdict
@@ -396,15 +402,8 @@ let post_request_body = function
         | Some _ | None -> base
       in
       `Assoc fields
-  | Post_task_cancel { task_id; reason } ->
-      let base = [ ("task_id", `String task_id) ] in
-      let fields =
-        match reason with
-        | Some r when not (String.equal (String.trim r) "") ->
-            base @ [ ("reason", `String (String.trim r)) ]
-        | Some _ | None -> base
-      in
-      `Assoc fields
+  | Post_task_cancel { task_id; reason; expected_workspace } ->
+      Wire_work.encode_task_cancel ~task_id ~reason ~expected_workspace
   | Post_harness_overrule { target_id; reason } ->
       `Assoc [ ("target_id", `String target_id); ("reason", `String reason) ]
 

@@ -150,6 +150,11 @@ val resolve_steer : keeper:string -> Model.t -> steer_resolution
 (** What a steer submission may cut on [keeper]: only the operation of a
     request this TUI submitted and still streams. *)
 
+
+val expected_workspace_of : Model.t -> Wire_work.expected_workspace option
+(** The workspace [/health] reported, as a write's [expected_workspace]
+    precondition; [None] until a full health read named it. *)
+
 val build_chat_submit_cmd :
   Model.t ->
   Drafts.pending_message ->

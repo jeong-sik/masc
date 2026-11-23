@@ -1524,7 +1524,14 @@ let test_verifier_regressions () =
   Alcotest.(check string) "Post_task_cancel path"
     "/api/v1/dashboard/tasks/cancel"
     (Cmd.post_request_path
-       (Cmd.Post_task_cancel { task_id = "t1"; reason = None }));
+       (Cmd.Post_task_cancel
+          {
+            task_id = "t1";
+            reason = None;
+            expected_workspace =
+              ({ base_path = "/repo"; masc_root = "/repo/.masc" }
+                : Wire_work.expected_workspace);
+          }));
   let m_goal, _ =
     Update.step ~now:t0 m0
       (Msg.Http_reply
@@ -3213,6 +3220,51 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
              true
          | _ -> false)
        cmds_tc);
+  (* What goes on the wire: the cancel and Goal routes refuse a body that does
+     not name the workspace [/health] reported. *)
+  let posted_bodies cmds =
+    List.filter_map
+      (function
+        | Cmd.Http_post { req; _ } -> Some (Cmd.post_request_body req)
+        | Cmd.Batch _ | Cmd.Http_get _ | Cmd.Http_put _
+        | Cmd.Http_post_stream _ | Cmd.Sync_streams _
+        | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
+        | Cmd.Copy_clipboard _ | Cmd.Open_external_url _
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Start_local_server
+        | Cmd.Restart_tui | Cmd.Quit _ ->
+            None)
+      (Cmd.flatten cmds)
+  in
+  let posted_field key cmds =
+    List.map
+      (fun body -> Yojson.Safe.to_string (Yojson.Safe.Util.member key body))
+      (posted_bodies cmds)
+  in
+  let health_workspace_json =
+    Yojson.Safe.to_string
+      (`Assoc
+         [
+           ("base_path", `String ws_id.base_path);
+           ("masc_root", `String ws_id.masc_root);
+         ])
+  in
+  Alcotest.(check (list string))
+    "Task_cancel body names the workspace /health reported"
+    [ health_workspace_json ]
+    (posted_field "expected_workspace" cmds_tc);
+  let without_workspace (m : Model.t) =
+    { m with server_identity = { m.server_identity with workspace = None } }
+  in
+  let m_tc_unknown, cmds_tc_unknown =
+    step (without_workspace m_tc) (key Keymap.Input.Enter)
+  in
+  Alcotest.(check int) "Task_cancel posts nothing before /health names the workspace"
+    0
+    (List.length (posted_bodies cmds_tc_unknown));
+  Alcotest.(check bool) "Task_cancel keeps its modal open with an error" true
+    (match m_tc_unknown.inline_modal with
+    | Some md -> Option.is_some md.error
+    | None -> false);
 
   (* Goal_dive: Awaiting_confirmation [a] NEVER fabricates proof — opens explicit server-proof modal *)
   let m_gdive_conf =
@@ -3310,6 +3362,14 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
              true
          | _ -> false)
        cmds_greq);
+  Alcotest.(check (list string))
+    "Goal transition body names the workspace /health reported"
+    [ health_workspace_json ]
+    (posted_field "expected_workspace" cmds_greq);
+  let _, cmds_greq_unknown = step (without_workspace m_gdive_exec) (char_key "a") in
+  Alcotest.(check int)
+    "Goal transition posts nothing before /health names the workspace" 0
+    (List.length (posted_bodies cmds_greq_unknown));
   let _, cmds_gpause = step m_gdive_exec (char_key "x") in
   Alcotest.(check bool) "Goal_dive Executing [x] emits Pause" true
     (has_cmd

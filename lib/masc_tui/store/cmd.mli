@@ -106,6 +106,7 @@ type post_request =
       goal_id : string;
       action : Wire_work.goal_action;
       note : string option;
+      expected_workspace : Wire_work.expected_workspace;
     }
   | Post_goal_confirmation of Wire_work.goal_confirmation_request
   | Post_verification_verdict of {
@@ -163,7 +164,11 @@ type post_request =
     }
   | Post_connector_create of { connector : string; channel : string }
   | Post_repo_add of { url : string; branch : string option }
-  | Post_task_cancel of { task_id : string; reason : string option }
+  | Post_task_cancel of {
+      task_id : string;
+      reason : string option;
+      expected_workspace : Wire_work.expected_workspace;
+    }
   | Post_harness_overrule of { target_id : string; reason : string }
 
 type put_request =

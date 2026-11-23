@@ -736,6 +736,31 @@ let open_goal_confirmation_proof_modal (m : Model.t) ~(goal_id : string)
       };
     ]
 
+(* The route refuses a Goal transition that does not name the workspace the
+   operator saw. Until [/health] has named it there is nothing true to name,
+   so the key posts nothing and says why. *)
+let request_goal_transition ~now (m : Model.t) ~level ~toast
+    (g : Wire_work.goal) action =
+  match Update_nav.expected_workspace_of m with
+  | Some expected_workspace ->
+      ( Model.with_toast ~now ~level toast m
+      , [
+          Cmd.Http_post
+            {
+              epoch = m.epoch;
+              req =
+                Cmd.Post_goal_transition
+                  { goal_id = g.id; action; note = None; expected_workspace };
+            };
+        ] )
+  | None ->
+      ( Model.with_toast ~now ~level:Model.Toast_warning
+          (Say.make
+             ~ko:"목표 상태를 바꾸려면 서버 워크스페이스 정보가 필요합니다"
+             ~en:"Goal transitions need the server workspace identity")
+          m
+      , [] )
+
 let goal_action_on_approve ~now (m : Model.t) (g : Wire_work.goal) =
   match g.phase with
   | Wire_work.Awaiting_confirmation -> (
@@ -766,24 +791,12 @@ let goal_action_on_approve ~now (m : Model.t) (g : Wire_work.goal) =
               m
           , [] ))
   | Wire_work.Executing ->
-      ( Model.with_toast ~now ~level:Model.Toast_info
+      request_goal_transition ~now m ~level:Model.Toast_info
+        ~toast:
           (Say.make
              ~ko:("목표 완료 검증 요청: " ^ g.title)
              ~en:("Requesting goal completion verification: " ^ g.title))
-          m
-      , [
-          Cmd.Http_post
-            {
-              epoch = m.epoch;
-              req =
-                Cmd.Post_goal_transition
-                  {
-                    goal_id = g.id;
-                    action = Wire_work.Request_complete;
-                    note = None;
-                  };
-            };
-        ] )
+        g Wire_work.Request_complete
   | Wire_work.Verifying ->
       ( Model.with_toast ~now ~level:Model.Toast_info
           (Say.make ~ko:"목표가 현재 검증 진행 중입니다"
@@ -791,76 +804,36 @@ let goal_action_on_approve ~now (m : Model.t) (g : Wire_work.goal) =
           m
       , [] )
   | Wire_work.Paused _ ->
-      ( Model.with_toast ~now ~level:Model.Toast_info
+      request_goal_transition ~now m ~level:Model.Toast_info
+        ~toast:
           (Say.make ~ko:("목표 재개 요청: " ^ g.title) ~en:("Resuming goal: " ^ g.title))
-          m
-      , [
-          Cmd.Http_post
-            {
-              epoch = m.epoch;
-              req =
-                Cmd.Post_goal_transition
-                  { goal_id = g.id; action = Wire_work.Resume; note = None };
-            };
-        ] )
+        g Wire_work.Resume
   | Wire_work.Blocked _ ->
-      ( Model.with_toast ~now ~level:Model.Toast_info
+      request_goal_transition ~now m ~level:Model.Toast_info
+        ~toast:
           (Say.make ~ko:("목표 차단 해제: " ^ g.title) ~en:("Unblocking goal: " ^ g.title))
-          m
-      , [
-          Cmd.Http_post
-            {
-              epoch = m.epoch;
-              req =
-                Cmd.Post_goal_transition
-                  { goal_id = g.id; action = Wire_work.Unblock; note = None };
-            };
-        ] )
+        g Wire_work.Unblock
   | Wire_work.Completed | Wire_work.Dropped ->
-      ( Model.with_toast ~now ~level:Model.Toast_info
+      request_goal_transition ~now m ~level:Model.Toast_info
+        ~toast:
           (Say.make ~ko:("목표 재개(Reopen): " ^ g.title) ~en:("Reopening goal: " ^ g.title))
-          m
-      , [
-          Cmd.Http_post
-            {
-              epoch = m.epoch;
-              req =
-                Cmd.Post_goal_transition
-                  { goal_id = g.id; action = Wire_work.Reopen; note = None };
-            };
-        ] )
+        g Wire_work.Reopen
 
 let goal_action_on_stop ~now (m : Model.t) (g : Wire_work.goal) =
   match g.phase with
   | Wire_work.Paused _ ->
-      ( Model.with_toast ~now ~level:Model.Toast_warning
+      request_goal_transition ~now m ~level:Model.Toast_warning
+        ~toast:
           (Say.make ~ko:("목표 폐기(Drop) 요청: " ^ g.title) ~en:("Dropping goal: " ^ g.title))
-          m
-      , [
-          Cmd.Http_post
-            {
-              epoch = m.epoch;
-              req =
-                Cmd.Post_goal_transition
-                  { goal_id = g.id; action = Wire_work.Drop; note = None };
-            };
-        ] )
+        g Wire_work.Drop
   | Wire_work.Executing
   | Wire_work.Verifying
   | Wire_work.Awaiting_confirmation
   | Wire_work.Blocked _ ->
-      ( Model.with_toast ~now ~level:Model.Toast_info
+      request_goal_transition ~now m ~level:Model.Toast_info
+        ~toast:
           (Say.make ~ko:("목표 일시정지 요청: " ^ g.title) ~en:("Pausing goal: " ^ g.title))
-          m
-      , [
-          Cmd.Http_post
-            {
-              epoch = m.epoch;
-              req =
-                Cmd.Post_goal_transition
-                  { goal_id = g.id; action = Wire_work.Pause; note = None };
-            };
-        ] )
+        g Wire_work.Pause
   | Wire_work.Completed | Wire_work.Dropped ->
       ( Model.with_toast ~now ~level:Model.Toast_info
           (Say.make ~ko:"이미 종료된 목표입니다 ([a] 재개)"
@@ -1243,24 +1216,12 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
       match printable_char, goal_opt with
       | Some "a", Some g -> goal_action_on_approve ~now m g
       | Some "c", Some g ->
-          ( Model.with_toast ~now ~level:Model.Toast_info
+          request_goal_transition ~now m ~level:Model.Toast_info
+            ~toast:
               (Say.make
                  ~ko:("목표 완료 검증 요청: " ^ g.title)
                  ~en:("Requesting goal completion: " ^ g.title))
-              m
-          , [
-              Cmd.Http_post
-                {
-                  epoch = m.epoch;
-                  req =
-                    Cmd.Post_goal_transition
-                      {
-                        goal_id = g.id;
-                        action = Wire_work.Request_complete;
-                        note = None;
-                      };
-                };
-            ] )
+            g Wire_work.Request_complete
       | Some "x", Some g -> goal_action_on_stop ~now m g
       | _ -> (m, []))
   | Some (Nav.Dive_work (Nav.Task_dive task_id)) -> (
@@ -1745,24 +1706,12 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                   match printable_char with
                   | Some "a" -> goal_action_on_approve ~now m g
                   | Some "c" ->
-                      ( Model.with_toast ~now ~level:Model.Toast_info
+                      request_goal_transition ~now m ~level:Model.Toast_info
+                        ~toast:
                           (Say.make
                              ~ko:("목표 완료 검증 요청: " ^ g.title)
                              ~en:("Requesting goal completion: " ^ g.title))
-                          m
-                      , [
-                          Cmd.Http_post
-                            {
-                              epoch = m.epoch;
-                              req =
-                                Cmd.Post_goal_transition
-                                  {
-                                    goal_id = g.id;
-                                    action = Wire_work.Request_complete;
-                                    note = None;
-                                  };
-                            };
-                        ] )
+                        g Wire_work.Request_complete
                   | Some "x" -> goal_action_on_stop ~now m g
                   | _ -> (m, []))
               | `Verification v -> (

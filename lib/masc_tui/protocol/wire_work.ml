@@ -296,19 +296,22 @@ let encode_expected_workspace (ws : expected_workspace) =
   `Assoc
     [ ("base_path", `String ws.base_path); ("masc_root", `String ws.masc_root) ]
 
-let encode_goal_transition ~goal_id ~action ~note =
-  let base =
-    [
-      ("goal_id", `String goal_id);
-      ("action", `String (goal_action_to_string action));
-    ]
-  in
-  let fields =
+(* The route refuses a transition that does not name the workspace the
+   operator read the Goal from ([validate_goal_workspace] in
+   server_routes_http_routes_activity.ml), so the field is not optional. *)
+let encode_goal_transition ~goal_id ~action ~note ~expected_workspace =
+  let note_field =
     match note with
-    | None -> base
-    | Some n -> base @ [ ("note", `String n) ]
+    | None -> []
+    | Some n -> [ ("note", `String n) ]
   in
-  `Assoc fields
+  `Assoc
+    ([
+       ("goal_id", `String goal_id);
+       ("action", `String (goal_action_to_string action));
+     ]
+    @ note_field
+    @ [ ("expected_workspace", encode_expected_workspace expected_workspace) ])
 
 let encode_goal_confirmation (req : goal_confirmation_request) =
   (* Exact 7-field allowlist enforced by [server_routes_http_routes_verification.ml:204]. *)
@@ -454,6 +457,21 @@ let check_goal_link_assignable (t : task) =
   | Linked goal_id ->
       Error
         (Printf.sprintf "task %S is already assigned to goal %S" t.id goal_id)
+
+(* The route's allowlist is exactly these three fields, and it refuses a body
+   without [expected_workspace] ([commit_operator_cancel_json] in
+   server_routes_http_routes_verification.ml). A blank reason is left out. *)
+let encode_task_cancel ~task_id ~reason ~expected_workspace =
+  let reason_field =
+    match reason with
+    | Some r when not (String.equal (String.trim r) "") ->
+        [ ("reason", `String (String.trim r)) ]
+    | Some _ | None -> []
+  in
+  `Assoc
+    ([ ("task_id", `String task_id) ]
+    @ reason_field
+    @ [ ("expected_workspace", encode_expected_workspace expected_workspace) ])
 
 let enrich_planning_with_tasks ~observed_at (snap : planning_snapshot) tasks =
   let count_for_goal goal_id =

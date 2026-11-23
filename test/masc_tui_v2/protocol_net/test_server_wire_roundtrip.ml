@@ -13,8 +13,38 @@ module Wire_work = Masc_tui_protocol.Wire_work
 module Wire_fleet = Masc_tui_protocol.Wire_fleet
 module Stream_route = Server_routes_http_keeper_stream
 module Owner_registry = Masc.Keeper_owner_registry
+module Workspace = Masc.Workspace
 
 let observed_at = Clock.Mono.of_ns 1_000_000_000L
+
+let rec rm_rf path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+      (try
+         Array.iter
+           (fun entry -> rm_rf (Filename.concat path entry))
+           (Sys.readdir path)
+       with Sys_error _ -> ());
+      (try Unix.rmdir path with Unix.Unix_error _ -> ())
+  | _ -> ( try Unix.unlink path with Unix.Unix_error _ -> ())
+
+(* A fresh workspace, and the [expected_workspace] pair the TUI sends for it:
+   the canonical paths [/health] reports, which is what the TUI stores. *)
+let with_workspace f =
+  let base = Filename.temp_dir "masc_tui_wire_rt_" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base)
+    (fun () ->
+      let config = Workspace.default_config base in
+      ignore (Workspace.init config ~agent_name:None : string);
+      let expected_workspace : Wire_work.expected_workspace =
+        {
+          base_path = Unix.realpath config.Workspace.base_path;
+          masc_root = Unix.realpath (Workspace.masc_dir config);
+        }
+      in
+      f config expected_workspace)
 
 (* GET /api/v1/dashboard/scheduled-automation: a keeper wake stores its
    enqueue receipt object in [detail]; a failed wake carries [error]. *)
@@ -725,6 +755,53 @@ let test_wiki_page_links_roundtrip () =
           Alcotest.(check (list (pair string link_target)))
             "every link shape decodes to its kind" expected decoded)
 
+(* POST /api/v1/tools/masc_goal_transition refuses a body without
+   [expected_workspace]. The check it then runs accepts the pair the TUI sends
+   and strips it, so the Goal tool reads only the transition itself. *)
+let test_goal_transition_workspace_roundtrip () =
+  with_workspace (fun config expected_workspace ->
+      let body =
+        Wire_work.encode_goal_transition ~goal_id:"goal-1"
+          ~action:Wire_work.Pause ~note:None ~expected_workspace
+      in
+      Alcotest.(check bool)
+        "the body names the workspace" true
+        (List.mem "expected_workspace" (Yojson.Safe.Util.keys body));
+      match Workspace.validate_expected_workspace ~config body with
+      | Ok args ->
+          Alcotest.(check (list string))
+            "the Goal tool reads goal_id and action" [ "action"; "goal_id" ]
+            (List.sort String.compare (Yojson.Safe.Util.keys args))
+      | Error error ->
+          Alcotest.fail (Workspace.expected_workspace_error_message error))
+
+(* POST /api/v1/dashboard/tasks/cancel: the route's own parser and commit
+   take the body the TUI encodes. The body the TUI sent before, without
+   [expected_workspace], is refused. *)
+let test_task_cancel_roundtrip () =
+  with_workspace (fun config expected_workspace ->
+      ignore
+        (Workspace.add_task config ~title:"Cancel from the terminal" ~priority:1
+           ~description:""
+          : string);
+      let module Route = Server_routes_http_routes_verification.For_testing in
+      let commit body =
+        Route.commit_operator_cancel_json ~config ~operator_id:"operator-test"
+          body
+      in
+      (match commit (`Assoc [ ("task_id", `String "task-001") ]) with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "a cancel without expected_workspace committed");
+      match
+        commit
+          (Wire_work.encode_task_cancel ~task_id:"task-001"
+             ~reason:(Some "wrong scope") ~expected_workspace)
+      with
+      | Ok outcome ->
+          Alcotest.(check bool)
+            "the cancel commits instead of a no-op" false outcome.Workspace.noop
+      | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error))
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -736,6 +813,11 @@ let () =
             `Quick test_schedule_wake_roundtrip;
           Alcotest.test_case "approval queue state -> decode_gate_pending_list"
             `Quick test_gate_queue_state_roundtrip;
+          Alcotest.test_case
+            "goal transition body -> validate_expected_workspace" `Quick
+            test_goal_transition_workspace_roundtrip;
+          Alcotest.test_case "task cancel body -> commit_operator_cancel_json"
+            `Quick test_task_cancel_roundtrip;
         ] );
       ( "runtime",
         [

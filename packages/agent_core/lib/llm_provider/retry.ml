@@ -386,10 +386,64 @@ let json_number_opt = function
   | `Assoc _ | `List _ | `String _ | `Bool _ | `Null -> None
 ;;
 
+(* Strict protobuf Duration string: "<digits>[.<digits>]s" (e.g. "39s", "39.5s").
+   Rejects signs, unit-less numbers ("39"), non-numeric suffixes, and non-finite
+   values instead of defaulting to 0.0. *)
+let parse_protobuf_duration_seconds (raw : string) : float option =
+  let s = String.trim raw in
+  let len = String.length s in
+  if len < 2 || s.[len - 1] <> 's'
+  then None
+  else (
+    let body_len = len - 1 in
+    let is_digit c = c >= '0' && c <= '9' in
+    let rec check_digits idx saw_dot digits_before digits_after =
+      if idx >= body_len
+      then digits_before > 0 && ((not saw_dot) || digits_after > 0)
+      else (
+        let c = s.[idx] in
+        if is_digit c
+        then
+          if saw_dot
+          then check_digits (idx + 1) true digits_before (digits_after + 1)
+          else check_digits (idx + 1) false (digits_before + 1) digits_after
+        else if c = '.' && not saw_dot
+        then check_digits (idx + 1) true digits_before digits_after
+        else false)
+    in
+    if check_digits 0 false 0 0
+    then Option.bind (float_of_string_opt (String.sub s 0 body_len)) usable_retry_after
+    else None)
+;;
+
+let retry_info_in_details fields =
+  match List.assoc_opt "details" fields with
+  | Some (`List items) ->
+    List.find_map
+      (function
+        | `Assoc df ->
+          (match Option.bind (List.assoc_opt "@type" df) json_string_opt with
+           | Some ("type.googleapis.com/google.rpc.RetryInfo" | "google.rpc.RetryInfo") ->
+             Option.bind (List.assoc_opt "retryDelay" df) (function
+               | `String raw -> parse_protobuf_duration_seconds raw
+               | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
+                 None)
+           | Some _ | None -> None)
+        | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None)
+      items
+  | Some (`Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+  | None -> None
+;;
+
+(* Precedence within an object: numeric retry_after -> numeric retryAfter ->
+   google.rpc.RetryInfo retryDelay. *)
 let retry_after_in_fields fields =
   match Option.bind (List.assoc_opt "retry_after" fields) json_number_opt with
   | Some _ as v -> v
-  | None -> Option.bind (List.assoc_opt "retryAfter" fields) json_number_opt
+  | None ->
+    (match Option.bind (List.assoc_opt "retryAfter" fields) json_number_opt with
+     | Some _ as v -> v
+     | None -> retry_info_in_details fields)
 ;;
 
 let metadata_raw_of_fields fields =
@@ -575,6 +629,145 @@ let signals_of_body (body : string) : error_signals =
   match Json_util.from_string_bounded body with
   | Ok json -> signals_of_json json
   | Error _ -> empty_signals
+;;
+
+(* Preserve the exact pre-stack [main] HTTP JSON signal extractor and refusal
+   code/type tables exclusively for {!classify_structured_refusal} /
+   {!classify_error} so existing HTTP backend behavior stays 100% invariant
+   while non-HTTP / ACP structured signal helpers use the wider normalized
+   tables below. *)
+let rec extract_http_signals_from_json ~depth (json : Yojson.Safe.t) : error_signals =
+  if depth > 2
+  then empty_signals
+  else
+    match json with
+    | `Assoc fields ->
+      let err_obj =
+        match List.assoc_opt "error" fields with
+        | Some (`Assoc err_fields) -> err_fields
+        | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+        | None -> fields
+      in
+      let codes =
+        match Option.bind (List.assoc_opt "code" err_obj) json_code_string_opt with
+        | Some c -> [ c ]
+        | None -> []
+      in
+      let top_type = Option.bind (List.assoc_opt "type" err_obj) json_string_opt in
+      let metadata_fields =
+        match List.assoc_opt "metadata" err_obj with
+        | Some (`Assoc mf) -> Some mf
+        | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+        | None -> None
+      in
+      let meta_type =
+        Option.bind metadata_fields (fun mf ->
+          Option.bind (List.assoc_opt "error_type" mf) json_string_opt)
+      in
+      let types = List.filter_map Fun.id [ top_type; meta_type ] in
+      let statuses =
+        match Option.bind (List.assoc_opt "status" err_obj) json_string_opt with
+        | Some s -> [ s ]
+        | None -> []
+      in
+      let detail_reasons =
+        match List.assoc_opt "details" err_obj with
+        | Some (`List items) ->
+          List.filter_map
+            (function
+              | `Assoc df -> Option.bind (List.assoc_opt "reason" df) json_string_opt
+              | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
+                None)
+            items
+        | Some (`Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+        | None -> []
+      in
+      let messages =
+        match Option.bind (List.assoc_opt "message" err_obj) json_string_opt with
+        | Some m -> [ m ]
+        | None -> []
+      in
+      let n_ctx = Option.bind (List.assoc_opt "n_ctx" err_obj) json_positive_int_opt in
+      let base = { codes; types; statuses; detail_reasons; messages; n_ctx } in
+      let nested =
+        match
+          Option.bind metadata_fields (fun mf ->
+            Option.bind (List.assoc_opt "raw" mf) json_string_opt)
+        with
+        | None -> empty_signals
+        | Some raw ->
+          (match Json_util.from_string_bounded raw with
+           | Ok raw_json -> extract_http_signals_from_json ~depth:(depth + 1) raw_json
+           | Error _ -> empty_signals)
+      in
+      merge_signals base nested
+    | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
+      empty_signals
+;;
+
+let http_signals_of_body (body : string) : error_signals =
+  match Json_util.from_string_bounded body with
+  | Ok json -> extract_http_signals_from_json ~depth:0 json
+  | Error _ -> empty_signals
+;;
+
+let is_http_context_overflow_code code =
+  match code with
+  | "context_length_exceeded"
+  | "string_above_max_length"
+  | "model_context_window_exceeded"
+  | "3200" -> true
+  | _ -> Backend_glm.is_context_overflow_code code
+;;
+
+let is_http_context_overflow_type = function
+  | "context_length_exceeded" | "exceed_context_size_error" | "request_too_large" -> true
+  | _ -> false
+;;
+
+let is_http_context_overflow_reason = function
+  | "CONTEXT_LENGTH_EXCEEDED" | "PROMPT_TOO_LONG" -> true
+  | _ -> false
+;;
+
+let is_http_quota_code code =
+  match code with
+  | "insufficient_quota"
+  | "billing_hard_limit_reached"
+  | "credit_balance_too_low"
+  | "key_limit_exceeded"
+  | "quota_exceeded"
+  | "usage_limit_exceeded"
+  (* Mistral API: billing_api_budget_exhausted (code 2303). *)
+  | "2303" -> true
+  | _ -> Backend_glm.is_quota_code code
+;;
+
+let is_http_quota_type = function
+  | "insufficient_quota"
+  | "billing_error"
+  | "quota_exceeded"
+  | "key_limit_exceeded"
+  | "usage_limit_exceeded"
+  | "GoUsageLimitError" -> true
+  | _ -> false
+;;
+
+let is_http_quota_reason = function
+  | "QUOTA_EXCEEDED" | "BILLING_DISABLED" -> true
+  | _ -> false
+;;
+
+let http_signals_indicate_context_overflow (s : error_signals) =
+  List.exists is_http_context_overflow_code s.codes
+  || List.exists is_http_context_overflow_type s.types
+  || List.exists is_http_context_overflow_reason s.detail_reasons
+;;
+
+let http_signals_indicate_account_quota (s : error_signals) =
+  List.exists is_http_quota_code s.codes
+  || List.exists is_http_quota_type s.types
+  || List.exists is_http_quota_reason s.detail_reasons
 ;;
 
 let is_structured_context_overflow_code code =
@@ -786,15 +979,21 @@ let signals_indicate_anthropic_400_account_quota (s : error_signals) ~message =
   List.exists is_anthropic_400_account_quota_message (message :: s.messages)
 ;;
 
-let structured_refusal_of_signals ~retry_after ~status ~message (signals : error_signals)
+let structured_refusal_of_signals_with
+      ~indicates_overflow
+      ~indicates_quota
+      ~retry_after
+      ~status
+      ~message
+      (signals : error_signals)
   : structured_refusal option
   =
   match status with
   | 400 | 422 ->
-    if signals_indicate_context_overflow signals
+    if indicates_overflow signals
     then Some (Structured_context_overflow { message; limit = signals.n_ctx })
     else if
-      signals_indicate_account_quota signals
+      indicates_quota signals
       || (status = 400 && signals_indicate_anthropic_400_account_quota signals ~message)
     then Some (Structured_account_quota { message; retry_after })
     else None
@@ -803,14 +1002,26 @@ let structured_refusal_of_signals ~retry_after ~status ~message (signals : error
     (* Require an explicit structured quota/billing signal on 403; a WAF/CDN
        403 carrying only Retry-After stays AuthorizationError until a provider
        usage-window read confirms the account budget is spent. *)
-    if signals_indicate_account_quota signals
+    if indicates_quota signals
     then Some (Structured_account_quota { message; retry_after })
     else None
   | 429 ->
-    if signals_indicate_account_quota signals
+    if indicates_quota signals
     then Some (Structured_account_quota { message; retry_after })
     else None
   | _ -> None
+;;
+
+let structured_refusal_of_signals ~retry_after ~status ~message (signals : error_signals)
+  : structured_refusal option
+  =
+  structured_refusal_of_signals_with
+    ~indicates_overflow:signals_indicate_context_overflow
+    ~indicates_quota:signals_indicate_account_quota
+    ~retry_after
+    ~status
+    ~message
+    signals
 ;;
 
 let message_of_signals ?(fallback_message = "") (signals : error_signals) =
@@ -834,9 +1045,15 @@ let structured_refusal_of_json ?retry_after ~status (json : Yojson.Safe.t)
 
 let classify_structured_refusal ~retry_after_header ~status ~body : structured_refusal option =
   let message = extract_error_message body in
-  let signals = signals_of_body body in
+  let signals = http_signals_of_body body in
   let retry_after = resolve_retry_after ~body ~header:retry_after_header in
-  structured_refusal_of_signals ~retry_after ~status ~message signals
+  structured_refusal_of_signals_with
+    ~indicates_overflow:http_signals_indicate_context_overflow
+    ~indicates_quota:http_signals_indicate_account_quota
+    ~retry_after
+    ~status
+    ~message
+    signals
 ;;
 
 type signal_refusal =
@@ -844,6 +1061,7 @@ type signal_refusal =
       { message : string
       ; limit : int option
       }
+  | Signal_request_body_too_large of { message : string }
   | Signal_hard_quota of
       { message : string
       ; retry_after : float option
@@ -870,12 +1088,8 @@ let classify_structured_signals
   =
   let retry_after = Option.bind retry_after usable_retry_after in
   let message = message_of_signals ~fallback_message signals in
-  let classify_by_fields () =
-    if signals_indicate_account_quota signals
-    then Some (Signal_hard_quota { message; retry_after })
-    else if signals_indicate_context_overflow signals
-    then Some (Signal_context_overflow { message; limit = signals.n_ctx })
-    else if signals_indicate_rate_limit signals
+  let classify_non_quota_overflow_fields () =
+    if signals_indicate_rate_limit signals
     then Some (Signal_rate_limited { message; retry_after })
     else if signals_indicate_auth_error signals
     then Some (Signal_auth_error { message })
@@ -884,6 +1098,13 @@ let classify_structured_signals
     else if signals_indicate_provider_unavailable signals
     then Some (Signal_provider_unavailable { message })
     else None
+  in
+  let classify_by_fields () =
+    if signals_indicate_account_quota signals
+    then Some (Signal_hard_quota { message; retry_after })
+    else if signals_indicate_context_overflow signals
+    then Some (Signal_context_overflow { message; limit = signals.n_ctx })
+    else classify_non_quota_overflow_fields ()
   in
   match refusal_http_status_opt http_status with
   | Some 402 -> Some (Signal_hard_quota { message; retry_after })
@@ -896,14 +1117,14 @@ let classify_structured_signals
     if signals_indicate_account_quota signals
     then Some (Signal_hard_quota { message; retry_after })
     else Some (Signal_rate_limited { message; retry_after })
-  | Some 413 -> Some (Signal_context_overflow { message; limit = signals.n_ctx })
-  | Some 400 ->
-    (match classify_by_fields () with
-     | Some _ as classified -> classified
-     | None ->
-       if signals_indicate_anthropic_400_account_quota signals ~message
-       then Some (Signal_hard_quota { message; retry_after })
-       else None)
+  | Some 413 -> Some (Signal_request_body_too_large { message })
+  | Some (400 | 422 as status) ->
+    (match structured_refusal_of_signals ~retry_after ~status ~message signals with
+     | Some (Structured_context_overflow { message; limit }) ->
+       Some (Signal_context_overflow { message; limit })
+     | Some (Structured_account_quota { message; retry_after }) ->
+       Some (Signal_hard_quota { message; retry_after })
+     | None -> classify_non_quota_overflow_fields ())
   | Some status ->
     (match server_status_class_of_code status with
      | Some (Overloaded_status | Server_error_status) ->
@@ -1042,7 +1263,8 @@ let is_ascii_ident_char = function
 ;;
 
 let extract_ascii_tokens (text : string) : (int * int * string) list =
-  let len = min (String.length text) 16384 in
+  let total_len = String.length text in
+  let len = min total_len 16384 in
   let rec skip_sep idx acc =
     if idx >= len
     then List.rev acc
@@ -1052,6 +1274,8 @@ let extract_ascii_tokens (text : string) : (int * int * string) list =
   and scan_tok start idx acc =
     if idx < len && is_ascii_ident_char text.[idx]
     then scan_tok start (idx + 1) acc
+    else if idx = len && total_len > len && is_ascii_ident_char text.[len]
+    then List.rev acc
     else (
       let tok = String.sub text start (idx - start) in
       skip_sep idx ((start, idx, tok) :: acc))
@@ -1205,6 +1429,51 @@ let is_exact_machine_wire_token = function
   | _ -> false
 ;;
 
+let http_status_of_machine_tokens (text : string) : int option =
+  let trimmed = String.trim text in
+  if trimmed = ""
+  then None
+  else explicit_http_refusal_status_in_tokens trimmed (extract_ascii_tokens trimmed)
+;;
+
+(* Exact key=value wire reason matcher for Google/Antigravity CLI responses
+   such as ["... reason=QUOTA_EXHAUSTED"]. Requires contiguous [=] with exact
+   key ["reason"] and ALL-CAPS ["QUOTA_EXHAUSTED"] token boundaries. *)
+let has_exact_reason_quota_exhausted text tokens =
+  let rec walk = function
+    | (_s1, e1, t1) :: ((s2, _e2, t2) :: _ as rest) ->
+      if String.equal (String.lowercase_ascii t1) "reason"
+         && s2 = e1 + 1
+         && e1 < String.length text
+         && text.[e1] = '='
+         && String.equal t2 "QUOTA_EXHAUSTED"
+      then true
+      else walk rest
+    | [ _ ] | [] -> false
+  in
+  walk tokens
+;;
+
+let signals_of_machine_tokens trimmed tokens =
+  let matched_codes =
+    List.filter_map
+      (fun (_, _, tok) -> if is_exact_machine_wire_token tok then Some tok else None)
+      tokens
+  in
+  let detail_reasons =
+    if has_exact_reason_quota_exhausted trimmed tokens
+    then "QUOTA_EXCEEDED" :: matched_codes
+    else matched_codes
+  in
+  { codes = matched_codes
+  ; types = matched_codes
+  ; statuses = matched_codes
+  ; detail_reasons
+  ; messages = (if trimmed = "" then [] else [ trimmed ])
+  ; n_ctx = None
+  }
+;;
+
 let classify_machine_tokens ?http_status ?retry_after (text : string) : signal_refusal option =
   let trimmed = String.trim text in
   let tokens = extract_ascii_tokens trimmed in
@@ -1213,25 +1482,142 @@ let classify_machine_tokens ?http_status ?retry_after (text : string) : signal_r
     | Some _ as s -> s
     | None -> explicit_http_refusal_status_in_tokens trimmed tokens
   in
-  let matched_codes =
-    List.filter_map
-      (fun (_, _, tok) -> if is_exact_machine_wire_token tok then Some tok else None)
-      tokens
-  in
-  let signals =
-    { codes = matched_codes
-    ; types = matched_codes
-    ; statuses = matched_codes
-    ; detail_reasons = matched_codes
-    ; messages = (if trimmed = "" then [] else [ trimmed ])
-    ; n_ctx = None
-    }
-  in
+  let signals = signals_of_machine_tokens trimmed tokens in
   classify_structured_signals
     ?http_status:effective_status
     ?retry_after
     ~fallback_message:trimmed
     signals
+;;
+
+let signal_retry_after_opt = function
+  | Signal_hard_quota { retry_after; _ } | Signal_rate_limited { retry_after; _ } ->
+    retry_after
+  | Signal_context_overflow _
+  | Signal_request_body_too_large _
+  | Signal_auth_error _
+  | Signal_authorization_error _
+  | Signal_provider_unavailable _ -> None
+;;
+
+let signal_message_of = function
+  | Signal_context_overflow { message; _ }
+  | Signal_request_body_too_large { message }
+  | Signal_hard_quota { message; _ }
+  | Signal_rate_limited { message; _ }
+  | Signal_auth_error { message }
+  | Signal_authorization_error { message }
+  | Signal_provider_unavailable { message } -> message
+;;
+
+let signal_is_hard_quota = function
+  | Some (Signal_hard_quota _) -> true
+  | Some
+      ( Signal_context_overflow _
+      | Signal_request_body_too_large _
+      | Signal_rate_limited _
+      | Signal_auth_error _
+      | Signal_authorization_error _
+      | Signal_provider_unavailable _ )
+  | None -> false
+;;
+
+let first_some_opt items = List.find_map Fun.id items
+
+let classify_text ?http_status ?retry_after (text : string) : signal_refusal option =
+  let trimmed = String.trim text in
+  if trimmed = ""
+  then None
+  else (
+    let tokens = extract_ascii_tokens trimmed in
+    let caller_status = refusal_http_status_opt http_status in
+    let token_status = explicit_http_refusal_status_in_tokens trimmed tokens in
+    let effective_status = first_some_opt [ caller_status; token_status ] in
+    let caller_retry = Option.bind retry_after usable_retry_after in
+    (* Extract pure embedded JSON and pure machine-token signals without forcing
+       caller/token HTTP status yet so an unrelated leading JSON object (e.g.
+       {"requestId":"x"}) cannot prematurely short-circuit a later quota signal. *)
+    let json_signal = classify_embedded_json ?retry_after:caller_retry trimmed in
+    let token_signals = signals_of_machine_tokens trimmed tokens in
+    let token_signal =
+      classify_structured_signals
+        ?retry_after:caller_retry
+        ~fallback_message:trimmed
+        token_signals
+    in
+    let best_retry =
+      first_some_opt
+        [ Option.bind json_signal signal_retry_after_opt
+        ; caller_retry
+        ; Option.bind token_signal signal_retry_after_opt
+        ]
+    in
+    let best_message =
+      match json_signal with
+      | Some s ->
+        let m = signal_message_of s in
+        if String.trim m <> "" then m else trimmed
+      | None -> trimmed
+    in
+    let has_hard_quota =
+      signal_is_hard_quota json_signal || signal_is_hard_quota token_signal
+    in
+    let merge_statusless () =
+      match json_signal with
+      | Some (Signal_hard_quota { message; _ }) ->
+        Some (Signal_hard_quota { message; retry_after = best_retry })
+      | Some
+          ( Signal_context_overflow _
+          | Signal_request_body_too_large _
+          | Signal_rate_limited _
+          | Signal_auth_error _
+          | Signal_authorization_error _
+          | Signal_provider_unavailable _ ) ->
+        if signal_is_hard_quota token_signal
+        then Some (Signal_hard_quota { message = best_message; retry_after = best_retry })
+        else json_signal
+      | None ->
+        (match token_signal with
+         | Some (Signal_hard_quota { message; _ }) ->
+           Some (Signal_hard_quota { message; retry_after = best_retry })
+         | Some (Signal_rate_limited { message; _ }) ->
+           Some (Signal_rate_limited { message; retry_after = best_retry })
+         | Some
+             ( Signal_context_overflow _
+             | Signal_request_body_too_large _
+             | Signal_auth_error _
+             | Signal_authorization_error _
+             | Signal_provider_unavailable _ ) as s -> s
+         | None -> None)
+    in
+    match effective_status with
+    | Some 402 ->
+      Some (Signal_hard_quota { message = best_message; retry_after = best_retry })
+    | Some 401 -> Some (Signal_auth_error { message = best_message })
+    | Some 403 ->
+      if has_hard_quota
+      then Some (Signal_hard_quota { message = best_message; retry_after = best_retry })
+      else Some (Signal_authorization_error { message = best_message })
+    | Some 429 ->
+      if has_hard_quota
+      then Some (Signal_hard_quota { message = best_message; retry_after = best_retry })
+      else Some (Signal_rate_limited { message = best_message; retry_after = best_retry })
+    | Some 413 -> Some (Signal_request_body_too_large { message = best_message })
+    | Some (400 | 422 as status) ->
+      (match classify_embedded_json ~http_status:status ?retry_after:best_retry trimmed with
+       | Some _ as s -> s
+       | None ->
+         classify_structured_signals
+           ~http_status:status
+           ?retry_after:best_retry
+           ~fallback_message:trimmed
+           token_signals)
+    | Some status ->
+      (match server_status_class_of_code status with
+       | Some (Overloaded_status | Server_error_status) ->
+         Some (Signal_provider_unavailable { message = best_message })
+       | None -> merge_statusless ())
+    | None -> merge_statusless ())
 ;;
 
 (** Classify HTTP status + body into structured api_error *)

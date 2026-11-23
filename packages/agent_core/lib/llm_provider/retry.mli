@@ -169,8 +169,14 @@ val signals_of_body : string -> error_signals
     and non-HTTP vendor codes (such as [1113] or [2303]) return [None]. *)
 val http_status_of_json : Yojson.Safe.t -> int option
 
-(** Extract a validated, finite, non-negative [retry_after] / [retryAfter]
-    delay in seconds from a JSON provider error payload. *)
+(** Extract a validated, finite, non-negative retry delay in seconds from a
+    JSON provider error payload. Precedence within each object (nested [error],
+    outer object, then [metadata.raw] up to depth 2):
+    1. numeric [retry_after],
+    2. numeric [retryAfter],
+    3. Google [details[]] entry with [@type] equal to
+       ["type.googleapis.com/google.rpc.RetryInfo"] or ["google.rpc.RetryInfo"]
+       and strict protobuf duration [retryDelay] (["<digits>[.<digits>]s"]). *)
 val retry_after_of_json : Yojson.Safe.t -> float option
 
 (** True when structured {!error_signals} carry a recognized machine-readable
@@ -220,6 +226,7 @@ type signal_refusal =
       { message : string
       ; limit : int option
       }
+  | Signal_request_body_too_large of { message : string }
   | Signal_hard_quota of
       { message : string
       ; retry_after : float option
@@ -234,13 +241,17 @@ type signal_refusal =
 
 (** Classify structured {!error_signals} (with optional HTTP status and
     [retry_after] evidence) into a closed {!signal_refusal}. Non-finite or
-    negative [?retry_after] delays are rejected to [None]. When a status-less
-    payload carries both quota and overflow signals, quota takes precedence so
-    spent accounts rest instead of shrinking context. On HTTP 400 this also
-    preserves parity with {!classify_structured_refusal} for Anthropic's
-    documented credit/usage-limit refusal messages (which emit no distinct
-    billing code). Returns [None] when no recognized HTTP refusal status
-    ([400..599]) or structured machine signal is present. *)
+    negative [?retry_after] delays are rejected to [None].
+    - On HTTP [400] / [422], delegates directly to {!structured_refusal_of_signals}
+      so HTTP {!classify_error} and status-qualified signal classification share
+      one precedence table ([overflow > quota], plus Anthropic 400 billing parity).
+    - On HTTP [413], returns {!Signal_request_body_too_large} (preserving parity
+      with {!classify_error}'s [Request_body_refused_by_provider] instead of
+      fabricating a context-window overflow).
+    - When a status-less payload carries both quota and overflow signals, quota
+      takes precedence so spent accounts rest instead of shrinking context.
+    Returns [None] when no recognized HTTP refusal status ([400..599]) or
+    structured machine signal is present. *)
 val classify_structured_signals
   :  ?http_status:int
   -> ?retry_after:float
@@ -273,15 +284,35 @@ val classify_embedded_json
   -> string
   -> signal_refusal option
 
+(** Extract an explicit ASCII-boundary [HTTP[/ver] <status>] refusal status
+    code ([401], [402], [403], [413], [429], or recognized [5xx] server/overload
+    codes) from a plain text error message. Rejects malformed status tokens
+    such as ["HTTP 4290"], ["HTTP 500-byte"], or ["HTTP 403/404"]. *)
+val http_status_of_machine_tokens : string -> int option
+
 (** Classify an error string strictly by exact ASCII-boundary machine wire
     codes (such as [RESOURCE_EXHAUSTED], [UNAUTHENTICATED],
     [PERMISSION_DENIED], [exceeded_current_quota_error],
-    [context_length_exceeded], [GoUsageLimitError]) and explicit [HTTP <4xx|5xx>]
+    [context_length_exceeded], [GoUsageLimitError], or exact
+    [reason=QUOTA_EXHAUSTED]) and explicit [HTTP <4xx|5xx>]
     status tokens, delegating to {!classify_structured_signals}. Free-form
     English prose (such as ["permission denied"], ["forbidden"], ["throttled"],
     ["token limit"], or ["prompt exceeds maximum context length"]) is never
     matched and returns [None]. *)
 val classify_machine_tokens
+  :  ?http_status:int
+  -> ?retry_after:float
+  -> string
+  -> signal_refusal option
+
+(** Unified text-surface refusal classifier shared across non-HTTP clients
+    (ACP JSON-RPC [message], Antigravity CLI [Turn_failed] detail, and
+    stringified [error.data]). Combines caller [?http_status],
+    {!http_status_of_machine_tokens}, {!classify_embedded_json}, and exact
+    machine tokens under one authoritative HTTP status precedence gate so an
+    explicit HTTP [401]/[402]/[403]/[413]/[429]/[5xx] status in either caller
+    metadata or text can never be downgraded into {!Signal_context_overflow}. *)
+val classify_text
   :  ?http_status:int
   -> ?retry_after:float
   -> string

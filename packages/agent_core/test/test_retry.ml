@@ -873,7 +873,139 @@ let test_structured_json_signals_and_status_optional_ssot () =
     ; "HTTP 400 Bad Request"
     ; "HTTP 500-byte chunk"
     ; "HTTP 403/404 ratio"
-    ]
+    ; "HTTP 4290 malformed code"
+    ; "bare QUOTA_EXHAUSTED prose without reason= key"
+    ; "my_reason=QUOTA_EXHAUSTED wrong key prefix"
+    ; "reason=QUOTA_EXHAUSTED_EXTRA suffix"
+    ];
+  (* 10. Cross-model review hardening: google.rpc.RetryInfo, 400/422 parity,
+     HTTP 413 separation, reason=QUOTA_EXHAUSTED, and Retry.classify_text SSOT *)
+  check (option (float 0.001)) "google.rpc.RetryInfo integer retryDelay parsed" (Some 39.0)
+    (Retry.retry_after_of_json
+       (parse
+          {|{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"39s"}]}}|}));
+  check (option (float 0.001)) "google.rpc.RetryInfo fractional retryDelay parsed" (Some 12.5)
+    (Retry.retry_after_of_json
+       (parse
+          {|{"error":{"details":[{"@type":"google.rpc.RetryInfo","retryDelay":"12.5s"}]}}|}));
+  check (option (float 0.001)) "numeric retry_after takes precedence over RetryInfo" (Some 7.0)
+    (Retry.retry_after_of_json
+       (parse
+          {|{"error":{"retry_after":7,"details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"39s"}]}}|}));
+  List.iter
+    (fun bad ->
+       check (option (float 0.001)) ("invalid RetryInfo duration rejected: " ^ bad) None
+         (Retry.retry_after_of_json
+            (`Assoc
+               [ ( "details"
+                 , `List
+                     [ `Assoc
+                         [ "@type", `String "type.googleapis.com/google.rpc.RetryInfo"
+                         ; "retryDelay", `String bad
+                         ]
+                     ] )
+               ])))
+    [ "-5s"; "39"; ".5s"; "39.s"; "1e3s"; ""; "abc" ];
+  (* 400/422 precedence parity with structured_refusal_of_signals (overflow > quota) *)
+  (match
+     Retry.classify_structured_json
+       ~http_status:400
+       (parse
+          {|{"error":{"code":"context_length_exceeded","n_ctx":64000,"details":[{"reason":"QUOTA_EXCEEDED"}]}}|} )
+   with
+   | Some (Retry.Signal_context_overflow { limit = Some 64000; _ }) -> ()
+   | _ -> fail "HTTP 400 must preserve structured_refusal_of_signals overflow > quota parity");
+  (* HTTP 413 separates into Signal_request_body_too_large (never fabricates context overflow) *)
+  (match
+     Retry.classify_structured_json
+       ~http_status:413
+       (parse {|{"error":{"message":"payload too large","n_ctx":128000}}|} )
+   with
+   | Some (Retry.Signal_request_body_too_large _) -> ()
+   | _ -> fail "HTTP 413 must classify as Signal_request_body_too_large, not context overflow");
+  (match Retry.classify_text {|HTTP 413 Payload Too Large: {"error":{"code":"request_too_large"}}|} with
+   | Some (Retry.Signal_request_body_too_large _) -> ()
+   | _ -> fail "HTTP 413 text must classify as Signal_request_body_too_large");
+  (* P1 invariant: HTTP 429/401/402/403 in text NEVER downgraded to Signal_context_overflow *)
+  (match
+     Retry.classify_text
+       {|HTTP 429 Too Many Requests: {"error":{"code":"request_too_large"}}|}
+   with
+   | Some (Retry.Signal_rate_limited _) -> ()
+   | _ -> fail "HTTP 429 in message text must take precedence over embedded request_too_large JSON");
+  (match
+     Retry.classify_text
+       {|HTTP 403 Forbidden: {"error":{"code":"context_length_exceeded"}}|}
+   with
+   | Some (Retry.Signal_authorization_error _) -> ()
+   | _ -> fail "HTTP 403 in message text must not misclassify as context overflow");
+  (* Leading unrelated JSON object must not mask later quota JSON under caller HTTP 429 *)
+  (match
+     Retry.classify_text
+       ~http_status:429
+       {|{"requestId":"req-1"} {"error":{"details":[{"reason":"QUOTA_EXCEEDED"}]}}|}
+   with
+   | Some (Retry.Signal_hard_quota _) -> ()
+   | _ -> fail "leading unrelated JSON must not prevent later quota JSON promotion under HTTP 429");
+  (* Exact reason=QUOTA_EXHAUSTED vs bare RESOURCE_EXHAUSTED boundary + RetryInfo preservation *)
+  (match
+     Retry.classify_text
+       "You have exhausted your capacity on this model. Your quota will reset after 4h41m7s. reason=QUOTA_EXHAUSTED"
+   with
+   | Some (Retry.Signal_hard_quota _) -> ()
+   | _ -> fail "exact key=value reason=QUOTA_EXHAUSTED must classify as Signal_hard_quota");
+  (match
+     Retry.classify_text
+       {|{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"39s"}]}} reason=QUOTA_EXHAUSTED|}
+   with
+   | Some (Retry.Signal_hard_quota { retry_after = Some 39.0; _ }) -> ()
+   | _ -> fail "reason=QUOTA_EXHAUSTED with RetryInfo must preserve 39.0s retry_after");
+  check (option int) "http_status_of_machine_tokens extracts 429 and rejects 4290" (Some 429)
+    (Retry.http_status_of_machine_tokens "HTTP 429 Too Many Requests");
+  check (option int) "http_status_of_machine_tokens rejects 4290" None
+    (Retry.http_status_of_machine_tokens "HTTP 4290 invalid");
+  (* 16 KiB boundary truncation must not synthesize a partial prefix wire token
+     (use non-whitespace '.' filler so String.trim does not strip the prefix). *)
+  let boundary_payload = String.make 16366 '.' ^ "insufficient_quota_unrelated_suffix" in
+  (match Retry.classify_machine_tokens boundary_payload with
+   | None -> ()
+   | Some _ -> fail "16 KiB token boundary must not fabricate insufficient_quota from truncated suffix");
+  (* 11. HTTP classify_error / classify_structured_refusal behavioral invariance:
+     wider non-HTTP/ACP codes (prompt_too_long, payment_required, status-field
+     matches, outer-object merges) must NOT alter existing HTTP classify_error
+     decisions while still classifying through classify_structured_json. *)
+  (match
+     Retry.classify_error
+       ~retry_after_header:None
+       ~status:400
+       ~body:{|{"error":{"code":"prompt_too_long","message":"too long"}}|}
+   with
+   | Retry.InvalidRequest { reason = Retry.Unknown_invalid_request; _ } -> ()
+   | other ->
+     failf "HTTP 400 code=prompt_too_long must remain Unknown_invalid_request, got %s"
+       (Retry.error_message other));
+  (match
+     Retry.classify_structured_refusal
+       ~retry_after_header:None
+       ~status:400
+       ~body:{|{"error":{"code":"payment_required","message":"pay"}}|}
+   with
+   | None -> ()
+   | Some _ -> fail "HTTP 400 code=payment_required must remain unchanged (None) in classify_structured_refusal");
+  (match
+     Retry.classify_structured_refusal
+       ~retry_after_header:None
+       ~status:403
+       ~body:{|{"error":{"status":"QUOTA_EXCEEDED","message":"spent"}}|}
+   with
+   | None -> ()
+   | Some _ -> fail "HTTP 403 status=QUOTA_EXCEEDED must remain unchanged (None) in classify_structured_refusal");
+  (match
+     Retry.classify_structured_json
+       (parse {|{"error":{"code":"prompt_too_long","message":"too long"}}|})
+   with
+   | Some (Retry.Signal_context_overflow _) -> ()
+   | _ -> fail "non-HTTP classify_structured_json must still classify code=prompt_too_long")
 ;;
 
 let () =

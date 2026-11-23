@@ -7,7 +7,6 @@
 | Created | 2026-05-26 |
 | Target | `agent_sdk` (agent_core) — `lib/llm_provider/`, `lib/provider.ml` |
 | Supplements | RFC-AC-018 catalog externalization (adds axis reshape on top of externalization) — see §7.2 |
-| Sibling | RFC-AC-017 (coordinator-shape leak) |
 | Boundary | masc-mcp depends on `Provider_kind.t` variant names — see §7.3 |
 
 ## 0. Summary

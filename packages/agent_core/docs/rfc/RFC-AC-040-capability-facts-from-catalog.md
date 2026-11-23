@@ -426,7 +426,7 @@ preset 을 fixture 바탕이나 인자로만 쓰는 파일이 20개다. `capabil
 - 요청에서 언급된 #36944 는 2026-09-17T17:06:37Z 에 머지됐다. 바꾼 파일은 `agent.mli`, `agent_types.ml(i)`, `test_agent_core.ml`, keeper 도구 검색 파일들이다. 이 RFC 의 파일과 겹치지 않는다.
 - 최근 머지된 PR 중 이 RFC 와 방향이 같은 것: #37009·#37016 (공급자·모델 사실을 내장 카탈로그 한 벌로 모았다. 원칙 1), #36981 (Ollama 가 서빙하는 deepseek 행의 재전송 정책을 행에서 고쳤다. 2.2), #36512 (OpenAI 호환 preset 에서 context 값을 뺐다. 원칙 2의 선례), #36412 (`uncontrolled_reasoning` 도입, 키는 만들지 않았다), #35254 (1.7 의 두 resolver 어긋남), #36139 (스트리밍 파서가 선언된 멤버만 읽는다).
 - 방향이 반대인 것: #36991 이 `openrouter_capabilities` preset 을 더했다. 이 preset 을 받는 행은 없어서(1.1) 3.a 가 적을 값은 없고, 3.d 가 지울 preset 에 든다.
-- `docs/rfc/` 의 frontmatter 검사(#36898)는 `docs/rfc/RFC-*.md` 만 본다 (`scripts/rfc-generate-index.py:23`, `:231`). 이 파일은 대상이 아니다. 형식은 RFC-AC-039 의 머리 표를 따랐다.
+- `docs/rfc/` 의 frontmatter 검사(#36898)는 `docs/rfc/RFC-*.md` 만 본다 (`scripts/rfc-generate-index.py:23`, `:231`). 이 파일은 대상이 아니다.
 
 ## 부록 A. 검증 명령
 

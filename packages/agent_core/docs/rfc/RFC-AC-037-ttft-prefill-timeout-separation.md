@@ -6,7 +6,7 @@
 | Author | vincent (with Claude analysis) |
 | Created | 2026-07-20 |
 | Target | `agent_sdk` (agent_core) |
-| Related | [[RFC-AC-020]] (TTFT instrumentation), [[RFC-AC-026]] (transport-liveness-carrier) |
+| Related | [[RFC-AC-020]] (TTFT instrumentation) |
 
 ## 0. Summary
 

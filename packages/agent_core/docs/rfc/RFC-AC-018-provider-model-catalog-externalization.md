@@ -7,7 +7,6 @@
 | Created | 2026-05-12 |
 | Target | `agent_sdk` (agent_core) |
 | Supersedes | PR #1536 (`refactor/ollama-endpoint-constant`, closed as antipattern reinforcement) |
-| Sibling | RFC-AC-015 (mutable cleanup), RFC-AC-016 (mcp optional), RFC-AC-017 (coordinator-shape leak) |
 
 ## 0. Summary
 
@@ -171,7 +170,7 @@ esac
 
 ## 7. Open questions
 
-- Catalog 파일 위치: `$XDG_CONFIG_HOME/agent_core/catalog.toml` 우선, fallback `./agent-core-catalog.toml`. RFC-AC-016 (MCP optional config) 와 같은 convention 채택.
+- Catalog 파일 위치: `$XDG_CONFIG_HOME/agent_core/catalog.toml` 우선, fallback `./agent-core-catalog.toml`.
 - Size token (`27b`, `31b`) → `params_millions : int option` 으로 일반화. 모델별 사이즈 variant 는 catalog entry id 로 표현.
 - Multi-generation drift (같은 `claude-haiku-4-5` 가 시점에 따라 capability 변경) → 본 RFC scope 밖, RFC-AC-019 후보.
 - Catalog hot-reload (server 재기동 없이 reload) → Phase 4 후 별도 RFC.
@@ -179,9 +178,6 @@ esac
 ## 8. Non-blocking dependencies
 
 - PR #1539 (`max_cost_usd` unpriced model fail-closed) — Phase 2 에서 typed `Unknown_model` 로 흡수, 그 전까지는 호환.
-- RFC-AC-016 (mcp optional) — 외부화 패턴 동일, coherent.
-- RFC-AC-017 (coordinator-shape) — 직접 의존성 없음.
-- RFC-AC-015 (mutable cleanup) — 직접 의존성 없음.
 
 ## 9. Verification / Exit criteria
 
@@ -197,6 +193,4 @@ esac
 
 - CLAUDE.md §Workaround Rejection Bar — signatures #2 (string classifier) + #3 (N-of-M)
 - `lib/agent/agent_tools.mli` — exact registered-name lookup contract
-- RFC-AC-015 — mutable cleanup phased precedent
-- RFC-AC-016 — mcp optional dependency (외부화 패턴 자매)
 - 측정 명령: `rg '"(qwen[^"]*|llama-?[0-9][^"]*|gemma-?[0-9][^"]*|claude-[a-z]+-[0-9][^"]*|gpt-[0-9][^"]*|deepseek[^"]*|kimi-[^"]*)"' lib/ | wc -l` → 240 (2026-05-12 main `8d8402f6`)

@@ -60,15 +60,10 @@ let fetches_for_context_drawer ~force (m : Model.t) =
         needs_fetch ~force (Fleet_store.turn_records_for ~keeper m.fleet)
       in
       let internals_needed =
-        match m.knowledge.memory_os_internals with
-        | Observed.Value { data; stale = false; _ } ->
-            force || not (String.equal data.keeper keeper)
-        | Observed.Loading _
-        | Observed.Value { stale = true; _ }
-        | Observed.Absent
-        | Observed.Unreported
-        | Observed.Failed _ ->
-            needs_fetch ~force m.knowledge.memory_os_internals
+        needs_target_fetch ~force
+          ~holds_target:(fun (i : Wire_knowledge.memory_os_internals) ->
+            String.equal i.keeper keeper)
+          m.knowledge.memory_os_internals
       in
       []
       |> add_keeper_costs ~force m

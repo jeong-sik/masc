@@ -12,7 +12,6 @@ module Wire_infra = Masc_tui_protocol.Wire_infra
 module Wire_fleet = Masc_tui_protocol.Wire_fleet
 module Wire_runtime = Masc_tui_protocol.Wire_runtime
 module Wire_work = Masc_tui_protocol.Wire_work
-module Wire_fleet = Masc_tui_protocol.Wire_fleet
 module Stream_route = Server_routes_http_keeper_stream
 module Owner_registry = Masc.Keeper_owner_registry
 module Workspace = Masc.Workspace

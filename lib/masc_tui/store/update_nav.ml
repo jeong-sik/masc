@@ -1551,7 +1551,7 @@ let toggle_voice ~now (m : Model.t) =
   | Drafts.Voice_recording _ ->
       let drafts = Drafts.voice_set_transcribing m.drafts in
       ({ m with drafts }, [ Cmd.Voice_cmd Cmd.Stop_ptt ])
-  | Drafts.Voice_transcribing | Drafts.Voice_speaking ->
+  | Drafts.Voice_transcribing ->
       let drafts = Drafts.voice_set_off m.drafts in
       ({ m with drafts }, [ Cmd.Voice_cmd Cmd.Cancel_ptt ])
 

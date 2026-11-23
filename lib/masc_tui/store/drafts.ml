@@ -44,14 +44,12 @@ type voice_phase =
       elapsed_s : float;
     }
   | Voice_transcribing
-  | Voice_speaking
   | Voice_error of string
 
 type voice_capabilities = {
   recorder_available : bool;
   recorder_cmd : string option;
   stt_available : bool;
-  tts_available : bool;
 }
 
 type btw_status =
@@ -781,7 +779,7 @@ let tx_position_for_keeper ~keeper ~request_id t =
 let is_voice_active t =
   match t.voice with
   | Voice_off | Voice_error _ -> false
-  | Voice_recording _ | Voice_transcribing | Voice_speaking -> true
+  | Voice_recording _ | Voice_transcribing -> true
 
 let voice_start_recording ~now t =
   {
@@ -795,7 +793,7 @@ let voice_push_level level t =
       let clamped = Float.max 0.0 (Float.min 1.0 level) in
       let levels = List.take max_voice_levels (clamped :: rec_state.levels) in
       { t with voice = Voice_recording { rec_state with levels } }
-  | Voice_off | Voice_transcribing | Voice_speaking | Voice_error _ -> t
+  | Voice_off | Voice_transcribing | Voice_error _ -> t
 
 let voice_tick_elapsed ~now t =
   match t.voice with
@@ -804,10 +802,9 @@ let voice_tick_elapsed ~now t =
         Float.max 0.0 (Clock.Mono.seconds_since now ~since:rec_state.started_at)
       in
       { t with voice = Voice_recording { rec_state with elapsed_s } }
-  | Voice_off | Voice_transcribing | Voice_speaking | Voice_error _ -> t
+  | Voice_off | Voice_transcribing | Voice_error _ -> t
 
 let voice_set_transcribing t = { t with voice = Voice_transcribing }
-let voice_set_speaking t = { t with voice = Voice_speaking }
 let voice_set_off t = { t with voice = Voice_off }
 let voice_set_error msg t = { t with voice = Voice_error msg }
 

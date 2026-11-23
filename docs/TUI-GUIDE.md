@@ -147,7 +147,6 @@ composer dispatches navigation or overlay shortcuts (`1`–`6`, `,`, `I`, `?`,
    - **`Space`** — Toggle inline turn details.
    - **`Ctrl+X`** — Interrupt the active Keeper turn.
    - **`y`** — Copy the Keeper's latest reply to the clipboard via OSC 52.
-   - **`S`** — Speak the Keeper's latest reply aloud via TTS.
 
 ### Mouse & Copy
 
@@ -563,9 +562,8 @@ MASC TUI v2.6 enforces a strict connection budget in
 - **Voice**: at boot, the TUI probes local audio capture (`rec` / `sox` /
   `ffmpeg`) and server voice endpoints (`/api/v1/voice/config`). Toggle
   Push-to-Talk with `V` (unfocused), `Ctrl+B`, `Alt+V`, `F8`, or `/voice`;
-  transcribed text lands in the composer draft. Press `S` in Keepers/Chat to
-  speak the latest Keeper reply via TTS (`afplay` / `paplay` / `aplay` /
-  `ffplay`). See [VOICE-RUNBOOK.md](VOICE-RUNBOOK.md) for host setup.
+  transcribed text lands in the composer draft. See
+  [VOICE-RUNBOOK.md](VOICE-RUNBOOK.md) for host setup.
 
 ## Server Connection & Auto-Start
 

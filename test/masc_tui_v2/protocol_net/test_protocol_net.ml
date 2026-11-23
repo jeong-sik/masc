@@ -1364,13 +1364,7 @@ let test_worker_and_voice_runner () =
               "stt": { "default_model": "s1", "active_endpoint": { "configured": true, "enabled": false }, "send_on_stop": true }
             }|}))
   in
-  Alcotest.(check bool) "tts_available" true caps.tts_available;
   Alcotest.(check bool) "stt_available" false caps.stt_available;
-  (* POST /api/v1/voice/probe/tts sends key "message", NOT "text" *)
-  let tts_body = Voice_runner.encode_tts_probe_request ~text:"hello world" in
-  Alcotest.(check (list string)) "tts probe exact keys" [ "message" ] (assoc_keys tts_body);
-  Alcotest.(check string) "tts probe message" "hello world"
-    (expect_ok "message" (Wire_common.required_nonblank_string tts_body "message"));
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let worker = Worker_pool.create ~sw (Eio.Stdenv.domain_mgr env) in
@@ -1393,7 +1387,6 @@ let test_worker_and_voice_runner () =
               recorder_available = true;
               recorder_cmd = Some "rec";
               stt_available = true;
-              tts_available = true;
             });
       record_until_stopped =
         (fun ~device:_ ~stop_signal ~on_level ->
@@ -1403,7 +1396,6 @@ let test_worker_and_voice_runner () =
           if n = 1 then Eio.Promise.await first_gate;
           Ok (Printf.sprintf "ptt_%d.wav" n));
       transcribe = (fun ~audio_path -> Ok ("heard:" ^ audio_path));
-      speak = (fun ~text:_ ~voice_id:_ -> Ok ());
       cleanup_audio = (fun ~audio_path -> cleaned_paths := audio_path :: !cleaned_paths);
     }
   in
@@ -1412,8 +1404,7 @@ let test_worker_and_voice_runner () =
       | Voice_runner.Transcript_ready text ->
           ignore (Eio.Promise.try_resolve resolve_transcript text : bool)
       | Voice_runner.Phase_changed _ | Voice_runner.Level_meter _
-      | Voice_runner.Speak_done | Voice_runner.Capabilities _
-      | Voice_runner.Voice_error _ ->
+      | Voice_runner.Capabilities _ | Voice_runner.Voice_error _ ->
           ())
   in
   (* Start #1, cancel #1 while #1 is blocked in shutdown, immediately start #2 *)
@@ -1429,7 +1420,7 @@ let test_worker_and_voice_runner () =
   (match Voice_runner.phase runner with
   | Voice_runner.Voice_recording _ -> ()
   | Voice_runner.Voice_idle | Voice_runner.Voice_transcribing
-  | Voice_runner.Voice_speaking | Voice_runner.Voice_failed _ ->
+  | Voice_runner.Voice_failed _ ->
       Alcotest.fail "stale cancelled session clobbered active second session");
   Alcotest.(check (list string)) "cancelled audio cleaned up" [ "ptt_1.wav" ] !cleaned_paths;
   Voice_runner.dispatch runner Voice_runner.Stop_ptt;

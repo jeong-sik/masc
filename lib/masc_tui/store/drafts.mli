@@ -54,14 +54,12 @@ type voice_phase =
       elapsed_s : float;
     }
   | Voice_transcribing
-  | Voice_speaking
   | Voice_error of string
 
 type voice_capabilities = {
   recorder_available : bool;
   recorder_cmd : string option;
   stt_available : bool;
-  tts_available : bool;
 }
 
 type btw_status =
@@ -227,7 +225,6 @@ val voice_start_recording : now:Clock.Mono.t -> t -> t
 val voice_push_level : float -> t -> t
 val voice_tick_elapsed : now:Clock.Mono.t -> t -> t
 val voice_set_transcribing : t -> t
-val voice_set_speaking : t -> t
 val voice_set_off : t -> t
 val voice_set_error : string -> t -> t
 val voice_apply_transcript : string -> t -> t

@@ -420,8 +420,7 @@ Press `?` to view the dynamic keymap help:
 |---|---|
 | `V` (unfocused) · `Ctrl+B` · `Alt+V` · `F8` · `/voice` | start/stop Push-to-Talk recording; transcribed text lands in the composer draft |
 | `Enter` (composer focused) | send the draft to `imp` |
-| `S` (in Keepers / Chat, unfocused) | speak `imp`'s latest reply aloud via TTS |
-| `Esc` | blur composer / step back (never quits; press `Ctrl+B` or `V` to cancel active transcription/speaking) |
+| `Esc` | blur composer / step back (never quits; press `Ctrl+B` or `V` to cancel active transcription) |
 
 Transcribed speech lands in the focused composer draft so you can review or edit
 it before pressing `Enter` to send (`[voice.stt] send_on_stop` is not currently

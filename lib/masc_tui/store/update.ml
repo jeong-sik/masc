@@ -162,8 +162,6 @@ let apply_voice_event ~now (m : Model.t) = function
       ({ m with drafts = Drafts.voice_push_level lvl m.drafts }, [])
   | Msg.Voice_transcribing ->
       ({ m with drafts = Drafts.voice_set_transcribing m.drafts }, [])
-  | Msg.Voice_speaking ->
-      ({ m with drafts = Drafts.voice_set_speaking m.drafts }, [])
   | Msg.Voice_idle -> ({ m with drafts = Drafts.voice_set_off m.drafts }, [])
   | Msg.Voice_transcript text ->
       let drafts =

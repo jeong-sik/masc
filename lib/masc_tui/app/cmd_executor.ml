@@ -1305,8 +1305,11 @@ let chat_reattach_delay ~(acceptance : Wire_fleet.accepted_state option)
 (* Only the server process that accepted a request runs its turn, and the
    guard names that process. A reattach goes out only while the endpoint
    still names the same instance: a restarted server is another instance and
-   a new epoch, where the store settles the request from the history. A
-   request sent before /health named an instance is not reattached. *)
+   a new epoch, where the store settles the request from the history. Until
+   /health names the new instance the guard still names the old one, so a
+   reattach can reach the restarted server; it answers 409, which moves the
+   epoch the same way. A request sent before /health named an instance is not
+   reattached. *)
 let chat_reattach_same_instance ~(submitted_to : Http_client.workspace_guard)
     (current : Http_client.workspace_guard) =
   match

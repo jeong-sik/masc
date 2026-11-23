@@ -1469,6 +1469,15 @@ let () =
           Alcotest.test_case
             "encode_chat_submit_request -> parse_keeper_chat_stream_request"
             `Quick test_chat_submit_admission_roundtrip;
+          Alcotest.test_case
+            "context projection and error row -> decode_keepers_roster" `Quick
+            test_keepers_roster_roundtrip;
+          Alcotest.test_case
+            "Turn_record.to_json entries -> decode_keeper_turn_records" `Quick
+            test_turn_records_roundtrip;
+          Alcotest.test_case
+            "Candle_observation.to_json -> decode_keepers_roster_extras" `Quick
+            test_candle_observation_roundtrip;
         ] );
       ( "knowledge",
         [
@@ -1490,17 +1499,5 @@ let () =
           Alcotest.test_case
             "file change to_json -> decode_repository_activity" `Quick
             test_repository_activity_roundtrip;
-        ] );
-      ( "fleet",
-        [
-          Alcotest.test_case
-            "context projection and error row -> decode_keepers_roster" `Quick
-            test_keepers_roster_roundtrip;
-          Alcotest.test_case
-            "Turn_record.to_json entries -> decode_keeper_turn_records" `Quick
-            test_turn_records_roundtrip;
-          Alcotest.test_case
-            "Candle_observation.to_json -> decode_keepers_roster_extras" `Quick
-            test_candle_observation_roundtrip;
         ] );
     ]

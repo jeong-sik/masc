@@ -91,62 +91,73 @@ let safe_close_fd fd =
   | exception Unix.Unix_error _ -> ()
 
 let process_runner ?(executable = "masc-pele") ?(timeout_s = default_timeout_s)
-    ?clock () ~input ~output ~errors =
-  let with_file path flags fn =
-    let descriptor = Unix.openfile path flags 0o600 in
-    Fun.protect ~finally:(fun () -> safe_close_fd descriptor) (fun () -> fn descriptor)
-  in
-  let pid =
-    with_file input [ Unix.O_RDONLY; Unix.O_CLOEXEC ] (fun stdin_fd ->
-        with_file output [ Unix.O_WRONLY; Unix.O_TRUNC; Unix.O_CLOEXEC ]
-          (fun stdout_fd ->
-            with_file errors [ Unix.O_WRONLY; Unix.O_TRUNC; Unix.O_CLOEXEC ]
-              (fun stderr_fd ->
-                Unix.create_process executable [| executable |] stdin_fd
-                  stdout_fd stderr_fd)))
-  in
-  let timeout_s =
-    if Float.is_finite timeout_s && timeout_s > 0.0 then timeout_s
-    else default_timeout_s
-  in
-  let deadline = Clock.Mono.after_s (Clock.Mono.now ()) timeout_s in
-  let sleep_step step_s =
-    match clock with
-    | Some clk -> Eio.Time.sleep clk step_s
-    | None -> Unix.sleepf step_s
-  in
-  let rec wait poll_s =
-    match Unix.waitpid [ Unix.WNOHANG ] pid with
-    | 0, _ ->
-        let remaining = Clock.Mono.seconds_since deadline ~since:(Clock.Mono.now ()) in
-        if remaining <= 0.0 then begin
-          kill_and_reap pid;
-          Killed_at_deadline
-        end
-        else begin
-          sleep_step (Float.min poll_s remaining);
-          wait (Float.min 0.025 (poll_s *. 1.5))
-        end
-    | _, (Unix.WSTOPPED _ as status) ->
+    ?clock ?(cancelled = fun () -> false) () ~input ~output ~errors =
+  if cancelled () then Cancelled
+  else
+    let with_file path flags fn =
+      let descriptor = Unix.openfile path flags 0o600 in
+      Fun.protect ~finally:(fun () -> safe_close_fd descriptor) (fun () -> fn descriptor)
+    in
+    let pid =
+      with_file input [ Unix.O_RDONLY; Unix.O_CLOEXEC ] (fun stdin_fd ->
+          with_file output [ Unix.O_WRONLY; Unix.O_TRUNC; Unix.O_CLOEXEC ]
+            (fun stdout_fd ->
+              with_file errors [ Unix.O_WRONLY; Unix.O_TRUNC; Unix.O_CLOEXEC ]
+                (fun stderr_fd ->
+                  Unix.create_process executable [| executable |] stdin_fd
+                    stdout_fd stderr_fd)))
+    in
+    let timeout_s =
+      if Float.is_finite timeout_s && timeout_s > 0.0 then timeout_s
+      else default_timeout_s
+    in
+    let deadline = Clock.Mono.after_s (Clock.Mono.now ()) timeout_s in
+    let sleep_step step_s =
+      match clock with
+      | Some clk -> Eio.Time.sleep clk step_s
+      | None -> Unix.sleepf step_s
+    in
+    let rec wait poll_s =
+      if cancelled () then begin
         kill_and_reap pid;
-        Exited status
-    | _, ((Unix.WEXITED _ | Unix.WSIGNALED _) as status) -> Exited status
-    | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait poll_s
-  in
-  try wait 0.005 with
-  | Eio.Cancel.Cancelled _ as ex ->
-      Eio.Cancel.protect (fun () -> kill_and_reap pid);
-      raise ex
-  | ex ->
-      kill_and_reap pid;
-      raise ex
+        Cancelled
+      end
+      else
+        match Unix.waitpid [ Unix.WNOHANG ] pid with
+        | 0, _ ->
+            let remaining =
+              Clock.Mono.seconds_since deadline ~since:(Clock.Mono.now ())
+            in
+            if remaining <= 0.0 then begin
+              kill_and_reap pid;
+              Killed_at_deadline
+            end
+            else begin
+              sleep_step (Float.min poll_s remaining);
+              wait (Float.min 0.025 (poll_s *. 1.5))
+            end
+        | _, (Unix.WSTOPPED _ as status) ->
+            kill_and_reap pid;
+            Exited status
+        | _, ((Unix.WEXITED _ | Unix.WSIGNALED _) as status) -> Exited status
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait poll_s
+    in
+    try wait 0.005 with
+    | Eio.Cancel.Cancelled _ as ex ->
+        Eio.Cancel.protect (fun () -> kill_and_reap pid);
+        raise ex
+    | ex ->
+        kill_and_reap pid;
+        raise ex
 
-let render ~cache_dir ?timeout_s ?clock ?raster ?runner
-    { format; source; max_width; font_size; now_ms; colors } =
+let render ~cache_dir ?timeout_s ?clock ?(cancelled = fun () -> false) ?raster
+    ?runner { format; source; max_width; font_size; now_ms; colors } =
+  if cancelled () then Error "Pele was cancelled"
+  else
   let run_helper =
     match runner with
     | Some r -> r
-    | None -> process_runner ?timeout_s ?clock ()
+    | None -> process_runner ?timeout_s ?clock ~cancelled ()
   in
   let paths = ref [] in
   let temporary suffix =

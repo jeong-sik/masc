@@ -187,6 +187,7 @@ type t = {
   endpoint : Http_client.endpoint Atomic.t;
   stream_epoch : Epoch.t Atomic.t;
   owned_server : Masc_server_lifecycle.owned_server option Atomic.t;
+  active_memory_diagram_cancel : bool Atomic.t option Atomic.t;
   sse_hub : Sse_hub.t;
   voice_runner : Voice_runner.t;
   editor_handoff : editor_handoff;
@@ -346,6 +347,7 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
   let endpoint = Atomic.make initial_ep in
   let stream_epoch = Atomic.make Epoch.initial in
   let owned_server = Atomic.make None in
+  let active_memory_diagram_cancel = Atomic.make None in
   let sse_hub =
     Sse_hub.create ~io ~clock ~endpoint:initial_ep
       ~on_event:(publish_hub_event ~bus ~stream_epoch)
@@ -360,7 +362,11 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
         Ui_bus.publish_stream bus (Msg.Voice_event (msg_of_voice_event ev)))
   in
   let closed = Atomic.make false in
-  Eio.Switch.on_release sw (fun () -> Atomic.set closed true);
+  Eio.Switch.on_release sw (fun () ->
+      Atomic.set closed true;
+      match Atomic.exchange active_memory_diagram_cancel None with
+      | Some flag -> Atomic.set flag true
+      | None -> ());
   {
     sw;
     closed;
@@ -373,6 +379,7 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
     endpoint;
     stream_epoch;
     owned_server;
+    active_memory_diagram_cancel;
     sse_hub;
     voice_runner;
     editor_handoff;
@@ -1604,6 +1611,265 @@ let execute_start_local_server t =
                     Ui_bus.publish_stream t.bus
                       (Msg.Server_start_result (Error detail)))))
 
+let pele_timeout_s = 8.0
+
+let combine_fallback_note primary extra =
+  match extra with
+  | Some detail when not (String.equal (String.trim detail) "") ->
+      primary ^ " · " ^ detail
+  | Some _ | None -> primary
+
+let render_memory_diagram_payload ?run_pele ~(probe : Probe.observation)
+    ~term_program ~(palette : Palette.t option) ~keeper ~kind ~mode ~ko
+    ~tz_offset_sec ~now_unix ~max_width ~chart () :
+    Knowledge_store.memory_diagram_payload =
+  let render_mermaid () =
+    Memory_diagram.render_mermaid_fallback ~tz_offset_sec ~ko ~now:now_unix
+      ~max_width ~kind chart
+  in
+  let render_tree () =
+    Memory_diagram.render_tree_lines ~tz_offset_sec ~ko ~now:now_unix
+      ~keeper_name:keeper ~max_width chart
+    |> List.map (fun (ln : Masc_tui_ui.Memory_tree.line) -> ln.text)
+  in
+  match mode with
+  | Knowledge_store.Diagram_mode_mermaid ->
+      let lines, note = render_mermaid () in
+      Knowledge_store.Diagram_text { lines; note }
+  | Knowledge_store.Diagram_mode_tree ->
+      Knowledge_store.Diagram_text { lines = render_tree (); note = None }
+  | Knowledge_store.Diagram_mode_auto -> (
+      let proto =
+        Graphics.protocol_of_probe ~graphics:probe.graphics ~term_program
+      in
+      let graphics_supported =
+        not (Graphics.equal_graphics_protocol proto Graphics.Unsupported_protocol)
+      in
+      let now_ms =
+        if Float.is_finite now_unix && now_unix > 0.0 then
+          Int64.of_float (now_unix *. 1000.0)
+        else 0L
+      in
+      let run_scene scene =
+        match run_pele with
+        | Some f -> f scene
+        | None -> Error "Pele runner unavailable"
+      in
+      match kind with
+      | Knowledge_store.Diagram_pele_card ->
+          let fallback_lines, mermaid_note = render_mermaid () in
+          if not graphics_supported then
+            let reason =
+              if ko then "그래픽 미지원 터미널 · Mermaid 텍스트 폴백"
+              else "Terminal graphics unsupported · Mermaid fallback"
+            in
+            Knowledge_store.Diagram_text
+              {
+                lines = fallback_lines;
+                note = Some (combine_fallback_note reason mermaid_note);
+              }
+          else (
+            match palette with
+            | None ->
+                let reason =
+                  if ko then "터미널 팔레트 미관측 · Mermaid 텍스트 폴백"
+                  else "Terminal palette unavailable · Mermaid fallback"
+                in
+                Knowledge_store.Diagram_text
+                  {
+                    lines = fallback_lines;
+                    note = Some (combine_fallback_note reason mermaid_note);
+                  }
+            | Some pal -> (
+                let svg =
+                  Masc_tui_ui.Memory_lineage.transition_svg ~tz_offset_sec ~ko
+                    ~now:now_unix ~palette:pal chart
+                in
+                let colors = Some (Pele.colors_of_palette pal) in
+                let scene =
+                  Pele.scene ~format:Pele.Svg ~max_width:1240 ~font_size:15
+                    ~now_ms ~colors svg
+                in
+                match run_scene scene with
+                | Ok png -> (
+                    match Memory_diagram.parse_png_dimensions png with
+                    | Some _ as pixel_size ->
+                        Knowledge_store.Diagram_pele_png
+                          {
+                            png;
+                            pixel_size;
+                            format_label = "Pele SVG";
+                            fallback_lines;
+                          }
+                    | None ->
+                        let reason =
+                          if ko then
+                            "Pele PNG 헤더 손상 · Mermaid 텍스트 폴백"
+                          else "Invalid Pele PNG header · Mermaid fallback"
+                        in
+                        Knowledge_store.Diagram_text
+                          {
+                            lines = fallback_lines;
+                            note =
+                              Some (combine_fallback_note reason mermaid_note);
+                          })
+                | Error err ->
+                    let reason =
+                      if ko then
+                        Printf.sprintf "Pele 불가 (%s) · Mermaid 폴백" err
+                      else Printf.sprintf "Pele unavailable (%s) · Mermaid fallback" err
+                    in
+                    Knowledge_store.Diagram_text
+                      {
+                        lines = fallback_lines;
+                        note = Some (combine_fallback_note reason mermaid_note);
+                      }))
+      | Knowledge_store.Diagram_formation_tree ->
+          let tree_lines = render_tree () in
+          if not graphics_supported then
+            let reason =
+              if ko then "그래픽 미지원 터미널 · 형성 트리 텍스트 폴백"
+              else "Terminal graphics unsupported · Formation tree fallback"
+            in
+            Knowledge_store.Diagram_text { lines = tree_lines; note = Some reason }
+          else
+            let graph_json =
+              Masc_tui_ui.Memory_lineage.formation_graph_json ~tz_offset_sec ~ko
+                ~now:now_unix ?palette ~keeper_name:keeper chart
+            in
+            let colors = Option.map Pele.colors_of_palette palette in
+            let scene =
+              Pele.scene ~format:Pele.Graph ~max_width:1400 ~font_size:14
+                ~now_ms ~colors graph_json
+            in
+            match run_scene scene with
+            | Ok png -> (
+                match Memory_diagram.parse_png_dimensions png with
+                | Some _ as pixel_size ->
+                    Knowledge_store.Diagram_pele_png
+                      {
+                        png;
+                        pixel_size;
+                        format_label = "Pele Graph";
+                        fallback_lines = tree_lines;
+                      }
+                | None ->
+                    let reason =
+                      if ko then
+                        "Pele PNG 헤더 손상 · 형성 트리 텍스트 폴백"
+                      else "Invalid Pele PNG header · Formation tree fallback"
+                    in
+                    Knowledge_store.Diagram_text
+                      { lines = tree_lines; note = Some reason })
+            | Error err ->
+                let reason =
+                  if ko then
+                    Printf.sprintf "Pele 불가 (%s) · 형성 트리 폴백" err
+                  else
+                    Printf.sprintf "Pele unavailable (%s) · Formation tree fallback"
+                      err
+                in
+                Knowledge_store.Diagram_text
+                  { lines = tree_lines; note = Some reason })
+
+let ensure_pele_cache_dir ~base_path =
+  let dir =
+    Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "cache")
+      "pele"
+  in
+  try
+    Fs_compat.mkdir_p dir;
+    dir
+  with Sys_error _ | Unix.Unix_error _ -> Filename.get_temp_dir_name ()
+
+let cancel_active_memory_diagram t =
+  match Atomic.exchange t.active_memory_diagram_cancel None with
+  | Some flag -> Atomic.set flag true
+  | None -> ()
+
+let execute_render_memory_diagram t ~epoch ~request_id ~keeper ~event_identity
+    ~kind ~mode ~ko ~tz_offset_sec ~now_unix ~max_width ~chart =
+  if Atomic.get t.closed then cancel_active_memory_diagram t
+  else
+    let cancel_flag = Atomic.make false in
+    let slot = Some cancel_flag in
+    (match Atomic.exchange t.active_memory_diagram_cancel slot with
+    | Some prev -> Atomic.set prev true
+    | None -> ());
+    let is_cancelled () = Atomic.get cancel_flag || Atomic.get t.closed in
+    let probe = Probe.current_observation () in
+    let term_program =
+      Graphics.effective_term_program ~getenv:Sys.getenv_opt
+    in
+    let palette =
+      match Palette.current () with
+      | Some _ as p -> p
+      | None -> probe.palette
+    in
+    fork_safe t (fun () ->
+        let release_slot () =
+          ignore
+            (Atomic.compare_and_set t.active_memory_diagram_cancel slot None
+              : bool)
+        in
+        Fun.protect ~finally:release_slot (fun () ->
+            Eio.Fiber.yield ();
+            if not (is_cancelled ()) then begin
+              let done_p, done_u = Eio.Promise.create () in
+              let result_ref = ref None in
+              Eio.Fiber.both
+                (fun () ->
+                  try Eio.Promise.await done_p
+                  with Eio.Cancel.Cancelled _ as ex ->
+                    Atomic.set cancel_flag true;
+                    raise ex)
+                (fun () ->
+                  Fun.protect
+                    ~finally:(fun () -> Eio.Promise.resolve done_u ())
+                    (fun () ->
+                      let res =
+                        Eio_unix.run_in_systhread (fun () ->
+                            if is_cancelled () then Error "Pele was cancelled"
+                            else
+                              try
+                                let run_pele scene =
+                                  if is_cancelled () then
+                                    Error "Pele was cancelled"
+                                  else
+                                    let cache_dir =
+                                      ensure_pele_cache_dir
+                                        ~base_path:t.cli.base_path
+                                    in
+                                    Pele.render ~cache_dir
+                                      ~timeout_s:pele_timeout_s
+                                      ~cancelled:is_cancelled scene
+                                in
+                                Ok
+                                  (render_memory_diagram_payload ~run_pele
+                                     ~probe ~term_program ~palette ~keeper
+                                     ~kind ~mode ~ko ~tz_offset_sec ~now_unix
+                                     ~max_width ~chart ())
+                              with ex -> Error (Printexc.to_string ex))
+                      in
+                      result_ref := Some res));
+              if not (is_cancelled ()) then
+                match !result_ref with
+                | Some result ->
+                    Ui_bus.publish_stream t.bus
+                      (Msg.Memory_diagram_rendered
+                         {
+                           epoch;
+                           request_id;
+                           keeper;
+                           event_identity;
+                           kind;
+                           mode;
+                           result;
+                         })
+                | None -> ()
+            end))
+
 let rec execute t = function
   | Cmd.Batch cmds -> List.iter (execute t) cmds
   | Cmd.Http_get { epoch; req } -> execute_get t ~epoch req
@@ -1649,6 +1915,23 @@ let rec execute t = function
                 Clipboard.copy_text session ~write_osc52 text)
           in
           ())
+  | Cmd.Render_memory_diagram
+      {
+        epoch;
+        request_id;
+        keeper;
+        event_identity;
+        kind;
+        mode;
+        ko;
+        tz_offset_sec;
+        now_unix;
+        max_width;
+        chart;
+      } ->
+      execute_render_memory_diagram t ~epoch ~request_id ~keeper ~event_identity
+        ~kind ~mode ~ko ~tz_offset_sec ~now_unix ~max_width ~chart
+  | Cmd.Cancel_memory_diagram -> cancel_active_memory_diagram t
   | Cmd.Open_external_url url ->
       if is_safe_external_url url then
         fork_safe t (fun () ->
@@ -1678,6 +1961,7 @@ let execute_all t cmds = List.iter (execute t) (Cmd.flatten cmds)
 
 let shutdown ?(preserve_owned_server = false) t =
   Atomic.set t.closed true;
+  cancel_active_memory_diagram t;
   Voice_runner.stop t.voice_runner;
   Sse_hub.shutdown t.sse_hub;
   if not preserve_owned_server then

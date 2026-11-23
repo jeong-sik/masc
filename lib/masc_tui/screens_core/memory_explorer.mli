@@ -39,6 +39,19 @@ val render_full_reading :
   scroll:int ->
   unit
 
+val active_diagram_body_rect : Model.t -> Rect.t option
+(** Pure layout projection returning the exact terminal-grid [Rect.t] of the
+    open Memory Diagram's inner body area across [3 -> 기억] and
+    [4 -> Keeper -> 기억] (including zoomed mode), or [None] when inactive. *)
+
+val render_memory_diagram :
+  grid:Cell_grid.t ->
+  rect:Rect.t ->
+  theme:Theme.t ->
+  lang:Say.lang ->
+  diagram:Knowledge_store.memory_diagram_state ->
+  unit
+
 val render_keeper_memory :
   grid:Cell_grid.t ->
   rect:Rect.t ->

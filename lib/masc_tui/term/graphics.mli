@@ -27,6 +27,18 @@ val fit_rows :
 (** Aspect-preserving rows that fit both terminal dimensions. Without measured
     pixel geometry, retains [max 1 rows] rather than inventing cell shape. *)
 
+val fit_cells :
+  cell_pixels:(int * int) option ->
+  image_pixels:(int * int) option ->
+  columns:int ->
+  rows:int ->
+  int * int
+(** Aspect-preserving [(cols, rows)] strictly bounded within
+    [(1 .. max 1 columns, 1 .. max 1 rows)]. When [cell_pixels] is absent, uses
+    a conservative 1:2 monospace cell aspect ratio ([8 x 16]) so wide images
+    never overflow split panes or terminal edges. When [image_pixels] is absent
+    or invalid, returns [(max 1 columns, max 1 rows)]. *)
+
 (** Distinct Kitty image slots owned by this process. *)
 type image =
   | Graphics_query  (** {!query}'s one-pixel probe, received but never drawn *)
@@ -171,6 +183,13 @@ type graphics_protocol =
   | Unsupported_protocol
 
 val equal_graphics_protocol : graphics_protocol -> graphics_protocol -> bool
+
+val effective_term_program :
+  getenv:(string -> string option) -> string option
+(** Read [TERM_PROGRAM] only when [TERM] is set to a non-empty value other than
+    ["dumb"] (case-insensitive). Returns [None] when [TERM] is missing, blank,
+    or ["dumb"], preventing inherited [TERM_PROGRAM=iTerm.app] from emitting
+    OSC 1337 graphics escapes on dumb terminals. *)
 
 val protocol_of_probe :
   graphics:Probe.graphics_reply option ->

@@ -466,7 +466,10 @@ let sync_config_for_keeper_view (m : Model.t) =
                   else
                     Knowledge_store.set_memory_diff_keeper (Some k.name)
                       m.knowledge
-                else Knowledge_store.close_memory_reading m.knowledge
+                else
+                  m.knowledge
+                  |> Knowledge_store.close_memory_reading
+                  |> Knowledge_store.close_memory_diagram
               in
               {
                 m with
@@ -481,7 +484,10 @@ let sync_config_for_keeper_view (m : Model.t) =
           | Nav.Keepers, None ->
               {
                 m with
-                knowledge = Knowledge_store.close_memory_reading m.knowledge;
+                knowledge =
+                  m.knowledge
+                  |> Knowledge_store.close_memory_reading
+                  |> Knowledge_store.close_memory_diagram;
               }
           | (Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Runtime | Nav.Infra), _ ->
               m))
@@ -501,7 +507,11 @@ let switch_workspace (m : Model.t) ws =
   in
   let drafts = Drafts.set_focus false m.drafts in
   let config = Config_store.cancel_edit_field m.config in
-  let knowledge = Knowledge_store.close_memory_reading m.knowledge in
+  let knowledge =
+    m.knowledge
+    |> Knowledge_store.close_memory_reading
+    |> Knowledge_store.close_memory_diagram
+  in
   let next =
     { m with nav; drafts; config; knowledge; inline_modal = None }
     |> sync_config_for_keeper_view
@@ -679,11 +689,18 @@ let push_dive (m : Model.t) dive =
   let knowledge =
     match dive with
     | Nav.Dive_keeper { name; tab = Nav.Keeper_memory } ->
-        Knowledge_store.set_memory_diff_keeper (Some name) m.knowledge
+        m.knowledge
+        |> Knowledge_store.close_memory_diagram
+        |> Knowledge_store.set_memory_diff_keeper (Some name)
     | Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; _ }) ->
         if Option.equal String.equal m.knowledge.memory_diff_keeper keeper then
-          Knowledge_store.close_memory_reading m.knowledge
-        else Knowledge_store.set_memory_diff_keeper keeper m.knowledge
+          m.knowledge
+          |> Knowledge_store.close_memory_reading
+          |> Knowledge_store.close_memory_diagram
+        else
+          m.knowledge
+          |> Knowledge_store.close_memory_diagram
+          |> Knowledge_store.set_memory_diff_keeper keeper
     | Nav.Dive_keeper
         {
           tab =
@@ -697,7 +714,9 @@ let push_dive (m : Model.t) dive =
     | Nav.Dive_knowledge
         (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
     | Nav.Dive_infra _ ->
-        Knowledge_store.close_memory_reading m.knowledge
+        m.knowledge
+        |> Knowledge_store.close_memory_reading
+        |> Knowledge_store.close_memory_diagram
   in
   let next =
     { m with nav; drafts; fleet; config; knowledge; inline_modal = None }
@@ -765,12 +784,16 @@ let cycle_sub_tab (m : Model.t) dir =
           let knowledge =
             match next_tab with
             | Nav.Keeper_memory ->
-                Knowledge_store.set_memory_diff_keeper (Some name) m.knowledge
+                m.knowledge
+                |> Knowledge_store.close_memory_diagram
+                |> Knowledge_store.set_memory_diff_keeper (Some name)
             | Nav.Keeper_chat
             | Nav.Keeper_work_candle
             | Nav.Keeper_sandbox
             | Nav.Keeper_config ->
-                Knowledge_store.close_memory_reading m.knowledge
+                m.knowledge
+                |> Knowledge_store.close_memory_reading
+                |> Knowledge_store.close_memory_diagram
           in
           let next = { m with nav; drafts; fleet; config; knowledge } in
           (next, View_fetches.fetches_for_current_view next)
@@ -1516,9 +1539,253 @@ let dive_attention_entry (m : Model.t) (entry : Attention.entry) =
       in
       switch_workspace { m with knowledge } Nav.Knowledge
 
+let launch_memory_diagram ~now ~keeper ~(content_rect : Rect.t) ~kind ~mode
+    ~(activity : Wire_knowledge.keeper_memory_activity)
+    ~(selected : Wire_knowledge.memory_activity_event) (m : Model.t) =
+  let facts = Observed.to_option m.knowledge.keeper_memory_facts in
+  match Memory_diagram.chart_of_activity ~keeper ~activity ~facts ~selected with
+  | None ->
+      ( Model.with_toast ~now ~level:Model.Toast_warning
+          (Say.make
+             ~ko:"선택한 변천 이벤트의 기억 계보를 구성할 수 없습니다"
+             ~en:"Could not build lineage chart for selected evolution event")
+          m
+      , [] )
+  | Some chart ->
+      let ko = Say.equal_lang m.lang Say.Lang_ko in
+      let max_width = Int.max 24 content_rect.w in
+      let now_unix = m.freshness.last_wall_unix in
+      let copy_source =
+        Memory_diagram.copy_source_of_chart ~tz_offset_sec:m.tz_offset_sec ~ko
+          ~now:now_unix ~keeper_name:keeper ~max_width ~kind ~mode chart
+      in
+      let request_id =
+        Knowledge_store.next_memory_diagram_request_id m.knowledge
+      in
+      let state : Knowledge_store.memory_diagram_state =
+        {
+          request_id;
+          keeper;
+          event_identity = selected.identity;
+          revision = selected.revision;
+          kind;
+          mode;
+          payload = Observed.loading ~since_ns:now;
+          scroll = 0;
+          copy_source;
+        }
+      in
+      let knowledge = Knowledge_store.open_memory_diagram state m.knowledge in
+      let nav =
+        match Model.active_dive m, m.nav.workspace with
+        | None, (Nav.Knowledge | Nav.Keepers) when not m.nav.zoomed ->
+            { m.nav with pane_index = 1 }
+        | ( None
+          , ( Nav.Pulse
+            | Nav.Work
+            | Nav.Knowledge
+            | Nav.Keepers
+            | Nav.Runtime
+            | Nav.Infra ) )
+        | ( Some _
+          , ( Nav.Pulse
+            | Nav.Work
+            | Nav.Knowledge
+            | Nav.Keepers
+            | Nav.Runtime
+            | Nav.Infra ) ) ->
+            m.nav
+      in
+      let cmd =
+        Cmd.Render_memory_diagram
+          {
+            epoch = m.epoch;
+            request_id;
+            keeper;
+            event_identity = selected.identity;
+            kind;
+            mode;
+            ko;
+            tz_offset_sec = m.tz_offset_sec;
+            now_unix;
+            max_width;
+            chart;
+          }
+      in
+      ({ m with nav; knowledge }, [ cmd ])
+
+let open_memory_diagram ~now ~kind (m : Model.t) =
+  match Memory_diagram.active_memory_content_rect m with
+  | None ->
+      let on_world_memory =
+        Option.is_none m.nav.overlay
+        && Option.is_none (Model.active_dive m)
+        && Nav.equal_workspace m.nav.workspace Nav.Knowledge
+        && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_memory
+        && Option.is_none m.knowledge.memory_diff_keeper
+      in
+      if on_world_memory then
+        ( Model.with_toast ~now ~level:Model.Toast_info
+            (Say.make
+               ~ko:"다이어그램을 보려면 왼쪽 목록에서 키퍼를 선택하세요"
+               ~en:"Select a keeper on the left to inspect memory diagrams")
+            m
+        , [] )
+      else (m, [])
+  | Some (keeper, content_rect) -> (
+      match Observed.to_option m.knowledge.keeper_memory_activity with
+      | Some act when String.equal act.keeper keeper -> (
+          let selected_opt, empty_toast =
+            match Memory_diagram.active_diagram m with
+            | Some d ->
+                ( List.find_opt
+                    (fun (ev : Wire_knowledge.memory_activity_event) ->
+                      String.equal ev.identity d.event_identity)
+                    act.events
+                , Say.make ~ko:"선택한 변천 이벤트를 찾을 수 없습니다"
+                    ~en:"Selected memory evolution event no longer in log" )
+            | None -> (
+                match m.knowledge.memory_view_mode with
+                | Knowledge_store.View_evolution ->
+                    ( Knowledge_store.selected_activity_event_for ~keeper
+                        m.knowledge
+                    , Say.make ~ko:"다이어그램을 열 변천 이벤트가 없습니다"
+                        ~en:"No memory evolution event selected" )
+                | Knowledge_store.View_facts -> (
+                    match
+                      Knowledge_store.selected_memory_fact_row ~keeper
+                        m.knowledge
+                    with
+                    | Some (Knowledge_store.Fact_ordinary { fact; _ }) ->
+                        ( Memory_diagram.find_latest_event_for_fact
+                            ~memory_id:fact.memory_id act
+                        , Say.make
+                            ~ko:"선택한 기억 사실과 연결된 변천 이벤트가 최근 이력에 없습니다"
+                            ~en:"No recent evolution event references the selected fact"
+                        )
+                    | Some
+                        ( Knowledge_store.Fact_source _
+                        | Knowledge_store.Fact_source_invalidation _ )
+                    | None ->
+                        ( None
+                        , Say.make
+                            ~ko:"다이어그램을 열 일반 기억 사실을 선택하세요"
+                            ~en:"Select an ordinary memory fact to open its diagram"
+                        ))
+                | Knowledge_store.View_diff ->
+                    let diff_match =
+                      match
+                        Knowledge_store.selected_memory_diff_item_for
+                          ~keeper_opt:(Some keeper) m.knowledge
+                      with
+                      | Some (Knowledge_store.Keeper_added f) ->
+                          Memory_diagram.find_latest_event_for_fact
+                            ~memory_id:f.memory_id act
+                      | Some (Knowledge_store.Keeper_updated u) -> (
+                          match
+                            Memory_diagram.find_latest_event_for_fact
+                              ~memory_id:u.after.memory_id act
+                          with
+                          | Some _ as ev -> ev
+                          | None ->
+                              Memory_diagram.find_latest_event_for_fact
+                                ~memory_id:u.before.memory_id act)
+                      | Some (Knowledge_store.Keeper_retracted r) ->
+                          Memory_diagram.find_latest_event_for_fact
+                            ~memory_id:r.memory_id act
+                      | Some (Knowledge_store.Keeper_invalidated inv) ->
+                          Memory_diagram.find_latest_event_for_fact
+                            ~memory_id:inv.memory_id act
+                      | Some
+                          ( Knowledge_store.World_added _
+                          | Knowledge_store.World_updated _
+                          | Knowledge_store.World_retracted _ )
+                      | None ->
+                          None
+                    in
+                    let resolved =
+                      match diff_match with
+                      | Some _ as ev -> ev
+                      | None ->
+                          Knowledge_store.selected_activity_event_for ~keeper
+                            m.knowledge
+                    in
+                    ( resolved
+                    , Say.make ~ko:"다이어그램을 열 변천 이벤트가 없습니다"
+                        ~en:"No memory evolution event available for diagram" ))
+          in
+          match selected_opt with
+          | None ->
+              (Model.with_toast ~now ~level:Model.Toast_info empty_toast m, [])
+          | Some selected ->
+              let mode =
+                match Memory_diagram.active_diagram m with
+                | Some d -> d.mode
+                | None -> Knowledge_store.Diagram_mode_auto
+              in
+              launch_memory_diagram ~now ~keeper ~content_rect ~kind ~mode
+                ~activity:act ~selected m)
+      | Some _ | None ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make
+                 ~ko:"기억 변천 이력을 불러오는 중입니다..."
+                 ~en:"Loading memory evolution activity...")
+              m
+          , [
+              Cmd.Http_get
+                {
+                  epoch = m.epoch;
+                  req = Cmd.Get_keeper_memory_activity { keeper; limit = 50 };
+                };
+            ] ))
+
+let cycle_memory_diagram_mode ~now (m : Model.t) =
+  match
+    Memory_diagram.active_diagram m, Memory_diagram.active_memory_content_rect m
+  with
+  | Some d, Some (keeper, content_rect) when String.equal d.keeper keeper -> (
+      match Observed.to_option m.knowledge.keeper_memory_activity with
+      | Some act when String.equal act.keeper keeper -> (
+          match
+            List.find_opt
+              (fun (ev : Wire_knowledge.memory_activity_event) ->
+                String.equal ev.identity d.event_identity)
+              act.events
+          with
+          | Some selected ->
+              let mode = Knowledge_store.next_memory_diagram_mode d.mode in
+              launch_memory_diagram ~now ~keeper ~content_rect ~kind:d.kind
+                ~mode ~activity:act ~selected m
+          | None -> (m, []))
+      | Some _ | None -> (m, []))
+  | (Some _ | None), (Some _ | None) -> (m, [])
+
+let refresh_open_memory_diagram ~now (m : Model.t) =
+  match
+    Memory_diagram.active_diagram m, Memory_diagram.active_memory_content_rect m
+  with
+  | Some d, Some (keeper, content_rect) when String.equal d.keeper keeper -> (
+      match Observed.to_option m.knowledge.keeper_memory_activity with
+      | Some act when String.equal act.keeper keeper -> (
+          match
+            List.find_opt
+              (fun (ev : Wire_knowledge.memory_activity_event) ->
+                String.equal ev.identity d.event_identity)
+              act.events
+          with
+          | Some selected ->
+              launch_memory_diagram ~now ~keeper ~content_rect ~kind:d.kind
+                ~mode:d.mode ~activity:act ~selected m
+          | None -> (m, []))
+      | Some _ | None -> (m, []))
+  | (Some _ | None), (Some _ | None) -> (m, [])
+
 let open_memory_reading_for ?(force_diff = false) ~keeper_opt (m : Model.t) =
   let k = m.knowledge in
-  if Option.is_some k.memory_reading then (m, [])
+  if
+    Option.is_some k.memory_reading
+    || Option.is_some (Memory_diagram.active_diagram m)
+  then (m, [])
   else
     let entry_opt =
       if force_diff then
@@ -1722,13 +1989,15 @@ let dive_selected (m : Model.t) =
                       ] )
               in
               if m.nav.pane_index = 1 || m.nav.zoomed then
-                let opened, cmds =
-                  open_memory_reading_for
-                    ~keeper_opt:m.knowledge.memory_diff_keeper m
-                in
-                if Option.is_some opened.knowledge.memory_reading then
-                  (opened, cmds)
-                else enter_diff_dive ()
+                if Option.is_some (Memory_diagram.active_diagram m) then (m, [])
+                else
+                  let opened, cmds =
+                    open_memory_reading_for
+                      ~keeper_opt:m.knowledge.memory_diff_keeper m
+                  in
+                  if Option.is_some opened.knowledge.memory_reading then
+                    (opened, cmds)
+                  else enter_diff_dive ()
               else
                 match Knowledge_store.selected_memory_left_row m.knowledge with
                 | Some (Knowledge_store.Left_writer w) ->
@@ -3857,6 +4126,26 @@ let memory_reading_max_scroll (m : Model.t) =
         in
         max 0 (total - body_h)
 
+let memory_diagram_max_scroll (m : Model.t) =
+  match
+    Memory_diagram.active_diagram m, Memory_diagram.active_memory_content_rect m
+  with
+  | Some d, Some (_, content_rect) ->
+      let body_rect, _ = Memory_diagram.diagram_body_rect ~content_rect d in
+      if Rect.is_empty body_rect then 0
+      else
+        let total =
+          match Observed.to_option d.payload with
+          | Some (Knowledge_store.Diagram_text { lines; _ }) ->
+              List.length lines
+          | Some (Knowledge_store.Diagram_pele_png { fallback_lines; _ }) ->
+              if Memory_diagram.can_render_png_in_rect ~content_rect d then 0
+              else List.length fallback_lines
+          | None -> 0
+        in
+        max 0 (total - body_rect.h)
+  | (Some _ | None), (Some _ | None) -> 0
+
 let dive_max_scroll (m : Model.t) active =
   let bp = ui_bp m in
   let br = ui_body_rect m in
@@ -4630,6 +4919,9 @@ let apply_move (m : Model.t) dir =
                 move_keeper_config_selection ~embedded:false ~name
                   ~delta:(move_delta dir) m
             | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
+                let has_matching_diagram =
+                  Option.is_some (Memory_diagram.active_diagram m)
+                in
                 let has_matching_reading =
                   match m.knowledge.memory_reading with
                   | Some entry ->
@@ -4637,7 +4929,15 @@ let apply_move (m : Model.t) dir =
                         ~keeper_opt:(Some name) entry
                   | None -> false
                 in
-                if has_matching_reading then
+                if has_matching_diagram then
+                  let sd = scroll_delta dir in
+                  let max_scroll = memory_diagram_max_scroll m in
+                  let knowledge =
+                    Knowledge_store.scroll_memory_diagram ~max_scroll ~delta:sd
+                      m.knowledge
+                  in
+                  ({ m with knowledge }, [])
+                else if has_matching_reading then
                   let sd = scroll_delta dir in
                   let max_scroll = memory_reading_max_scroll m in
                   let knowledge =
@@ -4783,6 +5083,9 @@ let apply_move (m : Model.t) dir =
                               move_keeper_config_selection ~embedded
                                 ~name:k.name ~delta:(move_delta dir) m
                           | Nav.Keeper_memory ->
+                              let has_matching_diagram =
+                                Option.is_some (Memory_diagram.active_diagram m)
+                              in
                               let has_matching_reading =
                                 match m.knowledge.memory_reading with
                                 | Some entry ->
@@ -4790,7 +5093,15 @@ let apply_move (m : Model.t) dir =
                                       ~keeper_opt:(Some k.name) entry
                                 | None -> false
                               in
-                              if has_matching_reading then
+                              if has_matching_diagram then
+                                let sd = scroll_delta dir in
+                                let max_scroll = memory_diagram_max_scroll m in
+                                let knowledge =
+                                  Knowledge_store.scroll_memory_diagram
+                                    ~max_scroll ~delta:sd m.knowledge
+                                in
+                                ({ m with knowledge }, [])
+                              else if has_matching_reading then
                                 let sd = scroll_delta dir in
                                 let max_scroll = memory_reading_max_scroll m in
                                 let knowledge =
@@ -4999,6 +5310,11 @@ let apply_move (m : Model.t) dir =
                       | None -> None
                     in
                     let prev_mem_keeper = m.knowledge.memory_diff_keeper in
+                    let has_matching_diagram =
+                      Nav.equal_knowledge_tab m.knowledge.active_tab
+                        Nav.Knowledge_memory
+                      && Option.is_some (Memory_diagram.active_diagram m)
+                    in
                     let has_matching_reading =
                       Nav.equal_knowledge_tab m.knowledge.active_tab
                         Nav.Knowledge_memory
@@ -5013,6 +5329,7 @@ let apply_move (m : Model.t) dir =
                       Nav.equal_knowledge_tab m.knowledge.active_tab
                         Nav.Knowledge_memory
                       && eff_pane = 1
+                      && (not has_matching_diagram)
                       && (not has_matching_reading)
                       && Option.is_some m.knowledge.memory_diff_keeper
                       &&
@@ -5029,7 +5346,9 @@ let apply_move (m : Model.t) dir =
                     in
                     let max_detail_scroll =
                       if eff_pane = 1 then
-                        if has_matching_reading then
+                        if has_matching_diagram then
+                          Some (memory_diagram_max_scroll m)
+                        else if has_matching_reading then
                           Some (memory_reading_max_scroll m)
                         else Some (knowledge_detail_max_scroll m)
                       else None

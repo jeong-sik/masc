@@ -234,6 +234,125 @@ let render_full_reading ~grid ~(rect : Rect.t) ~(theme : Theme.t)
         (Store_scroll.drop skip lines)
     end
 
+(* --- Interactive Memory Diagram Renderer (Pele SVG / Mermaid / Formation Tree) --- *)
+
+let active_diagram_body_rect = Memory_diagram.active_diagram_body_rect
+
+let render_memory_diagram ~grid ~(rect : Rect.t) ~(theme : Theme.t)
+    ~(lang : Say.lang) ~(diagram : Knowledge_store.memory_diagram_state) =
+  if Rect.is_empty rect then ()
+  else
+    let bg = Color.of_rgb theme.surface_1 in
+    let hdr_rect, after_hdr = Rect.split_v rect ~top_h:1 in
+    let hdr_bg = Color.of_rgb theme.surface_2 in
+    Cell_grid.fill_rect ~clip:hdr_rect grid ~rect:hdr_rect
+      ~style:(Style.make ~bg:hdr_bg ())
+      ();
+    let kind_lbl =
+      match diagram.kind with
+      | Knowledge_store.Diagram_pele_card ->
+          say lang ~ko:"Pele/Mermaid 카드" ~en:"Pele/Mermaid Card"
+      | Knowledge_store.Diagram_formation_tree ->
+          say lang ~ko:"기억 형성 트리" ~en:"Formation Tree"
+    in
+    let mode_lbl =
+      match diagram.mode with
+      | Knowledge_store.Diagram_mode_auto -> (
+          match Observed.to_option diagram.payload with
+          | Some (Knowledge_store.Diagram_pele_png { format_label; _ }) ->
+              "Auto · " ^ format_label
+          | Some (Knowledge_store.Diagram_text _) | None -> "Auto")
+      | Knowledge_store.Diagram_mode_mermaid -> "Mermaid"
+      | Knowledge_store.Diagram_mode_tree -> "Tree"
+    in
+    let title =
+      Printf.sprintf "%s · r%d [%s]" kind_lbl diagram.revision mode_lbl
+    in
+    let hint =
+      say lang ~ko:"[v] Pele/Mermaid/Tree · [y] 복사 · [Esc] 닫기"
+        ~en:"[v] Pele/Mermaid/Tree · [y] Copy · [Esc] Close"
+    in
+    let hw = Grapheme.display_width hint in
+    ignore
+      (put_clipped ~grid ~clip:hdr_rect ~x:(hdr_rect.x + 1) ~y:hdr_rect.y
+         ~max_w:(Int.max 6 (hdr_rect.w - hw - 3))
+         ~style:(Typography.anchor ~bg:hdr_bg theme)
+         title);
+    if hdr_rect.w > hw + 10 then
+      ignore
+        (put_right ~grid ~clip:hdr_rect ~right_x:(Rect.right hdr_rect - 1)
+           ~y:hdr_rect.y ~max_w:hw
+           ~style:(Typography.whisper ~bg:hdr_bg ~italic:false theme)
+           hint);
+    if not (Rect.is_empty after_hdr) then begin
+      let body_rect, has_note =
+        Memory_diagram.diagram_body_rect ~content_rect:rect diagram
+      in
+      let draw_note note_txt =
+        if has_note then begin
+          let note_r, _ = Rect.split_v after_hdr ~top_h:1 in
+          Card.draw_left_rail ~bg ~tone:Theme.Status_attention grid ~x:note_r.x
+            ~y:note_r.y ~h:1 ~theme;
+          ignore
+            (put_clipped ~grid ~clip:note_r ~x:(note_r.x + 2) ~y:note_r.y
+               ~max_w:(Int.max 0 (note_r.w - 2))
+               ~style:(Typography.status ~bg theme Theme.Status_attention)
+               note_txt)
+        end
+      in
+      let draw_text_lines lines =
+        if not (Rect.is_empty body_rect) then begin
+          let vis_h = Int.max 1 body_rect.h in
+          let max_scroll = Int.max 0 (List.length lines - vis_h) in
+          let skip = Int.min max_scroll (Int.max 0 diagram.scroll) in
+          let y = ref body_rect.y in
+          let bottom = Rect.bottom body_rect in
+          List.iter
+            (fun line ->
+              if !y < bottom then begin
+                ignore
+                  (put_clipped ~grid ~clip:body_rect ~x:body_rect.x ~y:!y
+                     ~max_w:body_rect.w
+                     ~style:(Typography.primary ~bg theme)
+                     line);
+                incr y
+              end)
+            (Store_scroll.drop skip lines)
+        end
+      in
+      match diagram.payload with
+      | Observed.Value { data = Knowledge_store.Diagram_pele_png { fallback_lines; _ }; _ } ->
+          if Memory_diagram.can_render_png_in_rect ~content_rect:rect diagram
+          then
+            (* Clean surface canvas so Kitty/iTerm2 pixel overlay paints without text bleed *)
+            Cell_grid.fill_rect ~clip:body_rect grid ~rect:body_rect
+              ~style:(Style.make ~bg ())
+              ()
+          else begin
+            draw_note
+              (say lang ~ko:"표시 영역이 좁아 텍스트 폴백으로 전환됨"
+                 ~en:"Viewport narrow · showing text fallback");
+            draw_text_lines fallback_lines
+          end
+      | Observed.Value { data = Knowledge_store.Diagram_text { lines; note }; _ } ->
+          (match note with
+          | Some n when not (String.equal (String.trim n) "") -> draw_note n
+          | Some _ | None -> ());
+          draw_text_lines lines
+      | Observed.Loading _ ->
+          let msg =
+            Glyph.to_utf8 Glyph.Transport_reconnecting ^ " "
+            ^ say lang ~ko:"다이어그램 렌더링 중..." ~en:"Rendering diagram..."
+          in
+          ignore
+            (put_clipped ~grid ~clip:body_rect ~x:body_rect.x ~y:body_rect.y
+               ~max_w:body_rect.w
+               ~style:(Typography.whisper ~bg theme)
+               msg)
+      | (Observed.Absent | Observed.Unreported | Observed.Failed _) as obs ->
+          draw_observed_notice ~grid ~rect:body_rect ~theme ~lang ~bg obs
+    end
+
 (* --- Mode Switch Pills Bar --- *)
 
 let draw_mode_pills ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~(lang : Say.lang)
@@ -286,7 +405,8 @@ let draw_mode_pills ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~(lang : Say.lang)
     let right_hint =
       match k.memory_view_mode with
       | Knowledge_store.View_evolution ->
-          say lang ~ko:"[t] 전환 · [Enter] 전문" ~en:"[t] Mode · [Enter] Read"
+          say lang ~ko:"[Enter] 전문 · [.] Pele/Mermaid · [Ctrl+O] 형성 트리"
+            ~en:"[Enter] Read · [.] Pele/Mermaid · [Ctrl+O] Tree"
       | Knowledge_store.View_facts ->
           let sort_lbl =
             match k.memory_facts_sort with
@@ -1408,35 +1528,41 @@ let render_keeper_memory ~grid ~(rect : Rect.t) ~(theme : Theme.t)
     let now_unix = model.freshness.last_wall_unix in
     let k = model.knowledge in
     let bg = Color.of_rgb theme.surface_1 in
-    match k.memory_reading with
-    | Some entry
-      when Knowledge_store.memory_reading_matches_scope
-             ~keeper_opt:(Some keeper) entry ->
-        render_full_reading ~grid ~rect ~theme ~lang ~now_unix ~entry
-          ~scroll:k.memory_reading_scroll
-    | Some _ | None ->
-        let bar_rect, body_rect = Rect.split_v rect ~top_h:1 in
-        draw_mode_pills ~grid ~rect:bar_rect ~theme ~lang ~bg ~k ~keeper;
-        if not (Rect.is_empty body_rect) then begin
-          let chart_used =
-            draw_keeper_chart_strip ~grid ~rect:body_rect ~theme ~lang ~bg
-              ~keeper ~k
-          in
-          let list_rect =
-            Rect.make ~x:body_rect.x ~y:(body_rect.y + chart_used)
-              ~w:body_rect.w ~h:(Int.max 0 (body_rect.h - chart_used))
-          in
-          match k.memory_view_mode with
-          | Knowledge_store.View_evolution ->
-              render_evolution_view ~grid ~rect:list_rect ~theme ~lang ~now_unix
-                ~bg ~keeper ~k ~focused
-          | Knowledge_store.View_facts ->
-              render_facts_view ~grid ~rect:list_rect ~theme ~lang ~now_unix ~bg
-                ~keeper ~k ~focused
-          | Knowledge_store.View_diff ->
-              render_keeper_diff_view ~grid ~rect:list_rect ~theme ~lang
-                ~now_unix ~bg ~keeper ~k ~focused ~diff_scroll
-        end
+    match k.memory_diagram with
+    | Some diagram
+      when Knowledge_store.memory_diagram_matches_scope
+             ~keeper_opt:(Some keeper) diagram ->
+        render_memory_diagram ~grid ~rect ~theme ~lang ~diagram
+    | Some _ | None -> (
+        match k.memory_reading with
+        | Some entry
+          when Knowledge_store.memory_reading_matches_scope
+                 ~keeper_opt:(Some keeper) entry ->
+            render_full_reading ~grid ~rect ~theme ~lang ~now_unix ~entry
+              ~scroll:k.memory_reading_scroll
+        | Some _ | None ->
+            let bar_rect, body_rect = Rect.split_v rect ~top_h:1 in
+            draw_mode_pills ~grid ~rect:bar_rect ~theme ~lang ~bg ~k ~keeper;
+            if not (Rect.is_empty body_rect) then begin
+              let chart_used =
+                draw_keeper_chart_strip ~grid ~rect:body_rect ~theme ~lang ~bg
+                  ~keeper ~k
+              in
+              let list_rect =
+                Rect.make ~x:body_rect.x ~y:(body_rect.y + chart_used)
+                  ~w:body_rect.w ~h:(Int.max 0 (body_rect.h - chart_used))
+              in
+              match k.memory_view_mode with
+              | Knowledge_store.View_evolution ->
+                  render_evolution_view ~grid ~rect:list_rect ~theme ~lang
+                    ~now_unix ~bg ~keeper ~k ~focused
+              | Knowledge_store.View_facts ->
+                  render_facts_view ~grid ~rect:list_rect ~theme ~lang ~now_unix
+                    ~bg ~keeper ~k ~focused
+              | Knowledge_store.View_diff ->
+                  render_keeper_diff_view ~grid ~rect:list_rect ~theme ~lang
+                    ~now_unix ~bg ~keeper ~k ~focused ~diff_scroll
+            end)
 
 let render_world_diff_body ~grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(lang : Say.lang) ~now_unix ~(k : Knowledge_store.t) ~focused ~diff_scroll

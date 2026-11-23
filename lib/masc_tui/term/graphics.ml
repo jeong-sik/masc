@@ -16,6 +16,32 @@ let fit_rows ~cell_pixels ~image_pixels ~columns ~rows =
       max 1 (int_of_float (min (float_of_int (max 1 rows)) allowed))
   | Some _, Some _ | Some _, None | None, Some _ | None, None -> max 1 rows
 
+let fit_cells ~cell_pixels ~image_pixels ~columns ~rows =
+  let max_cols = max 1 columns in
+  let max_rows = max 1 rows in
+  match image_pixels with
+  | Some (iw, ih) when iw > 0 && ih > 0 ->
+      let cw, ch =
+        match cell_pixels with
+        | Some (w, h) when w > 0 && h > 0 -> (w, h)
+        | Some _ | None -> (8, 16)
+      in
+      let box_w_px = float_of_int max_cols *. float_of_int cw in
+      let box_h_px = float_of_int max_rows *. float_of_int ch in
+      let scale =
+        Float.min (box_w_px /. float_of_int iw) (box_h_px /. float_of_int ih)
+      in
+      let scaled_cols =
+        int_of_float
+          (Float.floor ((float_of_int iw *. scale /. float_of_int cw) +. 1e-9))
+      in
+      let scaled_rows =
+        int_of_float
+          (Float.floor ((float_of_int ih *. scale /. float_of_int ch) +. 1e-9))
+      in
+      (max 1 (min max_cols scaled_cols), max 1 (min max_rows scaled_rows))
+  | Some _ | None -> (max_cols, max_rows)
+
 type query_reply =
   | Supported
   | Refused of string
@@ -269,6 +295,17 @@ let equal_graphics_protocol a b =
   | ITerm2_protocol, (Kitty_protocol | Unsupported_protocol)
   | Unsupported_protocol, (Kitty_protocol | ITerm2_protocol) ->
       false
+
+let effective_term_program ~getenv =
+  let term_usable =
+    match getenv "TERM" with
+    | Some term ->
+        let trimmed = String.trim term in
+        String.length trimmed > 0
+        && not (String.equal (String.lowercase_ascii trimmed) "dumb")
+    | None -> false
+  in
+  if not term_usable then None else getenv "TERM_PROGRAM"
 
 let protocol_of_probe ~graphics ~term_program =
   match graphics with

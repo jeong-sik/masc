@@ -133,6 +133,152 @@ let apply_terminal_reply ~probe_decoder
   let after = Probe.observation probe_decoder in
   if Probe.equal_observation before after then None else Some after
 
+type memory_graphic_state = {
+  key : string;
+  rect : Rect.t;
+  protocol : Graphics.graphics_protocol;
+}
+
+let equal_memory_graphic_state a b =
+  String.equal a.key b.key
+  && Rect.equal a.rect b.rect
+  && Graphics.equal_graphics_protocol a.protocol b.protocol
+
+type memory_graphic_step = {
+  pre_present_bytes : string;
+  invalidate_presenter : bool;
+  post_present_bytes : string;
+  next_state : memory_graphic_state option;
+}
+
+let wrap_tmux ~in_tmux payload =
+  if in_tmux then Graphics.tmux_wrapped payload else payload
+
+let teardown_memory_graphic_bytes ~in_tmux = function
+  | Some { protocol = Graphics.Kitty_protocol; _ } ->
+      wrap_tmux ~in_tmux
+        (Graphics.delete_image
+           ~image_id:(Graphics.image_id Graphics.Memory_diagram))
+  | Some { protocol = Graphics.ITerm2_protocol | Graphics.Unsupported_protocol; _ }
+  | None ->
+      ""
+
+let composer_popup_open (model : Model.t) =
+  match Update_nav.resolve_composer_popup model with
+  | Update_nav.Composer_popup_none -> false
+  | Update_nav.Composer_popup_slash _ | Update_nav.Composer_popup_mention _ ->
+      true
+
+let desired_memory_graphic ~(probe : Probe.observation) ~term_program
+    ~(model : Model.t) =
+  if composer_popup_open model then None
+  else
+  let protocol =
+    Graphics.protocol_of_probe ~graphics:probe.graphics ~term_program
+  in
+  match protocol with
+  | Graphics.Unsupported_protocol -> None
+  | Graphics.Kitty_protocol | Graphics.ITerm2_protocol -> (
+      match
+        Memory_diagram.active_memory_content_rect model,
+        Memory_diagram.active_diagram model
+      with
+      | Some (keeper, content_rect), Some d
+        when Memory_diagram.can_render_png_in_rect ~content_rect d -> (
+          match Observed.to_option d.payload with
+          | Some
+              (Knowledge_store.Diagram_pele_png
+                 { png; pixel_size; _ })
+            when String.length png > 0 ->
+              let rect, _ = Memory_diagram.diagram_body_rect ~content_rect d in
+              if
+                rect.w >= Memory_diagram.min_graphic_cols
+                && rect.h >= Memory_diagram.min_graphic_rows
+              then
+                let kind_s =
+                  match d.kind with
+                  | Knowledge_store.Diagram_pele_card -> "card"
+                  | Knowledge_store.Diagram_formation_tree -> "tree"
+                in
+                let fit_cols, fit_rows =
+                  match protocol with
+                  | Graphics.Kitty_protocol ->
+                      Graphics.fit_cells ~cell_pixels:probe.cell_pixels
+                        ~image_pixels:pixel_size ~columns:rect.w ~rows:rect.h
+                  | Graphics.ITerm2_protocol | Graphics.Unsupported_protocol ->
+                      (rect.w, rect.h)
+                in
+                let key =
+                  Printf.sprintf "%s|%s|%s|%dx%d|%s" keeper d.event_identity
+                    kind_s fit_cols fit_rows (Digest.to_hex (Digest.string png))
+                in
+                Some ({ key; rect; protocol }, png, pixel_size)
+              else None
+          | Some (Knowledge_store.Diagram_pele_png _ | Knowledge_store.Diagram_text _)
+          | None ->
+              None)
+      | (Some _ | None), (Some _ | None) -> None)
+
+let plan_memory_graphic_clear ~active ~probe ~term_program ~in_tmux ~model =
+  let desired = desired_memory_graphic ~probe ~term_program ~model in
+  match active, desired with
+  | None, _ -> ("", false, None)
+  | Some prev, Some (next, _, _) when equal_memory_graphic_state prev next ->
+      ("", false, active)
+  | Some prev, (None | Some _) ->
+      let bytes = teardown_memory_graphic_bytes ~in_tmux (Some prev) in
+      (bytes, true, None)
+
+let plan_memory_graphic_place ~active ~probe ~term_program ~in_tmux ~model
+    ~full_repaint =
+  let desired = desired_memory_graphic ~probe ~term_program ~model in
+  match active, desired with
+  | _, None -> ("", None)
+  | Some prev, Some (next, _, _)
+    when equal_memory_graphic_state prev next && not full_repaint ->
+      ("", active)
+  | (None | Some _), Some (next, png, pixel_size) ->
+      let payload =
+        match next.protocol with
+        | Graphics.Kitty_protocol ->
+            let cols, rows =
+              Graphics.fit_cells ~cell_pixels:probe.cell_pixels
+                ~image_pixels:pixel_size ~columns:next.rect.w ~rows:next.rect.h
+            in
+            wrap_tmux ~in_tmux
+              (Graphics.replace_png
+                 ~image_id:(Graphics.image_id Graphics.Memory_diagram)
+                 ~placement_id:1 ~data:png ~rows ~cols ~crop:None)
+        | Graphics.ITerm2_protocol ->
+            wrap_tmux ~in_tmux
+              (Graphics.iterm2_place ~data:png
+                 { Graphics.columns = next.rect.w; rows = next.rect.h })
+        | Graphics.Unsupported_protocol -> ""
+      in
+      if String.equal payload "" then ("", None)
+      else
+        let bytes =
+          Printf.sprintf "\x1b7\x1b[%d;%dH%s\x1b8" (next.rect.y + 1)
+            (next.rect.x + 1) payload
+        in
+        (bytes, Some next)
+
+let step_memory_graphic ~active ~probe ~term_program ~in_tmux ~model
+    ~full_repaint =
+  let pre_present_bytes, invalidate_presenter, after_clear =
+    plan_memory_graphic_clear ~active ~probe ~term_program ~in_tmux ~model
+  in
+  let post_present_bytes, next_state =
+    plan_memory_graphic_place ~active:after_clear ~probe ~term_program ~in_tmux
+      ~model ~full_repaint:(full_repaint || invalidate_presenter)
+  in
+  {
+    pre_present_bytes;
+    invalidate_presenter;
+    post_present_bytes;
+    next_state;
+  }
+
 let local_tz_offset_sec ?(at = Unix.time ()) () =
   let lt = Unix.localtime at in
   let gt = Unix.gmtime at in
@@ -226,7 +372,8 @@ let detect_capabilities () : Presenter.capabilities =
 
 let msg_pace = function
   | Msg.Key_event _ | Msg.Paste_text _ | Msg.Mouse_event _ | Msg.Resize _
-  | Msg.Chat_stream_chunk _ | Msg.Chat_stream_done _ ->
+  | Msg.Chat_stream_chunk _ | Msg.Chat_stream_done _
+  | Msg.Memory_diagram_rendered _ ->
       Frame_scheduler.Pace_interactive
   | Msg.Boot | Msg.Tick _ | Msg.Server_health_result _
   | Msg.Server_start_result _ | Msg.Http_reply _ | Msg.Sse_event _
@@ -645,6 +792,27 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
         Terminal_out.install_switch_teardown ~sw
           ~kitty_keyboard:caps.kitty_keyboard ();
 
+        let term_program =
+          Graphics.effective_term_program ~getenv:Sys.getenv_opt
+        in
+        let in_tmux =
+          match Sys.getenv_opt "TMUX" with
+          | Some s -> not (String.equal (String.trim s) "")
+          | None -> false
+        in
+        let active_memory_graphic : memory_graphic_state option ref = ref None in
+        let clear_active_memory_graphic () =
+          let bytes =
+            teardown_memory_graphic_bytes ~in_tmux !active_memory_graphic
+          in
+          active_memory_graphic := None;
+          if not (String.equal bytes "") then begin
+            Terminal_out.write bytes;
+            Terminal_out.flush ()
+          end
+        in
+        Eio.Switch.on_release sw clear_active_memory_graphic;
+
         let clock = Eio.Stdenv.clock env in
         (* Bounded startup terminal probe (CSI 16t cell pixels, optional
            OSC 10/11/4 palette, Kitty APC G graphics). Early user keystrokes
@@ -713,6 +881,7 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
           {
             pause_terminal =
               (fun () ->
+                clear_active_memory_graphic ();
                 (match !input_handle with
                 | Some h ->
                     input_handle := None;
@@ -779,6 +948,7 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
             | Msg.Chat_stream_chunk _
             | Msg.Chat_stream_done _
             | Msg.Chat_stream_decode_warning _
+            | Msg.Memory_diagram_rendered _
             | Msg.Voice_event _
             | Msg.Stream_gap _ ->
                 false
@@ -1014,11 +1184,33 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                     let render_us =
                       Clock.Mono.us_since (Clock.Mono.now ()) ~since:render_start
                     in
+                    let probe_obs = Probe.current_observation () in
+                    let pre_bytes, invalidate_for_graphic, remaining_graphic =
+                      plan_memory_graphic_clear ~active:!active_memory_graphic
+                        ~probe:probe_obs ~term_program ~in_tmux ~model:!model
+                    in
+                    active_memory_graphic := remaining_graphic;
+                    if not (String.equal pre_bytes "") then begin
+                      Terminal_out.write pre_bytes;
+                      Terminal_out.flush ()
+                    end;
+                    if invalidate_for_graphic then Presenter.invalidate presenter;
                     let diff_stats =
                       Presenter.present_back presenter ~cursor
                         ~write:Terminal_out.write
                     in
                     if diff_stats.bytes_emitted > 0 then Terminal_out.flush ();
+                    let post_bytes, next_graphic =
+                      plan_memory_graphic_place ~active:!active_memory_graphic
+                        ~probe:probe_obs ~term_program ~in_tmux ~model:!model
+                        ~full_repaint:
+                          (diff_stats.full_repaint || invalidate_for_graphic)
+                    in
+                    active_memory_graphic := next_graphic;
+                    if not (String.equal post_bytes "") then begin
+                      Terminal_out.write post_bytes;
+                      Terminal_out.flush ()
+                    end;
                     let finished_ns = Clock.Mono.to_ns (Clock.Mono.now ()) in
                     scheduler :=
                       Frame_scheduler.record_rendered ~now_ns:finished_ns

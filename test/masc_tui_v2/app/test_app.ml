@@ -801,6 +801,7 @@ let test_cmd_executor_dispatch_and_cancellation () =
                  | Msg.Chat_stream_chunk _
                  | Msg.Chat_stream_done _
                  | Msg.Chat_stream_decode_warning _
+                 | Msg.Memory_diagram_rendered _
                  | Msg.Stream_gap _ ->
                      ())
              | Ui_bus.Snapshot _ | Ui_bus.Stream_gap _ -> ())
@@ -948,6 +949,7 @@ let test_remote_editor_escape_hatch_blocked () =
                 | Msg.Chat_stream_chunk _
                 | Msg.Chat_stream_done _
                 | Msg.Chat_stream_decode_warning _
+                 | Msg.Memory_diagram_rendered _
                 | Msg.Voice_event _
                 | Msg.Stream_gap _ ->
                     None)
@@ -1075,6 +1077,7 @@ let test_bus_key_hash_and_stream_frames () =
             | Msg.Chat_stream_chunk _
             | Msg.Chat_stream_done _
             | Msg.Chat_stream_decode_warning _
+                 | Msg.Memory_diagram_rendered _
             | Msg.Voice_event _
             | Msg.Stream_gap _ ) ) ->
             None)
@@ -1148,6 +1151,7 @@ let test_bus_key_hash_and_stream_frames () =
   | Msg.Chat_stream_chunk _
   | Msg.Chat_stream_done _
   | Msg.Chat_stream_decode_warning _
+                 | Msg.Memory_diagram_rendered _
   | Msg.Voice_event _
   | Msg.Stream_gap _ ->
       Alcotest.fail "expected Sse_models_metrics_snapshot");

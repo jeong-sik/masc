@@ -63,7 +63,8 @@ Run `masc-tui --help` for the exact CLI flags (`lib/masc_tui/app/cli_args.ml`):
 
 The legacy `--reasoning` and `--tool-view` startup flags were removed in v2.5
 and exit with code `2`. Switch reasoning display at runtime with `Alt+T`, and
-tool call detail with `Ctrl+O` or `/tools compact|results|full`.
+tool call detail with `Ctrl+O` or `/tools compact|results|full` (in Memory
+Explorer, `Ctrl+O` opens the Formation Tree diagram).
 
 ## Navigation & Keybindings
 
@@ -88,6 +89,7 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
 | `r` | Unfocused | Force refresh active view from server SSOT (triggers `force=1` probe on Runtime Quotas/Failover) |
 | `n` | Unfocused / Settings | Create new item in current workspace (Board post, `#goals` proposal, Schedule, Connector, Repo, or new Keeper) |
 | `o` | Unfocused / Settings | Open linked `http(s)` URL externally, open Artifact Viewer on Artifacts, or open local TOML in `$EDITOR` from Settings |
+| `.` / `Ctrl+O` / `v` | Memory Explorer (Unfocused) | `.` opens the Pele 3-stage SVG card (with Mermaid fallback) for the selected evolution event/fact; `Ctrl+O` opens the Formation Tree (Pele Graph / `Memory_tree`); while a diagram is open, `v` cycles `Auto (Pele)` → `Mermaid` → `Tree`, `y` copies diagram source, `r` retries, and `Esc` closes |
 
 ### `Esc` vs `Ctrl+Q`
 
@@ -139,7 +141,7 @@ composer dispatches navigation or overlay shortcuts (`1`–`6`, `,`, `I`, `?`,
    - **`←` / `→` / `Home` / `End`** — Move the editing cursor inside the draft (`Ctrl+←/→` or `Alt+←/→` jump by word).
    - **`Esc`** — Dismiss open `/` or `@` popup first, then blur the composer while preserving your per-Keeper draft.
 4. While reading Chat (unfocused):
-   - **`Ctrl+O`** or **`/tools [compact|results|full]`** — Cycle or set tool call detail mode.
+   - **`Ctrl+O`** or **`/tools [compact|results|full]`** — Cycle or set tool call detail mode (in Memory Explorer, opens the Formation Tree diagram).
    - **`Alt+T`** — Cycle thinking/reasoning display (`folded` → `full` → `hidden`).
    - **`Ctrl+F`** — Cycle origin display mode (`bare` → `inline` → `row`).
    - **`Space`** — Toggle inline turn details.
@@ -164,7 +166,7 @@ composer dispatches navigation or overlay shortcuts (`1`–`6`, `,`, `I`, `?`,
   - **Board**: selected post body
   - **Wiki**: open page Markdown (or selected page slug)
   - **Artifacts / Media Viewer**: selected artifact SHA-256
-  - **World Memory**: briefing text or top claim
+  - **World Memory / Memory Diagram**: briefing text or top claim; when a Memory Diagram is open, copies its Mermaid source or Formation Tree text
   - **Sandboxes / Repos / Logs**: keeper name, repository URL, or log message
   - **Work / Runtime**: goal/task title, schedule ID, ask ID, candle keeper, or lane ID
 
@@ -451,6 +453,17 @@ showing availability (`avail`), connected client count (`clients`), issue count
 - **Per-Keeper**: open **`4` Keepers → select Keeper → `Enter` → Memory** tab
   (`[ ]`). View that Keeper's scoped diff, **Retrieval Heat** stacked bar
   (`HOT` / `WARM` / `COLD` / `0x` hits), and per-Keeper Librarian recovery.
+- **Pele / Mermaid / Formation Tree Diagrams** (in **`3` Knowledge → Memory**
+  with a Keeper selected, or **`4` Keepers → Keeper → Memory**):
+  - Press **`.`** on an evolution event (or ordinary fact linked to an evolution
+    event) to open the **Pele 3-stage SVG card** (renders live Kitty/iTerm2
+    pixels when supported, and falls back deterministically to `Mermaid` text
+    otherwise).
+  - Press **`Ctrl+O`** to open the **Formation Tree** (Pele Graph PNG or
+    `Memory_tree` text fallback).
+  - Inside an open diagram: press **`v`** to cycle `Auto (Pele)` → `Mermaid` →
+    `Tree`, **`j`/`k`/`PgUp`/`PgDn`/`g`/`G`** to scroll text lines, **`y`** to
+    copy diagram source, **`r`** to retry/refresh, and **`Esc`** to close.
 
 ### Viewing Unified Logs & Live Events
 

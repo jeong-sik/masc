@@ -100,6 +100,18 @@ val sync_config_for_keeper_view : Model.t -> Model.t
 val cycle_sub_tab : Model.t -> Keymap.cycle_dir -> Model.t * Cmd.t list
 val dive_selected : Model.t -> Model.t * Cmd.t list
 
+val open_memory_diagram :
+  now:Clock.Mono.t ->
+  kind:Knowledge_store.memory_diagram_kind ->
+  Model.t ->
+  Model.t * Cmd.t list
+
+val cycle_memory_diagram_mode :
+  now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
+
+val refresh_open_memory_diagram :
+  now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
+
 val current_filter_query : Model.t -> string
 val set_active_filter_query : string -> Model.t -> Model.t
 

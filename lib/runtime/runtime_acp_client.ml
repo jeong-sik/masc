@@ -568,19 +568,22 @@ let extract_data_evidence ~fallback_message (data : Yojson.Safe.t option) =
   | None -> None, None, None, None, None
   | Some (`Assoc _ as obj) -> inspect_assoc obj
   | Some (`List items) ->
-    let rec walk remaining = function
-      | [] -> None, None, None, None, None
-      | _ when remaining <= 0 -> None, None, None, None, None
-      | (`Assoc _ as obj) :: rest ->
-        let status, retry, n_ctx, field_signal, matched_obj = inspect_assoc obj in
-        if Option.is_some field_signal
-           || Option.is_some status
-           || Option.is_some retry
-           || Option.is_some n_ctx
-        then status, retry, n_ctx, field_signal, matched_obj
-        else walk (remaining - 1) rest
-      | (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) :: rest ->
-        walk (remaining - 1) rest
+    let rec walk remaining items =
+      if remaining <= 0
+      then None, None, None, None, None
+      else (
+        match items with
+        | [] -> None, None, None, None, None
+        | (`Assoc _ as obj) :: rest ->
+          let status, retry, n_ctx, field_signal, matched_obj = inspect_assoc obj in
+          if Option.is_some field_signal
+             || Option.is_some status
+             || Option.is_some retry
+             || Option.is_some n_ctx
+          then status, retry, n_ctx, field_signal, matched_obj
+          else walk (remaining - 1) rest
+        | (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) :: rest ->
+          walk (remaining - 1) rest)
     in
     walk 8 items
   | Some (`String raw) ->

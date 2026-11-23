@@ -17,6 +17,12 @@ val absent : 'a t
 val unreported : 'a t
 val failed : reason:string -> retryable:bool -> at:Clock.Mono.t -> 'a t
 
+val fetch_failed :
+  reason:string -> retryable:bool -> at:Clock.Mono.t -> 'a t -> 'a t
+(** Record a failed fetch on a slot. A slot holding a [Value] keeps the data and
+    turns stale; any other slot becomes [Failed], so a panel that never loaded
+    shows the failure instead of looking like the server has not reported. *)
+
 val map : ('a -> 'b) -> 'a t -> 'b t
 val bind : 'a t -> ('a -> 'b t) -> 'b t
 
@@ -28,6 +34,10 @@ val is_loading : 'a t -> bool
 val is_value : 'a t -> bool
 val is_stale : 'a t -> bool
 val mark_stale : 'a t -> 'a t
+(** The question behind the slot changed: new parameters, a reconnect, a
+    dataset event. A [Value] keeps its data and is marked stale. A [Failed]
+    keeps its reason and becomes retryable, because the next request is no
+    longer the one that failed. Other states are unchanged. *)
 
 val observed_at : 'a t -> Clock.Mono.t option
 (** [Some observed_at] for [Value _]; [None] for all other states. *)

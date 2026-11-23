@@ -6946,6 +6946,93 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
   Alcotest.(check bool) "other-keeper journal append keeps alpha facts fresh" false
     (Observed.is_stale m_sse_other_journal.knowledge.keeper_memory_facts)
 
+let test_fetch_failure_lands_on_panel_slot () =
+  let step_reply r (m : Model.t) =
+    fst (Update.step ~now:t1 m (Msg.Http_reply { epoch = m.epoch; reply = r }))
+  in
+  let m0 = Model.initial () in
+  let m1 =
+    step_reply (Msg.Reply_asks (Error (Msg.Decode_error "asks[0]: drift"))) m0
+  in
+  (match m1.work.asks with
+  | Observed.Failed { retryable; _ } ->
+      Alcotest.(check bool) "a decode failure is not retryable" false retryable
+  | Observed.Loading _ | Observed.Value _ | Observed.Absent
+  | Observed.Unreported ->
+      Alcotest.fail "a panel that never loaded shows the fetch failure");
+  let m2 = step_reply (Msg.Reply_asks (Ok [])) m1 in
+  let m3 =
+    step_reply (Msg.Reply_asks (Error (Msg.Transport Health.Timeout))) m2
+  in
+  match m3.work.asks with
+  | Observed.Value { data; stale; _ } ->
+      Alcotest.(check int) "a failed refetch keeps the last rows" 0
+        (List.length data);
+      Alcotest.(check bool) "a failed refetch marks the rows stale" true stale
+  | Observed.Loading _ | Observed.Failed _ | Observed.Absent
+  | Observed.Unreported ->
+      Alcotest.fail "a failed refetch keeps the last good value"
+
+(* A failure that is not retryable is asked again once the question changes.
+   New parameters mark it stale, and a slot that holds one keeper at a time
+   cannot tell which keeper failed. *)
+let test_failure_is_asked_again_for_a_new_question () =
+  (match
+     Observed.mark_stale
+       (Observed.fetch_failed ~reason:"board[0]: drift" ~retryable:false
+          ~at:t0 Observed.unreported)
+   with
+  | Observed.Failed { retryable; reason; _ } ->
+      Alcotest.(check bool) "new parameters make the failure retryable" true
+        retryable;
+      Alcotest.(check string) "the panel keeps the reason" "board[0]: drift"
+        reason
+  | Observed.Loading _ | Observed.Value _ | Observed.Absent
+  | Observed.Unreported ->
+      Alcotest.fail "a stale failure stays a failure");
+  let m0 = Model.initial () in
+  let failed, _ =
+    Update.step ~now:t1 m0
+      (Msg.Http_reply
+         {
+           epoch = m0.epoch;
+           reply =
+             Msg.Reply_keeper_sandbox
+               (Error
+                  (Msg.Http_error
+                     { status = 400; body = "bad keeper"; api_error = None }));
+         })
+  in
+  let beta =
+    {
+      failed with
+      nav =
+        {
+          failed.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "beta"; tab = Nav.Keeper_sandbox } ];
+        };
+    }
+  in
+  let asks_beta =
+    List.exists
+      (function
+        | Cmd.Http_get { req = Cmd.Get_keeper_sandbox { keeper }; _ } ->
+            String.equal keeper "beta"
+        | Cmd.Http_get _ | Cmd.Batch _ | Cmd.Http_post _ | Cmd.Http_put _
+        | Cmd.Http_post_stream _ | Cmd.Sync_streams _
+        | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
+        | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _
+        | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Start_local_server
+        | Cmd.Restart_tui | Cmd.Quit _ ->
+            false)
+      (Cmd.flatten (View_fetches.fetches_for_current_view beta))
+  in
+  Alcotest.(check bool) "a keeper's sandbox is asked after another 400" true
+    asks_beta
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -7031,5 +7118,9 @@ let () =
             `Quick test_agui_chat_stream_lifecycle_15_bugs;
           Alcotest.test_case "Memory explorer: set_memory_diff_keeper, 5 fetches, modes/sort, reading, Observed isolation & SSE"
             `Quick test_memory_explorer_store_fetches_reading_and_sse;
+          Alcotest.test_case "A failed fetch lands on the panel slot, keeping the last value"
+            `Quick test_fetch_failure_lands_on_panel_slot;
+          Alcotest.test_case "A failure is asked again for new parameters or another keeper"
+            `Quick test_failure_is_asked_again_for_a_new_question;
         ] );
     ]

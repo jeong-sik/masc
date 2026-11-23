@@ -69,6 +69,11 @@ let http_error_detail = function
           Printf.sprintf "HTTP %d: %s" status snippet)
   | Decode_error detail -> "decode error: " ^ detail
 
+let http_error_retryable = function
+  | Transport _ -> true
+  | Http_error { status; _ } -> status >= 500 || status = 429
+  | Workspace_mismatch _ | Decode_error _ -> false
+
 type http_reply =
   | Reply_dashboard_shell of (Wire_fleet.dashboard_shell, http_error) result
   | Reply_keepers_roster of (Wire_fleet.keeper_summary list, http_error) result

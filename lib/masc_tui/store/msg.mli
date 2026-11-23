@@ -25,6 +25,10 @@ type http_error =
 val http_error_summary : http_error -> Say.t
 val http_error_detail : http_error -> string
 
+val http_error_retryable : http_error -> bool
+(** [true] for transport failures, HTTP 5xx and 429. A decode error or a 4xx
+    fails the same way on the next poll. *)
+
 type http_reply =
   (* Fleet & Pulse *)
   | Reply_dashboard_shell of (Wire_fleet.dashboard_shell, http_error) result

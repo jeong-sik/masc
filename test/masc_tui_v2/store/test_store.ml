@@ -6946,6 +6946,33 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
   Alcotest.(check bool) "other-keeper journal append keeps alpha facts fresh" false
     (Observed.is_stale m_sse_other_journal.knowledge.keeper_memory_facts)
 
+let test_fetch_failure_lands_on_panel_slot () =
+  let step_reply r (m : Model.t) =
+    fst (Update.step ~now:t1 m (Msg.Http_reply { epoch = m.epoch; reply = r }))
+  in
+  let m0 = Model.initial () in
+  let m1 =
+    step_reply (Msg.Reply_asks (Error (Msg.Decode_error "asks[0]: drift"))) m0
+  in
+  (match m1.work.asks with
+  | Observed.Failed { retryable; _ } ->
+      Alcotest.(check bool) "a decode failure is not retryable" false retryable
+  | Observed.Loading _ | Observed.Value _ | Observed.Absent
+  | Observed.Unreported ->
+      Alcotest.fail "a panel that never loaded shows the fetch failure");
+  let m2 = step_reply (Msg.Reply_asks (Ok [])) m1 in
+  let m3 =
+    step_reply (Msg.Reply_asks (Error (Msg.Transport Health.Timeout))) m2
+  in
+  match m3.work.asks with
+  | Observed.Value { data; stale; _ } ->
+      Alcotest.(check int) "a failed refetch keeps the last rows" 0
+        (List.length data);
+      Alcotest.(check bool) "a failed refetch marks the rows stale" true stale
+  | Observed.Loading _ | Observed.Failed _ | Observed.Absent
+  | Observed.Unreported ->
+      Alcotest.fail "a failed refetch keeps the last good value"
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -7031,5 +7058,7 @@ let () =
             `Quick test_agui_chat_stream_lifecycle_15_bugs;
           Alcotest.test_case "Memory explorer: set_memory_diff_keeper, 5 fetches, modes/sort, reading, Observed isolation & SSE"
             `Quick test_memory_explorer_store_fetches_reading_and_sse;
+          Alcotest.test_case "A failed fetch lands on the panel slot, keeping the last value"
+            `Quick test_fetch_failure_lands_on_panel_slot;
         ] );
     ]

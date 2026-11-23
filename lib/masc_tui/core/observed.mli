@@ -17,6 +17,12 @@ val absent : 'a t
 val unreported : 'a t
 val failed : reason:string -> retryable:bool -> at:Clock.Mono.t -> 'a t
 
+val fetch_failed :
+  reason:string -> retryable:bool -> at:Clock.Mono.t -> 'a t -> 'a t
+(** Record a failed fetch on a slot. A slot holding a [Value] keeps the data and
+    turns stale; any other slot becomes [Failed], so a panel that never loaded
+    shows the failure instead of looking like the server has not reported. *)
+
 val map : ('a -> 'b) -> 'a t -> 'b t
 val bind : 'a t -> ('a -> 'b t) -> 'b t
 

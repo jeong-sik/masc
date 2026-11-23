@@ -11,6 +11,10 @@ let absent = Absent
 let unreported = Unreported
 let failed ~reason ~retryable ~at = Failed { reason; retryable; at }
 
+let fetch_failed ~reason ~retryable ~at = function
+  | Value { data; observed_at; stale = _ } -> Value { data; observed_at; stale = true }
+  | Loading _ | Absent | Unreported | Failed _ -> Failed { reason; retryable; at }
+
 let map f = function
   | Loading { since_ns } -> Loading { since_ns }
   | Value { data; observed_at; stale } ->

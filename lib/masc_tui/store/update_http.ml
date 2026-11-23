@@ -278,8 +278,41 @@ let refresh_404_fallbacks ~now (m : Model.t) =
   in
   { m with infra; work }
 
+(* The keeper whose file changes the Repos panel shows: the selected
+   repository's first keeper, or the selected keeper when no repository is
+   selected. A reply for any other keeper is stale. *)
+let is_file_changes_target (m : Model.t) keeper =
+  let expected =
+    match Infra_store.selected_repository m.infra with
+    | Some { keepers = k :: _; _ } -> Some k
+    | Some { keepers = []; _ } -> None
+    | None ->
+        Option.map
+          (fun (k : Wire_fleet.keeper_summary) -> k.name)
+          (Fleet_store.selected_keeper_summary m.fleet)
+  in
+  Option.equal String.equal expected (Some keeper)
+
 let apply_http_reply ~now (m : Model.t) reply =
-  let err_reply ~source ~ko ~en err =
+  let failed_slot err slot =
+    Observed.fetch_failed ~reason:(Msg.http_error_detail err)
+      ~retryable:(Msg.http_error_retryable err) ~at:now slot
+  in
+  (* Every read failure lands on the slot its panel renders, so a failed fetch
+     shows "조회 실패: <reason>" instead of the "서버 미보고" placeholder.
+     [~fail] is required, so a new reply cannot skip that decision. *)
+  let on_fleet f (m : Model.t) = { m with fleet = f m.fleet } in
+  let on_work f (m : Model.t) = { m with work = f m.work } in
+  let on_knowledge f (m : Model.t) = { m with knowledge = f m.knowledge } in
+  let on_runtime f (m : Model.t) = { m with runtime = f m.runtime } in
+  let on_infra f (m : Model.t) = { m with infra = f m.infra } in
+  let on_config f (m : Model.t) = { m with config = f m.config } in
+  let err_reply ~source ~ko ~en ~fail err =
+    let m =
+      match err with
+      | Msg.Workspace_mismatch _ -> m
+      | Msg.Transport _ | Msg.Http_error _ | Msg.Decode_error _ -> fail m
+    in
     record_http_incident ~now ~source ~context:(Say.make ~ko ~en) err m
   in
   match reply with
@@ -300,7 +333,11 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       (next, [])
   | Msg.Reply_dashboard_shell (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"대시보드 셸 조회"
+      err_reply
+        ~fail:
+          (on_fleet (fun (x : Fleet_store.t) ->
+               { x with shell = failed_slot err x.shell }))
+        ~source:Health.Source_client_http ~ko:"대시보드 셸 조회"
         ~en:"Dashboard shell fetch" err
   | Msg.Reply_keepers_roster (Ok ks) ->
       let fleet = Fleet_store.apply_keepers ~observed_at:now ks m.fleet in
@@ -326,7 +363,11 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       (next, cmds)
   | Msg.Reply_keepers_roster (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"키퍼 목록 조회"
+      err_reply
+        ~fail:
+          (on_fleet (fun (x : Fleet_store.t) ->
+               { x with keepers = failed_slot err x.keepers }))
+        ~source:Health.Source_client_http ~ko:"키퍼 목록 조회"
         ~en:"Keepers roster fetch" err
   | Msg.Reply_keepers_roster_extras extras ->
       let next =
@@ -349,7 +390,11 @@ let apply_http_reply ~now (m : Model.t) reply =
   | Msg.Reply_keeper_turns (Ok rows) ->
       ({ m with fleet = Fleet_store.apply_turns ~observed_at:now rows m.fleet }, [])
   | Msg.Reply_keeper_turns (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"키퍼 턴 상태 조회"
+      err_reply
+        ~fail:
+          (on_fleet (fun (x : Fleet_store.t) ->
+               { x with turns = failed_slot err x.turns }))
+        ~source:Health.Source_client_http ~ko:"키퍼 턴 상태 조회"
         ~en:"Keeper turns fetch" err
   | Msg.Reply_chat_history { keeper; result = Ok page } ->
       let fleet =
@@ -360,15 +405,10 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       ({ m with fleet; drafts }, [])
   | Msg.Reply_chat_history { keeper; result = Error err } ->
-      let retryable =
-        match err with
-        | Msg.Transport _ -> true
-        | Msg.Http_error { status; _ } -> status >= 500 || status = 429
-        | Msg.Workspace_mismatch _ | Msg.Decode_error _ -> false
-      in
       let fleet =
         Fleet_store.mark_chat_history_failed ~at:now ~keeper
-          ~reason:(Msg.http_error_detail err) ~retryable m.fleet
+          ~reason:(Msg.http_error_detail err)
+          ~retryable:(Msg.http_error_retryable err) m.fleet
       in
       record_http_incident ~now ~source:(Health.Source_keeper keeper)
         ~context:(Say.make ~ko:"대화 이력 조회" ~en:"Chat history fetch")
@@ -467,7 +507,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         |> Model.sync_effective_scorecard ~now
       , [] )
   | Msg.Reply_planning (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"목표·작업 조회"
+      err_reply
+        ~fail:
+          (on_work (fun (x : Work_store.t) ->
+               { x with planning = failed_slot err x.planning }))
+        ~source:Health.Source_client_http ~ko:"목표·작업 조회"
         ~en:"Planning fetch" err
   | Msg.Reply_planning_backlog counts ->
       let work = Work_store.apply_backlog_counts counts m.work in
@@ -477,19 +521,31 @@ let apply_http_reply ~now (m : Model.t) reply =
         |> Model.sync_effective_scorecard ~now
       , [] )
   | Msg.Reply_verifications (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"검증 목록 조회"
+      err_reply
+        ~fail:
+          (on_work (fun (x : Work_store.t) ->
+               { x with verifications = failed_slot err x.verifications }))
+        ~source:Health.Source_client_http ~ko:"검증 목록 조회"
         ~en:"Verifications fetch" err
   | Msg.Reply_schedules (Ok scheds) ->
       ( { m with work = Work_store.apply_schedules ~observed_at:now scheds m.work }
       , [] )
   | Msg.Reply_schedules (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"일정 조회"
+      err_reply
+        ~fail:
+          (on_work (fun (x : Work_store.t) ->
+               { x with schedules = failed_slot err x.schedules }))
+        ~source:Health.Source_client_http ~ko:"일정 조회"
         ~en:"Schedules fetch" err
   | Msg.Reply_asks (Ok asks) ->
       let work = Work_store.apply_asks ~observed_at:now asks m.work in
       (Model.rebuild_attention { m with work }, [])
   | Msg.Reply_asks (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"질문 목록 조회"
+      err_reply
+        ~fail:
+          (on_work (fun (x : Work_store.t) ->
+               { x with asks = failed_slot err x.asks }))
+        ~source:Health.Source_client_http ~ko:"질문 목록 조회"
         ~en:"Asks fetch" err
   | Msg.Reply_tool_approvals (Ok approvals) ->
       let work =
@@ -497,13 +553,21 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       (Model.rebuild_attention { m with work }, [])
   | Msg.Reply_tool_approvals (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"도구 승인 대기 조회"
+      err_reply
+        ~fail:
+          (on_work (fun (x : Work_store.t) ->
+               { x with tool_approvals = failed_slot err x.tool_approvals }))
+        ~source:Health.Source_client_http ~ko:"도구 승인 대기 조회"
         ~en:"Tool approvals fetch" err
   | Msg.Reply_gate_pending (Ok gates) ->
       let work = Work_store.apply_gate_pending ~observed_at:now gates m.work in
       (Model.rebuild_attention { m with work }, [])
   | Msg.Reply_gate_pending (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"게이트 승인 조회"
+      err_reply
+        ~fail:
+          (on_work (fun (x : Work_store.t) ->
+               { x with gate_pending = failed_slot err x.gate_pending }))
+        ~source:Health.Source_client_http ~ko:"게이트 승인 조회"
         ~en:"Gate pending fetch" err
   | Msg.Reply_candle_ledger (Ok ledger) ->
       ( {
@@ -524,7 +588,11 @@ let apply_http_reply ~now (m : Model.t) reply =
           ({ m with work }, [])
       | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
       | Msg.Decode_error _ ->
-          err_reply ~source:Health.Source_client_http ~ko:"캔들 원장 조회"
+          err_reply
+            ~fail:
+              (on_work (fun (x : Work_store.t) ->
+                   { x with candle_ledger = failed_slot err x.candle_ledger }))
+            ~source:Health.Source_client_http ~ko:"캔들 원장 조회"
             ~en:"Candle ledger fetch" err)
   | Msg.Reply_work_mutation
       { label; attention_id; decision_kind; target_id; keeper; result = Ok () } ->
@@ -569,7 +637,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         |> Model.sync_effective_scorecard ~now
       , [] )
   | Msg.Reply_board_feed (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"보드 피드 조회"
+      err_reply
+        ~fail:
+          (on_knowledge (fun (x : Knowledge_store.t) ->
+               { x with board = failed_slot err x.board }))
+        ~source:Health.Source_client_http ~ko:"보드 피드 조회"
         ~en:"Board feed fetch" err
   | Msg.Reply_board_thread (Ok thread) ->
       ( {
@@ -579,7 +651,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_board_thread (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"보드 스레드 조회"
+      err_reply
+        ~fail:
+          (on_knowledge (fun (x : Knowledge_store.t) ->
+               { x with active_thread = failed_slot err x.active_thread }))
+        ~source:Health.Source_client_http ~ko:"보드 스레드 조회"
         ~en:"Board thread fetch" err
   | Msg.Reply_quarantines (Ok qs) ->
       let knowledge =
@@ -587,7 +663,11 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       (Model.rebuild_attention { m with knowledge }, [])
   | Msg.Reply_quarantines (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"격리 후보 조회"
+      err_reply
+        ~fail:
+          (on_knowledge (fun (x : Knowledge_store.t) ->
+               { x with quarantines = failed_slot err x.quarantines }))
+        ~source:Health.Source_client_http ~ko:"격리 후보 조회"
         ~en:"Quarantines fetch" err
   | Msg.Reply_wiki_index (Ok idx) ->
       ( {
@@ -597,7 +677,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_wiki_index (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"위키 색인 조회"
+      err_reply
+        ~fail:
+          (on_knowledge (fun (x : Knowledge_store.t) ->
+               { x with wiki_index = failed_slot err x.wiki_index }))
+        ~source:Health.Source_client_http ~ko:"위키 색인 조회"
         ~en:"Wiki index fetch" err
   | Msg.Reply_wiki_page (Ok page) ->
       ( {
@@ -607,7 +691,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_wiki_page (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"위키 문서 조회"
+      err_reply
+        ~fail:
+          (on_knowledge (fun (x : Knowledge_store.t) ->
+               { x with wiki_page = failed_slot err x.wiki_page }))
+        ~source:Health.Source_client_http ~ko:"위키 문서 조회"
         ~en:"Wiki page fetch" err
   | Msg.Reply_wiki_log (Ok log) ->
       ( {
@@ -617,7 +705,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_wiki_log (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"위키 변경 이력 조회"
+      err_reply
+        ~fail:
+          (on_knowledge (fun (x : Knowledge_store.t) ->
+               { x with wiki_log = failed_slot err x.wiki_log }))
+        ~source:Health.Source_client_http ~ko:"위키 변경 이력 조회"
         ~en:"Wiki log fetch" err
   | Msg.Reply_wiki_search (Ok search) ->
       ( {
@@ -627,7 +719,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_wiki_search (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"위키 검색"
+      err_reply
+        ~fail:
+          (on_knowledge (fun (x : Knowledge_store.t) ->
+               { x with wiki_search = failed_slot err x.wiki_search }))
+        ~source:Health.Source_client_http ~ko:"위키 검색"
         ~en:"Wiki search" err
   | Msg.Reply_wiki_lint (Ok lint) ->
       ( {
@@ -637,7 +733,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_wiki_lint (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"위키 린트 조회"
+      err_reply
+        ~fail:
+          (on_knowledge (fun (x : Knowledge_store.t) ->
+               { x with wiki_lint = failed_slot err x.wiki_lint }))
+        ~source:Health.Source_client_http ~ko:"위키 린트 조회"
         ~en:"Wiki lint fetch" err
   | Msg.Reply_wiki_put { page; result = Ok detail } ->
       let knowledge =
@@ -677,7 +777,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_artifacts (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"산출물 목록 조회"
+      err_reply
+        ~fail:
+          (on_knowledge (fun (x : Knowledge_store.t) ->
+               { x with artifacts = failed_slot err x.artifacts }))
+        ~source:Health.Source_client_http ~ko:"산출물 목록 조회"
         ~en:"Artifacts fetch" err
   | Msg.Reply_world_memory (Ok wm) ->
       ( {
@@ -687,7 +791,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_world_memory (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"세계 기억 조회"
+      err_reply
+        ~fail:
+          (on_knowledge (fun (x : Knowledge_store.t) ->
+               { x with world_memory = failed_slot err x.world_memory }))
+        ~source:Health.Source_client_http ~ko:"세계 기억 조회"
         ~en:"World memory fetch" err
   | Msg.Reply_memory_diff { keeper; result } ->
       let expected =
@@ -748,7 +856,11 @@ let apply_http_reply ~now (m : Model.t) reply =
               , [] )
             else (m, [])
         | Error err ->
-            err_reply ~source:Health.Source_client_http ~ko:"기억 변화 조회"
+            err_reply
+              ~fail:
+                (on_knowledge (fun (x : Knowledge_store.t) ->
+                     { x with memory_diff = failed_slot err x.memory_diff }))
+              ~source:Health.Source_client_http ~ko:"기억 변화 조회"
               ~en:"Memory diff fetch" err)
   | Msg.Reply_keeper_memory_os_internals { keeper; result } ->
       let expected =
@@ -809,7 +921,15 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Msg.Transport _
              | Msg.Workspace_mismatch _
              | Msg.Decode_error _ ) as err) ->
-            err_reply ~source:Health.Source_client_http
+            err_reply
+              ~fail:
+                (on_knowledge (fun (x : Knowledge_store.t) ->
+                     {
+                       x with
+                       memory_os_internals =
+                         failed_slot err x.memory_os_internals;
+                     }))
+              ~source:Health.Source_client_http
               ~ko:"메모리 OS 내부 상태 조회" ~en:"Memory OS internals fetch" err)
   | Msg.Reply_keeper_memory_facts { keeper; result } ->
       let expected =
@@ -1032,7 +1152,10 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       (Model.with_toast ~now ~level msg { m with knowledge }, [])
   | Msg.Reply_memory_act { keeper; result = Error err } ->
-      err_reply ~source:(Health.Source_keeper keeper) ~ko:"사서 기억 복구"
+      err_reply
+        (* A recovery act is a write: the incident carries the failure. *)
+        ~fail:Fun.id
+        ~source:(Health.Source_keeper keeper) ~ko:"사서 기억 복구"
         ~en:"Memory recovery act" err
   | Msg.Reply_provider_usage (Ok uw) ->
       ( {
@@ -1042,7 +1165,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_provider_usage (Error err) ->
-      err_reply ~source:(Health.Source_runtime "usage") ~ko:"프로바이더 할당 조회"
+      err_reply
+        ~fail:
+          (on_runtime (fun (x : Runtime_store.t) ->
+               { x with usage_windows = failed_slot err x.usage_windows }))
+        ~source:(Health.Source_runtime "usage") ~ko:"프로바이더 할당 조회"
         ~en:"Provider usage fetch" err
   | Msg.Reply_provider_usage_history (Ok hist) ->
       ( {
@@ -1052,7 +1179,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_provider_usage_history (Error err) ->
-      err_reply ~source:(Health.Source_runtime "usage_history")
+      err_reply
+        ~fail:
+          (on_runtime (fun (x : Runtime_store.t) ->
+               { x with usage_history = failed_slot err x.usage_history }))
+        ~source:(Health.Source_runtime "usage_history")
         ~ko:"프로바이더 사용 이력 조회" ~en:"Provider usage history fetch" err
   | Msg.Reply_keeper_costs (Ok costs) ->
       ( {
@@ -1063,7 +1194,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         |> Model.sync_effective_scorecard ~now
       , [] )
   | Msg.Reply_keeper_costs (Error err) ->
-      err_reply ~source:(Health.Source_runtime "costs") ~ko:"키퍼 비용 조회"
+      err_reply
+        ~fail:
+          (on_runtime (fun (x : Runtime_store.t) ->
+               { x with keeper_costs = failed_slot err x.keeper_costs }))
+        ~source:(Health.Source_runtime "costs") ~ko:"키퍼 비용 조회"
         ~en:"Keeper costs fetch" err
   | Msg.Reply_efficiency (Ok eff) ->
       ( {
@@ -1072,7 +1207,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_efficiency (Error err) ->
-      err_reply ~source:(Health.Source_runtime "efficiency") ~ko:"효율 지표 조회"
+      err_reply
+        ~fail:
+          (on_runtime (fun (x : Runtime_store.t) ->
+               { x with efficiency = failed_slot err x.efficiency }))
+        ~source:(Health.Source_runtime "efficiency") ~ko:"효율 지표 조회"
         ~en:"Efficiency fetch" err
   | Msg.Reply_models_metrics (Ok mm) ->
       ( {
@@ -1083,7 +1222,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         |> Model.sync_effective_scorecard ~now
       , [] )
   | Msg.Reply_models_metrics (Error err) ->
-      err_reply ~source:(Health.Source_runtime "models_metrics")
+      err_reply
+        ~fail:
+          (on_runtime (fun (x : Runtime_store.t) ->
+               { x with models_metrics = failed_slot err x.models_metrics }))
+        ~source:(Health.Source_runtime "models_metrics")
         ~ko:"모델 메트릭 조회" ~en:"Model metrics fetch" err
   | Msg.Reply_runtime_metrics (Ok rm) ->
       ( {
@@ -1107,7 +1250,11 @@ let apply_http_reply ~now (m : Model.t) reply =
           ({ m with runtime }, [])
       | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
       | Msg.Decode_error _ ->
-          err_reply ~source:(Health.Source_runtime "runtime_metrics")
+          err_reply
+            ~fail:
+              (on_runtime (fun (x : Runtime_store.t) ->
+                   { x with runtime_metrics = failed_slot err x.runtime_metrics }))
+            ~source:(Health.Source_runtime "runtime_metrics")
             ~ko:"런타임 메트릭 조회" ~en:"Runtime metrics fetch" err)
   | Msg.Reply_runtime_resolved (Ok resolved) ->
       ( {
@@ -1118,7 +1265,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_runtime_resolved (Error err) ->
-      err_reply ~source:(Health.Source_runtime "resolved") ~ko:"페일오버 레인 조회"
+      err_reply
+        ~fail:
+          (on_runtime (fun (x : Runtime_store.t) ->
+               { x with runtime_resolved = failed_slot err x.runtime_resolved }))
+        ~source:(Health.Source_runtime "resolved") ~ko:"페일오버 레인 조회"
         ~en:"Runtime lanes fetch" err
   | Msg.Reply_runtime_config_raw (Ok meta) ->
       ( {
@@ -1142,7 +1293,11 @@ let apply_http_reply ~now (m : Model.t) reply =
           ({ m with runtime }, [])
       | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
       | Msg.Decode_error _ ->
-          err_reply ~source:(Health.Source_runtime "config_raw")
+          err_reply
+            ~fail:
+              (on_runtime (fun (x : Runtime_store.t) ->
+                   { x with runtime_config_raw = failed_slot err x.runtime_config_raw }))
+            ~source:(Health.Source_runtime "config_raw")
             ~ko:"런타임 설정 원본 조회" ~en:"Runtime raw config fetch" err)
   | Msg.Reply_setup_inventory (Ok inv) ->
       ( {
@@ -1165,7 +1320,11 @@ let apply_http_reply ~now (m : Model.t) reply =
           ({ m with runtime }, [])
       | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
       | Msg.Decode_error _ ->
-          err_reply ~source:(Health.Source_runtime "setup_inventory")
+          err_reply
+            ~fail:
+              (on_runtime (fun (x : Runtime_store.t) ->
+                   { x with setup_inventory = failed_slot err x.setup_inventory }))
+            ~source:(Health.Source_runtime "setup_inventory")
             ~ko:"셋업 인벤토리 조회" ~en:"Setup inventory fetch" err)
   | Msg.Reply_setup_login_receipt (Ok receipt) ->
       let runtime =
@@ -1299,7 +1458,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_runtime_probe (Error err) ->
-      err_reply ~source:(Health.Source_runtime "probe") ~ko:"런타임 프로브 조회"
+      err_reply
+        ~fail:
+          (on_runtime (fun (x : Runtime_store.t) ->
+               { x with runtime_probe = failed_slot err x.runtime_probe }))
+        ~source:(Health.Source_runtime "probe") ~ko:"런타임 프로브 조회"
         ~en:"Runtime probe fetch" err
   | Msg.Reply_exact_lane_runs (Ok runs) ->
       ( {
@@ -1309,7 +1472,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_exact_lane_runs (Error err) ->
-      err_reply ~source:(Health.Source_runtime "exact") ~ko:"교차 검증 레인 조회"
+      err_reply
+        ~fail:
+          (on_runtime (fun (x : Runtime_store.t) ->
+               { x with exact_lane_runs = failed_slot err x.exact_lane_runs }))
+        ~source:(Health.Source_runtime "exact") ~ko:"교차 검증 레인 조회"
         ~en:"Exact lanes fetch" err
   | Msg.Reply_fusion_runs (Ok runs) ->
       ( {
@@ -1319,7 +1486,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_fusion_runs (Error err) ->
-      err_reply ~source:(Health.Source_runtime "fusion") ~ko:"퓨전 실행 조회"
+      err_reply
+        ~fail:
+          (on_runtime (fun (x : Runtime_store.t) ->
+               { x with fusion_runs = failed_slot err x.fusion_runs }))
+        ~source:(Health.Source_runtime "fusion") ~ko:"퓨전 실행 조회"
         ~en:"Fusion runs fetch" err
   | Msg.Reply_fusion_launch (Ok ()) ->
       let runtime = Runtime_store.clear_fusion_draft m.runtime in
@@ -1350,7 +1521,11 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       (next, [])
   | Msg.Reply_tool_series (Error err) ->
-      err_reply ~source:(Health.Source_runtime "tools") ~ko:"도구 시계열 조회"
+      err_reply
+        ~fail:
+          (on_runtime (fun (x : Runtime_store.t) ->
+               { x with tool_series = failed_slot err x.tool_series }))
+        ~source:(Health.Source_runtime "tools") ~ko:"도구 시계열 조회"
         ~en:"Tool series fetch" err
   | Msg.Reply_tools_catalog (Ok tools) ->
       ( {
@@ -1360,7 +1535,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_tools_catalog (Error err) ->
-      err_reply ~source:(Health.Source_runtime "tools") ~ko:"도구 목록 조회"
+      err_reply
+        ~fail:
+          (on_runtime (fun (x : Runtime_store.t) ->
+               { x with tools_catalog = failed_slot err x.tools_catalog }))
+        ~source:(Health.Source_runtime "tools") ~ko:"도구 목록 조회"
         ~en:"Tools catalog fetch" err
   | Msg.Reply_connectors (Ok conns) ->
       ( {
@@ -1370,7 +1549,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_connectors (Error err) ->
-      err_reply ~source:(Health.Source_runtime "connectors") ~ko:"커넥터 조회"
+      err_reply
+        ~fail:
+          (on_runtime (fun (x : Runtime_store.t) ->
+               { x with connectors = failed_slot err x.connectors }))
+        ~source:(Health.Source_runtime "connectors") ~ko:"커넥터 조회"
         ~en:"Connectors fetch" err
   | Msg.Reply_browser_lane (Ok bl) ->
       ( {
@@ -1380,7 +1563,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_browser_lane (Error err) ->
-      err_reply ~source:(Health.Source_runtime "browser") ~ko:"브라우저 레인 조회"
+      err_reply
+        ~fail:
+          (on_runtime (fun (x : Runtime_store.t) ->
+               { x with browser_lane = failed_slot err x.browser_lane }))
+        ~source:(Health.Source_runtime "browser") ~ko:"브라우저 레인 조회"
         ~en:"Browser lane fetch" err
   | Msg.Reply_mcp_clients (Ok clients) ->
       ( {
@@ -1390,7 +1577,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_mcp_clients (Error err) ->
-      err_reply ~source:(Health.Source_runtime "clients") ~ko:"클라이언트 조회"
+      err_reply
+        ~fail:
+          (on_runtime (fun (x : Runtime_store.t) ->
+               { x with mcp_clients = failed_slot err x.mcp_clients }))
+        ~source:(Health.Source_runtime "clients") ~ko:"클라이언트 조회"
         ~en:"MCP clients fetch" err
   | Msg.Reply_sandboxes (Ok sb) ->
       ( {
@@ -1417,7 +1608,11 @@ let apply_http_reply ~now (m : Model.t) reply =
           ({ m with infra }, [])
       | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
       | Msg.Decode_error _ ->
-          err_reply ~source:(Health.Source_sandbox "fleet") ~ko:"샌드박스 조회"
+          err_reply
+            ~fail:
+              (on_infra (fun (x : Infra_store.t) ->
+                   { x with sandboxes = failed_slot err x.sandboxes }))
+            ~source:(Health.Source_sandbox "fleet") ~ko:"샌드박스 조회"
             ~en:"Sandboxes fetch" err)
   | Msg.Reply_keeper_sandbox (Ok ks) ->
       ( {
@@ -1426,7 +1621,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_keeper_sandbox (Error err) ->
-      err_reply ~source:(Health.Source_sandbox "keeper") ~ko:"키퍼 샌드박스 조회"
+      err_reply
+        ~fail:
+          (on_infra (fun (x : Infra_store.t) ->
+               { x with keeper_sandbox = failed_slot err x.keeper_sandbox }))
+        ~source:(Health.Source_sandbox "keeper") ~ko:"키퍼 샌드박스 조회"
         ~en:"Keeper sandbox fetch" err
   | Msg.Reply_repositories (Ok repos) ->
       let infra =
@@ -1442,19 +1641,14 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       (next, extra_cmds)
   | Msg.Reply_repositories (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"저장소 목록 조회"
+      err_reply
+        ~fail:
+          (on_infra (fun (x : Infra_store.t) ->
+               { x with repositories = failed_slot err x.repositories }))
+        ~source:Health.Source_client_http ~ko:"저장소 목록 조회"
         ~en:"Repositories fetch" err
   | Msg.Reply_file_changes { keeper; result = Ok changes } ->
-      let expected =
-        match Infra_store.selected_repository m.infra with
-        | Some { keepers = k :: _; _ } -> Some k
-        | Some { keepers = []; _ } -> None
-        | None ->
-            Option.map
-              (fun (k : Wire_fleet.keeper_summary) -> k.name)
-              (Fleet_store.selected_keeper_summary m.fleet)
-      in
-      if Option.equal String.equal expected (Some keeper) then
+      if is_file_changes_target m keeper then
         ( {
             m with
             infra =
@@ -1463,13 +1657,24 @@ let apply_http_reply ~now (m : Model.t) reply =
           }
         , [] )
       else (m, [])
-  | Msg.Reply_file_changes { keeper = _; result = Error err } ->
-      err_reply ~source:Health.Source_client_http ~ko:"파일 변경 조회"
+  | Msg.Reply_file_changes { keeper; result = Error err } ->
+      err_reply
+        ~fail:(fun (m : Model.t) ->
+          if is_file_changes_target m keeper then
+            on_infra
+              (fun (x : Infra_store.t) ->
+                { x with file_changes = failed_slot err x.file_changes })
+              m
+          else m)
+        ~source:Health.Source_client_http ~ko:"파일 변경 조회"
         ~en:"File changes fetch" err
   | Msg.Reply_system_logs (Ok entries) ->
       ({ m with infra = Infra_store.apply_log_snapshot entries m.infra }, [])
   | Msg.Reply_system_logs (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"시스템 로그 조회"
+      err_reply
+        (* The log list has no observation state; the incident carries the failure. *)
+        ~fail:Fun.id
+        ~source:Health.Source_client_http ~ko:"시스템 로그 조회"
         ~en:"System logs fetch" err
   | Msg.Reply_tui_preferences (Ok prefs) ->
       let config = Config_store.apply_preferences ~observed_at:now prefs m.config in
@@ -1490,7 +1695,11 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       ({ m with config; lang; theme_preset; knowledge }, [])
   | Msg.Reply_tui_preferences (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"TUI 설정 조회"
+      err_reply
+        ~fail:
+          (on_config (fun (x : Config_store.t) ->
+               { x with preferences = failed_slot err x.preferences }))
+        ~source:Health.Source_client_http ~ko:"TUI 설정 조회"
         ~en:"TUI preferences fetch" err
   | Msg.Reply_config_schema_meta { target; meta } ->
       ( {
@@ -1505,7 +1714,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_config_schema (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"설정 스키마 조회"
+      err_reply
+        ~fail:
+          (on_config (fun (x : Config_store.t) ->
+               { x with schema = failed_slot err x.schema }))
+        ~source:Health.Source_client_http ~ko:"설정 스키마 조회"
         ~en:"Config schema fetch" err
   | Msg.Reply_config_patch { dry_run; result = Ok resp } ->
       let config = Config_store.apply_patch_response ~dry_run resp m.config in

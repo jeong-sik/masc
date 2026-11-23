@@ -1032,8 +1032,9 @@ let test_bus_key_hash_and_stream_frames () =
        });
   Alcotest.(check int) "coalesced to 1 snapshot" 1 (List.length (Ui_bus.drain bus));
 
-  (* P1-2: live /api/v1/dashboard/logs/stream sends newest-first batch frames
-     {"reset": true, "entries": [seq=2, seq=1]}; decode oldest-first. *)
+  (* /api/v1/dashboard/logs/stream sends newest-first batch frames
+     {"reset": true, "entries": [seq=2, seq=1]}; the frame reaches the store
+     whole, reset flag included. *)
   let batch_json =
     {|{"reset":true,"entries":[{"seq":2,"ts":"2026-11-22T00:00:02Z","level":"WARN","source":"server","module":"Http","message":"second"},{"seq":1,"ts":"2026-11-22T00:00:01Z","level":"INFO","source":"server","module":"Http","message":"first"}]}|}
   in
@@ -1050,7 +1051,16 @@ let test_bus_key_hash_and_stream_frames () =
     List.filter_map
       (fun (key_opt, msg) ->
         match key_opt, msg with
-        | None, Msg.Sse_event { event = Msg.Sse_log_entry e; _ } -> Some e.seq
+        | ( None
+          , Msg.Sse_event
+              { event = Msg.Sse_log_frame { reset = true; entries }; _ } ) ->
+            Some
+              (List.map
+                 (fun (e : Masc_tui_protocol.Wire_infra.system_log_entry) -> e.seq)
+                 entries)
+        | None, Msg.Sse_event { event = Msg.Sse_log_frame { reset = false; _ }; _ }
+          ->
+            None
         | Some _, _ -> None
         | ( None
           , ( Msg.Sse_event
@@ -1082,7 +1092,8 @@ let test_bus_key_hash_and_stream_frames () =
             None)
       log_msgs
   in
-  Alcotest.(check (list int)) "batch log entries in chronological order" [ 1; 2 ] seqs;
+  Alcotest.(check (list (list int))) "one reset frame, newest first" [ [ 2; 1 ] ]
+    seqs;
 
   (* A model metrics frame for another window (the server's unbucketed
      30-minute default) never replaces the 24h chart and is reported as a
@@ -1144,7 +1155,7 @@ let test_bus_key_hash_and_stream_frames () =
           | Msg.Sse_observer_delivery _
           | Msg.Sse_fleet _
           | Msg.Sse_tool_series _
-          | Msg.Sse_log_entry _ );
+          | Msg.Sse_log_frame _ );
         _;
       }
   | Msg.Boot

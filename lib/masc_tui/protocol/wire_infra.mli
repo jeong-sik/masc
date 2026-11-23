@@ -243,3 +243,11 @@ val log_level_of_string : string -> log_level option
 val log_level_to_string : log_level -> string
 val decode_system_log_entry : Yojson.Safe.t -> (system_log_entry, string) result
 val decode_system_log_snapshot : Yojson.Safe.t -> (system_log_entry list, string) result
+
+type system_log_frame = { reset : bool; entries : system_log_entry list }
+(** One [/api/v1/dashboard/logs/stream] frame, entries newest first. [reset]
+    asks the client to replace its list with this page: the stream had no
+    cursor, the ring evicted entries the client never got, more entries
+    matched than one page, or the cursor came from an earlier server run. *)
+
+val decode_system_log_frame : Yojson.Safe.t -> (system_log_frame, string) result

@@ -740,3 +740,10 @@ let decode_system_log_snapshot json =
   let* _, body = unwrap_v2_or_raw json in
   let* items = required_list_field body "entries" in
   decode_list "entries" decode_system_log_entry items
+
+type system_log_frame = { reset : bool; entries : system_log_entry list }
+
+let decode_system_log_frame json =
+  let* reset = required_bool_field json "reset" in
+  let* entries = decode_system_log_snapshot json in
+  Ok { reset; entries }

@@ -233,17 +233,20 @@ let msg_of_voice_event = function
         }
   | Voice_runner.Voice_error reason -> Msg.Voice_failed reason
 
-let decode_log_frame_entries json =
-  match Wire_infra.decode_system_log_snapshot json with
-  | Ok entries ->
-      (* Live /api/v1/dashboard/logs/stream sends newest-first batch frames
-         ({"reset": bool, "entries": [...]}). Emit oldest-first so append_log
-         preserves chronological order. *)
-      List.rev entries
-  | Error _ -> (
-      match Wire_infra.decode_system_log_entry json with
-      | Ok entry -> [ entry ]
-      | Error _ -> [])
+(* A view-stream frame that cannot be applied is reported like an
+   undecodable observer frame, so the failure is on the incident list instead
+   of vanishing. *)
+let skipped_stream_frame ~epoch detail =
+  [
+    ( None
+    , Msg.Sse_event
+        {
+          epoch;
+          event =
+            Msg.Sse_observer_delivery
+              { cursor = None; decoded = Wire_observer.Undecodable detail };
+        } );
+  ]
 
 let decode_hub_event_msgs ~epoch ~observed_at ev =
   match ev with
@@ -260,31 +263,18 @@ let decode_hub_event_msgs ~epoch ~observed_at ev =
       match stream with
       | Sse_hub.Stream_spec.Logs _ -> (
           match Yojson.Safe.from_string frame.data with
-          | json ->
-              decode_log_frame_entries json
-              |> List.map (fun entry ->
-                     (None, Msg.Sse_event { epoch; event = Msg.Sse_log_entry entry }))
-          | exception Yojson.Json_error _ -> [])
+          | exception Yojson.Json_error msg ->
+              skipped_stream_frame ~epoch ("log stream: invalid JSON frame: " ^ msg)
+          | json -> (
+              match Wire_infra.decode_system_log_frame json with
+              | Ok log_frame ->
+                  [ (None, Msg.Sse_event { epoch; event = Msg.Sse_log_frame log_frame }) ]
+              | Error reason -> skipped_stream_frame ~epoch ("log stream: " ^ reason)))
       | Sse_hub.Stream_spec.Model_metrics -> (
           (* The stream is opened with the chart's window and bucket
              (Wire_runtime.models_metrics_stream_path), so every snapshot
-             frame replaces the chart. A frame that cannot do that is
-             reported like an undecodable observer frame, not dropped. *)
-          let skipped detail =
-            [
-              ( None
-              , Msg.Sse_event
-                  {
-                    epoch;
-                    event =
-                      Msg.Sse_observer_delivery
-                        {
-                          cursor = None;
-                          decoded = Wire_observer.Undecodable detail;
-                        };
-                  } );
-            ]
-          in
+             frame replaces the chart. *)
+          let skipped = skipped_stream_frame ~epoch in
           match Yojson.Safe.from_string frame.data with
           | exception Yojson.Json_error msg ->
               skipped ("model metrics stream: invalid JSON frame: " ^ msg)
@@ -322,6 +312,9 @@ let decode_hub_event_msgs ~epoch ~observed_at ev =
               else skipped "model metrics stream: frame has neither window_minutes nor error")
       | Sse_hub.Stream_spec.Tool_metrics_series -> (
           match Yojson.Safe.from_string frame.data with
+          | exception Yojson.Json_error msg ->
+              skipped_stream_frame ~epoch
+                ("tool series stream: invalid JSON frame: " ^ msg)
           | json -> (
               match Wire_runtime.decode_tool_series json with
               | Ok series ->
@@ -329,8 +322,7 @@ let decode_hub_event_msgs ~epoch ~observed_at ev =
                     ( None
                     , Msg.Sse_event { epoch; event = Msg.Sse_tool_series series } );
                   ]
-              | Error _ -> [])
-          | exception Yojson.Json_error _ -> [])
+              | Error reason -> skipped_stream_frame ~epoch ("tool series stream: " ^ reason)))
       | Sse_hub.Stream_spec.Observer | Sse_hub.Stream_spec.Fleet -> [])
 
 let publish_hub_event ~bus ~stream_epoch ev =

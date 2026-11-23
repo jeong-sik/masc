@@ -850,8 +850,8 @@ let apply_sse_event ~now (m : Model.t) = function
         Fleet_store.apply_fleet_stream_event ~observed_at:now ev m.fleet
       in
       ({ m with fleet }, [])
-  | Msg.Sse_log_entry entry ->
-      ({ m with infra = Infra_store.append_log entry m.infra }, [])
+  | Msg.Sse_log_frame frame ->
+      ({ m with infra = Infra_store.apply_log_frame frame m.infra }, [])
   | Msg.Sse_models_metrics_snapshot snap ->
       ( {
           m with

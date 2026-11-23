@@ -879,7 +879,7 @@ let test_subscriptions_bounded_and_zero_polling () =
   (* Tick emits ZERO commands (no idle polling) *)
   let _, tick_cmds = Update.step ~now:t2 base (Msg.Tick { wall_unix = 200.0 }) in
   Alcotest.(check int) "Tick emits 0 commands" 0 (List.length tick_cmds);
-  (* P1-1: Sse_log_entry on Infra_activity_logs emits 0 commands (no reconnect storm) *)
+  (* A log frame on Infra_activity_logs emits 0 commands (no reconnect storm) *)
   let m_logs =
     {
       base with
@@ -904,12 +904,43 @@ let test_subscriptions_bounded_and_zero_polling () =
   let m_logs2, log_cmds =
     Update.step ~now:t2 m_logs
       (Msg.Sse_event
-         { epoch = m_logs.epoch; event = Msg.Sse_log_entry log_entry })
+         {
+           epoch = m_logs.epoch;
+           event = Msg.Sse_log_frame { reset = false; entries = [ log_entry ] };
+         })
   in
   Alcotest.(check (option int)) "last_log_seq advanced" (Some 42)
     m_logs2.infra.last_log_seq;
-  Alcotest.(check int) "Sse_log_entry emits 0 commands (no Sync_streams storm)" 0
-    (List.length log_cmds)
+  Alcotest.(check int) "log frame emits 0 commands (no Sync_streams storm)" 0
+    (List.length log_cmds);
+  (* After a server restart the ring numbers from zero again. The stream's
+     reset frame replaces the list and the cursor; a new line whose seq an
+     old line had is kept. *)
+  let restarted_entry = { log_entry with seq = 1; message = "server started" } in
+  let m_logs3, _ =
+    Update.step ~now:t2 m_logs2
+      (Msg.Sse_event
+         {
+           epoch = m_logs2.epoch;
+           event = Msg.Sse_log_frame { reset = true; entries = [ restarted_entry ] };
+         })
+  in
+  Alcotest.(check (option int)) "reset frame replaces the cursor" (Some 1)
+    m_logs3.infra.last_log_seq;
+  Alcotest.(check (list int)) "reset frame replaces the list" [ 1 ]
+    (List.map (fun (e : Wire_infra.system_log_entry) -> e.seq) m_logs3.infra.logs);
+  let m_logs4, _ =
+    Update.step ~now:t2 m_logs3
+      (Msg.Sse_event
+         {
+           epoch = m_logs3.epoch;
+           event =
+             Msg.Sse_log_frame
+               { reset = false; entries = [ { log_entry with seq = 2 } ] };
+         })
+  in
+  Alcotest.(check (list int)) "next frame appends after the reset" [ 2; 1 ]
+    (List.map (fun (e : Wire_infra.system_log_entry) -> e.seq) m_logs4.infra.logs)
 
 (* 6. Keymap actions & all 22 Slash commands *)
 let test_keymap_and_slash_commands () =

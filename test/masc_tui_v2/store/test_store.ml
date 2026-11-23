@@ -3261,7 +3261,8 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
         | Cmd.Batch _ | Cmd.Http_get _ | Cmd.Http_put _
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
-        | Cmd.Copy_clipboard _ | Cmd.Open_external_url _
+        | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _
+        | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
             None)

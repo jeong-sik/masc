@@ -249,8 +249,8 @@ MASC TUI is **monitor-first**: while unfocused, bare keys navigate directly.
 Switch workspaces with `1`–`6`, cycle sub-tabs with `[` / `]` (or `←` / `→`
 unfocused, `Alt+[` / `Alt+]`), move selection or scroll with `↑`/`↓` (`j`/`k`), dive into an item
 with `Enter`, and focus the bottom composer with `i` (or press `c` on a Keeper
-to jump straight into Chat). Inside the composer, `Enter` sends/steers,
-`Alt+Enter` (or `Ctrl+Enter`) queues a follow-up, and `Shift+Enter` (or `Ctrl+J`)
+to jump straight into Chat). Inside the composer, `Enter` sends (behind an active turn it waits for that turn to end),
+`Alt+Enter` (or `Ctrl+Enter`) steers by cutting your own running request, and `Shift+Enter` (or `Ctrl+J`)
 inserts a newline. Type `/` or `@` inside the composer to open the interactive
 command/mention popup (`↑`/`↓` select, `Tab` complete, `Enter` run/insert,
 `Esc` dismiss). `Esc` blurs the composer, pops a dive, or closes an overlay and

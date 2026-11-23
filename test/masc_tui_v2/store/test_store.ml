@@ -8053,6 +8053,166 @@ let test_candle_fallback_never_makes_a_zero_ledger () =
   Alcotest.(check int) "an explicit refresh asks it again" 1
     (ledger_gets (View_fetches.fetches_for_current_view ~force:true after_404))
 
+(* "대화는 자꾸 끊기고": a plain Enter on a busy Keeper used to steer, and the
+   steer named the turn row's interrupt token, so it cut whichever turn held
+   the Keeper, another Keeper's delegated reply included. Enter now queues,
+   and the steer chord cuts only a request this TUI is streaming. *)
+let test_busy_enter_queues_and_steer_cuts_only_own_request () =
+  let keeper = "alpha" in
+  let turn_row ~interrupt_token : Wire_fleet.keeper_turn_row =
+    {
+      keeper_name = keeper;
+      chat_control_token = Some "ctrl-1";
+      state =
+        Wire_fleet.Turn_active
+          {
+            lane = Wire_fleet.Lane_chat;
+            started_at_unix = 100.0;
+            interrupt_token;
+            phase = Some "thinking";
+            tool_in_flight = None;
+            elapsed_ms = Some 500.0;
+          };
+    }
+  in
+  let with_turn ~interrupt_token (m : Model.t) =
+    {
+      m with
+      fleet =
+        Fleet_store.apply_turns ~observed_at:t0
+          [ turn_row ~interrupt_token ]
+          m.fleet;
+    }
+  in
+  let m0 = Model.initial ~cols:120 ~rows:36 () in
+  let m0 =
+    {
+      m0 with
+      fleet =
+        Fleet_store.apply_keepers ~observed_at:t0 [ sample_keeper keeper ]
+          m0.fleet;
+      drafts = Drafts.set_active_keeper keeper m0.drafts;
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Keepers;
+          dive_stack = [ Nav.Dive_keeper { name = keeper; tab = Nav.Keeper_chat } ];
+        };
+    }
+  in
+  let press ?alt text (m : Model.t) =
+    let typed =
+      {
+        m with
+        drafts = m.drafts |> Drafts.set_focus true |> Drafts.insert_text text;
+      }
+    in
+    Update.step ~now:t0 typed (Msg.Key_event (key ?alt Keymap.Input.Enter))
+  in
+  let one_request label cmds : Wire_fleet.chat_submit_request =
+    match
+      List.filter_map
+        (function
+          | Cmd.Http_post_stream
+              { req = Cmd.Stream_keeper_chat { request; is_btw = false }; _ } ->
+              Some request
+          | _ -> None)
+        (Cmd.flatten cmds)
+    with
+    | [ request ] -> request
+    | requests ->
+        Alcotest.failf "%s: expected one chat submit, got %d" label
+          (List.length requests)
+  in
+  let queued (request : Wire_fleet.chat_submit_request) =
+    match request.mode with
+    | Wire_fleet.Follow_up -> true
+    | Wire_fleet.Steer _ -> false
+  in
+  let warned (m : Model.t) =
+    match m.toast with
+    | Some { level = Model.Toast_warning; _ } -> true
+    | Some
+        { level = Model.Toast_info | Model.Toast_success | Model.Toast_error; _ }
+    | None ->
+        false
+  in
+  let tx_mode request_id (m : Model.t) =
+    match
+      List.find_opt
+        (fun (tx : Drafts.pending_message) ->
+          String.equal tx.request_id request_id)
+        m.drafts.pending_txs
+    with
+    | Some tx -> tx.mode
+    | None -> Alcotest.failf "no pending tx %s" request_id
+  in
+  let feed (m : Model.t) ~request_id chunk =
+    Update.step ~now:t0 m
+      (Msg.Chat_stream_chunk
+         { epoch = m.epoch; keeper; request_id; is_btw = false; chunk })
+  in
+  (* Idle: Enter sends request A, and A streams a partial reply. *)
+  let m1, cmds1 = press "first" m0 in
+  let a = one_request "idle Enter" cmds1 in
+  Alcotest.(check bool) "idle Enter sends with no interrupt" true (queued a);
+  let m2, _ =
+    feed m1 ~request_id:a.request_id
+      (Wire_fleet.Chunk_text_delta
+         { operation_id = Some a.request_id; delta = "partial reply" })
+  in
+  let m2 = with_turn ~interrupt_token:"turn-of-a" m2 in
+  (* Busy with A: Enter queues B behind A and keeps A streaming. *)
+  let m3, cmds3 = press "second" m2 in
+  let b = one_request "busy Enter" cmds3 in
+  Alcotest.(check bool) "busy Enter sends no admission intent" true (queued b);
+  Alcotest.(check bool) "busy Enter records a follow-up" true
+    (Drafts.equal_delivery_mode (tx_mode b.request_id m3) Drafts.Mode_follow_up);
+  Alcotest.(check (option string)) "busy Enter keeps A's live buffer"
+    (Some a.request_id)
+    (Option.map
+       (fun (s : Fleet_store.chat_stream_buffer) -> s.request_id)
+       (Fleet_store.String_map.find_opt keeper m3.fleet.chat_streams));
+  Alcotest.(check bool) "busy Enter raises no warning" false (warned m3);
+  (* The steer chord cuts A, the request this TUI is streaming. *)
+  let m4, cmds4 = press ~alt:true "third" m3 in
+  (match (one_request "own steer" cmds4).mode with
+  | Wire_fleet.Steer { control_token; operation_id } ->
+      Alcotest.(check string) "steer carries the Keeper's control token"
+        "ctrl-1" control_token;
+      Alcotest.(check string) "steer names A, this TUI's own request"
+        a.request_id operation_id
+  | Wire_fleet.Follow_up ->
+      Alcotest.fail "the steer chord must cut this TUI's own streaming request");
+  Alcotest.(check bool) "own steer raises no fallback warning" false (warned m4);
+  (* Another sender's turn holds the Keeper; this TUI streams nothing. *)
+  let foreign = with_turn ~interrupt_token:"delegated-turn" m0 in
+  let f1, cmds_f1 = press ~alt:true "steer attempt" foreign in
+  Alcotest.(check bool) "steer on a foreign turn queues instead" true
+    (queued (one_request "foreign steer" cmds_f1));
+  Alcotest.(check bool) "the queue fallback raises a warning toast" true
+    (warned f1);
+  let f2, cmds_f2 = press "plain send" foreign in
+  Alcotest.(check bool) "Enter on a foreign turn queues" true
+    (queued (one_request "foreign Enter" cmds_f2));
+  Alcotest.(check bool) "a queued Enter raises no warning" false (warned f2);
+  (* A finished and the turn row already shows the next turn, which is not
+     A. The steer must not reach that turn through its token. *)
+  let done_m, _ =
+    feed m2 ~request_id:a.request_id
+      (Wire_fleet.Chunk_turn_done
+         {
+           operation_id = Some a.request_id;
+           turn_ref = None;
+           reply = Some "partial reply";
+         })
+  in
+  let after = with_turn ~interrupt_token:"next-turn" done_m in
+  let g1, cmds_g1 = press ~alt:true "late steer" after in
+  Alcotest.(check bool) "a steer after A finished queues" true
+    (queued (one_request "late steer" cmds_g1));
+  Alcotest.(check bool) "the late steer fallback warns" true (warned g1)
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -8167,5 +8327,11 @@ let () =
             `Quick test_context_display_keeps_estimates_and_reasons_apart;
           Alcotest.test_case "The Candle fallback never makes a 0/0/0 ledger"
             `Quick test_candle_fallback_never_makes_a_zero_ledger;
+        ] );
+      ( "chat_submit"
+      , [
+          Alcotest.test_case
+            "Busy Enter queues; steer cuts only this TUI's own request"
+            `Quick test_busy_enter_queues_and_steer_cuts_only_own_request;
         ] );
     ]

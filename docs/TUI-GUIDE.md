@@ -133,8 +133,8 @@ composer dispatches navigation or overlay shortcuts (`1`–`6`, `,`, `I`, `?`,
 2. Press `i` to focus the bottom composer.
 3. Type your message (or paste directly — bracketed paste while unfocused also
    focuses the composer and inserts text cleanly):
-   - **`Enter`** — Send message (or **Steer** an active turn if the Keeper is busy and has a chat control token; when the `/` or `@` popup is open, executes or inserts the highlighted item).
-   - **`Alt+Enter`** or **`Ctrl+Enter`** — Queue as an end-of-turn **Follow-up**.
+   - **`Enter`** — Send message. While the Keeper is in a turn, the message waits in the queue (`Queued`) and runs after that turn ends; the running reply is not cut. When the `/` or `@` popup is open, `Enter` executes or inserts the highlighted item.
+   - **`Alt+Enter`** or **`Ctrl+Enter`** — **Steer**: cut the reply to your own running request and send this message in its place. When the running turn is not one you sent (another Keeper's delegated request, an autonomous or scheduled turn), nothing is cut: the message is queued and a toast says so.
    - **`Shift+Enter`** or **`Ctrl+J`** — Insert a literal newline inside the composer.
    - **`/` or `@` popup** — Type `/` (command or argument completion) or `@` (Keeper mention) to open the interactive popup: `↑`/`↓` (`PgUp`/`PgDn`, `Home`/`End`) move selection, `Tab` completes, `Enter` executes or inserts, and `Esc` dismisses the popup while keeping the composer focused (second `Esc` blurs).
    - **`Ctrl+W`** / **`Alt+Backspace`** — Delete the previous word; **`Ctrl+U`** clears to line start; **`Ctrl+A`/`E`** jump to line start/end.

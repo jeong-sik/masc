@@ -2530,7 +2530,7 @@ let test_journeys_tab_multipane_dives_safety () =
   Alcotest.(check bool) "J21 /btw Esc clears Drafts.btw to Btw_idle" true
     (m_btw_closed.drafts.btw = Drafts.Btw_idle);
 
-  (* J22: Composer Shift+Enter = newline, Ctrl+Enter = follow-up, Ctrl+A/E/U *)
+  (* J22: Composer Shift+Enter = newline, Ctrl+Enter = steer (a plain send on an idle Keeper), Ctrl+A/E/U *)
   record_case ();
   let m_c = { base with drafts = Drafts.set_focus true base.drafts } in
   let m_c1, _ = type_str m_c "line1" in
@@ -2549,7 +2549,7 @@ let test_journeys_tab_multipane_dives_safety () =
   Alcotest.(check string) "J22 Ctrl+U kills to line start" "line1\n"
     (Drafts.current_draft m_c6.drafts).text;
   let _, cmds_ce = step m_c3 (mk_key ~ctrl:true Keymap.Input.Enter) in
-  Alcotest.(check bool) "J22 Ctrl+Enter submits follow-up" true
+  Alcotest.(check bool) "J22 Ctrl+Enter on an idle Keeper sends without cutting a turn" true
     (has_cmd
        (function
          | Cmd.Http_post_stream

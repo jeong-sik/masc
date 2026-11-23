@@ -529,8 +529,8 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ~breakpoint (st : state)
         let send_hint =
           Say.resolve lang
             (if st.focused then
-               Say.make ~ko:" Enter 전송 · Alt+↵ 큐 " ~en:" Steer ↵ · Queue Alt+↵ "
-             else Say.make ~ko:" Steer ↵ " ~en:" Steer ↵ ")
+               Say.make ~ko:" Enter 전송 · Alt+↵ Steer " ~en:" Send ↵ · Steer Alt+↵ "
+             else Say.make ~ko:" 전송 ↵ " ~en:" Send ↵ ")
         in
         right_parts := (send_hint, pill_style) :: !right_parts;
         if st.draft_count_other_keepers > 0 then begin

@@ -439,19 +439,22 @@ let workspace_bindings =
     Nav.all_workspaces
 
 let ask_choice_bindings =
+  (* Bind Ask choices to bare a..d instead of 1..4 so 1..6 workspace navigation
+     never accidentally answers a pending Keeper Ask on Work > Inbox. *)
   List.init 4 (fun i ->
       let n = i + 1 in
-      let digit = Char.chr (Char.code '0' + n) in
+      let letter = Char.chr (Char.code 'a' + i) in
+      let key_s = String.make 1 letter in
       bind ~scope:Ask_choice_focused ~tier:Bare_unfocused ~category:Cat_approval
         ~action:(Ask_select_choice n)
-        ~key_display:(String.make 1 digit)
-        ~hint_label:(Say.make ~ko:(Printf.sprintf "선택 %d" n) ~en:(Printf.sprintf "Choice %d" n))
+        ~key_display:key_s
+        ~hint_label:(Say.make ~ko:(Printf.sprintf "선택 %c" letter) ~en:(Printf.sprintf "Choice %c" letter))
         ~help_desc:
           (Say.make
-             ~ko:(Printf.sprintf "Ask 선택지 %d 응답" n)
-             ~en:(Printf.sprintf "Select Ask choice %d" n))
+             ~ko:(Printf.sprintf "Ask 선택지 %c(%d) 응답" letter n)
+             ~en:(Printf.sprintf "Select Ask choice %c (%d)" letter n))
         ~footer_priority:(if n = 1 then 1 else 0)
-        (bare_char digit))
+        (bare_char letter))
 
 let say_dive = Say.make ~ko:"상세" ~en:"Dive"
 let say_back = Say.make ~ko:"닫기/뒤로" ~en:"Back"

@@ -1178,8 +1178,8 @@ let test_work_all_4_subtabs_and_empty_inbox () =
             render_to_grid ~cols ~rows (Screen_work.render ~model:m_ask)
           in
           let ask_txt = grid_all_text ask_grid in
-          Alcotest.(check bool) "shows [1] Merge now choice" true
-            (contains_sub ~needle:"[1] Merge now" ask_txt);
+          Alcotest.(check bool) "shows [a] Merge now choice" true
+            (contains_sub ~needle:"[a] Merge now" ask_txt);
           (* Empty Inbox renders Recent Decisions Audit (24h) + Policy Summary, never black void *)
           let m_empty_inbox =
             {
@@ -1197,7 +1197,10 @@ let test_work_all_4_subtabs_and_empty_inbox () =
             true (empty_rows >= 8);
           let empty_txt = grid_all_text empty_grid in
           Alcotest.(check bool) "empty inbox shows 24h recent decision audit" true
-            (contains_sub ~needle:"Approved PR #54339" empty_txt))
+            (contains_sub ~needle:"Approved PR #54339" empty_txt);
+          (* Ask choices are bound to a..d; bare 1..4 switch workspaces. *)
+          Alcotest.(check bool) "empty inbox does not advertise 1..4 choices" false
+            (contains_sub ~needle:"1..4" empty_txt))
         langs)
     viewports
 

@@ -569,6 +569,24 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
           else Say.resolve lang (Say.make ~ko:"[Esc] 뒤로" ~en:"[Esc] Back")
         in
         (txt, whisper_style)
+      else if
+        Option.is_none (Model.active_dive model)
+        && Nav.equal_workspace model.nav.workspace Nav.Keepers
+        && (model.nav.pane_index = 1 || model.nav.zoomed)
+        && Option.is_some (Fleet_store.selected_keeper_summary model.fleet)
+      then
+        let txt =
+          if compact then "[Tab] [[ ]]"
+          else if Model.is_keeper_config_active model then
+            Say.resolve lang
+              (Say.make ~ko:"[Tab] 목록  [←→] 값  [[ ]] 탭"
+                 ~en:"[Tab] Fleet  [←→] Cycle  [[ ]] Tabs")
+          else
+            Say.resolve lang
+              (Say.make ~ko:"[Tab] 목록  [←→] 탭"
+                 ~en:"[Tab] Fleet  [←→] Tabs")
+        in
+        (txt, whisper_style)
       else if Model.is_keeper_config_active model then
         let txt =
           if compact then "[[ ]]"
@@ -711,20 +729,24 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
          in
          x := !x + adv
      | Some (Nav.Dive_infra target) ->
-         let label =
+         let ws_label, label =
            match target with
            | Nav.Sandbox_dive name ->
-               Say.resolve lang (Say.make ~ko:"샌드박스" ~en:"Sandbox") ^ " " ^ name
+               ( Nav.workspace_label Nav.Infra,
+                 Say.resolve lang (Say.make ~ko:"샌드박스" ~en:"Sandbox")
+                 ^ " " ^ name )
            | Nav.Lane_dive id ->
-               Say.resolve lang (Say.make ~ko:"레인" ~en:"Lane") ^ " " ^ id
+               ( Nav.workspace_label Nav.Runtime,
+                 Say.resolve lang (Say.make ~ko:"레인" ~en:"Lane") ^ " " ^ id )
            | Nav.Incident_dive id ->
-               Printf.sprintf "%s #%d"
-                 (Say.resolve lang (Say.make ~ko:"이력" ~en:"Incident"))
-                 id
+               ( Nav.workspace_label Nav.Infra,
+                 Printf.sprintf "%s #%d"
+                   (Say.resolve lang (Say.make ~ko:"이력" ~en:"Incident"))
+                   id )
          in
          let crumb =
            Printf.sprintf "%s %s %s"
-             (Say.resolve lang (Nav.workspace_label Nav.Infra))
+             (Say.resolve lang ws_label)
              (Glyph.to_utf8 Glyph.Prompt_caret)
              label
          in
@@ -765,15 +787,44 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
                  Nav.all_knowledge_tabs
              in
              draw_tab_list tabs
-         | Nav.Keepers ->
-             let tabs =
-               List.map
-                 (fun m ->
-                   ( Say.resolve lang (Nav.keepers_fleet_mode_label m),
-                     Nav.equal_keepers_fleet_mode m model.fleet.fleet_mode ))
-                 Nav.all_keepers_fleet_modes
-             in
-             draw_tab_list tabs
+         | Nav.Keepers -> (
+             (* Sync sub-tab bar with what '['/']'/'←'/'→' actually control:
+                when Preview (pane 1 / zoomed) owns focus, show the selected
+                keeper's 5 inner preview tabs instead of Fleet modes. *)
+             match
+               if model.nav.pane_index = 1 || model.nav.zoomed then
+                 Fleet_store.selected_keeper_summary model.fleet
+               else None
+             with
+             | Some k ->
+                 let crumb =
+                   Printf.sprintf "%s %s %s"
+                     (Say.resolve lang (Nav.workspace_label Nav.Keepers))
+                     (Glyph.to_utf8 Glyph.Prompt_caret)
+                     (Grapheme.truncate_to_width ~max_width:20 k.name)
+                 in
+                 let adv =
+                   Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
+                     ~style:crumb_style crumb
+                 in
+                 x := !x + adv + 2;
+                 let tabs =
+                   List.map
+                     (fun t ->
+                       ( compact_keeper_tab_label ~lang ~compact t,
+                         Nav.equal_keeper_tab t model.fleet.keeper_dive_tab ))
+                     Nav.all_keeper_tabs
+                 in
+                 draw_tab_list tabs
+             | None ->
+                 let tabs =
+                   List.map
+                     (fun m ->
+                       ( Say.resolve lang (Nav.keepers_fleet_mode_label m),
+                         Nav.equal_keepers_fleet_mode m model.fleet.fleet_mode ))
+                     Nav.all_keepers_fleet_modes
+                 in
+                 draw_tab_list tabs)
          | Nav.Runtime ->
              let tabs =
                List.map

@@ -5350,10 +5350,10 @@ let test_p1_work_inbox_ask_approval_sync () =
   in
   Alcotest.(check (option string))
     "Work_inbox 'y' on triage_index=2 copies ask-2" (Some "ask-2") copied;
-  (* Pressing '1' answers ask-2, NOT ask-1! *)
-  let _, cmds_ans = Update.step ~now:t0 m_i2 (Msg.Key_event (char_key "1")) in
+  (* Pressing 'a' answers ask-2, NOT ask-1; bare '1' stays workspace switch! *)
+  let _, cmds_ans = Update.step ~now:t0 m_i2 (Msg.Key_event (char_key "a")) in
   Alcotest.(check (option string))
-    "Work_inbox '1' on triage_index=2 submits Post_ask_answer for ask-2"
+    "Work_inbox 'a' on triage_index=2 submits Post_ask_answer for ask-2"
     (Some "ask-2") (has_ask_post cmds_ans)
 
 let test_p1_pulse_collapsed_company_dive_and_scroll () =

@@ -124,16 +124,21 @@ let test_keymap_retired_p_v_and_vt100_safety () =
     all_focuses
 
 let test_keymap_scopes_and_3_tiers () =
-  (* Bare 1..6 switches workspaces when unfocused, yields to 1..4 inside Ask_choice_focused *)
+  (* Bare 1..6 ALWAYS switches workspaces (even in Ask_choice_focused), while
+     a..d answers Ask choices without hijacking workspace navigation. *)
   let ws_chain = Keymap.scope_chain_of_focus (Nav.Workspace_focused Nav.Pulse) in
   Alcotest.(check bool) "bare 4 -> Keepers" true
     (Option.equal Keymap.equal_action
        (Some (Keymap.Switch_workspace Nav.Keepers))
        (Keymap.dispatch ~scope_chain:ws_chain (char_ev '4')));
   let ask_chain = Keymap.scope_chain_of_focus Nav.Ask_choice_focused in
-  Alcotest.(check bool) "bare 2 in Ask_choice -> Ask_select_choice 2" true
+  Alcotest.(check bool) "bare b in Ask_choice -> Ask_select_choice 2" true
     (Option.equal Keymap.equal_action
        (Some (Keymap.Ask_select_choice 2))
+       (Keymap.dispatch ~scope_chain:ask_chain (char_ev 'b')));
+  Alcotest.(check bool) "bare 2 in Ask_choice -> Work workspace (no hijack)" true
+    (Option.equal Keymap.equal_action
+       (Some (Keymap.Switch_workspace Nav.Work))
        (Keymap.dispatch ~scope_chain:ask_chain (char_ev '2')));
   Alcotest.(check bool) "Ctrl+2 in Ask_choice -> Work workspace" true
     (Option.equal Keymap.equal_action

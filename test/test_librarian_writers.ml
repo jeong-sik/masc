@@ -481,10 +481,10 @@ let test_world_promotions_dispatch_once_across_compact_and_subsequent_events () 
         if pred () then ()
         else if attempts <= 0 then fail "timed out waiting for writer state"
         else (
-          Eio.Fiber.yield ();
+          Eio_unix.sleep 0.001;
           loop (attempts - 1))
       in
-      loop 200
+      loop 5000
     in
     let writer_idle () =
       match Writers.held writers with

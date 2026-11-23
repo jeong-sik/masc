@@ -3643,6 +3643,44 @@ let test_chat_history_speaker () =
                  "surface":{"kind":"pigeon"}}]|}))
       : string)
 
+(* A quota window that still has room plus a $0 credit window is a live
+   subscription ($0 Sub). Credit alone, or a spent quota window, is exhausted. *)
+let test_account_cost_state_credit_and_quota () =
+  let window utilization =
+    {
+      Wire_runtime.limit_id = None;
+      kind = Wire_runtime.Window_five_hour;
+      role = Wire_runtime.Role_gates_model_calls;
+      utilization;
+      resets_at_unix = None;
+      observed_at_unix = 0.0;
+    }
+  in
+  let credit_zero =
+    window
+      (Wire_runtime.Util_credit_balance
+         { currency = "USD"; total = Some 10.0; remaining = 0.0 })
+  in
+  let cost windows =
+    Format_val.format_cost
+      (Wire_runtime.classify_account_cost_state
+         (Wire_runtime.Account_reported windows))
+      ~lang:Say.Lang_en
+  in
+  Alcotest.(check string) "7 percent used quota + $0 credit" "$0 Sub"
+    (cost [ window (Wire_runtime.Util_percent 7); credit_zero ]);
+  Alcotest.(check string) "fraction 0.07 quota + $0 credit" "$0 Sub"
+    (cost [ window (Wire_runtime.Util_fraction 0.07); credit_zero ]);
+  Alcotest.(check string) "unlimited quota + $0 credit" "$0 Sub"
+    (cost [ window Wire_runtime.Util_credit_unlimited; credit_zero ]);
+  Alcotest.(check string) "$0 credit alone" "$0 Exhausted" (cost [ credit_zero ]);
+  Alcotest.(check string) "100 percent used quota + $0 credit" "$0 Exhausted"
+    (cost [ window (Wire_runtime.Util_percent 100); credit_zero ]);
+  Alcotest.(check string) "fraction 1.0 quota + $0 credit" "$0 Exhausted"
+    (cost [ window (Wire_runtime.Util_fraction 1.0); credit_zero ]);
+  Alcotest.(check string) "NaN fraction quota + $0 credit" "$0 Exhausted"
+    (cost [ window (Wire_runtime.Util_fraction Float.nan); credit_zero ])
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -3657,6 +3695,8 @@ let () =
           Alcotest.test_case "wire_work" `Quick test_wire_work;
           Alcotest.test_case "wire_knowledge" `Quick test_wire_knowledge;
           Alcotest.test_case "wire_runtime" `Quick test_wire_runtime;
+          Alcotest.test_case "account cost state: credit and quota windows" `Quick
+            test_account_cost_state_credit_and_quota;
           Alcotest.test_case "wire_infra" `Quick test_wire_infra;
           Alcotest.test_case "wire_config" `Quick test_wire_config;
           Alcotest.test_case "wire_observer" `Quick test_wire_observer;

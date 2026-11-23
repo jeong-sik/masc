@@ -816,11 +816,10 @@ let apply_http_reply ~now (m : Model.t) reply =
          stored page and index are marked stale and the current view reads
          them again instead of patching them. *)
       let knowledge =
-        let k = Knowledge_store.cancel_wiki_edit m.knowledge in
         {
-          k with
-          wiki_page = Observed.mark_stale k.wiki_page;
-          wiki_index = Observed.mark_stale k.wiki_index;
+          m.knowledge with
+          wiki_page = Observed.mark_stale m.knowledge.wiki_page;
+          wiki_index = Observed.mark_stale m.knowledge.wiki_index;
         }
       in
       let done_ko, done_en =
@@ -843,12 +842,11 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       (next, View_fetches.fetches_for_current_view next)
   | Msg.Reply_wiki_put { page; result = Error err } ->
-      let knowledge = Knowledge_store.mark_wiki_edit_saving false m.knowledge in
       let next, cmds =
         record_http_incident ~now ~source:Health.Source_client_http
           ~context:
             (Say.make ~ko:("위키 저장: " ^ page) ~en:("Save wiki: " ^ page))
-          err { m with knowledge }
+          err m
       in
       ( Model.with_toast ~now ~level:Model.Toast_error
           (Msg.http_error_summary err) next

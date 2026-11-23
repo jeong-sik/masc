@@ -921,10 +921,16 @@ let open_memory_act_modal (m : Model.t) ~(keeper_default : string) =
       };
     ]
 
+(* The form opens only on a page held fresh: right after a save the slot
+   still holds the previous revision, marked stale, until the page is read
+   again. The page it opens on becomes the edit's base, so the save names the
+   revision the form's text came from. *)
 let open_wiki_edit_modal ~now (m : Model.t) ~(slug : string) =
-  match Observed.to_option m.knowledge.wiki_page with
-  | Some d when String.equal d.slug slug ->
-      open_custom_inline_modal m
+  match m.knowledge.wiki_page with
+  | Observed.Value { data = d; stale = false; _ } when String.equal d.slug slug
+    ->
+      open_custom_inline_modal
+        { m with knowledge = Knowledge_store.begin_wiki_edit d m.knowledge }
         [
           {
             key = "wiki_slug";
@@ -962,7 +968,8 @@ let open_wiki_edit_modal ~now (m : Model.t) ~(slug : string) =
             secret = false;
           };
         ]
-  | Some _ | None ->
+  | Observed.Value _ | Observed.Loading _ | Observed.Absent
+  | Observed.Unreported | Observed.Failed _ ->
       ( Model.with_toast ~now ~level:Model.Toast_info
           (Say.make
              ~ko:("위키 본문을 불러오는 중입니다 (" ^ slug ^ ") — 잠시 후 [e]를 다시 누르세요")

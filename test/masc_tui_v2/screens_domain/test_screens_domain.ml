@@ -1368,7 +1368,7 @@ let test_knowledge_all_tabs_and_dives () =
                    Alcotest.(check bool)
                      (lbl ^ " interns OSC 8 wiki hyperlink") true
                      (Option.is_some (Cell_grid.hyperlink_uri grid 1));
-                   (* Also test Artifacts submode & Wiki inline edit draft *)
+                   (* Also test the Artifacts submode *)
                    let m_art =
                      {
                        m with
@@ -1381,25 +1381,7 @@ let test_knowledge_all_tabs_and_dives () =
                      render_into ~cols ~rows (fun ~cache ~rect g ->
                          Screen_knowledge.render ~model:m_art ~cache ~rect g)
                    in
-                   assert_grid_invariants ~label:(lbl ^ "/Artifacts") g_art;
-                   (match Observed.to_option m.knowledge.wiki_page with
-                    | Some wp ->
-                        let m_edit =
-                          {
-                            m with
-                            knowledge =
-                              Knowledge_store.begin_wiki_edit wp m.knowledge
-                              |> Knowledge_store.update_wiki_edit_body
-                                   "# Updated inline";
-                          }
-                        in
-                        let g_edit =
-                          render_into ~cols ~rows (fun ~cache ~rect g ->
-                              Screen_knowledge.render ~model:m_edit ~cache ~rect
-                                g)
-                        in
-                        assert_grid_invariants ~label:(lbl ^ "/WikiEdit") g_edit
-                    | None -> ())
+                   assert_grid_invariants ~label:(lbl ^ "/Artifacts") g_art
                | Nav.Knowledge_memory ->
                    (* Retrieval heat & real /memory/act recovery acts *)
                    Alcotest.(check bool)

@@ -2512,31 +2512,20 @@ let submit_inline_modal ~now (m : Model.t) =
               let note =
                 if String.equal note_raw "" then "TUI inline edit" else note_raw
               in
+              (* The save names the revision the form opened on, not the
+                 one the slot holds now: a page read again while the form is
+                 open must not let the old text pass the server's check. A
+                 slug typed over the base's creates a page, which the server
+                 refuses if one exists. *)
               let expected_revision, expected_sha256, source, tags =
-                match Observed.to_option m.knowledge.wiki_page with
-                | Some detail when String.equal detail.slug slug ->
-                    ( Some detail.frontmatter.revision
-                    , Some detail.sha256
-                    , detail.frontmatter.source
-                    , detail.frontmatter.tags )
-                | Some _ | None -> (
-                    match Observed.to_option m.knowledge.wiki_index with
-                    | Some idx -> (
-                        match
-                          List.find_opt
-                            (fun (p : Wire_knowledge.wiki_page_summary) ->
-                              String.equal p.slug slug)
-                            idx.pages
-                        with
-                        | Some s ->
-                            ( Some s.revision
-                            , Some s.sha256
-                            , s.source
-                            , s.tags )
-                        | None ->
-                            (None, None, Wire_knowledge.Source_observation, []))
-                    | None ->
-                        (None, None, Wire_knowledge.Source_observation, []))
+                match m.knowledge.wiki_edit_base with
+                | Some base when String.equal base.slug slug ->
+                    ( Some base.revision
+                    , Some base.sha256
+                    , base.source
+                    , base.tags )
+                | Some _ | None ->
+                    (None, None, Wire_knowledge.Source_observation, [])
               in
               let request : Wire_knowledge.wiki_put_request =
                 {
@@ -2555,7 +2544,10 @@ let submit_inline_modal ~now (m : Model.t) =
                     (Say.make
                        ~ko:("위키 문서 저장 중: " ^ slug)
                        ~en:("Saving wiki page: " ^ slug))
-                  m
+                  {
+                    m with
+                    knowledge = Knowledge_store.end_wiki_edit m.knowledge;
+                  }
               , [
                   Cmd.Http_put
                     {
@@ -3345,23 +3337,7 @@ let wiki_preview_max_scroll ~bp ~theme ~(rect : Rect.t)
           | None -> None)
       | None -> Knowledge_store.selected_wiki_page k
     in
-    let active_draft =
-      match target_slug with
-      | None -> k.wiki_edit_draft
-      | Some want -> (
-          match k.wiki_edit_draft with
-          | Some d when String.equal d.slug want -> Some d
-          | Some _ | None -> None)
-    in
-    match active_draft with
-    | Some d ->
-        let md_rect =
-          Rect.make ~x:inner.x ~y:(inner.y + 1) ~w:inner.w
-            ~h:(max 0 (inner.h - 1))
-          |> ui_pad_content ~bp
-        in
-        markdown_max_scroll ~theme ~width:md_rect.w ~height:md_rect.h d.body
-    | None -> (
+    (
         let page_detail =
           match Observed.to_option k.wiki_page with
           | Some d -> (

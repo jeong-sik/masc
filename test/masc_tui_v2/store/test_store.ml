@@ -3603,6 +3603,55 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
          | Cmd.Http_get { req = Cmd.Get_wiki_page { page = "guide" }; _ } -> true
          | _ -> false)
        cmds_wsaved);
+  (* Until that read lands the slot holds revision 3, so [e] waits for the
+     page instead of opening a form on the text the save replaced. *)
+  let m_wagain, cmds_wagain = step m_wsaved (char_key "e") in
+  Alcotest.(check bool) "[e] right after a save opens no form" true
+    (Option.is_none m_wagain.inline_modal);
+  Alcotest.(check bool) "[e] right after a save asks for the page" true
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_wiki_page { page = "guide" }; _ } -> true
+         | _ -> false)
+       cmds_wagain);
+  (* A form opened on revision 3 saves against revision 3 even when
+     revision 4 lands while it is open: the server then refuses the save
+     instead of writing the old text over revision 4. *)
+  let m_wopen, _ = step m_wiki (char_key "e") in
+  let page_r4 =
+    {
+      wiki_page with
+      frontmatter = { wiki_page.frontmatter with revision = 4 };
+      sha256 = "sha-w4";
+    }
+  in
+  let m_wr4, _ =
+    Update.step ~now:t1 m_wopen
+      (Msg.Http_reply
+         { epoch = m_wopen.epoch; reply = Msg.Reply_wiki_page (Ok page_r4) })
+  in
+  let _, cmds_wbase = step m_wr4 (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "the save names the revision the form opened on" true
+    (has_cmd
+       (function
+         | Cmd.Http_put
+             {
+               req =
+                 Cmd.Put_wiki_page
+                   {
+                     page = "guide";
+                     request =
+                       {
+                         expected_revision = Some 3;
+                         expected_sha256 = Some "sha-w3";
+                         _;
+                       };
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       cmds_wbase);
   let m_mact_mod, _ = step m_kmem (char_key "A") in
   let m_mact_done, cmds_mact_mod = step m_mact_mod (key Keymap.Input.Enter) in
   Alcotest.(check bool) "Memory [A] modal closes on submit and emits Post_memory_act"

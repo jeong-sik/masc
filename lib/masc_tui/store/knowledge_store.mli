@@ -104,18 +104,15 @@ type memory_diagram_state = {
   copy_source : string;
 }
 
-type wiki_edit_draft = {
+(** The page an open wiki edit form started from. The form's text came from
+    this revision, so its save names this revision and sha256, and the
+    server refuses the save if the page changed since. *)
+type wiki_edit_base = {
   slug : string;
-  expected_revision : int option;
-  expected_sha256 : string option;
-  title : string;
-  summary : string;
+  revision : int;
+  sha256 : string;
   source : Wire_knowledge.wiki_source;
   tags : string list;
-  body : string;
-  note : string;
-  dirty : bool;
-  saving : bool;
 }
 
 type t = {
@@ -134,7 +131,7 @@ type t = {
   wiki_log : Wire_knowledge.wiki_log_response Observed.t;
   wiki_search : Wire_knowledge.wiki_search_response Observed.t;
   wiki_lint : Wire_knowledge.wiki_lint_report Observed.t;
-  wiki_edit_draft : wiki_edit_draft option;
+  wiki_edit_base : wiki_edit_base option;
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
   world_memory : Wire_knowledge.world_memory Observed.t;
   memory_diff : Wire_knowledge.memory_diff Observed.t;
@@ -301,12 +298,10 @@ val record_memory_act_answer :
   keeper:string -> Wire_knowledge.memory_act_answer -> t -> t
 
 val begin_wiki_edit : Wire_knowledge.wiki_page_detail -> t -> t
-val update_wiki_edit_body : string -> t -> t
-val update_wiki_edit_note : string -> t -> t
-val mark_wiki_edit_saving : bool -> t -> t
-val cancel_wiki_edit : t -> t
-val wiki_put_request_of_draft :
-  wiki_edit_draft -> Wire_knowledge.wiki_put_request
+(** Remember [page] as the base of the edit form that opens on it. *)
+
+val end_wiki_edit : t -> t
+(** Forget the base once the form is submitted. *)
 
 type succession_group = {
   chain_root_id : string option;

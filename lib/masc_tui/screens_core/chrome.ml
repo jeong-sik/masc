@@ -1096,16 +1096,33 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               true
           | None -> Model.focusable_pane_count model > 1
         in
-        if show_tab_hint then raw
-        else
-          List.filter
-            (fun (h : Keymap.footer_hint) ->
-              not
-                (Keymap.equal_action h.action
-                   (Keymap.Cycle_focus_pane Keymap.Next)
-                 || Keymap.equal_action h.action
-                      (Keymap.Cycle_focus_pane Keymap.Prev)))
-            raw
+        let enter_hint =
+          match model.nav.overlay with
+          | None -> Update_nav.enter_hint model
+          | Some _ -> Update_nav.Enter_hint_dive
+        in
+        let relabel (h : Keymap.footer_hint) ~ko ~en =
+          { h with label = Say.resolve model.lang (Say.make ~ko ~en) }
+        in
+        List.filter_map
+          (fun (h : Keymap.footer_hint) ->
+            let is_tab_hint =
+              Keymap.equal_action h.action (Keymap.Cycle_focus_pane Keymap.Next)
+              || Keymap.equal_action h.action
+                   (Keymap.Cycle_focus_pane Keymap.Prev)
+            in
+            if is_tab_hint && not show_tab_hint then None
+            else if not (Keymap.equal_action h.action Keymap.Dive_selected) then
+              Some h
+            else
+              match enter_hint with
+              | Update_nav.Enter_hint_hidden -> None
+              | Update_nav.Enter_hint_dive -> Some h
+              | Update_nav.Enter_hint_edit_field ->
+                  Some (relabel h ~ko:"편집" ~en:"Edit")
+              | Update_nav.Enter_hint_confirm_field ->
+                  Some (relabel h ~ko:"확인" ~en:"Confirm"))
+          raw
     in
     let rec draw_keycaps count = function
       | [] -> ()

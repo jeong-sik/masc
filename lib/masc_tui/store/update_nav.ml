@@ -1780,66 +1780,83 @@ let refresh_open_memory_diagram ~now (m : Model.t) =
       | Some _ | None -> (m, []))
   | (Some _ | None), (Some _ | None) -> (m, [])
 
-let open_memory_reading_for ?(force_diff = false) ~keeper_opt (m : Model.t) =
-  let k = m.knowledge in
-  if
-    Option.is_some k.memory_reading
-    || Option.is_some (Memory_diagram.active_diagram m)
-  then (m, [])
+(* The reading Enter opens on the selected memory row of [keeper_opt]'s
+   scope: an activity event, a fact or a diff item. *)
+let selected_memory_reading ?(force_diff = false) ~keeper_opt
+    (k : Knowledge_store.t) =
+  if force_diff then
+    match Knowledge_store.selected_memory_diff_item_for ~keeper_opt k with
+    | Some item ->
+        Some (Knowledge_store.Reading_diff_item { keeper = keeper_opt; item })
+    | None -> None
   else
-    let entry_opt =
-      if force_diff then
+    match keeper_opt, k.memory_view_mode with
+    | Some kp, Knowledge_store.View_evolution -> (
+        match Knowledge_store.selected_activity_event_for ~keeper:kp k with
+        | None -> None
+        | Some event ->
+            let notes =
+              match Observed.to_option k.keeper_memory_activity with
+              | Some act when String.equal act.keeper kp -> act.notes
+              | Some _ | None -> []
+            in
+            Some (Knowledge_store.Reading_activity { keeper = kp; event; notes }))
+    | Some kp, Knowledge_store.View_facts -> (
+        match Knowledge_store.selected_memory_fact_row ~keeper:kp k with
+        | None -> None
+        | Some (Knowledge_store.Fact_ordinary { revision; fact }) ->
+            Some
+              (Knowledge_store.Reading_ordinary_fact
+                 { keeper = kp; revision; fact })
+        | Some (Knowledge_store.Fact_source fact) ->
+            Some (Knowledge_store.Reading_source_fact { keeper = kp; fact })
+        | Some (Knowledge_store.Fact_source_invalidation invalidation) ->
+            Some
+              (Knowledge_store.Reading_source_invalidation
+                 { keeper = kp; invalidation }))
+    | _, Knowledge_store.View_diff
+    | None, (Knowledge_store.View_evolution | Knowledge_store.View_facts) -> (
         match Knowledge_store.selected_memory_diff_item_for ~keeper_opt k with
         | Some item ->
-            Some (Knowledge_store.Reading_diff_item { keeper = keeper_opt; item })
-        | None -> None
-      else
-        match keeper_opt, k.memory_view_mode with
-        | Some kp, Knowledge_store.View_evolution -> (
-            match Knowledge_store.selected_activity_event_for ~keeper:kp k with
-            | None -> None
-            | Some event ->
-                let notes =
-                  match Observed.to_option k.keeper_memory_activity with
-                  | Some act when String.equal act.keeper kp -> act.notes
-                  | Some _ | None -> []
-                in
-                Some
-                  (Knowledge_store.Reading_activity { keeper = kp; event; notes }))
-        | Some kp, Knowledge_store.View_facts -> (
-            match Knowledge_store.selected_memory_fact_row ~keeper:kp k with
-            | None -> None
-            | Some (Knowledge_store.Fact_ordinary { revision; fact }) ->
-                Some
-                  (Knowledge_store.Reading_ordinary_fact
-                     { keeper = kp; revision; fact })
-            | Some (Knowledge_store.Fact_source fact) ->
-                Some (Knowledge_store.Reading_source_fact { keeper = kp; fact })
-            | Some (Knowledge_store.Fact_source_invalidation invalidation) ->
-                Some
-                  (Knowledge_store.Reading_source_invalidation
-                     { keeper = kp; invalidation }))
-        | _, Knowledge_store.View_diff
-        | None, (Knowledge_store.View_evolution | Knowledge_store.View_facts) -> (
-            match Knowledge_store.selected_memory_diff_item_for ~keeper_opt k with
-            | Some item ->
-                Some
-                  (Knowledge_store.Reading_diff_item
-                     { keeper = keeper_opt; item })
-            | None -> None)
-    in
-    match entry_opt with
-    | Some entry ->
-        ({ m with knowledge = Knowledge_store.open_memory_reading entry k }, [])
-    | None -> (m, [])
+            Some
+              (Knowledge_store.Reading_diff_item { keeper = keeper_opt; item })
+        | None -> None)
 
-let dive_selected (m : Model.t) =
+(* What Enter does on the current unfocused view. [dive_selected] runs the
+   plan and the footer reads [enter_hint], so the footer only offers Enter
+   where the key does something. *)
+type enter_plan =
+  | Enter_noop
+  | Enter_push of Nav.dive
+  | Enter_attention of Attention.entry
+  | Enter_toggle_unreported_accounts
+  | Enter_fetch_memory_diff
+  | Enter_open_memory_reading of Knowledge_store.memory_reading_entry
+  | Enter_scope_memory of string option
+
+(* Enter on a memory row opens its reading, unless a reading or a memory
+   diagram is already open; with nothing selected it does [otherwise]. *)
+let memory_reading_plan ?force_diff ~keeper_opt ~otherwise (m : Model.t) =
+  if
+    Option.is_some m.knowledge.memory_reading
+    || Option.is_some (Memory_diagram.active_diagram m)
+  then Enter_noop
+  else
+    match selected_memory_reading ?force_diff ~keeper_opt m.knowledge with
+    | Some entry -> Enter_open_memory_reading entry
+    | None -> otherwise ()
+
+let enter_plan (m : Model.t) : enter_plan =
   (* Never push duplicate or cross-workspace dives when already inside a dive! *)
   match Model.active_dive m with
   | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
-      open_memory_reading_for ~keeper_opt:(Some name) m
+      memory_reading_plan ~keeper_opt:(Some name)
+        ~otherwise:(fun () -> Enter_noop)
+        m
   | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; _ })) ->
-      open_memory_reading_for ~force_diff:true ~keeper_opt:keeper m
+      memory_reading_plan ~force_diff:true ~keeper_opt:keeper
+        ~otherwise:(fun () -> Enter_noop)
+        m
   | Some
       ( Nav.Dive_keeper
           {
@@ -1854,30 +1871,30 @@ let dive_selected (m : Model.t) =
       | Nav.Dive_knowledge
           (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
       | Nav.Dive_infra _ ) ->
-      (m, [])
+      Enter_noop
   | None -> (
       match m.nav.workspace with
       | Nav.Pulse -> (
           match Model.active_pulse_pane m with
           | Model.Pulse_attention -> (
               match Attention.current_triage_item m.attention with
-              | Some entry -> dive_attention_entry m entry
-              | None -> (m, []))
+              | Some entry -> Enter_attention entry
+              | None -> Enter_noop)
           | Model.Pulse_companies -> (
               match Fleet_store.selected_company_keeper m.fleet with
               | Some k ->
-                  push_dive m
+                  Enter_push
                     (Nav.Dive_keeper
                        { name = k.name; tab = m.fleet.keeper_dive_tab })
-              | None -> (m, []))
+              | None -> Enter_noop)
           | Model.Pulse_goals -> (
               match Work_store.selected_pulse_goal m.work with
-              | Some g -> push_dive m (Nav.Dive_work (Nav.Goal_dive g.id))
-              | None -> (m, []))
+              | Some g -> Enter_push (Nav.Dive_work (Nav.Goal_dive g.id))
+              | None -> Enter_noop)
           | Model.Pulse_world -> (
               match Knowledge_store.selected_pulse_thread m.knowledge with
-              | Some p -> push_dive m (Nav.Dive_knowledge (Nav.Thread_dive p.id))
-              | None -> (m, [])))
+              | Some p -> Enter_push (Nav.Dive_knowledge (Nav.Thread_dive p.id))
+              | None -> Enter_noop))
       | Nav.Keepers -> (
           match Fleet_store.selected_keeper_summary m.fleet with
           | Some k ->
@@ -1885,12 +1902,15 @@ let dive_selected (m : Model.t) =
                 (m.nav.pane_index = 1 || m.nav.zoomed)
                 && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                      Nav.Keeper_memory
-              then open_memory_reading_for ~keeper_opt:(Some k.name) m
+              then
+                memory_reading_plan ~keeper_opt:(Some k.name)
+                  ~otherwise:(fun () -> Enter_noop)
+                  m
               else
-                push_dive m
+                Enter_push
                   (Nav.Dive_keeper
                      { name = k.name; tab = m.fleet.keeper_dive_tab })
-          | None -> (m, []))
+          | None -> Enter_noop)
       | Nav.Work -> (
           match m.work.active_tab with
           | Nav.Work_pipeline -> (
@@ -1898,46 +1918,46 @@ let dive_selected (m : Model.t) =
               | 1 when Model.work_pipeline_has_linked_card m -> (
                   match Work_store.selected_verification m.work with
                   | Some v ->
-                      push_dive m
+                      Enter_push
                         (Nav.Dive_work (Nav.Verification_dive v.request_id))
-                  | None -> (m, []))
+                  | None -> Enter_noop)
               | _ -> (
                   match Work_store.selected_goal m.work with
-                  | Some g -> push_dive m (Nav.Dive_work (Nav.Goal_dive g.id))
-                  | None -> (m, [])))
+                  | Some g -> Enter_push (Nav.Dive_work (Nav.Goal_dive g.id))
+                  | None -> Enter_noop))
           | Nav.Work_tasks_schedules -> (
               match Work_store.selected_task m.work with
-              | Some task -> push_dive m (Nav.Dive_work (Nav.Task_dive task.id))
-              | None -> (m, []))
+              | Some task -> Enter_push (Nav.Dive_work (Nav.Task_dive task.id))
+              | None -> Enter_noop)
           | Nav.Work_inbox -> (
               match
                 Attention.current_filtered_item ~query:m.work.filter_query
                   m.attention
               with
-              | Some entry -> dive_attention_entry m entry
-              | None -> (m, []))
-          | Nav.Work_candle_scorecard -> (m, []))
+              | Some entry -> Enter_attention entry
+              | None -> Enter_noop)
+          | Nav.Work_candle_scorecard -> Enter_noop)
       | Nav.Knowledge -> (
           match m.knowledge.active_tab with
           | Nav.Knowledge_board -> (
               match Knowledge_store.selected_post m.knowledge with
-              | Some p -> push_dive m (Nav.Dive_knowledge (Nav.Thread_dive p.id))
-              | None -> (m, []))
+              | Some p -> Enter_push (Nav.Dive_knowledge (Nav.Thread_dive p.id))
+              | None -> Enter_noop)
           | Nav.Knowledge_wiki_artifacts -> (
               match m.knowledge.wiki_artifacts_submode with
               | `Wiki -> (
                   match Knowledge_store.selected_wiki_page m.knowledge with
                   | Some p ->
-                      push_dive m (Nav.Dive_knowledge (Nav.Wiki_dive p.slug))
-                  | None -> (m, []))
+                      Enter_push (Nav.Dive_knowledge (Nav.Wiki_dive p.slug))
+                  | None -> Enter_noop)
               | `Artifacts -> (
                   match Knowledge_store.selected_artifact m.knowledge with
                   | Some a ->
-                      push_dive m
+                      Enter_push
                         (Nav.Dive_knowledge (Nav.Artifact_dive a.sha256))
-                  | None -> (m, [])))
+                  | None -> Enter_noop))
           | Nav.Knowledge_memory -> (
-              let enter_diff_dive () =
+              let diff_plan () =
                 let rev_bounds =
                   match Observed.to_option m.knowledge.memory_diff with
                   | None -> None
@@ -1965,7 +1985,7 @@ let dive_selected (m : Model.t) =
                 in
                 match rev_bounds with
                 | Some (from_rev, to_rev) ->
-                    push_dive m
+                    Enter_push
                       (Nav.Dive_knowledge
                          (Nav.Memory_diff_dive
                             {
@@ -1973,94 +1993,101 @@ let dive_selected (m : Model.t) =
                               from_rev;
                               to_rev;
                             }))
-                | None ->
-                    ( m
-                    , [
-                        Cmd.Http_get
-                          {
-                            epoch = m.epoch;
-                            req =
-                              Cmd.Get_memory_diff
-                                {
-                                  keeper = m.knowledge.memory_diff_keeper;
-                                  window = m.knowledge.memory_diff_window;
-                                };
-                          };
-                      ] )
+                | None -> Enter_fetch_memory_diff
               in
               if m.nav.pane_index = 1 || m.nav.zoomed then
-                if Option.is_some (Memory_diagram.active_diagram m) then (m, [])
-                else
-                  let opened, cmds =
-                    open_memory_reading_for
-                      ~keeper_opt:m.knowledge.memory_diff_keeper m
-                  in
-                  if Option.is_some opened.knowledge.memory_reading then
-                    (opened, cmds)
-                  else enter_diff_dive ()
+                memory_reading_plan ~keeper_opt:m.knowledge.memory_diff_keeper
+                  ~otherwise:diff_plan m
               else
                 match Knowledge_store.selected_memory_left_row m.knowledge with
                 | Some (Knowledge_store.Left_writer w) ->
-                    let knowledge =
-                      Knowledge_store.set_memory_diff_keeper (Some w.keeper)
-                        m.knowledge
-                    in
-                    let next =
-                      {
-                        m with
-                        nav = { m.nav with pane_index = 1 };
-                        knowledge;
-                      }
-                    in
-                    (next, View_fetches.fetches_for_current_view next)
-                | Some Knowledge_store.Left_world_scope ->
-                    let knowledge =
-                      Knowledge_store.set_memory_diff_keeper None m.knowledge
-                    in
-                    let next =
-                      {
-                        m with
-                        nav = { m.nav with pane_index = 1 };
-                        knowledge;
-                      }
-                    in
-                    (next, View_fetches.fetches_for_current_view next)
-                | Some (Knowledge_store.Left_conflict _) | None ->
-                    enter_diff_dive ()))
+                    Enter_scope_memory (Some w.keeper)
+                | Some Knowledge_store.Left_world_scope -> Enter_scope_memory None
+                | Some (Knowledge_store.Left_conflict _) | None -> diff_plan ()))
       | Nav.Runtime -> (
           match m.runtime.active_tab with
           | Nav.Runtime_quotas_credits ->
               if
                 m.nav.pane_index = 1
                 && Runtime_store.is_unreported_toggle_row_selected m.runtime
-              then
-                ( {
-                    m with
-                    runtime =
-                      Runtime_store.toggle_unreported_accounts m.runtime;
-                  }
-                , [] )
-              else (m, [])
+              then Enter_toggle_unreported_accounts
+              else Enter_noop
           | Nav.Runtime_failover_lanes -> (
               match Runtime_store.selected_lane m.runtime with
-              | Some lane -> push_dive m (Nav.Dive_infra (Nav.Lane_dive lane.id))
-              | None -> (m, []))
+              | Some lane -> Enter_push (Nav.Dive_infra (Nav.Lane_dive lane.id))
+              | None -> Enter_noop)
           | Nav.Runtime_efficiency_spend -> (
               match Runtime_store.selected_keeper_spend_row m.runtime with
               | Some row ->
-                  push_dive m
+                  Enter_push
                     (Nav.Dive_keeper
                        { name = row.keeper; tab = Nav.Keeper_work_candle })
-              | None -> (m, []))
-          | Nav.Runtime_tools_connectors -> (m, []))
+              | None -> Enter_noop)
+          | Nav.Runtime_tools_connectors -> Enter_noop)
       | Nav.Infra -> (
           match m.infra.active_tab with
           | Nav.Infra_sandboxes -> (
               match Infra_store.selected_sandbox_keeper m.infra with
               | Some keeper ->
-                  push_dive m (Nav.Dive_infra (Nav.Sandbox_dive keeper))
-              | None -> (m, []))
-          | Nav.Infra_repos_changes | Nav.Infra_activity_logs -> (m, [])))
+                  Enter_push (Nav.Dive_infra (Nav.Sandbox_dive keeper))
+              | None -> Enter_noop)
+          | Nav.Infra_repos_changes | Nav.Infra_activity_logs -> Enter_noop))
+
+let dive_selected (m : Model.t) =
+  match enter_plan m with
+  | Enter_noop -> (m, [])
+  | Enter_push dive -> push_dive m dive
+  | Enter_attention entry -> dive_attention_entry m entry
+  | Enter_toggle_unreported_accounts ->
+      ( { m with runtime = Runtime_store.toggle_unreported_accounts m.runtime }
+      , [] )
+  | Enter_fetch_memory_diff ->
+      ( m
+      , [
+          Cmd.Http_get
+            {
+              epoch = m.epoch;
+              req =
+                Cmd.Get_memory_diff
+                  {
+                    keeper = m.knowledge.memory_diff_keeper;
+                    window = m.knowledge.memory_diff_window;
+                  };
+            };
+        ] )
+  | Enter_open_memory_reading entry ->
+      ( {
+          m with
+          knowledge = Knowledge_store.open_memory_reading entry m.knowledge;
+        }
+      , [] )
+  | Enter_scope_memory keeper ->
+      let knowledge =
+        Knowledge_store.set_memory_diff_keeper keeper m.knowledge
+      in
+      let next = { m with nav = { m.nav with pane_index = 1 }; knowledge } in
+      (next, View_fetches.fetches_for_current_view next)
+
+type enter_hint =
+  | Enter_hint_hidden
+  | Enter_hint_dive
+  | Enter_hint_edit_field
+  | Enter_hint_confirm_field
+
+(* Keeper config takes Enter before the keymap does
+   (Update_input.dispatch_keeper_config_key, behind the same condition): Enter
+   starts editing the selected field, or confirms the edit in progress. *)
+let enter_hint (m : Model.t) =
+  if Model.is_keeper_config_active m && not (Drafts.is_focused m.drafts) then
+    if Config_store.is_editing_field m.config then Enter_hint_confirm_field
+    else Enter_hint_edit_field
+  else
+    match enter_plan m with
+    | Enter_noop -> Enter_hint_hidden
+    | Enter_push _ | Enter_attention _ | Enter_toggle_unreported_accounts
+    | Enter_fetch_memory_diff | Enter_open_memory_reading _
+    | Enter_scope_memory _ ->
+        Enter_hint_dive
 
 type inline_form_kind =
   | Form_standard of Nav.inline_action_kind

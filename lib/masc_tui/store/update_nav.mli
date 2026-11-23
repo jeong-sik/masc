@@ -112,6 +112,18 @@ val cycle_memory_diagram_mode :
 val refresh_open_memory_diagram :
   now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
 
+type enter_hint =
+  | Enter_hint_hidden  (** Enter does nothing here. *)
+  | Enter_hint_dive  (** Enter dives, toggles, or fetches ([dive_selected]). *)
+  | Enter_hint_edit_field  (** Keeper config: Enter edits the selected field. *)
+  | Enter_hint_confirm_field
+      (** Keeper config: Enter confirms the field being edited. *)
+
+val enter_hint : Model.t -> enter_hint
+(** What the footer's Enter hint says. It reads the plan [dive_selected] runs,
+    and the Keeper config condition that takes Enter before the keymap, so the
+    footer offers Enter only where the key acts and names what it does. *)
+
 val current_filter_query : Model.t -> string
 val set_active_filter_query : string -> Model.t -> Model.t
 

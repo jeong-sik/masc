@@ -389,6 +389,17 @@ val hottest_signal_threads : t -> Wire_knowledge.board_post list
 val selected_pulse_thread : t -> Wire_knowledge.board_post option
 val move_pulse_thread : ?viewport_rows:int -> delta:int -> t -> t
 val selected_post : t -> Wire_knowledge.board_post option
+
+(** What [Space] does on the Board list: it folds the selected post's
+    succession chain when the post belongs to one, and otherwise flips the
+    Signal-only / All filter. The key handler and the card hint both read this,
+    so the hint names the action the key runs. *)
+type board_space_effect =
+  | Board_space_toggle_chain of string
+  | Board_space_toggle_signal_only
+
+val board_space_effect : t -> board_space_effect
+
 val selected_wiki_page : t -> Wire_knowledge.wiki_page_summary option
 val selected_artifact : t -> Wire_knowledge.artifact_entry option
 

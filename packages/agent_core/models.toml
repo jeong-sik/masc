@@ -3808,6 +3808,31 @@ supports_reasoning = true
 reasoning_streaming_format = "delta:reasoning_content"
 supports_native_streaming = true
 
+# GLM-5.4 joined both coding-plan /models lists on 2026-11-23 (created
+# 2026-11-23T12:00Z). Same day: an oversized max_tokens was refused with
+# code 1210 "[1,131072]", and a tool-call completion came back as
+# model="glm-5.4" with reasoning on message.reasoning_content. Z.AI has no
+# glm-5.4 model page yet; the 1M window is docs.z.ai/devpack/latest-model's
+# "[1m]" setup with CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000.
+# Images: latest-model says "Both GLM-5.4 and GLM-5.3-Flash are multimodal
+# models", and a PNG sent as image_url on /coding/paas/v4 came back as its
+# exact text the same day.
+[[models]]
+model_id = "glm-5.4"
+provider_name = "glm-coding"
+base = "glm"
+thinking_control_format = "none"
+max_context_tokens = 1048576
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_multimodal_inputs = true
+supports_image_input = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
 # The rest of the Z.AI coding plan's text models. A glm-coding binding's
 # capability lookup never reads a bare row (the glm-4.6v twin below has the
 # full account), so without these every one resolved to the glm
@@ -5248,6 +5273,31 @@ supports_tools = true
 supports_tool_choice = true
 supports_named_tool_choice = false
 supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+# GLM-5.4 joined both coding-plan /models lists on 2026-11-23 (created
+# 2026-11-23T12:00Z). Same day: an oversized max_tokens was refused with
+# code 1210 "[1,131072]", and a tool-call completion came back as
+# model="glm-5.4" with reasoning on message.reasoning_content. Z.AI has no
+# glm-5.4 model page yet; the 1M window is docs.z.ai/devpack/latest-model's
+# "[1m]" setup with CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000.
+# Images: latest-model says "Both GLM-5.4 and GLM-5.3-Flash are multimodal
+# models", and a PNG sent as image_url on /coding/paas/v4 came back as its
+# exact text the same day.
+[[models]]
+model_id = "glm-5.4"
+provider_name = "glm"
+base = "glm"
+thinking_control_format = "none"
+max_context_tokens = 1048576
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_multimodal_inputs = true
+supports_image_input = true
 reasoning_streaming_format = "delta:reasoning_content"
 supports_native_streaming = true
 

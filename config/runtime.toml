@@ -995,6 +995,10 @@ thinking-support = true
 preserve-thinking = true
 streaming = true
 
+# glm-5.4 read a PNG on the coding-plan wire on 2026-11-23.
+[models.glm-5-4.capabilities]
+supports-image-input = true
+
 [glm-coding.glm-5-4]
 max-concurrent = 4
 # One of several glm-coding bindings now, so the wizard's pick is named.

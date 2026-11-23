@@ -3814,6 +3814,9 @@ supports_native_streaming = true
 # model="glm-5.4" with reasoning on message.reasoning_content. Z.AI has no
 # glm-5.4 model page yet; the 1M window is docs.z.ai/devpack/latest-model's
 # "[1m]" setup with CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000.
+# Images: latest-model says "Both GLM-5.4 and GLM-5.3-Flash are multimodal
+# models", and a PNG sent as image_url on /coding/paas/v4 came back as its
+# exact text the same day.
 [[models]]
 model_id = "glm-5.4"
 provider_name = "glm-coding"
@@ -3825,6 +3828,8 @@ supports_tools = true
 supports_tool_choice = true
 supports_named_tool_choice = false
 supports_reasoning = true
+supports_multimodal_inputs = true
+supports_image_input = true
 reasoning_streaming_format = "delta:reasoning_content"
 supports_native_streaming = true
 
@@ -5277,6 +5282,9 @@ supports_native_streaming = true
 # model="glm-5.4" with reasoning on message.reasoning_content. Z.AI has no
 # glm-5.4 model page yet; the 1M window is docs.z.ai/devpack/latest-model's
 # "[1m]" setup with CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000.
+# Images: latest-model says "Both GLM-5.4 and GLM-5.3-Flash are multimodal
+# models", and a PNG sent as image_url on /coding/paas/v4 came back as its
+# exact text the same day.
 [[models]]
 model_id = "glm-5.4"
 provider_name = "glm"
@@ -5288,6 +5296,8 @@ supports_tools = true
 supports_tool_choice = true
 supports_named_tool_choice = false
 supports_reasoning = true
+supports_multimodal_inputs = true
+supports_image_input = true
 reasoning_streaming_format = "delta:reasoning_content"
 supports_native_streaming = true
 

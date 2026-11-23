@@ -181,7 +181,7 @@ let has_get_health cmds =
               | Cmd.Get_sandboxes
               | Cmd.Get_keeper_sandbox _
               | Cmd.Get_repositories
-              | Cmd.Get_file_changes _
+              | Cmd.Get_repository_activity _
               | Cmd.Get_system_logs _
               | Cmd.Get_tui_preferences
               | Cmd.Get_config_schema _ );
@@ -4932,9 +4932,9 @@ let test_nav_fix7_symmetric_viewport_scrolling_all_stores () =
           name = Printf.sprintf "repo-%02d" i;
           codebase = None;
           url = "https://example.invalid/repo";
-          local_path = "/tmp/repo";
+          resolved_local_path = "/tmp/repo";
           default_branch = "main";
-          status = Wire_infra.Repo_synced;
+          status = Wire_infra.Repo_active;
           keepers = [];
           auto_sync = false;
         })
@@ -7627,6 +7627,147 @@ let test_wiki_index_reply_requests_selected_page () =
     [ "other-page" ]
     (wiki_page_gets (View_fetches.fetches_for_current_view dive_with_index))
 
+(* Infra > Repos lists the selected repository's activity and nothing else:
+   an answer or a failure for another repository is dropped, and moving the
+   cursor to another repository waits for that repository's own answer. *)
+let test_infra_changes_follow_the_selected_repository () =
+  let repo id ~keepers : Wire_infra.repository =
+    {
+      id;
+      name = id;
+      codebase = None;
+      url = "https://example.invalid/" ^ id;
+      resolved_local_path = "/srv/repos/" ^ id;
+      default_branch = "main";
+      status = Wire_infra.Repo_active;
+      keepers;
+      auto_sync = false;
+    }
+  in
+  let change ~path ~keeper : Wire_infra.file_change =
+    {
+      path;
+      keeper;
+      change =
+        Wire_infra.Change_edit
+          { before = "a\nb"; after = "a\nc"; replace_all = false };
+      line_evidence =
+        Some
+          (Wire_infra.Edit_ranges
+             [
+               {
+                 old_range = { start_line = 7; end_line = 8 };
+                 new_range = Some { start_line = 7; end_line = 8 };
+               };
+             ]);
+      succeeded = true;
+    }
+  in
+  let activity changes : Wire_infra.repository_activity =
+    { window_hours = 24.0; changes; incomplete = 0; unattributed = 0 }
+  in
+  let paths inf =
+    List.map
+      (fun (fc : Wire_infra.file_change) -> fc.path)
+      (Infra_store.repo_changes inf)
+  in
+  let is_waiting inf =
+    match Infra_store.selected_repo_activity inf with
+    | Some (_, Observed.Loading _) -> true
+    | Some
+        ( _,
+          ( Observed.Value _ | Observed.Absent | Observed.Unreported
+          | Observed.Failed _ ) )
+    | None ->
+        false
+  in
+  let masc_answer =
+    activity
+      [ change ~path:"lib/a.ml" ~keeper:"alpha"; change ~path:"lib/b.ml" ~keeper:"beta" ]
+  in
+  let docs_answer = activity [ change ~path:"README.md" ~keeper:"gamma" ] in
+  let inf0 =
+    Infra_store.empty
+    |> Infra_store.set_tab Nav.Infra_repos_changes
+    |> Infra_store.apply_repositories ~observed_at:t0
+         [ repo "masc" ~keepers:[ "alpha"; "beta" ]; repo "docs" ~keepers:[] ]
+  in
+  let inf_other =
+    Infra_store.apply_repo_activity ~repo_id:"docs" ~observed_at:t0 docs_answer
+      inf0
+  in
+  Alcotest.(check (list string))
+    "an answer for a repository that is not selected is dropped" []
+    (paths inf_other);
+  let inf1 =
+    Infra_store.apply_repo_activity ~repo_id:"masc" ~observed_at:t0 masc_answer
+      inf_other
+  in
+  Alcotest.(check (list string)) "the selected repository's answer is listed"
+    [ "lib/a.ml"; "lib/b.ml" ] (paths inf1);
+  Alcotest.(check (list string)) "the filter narrows by keeper"
+    [ "lib/b.ml" ]
+    (paths (Infra_store.set_filter "beta" inf1));
+  Alcotest.(check (list (pair (option int) (option int))))
+    "the preview is numbered from the recorded range"
+    [ (Some 7, Some 7); (Some 8, None); (None, Some 8) ]
+    (match Infra_store.selected_change inf1 with
+     | Some fc ->
+         List.map
+           (fun (n : Masc_tui_ui.Diff.numbered) -> (n.old_line, n.new_line))
+           (Infra_store.change_preview_rows fc)
+     | None -> []);
+  let inf2 = Infra_store.move_selection ~pane_index:0 ~delta:1 inf1 in
+  Alcotest.(check (option string)) "the cursor is on docs" (Some "docs")
+    (Option.map
+       (fun (r : Wire_infra.repository) -> r.id)
+       (Infra_store.selected_repository inf2));
+  Alcotest.(check (list string))
+    "moving to another repository hides the previous answer" []
+    (paths inf2);
+  Alcotest.(check bool) "the moved-to repository waits for its own answer" true
+    (is_waiting inf2);
+  let inf3 =
+    Infra_store.request_repo_activity ~repo_id:"docs" inf2
+    |> Infra_store.apply_repo_activity ~repo_id:"masc" ~observed_at:t1
+         masc_answer
+    |> Infra_store.fail_repo_activity ~repo_id:"masc"
+         (Observed.fetch_failed ~reason:"HTTP 503" ~retryable:true ~at:t1)
+  in
+  Alcotest.(check (list string))
+    "a late answer for the previous repository is dropped" [] (paths inf3);
+  Alcotest.(check bool) "a failure for the previous repository is dropped"
+    true (is_waiting inf3);
+  let inf4 =
+    Infra_store.apply_repo_activity ~repo_id:"docs" ~observed_at:t1 docs_answer
+      inf3
+  in
+  Alcotest.(check (list string)) "the moved-to repository's answer is listed"
+    [ "README.md" ] (paths inf4);
+  (* Typing into the Repos filter can move the cursor too. *)
+  let m0 = Model.initial () in
+  let on_repos =
+    { m0 with nav = { m0.nav with workspace = Nav.Infra }; infra = inf1 }
+  in
+  let activity_gets cmds =
+    List.filter_map
+      (function
+        | Cmd.Http_get { req = Cmd.Get_repository_activity { repo_id }; _ } ->
+            Some repo_id
+        | _ -> None)
+      cmds
+  in
+  let m_docs, cmds_docs = Update_nav.set_active_filter_query "docs" on_repos in
+  Alcotest.(check (list string))
+    "a filter that moves the cursor asks for that repository's activity"
+    [ "docs" ] (activity_gets cmds_docs);
+  Alcotest.(check bool) "the changes panel waits for docs" true
+    (is_waiting m_docs.infra);
+  let _, cmds_doc = Update_nav.set_active_filter_query "doc" m_docs in
+  Alcotest.(check (list string))
+    "a filter edit that keeps the cursor asks for nothing" []
+    (activity_gets cmds_doc)
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -7726,5 +7867,7 @@ let () =
             `Quick test_failure_is_asked_again_for_a_new_question;
           Alcotest.test_case "The wiki index reply asks for the page it selects"
             `Quick test_wiki_index_reply_requests_selected_page;
+          Alcotest.test_case "Infra changes follow the selected repository"
+            `Quick test_infra_changes_follow_the_selected_repository;
         ] );
     ]

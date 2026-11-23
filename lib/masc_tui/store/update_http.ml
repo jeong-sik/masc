@@ -294,21 +294,6 @@ let refresh_404_fallbacks ~now (m : Model.t) =
   in
   { m with infra; work }
 
-(* The keeper whose file changes the Repos panel shows: the selected
-   repository's first keeper, or the selected keeper when no repository is
-   selected. A reply for any other keeper is stale. *)
-let is_file_changes_target (m : Model.t) keeper =
-  let expected =
-    match Infra_store.selected_repository m.infra with
-    | Some { keepers = k :: _; _ } -> Some k
-    | Some { keepers = []; _ } -> None
-    | None ->
-        Option.map
-          (fun (k : Wire_fleet.keeper_summary) -> k.name)
-          (Fleet_store.selected_keeper_summary m.fleet)
-  in
-  Option.equal String.equal expected (Some keeper)
-
 let apply_http_reply ~now (m : Model.t) reply =
   let failed_slot err slot =
     Observed.fetch_failed ~reason:(Msg.http_error_detail err)
@@ -1735,25 +1720,18 @@ let apply_http_reply ~now (m : Model.t) reply =
                { x with repositories = failed_slot err x.repositories }))
         ~source:Health.Source_client_http ~ko:"저장소 목록 조회"
         ~en:"Repositories fetch" err
-  | Msg.Reply_file_changes { keeper; result = Ok changes } ->
-      if is_file_changes_target m keeper then
-        ( {
-            m with
-            infra =
-              Infra_store.apply_file_changes ~keeper ~observed_at:now changes
-                m.infra;
-          }
-        , [] )
-      else (m, [])
-  | Msg.Reply_file_changes { keeper; result = Error err } ->
+  | Msg.Reply_repository_activity { repo_id; result = Ok activity } ->
+      ( {
+          m with
+          infra =
+            Infra_store.apply_repo_activity ~repo_id ~observed_at:now activity
+              m.infra;
+        }
+      , [] )
+  | Msg.Reply_repository_activity { repo_id; result = Error err } ->
       err_reply
-        ~fail:(fun (m : Model.t) ->
-          if is_file_changes_target m keeper then
-            on_infra
-              (fun (x : Infra_store.t) ->
-                { x with file_changes = failed_slot err x.file_changes })
-              m
-          else m)
+        ~fail:
+          (on_infra (Infra_store.fail_repo_activity ~repo_id (failed_slot err)))
         ~source:Health.Source_client_http ~ko:"파일 변경 조회"
         ~en:"File changes fetch" err
   | Msg.Reply_system_logs (Ok entries) ->

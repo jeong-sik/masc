@@ -1285,27 +1285,113 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
 (* --- 2. Sub-Tab 2: Repos & Read-Only Syntax-Highlighted Diffs --- *)
 
 let repo_status_display ~lang = function
-  | Wire_infra.Repo_synced ->
+  | Wire_infra.Repo_active ->
       ( Glyph.Live_healthy
       , Theme.Status_ok
-      , Say.resolve lang (Say.make ~ko:"동기화" ~en:"synced") )
-  | Wire_infra.Repo_syncing ->
+      , Say.resolve lang (Say.make ~ko:"활성" ~en:"active") )
+  | Wire_infra.Repo_paused ->
+      ( Glyph.Live_paused
+      , Theme.Status_historical
+      , Say.resolve lang (Say.make ~ko:"일시 정지" ~en:"paused") )
+  | Wire_infra.Repo_cloning ->
       ( Glyph.Live_working
       , Theme.Status_active
-      , Say.resolve lang (Say.make ~ko:"동기화 중" ~en:"syncing") )
-  | Wire_infra.Repo_dirty ->
-      ( Glyph.Warning_triangle
-      , Theme.Status_attention
-      , Say.resolve lang (Say.make ~ko:"변경 있음" ~en:"dirty") )
+      , Say.resolve lang (Say.make ~ko:"복제 중" ~en:"cloning") )
   | Wire_infra.Repo_error e -> (Glyph.Live_failing, Theme.Status_critical, e)
-  | Wire_infra.Repo_unknown s ->
-      (Glyph.Missing_unreported, Theme.Status_historical, s)
 
-let file_change_kind_badge = function
-  | Wire_infra.File_added -> ("+", Theme.Status_ok)
-  | Wire_infra.File_modified -> ("~", Theme.Status_active)
-  | Wire_infra.File_deleted -> ("-", Theme.Status_critical)
-  | Wire_infra.File_renamed -> ("R", Theme.Status_attention)
+let file_change_badge (fc : Wire_infra.file_change) =
+  if not fc.succeeded then ("!", Theme.Status_critical)
+  else
+    match fc.change with
+    | Wire_infra.Change_edit _ -> ("~", Theme.Status_active)
+    | Wire_infra.Change_write _ -> ("=", Theme.Status_attention)
+    | Wire_infra.Change_insert _ -> ("+", Theme.Status_ok)
+    | Wire_infra.Change_materialize _ -> ("*", Theme.Status_historical)
+
+let change_kind_label = function
+  | Wire_infra.Change_edit { replace_all = true; _ } -> "edit replace_all"
+  | Wire_infra.Change_edit { replace_all = false; _ } -> "edit"
+  | Wire_infra.Change_write _ -> "write"
+  | Wire_infra.Change_insert _ -> "insert"
+  | Wire_infra.Change_materialize _ -> "materialize"
+
+let line_counts_text (counts : Wire_infra.line_counts) =
+  let side sign = function
+    | Some n -> Printf.sprintf "%s%d" sign n
+    | None -> ""
+  in
+  String.trim
+    (Printf.sprintf "%s %s" (side "+" counts.added) (side "-" counts.removed))
+
+(* Calls the server could not read or place. [incomplete] belongs to this
+   repository; [unattributed] is fleet-wide because its target is unknown. *)
+let activity_gap_note ~lang (activity : Wire_infra.repository_activity) =
+  let incomplete =
+    if activity.incomplete > 0 then
+      [
+        Say.resolve lang
+          (Say.make
+             ~ko:(Printf.sprintf "+%d건 표시 못 함" activity.incomplete)
+             ~en:(Printf.sprintf "+%d not shown" activity.incomplete));
+      ]
+    else []
+  in
+  let unattributed =
+    if activity.unattributed > 0 then
+      [
+        Say.resolve lang
+          (Say.make
+             ~ko:(Printf.sprintf "대상 모르는 호출 %d건" activity.unattributed)
+             ~en:
+               (Printf.sprintf "%d calls with unknown target"
+                  activity.unattributed));
+      ]
+    else []
+  in
+  match incomplete @ unattributed with
+  | [] -> None
+  | parts -> Some (String.concat " · " parts)
+
+let draw_changes_empty_state ~grid ~rect ~theme ~lang (inf : Infra_store.t) =
+  match Infra_store.selected_repo_activity inf with
+  | None ->
+      H.draw_empty_notice ~grid ~rect ~theme
+        (Say.resolve lang
+           (Say.make ~ko:"선택한 저장소 없음" ~en:"No repository selected"))
+  | Some (_, Observed.Value { data = activity; _ }) ->
+      H.draw_empty_notice ~grid ~rect ~theme
+        (Say.resolve lang
+           (if activity.changes = [] then
+              Say.make
+                ~ko:
+                  (Printf.sprintf "%g시간 동안 이 저장소 파일을 바꾼 도구 호출 없음"
+                     activity.window_hours)
+                ~en:
+                  (Printf.sprintf
+                     "No file-writing tool calls in this repo in the last %gh"
+                     activity.window_hours)
+            else
+              Say.make ~ko:"필터에 일치하는 파일 변경 없음"
+                ~en:"No file changes match filter"))
+  | Some
+      ( _,
+        (( Observed.Loading _
+         | Observed.Absent
+         | Observed.Unreported
+         | Observed.Failed _ ) as activity) ) ->
+      H.draw_observed_placeholder ~grid ~rect ~theme ~lang activity
+
+let empty_preview_text ~lang (fc : Wire_infra.file_change) =
+  match fc.change with
+  | Wire_infra.Change_materialize { sha256 } ->
+      Say.resolve lang
+        (Say.make
+           ~ko:("blob 내용은 기록에 없음 · sha256:" ^ sha256)
+           ~en:("Blob content is not in the log · sha256:" ^ sha256))
+  | Wire_infra.Change_edit _ | Wire_infra.Change_write _
+  | Wire_infra.Change_insert _ ->
+      Say.resolve lang
+        (Say.make ~ko:"기록된 내용이 비어 있음" ~en:"The recorded text is empty")
 
 let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp grid =
@@ -1400,25 +1486,18 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
         H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp repos_inner)
           ~theme ~lang obs
   end;
-  let all_changes = Infra_store.filtered_file_changes inf in
   let sel_repo = Infra_store.selected_repository inf in
-  let changes =
-    match sel_repo with
-    | Some r -> (
-        if r.keepers = [] then []
-        else
-          match inf.file_changes_keeper with
-          | Some k when List.exists (String.equal k) r.keepers -> all_changes
-          | Some _ | None -> [])
-    | None -> all_changes
-  in
-  let active_change =
-    List.nth_opt changes
-      (H.clamp_index (List.length changes) inf.change_selected_index)
+  let changes = Infra_store.repo_changes inf in
+  let active_change = Infra_store.selected_change inf in
+  let gap_note =
+    match Infra_store.selected_repo_activity inf with
+    | Some (_, activity) ->
+        Option.bind (Observed.to_option activity) (activity_gap_note ~lang)
+    | None -> None
   in
   let ch_inner =
     Card.draw ~cache grid ~rect:changes_rect ~theme
-      (H.card_spec ~focused:(model.nav.pane_index = 2)
+      (H.card_spec ?subtitle:gap_note ~focused:(model.nav.pane_index = 2)
          (Say.resolve lang
             (Say.make
                ~ko:(Printf.sprintf "키퍼 파일 변경 (%d)" (List.length changes))
@@ -1426,14 +1505,8 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   if not (Rect.is_empty ch_inner) then begin
     if changes = [] then
-      if not (String.equal (String.trim inf.filter_query) "") then
-        H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp ch_inner) ~theme
-          (Say.resolve lang
-             (Say.make ~ko:"필터에 일치하는 파일 변경 없음"
-                ~en:"No file changes match filter"))
-      else
-        H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp ch_inner)
-          ~theme ~lang inf.file_changes
+      draw_changes_empty_state ~grid ~rect:(H.pad_content ~bp ch_inner) ~theme
+        ~lang inf
     else
       let total_ch = List.length changes in
       let sel_ch_idx = H.clamp_index total_ch inf.change_selected_index in
@@ -1447,34 +1520,20 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
         (fun local_i (fc : Wire_infra.file_change) ->
           let idx = start_ch + local_i in
           if !y < bot then begin
-            let is_active =
-              if model.nav.pane_index = 2 then Int.equal idx sel_ch_idx
-              else
-                match active_change with
-                | Some ac -> String.equal ac.path fc.path
-                | None -> false
-            in
+            (* Rows repeat per call, so one path can sit on several rows;
+               the cursor is the row index. *)
+            let is_active = Int.equal idx sel_ch_idx in
             let row_rect = Rect.make ~x:ch_inner.x ~y:!y ~w:ch_inner.w ~h:1 in
             let row_bg =
               if is_active then theme.selection_bg else theme.surface_1
             in
             if is_active then
               H.paint_selected_row_bg ~grid ~clip:ch_inner ~row_rect ~theme ();
-            let sign, tone = file_change_kind_badge fc.kind in
-            let add_s =
-              match Observed.to_option fc.additions with
-              | Some n -> Printf.sprintf "+%d" n
-              | None -> ""
-            in
-            let del_s =
-              match Observed.to_option fc.deletions with
-              | Some n -> Printf.sprintf "-%d" n
-              | None -> ""
-            in
+            let sign, tone = file_change_badge fc in
             let stats_s =
-              String.trim (Printf.sprintf "%s %s" add_s del_s)
+              line_counts_text (Wire_infra.file_change_line_counts fc)
             in
-            let kp_s = match fc.keeper with Some k -> "@" ^ k | None -> "" in
+            let kp_s = "@" ^ fc.keeper in
             let right_edge = Rect.right ch_inner - pad_r in
             let tx = ch_inner.x + 2 in
             let r_meta =
@@ -1502,10 +1561,17 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
           end)
         (Store_scroll.drop start_ch changes)
   end;
-  (* Right Card: Read-Only Syntax-Highlighted Unified Diff *)
+  (* Right Card: the selected call's recorded text, syntax-highlighted *)
   let diff_subtitle =
     match active_change, sel_repo with
-    | Some fc, _ -> Some fc.path
+    | Some fc, _ ->
+        let outcome =
+          if fc.succeeded then []
+          else [ Say.resolve lang (Say.make ~ko:"실패한 호출" ~en:"failed call") ]
+        in
+        Some
+          (String.concat " · "
+             ([ fc.path; change_kind_label fc.change; "@" ^ fc.keeper ] @ outcome))
     | None, Some r -> Some r.default_branch
     | None, None -> None
   in
@@ -1513,8 +1579,7 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
     Card.draw ~cache grid ~rect:right_rect ~theme
       (H.card_spec ?subtitle:diff_subtitle ~focused:(model.nav.pane_index = 1)
          ~hotkey:(Say.resolve lang (Say.make ~ko:"[o] URL 열기" ~en:"[o] Open URL"))
-         (Say.resolve lang
-            (Say.make ~ko:"읽기 전용 Unified Diff" ~en:"Read-Only Unified Diff")))
+         (Say.resolve lang (Say.make ~ko:"변경 미리보기" ~en:"Change Preview")))
   in
   if not (Rect.is_empty diff_inner) then begin
     let y = ref diff_inner.y and bot = Rect.bottom diff_inner in
@@ -1543,11 +1608,11 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
                ~w:(Int.max 0 (diff_inner.w - (2 * pad_x)))
                ~h:1
            in
-           let file_uri = "file://" ^ r.local_path in
+           let file_uri = "file://" ^ r.resolved_local_path in
            let adv =
              H.put_link ~grid ~clip:link_rect ~x:link_rect.x ~y:!y
                ~max_w:link_rect.w ~style:(H.accent_style ~theme ())
-               ~uri:file_uri ("file://" ^ r.local_path)
+               ~uri:file_uri file_uri
            in
            let rem = link_rect.w - adv - 3 in
            if rem > 6 && not (String.equal r.url "") then
@@ -1568,28 +1633,21 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
     in
     match active_change with
     | Some fc -> (
-        match fc.diff_preview with
-        | Some raw_diff when not (String.equal (String.trim raw_diff) "") ->
-            let numbered = H.parse_unified_diff raw_diff in
+        match Infra_store.change_preview_rows fc with
+        | [] ->
+            H.draw_empty_notice ~grid ~rect:diff_content ~theme
+              (empty_preview_text ~lang fc)
+        | numbered ->
             let language = Code_lexer.language_of_path fc.path in
             if not (Rect.is_empty diff_content) then begin
               ignore
                 (Diff.draw grid ~rect:diff_content ~theme ?language
                    ~scroll:inf.diff_scroll_offset numbered)
-            end
-        | Some _ | None ->
-            H.draw_empty_notice ~grid ~rect:diff_content ~theme
-              (Printf.sprintf "%s · %s" fc.path
-                 (Say.resolve lang
-                    (Say.make ~ko:"Diff 미리보기 미보고"
-                       ~en:"Diff preview not reported"))))
+            end)
     | None -> (
         match sel_repo with
         | Some _ ->
-            H.draw_empty_notice ~grid ~rect:diff_content ~theme
-              (Say.resolve lang
-                 (Say.make ~ko:"작업 트리 깨끗함 · 변경된 파일 없음"
-                    ~en:"Working tree clean · no modified files"))
+            draw_changes_empty_state ~grid ~rect:diff_content ~theme ~lang inf
         | None ->
             H.draw_observed_placeholder ~grid ~rect:diff_content ~theme ~lang
               inf.repositories)

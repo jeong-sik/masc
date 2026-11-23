@@ -493,26 +493,14 @@ let fetches_for_workspace ~force (m : Model.t) =
                  (needs_fetch ~force m.infra.repositories)
                  Cmd.Get_repositories
           in
-          let target_keeper =
-            match Infra_store.selected_repository m.infra with
-            | Some { keepers = k :: _; _ } -> Some k
-            | Some { keepers = []; _ } -> None
-            | None ->
-                Option.map
-                  (fun (k : Wire_fleet.keeper_summary) -> k.name)
-                  (Fleet_store.selected_keeper_summary m.fleet)
-          in
-          match target_keeper with
-          | Some keeper ->
-              let keeper_mismatch =
-                not
-                  (Option.equal String.equal m.infra.file_changes_keeper
-                     (Some keeper))
-              in
+          (* A slot holding another repository's answer reads as waiting,
+             so [needs_fetch] asks for the selected one. *)
+          match Infra_store.selected_repo_activity m.infra with
+          | Some (repo, activity) ->
               base_reqs
               |> add_if
-                   (needs_fetch ~force m.infra.file_changes || keeper_mismatch)
-                   (Cmd.Get_file_changes { keeper; window_hours = Some 24.0 })
+                   (needs_fetch ~force activity)
+                   (Cmd.Get_repository_activity { repo_id = repo.id })
           | None -> base_reqs)
       | Nav.Infra_activity_logs ->
           []

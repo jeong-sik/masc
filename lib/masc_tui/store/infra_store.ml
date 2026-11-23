@@ -20,15 +20,18 @@ type activity_row = {
   detail : string option;
 }
 
+type repo_activity = {
+  repo_id : string;
+  activity : Wire_infra.repository_activity Observed.t;
+}
+
 type t = {
   active_tab : Nav.infra_tab;
   sandboxes : Wire_infra.sandboxes_snapshot Observed.t;
   sandboxes_fallback_404 : bool;
   keeper_sandbox : Wire_infra.keeper_sandbox_response Observed.t;
   repositories : Wire_infra.repository list Observed.t;
-  file_changes : Wire_infra.file_change list Observed.t;
-  file_changes_keeper : string option;
-  requested_file_changes_keeper : string option;
+  repo_activity : repo_activity option;
   logs : Wire_infra.system_log_entry list;
   logs_loaded : bool;
   last_log_seq : int option;
@@ -53,9 +56,7 @@ let empty =
     sandboxes_fallback_404 = false;
     keeper_sandbox = Observed.absent;
     repositories = Observed.unreported;
-    file_changes = Observed.unreported;
-    file_changes_keeper = None;
-    requested_file_changes_keeper = None;
+    repo_activity = None;
     logs = [];
     logs_loaded = false;
     last_log_seq = None;
@@ -255,39 +256,6 @@ let apply_keeper_sandbox ~observed_at keeper_sandbox t =
 let apply_repositories ~observed_at repositories t =
   { t with repositories = Observed.value ~observed_at repositories }
 
-let apply_file_changes ?keeper ~observed_at file_changes t =
-  let file_changes_keeper =
-    match keeper with
-    | Some k -> Some k
-    | None -> (
-        match file_changes with
-        | (fc : Wire_infra.file_change) :: _ -> fc.keeper
-        | [] -> t.file_changes_keeper)
-  in
-  {
-    t with
-    file_changes = Observed.value ~observed_at file_changes;
-    file_changes_keeper;
-    requested_file_changes_keeper = None;
-    change_selected_index = 0;
-    change_scroll_offset = 0;
-    diff_scroll_offset = 0;
-  }
-
-let clear_file_changes t =
-  {
-    t with
-    file_changes = Observed.unreported;
-    file_changes_keeper = None;
-    requested_file_changes_keeper = None;
-    change_selected_index = 0;
-    change_scroll_offset = 0;
-    diff_scroll_offset = 0;
-  }
-
-let mark_file_changes_requested ~keeper t =
-  { t with requested_file_changes_keeper = Some keeper }
-
 let max_seq_of entries =
   List.fold_left
     (fun acc (e : Wire_infra.system_log_entry) ->
@@ -469,22 +437,6 @@ let filtered_repositories t =
         || List.exists (fun kp -> contains_ci ~needle:q kp) r.keepers)
       all
 
-let filtered_file_changes t =
-  let all =
-    match Observed.to_option t.file_changes with Some xs -> xs | None -> []
-  in
-  let q = String.trim t.filter_query in
-  if String.equal q "" then all
-  else
-    List.filter
-      (fun (fc : Wire_infra.file_change) ->
-        contains_ci ~needle:q fc.path
-        ||
-        match fc.keeper with
-        | Some kp -> contains_ci ~needle:q kp
-        | None -> false)
-      all
-
 let selected_sandbox_keeper t =
   let names = filtered_sandbox_keepers t in
   List.nth_opt names (clamp_index (List.length names) t.selected_index)
@@ -493,25 +445,105 @@ let selected_repository t =
   let repos = filtered_repositories t in
   List.nth_opt repos (clamp_index (List.length repos) t.selected_index)
 
-let repo_scoped_file_changes t =
-  let all_changes = filtered_file_changes t in
+(* The changes panel shows one repository's activity at a time: the slot
+   names the repository it answers for, and a slot for any other repository
+   is a wait for the selected one. *)
+let waiting_activity = Observed.loading ~since_ns:Clock.Mono.zero
+
+let activity_for ~repo_id t =
+  match t.repo_activity with
+  | Some slot when String.equal slot.repo_id repo_id -> slot.activity
+  | Some _ | None -> waiting_activity
+
+let is_selected_repository ~repo_id t =
   match selected_repository t with
-  | Some r -> (
-      if r.keepers = [] then []
+  | Some r -> String.equal r.id repo_id
+  | None -> false
+
+let reset_change_cursor t =
+  { t with change_selected_index = 0; change_scroll_offset = 0; diff_scroll_offset = 0 }
+
+let request_repo_activity ~repo_id t =
+  match t.repo_activity with
+  | Some slot when String.equal slot.repo_id repo_id -> t
+  | Some _ | None ->
+      reset_change_cursor
+        { t with repo_activity = Some { repo_id; activity = waiting_activity } }
+
+let apply_repo_activity ~repo_id ~observed_at activity t =
+  if is_selected_repository ~repo_id t then
+    reset_change_cursor
+      {
+        t with
+        repo_activity =
+          Some { repo_id; activity = Observed.value ~observed_at activity };
+      }
+  else t
+
+let fail_repo_activity ~repo_id fail t =
+  if is_selected_repository ~repo_id t then
+    {
+      t with
+      repo_activity =
+        Some { repo_id; activity = fail (activity_for ~repo_id t) };
+    }
+  else t
+
+let selected_repo_activity t =
+  Option.map
+    (fun (r : Wire_infra.repository) -> (r, activity_for ~repo_id:r.id t))
+    (selected_repository t)
+
+let repo_changes t =
+  match
+    Option.bind (selected_repo_activity t) (fun (_, activity) ->
+        Observed.to_option activity)
+  with
+  | None -> []
+  | Some (activity : Wire_infra.repository_activity) ->
+      let q = String.trim t.filter_query in
+      if String.equal q "" then activity.changes
       else
-        match t.file_changes_keeper with
-        | Some k when List.exists (String.equal k) r.keepers -> all_changes
-        | Some _ | None -> [])
-  | None -> all_changes
+        List.filter
+          (fun (fc : Wire_infra.file_change) ->
+            contains_ci ~needle:q fc.path || contains_ci ~needle:q fc.keeper)
+          activity.changes
 
-let selected_file_change t =
-  let changes = filtered_file_changes t in
-  List.nth_opt changes (clamp_index (List.length changes) t.change_selected_index)
-
-let selected_repo_file_change t =
-  let changes = repo_scoped_file_changes t in
+let selected_change t =
+  let changes = repo_changes t in
   List.nth_opt changes
     (clamp_index (List.length changes) t.change_selected_index)
+
+let unnumbered rows =
+  List.map (fun nrow -> { Diff.nrow; old_line = None; new_line = None }) rows
+
+let change_preview_rows (fc : Wire_infra.file_change) =
+  match fc.change with
+  | Wire_infra.Change_edit { before; after; _ } -> (
+      let rows = Diff.rows ~before ~after in
+      match fc.line_evidence with
+      | Some (Wire_infra.Edit_ranges (first :: _)) ->
+          Diff.number ~old_start:first.old_range.start_line
+            ~new_start:
+              (Option.map
+                 (fun (range : Wire_infra.line_range) -> range.start_line)
+                 first.new_range)
+            rows
+      | Some
+          ( Wire_infra.Edit_ranges []
+          | Wire_infra.Edit_ranges_omitted
+          | Wire_infra.Write_range _ )
+      | None ->
+          (* No recorded position: the rows carry no line numbers rather than
+             numbers counted from an invented start. *)
+          unnumbered rows)
+  | Wire_infra.Change_write { content } ->
+      Diff.number ~old_start:1 ~new_start:(Some 1)
+        (Diff.rows ~before:"" ~after:content)
+  | Wire_infra.Change_insert { line; text } ->
+      Diff.number ~old_start:line ~new_start:(Some line)
+        (Diff.rows ~before:"" ~after:text)
+  | Wire_infra.Change_materialize _ -> []
 
 let selected_log t =
   let vis = visible_logs t in
@@ -584,17 +616,14 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
             match max_detail_scroll with
             | Some ms -> max 0 ms
             | None -> (
-                match selected_repo_file_change t with
-                | Some fc -> (
-                    match fc.diff_preview with
-                    | Some dp when not (String.equal dp "") ->
-                        let vis =
-                          max 1
-                            (Option.value viewport_rows
-                               ~default:Store_scroll.default_viewport_rows)
-                        in
-                        max 0 (List.length (Diff.parse_unified dp) - vis)
-                    | Some _ | None -> 0)
+                match selected_change t with
+                | Some fc ->
+                    let vis =
+                      max 1
+                        (Option.value viewport_rows
+                           ~default:Store_scroll.default_viewport_rows)
+                    in
+                    max 0 (List.length (change_preview_rows fc) - vis)
                 | None -> 0)
           in
           let diff_scroll_offset =
@@ -602,7 +631,7 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
           in
           { t with diff_scroll_offset }
       | 2 ->
-          let len = List.length (repo_scoped_file_changes t) in
+          let len = List.length (repo_changes t) in
           let change_selected_index =
             clamp_index len (t.change_selected_index + delta)
           in
@@ -691,5 +720,8 @@ let mark_stale_all t =
     sandboxes = Observed.mark_stale t.sandboxes;
     keeper_sandbox = Observed.mark_stale t.keeper_sandbox;
     repositories = Observed.mark_stale t.repositories;
-    file_changes = Observed.mark_stale t.file_changes;
+    repo_activity =
+      Option.map
+        (fun slot -> { slot with activity = Observed.mark_stale slot.activity })
+        t.repo_activity;
   }

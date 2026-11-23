@@ -12,5 +12,10 @@
     The repository JSON projection is shared so adjacent read-only dashboard
     surfaces cannot drift from the public repository API shape. *)
 
+val repository_json :
+  base_path:string -> Repo_manager_types.repository -> Yojson.Safe.t
+(** One row of [GET /api/v1/repositories]. [resolved_local_path] is
+    [local_path] resolved against [base_path]. *)
+
 val add_routes :
   Http_server_eio.Router.t -> Http_server_eio.Router.t

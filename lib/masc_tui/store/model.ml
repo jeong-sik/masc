@@ -476,19 +476,7 @@ let focusable_pane_count m =
                   if inner_body_width m >= 100 then 2 else 1
               | Nav.Infra_activity_logs -> 2
               | Nav.Infra_repos_changes ->
-                  let has_changes_for_repo =
-                    match Infra_store.selected_repository m.infra with
-                    | Some r -> (
-                        r.keepers <> []
-                        &&
-                        match m.infra.file_changes_keeper with
-                        | Some k ->
-                            List.exists (String.equal k) r.keepers
-                            && Infra_store.filtered_file_changes m.infra <> []
-                        | None -> false)
-                    | None -> Infra_store.filtered_file_changes m.infra <> []
-                  in
-                  if has_changes_for_repo then 3 else 2))
+                  if Infra_store.repo_changes m.infra <> [] then 3 else 2))
 
 let active_focus_scope m =
   if is_too_small_viewport m.viewport then

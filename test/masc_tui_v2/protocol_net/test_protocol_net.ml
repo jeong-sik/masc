@@ -979,8 +979,14 @@ let test_wire_infra () =
       }|}
   in
   let sb = expect_ok "sandboxes" (Wire_infra.decode_sandboxes_snapshot ~observed_at:t0 sandboxes_json) in
-  Alcotest.(check bool) "ssh_active_sessions null -> Absent" true
-    (Observed.equal Int.equal sb.ssh_active_sessions Observed.absent);
+  Alcotest.(check bool) "ssh_active_sessions null -> Unreported" true
+    (Observed.equal Int.equal sb.ssh_active_sessions Observed.unreported);
+  let pool = List.hd sb.ssh_pools in
+  Alcotest.(check bool) "pool active_sessions null -> Unreported" true
+    (Observed.equal Int.equal pool.active_sessions Observed.unreported);
+  Alcotest.(check bool) "account active_sessions null -> Unreported" true
+    (Observed.equal Int.equal (List.hd pool.accounts).active_sessions
+       Observed.unreported);
   Alcotest.(check int) "1 unobserved reason object" 1 (List.length sb.unobserved_reasons);
   let guest = List.hd sb.microvm_guests in
   Alcotest.(check bool) "network_mode policy" true (guest.network_mode = Wire_infra.Net_policy);

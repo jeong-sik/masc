@@ -1221,23 +1221,42 @@ let make_rich_model ~lang ~cols ~rows =
       name = "masc";
       codebase = Some "ocaml";
       url = "https://github.com/jeong-sik/masc";
-      local_path = "/workspace/masc";
+      resolved_local_path = "/workspace/masc";
       default_branch = "main";
-      status = Wire_infra.Repo_dirty;
+      status = Wire_infra.Repo_cloning;
       keepers = [ "e-masc-the-leader"; "code-reviewer" ];
       auto_sync = true;
     }
   in
-  let change_1 : Wire_infra.file_change =
+  let activity_1 : Wire_infra.repository_activity =
     {
-      path = "lib/masc_tui/screens_domain/screen_infra.ml";
-      kind = Wire_infra.File_modified;
-      additions = Observed.value ~observed_at:now_mono 12;
-      deletions = Observed.value ~observed_at:now_mono 3;
-      keeper = Some "e-masc-the-leader";
-      diff_preview =
-        Some
-          "@@ -10,4 +10,5 @@\n let mode = Net_inherit\n-let old_val = 0\n+let new_val = 42\n+let ok = true\n";
+      window_hours = 24.0;
+      changes =
+        [
+          {
+            path = "lib/masc_tui/screens_domain/screen_infra.ml";
+            keeper = "e-masc-the-leader";
+            change =
+              Wire_infra.Change_edit
+                {
+                  before = "let mode = Net_inherit\nlet old_val = 0";
+                  after = "let mode = Net_inherit\nlet new_val = 42\nlet ok = true";
+                  replace_all = false;
+                };
+            line_evidence =
+              Some
+                (Wire_infra.Edit_ranges
+                   [
+                     {
+                       old_range = { start_line = 10; end_line = 11 };
+                       new_range = Some { start_line = 10; end_line = 12 };
+                     };
+                   ]);
+            succeeded = true;
+          };
+        ];
+      incomplete = 1;
+      unattributed = 0;
     }
   in
   let log_1 : Wire_infra.system_log_entry =
@@ -1264,7 +1283,8 @@ let make_rich_model ~lang ~cols ~rows =
     m0.infra
     |> Infra_store.apply_sandboxes ~observed_at:now_mono sandboxes
     |> Infra_store.apply_repositories ~observed_at:now_mono [ repo_1 ]
-    |> Infra_store.apply_file_changes ~observed_at:now_mono [ change_1 ]
+    |> Infra_store.apply_repo_activity ~repo_id:"repo-masc" ~observed_at:now_mono
+         activity_1
     |> Infra_store.apply_log_snapshot [ log_1 ]
     |> Infra_store.push_activity
          {

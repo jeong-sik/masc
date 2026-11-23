@@ -9,6 +9,7 @@
   masc_tui_protocol
   masc_tui_store
   masc_tui_term
+  masc_tui_ui
   yojson
   alcotest))
 

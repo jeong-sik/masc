@@ -318,7 +318,7 @@ let fast_approval_strip_item m =
               | Attention.Payload_gate _
               | Attention.Payload_goal_confirmation _ ->
                   Some e
-              | Attention.Payload_ask _ | Attention.Payload_quarantine _ -> None)
+              | Attention.Payload_ask _ -> None)
           | Some _ | None -> None
         else Attention.top_fast_path m.attention
 
@@ -514,8 +514,7 @@ let active_focus_scope m =
                         payload =
                           ( Attention.Payload_tool_approval _
                           | Attention.Payload_gate _
-                          | Attention.Payload_goal_confirmation _
-                          | Attention.Payload_quarantine _ );
+                          | Attention.Payload_goal_confirmation _ );
                         _;
                       }
                   | None ->
@@ -771,7 +770,6 @@ let rebuild_attention m =
       ~tool_approvals:(Work_store.tool_approvals_list m.work)
       ~gate_pending:(Work_store.gate_pending_list m.work)
       ~goals:(Work_store.goals m.work)
-      ~quarantines:(Knowledge_store.quarantines_list m.knowledge)
       m.attention
   in
   { m with attention }

@@ -375,19 +375,6 @@ let sample_tool_approvals : Wire_work.held_tool_approval list =
     };
   ]
 
-let sample_quarantines : Wire_knowledge.quarantine_candidate list =
-  [
-    {
-      partition_id = "part-wkbl";
-      quarantine_id = "q-101";
-      keeper = "wkbl-growth";
-      post_id = "p-891608";
-      status = "quarantined";
-      failure_reason = "durable_partition_invariant";
-      quarantined_at_unix = Some (now_unix -. 900.0);
-    };
-  ]
-
 let sample_candle_ledger : Wire_work.candle_ledger =
   {
     ledger_state = Wire_work.Ledger_present;
@@ -898,7 +885,6 @@ let make_populated_model ~cols ~rows ~lang =
   in
   let knowledge =
     m0.knowledge
-    |> Knowledge_store.apply_quarantines ~observed_at:now_mono sample_quarantines
     |> Knowledge_store.apply_memory_diff ~observed_at:now_mono sample_memory_diff
     |> Knowledge_store.apply_board ~observed_at:now_mono
          {

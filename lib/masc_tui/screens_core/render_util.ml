@@ -155,12 +155,9 @@ let attention_kind_tag = function
   | Health.Pending_ask _ -> Say.make ~ko:"질문" ~en:"ASK"
   | Health.Held_tool_approval _ -> Say.make ~ko:"도구" ~en:"TOOL"
   | Health.Goal_confirmation _ -> Say.make ~ko:"목표" ~en:"GOAL"
-  | Health.Board_quarantine _ -> Say.make ~ko:"격리" ~en:"QUAR"
 
 let attention_kind_keeper = function
-  | Health.Pending_ask { keeper; _ }
-  | Health.Held_tool_approval { keeper; _ }
-  | Health.Board_quarantine { keeper; _ } ->
+  | Health.Pending_ask { keeper; _ } | Health.Held_tool_approval { keeper; _ } ->
       Some keeper
   | Health.Goal_confirmation _ -> None
 

@@ -187,99 +187,6 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
               (H.safe_take (bottom - !y) comments)
           end
 
-let draw_quarantine_strip ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~bp ~lang
-    ~now_unix (quarantines : Wire_knowledge.quarantine_candidate list) =
-  if Rect.is_empty rect then ()
-  else
-    let pad_x = Layout.card_pad_x bp in
-    let n = List.length quarantines in
-    if n = 0 then begin
-      let y = rect.y in
-      let line =
-        Printf.sprintf "%s %s"
-          (Glyph.to_utf8 Glyph.Live_healthy)
-          (Say.resolve lang
-             (Say.make ~ko:"보드 주목 격리: 0건 (정상)"
-                ~en:"Board Attention Quarantine: 0 (healthy)"))
-      in
-      ignore
-        (H.put_clipped ~grid ~clip:rect ~x:(rect.x + pad_x) ~y
-           ~max_w:(Int.max 0 (rect.w - (2 * pad_x)))
-           ~style:(H.status_style ~theme Theme.Status_ok)
-           line)
-    end
-    else begin
-      let y = ref rect.y in
-      let bottom = Rect.bottom rect in
-      H.draw_divider ~grid ~rect ~y:!y ~theme ~pad_x
-        ~label:
-          (Printf.sprintf "%s %s (%d)"
-             (Glyph.to_utf8 Glyph.Action_required)
-             (Say.resolve lang
-                (Say.make ~ko:"격리 큐 · CAS 재큐"
-                   ~en:"Quarantined · CAS Requeue"))
-             n)
-        ();
-      incr y;
-      let tx = rect.x + pad_x in
-      let tw = Int.max 0 (rect.w - (2 * pad_x)) in
-      if !y < bottom then begin
-        let counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
-        let order = ref [] in
-        List.iter
-          (fun (q : Wire_knowledge.quarantine_candidate) ->
-            match Hashtbl.find_opt counts q.keeper with
-            | None ->
-                order := q.keeper :: !order;
-                Hashtbl.add counts q.keeper 1
-            | Some c -> Hashtbl.replace counts q.keeper (c + 1))
-          quarantines;
-        let summary =
-          List.rev !order |> H.safe_take 5
-          |> List.map (fun kp ->
-                 let c = Option.value ~default:0 (Hashtbl.find_opt counts kp) in
-                 Printf.sprintf "%s(%d)" kp c)
-          |> String.concat ", "
-        in
-        Card.draw_left_rail ~tone:Theme.Status_attention grid ~x:tx ~y:!y ~h:1
-          ~theme;
-        let line =
-          Printf.sprintf "%s %s · [R] %s"
-            (Glyph.to_utf8 Glyph.Action_required)
-            summary
-            (Say.resolve lang (Say.make ~ko:"선택 재큐" ~en:"CAS Requeue"))
-        in
-        ignore
-          (H.put_clipped ~grid ~clip:rect ~x:(tx + 2) ~y:!y
-             ~max_w:(Int.max 0 (tw - 2))
-             ~style:
-               (H.status_style ~theme ~attrs:Attr.bold Theme.Status_attention)
-             line);
-        incr y
-      end;
-      match quarantines with
-      | q :: _ when !y < bottom ->
-          let age =
-            match q.quarantined_at_unix with
-            | Some ts -> H.format_age ~now_unix ts
-            | None -> Glyph.to_utf8 Glyph.Missing_absent
-          in
-          Card.draw_left_rail ~tone:Theme.Status_attention grid ~x:tx ~y:!y ~h:1
-            ~theme;
-          let evidence =
-            Printf.sprintf "%s [%s] %s · q=%s · %s (%s)" q.keeper q.status
-              q.failure_reason
-              (H.short_hash ~len:8 q.quarantine_id)
-              (H.short_hash ~len:10 q.post_id)
-              age
-          in
-          ignore
-            (H.put_clipped ~grid ~clip:rect ~x:(tx + 2) ~y:!y
-               ~max_w:(Int.max 0 (tw - 2)) ~style:(H.whisper_style ~theme ())
-               evidence)
-      | _ -> ()
-    end
-
 let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     ~bp grid =
   let lang = model.lang in
@@ -318,8 +225,6 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             acc)
       0 all_posts
   in
-  let quarantines = Knowledge_store.quarantines_list k in
-  let q_count = List.length quarantines in
   let filter_rect, body_rect =
     match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
     | [ f; b ] -> (f, b)
@@ -364,17 +269,6 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         active = false;
         tone = Some Theme.Status_active;
         glyph = None;
-      };
-      {
-        H.label =
-          Printf.sprintf "%s %d"
-            (Say.resolve lang (Say.make ~ko:"격리" ~en:"Quar"))
-            q_count;
-        active = q_count > 0;
-        tone =
-          Some
-            (if q_count > 0 then Theme.Status_attention else Theme.Status_ok);
-        glyph = Some Glyph.Action_required;
       };
     ]
     @
@@ -436,12 +330,7 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       let hearth_rows =
         if list_inner.h >= 6 then 2 else if list_inner.h >= 4 then 1 else 0
       in
-      let quar_rows =
-        if list_inner.h >= 8 then if q_count > 0 then 3 else 1
-        else if list_inner.h >= 6 && q_count > 0 then 2
-        else 0
-      in
-      let feed_h = Int.max 0 (list_inner.h - hearth_rows - quar_rows) in
+      let feed_h = Int.max 0 (list_inner.h - hearth_rows) in
       let cur_y = ref list_inner.y in
       if hearth_rows >= 1 then begin
         let h_rect =
@@ -482,7 +371,6 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       let feed_rect =
         Rect.make ~x:list_inner.x ~y:!cur_y ~w:list_inner.w ~h:feed_h
       in
-      cur_y := !cur_y + feed_h;
       let pad_r = if list_inner.w >= 24 then 2 else 1 in
       (match k.board with
        | Observed.Value _ when filtered <> [] ->
@@ -663,14 +551,7 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
          | Observed.Unreported
          | Observed.Failed _ ) as obs ->
            H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp feed_rect)
-             ~theme ~lang obs);
-      if quar_rows > 0 then begin
-        let q_rect =
-          Rect.make ~x:list_inner.x ~y:!cur_y ~w:list_inner.w ~h:quar_rows
-        in
-        draw_quarantine_strip ~grid ~rect:q_rect ~theme ~bp ~lang ~now_unix
-          quarantines
-      end
+             ~theme ~lang obs)
     end;
     draw_board_preview ~grid ~cache ~rect:preview_rect ~theme ~bp ~lang
       ~now_unix ~k selected_post ~focused:(model.nav.pane_index = 1)

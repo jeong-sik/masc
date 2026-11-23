@@ -308,28 +308,6 @@ let make_rich_model ~lang ~cols ~rows =
       };
     ]
   in
-  let quarantines : Wire_knowledge.quarantine_candidate list =
-    [
-      {
-        partition_id = "part-wkbl-01";
-        quarantine_id = "q-deadbeef-01";
-        keeper = "wkbl-front";
-        post_id = "p-chain-22";
-        status = "quarantined";
-        failure_reason = "durable_partition_invariant";
-        quarantined_at_unix = Some (now_unix -. 420.0);
-      };
-      {
-        partition_id = "part-gloss-02";
-        quarantine_id = "q-cafebabe-02";
-        keeper = "glossary-maniac";
-        post_id = "p-direct-1";
-        status = "quarantined";
-        failure_reason = "owner_lane_rejected";
-        quarantined_at_unix = Some (now_unix -. 900.0);
-      };
-    ]
-  in
   let lint_counts : Wire_knowledge.wiki_lint_counts =
     {
       broken_link = 1;
@@ -705,7 +683,6 @@ let make_rich_model ~lang ~cols ~rows =
            signal_only = true;
          }
     |> Knowledge_store.apply_thread ~observed_at:now_mono (p1, comments)
-    |> Knowledge_store.apply_quarantines ~observed_at:now_mono quarantines
     |> Knowledge_store.apply_wiki_index ~observed_at:now_mono wiki_index
     |> Knowledge_store.apply_wiki_page ~observed_at:now_mono wiki_detail
     |> Knowledge_store.apply_wiki_log ~observed_at:now_mono wiki_log

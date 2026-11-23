@@ -2242,7 +2242,6 @@ let attention_tag = function
   | Health.Held_tool_approval _ -> ("TOOL", Theme.Status_critical)
   | Health.Pending_ask _ -> ("ASK", Theme.Status_attention)
   | Health.Goal_confirmation _ -> ("GOAL", Theme.Status_active)
-  | Health.Board_quarantine _ -> ("QUAR", Theme.Status_attention)
 
 let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
   if Rect.is_empty rect then ()
@@ -2660,41 +2659,6 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                            , Ops_common.say model
                                ~ko:"목표 상세에서 증명 확인 후 완료 확정"
                                ~en:"Review proof in Goal Dive to confirm" );
-                         ])
-              | Attention.Payload_quarantine q ->
-                  Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme
-                    ~bg:card_bg ~label_w:14 ~key:"Keeper" ~value:("@" ^ q.keeper)
-                    ~val_fg:theme.accent ();
-                  incr y;
-                  Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme
-                    ~bg:card_bg ~label_w:14 ~key:"Partition" ~value:q.partition_id
-                    ();
-                  incr y;
-                  Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme
-                    ~bg:card_bg ~label_w:14 ~key:"Post" ~value:q.post_id ();
-                  incr y;
-                  if !y < bot - 1 then begin
-                    Card.draw_left_rail ~bg:card_bg ~tone:Theme.Status_critical
-                      grid ~x:content.x ~y:!y ~h:1 ~theme;
-                    ignore
-                      (Ops_common.put_line ~clip:content grid ~x:(content.x + 2)
-                         ~y:!y ~max_w:(Int.max 0 (content.w - 2))
-                         ~style:
-                           (Typography.status ~bg:card_bg ~bold:true theme
-                              Theme.Status_critical)
-                         (Ops_common.say model ~ko:"격리 사유: " ~en:"Failure: "
-                          ^ q.failure_reason))
-                  end;
-                  if bot > r_inner.y then
-                    ignore
-                      (Ops_common.draw_keycap_bar grid
-                         ~rect:
-                           (Rect.make ~x:content.x ~y:(bot - 1) ~w:content.w
-                              ~h:1)
-                         ~theme ~bg:card_bg
-                         [
-                           ("Y", Ops_common.say model ~ko:"CAS 재큐잉" ~en:"CAS Requeue");
-                           ("N", Ops_common.say model ~ko:"건너뛰기" ~en:"Skip");
                          ])
             end
 

@@ -647,13 +647,6 @@ let execute_get t ~epoch req =
                    ~decode:(Wire_knowledge.decode_board_thread ~observed_at))
             in
             Msg.Http_reply { epoch; reply }
-        | Cmd.Get_quarantines _ ->
-            let reply =
-              Msg.Reply_quarantines
-                (fetch_and_decode_get t ~path
-                   ~decode:Wire_knowledge.decode_quarantines)
-            in
-            Msg.Http_reply { epoch; reply }
         | Cmd.Get_wiki_index _ ->
             let reply =
               Msg.Reply_wiki_index
@@ -1092,19 +1085,6 @@ let execute_post t ~epoch req =
                    decision_kind = Some decision_kind;
                    target_id = Some verification_id;
                    keeper = None;
-                   result;
-                 })
-        | Cmd.Post_quarantine_requeue { keeper; quarantine_id; _ } ->
-            let result = post_ack t ~path ~body in
-            Some
-              (Msg.Reply_work_mutation
-                 {
-                   label =
-                     Say.make ~ko:"격리 후보 재큐잉 완료" ~en:"Quarantine requeued";
-                   attention_id = Some ("quarantine:" ^ quarantine_id);
-                   decision_kind = None;
-                   target_id = Some quarantine_id;
-                   keeper = Some keeper;
                    result;
                  })
         | Cmd.Post_memory_act { keeper; _ } ->

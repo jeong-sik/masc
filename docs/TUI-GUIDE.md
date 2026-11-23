@@ -117,7 +117,7 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
 | `,` (unfocused), `Ctrl+,`, `Alt+,`, `F10` | `/config [query]` | 2-pane, 7-category **Settings** overlay |
 | `Ctrl+T` | `/queue`, `/context` | 3-tab **Queue / Context / Schedules** drawer; the Context tab shows the selected Keeper's context fill per turn over its last 60 turns, and its latest compaction and history reset |
 | `I` (unfocused), `Alt+I` | `/incidents` | Historical Incidents drawer (`d` dismiss, `c`/`D` clear all, `Space` show dismissed, `o`/`Enter` dive) |
-| `J` (unfocused), `Alt+J` | `/jump` | Teleport to the highest-priority blocked item (Ask, Tool Approval, Goal Confirmation, or Quarantine) |
+| `J` (unfocused), `Alt+J` | `/jump` | Teleport to the highest-priority blocked item (Ask, Tool Approval, or Goal Confirmation) |
 | `?` (unfocused) | `/help` | Dynamic keymap help overlay |
 
 ### Chatting with a Keeper
@@ -213,8 +213,8 @@ The organization cockpit (`lib/masc_tui/screens_core/screen_pulse.ml`):
 
 - **4-KPI Hero Band**: live fleet counts (`running/total`), 24h turn volume,
   sandbox infra mix (`vm · ssh · dk`), and 24h verification / spend summary.
-- **Attention Queue**: live pending Asks, held Tool Approvals, Gate items, Goal
-  confirmations, and Board quarantines.
+- **Attention Queue**: live pending Asks, held Tool Approvals, Gate items, and
+  Goal confirmations.
 - **Group Overview**: Keepers grouped by `keeper.group` with 24h activity
   sparklines and health/spend rollups.
 - **Goals, Scorecard & 24h World Pulse**: active Goals summary and workspace
@@ -255,11 +255,10 @@ Four sub-tabs (`[` / `]` or `←` / `→`):
 Pending operator decisions appear in two places:
 
 - **Fast Approval Strip**: whenever an actionable item is waiting (held Tool
-  Approval, Gate request, Ask, Goal confirmation, or Board quarantine), a
-  1-row strip appears above the composer on every workspace.
-  - Unfocused: press **`Y`** to approve/accept (or select Ask choice 1, or
-    requeue quarantine) and **`N`** to deny/skip (opens reason modal for Gate
-    rejection).
+  Approval, Gate request, Ask, or Goal confirmation), a 1-row strip appears
+  above the composer on every workspace.
+  - Unfocused: press **`Y`** to approve/accept (or select Ask choice 1) and
+    **`N`** to deny/skip (opens reason modal for Gate rejection).
   - While typing in the composer: use **`Alt+Y`** and **`Alt+N`** without
     losing your draft.
   - A Tool Approval answer toasts what the server did with it: the waiting
@@ -283,8 +282,7 @@ Three sub-tabs (`[` / `]` or `←` / `→`):
 1. **Board**: workspace posts with Signal-only vs All filtering and Succession
    Chain folding (`Space` expands/collapses a selected succession chain, or
    toggles Signal-only/All when no chain is selected; `Enter` opens Thread Dive;
-   `n` opens new Board post modal; `R` requeues the top quarantined post; `y`
-   copies selected post body).
+   `n` opens new Board post modal; `y` copies selected post body).
 2. **Wiki & Artifacts**: shared `.masc/wiki/` index, lint status, and published
    artifacts. Press **`Space`** to toggle between **Wiki** and **Artifacts**.
    - **Wiki mode**: `Enter` opens Wiki Dive (Markdown body, outgoing links,

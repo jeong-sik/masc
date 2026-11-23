@@ -15,8 +15,7 @@ let attention_items_for_grouping (m : Model.t) =
         match e.kind with
         | Health.Pending_ask _ -> Wire_fleet.Bucket_asks
         | Health.Held_tool_approval _ -> Wire_fleet.Bucket_approvals
-        | Health.Goal_confirmation _ | Health.Board_quarantine _ ->
-            Wire_fleet.Bucket_confirmations_quarantine
+        | Health.Goal_confirmation _ -> Wire_fleet.Bucket_confirmations
       in
       {
         Wire_fleet.id = e.id;
@@ -984,8 +983,6 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             | Health.Held_tool_approval _ | Health.Pending_ask _ -> "[Y/N]"
             | Health.Goal_confirmation _ ->
                 Say.resolve lang (Say.make ~ko:"[Enter] 확인" ~en:"[Enter]")
-            | Health.Board_quarantine _ ->
-                Say.resolve lang (Say.make ~ko:"[Enter] 복구" ~en:"[Enter]")
           in
           let ah_w = Grapheme.display_width action_hint in
           let right_edge = Rect.right inner - pad_x in
@@ -2275,26 +2272,7 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                     else Printf.sprintf "Wiki %dp" wi.pages_total
                 | None -> ""
               in
-              let quar_n =
-                List.length (Knowledge_store.quarantines_list model.knowledge)
-              in
-              let quar_part =
-                if quar_n > 0 then
-                  Printf.sprintf "%s %d %s"
-                    (Glyph.to_utf8 Glyph.Action_required)
-                    quar_n
-                    (Say.resolve lang (Say.make ~ko:"격리" ~en:"quarantined"))
-                else
-                  Printf.sprintf "%s 0 %s"
-                    (Glyph.to_utf8 Glyph.Live_healthy)
-                    (Say.resolve lang (Say.make ~ko:"격리" ~en:"quarantined"))
-              in
-              let left_parts =
-                List.filter
-                  (fun s -> not (String.equal s ""))
-                  [ quar_part; wiki_part ]
-              in
-              let left_line = String.concat Typography.sep_dot left_parts in
+              let left_line = wiki_part in
               let right_candle, right_st =
                 if unattrib > 0 then
                   ( Printf.sprintf "%s%d %s"
@@ -2307,7 +2285,7 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               in
               put_left_right grid ~clip:row2 ~y:(mem_y + 1)
                 ~left_text:left_line
-                ~left_style:(if quar_n > 0 then attn_st else whisper_st)
+                ~left_style:whisper_st
                 ~right_text:right_candle ~right_style:right_st
             end
       end

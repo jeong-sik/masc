@@ -125,18 +125,6 @@ let sample_goal ?(id = "g-1") ?(phase = Wire_work.Awaiting_confirmation) () :
     linked_task_count = Observed.value ~observed_at:t0 2;
   }
 
-let sample_quarantine ?(id = "q-1") ?(keeper = "alpha") () :
-    Wire_knowledge.quarantine_candidate =
-  {
-    partition_id = "p-1";
-    quarantine_id = id;
-    keeper;
-    post_id = "post-99";
-    status = "quarantined";
-    failure_reason = "delivery timeout";
-    quarantined_at_unix = Some 80.0;
-  }
-
 let has_get_health cmds =
   List.exists
     (function
@@ -158,7 +146,6 @@ let has_get_health cmds =
               | Cmd.Get_candle_ledger _
               | Cmd.Get_board_feed _
               | Cmd.Get_board_thread _
-              | Cmd.Get_quarantines _
               | Cmd.Get_wiki_index _
               | Cmd.Get_wiki_page _
               | Cmd.Get_wiki_log _
@@ -399,19 +386,11 @@ let test_three_channel_separation () =
   Alcotest.(check int) "incidents bounded to 200" Incidents.max_entries
     (Incidents.count inc_capped);
   (* Channel 1 Attention urgency ordering & fast-path strip *)
-  let m6, _ =
+  let m7, _ =
     Update.step ~now:t1 m5
       (Msg.Http_reply
          {
            epoch = m5.epoch;
-           reply = Msg.Reply_quarantines (Ok [ sample_quarantine () ]);
-         })
-  in
-  let m7, _ =
-    Update.step ~now:t1 m6
-      (Msg.Http_reply
-         {
-           epoch = m6.epoch;
            reply =
              Msg.Reply_planning
                (Ok { goals = [ sample_goal () ]; tasks = [] });
@@ -430,7 +409,7 @@ let test_three_channel_separation () =
            reply = Msg.Reply_tool_approvals (Ok [ sample_tool_approval () ]);
          })
   in
-  Alcotest.(check int) "4 attention items" 4 (Attention.count m9.attention);
+  Alcotest.(check int) "3 attention items" 3 (Attention.count m9.attention);
   let top =
     match Model.fast_approval_strip_item m9 with
     | Some e -> e
@@ -498,7 +477,7 @@ let test_three_channel_separation () =
   (* Honest in-flight: item remains in queue until server ack, while strip skips it *)
   Alcotest.(check bool) "ask marked in-flight before ack" true
     (Attention.is_in_flight ~id:"ask:ask-1" m11.attention);
-  Alcotest.(check int) "ask not optimistically dropped" 4
+  Alcotest.(check int) "ask not optimistically dropped" 3
     (Attention.count m11.attention);
   (* Failure restores actionable state without dropping item *)
   let m11_fail, _ =
@@ -538,7 +517,7 @@ let test_three_channel_separation () =
                };
          })
   in
-  Alcotest.(check int) "ask removed on server ack" 3
+  Alcotest.(check int) "ask removed on server ack" 2
     (Attention.count m12.attention);
   Alcotest.(check int) "recent 24h decision recorded" 1
     (List.length m12.work.recent_decisions_24h);
@@ -564,7 +543,7 @@ let test_three_channel_separation () =
   in
   Alcotest.(check bool) "an approval no call took is no longer in flight" false
     (Attention.is_in_flight ~id:"tool:ap-1" m_unclaimed.attention);
-  Alcotest.(check int) "an approval no call took keeps the item" 3
+  Alcotest.(check int) "an approval no call took keeps the item" 2
     (Attention.count m_unclaimed.attention);
   Alcotest.(check int) "an approval no call took records no decision" 1
     (List.length m_unclaimed.work.recent_decisions_24h);
@@ -578,14 +557,14 @@ let test_three_channel_separation () =
   let m_settled, _ =
     Update.step ~now:t2 m12 (tool_reply Wire_work.Tool_approval_settled)
   in
-  Alcotest.(check int) "a settled approval resolves the item" 2
+  Alcotest.(check int) "a settled approval resolves the item" 1
     (Attention.count m_settled.attention);
   Alcotest.(check int) "a settled approval records the decision" 2
     (List.length m_settled.work.recent_decisions_24h);
   let m_remembered, _ =
     Update.step ~now:t2 m12 (tool_reply Wire_work.Tool_approval_remembered)
   in
-  Alcotest.(check int) "a remembered approval resolves the item" 2
+  Alcotest.(check int) "a remembered approval resolves the item" 1
     (Attention.count m_remembered.attention);
   Alcotest.(check int) "a remembered approval records the decision" 2
     (List.length m_remembered.work.recent_decisions_24h)
@@ -1694,7 +1673,6 @@ let test_verifier_regressions () =
         | Cmd.Post_goal_transition _
         | Cmd.Post_goal_confirmation _
         | Cmd.Post_verification_verdict _
-        | Cmd.Post_quarantine_requeue _
         | Cmd.Post_memory_act _
         | Cmd.Post_fusion_launch _
         | Cmd.Post_runtime_assignment _
@@ -3513,7 +3491,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
          | _ -> false)
        cmds_gpause);
 
-  (* 3. Knowledge: Memory [a] -> Post_memory_act, Wiki [e]/[Ctrl+E] -> Put_wiki_page / Edit_wiki_page, Board [R] -> Post_quarantine_requeue *)
+  (* 3. Knowledge: Memory [a] -> Post_memory_act, Wiki [e]/[Ctrl+E] -> Put_wiki_page / Edit_wiki_page *)
   let m_kmem =
     {
       m0 with
@@ -5749,7 +5727,7 @@ let test_p2_schedules_attention_scroll_and_filter_guard () =
   in
   let att0 =
     Attention.rebuild ~asks:asks10 ~tool_approvals:[] ~gate_pending:[]
-      ~goals:[] ~quarantines:[] Attention.empty
+      ~goals:[] Attention.empty
   in
   let att_deep = Attention.move_triage ~viewport_rows:5 ~delta:8 att0 in
   Alcotest.(check int) "Attention triage_scroll_offset = 8 - 5 + 1 = 4" 4

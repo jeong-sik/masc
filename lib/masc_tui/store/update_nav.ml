@@ -1431,24 +1431,7 @@ let fast_approve_top ~now (m : Model.t) =
               (Say.make ~ko:"목표 상세에서 검증 증명을 확인한 뒤 완료 확정하세요"
                  ~en:"Review verified proof in Goal Dive before confirming completion")
               next
-          , cmds )
-      | Attention.Payload_quarantine q ->
-          let attention = Attention.mark_in_flight ~id:entry.id m.attention in
-          let cmd =
-            Cmd.Http_post
-              {
-                epoch = m.epoch;
-                req =
-                  Cmd.Post_quarantine_requeue
-                    {
-                      keeper = q.keeper;
-                      partition_id = q.partition_id;
-                      quarantine_id = q.quarantine_id;
-                      reason = None;
-                    };
-              }
-          in
-          ({ m with attention }, [ cmd ]))
+          , cmds ))
 
 let fast_deny_top ~now (m : Model.t) =
   match actionable_approval_item m with
@@ -1499,20 +1482,7 @@ let fast_deny_top ~now (m : Model.t) =
               (Say.make ~ko:"목표 상세에서 보류·중단·거절을 진행하세요"
                  ~en:"Open Goal Dive to pause, block, or reject completion")
               next
-          , cmds )
-      | Attention.Payload_quarantine _ ->
-          let query =
-            if
-              Nav.equal_workspace m.nav.workspace Nav.Work
-              && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
-            then m.work.filter_query
-            else ""
-          in
-          let attention = Attention.move_triage ~query ~delta:1 m.attention in
-          ( Model.with_toast ~now ~level:Model.Toast_info
-              (Say.make ~ko:"격리 항목 건너뜀" ~en:"Skipped quarantine item")
-              { m with attention }
-          , [] ))
+          , cmds ))
 
 let teleport_blocked ~now (m : Model.t) =
   match Attention.top_fast_path m.attention with
@@ -1531,12 +1501,7 @@ let teleport_blocked ~now (m : Model.t) =
           let work = Work_store.set_tab Nav.Work_pipeline m.work in
           let m1, cmds1 = switch_workspace { m with work } Nav.Work in
           let m2, cmds2 = push_dive m1 (Nav.Dive_work (Nav.Goal_dive goal_id)) in
-          (m2, cmds1 @ cmds2)
-      | Health.Board_quarantine _ ->
-          let knowledge =
-            Knowledge_store.set_tab Nav.Knowledge_board m.knowledge
-          in
-          switch_workspace { m with knowledge } Nav.Knowledge)
+          (m2, cmds1 @ cmds2))
 
 let toggle_voice ~now (m : Model.t) =
   match m.drafts.voice with
@@ -1565,11 +1530,6 @@ let dive_attention_entry (m : Model.t) (entry : Attention.entry) =
       push_dive m (Nav.Dive_keeper { name = ta.keeper; tab = Nav.Keeper_chat })
   | Attention.Payload_gate g ->
       push_dive m (Nav.Dive_keeper { name = g.keeper; tab = Nav.Keeper_chat })
-  | Attention.Payload_quarantine _ ->
-      let knowledge =
-        Knowledge_store.set_tab Nav.Knowledge_memory m.knowledge
-      in
-      switch_workspace { m with knowledge } Nav.Knowledge
 
 let launch_memory_diagram ~now ~keeper ~(content_rect : Rect.t) ~kind ~mode
     ~(activity : Wire_knowledge.keeper_memory_activity)
@@ -3806,8 +3766,7 @@ let work_detail_max_scroll (m : Model.t) =
                 else
                   markdown_max_scroll ~theme ~width:w ~height:md_h
                     (Chat_transcript.rewrite_masc_links_for_markdown
-                       (g.measure ^ "\n\n" ^ g.procedure))
-            | Attention.Payload_quarantine _ -> 0))
+                       (g.measure ^ "\n\n" ^ g.procedure))))
   | Nav.Work_tasks_schedules | Nav.Work_candle_scorecard -> 0
 
 let runtime_detail_max_scroll (m : Model.t) =
@@ -5314,8 +5273,7 @@ let apply_move (m : Model.t) dir =
                                   payload =
                                     ( Attention.Payload_tool_approval _
                                     | Attention.Payload_gate _
-                                    | Attention.Payload_goal_confirmation _
-                                    | Attention.Payload_quarantine _ );
+                                    | Attention.Payload_goal_confirmation _ );
                                   _;
                                 }
                             | None ->

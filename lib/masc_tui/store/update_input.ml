@@ -1590,37 +1590,7 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                         | Some "e" -> open_wiki_edit_modal ~now m ~slug:p.slug
                         | _ -> (m, [])))
               | `Artifacts -> (m, []))
-          | Nav.Knowledge_board -> (
-              match printable_char with
-              | Some "R" -> (
-                  match Knowledge_store.quarantines_list m.knowledge with
-                  | q :: _ ->
-                      ( Model.with_toast ~now ~level:Model.Toast_info
-                          (Say.make
-                             ~ko:("격리 항목 재큐잉 요청: " ^ q.quarantine_id)
-                             ~en:("Requeuing quarantine: " ^ q.quarantine_id))
-                          m
-                      , [
-                          Cmd.Http_post
-                            {
-                              epoch = m.epoch;
-                              req =
-                                Cmd.Post_quarantine_requeue
-                                  {
-                                    keeper = q.keeper;
-                                    partition_id = q.partition_id;
-                                    quarantine_id = q.quarantine_id;
-                                    reason = None;
-                                  };
-                            };
-                        ] )
-                  | [] ->
-                      ( Model.with_toast ~now ~level:Model.Toast_info
-                          (Say.make ~ko:"재큐잉할 격리 항목이 없습니다"
-                             ~en:"No quarantined posts to requeue")
-                          m
-                      , [] ))
-              | _ -> (m, [])))
+          | Nav.Knowledge_board -> (m, []))
       | Nav.Work -> (
           match m.work.active_tab with
           | Nav.Work_pipeline -> (

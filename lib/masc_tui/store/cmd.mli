@@ -37,7 +37,6 @@ type get_request =
       offset : int option;
     }
   | Get_board_thread of { post_id : string; comment_limit : int option }
-  | Get_quarantines of { keeper : string }
   | Get_wiki_index of {
       tag : string option;
       source : string option;
@@ -115,12 +114,6 @@ type post_request =
       verification_id : string;
       verdict : Wire_work.operator_verdict;
       notes : string option;
-    }
-  | Post_quarantine_requeue of {
-      keeper : string;
-      partition_id : string;
-      quarantine_id : string;
-      reason : string option;
     }
   | Post_memory_act of {
       keeper : string;

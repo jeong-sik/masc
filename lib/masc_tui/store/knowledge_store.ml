@@ -115,7 +115,6 @@ type t = {
   expanded_succession_chains : String_set.t;
   active_thread :
     (Wire_knowledge.board_post * Wire_knowledge.board_comment list) Observed.t;
-  quarantines : Wire_knowledge.quarantine_candidate list Observed.t;
   wiki_artifacts_submode : [ `Wiki | `Artifacts ];
   wiki_index : Wire_knowledge.wiki_index Observed.t;
   wiki_page : Wire_knowledge.wiki_page_detail Observed.t;
@@ -161,7 +160,6 @@ let empty =
     board_hearth = None;
     expanded_succession_chains = String_set.empty;
     active_thread = Observed.absent;
-    quarantines = Observed.unreported;
     wiki_artifacts_submode = `Wiki;
     wiki_index = Observed.unreported;
     wiki_page = Observed.absent;
@@ -1208,9 +1206,6 @@ let apply_board ~observed_at feed t =
 let apply_thread ~observed_at thread t =
   { t with active_thread = Observed.value ~observed_at thread }
 
-let apply_quarantines ~observed_at quarantines t =
-  { t with quarantines = Observed.value ~observed_at quarantines }
-
 let apply_wiki_index ~observed_at idx t =
   let on_wiki =
     Nav.equal_knowledge_tab t.active_tab Nav.Knowledge_wiki_artifacts
@@ -1356,9 +1351,6 @@ let begin_wiki_edit (page : Wire_knowledge.wiki_page_detail) t =
   }
 
 let end_wiki_edit t = { t with wiki_edit_base = None }
-
-let quarantines_list t =
-  match Observed.to_option t.quarantines with Some xs -> xs | None -> []
 
 let artifacts_filtered t =
   let items =
@@ -1948,7 +1940,6 @@ let mark_stale_all t =
     t with
     board = Observed.mark_stale t.board;
     active_thread = Observed.mark_stale t.active_thread;
-    quarantines = Observed.mark_stale t.quarantines;
     wiki_index = Observed.mark_stale t.wiki_index;
     wiki_page = Observed.mark_stale t.wiki_page;
     wiki_log = Observed.mark_stale t.wiki_log;

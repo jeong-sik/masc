@@ -1,4 +1,4 @@
-(** Knowledge domain wire codecs: Board posts/comments/quarantines, Wiki
+(** Knowledge domain wire codecs: Board posts/comments, Wiki
     ([/api/v1/wiki*]), Artifacts, World Memory ([/api/v1/memory/world]),
     Temporal Memory Diff ([/api/v1/memory/diff]), and Keeper Memory Recovery
     Acts ([/api/v1/keepers/:name/memory/act]). *)
@@ -18,9 +18,6 @@ val board_list_path :
 
 val board_post_path :
   post_id:string -> ?comment_offset:int -> ?comment_limit:int -> unit -> string
-
-val keeper_quarantines_path : keeper:string -> string
-val keeper_quarantine_requeue_path : keeper:string -> partition_id:string -> string
 
 val wiki_index_path :
   ?tag:string -> ?source:string -> ?sort:string -> unit -> string
@@ -42,7 +39,7 @@ val memory_diff_path :
 
 val keeper_memory_act_path : keeper:string -> string
 
-(** {1 Board Posts, Comments & Quarantines} *)
+(** {1 Board Posts & Comments} *)
 
 type post_kind =
   | Human_post
@@ -90,16 +87,6 @@ type board_feed = {
   signal_only : bool;
 }
 
-type quarantine_candidate = {
-  partition_id : string;
-  quarantine_id : string;
-  keeper : string;
-  post_id : string;
-  status : string;
-  failure_reason : string;
-  quarantined_at_unix : float option;
-}
-
 val is_signal_board_post :
   post_kind:post_kind option ->
   hearth:string option ->
@@ -118,12 +105,6 @@ val decode_board_thread :
   observed_at:Clock.Mono.t ->
   Yojson.Safe.t ->
   (board_post * board_comment list, string) result
-
-val decode_quarantines :
-  Yojson.Safe.t -> (quarantine_candidate list, string) result
-
-val encode_quarantine_requeue_request :
-  quarantine_id:string -> reason:string option -> Yojson.Safe.t
 
 (** {1 Wiki ([/api/v1/wiki*])} *)
 

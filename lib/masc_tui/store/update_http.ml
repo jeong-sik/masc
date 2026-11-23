@@ -732,18 +732,6 @@ let apply_http_reply ~now (m : Model.t) reply =
                { x with active_thread = failed_slot err x.active_thread }))
         ~source:Health.Source_client_http ~ko:"보드 스레드 조회"
         ~en:"Board thread fetch" err
-  | Msg.Reply_quarantines (Ok qs) ->
-      let knowledge =
-        Knowledge_store.apply_quarantines ~observed_at:now qs m.knowledge
-      in
-      (Model.rebuild_attention { m with knowledge }, [])
-  | Msg.Reply_quarantines (Error err) ->
-      err_reply
-        ~fail:
-          (on_knowledge (fun (x : Knowledge_store.t) ->
-               { x with quarantines = failed_slot err x.quarantines }))
-        ~source:Health.Source_client_http ~ko:"격리 후보 조회"
-        ~en:"Quarantines fetch" err
   | Msg.Reply_wiki_index (Ok idx) ->
       let next =
         {

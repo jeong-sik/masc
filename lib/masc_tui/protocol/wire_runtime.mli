@@ -18,7 +18,16 @@ val runtime_probe_path : ?force:bool -> unit -> string
 val provider_usage_history_path : days:int -> string
 val keeper_costs_path : window_minutes:int -> string
 val keeper_efficiency_path : ?month:string -> unit -> string
-val models_metrics_path : ?window_minutes:int -> ?bucket_minutes:int -> unit -> string
+val models_chart_window_minutes : int
+val models_chart_bucket_minutes : int
+(** The model spend chart reads 24 hours in 60-minute buckets. *)
+
+val models_metrics_path : window_minutes:int -> bucket_minutes:int -> string
+
+val models_metrics_stream_path : string
+(** The live stream asks for the chart's window and bucket. Without them the
+    server streams its 30-minute unbucketed aggregate, which cannot replace
+    the chart's snapshot. *)
 val runtime_metrics_path : string
 val tool_series_path : bucket:[ `Hour | `Day ] -> since_hours:int -> string
 val dashboard_tools_path : ?keeper:string -> unit -> string

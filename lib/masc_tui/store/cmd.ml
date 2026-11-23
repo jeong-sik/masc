@@ -271,7 +271,7 @@ let get_request_path = function
       Wire_runtime.keeper_costs_path ~window_minutes
   | Get_efficiency { month } -> Wire_runtime.keeper_efficiency_path ?month ()
   | Get_models_metrics { window_minutes; bucket_minutes } ->
-      Wire_runtime.models_metrics_path ~window_minutes ~bucket_minutes ()
+      Wire_runtime.models_metrics_path ~window_minutes ~bucket_minutes
   | Get_runtime_metrics -> Wire_runtime.runtime_metrics_path
   | Get_runtime_resolved -> Wire_runtime.runtime_resolved_path
   | Get_runtime_config_raw -> Wire_runtime.runtime_config_raw_path

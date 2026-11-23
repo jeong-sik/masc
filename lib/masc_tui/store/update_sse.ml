@@ -429,12 +429,20 @@ let apply_observation_changed (m : Model.t)
             [
               get_cmd e (Cmd.Get_efficiency { month = None });
               get_cmd e
-                (Cmd.Get_models_metrics { window_minutes = 1440; bucket_minutes = 60 });
+                (Cmd.Get_models_metrics
+                  {
+                    window_minutes = Wire_runtime.models_chart_window_minutes;
+                    bucket_minutes = Wire_runtime.models_chart_bucket_minutes;
+                  });
             ]
         | Nav.Pulse ->
             [
               get_cmd e
-                (Cmd.Get_models_metrics { window_minutes = 1440; bucket_minutes = 60 });
+                (Cmd.Get_models_metrics
+                  {
+                    window_minutes = Wire_runtime.models_chart_window_minutes;
+                    bucket_minutes = Wire_runtime.models_chart_bucket_minutes;
+                  });
             ]
         | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Infra -> []
       in
@@ -844,12 +852,6 @@ let apply_sse_event ~now (m : Model.t) = function
       ({ m with fleet }, [])
   | Msg.Sse_log_entry entry ->
       ({ m with infra = Infra_store.append_log entry m.infra }, [])
-  | Msg.Sse_model_metrics eff ->
-      ( {
-          m with
-          runtime = Runtime_store.apply_efficiency ~observed_at:now eff m.runtime;
-        }
-      , [] )
   | Msg.Sse_models_metrics_snapshot snap ->
       ( {
           m with

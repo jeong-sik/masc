@@ -1,5 +1,4 @@
 open Masc_tui_core
-open Masc_tui_protocol
 
 type stream_id =
   | Stream_observer
@@ -15,14 +14,6 @@ let max_streams = max_persistent_streams + max_view_scoped_streams
 let is_persistent = function
   | Stream_observer | Stream_fleet -> true
   | Stream_model_metrics | Stream_tool_metrics_series | Stream_logs _ -> false
-
-let stream_path = function
-  | Stream_observer -> Wire_observer.observer_stream_path
-  | Stream_fleet -> Wire_fleet.fleet_stream_path
-  | Stream_model_metrics -> "/api/v1/models/metrics/stream"
-  | Stream_tool_metrics_series -> "/api/v1/tool-metrics/series/stream"
-  | Stream_logs { since_seq } ->
-      Wire_infra.system_logs_stream_path ?since_seq ()
 
 let equal_stream_id a b =
   match a, b with

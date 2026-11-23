@@ -1059,7 +1059,6 @@ let test_bus_key_hash_and_stream_frames () =
                     ( Msg.Sse_observer_handshake _
                     | Msg.Sse_observer_delivery _
                     | Msg.Sse_fleet _
-                    | Msg.Sse_model_metrics _
                     | Msg.Sse_models_metrics_snapshot _
                     | Msg.Sse_tool_series _ );
                   _;
@@ -1085,10 +1084,11 @@ let test_bus_key_hash_and_stream_frames () =
   in
   Alcotest.(check (list int)) "batch log entries in chronological order" [ 1; 2 ] seqs;
 
-  (* P2-4: live /api/v1/models/metrics/stream aggregate payload is handled cleanly
-     without bogus decode crashes; error payloads surface cleanly. *)
+  (* A model metrics frame for another window (the server's unbucketed
+     30-minute default) never replaces the 24h chart and is reported as a
+     skipped frame instead of vanishing. *)
   let model_metrics_agg =
-    {|{"window_minutes":30,"bucket_minutes":0,"models":[]}|}
+    {|{"window_minutes":30,"bucket_minutes":0,"total_entries":0,"total_error_entries":0,"models":[]}|}
   in
   let agg_msgs =
     Cmd_executor.decode_hub_event_msgs ~epoch:Epoch.initial
@@ -1099,8 +1099,18 @@ let test_bus_key_hash_and_stream_frames () =
            frame = { Sse_wire.id = None; data = model_metrics_agg };
          })
   in
-  Alcotest.(check int) "aggregate model metrics frame ignored cleanly" 0
-    (List.length agg_msgs);
+  Alcotest.(check bool) "other-window model metrics frame is reported, not applied" true
+    (match agg_msgs with
+    | [ ( None
+        , Msg.Sse_event
+            {
+              event =
+                Msg.Sse_observer_delivery
+                  { decoded = Masc_tui_protocol.Wire_observer.Undecodable _; _ };
+              _;
+            } ) ] ->
+        true
+    | _ -> false);
 
   (* v2.5: bucketed model metrics SSE frame decodes into Sse_models_metrics_snapshot *)
   let model_metrics_bucketed =
@@ -1133,7 +1143,6 @@ let test_bus_key_hash_and_stream_frames () =
           | Msg.Sse_observer_handshake _
           | Msg.Sse_observer_delivery _
           | Msg.Sse_fleet _
-          | Msg.Sse_model_metrics _
           | Msg.Sse_tool_series _
           | Msg.Sse_log_entry _ );
         _;

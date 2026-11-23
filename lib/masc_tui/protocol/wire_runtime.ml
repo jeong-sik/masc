@@ -29,9 +29,16 @@ let keeper_efficiency_path ?month () =
   | None -> "/api/v1/keeper-efficiency"
   | Some m -> "/api/v1/keeper-efficiency?month=" ^ percent_encode m
 
-let models_metrics_path ?(window_minutes = 1440) ?(bucket_minutes = 60) () =
+let models_chart_window_minutes = 1440
+let models_chart_bucket_minutes = 60
+
+let models_metrics_path ~window_minutes ~bucket_minutes =
   Printf.sprintf "/api/v1/models/metrics?window=%d&bucket_min=%d"
     (max 1 window_minutes) (max 0 bucket_minutes)
+
+let models_metrics_stream_path =
+  Printf.sprintf "/api/v1/models/metrics/stream?window=%d&bucket_min=%d"
+    models_chart_window_minutes models_chart_bucket_minutes
 
 let runtime_metrics_path = "/api/v1/runtime/metrics"
 

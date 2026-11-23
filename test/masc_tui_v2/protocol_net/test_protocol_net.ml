@@ -1909,7 +1909,10 @@ let test_v25_data_pipeline_decoders () =
   (* 2. models/metrics query param + hourly bucket aggregation + runtime/metrics *)
   Alcotest.(check string) "models_metrics_path exact bucket_min param"
     "/api/v1/models/metrics?window=1440&bucket_min=60"
-    (Wire_runtime.models_metrics_path ~window_minutes:1440 ~bucket_minutes:60 ());
+    (Wire_runtime.models_metrics_path ~window_minutes:1440 ~bucket_minutes:60);
+  Alcotest.(check string) "models metrics stream asks for the chart window"
+    "/api/v1/models/metrics/stream?window=1440&bucket_min=60"
+    Wire_runtime.models_metrics_stream_path;
   let models_metrics_json =
     parse_json
       {|{

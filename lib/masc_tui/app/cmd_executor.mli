@@ -75,9 +75,10 @@ val decode_hub_event_msgs :
   Sse_hub.hub_event ->
   (bus_key option * Msg.t) list
 (** Pure projection from a {!Sse_hub.hub_event} into zero or more bus items
-    [(Some snapshot_key, msg)] or [(None, stream_msg)]. Handles batched
-    [/api/v1/dashboard/logs/stream] frames ([{"reset": ..., "entries": [...]}])
-    in chronological order as well as single-entry fallback. *)
+    [(Some snapshot_key, msg)] or [(None, stream_msg)]. A
+    [/api/v1/dashboard/logs/stream] frame ([{"reset": ..., "entries": [...]}])
+    becomes one [Sse_log_frame]. A view-stream frame that cannot be applied
+    becomes an undecodable observer delivery. *)
 
 val run_setup_login_stream :
   publish:

@@ -294,6 +294,8 @@ let max_seq_of entries =
       match acc with None -> Some e.seq | Some s -> Some (max s e.seq))
     None entries
 
+let forget_log_cursor t = { t with last_log_seq = None }
+
 let apply_log_snapshot entries t =
   let sorted_desc =
     List.stable_sort
@@ -325,6 +327,22 @@ let append_log (entry : Wire_infra.system_log_entry) t =
     | Some prev -> Some (max prev entry.seq)
   in
   { t with logs; logs_loaded = true; last_log_seq }
+
+(* A reset frame replaces the list and the cursor. After a server restart the
+   ring numbers from zero again, so keeping the old entries would drop every
+   new line whose seq an old one already had, and keeping the old maximum
+   would hand the next stream a cursor from the previous run. *)
+let apply_log_frame ({ reset; entries } : Wire_infra.system_log_frame) t =
+  if reset then
+    let bounded =
+      entries
+      |> List.stable_sort
+           (fun (a : Wire_infra.system_log_entry) (b : Wire_infra.system_log_entry) ->
+             Int.compare b.seq a.seq)
+      |> List.take max_logs
+    in
+    { t with logs = bounded; logs_loaded = true; last_log_seq = max_seq_of bounded }
+  else List.fold_left (fun acc entry -> append_log entry acc) t (List.rev entries)
 
 let push_activity row t =
   {

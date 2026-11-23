@@ -82,7 +82,14 @@ val clear_file_changes : t -> t
 val mark_file_changes_requested : keeper:string -> t -> t
 
 val apply_log_snapshot : Wire_infra.system_log_entry list -> t -> t
-val append_log : Wire_infra.system_log_entry -> t -> t
+
+val forget_log_cursor : t -> t
+(** Drop [last_log_seq], so the next log stream opens without a cursor and the
+    server answers with a reset frame from its own ring. A new server process
+    numbers its lines from zero again. *)
+val apply_log_frame : Wire_infra.system_log_frame -> t -> t
+(** A reset frame replaces the list and [last_log_seq]; any other frame
+    appends its entries oldest first. *)
 val push_activity : activity_row -> t -> t
 val record_stream_gap : int -> t -> t
 

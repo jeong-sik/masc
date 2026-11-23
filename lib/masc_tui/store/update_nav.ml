@@ -4028,11 +4028,7 @@ let keeper_tab_max_scroll ~embedded (m : Model.t) ~name ~tab =
         in
         let n_scheds =
           List.length
-            (List.filter
-               (fun (sc : Wire_work.schedule_row) ->
-                 Option.equal String.equal sc.payload_keeper_name (Some name)
-                 || Option.equal String.equal sc.payload_target (Some name))
-               (Work_store.schedules_list m.work))
+            (Keeper_cadence.keeper_schedules ~name (Work_store.schedules_list m.work))
         in
         let n_posts =
           List.length
@@ -4040,7 +4036,10 @@ let keeper_tab_max_scroll ~embedded (m : Model.t) ~name ~tab =
                (fun (p : Wire_knowledge.board_post) -> String.equal p.author name)
                (Knowledge_store.filtered_posts m.knowledge))
         in
-        let total_rows = 3 + max 1 n_tasks + max 1 n_scheds + max 1 n_posts in
+        let total_rows =
+          Keeper_cadence.block_rows (Fleet_store.turn_pulse m.fleet name)
+          + 3 + max 1 n_tasks + max 1 n_scheds + max 1 n_posts
+        in
         max 0 (total_rows - max 1 left_h)
     | Nav.Keeper_sandbox ->
         let top_h = min 10 (max 4 (content_h / 2)) in

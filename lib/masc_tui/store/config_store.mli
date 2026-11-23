@@ -67,6 +67,7 @@ type t = {
   search_query : string;
   dirty_fields : Wire_config.patch_op String_map.t;
   dry_run_preview : dry_run_state;
+  dry_run_scroll_offset : int;
   save_state : save_state;
   last_snapshot_id : string option;
   new_keeper_name : string;
@@ -147,6 +148,16 @@ val field_sub_group : t -> Wire_config.schema_field -> string option
     falling back to quote-aware {!Wire_config.field_sub_group}. *)
 
 val visible_fields : t -> Wire_config.schema_field list
+val keeper_visible_fields : ?lang:Say.lang -> t -> Wire_config.schema_field list
+(** All fields flattened across every section of [schema.sections] (never
+    filtered by [active_tab]) and filtered by [search_query] using the single
+    shared predicate matching localized label, [full_key], [label], and
+    [description]. Returns [[]] when the schema is unloaded or belongs to a
+    different target. *)
+
+val keeper_selected_field : ?lang:Say.lang -> t -> Wire_config.schema_field option
+(** Currently focused field in {!keeper_visible_fields}. *)
+
 val inspector_fields : t -> Wire_config.schema_field list
 (** Exact fields displayed in the Right-Pane Property Inspector, including
     synthesized [tui.*] preference fallback rows when [General & UI] has no
@@ -165,6 +176,22 @@ val unstage_patch : full_key:string -> t -> t
 val clear_dirty : t -> t
 val dirty_count : t -> int
 
+val step_field :
+  delta:int -> Wire_config.schema_field -> t -> (t * bool, string) result
+(** Step a writable discrete/numeric field by [delta] ([Field_enum] wrap-cycles,
+    [Field_bool] toggles, [Field_int] steps by [delta] clamped to bounds,
+    [Field_float] steps by [delta *. 0.1] clamped to bounds, unstaging when
+    returning to the original schema value). Returns [Ok (t, false)] for
+    non-steppable string/list fields and [Error reason] for read-only, secret,
+    or structured fields. *)
+
+val step_selected_field : delta:int -> t -> (t * bool, string) result
+(** {!step_field} applied to {!selected_field} in Settings [Pane_inspector]. *)
+
+val step_keeper_field :
+  ?lang:Say.lang -> delta:int -> t -> (t * bool, string) result
+(** {!step_field} applied to {!keeper_selected_field} in [Keeper_config]. *)
+
 val build_patch_request :
   dry_run:bool -> t -> (Wire_config.patch_request, string) result
 
@@ -175,10 +202,20 @@ val new_keeper_name_field_key : string
 val is_editing_field : t -> bool
 val is_editing_new_keeper_name : t -> bool
 val begin_edit_new_keeper_name : t -> t
+val begin_edit_field :
+  ?step_enum:bool -> Wire_config.schema_field -> t -> (t, string) result
+(** Begin editing or immediately toggle/step [field]. [Field_bool] always
+    toggles immediately; [Field_enum] steps [+1] when [step_enum = true]
+    (default) or opens inline text edit when [step_enum = false]; scalar/list
+    fields open [editing_field_key]/[editing_buffer]. *)
+
 val begin_edit_selected : t -> (t, string) result
+val begin_edit_keeper_selected : ?lang:Say.lang -> t -> (t, string) result
+val stage_remove_field : Wire_config.schema_field -> t -> (t, string) result
 val stage_remove_selected : t -> (t, string) result
 (** Stage (or unstage if already staged) a {!Wire_config.Remove_key} patch op
     for the currently selected writable field. *)
+val stage_remove_keeper_selected : ?lang:Say.lang -> t -> (t, string) result
 val update_edit_buffer : string -> t -> t
 val append_edit_char : string -> t -> t
 val backspace_edit_buffer : t -> t
@@ -189,4 +226,15 @@ val commit_edit_field : t -> (t, string) result
     bools, or enum choices) and stage the resulting {!Wire_config.patch_op}. *)
 
 val move_selection : ?viewport_rows:int -> delta:int -> t -> t
+val move_keeper_selection :
+  ?viewport_rows:int ->
+  ?lang:Say.lang ->
+  ?fallback_count:int ->
+  delta:int ->
+  t ->
+  t
+(** Move [selected_field_index] across all {!keeper_visible_fields} (or
+    [fallback_count], default [5], while the target keeper's schema is still
+    unloaded). *)
+val move_dry_run_scroll : max_scroll:int -> delta:int -> t -> t
 val mark_stale_all : t -> t

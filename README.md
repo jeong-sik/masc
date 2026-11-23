@@ -241,7 +241,7 @@ or `Ctrl+1`–`6` / `Alt+1`–`6` / `F1`–`F6`):
 | `1` | **Pulse** | Organization overview, KPI hero band, Attention queue, live fleet health, and 24h pulse |
 | `2` | **Work** | Four tabs: Pipeline (Goals & Verifications), Tasks & Schedules, Action Inbox (Asks, Tool Approvals, Gate), and Candle & Scorecard |
 | `3` | **Knowledge** | Three tabs: Board (Signal/All & Succession Chains), Wiki & Artifacts (`Space` toggles), and World Memory (Claims/Conflicts & Temporal Diff Scrubber) |
-| `4` | **Keepers** | Fleet roster (`Companies`, `Attention`, `24h Wall`) and 1-hop 5-tab Keeper Dive (Chat & Stream, Memory, Work & Candle, Sandbox, Config) |
+| `4` | **Keepers** | Fleet roster (`Companies`, `Attention`, `24h Wall`) and 1-hop 5-tab Keeper Dive (Chat & Stream, Memory, Work & Candle, Sandbox, in-place editable Config) |
 | `5` | **Runtime** | Four tabs: Quotas & Credits, Efficiency & Spend, Failover Lanes (cascades, `exact_lane_runs`, Fusion), and Tools & Connectors (Tools, Connectors, Browser Lane summary, MCP Clients) |
 | `6` | **Infra** | Three tabs: Sandboxes (MicroVM/SSH/Docker fleet + inspector), Repos & Changes, and Activity & Logs (live system logs + events) |
 
@@ -257,7 +257,9 @@ command/mention popup (`↑`/`↓` select, `Tab` complete, `Enter` run/insert,
 never quits; `Ctrl+Q` quits cleanly.
 
 Global overlays and tools: `Ctrl+K` command/entity palette, `Ctrl+G` keeper
-switcher, `Ctrl+L` model/runtime switcher, `,` 2-pane Settings overlay, `Ctrl+T`
+switcher, `Ctrl+L` model/runtime switcher, `,` 2-pane Settings overlay (`←`/`→`
+cycle enum/bool/numeric values, `Enter` inline edit, `Space` dry-run diff,
+`Ctrl+S` save — also available directly in Keeper Config), `Ctrl+T`
 Queue/Context/Schedules drawer, `I` historical incidents drawer, `J` jump to the
 most urgent blocked item, and `?` dynamic keymap help. Native terminal
 drag-select is on by default (mouse capture starts off); press `m` while

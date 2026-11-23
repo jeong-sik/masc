@@ -33,6 +33,7 @@ type nav_state = {
   filter_focused : bool;
   dive_scroll_offset : int;
   help_scroll_offset : int;
+  queue_scroll_offset : int;
 }
 
 type pulse_pane =
@@ -151,7 +152,8 @@ val inner_body_height : t -> int
 
 val work_pipeline_has_linked_card : t -> bool
 (** [true] iff [2 Work > Pipeline] renders the bottom-left Linked Tasks &
-    Verifications card ([inner_body_width >= 96 && inner_body_height >= 14]). *)
+    Verifications card ([inner_body_width >= 96 && inner_body_height >= 15],
+    matching [left_rect.h = inner_body_height - 1 >= 14]). *)
 
 val can_zoom_current_view : t -> bool
 (** [true] iff [z] ([Toggle_zoom]) renders a zoomed view on the active screen
@@ -177,6 +179,10 @@ val initial :
 
 val active_dive : t -> Nav.dive option
 val is_in_keeper_chat : t -> bool
+val is_keeper_config_active : t -> bool
+(** [true] when [overlay = None] and either [Dive_keeper { tab = Keeper_config }]
+    is active, or [4 Keepers] Split [pane 1] / zoomed view has
+    [fleet.keeper_dive_tab = Keeper_config]. *)
 val fast_approval_strip_item : t -> Attention.entry option
 val composer_mode : t -> composer_mode
 (** Compact auto-fold selector: on {!Compact} / {!Micro}, folds to

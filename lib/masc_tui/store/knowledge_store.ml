@@ -632,6 +632,23 @@ let filtered_memory_claims t =
         || List.exists (contains_ci ~needle:q) c.supporting_keepers)
       all
 
+let filtered_librarian_writers t =
+  let all =
+    match Observed.to_option t.world_memory with
+    | Some w -> (
+        match w.librarian_writers with
+        | Wire_knowledge.Writers_running { keepers; _ } -> keepers
+        | Wire_knowledge.Writers_none_in_process -> [])
+    | None -> []
+  in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then all
+  else
+    List.filter
+      (fun (w : Wire_knowledge.librarian_writer_row) ->
+        contains_ci ~needle:q w.keeper)
+      all
+
 let hottest_signal_threads t =
   match Observed.to_option t.board with
   | None -> []
@@ -658,8 +675,18 @@ let move_pulse_thread ?viewport_rows:_ ~delta t =
   let pulse_thread_index = clamp_index len (t.pulse_thread_index + delta) in
   { t with pulse_thread_index }
 
-let memory_diff_entry_count t =
+type memory_diff_item =
+  | Keeper_added of Wire_knowledge.memory_fact_entry
+  | Keeper_updated of Wire_knowledge.memory_updated_fact
+  | Keeper_retracted of Wire_knowledge.memory_retracted_fact
+  | Keeper_invalidated of Wire_knowledge.memory_invalidated_fact
+  | World_added of Wire_knowledge.world_change_entry
+  | World_updated of Wire_knowledge.world_updated_entry
+  | World_retracted of Wire_knowledge.world_change_entry
+
+let filtered_memory_diff_items t =
   match Observed.to_option t.memory_diff with
+  | None -> []
   | Some
       {
         body =
@@ -667,64 +694,127 @@ let memory_diff_entry_count t =
             { added; updated; retracted; invalidated; _ };
         _;
       } ->
-      let cnt_added =
-        List.length
-          (List.filter
-             (fun (f : Wire_knowledge.memory_fact_entry) ->
-               memory_diff_matches_filter t (f.category ^ " " ^ f.text ^ " " ^ f.origin))
-             added)
+      let a =
+        List.filter_map
+          (fun (f : Wire_knowledge.memory_fact_entry) ->
+            if
+              memory_diff_matches_filter t
+                (f.category ^ " " ^ f.origin ^ " " ^ f.text)
+            then Some (Keeper_added f)
+            else None)
+          added
       in
-      let cnt_updated =
-        List.length
-          (List.filter
-             (fun (u : Wire_knowledge.memory_updated_fact) ->
-               memory_diff_matches_filter t
-                 (u.before.text ^ " " ^ u.after.text ^ " " ^ u.after.category))
-             updated)
+      let u =
+        List.filter_map
+          (fun (uf : Wire_knowledge.memory_updated_fact) ->
+            if
+              memory_diff_matches_filter t
+                (uf.after.category ^ " " ^ uf.before.text ^ " " ^ uf.after.text)
+            then Some (Keeper_updated uf)
+            else None)
+          updated
       in
-      let cnt_retracted =
-        List.length
-          (List.filter
-             (fun (r : Wire_knowledge.memory_retracted_fact) ->
-               memory_diff_matches_filter t (r.category ^ " " ^ r.text ^ " " ^ r.removed_by))
-             retracted)
+      let r =
+        List.filter_map
+          (fun (rf : Wire_knowledge.memory_retracted_fact) ->
+            if
+              memory_diff_matches_filter t
+                (rf.category ^ " " ^ rf.removed_by ^ " " ^ rf.text)
+            then Some (Keeper_retracted rf)
+            else None)
+          retracted
       in
-      let cnt_inv =
-        List.length
-          (List.filter
-             (fun (inv : Wire_knowledge.memory_invalidated_fact) ->
-               memory_diff_matches_filter t inv.text)
-             invalidated)
+      let inv =
+        List.filter_map
+          (fun (iv : Wire_knowledge.memory_invalidated_fact) ->
+            if
+              memory_diff_matches_filter t
+                (iv.text ^ " " ^ String.concat " " iv.missing_premise_ids)
+            then Some (Keeper_invalidated iv)
+            else None)
+          invalidated
       in
-      cnt_added + cnt_updated + cnt_retracted + cnt_inv
+      a @ u @ r @ inv
   | Some
       {
         body = Wire_knowledge.World_diff { added; updated; retracted; _ };
         _;
       } ->
-      let cnt_a =
-        List.length
-          (List.filter
-             (fun (e : Wire_knowledge.world_change_entry) ->
-               memory_diff_matches_filter t (e.fact_id ^ " " ^ e.summary))
-             added)
+      let a =
+        List.filter_map
+          (fun (e : Wire_knowledge.world_change_entry) ->
+            if memory_diff_matches_filter t (e.fact_id ^ " " ^ e.summary) then
+              Some (World_added e)
+            else None)
+          added
       in
-      let cnt_u =
-        List.length
-          (List.filter
-             (fun (u : Wire_knowledge.world_updated_entry) ->
-               memory_diff_matches_filter t (u.fact_id ^ " " ^ u.summary))
-             updated)
+      let u =
+        List.filter_map
+          (fun (ue : Wire_knowledge.world_updated_entry) ->
+            if memory_diff_matches_filter t (ue.fact_id ^ " " ^ ue.summary) then
+              Some (World_updated ue)
+            else None)
+          updated
       in
-      let cnt_r =
-        List.length
-          (List.filter
-             (fun (e : Wire_knowledge.world_change_entry) ->
-               memory_diff_matches_filter t (e.fact_id ^ " " ^ e.summary))
-             retracted)
+      let r =
+        List.filter_map
+          (fun (e : Wire_knowledge.world_change_entry) ->
+            if memory_diff_matches_filter t (e.fact_id ^ " " ^ e.summary) then
+              Some (World_retracted e)
+            else None)
+          retracted
       in
-      cnt_a + cnt_u + cnt_r
-  | None -> 0
+      a @ u @ r
+
+let memory_diff_entry_count t = List.length (filtered_memory_diff_items t)
+
+let json_has_kv_summary = function
+  | `Assoc (_ :: _) -> true
+  | `Assoc [] | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _
+  | `Null ->
+      false
+
+let memory_diff_item_lines = function
+  | Keeper_added _ | Keeper_retracted _ | Keeper_invalidated _ -> 2
+  | Keeper_updated _ -> 3
+  | World_added _ | World_retracted _ -> 1
+  | World_updated u ->
+      1
+      + (if json_has_kv_summary u.before then 1 else 0)
+      + (if json_has_kv_summary u.after then 1 else 0)
+
+let memory_diff_line_count t =
+  List.fold_left
+    (fun acc it -> acc + memory_diff_item_lines it)
+    0
+    (filtered_memory_diff_items t)
+
+let keeper_memory_diff_line_count ~name t =
+  match Observed.to_option t.memory_diff with
+  | Some
+      {
+        scope = Wire_knowledge.Scope_keeper k;
+        body =
+          Wire_knowledge.Keeper_diff
+            { added; updated; retracted; invalidated; _ };
+        _;
+      }
+    when String.equal k name ->
+      let total =
+        (List.length added * 2)
+        + (List.length updated * 3)
+        + (List.length retracted * 2)
+        + (List.length invalidated * 2)
+      in
+      if total = 0 then 1 else total
+  | Some
+      {
+        scope = Wire_knowledge.Scope_world | Wire_knowledge.Scope_keeper _;
+        body = Wire_knowledge.Keeper_diff _ | Wire_knowledge.World_diff _;
+        _;
+      }
+  | None ->
+      0
 
 let reset_detail_scroll t = { t with detail_scroll_offset = 0 }
 
@@ -738,30 +828,48 @@ let active_list_len t =
   | Nav.Knowledge_memory ->
       let conflicts = filtered_memory_conflicts t in
       if conflicts <> [] then List.length conflicts
-      else List.length (filtered_memory_claims t)
+      else List.length (filtered_librarian_writers t)
 
-let move_selection ?(pane_index = 0) ?viewport_rows ~delta t =
+let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t =
   match t.active_tab with
   | Nav.Knowledge_board | Nav.Knowledge_wiki_artifacts ->
       if pane_index = 1 then
         let max_scroll =
-          match t.active_tab with
-          | Nav.Knowledge_board -> (
-              match selected_post t with
-              | Some p ->
-                  max 16 (List.length (String.split_on_char '\n' p.body) + 16)
-              | None -> 80)
-          | Nav.Knowledge_wiki_artifacts -> (
-              match t.wiki_artifacts_submode with
-              | `Wiki -> (
-                  match Observed.to_option t.wiki_page with
+          match max_detail_scroll with
+          | Some ms -> max 0 ms
+          | None -> (
+              let vis =
+                max 1
+                  (Option.value viewport_rows
+                     ~default:Store_scroll.default_viewport_rows)
+              in
+              match t.active_tab with
+              | Nav.Knowledge_board -> (
+                  match selected_post t with
                   | Some p ->
-                      max 24
-                        (List.length (String.split_on_char '\n' p.body_markdown)
-                         + 24)
-                  | None -> 120)
-              | `Artifacts -> 80)
-          | Nav.Knowledge_memory -> 80
+                      max 0 (List.length (String.split_on_char '\n' p.body) - vis)
+                  | None -> 0)
+              | Nav.Knowledge_wiki_artifacts -> (
+                  match t.wiki_artifacts_submode with
+                  | `Wiki -> (
+                      let body_opt =
+                        match t.wiki_edit_draft with
+                        | Some d -> Some d.body
+                        | None ->
+                            Option.map
+                              (fun (p : Wire_knowledge.wiki_page_detail) ->
+                                p.body_markdown)
+                              (Observed.to_option t.wiki_page)
+                      in
+                      match body_opt with
+                      | Some body ->
+                          max 0 (List.length (String.split_on_char '\n' body) - vis)
+                      | None -> 0)
+                  | `Artifacts -> (
+                      match selected_artifact t with
+                      | Some _ -> max 0 (12 - vis)
+                      | None -> 0))
+              | Nav.Knowledge_memory -> 0)
         in
         let detail_scroll_offset =
           Store_scroll.clamp_scroll ~max_scroll (t.detail_scroll_offset + delta)
@@ -783,8 +891,17 @@ let move_selection ?(pane_index = 0) ?viewport_rows ~delta t =
         { t with selected_index; scroll_offset; detail_scroll_offset }
   | Nav.Knowledge_memory ->
       if pane_index = 1 then
-        let total = memory_diff_entry_count t in
-        let max_scroll = max 0 (total - 1) in
+        let max_scroll =
+          match max_detail_scroll with
+          | Some ms -> max 0 ms
+          | None ->
+              let vis =
+                max 1
+                  (Option.value viewport_rows
+                     ~default:Store_scroll.default_viewport_rows)
+              in
+              max 0 (memory_diff_line_count t - vis)
+        in
         let diff_scroll_offset =
           Store_scroll.clamp_scroll ~max_scroll (t.diff_scroll_offset + delta)
         in

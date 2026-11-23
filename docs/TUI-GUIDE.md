@@ -77,7 +77,7 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
 | Key | Scope | Action |
 |---|---|---|
 | `1`–`6` (or `Ctrl+1`–`6`, `Alt+1`–`6`, `F1`–`F6`) | Unfocused / Global | Switch to workspace `1 Pulse`, `2 Work`, `3 Knowledge`, `4 Keepers`, `5 Runtime`, `6 Infra` |
-| `[` / `]` (or `←` / `→` unfocused, `Alt+[` / `Alt+]`) | Unfocused / Global | Cycle sub-tabs (Workspaces, 5-tab Keeper Dive, Queue/Context drawer; inside the composer `←`/`→` move the text cursor, and in Settings they collapse/expand tree categories) |
+| `[` / `]` (or `←` / `→` unfocused, `Alt+[` / `Alt+]`) | Unfocused / Global | Cycle sub-tabs (Workspaces, 5-tab Keeper Dive, Queue/Context drawer; inside the composer `←`/`→` move the text cursor, in Settings Tree they collapse/expand categories, and in Settings Inspector or Keeper Config they cycle enum/bool/numeric values while `[` / `]` switch tabs) |
 | `↑` / `↓` or `j` / `k` | Unfocused / Overlay | Move list selection or scroll Keeper Chat |
 | `PgUp` / `PgDn`, `Home` (`g`) / `End` (`G`) | Unfocused / Overlay | Page scroll or jump to top / bottom |
 | `Tab` / `Shift+Tab` | Unfocused / Overlay | Cycle active focus panes on multi-pane views (omitted on single-pane views and narrow layouts; cycles tabs in Queue/Context, selection in Palette, or Tree / Inspector in Settings) |
@@ -316,10 +316,16 @@ the **5-tab Keeper Dive** (`[` / `]` cycles tabs):
    portrait items.
 4. **Sandbox**: Keeper's sandbox backend, network mode, agent socket, shim
    parity, 24h tool metrics, and on-demand probe (`p`).
-5. **Config**: read-only inspector of Keeper TOML fields (`keeper.group`,
+5. **Config**: in-place editor of Keeper TOML fields (`keeper.group`,
    `activation_mode`, `sandbox_profile`, `mention_targets`, `board_interests`,
    etc.) with provenance and reload scope badges (`Hot_reload`, `Next_turn`,
-   `Restart_required`).
+   `Restart_required`). Navigate all fields with `↑`/`↓` (`j`/`k`), cycle
+   enum/bool/numeric values directly with `←`/`→` (`h`/`l`), edit text or
+   step fields with `Enter`, toggle booleans or preview a server-side dry-run
+   diff with `Space`, save atomically with `Ctrl+S`, remove a key with
+   `Delete`/`Ctrl+D`, filter with `/`, switch tabs with `[` / `]`, or press
+   `e` to open the full Settings overlay. Works identically in both Keeper Dive
+   and the `4 Keepers` split preview right pane.
 
 ### `5` Runtime
 
@@ -368,11 +374,13 @@ categorized TOML editor backed by `GET /api/v1/config/schema` and
   `6` Voice & Integrations, `7` Board, Memory & Candle). Navigate with `↑`/`↓`,
   expand/collapse with `←`/`→` (`h`/`l`), or jump directly with `1`–`7` /
   `[` / `]`.
-- **Right Pane (Inspector)**: press `Tab` to focus fields; `Enter` edits a
-  field and stages the change; `Delete` or `Ctrl+D` toggles key removal;
-  **`Space`** runs a server-side **dry-run diff** preview; **`Ctrl+S`** saves
-  atomically and reports the effective reload scope (`hot_reload`, `next_turn`,
-  or `restart_required`).
+- **Right Pane (Inspector)**: press `Tab` to focus fields; `←`/`→` (`h`/`l`)
+  cycle enum, boolean, and numeric values directly (applying `tui.*` theme and
+  language preferences live); `Enter` edits a field inline and stages the
+  change; `Delete` or `Ctrl+D` toggles key removal; **`Space`** runs a
+  server-side **dry-run diff** preview; **`Ctrl+S`** saves atomically and
+  reports the effective reload scope (`hot_reload`, `next_turn`, or
+  `restart_required`).
 - **`Ctrl+E` or `o`**: escape hatch to edit local `runtime.toml` or an
   existing `<keeper>.toml` in `$EDITOR` (pauses and restores the terminal
   cleanly; unavailable for new-keeper creation, which must be submitted in
@@ -391,13 +399,13 @@ Add an optional `group` string under `[keeper]` in
 group = "platform"
 ```
 
-For an existing Keeper, edit `keeper.group` directly in
-`<base-path>/.masc/config/keepers/<name>.toml` (or via
+For an existing Keeper, edit `keeper.group` directly in **4 Keepers → Dive →
+Config** (or in the `4 Keepers` split preview Config tab: `↑`/`↓` to select,
+`Enter` to edit, `Space` for dry-run diff, `Ctrl+S` to save via
 `POST /api/v1/config/patch` with `target=keeper:<name>`, `next_turn` reload
-scope) and inspect the resolved value read-only in **4 Keepers → Dive →
-Config**. When creating a new Keeper via `n` on **4 Keepers** (or the
-`4 Keepers & Companies` tab in Settings `,`), you can set `keeper.group`
-directly in the creation form.
+scope), or edit `<base-path>/.masc/config/keepers/<name>.toml`. When creating
+a new Keeper via `n` on **4 Keepers** (or the `4 Keepers & Companies` tab in
+Settings `,`), you can set `keeper.group` directly in the creation form.
 
 - Whitespace is trimmed; an absent or blank `group` maps to `"ungrouped"` on
   the server (in the TUI fleet list, Keepers without an explicit `keeper.group`

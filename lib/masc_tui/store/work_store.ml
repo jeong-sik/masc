@@ -543,7 +543,7 @@ let jump_tasks_schedules_pane ~pane_index t =
     else t
 
 let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
-    ~delta t =
+    ?max_detail_scroll ~delta t =
   match t.active_tab with
   | Nav.Work_pipeline -> (
       match pane_index with
@@ -558,8 +558,27 @@ let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
           in
           { t with verif_selected_index; verif_scroll_offset }
       | 1 | 2 ->
+          let max_scroll =
+            match max_detail_scroll with
+            | Some ms -> max 0 ms
+            | None -> (
+                match selected_goal t with
+                | Some g ->
+                    let vis =
+                      max 1
+                        (Option.value viewport_rows
+                           ~default:default_viewport_rows)
+                    in
+                    let raw_lines =
+                      List.length
+                        (String.split_on_char '\n' (g.measure ^ "\n\n" ^ g.procedure))
+                      + 6
+                    in
+                    max 0 (raw_lines - vis)
+                | None -> 0)
+          in
           let detail_scroll_offset =
-            Store_scroll.clamp_scroll ~max_scroll:120
+            Store_scroll.clamp_scroll ~max_scroll
               (t.detail_scroll_offset + delta)
           in
           { t with detail_scroll_offset }
@@ -601,8 +620,11 @@ let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
         { t with selected_index; schedules_scroll_offset }
   | Nav.Work_inbox ->
       if pane_index = 1 then
+        let max_scroll =
+          match max_detail_scroll with Some ms -> max 0 ms | None -> 0
+        in
         let detail_scroll_offset =
-          Store_scroll.clamp_scroll ~max_scroll:120
+          Store_scroll.clamp_scroll ~max_scroll
             (t.detail_scroll_offset + delta)
         in
         { t with detail_scroll_offset }

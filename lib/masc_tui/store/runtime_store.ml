@@ -940,11 +940,9 @@ let visual_row_for_selection t ~selected_index =
       let rec walk vis_row idx = function
         | [] -> (vis_row, vis_row)
         | (lane : Wire_runtime.failover_lane) :: rest ->
-            if idx >= selected_index then (vis_row, vis_row)
-            else
-              walk
-                (vis_row + 1 + List.length lane.runtime_ids)
-                (idx + 1) rest
+            let slot_n = List.length lane.runtime_ids in
+            if idx >= selected_index then (vis_row, vis_row + slot_n)
+            else walk (vis_row + 1 + slot_n) (idx + 1) rest
       in
       walk 0 0 lanes
   | Nav.Runtime_quotas_credits | Nav.Runtime_tools_connectors ->
@@ -952,12 +950,24 @@ let visual_row_for_selection t ~selected_index =
 
 let reset_detail_scroll t = { t with detail_scroll_offset = 0 }
 
-let move_selection ?(pane_index = 0) ?viewport_rows ~delta t =
+let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t =
   match t.active_tab with
   | Nav.Runtime_quotas_credits ->
       if pane_index = 0 then
         let total = subscription_window_count t in
-        let max_scroll = max 0 (total - 1) in
+        let max_scroll =
+          match max_detail_scroll with
+          | Some ms -> max 0 ms
+          | None ->
+              let vis =
+                max 1
+                  (Option.value viewport_rows
+                     ~default:Store_scroll.default_viewport_rows)
+              in
+              let truncated = total > vis && vis >= 2 in
+              let visible_limit = if truncated then vis - 1 else vis in
+              max 0 (total - visible_limit)
+        in
         let quota_scroll_offset =
           Store_scroll.clamp_scroll ~max_scroll (t.quota_scroll_offset + delta)
         in
@@ -981,8 +991,18 @@ let move_selection ?(pane_index = 0) ?viewport_rows ~delta t =
       { t with selected_index; scroll_offset }
   | Nav.Runtime_failover_lanes ->
       if pane_index = 1 then
+        let max_scroll =
+          match max_detail_scroll with
+          | Some ms -> max 0 ms
+          | None -> (
+              match selected_lane t with
+              | Some lane ->
+                  let vis = max 1 (Option.value viewport_rows ~default:6) in
+                  max 0 (List.length lane.runtime_ids - vis)
+              | None -> 0)
+        in
         let detail_scroll_offset =
-          Store_scroll.clamp_scroll ~max_scroll:64
+          Store_scroll.clamp_scroll ~max_scroll
             (t.detail_scroll_offset + delta)
         in
         { t with detail_scroll_offset }

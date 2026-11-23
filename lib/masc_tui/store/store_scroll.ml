@@ -17,7 +17,9 @@ let adjust_grouped_scroll ?(viewport_rows = default_viewport_rows) ~scroll
   let vr = max 1 viewport_rows in
   let top_row = if vr >= 2 then min header_row vis_row else vis_row in
   if top_row < scroll then top_row
-  else if vis_row >= scroll + vr then max 0 (vis_row - vr + 1)
+  else if vis_row >= scroll + vr then
+    let needed = max 0 (vis_row - vr + 1) in
+    min top_row needed
   else scroll
 
 let clamp_scroll ?max_scroll offset =

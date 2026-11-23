@@ -1149,8 +1149,8 @@ let draw_grouped_section_form grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
                      (Grapheme.truncate_to_width ~max_width:fw
                         (Say.resolve lang
                            (Say.make
-                              ~ko:"[Enter] 편집 · [Space] Dry-run · [Ctrl+S] 저장"
-                              ~en:"[Enter] Edit · [Space] Dry-run · [Ctrl+S] Save"))))
+                              ~ko:"[←→] 값 변경 · [Enter] 편집 · [Space] Dry-run · [Ctrl+S] 저장 · [Tab] 트리"
+                              ~en:"[←→] Cycle · [Enter] Edit · [Space] Dry-run · [Ctrl+S] Save · [Tab] Tree"))))
           end;
           let y3 = footer_r.y + 3 in
           if y3 < Rect.bottom footer_r then begin
@@ -1196,8 +1196,8 @@ let draw_grouped_section_form grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
                    (Grapheme.truncate_to_width ~max_width:fw
                       (Say.resolve lang
                          (Say.make
-                            ~ko:"[Tab] 좌/우 전환 · [Enter] 편집 · [Space] Dry-run"
-                            ~en:"[Tab] Switch pane · [Enter] Edit · [Space] Dry-run"))))
+                            ~ko:"[←→] 값 변경 · [Enter] 편집 · [Space] Dry-run · [Tab] 트리"
+                            ~en:"[←→] Cycle · [Enter] Edit · [Space] Dry-run · [Tab] Tree"))))
           end
     end
 
@@ -1447,8 +1447,8 @@ let render_settings_tree_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
       end
     done
 
-let render_dry_run_pane grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ~pad_x
-    ~(dry_run_preview : Config_store.dry_run_state) =
+let render_dry_run_pane ?(scroll = 0) grid ~(rect : Rect.t) ~(theme : Theme.t)
+    ~lang ~pad_x ~(dry_run_preview : Config_store.dry_run_state) =
   if Rect.is_empty rect then ()
   else
     let bg = Color.of_rgb theme.surface_1 in
@@ -1503,7 +1503,7 @@ let render_dry_run_pane grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ~pad_x
           in
           ignore
             (Diff.draw grid ~rect:diff_r ~theme ~language:Code_lexer.Toml
-               diff_rows)
+               ~scroll diff_rows)
 
 let section_base_provenance ~target (sec : Config_store.settings_tree_section) =
   (* Prefer file-level provenance (Global/Project/Keeper TOML) as the section
@@ -1558,8 +1558,8 @@ let render_settings_inspector_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
         let hdr_lbl =
           if insp_focused then
             Say.resolve lang
-              (Say.make ~ko:"▸ 속성 검사기 · 활성  [Enter] 편집 · [Del] 삭제"
-                 ~en:"▸ INSPECTOR · FOCUS  [Enter] Edit · [Del] Remove")
+              (Say.make ~ko:"▸ 속성 검사기 · 활성  [←→] 값 변경 · [Enter] 편집 · [Del] 삭제"
+                 ~en:"▸ INSPECTOR · FOCUS  [←→] Cycle · [Enter] Edit · [Del] Remove")
           else
             Say.resolve lang
               (Say.make ~ko:"  속성 검사기  [Tab]으로 포커스 이동"
@@ -1778,7 +1778,8 @@ let render_settings_inspector_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
       draw_grouped_section_form grid ~rect:form_r ~theme ~lang ~pad_x
         ~hdr:section_header ~form_state ~schema_fields ~model ~insp_focused;
     if not (Rect.is_empty dry_r) then
-      render_dry_run_pane grid ~rect:dry_r ~theme ~lang ~pad_x
+      render_dry_run_pane ~scroll:model.config.dry_run_scroll_offset grid
+        ~rect:dry_r ~theme ~lang ~pad_x
         ~dry_run_preview:model.config.dry_run_preview
 
 let render_settings grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
@@ -2259,14 +2260,18 @@ let render_incidents_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                     let lines =
                       Json_tree.flatten ~max_depth:4 ~redact_secrets:true json
                     in
-                    ignore (Json_tree.draw grid ~rect:tree_r ~theme lines)
+                    ignore
+                      (Json_tree.draw grid ~rect:tree_r ~theme
+                         ~scroll:model.incidents.detail_scroll_offset lines)
                 | None ->
                     let safe_detail =
                       Render_util.redact_plain_text_secrets inc.detail
                     in
                     ignore
                       (Markdown.draw grid ~rect:payload_r ~theme
-                         ~osc8:caps.osc8_hyperlinks safe_detail)
+                         ~osc8:caps.osc8_hyperlinks
+                         ~scroll:model.incidents.detail_scroll_offset
+                         safe_detail)
         end
     end
 
@@ -2295,8 +2300,8 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           hotkey =
             Some
               (Say.resolve lang
-                 (Say.make ~ko:"[Tab/←→] 탭 · [Esc] 닫기"
-                    ~en:"[Tab/←→] Tabs · [Esc] Close"));
+                 (Say.make ~ko:"[↑↓] 스크롤 · [Tab/←→] 탭 · [Esc] 닫기"
+                    ~en:"[↑↓] Scroll · [Tab/←→] Tabs · [Esc] Close"));
           focused = true;
           elevated = true;
         }
@@ -2365,27 +2370,18 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       if not (Rect.is_empty body_r) then
         match active_tab with
         | Nav.Drawer_queue ->
-            let y = ref body_r.y in
-            let bottom = Rect.bottom body_r in
-            let put style txt =
-              if !y < bottom then begin
-                let r = Rect.make ~x:body_r.x ~y:!y ~w:body_r.w ~h:1 in
-                ignore
-                  (Cell_grid.put_text ~clip:r grid ~x:body_r.x ~y:!y ~style
-                     (Grapheme.truncate_to_width ~max_width:body_r.w txt));
-                incr y
-              end
-            in
+            let rows_acc = ref [] in
+            let push style txt = rows_acc := (style, txt) :: !rows_acc in
             let txs = Drafts.pending_txs_for_keeper ~keeper model.drafts in
             let draft = Drafts.draft_for ~keeper model.drafts in
-            put (Typography.anchor ~bg theme)
+            push (Typography.anchor ~bg theme)
               (Say.resolve lang
                  (Say.make
                     ~ko:(Printf.sprintf "전송 대기열 (%d건)" (List.length txs))
                     ~en:(Printf.sprintf "Pending Transmissions (%d)"
                            (List.length txs))));
             if txs = [] then
-              put whisper_st
+              push whisper_st
                 (Say.resolve lang
                    (Say.make ~ko:"  진행 중인 전송 없음"
                       ~en:"  No active transmissions"))
@@ -2424,30 +2420,49 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   let body_one =
                     String.map (function '\n' | '\r' -> ' ' | c -> c) tx.body
                   in
-                  put st_style
+                  push st_style
                     (Printf.sprintf "  %s %s (%s) · %s" mode_s st_s tx.request_id
                        body_one))
                 txs;
-            if !y < bottom then incr y;
-            put (Typography.anchor ~bg theme)
+            push pri_st "";
+            push (Typography.anchor ~bg theme)
               (Say.resolve lang
                  (Say.make ~ko:"보존 초안 (Carry)" ~en:"Preserved Draft (Carry)"));
             let draft_empty = String.equal (String.trim draft.text) "" in
             if draft_empty then
-              put whisper_st
+              push whisper_st
                 (Say.resolve lang (Say.make ~ko:"  비어 있음" ~en:"  Empty"))
             else
-              put pri_st
+              push pri_st
                 ("  "
                  ^ String.map (function '\n' | '\r' -> ' ' | c -> c) draft.text);
             let others = Drafts.other_keepers_draft_count model.drafts in
             if others > 0 then
-              put whisper_st
+              push whisper_st
                 (Say.resolve lang
                    (Say.make
                       ~ko:(Printf.sprintf "  다른 키퍼 초안 %d건 보존 중" others)
                       ~en:(Printf.sprintf "  %d other keeper draft(s) preserved"
-                             others)))
+                             others)));
+            let rows = List.rev !rows_acc in
+            let max_skip = Int.max 0 (List.length rows - Int.max 1 body_r.h) in
+            let skip =
+              Int.min max_skip (Int.max 0 model.nav.queue_scroll_offset)
+            in
+            let y = ref body_r.y in
+            let bottom = Rect.bottom body_r in
+            List.iter
+              (fun (style, txt) ->
+                if !y < bottom then begin
+                  if not (String.equal txt "") then begin
+                    let r = Rect.make ~x:body_r.x ~y:!y ~w:body_r.w ~h:1 in
+                    ignore
+                      (Cell_grid.put_text ~clip:r grid ~x:body_r.x ~y:!y ~style
+                         (Grapheme.truncate_to_width ~max_width:body_r.w txt))
+                  end;
+                  incr y
+                end)
+              (Store_scroll.drop skip rows)
         | Nav.Drawer_context ->
             let keeper_opt = Fleet_store.find_keeper ~name:keeper model.fleet in
             let eff_row =
@@ -2597,9 +2612,14 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                          ~en:"No schedules registered.")))
             else
               let arr = Array.of_list sorted in
-              let max_show = Int.min body_r.h (Array.length arr) in
+              let total = Array.length arr in
+              let max_skip = Int.max 0 (total - Int.max 1 body_r.h) in
+              let skip =
+                Int.min max_skip (Int.max 0 model.nav.queue_scroll_offset)
+              in
+              let max_show = Int.min body_r.h (Int.max 0 (total - skip)) in
               for i = 0 to max_show - 1 do
-                let s = arr.(i) in
+                let s = arr.(skip + i) in
                 let py = body_r.y + i in
                 let row_r = Rect.make ~x:body_r.x ~y:py ~w:body_r.w ~h:1 in
                 let g, st_style =

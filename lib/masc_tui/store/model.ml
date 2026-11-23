@@ -27,6 +27,7 @@ type nav_state = {
   filter_focused : bool;
   dive_scroll_offset : int;
   help_scroll_offset : int;
+  queue_scroll_offset : int;
 }
 
 type pulse_pane =
@@ -210,6 +211,7 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
         filter_focused = false;
         dive_scroll_offset = 0;
         help_scroll_offset = 0;
+        queue_scroll_offset = 0;
       };
     freshness =
       {
@@ -393,7 +395,7 @@ let inner_body_height m =
     max 0 (approval_y - top_h)
 
 let work_pipeline_has_linked_card m =
-  inner_body_width m >= 96 && inner_body_height m >= 14
+  inner_body_width m >= 96 && inner_body_height m >= 15
 
 let can_zoom_current_view m =
   if
@@ -544,15 +546,39 @@ let focus_scope_chain m =
   in
   Keymap.scope_chain_of_focus ~approval_strip_active (active_focus_scope m)
 
+let is_keeper_config_active m =
+  Option.is_none m.nav.overlay
+  &&
+  match active_dive m with
+  | Some (Nav.Dive_keeper { tab = Nav.Keeper_config; _ }) -> true
+  | Some
+      ( Nav.Dive_keeper
+          {
+            tab =
+              ( Nav.Keeper_chat
+              | Nav.Keeper_memory
+              | Nav.Keeper_work_candle
+              | Nav.Keeper_sandbox );
+            _;
+          }
+      | Nav.Dive_work _
+      | Nav.Dive_knowledge _
+      | Nav.Dive_infra _ ) ->
+      false
+  | None ->
+      Nav.equal_workspace m.nav.workspace Nav.Keepers
+      && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_config
+      && (m.nav.pane_index = 1 || (m.nav.zoomed && can_zoom_current_view m))
+
 let is_text_capture_active m =
   if m.nav.filter_focused || Drafts.is_focused m.drafts then true
   else
     match m.nav.overlay with
     | Some Nav.Palette | Some (Nav.Inline_action _) -> true
     | Some (Nav.Settings _) -> Config_store.is_editing_field m.config
-    | Some (Nav.Incidents | Nav.Queue_context _ | Nav.Help | Nav.System_gate _)
-    | None ->
+    | Some (Nav.Incidents | Nav.Queue_context _ | Nav.Help | Nav.System_gate _) ->
         false
+    | None -> is_keeper_config_active m && Config_store.is_editing_field m.config
 
 let inline_modal_for kind =
   let fields =

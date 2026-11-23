@@ -29,15 +29,18 @@ let open_custom_inline_modal (m : Model.t)
   let drafts = Drafts.set_focus false m.drafts in
   ({ m with nav; drafts; inline_modal = Some modal }, [])
 
-let save_settings_config ~now (m : Model.t) =
-  match Config_store.build_patch_request ~dry_run:false m.config with
-  | Ok req ->
-      let config = Config_store.mark_save_in_flight m.config in
-      ( { m with config }
-      , [ Cmd.Http_post { epoch = m.epoch; req = Cmd.Post_config_patch req } ] )
-  | Error reason ->
-      ( Model.with_toast ~now ~level:Model.Toast_warning (Say.literal reason) m
-      , [] )
+let is_korean_char (s : string) =
+  if String.length s = 0 then false
+  else
+    let d = String.get_utf_8_uchar s 0 in
+    if not (Uchar.utf_decode_is_valid d) then false
+    else
+      let cp = Uchar.to_int (Uchar.utf_decode_uchar d) in
+      (cp >= 0xAC00 && cp <= 0xD7A3)
+      || (cp >= 0x3131 && cp <= 0x318E)
+      || (cp >= 0x1100 && cp <= 0x11FF)
+
+let save_settings_config = Update_actions.save_settings_config
 
 let stage_remove_settings_key ~now (m : Model.t) =
   match m.config.settings_pane with
@@ -61,6 +64,136 @@ let stage_remove_settings_key ~now (m : Model.t) =
               m
           , [] ))
 
+let extract_embedded_json_opt s =
+  let len = String.length s in
+  let rec find_delim i =
+    if i >= len then None
+    else
+      match s.[i] with
+      | '{' | '[' -> Some i
+      | _ -> find_delim (i + 1)
+  in
+  match find_delim 0 with
+  | None -> None
+  | Some idx -> (
+      let prefix = String.trim (String.sub s 0 idx) in
+      let rest = String.sub s idx (len - idx) in
+      match Yojson.Safe.from_string rest with
+      | json -> Some (prefix, json)
+      | exception Yojson.Json_error _ -> None)
+
+let patch_response_diff_row_count (resp : Wire_config.patch_response) =
+  if resp.diff_hunks <> [] then
+    List.fold_left
+      (fun acc (h : Wire_config.diff_hunk) -> acc + List.length h.lines)
+      0 resp.diff_hunks
+  else List.length (Masc_tui_ui.Diff.parse_unified resp.unified_diff)
+
+let settings_dry_run_max_scroll (m : Model.t) =
+  match m.config.dry_run_preview with
+  | Config_store.Dry_run_idle
+  | Config_store.Dry_run_loading
+  | Config_store.Dry_run_failed _ ->
+      0
+  | Config_store.Dry_run_ready resp ->
+      let n_rows = patch_response_diff_row_count resp in
+      if n_rows <= 0 then 0
+      else
+        let modal_w = max 0 m.viewport.cols in
+        let modal_h = max 0 (m.viewport.rows - 2) in
+        let inner_w = if modal_w >= 2 && modal_h >= 2 then modal_w - 2 else 0 in
+        let inner_h = if modal_w >= 2 && modal_h >= 2 then modal_h - 2 else 0 in
+        let body_w = inner_w in
+        let body_h = max 0 (inner_h - 2) in
+        if body_w <= 0 || body_h <= 0 then 0
+        else
+          let insp_h0 = if body_w >= 72 then body_h else max 0 (body_h - 1) in
+          (* Pane Focus Header Bar (overlays.ml:1547) *)
+          let insp_h1 = if insp_h0 >= 4 then insp_h0 - 1 else insp_h0 in
+          (* Optional New Keeper Name banner (overlays.ml:1585) *)
+          let insp_h =
+            match m.config.target with
+            | Wire_config.Target_keeper_create when insp_h1 >= 5 -> insp_h1 - 1
+            | Wire_config.Target_keeper_create
+            | Wire_config.Target_runtime
+            | Wire_config.Target_keeper _ ->
+                insp_h1
+          in
+          let has_save_banner =
+            match m.config.save_state with
+            | Config_store.Save_in_flight
+            | Config_store.Save_succeeded _
+            | Config_store.Save_failed _ ->
+                true
+            | Config_store.Save_idle -> Option.is_some m.config.last_snapshot_id
+          in
+          let work_h =
+            if has_save_banner && insp_h >= 6 then insp_h - 1 else insp_h
+          in
+          if work_h < 10 then 0
+          else
+            let desired_dry = min (work_h / 2) (max 5 (n_rows + 3)) in
+            let top_h = max 5 (work_h - desired_dry) in
+            let dry_h = max 0 (work_h - top_h) in
+            let warn_n = List.length resp.validation_warnings in
+            let diff_h = max 0 (dry_h - 2 - warn_n) in
+            if diff_h <= 0 then 0 else max 0 (n_rows - diff_h)
+
+let keeper_config_dry_run_max_scroll (m : Model.t) =
+  let name_opt, embedded =
+    match Model.active_dive m with
+    | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_config }) ->
+        (Some name, false)
+    | Some
+        ( Nav.Dive_keeper
+            {
+              tab =
+                ( Nav.Keeper_chat
+                | Nav.Keeper_memory
+                | Nav.Keeper_work_candle
+                | Nav.Keeper_sandbox );
+              _;
+            }
+        | Nav.Dive_work _
+        | Nav.Dive_knowledge _
+        | Nav.Dive_infra _ )
+    | None ->
+        let zoomed = m.nav.zoomed && Model.can_zoom_current_view m in
+        ( Option.map
+            (fun (k : Wire_fleet.keeper_summary) -> k.name)
+            (Fleet_store.selected_keeper_summary m.fleet)
+        , not zoomed )
+  in
+  match name_opt, m.config.dry_run_preview with
+  | Some name, Config_store.Dry_run_ready resp
+    when Config_store.equal_config_target m.config.target
+           (Wire_config.Target_keeper name)
+         && (String.equal resp.target ("keeper:" ^ name)
+             || String.equal resp.target name)
+         && (resp.diff_hunks <> []
+             || not (String.equal (String.trim resp.unified_diff) "")) ->
+      let _, content_h =
+        Chat_transcript.keeper_content_rect_size ~embedded ~model:m
+      in
+      let rest_h = max 0 (content_h - 1) in
+      let diff_h = if rest_h >= 10 then min 7 (rest_h / 3) else 0 in
+      if diff_h < 2 then 0
+      else
+        let body_h = max 1 (diff_h - 1) in
+        let n_rows = patch_response_diff_row_count resp in
+        max 0 (n_rows - body_h)
+  | ( Some _
+    , ( Config_store.Dry_run_ready _
+      | Config_store.Dry_run_idle
+      | Config_store.Dry_run_loading
+      | Config_store.Dry_run_failed _ ) )
+  | ( None
+    , ( Config_store.Dry_run_ready _
+      | Config_store.Dry_run_idle
+      | Config_store.Dry_run_loading
+      | Config_store.Dry_run_failed _ ) ) ->
+      0
+
 let dispatch_settings_overlay_key ~now (m : Model.t)
     (norm : Keymap.Input.key_event) =
   let norm = Keymap.replay_ime_event norm in
@@ -71,29 +204,31 @@ let dispatch_settings_overlay_key ~now (m : Model.t)
         Some ({ m with config = Config_store.toggle_pane m.config }, [])
       else Some (m, [])
   | Keymap.Input.Left ->
-      if not has_tree then Some (m, [])
-      else
-        let config = Config_store.collapse_or_leave m.config in
-        let nav = { m.nav with overlay = Some (Nav.Settings config.active_tab) } in
-        Some ({ m with nav; config }, [])
+      Some (Update_actions.step_settings_pane_lr ~now m Keymap.Left)
   | Keymap.Input.Right ->
-      if not has_tree then Some (m, [])
-      else
-        let config = Config_store.expand_or_enter m.config in
-        let nav = { m.nav with overlay = Some (Nav.Settings config.active_tab) } in
-        Some ({ m with nav; config }, [])
+      Some (Update_actions.step_settings_pane_lr ~now m Keymap.Right)
   | Keymap.Input.Char "h" when is_printable_key norm ->
-      if not has_tree then Some (m, [])
-      else
-        let config = Config_store.collapse_or_leave m.config in
-        let nav = { m.nav with overlay = Some (Nav.Settings config.active_tab) } in
-        Some ({ m with nav; config }, [])
+      Some (Update_actions.step_settings_pane_lr ~now m Keymap.Left)
   | Keymap.Input.Char "l" when is_printable_key norm ->
-      if not has_tree then Some (m, [])
-      else
-        let config = Config_store.expand_or_enter m.config in
-        let nav = { m.nav with overlay = Some (Nav.Settings config.active_tab) } in
-        Some ({ m with nav; config }, [])
+      Some (Update_actions.step_settings_pane_lr ~now m Keymap.Right)
+  | Keymap.Input.Char "J" when is_printable_key norm ->
+      let max_scroll = settings_dry_run_max_scroll m in
+      Some
+        ( {
+            m with
+            config =
+              Config_store.move_dry_run_scroll ~max_scroll ~delta:1 m.config;
+          }
+        , [] )
+  | Keymap.Input.Char "K" when is_printable_key norm ->
+      let max_scroll = settings_dry_run_max_scroll m in
+      Some
+        ( {
+            m with
+            config =
+              Config_store.move_dry_run_scroll ~max_scroll ~delta:(-1) m.config;
+          }
+        , [] )
   | Keymap.Input.Char "j" when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m (Keymap.Move Keymap.Down))
   | Keymap.Input.Char "k" when is_printable_key norm ->
@@ -149,10 +284,80 @@ let dispatch_settings_overlay_key ~now (m : Model.t)
   | Keymap.Input.Function _ ->
       None
 
+let incidents_detail_max_scroll (m : Model.t) =
+  match Incidents.selected_entry m.incidents with
+  | None -> 0
+  | Some inc ->
+      let overlay_w = max 0 m.viewport.cols in
+      let overlay_h = max 0 (m.viewport.rows - 2) in
+      let drawer_w =
+        if overlay_w >= 110 then min 94 (overlay_w * 2 / 3)
+        else max 0 (overlay_w - 2)
+      in
+      let drawer_h = max 0 (overlay_h - 2) in
+      let inner_w = if drawer_w >= 2 && drawer_h >= 2 then drawer_w - 2 else 0 in
+      let inner_h = if drawer_w >= 2 && drawer_h >= 2 then drawer_h - 2 else 0 in
+      let content_r =
+        Rect.make ~x:0 ~y:0 ~w:inner_w ~h:(max 0 (inner_h - 1))
+      in
+      if content_r.h < 10 then 0
+      else
+        let detail_r =
+          match
+            Masc_tui_ui.Layout.split_v ~gap:1 content_r
+              [ Masc_tui_ui.Layout.Ratio 0.45; Masc_tui_ui.Layout.Flex 1 ]
+          with
+          | [ _; d ] -> d
+          | _ -> Rect.empty
+        in
+        let pad_x = if inner_w >= 56 then 2 else 1 in
+        let d_pad = Masc_tui_ui.Card.pad_inner ~pad_x detail_r in
+        let payload_w = max 0 d_pad.w in
+        let payload_h = max 0 (d_pad.h - 1) in
+        if payload_w <= 0 || payload_h <= 0 then 0
+        else
+          match extract_embedded_json_opt inc.detail with
+          | Some (prefix, json) ->
+              let tree_h =
+                if (not (String.equal prefix "")) && payload_h >= 2 then
+                  payload_h - 1
+                else payload_h
+              in
+              let lines =
+                Masc_tui_ui.Json_tree.flatten ~max_depth:4 ~redact_secrets:true
+                  json
+              in
+              max 0 (List.length lines - tree_h)
+          | None ->
+              let theme = Theme.of_preset m.theme_preset in
+              let lines =
+                Masc_tui_ui.Markdown.render_lines ~theme ~width:payload_w
+                  inc.detail
+              in
+              max 0 (List.length lines - payload_h)
+
 let dispatch_incidents_overlay_key ~now (m : Model.t)
     (norm : Keymap.Input.key_event) =
   let norm = Keymap.replay_ime_event norm in
   match norm.key with
+  | Keymap.Input.Char "J" when is_printable_key norm ->
+      let max_scroll = incidents_detail_max_scroll m in
+      Some
+        ( {
+            m with
+            incidents =
+              Incidents.move_detail_scroll ~max_scroll ~delta:1 m.incidents;
+          }
+        , [] )
+  | Keymap.Input.Char "K" when is_printable_key norm ->
+      let max_scroll = incidents_detail_max_scroll m in
+      Some
+        ( {
+            m with
+            incidents =
+              Incidents.move_detail_scroll ~max_scroll ~delta:(-1) m.incidents;
+          }
+        , [] )
   | Keymap.Input.Char "j" when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m (Keymap.Move Keymap.Down))
   | Keymap.Input.Char "k" when is_printable_key norm ->
@@ -207,6 +412,14 @@ let dispatch_queue_context_overlay_key ~now (m : Model.t)
     (norm : Keymap.Input.key_event) =
   let norm = Keymap.replay_ime_event norm in
   match norm.key with
+  | Keymap.Input.Char "j" when is_printable_key norm ->
+      Some (Update_actions.execute_action ~now m (Keymap.Move Keymap.Down))
+  | Keymap.Input.Char "k" when is_printable_key norm ->
+      Some (Update_actions.execute_action ~now m (Keymap.Move Keymap.Up))
+  | Keymap.Input.Char "g" when is_printable_key norm ->
+      Some (Update_actions.execute_action ~now m (Keymap.Move Keymap.Home))
+  | Keymap.Input.Char "G" when is_printable_key norm ->
+      Some (Update_actions.execute_action ~now m (Keymap.Move Keymap.End))
   | Keymap.Input.Char "[" when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m (Keymap.Sub_tab Keymap.Prev))
   | Keymap.Input.Char "]" when is_printable_key norm ->
@@ -1127,11 +1340,16 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
               dive_scroll_offset = 0;
             }
           in
-          let fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_chat m.fleet in
+          let fleet =
+            m.fleet
+            |> Fleet_store.set_keeper_dive_tab Nav.Keeper_chat
+            |> Fleet_store.mark_chat_history_loading ~keeper:name
+          in
+          let config = Config_store.cancel_edit_field m.config in
           let drafts =
             m.drafts |> Drafts.set_active_keeper name |> Drafts.set_focus true
           in
-          let next = { m with nav; fleet; drafts } in
+          let next = { m with nav; fleet; config; drafts } in
           (next, View_fetches.fetches_for_current_view next)
       | Nav.Keeper_config, Some "e" ->
           let config =
@@ -1248,8 +1466,45 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
             , (Some _ | None) ) ->
               (m, []))
       | Nav.Keepers -> (
-          match printable_char with
-          | Some "c" -> (
+          let split_keeper_opt =
+            if m.nav.pane_index = 1 then
+              Option.map
+                (fun (k : Wire_fleet.keeper_summary) -> k.name)
+                (Fleet_store.selected_keeper_summary m.fleet)
+            else None
+          in
+          match split_keeper_opt, m.fleet.keeper_dive_tab, printable_char with
+          | Some name, Nav.Keeper_sandbox, Some "p" ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:("샌드박스 프로브 실행: " ^ name)
+                     ~en:("Probing sandbox: " ^ name))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req = Cmd.Post_sandbox_probe (`Keeper name);
+                    };
+                ] )
+          | Some name, Nav.Keeper_memory, Some "a" ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:("사서 라이터 재개 요청: " ^ name)
+                     ~en:("Requesting librarian writer resume: " ^ name))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_memory_act
+                          { keeper = name; act = Wire_knowledge.Act_resume };
+                    };
+                ] )
+          | Some name, Nav.Keeper_memory, Some "A" ->
+              open_memory_act_modal m ~keeper_default:name
+          | _, _, Some "c" -> (
               match Fleet_store.selected_keeper_summary m.fleet with
               | Some k ->
                   let m1, cmds =
@@ -1269,18 +1524,11 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                          ~en:"Select a keeper first")
                       m
                   , [] ))
-          | Some "X" -> (
-              match m.fleet.keeper_dive_tab, Fleet_store.selected_keeper_summary m.fleet with
-              | Nav.Keeper_chat, Some k ->
-                  dismiss_keeper_chat_errors ~now ~keeper:k.name m
-              | ( ( Nav.Keeper_chat
-                  | Nav.Keeper_memory
-                  | Nav.Keeper_work_candle
-                  | Nav.Keeper_sandbox
-                  | Nav.Keeper_config )
-                , (Some _ | None) ) ->
-                  (m, []))
-          | Some "S" -> (
+          | _, Nav.Keeper_chat, Some "X" -> (
+              match Fleet_store.selected_keeper_summary m.fleet with
+              | Some k -> dismiss_keeper_chat_errors ~now ~keeper:k.name m
+              | None -> (m, []))
+          | _, _, Some "S" -> (
               match latest_reply_for_tts m with
               | Some (keeper, text) ->
                   ( Model.with_toast ~now ~level:Model.Toast_info
@@ -1295,7 +1543,14 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                          ~en:"No recent keeper reply to speak")
                       m
                   , [] ))
-          | _ -> (m, []))
+          | ( (Some _ | None)
+            , ( Nav.Keeper_chat
+              | Nav.Keeper_memory
+              | Nav.Keeper_work_candle
+              | Nav.Keeper_sandbox
+              | Nav.Keeper_config )
+            , (Some _ | None) ) ->
+              (m, []))
       | Nav.Knowledge -> (
           match m.knowledge.active_tab with
           | Nav.Knowledge_memory -> (
@@ -1457,6 +1712,235 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
               | _ -> (m, []))
           | Nav.Work_inbox | Nav.Work_candle_scorecard -> (m, []))
       | Nav.Pulse -> (m, []))
+
+let keeper_config_target_name (m : Model.t) =
+  match Model.active_dive m with
+  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_config }) -> Some name
+  | Some
+      ( Nav.Dive_keeper
+          {
+            tab =
+              ( Nav.Keeper_chat
+              | Nav.Keeper_memory
+              | Nav.Keeper_work_candle
+              | Nav.Keeper_sandbox );
+            _;
+          }
+      | Nav.Dive_work _
+      | Nav.Dive_knowledge _
+      | Nav.Dive_infra _ ) ->
+      None
+  | None ->
+      if Model.is_keeper_config_active m then
+        Option.map
+          (fun (k : Wire_fleet.keeper_summary) -> k.name)
+          (Fleet_store.selected_keeper_summary m.fleet)
+      else None
+
+let dispatch_keeper_config_key ~now (m : Model.t)
+    (norm : Keymap.Input.key_event) =
+  if Config_store.is_editing_field m.config then
+    match norm.key with
+    | Keymap.Input.Backspace ->
+        Some
+          ({ m with config = Config_store.backspace_edit_buffer m.config }, [])
+    | Keymap.Input.Char s when is_printable_key norm ->
+        Some
+          ({ m with config = Config_store.append_edit_char s m.config }, [])
+    | Keymap.Input.Enter -> (
+        match Config_store.commit_edit_field m.config with
+        | Ok config ->
+            Some
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:"변경값이 스테이징됨 (Ctrl+S: 저장 · Space: 미리보기)"
+                     ~en:"Staged field change (Ctrl+S: save · Space: dry-run)")
+                  { m with config }
+              , [] )
+        | Error reason ->
+            Some
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.literal reason) m
+              , [] ))
+    | Keymap.Input.Escape ->
+        Some ({ m with config = Config_store.cancel_edit_field m.config }, [])
+    | Keymap.Input.Tab
+    | Keymap.Input.Left
+    | Keymap.Input.Right
+    | Keymap.Input.Up
+    | Keymap.Input.Down
+    | Keymap.Input.Home
+    | Keymap.Input.End
+    | Keymap.Input.Page_up
+    | Keymap.Input.Page_down ->
+        Some (m, [])
+    | Keymap.Input.Char _
+    | Keymap.Input.Delete
+    | Keymap.Input.Insert
+    | Keymap.Input.Function _ -> (
+        match Keymap.dispatch ~scope_chain:[ Keymap.Global ] norm with
+        | Some act when Keymap.equal_action act Keymap.Quit_app ->
+            Some (Update_actions.execute_action ~now m Keymap.Quit_app)
+        | Some _ | None -> Some (m, []))
+  else
+    let norm = Keymap.replay_ime_event norm in
+    let step_lr delta =
+      match Config_store.step_keeper_field ~lang:m.lang ~delta m.config with
+      | Ok (config, true) -> Some ({ m with config }, [])
+      | Ok (_, false) ->
+          Some
+            ( Model.with_toast ~now ~level:Model.Toast_info
+                (Say.make ~ko:"[Enter] 키로 텍스트 값을 편집하세요"
+                   ~en:"Press [Enter] to edit text value")
+                m
+            , [] )
+      | Error reason ->
+          Some
+            ( Model.with_toast ~now ~level:Model.Toast_info (Say.literal reason)
+                m
+            , [] )
+    in
+    match norm.key with
+    | Keymap.Input.Up -> Some (Update_nav.apply_move m Keymap.Up)
+    | Keymap.Input.Down -> Some (Update_nav.apply_move m Keymap.Down)
+    | Keymap.Input.Page_up -> Some (Update_nav.apply_move m Keymap.Page_up)
+    | Keymap.Input.Page_down -> Some (Update_nav.apply_move m Keymap.Page_down)
+    | Keymap.Input.Home -> Some (Update_nav.apply_move m Keymap.Home)
+    | Keymap.Input.End -> Some (Update_nav.apply_move m Keymap.End)
+    | Keymap.Input.Char "k" when is_printable_key norm ->
+        Some (Update_nav.apply_move m Keymap.Up)
+    | Keymap.Input.Char "j" when is_printable_key norm ->
+        Some (Update_nav.apply_move m Keymap.Down)
+    | Keymap.Input.Char "J" when is_printable_key norm ->
+        let max_scroll = keeper_config_dry_run_max_scroll m in
+        Some
+          ( {
+              m with
+              config =
+                Config_store.move_dry_run_scroll ~max_scroll ~delta:1 m.config;
+            }
+          , [] )
+    | Keymap.Input.Char "K" when is_printable_key norm ->
+        let max_scroll = keeper_config_dry_run_max_scroll m in
+        Some
+          ( {
+              m with
+              config =
+                Config_store.move_dry_run_scroll ~max_scroll ~delta:(-1)
+                  m.config;
+            }
+          , [] )
+    | Keymap.Input.Char "g" when is_printable_key norm ->
+        Some (Update_nav.apply_move m Keymap.Home)
+    | Keymap.Input.Char "G" when is_printable_key norm ->
+        Some (Update_nav.apply_move m Keymap.End)
+    | Keymap.Input.Left -> step_lr (-1)
+    | Keymap.Input.Right -> step_lr 1
+    | Keymap.Input.Char "h" when is_printable_key norm -> step_lr (-1)
+    | Keymap.Input.Char "l" when is_printable_key norm -> step_lr 1
+    | Keymap.Input.Enter -> (
+        match Config_store.begin_edit_keeper_selected ~lang:m.lang m.config with
+        | Ok config -> Some ({ m with config }, [])
+        | Error reason ->
+            Some
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.literal reason) m
+              , [] ))
+    | Keymap.Input.Char " " when is_printable_key norm -> (
+        match Config_store.keeper_selected_field ~lang:m.lang m.config with
+        | Some f when f.writable && f.kind = Wire_config.Field_bool ->
+            step_lr 1
+        | _ ->
+            if Config_store.dirty_count m.config > 0 then
+              match Config_store.build_patch_request ~dry_run:true m.config with
+              | Ok req ->
+                  let config = Config_store.mark_dry_run_loading m.config in
+                  Some
+                    ( { m with config }
+                    , [
+                        Cmd.Http_post
+                          { epoch = m.epoch; req = Cmd.Post_config_patch req };
+                      ] )
+              | Error reason ->
+                  Some
+                    ( Model.with_toast ~now ~level:Model.Toast_info
+                        (Say.literal reason) m
+                    , [] )
+            else
+              Some
+                ( Model.with_toast ~now ~level:Model.Toast_info
+                    (Say.make
+                       ~ko:"변경된 필드가 없습니다 ([←→] 값 변경 · [Enter] 편집)"
+                       ~en:"No staged changes ([←→] cycle · [Enter] edit)")
+                    m
+                , [] ))
+    | Keymap.Input.Char "s" when norm.mods.ctrl && not norm.mods.alt ->
+        Some (save_settings_config ~now m)
+    | Keymap.Input.Delete -> (
+        match
+          Config_store.stage_remove_keeper_selected ~lang:m.lang m.config
+        with
+        | Ok config ->
+            Some
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:"키 삭제 스테이징 토글됨 (Space: 미리보기 · Ctrl+S: 저장)"
+                     ~en:"Toggled key removal (Space: dry-run · Ctrl+S: save)")
+                  { m with config }
+              , [] )
+        | Error reason ->
+            Some
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.literal reason) m
+              , [] ))
+    | Keymap.Input.Char "d" when norm.mods.ctrl && not norm.mods.alt -> (
+        match
+          Config_store.stage_remove_keeper_selected ~lang:m.lang m.config
+        with
+        | Ok config ->
+            Some
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:"키 삭제 스테이징 토글됨 (Space: 미리보기 · Ctrl+S: 저장)"
+                     ~en:"Toggled key removal (Space: dry-run · Ctrl+S: save)")
+                  { m with config }
+              , [] )
+        | Error reason ->
+            Some
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.literal reason) m
+              , [] ))
+    | Keymap.Input.Char "e" when is_printable_key norm -> (
+        match keeper_config_target_name m with
+        | Some name ->
+            let config =
+              m.config
+              |> Config_store.set_target (Wire_config.Target_keeper name)
+              |> Config_store.set_tab Nav.Settings_keepers_companies
+            in
+            Some
+              (Update_nav.open_overlay { m with config }
+                 (Nav.Settings Nav.Settings_keepers_companies))
+        | None -> None)
+    | Keymap.Input.Char "a" when is_printable_key norm -> (
+        match keeper_config_target_name m with
+        | Some name ->
+            let runtime_default =
+              match Observed.to_option m.runtime.runtime_config_raw with
+              | Some meta ->
+                  Option.value (List.assoc_opt name meta.assignments)
+                    ~default:""
+              | None -> ""
+            in
+            Some (open_runtime_assign_modal m ~keeper_default:name ~runtime_default ())
+        | None -> None)
+    | Keymap.Input.Char _
+    | Keymap.Input.Tab
+    | Keymap.Input.Backspace
+    | Keymap.Input.Escape
+    | Keymap.Input.Insert
+    | Keymap.Input.Function _ ->
+        None
 
 let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
   let norm = Keymap.normalize_key_event ev in
@@ -1823,13 +2307,77 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
               match popup_handled with
               | Some res -> res
               | None ->
-                  let is_ctrl_x =
-                    norm.mods.ctrl && (not norm.mods.alt) && (not norm.mods.shift)
-                    && Option.equal String.equal (key_char_opt norm.key) (Some "x")
+                  let pre_dispatch =
+                    if
+                      Model.is_keeper_config_active m
+                      && not (Drafts.is_focused m.drafts)
+                    then dispatch_keeper_config_key ~now m norm
+                    else if not (Drafts.is_focused m.drafts) then
+                      (* Pillar 3: typing Korean while unfocused inside
+                         Dive_keeper { tab = Keeper_chat } auto-focuses the
+                         composer and inserts the character instead of letting
+                         Korean jamo replay trigger centered modals. *)
+                      match Model.active_dive m, norm.key with
+                      | ( Some
+                            (Nav.Dive_keeper
+                               { name; tab = Nav.Keeper_chat })
+                        , Keymap.Input.Char s )
+                        when is_printable_key norm && is_korean_char s
+                             && not (Model.equal_breakpoint m.breakpoint Model.Micro)
+                        ->
+                          let drafts =
+                            m.drafts
+                            |> Drafts.set_active_keeper name
+                            |> Drafts.set_focus true
+                            |> Drafts.insert_text s
+                          in
+                          Some ({ m with drafts }, [])
+                      | ( ( Some
+                              ( Nav.Dive_keeper
+                                  {
+                                    tab =
+                                      ( Nav.Keeper_chat
+                                      | Nav.Keeper_memory
+                                      | Nav.Keeper_work_candle
+                                      | Nav.Keeper_sandbox
+                                      | Nav.Keeper_config );
+                                    _;
+                                  }
+                              | Nav.Dive_work _
+                              | Nav.Dive_knowledge _
+                              | Nav.Dive_infra _ )
+                          | None )
+                        , ( Keymap.Input.Char _
+                          | Keymap.Input.Enter
+                          | Keymap.Input.Tab
+                          | Keymap.Input.Backspace
+                          | Keymap.Input.Escape
+                          | Keymap.Input.Delete
+                          | Keymap.Input.Insert
+                          | Keymap.Input.Up
+                          | Keymap.Input.Down
+                          | Keymap.Input.Left
+                          | Keymap.Input.Right
+                          | Keymap.Input.Home
+                          | Keymap.Input.End
+                          | Keymap.Input.Page_up
+                          | Keymap.Input.Page_down
+                          | Keymap.Input.Function _ ) ) ->
+                          None
+                    else None
                   in
-                  if is_ctrl_x then interrupt_active_keeper_turn ~now m
-                  else
-                    (* 3. Single-SSOT Keymap dispatch *)
+                  match pre_dispatch with
+                  | Some res -> res
+                  | None ->
+                      let is_ctrl_x =
+                        norm.mods.ctrl && (not norm.mods.alt)
+                        && (not norm.mods.shift)
+                        && Option.equal String.equal (key_char_opt norm.key)
+                             (Some "x")
+                      in
+                      if is_ctrl_x then interrupt_active_keeper_turn ~now m
+                      else
+                        (* 3. Single-SSOT Keymap dispatch *)
                     match
                       Keymap.dispatch ~scope_chain:(Model.focus_scope_chain m)
                         norm
@@ -2003,6 +2551,15 @@ let apply_paste ~now:_ (m : Model.t) text =
         if m.nav.filter_focused then
           let q = Update_nav.current_filter_query m ^ strip_newlines text in
           (Update_nav.set_active_filter_query q m, [])
+        else if
+          Model.is_keeper_config_active m && Config_store.is_editing_field m.config
+        then
+          ( {
+              m with
+              config =
+                Config_store.append_edit_char (strip_newlines text) m.config;
+            }
+          , [] )
         else
           let drafts =
             m.drafts |> Drafts.set_focus true |> Drafts.insert_text text
@@ -2012,6 +2569,11 @@ let apply_paste ~now:_ (m : Model.t) text =
 let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
   if Model.is_too_small_viewport m.viewport then (m, [])
   else
+    let m =
+      if Config_store.is_editing_field m.config then
+        { m with config = Config_store.cancel_edit_field m.config }
+      else m
+    in
     match ev with
     | Keymap.Input.Wheel { dir = Keymap.Input.Wheel_up; _ } ->
         Update_actions.execute_action ~now m (Keymap.Move Keymap.Up)

@@ -1820,7 +1820,7 @@ let test_dynamic_rendered_hint_contracts () =
           if String.equal vname "Dive/Keeper/ChatEmpty" then
             assert_no ~label ~needle:"/status" txt;
           if String.equal vname "Dive/Keeper/Config" then
-            assert_no ~label ~needle:"Ctrl+S" txt)
+            assert_has ~label ~needle:"Ctrl+S" txt)
         views;
       (* Specific truthful positive hint checks *)
       record_case ();
@@ -2102,11 +2102,24 @@ let test_journeys_tab_multipane_dives_safety () =
   (* J11: Work_pipeline 3 panes & empty verifs never corrupts Goals *)
   record_case ();
   let m_wp =
+    let long_proc =
+      List.init 40 (fun i -> Printf.sprintf "- Step %d: verify contract detail" i)
+      |> String.concat "\n"
+    in
+    let goals =
+      List.map
+        (fun (g : Wire_work.goal) ->
+          if String.equal g.id "goal-3" then { g with procedure = long_proc }
+          else g)
+        (Work_store.goals base.work)
+    in
     {
       base with
       nav = { base.nav with workspace = Nav.Work };
       work =
         base.work
+        |> Work_store.apply_planning ~observed_at:t0
+             { goals; tasks = Work_store.tasks base.work }
         |> Work_store.set_tab Nav.Work_pipeline
         |> Work_store.apply_verifications ~observed_at:t0 [];
     }
@@ -2142,11 +2155,44 @@ let test_journeys_tab_multipane_dives_safety () =
   (* J13: Work_inbox Down -> Y resolves selected item 1, NEVER item 0! *)
   record_case ();
   let m_inb =
+    let long_ctx =
+      List.init 40 (fun i -> Printf.sprintf "- Detail line %02d for inbox scroll" i)
+      |> String.concat "\n"
+    in
+    let asks =
+      List.map
+        (fun (a : Wire_work.ask_row) -> { a with context = Some long_ctx })
+        (Work_store.asks_list base.work)
+    in
+    let tool_approvals =
+      List.map
+        (fun (ta : Wire_work.held_tool_approval) ->
+          { ta with question = long_ctx })
+        (Work_store.tool_approvals_list base.work)
+    in
+    let long_gate_json =
+      "{"
+      ^ (List.init 35 (fun i -> Printf.sprintf {|"k%02d":"val-%02d"|} i i)
+         |> String.concat ",")
+      ^ "}"
+    in
+    let gates =
+      List.map
+        (fun (g : Wire_work.gate_pending) ->
+          { g with input_preview = Some long_gate_json })
+        (Work_store.gate_pending_list base.work)
+    in
     {
       base with
       nav = { base.nav with workspace = Nav.Work };
-      work = Work_store.set_tab Nav.Work_inbox base.work;
+      work =
+        base.work
+        |> Work_store.apply_asks ~observed_at:t0 asks
+        |> Work_store.apply_tool_approvals ~observed_at:t0 tool_approvals
+        |> Work_store.apply_gate_pending ~observed_at:t0 gates
+        |> Work_store.set_tab Nav.Work_inbox;
     }
+    |> Model.rebuild_attention
   in
   let item0_id =
     match Attention.current_filtered_item ~query:"" m_inb.attention with
@@ -2200,10 +2246,44 @@ let test_journeys_tab_multipane_dives_safety () =
   (* J15: Runtime Quotas independent pane 0 scroll + pane 1 credits *)
   record_case ();
   let m_rq =
+    let many_windows : Wire_runtime.provider_usage_windows =
+      {
+        since_unix = 1700000000.0;
+        accounts =
+          List.init 40 (fun i : Wire_runtime.account_usage ->
+              {
+                scope = "anthropic";
+                scope_id = Printf.sprintf "anth-%02d" i;
+                providers =
+                  [
+                    {
+                      id = Printf.sprintf "anthropic-%02d" i;
+                      display_name = Printf.sprintf "Anthropic %02d" i;
+                    };
+                  ];
+                state =
+                  Wire_runtime.Account_reported
+                    [
+                      {
+                        limit_id = Some "5h";
+                        kind = Wire_runtime.Window_five_hour;
+                        role = Wire_runtime.Role_gates_model_calls;
+                        utilization = Wire_runtime.Util_percent (10 + (i mod 80));
+                        resets_at_unix = Some 1700018000.0;
+                        observed_at_unix = 1700000000.0;
+                      };
+                    ];
+                cost_state = Format_val.Subscription_zero;
+              });
+      }
+    in
     {
       base with
       nav = { base.nav with workspace = Nav.Runtime };
-      runtime = Runtime_store.set_tab Nav.Runtime_quotas_credits base.runtime;
+      runtime =
+        base.runtime
+        |> Runtime_store.apply_usage_windows ~observed_at:t0 many_windows
+        |> Runtime_store.set_tab Nav.Runtime_quotas_credits;
     }
   in
   let m_rq_sc, _ = step m_rq (mk_key Keymap.Input.Down) in
@@ -2215,11 +2295,23 @@ let test_journeys_tab_multipane_dives_safety () =
   (* J16: Wiki detail scroll reset + auto-fetch + Wiki [e] empty guard *)
   record_case ();
   let m_kw =
+    let long_wiki =
+      {
+        (mk_wiki_detail ~slug:"arch-overview" ~title:"Architecture Overview") with
+        body_markdown =
+          "# Architecture Overview\n\n"
+          ^ (List.init 50 (fun i ->
+                 Printf.sprintf "- Section line %02d documenting architecture" i)
+             |> String.concat "\n");
+      }
+    in
     {
       base with
       nav = { base.nav with workspace = Nav.Knowledge };
       knowledge =
-        Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts base.knowledge;
+        base.knowledge
+        |> Knowledge_store.apply_wiki_page ~observed_at:t0 long_wiki
+        |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts;
     }
   in
   let m_kw_p1, _ = step m_kw (mk_key Keymap.Input.Tab) in
@@ -2269,10 +2361,28 @@ let test_journeys_tab_multipane_dives_safety () =
   (* J17: Infra Repos & Changes 3 panes *)
   record_case ();
   let m_ir =
+    let long_diff =
+      "@@ -1,4 +1,45 @@\n"
+      ^ (List.init 45 (fun i -> Printf.sprintf "+let added_line_%02d = %d" i i)
+         |> String.concat "\n")
+    in
+    let long_changes =
+      match Observed.to_option base.infra.file_changes with
+      | Some xs ->
+          List.map
+            (fun (fc : Wire_infra.file_change) ->
+              { fc with diff_preview = Some long_diff })
+            xs
+      | None -> []
+    in
     {
       base with
       nav = { base.nav with workspace = Nav.Infra };
-      infra = Infra_store.set_tab Nav.Infra_repos_changes base.infra;
+      infra =
+        base.infra
+        |> Infra_store.apply_file_changes ~observed_at:t0 ~keeper:"alpha"
+             long_changes
+        |> Infra_store.set_tab Nav.Infra_repos_changes;
     }
   in
   Alcotest.(check int) "J17 Infra Repos w/ changes has 3 panes" 3
@@ -2419,9 +2529,10 @@ let test_journeys_tab_multipane_dives_safety () =
          | _ -> false)
        cmds_ce);
 
-  (* J23: Help '?' toggle & scroll *)
+  (* J23: Help '?' toggle & scroll (on compact 80x24 where Help overflows 1-col) *)
   record_case ();
-  let m_h1, _ = step base (char_key "?") in
+  let m_h0 = populated_model ~cols:80 ~rows:24 () in
+  let m_h1, _ = step m_h0 (char_key "?") in
   Alcotest.(check bool) "J23 '?' opens Help" true (m_h1.nav.overlay = Some Nav.Help);
   let m_h2, _ = step m_h1 (mk_key Keymap.Input.Down) in
   Alcotest.(check bool) "J23 Help Down scrolls help_scroll_offset" true
@@ -2505,10 +2616,23 @@ let test_journeys_tab_multipane_dives_safety () =
   record_case ();
   let m_wp_narrow =
     let m0 = populated_model ~cols:80 ~rows:24 () in
+    let long_proc =
+      List.init 25 (fun i -> Printf.sprintf "- Narrow step %02d" i)
+      |> String.concat "\n"
+    in
+    let goals =
+      List.map
+        (fun (g : Wire_work.goal) -> { g with procedure = long_proc })
+        (Work_store.goals m0.work)
+    in
     {
       m0 with
       nav = { m0.nav with workspace = Nav.Work; pane_index = 0 };
-      work = Work_store.set_tab Nav.Work_pipeline m0.work;
+      work =
+        m0.work
+        |> Work_store.apply_planning ~observed_at:t0
+             { goals; tasks = Work_store.tasks m0.work }
+        |> Work_store.set_tab Nav.Work_pipeline;
     }
   in
   Alcotest.(check bool) "R1 Work_pipeline 80x24 has no linked card" false
@@ -3084,6 +3208,1930 @@ let test_journeys_tab_multipane_dives_safety () =
     true (!matrix_case_count >= 1000);
   Printf.printf "KEYMAP_MATRIX_TOTAL_CASES=%d\n%!" !matrix_case_count
 
+(* ---------- Pillar 1: Editable Keeper_config & Settings Pane_inspector ←/→ ---------- *)
+
+let mk_keeper_rich_schema ~keeper : Wire_config.config_schema =
+  let mk_f ~table ~key ~label ~kind ~value ?(writable = true) ?(secret = false)
+      ?(description = None) () : Wire_config.schema_field =
+    {
+      table;
+      key;
+      full_key = table ^ "." ^ key;
+      label;
+      env = None;
+      description;
+      kind;
+      value;
+      default_value = Some value;
+      provenance = Wire_config.Prov_keeper;
+      reload_scope = Wire_config.Hot_reload;
+      secret;
+      writable;
+    }
+  in
+  let extra_fields =
+    List.init 10 (fun i ->
+        mk_f ~table:"safety"
+          ~key:(Printf.sprintf "limit_%02d" i)
+          ~label:(Printf.sprintf "Limit %02d" i)
+          ~kind:(Wire_config.Field_int { min = Some 1; max = Some 99 })
+          ~value:(Wire_config.Val_int (10 + i))
+          ~description:(Some (Printf.sprintf "Safety ceiling number %d" i))
+          ())
+  in
+  {
+    target = Wire_config.Target_keeper keeper;
+    keeper = Some keeper;
+    file_exists = true;
+    file_sha256 = "sha-keeper-rich";
+    sections =
+      [
+        {
+          id = "identity";
+          category = Wire_config.Cat_keepers_companies;
+          title = "Identity";
+          fields =
+            [
+              mk_f ~table:"keeper" ~key:"activation_mode"
+                ~label:"Activation Mode"
+                ~kind:(Wire_config.Field_enum [ "autonomous"; "reactive"; "manual" ])
+                ~value:(Wire_config.Val_string "autonomous")
+                ~description:(Some "Turn wake policy") ();
+              mk_f ~table:"keeper" ~key:"paused" ~label:"Paused"
+                ~kind:Wire_config.Field_bool ~value:(Wire_config.Val_bool false)
+                ();
+              mk_f ~table:"keeper" ~key:"max_turns" ~label:"Max Turns"
+                ~kind:(Wire_config.Field_int { min = Some 1; max = Some 5 })
+                ~value:(Wire_config.Val_int 3) ();
+              mk_f ~table:"keeper" ~key:"group" ~label:"Group"
+                ~kind:Wire_config.Field_string
+                ~value:(Wire_config.Val_string "platform") ();
+            ];
+        };
+        {
+          id = "runtime";
+          category = Wire_config.Cat_providers_models;
+          title = "Runtime";
+          fields =
+            [
+              mk_f ~table:"runtime" ~key:"temperature" ~label:"Temperature"
+                ~kind:(Wire_config.Field_float { min = Some 0.0; max = Some 1.0 })
+                ~value:(Wire_config.Val_float 0.5) ();
+              mk_f ~table:"runtime" ~key:"tags" ~label:"Tags"
+                ~kind:Wire_config.Field_string_list
+                ~value:(Wire_config.Val_string_list [ "ops"; "prod" ]) ();
+              mk_f ~table:"runtime" ~key:"api_secret" ~label:"API Secret"
+                ~kind:Wire_config.Field_secret
+                ~value:
+                  (Wire_config.Val_secret
+                     {
+                       configured = true;
+                       source = Wire_config.Secret_inline_redacted;
+                     })
+                ~writable:false ~secret:true ();
+              mk_f ~table:"runtime" ~key:"readonly_id" ~label:"Readonly ID"
+                ~kind:Wire_config.Field_string
+                ~value:(Wire_config.Val_string "ro-42") ~writable:false ();
+            ];
+        };
+        {
+          id = "safety";
+          category = Wire_config.Cat_sandbox_ssh;
+          title = "Safety Limits";
+          fields = extra_fields;
+        };
+      ];
+  }
+
+let test_pillar1_keeper_config_and_settings_lr () =
+  let base = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let rich_schema = mk_keeper_rich_schema ~keeper:"alpha" in
+  let rich_cfg =
+    Config_store.empty
+    |> Config_store.set_target (Wire_config.Target_keeper "alpha")
+    |> Config_store.set_tab Nav.Settings_sandbox_ssh
+       (* Deliberately mismatch active_tab to prove keeper_visible_fields NEVER filters by active_tab *)
+    |> Config_store.apply_schema ~observed_at:t0 rich_schema
+  in
+  let verify_keeper_config_context ~label m0 =
+    Alcotest.(check bool) (label ^ ": is_keeper_config_active = true") true
+      (Model.is_keeper_config_active m0);
+    let visible = Config_store.keeper_visible_fields ~lang:m0.lang m0.config in
+    Alcotest.(check int) (label ^ ": all 18 multi-section fields visible") 18
+      (List.length visible);
+    (* 1. ArrowDown traverses ALL 18 fields past index 3 (Group) to index 17 *)
+    let m_dn =
+      List.init 25 (fun _ -> mk_key Keymap.Input.Down) |> step_keys m0 |> fst
+    in
+    Alcotest.(check int)
+      (label ^ ": ArrowDown reaches last field 17 (past index 3) and clamps")
+      17 m_dn.config.selected_field_index;
+    let m_home, _ = step m_dn (mk_key Keymap.Input.Home) in
+    Alcotest.(check int) (label ^ ": Home returns to 0") 0
+      m_home.config.selected_field_index;
+    let m_end, _ = step m_home (mk_key Keymap.Input.End) in
+    Alcotest.(check int) (label ^ ": End jumps directly to 17") 17
+      m_end.config.selected_field_index;
+    (* 2. ←/→ NEVER switches tab; cycles Field_enum and unstages back to original *)
+    let m_enum_r, _ = step m_home (mk_key Keymap.Input.Right) in
+    Alcotest.(check bool) (label ^ ": Right stays on Keeper_config (not hijacked)")
+      true (Model.is_keeper_config_active m_enum_r);
+    Alcotest.(check int) (label ^ ": Right on enum stages 1 patch") 1
+      (Config_store.dirty_count m_enum_r.config);
+    let m_enum_l, _ = step m_enum_r (mk_key Keymap.Input.Left) in
+    Alcotest.(check int) (label ^ ": Left back to original unstages to 0") 0
+      (Config_store.dirty_count m_enum_l.config);
+    (* Wrap-around Left from index 0 -> last enum ("manual") *)
+    let m_enum_wrap, _ = step m_enum_l (mk_key Keymap.Input.Left) in
+    Alcotest.(check int) (label ^ ": Left wrap-around stages 1 patch") 1
+      (Config_store.dirty_count m_enum_wrap.config);
+    (* 3. Field_bool: Right/Space toggles and unstages back *)
+    let m_bool, _ = step m_home (mk_key Keymap.Input.Down) in
+    let m_bool_t, _ = step m_bool (char_key " ") in
+    Alcotest.(check int) (label ^ ": Space toggles Field_bool (dirty=1)") 1
+      (Config_store.dirty_count m_bool_t.config);
+    let m_bool_t2, _ = step m_bool_t (mk_key Keymap.Input.Left) in
+    Alcotest.(check int) (label ^ ": Left toggles Field_bool back (dirty=0)") 0
+      (Config_store.dirty_count m_bool_t2.config);
+    (* 4. Field_int clamped to [1; 5] *)
+    let m_int, _ = step_keys m_home [ mk_key Keymap.Input.Down; mk_key Keymap.Input.Down ] in
+    let m_int_hi, _ =
+      step_keys m_int (List.init 6 (fun _ -> mk_key Keymap.Input.Right))
+    in
+    Alcotest.(check bool) (label ^ ": Field_int clamps at max=5") true
+      (match
+         Config_store.String_map.find_opt "keeper.max_turns"
+           m_int_hi.config.dirty_fields
+       with
+       | Some (Wire_config.Set_int { value = 5; _ }) -> true
+       | _ -> false);
+    (* 5. Field_float steps by 0.1 clamped to [0.0; 1.0] *)
+    let m_flt, _ =
+      step_keys m_home (List.init 4 (fun _ -> mk_key Keymap.Input.Down))
+    in
+    let m_flt1, _ = step m_flt (mk_key Keymap.Input.Right) in
+    Alcotest.(check bool) (label ^ ": Field_float steps +0.1 -> 0.6") true
+      (match
+         Config_store.String_map.find_opt "runtime.temperature"
+           m_flt1.config.dirty_fields
+       with
+       | Some (Wire_config.Set_float { value; _ }) ->
+           Float.abs (value -. 0.6) < 0.001
+       | _ -> false);
+    (* 6. Field_string: Right shows toast, Enter opens inline edit + Paste + Enter commits + Esc cancels *)
+    let m_str, _ =
+      step_keys m_home (List.init 3 (fun _ -> mk_key Keymap.Input.Down))
+    in
+    let m_str_r, _ = step m_str (mk_key Keymap.Input.Right) in
+    Alcotest.(check int) (label ^ ": Right on string leaves dirty=0") 0
+      (Config_store.dirty_count m_str_r.config);
+    let m_edit, _ = step m_str (mk_key Keymap.Input.Enter) in
+    Alcotest.(check bool) (label ^ ": Enter opens inline edit") true
+      (Config_store.is_editing_field m_edit.config
+       && Model.is_text_capture_active m_edit);
+    let m_edit_p, _ = Update.step ~now:t0 m_edit (Msg.Paste_text "-v2") in
+    let m_edit_c, _ = step m_edit_p (mk_key Keymap.Input.Enter) in
+    Alcotest.(check bool) (label ^ ": Enter commits inline edit") true
+      ((not (Config_store.is_editing_field m_edit_c.config))
+       && Config_store.dirty_count m_edit_c.config = 1);
+    (* Space on non-bool with dirty_count > 0 emits dry-run Post_config_patch *)
+    let _, cmds_dry = step m_edit_c (char_key " ") in
+    Alcotest.(check bool) (label ^ ": Space emits dry_run Post_config_patch") true
+      (has_cmd
+         (function
+           | Cmd.Http_post { req = Cmd.Post_config_patch { dry_run = true; _ }; _ } ->
+               true
+           | _ -> false)
+         cmds_dry);
+    (* Ctrl+S emits real save Post_config_patch *)
+    let _, cmds_save = step m_edit_c (char_key ~ctrl:true "s") in
+    Alcotest.(check bool) (label ^ ": Ctrl+S emits save Post_config_patch") true
+      (has_cmd
+         (function
+           | Cmd.Http_post { req = Cmd.Post_config_patch { dry_run = false; _ }; _ } ->
+               true
+           | _ -> false)
+         cmds_save);
+    (* Delete stages Remove_key and renders "(removed)" (parity with Settings) *)
+    let m_del, _ = step m_str (mk_key Keymap.Input.Delete) in
+    Alcotest.(check bool) (label ^ ": Delete stages Remove_key") true
+      (match
+         Config_store.String_map.find_opt "keeper.group"
+           m_del.config.dirty_fields
+       with
+       | Some (Wire_config.Remove_key _) -> true
+       | _ -> false);
+    let txt_del = grid_all_text (render_full ~model:m_del) in
+    Alcotest.(check bool) (label ^ ": Remove_key renders \"(removed)\"") true
+      (Store_scroll.contains_ci ~needle:"(removed)" txt_del);
+    (* Read-only & Secret refuse stepping with toast *)
+    let m_sec, _ =
+      step_keys m_home (List.init 6 (fun _ -> mk_key Keymap.Input.Down))
+    in
+    let m_sec_r, _ = step m_sec (mk_key Keymap.Input.Right) in
+    Alcotest.(check int) (label ^ ": Secret field refuses Right step") 0
+      (Config_store.dirty_count m_sec_r.config);
+    (* '/' filters Keeper_config (NOT fleet roster!), renders filter pill in chrome sub-tab bar,
+       and Esc ladder cancels edit -> clears search -> pops/pane0 *)
+    let m_f1, _ = step m_home (char_key "/") in
+    let m_f2, _ = type_str m_f1 "limit_09" in
+    let txt_f2 = grid_all_text (render_full ~model:m_f2) in
+    Alcotest.(check bool) (label ^ ": chrome sub-tab bar shows active '/' query while typing")
+      true (Store_scroll.contains_ci ~needle:"limit_09" txt_f2);
+    let m_f3, _ = step m_f2 (mk_key Keymap.Input.Enter) in
+    let txt_f3 = grid_all_text (render_full ~model:m_f3) in
+    Alcotest.(check bool) (label ^ ": chrome sub-tab bar shows '/' filter pill after Enter")
+      true (Store_scroll.contains_ci ~needle:"limit_09" txt_f3);
+    Alcotest.(check string) (label ^ ": '/' sets config.search_query") "limit_09"
+      m_f3.config.search_query;
+    Alcotest.(check string) (label ^ ": '/' leaves fleet.filter_query untouched") ""
+      m_f3.fleet.filter_query;
+    Alcotest.(check int) (label ^ ": filtered keeper_visible_fields = 1") 1
+      (List.length (Config_store.keeper_visible_fields ~lang:m_f3.lang m_f3.config));
+    let m_f_edit, _ = step m_f3 (mk_key Keymap.Input.Enter) in
+    (* Mouse wheel while editing cancels editing_field_key cleanly *)
+    let m_wheel, _ =
+      Update.step ~now:t0 m_f_edit
+        (Msg.Mouse_event
+           (Keymap.Input.Wheel
+              { dir = Keymap.Input.Wheel_down; col = 50; row = 12 }))
+    in
+    Alcotest.(check bool) (label ^ ": Mouse wheel cancels editing_field_key")
+      false (Config_store.is_editing_field m_wheel.config);
+    let m_esc1, _ = step m_f_edit (mk_key Keymap.Input.Escape) in
+    Alcotest.(check bool) (label ^ ": Esc #1 cancels inline edit") true
+      ((not (Config_store.is_editing_field m_esc1.config))
+       && String.equal m_esc1.config.search_query "limit_09");
+    let m_esc2, _ = step m_esc1 (mk_key Keymap.Input.Escape) in
+    Alcotest.(check string) (label ^ ": Esc #2 clears config search_query") ""
+      m_esc2.config.search_query;
+    Alcotest.(check bool) (label ^ ": Esc #2 stays in Keeper_config") true
+      (Model.is_keeper_config_active m_esc2);
+    (* Dry-run diff preview J/K scrolls dry_run_scroll_offset in Keeper_config *)
+    let kc_dry_hunk : Wire_config.diff_hunk =
+      {
+        header = "@@ -1,1 +1,20 @@";
+        old_start = 1;
+        old_count = 1;
+        new_start = 1;
+        new_count = 20;
+        lines =
+          List.init 20 (fun i ->
+              Printf.sprintf "+kc_diff_row_%02d = %d" i i);
+      }
+    in
+    let m_kc_dry =
+      {
+        m_home with
+        config =
+          {
+            m_home.config with
+            dry_run_preview =
+              Config_store.Dry_run_ready
+                {
+                  applied = false;
+                  dry_run = true;
+                  target = "keeper:alpha";
+                  changed = true;
+                  before_sha256 = "sha-old";
+                  new_sha256 = "sha-new";
+                  snapshot_id = None;
+                  snapshot_path = None;
+                  reload_scope = Wire_config.Hot_reload;
+                  unified_diff = "";
+                  diff_hunks = [ kc_dry_hunk ];
+                  validation_warnings = [];
+                };
+          };
+      }
+    in
+    let m_kc_j, _ = step m_kc_dry (char_key ~shift:true "J") in
+    Alcotest.(check bool) (label ^ ": Keeper_config Shift+J scrolls dry-run diff")
+      true (m_kc_j.config.dry_run_scroll_offset > 0);
+    let m_kc_k, _ = step m_kc_j (char_key ~shift:true "K") in
+    Alcotest.(check int) (label ^ ": Keeper_config Shift+K decrements dry-run diff")
+      0 m_kc_k.config.dry_run_scroll_offset;
+    (* '[' / ']' switches keeper dive tabs *)
+    let m_tab_next, _ = step m_home (char_key "]") in
+    Alcotest.(check bool) (label ^ ": ']' leaves Keeper_config to next tab") false
+      (Model.is_keeper_config_active m_tab_next);
+    (* 'e' opens Settings overlay targeting Target_keeper alpha *)
+    let m_set, _ = step m_home (char_key "e") in
+    Alcotest.(check bool) (label ^ ": 'e' opens Settings overlay on Target_keeper")
+      true
+      ((match m_set.nav.overlay with
+        | Some (Nav.Settings _) -> true
+        | Some
+            ( Nav.Palette
+            | Nav.Incidents
+            | Nav.Queue_context _
+            | Nav.Inline_action _
+            | Nav.Help
+            | Nav.System_gate _ )
+        | None ->
+            false)
+       && m_set.config.target = Wire_config.Target_keeper "alpha");
+    (* Dangling edit & target guard: e -> n (Target_keeper_create + editing) -> Ctrl+K -> Esc
+       must cancel editing_field_key and restore Target_keeper alpha! *)
+    let m_leak_n, _ = step m_set (char_key "n") in
+    Alcotest.(check bool) (label ^ ": e -> n enters Target_keeper_create editing")
+      true
+      (m_leak_n.config.target = Wire_config.Target_keeper_create
+       && Config_store.is_editing_field m_leak_n.config);
+    let m_leak_pal, _ = step m_leak_n (char_key ~ctrl:true "k") in
+    Alcotest.(check bool) (label ^ ": Ctrl+K cancels dangling editing_field_key")
+      false (Config_store.is_editing_field m_leak_pal.config);
+    let m_leak_esc, _ = step m_leak_pal (mk_key Keymap.Input.Escape) in
+    Alcotest.(check bool)
+      (label ^ ": e -> n -> Ctrl+K -> Esc restores Target_keeper alpha & editing=false")
+      true
+      (m_leak_esc.config.target = Wire_config.Target_keeper "alpha"
+       && not (Config_store.is_editing_field m_leak_esc.config));
+    (* Rendered hints & body truth check *)
+    let g = render_full ~model:m_edit_c in
+    let txt = grid_all_text g in
+    Alcotest.(check bool) (label ^ ": rendered hints show Ctrl+S") true
+      (Store_scroll.contains_ci ~needle:"Ctrl+S" txt);
+    Alcotest.(check bool) (label ^ ": header omits misleading [↔]") false
+      (Store_scroll.contains_ci ~needle:"[↔]" txt);
+    Alcotest.(check bool) (label ^ ": sub-tab bar omits misleading [←→] Tabs") false
+      (Store_scroll.contains_ci ~needle:"[←→] Tabs" txt);
+    Alcotest.(check bool) (label ^ ": sub-tab bar shows truthful [[ ]] Tabs") true
+      (Store_scroll.contains_ci ~needle:"[[ ]] Tabs" txt);
+    Alcotest.(check bool) (label ^ ": rendered body shows Keeper Profile band") true
+      (Store_scroll.contains_ci ~needle:"alpha Keeper Profile" txt);
+    Alcotest.(check bool) (label ^ ": rendered body shows Activation Mode field") true
+      (Store_scroll.contains_ci ~needle:"Activation Mode" txt);
+    let g_end = render_full ~model:m_end in
+    let txt_end = grid_all_text g_end in
+    Alcotest.(check bool) (label ^ ": rendered body after End shows Limit 09") true
+      (Store_scroll.contains_ci ~needle:"Limit 09" txt_end)
+  in
+  let m_dive =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_config } ];
+        };
+      config = rich_cfg;
+    }
+  in
+  verify_keeper_config_context ~label:"Dive_keeper" m_dive;
+  let m_split =
+    (* Move fleet selection from index 0 (ops/gamma) to index 1 (platform/alpha) *)
+    let m_kp0 = { base with nav = { base.nav with workspace = Nav.Keepers } } in
+    let m_kp_alpha, _ = step m_kp0 (mk_key Keymap.Input.Down) in
+    {
+      m_kp_alpha with
+      nav = { m_kp_alpha.nav with workspace = Nav.Keepers; pane_index = 1 };
+      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_config m_kp_alpha.fleet;
+      config = rich_cfg;
+    }
+  in
+  verify_keeper_config_context ~label:"Split_pane1" m_split;
+  (* Zoomed Keepers (z) Keeper_config: '['/']' keeps zoom active and cycles keeper tabs (not fleet_mode) *)
+  let m_zoom, _ = step m_split (char_key "z") in
+  Alcotest.(check bool) "Zoomed Keepers Keeper_config is active & zoomed" true
+    (m_zoom.nav.zoomed && Model.is_keeper_config_active m_zoom);
+  let txt_zoom = grid_all_text (render_full ~model:m_zoom) in
+  Alcotest.(check bool) "Zoomed Keeper_config sub-tab bar omits [←→] Tabs" false
+    (Store_scroll.contains_ci ~needle:"[←→] Tabs" txt_zoom);
+  let m_zoom_next, _ = step m_zoom (char_key "]") in
+  Alcotest.(check bool)
+    "Zoomed Keeper_config ']' keeps zoom active & cycles keeper_dive_tab (not fleet_mode)"
+    true
+    (m_zoom_next.nav.zoomed
+     && (not (Nav.equal_keeper_tab m_zoom_next.fleet.keeper_dive_tab Nav.Keeper_config))
+     && m_zoom_next.fleet.fleet_mode = m_zoom.fleet.fleet_mode);
+  let m_zoom_back, _ = step m_zoom_next (char_key "[") in
+  Alcotest.(check bool) "Zoomed Keepers '[' returns to Keeper_config while zoomed"
+    true (m_zoom_back.nav.zoomed && Model.is_keeper_config_active m_zoom_back);
+  (* Settings Pane_inspector ←/→ on BOTH wide (140 cols) and narrow (68 cols),
+     INCLUDING when tui.theme & tui.language exist in server runtime.toml schema! *)
+  let runtime_schema_with_tui : Wire_config.config_schema =
+    {
+      target = Wire_config.Target_runtime;
+      keeper = None;
+      file_exists = true;
+      file_sha256 = "sha-rt-tui";
+      sections =
+        [
+          {
+            id = "tui";
+            category = Wire_config.Cat_general_ui;
+            title = "General & UI";
+            fields =
+              [
+                {
+                  table = "tui";
+                  key = "theme";
+                  full_key = "tui.theme";
+                  label = "Theme";
+                  env = None;
+                  description = Some "TUI theme preset";
+                  kind =
+                    Wire_config.Field_enum
+                      [ "midnight"; "arcade_hi"; "paper_light"; "mono" ];
+                  value = Wire_config.Val_string "midnight";
+                  default_value = Some (Wire_config.Val_string "midnight");
+                  provenance = Wire_config.Prov_global;
+                  reload_scope = Wire_config.Hot_reload;
+                  secret = false;
+                  writable = true;
+                };
+                {
+                  table = "tui";
+                  key = "language";
+                  full_key = "tui.language";
+                  label = "Language";
+                  env = None;
+                  description = Some "UI Language";
+                  kind = Wire_config.Field_enum [ "ko"; "en" ];
+                  value = Wire_config.Val_string "en";
+                  default_value = Some (Wire_config.Val_string "en");
+                  provenance = Wire_config.Prov_global;
+                  reload_scope = Wire_config.Hot_reload;
+                  secret = false;
+                  writable = true;
+                };
+              ];
+          };
+        ];
+    }
+  in
+  let m_set_wide0, _ = step base (char_key ~ctrl:true ",") in
+  let m_set_wide =
+    {
+      m_set_wide0 with
+      config =
+        Config_store.apply_schema ~observed_at:t0 runtime_schema_with_tui
+          m_set_wide0.config;
+    }
+  in
+  Alcotest.(check bool) "Settings wide opens on Pane_inspector" true
+    (m_set_wide.config.settings_pane = Config_store.Pane_inspector);
+  let m_set_tree, _ = step m_set_wide (mk_key Keymap.Input.Tab) in
+  Alcotest.(check bool) "Settings wide Tab toggles Pane_inspector -> Pane_tree"
+    true (m_set_tree.config.settings_pane = Config_store.Pane_tree);
+  let m_set_insp, _ = step m_set_tree (mk_key Keymap.Input.Tab) in
+  Alcotest.(check bool) "Settings wide 2nd Tab -> Pane_inspector" true
+    (m_set_insp.config.settings_pane = Config_store.Pane_inspector);
+  let theme_before = m_set_insp.theme_preset in
+  let m_set_r, cmds_pref = step m_set_insp (mk_key Keymap.Input.Right) in
+  Alcotest.(check bool) "Settings wide Right steps schema-backed tui.theme live"
+    true (m_set_r.theme_preset <> theme_before);
+  Alcotest.(check int) "Settings wide Right stages tui.theme dirty=1" 1
+    (Config_store.dirty_count m_set_r.config);
+  Alcotest.(check bool) "Settings wide Right emits Post_tui_preference" true
+    (has_cmd
+       (function
+         | Cmd.Http_post { req = Cmd.Post_tui_preference _; _ } -> true
+         | _ -> false)
+       cmds_pref);
+  let m_set_l, cmds_revert = step m_set_r (mk_key Keymap.Input.Left) in
+  Alcotest.(check int)
+    "Settings wide Left back to original unstages tui.theme (dirty=0)" 0
+    (Config_store.dirty_count m_set_l.config);
+  Alcotest.(check bool)
+    "Settings wide Left back to original STILL reverts live theme_preset" true
+    (m_set_l.theme_preset = theme_before);
+  Alcotest.(check bool)
+    "Settings wide Left back to original STILL emits Post_tui_preference revert"
+    true
+    (has_cmd
+       (function
+         | Cmd.Http_post { req = Cmd.Post_tui_preference _; _ } -> true
+         | _ -> false)
+       cmds_revert);
+  (* Narrow Settings (68 cols): 1-pane inspector ←/→ steps enum directly *)
+  let base_narrow = populated_model ~cols:68 ~rows:28 ~lang:Say.Lang_en () in
+  let m_sn, _ = step base_narrow (char_key ~ctrl:true ",") in
+  let m_sn_r, cmds_sn = step m_sn (mk_key Keymap.Input.Right) in
+  Alcotest.(check bool) "Settings narrow Right steps tui.theme live" true
+    (m_sn_r.theme_preset <> m_sn.theme_preset
+     && has_cmd
+          (function
+            | Cmd.Http_post { req = Cmd.Post_tui_preference _; _ } -> true
+            | _ -> false)
+          cmds_sn);
+  (* Wide Settings Left on non-steppable string field returns to Pane_tree *)
+  let m_set_str =
+    {
+      m_set_insp with
+      config =
+        rich_cfg
+        |> Config_store.set_tab Nav.Settings_keepers_companies
+        |> Config_store.set_pane Config_store.Pane_inspector
+        |> fun c -> { c with selected_field_index = 3 };
+    }
+  in
+  let m_set_back, _ = step m_set_str (mk_key Keymap.Input.Left) in
+  Alcotest.(check bool) "Settings wide Left on Field_string leaves to Pane_tree"
+    true (m_set_back.config.settings_pane = Config_store.Pane_tree);
+  (* Settings dry-run diff J/K scrolls dry_run_scroll_offset cleanly for diff_hunks & exact diff_r.h *)
+  let set_dry_hunk : Wire_config.diff_hunk =
+    {
+      header = "@@ -1,1 +1,40 @@";
+      old_start = 1;
+      old_count = 1;
+      new_start = 1;
+      new_count = 40;
+      lines =
+        List.init 40 (fun i -> Printf.sprintf "+SET_DRY_LINE_%02d = true" i);
+    }
+  in
+  let m_set_dry =
+    {
+      m_set_insp with
+      config =
+        {
+          m_set_insp.config with
+          dry_run_preview =
+            Config_store.Dry_run_ready
+              {
+                applied = false;
+                dry_run = true;
+                target = "runtime";
+                changed = true;
+                before_sha256 = "sha-old";
+                new_sha256 = "sha-new";
+                snapshot_id = None;
+                snapshot_path = None;
+                reload_scope = Wire_config.Hot_reload;
+                unified_diff = "";
+                diff_hunks = [ set_dry_hunk ];
+                validation_warnings = [];
+              };
+        };
+    }
+  in
+  let m_set_j_end =
+    List.init 45 (fun _ -> char_key ~shift:true "J") |> step_keys m_set_dry |> fst
+  in
+  Alcotest.(check bool) "Settings Shift+J scrolls diff_hunks > 0" true
+    (m_set_j_end.config.dry_run_scroll_offset > 0);
+  let txt_set_dry = grid_all_text (render_full ~model:m_set_j_end) in
+  Alcotest.(check bool) "Settings dry-run at bottom renders SET_DRY_LINE_39" true
+    (Store_scroll.contains_ci ~needle:"SET_DRY_LINE_39" txt_set_dry);
+  let m_set_k1, _ = step m_set_j_end (char_key ~shift:true "K") in
+  Alcotest.(check int)
+    "Settings Shift+K from bottom immediately decrements by 1 (zero sticky K)"
+    (m_set_j_end.config.dry_run_scroll_offset - 1)
+    m_set_k1.config.dry_run_scroll_offset
+
+(* ---------- Pillar 2: All 16 ArrowDown / End / Viewport Scroll Bounds ---------- *)
+
+let test_pillar2_scroll_bounds_all_surfaces () =
+  let base = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  (* 1. Keeper_memory & Keeper_work_candle: >160 rows, End reaches exact bottom, no overshoot, ArrowUp steps -1 *)
+  let big_facts =
+    List.init 220 (fun i : Wire_knowledge.memory_fact_entry ->
+        {
+          added_at_rev = Some 2;
+          memory_id = Printf.sprintf "fact-%03d" i;
+          category = "verified";
+          origin = "alpha";
+          text = Printf.sprintf "Detail fact line %03d" i;
+          first_seen_unix = 1700000000.0 +. float_of_int i;
+          last_seen_unix = Some (1700000010.0 +. float_of_int i);
+          retrieval_count = 1;
+          last_retrieved_at_unix = None;
+          heat = Wire_knowledge.Heat_hot;
+        })
+  in
+  let big_diff : Wire_knowledge.memory_diff =
+    {
+      scope = Wire_knowledge.Scope_keeper "alpha";
+      range =
+        {
+          window = Some "24h";
+          from_rev = Some 1;
+          to_rev = Some 2;
+          from_unix = None;
+          to_unix = None;
+        };
+      retrieval_heat =
+        {
+          hot = 220;
+          warm = 0;
+          cold = 0;
+          never_retrieved = 0;
+          total_events = 220;
+          unreadable_event_lines = 0;
+        };
+      body =
+        Wire_knowledge.Keeper_diff
+          {
+            counts =
+              {
+                total_facts_now = 220;
+                added = 220;
+                updated = 0;
+                retracted = 0;
+                invalidated = 1;
+                journal_failures_in_window = 0;
+                journal_quarantines_in_window = 0;
+                undecodable_journal_lines = 0;
+              };
+            revisions = [];
+            added = big_facts;
+            updated = [];
+            retracted = [];
+            invalidated =
+              [
+                {
+                  memory_id = "inv-1";
+                  text = "Invalidated stale premise";
+                  at_rev = 2;
+                  missing_premise_ids = [ "prem-secret-99" ];
+                };
+              ];
+            writer_status = None;
+          };
+    }
+  in
+  let m_kmem =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory } ];
+        };
+      knowledge =
+        Knowledge_store.apply_memory_diff ~observed_at:t0 big_diff
+          base.knowledge;
+    }
+  in
+  let m_kmem_end, _ = step m_kmem (mk_key Keymap.Input.End) in
+  Alcotest.(check bool) "Keeper_memory End goes past old 160 cap (>180)" true
+    (m_kmem_end.nav.dive_scroll_offset > 180);
+  let m_kmem_dn, _ = step m_kmem_end (mk_key Keymap.Input.Down) in
+  Alcotest.(check int) "Keeper_memory Down at End does NOT overshoot"
+    m_kmem_end.nav.dive_scroll_offset m_kmem_dn.nav.dive_scroll_offset;
+  let m_kmem_up, _ = step m_kmem_end (mk_key Keymap.Input.Up) in
+  Alcotest.(check int) "Keeper_memory Up from End immediately decrements by 1"
+    (m_kmem_end.nav.dive_scroll_offset - 1) m_kmem_up.nav.dive_scroll_offset;
+  let txt_kmem = grid_all_text (render_full ~model:m_kmem_end) in
+  Alcotest.(check bool) "Keeper_memory at End renders bottom row (never blank)"
+    true
+    (Store_scroll.contains_ci ~needle:"Detail fact line 219" txt_kmem
+     || Store_scroll.contains_ci ~needle:"Invalidated stale premise" txt_kmem);
+  (* 2. Keeper_work_candle: >160 rows (tasks + schedules + posts), no skip > 0 jump, exact clamp *)
+  let many_alpha_tasks =
+    List.init 100 (fun i ->
+        mk_task
+          ~id:(Printf.sprintf "alpha-task-%03d" i)
+          ~title:(Printf.sprintf "Alpha deliverable %03d" i)
+          ~goal_id:(Some "goal-1"))
+  in
+  let many_alpha_scheds =
+    List.init 100 (fun i ->
+        mk_schedule
+          ~id:(Printf.sprintf "alpha-sched-%03d" i)
+          ~name:(Printf.sprintf "alpha-cron-%03d" i)
+          ~keeper:"alpha")
+  in
+  let many_alpha_posts =
+    List.init 20 (fun i ->
+        mk_post
+          ~id:(Printf.sprintf "alpha-post-%03d" i)
+          ~title:(Printf.sprintf "Alpha board update %03d" i)
+          ~author:"alpha" ~signal:true)
+  in
+  let m_kwc =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_work_candle } ];
+        };
+      work =
+        base.work
+        |> Work_store.apply_planning ~observed_at:t0
+             { goals = Work_store.goals base.work; tasks = many_alpha_tasks }
+        |> Work_store.apply_schedules ~observed_at:t0 (many_alpha_scheds, None);
+      knowledge =
+        Knowledge_store.apply_board ~observed_at:t0
+          {
+            posts = many_alpha_posts;
+            count = List.length many_alpha_posts;
+            sort_by = "hot";
+            signal_only = false;
+          }
+          base.knowledge;
+    }
+  in
+  let m_kwc_end, _ = step m_kwc (mk_key Keymap.Input.End) in
+  Alcotest.(check bool) "Keeper_work_candle End goes past old 160 cap" true
+    (m_kwc_end.nav.dive_scroll_offset > 160);
+  let m_kwc_dn, _ = step m_kwc_end (mk_key Keymap.Input.Down) in
+  Alcotest.(check int) "Keeper_work_candle Down at End clamps cleanly"
+    m_kwc_end.nav.dive_scroll_offset m_kwc_dn.nav.dive_scroll_offset;
+  let txt_kwc = grid_all_text (render_full ~model:m_kwc_end) in
+  Alcotest.(check bool) "Keeper_work_candle at End renders last post row (never blank)"
+    true (Store_scroll.contains_ci ~needle:"Alpha board update 019" txt_kwc);
+  (* 3. Keepers Split pane 1 Keeper_chat uses ~embedded:true geometry & renders exact top msg *)
+  let m_split_chat =
+    let m_kp0 = { base with nav = { base.nav with workspace = Nav.Keepers } } in
+    let m_kp_alpha, _ = step m_kp0 (mk_key Keymap.Input.Down) in
+    {
+      m_kp_alpha with
+      nav = { m_kp_alpha.nav with workspace = Nav.Keepers; pane_index = 1 };
+      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_chat m_kp_alpha.fleet;
+    }
+  in
+  let m_split_home, _ = step m_split_chat (mk_key Keymap.Input.Home) in
+  Alcotest.(check bool)
+    "Keepers Split pane 1 Keeper_chat Home scrolls > 0" true
+    (m_split_home.fleet.chat_scroll_offset > 0);
+  let m_split_up, _ = step m_split_home (mk_key Keymap.Input.Up) in
+  Alcotest.(check int) "Keepers Split pane 1 Keeper_chat Up at Home clamps"
+    m_split_home.fleet.chat_scroll_offset m_split_up.fleet.chat_scroll_offset;
+  let m_split_dn, _ = step m_split_home (mk_key Keymap.Input.Down) in
+  Alcotest.(check int)
+    "Keepers Split pane 1 Keeper_chat Down from Home decrements by 1"
+    (m_split_home.fleet.chat_scroll_offset - 1)
+    m_split_dn.fleet.chat_scroll_offset;
+  let txt_split_top = grid_all_text (render_full ~model:m_split_home) in
+  Alcotest.(check bool)
+    "Keepers Split pane 1 Keeper_chat at Home renders first message (line 0)"
+    true (Store_scroll.contains_ci ~needle:"Message content line 0" txt_split_top);
+  (* 4. Knowledge > Artifacts pane 1 detail_scroll_offset works and renders scrolled slice *)
+  let many_artifacts =
+    List.init 60 (fun i : Wire_knowledge.artifact_entry ->
+        {
+          sha256 = Printf.sprintf "sha-%04d-abcdef" i;
+          name = Printf.sprintf "artifact-%02d.log" i;
+          title = Some (Printf.sprintf "Artifact Report %02d" i);
+          mime_type = "text/plain";
+          bytes = 1024 * (i + 1);
+          created_at_unix = Some 1700000000.0;
+          producer = Some "alpha";
+        })
+  in
+  let m_art_tall =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Knowledge; pane_index = 1 };
+      knowledge =
+        base.knowledge
+        |> Knowledge_store.apply_artifacts ~observed_at:t0 many_artifacts
+        |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts
+        |> Knowledge_store.toggle_wiki_artifacts_submode;
+    }
+  in
+  let m_art_tall_end, _ = step m_art_tall (mk_key Keymap.Input.End) in
+  Alcotest.(check int)
+    "Knowledge > Artifacts pane 1 (tall viewport) clamps 5-row detail cleanly to 0"
+    0 m_art_tall_end.knowledge.detail_scroll_offset;
+  let m_art_dive =
+    {
+      m_art_tall with
+      nav =
+        {
+          m_art_tall.nav with
+          dive_stack =
+            [ Nav.Dive_knowledge (Nav.Artifact_dive "sha-0000-abcdef") ];
+        };
+    }
+  in
+  let m_art_dive_end, _ = step m_art_dive (mk_key Keymap.Input.End) in
+  Alcotest.(check bool)
+    "Knowledge > Artifact_dive End scrolls 60 revisions > 0" true
+    (m_art_dive_end.nav.dive_scroll_offset > 0);
+  let txt_art = grid_all_text (render_full ~model:m_art_dive_end) in
+  Alcotest.(check bool)
+    "Knowledge > Artifact_dive at End renders last artifact-59.log" true
+    (Store_scroll.contains_ci ~needle:"artifact-59.log" txt_art);
+  (* 4b. Knowledge > Wiki pane 1 with wide 22-col TOC rail wraps prose cleanly & reaches exact bottom *)
+  let long_wiki_toc =
+    {
+      (mk_wiki_detail ~slug:"arch-overview" ~title:"Architecture Overview") with
+      body_markdown =
+        "# Architecture Overview\n\n## Section One\n\n"
+        ^ (List.init 60 (fun i ->
+               Printf.sprintf
+                 "- Bullet %02d with enough wrapped prose width to exercise the \
+                  22-column TOC rail layout cleanly"
+                 i)
+           |> String.concat "\n")
+        ^ "\n\n## Final Marker\n\nFINAL_WIKI_BOTTOM_LINE";
+    }
+  in
+  let m_wiki_toc =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Knowledge; pane_index = 1 };
+      knowledge =
+        base.knowledge
+        |> Knowledge_store.apply_wiki_page ~observed_at:t0 long_wiki_toc
+        |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts;
+    }
+  in
+  let m_wiki_end, _ = step m_wiki_toc (mk_key Keymap.Input.End) in
+  Alcotest.(check bool) "Knowledge > Wiki pane 1 (22-col TOC) End scrolls > 40"
+    true (m_wiki_end.knowledge.detail_scroll_offset > 40);
+  let m_wiki_dn, _ = step m_wiki_end (mk_key Keymap.Input.Down) in
+  Alcotest.(check int) "Knowledge > Wiki pane 1 Down at End clamps cleanly"
+    m_wiki_end.knowledge.detail_scroll_offset
+    m_wiki_dn.knowledge.detail_scroll_offset;
+  let txt_wiki = grid_all_text (render_full ~model:m_wiki_end) in
+  Alcotest.(check bool)
+    "Knowledge > Wiki pane 1 at End renders FINAL_WIKI_BOTTOM_LINE (never blank)"
+    true (Store_scroll.contains_ci ~needle:"FINAL_WIKI_BOTTOM_LINE" txt_wiki);
+  (* 5. Runtime > Failover Lanes pane 0 keeps last lane child slots in viewport *)
+  let many_lanes =
+    List.init 8 (fun i : Wire_runtime.failover_lane ->
+        {
+          id = Printf.sprintf "lane-%02d" i;
+          declared = true;
+          runtime_ids =
+            List.init 5 (fun j -> Printf.sprintf "slot-%02d-%d" i j);
+        })
+  in
+  let m_lanes =
+    let rr : Wire_runtime.runtime_resolved_snapshot =
+      {
+        generated_at_iso = "2026-11-22T00:00:00Z";
+        config_path = None;
+        default_route = Some "lane-00";
+        lanes = many_lanes;
+        runtimes = [];
+        usage_windows = None;
+      }
+    in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Runtime; pane_index = 0 };
+      runtime =
+        base.runtime
+        |> Runtime_store.set_tab Nav.Runtime_failover_lanes
+        |> Runtime_store.apply_runtime_resolved ~observed_at:t0 rr;
+    }
+  in
+  let m_lanes_end, _ = step m_lanes (mk_key Keymap.Input.End) in
+  let txt_lanes = grid_all_text (render_full ~model:m_lanes_end) in
+  let last_slot_lbl = Wire_runtime.human_runtime_slot_label "slot-07-4" in
+  Alcotest.(check bool)
+    "Runtime > Failover Lanes pane 0 End keeps last lane's last child slot visible"
+    true (Store_scroll.contains_ci ~needle:last_slot_lbl txt_lanes);
+  (* 6. Queue_context (Ctrl+T) scrolls cleanly bounded *)
+  let many_scheds =
+    List.init 80 (fun i ->
+        mk_schedule
+          ~id:(Printf.sprintf "sched-inst-%03d" i)
+          ~name:(Printf.sprintf "job-%03d" i)
+          ~keeper:"alpha")
+  in
+  let m_q0 =
+    {
+      base with
+      work =
+        Work_store.apply_schedules ~observed_at:t0 (many_scheds, None) base.work;
+    }
+  in
+  let m_q1, _ = step_keys m_q0 [ char_key ~ctrl:true "t"; char_key "]"; char_key "]" ] in
+  let m_q_end, _ = step m_q1 (mk_key Keymap.Input.End) in
+  Alcotest.(check bool) "Queue_context (Ctrl+T) End scrolls > 0" true
+    (m_q_end.nav.queue_scroll_offset > 0);
+  let m_q_dn, _ = step m_q_end (mk_key Keymap.Input.Down) in
+  Alcotest.(check int) "Queue_context Down at End clamps cleanly"
+    m_q_end.nav.queue_scroll_offset m_q_dn.nav.queue_scroll_offset;
+  let txt_q = grid_all_text (render_full ~model:m_q_end) in
+  Alcotest.(check bool) "Queue_context at End renders last schedule row" true
+    (Store_scroll.contains_ci ~needle:"job-079" txt_q);
+  (* 7. Work > Pipeline height-14 race: inner_body_height=14 => false, 15 => true *)
+  let mk_wp_h ~rows =
+    let m0 = populated_model ~cols:140 ~rows ~with_attention:true () in
+    let drafts =
+      m0.drafts
+      |> Drafts.set_focus true
+      |> Drafts.set_current_text "l1\nl2\nl3\nl4\nl5"
+    in
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Work };
+      work = Work_store.set_tab Nav.Work_pipeline m0.work;
+      drafts;
+    }
+  in
+  let m_h14 = mk_wp_h ~rows:24 in
+  let m_h15 = mk_wp_h ~rows:25 in
+  Alcotest.(check int) "m_h14 inner_body_height = 14" 14
+    (Model.inner_body_height m_h14);
+  Alcotest.(check int) "m_h15 inner_body_height = 15" 15
+    (Model.inner_body_height m_h15);
+  Alcotest.(check bool)
+    "work_pipeline_has_linked_card false when inner_body_height=14 (left_rect.h=13)"
+    false (Model.work_pipeline_has_linked_card m_h14);
+  Alcotest.(check bool)
+    "work_pipeline_has_linked_card true when inner_body_height=15 (left_rect.h=14)"
+    true (Model.work_pipeline_has_linked_card m_h15);
+  (* 8. Knowledge > Memory filtered_memory_diff_items matches missing_premise_ids & pane 0 scrolls writers when conflicts=[] *)
+  let k_prem =
+    m_kmem.knowledge |> Knowledge_store.set_filter "prem-secret-99"
+  in
+  Alcotest.(check int)
+    "filtered_memory_diff_items matches inv.missing_premise_ids" 1
+    (List.length (Knowledge_store.filtered_memory_diff_items k_prem));
+  let many_writers =
+    List.init 35 (fun i : Wire_knowledge.librarian_writer_row ->
+        {
+          keeper = Printf.sprintf "writer-%02d" i;
+          state = Wire_knowledge.Writer_open;
+          available_act_tokens = [];
+          snapshot_file = None;
+        })
+  in
+  let m_mem_w =
+    let wm : Wire_knowledge.world_memory =
+      {
+        ledger_state = Wire_knowledge.World_ledger_available;
+        ledger_sha256 = Some "sha-wm";
+        claims_count = 0;
+        facts_count = 0;
+        conflicts_count = 0;
+        excluded_count = 0;
+        claims = [];
+        active_conflicts = [];
+        briefing =
+          {
+            status = Wire_knowledge.Briefing_missing;
+            text = None;
+            source_ids_count = 0;
+            error = None;
+            building_pass = None;
+          };
+        librarian_writers =
+          Wire_knowledge.Writers_running
+            { error_count = 0; warn_count = 0; keepers = many_writers };
+        ordinary_absence_detail = None;
+      }
+    in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Knowledge; pane_index = 0 };
+      knowledge =
+        base.knowledge
+        |> Knowledge_store.set_tab Nav.Knowledge_memory
+        |> Knowledge_store.apply_world_memory ~observed_at:t0 wm;
+    }
+  in
+  let m_mem_w_end, _ = step m_mem_w (mk_key Keymap.Input.End) in
+  Alcotest.(check int)
+    "Knowledge > Memory pane 0 scrolls librarian_writers when conflicts=[]" 34
+    m_mem_w_end.knowledge.selected_index;
+  (* 9. Incidents detail J/K scrolls detail_scroll_offset *)
+  let m_inc =
+    let inc, _ =
+      Incidents.push ~occurred_at_unix:1700000000.0
+        ~source:Health.Source_client_http
+        ~summary:(Say.make ~ko:"긴 트레이스" ~en:"long trace")
+        ~detail:
+          (List.init 40 (fun i -> Printf.sprintf "frame %02d: stack detail" i)
+           |> String.concat "\n")
+        ~status:Health.Resolved base.incidents
+    in
+    {
+      base with
+      incidents = inc;
+      nav = { base.nav with overlay = Some Nav.Incidents };
+    }
+  in
+  let m_inc_j, _ = step m_inc (char_key ~shift:true "J") in
+  Alcotest.(check bool) "Incidents Shift+J scrolls detail_scroll_offset" true
+    (m_inc_j.incidents.detail_scroll_offset > 0);
+  ignore (render_full ~model:m_inc_j);
+  (* 10. Non-trivial bottom-row render + zero-sticky-ArrowUp proof for EVERY fixed surface & all 9 Dives *)
+  let assert_scroll_exact ~label ~needle ~get_off (m0 : Model.t) =
+    let m_end, _ = step m0 (mk_key Keymap.Input.End) in
+    let off_end = get_off m_end in
+    Alcotest.(check bool) (label ^ ": End scrolls > 0") true (off_end > 0);
+    let m_dn, _ = step m_end (mk_key Keymap.Input.Down) in
+    Alcotest.(check int) (label ^ ": Down at End clamps cleanly (zero overshoot)")
+      off_end (get_off m_dn);
+    let m_up, _ = step m_end (mk_key Keymap.Input.Up) in
+    Alcotest.(check int)
+      (label ^ ": Up from End decrements by 1 (zero sticky ArrowUp)")
+      (off_end - 1) (get_off m_up);
+    let txt = grid_all_text (render_full ~model:m_end) in
+    Alcotest.(check bool) (label ^ ": render_full at End shows bottom sentinel " ^ needle)
+      true (Store_scroll.contains_ci ~needle txt)
+  in
+  (* 10a. 5 Runtime > Quotas pane 0: 20 windows (> 14-row 52% sub_rect) *)
+  let twenty_quota_accts : Wire_runtime.account_usage list =
+    List.init 20 (fun i : Wire_runtime.account_usage ->
+        {
+          scope = Printf.sprintf "qprov-%02d" i;
+          scope_id = Printf.sprintf "qacct-%02d" i;
+          providers =
+            [
+              {
+                id = Printf.sprintf "qprov-%02d" i;
+                display_name = Printf.sprintf "QuotaProv-%02d" i;
+              };
+            ];
+          state =
+            Wire_runtime.Account_reported
+              [
+                {
+                  limit_id = Some "5h";
+                  kind = Wire_runtime.Window_five_hour;
+                  role = Wire_runtime.Role_gates_model_calls;
+                  utilization = Wire_runtime.Util_percent (90 - (i * 3));
+                  resets_at_unix = Some 1700018000.0;
+                  observed_at_unix = 1700000000.0;
+                };
+              ];
+          cost_state = Format_val.Subscription_zero;
+        })
+  in
+  let m_quotas0 =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Runtime; pane_index = 0 };
+      runtime =
+        base.runtime
+        |> Runtime_store.set_tab Nav.Runtime_quotas_credits
+        |> Runtime_store.apply_usage_windows ~observed_at:t0
+             { since_unix = 1700000000.0; accounts = twenty_quota_accts };
+    }
+  in
+  assert_scroll_exact ~label:"Runtime > Quotas pane 0 (20 windows)"
+    ~needle:"QuotaProv-19"
+    ~get_off:(fun m -> m.runtime.quota_scroll_offset)
+    m_quotas0;
+  (* 10b. 5 Runtime > Failover Lanes pane 1: 18 slots (> ~10-row 52% insp_rect) *)
+  let big_lane_rr : Wire_runtime.runtime_resolved_snapshot =
+    {
+      generated_at_iso = "2026-11-22T00:00:00Z";
+      config_path = None;
+      default_route = Some "lane-big";
+      lanes =
+        [
+          {
+            id = "lane-big";
+            declared = true;
+            runtime_ids =
+              List.init 18 (fun i -> Printf.sprintf "big-slot-%02d" i);
+          };
+        ];
+      runtimes = [];
+      usage_windows = None;
+    }
+  in
+  let m_lane_p1 =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Runtime; pane_index = 1 };
+      runtime =
+        base.runtime
+        |> Runtime_store.set_tab Nav.Runtime_failover_lanes
+        |> Runtime_store.apply_runtime_resolved ~observed_at:t0 big_lane_rr;
+    }
+  in
+  assert_scroll_exact ~label:"Runtime > Failover Lanes pane 1 (18 slots)"
+    ~needle:(Wire_runtime.human_runtime_slot_label "big-slot-17")
+    ~get_off:(fun m -> m.runtime.detail_scroll_offset)
+    m_lane_p1;
+  (* 10c. Keeper_work_candle with Done & Cancelled tasks (matches Ops_common.task_assignee_opt) *)
+  let done_and_cancel_tasks =
+    List.init 25 (fun i ->
+        {
+          (mk_task
+             ~id:(Printf.sprintf "done-t-%02d" i)
+             ~title:(Printf.sprintf "Done task %02d" i)
+             ~goal_id:(Some "goal-1"))
+          with
+          status =
+            if i mod 2 = 0 then
+              Wire_work.Done
+                {
+                  assignee = "alpha";
+                  completed_at = "2026-11-22T02:00:00Z";
+                  notes = None;
+                }
+            else
+              Wire_work.Cancelled
+                {
+                  cancelled_by = "alpha";
+                  cancelled_at = "2026-11-22T02:00:00Z";
+                  reason = Some "superseded";
+                };
+        })
+  in
+  let m_kwc_dc =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_work_candle } ];
+        };
+      work =
+        base.work
+        |> Work_store.apply_planning ~observed_at:t0
+             { goals = Work_store.goals base.work; tasks = done_and_cancel_tasks }
+        |> Work_store.apply_schedules ~observed_at:t0
+             (List.init 10 (fun i ->
+                  mk_schedule
+                    ~id:(Printf.sprintf "dc-s-%02d" i)
+                    ~name:(Printf.sprintf "dc-sched-%02d" i)
+                    ~keeper:"alpha")
+             , None);
+      knowledge =
+        Knowledge_store.apply_board ~observed_at:t0
+          {
+            posts =
+              List.init 8 (fun i ->
+                  mk_post
+                    ~id:(Printf.sprintf "dc-p-%02d" i)
+                    ~title:
+                      (if i = 7 then "CANDLE_LAST_POST"
+                       else Printf.sprintf "Candle post %02d" i)
+                    ~author:"alpha" ~signal:true);
+            count = 8;
+            sort_by = "hot";
+            signal_only = false;
+          }
+          base.knowledge;
+    }
+  in
+  assert_scroll_exact ~label:"Keeper_work_candle (Done + Cancelled tasks)"
+    ~needle:"CANDLE_LAST_POST"
+    ~get_off:(fun m -> m.nav.dive_scroll_offset)
+    m_kwc_dc;
+  (* 10d. 3 Knowledge > Board pane 1 (wrapped long post body, Fixed 1 + 0.48/0.54) *)
+  let long_board_post =
+    {
+      (mk_post ~id:"post-long" ~title:"Long Wrapped Post" ~author:"alpha"
+         ~signal:true)
+      with
+      body =
+        (List.init 45 (fun i ->
+             Printf.sprintf
+               "Paragraph %02d with enough prose text to wrap cleanly inside \
+                the 52%% board detail pane width."
+               i)
+         |> String.concat "\n\n")
+        ^ "\n\nBOARD_LAST_SENTINEL";
+    }
+  in
+  let m_board_p1 =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Knowledge; pane_index = 1 };
+      knowledge =
+        base.knowledge
+        |> Knowledge_store.set_tab Nav.Knowledge_board
+        |> Knowledge_store.apply_board ~observed_at:t0
+             {
+               posts = [ long_board_post ];
+               count = 1;
+               sort_by = "recent";
+               signal_only = true;
+             };
+    }
+  in
+  assert_scroll_exact ~label:"Knowledge > Board pane 1 (wrapped post)"
+    ~needle:"BOARD_LAST_SENTINEL"
+    ~get_off:(fun m -> m.knowledge.detail_scroll_offset)
+    m_board_p1;
+  (* 10e. 3 Knowledge > Memory pane 1 & Memory_diff_dive with World_diff (unconditional 2-row heat bar) *)
+  let world_diff_40 : Wire_knowledge.memory_diff =
+    {
+      scope = Wire_knowledge.Scope_world;
+      range =
+        {
+          window = Some "24h";
+          from_rev = Some 1;
+          to_rev = Some 40;
+          from_unix = None;
+          to_unix = None;
+        };
+      retrieval_heat =
+        {
+          hot = 0;
+          warm = 0;
+          cold = 0;
+          never_retrieved = 0;
+          total_events = 0;
+          unreadable_event_lines = 0;
+        };
+      body =
+        Wire_knowledge.World_diff
+          {
+            counts =
+              {
+                total_claims_now = 40;
+                added = 40;
+                updated = 0;
+                retracted = 0;
+                incomplete_batches = 0;
+                aborted_batches = 0;
+              };
+            unparseable_timestamps = 0;
+            revisions = [];
+            added =
+              List.init 40 (fun i ->
+                  {
+                    Wire_knowledge.seq = i + 1;
+                    batch_id = Printf.sprintf "wb-%02d" i;
+                    fact_id = Printf.sprintf "wf-%02d" i;
+                    summary = Printf.sprintf "WORLD_CLAIM_LAST_%02d" i;
+                    recorded_at = "2026-11-22T10:00:00Z";
+                    payload = `Null;
+                  });
+            updated = [];
+            retracted = [];
+          };
+    }
+  in
+  let m_mem_world =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Knowledge; pane_index = 1 };
+      knowledge =
+        base.knowledge
+        |> Knowledge_store.set_tab Nav.Knowledge_memory
+        |> Knowledge_store.apply_memory_diff ~observed_at:t0 world_diff_40;
+    }
+  in
+  assert_scroll_exact ~label:"Knowledge > Memory pane 1 (World_diff)"
+    ~needle:"WORLD_CLAIM_LAST_39"
+    ~get_off:(fun m -> m.knowledge.diff_scroll_offset)
+    m_mem_world;
+  let m_mem_dive_z =
+    {
+      m_mem_world with
+      nav =
+        {
+          m_mem_world.nav with
+          zoomed = true;
+          dive_stack =
+            [
+              Nav.Dive_knowledge
+                (Nav.Memory_diff_dive { keeper = None; from_rev = 1; to_rev = 40 });
+            ];
+        };
+    }
+  in
+  assert_scroll_exact ~label:"Memory_diff_dive (World_diff + zoomed)"
+    ~needle:"WORLD_CLAIM_LAST_39"
+    ~get_off:(fun m -> m.nav.dive_scroll_offset)
+    m_mem_dive_z;
+  (* 10f. 6 Infra > Sandboxes pane 1 (microVM + 35 logs), Logs pane 1 (long wrapped msg + 30-key JSON), Repos pane 1 (with sel_repo link_rect) *)
+  let sb_35_logs =
+    List.init 35 (fun i : Wire_infra.system_log_entry ->
+        {
+          seq = i + 1;
+          ts = Printf.sprintf "2026-11-22T10:%02d:00Z" (i mod 60);
+          level = Wire_infra.Log_info;
+          source = "sandbox";
+          module_name = "alpha";
+          message = Printf.sprintf "SB_LOG_SENT_%02d" i;
+          keeper = Some "alpha";
+          turn_id = None;
+          category = None;
+          details = `Assoc [];
+        })
+  in
+  let m_sb_p1 =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Infra; pane_index = 1 };
+      infra =
+        base.infra
+        |> Infra_store.set_tab Nav.Infra_sandboxes
+        |> Infra_store.apply_log_snapshot sb_35_logs;
+    }
+  in
+  assert_scroll_exact ~label:"Infra > Sandboxes pane 1 (microVM + 35 logs)"
+    ~needle:"SB_LOG_SENT_00"
+    ~get_off:(fun m -> m.infra.detail_scroll_offset)
+    m_sb_p1;
+  let rich_log_entry : Wire_infra.system_log_entry =
+    {
+      seq = 1;
+      ts = "2026-11-22T10:00:00Z";
+      level = Wire_infra.Log_warn;
+      source = "server";
+      module_name = "http";
+      message =
+        String.concat " "
+          (List.init 30 (fun i -> Printf.sprintf "wrapped_token_%02d" i));
+      keeper = Some "alpha";
+      turn_id = None;
+      category = None;
+      details =
+        `Assoc
+          (List.init 30 (fun i ->
+               ( Printf.sprintf "k_%02d" i
+               , `String (Printf.sprintf "LOG_JSON_BOTTOM_%02d" i) )));
+    }
+  in
+  let m_logs_p1 =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Infra; pane_index = 1 };
+      infra =
+        base.infra
+        |> Infra_store.set_tab Nav.Infra_activity_logs
+        |> Infra_store.apply_log_snapshot [ rich_log_entry ];
+    }
+  in
+  assert_scroll_exact ~label:"Infra > Logs pane 1 (wrapped msg + 30-key JSON)"
+    ~needle:"LOG_JSON_BOTTOM_29"
+    ~get_off:(fun m -> m.infra.detail_scroll_offset)
+    m_logs_p1;
+  let big_repo_diff =
+    "@@ -1,1 +1,45 @@\n"
+    ^ (List.init 45 (fun i -> Printf.sprintf "+let repo_line_%02d = %d" i i)
+       |> String.concat "\n")
+  in
+  let m_repos_p1 =
+    let fc : Wire_infra.file_change =
+      {
+        path = "lib/masc_tui/store/update_nav.ml";
+        kind = Wire_infra.File_modified;
+        additions = obs 45;
+        deletions = obs 0;
+        keeper = Some "alpha";
+        diff_preview = Some big_repo_diff;
+      }
+    in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Infra; pane_index = 1 };
+      infra =
+        base.infra
+        |> Infra_store.set_tab Nav.Infra_repos_changes
+        |> Infra_store.apply_file_changes ~observed_at:t0 ~keeper:"alpha" [ fc ];
+    }
+  in
+  assert_scroll_exact ~label:"Infra > Repos pane 1 (with sel_repo link row)"
+    ~needle:"repo_line_44"
+    ~get_off:(fun m -> m.infra.diff_scroll_offset)
+    m_repos_p1;
+  (* 10g. 2 Work > Pipeline pane 2 (long Markdown + rejected completion_contract) *)
+  let long_pipe_goal =
+    {
+      (mk_goal ~id:"goal-1" ~title:"Long Pipeline Goal"
+         ~phase:Wire_work.Executing)
+      with
+      measure =
+        (List.init 35 (fun i -> Printf.sprintf "- Measure requirement %02d" i)
+         |> String.concat "\n")
+        ^ "\n- PIPE_MD_BOTTOM_34";
+      procedure = "Verify bottom sentinel";
+    }
+  in
+  let rejected_contract_verif : Wire_work.verification_request =
+    {
+      (mk_verif ~req_id:"verif-1" ~task_id:"task-1" ~title:"Contract Check")
+      with
+      completion_contract =
+        List.init 18 (fun i -> Printf.sprintf "CONTRACT_ITEM_%02d" i);
+      required_artifacts = [ "art-1.log"; "art-2.log" ];
+      submitted_evidence = [ "ev-1.log" ];
+      review_observation =
+        Some
+          {
+            state = Wire_work.Review_rejected;
+            actor = "verifier";
+            detail = "Missing required contract items";
+          };
+    }
+  in
+  let m_pipe_p2 =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Work; pane_index = 2 };
+      work =
+        base.work
+        |> Work_store.set_tab Nav.Work_pipeline
+        |> Work_store.apply_planning ~observed_at:t0
+             { goals = [ long_pipe_goal ]; tasks = Work_store.tasks base.work }
+        |> Work_store.apply_verifications ~observed_at:t0
+             [ rejected_contract_verif ];
+    }
+  in
+  assert_scroll_exact ~label:"Work > Pipeline pane 2 (long Markdown + contract diff)"
+    ~needle:"PIPE_MD_BOTTOM_34"
+    ~get_off:(fun m -> m.work.detail_scroll_offset)
+    m_pipe_p2;
+  let m_pipe_contract_only =
+    let short_goal =
+      {
+        long_pipe_goal with
+        measure = "Short measure";
+        procedure = "Short procedure";
+      }
+    in
+    {
+      m_pipe_p2 with
+      work =
+        m_pipe_p2.work
+        |> Work_store.apply_planning ~observed_at:t0
+             { goals = [ short_goal ]; tasks = Work_store.tasks base.work };
+    }
+  in
+  assert_scroll_exact ~label:"Work > Pipeline pane 2 (completion_contract diff)"
+    ~needle:"CONTRACT_ITEM_17"
+    ~get_off:(fun m -> m.work.detail_scroll_offset)
+    m_pipe_contract_only;
+  (* 10h. 2 Work > Inbox pane 1: ALL 4 scrollable payloads (Tool_approval, Gate, Ask, Goal_confirmation) *)
+  let mk_inbox_model payload =
+    let entry : Attention.entry =
+      {
+        id = "inbox-test";
+        kind =
+          Health.Held_tool_approval
+            { request_id = "req-1"; keeper = "alpha"; tool = "bash" };
+        title = "Inbox Scroll Test";
+        summary = "Testing band-subtracted scroll bounds";
+        keeper = Some "alpha";
+        created_at_unix = Some 1700000000.0;
+        payload;
+      }
+    in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Work; pane_index = 1 };
+      work = Work_store.set_tab Nav.Work_inbox base.work;
+      attention = { base.attention with items = [ entry ]; triage_index = 0 };
+    }
+  in
+  let ta_json =
+    `Assoc
+      (List.init 30 (fun i ->
+           ( Printf.sprintf "arg_%02d" i
+           , `String (Printf.sprintf "TA_ARG_BOTTOM_%02d" i) )))
+    |> Yojson.Safe.to_string
+  in
+  assert_scroll_exact ~label:"Work > Inbox pane 1 (Payload_tool_approval)"
+    ~needle:"TA_ARG_BOTTOM_29"
+    ~get_off:(fun m -> m.work.detail_scroll_offset)
+    (mk_inbox_model
+       (Attention.Payload_tool_approval
+          {
+            approval_id = "appr-big";
+            tool_call_id = "tc-big";
+            keeper = "alpha";
+            tool = "bash";
+            args_preview = ta_json;
+            question = "Approve command?";
+            because = Some "testing";
+            asked_at = 1700000000.0;
+            timeout_sec = 300.0;
+          }));
+  let gate_json =
+    `Assoc
+      (List.init 32 (fun i ->
+           ( Printf.sprintf "in_%02d" i
+           , `String (Printf.sprintf "GATE_IN_BOTTOM_%02d" i) )))
+    |> Yojson.Safe.to_string
+  in
+  assert_scroll_exact ~label:"Work > Inbox pane 1 (Payload_gate)"
+    ~needle:"GATE_IN_BOTTOM_31"
+    ~get_off:(fun m -> m.work.detail_scroll_offset)
+    (mk_inbox_model
+       (Attention.Payload_gate
+          {
+            id = "gate-big";
+            keeper = "alpha";
+            tool_name = "deploy";
+            input_preview = Some gate_json;
+            waiting_s = Some 5.0;
+            phase = "pending";
+          }));
+  assert_scroll_exact ~label:"Work > Inbox pane 1 (Payload_ask)"
+    ~needle:"ASK_BOTTOM_34"
+    ~get_off:(fun m -> m.work.detail_scroll_offset)
+    (mk_inbox_model
+       (Attention.Payload_ask
+          {
+            ask_id = "ask-big";
+            keeper = "alpha";
+            asked_at = 1700000000.0;
+            context = Some "Context header";
+            questions =
+              [
+                {
+                  question_id = "q-big";
+                  header = "Long Ask";
+                  prompt =
+                    (List.init 35 (fun i -> Printf.sprintf "- Ask line %02d" i)
+                     |> String.concat "\n")
+                    ^ "\n- ASK_BOTTOM_34";
+                  mode = Wire_work.Ask_single;
+                  allow_free_text = false;
+                  free_text_hint = None;
+                  choices =
+                    [ { choice_id = "ok"; label = "OK"; description = None } ];
+                };
+              ];
+            resolution = Wire_work.Ask_open;
+          }));
+  assert_scroll_exact ~label:"Work > Inbox pane 1 (Payload_goal_confirmation)"
+    ~needle:"CONF_BOTTOM_34"
+    ~get_off:(fun m -> m.work.detail_scroll_offset)
+    (mk_inbox_model
+       (Attention.Payload_goal_confirmation
+          {
+            (mk_goal ~id:"goal-conf" ~title:"Confirm Me"
+               ~phase:Wire_work.Awaiting_confirmation)
+            with
+            measure = "Measure";
+            procedure =
+              (List.init 35 (fun i -> Printf.sprintf "- Conf step %02d" i)
+               |> String.concat "\n")
+              ^ "\n- CONF_BOTTOM_34";
+          }));
+  (* 10i. Help (?) on short terminals 100x28 & 80x24 (overlay_rect.h = rows - 2 -> modal_h = rows - 4) *)
+  let m_help_28 =
+    let m0 = populated_model ~cols:100 ~rows:28 ~lang:Say.Lang_en () in
+    { m0 with nav = { m0.nav with overlay = Some Nav.Help } }
+  in
+  let m_help_end, _ = step m_help_28 (mk_key Keymap.Input.End) in
+  Alcotest.(check bool) "Help (100x28) End scrolls > 0" true
+    (m_help_end.nav.help_scroll_offset > 0);
+  let m_help_dn, _ = step m_help_end (mk_key Keymap.Input.Down) in
+  Alcotest.(check int) "Help (100x28) Down at End clamps"
+    m_help_end.nav.help_scroll_offset m_help_dn.nav.help_scroll_offset;
+  let m_help_up, _ = step m_help_end (mk_key Keymap.Input.Up) in
+  Alcotest.(check int) "Help (100x28) Up from End decrements by 1"
+    (m_help_end.nav.help_scroll_offset - 1) m_help_up.nav.help_scroll_offset;
+  let txt_help_end = grid_all_text (render_full ~model:m_help_end) in
+  let txt_help_top = grid_all_text (render_full ~model:m_help_28) in
+  Alcotest.(check bool) "Help (100x28) End renders scrolled bottom view" true
+    (not (String.equal txt_help_top txt_help_end));
+  (* 10j. Queue_context (Ctrl+T) at rows=24 for BOTH Drawer_queue and Drawer_schedules *)
+  let m_q24 =
+    let m0 = populated_model ~cols:100 ~rows:24 ~lang:Say.Lang_en () in
+    let drafts =
+      let rec add_tx i d =
+        if i >= 25 then d
+        else
+          let d_text =
+            Drafts.set_current_text (Printf.sprintf "TX_QUEUE_%02d" i) d
+          in
+          let d' =
+            match
+              Drafts.enqueue_submission ~now:t0 ~keeper:"alpha"
+                ~mode:Drafts.Mode_follow_up d_text
+            with
+            | Some (d_next, _) -> d_next
+            | None -> d_text
+          in
+          add_tx (i + 1) d'
+      in
+      add_tx 0 (Drafts.set_active_keeper "alpha" m0.drafts)
+    in
+    {
+      m0 with
+      drafts;
+      work =
+        Work_store.apply_schedules ~observed_at:t0 (many_scheds, None) m0.work;
+      nav = { m0.nav with overlay = Some (Nav.Queue_context Nav.Drawer_queue) };
+    }
+  in
+  assert_scroll_exact ~label:"Queue_context Drawer_queue (rows=24)"
+    ~needle:"TX_QUEUE_24"
+    ~get_off:(fun m -> m.nav.queue_scroll_offset)
+    m_q24;
+  let m_q24_sched =
+    {
+      m_q24 with
+      nav =
+        { m_q24.nav with overlay = Some (Nav.Queue_context Nav.Drawer_schedules) };
+    }
+  in
+  assert_scroll_exact ~label:"Queue_context Drawer_schedules (rows=24)"
+    ~needle:"job-079"
+    ~get_off:(fun m -> m.nav.queue_scroll_offset)
+    m_q24_sched;
+  (* 10k. Incidents detail J/K with compact 1-line embedded JSON (flattens to 30+ lines!) *)
+  let compact_inc_json =
+    "payload "
+    ^ (`Assoc
+         (List.init 28 (fun i ->
+              ( Printf.sprintf "k%02d" i
+              , `String (Printf.sprintf "INC_JSON_LAST_%02d" i) )))
+       |> Yojson.Safe.to_string)
+  in
+  let m_inc_json =
+    let inc, _ =
+      Incidents.push ~occurred_at_unix:1700000000.0
+        ~source:Health.Source_client_http
+        ~summary:(Say.make ~ko:"컴팩트 JSON" ~en:"compact json")
+        ~detail:compact_inc_json ~status:Health.Resolved base.incidents
+    in
+    {
+      base with
+      incidents = inc;
+      nav = { base.nav with overlay = Some Nav.Incidents };
+    }
+  in
+  let m_inc_json_bot =
+    List.init 40 (fun _ -> char_key ~shift:true "J")
+    |> step_keys m_inc_json |> fst
+  in
+  Alcotest.(check bool) "Incidents Shift+J scrolls compact 1-line JSON > 0" true
+    (m_inc_json_bot.incidents.detail_scroll_offset > 0);
+  let txt_inc_j = grid_all_text (render_full ~model:m_inc_json_bot) in
+  Alcotest.(check bool) "Incidents compact JSON at bottom renders INC_JSON_LAST_27"
+    true (Store_scroll.contains_ci ~needle:"INC_JSON_LAST_27" txt_inc_j);
+  let m_inc_json_k, _ = step m_inc_json_bot (char_key ~shift:true "K") in
+  Alcotest.(check int)
+    "Incidents Shift+K from bottom immediately decrements by 1"
+    (m_inc_json_bot.incidents.detail_scroll_offset - 1)
+    m_inc_json_k.incidents.detail_scroll_offset;
+  (* 10l. Populated long fixtures for ALL 9 non-chat Dives (bottom-row rendered + zero sticky Up!) *)
+  let long_comments =
+    List.init 45 (fun i : Wire_knowledge.board_comment ->
+        {
+          id = Printf.sprintf "c-%02d" i;
+          post_id = "post-1";
+          parent_id = None;
+          author = "alpha";
+          body = Printf.sprintf "Comment number %02d with verification detail" i;
+          created_at_unix = 1700000100.0 +. float_of_int i;
+          score = 1;
+        })
+  in
+  let post1 =
+    match Knowledge_store.selected_post base.knowledge with
+    | Some p -> p
+    | None -> mk_post ~id:"post-1" ~title:"Post 1" ~author:"alpha" ~signal:true
+  in
+  let dive_tasks =
+    List.init 35 (fun i ->
+        {
+          (mk_task
+             ~id:(Printf.sprintf "task-%02d" (i + 1))
+             ~title:(Printf.sprintf "GD_TASK_%02d" i)
+             ~goal_id:(Some "goal-1"))
+          with
+          description =
+            Some
+              ((List.init 40 (fun j -> Printf.sprintf "- Desc line %02d" j)
+                |> String.concat "\n")
+               ^ "\n- TD_DESC_39");
+        })
+  in
+  let dive_verif : Wire_work.verification_request =
+    {
+      (mk_verif ~req_id:"verif-1" ~task_id:"task-01" ~title:"GD_TASK_00")
+      with
+      completion_contract =
+        List.init 25 (fun i -> Printf.sprintf "VD_CONTRACT_%02d" i);
+      required_artifacts =
+        List.init 15 (fun i -> Printf.sprintf "vd-art-%02d.log" i);
+      submitted_evidence = [ "vd-art-00.log" ];
+      review_observation =
+        Some
+          {
+            state = Wire_work.Review_rejected;
+            actor = "verifier";
+            detail = "Missing artifacts";
+          };
+    }
+  in
+  let dive_logs =
+    List.init 45 (fun i : Wire_infra.system_log_entry ->
+        {
+          seq = i + 1;
+          ts = Printf.sprintf "2026-11-22T11:%02d:00Z" (i mod 60);
+          level = Wire_infra.Log_info;
+          source = "server";
+          module_name = "alpha";
+          message = Printf.sprintf "DIVE_LOG_%02d" i;
+          keeper = if i = 0 then None else Some "alpha";
+          turn_id = None;
+          category = None;
+          details = `Assoc [];
+        })
+  in
+  let dive_inc, dive_inc_id =
+    Incidents.push ~occurred_at_unix:1700000000.0
+      ~source:(Health.Source_keeper "alpha")
+      ~summary:(Say.make ~ko:"모듈 로그 매칭" ~en:"module log match")
+      ~detail:"short incident detail" ~status:Health.Resolved base.incidents
+  in
+  let m_dives_base =
+    {
+      base with
+      work =
+        base.work
+        |> Work_store.apply_planning ~observed_at:t0
+             { goals = [ long_pipe_goal ]; tasks = dive_tasks }
+        |> Work_store.apply_verifications ~observed_at:t0 [ dive_verif ];
+      knowledge =
+        base.knowledge
+        |> Knowledge_store.apply_thread ~observed_at:t0 (post1, long_comments)
+        |> Knowledge_store.apply_wiki_page ~observed_at:t0 long_wiki_toc
+        |> Knowledge_store.apply_artifacts ~observed_at:t0 many_artifacts;
+      runtime = m_lanes.runtime;
+      infra = Infra_store.apply_log_snapshot dive_logs base.infra;
+      incidents = dive_inc;
+    }
+  in
+  let dives_with_sentinels =
+    [
+      ("Goal_dive", Nav.Dive_work (Nav.Goal_dive "goal-1"), "GD_TASK_34");
+      ("Task_dive", Nav.Dive_work (Nav.Task_dive "task-01"), "TD_DESC_39");
+      ( "Verification_dive"
+      , Nav.Dive_work (Nav.Verification_dive "verif-1")
+      , "Missing artifacts" );
+      ("Thread_dive", Nav.Dive_knowledge (Nav.Thread_dive "post-1"), "Comment number 44");
+      ("Wiki_dive", Nav.Dive_knowledge (Nav.Wiki_dive "arch-overview"), "FINAL_WIKI_BOTTOM_LINE");
+      ("Artifact_dive", Nav.Dive_knowledge (Nav.Artifact_dive "sha-0000-abcdef"), "artifact-59.log");
+      ("Sandbox_dive", Nav.Dive_infra (Nav.Sandbox_dive "alpha"), "DIVE_LOG_01");
+      ("Lane_dive", Nav.Dive_infra (Nav.Lane_dive "lane-00"), "DIVE_LOG_00");
+      ("Incident_dive (module_name match)", Nav.Dive_infra (Nav.Incident_dive dive_inc_id.id), "DIVE_LOG_00");
+    ]
+  in
+  List.iter
+    (fun (dname, dive, needle) ->
+      let md0 =
+        { m_dives_base with nav = { m_dives_base.nav with dive_stack = [ dive ] } }
+      in
+      assert_scroll_exact ~label:dname ~needle
+        ~get_off:(fun m -> m.nav.dive_scroll_offset)
+        md0)
+    dives_with_sentinels
+
+(* ---------- Pillar 3: Centered-Rectangle Keeper Chat UX & Korean IME Guard ---------- *)
+
+let test_pillar3_keeper_chat_empty_loading_and_korean_ime () =
+  let base = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
+  let theme = Theme.of_preset base.theme_preset in
+  let count_surface2_cells (g : Cell_grid.t) =
+    (* Scan the chat transcript canvas (excluding the top header/tab bar y<5
+       and the bottom composer/status bar y>=rows-6) for any floating
+       centered surface_2 rectangle. *)
+    let s2 = Color.of_rgb theme.surface_2 in
+    let n = ref 0 in
+    for y = 5 to Cell_grid.rows g - 7 do
+      for x = 0 to Cell_grid.cols g - 1 do
+        let c = Cell_grid.get g ~x ~y in
+        if Color.equal c.style.bg s2 then incr n
+      done
+    done;
+    !n
+  in
+  (* 1. Observed.Loading _ renders clean 1-line left-aligned whisper, ZERO surface_2 centered box *)
+  let m_loading =
+    let empty_fleet =
+      let f0 =
+        Fleet_store.empty
+        |> Fleet_store.apply_keepers ~observed_at:t0
+             [
+               mk_keeper ~name:"fresh" ~company:"platform"
+                 ~health:Wire_fleet.Keeper_healthy;
+             ]
+      in
+      {
+        f0 with
+        chat_histories =
+          Fleet_store.String_map.add "fresh"
+            (Observed.loading ~since_ns:t0)
+            f0.chat_histories;
+      }
+    in
+    {
+      base with
+      fleet = empty_fleet;
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "fresh"; tab = Nav.Keeper_chat } ];
+        };
+    }
+  in
+  let g_load = render_full ~model:m_loading in
+  Alcotest.(check int)
+    "Observed.Loading Keeper_chat has ZERO centered surface_2 rectangle cells" 0
+    (count_surface2_cells g_load);
+  let txt_load = grid_all_text g_load in
+  Alcotest.(check bool)
+    "Observed.Loading Keeper_chat shows clean loading whisper" true
+    (Store_scroll.contains_ci ~needle:"불러오는 중" txt_load);
+  (* 2. Genuinely empty chat renders left-aligned on surface_1, ZERO centered surface_2 box *)
+  let m_empty =
+    {
+      m_loading with
+      fleet =
+        Fleet_store.apply_chat_history ~observed_at:t0 ~keeper:"fresh"
+          { messages = []; has_more = false; next_cursor = None }
+          m_loading.fleet;
+    }
+  in
+  let g_empty = render_full ~model:m_empty in
+  Alcotest.(check int)
+    "Empty Keeper_chat renders cleanly without floating surface_2 rectangle" 0
+    (count_surface2_cells g_empty);
+  (* 3. Korean typing while unfocused in Dive_keeper Keeper_chat auto-focuses composer & inserts char (NEVER opens modals!) *)
+  let m_unfocused =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat } ];
+        };
+      drafts = Drafts.set_focus false base.drafts;
+    }
+  in
+  let m_ko1, cmds_ko1 = step m_unfocused (char_key "ㅇ") in
+  Alcotest.(check bool)
+    "Korean jamo 'ㅇ' unfocused in Keeper_chat auto-focuses composer" true
+    (Drafts.is_focused m_ko1.drafts);
+  Alcotest.(check string)
+    "Korean jamo 'ㅇ' inserted directly into composer draft" "ㅇ"
+    (Drafts.current_draft m_ko1.drafts).text;
+  Alcotest.(check bool)
+    "Korean jamo 'ㅇ' NEVER opens any modal/overlay" true
+    (Option.is_none m_ko1.nav.overlay && Option.is_none m_ko1.inline_modal);
+  Alcotest.(check bool)
+    "Korean jamo 'ㅇ' NEVER triggers fast deny/approve HTTP post" false
+    (has_cmd (function Cmd.Http_post _ -> true | _ -> false) cmds_ko1);
+  let m_ko2, _ = step m_unfocused (char_key "안") in
+  Alcotest.(check string)
+    "Korean syllable '안' unfocused in Keeper_chat auto-focuses & inserts '안'"
+    "안" (Drafts.current_draft m_ko2.drafts).text;
+  Alcotest.(check bool)
+    "Korean syllable '안' NEVER opens any modal/overlay" true
+    (Option.is_none m_ko2.nav.overlay && Option.is_none m_ko2.inline_modal);
+  (* 4. Micro breakpoint (<80x24) blocks unfocused Korean auto-focus in Keeper_chat *)
+  let m_micro_ko =
+    let m0 = populated_model ~cols:70 ~rows:22 ~lang:Say.Lang_ko () in
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat } ];
+        };
+      drafts = Drafts.set_focus false m0.drafts;
+    }
+  in
+  let m_micro_after, _ = step m_micro_ko (char_key "안") in
+  Alcotest.(check bool) "Micro breakpoint blocks unfocused Korean auto-focus"
+    false (Drafts.is_focused m_micro_after.drafts);
+  Alcotest.(check string) "Micro breakpoint leaves draft empty on Korean key" ""
+    (Drafts.current_draft m_micro_after.drafts).text;
+  (* 5. Dive 'c' quick-chat marks chat_histories loading (no empty flash) *)
+  let m_dive_c0 =
+    let fresh_fleet =
+      Fleet_store.empty
+      |> Fleet_store.apply_keepers ~observed_at:t0
+           [
+             mk_keeper ~name:"fresh" ~company:"platform"
+               ~health:Wire_fleet.Keeper_healthy;
+           ]
+    in
+    {
+      base with
+      fleet = fresh_fleet;
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "fresh"; tab = Nav.Keeper_memory } ];
+        };
+    }
+  in
+  let m_dive_c1, _ = step m_dive_c0 (char_key "c") in
+  Alcotest.(check bool)
+    "Dive 'c' quick-chat switches to Keeper_chat and marks chat_histories Loading"
+    true
+    (match
+       Fleet_store.String_map.find_opt "fresh" m_dive_c1.fleet.chat_histories
+     with
+     | Some (Observed.Loading _) -> true
+     | _ -> false)
+
 let () =
   Alcotest.run "masc_tui_keymap_matrix"
     [
@@ -3109,5 +5157,17 @@ let () =
           Alcotest.test_case
             "Tab / Multi-Pane / Dive / Safety journeys + >=1000 gate" `Quick
             test_journeys_tab_multipane_dives_safety;
+        ] );
+      ( "pr_a_pillars_1_2_3"
+      , [
+          Alcotest.test_case
+            "Pillar 1: Keeper_config editing (Dive+Split) & Settings Pane_inspector ←/→"
+            `Quick test_pillar1_keeper_config_and_settings_lr;
+          Alcotest.test_case
+            "Pillar 2: All 16 ArrowDown / End / Viewport scroll bounds" `Quick
+            test_pillar2_scroll_bounds_all_surfaces;
+          Alcotest.test_case
+            "Pillar 3: Keeper chat loading/empty left-align & Korean IME guard"
+            `Quick test_pillar3_keeper_chat_empty_loading_and_korean_ime;
         ] );
     ]

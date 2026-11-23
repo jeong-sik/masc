@@ -358,8 +358,19 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       ({ m with fleet; drafts }, [])
   | Msg.Reply_chat_history { keeper; result = Error err } ->
-      err_reply ~source:(Health.Source_keeper keeper) ~ko:"대화 이력 조회"
-        ~en:"Chat history fetch" err
+      let retryable =
+        match err with
+        | Msg.Transport _ -> true
+        | Msg.Http_error { status; _ } -> status >= 500 || status = 429
+        | Msg.Workspace_mismatch _ | Msg.Decode_error _ -> false
+      in
+      let fleet =
+        Fleet_store.mark_chat_history_failed ~at:now ~keeper
+          ~reason:(Msg.http_error_detail err) ~retryable m.fleet
+      in
+      record_http_incident ~now ~source:(Health.Source_keeper keeper)
+        ~context:(Say.make ~ko:"대화 이력 조회" ~en:"Chat history fetch")
+        err { m with fleet }
   | Msg.Reply_turn_interrupt { keeper; result = Ok resp } ->
       let fleet0 =
         match resp.chat_control_token with

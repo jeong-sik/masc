@@ -9,12 +9,13 @@
 open Masc_tui_core
 module Wire_knowledge = Masc_tui_protocol.Wire_knowledge
 module Wire_infra = Masc_tui_protocol.Wire_infra
+module Wire_fleet = Masc_tui_protocol.Wire_fleet
 module Wire_runtime = Masc_tui_protocol.Wire_runtime
 module Wire_work = Masc_tui_protocol.Wire_work
-module Wire_fleet = Masc_tui_protocol.Wire_fleet
 module Stream_route = Server_routes_http_keeper_stream
 module Owner_registry = Masc.Keeper_owner_registry
 module Workspace = Masc.Workspace
+module Projection = Masc.Keeper_context_observation_projection
 
 let observed_at = Clock.Mono.of_ns 1_000_000_000L
 
@@ -1177,6 +1178,264 @@ let test_repository_activity_roundtrip () =
            (Wire_infra.decode_repository_activity ~repo_id:"masc"
               (activity_body ~repo_id:"masc" [ bundle_row ])))
 
+(* The context projection reads the keeper's turn-record store, so the
+   roster cases run against a throwaway workspace. *)
+let with_temp_workspace f =
+  let path = Filename.temp_file "tui-wire-roundtrip-" ".dir" in
+  Sys.remove path;
+  Sys.mkdir path 0o700;
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree path)
+    (fun () -> f (Masc.Workspace.default_config path))
+
+let trace_id = "trace-1781200000000-00000"
+let record_ts = 1_781_200_000.0
+
+let turn_record ~keeper ?(absolute_turn = 7) ?(input_tokens = Some 40_000)
+    ?(context_window = Some 200_000) ?(provider_context_window = None)
+    ?(usage_scope = Runtime_usage_scope.Per_request)
+    ?(input_provenance = Some Turn_input_provenance.Measured_request) () :
+    Turn_record.t =
+  {
+    request_observations = [];
+    execution_ids = [];
+    keeper;
+    agent_name = keeper ^ "-agent";
+    turn_kind = Turn_record.Direct;
+    trace_id;
+    absolute_turn;
+    turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn;
+    blocks =
+      [
+        {
+          Turn_record.block = Prompt_block_id.Keeper_instructions;
+          bytes = 4;
+          digest = String.make 64 'a';
+        };
+      ];
+    input_components =
+      Some [ { component = Turn_record.Tool_schemas; bytes = 8192 } ];
+    tool_surface_ref = None;
+    runtime_profile = "glm-coding.glm-5-turbo";
+    selected_model = Some "glm-5-turbo";
+    finish_reason = Some "completed";
+    context_window;
+    provider_context_window;
+    price_input_per_million = None;
+    price_output_per_million = None;
+    request_latency_ms = Some 1234;
+    ttfrc_ms = None;
+    request_wire_observation =
+      Some { runtime_profile = "glm-coding.glm-5-turbo"; body_bytes = 560_513 };
+    model_input_window = None;
+    response_observed_model_input = None;
+    refused_model_input = None;
+    raw_trace_run_ref = None;
+    sampling =
+      {
+        temperature = None;
+        top_p = None;
+        max_tokens = None;
+        enable_thinking = Some true;
+      };
+    usage =
+      {
+        input_tokens;
+        output_tokens = Some 412;
+        cache_creation_input_tokens = None;
+        cache_read_input_tokens = Some 15_000;
+        scope = usage_scope;
+        input_provenance;
+      };
+    turn_output_tokens = None;
+    ts = record_ts;
+  }
+
+let append_record config (record : Turn_record.t) =
+  Dated_jsonl.append
+    (Masc.Keeper_types_support.keeper_turn_record_store config record.keeper)
+    (Turn_record.to_json record)
+
+let keeper_row name context_fields =
+  `Assoc
+    ([
+       ("name", `String name);
+       ("health", `String "healthy");
+       ("paused", `Bool false);
+       ("keepalive_running", `Bool true);
+       ("activation_mode", `String "autonomous");
+       ("runtime_id", `String "glm-coding.glm-5-turbo");
+     ]
+    @ context_fields)
+
+(* GET /api/v1/gate/keepers?detail=true: every detail row carries the context
+   projection, and a keeper whose meta did not read is an error row that must
+   not fail the rest of the roster. *)
+let test_keepers_roster_roundtrip () =
+  with_temp_workspace (fun config ->
+      append_record config (turn_record ~keeper:"alpha" ());
+      append_record config
+        (turn_record ~keeper:"beta"
+           ~input_provenance:(Some Turn_input_provenance.Context_estimate) ());
+      let context name =
+        Projection.context_fields ~config ~keeper_name:name
+          ~current_trace_id:trace_id
+      in
+      let error_row =
+        Masc.Keeper_tool_surface_ops.keeper_list_error_row_json
+          ~persisted_meta:None ~runtime_class:"keeper" config "broken"
+          "keeper.toml: unknown field model_x"
+      in
+      let body =
+        `Assoc
+          [
+            ( "keepers",
+              `List
+                [
+                  keeper_row "alpha" (context "alpha");
+                  keeper_row "beta" (context "beta");
+                  keeper_row "gamma" (Projection.missing_context_fields ());
+                  error_row;
+                ] );
+          ]
+      in
+      match Wire_fleet.decode_keepers_roster ~observed_at body with
+      | Error e -> Alcotest.fail ("roster decode failed: " ^ e)
+      | Ok roster -> (
+          Alcotest.(check (list (pair string string)))
+            "the error row is an unreadable keeper with its message"
+            [ ("broken", "keeper.toml: unknown field model_x") ]
+            (List.map
+               (fun (u : Wire_fleet.unreadable_keeper) -> (u.name, u.reason))
+               roster.unreadable);
+          let context_of name =
+            match
+              List.find_opt
+                (fun (k : Wire_fleet.keeper_summary) -> String.equal k.name name)
+                roster.keepers
+            with
+            | Some k -> Observed.to_option k.context
+            | None -> Alcotest.fail (name ^ " is missing from the roster")
+          in
+          (match context_of "alpha" with
+          | Some
+              (Wire_fleet.Context_measured
+                 { ratio; tokens; window; absolute_turn; measured_at_unix }) ->
+              Alcotest.(check (option (float 1e-9)))
+                "measured ratio is tokens over window" (Some 0.2) ratio;
+              Alcotest.(check int) "measured tokens" 40_000 tokens;
+              Alcotest.(check (option int)) "window" (Some 200_000) window;
+              Alcotest.(check (option int)) "turn" (Some 7) absolute_turn;
+              Alcotest.(check (option (float 1.0)))
+                "measured at the record's time" (Some record_ts) measured_at_unix
+          | Some (Wire_fleet.Context_not_measured _) | None ->
+              Alcotest.fail "alpha's context decodes as measured");
+          (match context_of "beta" with
+          | Some
+              (Wire_fleet.Context_not_measured
+                 { reason = Wire_fleet.Context_input_estimate; estimated_ratio })
+            ->
+              Alcotest.(check (option (float 1e-9)))
+                "the estimate comes with the reason" (Some 0.2) estimated_ratio
+          | Some
+              (Wire_fleet.Context_not_measured _ | Wire_fleet.Context_measured _)
+          | None ->
+              Alcotest.fail "beta's context decodes as an input estimate");
+          match context_of "gamma" with
+          | Some
+              (Wire_fleet.Context_not_measured
+                 {
+                   reason = Wire_fleet.Context_measurement_missing;
+                   estimated_ratio = None;
+                 }) ->
+              ()
+          | Some
+              (Wire_fleet.Context_not_measured _ | Wire_fleet.Context_measured _)
+          | None ->
+              Alcotest.fail "gamma's context decodes as a missing measurement"))
+
+(* GET /api/v1/keepers/:name/turn-records: each entry wraps
+   Turn_record.to_json, oldest first. Only a per-request input the provider
+   measured, within the window, counts as a fill. *)
+let test_turn_records_roundtrip () =
+  let records =
+    [
+      turn_record ~keeper:"alpha" ~absolute_turn:5 ();
+      turn_record ~keeper:"alpha" ~absolute_turn:6
+        ~input_provenance:(Some Turn_input_provenance.Context_estimate) ();
+      turn_record ~keeper:"alpha" ~absolute_turn:7
+        ~usage_scope:Runtime_usage_scope.Conversation_cumulative ();
+      turn_record ~keeper:"alpha" ~absolute_turn:8
+        ~provider_context_window:(Some 100_000) ();
+      turn_record ~keeper:"alpha" ~absolute_turn:9
+        ~input_tokens:(Some 250_000) ();
+    ]
+  in
+  let body =
+    `Assoc
+      [
+        ("keeper", `String "alpha");
+        ("count", `Int (List.length records));
+        ("skipped_rows", `Int 1);
+        ( "entries",
+          `List
+            (List.map
+               (fun record ->
+                 `Assoc
+                   [
+                     ("record", Turn_record.to_json record);
+                     ("diff_vs_prev", `Null);
+                   ])
+               records) );
+      ]
+  in
+  match Wire_fleet.decode_keeper_turn_records body with
+  | Error e -> Alcotest.fail ("turn records decode failed: " ^ e)
+  | Ok decoded ->
+      Alcotest.(check string) "keeper" "alpha" decoded.keeper;
+      Alcotest.(check int) "skipped rows" 1 decoded.skipped_rows;
+      Alcotest.(check (list int)) "turns, oldest first" [ 5; 6; 7; 8; 9 ]
+        (List.map
+           (fun (r : Wire_fleet.turn_record_row) -> r.absolute_turn)
+           decoded.rows);
+      Alcotest.(check (list (option (float 1e-9))))
+        "fill per turn: measured, estimate, cumulative, provider window, over \
+         the window"
+        [ Some 0.2; None; None; Some 0.4; None ]
+        (List.map Wire_fleet.turn_record_context_fill decoded.rows)
+
+(* The roster's top-level [candle] is Candle_observation.to_json. Only a ready
+   ledger carries a supply; off and disabled stay apart from a 0 supply. *)
+let test_candle_observation_roundtrip () =
+  let decode candle =
+    Result.map
+      (fun (extras : Wire_fleet.keeper_roster_extras) -> extras.candle_summary)
+      (Wire_fleet.decode_keepers_roster_extras
+         (`Assoc
+            [ ("keepers", `List []); ("candle", Candle_observation.to_json candle) ]))
+  in
+  Alcotest.(check bool) "off" true
+    (decode Candle_observation.Off = Ok (Some Wire_fleet.Candle_off));
+  Alcotest.(check bool) "disabled keeps its reason" true
+    (decode (Candle_observation.Disabled { reason = "candle.toml unreadable" })
+    = Ok (Some (Wire_fleet.Candle_disabled { reason = "candle.toml unreadable" })));
+  Alcotest.(check bool) "ready carries the supply" true
+    (decode
+       (Candle_observation.Ready
+          {
+            Candle_balance.issued_milli = "10000";
+            burned_milli = "2500";
+            circulating_milli = "7500";
+          })
+    = Ok
+        (Some
+           (Wire_fleet.Candle_ready
+              {
+                issued_milli = "10000";
+                burned_milli = "2500";
+                circulating_milli = "7500";
+              })))
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1210,6 +1469,15 @@ let () =
           Alcotest.test_case
             "encode_chat_submit_request -> parse_keeper_chat_stream_request"
             `Quick test_chat_submit_admission_roundtrip;
+          Alcotest.test_case
+            "context projection and error row -> decode_keepers_roster" `Quick
+            test_keepers_roster_roundtrip;
+          Alcotest.test_case
+            "Turn_record.to_json entries -> decode_keeper_turn_records" `Quick
+            test_turn_records_roundtrip;
+          Alcotest.test_case
+            "Candle_observation.to_json -> decode_keepers_roster_extras" `Quick
+            test_candle_observation_roundtrip;
         ] );
       ( "knowledge",
         [

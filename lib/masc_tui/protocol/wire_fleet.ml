@@ -92,6 +92,32 @@ type keeper_turn_row = {
   state : keeper_turn_state;
 }
 
+type context_unavailable_reason =
+  | Context_measurement_missing
+  | Context_record_undecodable
+  | Context_record_read_failed
+  | Context_record_without_usage
+  | Context_trace_mismatch
+  | Context_cumulative_usage
+  | Context_turn_total_usage
+  | Context_usage_scope_unavailable
+  | Context_tokens_exceed_window
+  | Context_input_estimate
+  | Context_input_provenance_unavailable
+
+type context_reading =
+  | Context_measured of {
+      ratio : float option;
+      tokens : int;
+      window : int option;
+      absolute_turn : int option;
+      measured_at_unix : float option;
+    }
+  | Context_not_measured of {
+      reason : context_unavailable_reason;
+      estimated_ratio : float option;
+    }
+
 type keeper_summary = {
   name : string;
   group : string option;
@@ -103,13 +129,21 @@ type keeper_summary = {
   runtime_id : string;
   model_id : string option;
   current_task_id : string option;
-  context_ratio : float Observed.t;
+  context : context_reading Observed.t;
   total_turns : int Observed.t;
-  total_tokens : int Observed.t;
-  cost_24h_usd : float Observed.t;
   last_turn_at_unix : float option;
   active_turn : active_turn option;
   activity_sparkline_24h : float list;
+}
+
+type unreadable_keeper = {
+  name : string;
+  reason : string;
+}
+
+type keepers_roster = {
+  keepers : keeper_summary list;
+  unreadable : unreadable_keeper list;
 }
 
 type attention_bucket =
@@ -133,21 +167,25 @@ type keeper_sandbox_profile =
   | Profile_docker
   | Profile_other of string
 
-type candle_summary_fallback = {
+type candle_supply = {
   issued_milli : string;
   burned_milli : string;
   circulating_milli : string;
 }
 
+type candle_observation =
+  | Candle_off
+  | Candle_disabled of { reason : string }
+  | Candle_ready of candle_supply
+
 type keeper_roster_extras = {
   sandbox_profiles : (string * keeper_sandbox_profile) list;
   candle_balances_milli : (string * int) list;
-  candle_summary : candle_summary_fallback option;
+  candle_summary : candle_observation option;
 }
 
 type execution_keeper_enrichment = {
   keeper_name : string;
-  context_ratio : float option;
   sandbox_profile : keeper_sandbox_profile option;
   total_turns : int option;
 }
@@ -177,7 +215,6 @@ type daily_scorecard = {
   tasks_todo : int Observed.t;
   tasks_cancelled : int Observed.t;
   goals_completed_24h : int Observed.t;
-  prs_reviewed_24h : int Observed.t;
   verifications_passed_24h : int Observed.t;
   verifications_rejected_24h : int Observed.t;
   board_posts_24h : int Observed.t;
@@ -383,10 +420,7 @@ let group_by_company ?(attention = []) ?(sandbox_profiles = [])
             let k_cost =
               match Hashtbl.find_opt cost_tbl k.name with
               | Some c -> c
-              | None -> (
-                  match Observed.to_option k.cost_24h_usd with
-                  | Some c -> c
-                  | None -> 0.0)
+              | None -> 0.0
             in
             cost_24h_usd := !cost_24h_usd +. k_cost)
           members;
@@ -517,6 +551,61 @@ let decode_lane_turn_count ~observed_at json =
           | Ok (Some n) when n >= 0 -> Observed.value ~observed_at n
           | Ok (Some _) | Ok None | Error _ -> Observed.unreported))
 
+let context_unavailable_reason_of_string = function
+  | "context_measurement_missing" -> Some Context_measurement_missing
+  | "turn_record_undecodable" -> Some Context_record_undecodable
+  | "turn_record_read_failed" -> Some Context_record_read_failed
+  | "turn_record_without_usage" -> Some Context_record_without_usage
+  | "turn_record_trace_mismatch" -> Some Context_trace_mismatch
+  | "conversation_cumulative_usage" -> Some Context_cumulative_usage
+  | "turn_total_usage" -> Some Context_turn_total_usage
+  | "usage_scope_unavailable" -> Some Context_usage_scope_unavailable
+  | "context_tokens_exceed_window" -> Some Context_tokens_exceed_window
+  | "context_input_estimate" -> Some Context_input_estimate
+  | "input_provenance_unavailable" -> Some Context_input_provenance_unavailable
+  | _ -> None
+
+(* The row carries Keeper_context_observation_projection's fields.
+   [context_provenance] says whether [context_ratio] measured a dispatched
+   request; any other provenance names the reason in
+   [context_metrics_unavailable_reason] and may carry an estimate. A row
+   without [context_provenance] is a server that reported no context. *)
+let decode_context_reading ~observed_at json =
+  if not (has_field json "context_provenance") then Ok Observed.unreported
+  else
+    let* provenance = required_nonblank_string json "context_provenance" in
+    match provenance with
+    | "measured" ->
+        let* tokens = required_int_field json "context_tokens" in
+        let* window = required_nullable_int_field json "context_max" in
+        let* ratio = optional_finite_float json "context_ratio" in
+        let* context = optional_object_field json "context" in
+        let* measured_at_unix, absolute_turn =
+          match context with
+          | None -> Ok (None, None)
+          | Some ctx ->
+              let* at = decode_optional_timestamp_unix ctx "observed_at" in
+              let* turn = optional_int_field ctx "absolute_turn" in
+              Ok (at, turn)
+        in
+        Ok
+          (Observed.value ~observed_at
+             (Context_measured
+                { ratio; tokens; window; absolute_turn; measured_at_unix }))
+    | "estimated" | "unavailable" ->
+        let* reason =
+          decode_enum ~field:"context_metrics_unavailable_reason"
+            context_unavailable_reason_of_string json
+        in
+        let* estimated_ratio =
+          optional_finite_float json "estimated_context_ratio"
+        in
+        Ok
+          (Observed.value ~observed_at
+             (Context_not_measured { reason; estimated_ratio }))
+    | other ->
+        Error (Printf.sprintf "unknown context_provenance value %S" other)
+
 let decode_keeper_summary ~observed_at json =
   let* name = required_nonblank_string json "name" in
   let* group = optional_nonblank_string json "group" in
@@ -529,7 +618,7 @@ let decode_keeper_summary ~observed_at json =
   let* runtime_id = required_string_field json "runtime_id" in
   let* model_id = optional_nonblank_string json "model_id" in
   let* current_task_id = optional_nonblank_string json "current_task_id" in
-  let* context_ratio = observed_float ~observed_at json "context_ratio" in
+  let* context = decode_context_reading ~observed_at json in
   let* total_turns_raw = observed_int ~observed_at json "total_turns" in
   let total_turns =
     match total_turns_raw with
@@ -540,8 +629,6 @@ let decode_keeper_summary ~observed_at json =
         | Observed.Absent | Observed.Unreported | Observed.Loading _ | Observed.Failed _ ->
             total_turns_raw)
   in
-  let* total_tokens = observed_int ~observed_at json "total_tokens" in
-  let* cost_24h_usd = observed_float ~observed_at json "cost_24h_usd" in
   let* last_turn_at_unix =
     decode_optional_timestamp_unix json "last_turn_at_unix"
   in
@@ -575,19 +662,52 @@ let decode_keeper_summary ~observed_at json =
       runtime_id;
       model_id;
       current_task_id;
-      context_ratio;
+      context;
       total_turns;
-      total_tokens;
-      cost_24h_usd;
       last_turn_at_unix;
       active_turn;
       activity_sparkline_24h;
     }
 
+(* The gate roster lists a keeper whose effective meta did not read as a row
+   with [name] and an [effective_meta_error] object but no health, runtime or
+   activation fields (Keeper_tool_surface_ops.keeper_list_error_row_json).
+   Such a row decodes apart from the summaries, so one broken keeper TOML
+   does not fail the whole roster. *)
+type roster_row =
+  | Roster_keeper of keeper_summary
+  | Roster_unreadable of unreadable_keeper
+
+let decode_roster_row ~observed_at json =
+  let* meta_error = optional_object_field json "effective_meta_error" in
+  match meta_error with
+  | Some err ->
+      let* name = required_nonblank_string json "name" in
+      let* reason = required_string_field err "message" in
+      Ok (Roster_unreadable { name; reason })
+  | None ->
+      let* summary = decode_keeper_summary ~observed_at json in
+      Ok (Roster_keeper summary)
+
 let decode_keepers_roster ~observed_at json =
   let* _, body = unwrap_v2_or_raw json in
   let* items = required_list_field body "keepers" in
-  decode_list "keepers" (decode_keeper_summary ~observed_at) items
+  let* rows = decode_list "keepers" (decode_roster_row ~observed_at) items in
+  let keepers =
+    List.filter_map
+      (function
+        | Roster_keeper k -> Some k
+        | Roster_unreadable _ -> None)
+      rows
+  in
+  let unreadable =
+    List.filter_map
+      (function
+        | Roster_unreadable u -> Some u
+        | Roster_keeper _ -> None)
+      rows
+  in
+  Ok ({ keepers; unreadable } : keepers_roster)
 
 let sandbox_profile_of_string raw =
   match String.lowercase_ascii (String.trim raw) with
@@ -600,18 +720,31 @@ let decode_milli_string json key =
   match member key json with
   | `String s when not (String.equal (String.trim s) "") -> Ok (String.trim s)
   | `Int i when i >= 0 -> Ok (Int.to_string i)
-  | `Null -> Ok "0"
   | bad -> field_type_error key "a non-negative milli string or integer" bad
 
-let decode_candle_summary_opt body =
-  match optional_object_field body "candle" with
-  | Error _ as err -> err
-  | Ok None -> Ok None
-  | Ok (Some cobj) ->
-      let* issued_milli = decode_milli_string cobj "issued_milli" in
-      let* burned_milli = decode_milli_string cobj "burned_milli" in
-      let* circulating_milli = decode_milli_string cobj "circulating_milli" in
-      Ok (Some { issued_milli; burned_milli; circulating_milli })
+(* [candle] is Candle_observation.to_json: [status] names the ledger state and
+   only a ready ledger carries the supply amounts. *)
+let decode_candle_observation_opt body =
+  let* candle = optional_object_field body "candle" in
+  match candle with
+  | None -> Ok None
+  | Some cobj -> (
+      let* status = required_nonblank_string cobj "status" in
+      match status with
+      | "off" -> Ok (Some Candle_off)
+      | "disabled" ->
+          let* reason = required_string_field cobj "reason" in
+          Ok (Some (Candle_disabled { reason }))
+      | "ready" ->
+          let* issued_milli = decode_milli_string cobj "issued_milli" in
+          let* burned_milli = decode_milli_string cobj "burned_milli" in
+          let* circulating_milli =
+            decode_milli_string cobj "circulating_milli"
+          in
+          Ok
+            (Some
+               (Candle_ready { issued_milli; burned_milli; circulating_milli }))
+      | other -> Error (Printf.sprintf "unknown candle status value %S" other))
 
 let extract_sandbox_profile_opt obj =
   let direct =
@@ -646,7 +779,7 @@ let extract_candle_balance_opt obj =
 let decode_keepers_roster_extras json =
   let* _, body = unwrap_v2_or_raw json in
   let* items = required_list_field body "keepers" in
-  let* candle_summary = decode_candle_summary_opt body in
+  let* candle_summary = decode_candle_observation_opt body in
   let profiles = ref [] in
   let balances = ref [] in
   List.iter
@@ -670,18 +803,13 @@ let decode_keepers_roster_extras json =
 
 let decode_execution_keeper_enrichments json =
   let* _, body = unwrap_v2_or_raw json in
-  let* candle_summary = decode_candle_summary_opt body in
+  let* candle_summary = decode_candle_observation_opt body in
   let* items = optional_list_field body "keepers" in
   let enrichments =
     List.filter_map
       (fun item ->
         match optional_nonblank_string item "name" with
         | Ok (Some keeper_name) ->
-            let context_ratio =
-              match optional_finite_float item "context_ratio" with
-              | Ok v -> v
-              | Error _ -> None
-            in
             let sandbox_profile = extract_sandbox_profile_opt item in
             let total_turns =
               match optional_int_field item "total_turns" with
@@ -691,11 +819,117 @@ let decode_execution_keeper_enrichments json =
                   | Ok (Some n) when n >= 0 -> Some n
                   | Ok (Some _) | Ok None | Error _ -> None)
             in
-            Some { keeper_name; context_ratio; sandbox_profile; total_turns }
+            Some { keeper_name; sandbox_profile; total_turns }
         | Ok None | Error _ -> None)
       items
   in
   Ok (enrichments, candle_summary)
+
+type turn_usage_scope =
+  | Usage_per_request
+  | Usage_turn_total
+  | Usage_conversation_cumulative
+  | Usage_scope_unavailable
+
+type turn_input_provenance =
+  | Input_measured_request
+  | Input_context_estimate
+
+type turn_record_row = {
+  absolute_turn : int;
+  input_tokens : int option;
+  usage_scope : turn_usage_scope;
+  input_provenance : turn_input_provenance option;
+  context_window : int option;
+  provider_context_window : int option;
+}
+
+type keeper_turn_records = {
+  keeper : string;
+  skipped_rows : int;
+  rows : turn_record_row list;
+}
+
+(* The server clamps [limit] to this (Server_dashboard_http_keeper_read_limits
+   .trajectory_max_limit). *)
+let keeper_turn_records_max_limit = 500
+
+let keeper_turn_records_path ~keeper ~limit =
+  Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=%d"
+    (percent_encode keeper)
+    (max 1 (min keeper_turn_records_max_limit limit))
+
+let turn_usage_scope_of_string = function
+  | "per_request" -> Some Usage_per_request
+  | "turn_total" -> Some Usage_turn_total
+  | "conversation_cumulative" -> Some Usage_conversation_cumulative
+  | "unavailable" -> Some Usage_scope_unavailable
+  | _ -> None
+
+let turn_input_provenance_of_string = function
+  | "measured_request" -> Some Input_measured_request
+  | "context_estimate" -> Some Input_context_estimate
+  | _ -> None
+
+(* One [entries] item is [{record: Turn_record.to_json, diff_vs_prev}]. Only
+   the fields the context-fill rule reads are decoded. *)
+let decode_turn_record_row json =
+  let* record = required_object_field json "record" in
+  let* absolute_turn = required_int_field record "absolute_turn" in
+  let* input_tokens = optional_int_field record "input_tokens" in
+  let* usage_scope =
+    decode_enum ~field:"usage_scope" turn_usage_scope_of_string record
+  in
+  let* input_provenance =
+    decode_optional_enum ~field:"input_provenance"
+      turn_input_provenance_of_string record
+  in
+  let* context_window = optional_int_field record "context_window" in
+  let* provider_context_window =
+    optional_int_field record "provider_context_window"
+  in
+  Ok
+    {
+      absolute_turn;
+      input_tokens;
+      usage_scope;
+      input_provenance;
+      context_window;
+      provider_context_window;
+    }
+
+let decode_keeper_turn_records json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* keeper = required_nonblank_string body "keeper" in
+  let* skipped_rows = required_nonnegative_int_field body "skipped_rows" in
+  let* entries = required_list_field body "entries" in
+  let* rows = decode_list "entries" decode_turn_record_row entries in
+  Ok { keeper; skipped_rows; rows }
+
+(* The same rule Keeper_context_observation_projection applies to the newest
+   record: a fill is measured only for per-request usage whose input counts a
+   dispatched request, against the provider window (else the configured one),
+   and never above that window. *)
+let turn_record_context_fill (r : turn_record_row) =
+  let measured_tokens =
+    match r.usage_scope, r.input_provenance with
+    | Usage_per_request, Some Input_measured_request -> r.input_tokens
+    | Usage_per_request, (Some Input_context_estimate | None)
+    | ( ( Usage_turn_total | Usage_conversation_cumulative
+        | Usage_scope_unavailable )
+      , (Some (Input_measured_request | Input_context_estimate) | None) ) ->
+        None
+  in
+  let window =
+    match r.provider_context_window with
+    | Some _ as reported -> reported
+    | None -> r.context_window
+  in
+  match measured_tokens, window with
+  | Some tokens, Some maximum
+    when maximum > 0 && tokens >= 0 && tokens <= maximum ->
+      Some (Float.of_int tokens /. Float.of_int maximum)
+  | Some _, (Some _ | None) | None, (Some _ | None) -> None
 
 let decode_attention_item json =
   let* kind_word = required_nonblank_string json "kind" in
@@ -768,7 +1002,6 @@ let empty_scorecard =
     tasks_todo = Observed.unreported;
     tasks_cancelled = Observed.unreported;
     goals_completed_24h = Observed.unreported;
-    prs_reviewed_24h = Observed.unreported;
     verifications_passed_24h = Observed.unreported;
     verifications_rejected_24h = Observed.unreported;
     board_posts_24h = Observed.unreported;
@@ -789,7 +1022,6 @@ let decode_daily_scorecard ~observed_at json =
   let* goals_completed_24h =
     observed_int ~observed_at json "goals_completed_24h"
   in
-  let* prs_reviewed_24h = observed_int ~observed_at json "prs_reviewed_24h" in
   let* verifications_passed_24h =
     observed_int ~observed_at json "verifications_passed_24h"
   in
@@ -809,7 +1041,6 @@ let decode_daily_scorecard ~observed_at json =
       tasks_todo;
       tasks_cancelled;
       goals_completed_24h;
-      prs_reviewed_24h;
       verifications_passed_24h;
       verifications_rejected_24h;
       board_posts_24h;

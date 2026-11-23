@@ -78,16 +78,28 @@ let company_groups_for_model ~(model : Model.t) =
   Fleet_store.company_groups_with_costs ~attention:attn_items ~keeper_costs_24h
     model.fleet
 
-let context_ratio_cell ~lang (obs : float Observed.t) : Table.cell_content =
+let context_cell ~lang (obs : Wire_fleet.context_reading Observed.t) :
+    Table.cell_content =
   match obs with
-  | Observed.Value { data; _ } ->
-      let pct = Float.max 0.0 (Float.min 1.0 data) in
-      let lbl = Printf.sprintf "%2.0f%%" (pct *. 100.0) in
-      let gradient =
-        if pct >= 0.80 then Chart.Gradient.Thermal
-        else Chart.Gradient.Cool_flow
-      in
-      Table.Gauge { ratio = pct; gradient; label = Some lbl }
+  | Observed.Value { data; _ } -> (
+      match Fleet_store.context_display data with
+      | Fleet_store.Context_fill { ratio; estimated } ->
+          let gradient =
+            if ratio >= 0.80 then Chart.Gradient.Thermal
+            else Chart.Gradient.Cool_flow
+          in
+          Table.Gauge
+            {
+              ratio;
+              gradient;
+              label = Some (Fleet_store.context_fill_label ~estimated ratio);
+            }
+      | Fleet_store.Context_tokens_only tokens ->
+          Table.text_cell
+            (Format_val.format_value Format_val.Tokens (Float.of_int tokens))
+      | Fleet_store.Context_unavailable reason ->
+          Table.text_cell
+            (Say.resolve lang (Fleet_store.context_unavailable_label reason)))
   | Observed.Loading _ ->
       Table.text_cell (Glyph.to_utf8 Glyph.Transport_reconnecting)
   | Observed.Absent ->
@@ -95,7 +107,6 @@ let context_ratio_cell ~lang (obs : float Observed.t) : Table.cell_content =
   | Observed.Unreported ->
       Table.text_cell (Glyph.to_utf8 Glyph.Missing_unreported)
   | Observed.Failed _ ->
-      ignore lang;
       Table.Badge
         {
           glyph = Some Glyph.Live_failing;
@@ -129,7 +140,7 @@ let keeper_table_row ~(model : Model.t) ~(theme : Theme.t) ~indent_name
       (Observed.map Float.of_int k.total_turns)
       ~lang:model.lang
   in
-  let cost_obs = Ops_common.keeper_cost_24h ~model k in
+  let cost_obs = Runtime_store.keeper_cost_usd ~keeper:k.name model.runtime in
   let cost_str = Format_val.format_observed Format_val.Usd cost_obs ~lang:model.lang in
   {
     Table.id = k.name;
@@ -139,7 +150,7 @@ let keeper_table_row ~(model : Model.t) ~(theme : Theme.t) ~indent_name
         ("keeper", Table.text_cell name_display);
         ("company", Table.text_cell ~fg:(Color.of_rgb theme.text_secondary) k.company);
         ("task", Table.text_cell ~fg:(Color.of_rgb theme.text_secondary) task_str);
-        ("ctx", context_ratio_cell ~lang:model.lang k.context_ratio);
+        ("ctx", context_cell ~lang:model.lang k.context);
         ("infra", Table.Badge { glyph = None; text = infra_txt; tone = infra_tone });
         ( "spark"
         , Table.Sparkline
@@ -420,11 +431,21 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
           | `Company _ -> false)
         flat_rows
     in
+    let rail_context_fill (k : Wire_fleet.keeper_summary) =
+      match Observed.to_option k.context with
+      | Some reading -> (
+          match Fleet_store.context_display reading with
+          | Fleet_store.Context_fill { ratio; estimated } -> Some (ratio, estimated)
+          | Fleet_store.Context_tokens_only _ | Fleet_store.Context_unavailable _
+            ->
+              None)
+      | None -> None
+    in
     let has_any_ctx =
       List.exists
         (function
           | `Keeper (k : Wire_fleet.keeper_summary) ->
-              Observed.is_value k.context_ratio
+              Option.is_some (rail_context_fill k)
           | `Company _ -> false)
         flat_rows
     in
@@ -640,9 +661,8 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
           end;
           if ctx_w > 0 then begin
             rx := !rx - ctx_w;
-            (match k.context_ratio with
-            | Observed.Value { data; _ } ->
-                let ratio = Float.max 0.0 (Float.min 1.0 data) in
+            (match rail_context_fill k with
+            | Some (ratio, estimated) ->
                 let bar_w = 3 in
                 ignore
                   (Chart.draw_ratio_bar_run ~clip:row_rect grid ~x:!rx ~y:py
@@ -651,17 +671,14 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
                        (if ratio >= 0.80 then Chart.Gradient.Thermal
                         else Chart.Gradient.Cool_flow)
                      ~ratio);
-                let pct_s = Printf.sprintf "%3.0f%%" (ratio *. 100.0) in
+                let pct_s = Fleet_store.context_fill_label ~estimated ratio in
                 ignore
                   (Ops_common.put_line ~clip:row_rect grid
                      ~x:(!rx + bar_w + 1) ~y:py
                      ~max_w:(ctx_w - bar_w - 1)
                      ~style:(Typography.structure ~bg theme)
                      pct_s)
-            | Observed.Loading _
-            | Observed.Absent
-            | Observed.Unreported
-            | Observed.Failed _ ->
+            | None ->
                 ignore
                   (Ops_common.put_line ~clip:row_rect grid
                      ~x:(!rx + ctx_w - 1) ~y:py ~max_w:1
@@ -933,6 +950,44 @@ let render_full_width_roster grid ~(rect : Rect.t) ~(theme : Theme.t)
              ?selected:selected_idx ~col_gap:(Layout.table_col_gap bp)
              ~columns:pulse_wall_columns rows)
 
+(* The roster lists a keeper whose meta did not read with only its name and
+   the read error, so it has no row in the fleet table; it gets a line under
+   the table instead, up to a third of the card. *)
+let unreadable_lines_max = 3
+
+let split_unreadable_area ~(model : Model.t) (rect : Rect.t) =
+  let n = List.length model.fleet.unreadable_keepers in
+  let h = Int.min (Int.min n unreadable_lines_max) (rect.h / 3) in
+  if h <= 0 then (rect, Rect.empty) else Rect.split_v rect ~top_h:(rect.h - h)
+
+let draw_unreadable_keepers grid ~(rect : Rect.t) ~(theme : Theme.t)
+    ~(model : Model.t) =
+  if Rect.is_empty rect then ()
+  else
+    let bg = Color.of_rgb theme.surface_1 in
+    let style = Typography.status ~bg theme Theme.Status_critical in
+    let rows = model.fleet.unreadable_keepers in
+    let total = List.length rows in
+    List.iteri
+      (fun i (u : Wire_fleet.unreadable_keeper) ->
+        if i < rect.h then
+          let line =
+            if i = rect.h - 1 && total > rect.h then
+              Say.resolve model.lang
+                (Say.make
+                   ~ko:(Printf.sprintf "설정을 읽지 못한 키퍼 %d개 더" (total - i))
+                   ~en:(Printf.sprintf "%d more keepers with unreadable meta"
+                          (total - i)))
+            else
+              Printf.sprintf "%s %s: %s"
+                (Glyph.to_utf8 Glyph.Live_failing)
+                u.name u.reason
+          in
+          ignore
+            (Ops_common.put_line ~clip:rect grid ~x:rect.x ~y:(rect.y + i)
+               ~max_w:rect.w ~style line))
+      rows
+
 let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
   if Rect.is_empty rect then ()
   else
@@ -999,8 +1054,12 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           let left_inner =
             Card.draw ~cache grid ~rect:left_rect ~theme roster_spec
           in
-          if not (Rect.is_empty left_inner) then
-            render_narrow_company_rail grid ~rect:left_inner ~theme ~model;
+          let rail_rect, unreadable_rect =
+            split_unreadable_area ~model left_inner
+          in
+          if not (Rect.is_empty rail_rect) then
+            render_narrow_company_rail grid ~rect:rail_rect ~theme ~model;
+          draw_unreadable_keepers grid ~rect:unreadable_rect ~theme ~model;
           (match selected_keeper_opt with
           | Some k ->
               Keeper_dive.render_tabs_body ~embedded:true ~name:k.name
@@ -1058,8 +1117,10 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         }
       in
       let inner = Card.draw ~cache grid ~rect ~theme roster_spec in
-      if not (Rect.is_empty inner) then
-        render_full_width_roster grid ~rect:inner ~theme ~model
+      let roster_rect, unreadable_rect = split_unreadable_area ~model inner in
+      if not (Rect.is_empty roster_rect) then
+        render_full_width_roster grid ~rect:roster_rect ~theme ~model;
+      draw_unreadable_keepers grid ~rect:unreadable_rect ~theme ~model
 
 let render_dive ~name ~tab ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
   Keeper_dive.render_tabs_body ~embedded:false ~name ~tab ~model ~cache ~rect

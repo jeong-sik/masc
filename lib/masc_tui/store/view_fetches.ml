@@ -38,6 +38,51 @@ let memory_diff_holds ~keeper (diff : Wire_knowledge.memory_diff) =
 
 let add_if cond req acc = if cond then req :: acc else acc
 
+(* Once the ledger route has answered 404, the Candle panels read the
+   roster's Candle summary, which each roster reply refreshes. Only an
+   explicit refresh asks the route again. *)
+let candle_ledger_reqs ~force (m : Model.t) acc =
+  add_if
+    ((force || not m.work.candle_fallback_404)
+    && needs_fetch ~force m.work.candle_ledger)
+    (Cmd.Get_candle_ledger { limit = Some 50 })
+    acc
+
+(* The keeper-costs window every view asks for: the server's default and
+   maximum (Dashboard_http_keeper_feeds.keeper_costs_max_window_minutes), so
+   one response serves the Keepers table, the keeper dive and Runtime. *)
+let keeper_costs_window_minutes = 1440
+
+let add_keeper_costs ~force (m : Model.t) acc =
+  add_if
+    (needs_fetch ~force m.runtime.keeper_costs)
+    (Cmd.Get_keeper_costs { window_minutes = keeper_costs_window_minutes })
+    acc
+
+(* Turns the Ctrl+T Context tab plots, newest last. *)
+let context_history_turns = 60
+
+let fetches_for_context_drawer ~force (m : Model.t) =
+  match Model.target_keeper m with
+  | None -> []
+  | Some keeper ->
+      let records_needed =
+        needs_fetch ~force (Fleet_store.turn_records_for ~keeper m.fleet)
+      in
+      let internals_needed =
+        needs_target_fetch ~force
+          ~holds_target:(fun (i : Wire_knowledge.memory_os_internals) ->
+            String.equal i.keeper keeper)
+          m.knowledge.memory_os_internals
+      in
+      []
+      |> add_keeper_costs ~force m
+      |> add_if records_needed
+           (Cmd.Get_keeper_turn_records
+              { keeper; limit = context_history_turns })
+      |> add_if internals_needed
+           (Cmd.Get_keeper_memory_os_internals { keeper })
+
 let dedup_reqs reqs =
   let rec loop seen acc = function
     | [] -> List.rev acc
@@ -61,17 +106,19 @@ let fetches_for_overlay ~force (m : Model.t) =
       |> add_if
            (schema_target_mismatch || needs_fetch ~force m.config.schema)
            (Cmd.Get_config_schema m.config.target)
+  | Some (Nav.Queue_context Nav.Drawer_context) ->
+      fetches_for_context_drawer ~force m
   | Some
       ( Nav.Palette
       | Nav.Incidents
-      | Nav.Queue_context _
+      | Nav.Queue_context (Nav.Drawer_queue | Nav.Drawer_schedules)
       | Nav.Inline_action _
       | Nav.Help
       | Nav.System_gate _ )
   | None ->
       []
 
-let fetches_for_keeper_tab ~force ~name ~tab (m : Model.t) =
+let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
   match tab with
   | Nav.Keeper_chat ->
       let hist_needed =
@@ -135,9 +182,7 @@ let fetches_for_keeper_tab ~force ~name ~tab (m : Model.t) =
   | Nav.Keeper_work_candle ->
       []
       |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
-      |> add_if
-           (needs_fetch ~force m.work.candle_ledger)
-           (Cmd.Get_candle_ledger { limit = Some 50 })
+      |> candle_ledger_reqs ~force m
   | Nav.Keeper_sandbox ->
       let sandbox_needed =
         needs_target_fetch ~force
@@ -155,6 +200,11 @@ let fetches_for_keeper_tab ~force ~name ~tab (m : Model.t) =
         || needs_fetch ~force m.config.schema
       in
       [] |> add_if schema_needed (Cmd.Get_config_schema target)
+
+(* Every keeper tab sits under the dive header, whose KPI strip shows the
+   keeper's cost and tokens from keeper-costs. *)
+let fetches_for_keeper_tab ~force ~name ~tab (m : Model.t) =
+  add_keeper_costs ~force m (keeper_tab_fetches ~force ~name ~tab m)
 
 let fetches_for_dive ~force (m : Model.t) =
   match Model.active_dive m with
@@ -248,9 +298,7 @@ let fetches_for_workspace ~force (m : Model.t) =
       |> add_if
            (needs_fetch ~force m.work.verifications)
            (Cmd.Get_verifications { view = `All; limit = 50; offset = 0 })
-      |> add_if
-           (needs_fetch ~force m.work.candle_ledger)
-           (Cmd.Get_candle_ledger { limit = Some 50 })
+      |> candle_ledger_reqs ~force m
       |> add_if (needs_fetch ~force m.infra.sandboxes) Cmd.Get_sandboxes
       |> add_if
            (needs_fetch ~force m.runtime.tool_series)
@@ -265,9 +313,7 @@ let fetches_for_workspace ~force (m : Model.t) =
       |> add_if
            (needs_fetch ~force m.runtime.runtime_metrics)
            Cmd.Get_runtime_metrics
-      |> add_if
-           (needs_fetch ~force m.runtime.keeper_costs)
-           (Cmd.Get_keeper_costs { window_minutes = 1440 })
+      |> add_keeper_costs ~force m
       |> add_if
            (needs_fetch ~force m.runtime.efficiency)
            (Cmd.Get_efficiency { month = None })
@@ -302,9 +348,7 @@ let fetches_for_workspace ~force (m : Model.t) =
                Cmd.Get_gate_pending
       | Nav.Work_candle_scorecard ->
           []
-          |> add_if
-               (needs_fetch ~force m.work.candle_ledger)
-               (Cmd.Get_candle_ledger { limit = Some 50 })
+          |> candle_ledger_reqs ~force m
           |> add_if (needs_fetch ~force m.fleet.shell) Cmd.Get_dashboard_shell)
   | Nav.Knowledge -> (
       match m.knowledge.active_tab with
@@ -400,7 +444,8 @@ let fetches_for_workspace ~force (m : Model.t) =
       ([]
       |> add_if (needs_fetch ~force m.fleet.keepers) Cmd.Get_keepers_roster
       |> add_if (needs_fetch ~force m.fleet.turns) Cmd.Get_keeper_turns
-      |> add_if (needs_fetch ~force m.infra.sandboxes) Cmd.Get_sandboxes)
+      |> add_if (needs_fetch ~force m.infra.sandboxes) Cmd.Get_sandboxes
+      |> add_keeper_costs ~force m)
       @ embedded_dive_reqs
   | Nav.Runtime -> (
       match m.runtime.active_tab with
@@ -421,9 +466,7 @@ let fetches_for_workspace ~force (m : Model.t) =
           |> add_if
                (needs_fetch ~force m.runtime.runtime_probe)
                (Cmd.Get_runtime_probe { force = false })
-          |> add_if
-               (needs_fetch ~force m.runtime.keeper_costs)
-               (Cmd.Get_keeper_costs { window_minutes = 1440 })
+          |> add_keeper_costs ~force m
       | Nav.Runtime_efficiency_spend ->
           []
           |> add_if
@@ -442,9 +485,7 @@ let fetches_for_workspace ~force (m : Model.t) =
           |> add_if
                (needs_fetch ~force m.runtime.efficiency)
                (Cmd.Get_efficiency { month = None })
-          |> add_if
-               (needs_fetch ~force m.runtime.keeper_costs)
-               (Cmd.Get_keeper_costs { window_minutes = 1440 })
+          |> add_keeper_costs ~force m
       | Nav.Runtime_failover_lanes ->
           []
           |> add_if
@@ -517,6 +558,11 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
     |> dedup_reqs
   in
   List.map (fun req -> Cmd.Http_get { epoch = m.epoch; req }) reqs
+
+let overlay_fetches (m : Model.t) =
+  List.map
+    (fun req -> Cmd.Http_get { epoch = m.epoch; req })
+    (fetches_for_overlay ~force:false m)
 
 let selected_wiki_page_fetch (m : Model.t) =
   let wiki_tab_shown =

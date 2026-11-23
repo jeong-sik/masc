@@ -8,6 +8,17 @@ open Masc_tui_screens_core
 open Masc_tui_screens_ops
 open Masc_tui_screens_domain
 
+(* A measured context reading: [ratio] of a 200k-token window. *)
+let measured_context ratio : Wire_fleet.context_reading =
+  Wire_fleet.Context_measured
+    {
+      ratio = Some ratio;
+      tokens = Float.to_int (ratio *. 200_000.0);
+      window = Some 200_000;
+      absolute_turn = None;
+      measured_at_unix = None;
+    }
+
 let t0 = Clock.Mono.of_ns 1_000_000_000L
 let obs v = Observed.value ~observed_at:t0 v
 
@@ -96,10 +107,8 @@ let mk_keeper ~name ~company ~health : Wire_fleet.keeper_summary =
     runtime_id = "lane-primary";
     model_id = Some "claude-sonnet-4";
     current_task_id = Some "task-1";
-    context_ratio = obs 0.45;
+    context = obs (measured_context 0.45);
     total_turns = obs 84;
-    total_tokens = obs 120_000;
-    cost_24h_usd = obs 1.25;
     last_turn_at_unix = Some 1700000000.0;
     active_turn = None;
     activity_sparkline_24h = [ 1.0; 2.0; 4.0; 3.0 ];

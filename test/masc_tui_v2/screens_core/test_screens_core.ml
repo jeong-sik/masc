@@ -5,6 +5,17 @@ open Masc_tui_protocol
 open Masc_tui_store
 open Masc_tui_screens_core
 
+(* A measured context reading: [ratio] of a 200k-token window. *)
+let measured_context ratio : Wire_fleet.context_reading =
+  Wire_fleet.Context_measured
+    {
+      ratio = Some ratio;
+      tokens = Float.to_int (ratio *. 200_000.0);
+      window = Some 200_000;
+      absolute_turn = None;
+      measured_at_unix = None;
+    }
+
 let obs v = Observed.value ~observed_at:Clock.Mono.zero v
 
 let grid_row_text (grid : Cell_grid.t) y =
@@ -95,10 +106,8 @@ let mk_keeper ~name ~company ~health ?(turns = 120) ?(ctx = 0.42) () :
     runtime_id = "sonnet-med-glm";
     model_id = Some "claude-sonnet-4";
     current_task_id = Some "task-3898";
-    context_ratio = obs ctx;
+    context = obs (measured_context ctx);
     total_turns = obs turns;
-    total_tokens = obs 420_000;
-    cost_24h_usd = obs 12.4;
     last_turn_at_unix = Some 1763700000.0;
     active_turn = None;
     activity_sparkline_24h = [ 1.0; 3.0; 5.0; 9.0; 7.0; 12.0; 8.0; 4.0 ];
@@ -137,7 +146,6 @@ let populated_model ~cols ~rows ~lang =
       tasks_todo = obs 522;
       tasks_cancelled = obs 4;
       goals_completed_24h = obs 3;
-      prs_reviewed_24h = obs 48;
       verifications_passed_24h = obs 31;
       verifications_rejected_24h = obs 3;
       board_posts_24h = obs 19;
@@ -2045,7 +2053,6 @@ let test_v25_pulse_honest_observed_and_no_fabricated_zeros () =
                 sh.scorecard_24h with
                 tasks_done_24h = Observed.unreported;
                 tasks_done_total = obs 730;
-                prs_reviewed_24h = Observed.unreported;
                 turns_24h = obs 1450;
                 cost_24h_usd = Observed.unreported;
               }
@@ -2830,10 +2837,8 @@ let test_p1_pulse_collapsed_company_highlight_and_scroll () =
       runtime_id = "rt-1";
       model_id = Some "model-1";
       current_task_id = None;
-      context_ratio = Observed.value ~observed_at:Clock.Mono.zero 0.30;
+      context = Observed.value ~observed_at:Clock.Mono.zero (measured_context 0.30);
       total_turns = Observed.value ~observed_at:Clock.Mono.zero 20;
-      total_tokens = Observed.value ~observed_at:Clock.Mono.zero 8000;
-      cost_24h_usd = Observed.value ~observed_at:Clock.Mono.zero 2.0;
       last_turn_at_unix = Some 1_795_200_000.0;
       active_turn = None;
       activity_sparkline_24h = [ 1.0; 2.0 ];
@@ -2964,6 +2969,52 @@ let test_memory_diff_viewport_skip_multi_row_selection () =
   let s6 = skip ~total_rows:40 ~avail_h:12 ~scroll:9 ~selected_range:None in
   Alcotest.(check int) "None selection keeps clamped scroll" 9 s6
 
+(* The Ctrl+T Context tab draws the gauge, the cache bar and the cost line
+   first. The turn history and compaction facts take the rows left, so a
+   short drawer keeps the cache bar and cost line and never reports a held
+   cache snapshot as awaited. *)
+let test_context_tab_keeps_cache_and_cost_first () =
+  let keeper = "e-masc-the-leader" in
+  let row i : Wire_fleet.turn_record_row =
+    {
+      absolute_turn = i + 1;
+      input_tokens = Some (40_000 + (i * 5_000));
+      usage_scope = Wire_fleet.Usage_per_request;
+      input_provenance = Some Wire_fleet.Input_measured_request;
+      context_window = Some 200_000;
+      provider_context_window = None;
+    }
+  in
+  let records : Wire_fleet.keeper_turn_records =
+    { keeper; skipped_rows = 1; rows = List.init 6 row }
+  in
+  List.iter
+    (fun (cols, rows, history_fits) ->
+      let base = populated_model ~cols ~rows ~lang:Say.Lang_en in
+      let m =
+        {
+          base with
+          drafts = Drafts.set_active_keeper keeper base.drafts;
+          fleet = Fleet_store.set_turn_records ~keeper (obs records) base.fleet;
+          nav =
+            {
+              base.nav with
+              overlay = Some (Nav.Queue_context Nav.Drawer_context);
+            };
+        }
+      in
+      let g, _ = render_full ~model:m ~cols ~rows in
+      let label = Printf.sprintf "context_tab_%dx%d" cols rows in
+      assert_clean_grid ~label g;
+      let txt = grid_all_text g in
+      assert_contains ~label ~needle:"Cache Read" txt;
+      assert_contains ~label ~needle:"Runtime:" txt;
+      assert_not_contains ~label
+        ~needle:"Awaiting token & cache breakdown snapshot" txt;
+      if history_fits then
+        assert_contains ~label ~needle:"Context per turn" txt)
+    [ (60, 18, false); (90, 28, true) ]
+
 let () =
   Alcotest.run "masc_tui_screens_core"
     [
@@ -3001,6 +3052,8 @@ let () =
         [
           Alcotest.test_case "all 7 universal overlays at 140x40, 90x28, 60x18 KO & EN"
             `Quick test_all_7_overlays;
+          Alcotest.test_case "Context tab keeps the cache bar and cost line first"
+            `Quick test_context_tab_keeps_cache_and_cost_first;
           Alcotest.test_case "palette high selection >12 and Update_nav parity"
             `Quick test_palette_high_selection_and_sync;
           Alcotest.test_case "incident prefixed JSON and truncated/plain-text secret redaction"

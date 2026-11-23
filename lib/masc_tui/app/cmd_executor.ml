@@ -496,17 +496,17 @@ let execute_get t ~epoch req =
               fetch_and_decode_get t ~path ~decode:(fun json ->
                   match Wire_fleet.decode_keepers_roster ~observed_at json with
                   | Error _ as err -> err
-                  | Ok keepers ->
+                  | Ok roster ->
                       let extras =
                         match Wire_fleet.decode_keepers_roster_extras json with
                         | Ok ex -> Some ex
                         | Error _ -> None
                       in
-                      Ok (keepers, extras))
+                      Ok (roster, extras))
             in
             let reply =
               match roster_res with
-              | Ok (keepers, extras_opt) ->
+              | Ok (roster, extras_opt) ->
                   Option.iter
                     (fun ex ->
                       Ui_bus.publish_snapshot t.bus
@@ -514,7 +514,7 @@ let execute_get t ~epoch req =
                         (Msg.Http_reply
                            { epoch; reply = Msg.Reply_keepers_roster_extras ex }))
                     extras_opt;
-                  Msg.Reply_keepers_roster (Ok keepers)
+                  Msg.Reply_keepers_roster (Ok roster)
               | Error _ as err -> Msg.Reply_keepers_roster err
             in
             Msg.Http_reply { epoch; reply }
@@ -525,6 +525,13 @@ let execute_get t ~epoch req =
                    ~decode:Wire_fleet.decode_keeper_turns)
             in
             Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_turn_records { keeper; _ } ->
+            let result =
+              fetch_and_decode_get t ~path
+                ~decode:Wire_fleet.decode_keeper_turn_records
+            in
+            Msg.Http_reply
+              { epoch; reply = Msg.Reply_keeper_turn_records { keeper; result } }
         | Cmd.Get_chat_history { keeper; _ } ->
             let result =
               fetch_and_decode_get t ~path

@@ -340,9 +340,11 @@ let apply_http_reply ~now (m : Model.t) reply =
                { x with shell = failed_slot err x.shell }))
         ~source:Health.Source_client_http ~ko:"대시보드 셸 조회"
         ~en:"Dashboard shell fetch" err
-  | Msg.Reply_keepers_roster (Ok ks) ->
-      let fleet = Fleet_store.apply_keepers ~observed_at:now ks m.fleet in
-      let runtime = Runtime_store.sync_keeper_companies ks m.runtime in
+  | Msg.Reply_keepers_roster (Ok roster) ->
+      let fleet = Fleet_store.apply_roster ~observed_at:now roster m.fleet in
+      let runtime =
+        Runtime_store.sync_keeper_companies roster.keepers m.runtime
+      in
       let drafts =
         match m.drafts.active_keeper, fleet.selected_keeper with
         | None, Some name -> Drafts.set_active_keeper name m.drafts
@@ -354,13 +356,15 @@ let apply_http_reply ~now (m : Model.t) reply =
         |> refresh_404_fallbacks ~now
         |> Model.sync_effective_scorecard ~now
       in
+      (* A roster change can mean a finished turn, which leaves the Context
+         tab's turn records stale; the drawer opens over any view. *)
       let cmds =
         if
           Nav.equal_workspace next.nav.workspace Nav.Keepers
           && next.nav.dive_stack = []
           && Option.is_some fleet.selected_keeper
         then View_fetches.fetches_for_current_view next
-        else []
+        else View_fetches.overlay_fetches next
       in
       (next, cmds)
   | Msg.Reply_keepers_roster (Error err) ->
@@ -397,6 +401,24 @@ let apply_http_reply ~now (m : Model.t) reply =
                { x with turns = failed_slot err x.turns }))
         ~source:Health.Source_client_http ~ko:"키퍼 턴 상태 조회"
         ~en:"Keeper turns fetch" err
+  | Msg.Reply_keeper_turn_records { keeper; result = Ok records } ->
+      ( {
+          m with
+          fleet =
+            Fleet_store.set_turn_records ~keeper
+              (Observed.value ~observed_at:now records)
+              m.fleet;
+        }
+      , [] )
+  | Msg.Reply_keeper_turn_records { keeper; result = Error err } ->
+      err_reply
+        ~fail:
+          (on_fleet (fun (x : Fleet_store.t) ->
+               Fleet_store.set_turn_records ~keeper
+                 (failed_slot err (Fleet_store.turn_records_for ~keeper x))
+                 x))
+        ~source:(Health.Source_keeper keeper) ~ko:"턴 기록 조회"
+        ~en:"Turn records fetch" err
   | Msg.Reply_chat_history { keeper; result = Ok page } ->
       let fleet =
         Fleet_store.apply_chat_history ~observed_at:now ~keeper page m.fleet

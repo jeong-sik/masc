@@ -695,6 +695,7 @@ type canonical_turns_internals = {
   compaction_watermark_seq : int option;
   compaction_watermark_epoch : int option;
   history_resets_count : int;
+  latest_reset_at_unix : float option;
   read_error : string option;
 }
 

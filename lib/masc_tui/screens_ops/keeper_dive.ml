@@ -1003,7 +1003,15 @@ let draw_keeper_status_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
             Say.resolve model.lang (Ops_common.activation_label k.activation_mode)
           in
           let rt = Ops_common.human_runtime_label ~model k in
-          let ctx_opt = Observed.to_option k.context_ratio in
+          let ctx_opt =
+            match Observed.to_option k.context with
+            | Some (Wire_fleet.Context_measured { ratio = Some r; _ }) -> Some r
+            | Some
+                ( Wire_fleet.Context_measured { ratio = None; _ }
+                | Wire_fleet.Context_not_measured _ )
+            | None ->
+                None
+          in
           (g, t, act, rt, ctx_opt)
       | None ->
           ( Glyph.Live_idle
@@ -2730,7 +2738,7 @@ let draw_embedded_preview_header grid ~(rect : Rect.t) ~(theme : Theme.t)
       Layout.split_h ~gap:kpi_gap kpi_rect
         [ Layout.Flex 1; Layout.Flex 1; Layout.Flex 1; Layout.Flex 1 ]
     in
-    let ctx_ratio_opt = Observed.to_option k.context_ratio in
+    let ctx_display = Observed.map Fleet_store.context_display k.context in
     let turns_label, turns_short, turns_s =
       match keeper_turns_24h_opt k with
       | Some n24 ->
@@ -2746,15 +2754,21 @@ let draw_embedded_preview_header grid ~(rect : Rect.t) ~(theme : Theme.t)
     in
     let cost_s =
       Format_val.format_observed Format_val.Usd
-        (Ops_common.keeper_cost_24h ~model k)
+        (Runtime_store.keeper_cost_usd ~keeper:name model.runtime)
         ~lang:model.lang
+    in
+    let cost_label =
+      match Runtime_store.keeper_costs_window_label model.runtime with
+      | Some w -> Ops_common.say model ~ko:(w ^ " 비용") ~en:(w ^ " Cost")
+      | None -> Ops_common.say model ~ko:"비용" ~en:"Cost"
     in
     let candle_s =
       match Ops_common.keeper_candle_milli ~model name with
       | Some (_, dec_s) ->
           Glyph.to_utf8 Glyph.Ai_spark ^ " "
           ^ Ops_common.format_milli_string dec_s
-      | None -> Glyph.to_utf8 Glyph.Ai_spark ^ " 0.000 C"
+      | None ->
+          Glyph.to_utf8 Glyph.Ai_spark ^ " " ^ Glyph.to_utf8 Glyph.Missing_absent
     in
     List.iteri
       (fun idx (cr : Rect.t) ->
@@ -2766,22 +2780,38 @@ let draw_embedded_preview_header grid ~(rect : Rect.t) ~(theme : Theme.t)
         if not (Rect.is_empty cr) then
           match idx with
           | 0 ->
-              (* Context % gauge *)
+              (* Context % gauge: a measured fill, the server's estimate
+                 marked with "~", or the reason the server has no fill. *)
               let pct_s =
-                match ctx_ratio_opt with
-                | Some r ->
-                    Printf.sprintf "%.0f%%"
-                      (Float.max 0.0 (Float.min 1.0 r) *. 100.0)
-                | None -> Glyph.to_utf8 Glyph.Missing_absent
+                match ctx_display with
+                | Observed.Value
+                    { data = Fleet_store.Context_fill { ratio; estimated }; _ }
+                  ->
+                    Fleet_store.context_fill_label ~estimated ratio
+                | Observed.Value
+                    { data = Fleet_store.Context_tokens_only tokens; _ } ->
+                    Format_val.format_value Format_val.Tokens
+                      (Float.of_int tokens)
+                | Observed.Value
+                    { data = Fleet_store.Context_unavailable _; _ }
+                | Observed.Loading _ | Observed.Absent | Observed.Unreported
+                | Observed.Failed _ ->
+                    Glyph.to_utf8 Glyph.Missing_absent
               in
               Ops_common.draw_kpi_line grid ~rect:cr ~y:cr.y ~theme ~bg
                 ~label:(Ops_common.say model ~ko:"컨텍스트" ~en:"Ctx")
                 ~short_label:"Ctx" ~value:pct_s
                 ~val_style:(Typography.anchor ~bg theme);
-              if cr.h >= 2 then
-                (match ctx_ratio_opt with
-                | Some r ->
-                    let ratio = Float.max 0.0 (Float.min 1.0 r) in
+              if cr.h >= 2 then begin
+                let whisper line =
+                  ignore
+                    (Ops_common.put_line ~clip:cr grid ~x:cr.x ~y:(cr.y + 1)
+                       ~max_w:cr.w ~style:(Typography.whisper ~bg theme) line)
+                in
+                match ctx_display with
+                | Observed.Value
+                    { data = Fleet_store.Context_fill { ratio; estimated = _ }; _ }
+                  ->
                     ignore
                       (Chart.draw_ratio_bar_run ~clip:cr grid ~x:cr.x
                          ~y:(cr.y + 1) ~width:(Int.min 12 cr.w) ~theme ~bg
@@ -2790,11 +2820,23 @@ let draw_embedded_preview_header grid ~(rect : Rect.t) ~(theme : Theme.t)
                            (if ratio >= 0.80 then Chart.Gradient.Thermal
                             else Chart.Gradient.Cool_flow)
                          ~ratio)
-                | None ->
-                    ignore
-                      (Ops_common.put_line ~clip:cr grid ~x:cr.x ~y:(cr.y + 1)
-                         ~max_w:cr.w ~style:(Typography.whisper ~bg theme)
-                         (Ops_common.say model ~ko:"미보고" ~en:"unreported")))
+                | Observed.Value
+                    { data = Fleet_store.Context_tokens_only _; _ } ->
+                    whisper
+                      (Ops_common.say model ~ko:"창 크기 미보고"
+                         ~en:"window unreported")
+                | Observed.Value
+                    { data = Fleet_store.Context_unavailable reason; _ } ->
+                    whisper
+                      (Say.resolve model.lang
+                         (Fleet_store.context_unavailable_label reason))
+                | Observed.Loading _ -> whisper (Glyph.to_utf8 Glyph.Ellipsis)
+                | Observed.Absent -> whisper (Glyph.to_utf8 Glyph.Missing_absent)
+                | Observed.Unreported ->
+                    whisper (Ops_common.say model ~ko:"미보고" ~en:"unreported")
+                | Observed.Failed _ ->
+                    whisper (Ops_common.say model ~ko:"조회 실패" ~en:"fetch failed")
+              end
           | 1 ->
               (* Honest 24h Turns (from 24h sparkline) or explicit Total turns *)
               Ops_common.draw_kpi_line grid ~rect:cr ~y:cr.y ~theme ~bg
@@ -2813,21 +2855,21 @@ let draw_embedded_preview_header grid ~(rect : Rect.t) ~(theme : Theme.t)
                        ~max_w:cr.w ~style:(Typography.whisper ~bg theme)
                        (Ops_common.say model ~ko:"누적 합계" ~en:"lifetime total"))
           | 2 ->
-              (* 24h Cost *)
+              (* Cost and tokens over the keeper-costs window *)
               Ops_common.draw_kpi_line grid ~rect:cr ~y:cr.y ~theme ~bg
-                ~label:(Ops_common.say model ~ko:"24h 비용" ~en:"Cost")
-                ~short_label:(Ops_common.say model ~ko:"비용" ~en:"$")
+                ~label:cost_label ~short_label:(Ops_common.say model ~ko:"비용" ~en:"$")
                 ~value:cost_s ~val_style:(Typography.anchor ~bg theme);
               if cr.h >= 2 then
                 let tok_s =
                   Format_val.format_observed Format_val.Tokens
-                    (Observed.map Float.of_int k.total_tokens)
+                    (Observed.map Float.of_int
+                       (Runtime_store.keeper_tokens ~keeper:name model.runtime))
                     ~lang:model.lang
                 in
                 ignore
                   (Ops_common.put_line ~clip:cr grid ~x:cr.x ~y:(cr.y + 1)
                      ~max_w:cr.w ~style:(Typography.whisper ~bg theme)
-                     (tok_s ^ " tok"))
+                     tok_s)
           | _ ->
               (* Candle balance in Violet *)
               Ops_common.draw_kpi_line grid ~rect:cr ~y:cr.y ~theme ~bg

@@ -135,13 +135,11 @@ let apply_candle_ledger ~observed_at candle_ledger t =
     candle_fallback_404 = false;
   }
 
-let apply_candle_ledger_fallback ~observed_at
-    ~(summary : Wire_fleet.candle_summary_fallback option) ~balances t =
-  let issued_milli, burned_milli, circulating_milli =
-    match summary with
-    | Some s -> (s.issued_milli, s.burned_milli, s.circulating_milli)
-    | None -> ("0", "0", "0")
-  in
+(* Only a ready Candle carries a supply. An off Candle has no ledger, a
+   disabled one failed to read its configuration, and no summary means the
+   roster has not reported one yet; none of them becomes a 0/0/0 ledger. *)
+let fallback_ledger ~(supply : Wire_fleet.candle_supply) ~balances :
+    Wire_work.candle_ledger =
   let balance_rows : Wire_work.candle_balance_row list =
     List.map
       (fun (keeper, balance_milli) ->
@@ -163,39 +161,44 @@ let apply_candle_ledger_fallback ~observed_at
         if r.balance_milli > 0 then n + 1 else n)
       0 balance_rows
   in
-  let ledger : Wire_work.candle_ledger =
-    {
-      ledger_state =
-        (if Option.is_some summary || balance_rows <> [] then
-           Wire_work.Ledger_present
-        else Wire_work.Ledger_missing);
-      total_events = 0;
-      balance_error = None;
-      policy_configuration = "fallback";
-      pricing_mode = "fixed";
-      disabled_reason = None;
-      half_life_sec = None;
-      issued_milli;
-      burned_milli;
-      circulating_milli;
-      total_supply_milli = circulating_milli;
-      active_keepers;
-      diagnostics =
-        {
-          unattributed_count = 0;
-          backlog_fenced_count = 0;
-          zero_linked_tasks_goals = 0;
-          held_windows_count = 0;
-        };
-      balances = balance_rows;
-      recent_events = [];
-    }
-  in
   {
-    t with
-    candle_ledger = Observed.value ~observed_at ledger;
-    candle_fallback_404 = true;
+    ledger_state = Wire_work.Ledger_present;
+    total_events = 0;
+    balance_error = None;
+    policy_configuration = "fallback";
+    pricing_mode = "fixed";
+    disabled_reason = None;
+    half_life_sec = None;
+    issued_milli = supply.issued_milli;
+    burned_milli = supply.burned_milli;
+    circulating_milli = supply.circulating_milli;
+    total_supply_milli = supply.circulating_milli;
+    active_keepers;
+    diagnostics =
+      {
+        unattributed_count = 0;
+        backlog_fenced_count = 0;
+        zero_linked_tasks_goals = 0;
+        held_windows_count = 0;
+      };
+    balances = balance_rows;
+    recent_events = [];
   }
+
+let apply_candle_ledger_fallback ~observed_at
+    ~(summary : Wire_fleet.candle_observation option) ~balances t =
+  let candle_ledger =
+    match summary with
+    | Some (Wire_fleet.Candle_ready supply) ->
+        Observed.value ~observed_at (fallback_ledger ~supply ~balances)
+    | Some Wire_fleet.Candle_off -> Observed.absent
+    | Some (Wire_fleet.Candle_disabled { reason }) ->
+        Observed.failed
+          ~reason:("Candle disabled: " ^ reason)
+          ~retryable:false ~at:observed_at
+    | None -> Observed.unreported
+  in
+  { t with candle_ledger; candle_fallback_404 = true }
 
 let effective_task_counts t =
   match t.backlog_counts with

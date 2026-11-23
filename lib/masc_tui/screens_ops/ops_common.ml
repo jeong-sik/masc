@@ -504,20 +504,6 @@ let human_runtime_label ~(model : Model.t) (k : Wire_fleet.keeper_summary) =
   let resolved = Wire_runtime.human_runtime_slot_label ~runtimes raw in
   if String.equal (String.trim resolved) "" then raw else resolved
 
-let keeper_cost_24h ~(model : Model.t) (k : Wire_fleet.keeper_summary) =
-  match k.cost_24h_usd with
-  | Observed.Value _ as v -> v
-  | Observed.Loading _
-  | Observed.Absent
-  | Observed.Unreported
-  | Observed.Failed _ -> (
-      match
-        List.assoc_opt k.name (Runtime_store.keeper_costs_24h_assoc model.runtime)
-      with
-      | Some usd when Float.is_finite usd ->
-          Observed.value ~observed_at:Clock.Mono.zero usd
-      | Some _ | None -> k.cost_24h_usd)
-
 let keeper_candle_milli ~(model : Model.t) name =
   let from_ledger =
     match Observed.to_option model.work.candle_ledger with

@@ -56,11 +56,15 @@ type t = {
   shell : Wire_fleet.dashboard_shell Observed.t;
   raw_shell_scorecard : Wire_fleet.daily_scorecard option;
   keepers : Wire_fleet.keeper_summary list Observed.t;
+  unreadable_keepers : Wire_fleet.unreadable_keeper list;
+      (** Roster rows whose effective meta did not read, from the last roster. *)
   turns : Wire_fleet.keeper_turn_row list Observed.t;
+  turn_records : Wire_fleet.keeper_turn_records Observed.t String_map.t;
+      (** Recent turn records per keeper, read for the Ctrl+T Context tab. *)
   chat_control_tokens : string String_map.t;
   sandbox_profiles : Wire_fleet.keeper_sandbox_profile String_map.t;
   candle_balances_milli : int String_map.t;
-  candle_summary_fallback : Wire_fleet.candle_summary_fallback option;
+  candle_summary_fallback : Wire_fleet.candle_observation option;
   fleet_reading : Wire_fleet.fleet_stream_reading Observed.t;
   fleet_degradation : Wire_fleet.fleet_degradation option;
   fleet_mode : Nav.keepers_fleet_mode;
@@ -89,6 +93,22 @@ val equal_memory_display : memory_display -> memory_display -> bool
 
 val keeper_live_state : Wire_fleet.keeper_summary -> Health.live_state
 (** Project authoritative [keeper_health] onto Channel 2 {!Health.live_state}. *)
+
+(** What a context cell shows for one [Wire_fleet.context_reading]. *)
+type context_display =
+  | Context_fill of { ratio : float; estimated : bool }
+      (** [ratio] clamped to [[0, 1]]; [estimated] marks the server's estimate. *)
+  | Context_tokens_only of int
+      (** A measured input with no reported window. *)
+  | Context_unavailable of Wire_fleet.context_unavailable_reason
+
+val context_display : Wire_fleet.context_reading -> context_display
+
+val context_fill_label : estimated:bool -> float -> string
+(** ["42%"], or ["~42%"] for an estimate. *)
+
+val context_unavailable_label : Wire_fleet.context_unavailable_reason -> Say.t
+(** Short label for why the server has no measured context ratio. *)
 
 type fleet_health_counts = {
   total : int;
@@ -140,10 +160,13 @@ val apply_shell :
   observed_at:Clock.Mono.t -> Wire_fleet.dashboard_shell -> t -> t
 val apply_keepers :
   observed_at:Clock.Mono.t -> Wire_fleet.keeper_summary list -> t -> t
+val apply_roster :
+  observed_at:Clock.Mono.t -> Wire_fleet.keepers_roster -> t -> t
+(** [apply_keepers] for the readable rows; replaces [unreadable_keepers]. *)
 val apply_roster_extras : Wire_fleet.keeper_roster_extras -> t -> t
 val apply_execution_enrichments :
   observed_at:Clock.Mono.t ->
-  Wire_fleet.execution_keeper_enrichment list * Wire_fleet.candle_summary_fallback option ->
+  Wire_fleet.execution_keeper_enrichment list * Wire_fleet.candle_observation option ->
   t ->
   t
 val enrich_scorecard :
@@ -219,6 +242,14 @@ val set_filter : string -> t -> t
 
 val mark_stale_all : t -> t
 val mark_keepers_stale : t -> t
+(** Also marks every keeper's [turn_records] stale. *)
+
+val turn_records_for :
+  keeper:string -> t -> Wire_fleet.keeper_turn_records Observed.t
+(** [Unreported] when the keeper's turn records were never read. *)
+
+val set_turn_records :
+  keeper:string -> Wire_fleet.keeper_turn_records Observed.t -> t -> t
 val mark_chat_history_loading : keeper:string -> t -> t
 val mark_chat_history_failed :
   at:Clock.Mono.t -> keeper:string -> reason:string -> retryable:bool -> t -> t

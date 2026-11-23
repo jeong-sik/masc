@@ -45,6 +45,28 @@ let model_selection_to_string = function
   | Explicit_model m -> m
 ;;
 
+(* Single driver-scoped effort alias SSOT shared by both runtime.toml parsing
+   and ACP session/new configOptions parsing.
+   Live-verified CLI configOptions (2026-11-23):
+   - agy acp 1.5.14: thought_level = [low; medium; high; xhigh]
+   - kimi acp 2.7.2: thinking = [low; high; max]
+   - vibe-acp 3.1.0: thinking = [off; high] *)
+let effort_of_driver_string ~driver (raw : string) : Llm_provider.Reasoning_effort.t option =
+  let normalized = String.lowercase_ascii (String.trim raw) in
+  match Llm_provider.Reasoning_effort.of_string normalized with
+  | Some _ as eff -> eff
+  | None ->
+    (match driver, normalized with
+     | Mistral_vibe, "off" -> Some Llm_provider.Reasoning_effort.None_
+     | (Antigravity | Kimi_code | Mistral_vibe), _ -> None)
+;;
+
+let effort_values_for_log ~driver =
+  match driver with
+  | Mistral_vibe -> Llm_provider.Reasoning_effort.values_for_log ^ "/off"
+  | Antigravity | Kimi_code -> Llm_provider.Reasoning_effort.values_for_log
+;;
+
 type mcp_wiring =
   | Session_new_http_mcp
   | Gemini_dir_mcp_config
@@ -2977,14 +2999,7 @@ let is_effort_category = function
 ;;
 
 let parse_wire_effort ~driver (raw : string) : Llm_provider.Reasoning_effort.t option =
-  let normalized = String.lowercase_ascii (String.trim raw) in
-  match Llm_provider.Reasoning_effort.of_string normalized with
-  | Some _ as eff -> eff
-  | None ->
-    (match driver, normalized with
-     (* Mistral Vibe 3.1.0 advertises "off" for Reasoning_effort.None_. *)
-     | Mistral_vibe, "off" -> Some Llm_provider.Reasoning_effort.None_
-     | (Antigravity | Kimi_code | Mistral_vibe), _ -> None)
+  effort_of_driver_string ~driver raw
 ;;
 
 let preferred_wire_value_of_effort ~driver (effort : Llm_provider.Reasoning_effort.t) : string =

@@ -373,11 +373,92 @@ max-context = 1000
 default = "bad_eff.m"
 |}
   in
-  match Runtime_toml.parse_string invalid_effort with
+  (match Runtime_toml.parse_string invalid_effort with
+   | Error (err :: _) ->
+     check string "error path identifies effort key" "providers.bad_eff.effort" err.path
+   | Error [] -> fail "expected non-empty error list for invalid ACP effort"
+   | Ok _ -> fail "unknown ACP effort must be rejected strictly at TOML parse time");
+  (* Option A': driver-scoped effort alias SSOT — mistral_vibe accepts "off" -> None_,
+     kimi_code rejects "off", and unknown values such as "auto" stay fail-closed. *)
+  let vibe_off =
+    {|
+[providers.vibe_off]
+protocol = "acp"
+driver = "mistral_vibe"
+command = "vibe-acp"
+is-non-interactive = true
+effort = "off"
+[models.m]
+api-name = "m"
+max-context = 1000
+[vibe_off.m]
+[runtime]
+default = "vibe_off.m"
+|}
+  in
+  (match Runtime_toml.parse_string vibe_off with
+   | Error errs ->
+     failf "mistral_vibe effort=\"off\" must succeed, got: %s"
+       (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errs))
+   | Ok cfg ->
+     let runtimes, dropped = Runtime_instance.partition_bindings cfg cfg.bindings in
+     check int "zero dropped for mistral_vibe effort=\"off\"" 0 (List.length dropped);
+     (match runtimes with
+      | [ { execution = Runtime_execution.Acp exec; _ } ] ->
+        check bool "mistral_vibe effort=\"off\" normalizes to Some None_" true
+          (Option.equal
+             Llm_provider.Reasoning_effort.equal
+             (Some Llm_provider.Reasoning_effort.None_)
+             exec.effort)
+      | _ -> fail "expected single materialized mistral_vibe runtime"));
+  let kimi_off =
+    {|
+[providers.kimi_off]
+protocol = "acp"
+driver = "kimi_code"
+command = "kimi"
+is-non-interactive = true
+effort = "off"
+[models.m]
+api-name = "m"
+max-context = 1000
+[kimi_off.m]
+[runtime]
+default = "kimi_off.m"
+|}
+  in
+  (match Runtime_toml.parse_string kimi_off with
+   | Error (err :: _) ->
+     check string "kimi_code effort=\"off\" reports effort path" "providers.kimi_off.effort" err.path;
+     check string "kimi_code effort error excludes mistral_vibe-only off alias"
+       (Printf.sprintf "effort must be one of %s; got \"off\"" Llm_provider.Reasoning_effort.values_for_log)
+       err.message
+   | Error [] -> fail "expected error list for kimi_code effort=\"off\""
+   | Ok _ -> fail "kimi_code must reject mistral_vibe-only effort=\"off\" alias");
+  let vibe_auto =
+    {|
+[providers.vibe_auto]
+protocol = "acp"
+driver = "mistral_vibe"
+command = "vibe-acp"
+is-non-interactive = true
+effort = "auto"
+[models.m]
+api-name = "m"
+max-context = 1000
+[vibe_auto.m]
+[runtime]
+default = "vibe_auto.m"
+|}
+  in
+  match Runtime_toml.parse_string vibe_auto with
   | Error (err :: _) ->
-    check string "error path identifies effort key" "providers.bad_eff.effort" err.path
-  | Error [] -> fail "expected non-empty error list for invalid ACP effort"
-  | Ok _ -> fail "unknown ACP effort must be rejected strictly at TOML parse time"
+    check string "mistral_vibe effort=\"auto\" reports effort path" "providers.vibe_auto.effort" err.path;
+    check string "mistral_vibe effort error advertises off alias"
+      (Printf.sprintf "effort must be one of %s/off; got \"auto\"" Llm_provider.Reasoning_effort.values_for_log)
+      err.message
+  | Error [] -> fail "expected error list for mistral_vibe effort=\"auto\""
+  | Ok _ -> fail "unknown effort=\"auto\" must remain fail-closed"
 ;;
 
 let test_build_argv_and_strict_permission_posture () =

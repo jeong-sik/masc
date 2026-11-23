@@ -36,6 +36,18 @@ val model_selection_to_string : model_selection -> string
 (** Canonical diagnostic string for {!model_selection} (["default"] for
     {!Keep_cli_default}, the model id for {!Explicit_model}). *)
 
+val effort_of_driver_string : driver:driver -> string -> Llm_provider.Reasoning_effort.t option
+(** Parse a reasoning effort string at the TOML or ACP wire boundary using a
+    single driver-scoped alias table: accepts the 8 canonical
+    {!Llm_provider.Reasoning_effort} values for every driver, plus ["off"]
+    as {!Llm_provider.Reasoning_effort.None_} exclusively for {!Mistral_vibe}
+    (live-verified against [vibe-acp 3.1.0]; [agy acp 1.5.14] advertises
+    [low/medium/high/xhigh] and [kimi acp 2.7.2] advertises [low/high/max]). *)
+
+val effort_values_for_log : driver:driver -> string
+(** Human-readable list of effort values accepted by {!effort_of_driver_string}
+    for [driver], suitable for startup validation error diagnostics. *)
+
 type mcp_wiring =
   | Session_new_http_mcp
       (** Driver accepts [mcpServers] directly in [session/new] and

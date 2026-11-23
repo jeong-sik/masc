@@ -1017,24 +1017,17 @@ let execute_post t ~epoch req =
                    result;
                  })
         | Cmd.Post_tool_approval { keeper; approval_id; decision; _ } ->
-            let result = post_ack t ~path ~body in
-            let label, decision_kind =
-              match decision with
-              | Wire_work.Tool_approve ->
-                  ( Say.make ~ko:"도구 호출 승인됨" ~en:"Tool call approved"
-                  , Work_store.Decision_tool_approved )
-              | Wire_work.Tool_deny ->
-                  ( Say.make ~ko:"도구 호출 거절됨" ~en:"Tool call denied"
-                  , Work_store.Decision_tool_denied )
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_work.decode_tool_approval_outcome
             in
             Some
-              (Msg.Reply_work_mutation
+              (Msg.Reply_tool_approval
                  {
-                   label;
-                   attention_id = Some ("tool:" ^ approval_id);
-                   decision_kind = Some decision_kind;
-                   target_id = Some approval_id;
-                   keeper = Some keeper;
+                   keeper;
+                   approval_id;
+                   attention_id = "tool:" ^ approval_id;
+                   decision;
                    result;
                  })
         | Cmd.Post_gate_resolution { id; approved; _ } ->

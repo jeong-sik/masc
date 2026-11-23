@@ -1095,6 +1095,23 @@ let encode_tool_approval_decision ~keeper ~tool_call_id ~approval_id ~decision
      ]
     @ ws_field)
 
+(* The tool-approval route answers 200 with [settled] and [remembered]
+   (server_routes_http_keeper_control.ml). [remembered] is only read when
+   [settled] is false, so the server never sends both as true. *)
+type tool_approval_outcome =
+  | Tool_approval_settled
+  | Tool_approval_remembered
+  | Tool_approval_no_waiting_call
+
+let decode_tool_approval_outcome json =
+  let* settled = required_bool_field json "settled" in
+  let* remembered = required_bool_field json "remembered" in
+  match (settled, remembered) with
+  | true, false -> Ok Tool_approval_settled
+  | false, true -> Ok Tool_approval_remembered
+  | false, false -> Ok Tool_approval_no_waiting_call
+  | true, true -> Error "tool approval answer is both settled and remembered"
+
 let encode_gate_resolution ~id ~approved ~reason =
   `Assoc
     ([

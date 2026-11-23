@@ -66,6 +66,13 @@ type http_reply =
       keeper : string option;
       result : (unit, http_error) result;
     }
+  | Reply_tool_approval of {
+      keeper : string;
+      approval_id : string;
+      attention_id : string;
+      decision : Wire_work.tool_approval_decision;
+      result : (Wire_work.tool_approval_outcome, http_error) result;
+    }
   (* Knowledge *)
   | Reply_board_feed of (Wire_knowledge.board_feed, http_error) result
   | Reply_board_thread of

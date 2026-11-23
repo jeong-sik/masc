@@ -394,6 +394,20 @@ val encode_tool_approval_decision :
 (** Encode [POST /api/v1/keepers/tool-approval] with server keys ["name"],
     ["tool_call_id"], ["approval_id"], and ["decision"] (["approve"|"deny"]). *)
 
+type tool_approval_outcome =
+  | Tool_approval_settled  (** The waiting call received the decision. *)
+  | Tool_approval_remembered
+      (** The wait had ended. The decision stands for the identical retried
+          call. *)
+  | Tool_approval_no_waiting_call
+      (** No call was waiting and no matching ask was found, so the decision
+          reached nothing. *)
+
+val decode_tool_approval_outcome :
+  Yojson.Safe.t -> (tool_approval_outcome, string) result
+(** Decode the [{settled, remembered}] answer of
+    [POST /api/v1/keepers/tool-approval]. Both true is an error. *)
+
 val encode_gate_resolution :
   id:string -> approved:bool -> reason:string option -> Yojson.Safe.t
 

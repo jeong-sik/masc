@@ -477,6 +477,45 @@ let test_wire_work () =
   in
   Alcotest.(check string) "decision deny" "deny"
     (expect_ok "decision" (Wire_common.required_nonblank_string ap_dec "decision"));
+  (* The tool-approval answer, with the fields the route writes in
+     server_routes_http_keeper_control.ml. *)
+  let approval_answer ~settled ~remembered =
+    Wire_work.decode_tool_approval_outcome
+      (`Assoc
+        [
+          ("settled", `Bool settled);
+          ("remembered", `Bool remembered);
+          ("decision", `String "approve");
+          ("actor", `String "operator");
+        ])
+  in
+  Alcotest.(check bool) "settled answer" true
+    (match
+       expect_ok "settled" (approval_answer ~settled:true ~remembered:false)
+     with
+    | Wire_work.Tool_approval_settled -> true
+    | Wire_work.Tool_approval_remembered | Wire_work.Tool_approval_no_waiting_call
+      ->
+        false);
+  Alcotest.(check bool) "remembered answer" true
+    (match
+       expect_ok "remembered" (approval_answer ~settled:false ~remembered:true)
+     with
+    | Wire_work.Tool_approval_remembered -> true
+    | Wire_work.Tool_approval_settled | Wire_work.Tool_approval_no_waiting_call
+      ->
+        false);
+  Alcotest.(check bool) "answer no call took" true
+    (match
+       expect_ok "no waiting call"
+         (approval_answer ~settled:false ~remembered:false)
+     with
+    | Wire_work.Tool_approval_no_waiting_call -> true
+    | Wire_work.Tool_approval_settled | Wire_work.Tool_approval_remembered ->
+        false);
+  ignore
+    (expect_err "settled and remembered"
+       (approval_answer ~settled:true ~remembered:true));
   (* Real Candle Ledger: ledger_state=missing, nullable half_life_sec, all 15 event kinds *)
   let candle_json =
     parse_json

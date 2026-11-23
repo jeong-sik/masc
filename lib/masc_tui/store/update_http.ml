@@ -85,6 +85,22 @@ let record_http_incident ~now ~source ~context err (m : Model.t) =
       (* Channel 3 isolation: ONLY append to incidents, NEVER touch live health. *)
       ({ m with incidents }, [])
 
+(* A decision POST that failed leaves its attention item actionable again,
+   records an incident, and toasts the failure. *)
+let fail_decision_post ~now ~attention_id ~context err (m : Model.t) =
+  let attention =
+    match attention_id with
+    | Some id -> Attention.clear_in_flight ~id m.attention
+    | None -> m.attention
+  in
+  let next, cmds =
+    record_http_incident ~now ~source:Health.Source_client_http ~context err
+      { m with attention }
+  in
+  ( Model.with_toast ~now ~level:Model.Toast_error (Msg.http_error_summary err)
+      next,
+    cmds )
+
 let max_confirm_rechecks = 3
 
 let take_matching_user_msg (tx : Drafts.pending_message)
@@ -614,21 +630,73 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       (next, [])
   | Msg.Reply_work_mutation { label; attention_id; result = Error err; _ } ->
-      let attention =
-        match attention_id with
-        | Some id -> Attention.clear_in_flight ~id m.attention
-        | None -> m.attention
+      fail_decision_post ~now ~attention_id ~context:label err m
+  | Msg.Reply_tool_approval
+      { keeper; approval_id; attention_id; decision; result = Ok outcome } -> (
+      let decision_kind, settled_label, noun_ko, noun_en =
+        match decision with
+        | Wire_work.Tool_approve ->
+            ( Work_store.Decision_tool_approved,
+              Say.make ~ko:"도구 호출 승인됨" ~en:"Tool call approved",
+              "승인",
+              "approval" )
+        | Wire_work.Tool_deny ->
+            ( Work_store.Decision_tool_denied,
+              Say.make ~ko:"도구 호출 거절됨" ~en:"Tool call denied",
+              "거절",
+              "denial" )
       in
-      let m' = { m with attention } in
-      let next, cmds =
-        record_http_incident ~now ~source:Health.Source_client_http
-          ~context:label err m'
+      let resolve ~level label =
+        let work =
+          Work_store.record_decision ~at_unix:m.freshness.last_wall_unix
+            ~kind:decision_kind ~target_id:approval_id ~keeper:(Some keeper)
+            ~summary:(Say.resolve m.lang label) m.work
+        in
+        let attention =
+          Attention.advance_after_resolution ~resolved_id:attention_id
+            m.attention
+        in
+        ({ m with attention; work } |> Model.with_toast ~now ~level label, [])
       in
-      let next =
-        Model.with_toast ~now ~level:Model.Toast_error
-          (Msg.http_error_summary err) next
+      match outcome with
+      | Wire_work.Tool_approval_settled ->
+          resolve ~level:Model.Toast_success settled_label
+      | Wire_work.Tool_approval_remembered ->
+          resolve ~level:Model.Toast_info
+            (Say.make
+               ~ko:
+                 ("기다림이 끝난 호출이라 같은 호출을 다시 할 때 " ^ noun_ko
+                ^ "이 적용됩니다")
+               ~en:
+                 ("The call had stopped waiting; the " ^ noun_en
+                ^ " applies when the same call is retried"))
+      | Wire_work.Tool_approval_no_waiting_call ->
+          (* Nothing received the decision, so no decision is recorded and
+             the held approvals are read again instead of dropping the item
+             here. *)
+          let next =
+            {
+              m with
+              attention = Attention.clear_in_flight ~id:attention_id m.attention;
+            }
+            |> on_work (fun (x : Work_store.t) ->
+                   { x with tool_approvals = Observed.mark_stale x.tool_approvals })
+            |> Model.with_toast ~now ~level:Model.Toast_warning
+                 (Say.make
+                    ~ko:("기다리는 호출이 없어 " ^ noun_ko ^ "이 적용되지 않았습니다")
+                    ~en:
+                      ("No call was waiting, so the " ^ noun_en
+                     ^ " was not applied"))
+          in
+          (next, [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_tool_approvals } ]))
+  | Msg.Reply_tool_approval { attention_id; decision; result = Error err; _ } ->
+      let context =
+        match decision with
+        | Wire_work.Tool_approve ->
+            Say.make ~ko:"도구 호출 승인" ~en:"Tool call approval"
+        | Wire_work.Tool_deny -> Say.make ~ko:"도구 호출 거절" ~en:"Tool call denial"
       in
-      (next, cmds)
+      fail_decision_post ~now ~attention_id:(Some attention_id) ~context err m
   | Msg.Reply_board_feed (Ok feed) ->
       ( {
           m with

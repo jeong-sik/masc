@@ -263,6 +263,11 @@ Pending operator decisions appear in two places:
     rejection).
   - While typing in the composer: use **`Alt+Y`** and **`Alt+N`** without
     losing your draft.
+  - A Tool Approval answer toasts what the server did with it: the waiting
+    call took it, the call had stopped waiting and the answer applies when
+    the same call is retried, or no call was waiting. In the last case
+    nothing is recorded, the item stays, and the held approvals are read
+    again.
   - For **Goal confirmations**, `Y` never fabricates proof tokens — it dives
     into **Goal Dive** so you can review verified proof and submit the exact
     server-issued `criterion_revision`, `request_id`, `verification_run_id`,

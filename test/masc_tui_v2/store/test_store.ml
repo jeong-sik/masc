@@ -531,7 +531,54 @@ let test_three_channel_separation () =
   Alcotest.(check int) "ask removed on server ack" 3
     (Attention.count m12.attention);
   Alcotest.(check int) "recent 24h decision recorded" 1
-    (List.length m12.work.recent_decisions_24h)
+    (List.length m12.work.recent_decisions_24h);
+  (* The fast approval of tool:ap-1 is still in flight. Its answer decides
+     whether the item is resolved. *)
+  let tool_reply outcome =
+    Msg.Http_reply
+      {
+        epoch = m12.epoch;
+        reply =
+          Msg.Reply_tool_approval
+            {
+              keeper = "alpha";
+              approval_id = "ap-1";
+              attention_id = "tool:ap-1";
+              decision = Wire_work.Tool_approve;
+              result = Ok outcome;
+            };
+      }
+  in
+  let m_unclaimed, cmds_unclaimed =
+    Update.step ~now:t2 m12 (tool_reply Wire_work.Tool_approval_no_waiting_call)
+  in
+  Alcotest.(check bool) "an approval no call took is no longer in flight" false
+    (Attention.is_in_flight ~id:"tool:ap-1" m_unclaimed.attention);
+  Alcotest.(check int) "an approval no call took keeps the item" 3
+    (Attention.count m_unclaimed.attention);
+  Alcotest.(check int) "an approval no call took records no decision" 1
+    (List.length m_unclaimed.work.recent_decisions_24h);
+  Alcotest.(check bool) "an approval no call took reads the held approvals again"
+    true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_tool_approvals; _ } -> true
+         | _ -> false)
+       cmds_unclaimed);
+  let m_settled, _ =
+    Update.step ~now:t2 m12 (tool_reply Wire_work.Tool_approval_settled)
+  in
+  Alcotest.(check int) "a settled approval resolves the item" 2
+    (Attention.count m_settled.attention);
+  Alcotest.(check int) "a settled approval records the decision" 2
+    (List.length m_settled.work.recent_decisions_24h);
+  let m_remembered, _ =
+    Update.step ~now:t2 m12 (tool_reply Wire_work.Tool_approval_remembered)
+  in
+  Alcotest.(check int) "a remembered approval resolves the item" 2
+    (Attention.count m_remembered.attention);
+  Alcotest.(check int) "a remembered approval records the decision" 2
+    (List.length m_remembered.work.recent_decisions_24h)
 
 (* 3. Compact composer auto-fold, draft preservation & transmission lifecycle *)
 let test_compact_composer_and_drafts () =

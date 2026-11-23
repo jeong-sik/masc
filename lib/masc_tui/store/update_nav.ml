@@ -2320,13 +2320,16 @@ let submit_inline_modal ~now (m : Model.t) =
                     ] ))
           | Form_standard Nav.Connector_form ->
               let connector = Model.modal_field_value ~key:"connector" modal in
-              let channel = Model.modal_field_value ~key:"channel" modal in
+              let channel_id = Model.modal_field_value ~key:"channel" modal in
+              let keeper_name = Model.modal_field_value ~key:"keeper" modal in
               ( mark_submitting m
               , [
                   Cmd.Http_post
                     {
                       epoch = m.epoch;
-                      req = Cmd.Post_connector_create { connector; channel };
+                      req =
+                        Cmd.Post_connector_bind
+                          { connector; channel_id; keeper_name };
                     };
                 ] )
           | Form_standard Nav.Repo_add_form ->

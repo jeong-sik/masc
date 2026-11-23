@@ -352,7 +352,8 @@ Four sub-tabs (`[` / `]` or `←` / `→`):
    lanes), and **Fusion** runs (`f` opens the Fusion launch modal).
 4. **Tools & Connectors**: 24h tool metrics series (live updates via
    view-scoped `tool-metrics/series/stream` SSE), Tools catalog, Channel Gate
-   Connectors (`n` opens Connector form), **Browser Lane** summary, and
+   Connectors (`n` opens the Connector bind form: connector name such as
+   `discord`, channel ID, and the Keeper to bind), **Browser Lane** summary, and
    **Connected MCP Clients**.
 
 ### `6` Infra

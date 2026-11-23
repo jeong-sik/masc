@@ -152,7 +152,11 @@ type post_request =
       hearth : string option;
     }
   | Post_schedule_create of Wire_work.schedule_create_request
-  | Post_connector_create of { connector : string; channel : string }
+  | Post_connector_bind of {
+      connector : string;
+      channel_id : string;
+      keeper_name : string;
+    }
   | Post_repo_add of { url : string; branch : string option }
   | Post_task_cancel of {
       task_id : string;
@@ -323,7 +327,8 @@ let post_request_path = function
   | Post_keeper_turn_interrupt _ -> Wire_fleet.keeper_turn_interrupt_path
   | Post_board_create _ -> "/api/v1/tools/masc_board_post"
   | Post_schedule_create _ -> "/api/v1/tools/masc_schedule_create"
-  | Post_connector_create _ -> "/api/v1/gate/connector/bind"
+  | Post_connector_bind { connector; _ } ->
+      Wire_runtime.connector_bind_path ~connector
   | Post_repo_add _ -> Wire_infra.repositories_path
   | Post_task_cancel _ -> "/api/v1/dashboard/tasks/cancel"
   | Post_harness_overrule _ -> "/api/v1/dashboard/harness-label"
@@ -381,8 +386,8 @@ let post_request_body = function
       in
       `Assoc fields
   | Post_schedule_create req -> Wire_work.encode_schedule_create req
-  | Post_connector_create { connector; channel } ->
-      `Assoc [ ("connector", `String connector); ("channel", `String channel) ]
+  | Post_connector_bind { connector = _; channel_id; keeper_name } ->
+      Wire_runtime.encode_connector_bind ~channel_id ~keeper_name
   | Post_repo_add { url; branch } ->
       let base = [ ("url", `String url) ] in
       let fields =

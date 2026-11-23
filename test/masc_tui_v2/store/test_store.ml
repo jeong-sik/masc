@@ -1649,7 +1649,7 @@ let test_verifier_regressions () =
         | Cmd.Post_keeper_turn_interrupt _
         | Cmd.Post_board_create _
         | Cmd.Post_schedule_create _
-        | Cmd.Post_connector_create _
+        | Cmd.Post_connector_bind _
         | Cmd.Post_repo_add _
         | Cmd.Post_task_cancel _
         | Cmd.Post_harness_overrule _ ->
@@ -3222,10 +3222,10 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
        cmds_tc);
   (* What goes on the wire: the cancel and Goal routes refuse a body that does
      not name the workspace [/health] reported. *)
-  let posted_bodies cmds =
+  let posted_requests cmds =
     List.filter_map
       (function
-        | Cmd.Http_post { req; _ } -> Some (Cmd.post_request_body req)
+        | Cmd.Http_post { req; _ } -> Some req
         | Cmd.Batch _ | Cmd.Http_get _ | Cmd.Http_put _
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
@@ -3234,6 +3234,9 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
         | Cmd.Restart_tui | Cmd.Quit _ ->
             None)
       (Cmd.flatten cmds)
+  in
+  let posted_bodies cmds =
+    List.map Cmd.post_request_body (posted_requests cmds)
   in
   let posted_field key cmds =
     List.map
@@ -3330,6 +3333,23 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     (match m_sched_bad.inline_modal with
     | Some md -> Option.is_some md.error
     | None -> false);
+
+  (* Connector form -> the bind route's only inputs: the connector as the
+     [name] query parameter, and channel_id and keeper_name in the body. *)
+  let m_conn_modal, _ = Update_nav.open_inline_modal m_work Nav.Connector_form in
+  let _, cmds_conn =
+    step
+      (fill_modal
+         [ ("connector", "discord"); ("channel", "1234"); ("keeper", "alpha") ]
+         m_conn_modal)
+      (key Keymap.Input.Enter)
+  in
+  Alcotest.(check (list string)) "Connector form names the connector in the query"
+    [ "/api/v1/gate/connector/bind?name=discord" ]
+    (List.map Cmd.post_request_path (posted_requests cmds_conn));
+  Alcotest.(check (list string)) "Connector form posts channel_id and keeper_name"
+    [ {|{"channel_id":"1234","keeper_name":"alpha"}|} ]
+    (List.map Yojson.Safe.to_string (posted_bodies cmds_conn));
 
   (* Goal_dive: Awaiting_confirmation [a] NEVER fabricates proof — opens explicit server-proof modal *)
   let m_gdive_conf =

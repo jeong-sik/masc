@@ -158,7 +158,11 @@ type post_request =
       hearth : string option;
     }
   | Post_schedule_create of Wire_work.schedule_create_request
-  | Post_connector_create of { connector : string; channel : string }
+  | Post_connector_bind of {
+      connector : string;
+      channel_id : string;
+      keeper_name : string;
+    }
   | Post_repo_add of { url : string; branch : string option }
   | Post_task_cancel of {
       task_id : string;

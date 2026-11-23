@@ -1218,7 +1218,7 @@ let execute_post t ~epoch req =
                    label = Say.make ~ko:"일정 생성 완료" ~en:"Schedule created";
                    result;
                  })
-        | Cmd.Post_connector_create _ ->
+        | Cmd.Post_connector_bind _ ->
             let result = post_ack t ~path ~body in
             Some
               (Msg.Reply_action_ack

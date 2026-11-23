@@ -65,6 +65,11 @@ let exact_lane_runs_path ?lane ?(limit = 20) () =
   "/api/v1/dashboard/exact-lane-runs?" ^ String.concat "&" params
 
 let connectors_path = "/api/v1/gate/connectors"
+
+(* [handle_gate_connector_bind] reads the connector from the [name] query
+   parameter and refuses a request without it. *)
+let connector_bind_path ~connector =
+  "/api/v1/gate/connector/bind?name=" ^ percent_encode connector
 let browser_lane_path = "/api/v1/dashboard/browser-lane/clients"
 let mcp_clients_path = "/api/v1/dashboard/clients"
 
@@ -2025,6 +2030,12 @@ let decode_connectors json =
   let* _, body = unwrap_v2_or_raw json in
   let* items = required_list_field body "connectors" in
   decode_list "connectors" decode_connector_row items
+
+(* [handle_bind_for_connector] reads exactly these two body fields and refuses
+   a blank one. *)
+let encode_connector_bind ~channel_id ~keeper_name =
+  `Assoc
+    [ ("channel_id", `String channel_id); ("keeper_name", `String keeper_name) ]
 
 type browser_lane_status = {
   ok : bool;

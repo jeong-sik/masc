@@ -685,7 +685,14 @@ let inline_modal_for kind =
           };
           {
             key = "channel";
-            label = Say.make ~ko:"채널" ~en:"Channel";
+            label = Say.make ~ko:"채널 ID" ~en:"Channel ID";
+            value = "";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "keeper";
+            label = Say.make ~ko:"연결할 키퍼" ~en:"Keeper to bind";
             value = "";
             required = true;
             secret = false;

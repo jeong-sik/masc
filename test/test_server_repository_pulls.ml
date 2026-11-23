@@ -55,6 +55,19 @@ let pull_node
     author
     rollup
 
+(* A [statusCheckRollup] as the reader's query asks for it: how many check
+   runs and how many commit statuses the head commit has in each state. *)
+let rollup_json ?(statuses = []) runs =
+  let entries counts =
+    counts
+    |> List.map (fun (state, count) -> Printf.sprintf {|{"state":%S,"count":%d}|} state count)
+    |> String.concat ","
+  in
+  Printf.sprintf
+    {|{"contexts":{"checkRunCountsByState":[%s],"statusContextCountsByState":[%s]}}|}
+    (entries runs)
+    (entries statuses)
+
 let page ~has_next ~cursor nodes =
   Printf.sprintf
     {|{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":%b,"endCursor":%s},"nodes":[%s]}}}}|}
@@ -103,7 +116,7 @@ let test_decodes_two_pages () =
           ~number:38054
           ~draft:false
           ~review:{|"APPROVED"|}
-          ~rollup:{|{"state":"SUCCESS"}|} ()
+          ~rollup:(rollup_json [ "SUCCESS", 1 ]) ()
       ]
   in
   let second =
@@ -114,7 +127,7 @@ let test_decodes_two_pages () =
           ~number:38030
           ~draft:false
           ~review:{|"REVIEW_REQUIRED"|}
-          ~rollup:{|{"state":"PENDING"}|} ()
+          ~rollup:(rollup_json [ "IN_PROGRESS", 1 ]) ()
       ]
   in
   let http_post, requests = recording_stub [ ok_response first; ok_response second ] in
@@ -129,9 +142,9 @@ let test_decodes_two_pages () =
      Alcotest.(check bool) "draft" true draft.draft;
      Alcotest.(check bool) "no rollup reads as no checks" true (draft.checks = Facts.Checks_none);
      Alcotest.(check bool) "no decision reads as no review" true (draft.review = Facts.Review_none);
-     Alcotest.(check bool) "SUCCESS" true (approved.checks = Facts.Checks_passing);
+     Alcotest.(check bool) "a passed run" true (approved.checks = Facts.Checks_passing);
      Alcotest.(check bool) "APPROVED" true (approved.review = Facts.Review_approved);
-     Alcotest.(check bool) "PENDING" true (waiting.checks = Facts.Checks_running);
+     Alcotest.(check bool) "a run in progress" true (waiting.checks = Facts.Checks_running);
      Alcotest.(check bool) "REVIEW_REQUIRED" true (waiting.review = Facts.Review_waiting);
      Alcotest.(check string) "slug" "jeong-sik/masc" waiting.repo_slug
    | _ -> failf "expected three pull requests");
@@ -144,12 +157,12 @@ let test_unknown_enum_is_counted () =
     page
       ~has_next:false
       ~cursor:None
-      [ pull_node ~number:1 ~draft:false ~review:"null" ~rollup:{|{"state":"SUCCESS"}|} ()
+      [ pull_node ~number:1 ~draft:false ~review:"null" ~rollup:(rollup_json [ "SUCCESS", 1 ]) ()
       ; pull_node
           ~number:2
           ~draft:false
           ~review:"null"
-          ~rollup:{|{"state":"QUEUED_FOR_SOMETHING_NEW"}|} ()
+          ~rollup:(rollup_json [ "QUEUED_FOR_SOMETHING_NEW", 1 ]) ()
       ; pull_node ~number:3 ~draft:false ~review:{|"DISMISSED_NEW"|} ~rollup:"null" ()
       ; {|{"number":4,"isDraft":false,
           "reviewDecision":null,"mergeable":"MERGEABLE",
@@ -163,6 +176,97 @@ let test_unknown_enum_is_counted () =
   in
   Alcotest.(check int) "unknown members and a missing rollup key are counted" 3 undecodable;
   Alcotest.(check (list int)) "they are not shown as some known state" [ 1 ]
+    (List.map (fun (p : Facts.pull_request) -> p.number) pulls)
+
+(* GitHub's rollup state reads FAILURE for a cancelled run, and a run that a
+   newer run of its concurrency group stopped is cancelled, not failed. So the
+   reader counts the runs by state itself, and a cancelled run decides
+   nothing. *)
+let checks_of_rollup rollup =
+  let body =
+    page ~has_next:false ~cursor:None [ pull_node ~number:1 ~draft:false ~review:"null" ~rollup () ]
+  in
+  let http_post, _ = recording_stub [ ok_response body ] in
+  match Pulls.read_repository ~now ~http_post ~token:"t" "o/r" |> read_or_fail with
+  | [ pull ], 0 -> Facts.check_state_to_string pull.checks
+  | _ -> failf "the row must decode"
+
+let test_a_cancelled_run_is_no_verdict () =
+  List.iter
+    (fun (name, rollup, expected) ->
+      Alcotest.(check string) name expected (checks_of_rollup rollup))
+    [ "only cancelled runs", rollup_json [ "CANCELLED", 2 ], "none"
+    ; "a cancelled run beside passed ones", rollup_json [ "CANCELLED", 1; "SUCCESS", 3 ], "passing"
+    ; "skipped and neutral runs pass", rollup_json [ "SKIPPED", 2; "NEUTRAL", 1 ], "passing"
+    ; ( "a failed run decides, cancelled runs or not"
+      , rollup_json [ "CANCELLED", 1; "FAILURE", 1; "SUCCESS", 2 ]
+      , "failing" )
+    ; "a timed out run fails", rollup_json [ "TIMED_OUT", 1; "SUCCESS", 1 ], "failing"
+    ; "a run that did not start fails", rollup_json [ "STARTUP_FAILURE", 1 ], "failing"
+    ; "a run that needs a person fails", rollup_json [ "ACTION_REQUIRED", 1 ], "failing"
+    ; "a stale run fails", rollup_json [ "STALE", 1 ], "failing"
+    ; ( "an unfinished run keeps the head running"
+      , rollup_json [ "CANCELLED", 1; "QUEUED", 1; "SUCCESS", 1 ]
+      , "running" )
+    ; "a run in progress", rollup_json [ "IN_PROGRESS", 1 ], "running"
+    ; "a pending run", rollup_json [ "PENDING", 1 ], "running"
+    ; "a waiting run", rollup_json [ "WAITING", 1 ], "running"
+    ; ( "a failed run outranks an unfinished one"
+      , rollup_json [ "FAILURE", 1; "IN_PROGRESS", 1 ]
+      , "failing" )
+    ; "a failed status", rollup_json ~statuses:[ "FAILURE", 1 ] [ "SUCCESS", 1 ], "failing"
+    ; "an errored status", rollup_json ~statuses:[ "ERROR", 1 ] [], "failing"
+    ; "a pending status", rollup_json ~statuses:[ "PENDING", 1 ] [ "SUCCESS", 1 ], "running"
+    ; "an expected status", rollup_json ~statuses:[ "EXPECTED", 1 ] [], "running"
+    ; ( "a passed status beside a cancelled run"
+      , rollup_json ~statuses:[ "SUCCESS", 1 ] [ "CANCELLED", 1 ]
+      , "passing" )
+    ; "no state has a count", rollup_json [], "none"
+    ; ( "states GitHub lists with a count of 0 are not read"
+      , rollup_json [ "CANCELLED", 0; "FAILURE", 0; "SOMETHING_NEW", 0; "SUCCESS", 4 ]
+      , "passing" )
+    ]
+
+let test_unreadable_check_counts_are_counted () =
+  let body =
+    page
+      ~has_next:false
+      ~cursor:None
+      [ pull_node ~number:1 ~draft:false ~review:"null" ~rollup:(rollup_json [ "SUCCESS", 1 ]) ()
+      ; pull_node ~number:2 ~draft:false ~review:"null" ~rollup:(rollup_json [ "SUCCESS", -1 ]) ()
+      ; pull_node
+          ~number:3
+          ~draft:false
+          ~review:"null"
+          ~rollup:
+            {|{"contexts":{"checkRunCountsByState":[{"state":"SUCCESS","count":"3"}],"statusContextCountsByState":[]}}|}
+          ()
+      ; pull_node
+          ~number:4
+          ~draft:false
+          ~review:"null"
+          ~rollup:{|{"contexts":{"checkRunCountsByState":[{"state":"SUCCESS","count":1}]}}|}
+          ()
+      ; pull_node ~number:5 ~draft:false ~review:"null" ~rollup:(rollup_json [ "COMPLETED", 1 ]) ()
+      ; pull_node ~number:6 ~draft:false ~review:"null" ~rollup:{|{"state":"SUCCESS"}|} ()
+      ; pull_node
+          ~number:7
+          ~draft:false
+          ~review:"null"
+          ~rollup:(rollup_json ~statuses:[ "SOMETHING_NEW", 1 ] [])
+          ()
+      ; pull_node ~number:8 ~draft:false ~review:"null" ~rollup:{|{"contexts":null}|} ()
+      ]
+  in
+  let http_post, _ = recording_stub [ ok_response body ] in
+  let pulls, undecodable =
+    Pulls.read_repository ~now ~http_post ~token:"t" "o/r" |> read_or_fail
+  in
+  Alcotest.(check int)
+    "a negative count, a count that is no number, a missing list, a check run state and a status state not read, null contexts and a rollup without counts"
+    7
+    undecodable;
+  Alcotest.(check (list int)) "only the readable row is shown" [ 1 ]
     (List.map (fun (p : Facts.pull_request) -> p.number) pulls)
 
 let failure_or_fail = function
@@ -842,7 +946,7 @@ let test_a_merge_commit_head_keeps_the_writing_keeper () =
             ; authored_node ~parents:1 ~author:"edgar"
             ; authored_node ~parents:2 ~author:"pr-updater"
             ]
-          ~head_rollup:{|{"state":"PENDING"}|}
+          ~head_rollup:(rollup_json [ "IN_PROGRESS", 1 ])
       ; merge_head_node
           ~number:2
           ~authored:
@@ -850,7 +954,7 @@ let test_a_merge_commit_head_keeps_the_writing_keeper () =
             ; authored_node ~parents:2 ~author:"jeong-sik"
             ; authored_node ~parents:2 ~author:"pr-updater"
             ]
-          ~head_rollup:{|{"state":"FAILURE"}|}
+          ~head_rollup:(rollup_json [ "FAILURE", 1 ])
       ; merge_head_node
           ~number:3
           ~authored:
@@ -905,6 +1009,10 @@ let test_the_query_reads_head_checks_and_an_author_window () =
     in
     Alcotest.(check bool) "checks come from the head commit" true
       (contains "head: commits(last: 1)");
+    Alcotest.(check bool) "the check counts by state are asked for, not the rollup state" true
+      (contains "checkRunCountsByState { state count }"
+       && contains "statusContextCountsByState { state count }"
+       && not (contains "statusCheckRollup { state"));
     Alcotest.(check bool) "the author window reads each commit's parent count" true
       (contains "parents { totalCount }");
     Alcotest.(check bool) "the title and the head object id are asked for" true
@@ -1211,7 +1319,7 @@ let column_node ~number columns =
     {|{"number":%d,"isDraft":false,%s
        "reviewDecision":null,"mergeable":"MERGEABLE",
        "authored":{"nodes":[{"commit":{"parents":{"totalCount":1},"author":{"name":"edgar"}}}]},
-       "head":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}|}
+       "head":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"checkRunCountsByState":[{"state":"SUCCESS","count":1}],"statusContextCountsByState":[]}}}}]}}|}
     number
     columns
 
@@ -1378,6 +1486,9 @@ let () =
     [ ( "graphql"
       , [ Alcotest.test_case "two pages decode in order" `Quick test_decodes_two_pages
         ; Alcotest.test_case "unknown enum is counted" `Quick test_unknown_enum_is_counted
+        ; Alcotest.test_case "a cancelled run is no verdict" `Quick test_a_cancelled_run_is_no_verdict
+        ; Alcotest.test_case "unreadable check counts are counted" `Quick
+            test_unreadable_check_counts_are_counted
         ; Alcotest.test_case "author and mergeable decode" `Quick test_author_and_mergeable_decode
         ; Alcotest.test_case "title, head and the last reviews decode" `Quick
             test_title_head_and_latest_reviews_decode

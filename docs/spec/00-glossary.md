@@ -3708,8 +3708,8 @@ status: reference
 
 **PR Placement (PR 자리)**
 : 열린 PR 하나를 `Repository_pulls_placement` 표에서 위쪽부터 처음 맞는 자리 하나에만 넣는 분류
-  (RFC keeper-world-state-shows-open-work §4.2). draft, checks 실패, changes requested,
-  충돌, checks 실행 중을 차례로 보고, 그다음에 현재 head 커밋에 어느 계정의 마지막 리뷰가 있는지
+  (RFC keeper-world-state-shows-open-work §4.2). draft, checks 실패(취소된 실행은 세지 않는다),
+  changes requested, 충돌, checks 실행 중을 차례로 보고, 그다음에 현재 head 커밋에 어느 계정의 마지막 리뷰가 있는지
   (`head_review`)로 가른다. 리뷰는 판정(verdict)과 관계없이 세므로, head 에 리뷰가 있어도
   리뷰 결정(review decision)이 아직 승인을 기다리면 `awaiting_approval` 에 든다.
   `checks_failing`·`changes_requested`·`conflicting`·`unreviewed_on_head`·

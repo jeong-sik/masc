@@ -153,6 +153,9 @@ let github_slug_of_remote ?(host = default_github_host) remote =
 
 (* --- GraphQL --- *)
 
+(* [contexts(first: 1)]: the check counts by state cover every context of the
+   head commit whatever the page size; [first] is only the argument the
+   connection requires. *)
 let query =
   {|query($owner: String!, $name: String!, $first: Int!, $after: String, $authorWindow: Int!) {
   repository(owner: $owner, name: $name) {
@@ -161,7 +164,7 @@ let query =
       nodes {
         number isDraft reviewDecision mergeable title headRefOid
         latestReviews(first: 10) { pageInfo { hasNextPage } nodes { state author { __typename login } commit { oid } } }
-        head: commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+        head: commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 1) { checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } }
         authored: commits(last: $authorWindow) { nodes { commit { parents { totalCount } author { name } } } }
       }
     }
@@ -184,10 +187,38 @@ let request_body ~owner ~name ~after =
 (* The wire enums are read once, here. An unknown member is [None]: the row
    is counted as undecodable rather than shown as a state GitHub did not
    report. *)
-let check_state_of_wire = function
-  | "SUCCESS" -> Some Checks_passing
-  | "FAILURE" | "ERROR" -> Some Checks_failing
-  | "PENDING" | "EXPECTED" -> Some Checks_running
+
+(* What one check run or commit status says about the head commit.
+
+   GitHub's rollup state reads FAILURE for a cancelled run, so a head whose
+   only non-passing runs were cancelled read as failing. A cancelled run is
+   no verdict on the head: a newer run of the same concurrency group stopped
+   it, and that run can belong to another pull request, so the contexts of the
+   head never show the run that replaced it. Measured 2026-11-23 on the open
+   pull requests of jeong-sik/masc: 16 of the 20 with a rollup read FAILURE,
+   and all 16 had cancelled runs and no failed one. *)
+type context_outcome =
+  | Outcome_failed
+  | Outcome_unfinished
+  | Outcome_passed
+  | Outcome_cancelled
+
+(* [CheckRunState] names, as [checkRunCountsByState] lists them. A run that
+   needs a person ([ACTION_REQUIRED], [STALE]) reads as failed. [COMPLETED]
+   says a run finished, not how, so it is not read. *)
+let check_run_outcome_of_wire = function
+  | "SUCCESS" | "NEUTRAL" | "SKIPPED" -> Some Outcome_passed
+  | "FAILURE" | "TIMED_OUT" | "STARTUP_FAILURE" | "ACTION_REQUIRED" | "STALE" ->
+    Some Outcome_failed
+  | "IN_PROGRESS" | "PENDING" | "QUEUED" | "WAITING" -> Some Outcome_unfinished
+  | "CANCELLED" -> Some Outcome_cancelled
+  | _ -> None
+
+(* [StatusState] names, as [statusContextCountsByState] lists them. *)
+let status_outcome_of_wire = function
+  | "SUCCESS" -> Some Outcome_passed
+  | "FAILURE" | "ERROR" -> Some Outcome_failed
+  | "PENDING" | "EXPECTED" -> Some Outcome_unfinished
   | _ -> None
 
 let review_state_of_wire = function
@@ -201,6 +232,59 @@ let mergeable_of_wire = function
   | "CONFLICTING" -> Some Conflicting
   | "UNKNOWN" -> Some Mergeable_unknown
   | _ -> None
+
+type outcome_totals =
+  { failed : int
+  ; unfinished : int
+  ; passed : int
+  }
+
+let no_outcomes = { failed = 0; unfinished = 0; passed = 0 }
+
+(* A cancelled run adds to no total. *)
+let add_outcome totals (outcome, count) =
+  match outcome with
+  | Outcome_failed -> { totals with failed = totals.failed + count }
+  | Outcome_unfinished -> { totals with unfinished = totals.unfinished + count }
+  | Outcome_passed -> { totals with passed = totals.passed + count }
+  | Outcome_cancelled -> totals
+
+(* One list of [{ state, count }] entries. GitHub lists every state of the
+   enum, those the head commit has none of with a count of 0. Such an entry
+   says nothing about the row, so its state name is not read: a state GitHub
+   adds later does not make every row undecodable. *)
+let rec add_outcome_counts ~outcome_of_wire totals = function
+  | [] -> Some totals
+  | entry :: rest ->
+    (match Json_util.assoc_member_opt "state" entry, Json_util.assoc_member_opt "count" entry with
+     | Some (`String _), Some (`Int 0) -> add_outcome_counts ~outcome_of_wire totals rest
+     | Some (`String state), Some (`Int count) when count > 0 ->
+       (match outcome_of_wire state with
+        | Some outcome ->
+          add_outcome_counts ~outcome_of_wire (add_outcome totals (outcome, count)) rest
+        | None -> None)
+     | _ -> None)
+
+(* The same order as GitHub's rollup: a failed context outranks an unfinished
+   one, which outranks a passed one. A head with none of them has no checks. *)
+let check_state_of_totals { failed; unfinished; passed } =
+  if failed > 0
+  then Checks_failing
+  else if unfinished > 0
+  then Checks_running
+  else if passed > 0
+  then Checks_passing
+  else Checks_none
+
+let decode_outcome_totals contexts =
+  let counts name ~outcome_of_wire totals =
+    match Json_util.assoc_member_opt name contexts with
+    | Some (`List entries) -> add_outcome_counts ~outcome_of_wire totals entries
+    | _ -> None
+  in
+  Option.bind
+    (counts "checkRunCountsByState" ~outcome_of_wire:check_run_outcome_of_wire no_outcomes)
+    (counts "statusContextCountsByState" ~outcome_of_wire:status_outcome_of_wire)
 
 (* The check state is the head commit's, merge commit or not: the head is
    what GitHub ran the checks on. *)
@@ -222,9 +306,10 @@ let decode_checks node =
      | None -> None
      | Some `Null -> Some Checks_none
      | Some rollup ->
-       (match Json_util.assoc_member_opt "state" rollup with
-        | Some (`String state) -> check_state_of_wire state
-        | _ -> None))
+       Option.bind
+         (Json_util.assoc_member_opt "contexts" rollup)
+         (fun contexts ->
+           Option.map check_state_of_totals (decode_outcome_totals contexts)))
   | _ -> None
 
 let decode_review node =

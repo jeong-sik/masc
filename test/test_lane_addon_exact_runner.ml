@@ -1300,7 +1300,7 @@ let test_original_mixed_failure_proof () =
     check bool "the original named capacity survives the quota" true evidence.named_input_capacity;
     check bool "quota still vetoes recursive whole-input partition" true evidence.size_independent_execution_failure;
     check bool "the separate actually exhausted API-only proof retains named causes" true
-      (Keeper_exact_walk_receipt.exhausted_input_refusals receipt=Some [Keeper_librarian_input_refusal.Request_body_refused]);
+      (Keeper_exact_walk_receipt.exhausted_input_refusals receipt=Some [Keeper_exact_input_refusal.Request_body_refused]);
     let wire=Keeper_exact_walk_receipt.to_json receipt in
     let missing_advance=match wire with
       | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,if key="http" then

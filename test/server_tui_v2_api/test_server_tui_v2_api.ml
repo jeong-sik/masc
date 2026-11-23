@@ -649,55 +649,131 @@ let test_memory_v2_world_and_diff () =
         ~origin
     in
     let f1_v2_id = Keeper_memory_os_types.memory_id f1_v2 in
-    (match
-       Keeper_memory_os_current.upsert_fact
-         ~pass:Keeper_memory_commit_pass.Keeper_write
-         ~keepers_dir
-         ~keeper_id:"alpha"
-         ~now:(now -. 300.0)
-         ~source
-         f1
-     with
-     | Ok _ -> ()
-     | Error e ->
-       Alcotest.fail ("upsert f1 failed: " ^ Keeper_memory_os_current.upsert_error_to_string e));
-    (match
-       Keeper_memory_os_current.upsert_fact
-         ~pass:Keeper_memory_commit_pass.Keeper_write
-         ~keepers_dir
-         ~keeper_id:"alpha"
-         ~now:(now -. 250.0)
-         ~source
-         f2
-     with
-     | Ok _ -> ()
-     | Error e ->
-       Alcotest.fail ("upsert f2 failed: " ^ Keeper_memory_os_current.upsert_error_to_string e));
-    (match
-       Keeper_memory_os_current.supersede_fact
-         ~pass:Keeper_memory_commit_pass.Keeper_write
-         ~keepers_dir
-         ~keeper_id:"alpha"
-         ~now:(now -. 200.0)
-         ~source
-         ~superseded_memory_id:f1_id
-         f1_v2
-     with
-     | Ok _ -> ()
-     | Error _ -> Alcotest.fail "supersede f1 failed");
-    (match
-       Keeper_memory_os_current.retract_fact
-         ~pass:Keeper_memory_commit_pass.Keeper_delete
-         ~keepers_dir
-         ~keeper_id:"alpha"
-         ~now:(now -. 100.0)
-         ~source:{ kind = Explicit_retract; trace_id = "trace-2" }
-         ~memory_id:f2_id
-         ~reason:"obsolete scratch note"
-         ()
-     with
-     | Ok _ -> ()
-     | Error _ -> Alcotest.fail "retract f2 failed");
+    let dummy_log_id = Keeper_turn_log.Log_id.fresh () in
+    let dummy_mark : Keeper_turn_log.mark =
+      { trace = ""
+      ; closed_messages = 0
+      ; session = ""
+      ; history_bytes = 0
+      ; internal_bytes = 0
+      ; chat_bytes = 0
+      ; external_rows = 0
+      }
+    in
+    let commit_and_write ~keeper_id ~at ~revision ~source ~cause ~added ~removed ~facts =
+      let snap : Keeper_memory_os_current.t =
+        { revision
+        ; updated_at = at
+        ; source
+        ; facts
+        ; change =
+            { added
+            ; removed = List.map fst removed
+            ; retained = max 0 (List.length facts - List.length added)
+            ; invalidated = []
+            }
+        }
+      in
+      let snap_bytes =
+        Yojson.Safe.pretty_to_string (Keeper_memory_os_current.to_json snap) ^ "\n"
+      in
+      write_file_raw
+        (Keeper_memory_os_current.path_for_keepers_dir ~keepers_dir ~keeper_id)
+        snap_bytes;
+      let log_path = Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id in
+      let at_end =
+        match Librarian_log_store.read_tail log_path with
+        | Ok Librarian_log_store.Nothing_written -> 0
+        | Ok (Librarian_log_store.Written { rows_end; _ }) -> rows_end
+        | Error _ -> 0
+      in
+      let digest = Agent_core.Checkpoint_objects.digest_of_bytes snap_bytes in
+      let commit : Librarian_log.commit =
+        { seq = revision
+        ; at
+        ; basis = digest
+        ; after = digest
+        ; revision
+        ; cause
+        ; effects = { Librarian_effects.empty with added; removed }
+        ; turn_log = dummy_log_id
+        ; turn_log_offset = 0
+        ; covers_through = Librarian_log.Before_first
+        ; covered = dummy_mark
+        ; working_state = None
+        }
+      in
+      match Librarian_log_store.append ~path:log_path ~at_end (Librarian_log.Committed commit) with
+      | Ok _ -> ()
+      | Error _ -> Alcotest.fail ("commit log append failed for " ^ keeper_id)
+    in
+    let direct_remember (f : Keeper_memory_os_types.fact) =
+      Librarian_log.Direct
+        { by = Librarian_effects.Keeper
+        ; trace = "trace-1"
+        ; write =
+            Librarian_direct.Remember
+              { claim = f.claim; category = f.category; basis = f.basis }
+        }
+    in
+    commit_and_write
+      ~keeper_id:"alpha"
+      ~at:(now -. 300.0)
+      ~revision:1
+      ~source
+      ~cause:(direct_remember f1)
+      ~added:[ f1 ]
+      ~removed:[]
+      ~facts:[ f1 ];
+    commit_and_write
+      ~keeper_id:"alpha"
+      ~at:(now -. 250.0)
+      ~revision:2
+      ~source
+      ~cause:(direct_remember f2)
+      ~added:[ f2 ]
+      ~removed:[]
+      ~facts:[ f1; f2 ];
+    commit_and_write
+      ~keeper_id:"alpha"
+      ~at:(now -. 200.0)
+      ~revision:3
+      ~source
+      ~cause:
+        (Librarian_log.Direct
+           { by = Librarian_effects.Keeper
+           ; trace = "trace-1"
+           ; write =
+               Librarian_direct.Supersede
+                 { old = f1_id
+                 ; claim = f1_v2.claim
+                 ; category = f1_v2.category
+                 ; basis = f1_v2.basis
+                 }
+           })
+      ~added:[ f1_v2 ]
+      ~removed:[ f1, Librarian_effects.Superseded_by f1_v2_id ]
+      ~facts:[ f2; f1_v2 ];
+    commit_and_write
+      ~keeper_id:"alpha"
+      ~at:(now -. 100.0)
+      ~revision:4
+      ~source:{ kind = Explicit_retract; trace_id = "trace-2" }
+      ~cause:
+        (Librarian_log.Direct
+           { by = Librarian_effects.Keeper
+           ; trace = "trace-2"
+           ; write =
+               Librarian_direct.Retract
+                 { id = f2_id; reason = "obsolete scratch note" }
+           })
+      ~added:[]
+      ~removed:
+        [ f2
+        , Librarian_effects.Retracted
+            { by = Librarian_effects.Keeper; reason = "obsolete scratch note" }
+        ]
+      ~facts:[ f1_v2 ];
     (* Append retrieval events so f1_v2 becomes "hot" *)
     for i = 1 to 3 do
       match
@@ -724,18 +800,15 @@ let test_memory_v2_world_and_diff () =
         ~origin
     in
     let beta_id = Keeper_memory_os_types.memory_id beta_f in
-    (match
-       Keeper_memory_os_current.upsert_fact
-         ~pass:Keeper_memory_commit_pass.Keeper_write
-         ~keepers_dir
-         ~keeper_id:"beta"
-         ~now:(now -. 150.0)
-         ~source
-         beta_f
-     with
-     | Ok _ -> ()
-     | Error e ->
-       Alcotest.fail ("upsert beta failed: " ^ Keeper_memory_os_current.upsert_error_to_string e));
+    commit_and_write
+      ~keeper_id:"beta"
+      ~at:(now -. 150.0)
+      ~revision:1
+      ~source
+      ~cause:(direct_remember beta_f)
+      ~added:[ beta_f ]
+      ~removed:[]
+      ~facts:[ beta_f ];
     (* Build & save Workspace_memory_ledger with 1 claim + 1 conflict *)
     let strip_sha256_prefix id =
       if String.starts_with ~prefix:"sha256:" id
@@ -758,14 +831,15 @@ let test_memory_v2_world_and_diff () =
         ~origin
     in
     let claim_id = Keeper_memory_os_types.memory_id claim_f in
-    ignore
-      (Keeper_memory_os_current.upsert_fact
-         ~pass:Keeper_memory_commit_pass.Keeper_write
-         ~keepers_dir
-         ~keeper_id:"alpha"
-         ~now:(now -. 120.0)
-         ~source
-         claim_f);
+    commit_and_write
+      ~keeper_id:"alpha"
+      ~at:(now -. 120.0)
+      ~revision:5
+      ~source
+      ~cause:(direct_remember claim_f)
+      ~added:[ claim_f ]
+      ~removed:[]
+      ~facts:[ f1_v2; claim_f ];
     let ref_claim =
       Workspace_memory_ledger.Ordinary
         { keeper_id = "alpha"; claim_sha256 = strip_sha256_prefix claim_id }
@@ -3232,17 +3306,6 @@ let test_memory_os_world_mvcc_and_keeper_internals () =
     (* 3. Program absorption relation fires in keeper diff via Keeper_memory_activity *)
     let old_a = Keeper_memory_os_types.observed ~claim:"Old partial fact A" ~category:Fact ~now:(now -. 40.0) ~origin in
     let succ_a = Keeper_memory_os_types.observed ~claim:"Synthesized combined fact" ~category:Fact ~now:(now -. 10.0) ~origin in
-    let absorbed_rec : Keeper_memory_absorbed.record =
-      { recorded_at = now -. 10.0
-      ; trace_id = "trace-absorb"
-      ; memory_id = Keeper_memory_os_types.memory_id old_a
-      ; into = Keeper_memory_os_types.memory_id succ_a
-      ; fact = old_a
-      }
-    in
-    (match Keeper_memory_absorbed.append_all ~keepers_dir ~keeper_id:"alpha" [ absorbed_rec ] with
-     | Ok () -> ()
-     | Error e -> Alcotest.fail ("append_all absorbed: " ^ Keeper_memory_absorbed.append_error_to_string e));
     let journal_snap : Keeper_memory_os_current.t =
       { revision = 1
       ; updated_at = now -. 10.0
@@ -3251,29 +3314,103 @@ let test_memory_os_world_mvcc_and_keeper_internals () =
       ; change = { added = [ succ_a ]; removed = [ old_a ]; retained = 0; invalidated = [] }
       }
     in
-    let snap_json = Keeper_memory_os_current.to_json journal_snap in
-    let journal_row =
-      `Assoc
-        [ "outcome", `String "committed"
-        ; "recorded_at", `Float (now -. 10.0)
-        ; "revision", `Int 1
-        ; "source", Yojson.Safe.Util.member "source" snap_json
-        ; "change", Yojson.Safe.Util.member "change" snap_json
-        ; "commit_effect", `String "rewritten"
-        ]
+    let snap_bytes =
+      Yojson.Safe.pretty_to_string (Keeper_memory_os_current.to_json journal_snap) ^ "\n"
     in
     write_file_raw (Keeper_memory_os_current.path_for_keepers_dir ~keepers_dir ~keeper_id:"alpha")
-      (Yojson.Safe.to_string snap_json ^ "\n");
-    write_file_raw (Keeper_memory_os_current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"alpha")
-      (Yojson.Safe.to_string journal_row ^ "\n");
+      snap_bytes;
+    let qid =
+      match
+        Librarian_question_id.of_halves
+          ~front:(String.make Librarian_question_id.half_length 'a')
+          ~back:(String.make Librarian_question_id.half_length 'b')
+      with
+      | Some id -> id
+      | None -> Alcotest.fail "question id"
+    in
+    let digest = Agent_core.Checkpoint_objects.digest_of_bytes snap_bytes in
+    let absorb_commit : Librarian_log.commit =
+      { seq = 1
+      ; at = now -. 10.0
+      ; basis = digest
+      ; after = digest
+      ; revision = 1
+      ; cause =
+          Librarian_log.Read
+            { question = qid
+            ; shown = Librarian_log.With_memory
+            ; slot = "tui-test"
+            ; trace = "trace-absorb"
+            ; missing = []
+            }
+      ; effects =
+          { Librarian_effects.empty with
+            added = [ succ_a ]
+          ; removed =
+              [ old_a, Librarian_effects.Merged_into (Keeper_memory_os_types.memory_id succ_a) ]
+          }
+      ; turn_log = Keeper_turn_log.Log_id.fresh ()
+      ; turn_log_offset = 0
+      ; covers_through = Librarian_log.Before_first
+      ; covered =
+          { Keeper_turn_log.trace = ""
+          ; closed_messages = 0
+          ; session = ""
+          ; history_bytes = 0
+          ; internal_bytes = 0
+          ; chat_bytes = 0
+          ; external_rows = 0
+          }
+      ; working_state = None
+      }
+    in
+    let log_path = Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id:"alpha" in
+    let next_end =
+      match Librarian_log_store.append ~path:log_path ~at_end:0 (Librarian_log.Committed absorb_commit) with
+      | Ok { Librarian_log_store.new_end; _ } -> ref new_end
+      | Error _ -> Alcotest.fail "append absorb commit log failed"
+    in
+    (* Append 205 newer commits after the absorption so [absorb_commit] sits >200
+       commits back from the tail (still well inside the 2000-commit diff window). *)
+    for i = 2 to 206 do
+      let filler_fact =
+        Keeper_memory_os_types.observed
+          ~claim:(Printf.sprintf "Filler fact %d after absorption" i)
+          ~category:Keeper_memory_os_types.Fact
+          ~now:(now -. 5.0)
+          ~origin:{ kind = Keeper_memory_os_types.Authored; trace_id = Printf.sprintf "filler-%d" i }
+      in
+      let filler_commit : Librarian_log.commit =
+        { absorb_commit with
+          seq = i
+        ; at = now -. 5.0
+        ; revision = i
+        ; cause =
+            Librarian_log.Direct
+              { by = Librarian_effects.Keeper
+              ; trace = Printf.sprintf "filler-%d" i
+              ; write =
+                  Librarian_direct.Remember
+                    { claim = filler_fact.claim
+                    ; category = filler_fact.category
+                    ; basis = filler_fact.basis
+                    }
+              }
+        ; effects = { Librarian_effects.empty with added = [ filler_fact ] }
+        }
+      in
+      match Librarian_log_store.append ~path:log_path ~at_end:!next_end (Librarian_log.Committed filler_commit) with
+      | Ok { Librarian_log_store.new_end; _ } -> next_end := new_end
+      | Error _ -> Alcotest.fail "append filler commit log failed"
+    done;
     let kdiff =
       Memory_api.diff_json ~now ~config ~scope:(Scope_keeper "alpha")
         ~range:(Range_window Window_24h) ()
-      |> ok_or_fail "GET /api/v1/memory/diff?scope=keeper:alpha (absorption)"
+      |> ok_or_fail "GET /api/v1/memory/diff?scope=keeper:alpha (absorption >200 commits back)"
       |> json_member_exn "data"
     in
     let updated = json_list_exn "updated" kdiff in
-    Alcotest.(check bool) "keeper diff emits program_absorption relation" true
+    Alcotest.(check bool) "keeper diff emits program_absorption relation even >200 commits back" true
       (List.exists (fun u -> json_string_exn "relation" u = "program_absorption") updated))
 ;;
 

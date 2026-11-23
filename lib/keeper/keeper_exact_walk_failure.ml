@@ -1,7 +1,7 @@
 module Exact_output = Agent_core.Exact_output
 module Http_client = Llm_provider.Http_client
 
-module Input_refusal = Keeper_librarian_input_refusal
+module Input_refusal = Keeper_exact_input_refusal
 
 type t =
   { historical_range_size : bool

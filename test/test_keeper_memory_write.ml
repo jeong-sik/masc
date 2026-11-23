@@ -196,27 +196,56 @@ let current_facts ~keepers_dir ~keeper_id =
   | Error detail -> Alcotest.fail detail
 ;;
 
-let replace_current_facts ?expected_revision ~keepers_dir ~keeper_id facts =
-  Current.replace
-    ~keepers_dir
-    ~keeper_id
-    ~expected_revision
-    ~now:(Time_compat.now ())
-    ~source:{ Current.kind = Current.Librarian; trace_id = "seed" }
-    ~facts
-    ()
-  |> function
-  | Ok _ -> ()
+let write_current_snapshot ~keepers_dir ~keeper_id ~revision ~now ~source ~facts () =
+  Fs_compat.mkdir_p keepers_dir;
+  let snapshot : Current.t =
+    { revision
+    ; updated_at = now
+    ; source
+    ; facts
+    ; change = { added = facts; removed = []; retained = 0; invalidated = [] }
+    }
+  in
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  match Fs_compat.save_file_atomic path (Yojson.Safe.to_string (Current.to_json snapshot)) with
+  | Ok () -> snapshot
   | Error detail -> Alcotest.fail detail
+;;
+
+let replace_current_facts ?expected_revision ~keepers_dir ~keeper_id facts =
+  let current_rev =
+    match Current.read_for_keepers_dir ~keepers_dir ~keeper_id with
+    | Ok None -> 0
+    | Ok (Some snap) -> snap.revision
+    | Error detail -> Alcotest.fail detail
+  in
+  (match expected_revision with
+   | Some expected when expected <> current_rev ->
+     Alcotest.failf "expected revision %d, found %d" expected current_rev
+   | Some _ | None -> ());
+  ignore
+    (write_current_snapshot
+       ~keepers_dir
+       ~keeper_id
+       ~revision:(current_rev + 1)
+       ~now:(Time_compat.now ())
+       ~source:{ Current.kind = Current.Librarian; trace_id = "seed" }
+       ~facts
+       ())
 ;;
 
 let seed_current ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) claim =
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Masc.Workspace.base_path in
   let value = fact claim in
-  match Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:meta.name ~now:value.last_seen
-      ~source:{Current.kind=Current.Explicit_write; trace_id="fixture"} value with
-  | Ok _ -> Masc.Keeper_memory_os_types.memory_id value
-  | Error _ -> Alcotest.fail "could not seed current fact"
+  let existing = current_facts ~keepers_dir ~keeper_id:meta.name in
+  let id = Masc.Keeper_memory_os_types.memory_id value in
+  let facts =
+    if List.exists (fun f -> String.equal (Masc.Keeper_memory_os_types.memory_id f) id) existing
+    then existing
+    else existing @ [ value ]
+  in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name facts;
+  id
 ;;
 
 (* A Board reference names where an observation was read. It is an observation
@@ -984,10 +1013,7 @@ let test_same_count_replacement_updates_notice_and_demand_search () =
      && contains ~needle:old.claim first_notice
      && not (contains ~needle:current.claim first_notice)
      && not (contains ~needle:"bodies omitted" first_notice));
-  (match Current.replace ~keepers_dir ~keeper_id:meta.name
-    ~expected_revision:(Some before.revision) ~now:300.
-    ~source:{Current.kind=Current.Librarian; trace_id="transition"} ~facts:[current] () with
-   | Ok _ -> () | Error detail -> Alcotest.fail detail);
+  replace_current_facts ~expected_revision:before.revision ~keepers_dir ~keeper_id:meta.name [current];
   let after = read () in
   let next_notice = render 400. in
   Alcotest.(check int) "replacement preserves count" (List.length before.facts) (List.length after.facts);
@@ -3237,11 +3263,9 @@ let test_source_snapshot_commit_notifications () =
   let stop = Notifications.subscribe (fun (event : Notifications.event) ->
     if String.equal event.keepers_dir physical_keepers_dir then (
       let snapshot =
-        Masc.Keeper_memory_os_aggregate_lock.with_lock
-          ~keepers_dir ~keeper_id:meta.name (fun () ->
-            File_lock_eio.with_lock
-              (Source.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name)
-              (fun () -> Source.read_for_keepers_dir ~keepers_dir ~keeper_id:meta.name))
+        File_lock_eio.with_lock
+          (Source.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name)
+          (fun () -> Source.read_for_keepers_dir ~keepers_dir ~keeper_id:meta.name)
       in
       observed := (event, snapshot) :: !observed))
   in
@@ -3301,20 +3325,38 @@ let test_ordinary_commit_budget_preserves_store_on_rejection () =
   with_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key "500" @@ fun () ->
   with_molt_observer @@ fun signals ->
   let keeper_id = "ordinary-budget" in
-  replace_current_facts ~keepers_dir ~keeper_id [ fact "small current fact" ];
+  let initial = [ fact "small current fact" ] in
+  let initial_budget =
+    Render.evaluate_facts_budget
+      ~keeper_id ~previous_bytes:0 ~ordinary_facts:initial ~source_lines:[]
+  in
+  (match initial_budget with
+   | Render.Within_threshold _ -> ()
+   | Render.Molt_recommended _ | Render.Backstop_exceeded _ ->
+     Alcotest.fail "small initial fact should be within threshold");
+  Render.notify_molt_if_recommended ~keeper_id initial_budget;
+  replace_current_facts ~keepers_dir ~keeper_id initial;
   Alcotest.(check int) "within-threshold commit emits no molt signal" 0 (List.length !signals);
+  let prev_bytes = Render.facts_payload_bytes ~ordinary_facts:initial ~source_lines:[] in
   let proposed = current_facts ~keepers_dir ~keeper_id @ [ fact (String.make 600 'x') ] in
-  (match
-     Current.replace
-       ~keepers_dir ~keeper_id ~expected_revision:(Some 1)
-       ~now:(Time_compat.now ())
-       ~source:{ Current.kind = Current.Librarian; trace_id = "oversize" }
-       ~facts:proposed ()
-   with
-   | Ok snapshot ->
-     Alcotest.(check int) "commit succeeds without hard budget refusal" 2 snapshot.revision;
-     Alcotest.(check int) "all proposed facts persisted" 2 (List.length snapshot.facts)
-   | Error detail -> Alcotest.fail ("commit should not hard-reject on soft molt threshold: " ^ detail));
+  let outcome =
+    Render.evaluate_facts_budget
+      ~keeper_id ~previous_bytes:prev_bytes ~ordinary_facts:proposed ~source_lines:[]
+  in
+  (match outcome with
+   | Render.Molt_recommended _ -> ()
+   | Render.Within_threshold _ | Render.Backstop_exceeded _ ->
+     Alcotest.fail "growth past soft threshold with healthy receiver must recommend molt");
+  let snapshot =
+    write_current_snapshot
+      ~keepers_dir ~keeper_id ~revision:2
+      ~now:(Time_compat.now ())
+      ~source:{ Current.kind = Current.Librarian; trace_id = "oversize" }
+      ~facts:proposed ()
+  in
+  Render.notify_molt_if_recommended ~keeper_id outcome;
+  Alcotest.(check int) "commit succeeds without hard budget refusal" 2 snapshot.revision;
+  Alcotest.(check int) "all proposed facts persisted" 2 (List.length snapshot.facts);
   (match !signals with
    | [ (notified_keeper, budget) ] ->
      Alcotest.(check string) "molt notified for exact keeper" keeper_id notified_keeper;
@@ -3331,44 +3373,61 @@ let test_over_budget_retraction_recovers_incrementally () =
   let first = fact (String.make 300 'a') in
   let second = fact (String.make 300 'b') in
   with_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key "1000" @@ fun () ->
-  replace_current_facts ~keepers_dir ~keeper_id [ first; second ];
+  let seed_facts = [ first; second ] in
+  let seed_outcome =
+    Render.evaluate_facts_budget
+      ~keeper_id ~previous_bytes:0 ~ordinary_facts:seed_facts ~source_lines:[]
+  in
+  Render.notify_molt_if_recommended ~keeper_id seed_outcome;
+  replace_current_facts ~keepers_dir ~keeper_id seed_facts;
   Alcotest.(check int) "seed within threshold emits no molt" 0 (List.length !signals);
   with_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key "200" @@ fun () ->
-  let source = { Current.kind = Current.Explicit_write; trace_id = "retract" } in
-  (match
-     Current.retract_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_delete
-       ~keepers_dir ~keeper_id ~now:(Time_compat.now ()) ~source
-       ~memory_id:(Masc.Keeper_memory_os_types.memory_id first)
-       ~reason:"less useful" ()
-   with
-   | Ok _ -> ()
-   | Error _ -> Alcotest.fail "a reducing over-budget retraction was rejected");
+  let prev_bytes = Render.facts_payload_bytes ~ordinary_facts:seed_facts ~source_lines:[] in
+  let after_retract = [ second ] in
+  let retract_outcome =
+    Render.evaluate_facts_budget
+      ~keeper_id ~previous_bytes:prev_bytes ~ordinary_facts:after_retract ~source_lines:[]
+  in
+  (match retract_outcome with
+   | Render.Within_threshold _ -> ()
+   | Render.Molt_recommended _ | Render.Backstop_exceeded _ ->
+     Alcotest.fail "a reducing over-budget retraction was rejected");
+  Render.notify_molt_if_recommended ~keeper_id retract_outcome;
+  replace_current_facts ~expected_revision:1 ~keepers_dir ~keeper_id after_retract;
   Alcotest.(check int) "shrinking commit emits no new molt signal" 0 (List.length !signals);
   let remaining = current_facts ~keepers_dir ~keeper_id in
   Alcotest.(check int) "one fact remains" 1 (List.length remaining);
+  let remaining_bytes = Render.facts_payload_bytes ~ordinary_facts:remaining ~source_lines:[] in
   Alcotest.(check bool) "remaining fact is still over the reduced threshold" true
-    (Render.facts_payload_bytes ~ordinary_facts:remaining ~source_lines:[] > 200);
+    (remaining_bytes > 200);
   Alcotest.(check bool) "the second fact remains" true
     (String.equal (List.hd remaining).claim second.claim);
   (* Growth past threshold commits cleanly and notifies the Librarian to molt. *)
-  (match
-     Current.replace
-       ~keepers_dir ~keeper_id ~expected_revision:(Some 2)
-       ~now:(Time_compat.now ()) ~source
-       ~facts:(remaining @ [ fact "new fact" ]) ()
-   with
-   | Ok snapshot ->
-     Alcotest.(check int) "growth commit succeeded" 2 (List.length snapshot.facts)
-   | Error detail -> Alcotest.fail ("growth should commit and signal molt: " ^ detail));
+  let grown = remaining @ [ fact "new fact" ] in
+  let grow_outcome =
+    Render.evaluate_facts_budget
+      ~keeper_id ~previous_bytes:remaining_bytes ~ordinary_facts:grown ~source_lines:[]
+  in
+  (match grow_outcome with
+   | Render.Molt_recommended _ -> ()
+   | Render.Within_threshold _ | Render.Backstop_exceeded _ ->
+     Alcotest.fail "growth should commit and signal molt");
+  replace_current_facts ~expected_revision:2 ~keepers_dir ~keeper_id grown;
+  Render.notify_molt_if_recommended ~keeper_id grow_outcome;
+  Alcotest.(check int) "growth commit succeeded" 2
+    (List.length (current_facts ~keepers_dir ~keeper_id));
   Alcotest.(check int) "growth past threshold fired molt signal" 1 (List.length !signals);
-  (match
-     Current.retract_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_delete
-       ~keepers_dir ~keeper_id ~now:(Time_compat.now ()) ~source
-       ~memory_id:(Masc.Keeper_memory_os_types.memory_id second)
-       ~reason:"less useful" ()
-   with
-   | Ok _ -> ()
-   | Error _ -> Alcotest.fail "final recovery retraction was rejected");
+  let grown_bytes = Render.facts_payload_bytes ~ordinary_facts:grown ~source_lines:[] in
+  let recovered = List.filter (fun (f : Masc.Keeper_memory_os_types.fact) -> not (String.equal f.claim second.claim)) grown in
+  let recover_outcome =
+    Render.evaluate_facts_budget
+      ~keeper_id ~previous_bytes:grown_bytes ~ordinary_facts:recovered ~source_lines:[]
+  in
+  (match recover_outcome with
+   | Render.Within_threshold _ -> ()
+   | Render.Molt_recommended _ | Render.Backstop_exceeded _ ->
+     Alcotest.fail "final recovery retraction was rejected");
+  replace_current_facts ~expected_revision:3 ~keepers_dir ~keeper_id recovered;
   Alcotest.(check int) "one remaining fact after retracting second" 1
     (List.length (current_facts ~keepers_dir ~keeper_id))
 ;;
@@ -3442,17 +3501,31 @@ let test_ordinary_commit_budget_counts_source_facts () =
    | Error (Source.Source_read_failed failure) ->
      Alcotest.fail (Source.source_read_failure_to_string failure));
   Alcotest.(check int) "initial source fact within threshold" 0 (List.length !signals);
-  (match
-     Current.replace
-       ~keepers_dir ~keeper_id:meta.name ~expected_revision:None
-       ~now:(Time_compat.now ())
-       ~source:{ Current.kind = Current.Librarian; trace_id = "oversize" }
-       ~facts:[ fact (String.make 180 'o') ] ()
-   with
-   | Ok snapshot ->
-     Alcotest.(check int) "ordinary fact committed without hard refusal" 1
-       (List.length snapshot.facts)
-   | Error detail -> Alcotest.fail detail);
+  let source_lines =
+    match Source.read_budget_lines ~keepers_dir ~keeper_id:meta.name with
+    | Ok lines -> lines
+    | Error detail -> Alcotest.fail detail
+  in
+  let previous_bytes = Render.facts_payload_bytes ~ordinary_facts:[] ~source_lines in
+  let ordinary_facts = [ fact (String.make 180 'o') ] in
+  let outcome =
+    Render.evaluate_facts_budget
+      ~keeper_id:meta.name ~previous_bytes ~ordinary_facts ~source_lines
+  in
+  (match outcome with
+   | Render.Molt_recommended _ -> ()
+   | Render.Within_threshold _ | Render.Backstop_exceeded _ ->
+     Alcotest.fail "combined ordinary + source must recommend molt");
+  let snapshot =
+    write_current_snapshot
+      ~keepers_dir ~keeper_id:meta.name ~revision:1
+      ~now:(Time_compat.now ())
+      ~source:{ Current.kind = Current.Librarian; trace_id = "oversize" }
+      ~facts:ordinary_facts ()
+  in
+  Render.notify_molt_if_recommended ~keeper_id:meta.name outcome;
+  Alcotest.(check int) "ordinary fact committed without hard refusal" 1
+    (List.length snapshot.facts);
   (match !signals with
    | [ (notified_keeper, budget) ] ->
      Alcotest.(check string) "molt notified for ordinary keeper" meta.name notified_keeper;

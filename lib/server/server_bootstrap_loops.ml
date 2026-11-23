@@ -815,10 +815,12 @@ let prepare_keeper_persistence_owned
      --accept-store-quarantine. This workspace's keeper loops have
      not started; that does not fence independent external writers. *)
   let store_reconcile_started = preparation_stage_started () in
-  let recovery_refusals = Keeper_store_boot_reconcile.recover_memory_publications config in
   let examination = Keeper_store_boot_reconcile.examine config in
-  let admission = Keeper_store_boot_reconcile.admit_after_recovery
-    ~recovery_refusals ~accept_quarantine:accept_store_quarantine examination in
+  let admission =
+    Keeper_store_boot_reconcile.admit
+      ~accept_quarantine:accept_store_quarantine
+      examination
+  in
   match admission with
   | Error undecodable ->
     observe_preparation_stage

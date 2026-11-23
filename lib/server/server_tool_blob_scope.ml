@@ -234,46 +234,12 @@ let config_keepers =
       ; reason = M.Writes_no_reference
       }
   ; M.Keeper_files
-      { suffix = Keeper_memory_os_current_layout.journal_suffix
-      ; reason = M.Writes_no_reference
-      }
-  ; M.Keeper_files
       { suffix = Keeper_memory_source_current.suffix
-      ; reason = M.Writes_no_reference
-      }
-  ; M.Keeper_files
-      { suffix = Keeper_memory_os_current_layout.epoch_suffix
-      ; reason = M.Writes_no_reference
-      }
-    (* The aggregate lock names its own [.lock]; the derived suffix resolves
-       once this base name is classified. *)
-  ; M.Keeper_files
-      { suffix = Keeper_memory_os_aggregate_lock.suffix
-      ; reason = M.Writes_no_reference
-      }
-    (* Receipts beside the snapshot: a publication marker, a retraction plan
-       and the Librarian range commit. They name store state, not a blob. *)
-  ; M.Keeper_files
-      { suffix = Keeper_memory_os_current_layout.publication_receipt_suffix
-      ; reason = M.Writes_no_reference
-      }
-  ; M.Keeper_files
-      { suffix = Keeper_memory_os_current_layout.retraction_plan_receipt_suffix
-      ; reason = M.Writes_no_reference
-      }
-  ; M.Keeper_files
-      { suffix = Keeper_memory_os_current_layout.durable_range_receipt_suffix
       ; reason = M.Writes_no_reference
       }
     (* Memory history events name a memory id, a trace id and a query. *)
   ; M.Keeper_files
       { suffix = Keeper_memory_os_events.suffix
-      ; reason = M.Writes_no_reference
-      }
-    (* Absorbed rows live in this same directory. Their rows carry claim text,
-       a memory id, and a trace id — no tool blob key. *)
-  ; M.Keeper_files
-      { suffix = Keeper_memory_absorbed.suffix
       ; reason = M.Writes_no_reference
       }
     (* A commit log line carries facts, the write or adoption that caused it,

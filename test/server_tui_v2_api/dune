@@ -7,6 +7,7 @@
  (name test_server_tui_v2_api)
  (modules test_server_tui_v2_api)
  (libraries
+  agent_core
   alcotest
   eio
   eio_main

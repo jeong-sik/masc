@@ -13,4 +13,3 @@ val merge_basis : basis -> basis -> basis
 val make_snapshot_from_maintained : previous:t option -> now:float -> source:source -> facts:fact list -> invalidated:support_invalidation list -> unit -> (t, string) result
 val make_snapshot : previous:t option -> now:float -> source:source -> facts:fact list -> unit -> (t, string) result
 val insert_or_reobserve : fact list -> fact -> fact list
-val upsert_snapshot : previous:t option -> now:float -> source:source -> fact -> (t, upsert_error) result

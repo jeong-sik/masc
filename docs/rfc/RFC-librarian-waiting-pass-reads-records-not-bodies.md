@@ -1,12 +1,12 @@
 ---
 rfc: "librarian-waiting-pass-reads-records-not-bodies"
 title: "기다리는 원본의 pass 는 본문을 다시 읽지 않는다"
-status: Draft
+status: Superseded
 created: 2026-11-11
-updated: 2026-11-13
+updated: 2026-11-23
 author: claude
 supersedes: []
-superseded_by: null
+superseded_by: "librarian-call-only-proposes-and-one-writer-per-keeper-commits-in-one-line"
 related: ["0500", "librarian-history-unknown-resolution", "librarian-durable-message-floor", "main-domain-scheduler-latency"]
 ---
 

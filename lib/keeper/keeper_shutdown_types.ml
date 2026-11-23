@@ -51,15 +51,9 @@ type dashboard_purge_artifact =
   | Keeper_root_logs_artifact
   | Keeper_runtime_directory_artifact
   | Keeper_memory_current_artifact
-  | Keeper_memory_epoch_artifact
-  | Keeper_memory_publication_artifact
-  | Keeper_memory_retraction_plan_artifact
   | Keeper_memory_source_current_artifact
   | Keeper_working_context_recall_artifact
   | Keeper_working_context_artifact
-  | Keeper_memory_journal_artifact
-  | Keeper_memory_journal_lock_artifact
-  | Keeper_memory_absorbed_artifact
   | Keeper_memory_log_artifact
   | Keeper_memory_log_lock_artifact
   | Keeper_memory_writer_lock_artifact
@@ -601,17 +595,9 @@ let dashboard_purge_artifact_plan ~keeper_name context =
        snapshots and journal behind, and a later keeper with the same name
        inherits them. *)
   ; Keeper_memory_current_artifact
-  ; Keeper_memory_epoch_artifact
-  ; Keeper_memory_publication_artifact
-  ; Keeper_memory_retraction_plan_artifact
   ; Keeper_memory_source_current_artifact
   ; Keeper_working_context_recall_artifact
   ; Keeper_working_context_artifact
-  ; Keeper_memory_journal_artifact
-    (* The journal's stable sibling remains for every append/recovery. Only
-       the quiesced purge may remove it, after its writers have stopped. *)
-  ; Keeper_memory_journal_lock_artifact
-  ; Keeper_memory_absorbed_artifact
     (* The commit log names the snapshot its last line left. Left behind, a
        later keeper with the same name boots against a snapshot that is gone
        and its Memory store stops. The log's lock and the writer's lock go

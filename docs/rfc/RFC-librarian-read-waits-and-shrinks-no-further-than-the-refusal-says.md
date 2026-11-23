@@ -1,12 +1,12 @@
 ---
 rfc: "librarian-read-waits-and-shrinks-no-further-than-the-refusal-says"
 title: "Librarian 읽기를 미루거나 줄일 때는 받는 쪽의 거절이 말한 만큼만 한다"
-status: Draft
+status: Superseded
 created: 2026-11-17
-updated: 2026-11-17
+updated: 2026-11-23
 author: vincent + claude
 supersedes: []
-superseded_by: null
+superseded_by: "librarian-call-only-proposes-and-one-writer-per-keeper-commits-in-one-line"
 related: ["librarian-lifecycle", "host-cycle-runs-exact-requests-side-by-side", "librarian-ends-waiting-requests-of-a-replaced-declaration", "librarian-waiting-pass-reads-records-not-bodies"]
 ---
 

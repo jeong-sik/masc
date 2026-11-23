@@ -96,11 +96,11 @@ let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ?same_failure ~
   Alcotest.(check bool) "refused request never commits Memory" false !committed;
   let expected_refusals =
     if first_overflow || status = `Request_entity_too_large
-    then [Keeper_librarian_input_refusal.Request_body_refused]
+    then [Keeper_exact_input_refusal.Request_body_refused]
     else [] in
   Alcotest.(check (list string)) "named HTTP body refusal survives subsequent slots and CLI fallback"
-    (List.map Keeper_librarian_input_refusal.to_string expected_refusals)
-    (List.map Keeper_librarian_input_refusal.to_string !provider_refusals);
+    (List.map Keeper_exact_input_refusal.to_string expected_refusals)
+    (List.map Keeper_exact_input_refusal.to_string !provider_refusals);
   let runs = Runs.list_runs registry |> List.filter
     (fun (run : Runs.run) -> String.equal run.actor keeper_id) in
   match runs with
@@ -113,7 +113,7 @@ let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ?same_failure ~
    changes what a keeper reads after a refusal. *)
 let test_named_provider_input_refusals () =
   let module E = Agent_core.Exact_output in
-  let module I = Keeper_librarian_input_refusal in
+  let module I = Keeper_exact_input_refusal in
   let refused refusal = E.Provider_response_refused
     { http_status = 400; refusal; retry_after_s = None } in
   List.iter (fun (label, cause, expected) ->

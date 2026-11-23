@@ -4239,22 +4239,30 @@ let test_handle_request_keeper_memory_access_and_readership () =
         | Ok f -> f
         | Error err -> Alcotest.fail err
       in
-      let snap =
-        match
-          Memory_current.replace ~keepers_dir ~keeper_id:"alpha" ~expected_revision:None ~now
-            ~source:{ kind = Memory_current.Librarian; trace_id = "trace-alpha" }
-            ~facts:
-              [ transcript_fact
-              ; public_board_fact
-              ; direct_board_fact
-              ; derived_on_direct
-              ; derived_on_transcript
-              ]
-            ()
-        with
-        | Ok s -> s
-        | Error err -> Alcotest.fail ("Memory_current.replace failed: " ^ err)
+      let facts =
+        [ transcript_fact
+        ; public_board_fact
+        ; direct_board_fact
+        ; derived_on_direct
+        ; derived_on_transcript
+        ]
       in
+      let snap : Memory_current.t =
+        { revision = 1
+        ; updated_at = now
+        ; source = { kind = Memory_current.Librarian; trace_id = "trace-alpha" }
+        ; facts
+        ; change = { added = facts; removed = []; retained = 0; invalidated = [] }
+        }
+      in
+      Fs_compat.mkdir_p keepers_dir;
+      (match
+         Fs_compat.save_file_atomic_strict
+           (Memory_current.path_for_keepers_dir ~keepers_dir ~keeper_id:"alpha")
+           (Yojson.Safe.pretty_to_string (Memory_current.to_json snap) ^ "\n")
+       with
+       | Ok () -> ()
+       | Error err -> Alcotest.fail ("snapshot write failed: " ^ err));
       (* 1. Default omitted caller on handle_read_resource_eio fails closed (-32001). *)
       let read_direct ?caller id_num uri =
         Resource.handle_read_resource_eio ?caller state (`Int id_num)
@@ -4420,7 +4428,82 @@ let test_handle_request_keeper_memory_access_and_readership () =
         Yojson.Safe.Util.(bad_mem_resp |> member "error" |> member "message" |> to_string);
       Alcotest.(check bool) "undecodable error leaks no sentinel host path or detail" false
         (String_util.contains_substring (Yojson.Safe.to_string bad_mem_resp)
-           "/secret/host/path/sentinel"))
+           "/secret/host/path/sentinel");
+      (* 7. Truncated commit-log tail (>20 commits) with absent snapshot preserves accurate
+            running [pre_tail_count] in forward fallback rather than resetting to 0. *)
+      let log_only_keeper = "tailcount" in
+      let log_only_path =
+        Masc.Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id:log_only_keeper
+      in
+      let dummy_digest = Agent_core.Checkpoint_objects.digest_of_bytes "tailcount" in
+      let dummy_log_id = Masc.Keeper_turn_log.Log_id.fresh () in
+      let dummy_mark : Masc.Keeper_turn_log.mark =
+        { trace = ""
+        ; closed_messages = 0
+        ; session = ""
+        ; history_bytes = 0
+        ; internal_bytes = 0
+        ; chat_bytes = 0
+        ; external_rows = 0
+        }
+      in
+      let next_offset = ref 0 in
+      for i = 1 to 25 do
+        let f =
+          Memory_types.observed
+            ~claim:(Printf.sprintf "Tail count fact %d" i)
+            ~category:Memory_types.Fact
+            ~now:(1000.0 +. float_of_int i)
+            ~origin:{ kind = Memory_types.Authored; trace_id = Printf.sprintf "tc-%d" i }
+        in
+        let commit : Masc.Librarian_log.commit =
+          { seq = i
+          ; at = 1000.0 +. float_of_int i
+          ; basis = dummy_digest
+          ; after = dummy_digest
+          ; revision = i
+          ; cause =
+              Masc.Librarian_log.Direct
+                { by = Masc.Librarian_effects.Keeper
+                ; trace = Printf.sprintf "tc-%d" i
+                ; write =
+                    Masc.Librarian_direct.Remember
+                      { claim = f.claim; category = f.category; basis = f.basis }
+                }
+          ; effects = { Masc.Librarian_effects.empty with added = [ f ] }
+          ; turn_log = dummy_log_id
+          ; turn_log_offset = 0
+          ; covers_through = Masc.Librarian_log.Before_first
+          ; covered = dummy_mark
+          ; working_state = None
+          }
+        in
+        match
+          Masc.Librarian_log_store.append ~path:log_only_path ~at_end:!next_offset
+            (Masc.Librarian_log.Committed commit)
+        with
+        | Ok { Masc.Librarian_log_store.new_end; _ } -> next_offset := new_end
+        | Error _ -> Alcotest.fail "append tailcount commit log failed"
+      done;
+      let tc_health_json =
+        Yojson.Safe.from_string
+          (resource_text_exn
+             (read_via_protocol ~sender:(admit admin_tok) ~auth_token:admin_tok
+                "masc://keepers/tailcount/memory/health"))
+      in
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "absent snapshot status" "missing"
+        (tc_health_json |> member "ordinary" |> member "status" |> to_string);
+      let tc_entries =
+        tc_health_json |> member "journal" |> member "recent_entries" |> to_list
+      in
+      Alcotest.(check int) "recent_entries bounded to 20" 20 (List.length tc_entries);
+      let oldest_entry = List.hd tc_entries in
+      let newest_entry = List.hd (List.rev tc_entries) in
+      Alcotest.(check int) "oldest retained commit (#6) starts from pre_tail_count=5" 5
+        (oldest_entry |> member "retained_count" |> to_int);
+      Alcotest.(check int) "newest retained commit (#25) has retained_count=24" 24
+        (newest_entry |> member "retained_count" |> to_int))
 
 let test_handle_request_resources_subscribe_requires_session () =
   Eio_main.run @@ fun env ->

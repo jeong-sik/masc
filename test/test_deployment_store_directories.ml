@@ -281,25 +281,6 @@ let test_transcript_inventory_failure_stops_preflight exe () =
         check bool ("unreadable directory is named: " ^ output) true
           (String_util.contains_substring output (dir ^ ":")))))
 
-(* Every Memory write for a keeper reconciles its range receipt ledger before
-   it builds, so a ledger this build cannot decode must stop the rollout here,
-   not every Memory write after it. *)
-let test_range_receipt_ledger exe () = with_workspace (fun root _keepers _traces ->
-  let config_keepers = Filename.concat root ".masc/config/keepers" in
-  Fs_compat.mkdir_p config_keepers;
-  let ledger = Filename.concat config_keepers "keeper.librarian-range-commit.json" in
-  write ledger {|{"receipts":[]}|};
-  let status, output = invoke exe root in
-  check bool ("a readable ledger passes: " ^ output) true (status = Unix.WEXITED 0);
-  check bool ("the readable ledger is read: " ^ output) true
-    (String_util.contains_substring output "Librarian range receipt ledger rows=1 refused=0");
-  write ledger {|{"receipts":{}}|};
-  let status, output = invoke exe root in
-  check bool "an undecodable ledger refuses deployment" true (status <> Unix.WEXITED 0);
-  check bool ("reports the ledger: " ^ output) true
-    (String_util.contains_substring output "Librarian range receipt ledger rows=1 refused=1");
-  check string "refused ledger preserved" {|{"receipts":{}}|} (read ledger))
-
 let test_symlink_refusal exe () = with_workspace (fun root keepers _traces ->
   Unix.symlink (Filename.concat keepers "keeper") (Filename.concat keepers "linked");
   let status, output = invoke exe root in
@@ -805,13 +786,12 @@ let test_lane_addon_record_refuses_deploy exe () = with_lane_store (fun base roo
   check bool ("the refusal names the file: " ^ output) true
     (String_util.contains_substring (diagnostic_words output) (diagnostic_words path)))
 
-let require = function Ok value -> value | Error detail -> fail detail
 let unchanged_workspace base f =
   let state ()=tree base |> List.filter (fun (path,_) ->
     path<>Filename.concat base "stdout" && path<>Filename.concat base "stderr") in
   let before=state () in
   let result=f () in
-  check (list (pair string string)) "preflight changes no workspace state, epoch, receipt or ACK" before (state ());
+  check (list (pair string string)) "preflight changes no workspace state or snapshot" before (state ());
   result
 
 let with_memory_workspace f = with_workspace (fun base _keepers _traces ->
@@ -827,150 +807,25 @@ let with_memory_workspace f = with_workspace (fun base _keepers _traces ->
         (Config_dir_resolver.keepers_dir_for_base_path ~base_path:base);
       f base keepers_dir))
 
-let memory_preflight base =
-  let module D = Keeper_durable_store in
-  let scan = match D.preflight_scan D.Id.Memory_current with
-    | Some scan -> scan
-    | None -> fail "Memory current has no deployment scan" in
-  D.run scan ~base_path:base |> require
-
-let test_memory_publication_preflight exe () = with_memory_workspace (fun base keepers_dir ->
-  let module Current = Keeper_memory_os_current in
-  let module Types = Keeper_memory_os_types in
-  let source = {Current.kind = Current.Explicit_write; trace_id = "preflight"} in
-  let fact claim = Types.observed ~claim ~category:Types.Fact ~now:10.
-    ~origin:{kind=Types.Authored; trace_id="preflight"} in
-  let old = fact "previous memory" and next = fact "next memory" in
-  let cases =
-    ["first-before", true, false; "first-after", true, true;
-     "later-before", false, false; "later-after", false, true] in
-  List.iter (fun (keeper_id, first, _) ->
-    if not first then
-      ignore (Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
-        ~now:20. ~source ~facts:[old] () |> require)) cases;
-  let wakes = ref [] in
-  let unsubscribe = Keeper_memory_commit_notifications.subscribe (fun event ->
-    wakes := (event.keeper_id, event.revision) :: !wakes) in
-  Fun.protect ~finally:unsubscribe (fun () ->
-    List.iter (fun (keeper_id, first, after_rename) ->
-      let write_snapshot path content =
-        Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
-          ~sync_file:(fun _ -> if not after_rename then failwith "before rename")
-          ~sync_parent:(fun _ -> failwith "after rename") path content in
-      (match Current.For_testing.replace_with_publication_io
-        ~on_committed:(fun _ _ -> ()) ~before_journal:(fun () -> ())
-        ~write_snapshot ~sync_snapshot:(fun _ -> Error "durability unconfirmed")
-        ~keepers_dir ~keeper_id ~now:30. ~source ~facts:[next] with
-       | Error _ -> () | Ok _ -> fail "injected publication fault was hidden");
-      check bool "pending receipt exists" true
-        (Sys.file_exists (Current.publication_receipt_path ~keepers_dir ~keeper_id));
-      check bool "snapshot existence reflects the interruption point"
-        (after_rename || not first)
-        (Sys.file_exists (Current.path_for_keepers_dir ~keepers_dir ~keeper_id))) cases;
-    check (list (pair string int)) "interrupted publications sent no wake" [] !wakes;
-    let linked_receipt = Current.publication_receipt_path ~keepers_dir ~keeper_id:"first-after" in
-    let receipt_target = linked_receipt ^ ".fixture" in
-    Sys.rename linked_receipt receipt_target;
-    Unix.symlink (Filename.basename receipt_target) linked_receipt;
-    let report = unchanged_workspace base (fun () -> memory_preflight base) in
-    check int "each pending publication is inventoried" 4 report.rows;
-    check int "valid pending receipts are not decode failures" 0 report.refused;
-    check int "each publication awaits owner recovery" 4 (List.length report.pending_recovery);
-    check (list (pair string int)) "in-process preflight sends no wake" [] !wakes;
-    let status, output = unchanged_workspace base (fun () -> invoke exe base) in
-    check bool ("the helper holds pending publications: " ^ output) true (status <> Unix.WEXITED 0);
-    List.iter (fun (keeper_id, _, _) ->
-      check bool ("helper identifies " ^ keeper_id) true
-        (String_util.contains_substring output
-          (Current.publication_receipt_path ~keepers_dir ~keeper_id))) cases;
-    check bool "helper distinguishes pending from refused" true
-      (String_util.contains_substring (diagnostic_words output)
-        "0 refused row(s), 4 pending publication(s)");
-    Unix.unlink linked_receipt;
-    Sys.rename receipt_target linked_receipt;
-    List.iter (fun (keeper_id, first, after_rename) ->
-      let recovered = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require in
-      let expected = if after_rename then Some [next] else if first then None else Some [old] in
-      check bool "the owner can recover the untouched publication" true
-        (Option.map (fun (snapshot : Current.t) -> snapshot.facts) recovered = expected);
-      check bool "owner recovery completes the receipt" false
-        (Sys.file_exists (Current.publication_receipt_path ~keepers_dir ~keeper_id))) cases;
-    check (list (pair string int)) "only owner recovery dispatches committed wakes"
-      ["first-after", 1; "later-after", 2]
-      (List.sort compare !wakes);
-    let linked_snapshot = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"later-after" in
-    let snapshot_target = linked_snapshot ^ ".fixture" in
-    Sys.rename linked_snapshot snapshot_target;
-    Unix.symlink (Filename.basename snapshot_target) linked_snapshot;
-    let report = unchanged_workspace base (fun () -> memory_preflight base) in
-    check int "the linked snapshot remains in the inventory" 3 report.rows;
-    check int "a regular snapshot symlink is readable" 0 report.refused;
-    check int "completed publications no longer hold deployment" 0 (List.length report.pending_recovery)))
-
-let test_bad_memory_publication_preflight exe () = with_memory_workspace (fun base keepers_dir ->
-  let path = Keeper_memory_os_current.publication_receipt_path ~keepers_dir ~keeper_id:"broken" in
-  write path "{broken";
-  let report = unchanged_workspace base (fun () -> memory_preflight base) in
-  check int "receipt-only owner is inventoried" 1 report.rows;
-  check int "malformed receipt is refused" 1 report.refused;
-  check int "malformed receipt is not a valid pending publication" 0 (List.length report.pending_recovery);
-  let status, output = unchanged_workspace base (fun () -> invoke exe base) in
-  check bool ("malformed receipt stops deployment: " ^ output) true (status <> Unix.WEXITED 0);
-  check bool "refusal identifies the receipt" true (String_util.contains_substring output path))
-
-let test_pending_memory_notification_preflight exe () = with_memory_workspace (fun base keepers_dir ->
-  let module Current = Keeper_memory_os_current in
-  let module Types = Keeper_memory_os_types in
-  let keeper_id = "notification" in
-  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-  let receipt = Current.publication_receipt_path ~keepers_dir ~keeper_id in
-  let fact = Types.observed ~claim:"memory with a pending wake" ~category:Types.Fact ~now:10.
-    ~origin:{kind=Types.Authored; trace_id="preflight"} in
-  Unix.mkdir journal 0o700;
-  let source = {Current.kind = Current.Explicit_write; trace_id = "preflight"} in
-  ignore (Current.replace ~keepers_dir ~keeper_id ~expected_revision:None ~now:20.
-    ~source ~facts:[fact] () |> require);
-  check bool "journal failure leaves a publication" true (Sys.file_exists receipt);
-  Unix.rmdir journal;
-  let cancel = Keeper_memory_commit_notifications.subscribe (fun _ ->
-    raise (Eio.Cancel.Cancelled (Failure "interrupt notification"))) in
-  Fun.protect ~finally:cancel (fun () ->
-    match Current.read_for_keepers_dir ~keepers_dir ~keeper_id with
-    | exception Eio.Cancel.Cancelled _ -> ()
-    | Ok _ | Error _ -> fail "fixture did not interrupt notification");
-  check string "fixture reached notification-pending phase" "notification_pending"
-    Yojson.Safe.Util.(Yojson.Safe.from_file receipt |> member "phase" |> to_string);
-  let wakes = ref 0 in
-  let unsubscribe = Keeper_memory_commit_notifications.subscribe (fun _ -> incr wakes) in
-  Fun.protect ~finally:unsubscribe (fun () ->
-    let report = unchanged_workspace base (fun () -> memory_preflight base) in
-    check int "notification remains pending" 1 (List.length report.pending_recovery);
-    check int "pending notification is not malformed" 0 report.refused;
-    let status, output = unchanged_workspace base (fun () -> invoke exe base) in
-    check bool ("pending notification stops deployment: " ^ output) true (status <> Unix.WEXITED 0);
-    check int "preflight did not dispatch the wake" 0 !wakes;
-    ignore (Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require);
-    check int "owner resumes the pending wake" 1 !wakes;
-    check bool "owner completed the publication" false (Sys.file_exists receipt)))
-
 let test_special_memory_paths_preflight exe () = with_memory_workspace (fun base keepers_dir ->
   let module Current = Keeper_memory_os_current in
   let broken_parent = Filename.concat base "broken-parent" in
   Unix.symlink "missing-parent" broken_parent;
   check bool "a broken inventory ancestor is not an empty store" true
-    (Result.is_error (Current.list_preflight_keeper_ids
-      ~keepers_dir:(Filename.concat broken_parent "keepers")));
-  let receipt keeper_id = Current.publication_receipt_path ~keepers_dir ~keeper_id in
-  Unix.mkfifo (receipt "a-fifo") 0o600;
-  Unix.symlink "missing-target" (receipt "b-dangling");
-  Unix.mkfifo (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"c-snapshot-fifo") 0o600;
+    (Result.is_error (Current.list_keeper_ids_with_suffix
+      ~keepers_dir:(Filename.concat broken_parent "keepers")
+      ~suffix:Current.suffix));
+  let snapshot keeper_id = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  Unix.mkfifo (snapshot "a-fifo") 0o600;
+  Unix.symlink "missing-target" (snapshot "b-dangling");
+  Unix.mkfifo (snapshot "c-snapshot-fifo") 0o600;
   let status, output = unchanged_workspace base (fun () ->
     invoke_with_args ~timeout:30. exe base ["validate-stores"; "--base-path"; base]) in
   check bool ("special paths stop deployment: " ^ output) true (status <> Unix.WEXITED 0);
   check bool "all special paths are refused" true
     (String_util.contains_substring output "memory OS current snapshot rows=3 refused=3");
   check bool "the first refusal identifies the FIFO" true
-    (String_util.contains_substring output (receipt "a-fifo")))
+    (String_util.contains_substring output (snapshot "a-fifo")))
 
 let () =
   let exe = Sys.getenv "MASC_TEST_DEPLOYMENT_PREFLIGHT_EXE" in
@@ -996,8 +851,6 @@ let () =
       test_case "transcript inventory failure stops deployment" `Quick
         (test_transcript_inventory_failure_stops_preflight exe);
       test_case "symlink remains a refusal" `Quick (test_symlink_refusal exe);
-      test_case "range receipt ledger is read before rollout" `Quick
-        (test_range_receipt_ledger exe);
       test_case "task backlog bytes retain duplicate intent fields" `Quick
         (test_task_backlog_original_bytes exe);
       test_case "transcript directory absence differs from a wrong-kind path" `Quick
@@ -1018,12 +871,6 @@ let () =
         (test_lane_addon_record_refuses_deploy exe);
       test_case "--base-path forms read the store the server serves" `Quick
         (test_base_path_forms_read_the_served_store exe)];
-     "Memory publication preflight",
-     [test_case "preserves each interrupted publication for its owner" `Quick
-        (test_memory_publication_preflight exe);
-      test_case "refuses malformed receipt without a snapshot" `Quick
-        (test_bad_memory_publication_preflight exe);
-      test_case "preserves a pending notification for its owner" `Quick
-        (test_pending_memory_notification_preflight exe);
-      test_case "refuses FIFO and dangling paths without blocking" `Quick
+     "Memory snapshot preflight",
+     [test_case "refuses FIFO and dangling paths without blocking" `Quick
         (test_special_memory_paths_preflight exe)]]

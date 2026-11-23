@@ -1,12 +1,12 @@
 ---
 rfc: "librarian-ends-waiting-requests-of-a-replaced-declaration"
 title: "선언이 교체되면 그 선언으로 만든 대기 요청을 끝내고 새 선언으로 다시 만든다"
-status: Active
+status: Superseded
 created: 2026-11-11
-updated: 2026-11-17
+updated: 2026-11-23
 author: claude
 supersedes: []
-superseded_by: null
+superseded_by: "librarian-call-only-proposes-and-one-writer-per-keeper-commits-in-one-line"
 related: ["0489", "0500", "librarian-history-unknown-resolution", "librarian-history-settles-finished-originals"]
 ---
 

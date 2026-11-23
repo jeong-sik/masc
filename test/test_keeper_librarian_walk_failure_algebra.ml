@@ -2,7 +2,7 @@
    algebra that admission reads after a refused Librarian walk. No server,
    no fixture keeper, no files - only values and JSON roundtrips through the
    public API of [Keeper_exact_walk_failure] and
-   [Keeper_librarian_input_refusal].
+   [Keeper_exact_input_refusal].
 
    The suite links through [exact_output_fixture] like its Librarian
    siblings and opens [Masc] so the wrapped library's modules resolve.
@@ -21,7 +21,7 @@
 open Masc
 
 module S = Keeper_exact_walk_failure
-module I = Keeper_librarian_input_refusal
+module I = Keeper_exact_input_refusal
 module EO = Agent_core.Exact_output
 
 let refusals evidence = List.map I.to_string evidence.S.provider_input_refusals

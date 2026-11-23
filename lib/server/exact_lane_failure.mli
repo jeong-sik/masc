@@ -48,7 +48,7 @@ val ending_input_refusal : t list -> input_refusal option
     smaller input clears that slot's cause, which is what a consumer that
     subdivides its input reads the kind for; [Invalid_request] states no
     cause. Among the refusals that name the size, the order is the one
-    [Keeper_librarian_input_refusal.rank] gives them. *)
+    [Keeper_exact_input_refusal.rank] gives them. *)
 
 val execution : Agent_core.Exact_output.execution_error_cause -> t
 (** An HTTP slot's failed call. *)

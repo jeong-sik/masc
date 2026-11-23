@@ -911,11 +911,6 @@ let validate_stores ~jobs base_path =
     | Error detail -> Printf.printf "%s scan_failed=%s\n%!" name detail
     | Ok (report : D.report) ->
       Printf.printf "%s rows=%d refused=%d\n%!" name report.rows report.refused;
-      List.iter (function
-        | D.Memory_publication {path} ->
-          Printf.printf
-            "  pending recovery: %s: publication needs its compatible owner; evidence was not changed\n%!" path)
-        (List.rev report.pending_recovery);
       (match report.first_refusal with
        | None -> ()
        | Some detail ->
@@ -1025,20 +1020,10 @@ let validate_stores ~jobs base_path =
            | Ok _ -> None)
         lane_addon_reports
   in
-  let pending_recovery =
-    List.fold_left (fun total (_, _, result) ->
-      match result with
-      | Ok (report : D.report) -> total + List.length report.pending_recovery
-      | Error _ -> total) 0 reports
-  in
   if failed_scans <> []
   then errorf "store scan failed: %s" (String.concat ", " failed_scans)
-  else if refused = 0 && pending_recovery = 0
+  else if refused = 0
   then Ok ()
-  else if pending_recovery > 0 then
-    errorf
-      "stored-state compatibility not confirmed: %d refused row(s), %d pending publication(s)"
-      refused pending_recovery
   else
     let refused_stores =
       List.filter_map

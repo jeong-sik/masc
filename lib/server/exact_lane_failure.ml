@@ -20,7 +20,7 @@ let is_transient = function
   | Auth_refused | Configuration_refused | Input_refused _ | Output_unusable | Output_limit -> false
 
 (* The refusals that name the size come first, in the order
-   [Keeper_librarian_input_refusal.rank] gives them; [Invalid_request] names
+   [Keeper_exact_input_refusal.rank] gives them; [Invalid_request] names
    no cause and comes last. *)
 let ending_precedence = [ Context_overflow; Input_capacity; Request_body; Invalid_request ]
 

@@ -137,7 +137,6 @@
 (include stanzas/test_github_oauth.inc)
 (include stanzas/test_keeper_chat_store_announces.inc)
 (include stanzas/test_keeper_chat_store_transcript_index.inc)
-(include stanzas/test_keeper_memory_journal_announces.inc)
 (include stanzas/test_keeper_composite_cleared_before_announce.inc)
 (include stanzas/test_runtime_blocker_classification.inc)
 (include stanzas/test_runtime_response_identity.inc)
@@ -544,7 +543,6 @@
   test_librarian_archive
   test_librarian_store_checks
   test_librarian_scoring
-  test_librarian_unread
   test_librarian_unit_content
   test_librarian_width
   test_librarian_bottom
@@ -902,7 +900,6 @@
   test_librarian_archive
   test_librarian_store_checks
   test_librarian_scoring
-  test_librarian_unread
   test_librarian_unit_content
   test_librarian_width
   test_librarian_bottom
@@ -1602,11 +1599,6 @@
 
 ; RFC cli-runtimes-as-lane-slots — the per-slot cli one-shot executor:
 ; schema sentence parity with Agent Core, strict JSON parse, ordered walk.
-
-(test
- (name test_keeper_memory_os_program)
- (modules test_keeper_memory_os_program)
- (libraries masc_test_deps masc masc.runtime agent_core))
 
 (test
  (name test_keeper_librarian_cli_lane)
@@ -3226,21 +3218,8 @@
 
 (include stanzas/test_keeper_surface_status.inc)
 
-(include stanzas/test_keeper_memory_successor_selection.inc)
-(include stanzas/test_keeper_memory_successor_selection_revision_evidence.inc)
-
-(include stanzas/test_keeper_memory_resolved_selection_capture.inc)
-
-(include stanzas/test_keeper_memory_resolved_selection_replay.inc)
-
-(include stanzas/test_keeper_memory_successor_branch_capture.inc)
-
-(include stanzas/test_keeper_memory_successor_http_replay.inc)
 (include stanzas/test_keeper_memory_write.inc)
-(include stanzas/test_keeper_memory_write_absorbed.inc)
 (include stanzas/test_keeper_memory_write_growth_probe.inc)
-(include stanzas/test_keeper_memory_change_metrics.inc)
-
 
 (include stanzas/test_keeper_memory_write_supersedes.inc)
 
@@ -3990,8 +3969,6 @@
  (modules test_keeper_descriptor_schema)
  (libraries alcotest yojson masc masc_test_deps mcp_protocol eio_main))
 
-(include stanzas/test_librarian_journal_failures.inc)
-
 (include stanzas/test_keeper_raw_trace_reader.inc)
 (include stanzas/test_keeper_tool_result_source.inc)
 
@@ -4005,15 +3982,7 @@
 (include stanzas/test_keeper_arrived_stimuli.inc)
 (include stanzas/test_keeper_waiting_operations.inc)
 
-(include stanzas/test_keeper_memory_journal_projection.inc)
-
 (include stanzas/test_keeper_memory_left.inc)
-(include stanzas/test_keeper_memory_os_current_cut_parts.inc)
-
-(test
- (name test_keeper_memory_journal_serialization)
- (modules test_keeper_memory_journal_serialization)
- (libraries alcotest masc masc_test_deps unix))
 
 (include stanzas/test_review_prompt_sections_reach_the_model.inc)
 (include stanzas/test_prompt_templates_render.inc)
@@ -5380,15 +5349,8 @@
 
 (include stanzas/test_keeper_memory_select.inc)
 
-(include stanzas/test_keeper_memory_select_capture.inc)
-
-(include stanzas/test_keeper_memory_select_provider_wire.inc)
-
 (include stanzas/test_provider_connection_cache_wiring.inc)
 (include stanzas/test_keeper_provider_connection_recovery.inc)
-
-(include stanzas/test_keeper_event_genealogy_capture.inc)
-
 
 (include stanzas/test_utf8_prefix_parity.inc)
 

@@ -2,7 +2,6 @@ open Masc
 
 module Runtime = Keeper_librarian_runtime
 module Librarian = Keeper_librarian
-module Current = Keeper_memory_os_current
 module Runs = Exact_lane_run_registry
 module Fixture = Exact_output_fixture
 
@@ -16,12 +15,6 @@ type stage =
 let check_json label expected actual =
   Alcotest.(check string) label
     (Yojson.Safe.to_string expected) (Yojson.Safe.to_string actual)
-
-let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
-  match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
-  | Ok rows -> rows
-  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
-;;
 
 let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~registry stage () =
   Eio_main.run @@ fun env ->
@@ -141,12 +134,6 @@ let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~reg
   (match previous_pool with
    | None -> Domain_pool_ref.clear_for_tests ()
    | Some pool -> Domain_pool_ref.set pool);
-  let journal = readable_journal_tail ~keepers_dir ~keeper_id ~limit:10 in
-  let cancellations = List.filter (function
-    | Ok (Current.Journal_failed { kind = Current.Lane_cancelled; _ }) -> true
-    | Ok _ -> false
-    | Error detail -> Alcotest.fail detail) journal in
-  Alcotest.(check int) "cancellation adds a failure journal row" 1 (List.length cancellations);
   Librarian_run_tui_reading.check replayed_run
 
 let () =

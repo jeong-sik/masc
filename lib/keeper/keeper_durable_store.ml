@@ -22,13 +22,10 @@ open Result.Syntax
    Every scan runs the production decoder. A fixture cannot go stale here
    because there is no fixture -- these are the rows on disk, read by the
    binary about to serve them. *)
-type pending_recovery = Memory_publication of { path : string }
-
 type report =
   { rows : int
   ; refused : int
   ; first_refusal : string option
-  ; pending_recovery : pending_recovery list
   }
 
 type store_scan =
@@ -37,7 +34,7 @@ type store_scan =
   ; scan : base_path:string -> (report, string) result
   }
 
-let empty_report = { rows = 0; refused = 0; first_refusal = None; pending_recovery = [] }
+let empty_report = { rows = 0; refused = 0; first_refusal = None }
 
 let read_optional_regular_file path =
   try
@@ -61,7 +58,6 @@ let count_row report = function
         (match report.first_refusal with
          | Some _ as kept -> kept
          | None -> Some detail)
-    ; pending_recovery = report.pending_recovery
     }
 ;;
 
@@ -154,111 +150,34 @@ let keeper_meta_store =
 let memory_os_current_store =
   { store = "memory OS current snapshot"
   ; on_refusal =
-      "a damaged publication or filesystem error can block Memory recovery; \
-       for a snapshot rejected by the decoder, recall reports unavailable \
-       Memory and a later Memory commit can move it aside and start from no snapshot"
+      "for a snapshot rejected by the decoder, recall reports unavailable \
+       Memory and boot refuses until the snapshot is repaired or quarantined"
   ; scan =
       (fun ~base_path ->
          let keepers_dir =
            Config_dir_resolver.keepers_dir_for_base_path ~base_path
          in
-         let* keeper_ids = Keeper_memory_os_current.list_preflight_keeper_ids ~keepers_dir in
+         let* keeper_ids =
+           Keeper_memory_os_current.list_keeper_ids_with_suffix
+             ~keepers_dir
+             ~suffix:Keeper_memory_os_current.suffix
+         in
          Ok
-           (keeper_ids |> List.fold_left
+           (keeper_ids
+            |> List.fold_left
                  (fun report keeper_id ->
                     match
-                      Keeper_memory_os_current.inspect_for_preflight
+                      Keeper_memory_os_current.inspect_for_boot
                         ~keepers_dir
                         ~keeper_id
                     with
-                    | Ok Keeper_memory_os_current.Preflight_absent -> report
-                    | Ok Keeper_memory_os_current.Preflight_snapshot -> count_row report (Ok ())
-                    | Ok Keeper_memory_os_current.Preflight_publication_pending ->
-                      let path = Keeper_memory_os_current.publication_receipt_path
-                          ~keepers_dir ~keeper_id in
-                      { report with rows = report.rows + 1
-                      ; pending_recovery = Memory_publication {path} :: report.pending_recovery }
-                    | Error detail ->
+                    | Keeper_memory_os_current.Boot_absent -> report
+                    | Keeper_memory_os_current.Boot_readable ->
+                      count_row report (Ok ())
+                    | Keeper_memory_os_current.Boot_undecodable { rejection; _ } ->
+                      count_row report (Error (keeper_id ^ ": " ^ rejection))
+                    | Keeper_memory_os_current.Boot_unreadable { detail } ->
                       count_row report (Error (keeper_id ^ ": " ^ detail)))
-                 empty_report))
-  }
-;;
-
-(* 2026-09-05 (#32504): #33241 removed [reinforcement] from the fact codec.
-   No snapshot kept the field but 15 of 17 journals did, and the scan above
-   reads only the snapshot. Each journal line is decoded with the decoder
-   every journal reader applies, and a refusal names the physical line. The
-   text after the last newline is an append a crash cut short; the next
-   append truncates it, so it is not a line this build refuses. *)
-let memory_journal_store =
-  { store = "keeper memory journal"
-  ; on_refusal =
-      "the keeper's turns still run, because turn recall reads only the \
-       snapshot; every Librarian Memory program stops, because capturing its \
-       anchor decodes the whole journal; an admission commit that carries \
-       recall bindings refuses, and superseding a removed memory, the archive \
-       and successor recall report the journal unreadable; writes keep \
-       appending and the line stays on disk"
-  ; scan =
-      (fun ~base_path ->
-         let complete_lines bytes =
-           match List.rev (String.split_on_char '\n' bytes) with
-           | [] -> []
-           | _after_last_newline :: lines -> List.rev lines
-         in
-         let scan_line ~path report line_number line =
-           let refusal detail = Error (Printf.sprintf "%s line %d: %s" path line_number detail) in
-           match Dated_jsonl.entry_of_physical_line ~path line with
-           | None -> report
-           | Some (Dated_jsonl.Malformed_json { detail; _ }) ->
-             count_row report (refusal ("not JSON: " ^ detail))
-           | Some (Dated_jsonl.Parsed json) ->
-             count_row
-               report
-               (match Keeper_memory_os_journal_codec.journal_entry_of_json json with
-                | Ok (_ : Keeper_memory_os_current_types.journal_entry) -> Ok ()
-                | Error detail -> refusal detail)
-         in
-         scan_memory_files ~base_path ~suffix:Keeper_memory_os_current_layout.journal_suffix
-           (fun report ~keepers_dir ~keeper_id ->
-              let path =
-                Keeper_memory_os_current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id
-              in
-              match read_optional_regular_file path with
-              | Error detail -> count_row report (Error detail)
-              | Ok None -> report
-              | Ok (Some bytes) ->
-                List.fold_left
-                  (fun (report, line_number) line ->
-                     scan_line ~path report line_number line, line_number + 1)
-                  (report, 1)
-                  (complete_lines bytes)
-                |> fst))
-  }
-;;
-
-let librarian_range_receipt_store =
-  { store = "Librarian range receipt ledger"
-  ; on_refusal =
-      "a structurally broken ledger file still fails the reconcile, so the \
-       Librarian cannot prove which range it already committed; single \
-       unreadable entries are quarantined aside instead and the pass proceeds"
-  ; scan =
-      (fun ~base_path ->
-         let keepers_dir =
-           Config_dir_resolver.keepers_dir_for_base_path ~base_path
-         in
-         Ok
-           (Keeper_memory_os_current.list_durable_range_receipt_keeper_ids
-              ~keepers_dir
-            |> List.fold_left
-                 (fun report keeper_id ->
-                    count_row
-                      report
-                      (Keeper_memory_os_current.validate_durable_range_receipts
-                         ~keepers_dir
-                         ~keeper_id
-                       |> Result.map_error (fun detail -> keeper_id ^ ": " ^ detail)))
                  empty_report))
   }
 ;;
@@ -352,7 +271,7 @@ let board_posts_store =
             | [] -> None
             | _ :: _ -> Some (Posts.posts_source_failure_to_board_error
                 (Board_types.Posts_rows_rejected errors) |> Board_types.show_board_error) in
-          Ok { rows = accepted_rows + refused; refused; first_refusal; pending_recovery = [] }
+          Ok { rows = accepted_rows + refused; refused; first_refusal }
         | Posts.Inspection_failed { error; _ } ->
           Error (Fs_compat.Private_jsonl_unique_fold.error_to_string error))
   }
@@ -734,39 +653,6 @@ let turn_fragment_store =
   }
 ;;
 
-let memory_absorbed_store =
-  { store = "keeper absorbed memory facts"
-  ; on_refusal =
-      "the row stays an error its readers count and name, and the fact it \
-       carries is not read"
-  ; scan =
-      (fun ~base_path ->
-         scan_memory_files ~base_path ~suffix:Keeper_memory_absorbed.suffix
-           (fun report ~keepers_dir ~keeper_id ->
-           match Keeper_memory_absorbed.read ~keepers_dir ~keeper_id with
-           | Error detail -> count_row report (Error (keeper_id ^ ": " ^ detail))
-           | Ok lines ->
-             List.fold_left
-               (fun report (line, decoded) ->
-                  match decoded with
-                  | Ok _ -> count_row report (Ok ())
-                  | Error Keeper_memory_absorbed.Incomplete_line -> report
-                  | Error
-                      (( Keeper_memory_absorbed.Not_json _
-                       | Keeper_memory_absorbed.Malformed _ ) as error) ->
-                    count_row
-                      report
-                      (Error
-                         (Printf.sprintf
-                            "%s line %d: %s"
-                            keeper_id
-                            line
-                            (Keeper_memory_absorbed.read_error_to_string error))))
-               report
-               lines))
-  }
-;;
-
 let memory_os_events_store =
   { store = "keeper memory OS events"
   ; on_refusal =
@@ -986,8 +872,7 @@ let keeper_reaction_ledger_store =
                   ({ Ledger.malformed_row_count; semantic_invalid_row_count; _ } as
                    incomplete) ->
                 Ok
-                  { report with
-                    rows
+                  { rows
                   ; refused = report.refused + malformed_row_count + semantic_invalid_row_count
                   ; first_refusal =
                       (match report.first_refusal with
@@ -1010,9 +895,7 @@ module Id = struct
     | Gate_pending
     | Official_client_session
     | Memory_current
-    | Memory_journal
     | Goal_store
-    | Librarian_range_receipts
     | Memory_source_current
     | Disposition_receipts
     | Board_posts
@@ -1022,7 +905,6 @@ module Id = struct
     | Turn_log
     | Memory_log
     | Turn_fragments
-    | Memory_absorbed
     | Memory_os_events
     | Keeper_event_queue
     | Keeper_chat_transcripts
@@ -1056,13 +938,10 @@ type reader =
 let reader : Id.t -> reader = function
   | Id.Keeper_meta -> Refuse_boot (Refusing.Keeper_meta, keeper_meta_store)
   | Id.Memory_current -> Refuse_boot (Refusing.Memory_current, memory_os_current_store)
-  | Id.Memory_journal -> Preflight_only memory_journal_store
   | Id.Goal_store -> Degrade_typed Reported.Goal_store
   | Id.Gate_pending -> Preflight_only gate_pending_store
   | Id.Official_client_session ->
     Refuse_boot (Refusing.Official_client_session, official_client_session_store)
-
-  | Id.Librarian_range_receipts -> Preflight_only librarian_range_receipt_store
   | Id.Memory_source_current -> Preflight_only memory_source_current_store
   | Id.Disposition_receipts -> Preflight_only disposition_receipt_store
   | Id.Board_posts -> Preflight_only board_posts_store
@@ -1072,7 +951,6 @@ let reader : Id.t -> reader = function
   | Id.Turn_log -> Preflight_only turn_log_store
   | Id.Memory_log -> Preflight_only memory_log_store
   | Id.Turn_fragments -> Preflight_only turn_fragment_store
-  | Id.Memory_absorbed -> Preflight_only memory_absorbed_store
   | Id.Memory_os_events -> Preflight_only memory_os_events_store
   | Id.Keeper_event_queue -> Refuse_boot (Refusing.Event_queue, event_queue_store)
   | Id.Keeper_chat_transcripts -> Preflight_only keeper_chat_transcript_store

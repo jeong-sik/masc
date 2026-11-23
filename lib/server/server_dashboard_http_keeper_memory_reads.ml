@@ -151,6 +151,212 @@ let handle_working_context_get state req reqd name =
     Http.Response.json_value ~status ~compress:true ~request:req json reqd
 ;;
 
+let source_of_commit_cause (cause : Librarian_log.cause) : Keeper_memory_os_current.source =
+  let non_empty text fallback =
+    let trimmed = String.trim text in
+    if String.equal trimmed "" then fallback else trimmed
+  in
+  match cause with
+  | Librarian_log.Direct { write = Librarian_direct.Retract _; trace; _ } ->
+    { kind = Explicit_retract; trace_id = non_empty trace "explicit_retract" }
+  | Librarian_log.Direct
+      { write = Librarian_direct.(Remember _ | Supersede _); trace; _ } ->
+    { kind = Explicit_write; trace_id = non_empty trace "explicit_write" }
+  | Librarian_log.Read { trace; _ } ->
+    { kind = Librarian; trace_id = non_empty trace "librarian_read" }
+  | Librarian_log.Make_room { trace; _ } ->
+    { kind = Librarian; trace_id = non_empty trace "librarian_make_room" }
+  | Librarian_log.Molt_and_synthesize { trace; _ } ->
+    { kind = Librarian; trace_id = non_empty trace "librarian_molt" }
+  | Librarian_log.Adopt { by; _ } ->
+    { kind = Librarian; trace_id = non_empty by "adopt" }
+  | Librarian_log.Skip _ ->
+    { kind = Librarian; trace_id = "skip" }
+  | Librarian_log.Checkpoint _ ->
+    { kind = Librarian; trace_id = "checkpoint" }
+;;
+
+let undecodable_log_line_to_string = function
+  | Librarian_log_store.Not_json -> "commit log line is not valid JSON"
+  | Librarian_log_store.Malformed err ->
+    Keeper_memory_os_types.wire_error_to_string err
+;;
+
+let read_commit_lineage_from_log ~keepers_dir ~keeper_id =
+  let log_path = Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+    Librarian_log_store.fold log_path ~init:([], [])
+      ~f:(fun (revisions_rev, retractions_rev) ({ line; _ } : Librarian_log_store.scanned) ->
+        match line with
+        | Ok (Librarian_log.Committed commit) ->
+          List.fold_left
+            (fun (revs, rets) ((fact : Keeper_memory_os_types.fact), removal) ->
+               let id = Keeper_memory_os_types.memory_id fact in
+               match removal with
+               | Librarian_effects.Revised_into into_id
+               | Librarian_effects.Superseded_by into_id ->
+                 ( { Keeper_memory_os_types.superseded = id
+                   ; superseded_by = into_id
+                   }
+                   :: revs
+                 , rets )
+               | Librarian_effects.Retracted _ -> revs, id :: rets
+               | Dropped _ | Merged_into _ | Support_lost _ | Molted _ -> revs, rets)
+            (revisions_rev, retractions_rev)
+            commit.effects.removed
+        | Ok (Librarian_log.Started _) | Error _ -> revisions_rev, retractions_rev)
+    |> Result.map (fun (revs, rets) -> List.rev revs, List.rev rets)
+    |> Result.map_error Private_jsonl_scan.error_to_string)
+;;
+
+let journal_projection_identity ~keeper_id line_offset =
+  Printf.sprintf "memory:journal:%d:%s:%d" (String.length keeper_id) keeper_id line_offset
+;;
+
+let read_memory_log_tail_projection ~keepers_dir ~keeper_id ~limit =
+  if limit <= 0
+  then Ok []
+  else
+    let log_path = Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id in
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+      let tail_q :
+        (int * (Librarian_log.commit, Librarian_log_store.undecodable) result) Queue.t
+        =
+        Queue.create ()
+      in
+      let pre_tail_count = ref 0 in
+      let push_row row =
+        Queue.add row tail_q;
+        if Queue.length tail_q > limit
+        then (
+          match Queue.take tail_q with
+          | _, Error _ -> ()
+          | _, Ok (evicted : Librarian_log.commit) ->
+            let added_n = List.length evicted.effects.added in
+            let removed_n = List.length evicted.effects.removed in
+            let retained = max 0 (!pre_tail_count - removed_n) in
+            pre_tail_count := max 0 (retained + added_n))
+      in
+      match
+        Librarian_log_store.fold log_path ~init:()
+          ~f:(fun () ({ at; line } : Librarian_log_store.scanned) ->
+            match line with
+            | Ok (Librarian_log.Started _) -> ()
+            | Ok (Librarian_log.Committed commit) -> push_row (at, Ok commit)
+            | Error err -> push_row (at, Error err))
+      with
+      | Error err -> Error (Private_jsonl_scan.error_to_string err)
+      | Ok () ->
+        let tail_rows = Queue.fold (fun acc item -> item :: acc) [] tail_q |> List.rev in
+        let anchored =
+          match Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id with
+          | Ok (Some snap) ->
+            let rec walk_back running acc = function
+              | [] -> acc
+              | (at, Error err) :: older -> walk_back running ((at, Error err) :: acc) older
+              | (at, Ok (commit : Librarian_log.commit)) :: older ->
+                let added_n = List.length commit.effects.added in
+                let removed_n = List.length commit.effects.removed in
+                let retained = max 0 (running - added_n) in
+                let before = max 0 (running - added_n + removed_n) in
+                walk_back before ((at, Ok (commit, retained)) :: acc) older
+            in
+            walk_back (List.length snap.facts) [] (List.rev tail_rows)
+          | Ok None | Error _ ->
+            let rec walk_forward running acc = function
+              | [] -> List.rev acc
+              | (at, Error err) :: newer -> walk_forward running ((at, Error err) :: acc) newer
+              | (at, Ok (commit : Librarian_log.commit)) :: newer ->
+                let added_n = List.length commit.effects.added in
+                let removed_n = List.length commit.effects.removed in
+                let retained = max 0 (running - removed_n) in
+                let after = max 0 (retained + added_n) in
+                walk_forward after ((at, Ok (commit, retained)) :: acc) newer
+            in
+            walk_forward !pre_tail_count [] tail_rows
+        in
+        Ok
+          (List.map
+             (fun (line_offset, row) ->
+                let structural_id =
+                  "structural_id", `String (journal_projection_identity ~keeper_id line_offset)
+                in
+                match row with
+                | Error err ->
+                  `Assoc
+                    [ structural_id
+                    ; "ok", `Bool false
+                    ; "error", `String (undecodable_log_line_to_string err)
+                    ]
+                | Ok ((commit : Librarian_log.commit), retained) ->
+                  let source = source_of_commit_cause commit.cause in
+                  let invalidated =
+                    List.filter_map
+                      (fun ((fact : Keeper_memory_os_types.fact), removal) ->
+                         match removal, fact.basis with
+                         | Librarian_effects.Support_lost { missing },
+                           Keeper_memory_os_types.Derived _ ->
+                           let ids =
+                             List.filter Keeper_memory_os_types.is_memory_id missing
+                             |> List.sort_uniq String.compare
+                           in
+                           if ids = []
+                           then None
+                           else
+                             Some
+                               { Keeper_memory_os_current.fact
+                               ; missing_premise_ids = ids
+                               }
+                         | Librarian_effects.Support_lost _,
+                           Keeper_memory_os_types.Observed _
+                         | ( Librarian_effects.Dropped _
+                           | Librarian_effects.Merged_into _
+                           | Librarian_effects.Revised_into _
+                           | Librarian_effects.Superseded_by _
+                           | Librarian_effects.Retracted _
+                           | Librarian_effects.Molted _ ),
+                           Keeper_memory_os_types.(Observed _ | Derived _) -> None)
+                      commit.effects.removed
+                  in
+                  let dropped =
+                    List.filter_map
+                      (fun ((fact : Keeper_memory_os_types.fact), removal) ->
+                         match removal with
+                         | Librarian_effects.Dropped { reason }
+                         | Librarian_effects.Retracted { reason; _ }
+                         | Librarian_effects.Molted { reason } ->
+                           if String.trim reason = ""
+                           then None
+                           else
+                             Some
+                               (`Assoc
+                                 [ "memory_id", `String (Keeper_memory_os_types.memory_id fact)
+                                 ; "reason", `String reason
+                                 ])
+                         | Merged_into _ | Revised_into _ | Superseded_by _ | Support_lost _ ->
+                           None)
+                      commit.effects.removed
+                  in
+                  let change : Keeper_memory_os_current.change =
+                    { added = commit.effects.added
+                    ; removed = List.map fst commit.effects.removed
+                    ; retained
+                    ; invalidated
+                    }
+                  in
+                  `Assoc
+                    ([ structural_id
+                     ; "ok", `Bool true
+                     ; "outcome", `String "committed"
+                     ; "recorded_at", `Float commit.at
+                     ; "revision", `Int commit.revision
+                     ; "source", Keeper_memory_os_snapshot_codec.source_to_json source
+                     ; "change", Keeper_memory_os_snapshot_codec.change_to_json change
+                     ]
+                     @ if dropped = [] then [] else [ "dropped", `List dropped ]))
+             anchored))
+;;
+
 let handle_facts_get state req reqd name =
   (* What this keeper remembers, fact by fact. The store keeps a closed
      taxonomy and provenance on every row, and the health
@@ -179,12 +385,11 @@ let handle_facts_get state req reqd name =
       | Error error ->
         [], Some (Keeper_memory_os_events.file_read_error_to_string error)
     in
-    let lineage, lineage_read_error =
-      match Keeper_memory_os_current.read_commit_lineage ~keepers_dir ~keeper_id:name with
-      | Ok lineage -> lineage, None
+    let revisions, retractions, lineage_read_error =
+      match read_commit_lineage_from_log ~keepers_dir ~keeper_id:name with
+      | Ok (revisions, retractions) -> revisions, retractions, None
       | Error detail ->
-        ( { Keeper_memory_os_current.revisions = []; retractions = [] }
-        , Some ("memory journal lineage read failed: " ^ detail) )
+        [], [], Some ("memory commit log lineage read failed: " ^ detail)
     in
     let events_read_error =
       match sidecar_read_error, lineage_read_error with
@@ -257,8 +462,8 @@ let handle_facts_get state req reqd name =
             let facts = List.map (fun fact -> Keeper_memory_os_types.memory_id fact, fact) facts in
             let summaries = Keeper_memory_os_events.summaries_for
                 ~memory_ids:(List.map fst facts)
-                ~revisions:lineage.Keeper_memory_os_current.revisions
-                ~retractions:lineage.Keeper_memory_os_current.retractions
+                ~revisions
+                ~retractions
                 events in
             List.map2 fact_json facts summaries
         in
@@ -348,7 +553,7 @@ let handle_journal_get state req reqd name =
     let config = Mcp_server.workspace_config state in
     let keepers_dir = memory_os_keepers_dir config in
     match
-      Keeper_memory_os_current.read_journal_tail_projection
+      read_memory_log_tail_projection
         ~keepers_dir
         ~keeper_id:name
         ~limit

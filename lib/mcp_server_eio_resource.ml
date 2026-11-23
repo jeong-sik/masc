@@ -531,7 +531,7 @@ let keeper_exists_hint ~base_path ~keepers_dir ~keeper ~ordinary ~source_bound =
   || (match source_bound with
       | Ok None -> false
       | Ok (Some _) | Error _ -> true)
-  || Sys.file_exists (Keeper_memory_os_current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:keeper)
+  || Sys.file_exists (Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper)
   || Sys.file_exists (Keeper_memory_os_events.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper)
 ;;
 
@@ -743,33 +743,47 @@ let read_keeper_memory_json ~config ~caller ~keeper =
                   ]))))
 ;;
 
+let source_kind_of_commit_cause = function
+  | Librarian_log.Direct { write = Librarian_direct.Retract _; _ } ->
+    Keeper_memory_os_current.Explicit_retract
+  | Librarian_log.Direct
+      { write = Librarian_direct.(Remember _ | Supersede _); _ } ->
+    Keeper_memory_os_current.Explicit_write
+  | Librarian_log.Read _
+  | Librarian_log.Make_room _
+  | Librarian_log.Molt_and_synthesize _
+  | Librarian_log.Adopt _
+  | Librarian_log.Skip _
+  | Librarian_log.Checkpoint _ -> Keeper_memory_os_current.Librarian
+;;
+
 (* RFC §12.1 G16: health surface carries only closed status/outcome/kind tokens,
    counts, revisions, timestamps, and hashes — no free-text claims, details,
    rejections, or file paths. *)
-let journal_entry_summary = function
-  | Keeper_memory_os_current.Journal_committed { recorded_at; revision; source; change; _ } ->
-    `Assoc
-      [ "outcome", `String "committed"
-      ; "recorded_at", `Float recorded_at
-      ; "revision", `Int revision
-      ; "source_kind", `String (Keeper_memory_os_current.source_kind_to_string source.kind)
-      ; "added_count", `Int (List.length change.added)
-      ; "removed_count", `Int (List.length change.removed)
-      ; "retained_count", `Int change.retained
-      ; "invalidated_count", `Int (List.length change.invalidated)
-      ]
-  | Keeper_memory_os_current.Journal_failed { recorded_at; kind; snapshot_present; _ } ->
-    `Assoc
-      [ "outcome", `String "failed"
-      ; "recorded_at", `Float recorded_at
-      ; "kind", `String (Keeper_memory_os_current.librarian_failure_kind_to_string kind)
-      ; "snapshot_present", `Bool snapshot_present
-      ]
-  | Keeper_memory_os_current.Journal_quarantined { recorded_at; _ } ->
-    `Assoc
-      [ "outcome", `String "quarantined"
-      ; "recorded_at", `Float recorded_at
-      ]
+let commit_entry_summary ~retained (commit : Librarian_log.commit) =
+  let invalidated_count =
+    List.fold_left
+      (fun acc (_, removal) ->
+         match removal with
+         | Librarian_effects.Support_lost _ -> acc + 1
+         | Dropped _ | Merged_into _ | Revised_into _ | Superseded_by _
+         | Retracted _ | Molted _ -> acc)
+      0
+      commit.effects.removed
+  in
+  `Assoc
+    [ "outcome", `String "committed"
+    ; "recorded_at", `Float commit.at
+    ; "revision", `Int commit.revision
+    ; ( "source_kind"
+      , `String
+          (Keeper_memory_os_current.source_kind_to_string
+             (source_kind_of_commit_cause commit.cause)) )
+    ; "added_count", `Int (List.length commit.effects.added)
+    ; "removed_count", `Int (List.length commit.effects.removed)
+    ; "retained_count", `Int retained
+    ; "invalidated_count", `Int invalidated_count
+    ]
 ;;
 
 let read_keeper_memory_health_json ~base_path ~caller ~keeper =
@@ -850,19 +864,77 @@ let read_keeper_memory_health_json ~base_path ~caller ~keeper =
                  ]
            in
            let journal_json =
+             let log_path =
+               Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper
+             in
+             let max_recent = 20 in
+             let tail_q :
+               (Librarian_log.commit, Librarian_log_store.undecodable) result Queue.t
+               =
+               Queue.create ()
+             in
+             let pre_tail_count = ref 0 in
+             let push_row row =
+               Queue.add row tail_q;
+               if Queue.length tail_q > max_recent
+               then (
+                 match Queue.take tail_q with
+                 | Error _ -> ()
+                 | Ok (evicted : Librarian_log.commit) ->
+                   let added_n = List.length evicted.effects.added in
+                   let removed_n = List.length evicted.effects.removed in
+                   let retained = max 0 (!pre_tail_count - removed_n) in
+                   pre_tail_count := max 0 (retained + added_n))
+             in
              match
-               Keeper_memory_os_current.read_journal_tail ~keepers_dir ~keeper_id:keeper ~limit:20
+               Librarian_log_store.fold log_path ~init:()
+                 ~f:(fun () ({ line; _ } : Librarian_log_store.scanned) ->
+                   match line with
+                   | Ok (Librarian_log.Started _) -> ()
+                   | Ok (Librarian_log.Committed commit) -> push_row (Ok commit)
+                   | Error err -> push_row (Error err))
              with
              | Error _ -> `Assoc [ "status", `String "unreadable" ]
-             | Ok rows ->
+             | Ok () ->
+               let tail_rows =
+                 Queue.fold (fun acc item -> item :: acc) [] tail_q |> List.rev
+               in
+               let retained_of_commits =
+                 match ordinary with
+                 | Keeper_memory_os_current.Readable snap ->
+                   let rec walk_back running acc = function
+                     | [] -> acc
+                     | Error err :: older -> walk_back running (Error err :: acc) older
+                     | Ok (commit : Librarian_log.commit) :: older ->
+                       let added_n = List.length commit.effects.added in
+                       let removed_n = List.length commit.effects.removed in
+                       let retained = max 0 (running - added_n) in
+                       let before = max 0 (running - added_n + removed_n) in
+                       walk_back before (Ok (commit, retained) :: acc) older
+                   in
+                   walk_back (List.length snap.facts) [] (List.rev tail_rows)
+                 | No_snapshot | Undecodable _ | Io_unreadable _ ->
+                   let rec walk_forward running acc = function
+                     | [] -> List.rev acc
+                     | Error err :: newer -> walk_forward running (Error err :: acc) newer
+                     | Ok (commit : Librarian_log.commit) :: newer ->
+                       let added_n = List.length commit.effects.added in
+                       let removed_n = List.length commit.effects.removed in
+                       let retained = max 0 (running - removed_n) in
+                       let after = max 0 (retained + added_n) in
+                       walk_forward after (Ok (commit, retained) :: acc) newer
+                   in
+                   walk_forward !pre_tail_count [] tail_rows
+               in
                let entries, undecodable_count =
                  List.fold_left
                    (fun (acc, bad) item ->
                       match item with
-                      | Ok entry -> journal_entry_summary entry :: acc, bad
+                      | Ok (commit, retained) ->
+                        commit_entry_summary ~retained commit :: acc, bad
                       | Error _ -> acc, bad + 1)
                    ([], 0)
-                   rows
+                   retained_of_commits
                in
                `Assoc
                  [ "status", `String "readable"

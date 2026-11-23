@@ -34,15 +34,9 @@ type dashboard_purge_artifact =
   | Keeper_root_logs_artifact
   | Keeper_runtime_directory_artifact
   | Keeper_memory_current_artifact
-  | Keeper_memory_epoch_artifact
-  | Keeper_memory_publication_artifact
-  | Keeper_memory_retraction_plan_artifact
   | Keeper_memory_source_current_artifact
   | Keeper_working_context_recall_artifact
   | Keeper_working_context_artifact
-  | Keeper_memory_journal_artifact
-  | Keeper_memory_journal_lock_artifact
-  | Keeper_memory_absorbed_artifact
   | Keeper_memory_log_artifact
   | Keeper_memory_log_lock_artifact
   | Keeper_memory_writer_lock_artifact

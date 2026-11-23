@@ -778,9 +778,33 @@ let test_recall_lifecycle_across_native_ticks () =
     ; origin = { kind = Authored; trace_id = "recall-cycle" }
     ; basis = Observed Transcript } in
   let replace ?(now = 1.) expected_revision facts =
-    match Current.replace ~keepers_dir ~keeper_id ~expected_revision
-      ~now ~source:{kind = Librarian; trace_id = "recall-cycle"} ~facts () with
-    | Ok _ -> ()
+    let previous =
+      match Current.read_for_keepers_dir ~keepers_dir ~keeper_id with
+      | Ok p -> p
+      | Error _ -> fail "fixture could not read current memory"
+    in
+    let revision =
+      match expected_revision with
+      | None -> 1
+      | Some r -> r + 1
+    in
+    let prev_facts = match previous with None -> [] | Some s -> s.Current.facts in
+    let prev_ids = List.map Memory.memory_id prev_facts in
+    let next_ids = List.map Memory.memory_id facts in
+    let added = List.filter (fun f -> not (List.mem (Memory.memory_id f) prev_ids)) facts in
+    let removed = List.filter (fun f -> not (List.mem (Memory.memory_id f) next_ids)) prev_facts in
+    let retained = List.length facts - List.length added in
+    let snap : Current.t =
+      { revision
+      ; updated_at = now
+      ; source = { kind = Librarian; trace_id = "recall-cycle" }
+      ; facts
+      ; change = { added; removed; retained; invalidated = [] }
+      }
+    in
+    match Fs_compat.save_file_atomic_strict path
+        (Yojson.Safe.pretty_to_string (Current.to_json snap) ^ "\n") with
+    | Ok () -> ()
     | Error _ -> fail "fixture could not replace the committed memory"
   in
   let tick = ref 0 in

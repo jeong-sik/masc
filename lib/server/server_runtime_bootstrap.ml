@@ -520,7 +520,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Workspace_dataset_event.install_store_observers ();
   Server_lane_inventory.install ();
   Server_memory_health_broadcast.install ~sw ~mono_clock ~config;
-  Server_dashboard_http_keeper_memory_health.install ();
+  Server_dashboard_http_keeper_memory_health.install ~sw ();
   Server_tla_source_events.start ~sw ~mono_clock ~report:(fun _ ->
     Server_routes_http_runtime.invalidate_full_health_snapshot ();
     Dashboard_observation_commit.process_written `Health);

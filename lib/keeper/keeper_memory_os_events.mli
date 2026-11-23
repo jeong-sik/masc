@@ -6,14 +6,14 @@
     stores no strength, score, or threshold; every number a consumer shows is
     computed from what it reads.
 
-    Only reads live here. A retrieval changes no snapshot, so it has no journal
-    row to ride on, and it is written on the turn path by
+    Only reads live here. A retrieval changes no snapshot, so it has no commit
+    log row to ride on, and it is written on the turn path by
     [keeper_memory_search] and [keeper_memory_select]. Revisions and
-    retractions change the snapshot, and the commit's own journal row is their
-    record ({!Keeper_memory_os_current.read_commit_lineage}): a separate append
-    after the commit could be lost to a cancellation or crash in between
-    (#37433). Events outlive the fact they name; a dropped fact keeps its
-    events and a reader attaches them only to facts that still exist. *)
+    retractions change the snapshot, and the commit's own {!Librarian_log} row
+    is their record: a separate append after the commit could be lost to a
+    cancellation or crash in between (#37433). Events outlive the fact they
+    name; a dropped fact keeps its events and a reader attaches them only to
+    facts that still exist. *)
 
 (** What happened to the memory. A closed set: a new kind of event is a new
     constructor, and the compiler names every consumer that has to learn it. *)
@@ -116,12 +116,12 @@ val summaries_for :
   revisions:Keeper_memory_os_types.revision list ->
   retractions:string list ->
   event list -> summary list
-(** Analyze one captured event list and one journal lineage
-    ({!Keeper_memory_os_current.read_commit_lineage}) for only the requested
-    ids. Results have exactly the requested order and length, including
-    duplicate ids. A requested id with no events and no lineage has an empty
-    summary. Incoming revisions from unrequested predecessors still count;
-    self-revisions do not. No state crosses calls. *)
+(** Analyze one captured event list and commit-log lineage
+    ({!Librarian_log_store}) for only the requested ids. Results have exactly
+    the requested order and length, including duplicate ids. A requested id
+    with no events and no lineage has an empty summary. Incoming revisions from
+    unrequested predecessors still count; self-revisions do not. No state
+    crosses calls. *)
 
 (** The summary on the wire: the five fields by name, [last_retrieved_at]
     null when the fact was never retrieved. *)

@@ -80,8 +80,6 @@ type fact_match =
   ; basis : Keeper_memory_os_types.basis
   ; store : fact_store
   ; first_seen : float
-  ; lookup_evidence : Keeper_memory_os_current.admission_recall_binding option
-  ; successor_evidence : Keeper_memory_os_current.successor_recall_candidate option
   }
 
 (* The durable stores a search reads. Either failing is the store, not the
@@ -124,11 +122,7 @@ let read_current_facts ~keepers_dir ~keeper_id =
   | Error detail -> Error (Snapshot_read_failed detail)
 ;;
 
-let fact_match_lookup_text (matched : fact_match) =
-  match matched.lookup_evidence with
-  | None -> matched.claim
-  | Some binding -> binding.source_fact.claim
-;;
+let fact_match_lookup_text (matched : fact_match) = matched.claim
 
 (* Set by the first ranking failure {!answering} logs. *)
 let ranking_failure_logged = Atomic.make false
@@ -202,7 +196,6 @@ let search_durable_facts
       ~(keepers_dir : string)
       ~(meta : keeper_meta)
       ~(facts : Keeper_memory_os_types.fact list)
-      ~(recall_bindings : Keeper_memory_os_current.admission_recall_binding list)
       ~(query : string)
       ~(limit : int option)
   : (fact_match list * int * Keeper_memory_source_current.file_source list * (unit -> string),
@@ -236,27 +229,14 @@ let search_durable_facts
         not (StringSet.mem fact.source.path unverified_paths))
       source_projection.facts in
   let total_candidates = List.length facts + List.length source_projection.facts in
-  let ordinary_entries = List.map (fun fact -> fact, None) facts in
-  let by_id = List.fold_left (fun indexed (fact : Keeper_memory_os_types.fact) ->
-    StringMap.add (Keeper_memory_os_types.memory_id fact) fact indexed) StringMap.empty facts in
-  let lookup_entries = if query = "" then [] else
-    List.filter_map (fun (binding : Keeper_memory_os_current.admission_recall_binding) ->
-      Option.map (fun target -> target, Some binding)
-        (StringMap.find_opt binding.target_memory_id by_id)) recall_bindings in
   let ordinary_whole, ordinary_fragments =
-    let claim_of
-        ((fact : Keeper_memory_os_types.fact),
-         (evidence : Keeper_memory_os_current.admission_recall_binding option)) =
-      match evidence with None -> fact.claim | Some binding -> binding.source_fact.claim
-    in
-    if lookup_entries = []
-    then
-      answering_with_rank
-        ~rank_fn:(fun () ->
-          Keeper_memory_search_index.rank_persistent_for_facts
-            ~keepers_dir ~keeper_id:meta.name ~query facts)
-        ~query ~claim_of ordinary_entries
-    else answering ~query ~claim_of (ordinary_entries @ lookup_entries)
+    answering_with_rank
+      ~rank_fn:(fun () ->
+        Keeper_memory_search_index.rank_persistent_for_facts
+          ~keepers_dir ~keeper_id:meta.name ~query facts)
+      ~query
+      ~claim_of:(fun (fact : Keeper_memory_os_types.fact) -> fact.claim)
+      facts
   in
   (* Keep the query's ranked order without building a second index. A
      concurrently rewritten claim is not the selected claim, even if its
@@ -276,7 +256,7 @@ let search_durable_facts
         else None) (source_whole @ source_fragments) in
   let source_whole = List.filter still_current source_whole in
   let source_fragments = List.filter still_current source_fragments in
-  let ordinary_match ((fact : Keeper_memory_os_types.fact), lookup_evidence) : fact_match =
+  let ordinary_match (fact : Keeper_memory_os_types.fact) : fact_match =
     { claim = fact.claim
     ; identity =
         Ordinary_memory_id
@@ -288,8 +268,6 @@ let search_durable_facts
     ; basis = fact.basis
     ; store = Ordinary_current
     ; first_seen = fact.first_seen
-    ; lookup_evidence
-    ; successor_evidence = None
     }
   in
   let source_match (fact : Keeper_memory_source_current.fact) : fact_match =
@@ -299,8 +277,6 @@ let search_durable_facts
     ; basis = Keeper_memory_os_types.Observed Keeper_memory_os_types.Transcript
     ; store = Source_bound_current
     ; first_seen = fact.first_seen
-    ; lookup_evidence = None
-    ; successor_evidence = None
     }
   in
   let deduplicate_targets matches =
@@ -333,74 +309,14 @@ let search_durable_facts
            ])) )
 ;;
 
-let successor_candidates_for_query ~query candidates =
-  if query="" then [] else
-  let whole,fragments = answering ~query
-    ~claim_of:(fun (candidate : Keeper_memory_os_current.successor_recall_candidate) ->
-      candidate.binding.source_fact.claim) candidates in
-  whole @ fragments
-;;
-
-let search_current_with_successors ~clock ~config ~keepers_dir ~(meta : keeper_meta) ~query ~limit =
-  let module Current = Keeper_memory_os_current in
-  let module Selector = Keeper_memory_successor_selection in
-  match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-      Current.read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id:meta.name) with
-  | Error detail -> Error (Snapshot_read_failed detail)
-  | Ok state ->
-    let relevant claim_of rows = if query="" then [] else
-      let whole,fragments = answering ~claim_of ~query rows in whole @ fragments in
-    let candidates = successor_candidates_for_query ~query state.successor_candidates in
-    let judged = Selector.run ~clock ~config ~keepers_dir ~keeper_id:meta.name ~query
-      ~snapshot:state.snapshot candidates in
-    let fresh = if candidates=[] then Ok state else
-      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-        Current.read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id:meta.name) in
-    (match fresh with
-    | Error detail -> Error (Snapshot_read_failed detail)
-    | Ok fresh ->
-    let judged = Selector.revalidate ~snapshot:state.snapshot ~candidates ~current:fresh judged in
-    let facts = match fresh.snapshot with None -> [] | Some snapshot -> snapshot.Current.facts in
-    let history_unresolved = relevant (fun (row : Current.recall_unresolved) ->
-      row.binding.source_fact.claim) fresh.unresolved
-      |> List.filter (fun (row : Current.recall_unresolved) -> match row.reason with
-        | Current.Retired_without_successor _ -> false
-        | History_unavailable _ | Missing_transition _ | Invalid_transition _ | Unrecorded_lineage _ -> true) in
-    let unresolved = List.map (fun ((candidate : Current.successor_recall_candidate),issue) -> `Assoc
-      ["request_id",`String candidate.Current.binding.candidate_id.request_id;
-       "issue",Selector.issue_to_json issue]) judged.unresolved
-      @ List.map (fun (row : Current.recall_unresolved) -> `Assoc
-        ["request_id",`String row.binding.candidate_id.request_id;
-         "issue",Current.recall_unresolved_reason_to_json row.reason]) history_unresolved in
-    let unresolved = match fresh.receipt_verification with
-      | Ok () -> unresolved
-      | Error detail -> `Assoc ["issue", `Assoc
-          ["kind", `String "receipt_unavailable"; "detail", `String detail]] :: unresolved in
-    let extra_fields = if unresolved=[] then [] else
-      ["successor_recall",`Assoc ["status",`String "incomplete";"unresolved",`List unresolved;
-        "guidance",`String "Some historical lookup paths could not be resolved. Existing direct results remain usable; absence of further results is not evidence that no current successor exists."]] in
-    (* Keep direct results even when judging a successor fails. Deduplication
-       and the caller's limit happen only after merging both query tiers. *)
-    match search_durable_facts ~config ~keepers_dir ~meta ~facts
-      ~recall_bindings:fresh.direct_bindings ~query ~limit with
-    | Error _ as error -> error
-    | Ok (direct,total,deferred,corpus_revision) ->
-      let successors = List.map (fun (candidate : Current.successor_recall_candidate) ->
-        let fact = candidate.target in
-        {identity=Ordinary_memory_id {memory_id=Keeper_memory_os_types.memory_id fact;origin=fact.origin.kind;
-           last_seen=fact.last_seen};
-         claim=fact.claim;category=Keeper_memory_os_types.category_to_string fact.category;
-         basis=fact.basis;store=Ordinary_current;first_seen=fact.first_seen;lookup_evidence=Some candidate.binding;
-         successor_evidence=Some candidate}) judged.selected in
-      let whole,fragments = if successors=[] then direct,[] else
-        answering ~claim_of:fact_match_lookup_text ~query (direct @ successors) in
-      let _,rev = List.fold_left (fun (seen,kept) (matched : fact_match) -> match matched.identity with
-        | Source_sha256 _ -> seen,matched::kept
-        | Ordinary_memory_id {memory_id;_} -> if StringSet.mem memory_id seen then seen,kept
-          else StringSet.add memory_id seen,matched::kept) (StringSet.empty,[]) (whole @ fragments) in
-      let merged = List.rev rev in
-      let merged = match limit with None -> merged | Some limit -> take limit merged in
-      Ok (facts,merged,total,deferred,extra_fields,unresolved<>[],corpus_revision))
+let search_current ~config ~keepers_dir ~(meta : keeper_meta) ~query ~limit =
+  match read_current_facts ~keepers_dir ~keeper_id:meta.name with
+  | Error _ as error -> error
+  | Ok facts ->
+    Result.map
+      (fun (matches, total, deferred, corpus_revision) ->
+         facts, matches, total, deferred, corpus_revision)
+      (search_durable_facts ~config ~keepers_dir ~meta ~facts ~query ~limit)
 ;;
 
 (* [first_seen] and [last_seen] are absolute UTC ISO 8601, the form of the
@@ -414,22 +330,6 @@ let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
      ; "store", `String (fact_store_to_string m.store)
      ; "first_seen", `String (Masc_domain.iso8601_of_unix_seconds m.first_seen)
      ]
-     @ (match m.successor_evidence with
-        | None -> []
-        | Some evidence -> ["successor_lookup_evidence", `Assoc
-            ["kind",`String "historical_source_with_judged_committed_successor";
-             "evidence",Keeper_memory_successor_selection.candidate_to_json evidence;
-             "guidance",`String "Historical lookup provenance only. Returned text and memory_id describe the current target, whose policy may differ from the historical source."]])
-     @ (match m.lookup_evidence, m.successor_evidence with
-        | None, _ | Some _, Some _ -> []
-        | Some binding, None ->
-          [ "lookup_evidence", `Assoc
-              [ "kind", `String "historical_admission_source"
-              ; "request_id", `String binding.candidate_id.request_id
-              ; "source_fact", Keeper_memory_os_types.fact_to_json binding.source_fact
-              ; "target_memory_id", `String binding.target_memory_id
-              ; "guidance", `String "Historical observation used to locate the current target. The returned text and memory_id describe current Memory; this evidence is not a separate current claim."
-              ] ])
      @
      match m.identity with
      | Ordinary_memory_id { memory_id; origin; last_seen } ->
@@ -754,7 +654,7 @@ let current_page_cursor ~revision ~offset =
 
 let keeper_memory_search_with_outcome
       ?turn_ref
-      ?clock
+      ?clock:_
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
@@ -860,12 +760,11 @@ let keeper_memory_search_with_outcome
             ; "guidance", `String "Query-matching stored claims could not be verified and were withheld. Retry relevant retrieval before drawing a negative conclusion; no claim body is supplied."
             ] ] in
     let current_stores cursor =
-      match search_current_with_successors ~clock ~config ~keepers_dir ~meta ~query ~limit:None with
+      match search_current ~config ~keepers_dir ~meta ~query ~limit:None with
       | Error _ as error -> error
-      | Ok (_facts, matches, fact_total, deferred_sources, successor_fields, successor_incomplete, corpus_revision) ->
-        (* Rank the complete current answer, successors included, before
-           slicing. The per-page bound must not discard the facts later
-           pages need. *)
+      | Ok (_facts, matches, fact_total, deferred_sources, corpus_revision) ->
+        (* Rank the complete current answer before slicing. The per-page bound
+           must not discard the facts later pages need. *)
         let revision = Snapshot_protocol.revision_of_json
             ~namespace:"keeper-current-memory-search-page"
             (`Assoc [ "corpus", `String (corpus_revision ())
@@ -891,12 +790,11 @@ let keeper_memory_search_with_outcome
                    ~fact_total
                    ~total_matches:(List.length fact_matches)
                    ~extra_matches:[]
-                   ~read_errors:(deferred_sources <> [] || successor_incomplete)
-                   ~read_error_fields:(page_fields @ source_verification_fields deferred_sources
-                      @ successor_fields)
+                   ~read_errors:(deferred_sources <> [])
+                   ~read_error_fields:(page_fields @ source_verification_fields deferred_sources)
              ; match_count = List.length fact_matches
              ; durable_candidates = Some fact_total
-             ; read_errors = deferred_sources <> [] || successor_incomplete
+             ; read_errors = deferred_sources <> []
              ; matched_memory_ids =
                  List.filter_map
                    (fun (matched : fact_match) ->
@@ -913,9 +811,9 @@ let keeper_memory_search_with_outcome
        never silently widens into absorbed history. Only ordinary current facts are
        retrievals; an absorbed row leaves no Retrieved event. *)
     let all_stores () =
-      match search_current_with_successors ~clock ~config ~keepers_dir ~meta ~query ~limit:(Some limit) with
+      match search_current ~config ~keepers_dir ~meta ~query ~limit:(Some limit) with
       | Error _ as error -> error
-      | Ok (facts, fact_matches, fact_total, deferred_sources, successor_fields, successor_incomplete, _corpus_revision) ->
+      | Ok (facts, fact_matches, fact_total, deferred_sources, _corpus_revision) ->
         (
            (* An absorbed fact names the claim that now says it. When that
               claim answers this search too, the absorbed fact says the same
@@ -967,7 +865,6 @@ let keeper_memory_search_with_outcome
            let selected = take limit (whole_query @ fragments) in
            let read_errors =
              deferred_sources <> []
-             || successor_incomplete
              || history_has_read_errors history
              || (match left with Some { unreadable; _ } -> unreadable > 0 | None -> false)
              || unavailable <> None
@@ -984,8 +881,7 @@ let keeper_memory_search_with_outcome
                      ([ "left_guidance", `String left_guidance ]
                       @ left_fields ~left ~unavailable
                       @ history_read_error_fields history
-                      @ source_verification_fields deferred_sources
-                      @ successor_fields)
+                      @ source_verification_fields deferred_sources)
              ; match_count = List.length selected
              ; durable_candidates = Some (fact_total + left_total)
              ; read_errors
@@ -1425,13 +1321,10 @@ let keeper_memory_write_with_outcome
     (match source_path, basis, supersedes with
      | Some source_path, _, _ ->
        (match
-          Result.bind
-            (Keeper_memory_os_current.recover_publication ~keepers_dir ~keeper_id:meta.name
-             |> Result.map_error (fun detail -> Keeper_memory_source_current.Store_write_failed detail))
-            (fun () -> Keeper_memory_source_current.upsert_file_fact
+          Keeper_memory_source_current.upsert_file_fact
             ~ordinary_facts:(fun () ->
               match
-                Keeper_memory_os_current.read_locked_for_keepers_dir
+                Keeper_memory_os_current.read_for_keepers_dir
                   ~keepers_dir
                   ~keeper_id:meta.Keeper_meta_contract.name
               with
@@ -1444,7 +1337,7 @@ let keeper_memory_write_with_outcome
             ~now:(Time_compat.now ())
             ~claim:body
             ~source_path
-            ())
+            ()
         with
         | Ok snapshot ->
           (match
@@ -1723,7 +1616,6 @@ let keeper_memory_retract_with_outcome
 ;;
 
 module For_testing = struct
-  let successor_candidates_for_query = successor_candidates_for_query
   let read_current_facts ~keepers_dir ~keeper_id =
     Result.map_error
       durable_search_error_detail

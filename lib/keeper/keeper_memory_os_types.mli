@@ -57,10 +57,9 @@ type wire_step =
 (** Why one node did not decode. Closed, so a new rejection has to name itself
     here before a decoder can make it. [Not_ascending] is produced only by the
     snapshot codec in {!Keeper_memory_os_current}, [Not_a_turn_ref] by
-    {!Keeper_turn_boundaries}, {!Keeper_turn_fragments} and
-    {!Keeper_turn_log_codec}, and [Not_positive] by the snapshot codec, the
-    position stores and {!Keeper_turn_log_codec}; they share this vocabulary
-    rather than keeping a parallel one. *)
+    {!Keeper_turn_fragments} and {!Keeper_turn_log_codec}, and [Not_positive]
+    by the snapshot codec and {!Keeper_turn_log_codec}; they share this
+    vocabulary rather than keeping a parallel one. *)
 type wire_reason =
   | Expected_object
   | Expected_array
@@ -168,8 +167,8 @@ type dropped_statement =
   ; reason : string
   }
 
-(** A current memory a new claim now says: [absorbed] leaves
-    the snapshot and its row goes to {!Keeper_memory_absorbed}; [into] is the
+(** A current memory a new claim now says: [absorbed] leaves the snapshot and
+    its removal is recorded in the commit log ({!Librarian_log}); [into] is the
     new claim's identity. No reason: the new claim is the reason. *)
 type absorbed_statement =
   { absorbed : string

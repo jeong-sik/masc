@@ -59,14 +59,14 @@ worker와 host Exact record 및 결과 증거가 모두 없는 dispatched origin
 
 ## 관측 범위와 배포
 
-Memory health 응답은 `librarian.operator_action_required`, 별도 attention alert,
-`alert_summary.librarian_attention_required_keepers`를 함께 제공한다. 서버·TUI·dashboard를
-같은 계약으로 배포한다. 다른 schema의 응답을 decoder에 통과시키는 호환 경로는 없다.
+Memory health 응답(`keeper.memory_os.current_health.v19`)은 Keeper별 단일
+Memory writer(`writer` 필드, `Librarian_writer`)의 상태와 `available_acts`를
+노출한다. 서버·TUI·dashboard를 같은 계약으로 배포한다. 다른 schema의 응답을
+decoder에 통과시키는 호환 경로는 없다.
 
-`/health?full=1`의 `keeper_memory_attention`은 현재 프로세스에서 완료한 durable 관측과
-독립 admission 관측(worker 대기 또는 pass 실패)을 읽는다. `operator_action_required`와 이유가 전체 health로 이어진다.
-관측 수와 scope를 함께 보며, 일부 관측에 attention이 없다는 결과를 fleet 전체 drain으로
-부르지 않는다. `keeper_memory_execution`의 serving은 별도의 경로 가용성이다.
+`/health?full=1`은 `librarian` 섹션으로 v2 Memory writer 상태를 노출하며,
+구형 `keeper_memory_attention` / `keeper_memory_execution` 필드는 단일 writer
+컷오버로 제거되었다.
 
 대시보드는 갱신 실패 시 이전 값을 보존하면서 실패와 마지막 관측임을 표시한다.
 TUI는 보유 snapshot보다 앞선 행 응답으로 행을 교체하거나 없애지 않고 fleet을 다시 읽는다.

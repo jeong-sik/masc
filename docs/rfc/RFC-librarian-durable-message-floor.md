@@ -1,9 +1,10 @@
 ---
 rfc: "librarian-durable-message-floor"
 title: "Librarian durable 경로도 메시지 바닥까지 나눠 읽고, 그래도 못 읽는 메시지는 기록하고 지나간다"
-status: Implemented (L2~L5 병합 2026-10-29, 맨 위 #46690. 긴 턴의 비용은 3.10, #46717)
+status: Superseded
+superseded_by: "librarian-call-only-proposes-and-one-writer-per-keeper-commits-in-one-line"
 created: 2026-10-27
-updated: 2026-11-15
+updated: 2026-11-23
 author: claude
 related: ["librarian-lifecycle", "librarian-history-original-holds-what-it-read"]
 ---

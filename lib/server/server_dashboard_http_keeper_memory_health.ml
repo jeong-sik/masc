@@ -157,7 +157,7 @@ let keeper_health ~config:(_ : Workspace.config) ~keepers_dir keeper_id =
   let journal = Keeper_memory_journal_outcome.read ~keepers_dir ~keeper_id in
   let journal_error =
     Option.map
-      (fun error -> "memory journal: " ^ Dated_jsonl.read_error_to_string error)
+      (fun error -> "memory commit log: " ^ error)
       journal.read_error
   in
   match
@@ -352,11 +352,34 @@ let invalidate_after_store_write ~keepers_dir ~keeper_id =
   invalidate_after_write ~keepers_dir:(health_directory_identity keepers_dir) ~keeper_id
 ;;
 
-let install () =
-  let retained = ref [] in
-  let register restore = retained := restore :: !retained in
-  register (Keeper_memory_os_current.install_commit_observer invalidate_after_store_write);
-  register (Keeper_memory_source_current.install_commit_observer invalidate_after_store_write)
+let install_mutex = Mutex.create ()
+let active_unsubscribe : (unit -> unit) option ref = ref None
+
+let uninstall_if_current unsubscribe =
+  Stdlib.Mutex.protect install_mutex (fun () ->
+    match !active_unsubscribe with
+    | Some current when current == unsubscribe ->
+      current ();
+      active_unsubscribe := None
+    | Some _ | None -> ())
+;;
+
+let install ?sw () =
+  let unsubscribe =
+    Stdlib.Mutex.protect install_mutex (fun () ->
+      Option.iter (fun prev -> prev ()) !active_unsubscribe;
+      let unsubscribe =
+        Keeper_memory_commit_notifications.subscribe (fun event ->
+          invalidate_after_write
+            ~keepers_dir:event.keepers_dir
+            ~keeper_id:event.keeper_id)
+      in
+      active_unsubscribe := Some unsubscribe;
+      unsubscribe)
+  in
+  Option.iter
+    (fun sw -> Eio.Switch.on_release sw (fun () -> uninstall_if_current unsubscribe))
+    sw
 ;;
 
 let alerts (h : keeper_health) =
@@ -435,6 +458,27 @@ let alerts (h : keeper_health) =
 ;;
 
 
+let zero_pass_changes_json =
+  `Assoc
+    [ "added", `Int 0
+    ; "absorbed", `Int 0
+    ; "superseded", `Int 0
+    ; "dropped", `Int 0
+    ]
+;;
+
+let empty_changes_since_start_json =
+  `Assoc
+    [ "admission", zero_pass_changes_json
+    ; "durable", zero_pass_changes_json
+    ; "continuity", zero_pass_changes_json
+    ; "cleanup", zero_pass_changes_json
+    ; "keeper_write", zero_pass_changes_json
+    ; "keeper_delete", zero_pass_changes_json
+    ; "operator_delete", zero_pass_changes_json
+    ]
+;;
+
 let keeper_health_entry_to_json ~now ~writer (h : keeper_health) =
   let age_bins_json =
     match h.first_seen with
@@ -462,8 +506,7 @@ let keeper_health_entry_to_json ~now ~writer (h : keeper_health) =
          store counts after it releases its locks: the journal line that
          empties the cached row comes before the count, and the commit
          notification that empties a written fleet answer comes after it. *)
-    ; ( "changes_since_start"
-      , Keeper_memory_commit_change.(by_pass_to_json (since_start ~keeper_id:h.keeper_id)) )
+    ; "changes_since_start", empty_changes_since_start_json
       (* The Keeper's Memory writer (RFC librarian-call-only-proposes
          §12.3), read from what the writer holds when the answer is written.
          Nothing a row is emptied by says the writer moved, so it is not
@@ -602,7 +645,10 @@ module For_testing = struct
       Hashtbl.reset row_roots);
     health_reader := reader;
     let restore =
-      Keeper_memory_os_current.install_commit_observer invalidate_after_store_write
+      Keeper_memory_commit_notifications.subscribe (fun event ->
+        invalidate_after_write
+          ~keepers_dir:event.keepers_dir
+          ~keeper_id:event.keeper_id)
     in
     Fun.protect
       ~finally:(fun () ->

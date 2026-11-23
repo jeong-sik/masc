@@ -165,13 +165,12 @@ bytes. Working Context already changes generation on rebuild; its hash binds an
 Admin plan to the exact bytes that were reviewed rather than adding another
 lifecycle identity.
 
-Search with `source="absorbed"` reads facts a Librarian combined into another
-claim from `<keeper_name>.memory-absorbed.jsonl`. These results carry
-`store="absorbed_memory"`, the successor identity `into`, and `into_current`.
-An archived fact is not a current derivation premise. An archive row alone does
-not prove that the successor snapshot committed; `into_current` is checked
-against current memory. `source="all"` includes the stores with those identities
-kept distinct.
+Search with `source="absorbed"` or `source="dropped"` reads historical
+removals from `<keeper_name>.memory-log.jsonl` (and compacted cold archive
+`<keeper_name>.memory-archive.jsonl`) via `Keeper_memory_left`. Absorbed
+results carry `store="absorbed_memory"`, the successor identity `into`, and
+`into_current` checked against current memory. `source="all"` combines current
+facts, absorbed/dropped rows, and history with identities kept distinct.
 
 The runtime may inject selected memory into a future prompt as context. That
 context is advisory and cannot mutate task, goal, lifecycle, HITL, connector,
@@ -179,53 +178,27 @@ or scheduler state.
 
 ## Librarian disposition
 
-The Librarian returns changes: `new_claims`, explicit `dropped` statements,
-and `working_contexts`. A new claim may name a `supersedes` identity or
-`absorbs` identities. Unmentioned facts are retained subject to derivation
-support. A fact removed because its derivation lost all support is recorded in
-`change.invalidated` with its missing premise identities, the same support
-fixed point that `keeper_memory_retract` records. There is no per-fact retain
-response. Superseded identities must also be dropped; absorbed
-identities must not be dropped. Unknown identities, duplicate dispositions,
-and invalid schema values reject the answer (`Keeper_librarian`).
-`working_contexts` is judged apart from these: when it is missing or fails the
-pending-input check, the answer's Memory changes still commit, that pass
-organizes nothing, and the run records `answer_missing` or `answer_refused`
-as its `context_write`. `working_state` is read only when the pass carries a
-continuity range, which requires nonblank text; a Memory pass without one
-never reads it.
-
-`Keeper_memory_os_current.apply_disposition` applies the changes to the current
-snapshot under its write lock. A fact the Keeper wrote while the model was
-answering is preserved unless the answer explicitly retires that identity
-or its derivation loses all support;
-an already-present new claim is not inserted twice. Absorbed facts are appended
-to the archive before replacing the snapshot, and an archive write failure
-fails the memory commit. A failed snapshot replacement can therefore leave an
-archive row whose successor is not current. Working context has a separate
-revision and does not roll back a memory commit. No threshold, priority score,
-recency rule, or capacity heuristic decides which memories survive.
+Each Keeper has a single Memory writer (`Librarian_writer` / `Librarian_store`)
+owning `<keeper_name>.memory-log.jsonl` and `<keeper_name>.memory-current.json`
+(RFC `librarian-call-only-proposes-and-one-writer-per-keeper-commits-in-one-line`).
+Model calls propose structured operations (`Librarian_answer`); the writer
+validates and applies them deterministically, appends one commit line to
+`<keeper_name>.memory-log.jsonl`, and atomically rewrites the current snapshot.
+Direct writes (`keeper_memory_write`, `keeper_memory_retract`, and operator
+cleanup) go through the same single writer. Unmentioned facts are retained
+subject to derivation support; derived facts whose premises disappear are
+removed as `Support_lost` and recorded in `change.invalidated`. No priority
+score, recency rule, or silent eviction heuristic decides which memories
+survive; structural growth triggers proactive `Molt_and_synthesize` rounds.
 
 ## Committed revision lineage
 
-A declared revision relates a removed memory identity to a target present in
-the committed snapshot. Applied Librarian revisions and explicit supersedes
-writes record these links in the same recoverable removal transaction as the
-snapshot change. The journal records explicit links on actual rewrites; a
-no-change observation cannot create a revision transition. An unfinished
-journal receipt is an unavailable evidence state until a writer recovers it.
-
-A coherent read exposes the current snapshot and revision evidence after a
-requested revision. Missing link metadata is unrecorded, not an inferred
-relationship. The journal links are the only record of revisions: the
-dashboard's `revised_from` and the absorbed-chain search read them, and no
-separate sidecar event is written after the commit (#37433).
-
-These links establish declared structural succession. They do not establish
-that every historical input remains applicable to every successor. Demand
-retrieval still needs a scope judgment before using a past observation to
-select a revised current claim. Existing candidate consumption receipts stay
-unchanged; a revision does not consume those candidates again.
+Applied `Revised_into`, `Superseded_by`, `Merged_into`, and `Retracted` effects
+are recorded directly on each committed line in
+`<keeper_name>.memory-log.jsonl`. Read-only dashboard and TUI surfaces
+(`Keeper_memory_activity`, `memory-facts`, `memory-journal`, and TUI v2
+`/api/v1/memory/diff`) project lineage directly from the commit log; no
+separate `.memory-journal.jsonl` or `.memory-absorbed.jsonl` sidecar exists.
 
 ## Admission lookup provenance
 

@@ -451,87 +451,6 @@ let test_undecodable_stores_are_moved_aside_once () =
   check int "and moves nothing" 0 (List.length counted.R.quarantined)
 ;;
 
-(* Ordinary removal commits the snapshot even when its archive append fails,
-   and leaves its removal receipt and its publication receipt pending. If a
-   later boot cannot decode that snapshot, accepted quarantine does not move
-   it: the snapshot and both receipts stay where they are, and the report
-   names the store as failed. *)
-let test_memory_quarantine_refuses_pending_publication () =
-  with_workspace
-  @@ fun config ->
-  let module Current = Keeper_memory_os_current in
-  let module Types = Keeper_memory_os_types in
-  let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
-  in
-  let keeper_id = "sound" in
-  let original : Types.fact =
-    { claim = "original with conditions preserved during quarantine"
-    ; category = Types.Constraint
-    ; first_seen = 100.
-    ; last_seen = 100.
-    ; origin = { kind = Types.Authored; trace_id = "boot-removal" }
-    ; basis = Types.Observed Types.Transcript
-    }
-  in
-  (match Current.upsert_fact ~pass:Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id ~now:200.
-      ~source:{ Current.kind = Current.Explicit_write; trace_id = "boot-removal" }
-      original with
-   | Ok _ -> ()
-   | Error error -> fail (Current.upsert_error_to_string error));
-  let journal_path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-  let seed_journal = Fs_compat.load_file journal_path in
-  Fs_compat.invalidate_cached_writer journal_path;
-  Sys.remove journal_path;
-  Unix.mkdir journal_path 0o700;
-  (match Current.retract_fact ~pass:Keeper_memory_commit_pass.Keeper_delete ~keepers_dir ~keeper_id ~now:300.
-      ~source:{ Current.kind = Current.Explicit_retract; trace_id = "boot-removal" }
-      ~memory_id:(Types.memory_id original) ~reason:"operator withdrew this exact rule" ()
-   with
-   | Ok snapshot ->
-     check bool "the committed snapshot retains the removed original" true
-       (snapshot.change.removed = [ original ])
-   | Error _ -> fail "ordinary removal must report its committed snapshot");
-  Unix.rmdir journal_path;
-  write_bytes journal_path seed_journal;
-  let removal_path = Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id in
-  let publication_path = Current.publication_receipt_path ~keepers_dir ~keeper_id in
-  let removal_bytes = Fs_compat.load_file removal_path in
-  let publication_bytes = Fs_compat.load_file publication_path in
-  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
-  let rejected_bytes =
-    match Yojson.Safe.from_string (Fs_compat.load_file snapshot_path) with
-    | `Assoc fields ->
-      Yojson.Safe.to_string (`Assoc (("unknown_snapshot_field", `Bool true) :: fields))
-    | _ -> fail "the committed snapshot is not an object"
-  in
-  write_bytes snapshot_path rejected_bytes;
-  let examination = R.examine config in
-  check (list string) "pending publication is unavailable, not a decode rejection" []
-    (List.map (fun (row : R.undecodable) -> row.path) examination.undecodable);
-  check (list string) "boot names the unavailable snapshot" [ snapshot_path ]
-    (List.map (fun (row : R.failure) -> row.path) examination.unreadable);
-  (match R.admit ~accept_quarantine:true examination with
-   | Error [ R.Unreadable _ ] -> ()
-   | Error _ | Ok _ -> fail "pending publication must be a mandatory refusal");
-  let report = R.quarantine ~now:400. config examination in
-  check int "nothing is moved aside" 0 (List.length report.R.quarantined);
-  (match report.R.failed with
-   | [ failure ] ->
-     check string "the failed store" "memory_current" (R.store_to_string failure.R.store);
-     check string "the exact snapshot" snapshot_path failure.R.path
-   | _ -> fail "the refused quarantine names the snapshot once");
-  check string "the rejected snapshot stays in place" rejected_bytes
-    (Fs_compat.load_file snapshot_path);
-  check string "the removal receipt stays in place" removal_bytes
-    (Fs_compat.load_file removal_path);
-  check string "the publication receipt stays in place" publication_bytes
-    (Fs_compat.load_file publication_path);
-  check (list string) "no rejected copy is written" []
-    (Sys.readdir keepers_dir |> Array.to_list
-     |> List.filter (fun name -> String_util.contains_substring name ".rejected-"))
-;;
-
 let test_memory_unreadable_never_accepts_quarantine () =
   with_workspace @@ fun config ->
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
@@ -561,18 +480,28 @@ let test_memory_unreadable_never_accepts_quarantine () =
     (Fs_compat.load_file retained)
 ;;
 
+let write_empty_memory_snapshot ~keepers_dir ~keeper_id ~trace_id =
+  let module Current = Keeper_memory_os_current in
+  Fs_compat.mkdir_p keepers_dir;
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let snapshot : Current.t =
+    { revision = 1
+    ; updated_at = 100.
+    ; source = { Current.kind = Current.Explicit_write; trace_id }
+    ; facts = []
+    ; change = { added = []; removed = []; retained = 0; invalidated = [] }
+    }
+  in
+  write_bytes path (Yojson.Safe.to_string (Current.to_json snapshot));
+  path
+;;
+
 let test_memory_quarantine_rechecks_exact_snapshot () =
   with_workspace @@ fun config ->
-  let module Current = Keeper_memory_os_current in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
   let keeper_id = "memory-changed" in
-  let source = {Current.kind=Current.Explicit_write;trace_id="boot-recheck"} in
-  (match Current.replace ~keepers_dir ~keeper_id ~expected_revision:None ~now:100. ~source ~facts:[] () with
-   | Ok _ -> () | Error error -> fail error);
-  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let path = write_empty_memory_snapshot ~keepers_dir ~keeper_id ~trace_id:"boot-recheck" in
   let valid = Fs_compat.load_file path in
-  let epoch = Current.epoch_path ~keepers_dir ~keeper_id in
-  let original_epoch = Fs_compat.load_file epoch in
   let rejected_a = "{invalid snapshot A" and rejected_b = "{invalid snapshot B" in
   let check_changed replacement =
     write_bytes path rejected_a;
@@ -583,8 +512,7 @@ let test_memory_quarantine_rechecks_exact_snapshot () =
     let report = R.quarantine ~now:300. config examination in
     check int "changed bytes are never quarantined" 0 (List.length report.quarantined);
     check int "the stale rejection is a failed move" 1 (List.length report.failed);
-    check string "the current snapshot stays in place" replacement (Fs_compat.load_file path);
-    check string "the Memory epoch does not rotate" original_epoch (Fs_compat.load_file epoch) in
+    check string "the current snapshot stays in place" replacement (Fs_compat.load_file path) in
   check_changed valid;
   check_changed rejected_b;
   check (list string) "no rejected copy was created" []
@@ -594,13 +522,9 @@ let test_memory_quarantine_rechecks_exact_snapshot () =
 
 let test_memory_snapshot_symlink_reads_but_cannot_be_quarantined () =
   with_workspace @@ fun config ->
-  let module Current = Keeper_memory_os_current in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
   let keeper_id = "memory-link" in
-  let source = {Current.kind=Current.Explicit_write;trace_id="boot-link"} in
-  (match Current.replace ~keepers_dir ~keeper_id ~expected_revision:None ~now:100. ~source ~facts:[] () with
-   | Ok _ -> () | Error error -> fail error);
-  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let path = write_empty_memory_snapshot ~keepers_dir ~keeper_id ~trace_id:"boot-link" in
   let target = path ^ ".target" in
   Sys.rename path target;
   Unix.symlink (Filename.basename target) path;
@@ -622,165 +546,6 @@ let test_memory_snapshot_symlink_reads_but_cannot_be_quarantined () =
   check int "the symlink was not moved" 0 (List.length report.quarantined);
   check bool "the original symlink remains" true ((Unix.lstat path).Unix.st_kind=Unix.S_LNK);
   check string "the target bytes remain" invalid (Fs_compat.load_file target)
-;;
-
-let test_memory_dangling_publication_is_unavailable () =
-  with_workspace @@ fun config ->
-  let module Current = Keeper_memory_os_current in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
-  let keeper_id = "memory-dangling-publication" in
-  let source = {Current.kind=Current.Explicit_write;trace_id="boot-dangling"} in
-  (match Current.replace ~keepers_dir ~keeper_id ~expected_revision:None ~now:100. ~source ~facts:[] () with
-   | Ok _ -> () | Error error -> fail error);
-  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
-  let snapshot = Fs_compat.load_file snapshot_path in
-  let publication_path = Current.publication_receipt_path ~keepers_dir ~keeper_id in
-  Unix.symlink "missing-receipt-target" publication_path;
-  let recovery_refusals = R.recover_memory_publications config in
-  (match recovery_refusals with
-   | [R.Unreadable failure] -> check string "the snapshot owner is named" snapshot_path failure.path
-   | [] | _ :: _ -> fail "a dangling publication must refuse recovery");
-  let examination = R.examine config in
-  List.iter (fun accept_quarantine ->
-    match R.admit_after_recovery ~recovery_refusals ~accept_quarantine examination with
-    | Error [R.Unreadable _] -> ()
-    | Error _ | Ok _ -> fail "a dangling publication must refuse boot") [false;true];
-  Fun.protect ~finally:B.For_testing.reset_keeper_persistence_lifecycle (fun () ->
-    List.iter (fun accept_quarantine ->
-      B.For_testing.reset_keeper_persistence_lifecycle ();
-      match B.prepare_keeper_persistence ~accept_store_quarantine:accept_quarantine ~config () with
-      | Error (B.Store_quarantine_refused [R.Unreadable _]) -> ()
-      | Error error -> fail (B.keeper_persistence_prepare_error_to_string error)
-      | Ok _ -> fail "server preparation admitted a dangling publication") [false;true]);
-  check bool "the dangling receipt remains" true ((Unix.lstat publication_path).Unix.st_kind=Unix.S_LNK);
-  check string "the healthy snapshot remains" snapshot (Fs_compat.load_file snapshot_path)
-;;
-
-let test_memory_examine_is_read_only_and_boot_recovers_publications () =
-  with_workspace @@ fun config ->
-  let module Current = Keeper_memory_os_current in
-  let module Types = Keeper_memory_os_types in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
-  let source = {Current.kind=Current.Explicit_write;trace_id="boot-recovery"} in
-  let fact claim = Types.observed ~claim ~category:Types.Fact ~now:10.
-    ~origin:{kind=Types.Authored;trace_id="boot-recovery"} in
-  let cases = ["before-rename",false; "after-rename",true] in
-  List.iter (fun (keeper_id,after_rename) ->
-    (match Current.replace ~keepers_dir ~keeper_id ~expected_revision:None ~now:20.
-       ~source ~facts:[fact "before publication"] () with
-     | Ok _ -> () | Error error -> fail error);
-    let write_snapshot path content =
-      Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
-        ~sync_file:(fun _ -> if not after_rename then failwith "before rename")
-        ~sync_parent:(fun _ -> failwith "after rename") path content in
-    (match Current.For_testing.replace_with_publication_io
-       ~write_snapshot ~sync_snapshot:(fun _ -> Error "sync unconfirmed")
-       ~on_committed:(fun _ _ -> ()) ~before_journal:(fun () -> ())
-       ~keepers_dir ~keeper_id ~now:30. ~source ~facts:[fact "after publication"] with
-     | Error _ -> () | Ok _ -> fail "fixture must leave a pending publication")) cases;
-  let paths = List.map (fun (keeper_id,_) ->
-    let path=Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
-    let receipt=Current.publication_receipt_path ~keepers_dir ~keeper_id in
-    path,Fs_compat.load_file path,receipt,Fs_compat.load_file receipt) cases in
-  let wakes = ref [] in
-  let unsubscribe = Keeper_memory_commit_notifications.subscribe (fun event ->
-    wakes := (event.keeper_id,event.revision) :: !wakes) in
-  Fun.protect ~finally:(fun () ->
-    unsubscribe ();
-    B.For_testing.reset_keeper_persistence_lifecycle ()) (fun () ->
-    let examination = R.examine config in
-    check int "both pending publications are unavailable" 2 (List.length examination.unreadable);
-    check bool "examination sends no wake" true (!wakes=[]);
-    List.iter (fun (path,snapshot,receipt,publication) ->
-      check string "examination leaves snapshot bytes" snapshot (Fs_compat.load_file path);
-      check string "examination leaves receipt bytes" publication (Fs_compat.load_file receipt)) paths;
-    B.For_testing.reset_keeper_persistence_lifecycle ();
-    (match B.prepare_keeper_persistence ~accept_store_quarantine:false ~config () with
-     | Ok _ -> ()
-     | Error error -> fail (B.keeper_persistence_prepare_error_to_string error));
-    List.iter (fun (keeper_id,after_rename) ->
-      let receipt=Current.publication_receipt_path ~keepers_dir ~keeper_id in
-      check bool "owner recovery settles the receipt" false (Sys.file_exists receipt);
-      match Current.read_for_keepers_dir ~keepers_dir ~keeper_id with
-      | Ok (Some snapshot) ->
-        let expected = if after_rename then [fact "after publication"] else [fact "before publication"] in
-        check bool "recovery preserves the correct publication" true (snapshot.facts=expected)
-      | Ok None | Error _ -> fail "the recovered snapshot must be readable") cases;
-    check (list (pair string int)) "only the published target wakes" ["after-rename",2] !wakes;
-    let after = R.examine config in
-    check bool "recovered snapshots are readable" true (after.unreadable=[] && after.undecodable=[]))
-;;
-
-let test_memory_receipt_only_keeps_existing_owner_recovery () =
-  with_workspace @@ fun config ->
-  let module Current = Keeper_memory_os_current in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
-  let keeper_id = "first-publication" in
-  let source = {Current.kind=Current.Explicit_write;trace_id="boot-first-publication"} in
-  let write_snapshot path content =
-    Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
-      ~sync_file:(fun _ -> failwith "before first snapshot rename")
-      ~sync_parent:(fun _ -> ()) path content in
-  (match Current.For_testing.replace_with_publication_io
-     ~write_snapshot ~sync_snapshot:(fun _ -> Error "sync unconfirmed")
-     ~on_committed:(fun _ _ -> ()) ~before_journal:(fun () -> ())
-     ~keepers_dir ~keeper_id ~now:30. ~source ~facts:[] with
-   | Error _ -> () | Ok _ -> fail "fixture must leave a first publication receipt");
-  let snapshot = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
-  let receipt = Current.publication_receipt_path ~keepers_dir ~keeper_id in
-  let original = Fs_compat.load_file receipt in
-  check bool "the first snapshot is still absent" false (Sys.file_exists snapshot);
-  check bool "snapshot-owner boot recovery leaves this receipt alone" true
-    (R.recover_memory_publications config=[]);
-  let examination = R.examine config in
-  check bool "snapshot-only examination keeps its original scope" true
-    (examination.unreadable=[] && examination.undecodable=[]);
-  check string "boot inspection preserves the receipt bytes" original (Fs_compat.load_file receipt);
-  (match Current.read_for_keepers_dir ~keepers_dir ~keeper_id with
-   | Ok None -> ()
-   | Ok (Some _) | Error _ -> fail "the owner must recover the incomplete first publication");
-  check bool "owner recovery settles the receipt" false (Sys.file_exists receipt)
-;;
-
-let test_memory_recovery_unlink_sync_failure_is_mandatory () =
-  with_workspace @@ fun config ->
-  let module Current = Keeper_memory_os_current in
-  let module Types = Keeper_memory_os_types in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
-  let keeper_id = "memory-unlink-failure" in
-  let source = {Current.kind=Current.Explicit_write;trace_id="boot-unlink"} in
-  let fact claim = Types.observed ~claim ~category:Types.Fact ~now:10.
-    ~origin:{kind=Types.Authored;trace_id="boot-unlink"} in
-  (match Current.replace ~keepers_dir ~keeper_id ~expected_revision:None ~now:20.
-     ~source ~facts:[fact "before publication"] () with
-   | Ok _ -> () | Error error -> fail error);
-  let write_snapshot path content =
-    Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
-      ~sync_parent:(fun _ -> failwith "after snapshot rename") path content in
-  (match Current.For_testing.replace_with_publication_io
-     ~write_snapshot ~sync_snapshot:(fun _ -> Error "snapshot sync unconfirmed")
-     ~on_committed:(fun _ _ -> ()) ~before_journal:(fun () -> ())
-     ~keepers_dir ~keeper_id ~now:30. ~source ~facts:[fact "after publication"] with
-   | Error _ -> () | Ok _ -> fail "fixture publication must stop after rename");
-  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
-  let receipt = Current.publication_receipt_path ~keepers_dir ~keeper_id in
-  let snapshot = Fs_compat.load_file path in
-  check bool "the publication receipt exists before recovery" true (Sys.file_exists receipt);
-  let sync_calls = ref 0 in
-  let recover ~keepers_dir ~keeper_id =
-    Current.For_testing.recover_publication_with_sync ~keepers_dir ~keeper_id
-      ~sync_parent:(fun _ -> incr sync_calls; raise (Unix.Unix_error (Unix.EIO,"fsync","fixture"))) in
-  let recovery_refusals = R.For_testing.recover_memory_publications_with ~recover config in
-  check int "the injected sync follows one real receipt unlink" 1 !sync_calls;
-  check bool "receipt is already absent after failed sync" false (Sys.file_exists receipt);
-  check string "the committed snapshot is still present" snapshot (Fs_compat.load_file path);
-  let examination = R.examine config in
-  check bool "the later snapshot read is otherwise healthy" true (examination.undecodable=[] && examination.unreadable=[]);
-  List.iter (fun accept_quarantine ->
-    match R.admit_after_recovery ~recovery_refusals ~accept_quarantine examination with
-    | Error [R.Unreadable failure] -> check string "the recovery failure names the snapshot" path failure.path
-    | Error _ | Ok _ -> fail "the uncertain unlink must refuse boot with either flag") [false;true];
-  check string "the valid snapshot was not moved" snapshot (Fs_compat.load_file path)
 ;;
 
 (* The whole preparation, as the server runs it: refused without the flag with
@@ -980,125 +745,6 @@ let test_preflight_refuses_an_older_chat_operation_journal () =
       (String_util.contains_substring detail "user_version")
   | Ok report -> failf "rows %d refused %d" report.D.rows report.D.refused
   | Error detail -> failf "scan failed: %s" detail
-;;
-
-(* Every store the deploy preflight reads that refuses a row, in [Id.all]
-   order, as [validate-stores] reads them. *)
-let preflight_refusals ~base_path =
-  List.filter_map
-    (fun id ->
-       match D.preflight_scan id with
-       | None -> None
-       | Some scan ->
-         (match D.run scan ~base_path with
-          | Ok { D.refused = 0; _ } -> None
-          | Ok report -> Some (D.name id, report)
-          | Error detail -> failf "%s: scan failed: %s" (D.name id) detail))
-    D.Id.all
-;;
-
-let show_refusals refusals =
-  String.concat "; "
-    (List.map
-       (fun (name, report) ->
-          Printf.sprintf "%s rows=%d refused=%d" name report.D.rows report.D.refused)
-       refusals)
-;;
-
-let replace_member key value = function
-  | `Assoc fields ->
-    `Assoc (List.map (fun (name, held) -> name, if String.equal name key then value else held) fields)
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
-    fail "journal fixture line is not an object"
-;;
-
-(* The committed line with a field the fact codec no longer has, as the
-   journals #33241 left behind. *)
-let with_reinforced_fact line =
-  let module U = Yojson.Safe.Util in
-  let json = Yojson.Safe.from_string line in
-  let change = U.member "change" json in
-  let added =
-    match U.to_list (U.member "added" change) with
-    | `Assoc fact :: rest -> `Assoc (("reinforcement", `Int 1) :: fact) :: rest
-    | [] | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) :: _ ->
-      fail "the first commit line holds no added fact"
-  in
-  Yojson.Safe.to_string (replace_member "change" (replace_member "added" (`List added) change) json)
-;;
-
-(* 2026-09-05 (#32504): #33241 removed [reinforcement] from the fact codec.
-   No snapshot kept the field but 15 of 17 journals did, and the deploy
-   preflight read only the snapshot, so it would have passed while every
-   reader that decodes the journal refused those lines. Of all the stores
-   the preflight reads, the journal's own scan is the one that refuses such
-   a line, and it names the file and the line. *)
-let test_preflight_names_the_journal_line_readers_refuse () =
-  with_workspace
-  @@ fun config ->
-  let module Current = Keeper_memory_os_current in
-  let module Types = Keeper_memory_os_types in
-  let base_path = config.Workspace.base_path in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let journal keeper_id = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-  let scan =
-    match D.reader D.Id.Memory_journal with
-    | D.Preflight_only scan -> scan
-    | D.Refuse_boot _ | D.Degrade_typed _ -> fail "the journal is read by the preflight only"
-  in
-  Fs_compat.mkdir_p keepers_dir;
-  (match D.run scan ~base_path with
-   | Ok { D.rows = 0; refused = 0; first_refusal = None; pending_recovery = [] } -> ()
-   | Ok report -> failf "no journal, yet rows %d refused %d" report.D.rows report.D.refused
-   | Error detail -> failf "no journal, yet the scan failed: %s" detail);
-  let source = { Current.kind = Current.Explicit_write; trace_id = "journal-preflight" } in
-  let commit ~expected_revision claim =
-    let fact =
-      Types.observed ~claim ~category:Types.Fact ~now:10.
-        ~origin:{ kind = Types.Authored; trace_id = "journal-preflight" }
-    in
-    match
-      Current.replace ~keepers_dir ~keeper_id:"readable" ~expected_revision ~now:20. ~source
-        ~facts:[ fact ] ()
-    with
-    | Ok _ -> ()
-    | Error detail -> fail detail
-  in
-  commit ~expected_revision:None "first memory";
-  commit ~expected_revision:(Some 1) "second memory";
-  (match D.run scan ~base_path with
-   | Ok { D.rows = 2; refused = 0; _ } -> ()
-   | Ok report -> failf "a written journal read rows %d refused %d" report.D.rows report.D.refused
-   | Error detail -> failf "a written journal failed the scan: %s" detail);
-  let committed =
-    String.split_on_char '\n' (Fs_compat.load_file (journal "readable"))
-    |> List.filter (fun line -> not (String.equal line ""))
-  in
-  let first, second =
-    match committed with
-    | [ first; second ] -> first, second
-    | lines -> failf "the two commits wrote %d journal lines" (List.length lines)
-  in
-  (* A blank line is not a row, and the cut-short append at the end is the
-     one the next append truncates: neither is refused, and the blank line
-     still counts toward the line the refusal names. *)
-  let unreadable =
-    String.concat "\n" [ first; ""; with_reinforced_fact first; second ]
-    ^ "\n{\"outcome\":\"comm"
-  in
-  write_bytes (journal "unreadable") unreadable;
-  (match preflight_refusals ~base_path with
-   | [ (name, { D.rows = 5; refused = 1; first_refusal = Some detail; _ }) ] ->
-     check string "the journal store refuses it" (D.name D.Id.Memory_journal) name;
-     check bool ("the refusal names the file and line 3: " ^ detail) true
-       (String.starts_with ~prefix:(journal "unreadable" ^ " line 3: ") detail);
-     check bool "and the field the decoder refuses" true
-       (String_util.contains_substring detail "reinforcement")
-   | refusals ->
-     failf "expected one store to refuse one of five journal rows, got [%s]"
-       (show_refusals refusals));
-  check string "the preflight leaves the refused journal as it was" unreadable
-    (Fs_compat.load_file (journal "unreadable"))
 ;;
 
 (* [Id.all] is derived. Each store boot refuses on or reports must be
@@ -2577,10 +2223,6 @@ let () =
             test_memory_unreadable_never_accepts_quarantine
         ; test_case "memory snapshot symlinks cannot be quarantined automatically" `Quick
             test_memory_snapshot_symlink_reads_but_cannot_be_quarantined
-        ; test_case "dangling publication refuses recovery and boot" `Quick
-            test_memory_dangling_publication_is_unavailable
-        ; test_case "publication unlink sync failure refuses boot" `Quick
-            test_memory_recovery_unlink_sync_failure_is_mandatory
         ; test_case "session I/O refuses boot and direct quarantine" `Quick
             test_session_io_refuses_boot_and_direct_quarantine
         ; test_case "metadata I/O failure never accepts quarantine" `Quick
@@ -2609,18 +2251,12 @@ let () =
             test_session_quarantine_reread_refuses_a_new_io_failure
         ; test_case "undecodable stores are moved aside once" `Quick
             test_undecodable_stores_are_moved_aside_once
-        ; test_case "pending publication refuses the memory quarantine" `Quick
-            test_memory_quarantine_refuses_pending_publication
         ; test_case "memory quarantine rechecks exact snapshot bytes" `Quick
             test_memory_quarantine_rechecks_exact_snapshot
         ] )
     ; ( "preparation"
       , [ test_case "refuses without the flag and moves aside with it" `Quick
             test_preparation_refuses_then_moves_aside_with_the_flag
-        ; test_case "read-only examination and owner publication recovery" `Quick
-            test_memory_examine_is_read_only_and_boot_recovers_publications
-        ; test_case "receipt-only first publication keeps owner recovery" `Quick
-            test_memory_receipt_only_keeps_existing_owner_recovery
         ; test_case "a failed session quarantine refuses until repaired" `Quick
             test_preparation_refuses_a_failed_session_quarantine
         ] )
@@ -2645,8 +2281,6 @@ let () =
             test_transcript_inventory_failure_is_not_empty
         ; test_case "the preflight refuses an older chat operation journal" `Quick
             test_preflight_refuses_an_older_chat_operation_journal
-        ; test_case "the preflight names the journal line Memory readers refuse" `Quick
-            test_preflight_names_the_journal_line_readers_refuse
         ; test_case "every boot store has exactly one id" `Quick
             test_every_boot_store_has_exactly_one_id
         ] )

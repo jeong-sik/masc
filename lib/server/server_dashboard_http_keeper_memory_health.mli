@@ -28,12 +28,12 @@ val invalidate_after_write : keepers_dir:string -> keeper_id:string -> unit
     either signal's callback. A root no read registered, or a Keeper with no
     cached row, is left alone. *)
 
-val install : unit -> unit
-(** Invalidate only the changed Keeper after a durable journal commit. The next
-    visible read recomputes that Keeper outside the store locks, not the fleet.
-    These store hooks run beside {!Server_memory_health_broadcast}, which
-    empties the row for every write signal; a write both reach empties it
-    twice, which is the same as once. *)
+val install : ?sw:Eio.Switch.t -> unit -> unit
+(** Subscribe to {!Keeper_memory_commit_notifications} to invalidate only the
+    changed Keeper after an authoritative Ordinary or Source_bound snapshot
+    commit. Idempotent: calling [install] again unsubscribes the prior
+    registration under a mutex. When [~sw] is provided, registers an
+    [Eio.Switch.on_release] cleanup hook. *)
 
 module For_testing : sig
   val keeper_health : config:Workspace.config -> keepers_dir:string -> string -> keeper_health

@@ -181,6 +181,33 @@ let markdown_rows ?rail_rgb ~(theme : Theme.t) ~width ~prefix ~cont_prefix
       in
       head :: tail
 
+(* The header of a [user] row the operator did not write: the author the server
+   recorded, and the route when it is not a direct message. *)
+let peer_label model (peer : Wire_fleet.chat_peer)
+    (surface : Wire_fleet.chat_surface option) =
+  let author =
+    match peer with
+    | Wire_fleet.Peer_keeper name | Wire_fleet.Peer_external name -> name
+    | Wire_fleet.Peer_unresolved None ->
+        Ops_common.say model ~ko:"보낸 사람 모름" ~en:"unknown sender"
+    | Wire_fleet.Peer_unresolved (Some id) ->
+        Printf.sprintf "%s (%s)" id
+          (Ops_common.say model ~ko:"확인 안 됨" ~en:"unverified")
+  in
+  let route =
+    match surface with
+    | None | Some (Wire_fleet.Surface_dashboard | Wire_fleet.Surface_agent) -> None
+    | Some Wire_fleet.Surface_broadcast ->
+        Some (Ops_common.say model ~ko:"방송" ~en:"broadcast")
+    | Some Wire_fleet.Surface_discord -> Some "Discord"
+    | Some Wire_fleet.Surface_slack -> Some "Slack"
+    | Some Wire_fleet.Surface_webhook -> Some "Webhook"
+    | Some (Wire_fleet.Surface_gate label) -> Some label
+  in
+  match route with
+  | None -> author
+  | Some r -> Printf.sprintf "%s · %s" author r
+
 let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
     (messages : Wire_fleet.chat_message list) =
   let base_bg = theme.surface_1 in
@@ -252,6 +279,20 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
               @ markdown_rows ~rail_rgb:theme.accent ~theme ~width ~prefix
                   ~cont_prefix:cont ~prefix_fg:theme.accent ~bg_rgb:user_bg
                   ~full_bleed_bg:true msg.content
+          | Wire_fleet.Role_peer { peer; surface } ->
+              (* Named on a header row in every origin mode: no prefix says who
+                 wrote it, and the accent rail stays the operator's.
+                 [Chat_transcript.count_history] counts the same rows. *)
+              single_span_row ~rail_rgb:theme.border_subtle
+                ~prefix:(Glyph.to_utf8 Glyph.Prompt_caret ^ " ")
+                ~prefix_fg:theme.text_muted ~prefix_attrs:Attr.bold
+                ~text:(peer_label model peer surface)
+                ~text_fg:theme.text_primary ~attrs:Attr.bold ~right_meta:hhmm
+                ~right_meta_fg:theme.text_muted ~right_meta_attrs:Attr.italic
+                ~bg_rgb:base_bg ~full_bleed_bg:true ()
+              :: markdown_rows ~rail_rgb:theme.border_subtle ~theme ~width
+                   ~prefix:"  " ~cont_prefix:"  " ~prefix_fg:theme.text_muted
+                   ~bg_rgb:base_bg ~full_bleed_bg:true msg.content
           | Wire_fleet.Role_assistant ->
               (* Claude-Code Assistant Reply: Bare keeps calm surface_1 + HH:MM; Row adds subtle rail + full model provenance *)
               let provenance_meta =

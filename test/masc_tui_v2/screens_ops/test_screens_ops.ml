@@ -2893,6 +2893,159 @@ let test_p1_chat_transcript_render_parity () =
     true
     (not (String.equal txt_top txt_dn1))
 
+(* A [user] row another Keeper wrote is headed with that Keeper, not
+   "Operator", and its header row is counted for scrolling. *)
+let test_chat_peer_rows_name_their_author () =
+  let cols, rows = (80, 24) in
+  let mk_k name : Wire_fleet.keeper_summary =
+    {
+      name;
+      group = Some "org-alpha";
+      company = "org-alpha";
+      health = Wire_fleet.Keeper_healthy;
+      paused = false;
+      keepalive_running = true;
+      activation_mode = Wire_fleet.Activation_autonomous;
+      runtime_id = "rt-1";
+      model_id = Some "model-1";
+      current_task_id = None;
+      context_ratio = Observed.value ~observed_at:now_mono 0.25;
+      total_turns = Observed.value ~observed_at:now_mono 10;
+      total_tokens = Observed.value ~observed_at:now_mono 5000;
+      cost_24h_usd = Observed.value ~observed_at:now_mono 1.0;
+      last_turn_at_unix = Some now_unix;
+      active_turn = None;
+      activity_sparkline_24h = [ 1.0; 2.0 ];
+    }
+  in
+  let mk_msg ~id ~role ~content ts : Wire_fleet.chat_message =
+    {
+      id;
+      role;
+      content;
+      ts_unix = ts;
+      turn_ref = None;
+      model_used = None;
+      tool_call_id = None;
+      tool_call_name = None;
+      execution_id = None;
+      operation_id = None;
+      transcript_slot = None;
+      failure_kind = None;
+    }
+  in
+  let broadcast =
+    Wire_fleet.Role_peer
+      {
+        peer = Wire_fleet.Peer_keeper "leader-1";
+        surface = Some Wire_fleet.Surface_broadcast;
+      }
+  in
+  let direct =
+    Wire_fleet.Role_peer
+      {
+        peer = Wire_fleet.Peer_keeper "reviewer-2";
+        surface = Some Wire_fleet.Surface_agent;
+      }
+  in
+  let msgs =
+    [
+      mk_msg ~id:"p-top" ~role:broadcast ~content:"PEER_TOP_MARKER freeze lifted"
+        (now_unix -. 900.0);
+    ]
+    @ List.init 8 (fun i ->
+          mk_msg
+            ~id:(Printf.sprintf "p-%d" i)
+            ~role:(if i mod 2 = 0 then direct else broadcast)
+            ~content:
+              (Printf.sprintf
+                 "PEER_BODY_%02d Long multi-word paragraph that wraps cleanly at eighty columns width."
+                 i)
+            (now_unix -. 800.0 +. float_of_int (i * 10)))
+    @ [
+        mk_msg ~id:"u-last" ~role:Wire_fleet.Role_user
+          ~content:"OPERATOR_LAST_MARKER" (now_unix -. 10.0);
+      ]
+  in
+  let m0 = Model.initial ~cols ~rows ~lang:Say.Lang_en () in
+  let fleet =
+    m0.fleet
+    |> Fleet_store.apply_keepers ~observed_at:now_mono [ mk_k "alpha-1" ]
+    |> Fleet_store.apply_chat_history ~observed_at:now_mono ~keeper:"alpha-1"
+         { messages = msgs; has_more = false; next_cursor = None }
+  in
+  let m_chat =
+    {
+      m0 with
+      fleet;
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha-1"; tab = Nav.Keeper_chat } ];
+        };
+    }
+  in
+  let render_dive_body (m : Model.t) =
+    let geom = Chat_transcript.chat_viewport_geometry ~model:m in
+    let rect_h = geom.body_h + 3 in
+    let bp = Ops_common.layout_bp m in
+    let body_outer =
+      Layout.inset_body bp (Rect.make ~x:0 ~y:0 ~w:cols ~h:rect_h)
+    in
+    let grid = Cell_grid.create ~cols ~rows:rect_h in
+    let cache = Card.Cache.create () in
+    Screen_keepers.render_dive ~name:"alpha-1" ~tab:Nav.Keeper_chat ~model:m
+      ~cache ~rect:body_outer grid;
+    grid_all_text grid
+  in
+  let lines_with ~needle txt =
+    List.filter (contains_sub ~needle) (String.split_on_char '\n' txt)
+  in
+  let txt_bot = render_dive_body m_chat in
+  Alcotest.(check bool) "bottom frame shows the operator's last row" true
+    (contains_sub ~needle:"OPERATOR_LAST_MARKER" txt_bot);
+  Alcotest.(check bool) "operator row keeps the Operator header" true
+    (contains_sub ~needle:"Operator" txt_bot);
+  let m_home, _ =
+    Update.step ~now:now_mono m_chat
+      (Msg.Key_event
+         {
+           Keymap.Input.key = Keymap.Input.Home;
+           mods = Keymap.Input.no_mods;
+         })
+  in
+  let txt_top = render_dive_body m_home in
+  Alcotest.(check bool) "Home reaches the first peer row" true
+    (contains_sub ~needle:"PEER_TOP_MARKER" txt_top);
+  let m_dn1, _ =
+    Update.step ~now:now_mono m_home
+      (Msg.Key_event
+         {
+           Keymap.Input.key = Keymap.Input.Down;
+           mods = Keymap.Input.no_mods;
+         })
+  in
+  Alcotest.(check bool) "one Down after Home moves the frame (no uncounted rows)"
+    true
+    (not (String.equal txt_top (render_dive_body m_dn1)));
+  let broadcast_headers = lines_with ~needle:"leader-1 · broadcast" txt_top in
+  Alcotest.(check bool) "broadcast row names its Keeper and route" true
+    (broadcast_headers <> []);
+  Alcotest.(check bool) "broadcast header is not the operator's" true
+    (List.for_all
+       (fun line -> not (contains_sub ~needle:"Operator" line))
+       broadcast_headers);
+  Alcotest.(check bool) "direct row names its Keeper without a route" true
+    (contains_sub ~needle:"reviewer-2" txt_top
+    && not (contains_sub ~needle:"reviewer-2 · " txt_top));
+  let m_inline =
+    { m_home with fleet = Fleet_store.cycle_origin_mode m_home.fleet }
+  in
+  Alcotest.(check bool) "inline origin mode still names the peer" true
+    (contains_sub ~needle:"leader-1 · broadcast" (render_dive_body m_inline))
+
 let test_agui_chat_chronological_projection_and_phase_parity () =
   let cols, rows = (120, 36) in
   let mk_k name : Wire_fleet.keeper_summary =
@@ -3161,6 +3314,8 @@ let () =
             `Quick test_nav_keepers_display_order_monotonic_screen_rows;
           Alcotest.test_case "P1 #1: Chat_transcript Home/Down render parity (narrow Markdown + JSON tool + dedup)"
             `Quick test_p1_chat_transcript_render_parity;
+          Alcotest.test_case "Chat rows from another Keeper name their author, not Operator"
+            `Quick test_chat_peer_rows_name_their_author;
           Alcotest.test_case "AG-UI chat chronological projection, dedup & SSOT phase parity"
             `Quick test_agui_chat_chronological_projection_and_phase_parity;
         ] );

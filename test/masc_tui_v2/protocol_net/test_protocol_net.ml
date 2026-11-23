@@ -3459,6 +3459,81 @@ let test_keeper_memory_facts_activity_and_health_decoders () =
              {|{"schema":"keeper.memory_os.current_health.v19","generated_at":1.0,"keepers":[{"keeper_id":"a","revision":1,"updated_at":1.0,"facts":1,"observed_facts":1,"derived_facts":0,"support_invalidations":0,"snapshot_bytes":10,"added":0,"removed":0,"snapshot_present":true,"age_bins":[0,0,0],"facts_by_hour":[],"librarian_failures":0,"vision_ingest_errors":0,"read_error":null,"source_revision":0,"source_facts":0,"source_invalidations":0,"source_snapshot_bytes":0,"source_snapshot_present":false,"source_read_error":null,"alerts":[]}]}|}))
       : string)
 
+(* Every Keeper input is a [user] row; only [speaker_authority] says whether
+   the operator wrote it. *)
+let test_chat_history_speaker () =
+  let rows =
+    expect_ok "user rows by speaker"
+      (Wire_fleet.decode_chat_history
+         (parse_json
+            {|[
+              {"id":"u-1","role":"user","content":"a","ts":1.0,
+               "speaker_authority":"owner","surface":{"kind":"dashboard"}},
+              {"id":"u-2","role":"user","content":"b","ts":2.0,
+               "speaker_id":"leader-1","speaker_name":"leader-1",
+               "speaker_authority":"keeper","surface":{"kind":"broadcast"}},
+              {"id":"u-3","role":"user","content":"c","ts":3.0,
+               "speaker_id":"reviewer-2","speaker_authority":"keeper",
+               "surface":{"kind":"agent"}},
+              {"id":"u-4","role":"user","content":"d","ts":4.0,
+               "speaker_id":"U1","speaker_name":"slack-author",
+               "speaker_authority":"external",
+               "surface":{"kind":"slack","channel_id":"C1"}},
+              {"id":"u-5","role":"user","content":"e","ts":5.0,
+               "speaker_id":"someone"},
+              {"id":"u-6","role":"operator","content":"f","ts":6.0}
+            ]|}))
+  in
+  let role_of id =
+    (List.find (fun (m : Wire_fleet.chat_message) -> String.equal m.id id) rows)
+      .role
+  in
+  Alcotest.(check bool) "owner row is the operator's" true
+    (role_of "u-1" = Wire_fleet.Role_user);
+  Alcotest.(check bool) "keeper broadcast names the keeper and the route" true
+    (role_of "u-2"
+    = Wire_fleet.Role_peer
+        {
+          peer = Wire_fleet.Peer_keeper "leader-1";
+          surface = Some Wire_fleet.Surface_broadcast;
+        });
+  Alcotest.(check bool) "keeper without a name is named by its id" true
+    (role_of "u-3"
+    = Wire_fleet.Role_peer
+        {
+          peer = Wire_fleet.Peer_keeper "reviewer-2";
+          surface = Some Wire_fleet.Surface_agent;
+        });
+  Alcotest.(check bool) "connector author keeps its name and route" true
+    (role_of "u-4"
+    = Wire_fleet.Role_peer
+        {
+          peer = Wire_fleet.Peer_external "slack-author";
+          surface = Some Wire_fleet.Surface_slack;
+        });
+  Alcotest.(check bool) "row without an authority is unresolved, not the operator's"
+    true
+    (role_of "u-5"
+    = Wire_fleet.Role_peer
+        { peer = Wire_fleet.Peer_unresolved (Some "someone"); surface = None });
+  Alcotest.(check bool) "operator role is the operator's" true
+    (role_of "u-6" = Wire_fleet.Role_user);
+  ignore
+    (expect_err "unknown speaker_authority rejected"
+       (Wire_fleet.decode_chat_history
+          (parse_json
+             {|[{"id":"u-7","role":"user","content":"g","ts":7.0,
+                 "speaker_authority":"admin"}]|}))
+      : string);
+  ignore
+    (expect_err "unknown surface kind on a peer row rejected"
+       (Wire_fleet.decode_chat_history
+          (parse_json
+             {|[{"id":"u-8","role":"user","content":"h","ts":8.0,
+                 "speaker_id":"leader-1","speaker_authority":"keeper",
+                 "surface":{"kind":"pigeon"}}]|}))
+      : string)
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -3468,6 +3543,8 @@ let () =
           Alcotest.test_case "wire_fleet" `Quick test_wire_fleet;
           Alcotest.test_case "agui_chat_stream_and_history_provenance" `Quick
             test_agui_chat_stream_and_history_provenance;
+          Alcotest.test_case "chat_history_speaker" `Quick
+            test_chat_history_speaker;
           Alcotest.test_case "wire_work" `Quick test_wire_work;
           Alcotest.test_case "wire_knowledge" `Quick test_wire_knowledge;
           Alcotest.test_case "wire_runtime" `Quick test_wire_runtime;

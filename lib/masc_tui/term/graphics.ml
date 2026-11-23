@@ -209,6 +209,12 @@ let place_png ~identity ~extent ~data =
 let place ~data ~rows =
   place_png ~identity:"" ~extent:(Printf.sprintf ",r=%d" (max 1 rows)) ~data
 
+let place_slot ~image ~placement_id ~data ~rows =
+  place_png
+    ~identity:(identity ~image_id:(image_id image) ~placement_id)
+    ~extent:(Printf.sprintf ",r=%d" (max 1 rows))
+    ~data
+
 let replace_rgba ~image_id ~placement_id ~data ~pixel_width ~pixel_height ~rows =
   match
     Rgb_png.encode_rgba ~width:pixel_width ~height:pixel_height ~rgba:data

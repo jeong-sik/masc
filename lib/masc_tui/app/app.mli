@@ -65,6 +65,62 @@ val apply_terminal_reply :
 (** Feed a late {!Input_decoder.terminal_reply} back into the owning
     [probe_decoder]. Returns [Some obs] iff the observed capabilities changed. *)
 
+type memory_graphic_state = {
+  key : string;
+  rect : Masc_tui_core.Rect.t;
+  protocol : Graphics.graphics_protocol;
+}
+
+val equal_memory_graphic_state :
+  memory_graphic_state -> memory_graphic_state -> bool
+
+type memory_graphic_step = {
+  pre_present_bytes : string;
+  invalidate_presenter : bool;
+  post_present_bytes : string;
+  next_state : memory_graphic_state option;
+}
+
+val teardown_memory_graphic_bytes :
+  in_tmux:bool -> memory_graphic_state option -> string
+(** Escape sequence to clear an active Kitty {!Graphics.Memory_diagram} slot
+    (wrapped for tmux when [in_tmux = true]), or [""] when inactive or iTerm2. *)
+
+val plan_memory_graphic_clear :
+  active:memory_graphic_state option ->
+  probe:Probe.observation ->
+  term_program:string option ->
+  in_tmux:bool ->
+  model:Model.t ->
+  string * bool * memory_graphic_state option
+(** Pre-present graphics transition returning
+    [(clear_bytes, invalidate_presenter, remaining_active)]. Emits Kitty
+    [delete_image] and requests presenter invalidation whenever an active
+    graphic closes, switches mode/content, or changes geometry. *)
+
+val plan_memory_graphic_place :
+  active:memory_graphic_state option ->
+  probe:Probe.observation ->
+  term_program:string option ->
+  in_tmux:bool ->
+  model:Model.t ->
+  full_repaint:bool ->
+  string * memory_graphic_state option
+(** Post-present graphics transition returning [(place_bytes, next_active)].
+    Emits Kitty {!Graphics.place_slot} or iTerm2 {!Graphics.iterm2_place} once
+    per unique key+rect and skips redundant re-emission when unchanged. *)
+
+val step_memory_graphic :
+  active:memory_graphic_state option ->
+  probe:Probe.observation ->
+  term_program:string option ->
+  in_tmux:bool ->
+  model:Model.t ->
+  full_repaint:bool ->
+  memory_graphic_step
+(** Combined pure transition composing {!plan_memory_graphic_clear} and
+    {!plan_memory_graphic_place}. *)
+
 val is_ctrl_c : Input_decoder.key_event -> bool
 (** [true] iff [ev] represents [Ctrl+C] (e.g. Kitty [CSI u] [\x1b[99;5u]] or
     raw control byte). *)

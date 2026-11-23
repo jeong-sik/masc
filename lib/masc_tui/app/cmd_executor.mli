@@ -105,6 +105,30 @@ val editor_file_path : base_path:string -> Cmd.editor_target -> string option
     {!Msg.Reply_action_ack} directs the operator to Settings
     ([HTTP /api/v1/config/patch]). *)
 
+val render_memory_diagram_payload :
+  ?run_pele:(Pele.scene -> (string, string) result) ->
+  probe:Masc_tui_term.Probe.observation ->
+  term_program:string option ->
+  palette:Masc_tui_term.Palette.t option ->
+  keeper:string ->
+  kind:Knowledge_store.memory_diagram_kind ->
+  mode:Knowledge_store.memory_diagram_mode ->
+  ko:bool ->
+  tz_offset_sec:int ->
+  now_unix:float ->
+  max_width:int ->
+  chart:Masc_tui_ui.Memory_lineage.chart ->
+  unit ->
+  Knowledge_store.memory_diagram_payload
+(** Resolve a memory diagram render request according to [kind], [mode],
+    observed terminal graphics capabilities, and observed terminal palette.
+    Forced [Diagram_mode_mermaid] and [Diagram_mode_tree] render purely in
+    memory without calling [run_pele]. [Diagram_mode_auto] attempts Pele SVG
+    (for [Diagram_pele_card]) or Pele Graph JSON (for [Diagram_formation_tree])
+    when graphics (and palette for SVG) are available, automatically falling
+    back to Mermaid or Formation Tree text with a 1-line diagnostic note on
+    any capability gap or Pele failure. *)
+
 (** {1 Executor Lifecycle & Command Dispatch} *)
 
 type editor_handoff = {

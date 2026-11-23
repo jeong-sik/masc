@@ -1604,6 +1604,190 @@ let execute_start_local_server t =
                     Ui_bus.publish_stream t.bus
                       (Msg.Server_start_result (Error detail)))))
 
+let pele_timeout_s = 8.0
+
+let combine_fallback_note primary extra =
+  match extra with
+  | Some detail when not (String.equal (String.trim detail) "") ->
+      primary ^ " · " ^ detail
+  | Some _ | None -> primary
+
+let render_memory_diagram_payload ?run_pele ~(probe : Probe.observation)
+    ~term_program ~(palette : Palette.t option) ~keeper ~kind ~mode ~ko
+    ~tz_offset_sec ~now_unix ~max_width ~chart () :
+    Knowledge_store.memory_diagram_payload =
+  let render_mermaid () =
+    Memory_diagram.render_mermaid_fallback ~tz_offset_sec ~ko ~now:now_unix
+      ~max_width ~kind chart
+  in
+  let render_tree () =
+    Memory_diagram.render_tree_lines ~tz_offset_sec ~ko ~now:now_unix
+      ~keeper_name:keeper ~max_width chart
+    |> List.map (fun (ln : Masc_tui_ui.Memory_tree.line) -> ln.text)
+  in
+  match mode with
+  | Knowledge_store.Diagram_mode_mermaid ->
+      let lines, note = render_mermaid () in
+      Knowledge_store.Diagram_text { lines; note }
+  | Knowledge_store.Diagram_mode_tree ->
+      Knowledge_store.Diagram_text { lines = render_tree (); note = None }
+  | Knowledge_store.Diagram_mode_auto -> (
+      let proto =
+        Graphics.protocol_of_probe ~graphics:probe.graphics ~term_program
+      in
+      let graphics_supported =
+        not (Graphics.equal_graphics_protocol proto Graphics.Unsupported_protocol)
+      in
+      let now_ms =
+        if Float.is_finite now_unix && now_unix > 0.0 then
+          Int64.of_float (now_unix *. 1000.0)
+        else 0L
+      in
+      let run_scene scene =
+        match run_pele with
+        | Some f -> f scene
+        | None -> Error "Pele runner unavailable"
+      in
+      match kind with
+      | Knowledge_store.Diagram_pele_card ->
+          let fallback_lines, mermaid_note = render_mermaid () in
+          if not graphics_supported then
+            let reason =
+              if ko then "그래픽 미지원 터미널 · Mermaid 텍스트 폴백"
+              else "Terminal graphics unsupported · Mermaid fallback"
+            in
+            Knowledge_store.Diagram_text
+              {
+                lines = fallback_lines;
+                note = Some (combine_fallback_note reason mermaid_note);
+              }
+          else (
+            match palette with
+            | None ->
+                let reason =
+                  if ko then "터미널 팔레트 미관측 · Mermaid 텍스트 폴백"
+                  else "Terminal palette unavailable · Mermaid fallback"
+                in
+                Knowledge_store.Diagram_text
+                  {
+                    lines = fallback_lines;
+                    note = Some (combine_fallback_note reason mermaid_note);
+                  }
+            | Some pal -> (
+                let svg =
+                  Masc_tui_ui.Memory_lineage.transition_svg ~tz_offset_sec ~ko
+                    ~now:now_unix ~palette:pal chart
+                in
+                let colors = Some (Pele.colors_of_palette pal) in
+                let scene =
+                  Pele.scene ~format:Pele.Svg ~max_width:1240 ~font_size:15
+                    ~now_ms ~colors svg
+                in
+                match run_scene scene with
+                | Ok png ->
+                    let pixel_size = Memory_diagram.parse_png_dimensions png in
+                    Knowledge_store.Diagram_pele_png
+                      {
+                        png;
+                        pixel_size;
+                        format_label = "Pele SVG";
+                        fallback_lines;
+                      }
+                | Error err ->
+                    let reason =
+                      if ko then
+                        Printf.sprintf "Pele 불가 (%s) · Mermaid 폴백" err
+                      else Printf.sprintf "Pele unavailable (%s) · Mermaid fallback" err
+                    in
+                    Knowledge_store.Diagram_text
+                      {
+                        lines = fallback_lines;
+                        note = Some (combine_fallback_note reason mermaid_note);
+                      }))
+      | Knowledge_store.Diagram_formation_tree ->
+          let tree_lines = render_tree () in
+          if not graphics_supported then
+            let reason =
+              if ko then "그래픽 미지원 터미널 · 형성 트리 텍스트 폴백"
+              else "Terminal graphics unsupported · Formation tree fallback"
+            in
+            Knowledge_store.Diagram_text { lines = tree_lines; note = Some reason }
+          else
+            let graph_json =
+              Masc_tui_ui.Memory_lineage.formation_graph_json ~tz_offset_sec ~ko
+                ~now:now_unix ?palette ~keeper_name:keeper chart
+            in
+            let colors = Option.map Pele.colors_of_palette palette in
+            let scene =
+              Pele.scene ~format:Pele.Graph ~max_width:1400 ~font_size:14
+                ~now_ms ~colors graph_json
+            in
+            match run_scene scene with
+            | Ok png ->
+                let pixel_size = Memory_diagram.parse_png_dimensions png in
+                Knowledge_store.Diagram_pele_png
+                  {
+                    png;
+                    pixel_size;
+                    format_label = "Pele Graph";
+                    fallback_lines = tree_lines;
+                  }
+            | Error err ->
+                let reason =
+                  if ko then
+                    Printf.sprintf "Pele 불가 (%s) · 형성 트리 폴백" err
+                  else
+                    Printf.sprintf "Pele unavailable (%s) · Formation tree fallback"
+                      err
+                in
+                Knowledge_store.Diagram_text
+                  { lines = tree_lines; note = Some reason })
+
+let ensure_pele_cache_dir ~base_path =
+  let dir =
+    Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "cache")
+      "pele"
+  in
+  try
+    Fs_compat.mkdir_p dir;
+    dir
+  with Sys_error _ | Unix.Unix_error _ -> Filename.get_temp_dir_name ()
+
+let execute_render_memory_diagram t ~epoch ~keeper ~event_identity ~kind ~mode
+    ~ko ~tz_offset_sec ~now_unix ~max_width ~chart =
+  fork_safe t (fun () ->
+      Eio.Fiber.yield ();
+      let result =
+        try
+          let probe = Probe.current_observation () in
+          let term_program = Sys.getenv_opt "TERM_PROGRAM" in
+          let palette =
+            match Palette.current () with
+            | Some _ as p -> p
+            | None -> probe.palette
+          in
+          let run_pele scene =
+            let cache_dir =
+              Eio_unix.run_in_systhread (fun () ->
+                  ensure_pele_cache_dir ~base_path:t.cli.base_path)
+            in
+            Pele.render ~cache_dir ~timeout_s:pele_timeout_s ~clock:t.clock scene
+          in
+          let payload =
+            render_memory_diagram_payload ~run_pele ~probe ~term_program
+              ~palette ~keeper ~kind ~mode ~ko ~tz_offset_sec ~now_unix
+              ~max_width ~chart ()
+          in
+          Ok payload
+        with
+        | Eio.Cancel.Cancelled _ as ex -> raise ex
+        | ex -> Error (Printexc.to_string ex)
+      in
+      Ui_bus.publish_stream t.bus
+        (Msg.Memory_diagram_rendered
+           { epoch; keeper; event_identity; kind; mode; result }))
+
 let rec execute t = function
   | Cmd.Batch cmds -> List.iter (execute t) cmds
   | Cmd.Http_get { epoch; req } -> execute_get t ~epoch req
@@ -1649,6 +1833,21 @@ let rec execute t = function
                 Clipboard.copy_text session ~write_osc52 text)
           in
           ())
+  | Cmd.Render_memory_diagram
+      {
+        epoch;
+        keeper;
+        event_identity;
+        kind;
+        mode;
+        ko;
+        tz_offset_sec;
+        now_unix;
+        max_width;
+        chart;
+      } ->
+      execute_render_memory_diagram t ~epoch ~keeper ~event_identity ~kind ~mode
+        ~ko ~tz_offset_sec ~now_unix ~max_width ~chart
   | Cmd.Open_external_url url ->
       if is_safe_external_url url then
         fork_safe t (fun () ->

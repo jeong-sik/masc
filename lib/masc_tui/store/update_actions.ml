@@ -1266,6 +1266,12 @@ and execute_action ~now (m : Model.t) action =
             in
             if keeper_config_has_search then
               ({ m with config = Config_store.set_search_query "" m.config }, [])
+            else if Option.is_some (Memory_diagram.active_diagram m) then
+              ( {
+                  m with
+                  knowledge = Knowledge_store.close_memory_diagram m.knowledge;
+                }
+              , [] )
             else if Option.is_some (active_memory_reading m) then
               ( {
                   m with
@@ -1397,6 +1403,8 @@ and execute_action ~now (m : Model.t) action =
                               zoomed = false;
                               dive_scroll_offset = 0;
                             };
+                          knowledge =
+                            Knowledge_store.close_memory_diagram m.knowledge;
                         }
                         |> Update_nav.sync_config_for_keeper_view
                       in
@@ -1464,7 +1472,19 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Open_keeper_switcher -> Update_nav.open_palette m Model.Palette_keepers
   | Keymap.Open_model_switcher -> Update_nav.open_palette m Model.Palette_models
   | Keymap.Toggle_tool_details ->
-      ({ m with fleet = Fleet_store.cycle_tools_mode m.fleet }, [])
+      let in_memory_surface =
+        (not (Drafts.is_focused m.drafts))
+        && (Option.is_some (Memory_diagram.active_memory_content_rect m)
+           || (Option.is_none m.nav.overlay
+              && Option.is_none (Model.active_dive m)
+              && Nav.equal_workspace m.nav.workspace Nav.Knowledge
+              && Nav.equal_knowledge_tab m.knowledge.active_tab
+                   Nav.Knowledge_memory))
+      in
+      if in_memory_surface then
+        Update_nav.open_memory_diagram ~now
+          ~kind:Knowledge_store.Diagram_formation_tree m
+      else ({ m with fleet = Fleet_store.cycle_tools_mode m.fleet }, [])
   | Keymap.Open_queue_context -> (
       match m.nav.overlay with
       | Some (Nav.Queue_context _) ->
@@ -1726,6 +1746,7 @@ and execute_action ~now (m : Model.t) action =
                   | Cmd.Update_workspace_guard _
                   | Cmd.Voice_cmd _
                   | Cmd.Copy_clipboard _
+                  | Cmd.Render_memory_diagram _
                   | Cmd.Open_external_url _
                   | Cmd.Open_editor_escape_hatch _
                   | Cmd.Start_local_server
@@ -1945,8 +1966,17 @@ and execute_action ~now (m : Model.t) action =
                 (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline) ) ->
             None
         | None -> (
+            let diagram_copy_opt =
+              match Memory_diagram.active_diagram m with
+              | Some d when not (String.equal (String.trim d.copy_source) "") ->
+                  Some d.copy_source
+              | Some _ | None -> None
+            in
             let reading_copy_opt =
-              match active_memory_reading m with
+              match diagram_copy_opt with
+              | Some _ as txt -> txt
+              | None -> (
+                  match active_memory_reading m with
               | None -> None
               | Some (Knowledge_store.Reading_activity { event; _ }) ->
                   let claims =
@@ -1981,7 +2011,7 @@ and execute_action ~now (m : Model.t) action =
                   | Knowledge_store.World_added e
                   | Knowledge_store.World_retracted e ->
                       Some e.summary
-                  | Knowledge_store.World_updated u -> Some u.summary)
+                  | Knowledge_store.World_updated u -> Some u.summary))
             in
             match reading_copy_opt with
             | Some txt -> Some txt
@@ -2366,7 +2396,10 @@ and execute_action ~now (m : Model.t) action =
       else
         let zoomed = not m.nav.zoomed in
         let pane_index = if zoomed then 0 else m.nav.pane_index in
-        ({ m with nav = { m.nav with zoomed; pane_index } }, [])
+        let next = { m with nav = { m.nav with zoomed; pane_index } } in
+        if Option.is_some (Memory_diagram.active_diagram next) then
+          Update_nav.refresh_open_memory_diagram ~now next
+        else (next, [])
   | Keymap.Cycle_memory_view ->
       let in_memory =
         Option.is_none m.nav.overlay

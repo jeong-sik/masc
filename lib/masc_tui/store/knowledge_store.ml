@@ -65,6 +65,38 @@ type memory_reading_entry =
       item : memory_diff_item;
     }
 
+type memory_diagram_kind =
+  | Diagram_pele_card
+  | Diagram_formation_tree
+
+type memory_diagram_mode =
+  | Diagram_mode_auto
+  | Diagram_mode_mermaid
+  | Diagram_mode_tree
+
+type memory_diagram_payload =
+  | Diagram_pele_png of {
+      png : string;
+      pixel_size : (int * int) option;
+      format_label : string;
+      fallback_lines : string list;
+    }
+  | Diagram_text of {
+      lines : string list;
+      note : string option;
+    }
+
+type memory_diagram_state = {
+  keeper : string;
+  event_identity : string;
+  revision : int;
+  kind : memory_diagram_kind;
+  mode : memory_diagram_mode;
+  payload : memory_diagram_payload Observed.t;
+  scroll : int;
+  copy_source : string;
+}
+
 type wiki_edit_draft = {
   slug : string;
   expected_revision : int option;
@@ -114,6 +146,7 @@ type t = {
   selected_diff_index : int;
   memory_reading : memory_reading_entry option;
   memory_reading_scroll : int;
+  memory_diagram : memory_diagram_state option;
   last_memory_act_answer : (string * Wire_knowledge.memory_act_answer) option;
   selected_index : int;
   scroll_offset : int;
@@ -158,6 +191,7 @@ let empty =
     selected_diff_index = 0;
     memory_reading = None;
     memory_reading_scroll = 0;
+    memory_diagram = None;
     last_memory_act_answer = None;
     selected_index = 0;
     scroll_offset = 0;
@@ -199,6 +233,26 @@ let memory_facts_sort_rank = function
 
 let equal_memory_facts_sort a b =
   Int.equal (memory_facts_sort_rank a) (memory_facts_sort_rank b)
+
+let memory_diagram_kind_rank = function
+  | Diagram_pele_card -> 0
+  | Diagram_formation_tree -> 1
+
+let equal_memory_diagram_kind a b =
+  Int.equal (memory_diagram_kind_rank a) (memory_diagram_kind_rank b)
+
+let memory_diagram_mode_rank = function
+  | Diagram_mode_auto -> 0
+  | Diagram_mode_mermaid -> 1
+  | Diagram_mode_tree -> 2
+
+let equal_memory_diagram_mode a b =
+  Int.equal (memory_diagram_mode_rank a) (memory_diagram_mode_rank b)
+
+let next_memory_diagram_mode = function
+  | Diagram_mode_auto -> Diagram_mode_mermaid
+  | Diagram_mode_mermaid -> Diagram_mode_tree
+  | Diagram_mode_tree -> Diagram_mode_auto
 
 let contains_ci = Store_scroll.contains_ci
 let adjust_grouped_scroll = Store_scroll.adjust_grouped_scroll
@@ -445,6 +499,7 @@ let set_tab active_tab t =
     detail_scroll_offset = 0;
     memory_reading = None;
     memory_reading_scroll = 0;
+    memory_diagram = None;
   }
 
 let cycle_tab dir t =
@@ -554,6 +609,7 @@ let set_memory_diff_keeper memory_diff_keeper t =
     diff_scroll_offset = if changed then 0 else t.diff_scroll_offset;
     memory_reading = if changed then None else t.memory_reading;
     memory_reading_scroll = if changed then 0 else t.memory_reading_scroll;
+    memory_diagram = if changed then None else t.memory_diagram;
   }
 
 let set_memory_view_mode memory_view_mode t =
@@ -562,6 +618,7 @@ let set_memory_view_mode memory_view_mode t =
     memory_view_mode;
     memory_reading = None;
     memory_reading_scroll = 0;
+    memory_diagram = None;
   }
 
 let cycle_memory_view_mode t =
@@ -590,7 +647,12 @@ let toggle_memory_facts_sort t =
   set_memory_facts_sort next t
 
 let open_memory_reading entry t =
-  { t with memory_reading = Some entry; memory_reading_scroll = 0 }
+  {
+    t with
+    memory_reading = Some entry;
+    memory_reading_scroll = 0;
+    memory_diagram = None;
+  }
 
 let close_memory_reading t =
   { t with memory_reading = None; memory_reading_scroll = 0 }
@@ -610,6 +672,46 @@ let scroll_memory_reading ~max_scroll ~delta t =
       (t.memory_reading_scroll + delta)
   in
   { t with memory_reading_scroll }
+
+let open_memory_diagram state t =
+  {
+    t with
+    memory_diagram = Some state;
+    memory_reading = None;
+    memory_reading_scroll = 0;
+  }
+
+let close_memory_diagram t = { t with memory_diagram = None }
+
+let memory_diagram_matches_scope ~keeper_opt (d : memory_diagram_state) =
+  Option.equal String.equal keeper_opt (Some d.keeper)
+
+let scroll_memory_diagram ~max_scroll ~delta t =
+  match t.memory_diagram with
+  | None -> t
+  | Some d ->
+      let scroll =
+        Store_scroll.clamp_scroll ~max_scroll:(max 0 max_scroll)
+          (d.scroll + delta)
+      in
+      { t with memory_diagram = Some { d with scroll } }
+
+let apply_memory_diagram_result ~observed_at ~keeper ~event_identity ~kind ~mode
+    result t =
+  match t.memory_diagram with
+  | Some d
+    when String.equal d.keeper keeper
+         && String.equal d.event_identity event_identity
+         && equal_memory_diagram_kind d.kind kind
+         && equal_memory_diagram_mode d.mode mode ->
+      let payload =
+        match result with
+        | Ok p -> Observed.value ~observed_at p
+        | Error reason ->
+            Observed.failed ~reason ~retryable:true ~at:observed_at
+      in
+      { t with memory_diagram = Some { d with payload; scroll = 0 } }
+  | Some _ | None -> t
 
 type reading_line_tone =
   | Reading_anchor
@@ -1784,36 +1886,47 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
         { t with selected_index; scroll_offset; detail_scroll_offset }
   | Nav.Knowledge_memory ->
       if pane_index = 1 then
-        if Option.is_some t.memory_reading then
-          let max_scroll = Option.value max_detail_scroll ~default:200 in
-          scroll_memory_reading ~max_scroll ~delta t
-        else
-          match t.memory_diff_keeper, t.memory_view_mode with
-          | Some kp, View_evolution ->
-              move_memory_activity ~keeper:kp ?viewport_rows ~delta t
-          | Some kp, View_facts ->
-              move_memory_facts ~keeper:kp ?viewport_rows ~delta t
-          | Some _, View_diff | None, (View_evolution | View_facts | View_diff) ->
-              let max_scroll =
-                match max_detail_scroll with
-                | Some ms -> max 0 ms
-                | None ->
-                    let vis =
-                      max 1
-                        (Option.value viewport_rows
-                           ~default:Store_scroll.default_viewport_rows)
+        match t.memory_diagram with
+        | Some d
+          when memory_diagram_matches_scope ~keeper_opt:t.memory_diff_keeper d
+          ->
+            let max_scroll = Option.value max_detail_scroll ~default:0 in
+            scroll_memory_diagram ~max_scroll ~delta t
+        | Some _ | None -> (
+            match t.memory_reading with
+            | Some entry
+              when memory_reading_matches_scope ~keeper_opt:t.memory_diff_keeper
+                     entry ->
+                let max_scroll = Option.value max_detail_scroll ~default:0 in
+                scroll_memory_reading ~max_scroll ~delta t
+            | Some _ | None -> (
+                match t.memory_diff_keeper, t.memory_view_mode with
+                | Some kp, View_evolution ->
+                    move_memory_activity ~keeper:kp ?viewport_rows ~delta t
+                | Some kp, View_facts ->
+                    move_memory_facts ~keeper:kp ?viewport_rows ~delta t
+                | Some _, View_diff
+                | None, (View_evolution | View_facts | View_diff) ->
+                    let max_scroll =
+                      match max_detail_scroll with
+                      | Some ms -> max 0 ms
+                      | None ->
+                          let vis =
+                            max 1
+                              (Option.value viewport_rows
+                                 ~default:Store_scroll.default_viewport_rows)
+                          in
+                          max 0 (memory_diff_line_count t - vis)
                     in
-                    max 0 (memory_diff_line_count t - vis)
-              in
-              let diff_scroll_offset =
-                Store_scroll.clamp_scroll ~max_scroll
-                  (t.diff_scroll_offset + delta)
-              in
-              let selected_diff_index =
-                clamp_index (memory_diff_entry_count t)
-                  (t.selected_diff_index + delta)
-              in
-              { t with diff_scroll_offset; selected_diff_index }
+                    let diff_scroll_offset =
+                      Store_scroll.clamp_scroll ~max_scroll
+                        (t.diff_scroll_offset + delta)
+                    in
+                    let selected_diff_index =
+                      clamp_index (memory_diff_entry_count t)
+                        (t.selected_diff_index + delta)
+                    in
+                    { t with diff_scroll_offset; selected_diff_index }))
       else
         let len = active_list_len t in
         let selected_index = clamp_index len (t.selected_index + delta) in
@@ -1842,6 +1955,7 @@ let set_filter filter_query t =
     selected_diff_index = 0;
     memory_reading = None;
     memory_reading_scroll = 0;
+    memory_diagram = None;
   }
 
 let mark_stale_all t =

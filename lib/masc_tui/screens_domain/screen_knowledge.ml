@@ -2201,13 +2201,28 @@ let draw_temporal_memory_diff ~(model : Model.t) ~grid ~cache ~(rect : Rect.t)
   in
   let title, hotkey =
     match k.memory_diff_keeper with
-    | Some _ ->
+    | Some kp ->
+        let diagram_open =
+          match k.memory_diagram with
+          | Some d ->
+              Knowledge_store.memory_diagram_matches_scope ~keeper_opt:(Some kp)
+                d
+          | None -> false
+        in
+        let hk =
+          if diagram_open then
+            Say.resolve lang
+              (Say.make ~ko:"[v] Pele/Mermaid/Tree · [y] 복사 · [Esc] 닫기"
+                 ~en:"[v] Pele/Mermaid/Tree · [y] Copy · [Esc] Close")
+          else
+            Say.resolve lang
+              (Say.make ~ko:"[Enter] 전문 · [.] Pele/Mermaid · [Ctrl+O] 형성 트리"
+                 ~en:"[Enter] Read · [.] Pele/Mermaid · [Ctrl+O] Tree")
+        in
         ( Say.resolve lang
             (Say.make ~ko:"키퍼 기억 탐색기 · 차트"
                ~en:"Keeper Memory Explorer & Charts")
-        , Say.resolve lang
-            (Say.make ~ko:"[e/f/d/t] 보기 · [Enter] 전문"
-               ~en:"[e/f/d/t] View · [Enter] Read") )
+        , hk )
     | None ->
         ( Say.resolve lang
             (Say.make ~ko:"시간축 메모리 Diff 스크러버"

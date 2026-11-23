@@ -266,5 +266,13 @@ type t =
       is_btw : bool;
       result : (unit, http_error) result;
     }
+  | Memory_diagram_rendered of {
+      epoch : Epoch.t;
+      keeper : string;
+      event_identity : string;
+      kind : Knowledge_store.memory_diagram_kind;
+      mode : Knowledge_store.memory_diagram_mode;
+      result : (Knowledge_store.memory_diagram_payload, string) result;
+    }
   | Voice_event of voice_event
   | Stream_gap of int

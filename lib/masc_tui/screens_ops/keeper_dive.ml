@@ -2857,6 +2857,14 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
           name
     in
     let has_running_turn = Chat_transcript.is_phase_interruptible chat_phase in
+    let memory_diagram_open =
+      Nav.equal_keeper_tab tab Nav.Keeper_memory
+      &&
+      match model.knowledge.memory_diagram with
+      | Some d ->
+          Knowledge_store.memory_diagram_matches_scope ~keeper_opt:(Some name) d
+      | None -> false
+    in
     let hotkey =
       if embedded then
         if Nav.equal_keeper_tab tab Nav.Keeper_config then
@@ -2864,6 +2872,16 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
             (Ops_common.say model
                ~ko:"[←→] 값 · [Enter] 편집 · [Ctrl+S] 저장 · [[ ]] 탭"
                ~en:"[←→] Cycle · [Enter] Edit · [Ctrl+S] Save · [[ ]] Tabs")
+        else if memory_diagram_open then
+          Some
+            (Ops_common.say model
+               ~ko:"[v] Pele/Mermaid/Tree · [y] 복사 · [Esc] 닫기"
+               ~en:"[v] Pele/Mermaid/Tree · [y] Copy · [Esc] Close")
+        else if Nav.equal_keeper_tab tab Nav.Keeper_memory then
+          Some
+            (Ops_common.say model
+               ~ko:"[Enter] 전문 · [.] Pele/Mermaid · [Ctrl+O] 형성 트리"
+               ~en:"[Enter] Read · [.] Pele/Mermaid · [Ctrl+O] Tree")
         else
           Some
             (Ops_common.say model ~ko:"[Ctrl+T] 큐 · [z] 확대"
@@ -2873,6 +2891,16 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
           (Ops_common.say model
              ~ko:"[←→] 값 변경 · [Enter] 편집 · [Ctrl+S] 저장 · [[ ]] 탭 · [Esc] 목록"
              ~en:"[←→] Cycle · [Enter] Edit · [Ctrl+S] Save · [[ ]] Tabs · [Esc] Fleet")
+      else if memory_diagram_open then
+        Some
+          (Ops_common.say model
+             ~ko:"[v] Pele/Mermaid/Tree · [y] 복사 · [Esc] 닫기"
+             ~en:"[v] Pele/Mermaid/Tree · [y] Copy · [Esc] Close")
+      else if Nav.equal_keeper_tab tab Nav.Keeper_memory then
+        Some
+          (Ops_common.say model
+             ~ko:"[Enter] 전문 · [.] Pele/Mermaid · [Ctrl+O] 형성 트리"
+             ~en:"[Enter] Read · [.] Pele/Mermaid · [Ctrl+O] Tree")
       else if Nav.equal_keeper_tab tab Nav.Keeper_chat && has_running_turn then
         Some
           (Ops_common.say model ~ko:"[Esc/Ctrl+X] 턴 중단 · [y] 복사 · [←→] 탭"

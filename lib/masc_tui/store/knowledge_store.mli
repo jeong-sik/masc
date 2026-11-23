@@ -71,6 +71,38 @@ type memory_reading_entry =
       item : memory_diff_item;
     }
 
+type memory_diagram_kind =
+  | Diagram_pele_card
+  | Diagram_formation_tree
+
+type memory_diagram_mode =
+  | Diagram_mode_auto
+  | Diagram_mode_mermaid
+  | Diagram_mode_tree
+
+type memory_diagram_payload =
+  | Diagram_pele_png of {
+      png : string;
+      pixel_size : (int * int) option;
+      format_label : string;
+      fallback_lines : string list;
+    }
+  | Diagram_text of {
+      lines : string list;
+      note : string option;
+    }
+
+type memory_diagram_state = {
+  keeper : string;
+  event_identity : string;
+  revision : int;
+  kind : memory_diagram_kind;
+  mode : memory_diagram_mode;
+  payload : memory_diagram_payload Observed.t;
+  scroll : int;
+  copy_source : string;
+}
+
 type wiki_edit_draft = {
   slug : string;
   expected_revision : int option;
@@ -120,6 +152,7 @@ type t = {
   selected_diff_index : int;
   memory_reading : memory_reading_entry option;
   memory_reading_scroll : int;
+  memory_diagram : memory_diagram_state option;
   last_memory_act_answer : (string * Wire_knowledge.memory_act_answer) option;
   selected_index : int;
   scroll_offset : int;
@@ -135,6 +168,11 @@ val memory_diff_window_query : memory_diff_window -> string option
 val equal_memory_diff_window : memory_diff_window -> memory_diff_window -> bool
 val equal_memory_view_mode : memory_view_mode -> memory_view_mode -> bool
 val equal_memory_facts_sort : memory_facts_sort -> memory_facts_sort -> bool
+val equal_memory_diagram_kind :
+  memory_diagram_kind -> memory_diagram_kind -> bool
+val equal_memory_diagram_mode :
+  memory_diagram_mode -> memory_diagram_mode -> bool
+val next_memory_diagram_mode : memory_diagram_mode -> memory_diagram_mode
 
 val set_tab : Nav.knowledge_tab -> t -> t
 val cycle_tab : Keymap.cycle_dir -> t -> t
@@ -157,6 +195,21 @@ val close_memory_reading : t -> t
 val memory_reading_matches_scope :
   keeper_opt:string option -> memory_reading_entry -> bool
 val scroll_memory_reading : max_scroll:int -> delta:int -> t -> t
+
+val open_memory_diagram : memory_diagram_state -> t -> t
+val close_memory_diagram : t -> t
+val memory_diagram_matches_scope :
+  keeper_opt:string option -> memory_diagram_state -> bool
+val scroll_memory_diagram : max_scroll:int -> delta:int -> t -> t
+val apply_memory_diagram_result :
+  observed_at:Clock.Mono.t ->
+  keeper:string ->
+  event_identity:string ->
+  kind:memory_diagram_kind ->
+  mode:memory_diagram_mode ->
+  (memory_diagram_payload, string) result ->
+  t ->
+  t
 
 type reading_line_tone =
   | Reading_anchor

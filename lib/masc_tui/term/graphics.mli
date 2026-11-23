@@ -156,6 +156,13 @@ val place : data:string -> rows:int -> string
 (** Chunked, silent ([q=2]) PNG transmit-and-display at the cursor ([f=100,a=T]).
     Returns [""] when [data] is empty. *)
 
+val place_slot :
+  image:image -> placement_id:int -> data:string -> rows:int -> string
+(** Chunked, silent ([q=2]), cursor-preserving ([C=1]) aspect-preserving PNG
+    transmit-and-display bound to a dedicated {!image} slot ID ([i=...]) so
+    {!delete_image} cleanly removes the placement without ghost pixels. Returns
+    [""] when [data] is empty. *)
+
 val delete_placement : image_id:int -> placement_id:int -> string
 (** Delete one placement while retaining the stored image pixels ([d=i]). *)
 

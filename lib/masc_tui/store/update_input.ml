@@ -1182,6 +1182,20 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
   let printable_char =
     if is_printable_key norm then key_char_opt norm.key else None
   in
+  (* 0. Active Memory Diagram & Memory Explorer diagram triggers (., v) *)
+  match printable_char with
+  | Some "v" when Option.is_some (Memory_diagram.active_diagram m) ->
+      Update_nav.cycle_memory_diagram_mode ~now m
+  | Some "."
+    when Option.is_some (Memory_diagram.active_memory_content_rect m)
+         || (Option.is_none m.nav.overlay
+            && Option.is_none (Model.active_dive m)
+            && Nav.equal_workspace m.nav.workspace Nav.Knowledge
+            && Nav.equal_knowledge_tab m.knowledge.active_tab
+                 Nav.Knowledge_memory) ->
+      Update_nav.open_memory_diagram ~now
+        ~kind:Knowledge_store.Diagram_pele_card m
+  | _ -> (
   (* 1. Active Dive contextual hotkeys *)
   match Model.active_dive m with
   | Some (Nav.Dive_work (Nav.Verification_dive req_id)) -> (
@@ -1367,7 +1381,11 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
             |> Fleet_store.mark_chat_history_loading ~keeper:name
           in
           let config = Config_store.cancel_edit_field m.config in
-          let knowledge = Knowledge_store.close_memory_reading m.knowledge in
+          let knowledge =
+            m.knowledge
+            |> Knowledge_store.close_memory_reading
+            |> Knowledge_store.close_memory_diagram
+          in
           let drafts =
             m.drafts |> Drafts.set_active_keeper name |> Drafts.set_focus true
           in
@@ -1784,7 +1802,7 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                   Update_nav.open_inline_modal m (Nav.Harness_overrule task.id)
               | _ -> (m, []))
           | Nav.Work_inbox | Nav.Work_candle_scorecard -> (m, []))
-      | Nav.Pulse -> (m, []))
+      | Nav.Pulse -> (m, [])))
 
 let keeper_config_target_name (m : Model.t) =
   match Model.active_dive m with

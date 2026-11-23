@@ -194,6 +194,18 @@ type t =
     }
   | Voice_cmd of voice_cmd
   | Copy_clipboard of string
+  | Render_memory_diagram of {
+      epoch : Epoch.t;
+      keeper : string;
+      event_identity : string;
+      kind : Knowledge_store.memory_diagram_kind;
+      mode : Knowledge_store.memory_diagram_mode;
+      ko : bool;
+      tz_offset_sec : int;
+      now_unix : float;
+      max_width : int;
+      chart : Masc_tui_ui.Memory_lineage.chart;
+    }
   | Open_external_url of string
   | Open_editor_escape_hatch of editor_target
   | Start_local_server
@@ -410,6 +422,7 @@ let rec flatten_one acc = function
     | Update_workspace_guard _
     | Voice_cmd _
     | Copy_clipboard _
+    | Render_memory_diagram _
     | Open_external_url _
     | Open_editor_escape_hatch _
     | Start_local_server

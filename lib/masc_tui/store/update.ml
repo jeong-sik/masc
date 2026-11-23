@@ -17,6 +17,7 @@ let has_explicit_sync_streams cmds =
       | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
+      | Cmd.Render_memory_diagram _
       | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _
       | Cmd.Start_local_server
@@ -285,6 +286,15 @@ let step_raw ~now (m : Model.t) = function
       else
         Update_sse.apply_chat_stream_done ~now ~keeper ~request_id ~is_btw
           ~result m
+  | Msg.Memory_diagram_rendered
+      { epoch; keeper; event_identity; kind; mode; result } ->
+      if not (Epoch.is_current ~current:m.epoch ~reply:epoch) then (m, [])
+      else
+        let knowledge =
+          Knowledge_store.apply_memory_diagram_result ~observed_at:now ~keeper
+            ~event_identity ~kind ~mode result m.knowledge
+        in
+        ({ m with knowledge }, [])
   | Msg.Voice_event ev -> apply_voice_event ~now m ev
   | Msg.Stream_gap dropped -> Update_sse.apply_stream_gap ~now dropped m
 

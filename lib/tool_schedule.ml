@@ -311,8 +311,9 @@ let source_of_requester (requested_by : Schedule_domain.actor) =
    same rule as the actor fields in [refuse_other_actor]. *)
 let refuse_other_source ~(requested_by : Schedule_domain.actor) ~source args =
   let derived = Schedule_domain.schedule_source_to_string source in
-  match string_opt args "source" with
-  | Some given when not (String.equal given derived) ->
+  match strict_string args "source" with
+  | Error refusal -> Error refusal
+  | Ok (Some given) when not (String.equal given derived) ->
     let requester_kind = Schedule_domain.actor_kind_to_string requested_by.kind in
     Error
       (Typed_refusal
@@ -329,7 +330,7 @@ let refuse_other_source ~(requested_by : Schedule_domain.actor) ~source args =
              ; "given", `String given
              ]
          })
-  | Some _ | None -> Ok ()
+  | Ok (Some _ | None) -> Ok ()
 ;;
 
 let status_of_arg args =

@@ -13,8 +13,7 @@ side derives memory from a model-authored state envelope.
 | Store | Owner | Purpose |
 |---|---|---|
 | agent core checkpoint/context | agent core | active transcript and restartable agent context |
-| Memory OS current snapshot | MASC | supported current claims from librarian updates and admitted writes, minus exact retractions |
-| Memory OS admission queue & WAL | MASC | durable pending candidates from explicit `keeper_memory_write` operations awaiting Librarian consolidation |
+| Memory OS current snapshot | MASC | supported current claims from librarian updates and direct writes, minus exact retractions |
 | Shared Wiki (`.masc/wiki/`) | MASC | workspace-wide Markdown pages, revision log, and structural lint surface |
 | Workspace Memory Ledger & Briefing (`.masc/workspace-memory/`) | MASC | shared cross-Keeper memory ledger (`ledger.json`) and curator briefing (`briefing.json`) |
 | Tool/history logs | MASC | observable evidence and recall source |
@@ -25,9 +24,10 @@ Memory OS snapshot path:
 default is `<base-path>/.masc/config/keepers`, and a configured `MASC_CONFIG_DIR`
 changes the config root.
 A missing snapshot means fresh empty state. Memory OS does not import, migrate,
-or fall back to alternate store layouts. All durable snapshot, WAL, and sidecar
-replacements enforce strict file + parent-directory `fsync` and publication
-recovery before reporting commit success.
+or fall back to alternate store layouts. A commit is on disk when its line is
+appended to `<keeper_name>.memory-log.jsonl`. The snapshot is written after the
+line and from it, so it is at most one line behind, and the next boot writes it
+again from that line (`Librarian_store`).
 
 ## Context delivery evidence
 
@@ -56,13 +56,13 @@ does not change layer relevance or independently omit individual world layers.
 ## Write Contract
 
 A memory claim must come from an explicit memory operation or the librarian
-lane's typed result. When the Librarian lane is enabled (the default), explicit
-`keeper_memory_write` calls do not mutate `memory-current.json` directly: they
-append a durable observed candidate to the Librarian admission queue so the
-Librarian can deduplicate, absorb, or supersede against current memory before
-recall. Direct immediate writes to `memory-current.json` occur only when the
-Librarian lane is explicitly disabled or via a superseding/retracting
-maintenance boundary. A fact stores its exact claim text, typed category,
+lane's typed result. An explicit `keeper_memory_write` without `source_path`,
+or a `keeper_memory_retract`, is a direct write to the Keeper's Memory writer:
+no model is asked, and the outcome is a pure function of current Memory and
+the write (`Librarian_direct`). A write with `source_path` goes to the
+source-bound store (`Keeper_memory_source_current`).
+
+A fact stores its exact claim text, typed category,
 `first_seen` and `last_seen` timestamps, writer origin, and observed or derived
 basis (`Keeper_memory_os_types.fact`). Its `memory_id` is the SHA-256 digest of the exact claim
 bytes and is used for exact write receipts, derivation premises, duplicate
@@ -87,9 +87,10 @@ exchange. A changed relationship is two explicit operations: retract the
 superseded claim by exact identity with a durable reason, then write the
 corrected claim.
 
-Speaker provenance reaches the Librarian through bounded recent projections of
-the producer-owned durable stores, not by parsing the AGENT_CORE checkpoint
-envelope. Direct user rows come from `Keeper_chat_store`; connector input also
+Speaker provenance reaches the Librarian through the rows of the
+producer-owned durable stores that a turn-log unit names
+(`Librarian_unit_content`). Direct user rows come from `Keeper_chat_store`;
+connector input also
 comes from `Keeper_external_attention`, so a best-effort ambient chat append
 failure cannot erase the original actor evidence. Duplicate connector/chat
 projections are collapsed only by exact conversation and external-message IDs.
@@ -132,38 +133,38 @@ health, and dashboard surfaces report the read failure explicitly.
 
 ## Recall Contract
 
-Recall reads the same current snapshot projected by the dashboard and renders
-every supported claim in stored order. It does not rank, trim, or hide claims
-behind a byte threshold. A malformed snapshot is reported as unavailable
+Recall reads the same current snapshot projected by the dashboard and injects
+it as a digest compiled by `Keeper_memory_digest`: derived facts first, then
+category and `memory_id` order, bounded to 8 KiB
+(`default_max_rendered_bytes`). Facts beyond the bound are summarized with a
+pointer to `keeper_memory_search`. The digest bytes stay identical until the
+snapshot revision advances. A malformed snapshot is reported as unavailable
 rather than silently treated as empty memory.
 
-Explicit Memory OS search filters case-insensitive query substrings and preserves snapshot
-order. It does not emit a relevance score or reorder facts by timestamp.
+Explicit Memory OS search answers in two tiers. First come the claims that
+hold the whole query as one run of text, in store order. Then come the claims
+that hold any query term, ordered by the BM25 score of a SQLite FTS5 trigram
+index (`Keeper_memory_search_index`); when the index cannot be built, that
+tier keeps store order. It does not reorder facts by timestamp.
 It returns exact fact identities and derivation support. The
 `keeper_memory_retract` tool accepts one of those ordinary-current identities
 plus a non-empty reason, atomically removes it, and records every derived fact
 invalidated by the resulting support fixed point. Source-bound facts remain a
 separate exact-bytes store and are not accepted by this retraction surface.
 
-The Admin batch cleanup boundary additionally requires the exact current
-revision and snapshot SHA-256. It writes a prepared plan receipt binding the
-prior/target snapshot identities to every exact retraction reason before
-replacing the snapshot. HTTP success means the matching journal entry is
-durable and the receipt has been cleared. If interruption
-or an I/O failure occurs after replacement, the response identifies the
-committed revision and hash with `snapshot_committed=true`; the next locked
-writer reconciles the exact entry without duplication before another snapshot
-change. Whole-Keeper purge removes an unfinished plan receipt with the other
-Memory OS sidecars. A successful cleanup returns the newly written revision and
-snapshot SHA-256, so a following reviewed plan does not need another inventory
-read.
+The Admin batch cleanup boundary
+(`POST /api/v1/keepers/:name/memory/retractions`) accepts exactly `plan_id` and
+non-empty `retractions: [{memory_id, reason}]`. Each retraction is one direct
+write to the Keeper's Memory writer on the trace `plan_id`, in request order.
+The answer lists each one as `retracted` or `not_current`. The first
+retraction the writer does not take ends the request with
+`code=memory_unwritable`; the retractions answered before it stay committed.
 
-The exact-byte hash has different jobs in the two current stores. Ordinary
-Memory has no generation; after a rejected snapshot is quarantined, revision 1
-can exist again, so the hash prevents an old revision-1 plan from matching new
-bytes. Working Context already changes generation on rebuild; its hash binds an
-Admin plan to the exact bytes that were reviewed rather than adding another
-lifecycle identity.
+The Working Context cleanup boundary
+(`POST /api/v1/keepers/:name/working-context/source-retractions`) additionally
+requires `expected_generation`, `expected_revision`, and
+`expected_snapshot_sha256`. The hash binds an Admin plan to the exact bytes
+that were reviewed.
 
 Search with `source="absorbed"` or `source="dropped"` reads historical
 removals from `<keeper_name>.memory-log.jsonl` (and compacted cold archive
@@ -197,78 +198,24 @@ Applied `Revised_into`, `Superseded_by`, `Merged_into`, and `Retracted` effects
 are recorded directly on each committed line in
 `<keeper_name>.memory-log.jsonl`. Read-only dashboard and TUI surfaces
 (`Keeper_memory_activity`, `memory-facts`, `memory-journal`, and TUI v2
-`/api/v1/memory/diff`) project lineage directly from the commit log; no
-separate `.memory-journal.jsonl` or `.memory-absorbed.jsonl` sidecar exists.
-
-## Admission lookup provenance
-
-Deferred explicit writes judged `incorporated` or `already_represented` retain
-an original-input-to-current-claim lookup binding. The original fact, its exact
-candidate identity and the selected target identity commit through the same WAL
-transaction as candidate consumption. `not_durable` and `deferred` judgments do
-not create lookup bindings. A binding records the Librarian's declared relation;
-it is not an independent semantic verification of that relation.
-
-Current-memory search can match the original observation while returning the
-current target's text and memory identity. `lookup_evidence` labels the original
-observation as historical admission evidence, not a separate current claim.
-Multiple observations pointing to one target produce one current search result.
-These observations are search data, not an additional automatic prompt block.
-The snapshot and its eligible bindings are read under the same store lock.
-
-Bindings follow only the exact admitted target. A target's removal invalidates
-its old bindings, including if identical text is subsequently re-added. Search
-does not automatically transfer a binding to a replacement or split successor.
-That transfer requires a future semantic decision about which successor retains
-the observation's scope. Retention and recovery inherit the consumption receipt
-store's snapshot and journal evidence requirements. Actual revision transitions
-are distinguished from unchanged observations; an unchanged observation cannot
-fill a missing transition when proving that a target was never retired.
-The same holds when a binding commits: if Memory moved after the Librarian
-read it, the journal must show every revision written since. A missing line
-refuses the commit, and the input stays pending for a decision on current
-Memory. Search over the current snapshot is not affected.
-
-## Demand retrieval across revisions
-
-A historical admission observation can locate a current successor through
-explicitly committed revision edges. The reader follows chronological snapshot
-transitions, including branches and multiple revisions. Missing transition
-evidence is unresolved; retirement followed by unrelated identical-text
-recreation does not revive a path. Structural candidates are not yet answers.
-
-For a requested query, the successor selector judges whether the current target
-addresses the same subject, event and applicable scope as the historical lookup
-source. Corrected facts need not repeat the old content. For example, an old
-owner-approval observation may locate today's two-approval rule for the same
-release. The judgment receives the query, original observation and target,
-committed path and current target. Keeper exclusions and the configured Jev
-lane apply; the absorption feature switch does not control this retrieval.
-
-The request and response are durably recorded before using a judgment. A second
-coherent read must retain the exact candidate witness before publication. Current
-result bodies and identities come from current targets, with historical lookup
-provenance clearly separated. Multiple observations do not duplicate the same
-current target in a result. Model failure, uncertain scope or changed evidence
-leave additional retrieval explicitly unresolved while preserving direct matches;
-they must not turn into an authoritative no-match answer.
+`/api/v1/memory/diff`) project lineage directly from the commit log.
 
 ## Shared Wiki System
 
 MASC provides a workspace-shared Wiki under `<base-path>/.masc/wiki/` (`lib/tool_wiki.ml`, `lib/wiki_page.ml`, and `lib/wiki_lint.ml`,
 exposed through `masc_wiki_*` and `keeper_wiki_*` tools and `masc://wiki/*`
 MCP resources). Pages are Markdown documents with structured frontmatter, slugs,
-and revision history (`log.jsonl`).
+and revision history (`log.md`).
 
 - **Search**: `masc_wiki_search` / `keeper_wiki_search` support multi-word
   queries and enforce word-boundary matching on short tokens (`<= 2` ASCII
   characters) to prevent noisy substring hits.
-- **Resource tail**: `masc://wiki/log` returns a bounded 64 KiB UTF-8-safe tail
-  of `log.jsonl` when the revision log exceeds 64 KiB.
+- **Resource tail**: `masc://wiki/log` returns the last 64 KiB of `log.md`,
+  starting at a line boundary, when the revision log exceeds 64 KiB.
 - **Structural lint (`masc_wiki_lint`)**: inspects the wiki graph and revision
-  log for 9 finding kinds (`broken_link`, `orphan_page`, `missing_summary`,
-  `stale_source`, `unlinked_mention`, `empty_section`, `duplicate_title`,
-  `unindexed_page`, `revision_log_hole`) and reports `revision_log_hole_suppressed`
+  log for 9 finding kinds (`broken_link`, `unsupported_link`, `orphan`,
+  `orphan_unconfirmed`, `missing_sources`, `hearsay_only`, `unreadable_page`,
+  `revision_log_gap`, `revision_log_hole`) and reports `revision_log_hole_suppressed`
   when known historical log gaps are explicitly suppressed.
 
 ## Workspace Memory Ledger and Curator Briefing
@@ -278,13 +225,12 @@ ledger and curator briefing under `<base-path>/.masc/workspace-memory/`:
 
 - `ledger.json`: durable workspace memory claims and cross-Keeper provenance
   managed through `lib/workspace_memory/`.
-- `briefing.json`: structured workspace briefing synthesized by the
-  installed Workspace Curator Addon’s `briefing` output from current workspace memory, active tasks/goals,
-  and recent collaboration state.
+- `briefing.json`: structured workspace briefing synthesized by the in-process
+  Workspace Memory Curator (`lib/server/server_workspace_memory_curator.ml`)
+  from the ledger's claims and conflicts.
 
-Both files use atomic temp-file write + file/parent `fsync` and strict schema
-decoding; malformed or missing curator state is reported explicitly rather than
-silently fabricating an empty briefing.
+Both files use strict atomic replacement and strict schema decoding. Malformed
+state is an error; a missing file reads as empty.
 
 ## See also
 

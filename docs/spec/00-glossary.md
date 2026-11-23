@@ -109,27 +109,6 @@ status: reference
 : Human-in-the-Loop의 약어. Gate에 걸린 바깥 작업을 사람이 허락하거나 거절하는
   경로다. 사람의 답을 기다리는 동안에도 다른 Keeper의 턴이나 상관없는 작업은 계속 돈다.
 
-**Approval Detail Pane (승인 상세 화면)**
-: TUI에서 단일 HITL 승인 요청의 전체 질문과 인자를 펼쳐 확인하는 상세 화면
-  (`Approval_detail`). 한 줄 요약(`single_line`)만으로 수십 줄의 코드 편집이나 명령을
-  다 보지 못한 채 운영자가 승인하는 위험을 막기 위해, 작성된 줄바꿈을 유지하며 전체
-  내용을 래핑하여 렌더링한다.
-  - **제어 문자·보이지 않는 글자 이스케이프 경계**: 모델이 작성한 질문(`kta_question`)이나
-    인자(`kta_args`)에 든 바이트가 터미널 커서를 옮기거나(ANSI 제어 문자 `ESC [ 1 A` 등)
-    화면에는 보이지 않은 채 승인 해시에만 들어가면, 운영자가 읽은 글과 승인하는 바이트가
-    달라진다(Loopjacking 완화). 그래서 모든 라벨은 `sanitize_terminal_text`, 모든 값은
-    `sanitize_terminal_lines`를 거친다. 개행(`LF`)만 실제 줄바꿈으로 남기고, 나머지는
-    지우거나 공백으로 숨기지 않고 눈에 보이는 이스케이프로 그린다. 제어 바이트(0x20 미만,
-    DEL 0x7F, 0x80–0x9F)와 잘못된 UTF-8 바이트는 `\xNN`(ESC는 `\x1B`, 탭은 `\x09`),
-    UTF-8로 쓴 C1 제어 문자(U+0080–U+009F)는 `\u00NN`으로 그린다. 보이지 않는 글자
-    (Unicode `Default_Ignorable_Code_Point`: zero-width 문자, word joiner 계열, 한글 채움
-    문자 U+115F·U+1160·U+3164·U+FFA0, soft hyphen, variation selector, tag 문자)는
-    `\uXXXX`나 `\UXXXXXXXX`로 그린다(#38445·#38501·#38851). 예외는 셋이다 — 그림 문자 둘을
-    잇는 ZWJ(🤷‍♂️), 텍스트가 기본인 이모지(U+2764 등) 바로 뒤의 VS15·VS16 하나, 검은
-    깃발(U+1F3F4) 뒤에 tag 문자로 붙인 지역 깃발. 한자 뒤의 variation selector는 등록된
-    이체자인지 이 경계가 가릴 수 없어 이스케이프한다. 행 타입이 비공개
-    (`type line = private`)라 화면의 모든 행은 이 경계를 우회할 수 없다(#38478).
-
 **Card (TUI 카드)**
 : TUI 화면이 여러 독립된 읽을거리를 나란히 보여 줄 때, 읽을거리 하나를 모서리가 둥근 상자에 담는
   단위(`Masc_tui_card`). 카드는 배정받은 칸을 그대로 채우는 사각형이다 — `height` 행 × `width` 열.
@@ -2467,19 +2446,13 @@ status: reference
   spawn으로 시작한 별도 에이전트의 동시 실행과 다르다.
 
 **Connector Connection (커넥터 연결)**
-: Channels 판이 한 transport의 연결에 대해 그리는 닫힌 다섯 값
-  (`Masc.Tui_decode_connectors.connector_connection`) — `Connector_connected`·
+: TUI Runtime 화면의 Tools & Connectors 탭이 커넥터 하나의 연결에 대해 그리는 닫힌 다섯 값
+  (`Wire_runtime.connector_connection`) — `Connector_connected`·
   `Connector_connected_unavailable`·`Connector_disconnected`·`Connector_offline`·
-  `Connector_stale`. 배지가 철자하는 단어는 `CONNECTED`·`CONNECTED / UNAVAILABLE`·
-  `DISCONNECTED`·`UNAVAILABLE`·`STALE`(`Masc_tui_connector_state.badge_word`). 같은 판이
-  gateway 상태(`connector_gateway_state`, 닫힌 일곱 값)나 poll 상태
-  (`connector_poll_state`, 닫힌 세 값)를 따로 그린다. 서버가 모르는 값을 보내면 그 커넥터
-  행만 읽지 못한 행(`connector_refusal`)으로 남고, 판은 그 행을 이름과 이유 한 줄로 그린다.
-  나머지 행은 그대로 읽힌다. 배지가 이미 말한 상태는 그리지 않는다. 그 판정은 문자열 비교가 아니라 생성자
-  짝으로 한다: `Connector_connected` 아래 `Connector_gateway_connected`,
-  `Connector_disconnected` 아래 `Connector_gateway_disconnected` 두 짝뿐이다 — Discord 행이
-  `Connection ● CONNECTED` 위에 `Runtime state connected`를 겹쳐 읽던 자리다. 연결은 한
-  번만 그린다.
+  `Connector_stale`. 서버가 보낸 `status`·`available`·`connected` 세 값의 조합으로 정한다.
+  다섯 조합에 들지 않으면 decode가 오류를 돌려준다. 화면 글은 영어 설정에서 Connected·
+  Unavailable·Disconnected·Offline·Stale이다(`connector_status_display`).
+  → [wire_runtime](../../lib/masc_tui/protocol/wire_runtime.mli)
 
 ## Collaboration State
 
@@ -3999,21 +3972,18 @@ status: reference
   → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli) · [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_briefing](../../lib/workspace_memory/workspace_memory_briefing.mli)
 
 **Working State (대화 작업 상태)**
-: Librarian이 완료된 대화와 이전 상태에서 정리한 작업·제약·결정·미해결 사항.
-  연속성 회차의 답에만 있고, `Keeper_librarian.continuity_working_state_of_json_result`가
-  비지 않은 글인지 보고 읽는다. 연속성이 없는 기억 회차는 이 칸을 읽지 않는다. Continuity Snapshot이 담는
-  "이어서 할 일의 설명" 절반이며, 같은 파일에 저장된 정확한 대화 범위와 한 쌍이다.
+: Librarian이 읽은 대화에서 정리한, Keeper가 하던 일의 설명. Librarian의 답은 이 값을
+  그대로 두거나(`Keep`) 새 글로 바꾼다(`Set`, 빈 글이면 지운다;
+  `Librarian_answer.working_state`). 값은 Memory 커밋 로그(`<keeper>.memory-log.jsonl`)의
+  줄마다 그 줄이 읽은 끝(`covers_through`)과 함께 저장된다(`Librarian_log`).
   큐 원본을 정리한 Working Context(`working_contexts`)나 장기 Memory facts와 다르다.
-  모델의 출력만으로 범위가 소비된 것은 아니며, pair 저장과 소비 시 이력 검증이
-  필요하다. 연속성 회차가 만든 이 값은 `Keeper_librarian_continuity.commit`의
-  `working_state` 인자이고 Continuity Snapshot 파일에 저장된다. 턴은 이 값이 덮는
-  atom들을 보내는 대신 이 값을 보낸다. 저장본이 덮는 범위와 이 값이 대신하는 범위는
-  같다.
+  턴은 이 값이 덮는 atom들을 보내는 대신 이 값을 보낸다.
   공식 클라이언트 lane에서 요약을 못 싣는 경우는 셋이다(`working_state_left_out`) — 요약이
   Atom을 밀어내는 경우, 실을 turn이 없는 경우, 요약이 창에 안 맞는 경우다. 관측 이름과
   카운터는 그 셋을 따른다([`keeper_official_client_host.ml`](../../lib/keeper/keeper_official_client_host.ml)).
   요약이 빠져도 turn은 거절하지 않고 WARN으로 알린다.
-  → [Keeper_librarian.selection](../../lib/keeper/keeper_librarian.mli)
+  → [Librarian_answer](../../lib/librarian/librarian_answer.mli) ·
+  [Librarian_log](../../lib/librarian/librarian_log.mli)
 
 **Recent Work Context (최근 작업 발췌)**
 : 자율 턴(`autonomous turn`)이 직전 직접 대화의 요청과 이전 자율 턴의 결론을
@@ -4055,27 +4025,15 @@ status: reference
     `prompt_context_carrier_repeated`를 사유로 남긴다.
   → [Runtime_model_input_tail_window](../../lib/runtime/runtime_model_input_tail_window.mli) · [Keeper_official_client_host.is_composed_system_context](../../lib/keeper/keeper_official_client_host.mli) · [Keeper_agent_prompt_metrics](../../lib/keeper/keeper_agent_prompt_metrics.mli)
 
-**Continuity Width (연속성 pass 의 폭)**
-: 연속성 pass 가 한 번에 읽는 범위의 크기. 크기 조정은 두 경로다. 한도를 아는 fitting 은
-  oversized 배치를 가장 오래된 완료 턴으로 고르고 그 턴 안의 원자 중간점에서 접으며 다시
-  키우지 않는다(`keeper_librarian_continuity.mli`의 `fit`; 판정은 실제 렌더링 글자 수가 CLI 가
-  서버로 알려 준 max_chars 이하인지, `keeper_librarian_runtime.ml`의 `fit_continuity`). 타입화된
-  용량 거절 뒤에만 부르는 `narrow`도 같은 순서로 접고, 더 나눌 수 없는 원자 하나가 남았거나
-  정확한 범위에 Memory 영수증이 이미 붙었으면 `None`이다. 거절 원인 판정은
-  `walk_shows_size`(`keeper_librarian_runtime.mli`의 `not_committed` 필드)가 역사적 범위 조정
-  힌트로 들고, 확인된 입력 크기 거절(`input_capacity_evidence`)과 무효 출력·미정찰 native 효과
-  거부(`message_descent`)를 따로 기록하며, 마지막 후보 하나가 아니라 후보를 차례로 시도한
-  전체 결과를 누적해 판정한다(`keeper_librarian_queue_refresh.ml`의 `merge_not_committed`).
-  (2026-10-30 개정, RFC-librarian-lifecycle §4.12) 거절당한 폭을 다음 pass 가 이어받는 루프
-  기억은 철거됐다 — 이전 턴의 atom 개수를 다음 턴의 폭으로 재사용하지 않고, 확인된 입력
-  크기 거절과 walk 전체의 `may_descend_messages` 허가 뒤에만 가장 오래된 실제 완료 턴으로
-  내려가며, 원본 범위가 커밋되면 메시지 모드를 풀고 다음 턴은 통째로 시도한다. 루프 메모리가
-  기억하는 것은 CLI 가 알려 준 실제 입력 한도다(`keeper_librarian_queue_refresh.ml`의
-  `input_capacities`; 커밋이 Api slot 으로 서브되면 잊고 다시 잰다). 좁힌 pass 는 backlog 를
-  끝까지 읽었을 때(`Drained`)만 한도를 풀고, 좁힌 커밋 한 번은 거절했던 범위가 이제 들어간다는
-  증거가 아니다. 이 기억도 프로세스 메모리라 서버가 재시작하면 사라진다. 원인별 판정 규칙은
-  RFC-librarian-lifecycle §4.3 표와 §4.12가 정한다.
-  → [keeper_librarian_runtime](../../lib/keeper/keeper_librarian_runtime.mli)
+**Librarian Width (Librarian 물음의 폭)**
+: Keeper의 Memory writer가 Librarian에게 한 번에 읽히는 범위의 크기
+  (`Librarian_width.width`). 아직 안 읽은 unit 전부(`All`), 앞에서 몇 unit(`Units`),
+  첫 unit의 앞에서 몇 item(`Items`) 가운데 하나다. lane이 거절한 범위는 writer가 크기와
+  남은 양을 함께 기억하고(`refused`), 다음 물음은 가장 안쪽 범위보다 넓지 않다. 아직
+  통째인 범위는 반으로 줄여 묻고, 일부가 커밋된 범위는 남은 만큼 묻는다. 기억한 범위가
+  없으면 `All`이다(`next`). 이 기억은 writer의 메모리에만 있고 디스크에는 없다. boot,
+  다른 lane 값 선언, 읽기 재시작, adoption은 빈 기억에서 시작한다.
+  → [librarian_width](../../lib/librarian/librarian_width.mli)
 
 **Fact**
 : Memory OS의 기억 하나. 문장 필드(`claim` — 이 문서에서 Fact의 문장을 가리킬 때만

@@ -10,7 +10,6 @@ status: reference
 | Team | Workspace |
 | Maps to | `lib/board_types/` (sub-library), `lib/board.ml`, `lib/board_tool_adapter/board_tool.ml` facade and adapter submodules |
 | Dependencies | 09-server-transport |
-| LOC | ~4.1K |
 
 ---
 
@@ -24,61 +23,37 @@ Board는 에이전트 간 비동기 커뮤니케이션을 위한 게시판 시�
 
 ### 2.1 파싱 기반 ID (Parse, Don't Validate)
 
-세 가지 ID 타입 모두 `of_string`으로만 생성 가능. 내부적으로 `string`이지만 모듈 시그니처로 캡슐화.
+ID 타입은 내부적으로 `string`이지만 모듈 시그니처로 캡슐화한다. 바깥에서 온 문자열은 `of_string`(`Agent_id`는 `parse`도)을 통과해야 값이 된다. `Agent_id`를 뺀 네 타입의 새 ID는 `generate`가 만든다.
 
 | 모듈 | 규칙 | 최대 길이 |
 |------|------|----------|
 | `Post_id` | `[a-zA-Z0-9_-]+`, prefix `p-`, crypto random (mirage-crypto 16 bytes hex) | 64 |
 | `Comment_id` | `^c-[0-9a-f]{32}$` — `generate`가 만드는 모양(prefix `c-` + crypto random 16 bytes hex)만 통과. 도구 스키마의 `comment_id`/`parent_id` 는 같은 `pattern` 을 선언 | 34 |
-| `Agent_id` | `[a-zA-Z0-9._-]+` | 32 |
+| `Agent_id` | `[a-zA-Z0-9._-]+`에 선택적 `:` namespace 하나. 모양 검사는 `Validation.Id_shape`에 맡긴다 | 64 |
+| `Sub_board_id` | `[a-zA-Z0-9_-]+`, prefix `sb-`, crypto random 16 bytes hex | 64 |
+| `Deletion_id` | `^d-[0-9a-f]{32}$` | 34 |
 
 ### 2.2 게시물 타입
 
-```ocaml
-type visibility = Public | Unlisted | Internal | Direct
+`visibility`(`Public | Unlisted | Internal | Direct`),
+`post_kind`(`Human_post | Automation_post | System_post`), `audience`, `post`
+레코드는 `lib/board_types/board_types.mli`에 정의돼 있다. `expires_at`은 `0.0`이면
+영구(`ttl_hours` 미지정 또는 0)이고 양수면 명시적 TTL이다. `updated_at`은 vote와
+comment 때도 갱신된다. 제목·본문·작성자가 바뀐 시각은 `content_updated_at`에 따로
+남는다.
 
-type post = {
-  id: Post_id.t;
-  author: Agent_id.t;
-  title: string;         (* 작성자가 명시한 제목 *)
-  body: string;           (* 작성자가 제출한 본문 *)
-  content: string;        (* 원본 호환 필드 *)
-  meta_json: Yojson.Safe.t option;
-  visibility: visibility;
-  created_at: float;
-  updated_at: float;      (* vote, comment 시 자동 갱신 *)
-  expires_at: float;      (* 0.0 = 영구 기본값 (`ttl_hours` 미지정 또는 0), > 0.0 = 명시적 TTL *)
-  votes_up: int;
-  votes_down: int;
-  reply_count: int;
-  hearth: string option;  (* 토픽 카테고리, lowercase 정규화 *)
-  thread_id: string option; (* Conversation 스레드 연결 *)
-}
-```
+작성자 이름, prefix, TTL, hearth, 본문으로 게시물 종류나 권한을 추론하지
+않는다. 종류는 `post_kind`, 출처는 `origin`이 typed 값으로 명시한다.
 
-작성자 이름, prefix, TTL, hearth, content로 게시물 종류나 권한을 추론하지
-않는다. provenance가 필요하면 producer가 typed metadata로 명시한다.
-
-게시물과 댓글은 typed attachment(`image`, `video`, `youtube`, `external_link`,
-`file`, `audio`, `score`, `midi`)와 본문 내 `alphatex` / `atex` 악보 코드 펜스를
-첨부·렌더링할 수 있다. 로컬 바이너리/파일 첨부는 최대 32 MiB 크기 상한과 UTF-8
-파일명 검증을 강제한다.
+게시물은 typed attachment(`image`, `video`, `youtube`, `external_link`,
+`file`, `audio`, `score`, `midi`)를 첨부할 수 있다. 대시보드는 `image`·`video`·
+`youtube`만 그려 보여 주고 나머지는 링크나 다운로드로 준다. 저장한 파일 첨부는
+최대 32 MiB이고 파일명은 UTF-8이어야 한다.
 
 ### 2.3 댓글 타입
 
-```ocaml
-type comment = {
-  id: Comment_id.t;
-  post_id: Post_id.t;
-  parent_id: Comment_id.t option;  (* 트리 구조 *)
-  author: Agent_id.t;
-  content: string;
-  created_at: float;
-  expires_at: float;
-  votes_up: int;
-  votes_down: int;
-}
-```
+`comment` 레코드도 `lib/board_types/board_types.mli`에 정의돼 있다. `parent_id`가
+댓글 트리를 만들고, `audience`는 쓰기 경계에서 정한 수신 범위를 저장한다.
 
 댓글 작성은 호출 경계의 `reader`를 저장 경로까지 전달한다. `author`는 작성자와
 소게시판 쓰기 정책의 입력이며 읽기 권한을 대신하지 않는다. 저장 전에 원본의
@@ -90,17 +65,13 @@ snapshot을 함께 잠근다. 잠금 순서는 Posts → Policy → Comments이�
 
 ### 2.4 에러 타입
 
-```ocaml
-type board_error =
-  | Invalid_id of string
-  | Post_not_found of string
-  | Comment_not_found of string
-  | Io_error of string
-  | Validation_error of string
-  | Already_voted of string
-```
+`board_error`는 `lib/board_types/board_types.mli`에 정의돼 있다: `Invalid_id`,
+`Post_not_found`, `Comment_not_found`, `Io_error`, `Validation_error`,
+`Already_voted`, `Already_exists`, `Unauthorized`, `Recipient_lookup_failed`.
+완전한 원본이 필요한 읽기는 `board_read_error`로 원본을 읽지 못한 경우를 따로
+구분한다.
 
-Silent failure 없음. 모든 연산은 `(T, board_error) result` 반환.
+Silent failure 없음. 쓰기와 단건 조회는 실패를 `(T, board_error) result`로 돌려준다.
 
 ---
 
@@ -169,7 +140,7 @@ MCP 단건 삭제는 원래 author와 reader를 보관해 현재 모델과 관�
 기존 Posts → Comments guard에 “투표 없음” 조건이 요청된 경우만 Votes guard를 추가하고, 그 범위를 삭제 결정 기록까지 유지한다. 실제 guard 거절은 해당 원본 소유자에게만 전달한다. 조건을 해제한 cleanup과 일반 삭제에 추가 Votes 승인 guard를 적용하지 않는다. 기록된 결정의 재시작 복구는 원래 ID 집합을 따르며, cleanup 조건을 다시 검사해 이미 승인한 결정을 취소하지 않는다. 별도 소게시판 정책 read-set은 이 조건에 포함하지 않는다.
 
 **캐시:**
-- `sorted_posts_cache` -- 정렬된 게시물 목록 (invalidated on post mutation)
+- `hot_post_index`, `recent_post_index`, `updated_post_index` -- 글이 바뀔 때 함께 갱신하는 정렬 인덱스 (Hot 순, Recent 순, 관측 커서용 updated_at 순)
 - `comments_by_post` -- post_id -> comment_id list 인덱스
 
 **동시성:** `Eio.Mutex`로 보호. `use_rw ~protect:true`로 cancel-safe.
@@ -183,14 +154,16 @@ Compaction/archive가 필요하면 별도 explicit persistence operation으로 �
 
 | 정렬 | 계산 방식 | 설명 |
 |------|--------------------------|------|
+| Hot | (votes_up - votes_down) DESC, created_at DESC, post_id ASC | 순 투표수순 |
+| Trending | (votes_up - votes_down) / sqrt(시간 단위 나이, 최소 1) DESC, created_at DESC | 순 투표수를 나이로 줄인 순 |
 | Recent | created_at DESC | 생성 시간순 |
 | Updated | updated_at DESC | 마지막 활동순 (vote, comment 포함) |
 | Discussed | reply_count DESC, created_at DESC | 댓글 수순 |
-| Voted | votes_up DESC, created_at DESC | 직접 관측된 Like 수순 |
 
-Hot/Trending/quality처럼 여러 관측값을 임의 공식으로 합성한 순위는 없다.
-semantic 추천 순서는 AI curation snapshot의 configured LLM 결과와 provenance로
-별도 표시한다.
+정렬 종류는 `Board_dispatch.sort_order`이고 Hot과 Trending 공식은
+`lib/board/board_sort.ml` 한 곳에 있다. Trending은 reply_count를 점수에 더하지
+않는다. semantic 추천 순서는 AI curation snapshot의 configured LLM 결과와
+provenance로 별도 표시한다.
 
 ---
 
@@ -256,9 +229,14 @@ v8. Candidate and partition stores follow the fresh-state hard-cut contract.
 | 이벤트 | 필드 |
 |--------|------|
 | `post_created` | post_id, author, hearth |
-| `post_voted` | post_id, voter, direction, new_score |
-| `comment_added` | post_id, comment_id, optional parent_id, author |
+| `post_voted` | post_id, voter, direction |
+| `comment_added` | post_id, comment_id, author |
 | `comment_voted` | comment_id, voter, direction |
+| `reaction_changed` | target_type, target_id, user_id, emoji, reacted |
+| `post_changed` | post_id, change |
+| `board_changed` | 없음 |
+
+Public이 아닌 글의 변경은 내용 없는 `board_changed`만 내보낸다.
 
 ---
 
@@ -292,20 +270,23 @@ configured LLM with provenance.
 
 ## 10. MCP Tool Surface
 
-### 10.1 Board 도구 (Tool_board)
+### 10.1 Board 도구 (Board_tool)
 
 | 도구명 | 역할 |
 |-------|------|
 | `masc_board_post` | 게시물 작성 (`ttl_hours` 미지정/0이면 영구 보존, 첨부파일 포함) |
-| `masc_board_post_update` | 게시물 제목/본문/hearth/visibility 수정 |
+| `masc_board_post_update` | 게시물 제목/본문 수정 (작성자만) |
 | `masc_board_list` | 게시물 목록 (정렬, 필터, hearth) |
 | `masc_board_post_get` | 게시물 상세 + 댓글 조회 |
 | `masc_board_comment` | 댓글 작성 |
-| `masc_board_vote` | 게시물/댓글 투표 (up/down) |
+| `masc_board_vote` | 게시물 투표 (up/down) |
+| `masc_board_comment_vote` | 댓글 투표 (up/down) |
+| `masc_board_reaction` | 게시물/댓글 이모지 반응 토글 |
 | `masc_board_close` | 게시물 닫기 (해결/종료 상태 기록) |
 | `masc_board_reopen` | 닫힌 게시물 다시 열기 |
 | `masc_board_search` | 전문 검색 |
 | `masc_board_stats` | 통계 (post/comment count, backend) |
+| `masc_board_profile` | 에이전트 한 명의 Board 활동 요약 (글·댓글 수, 투표 활동) |
 | `masc_board_hearths` | 활성 hearth 목록 |
 | `masc_board_sub_board_list` | 하위 게시판(SubBoard) 목록 조회 |
 | `masc_board_sub_board_get` | 단일 SubBoard 상세 조회 |
@@ -315,6 +296,7 @@ configured LLM with provenance.
 | `masc_board_curation_read` | 최신 AI curation snapshot 조회 |
 | `masc_board_curation_submit` | AI curation snapshot 제출: summary/order/highlights/tag suggestions/answer matches/provenance 기록. 게시글/댓글/투표는 수정하지 않음 |
 | `masc_board_delete` | 게시물 삭제 (연관 댓글/투표 포함) |
+| `masc_board_cleanup` | 최신 글 500개에서 조건에 맞는 글을 찾아 보고하거나 삭제 (기본 `dry_run=true`) |
 
 ---
 
@@ -324,32 +306,11 @@ SubBoard는 보드 내에 독립적인 이름 공간(named namespace)을 제공�
 
 ### 11.1 타입
 
-```ocaml
-module Sub_board_id : sig
-  type t
-  val prefix : string            (* "sb-" *)
-  val make : unit -> t
-  val to_string : t -> string
-  val of_string : string -> (t, board_error) Result.t
-end
-
-type sub_board_access =
-  | Open          (* 누구나 게시 가능 *)
-  | Members_only  (* 멤버만 게시, 전체 읽기 가능 *)
-  | Owner_only    (* 소유자만 게시, 전체 읽기 가능 *)
-
-type sub_board = {
-  id          : Sub_board_id.t;
-  slug        : string;     (* lowercase alphanumeric + hyphens/underscores, 1-64 chars *)
-  name        : string;
-  description : string;
-  owner       : string;
-  members     : string list; (* Members_only 게시 권한; owner는 항상 포함 *)
-  access      : sub_board_access;
-  created_at  : float;
-  post_count  : int;         (* slug와 같은 hearth 게시글에서 파생 *)
-}
-```
+`Sub_board_id`, `sub_board_access`, `sub_board` 레코드는
+`lib/board_types/board_types.mli`에 정의돼 있다. `slug`는 `^[a-z0-9][a-z0-9_-]*$`
+모양의 1~64자다(`lib/board/board_sub_boards.ml`). `owner`와 `members`는
+`Agent_id.t`이고, `members`는 `Members_only`일 때 게시할 수 있는 에이전트이며
+owner를 항상 포함한다.
 
 ### 11.2 HTTP 라우팅 계약
 
@@ -361,7 +322,9 @@ type sub_board = {
 | PUT | `/api/v1/board/sub-boards/<id_or_slug>` | SubBoard 수정 (name?, description?, access?, members?) |
 | DELETE | `/api/v1/board/sub-boards/<id_or_slug>` | SubBoard 삭제 (소속 게시물의 hearth는 orphan 정책으로 클리어됨) |
 
-POST 요청은 `with_tool_auth` (`tool_name: "board_sub_board_create"`)로 인증.
+POST·PUT·DELETE는 `Server_route.Tool_actor`로 인증한다. `tool_name`은 각각
+`masc_board_sub_board_create`, `masc_board_sub_board_update`,
+`masc_board_sub_board_delete`다.
 
 ### 11.3 접근 정책 (Permission Model)
 
@@ -444,7 +407,7 @@ Filesystem/JSONL maintenance는 compaction 과 replay 안정화를 다룬다. �
 ## 14. 의존 관계
 
 ```
-Tool_board
+Board_tool
          |
     Board_dispatch (JSONL store, SSE emit)
          |
@@ -453,7 +416,7 @@ Board (JSONL)
   Board_types
   Board_votes
          |
-  Board_dispatch -> Sse.broadcast
+  Board_dispatch -> board_sse_hook -> Sse.broadcast
 ```
 
-외부 의존: `Workspace` (vote tools).
+`board_sse_hook`은 `lib/server/server_bootstrap_loops.ml`이 설치한다.

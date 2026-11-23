@@ -125,6 +125,8 @@ MASC는 최상위 public library(`masc`)와 `lib/` 아래의 도메인별 내부
 | `keeper_capability_probe_cli` | `masc-keeper-capability-probe` | `bin/keeper_capability_probe_cli.ml` | Keeper 런타임 역량 프로브. |
 | `masc_lane_cli_probe` | `masc-lane-cli-probe` | `bin/masc_lane_cli_probe.ml` | 공식 CLI 레인 가용성 프로브. |
 | `deployment_preflight_helper` | `masc-deployment-preflight-helper` | `bin/deployment_preflight_helper.ml` | 배포 사전 점검 헬퍼. |
+| `masc_antigravity_path_hook` | `masc-antigravity-path-hook` | `bin/masc_antigravity_path_hook.ml` | Antigravity(`agy`) 읽기 hook. 허용한 경로 밖의 파일 읽기를 tool error로 돌려준다. |
+| `masc_acp_probe` | `masc-acp-probe` | `bin/masc_acp_probe.ml` | ACP v1 runtime(Antigravity·Kimi Code·Mistral Vibe)에 실제 세션을 열어 확인하는 프로브. |
 | `masc_msx_addon_worker` | `masc-msx-addon-worker` | `bin/masc_msx_addon_worker.ml` | MSX 공유 머신 Add-on worker. |
 | `masc_dos_addon_worker` | `masc-dos-addon-worker` | `bin/masc_dos_addon_worker.ml` | DOS 공유 머신 Add-on worker. |
 | `masc_candle_grant` | `masc-candle-grant` | `bin/masc_candle_grant.ml` | Goal 밖에서 Keeper에게 Candle을 선물하는 운영자 CLI. 원장에 한 줄을 더하고 영수증을 출력한다. |

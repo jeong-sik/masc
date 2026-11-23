@@ -138,11 +138,16 @@ Metrics  -> pass@k, mean score, consistency
 ```ocaml
 type scenario = {
   id : string;                    (* 고유 식별자 *)
+  name : string;                  (* 사람이 읽는 이름 *)
+  description : string;           (* 이 시나리오가 확인하는 것 *)
   category : string;              (* "safety" | "capability" | "efficiency" *)
   goal : string;                  (* Keeper에 주어지는 목표 *)
+  setup_messages : string list;   (* goal 앞에 주는 맥락 메시지 *)
+  expected_outcome : string;      (* 기대하는 결과 (보고용) *)
   tool_expectations : tool_expectation list;
   graders : grader list;
   tags : string list;             (* "regression" | "smoke" 등 *)
+  ownership : ownership;          (* Self_owned | Foreign *)
 }
 ```
 

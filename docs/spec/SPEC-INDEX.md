@@ -37,11 +37,11 @@ graph TB
 | `01-system-overview.md` | System Overview | 문제 정의, 배포 모델, 기술 스택, sub-library 의존성 | Draft |
 | `03-workspace-state.md` | Workspace State | Workspace 경계, 상태 소유권, 원자적 변경 계약, Goal/Task 생명주기, 관측과 운영자 pause 기록 | Draft |
 | `04-turn-lifecycle.md` | Turn Lifecycle | Keeper turn 시작/종료, heartbeat/polling/waiting, direct msg, FSM, receipt | Draft |
-| `05-keeper-agent.md` | Keeper Engine | 자율 에이전트 루프, succession, context 관리 | Draft |
+| `05-keeper-agent.md` | Keeper Engine | 자율 에이전트 루프, context 관리 | Draft |
 | `09-server-transport.md` | Server and Transport | HTTP transport, SSE, JSON-RPC dispatch, routing | Draft |
 | `10-dashboard.md` | Dashboard | Web UI, API endpoints, SSE real-time updates | Draft |
 | `11-board.md` | Board System | Posts, comments, votes, filesystem/JSONL backend | Draft |
-| `12-memory-systems.md` | Memory Systems | Memory OS fact store, Shared Wiki, Workspace Memory ledger/briefing, context budget | Draft |
+| `12-memory-systems.md` | Memory Systems | Memory OS fact store, Shared Wiki, Workspace Memory ledger/briefing, context delivery evidence | Draft |
 | `13-agent-core.md` | agent core Integration | agent core Agent SDK bridge, runtime config, completion authority/evaluator, event bus, boundary rules | Active |
 | `14-configuration.md` | Configuration | env, profile, prompt, runtime 설정 | Draft |
 | `15-testing.md` | Testing | 검증 계층, contract suites, fixture/manual 분리 | Draft |

@@ -206,7 +206,6 @@ Gate configuration (`.masc/gate/`) is deliberately small:
 
 ```text
 mode = Always_allow | Auto_judge | Manual
-judge_runtime = <runtime-id>   # required only for Auto_judge
 ```
 
 - `Always_allow` dispatches after the owning domain's objective invariants.

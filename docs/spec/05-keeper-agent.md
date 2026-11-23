@@ -12,19 +12,19 @@ status: reference
 | Dependencies | 13-agent-core |
 | Modules | `lib/keeper/` source tree is the inventory SSOT |
 | LOC | Derived from the source tree, not duplicated here |
-| MCP Tools | `tool_keeper` |
+| MCP Tools | `masc_keeper_*` (`config/tools/`) |
 | External Deps | `Agent_core` (agent core), `Llm_provider`, `Workspace`, `Runtime_inference` |
 
 ---
 
 ## 1. Purpose
 
-Keeper는 MASC의 자율 에이전트 하네스(harness)다. agent core `Agent.run` 위에서 동작하며, 장기 실행 루프, 컨텍스트 관리, 메모리 계층, 심의(deliberation), 승계(succession)을 담당한다. Task verification verdict는 Keeper lifecycle 밖의 application-owned system LLM agent 또는 authenticated HITL authority가 typed completion-authority 경계에서 결정한다. Keeper는 evidence를 제출할 수 있지만 verifier가 되지 않는다.
+Keeper는 MASC의 자율 에이전트 하네스(harness)다. agent core `Agent.run` 위에서 동작하며, 장기 실행 루프, 컨텍스트 관리, 메모리 계층을 담당한다. Task verification verdict는 Keeper lifecycle 밖의 application-owned system LLM agent 또는 authenticated HITL authority가 typed completion-authority 경계에서 결정한다. Keeper는 evidence를 제출할 수 있지만 verifier가 되지 않는다.
 
 Keeper 하나는 다음을 소유한다:
 - **identity**: `keeper_meta` 레코드 (이름, keeper, instructions, typed goal/task links)
 - **context**: `working_context` (`Agent_core.Checkpoint.t` 래퍼 — 세션 대화, 메시지, 체크포인트 상태를 보관)
-- **memory**: Memory OS fact/episode store
+- **memory**: Memory OS fact store
 - **lifecycle**: heartbeat fiber + supervisor + checkpoint store
 
 Keeper는 외부 세계를 관찰(`world_observation`)하고, 프롬프트를 구성하고, agent core `Agent.run`에 위임하고, 결과로부터 메트릭을 갱신하는 루프를 반복한다.
@@ -79,9 +79,7 @@ graph LR
 
 ### 3.1 keeper_meta
 
-Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_meta_contract.ml`에 정의되며, 약 100개 필드를 가진다.
-
-**소스**: `keeper_meta_contract.ml` (lines 246+)
+Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_meta_contract.ml`에 정의된다.
 
 주요 필드 군:
 
@@ -98,7 +96,7 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_meta_contract.ml
 - **Activation**: `activation_mode` (`manual` | `on_demand` | `autonomous`)
 - **Metrics**: `total_turns`, `total_tokens`, `total_cost_usd`, `last_turn_ts` 등
 
-직렬화: `meta_to_json` / `meta_of_json`로 JSON 왕복. `validate_name`이 역직렬화 시점에 이름/trace_id를 검증하며, `.masc/keepers/<name>.json`에서 은퇴한 레거시 필드(`trace_history`, `last_handoff_ts` 등)가 발견되면 조용히 무시하지 않고 역직렬화를 엄격히 거부한다.
+직렬화: `meta_to_json` / `meta_of_json`로 JSON 왕복. `meta_of_json`은 역직렬화 시점에 이름과 trace_id를 검증한다. `.masc/keepers/<name>.json`에 현재 schema 밖의 필드가 있으면 조용히 무시하지 않고 역직렬화를 거부한다(`Keeper_meta_json_current_schema.validate_current_object`).
 
 ### 3.2 working_context
  
@@ -135,7 +133,6 @@ JSON/MCP 경계에는 `mention_targets` 같은 workspace collaboration 값이 �
 type fiber_health =
   | Fiber_alive     (* fiber 실행 중, promise 미해소 *)
   | Fiber_zombie    (* registry 존재하나 fiber 종료 *)
-  | Fiber_dead      (* 재시작 예산 소진, 수동 복구 필요 *)
   | Fiber_unknown   (* supervised registry에 없음 *)
 ```
 
@@ -165,18 +162,16 @@ stateDiagram-v2
 
 1. **Observe**: `keeper_world_observation.observe`로 workspace 상태, 멘션, board 이벤트, idle 시간, 경제 압력 등을 수집
 2. **BuildPrompt**: `Keeper_run_context.prepare_run_context`와 `keeper_unified_prompt.build_prompt`가 keeper identity (`config/prompts/keeper.md` + `<base-path>/.masc/config/keepers/<name>.toml` `keeper.instructions`), world observation, dynamic context layers를 조립
-3. **AgentRun**: `keeper_agent_run.run_turn`이 agent core `Agent.run`에 위임. tools + hooks + context_reducer를 전달하며 memory object는 전달하지 않는다
-4. **ToolExecution**: Agent가 tool을 호출하면 `keeper_tools_agent_core`가 `agent_tool_dispatch_runtime.execute_keeper_tool_call`로 디스패치
-5. **UpdateMetrics**: `keeper_unified_turn.update_metrics_from_result`가 turn count, token 사용량, cost 등을 keeper_meta에 반영하고 `observation.idle_seconds`를 `masc_keeper_idle_seconds{keeper_name}` OTel metric-store gauge로 노출
+3. **AgentRun**: `keeper_agent_run.run_turn`이 agent core `Agent.run`에 위임. tools + hooks를 전달하며 memory object는 전달하지 않는다
+4. **ToolExecution**: Agent가 tool을 호출하면 `keeper_tools_agent_core`가 `keeper_tool_dispatch_runtime.execute_keeper_tool_call`로 디스패치
+5. **UpdateMetrics**: `keeper_unified_metrics_result.update_metrics_from_result`가 turn count, token 사용량, cost 등을 keeper_meta에 반영하고 `observation.idle_seconds`를 `masc_keeper_idle_seconds{keeper_name}` OTel metric-store gauge로 노출
 6. **PostTurnLifecycle / Checkpoint**: `keeper_post_turn.apply_post_turn_lifecycle`이 checkpoint를 보존하고 그 결과를 keeper meta와 대시보드 표면에 반영한다. keeper 자율성은 heartbeat/turn lane이 계속 쥔다
-7. **MemoryWrite**: `keeper_agent_run` tail에서 Memory OS librarian extraction을 memory lane에 제출한다
+7. **MemoryWrite**: `keeper_turn_log_recorder`가 turn log에 턴을 닫는 줄을 쓰면 그 Keeper의 Memory writer에 알린다(`Librarian_writers.turn_closed`). writer가 turn log를 읽고 Librarian에게 묻는다
 
 ### 4.1.1 Post-turn Persistence
 
 turn 끝에서 쓰는 것은 typed checkpoint metadata 하나다. `keeper_post_turn.ml`이
 keeper meta에 쓰며, 계약은 keeper post-turn contract가 정한다.
-| Memory OS current snapshot | `keeper_memory_os_current.ml` + `keeper_librarian.ml` | `<resolved-config-root>/keepers/<name>.memory-current.json` (기본 `.masc/config/keepers/<name>.memory-current.json`) | revision-CAS librarian contract |
-| collaboration activity signal | `workspace_task.ml` + `workspace.ml` | `.masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl` | task lifecycle + activity graph event contract |
 
 ### 4.2 Keeper Supervisor Lifecycle
 
@@ -188,9 +183,6 @@ stateDiagram-v2
   Alive --> Crashed : fiber 종료 (Promise 해소)
   Crashed --> Restarting : 다음 lane-local supervisor sweep
   Restarting --> Alive : sweep_and_recover
-  Alive --> Dead : 명시적 durable tombstone 기록
-  Crashed --> Dead : 명시적 durable tombstone 기록
-  Dead --> [*] : 명시적 operator revival 또는 정리
 ```
 
 - `supervise_keepalive`: keeper heartbeat loop을 supervised fiber로 실행
@@ -214,7 +206,7 @@ stateDiagram-v2
 4. `make_tools` (keeper tool bridge) + `make_hooks` (passive timing/usage/tool-result observation) 생성
 5. `Keeper_turn_driver.run_named` -> agent core `Agent.run` loop. agent core Guardrails는 permissive이며 실제 외부 효과 adapter가 실행 직전에 Keeper Gate를 호출
 6. `persist_message` (assistant 응답 영속화)
-7. 결과 반환: `run_result { response_text, model_used, turn_count, tool_calls_made, usage, tools_used }`
+7. 결과 반환: `run_result { response_text, model_used, turn_count, tool_calls, usage, stop_reason, ... }` (`lib/keeper/keeper_agent_result.ml`)
 
 ### 5.2 Unified Keeper Turn (heartbeat 경로)
 
@@ -222,12 +214,12 @@ stateDiagram-v2
 2. `world_observation.observe` -> 세계 상태 수집
 3. `unified_turn.run_keeper_cycle` -> `build_prompt` + `run_turn`
 4. `update_metrics_from_result` -> keeper_meta 갱신
-5. `write_meta` -> 메타데이터 영속화
+5. `Keeper_unified_turn_success.persist_terminal_turn_meta` -> Keeper Owner를 거쳐 메타데이터 영속화
 
 ### 5.3 agent core 통합 구성
 
 `run_turn`은 agent core에 `runtime_id`, model-visible `tools`, passive observation
-`hooks`, configured `context_reducer`, `initial_messages`를 전달한다. agent core
+`hooks`, `initial_messages`를 전달한다. agent core
 Guardrails는 permissive이고 hooks는 timing, usage, trajectory, tool outcome을
 기록할 뿐 실행 권한을 만들지 않는다. 외부 효과는 MASC adapter가 실제
 effect sink 직전에 opaque operation + normalized input으로 Keeper Gate를
@@ -303,7 +295,7 @@ agent core Agent.run의 hook lifecycle에 keeper 동작을 주입:
 | External effect | hook에서 명령 의미를 분류하지 않는다. normalized Gate 경계가 판정한다. |
 
 `pre_tool_use` hook은 tool 이름과 input 의미를 검사하거나
-`Override`/`Block`/`ApprovalRequired`를 반환하지 않는다.
+`Block`/`ElicitToolApproval`을 반환하지 않는다.
 
 ### 8.2 Tool surface projection
 
@@ -314,7 +306,7 @@ agent core Agent.run의 hook lifecycle에 keeper 동작을 주입:
 - **Deferred tool loading (`keeper_tool_search`)**: 지연 로드 대상 도구를 검색해
   현재 턴/세션의 모델 가시 도구 표면에 추가.
 - **Keeper-owned isolated job tools (`keeper_job_start`, `keeper_job_status`,
-  `keeper_job_output`, `keeper_job_cancel`, `keeper_job_list`)**: Keeper 소유의
+  `keeper_job_result`, `keeper_job_cancel`)**: Keeper 소유의
   장기 실행 격리 Docker 잡 제어.
 
 Keeper, runtime, provider, credential 상태는 기본 카탈로그를 임의로 줄이지 않으며
@@ -385,15 +377,10 @@ exact-output 행은 예외다. 이 persistence finalization barrier는 먼저 fs
 
 
 **Unified Turn**: runtime/provider capabilities determine temperature and output
-token intent. agent core `max_turns = 0` and Keeper `max_idle_turns = 0` are the
-unbounded sentinels; MASC observes turn/token/cost usage but does not impose a
+token intent. MASC observes turn/token/cost usage but does not impose a
 Keeper work budget.
 
-**Execution**: `AUTONOMOUS_MAX_TOKENS`(4000)
-
 **Other**: `DEBUG`(0), `BOOTSTRAP_PROACTIVE_WARMUP_SEC`(60)
-
-**Evidence 상한** (task tooling, `lib/keeper/keeper_tool_task_runtime.ml`): `evidence_total_bytes_limit` = 51,200바이트 — `keeper_task_done`이 `artifact:` evidence 전체 합계로 거절하는 상한. 초과 시 전환 전에 즉시 거절되며 총 바이트 수와 `note:` 대안이 안내된다. 코드 상수이며 환경변수·TOML 로 바꾸지 않는다.
 
 **Context capacity**: handoff decisions are typed capacity signals. They do not classify model text or infer goals; semantic decisions remain at the model boundary.
 
@@ -418,7 +405,7 @@ Canonical file model:
 - `.masc/keepers/{name}.json`: durable runtime state
 - `.masc/keepers/{name}/...`: metrics, decisions, trajectories, checkpoints, and other high-cardinality runtime artifacts
 
-keeper는 durable always-on으로 취급되며, `keeper_up`은 inline args, TOML, Keeper prompt를 합쳐 초기 `keeper_meta`를 생성한다. runtime 중지 여부는 `keeper_down` 또는 durable tombstone으로 표현한다.
+keeper는 durable always-on으로 취급되며, `keeper_up`은 inline args, TOML, Keeper prompt를 합쳐 초기 `keeper_meta`를 생성한다. runtime 중지는 keeper meta의 `paused`와 `latched_reason`(`Operator_paused`)으로 표현한다.
 
 ---
 
@@ -436,7 +423,7 @@ Keeper는 idle 상태에서 주기적으로 자발적 행동을 생성한다.
 
 ### INV-KEEPER-002: trace_id 유일성
 
-`generate_trace_id`는 `trace-{ms_timestamp}-{5hex_hash}` 형식으로 생성된다. 동일 밀리초 내에서도 `gettimeofday` hash가 달라 충돌 가능성이 낮다.
+`generate_trace_id`는 `trace-{ms_timestamp}-{5hex}` 형식으로 생성된다. 뒤 5자리는 프로세스 안에서 하나씩 늘어나는 atomic counter 값이라 같은 밀리초에 만든 ID도 서로 다르다.
 
 ### INV-KEEPER-003: checkpoint history 보존
 
@@ -469,11 +456,11 @@ Filesystem capability는 같은 부모에 동등한 쓰기 권한을 이미 가�
 
 ### INV-KEEPER-009: fiber_health 정합성
 
-`supervised_state.fiber_health`는 Promise 해소 여부와 동기화된다. Promise resolved + registry에 존재하면 Crashed로 관측하며 해당 lane의 재시작을 계속 시도한다. Dead는 실패 횟수가 아니라 명시적 durable tombstone으로만 성립한다.
+`Keeper_registry.fiber_health_of`는 registry entry의 phase와 Promise 해소 여부로 fiber 건강을 계산한다. Crashed·Restarting phase는 `Fiber_zombie`이고 supervisor sweep이 그 lane을 다시 시작한다. registry에 없으면 `Fiber_unknown`이다.
 
 ### INV-KEEPER-010: UTF-8 안전성
 
-`utf8_safe_prefix_bytes`가 max_bytes에서 UTF-8 코드포인트 경계를 지키며 절단한다. `utf8_repair_string`이 잘못된 바이트를 U+FFFD로 치환한다. Checkpoint 직렬화 시 `sanitize_text_utf8`이 적용된다.
+`String_util.utf8_prefix`가 max_bytes에서 UTF-8 코드포인트 경계를 지키며 절단한다. `utf8_repair_string`이 잘못된 바이트를 U+FFFD로 치환한다. Checkpoint 직렬화 시 `sanitize_text_utf8`이 적용된다.
 
 ### INV-KEEPER-012: structural execution invariants
 
@@ -483,11 +470,7 @@ Filesystem capability는 같은 부모에 동등한 쓰기 권한을 이미 가�
 
 ## 15. Known Issues / Technical Debt
 
-### 15.1 keeper_meta 필드 수 (~100)
-
-`keeper_meta` 레코드가 약 100개 필드를 가지며 `meta_to_json`/`meta_of_json`이 각각 ~200줄이다. 필드 군(group)별 sub-record 분할이 필요하다.
-
-### 15.2 Memory Boundary
+### 15.1 Memory Boundary
 
 경계 이슈는 keeper context/checkpoint nativeization과 raw marker leakage이며, memory storage 자체는 Memory OS fact store가 소유한다.
 

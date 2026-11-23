@@ -304,10 +304,17 @@ let pulse_of_samples ~known_since samples =
     (List.rev samples)
 ;;
 
+(* The turn log only grows, so the seed reads its tail as it reads a decision
+   log's. Measured 2026-11-23 on the live workspace, the busiest keeper's turn
+   log took 1.56 MB for its last 48 hours, so the decision log's bounds reach
+   back past the window a turn can have opened in. *)
+let turn_log_tail_max_bytes = seed_tail_max_bytes
+let turn_log_tail_max_lines = seed_tail_max_lines
+
 (* The causes of the turns the turn log opened since a window before
    [window_start], keyed by turn ref: a turn that ended inside the window may
-   have opened before it. A log that cannot be read gives no cause, and the
-   autonomous turns it would have named count as unknown. *)
+   have opened before it. A turn opened before the tail read, or a log that
+   cannot be read, gives no cause, and its autonomous turns count as unknown. *)
 let logged_causes ~config ~keeper_name ~window_start =
   let path =
     Keeper_turn_log_store.path_for_keepers_dir
@@ -315,37 +322,53 @@ let logged_causes ~config ~keeper_name ~window_start =
       ~keeper_id:keeper_name
   in
   let opened_since = window_start -. float_of_int window_seconds in
-  let add causes (scanned : Keeper_turn_log_store.scanned) =
-    match scanned.line with
-    | Ok (Keeper_turn_log.Opened { at; turn_ref; stimuli; _ }) when at >= opened_since ->
-      Hashtbl.replace causes (Ids.Turn_ref.to_string turn_ref) (cause_of_logged_inputs stimuli);
-      causes
-    | Ok
-        ( Keeper_turn_log.Opened _
-        | Keeper_turn_log.Log_started _
-        | Keeper_turn_log.Closed _
-        | Keeper_turn_log.Reset _ )
-    | Error _ -> causes
+  let causes = Hashtbl.create 256 in
+  let add line =
+    match Yojson.Safe.from_string line with
+    | exception Yojson.Json_error _ -> ()
+    | json ->
+      (match Keeper_turn_log_codec.of_json json with
+       | Ok (Keeper_turn_log.Opened { at; turn_ref; stimuli; _ }) when at >= opened_since ->
+         Hashtbl.replace
+           causes
+           (Ids.Turn_ref.to_string turn_ref)
+           (cause_of_logged_inputs stimuli)
+       | Ok
+           ( Keeper_turn_log.Opened _
+           | Keeper_turn_log.Log_started _
+           | Keeper_turn_log.Closed _
+           | Keeper_turn_log.Reset _ )
+       | Error _ -> ())
   in
-  match Keeper_turn_log_store.fold path ~init:(Hashtbl.create 256) ~f:add with
-  | Ok causes -> causes
-  | Error error ->
-    Log.Keeper.warn
-      ~keeper_name
-      "turn pulse seed could not read the turn log, so its autonomous turns count as unknown: %s"
-      (Private_jsonl_scan.error_to_string error);
-    Hashtbl.create 0
+  if Fs_compat.file_exists path
+  then (
+    match
+      Keeper_memory_recall.read_file_tail_lines_with_completion
+        path
+        ~max_bytes:turn_log_tail_max_bytes
+        ~max_lines:turn_log_tail_max_lines
+    with
+    | Ok { lines; completion = _; from_file_start = _ } -> List.iter add lines
+    | Error exn_class ->
+      Keeper_memory_recall.record_memory_recall_read_error
+        ~site:"keeper_turn_pulse_seed_turn_log"
+        path
+        exn_class;
+      Log.Keeper.warn
+        ~keeper_name
+        "turn pulse seed could not read the turn log, so its autonomous turns count as unknown");
+  causes
 ;;
 
 (* The logs hold every turn since the oldest row read, so the pulse is known
    from there; a row older than the window makes it the window start. With no
    row read it is known from [now], when the server starts recording. *)
-let seed_from_decision_log ?(now = Time_compat.now ()) ~config ~keeper_name () =
-  let base_path = config.Workspace.base_path in
+let read_seed ~now ~config ~keeper_name =
   let primary_path = Keeper_types_support.keeper_decision_log_path config keeper_name in
   let window_start = now -. float_of_int window_seconds in
-  let causes = logged_causes ~config ~keeper_name ~window_start in
-  let cause_of_turn turn_ref = Hashtbl.find_opt causes turn_ref in
+  (* The turn log is read only once an autonomous row asks for a cause. *)
+  let causes = lazy (logged_causes ~config ~keeper_name ~window_start) in
+  let cause_of_turn turn_ref = Hashtbl.find_opt (Lazy.force causes) turn_ref in
   let read path = read_tail ~cause_of_turn ~now ~window_start path in
   let known_from oldest_row = Option.value oldest_row ~default:now in
   (* [newer] were read from the primary log, which begins where the rotated log
@@ -359,20 +382,25 @@ let seed_from_decision_log ?(now = Time_compat.now ()) ~config ~keeper_name () =
     | Ok (Starts_inside_window { samples = older; oldest_row; whole_file = _ }) ->
       Some (known_from (earliest oldest_row newer_oldest), newer @ older)
   in
-  let seeded =
-    match read primary_path with
-    | Error _ -> None
-    | Ok Log_absent -> with_rotated ~newer:[] ~newer_oldest:None
-    | Ok (Reaches_window_start samples) -> Some (window_start, samples)
-    | Ok (Starts_inside_window { samples; oldest_row; whole_file = false }) ->
-      Some (known_from oldest_row, samples)
-    | Ok (Starts_inside_window { samples; oldest_row; whole_file = true }) ->
-      with_rotated ~newer:samples ~newer_oldest:oldest_row
-  in
-  match seeded with
-  | Some (known_since, samples) ->
-    seed ~base_path ~keeper_name (pulse_of_samples ~known_since samples)
-  | None -> ()
+  match read primary_path with
+  | Error _ -> None
+  | Ok Log_absent -> with_rotated ~newer:[] ~newer_oldest:None
+  | Ok (Reaches_window_start samples) -> Some (window_start, samples)
+  | Ok (Starts_inside_window { samples; oldest_row; whole_file = false }) ->
+    Some (known_from oldest_row, samples)
+  | Ok (Starts_inside_window { samples; oldest_row; whole_file = true }) ->
+    with_rotated ~newer:samples ~newer_oldest:oldest_row
+;;
+
+let seed_from_decision_log ?(now = Time_compat.now ()) ~config ~keeper_name () =
+  let base_path = config.Workspace.base_path in
+  match get ~base_path ~keeper_name with
+  | Some _ -> ()
+  | None ->
+    (match read_seed ~now ~config ~keeper_name with
+     | Some (known_since, samples) ->
+       seed ~base_path ~keeper_name (pulse_of_samples ~known_since samples)
+     | None -> ())
 ;;
 
 let seed_all_from_decision_logs ?(now = Time_compat.now ()) ~config () =

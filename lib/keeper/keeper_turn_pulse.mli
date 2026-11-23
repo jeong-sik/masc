@@ -27,7 +27,10 @@ type cause =
   | Scheduled  (** Every input the turn took was a due schedule. *)
   | Reacted  (** The turn took at least one input that was not a due schedule. *)
   | Chat  (** A direct request: someone wrote to the keeper. *)
-  | Own  (** The autonomous cycle took no input: the keeper's own cadence. *)
+  | Own
+      (** The autonomous cycle took no input. A cadence tick and a broadcast
+          wake that found the queue empty both land here: the turn log writes
+          no input for either, so a seed could not tell them apart. *)
 
 type tally = {
   ok : int;
@@ -41,8 +44,10 @@ type causes = {
   chat : int;
   own : int;
   unknown : int;
-      (** Seeded autonomous turns whose turn-log line was not read, so what
-          started them is not known. A recorded turn never lands here. *)
+      (** Seeded autonomous turns with no [Opened] line read: the line lies
+          before the turn-log tail the seed reads, or the turn failed before
+          it opened one. A recorded turn never lands here, so such a turn moves
+          from its cause to [unknown] when the server restarts. *)
 }
 
 type slot = {
@@ -89,7 +94,8 @@ val seed_from_decision_log :
     A [direct_turn] row is {!Chat}. An [autonomous_cycle] row takes its cause
     from the keeper's turn log: the [Opened] line whose turn ref is the row's
     [trace_id] and [turn_id] names what the turn took. A row with no such line
-    read counts as [unknown].
+    read counts as [unknown]. The turn log's tail is read within the decision
+    log's bounds, and only once an autonomous row needs a cause.
 
     [known_since] is the window start when a row older than the window was
     read. Otherwise it is the oldest row read, of any event, since the logs

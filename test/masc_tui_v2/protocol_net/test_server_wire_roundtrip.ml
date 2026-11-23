@@ -1,12 +1,17 @@
-(** Server encoder -> TUI decoder round trips.
+(** Round trips between the server's code and the TUI's code for one endpoint.
 
-    Each case builds the JSON with the server's own encoder and decodes it
-    with the TUI decoder that reads that endpoint, so a renamed or reshaped
-    field fails here instead of on the operator's screen. *)
+    A response case builds the JSON with the server's own encoder and decodes
+    it with the TUI decoder that reads that endpoint. A request case encodes
+    the body with the TUI encoder and parses it with the server's own parser.
+    A renamed or reshaped field fails here instead of on the operator's
+    screen. *)
 
 open Masc_tui_core
 module Wire_runtime = Masc_tui_protocol.Wire_runtime
 module Wire_work = Masc_tui_protocol.Wire_work
+module Wire_fleet = Masc_tui_protocol.Wire_fleet
+module Stream_route = Server_routes_http_keeper_stream
+module Owner_registry = Masc.Keeper_owner_registry
 
 let observed_at = Clock.Mono.of_ns 1_000_000_000L
 
@@ -411,6 +416,72 @@ let test_gate_queue_state_roundtrip () =
            ~prefix:Queue_result.approval_queue_unavailable_title reason)
   | Ok _ -> Alcotest.fail "an unavailable queue must not decode as empty"
 
+(* POST /api/v1/keepers/chat/stream: a follow-up carries no admission intent,
+   so the server queues it behind the running turn. A steer names only the
+   operation this TUI submitted, never a turn token, because the server
+   cancels any non-maintenance turn that holds a token. *)
+let test_chat_submit_admission_roundtrip () =
+  let parse mode =
+    let request : Wire_fleet.chat_submit_request =
+      {
+        request_id = "tui-roundtrip-2";
+        keeper_name = "alpha";
+        message = "second";
+        origin = Wire_fleet.Origin_bare;
+        mode;
+        turn_instructions = None;
+        since_seq = None;
+        attachments = [];
+      }
+    in
+    Stream_route.parse_keeper_chat_stream_request
+      ~media_store:(Agent_core.History.Memory_store.create ())
+      (Yojson.Safe.to_string (Wire_fleet.encode_chat_submit_request request))
+  in
+  (match parse Wire_fleet.Follow_up with
+  | Ok { Stream_route.admission_intent = Stream_route.Queue_only; _ } -> ()
+  | Ok { Stream_route.admission_intent = Stream_route.Interactive _; _ } ->
+      Alcotest.fail "a follow-up must queue, not interrupt"
+  | Error detail -> Alcotest.failf "server rejected the follow-up: %s" detail);
+  match
+    parse
+      (Wire_fleet.Steer
+         { control_token = "ctrl-1"; operation_id = "tui-roundtrip-1" })
+  with
+  | Ok
+      {
+        Stream_route.admission_intent =
+          Stream_route.Interactive
+            {
+              control_token;
+              target = Some (Owner_registry.Direct_operation_id operation_id);
+            };
+        _;
+      } ->
+      Alcotest.(check string) "steer keeps the control token" "ctrl-1"
+        control_token;
+      Alcotest.(check string) "steer cuts exactly the TUI's own operation"
+        "tui-roundtrip-1"
+        (Masc.Keeper_owner.Chat_operation.Operation_id.to_string operation_id)
+  | Ok
+      {
+        Stream_route.admission_intent =
+          Stream_route.Interactive
+            { target = Some (Owner_registry.Observed_turn_token _); _ };
+        _;
+      } ->
+      Alcotest.fail "a steer must not name the observed turn token"
+  | Ok
+      {
+        Stream_route.admission_intent =
+          Stream_route.Interactive { target = None; _ };
+        _;
+      } ->
+      Alcotest.fail "a steer must name its own operation"
+  | Ok { Stream_route.admission_intent = Stream_route.Queue_only; _ } ->
+      Alcotest.fail "a steer must reach the server as an interactive admission"
+  | Error detail -> Alcotest.failf "server rejected the steer: %s" detail
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -431,5 +502,11 @@ let () =
             test_tools_warming_roundtrip;
           Alcotest.test_case "lane run page -> decode_exact_lane_runs" `Quick
             test_lane_run_statuses_roundtrip;
+        ] );
+      ( "fleet",
+        [
+          Alcotest.test_case
+            "encode_chat_submit_request -> parse_keeper_chat_stream_request"
+            `Quick test_chat_submit_admission_roundtrip;
         ] );
     ]

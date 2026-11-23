@@ -764,18 +764,25 @@ and submit_composer ~now ~mode (m : Model.t) =
               || Fleet_store.has_active_chat_stream ~keeper m.fleet
               || Drafts.has_active_tx_for ~keeper m.drafts
             in
-            let effective_mode =
-              if not keeper_is_busy then Drafts.Mode_direct
+            (* A busy Keeper queues the message. Only a steer cuts a turn, and
+               only the operation this TUI's own request is streaming. *)
+            let effective_mode, wire_mode, steer_refusal =
+              if not keeper_is_busy then
+                (Drafts.Mode_direct, Wire_fleet.Follow_up, None)
               else
                 match mode with
                 | Drafts.Mode_steer -> (
-                    match
-                      Fleet_store.chat_control_token_for ~keeper m.fleet
-                    with
-                    | Some _ -> Drafts.Mode_steer
-                    | None -> Drafts.Mode_follow_up)
-                | Drafts.Mode_follow_up -> Drafts.Mode_follow_up
-                | Drafts.Mode_direct -> Drafts.Mode_direct
+                    match Update_nav.resolve_steer ~keeper m with
+                    | Update_nav.Steer_own { control_token; operation_id } ->
+                        ( Drafts.Mode_steer
+                        , Wire_fleet.Steer { control_token; operation_id }
+                        , None )
+                    | Update_nav.Steer_refused refusal ->
+                        (Drafts.Mode_follow_up, Wire_fleet.Follow_up, Some refusal))
+                | Drafts.Mode_follow_up ->
+                    (Drafts.Mode_follow_up, Wire_fleet.Follow_up, None)
+                | Drafts.Mode_direct ->
+                    (Drafts.Mode_direct, Wire_fleet.Follow_up, None)
             in
             let drafts0 = Drafts.set_active_keeper keeper m.drafts in
             match
@@ -795,8 +802,28 @@ and submit_composer ~now ~mode (m : Model.t) =
                       ~request_id:tx.request_id m.fleet
                 in
                 let fleet = Fleet_store.reset_chat_scroll fleet0 in
-                let cmd = Update_nav.build_chat_submit_cmd m tx ~is_btw:false in
-                ({ m with drafts = drafts2; fleet }, [ cmd ])))
+                let cmd =
+                  Update_nav.build_chat_submit_cmd m tx ~mode:wire_mode
+                    ~is_btw:false
+                in
+                let sent = { m with drafts = drafts2; fleet } in
+                let sent =
+                  match steer_refusal with
+                  | None -> sent
+                  | Some Update_nav.Steer_turn_not_own ->
+                      Model.with_toast ~now ~level:Model.Toast_warning
+                        (Say.make
+                           ~ko:"돌고 있는 턴이 내 요청이 아니라서 끊지 않고 대기열에 넣었습니다"
+                           ~en:"The running turn is not yours: your message is queued, nothing was cut")
+                        sent
+                  | Some Update_nav.Steer_no_control_token ->
+                      Model.with_toast ~now ~level:Model.Toast_warning
+                        (Say.make
+                           ~ko:"Steer 토큰을 아직 받지 못해서 끊지 않고 대기열에 넣었습니다"
+                           ~en:"No steer token yet: your message is queued, nothing was cut")
+                        sent
+                in
+                (sent, [ cmd ])))
 
 and confirm_palette ~now (m : Model.t) =
   match m.palette.mode with

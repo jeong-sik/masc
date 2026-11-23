@@ -132,8 +132,30 @@ val palette_filtered_keepers : Model.t -> Wire_fleet.keeper_summary list
 val palette_filtered_models : Model.t -> Wire_runtime.runtime_option list
 
 val resolve_target_keeper : Model.t -> string option
+
+type steer_refusal =
+  | Steer_turn_not_own
+      (** No request this TUI submitted is streaming for the Keeper, so the
+          busy turn belongs to someone else (another Keeper's delegated
+          request, an autonomous or scheduled turn). *)
+  | Steer_no_control_token
+      (** The Keeper's chat control token has not reached this TUI yet. *)
+
+type steer_resolution =
+  | Steer_own of { control_token : string; operation_id : string }
+      (** [operation_id] is this TUI's own streaming request. *)
+  | Steer_refused of steer_refusal
+
+val resolve_steer : keeper:string -> Model.t -> steer_resolution
+(** What a steer submission may cut on [keeper]: only the operation of a
+    request this TUI submitted and still streams. *)
+
 val build_chat_submit_cmd :
-  Model.t -> Drafts.pending_message -> is_btw:bool -> Cmd.t
+  Model.t ->
+  Drafts.pending_message ->
+  mode:Wire_fleet.submit_mode ->
+  is_btw:bool ->
+  Cmd.t
 
 val start_btw_query :
   now:Clock.Mono.t -> prompt:string -> Model.t -> Model.t * Cmd.t list

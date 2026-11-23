@@ -1038,16 +1038,11 @@ type chat_origin =
   | Origin_bare
   | Origin_connector of string
 
-type interrupt_target =
-  | Interrupt_none
-  | Interrupt_turn_token of string
-  | Interrupt_operation_id of string
-
 type submit_mode =
   | Follow_up
   | Steer of {
       control_token : string;
-      target : interrupt_target;
+      operation_id : string;
     }
 
 type chat_attachment = {
@@ -1174,21 +1169,15 @@ let encode_chat_submit_request req =
   let admission_field =
     match req.mode with
     | Follow_up -> []
-    | Steer { control_token; target } ->
-        let interrupt_token_json, operation_id_json =
-          match target with
-          | Interrupt_none -> (`Null, `Null)
-          | Interrupt_turn_token tok -> (`String tok, `Null)
-          | Interrupt_operation_id op -> (`Null, `String op)
-        in
+    | Steer { control_token; operation_id } ->
         [
           ( "admission_intent"
           , `Assoc
               [
                 ("kind", `String "interactive");
                 ("control_token", `String control_token);
-                ("interrupt_token", interrupt_token_json);
-                ("operation_id", operation_id_json);
+                ("interrupt_token", `Null);
+                ("operation_id", `String operation_id);
               ] );
         ]
   in

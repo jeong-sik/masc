@@ -625,6 +625,257 @@ let test_anthropic_400_credit_and_usage_exhaustion () =
   | other -> failf "expected AuthorizationError on 403, got %s" (Retry.error_message other)
 ;;
 
+let test_structured_json_signals_and_status_optional_ssot () =
+  let parse s = Yojson.Safe.from_string s in
+  (* 1. http_status_of_json ignores JSON-RPC negative codes and vendor codes > 599 *)
+  check (option int) "JSON-RPC -32000 is not an HTTP status" None
+    (Retry.http_status_of_json (parse {|{"code":-32000,"message":"internal"}|}));
+  check (option int) "Z.AI code 1113 is not an HTTP status" None
+    (Retry.http_status_of_json (parse {|{"error":{"code":1113,"message":"quota"}}|}));
+  check (option int) "explicit httpStatus 429 extracted" (Some 429)
+    (Retry.http_status_of_json (parse {|{"httpStatus":429,"status":"RESOURCE_EXHAUSTED"}|}));
+  check (option int) "nested metadata.raw code 503 extracted" (Some 503)
+    (Retry.http_status_of_json
+       (parse {|{"error":{"metadata":{"raw":"{\"error\":{\"code\":503,\"status\":\"UNAVAILABLE\"}}"}}}|}));
+  (* 2. retry_after_of_json supports snake_case + camelCase and rejects negatives *)
+  check (option (float 0.001)) "camelCase retryAfter extracted" (Some 42.5)
+    (Retry.retry_after_of_json (parse {|{"error":{"retryAfter":42.5}}|}));
+  check (option (float 0.001)) "negative retry_after rejected" None
+    (Retry.retry_after_of_json (parse {|{"error":{"retry_after":-3.0}}|}));
+  (* 3. Status-optional structured JSON classification *)
+  (match
+     Retry.classify_structured_json
+       (parse {|{"error":{"error_code":"context_length_exceeded","n_ctx":400000,"message":"cap hit"}}|})
+   with
+   | Some (Retry.Signal_context_overflow { limit = Some 400000; message = "cap hit" }) -> ()
+   | _ -> fail "expected Signal_context_overflow from error_code without HTTP status");
+  (match
+     Retry.classify_structured_json
+       (parse {|{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","retryAfter":15,"message":"rpm"}}|})
+   with
+   | Some (Retry.Signal_rate_limited { retry_after = Some 15.0; _ }) -> ()
+   | _ -> fail "Gemini transient 429 RESOURCE_EXHAUSTED must classify as Signal_rate_limited");
+  (match
+     Retry.classify_structured_json
+       (parse {|{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","details":[{"reason":"QUOTA_EXCEEDED"}],"retry_after":600}}|})
+   with
+   | Some (Retry.Signal_hard_quota { retry_after = Some 600.0; _ }) -> ()
+   | _ -> fail "Gemini 429 with QUOTA_EXCEEDED detail must classify as Signal_hard_quota");
+  (match
+     Retry.classify_structured_json
+       (parse {|{"error":{"status":"UNAUTHENTICATED","message":"bad token"}}|})
+   with
+   | Some (Retry.Signal_auth_error { message = "bad token" }) -> ()
+   | _ -> fail "UNAUTHENTICATED must classify as Signal_auth_error");
+  (match
+     Retry.classify_structured_json
+       (parse {|{"error":{"status":"PERMISSION_DENIED","message":"denied"}}|})
+   with
+   | Some (Retry.Signal_authorization_error { message = "denied" }) -> ()
+   | _ -> fail "PERMISSION_DENIED must classify as Signal_authorization_error");
+  (match
+     Retry.classify_structured_json
+       (parse {|{"error":{"type":"overloaded_error","message":"busy"}}|})
+   with
+   | Some (Retry.Signal_provider_unavailable { message = "busy" }) -> ()
+   | _ -> fail "overloaded_error must classify as Signal_provider_unavailable");
+  (* 4. Free-form prose in message without structured codes MUST return None (zero prose guessing) *)
+  (match
+     Retry.classify_structured_json
+       (parse {|{"message":"permission denied while reading token limit file (throttled/overloaded/forbidden)"}|})
+   with
+   | None -> ()
+   | Some _ -> fail "prose-only JSON without structured codes must stay unclassified (None)");
+  (* 5. structured_refusal_of_json matches classify_structured_refusal without re-serializing *)
+  (match
+     Retry.structured_refusal_of_json
+       ~retry_after:30.0
+       ~status:429
+       (parse {|{"error":{"type":"GoUsageLimitError","message":"monthly limit"}}|})
+   with
+   | Some (Retry.Structured_account_quota { retry_after = Some 30.0; message = "monthly limit" }) -> ()
+   | _ -> fail "structured_refusal_of_json must match GoUsageLimitError");
+  (* 6. P1 fixes: outer-object + nested error merge, flat-string error message, status-field overflow/quota *)
+  (match
+     Retry.classify_structured_json
+       (parse {|{"error_code":"context_length_exceeded","n_ctx":200000,"error":{"message":"cap hit"}}|})
+   with
+   | Some (Retry.Signal_context_overflow { limit = Some 200000; message = "cap hit" }) -> ()
+   | _ -> fail "outer error_code + n_ctx must merge with nested error.message");
+  (match
+     Retry.classify_structured_json
+       (parse {|{"status":"RESOURCE_EXHAUSTED","error":{"message":"slow down"}}|})
+   with
+   | Some (Retry.Signal_rate_limited { message = "slow down"; retry_after = None }) -> ()
+   | _ -> fail "outer status RESOURCE_EXHAUSTED must merge with nested error");
+  (match
+     Retry.classify_structured_json
+       ~http_status:429
+       (parse {|{"error":"too many concurrent requests"}|})
+   with
+   | Some (Retry.Signal_rate_limited { message = "too many concurrent requests"; _ }) -> ()
+   | _ -> fail "flat-string error field must preserve message");
+  (match
+     Retry.structured_refusal_of_json
+       ~status:400
+       (parse {|{"error":"Your credit balance is too low"}|})
+   with
+   | Some (Retry.Structured_account_quota { message = "Your credit balance is too low"; _ }) -> ()
+   | _ -> fail "structured_refusal_of_json must match flat-string Anthropic 400 billing message");
+  (match
+     Retry.classify_structured_json
+       (parse {|{"error":{"status":"context_length_exceeded","message":"too long"}}|})
+   with
+   | Some (Retry.Signal_context_overflow { message = "too long"; _ }) -> ()
+   | _ -> fail "status-field context_length_exceeded must classify");
+  (match
+     Retry.classify_structured_json
+       (parse {|{"error":{"status":"QUOTA_EXCEEDED","message":"budget spent"}}|})
+   with
+   | Some (Retry.Signal_hard_quota { message = "budget spent"; _ }) -> ()
+   | _ -> fail "status-field QUOTA_EXCEEDED must classify");
+  (* 7. P2 fixes: caller ?retry_after sanitization and non-refusal ?http_status fallback *)
+  check (option (float 0.001)) "retry_after_of_json rejects NaN/Inf" None
+    (Retry.retry_after_of_json (`Assoc [ "retry_after", `Float Float.nan ]));
+  check (option (float 0.001)) "retry_after_of_json rejects +Inf" None
+    (Retry.retry_after_of_json (`Assoc [ "retry_after", `Float Float.infinity ]));
+  check (option (float 0.001)) "retry_after_of_json rejects overflowing Intlit" None
+    (Retry.retry_after_of_json (`Assoc [ "retry_after", `Intlit (String.make 400 '9') ]));
+  (match
+     Retry.classify_structured_json
+       ~retry_after:Float.infinity
+       (parse {|{"error":{"code":429,"retry_after":-3.0,"message":"rpm"}}|})
+   with
+   | Some (Retry.Signal_rate_limited { retry_after = None; _ }) -> ()
+   | _ -> fail "non-finite caller retry_after must sanitize to None");
+  (match
+     Retry.structured_refusal_of_json ~retry_after:(-5.0) ~status:402 (`Assoc [])
+   with
+   | Some (Retry.Structured_account_quota { retry_after = None; _ }) -> ()
+   | _ -> fail "negative caller retry_after must sanitize to None");
+  (match
+     Retry.classify_structured_json
+       ~http_status:200
+       (parse {|{"error":{"code":402,"message":"Insufficient Balance"}}|})
+   with
+   | Some (Retry.Signal_hard_quota { message = "Insufficient Balance"; _ }) -> ()
+   | _ -> fail "non-refusal caller http_status 200 must not shadow JSON status 402");
+  (match
+     Retry.classify_structured_json
+       ~http_status:(-32000)
+       (parse {|{"error":{"code":503,"message":"down"}}|})
+   with
+   | Some (Retry.Signal_provider_unavailable { message = "down" }) -> ()
+   | _ -> fail "negative JSON-RPC caller status must not shadow JSON status 503");
+  (* 8. P3: trimmed GLM code, depth boundary, non-object JSON, fallback_message *)
+  check bool "trimmed Z.AI quota code 1113 recognized" true
+    (Retry.signals_indicate_account_quota
+       { Retry.codes = [ " 1113 " ]
+       ; types = []
+       ; statuses = []
+       ; detail_reasons = []
+       ; messages = []
+       ; n_ctx = None
+       });
+  check (option int) "non-object JSON returns None status" None
+    (Retry.http_status_of_json (`List [ `Int 429 ]));
+  (match Retry.classify_structured_json ~fallback_message:"fb" (`Assoc [ "code", `Int 401 ]) with
+   | Some (Retry.Signal_auth_error { message = "fb" }) -> ()
+   | _ -> fail "fallback_message must be used when JSON has no message field");
+  (* metadata.raw recursion depth boundary: depth 2 extracted, depth 3 cut off *)
+  let wrap_raw inner =
+    Yojson.Safe.to_string (`Assoc [ "metadata", `Assoc [ "raw", `String inner ] ])
+  in
+  let leaf = {|{"error":{"code":503,"retry_after":9}}|} in
+  let depth_2 = parse (wrap_raw (wrap_raw leaf)) in
+  let depth_3 = parse (wrap_raw (wrap_raw (wrap_raw leaf))) in
+  check (option int) "metadata.raw depth 2 extracted" (Some 503)
+    (Retry.http_status_of_json depth_2);
+  check (option (float 0.001)) "metadata.raw depth 2 retry_after extracted" (Some 9.0)
+    (Retry.retry_after_of_json depth_2);
+  check (option int) "metadata.raw depth 3 cut off" None
+    (Retry.http_status_of_json depth_3);
+  check (option (float 0.001)) "metadata.raw depth 3 retry_after cut off" None
+    (Retry.retry_after_of_json depth_3);
+  (* Anthropic HTTP 400 billing parity through classify_structured_json *)
+  (match
+     Retry.classify_structured_json
+       ~http_status:400
+       (parse {|{"error":{"type":"invalid_request_error","message":"Your credit balance is too low"}}|})
+   with
+   | Some (Retry.Signal_hard_quota _) -> ()
+   | _ -> fail "classify_structured_json with HTTP 400 must preserve Anthropic credit exhaustion");
+  (* 9. classify_embedded_json and classify_machine_tokens SSOT *)
+  (match
+     Retry.classify_embedded_json
+       {|upstream failure: {"error":{"code":"context_length_exceeded","n_ctx":128000}} (aborted)|}
+   with
+   | Some (Retry.Signal_context_overflow { limit = Some 128000; _ }) -> ()
+   | _ -> fail "classify_embedded_json must extract balanced JSON with trailing text");
+  (match
+     Retry.classify_embedded_json
+       {|{unbalanced prefix {"error":{"code":"context_length_exceeded","n_ctx":64000}}|}
+   with
+   | Some (Retry.Signal_context_overflow { limit = Some 64000; _ }) -> ()
+   | _ -> fail "classify_embedded_json must survive an unbalanced '{' prefix");
+  (match
+     Retry.classify_embedded_json
+       {|[{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"rpm"}}]|}
+   with
+   | Some (Retry.Signal_rate_limited _) -> ()
+   | _ -> fail "classify_embedded_json must classify bare Gemini JSON-array error envelope");
+  (match
+     Retry.classify_embedded_json
+       {|{"message":"user quoted {\"error\":{\"code\":429}} in prose"}|}
+   with
+   | None -> ()
+   | Some _ -> fail "classify_embedded_json must not re-scan prose strings inside a valid JSON object");
+  (match Retry.classify_machine_tokens "http: HTTP 429" with
+   | Some (Retry.Signal_rate_limited _) -> ()
+   | _ -> fail "http prefix within 12 bytes must not mask subsequent HTTP 429");
+  (match Retry.classify_machine_tokens "http-gw: HTTP 503" with
+   | Some (Retry.Signal_provider_unavailable _) -> ()
+   | _ -> fail "http-gw prefix within 12 bytes must not mask subsequent HTTP 503");
+  (match Retry.classify_machine_tokens "exceeded_current_quota_error: credits exhausted" with
+   | Some (Retry.Signal_hard_quota _) -> ()
+   | _ -> fail "exact token exceeded_current_quota_error must classify as hard quota");
+  (match Retry.classify_machine_tokens "RESOURCE_EXHAUSTED: slow down" with
+   | Some (Retry.Signal_rate_limited _) -> ()
+   | _ -> fail "RESOURCE_EXHAUSTED alone must classify as rate limited");
+  (match Retry.classify_machine_tokens "RESOURCE_EXHAUSTED: QUOTA_EXCEEDED" with
+   | Some (Retry.Signal_hard_quota _) -> ()
+   | _ -> fail "RESOURCE_EXHAUSTED + QUOTA_EXCEEDED must classify as hard quota");
+  (match Retry.classify_machine_tokens "HTTP 429 Too Many Requests: request too large" with
+   | Some (Retry.Signal_rate_limited _) -> ()
+   | _ -> fail "HTTP 429 must classify as rate limited");
+  (match Retry.classify_machine_tokens "HTTP/1.1 503 Service Unavailable" with
+   | Some (Retry.Signal_provider_unavailable _) -> ()
+   | _ -> fail "HTTP/1.1 503 must classify as provider unavailable");
+  (match Retry.classify_machine_tokens "HTTP/2 401 Unauthorized" with
+   | Some (Retry.Signal_auth_error _) -> ()
+   | _ -> fail "HTTP/2 401 must classify as auth error");
+  (match Retry.classify_machine_tokens "context_length_exceeded: max input" with
+   | Some (Retry.Signal_context_overflow _) -> ()
+   | _ -> fail "exact token context_length_exceeded must classify as overflow");
+  (* Zero English prose false positives *)
+  List.iter
+    (fun prose ->
+       match Retry.classify_machine_tokens prose with
+       | None -> ()
+       | Some _ -> failf "free-form prose must stay unclassified: %S" prose)
+    [ "permission denied reading /tmp/file"
+    ; "forbidden character in tool argument"
+    ; "prompt exceeds maximum context length"
+    ; "token limit discussed in user message"
+    ; "service throttled or overloaded in simulation"
+    ; "port 429 refused connection on line 503"
+    ; "HTTP request on port 429 failed"
+    ; "HTTP 400 Bad Request"
+    ; "HTTP 500-byte chunk"
+    ; "HTTP 403/404 ratio"
+    ]
+;;
+
 let () =
   run
     "Retry"
@@ -634,6 +885,8 @@ let () =
             test_zai_glm_error_codes_ssot_parity
         ; test_case "Anthropic HTTP 400 credit and usage exhaustion" `Quick
             test_anthropic_400_credit_and_usage_exhaustion
+        ; test_case "structured JSON signals and status-optional SSOT" `Quick
+            test_structured_json_signals_and_status_optional_ssot
         ; test_case "edge cases" `Quick test_classify_error_edge_cases
         ; test_case
             "structured 400/422 overflow and 403/429 quota"

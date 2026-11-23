@@ -379,71 +379,183 @@ let json_positive_int_opt = function
     None
 ;;
 
+let json_number_opt = function
+  | `Float f -> usable_retry_after f
+  | `Int n -> usable_retry_after (float_of_int n)
+  | `Intlit s -> Option.bind (float_of_string_opt s) usable_retry_after
+  | `Assoc _ | `List _ | `String _ | `Bool _ | `Null -> None
+;;
+
+let retry_after_in_fields fields =
+  match Option.bind (List.assoc_opt "retry_after" fields) json_number_opt with
+  | Some _ as v -> v
+  | None -> Option.bind (List.assoc_opt "retryAfter" fields) json_number_opt
+;;
+
+let metadata_raw_of_fields fields =
+  match List.assoc_opt "metadata" fields with
+  | Some (`Assoc mf) -> Option.bind (List.assoc_opt "raw" mf) json_string_opt
+  | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+  | None -> None
+;;
+
+let metadata_raw_in_envelope ~err_fields ~outer_fields =
+  match Option.bind err_fields metadata_raw_of_fields with
+  | Some _ as raw -> raw
+  | None -> metadata_raw_of_fields outer_fields
+;;
+
+let rec retry_after_of_json_depth ~depth (json : Yojson.Safe.t) : float option =
+  if depth > 2
+  then None
+  else
+    match json with
+    | `Assoc fields ->
+      let err_fields =
+        match List.assoc_opt "error" fields with
+        | Some (`Assoc ef) -> Some ef
+        | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+        | None -> None
+      in
+      let direct =
+        match Option.bind err_fields retry_after_in_fields with
+        | Some _ as v -> v
+        | None -> retry_after_in_fields fields
+      in
+      (match direct with
+       | Some _ as v -> v
+       | None ->
+         (match metadata_raw_in_envelope ~err_fields ~outer_fields:fields with
+          | None -> None
+          | Some raw ->
+            (match Json_util.from_string_bounded raw with
+             | Ok raw_json -> retry_after_of_json_depth ~depth:(depth + 1) raw_json
+             | Error _ -> None)))
+    | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+;;
+
+let retry_after_of_json (json : Yojson.Safe.t) : float option =
+  retry_after_of_json_depth ~depth:0 json
+;;
+
+let json_http_status_opt = function
+  | `Int n when n >= 400 && n <= 599 -> Some n
+  | `Int _ | `Assoc _ | `List _ | `String _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
+    None
+;;
+
+let http_status_in_fields fields =
+  let first_status keys =
+    List.find_map
+      (fun key -> Option.bind (List.assoc_opt key fields) json_http_status_opt)
+      keys
+  in
+  first_status [ "http_status"; "httpStatus"; "status_code"; "statusCode"; "status"; "code" ]
+;;
+
+let rec http_status_of_json_depth ~depth (json : Yojson.Safe.t) : int option =
+  if depth > 2
+  then None
+  else
+    match json with
+    | `Assoc fields ->
+      let err_fields =
+        match List.assoc_opt "error" fields with
+        | Some (`Assoc ef) -> Some ef
+        | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+        | None -> None
+      in
+      let direct =
+        match Option.bind err_fields http_status_in_fields with
+        | Some _ as v -> v
+        | None -> http_status_in_fields fields
+      in
+      (match direct with
+       | Some _ as v -> v
+       | None ->
+         (match metadata_raw_in_envelope ~err_fields ~outer_fields:fields with
+          | None -> None
+          | Some raw ->
+            (match Json_util.from_string_bounded raw with
+             | Ok raw_json -> http_status_of_json_depth ~depth:(depth + 1) raw_json
+             | Error _ -> None)))
+    | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+;;
+
+let http_status_of_json (json : Yojson.Safe.t) : int option =
+  http_status_of_json_depth ~depth:0 json
+;;
+
+let signals_of_object_fields fields : error_signals =
+  let codes =
+    List.filter_map
+      (fun key -> Option.bind (List.assoc_opt key fields) json_code_string_opt)
+      [ "code"; "error_code" ]
+  in
+  let top_type = Option.bind (List.assoc_opt "type" fields) json_string_opt in
+  let err_type = Option.bind (List.assoc_opt "error_type" fields) json_string_opt in
+  let metadata_fields =
+    match List.assoc_opt "metadata" fields with
+    | Some (`Assoc mf) -> Some mf
+    | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+    | None -> None
+  in
+  let meta_type =
+    Option.bind metadata_fields (fun mf ->
+      Option.bind (List.assoc_opt "error_type" mf) json_string_opt)
+  in
+  let types = List.filter_map Fun.id [ top_type; err_type; meta_type ] in
+  let statuses =
+    match Option.bind (List.assoc_opt "status" fields) json_string_opt with
+    | Some s -> [ s ]
+    | None -> []
+  in
+  let detail_reasons =
+    match List.assoc_opt "details" fields with
+    | Some (`List items) ->
+      List.filter_map
+        (function
+          | `Assoc df -> Option.bind (List.assoc_opt "reason" df) json_string_opt
+          | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None)
+        items
+    | Some (`Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+    | None -> []
+  in
+  let direct_message = Option.bind (List.assoc_opt "message" fields) json_string_opt in
+  let flat_error_message =
+    match List.assoc_opt "error" fields with
+    | Some (`String _ as s) -> json_string_opt s
+    | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+    | None -> None
+  in
+  let messages = List.filter_map Fun.id [ direct_message; flat_error_message ] in
+  let n_ctx = Option.bind (List.assoc_opt "n_ctx" fields) json_positive_int_opt in
+  { codes; types; statuses; detail_reasons; messages; n_ctx }
+;;
+
 let rec extract_signals_from_json ~depth (json : Yojson.Safe.t) : error_signals =
   if depth > 2
   then empty_signals
   else
     match json with
     | `Assoc fields ->
-      let err_obj =
+      let err_fields =
         match List.assoc_opt "error" fields with
-        | Some (`Assoc err_fields) -> err_fields
-        | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
-        | None -> fields
-      in
-      let codes =
-        match Option.bind (List.assoc_opt "code" err_obj) json_code_string_opt with
-        | Some c -> [ c ]
-        | None -> []
-      in
-      let top_type =
-        Option.bind (List.assoc_opt "type" err_obj) json_string_opt
-      in
-      let metadata_fields =
-        match List.assoc_opt "metadata" err_obj with
-        | Some (`Assoc mf) -> Some mf
+        | Some (`Assoc ef) -> Some ef
         | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
         | None -> None
       in
-      let meta_type =
-        Option.bind metadata_fields (fun mf ->
-          Option.bind (List.assoc_opt "error_type" mf) json_string_opt)
+      let outer = signals_of_object_fields fields in
+      let base =
+        match err_fields with
+        | Some ef -> merge_signals (signals_of_object_fields ef) outer
+        | None -> outer
       in
-      let types = List.filter_map Fun.id [ top_type; meta_type ] in
-      let statuses =
-        match Option.bind (List.assoc_opt "status" err_obj) json_string_opt with
-        | Some s -> [ s ]
-        | None -> []
-      in
-      let detail_reasons =
-        match List.assoc_opt "details" err_obj with
-        | Some (`List items) ->
-          List.filter_map
-            (function
-              | `Assoc df -> Option.bind (List.assoc_opt "reason" df) json_string_opt
-              | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
-                None)
-            items
-        | Some (`Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
-        | None -> []
-      in
-      let messages =
-        match Option.bind (List.assoc_opt "message" err_obj) json_string_opt with
-        | Some m -> [ m ]
-        | None -> []
-      in
-      let n_ctx =
-        Option.bind (List.assoc_opt "n_ctx" err_obj) json_positive_int_opt
-      in
-      let base = { codes; types; statuses; detail_reasons; messages; n_ctx } in
       (* OpenRouter embeds the upstream provider's structured JSON error object
          as a string inside [error.metadata.raw]. Parse it as JSON with the same
          structured extractor so upstream error codes/types survive proxying. *)
       let nested =
-        match
-          Option.bind metadata_fields (fun mf ->
-            Option.bind (List.assoc_opt "raw" mf) json_string_opt)
-        with
+        match metadata_raw_in_envelope ~err_fields ~outer_fields:fields with
         | None -> empty_signals
         | Some raw ->
           (match Json_util.from_string_bounded raw with
@@ -455,38 +567,63 @@ let rec extract_signals_from_json ~depth (json : Yojson.Safe.t) : error_signals 
       empty_signals
 ;;
 
+let signals_of_json (json : Yojson.Safe.t) : error_signals =
+  extract_signals_from_json ~depth:0 json
+;;
+
 let signals_of_body (body : string) : error_signals =
   match Json_util.from_string_bounded body with
-  | Ok json -> extract_signals_from_json ~depth:0 json
+  | Ok json -> signals_of_json json
   | Error _ -> empty_signals
 ;;
 
 let is_structured_context_overflow_code code =
-  match code with
+  let normalized = String.lowercase_ascii (String.trim code) in
+  match normalized with
   | "context_length_exceeded"
+  | "context_window_exceeded"
   | "string_above_max_length"
   | "model_context_window_exceeded"
+  | "model_context_length_exceeded"
+  | "prompt_too_long"
+  | "max_tokens_exceeded"
+  | "request_too_large"
+  | "invalid_argument_prompt_too_long"
   | "3200" -> true
-  | _ -> Backend_glm.is_context_overflow_code code
+  | _ -> Backend_glm.is_context_overflow_code normalized
 ;;
 
-let is_structured_context_overflow_type = function
+let is_structured_context_overflow_type t =
+  match String.lowercase_ascii (String.trim t) with
   | "context_length_exceeded"
+  | "context_window_exceeded"
   | "exceed_context_size_error"
-  | "request_too_large" -> true
+  | "request_too_large"
+  | "max_tokens_exceeded"
+  | "prompt_too_long" -> true
   | _ -> false
 ;;
 
-let is_structured_context_overflow_reason = function
-  | "CONTEXT_LENGTH_EXCEEDED" | "PROMPT_TOO_LONG" -> true
+let is_structured_context_overflow_reason reason =
+  match String.uppercase_ascii (String.trim reason) with
+  | "CONTEXT_LENGTH_EXCEEDED"
+  | "CONTEXT_WINDOW_EXCEEDED"
+  | "PROMPT_TOO_LONG"
+  | "MAX_TOKENS_EXCEEDED" -> true
   | _ -> false
 ;;
 
 let is_structured_quota_code code =
-  match code with
+  let normalized = String.lowercase_ascii (String.trim code) in
+  match normalized with
+  | "exceeded_current_quota_error"
   | "insufficient_quota"
   | "billing_hard_limit_reached"
+  | "billing_api_budget_exhausted"
+  | "billing_disabled"
   | "credit_balance_too_low"
+  | "insufficient_balance"
+  | "payment_required"
   | "key_limit_exceeded"
   | "quota_exceeded"
   | "usage_limit_exceeded"
@@ -494,34 +631,117 @@ let is_structured_quota_code code =
   | "2303" -> true
   (* ZhipuAI / GLM codes (1113, 1308-1311, 1313, 1314, 1316-1321) live in
      Backend_glm.classify_glm_error as the single source of truth. *)
-  | _ -> Backend_glm.is_quota_code code
+  | _ -> Backend_glm.is_quota_code normalized
 ;;
 
-let is_structured_quota_type = function
+let is_structured_quota_type t =
+  match String.lowercase_ascii (String.trim t) with
+  | "exceeded_current_quota_error"
   | "insufficient_quota"
   | "billing_error"
+  | "billing_hard_limit_reached"
+  | "billing_api_budget_exhausted"
+  | "insufficient_balance"
+  | "insufficient_balance_error"
+  | "payment_required"
   | "quota_exceeded"
   | "key_limit_exceeded"
   | "usage_limit_exceeded"
-  | "GoUsageLimitError" -> true
+  | "gousagelimiterror" -> true
   | _ -> false
 ;;
 
-let is_structured_quota_reason = function
+let is_structured_quota_reason reason =
+  match String.uppercase_ascii (String.trim reason) with
   | "QUOTA_EXCEEDED" | "BILLING_DISABLED" -> true
+  | _ -> false
+;;
+
+let is_structured_rate_limit_token value =
+  match String.lowercase_ascii (String.trim value) with
+  | "resource_exhausted"
+  | "rate_limit_exceeded"
+  | "rate_limit_error"
+  | "too_many_requests" -> true
+  | _ -> false
+;;
+
+let is_structured_auth_token value =
+  match String.lowercase_ascii (String.trim value) with
+  | "unauthenticated"
+  | "authentication_error"
+  | "invalid_authentication_error"
+  | "invalid_api_key"
+  | "unauthorized" -> true
+  | _ -> false
+;;
+
+let is_structured_authorization_token value =
+  match String.lowercase_ascii (String.trim value) with
+  | "permission_denied"
+  | "permission_error"
+  | "forbidden"
+  | "access_denied" -> true
+  | _ -> false
+;;
+
+let is_structured_unavailable_token value =
+  match String.lowercase_ascii (String.trim value) with
+  | "overloaded_error"
+  | "api_error"
+  | "server_error"
+  | "service_unavailable"
+  | "internal_error"
+  | "internal_server_error"
+  | "bad_gateway"
+  | "gateway_timeout"
+  | "unavailable"
+  | "deadline_exceeded" -> true
   | _ -> false
 ;;
 
 let signals_indicate_context_overflow (s : error_signals) =
   List.exists is_structured_context_overflow_code s.codes
   || List.exists is_structured_context_overflow_type s.types
+  || List.exists is_structured_context_overflow_code s.statuses
+  || List.exists is_structured_context_overflow_reason s.statuses
   || List.exists is_structured_context_overflow_reason s.detail_reasons
 ;;
 
 let signals_indicate_account_quota (s : error_signals) =
   List.exists is_structured_quota_code s.codes
   || List.exists is_structured_quota_type s.types
+  || List.exists is_structured_quota_code s.statuses
+  || List.exists is_structured_quota_reason s.statuses
   || List.exists is_structured_quota_reason s.detail_reasons
+;;
+
+let signals_indicate_rate_limit (s : error_signals) =
+  List.exists is_structured_rate_limit_token s.codes
+  || List.exists is_structured_rate_limit_token s.types
+  || List.exists is_structured_rate_limit_token s.statuses
+  || List.exists is_structured_rate_limit_token s.detail_reasons
+;;
+
+let signals_indicate_auth_error (s : error_signals) =
+  List.exists is_structured_auth_token s.codes
+  || List.exists is_structured_auth_token s.types
+  || List.exists is_structured_auth_token s.statuses
+  || List.exists is_structured_auth_token s.detail_reasons
+;;
+
+let signals_indicate_authorization_error (s : error_signals) =
+  List.exists is_structured_authorization_token s.codes
+  || List.exists is_structured_authorization_token s.types
+  || List.exists is_structured_authorization_token s.statuses
+  || List.exists is_structured_authorization_token s.detail_reasons
+;;
+
+let signals_indicate_provider_unavailable (s : error_signals) =
+  List.exists is_structured_unavailable_token s.codes
+  || List.exists is_structured_unavailable_token s.types
+  || List.exists is_structured_unavailable_token s.statuses
+  || List.exists is_structured_unavailable_token s.detail_reasons
 ;;
 
 let contains_substring_ci ~haystack ~needle =
@@ -566,10 +786,9 @@ let signals_indicate_anthropic_400_account_quota (s : error_signals) ~message =
   List.exists is_anthropic_400_account_quota_message (message :: s.messages)
 ;;
 
-let classify_structured_refusal ~retry_after_header ~status ~body : structured_refusal option =
-  let message = extract_error_message body in
-  let signals = signals_of_body body in
-  let retry_after = resolve_retry_after ~body ~header:retry_after_header in
+let structured_refusal_of_signals ~retry_after ~status ~message (signals : error_signals)
+  : structured_refusal option
+  =
   match status with
   | 400 | 422 ->
     if signals_indicate_context_overflow signals
@@ -592,6 +811,424 @@ let classify_structured_refusal ~retry_after_header ~status ~body : structured_r
     then Some (Structured_account_quota { message; retry_after })
     else None
   | _ -> None
+;;
+
+let message_of_signals ?(fallback_message = "") (signals : error_signals) =
+  match signals.messages with
+  | m :: _ -> m
+  | [] -> fallback_message
+;;
+
+let structured_refusal_of_json ?retry_after ~status (json : Yojson.Safe.t)
+  : structured_refusal option
+  =
+  let signals = signals_of_json json in
+  let effective_retry =
+    match retry_after_of_json json with
+    | Some _ as from_json -> from_json
+    | None -> Option.bind retry_after usable_retry_after
+  in
+  let message = message_of_signals signals in
+  structured_refusal_of_signals ~retry_after:effective_retry ~status ~message signals
+;;
+
+let classify_structured_refusal ~retry_after_header ~status ~body : structured_refusal option =
+  let message = extract_error_message body in
+  let signals = signals_of_body body in
+  let retry_after = resolve_retry_after ~body ~header:retry_after_header in
+  structured_refusal_of_signals ~retry_after ~status ~message signals
+;;
+
+type signal_refusal =
+  | Signal_context_overflow of
+      { message : string
+      ; limit : int option
+      }
+  | Signal_hard_quota of
+      { message : string
+      ; retry_after : float option
+      }
+  | Signal_rate_limited of
+      { message : string
+      ; retry_after : float option
+      }
+  | Signal_auth_error of { message : string }
+  | Signal_authorization_error of { message : string }
+  | Signal_provider_unavailable of { message : string }
+
+let refusal_http_status_opt = function
+  | Some s when s >= 400 && s <= 599 -> Some s
+  | Some _ | None -> None
+;;
+
+let classify_structured_signals
+      ?http_status
+      ?retry_after
+      ?(fallback_message = "")
+      (signals : error_signals)
+  : signal_refusal option
+  =
+  let retry_after = Option.bind retry_after usable_retry_after in
+  let message = message_of_signals ~fallback_message signals in
+  let classify_by_fields () =
+    if signals_indicate_account_quota signals
+    then Some (Signal_hard_quota { message; retry_after })
+    else if signals_indicate_context_overflow signals
+    then Some (Signal_context_overflow { message; limit = signals.n_ctx })
+    else if signals_indicate_rate_limit signals
+    then Some (Signal_rate_limited { message; retry_after })
+    else if signals_indicate_auth_error signals
+    then Some (Signal_auth_error { message })
+    else if signals_indicate_authorization_error signals
+    then Some (Signal_authorization_error { message })
+    else if signals_indicate_provider_unavailable signals
+    then Some (Signal_provider_unavailable { message })
+    else None
+  in
+  match refusal_http_status_opt http_status with
+  | Some 402 -> Some (Signal_hard_quota { message; retry_after })
+  | Some 401 -> Some (Signal_auth_error { message })
+  | Some 403 ->
+    if signals_indicate_account_quota signals
+    then Some (Signal_hard_quota { message; retry_after })
+    else Some (Signal_authorization_error { message })
+  | Some 429 ->
+    if signals_indicate_account_quota signals
+    then Some (Signal_hard_quota { message; retry_after })
+    else Some (Signal_rate_limited { message; retry_after })
+  | Some 413 -> Some (Signal_context_overflow { message; limit = signals.n_ctx })
+  | Some 400 ->
+    (match classify_by_fields () with
+     | Some _ as classified -> classified
+     | None ->
+       if signals_indicate_anthropic_400_account_quota signals ~message
+       then Some (Signal_hard_quota { message; retry_after })
+       else None)
+  | Some status ->
+    (match server_status_class_of_code status with
+     | Some (Overloaded_status | Server_error_status) ->
+       Some (Signal_provider_unavailable { message })
+     | None -> classify_by_fields ())
+  | None -> classify_by_fields ()
+;;
+
+let classify_structured_json
+      ?http_status
+      ?retry_after
+      ?fallback_message
+      (json : Yojson.Safe.t)
+  : signal_refusal option
+  =
+  let signals = signals_of_json json in
+  let effective_status =
+    match refusal_http_status_opt http_status with
+    | Some _ as s -> s
+    | None -> http_status_of_json json
+  in
+  let effective_retry =
+    match retry_after_of_json json with
+    | Some _ as r -> r
+    | None -> Option.bind retry_after usable_retry_after
+  in
+  classify_structured_signals
+    ?http_status:effective_status
+    ?retry_after:effective_retry
+    ?fallback_message
+    signals
+;;
+
+(* Scan up to [max_attempts] '{'-anchored balanced JSON object spans inside
+   [text], respecting JSON string quoting and backslash escapes. Bounded to
+   64 KiB and 8 attempts on both fast and scan paths so adversarial payloads or
+   unbalanced prefixes (such as ["{prefix {\"error\":...}}"]) cannot stall
+   classification or mask a valid embedded JSON envelope later in the string.
+   Top-level JSON arrays (such as Gemini streaming [[{"error":{...}}]]) inspect
+   up to 8 leading object entries. *)
+let classify_embedded_json ?http_status ?retry_after (text : string) : signal_refusal option =
+  let trimmed = String.trim text in
+  if trimmed = ""
+  then None
+  else (
+    let max_bytes = 65536 in
+    let bounded =
+      if String.length trimmed <= max_bytes then trimmed else String.sub trimmed 0 max_bytes
+    in
+    let classify_json = function
+      | `Assoc _ as obj ->
+        classify_structured_json ?http_status ?retry_after ~fallback_message:bounded obj
+      | `List items ->
+        let rec walk_items remaining = function
+          | [] -> None
+          | _ when remaining <= 0 -> None
+          | (`Assoc _ as item) :: rest ->
+            (match
+               classify_structured_json
+                 ?http_status
+                 ?retry_after
+                 ~fallback_message:bounded
+                 item
+             with
+             | Some _ as matched -> matched
+             | None -> walk_items (remaining - 1) rest)
+          | (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) :: rest ->
+            walk_items (remaining - 1) rest
+        in
+        walk_items 8 items
+      | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+    in
+    let try_slice slice =
+      match Json_util.from_string_bounded slice with
+      | Ok json -> Ok (classify_json json)
+      | Error _ -> Error ()
+    in
+    let fast_path =
+      if String.length trimmed <= max_bytes then try_slice trimmed else Error ()
+    in
+    match fast_path with
+    | Ok (Some _ as matched) -> matched
+    | Ok None -> None
+    | Error () ->
+      let len = String.length bounded in
+      let find_end start =
+        let rec loop idx depth in_str escaped =
+          if idx >= len
+          then None
+          else (
+            let c = bounded.[idx] in
+            if in_str
+            then
+              if escaped
+              then loop (idx + 1) depth true false
+              else if c = '\\'
+              then loop (idx + 1) depth true true
+              else if c = '"'
+              then loop (idx + 1) depth false false
+              else loop (idx + 1) depth true false
+            else if c = '"'
+            then loop (idx + 1) depth true false
+            else if c = '{'
+            then loop (idx + 1) (depth + 1) false false
+            else if c = '}'
+            then
+              if depth <= 1 then Some (idx + 1) else loop (idx + 1) (depth - 1) false false
+            else loop (idx + 1) depth false false)
+        in
+        loop (start + 1) 1 false false
+      in
+      let rec scan idx attempts =
+        if idx >= len || attempts <= 0
+        then None
+        else if bounded.[idx] = '{'
+        then (
+          match find_end idx with
+          | Some stop ->
+            let slice = String.sub bounded idx (stop - idx) in
+            (match try_slice slice with
+             | Ok (Some _ as matched) -> matched
+             | Ok None -> scan stop (attempts - 1)
+             | Error () -> scan (idx + 1) (attempts - 1))
+          | None -> scan (idx + 1) (attempts - 1))
+        else scan (idx + 1) attempts
+      in
+      scan 0 8)
+;;
+
+let is_ascii_ident_char = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true
+  | _ -> false
+;;
+
+let extract_ascii_tokens (text : string) : (int * int * string) list =
+  let len = min (String.length text) 16384 in
+  let rec skip_sep idx acc =
+    if idx >= len
+    then List.rev acc
+    else if is_ascii_ident_char text.[idx]
+    then scan_tok idx (idx + 1) acc
+    else skip_sep (idx + 1) acc
+  and scan_tok start idx acc =
+    if idx < len && is_ascii_ident_char text.[idx]
+    then scan_tok start (idx + 1) acc
+    else (
+      let tok = String.sub text start (idx - start) in
+      skip_sep idx ((start, idx, tok) :: acc))
+  in
+  skip_sep 0 []
+;;
+
+let is_http_version_and_space text ~from ~until =
+  let is_digit c = c >= '0' && c <= '9' in
+  let is_hspace c = c = ' ' || c = '\t' in
+  let rec skip_hspace idx =
+    if idx >= until
+    then idx
+    else if is_hspace text.[idx]
+    then skip_hspace (idx + 1)
+    else idx
+  in
+  let rec skip_digits idx =
+    if idx < until && is_digit text.[idx] then skip_digits (idx + 1) else idx
+  in
+  if from >= until
+  then false
+  else if text.[from] = '/'
+  then (
+    let after_major = skip_digits (from + 1) in
+    if after_major = from + 1
+    then false
+    else (
+      let after_ver =
+        if after_major < until && text.[after_major] = '.'
+        then (
+          let after_minor = skip_digits (after_major + 1) in
+          if after_minor = after_major + 1 then -1 else after_minor)
+        else after_major
+      in
+      after_ver > 0
+      && after_ver < until
+      && is_hspace text.[after_ver]
+      && skip_hspace after_ver = until))
+  else is_hspace text.[from] && skip_hspace from = until
+;;
+
+let explicit_http_refusal_status_in_tokens text tokens =
+  let parse_refusal_code tok =
+    if String.length tok = 3
+    then (
+      match int_of_string_opt tok with
+      | Some (401 | 402 | 403 | 413 | 429 as s) -> Some s
+      | Some s when Option.is_some (server_status_class_of_code s) -> Some s
+      | Some _ | None -> None)
+    else None
+  in
+  let has_valid_code_trailing_boundary end_pos =
+    if end_pos >= String.length text
+    then true
+    else (
+      match text.[end_pos] with
+      | '-' | '/' | '.' -> false
+      | _ -> true)
+  in
+  let rec walk = function
+    | (_s1, e1, t1) :: rest
+      when String.equal (String.lowercase_ascii t1) "http" ->
+      let rec find_code = function
+        | (s2, e2, t2) :: tl ->
+          if is_http_version_and_space text ~from:e1 ~until:s2
+          then (
+            if has_valid_code_trailing_boundary e2
+            then (
+              match parse_refusal_code t2 with
+              | Some _ as status -> status
+              | None -> walk rest)
+            else walk rest)
+          else if s2 - e1 <= 12
+          then find_code tl
+          else walk rest
+        | [] -> walk rest
+      in
+      find_code rest
+    | _ :: rest -> walk rest
+    | [] -> None
+  in
+  walk tokens
+;;
+
+(* Exact unambiguous machine wire-code tokens accepted when a non-HTTP CLI or
+   JSON-RPC server wraps an upstream refusal code into a plain message string
+   without a structured JSON envelope. Every token here is an explicit wire
+   identifier (snake_case, ALL-CAPS gRPC status, or CamelCase error type) —
+   ordinary English words (forbidden, unauthorized, overloaded, throttled,
+   token limit, permission denied, etc.) are intentionally excluded. *)
+let is_exact_machine_wire_token = function
+  (* Hard quota / billing *)
+  | "exceeded_current_quota_error"
+  | "insufficient_quota"
+  | "quota_exceeded"
+  | "QUOTA_EXCEEDED"
+  | "usage_limit_exceeded"
+  | "billing_hard_limit_reached"
+  | "billing_api_budget_exhausted"
+  | "billing_disabled"
+  | "BILLING_DISABLED"
+  | "credit_balance_too_low"
+  | "insufficient_balance"
+  | "insufficient_balance_error"
+  | "payment_required"
+  | "PAYMENT_REQUIRED"
+  | "key_limit_exceeded"
+  | "GoUsageLimitError"
+  (* Rate limit *)
+  | "RESOURCE_EXHAUSTED"
+  | "resource_exhausted"
+  | "rate_limit_exceeded"
+  | "rate_limit_error"
+  | "too_many_requests"
+  | "TOO_MANY_REQUESTS"
+  (* Auth *)
+  | "UNAUTHENTICATED"
+  | "invalid_api_key"
+  | "authentication_error"
+  | "invalid_authentication_error"
+  (* Authorization *)
+  | "PERMISSION_DENIED"
+  | "permission_error"
+  | "access_denied"
+  (* Context overflow *)
+  | "context_length_exceeded"
+  | "CONTEXT_LENGTH_EXCEEDED"
+  | "context_window_exceeded"
+  | "CONTEXT_WINDOW_EXCEEDED"
+  | "model_context_window_exceeded"
+  | "model_context_length_exceeded"
+  | "max_tokens_exceeded"
+  | "MAX_TOKENS_EXCEEDED"
+  | "prompt_too_long"
+  | "PROMPT_TOO_LONG"
+  | "request_too_large"
+  | "REQUEST_TOO_LARGE"
+  | "exceed_context_size_error"
+  | "string_above_max_length"
+  | "invalid_argument_prompt_too_long"
+  (* Provider unavailable *)
+  | "overloaded_error"
+  | "service_unavailable"
+  | "SERVICE_UNAVAILABLE"
+  | "DEADLINE_EXCEEDED"
+  | "internal_server_error"
+  | "bad_gateway"
+  | "gateway_timeout"
+  | "server_error" -> true
+  | _ -> false
+;;
+
+let classify_machine_tokens ?http_status ?retry_after (text : string) : signal_refusal option =
+  let trimmed = String.trim text in
+  let tokens = extract_ascii_tokens trimmed in
+  let effective_status =
+    match refusal_http_status_opt http_status with
+    | Some _ as s -> s
+    | None -> explicit_http_refusal_status_in_tokens trimmed tokens
+  in
+  let matched_codes =
+    List.filter_map
+      (fun (_, _, tok) -> if is_exact_machine_wire_token tok then Some tok else None)
+      tokens
+  in
+  let signals =
+    { codes = matched_codes
+    ; types = matched_codes
+    ; statuses = matched_codes
+    ; detail_reasons = matched_codes
+    ; messages = (if trimmed = "" then [] else [ trimmed ])
+    ; n_ctx = None
+    }
+  in
+  classify_structured_signals
+    ?http_status:effective_status
+    ?retry_after
+    ~fallback_message:trimmed
+    signals
 ;;
 
 (** Classify HTTP status + body into structured api_error *)

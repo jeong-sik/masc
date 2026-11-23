@@ -61,7 +61,8 @@ def spec(choice='vllm'):
     # 100000 and RuntimeSpecWindowFloor's assertion in the same commit.
     max_context = 100000 if choice == 'claude_code' else 8192
     result = dict(choice=choice, model='operator/model-exact', max_context=max_context, tools=True, streaming=False)
-    if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama', 'messages'):
+    if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama', 'messages',
+                  'gemini', 'vertex_gemini'):
         result['endpoint'] = 'http://127.0.0.1:9/v1'
         if choice == 'messages':
             result['provider_kind'] = 'anthropic'

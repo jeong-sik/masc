@@ -29,6 +29,72 @@ let is_viewing_keeper_chat ~keeper (m : Model.t) =
       | Nav.Dive_infra _ ) ->
       false
 
+let active_memory_keeper (m : Model.t) =
+  match Model.active_dive m with
+  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) -> Some name
+  | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; _ })) -> keeper
+  | Some
+      ( Nav.Dive_keeper
+          {
+            tab =
+              ( Nav.Keeper_chat
+              | Nav.Keeper_work_candle
+              | Nav.Keeper_sandbox
+              | Nav.Keeper_config );
+            _;
+          }
+      | Nav.Dive_work _
+      | Nav.Dive_knowledge
+          (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+      | Nav.Dive_infra _ ) ->
+      None
+  | None -> (
+      match m.nav.workspace with
+      | Nav.Knowledge
+        when Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_memory
+        ->
+          m.knowledge.memory_diff_keeper
+      | Nav.Keepers
+        when Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory ->
+          Option.map
+            (fun (k : Wire_fleet.keeper_summary) -> k.name)
+            (Fleet_store.selected_keeper_summary m.fleet)
+      | Nav.Pulse
+      | Nav.Work
+      | Nav.Knowledge
+      | Nav.Keepers
+      | Nav.Runtime
+      | Nav.Infra ->
+          None)
+
+let is_viewing_memory (m : Model.t) =
+  match Model.active_dive m with
+  | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ })
+  | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive _)) ->
+      true
+  | Some
+      ( Nav.Dive_keeper
+          {
+            tab =
+              ( Nav.Keeper_chat
+              | Nav.Keeper_work_candle
+              | Nav.Keeper_sandbox
+              | Nav.Keeper_config );
+            _;
+          }
+      | Nav.Dive_work _
+      | Nav.Dive_knowledge
+          (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+      | Nav.Dive_infra _ ) ->
+      false
+  | None -> (
+      match m.nav.workspace with
+      | Nav.Knowledge ->
+          Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_memory
+      | Nav.Keepers ->
+          Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
+      | Nav.Pulse | Nav.Work | Nav.Runtime | Nav.Infra -> false)
+
 let apply_dataset_invalidation (m : Model.t) ds =
   let e = m.epoch in
   let ws = m.nav.workspace in
@@ -64,7 +130,60 @@ let apply_dataset_invalidation (m : Model.t) ds =
         | Nav.Work | Nav.Keepers | Nav.Runtime | Nav.Infra -> []
       in
       ({ m with knowledge }, cmds)
-  | Wire_observer.Dataset_memory_health _ | Wire_observer.Dataset_world_memory ->
+  | Wire_observer.Dataset_memory_health keeper_opt ->
+      let mark_if_matching ~get_keeper obs =
+        match keeper_opt with
+        | None -> Observed.mark_stale obs
+        | Some target -> (
+            match Observed.to_option obs with
+            | Some data when String.equal (get_keeper data) target ->
+                Observed.mark_stale obs
+            | Some _ | None -> obs)
+      in
+      let knowledge =
+        {
+          m.knowledge with
+          world_memory = Observed.mark_stale m.knowledge.world_memory;
+          keeper_memory_health =
+            Observed.mark_stale m.knowledge.keeper_memory_health;
+          keeper_memory_facts =
+            mark_if_matching
+              ~get_keeper:(fun (f : Wire_knowledge.keeper_memory_facts) ->
+                f.keeper)
+              m.knowledge.keeper_memory_facts;
+          memory_os_internals =
+            mark_if_matching
+              ~get_keeper:(fun (i : Wire_knowledge.memory_os_internals) ->
+                i.keeper)
+              m.knowledge.memory_os_internals;
+        }
+      in
+      let base_cmds =
+        match ws with
+        | Nav.Knowledge | Nav.Pulse -> [ get_cmd e Cmd.Get_world_memory ]
+        | Nav.Work | Nav.Keepers | Nav.Runtime | Nav.Infra -> []
+      in
+      let mem_cmds =
+        if not (is_viewing_memory m) then []
+        else
+          let keeper_cmds =
+            match active_memory_keeper m, keeper_opt with
+            | Some kp, None ->
+                [
+                  get_cmd e (Cmd.Get_keeper_memory_facts { keeper = kp });
+                  get_cmd e (Cmd.Get_keeper_memory_os_internals { keeper = kp });
+                ]
+            | Some kp, Some target when String.equal kp target ->
+                [
+                  get_cmd e (Cmd.Get_keeper_memory_facts { keeper = kp });
+                  get_cmd e (Cmd.Get_keeper_memory_os_internals { keeper = kp });
+                ]
+            | Some _, Some _ | None, (Some _ | None) -> []
+          in
+          get_cmd e Cmd.Get_keeper_memory_health :: keeper_cmds
+      in
+      ({ m with knowledge }, base_cmds @ mem_cmds)
+  | Wire_observer.Dataset_world_memory ->
       let knowledge =
         {
           m.knowledge with
@@ -82,20 +201,52 @@ let apply_dataset_invalidation (m : Model.t) ds =
         {
           m.knowledge with
           memory_diff = Observed.mark_stale m.knowledge.memory_diff;
+          keeper_memory_activity =
+            Observed.mark_stale m.knowledge.keeper_memory_activity;
+          keeper_memory_facts =
+            Observed.mark_stale m.knowledge.keeper_memory_facts;
+          keeper_memory_health =
+            Observed.mark_stale m.knowledge.keeper_memory_health;
+          memory_os_internals =
+            Observed.mark_stale m.knowledge.memory_os_internals;
         }
       in
       let cmds =
-        match ws with
-        | Nav.Knowledge ->
-            [
-              get_cmd e
-                (Cmd.Get_memory_diff
-                   {
-                     keeper = knowledge.memory_diff_keeper;
-                     window = knowledge.memory_diff_window;
-                   });
-            ]
-        | Nav.Pulse | Nav.Work | Nav.Keepers | Nav.Runtime | Nav.Infra -> []
+        if not (is_viewing_memory m) then
+          match ws with
+          | Nav.Knowledge ->
+              [
+                get_cmd e
+                  (Cmd.Get_memory_diff
+                     {
+                       keeper = knowledge.memory_diff_keeper;
+                       window = knowledge.memory_diff_window;
+                     });
+              ]
+          | Nav.Pulse | Nav.Work | Nav.Keepers | Nav.Runtime | Nav.Infra -> []
+        else
+          match active_memory_keeper m with
+          | Some kp ->
+              [
+                get_cmd e
+                  (Cmd.Get_memory_diff
+                     { keeper = Some kp; window = knowledge.memory_diff_window });
+                get_cmd e
+                  (Cmd.Get_keeper_memory_activity { keeper = kp; limit = 50 });
+                get_cmd e (Cmd.Get_keeper_memory_facts { keeper = kp });
+                get_cmd e (Cmd.Get_keeper_memory_os_internals { keeper = kp });
+                get_cmd e Cmd.Get_keeper_memory_health;
+              ]
+          | None ->
+              [
+                get_cmd e
+                  (Cmd.Get_memory_diff
+                     {
+                       keeper = knowledge.memory_diff_keeper;
+                       window = knowledge.memory_diff_window;
+                     });
+                get_cmd e Cmd.Get_keeper_memory_health;
+              ]
       in
       ({ m with knowledge }, cmds)
   | Wire_observer.Dataset_runtime_config ->
@@ -517,8 +668,73 @@ let apply_observer_event (m : Model.t) = function
         | Nav.Work | Nav.Knowledge | Nav.Runtime | Nav.Infra -> []
       in
       ({ m with fleet }, cmds)
-  | Wire_observer.Keeper_memory_journal_appended _ ->
-      apply_dataset_invalidation m Wire_observer.Dataset_memory_diff
+  | Wire_observer.Keeper_memory_journal_appended { keeper; _ } ->
+      let mark_keeper_slot ~get_keeper obs =
+        match Observed.to_option obs with
+        | Some data when String.equal (get_keeper data) keeper ->
+            Observed.mark_stale obs
+        | Some _ | None -> obs
+      in
+      let memory_diff =
+        match Observed.to_option m.knowledge.memory_diff with
+        | Some (diff : Wire_knowledge.memory_diff) -> (
+            match diff.scope with
+            | Wire_knowledge.Scope_keeper k when String.equal k keeper ->
+                Observed.mark_stale m.knowledge.memory_diff
+            | Wire_knowledge.Scope_world ->
+                Observed.mark_stale m.knowledge.memory_diff
+            | Wire_knowledge.Scope_keeper _ -> m.knowledge.memory_diff)
+        | None -> m.knowledge.memory_diff
+      in
+      let knowledge =
+        {
+          m.knowledge with
+          memory_diff;
+          keeper_memory_activity =
+            mark_keeper_slot
+              ~get_keeper:(fun (a : Wire_knowledge.keeper_memory_activity) ->
+                a.keeper)
+              m.knowledge.keeper_memory_activity;
+          keeper_memory_facts =
+            mark_keeper_slot
+              ~get_keeper:(fun (f : Wire_knowledge.keeper_memory_facts) ->
+                f.keeper)
+              m.knowledge.keeper_memory_facts;
+          keeper_memory_health =
+            Observed.mark_stale m.knowledge.keeper_memory_health;
+          memory_os_internals =
+            mark_keeper_slot
+              ~get_keeper:(fun (i : Wire_knowledge.memory_os_internals) ->
+                i.keeper)
+              m.knowledge.memory_os_internals;
+        }
+      in
+      let e = m.epoch in
+      let cmds =
+        if not (is_viewing_memory m) then []
+        else
+          match active_memory_keeper m with
+          | Some kp when String.equal kp keeper ->
+              [
+                get_cmd e
+                  (Cmd.Get_memory_diff
+                     { keeper = Some kp; window = knowledge.memory_diff_window });
+                get_cmd e
+                  (Cmd.Get_keeper_memory_activity { keeper = kp; limit = 50 });
+                get_cmd e (Cmd.Get_keeper_memory_facts { keeper = kp });
+                get_cmd e (Cmd.Get_keeper_memory_os_internals { keeper = kp });
+                get_cmd e Cmd.Get_keeper_memory_health;
+              ]
+          | Some _ -> [ get_cmd e Cmd.Get_keeper_memory_health ]
+          | None ->
+              [
+                get_cmd e
+                  (Cmd.Get_memory_diff
+                     { keeper = None; window = knowledge.memory_diff_window });
+                get_cmd e Cmd.Get_keeper_memory_health;
+              ]
+      in
+      ({ m with knowledge }, cmds)
   | Wire_observer.Board_changed _ ->
       apply_dataset_invalidation m Wire_observer.Dataset_board
   | Wire_observer.Approval_changed ev -> (

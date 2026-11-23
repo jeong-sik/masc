@@ -47,6 +47,9 @@ type get_request =
       window : Knowledge_store.memory_diff_window;
     }
   | Get_keeper_memory_os_internals of { keeper : string }
+  | Get_keeper_memory_facts of { keeper : string }
+  | Get_keeper_memory_activity of { keeper : string; limit : int }
+  | Get_keeper_memory_health
   | Get_provider_usage of { days : int }
   | Get_keeper_costs of { window_minutes : int }
   | Get_efficiency of { month : string option }
@@ -242,6 +245,12 @@ let get_request_path = function
           Wire_knowledge.memory_diff_path ~keeper ?window ())
   | Get_keeper_memory_os_internals { keeper } ->
       Wire_knowledge.keeper_memory_os_internals_path ~keeper
+  | Get_keeper_memory_facts { keeper } ->
+      Wire_knowledge.keeper_memory_facts_path ~keeper
+  | Get_keeper_memory_activity { keeper; limit } ->
+      Wire_knowledge.keeper_memory_activity_path ~keeper ~limit ()
+  | Get_keeper_memory_health ->
+      Wire_knowledge.keeper_memory_health_path ()
   | Get_provider_usage { days } ->
       Wire_runtime.provider_usage_history_path ~days
   | Get_keeper_costs { window_minutes } ->

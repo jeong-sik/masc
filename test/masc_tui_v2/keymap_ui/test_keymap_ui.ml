@@ -18,6 +18,7 @@ module Layout = Masc_tui_ui.Layout
 module Typography = Masc_tui_ui.Typography
 module Card = Masc_tui_ui.Card
 module Chart = Masc_tui_ui.Chart
+module Memory_charts = Masc_tui_ui.Memory_charts
 module Table = Masc_tui_ui.Table
 module Code_lexer = Masc_tui_ui.Code_lexer
 module Diff = Masc_tui_ui.Diff
@@ -1754,6 +1755,118 @@ let test_p0_2_dual_independent_usd_axis () =
         (count_b ~y0:5 ~y1:7 >= 20))
     [ Say.Lang_ko; Say.Lang_en ]
 
+let test_memory_age_ladder_math_and_keymap_bindings () =
+  (* 1. Age Ladder responsive merge_of_width *)
+  Alcotest.(check (option int)) "width 24 -> merge 1" (Some 1)
+    (Memory_charts.merge_of_width 24);
+  Alcotest.(check (option int)) "width 30 -> merge 1" (Some 1)
+    (Memory_charts.merge_of_width 30);
+  Alcotest.(check (option int)) "width 12 -> merge 2" (Some 2)
+    (Memory_charts.merge_of_width 12);
+  Alcotest.(check (option int)) "width 23 -> merge 2" (Some 2)
+    (Memory_charts.merge_of_width 23);
+  Alcotest.(check (option int)) "width 6 -> merge 4" (Some 4)
+    (Memory_charts.merge_of_width 6);
+  Alcotest.(check (option int)) "width 5 -> None" None
+    (Memory_charts.merge_of_width 5);
+
+  (* 2. Exact boundary indices & tier counts *)
+  Alcotest.(check int) "1h edge bin" 1 (Memory_charts.edge_bin Memory_charts.Edge_hour);
+  Alcotest.(check int) "1d edge bin" 9 (Memory_charts.edge_bin Memory_charts.Edge_day);
+  Alcotest.(check int) "7d edge bin" 17 (Memory_charts.edge_bin Memory_charts.Edge_week);
+  Alcotest.(check int) "30d edge bin" 23 (Memory_charts.edge_bin Memory_charts.Edge_month);
+  let bins = Array.init 24 (fun i -> i + 1) in
+  (match Memory_charts.tier_counts bins with
+  | Ok (d, w, p) ->
+      (* bins 0..8 -> 1+..+9 = 45; bins 9..16 -> 10+..+17 = 108; bins 17..23 -> 18+..+24 = 147 *)
+      Alcotest.(check int) "<1d sum" 45 d;
+      Alcotest.(check int) "1-7d sum" 108 w;
+      Alcotest.(check int) ">7d sum" 147 p
+  | Error msg -> Alcotest.fail msg);
+
+  (* 3. Folding oldest-left to newest-right + newest-bin tier inheritance *)
+  (match Memory_charts.fold_bins ~merge:1 bins with
+  | Ok cells ->
+      Alcotest.(check int) "24 cells" 24 (List.length cells);
+      let first = List.nth cells 0 in
+      let last = List.nth cells 23 in
+      Alcotest.(check int) "leftmost cell is oldest bin 23 (count 24)" 24 first.count;
+      Alcotest.(check bool) "leftmost tier >7d" true
+        (Memory_charts.equal_age_tier first.tier Memory_charts.Tier_past_week);
+      Alcotest.(check int) "rightmost cell is newest bin 0 (count 1)" 1 last.count;
+      Alcotest.(check bool) "rightmost tier <1d" true
+        (Memory_charts.equal_age_tier last.tier Memory_charts.Tier_within_day)
+  | Error msg -> Alcotest.fail msg);
+  (match Memory_charts.fold_bins ~merge:2 bins with
+  | Ok cells ->
+      Alcotest.(check int) "12 cells" 12 (List.length cells);
+      (* cell 0 merges bin 23 (24) + bin 22 (23) = 47 *)
+      Alcotest.(check int) "merged pair 0 sum" 47 (List.nth cells 0).count;
+      (* cell 7 merges bin 9 (10) + bin 8 (9) -> newest bin is 8 (<1d) *)
+      let boundary_cell = List.nth cells 7 in
+      Alcotest.(check int) "boundary cell newest_bin = 8" 8 boundary_cell.newest_bin;
+      Alcotest.(check bool) "boundary cell inherits newest bin tier (<1d)" true
+        (Memory_charts.equal_age_tier boundary_cell.tier Memory_charts.Tier_within_day)
+  | Error msg -> Alcotest.fail msg);
+  (match Memory_charts.fold_bins ~merge:4 bins with
+  | Ok cells -> Alcotest.(check int) "6 cells" 6 (List.length cells)
+  | Error msg -> Alcotest.fail msg);
+  Alcotest.(check bool) "reject wrong array length" true
+    (Result.is_error (Memory_charts.fold_bins ~merge:1 [| 1; 2; 3 |]));
+  Alcotest.(check bool) "reject invalid merge factor" true
+    (Result.is_error (Memory_charts.fold_bins ~merge:3 bins));
+
+  (* 4. Level glyphs never floor positive counts to empty & tick header exact width *)
+  Alcotest.(check string) "0 -> dot" "·"
+    (Memory_charts.level_glyph ~unicode:true ~count:0 ~max_count:100);
+  Alcotest.(check bool) "positive count never floors to dot" false
+    (String.equal "·" (Memory_charts.level_glyph ~unicode:true ~count:1 ~max_count:10000));
+  Alcotest.(check string) "max count -> full block" "█"
+    (Memory_charts.level_glyph ~unicode:true ~count:100 ~max_count:100);
+  let hdr24 = Memory_charts.tick_header ~width:24 in
+  Alcotest.(check int) "tick_header exact width 24" 24 (String.length hdr24);
+  Alcotest.(check bool) "tick_header 24 has 1h/1d/7d/30d" true
+    (contains_sub ~needle:"1h" ~haystack:hdr24
+     && contains_sub ~needle:"1d" ~haystack:hdr24
+     && contains_sub ~needle:"7d" ~haystack:hdr24
+     && contains_sub ~needle:"30d" ~haystack:hdr24);
+  Alcotest.(check int) "tick_header exact width 12" 12
+    (String.length (Memory_charts.tick_header ~width:12));
+
+  (* 5. Fleet age bin aggregation *)
+  Alcotest.(check bool) "empty fleet -> None" true
+    (Option.is_none (Memory_charts.aggregate_fleet_age_bins []));
+  (match Memory_charts.aggregate_fleet_age_bins [ bins; bins ] with
+  | Some sum -> Alcotest.(check int) "doubled bin 0" 2 sum.(0)
+  | None -> Alcotest.fail "expected aggregated fleet bins");
+
+  (* 6. Keymap zero collisions + new t/s bindings + PR 2 reserved keys untouched *)
+  Alcotest.(check int) "zero keymap collisions" 0 (List.length (Keymap.collisions ()));
+  let nav_chain = Keymap.scope_chain_of_focus (Nav.Workspace_focused Nav.Knowledge) in
+  let ev_char c =
+    { Keymap.Input.key = Keymap.Input.Char c; mods = Keymap.Input.no_mods }
+  in
+  Alcotest.(check bool) "t -> Cycle_memory_view" true
+    (Option.equal Keymap.equal_action
+       (Keymap.dispatch ~scope_chain:nav_chain (ev_char "t"))
+       (Some Keymap.Cycle_memory_view));
+  Alcotest.(check bool) "s -> Toggle_memory_sort" true
+    (Option.equal Keymap.equal_action
+       (Keymap.dispatch ~scope_chain:nav_chain (ev_char "s"))
+       (Some Keymap.Toggle_memory_sort));
+  Alcotest.(check bool) ". stays unbound for PR 2 Pele Card" true
+    (Option.is_none (Keymap.dispatch ~scope_chain:nav_chain (ev_char ".")));
+  let ctrl_o =
+    {
+      Keymap.Input.key = Keymap.Input.Char "o";
+      mods = { ctrl = true; alt = false; shift = false };
+    }
+  in
+  Alcotest.(check bool) "Ctrl+O stays Toggle_tool_details (PR 2 hook)" true
+    (Option.equal Keymap.equal_action
+       (Keymap.dispatch ~scope_chain:nav_chain ctrl_o)
+       (Some Keymap.Toggle_tool_details))
+
 let () =
   Alcotest.run "masc_tui_keymap_ui"
     [
@@ -1826,5 +1939,7 @@ let () =
             `Quick test_v25_markdown_form_inspector_and_composer;
           Alcotest.test_case "Full-width 24h Braille curve stretch (Full & Dual), gap preservation & n=1"
             `Quick test_v25_chart_full_width_braille_stretch;
+          Alcotest.test_case "24-bin Age Ladder folding/tiers/ticks & Memory keymap invariants"
+            `Quick test_memory_age_ladder_math_and_keymap_bindings;
         ] );
     ]

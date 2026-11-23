@@ -3076,6 +3076,389 @@ let test_agui_chat_stream_and_history_provenance () =
   Alcotest.(check (option string)) "interrupt chat_control_token"
     (Some "ctrl-88") int_resp.chat_control_token
 
+let test_keeper_memory_facts_activity_and_health_decoders () =
+  (* 1. Endpoint builders *)
+  Alcotest.(check string) "memory-facts path"
+    "/api/v1/keepers/e-masc-leader/memory-facts"
+    (Wire_knowledge.keeper_memory_facts_path ~keeper:"e-masc-leader");
+  Alcotest.(check string) "memory-activity path"
+    "/api/v1/keepers/e-masc-leader/memory-journal?activity=1&limit=50"
+    (Wire_knowledge.keeper_memory_activity_path ~keeper:"e-masc-leader" ());
+  Alcotest.(check string) "memory-health fleet path"
+    "/api/v1/dashboard/keeper-memory-health"
+    (Wire_knowledge.keeper_memory_health_path ());
+  Alcotest.(check string) "memory-health scoped path"
+    "/api/v1/dashboard/keeper-memory-health?keeper=alpha%201"
+    (Wire_knowledge.keeper_memory_health_path ~keeper:"alpha 1" ());
+
+  (* 2. decode_keeper_memory_facts: present + observed/board/derived + retrieval + source_bound *)
+  let facts_json =
+    parse_json
+      {|{
+        "keeper": "alpha",
+        "dashboard_surface": "keeper_memory_facts",
+        "ordinary": {
+          "present": true,
+          "revision": 12,
+          "snapshot_sha256": "abc123def456",
+          "updated_at": 1795252000.0,
+          "facts": [
+            {
+              "memory_id": "m-1",
+              "claim": "Always run dune build @check",
+              "category": "lesson",
+              "origin": "authored",
+              "first_seen": 1795200000.0,
+              "last_seen": 1795251000.0,
+              "basis": { "kind": "observed", "board": { "post_id": "p-42", "comment_id": "c-7" } },
+              "events": {
+                "retrieved_count": 5,
+                "retrieved_distinct_days": 2,
+                "last_retrieved_at": 1795251500.0,
+                "retracted_count": 0,
+                "revised_from": ["m-0"]
+              }
+            },
+            {
+              "memory_id": "m-2",
+              "claim": "Derived synthesis rule",
+              "category": "custom_topic",
+              "origin": "injected",
+              "first_seen": 1795200100.0,
+              "last_seen": 1795251100.0,
+              "basis": { "kind": "derived", "derivations": [{ "rule_id": "r-synth", "premise_ids": ["m-1"] }] },
+              "events": {
+                "retrieved_count": 0,
+                "retrieved_distinct_days": 0,
+                "last_retrieved_at": null,
+                "retracted_count": 1,
+                "revised_from": []
+              }
+            }
+          ],
+          "support_invalidations": [
+            {
+              "memory_id": "m-inv",
+              "claim": "Stale derived claim",
+              "basis": { "kind": "observed" },
+              "missing_premise_ids": ["m-gone"]
+            }
+          ]
+        },
+        "source_bound": {
+          "present": true,
+          "revision": 3,
+          "updated_at": 1795252000.0,
+          "facts": [
+            { "claim": "Config lives in runtime.toml", "first_seen": 1795210000.0, "path": "docs/README.md", "sha256": "deadbeef" }
+          ],
+          "invalidations": [
+            { "source_path": "docs/OLD.md", "invalidated_at": 1795250000.0, "reason": "source_changed" }
+          ]
+        },
+        "events_unreadable_lines": 0,
+        "events_read_error": null
+      }|}
+  in
+  let mf = expect_ok "memory facts present" (Wire_knowledge.decode_keeper_memory_facts facts_json) in
+  Alcotest.(check string) "facts keeper" "alpha" mf.keeper;
+  (match mf.ordinary with
+  | Wire_knowledge.Memory_store_present ord ->
+      Alcotest.(check int) "ordinary rev" 12 ord.revision;
+      Alcotest.(check int) "2 ordinary facts" 2 (List.length ord.facts);
+      Alcotest.(check int) "1 support invalidation" 1 (List.length ord.support_invalidations);
+      let f0 = List.nth ord.facts 0 in
+      let f1 = List.nth ord.facts 1 in
+      Alcotest.(check string) "cat0" "lesson"
+        (Wire_knowledge.memory_fact_category_to_string f0.category);
+      Alcotest.(check string) "cat1 custom" "custom_topic"
+        (Wire_knowledge.memory_fact_category_to_string f1.category);
+      (match f0.events.retrieval with
+      | Wire_knowledge.Retrieved { count = 5; distinct_days = 2; _ } -> ()
+      | Wire_knowledge.Retrieved _ | Wire_knowledge.Never_retrieved ->
+          Alcotest.fail "expected Retrieved 5/2");
+      (match f1.events.retrieval with
+      | Wire_knowledge.Never_retrieved -> ()
+      | Wire_knowledge.Retrieved _ -> Alcotest.fail "expected Never_retrieved")
+  | Wire_knowledge.Memory_store_absent | Wire_knowledge.Memory_store_read_error _ ->
+      Alcotest.fail "expected present ordinary memory");
+  (match mf.source_bound with
+  | Wire_knowledge.Memory_store_present sb ->
+      Alcotest.(check int) "1 source fact" 1 (List.length sb.facts);
+      Alcotest.(check int) "1 source invalidation" 1 (List.length sb.invalidations)
+  | Wire_knowledge.Memory_store_absent | Wire_knowledge.Memory_store_read_error _ ->
+      Alcotest.fail "expected present source_bound memory");
+  (* Absent & read_error states *)
+  let mf_states =
+    expect_ok "absent + read_error"
+      (Wire_knowledge.decode_keeper_memory_facts
+         (parse_json
+            {|{
+              "keeper": "beta",
+              "ordinary": { "present": false },
+              "source_bound": { "read_error": "disk corrupt" },
+              "events_unreadable_lines": 2,
+              "events_read_error": "tail truncated"
+            }|}))
+  in
+  (match mf_states.ordinary, mf_states.source_bound with
+  | Wire_knowledge.Memory_store_absent, Wire_knowledge.Memory_store_read_error "disk corrupt" -> ()
+  | _ -> Alcotest.fail "expected absent ordinary + read_error source_bound");
+  (* Strict rejections on memory-facts *)
+  ignore
+    (expect_err "reject forbidden category 'all'"
+       (Wire_knowledge.decode_keeper_memory_facts
+          (parse_json
+             {|{
+               "keeper": "alpha",
+               "ordinary": {
+                 "present": true, "revision": 1, "snapshot_sha256": "aa", "updated_at": 1.0,
+                 "facts": [{
+                   "memory_id": "m1", "claim": "x", "category": "all", "origin": "authored",
+                   "first_seen": 1.0, "last_seen": 2.0, "basis": {"kind": "observed"},
+                   "events": {"retrieved_count": 0, "retrieved_distinct_days": 0, "last_retrieved_at": null, "retracted_count": 0, "revised_from": []}
+                 }],
+                 "support_invalidations": []
+               },
+               "source_bound": { "present": false },
+               "events_unreadable_lines": 0,
+               "events_read_error": null
+             }|}))
+      : string);
+  ignore
+    (expect_err "reject inconsistent retrieval count=0 with timestamp"
+       (Wire_knowledge.decode_keeper_memory_facts
+          (parse_json
+             {|{
+               "keeper": "alpha",
+               "ordinary": {
+                 "present": true, "revision": 1, "snapshot_sha256": "aa", "updated_at": 1.0,
+                 "facts": [{
+                   "memory_id": "m1", "claim": "x", "category": "fact", "origin": "authored",
+                   "first_seen": 1.0, "last_seen": 2.0, "basis": {"kind": "observed"},
+                   "events": {"retrieved_count": 0, "retrieved_distinct_days": 0, "last_retrieved_at": 5.0, "retracted_count": 0, "revised_from": []}
+                 }],
+                 "support_invalidations": []
+               },
+               "source_bound": { "present": false },
+               "events_unreadable_lines": 0,
+               "events_read_error": null
+             }|}))
+      : string);
+
+  (* 3. decode_keeper_memory_activity: all 8 closed kinds + shape rejections *)
+  let act_json =
+    parse_json
+      {|{
+        "keeper": "alpha",
+        "returned": 8,
+        "undecodable_lines": 1,
+        "entries": [],
+        "activity": {
+          "limit": 50,
+          "journal_lines": 8,
+          "notes": ["oldest lines truncated"],
+          "events": [
+            {"identity":"e1","recorded_at":1795252001.0,"revision":1,"kind":"created","before":[],"after":[{"memory_id":"f1","claim":"c1"}],"reason":null},
+            {"identity":"e2","recorded_at":1795252002.0,"revision":2,"kind":"reobserved","before":[{"memory_id":"f1","claim":"c1"}],"after":[{"memory_id":"f1","claim":"c1"}],"reason":null},
+            {"identity":"e3","recorded_at":1795252003.0,"revision":3,"kind":"revised","before":[{"memory_id":"f1","claim":"c1"}],"after":[{"memory_id":"f2","claim":"c2"}],"reason":"refined"},
+            {"identity":"e4","recorded_at":1795252004.0,"revision":4,"kind":"absorbed","before":[{"memory_id":"f2","claim":"c2"}],"after":[{"memory_id":"f3","claim":"c3"}],"reason":"merged"},
+            {"identity":"e5","recorded_at":1795252005.0,"revision":5,"kind":"retracted","before":[{"memory_id":"f3","claim":"c3"}],"after":[],"reason":"superseded"},
+            {"identity":"e6","recorded_at":1795252006.0,"revision":6,"kind":"removed","before":[{"memory_id":"f4","claim":"c4"}],"after":[],"reason":null},
+            {"identity":"e7","recorded_at":1795252007.0,"revision":7,"kind":"invalidated","before":[{"memory_id":"f5","claim":"c5"}],"after":[],"reason":"missing premise"},
+            {"identity":"e8","recorded_at":1795252008.0,"revision":8,"kind":"relation_unavailable","before":[{"memory_id":"f6","claim":"c6"}],"after":[],"reason":"legacy log missing link"}
+          ]
+        }
+      }|}
+  in
+  let act = expect_ok "memory activity 8 kinds" (Wire_knowledge.decode_keeper_memory_activity act_json) in
+  Alcotest.(check int) "8 events decoded" 8 (List.length act.events);
+  Alcotest.(check int) "undecodable_lines" 1 act.undecodable_lines;
+  Alcotest.(check bool) "kind 0 created" true
+    (Wire_knowledge.equal_memory_activity_kind (List.nth act.events 0).kind
+       Wire_knowledge.Activity_created);
+  Alcotest.(check bool) "kind 7 relation_unavailable" true
+    (Wire_knowledge.equal_memory_activity_kind (List.nth act.events 7).kind
+       Wire_knowledge.Activity_relation_unavailable);
+  ignore
+    (expect_err "reject unknown activity kind"
+       (Wire_knowledge.decode_keeper_memory_activity
+          (parse_json
+             {|{"keeper":"alpha","undecodable_lines":0,"activity":{"limit":10,"journal_lines":1,"notes":[],"events":[{"identity":"x","recorded_at":1.0,"revision":1,"kind":"teleported","before":[],"after":[{"memory_id":"f1","claim":"c1"}],"reason":null}]}}|}))
+      : string);
+  ignore
+    (expect_err "reject created with non-empty before"
+       (Wire_knowledge.decode_keeper_memory_activity
+          (parse_json
+             {|{"keeper":"alpha","undecodable_lines":0,"activity":{"limit":10,"journal_lines":1,"notes":[],"events":[{"identity":"x","recorded_at":1.0,"revision":1,"kind":"created","before":[{"memory_id":"f0","claim":"old"}],"after":[{"memory_id":"f1","claim":"c1"}],"reason":null}]}}|}))
+      : string);
+  ignore
+    (expect_err "reject removed with null claim"
+       (Wire_knowledge.decode_keeper_memory_activity
+          (parse_json
+             {|{"keeper":"alpha","undecodable_lines":0,"activity":{"limit":10,"journal_lines":1,"notes":[],"events":[{"identity":"x","recorded_at":1.0,"revision":1,"kind":"removed","before":[{"memory_id":"f0","claim":null}],"after":[],"reason":null}]}}|}))
+      : string);
+  ignore
+    (expect_err "reject relation_unavailable with empty before"
+       (Wire_knowledge.decode_keeper_memory_activity
+          (parse_json
+             {|{"keeper":"alpha","undecodable_lines":0,"activity":{"limit":10,"journal_lines":1,"notes":[],"events":[{"identity":"x","recorded_at":1.0,"revision":1,"kind":"relation_unavailable","before":[],"after":[{"memory_id":"f1","claim":"c1"}],"reason":"missing link"}]}}|}))
+      : string);
+  ignore
+    (expect_err "reject activity event missing reason field"
+       (Wire_knowledge.decode_keeper_memory_activity
+          (parse_json
+             {|{"keeper":"alpha","undecodable_lines":0,"activity":{"limit":10,"journal_lines":1,"notes":[],"events":[{"identity":"x","recorded_at":1.0,"revision":1,"kind":"created","before":[],"after":[{"memory_id":"f1","claim":"c1"}]}]}}|}))
+      : string);
+  ignore
+    (expect_err "reject activity event with negative recorded_at"
+       (Wire_knowledge.decode_keeper_memory_activity
+          (parse_json
+             {|{"keeper":"alpha","undecodable_lines":0,"activity":{"limit":10,"journal_lines":1,"notes":[],"events":[{"identity":"x","recorded_at":-5.0,"revision":1,"kind":"created","before":[],"after":[{"memory_id":"f1","claim":"c1"}],"reason":null}]}}|}))
+      : string);
+  ignore
+    (expect_err "reject duplicate activity identities"
+       (Wire_knowledge.decode_keeper_memory_activity
+          (parse_json
+             {|{"keeper":"alpha","undecodable_lines":0,"activity":{"limit":10,"journal_lines":2,"notes":[],"events":[{"identity":"dup","recorded_at":1.0,"revision":1,"kind":"created","before":[],"after":[{"memory_id":"f1","claim":"c1"}],"reason":null},{"identity":"dup","recorded_at":2.0,"revision":2,"kind":"created","before":[],"after":[{"memory_id":"f2","claim":"c2"}],"reason":null}]}}|}))
+      : string);
+  (* Additional strict memory-facts rejections: bad custom category, empty premise_ids, missing support_invalidations *)
+  ignore
+    (expect_err "reject consecutive underscore category a__b"
+       (Wire_knowledge.decode_keeper_memory_facts
+          (parse_json
+             {|{"keeper":"alpha","ordinary":{"present":true,"revision":1,"snapshot_sha256":"aa","updated_at":1.0,"facts":[{"memory_id":"m1","claim":"x","category":"a__b","origin":"authored","first_seen":1.0,"last_seen":2.0,"basis":{"kind":"observed"},"events":{"retrieved_count":0,"retrieved_distinct_days":0,"last_retrieved_at":null,"retracted_count":0,"revised_from":[]}}],"support_invalidations":[]},"source_bound":{"present":false},"events_unreadable_lines":0,"events_read_error":null}|}))
+      : string);
+  ignore
+    (expect_err "reject trailing underscore category a_"
+       (Wire_knowledge.decode_keeper_memory_facts
+          (parse_json
+             {|{"keeper":"alpha","ordinary":{"present":true,"revision":1,"snapshot_sha256":"aa","updated_at":1.0,"facts":[{"memory_id":"m1","claim":"x","category":"a_","origin":"authored","first_seen":1.0,"last_seen":2.0,"basis":{"kind":"observed"},"events":{"retrieved_count":0,"retrieved_distinct_days":0,"last_retrieved_at":null,"retracted_count":0,"revised_from":[]}}],"support_invalidations":[]},"source_bound":{"present":false},"events_unreadable_lines":0,"events_read_error":null}|}))
+      : string);
+  ignore
+    (expect_err "reject derived fact with empty premise_ids"
+       (Wire_knowledge.decode_keeper_memory_facts
+          (parse_json
+             {|{"keeper":"alpha","ordinary":{"present":true,"revision":1,"snapshot_sha256":"aa","updated_at":1.0,"facts":[{"memory_id":"m1","claim":"x","category":"fact","origin":"authored","first_seen":1.0,"last_seen":2.0,"basis":{"kind":"derived","derivations":[{"rule_id":"r1","premise_ids":[]}]},"events":{"retrieved_count":0,"retrieved_distinct_days":0,"last_retrieved_at":null,"retracted_count":0,"revised_from":[]}}],"support_invalidations":[]},"source_bound":{"present":false},"events_unreadable_lines":0,"events_read_error":null}|}))
+      : string);
+  ignore
+    (expect_err "reject ordinary present missing support_invalidations"
+       (Wire_knowledge.decode_keeper_memory_facts
+          (parse_json
+             {|{"keeper":"alpha","ordinary":{"present":true,"revision":1,"snapshot_sha256":"aa","updated_at":1.0,"facts":[]},"source_bound":{"present":false},"events_unreadable_lines":0,"events_read_error":null}|}))
+      : string);
+
+  (* 4. decode_keeper_memory_health_fleet (v19): 24-bin age_bins + facts_by_hour + strict rejections *)
+  let bins_24_str =
+    "[" ^ String.concat "," (List.init 24 (fun i -> string_of_int i)) ^ "]"
+  in
+  let health_json =
+    parse_json
+      (Printf.sprintf
+         {|{
+           "schema": "keeper.memory_os.current_health.v19",
+           "generated_at": 1795252099.0,
+           "keepers": [
+             {
+               "keeper_id": "alpha",
+               "revision": 12,
+               "updated_at": 1795252000.0,
+               "facts": 276,
+               "observed_facts": 200,
+               "derived_facts": 76,
+               "support_invalidations": 1,
+               "snapshot_bytes": 40960,
+               "added": 14,
+               "removed": 3,
+               "snapshot_present": true,
+               "age_bins": %s,
+               "facts_by_hour": [
+                 {"recorded_at": 1795240000.0, "facts": 265},
+                 {"recorded_at": 1795252000.0, "facts": 276}
+               ],
+               "librarian_failures": 0,
+               "vision_ingest_errors": 0,
+               "read_error": null,
+               "source_revision": 3,
+               "source_facts": 5,
+               "source_invalidations": 0,
+               "source_snapshot_bytes": 1024,
+               "source_snapshot_present": true,
+               "source_read_error": null,
+               "alerts": [
+                 {"code": "stale_derivation", "severity": "warn", "target": "alpha", "label": "Stale", "message": "1 invalidated"}
+               ]
+             },
+             {
+               "keeper_id": "beta",
+               "revision": 0,
+               "updated_at": null,
+               "facts": 0,
+               "observed_facts": 0,
+               "derived_facts": 0,
+               "support_invalidations": 0,
+               "snapshot_bytes": 0,
+               "added": 0,
+               "removed": 0,
+               "snapshot_present": false,
+               "age_bins": null,
+               "facts_by_hour": [],
+               "librarian_failures": 0,
+               "vision_ingest_errors": 0,
+               "read_error": null,
+               "source_revision": 0,
+               "source_facts": 0,
+               "source_invalidations": 0,
+               "source_snapshot_bytes": 0,
+               "source_snapshot_present": false,
+               "source_read_error": null,
+               "alerts": []
+             }
+           ]
+         }|}
+         bins_24_str)
+  in
+  let fleet = expect_ok "memory health v19" (Wire_knowledge.decode_keeper_memory_health_fleet health_json) in
+  Alcotest.(check int) "2 health rows" 2 (List.length fleet.keepers);
+  let h0 = List.nth fleet.keepers 0 in
+  let h1 = List.nth fleet.keepers 1 in
+  Alcotest.(check int) "alpha facts" 276 h0.facts;
+  Alcotest.(check int) "alpha source_facts" 5 h0.source_facts;
+  Alcotest.(check int) "alpha facts_by_hour len" 2 (List.length h0.facts_by_hour);
+  (match h0.age_bins with
+  | Some arr ->
+      Alcotest.(check int) "24 age bins" 24 (Array.length arr);
+      Alcotest.(check int) "bin 23 value" 23 arr.(23)
+  | None -> Alcotest.fail "expected Some age_bins");
+  Alcotest.(check bool) "beta absent age_bins is None" true (Option.is_none h1.age_bins);
+  ignore
+    (expect_err "reject wrong health schema"
+       (Wire_knowledge.decode_keeper_memory_health_fleet
+          (parse_json {|{"schema":"keeper.memory_os.current_health.v18","generated_at":1.0,"keepers":[]}|}))
+      : string);
+  ignore
+    (expect_err "reject missing v19 source_* fields on health row"
+       (Wire_knowledge.decode_keeper_memory_health_fleet
+          (parse_json
+             (Printf.sprintf
+                {|{"schema":"keeper.memory_os.current_health.v19","generated_at":1.0,"keepers":[{"keeper_id":"a","revision":1,"updated_at":1.0,"facts":1,"observed_facts":1,"derived_facts":0,"support_invalidations":0,"snapshot_bytes":10,"added":0,"removed":0,"snapshot_present":true,"age_bins":%s,"facts_by_hour":[],"librarian_failures":0,"vision_ingest_errors":0,"read_error":null,"alerts":[]}]}|}
+                bins_24_str)))
+      : string);
+  ignore
+    (expect_err "reject blank source_read_error on health row"
+       (Wire_knowledge.decode_keeper_memory_health_fleet
+          (parse_json
+             (Printf.sprintf
+                {|{"schema":"keeper.memory_os.current_health.v19","generated_at":1.0,"keepers":[{"keeper_id":"a","revision":1,"updated_at":1.0,"facts":1,"observed_facts":1,"derived_facts":0,"support_invalidations":0,"snapshot_bytes":10,"added":0,"removed":0,"snapshot_present":true,"age_bins":%s,"facts_by_hour":[],"librarian_failures":0,"vision_ingest_errors":0,"read_error":null,"source_revision":0,"source_facts":0,"source_invalidations":0,"source_snapshot_bytes":0,"source_snapshot_present":false,"source_read_error":"   ","alerts":[]}]}|}
+                bins_24_str)))
+      : string);
+  ignore
+    (expect_err "reject 23-element age_bins"
+       (Wire_knowledge.decode_keeper_memory_health_fleet
+          (parse_json
+             {|{"schema":"keeper.memory_os.current_health.v19","generated_at":1.0,"keepers":[{"keeper_id":"a","revision":1,"updated_at":1.0,"facts":1,"observed_facts":1,"derived_facts":0,"support_invalidations":0,"snapshot_bytes":10,"added":0,"removed":0,"snapshot_present":true,"age_bins":[0,0,0],"facts_by_hour":[],"librarian_failures":0,"vision_ingest_errors":0,"read_error":null,"source_revision":0,"source_facts":0,"source_invalidations":0,"source_snapshot_bytes":0,"source_snapshot_present":false,"source_read_error":null,"alerts":[]}]}|}))
+      : string)
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -3105,6 +3488,8 @@ let () =
             test_p1_7_wire_fleet_offline_vs_failing_ssot;
           Alcotest.test_case "Memory OS internals, effort labels, capability keys & setup codecs" `Quick
             test_tui_memory_os_and_runtime_setup_codecs;
+          Alcotest.test_case "Keeper memory facts, activity (8 kinds) & v19 health fleet codecs" `Quick
+            test_keeper_memory_facts_activity_and_health_decoders;
         ] );
       ( "net"
       , [

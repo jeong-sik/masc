@@ -1123,13 +1123,7 @@ let render_chat_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
       draw_keeper_status_strip grid ~rect:status_rect ~theme ~model ~name
         keeper_opt
 
-(* --- Tab 2: Memory (Scoped Temporal Diff Scrubber + Heat Stacked_bar + Librarian) --- *)
-
-let heat_badge = function
-  | Wire_knowledge.Heat_hot -> ("HOT", Theme.Status_critical)
-  | Wire_knowledge.Heat_warm -> ("WARM", Theme.Status_attention)
-  | Wire_knowledge.Heat_cold -> ("COLD", Theme.Status_active)
-  | Wire_knowledge.Heat_never_retrieved -> ("0x", Theme.Status_historical)
+(* --- Tab 2: Memory (Rich Explorer + 24-bin Age Ladder + Braille Trend + Librarian) --- *)
 
 let writer_state_badge = function
   | Wire_knowledge.Writer_open ->
@@ -1153,49 +1147,15 @@ let writer_state_badge = function
   | Wire_knowledge.Writer_no_writer ->
       (Glyph.Missing_absent, Theme.Status_historical, Say.make ~ko:"라이터 없음" ~en:"No Writer")
 
-let relation_label ~lang = function
-  | Wire_knowledge.Revision -> Say.resolve lang (Say.make ~ko:"개정" ~en:"rev")
-  | Wire_knowledge.Program_revision ->
-      Say.resolve lang (Say.make ~ko:"규칙 개정" ~en:"prog-rev")
-  | Wire_knowledge.Program_absorption ->
-      Say.resolve lang (Say.make ~ko:"흡수" ~en:"absorb")
-
 let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     ~name =
   if Rect.is_empty rect then ()
   else
     let bg = Color.of_rgb theme.surface_1 in
     let pad_x = Ops_common.pad_x_for ~model rect in
-    let bar_rect, rest_rect = Rect.split_v rect ~top_h:1 in
-    let win = model.knowledge.memory_diff_window in
-    let rev_pill_lbl =
-      match win with
-      | Knowledge_store.Window_revs { from_rev; to_rev } ->
-          Printf.sprintf "rev %d..%d" from_rev to_rev
-      | Knowledge_store.Window_24h
-      | Knowledge_store.Window_7d
-      | Knowledge_store.Window_30d ->
-          "rev"
-    in
-    let pills =
-      [
-        ("24h", Knowledge_store.equal_memory_diff_window win Knowledge_store.Window_24h, None);
-        ("7d", Knowledge_store.equal_memory_diff_window win Knowledge_store.Window_7d, None);
-        ("30d", Knowledge_store.equal_memory_diff_window win Knowledge_store.Window_30d, None);
-        ( rev_pill_lbl
-        , (match win with
-           | Knowledge_store.Window_revs _ -> true
-           | Knowledge_store.Window_24h
-           | Knowledge_store.Window_7d
-           | Knowledge_store.Window_30d ->
-               false)
-        , None );
-      ]
-    in
-    ignore (Ops_common.draw_pills grid ~rect:bar_rect ~theme ~bg pills);
-    let footer_h = if rest_rect.h >= 6 then 2 else 0 in
+    let footer_h = if rect.h >= 7 then 2 else 0 in
     let body_rect, writer_rect =
-      Rect.split_v rest_rect ~top_h:(Int.max 0 (rest_rect.h - footer_h))
+      Rect.split_v rect ~top_h:(Int.max 0 (rect.h - footer_h))
     in
     let content = Card.pad_inner ~pad_x body_rect in
     let writer_c = Card.pad_inner ~pad_x writer_rect in
@@ -1302,287 +1262,29 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
              (status_line ^ act_receipt))
       end
     in
-    match model.knowledge.memory_diff with
-    | Observed.Value { data = diff; _ } -> (
-        match diff.body with
-        | Wire_knowledge.Keeper_diff
-            { counts; added; updated; retracted; invalidated; writer_status; _ } ->
-            let scope_matches =
-              match diff.scope with
-              | Wire_knowledge.Scope_keeper k -> String.equal k name
-              | Wire_knowledge.Scope_world -> false
-            in
-            if not scope_matches then begin
-              if not (Rect.is_empty content) then begin
-                let msg =
-                  Ops_common.say model
-                    ~ko:
-                      (Printf.sprintf
-                         "%s 기억 Diff 불러오기 대기 중 · [r] 키로 새로고침" name)
-                    ~en:
-                      (Printf.sprintf
-                         "Awaiting scoped memory diff for %s · press [r] to refresh"
-                         name)
-                in
-                ignore
-                  (Ops_common.put_line ~clip:content grid ~x:content.x
-                     ~y:(content.y + Int.min 1 (Int.max 0 (content.h - 1)))
-                     ~max_w:content.w ~style:(Typography.whisper ~bg theme)
-                     (Glyph.to_utf8 Glyph.Transport_reconnecting ^ " " ^ msg))
-              end;
-              draw_librarian_footer None
-            end
-            else begin
-              let y = ref content.y in
-              let bottom = Rect.bottom content in
-              let heat = diff.retrieval_heat in
-              let rev_span =
-                match diff.range.from_rev, diff.range.to_rev with
-                | Some a, Some b -> Printf.sprintf "rev %d -> %d" a b
-                | Some a, None -> Printf.sprintf "rev %d.." a
-                | None, Some b -> Printf.sprintf "..rev %d" b
-                | None, None ->
-                    (match diff.range.window with Some w -> w | None -> "24h")
-              in
-              let summary_line =
-                Printf.sprintf "%s %s %d facts %s +%d ~%d -%d !%d %s HOT:%d WARM:%d COLD:%d"
-                  rev_span
-                  (Glyph.to_utf8 Glyph.Separator_dot)
-                  counts.total_facts_now
-                  (Glyph.to_utf8 Glyph.Separator_dot)
-                  counts.added counts.updated counts.retracted counts.invalidated
-                  (Glyph.to_utf8 Glyph.Separator_dot)
-                  heat.hot heat.warm heat.cold
-              in
-              if !y < bottom then begin
-                ignore
-                  (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
-                     ~max_w:content.w ~style:(Typography.structure ~bg ~bold:true theme)
-                     summary_line);
-                incr y
-              end;
-              (* Memory OS Internals strip (Compaction · Canonical Turns · Digest · Librarian Molt) *)
-              (match Observed.to_option model.knowledge.memory_os_internals with
-              | Some intr when String.equal intr.keeper name && !y < bottom ->
-                  let comp_s =
-                    if intr.compaction.present then
-                      Printf.sprintf "compaction:%dep/%dt/%dB"
-                        intr.compaction.epoch_count
-                        intr.compaction.archived_turns_count
-                        intr.compaction.anchor_bytes
-                    else "compaction:none"
-                  in
-                  let ct_s =
-                    if intr.canonical_turns.present then
-                      let rk =
-                        Option.value intr.canonical_turns.latest_runtime_kind
-                          ~default:"?"
-                      in
-                      let wm =
-                        match intr.canonical_turns.compaction_watermark_seq with
-                        | Some s -> Printf.sprintf ",wm:%d" s
-                        | None -> ""
-                      in
-                      Printf.sprintf "turns:%d(%s%s,rst:%d)"
-                        intr.canonical_turns.turn_count rk wm
-                        intr.canonical_turns.history_resets_count
-                    else "turns:none"
-                  in
-                  let dig_s =
-                    if intr.memory_digest.present then
-                      let rev_s =
-                        match intr.memory_digest.revision with
-                        | Some r -> Printf.sprintf "r%d" r
-                        | None -> "r?"
-                      in
-                      let sha_s =
-                        match intr.memory_digest.digest_sha256 with
-                        | Some s when String.length s > 8 ->
-                            "#" ^ String.sub s 0 8
-                        | Some s -> "#" ^ s
-                        | None -> ""
-                      in
-                      Printf.sprintf "digest:%s%s/%df/%dB" rev_s sha_s
-                        intr.memory_digest.fact_count intr.memory_digest.bytes
-                    else "digest:none"
-                  in
-                  let molt_s =
-                    match intr.librarian_molt.pending_molt_kind with
-                    | Some mk ->
-                        let cats =
-                          if intr.librarian_molt.pending_molt_categories = []
-                          then ""
-                          else
-                            "("
-                            ^ String.concat ","
-                                intr.librarian_molt.pending_molt_categories
-                            ^ ")"
-                        in
-                        "molt:" ^ mk ^ cats
-                    | None -> "molt:clear"
-                  in
-                  let os_line =
-                    Printf.sprintf "OS %s %s %s %s %s %s %s"
-                      comp_s (Glyph.to_utf8 Glyph.Separator_dot)
-                      ct_s (Glyph.to_utf8 Glyph.Separator_dot)
-                      dig_s (Glyph.to_utf8 Glyph.Separator_dot)
-                      molt_s
-                  in
-                  ignore
-                    (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
-                       ~max_w:content.w ~style:(Typography.structure ~bg theme)
-                       os_line);
-                  incr y
-              | _ -> ());
-              (* Visual Tier Breakdown Bar (Chart.Stacked_bar, ~show_title:false) *)
-              let heat_total = heat.hot + heat.warm + heat.cold + heat.never_retrieved in
-              if heat_total > 0 && bottom - !y >= 4 then begin
-                let bar_r = Rect.make ~x:content.x ~y:!y ~w:content.w ~h:2 in
-                let segments =
-                  [
-                    (Say.literal "HOT", Float.of_int heat.hot, Theme.Status_critical);
-                    (Say.literal "WARM", Float.of_int heat.warm, Theme.Status_attention);
-                    (Say.literal "COLD", Float.of_int heat.cold, Theme.Status_active);
-                    (Say.literal "0x", Float.of_int heat.never_retrieved, Theme.Status_historical);
-                  ]
-                  |> List.filter (fun (_, v, _) -> v > 0.0)
-                in
-                ignore
-                  (Chart.draw grid ~rect:bar_r ~theme
-                     ~caps:Ops_common.default_caps ~lang:model.lang
-                     ~show_title:false
-                     {
-                       Chart.Spec.title = Say.make ~ko:"기억 열도" ~en:"Heat";
-                       kind =
-                         Chart.Spec.Stacked_bar
-                           {
-                             segments;
-                             total_label =
-                               Say.literal
-                                 (Printf.sprintf "%d hits" heat.total_events);
-                             unit = Format_val.Count;
-                           };
-                       hotkey_hint = None;
-                     });
-                y := !y + 2;
-                if !y < bottom then begin
-                  Card.draw_hairline ~pad_x:0 ~bg grid ~rect:content ~y:!y ~theme;
-                  incr y
-                end
-              end;
-              let rows_acc = ref [] in
-              let push_railed ?rail_tone ~fg ~attrs line =
-                rows_acc := (rail_tone, fg, attrs, line) :: !rows_acc
-              in
-              List.iter
-                (fun (f : Wire_knowledge.memory_fact_entry) ->
-                  let h_lbl, _ = heat_badge f.heat in
-                  push_railed ~rail_tone:Theme.Status_ok ~fg:theme.status_ok
-                    ~attrs:Attr.bold
-                    (Printf.sprintf "+ [%s] %s · %s %dx" f.category f.origin
-                       h_lbl f.retrieval_count);
-                  push_railed ~rail_tone:Theme.Status_ok ~fg:theme.text_primary
-                    ~attrs:Attr.none ("  " ^ f.text))
-                added;
-              List.iter
-                (fun (u : Wire_knowledge.memory_updated_fact) ->
-                  let h_lbl, _ = heat_badge u.after.heat in
-                  push_railed ~rail_tone:Theme.Status_active
-                    ~fg:theme.status_active ~attrs:Attr.bold
-                    (Printf.sprintf "~ [%s] %s rev %d · %s %dx" u.after.category
-                       (relation_label ~lang:model.lang u.relation)
-                       u.at_rev h_lbl u.after.retrieval_count);
-                  push_railed ~rail_tone:Theme.Status_active
-                    ~fg:theme.status_critical ~attrs:Attr.none
-                    ("  - " ^ u.before.text);
-                  push_railed ~rail_tone:Theme.Status_active ~fg:theme.status_ok
-                    ~attrs:Attr.none ("  + " ^ u.after.text))
-                updated;
-              List.iter
-                (fun (r : Wire_knowledge.memory_retracted_fact) ->
-                  let reason_s =
-                    match r.drop_reason with
-                    | Some rs -> " (" ^ rs ^ ")"
-                    | None -> ""
-                  in
-                  push_railed ~rail_tone:Theme.Status_critical
-                    ~fg:theme.status_critical ~attrs:Attr.bold
-                    (Printf.sprintf "- [%s] rev %d · %s%s" r.category
-                       r.removed_at_rev r.removed_by reason_s);
-                  push_railed ~rail_tone:Theme.Status_critical
-                    ~fg:theme.text_muted ~attrs:Attr.italic ("  " ^ r.text))
-                retracted;
-              List.iter
-                (fun (inv : Wire_knowledge.memory_invalidated_fact) ->
-                  push_railed ~rail_tone:Theme.Status_attention
-                    ~fg:theme.status_attention ~attrs:Attr.bold
-                    (Printf.sprintf "! rev %d · missing premises: %s" inv.at_rev
-                       (String.concat ", " inv.missing_premise_ids));
-                  push_railed ~rail_tone:Theme.Status_attention
-                    ~fg:theme.text_secondary ~attrs:Attr.none ("  " ^ inv.text))
-                invalidated;
-              if
-                added = [] && updated = [] && retracted = [] && invalidated = []
-              then
-                push_railed ~fg:theme.text_muted ~attrs:Attr.italic
-                  (Ops_common.say model
-                     ~ko:"선택한 기간 내 기억 변경 사항이 없습니다."
-                     ~en:"No memory changes recorded in this window.");
-              let rows = List.rev !rows_acc in
-              let vis_h = Int.max 1 (bottom - !y) in
-              let max_scroll = Int.max 0 (List.length rows - vis_h) in
-              let scroll =
-                Int.min max_scroll (Int.max 0 model.nav.dive_scroll_offset)
-              in
-              List.iter
-                (fun (rail_tone, fg, attrs, line) ->
-                  if !y < bottom then begin
-                    let x0 =
-                      match rail_tone with
-                      | Some tok ->
-                          Card.draw_left_rail ~bg ~tone:tok grid ~x:content.x
-                            ~y:!y ~h:1 ~theme;
-                          content.x + 2
-                      | None -> content.x + 2
-                    in
-                    let st = Style.make ~fg:(Color.of_rgb fg) ~bg ~attrs () in
-                    ignore
-                      (Ops_common.put_line ~clip:content grid ~x:x0 ~y:!y
-                         ~max_w:(Int.max 0 (Rect.right content - x0))
-                         ~style:st line);
-                    incr y
-                  end)
-                (Store_scroll.drop scroll rows);
-              draw_librarian_footer writer_status
-            end
-        | Wire_knowledge.World_diff { counts; _ } ->
-            if not (Rect.is_empty content) then begin
-              let msg =
-                Ops_common.say model
-                  ~ko:
-                    (Printf.sprintf
-                       "현재 월드 기억 Diff 로드됨 (%d claims) · [r] 키로 %s 범위 조회"
-                       counts.total_claims_now name)
-                  ~en:
-                    (Printf.sprintf
-                       "World memory diff loaded (%d claims) · press [r] to load %s"
-                       counts.total_claims_now name)
-              in
-              ignore
-                (Ops_common.put_line ~clip:content grid ~x:content.x
-                   ~y:(content.y + Int.min 1 (Int.max 0 (content.h - 1)))
-                   ~max_w:content.w ~style:(Typography.whisper ~bg theme) msg)
-            end;
-            draw_librarian_footer None)
-    | ( Observed.Loading _
-      | Observed.Absent
-      | Observed.Unreported
-      | Observed.Failed _ ) as obs ->
-        Ops_common.draw_observed_empty grid ~rect:body_rect ~theme
-          ~lang:model.lang obs
-          ~empty_msg:
-            (Say.make ~ko:"기억 변경 이력이 없습니다" ~en:"No memory diff available");
-        draw_librarian_footer None
+    let writer_status_opt =
+      match Observed.to_option model.knowledge.memory_diff with
+      | Some
+          {
+            scope = Wire_knowledge.Scope_keeper kp;
+            body = Wire_knowledge.Keeper_diff { writer_status; _ };
+            _;
+          }
+        when String.equal kp name ->
+          writer_status
+      | Some
+          {
+            scope = Wire_knowledge.Scope_world | Wire_knowledge.Scope_keeper _;
+            body = Wire_knowledge.Keeper_diff _ | Wire_knowledge.World_diff _;
+            _;
+          }
+      | None ->
+          None
+    in
+    Masc_tui_screens_core.Memory_explorer.render_keeper_memory ~grid
+      ~rect:content ~theme ~bp:(Ops_common.layout_bp model) ~model ~keeper:name
+      ~focused:true ~diff_scroll:model.nav.dive_scroll_offset;
+    draw_librarian_footer writer_status_opt
 
 (* --- Tab 3: Work & Candle (ZERO Nested Boxes — uses v_hairline / hairline!) --- *)
 

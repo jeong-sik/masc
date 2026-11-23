@@ -1064,9 +1064,24 @@ let test_keeper_dive_all_5_tabs () =
           let m = make_populated_model ~cols ~rows ~lang in
           List.iter
             (fun tab ->
+              let m_tab =
+                match tab with
+                | Nav.Keeper_memory ->
+                    {
+                      m with
+                      knowledge =
+                        Knowledge_store.set_memory_view_mode
+                          Knowledge_store.View_diff m.knowledge;
+                    }
+                | Nav.Keeper_chat
+                | Nav.Keeper_work_candle
+                | Nav.Keeper_sandbox
+                | Nav.Keeper_config ->
+                    m
+              in
               let grid =
                 render_to_grid ~cols ~rows
-                  (Screen_keepers.render_dive ~name:"e-masc-the-leader" ~tab ~model:m)
+                  (Screen_keepers.render_dive ~name:"e-masc-the-leader" ~tab ~model:m_tab)
               in
               let populated = non_empty_row_count grid in
               Alcotest.(check bool)

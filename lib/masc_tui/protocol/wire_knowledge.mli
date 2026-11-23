@@ -625,6 +625,9 @@ val decode_memory_act_answer :
 (** {1 Per-Keeper Memory OS Internals ([/api/v1/keepers/:name/memory-os-internals])} *)
 
 val keeper_memory_os_internals_path : keeper:string -> string
+val keeper_memory_facts_path : keeper:string -> string
+val keeper_memory_activity_path : keeper:string -> ?limit:int -> unit -> string
+val keeper_memory_health_path : ?keeper:string -> unit -> string
 
 type compaction_internals = {
   present : bool;
@@ -679,3 +682,211 @@ type memory_os_internals = {
 
 val decode_memory_os_internals :
   Yojson.Safe.t -> (memory_os_internals, string) result
+
+(** {1 Per-Keeper Memory Facts ([/api/v1/keepers/:name/memory-facts])} *)
+
+type memory_fact_category =
+  | Cat_code_change
+  | Cat_fact
+  | Cat_preference
+  | Cat_blocker
+  | Cat_goal
+  | Cat_constraint
+  | Cat_validated_approach
+  | Cat_lesson
+  | Cat_custom of string
+
+type memory_fact_origin =
+  | Origin_authored
+  | Origin_injected
+
+type memory_board_ref = {
+  post_id : string;
+  comment_id : string option;
+}
+
+type memory_derivation_ref = {
+  rule_id : string;
+  premise_ids : string list;
+}
+
+type memory_fact_basis =
+  | Basis_observed
+  | Basis_observed_board of memory_board_ref
+  | Basis_derived of memory_derivation_ref list
+
+type memory_retrieval_state =
+  | Never_retrieved
+  | Retrieved of {
+      count : int;
+      distinct_days : int;
+      last_at_unix : float;
+    }
+
+type memory_fact_events = {
+  retrieval : memory_retrieval_state;
+  retracted_count : int;
+  revised_from : string list;
+}
+
+type keeper_ordinary_fact = {
+  memory_id : string;
+  claim : string;
+  category : memory_fact_category;
+  origin : memory_fact_origin;
+  basis : memory_fact_basis;
+  first_seen_unix : float;
+  last_seen_unix : float;
+  events : memory_fact_events;
+}
+
+type keeper_support_invalidation = {
+  memory_id : string;
+  claim : string;
+  basis : memory_fact_basis;
+  missing_premise_ids : string list;
+}
+
+type keeper_ordinary_memory = {
+  revision : int;
+  snapshot_sha256 : string;
+  updated_at_unix : float;
+  facts : keeper_ordinary_fact list;
+  support_invalidations : keeper_support_invalidation list;
+}
+
+type keeper_source_fact = {
+  claim : string;
+  first_seen_unix : float;
+  path : string;
+  sha256 : string;
+}
+
+type source_invalidation_reason =
+  | Source_changed
+  | Source_unavailable
+
+type keeper_source_invalidation = {
+  source_path : string;
+  invalidated_at_unix : float;
+  reason : source_invalidation_reason;
+}
+
+type keeper_source_memory = {
+  revision : int;
+  updated_at_unix : float;
+  facts : keeper_source_fact list;
+  invalidations : keeper_source_invalidation list;
+}
+
+type 'a memory_store_state =
+  | Memory_store_read_error of string
+  | Memory_store_absent
+  | Memory_store_present of 'a
+
+type keeper_memory_facts = {
+  keeper : string;
+  ordinary : keeper_ordinary_memory memory_store_state;
+  source_bound : keeper_source_memory memory_store_state;
+  events_unreadable_lines : int;
+  events_read_error : string option;
+}
+
+val memory_fact_category_to_string : memory_fact_category -> string
+val memory_fact_origin_to_string : memory_fact_origin -> string
+val source_invalidation_reason_to_string : source_invalidation_reason -> string
+
+val decode_keeper_memory_facts :
+  Yojson.Safe.t -> (keeper_memory_facts, string) result
+
+(** {1 Per-Keeper Memory Evolution / Activity ([/api/v1/keepers/:name/memory-journal?activity=1&limit=50])} *)
+
+type memory_activity_kind =
+  | Activity_created
+  | Activity_reobserved
+  | Activity_revised
+  | Activity_absorbed
+  | Activity_retracted
+  | Activity_removed
+  | Activity_invalidated
+  | Activity_relation_unavailable
+
+type memory_activity_fact = {
+  memory_id : string;
+  claim : string option;
+}
+
+type memory_activity_event = {
+  identity : string;
+  recorded_at_unix : float;
+  revision : int;
+  kind : memory_activity_kind;
+  before : memory_activity_fact list;
+  after : memory_activity_fact list;
+  reason : string option;
+}
+
+type keeper_memory_activity = {
+  keeper : string;
+  limit : int;
+  journal_lines : int;
+  undecodable_lines : int;
+  events : memory_activity_event list;
+  notes : string list;
+}
+
+val equal_memory_activity_kind :
+  memory_activity_kind -> memory_activity_kind -> bool
+val memory_activity_kind_to_string : memory_activity_kind -> string
+
+val decode_keeper_memory_activity :
+  Yojson.Safe.t -> (keeper_memory_activity, string) result
+
+(** {1 Fleet Keeper Memory Health ([/api/v1/dashboard/keeper-memory-health])} *)
+
+type memory_health_alert_severity =
+  | Alert_warn
+  | Alert_error
+
+type memory_health_alert = {
+  code : string;
+  severity : memory_health_alert_severity;
+  target : string;
+  label : string;
+  message : string;
+}
+
+type keeper_memory_health_row = {
+  keeper_id : string;
+  revision : int;
+  updated_at_unix : float option;
+  facts : int;
+  observed_facts : int;
+  derived_facts : int;
+  support_invalidations : int;
+  snapshot_bytes : int;
+  added : int;
+  removed : int;
+  snapshot_present : bool;
+  age_bins : int array option;
+  facts_by_hour : (float * int) list;
+  librarian_failures : int;
+  vision_ingest_errors : int;
+  read_error : string option;
+  source_revision : int;
+  source_facts : int;
+  source_invalidations : int;
+  source_snapshot_bytes : int;
+  source_snapshot_present : bool;
+  source_read_error : string option;
+  alerts : memory_health_alert list;
+}
+
+type keeper_memory_health_fleet = {
+  schema : string;
+  generated_at_unix : float;
+  keepers : keeper_memory_health_row list;
+}
+
+val decode_keeper_memory_health_fleet :
+  Yojson.Safe.t -> (keeper_memory_health_fleet, string) result

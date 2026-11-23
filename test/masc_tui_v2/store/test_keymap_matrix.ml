@@ -3865,8 +3865,10 @@ let test_pillar2_scroll_bounds_all_surfaces () =
             [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory } ];
         };
       knowledge =
-        Knowledge_store.apply_memory_diff ~observed_at:t0 big_diff
-          base.knowledge;
+        base.knowledge
+        |> Knowledge_store.set_memory_diff_keeper (Some "alpha")
+        |> Knowledge_store.set_memory_view_mode Knowledge_store.View_diff
+        |> Knowledge_store.apply_memory_diff ~observed_at:t0 big_diff;
     }
   in
   let m_kmem_end, _ = step m_kmem (mk_key Keymap.Input.End) in
@@ -4189,8 +4191,11 @@ let test_pillar2_scroll_bounds_all_surfaces () =
   in
   let m_mem_w_end, _ = step m_mem_w (mk_key Keymap.Input.End) in
   Alcotest.(check int)
-    "Knowledge > Memory pane 0 scrolls librarian_writers when conflicts=[]" 34
-    m_mem_w_end.knowledge.selected_index;
+    "Knowledge > Memory pane 0 scrolls World + librarian_writers when conflicts=[]"
+    35 m_mem_w_end.knowledge.selected_index;
+  Alcotest.(check (option string))
+    "Selecting last writer updates memory_diff_keeper" (Some "writer-34")
+    m_mem_w_end.knowledge.memory_diff_keeper;
   (* 9. Incidents detail J/K scrolls detail_scroll_offset *)
   let m_inc =
     let inc, _ =

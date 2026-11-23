@@ -703,18 +703,55 @@ let execute_get t ~epoch req =
             in
             let reply = Msg.Reply_world_memory resolved in
             Msg.Http_reply { epoch; reply }
-        | Cmd.Get_memory_diff _ ->
+        | Cmd.Get_memory_diff { keeper; _ } ->
             let reply =
               Msg.Reply_memory_diff
-                (fetch_and_decode_get t ~path
-                   ~decode:Wire_knowledge.decode_memory_diff)
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_knowledge.decode_memory_diff;
+                }
             in
             Msg.Http_reply { epoch; reply }
-        | Cmd.Get_keeper_memory_os_internals _ ->
+        | Cmd.Get_keeper_memory_os_internals { keeper } ->
             let reply =
               Msg.Reply_keeper_memory_os_internals
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_knowledge.decode_memory_os_internals;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_memory_facts { keeper } ->
+            let reply =
+              Msg.Reply_keeper_memory_facts
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_knowledge.decode_keeper_memory_facts;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_memory_activity { keeper; _ } ->
+            let reply =
+              Msg.Reply_keeper_memory_activity
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_knowledge.decode_keeper_memory_activity;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_memory_health ->
+            let reply =
+              Msg.Reply_keeper_memory_health
                 (fetch_and_decode_get t ~path
-                   ~decode:Wire_knowledge.decode_memory_os_internals)
+                   ~decode:Wire_knowledge.decode_keeper_memory_health_fleet)
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_provider_usage _ ->

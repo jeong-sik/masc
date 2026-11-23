@@ -1294,6 +1294,27 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
               Cmd.Http_post
                 { epoch = m.epoch; req = Cmd.Post_sandbox_probe (`Keeper name) };
             ] )
+      | Nav.Keeper_memory, Some "e" ->
+          let knowledge =
+            Knowledge_store.set_memory_view_mode Knowledge_store.View_evolution
+              m.knowledge
+          in
+          let next = { m with nav = { m.nav with dive_scroll_offset = 0 }; knowledge } in
+          (next, View_fetches.fetches_for_current_view next)
+      | Nav.Keeper_memory, Some "f" ->
+          let knowledge =
+            Knowledge_store.set_memory_view_mode Knowledge_store.View_facts
+              m.knowledge
+          in
+          let next = { m with nav = { m.nav with dive_scroll_offset = 0 }; knowledge } in
+          (next, View_fetches.fetches_for_current_view next)
+      | Nav.Keeper_memory, Some "d" ->
+          let knowledge =
+            Knowledge_store.set_memory_view_mode Knowledge_store.View_diff
+              m.knowledge
+          in
+          let next = { m with nav = { m.nav with dive_scroll_offset = 0 }; knowledge } in
+          (next, View_fetches.fetches_for_current_view next)
       | Nav.Keeper_memory, Some "a" ->
           ( Model.with_toast ~now ~level:Model.Toast_info
               (Say.make
@@ -1346,10 +1367,11 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
             |> Fleet_store.mark_chat_history_loading ~keeper:name
           in
           let config = Config_store.cancel_edit_field m.config in
+          let knowledge = Knowledge_store.close_memory_reading m.knowledge in
           let drafts =
             m.drafts |> Drafts.set_active_keeper name |> Drafts.set_focus true
           in
-          let next = { m with nav; fleet; config; drafts } in
+          let next = { m with nav; fleet; config; knowledge; drafts } in
           (next, View_fetches.fetches_for_current_view next)
       | Nav.Keeper_config, Some "e" ->
           let config =
@@ -1467,7 +1489,10 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
               (m, []))
       | Nav.Keepers -> (
           let split_keeper_opt =
-            if m.nav.pane_index = 1 then
+            if
+              m.nav.pane_index = 1
+              || (m.nav.zoomed && Model.can_zoom_current_view m)
+            then
               Option.map
                 (fun (k : Wire_fleet.keeper_summary) -> k.name)
                 (Fleet_store.selected_keeper_summary m.fleet)
@@ -1487,6 +1512,33 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                       req = Cmd.Post_sandbox_probe (`Keeper name);
                     };
                 ] )
+          | Some _, Nav.Keeper_memory, Some "e" ->
+              let knowledge =
+                Knowledge_store.set_memory_view_mode
+                  Knowledge_store.View_evolution m.knowledge
+              in
+              let next =
+                { m with nav = { m.nav with dive_scroll_offset = 0 }; knowledge }
+              in
+              (next, View_fetches.fetches_for_current_view next)
+          | Some _, Nav.Keeper_memory, Some "f" ->
+              let knowledge =
+                Knowledge_store.set_memory_view_mode Knowledge_store.View_facts
+                  m.knowledge
+              in
+              let next =
+                { m with nav = { m.nav with dive_scroll_offset = 0 }; knowledge }
+              in
+              (next, View_fetches.fetches_for_current_view next)
+          | Some _, Nav.Keeper_memory, Some "d" ->
+              let knowledge =
+                Knowledge_store.set_memory_view_mode Knowledge_store.View_diff
+                  m.knowledge
+              in
+              let next =
+                { m with nav = { m.nav with dive_scroll_offset = 0 }; knowledge }
+              in
+              (next, View_fetches.fetches_for_current_view next)
           | Some name, Nav.Keeper_memory, Some "a" ->
               ( Model.with_toast ~now ~level:Model.Toast_info
                   (Say.make
@@ -1555,6 +1607,27 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
           match m.knowledge.active_tab with
           | Nav.Knowledge_memory -> (
               match printable_char with
+              | Some "e" ->
+                  let knowledge =
+                    Knowledge_store.set_memory_view_mode
+                      Knowledge_store.View_evolution m.knowledge
+                  in
+                  let next = { m with knowledge } in
+                  (next, View_fetches.fetches_for_current_view next)
+              | Some "f" ->
+                  let knowledge =
+                    Knowledge_store.set_memory_view_mode
+                      Knowledge_store.View_facts m.knowledge
+                  in
+                  let next = { m with knowledge } in
+                  (next, View_fetches.fetches_for_current_view next)
+              | Some "d" ->
+                  let knowledge =
+                    Knowledge_store.set_memory_view_mode
+                      Knowledge_store.View_diff m.knowledge
+                  in
+                  let next = { m with knowledge } in
+                  (next, View_fetches.fetches_for_current_view next)
               | Some "a" -> (
                   match resolve_memory_act_keeper m with
                   | Some keeper ->

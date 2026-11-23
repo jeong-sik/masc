@@ -89,6 +89,29 @@ let fetches_for_keeper_tab ~force ~name ~tab (m : Model.t) =
         | Observed.Failed _ ->
             needs_fetch ~force m.knowledge.memory_os_internals
       in
+      let facts_needed =
+        match m.knowledge.keeper_memory_facts with
+        | Observed.Value { data; stale = false; _ } ->
+            force || not (String.equal data.keeper name)
+        | Observed.Loading _
+        | Observed.Value { stale = true; _ }
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ->
+            needs_fetch ~force m.knowledge.keeper_memory_facts
+      in
+      let activity_needed =
+        match m.knowledge.keeper_memory_activity with
+        | Observed.Value { data; stale = false; _ } ->
+            force || not (String.equal data.keeper name)
+        | Observed.Loading _
+        | Observed.Value { stale = true; _ }
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ->
+            needs_fetch ~force m.knowledge.keeper_memory_activity
+      in
+      let health_needed = needs_fetch ~force m.knowledge.keeper_memory_health in
       []
       |> add_if diff_needed
            (Cmd.Get_memory_diff
@@ -98,6 +121,10 @@ let fetches_for_keeper_tab ~force ~name ~tab (m : Model.t) =
               })
       |> add_if internals_needed
            (Cmd.Get_keeper_memory_os_internals { keeper = name })
+      |> add_if facts_needed (Cmd.Get_keeper_memory_facts { keeper = name })
+      |> add_if activity_needed
+           (Cmd.Get_keeper_memory_activity { keeper = name; limit = 50 })
+      |> add_if health_needed Cmd.Get_keeper_memory_health
   | Nav.Keeper_work_candle ->
       []
       |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
@@ -298,11 +325,11 @@ let fetches_for_workspace ~force (m : Model.t) =
           |> add_if (needs_fetch ~force m.knowledge.artifacts) Cmd.Get_artifacts)
           @ selected_wiki_req
       | Nav.Knowledge_memory ->
-          let internals_reqs =
+          let keeper_scoped_reqs =
             match m.knowledge.memory_diff_keeper with
             | None -> []
             | Some keeper ->
-                let needed =
+                let internals_needed =
                   match m.knowledge.memory_os_internals with
                   | Observed.Value { data; stale = false; _ } ->
                       force || not (String.equal data.keeper keeper)
@@ -313,22 +340,69 @@ let fetches_for_workspace ~force (m : Model.t) =
                   | Observed.Failed _ ->
                       needs_fetch ~force m.knowledge.memory_os_internals
                 in
-                if needed then
-                  [ Cmd.Get_keeper_memory_os_internals { keeper } ]
-                else []
+                let facts_needed =
+                  match m.knowledge.keeper_memory_facts with
+                  | Observed.Value { data; stale = false; _ } ->
+                      force || not (String.equal data.keeper keeper)
+                  | Observed.Loading _
+                  | Observed.Value { stale = true; _ }
+                  | Observed.Absent
+                  | Observed.Unreported
+                  | Observed.Failed _ ->
+                      needs_fetch ~force m.knowledge.keeper_memory_facts
+                in
+                let activity_needed =
+                  match m.knowledge.keeper_memory_activity with
+                  | Observed.Value { data; stale = false; _ } ->
+                      force || not (String.equal data.keeper keeper)
+                  | Observed.Loading _
+                  | Observed.Value { stale = true; _ }
+                  | Observed.Absent
+                  | Observed.Unreported
+                  | Observed.Failed _ ->
+                      needs_fetch ~force m.knowledge.keeper_memory_activity
+                in
+                []
+                |> add_if internals_needed
+                     (Cmd.Get_keeper_memory_os_internals { keeper })
+                |> add_if facts_needed
+                     (Cmd.Get_keeper_memory_facts { keeper })
+                |> add_if activity_needed
+                     (Cmd.Get_keeper_memory_activity { keeper; limit = 50 })
+          in
+          let diff_needed =
+            match m.knowledge.memory_diff with
+            | Observed.Value { data; stale = false; _ } -> (
+                force
+                ||
+                match m.knowledge.memory_diff_keeper, data.scope with
+                | None, Wire_knowledge.Scope_world -> false
+                | Some kp, Wire_knowledge.Scope_keeper k ->
+                    not (String.equal kp k)
+                | None, Wire_knowledge.Scope_keeper _
+                | Some _, Wire_knowledge.Scope_world ->
+                    true)
+            | Observed.Loading _
+            | Observed.Value { stale = true; _ }
+            | Observed.Absent
+            | Observed.Unreported
+            | Observed.Failed _ ->
+                needs_fetch ~force m.knowledge.memory_diff
           in
           ([]
           |> add_if
                (needs_fetch ~force m.knowledge.world_memory)
                Cmd.Get_world_memory
           |> add_if
-               (needs_fetch ~force m.knowledge.memory_diff)
+               (needs_fetch ~force m.knowledge.keeper_memory_health)
+               Cmd.Get_keeper_memory_health
+          |> add_if diff_needed
                (Cmd.Get_memory_diff
                   {
                     keeper = m.knowledge.memory_diff_keeper;
                     window = m.knowledge.memory_diff_window;
                   }))
-          @ internals_reqs)
+          @ keeper_scoped_reqs)
   | Nav.Keepers ->
       let embedded_dive_reqs =
         match Fleet_store.selected_keeper_summary m.fleet with

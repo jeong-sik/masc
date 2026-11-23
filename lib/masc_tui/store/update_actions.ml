@@ -2,6 +2,54 @@ open Masc_tui_core
 open Masc_tui_keymap
 open Masc_tui_protocol
 
+let active_memory_reading (m : Model.t) :
+    Knowledge_store.memory_reading_entry option =
+  let scope_opt =
+    match Model.active_dive m with
+    | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
+        Some (Some name)
+    | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; _ })) ->
+        Some keeper
+    | Some
+        ( Nav.Dive_keeper
+            {
+              tab =
+                ( Nav.Keeper_chat
+                | Nav.Keeper_work_candle
+                | Nav.Keeper_sandbox
+                | Nav.Keeper_config );
+              _;
+            }
+        | Nav.Dive_work _
+        | Nav.Dive_knowledge
+            (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+        | Nav.Dive_infra _ ) ->
+        None
+    | None -> (
+        match m.nav.workspace with
+        | Nav.Knowledge
+          when Nav.equal_knowledge_tab m.knowledge.active_tab
+                 Nav.Knowledge_memory ->
+            Some m.knowledge.memory_diff_keeper
+        | Nav.Keepers
+          when Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory -> (
+            match Fleet_store.selected_keeper_summary m.fleet with
+            | Some k -> Some (Some k.name)
+            | None -> None)
+        | Nav.Pulse
+        | Nav.Work
+        | Nav.Keepers
+        | Nav.Knowledge
+        | Nav.Runtime
+        | Nav.Infra ->
+            None)
+  in
+  match scope_opt, m.knowledge.memory_reading with
+  | Some keeper_opt, Some entry
+    when Knowledge_store.memory_reading_matches_scope ~keeper_opt entry ->
+      Some entry
+  | (Some _ | None), (Some _ | None) -> None
+
 let next_theme_preset = function
   | Theme.Midnight -> Theme.Arcade_hi
   | Theme.Arcade_hi -> Theme.Paper_light
@@ -1218,6 +1266,12 @@ and execute_action ~now (m : Model.t) action =
             in
             if keeper_config_has_search then
               ({ m with config = Config_store.set_search_query "" m.config }, [])
+            else if Option.is_some (active_memory_reading m) then
+              ( {
+                  m with
+                  knowledge = Knowledge_store.close_memory_reading m.knowledge;
+                }
+              , [] )
             else
               let active_chat_interrupt =
                 match Model.active_dive m with
@@ -1491,14 +1545,19 @@ and execute_action ~now (m : Model.t) action =
           match Model.active_dive m with
           | Some (Nav.Dive_keeper { tab = Nav.Keeper_chat; _ }) ->
               ({ m with fleet = Fleet_store.toggle_turn_details m.fleet }, [])
+          | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ }) ->
+              let knowledge =
+                Knowledge_store.cycle_memory_diff_window m.knowledge
+              in
+              let next = { m with knowledge } in
+              (next, View_fetches.fetches_for_current_view next)
           | Some (Nav.Dive_infra _ | Nav.Dive_work _) ->
               ({ m with infra = Infra_store.toggle_raw_json m.infra }, [])
           | Some
               ( Nav.Dive_keeper
                   {
                     tab =
-                      ( Nav.Keeper_memory
-                      | Nav.Keeper_work_candle
+                      ( Nav.Keeper_work_candle
                       | Nav.Keeper_sandbox
                       | Nav.Keeper_config );
                     _;
@@ -1509,12 +1568,22 @@ and execute_action ~now (m : Model.t) action =
               match m.nav.workspace with
               | Nav.Keepers ->
                   if
-                    m.nav.pane_index = 1
+                    (m.nav.pane_index = 1 || m.nav.zoomed)
                     && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                          Nav.Keeper_chat
                   then
                     ( { m with fleet = Fleet_store.toggle_turn_details m.fleet }
                     , [] )
+                  else if
+                    (m.nav.pane_index = 1 || m.nav.zoomed)
+                    && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                         Nav.Keeper_memory
+                  then
+                    let knowledge =
+                      Knowledge_store.cycle_memory_diff_window m.knowledge
+                    in
+                    let next = { m with knowledge } in
+                    (next, View_fetches.fetches_for_current_view next)
                   else if m.nav.pane_index = 0 then
                     match Fleet_store.selected_keeper_summary m.fleet with
                     | Some k ->
@@ -1876,6 +1945,47 @@ and execute_action ~now (m : Model.t) action =
                 (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline) ) ->
             None
         | None -> (
+            let reading_copy_opt =
+              match active_memory_reading m with
+              | None -> None
+              | Some (Knowledge_store.Reading_activity { event; _ }) ->
+                  let claims =
+                    List.filter_map
+                      (fun (f : Wire_knowledge.memory_activity_fact) -> f.claim)
+                      (event.after @ event.before)
+                  in
+                  let parts =
+                    claims
+                    @
+                    match event.reason with
+                    | Some r when not (String.equal (String.trim r) "") -> [ r ]
+                    | Some _ | None -> []
+                  in
+                  if parts <> [] then Some (String.concat "\n" parts)
+                  else Some event.identity
+              | Some (Knowledge_store.Reading_ordinary_fact { fact; _ }) ->
+                  Some fact.claim
+              | Some (Knowledge_store.Reading_source_fact { fact; _ }) ->
+                  Some (fact.path ^ "\n" ^ fact.claim)
+              | Some
+                  (Knowledge_store.Reading_source_invalidation
+                     { invalidation; _ }) ->
+                  Some invalidation.source_path
+              | Some (Knowledge_store.Reading_diff_item { item; _ }) -> (
+                  match item with
+                  | Knowledge_store.Keeper_added f -> Some f.text
+                  | Knowledge_store.Keeper_updated u ->
+                      Some ("- " ^ u.before.text ^ "\n+ " ^ u.after.text)
+                  | Knowledge_store.Keeper_retracted r -> Some r.text
+                  | Knowledge_store.Keeper_invalidated inv -> Some inv.text
+                  | Knowledge_store.World_added e
+                  | Knowledge_store.World_retracted e ->
+                      Some e.summary
+                  | Knowledge_store.World_updated u -> Some u.summary)
+            in
+            match reading_copy_opt with
+            | Some txt -> Some txt
+            | None -> (
             match Model.active_dive m with
             | Some (Nav.Dive_keeper { name; tab }) -> (
                 match tab with
@@ -2063,7 +2173,7 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Runtime ->
                     Option.map
                       (fun (l : Wire_runtime.failover_lane) -> l.id)
-                      (Runtime_store.selected_lane m.runtime)))
+                      (Runtime_store.selected_lane m.runtime))))
       in
       match text_opt with
       | Some txt ->
@@ -2257,4 +2367,82 @@ and execute_action ~now (m : Model.t) action =
         let zoomed = not m.nav.zoomed in
         let pane_index = if zoomed then 0 else m.nav.pane_index in
         ({ m with nav = { m.nav with zoomed; pane_index } }, [])
+  | Keymap.Cycle_memory_view ->
+      let in_memory =
+        Option.is_none m.nav.overlay
+        &&
+        match Model.active_dive m with
+        | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ }) -> true
+        | Some
+            ( Nav.Dive_keeper
+                {
+                  tab =
+                    ( Nav.Keeper_chat
+                    | Nav.Keeper_work_candle
+                    | Nav.Keeper_sandbox
+                    | Nav.Keeper_config );
+                  _;
+                }
+            | Nav.Dive_work _
+            | Nav.Dive_knowledge _
+            | Nav.Dive_infra _ ) ->
+            false
+        | None -> (
+            match m.nav.workspace with
+            | Nav.Knowledge ->
+                Nav.equal_knowledge_tab m.knowledge.active_tab
+                  Nav.Knowledge_memory
+            | Nav.Keepers ->
+                Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
+            | Nav.Pulse | Nav.Work | Nav.Runtime | Nav.Infra -> false)
+      in
+      if not in_memory then (m, [])
+      else
+        let knowledge =
+          Knowledge_store.cycle_memory_view_mode m.knowledge
+        in
+        let next =
+          {
+            m with
+            nav = { m.nav with dive_scroll_offset = 0 };
+            knowledge;
+          }
+        in
+        (next, View_fetches.fetches_for_current_view next)
+  | Keymap.Toggle_memory_sort ->
+      let in_memory =
+        Option.is_none m.nav.overlay
+        &&
+        match Model.active_dive m with
+        | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ }) -> true
+        | Some
+            ( Nav.Dive_keeper
+                {
+                  tab =
+                    ( Nav.Keeper_chat
+                    | Nav.Keeper_work_candle
+                    | Nav.Keeper_sandbox
+                    | Nav.Keeper_config );
+                  _;
+                }
+            | Nav.Dive_work _
+            | Nav.Dive_knowledge _
+            | Nav.Dive_infra _ ) ->
+            false
+        | None -> (
+            match m.nav.workspace with
+            | Nav.Knowledge ->
+                Nav.equal_knowledge_tab m.knowledge.active_tab
+                  Nav.Knowledge_memory
+            | Nav.Keepers ->
+                Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
+            | Nav.Pulse | Nav.Work | Nav.Runtime | Nav.Infra -> false)
+      in
+      if not in_memory then (m, [])
+      else
+        ( {
+            m with
+            knowledge = Knowledge_store.toggle_memory_facts_sort m.knowledge;
+          }
+        , [] )
   | Keymap.Quit_app -> (m, [ Cmd.Quit Exit_reason.Quit_key ])

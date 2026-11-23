@@ -1683,21 +1683,6 @@ let briefing_status_display ~lang = function
       , Theme.Status_critical
       , Say.resolve lang (Say.make ~ko:"조회 불가" ~en:"Unavailable") )
 
-let heat_pill_spec ~count = function
-  | Wire_knowledge.Heat_hot ->
-      (Printf.sprintf "HOT %dx" count, Theme.Status_attention)
-  | Wire_knowledge.Heat_warm ->
-      (Printf.sprintf "WARM %dx" count, Theme.Status_active)
-  | Wire_knowledge.Heat_cold ->
-      (Printf.sprintf "COLD %dx" count, Theme.Status_historical)
-  | Wire_knowledge.Heat_never_retrieved ->
-      ("COLD 0x", Theme.Status_historical)
-
-let relation_label = function
-  | Wire_knowledge.Revision -> "rev"
-  | Wire_knowledge.Program_revision -> "prog-rev"
-  | Wire_knowledge.Program_absorption -> "absorb"
-
 let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     ~bp ~lang ~(k : Knowledge_store.t) ~focused =
   let wm_opt = Observed.to_option k.world_memory in
@@ -1813,17 +1798,23 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           let two_line_claims = conflict_budget >= 5 in
           let max_conflicts = if conflict_budget >= 11 then 2 else 1 in
           let total_c = List.length conflicts in
-          let sel_c = H.clamp_index total_c k.selected_index in
+          let sel_c_opt =
+            if k.selected_index >= 0 && k.selected_index < total_c then
+              Some k.selected_index
+            else None
+          in
           let start_c, _ =
             Table.compute_viewport ~total_rows:total_c
               ~viewport_rows:max_conflicts ~scroll:k.scroll_offset
-              ~selected:(Some sel_c)
+              ~selected:sel_c_opt
           in
           List.iteri
             (fun local_i (c : Wire_knowledge.memory_conflict) ->
               let idx = start_c + local_i in
               if !y + writer_reserve < bottom then begin
-                let is_sel = Int.equal idx sel_c && focused in
+                let is_sel =
+                  focused && Option.equal Int.equal sel_c_opt (Some idx)
+                in
                 let row_bg =
                   if is_sel then theme.selection_bg else theme.surface_1
                 in
@@ -1982,29 +1973,33 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 incr y
               end;
               let visible_writers = Knowledge_store.filtered_librarian_writers k in
-              let total_w = List.length visible_writers in
+              let n_conflicts = List.length conflicts in
+              let scope_entries =
+                if visible_writers = [] then []
+                else
+                  `World
+                  :: List.map (fun w -> `Writer w) visible_writers
+              in
+              let total_s = List.length scope_entries in
               let reserve_acts = 2 in
               let max_w = Int.max 0 (bottom - !y - reserve_acts) in
-              let sel_w_idx =
-                if total_w > 0 then Some (H.clamp_index total_w k.selected_index)
+              let sel_s_idx =
+                if total_s > 0 && k.selected_index >= n_conflicts then
+                  Some (H.clamp_index total_s (k.selected_index - n_conflicts))
                 else None
               in
-              let start_w, _ =
-                Table.compute_viewport ~total_rows:total_w
-                  ~viewport_rows:(Int.max 1 max_w) ~scroll:k.scroll_offset
-                  ~selected:sel_w_idx
-              in
-              let show_sel =
-                focused
-                && Knowledge_store.filtered_memory_conflicts k = []
+              let start_s, _ =
+                Table.compute_viewport ~total_rows:total_s
+                  ~viewport_rows:(Int.max 1 max_w)
+                  ~scroll:(Int.max 0 (k.scroll_offset - n_conflicts))
+                  ~selected:sel_s_idx
               in
               List.iteri
-                (fun local_i (w : Wire_knowledge.librarian_writer_row) ->
-                  let abs_i = start_w + local_i in
+                (fun local_i entry ->
+                  let abs_s = start_s + local_i in
                   if !y < bottom - reserve_acts then begin
                     let is_sel =
-                      show_sel
-                      && Option.equal Int.equal sel_w_idx (Some abs_i)
+                      focused && Option.equal Int.equal sel_s_idx (Some abs_s)
                     in
                     let row_bg =
                       if is_sel then theme.selection_bg else theme.surface_1
@@ -2014,47 +2009,85 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                         ~row_rect:
                           (Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1)
                         ~theme ();
-                    let g, tone, lbl = writer_state_display ~lang w.state in
-                    let snap_s =
-                      match w.snapshot_file with
-                      | Some (Wire_knowledge.Snapshot_file_present { sha; _ }) ->
-                          let short =
-                            if String.length sha > 8 then String.sub sha 0 8
-                            else sha
-                          in
-                          " · snap:" ^ short
-                      | Some (Wire_knowledge.Snapshot_file_fault f) ->
-                          " · snap:" ^ f
-                      | None -> ""
-                    in
-                    let acts_s =
-                      match w.available_act_tokens with
-                      | [] -> ""
-                      | xs -> String.concat ", " xs
-                    in
-                    let left_s =
-                      Printf.sprintf "  %s %s · %s%s" (Glyph.to_utf8 g) w.keeper
-                        (Say.resolve lang lbl) snap_s
-                    in
-                    let aw = Grapheme.display_width acts_s in
-                    ignore
-                      (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-                         ~max_w:
-                           (if aw > 0 then Int.max 10 (content.w - aw - 2)
-                            else content.w)
-                         ~style:
-                           (H.status_style ~theme ~bg:row_bg
-                              ~attrs:(if is_sel then Attr.bold else Attr.none)
-                              tone)
-                         left_s);
-                    if aw > 0 then
-                      ignore
-                        (H.put_right ~grid ~clip:content
-                           ~right_x:(Rect.right content) ~y:!y ~max_w:aw
-                           ~style:(H.whisper_style ~theme ~bg:row_bg ()) acts_s);
+                    (match entry with
+                    | `World ->
+                        let is_active = Option.is_none k.memory_diff_keeper in
+                        let mark =
+                          if is_active then Glyph.to_utf8 Glyph.Live_healthy
+                          else Glyph.to_utf8 Glyph.Live_idle
+                        in
+                        let left_s =
+                          Printf.sprintf "  %s %s" mark
+                            (Say.resolve lang
+                               (Say.make ~ko:"월드 메모리 (전체)"
+                                  ~en:"World Memory (Global)"))
+                        in
+                        let tone =
+                          if is_active then Theme.Status_active
+                          else Theme.Status_historical
+                        in
+                        ignore
+                          (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                             ~max_w:content.w
+                             ~style:
+                               (H.status_style ~theme ~bg:row_bg
+                                  ~attrs:
+                                    (if is_sel || is_active then Attr.bold
+                                     else Attr.none)
+                                  tone)
+                             left_s)
+                    | `Writer (w : Wire_knowledge.librarian_writer_row) ->
+                        let is_active =
+                          Option.equal String.equal k.memory_diff_keeper
+                            (Some w.keeper)
+                        in
+                        let g, tone, lbl = writer_state_display ~lang w.state in
+                        let snap_s =
+                          match w.snapshot_file with
+                          | Some (Wire_knowledge.Snapshot_file_present { sha; _ })
+                            ->
+                              let short =
+                                if String.length sha > 8 then String.sub sha 0 8
+                                else sha
+                              in
+                              " · snap:" ^ short
+                          | Some (Wire_knowledge.Snapshot_file_fault f) ->
+                              " · snap:" ^ f
+                          | None -> ""
+                        in
+                        let acts_s =
+                          match w.available_act_tokens with
+                          | [] -> ""
+                          | xs -> String.concat ", " xs
+                        in
+                        let scope_mark = if is_active then "▸ " else "  " in
+                        let left_s =
+                          Printf.sprintf "%s%s %s · %s%s" scope_mark
+                            (Glyph.to_utf8 g) w.keeper (Say.resolve lang lbl)
+                            snap_s
+                        in
+                        let aw = Grapheme.display_width acts_s in
+                        ignore
+                          (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                             ~max_w:
+                               (if aw > 0 then Int.max 10 (content.w - aw - 2)
+                                else content.w)
+                             ~style:
+                               (H.status_style ~theme ~bg:row_bg
+                                  ~attrs:
+                                    (if is_sel || is_active then Attr.bold
+                                     else Attr.none)
+                                  tone)
+                             left_s);
+                        if aw > 0 then
+                          ignore
+                            (H.put_right ~grid ~clip:content
+                               ~right_x:(Rect.right content) ~y:!y ~max_w:aw
+                               ~style:(H.whisper_style ~theme ~bg:row_bg ())
+                               acts_s));
                     incr y
                   end)
-                (Store_scroll.drop start_w visible_writers |> H.safe_take max_w);
+                (Store_scroll.drop start_s scope_entries |> H.safe_take max_w);
               List.concat_map
                 (fun (w : Wire_knowledge.librarian_writer_row) ->
                   w.available_act_tokens)
@@ -2151,8 +2184,8 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Observed.Failed _ ) as obs ->
         H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang obs
 
-let draw_temporal_memory_diff ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
-    ~bp ~lang ~now_unix ~(k : Knowledge_store.t) ~focused =
+let draw_temporal_memory_diff ~(model : Model.t) ~grid ~cache ~(rect : Rect.t)
+    ~(theme : Theme.t) ~bp ~lang ~now_unix ~(k : Knowledge_store.t) ~focused =
   let scope_str =
     match k.memory_diff_keeper with
     | None -> Say.resolve lang (Say.make ~ko:"월드 메모리" ~en:"World Memory")
@@ -2166,393 +2199,40 @@ let draw_temporal_memory_diff ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Knowledge_store.Window_revs { from_rev; to_rev } ->
         Printf.sprintf "rev %d->%d" from_rev to_rev
   in
+  let title, hotkey =
+    match k.memory_diff_keeper with
+    | Some _ ->
+        ( Say.resolve lang
+            (Say.make ~ko:"키퍼 기억 탐색기 · 차트"
+               ~en:"Keeper Memory Explorer & Charts")
+        , Say.resolve lang
+            (Say.make ~ko:"[e/f/d/t] 보기 · [Enter] 전문"
+               ~en:"[e/f/d/t] View · [Enter] Read") )
+    | None ->
+        ( Say.resolve lang
+            (Say.make ~ko:"시간축 메모리 Diff 스크러버"
+               ~en:"Temporal Memory Diff Scrubber")
+        , Say.resolve lang
+            (Say.make ~ko:"[Space] 창 전환" ~en:"[Space] Window") )
+  in
   let inner =
     Card.draw ~cache grid ~rect ~theme
       (H.card_spec ~focused
          ~subtitle:(Printf.sprintf "%s · %s" scope_str win_str)
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[Space] 창 전환" ~en:"[Space] Window"))
-         (Say.resolve lang
-            (Say.make ~ko:"시간축 메모리 Diff 스크러버"
-               ~en:"Temporal Memory Diff Scrubber")))
+         ~hotkey title)
   in
   let content = H.pad_content ~bp inner in
   if Rect.is_empty content then ()
   else
-    match k.memory_diff with
-    | Observed.Value { data = diff; _ } ->
-        let y = ref content.y in
-        let bottom = Rect.bottom content in
-        (* Row 1: Revision range + semantic diff counts *)
-        if !y < bottom then begin
-          let rev_range =
-            match diff.range.from_rev, diff.range.to_rev with
-            | Some a, Some b -> Printf.sprintf "rev %d → %d" a b
-            | Some a, None -> Printf.sprintf "rev %d+" a
-            | None, Some b -> Printf.sprintf "..rev %d" b
-            | None, None -> win_str
-          in
-          let cx = ref content.x and right_e = Rect.right content in
-          let put_s style s =
-            let adv =
-              H.put_clipped ~grid ~clip:content ~x:!cx ~y:!y
-                ~max_w:(Int.max 0 (right_e - !cx)) ~style s
-            in
-            cx := !cx + adv
-          in
-          put_s (H.anchor_style ~theme ()) rev_range;
-          put_s (H.whisper_style ~theme ~italic:false ()) Typography.sep_dot;
-          (match diff.body with
-           | Wire_knowledge.Keeper_diff { counts; _ } ->
-               put_s (H.secondary_style ~theme ())
-                 (Printf.sprintf "%d %s" counts.total_facts_now
-                    (Say.resolve lang (Say.make ~ko:"사실" ~en:"facts")));
-               put_s (H.whisper_style ~theme ~italic:false ()) Typography.sep_dot;
-               put_s (H.status_style ~theme Theme.Status_ok)
-                 (Printf.sprintf "+%d " counts.added);
-               put_s (H.status_style ~theme Theme.Status_active)
-                 (Printf.sprintf "~%d " counts.updated);
-               put_s (H.status_style ~theme Theme.Status_critical)
-                 (Printf.sprintf "-%d " counts.retracted);
-               put_s (H.status_style ~theme Theme.Status_attention)
-                 (Printf.sprintf "!%d" counts.invalidated)
-           | Wire_knowledge.World_diff { counts; _ } ->
-               put_s (H.secondary_style ~theme ())
-                 (Printf.sprintf "%d %s" counts.total_claims_now
-                    (Say.resolve lang (Say.make ~ko:"주장" ~en:"claims")));
-               put_s (H.whisper_style ~theme ~italic:false ()) Typography.sep_dot;
-               put_s (H.status_style ~theme Theme.Status_ok)
-                 (Printf.sprintf "+%d " counts.added);
-               put_s (H.status_style ~theme Theme.Status_active)
-                 (Printf.sprintf "~%d " counts.updated);
-               put_s (H.status_style ~theme Theme.Status_critical)
-                 (Printf.sprintf "-%d" counts.retracted));
-          incr y
-        end;
-        (* Row 2-3: HOT / WARM / COLD Tier Distribution Stacked_bar with colored ● legend *)
-        if !y + 1 < bottom then begin
-          let h = diff.retrieval_heat in
-          let bar_rect = Rect.make ~x:content.x ~y:!y ~w:content.w ~h:2 in
-          let heat_spec : Chart.Spec.t =
-            {
-              title = Say.make ~ko:"기억 계층" ~en:"Memory Tiers";
-              hotkey_hint = None;
-              kind =
-                Chart.Spec.Stacked_bar
-                  {
-                    segments =
-                      [
-                        (Say.literal "HOT", float_of_int h.hot, Theme.Status_attention);
-                        (Say.literal "WARM", float_of_int h.warm, Theme.Status_active);
-                        ( Say.literal "COLD"
-                        , float_of_int (h.cold + h.never_retrieved)
-                        , Theme.Status_historical );
-                      ];
-                    total_label =
-                      Say.literal (Printf.sprintf "%d hits" h.total_events);
-                    unit = Format_val.Count;
-                  };
-            }
-          in
-          ignore
-            (Chart.draw grid ~rect:bar_rect ~theme ~caps:H.default_caps ~lang
-               ~show_title:false heat_spec);
-          y := !y + 2
-        end;
-        (* Memory OS Internals compact telemetry line (Compaction · Canonical · Digest · Molt) *)
-        (match k.memory_diff_keeper, Observed.to_option k.memory_os_internals with
-        | Some kp, Some intr when String.equal intr.keeper kp && !y < bottom ->
-            let comp_s =
-              if intr.compaction.present then
-                Printf.sprintf "cmp:%dep/%dt/%dB" intr.compaction.epoch_count
-                  intr.compaction.archived_turns_count intr.compaction.anchor_bytes
-              else "cmp:none"
-            in
-            let ct_s =
-              if intr.canonical_turns.present then
-                let rk =
-                  Option.value intr.canonical_turns.latest_runtime_kind
-                    ~default:"?"
-                in
-                Printf.sprintf "turns:%d(%s,rst:%d)"
-                  intr.canonical_turns.turn_count rk
-                  intr.canonical_turns.history_resets_count
-              else "turns:none"
-            in
-            let dig_s =
-              if intr.memory_digest.present then
-                let rev_s =
-                  match intr.memory_digest.revision with
-                  | Some r -> Printf.sprintf "r%d" r
-                  | None -> "r?"
-                in
-                Printf.sprintf "dig:%s/%df/%dB" rev_s
-                  intr.memory_digest.fact_count intr.memory_digest.bytes
-              else "dig:none"
-            in
-            let molt_s =
-              match intr.librarian_molt.pending_molt_kind with
-              | Some mk ->
-                  let cats =
-                    if intr.librarian_molt.pending_molt_categories = [] then ""
-                    else
-                      "("
-                      ^ String.concat ","
-                          intr.librarian_molt.pending_molt_categories
-                      ^ ")"
-                  in
-                  "molt:" ^ mk ^ cats
-              | None -> "molt:clear"
-            in
-            let line =
-              Printf.sprintf "OS %s · %s · %s · %s" comp_s ct_s dig_s molt_s
-            in
-            ignore
-              (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-                 ~max_w:content.w ~style:(H.secondary_style ~theme ()) line);
-            incr y
-        | _ -> ());
-        if !y < bottom then begin
-          H.draw_divider ~grid ~rect:content ~y:!y ~theme ();
-          incr y
-        end;
-        (* Temporal Diff Entries with semantic Left Rails & Tier-4 Italic timestamps.
-           Single-SSOT filtering + line-level scrolling shared with Update_nav. *)
-        let q = String.trim k.filter_query in
-        let items = Knowledge_store.filtered_memory_diff_items k in
-        let is_world_diff =
-          match diff.body with
-          | Wire_knowledge.World_diff _ -> true
-          | Wire_knowledge.Keeper_diff _ -> false
-        in
-        let rows_acc = ref [] in
-        let push_row r = rows_acc := r :: !rows_acc in
-        List.iter
-          (function
-            | Knowledge_store.Keeper_added f ->
-                let heat_lbl, heat_tone =
-                  heat_pill_spec ~count:f.retrieval_count f.heat
-                in
-                let age = H.format_age ~now_unix f.first_seen_unix in
-                let left_txt = Printf.sprintf "+ [%s] %s" f.category f.origin in
-                push_row
-                  (`Header_heat_age
-                     ( Theme.Status_ok
-                     , H.status_style ~theme ~attrs:Attr.bold Theme.Status_ok
-                     , left_txt
-                     , heat_lbl
-                     , heat_tone
-                     , age ));
-                push_row (`Plain (Theme.Status_ok, H.text_style ~theme (), f.text))
-            | Knowledge_store.Keeper_updated u ->
-                let heat_lbl, heat_tone =
-                  heat_pill_spec ~count:u.after.retrieval_count u.after.heat
-                in
-                let hdr =
-                  Printf.sprintf "~ [%s] %s @r%d" u.after.category
-                    (relation_label u.relation) u.at_rev
-                in
-                push_row
-                  (`Header_right
-                     ( Theme.Status_active
-                     , H.status_style ~theme ~attrs:Attr.bold Theme.Status_active
-                     , hdr
-                     , heat_lbl
-                     , H.status_style ~theme heat_tone ));
-                push_row
-                  (`Plain
-                     ( Theme.Status_active
-                     , H.status_style ~theme Theme.Status_critical
-                     , "- " ^ u.before.text ));
-                push_row
-                  (`Plain
-                     ( Theme.Status_active
-                     , H.status_style ~theme Theme.Status_ok
-                     , "+ " ^ u.after.text ))
-            | Knowledge_store.Keeper_retracted r ->
-                let why =
-                  match r.drop_reason with Some s -> " · " ^ s | None -> ""
-                in
-                let hdr =
-                  Printf.sprintf "- [%s] %s @r%d · %s%s" r.category
-                    (Say.resolve lang (Say.make ~ko:"대체/철회" ~en:"retracted"))
-                    r.removed_at_rev r.removed_by why
-                in
-                push_row
-                  (`Plain
-                     ( Theme.Status_critical
-                     , H.status_style ~theme Theme.Status_critical
-                     , hdr ));
-                push_row
-                  (`Plain
-                     ( Theme.Status_critical
-                     , H.whisper_style ~theme ()
-                     , "- " ^ r.text ))
-            | Knowledge_store.Keeper_invalidated inv ->
-                let prems = String.concat ", " inv.missing_premise_ids in
-                let hdr =
-                  Printf.sprintf "! [invalidated] @r%d missing: %s" inv.at_rev
-                    prems
-                in
-                push_row
-                  (`Plain
-                     ( Theme.Status_attention
-                     , H.status_style ~theme Theme.Status_attention
-                     , hdr ));
-                push_row
-                  (`Plain
-                     ( Theme.Status_attention
-                     , H.whisper_style ~theme ()
-                     , "- " ^ inv.text ))
-            | Knowledge_store.World_added e ->
-                let ts = H.extract_hhmmss e.recorded_at in
-                let line =
-                  Printf.sprintf "+ #%d [%s] %s" e.seq
-                    (H.short_hash ~len:8 e.fact_id)
-                    e.summary
-                in
-                push_row
-                  (`Header_right
-                     ( Theme.Status_ok
-                     , H.status_style ~theme Theme.Status_ok
-                     , line
-                     , ts
-                     , H.whisper_style ~theme () ))
-            | Knowledge_store.World_updated u ->
-                let ts = H.extract_hhmmss u.recorded_at in
-                let hdr =
-                  Printf.sprintf "~ #%d [%s] %s" u.seq
-                    (H.short_hash ~len:8 u.fact_id)
-                    u.summary
-                in
-                push_row
-                  (`Header_right
-                     ( Theme.Status_active
-                     , H.status_style ~theme ~attrs:Attr.bold Theme.Status_active
-                     , hdr
-                     , ts
-                     , H.whisper_style ~theme () ));
-                let b_s =
-                  H.json_kv_summary u.before |> H.safe_take 3
-                  |> List.map (fun (k, v) -> k ^ "=" ^ v)
-                  |> String.concat " · "
-                in
-                let a_s =
-                  H.json_kv_summary u.after |> H.safe_take 3
-                  |> List.map (fun (k, v) -> k ^ "=" ^ v)
-                  |> String.concat " · "
-                in
-                if not (String.equal b_s "") then
-                  push_row
-                    (`Plain
-                       ( Theme.Status_active
-                       , H.status_style ~theme Theme.Status_critical
-                       , "- " ^ b_s ));
-                if not (String.equal a_s "") then
-                  push_row
-                    (`Plain
-                       ( Theme.Status_active
-                       , H.status_style ~theme Theme.Status_ok
-                       , "+ " ^ a_s ))
-            | Knowledge_store.World_retracted r ->
-                let ts = H.extract_hhmmss r.recorded_at in
-                let line =
-                  Printf.sprintf "- #%d [%s] %s" r.seq
-                    (H.short_hash ~len:8 r.fact_id)
-                    r.summary
-                in
-                push_row
-                  (`Header_right
-                     ( Theme.Status_critical
-                     , H.status_style ~theme Theme.Status_critical
-                     , line
-                     , ts
-                     , H.whisper_style ~theme () )))
-          items;
-        let rows = List.rev !rows_acc in
-        let avail_h = Int.max 1 (bottom - !y) in
-        let max_skip = Int.max 0 (List.length rows - avail_h) in
-        let skip = Int.min max_skip (Int.max 0 k.diff_scroll_offset) in
-        let tx = content.x + 2 and tw = Int.max 0 (content.w - 2) in
-        List.iter
-          (function
-            | `Header_heat_age (rail_tone, st, left_txt, heat_lbl, heat_tone, age) ->
-                if !y < bottom then begin
-                  Card.draw_left_rail ~tone:rail_tone grid ~x:content.x ~y:!y
-                    ~h:1 ~theme;
-                  let hw = Grapheme.display_width heat_lbl in
-                  let aw = Grapheme.display_width age in
-                  ignore
-                    (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y
-                       ~max_w:(Int.max 6 (tw - hw - aw - 4))
-                       ~style:st left_txt);
-                  ignore
-                    (H.put_right ~grid ~clip:content
-                       ~right_x:(Rect.right content - aw - 2) ~y:!y ~max_w:hw
-                       ~style:(H.status_style ~theme heat_tone) heat_lbl);
-                  ignore
-                    (H.put_right ~grid ~clip:content
-                       ~right_x:(Rect.right content) ~y:!y ~max_w:aw
-                       ~style:(H.whisper_style ~theme ()) age);
-                  incr y
-                end
-            | `Header_right (rail_tone, st, left_txt, right_txt, right_st) ->
-                if !y < bottom then begin
-                  Card.draw_left_rail ~tone:rail_tone grid ~x:content.x ~y:!y
-                    ~h:1 ~theme;
-                  let rw = Grapheme.display_width right_txt in
-                  ignore
-                    (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y
-                       ~max_w:(Int.max 6 (tw - rw - 2))
-                       ~style:st left_txt);
-                  ignore
-                    (H.put_right ~grid ~clip:content
-                       ~right_x:(Rect.right content) ~y:!y ~max_w:rw
-                       ~style:right_st right_txt);
-                  incr y
-                end
-            | `Plain (rail_tone, st, text) ->
-                if !y < bottom then begin
-                  Card.draw_left_rail ~tone:rail_tone grid ~x:content.x ~y:!y
-                    ~h:1 ~theme;
-                  ignore
-                    (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
-                       ~style:st text);
-                  incr y
-                end)
-          (Store_scroll.drop skip rows);
-        if items = [] && !y < bottom then
-          H.draw_empty_notice ~grid
-            ~rect:
-              (Rect.make ~x:content.x ~y:!y ~w:content.w
-                 ~h:(Int.max 1 (bottom - !y)))
-            ~theme
-            ~hint:
-              (Say.resolve lang
-                 (if String.equal q "" then
-                    Say.make ~ko:"[Space] 시간 범위를 7d로 확장"
-                      ~en:"[Space] Expand window to 7d"
-                  else
-                    Say.make ~ko:"[Esc] 필터 초기화"
-                      ~en:"[Esc] Clear filter"))
-            (Say.resolve lang
-               (if String.equal q "" then
-                  if is_world_diff then
-                    Say.make ~ko:"이 기간 내 월드 메모리 변동 없음"
-                      ~en:"No world memory changes in this window"
-                  else
-                    Say.make ~ko:"이 기간 내 메모리 변동 없음"
-                      ~en:"No memory changes in this window"
-                else if is_world_diff then
-                  Say.make ~ko:"필터에 일치하는 월드 메모리 변동 없음"
-                    ~en:"No world memory changes match filter"
-                else
-                  Say.make ~ko:"필터에 일치하는 메모리 변동 없음"
-                    ~en:"No memory changes match filter"))
-    | ( Observed.Loading _
-      | Observed.Absent
-      | Observed.Unreported
-      | Observed.Failed _ ) as obs ->
-        H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang obs
+    match k.memory_diff_keeper with
+    | Some keeper ->
+        Masc_tui_screens_core.Memory_explorer.render_keeper_memory ~grid
+          ~rect:content ~theme ~bp ~model ~keeper ~focused
+          ~diff_scroll:k.diff_scroll_offset
+    | None ->
+        Masc_tui_screens_core.Memory_explorer.render_world_diff_body ~grid
+          ~rect:content ~theme ~lang ~now_unix ~k ~focused
+          ~diff_scroll:k.diff_scroll_offset
 
 let render_memory ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     ~bp grid =
@@ -2622,8 +2302,8 @@ let render_memory ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   in
   ignore (H.draw_pills ~grid ~rect:top_rect ~theme pills);
   if model.nav.zoomed then
-    draw_temporal_memory_diff ~grid ~cache ~rect:body_rect ~theme ~bp ~lang
-      ~now_unix ~k ~focused:true
+    draw_temporal_memory_diff ~model ~grid ~cache ~rect:body_rect ~theme ~bp
+      ~lang ~now_unix ~k ~focused:true
   else
     let left_rect, right_rect =
       Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.48
@@ -2631,8 +2311,8 @@ let render_memory ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     in
     draw_world_and_librarian ~grid ~cache ~rect:left_rect ~theme ~bp ~lang ~k
       ~focused:(model.nav.pane_index = 0);
-    draw_temporal_memory_diff ~grid ~cache ~rect:right_rect ~theme ~bp ~lang
-      ~now_unix ~k ~focused:(model.nav.pane_index = 1)
+    draw_temporal_memory_diff ~model ~grid ~cache ~rect:right_rect ~theme ~bp
+      ~lang ~now_unix ~k ~focused:(model.nav.pane_index = 1)
 
 (* --- 4. Top-Level Workspace Render & Dive Render --- *)
 
@@ -3082,6 +2762,7 @@ let render_dive_memory ~keeper ~from_rev ~to_rev ~(model : Model.t) ~cache
       model.knowledge with
       memory_diff_keeper = keeper;
       memory_diff_window = Knowledge_store.Window_revs { from_rev; to_rev };
+      memory_view_mode = Knowledge_store.View_diff;
       diff_scroll_offset = model.nav.dive_scroll_offset;
     }
   in

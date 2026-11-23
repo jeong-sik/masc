@@ -2,4 +2,15 @@
 
 (test
  (name test_keymap_ui)
+ (modules test_keymap_ui)
  (libraries masc_tui_core masc_tui_term masc_tui_keymap masc_tui_ui yojson alcotest))
+
+(test
+ (name test_mermaid)
+ (modules test_mermaid)
+ (libraries masc_tui_core masc_tui_term masc_tui_ui alcotest))
+
+(test
+ (name test_memory_lineage)
+ (modules test_memory_lineage)
+ (libraries masc_tui_core masc_tui_term masc_tui_ui yojson alcotest))

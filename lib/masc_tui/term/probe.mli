@@ -18,6 +18,15 @@ type observation = {
   cell_pixels : (int * int) option;
 }
 
+val empty_observation : observation
+val equal_observation : observation -> observation -> bool
+val current_observation : unit -> observation
+(** Process-local latest terminal capability observation (updated atomically at
+    startup and on late terminal probe replies). *)
+
+val set_current_observation : observation -> unit
+(** Atomically publish the latest terminal capability observation. *)
+
 type result = {
   palette : Palette.t option;
   graphics : graphics_reply option;

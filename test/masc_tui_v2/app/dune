@@ -2,6 +2,7 @@
 
 (test
  (name test_app)
+ (modules test_app)
  (libraries
   masc_tui_core
   masc_tui_term
@@ -14,6 +15,21 @@
   masc.sse_wire
   masc_core
   fs_compat
+  eio
+  eio_main
+  unix
+  yojson
+  alcotest))
+
+(test
+ (name test_pele_and_probe)
+ (modules test_pele_and_probe)
+ (libraries
+  masc_tui_core
+  masc_tui_term
+  masc_tui_ui
+  masc_tui_store
+  masc_tui_app
   eio
   eio_main
   unix

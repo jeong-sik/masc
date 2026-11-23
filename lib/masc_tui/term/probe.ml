@@ -42,6 +42,19 @@ type observation = {
   cell_pixels : (int * int) option;
 }
 
+let empty_observation = { palette = None; graphics = None; cell_pixels = None }
+
+let equal_cell_pixels (w1, h1) (w2, h2) = Int.equal w1 w2 && Int.equal h1 h2
+
+let equal_observation a b =
+  Option.equal Palette.equal a.palette b.palette
+  && Option.equal equal_graphics_reply a.graphics b.graphics
+  && Option.equal equal_cell_pixels a.cell_pixels b.cell_pixels
+
+let process_observation = Atomic.make empty_observation
+let current_observation () = Atomic.get process_observation
+let set_current_observation obs = Atomic.set process_observation obs
+
 type result = {
   palette : Palette.t option;
   graphics : graphics_reply option;

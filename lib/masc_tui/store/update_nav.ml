@@ -1191,29 +1191,30 @@ let resolve_target_keeper (m : Model.t) =
       | Some k -> Some k.name
       | None -> None)
 
-let build_chat_submit_cmd (m : Model.t) (tx : Drafts.pending_message) ~is_btw =
-  let mode =
-    match tx.mode with
-    | Drafts.Mode_direct | Drafts.Mode_follow_up -> Wire_fleet.Follow_up
-    | Drafts.Mode_steer -> (
-        match Fleet_store.chat_control_token_for ~keeper:tx.keeper m.fleet with
-        | Some control_token ->
-            let target =
-              match Fleet_store.active_turn_for ~keeper:tx.keeper m.fleet with
-              | Some turn -> Wire_fleet.Interrupt_turn_token turn.interrupt_token
-              | None -> (
-                  match
-                    Fleet_store.String_map.find_opt tx.keeper
-                      m.fleet.chat_streams
-                  with
-                  | Some s when s.active ->
-                      Wire_fleet.Interrupt_operation_id
-                        (Option.value s.operation_id ~default:s.request_id)
-                  | Some _ | None -> Wire_fleet.Interrupt_none)
-            in
-            Wire_fleet.Steer { control_token; target }
-        | None -> Wire_fleet.Follow_up)
-  in
+type steer_refusal =
+  | Steer_turn_not_own
+  | Steer_no_control_token
+
+type steer_resolution =
+  | Steer_own of { control_token : string; operation_id : string }
+  | Steer_refused of steer_refusal
+
+let resolve_steer ~keeper (m : Model.t) =
+  (* [Stream_keeper_chat] is the only producer of [chat_streams], so an
+     active buffer is a request this TUI submitted, and the server keys that
+     request's operation by its [request_id]. The turn row's interrupt token
+     names whichever turn holds the Keeper (another Keeper's delegated
+     request, an autonomous cycle), so it is never a steer target. *)
+  match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with
+  | Some s when s.active -> (
+      match Fleet_store.chat_control_token_for ~keeper m.fleet with
+      | Some control_token ->
+          Steer_own { control_token; operation_id = s.request_id }
+      | None -> Steer_refused Steer_no_control_token)
+  | Some _ | None -> Steer_refused Steer_turn_not_own
+
+let build_chat_submit_cmd (m : Model.t) (tx : Drafts.pending_message) ~mode
+    ~is_btw =
   let req : Wire_fleet.chat_submit_request =
     {
       request_id = tx.request_id;

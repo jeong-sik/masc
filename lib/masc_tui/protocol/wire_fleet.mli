@@ -320,17 +320,17 @@ type chat_origin =
   | Origin_bare
   | Origin_connector of string
 
-type interrupt_target =
-  | Interrupt_none
-  | Interrupt_turn_token of string
-  | Interrupt_operation_id of string
-
 type submit_mode =
   | Follow_up
   | Steer of {
       control_token : string;
-      target : interrupt_target;
+      operation_id : string;
     }
+(** [Follow_up] sends no [admission_intent]: the server queues the message
+    behind whatever turn holds the Keeper. [Steer] cuts exactly
+    [operation_id], an operation this client submitted. The server resolves
+    that id against its operation store and cuts it only while it is the one
+    running, so a steer never reaches a turn this client did not start. *)
 
 type chat_attachment = {
   attachment_id : string;

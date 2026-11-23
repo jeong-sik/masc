@@ -252,10 +252,7 @@ let test_wire_fleet () =
         origin = Wire_fleet.Origin_bare;
         mode =
           Wire_fleet.Steer
-            {
-              control_token = "ctrl-42";
-              target = Wire_fleet.Interrupt_turn_token "turn-tok-9";
-            };
+            { control_token = "ctrl-42"; operation_id = "op-122" };
         turn_instructions = None;
         since_seq = None;
         attachments = [];
@@ -268,6 +265,10 @@ let test_wire_fleet () =
   Alcotest.(check (list string)) "admission_intent exact 4 keys"
     [ "control_token"; "interrupt_token"; "kind"; "operation_id" ]
     (assoc_keys ai);
+  Alcotest.(check bool) "steer names its own operation, never a turn token"
+    true
+    (json_field "operation_id" ai = `String "op-122"
+    && json_field "interrupt_token" ai = `Null);
   let followup_json =
     Wire_fleet.encode_chat_submit_request
       {

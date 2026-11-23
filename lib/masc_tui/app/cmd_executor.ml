@@ -1691,15 +1691,28 @@ let render_memory_diagram_payload ?run_pele ~(probe : Probe.observation)
                     ~now_ms ~colors svg
                 in
                 match run_scene scene with
-                | Ok png ->
-                    let pixel_size = Memory_diagram.parse_png_dimensions png in
-                    Knowledge_store.Diagram_pele_png
-                      {
-                        png;
-                        pixel_size;
-                        format_label = "Pele SVG";
-                        fallback_lines;
-                      }
+                | Ok png -> (
+                    match Memory_diagram.parse_png_dimensions png with
+                    | Some _ as pixel_size ->
+                        Knowledge_store.Diagram_pele_png
+                          {
+                            png;
+                            pixel_size;
+                            format_label = "Pele SVG";
+                            fallback_lines;
+                          }
+                    | None ->
+                        let reason =
+                          if ko then
+                            "Pele PNG 헤더 손상 · Mermaid 텍스트 폴백"
+                          else "Invalid Pele PNG header · Mermaid fallback"
+                        in
+                        Knowledge_store.Diagram_text
+                          {
+                            lines = fallback_lines;
+                            note =
+                              Some (combine_fallback_note reason mermaid_note);
+                          })
                 | Error err ->
                     let reason =
                       if ko then
@@ -1730,15 +1743,24 @@ let render_memory_diagram_payload ?run_pele ~(probe : Probe.observation)
                 ~now_ms ~colors graph_json
             in
             match run_scene scene with
-            | Ok png ->
-                let pixel_size = Memory_diagram.parse_png_dimensions png in
-                Knowledge_store.Diagram_pele_png
-                  {
-                    png;
-                    pixel_size;
-                    format_label = "Pele Graph";
-                    fallback_lines = tree_lines;
-                  }
+            | Ok png -> (
+                match Memory_diagram.parse_png_dimensions png with
+                | Some _ as pixel_size ->
+                    Knowledge_store.Diagram_pele_png
+                      {
+                        png;
+                        pixel_size;
+                        format_label = "Pele Graph";
+                        fallback_lines = tree_lines;
+                      }
+                | None ->
+                    let reason =
+                      if ko then
+                        "Pele PNG 헤더 손상 · 형성 트리 텍스트 폴백"
+                      else "Invalid Pele PNG header · Formation tree fallback"
+                    in
+                    Knowledge_store.Diagram_text
+                      { lines = tree_lines; note = Some reason })
             | Error err ->
                 let reason =
                   if ko then

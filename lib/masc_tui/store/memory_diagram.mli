@@ -45,8 +45,9 @@ val find_latest_event_for_fact :
 
 val parse_png_dimensions : string -> (int * int) option
 (** Safely extract [(width_px, height_px)] from PNG bytes by validating the
-    exact 8-byte PNG signature, an [IHDR] chunk of length [>= 13], complete
-    IHDR payload presence, and strictly positive 31-bit PNG dimensions. *)
+    exact 8-byte PNG signature, an [IHDR] chunk of exact length [13], complete
+    33-byte header + IHDR data + CRC presence, and strictly positive 31-bit
+    PNG dimensions. *)
 
 val mermaid_source :
   ?tz_offset_sec:int ->

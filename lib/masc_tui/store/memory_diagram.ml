@@ -106,13 +106,13 @@ let png_signature = "\137PNG\r\n\026\n"
 
 let parse_png_dimensions bytes =
   let len = String.length bytes in
-  (* 8-byte PNG signature + 4-byte IHDR length + 4-byte "IHDR" + 13-byte IHDR data *)
-  if len < 29 then None
+  (* 8-byte PNG signature + 4-byte IHDR length + 4-byte "IHDR" + 13-byte IHDR data + 4-byte CRC *)
+  if len < 33 then None
   else if not (String.equal (String.sub bytes 0 8) png_signature) then None
   else if not (String.equal (String.sub bytes 12 4) "IHDR") then None
   else
     let ihdr_len = String.get_int32_be bytes 8 in
-    if Int32.unsigned_compare ihdr_len 13l < 0 then None
+    if not (Int32.equal ihdr_len 13l) then None
     else
       let w32 = String.get_int32_be bytes 16 in
       let h32 = String.get_int32_be bytes 20 in

@@ -243,6 +243,8 @@ let test_png_ihdr_parser () =
     (Memory_diagram.parse_png_dimensions "");
   check (option (pair int int)) "truncated 24 bytes -> None" None
     (Memory_diagram.parse_png_dimensions (String.sub valid 0 24));
+  check (option (pair int int)) "truncated 32 bytes (missing CRC) -> None" None
+    (Memory_diagram.parse_png_dimensions (String.sub valid 0 32));
   let bad_sig = "X" ^ String.sub valid 1 (String.length valid - 1) in
   check (option (pair int int)) "invalid signature -> None" None
     (Memory_diagram.parse_png_dimensions bad_sig);
@@ -260,6 +262,13 @@ let test_png_ihdr_parser () =
   in
   check (option (pair int int)) "IHDR len < 13 -> None" None
     (Memory_diagram.parse_png_dimensions short_ihdr_len);
+  let long_ihdr_len =
+    let b = Bytes.of_string valid in
+    Bytes.set_int32_be b 8 14l;
+    Bytes.to_string b
+  in
+  check (option (pair int int)) "IHDR len > 13 -> None" None
+    (Memory_diagram.parse_png_dimensions long_ihdr_len);
   check (option (pair int int)) "zero width -> None" None
     (Memory_diagram.parse_png_dimensions (sample_png ~w:0 ~h:100));
   check (option (pair int int)) "zero height -> None" None
@@ -692,6 +701,33 @@ let test_cmd_executor_render_decisions () =
   | Knowledge_store.Diagram_text { lines = _ :: _; note = Some _ } -> ()
   | Knowledge_store.Diagram_text _ | Knowledge_store.Diagram_pele_png _ ->
       fail "expected Formation tree fallback with note when Pele fails");
+
+  (* Auto + Kitty + Pele returns corrupt/truncated PNG -> text fallback, NEVER Diagram_pele_png *)
+  let payload_corrupt_svg =
+    Cmd_executor.render_memory_diagram_payload
+      ~run_pele:(fun _ -> Ok (String.sub png 0 29))
+      ~probe:kitty_probe ~term_program:None ~palette:(Some pal) ~keeper:"alpha"
+      ~kind:Knowledge_store.Diagram_pele_card
+      ~mode:Knowledge_store.Diagram_mode_auto ~ko:false ~tz_offset_sec:0
+      ~now_unix:1_700_000_500.0 ~max_width:100 ~chart ()
+  in
+  (match payload_corrupt_svg with
+  | Knowledge_store.Diagram_text { lines = _ :: _; note = Some _ } -> ()
+  | Knowledge_store.Diagram_text _ | Knowledge_store.Diagram_pele_png _ ->
+      fail "expected Diagram_text fallback when Pele returns truncated PNG");
+  let payload_corrupt_tree =
+    Cmd_executor.render_memory_diagram_payload
+      ~run_pele:(fun _ -> Ok "not-a-png")
+      ~probe:kitty_probe ~term_program:None ~palette:(Some pal) ~keeper:"alpha"
+      ~kind:Knowledge_store.Diagram_formation_tree
+      ~mode:Knowledge_store.Diagram_mode_auto ~ko:false ~tz_offset_sec:0
+      ~now_unix:1_700_000_500.0 ~max_width:80 ~chart ()
+  in
+  (match payload_corrupt_tree with
+  | Knowledge_store.Diagram_text { lines = _ :: _; note = Some _ } -> ()
+  | Knowledge_store.Diagram_text _ | Knowledge_store.Diagram_pele_png _ ->
+      fail
+        "expected Formation tree text fallback when Pele returns invalid PNG");
 
   (* Forced Mermaid / Tree modes NEVER invoke Pele *)
   let forced_calls = ref 0 in
@@ -1315,8 +1351,29 @@ let test_pele_cooperative_cancellation () =
       let elapsed = Clock.Mono.seconds_since (Clock.Mono.now ()) ~since:t0 in
       check (result string string) "cancelled Pele returns Error"
         (Error "Pele was cancelled") !res;
-      check bool "cancelled sleeping helper killed promptly (< 1.5s)" true
-        (elapsed < 1.5))
+  check bool "Pele cooperative cancellation kills sleeping helper promptly" true
+    (elapsed < 1.5);
+  (* Keymap Help SSOT documents '.', 'Ctrl+O', and 'v' with zero collisions *)
+  check int "keymap has zero collisions" 0 (List.length (Keymap.collisions ()));
+  let help_groups =
+    Keymap.help_entries ~scope_chain:Keymap.all_scopes ~lang:Say.Lang_en
+  in
+  let help_keys =
+    List.concat_map
+      (fun (g : Keymap.help_group) ->
+        List.concat_map (fun (e : Keymap.help_entry) -> e.keys) g.entries)
+      help_groups
+  in
+  check bool "Help SSOT lists '.'" true (List.mem "." help_keys);
+  check bool "Help SSOT lists 'v'" true (List.mem "v" help_keys);
+  check bool "Help SSOT lists 'Ctrl+O'" true (List.mem "Ctrl+O" help_keys);
+  let md_ref = Keymap.render_markdown_reference ~lang:Say.Lang_en () in
+  check bool "Markdown reference documents '.'" true
+    (has_substring md_ref "`.`");
+  check bool "Markdown reference documents 'v'" true
+    (has_substring md_ref "`v`");
+  check bool "Markdown reference documents Formation Tree on Ctrl+O" true
+    (has_substring md_ref "Formation Tree"))
 
 let () =
   run "masc_tui_v2_memory_diagram_wiring"

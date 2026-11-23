@@ -733,7 +733,10 @@ let bindings : binding list =
         ~slash_twin:"/model" ~footer_priority:9 (ctrl_char 'l');
       bind ~scope:Global ~tier:Universal_ctrl ~category:Cat_actions
         ~action:Toggle_tool_details ~key_display:"Ctrl+O" ~hint_label:say_tools
-        ~help_desc:(Say.make ~ko:"도구 호출 상세 펼치기/접기" ~en:"Toggle tool call details")
+        ~help_desc:
+          (Say.make
+             ~ko:"도구 호출 상세 펼치기/접기 · 기억 탐색기에서 형성 트리 열기"
+             ~en:"Toggle tool call details · open Memory Formation Tree")
         ~slash_twin:"/tools" ~footer_priority:9 (ctrl_char 'o');
       bind ~scope:Global ~tier:Universal_ctrl ~category:Cat_overlays
         ~action:Open_queue_context ~key_display:"Ctrl+T" ~hint_label:say_queue
@@ -962,11 +965,38 @@ let format_footer_line hints =
   String.concat footer_separator
     (List.map (fun (h : footer_hint) -> h.key_display ^ " " ^ h.label) hints)
 
+let contextual_memory_help_entries ~lang =
+  [
+    {
+      keys = [ "." ];
+      desc =
+        Say.resolve lang
+          (Say.make
+             ~ko:"기억 탐색기: Pele 3-stage SVG 카드 / Mermaid 폴백 열기"
+             ~en:"Memory Explorer: open Pele 3-stage SVG card / Mermaid fallback");
+      slash_twin = None;
+      action = Cycle_memory_view;
+    };
+    {
+      keys = [ "v" ];
+      desc =
+        Say.resolve lang
+          (Say.make
+             ~ko:"기억 다이어그램 열림 시: Auto(Pele) / Mermaid / Tree 모드 순환"
+             ~en:"Memory diagram open: cycle Auto (Pele) / Mermaid / Tree");
+      slash_twin = None;
+      action = Cycle_memory_view;
+    };
+  ]
+
 let help_entries ~scope_chain ~lang =
   let active_bindings =
     List.filter
       (fun (b : binding) -> List.exists (equal_scope b.scope) scope_chain)
       bindings
+  in
+  let include_contextual_memory =
+    List.exists (equal_scope Unfocused_nav) scope_chain
   in
   List.filter_map
     (fun category ->
@@ -999,6 +1029,11 @@ let help_entries ~scope_chain ~lang =
                     };
                   ])
           [] cat_bindings
+      in
+      let entries =
+        if include_contextual_memory && equal_help_category category Cat_actions
+        then entries @ contextual_memory_help_entries ~lang
+        else entries
       in
       match entries with
       | [] -> None
@@ -1103,4 +1138,10 @@ let render_markdown_reference ?(lang = Say.Lang_en) () =
         (scope_name b.scope) (tier_name b.tier) b.key_display slash
         (Say.resolve lang b.help_desc))
     bindings;
+  List.iter
+    (fun (e : help_entry) ->
+      let key_s = String.concat "/" e.keys in
+      Printf.bprintf buf "| Memory Explorer (Contextual) | Monitor-first bare | `%s` | — | %s |\n"
+        key_s e.desc)
+    (contextual_memory_help_entries ~lang);
   Buffer.contents buf

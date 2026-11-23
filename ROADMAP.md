@@ -19,20 +19,7 @@ A planning view, not a release promise. The operating model behind it
 
 ## Release train
 
-State read on 2026-10-17 from `gh release list`, the `main` branch, and
-[`CHANGELOG.md`](CHANGELOG.md). The cut date holds and scope varies.
-
-| Version | Published (UTC) | Note |
-|---|---|---|
-| v0.52.0 | 2026-10-12 06:54 | |
-| v0.53.0 | 2026-10-13 10:32 | |
-| v0.54.0 | 2026-10-13 23:50 | |
-| v0.55.0 | 2026-10-14 06:18 | |
-| v0.56.0 | 2026-10-14 16:36 | |
-| v0.57.0 | 2026-10-16 09:23 | |
-| v0.58.0 | 2026-10-16 22:06 | |
-| v0.59.0 | 2026-10-19 19:18 | |
-| v0.60.0 | 2026-10-21 00:14 | latest |
+The cut date holds and scope varies.
 
 The cut order for each train is: freeze, `release/v0.y.0`, version bump and
 changelog assembly, release candidate (`v0.y.0-rc*`), an independent release
@@ -44,17 +31,7 @@ tag, and publish check.
 Every issue carries a `masc-triage` block, and its `impact` axis ranks the
 backlog: `breaks-continuity`, then `breaks-collab`, `blinds-operator`,
 `degrades`, `internal`. `must-do: true` marks what breaks the product promise
-now. Counted on 2026-09-07:
-
-| Open | Count |
-|---|---|
-| Issues | 1,210 |
-| `must-do` | 74 |
-| `impact/breaks-continuity` | 174 |
-| `impact/breaks-collab` | 26 |
-| `impact/blinds-operator` | 250 |
-| `impact/degrades` | 451 |
-| `impact/internal` | 285 |
+now.
 
 The live list is
 [open `must-do` issues](https://github.com/jeong-sik/masc/issues?q=is%3Aissue+is%3Aopen+label%3Amust-do).
@@ -64,26 +41,10 @@ This file names groups and examples from it; the query is the source.
 
 Open `must-do` issues, grouped. Numbers are issues.
 
-- **Keeper continuity.** A Keeper that cannot boot, or drops what it already
-  decided: #32463 (meta file reset on boot), #32461 (an undecodable snapshot
-  still blocks the keeper), #31738 (a blocked-shutdown record makes a keeper
-  unbootable), #33267 (a rejected `max_tokens` response kept in the
-  checkpoint), #32504 (schema hard cut reconciled in one place at boot).
-- **Sandbox truth.** #33638 (an observe run allowed network writes in
-  production), #33492 (the microvm adapter cannot express
+- **Sandbox truth.** #33492 (the microvm adapter cannot express
   drop-all-capabilities and read-only rootfs on `msb`).
-- **Server lifecycle.** #33600 (`start-masc.sh` hijacked by the TUI hand-over),
-  #31711 (servers receive external SIGTERM).
-- **CI truth on `main`.** #32372, #32522, #32507, #32503 (suites red on
-  `main`), #31801 (a ratchet that counts zero on CI runners and passes),
-  #32181 (hangs that burn the test budget).
-- **Operator visibility.** #32828 (a rejected prompt override is invisible),
-  #32747 (a Gate record shows the pre-routing command), #31729 (decision-feed
-  token, cost, and stop-reason fields never written), #31722 (the dashboard
-  snapshot materialises 440k events per cycle).
-- **Verification.** #31862 (the judge cannot read producer evidence), #31629
-  (launcher provenance for verifier-grade proof), #32061 (non-Keeper owners
-  cannot submit completion over MCP).
+- **Operator visibility.** #32747 (a Gate record shows the pre-routing command).
+- **Verification.** #31629 (launcher provenance for verifier-grade proof).
 
 ## Next
 
@@ -116,17 +77,13 @@ Open `must-do` issues, grouped. Numbers are issues.
 - `v2.*` tags are audit history only.
 - No `0.y.0` tag while that train's entry-condition issues remain open. The
   milestone is the list, not the label: an issue blocks the tag when it sits on
-  that train's GitHub milestone (v0.36.0: its open `impact/breaks-continuity`
-  issues). The label states the risk; putting the issue on that milestone is
-  the separate act that makes it block — on 2026-09-21, 11 of the 191 open
-  `impact/breaks-continuity` issues were on it. Other `must-do` issues do not
-  block a tag; they stay ordered by `impact/*` in the backlog. (Before 2026-09-21 this
-  rule read "no tag while `must-do` issues remain open"; with 97 open on that
-  day no tag could satisfy it, so it was never applied.)
+  that train's GitHub milestone. The label states the risk; putting the issue
+  on that milestone is the separate act that makes it block. Other `must-do`
+  issues do not block a tag; they stay ordered by `impact/*` in the backlog.
 - `0.y.z` tags are date-fixed and scope-variable: the cut date holds and
   whatever has not passed the gates moves to the next tag.
 - No tag while version truth is broken across `dune-project`, `masc.opam`,
-  `ROADMAP.md`, and `CHANGELOG.md`.
+  and `CHANGELOG.md`.
 - The backlog is ordered by `impact/*`.
 
 ## References

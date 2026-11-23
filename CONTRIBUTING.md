@@ -60,7 +60,6 @@ scripts/opam-pin-external-deps.sh         # pin external OCaml dependencies
 opam install ./masc.opam --deps-only --locked --with-test
 
 scripts/dune-local.sh build @default      # build
-scripts/dune-local.sh exec test/test_keeper_meta_json_config_toml_only.exe
 mkdir -p "$HOME/masc-dev"
 env -u MASC_CONFIG_DIR scripts/run-local.sh --target-dir "$HOME/masc-dev" --port 9234
 ```

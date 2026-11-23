@@ -38,16 +38,13 @@
 
 기존 benchmark 데이터셋과 패키지 fixture는 각자의 입력 계약을 유지한다.
 
-`scripts/release-evidence.sh`, `make release-evidence`와 Keeper 생명주기
-검사기의 기본 출력은 `artifacts/release-evidence/`다. 출력 경로를 명시하면
-그 위치를 사용한다. 반복 측정 로그는 다른 작업 디렉터리에서 스크립트를
-호출해도 해당 저장소의 `artifacts/feedback-loop/`에 쓴다.
+`scripts/release-evidence.sh`와 Keeper 생명주기 검사기의 기본 출력은
+`artifacts/release-evidence/`다. 출력 경로를 명시하면 그 위치를 사용한다.
 
 ## 로컬 폴더 정리
 
 폴더를 지우기 전에 추적 파일, 현재 스크립트·설정의 참조와 사용 여부를 확인한다.
-Git에서 제외된 경로에도 런타임 상태나 미제출 작업이 있을 수 있다. 특히 저장소의
-`logs/`에는 supervisor 복구 기록이 있다.
+Git에서 제외된 경로에도 런타임 상태나 미제출 작업이 있을 수 있다.
 
 용도가 확인된 일회용 캐시와 실제로 빈 폴더는 제거한다. 도구가 캐시를 다시 만들
 수 있다. 실행 기록, 수정한 소스와 오래된 대시보드 복사본은 기존 위치를 정리할 때

@@ -322,7 +322,13 @@ let decode_hub_event_msgs ~epoch ~observed_at ev =
                     ( None
                     , Msg.Sse_event { epoch; event = Msg.Sse_tool_series series } );
                   ]
-              | Error reason -> skipped_stream_frame ~epoch ("tool series stream: " ^ reason)))
+              | Error reason ->
+                  (* A failed read arrives as {"error": detail}, and the server
+                     then ends the stream (Server_tool_metrics_series_stream). *)
+                  skipped_stream_frame ~epoch
+                    (match Wire_common.optional_nonblank_string json "error" with
+                    | Ok (Some detail) -> "tool series stream: " ^ detail
+                    | Ok None | Error _ -> "tool series stream: " ^ reason)))
       | Sse_hub.Stream_spec.Observer | Sse_hub.Stream_spec.Fleet -> [])
 
 let publish_hub_event ~bus ~stream_epoch ev =

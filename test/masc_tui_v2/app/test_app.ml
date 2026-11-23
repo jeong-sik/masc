@@ -1123,6 +1123,31 @@ let test_bus_key_hash_and_stream_frames () =
         true
     | _ -> false);
 
+  (* The tool series stream answers a failed read with {"error": detail} and
+     ends; the skipped frame names the server's detail. *)
+  let tool_error_msgs =
+    Cmd_executor.decode_hub_event_msgs ~epoch:Epoch.initial
+      ~observed_at:Clock.Mono.zero
+      (Sse_hub.Raw_frame
+         {
+           stream = Sse_hub.Stream_spec.Tool_metrics_series;
+           frame =
+             { Sse_wire.id = None; data = {|{"error":"metrics store locked"}|} };
+         })
+  in
+  Alcotest.(check bool) "tool series error frame names the server's detail" true
+    (match tool_error_msgs with
+    | [ ( None
+        , Msg.Sse_event
+            {
+              event =
+                Msg.Sse_observer_delivery
+                  { decoded = Masc_tui_protocol.Wire_observer.Undecodable reason; _ };
+              _;
+            } ) ] ->
+        String.equal reason "tool series stream: metrics store locked"
+    | _ -> false);
+
   (* v2.5: bucketed model metrics SSE frame decodes into Sse_models_metrics_snapshot *)
   let model_metrics_bucketed =
     {|{"window_minutes":1440,"bucket_minutes":60,"total_entries":10,"total_error_entries":0,"models":[]}|}

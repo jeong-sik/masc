@@ -294,6 +294,8 @@ let max_seq_of entries =
       match acc with None -> Some e.seq | Some s -> Some (max s e.seq))
     None entries
 
+let forget_log_cursor t = { t with last_log_seq = None }
+
 let apply_log_snapshot entries t =
   let sorted_desc =
     List.stable_sort

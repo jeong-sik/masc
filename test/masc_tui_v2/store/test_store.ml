@@ -703,6 +703,22 @@ let test_compact_composer_and_drafts () =
   Alcotest.(check bool) "persisted history confirms delivery" false
     (Drafts.has_active_tx_for ~keeper:"alpha" m20.drafts)
 
+(* A new epoch may face another server process, whose log seqs start from
+   zero again; the next log stream must open without the old cursor. *)
+let test_new_epoch_forgets_log_cursor () =
+  let m0 = Model.initial () in
+  let m1 =
+    { m0 with infra = { m0.infra with Infra_store.last_log_seq = Some 50 } }
+  in
+  let m2, _ = Update.step ~now:t1 m1 (Msg.Tick { wall_unix = 2.0 }) in
+  Alcotest.(check (option int)) "a step that keeps the epoch keeps the cursor"
+    (Some 50) m2.infra.Infra_store.last_log_seq;
+  let m3, _ = Update.step ~now:t2 m2 (Msg.Server_start_result (Ok ())) in
+  Alcotest.(check bool) "starting the server moved the epoch" false
+    (Epoch.equal m2.epoch m3.epoch);
+  Alcotest.(check (option int)) "the new epoch drops the cursor" None
+    m3.infra.Infra_store.last_log_seq
+
 (* 4. 409 workspace_mismatch recovery without loop *)
 let test_workspace_mismatch_recovery () =
   let m0 = Model.initial () in
@@ -7136,6 +7152,8 @@ let () =
       , [
           Alcotest.test_case "409 epoch bump and anti-loop recovery" `Quick
             test_workspace_mismatch_recovery;
+          Alcotest.test_case "a new epoch drops the log cursor" `Quick
+            test_new_epoch_forgets_log_cursor;
         ] );
       ( "subscriptions"
       , [

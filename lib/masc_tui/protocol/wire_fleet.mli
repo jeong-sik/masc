@@ -280,8 +280,37 @@ val decode_fleet_stream_event :
 
 (** {1 Keeper Chat Messages, Stream Chunks & Submit Requests} *)
 
+(** The route a [user] row arrived by: the server's [surface.kind]. *)
+type chat_surface =
+  | Surface_dashboard
+  | Surface_agent  (** [masc_keeper_msg] and workspace @mention delivery *)
+  | Surface_broadcast  (** a fleet broadcast copied into every Keeper *)
+  | Surface_discord
+  | Surface_slack
+  | Surface_webhook
+  | Surface_gate of string  (** the gate's channel label *)
+
+(** Who wrote a [user] row the operator did not write. The server sets
+    [speaker_authority] from the arrival route, never from the text. *)
+type chat_peer =
+  | Peer_keeper of string  (** ["keeper"]: [speaker_name], else [speaker_id] *)
+  | Peer_external of string
+      (** ["external"]: a connector author; [speaker_name], else [speaker_id] *)
+  | Peer_unresolved of string option
+      (** No [speaker_authority], or neither name nor id: the [speaker_id]
+          when the server sent one. *)
+
 type chat_role =
   | Role_user
+      (** The operator wrote it: role ["operator"], or ["user"] with
+          [speaker_authority] ["owner"]. *)
+  | Role_peer of {
+      peer : chat_peer;
+      surface : chat_surface option;
+    }
+      (** Any other ["user"] row: a Keeper's message or broadcast, a connector
+          author, or an author the server did not record. The Keeper reads it
+          as user input, but the operator did not write it. *)
   | Role_assistant
   | Role_system
   | Role_tool

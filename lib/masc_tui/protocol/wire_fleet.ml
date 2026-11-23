@@ -1009,8 +1009,26 @@ let decode_fleet_stream_event json =
       Ok (Fleet_degraded { revision; degradation })
   | other -> Error (Printf.sprintf "unknown fleet stream event %S" other)
 
+type chat_surface =
+  | Surface_dashboard
+  | Surface_agent
+  | Surface_broadcast
+  | Surface_discord
+  | Surface_slack
+  | Surface_webhook
+  | Surface_gate of string
+
+type chat_peer =
+  | Peer_keeper of string
+  | Peer_external of string
+  | Peer_unresolved of string option
+
 type chat_role =
   | Role_user
+  | Role_peer of {
+      peer : chat_peer;
+      surface : chat_surface option;
+    }
   | Role_assistant
   | Role_system
   | Role_tool
@@ -1213,17 +1231,76 @@ let encode_chat_submit_request req =
     @ channel_field @ instructions_field @ since_seq_field @ admission_field
     @ attachments_field)
 
-let chat_role_of_string = function
-  | "user" | "operator" -> Some Role_user
-  | "assistant" | "keeper" -> Some Role_assistant
-  | "system" -> Some Role_system
-  | "tool" -> Some Role_tool
-  | "request_failure" -> Some Role_request_failure
+(* The server's closed [Surface_ref.t] vocabulary; it rejects an unknown kind
+   the same way. *)
+let decode_chat_surface json =
+  let* kind = required_nonblank_string json "kind" in
+  match kind with
+  | "dashboard" -> Ok Surface_dashboard
+  | "agent" -> Ok Surface_agent
+  | "broadcast" -> Ok Surface_broadcast
+  | "discord" -> Ok Surface_discord
+  | "slack" -> Ok Surface_slack
+  | "webhook" -> Ok Surface_webhook
+  | "gate" ->
+      let* label = required_nonblank_string json "label" in
+      Ok (Surface_gate label)
+  | other -> Error (Printf.sprintf "unknown surface kind value %S" other)
+
+type speaker_authority =
+  | Authority_owner
+  | Authority_keeper
+  | Authority_external
+
+(* The server writes [Keeper_chat_store.speaker_authority] as these three
+   labels. *)
+let speaker_authority_of_string = function
+  | "owner" -> Some Authority_owner
+  | "keeper" -> Some Authority_keeper
+  | "external" -> Some Authority_external
   | _ -> None
+
+(* Every Keeper input is a [user] row: the operator's, another Keeper's
+   message or broadcast, a connector author's. Only [speaker_authority] says
+   which, so a row without it is unresolved rather than the operator's. *)
+let decode_user_role json =
+  let* authority =
+    decode_optional_enum ~field:"speaker_authority" speaker_authority_of_string
+      json
+  in
+  let* speaker_id = optional_nonblank_string json "speaker_id" in
+  let* speaker_name = optional_nonblank_string json "speaker_name" in
+  let name = match speaker_name with Some _ -> speaker_name | None -> speaker_id in
+  let peer_role peer =
+    let* surface_json = optional_object_field json "surface" in
+    let* surface =
+      match surface_json with
+      | None -> Ok None
+      | Some s -> Result.map Option.some (decode_chat_surface s)
+    in
+    Ok (Role_peer { peer; surface })
+  in
+  match authority, name with
+  | Some Authority_owner, (Some _ | None) -> Ok Role_user
+  | Some Authority_keeper, Some n -> peer_role (Peer_keeper n)
+  | Some Authority_external, Some n -> peer_role (Peer_external n)
+  | (Some (Authority_keeper | Authority_external) | None), (Some _ | None) ->
+      peer_role (Peer_unresolved speaker_id)
+
+let decode_chat_role json =
+  let* raw = required_string_field json "role" in
+  match raw with
+  | "operator" -> Ok Role_user
+  | "user" -> decode_user_role json
+  | "assistant" | "keeper" -> Ok Role_assistant
+  | "system" -> Ok Role_system
+  | "tool" -> Ok Role_tool
+  | "request_failure" -> Ok Role_request_failure
+  | other -> Error (Printf.sprintf "unknown role value %S" other)
 
 let decode_chat_message json =
   let* id = required_nonblank_string json "id" in
-  let* role = decode_enum ~field:"role" chat_role_of_string json in
+  let* role = decode_chat_role json in
   let* content = required_string_field json "content" in
   let* ts_unix = required_finite_float json "ts" in
   let* turn_ref = optional_nonblank_string json "turn_ref" in

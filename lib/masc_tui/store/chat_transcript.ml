@@ -481,6 +481,7 @@ let stream_reply_already_persisted (hist_msgs : Wire_fleet.chat_message list)
                 | Some _ -> false)
             | Wire_fleet.Role_request_failure -> true
             | Wire_fleet.Role_user
+            | Wire_fleet.Role_peer _
             | Wire_fleet.Role_system
             | Wire_fleet.Role_tool ->
                 false)
@@ -498,6 +499,7 @@ let stream_reply_already_persisted (hist_msgs : Wire_fleet.chat_message list)
               , Some mtr ) ->
                 String.equal mtr tr
             | ( ( Wire_fleet.Role_user
+                | Wire_fleet.Role_peer _
                 | Wire_fleet.Role_assistant
                 | Wire_fleet.Role_system
                 | Wire_fleet.Role_tool
@@ -521,6 +523,7 @@ let stream_reply_already_persisted (hist_msgs : Wire_fleet.chat_message list)
                   && (not (Fleet_store.String_set.mem m.id buf.prior_msg_ids))
                   && String.equal (String.trim m.content) trimmed
               | Wire_fleet.Role_user
+              | Wire_fleet.Role_peer _
               | Wire_fleet.Role_system
               | Wire_fleet.Role_tool
               | Wire_fleet.Role_request_failure ->
@@ -672,6 +675,7 @@ let has_persisted_failure_for_op (hist_msgs : Wire_fleet.chat_message list)
       match m.role, m.operation_id with
       | Wire_fleet.Role_request_failure, Some op -> String.equal op op_id
       | ( ( Wire_fleet.Role_user
+          | Wire_fleet.Role_peer _
           | Wire_fleet.Role_assistant
           | Wire_fleet.Role_system
           | Wire_fleet.Role_tool
@@ -684,8 +688,10 @@ let has_persisted_user_for_op (hist_msgs : Wire_fleet.chat_message list) op_id =
   List.exists
     (fun (m : Wire_fleet.chat_message) ->
       match m.role, m.operation_id with
-      | Wire_fleet.Role_user, Some op -> String.equal op op_id
+      | (Wire_fleet.Role_user | Wire_fleet.Role_peer _), Some op ->
+          String.equal op op_id
       | ( ( Wire_fleet.Role_user
+          | Wire_fleet.Role_peer _
           | Wire_fleet.Role_assistant
           | Wire_fleet.Role_system
           | Wire_fleet.Role_tool
@@ -1224,6 +1230,12 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
                 hdr
                 + count_markdown_rows ~theme ~width ~rail_present:true ~prefix
                     msg.content
+            | Wire_fleet.Role_peer _ ->
+                (* Keeper_dive names the author on a header row in every
+                   origin mode and draws the body with a rail and "  ". *)
+                1
+                + count_markdown_rows ~theme ~width ~rail_present:true
+                    ~prefix:"  " msg.content
             | Wire_fleet.Role_assistant ->
                 let hdr =
                   match origin_mode with

@@ -124,7 +124,7 @@ let confirm_pending_txs_from_history ~now ~keeper
     List.filter
       (fun (msg : Wire_fleet.chat_message) ->
         match msg.role with
-        | Wire_fleet.Role_user -> true
+        | Wire_fleet.Role_user | Wire_fleet.Role_peer _ -> true
         | Wire_fleet.Role_assistant
         | Wire_fleet.Role_system
         | Wire_fleet.Role_tool
@@ -139,6 +139,7 @@ let confirm_pending_txs_from_history ~now ~keeper
         | Wire_fleet.Role_request_failure, Some op ->
             Fleet_store.String_set.add op acc
         | ( ( Wire_fleet.Role_user
+            | Wire_fleet.Role_peer _
             | Wire_fleet.Role_assistant
             | Wire_fleet.Role_system
             | Wire_fleet.Role_tool
@@ -157,6 +158,7 @@ let confirm_pending_txs_from_history ~now ~keeper
                 Fleet_store.String_set.add op acc
             | Some _ -> acc)
         | ( ( Wire_fleet.Role_user
+            | Wire_fleet.Role_peer _
             | Wire_fleet.Role_assistant
             | Wire_fleet.Role_system
             | Wire_fleet.Role_tool

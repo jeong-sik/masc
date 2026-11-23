@@ -2011,6 +2011,11 @@ let test_a_named_caller_is_the_actor_not_the_argument () =
   check_refusal "scheduled_by_id naming another actor"
     Schedule_contract_values.Refusal_actor_mismatch
     (create [ "scheduled_by_id", `String "spoofed-scheduler" ]);
+  check_refusal "a Keeper's source naming an operator request"
+    Schedule_contract_values.Refusal_actor_mismatch
+    (create [ "source", `String "operator_request" ]);
+  check bool "a source that is not a string is refused" false
+    (Tool_result.is_success (create [ "source", `Int 1 ]));
   let created = create [ "requested_by_id", `String "real-caller" ] in
   check bool "an id that names the caller is accepted" true
     (Tool_result.is_success created);
@@ -2019,6 +2024,39 @@ let test_a_named_caller_is_the_actor_not_the_argument () =
     (Tool_result.data created |> member "requested_by" |> member "id" |> to_string);
   check string "scheduled_by is the caller" "real-caller"
     (Tool_result.data created |> member "scheduled_by" |> member "id" |> to_string);
+  check string "a Keeper's own schedule is an automated request" "automated_request"
+    (Tool_result.data created |> member "source" |> to_string);
+  let operator_created =
+    dispatch_exn ~caller:(Tool_schedule.Operator_caller "dashboard-operator") config
+      Tool_schemas_schedule.Create_request
+      (`Assoc
+        [ "schedule_id", `String "sched-operator-source"
+        ; "due_at_unix", `Float future_due_at
+        ; "keeper_name", `String "schedule-keeper"
+        ; "message", `String "operator source"
+        ])
+  in
+  check bool "an operator create succeeds" true (Tool_result.is_success operator_created);
+  check string "an operator's schedule is an operator request" "operator_request"
+    (Tool_result.data operator_created |> member "source" |> to_string);
+  let update extra =
+    dispatch_exn ~caller config Tool_schemas_schedule.Update_request
+      (`Assoc
+        ([ "schedule_id", `String "sched-actor-binding"
+         ; "due_at_unix", `Float (future_due_at +. 300.0)
+         ; "keeper_name", `String "schedule-keeper"
+         ; "message", `String "actor binding, updated"
+         ; "recurrence_kind", `String "one_shot"
+         ]
+         @ extra))
+  in
+  check_refusal "an update's source naming an operator request"
+    Schedule_contract_values.Refusal_actor_mismatch
+    (update [ "source", `String "operator_request" ]);
+  let updated = update [] in
+  check bool "the creator's update succeeds" true (Tool_result.is_success updated);
+  check string "an update keeps the creator's source" "automated_request"
+    (Tool_result.data updated |> member "source" |> to_string);
   check_refusal "cancelled_by_id naming another actor"
     Schedule_contract_values.Refusal_actor_mismatch
     (dispatch_exn ~caller config Tool_schemas_schedule.Cancel_request

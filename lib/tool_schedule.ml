@@ -293,13 +293,44 @@ let resolve_due_at ~dispatched_at recurrence args =
          })
 ;;
 
-let source_of_arg args =
-  match string_opt args "source" with
-  | None -> Ok Schedule_domain.Operator_request
-  | Some raw ->
-    (match Schedule_domain.schedule_source_of_string raw with
-     | Ok source -> Ok source
-     | Error msg -> Error msg)
+(* [source] says who asked for the row, the fact [requested_by.kind] already
+   carries, so it is read from the requester and never from the call. Read
+   from an argument, a Keeper that omitted it was recorded as an operator
+   request, and one that sent [operator_request] could pass its own schedule
+   off as the operator's. An update keeps the creator as requester, so it
+   keeps the creator's source. *)
+let source_of_requester (requested_by : Schedule_domain.actor) =
+  match requested_by.kind with
+  | Schedule_domain.Human_operator -> Schedule_domain.Operator_request
+  | Schedule_domain.Automated_actor -> Schedule_domain.Automated_request
+  | Schedule_domain.System -> Schedule_domain.System_request
+;;
+
+(* [source] is not in the tool schemas; a call that skips schema validation
+   can still send it. One that disagrees with the requester is refused, the
+   same rule as the actor fields in [refuse_other_actor]. *)
+let refuse_other_source ~(requested_by : Schedule_domain.actor) ~source args =
+  let derived = Schedule_domain.schedule_source_to_string source in
+  match strict_string args "source" with
+  | Error refusal -> Error refusal
+  | Ok (Some given) when not (String.equal given derived) ->
+    let requester_kind = Schedule_domain.actor_kind_to_string requested_by.kind in
+    Error
+      (Typed_refusal
+         { kind = Schedule_contract_values.Refusal_actor_mismatch
+         ; message =
+             Printf.sprintf
+               "source %s does not match the requester %s (%s); the source \
+                follows the requester, so omit the field"
+               given requested_by.id requester_kind
+         ; facts =
+             [ "field", `String "source"
+             ; "requester", `String requested_by.id
+             ; "requester_kind", `String requester_kind
+             ; "given", `String given
+             ]
+         })
+  | Ok (Some _ | None) -> Ok ()
 ;;
 
 let status_of_arg args =
@@ -960,7 +991,6 @@ let handle_write ~action ~tool_name ~start_time ctx args =
     let* keeper_wake_target =
       plain (Schedule_payload_projection.creation_keeper_wake_target ~payload)
     in
-    let* source = plain (source_of_arg args) in
     let* stored = match action with
       | Create_schedule -> Ok None
       | Update_schedule ->
@@ -1082,6 +1112,8 @@ let handle_write ~action ~tool_name ~start_time ctx args =
          | None -> caller_as_creator ())
       | Update_schedule, None | Create_schedule, _ -> caller_as_creator ()
     in
+    let source = source_of_requester requested_by in
+    let* () = refuse_other_source ~requested_by ~source args in
     let* expires_at = strict_number args "expires_at_unix" in
     let write_request () =
       let* () =

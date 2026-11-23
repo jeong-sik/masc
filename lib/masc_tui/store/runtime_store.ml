@@ -661,6 +661,35 @@ let keeper_costs_24h_assoc t =
           | None -> None)
         kc.rows
 
+(* The roster carries no cost or tokens; keeper-costs is their one source.
+   A keeper the response lists no row for reads as [Absent]. *)
+let keeper_cost_field ~keeper t field =
+  let value =
+    Observed.bind t.keeper_costs (fun (kc : Wire_runtime.keeper_costs_window) ->
+        match
+          List.find_opt
+            (fun (r : Wire_runtime.keeper_cost_row) ->
+              String.equal r.keeper_name keeper)
+            kc.rows
+        with
+        | Some r -> field r
+        | None -> Observed.absent)
+  in
+  if Observed.is_stale t.keeper_costs then Observed.mark_stale value else value
+
+let keeper_cost_usd ~keeper t =
+  keeper_cost_field ~keeper t (fun (r : Wire_runtime.keeper_cost_row) ->
+      r.total_cost_usd)
+
+let keeper_tokens ~keeper t =
+  keeper_cost_field ~keeper t (fun (r : Wire_runtime.keeper_cost_row) ->
+      r.total_tokens)
+
+let keeper_costs_window_label t =
+  match Observed.to_option t.keeper_costs with
+  | Some kc -> Some (Printf.sprintf "%dh" (Int.max 1 (kc.window_minutes / 60)))
+  | None -> None
+
 let compare_keeper_spend (a : keeper_spend_row) (b : keeper_spend_row) =
   let c = Float.compare b.cost_usd a.cost_usd in
   if c <> 0 then c

@@ -229,6 +229,18 @@ val sync_keeper_companies : Wire_fleet.keeper_summary list -> t -> t
 val keeper_costs_24h_assoc : t -> (string * float) list
 (** Per-keeper 24h USD costs from [keeper_costs] for Company rollup. *)
 
+val keeper_cost_usd : keeper:string -> t -> float Observed.t
+(** The keeper's [total_cost_usd] over the [keeper_costs] window; [Absent]
+    when the response has no row for the keeper or no turn reported a cost. *)
+
+val keeper_tokens : keeper:string -> t -> int Observed.t
+(** The keeper's [total_tokens] over the [keeper_costs] window, under the
+    same rule as [keeper_cost_usd]. *)
+
+val keeper_costs_window_label : t -> string option
+(** ["24h"] for the loaded [keeper_costs] [window_minutes]; [None] before the
+    response arrives. *)
+
 val keeper_spend_rows : t -> keeper_spend_row list
 (** Ranked per-keeper cost & efficiency table rows (combining [efficiency] MTD
     and [keeper_costs] 24h so the table is populated on both live and isolated

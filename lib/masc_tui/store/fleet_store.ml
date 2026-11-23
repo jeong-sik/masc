@@ -47,11 +47,13 @@ type t = {
   shell : Wire_fleet.dashboard_shell Observed.t;
   raw_shell_scorecard : Wire_fleet.daily_scorecard option;
   keepers : Wire_fleet.keeper_summary list Observed.t;
+  unreadable_keepers : Wire_fleet.unreadable_keeper list;
   turns : Wire_fleet.keeper_turn_row list Observed.t;
+  turn_records : Wire_fleet.keeper_turn_records Observed.t String_map.t;
   chat_control_tokens : string String_map.t;
   sandbox_profiles : Wire_fleet.keeper_sandbox_profile String_map.t;
   candle_balances_milli : int String_map.t;
-  candle_summary_fallback : Wire_fleet.candle_summary_fallback option;
+  candle_summary_fallback : Wire_fleet.candle_observation option;
   fleet_reading : Wire_fleet.fleet_stream_reading Observed.t;
   fleet_degradation : Wire_fleet.fleet_degradation option;
   fleet_mode : Nav.keepers_fleet_mode;
@@ -77,7 +79,9 @@ let empty =
     shell = Observed.loading ~since_ns:Clock.Mono.zero;
     raw_shell_scorecard = None;
     keepers = Observed.loading ~since_ns:Clock.Mono.zero;
+    unreadable_keepers = [];
     turns = Observed.unreported;
+    turn_records = String_map.empty;
     chat_control_tokens = String_map.empty;
     sandbox_profiles = String_map.empty;
     candle_balances_milli = String_map.empty;
@@ -157,6 +161,50 @@ let keeper_live_state (k : Wire_fleet.keeper_summary) =
   | Wire_fleet.Keeper_failing ->
       Health.Down { reason = Say.make ~ko:"실행 실패" ~en:"Failing" }
   | Wire_fleet.Keeper_offline -> Health.Idle
+
+type context_display =
+  | Context_fill of { ratio : float; estimated : bool }
+  | Context_tokens_only of int
+  | Context_unavailable of Wire_fleet.context_unavailable_reason
+
+let clamp_unit_ratio r = Float.max 0.0 (Float.min 1.0 r)
+
+let context_display = function
+  | Wire_fleet.Context_measured { ratio = Some r; _ } ->
+      Context_fill { ratio = clamp_unit_ratio r; estimated = false }
+  | Wire_fleet.Context_measured { ratio = None; tokens; _ } ->
+      Context_tokens_only tokens
+  | Wire_fleet.Context_not_measured { estimated_ratio = Some r; _ } ->
+      Context_fill { ratio = clamp_unit_ratio r; estimated = true }
+  | Wire_fleet.Context_not_measured { reason; estimated_ratio = None } ->
+      Context_unavailable reason
+
+let context_fill_label ~estimated ratio =
+  let pct = ratio *. 100.0 in
+  if estimated then Printf.sprintf "~%.0f%%" pct else Printf.sprintf "%.0f%%" pct
+
+let context_unavailable_label = function
+  | Wire_fleet.Context_measurement_missing ->
+      Say.make ~ko:"기록 없음" ~en:"no record"
+  | Wire_fleet.Context_record_undecodable ->
+      Say.make ~ko:"기록 손상" ~en:"bad record"
+  | Wire_fleet.Context_record_read_failed ->
+      Say.make ~ko:"읽기 실패" ~en:"read failed"
+  | Wire_fleet.Context_record_without_usage ->
+      Say.make ~ko:"토큰 없음" ~en:"no usage"
+  | Wire_fleet.Context_trace_mismatch -> Say.make ~ko:"새로 시작" ~en:"restarted"
+  | Wire_fleet.Context_cumulative_usage ->
+      Say.make ~ko:"대화 누적" ~en:"cumulative"
+  | Wire_fleet.Context_turn_total_usage ->
+      Say.make ~ko:"턴 합계" ~en:"turn total"
+  | Wire_fleet.Context_usage_scope_unavailable ->
+      Say.make ~ko:"범위 모름" ~en:"scope unknown"
+  | Wire_fleet.Context_tokens_exceed_window ->
+      Say.make ~ko:"창 초과" ~en:"over window"
+  | Wire_fleet.Context_input_estimate ->
+      Say.make ~ko:"입력 추정" ~en:"input estimated"
+  | Wire_fleet.Context_input_provenance_unavailable ->
+      Say.make ~ko:"출처 모름" ~en:"no provenance"
 
 type fleet_health_counts = {
   total : int;
@@ -522,6 +570,10 @@ let apply_keepers ~observed_at ks t =
   sync_selection_after_change ~prev_index ~reset_scroll:false
     ~clear_if_empty:true next
 
+let apply_roster ~observed_at (roster : Wire_fleet.keepers_roster) t =
+  apply_keepers ~observed_at roster.keepers
+    { t with unreadable_keepers = roster.unreadable }
+
 let apply_roster_extras (extras : Wire_fleet.keeper_roster_extras) t =
   let sandbox_profiles =
     List.fold_left
@@ -557,13 +609,6 @@ let apply_execution_enrichments ~observed_at (enrichments, candle_opt) t =
            match Hashtbl.find_opt by_name k.name with
            | None -> k
            | Some e ->
-               let context_ratio =
-                 if Observed.is_value k.context_ratio then k.context_ratio
-                 else
-                   match e.context_ratio with
-                   | Some cr -> Observed.value ~observed_at cr
-                   | None -> k.context_ratio
-               in
                let total_turns =
                  if Observed.is_value k.total_turns then k.total_turns
                  else
@@ -571,7 +616,7 @@ let apply_execution_enrichments ~observed_at (enrichments, candle_opt) t =
                    | Some tt -> Observed.value ~observed_at tt
                    | None -> k.total_turns
                in
-               { k with context_ratio; total_turns }))
+               { k with total_turns }))
       t.keepers
   in
   let candle_summary_fallback =
@@ -1293,12 +1338,23 @@ let set_filter filter_query t =
   sync_selection_after_change ~prev_index:0 ~reset_scroll:true
     ~clear_if_empty:false next
 
+(* A roster change can mean a finished turn, so the turn records read for
+   the Ctrl+T drawer go stale with the roster. *)
 let mark_keepers_stale t =
   {
     t with
     keepers = Observed.mark_stale t.keepers;
     turns = Observed.mark_stale t.turns;
+    turn_records = String_map.map Observed.mark_stale t.turn_records;
   }
+
+let turn_records_for ~keeper t =
+  match String_map.find_opt keeper t.turn_records with
+  | Some obs -> obs
+  | None -> Observed.unreported
+
+let set_turn_records ~keeper obs t =
+  { t with turn_records = String_map.add keeper obs t.turn_records }
 
 let mark_chat_history_loading ~keeper t =
   match String_map.find_opt keeper t.chat_histories with
@@ -1341,6 +1397,7 @@ let mark_stale_all t =
     shell = Observed.mark_stale t.shell;
     keepers = Observed.mark_stale t.keepers;
     turns = Observed.mark_stale t.turns;
+    turn_records = String_map.map Observed.mark_stale t.turn_records;
     fleet_reading = Observed.mark_stale t.fleet_reading;
     chat_histories = String_map.map Observed.mark_stale t.chat_histories;
   }

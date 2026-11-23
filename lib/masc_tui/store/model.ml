@@ -250,6 +250,14 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
 let active_dive m =
   match m.nav.dive_stack with d :: _ -> Some d | [] -> None
 
+let target_keeper m =
+  match m.drafts.active_keeper with
+  | Some k when not (String.equal (String.trim k) "") -> Some (String.trim k)
+  | Some _ | None ->
+      Option.map
+        (fun (k : Wire_fleet.keeper_summary) -> k.name)
+        (Fleet_store.selected_keeper_summary m.fleet)
+
 let pulse_panes m =
   if Attention.is_empty m.attention then
     [ Pulse_companies; Pulse_goals; Pulse_world ]
@@ -812,7 +820,6 @@ let empty_scorecard : Wire_fleet.daily_scorecard =
     tasks_todo = Observed.unreported;
     tasks_cancelled = Observed.unreported;
     goals_completed_24h = Observed.unreported;
-    prs_reviewed_24h = Observed.unreported;
     verifications_passed_24h = Observed.unreported;
     verifications_rejected_24h = Observed.unreported;
     board_posts_24h = Observed.unreported;
@@ -916,7 +923,6 @@ let effective_scorecard m : Wire_fleet.daily_scorecard =
         (from_backlog (fun c -> c.Wire_work.cancelled));
     goals_completed_24h =
       or_observed base.goals_completed_24h goals_completed_fb;
-    prs_reviewed_24h = base.prs_reviewed_24h;
     verifications_passed_24h =
       or_observed base.verifications_passed_24h verif_passed_fb;
     verifications_rejected_24h =
@@ -1016,8 +1022,9 @@ let pulse_hero_metrics m =
     | Some l -> Some l.circulating_milli
     | None -> (
         match m.fleet.candle_summary_fallback with
-        | Some cs -> Some cs.circulating_milli
-        | None -> None)
+        | Some (Wire_fleet.Candle_ready supply) -> Some supply.circulating_milli
+        | Some (Wire_fleet.Candle_off | Wire_fleet.Candle_disabled _) | None ->
+            None)
   in
   {
     running_keepers;

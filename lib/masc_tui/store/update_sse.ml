@@ -95,6 +95,22 @@ let is_viewing_memory (m : Model.t) =
           Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
       | Nav.Pulse | Nav.Work | Nav.Runtime | Nav.Infra -> false)
 
+(* The views that read the schedule rows: Work's schedule list, the Keepers
+   list's next-due column and a keeper's work tab, wherever it was opened. *)
+let reads_schedules (m : Model.t) =
+  let workspace_reads =
+    match m.nav.workspace with
+    | Nav.Work | Nav.Keepers -> true
+    | Nav.Pulse | Nav.Knowledge | Nav.Runtime | Nav.Infra -> false
+  in
+  match Model.active_dive m with
+  | Some (Nav.Dive_keeper { tab = Nav.Keeper_work_candle; _ }) -> true
+  | Some
+      (Nav.Dive_keeper
+         { tab = Nav.Keeper_chat | Nav.Keeper_memory | Nav.Keeper_sandbox | Nav.Keeper_config; _ })
+  | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _)
+  | None -> workspace_reads
+
 let apply_dataset_invalidation (m : Model.t) ds =
   let e = m.epoch in
   let ws = m.nav.workspace in
@@ -345,9 +361,8 @@ let apply_dataset_invalidation (m : Model.t) ds =
         { m.work with schedules = Observed.mark_stale m.work.schedules }
       in
       let cmds =
-        match ws with
-        | Nav.Work -> [ get_cmd e (Cmd.Get_schedules { cursor = None }) ]
-        | Nav.Pulse | Nav.Knowledge | Nav.Keepers | Nav.Runtime | Nav.Infra -> []
+        if reads_schedules m then [ get_cmd e (Cmd.Get_schedules { cursor = None }) ]
+        else []
       in
       ({ m with work }, cmds)
   | Wire_observer.Dataset_wiki ->

@@ -65,6 +65,8 @@ type t = {
   sandbox_profiles : Wire_fleet.keeper_sandbox_profile String_map.t;
   candle_balances_milli : int String_map.t;
   candle_summary_fallback : Wire_fleet.candle_observation option;
+  turn_pulses : Wire_fleet.turn_pulse String_map.t;
+      (** Each keeper's turn pulse from the last roster read. *)
   fleet_reading : Wire_fleet.fleet_stream_reading Observed.t;
   fleet_degradation : Wire_fleet.fleet_degradation option;
   fleet_mode : Nav.keepers_fleet_mode;
@@ -164,6 +166,9 @@ val apply_roster :
   observed_at:Clock.Mono.t -> Wire_fleet.keepers_roster -> t -> t
 (** [apply_keepers] for the readable rows; replaces [unreadable_keepers]. *)
 val apply_roster_extras : Wire_fleet.keeper_roster_extras -> t -> t
+
+val turn_pulse : t -> string -> Wire_fleet.turn_pulse option
+(** The named keeper's turn pulse, [None] when the last roster read sent none. *)
 val apply_execution_enrichments :
   observed_at:Clock.Mono.t ->
   Wire_fleet.execution_keeper_enrichment list * Wire_fleet.candle_observation option ->

@@ -2024,6 +2024,7 @@ let test_v25_keepers_5_company_fleet_tree_and_preview_inspector () =
              ];
            candle_balances_milli = [ ("e-masc-the-leader", 4250) ];
            candle_summary = None;
+           turn_pulses = [];
          }
   in
   let runtime =
@@ -2412,6 +2413,7 @@ let test_p2_standard_viewport_keepers_split_and_kpi_visibility () =
               [ ("e-masc-the-leader", Wire_fleet.Profile_microvm) ];
             candle_balances_milli = [ ("e-masc-the-leader", 4250) ];
             candle_summary = None;
+            turn_pulses = [];
           }
           m0.fleet
       in
@@ -3259,11 +3261,86 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
   Alcotest.(check string) "Attention badge disambiguated in Korean" "승인/질문 필요"
     (Say.resolve Say.Lang_ko attn_lbl)
 
+let cadence_slot ~starts_at ~ok ~scheduled ~reacted ~chat ~own : Wire_fleet.turn_slot =
+  { starts_at; ok; rested = 0; failed = 0; scheduled; reacted; chat; own; unknown = 0 }
+
+(* A window is the last [hours * 2] half-hour slots, the current one included,
+   and a pulse known only from inside the window says so instead of reading
+   as a quiet start. *)
+let test_keeper_cadence_window_counts_causes () =
+  let slot = Wire_fleet.turn_slot_seconds in
+  let now_unix = 1_795_400_000.0 in
+  let current = int_of_float now_unix / slot * slot in
+  let pulse : Wire_fleet.turn_pulse =
+    {
+      known_since = now_unix -. 90_000.0;
+      slots =
+        [
+          (* the 6h window's oldest slot starts 11 slots back; 12 is outside *)
+          cadence_slot ~starts_at:(current - (12 * slot)) ~ok:2 ~scheduled:2 ~reacted:0 ~chat:0 ~own:0;
+          cadence_slot ~starts_at:(current - (11 * slot)) ~ok:3 ~scheduled:1 ~reacted:1 ~chat:1 ~own:0;
+          cadence_slot ~starts_at:current ~ok:1 ~scheduled:0 ~reacted:0 ~chat:0 ~own:1;
+        ];
+    }
+  in
+  let six = Keeper_cadence.window ~now_unix ~hours:6 pulse in
+  Alcotest.(check (list int)) "6h: turns, scheduled, reacted, chat, own"
+    [ 4; 1; 1; 1; 1 ] [ six.turns; six.scheduled; six.reacted; six.chat; six.own ];
+  Alcotest.(check bool) "6h window is fully known" true (six.known_from = None);
+  let day = Keeper_cadence.window ~now_unix ~hours:24 pulse in
+  Alcotest.(check int) "24h counts every slot" 6 day.turns;
+  let late_start = { pulse with known_since = now_unix -. 3_600.0 } in
+  Alcotest.(check (option (float 0.5))) "a pulse known from inside the window names its start"
+    (Some (now_unix -. 3_600.0)) (Keeper_cadence.window ~now_unix ~hours:6 late_start).known_from
+
+let cadence_schedules json_rows =
+  match
+    Wire_work.decode_schedules_snapshot
+      (Yojson.Safe.from_string (Printf.sprintf {|{"status":"ok","requests":[%s]}|} json_rows))
+  with
+  | Ok (rows, _) -> rows
+  | Error e -> Alcotest.fail ("schedules decode: " ^ e)
+
+let cadence_row ~id ~keeper ~next_due =
+  Printf.sprintf
+    {|{"schedule_instance_id":"si-%s","schedule_id":"%s","status":"scheduled","source":"operator",
+       "due_at":%s,"next_due_at":%s,"recurrence_kind":"interval","recurrence_summary":"every 15m",
+       "payload_kind":"keeper_wake","payload_support":"supported","payload_target":"%s",
+       "payload_keeper_name":"%s","payload_summary":"poll",
+       "last_wake":{"status":"succeeded","started_at":1795173600.0,"finished_at":1795173605.0}}|}
+    id id next_due next_due keeper keeper
+
+(* The earliest due time among the keeper's own schedules decides; another
+   keeper's schedule does not. *)
+let test_keeper_cadence_next_due () =
+  let now_unix = 1_795_400_000.0 in
+  let rows =
+    cadence_schedules
+      (String.concat ","
+         [
+           cadence_row ~id:"a" ~keeper:"alpha" ~next_due:"1795400900.0";
+           cadence_row ~id:"b" ~keeper:"alpha" ~next_due:"1795400300.0";
+           cadence_row ~id:"c" ~keeper:"beta" ~next_due:"1795399000.0";
+         ])
+  in
+  let due ?(more_pages = false) name =
+    Keeper_cadence.next_due ~now_unix ~more_pages (Keeper_cadence.keeper_schedules ~name rows)
+  in
+  Alcotest.(check bool) "alpha is due in 300s" true (due "alpha" = Keeper_cadence.Due_in 300.0);
+  Alcotest.(check bool) "beta is 1000s late" true (due "beta" = Keeper_cadence.Late_by 1000.0);
+  Alcotest.(check bool) "gamma has no schedule" true (due "gamma" = Keeper_cadence.No_schedule);
+  Alcotest.(check bool) "gamma may lie past the page read" true
+    (due ~more_pages:true "gamma" = Keeper_cadence.Past_page_read)
+
 let () =
   Alcotest.run "masc_tui_screens_ops"
     [
       ( "keepers"
       , [
+          Alcotest.test_case "cadence window counts causes" `Quick
+            test_keeper_cadence_window_counts_causes;
+          Alcotest.test_case "cadence next due is the keeper's earliest" `Quick
+            test_keeper_cadence_next_due;
           Alcotest.test_case "all 3 roster modes at 140x40 & 90x28 (KO/EN)"
             `Quick test_keepers_all_modes_viewports_langs;
           Alcotest.test_case "strict live SSOT vs historical 12h trail" `Quick

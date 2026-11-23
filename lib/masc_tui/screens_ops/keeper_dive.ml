@@ -1365,11 +1365,7 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
         (Work_store.tasks model.work)
     in
     let keeper_scheds =
-      List.filter
-        (fun (sc : Wire_work.schedule_row) ->
-          Option.equal String.equal sc.payload_keeper_name (Some name)
-          || Option.equal String.equal sc.payload_target (Some name))
-        (Work_store.schedules_list model.work)
+      Keeper_cadence.keeper_schedules ~name (Work_store.schedules_list model.work)
     in
     let keeper_posts =
       List.filter
@@ -1381,6 +1377,62 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
     let push_line ~fg ~attrs line =
       rows_acc := `Line (fg, attrs, line) :: !rows_acc
     in
+    let now_unix = model.freshness.last_wall_unix in
+    let say = Ops_common.say model in
+    push_hairline (say ~ko:"주기" ~en:"Cadence");
+    (match Fleet_store.turn_pulse model.fleet name with
+     | None ->
+         push_line ~fg:theme.text_muted ~attrs:Attr.italic
+           (say ~ko:"서버가 보낸 턴 기록이 없습니다" ~en:"The server sent no turn pulse")
+     | Some pulse ->
+         List.iter
+           (fun hours ->
+             let w = Keeper_cadence.window ~now_unix ~hours pulse in
+             let rate =
+               match w.known_from with
+               | None ->
+                   Printf.sprintf " · %s %.1f" (say ~ko:"시간당" ~en:"per hour")
+                     (Float.of_int w.turns /. Float.of_int hours)
+               | Some since ->
+                   Printf.sprintf " · %s %s"
+                     (say ~ko:"기록 시작" ~en:"counted since")
+                     (Ops_common.format_age ~now_unix since ~lang:model.lang)
+             in
+             push_line ~fg:theme.text_primary ~attrs:Attr.none
+               (Printf.sprintf "%s · %d%s%s"
+                  (say
+                     ~ko:(Printf.sprintf "최근 %d시간" hours)
+                     ~en:(Printf.sprintf "Last %dh" hours))
+                  w.turns (say ~ko:"턴" ~en:" turns") rate);
+             push_line ~fg:theme.text_secondary ~attrs:Attr.none
+               (Printf.sprintf "  %s %d · %s %d · %s %d · %s %d · %s %d"
+                  (say ~ko:"예약" ~en:"scheduled") w.scheduled
+                  (say ~ko:"반응" ~en:"reacted") w.reacted
+                  (say ~ko:"채팅" ~en:"chat") w.chat
+                  (say ~ko:"스스로" ~en:"own") w.own
+                  (say ~ko:"모름" ~en:"unknown") w.unknown))
+           Keeper_cadence.window_hours);
+    let next_due_text =
+      match Observed.to_option model.work.schedules with
+      | None -> say ~ko:"예약 목록을 아직 못 읽음" ~en:"schedules not read yet"
+      | Some (_rows, next_cursor) -> (
+          match
+            Keeper_cadence.next_due ~now_unix
+              ~more_pages:(Option.is_some next_cursor) keeper_scheds
+          with
+          | Keeper_cadence.No_schedule -> say ~ko:"없음" ~en:"none"
+          | Keeper_cadence.Past_page_read ->
+              say ~ko:"읽은 쪽에 없음" ~en:"not on the page read"
+          | Keeper_cadence.Due_unknown -> say ~ko:"시각 모름" ~en:"time unknown"
+          | Keeper_cadence.Due_in sec ->
+              say ~ko:(Format_val.format_duration_s sec ^ " 뒤")
+                ~en:("in " ^ Format_val.format_duration_s sec)
+          | Keeper_cadence.Late_by sec ->
+              say ~ko:(Format_val.format_duration_s sec ^ " 늦음")
+                ~en:(Format_val.format_duration_s sec ^ " late"))
+    in
+    push_line ~fg:theme.text_primary ~attrs:Attr.none
+      (Printf.sprintf "%s · %s" (say ~ko:"다음 예약" ~en:"Next due") next_due_text);
     let total_tasks = List.length keeper_tasks in
     push_hairline
       (Printf.sprintf "%s (%d)"
@@ -1421,8 +1473,16 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
           let summary =
             match sc.payload_summary with Some s -> " · " ^ s | None -> ""
           in
+          let due =
+            match sc.next_due_at_unix with
+            | Some at when at >= now_unix ->
+                " · " ^ say ~ko:"다음 " ~en:"next " ^ Format_val.format_duration_s (at -. now_unix)
+            | Some at ->
+                " · " ^ say ~ko:"늦음 " ~en:"late " ^ Format_val.format_duration_s (now_unix -. at)
+            | None -> ""
+          in
           push_line ~fg:(Theme.status_color theme wake_tok) ~attrs:Attr.none
-            (Printf.sprintf "%s · %s%s" sc.recurrence_summary wake_txt summary))
+            (Printf.sprintf "%s%s · %s%s" sc.recurrence_summary due wake_txt summary))
         keeper_scheds;
     let total_posts = List.length keeper_posts in
     push_hairline

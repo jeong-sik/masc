@@ -178,10 +178,27 @@ type candle_observation =
   | Candle_disabled of { reason : string }
   | Candle_ready of candle_supply
 
+type turn_slot = {
+  starts_at : int;
+  ok : int;
+  rested : int;
+  failed : int;
+  scheduled : int;
+  reacted : int;
+  chat : int;
+  own : int;
+  unknown : int;
+}
+
+type turn_pulse = { known_since : float; slots : turn_slot list }
+
+let turn_slot_seconds = 1800
+
 type keeper_roster_extras = {
   sandbox_profiles : (string * keeper_sandbox_profile) list;
   candle_balances_milli : (string * int) list;
   candle_summary : candle_observation option;
+  turn_pulses : (string * turn_pulse) list;
 }
 
 type execution_keeper_enrichment = {
@@ -498,32 +515,62 @@ let decode_keeper_turns json =
   in
   decode_list "keepers" decode_keeper_turn_row rows
 
-let decode_float_list json key =
-  let* items = optional_list_field json key in
-  decode_list key
-    (function
-      | `Float f when Float.is_finite f -> Ok f
-      | `Int i -> Ok (Float.of_int i)
-      | bad -> field_type_error key "a finite number" bad)
-    items
 
-let decode_recent_turns_sparkline json =
+let decode_turn_slot slot =
+  let* starts_at = required_int_field slot "starts_at" in
+  let count = required_nonnegative_int_field slot in
+  let* ok = count "ok" in
+  let* rested = count "rested" in
+  let* failed = count "failed" in
+  let* scheduled = count "scheduled" in
+  let* reacted = count "reacted" in
+  let* chat = count "chat" in
+  let* own = count "own" in
+  let* unknown = count "unknown" in
+  if starts_at mod turn_slot_seconds <> 0 then
+    Error (Printf.sprintf "recent_turns slot %d is not on a half-hour boundary" starts_at)
+  else if scheduled + reacted + chat + own + unknown <> ok + rested + failed then
+    Error
+      (Printf.sprintf "recent_turns slot %d: causes do not add up to its outcomes" starts_at)
+  else Ok { starts_at; ok; rested; failed; scheduled; reacted; chat; own; unknown }
+
+let decode_turn_pulse json =
   match optional_object_field json "recent_turns" with
   | Error _ as err -> err
-  | Ok None -> Ok []
+  | Ok None -> Ok None
   | Ok (Some rt) ->
+      let* known_since = required_nonnegative_float rt "known_since" in
       let* raw_slots = optional_list_field rt "slots" in
-      let parse_slot slot =
-        let* starts_at = required_int_field slot "starts_at" in
-        let* ok_c = required_nonnegative_int_field slot "ok" in
-        let* fail_c = required_nonnegative_int_field slot "failed" in
-        Ok (Float.of_int starts_at, Float.of_int (ok_c + fail_c))
+      let* slots = decode_list "recent_turns.slots" decode_turn_slot raw_slots in
+      let oldest_first =
+        List.sort (fun (a : turn_slot) b -> Int.compare a.starts_at b.starts_at) slots
       in
-      let* parsed = decode_list "recent_turns.slots" parse_slot raw_slots in
-      let chronological =
-        List.sort (fun (ts_a, _) (ts_b, _) -> Float.compare ts_a ts_b) parsed
+      let rec repeated = function
+        | (a : turn_slot) :: (b :: _ as rest) ->
+            if a.starts_at = b.starts_at then Some a.starts_at else repeated rest
+        | [ _ ] | [] -> None
       in
-      Ok (List.map snd chronological)
+      (match repeated oldest_first with
+       | Some starts_at ->
+           Error (Printf.sprintf "recent_turns holds slot %d twice" starts_at)
+       | None -> Ok (Some { known_since; slots = oldest_first }))
+
+(* Turns that ran ([ok] and [failed], as the server's fleet total counts them)
+   per slot from the oldest stored slot to the newest. The server stores only
+   slots that hold a turn, so a slot between two stored ones held none and is
+   drawn as zero instead of being closed up. *)
+let sparkline_of_pulse { slots; known_since = _ } =
+  match slots with
+  | [] -> []
+  | first :: _ ->
+      let by_start = Hashtbl.create (List.length slots) in
+      List.iter (fun (s : turn_slot) -> Hashtbl.replace by_start s.starts_at s) slots;
+      let last = (List.nth slots (List.length slots - 1)).starts_at in
+      let n = ((last - first.starts_at) / turn_slot_seconds) + 1 in
+      List.init n (fun i ->
+          match Hashtbl.find_opt by_start (first.starts_at + (i * turn_slot_seconds)) with
+          | Some s -> Float.of_int (s.ok + s.failed)
+          | None -> 0.0)
 
 let decode_lane_turn_count ~observed_at json =
   match optional_object_field json "runtime_lane_observation" with
@@ -625,11 +672,8 @@ let decode_keeper_summary ~observed_at json =
         let* t = decode_active_turn obj in
         Ok (Some t)
   in
-  let* explicit_sparkline = decode_float_list json "activity_sparkline_24h" in
-  let* activity_sparkline_24h =
-    if explicit_sparkline <> [] then Ok explicit_sparkline
-    else decode_recent_turns_sparkline json
-  in
+  let* pulse = decode_turn_pulse json in
+  let activity_sparkline_24h = Option.fold ~none:[] ~some:sparkline_of_pulse pulse in
   let company =
     match classify_company_single ~group name with
     | Some c -> c
@@ -767,6 +811,7 @@ let decode_keepers_roster_extras json =
   let* candle_summary = decode_candle_observation_opt body in
   let profiles = ref [] in
   let balances = ref [] in
+  let pulses = ref [] in
   List.iter
     (fun item ->
       match optional_nonblank_string item "name" with
@@ -776,7 +821,12 @@ let decode_keepers_roster_extras json =
           | None -> ());
           (match extract_candle_balance_opt item with
           | Some b -> balances := (name, b) :: !balances
-          | None -> ())
+          | None -> ());
+          (* A malformed pulse fails the roster decode
+             ([decode_keeper_summary]), so it never reaches here. *)
+          (match decode_turn_pulse item with
+          | Ok (Some pulse) -> pulses := (name, pulse) :: !pulses
+          | Ok None | Error _ -> ())
       | Ok None | Error _ -> ())
     items;
   Ok
@@ -784,6 +834,7 @@ let decode_keepers_roster_extras json =
       sandbox_profiles = List.rev !profiles;
       candle_balances_milli = List.rev !balances;
       candle_summary;
+      turn_pulses = List.rev !pulses;
     }
 
 let decode_execution_keeper_enrichments json =

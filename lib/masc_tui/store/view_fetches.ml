@@ -182,6 +182,9 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
   | Nav.Keeper_work_candle ->
       []
       |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
+      |> add_if
+           (needs_fetch ~force m.work.schedules)
+           (Cmd.Get_schedules { cursor = None })
       |> candle_ledger_reqs ~force m
   | Nav.Keeper_sandbox ->
       let sandbox_needed =
@@ -445,7 +448,11 @@ let fetches_for_workspace ~force (m : Model.t) =
       |> add_if (needs_fetch ~force m.fleet.keepers) Cmd.Get_keepers_roster
       |> add_if (needs_fetch ~force m.fleet.turns) Cmd.Get_keeper_turns
       |> add_if (needs_fetch ~force m.infra.sandboxes) Cmd.Get_sandboxes
-      |> add_keeper_costs ~force m)
+      |> add_keeper_costs ~force m
+      (* The list's next-due column reads the active schedules. *)
+      |> add_if
+           (needs_fetch ~force m.work.schedules)
+           (Cmd.Get_schedules { cursor = None }))
       @ embedded_dive_reqs
   | Nav.Runtime -> (
       match m.runtime.active_tab with

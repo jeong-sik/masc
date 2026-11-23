@@ -113,6 +113,15 @@ let context_cell ~lang (obs : Wire_fleet.context_reading Observed.t) :
           tone = Theme.Status_critical;
         }
 
+(* Cells a keeper name needs. The keeper column reserves them as its minimum
+   because [Table] shares the cells left after the minimums by weight: every
+   column added to the roster would otherwise take cells from the name.
+   "e-masc-the-leader" is the widest name test_screens_ops draws at 90x28. *)
+let keeper_name_cells = 17
+
+(* The Companies mode indents each keeper under its company header. *)
+let company_indent = "  "
+
 let keeper_table_row ~(model : Model.t) ~(theme : Theme.t) ~indent_name
     (k : Wire_fleet.keeper_summary) : Table.row =
   let has_attn = Ops_common.keeper_has_attention model.attention k.name in
@@ -131,7 +140,7 @@ let keeper_table_row ~(model : Model.t) ~(theme : Theme.t) ~indent_name
       Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
         (Glyph.to_utf8 Glyph.Separator_dot)
   in
-  let name_display = if indent_name then "  " ^ k.name else k.name in
+  let name_display = if indent_name then company_indent ^ k.name else k.name in
   let task_str = Ops_common.keeper_turn_summary ~lang:model.lang k in
   let spark_samples = Ops_common.samples_of_floats k.activity_sparkline_24h in
   let turns_str =
@@ -141,6 +150,29 @@ let keeper_table_row ~(model : Model.t) ~(theme : Theme.t) ~indent_name
   in
   let cost_obs = Runtime_store.keeper_cost_usd ~keeper:k.name model.runtime in
   let cost_str = Format_val.format_observed Format_val.Usd cost_obs ~lang:model.lang in
+  let muted_cell glyph = Table.text_cell ~fg:(Color.of_rgb theme.text_muted) (Glyph.to_utf8 glyph) in
+  let next_cell =
+    match Observed.to_option model.work.schedules with
+    | None -> muted_cell Glyph.Missing_unreported
+    | Some (rows, next_cursor) -> (
+        match
+          Keeper_cadence.next_due ~now_unix:model.freshness.last_wall_unix
+            ~more_pages:(Option.is_some next_cursor)
+            (Keeper_cadence.keeper_schedules ~name:k.name rows)
+        with
+        | Keeper_cadence.No_schedule -> muted_cell Glyph.Separator_dot
+        | Keeper_cadence.Due_unknown | Keeper_cadence.Past_page_read ->
+            muted_cell Glyph.Missing_absent
+        | Keeper_cadence.Due_in s ->
+            Table.text_cell ~fg:(Color.of_rgb theme.text_secondary) (Format_val.format_duration_s s)
+        | Keeper_cadence.Late_by s ->
+            Table.Badge
+              {
+                glyph = Some Glyph.Warning_triangle;
+                text = Format_val.format_duration_s s;
+                tone = Theme.Status_attention;
+              })
+  in
   {
     Table.id = k.name;
     cells =
@@ -155,6 +187,7 @@ let keeper_table_row ~(model : Model.t) ~(theme : Theme.t) ~indent_name
         , Table.Sparkline
             { samples = spark_samples; gradient = Chart.Gradient.Cool_flow } );
         ("turns", Table.text_cell ~fg:(Color.of_rgb theme.text_secondary) turns_str);
+        ("next", next_cell);
         ("cost", Table.text_cell ~fg:(Color.of_rgb theme.text_secondary) cost_str);
         ("trail", trail_cell);
       ];
@@ -175,7 +208,7 @@ let standard_roster_columns : Table.column list =
       id = "keeper";
       header = Say.make ~ko:"키퍼" ~en:"Keeper";
       priority = 0;
-      min_width = 14;
+      min_width = keeper_name_cells + String.length company_indent;
       max_width = Some 24;
       weight = 3;
       align = Table.Left;
@@ -217,6 +250,15 @@ let standard_roster_columns : Table.column list =
       align = Table.Left;
     };
     {
+      id = "next";
+      header = Say.make ~ko:"다음 예약" ~en:"Next due";
+      priority = 4;
+      min_width = 6;
+      max_width = Some 10;
+      weight = 1;
+      align = Table.Right;
+    };
+    {
       id = "trail";
       header = Say.make ~ko:"이력" ~en:"Trail";
       priority = 5;
@@ -242,7 +284,7 @@ let pulse_wall_columns : Table.column list =
       id = "keeper";
       header = Say.make ~ko:"키퍼" ~en:"Keeper";
       priority = 0;
-      min_width = 14;
+      min_width = keeper_name_cells;
       max_width = Some 22;
       weight = 2;
       align = Table.Left;
@@ -262,6 +304,15 @@ let pulse_wall_columns : Table.column list =
       priority = 2;
       min_width = 6;
       max_width = Some 9;
+      weight = 1;
+      align = Table.Right;
+    };
+    {
+      id = "next";
+      header = Say.make ~ko:"다음 예약" ~en:"Next due";
+      priority = 4;
+      min_width = 6;
+      max_width = Some 10;
       weight = 1;
       align = Table.Right;
     };

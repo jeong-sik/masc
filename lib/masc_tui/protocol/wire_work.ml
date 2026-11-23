@@ -15,11 +15,15 @@ let verification_requests_path ~view ~limit ~offset =
 
 let verification_verdict_path = "/api/v1/verification/verdict"
 
+(* Active schedules only: the Keepers list reads each keeper's next due time
+   from this list, and ended one-shot rows outnumber live ones by about
+   twenty to one, so a mixed first page leaves most keepers out. *)
 let schedules_path ?cursor () =
   match cursor with
-  | None -> "/api/v1/dashboard/scheduled-automation"
+  | None -> "/api/v1/dashboard/scheduled-automation?active_only=true"
   | Some c ->
-      "/api/v1/dashboard/scheduled-automation?cursor=" ^ percent_encode c
+      "/api/v1/dashboard/scheduled-automation?active_only=true&cursor="
+      ^ percent_encode c
 
 let keeper_asks_path ?keeper ?(include_resolved = false) () =
   let params =

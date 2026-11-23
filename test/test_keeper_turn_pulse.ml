@@ -7,10 +7,20 @@ let at_slot ?(offset = 0) slot = float_of_int (base + (slot * Pulse.slot_seconds
 
 let tallies (pulse : Pulse.pulse) =
   List.map
-    (fun ({ starts_at; tally = { ok; rested; failed } } : Pulse.slot) ->
+    (fun ({ starts_at; tally = { ok; rested; failed }; _ } : Pulse.slot) ->
       starts_at, ok, rested, failed)
     pulse.slots
 ;;
+
+(* [scheduled; reacted; chat; own; unknown] per slot, newest first. *)
+let causes (pulse : Pulse.pulse) =
+  List.map
+    (fun ({ starts_at; causes = { scheduled; reacted; chat; own; unknown }; _ } : Pulse.slot) ->
+      starts_at, [ scheduled; reacted; chat; own; unknown ])
+    pulse.slots
+;;
+
+let cause_list = Alcotest.(list (pair int (list int)))
 
 let tally_list = Alcotest.(list (pair int (triple int int int)))
 let flat = List.map (fun (s, ok, rested, failed) -> s, (ok, rested, failed))
@@ -31,18 +41,25 @@ let test_unknown_keeper_has_no_pulse () =
 
 let test_turns_are_counted_in_their_half_hour () =
   Pulse.reset_for_tests ();
-  let record at outcome = Pulse.record ~base_path:"/tmp/p1" ~keeper_name:"alpha" ~at outcome in
-  record (at_slot ~offset:10 0) Pulse.Turn_ok;
-  record (at_slot ~offset:1799 0) Pulse.Turn_failed;
-  record (at_slot 1) Pulse.Turn_rested;
-  record (at_slot ~offset:5 1) Pulse.Turn_ok;
+  let record at ~cause outcome =
+    Pulse.record ~base_path:"/tmp/p1" ~keeper_name:"alpha" ~at ~cause outcome
+  in
+  record (at_slot ~offset:10 0) ~cause:Pulse.Scheduled Pulse.Turn_ok;
+  record (at_slot ~offset:1799 0) ~cause:Pulse.Reacted Pulse.Turn_failed;
+  record (at_slot 1) ~cause:Pulse.Own Pulse.Turn_rested;
+  record (at_slot ~offset:5 1) ~cause:Pulse.Chat Pulse.Turn_ok;
   let pulse = get_exn ~base_path:"/tmp/p1" ~keeper_name:"alpha" in
   Alcotest.(check (float 0.001)) "known from the first turn" (at_slot ~offset:10 0) pulse.known_since;
   Alcotest.check
     tally_list
     "newest slot first, counted by outcome"
     (flat [ base + Pulse.slot_seconds, 1, 1, 0; base, 1, 0, 1 ])
-    (flat (tallies pulse))
+    (flat (tallies pulse));
+  Alcotest.check
+    cause_list
+    "the same turns, counted by what started them"
+    [ base + Pulse.slot_seconds, [ 0; 0; 1; 1; 0 ]; base, [ 1; 1; 0; 0; 0 ] ]
+    (causes pulse)
 ;;
 
 let test_many_turns_keep_every_hour () =
@@ -53,6 +70,7 @@ let test_many_turns_keep_every_hour () =
       ~base_path:"/tmp/p1"
       ~keeper_name:"busy"
       ~at:(at_slot ~offset:(i * 120) 0)
+      ~cause:Pulse.Own
       Pulse.Turn_ok
   done;
   let pulse = get_exn ~base_path:"/tmp/p1" ~keeper_name:"busy" in
@@ -65,7 +83,7 @@ let test_many_turns_keep_every_hour () =
 
 let test_a_turn_prunes_slots_older_than_a_day () =
   Pulse.reset_for_tests ();
-  let record slot = Pulse.record ~base_path:"/tmp/p1" ~keeper_name:"k" ~at:(at_slot slot) Pulse.Turn_ok in
+  let record slot = Pulse.record ~base_path:"/tmp/p1" ~keeper_name:"k" ~at:(at_slot slot) ~cause:Pulse.Own Pulse.Turn_ok in
   let slots_per_day = Pulse.window_seconds / Pulse.slot_seconds in
   record 0;
   record 1;
@@ -83,7 +101,7 @@ let test_a_turn_prunes_slots_older_than_a_day () =
 
 let test_a_late_turn_lands_in_its_own_slot () =
   Pulse.reset_for_tests ();
-  let record slot = Pulse.record ~base_path:"/tmp/p1" ~keeper_name:"k" ~at:(at_slot slot) Pulse.Turn_ok in
+  let record slot = Pulse.record ~base_path:"/tmp/p1" ~keeper_name:"k" ~at:(at_slot slot) ~cause:Pulse.Own Pulse.Turn_ok in
   record 3;
   record 1;
   record 2;
@@ -96,9 +114,9 @@ let test_a_late_turn_lands_in_its_own_slot () =
 
 let test_pulses_are_kept_per_workspace_and_keeper () =
   Pulse.reset_for_tests ();
-  Pulse.record ~base_path:"/tmp/p1" ~keeper_name:"k1" ~at:(at_slot 0) Pulse.Turn_ok;
-  Pulse.record ~base_path:"/tmp/p2" ~keeper_name:"k1" ~at:(at_slot 1) Pulse.Turn_failed;
-  Pulse.record ~base_path:"/tmp/p1" ~keeper_name:"k2" ~at:(at_slot 2) Pulse.Turn_rested;
+  Pulse.record ~base_path:"/tmp/p1" ~keeper_name:"k1" ~at:(at_slot 0) ~cause:Pulse.Own Pulse.Turn_ok;
+  Pulse.record ~base_path:"/tmp/p2" ~keeper_name:"k1" ~at:(at_slot 1) ~cause:Pulse.Own Pulse.Turn_failed;
+  Pulse.record ~base_path:"/tmp/p1" ~keeper_name:"k2" ~at:(at_slot 2) ~cause:Pulse.Own Pulse.Turn_rested;
   let newest ~base_path ~keeper_name =
     match (get_exn ~base_path ~keeper_name).slots with
     | slot :: _ -> slot.starts_at
@@ -221,21 +239,23 @@ let test_seed_reads_the_rotated_log_when_the_primary_is_missing () =
     Alcotest.(check int) "its turns are slotted" 2 (slot_count lone))
 ;;
 
-(* A chat row is not a pulse turn, but it shows how far back the log reaches. *)
+(* A chat row older than the window is not slotted, and it still shows how far
+   back the log reaches. *)
 let test_seed_knows_the_log_from_rows_of_any_event () =
   with_workspace (fun config log_path ->
     write_lines (log_path "chat-before") [ chat_line (window_start -. 60.0); turn_line (at_slot 90) ];
     let before = seeded config "chat-before" in
     check_known "a chat row older than the window reaches the window" window_start before;
-    Alcotest.(check int) "only the autonomous turn is slotted" 1 (slot_count before);
+    Alcotest.(check int) "only the turn inside the window is slotted" 1 (slot_count before);
     write_lines (log_path "chat-inside") [ chat_line (at_slot 85); turn_line (at_slot 90) ];
     check_known "a chat row is the log's first row" (at_slot 85) (seeded config "chat-inside"))
 ;;
 
-(* A row counts only when it is an autonomous-cycle turn with a known outcome.
-   Another event, a chat turn, a turn with no execution path and a line that is
-   not JSON are read past, so the slots show which rows counted. *)
-let test_seed_counts_only_autonomous_turns_by_outcome () =
+(* A row counts when it is a turn of either lane with a known outcome. Another
+   event, a turn with no execution path and a line that is not JSON are read
+   past, so the slots show which rows counted. With no turn log, the
+   autonomous turns count as unknown and the direct turn as chat. *)
+let test_seed_counts_both_lanes_by_outcome () =
   let line ?(path = {|,"execution_path":"autonomous_cycle"|}) ~event ~slot ~outcome () =
     Printf.sprintf
       {|{"event":"%s","ts_unix":%.1f,"outcome":"%s"%s}|}
@@ -263,12 +283,91 @@ let test_seed_counts_only_autonomous_turns_by_outcome () =
     | Some pulse ->
       Alcotest.check
         tally_list
-        "the success and the error turn are counted, no other row is"
+        "both lanes' turns are counted, no other row is"
         (flat
-           [ base + (91 * Pulse.slot_seconds), 0, 0, 1
+           [ base + (93 * Pulse.slot_seconds), 1, 0, 0
+           ; base + (91 * Pulse.slot_seconds), 0, 0, 1
            ; base + (90 * Pulse.slot_seconds), 1, 0, 0
            ])
-        (flat (tallies pulse))
+        (flat (tallies pulse));
+      Alcotest.check
+        cause_list
+        "the direct turn is chat, the autonomous turns are unknown without a turn log"
+        [ base + (93 * Pulse.slot_seconds), [ 0; 0; 1; 0; 0 ]
+        ; base + (91 * Pulse.slot_seconds), [ 0; 0; 0; 0; 1 ]
+        ; base + (90 * Pulse.slot_seconds), [ 0; 0; 0; 0; 1 ]
+        ]
+        (causes pulse)
+    | None -> Alcotest.fail "expected a seeded pulse")
+;;
+
+let mark : Masc.Keeper_turn_log.mark =
+  { trace = "trace-t"
+  ; closed_messages = 0
+  ; session = "trace-t"
+  ; history_bytes = 0
+  ; internal_bytes = 0
+  ; chat_bytes = 0
+  ; external_rows = 0
+  }
+;;
+
+let opened_line ~turn ~at stimuli =
+  Masc.Keeper_turn_log_codec.to_json
+    (Masc.Keeper_turn_log.Opened
+       { at
+       ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-t" ~absolute_turn:turn
+       ; runtime = "runtime-t"
+       ; task = Masc.Keeper_turn_log.No_task
+       ; stimuli
+       ; baseline = mark
+       })
+  |> Yojson.Safe.to_string
+;;
+
+let decision_line ~turn ~slot ~path =
+  Printf.sprintf
+    {|{"event":"turn","ts_unix":%.1f,"outcome":"success","execution_path":"%s","trace_id":"trace-t","turn_id":%d}|}
+    (at_slot ~offset:60 slot)
+    path
+    turn
+;;
+
+(* An autonomous row takes its cause from the [Opened] line its trace and turn
+   number name: only schedules is scheduled, anything else taken is a
+   reaction, nothing taken is the keeper's own. A row whose line was not
+   written is unknown, and a direct row is chat without a line. *)
+let test_seed_names_causes_from_the_turn_log () =
+  with_workspace (fun config log_path ->
+    let keeper_name = "joined" in
+    let turn_log =
+      Masc.Keeper_turn_log_store.path_for_keepers_dir
+        ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
+        ~keeper_id:keeper_name
+    in
+    let schedule = Masc.Keeper_turn_log.Schedule { schedule = "sched-1"; occurrence = "occ-1" } in
+    let receipt = Masc.Keeper_turn_log.Tool_result { receipt = "receipt-1" } in
+    write_lines
+      turn_log
+      [ opened_line ~turn:1 ~at:(at_slot 90) [ schedule ]
+      ; opened_line ~turn:2 ~at:(at_slot 90) [ schedule; receipt ]
+      ; opened_line ~turn:3 ~at:(at_slot 90) []
+      ];
+    write_lines
+      (log_path keeper_name)
+      [ decision_line ~turn:1 ~slot:90 ~path:"autonomous_cycle"
+      ; decision_line ~turn:2 ~slot:90 ~path:"autonomous_cycle"
+      ; decision_line ~turn:3 ~slot:90 ~path:"autonomous_cycle"
+      ; decision_line ~turn:4 ~slot:90 ~path:"autonomous_cycle"
+      ; decision_line ~turn:5 ~slot:90 ~path:"direct_turn"
+      ];
+    match seeded config keeper_name with
+    | Some pulse ->
+      Alcotest.check
+        cause_list
+        "scheduled, reacted, own, unknown and chat"
+        [ base + (90 * Pulse.slot_seconds), [ 1; 1; 1; 1; 1 ] ]
+        (causes pulse)
     | None -> Alcotest.fail "expected a seeded pulse")
 ;;
 
@@ -297,7 +396,7 @@ let test_seed_knows_a_long_log_from_its_oldest_read_turn () =
 let test_seed_leaves_a_recorded_keeper_alone () =
   with_workspace (fun config log_path ->
     let base_path = config.Masc.Workspace.base_path in
-    Pulse.record ~base_path ~keeper_name:"live" ~at:(at_slot 99) Pulse.Turn_failed;
+    Pulse.record ~base_path ~keeper_name:"live" ~at:(at_slot 99) ~cause:Pulse.Own Pulse.Turn_failed;
     write_turns (log_path "live") [ at_slot 90 ];
     check_known "the recorded pulse stays" (at_slot 99) (seeded config "live"))
 ;;
@@ -326,8 +425,10 @@ let () =
             test_seed_reads_the_rotated_log_when_the_primary_is_missing
         ; Alcotest.test_case "seed knows the log from rows of any event" `Quick
             test_seed_knows_the_log_from_rows_of_any_event
-        ; Alcotest.test_case "seed counts only autonomous turns by outcome" `Quick
-            test_seed_counts_only_autonomous_turns_by_outcome
+        ; Alcotest.test_case "seed counts both lanes by outcome" `Quick
+            test_seed_counts_both_lanes_by_outcome
+        ; Alcotest.test_case "seed names causes from the turn log" `Quick
+            test_seed_names_causes_from_the_turn_log
         ; Alcotest.test_case "seed drops turns stamped after now" `Quick
             test_seed_drops_turns_stamped_after_now
         ; Alcotest.test_case "seed knows a long log from its oldest read turn" `Quick

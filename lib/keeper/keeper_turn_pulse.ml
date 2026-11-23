@@ -3,15 +3,30 @@ type outcome =
   | Turn_rested
   | Turn_failed
 
+type cause =
+  | Scheduled
+  | Reacted
+  | Chat
+  | Own
+
 type tally =
   { ok : int
   ; rested : int
   ; failed : int
   }
 
+type causes =
+  { scheduled : int
+  ; reacted : int
+  ; chat : int
+  ; own : int
+  ; unknown : int
+  }
+
 type slot =
   { starts_at : int
   ; tally : tally
+  ; causes : causes
   }
 
 type pulse =
@@ -23,6 +38,7 @@ let slot_seconds = 1800
 let window_seconds = 86400
 let slot_start at = int_of_float (Float.floor (at /. float_of_int slot_seconds)) * slot_seconds
 let empty_tally = { ok = 0; rested = 0; failed = 0 }
+let empty_causes = { scheduled = 0; reacted = 0; chat = 0; own = 0; unknown = 0 }
 
 let count tally = function
   | Turn_ok -> { tally with ok = tally.ok + 1 }
@@ -30,23 +46,43 @@ let count tally = function
   | Turn_failed -> { tally with failed = tally.failed + 1 }
 ;;
 
+(* [None] is a seeded turn whose cause the turn log did not say. *)
+let count_cause causes = function
+  | Some Scheduled -> { causes with scheduled = causes.scheduled + 1 }
+  | Some Reacted -> { causes with reacted = causes.reacted + 1 }
+  | Some Chat -> { causes with chat = causes.chat + 1 }
+  | Some Own -> { causes with own = causes.own + 1 }
+  | None -> { causes with unknown = causes.unknown + 1 }
+;;
+
+let first_turn starts_at ~cause outcome =
+  { starts_at
+  ; tally = count empty_tally outcome
+  ; causes = count_cause empty_causes cause
+  }
+;;
+
 (* [slots] is newest first. A turn usually lands in the newest slot; a turn
    from another domain may end a little earlier than the last one recorded, so
    it is inserted where its slot belongs. *)
-let rec add_turn starts_at outcome = function
-  | [] -> [ { starts_at; tally = count empty_tally outcome } ]
+let rec add_turn starts_at ~cause outcome = function
+  | [] -> [ first_turn starts_at ~cause outcome ]
   | slot :: older when slot.starts_at = starts_at ->
-    { slot with tally = count slot.tally outcome } :: older
+    { slot with
+      tally = count slot.tally outcome
+    ; causes = count_cause slot.causes cause
+    }
+    :: older
   | slot :: _ as slots when slot.starts_at < starts_at ->
-    { starts_at; tally = count empty_tally outcome } :: slots
-  | slot :: older -> slot :: add_turn starts_at outcome older
+    first_turn starts_at ~cause outcome :: slots
+  | slot :: older -> slot :: add_turn starts_at ~cause outcome older
 ;;
 
 (* Pruning forgets the turns before [horizon], so [known_since] moves up to
    it: a reader drawing further back sees unknown hours, not quiet ones. *)
-let add_to_pulse pulse ~at outcome =
+let add_to_pulse pulse ~at ~cause outcome =
   let starts_at = slot_start at in
-  let slots = add_turn starts_at outcome pulse.slots in
+  let slots = add_turn starts_at ~cause outcome pulse.slots in
   let newest_slot =
     match slots with
     | newest :: _ -> newest.starts_at
@@ -71,7 +107,46 @@ module KeyMap = Map.Make (Key)
 
 let state : pulse KeyMap.t Atomic.t = Atomic.make KeyMap.empty
 
-let record ~base_path ~keeper_name ~at outcome =
+let cause_of_inputs inputs =
+  match inputs with
+  | [] -> Own
+  | _ :: _ ->
+    if List.for_all
+         (fun input -> Option.is_some (Keeper_event_queue.scheduled_wake input))
+         inputs
+    then Scheduled
+    else Reacted
+;;
+
+(* The turn log names the queue entries a turn took (Keeper_turn_log.stimulus,
+   one constructor per queue entry kind), so a seeded turn gets the cause
+   [cause_of_inputs] gave it when it ran. *)
+let is_logged_schedule : Keeper_turn_log.stimulus -> bool = function
+  | Schedule _ -> true
+  | Board _
+  | Board_routing_pending _
+  | Board_attention _
+  | Bootstrap
+  | Tool_result _
+  | Fusion _
+  | Connector _
+  | Hitl _
+  | Ask _
+  | Completion_rejected _
+  | Completion_approved _
+  | Task_cancelled _
+  | Workspace_message _
+  | Delegate _
+  | Composition _
+  | Owned_job _ -> false
+;;
+
+let cause_of_logged_inputs = function
+  | [] -> Own
+  | _ :: _ as inputs -> if List.for_all is_logged_schedule inputs then Scheduled else Reacted
+;;
+
+let record ~base_path ~keeper_name ~at ~cause outcome =
   let key = base_path, keeper_name in
   let rec loop () =
     let current = Atomic.get state in
@@ -80,7 +155,7 @@ let record ~base_path ~keeper_name ~at outcome =
       | Some pulse -> pulse
       | None -> { known_since = at; slots = [] }
     in
-    let next = KeyMap.add key (add_to_pulse existing ~at outcome) current in
+    let next = KeyMap.add key (add_to_pulse existing ~at ~cause:(Some cause) outcome) current in
     if Atomic.compare_and_set state current next then () else loop ()
   in
   loop ()
@@ -104,6 +179,7 @@ let seed ~base_path ~keeper_name pulse =
 type sample =
   { at : float
   ; outcome : outcome
+  ; cause : cause option
   }
 
 (* Every decision row carries [ts_unix]. A row of any event shows the log was
@@ -115,16 +191,28 @@ let row_time json =
   | _ -> None
 ;;
 
-(* Chat turns write the same [event = "turn"] row; only the autonomous cycle
-   records into the live pulse, so only its rows seed it (#49984). *)
-let sample_of_row json =
-  let autonomous =
+(* The turn ref the turn log keys an [Opened] line by: the decision row's
+   session trace and its absolute turn number. *)
+let turn_ref_of_row json =
+  match Json_util.get_string json "trace_id", Yojson.Safe.Util.member "turn_id" json with
+  | Some trace_id, `Int absolute_turn ->
+    Some (Ids.Turn_ref.to_string (Ids.Turn_ref.make ~trace_id ~absolute_turn))
+  | Some _, _ | None, _ -> None
+;;
+
+(* Both lanes write an [event = "turn"] row and both record into the live
+   pulse, so both seed it. [cause] is [None] for a row that names no lane,
+   which is read past, and [Some None] for an autonomous turn the turn log
+   did not name, which counts as unknown. *)
+let sample_of_row ~cause_of_turn json =
+  let cause =
     match Json_util.get_string json "execution_path" with
     | Some label ->
       (match Keeper_unified_metrics_decision.execution_path_of_string label with
-       | Some Autonomous_cycle -> true
-       | Some Direct_turn | None -> false)
-    | None -> false
+       | Some Direct_turn -> Some (Some Chat)
+       | Some Autonomous_cycle -> Some (Option.bind (turn_ref_of_row json) cause_of_turn)
+       | None -> None)
+    | None -> None
   in
   let outcome =
     match Json_util.get_string json "outcome" with
@@ -135,8 +223,8 @@ let sample_of_row json =
        | None -> None)
     | None -> None
   in
-  match Json_util.get_string json "event", row_time json, outcome with
-  | Some "turn", Some at, Some outcome when autonomous -> Some { at; outcome }
+  match Json_util.get_string json "event", row_time json, outcome, cause with
+  | Some "turn", Some at, Some outcome, Some cause -> Some { at; outcome; cause }
   | _ -> None
 ;;
 
@@ -168,7 +256,7 @@ let earliest a b =
    its turns, so the caller must not turn it into an empty pulse. A row stamped
    after [now] is dropped: its slot would lie past every hour the TUI draws and
    would prune the day behind it. *)
-let read_tail ~now ~window_start path =
+let read_tail ~cause_of_turn ~now ~window_start path =
   if not (Fs_compat.file_exists path)
   then Ok Log_absent
   else (
@@ -200,7 +288,7 @@ let read_tail ~now ~window_start path =
               | Some at when at < window_start -> Reaches_window_start (List.rev samples)
               | Some at ->
                 let samples =
-                  match sample_of_row json with
+                  match sample_of_row ~cause_of_turn json with
                   | Some sample -> sample :: samples
                   | None -> samples
                 in
@@ -211,9 +299,42 @@ let read_tail ~now ~window_start path =
 
 let pulse_of_samples ~known_since samples =
   List.fold_left
-    (fun pulse sample -> add_to_pulse pulse ~at:sample.at sample.outcome)
+    (fun pulse sample -> add_to_pulse pulse ~at:sample.at ~cause:sample.cause sample.outcome)
     { known_since; slots = [] }
     (List.rev samples)
+;;
+
+(* The causes of the turns the turn log opened since a window before
+   [window_start], keyed by turn ref: a turn that ended inside the window may
+   have opened before it. A log that cannot be read gives no cause, and the
+   autonomous turns it would have named count as unknown. *)
+let logged_causes ~config ~keeper_name ~window_start =
+  let path =
+    Keeper_turn_log_store.path_for_keepers_dir
+      ~keepers_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_id:keeper_name
+  in
+  let opened_since = window_start -. float_of_int window_seconds in
+  let add causes (scanned : Keeper_turn_log_store.scanned) =
+    match scanned.line with
+    | Ok (Keeper_turn_log.Opened { at; turn_ref; stimuli; _ }) when at >= opened_since ->
+      Hashtbl.replace causes (Ids.Turn_ref.to_string turn_ref) (cause_of_logged_inputs stimuli);
+      causes
+    | Ok
+        ( Keeper_turn_log.Opened _
+        | Keeper_turn_log.Log_started _
+        | Keeper_turn_log.Closed _
+        | Keeper_turn_log.Reset _ )
+    | Error _ -> causes
+  in
+  match Keeper_turn_log_store.fold path ~init:(Hashtbl.create 256) ~f:add with
+  | Ok causes -> causes
+  | Error error ->
+    Log.Keeper.warn
+      ~keeper_name
+      "turn pulse seed could not read the turn log, so its autonomous turns count as unknown: %s"
+      (Private_jsonl_scan.error_to_string error);
+    Hashtbl.create 0
 ;;
 
 (* The logs hold every turn since the oldest row read, so the pulse is known
@@ -223,7 +344,9 @@ let seed_from_decision_log ?(now = Time_compat.now ()) ~config ~keeper_name () =
   let base_path = config.Workspace.base_path in
   let primary_path = Keeper_types_support.keeper_decision_log_path config keeper_name in
   let window_start = now -. float_of_int window_seconds in
-  let read path = read_tail ~now ~window_start path in
+  let causes = logged_causes ~config ~keeper_name ~window_start in
+  let cause_of_turn turn_ref = Hashtbl.find_opt causes turn_ref in
+  let read path = read_tail ~cause_of_turn ~now ~window_start path in
   let known_from oldest_row = Option.value oldest_row ~default:now in
   (* [newer] were read from the primary log, which begins where the rotated log
      ends. A rotated log read whole may still follow a [.2] or a deleted log,

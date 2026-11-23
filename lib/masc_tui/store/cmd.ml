@@ -6,6 +6,7 @@ type get_request =
   | Get_dashboard_shell
   | Get_keepers_roster
   | Get_keeper_turns
+  | Get_keeper_turn_records of { keeper : string; limit : int }
   | Get_chat_history of {
       keeper : string;
       limit : int option;
@@ -223,6 +224,8 @@ let get_request_path = function
   | Get_dashboard_shell -> Wire_fleet.dashboard_shell_path
   | Get_keepers_roster -> Wire_fleet.dashboard_keepers_path
   | Get_keeper_turns -> Wire_fleet.keepers_turns_path
+  | Get_keeper_turn_records { keeper; limit } ->
+      Wire_fleet.keeper_turn_records_path ~keeper ~limit
   | Get_chat_history { keeper; limit; cursor } ->
       Wire_fleet.keeper_chat_history_page_path ~keeper ?limit ?cursor ()
   | Get_planning -> Wire_work.planning_path

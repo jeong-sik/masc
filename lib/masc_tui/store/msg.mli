@@ -32,12 +32,16 @@ val http_error_retryable : http_error -> bool
 type http_reply =
   (* Fleet & Pulse *)
   | Reply_dashboard_shell of (Wire_fleet.dashboard_shell, http_error) result
-  | Reply_keepers_roster of (Wire_fleet.keeper_summary list, http_error) result
+  | Reply_keepers_roster of (Wire_fleet.keepers_roster, http_error) result
   | Reply_keepers_roster_extras of Wire_fleet.keeper_roster_extras
   | Reply_execution_enrichments of
       (Wire_fleet.execution_keeper_enrichment list
-      * Wire_fleet.candle_summary_fallback option)
+      * Wire_fleet.candle_observation option)
   | Reply_keeper_turns of (Wire_fleet.keeper_turn_row list, http_error) result
+  | Reply_keeper_turn_records of {
+      keeper : string;
+      result : (Wire_fleet.keeper_turn_records, http_error) result;
+    }
   | Reply_chat_history of {
       keeper : string;
       result : (Wire_fleet.chat_history_page, http_error) result;

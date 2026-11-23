@@ -12,6 +12,7 @@ type get_request =
   | Get_dashboard_shell
   | Get_keepers_roster
   | Get_keeper_turns
+  | Get_keeper_turn_records of { keeper : string; limit : int }
   | Get_chat_history of {
       keeper : string;
       limit : int option;

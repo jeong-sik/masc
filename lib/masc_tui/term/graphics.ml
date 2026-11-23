@@ -82,7 +82,7 @@ let image_id = function
 let evidence_images =
   [ Evidence_image_1; Evidence_image_2; Evidence_image_3; Evidence_image_4 ]
 
-let resource_image_id index = 0x10000 + index
+let resource_image_id index = 0x10000 + max 0 index
 let query_id = image_id Graphics_query
 
 let one_pixel_png =
@@ -113,10 +113,13 @@ let chunk_bytes = 4096
 let payload_media_type = "image/png"
 
 let encode_rgb ~identity ~data ~pixel_width ~pixel_height ~rows =
+  let max_rgb_pixels = max_int / 3 in
   if
     String.length data = 0
     || pixel_width <= 0
     || pixel_height <= 0
+    || pixel_width > max_rgb_pixels
+    || pixel_height > max_rgb_pixels / pixel_width
     || String.length data <> pixel_width * pixel_height * 3
   then ""
   else
@@ -284,10 +287,12 @@ let iterm2_place ~data ({ columns; rows } : placement) =
       (max 1 columns) (max 1 rows) encoded
 
 let tmux_wrapped payload =
-  let escaped =
-    String.concat "\x1b\x1b" (String.split_on_char '\x1b' payload)
-  in
-  "\x1bPtmux;" ^ escaped ^ "\x1b\\"
+  if String.length payload = 0 then ""
+  else
+    let escaped =
+      String.concat "\x1b\x1b" (String.split_on_char '\x1b' payload)
+    in
+    "\x1bPtmux;" ^ escaped ^ "\x1b\\"
 
 type image_region = {
   top : int;
@@ -297,14 +302,22 @@ type image_region = {
 }
 
 let image_point region ~row ~column =
-  let x = (float_of_int (column - region.left) +. 0.5) /. region.width_cells in
-  let y = (float_of_int (row - region.top) +. 0.5) /. region.height_cells in
   if
-    Float.is_finite x
-    && Float.is_finite y
-    && x >= 0.
-    && x < 1.
-    && y >= 0.
-    && y < 1.
-  then Some (x, y)
-  else None
+    not
+      (Float.is_finite region.width_cells
+       && Float.is_finite region.height_cells
+       && region.width_cells > 0.
+       && region.height_cells > 0.)
+  then None
+  else
+    let x = (float_of_int (column - region.left) +. 0.5) /. region.width_cells in
+    let y = (float_of_int (row - region.top) +. 0.5) /. region.height_cells in
+    if
+      Float.is_finite x
+      && Float.is_finite y
+      && x >= 0.
+      && x < 1.
+      && y >= 0.
+      && y < 1.
+    then Some (x, y)
+    else None

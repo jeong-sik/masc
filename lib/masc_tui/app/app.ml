@@ -12,12 +12,29 @@ let voice_tick_interval_ns = 100_000_000L
 let probe_timeout_s = 0.15
 
 let palette_requested_of_env ~getenv =
-  match getenv "MASC_TUI_FORCE_COLOR" with
-  | Some "1" -> true
-  | Some _ | None -> (
-      match getenv "NO_COLOR" with
-      | Some value when String.length value > 0 -> false
-      | Some _ | None -> true)
+  let term_usable =
+    match getenv "TERM" with
+    | Some term ->
+        let trimmed = String.trim term in
+        String.length trimmed > 0
+        && not (String.equal (String.lowercase_ascii trimmed) "dumb")
+    | None -> false
+  in
+  if not term_usable then false
+  else
+    match getenv "MASC_TUI_FORCE_COLOR" with
+    | Some "1" -> true
+    | Some _ | None -> (
+        match getenv "NO_COLOR" with
+        | Some value when String.length value > 0 -> false
+        | Some _ | None -> true)
+
+let rec fd_immediately_readable fd =
+  match Unix.select [ fd ] [] [] 0.0 with
+  | _ :: _, _, _ -> `Ready
+  | [], _, _ -> `Not_ready
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> fd_immediately_readable fd
+  | exception Unix.Unix_error _ -> `Error
 
 let collect_startup_probe ?(timeout_s = probe_timeout_s)
     ?(max_bytes = Probe.max_bytes) ~clock ~fd ~palette_requested () =
@@ -28,48 +45,65 @@ let collect_startup_probe ?(timeout_s = probe_timeout_s)
   let deadline = Clock.Mono.after_s (Clock.Mono.now ()) timeout_s in
   let buf = Bytes.create 256 in
   let bytes_read = ref 0 in
+  let read_once () =
+    let room = Int.min (Bytes.length buf) (max_bytes - !bytes_read) in
+    if room <= 0 then `Stop
+    else
+      match Unix.read fd buf 0 room with
+      | 0 -> `Stop
+      | n ->
+          bytes_read := !bytes_read + n;
+          for i = 0 to n - 1 do
+            Probe.feed decoder (Bytes.get buf i)
+          done;
+          `Continue
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> `Continue
+      | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
+          `Continue
+      | exception Unix.Unix_error _ -> `Stop
+  in
   let rec loop () =
     if !bytes_read >= max_bytes then ()
     else
       match Probe.startup_status decoder with
       | Probe.Input_ready | Probe.Replies_ready -> ()
       | Probe.Awaiting_replies ->
-          let remaining_s =
-            Clock.Mono.seconds_since deadline ~since:(Clock.Mono.now ())
-          in
-          if remaining_s <= 0.0 then ()
-          else
-            let ready =
-              Eio.Fiber.first
-                (fun () ->
-                  Eio_unix.await_readable fd;
-                  `Readable)
-                (fun () ->
-                  Eio.Time.sleep clock remaining_s;
-                  `Timeout)
-            in
-            (match ready with
-             | `Timeout -> ()
-             | `Readable ->
-                 let room =
-                   Int.min (Bytes.length buf) (max_bytes - !bytes_read)
+          (* Validate fd and drain already-buffered bytes before registering
+             with Eio's poll loop (prevents Eio_posix POLLNVAL assertions on
+             closed/invalid fds). *)
+          (match fd_immediately_readable fd with
+           | `Error -> ()
+           | `Ready -> (
+               match read_once () with
+               | `Stop -> ()
+               | `Continue -> loop ())
+           | `Not_ready ->
+               let remaining_s =
+                 Clock.Mono.seconds_since deadline ~since:(Clock.Mono.now ())
+               in
+               if remaining_s <= 0.0 then ()
+               else
+                 let ready =
+                   Eio.Fiber.first
+                     (fun () ->
+                       match Eio_unix.await_readable fd with
+                       | () -> `Readable
+                       | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
+                       | exception Unix.Unix_error _ -> `Error)
+                     (fun () ->
+                       Eio.Time.sleep clock remaining_s;
+                       `Timeout)
                  in
-                 if room <= 0 then ()
-                 else
-                   (match Unix.read fd buf 0 room with
-                    | 0 -> ()
-                    | n ->
-                        bytes_read := !bytes_read + n;
-                        for i = 0 to n - 1 do
-                          Probe.feed decoder (Bytes.get buf i)
-                        done;
-                        loop ()
-                    | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
-                    | exception
-                        Unix.Unix_error
-                          ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
-                        loop ()
-                    | exception Unix.Unix_error _ -> ()))
+                 (match ready with
+                  | `Timeout | `Error -> ()
+                  | `Readable -> (
+                      match fd_immediately_readable fd with
+                      | `Error -> ()
+                      | `Not_ready -> loop ()
+                      | `Ready -> (
+                          match read_once () with
+                          | `Stop -> ()
+                          | `Continue -> loop ()))))
   in
   loop ();
   decoder

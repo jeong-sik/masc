@@ -228,6 +228,79 @@ let test_formation_graph_json_and_memory_tree () =
   Alcotest.(check int) "draw returns rendered line count"
     (List.length tree_lines) total
 
+let test_sanitization_and_fact_status_consistency () =
+  (* P1: ANSI/OSC/control injection in memory_id and keeper_name must be stripped
+     from both formation_graph_json and Memory_tree.render *)
+  let dirty_id = "mem-\x1b]52;c;ZGF0YQ==\x07\x1b[31m01\n\r\x00" in
+  let dirty_keeper = "keeper-\x1b[31mred\nline" in
+  let ev_known =
+    event ~kind:Lineage.Created "e1" []
+      [ { memory_id = dirty_id; claim = Some "observed body" } ]
+  in
+  let ev_ref =
+    event ~kind:Lineage.Reobserved "e2"
+      [ { memory_id = dirty_id; claim = None } ]
+      [ { memory_id = dirty_id; claim = None } ]
+  in
+  let ev_blank =
+    event ~kind:Lineage.Created "e3" []
+      [ { memory_id = "mem-blank"; claim = Some "   \t  " } ]
+  in
+  let chart =
+    Lineage.select ~event_id:"e2" (activity [ ev_known; ev_ref ]) |> Option.get
+  in
+  let json_str =
+    Lineage.formation_graph_json ~ko:false ~keeper_name:dirty_keeper chart
+  in
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string json_str in
+  let title = json |> member "title" |> to_string in
+  Alcotest.(check bool) "graph title has no ESC" false (contains ~needle:"\x1b" title);
+  Alcotest.(check bool) "graph title has no newline" false
+    (contains ~needle:"\n" title);
+  let fact_node =
+    json |> member "nodes" |> to_list
+    |> List.find (fun n -> n |> member "kind" |> to_string = "fact")
+  in
+  let mid = fact_node |> member "memoryId" |> to_string in
+  Alcotest.(check bool) "graph memoryId strips ESC/OSC" false
+    (contains ~needle:"\x1b" mid);
+  Alcotest.(check bool) "graph memoryId strips NUL/newline" false
+    (contains ~needle:"\x00" mid || contains ~needle:"\n" mid);
+
+  let tree_lines =
+    Tree.render ~ko:false ~keeper_name:dirty_keeper ~max_width:80 chart
+  in
+  List.iter
+    (fun line ->
+      Alcotest.(check bool) "tree line has no ESC" false
+        (contains ~needle:"\x1b" line);
+      Alcotest.(check bool) "tree line has no embedded newline/CR" false
+        (contains ~needle:"\n" line || contains ~needle:"\r" line))
+    tree_lines;
+
+  (* P2: fact_status agrees with fact_claim_text on resolved chart.facts claims
+     and on whitespace-only claims *)
+  let st_resolved, _ =
+    Lineage.fact_status ~ko:false chart { memory_id = dirty_id; claim = None }
+  in
+  Alcotest.(check string) "claim=None resolved via chart.facts is retained"
+    "retained" st_resolved;
+
+  let blank_chart =
+    Lineage.select ~event_id:"e3" (activity [ ev_blank ]) |> Option.get
+  in
+  let st_blank, _ =
+    Lineage.fact_status ~ko:false blank_chart
+      { memory_id = "mem-blank"; claim = Some "   \t  " }
+  in
+  Alcotest.(check string) "whitespace-only claim is unconfirmed" "unconfirmed"
+    st_blank;
+  Alcotest.(check bool) "whitespace-only fact_claim_text is unreported" true
+    (contains ~needle:"Claim not reported"
+       (Lineage.fact_claim_text ~ko:false blank_chart
+          { memory_id = "mem-blank"; claim = Some "   \t  " }))
+
 let () =
   Alcotest.run "masc_tui_v2_memory_lineage"
     [
@@ -241,5 +314,7 @@ let () =
             test_transition_svg_and_mermaid_fallback;
           Alcotest.test_case "formation_graph_json & Memory_tree.render/draw"
             `Quick test_formation_graph_json_and_memory_tree;
+          Alcotest.test_case "ANSI/control sanitization & fact_status consistency"
+            `Quick test_sanitization_and_fact_status_consistency;
         ] );
     ]

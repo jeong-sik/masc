@@ -75,8 +75,11 @@ val process_runner :
   ?clock:_ Eio.Time.clock ->
   unit ->
   runner
-(** Direct [Unix.create_process] runner with bounded timeout and clean
-    kill-and-reap on deadline expiry or [Eio.Cancel.Cancelled]. *)
+(** Direct [Unix.create_process] runner with [Unix.O_CLOEXEC] temp descriptors,
+    bounded timeout, and clean kill-and-reap on deadline expiry, [WSTOPPED], or
+    [Eio.Cancel.Cancelled]. Callers running inside an Eio event loop must pass
+    [?clock] (or dispatch onto {!Masc_tui_net.Worker_pool} /
+    [Eio_unix.run_in_systhread]) so polling never blocks the UI domain. *)
 
 val render :
   cache_dir:string ->
@@ -88,5 +91,7 @@ val render :
   (string, string) result
 (** Encode [scene] (and optional [raster] geometry) to JSON, execute [masc-pele]
     via [runner] (default {!process_runner}), verify the
-    [masc-pele-protocol:1\n] handshake, and return PNG bytes or an explicit
-    failure message. Always removes temporary files before returning. *)
+    [masc-pele-protocol:1\n] handshake, and return PNG bytes or an explicit,
+    bounded, control-stripped failure diagnostic. Always removes temporary files
+    before returning. Callers inside Eio must pass [?clock] or run on a worker
+    domain / systhread. *)

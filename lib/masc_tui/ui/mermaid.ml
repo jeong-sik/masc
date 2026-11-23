@@ -332,7 +332,7 @@ let unsafe_canvas_text text =
             && Char.code text.[at + 1] <= 0x9f)
         || scan (at + 1)
     in
-    scan 0
+    scan 0 || not (String.equal (Grapheme.sanitize_controls text) text)
 
 (* Bits merge: a line meeting a border turns the border cell into a
    junction. Text normally stays text, but an edge label colliding with a
@@ -894,10 +894,11 @@ let rec layout_scope ~trace ~cols ~direction ~node_of ~nodes ~groups ~edges =
         index
       in
       (* Segments, with dummies for the layers an edge crosses. *)
+      let dag_arr = Array.of_list dag in
       let segments = ref [] in
       List.iteri
         (fun edge_index edge ->
-          let s, t = List.nth dag edge_index in
+          let s, t = dag_arr.(edge_index) in
           let head_forward = edge.directed && not reversed.(edge_index) in
           let head_backward = edge.directed && reversed.(edge_index) in
           let span = layer.(t) - layer.(s) in

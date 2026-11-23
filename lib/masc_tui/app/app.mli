@@ -29,8 +29,10 @@ val probe_timeout_s : float
     non-responding terminals never hang TUI startup. *)
 
 val palette_requested_of_env : getenv:(string -> string option) -> bool
-(** Decide whether to query OSC 10/11/4 palette at startup ([false] when
-    [NO_COLOR] is non-empty unless [MASC_TUI_FORCE_COLOR=1]). *)
+(** Decide whether to query OSC 10/11/4 palette at startup: returns [false] when
+    [TERM] is absent, empty, or case-insensitively ["dumb"] (regardless of
+    [MASC_TUI_FORCE_COLOR]), or when [NO_COLOR] is non-empty without
+    [MASC_TUI_FORCE_COLOR=1]. *)
 
 val collect_startup_probe :
   ?timeout_s:float ->
@@ -42,7 +44,11 @@ val collect_startup_probe :
   Probe.decoder
 (** Collect startup terminal replies (CSI 16t cell pixels, optional OSC 10/11/4
     palette, Kitty APC G graphics) from [fd] within [timeout_s] without blocking
-    or discarding early user keystrokes. Stops immediately on [Input_ready] or
+    or discarding early user keystrokes. Callers should pass an [O_NONBLOCK]
+    descriptor; reads are additionally guarded with zero-timeout [Unix.select]
+    against spurious wakeups, and [Unix_error] on [await_readable]/[read]
+    returns the accumulated decoder cleanly while preserving
+    [Eio.Cancel.Cancelled]. Stops immediately on [Input_ready] or
     [Replies_ready] and returns the live {!Probe.decoder} with intact replay
     and pending state for handoff to the input reader. *)
 

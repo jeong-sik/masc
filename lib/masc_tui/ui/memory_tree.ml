@@ -24,9 +24,20 @@ type line = {
   text : string;
 }
 
+let sanitize_single_line text =
+  let len = String.length text in
+  let buf = Buffer.create len in
+  for i = 0 to len - 1 do
+    match text.[i] with
+    | '\n' | '\r' | '\t' -> Buffer.add_char buf ' '
+    | ch -> Buffer.add_char buf ch
+  done;
+  Grapheme.sanitize_controls (Buffer.contents buf)
+
 let fit ~max_width text =
-  if Grapheme.display_width text <= max_width then text
-  else Grapheme.truncate_to_width ~max_width text
+  let clean = sanitize_single_line text in
+  if Grapheme.display_width clean <= max_width then clean
+  else Grapheme.truncate_to_width ~max_width clean
 
 let wrap_with_prefix ~max_width ~first_prefix ~cont_prefix text =
   let prefix_w =
@@ -70,7 +81,7 @@ let render_lines ?(tz_offset_sec = 0) ~ko ?now ?(keeper_name = "") ~max_width
   in
   let acc = ref [] in
   let push kind s = acc := { kind; text = fit ~max_width s } :: !acc in
-  let clean_keeper = String.trim (Grapheme.sanitize_controls keeper_name) in
+  let clean_keeper = String.trim (sanitize_single_line keeper_name) in
   let header_text =
     if String.equal clean_keeper "" then
       text "기억 형성 트리" "Memory formation tree"
@@ -140,7 +151,8 @@ let render_lines ?(tz_offset_sec = 0) ~ko ?now ?(keeper_name = "") ~max_width
                let _, badge = Memory_lineage.fact_status ~ko chart f in
                let claim = Memory_lineage.fact_claim_text ~ko chart f in
                let heading =
-                 Printf.sprintf "[%s · %s · %s]" (fact_tag f) badge f.memory_id
+                 Printf.sprintf "[%s · %s · %s]" (fact_tag f) badge
+                   (sanitize_single_line f.memory_id)
                in
                push Fact_before (prefix ^ heading);
                List.iter (push Fact_before)
@@ -175,7 +187,8 @@ let render_lines ?(tz_offset_sec = 0) ~ko ?now ?(keeper_name = "") ~max_width
                let _, badge = Memory_lineage.fact_status ~ko chart f in
                let claim = Memory_lineage.fact_claim_text ~ko chart f in
                let heading =
-                 Printf.sprintf "[%s · %s · %s]" (fact_tag f) badge f.memory_id
+                 Printf.sprintf "[%s · %s · %s]" (fact_tag f) badge
+                   (sanitize_single_line f.memory_id)
                in
                push (Edge edge_style) (prefix ^ heading);
                List.iter (push Fact_after)

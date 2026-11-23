@@ -88,13 +88,19 @@ let identities (ev : event) =
     (fun ids (f : fact) -> Ids.add f.memory_id ids)
     Ids.empty (ev.before @ ev.after)
 
+let non_empty_claim = function
+  | Some claim when not (String.equal (String.trim claim) "") -> Some claim
+  | Some _ | None -> None
+
 let observed_facts events =
   List.concat_map (fun (ev : event) -> ev.before @ ev.after) events
   |> List.fold_left
        (fun observed (f : fact) ->
+         let normalized = { f with claim = non_empty_claim f.claim } in
          match Observed.find_opt f.memory_id observed with
          | Some { claim = Some _; _ } -> observed
-         | None | Some { claim = None; _ } -> Observed.add f.memory_id f observed)
+         | None | Some { claim = None; _ } ->
+             Observed.add f.memory_id normalized observed)
        Observed.empty
   |> Observed.bindings
   |> List.map snd
@@ -261,11 +267,13 @@ let civil_of_unix ~tz_offset_sec ts =
   let minute = (ds mod 3600) / 60 in
   (year, month, day, hour, minute)
 
+let max_format_unix_s = 253_402_300_799.0 (* 9999-12-31T23:59:59Z *)
+
 let format_instant ?(tz_offset_sec = 0) ~now at =
-  if (not (Float.is_finite at)) || at <= 0.0 then "?"
+  if (not (Float.is_finite at)) || at <= 0.0 || at > max_format_unix_s then "?"
   else
     let y, m, d, hh, mm = civil_of_unix ~tz_offset_sec at in
-    if (not (Float.is_finite now)) || now <= 0.0 then
+    if (not (Float.is_finite now)) || now <= 0.0 || now > max_format_unix_s then
       Printf.sprintf "%04d-%02d-%02d %02d:%02d" y m d hh mm
     else
       let ny, nm, nd, _, _ = civil_of_unix ~tz_offset_sec now in
@@ -308,21 +316,20 @@ let hex_of_rgb rgb =
   Printf.sprintf "#%02x%02x%02x" (Palette.red rgb) (Palette.green rgb)
     (Palette.blue rgb)
 
-let fact_claim_text ~ko (chart : chart) (f : fact) =
+let resolved_claim (chart : chart) (f : fact) =
   let observed =
     List.find_opt
       (fun (known : fact) -> String.equal known.memory_id f.memory_id)
       chart.facts
   in
-  let claim_opt =
-    match Option.bind observed (fun known -> known.claim) with
-    | Some _ as c -> c
-    | None -> f.claim
-  in
-  match claim_opt with
-  | Some claim when not (String.equal (String.trim claim) "") -> claim
-  | Some _ | None ->
-      if ko then "? 본문 보고 안 됨" else "? Claim not reported"
+  match Option.bind observed (fun known -> non_empty_claim known.claim) with
+  | Some _ as c -> c
+  | None -> non_empty_claim f.claim
+
+let fact_claim_text ~ko (chart : chart) (f : fact) =
+  match resolved_claim chart f with
+  | Some claim -> claim
+  | None -> if ko then "? 본문 보고 안 됨" else "? Claim not reported"
 
 let fact_status ~ko (chart : chart) (f : fact) =
   let touches =
@@ -344,7 +351,7 @@ let fact_status ~ko (chart : chart) (f : fact) =
       chart.events
   in
   let last_touch = List.fold_left (fun _ x -> Some x) None touches in
-  match f.claim, last_touch with
+  match resolved_claim chart f, last_touch with
   | None, _ ->
       ("unconfirmed", if ko then "본문 보고 안 됨" else "Claim not reported")
   | Some _, Some (`After ev | `Before ev)
@@ -540,7 +547,8 @@ let transition_svg ?(tz_offset_sec = 0) ~ko ~now ~palette (chart : chart) =
           (x + 1) (y + 14) (card_h - 28) accent;
         line ~x:(x + 16) ~y:(y + 26) ~size:12 ~weight:"700"
           (Printf.sprintf "#%02d · %s" (i + 1)
-             (Grapheme.truncate_to_width ~max_width:42 f.memory_id));
+             (Grapheme.truncate_to_width ~max_width:42
+                (sanitize_single_line f.memory_id)));
         add
           "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"%s\" stroke-opacity=\"0.25\"/>\n"
           (x + 14) (y + 36) (x + 370) (y + 36) ink;
@@ -661,7 +669,7 @@ let formation_graph_json ?(tz_offset_sec = 0) ~ko ?now ?palette
             ("id", `String (Printf.sprintf "F%d" i));
             ("kind", `String "fact");
             ("tag", `String (Printf.sprintf "F%d" (i + 1)));
-            ("memoryId", `String f.memory_id);
+            ("memoryId", `String (sanitize_single_line f.memory_id));
             ("status", `String status);
             ("badge", `String badge);
             ("lines", `List (List.map (fun l -> `String l) lines));

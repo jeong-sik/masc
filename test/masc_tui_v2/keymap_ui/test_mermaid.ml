@@ -209,10 +209,16 @@ let test_refusals_and_failures () =
    | Mermaid.Parse_error _ | Mermaid.Too_wide _ ->
        Alcotest.fail "expected Unsupported for subgraph crossing");
   (* Standalone combining mark (zero-width) is rejected cleanly *)
-  match failure "graph TD\nA[\xcc\x81]" with
+  (match failure "graph TD\nA[\xcc\x81]" with
+   | Mermaid.Unsupported _ -> ()
+   | Mermaid.Parse_error _ | Mermaid.Too_wide _ ->
+       Alcotest.fail "expected Unsupported for standalone zero-width mark");
+  (* Default-ignorable tag scalar that display_width strips must also be refused *)
+  let tag_spoof = "\xe2\x98\xba\xf3\xa0\x80\xa0\xe2\x98\xba\xf3\xa0\x80\xa0" in
+  match failure ("graph TD\nA[" ^ tag_spoof ^ "]") with
   | Mermaid.Unsupported _ -> ()
   | Mermaid.Parse_error _ | Mermaid.Too_wide _ ->
-      Alcotest.fail "expected Unsupported for standalone zero-width mark"
+      Alcotest.fail "expected Unsupported for stripped default-ignorable tag scalar"
 
 let test_canvas_source_positions_and_undrawn () =
   let ok_fixtures =

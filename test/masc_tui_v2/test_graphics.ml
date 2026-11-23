@@ -153,6 +153,9 @@ let test_raw_rgb_rgba_png_and_viewport () =
   check string "rgb rejects mismatched byte count" ""
     (Graphics.replace_rgb ~image_id:32 ~placement_id:1 ~data:"xyz"
        ~pixel_width:4 ~pixel_height:2 ~rows:5);
+  check string "rgb rejects overflowing dimensions without int overflow" ""
+    (Graphics.replace_rgb ~image_id:32 ~placement_id:1 ~data:"xyz"
+       ~pixel_width:(max_int / 2) ~pixel_height:4 ~rows:5);
 
   let rgba = String.init (w * h * 4) (fun i -> Char.chr (i mod 256)) in
   let rgba_bodies =
@@ -242,6 +245,9 @@ let test_deletes_iterm2_tmux_and_protocol () =
       (String.split_on_char '\x1b' inner |> List.filteri (fun i _ -> i mod 2 = 0))
   in
   check string "tmux undoubling roundtrip" payload undoubled;
+  check string "tmux_wrapped empty returns empty" "" (Graphics.tmux_wrapped "");
+  check int "negative resource_image_id clamps to 0x10000" 0x10000
+    (Graphics.resource_image_id (-5));
 
   check bool "Kitty supported -> Kitty_protocol" true
     (Graphics.equal_graphics_protocol Graphics.Kitty_protocol
@@ -263,7 +269,12 @@ let test_deletes_iterm2_tmux_and_protocol () =
     (Some (0.00625, 0.025))
     (Graphics.image_point region ~row:4 ~column:1);
   check bool "outside region returns None" true
-    (Option.is_none (Graphics.image_point region ~row:3 ~column:1))
+    (Option.is_none (Graphics.image_point region ~row:3 ~column:1));
+  let neg_region : Graphics.image_region =
+    { top = 4; left = 5; width_cells = -10.; height_cells = -10. }
+  in
+  check bool "non-positive region dimensions return None" true
+    (Option.is_none (Graphics.image_point neg_region ~row:1 ~column:1))
 
 let () =
   run "masc_tui_v2_graphics"

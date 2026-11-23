@@ -134,6 +134,29 @@ let test_pele_unconfirmed_and_errors () =
       check bool "confirmed vs unconfirmed error distinct" true
         (not (String.equal confirmed unconfirmed));
 
+      (* Empty stderr on confirmed non-zero exit omits trailing ": " *)
+      (match
+         run_probe ~cache_dir ~ending:(Pele.Exited (Unix.WEXITED 2))
+           ~stderr:"  \n" ~stdout:"masc-pele-protocol:1\n"
+       with
+       | Error msg, _ -> check string "no trailing colon on empty stderr" "Pele exited 2" msg
+       | Ok _, _ -> fail "expected error on exit 2");
+
+      (* Huge/ANSI-laden stderr is bounded and sanitized *)
+      let huge_stderr = "\x1b[31mboom\x1b[0m\n" ^ String.make 5000 'x' in
+      (match
+         run_probe ~cache_dir ~ending:(Pele.Exited (Unix.WEXITED 1))
+           ~stderr:huge_stderr ~stdout:"masc-pele-protocol:1\n"
+       with
+       | Error msg, _ ->
+           check bool "stderr bounded under 2200 bytes" true
+             (String.length msg < 2200);
+           check bool "stderr stripped ANSI ESC" false (String.contains msg '\x1b');
+           check bool "stderr collapsed newlines" false (String.contains msg '\n');
+           check bool "stderr ends with ellipsis" true
+             (String.ends_with ~suffix:"…" msg)
+       | Ok _, _ -> fail "expected error on exit 1");
+
       let empty, _ =
         run_probe ~cache_dir ~ending:(Pele.Exited (Unix.WEXITED 0)) ~stderr:""
           ~stdout:"masc-pele-protocol:1\n"
@@ -190,17 +213,39 @@ let test_pele_process_runner_timeout_and_missing_binary () =
           | Ok _ -> fail "hanging subprocess must be killed at deadline"))
 
 let test_startup_probe_collection_and_capabilities () =
-  check bool "default env requests palette" true
-    (App.palette_requested_of_env ~getenv:(fun _ -> None));
+  let with_term term extra key =
+    if String.equal key "TERM" then term else extra key
+  in
+  let empty_env _ = None in
+  check bool "usable TERM requests palette" true
+    (App.palette_requested_of_env ~getenv:(with_term (Some "xterm-256color") empty_env));
+  check bool "missing TERM skips palette" false
+    (App.palette_requested_of_env ~getenv:empty_env);
+  check bool "empty TERM skips palette even with FORCE_COLOR" false
+    (App.palette_requested_of_env
+       ~getenv:
+         (with_term (Some "") (function
+            | "MASC_TUI_FORCE_COLOR" -> Some "1"
+            | _ -> None)));
+  check bool "TERM=dumb skips palette even with FORCE_COLOR" false
+    (App.palette_requested_of_env
+       ~getenv:
+         (with_term (Some "DUMB") (function
+            | "MASC_TUI_FORCE_COLOR" -> Some "1"
+            | _ -> None)));
   check bool "NO_COLOR skips palette query" false
-    (App.palette_requested_of_env ~getenv:(function
-       | "NO_COLOR" -> Some "1"
-       | _ -> None));
-  check bool "MASC_TUI_FORCE_COLOR=1 overrides NO_COLOR" true
-    (App.palette_requested_of_env ~getenv:(function
-       | "NO_COLOR" -> Some "1"
-       | "MASC_TUI_FORCE_COLOR" -> Some "1"
-       | _ -> None));
+    (App.palette_requested_of_env
+       ~getenv:
+         (with_term (Some "xterm-256color") (function
+            | "NO_COLOR" -> Some "1"
+            | _ -> None)));
+  check bool "MASC_TUI_FORCE_COLOR=1 overrides NO_COLOR on usable TERM" true
+    (App.palette_requested_of_env
+       ~getenv:
+         (with_term (Some "xterm-256color") (function
+            | "NO_COLOR" -> Some "1"
+            | "MASC_TUI_FORCE_COLOR" -> Some "1"
+            | _ -> None)));
 
   let safe_close fd =
     match Unix.close fd with () -> () | exception Unix.Unix_error _ -> ()
@@ -295,7 +340,18 @@ let test_startup_probe_collection_and_capabilities () =
            (Some Probe.Graphics_supported));
       match Eio.Stream.take_nonblocking queue with
       | Some (Msg.Key_event { key = Input_decoder.Char "x"; _ }) -> ()
-      | Some _ | None -> fail "expected key 'x' dispatched alongside late replies")
+      | Some _ | None -> fail "expected key 'x' dispatched alongside late replies");
+
+  (* 4. Closed/invalid fd (EBADF) returns empty decoder cleanly without raising *)
+  let rd3, wr3 = Unix.pipe () in
+  safe_close rd3;
+  safe_close wr3;
+  let pd_closed =
+    App.collect_startup_probe ~timeout_s:0.05 ~clock ~fd:rd3
+      ~palette_requested:true ()
+  in
+  check bool "closed fd yields empty observation cleanly" true
+    (Probe.equal_observation Probe.empty_observation (Probe.observation pd_closed))
 
 let () =
   run "masc_tui_v2_pele_and_probe"

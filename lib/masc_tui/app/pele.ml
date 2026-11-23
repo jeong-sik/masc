@@ -97,9 +97,11 @@ let process_runner ?(executable = "masc-pele") ?(timeout_s = default_timeout_s)
     Fun.protect ~finally:(fun () -> safe_close_fd descriptor) (fun () -> fn descriptor)
   in
   let pid =
-    with_file input [ Unix.O_RDONLY ] (fun stdin_fd ->
-        with_file output [ Unix.O_WRONLY; Unix.O_TRUNC ] (fun stdout_fd ->
-            with_file errors [ Unix.O_WRONLY; Unix.O_TRUNC ] (fun stderr_fd ->
+    with_file input [ Unix.O_RDONLY; Unix.O_CLOEXEC ] (fun stdin_fd ->
+        with_file output [ Unix.O_WRONLY; Unix.O_TRUNC; Unix.O_CLOEXEC ]
+          (fun stdout_fd ->
+            with_file errors [ Unix.O_WRONLY; Unix.O_TRUNC; Unix.O_CLOEXEC ]
+              (fun stderr_fd ->
                 Unix.create_process executable [| executable |] stdin_fd
                   stdout_fd stderr_fd)))
   in
@@ -125,7 +127,10 @@ let process_runner ?(executable = "masc-pele") ?(timeout_s = default_timeout_s)
           sleep_step (Float.min poll_s remaining);
           wait (Float.min 0.025 (poll_s *. 1.5))
         end
-    | _, status -> Exited status
+    | _, (Unix.WSTOPPED _ as status) ->
+        kill_and_reap pid;
+        Exited status
+    | _, ((Unix.WEXITED _ | Unix.WSIGNALED _) as status) -> Exited status
     | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait poll_s
   in
   try wait 0.005 with
@@ -154,7 +159,35 @@ let render ~cache_dir ?timeout_s ?clock ?raster ?runner
       (fun path -> try Sys.remove path with Sys_error _ -> ())
       !paths
   in
-  let read path = In_channel.with_open_bin path In_channel.input_all in
+  let max_stderr_bytes = 2048 in
+  let read_diagnostic path =
+    let raw, truncated =
+      In_channel.with_open_bin path (fun ch ->
+          let buf = Bytes.create (max_stderr_bytes + 1) in
+          let rec fill off =
+            if off >= Bytes.length buf then (off, true)
+            else
+              match In_channel.input ch buf off (Bytes.length buf - off) with
+              | 0 -> (off, false)
+              | n -> fill (off + n)
+          in
+          let len, trunc = fill 0 in
+          let keep = Int.min len max_stderr_bytes in
+          (Bytes.sub_string buf 0 keep, trunc || len > max_stderr_bytes))
+    in
+    let collapsed = Buffer.create (String.length raw) in
+    String.iter
+      (function
+        | '\n' | '\r' | '\t' -> Buffer.add_char collapsed ' '
+        | ch -> Buffer.add_char collapsed ch)
+      raw;
+    let clean =
+      String.trim
+        (Masc_tui_term.Grapheme.sanitize_controls (Buffer.contents collapsed))
+    in
+    if truncated then if String.equal clean "" then "…" else clean ^ "…"
+    else clean
+  in
   Fun.protect ~finally:cleanup (fun () ->
       try
         let input = temporary ".json" in
@@ -221,11 +254,12 @@ let render ~cache_dir ?timeout_s ?clock ?raster ?runner
                 else Ok png
             | 0, Unconfirmed -> Error (unconfirmed_error "")
             | code, Confirmed _ ->
-                Error
-                  (Printf.sprintf "Pele exited %d: %s" code
-                     (String.trim (read errors)))
+                let detail = read_diagnostic errors in
+                if String.equal detail "" then
+                  Error (Printf.sprintf "Pele exited %d" code)
+                else Error (Printf.sprintf "Pele exited %d: %s" code detail)
             | code, Unconfirmed ->
-                let detail = String.trim (read errors) in
+                let detail = read_diagnostic errors in
                 let detail =
                   if String.equal detail "" then Printf.sprintf "exit %d" code
                   else Printf.sprintf "exit %d: %s" code detail

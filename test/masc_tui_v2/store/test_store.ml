@@ -6946,6 +6946,56 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
   Alcotest.(check bool) "other-keeper journal append keeps alpha facts fresh" false
     (Observed.is_stale m_sse_other_journal.knowledge.keeper_memory_facts)
 
+(* Agent-core lifecycle events land in Infra activity as [CORE] rows;
+   provider streaming telemetry does not. *)
+let test_agent_core_activity_skips_only_telemetry () =
+  let deliver kind (m : Model.t) =
+    let ev : Wire_observer.agent_core_event =
+      {
+        kind;
+        agent = Some "alpha";
+        tool = None;
+        task = None;
+        turn = None;
+        tool_use_id = None;
+        at_unix = 1795252090.0;
+        run_id = None;
+        execution_id = None;
+      }
+    in
+    fst
+      (Update.step ~now:t0 m
+         (Msg.Sse_event
+            {
+              epoch = m.epoch;
+              event =
+                Msg.Sse_observer_delivery
+                  {
+                    cursor = Some 1;
+                    decoded = Wire_observer.Event (Wire_observer.Agent_core ev);
+                  };
+            }))
+  in
+  let core_rows (m : Model.t) =
+    List.length
+      (List.filter
+         (fun (row : Infra_store.activity_row) ->
+           match row.kind with
+           | Infra_store.Activity_agent_core -> true
+           | _ -> false)
+         m.infra.activity_events)
+  in
+  let m0 = Model.initial () in
+  let m1 = deliver Wire_observer.Telemetry m0 in
+  Alcotest.(check int) "telemetry adds no activity row" (core_rows m0)
+    (core_rows m1);
+  let m2 = deliver (Wire_observer.Agent_completed { elapsed_s = 3.5 }) m1 in
+  Alcotest.(check int) "agent_completed adds one [CORE] row" (core_rows m1 + 1)
+    (core_rows m2);
+  let m3 = deliver Wire_observer.Turn_started m2 in
+  Alcotest.(check int) "turn_started adds one [CORE] row" (core_rows m2 + 1)
+    (core_rows m3)
+
 let test_fetch_failure_lands_on_panel_slot () =
   let step_reply r (m : Model.t) =
     fst (Update.step ~now:t1 m (Msg.Http_reply { epoch = m.epoch; reply = r }))
@@ -7118,6 +7168,8 @@ let () =
             `Quick test_agui_chat_stream_lifecycle_15_bugs;
           Alcotest.test_case "Memory explorer: set_memory_diff_keeper, 5 fetches, modes/sort, reading, Observed isolation & SSE"
             `Quick test_memory_explorer_store_fetches_reading_and_sse;
+          Alcotest.test_case "Agent-core activity skips only telemetry" `Quick
+            test_agent_core_activity_skips_only_telemetry;
           Alcotest.test_case "A failed fetch lands on the panel slot, keeping the last value"
             `Quick test_fetch_failure_lands_on_panel_slot;
           Alcotest.test_case "A failure is asked again for new parameters or another keeper"

@@ -26,14 +26,23 @@ let sample_keeper ?(health = Wire_fleet.Keeper_healthy) name :
     runtime_id = "rt-1";
     model_id = Some "claude-opus";
     current_task_id = None;
-    context_ratio = Observed.value ~observed_at:t0 0.25;
+    context =
+      Observed.value ~observed_at:t0
+        (Wire_fleet.Context_measured
+           {
+             ratio = Some 0.25;
+             tokens = 50_000;
+             window = Some 200_000;
+             absolute_turn = Some 12;
+             measured_at_unix = None;
+           });
     total_turns = Observed.value ~observed_at:t0 12;
-    total_tokens = Observed.value ~observed_at:t0 12_000;
-    cost_24h_usd = Observed.value ~observed_at:t0 0.0;
     last_turn_at_unix = Some 1_700_000_000.0;
     active_turn = None;
     activity_sparkline_24h = [ 1.0; 2.0; 3.0 ];
   }
+
+let roster_of keepers : Wire_fleet.keepers_roster = { keepers; unreadable = [] }
 
 let sample_health ?(instance = "inst-2") () : Wire_common.server_health =
   {
@@ -138,6 +147,7 @@ let has_get_health cmds =
               ( Cmd.Get_dashboard_shell
               | Cmd.Get_keepers_roster
               | Cmd.Get_keeper_turns
+              | Cmd.Get_keeper_turn_records _
               | Cmd.Get_chat_history _
               | Cmd.Get_planning
               | Cmd.Get_verifications _
@@ -255,7 +265,7 @@ let test_epoch_stale_reply_rejection () =
       (Msg.Http_reply
          {
            epoch = old_epoch;
-           reply = Msg.Reply_keepers_roster (Ok [ sample_keeper "stale-k" ]);
+           reply = Msg.Reply_keepers_roster (Ok (roster_of [ sample_keeper "stale-k" ]));
          })
   in
   Alcotest.(check bool) "stale HTTP reply dropped" true
@@ -286,7 +296,7 @@ let test_epoch_stale_reply_rejection () =
       (Msg.Http_reply
          {
            epoch = new_epoch;
-           reply = Msg.Reply_keepers_roster (Ok [ sample_keeper "live-k" ]);
+           reply = Msg.Reply_keepers_roster (Ok (roster_of [ sample_keeper "live-k" ]));
          })
   in
   Alcotest.(check bool) "current epoch reply applied" true
@@ -302,7 +312,7 @@ let test_three_channel_separation () =
            epoch = m0.epoch;
            reply =
              Msg.Reply_keepers_roster
-               (Ok [ sample_keeper ~health:Wire_fleet.Keeper_healthy "alpha" ]);
+               (Ok (roster_of [ sample_keeper ~health:Wire_fleet.Keeper_healthy "alpha" ]));
          })
   in
   (* Inject HTTP timeout, HTTP 500, Stream_gap, and historical Agent_failed *)
@@ -645,7 +655,7 @@ let test_compact_composer_and_drafts () =
       (Msg.Http_reply
          {
            epoch = m_nokeep2.epoch;
-           reply = Msg.Reply_keepers_roster (Ok [ sample_keeper "alpha" ]);
+           reply = Msg.Reply_keepers_roster (Ok (roster_of [ sample_keeper "alpha" ]));
          })
   in
   Alcotest.(check string) "early draft migrated to alpha" "early"
@@ -1165,7 +1175,7 @@ let test_keymap_and_slash_commands () =
       (Msg.Http_reply
          {
            epoch = m_inc_closed.epoch;
-           reply = Msg.Reply_keepers_roster (Ok [ sample_keeper "alpha" ]);
+           reply = Msg.Reply_keepers_roster (Ok (roster_of [ sample_keeper "alpha" ]));
          })
   in
   let m_k4, _ = Update.step ~now:t0 m_k (Msg.Key_event (char_key "4")) in
@@ -1405,7 +1415,7 @@ let test_verifier_regressions () =
       (Msg.Http_reply
          {
            epoch = m0.epoch;
-           reply = Msg.Reply_keepers_roster (Ok [ sample_keeper "alpha" ]);
+           reply = Msg.Reply_keepers_roster (Ok (roster_of [ sample_keeper "alpha" ]));
          })
   in
   let m_hist, _ =
@@ -2012,7 +2022,7 @@ let test_round2_store_regressions () =
            epoch = m_wall.epoch;
            reply =
              Msg.Reply_keepers_roster
-               (Ok [ sample_keeper "alpha"; sample_keeper "beta" ]);
+               (Ok (roster_of [ sample_keeper "alpha"; sample_keeper "beta" ]));
          })
   in
   let has_get pred cmds =
@@ -2263,7 +2273,7 @@ let test_round2_store_regressions () =
       (Msg.Http_reply
          {
            epoch = m_empty_kcfg.epoch;
-           reply = Msg.Reply_keepers_roster (Ok [ sample_keeper "alpha" ]);
+           reply = Msg.Reply_keepers_roster (Ok (roster_of [ sample_keeper "alpha" ]));
          })
   in
   Alcotest.(check bool) "Reply_keepers_roster on Keepers+Keeper_config syncs target=alpha"
@@ -2316,7 +2326,7 @@ let test_v25_data_pipeline_and_settings_2pane () =
   let m1, _ =
     Update.step ~now:t0 m0
       (Msg.Http_reply
-         { epoch = m0.epoch; reply = Msg.Reply_keepers_roster (Ok [ k_masc ]) })
+         { epoch = m0.epoch; reply = Msg.Reply_keepers_roster (Ok (roster_of [ k_masc ])) })
   in
   let extras : Wire_fleet.keeper_roster_extras =
     {
@@ -2324,11 +2334,12 @@ let test_v25_data_pipeline_and_settings_2pane () =
       candle_balances_milli = [ ("alpha-builder", 5000) ];
       candle_summary =
         Some
-          {
-            issued_milli = "10000";
-            burned_milli = "2500";
-            circulating_milli = "7500";
-          };
+          (Wire_fleet.Candle_ready
+             {
+               issued_milli = "10000";
+               burned_milli = "2500";
+               circulating_milli = "7500";
+             });
     }
   in
   let m2, _ =
@@ -2674,7 +2685,6 @@ let test_v25_data_pipeline_and_settings_2pane () =
           tasks_todo = Observed.unreported;
           tasks_cancelled = Observed.unreported;
           goals_completed_24h = Observed.unreported;
-          prs_reviewed_24h = Observed.unreported;
           verifications_passed_24h = Observed.unreported;
           verifications_rejected_24h = Observed.unreported;
           board_posts_24h = Observed.unreported;
@@ -4085,7 +4095,7 @@ let test_nav_fix2_pulse_company_row_stepping () =
   let m1, _ =
     Update.step ~now:t0 m0
       (Msg.Http_reply
-         { epoch = m0.epoch; reply = Msg.Reply_keepers_roster (Ok ks) })
+         { epoch = m0.epoch; reply = Msg.Reply_keepers_roster (Ok (roster_of ks)) })
   in
   (* Select 3rd keeper inside org-alpha, switch to Pulse, press Down -> must land on org-beta lead *)
   let m_pulse =
@@ -4182,7 +4192,7 @@ let test_nav_fix3_runtime_efficiency_company_grouped_display_order () =
   let m1, _ =
     Update.step ~now:t0 m0
       (Msg.Http_reply
-         { epoch = m0.epoch; reply = Msg.Reply_keepers_roster (Ok ks) })
+         { epoch = m0.epoch; reply = Msg.Reply_keepers_roster (Ok (roster_of ks)) })
   in
   let m2, _ =
     Update.step ~now:t0 m1
@@ -5402,7 +5412,7 @@ let test_p1_pulse_collapsed_company_dive_and_scroll () =
   let m1, _ =
     Update.step ~now:t0 m0
       (Msg.Http_reply
-         { epoch = m0.epoch; reply = Msg.Reply_keepers_roster (Ok ks) })
+         { epoch = m0.epoch; reply = Msg.Reply_keepers_roster (Ok (roster_of ks)) })
   in
   (* Collapse org-beta in Keepers, then navigate Pulse onto org-beta *)
   let m_col =
@@ -7768,6 +7778,237 @@ let test_infra_changes_follow_the_selected_repository () =
     "a filter edit that keeps the cursor asks for nothing" []
     (activity_gets cmds_doc)
 
+(* ---------- Keepers roster, Ctrl+T Context tab and keeper-costs reads ---------- *)
+
+let sent_get req cmds =
+  List.exists
+    (function
+      | Cmd.Http_get { req = sent; _ } -> sent = req
+      | Cmd.Batch _
+      | Cmd.Http_post _
+      | Cmd.Http_put _
+      | Cmd.Http_post_stream _
+      | Cmd.Sync_streams _
+      | Cmd.Update_workspace_guard _
+      | Cmd.Voice_cmd _
+      | Cmd.Copy_clipboard _
+      | Cmd.Open_external_url _
+      | Cmd.Open_editor_escape_hatch _
+      | Cmd.Start_local_server
+      | Cmd.Restart_tui
+      | Cmd.Quit _ ->
+          false)
+    (Cmd.flatten cmds)
+
+let keeper_costs_req = Cmd.Get_keeper_costs { window_minutes = 1440 }
+
+let test_roster_keeps_unreadable_keepers_apart () =
+  let m0 = Model.initial () in
+  let roster : Wire_fleet.keepers_roster =
+    {
+      keepers = [ sample_keeper "alpha" ];
+      unreadable = [ { name = "broken"; reason = "keeper.toml: unknown field" } ];
+    }
+  in
+  let m1, _ =
+    Update.step ~now:t0 m0
+      (Msg.Http_reply
+         { epoch = m0.epoch; reply = Msg.Reply_keepers_roster (Ok roster) })
+  in
+  Alcotest.(check (list string)) "readable rows become keepers" [ "alpha" ]
+    (match Observed.to_option m1.fleet.keepers with
+    | Some ks -> List.map (fun (k : Wire_fleet.keeper_summary) -> k.name) ks
+    | None -> []);
+  Alcotest.(check (list (pair string string)))
+    "unreadable rows keep their name and reason"
+    [ ("broken", "keeper.toml: unknown field") ]
+    (List.map
+       (fun (u : Wire_fleet.unreadable_keeper) -> (u.name, u.reason))
+       m1.fleet.unreadable_keepers);
+  let m2, _ =
+    Update.step ~now:t1 m1
+      (Msg.Http_reply
+         {
+           epoch = m1.epoch;
+           reply = Msg.Reply_keepers_roster (Ok (roster_of [ sample_keeper "alpha" ]));
+         })
+  in
+  Alcotest.(check int) "the next roster replaces the unreadable rows" 0
+    (List.length m2.fleet.unreadable_keepers)
+
+let test_context_tab_reads_turn_records_and_costs () =
+  let m0 = Model.initial () in
+  let m1, _ =
+    Update.step ~now:t0 m0
+      (Msg.Http_reply
+         {
+           epoch = m0.epoch;
+           reply = Msg.Reply_keepers_roster (Ok (roster_of [ sample_keeper "alpha" ]));
+         })
+  in
+  Alcotest.(check (option string)) "the drawer addresses the selected keeper"
+    (Some "alpha") (Model.target_keeper m1);
+  let turn_records = Cmd.Get_keeper_turn_records { keeper = "alpha"; limit = 60 } in
+  Alcotest.(check string) "the request asks the server for 60 turns"
+    "/api/v1/keepers/alpha/turn-records?limit=60"
+    (Cmd.get_request_path turn_records);
+  Alcotest.(check string) "a limit above the server's 500 is clamped"
+    "/api/v1/keepers/alpha/turn-records?limit=500"
+    (Cmd.get_request_path
+       (Cmd.Get_keeper_turn_records { keeper = "alpha"; limit = 900 }));
+  let m_queue, queue_cmds =
+    Update_nav.open_overlay m1 (Nav.Queue_context Nav.Drawer_queue)
+  in
+  Alcotest.(check bool) "the Queue tab reads no turn records" false
+    (sent_get turn_records queue_cmds);
+  let m_ctx, ctx_cmds = Update_nav.cycle_sub_tab m_queue Keymap.Next in
+  Alcotest.(check bool) "Tab moves to the Context tab" true
+    (m_ctx.nav.overlay = Some (Nav.Queue_context Nav.Drawer_context));
+  Alcotest.(check bool) "the Context tab reads alpha's turn records" true
+    (sent_get turn_records ctx_cmds);
+  Alcotest.(check bool) "the Context tab reads keeper-costs" true
+    (sent_get keeper_costs_req ctx_cmds);
+  Alcotest.(check bool) "the Context tab reads alpha's compaction facts" true
+    (sent_get (Cmd.Get_keeper_memory_os_internals { keeper = "alpha" }) ctx_cmds);
+  let _, opened_cmds =
+    Update_nav.open_overlay m1 (Nav.Queue_context Nav.Drawer_context)
+  in
+  Alcotest.(check bool) "opening straight on the Context tab reads them too" true
+    (sent_get turn_records opened_cmds);
+  let records : Wire_fleet.keeper_turn_records =
+    {
+      keeper = "alpha";
+      skipped_rows = 0;
+      rows =
+        [
+          {
+            absolute_turn = 3;
+            input_tokens = Some 50_000;
+            usage_scope = Wire_fleet.Usage_per_request;
+            input_provenance = Some Wire_fleet.Input_measured_request;
+            context_window = Some 200_000;
+            provider_context_window = None;
+          };
+        ];
+    }
+  in
+  let m_ok, _ =
+    Update.step ~now:t1 m_ctx
+      (Msg.Http_reply
+         {
+           epoch = m_ctx.epoch;
+           reply =
+             Msg.Reply_keeper_turn_records { keeper = "alpha"; result = Ok records };
+         })
+  in
+  Alcotest.(check (option (list int))) "the reply fills alpha's slot" (Some [ 3 ])
+    (Option.map
+       (fun (r : Wire_fleet.keeper_turn_records) ->
+         List.map (fun (row : Wire_fleet.turn_record_row) -> row.absolute_turn) r.rows)
+       (Observed.to_option (Fleet_store.turn_records_for ~keeper:"alpha" m_ok.fleet)));
+  Alcotest.(check bool) "a fresh slot is not read again" false
+    (sent_get turn_records (View_fetches.fetches_for_current_view m_ok));
+  let m_err, _ =
+    Update.step ~now:t1 m_ctx
+      (Msg.Http_reply
+         {
+           epoch = m_ctx.epoch;
+           reply =
+             Msg.Reply_keeper_turn_records
+               {
+                 keeper = "alpha";
+                 result =
+                   Error
+                     (Msg.Http_error
+                        { status = 500; body = "boom"; api_error = None });
+               };
+         })
+  in
+  Alcotest.(check bool) "a failed read lands on alpha's slot" true
+    (match Fleet_store.turn_records_for ~keeper:"alpha" m_err.fleet with
+    | Observed.Failed _ -> true
+    | Observed.Value _ | Observed.Loading _ | Observed.Absent | Observed.Unreported ->
+        false)
+
+let test_keepers_view_reads_keeper_costs () =
+  let m0 = Model.initial () in
+  let m_k = { m0 with nav = { m0.nav with workspace = Nav.Keepers } } in
+  Alcotest.(check bool) "the Keepers table reads cost and tokens from keeper-costs"
+    true
+    (sent_get keeper_costs_req (View_fetches.fetches_for_current_view m_k))
+
+let test_context_display_keeps_estimates_and_reasons_apart () =
+  Alcotest.(check bool) "a measured ratio is a fill" true
+    (Fleet_store.context_display
+       (Wire_fleet.Context_measured
+          {
+            ratio = Some 0.42;
+            tokens = 84_000;
+            window = Some 200_000;
+            absolute_turn = None;
+            measured_at_unix = None;
+          })
+    = Fleet_store.Context_fill { ratio = 0.42; estimated = false });
+  Alcotest.(check bool) "the server's estimate is a fill marked as an estimate" true
+    (Fleet_store.context_display
+       (Wire_fleet.Context_not_measured
+          { reason = Wire_fleet.Context_input_estimate; estimated_ratio = Some 0.3 })
+    = Fleet_store.Context_fill { ratio = 0.3; estimated = true });
+  Alcotest.(check bool) "tokens without a window stay tokens" true
+    (Fleet_store.context_display
+       (Wire_fleet.Context_measured
+          {
+            ratio = None;
+            tokens = 84_000;
+            window = None;
+            absolute_turn = None;
+            measured_at_unix = None;
+          })
+    = Fleet_store.Context_tokens_only 84_000);
+  Alcotest.(check bool) "no measurement and no estimate keeps the reason" true
+    (Fleet_store.context_display
+       (Wire_fleet.Context_not_measured
+          { reason = Wire_fleet.Context_cumulative_usage; estimated_ratio = None })
+    = Fleet_store.Context_unavailable Wire_fleet.Context_cumulative_usage)
+
+let test_candle_fallback_never_makes_a_zero_ledger () =
+  let w0 = (Model.initial ()).work in
+  let ledger summary =
+    (Work_store.apply_candle_ledger_fallback ~observed_at:t0 ~summary
+       ~balances:[ ("alpha", 5000) ] w0)
+      .candle_ledger
+  in
+  Alcotest.(check (option string)) "a ready Candle yields its supply"
+    (Some "7500")
+    (Option.map
+       (fun (l : Wire_work.candle_ledger) -> l.circulating_milli)
+       (Observed.to_option
+          (ledger
+             (Some
+                (Wire_fleet.Candle_ready
+                   {
+                     issued_milli = "10000";
+                     burned_milli = "2500";
+                     circulating_milli = "7500";
+                   })))));
+  Alcotest.(check bool) "an off Candle has no ledger" true
+    (match ledger (Some Wire_fleet.Candle_off) with
+    | Observed.Absent -> true
+    | Observed.Value _ | Observed.Loading _ | Observed.Unreported | Observed.Failed _ ->
+        false);
+  Alcotest.(check bool) "a disabled Candle is a failed read with its reason" true
+    (match ledger (Some (Wire_fleet.Candle_disabled { reason = "candle.toml unreadable" })) with
+    | Observed.Failed { reason; retryable = false; _ } ->
+        String.equal reason "Candle disabled: candle.toml unreadable"
+    | Observed.Failed { retryable = true; _ }
+    | Observed.Value _ | Observed.Loading _ | Observed.Absent | Observed.Unreported ->
+        false);
+  Alcotest.(check bool) "no summary yet is unreported" true
+    (match ledger None with
+    | Observed.Unreported -> true
+    | Observed.Value _ | Observed.Loading _ | Observed.Absent | Observed.Failed _ ->
+        false)
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -7869,5 +8110,18 @@ let () =
             `Quick test_wiki_index_reply_requests_selected_page;
           Alcotest.test_case "Infra changes follow the selected repository"
             `Quick test_infra_changes_follow_the_selected_repository;
+        ] );
+      ( "keeper_context_and_cost"
+      , [
+          Alcotest.test_case "A roster keeps unreadable keepers apart from the rest"
+            `Quick test_roster_keeps_unreadable_keepers_apart;
+          Alcotest.test_case "The Ctrl+T Context tab reads turn records, costs and compaction"
+            `Quick test_context_tab_reads_turn_records_and_costs;
+          Alcotest.test_case "The Keepers view reads keeper-costs"
+            `Quick test_keepers_view_reads_keeper_costs;
+          Alcotest.test_case "Context display keeps estimates and reasons apart"
+            `Quick test_context_display_keeps_estimates_and_reasons_apart;
+          Alcotest.test_case "The Candle fallback never makes a 0/0/0 ledger"
+            `Quick test_candle_fallback_never_makes_a_zero_ledger;
         ] );
     ]

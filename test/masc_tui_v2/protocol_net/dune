@@ -42,12 +42,14 @@
   masc
   masc.agent_core
   masc.board_handlers
+  masc.dated_jsonl
   masc.fs_compat
   ;; The chat submit case parses the TUI body with the server's own parser;
   ;; its interrupt target names an operation id from these two libraries.
   masc.keeper_chat_operations
   masc.keeper_operation_identity
   masc.masc_board
+  masc.masc_candle
   masc.masc_goal
   masc.masc_schedule
   masc.masc_tool_blob_store

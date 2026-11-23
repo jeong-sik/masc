@@ -115,7 +115,7 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
 | `Ctrl+G` | `/keeper [name]` | Keeper/Chat quick switcher |
 | `Ctrl+L` | `/model [lane]` | Runtime/Model switcher |
 | `,` (unfocused), `Ctrl+,`, `Alt+,`, `F10` | `/config [query]` | 2-pane, 7-category **Settings** overlay |
-| `Ctrl+T` | `/queue`, `/context` | 3-tab **Queue / Context / Schedules** drawer |
+| `Ctrl+T` | `/queue`, `/context` | 3-tab **Queue / Context / Schedules** drawer; the Context tab shows the selected Keeper's context fill per turn over its last 60 turns, and its latest compaction and history reset |
 | `I` (unfocused), `Alt+I` | `/incidents` | Historical Incidents drawer (`d` dismiss, `c`/`D` clear all, `Space` show dismissed, `o`/`Enter` dive) |
 | `J` (unfocused), `Alt+J` | `/jump` | Teleport to the highest-priority blocked item (Ask, Tool Approval, Goal Confirmation, or Quarantine) |
 | `?` (unfocused) | `/help` | Dynamic keymap help overlay |
@@ -314,6 +314,16 @@ Three fleet modes (`[` / `]` or `←` / `→`):
    or failing at the top.
 3. **24h Wall**: fleet-wide 24-hour activity sparkline wall with turns and cost
    columns.
+
+The **Ctx** column shows the context fill the server measured for the Keeper's
+newest turn. `~42%` marks the server's estimate. A short word in its place
+(`대화 누적` / `cumulative`, `기록 없음` / `no record`, ...) says why the turn has
+no measured fill. Cost and tokens come from `keeper-costs` over the window
+the label names (`24h`).
+
+A Keeper whose TOML did not read shows as a red `✕ <name>: <error>` line under
+the list instead of a row. Fix the TOML; the Keeper returns as a row on the
+next roster refresh.
 
 Press `n` on **Keepers** to open Settings targeted at creating a new Keeper.
 Press `Enter` on any Keeper (or `c` to jump directly into Chat input) to open

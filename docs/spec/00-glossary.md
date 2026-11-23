@@ -63,21 +63,6 @@ status: reference
   → [Keeper_turn_driver.official_client_observation](../../lib/keeper/keeper_turn_driver.mli) ·
   [Runtime_observation](../../lib/runtime/runtime_observation.ml)
 
-**Clients (TUI 클라이언트 표)**
-: `GET /api/v1/dashboard/clients` 한 읽기를 그리는 TUI 표. 한 워크스페이스에 붙은
-  모두를 한 번에 보여준다 — directory agent, state-backed session, runtime fiber.
-  행의 `cr_status`는 닫힌 `client_status` 넷(`Client_active`·`Client_busy`·
-  `Client_listening`·`Client_inactive`)이고, `cr_keeper_name`은 Keeper에 묶인 행만
-  이름을 갖는다(비-Keeper MCP 클라이언트는 `None` — 이 표가 보여주려는 행이다).
-  - **ACTING FOR** 열: 어떤 클라이언트가 **제 이름으로** Keeper의 세션에 묶였을 때
-    그 Keeper를 적는다. Keeper 자신의 세션은 Keeper 이름으로 접수되므로 그 행에서는
-    이름을 되풀이하지 않는다(`client_acting_for`가 `keeper_name = name`이면 `None`).
-    그런 행이 하나도 없으면 열 자체를 그리지 않는다(`clients_act_for_others`) — 빈 열이
-    행 끝 시계를 잘라 먹기 때문이다. **그래서 열이 안 보이는 것은 결함이 아니라 정보이다
-    — 남을 대신하는 클라이언트가 없다는 뜻이다.**
-  → [Tui_decode.client_row](../../lib/tui_decode.mli),
-  [Masc_tui_types.client_acting_for](../../bin/masc_tui_types.ml)
-
 **MCP**
 : Model Context Protocol의 약어. MASC는 양쪽으로 쓴다. 자기 도구와 협업 상태를
   MCP 서버로 내보내고(`masc_*` 도구), lane add-on worker 에는 MCP 클라이언트
@@ -144,8 +129,6 @@ status: reference
     깃발(U+1F3F4) 뒤에 tag 문자로 붙인 지역 깃발. 한자 뒤의 variation selector는 등록된
     이체자인지 이 경계가 가릴 수 없어 이스케이프한다. 행 타입이 비공개
     (`type line = private`)라 화면의 모든 행은 이 경계를 우회할 수 없다(#38478).
-  → [Approval_detail](../../bin/masc_tui_approval_detail.mli),
-  [Tui_decode](../../lib/tui_decode.mli)
 
 **Card (TUI 카드)**
 : TUI 화면이 여러 독립된 읽을거리를 나란히 보여 줄 때, 읽을거리 하나를 모서리가 둥근 상자에 담는
@@ -167,35 +150,6 @@ status: reference
 **Surface**
 : 같은 MASC 상태에 접근하고 관찰하는 사용자 표면. TUI, MCP, Dashboard처럼 서로 다른
   입구를 가리키며, 각 표면은 독립 상태를 소유하지 않는다.
-
-**Home (TUI Home 화면)**
-: TUI 최상단 대시보드(Overview) 탭에서 제공되는 운영자 중심의 의사결정·대화 진입 화면.
-  전체 통계와 차트 나열 위주의 집계형 구성을 대체하여, 사람 운영자의 직접 판단과 처리가 필요한
-  개별 의사결정(Decisions) 카드, 마지막 방문 대화 상대 재개(Continue), Keeper 선택/생성,
-  간결한 작업 흐름 요약을 제공한다(#39817·#40137·#40152).
-  - 요청 식별과 탐색(`home_request`·`home_action`): 사람이 판단해야 하는 대기 요청은
-    `home_request` 닫힌 합타입 5개(`Home_held_call`·`Home_gate_request`·`Home_operator_request`·
-    `Home_question`·`Home_goal_confirmation`)로 식별한다. 탐색 액션 대상
-    `home_action` 7개(`Home_approvals`·`Home_request`·`Home_agenda`·`Home_resume`·`Home_read_last`·
-    `Home_choose_keeper`·`Home_create_keeper`)를 `j`/`k` 또는 방향키로 선택하고 `Enter`로
-    원천 화면(Approvals·Agenda·Chat)을 열며, `Enter` 진입은 순수 탐색일 뿐 의사결정(승인/거절)을
-    제출하지 않는다(`open_approvals`, `bin/masc_tui_home.mli`).
-  - 복귀와 선택 보존: 열람 화면에서 `Esc`를 누르면 Home으로 복귀하며, 직전 선택 항목(`home_selected`)과
-    스크롤 윈도우(`home_decision_scroll`)를 그대로 유지한다. 새로운 최상단 탐색이 발생하면 직전 복귀
-    컨텍스트는 정리된다.
-  - 인간 개입 분리: 자동 게이트 작업(`approval_item_needs_person = false`)이나 일반 인시던트는
-    의사결정 목록에서 제외되어 사람 운영자의 의사결정 대기 목록을 침범하지 않는다.
-  - 실패 정직성과 결손 보존: 특정 출처의 읽기 실패나 알 수 없는 상태는 "대기 중인 의사결정 0건"으로
-    왜곡하지 않고 실패/알 수 없음 상태를 화면에 명시한다. 성공한 출처의 요청 행은 정상 유지된다.
-  - 대화 지속과 수신 영수증(`home_chat_receipt`): 마지막 방문 대화 상대를 `[tui].last_chat_keeper`에
-    저장하고 Continue 카드로 연결한다. 수신 상태는 `home_chat_receipt` 5개(`No_chat_receipt`·
-    `Recorded_chat`·`Session_chat`·`Unconfirmed_chat`·`Unreadable_chat_receipt`)로 투영하며,
-    고정 시작 설정(`opening = "keeper"`)은 마지막 대화 기록으로 보지 않는다. 작성 중인 메시지는
-    Keeper별 드래프트 저장소에 보존된다.
-  - 뷰포트 적응: 터미널 높이가 짧은 화면에서는 의사결정과 Continue 행이 부가 컨텍스트(Health/완료 작업)보다
-    화면 예산을 우선 할당받으며, 160열 이상의 넓은 터미널에서도 Recent 패널은 기본 닫힘 상태를
-    유지한다(`Ctrl-L`로 명시적 열기).
-  → [docs/TUI-GUIDE.md](../TUI-GUIDE.md)
 
 **Music Library (/music, 음악 라이브러리)**
 : TUI에서 프레이즈·어레인지먼트·녹음 테이크를 골라 열고 고치는 음악 작업 표면. Dashboard **s**
@@ -559,15 +513,6 @@ status: reference
   [Server_routes_http_runtime_health_fleet](../../lib/server/server_routes_http_runtime_health_fleet.mli),
   [Pause_status_backend](../../lib/pause_status_backend.mli)
 
-**Usage**
-: provider quota 창·보고 이력은 scope별로, 워크스페이스 Candle 공급 상태는
-  워크스페이스 단위로, Keeper 토큰·비용은 기록 여부와 함께 보여주는 TUI 화면.
-  워크스페이스 공급과 선택한 Keeper의 개인 잔액은 서로 다른 값이며, 개인 잔액은
-  Keeper Info에서 본다. `/cost`는 이 화면으로 이동한다. 값이 보고되지 않은 날이나
-  Keeper의 비용을 0으로 추정하지 않는다. Keeper 상태와 작업 목록은 각각 Keepers와
-  Work에서 본다.
-  → [Masc_tui_render](../../bin/masc_tui_render.ml)
-
 **Attention (Dashboard)**
 : 운영자가 처리해야 하는 사건을 요약한다. 자세한 Keeper 상태는 Keepers에서,
   Task·승인·질문은 Work에서 확인한다. Dashboard는 같은 행을 다시 나열하지 않는다.
@@ -577,8 +522,7 @@ status: reference
   카탈로그(`/api/v1/runtime/resolved`)는 런타임마다 `quota_exhausted`·`quota_resets_at`·
   `quota_scope` 를 싣는다. Usage는 서로 다른 scope를 합치지 않고, provider가 보고한
   사용률·관측 시각·재개 시각을 그대로 표시한다. 보고가 없으면 사용률을 추정하지 않는다.
-  → [Runtime_quota_window](../../lib/runtime/runtime_quota_window.ml),
-  [Masc_tui_overview_providers](../../bin/masc_tui_overview_providers.ml)
+  → [Runtime_quota_window](../../lib/runtime/runtime_quota_window.ml)
 
 **Runtime Rate Limit (런타임 속도 제한 관측)**
 : 한 런타임 후보가 받은 429 또는 제공자 속도 제한을 그 후보의 프로세스 로컬 셀에
@@ -682,7 +626,7 @@ status: reference
   예다. 어느 사건이 어느 slice로 가는지는 `Dashboard_event_slices`의 한 표가 정하고,
   서버 라우팅과 터미널 분류가 그 표를 함께 읽는다. Keeper가 한 일(`action`)과 반대편이다.
   → [Dashboard_event_slices](../../lib/dashboard_event_slices.mli),
-  [Activity scope](../../bin/masc_tui_acting.ml), [TUI 안내](../TUI-GUIDE.md)
+  [TUI 안내](../TUI-GUIDE.md)
 
 **SearXNG**
 : 웹 검색 제공자 가운데 하나. 런타임 `web_search` 절이 어디를 검색할지와 순서를
@@ -721,21 +665,18 @@ status: reference
   [Keeper_agent_prompt_metrics](../../lib/keeper/keeper_agent_prompt_metrics.mli)
 
 **Harness (하네스)**
-: 이 저장소에서 서로 다른 넷을 가리킨다. 문장에 어느 것인지 함께 적는다.
-  (1) TUI Harness 화면: 평가자 판정을 읽는 TUI 표면. 코드의 화면 이름은 `Harness`지만
-  키 표가 운영자에게 보이는 이름은 "Planning / Task Verdicts"이고
-  ([`masc_tui_keys.ml`](../../bin/masc_tui_keys.ml)의 판 이름 표), 상세에서 `y`(agree)·`x`(overrule)로 그 판정에 답한다
-  (`render_harness_detail`). (2) Eval Harness: Keeper 에이전트의 시나리오 기반 행동
+: 이 저장소에서 서로 다른 셋을 가리킨다. 문장에 어느 것인지 함께 적는다.
+  (1) Eval Harness: Keeper 에이전트의 시나리오 기반 행동
   평가(`lib/eval_harness.mli`). scenario·grader·metric 타입과 runner·summary 를
   정의하고 eval CLI 와 dashboard 가 소비한다. Grader는 둘로 나뉜다 —
   `Deterministic`은 필드(result·tool_name·error)에 대한 Exact/Contains/Regex/NotContains
   매칭으로 지연 0이고, `ModelBased`는 LLM에 rubric과 결과를 제출해 0.0~1.0 점수를
-  산출하며 비용이 든다. (3) Lab Safety Harness: Dashboard Lab
+  산출하며 비용이 든다. (2) Lab Safety Harness: Dashboard Lab
   표면의 안전 판독(`#lab?section=harness`,
   `lib/dashboard/dashboard_harness_health.ml`) — 평가자 보정 통계와 최근 runtime 안전
-  신호를 한 화면에 모은다. (4) Harness First: "측정 없이 AI 에이전트 코드를 진행하지
+  신호를 한 화면에 모은다. (3) Harness First: "측정 없이 AI 에이전트 코드를 진행하지
   않는다"는 프로젝트 원칙. RFC 들이 이 이름으로 인용한다.
-  → [masc_tui_keys](../../bin/masc_tui_keys.ml), [Eval_harness](../../lib/eval_harness.mli),
+  → [Eval_harness](../../lib/eval_harness.mli),
   [Dashboard_harness_health](../../lib/dashboard/dashboard_harness_health.ml)
 
 **Exit Reason (세션 종료 사유)**
@@ -756,7 +697,7 @@ status: reference
   세션이 끝난 사유는 이 줄에만 남는다. **Terminal Reason**과 다른 축이다 —
   Terminal Reason은 끝난 Keeper turn의 영수증 필드이고, Exit Reason은 TUI 프로세스
   세션이 끝난 까닭이다.
-  → [Masc_tui_exit_reason](../../bin/masc_tui_exit_reason.mli), [TUI 안내](../TUI-GUIDE.md)
+  → [Exit_reason](../../lib/masc_tui/core/exit_reason.mli), [TUI 안내](../TUI-GUIDE.md)
 
 **Workspace**
 : 에이전트와 협업 상태가 공유되는 조율 범위.
@@ -1009,7 +950,7 @@ status: reference
       낡은 식별자로 덮어쓰지 않는다.
     - 서버가 새로 추가한 알 수 없는 카테고리는 떨어뜨리지 않고 `Unreadable_row`로 보존·계수하여
       격리 수가 화면에서 축소 왜곡되지 않게 한다.
-  → [Keeper_board_attention_candidate](../../lib/keeper/keeper_board_attention_candidate.mli) · [Keeper_board_attention_quarantine_command](../../lib/keeper/keeper_board_attention_quarantine_command.mli) · [Masc_tui_board_quarantine](../../bin/masc_tui_board_quarantine.mli)
+  → [Keeper_board_attention_candidate](../../lib/keeper/keeper_board_attention_candidate.mli) · [Keeper_board_attention_quarantine_command](../../lib/keeper/keeper_board_attention_quarantine_command.mli)
 
 **Jev (TypeSafe AI System One 판정 어댑터)**
 : Board Attention Candidate의 관련성을 비자기회귀 System One 1회 요청으로 신속 판정하는
@@ -1071,8 +1012,7 @@ status: reference
   그 이름을 서버가 쓴 그대로 그린다(`Masc_tui_fleet_line.blocker_text`) — 더 새 서버의 사유도
   사유다. 아는 이름은 아래 counts 줄이 같은 Keeper 무리에 쓰는 말로 그린다(예: "autoboot
   keepers paused"). 이 줄은 까닭만 말하고 수는 아래 줄이 나른다.
-  → [Keeper_fleet_blocker](../../lib/keeper/keeper_fleet_blocker.mli),
-  [Masc_tui_fleet_line](../../bin/masc_tui_fleet_line.mli)
+  → [Keeper_fleet_blocker](../../lib/keeper/keeper_fleet_blocker.mli)
 
 **Terminal Reason**
 : 끝난 Keeper turn의 이유를 담은 영수증 필드(`terminal_reason_code`).
@@ -1138,13 +1078,6 @@ status: reference
   이벤트(`Ag_ui.Run_error`, code는 failure kind)로 투영된다.
   → [Keeper_chat_event_log](../../lib/keeper/keeper_chat_event_log.mli) ·
   [Server_routes_http_keeper_stream](../../lib/server/server_routes_http_keeper_stream.mli)
-
-**Chat Operation Reconciliation (채팅 오퍼레이션 정산)**
-: Keeper 채팅 오퍼레이션의 이벤트 스트림이 서버 재시작이나 연결 단절 등으로 종단 이벤트(`terminal event`) 없이 종료되었을 때, 듀러블 오퍼레이션 상태(`Keeper_chat_operation.state`)와 저널 엔드포인트(`read_whole_journal`)를 대조하여 화면 표시와 진행 행을 정합화하는 계약(#41680, #41705, #41730). 오퍼레이션이 이미 종료(`succeeded`·`failed`·`cancelled`)되었으나 스트림이 닫히지 않아 라이브 진행 행(`progress row`)에 과거 실행이 멈춘 채로 잔류하는 현상을 방지하며(`reconcile_operation`), 가짜 응답이나 합성 저널 이벤트를 임의로 조작하지 않고(`without fabricating journal events or a reply`) 스트림 도중 보존된 부분 텍스트(`partial text`), 도구 호출, 스킬 전달 영수증, 이전 연속 턴 이력을 그대로 보존한다. 저널 재조회 시 오퍼레이션 상태를 먼저 관측하고 저널을 읽은 뒤, 큐/실행 상태가 전진했는지 재확인(`read_with_operation_state`)하여 재조회 실패 시에도 첫 성공 저널을 유지하는 범위 내에서 최신 오퍼레이션 상태와의 정합성을 보장한다. 아울러 서버 재시작으로 중단된 세그먼트를 정산할 때(`record_restart_terminal`)는 세그먼트 오류 표식으로 `Restart_settlement settlement`(`Keeper_chat_event_log.Restart_settlement`)를 부여하여 이전 세그먼트의 과거 에러가 새 재시작 정산을 가로채지 못하게 방지하며, 재시작 종단 전달 재시도 시 재연결 커서가 저널보다 앞서더라도 중복 재생 없이 안정적으로 중단 종단을 완결한다(#41705, #41730).
-  → [Masc_tui_keeper_chat_log](../../bin/masc_tui_keeper_chat_log.mli) ·
-  [Masc_tui_keeper_chat_transcript](../../bin/masc_tui_keeper_chat_transcript.mli) ·
-  [Keeper_chat_event_log](../../lib/keeper/keeper_chat_event_log.mli) ·
-  [Keeper_chat_operation_store](../../lib/keeper_chat_operations/keeper_chat_operation_store.mli)
 
 **Keeper Direct Native Call (키퍼 직접 네이티브 호출)**
 : 한 직접 Keeper 채팅 오퍼레이션(`Keeper_chat_operation`) 안에서 실행되는 단일
@@ -1249,8 +1182,7 @@ status: reference
   말하며, Recorded Call Outcome(MASC 원장의 기록)·Tool Call Outcome(wire 투영)과 다른
   층이다. TUI 채팅의 라이브 종료 이벤트(`Native_tool_ended`)는 완료 키가 없으면
   `completion_unrecorded`로 접고, 완료 키가 둘 이상이면 `Undecodable`로 거절한다.
-  → [Runtime_native_tools](../../lib/runtime/runtime_native_tools.mli) ·
-  [Masc_tui_keeper_chat_live](../../bin/masc_tui_keeper_chat_live.ml)
+  → [Runtime_native_tools](../../lib/runtime/runtime_native_tools.mli)
 
 **Authored Whitespace Preservation (작성 공백 보존)**
 : 운영자 대면 채팅, Board 게시글 및 댓글, 커넥터(Slack, Discord), 위임(delegation)
@@ -1272,8 +1204,7 @@ status: reference
   메시지 본문의 가독성을 극대화하고, 단축키(`Ctrl-F`) 입력을 통해 간이 시계(`Origin_inline`)
   또는 전체 헤더 시계(`Origin_row`) 메타데이터를 동적으로 복원·토글한다
   (`Origin_bare` → `Origin_inline` → `Origin_row` → `Origin_bare`).
-  → [Masc_tui_message_layout](../../bin/masc_tui_message_layout.mli) ·
-  [Tui-chat-design](../../.agents/skills/tui-chat-design/SKILL.md)
+  → [Tui-chat-design](../../.agents/skills/tui-chat-design/SKILL.md)
 
 **Speaker Authority (화자 권한)**
 : Keeper 대화 turn을 연 발화자(human 또는 agent)의 권한 분류. 메시지 내용(content)에서
@@ -1288,23 +1219,6 @@ status: reference
   등록된 Keeper, 외부 화자를 안전하게 분리한다.
   → [Keeper_chat_store](../../lib/keeper/keeper_chat_store.mli),
   [Keeper_counterpart_observation](../../lib/keeper/keeper_counterpart_observation.mli)
-
-**Turn Row Source (턴 행 출처)**
-: 채팅 transcript가 한 turn의 행을 그리는 출처. 코드의 타입 이름이 아니라 이 문서가 쓰는
-  라벨이다. 한 turn의 행은
-  한 번에 한 출처에서만 나온다. 넷이다 — `live`(이 pane이 연 요청의 SSE stream),
-  `observed`(이 pane이 열지 않았거나, 열었다가 stream을 잃은 turn: operation journal을
-  읽어 따라간다), `settled`(stream이나 journal이 끝을 전한 held log), `committed only`(그
-  turn을 대신하는 log가 없어 transcript page의 행을 그대로 그린다 — log 없음 · reply 없이
-  끝난 취소 turn · 끝날 수 없게 된 Working log). log가 그 turn을 대신하면
-  (`turn_log_holds_the_turn`: log가 committed이고 stream이 실패를 전했거나 기록된 reply와
-  함께 끝났을 때) 그 log가 스스로 그리는 committed 행은 timeline에서 빠지고
-  (`rows_the_logs_do_not_draw`), 끝날 수 없게 된 Working log(journal을 못 읽거나
-  reply·failure가 기록됨)는 observed 집합에서 빠져 committed 행이 그 turn을 대신한다.
-  `live`는 `log_projection ~committed:false`, `observed`는 `held_projection
-  ~committed:false`, `settled`는 `held_projection ~committed:true`로 그린다.
-  → [Masc_tui_types](../../bin/masc_tui_types.ml),
-  [Masc_tui_render_chat](../../bin/masc_tui_render_chat.ml)
 
 **Chat Queue (TUI 채팅 큐 / 대기 입력 가시성)**
 : TUI 채팅 화면에서 사용자가 제출한 입력 메시지가 실제 Keeper 턴(turn) 시작에 이르기까지의
@@ -1330,45 +1244,7 @@ status: reference
   - 검증과 증거: OCaml 생애주기 테스트(`test/test_tui_chat_queue_wiring.ml`,
     `test/test_tui_chat_activity.ml`)가 재연결 불확실성·Keeper 이동 후 복귀 계약을
     다룬다.
-  → [Masc_tui_types](../../bin/masc_tui_types.ml) ·
-  [docs/TUI-GUIDE.md](../TUI-GUIDE.md)
-
-**Keeper Call Association (Keeper 호출 결합)**
-: TUI 채팅 transcript의 도구 호출 행을 영속 호출 원장 스냅숏에 연결해 내리는 표시층 판정
-  (`Masc_tui_keeper_call_evidence.keeper_call_association` — 닫힌 여덟 값, #42320). 행은 실행
-  신원(`execution_id`)만 갖고, 그 실행이 원장에 남았는지·남았다면 어느 레코드인지는 로그 읽기
-  상태와 스냅숏이 본 범위로 결정되므로, 행의 결과 표시는 이 판정을 통해서만 원장 근거에
-  묶인다. `resolve`가 판정하고 `bin/masc_tui_render_chat.ml`의 `keeper_call_association`이
-  채팅 행을 그릴 때 소비한다. 로그 상태와 실행 결합을 한 값에 섞지 않게 나눈다 —
-  `Call_log_not_loaded`(그 Keeper의 로그를 아직 읽지 않음), `Call_log_loading`(첫 읽기가 진행
-  중. 새로고침은 마지막 스냅숏을 유지하므로 loading이 되지 않는다), `Call_log_unavailable`
-  (읽기가 오류로 끝남), `Call_execution_unrecorded`(행이 execution_id를 갖지 않는다 — 조인 키
-  자체가 없음), `Call_execution_exact`(정확히 한 레코드가 매칭), `Call_execution_ambiguous`
-  (둘 이상 — 중복 실행 신원이라 영수증 하나를 고를 수 없음), `Call_execution_missing`(없음이
-  증명됨 — 스냅숏 건강이 ok이거나 비어 있음이 확인된 로그라 로그 완전성이 확인된 상태의
-  없음), `Call_execution_coverage_gap`(없음이 미증명 — stale·coverage gap·모르는 건강 값,
-  또는 다른 Keeper 이름으로 걸러진 행 뒤에 있을 수 있는 없음). missing과 coverage_gap의
-  구분이 이 항목의 원칙이다: 완전함이 확인된 로그의 빈 결과만 부재라 말하고, 불완전한 로그의
-  빈 결과는 "못 봤다"고 말한다. Tool Call Outcome·Execution Disposition이 호출의 실행을,
-  Recorded Call Outcome이 원장이 남긴 기록을 말할 때, 이 판정은 표시층이 지금 이 행을 어느
-  기록에 묶을 수 있는지를 말한다 — 기록이 있어도 행 결과를 대체하지 않는다(`result_state`:
-  `Never_returned` 행도 원장에 기록된 출력이 있으면 "in call log"로 그린다. durable 실패는
-  Exact의 `Recorded_failed`·`Failed` disposition뿐이다).
-  → [Masc_tui_keeper_call_evidence](../../bin/masc_tui_keeper_call_evidence.mli) ·
-  [Masc_tui_render_chat](../../bin/masc_tui_render_chat.ml)
-
-**Fold (접기)**
-: TUI가 넘치는 내용을 줄여 그리는 두 가지 방식. 코드의 타입 이름이 아니라 이 문서와
-  [TUI 안내](../TUI-GUIDE.md)가 쓰는 라벨이다. (A) **블록 접기** — 한 블록을 한 줄로
-  접어 감추는 표시 상태. 추론 블록은 `Ctrl-R`로 숨김·접힘·전체를 돈다. 접힌 도구 행은
-  결과 수를 그대로 지니고(`Tools 4 · read_file 2 · … · 4 details folded`), 펼친 도구
-  fold도 operational kind(`Skill`·`Keeper`·`Fusion`)를 지닌다. (B) **셀 글자 접기** —
-  셀 글자가 열 폭보다 넓을 때 어느 쪽이 양보하는지(`Table.fold`). `Fold_middle`은 양끝을
-  남긴다 — 식별자를 머리에서 자르면 다른 식별자로 읽히고, 수를 어느 끝에서 자르면 틀린
-  수가 되기 때문이다. `Fold_tail`은 머리를 남긴다 — 문장을 읽는 방식이다. 기본값은
-  `Fold_middle`이고, 문장을 담은 열은 `Fold_tail`을 쓴다.
-  → [Masc_tui_table](../../bin/masc_tui_table.ml),
-  [Masc_tui_message_layout](../../bin/masc_tui_message_layout.ml)
+  → [docs/TUI-GUIDE.md](../TUI-GUIDE.md)
 
 **Checkpoint Load**
 : 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
@@ -1400,7 +1276,6 @@ status: reference
   task id를 나르므로, Activity는 run의 wire id를 나르는 event에서만 필드 이름을
   "Agent run ID"로 적고 그 밖에서는 "Task ID"로 적는다. 한 필드가 두 개념을 나르는
   자리라, run의 wire id를 task로 읽으면 `evt-…`가 행의 detail로 그대로 찍힌다.
-  → [Observer event](../../bin/masc_tui_observer.mli), [Activity 라벨](../../bin/masc_tui_acting.ml)
 
 **Runtime Attempt**
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도. 코드 일부는 같은 것을
@@ -1622,7 +1497,6 @@ status: reference
     provider가 보고한 USD, Candle은 Goal 완료 보상, Usage Scope는 토큰 수의 범위다.
   → [Keeper_cost_coverage](../../lib/keeper_cost_coverage/keeper_cost_coverage.mli) ·
   [Keeper_turn_spend.cost_coverage](../../lib/keeper/keeper_turn_spend.mli) ·
-  [keeper_cost_summary](../../lib/tui_decode.mli) ·
   [keeper-cost-coverage.ts](../../dashboard/src/lib/keeper-cost-coverage.ts)
 
 **Provider Usage Window (제공자 사용량 창)**
@@ -1884,7 +1758,6 @@ status: reference
   - **DOS 활동 기록**: 최근 DOS Keeper 활동이 Play room 대화 아래, 배정된
     room 열이나 좁은 터미널 스트립 안에 표시된다(#41789).
   → [Play_room](../../lib/play/play_room.mli) ·
-  [Masc_tui_play_room](../../bin/masc_tui_play_room.mli) ·
   [Play_seat](../../lib/play/play_seat.mli) ·
   [PLAY-ROOM guide](../guides/PLAY-ROOM.md)
 
@@ -1977,19 +1850,6 @@ status: reference
   여부를 적고, 표는 필수 lane 둘(`Board_attention`·`Hitl_auto_judge`)을 먼저
   그린다. 고른 lane의 상세 맨 아래 두 줄(Output meaning·Evidence)은
   `Tui_decode.standalone_lane_answer`가 lane마다 따로 적는다.
-  → [tui_decode.mli](../../lib/tui_decode.mli)
-
-**Keeper Health Reading (Keeper 상태 표시)**
-: Keepers 명단이 한 Keeper의 상태를 읽는 닫힌 네 값(`Tui_decode.keeper_health_reading`).
-  `Health_running`(Phase Running이고 turn이 하나 이상 기록됨)·`Health_idle`(Phase
-  Running, 아직 turn 없음)·`Health_failing`(Phase Failing — keepalive는 turn을 계속
-  돌리지만 그 turn들이 실패한다)·`Health_offline`(keepalive가 돌지 않아 turn을 받지
-  못함). 좁은 칸은 글자 대신 mark 하나로 그린다 — `●` healthy·`!` failing·`·` idle·
-  `×` offline, 그리고 사람이 멈춘 `○` paused와 명단을 읽지 못한 `-` unread. mark는
-  health label 문자열이 아니라 이 variant를 match해 고르므로, 새 health 어휘가
-  생기면 조용히 healthy로 읽히는 대신 컴파일 오류가 난다.
-  → [masc_tui_keeper_mark.mli](../../bin/masc_tui_keeper_mark.mli),
-  [tui_decode.mli](../../lib/tui_decode.mli)
 
 **Reasoning Effort (추론 강도)**
 : OpenAI 호환 wire가 싣는 추론 강도의 정규 typed 값. `Reasoning_effort.t`가
@@ -2337,8 +2197,7 @@ status: reference
     때만 곧바로 `unchanged`로 답할 수 있다. `Running`은 지금 프레임이 기계를 바꾸는 중이라는
     뜻이라, 마지막 표식이 `since`와 같아도 기계 잠금을 잡고 끝난 화면을 읽는다.
   - 이름 경계: 여기의 `Running`은 기계가 도는 중이라는 게시 상태이고, Schedule의 `Running`
-    상태와 다른 값이다. 라우트 이름의 `live`도 Turn Row Source의 `live`(이 pane이 연 요청의
-    SSE stream)와 다른 말이다.
+    상태와 다른 값이다.
   → [Machine_live_publication](../../lib/machine_live_publication/machine_live_publication.mli),
   [Msx_lane](../../lib/msx_lane/msx_lane.mli), [Dos_lane](../../lib/dos_lane/dos_lane.mli),
   [lane-addons 라우트](../../lib/server/server_routes_http_routes_lane_addons.mli)
@@ -2358,9 +2217,7 @@ status: reference
   masc-tui 의 DOS 관전 화면이 이 필드를 오른쪽 고정폭 목록으로 그린다 — 터미널이
   충분히 넓고 목록이 비어 있지 않을 때만, 그림은 그만큼 좁아진다.
   → [Machine_action_feed](../../lib/machine_action_feed/machine_action_feed.mli),
-  [Dos_lane.recent_activity](../../lib/dos_lane/dos_lane.mli),
-  [Masc_tui_machine_live.activity_of](../../bin/masc_tui_machine_live.ml),
-  [Masc_tui_msx.shows_sidebar](../../bin/masc_tui_msx.mli)
+  [Dos_lane.recent_activity](../../lib/dos_lane/dos_lane.mli)
 
 **Lane activity (레인 활동 설정)**
 : exact lane·machine·package Add-on이 새 작업을 받을지 정하는 `enabled`
@@ -2453,8 +2310,7 @@ status: reference
     worker 하나를 문제로 지워도 같은 설치 ID 의 다른 incarnation 이 남을 수 있다.
   - **다른 owner 들**: Board 글의 작성자, Task 의 `Assignee`, 저장소 파일의 소유자는 각각
     다른 층의 말이고 그 표제어들을 따른다. 이 표제어는 Lane Add-on 설치 하나의 주인만 가리킨다.
-  → [Lane_addon_worker_state](../../lib/lane_addon/lane_addon_worker_state.mli) ·
-  [Masc_tui_lane_addons](../../bin/masc_tui_lane_addons.mli)
+  → [Lane_addon_worker_state](../../lib/lane_addon/lane_addon_worker_state.mli)
 
 **Operator quiz (운영자 퀴즈)**
 : 이 워크스페이스의 기록(Board 글·댓글, `repository` 권한의 파일)으로 운영자에게 선택형·서술형 문제를
@@ -2610,36 +2466,6 @@ status: reference
   요청할 수 없다. 이 요청 정책은 도구를 실행할 때의 동시성이나
   spawn으로 시작한 별도 에이전트의 동시 실행과 다르다.
 
-**Identity Row State (Identity 행 상태)**
-: 키퍼가 로그인한 업무 서비스 탭이 서비스 하나에 대해 말하는 닫힌 다섯 값
-  (`Masc_tui_identity_model.identity_row_state`). 탭 화면 라벨은 "서비스"(영문판 "Services")이고
-  내부 변형 이름은 `Detail_identity`다(#51829).
-  `Identity_not_attached`(선언이 없거나 도구 목록이 `None` — 한 번도 붙지 않음)·
-  `Identity_attached_without_tools`(붙었으나 제공하는 도구가 빈 목록)·
-  `Identity_switch_unreadable`(스위치 저장소를 읽지 못함)·`Identity_switched_off`(운영자가
-  껐음)·`Identity_attached of int`(붙었고 도구 n개). 우선순위가 있다 — 아무것도 제공하지
-  않는 서비스는 스위치가 무엇이라 말하든 그렇게 말하고, 읽지 못한 스위치는 스위치 값보다,
-  스위치 값은 도구 수보다 앞선다. 운영자가 꺼 둔 서비스는 catalog가 도구를 아무리 많이
-  이름 대도 이 Keeper에게 아무것도 주지 않는다. 행과 그 위 요약 줄이 이 한 함수를 읽으므로
-  둘이 어긋날 수 없다. 요약 줄은 `attached`·`switched off`·`attached with no tools`·
-  `with an unreadable switch`를 센다.
-  경계: 대시보드 keeper 구성 패널의 '정체성' 탭(`identity`,
-  [keeper-config-panel](../../dashboard/src/components/keeper-config-panel.ts))은 이 항목과
-  다른 개념이다 — 키퍼가 소유한 속성을 모은 섹션이고 연결 서비스 계정의 행 상태를 말하지
-  않는다. TUI의 옛 '정체성' 라벨(#51829 이전)과 이름만 겹치므로, '정체성'이라 적을 때는 어느
-  표면의 것인지 함께 적는다.
-  → [masc_tui_identity_model](../../bin/masc_tui_identity_model.mli),
-  [masc_tui_types](../../bin/masc_tui_types.ml)
-
-**Detail State (상세 상태)**
-: 상세를 가진 판의 바인딩이 어느 상태에서 응답하는지의 닫힌 세 값
-  (`Masc_tui_keys.detail_state`). `Either`(두 상태 모두 — 기본)·`List_only`(상세가 닫혀
-  있을 때만)·`Detail_only`(상세가 열려 있을 때만). 상세를 가진 판은 한 푸터로 두 상태를
-  그리므로, 이 축이 없으면 동작하지 않는 키를 푸터에 하나 보여준다 — 상세가 열린 뒤의
-  `Right / Enter`, 닫힌 동안의 `[ / ]`. 푸터는 `~detail_open`으로 자기 상태를 말하고,
-  그 인자가 없으면 모든 바인딩을 광고한다. `has_detail_scoped_keys`가 그런 판을 잡는다.
-  → [masc_tui_keys.mli](../../bin/masc_tui_keys.mli)
-
 **Connector Connection (커넥터 연결)**
 : Channels 판이 한 transport의 연결에 대해 그리는 닫힌 다섯 값
   (`Masc.Tui_decode_connectors.connector_connection`) — `Connector_connected`·
@@ -2654,8 +2480,6 @@ status: reference
   `Connector_disconnected` 아래 `Connector_gateway_disconnected` 두 짝뿐이다 — Discord 행이
   `Connection ● CONNECTED` 위에 `Runtime state connected`를 겹쳐 읽던 자리다. 연결은 한
   번만 그린다.
-  → [Masc_tui_connector_state.mli](../../bin/masc_tui_connector_state.mli),
-  [Tui_decode_connectors.connector_connection](../../lib/tui_decode_connectors.mli)
 
 ## Collaboration State
 
@@ -3165,7 +2989,7 @@ status: reference
   assignments는 마지막 복원 전으로 돌아간다. Keeper instructions와 lane은 프리셋에 든 것만
   다시 쓰므로, instructions가 없던 Keeper나 마지막 복원이 새로 더한 lane은 그대로 남는다.
   → [Prompt_preset](../../lib/prompt_preset.mli),
-  [Preset commands](../../bin/masc_tui_command.mli), [TUI 안내](../TUI-GUIDE.md)
+  [TUI 안내](../TUI-GUIDE.md)
 
 **HITL Delivery Occasion (HITL 전달 계기)**
 : 승인된 HITL 결정을 Keeper 에게 전달할 때, 그 전달이 왜 일어나는지를 가리키는 닫힌 세 값
@@ -3568,39 +3392,6 @@ status: reference
   도구 호출(`actions`)을 별도로 붙인다. 이후 호출이 있다는 사실만으로 Skill이
   그 행동의 원인이었거나 작업을 성공시켰다고 판정하지 않는다.
 
-**Skill State (Skill 상태)**
-: 로그가 Skill 행 하나에 적는 닫힌 여덟 값(`Masc_tui_keeper_chat_transcript.skill_state`).
-  `keeper_skill` 호출이 성공했다는 사실은 본문이 실렸다는 뜻일 뿐, 제공자가 그것을
-  받았거나(delivered) 이후 도구가 그 Skill을 썼다는(used) 뜻이 아니다 — 그래서 상태가
-  그 셋을 나눠 적는다. 생애 순서는 `Skill_calling` → `Skill_served_pending` →
-  `Skill_served_only` → `Skill_delivered` → `Skill_used` 이고, 나머지 셋(`Skill_failed`·
-  `Skill_evidence_missing`·`Skill_evidence_unavailable`)은 그 생애의 순회가 아니라 증거가
-  실패·부재·형식 불일치인 경우를 말한다. Instruction Skill 은 읽고 Composition Skill 은
-  자기 이름의 도구로 실행하므로, 앞 세 상태의 문구가 "읽음"과 "실행됨"으로 갈린다.
-  → [Masc_tui_keeper_chat_transcript](../../bin/masc_tui_keeper_chat_transcript.mli)
-
-**Skill Performance (Skill 성능)**
-: Tools 탭에서 고른 Skill의 정확한 content revision에 결속된 보존 실행 집계 카드(#44781·#44784).
-  서버 읽기 `/api/v1/skills/evidence`를 `Tui_decode_skill_evidence`가 해석하고
-  (`composition_statistics`), 같은 참조의 보존된 executor 정산 기록을 전체 Keeper에 걸쳐
-  한 파티션으로 센다. 카드 제목은 `SKILL PERFORMANCE`이고 보존 실행 건수(`scst_records`)를
-  함께 적는다.
-  - **두 평균**: 완료(`completed`)와 실패(`failed`)의 executor 실행 시간 평균
-    (`duration_statistics.sds_mean_ms`)을 각 표본 수(`sds_samples`)와 함께 따로 적는다.
-    막대는 0에서 관측된 최대 평균까지의 공유 축이고, 한 실행 id가 한 표본이다.
-  - **결과 분포**: `completed`·`failed`·`deferred` 건수를 분포 막대로 따로 그린다.
-    `deferred`는 평균에서 제외한다(`bin/masc_tui_render_tools.ml`의 `skill_statistics_lines`).
-  - **미관측은 0ms가 아니다**: 표본이 없으면 값 자리에 `—`(미관측)를 적고 0으로 채우지
-    않는다. 관측된 0은 0ms로 남는다. 집계 자체가 없으면 "실행 시간 집계 없음 · 미관측은
-    0ms가 아닙니다"를 적는다.
-  - **이름 경계**: 이 카드는 시계열도 지연 백분위(latency percentile)도 아니고, 그 Skill의
-    수명 전체 coverage도 아니다. queue·의존 대기·continuation·모델 시간을 포함하지 않는다.
-    Normal Skill(Instruction Skill)은 선언된 실행 그래프가 없으므로 평균을 지어내지 않고
-    그 사실을 설명으로 적는다. **Skill State**는 로그 한 행의 생애 상태이고, 이 카드는
-    보존 실행의 집계다 — 한쪽으로 다른 쪽을 판정하지 않는다.
-  - Dashboard → Monitor → Skills도 같은 typed I/O와 보존 증거를 쓰며, Composition 행을
-    펼쳐 선언된 입력·출력 경로와 executor 성능·결과 막대를 같은 revision 결속으로 읽는다.
-
 ## Repository Execution
 
 **Repository Catalog**
@@ -3679,8 +3470,7 @@ status: reference
   `None`이다(TUI는 `Unrecognised_repository_status`로 그대로 보존한다). Workspace
   표면은 상태 칸에 단어만 그리고, 사유는 선택 행의 context에 Path·Keepers 아래로
   그린다.
-  → [Repo_manager_types](../../lib/repo_manager/repo_manager_types.mli),
-  [Tui_decode](../../lib/tui_decode.mli)
+  → [Repo_manager_types](../../lib/repo_manager/repo_manager_types.mli)
 
 **PR Reader (PR 읽기 Keeper)**
 : 서버가 등록된 GitHub 저장소의 열린 PR 을 읽을 때 쓰는 GitHub 토큰의 주인 Keeper.
@@ -3897,16 +3687,9 @@ status: reference
   저장하며 Keeper가 등록돼 있으면 쓸 수 없다. CLI `masc-checkpoint-purge`는 기본이
   dry-run이고 `--apply`가 백업 후 저장한다.
 
-  atom을 여는 message를 지우지 않으므로 atom 번호는 그대로다. atom으로 자리를 세는
-  저장소 넷(turn-boundary 로그, Librarian 위치, continuity 스냅숏, carried-front 시작 위치 근거)이
-  같은 이력을 계속 가리키도록, 기록이 지목하는 message는 바이트 그대로 남긴다 — 마지막
-  atom과 꼬리, 각 완료 turn이 끝난 atom의 여는 message(`Turn_ended` 줄이 지목), 이
-  이력에 맞는 Librarian 작업 상태가 덮는 앞부분. `purge_messages`가 atom 수·남긴 여는
-  message의 digest·작업 상태를 `Librarian_continuity_snapshot.restore`로 대조하고, 어긋나면
-  이력을 돌려주지 않고 오류를 낸다. carried-front 시작 위치 근거는 남기지 않는다 — purge가 그
-  atom의 여는 message를 다시 썼으면 시작 위치 근거가 안 맞아 요청은 마지막 완료 turn이 끝난 자리에서
-  시작한다. 구조적으로 깨진 입력의 복구는 깨진 꼬리를 버리므로 끝이 옮겨지는 것이
-  설계다. 복구는 깨진 곳에서 이력을 끝낸다.
+  atom을 여는 message를 지우지 않으므로 atom 번호는 그대로다. 마지막 atom과 보호된
+  꼬리는 그대로 돌려준다. 구조적으로 깨진 입력의 복구는 깨진 꼬리를 버리므로 끝이
+  옮겨지는 것이 설계다. 복구는 깨진 곳에서 이력을 끝낸다.
 
   Keeper의 Memory writer는 턴 기록(turn log)이 아직 이름 붙이지 않은 message를 head에서
   읽는다(RFC librarian-call-only-proposes §5.6). 그래서 아무것도 버리지 않는 purge는
@@ -3915,10 +3698,7 @@ status: reference
   바뀌었으면 다시 쓰는 message가 없다. 턴 기록이 없는 Keeper는 이 규칙에 걸리지
   않는다. 턴 기록을 못 읽으면 purge를 거절한다. 복구는 버리기 전에 head가 가진
   message를 모두 이름 붙이는 `Reset` 줄을 먼저 쓴다. 바뀐 것이 없는 purge는 아무것도
-  설치하지 않는다. continuity 스냅숏(`librarian-continuity.json`)은 지우지
-  않는다 — 스냅숏이 덮는 앞부분을 바이트 그대로 남겨 purge 뒤에도 맞는다. 복구가 그
-  부분을 버리면 `Continuity_no_longer_fits`로 거절되고, 서버를 멈춘 채
-  `librarian-continuity.json`을 지우면 통과한다. 서버의 dashboard 청소 동작은 그 전에
+  설치하지 않는다. 서버의 dashboard 청소 동작은 그 전에
   Librarian lane을 취소하고 기다린다(`with_librarian_purge`).
   → [Keeper_checkpoint_purge](../../lib/keeper/keeper_checkpoint_purge.mli),
   [Runbook](../CHECKPOINT-PURGE-RUNBOOK.md)
@@ -4218,25 +3998,6 @@ status: reference
   - **브리핑 글 (Shared Briefing)**: 원장의 주장·충돌을 모델이 읽고 종합 요약한 자연어 글(`.masc/workspace-memory/briefing.json`). 기본 턴 문맥에는 메타데이터·갱신 상태·조회 경로를 전달하고 본문은 보류한다. 넓은 요약은 `keeper_workspace_memory_read`의 `view=briefing`으로, 목적에 맞는 원장 항목과 현재 근거는 `query`·`id`로 따로 읽는다.
   → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli) · [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_briefing](../../lib/workspace_memory/workspace_memory_briefing.mli)
 
-**Continuity Snapshot (하던 일 저장본)**
-: 이어서 할 일의 설명과, 그 설명이 대신하는 완료된 History 범위를 함께 담은
-  한 파일. 설명 절반은 Working State이고, 범위 절반은 완료된 History 구간이다.
-  전송을 시작할 위치는 보존한 범위의 끝(exclusive)이다.
-  Librarian Read Position은 합성 없이 기준점을 설정할 때도 움직이므로 이
-  저장본을 대신하지 않는다. 받은 요청을 묶는 Working Context와도 구분한다.
-  완료 대화 합성 회차는 대기열 정리를 요청하거나 Working Context를 변경하지 않는다.
-  대기열 정리 응답의 오류가 완료 대화의 기억·요약 저장을 막지 않도록 분리한다.
-  Agent Core는 저장본을 검증한 뒤, 완료된 원문 구간 대신 하던 일을 다음
-  요청에 전달한다. 원본 checkpoint는 보존한다. 저장 완료와 요청에 사용한
-  상태는 별개이며, 둘 다 모델 생성 설명의 의미 보존을 증명하지는 않는다.
-  저장본은 유도된 파생 상태(`derived state`)다. 롤백이나 판올림 후 포맷 불일치로 파일을
-  디코딩할 수 없는 경우(`Undecodable { reason }`), 이전처럼 매 회차 `Source_unavailable`로
-  멈춰 서지 않고 atom 0부터 재구축(`rebuilt from atom 0`)하여 다음 커밋 CAS에서 파일을
-  대체한다(#38477). 이때 이전 작업 상태(`working_state`)는 하드컷 정책에 따라 폐기되며,
-  재구축 중에도 `catch_up_end_atom`을 유지하여 턴 드라이버가 Librarian 위치에서 안정적으로
-  시작하도록 보장한다. 파일 읽기 실패(`Sys_error`)는 영구 오류로 남는다.
-  → [Librarian_continuity_snapshot](../../lib/librarian_continuity_snapshot.mli)
-
 **Working State (대화 작업 상태)**
 : Librarian이 완료된 대화와 이전 상태에서 정리한 작업·제약·결정·미해결 사항.
   연속성 회차의 답에만 있고, `Keeper_librarian.continuity_working_state_of_json_result`가
@@ -4252,7 +4013,7 @@ status: reference
   Atom을 밀어내는 경우, 실을 turn이 없는 경우, 요약이 창에 안 맞는 경우다. 관측 이름과
   카운터는 그 셋을 따른다([`keeper_official_client_host.ml`](../../lib/keeper/keeper_official_client_host.ml)).
   요약이 빠져도 turn은 거절하지 않고 WARN으로 알린다.
-  → [Keeper_librarian.selection](../../lib/keeper/keeper_librarian.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
+  → [Keeper_librarian.selection](../../lib/keeper/keeper_librarian.mli)
 
 **Recent Work Context (최근 작업 발췌)**
 : 자율 턴(`autonomous turn`)이 직전 직접 대화의 요청과 이전 자율 턴의 결론을
@@ -4294,78 +4055,6 @@ status: reference
     `prompt_context_carrier_repeated`를 사유로 남긴다.
   → [Runtime_model_input_tail_window](../../lib/runtime/runtime_model_input_tail_window.mli) · [Keeper_official_client_host.is_composed_system_context](../../lib/keeper/keeper_official_client_host.mli) · [Keeper_agent_prompt_metrics](../../lib/keeper/keeper_agent_prompt_metrics.mli)
 
-**Continuity Synthesis Observation (대화 요약 진행 관측)**
-: 이번 서버 실행에서 Librarian이 마지막으로 선택한 Atom 구간, 그때 확인한
-  완료 경계, 실행·저장·중단 상태. `context_cycle.synthesis`와 TUI Memory 화면에
-  표시한다. 일반 Memory 소비자의 `drained`와 별개이며 다음 실행을 통제하지 않는다.
-  `no_source`는 새로 읽을 완료 구간을 얻지 못했다는 뜻으로, 전체 요약 완료를
-  증명하지 않는다. 구간이 없거나 관측 전이면 알 수 없음으로 표시한다.
-
-**Continuity Request Observation (요청 입력 관측)**
-: 직렬화된 요청 하나가 무엇을 실었는지에 대한 읽기 전용 관측
-  (`Keeper_continuity_observation.input`). Agent Core 는 직렬화한 요청 본문을,
-  공식 클라이언트 레인은 클라이언트에 넘긴 범위를 기록한다. 이 관측은 History 삭제를
-  승인하지 않고 provider가 요청을 받아들였음을 증명하지도 않는다. 종류는 넷이다 —
-  `Summarized of frontier`(하던 일 저장본이 대신하는 경계까지 요약; frontier는 trace·
-  끝 Atom·경계 줄), `Absorbed of { trace_id; end_atom }`(Librarian의 durable Read
-  Position에서 시작하고 그 앞을 요약하지 않음 — Agent Core 와 공식 클라이언트 레인
-  모두에서 성립), `Without_snapshot`(turn이 Librarian 지점을 고르지 않아, 요청이
-  시작 위치 근거·레인 자체의 자르기·turn 경계 중 한 곳에서 시작함),
-  `Not_applied`(저장된 맥락을 적용하지 않음: turn 이 아무 선택도 안 했거나(추적 없음·
-  복구 뷰), 공식 클라이언트 레인에서 시작 위치 근거·레인 자체의 자르기가 turn 이 고른 지점보다
-  뒤에 있었음). `Absorbed`는 경계 줄이 없어 모양이
-  trace와 Atom뿐이다. Dashboard의 `context_cycle.prepared.input.kind`가
-  `summarized`·`absorbed`·`without_snapshot`·`not_applied`로, TUI Memory 화면이
-  `summary …`·`absorbed to atom N · trace X · no summary`·`no snapshot: this turn only`·
-  `saved context not applied`로 그린다. 같은 `context_cycle`의 `synthesis`를 담는
-  Continuity Synthesis Observation과 다른 필드이고, 저장된 파일인 Continuity
-  Snapshot과도 다르다.
-  → [Keeper_continuity_observation](../../lib/keeper/keeper_continuity_observation.mli),
-  [dashboard 투영](../../lib/server/server_dashboard_http_keeper_memory_health.ml)
-
-**Librarian Pass (Librarian 회차)**
-: Librarian이 한 번 도는 일. 코드의 이름은 pass 다 — 식별자(`invalid_arg "librarian pass: …"` 등)에는 pass 를 쓰고 `round` 는 주석과 사용자 노출 메시지 일부에만 남는다(`Keeper_librarian_durable_consumer`·
-  `Keeper_librarian_continuity`). Keeper마다 따로 돌고, 같은 신호(서버 기동·턴 끝·받은 일
-  변경)에 깨어난다. 두 가지가 있다.
-  - durable pass(`Keeper_librarian_durable_consumer`): 끝난 턴을 읽어 Memory OS에 적고
-    읽은 위치(Read Position)를 옮긴다. Agent Core 턴은 checkpoint의 atom으로, 공식
-    클라이언트 턴은 그 trace의 history 파일에서 `turn_ref`가 가리키는 조각으로 읽는다.
-    두 위치(atom 위치·공식 클라이언트 위치)는 각각 따로 옮기며, `commit`이 Memory OS snapshot
-    커밋을 보고할 때만 옮긴다. 공식 클라이언트 턴 쪽이 읽을 수 없는 거절 경계선에서
-    멈추더라도(`Keeper_librarian_range.Official_stop`, 그 줄 앞의 공식 턴은 먼저 읽는다), 이 정지는 공식 위치만 세우며 atom 쪽은
-    독립적으로 읽어 atom 위치를 전진시킨다. atom 쪽에 더 읽을 것이 없을 때 비로소 pass 가
-    `Official_range_stopped`로 종료된다(#38475).
-  - 연속성 pass(`Keeper_librarian_continuity`): 스냅숏이 덮은 앞부분을 다시 쓰는 pass.
-    완료된 대화 구간을 요약해 Continuity Snapshot을 만든다. 그 구간의 기억을 durable
-    pass 가 아직 저장하지 않았으면 이 pass 가 기억을 먼저 저장하고, 저장이 끝난 뒤에만
-    스냅숏을 쓴다. 이렇게 기억을 저장할 때는 durable pass 가 같은 구간에 싣는 것을 그대로
-    싣는다. 그 메시지의 도구 호출과, 그 턴 동안 들어온 상대방 발화다. durable pass 의
-    위치 파일은 고치지 않는다. 대신 durable pass 가 다음에
-    돌 때 연속성 pass 가 저장한 구간(그 영수증과 게시된 스냅숏)을 보고, 그 구간은 모델에
-    다시 보내지 않고 위치만 그 끝으로 옮긴다.
-  두 pass 는 따로 밀리고(Continuity Lag), 실패 뒤 범위를 좁히는 방식도 다르다(RFC
-  librarian-lifecycle §4.3). durable pass 는 실패 종류를 보지 않고, 실패 표식(wide-range
-  failure marker)을 루프 메모리에 두고 가장 오래된 한 턴으로 좁힌다. 단, 공식 정지
-  (`Official_range_stopped`)로 끝난 pass 는 이 마커를 해제하여 이후 pass 가 atom 백로그
-  전체를 정상적으로 읽도록 보장한다(#38475). 연속성 pass 는 실패 종류를 보고 크기
-  때문인 실패에서만 좁히며, 좁힌 폭(Continuity Width)을 다음 pass 로 넘긴다.
-  → [keeper_librarian_durable_consumer](../../lib/keeper/keeper_librarian_durable_consumer.mli) · [keeper_librarian_range](../../lib/keeper/keeper_librarian_range.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
-
-**Continuity Lag (요약이 밀린 정도)**
-: 연속성 pass 가 얼마나 뒤처졌나 — Librarian의 읽은 위치(Read Position)의 `end_atom`에서
-  연속성 스냅숏이 덮은 끝(`Keeper_continuity_observation.frontier.end_atom`)을 뺀 atom 수.
-  같은 trace를 가리킬 때만 세고, 스냅숏이 앞서면 세지 않는다. health JSON의
-  `continuity_unread_atoms`이고 TUI는 `continuity behind <n>`으로 그린다. durable pass 의
-  밀림(`Keeper_librarian_durable_consumer.unread`의 `atoms`·`official`, health의
-  `unread_atom_turns`·`unread_official_turns`)과 다른 값이다 — 두 pass 는 따로 밀리므로
-  한 숫자가 둘을 대신하지 못한다(RFC librarian-lifecycle §4.9). 스냅숏이 없거나, 두 파일
-  중 하나를 못 읽거나, 두 파일이 다른 trace를 가리키거나, 스냅숏이 앞서면 `null`
-  ("말할 수 없음")이다. 그 넷은 따라잡은 Keeper가 아니므로 0으로 적지 않는다. fleet
-  합계(`librarian_continuity_unread_atoms`)는 잴 수 있었던 Keeper만 더하고 못 잰 수를
-  옆에 센다(`librarian_continuity_unmeasured`) — 한 Keeper 때문에 합계가 null이 되면
-  잴 수 있는 Keeper가 다 가려진다.
-  → [server_dashboard_http_keeper_memory_health](../../lib/server/server_dashboard_http_keeper_memory_health.ml)
-
 **Continuity Width (연속성 pass 의 폭)**
 : 연속성 pass 가 한 번에 읽는 범위의 크기. 크기 조정은 두 경로다. 한도를 아는 fitting 은
   oversized 배치를 가장 오래된 완료 턴으로 고르고 그 턴 안의 원자 중간점에서 접으며 다시
@@ -4386,9 +4075,7 @@ status: reference
   끝까지 읽었을 때(`Drained`)만 한도를 풀고, 좁힌 커밋 한 번은 거절했던 범위가 이제 들어간다는
   증거가 아니다. 이 기억도 프로세스 메모리라 서버가 재시작하면 사라진다. 원인별 판정 규칙은
   RFC-librarian-lifecycle §4.3 표와 §4.12가 정한다.
-  → [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli) ·
-  [keeper_librarian_runtime](../../lib/keeper/keeper_librarian_runtime.mli) ·
-  [keeper_librarian_queue_refresh](../../lib/keeper/keeper_librarian_queue_refresh.ml)
+  → [keeper_librarian_runtime](../../lib/keeper/keeper_librarian_runtime.mli)
 
 **Fact**
 : Memory OS의 기억 하나. 문장 필드(`claim` — 이 문서에서 Fact의 문장을 가리킬 때만
@@ -4528,4 +4215,3 @@ status: reference
   is CLI-only`·`JEV unavailable: Board lane is not ready`는 JEV 모델 자체의 상태가
   아니라 그 lane이 JEV를 쓸 수 있는지의 구성 상태다. decode는 `state` 값 `off`·
   `configured`(+`model`)·`cli_only`·`lane_unavailable`을 받는다.
-

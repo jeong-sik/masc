@@ -1823,8 +1823,8 @@ let selected_memory_reading ?(force_diff = false) ~keeper_opt
         | None -> None)
 
 (* What Enter does on the current unfocused view. [dive_selected] runs the
-   plan and the footer reads [enter_has_effect], so the footer only offers
-   Enter where the key does something. *)
+   plan and the footer reads [enter_hint], so the footer only offers Enter
+   where the key does something. *)
 type enter_plan =
   | Enter_noop
   | Enter_push of Nav.dive
@@ -2068,13 +2068,26 @@ let dive_selected (m : Model.t) =
       let next = { m with nav = { m.nav with pane_index = 1 }; knowledge } in
       (next, View_fetches.fetches_for_current_view next)
 
-let enter_has_effect (m : Model.t) =
-  match enter_plan m with
-  | Enter_noop -> false
-  | Enter_push _ | Enter_attention _ | Enter_toggle_unreported_accounts
-  | Enter_fetch_memory_diff | Enter_open_memory_reading _
-  | Enter_scope_memory _ ->
-      true
+type enter_hint =
+  | Enter_hint_hidden
+  | Enter_hint_dive
+  | Enter_hint_edit_field
+  | Enter_hint_confirm_field
+
+(* Keeper config takes Enter before the keymap does
+   (Update_input.dispatch_keeper_config_key, behind the same condition): Enter
+   starts editing the selected field, or confirms the edit in progress. *)
+let enter_hint (m : Model.t) =
+  if Model.is_keeper_config_active m && not (Drafts.is_focused m.drafts) then
+    if Config_store.is_editing_field m.config then Enter_hint_confirm_field
+    else Enter_hint_edit_field
+  else
+    match enter_plan m with
+    | Enter_noop -> Enter_hint_hidden
+    | Enter_push _ | Enter_attention _ | Enter_toggle_unreported_accounts
+    | Enter_fetch_memory_diff | Enter_open_memory_reading _
+    | Enter_scope_memory _ ->
+        Enter_hint_dive
 
 type inline_form_kind =
   | Form_standard of Nav.inline_action_kind

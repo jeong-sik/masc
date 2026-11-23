@@ -5137,6 +5137,12 @@ let test_pillar3_keeper_chat_empty_loading_and_korean_ime () =
      | Some (Observed.Loading _) -> true
      | _ -> false)
 
+let enter_hint_name = function
+  | Update_nav.Enter_hint_hidden -> "hidden"
+  | Update_nav.Enter_hint_dive -> "dive"
+  | Update_nav.Enter_hint_edit_field -> "edit field"
+  | Update_nav.Enter_hint_confirm_field -> "confirm field"
+
 let test_enter_hint_follows_enter_plan () =
   let m_base = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
   let no_target_views : (string * Model.t) list =
@@ -5170,10 +5176,10 @@ let test_enter_hint_follows_enter_plan () =
   in
   List.iter
     (fun (label, (m : Model.t)) ->
-      Alcotest.(check bool)
+      Alcotest.(check string)
         (label ^ ": footer drops Enter")
-        false
-        (Update_nav.enter_has_effect m);
+        "hidden"
+        (enter_hint_name (Update_nav.enter_hint m));
       let m', cmds = Update_nav.dive_selected m in
       Alcotest.(check int)
         (label ^ ": Enter pushes no dive")
@@ -5185,11 +5191,37 @@ let test_enter_hint_follows_enter_plan () =
   let keepers =
     { m_base with nav = { m_base.nav with workspace = Nav.Keepers } }
   in
-  Alcotest.(check bool) "Keepers: footer offers Enter" true
-    (Update_nav.enter_has_effect keepers);
+  Alcotest.(check string) "Keepers: footer offers Enter" "dive"
+    (enter_hint_name (Update_nav.enter_hint keepers));
   let dived, _ = Update_nav.dive_selected keepers in
   Alcotest.(check int) "Keepers: Enter pushes the keeper dive" 1
-    (List.length dived.nav.dive_stack)
+    (List.length dived.nav.dive_stack);
+  (* Keeper config takes Enter before the keymap and edits a field, both in
+     the keeper dive and in the Keepers detail pane. *)
+  let config_dive =
+    {
+      keepers with
+      nav =
+        {
+          keepers.nav with
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_config } ];
+        };
+    }
+  in
+  Alcotest.(check string) "Keeper config dive: Enter edits a field"
+    "edit field"
+    (enter_hint_name (Update_nav.enter_hint config_dive));
+  let config_pane =
+    {
+      keepers with
+      nav = { keepers.nav with pane_index = 1 };
+      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_config keepers.fleet;
+    }
+  in
+  Alcotest.(check string) "Keepers config pane: Enter edits a field"
+    "edit field"
+    (enter_hint_name (Update_nav.enter_hint config_pane))
 
 let () =
   Alcotest.run "masc_tui_keymap_matrix"

@@ -28,8 +28,8 @@ type acp_client =
   ; args : string list
   ; strip_env : string list
   ; skills_dirs : string list
-  ; model : string
-  ; effort : string option
+  ; model : Runtime_acp_client.model_selection
+  ; effort : Llm_provider.Reasoning_effort.t option
   ; mode : string option
   ; oauth_source : string option
   ; timeout_s : float
@@ -86,7 +86,10 @@ let model_id = function
   | Codex_app_server config -> config.model
   | Antigravity_cli config -> Some config.model
   | Claude_code config -> config.model
-  | Acp config -> Some config.model
+  | Acp config ->
+    (match config.model with
+     | Runtime_acp_client.Keep_cli_default -> None
+     | Runtime_acp_client.Explicit_model m -> Some m)
 ;;
 
 let label = function

@@ -1611,6 +1611,27 @@ let acp_execution (provider : Runtime_schema.provider)
          "provider %S uses protocol acp and must declare is-non-interactive = true"
          provider.id)
   | Cli command ->
+    let make_acp_execution (options : Runtime_schema.acp_options) ~oauth_source =
+      let install_client =
+        match options.driver with
+        | Runtime_acp_client.Antigravity -> Runtime_official_cli_install.Antigravity
+        | Runtime_acp_client.Kimi_code -> Runtime_official_cli_install.Kimi_code
+        | Runtime_acp_client.Mistral_vibe -> Runtime_official_cli_install.Mistral_vibe
+      in
+      let cli_path = Runtime_official_cli_install.spawn_path install_client ~command in
+      Runtime_execution.Acp
+        { driver = options.driver
+        ; cli_path
+        ; args = options.args
+        ; strip_env = options.strip_env
+        ; skills_dirs = options.skills_dirs
+        ; model = Runtime_acp_client.model_selection_of_string spec.api_name
+        ; effort = options.effort
+        ; mode = options.mode
+        ; oauth_source
+        ; timeout_s = options.timeout_s
+        }
+    in
     (match provider.acp, provider.credentials with
      | None, (None | Some (Env _ | Inline _ | File _)) ->
        Error (Printf.sprintf "provider %S uses protocol acp without typed ACP options" provider.id)
@@ -1625,48 +1646,8 @@ let acp_execution (provider : Runtime_schema.provider)
             "provider %S uses protocol acp with a relative credential path %S"
             provider.id
             path)
-     | Some options, Some (File path) ->
-       let install_client =
-         match options.driver with
-         | Runtime_acp_client.Antigravity -> Runtime_official_cli_install.Antigravity
-         | Runtime_acp_client.Kimi_code -> Runtime_official_cli_install.Kimi_code
-         | Runtime_acp_client.Mistral_vibe -> Runtime_official_cli_install.Mistral_vibe
-       in
-       let cli_path = Runtime_official_cli_install.spawn_path install_client ~command in
-       Ok
-         (Runtime_execution.Acp
-            { driver = options.driver
-            ; cli_path
-            ; args = options.args
-            ; strip_env = options.strip_env
-            ; skills_dirs = options.skills_dirs
-            ; model = spec.api_name
-            ; effort = options.effort
-            ; mode = options.mode
-            ; oauth_source = Some path
-            ; timeout_s = options.timeout_s
-            })
-     | Some options, None ->
-       let install_client =
-         match options.driver with
-         | Runtime_acp_client.Antigravity -> Runtime_official_cli_install.Antigravity
-         | Runtime_acp_client.Kimi_code -> Runtime_official_cli_install.Kimi_code
-         | Runtime_acp_client.Mistral_vibe -> Runtime_official_cli_install.Mistral_vibe
-       in
-       let cli_path = Runtime_official_cli_install.spawn_path install_client ~command in
-       Ok
-         (Runtime_execution.Acp
-            { driver = options.driver
-            ; cli_path
-            ; args = options.args
-            ; strip_env = options.strip_env
-            ; skills_dirs = options.skills_dirs
-            ; model = spec.api_name
-            ; effort = options.effort
-            ; mode = options.mode
-            ; oauth_source = None
-            ; timeout_s = options.timeout_s
-            }))
+     | Some options, Some (File path) -> Ok (make_acp_execution options ~oauth_source:(Some path))
+     | Some options, None -> Ok (make_acp_execution options ~oauth_source:None))
 ;;
 
 let refuse_anthropic_thinking_control_on_official_client

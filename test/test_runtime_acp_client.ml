@@ -316,6 +316,70 @@ default = "bad_acp.m"
   | Ok _ -> fail "unknown ACP driver must be rejected at parse time"
 ;;
 
+let test_typed_acp_effort_and_model_selection_toml () =
+  let valid_toml =
+    {|
+[providers.agy_eff]
+protocol = "acp"
+driver = "antigravity"
+command = "agy"
+is-non-interactive = true
+effort = "ultra"
+[models.def]
+api-name = "default"
+max-context = 1000
+[agy_eff.def]
+[runtime]
+default = "agy_eff.def"
+|}
+  in
+  (match Runtime_toml.parse_string valid_toml with
+   | Error errs ->
+     failf "valid ACP effort/default model TOML failed: %s"
+       (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errs))
+   | Ok cfg ->
+     let runtimes, dropped = Runtime_instance.partition_bindings cfg cfg.bindings in
+     check int "zero dropped" 0 (List.length dropped);
+     match runtimes with
+     | [ { execution = Runtime_execution.Acp exec; _ } ] ->
+       check bool "default model parsed as Keep_cli_default" true
+         (Runtime_acp_client.equal_model_selection
+            Runtime_acp_client.keep_cli_default
+            exec.model);
+       check bool "case-insensitive trimmed default normalizes to Keep_cli_default" true
+         (Runtime_acp_client.equal_model_selection
+            Runtime_acp_client.keep_cli_default
+            (Runtime_acp_client.model_selection_of_string "  DEFAULT "));
+       check bool "ultra effort parsed as Reasoning_effort.Ultra" true
+         (Option.equal Llm_provider.Reasoning_effort.equal
+            (Some Llm_provider.Reasoning_effort.Ultra)
+            exec.effort);
+       check (option string) "Runtime_execution.model_id returns None for Keep_cli_default" None
+         (Runtime_execution.model_id (Runtime_execution.Acp exec))
+     | _ -> fail "expected single materialized ACP runtime");
+  let invalid_effort =
+    {|
+[providers.bad_eff]
+protocol = "acp"
+driver = "antigravity"
+command = "agy"
+is-non-interactive = true
+effort = "turbo"
+[models.m]
+api-name = "m"
+max-context = 1000
+[bad_eff.m]
+[runtime]
+default = "bad_eff.m"
+|}
+  in
+  match Runtime_toml.parse_string invalid_effort with
+  | Error (err :: _) ->
+    check string "error path identifies effort key" "providers.bad_eff.effort" err.path
+  | Error [] -> fail "expected non-empty error list for invalid ACP effort"
+  | Ok _ -> fail "unknown ACP effort must be rejected strictly at TOML parse time"
+;;
+
 let test_build_argv_and_strict_permission_posture () =
   let tmp_skills = Filename.get_temp_dir_name () in
   let kimi_cfg =
@@ -1059,22 +1123,79 @@ let test_vibe_310_config_options_and_permission_hardening () =
   check (list string) "flat effort available_values parsed"
     [ "off"; "high" ]
     effort_opt.available_values;
-  let resolve = Runtime_acp_client.For_testing.resolve_option_value in
-  check (option string) "default model sentinel is skipped" None
-    (resolve ~driver:Mistral_vibe ~config_id:"model" ~requested:"default" ~option:model_opt);
+  let resolve_model = Runtime_acp_client.For_testing.resolve_model_option_value in
+  let resolve_effort = Runtime_acp_client.For_testing.resolve_effort_option_value in
+  check (option string) "Keep_cli_default model selection is skipped" None
+    (resolve_model
+       ~driver:Mistral_vibe
+       ~requested:Runtime_acp_client.keep_cli_default
+       ~option:model_opt);
   check (option string) "retired devstral-2 is skipped when unsupported" None
-    (resolve ~driver:Mistral_vibe ~config_id:"model" ~requested:"devstral-2" ~option:model_opt);
+    (resolve_model
+       ~driver:Mistral_vibe
+       ~requested:(Runtime_acp_client.model_selection_of_string "devstral-2")
+       ~option:model_opt);
   check (option string) "already-current Vibe 3.1.0 model skips redundant RPC" None
-    (resolve ~driver:Mistral_vibe ~config_id:"model" ~requested:"mistral-medium-3.5" ~option:model_opt);
+    (resolve_model
+       ~driver:Mistral_vibe
+       ~requested:(Runtime_acp_client.model_selection_of_string "mistral-medium-3.5")
+       ~option:model_opt);
   check (option string) "supported Vibe 3.1.0 model switch resolves" (Some "mistral-large-latest")
-    (resolve ~driver:Mistral_vibe ~config_id:"model" ~requested:"mistral-large-latest" ~option:model_opt);
-  check (option string) "none effort skips redundant RPC when currentValue is already off" None
-    (resolve ~driver:Mistral_vibe ~config_id:"thinking" ~requested:"none" ~option:effort_opt);
+    (resolve_model
+       ~driver:Mistral_vibe
+       ~requested:(Runtime_acp_client.model_selection_of_string "mistral-large-latest")
+       ~option:model_opt);
+  let dup_none_opt = { effort_opt with available_values = [ "none"; "off" ]; current_value = "off" } in
+  check (option string) "duplicate None_ spellings preserve current_value without redundant RPC" None
+    (resolve_effort
+       ~driver:Mistral_vibe
+       ~requested:Llm_provider.Reasoning_effort.None_
+       ~option:dup_none_opt);
+  check (option string) "None_ effort skips redundant RPC when currentValue is already off" None
+    (resolve_effort
+       ~driver:Mistral_vibe
+       ~requested:Llm_provider.Reasoning_effort.None_
+       ~option:effort_opt);
   let effort_opt_high = { effort_opt with current_value = "high" } in
-  check (option string) "none effort maps to off when switching from high" (Some "off")
-    (resolve ~driver:Mistral_vibe ~config_id:"thinking" ~requested:"none" ~option:effort_opt_high);
-  check (option string) "medium effort clamps to high on Vibe [off; high]" (Some "high")
-    (resolve ~driver:Mistral_vibe ~config_id:"thinking" ~requested:"medium" ~option:effort_opt);
+  check (option string) "None_ effort maps to off when switching from high" (Some "off")
+    (resolve_effort
+       ~driver:Mistral_vibe
+       ~requested:Llm_provider.Reasoning_effort.None_
+       ~option:effort_opt_high);
+  check (option string) "Ultra effort clamps downward to high on Vibe [off; high]" (Some "high")
+    (resolve_effort
+       ~driver:Mistral_vibe
+       ~requested:Llm_provider.Reasoning_effort.Ultra
+       ~option:effort_opt);
+  check (option string) "Medium effort does NOT silently upgrade to high or turn off on Vibe [off; high]" None
+    (resolve_effort
+       ~driver:Mistral_vibe
+       ~requested:Llm_provider.Reasoning_effort.Medium
+       ~option:effort_opt);
+  let low_high_opt : Runtime_acp_client.config_option =
+    { id = "thought_level"
+    ; name = "Thought"
+    ; category = Some "thought_level"
+    ; current_value = "high"
+    ; available_values = [ "low"; "high" ]
+    }
+  in
+  check (option string) "Medium clamps downward to nearest positive <= requested (low)" (Some "low")
+    (resolve_effort
+       ~driver:Antigravity
+       ~requested:Llm_provider.Reasoning_effort.Medium
+       ~option:low_high_opt);
+  check (option string) "None_ does NOT upgrade to low when off/none is absent" None
+    (resolve_effort
+       ~driver:Antigravity
+       ~requested:Llm_provider.Reasoning_effort.None_
+       ~option:low_high_opt);
+  let med_high_opt = { low_high_opt with available_values = [ "medium"; "high" ] } in
+  check (option string) "Low does NOT silently upgrade to medium" None
+    (resolve_effort
+       ~driver:Antigravity
+       ~requested:Llm_provider.Reasoning_effort.Low
+       ~option:med_high_opt);
   (* Permission hardening: no Allow_always fallback, no fetch under Native_read, positive kind allowlist *)
   let only_always_and_reject =
     [ `Assoc [ "optionId", `String "opt_always"; "kind", `String "allow_always" ]
@@ -1603,11 +1724,10 @@ let test_typed_tool_call_classification_and_schema_boundary () =
       ; available_values = [ "off"; "high" ]
       }
     in
-    check (option string) "Vibe category=thinking maps none -> off" (Some "off")
-      (Runtime_acp_client.For_testing.resolve_option_value
+    check (option string) "Vibe category=thinking maps None_ -> off" (Some "off")
+      (Runtime_acp_client.For_testing.resolve_effort_option_value
          ~driver:Mistral_vibe
-         ~config_id:"thinking"
-         ~requested:"none"
+         ~requested:Llm_provider.Reasoning_effort.None_
          ~option:vibe_thinking_opt);
     let kimi_profile = Runtime_acp_client.profile_of_driver Kimi_code in
     check (option string) "Kimi effort_config_id matches live wire id" (Some "thinking")
@@ -1833,8 +1953,8 @@ for line in sys.stdin:
             Runtime_acp_client.new_session
               client
               ~cwd:tmp
-              ~model:"gemini-4-neon-medium"
-              ~effort:"medium"
+              ~model:(Runtime_acp_client.model_selection_of_string "gemini-4-neon-medium")
+              ~effort:Llm_provider.Reasoning_effort.Medium
               ()
           with
           | Ok s -> s
@@ -1950,8 +2070,8 @@ for line in sys.stdin:
            Runtime_acp_client.new_session
              client
              ~cwd:tmp
-             ~model:"gemini-4-neon-medium"
-             ~effort:"high"
+             ~model:(Runtime_acp_client.model_selection_of_string "gemini-4-neon-medium")
+             ~effort:Llm_provider.Reasoning_effort.High
              ()
          with
          | Ok _ -> ()
@@ -3314,8 +3434,8 @@ for line in sys.stdin:
               client
               ~cwd:iso_cwd
               ~mode:"default"
-              ~model:"model-a"
-              ~effort:"medium"
+              ~model:(Runtime_acp_client.model_selection_of_string "model-a")
+              ~effort:Llm_provider.Reasoning_effort.Medium
               ()
           with
           | Ok s -> s
@@ -3328,8 +3448,8 @@ for line in sys.stdin:
               client
               info
               ~mode:"default"
-              ~model:"model-a"
-              ~effort:"medium"
+              ~model:(Runtime_acp_client.model_selection_of_string "model-a")
+              ~effort:Llm_provider.Reasoning_effort.Medium
               ()
           with
           | Ok s -> s
@@ -3347,8 +3467,8 @@ for line in sys.stdin:
               client
               info2
               ~mode:"default"
-              ~model:"model-a"
-              ~effort:"high"
+              ~model:(Runtime_acp_client.model_selection_of_string "model-a")
+              ~effort:Llm_provider.Reasoning_effort.High
               ()
           with
           | Ok s -> s
@@ -3359,7 +3479,7 @@ for line in sys.stdin:
         check string "effort current_value updated in place" "high"
           (List.hd info3.config_options).current_value;
         (* load_session returning {} captures replayed usage/mode, reuses cached catalog,
-           and clears cached current_value so effort="high" still dispatches set_config_option *)
+           and clears cached current_value so effort=High still dispatches set_config_option *)
         let loaded =
           match
             Runtime_acp_client.load_session
@@ -3367,8 +3487,8 @@ for line in sys.stdin:
               ~session_id:"sess-l3-loaded"
               ~cwd:iso_cwd
               ~mode:"default"
-              ~model:"model-b"
-              ~effort:"high"
+              ~model:(Runtime_acp_client.model_selection_of_string "model-b")
+              ~effort:Llm_provider.Reasoning_effort.High
               ()
           with
           | Ok s -> s
@@ -3524,8 +3644,8 @@ let test_layer4_classify_prompt_error_usage_context_and_process_config_hash () =
     ; args = [ "acp" ]
     ; strip_env = []
     ; skills_dirs = []
-    ; model = "gemini-4-neon-medium"
-    ; effort = Some "medium"
+    ; model = Runtime_acp_client.model_selection_of_string "gemini-4-neon-medium"
+    ; effort = Some Llm_provider.Reasoning_effort.Medium
     ; mode = Some "default"
     ; oauth_source = Some "/tmp/oauth-a"
     ; timeout_s = 120.0
@@ -3541,7 +3661,11 @@ let test_layer4_classify_prompt_error_usage_context_and_process_config_hash () =
     Keeper_acp_runtime.For_testing.process_config_sha256
       ~native_posture:Runtime_native_tools.Native_none
       ~skills_dirs:[]
-      { base_cfg with model = "claude-opus-5-5-high"; effort = Some "high"; mode = Some "auto" }
+      { base_cfg with
+        model = Runtime_acp_client.model_selection_of_string "claude-opus-5-5-high"
+      ; effort = Some Llm_provider.Reasoning_effort.High
+      ; mode = Some "auto"
+      }
   in
   let h_diff_oauth =
     Keeper_acp_runtime.For_testing.process_config_sha256
@@ -3815,6 +3939,8 @@ let () =
     ; ( "toml"
       , [ test_case "all three drivers materialize" `Quick test_toml_materialization_all_three_drivers
         ; test_case "unknown driver rejected" `Quick test_unknown_driver_rejected
+        ; test_case "typed ACP effort and default model_selection TOML boundary" `Quick
+            test_typed_acp_effort_and_model_selection_toml
         ] )
     ]
 ;;

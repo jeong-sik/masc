@@ -737,19 +737,19 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
       {
         name = "read_file";
         description = Some "Read file";
-        calls_24h = obs 120;
+        calls = obs 120;
         failure_rate_pct = obs 0.0;
       };
       {
         name = "edit_file";
         description = Some "Edit file";
-        calls_24h = obs 45;
+        calls = obs 45;
         failure_rate_pct = obs 2.0;
       };
       {
         name = "run_command";
         description = Some "Shell exec";
-        calls_24h = obs 30;
+        calls = obs 30;
         failure_rate_pct = obs 5.0;
       };
     ]

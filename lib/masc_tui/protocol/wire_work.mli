@@ -239,10 +239,12 @@ type schedule_status =
   | Sched_cancelled
   | Sched_expired
 
+(* The server's wake statuses are running / succeeded / failed
+   (Schedule_contract_values.wake_status_to_string). A failed wake carries its
+   reason in the wake's [error] field, which may be absent. *)
 type wake_disposition =
   | Wake_succeeded
-  | Wake_skipped of string
-  | Wake_failed of string
+  | Wake_failed of string option
   | Wake_running
   | Wake_never
 

@@ -325,7 +325,7 @@ let sample_schedules : Wire_work.schedule_row list =
       payload_keeper_name = Some "e-masc-the-leader";
       payload_summary = Some "PR stack patrol check";
       last_wake_unix = Some (now_unix -. 300.0);
-      last_disposition = Wire_work.Wake_failed "GitHub API 503";
+      last_disposition = Wire_work.Wake_failed (Some "GitHub API 503");
     };
   ]
 

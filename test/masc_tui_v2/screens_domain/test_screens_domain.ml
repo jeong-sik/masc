@@ -1042,7 +1042,7 @@ let make_rich_model ~lang ~cols ~rows =
            {
              name = "masc_board_post";
              description = Some "Post to board";
-             calls_24h = Observed.value ~observed_at:now_mono 412;
+             calls = Observed.value ~observed_at:now_mono 412;
              failure_rate_pct = Observed.value ~observed_at:now_mono 0.8;
            };
          ]

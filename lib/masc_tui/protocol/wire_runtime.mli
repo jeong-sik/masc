@@ -500,7 +500,9 @@ val decode_tool_series : Yojson.Safe.t -> (tool_series, string) result
 type tool_summary = {
   name : string;
   description : string option;
-  calls_24h : int Observed.t;
+  calls : int Observed.t;
+      (** Calls over the server's retained metrics window. Unreported when the
+          tool is outside the server's top-20 usage list. *)
   failure_rate_pct : float Observed.t;
 }
 

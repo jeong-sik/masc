@@ -677,13 +677,13 @@ let wake_disposition_text ~lang = function
       ( Glyph.to_utf8 Glyph.Check_mark ^ " "
         ^ Say.resolve lang (Say.make ~ko:"정상 기상" ~en:"Woke OK")
       , Theme.Status_ok )
-  | Wire_work.Wake_skipped reason ->
-      ( Glyph.to_utf8 Glyph.Live_paused ^ " "
-        ^ Say.resolve lang (Say.make ~ko:("건너뜀: " ^ reason) ~en:("Skipped: " ^ reason))
-      , Theme.Status_historical )
   | Wire_work.Wake_failed reason ->
-      ( Glyph.to_utf8 Glyph.Live_failing ^ " "
-        ^ Say.resolve lang (Say.make ~ko:("실패: " ^ reason) ~en:("Failed: " ^ reason))
+      let label =
+        match reason with
+        | Some r -> Say.make ~ko:("실패: " ^ r) ~en:("Failed: " ^ r)
+        | None -> Say.make ~ko:"실패" ~en:"Failed"
+      in
+      ( Glyph.to_utf8 Glyph.Live_failing ^ " " ^ Say.resolve lang label
       , Theme.Status_critical )
   | Wire_work.Wake_running ->
       ( Glyph.to_utf8 Glyph.Live_working ^ " "

@@ -2636,10 +2636,10 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   match s.last_disposition with
                   | Wire_work.Wake_succeeded ->
                       Glyph.to_utf8 Glyph.Check_mark ^ " ok"
-                  | Wire_work.Wake_skipped r ->
-                      Glyph.to_utf8 Glyph.Live_idle ^ " skip: " ^ r
-                  | Wire_work.Wake_failed r ->
+                  | Wire_work.Wake_failed (Some r) ->
                       Glyph.to_utf8 Glyph.Live_failing ^ " fail: " ^ r
+                  | Wire_work.Wake_failed None ->
+                      Glyph.to_utf8 Glyph.Live_failing ^ " fail"
                   | Wire_work.Wake_running ->
                       Glyph.to_utf8 Glyph.Live_working ^ " running"
                   | Wire_work.Wake_never -> Glyph.to_utf8 Glyph.Missing_absent

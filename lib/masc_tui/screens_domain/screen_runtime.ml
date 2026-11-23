@@ -3181,7 +3181,7 @@ let render_tools_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
             };
             {
               id = "calls";
-              header = Say.make ~ko:"24h 호출" ~en:"Calls 24h";
+              header = Say.make ~ko:"호출" ~en:"Calls";
               priority = 1;
               min_width = 8;
               max_width = Some 11;
@@ -3202,7 +3202,7 @@ let render_tools_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
         let rows =
           List.map
             (fun (t : Wire_runtime.tool_summary) ->
-              let calls_obs = Observed.map float_of_int t.calls_24h in
+              let calls_obs = Observed.map float_of_int t.calls in
               let fail_fg =
                 match Observed.to_option t.failure_rate_pct with
                 | Some f when f >= 10.0 -> Some (Color.of_rgb theme.status_critical)

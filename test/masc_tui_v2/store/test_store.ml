@@ -4284,7 +4284,7 @@ let test_nav_fix6_work_inbox_filter_and_split_pane_clamping () =
         {
           name = Printf.sprintf "tool_%d" i;
           description = None;
-          calls_24h = Observed.value ~observed_at:t0 i;
+          calls = Observed.value ~observed_at:t0 i;
           failure_rate_pct = Observed.value ~observed_at:t0 0.0;
         })
   in

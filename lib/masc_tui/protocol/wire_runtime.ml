@@ -1775,21 +1775,46 @@ let decode_tool_series json =
 type tool_summary = {
   name : string;
   description : string option;
-  calls_24h : int Observed.t;
+  calls : int Observed.t;
   failure_rate_pct : float Observed.t;
 }
 
-let decode_tool_summary ~observed_at json =
+(* /api/v1/dashboard/tools answers [tool_inventory.tools] (every registered
+   tool) and [tool_usage.top_20] (the 20 most-called tools over the retained
+   metrics window, not a 24h window). A tool outside the top 20 has no usage
+   row, so its counts stay Unreported. *)
+let decode_tool_usage_row json =
   let* name = required_nonblank_string json "name" in
-  let* description = optional_nonblank_string json "description" in
-  let* calls_24h = observed_int ~observed_at json "calls_24h" in
-  let* failure_rate_pct = observed_float ~observed_at json "failure_rate_pct" in
-  Ok { name; description; calls_24h; failure_rate_pct }
+  let* calls = required_nonnegative_int_field json "call_count" in
+  let* failures = required_nonnegative_int_field json "failure_count" in
+  Ok (name, calls, failures)
 
 let decode_tools_catalog ~observed_at json =
   let* _, body = unwrap_v2_or_raw json in
-  let* items = required_list_field body "tools" in
-  decode_list "tools" (decode_tool_summary ~observed_at) items
+  let* inventory = required_object_field body "tool_inventory" in
+  let* usage = required_object_field body "tool_usage" in
+  let* tool_items = required_list_field inventory "tools" in
+  let* usage_items = required_list_field usage "top_20" in
+  let* usage_rows = decode_list "top_20" decode_tool_usage_row usage_items in
+  let decode_tool json =
+    let* name = required_nonblank_string json "name" in
+    let* description = optional_nonblank_string json "description" in
+    let calls, failure_rate_pct =
+      match
+        List.find_opt (fun (usage_name, _, _) -> String.equal usage_name name)
+          usage_rows
+      with
+      | None -> (Observed.unreported, Observed.unreported)
+      | Some (_, calls, failures) ->
+          ( Observed.value ~observed_at calls,
+            if calls > 0 then
+              Observed.value ~observed_at
+                (100.0 *. float_of_int failures /. float_of_int calls)
+            else Observed.absent )
+    in
+    Ok { name; description; calls; failure_rate_pct }
+  in
+  decode_list "tools" decode_tool tool_items
 
 type connector_connection =
   | Connector_connected

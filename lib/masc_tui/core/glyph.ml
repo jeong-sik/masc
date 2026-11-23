@@ -38,6 +38,12 @@ type t =
   | Box_br
   | Box_h
   | Box_v
+  | Box_heavy_tl
+  | Box_heavy_tr
+  | Box_heavy_bl
+  | Box_heavy_br
+  | Box_heavy_h
+  | Box_heavy_v
   | Box_tee_l
   | Box_tee_r
   | Box_tee_t
@@ -91,6 +97,12 @@ let to_utf8 = function
   | Box_br -> "╯"
   | Box_h -> "─"
   | Box_v -> "│"
+  | Box_heavy_tl -> "┏"
+  | Box_heavy_tr -> "┓"
+  | Box_heavy_bl -> "┗"
+  | Box_heavy_br -> "┛"
+  | Box_heavy_h -> "━"
+  | Box_heavy_v -> "┃"
   | Box_tee_l -> "├"
   | Box_tee_r -> "┤"
   | Box_tee_t -> "┬"
@@ -137,6 +149,12 @@ let to_ascii_fallback = function
   | Box_br -> "+"
   | Box_h -> "-"
   | Box_v -> "|"
+  | Box_heavy_tl -> "+"
+  | Box_heavy_tr -> "+"
+  | Box_heavy_bl -> "+"
+  | Box_heavy_br -> "+"
+  | Box_heavy_h -> "="
+  | Box_heavy_v -> "|"
   | Box_tee_l -> "+"
   | Box_tee_r -> "+"
   | Box_tee_t -> "+"
@@ -187,6 +205,12 @@ let all =
     Box_br;
     Box_h;
     Box_v;
+    Box_heavy_tl;
+    Box_heavy_tr;
+    Box_heavy_bl;
+    Box_heavy_br;
+    Box_heavy_h;
+    Box_heavy_v;
     Box_tee_l;
     Box_tee_r;
     Box_tee_t;

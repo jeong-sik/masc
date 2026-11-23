@@ -1009,7 +1009,7 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   let tbl_inner =
     Card.draw ~cache grid ~rect:tbl_rect ~theme
-      (H.card_spec ~focused:(model.nav.pane_index = 0)
+      (H.card_spec ~focused:(Model.pane_focused model 0)
          ~hotkey:(Say.resolve lang (Say.make ~ko:"[Enter] 상세" ~en:"[Enter] Dive"))
          (Say.resolve lang
             (Say.make
@@ -1280,7 +1280,7 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
   if not (Rect.is_empty insp_rect) then
     draw_sandbox_inspector ~scroll:inf.detail_scroll_offset ~grid ~cache
       ~rect:insp_rect ~theme ~bp ~lang ~model sel_entry inf.sandboxes
-      ~focused:(model.nav.pane_index = 1)
+      ~focused:(Model.pane_focused model 1)
 
 (* --- 2. Sub-Tab 2: Repos & Read-Only Syntax-Highlighted Diffs --- *)
 
@@ -1410,7 +1410,7 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   let repos_inner =
     Card.draw ~cache grid ~rect:repos_rect ~theme
-      (H.card_spec ~focused:(model.nav.pane_index = 0)
+      (H.card_spec ~focused:(Model.pane_focused model 0)
          ~hotkey:(Say.resolve lang (Say.make ~ko:"[n] 추가" ~en:"[n] Add"))
          (Say.resolve lang (Say.make ~ko:"등록된 Git 저장소" ~en:"Registered Repos")))
   in
@@ -1497,7 +1497,7 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   let ch_inner =
     Card.draw ~cache grid ~rect:changes_rect ~theme
-      (H.card_spec ?subtitle:gap_note ~focused:(model.nav.pane_index = 2)
+      (H.card_spec ?subtitle:gap_note ~focused:(Model.pane_focused model 2)
          (Say.resolve lang
             (Say.make
                ~ko:(Printf.sprintf "키퍼 파일 변경 (%d)" (List.length changes))
@@ -1577,7 +1577,7 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   let diff_inner =
     Card.draw ~cache grid ~rect:right_rect ~theme
-      (H.card_spec ?subtitle:diff_subtitle ~focused:(model.nav.pane_index = 1)
+      (H.card_spec ?subtitle:diff_subtitle ~focused:(Model.pane_focused model 1)
          ~hotkey:(Say.resolve lang (Say.make ~ko:"[o] URL 열기" ~en:"[o] Open URL"))
          (Say.resolve lang (Say.make ~ko:"변경 미리보기" ~en:"Change Preview")))
   in
@@ -1765,7 +1765,7 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   let stream_inner =
     Card.draw ~cache grid ~rect:left_rect ~theme
-      (H.card_spec ~focused:(model.nav.pane_index = 0)
+      (H.card_spec ~focused:(Model.pane_focused model 0)
          ~hotkey:
            (Say.resolve lang
               (Say.make ~ko:"[Space] 레벨 · [/] 필터" ~en:"[Space] Level · [/] Filter"))
@@ -1931,7 +1931,7 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   let det_inner =
     Card.draw ~cache grid ~rect:right_rect ~theme
-      (H.card_spec ?subtitle:det_subtitle ~focused:(model.nav.pane_index = 1)
+      (H.card_spec ?subtitle:det_subtitle ~focused:(Model.pane_focused model 1)
          (Say.resolve lang
             (Say.make ~ko:"구조화 K/V 상세" ~en:"Structured K/V Detail")))
   in
@@ -2223,7 +2223,7 @@ let render_dive_sandbox ~keeper ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   let inner =
     Card.draw ~cache grid ~rect ~theme
-      (H.card_spec ~focused:true ~subtitle:keeper
+      (H.card_spec ~focused:(Model.body_has_focus model) ~subtitle:keeper
          ~badge:
            (H.make_badge
               ~tone:
@@ -2310,7 +2310,7 @@ let render_dive_lane ~lane_id ~(model : Model.t) ~cache ~(rect : Rect.t)
   let active_probes, _ = Runtime_store.active_and_outside_probes rt in
   let inner =
     Card.draw ~cache grid ~rect ~theme
-      (H.card_spec ~focused:true ~subtitle:lane_id
+      (H.card_spec ~focused:(Model.body_has_focus model) ~subtitle:lane_id
          ~badge:
            (H.make_badge
               ~tone:
@@ -2470,7 +2470,7 @@ let render_dive_incident ~incident_id ~(model : Model.t) ~cache ~(rect : Rect.t)
   let inc_opt = Incidents.find_by_id incident_id model.incidents in
   let inner =
     Card.draw ~cache grid ~rect ~theme
-      (H.card_spec ~focused:true
+      (H.card_spec ~focused:(Model.body_has_focus model)
          ~subtitle:("#" ^ string_of_int incident_id)
          ~badge:
            (H.make_badge ~glyph:Glyph.Historical_incident

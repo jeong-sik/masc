@@ -332,31 +332,49 @@ let draw ?cache grid ~(rect : Rect.t) ~(theme : Theme.t) (spec : spec) =
     in
     let right_x = Rect.right rect - 1 in
     let bottom_y = Rect.bottom rect - 1 in
+    let g_tl, g_tr, g_bl, g_br, g_h, g_v =
+      if spec.focused then
+        ( Glyph.Box_heavy_tl,
+          Glyph.Box_heavy_tr,
+          Glyph.Box_heavy_bl,
+          Glyph.Box_heavy_br,
+          Glyph.Box_heavy_h,
+          Glyph.Box_heavy_v )
+      else
+        ( Glyph.Box_tl,
+          Glyph.Box_tr,
+          Glyph.Box_bl,
+          Glyph.Box_br,
+          Glyph.Box_h,
+          Glyph.Box_v )
+    in
     (* Top and bottom horizontal border lines *)
     put_border_glyph grid ~clip:rect ~x:rect.x ~y:rect.y ~style:border_style
-      ~unicode Glyph.Box_tl;
+      ~unicode g_tl;
     put_border_glyph grid ~clip:rect ~x:right_x ~y:rect.y ~style:border_style
-      ~unicode Glyph.Box_tr;
+      ~unicode g_tr;
     put_border_glyph grid ~clip:rect ~x:rect.x ~y:bottom_y ~style:border_style
-      ~unicode Glyph.Box_bl;
+      ~unicode g_bl;
     put_border_glyph grid ~clip:rect ~x:right_x ~y:bottom_y ~style:border_style
-      ~unicode Glyph.Box_br;
+      ~unicode g_br;
     for x = rect.x + 1 to right_x - 1 do
       put_border_glyph grid ~clip:rect ~x ~y:rect.y ~style:border_style
-        ~unicode Glyph.Box_h;
+        ~unicode g_h;
       put_border_glyph grid ~clip:rect ~x ~y:bottom_y ~style:border_style
-        ~unicode Glyph.Box_h
+        ~unicode g_h
     done;
     for y = rect.y + 1 to bottom_y - 1 do
       put_border_glyph grid ~clip:rect ~x:rect.x ~y ~style:border_style
-        ~unicode Glyph.Box_v;
+        ~unicode g_v;
       put_border_glyph grid ~clip:rect ~x:right_x ~y ~style:border_style
-        ~unicode Glyph.Box_v
+        ~unicode g_v
     done;
-    (* Embed left title + subtitle into top border *)
+    (* Embed left title + subtitle into top border. Focused cards lead with an
+       accent Focus_caret chevron and bright anchor title; unfocused cards recede
+       to muted structure text so active focus is unmistakable at a glance. *)
     let title_style =
       if spec.focused then Typography.anchor ~bg theme
-      else Typography.primary ~bg ~bold:true theme
+      else Typography.structure ~bg theme
     in
     let sub_style = Typography.structure ~bg theme in
     let badge_style =
@@ -367,6 +385,11 @@ let draw ?cache grid ~(rect : Rect.t) ~(theme : Theme.t) (spec : spec) =
     let cx = ref (rect.x + 2) in
     let top_clip = Rect.make ~x:(rect.x + 1) ~y:rect.y ~w:(Int.max 0 (rect.w - 2)) ~h:1 in
     if geom.left_title_w > 0 then begin
+      if spec.focused then begin
+        put_border_glyph grid ~clip:top_clip ~x:(rect.x + 1) ~y:rect.y
+          ~style:(Typography.accent ~bg ~bold:true theme)
+          ~unicode Glyph.Focus_caret
+      end;
       Cell_grid.put_ascii ~clip:top_clip grid ~x:!cx ~y:rect.y ~style:border_style ' ';
       cx := !cx + 1;
       let adv = Cell_grid.put_text ~clip:top_clip grid ~x:!cx ~y:rect.y ~style:title_style geom.left_title in

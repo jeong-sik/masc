@@ -1042,6 +1042,30 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     let right_hint_reserve =
       if right_hint_w > 0 then right_hint_w + 3 else 0
     in
+    (* Far-left persistent Focus Pill: makes the active input target unmistakable
+       at a glance across multi-pane bodies, Composer, Filter, and Overlays. *)
+    if avail_w >= 28 then begin
+      let focus_raw = Say.resolve model.lang (Model.active_focus_label model) in
+      let max_fw = if compact then 16 else 24 in
+      let focus_txt =
+        Printf.sprintf " %s %s "
+          (Glyph.to_utf8 Glyph.Focus_caret)
+          (Grapheme.truncate_to_width ~max_width:max_fw focus_raw)
+      in
+      let pill_bg = Color.of_rgb theme.surface_2 in
+      let focus_st =
+        if model.nav.filter_focused || Drafts.is_focused model.drafts then
+          Typography.status ~bg:pill_bg ~bold:true theme Theme.Status_attention
+        else if Option.is_some model.nav.overlay then
+          Typography.status ~bg:pill_bg ~bold:true theme Theme.Status_ai
+        else Typography.accent ~bg:pill_bg ~bold:true theme
+      in
+      let f_adv =
+        Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y ~style:focus_st
+          focus_txt
+      in
+      x := !x + f_adv + 2
+    end;
     (* On Compact idle (when no overlay is open), fold composer cleanly into left side *)
     if composer_folded && Option.is_none model.nav.overlay && avail_w >= 16 then
       begin

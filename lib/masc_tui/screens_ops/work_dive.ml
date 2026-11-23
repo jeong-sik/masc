@@ -281,7 +281,7 @@ let render_goal_dive ~goal_id ~(model : Model.t) ~cache ~(rect : Rect.t)
         subtitle = (match g_opt with Some g -> Some g.title | None -> None);
         badge;
         hotkey = Some "[a] Confirm · [x] Pause · [Space] JSON · [Esc] Back";
-        focused = true;
+        focused = Model.body_has_focus model;
       }
     in
     let inner = Card.draw ~cache grid ~rect:main_card_rect ~theme spec in
@@ -645,7 +645,7 @@ let render_task_dive ~task_id ~(model : Model.t) ~cache ~(rect : Rect.t)
         subtitle = (match tk_opt with Some tk -> Some tk.title | None -> None);
         badge;
         hotkey = Some "[x] Cancel · [Space] JSON · [Esc] Back";
-        focused = true;
+        focused = Model.body_has_focus model;
       }
     in
     let inner = Card.draw ~cache grid ~rect:main_card_rect ~theme spec in
@@ -842,7 +842,7 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
         subtitle = (match v_opt with Some v -> Some v.task_title | None -> None);
         badge;
         hotkey = Some "[a] Approve · [x] Reject · [Space] JSON · [Esc] Back";
-        focused = true;
+        focused = Model.body_has_focus model;
       }
     in
     let inner = Card.draw ~cache grid ~rect:main_card_rect ~theme spec in

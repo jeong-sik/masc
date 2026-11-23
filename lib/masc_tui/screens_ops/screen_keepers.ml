@@ -652,10 +652,16 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
             | Some sn -> String.equal k.name sn
             | None -> false
           in
-          let bg_rgb = if is_sel then theme.selection_bg else theme.surface_1 in
+          let rail_focused = Model.pane_focused model 0 in
+          let bg_rgb =
+            if is_sel && rail_focused then theme.selection_bg
+            else if is_sel then theme.surface_2
+            else theme.surface_1
+          in
           let bg = Color.of_rgb bg_rgb in
           let base_st =
-            if is_sel then Typography.anchor ~bg theme
+            if is_sel && rail_focused then Typography.anchor ~bg theme
+            else if is_sel then Typography.primary ~bg theme
             else Typography.primary ~bg theme
           in
           Cell_grid.fill_rect ~clip:rect grid ~rect:row_rect ~style:base_st ();
@@ -663,10 +669,15 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
           let glyph, tone, _ =
             keeper_row_status ~has_attention:has_attn k
           in
-          (* Calm v2.5 selection: Left_rail (▎) in accent Bold, NEVER whitewash semantic glyph! *)
-          if is_sel then
-            Card.draw_left_rail ~bg ~color:theme.accent grid ~x:rect.x ~y:py
-              ~h:1 ~theme;
+          (* Calm v2.5 selection: Left_rail (▎) in accent Bold when focused,
+             muted border_inactive when focus moved to Preview/Composer. *)
+          if is_sel then begin
+            let rail_color =
+              if rail_focused then theme.accent else theme.border_inactive
+            in
+            Card.draw_left_rail ~bg ~color:rail_color grid ~x:rect.x ~y:py
+              ~h:1 ~theme
+          end;
           Cell_grid.put_glyph ~clip:row_rect grid ~x:(rect.x + 2) ~y:py
             ~style:(Typography.status ~bg ~bold:true theme tone)
             glyph;
@@ -1098,7 +1109,7 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                        tone = Some Theme.Status_ok;
                      });
               hotkey = Some "/Filter";
-              focused = model.nav.pane_index = 0;
+              focused = Model.pane_focused model 0;
             }
           in
           let left_inner =
@@ -1163,7 +1174,7 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
             Some
               (Ops_common.say model ~ko:"[Enter] 상세 · [←→] 모드"
                  ~en:"[Enter] Dive · [←→] Mode");
-          focused = true;
+          focused = Model.body_has_focus model;
         }
       in
       let inner = Card.draw ~cache grid ~rect ~theme roster_spec in

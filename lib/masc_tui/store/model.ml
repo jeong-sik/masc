@@ -541,6 +541,147 @@ let focus_scope_chain m =
   in
   Keymap.scope_chain_of_focus ~approval_strip_active (active_focus_scope m)
 
+let body_has_focus m =
+  (not (is_too_small_viewport m.viewport))
+  && Option.is_none m.nav.overlay
+  && (not m.nav.filter_focused)
+  && not (Drafts.is_focused m.drafts)
+
+let pane_focused m idx = body_has_focus m && Int.equal m.nav.pane_index idx
+
+let active_focus_label m =
+  let pane_prefix ~ko ~en =
+    let n = focusable_pane_count m in
+    if n > 1 then
+      let idx = Int.min n (Int.max 1 (m.nav.pane_index + 1)) in
+      Say.make
+        ~ko:(Printf.sprintf "%d/%d %s" idx n ko)
+        ~en:(Printf.sprintf "%d/%d %s" idx n en)
+    else Say.make ~ko ~en
+  in
+  match m.nav.overlay with
+  | Some Nav.Help -> Say.make ~ko:"오버레이 · 도움말" ~en:"OVERLAY · Help"
+  | Some Nav.Palette -> Say.make ~ko:"오버레이 · 팔레트" ~en:"OVERLAY · Palette"
+  | Some (Nav.Settings _) ->
+      if Config_store.is_two_pane_width ~cols:m.viewport.cols then
+        if
+          Config_store.equal_settings_pane m.config.settings_pane
+            Config_store.Pane_tree
+        then Say.make ~ko:"설정 · 트리" ~en:"SETTINGS · Tree"
+        else Say.make ~ko:"설정 · 인스펙터" ~en:"SETTINGS · Inspector"
+      else Say.make ~ko:"오버레이 · 설정" ~en:"OVERLAY · Settings"
+  | Some Nav.Incidents ->
+      Say.make ~ko:"오버레이 · 이력" ~en:"OVERLAY · Incidents"
+  | Some (Nav.Queue_context _) ->
+      Say.make ~ko:"오버레이 · 큐/컨텍스트" ~en:"OVERLAY · Queue/Ctx"
+  | Some (Nav.Inline_action _) ->
+      Say.make ~ko:"입력 모달" ~en:"MODAL"
+  | Some (Nav.System_gate _) ->
+      Say.make ~ko:"시스템 게이트" ~en:"SYSTEM GATE"
+  | None -> (
+      if m.nav.filter_focused then Say.make ~ko:"필터 입력" ~en:"FILTER"
+      else if Drafts.is_focused m.drafts then
+        let k =
+          match m.drafts.active_keeper with
+          | Some name when not (String.equal (String.trim name) "") ->
+              " @" ^ name
+          | Some _ | None -> ""
+        in
+        Say.make ~ko:("입력창" ^ k) ~en:("COMPOSER" ^ k)
+      else
+        match active_dive m with
+        | Some (Nav.Dive_keeper { name; _ }) ->
+            Say.make ~ko:("상세 · " ^ name) ~en:("DIVE · " ^ name)
+        | Some (Nav.Dive_work _) ->
+            Say.make ~ko:"작업 상세" ~en:"WORK DIVE"
+        | Some (Nav.Dive_knowledge _) ->
+            Say.make ~ko:"지식 상세" ~en:"KNOWLEDGE DIVE"
+        | Some (Nav.Dive_infra (Nav.Lane_dive id)) ->
+            Say.make ~ko:("레인 · " ^ id) ~en:("LANE · " ^ id)
+        | Some (Nav.Dive_infra (Nav.Sandbox_dive _ | Nav.Incident_dive _)) ->
+            Say.make ~ko:"인프라 상세" ~en:"INFRA DIVE"
+        | None -> (
+            match m.nav.workspace with
+            | Nav.Pulse -> (
+                match active_pulse_pane m with
+                | Pulse_attention -> pane_prefix ~ko:"확인 대기" ~en:"Attention"
+                | Pulse_companies -> pane_prefix ~ko:"조직" ~en:"Companies"
+                | Pulse_goals -> pane_prefix ~ko:"목표" ~en:"Goals"
+                | Pulse_world -> pane_prefix ~ko:"월드 펄스" ~en:"World")
+            | Nav.Work -> (
+                match m.work.active_tab with
+                | Nav.Work_pipeline -> (
+                    match m.nav.pane_index with
+                    | 0 -> pane_prefix ~ko:"목표" ~en:"Goals"
+                    | 1 when work_pipeline_has_linked_card m ->
+                        pane_prefix ~ko:"검증" ~en:"Verifs"
+                    | _ -> pane_prefix ~ko:"목표 상세" ~en:"Detail")
+                | Nav.Work_tasks_schedules ->
+                    if m.nav.pane_index = 1 then
+                      pane_prefix ~ko:"예약 일정" ~en:"Schedules"
+                    else pane_prefix ~ko:"작업 목록" ~en:"Tasks"
+                | Nav.Work_inbox ->
+                    if m.nav.pane_index = 1 then
+                      pane_prefix ~ko:"인스펙터" ~en:"Inspector"
+                    else pane_prefix ~ko:"수신함" ~en:"Inbox"
+                | Nav.Work_candle_scorecard ->
+                    Say.make ~ko:"캔들 · 원장" ~en:"Candle")
+            | Nav.Knowledge -> (
+                match m.knowledge.active_tab with
+                | Nav.Knowledge_board ->
+                    if m.nav.pane_index = 1 then
+                      pane_prefix ~ko:"타래 보기" ~en:"Thread"
+                    else pane_prefix ~ko:"보드" ~en:"Board"
+                | Nav.Knowledge_wiki_artifacts -> (
+                    match m.knowledge.wiki_artifacts_submode with
+                    | `Wiki ->
+                        if m.nav.pane_index = 1 then
+                          pane_prefix ~ko:"위키 보기" ~en:"Wiki View"
+                        else pane_prefix ~ko:"위키 트리" ~en:"Wiki Tree"
+                    | `Artifacts ->
+                        if m.nav.pane_index = 1 then
+                          pane_prefix ~ko:"산출물 상세" ~en:"Artifact"
+                        else pane_prefix ~ko:"산출물 목록" ~en:"Artifacts")
+                | Nav.Knowledge_memory ->
+                    if m.nav.pane_index = 1 then
+                      pane_prefix ~ko:"기억 탐색" ~en:"Explorer"
+                    else pane_prefix ~ko:"기억 범위" ~en:"Memory Scope")
+            | Nav.Keepers ->
+                if m.nav.pane_index = 1 then
+                  pane_prefix ~ko:"키퍼 프리뷰" ~en:"Preview"
+                else pane_prefix ~ko:"키퍼 목록" ~en:"Fleet"
+            | Nav.Runtime -> (
+                match m.runtime.active_tab with
+                | Nav.Runtime_quotas_credits ->
+                    if m.nav.pane_index = 1 then
+                      pane_prefix ~ko:"크레딧" ~en:"Credits"
+                    else pane_prefix ~ko:"할당량" ~en:"Quotas"
+                | Nav.Runtime_efficiency_spend ->
+                    Say.make ~ko:"효율 · 지출" ~en:"Efficiency"
+                | Nav.Runtime_failover_lanes ->
+                    if m.nav.pane_index = 1 then
+                      pane_prefix ~ko:"레인 상세" ~en:"Lane Health"
+                    else pane_prefix ~ko:"페일오버" ~en:"Lanes"
+                | Nav.Runtime_tools_connectors ->
+                    if m.nav.pane_index = 1 then
+                      pane_prefix ~ko:"커넥터·MCP" ~en:"Connectors"
+                    else pane_prefix ~ko:"도구 목록" ~en:"Tools")
+            | Nav.Infra -> (
+                match m.infra.active_tab with
+                | Nav.Infra_sandboxes ->
+                    if m.nav.pane_index = 1 then
+                      pane_prefix ~ko:"샌드박스 상세" ~en:"Inspector"
+                    else pane_prefix ~ko:"샌드박스" ~en:"Sandboxes"
+                | Nav.Infra_repos_changes -> (
+                    match m.nav.pane_index with
+                    | 0 -> pane_prefix ~ko:"저장소" ~en:"Repos"
+                    | 2 -> pane_prefix ~ko:"파일 변경" ~en:"Changes"
+                    | _ -> pane_prefix ~ko:"Diff" ~en:"Diff")
+                | Nav.Infra_activity_logs ->
+                    if m.nav.pane_index = 1 then
+                      pane_prefix ~ko:"로그 상세" ~en:"Detail"
+                    else pane_prefix ~ko:"활동·로그" ~en:"Logs")))
+
 let is_keeper_config_active m =
   Option.is_none m.nav.overlay
   &&

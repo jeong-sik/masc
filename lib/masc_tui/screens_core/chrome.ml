@@ -689,10 +689,8 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
                Say.resolve lang (Say.make ~ko:"타래" ~en:"Thread") ^ " " ^ id
            | Nav.Wiki_dive slug ->
                Say.resolve lang (Say.make ~ko:"위키" ~en:"Wiki") ^ " " ^ slug
-           | Nav.Artifact_dive sha ->
-               Say.resolve lang (Say.make ~ko:"산출물" ~en:"Artifact")
-               ^ " "
-               ^ Grapheme.truncate_to_width ~max_width:12 sha
+           | Nav.Artifact_dive id ->
+               Say.resolve lang (Say.make ~ko:"산출물" ~en:"Artifact") ^ " " ^ id
            | Nav.Memory_diff_dive { keeper; from_rev; to_rev } ->
                let scope =
                  match keeper with

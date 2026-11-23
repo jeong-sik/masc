@@ -1954,8 +1954,7 @@ let enter_plan (m : Model.t) : enter_plan =
               | `Artifacts -> (
                   match Knowledge_store.selected_artifact m.knowledge with
                   | Some a ->
-                      Enter_push
-                        (Nav.Dive_knowledge (Nav.Artifact_dive a.sha256))
+                      Enter_push (Nav.Dive_knowledge (Nav.Artifact_dive a.id))
                   | None -> Enter_noop))
           | Nav.Knowledge_memory -> (
               let diff_plan () =
@@ -3446,7 +3445,7 @@ let knowledge_detail_max_scroll (m : Model.t) =
       | `Artifacts -> (
           match Knowledge_store.selected_artifact k with
           | None -> 0
-          | Some a ->
+          | Some _ ->
               let _, right_rect =
                 Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
                   ~left_ratio:0.56 ~top_ratio:0.54 bp body_after_bar
@@ -3459,12 +3458,9 @@ let knowledge_detail_max_scroll (m : Model.t) =
                 |> ui_pad_content ~bp
               in
               let content_h = max 1 content.h in
-              let total_rows =
-                2
-                + (if Option.is_some a.producer then 1 else 0)
-                + (if Option.is_some a.created_at_unix then 1 else 0)
-                + 1
-              in
+              (* ID, SHA-256, Author, Created and the viewer link, as
+                 Screen_knowledge draws them. *)
+              let total_rows = 5 in
               max 0 (total_rows - content_h)))
   | Nav.Knowledge_memory ->
       let right_rect =
@@ -4267,7 +4263,7 @@ let dive_max_scroll (m : Model.t) active =
       in
       wiki_preview_max_scroll ~bp ~theme ~rect:main_rect
         ~target_slug:(Some slug) m.knowledge
-  | Nav.Dive_knowledge (Nav.Artifact_dive sha256) ->
+  | Nav.Dive_knowledge (Nav.Artifact_dive id) ->
       let inner = ui_card_inner br in
       let content = ui_pad_content ~bp inner in
       let artifacts =
@@ -4275,18 +4271,13 @@ let dive_max_scroll (m : Model.t) active =
         | Some xs -> xs
         | None -> []
       in
+      (* Title, Summary, Revision, MIME, Size, SHA-256, Author, Created and
+         the viewer link, as Screen_knowledge.render_dive_artifact draws
+         them. *)
       let header_rows =
-        match
-          List.find_opt
-            (fun (a : Wire_knowledge.artifact_entry) ->
-              String.equal a.sha256 sha256)
-            artifacts
-        with
+        match Knowledge_store.artifact_by_id m.knowledge id with
         | None -> 0
-        | Some a ->
-            5
-            + (if Option.is_some a.title then 1 else 0)
-            + (if Option.is_some a.producer then 1 else 0)
+        | Some _ -> 9
       in
       if artifacts = [] || header_rows + 1 >= content.h then 0
       else

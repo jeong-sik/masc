@@ -285,8 +285,19 @@ let decode_board_comment json =
       decode_timestamp_unix json "created_at_unix"
     else decode_timestamp_unix json "created_at"
   in
-  let* score = int_field_or json "score" ~default:0 in
-  Ok { id; post_id; parent_id; author; body; created_at_unix; score }
+  (* A thread comment carries its vote tallies, not a score. *)
+  let* votes_up = required_nonnegative_int_field json "votes_up" in
+  let* votes_down = required_nonnegative_int_field json "votes_down" in
+  Ok
+    {
+      id;
+      post_id;
+      parent_id;
+      author;
+      body;
+      created_at_unix;
+      score = votes_up - votes_down;
+    }
 
 let decode_board_feed ~observed_at json =
   let* _, body = unwrap_v2_or_raw json in
@@ -361,13 +372,25 @@ type wiki_frontmatter = {
   tags : string list;
 }
 
+type wiki_unsupported_link =
+  | Unsupported_anchor
+  | Unsupported_scheme
+  | Unsupported_path
+  | Unsupported_not_markdown
+  | Unsupported_wikilink
+
+type wiki_link_target =
+  | Link_page of { slug : string; exists : bool }
+  | Link_own_file of string
+  | Link_external of string
+  | Link_invalid_name of string
+  | Link_unsupported of wiki_unsupported_link
+
 type wiki_outgoing_link = {
   text : string;
-  kind : string;
-  target : string;
+  target : wiki_link_target;
   raw : string;
   line : int;
-  exists : bool option;
 }
 
 type wiki_lint_kind =
@@ -742,15 +765,37 @@ let decode_wiki_frontmatter json =
   let* tags = required_string_list json "tags" in
   Ok { title; summary; source; author; created; updated; revision; tags }
 
+(* The [kind] spellings are the server's [link_to_json] in
+   server_dashboard_http_wiki.ml. Only a [page] link carries [exists]. *)
+let decode_wiki_link_target json =
+  let* kind = required_string_field json "kind" in
+  match kind with
+  | "page" ->
+      let* slug = required_nonblank_string json "target" in
+      let* exists = required_bool_field json "exists" in
+      Ok (Link_page { slug; exists })
+  | "own_file" ->
+      let* file = required_nonblank_string json "target" in
+      Ok (Link_own_file file)
+  | "external" ->
+      let* url = required_nonblank_string json "target" in
+      Ok (Link_external url)
+  | "invalid_name" ->
+      let* raw = required_nonblank_string json "target" in
+      Ok (Link_invalid_name raw)
+  | "unsupported:anchor" -> Ok (Link_unsupported Unsupported_anchor)
+  | "unsupported:scheme" -> Ok (Link_unsupported Unsupported_scheme)
+  | "unsupported:path" -> Ok (Link_unsupported Unsupported_path)
+  | "unsupported:not_markdown" -> Ok (Link_unsupported Unsupported_not_markdown)
+  | "unsupported:wikilink" -> Ok (Link_unsupported Unsupported_wikilink)
+  | other -> Error (Printf.sprintf "unknown wiki link kind %S" other)
+
 let decode_wiki_outgoing_link json =
   let* text = required_string_field json "text" in
-  let* kind = required_nonblank_string json "kind" in
-  let* target = required_nonblank_string json "target" in
+  let* target = decode_wiki_link_target json in
   let* raw = required_string_field json "raw" in
   let* line = required_nonnegative_int_field json "line" in
-  (* [exists] is [null] for [own_file], [external], and [unsupported:*] links. *)
-  let* exists = optional_bool_field json "exists" in
-  Ok { text; kind; target; raw; line; exists }
+  Ok ({ text; target; raw; line } : wiki_outgoing_link)
 
 let decode_wiki_page_detail json =
   let* _, body = unwrap_v2_or_raw json in
@@ -910,25 +955,47 @@ let encode_wiki_put_request req =
         ("note", `String req.note);
       ])
 
-type artifact_entry = {
+type artifact_body = {
   sha256 : string;
-  name : string;
-  mime_type : string;
   bytes : int;
-  created_at_unix : float option;
-  producer : string option;
-  title : string option;
+  mime : string;
 }
 
+type artifact_entry = {
+  id : string;
+  revision : int;
+  title : string;
+  summary : string;
+  author : string;
+  created_at_unix : float;
+  body : artifact_body;
+}
+
+(* A row is [Published_artifact.summary_to_json]: the latest revision of one
+   artifact, its body a content-addressed [_blob] reference. *)
+let decode_artifact_body json =
+  let* blob = required_object_field json "_blob" in
+  let* sha256 = required_nonblank_string blob "sha256" in
+  let* bytes = required_nonnegative_int_field blob "bytes" in
+  let* mime = required_nonblank_string blob "mime" in
+  Ok ({ sha256; bytes; mime } : artifact_body)
+
 let decode_artifact_entry json =
-  let* sha256 = required_nonblank_string json "sha256" in
-  let* name = required_nonblank_string json "name" in
-  let* mime_type = required_nonblank_string json "mime_type" in
-  let* bytes = required_nonnegative_int_field json "bytes" in
-  let* created_at_unix = decode_optional_timestamp_unix json "created_at_unix" in
-  let* producer = optional_nonblank_string json "producer" in
-  let* title = optional_nonblank_string json "title" in
-  Ok { sha256; name; mime_type; bytes; created_at_unix; producer; title }
+  let* id = required_nonblank_string json "id" in
+  let* revision = required_int_field json "revision" in
+  let* () =
+    if revision >= 1 then Ok ()
+    else Error (Printf.sprintf "field \"revision\" must be >= 1, got %d" revision)
+  in
+  let* title = required_nonblank_string json "title" in
+  let* summary = required_nonblank_string json "summary" in
+  let* author = required_nonblank_string json "author" in
+  let* created_at_unix = decode_timestamp_unix json "created_at" in
+  let* body_obj = required_object_field json "body" in
+  let* body = decode_artifact_body body_obj in
+  Ok
+    ({ id; revision; title; summary; author; created_at_unix; body }
+      : artifact_entry)
 
 let decode_artifacts_list json =
   let* _, body = unwrap_v2_or_raw json in

@@ -1457,17 +1457,9 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
       in
       if not (Rect.is_empty left_inner) then begin
         match k.artifacts with
-        | Observed.Value { data = items; _ } ->
+        | Observed.Value _ ->
             let q = String.trim k.filter_query in
-            let visible_items =
-              if String.equal q "" then items
-              else
-                List.filter
-                  (fun (a : Wire_knowledge.artifact_entry) ->
-                    H.contains_ci ~needle:q a.name
-                    || H.contains_ci ~needle:q a.sha256)
-                  items
-            in
+            let visible_items = Knowledge_store.artifacts_filtered k in
             if visible_items = [] then
               H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp left_inner)
                 ~theme
@@ -1509,8 +1501,8 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
                     align = Table.Right;
                   };
                   {
-                    id = "producer";
-                    header = Say.make ~ko:"생성자" ~en:"Producer";
+                    id = "author";
+                    header = Say.make ~ko:"작성자" ~en:"Author";
                     priority = 3;
                     min_width = 10;
                     max_width = Some 18;
@@ -1522,30 +1514,20 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
               let rows =
                 List.map
                   (fun (a : Wire_knowledge.artifact_entry) ->
-                    let display =
-                      match a.title with
-                      | Some t when not (String.equal (String.trim t) "") -> t
-                      | Some _ | None -> a.name
-                    in
-                    let prod =
-                      match a.producer with
-                      | Some p -> p
-                      | None -> Glyph.to_utf8 Glyph.Missing_absent
-                    in
                     {
-                      Table.id = a.sha256;
+                      Table.id = a.id;
                       cells =
                         [
-                          ("name", Table.text_cell display);
+                          ("name", Table.text_cell a.title);
                           ( "mime"
                           , Table.text_cell
                               ~fg:(Color.of_rgb theme.text_secondary)
-                              a.mime_type );
+                              a.body.mime );
                           ( "size"
                           , Table.text_cell
                               (Format_val.format_value Format_val.Bytes
-                                 (float_of_int a.bytes)) );
-                          ("producer", Table.text_cell prod);
+                                 (float_of_int a.body.bytes)) );
+                          ("author", Table.text_cell a.author);
                         ];
                     })
                   visible_items
@@ -1577,39 +1559,35 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
               ~rect:(H.pad_content ~bp right_inner) ~theme ~lang k.artifacts
         | Some a ->
             let pad_x = Layout.card_pad_x bp in
-            let title_s = Option.value ~default:a.name a.title in
             let band_h = if right_inner.h >= 7 then 2 else 1 in
             Card.draw_section_band ~pad_x grid
               ~rect:(Rect.make ~x:right_inner.x ~y:right_inner.y
                        ~w:right_inner.w ~h:band_h)
-              ~theme ~left_title:title_s
+              ~theme ~left_title:a.title
               ~right_meta:
-                (Format_val.format_value Format_val.Bytes (float_of_int a.bytes))
-              ?subtitle:(if band_h >= 2 then Some a.mime_type else None)
+                (Format_val.format_value Format_val.Bytes
+                   (float_of_int a.body.bytes))
+              ?subtitle:(if band_h >= 2 then Some a.body.mime else None)
               ();
             let content =
               Rect.make ~x:right_inner.x ~y:(right_inner.y + band_h)
                 ~w:right_inner.w ~h:(Int.max 0 (right_inner.h - band_h))
               |> H.pad_content ~bp
             in
-            let rows_acc = ref [] in
-            let push_kv key value = rows_acc := `Kv (key, value) :: !rows_acc in
-            push_kv (Say.resolve lang (Say.make ~ko:"파일" ~en:"File")) a.name;
-            push_kv "SHA-256" a.sha256;
-            (match a.producer with
-             | Some p ->
-                 push_kv
-                   (Say.resolve lang (Say.make ~ko:"생성자" ~en:"Producer"))
-                   p
-             | None -> ());
-            (match a.created_at_unix with
-             | Some ts ->
-                 push_kv
-                   (Say.resolve lang (Say.make ~ko:"생성" ~en:"Created"))
-                   (Wire_common.format_unix_rfc3339 ts)
-             | None -> ());
-            rows_acc := `Link a.sha256 :: !rows_acc;
-            let rows = List.rev !rows_acc in
+            (* Update_nav.knowledge_detail_max_scroll counts these rows. *)
+            let rows =
+              [
+                `Kv ("ID", a.id);
+                `Kv ("SHA-256", a.body.sha256);
+                `Kv
+                  ( Say.resolve lang (Say.make ~ko:"작성자" ~en:"Author"),
+                    a.author );
+                `Kv
+                  ( Say.resolve lang (Say.make ~ko:"생성" ~en:"Created"),
+                    Wire_common.format_unix_rfc3339 a.created_at_unix );
+                `Link (a.id, a.body.sha256);
+              ]
+            in
             let vis_h = Int.max 1 content.h in
             let max_skip = Int.max 0 (List.length rows - vis_h) in
             let skip = Int.min max_skip (Int.max 0 k.detail_scroll_offset) in
@@ -1622,9 +1600,9 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
                         ~max_w:content.w ~theme ~key_w:9 ~key value;
                       incr y
                     end
-                | `Link sha ->
+                | `Link (id, sha) ->
                     if !y < bottom then begin
-                      let uri = "masc://artifact/" ^ sha in
+                      let uri = "masc://artifact/" ^ id in
                       ignore
                         (H.put_link ~grid ~clip:content ~x:content.x ~y:!y
                            ~max_w:content.w ~style:(H.accent_style ~theme ())
@@ -2628,19 +2606,39 @@ let render_dive_wiki ~slug ~(model : Model.t) ~cache ~(rect : Rect.t)
         List.iter
           (fun (ol : Wire_knowledge.wiki_outgoing_link) ->
             if !y < bottom then begin
-              let tone, g =
-                match ol.exists with
-                | Some false -> (Theme.Status_critical, Glyph.Live_failing)
-                | Some true -> (Theme.Status_ok, Glyph.Check_mark)
-                | None -> (Theme.Status_active, Glyph.Focus_caret)
+              let tone, g, shown, uri =
+                match ol.target with
+                | Wire_knowledge.Link_page { slug; exists = true } ->
+                    ( Theme.Status_ok,
+                      Glyph.Check_mark,
+                      slug,
+                      Some ("masc://wiki/" ^ slug) )
+                | Wire_knowledge.Link_page { slug; exists = false } ->
+                    ( Theme.Status_critical,
+                      Glyph.Live_failing,
+                      slug,
+                      Some ("masc://wiki/" ^ slug) )
+                | Wire_knowledge.Link_invalid_name raw ->
+                    (Theme.Status_critical, Glyph.Live_failing, raw, None)
+                | Wire_knowledge.Link_external url ->
+                    (Theme.Status_active, Glyph.Focus_caret, url, Some url)
+                | Wire_knowledge.Link_own_file file ->
+                    (Theme.Status_active, Glyph.Focus_caret, file, None)
+                | Wire_knowledge.Link_unsupported _ ->
+                    (Theme.Status_active, Glyph.Focus_caret, ol.raw, None)
               in
               let lbl =
-                Printf.sprintf "%s %s -> %s" (Glyph.to_utf8 g) ol.text ol.target
+                Printf.sprintf "%s %s -> %s" (Glyph.to_utf8 g) ol.text shown
               in
+              let style = H.status_style ~theme tone in
               ignore
-                (H.put_link ~grid ~clip:side_inner ~x:side_inner.x ~y:!y
-                   ~max_w:side_inner.w ~style:(H.status_style ~theme tone)
-                   ~uri:ol.target lbl);
+                (match uri with
+                | Some uri ->
+                    H.put_link ~grid ~clip:side_inner ~x:side_inner.x ~y:!y
+                      ~max_w:side_inner.w ~style ~uri lbl
+                | None ->
+                    H.put_clipped ~grid ~clip:side_inner ~x:side_inner.x
+                      ~y:!y ~max_w:side_inner.w ~style lbl);
               incr y
             end)
           (H.safe_take 6 d.outgoing_links);
@@ -2677,22 +2675,17 @@ let render_dive_wiki ~slug ~(model : Model.t) ~cache ~(rect : Rect.t)
           k.wiki_page
   end
 
-let render_dive_artifact ~sha256 ~(model : Model.t) ~cache ~(rect : Rect.t)
+let render_dive_artifact ~id ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp grid =
   let lang = model.lang in
   let k = model.knowledge in
   let artifacts =
     match Observed.to_option k.artifacts with Some xs -> xs | None -> []
   in
-  let target =
-    List.find_opt
-      (fun (a : Wire_knowledge.artifact_entry) -> String.equal a.sha256 sha256)
-      artifacts
-  in
+  let target = Knowledge_store.artifact_by_id k id in
   let inner =
     Card.draw ~cache grid ~rect ~theme
-      (H.card_spec ~focused:true
-         ~subtitle:(H.short_hash ~len:12 sha256)
+      (H.card_spec ~focused:true ~subtitle:id
          ~hotkey:(Say.resolve lang (Say.make ~ko:"[Esc] 뒤로" ~en:"[Esc] Back"))
          (Say.resolve lang
             (Say.make ~ko:"지식 > 아티팩트 뷰어" ~en:"Knowledge > Artifact Viewer")))
@@ -2712,25 +2705,27 @@ let render_dive_artifact ~sha256 ~(model : Model.t) ~cache ~(rect : Rect.t)
              incr y
            end
          in
-         put_row (Say.resolve lang (Say.make ~ko:"이름" ~en:"Name")) a.name;
-         (match a.title with
-          | Some t ->
-              put_row (Say.resolve lang (Say.make ~ko:"제목" ~en:"Title")) t
-          | None -> ());
-         put_row "MIME" a.mime_type;
+         (* Update_nav.dive_max_scroll counts these rows. *)
+         put_row (Say.resolve lang (Say.make ~ko:"제목" ~en:"Title")) a.title;
+         put_row (Say.resolve lang (Say.make ~ko:"요약" ~en:"Summary")) a.summary;
+         put_row
+           (Say.resolve lang (Say.make ~ko:"리비전" ~en:"Revision"))
+           (Printf.sprintf "r%d" a.revision);
+         put_row "MIME" a.body.mime;
          put_row
            (Say.resolve lang (Say.make ~ko:"크기" ~en:"Size"))
-           (Format_val.format_value Format_val.Bytes (float_of_int a.bytes));
-         put_row "SHA-256" a.sha256;
-         (match a.producer with
-          | Some p ->
-              put_row (Say.resolve lang (Say.make ~ko:"생성자" ~en:"Producer")) p
-          | None -> ());
+           (Format_val.format_value Format_val.Bytes
+              (float_of_int a.body.bytes));
+         put_row "SHA-256" a.body.sha256;
+         put_row (Say.resolve lang (Say.make ~ko:"작성자" ~en:"Author")) a.author;
+         put_row
+           (Say.resolve lang (Say.make ~ko:"생성" ~en:"Created"))
+           (Wire_common.format_unix_rfc3339 a.created_at_unix);
          if !y < bottom then begin
            ignore
              (H.put_link ~grid ~clip:content ~x:content.x ~y:!y ~max_w:content.w
                 ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
-                ~uri:("masc://artifact/" ^ a.sha256)
+                ~uri:("masc://artifact/" ^ a.id)
                 (Say.resolve lang
                    (Say.make ~ko:"[o] 아티팩트 뷰어 열기"
                       ~en:"[o] Open artifact viewer")));
@@ -2740,7 +2735,7 @@ let render_dive_artifact ~sha256 ~(model : Model.t) ~cache ~(rect : Rect.t)
       H.draw_divider ~grid ~rect:content ~y:!y ~theme
         ~label:
           (Say.resolve lang
-             (Say.make ~ko:"아티팩트 리비전 목록" ~en:"Artifact Revisions"))
+             (Say.make ~ko:"발행 아티팩트 목록" ~en:"Published Artifacts"))
         ();
       incr y;
       let rev_vis_h = Int.max 1 (bottom - !y) in
@@ -2752,7 +2747,7 @@ let render_dive_artifact ~sha256 ~(model : Model.t) ~cache ~(rect : Rect.t)
       List.iter
         (fun (a : Wire_knowledge.artifact_entry) ->
           if !y < bottom then begin
-            let is_cur = String.equal a.sha256 sha256 in
+            let is_cur = String.equal a.id id in
             let row_rect =
               Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1
             in
@@ -2766,10 +2761,9 @@ let render_dive_artifact ~sha256 ~(model : Model.t) ~cache ~(rect : Rect.t)
               else H.secondary_style ~theme ~bg:row_bg ()
             in
             let line =
-              Printf.sprintf "%s · %s · %s"
-                (H.short_hash ~len:10 a.sha256)
-                a.name
-                (Format_val.format_value Format_val.Bytes (float_of_int a.bytes))
+              Printf.sprintf "r%d · %s · %s" a.revision a.title
+                (Format_val.format_value Format_val.Bytes
+                   (float_of_int a.body.bytes))
             in
             ignore
               (H.put_clipped ~grid ~clip:content ~x:(content.x + 2) ~y:!y
@@ -2811,8 +2805,8 @@ let render_dive ~(target : Nav.knowledge_dive_target) ~(model : Model.t) ~cache
         render_dive_thread ~post_id ~model ~cache ~rect:body ~theme ~bp grid
     | Nav.Wiki_dive slug ->
         render_dive_wiki ~slug ~model ~cache ~rect:body ~theme ~bp grid
-    | Nav.Artifact_dive sha256 ->
-        render_dive_artifact ~sha256 ~model ~cache ~rect:body ~theme ~bp grid
+    | Nav.Artifact_dive id ->
+        render_dive_artifact ~id ~model ~cache ~rect:body ~theme ~bp grid
     | Nav.Memory_diff_dive { keeper; from_rev; to_rev } ->
         render_dive_memory ~keeper ~from_rev ~to_rev ~model ~cache ~rect:body
           ~theme ~bp grid

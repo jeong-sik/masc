@@ -1409,12 +1409,22 @@ let artifacts_filtered t =
   else
     List.filter
       (fun (a : Wire_knowledge.artifact_entry) ->
-        contains_ci ~needle:q a.name || contains_ci ~needle:q a.sha256)
+        contains_ci ~needle:q a.title
+        || contains_ci ~needle:q a.id
+        || contains_ci ~needle:q a.body.sha256)
       items
 
 let selected_artifact t =
   let items = artifacts_filtered t in
   List.nth_opt items (clamp_index (List.length items) t.selected_index)
+
+let artifact_by_id t id =
+  match Observed.to_option t.artifacts with
+  | Some items ->
+      List.find_opt
+        (fun (a : Wire_knowledge.artifact_entry) -> String.equal a.id id)
+        items
+  | None -> None
 
 let memory_diff_matches_filter t text =
   let q = String.trim t.filter_query in

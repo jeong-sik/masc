@@ -564,13 +564,19 @@ let populated_model ~cols ~rows ~lang =
   let artifacts : Wire_knowledge.artifact_entry list =
     [
       {
-        sha256 = "0123456789abcdef0123456789abcdef";
-        name = "tui-v2-screenshot.png";
-        mime_type = "image/png";
-        bytes = 245_760;
-        created_at_unix = Some now_unix;
-        producer = Some "e-masc-the-leader";
-        title = Some "TUI v2 Retina Capture";
+        id = "artifact-0123456789abcdef0123456789abcdef";
+        revision = 1;
+        title = "TUI v2 Retina Capture";
+        summary = "Screen capture notes";
+        author = "e-masc-the-leader";
+        created_at_unix = now_unix;
+        body =
+          {
+            sha256 =
+              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+            bytes = 245_760;
+            mime = "text/html";
+          };
       };
     ]
   in

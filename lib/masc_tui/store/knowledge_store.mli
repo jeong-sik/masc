@@ -401,7 +401,15 @@ type board_space_effect =
 val board_space_effect : t -> board_space_effect
 
 val selected_wiki_page : t -> Wire_knowledge.wiki_page_summary option
+
+val artifacts_filtered : t -> Wire_knowledge.artifact_entry list
+(** The Artifacts list rows: every artifact whose title, id or body SHA-256
+    contains the filter text. *)
+
 val selected_artifact : t -> Wire_knowledge.artifact_entry option
+
+val artifact_by_id : t -> string -> Wire_knowledge.artifact_entry option
+(** The loaded artifact an [Artifact_dive] names. *)
 
 val move_selection :
   ?pane_index:int ->

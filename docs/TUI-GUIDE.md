@@ -283,9 +283,10 @@ Three sub-tabs (`[` / `]` or `←` / `→`):
      revision log), `e` opens inline Markdown edit modal (`PUT` with
      `expected_revision`/`expected_sha256`), `Ctrl+E` opens in `$EDITOR`, `y`
      copies Markdown body, `o` opens the first `http(s)` URL.
-   - **Artifacts mode**: `Enter` opens Artifact Dive (name, title, MIME, size,
-     SHA-256, producer, revision list), `o` opens the Media & Artifact Viewer
-     overlay, `y` copies SHA-256 via OSC 52.
+   - **Artifacts mode**: `Enter` opens Artifact Dive (title, summary,
+     revision, MIME, size, SHA-256, author, created time, and the list of
+     published artifacts), `o` opens the Media & Artifact Viewer overlay, `y`
+     copies the body SHA-256 via OSC 52.
 3. **Memory**: World Memory overview, Claims/Conflicts, Librarian writer status
    (`a` quick `resume`, `A` recovery act modal supporting `resume`, `adopt`,
    `restart_reading`, `skip_item`, `skip_line`), and the **Temporal Diff
@@ -476,10 +477,10 @@ selected entry. Press `Space` to cycle severity filters (`All` / `ERR` / `WRN`
 ### Viewing Artifacts
 
 Open **`3` Knowledge → Wiki & Artifacts**, then press **`Space`** to switch
-from Wiki to **Artifacts**. Press `Enter` for Artifact Dive (name, title, MIME,
-size, SHA-256, producer, and revision list), `o` to open the **Media & Artifact
-Viewer** overlay, and **`y`** to copy the selected artifact's **SHA-256** via
-OSC 52.
+from Wiki to **Artifacts**. Press `Enter` for Artifact Dive (title, summary,
+revision, MIME, size, SHA-256, author, created time, and the list of published
+artifacts), `o` to open the **Media & Artifact Viewer** overlay, and **`y`** to
+copy the **SHA-256** of the selected artifact's body via OSC 52.
 
 > **Current boundary:** TUI v2.6 displays artifact metadata and copies SHA-256
 > hashes; inline HTML rendering and full HTML/file content export or copy are

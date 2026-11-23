@@ -1989,7 +1989,7 @@ and execute_action ~now (m : Model.t) action =
         match m.nav.overlay with
         | Some (Nav.System_gate Nav.Media_viewer) ->
             Option.map
-              (fun (a : Wire_knowledge.artifact_entry) -> a.sha256)
+              (fun (a : Wire_knowledge.artifact_entry) -> a.body.sha256)
               (Knowledge_store.selected_artifact m.knowledge)
         | Some
             ( Nav.Palette
@@ -2110,7 +2110,10 @@ and execute_action ~now (m : Model.t) action =
                       ->
                         Some detail.body_markdown
                     | Some _ | None -> Some slug)
-                | Nav.Artifact_dive sha -> Some sha
+                | Nav.Artifact_dive id -> (
+                    match Knowledge_store.artifact_by_id m.knowledge id with
+                    | Some a -> Some a.body.sha256
+                    | None -> Some id)
                 | Nav.Memory_diff_dive _ -> (
                     match Observed.to_option m.knowledge.world_memory with
                     | Some wm -> wm.briefing.text
@@ -2146,7 +2149,7 @@ and execute_action ~now (m : Model.t) action =
                         | `Artifacts ->
                             Option.map
                               (fun (a : Wire_knowledge.artifact_entry) ->
-                                a.sha256)
+                                a.body.sha256)
                               (Knowledge_store.selected_artifact m.knowledge))
                     | Nav.Knowledge_memory -> (
                         match Observed.to_option m.knowledge.world_memory with
@@ -2295,7 +2298,13 @@ and execute_action ~now (m : Model.t) action =
                 match
                   List.find_map
                     (fun (lnk : Wire_knowledge.wiki_outgoing_link) ->
-                      extract_first_http_url lnk.target)
+                      match lnk.target with
+                      | Wire_knowledge.Link_external url -> Some url
+                      | Wire_knowledge.Link_page _
+                      | Wire_knowledge.Link_own_file _
+                      | Wire_knowledge.Link_invalid_name _
+                      | Wire_knowledge.Link_unsupported _ ->
+                          None)
                     detail.outgoing_links
                 with
                 | Some u -> Some u

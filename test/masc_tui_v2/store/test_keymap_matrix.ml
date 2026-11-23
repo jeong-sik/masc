@@ -489,22 +489,23 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
   let artifacts : Wire_knowledge.artifact_entry list =
     [
       {
-        sha256 = "aaaa1111bbbb2222";
-        name = "matrix-report.md";
-        mime_type = "text/markdown";
-        bytes = 4096;
-        created_at_unix = Some 1700000000.0;
-        producer = Some "alpha";
-        title = Some "Matrix Report";
+        id = "artifact-aaaa1111bbbb2222aaaa1111bbbb2222";
+        revision = 1;
+        title = "Matrix Report";
+        summary = "Keymap matrix report";
+        author = "alpha";
+        created_at_unix = 1700000000.0;
+        body =
+          { sha256 = "aaaa1111bbbb2222"; bytes = 4096; mime = "text/markdown" };
       };
       {
-        sha256 = "cccc3333dddd4444";
-        name = "perf-trace.json";
-        mime_type = "application/json";
-        bytes = 8192;
-        created_at_unix = Some 1700000100.0;
-        producer = Some "beta";
-        title = Some "Perf Trace";
+        id = "artifact-cccc3333dddd4444cccc3333dddd4444";
+        revision = 2;
+        title = "Perf Trace";
+        summary = "Trace export";
+        author = "beta";
+        created_at_unix = 1700000100.0;
+        body = { sha256 = "cccc3333dddd4444"; bytes = 8192; mime = "text/html" };
       };
     ]
   in
@@ -3972,13 +3973,18 @@ let test_pillar2_scroll_bounds_all_surfaces () =
   let many_artifacts =
     List.init 60 (fun i : Wire_knowledge.artifact_entry ->
         {
-          sha256 = Printf.sprintf "sha-%04d-abcdef" i;
-          name = Printf.sprintf "artifact-%02d.log" i;
-          title = Some (Printf.sprintf "Artifact Report %02d" i);
-          mime_type = "text/plain";
-          bytes = 1024 * (i + 1);
-          created_at_unix = Some 1700000000.0;
-          producer = Some "alpha";
+          id = Printf.sprintf "artifact-%032d" i;
+          revision = 1;
+          title = Printf.sprintf "Artifact Report %02d" i;
+          summary = "Scroll fixture";
+          author = "alpha";
+          created_at_unix = 1700000000.0;
+          body =
+            {
+              sha256 = Printf.sprintf "sha-%04d-abcdef" i;
+              bytes = 1024 * (i + 1);
+              mime = "text/markdown";
+            };
         })
   in
   let m_art_tall =
@@ -4003,7 +4009,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
         {
           m_art_tall.nav with
           dive_stack =
-            [ Nav.Dive_knowledge (Nav.Artifact_dive "sha-0000-abcdef") ];
+            [ Nav.Dive_knowledge (Nav.Artifact_dive (Printf.sprintf "artifact-%032d" 0)) ];
         };
     }
   in
@@ -4013,8 +4019,8 @@ let test_pillar2_scroll_bounds_all_surfaces () =
     (m_art_dive_end.nav.dive_scroll_offset > 0);
   let txt_art = grid_all_text (render_full ~model:m_art_dive_end) in
   Alcotest.(check bool)
-    "Knowledge > Artifact_dive at End renders last artifact-59.log" true
-    (Store_scroll.contains_ci ~needle:"artifact-59.log" txt_art);
+    "Knowledge > Artifact_dive at End renders last Artifact Report 59" true
+    (Store_scroll.contains_ci ~needle:"Artifact Report 59" txt_art);
   (* 4b. Knowledge > Wiki pane 1 with wide 22-col TOC rail wraps prose cleanly & reaches exact bottom *)
   let long_wiki_toc =
     {
@@ -4963,7 +4969,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
       , "Missing artifacts" );
       ("Thread_dive", Nav.Dive_knowledge (Nav.Thread_dive "post-1"), "Comment number 44");
       ("Wiki_dive", Nav.Dive_knowledge (Nav.Wiki_dive "arch-overview"), "FINAL_WIKI_BOTTOM_LINE");
-      ("Artifact_dive", Nav.Dive_knowledge (Nav.Artifact_dive "sha-0000-abcdef"), "artifact-59.log");
+      ("Artifact_dive", Nav.Dive_knowledge (Nav.Artifact_dive (Printf.sprintf "artifact-%032d" 0)), "Artifact Report 59");
       ("Sandbox_dive", Nav.Dive_infra (Nav.Sandbox_dive "alpha"), "DIVE_LOG_01");
       ("Lane_dive", Nav.Dive_infra (Nav.Lane_dive "lane-00"), "DIVE_LOG_00");
       ("Incident_dive (module_name match)", Nav.Dive_infra (Nav.Incident_dive dive_inc_id.id), "DIVE_LOG_00");

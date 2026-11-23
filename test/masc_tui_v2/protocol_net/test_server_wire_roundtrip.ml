@@ -7,6 +7,7 @@
     screen. *)
 
 open Masc_tui_core
+module Wire_knowledge = Masc_tui_protocol.Wire_knowledge
 module Wire_runtime = Masc_tui_protocol.Wire_runtime
 module Wire_work = Masc_tui_protocol.Wire_work
 module Wire_fleet = Masc_tui_protocol.Wire_fleet
@@ -482,6 +483,248 @@ let test_chat_submit_admission_roundtrip () =
       Alcotest.fail "a steer must reach the server as an interactive admission"
   | Error detail -> Alcotest.failf "server rejected the steer: %s" detail
 
+(* GET /api/v1/board/<id>?format=flat: the route appends the comment rows to
+   the post's own fields. A comment row carries its vote tallies and no
+   score. *)
+let test_board_comment_votes_roundtrip () =
+  let post_id = "p-0123456789abcdef0123456789abcdef" in
+  let comment : Masc.Board.comment =
+    {
+      id =
+        Masc.Board.Comment_id.of_string "c-0123456789abcdef0123456789abcdef"
+        |> Result.get_ok;
+      post_id = Masc.Board.Post_id.of_string post_id |> Result.get_ok;
+      parent_id = None;
+      author = Masc.Board.Agent_id.of_string "analyst" |> Result.get_ok;
+      content = "Measured twice";
+      audience = None;
+      created_at = 1795252000.0;
+      expires_at = 1795338400.0;
+      votes_up = 3;
+      votes_down = 1;
+    }
+  in
+  let thread =
+    `Assoc
+      [
+        ("id", `String post_id);
+        ("title", `String "Release notes");
+        ("body", `String "Ship the fix");
+        ("author", `String "e-masc-the-leader");
+        ("created_at", `Float 1795251000.0);
+        ("votes", `Int 2);
+        ("comment_count", `Int 1);
+        ("author_karma", `Int 5);
+        ( "comments",
+          `List [ Masc.Server_utils.board_comment_dashboard_json comment ] );
+      ]
+  in
+  match Wire_knowledge.decode_board_thread ~observed_at thread with
+  | Error e -> Alcotest.fail ("board thread decode failed: " ^ e)
+  | Ok (_, [ c ]) ->
+      Alcotest.(check int) "comment score is votes_up - votes_down" 2 c.score
+  | Ok (_, comments) ->
+      Alcotest.fail
+        (Printf.sprintf "expected one comment, got %d" (List.length comments))
+
+(* GET /api/v1/published-artifacts: each row is the latest revision's summary
+   and its body is a content-addressed [_blob] reference. *)
+let test_published_artifact_roundtrip () =
+  let sha256 = String.make 64 'a' in
+  let body =
+    match
+      Tool_output.make_artifact_ref ~sha256 ~bytes:2048 ~preview:"# Weekly"
+        ~mime:"text/markdown"
+    with
+    | Ok body -> body
+    | Error e -> Alcotest.fail (Tool_output.make_error_to_string e)
+  in
+  let revision : Masc.Published_artifact.revision =
+    {
+      revision = 2;
+      title = "Weekly report";
+      summary = "Throughput and failures";
+      format = Masc.Published_artifact.Markdown;
+      author = "e-masc-the-leader";
+      created_at = "2026-11-23T01:02:03Z";
+      body;
+      task_id = None;
+      goal_id = None;
+    }
+  in
+  let id = "artifact-0123456789abcdef0123456789abcdef" in
+  let response =
+    `Assoc
+      [
+        ( "artifacts",
+          `List [ Masc.Published_artifact.summary_to_json ~id revision ] );
+        ("diagnostics", `List []);
+      ]
+  in
+  match Wire_knowledge.decode_artifacts_list response with
+  | Error e -> Alcotest.fail ("published artifacts decode failed: " ^ e)
+  | Ok [ a ] ->
+      Alcotest.(check string) "id" id a.id;
+      Alcotest.(check int) "revision" 2 a.revision;
+      Alcotest.(check string) "title" "Weekly report" a.title;
+      Alcotest.(check string) "summary" "Throughput and failures" a.summary;
+      Alcotest.(check string) "author" "e-masc-the-leader" a.author;
+      Alcotest.(check (float 0.001))
+        "created_at reads the RFC3339 string" 1795395723.0 a.created_at_unix;
+      Alcotest.(check string) "body sha256" sha256 a.body.sha256;
+      Alcotest.(check int) "body bytes" 2048 a.body.bytes;
+      Alcotest.(check string) "body mime" "text/markdown" a.body.mime
+  | Ok rows ->
+      Alcotest.fail
+        (Printf.sprintf "expected one artifact row, got %d" (List.length rows))
+
+(* Removes a temporary workspace. Cleanup errors are ignored: the assertions
+   have already run. *)
+let rec rm_rf path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+      (try
+         Array.iter
+           (fun entry -> rm_rf (Filename.concat path entry))
+           (Sys.readdir path)
+       with Sys_error _ -> ());
+      (try Unix.rmdir path with Unix.Unix_error _ -> ())
+  | {
+      Unix.st_kind =
+        ( Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO
+        | Unix.S_SOCK );
+      _;
+    } -> (
+      try Unix.unlink path with Unix.Unix_error _ -> ())
+
+let rec mkdir_p path =
+  if not (Sys.file_exists path) then begin
+    mkdir_p (Filename.dirname path);
+    try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  end
+
+let unsupported_shape_name = function
+  | Wire_knowledge.Unsupported_anchor -> "anchor"
+  | Wire_knowledge.Unsupported_scheme -> "scheme"
+  | Wire_knowledge.Unsupported_path -> "path"
+  | Wire_knowledge.Unsupported_not_markdown -> "not_markdown"
+  | Wire_knowledge.Unsupported_wikilink -> "wikilink"
+
+let pp_link_target ppf = function
+  | Wire_knowledge.Link_page { slug; exists } ->
+      Format.fprintf ppf "page %s (exists=%b)" slug exists
+  | Wire_knowledge.Link_own_file file -> Format.fprintf ppf "own_file %s" file
+  | Wire_knowledge.Link_external url -> Format.fprintf ppf "external %s" url
+  | Wire_knowledge.Link_invalid_name raw ->
+      Format.fprintf ppf "invalid_name %s" raw
+  | Wire_knowledge.Link_unsupported shape ->
+      Format.fprintf ppf "unsupported %s" (unsupported_shape_name shape)
+
+let link_target = Alcotest.testable pp_link_target ( = )
+
+(* GET /api/v1/wiki/<slug>: one row per link in the page body. The server
+   sends an unsupported link's raw text as its target, and that text is blank
+   for [[x]()] and [[x](<>)]. *)
+let test_wiki_page_links_roundtrip () =
+  let base = Filename.temp_dir "masc_tui_wiki_links_" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base)
+    (fun () ->
+      mkdir_p (Filename.concat base ".masc/config/keepers");
+      mkdir_p (Filename.concat base ".masc/keepers");
+      let config = Masc.Workspace.default_config base in
+      let base_path = config.Masc.Workspace.base_path in
+      let slug = "link-shapes" in
+      let page_body =
+        String.concat "\n"
+          [
+            "[Self](link-shapes.md)";
+            "[Missing](missing-page.md)";
+            "[Index](index.md)";
+            "[Docs](https://example.com/docs)";
+            "[Bad](Bad_Name.md)";
+            "[Anchor](link-shapes.md#top)";
+            "[Mail](mailto:ops)";
+            "[Nested](notes/guide.md)";
+            "[Plain](notes.txt)";
+            "[Empty]()";
+            "[Angle](<>)";
+            "[[old-style]]";
+          ]
+      in
+      let put_body =
+        Yojson.Safe.to_string
+          (`Assoc
+             [
+               ("title", `String "Link shapes");
+               ("source", `String "observation");
+               ("summary", `String "Every link shape the wiki reads");
+               ("tags", `List [ `String "wiki" ]);
+               ("body", `String page_body);
+             ])
+      in
+      let now = 1795252092.0 in
+      (match
+         Server_dashboard_http_wiki.put_page_json ~now ~config ~actor:"tester"
+           ~slug ~body_str:put_body ()
+       with
+      | Ok _ -> ()
+      | Error (_, json) ->
+          Alcotest.fail ("wiki PUT failed: " ^ Yojson.Safe.to_string json));
+      let page_json =
+        match
+          Server_dashboard_http_wiki.get_page_json ~now ~base_path ~slug ()
+        with
+        | Ok json -> json
+        | Error (_, json) ->
+            Alcotest.fail ("wiki GET failed: " ^ Yojson.Safe.to_string json)
+      in
+      match Wire_knowledge.decode_wiki_page_detail page_json with
+      | Error e -> Alcotest.fail ("wiki page decode failed: " ^ e)
+      | Ok page ->
+          let decoded =
+            List.map
+              (fun (link : Wire_knowledge.wiki_outgoing_link) ->
+                (link.text, link.target))
+              page.outgoing_links
+            |> List.sort compare
+          in
+          let expected =
+            [
+              ("Self", Wire_knowledge.Link_page { slug; exists = true });
+              ( "Missing",
+                Wire_knowledge.Link_page
+                  { slug = "missing-page"; exists = false } );
+              ("Index", Wire_knowledge.Link_own_file "index.md");
+              ("Docs", Wire_knowledge.Link_external "https://example.com/docs");
+              ("Bad", Wire_knowledge.Link_invalid_name "Bad_Name.md");
+              ( "Anchor",
+                Wire_knowledge.Link_unsupported Wire_knowledge.Unsupported_anchor
+              );
+              ( "Mail",
+                Wire_knowledge.Link_unsupported Wire_knowledge.Unsupported_scheme
+              );
+              ( "Nested",
+                Wire_knowledge.Link_unsupported Wire_knowledge.Unsupported_path );
+              ( "Plain",
+                Wire_knowledge.Link_unsupported
+                  Wire_knowledge.Unsupported_not_markdown );
+              ( "Empty",
+                Wire_knowledge.Link_unsupported
+                  Wire_knowledge.Unsupported_not_markdown );
+              ( "Angle",
+                Wire_knowledge.Link_unsupported
+                  Wire_knowledge.Unsupported_not_markdown );
+              ( "old-style",
+                Wire_knowledge.Link_unsupported
+                  Wire_knowledge.Unsupported_wikilink );
+            ]
+            |> List.sort compare
+          in
+          Alcotest.(check (list (pair string link_target)))
+            "every link shape decodes to its kind" expected decoded)
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -508,5 +751,16 @@ let () =
           Alcotest.test_case
             "encode_chat_submit_request -> parse_keeper_chat_stream_request"
             `Quick test_chat_submit_admission_roundtrip;
+        ] );
+      ( "knowledge",
+        [
+          Alcotest.test_case
+            "board comment dashboard row -> decode_board_thread" `Quick
+            test_board_comment_votes_roundtrip;
+          Alcotest.test_case
+            "published artifact summary -> decode_artifacts_list" `Quick
+            test_published_artifact_roundtrip;
+          Alcotest.test_case "wiki page links -> decode_wiki_page_detail"
+            `Quick test_wiki_page_links_roundtrip;
         ] );
     ]

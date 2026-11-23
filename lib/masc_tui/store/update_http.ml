@@ -670,12 +670,16 @@ let apply_http_reply ~now (m : Model.t) reply =
         ~source:Health.Source_client_http ~ko:"격리 후보 조회"
         ~en:"Quarantines fetch" err
   | Msg.Reply_wiki_index (Ok idx) ->
-      ( {
+      let next =
+        {
           m with
           knowledge =
             Knowledge_store.apply_wiki_index ~observed_at:now idx m.knowledge;
         }
-      , [] )
+      in
+      (* Until the index lands no page is selected, so the Wiki tab's fetch
+         list could not name one. Ask for the page the index selected. *)
+      (next, View_fetches.selected_wiki_page_fetch next)
   | Msg.Reply_wiki_index (Error err) ->
       err_reply
         ~fail:

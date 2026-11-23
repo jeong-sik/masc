@@ -3521,14 +3521,14 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           match Knowledge_store.selected_artifact model.knowledge with
           | Some art ->
               [
-                (anchor_st, art.name);
+                (anchor_st, art.title);
                 ( struct_st,
-                  Printf.sprintf "MIME: %s · Size: %s" art.mime_type
+                  Printf.sprintf "MIME: %s · Size: %s" art.body.mime
                     (Format_val.format_value Format_val.Bytes
-                       (float_of_int art.bytes)) );
+                       (float_of_int art.body.bytes)) );
                 ( whisper_st,
                   Printf.sprintf "SHA256: %s"
-                    (Grapheme.truncate_to_width ~max_width:32 art.sha256) );
+                    (Grapheme.truncate_to_width ~max_width:32 art.body.sha256) );
                 ( pri_st,
                   Say.resolve lang
                     (Say.make ~ko:"프레임버퍼 안전 영역 내 미리보기 · [y] 해시 복사 · [Esc] 닫기"

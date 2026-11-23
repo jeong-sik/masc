@@ -802,6 +802,74 @@ let test_task_cancel_roundtrip () =
             "the cancel commits instead of a no-op" false outcome.Workspace.noop
       | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error))
 
+(* POST /api/v1/tools/masc_schedule_create validates the body against the
+   tool schema, then the tool reads a Keeper wake, a recurrence and exactly
+   one due input from it. The body the form sent before is refused by the
+   schema. *)
+let test_schedule_create_roundtrip () =
+  let schema =
+    match Tool_schemas_schedule.find_definition "masc_schedule_create" with
+    | Some definition -> definition.Tool_schemas_schedule.schema.input_schema
+    | None -> Alcotest.fail "masc_schedule_create has no registered schema"
+  in
+  let validate args =
+    Masc.Tool_input_validation.validate ~schema ~name:"masc_schedule_create"
+      ~args ()
+  in
+  (match
+     validate
+       (`Assoc
+          [
+            ("keeper", `String "alpha");
+            ("recurrence", `String "every 1h");
+            ("prompt", `String "Check the queue");
+          ])
+   with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "the old form body passed the schema");
+  let dispatched_at = 1_795_000_000.0 in
+  List.iter
+    (fun (label, repeat, expected_recurrence) ->
+      let body =
+        Wire_work.encode_schedule_create
+          {
+            keeper_name = "alpha";
+            message = "Check the queue";
+            first_due_in_sec = 600;
+            repeat;
+          }
+      in
+      match validate body with
+      | Error rejection ->
+          Alcotest.fail
+            (label ^ ": " ^ rejection.Masc.Tool_input_validation.message)
+      | Ok args -> (
+          (match Masc.Tool_schedule.payload_from_args args with
+          | Ok _ -> ()
+          | Error e -> Alcotest.fail (label ^ ": " ^ e));
+          match Masc.Tool_schedule.recurrence_of_arg args with
+          | Error e -> Alcotest.fail (label ^ ": " ^ e)
+          | Ok recurrence -> (
+              Alcotest.(check string)
+                (label ^ ": recurrence") expected_recurrence
+                (Yojson.Safe.to_string
+                   (Schedule_domain.recurrence_to_yojson recurrence));
+              match
+                Masc.Tool_schedule.resolve_due_at ~dispatched_at recurrence
+                  args
+              with
+              | Ok due_at ->
+                  Alcotest.(check (float 0.001))
+                    (label ^ ": first due counts from the server clock")
+                    (dispatched_at +. 600.0) due_at
+              | Error _ -> Alcotest.fail (label ^ ": no single due input"))))
+    [
+      ("once", Wire_work.Repeat_once, {|{"kind":"one_shot"}|});
+      ( "every 30m",
+        Wire_work.Repeat_every { interval_sec = 1800 },
+        {|{"kind":"interval","interval_sec":1800}|} );
+    ]
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -818,6 +886,8 @@ let () =
             test_goal_transition_workspace_roundtrip;
           Alcotest.test_case "task cancel body -> commit_operator_cancel_json"
             `Quick test_task_cancel_roundtrip;
+          Alcotest.test_case "schedule create body -> masc_schedule_create"
+            `Quick test_schedule_create_roundtrip;
         ] );
       ( "runtime",
         [

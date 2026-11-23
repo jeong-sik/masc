@@ -651,8 +651,18 @@ let inline_modal_for kind =
           };
           {
             key = "recurrence";
-            label = Say.make ~ko:"반복 주기" ~en:"Recurrence";
+            label =
+              Say.make ~ko:"반복 (once 또는 every 1h)"
+                ~en:"Repeat (once or every 1h)";
             value = "every 1h";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "first_run_in";
+            label =
+              Say.make ~ko:"첫 실행까지 (예: 10m)" ~en:"First run in (e.g. 10m)";
+            value = "";
             required = true;
             secret = false;
           };

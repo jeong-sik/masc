@@ -157,11 +157,7 @@ type post_request =
       body : string;
       hearth : string option;
     }
-  | Post_schedule_create of {
-      keeper : string;
-      recurrence : string;
-      prompt : string;
-    }
+  | Post_schedule_create of Wire_work.schedule_create_request
   | Post_connector_create of { connector : string; channel : string }
   | Post_repo_add of { url : string; branch : string option }
   | Post_task_cancel of {

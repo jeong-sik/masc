@@ -822,6 +822,39 @@ let decode_schedules_snapshot json =
       Error ("schedule cursor rejected: " ^ reason)
   | other -> Error (Printf.sprintf "unknown scheduled-automation status %S" other)
 
+type schedule_repeat =
+  | Repeat_once
+  | Repeat_every of { interval_sec : int }
+
+type schedule_create_request = {
+  keeper_name : string;
+  message : string;
+  first_due_in_sec : int;
+  repeat : schedule_repeat;
+}
+
+(* The route validates the body against the [masc_schedule_create] tool
+   schema, which takes no other field (config/tools/masc_schedule_create.toml).
+   The first due time is a delay, so it counts from the server's clock and
+   not the terminal's. *)
+let encode_schedule_create (req : schedule_create_request) =
+  let recurrence =
+    match req.repeat with
+    | Repeat_once -> [ ("recurrence_kind", `String "one_shot") ]
+    | Repeat_every { interval_sec } ->
+        [
+          ("recurrence_kind", `String "interval");
+          ("recurrence_interval_sec", `Int interval_sec);
+        ]
+  in
+  `Assoc
+    ([
+       ("keeper_name", `String req.keeper_name);
+       ("message", `String req.message);
+       ("due_in_sec", `Int req.first_due_in_sec);
+     ]
+    @ recurrence)
+
 type ask_mode =
   | Ask_single
   | Ask_multi

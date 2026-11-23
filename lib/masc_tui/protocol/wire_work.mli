@@ -285,6 +285,24 @@ val decode_schedules_snapshot :
 (** Decode [GET /api/v1/dashboard/scheduled-automation] ([requests] array +
     [next_cursor]). *)
 
+type schedule_repeat =
+  | Repeat_once
+  | Repeat_every of { interval_sec : int }
+
+(** A Keeper wake the Schedule form creates. [first_due_in_sec] is a delay
+    from when the server receives the request. *)
+type schedule_create_request = {
+  keeper_name : string;
+  message : string;
+  first_due_in_sec : int;
+  repeat : schedule_repeat;
+}
+
+val encode_schedule_create : schedule_create_request -> Yojson.Safe.t
+(** Body for [POST /api/v1/tools/masc_schedule_create]: [keeper_name],
+    [message], [due_in_sec] and the recurrence ([one_shot], or [interval] with
+    [recurrence_interval_sec]). *)
+
 (** {1 Approvals & Asks Inbox} *)
 
 type ask_mode =

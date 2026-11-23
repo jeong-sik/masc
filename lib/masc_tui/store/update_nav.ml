@@ -2123,6 +2123,52 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Repo_add_form ) as std ->
       Form_standard std
 
+(* The Schedule form's operator text. A delay is a whole count and one unit,
+   [90s], [10m], [2h] or [1d]; anything else is refused rather than read as
+   a guess. *)
+let seconds_per_delay_unit = function
+  | 's' -> Some 1
+  | 'm' -> Some 60
+  | 'h' -> Some 3600
+  | 'd' -> Some 86400
+  | _ -> None
+
+let parse_schedule_delay raw =
+  let text = String.lowercase_ascii (String.trim raw) in
+  let len = String.length text in
+  let refused =
+    Error
+      (Printf.sprintf "\"%s\" is not a delay such as 90s, 10m, 2h or 1d" raw)
+  in
+  if len < 2 then refused
+  else
+    let digits = String.sub text 0 (len - 1) in
+    let count =
+      if String.for_all (fun c -> c >= '0' && c <= '9') digits then
+        int_of_string_opt digits
+      else None
+    in
+    match (count, seconds_per_delay_unit text.[len - 1]) with
+    | Some n, Some unit_sec when n >= 1 && n <= max_int / unit_sec ->
+        Ok (n * unit_sec)
+    | Some _, Some _ | Some _, None | None, Some _ | None, None -> refused
+
+let parse_schedule_repeat raw =
+  let words =
+    String.split_on_char ' ' (String.lowercase_ascii (String.trim raw))
+    |> List.filter (fun w -> not (String.equal w ""))
+  in
+  match words with
+  | [ "once" ] -> Ok Wire_work.Repeat_once
+  | [ "every"; delay ] ->
+      Result.map
+        (fun interval_sec -> Wire_work.Repeat_every { interval_sec })
+        (parse_schedule_delay delay)
+  | _ ->
+      Error
+        (Printf.sprintf "\"%s\" is not a repeat such as once or every 1h"
+           raw)
+
 let submit_inline_modal ~now (m : Model.t) =
   match m.inline_modal with
   | None -> (m, [])
@@ -2250,19 +2296,28 @@ let submit_inline_modal ~now (m : Model.t) =
                               { task_id; reason; expected_workspace };
                         };
                     ] ))
-          | Form_standard Nav.Schedule_form ->
-              let keeper = Model.modal_field_value ~key:"keeper" modal in
-              let recurrence = Model.modal_field_value ~key:"recurrence" modal in
-              let prompt = Model.modal_field_value ~key:"prompt" modal in
-              ( mark_submitting m
-              , [
-                  Cmd.Http_post
-                    {
-                      epoch = m.epoch;
-                      req =
-                        Cmd.Post_schedule_create { keeper; recurrence; prompt };
-                    };
-                ] )
+          | Form_standard Nav.Schedule_form -> (
+              let keeper_name = Model.modal_field_value ~key:"keeper" modal in
+              let message = Model.modal_field_value ~key:"prompt" modal in
+              match
+                ( parse_schedule_repeat
+                    (Model.modal_field_value ~key:"recurrence" modal),
+                  parse_schedule_delay
+                    (Model.modal_field_value ~key:"first_run_in" modal) )
+              with
+              | Error err, (Ok _ | Error _) | Ok _, Error err ->
+                  set_modal_error err
+              | Ok repeat, Ok first_due_in_sec ->
+                  ( mark_submitting m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_schedule_create
+                              { keeper_name; message; first_due_in_sec; repeat };
+                        };
+                    ] ))
           | Form_standard Nav.Connector_form ->
               let connector = Model.modal_field_value ~key:"connector" modal in
               let channel = Model.modal_field_value ~key:"channel" modal in

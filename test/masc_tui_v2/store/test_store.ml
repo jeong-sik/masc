@@ -3266,6 +3266,71 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     | Some md -> Option.is_some md.error
     | None -> false);
 
+  (* Schedule form -> the masc_schedule_create fields: a Keeper wake, one
+     delay as its due input, and the repeat it reads. *)
+  let fill_modal values (m : Model.t) =
+    match m.inline_modal with
+    | None -> Alcotest.fail "expected an open modal"
+    | Some md ->
+        let fields =
+          List.map
+            (fun (f : Model.modal_form_field) ->
+              match List.assoc_opt f.key values with
+              | Some value -> { f with value }
+              | None -> f)
+            md.fields
+        in
+        { m with inline_modal = Some { md with fields } }
+  in
+  let _, cmds_sched =
+    step
+      (fill_modal
+         [
+           ("keeper", "alpha");
+           ("first_run_in", "10m");
+           ("prompt", "Check the queue");
+         ]
+         m_sched_modal)
+      (key Keymap.Input.Enter)
+  in
+  Alcotest.(check bool) "Schedule form posts keeper_name, message, delay and repeat"
+    true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_schedule_create
+                   {
+                     keeper_name = "alpha";
+                     message = "Check the queue";
+                     first_due_in_sec = 600;
+                     repeat = Wire_work.Repeat_every { interval_sec = 3600 };
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       cmds_sched);
+  let m_sched_bad, cmds_sched_bad =
+    step
+      (fill_modal
+         [
+           ("keeper", "alpha");
+           ("recurrence", "hourly");
+           ("first_run_in", "10m");
+           ("prompt", "Check the queue");
+         ]
+         m_sched_modal)
+      (key Keymap.Input.Enter)
+  in
+  Alcotest.(check int) "Schedule form posts nothing for a repeat it cannot read" 0
+    (List.length (posted_bodies cmds_sched_bad));
+  Alcotest.(check bool) "Schedule form stays open with an error" true
+    (match m_sched_bad.inline_modal with
+    | Some md -> Option.is_some md.error
+    | None -> false);
+
   (* Goal_dive: Awaiting_confirmation [a] NEVER fabricates proof — opens explicit server-proof modal *)
   let m_gdive_conf =
     {

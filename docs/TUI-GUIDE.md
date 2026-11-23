@@ -241,6 +241,11 @@ Four sub-tabs (`[` / `]` or `←` / `→`):
    Unlinked → Done → Schedules, `/` narrows by title or id within the chip,
    `Enter` dives into Task detail, `n` opens new Schedule form, `x` opens Task
    cancel modal, `h` / `X` opens harness overrule modal).
+   - Schedule form: target Keeper, repeat (`once`, or `every` with a delay
+     such as `every 30m`), first run delay (`90s`, `10m`, `2h`, `1d`), and the
+     prompt the Keeper is woken with. A repeat or delay in any other form keeps
+     the form open with an error. Daily and cron schedules are created with
+     `masc_schedule_create`, not from this form.
 3. **Inbox** (Action Inbox): unified operator triage queue (see
    [Approvals](#approvals) below).
 4. **Candle & Scorecard**: fleet Candle ledger (`GET /api/v1/candle/ledger`),

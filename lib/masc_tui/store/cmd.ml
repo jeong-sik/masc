@@ -151,11 +151,7 @@ type post_request =
       body : string;
       hearth : string option;
     }
-  | Post_schedule_create of {
-      keeper : string;
-      recurrence : string;
-      prompt : string;
-    }
+  | Post_schedule_create of Wire_work.schedule_create_request
   | Post_connector_create of { connector : string; channel : string }
   | Post_repo_add of { url : string; branch : string option }
   | Post_task_cancel of {
@@ -384,13 +380,7 @@ let post_request_body = function
         | Some _ | None -> base
       in
       `Assoc fields
-  | Post_schedule_create { keeper; recurrence; prompt } ->
-      `Assoc
-        [
-          ("keeper", `String keeper);
-          ("recurrence", `String recurrence);
-          ("prompt", `String prompt);
-        ]
+  | Post_schedule_create req -> Wire_work.encode_schedule_create req
   | Post_connector_create { connector; channel } ->
       `Assoc [ ("connector", `String connector); ("channel", `String channel) ]
   | Post_repo_add { url; branch } ->

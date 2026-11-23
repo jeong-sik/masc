@@ -431,6 +431,25 @@ let test_wire_work () =
   in
   Alcotest.(check int) "1 schedule" 1 (List.length scheds);
   Alcotest.(check (option string)) "next cursor" (Some "cur-2") next_cur;
+  (* Server_dashboard_schedule_projection answers an unreadable store with
+     200 and an empty list; that is a failed read, not "no schedules". *)
+  Alcotest.(check string) "unreadable schedule store is an error"
+    "schedule store read failed: lock timeout"
+    (expect_err "schedule store unknown"
+       (Wire_work.decode_schedules_snapshot
+          (parse_json
+             {|{ "status": "unknown", "schedule_store_known": false,
+                 "schedule_store_read_error": "schedule store read failed: lock timeout",
+                 "next_cursor": null, "requests": [] }|})));
+  (* Dashboard_verification answers an unreadable backlog the same way. *)
+  ignore
+    (expect_err "verification backlog unreadable"
+       (Wire_work.decode_verification_snapshot
+          (parse_json
+             {|{ "requests": [], "backlog_error": "backlog file corrupt",
+                 "backlog_recovery": null, "awaiting_unresolved_total": 0,
+                 "awaiting_unresolved": [] }|}))
+      : string);
   (* Ask answer uses "name" and tagged response *)
   let ask_ans =
     Wire_work.encode_ask_answer ~keeper:"wkbl-growth" ~ask_id:"ask-1"
@@ -1611,8 +1630,8 @@ let test_round2_wire_regressions () =
   Alcotest.(check bool) "current_value leak error mentions secret redaction" true
     (String.length err_cur > 0);
 
-  (* R2-P1-3: /api/v1/dashboard/gate live key "approval_queue" (array, empty, null)
-     alongside legacy "pending". *)
+  (* /api/v1/dashboard/gate: approval_queue is read through
+     approval_queue_state (ready or unavailable). *)
   let live_gate_json =
     parse_json
       {|{
@@ -1643,24 +1662,20 @@ let test_round2_wire_regressions () =
   let empty_gates =
     expect_ok "live gate empty approval_queue"
       (Wire_work.decode_gate_pending_list
-         (parse_json {|{ "approval_queue": [] }|}))
+         (parse_json
+            {|{ "approval_queue": [], "approval_queue_state": { "state": "ready" } }|}))
   in
   Alcotest.(check int) "0 live gates" 0 (List.length empty_gates);
-  let null_gates =
-    expect_ok "live gate null approval_queue"
-      (Wire_work.decode_gate_pending_list
-         (parse_json {|{ "approval_queue": null }|}))
-  in
-  Alcotest.(check int) "null approval_queue -> empty list" 0
-    (List.length null_gates);
-  let legacy_gates =
-    expect_ok "legacy gate pending"
-      (Wire_work.decode_gate_pending_list
-         (parse_json
-            {|{ "pending": [{ "id": "leg-1", "keeper_name": "alpha", "tool_name": "bash", "phase": "queued" }] }|}))
-  in
-  Alcotest.(check int) "legacy pending still decodes" 1
-    (List.length legacy_gates);
+  (* An unreadable queue store is a failed read, not an empty queue. *)
+  Alcotest.(check string) "unavailable approval queue is an error"
+    "Approval queue unavailable: queue file corrupt"
+    (expect_err "unavailable approval queue"
+       (Wire_work.decode_gate_pending_list
+          (parse_json
+             {|{ "approval_queue": null,
+                 "approval_queue_state": { "state": "unavailable", "code": "reset_required",
+                   "title": "Approval queue unavailable", "operator_detail": "queue file corrupt",
+                   "severity": "critical", "icon": "alert" } }|})));
 
   (* R2-P1-4: /api/v1/infra/sandboxes/:keeper live remote_ssh {keeper, backend, pool, session}
      and unbound SSH keeper (binding_state). *)

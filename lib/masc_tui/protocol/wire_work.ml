@@ -644,10 +644,18 @@ let decode_verification_request json =
       review_observation;
     }
 
+(* An unreadable verification backlog answers the awaiting view with an
+   empty queue and [backlog_error] (Dashboard_verification.filter_by_view).
+   An empty list there is not "nothing awaits review", so it is a failed
+   read. The All view carries no backlog fields. *)
 let decode_verification_snapshot json =
   let* _, body = unwrap_v2_or_raw json in
-  let* items = required_list_field body "requests" in
-  decode_list "requests" decode_verification_request items
+  let* backlog_error = optional_nonblank_string body "backlog_error" in
+  match backlog_error with
+  | Some reason -> Error ("verification backlog unreadable: " ^ reason)
+  | None ->
+      let* items = required_list_field body "requests" in
+      decode_list "requests" decode_verification_request items
 
 let encode_verification_verdict ~task_id ~verification_id ~verdict ~notes =
   (* Strict allowlist: [task_id; verification_id; verdict; reason; notes]. *)
@@ -776,12 +784,25 @@ let decode_schedule_row json =
       last_disposition;
     }
 
+(* The server answers 200 for an unreadable store and for a rejected cursor,
+   each with an empty [requests] list (Server_dashboard_schedule_projection).
+   An empty list there is not "no schedules", so it is a failed read. *)
 let decode_schedules_snapshot json =
   let* _, body = unwrap_v2_or_raw json in
-  let* items = required_list_field body "requests" in
-  let* rows = decode_list "requests" decode_schedule_row items in
-  let* next_cursor = optional_nonblank_string body "next_cursor" in
-  Ok (rows, next_cursor)
+  let* status = required_nonblank_string body "status" in
+  match status with
+  | "ok" ->
+      let* items = required_list_field body "requests" in
+      let* rows = decode_list "requests" decode_schedule_row items in
+      let* next_cursor = optional_nonblank_string body "next_cursor" in
+      Ok (rows, next_cursor)
+  | "unknown" ->
+      let* reason = required_nonblank_string body "schedule_store_read_error" in
+      Error reason
+  | "invalid_cursor" ->
+      let* reason = required_nonblank_string body "cursor_error" in
+      Error ("schedule cursor rejected: " ^ reason)
+  | other -> Error (Printf.sprintf "unknown scheduled-automation status %S" other)
 
 type ask_mode =
   | Ask_single
@@ -952,16 +973,23 @@ let decode_gate_pending json =
   let* phase = required_nonblank_string json "phase" in
   Ok { id; keeper; tool_name; input_preview; waiting_s; phase }
 
+(* Dashboard_gate.dashboard_json sends approval_queue = null with
+   approval_queue_state.state = "unavailable" when the queue store cannot be
+   read. That is a failed read, not an empty queue: Keepers may be waiting on
+   approvals the store holds. *)
 let decode_gate_pending_list json =
   let* _, body = unwrap_v2_or_raw json in
-  if has_field body "approval_queue" then
-    match member "approval_queue" body with
-    | `Null -> Ok []
-    | `List items -> decode_list "approval_queue" decode_gate_pending items
-    | bad -> field_type_error "approval_queue" "a list or null" bad
-  else
-    let* items = required_list_field body "pending" in
-    decode_list "pending" decode_gate_pending items
+  let* queue_state = required_object_field body "approval_queue_state" in
+  let* state = required_nonblank_string queue_state "state" in
+  match state with
+  | "ready" ->
+      let* items = required_list_field body "approval_queue" in
+      decode_list "approval_queue" decode_gate_pending items
+  | "unavailable" ->
+      let* title = required_nonblank_string queue_state "title" in
+      let* detail = required_nonblank_string queue_state "operator_detail" in
+      Error (title ^ ": " ^ detail)
+  | other -> Error (Printf.sprintf "unknown approval_queue_state %S" other)
 
 let encode_ask_response = function
   | Ask_chose choice_ids ->

@@ -37,8 +37,10 @@
   alcotest
   eio
   eio_main
+  goal_measure_fixture
   masc
   masc.fs_compat
+  masc.masc_goal
   masc.masc_schedule
   masc.masc_tool_surface
   masc.server

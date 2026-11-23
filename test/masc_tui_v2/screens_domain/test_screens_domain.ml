@@ -1014,11 +1014,11 @@ let make_rich_model ~lang ~cols ~rows =
          [
            {
              run_id = "ex-1";
-             lane = "verifier_exact";
-             status = "ok";
-             started_at_unix = Some (now_unix -. 60.0);
-             finished_at_unix = Some (now_unix -. 55.0);
-             summary = Some "PROVEN";
+             lane = "verifier";
+             subject_id = Some "task-3898";
+             status =
+               Wire_runtime.Task_verification Wire_runtime.Task_review_approved;
+             started_at_unix = now_unix -. 60.0;
            };
          ]
     |> Runtime_store.apply_fusion_runs ~observed_at:now_mono

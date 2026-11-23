@@ -433,14 +433,55 @@ val partition_probe_by_active_lanes :
 
 (** {1 Exact Lanes & Fusion Fan-Out} *)
 
+(** [/api/v1/dashboard/exact-lane-runs] merges three registries. Each names
+    its statuses with its own [status_label]: [Exact_lane_run_registry],
+    [Verification_run_registry] and [Goal_verification_run_registry]. *)
+type exact_output_status =
+  | Exact_running
+  | Exact_succeeded
+  | Exact_cancelled
+  | Exact_failed of { code : string; detail : string }
+  | Exact_completion_persistence_failed
+  | Exact_completion_durability_unknown
+
+type task_review_status =
+  | Task_review_running
+  | Task_review_approved
+  | Task_review_rejected
+  | Task_review_infrastructure_unavailable
+  | Task_review_not_reviewed
+  | Task_review_commit_failed
+  | Task_review_execution_pending
+  | Task_review_execution_repair_required
+  | Task_review_raised
+  | Task_review_cancelled
+  | Task_review_superseded
+
+type goal_review_status =
+  | Goal_review_running
+  | Goal_review_reviewed
+  | Goal_review_committed
+  | Goal_review_superseded
+  | Goal_review_deferred
+  | Goal_review_raised
+  | Goal_review_cancelled
+
+type lane_run_status =
+  | Exact_output of exact_output_status
+  | Task_verification of task_review_status
+  | Goal_verification of goal_review_status
+
 type exact_lane_run = {
   run_id : string;
   lane : string;
-  status : string;
-  started_at_unix : float option;
-  finished_at_unix : float option;
-  summary : string option;
+  subject_id : string option;
+      (** The reviewed task or goal id; [None] for an exact-output run. *)
+  status : lane_run_status;
+  started_at_unix : float;
 }
+
+val lane_run_status_label : lane_run_status -> string
+(** The server's spelling of the status. *)
 
 val decode_exact_lane_runs : Yojson.Safe.t -> (exact_lane_run list, string) result
 

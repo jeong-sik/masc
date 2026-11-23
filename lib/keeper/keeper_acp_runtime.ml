@@ -187,22 +187,22 @@ let acp_error_to_core_error = function
     Agent_core.Error.Provider
       (Llm_provider.Error.ParseError
          { detail = Printf.sprintf "ACP protocol error (%s): %s" stage detail })
-  | Acp.Rpc_error { method_name; code; message } ->
-    let detail = Printf.sprintf "ACP RPC %s failed (%d): %s" method_name code message in
-    (match Acp.classify_rpc_error ~method_name ~code ~message with
-     | Acp.Rpc_context_overflow ->
+  | Acp.Rpc_error { method_name; code; message; data } as rpc_err ->
+    let detail = Acp.error_to_string rpc_err in
+    (match Acp.classify_rpc_error ~method_name ~code ~message ~data with
+     | Acp.Rpc_context_overflow { limit } ->
        Agent_core.Error.Api
          (Agent_core.Retry.ContextOverflow
             { message =
                 Printf.sprintf "ACP RPC %s context overflow (%d): %s" method_name code message
-            ; limit = None
+            ; limit
             })
-     | Acp.Rpc_hard_quota ->
+     | Acp.Rpc_hard_quota { retry_after } ->
        Agent_core.Error.Provider
-         (Llm_provider.Error.HardQuota { provider = "acp"; retry_after = None; detail })
-     | Acp.Rpc_rate_limited ->
+         (Llm_provider.Error.HardQuota { provider = "acp"; retry_after; detail })
+     | Acp.Rpc_rate_limited { retry_after } ->
        Agent_core.Error.Provider
-         (Llm_provider.Error.RateLimit { provider = "acp"; retry_after = None; detail })
+         (Llm_provider.Error.RateLimit { provider = "acp"; retry_after; detail })
      | Acp.Rpc_auth_error ->
        Agent_core.Error.Provider
          (Llm_provider.Error.AuthError { provider = "acp"; detail })
@@ -212,7 +212,7 @@ let acp_error_to_core_error = function
      | Acp.Rpc_provider_unavailable ->
        Agent_core.Error.Provider
          (Llm_provider.Error.ProviderUnavailable { provider = "acp"; detail })
-     | Acp.Rpc_other ->
+     | Acp.Rpc_unclassified ->
        Agent_core.Error.Provider
          (Llm_provider.Error.ProviderReportedError
             { provider = "acp"
@@ -245,14 +245,14 @@ let acp_error_to_core_error = function
    storms. Transport, timeout, protocol, and non-quota RPC failures still evict
    the entry to keep session state clean. *)
 let should_evict_persistent_child_on_error = function
-  | Acp.Rpc_error { method_name; code; message } ->
-    (match Acp.classify_rpc_error ~method_name ~code ~message with
-     | Acp.Rpc_hard_quota | Acp.Rpc_rate_limited -> false
-     | Acp.Rpc_context_overflow
+  | Acp.Rpc_error { method_name; code; message; data } ->
+    (match Acp.classify_rpc_error ~method_name ~code ~message ~data with
+     | Acp.Rpc_hard_quota _ | Acp.Rpc_rate_limited _ -> false
+     | Acp.Rpc_context_overflow _
      | Acp.Rpc_auth_error
      | Acp.Rpc_authorization_error
      | Acp.Rpc_provider_unavailable
-     | Acp.Rpc_other -> true)
+     | Acp.Rpc_unclassified -> true)
   | Acp.Invalid_config _
   | Acp.Spawn_refused _
   | Acp.Protocol_error _
@@ -265,8 +265,8 @@ let recovery_failure_of_acp_error = function
   | Acp.Invalid_config _ -> Session_store.Pre_dispatch_failed
   | Acp.Spawn_refused refusal -> Session_store.recovery_failure_of_spawn_refusal refusal
   | Acp.Protocol_error _ -> Session_store.Protocol_failed
-  | Acp.Rpc_error { method_name; code; message }
-    when Acp.is_context_overflow_rpc_error ~method_name ~code ~message ->
+  | Acp.Rpc_error { method_name; code; message; data }
+    when Acp.is_context_overflow_rpc_error ~method_name ~code ~message ~data ->
     Session_store.Input_rejected Session_store.Bootstrap_floor_exceeded
   | Acp.Rpc_error _ -> Session_store.Provider_rejected
   | Acp.Timeout _ -> Session_store.Transport_interrupted
@@ -275,8 +275,8 @@ let recovery_failure_of_acp_error = function
 ;;
 
 let classify_prompt_error ~is_gate_continuation ~activity_observed = function
-  | Acp.Rpc_error { method_name; code; message }
-    when Acp.is_context_overflow_rpc_error ~method_name ~code ~message ->
+  | Acp.Rpc_error { method_name; code; message; data } as rpc_err
+    when Acp.is_context_overflow_rpc_error ~method_name ~code ~message ~data ->
     if is_gate_continuation
     then
       ( Session_store.Vendor_session_full
@@ -310,7 +310,7 @@ let classify_prompt_error ~is_gate_continuation ~activity_observed = function
              }) )
     else
       ( Session_store.Input_rejected Session_store.Bootstrap_floor_exceeded
-      , acp_error_to_core_error (Acp.Rpc_error { method_name; code; message }) )
+      , acp_error_to_core_error rpc_err )
   | ( Acp.Invalid_config _
     | Acp.Spawn_refused _
     | Acp.Protocol_error _
@@ -2665,9 +2665,9 @@ let run_without_lifecycle
            [Observation_unavailable] can downgrade cleanly to [No_effect_observed]
            (never clearing [Effect_attempted]). *)
         (match err with
-         | Acp.Rpc_error { method_name; code; message }
+         | Acp.Rpc_error { method_name; code; message; data }
            when (not activity_observed)
-                && Acp.is_context_overflow_rpc_error ~method_name ~code ~message ->
+                && Acp.is_context_overflow_rpc_error ~method_name ~code ~message ~data ->
            observe_effect_quiet ()
          | Acp.Invalid_config _
          | Acp.Spawn_refused _

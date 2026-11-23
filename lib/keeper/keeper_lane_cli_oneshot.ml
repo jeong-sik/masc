@@ -105,22 +105,30 @@ let codex_error_is_binding_rest (error : Runtime_codex_app_server.error) : bool 
 ;;
 
 let rpc_error_class_is_binding_rest = function
-  | Runtime_acp_client.Rpc_hard_quota
-  | Runtime_acp_client.Rpc_rate_limited -> true
-  | Runtime_acp_client.Rpc_context_overflow
+  | Runtime_acp_client.Rpc_hard_quota _
+  | Runtime_acp_client.Rpc_rate_limited _ -> true
+  | Runtime_acp_client.Rpc_context_overflow _
   | Runtime_acp_client.Rpc_auth_error
   | Runtime_acp_client.Rpc_authorization_error
   | Runtime_acp_client.Rpc_provider_unavailable
-  | Runtime_acp_client.Rpc_other -> false
+  | Runtime_acp_client.Rpc_unclassified -> false
+;;
+
+let signal_refusal_is_binding_rest = function
+  | Some (Llm_provider.Retry.Signal_hard_quota _ | Llm_provider.Retry.Signal_rate_limited _) ->
+    true
+  | Some
+      ( Llm_provider.Retry.Signal_context_overflow _
+      | Llm_provider.Retry.Signal_auth_error _
+      | Llm_provider.Retry.Signal_authorization_error _
+      | Llm_provider.Retry.Signal_provider_unavailable _ )
+  | None -> false
 ;;
 
 let antigravity_error_is_binding_rest : Runtime_antigravity.error -> bool = function
   | Runtime_antigravity.Turn_failed detail ->
-    Runtime_acp_client.classify_rpc_error
-      ~method_name:"antigravity/turn"
-      ~code:0
-      ~message:detail
-    |> rpc_error_class_is_binding_rest
+    Runtime_antigravity.classify_turn_failure detail
+    |> signal_refusal_is_binding_rest
   | Runtime_antigravity.Invalid_config _
   | Runtime_antigravity.Spawn_refused _
   | Runtime_antigravity.Spawn_capacity_busy _
@@ -136,8 +144,8 @@ let antigravity_error_is_binding_rest : Runtime_antigravity.error -> bool = func
 ;;
 
 let acp_error_is_binding_rest : Runtime_acp_client.error -> bool = function
-  | Runtime_acp_client.Rpc_error { method_name; code; message } ->
-    Runtime_acp_client.classify_rpc_error ~method_name ~code ~message
+  | Runtime_acp_client.Rpc_error { method_name; code; message; data } ->
+    Runtime_acp_client.classify_rpc_error ~method_name ~code ~message ~data
     |> rpc_error_class_is_binding_rest
   | Runtime_acp_client.Invalid_config _
   | Runtime_acp_client.Spawn_refused _
@@ -235,9 +243,9 @@ let refused_for_input_size = function
   | Execution_failed
       { cause =
           Fusion_official_client.Acp_failure
-            (Runtime_acp_client.Rpc_error { method_name; code; message })
+            (Runtime_acp_client.Rpc_error { method_name; code; message; data })
       ; runtime_id = _
-      } -> Runtime_acp_client.is_context_overflow_rpc_error ~method_name ~code ~message
+      } -> Runtime_acp_client.is_context_overflow_rpc_error ~method_name ~code ~message ~data
   | Execution_failed
       { cause =
           Fusion_official_client.Acp_failure

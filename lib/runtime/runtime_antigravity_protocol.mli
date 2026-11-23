@@ -183,6 +183,10 @@ type state
 val initial : state
 val terminal : state -> terminal option
 val read_phase : state -> read_phase
+(** Derive the existing idle-read policy from the last accepted step. An
+    identical closed-response replay preserves the original state and phase.
+    The driver stops reading once [terminal] is present. *)
+
 val activity_observed : state -> bool * bool
 (** [(tool_effect_attempted, response_emitted)] observed in [state] so far. *)
 
@@ -190,11 +194,12 @@ val is_structured_context_overflow :
   error_code:string option -> detail:string -> stderr:string -> bool
 (** Structured machine-readable overflow detection from an explicit protocol
     [error_code] or a JSON error envelope inside [detail] / [stderr] via
-    {!Llm_provider.Retry.classify_structured_refusal}. Never inspects free-form
-    prose messages. *)
-(** Derive the existing idle-read policy from the last accepted step. An
-    identical closed-response replay preserves the original state and phase.
-    The driver stops reading once [terminal] is present. *)
+    {!Llm_provider.Retry}. Never inspects free-form prose messages. *)
+
+val format_turn_failed_detail : error_code:string option -> string -> string
+(** Preserve a non-empty structured [error_code] alongside a [Turn_failed]
+    diagnostic detail so downstream refusal classification sees the wire code
+    without parsing free-form prose. *)
 
 type obligation =
   | Admit_conversation of { conversation_id : string }

@@ -30,30 +30,25 @@ let runtime_error_to_core_error = function
          ; detail = message
          })
   | Runtime_antigravity.Turn_failed detail ->
-    (match
-       Runtime_acp_client.classify_rpc_error
-         ~method_name:"antigravity/turn"
-         ~code:0
-         ~message:detail
-     with
-     | Runtime_acp_client.Rpc_hard_quota ->
+    (match Runtime_antigravity.classify_turn_failure detail with
+     | Some (Llm_provider.Retry.Signal_hard_quota { retry_after; _ }) ->
        Agent_core.Error.Provider
          (Llm_provider.Error.HardQuota
-            { provider = "antigravity_cli"; retry_after = None; detail })
-     | Runtime_acp_client.Rpc_rate_limited ->
+            { provider = "antigravity_cli"; retry_after; detail })
+     | Some (Llm_provider.Retry.Signal_rate_limited { retry_after; _ }) ->
        Agent_core.Error.Provider
          (Llm_provider.Error.RateLimit
-            { provider = "antigravity_cli"; retry_after = None; detail })
-     | Runtime_acp_client.Rpc_auth_error ->
+            { provider = "antigravity_cli"; retry_after; detail })
+     | Some (Llm_provider.Retry.Signal_auth_error _) ->
        Agent_core.Error.Provider
          (Llm_provider.Error.AuthError { provider = "antigravity_cli"; detail })
-     | Runtime_acp_client.Rpc_authorization_error ->
+     | Some (Llm_provider.Retry.Signal_authorization_error _) ->
        Agent_core.Error.Provider
          (Llm_provider.Error.AuthorizationError { provider = "antigravity_cli"; detail })
-     | Runtime_acp_client.Rpc_provider_unavailable ->
+     | Some (Llm_provider.Retry.Signal_provider_unavailable _) ->
        Agent_core.Error.Provider
          (Llm_provider.Error.ProviderUnavailable { provider = "antigravity_cli"; detail })
-     | Runtime_acp_client.Rpc_context_overflow | Runtime_acp_client.Rpc_other ->
+     | Some (Llm_provider.Retry.Signal_context_overflow _) | None ->
        Agent_core.Error.Provider
          (Llm_provider.Error.ProviderReportedError
             { provider = "antigravity_cli"

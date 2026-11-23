@@ -239,57 +239,27 @@ let activity_observed (state : state) =
     running.tool_steps > 0, running.text_streamed
 
 let is_structured_overflow_code code =
-  match String.lowercase_ascii (String.trim code) with
-  | "context_length_exceeded"
-  | "context_window_exceeded"
-  | "prompt_too_long"
-  | "max_tokens_exceeded"
-  | "request_too_large"
-  | "model_context_length_exceeded"
-  | "invalid_argument_prompt_too_long" -> true
-  | _ -> false
-
-let json_fields_have_structured_overflow_code json =
-  let string_code_matches fields key =
-    match List.assoc_opt key fields with
-    | Some (`String code) -> is_structured_overflow_code code
-    | Some _ | None -> false
-  in
-  let check_object fields =
-    string_code_matches fields "error_code"
-    || string_code_matches fields "code"
-    || string_code_matches fields "type"
-    || string_code_matches fields "status"
-  in
-  match json with
-  | `Assoc fields ->
-    check_object fields
-    || (match List.assoc_opt "error" fields with
-        | Some (`Assoc err_fields) -> check_object err_fields
-        | Some _ | None -> false)
-  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> false
+  let trimmed = String.trim code in
+  trimmed <> ""
+  && Llm_provider.Retry.signals_indicate_context_overflow
+       { codes = [ trimmed ]
+       ; types = [ trimmed ]
+       ; statuses = [ trimmed ]
+       ; detail_reasons = [ trimmed ]
+       ; messages = []
+       ; n_ctx = None
+       }
 
 let json_body_is_structured_overflow body =
-  let check candidate =
-    match
-      Llm_provider.Retry.classify_structured_refusal
-        ~retry_after_header:None ~status:400 ~body:candidate
-    with
-    | Some (Llm_provider.Retry.Structured_context_overflow _) -> true
-    | Some (Llm_provider.Retry.Structured_account_quota _) | None ->
-      (try json_fields_have_structured_overflow_code (Yojson.Safe.from_string candidate) with
-       | Yojson.Json_error _ -> false)
-  in
-  let trimmed = String.trim body in
-  if trimmed = ""
-  then false
-  else if check trimmed
-  then true
-  else (
-    match String.index_opt trimmed '{' with
-    | Some idx when idx > 0 ->
-      check (String.sub trimmed idx (String.length trimmed - idx))
-    | Some _ | None -> false)
+  match Llm_provider.Retry.classify_embedded_json body with
+  | Some (Llm_provider.Retry.Signal_context_overflow _) -> true
+  | Some
+      ( Llm_provider.Retry.Signal_hard_quota _
+      | Llm_provider.Retry.Signal_rate_limited _
+      | Llm_provider.Retry.Signal_auth_error _
+      | Llm_provider.Retry.Signal_authorization_error _
+      | Llm_provider.Retry.Signal_provider_unavailable _ )
+  | None -> false
 
 let is_structured_context_overflow ~error_code ~detail ~stderr =
   let code_matches =
@@ -302,6 +272,38 @@ let is_structured_context_overflow ~error_code ~detail ~stderr =
   || (stderr <> ""
       && (json_body_is_structured_overflow stderr
           || List.exists json_body_is_structured_overflow (String.split_on_char '\n' stderr)))
+
+let format_turn_failed_detail ~error_code detail =
+  let is_ident = function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true
+    | _ -> false
+  in
+  match error_code with
+  | None -> detail
+  | Some raw_code ->
+    let code = String.trim raw_code in
+    if code = ""
+    then detail
+    else (
+      let code_len = String.length code in
+      let detail_len = String.length detail in
+      let already_present =
+        let rec scan i =
+          if i > detail_len - code_len
+          then false
+          else if String.sub detail i code_len = code
+                  && (i = 0 || not (is_ident detail.[i - 1]))
+                  && (i + code_len = detail_len || not (is_ident detail.[i + code_len]))
+          then true
+          else scan (i + 1)
+        in
+        code_len <= detail_len && scan 0
+      in
+      if already_present
+      then detail
+      else if String.trim detail = ""
+      then Printf.sprintf "[%s]" code
+      else Printf.sprintf "[%s] %s" code detail)
 
 (* Only an ACTIVE tool update changes the existing idle-read phase. *)
 let read_phase (state : state) : read_phase =
@@ -512,7 +514,7 @@ let advance ~expected_model ~expected_cwd ~conversation_mode
                ; tool_effect_attempted = false
                ; response_emitted = false
                })
-        else Error (Turn_failed detail)
+        else Error (Turn_failed (format_turn_failed_detail ~error_code detail))
       | Awaiting_init, Success -> protocol_error stage "received result before init"
       | Awaiting_init, Not_completed status ->
         Error (Result_not_completed

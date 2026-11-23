@@ -310,6 +310,7 @@ type error =
       { method_name : string
       ; code : int
       ; message : string
+      ; data : Yojson.Safe.t option
       }
   | Timeout of
       { stage : string
@@ -323,23 +324,56 @@ type error =
 
 val error_to_string : error -> string
 
-val is_context_overflow_rpc_error : method_name:string -> code:int -> message:string -> bool
-(** True when an ACP JSON-RPC error reports a provider/model context-window or
-    prompt-length overflow that should enter shrink/compaction recovery. *)
+type jsonrpc_code =
+  | Jsonrpc_parse_error
+  | Jsonrpc_invalid_request
+  | Jsonrpc_method_not_found
+  | Jsonrpc_invalid_params
+  | Jsonrpc_internal_error
+  | Jsonrpc_server_error of int
+  | Jsonrpc_http_status of int
+  | Jsonrpc_other_code of int
+
+val jsonrpc_code_of_int : int -> jsonrpc_code
+(** Partition a JSON-RPC 2.0 error integer into its closed wire taxonomy so
+    negative JSON-RPC protocol/server codes ([-32700..-32000]) are never
+    conflated with HTTP refusal statuses ([400..599]). *)
+
+val is_context_overflow_rpc_error
+  :  method_name:string
+  -> code:int
+  -> message:string
+  -> data:Yojson.Safe.t option
+  -> bool
+(** True when an ACP JSON-RPC error reports a structured provider/model
+    context-window or prompt-length overflow (via {!Llm_provider.Retry}) that
+    should enter shrink/compaction recovery. Free-form prose without a
+    structured JSON payload or exact wire code returns [false]. *)
 
 type rpc_error_class =
-  | Rpc_context_overflow
-  | Rpc_hard_quota
-  | Rpc_rate_limited
+  | Rpc_context_overflow of { limit : int option }
+  | Rpc_hard_quota of { retry_after : float option }
+  | Rpc_rate_limited of { retry_after : float option }
   | Rpc_auth_error
   | Rpc_authorization_error
   | Rpc_provider_unavailable
-  | Rpc_other
+  | Rpc_unclassified
 
-val classify_rpc_error : method_name:string -> code:int -> message:string -> rpc_error_class
-(** Classify an upstream ACP RPC / official-client error into a closed
-    provider-refusal class so callers can record quota windows, candidate rate
-    backpressure, auth refusals, and failover without duplicating wire checks. *)
+val classify_rpc_error
+  :  method_name:string
+  -> code:int
+  -> message:string
+  -> data:Yojson.Safe.t option
+  -> rpc_error_class
+(** Classify an upstream ACP JSON-RPC error into a closed provider-refusal
+    class by delegating strictly to {!Llm_provider.Retry}:
+    1. structured JSON [data] ([Retry.classify_structured_json]),
+    2. embedded JSON envelope in [message] ([Retry.classify_embedded_json]),
+    3. exact ASCII-boundary machine wire tokens or explicit [HTTP <4xx|5xx>]
+       status tokens ([Retry.classify_machine_tokens]) paired with any
+       {!Jsonrpc_http_status} / [data] HTTP status.
+    Free-form English prose without structured evidence returns
+    {!Rpc_unclassified}. *)
 
 val image_input_unsupported_detail : driver -> string
 (** Canonical refusal detail when an ACP server advertises

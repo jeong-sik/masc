@@ -560,15 +560,15 @@ let official_failure_can_advance : Fusion_official_client.failure -> bool = func
       | Runtime_acp_client.Timeout _
       | Runtime_acp_client.Process_exited _
       | Runtime_acp_client.Client_closed ) -> true
-  | Acp_failure (Runtime_acp_client.Rpc_error { method_name; code; message }) ->
-    (match Runtime_acp_client.classify_rpc_error ~method_name ~code ~message with
-     | Runtime_acp_client.Rpc_hard_quota
-     | Runtime_acp_client.Rpc_rate_limited
+  | Acp_failure (Runtime_acp_client.Rpc_error { method_name; code; message; data }) ->
+    (match Runtime_acp_client.classify_rpc_error ~method_name ~code ~message ~data with
+     | Runtime_acp_client.Rpc_hard_quota _
+     | Runtime_acp_client.Rpc_rate_limited _
      | Runtime_acp_client.Rpc_auth_error
      | Runtime_acp_client.Rpc_authorization_error
      | Runtime_acp_client.Rpc_provider_unavailable
-     | Runtime_acp_client.Rpc_context_overflow -> true
-     | Runtime_acp_client.Rpc_other -> false)
+     | Runtime_acp_client.Rpc_context_overflow _ -> true
+     | Runtime_acp_client.Rpc_unclassified -> false)
   | Claude_admission_failure (Invalid_config _) -> false
   | Claude_admission_failure (Runtime_claude_code.Spawn_refused _)
   | Claude_admission_failure (Runtime_claude_code.Protocol_error _)

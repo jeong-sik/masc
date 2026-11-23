@@ -264,6 +264,12 @@ type error =
 
 val error_to_string : error -> string
 
+val classify_turn_failure : string -> Llm_provider.Retry.signal_refusal option
+(** Classify a {!Turn_failed} detail string directly via {!Llm_provider.Retry}
+    (embedded structured JSON envelopes first, then exact machine wire codes
+    and explicit [HTTP <4xx|5xx>] status tokens). Free-form prose without
+    structured evidence returns [None]. *)
+
 val redact_stderr_tail : string -> string
 (** Shared structural secret masking. The shared stderr capture masks complete
     retained input before display truncation. Once the raw byte bound is
@@ -323,6 +329,7 @@ val run_turn :
     XDG directory overrides before spawning the official client. *)
 
 module For_testing : sig
+  val format_turn_failed_detail : error_code:string option -> string -> string
   val with_child_fd_sampler :
     (unit -> Runtime_cli_spawn_gate.child_fds) -> (unit -> 'a) -> 'a
   (** Fiber-scoped samples for deterministic safety-abort tests. The normal

@@ -436,6 +436,7 @@ type error =
       { method_name : string
       ; code : int
       ; message : string
+      ; data : Yojson.Safe.t option
       }
   | Timeout of
       { stage : string
@@ -447,14 +448,39 @@ type error =
       }
   | Client_closed
 
+let bounded_redacted_json_summary (json : Yojson.Safe.t) =
+  let max_bytes = 512 in
+  let redacted = Yojson.Safe.to_string (Secret_patterns.redact_json_strings json) in
+  if String.length redacted <= max_bytes
+  then redacted
+  else (
+    let payload_cap = max_bytes - 3 in
+    let rec trim_utf8 i =
+      if i <= 0
+      then 0
+      else if (Char.code redacted.[i] land 0xC0) = 0x80
+      then trim_utf8 (i - 1)
+      else i
+    in
+    String.sub redacted 0 (trim_utf8 payload_cap) ^ "...")
+;;
+
 let error_to_string = function
   | Invalid_config detail -> "invalid ACP config: " ^ detail
   | Spawn_refused refusal ->
     "failed to start ACP client: " ^ Process_eio.spawn_refusal_to_string refusal
   | Protocol_error { stage; detail } ->
     Printf.sprintf "ACP protocol error (%s): %s" stage detail
-  | Rpc_error { method_name; code; message } ->
-    Printf.sprintf "ACP RPC error in %s (code %d): %s" method_name code message
+  | Rpc_error { method_name; code; message; data } ->
+    (match data with
+     | None -> Printf.sprintf "ACP RPC error in %s (code %d): %s" method_name code message
+     | Some json ->
+       Printf.sprintf
+         "ACP RPC error in %s (code %d): %s (data: %s)"
+         method_name
+         code
+         message
+         (bounded_redacted_json_summary json))
   | Timeout { stage; timeout_s } ->
     Printf.sprintf "ACP timeout in %s after %.1fs" stage timeout_s
   | Process_exited { detail; stderr_tail } ->
@@ -465,220 +491,215 @@ let error_to_string = function
   | Client_closed -> "ACP client is closed"
 ;;
 
-let contains_substring_ci ~haystack ~needle =
-  let h_len = String.length haystack in
-  let n_len = String.length needle in
-  if n_len = 0
-  then true
-  else if n_len > h_len
-  then false
-  else (
-    let h = String.lowercase_ascii haystack in
-    let n = String.lowercase_ascii needle in
-    let rec scan idx =
-      if idx > h_len - n_len
-      then false
-      else if String.sub h idx n_len = n
-      then true
-      else scan (idx + 1)
-    in
-    scan 0)
-;;
+type jsonrpc_code =
+  | Jsonrpc_parse_error
+  | Jsonrpc_invalid_request
+  | Jsonrpc_method_not_found
+  | Jsonrpc_invalid_params
+  | Jsonrpc_internal_error
+  | Jsonrpc_server_error of int
+  | Jsonrpc_http_status of int
+  | Jsonrpc_other_code of int
 
-let has_context_overflow_signal message =
-  let needles =
-    [ "context_length_exceeded"
-    ; "context length"
-    ; "maximum context"
-    ; "context window"
-    ; "prompt is too long"
-    ; "input is too long"
-    ; "request too large"
-    ; "too many tokens"
-    ; "token limit"
-    ; "tokens exceed"
-    ; "exceeds the maximum"
-    ; "max_tokens_exceeded"
-    ]
-  in
-  List.exists (fun needle -> contains_substring_ci ~haystack:message ~needle) needles
+let jsonrpc_code_of_int = function
+  | -32700 -> Jsonrpc_parse_error
+  | -32600 -> Jsonrpc_invalid_request
+  | -32601 -> Jsonrpc_method_not_found
+  | -32602 -> Jsonrpc_invalid_params
+  | -32603 -> Jsonrpc_internal_error
+  | n when n >= -32099 && n <= -32000 -> Jsonrpc_server_error n
+  | n when n >= 400 && n <= 599 -> Jsonrpc_http_status n
+  | n -> Jsonrpc_other_code n
 ;;
 
 type rpc_error_class =
-  | Rpc_context_overflow
-  | Rpc_hard_quota
-  | Rpc_rate_limited
+  | Rpc_context_overflow of { limit : int option }
+  | Rpc_hard_quota of { retry_after : float option }
+  | Rpc_rate_limited of { retry_after : float option }
   | Rpc_auth_error
   | Rpc_authorization_error
   | Rpc_provider_unavailable
-  | Rpc_other
+  | Rpc_unclassified
 
-let has_any_ci ~haystack needles =
-  List.exists (fun needle -> contains_substring_ci ~haystack ~needle) needles
+let signal_retry_after = function
+  | Llm_provider.Retry.Signal_hard_quota { retry_after; _ }
+  | Llm_provider.Retry.Signal_rate_limited { retry_after; _ } -> retry_after
+  | Llm_provider.Retry.Signal_context_overflow _
+  | Llm_provider.Retry.Signal_auth_error _
+  | Llm_provider.Retry.Signal_authorization_error _
+  | Llm_provider.Retry.Signal_provider_unavailable _ -> None
 ;;
 
-let has_hard_quota_signal message =
-  has_any_ci
-    ~haystack:message
-    [ "exceeded_current_quota_error"
-    ; "insufficient_quota"
-    ; "quota_exceeded"
-    ; "quota exceeded"
-    ; "quota exhausted"
-    ; "exceeded your current quota"
-    ; "exhausted your capacity"
-    ; "your quota will reset"
-    ; "usage_limit_exceeded"
-    ; "billing_hard_limit_reached"
-    ; "credit_balance_too_low"
-    ; "credit balance is too low"
-    ; "reached your specified api usage limits"
-    ; "reached your api usage limit"
-    ; "usage limit reached"
-    ; "reached your usage limit"
-    ; "billing_api_budget_exhausted"
-    ; "billing_disabled"
-    ; "insufficient_balance"
-    ; "insufficient balance"
-    ; "payment_required"
-    ; "payment required"
-    ; "out of credits"
-    ; "spend limit"
-    ; "gousagelimiterror"
-    ; "key_limit_exceeded"
-    ; "http 402"
-    ; "status 402"
-    ; "status: 402"
-    ; "status_code: 402"
-    ; "status code: 402"
-    ; "code 402"
-    ; "402 payment"
-    ]
+let signal_limit = function
+  | Llm_provider.Retry.Signal_context_overflow { limit; _ } -> limit
+  | Llm_provider.Retry.Signal_hard_quota _
+  | Llm_provider.Retry.Signal_rate_limited _
+  | Llm_provider.Retry.Signal_auth_error _
+  | Llm_provider.Retry.Signal_authorization_error _
+  | Llm_provider.Retry.Signal_provider_unavailable _ -> None
 ;;
 
-let has_rate_limit_signal message =
-  has_any_ci
-    ~haystack:message
-    [ "resource_exhausted"
-    ; "rate_limit"
-    ; "rate limit"
-    ; "ratelimit"
-    ; "too many requests"
-    ; "http 429"
-    ; "status 429"
-    ; "status: 429"
-    ; "status_code: 429"
-    ; "status code: 429"
-    ; "code 429"
-    ; "code: 429"
-    ; "error 429"
-    ; "429 too many"
-    ; "throttl"
-    ; "requests per minute"
-    ; "tokens per minute"
-    ]
+let first_some xs = List.find_map Fun.id xs
+
+let rpc_error_class_of_signal ~retry_after ~limit = function
+  | Llm_provider.Retry.Signal_context_overflow { limit = sig_limit; _ } ->
+    Rpc_context_overflow { limit = first_some [ sig_limit; limit ] }
+  | Llm_provider.Retry.Signal_hard_quota { retry_after = sig_retry; _ } ->
+    Rpc_hard_quota { retry_after = first_some [ sig_retry; retry_after ] }
+  | Llm_provider.Retry.Signal_rate_limited { retry_after = sig_retry; _ } ->
+    Rpc_rate_limited { retry_after = first_some [ sig_retry; retry_after ] }
+  | Llm_provider.Retry.Signal_auth_error _ -> Rpc_auth_error
+  | Llm_provider.Retry.Signal_authorization_error _ -> Rpc_authorization_error
+  | Llm_provider.Retry.Signal_provider_unavailable _ -> Rpc_provider_unavailable
 ;;
 
-let has_auth_signal message =
-  has_any_ci
-    ~haystack:message
-    [ "unauthenticated"
-    ; "unauthorized"
-    ; "invalid_api_key"
-    ; "invalid api key"
-    ; "invalid_authentication_error"
-    ; "authentication_error"
-    ; "authentication failed"
-    ; "not authenticated"
-    ; "login required"
-    ; "http 401"
-    ; "status 401"
-    ; "status: 401"
-    ; "status_code: 401"
-    ; "status code: 401"
-    ; "code 401"
-    ; "401 unauthorized"
-    ]
+let extract_data_evidence ~fallback_message (data : Yojson.Safe.t option) =
+  let module R = Llm_provider.Retry in
+  let inspect_assoc obj =
+    let status = R.http_status_of_json obj in
+    let retry = R.retry_after_of_json obj in
+    let signals = R.signals_of_json obj in
+    let field_signal =
+      R.classify_structured_signals ?retry_after:retry ~fallback_message signals
+    in
+    status, retry, signals.n_ctx, field_signal, Some obj
+  in
+  match data with
+  | None -> None, None, None, None, None
+  | Some (`Assoc _ as obj) -> inspect_assoc obj
+  | Some (`List items) ->
+    let rec walk remaining = function
+      | [] -> None, None, None, None, None
+      | _ when remaining <= 0 -> None, None, None, None, None
+      | (`Assoc _ as obj) :: rest ->
+        let status, retry, n_ctx, field_signal, matched_obj = inspect_assoc obj in
+        if Option.is_some field_signal
+           || Option.is_some status
+           || Option.is_some retry
+           || Option.is_some n_ctx
+        then status, retry, n_ctx, field_signal, matched_obj
+        else walk (remaining - 1) rest
+      | (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) :: rest ->
+        walk (remaining - 1) rest
+    in
+    walk 8 items
+  | Some (`String raw) ->
+    let sig_from_str =
+      match R.classify_embedded_json raw with
+      | Some _ as s -> s
+      | None -> R.classify_machine_tokens raw
+    in
+    None, Option.bind sig_from_str signal_retry_after, Option.bind sig_from_str signal_limit, sig_from_str, None
+  | Some (`Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) -> None, None, None, None, None
 ;;
 
-let has_authorization_signal message =
-  has_any_ci
-    ~haystack:message
-    [ "permission_denied"
-    ; "permission denied"
-    ; "forbidden"
-    ; "access denied"
-    ; "http 403"
-    ; "status 403"
-    ; "status: 403"
-    ; "status_code: 403"
-    ; "status code: 403"
-    ; "code 403"
-    ; "403 forbidden"
-    ]
+let classify_rpc_error ~method_name:_ ~code ~message ~data =
+  let module R = Llm_provider.Retry in
+  let code_http_status =
+    match jsonrpc_code_of_int code with
+    | Jsonrpc_http_status s -> Some s
+    | Jsonrpc_parse_error
+    | Jsonrpc_invalid_request
+    | Jsonrpc_method_not_found
+    | Jsonrpc_invalid_params
+    | Jsonrpc_internal_error
+    | Jsonrpc_server_error _
+    | Jsonrpc_other_code _ -> None
+  in
+  let data_status, data_retry, data_n_ctx, data_field_signal, data_assoc =
+    extract_data_evidence ~fallback_message:message data
+  in
+  let effective_http_status = first_some [ code_http_status; data_status ] in
+  (* Extract pure structured signals from [message] without forcing caller HTTP
+     status yet, so an unrelated leading JSON object cannot prematurely short-
+     circuit a quota signal later in the message. *)
+  let msg_json_signal = R.classify_embedded_json ?retry_after:data_retry message in
+  let msg_token_signal = R.classify_machine_tokens ?retry_after:data_retry message in
+  let best_retry =
+    first_some
+      [ data_retry
+      ; Option.bind data_field_signal signal_retry_after
+      ; Option.bind msg_json_signal signal_retry_after
+      ; Option.bind msg_token_signal signal_retry_after
+      ]
+  in
+  let best_limit =
+    first_some
+      [ data_n_ctx
+      ; Option.bind data_field_signal signal_limit
+      ; Option.bind msg_json_signal signal_limit
+      ; Option.bind msg_token_signal signal_limit
+      ]
+  in
+  let is_hard_quota = function
+    | Some (R.Signal_hard_quota _) -> true
+    | Some
+        ( R.Signal_context_overflow _
+        | R.Signal_rate_limited _
+        | R.Signal_auth_error _
+        | R.Signal_authorization_error _
+        | R.Signal_provider_unavailable _ )
+    | None -> false
+  in
+  let candidates = [ data_field_signal; msg_json_signal; msg_token_signal ] in
+  let best_signal =
+    match List.find_opt is_hard_quota candidates with
+    | Some (Some _ as q) -> q
+    | Some None | None -> first_some candidates
+  in
+  let anthropic_400_fallback () =
+    let from_data_400 =
+      Option.bind data_assoc (fun obj ->
+        R.classify_structured_json ~http_status:400 ~fallback_message:message obj)
+    in
+    match from_data_400 with
+    | Some _ as s -> s
+    | None -> R.classify_embedded_json ~http_status:400 ?retry_after:best_retry message
+  in
+  (* Enforce HTTP refusal status precedence (#354 P1 #1) so HTTP 429/402/401/
+     403/5xx never misclassify as context overflow (which would falsely clear
+     Native_full effect fences or evict persistent children). *)
+  match effective_http_status with
+  | Some 402 -> Rpc_hard_quota { retry_after = best_retry }
+  | Some 401 -> Rpc_auth_error
+  | Some 403 ->
+    if is_hard_quota best_signal
+    then Rpc_hard_quota { retry_after = best_retry }
+    else Rpc_authorization_error
+  | Some 429 ->
+    if is_hard_quota best_signal
+    then Rpc_hard_quota { retry_after = best_retry }
+    else Rpc_rate_limited { retry_after = best_retry }
+  | Some 413 -> Rpc_context_overflow { limit = best_limit }
+  | Some 400 ->
+    (match best_signal with
+     | Some s -> rpc_error_class_of_signal ~retry_after:best_retry ~limit:best_limit s
+     | None ->
+       (match anthropic_400_fallback () with
+        | Some s -> rpc_error_class_of_signal ~retry_after:best_retry ~limit:best_limit s
+        | None -> Rpc_unclassified))
+  | Some status ->
+    (match R.server_status_class_of_code status with
+     | Some (R.Overloaded_status | R.Server_error_status) -> Rpc_provider_unavailable
+     | None ->
+       (match best_signal with
+        | Some s -> rpc_error_class_of_signal ~retry_after:best_retry ~limit:best_limit s
+        | None -> Rpc_unclassified))
+  | None ->
+    (match best_signal with
+     | Some s -> rpc_error_class_of_signal ~retry_after:best_retry ~limit:best_limit s
+     | None -> Rpc_unclassified)
 ;;
 
-let has_unavailable_signal message =
-  has_any_ci
-    ~haystack:message
-    [ "service unavailable"
-    ; "temporarily unavailable"
-    ; "internal server error"
-    ; "bad gateway"
-    ; "gateway timeout"
-    ; "overloaded"
-    ; "server_error"
-    ; "http 500"
-    ; "http 502"
-    ; "http 503"
-    ; "http 504"
-    ; "http 529"
-    ; "status 500"
-    ; "status 502"
-    ; "status 503"
-    ; "status 504"
-    ; "status 529"
-    ; "status: 500"
-    ; "status: 502"
-    ; "status: 503"
-    ; "status: 504"
-    ; "status: 529"
-    ; "status_code: 500"
-    ; "status_code: 502"
-    ; "status_code: 503"
-    ; "status_code: 504"
-    ; "status_code: 529"
-    ]
-;;
-
-let classify_rpc_error ~method_name:_ ~code ~message =
-  match code with
-  | 402 -> Rpc_hard_quota
-  | 401 -> Rpc_auth_error
-  | 403 ->
-    if has_hard_quota_signal message then Rpc_hard_quota else Rpc_authorization_error
-  | 429 ->
-    if has_hard_quota_signal message then Rpc_hard_quota else Rpc_rate_limited
-  | 500 | 502 | 503 | 504 | 520 | 521 | 522 | 523 | 524 | 529 ->
-    Rpc_provider_unavailable
-  | _ ->
-    if has_hard_quota_signal message
-    then Rpc_hard_quota
-    else if has_rate_limit_signal message
-    then Rpc_rate_limited
-    else if has_auth_signal message
-    then Rpc_auth_error
-    else if has_authorization_signal message
-    then Rpc_authorization_error
-    else if has_context_overflow_signal message
-    then Rpc_context_overflow
-    else if has_unavailable_signal message
-    then Rpc_provider_unavailable
-    else Rpc_other
-;;
-
-let is_context_overflow_rpc_error ~method_name ~code ~message =
-  classify_rpc_error ~method_name ~code ~message = Rpc_context_overflow
+let is_context_overflow_rpc_error ~method_name ~code ~message ~data =
+  match classify_rpc_error ~method_name ~code ~message ~data with
+  | Rpc_context_overflow _ -> true
+  | Rpc_hard_quota _
+  | Rpc_rate_limited _
+  | Rpc_auth_error
+  | Rpc_authorization_error
+  | Rpc_provider_unavailable
+  | Rpc_unclassified -> false
 ;;
 
 let image_input_unsupported_detail driver =
@@ -1888,7 +1909,7 @@ type active_turn_hooks =
 
 type rpc_response =
   | Rpc_ok of Yojson.Safe.t
-  | Rpc_err of int * string
+  | Rpc_err of int * string * Yojson.Safe.t option
   | Rpc_closed of string
 
 type t =
@@ -2220,7 +2241,12 @@ let dispatch_incoming_message t msg =
           let message =
             Option.value (json_string_opt "message" err_obj) ~default:"unknown RPC error"
           in
-          Eio.Promise.resolve u (Rpc_err (code, message))
+          let data =
+            match json_field "data" err_obj with
+            | Some `Null | None -> None
+            | Some _ as d -> d
+          in
+          Eio.Promise.resolve u (Rpc_err (code, message, data))
         | None ->
           let result = Option.value (json_field "result" msg) ~default:`Null in
           Eio.Promise.resolve u (Rpc_ok result)))
@@ -2407,7 +2433,8 @@ let rpc_call_with_wait
        | Rpc_ok json ->
          decoder.decode json
          |> Result.map_error (fun detail -> Protocol_error { stage = method_name; detail })
-       | Rpc_err (code, message) -> Error (Rpc_error { method_name; code; message })
+       | Rpc_err (code, message, data) ->
+         Error (Rpc_error { method_name; code; message; data })
        | Rpc_closed reason ->
          Error (Process_exited { detail = reason; stderr_tail = stderr_tail t })))
 ;;

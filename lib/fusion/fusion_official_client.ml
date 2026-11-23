@@ -495,29 +495,46 @@ let claude_quota_standing : Runtime_claude_code.quota_block -> Runtime_candidate
 ;;
 
 let standing_of_rpc_error_class ~now = function
-  | Runtime_acp_client.Rpc_hard_quota ->
+  | Runtime_acp_client.Rpc_hard_quota { retry_after } ->
     Some
       (Runtime_candidate_standing.Hard_quota
-         { source = Runtime_quota_window.Provider_quota_refused; resets_at = None })
-  | Runtime_acp_client.Rpc_rate_limited ->
-    Some (Runtime_candidate_standing.Rate_limited { retry_after = None })
+         { source = Runtime_quota_window.Provider_quota_refused
+         ; resets_at = Option.map (fun s -> now +. s) retry_after
+         })
+  | Runtime_acp_client.Rpc_rate_limited { retry_after } ->
+    Some (Runtime_candidate_standing.Rate_limited { retry_after })
   | Runtime_acp_client.Rpc_auth_error ->
     Some (Runtime_candidate_standing.Credential_refused { noted_at = now })
-  | Runtime_acp_client.Rpc_context_overflow
+  | Runtime_acp_client.Rpc_context_overflow _
   | Runtime_acp_client.Rpc_authorization_error
   | Runtime_acp_client.Rpc_provider_unavailable
-  | Runtime_acp_client.Rpc_other -> None
+  | Runtime_acp_client.Rpc_unclassified -> None
+;;
+
+let standing_of_signal_refusal ~now = function
+  | Some (Llm_provider.Retry.Signal_hard_quota { retry_after; _ }) ->
+    Some
+      (Runtime_candidate_standing.Hard_quota
+         { source = Runtime_quota_window.Provider_quota_refused
+         ; resets_at = Option.map (fun s -> now +. s) retry_after
+         })
+  | Some (Llm_provider.Retry.Signal_rate_limited { retry_after; _ }) ->
+    Some (Runtime_candidate_standing.Rate_limited { retry_after })
+  | Some (Llm_provider.Retry.Signal_auth_error _) ->
+    Some (Runtime_candidate_standing.Credential_refused { noted_at = now })
+  | Some
+      ( Llm_provider.Retry.Signal_context_overflow _
+      | Llm_provider.Retry.Signal_authorization_error _
+      | Llm_provider.Retry.Signal_provider_unavailable _ )
+  | None -> None
 ;;
 
 let antigravity_standing_of_error ~now :
   Runtime_antigravity.error -> Runtime_candidate_standing.observation option
   = function
   | Runtime_antigravity.Turn_failed detail ->
-    Runtime_acp_client.classify_rpc_error
-      ~method_name:"antigravity/turn"
-      ~code:0
-      ~message:detail
-    |> standing_of_rpc_error_class ~now
+    Runtime_antigravity.classify_turn_failure detail
+    |> standing_of_signal_refusal ~now
   | Runtime_antigravity.Invalid_config _
   | Runtime_antigravity.Spawn_refused _
   | Runtime_antigravity.Spawn_capacity_busy _
@@ -535,8 +552,8 @@ let antigravity_standing_of_error ~now :
 let acp_standing_of_error ~now :
   Runtime_acp_client.error -> Runtime_candidate_standing.observation option
   = function
-  | Runtime_acp_client.Rpc_error { method_name; code; message } ->
-    Runtime_acp_client.classify_rpc_error ~method_name ~code ~message
+  | Runtime_acp_client.Rpc_error { method_name; code; message; data } ->
+    Runtime_acp_client.classify_rpc_error ~method_name ~code ~message ~data
     |> standing_of_rpc_error_class ~now
   | Runtime_acp_client.Invalid_config _
   | Runtime_acp_client.Spawn_refused _

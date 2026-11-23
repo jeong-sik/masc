@@ -1248,7 +1248,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
                 ; tool_effect_attempted = terminal.tool_steps > 0
                 ; response_emitted = terminal.text_streamed
                 })
-         else Error (Turn_failed detail)
+         else Error (Turn_failed (Protocol.format_turn_failed_detail ~error_code:terminal.error_code detail))
      (* The CLI's own noncompletion keeps its stricter recovery fence; the
         refusals ride along as evidence. *)
      | Not_completed status, (None | Some _) ->
@@ -1279,7 +1279,47 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
            (if stderr_redacted = "" then exit else exit ^ ": " ^ stderr_redacted))
 ;;
 
+let classify_turn_failure (detail : string) : Llm_provider.Retry.signal_refusal option =
+  let module R = Llm_provider.Retry in
+  let from_json = R.classify_embedded_json detail in
+  let from_tokens = R.classify_machine_tokens detail in
+  match from_json with
+  | Some (R.Signal_hard_quota _ as q) -> Some q
+  | Some (R.Signal_rate_limited { retry_after; message } as j) ->
+    (match from_tokens with
+     | Some (R.Signal_hard_quota { retry_after = tok_retry; _ }) ->
+       let retry_after =
+         match retry_after with
+         | Some _ as r -> r
+         | None -> tok_retry
+       in
+       Some (R.Signal_hard_quota { retry_after; message })
+     | Some
+         ( R.Signal_rate_limited _
+         | R.Signal_context_overflow _
+         | R.Signal_auth_error _
+         | R.Signal_authorization_error _
+         | R.Signal_provider_unavailable _ )
+     | None -> Some j)
+  | Some
+      (( R.Signal_context_overflow _
+       | R.Signal_auth_error _
+       | R.Signal_authorization_error _
+       | R.Signal_provider_unavailable _ ) as j) ->
+    (match from_tokens with
+     | Some (R.Signal_hard_quota _ as q) -> Some q
+     | Some
+         ( R.Signal_rate_limited _
+         | R.Signal_context_overflow _
+         | R.Signal_auth_error _
+         | R.Signal_authorization_error _
+         | R.Signal_provider_unavailable _ )
+     | None -> Some j)
+  | None -> from_tokens
+;;
+
 module For_testing = struct
+  let format_turn_failed_detail = Protocol.format_turn_failed_detail
   let tool_step_timeout_s config = timeout_s_for_phase config Tool_step_running
   let with_child_fd_sampler sample f = Eio.Fiber.with_binding child_fd_sampler_key sample f
 end

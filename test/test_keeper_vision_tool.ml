@@ -3138,19 +3138,25 @@ let test_acp_failure_advances_timeout_standing_and_exception_handling () =
     (fun message ->
        assert
          (can_advance
-            (F.Acp_failure (Acp.Rpc_error { method_name = "session/prompt"; code = -32000; message }))))
+            (F.Acp_failure
+               (Acp.Rpc_error { method_name = "session/prompt"; code = -32000; message; data = None }))))
     [ "HTTP 429 rate limit exceeded"
     ; "exceeded_current_quota_error"
     ; "HTTP 401 unauthorized"
     ; "HTTP 403 forbidden"
     ; "HTTP 503 service unavailable"
-    ; "prompt exceeds maximum context length"
+    ; "context_length_exceeded"
     ];
   assert
     (not
        (can_advance
           (F.Acp_failure
-             (Acp.Rpc_error { method_name = "session/prompt"; code = -32602; message = "invalid json params" }))));
+             (Acp.Rpc_error { method_name = "session/prompt"; code = -32000; message = "permission denied"; data = None }))));
+  assert
+    (not
+       (can_advance
+          (F.Acp_failure
+             (Acp.Rpc_error { method_name = "session/prompt"; code = -32602; message = "invalid json params"; data = None }))));
   (* P1 #9b: TimeoutError observes uniform standing & advances; ordinary exceptions log/format Printexc; Sys.Break re-raises *)
   with_temp_runtime_toml vision_output_limit_runtime_toml (fun () ->
     let calls = ref [] in

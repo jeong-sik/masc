@@ -1680,11 +1680,14 @@ let test_p2_voice_runner_ffmpeg_and_afplay () =
   Alcotest.(check bool) "[ㅡ] blocked while filter focused" false
     (App.should_toggle_mouse_capture m_filter bare_eu)
 
-(* A chat stream that drops after the server accepted the request is posted
-   again with its last journal seq; anything else ends the submit. *)
+(* A chat stream that drops while the server reports its operation queued or
+   running is posted again with its last journal seq, and only to the server
+   instance that accepted it; anything else ends the submit. *)
 let test_chat_reattach_decision () =
-  let delay ?(accepted = true) ?(terminal_seen = false) ?(reattaches = 0) result =
-    Cmd_executor.chat_reattach_delay ~accepted ~terminal_seen ~reattaches result
+  let delay ?(acceptance = Some Masc_tui_protocol.Wire_fleet.Accepted_running)
+      ?(terminal_seen = false) ?(reattaches = 0) result =
+    Cmd_executor.chat_reattach_delay ~acceptance ~terminal_seen ~reattaches
+      result
   in
   let dropped = Error (Msg.Transport Health.Stream_eof) in
   Alcotest.(check (option (float 0.0))) "accepted stream dropped mid-turn reattaches"
@@ -1698,12 +1701,37 @@ let test_chat_reattach_decision () =
   Alcotest.(check (option (float 0.0))) "reattach budget is bounded" None
     (delay ~reattaches:5 dropped);
   Alcotest.(check (option (float 0.0))) "a failure before acceptance is the submit's error"
-    None (delay ~accepted:false dropped);
+    None (delay ~acceptance:None dropped);
+  Alcotest.(check (option (float 0.0))) "a queued operation reattaches" (Some 1.0)
+    (delay ~acceptance:(Some Masc_tui_protocol.Wire_fleet.Accepted_queued) dropped);
+  Alcotest.(check (option (float 0.0)))
+    "a close after an acceptance that reports the operation succeeded is final"
+    None
+    (delay ~acceptance:(Some Masc_tui_protocol.Wire_fleet.Accepted_succeeded) (Ok ()));
+  Alcotest.(check (option (float 0.0)))
+    "a close after an acceptance that reports the operation cancelled is final"
+    None
+    (delay ~acceptance:(Some Masc_tui_protocol.Wire_fleet.Accepted_cancelled) (Ok ()));
   Alcotest.(check (option (float 0.0))) "a terminal frame ends the stream" None
     (delay ~terminal_seen:true (Ok ()));
   Alcotest.(check (option (float 0.0))) "a 4xx is final" None
     (delay
-       (Error (Msg.Http_error { status = 400; body = "bad request"; api_error = None })))
+       (Error (Msg.Http_error { status = 400; body = "bad request"; api_error = None })));
+  let guard instance : Http_client.workspace_guard =
+    { Http_client.expected_instance = instance; expected_workspace = Some "ws-sha" }
+  in
+  let same ~submitted_to current =
+    Cmd_executor.chat_reattach_same_instance ~submitted_to:(guard submitted_to)
+      (guard current)
+  in
+  Alcotest.(check bool) "the instance that accepted the request still answers" true
+    (same ~submitted_to:(Some "instance-1") (Some "instance-1"));
+  Alcotest.(check bool) "a restarted server is another instance" false
+    (same ~submitted_to:(Some "instance-1") (Some "instance-2"));
+  Alcotest.(check bool) "a guard cleared for a handshake names no instance" false
+    (same ~submitted_to:(Some "instance-1") None);
+  Alcotest.(check bool) "a request sent before /health named an instance" false
+    (same ~submitted_to:None (Some "instance-1"))
 
 let () =
   Alcotest.run "masc_tui_app"

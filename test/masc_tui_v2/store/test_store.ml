@@ -719,6 +719,45 @@ let test_new_epoch_forgets_log_cursor () =
   Alcotest.(check (option int)) "the new epoch drops the cursor" None
     m3.infra.Infra_store.last_log_seq
 
+(* Chat stream frames carry the epoch they were sent in, so a new epoch drops
+   them. Each open request then waits for the history, the way a stream that
+   closed without a terminal does, and an unanswered /btw fails. *)
+let test_new_epoch_detaches_chat_streams () =
+  let m0 = Model.initial () in
+  let typed =
+    m0.drafts |> Drafts.set_active_keeper "alpha" |> Drafts.insert_text "hello"
+  in
+  let drafts, request_id =
+    match
+      Drafts.enqueue_submission ~now:t0 ~keeper:"alpha"
+        ~mode:Drafts.Mode_follow_up typed
+    with
+    | Some (d, tx) ->
+        ( d
+          |> Drafts.mark_sending ~now:t0 ~request_id:tx.request_id
+          |> Drafts.mark_accepted ~now:t0 ~request_id:tx.request_id
+               ~operation_id:(Some "op-1")
+        , tx.request_id )
+    | None -> Alcotest.fail "expected a pending transmission"
+  in
+  let drafts, _btw_request =
+    Drafts.start_btw ~now:t0 ~keeper:"alpha" ~prompt:"side question" drafts
+  in
+  let fleet = Fleet_store.start_chat_stream ~keeper:"alpha" ~request_id m0.fleet in
+  let m1 = { m0 with drafts; fleet } in
+  let m2, _ = Update.step ~now:t1 m1 (Msg.Tick { wall_unix = 2.0 }) in
+  Alcotest.(check bool) "a step that keeps the epoch keeps the stream" true
+    (Fleet_store.has_active_chat_stream ~keeper:"alpha" m2.fleet);
+  let m3, _ = Update.step ~now:t2 m2 (Msg.Server_start_result (Ok ())) in
+  Alcotest.(check bool) "the buffer stops streaming" false
+    (Fleet_store.has_active_chat_stream ~keeper:"alpha" m3.fleet);
+  Alcotest.(check bool) "the request waits for the history" true
+    (match m3.drafts.Drafts.pending_txs with
+    | [ { Drafts.state = Drafts.Confirming_delivery; _ } ] -> true
+    | _ -> false);
+  Alcotest.(check bool) "the unanswered /btw fails" true
+    (match m3.drafts.Drafts.btw with Drafts.Btw_failed _ -> true | _ -> false)
+
 (* 4. 409 workspace_mismatch recovery without loop *)
 let test_workspace_mismatch_recovery () =
   let m0 = Model.initial () in
@@ -7154,6 +7193,8 @@ let () =
             test_workspace_mismatch_recovery;
           Alcotest.test_case "a new epoch drops the log cursor" `Quick
             test_new_epoch_forgets_log_cursor;
+          Alcotest.test_case "a new epoch detaches open chat streams" `Quick
+            test_new_epoch_detaches_chat_streams;
         ] );
       ( "subscriptions"
       , [

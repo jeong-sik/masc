@@ -1276,33 +1276,54 @@ let execute_put t ~epoch req =
 (* A chat operation keeps running when its stream drops: the server journals
    every event and answers a re-POST of the same request with the events
    past [since_seq] before going live (Server_routes_http_keeper_stream
-   serve_accepted_chat). The stream is attached again only after the server
-   accepted the request and before a terminal frame; a failure before
-   acceptance stays the submit's own error. A server restart takes about
-   this long to answer again. *)
+   serve_accepted_chat). The stream is attached again only while the last
+   acceptance reports the operation queued or running and no terminal frame
+   arrived; a failure before acceptance stays the submit's own error. An
+   acceptance that reports the operation settled is followed by a close
+   without a terminal when none was journaled, and the store then settles the
+   request from the history. *)
 let chat_reattach_backoff_s = [| 1.0; 2.0; 4.0; 8.0; 15.0 |]
 
-let chat_reattach_delay ~accepted ~terminal_seen ~reattaches
-    (result : (unit, Msg.http_error) result) =
-  if
-    (not accepted) || terminal_seen
-    || reattaches >= Array.length chat_reattach_backoff_s
-  then None
-  else
-    match result with
-    | Ok () -> Some chat_reattach_backoff_s.(reattaches)
-    | Error err when Msg.http_error_retryable err ->
-        Some chat_reattach_backoff_s.(reattaches)
-    | Error _ -> None
+let chat_reattach_delay ~(acceptance : Wire_fleet.accepted_state option)
+    ~terminal_seen ~reattaches (result : (unit, Msg.http_error) result) =
+  match acceptance with
+  | None
+  | Some
+      ( Wire_fleet.Accepted_succeeded | Wire_fleet.Accepted_failed
+      | Wire_fleet.Accepted_cancelled ) ->
+      None
+  | Some (Wire_fleet.Accepted_queued | Wire_fleet.Accepted_running) -> (
+      if terminal_seen || reattaches >= Array.length chat_reattach_backoff_s
+      then None
+      else
+        match result with
+        | Ok () -> Some chat_reattach_backoff_s.(reattaches)
+        | Error err when Msg.http_error_retryable err ->
+            Some chat_reattach_backoff_s.(reattaches)
+        | Error _ -> None)
+
+(* Only the server process that accepted a request runs its turn, and the
+   guard names that process. A reattach goes out only while the endpoint
+   still names the same instance: a restarted server is another instance and
+   a new epoch, where the store settles the request from the history. A
+   request sent before /health named an instance is not reattached. *)
+let chat_reattach_same_instance ~(submitted_to : Http_client.workspace_guard)
+    (current : Http_client.workspace_guard) =
+  match
+    ( submitted_to.Http_client.expected_instance,
+      current.Http_client.expected_instance )
+  with
+  | Some held, Some now -> String.equal held now
+  | Some _, None | None, Some _ | None, None -> false
 
 let execute_post_stream t ~epoch req =
   match req with
   | Cmd.Stream_keeper_chat { request; is_btw } ->
       fork_safe t (fun () ->
           (* Written from the stream's chunk callback, read between attempts. *)
-          let accepted = Atomic.make false in
+          let acceptance = Atomic.make None in
           let terminal_seen = Atomic.make false in
-          let last_seq = Atomic.make None in
+          let last_seq = Atomic.make request.since_seq in
           let note_frame_seq (frame : Sse_wire.frame) =
             match Option.bind frame.id int_of_string_opt with
             | None -> ()
@@ -1342,9 +1363,13 @@ let execute_post_stream t ~epoch req =
                 | json -> (
                     match Wire_fleet.decode_chat_stream_chunk json with
                     | Ok Wire_fleet.Chunk_ignored -> ()
-                    | Ok (Wire_fleet.Chunk_accepted _ as chunk) ->
-                        Atomic.set accepted true;
+                    | Ok (Wire_fleet.Chunk_accepted { state; _ } as chunk) ->
+                        Atomic.set acceptance (Some state);
                         publish_chunk chunk
+                    (* A refused re-POST also arrives as an error frame. It
+                       shows as the request's failure, and the history read
+                       the store sends with it clears that failure once the
+                       reply is persisted. *)
                     | Ok
                         ((Wire_fleet.Chunk_turn_done _ | Wire_fleet.Chunk_error _)
                          as chunk) ->
@@ -1365,8 +1390,7 @@ let execute_post_stream t ~epoch req =
                     publish_warning ("invalid JSON SSE frame: " ^ msg))
               frames
           in
-          let attempt ~since_seq =
-            let ep = Atomic.get t.endpoint in
+          let attempt ep ~since_seq =
             let body =
               Wire_fleet.encode_chat_submit_request { request with since_seq }
               |> Yojson.Safe.to_string
@@ -1377,18 +1401,30 @@ let execute_post_stream t ~epoch req =
               ep ~path:Wire_fleet.keeper_chat_stream_path
             |> Result.map_error msg_error_of_http
           in
-          let rec run ~reattaches ~since_seq =
-            let result = attempt ~since_seq in
+          let submitted_to = Atomic.get t.endpoint in
+          let rec run ep ~reattaches ~since_seq =
+            let result = attempt ep ~since_seq in
             match
-              chat_reattach_delay ~accepted:(Atomic.get accepted)
+              chat_reattach_delay ~acceptance:(Atomic.get acceptance)
                 ~terminal_seen:(Atomic.get terminal_seen) ~reattaches result
             with
             | None -> result
             | Some delay_s ->
                 Eio.Time.sleep t.clock delay_s;
-                run ~reattaches:(reattaches + 1) ~since_seq:(Atomic.get last_seq)
+                let current = Atomic.get t.endpoint in
+                if
+                  Epoch.equal (Atomic.get t.stream_epoch) epoch
+                  && chat_reattach_same_instance
+                       ~submitted_to:submitted_to.Http_client.guard
+                       current.Http_client.guard
+                then
+                  run current ~reattaches:(reattaches + 1)
+                    ~since_seq:(Atomic.get last_seq)
+                else result
           in
-          let result = run ~reattaches:0 ~since_seq:request.since_seq in
+          let result =
+            run submitted_to ~reattaches:0 ~since_seq:request.since_seq
+          in
           Ui_bus.publish_stream t.bus
             (Msg.Chat_stream_done
                {

@@ -1056,6 +1056,16 @@ let finish_chat_stream ~keeper ~request_id ~error t =
       { t with chat_streams = String_map.add keeper next t.chat_streams }
   | Some _ | None -> t
 
+let detach_chat_streams t =
+  {
+    t with
+    chat_streams =
+      String_map.map
+        (fun (b : chat_stream_buffer) ->
+          if b.active then { b with active = false; interrupting = false } else b)
+        t.chat_streams;
+  }
+
 let set_fleet_mode fleet_mode t =
   let next = { t with fleet_mode } in
   sync_selection_after_change ~prev_index:0 ~reset_scroll:true

@@ -70,16 +70,24 @@ val fetch_planning_with_tasks :
     [Transport]) instead of silently returning an empty task list. *)
 
 val chat_reattach_delay :
-  accepted:bool ->
+  acceptance:Masc_tui_protocol.Wire_fleet.accepted_state option ->
   terminal_seen:bool ->
   reattaches:int ->
   (unit, Msg.http_error) result ->
   float option
 (** Seconds to wait before posting the same chat request again with the last
     journal seq it received, or [None] when the stream's result is final: the
-    server never accepted the request, a terminal frame arrived, the error is
-    not retryable, or the reattach budget is spent. A clean close without a
-    terminal also reattaches; the server then replays the missed terminal. *)
+    server never accepted the request, its last acceptance reports the
+    operation settled, a terminal frame arrived, the error is not retryable,
+    or the reattach budget is spent. A clean close without a terminal while
+    the operation is queued or running also reattaches; the server then
+    replays the missed terminal. *)
+
+val chat_reattach_same_instance :
+  submitted_to:Http_client.workspace_guard -> Http_client.workspace_guard -> bool
+(** [true] only when both guards name the same server instance: the one that
+    accepted the request still answers. A missing instance on either side is
+    [false]. *)
 
 val decode_hub_event_msgs :
   epoch:Epoch.t ->

@@ -372,9 +372,23 @@ let decode_ssh_reachability json =
       Ok (Ssh_unreachable { detail; measured_at_unix })
   | other -> Error (Printf.sprintf "unknown ssh reachability status %S" other)
 
+(* The server writes every live SSH session count as [null] because nothing
+   counts them yet, and lists [ssh_active_sessions_unreported] under
+   [unobserved_reasons]. A [null] here is a count nobody took, not an empty
+   pool, so it reads as Unreported rather than Absent. *)
+let unobserved_session_count ~observed_at json key =
+  let* count = observed_int ~observed_at json key in
+  match count with
+  | Observed.Absent -> Ok Observed.unreported
+  | ( Observed.Loading _ | Observed.Value _ | Observed.Unreported
+    | Observed.Failed _ ) as reported ->
+      Ok reported
+
 let decode_ssh_account ~observed_at json =
   let* unix_user = required_nonblank_string json "unix_user" in
-  let* active_sessions = observed_int ~observed_at json "active_sessions" in
+  let* active_sessions =
+    unobserved_session_count ~observed_at json "active_sessions"
+  in
   let* max_sessions = required_nonnegative_int_field json "max_sessions" in
   let* keepers = required_string_list json "keepers" in
   Ok { unix_user; active_sessions; max_sessions; keepers }
@@ -398,7 +412,9 @@ let decode_ssh_pool ~observed_at json =
   let* remote_root = required_string_field json "remote_root" in
   let* private_home = required_bool_field json "private_home" in
   let* max_sessions = required_nonnegative_int_field json "max_sessions" in
-  let* active_sessions = observed_int ~observed_at json "active_sessions" in
+  let* active_sessions =
+    unobserved_session_count ~observed_at json "active_sessions"
+  in
   let* reach_obj = required_object_field json "reachability" in
   let* reachability = decode_ssh_reachability reach_obj in
   let* acct_items = required_list_field json "accounts" in
@@ -475,7 +491,7 @@ let decode_sandboxes_snapshot ~observed_at json =
     required_nonnegative_int_field summary "ssh_unbound_keepers"
   in
   let* ssh_active_sessions =
-    observed_int ~observed_at summary "ssh_active_sessions"
+    unobserved_session_count ~observed_at summary "ssh_active_sessions"
   in
   let* ssh_max_sessions =
     required_nonnegative_int_field summary "ssh_max_sessions"

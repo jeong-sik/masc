@@ -957,21 +957,24 @@ let classify_embedded_json ?http_status ?retry_after (text : string) : signal_re
       | `Assoc _ as obj ->
         classify_structured_json ?http_status ?retry_after ~fallback_message:bounded obj
       | `List items ->
-        let rec walk_items remaining = function
-          | [] -> None
-          | _ when remaining <= 0 -> None
-          | (`Assoc _ as item) :: rest ->
-            (match
-               classify_structured_json
-                 ?http_status
-                 ?retry_after
-                 ~fallback_message:bounded
-                 item
-             with
-             | Some _ as matched -> matched
-             | None -> walk_items (remaining - 1) rest)
-          | (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) :: rest ->
-            walk_items (remaining - 1) rest
+        let rec walk_items remaining items =
+          if remaining <= 0
+          then None
+          else (
+            match items with
+            | [] -> None
+            | (`Assoc _ as item) :: rest ->
+              (match
+                 classify_structured_json
+                   ?http_status
+                   ?retry_after
+                   ~fallback_message:bounded
+                   item
+               with
+               | Some _ as matched -> matched
+               | None -> walk_items (remaining - 1) rest)
+            | (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) :: rest ->
+              walk_items (remaining - 1) rest)
         in
         walk_items 8 items
       | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None

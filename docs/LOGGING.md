@@ -46,15 +46,6 @@ boundary, before the builder; put only formatting of those immutable values in
 it. A disabled event still incurs its capture and closure costs. This API does
 not change the separate Routine level policy or make enabled sink I/O lazy.
 
-Original TUI Ask follow-up records use Info in Transport, category `lifecycle`,
-with keeper metadata and `details.event = "tui_ask_followup"`. Original capsule
-identity, source/receipt/admission clocks, typed terminal cause and producer/job/UI
-facts live in `details`. The message is a readable summary. Consumers select the
-structured event field and preserve missing/unfinished outcomes; they do not
-parse the console summary. Ring JSONL, dashboard export and TUI log decoding
-already preserve this field. This does not add an Ask cohort report or prove a
-runtime speedup.
-
 ## Runtime execution and host acceptance
 
 Runtime observations have a producer-owned `observation_id`. Execution and
@@ -105,30 +96,8 @@ also remains in `details`.
 
 ## TUI process storage
 
-The TUI owns a different Log.Ring from its server. Its structured details are
-written below the opening local `<base-path>/.masc/logs/tui/session-<pid>-*/`,
-using the existing `system_log_YYYY-MM-DD.jsonl` sink. Each invocation creates a
-fresh private directory, so startup does not import server or earlier session
-history. The selected path is announced in the existing
-`<base-path>/.masc/logs/masc-tui-<pid>.log` stderr mirror. No log from a later
-remote/workspace identity change moves this local process store.
-
-Initialization runs after stderr redirection and level setup, before TUI state
-and read producers. Expected filesystem failure leaves the TUI running and
-records a warning through the ring/console path. `details.event =
-"tui_observation_store"` records initialized/unavailable outcome and monotonic
-clocks spanning the setup. This adds synchronous startup filesystem work;
-existing input-reader startup intervals begin later and do not include it.
-
-The client directory is local evidence. In the TUI Logs surface, `o` selects
-Server or This TUI. Each source retains its own filters, list/detail position,
-snapshot and error. This TUI reads the current process's memory ring on selection
-and the existing refresh cadence, including while server identity is unavailable;
-it does not scan previous sessions' files. The server dashboard does not read the
-client directory automatically. Source integration is not visible UI or server
-export proof. Logging levels can omit rows, a crash can interrupt a write, and normal
-sink flush is not fsync. These are process-owned retained log directories; this
-change adds no automatic deletion policy.
+While the TUI owns the terminal its stderr goes to
+`<base-path>/.masc/logs/masc-tui-<pid>.log`.
 
 ## Absent fields
 
@@ -178,48 +147,14 @@ is added here with its reason.
 | `lib/server/server_base_path_guard.ml` | Refuses to start without a workspace, or with a base path that cannot be canonicalized, before `Log` is initialised. |
 | `bin/main_eio.ml` | A base path that cannot be canonicalized, the `Out_of_memory` and `Stack_overflow` FATAL handlers (which must not allocate through the logging stack), build-provenance argument errors, and the `login`, `token` and `mcp-config` subcommands, whose output is the command's answer. Its "already running" lines use `Log.legacy_stderr` (see the legacy bridge row). |
 | `bin/main_stdio_eio.ml` | Reports a base path that cannot be canonicalized before the server starts. On the stdio transport stdout is the protocol, so diagnostics go to stderr. |
-| `bin/masc_tui.ml` | Start-up messages before the screen is drawn: a failed stderr redirect (it cannot say so through the sink it is still redirecting), and refusals to start (no interactive terminal, no embedded build commit, an unusable workspace). |
+| `lib/masc_tui/app/cli_args.ml`, `lib/masc_tui/app/app.ml` | Start-up messages before the screen is drawn: a failed stderr redirect (it cannot say so through the sink it is still redirecting), and refusals to start (no interactive terminal, no embedded build commit, an unusable workspace). |
 | `lib/exec_shim/exec_shim.ml` | `masc-exec-shim` is a static binary that runs on the remote endpoint, built from `unix` and a few small libraries without the masc logging stack. Its one stderr line is the usage message. |
 | `lib/keeper/keeper_github_identity.ml` | `print_observation` and the `run_cli_*` functions print what `masc keeper-github ...` was asked for. The rest of the module runs inside the server, so the exemption is wider than the functions that need it. Splitting the subcommands into their own module removes it. |
 | `bin/masc_trace.ml`, `bin/masc_cost.ml`, `bin/masc_lane_cli_probe.ml`, `bin/keeper_capability_probe_cli.ml`, `bin/fusion_run.ml`, `bin/masc_checkpoint_purge.ml`, `bin/deployment_preflight_helper.ml` | Operator commands run at a terminal. Their stdout and stderr are the answer to the command (measurements, JSON receipts, usage and argument errors), not a server record. Routing them to the log would move them away from the person who asked. |
-| `bin/masc_cli_setup.ml`, `bin/masc_cli_docker_session.ml`, `bin/masc_cli_onboarding.ml`, `bin/masc_cli_antigravity.ml`, `bin/masc_cli_account_login.ml`, `bin/masc_cli_codex_models.ml`, `bin/masc_cli_muse_models.ml`, `bin/masc_cli_model_resume.ml`, `bin/masc_cli_owner_upgrade.ml`, `bin/masc_cli_prerequisites.ml` | One-shot setup and onboarding commands. They report account, login and setup failures to the operator's terminal and print machine-readable receipts on stdout before any server or log sink exists. |
+| `bin/masc_cli_setup.ml`, `bin/masc_cli_docker_session.ml`, `bin/masc_cli_onboarding.ml`, `bin/masc_cli_antigravity.ml`, `bin/masc_cli_account_login.ml`, `bin/masc_cli_codex_models.ml`, `bin/masc_cli_model_resume.ml`, `bin/masc_cli_owner_upgrade.ml`, `bin/masc_cli_prerequisites.ml` | One-shot setup and onboarding commands. They report account, login and setup failures to the operator's terminal and print machine-readable receipts on stdout before any server or log sink exists. |
 | `bin/gen_board_tool_registry.ml` | A Dune-time generator. Its `eprintf` reports a malformed Board TOML declaration to the build operator. |
 | `bin/main_eio.ml`, `lib/backend/backend.ml`, `lib/workspace/workspace_query.ml`, `lib/mcp_server_eio_resource.ml` | The legacy bridge. `Log.legacy_stderr` and `Log.legacy_traceln` emit a raw, unprefixed stderr line and mirror it into the ring with a `Legacy_*` source tag (read back by `dashboard/src/api/schemas/logs.ts`). Every call site embeds its own `[FATAL]`, `[WARN]` or `[DEBUG]` marker in the message, so migrating would double-prefix it and drop the `Legacy_*` source. |
 
 A static component such as `"agent_core:event"` does route through `Log`: a
 module's `name` string may contain a colon even though the OCaml identifier
 cannot, and that site is the `Agent_core_event` module.
-
-### TUI admission evidence
-
-Each private TUI session also keeps `admissions/ask-followup.jsonl`. It records
-original admitted follow-up identities before dispatch independently of log level.
-Missing event logs remain unobserved attempts. Journal writes add synchronous
-preparation/flush work; capture failures are best-effort warnings and can leave
-unknown attempts. Retained bytes do not prove exhaustive capture or execution.
-
-Admission-write errors carry a structured Startup Warn/Boundary diagnostic with
-the original TUI instance, request, admission clock and failed capture span.
-Inspect the This TUI Logs source for its structured details. A storage diagnostic
-is separate from the original read's producer/UI outcome; missing warnings do
-not establish capture success. The comparison reader retains these observed
-failures without discarding independently declared attempts.
-
-Routine Ask follow-up Info details carry `admission_capture` from the same
-original read: returned/failed with attempt clocks, or unavailable without them.
-The local Logs detail exposes this structured field through the existing decoder.
-No extra successful-write event is emitted. The receipt ends before warning
-formatting/output; it is not fsync, complete capture or worker/UI/Task progress.
-Historical missing receipts remain unobserved in the comparison reader.
-
-### TUI terminal preparation
-
-The original `tui_startup_observation` capture is now reserved before the probe
-child is scheduled. Dispatched-only and scheduling-failed/interrupted captures
-remain visible when no worker starts. The shared collector's caller observation
-belongs to its adapter child; the owning UI loop later installs the exact
-returned decoder and applies capabilities. Those boundaries can have a gap.
-Collection no longer precedes loop entry, but settings application still does.
-No new event schema, sink, polling cadence or capture deadline is introduced.
-A caller wait ending is not producer cancellation, physical cleanup or first
-paint/input proof; existing missing-stage and failed comparisons still apply.

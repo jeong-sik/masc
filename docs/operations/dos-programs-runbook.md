@@ -106,17 +106,3 @@ operator-owned files before calling the ending unverified.
 The same contract applies to Romance of the Three Kingdoms 3 and to other DOS
 games. Game-specific key layouts may live as data in the Play pad inventory;
 the DOS Lane and its Tools do not branch on a title name.
-
-## Current measurements
-
-On 2026-10-08, the current pinned `ocaml-dos` core reported source digest
-`57ee37daab1a4cd93e6fa9480918286a`, matching the MASC CI pin. A user-owned
-Sangokushi III directory booted through `KOEI.COM`, reached a rendered battle
-screen, and continued through `407,100,000` instructions with no guest fault or
-process exit in the observed run. This establishes long-run Lane/Tool
-continuity and battle rendering; it does not establish a campaign ending.
-
-That inventory contained `END.EXE`, whose bytes reference `ENDSTIL`, but no
-`ENDSTIL.DAT` file. The asset set is therefore incomplete for an ending probe;
-the missing user-owned file must be supplied before that result can be called
-an emulator or Lane failure.

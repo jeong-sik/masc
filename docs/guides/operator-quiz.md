@@ -115,8 +115,6 @@ max_output_tokens = 2048
 늘렸고, `0.3.2` 는 그 선언의 순서를 바꿔 Results 가 `quiz/scorecard` 부터 열리게 했다.
 둘 다 row 와 log 는 그대로다. `0.3.3` 은 action 을 `kind` 별 갈래로 나누고, 이의를 걸 수
 있는 질문 row 에 `dispute` 칸을 더해 Results 에서 바로 이의를 걸게 했다. log 는 그대로다.
-`0.3.3` 의 행 동작 선언(presentation `actions`)은 그것을 아는 서버와 TUI 만 읽는다. 옛 서버는
-패키지를 거절하고, 옛 TUI 는 lane 화면을 읽지 못한다. 서버와 TUI 를 먼저 올린 뒤 패키지를 올린다.
 `0.4.0` 은 기록 읽기와 log 파일 코드를 공용 모듈 `records.py` 로
 옮겼다. row 와 log 는 그대로지만 이미지 `0.2.0` 이 있어야 뜬다. 이미지 `0.1.0` 에는
 `records.py` 가 없어 worker 가 시작하지 못한다. 이미지를 먼저 만들고 설치본을 갱신한다.
@@ -262,8 +260,6 @@ host 는 선언을 저장하기 전에 `[binding]` 을 아래 순서로 본다. 
 
 ## 결과 읽기
 
-TUI 에서는 `:` 팔레트에서 `go Features & plugins / Plugins / Operator quiz Results` 를 고르면 Results 가 바로 열린다. 이 항목은 TUI 가 이 설치를 본 뒤에 나온다. 설치가 Approvals 에 질문을 냈거나, Lanes 나 Lane Add-ons 화면을 한 번 연 뒤다. Results 는 왼쪽에 lane 별 목록, 오른쪽에 고른 행을 보여 준다. 처음에는 `quiz/scorecard` 의 첫 행이 골라져 있다. j/k 로 행을, Left/Right 로 lane 을 아래 표의 순서대로 옮긴다. 이 순서는 패키지가 선언한 Results 값의 순서다.
-
 Results 에 일곱 lane 이 나온다.
 
 | lane | 한 행 | 보는 것 |
@@ -321,13 +317,7 @@ Results 에 일곱 lane 이 나온다.
 ```
 
 - 이의를 걸 수 있는 `quiz/questions` 행에는 `dispute` 칸이 있고, 그 안에 `ask_id` 와 `question_id` 가 있다. 그 질문의 `grade` 요청이 아직 결과를 기다리면 이 칸이 없다.
-- TUI 에서는 Results 의 `quiz/questions` 에서 j/k 로 그 행을 고르고 `a` 를 누른다. 그 행의 동작 목록이 열린다.
-  1. `Dispute this grade` 를 고르고 Enter 를 누른다. 행에 `dispute` 칸이 없으면 이 줄 끝에 `unavailable` 과 이유가 붙고, Enter 를 누르면 그 이유가 오류 줄에 나온다.
-  2. 양식 맨 위에 `kind`·`ask_id`·`question_id` 가 행의 값으로 잠겨 있다. `note` 만 쓴다.
-  3. `Ctrl-S` 로 보낼 내용을 확인하고 Enter 로 한 번 보낸다. Esc 는 보내지 않고 닫는다.
-  - 목록 맨 아래 `Other action` 은 이 설치의 action 양식을 연다. 첫 칸에서 Left/Right 로 `Compose`·`Dispute`·`Export` 를 고른다.
-- 보낼 때 TUI 는 그 행을 다시 읽는다. 양식을 연 사이 행이 바뀌었으면 보내지 않고 다시 열라고 적는다.
-- `A` 명령 입력의 `act {…}` 로 보내도 같다. Keeper 는 `masc_lane_act` 로 같은 action 을 보낼 수 있다.
+- Keeper 는 `masc_lane_act` 로 이 action 을 보낸다.
 - 패키지는 `Disputed` 를 남기고 `grade` 요청을 하나 낸다. 이 요청에는 메모, 지금의 판정, 패키지가 읽어 둔 출처 원문이 들어간다.
 - 결과는 새 `Judged` 다. 정답 key 로 낸 판정보다 앞서고, 판정 기록에 모두 남는다. 이미 있던 판정을 바꾸면 G 에 센다.
 - 같은 action 을 다시 보내도 아무것도 쓰지 않고 같은 요청을 가리킨다. 그 질문에 아직 결과를 기다리는 `grade` 요청이 있거나, 답한 질문이 아니거나, 메모가 비어 있으면 `failed_before_effect` 로 거절한다.

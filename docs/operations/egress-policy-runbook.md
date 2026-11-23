@@ -28,7 +28,7 @@ says no, so none of them fall back to `inherit`.
 
 ## 1. Declare what the keeper may reach
 
-In the effective `<base>/.masc/runtime.toml`:
+In the effective `<base>/.masc/config/runtime.toml`:
 
 ```toml
 [egress.keepers.rondo]

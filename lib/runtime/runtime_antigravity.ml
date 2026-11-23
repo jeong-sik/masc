@@ -1248,7 +1248,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
                 ; tool_effect_attempted = terminal.tool_steps > 0
                 ; response_emitted = terminal.text_streamed
                 })
-         else Error (Turn_failed detail)
+         else Error (Turn_failed (Protocol.format_turn_failed_detail ~error_code:terminal.error_code detail))
      (* The CLI's own noncompletion keeps its stricter recovery fence; the
         refusals ride along as evidence. *)
      | Not_completed status, (None | Some _) ->
@@ -1279,7 +1279,12 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
            (if stderr_redacted = "" then exit else exit ^ ": " ^ stderr_redacted))
 ;;
 
+let classify_turn_failure (detail : string) : Llm_provider.Retry.signal_refusal option =
+  Llm_provider.Retry.classify_text detail
+;;
+
 module For_testing = struct
+  let format_turn_failed_detail = Protocol.format_turn_failed_detail
   let tool_step_timeout_s config = timeout_s_for_phase config Tool_step_running
   let with_child_fd_sampler sample f = Eio.Fiber.with_binding child_fd_sampler_key sample f
 end

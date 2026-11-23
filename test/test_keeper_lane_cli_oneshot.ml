@@ -1303,7 +1303,7 @@ let test_codex_session_budget_and_acp_antigravity_quota_refusal () =
   let agy_quota =
     mk_exec "agy.gemini"
       (Masc.Fusion_official_client.Antigravity_failure
-         (Runtime_antigravity.Turn_failed "RESOURCE_EXHAUSTED: quota exceeded"))
+         (Runtime_antigravity.Turn_failed "RESOURCE_EXHAUSTED: QUOTA_EXCEEDED"))
   in
   let agy_rate =
     mk_exec "agy.gemini"
@@ -1322,6 +1322,7 @@ let test_codex_session_budget_and_acp_antigravity_quota_refusal () =
             { method_name = "session/prompt"
             ; code = -32000
             ; message = "exceeded_current_quota_error"
+            ; data = None
             }))
   in
   let acp_rate =
@@ -1331,6 +1332,7 @@ let test_codex_session_budget_and_acp_antigravity_quota_refusal () =
             { method_name = "session/prompt"
             ; code = -32000
             ; message = "HTTP 429 Too Many Requests"
+            ; data = None
             }))
   in
   let acp_overflow =
@@ -1339,7 +1341,18 @@ let test_codex_session_budget_and_acp_antigravity_quota_refusal () =
          (Runtime_acp_client.Rpc_error
             { method_name = "session/prompt"
             ; code = -32000
+            ; message = "context_length_exceeded: prompt exceeds model window"
+            ; data = None
+            }))
+  in
+  let acp_prose_overflow =
+    mk_exec "vibe_acp.mistral"
+      (Masc.Fusion_official_client.Acp_failure
+         (Runtime_acp_client.Rpc_error
+            { method_name = "session/prompt"
+            ; code = -32000
             ; message = "prompt exceeds maximum context length"
+            ; data = None
             }))
   in
   let acp_other =
@@ -1349,6 +1362,7 @@ let test_codex_session_budget_and_acp_antigravity_quota_refusal () =
             { method_name = "session/prompt"
             ; code = -32603
             ; message = "internal decode error"
+            ; data = None
             }))
   in
   check bool "Codex Session_budget_exceeded rests binding" true
@@ -1369,6 +1383,8 @@ let test_codex_session_budget_and_acp_antigravity_quota_refusal () =
     (Cli_oneshot.refused_for_binding_rest acp_other);
   check bool "ACP context overflow counts as refused_for_input_size" true
     (Cli_oneshot.refused_for_input_size acp_overflow);
+  check bool "ACP prose without wire code is NOT refused_for_input_size" false
+    (Cli_oneshot.refused_for_input_size acp_prose_overflow);
   check bool "ACP quota is not refused_for_input_size" false
     (Cli_oneshot.refused_for_input_size acp_quota);
   (* Precedence regression (#354 P1 #1): TPM/quota messages carrying overflow substrings
@@ -1380,6 +1396,7 @@ let test_codex_session_budget_and_acp_antigravity_quota_refusal () =
             { method_name = "session/prompt"
             ; code = 429
             ; message = "Rate limit reached on tokens per min (TPM): Request too large for TPM limit"
+            ; data = None
             }))
   in
   let acp_quota_max =
@@ -1389,6 +1406,7 @@ let test_codex_session_budget_and_acp_antigravity_quota_refusal () =
             { method_name = "session/prompt"
             ; code = -32000
             ; message = "quota_exceeded: usage exceeds the maximum allowed"
+            ; data = None
             }))
   in
   check bool "ACP 429 TPM 'Request too large' rests binding" true

@@ -3774,8 +3774,16 @@ let test_turn_failed_quota_rate_auth_classification () =
     in
     check bool (label ^ ": " ^ Agent_core.Error.to_string err) true (pred err)
   in
-  check_core "RESOURCE_EXHAUSTED -> HardQuota" "RESOURCE_EXHAUSTED: quota exceeded" (function
+  check_core "RESOURCE_EXHAUSTED + QUOTA_EXCEEDED -> HardQuota"
+    "RESOURCE_EXHAUSTED: QUOTA_EXCEEDED" (function
     | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _) -> true | _ -> false);
+  check_core "bare RESOURCE_EXHAUSTED -> RateLimit (Gemini SSOT parity)"
+    "RESOURCE_EXHAUSTED: temporary RPM cap" (function
+    | Agent_core.Error.Provider (Llm_provider.Error.RateLimit _) -> true | _ -> false);
+  check_core "embedded JSON retry_after preserved on RateLimit"
+    {|upstream: {"error":{"code":429,"status":"RESOURCE_EXHAUSTED","retryAfter":18}}|} (function
+    | Agent_core.Error.Provider (Llm_provider.Error.RateLimit { retry_after = Some 18.0; _ }) -> true
+    | _ -> false);
   check_core "402 -> HardQuota" "HTTP 402 Payment Required: insufficient credits" (function
     | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _) -> true | _ -> false);
   check_core "429 -> RateLimit" "HTTP 429 Too Many Requests: rate limit exceeded" (function
@@ -3786,6 +3794,25 @@ let test_turn_failed_quota_rate_auth_classification () =
     | Agent_core.Error.Provider (Llm_provider.Error.AuthorizationError _) -> true | _ -> false);
   check_core "503 -> ProviderUnavailable" "HTTP 503 Service Unavailable" (function
     | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> true | _ -> false);
+  check_core "free-form prose stays ProviderReportedError"
+    "permission denied reading forbidden file while throttled" (function
+    | Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError _) -> true | _ -> false);
+  (* format_turn_failed_detail must check identifier boundaries (not raw substring)
+     so ERR_QUOTA_EXCEEDED still gets [QUOTA_EXCEEDED] and classifies as HardQuota. *)
+  let preserved_detail =
+    Runtime_antigravity.For_testing.format_turn_failed_detail
+      ~error_code:(Some "QUOTA_EXCEEDED")
+      "ERR_QUOTA_EXCEEDED: plan exhausted"
+  in
+  check_core "format_turn_failed_detail identifier boundary -> HardQuota" preserved_detail (function
+    | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _) -> true | _ -> false);
+  let upgraded_403_detail =
+    Runtime_antigravity.For_testing.format_turn_failed_detail
+      ~error_code:(Some "QUOTA_EXCEEDED")
+      {|{"error":{"code":403,"status":"PERMISSION_DENIED"}}|}
+  in
+  check_core "outer [QUOTA_EXCEEDED] upgrades embedded 403 JSON to HardQuota" upgraded_403_detail (function
+    | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _) -> true | _ -> false);
   check_core "ordinary failure -> ProviderReportedError" "tool crashed unexpectedly" (function
     | Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError _) -> true | _ -> false)
 ;;

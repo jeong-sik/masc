@@ -1680,6 +1680,31 @@ let test_p2_voice_runner_ffmpeg_and_afplay () =
   Alcotest.(check bool) "[ㅡ] blocked while filter focused" false
     (App.should_toggle_mouse_capture m_filter bare_eu)
 
+(* A chat stream that drops after the server accepted the request is posted
+   again with its last journal seq; anything else ends the submit. *)
+let test_chat_reattach_decision () =
+  let delay ?(accepted = true) ?(terminal_seen = false) ?(reattaches = 0) result =
+    Cmd_executor.chat_reattach_delay ~accepted ~terminal_seen ~reattaches result
+  in
+  let dropped = Error (Msg.Transport Health.Stream_eof) in
+  Alcotest.(check (option (float 0.0))) "accepted stream dropped mid-turn reattaches"
+    (Some 1.0) (delay dropped);
+  Alcotest.(check (option (float 0.0)))
+    "clean close without a terminal reattaches for the missed terminal" (Some 1.0)
+    (delay (Ok ()));
+  Alcotest.(check (option (float 0.0))) "a refused connection after acceptance waits longer"
+    (Some 15.0)
+    (delay ~reattaches:4 (Error (Msg.Transport Health.Connect_refused)));
+  Alcotest.(check (option (float 0.0))) "reattach budget is bounded" None
+    (delay ~reattaches:5 dropped);
+  Alcotest.(check (option (float 0.0))) "a failure before acceptance is the submit's error"
+    None (delay ~accepted:false dropped);
+  Alcotest.(check (option (float 0.0))) "a terminal frame ends the stream" None
+    (delay ~terminal_seen:true (Ok ()));
+  Alcotest.(check (option (float 0.0))) "a 4xx is final" None
+    (delay
+       (Error (Msg.Http_error { status = 400; body = "bad request"; api_error = None })))
+
 let () =
   Alcotest.run "masc_tui_app"
     [
@@ -1730,6 +1755,8 @@ let () =
             `Quick test_bus_key_hash_and_stream_frames;
           Alcotest.test_case "setup login stream propagates non-terminal error & delivers terminal receipt once"
             `Quick test_setup_login_stream_error_and_single_delivery;
+          Alcotest.test_case "chat stream reattach decision" `Quick
+            test_chat_reattach_decision;
         ] );
       ( "app"
       , [

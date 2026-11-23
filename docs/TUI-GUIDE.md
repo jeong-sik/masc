@@ -628,6 +628,13 @@ belongs to a different workspace instance than the one established at boot.
 Confirm the server's workspace via `curl -fsS 'http://127.0.0.1:8935/health?full=1' | jq '.paths'`,
 re-point `--base-path` or `--port`, and press `r` to re-run handshake.
 
+**A Keeper reply stops mid-stream.** When the chat stream drops after the
+server accepted the message (server restart, network loss), the TUI posts the
+same message again with the last event it received, and the reply continues
+from there. It retries for about 30 seconds (after 1, 2, 4, 8 and 15 s). After
+that the message shows as failed; the finished reply still appears in Chat
+history once the Keeper's turn ends.
+
 **A field or card shows loading, unreported (`—`), or failed instead of `0`.**
 TUI v2.6 tracks every dataset with an explicit `Observed.t` state (`Loading`,
 `Value`, `Absent`, `Unreported`, `Failed`) so missing or failed reads are never

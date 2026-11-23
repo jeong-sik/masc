@@ -1273,72 +1273,122 @@ let execute_put t ~epoch req =
           Ui_bus.publish_stream t.bus
             (Msg.Http_reply { epoch; reply = Msg.Reply_wiki_put { page; result } }))
 
+(* A chat operation keeps running when its stream drops: the server journals
+   every event and answers a re-POST of the same request with the events
+   past [since_seq] before going live (Server_routes_http_keeper_stream
+   serve_accepted_chat). The stream is attached again only after the server
+   accepted the request and before a terminal frame; a failure before
+   acceptance stays the submit's own error. A server restart takes about
+   this long to answer again. *)
+let chat_reattach_backoff_s = [| 1.0; 2.0; 4.0; 8.0; 15.0 |]
+
+let chat_reattach_delay ~accepted ~terminal_seen ~reattaches
+    (result : (unit, Msg.http_error) result) =
+  if
+    (not accepted) || terminal_seen
+    || reattaches >= Array.length chat_reattach_backoff_s
+  then None
+  else
+    match result with
+    | Ok () -> Some chat_reattach_backoff_s.(reattaches)
+    | Error err when Msg.http_error_retryable err ->
+        Some chat_reattach_backoff_s.(reattaches)
+    | Error _ -> None
+
 let execute_post_stream t ~epoch req =
   match req with
   | Cmd.Stream_keeper_chat { request; is_btw } ->
       fork_safe t (fun () ->
-          let ep = Atomic.get t.endpoint in
-          let body =
-            Wire_fleet.encode_chat_submit_request request
-            |> Yojson.Safe.to_string
+          (* Written from the stream's chunk callback, read between attempts. *)
+          let accepted = Atomic.make false in
+          let terminal_seen = Atomic.make false in
+          let last_seq = Atomic.make None in
+          let note_frame_seq (frame : Sse_wire.frame) =
+            match Option.bind frame.id int_of_string_opt with
+            | None -> ()
+            | Some seq -> (
+                match Atomic.get last_seq with
+                | Some held when held >= seq -> ()
+                | Some _ | None -> Atomic.set last_seq (Some seq))
           in
-          let sse_decoder = Sse_wire.create_decoder () in
+          let publish_chunk chunk =
+            Ui_bus.publish_stream t.bus
+              (Msg.Chat_stream_chunk
+                 {
+                   epoch;
+                   keeper = request.keeper_name;
+                   request_id = request.request_id;
+                   is_btw;
+                   chunk;
+                 })
+          in
+          let publish_warning reason =
+            Ui_bus.publish_stream t.bus
+              (Msg.Chat_stream_decode_warning
+                 {
+                   epoch;
+                   keeper = request.keeper_name;
+                   request_id = request.request_id;
+                   reason;
+                 })
+          in
           let on_response ~status:_ ~headers:_ = () in
-          let on_chunk raw =
+          let on_chunk sse_decoder raw =
             let frames = Sse_wire.feed sse_decoder raw in
             List.iter
               (fun (frame : Sse_wire.frame) ->
+                note_frame_seq frame;
                 match Yojson.Safe.from_string frame.data with
                 | json -> (
                     match Wire_fleet.decode_chat_stream_chunk json with
                     | Ok Wire_fleet.Chunk_ignored -> ()
+                    | Ok (Wire_fleet.Chunk_accepted _ as chunk) ->
+                        Atomic.set accepted true;
+                        publish_chunk chunk
                     | Ok
-                        (( Wire_fleet.Chunk_accepted _
-                         | Wire_fleet.Chunk_run_started _
+                        ((Wire_fleet.Chunk_turn_done _ | Wire_fleet.Chunk_error _)
+                         as chunk) ->
+                        Atomic.set terminal_seen true;
+                        publish_chunk chunk
+                    | Ok
+                        (( Wire_fleet.Chunk_run_started _
                          | Wire_fleet.Chunk_text_delta _
                          | Wire_fleet.Chunk_thinking_delta _
                          | Wire_fleet.Chunk_thinking_snapshot _
                          | Wire_fleet.Chunk_tool_start _
                          | Wire_fleet.Chunk_tool_args _
                          | Wire_fleet.Chunk_tool_end _
-                         | Wire_fleet.Chunk_reply_details _
-                         | Wire_fleet.Chunk_turn_done _
-                         | Wire_fleet.Chunk_error _ ) as chunk) ->
-                        Ui_bus.publish_stream t.bus
-                          (Msg.Chat_stream_chunk
-                             {
-                               epoch;
-                               keeper = request.keeper_name;
-                               request_id = request.request_id;
-                               is_btw;
-                               chunk;
-                             })
-                    | Error reason ->
-                        Ui_bus.publish_stream t.bus
-                          (Msg.Chat_stream_decode_warning
-                             {
-                               epoch;
-                               keeper = request.keeper_name;
-                               request_id = request.request_id;
-                               reason;
-                             }))
+                         | Wire_fleet.Chunk_reply_details _ ) as chunk) ->
+                        publish_chunk chunk
+                    | Error reason -> publish_warning reason)
                 | exception Yojson.Json_error msg ->
-                    Ui_bus.publish_stream t.bus
-                      (Msg.Chat_stream_decode_warning
-                         {
-                           epoch;
-                           keeper = request.keeper_name;
-                           request_id = request.request_id;
-                           reason = "invalid JSON SSE frame: " ^ msg;
-                         }))
+                    publish_warning ("invalid JSON SSE frame: " ^ msg))
               frames
           in
-          let result =
+          let attempt ~since_seq =
+            let ep = Atomic.get t.endpoint in
+            let body =
+              Wire_fleet.encode_chat_submit_request { request with since_seq }
+              |> Yojson.Safe.to_string
+            in
             Http_client.post_stream ~io:t.io ~clock:t.clock
-              ~content_type:"application/json" ~body ~on_response ~on_chunk ep
-              ~path:Wire_fleet.keeper_chat_stream_path
+              ~content_type:"application/json" ~body ~on_response
+              ~on_chunk:(on_chunk (Sse_wire.create_decoder ()))
+              ep ~path:Wire_fleet.keeper_chat_stream_path
             |> Result.map_error msg_error_of_http
           in
+          let rec run ~reattaches ~since_seq =
+            let result = attempt ~since_seq in
+            match
+              chat_reattach_delay ~accepted:(Atomic.get accepted)
+                ~terminal_seen:(Atomic.get terminal_seen) ~reattaches result
+            with
+            | None -> result
+            | Some delay_s ->
+                Eio.Time.sleep t.clock delay_s;
+                run ~reattaches:(reattaches + 1) ~since_seq:(Atomic.get last_seq)
+          in
+          let result = run ~reattaches:0 ~since_seq:request.since_seq in
           Ui_bus.publish_stream t.bus
             (Msg.Chat_stream_done
                {

@@ -69,6 +69,18 @@ val fetch_planning_with_tasks :
     error (including [Workspace_mismatch], [Decode_error], [Http_error], or
     [Transport]) instead of silently returning an empty task list. *)
 
+val chat_reattach_delay :
+  accepted:bool ->
+  terminal_seen:bool ->
+  reattaches:int ->
+  (unit, Msg.http_error) result ->
+  float option
+(** Seconds to wait before posting the same chat request again with the last
+    journal seq it received, or [None] when the stream's result is final: the
+    server never accepted the request, a terminal frame arrived, the error is
+    not retryable, or the reattach budget is spent. A clean close without a
+    terminal also reattaches; the server then replays the missed terminal. *)
+
 val decode_hub_event_msgs :
   epoch:Epoch.t ->
   observed_at:Clock.Mono.t ->

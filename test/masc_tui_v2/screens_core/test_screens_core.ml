@@ -2969,6 +2969,52 @@ let test_memory_diff_viewport_skip_multi_row_selection () =
   let s6 = skip ~total_rows:40 ~avail_h:12 ~scroll:9 ~selected_range:None in
   Alcotest.(check int) "None selection keeps clamped scroll" 9 s6
 
+(* The Ctrl+T Context tab draws the gauge, the cache bar and the cost line
+   first. The turn history and compaction facts take the rows left, so a
+   short drawer keeps the cache bar and cost line and never reports a held
+   cache snapshot as awaited. *)
+let test_context_tab_keeps_cache_and_cost_first () =
+  let keeper = "e-masc-the-leader" in
+  let row i : Wire_fleet.turn_record_row =
+    {
+      absolute_turn = i + 1;
+      input_tokens = Some (40_000 + (i * 5_000));
+      usage_scope = Wire_fleet.Usage_per_request;
+      input_provenance = Some Wire_fleet.Input_measured_request;
+      context_window = Some 200_000;
+      provider_context_window = None;
+    }
+  in
+  let records : Wire_fleet.keeper_turn_records =
+    { keeper; skipped_rows = 1; rows = List.init 6 row }
+  in
+  List.iter
+    (fun (cols, rows, history_fits) ->
+      let base = populated_model ~cols ~rows ~lang:Say.Lang_en in
+      let m =
+        {
+          base with
+          drafts = Drafts.set_active_keeper keeper base.drafts;
+          fleet = Fleet_store.set_turn_records ~keeper (obs records) base.fleet;
+          nav =
+            {
+              base.nav with
+              overlay = Some (Nav.Queue_context Nav.Drawer_context);
+            };
+        }
+      in
+      let g, _ = render_full ~model:m ~cols ~rows in
+      let label = Printf.sprintf "context_tab_%dx%d" cols rows in
+      assert_clean_grid ~label g;
+      let txt = grid_all_text g in
+      assert_contains ~label ~needle:"Cache Read" txt;
+      assert_contains ~label ~needle:"Runtime:" txt;
+      assert_not_contains ~label
+        ~needle:"Awaiting token & cache breakdown snapshot" txt;
+      if history_fits then
+        assert_contains ~label ~needle:"Context per turn" txt)
+    [ (60, 18, false); (90, 28, true) ]
+
 let () =
   Alcotest.run "masc_tui_screens_core"
     [
@@ -3006,6 +3052,8 @@ let () =
         [
           Alcotest.test_case "all 7 universal overlays at 140x40, 90x28, 60x18 KO & EN"
             `Quick test_all_7_overlays;
+          Alcotest.test_case "Context tab keeps the cache bar and cost line first"
+            `Quick test_context_tab_keeps_cache_and_cost_first;
           Alcotest.test_case "palette high selection >12 and Update_nav parity"
             `Quick test_palette_high_selection_and_sync;
           Alcotest.test_case "incident prefixed JSON and truncated/plain-text secret redaction"

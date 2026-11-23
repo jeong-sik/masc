@@ -2361,8 +2361,14 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           hotkey =
             Some
               (Say.resolve lang
-                 (Say.make ~ko:"[↑↓] 스크롤 · [Tab/←→] 탭 · [Esc] 닫기"
-                    ~en:"[↑↓] Scroll · [Tab/←→] Tabs · [Esc] Close"));
+                 (match active_tab with
+                  | Nav.Drawer_queue | Nav.Drawer_schedules ->
+                      Say.make ~ko:"[↑↓] 스크롤 · [Tab/←→] 탭 · [Esc] 닫기"
+                        ~en:"[↑↓] Scroll · [Tab/←→] Tabs · [Esc] Close"
+                  | Nav.Drawer_context ->
+                      (* The Context tab does not scroll. *)
+                      Say.make ~ko:"[Tab/←→] 탭 · [Esc] 닫기"
+                        ~en:"[Tab/←→] Tabs · [Esc] Close"));
           focused = true;
           elevated = true;
         }
@@ -2577,6 +2583,89 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               ignore (Chart.draw grid ~rect:gauge_r ~theme ~caps ~lang spec);
               y := !y + 3
             end;
+            (match eff_row with
+             | Some r when !y + 3 <= bottom ->
+                 let cache_r =
+                   match Observed.to_option r.cache_read_tokens with
+                   | Some v -> float_of_int v
+                   | None -> 0.0
+                 in
+                 let cache_w =
+                   match Observed.to_option r.cache_creation_tokens with
+                   | Some v -> float_of_int v
+                   | None -> 0.0
+                 in
+                 let uncached =
+                   Float.max 0.0
+                     (float_of_int r.input_tokens -. cache_r -. cache_w)
+                 in
+                 let out_tok = float_of_int r.output_tokens in
+                 let bar_r = Rect.make ~x:body_r.x ~y:!y ~w:body_r.w ~h:3 in
+                 let spec : Chart.Spec.t =
+                   {
+                     title =
+                       Say.make ~ko:"프롬프트 캐시 구성"
+                         ~en:"Prompt Cache Breakdown";
+                     kind =
+                       Chart.Spec.Stacked_bar
+                         {
+                           segments =
+                             [
+                               ( Say.make ~ko:"캐시 읽기" ~en:"Cache Read",
+                                 cache_r,
+                                 Theme.Status_ok );
+                               ( Say.make ~ko:"캐시 쓰기" ~en:"Cache Write",
+                                 cache_w,
+                                 Theme.Status_active );
+                               ( Say.make ~ko:"비캐시 입력" ~en:"Uncached",
+                                 uncached,
+                                 Theme.Status_attention );
+                               ( Say.make ~ko:"출력" ~en:"Output",
+                                 out_tok,
+                                 Theme.Status_historical );
+                             ];
+                           total_label =
+                             Say.make
+                               ~ko:(Printf.sprintf "적중률 %s"
+                                      (Format_val.format_observed
+                                         Format_val.Percent r.cache_hit_pct ~lang))
+                               ~en:(Printf.sprintf "Hit %s"
+                                      (Format_val.format_observed
+                                         Format_val.Percent r.cache_hit_pct ~lang));
+                           unit = Format_val.Tokens;
+                         };
+                     hotkey_hint = None;
+                   }
+                 in
+                 ignore (Chart.draw grid ~rect:bar_r ~theme ~caps ~lang spec);
+                 y := !y + 4
+             | Some _ -> (* held, but the drawer is too short for the bar *) ()
+             | None ->
+                 put_body_line ~style:whisper_st
+                   (say ~ko:"토큰·캐시 효율 스냅샷 대기 중"
+                      ~en:"Awaiting token & cache breakdown snapshot"));
+            (match keeper_opt with
+             | Some k ->
+                 (* Cost comes from keeper-costs over its trailing window. *)
+                 let cost_label =
+                   match Runtime_store.keeper_costs_window_label model.runtime with
+                   | Some w -> "Cost " ^ w
+                   | None -> "Cost"
+                 in
+                 let cost = Runtime_store.keeper_cost_usd ~keeper model.runtime in
+                 put_body_line ~style:struct_st
+                   (Printf.sprintf "Runtime: %s · Turns: %s · %s: %s"
+                      k.runtime_id
+                      (Format_val.format_observed Format_val.Count
+                         (Observed.map float_of_int k.total_turns)
+                         ~lang)
+                      cost_label
+                      (Format_val.format_observed Format_val.Usd cost ~lang))
+             | None -> ());
+            (* The turn history and compaction facts take the rows left under
+               the gauge, cache bar and cost line, so a short drawer drops
+               them first. *)
+            incr y;
             (* Per-turn fill from the keeper's recent turn records. *)
             (match Fleet_store.turn_records_for ~keeper model.fleet with
              | Observed.Value { data; _ } -> (
@@ -2689,86 +2778,7 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                    (say ~ko:"압축 기록 불러오는 중…" ~en:"Loading compaction facts…")
              | Observed.Absent | Observed.Unreported ->
                  put_body_line ~style:whisper_st
-                   (say ~ko:"압축 기록 미보고" ~en:"Compaction facts unreported"));
-            incr y;
-            (match eff_row with
-             | Some r when !y + 2 <= bottom ->
-                 let cache_r =
-                   match Observed.to_option r.cache_read_tokens with
-                   | Some v -> float_of_int v
-                   | None -> 0.0
-                 in
-                 let cache_w =
-                   match Observed.to_option r.cache_creation_tokens with
-                   | Some v -> float_of_int v
-                   | None -> 0.0
-                 in
-                 let uncached =
-                   Float.max 0.0
-                     (float_of_int r.input_tokens -. cache_r -. cache_w)
-                 in
-                 let out_tok = float_of_int r.output_tokens in
-                 let bar_r = Rect.make ~x:body_r.x ~y:!y ~w:body_r.w ~h:3 in
-                 let spec : Chart.Spec.t =
-                   {
-                     title =
-                       Say.make ~ko:"프롬프트 캐시 구성"
-                         ~en:"Prompt Cache Breakdown";
-                     kind =
-                       Chart.Spec.Stacked_bar
-                         {
-                           segments =
-                             [
-                               ( Say.make ~ko:"캐시 읽기" ~en:"Cache Read",
-                                 cache_r,
-                                 Theme.Status_ok );
-                               ( Say.make ~ko:"캐시 쓰기" ~en:"Cache Write",
-                                 cache_w,
-                                 Theme.Status_active );
-                               ( Say.make ~ko:"비캐시 입력" ~en:"Uncached",
-                                 uncached,
-                                 Theme.Status_attention );
-                               ( Say.make ~ko:"출력" ~en:"Output",
-                                 out_tok,
-                                 Theme.Status_historical );
-                             ];
-                           total_label =
-                             Say.make
-                               ~ko:(Printf.sprintf "적중률 %s"
-                                      (Format_val.format_observed
-                                         Format_val.Percent r.cache_hit_pct ~lang))
-                               ~en:(Printf.sprintf "Hit %s"
-                                      (Format_val.format_observed
-                                         Format_val.Percent r.cache_hit_pct ~lang));
-                           unit = Format_val.Tokens;
-                         };
-                     hotkey_hint = None;
-                   }
-                 in
-                 ignore (Chart.draw grid ~rect:bar_r ~theme ~caps ~lang spec);
-                 y := !y + 4
-             | Some _ | None ->
-                 put_body_line ~style:whisper_st
-                   (say ~ko:"토큰·캐시 효율 스냅샷 대기 중"
-                      ~en:"Awaiting token & cache breakdown snapshot"));
-            (match keeper_opt with
-             | Some k ->
-                 (* Cost comes from keeper-costs over its trailing window. *)
-                 let cost_label =
-                   match Runtime_store.keeper_costs_window_label model.runtime with
-                   | Some w -> "Cost " ^ w
-                   | None -> "Cost"
-                 in
-                 let cost = Runtime_store.keeper_cost_usd ~keeper model.runtime in
-                 put_body_line ~style:struct_st
-                   (Printf.sprintf "Runtime: %s · Turns: %s · %s: %s"
-                      k.runtime_id
-                      (Format_val.format_observed Format_val.Count
-                         (Observed.map float_of_int k.total_turns)
-                         ~lang)
-                      cost_label
-                      (Format_val.format_observed Format_val.Usd cost ~lang))
-             | None -> ())
+                   (say ~ko:"압축 기록 미보고" ~en:"Compaction facts unreported"))
         | Nav.Drawer_schedules ->
             let scheds = Work_store.schedules_list model.work in
             let sorted =

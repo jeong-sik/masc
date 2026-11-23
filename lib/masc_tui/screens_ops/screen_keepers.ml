@@ -113,6 +113,15 @@ let context_cell ~lang (obs : Wire_fleet.context_reading Observed.t) :
           tone = Theme.Status_critical;
         }
 
+(* Cells a keeper name needs. The keeper column reserves them as its minimum
+   because [Table] shares the cells left after the minimums by weight: every
+   column added to the roster would otherwise take cells from the name.
+   "e-masc-the-leader" is the widest name test_screens_ops draws at 90x28. *)
+let keeper_name_cells = 17
+
+(* The Companies mode indents each keeper under its company header. *)
+let company_indent = "  "
+
 let keeper_table_row ~(model : Model.t) ~(theme : Theme.t) ~indent_name
     (k : Wire_fleet.keeper_summary) : Table.row =
   let has_attn = Ops_common.keeper_has_attention model.attention k.name in
@@ -131,7 +140,7 @@ let keeper_table_row ~(model : Model.t) ~(theme : Theme.t) ~indent_name
       Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
         (Glyph.to_utf8 Glyph.Separator_dot)
   in
-  let name_display = if indent_name then "  " ^ k.name else k.name in
+  let name_display = if indent_name then company_indent ^ k.name else k.name in
   let task_str = Ops_common.keeper_turn_summary ~lang:model.lang k in
   let spark_samples = Ops_common.samples_of_floats k.activity_sparkline_24h in
   let turns_str =
@@ -199,7 +208,7 @@ let standard_roster_columns : Table.column list =
       id = "keeper";
       header = Say.make ~ko:"키퍼" ~en:"Keeper";
       priority = 0;
-      min_width = 14;
+      min_width = keeper_name_cells + String.length company_indent;
       max_width = Some 24;
       weight = 3;
       align = Table.Left;
@@ -275,7 +284,7 @@ let pulse_wall_columns : Table.column list =
       id = "keeper";
       header = Say.make ~ko:"키퍼" ~en:"Keeper";
       priority = 0;
-      min_width = 14;
+      min_width = keeper_name_cells;
       max_width = Some 22;
       weight = 2;
       align = Table.Left;

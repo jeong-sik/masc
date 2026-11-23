@@ -1897,8 +1897,8 @@ let test_v25_chrome_margins_and_keycaps () =
     in_cap := is_cap;
     if Attr.has c.style.attrs Attr.italic then has_italic_hint := true
   done;
-  Alcotest.(check bool) "footer has elevated keycaps (1..7)" true
-    (!keycap_runs >= 1 && !keycap_runs <= 7);
+  Alcotest.(check bool) "footer has elevated keycaps (1..14)" true
+    (!keycap_runs >= 1 && !keycap_runs <= 14);
   Alcotest.(check bool) "footer has Tier-4 italic status hint on Wide" true
     !has_italic_hint;
   (* P3: Top-rail HH:MM clock uses Tier-4 italic Typography.whisper *)

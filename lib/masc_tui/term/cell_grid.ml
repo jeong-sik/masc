@@ -278,3 +278,17 @@ let fill_rect ?clip t ~rect ~style ?(glyph = Empty) () =
         write_cell_in_clip t ~clip:target ~x ~y fill_cell
       done
     done
+
+let dim_rect ?clip t ~rect ~fg ~bg =
+  let target = Rect.intersect (effective_clip t clip) rect in
+  if Rect.is_empty target then ()
+  else
+    let scrim_style = Style.make ~fg ~bg () in
+    for y = target.y to Rect.bottom target - 1 do
+      let row_base = y * t.cols in
+      for x = target.x to Rect.right target - 1 do
+        let idx = row_base + x in
+        let existing = t.cells.(idx) in
+        t.cells.(idx) <- { existing with style = scrim_style }
+      done
+    done

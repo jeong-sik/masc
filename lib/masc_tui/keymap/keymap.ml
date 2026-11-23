@@ -516,27 +516,27 @@ let bindings : binding list =
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:Focus_filter ~key_display:"/" ~hint_label:say_filter
         ~help_desc:(Say.make ~ko:"현재 목록 필터 또는 슬래시 명령" ~en:"Filter list or enter slash command")
-        ~footer_priority:5 (bare_char '/');
+        ~footer_priority:6 (bare_char '/');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_overlays
         ~action:Open_settings ~key_display:"," ~hint_label:say_settings
         ~help_desc:(Say.make ~ko:"7-탭 설정 오버레이 열기" ~en:"Open 7-tab Settings overlay")
-        ~slash_twin:"/config" ~footer_priority:7 (bare_char ',');
+        ~slash_twin:"/config" ~footer_priority:6 (bare_char ',');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Teleport_blocked ~key_display:"J" ~hint_label:say_teleport
         ~help_desc:(Say.make ~ko:"가장 긴급한 대기/차단 키퍼로 점프" ~en:"Teleport to highest-priority blocked item")
-        ~slash_twin:"/jump" ~footer_priority:5 (bare_char 'J');
+        ~slash_twin:"/jump" ~footer_priority:8 (bare_char 'J');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_overlays
         ~action:Open_incidents ~key_display:"I" ~hint_label:say_incidents
         ~help_desc:(Say.make ~ko:"과거 장애·진단 이력 서랍 열기" ~en:"Open Historical Incidents drawer")
-        ~slash_twin:"/incidents" ~footer_priority:8 (bare_char 'I');
+        ~slash_twin:"/incidents" ~footer_priority:7 (bare_char 'I');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Voice_ptt_toggle ~key_display:"V" ~hint_label:say_voice
         ~help_desc:(Say.make ~ko:"음성 입력(PTT) 시작/중지" ~en:"Toggle Voice Push-to-Talk")
-        ~slash_twin:"/voice" ~footer_priority:8 (bare_char 'V');
+        ~slash_twin:"/voice" ~footer_priority:9 (bare_char 'V');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_overlays
         ~action:Open_help ~key_display:"?" ~hint_label:say_help
         ~help_desc:(Say.make ~ko:"동적 단축키 도움말 열기" ~en:"Open dynamic keymap help")
-        ~slash_twin:"/help" ~footer_priority:9 (bare_char '?');
+        ~slash_twin:"/help" ~footer_priority:5 (bare_char '?');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Move Down) ~key_display:"j" ~hint_label:(Say.make ~ko:"아래" ~en:"Down")
         ~help_desc:(Say.make ~ko:"다음 항목으로 이동" ~en:"Move selection down")
@@ -589,7 +589,7 @@ let bindings : binding list =
         ~action:(Cycle_focus_pane Next) ~key_display:"Tab"
         ~hint_label:(Say.make ~ko:"패널" ~en:"Pane")
         ~help_desc:(Say.make ~ko:"다음 패널로 포커스 전환" ~en:"Focus next pane")
-        ~footer_priority:6 (mk_chord Input.Tab);
+        ~footer_priority:2 (mk_chord Input.Tab);
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Cycle_focus_pane Prev) ~key_display:"Shift+Tab"
         ~hint_label:(Say.make ~ko:"이전 패널" ~en:"Prev Pane")
@@ -597,8 +597,11 @@ let bindings : binding list =
         ~footer_priority:0 (mk_chord ~shift:true Input.Tab);
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Toggle_expand ~key_display:"Space"
-        ~hint_label:(Say.make ~ko:"접기/펼치기" ~en:"Toggle")
-        ~help_desc:(Say.make ~ko:"선택 그룹 또는 카드 펼치기/접기" ~en:"Expand or collapse group")
+        ~hint_label:(Say.make ~ko:"전환" ~en:"Toggle")
+        ~help_desc:
+          (Say.make
+             ~ko:"컨텍스트 전환 (접기/펼치기 · Wiki↔산출물 · Diff 창 · 로그 레벨)"
+             ~en:"Context toggle (expand · Wiki↔Artifacts · Diff window · Log level)")
         ~footer_priority:0 (bare_char ' ');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Create_new ~key_display:"n"
@@ -722,11 +725,11 @@ let bindings : binding list =
       bind ~scope:Global ~tier:Universal_ctrl ~category:Cat_overlays
         ~action:Open_palette ~key_display:"Ctrl+K" ~hint_label:say_palette
         ~help_desc:(Say.make ~ko:"통합 명령·엔티티 팔레트 열기 (승인과 완전 분리)" ~en:"Open Universal Command & Entity Palette")
-        ~footer_priority:6 (ctrl_char 'k');
+        ~footer_priority:5 (ctrl_char 'k');
       bind ~scope:Global ~tier:Universal_ctrl ~category:Cat_overlays
         ~action:Open_keeper_switcher ~key_display:"Ctrl+G" ~hint_label:say_keeper
         ~help_desc:(Say.make ~ko:"키퍼/채팅 빠른 전환기 열기" ~en:"Open Keeper/Chat switcher")
-        ~slash_twin:"/keeper" ~footer_priority:7 (ctrl_char 'g');
+        ~slash_twin:"/keeper" ~footer_priority:8 (ctrl_char 'g');
       bind ~scope:Global ~tier:Universal_ctrl ~category:Cat_overlays
         ~action:Open_model_switcher ~key_display:"Ctrl+L" ~hint_label:say_model
         ~help_desc:(Say.make ~ko:"런타임/모델 전환기 열기" ~en:"Open Model/Runtime switcher")
@@ -741,7 +744,7 @@ let bindings : binding list =
       bind ~scope:Global ~tier:Universal_ctrl ~category:Cat_overlays
         ~action:Open_queue_context ~key_display:"Ctrl+T" ~hint_label:say_queue
         ~help_desc:(Say.make ~ko:"키퍼 큐·컨텍스트·예약 서랍 열기" ~en:"Open Queue & Context drawer")
-        ~slash_twin:"/queue" ~footer_priority:8 (ctrl_char 't');
+        ~slash_twin:"/queue" ~footer_priority:7 (ctrl_char 't');
       bind ~scope:Global ~tier:Universal_ctrl ~category:Cat_actions
         ~action:Voice_ptt_toggle ~key_display:"Ctrl+B" ~hint_label:say_voice
         ~help_desc:(Say.make ~ko:"음성 입력(PTT) 시작/중지" ~en:"Toggle Voice Push-to-Talk")

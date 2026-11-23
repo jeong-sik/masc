@@ -372,13 +372,25 @@ type wiki_frontmatter = {
   tags : string list;
 }
 
+type wiki_unsupported_link =
+  | Unsupported_anchor
+  | Unsupported_scheme
+  | Unsupported_path
+  | Unsupported_not_markdown
+  | Unsupported_wikilink
+
+type wiki_link_target =
+  | Link_page of { slug : string; exists : bool }
+  | Link_own_file of string
+  | Link_external of string
+  | Link_invalid_name of string
+  | Link_unsupported of wiki_unsupported_link
+
 type wiki_outgoing_link = {
   text : string;
-  kind : string;
-  target : string;
+  target : wiki_link_target;
   raw : string;
   line : int;
-  exists : bool option;
 }
 
 type wiki_lint_kind =
@@ -753,15 +765,37 @@ let decode_wiki_frontmatter json =
   let* tags = required_string_list json "tags" in
   Ok { title; summary; source; author; created; updated; revision; tags }
 
+(* The [kind] spellings are the server's [link_to_json] in
+   server_dashboard_http_wiki.ml. Only a [page] link carries [exists]. *)
+let decode_wiki_link_target json =
+  let* kind = required_string_field json "kind" in
+  match kind with
+  | "page" ->
+      let* slug = required_nonblank_string json "target" in
+      let* exists = required_bool_field json "exists" in
+      Ok (Link_page { slug; exists })
+  | "own_file" ->
+      let* file = required_nonblank_string json "target" in
+      Ok (Link_own_file file)
+  | "external" ->
+      let* url = required_nonblank_string json "target" in
+      Ok (Link_external url)
+  | "invalid_name" ->
+      let* raw = required_nonblank_string json "target" in
+      Ok (Link_invalid_name raw)
+  | "unsupported:anchor" -> Ok (Link_unsupported Unsupported_anchor)
+  | "unsupported:scheme" -> Ok (Link_unsupported Unsupported_scheme)
+  | "unsupported:path" -> Ok (Link_unsupported Unsupported_path)
+  | "unsupported:not_markdown" -> Ok (Link_unsupported Unsupported_not_markdown)
+  | "unsupported:wikilink" -> Ok (Link_unsupported Unsupported_wikilink)
+  | other -> Error (Printf.sprintf "unknown wiki link kind %S" other)
+
 let decode_wiki_outgoing_link json =
   let* text = required_string_field json "text" in
-  let* kind = required_nonblank_string json "kind" in
-  let* target = required_nonblank_string json "target" in
+  let* target = decode_wiki_link_target json in
   let* raw = required_string_field json "raw" in
   let* line = required_nonnegative_int_field json "line" in
-  (* [exists] is [null] for [own_file], [external], and [unsupported:*] links. *)
-  let* exists = optional_bool_field json "exists" in
-  Ok { text; kind; target; raw; line; exists }
+  Ok ({ text; target; raw; line } : wiki_outgoing_link)
 
 let decode_wiki_page_detail json =
   let* _, body = unwrap_v2_or_raw json in

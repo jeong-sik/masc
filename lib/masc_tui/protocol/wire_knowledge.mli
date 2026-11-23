@@ -144,13 +144,30 @@ type wiki_frontmatter = {
   tags : string list;
 }
 
+(** The link shapes the wiki does not follow, one per server
+    [unsupported:<shape>] kind. *)
+type wiki_unsupported_link =
+  | Unsupported_anchor
+  | Unsupported_scheme
+  | Unsupported_path
+  | Unsupported_not_markdown
+  | Unsupported_wikilink
+
+(** Where a page link points, one case per server [kind]. An unsupported link
+    keeps only its shape: the server's target for it is the link's [raw]
+    text, which is blank for [[x]()] and [[x](<>)]. *)
+type wiki_link_target =
+  | Link_page of { slug : string; exists : bool }
+  | Link_own_file of string
+  | Link_external of string
+  | Link_invalid_name of string
+  | Link_unsupported of wiki_unsupported_link
+
 type wiki_outgoing_link = {
   text : string;
-  kind : string;
-  target : string;
+  target : wiki_link_target;
   raw : string;
   line : int;
-  exists : bool option;
 }
 
 type wiki_lint_kind =

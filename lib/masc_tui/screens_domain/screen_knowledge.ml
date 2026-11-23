@@ -2628,19 +2628,39 @@ let render_dive_wiki ~slug ~(model : Model.t) ~cache ~(rect : Rect.t)
         List.iter
           (fun (ol : Wire_knowledge.wiki_outgoing_link) ->
             if !y < bottom then begin
-              let tone, g =
-                match ol.exists with
-                | Some false -> (Theme.Status_critical, Glyph.Live_failing)
-                | Some true -> (Theme.Status_ok, Glyph.Check_mark)
-                | None -> (Theme.Status_active, Glyph.Focus_caret)
+              let tone, g, shown, uri =
+                match ol.target with
+                | Wire_knowledge.Link_page { slug; exists = true } ->
+                    ( Theme.Status_ok,
+                      Glyph.Check_mark,
+                      slug,
+                      Some ("masc://wiki/" ^ slug) )
+                | Wire_knowledge.Link_page { slug; exists = false } ->
+                    ( Theme.Status_critical,
+                      Glyph.Live_failing,
+                      slug,
+                      Some ("masc://wiki/" ^ slug) )
+                | Wire_knowledge.Link_invalid_name raw ->
+                    (Theme.Status_critical, Glyph.Live_failing, raw, None)
+                | Wire_knowledge.Link_external url ->
+                    (Theme.Status_active, Glyph.Focus_caret, url, Some url)
+                | Wire_knowledge.Link_own_file file ->
+                    (Theme.Status_active, Glyph.Focus_caret, file, None)
+                | Wire_knowledge.Link_unsupported _ ->
+                    (Theme.Status_active, Glyph.Focus_caret, ol.raw, None)
               in
               let lbl =
-                Printf.sprintf "%s %s -> %s" (Glyph.to_utf8 g) ol.text ol.target
+                Printf.sprintf "%s %s -> %s" (Glyph.to_utf8 g) ol.text shown
               in
+              let style = H.status_style ~theme tone in
               ignore
-                (H.put_link ~grid ~clip:side_inner ~x:side_inner.x ~y:!y
-                   ~max_w:side_inner.w ~style:(H.status_style ~theme tone)
-                   ~uri:ol.target lbl);
+                (match uri with
+                | Some uri ->
+                    H.put_link ~grid ~clip:side_inner ~x:side_inner.x ~y:!y
+                      ~max_w:side_inner.w ~style ~uri lbl
+                | None ->
+                    H.put_clipped ~grid ~clip:side_inner ~x:side_inner.x
+                      ~y:!y ~max_w:side_inner.w ~style lbl);
               incr y
             end)
           (H.safe_take 6 d.outgoing_links);

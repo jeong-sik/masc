@@ -38,6 +38,7 @@
   eio
   eio_main
   goal_measure_fixture
+  httpun
   masc
   masc.agent_core
   masc.board_handlers
@@ -53,4 +54,6 @@
   masc.server
   masc_tui_core
   masc_tui_protocol
+  masc_workspace
+  unix
   yojson))

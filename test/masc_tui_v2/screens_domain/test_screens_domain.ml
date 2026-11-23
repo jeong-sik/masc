@@ -416,19 +416,16 @@ let make_rich_model ~lang ~cols ~rows =
         [
           {
             text = "Stack Guide";
-            kind = "wiki";
-            target = "masc://wiki/stack-guide";
-            raw = "[[stack-guide]]";
+            target =
+              Wire_knowledge.Link_page { slug = "stack-guide"; exists = true };
+            raw = "stack-guide.md";
             line = 3;
-            exists = Some true;
           };
           {
             text = "Missing Page";
-            kind = "wiki";
-            target = "masc://wiki/missing";
-            raw = "[[missing]]";
+            target = Wire_knowledge.Link_page { slug = "missing"; exists = false };
+            raw = "missing.md";
             line = 5;
-            exists = Some false;
           };
         ];
       backlinks = [ "wiki-home"; "ops-checklist" ];

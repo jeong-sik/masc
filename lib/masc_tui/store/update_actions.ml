@@ -2295,7 +2295,13 @@ and execute_action ~now (m : Model.t) action =
                 match
                   List.find_map
                     (fun (lnk : Wire_knowledge.wiki_outgoing_link) ->
-                      extract_first_http_url lnk.target)
+                      match lnk.target with
+                      | Wire_knowledge.Link_external url -> Some url
+                      | Wire_knowledge.Link_page _
+                      | Wire_knowledge.Link_own_file _
+                      | Wire_knowledge.Link_invalid_name _
+                      | Wire_knowledge.Link_unsupported _ ->
+                          None)
                     detail.outgoing_links
                 with
                 | Some u -> Some u

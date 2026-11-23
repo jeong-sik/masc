@@ -571,7 +571,7 @@ let test_wire_knowledge () =
   Alcotest.(check string) "wiki slug" "ops-runbook" (List.hd wi.pages).slug;
   Alcotest.(check int) "unreadable finding count" 1 wi.lint.counts.unreadable_page;
   Alcotest.(check int) "omitted zero broken_link" 0 wi.lint.counts.broken_link;
-  (* Wiki page detail with nullable outgoing_links[].exists *)
+  (* Wiki page detail: an external link carries a null [exists] *)
   let wiki_page_json =
     parse_json
       {|{
@@ -593,7 +593,12 @@ let test_wire_knowledge () =
       }|}
   in
   let wp = expect_ok "wiki page" (Wire_knowledge.decode_wiki_page_detail wiki_page_json) in
-  Alcotest.(check (option bool)) "external link exists=None" None (List.hd wp.outgoing_links).exists;
+  (match (List.hd wp.outgoing_links).target with
+  | Wire_knowledge.Link_external url ->
+      Alcotest.(check string) "external link keeps its url" "https://example.com" url
+  | Wire_knowledge.Link_page _ | Wire_knowledge.Link_own_file _
+  | Wire_knowledge.Link_invalid_name _ | Wire_knowledge.Link_unsupported _ ->
+      Alcotest.fail "an external link decodes as Link_external");
   (* Wiki log, search, put *)
   let wl =
     expect_ok "wiki log"

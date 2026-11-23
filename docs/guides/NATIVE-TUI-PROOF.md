@@ -10,10 +10,10 @@ characters) and `native-tui-scenario`:
 
 | Scenario | Native build targets | Executed suites |
 | --- | --- | --- |
-| `detail-ownership` (default) | TUI, key-doc generator and 9 test executables | `v2_tui_tests` (`test_core_term`, `test_keymap_ui`, `test_protocol_net`, `test_store`, `test_screens_core`, `test_screens_ops`, `test_screens_domain`, `test_app`) plus `test_server_tui_v2_api` |
-| `workspace-files` | TUI, key-doc generator, server and 10 test executables | `test_repo_git`, `test_workspace_file_confidentiality`, plus `v2_tui_tests` |
-| `rich-workspace` | TUI, key-doc generator, server and 11 test executables | The `workspace-files` suites plus `test_lsp_position` |
-| `rich-chat-workspace` | TUI, key-doc generator, server and 11 test executables | Same targets as `rich-workspace` (`test_repo_git`, `test_workspace_file_confidentiality`, `v2_tui_tests`, `test_lsp_position`) |
+| `detail-ownership` (default) | TUI, key-doc generator and 10 test executables | `v2_tui_tests` (`test_core_term`, `test_keymap_ui`, `test_protocol_net`, `test_server_config_roundtrip`, `test_store`, `test_screens_core`, `test_screens_ops`, `test_screens_domain`, `test_app`) plus `test_server_tui_v2_api` |
+| `workspace-files` | TUI, key-doc generator, server and 11 test executables | `test_repo_git`, `test_workspace_file_confidentiality`, plus `v2_tui_tests` |
+| `rich-workspace` | TUI, key-doc generator, server and 12 test executables | The `workspace-files` suites plus `test_lsp_position` |
+| `rich-chat-workspace` | TUI, key-doc generator, server and 12 test executables | Same targets as `rich-workspace` (`test_repo_git`, `test_workspace_file_confidentiality`, `v2_tui_tests`, `test_lsp_position`) |
 | `original-tool-result` | TUI, key-doc generator, server and 4 test executables | `test_keeper_tool_result_source`, `test_tool_output_washing_e2e`, `test_server_dashboard_http_keeper_tool_lookup`, `test_keymap_ui` |
 | `code-references` | TUI, key-doc generator, server and 5 test executables | `test_lsp_workspace_pool`, `test_lsp_questions`, `test_lsp_message_router`, `test_lsp_process_manager`, `test_server_ide_lsp_proxy` |
 | `resource-reading` | TUI, key-doc generator, server and 2 test executables | `test_screens_domain`, `test_protocol_net` |
@@ -21,7 +21,7 @@ characters) and `native-tui-scenario`:
 | `browser-lane` | TUI, key-doc generator, server, Browser Addon worker, native Addon launcher and 11 test executables | `test_browser_lane`, `test_browser_lane_watched_work`, `test_browser_addon_observation`, `test_browser_addon_tool`, `test_browser_ego_peer`, `test_browser_native_workflow`, `test_browser_addon_live_ego`, `test_browser_addon_wire`, `test_browser_selection`, `test_server_lane_inventory`, `test_keeper_vision_tool --browser-screenshot` |
 | `source-readers` | TUI, key-doc generator, server and 4 test executables | Same targets as `original-tool-result` (`test_keeper_tool_result_source`, `test_tool_output_washing_e2e`, `test_server_dashboard_http_keeper_tool_lookup`, `test_keymap_ui`) |
 | `code-drafts` | TUI, key-doc generator, server and 3 test executables | `test_workspace_file_confidentiality`, `test_keymap_ui`, `test_screens_core` |
-| `tui-performance` | TUI, key-doc generator and 9 test executables | `v2_tui_tests` plus `test_server_tui_v2_api` |
+| `tui-performance` | TUI, key-doc generator and 10 test executables | `v2_tui_tests` plus `test_server_tui_v2_api` |
 
 The server target is `bin/main_eio.exe`; the TUI is `bin/masc_tui.exe`.
 Every scenario also builds `bin/masc_tui_keys_doc_cli.exe`, the canonical key
@@ -35,7 +35,7 @@ checks run.
 
 Use `rich-workspace` or `rich-chat-workspace` for a workspace, LSP-position and
 full TUI v2 integration candidate. Both build the matching server and TUI and
-run `test_repo_git`, `test_workspace_file_confidentiality`, all eight
+run `test_repo_git`, `test_workspace_file_confidentiality`, all nine
 `v2_tui_tests` suites, and `test_lsp_position`. They do not establish visible
 terminal behavior; record live terminal checks separately against the same
 source commit. For example:
@@ -119,7 +119,7 @@ gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
   -f native-tui-scenario=addon-lifecycle
 ```
 
-For a workspace file-finder candidate:
+For the `workspace-files` scenario:
 
 ```sh
 gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
@@ -146,7 +146,7 @@ gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
 ```
 
 Use `detail-ownership` (the default) or `tui-performance` to package the TUI
-binary alone (no server binary) and run all eight `v2_tui_tests` suites plus
+binary alone (no server binary) and run all nine `v2_tui_tests` suites plus
 `test_server_tui_v2_api`.
 
 Replace both placeholders with the selected workflow ref and full feature
@@ -262,10 +262,7 @@ launch the downloaded TUI in a separate terminal:
 Replace `BASE_PATH` and `PORT` with that isolated server's workspace and port,
 then verify the connected workspace before exercising the changed behavior.
 
-For file discovery, observe Code Ctrl-P, filtering, selecting and opening a
-file outside the current directory, and returning through Code history. Include
-unavailable scopes and failed reads, checking that the original file and reading
-state remain available. Record saved state, actual requests and manual terminal
-captures separately from the build/suite receipt. Do not add screen wording,
-layout, row-order or PTY assertion tests. The artifact receipt deliberately
-leaves installed-runtime and visible-UI verification false.
+Record saved state, actual requests and manual terminal captures separately
+from the build/suite receipt. Do not add screen wording, layout, row-order or
+PTY assertion tests. The artifact receipt deliberately leaves installed-runtime
+and visible-UI verification false.

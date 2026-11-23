@@ -143,7 +143,7 @@ Why a test and not a digest: the retrieval-practice literature reports that taki
 - Sampling is allowed only inside an observation, never inside an action (`lib/lane_addon/lane_addon_worker.ml:524-527`; `lib/lane_addon/lane_addon_sampling.mli:12-14`).
 - Replies are free text. No JSON Schema is enforced (`docs/design/lane-addon-model-boundary.md:157-163`).
 - Official-client runtimes are refused because they cannot take a per-request output limit (`:140-144`).
-- MCP sampling is deprecated in the 2026-07-28 specification, and new designs should not adopt it (`:9-13`; `docs/spec/00-glossary.md:86-92`).
+- MCP sampling is deprecated in the 2026-07-28 specification, and new designs should not adopt it (`:9-13`; `docs/spec/00-glossary.md:71-77`).
 
 Host sampling therefore cannot give the quiz a schema-checked answer, cannot run during an action, and cannot use the operator's exact-output slots. `addons/fusion-compute` uses it (`addons/fusion-compute/lane.toml:17-19`); this RFC leaves it alone.
 

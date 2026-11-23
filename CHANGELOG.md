@@ -4,7 +4,7 @@
 
 ### 요약
 
-- 이 릴리스는 `v0.80.0`(`c5363d75`) 이후 `main`에 착지한 커밋 30건 가운데, 이 절에 기록한 26 PR(`#54343`, `#54415`, `#54417`, `#54429`, `#54430`, `#54434`, `#54436`, `#54437`, `#54438`, `#54440`, `#54444`, `#54445`, `#54446`, `#54448`, `#54449`, `#54450`, `#54451`, `#54452`, `#54453`, `#54454`, `#54455`, `#54456`, `#54457`, `#54458`, `#54459`, `#54487`)을 `0.81.0`(minor)으로 내보냅니다. 처음 5 PR(`#54429`, `#54430`, `#54434`, `#54436`, `#54440`) 위에 컷 이후 21 PR이 더해졌습니다.
+- 이 릴리스는 `v0.80.0`(`c5363d75`) 이후 tip `b9a950e8`까지 `main`에 착지한 커밋 32건 가운데, 이 절에 기록한 27 PR(`#54343`, `#54415`, `#54417`, `#54429`, `#54430`, `#54434`, `#54436`, `#54437`, `#54438`, `#54440`, `#54444`, `#54445`, `#54446`, `#54448`, `#54449`, `#54450`, `#54451`, `#54452`, `#54453`, `#54454`, `#54455`, `#54456`, `#54457`, `#54458`, `#54459`, `#54487`, `#54493`)을 `0.81.0`(minor)으로 내보냅니다. 처음 5 PR(`#54429`, `#54430`, `#54434`, `#54436`, `#54440`) 위에 컷 이후 22 PR이 더해졌습니다.
 - **ACP·비전·쿼터 하드닝**: fix(runtime): typed ACP tool-call correlation, session/set_model negotiation, and activity-based prompt liveness (#54429) · fix(keeper,acp): enforce operator max-context rollover cap, typed MCP effect fencing, tool activity liveness, and live catalog alignment (#54430) · fix(vision,acp,quota): fix vision split-brain, ACP/Antigravity quota failover, and Vibe/Agy MCP permission handling (#54434).
 - **설정·Memory OS·TUI 고도화**: fix(setup,memory-os,tui): ACP/Gemini/Vertex setup, MVCC World Memory & Memory OS internals, TUI quota/effort/assignment wiring (#54436) · fix(tui): interactive / slash & @ popup, unified Ctrl+K palette, Tab multi-pane focus, key safety & 1,226-case matrix (#54440).
 - **Keeper ACP·Gate 하드닝 (후속)**: Keeper ACP 연속성·rollover·Gate 일시정지 이어가기, SSE 방출 직렬화와 MCP call_id 소유권을 다듬었습니다 (#54437, #54438).
@@ -58,6 +58,7 @@
 - `masc_dos_screen` `include_ints` returns the DOS lane's recent INT-entry trail (last 64, oldest first, with the entry registers), giving the lane the view dosboot's `--int-trace` already has (#54417).
 - Add library-level pure Kitty/iTerm2 terminal graphics (`Masc_tui_term.Graphics`), Mermaid layout (`Masc_tui_ui.Mermaid`), Memory Lineage SVG/Graph/Mermaid and formation tree (`Masc_tui_ui.Memory_lineage`, `Masc_tui_ui.Memory_tree`), and offline `masc-pele-protocol:1` helper (`Masc_tui_app.Pele`) into v2.6 `lib/masc_tui/` (prepared for Memory screen wiring in the follow-up PR), and wire the bounded startup terminal capability probe (`Masc_tui_term.Probe`) into `Masc_tui_app.App` and `Presenter.capabilities` (#54457).
 - Restore the MASC TUI v2.6 Memory Explorer across `3 → 기억` and `4 → Keeper → 기억`, including strict decoders for keeper memory facts, 8-kind memory evolution activity, and v19 fleet memory health (`24-bin` logarithmic Fact Age Ladder and Braille `facts_by_hour` trend charts), mode pills (`Evolution` / `Facts` / `Diff`), `Recency`/`Retrieved` sort toggle, and scrollable word-wrapped Full Reading (`Enter`/`Esc`/`y`) (#54459).
+- Agent Core catalog rows for Z.AI `glm-5.4` on the `glm-coding` and `glm` providers, so a `glm-coding.glm-5-4` binding gets the 1M window and 131072 output ceiling instead of the provider defaults, and declare image input (#54493).
 
 ### Changed
 
@@ -71,6 +72,7 @@
 - Date the `## [0.81.0]` heading `2026-11-23` so it matches the UTC date of the tag commit that the release-body check compares (#54458)
 - Note in the `librarian/keeper seat overlap` entry that the detector and its overlap types were later removed in #54454 (#54455)
 - The DOS machine lane publishes 0.2.4 with the worker and ocaml-dos core from main: `masc_dos_screen` gains the `include_ints` INT-entry trail, and the core brings A20 gate + 16 MB RAM, 386 system registers, protected-mode segments and fault delivery, XMS changes, and snapshot format 45 (#54487).
+- The seed `config/runtime.toml` puts the exact-output lanes and the `glm-coding` wizard default on `glm-5.4` instead of `glm-5.3` (#54493).
 
 ### Removed
 

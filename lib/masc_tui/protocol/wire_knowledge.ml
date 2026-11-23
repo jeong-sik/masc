@@ -285,8 +285,19 @@ let decode_board_comment json =
       decode_timestamp_unix json "created_at_unix"
     else decode_timestamp_unix json "created_at"
   in
-  let* score = int_field_or json "score" ~default:0 in
-  Ok { id; post_id; parent_id; author; body; created_at_unix; score }
+  (* A thread comment carries its vote tallies, not a score. *)
+  let* votes_up = required_nonnegative_int_field json "votes_up" in
+  let* votes_down = required_nonnegative_int_field json "votes_down" in
+  Ok
+    {
+      id;
+      post_id;
+      parent_id;
+      author;
+      body;
+      created_at_unix;
+      score = votes_up - votes_down;
+    }
 
 let decode_board_feed ~observed_at json =
   let* _, body = unwrap_v2_or_raw json in

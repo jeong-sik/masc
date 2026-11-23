@@ -80,7 +80,7 @@ type board_comment = {
   author : string;
   body : string;
   created_at_unix : float;
-  score : int;
+  score : int;  (** [votes_up - votes_down] from the server row. *)
 }
 
 type board_feed = {

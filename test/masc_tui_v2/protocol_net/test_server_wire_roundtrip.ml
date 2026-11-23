@@ -7,6 +7,7 @@
     screen. *)
 
 open Masc_tui_core
+module Wire_knowledge = Masc_tui_protocol.Wire_knowledge
 module Wire_runtime = Masc_tui_protocol.Wire_runtime
 module Wire_work = Masc_tui_protocol.Wire_work
 module Wire_fleet = Masc_tui_protocol.Wire_fleet
@@ -482,6 +483,50 @@ let test_chat_submit_admission_roundtrip () =
       Alcotest.fail "a steer must reach the server as an interactive admission"
   | Error detail -> Alcotest.failf "server rejected the steer: %s" detail
 
+(* GET /api/v1/board/<id>?format=flat: the route appends the comment rows to
+   the post's own fields. A comment row carries its vote tallies and no
+   score. *)
+let test_board_comment_votes_roundtrip () =
+  let post_id = "p-0123456789abcdef0123456789abcdef" in
+  let comment : Masc.Board.comment =
+    {
+      id =
+        Masc.Board.Comment_id.of_string "c-0123456789abcdef0123456789abcdef"
+        |> Result.get_ok;
+      post_id = Masc.Board.Post_id.of_string post_id |> Result.get_ok;
+      parent_id = None;
+      author = Masc.Board.Agent_id.of_string "analyst" |> Result.get_ok;
+      content = "Measured twice";
+      audience = None;
+      created_at = 1795252000.0;
+      expires_at = 1795338400.0;
+      votes_up = 3;
+      votes_down = 1;
+    }
+  in
+  let thread =
+    `Assoc
+      [
+        ("id", `String post_id);
+        ("title", `String "Release notes");
+        ("body", `String "Ship the fix");
+        ("author", `String "e-masc-the-leader");
+        ("created_at", `Float 1795251000.0);
+        ("votes", `Int 2);
+        ("comment_count", `Int 1);
+        ("author_karma", `Int 5);
+        ( "comments",
+          `List [ Masc.Server_utils.board_comment_dashboard_json comment ] );
+      ]
+  in
+  match Wire_knowledge.decode_board_thread ~observed_at thread with
+  | Error e -> Alcotest.fail ("board thread decode failed: " ^ e)
+  | Ok (_, [ c ]) ->
+      Alcotest.(check int) "comment score is votes_up - votes_down" 2 c.score
+  | Ok (_, comments) ->
+      Alcotest.fail
+        (Printf.sprintf "expected one comment, got %d" (List.length comments))
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -508,5 +553,11 @@ let () =
           Alcotest.test_case
             "encode_chat_submit_request -> parse_keeper_chat_stream_request"
             `Quick test_chat_submit_admission_roundtrip;
+        ] );
+      ( "knowledge",
+        [
+          Alcotest.test_case
+            "board comment dashboard row -> decode_board_thread" `Quick
+            test_board_comment_votes_roundtrip;
         ] );
     ]

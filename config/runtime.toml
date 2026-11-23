@@ -104,23 +104,23 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 
 # Optional exact-output lane knobs: max_output_tokens (positive int), thinking (bool).
 [runtime.exact_output_lanes.librarian_exact]
-slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
+slots = ["glm-coding.glm-5-4", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
 max_output_tokens = 8192
 
 [runtime.exact_output_lanes.librarian_memory]
-slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
+slots = ["glm-coding.glm-5-4", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
 max_output_tokens = 8192
 
 [runtime.exact_output_lanes.hitl_auto_judge]
-slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
+slots = ["glm-coding.glm-5-4", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
 max_output_tokens = 8192
 
 [runtime.exact_output_lanes.board_attention_exact]
-slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
+slots = ["glm-coding.glm-5-4", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
 max_output_tokens = 8192
 
 [runtime.exact_output_lanes.verifier_exact]
-slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
+slots = ["glm-coding.glm-5-4", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
 max_output_tokens = 8192
 
 # SSH remote execution endpoint registry: configure under [exec.ssh.endpoints.<name>]
@@ -979,12 +979,12 @@ supports-multimodal-inputs = true
 [deepseek.deepseek-v4-flash]
 wizard-default = true
 
-# GLM-5.3 — primary slot of the exact-output judgement lanes (Z.AI 2026-08-14).
-# The api-name is the exact z.ai coding-plan id, confirmed against
-# GET /coding/paas/v4/models on 2026-08-30 (glm-5.3 present; a json_object
-# completion answered on that wire). The window is the AGENT_CORE catalog's.
-[models.glm-5-3]
-api-name = "glm-5.3"
+# GLM-5.4 — primary slot of the exact-output judgement lanes. The api-name is
+# the exact z.ai coding-plan id: GET /coding/paas/v4/models listed glm-5.4 on
+# 2026-11-23, and a tool-call completion answered as model="glm-5.4" that day.
+# The window is the AGENT_CORE catalog's.
+[models.glm-5-4]
+api-name = "glm-5.4"
 tools-support = true
 thinking-support = true
 # Preserved Thinking: earlier turns' reasoning is sent back
@@ -995,7 +995,7 @@ thinking-support = true
 preserve-thinking = true
 streaming = true
 
-[glm-coding.glm-5-3]
+[glm-coding.glm-5-4]
 max-concurrent = 4
 # One of several glm-coding bindings now, so the wizard's pick is named.
 wizard-default = true
@@ -1606,7 +1606,7 @@ candidates = [
 [runtime.lanes.reviewer-failover]
 candidates = [
   "codex_subscription.codex-gpt-6-1-sol-high",
-  "glm-coding.glm-5-3",
+  "glm-coding.glm-5-4",
   "antigravity_subscription.antigravity-gemini-3-8-flash-high",
 ]
 

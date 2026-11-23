@@ -224,7 +224,7 @@ name = "query"
 이름을 이미 알면 검색을 거치지 않아도 된다.
 
 기본 검색은 입력 전체를 하나의 literal phrase로 찾는다. 하이픈이 있는 이름도
-`{"query":"browser-navigate-read"}`처럼 그대로 넘긴다. 따옴표나 `OR`도 검색할
+`{"query":"browser-live-follow-read"}`처럼 그대로 넘긴다. 따옴표나 `OR`도 검색할
 텍스트로 취급하며, 단어 경계와 순위는 SQLite tokenizer가 정한다.
 
 대안·접두어·컬럼 조건 같은 FTS5 검색식은 `syntax`를 명시한다. 예를 들어

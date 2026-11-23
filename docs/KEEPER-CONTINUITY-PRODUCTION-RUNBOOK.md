@@ -56,11 +56,8 @@ depend on having run the deployment preflight. `Keeper_durable_store.reader` own
 `Keeper_store_boot_reconcile.examine` and `admit` run before Keeper loops and
 before owner readiness is published.
 
-The supervisor promotes a candidate to the last-known-good artifact only after
-the candidate PID owns the listener and `/health/ready` returns success. Its
-`status` command checks the same endpoint. `/health` liveness can succeed while
-owner initialization is still running, so it cannot certify a completed startup
-or authorize restart of a candidate that subsequently fails initialization.
+`/health` liveness can succeed while owner initialization is still running, so
+it cannot certify a completed startup. `/health/ready` answers that question.
 
 | Store | Executable startup behavior | Recovery boundary |
 |---|---|---|

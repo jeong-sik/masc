@@ -146,7 +146,7 @@ type http_reply =
   | Reply_fusion_runs of (Wire_runtime.fusion_run list, http_error) result
   | Reply_fusion_launch of (unit, http_error) result
   | Reply_tool_series of (Wire_runtime.tool_series, http_error) result
-  | Reply_tools_catalog of (Wire_runtime.tool_summary list, http_error) result
+  | Reply_tools_catalog of (Wire_runtime.tools_catalog, http_error) result
   | Reply_connectors of (Wire_runtime.connector_row list, http_error) result
   | Reply_browser_lane of
       (Wire_runtime.browser_lane_status, http_error) result

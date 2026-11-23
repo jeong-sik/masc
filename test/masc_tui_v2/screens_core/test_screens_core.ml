@@ -404,7 +404,7 @@ let populated_model ~cols ~rows ~lang =
         payload_keeper_name = Some "wkbl-growth";
         payload_summary = Some "Daily campaign digest";
         last_wake_unix = Some (now_unix -. 600.0);
-        last_disposition = Wire_work.Wake_failed "provider timeout";
+        last_disposition = Wire_work.Wake_failed (Some "provider timeout");
       };
     ]
   in

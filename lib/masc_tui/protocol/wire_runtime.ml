@@ -1775,21 +1775,93 @@ let decode_tool_series json =
 type tool_summary = {
   name : string;
   description : string option;
-  calls_24h : int Observed.t;
+  calls : int Observed.t;
   failure_rate_pct : float Observed.t;
 }
 
-let decode_tool_summary ~observed_at json =
-  let* name = required_nonblank_string json "name" in
-  let* description = optional_nonblank_string json "description" in
-  let* calls_24h = observed_int ~observed_at json "calls_24h" in
-  let* failure_rate_pct = observed_float ~observed_at json "failure_rate_pct" in
-  Ok { name; description; calls_24h; failure_rate_pct }
+type tools_catalog = Tools_warming | Tools_ready of tool_summary list
+
+(* /api/v1/dashboard/tools. Until its first compute finishes the server
+   answers a warming payload ([is_warming: true], empty lists). A ready
+   payload carries [tool_inventory.tools] (every tool, hidden ones too) and
+   Tool_unified.summary_report as [tool_usage]: [by_tool] holds one row per
+   called tool over the retained metrics window, and [never_called] the
+   visible tools with no call. Both key a tool by its internal name and list
+   the [public_names] a Keeper sees, which the inventory also uses. *)
+type tool_names = { internal_name : string; public_names : string list }
+
+type tool_usage_row = {
+  names : tool_names;
+  call_count : int;
+  failure_count : int;
+}
+
+let decode_tool_names json =
+  let* internal_name = required_nonblank_string json "name" in
+  let* public_names = required_string_list json "public_names" in
+  Ok { internal_name; public_names }
+
+let decode_tool_usage_row json =
+  let* names = decode_tool_names json in
+  let* call_count = required_nonnegative_int_field json "call_count" in
+  let* failure_count = required_nonnegative_int_field json "failure_count" in
+  Ok { names; call_count; failure_count }
+
+(* The rows for one inventory name: the row with that internal name, or else
+   the rows that publish the tool under that name. *)
+let rows_named name ~names_of rows =
+  match
+    List.filter (fun row -> String.equal (names_of row).internal_name name) rows
+  with
+  | _ :: _ as same_internal -> same_internal
+  | [] ->
+      List.filter
+        (fun row -> List.exists (String.equal name) (names_of row).public_names)
+        rows
 
 let decode_tools_catalog ~observed_at json =
   let* _, body = unwrap_v2_or_raw json in
-  let* items = required_list_field body "tools" in
-  decode_list "tools" (decode_tool_summary ~observed_at) items
+  let* warming =
+    if has_field body "is_warming" then required_bool_field body "is_warming"
+    else Ok false
+  in
+  if warming then Ok Tools_warming
+  else
+    let* inventory = required_object_field body "tool_inventory" in
+    let* usage = required_object_field body "tool_usage" in
+    let* tool_items = required_list_field inventory "tools" in
+    let* called_items = required_list_field usage "by_tool" in
+    let* called = decode_list "by_tool" decode_tool_usage_row called_items in
+    let* never_items = required_list_field usage "never_called" in
+    let* never_called = decode_list "never_called" decode_tool_names never_items in
+    let decode_tool json =
+      let* name = required_nonblank_string json "name" in
+      let* description = optional_nonblank_string json "description" in
+      let calls, failure_rate_pct =
+        match rows_named name ~names_of:(fun (r : tool_usage_row) -> r.names) called with
+        | _ :: _ as rows ->
+            let calls =
+              List.fold_left (fun acc (r : tool_usage_row) -> acc + r.call_count) 0 rows
+            in
+            let failures =
+              List.fold_left
+                (fun acc (r : tool_usage_row) -> acc + r.failure_count)
+                0 rows
+            in
+            ( Observed.value ~observed_at calls,
+              if calls > 0 then
+                Observed.value ~observed_at
+                  (100.0 *. float_of_int failures /. float_of_int calls)
+              else Observed.absent )
+        | [] -> (
+            match rows_named name ~names_of:Fun.id never_called with
+            | _ :: _ -> (Observed.value ~observed_at 0, Observed.absent)
+            | [] -> (Observed.unreported, Observed.unreported))
+      in
+      Ok { name; description; calls; failure_rate_pct }
+    in
+    let* tools = decode_list "tools" decode_tool tool_items in
+    Ok (Tools_ready tools)
 
 type connector_connection =
   | Connector_connected

@@ -676,10 +676,12 @@ type schedule_status =
   | Sched_cancelled
   | Sched_expired
 
+(* The server's wake statuses are running / succeeded / failed
+   (Schedule_contract_values.wake_status_to_string). A failed wake carries its
+   reason in the wake's [error] field, which may be absent. *)
 type wake_disposition =
   | Wake_succeeded
-  | Wake_skipped of string
-  | Wake_failed of string
+  | Wake_failed of string option
   | Wake_running
   | Wake_never
 
@@ -723,20 +725,15 @@ let decode_last_wake json =
         | Ok None -> decode_optional_timestamp_unix wake "started_at"
         | Error _ as err -> err
       in
-      let* status_word =
-        match optional_nonblank_string wake "status" with
-        | Ok (Some s) -> Ok s
-        | Ok None -> required_nonblank_string wake "outcome"
-        | Error _ as err -> err
-      in
-      let* detail = optional_nonblank_string wake "detail" in
+      (* [detail] is the consumer's receipt object (e.g. the keeper wake
+         enqueue record), not a reason string, so it is not read here. *)
+      let* error = optional_nonblank_string wake "error" in
+      let* status = required_nonblank_string wake "status" in
       let* disp =
-        match String.lowercase_ascii status_word with
-        | "succeeded" | "ok" | "completed" -> Ok Wake_succeeded
-        | "running" | "in_progress" -> Ok Wake_running
-        | "skipped" -> Ok (Wake_skipped (Option.value ~default:"skipped" detail))
-        | "failed" | "error" ->
-            Ok (Wake_failed (Option.value ~default:"failed" detail))
+        match status with
+        | "succeeded" -> Ok Wake_succeeded
+        | "running" -> Ok Wake_running
+        | "failed" -> Ok (Wake_failed error)
         | other -> Error (Printf.sprintf "unknown schedule wake status %S" other)
       in
       Ok (ts, disp)

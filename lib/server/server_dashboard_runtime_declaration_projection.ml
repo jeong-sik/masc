@@ -167,8 +167,10 @@ let runtime_request_config_json (rt : Runtime_instance.t) =
       [ "source", `String "official-client-runtime"
       ; "execution", `String ("acp_" ^ Runtime_acp_client.driver_to_string config.driver)
       ; "driver", `String (Runtime_acp_client.driver_to_string config.driver)
-      ; "model", `String config.model
-      ; "effort", Json_util.string_opt_to_json config.effort
+      ; "model", `String (Runtime_acp_client.model_selection_to_string config.model)
+      ; ( "effort"
+        , Json_util.string_opt_to_json
+            (Option.map Llm_provider.Reasoning_effort.to_string config.effort) )
       ; "mode", Json_util.string_opt_to_json config.mode
       ; "timeout_s", `Float config.timeout_s
       ; "verified", `Bool false

@@ -349,7 +349,25 @@ let parse_acp_options ~home ~(path : string) (tbl : Otoml.t)
                 (path ^ ".skills-dirs")
                 (Printf.sprintf "skills-dirs entries must be absolute paths, got %S" rel)))
     in
-    let effort_result = antigravity_optional_string ~path tbl "effort" in
+    let effort_result =
+      match driver_result with
+      | Error _ -> Ok None
+      | Ok driver ->
+        (match antigravity_optional_string ~path tbl "effort" with
+         | Error _ as err -> err
+         | Ok None -> Ok None
+         | Ok (Some raw) ->
+           (match Runtime_acp_client.effort_of_driver_string ~driver raw with
+            | Some eff -> Ok (Some eff)
+            | None ->
+              Error
+                (error
+                   (path ^ ".effort")
+                   (Printf.sprintf
+                      "effort must be one of %s; got %S"
+                      (Runtime_acp_client.effort_values_for_log ~driver)
+                      raw))))
+    in
     let mode_result = antigravity_optional_string ~path tbl "mode" in
     let timeout_result =
       match

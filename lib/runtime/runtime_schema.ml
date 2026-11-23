@@ -139,7 +139,7 @@ type acp_options =
   ; args : string list
   ; strip_env : string list
   ; skills_dirs : string list
-  ; effort : string option
+  ; effort : Llm_provider.Reasoning_effort.t option
   ; mode : string option
   ; timeout_s : float
   }

@@ -827,8 +827,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
     let effective_effort =
       match execution.effort with
       | Some _ as e -> e
-      | None ->
-        Option.map Llm_provider.Reasoning_effort.to_string runtime.model.reasoning_effort
+      | None -> runtime.model.reasoning_effort
     in
     Eio.Switch.run
     @@ fun sw ->
@@ -934,7 +933,8 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
                       let observed_model =
                         match session.current_model_id with
                         | Some m when String.trim m <> "" -> m
-                        | Some _ | None -> execution.model
+                        | Some _ | None ->
+                          Runtime_acp_client.model_selection_to_string execution.model
                       in
                       succeeded { text = res.text; model = observed_model; usage }))))
 ;;

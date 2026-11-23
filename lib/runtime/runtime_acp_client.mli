@@ -18,6 +18,36 @@ val all_drivers : driver list
 val driver_to_string : driver -> string
 val driver_of_string : string -> driver option
 
+type model_selection = private
+  | Keep_cli_default
+  | Explicit_model of string
+[@@deriving show, eq]
+
+val keep_cli_default : model_selection
+(** Keep the ACP CLI's active default model without issuing [session/set_model]
+    or [session/set_config_option]. *)
+
+val model_selection_of_string : string -> model_selection
+(** Parse a configured ACP model identifier at the config boundary: empty strings
+    and case-insensitive ["default"] become {!Keep_cli_default}; every other
+    non-empty trimmed identifier becomes {!Explicit_model}. *)
+
+val model_selection_to_string : model_selection -> string
+(** Canonical diagnostic string for {!model_selection} (["default"] for
+    {!Keep_cli_default}, the model id for {!Explicit_model}). *)
+
+val effort_of_driver_string : driver:driver -> string -> Llm_provider.Reasoning_effort.t option
+(** Parse a reasoning effort string at the TOML or ACP wire boundary using a
+    single driver-scoped alias table: accepts the 8 canonical
+    {!Llm_provider.Reasoning_effort} values for every driver, plus ["off"]
+    as {!Llm_provider.Reasoning_effort.None_} exclusively for {!Mistral_vibe}
+    (live-verified against [vibe-acp 3.1.0]; [agy acp 1.5.14] advertises
+    [low/medium/high/xhigh] and [kimi acp 2.7.2] advertises [low/high/max]). *)
+
+val effort_values_for_log : driver:driver -> string
+(** Human-readable list of effort values accepted by {!effort_of_driver_string}
+    for [driver], suitable for startup validation error diagnostics. *)
+
 type mcp_wiring =
   | Session_new_http_mcp
       (** Driver accepts [mcpServers] directly in [session/new] and
@@ -447,8 +477,8 @@ val new_session
   -> ?mcp_server:mcp_http_server
   -> ?additional_directories:string list
   -> ?mode:string
-  -> ?model:string
-  -> ?effort:string
+  -> ?model:model_selection
+  -> ?effort:Llm_provider.Reasoning_effort.t
   -> unit
   -> (session_info, error) result
 
@@ -459,8 +489,8 @@ val load_session
   -> ?mcp_server:mcp_http_server
   -> ?additional_directories:string list
   -> ?mode:string
-  -> ?model:string
-  -> ?effort:string
+  -> ?model:model_selection
+  -> ?effort:Llm_provider.Reasoning_effort.t
   -> unit
   -> (session_info, error) result
 (** Load an existing ACP session with activity-based idle liveness across
@@ -474,8 +504,8 @@ val resume_session
   -> ?mcp_server:mcp_http_server
   -> ?additional_directories:string list
   -> ?mode:string
-  -> ?model:string
-  -> ?effort:string
+  -> ?model:model_selection
+  -> ?effort:Llm_provider.Reasoning_effort.t
   -> unit
   -> (session_info, error) result
 
@@ -483,8 +513,8 @@ val reconfigure_session
   :  t
   -> session_info
   -> ?mode:string
-  -> ?model:string
-  -> ?effort:string
+  -> ?model:model_selection
+  -> ?effort:Llm_provider.Reasoning_effort.t
   -> unit
   -> (session_info, error) result
 (** Idempotently apply [mode], [model], and [effort] deltas to an already-open
@@ -567,10 +597,15 @@ module For_testing : sig
   val parse_config_options : Yojson.Safe.t -> config_option list
   val parse_session_info : Yojson.Safe.t -> (session_info, string) result
 
-  val resolve_option_value
+  val resolve_model_option_value
     :  driver:driver
-    -> config_id:string
-    -> requested:string
+    -> requested:model_selection
+    -> option:config_option
+    -> string option
+
+  val resolve_effort_option_value
+    :  driver:driver
+    -> requested:Llm_provider.Reasoning_effort.t
     -> option:config_option
     -> string option
 

@@ -2067,7 +2067,7 @@ let run_without_lifecycle
   in
   let effective_effort =
     match prepared.reasoning_effort with
-    | Some eff -> Some (Llm_provider.Reasoning_effort.to_string eff)
+    | Some _ as eff -> eff
     | None -> config.effort
   in
   let effective_mode =
@@ -2082,8 +2082,8 @@ let run_without_lifecycle
       ~keeper_name
       ~raw_trace
       ~prompt:raw_trace_prompt
-      ~model:config.model
-      ?reasoning_effort:effective_effort
+      ~model:(Acp.model_selection_to_string config.model)
+      ?reasoning_effort:(Option.map Llm_provider.Reasoning_effort.to_string effective_effort)
       ()
   in
   let terminal_error = ref None in
@@ -2461,7 +2461,7 @@ let run_without_lifecycle
       let effective_model =
         match session_info.current_model_id with
         | Some m when String.trim m <> "" -> m
-        | Some _ | None -> config.model
+        | Some _ | None -> Acp.model_selection_to_string config.model
       in
       let prompt_blocks = blocks_of_prompt active_prompt_text in
       let position =

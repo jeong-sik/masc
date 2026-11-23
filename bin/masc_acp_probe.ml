@@ -343,9 +343,10 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override ~posture (driver : Run
           | Runtime_acp_client.Framed_in_first_prompt -> None
         in
         let model =
-          match model_override with
-          | Some _ as m -> m
-          | None -> default_model_for_driver driver
+          (match model_override with
+           | Some _ as m -> m
+           | None -> default_model_for_driver driver)
+          |> Option.map Runtime_acp_client.model_selection_of_string
         in
         let mode = Runtime_acp_client.mode_of_posture driver posture in
         match

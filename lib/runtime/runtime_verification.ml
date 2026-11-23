@@ -781,8 +781,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ?fs ~cwd ~cwd_path ~timeout_s ~ac
                  let effort =
                    match execution.effort with
                    | Some _ as e -> e
-                   | None ->
-                     Option.map Llm_provider.Reasoning_effort.to_string runtime.model.reasoning_effort
+                   | None -> runtime.model.reasoning_effort
                  in
                  Fun.protect
                    ~finally:(fun () ->
@@ -826,7 +825,10 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ?fs ~cwd ~cwd_path ~timeout_s ~ac
                                   ~session_id:session.session_id
                                 : (unit, Runtime_acp_client.error) Stdlib.result);
                            let observed_model =
-                             Option.value session.current_model_id ~default:execution.model
+                             match session.current_model_id with
+                             | Some m when String.trim m <> "" -> m
+                             | Some _ | None ->
+                               Runtime_acp_client.model_selection_to_string execution.model
                            in
                            Ok { model = observed_model; text = res.text }))))
       | Runtime_execution.Antigravity_cli execution ->

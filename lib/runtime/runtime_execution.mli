@@ -39,8 +39,8 @@ type acp_client =
   ; args : string list
   ; strip_env : string list
   ; skills_dirs : string list
-  ; model : string
-  ; effort : string option
+  ; model : Runtime_acp_client.model_selection
+  ; effort : Llm_provider.Reasoning_effort.t option
   ; mode : string option
   ; oauth_source : string option
   ; timeout_s : float

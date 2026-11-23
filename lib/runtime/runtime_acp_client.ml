@@ -26,6 +26,47 @@ let driver_of_string = function
   | _ -> None
 ;;
 
+type model_selection =
+  | Keep_cli_default
+  | Explicit_model of string
+[@@deriving show, eq]
+
+let keep_cli_default = Keep_cli_default
+
+let model_selection_of_string raw =
+  let trimmed = String.trim raw in
+  if trimmed = "" || String.equal (String.lowercase_ascii trimmed) "default"
+  then Keep_cli_default
+  else Explicit_model trimmed
+;;
+
+let model_selection_to_string = function
+  | Keep_cli_default -> "default"
+  | Explicit_model m -> m
+;;
+
+(* Single driver-scoped effort alias SSOT shared by both runtime.toml parsing
+   and ACP session/new configOptions parsing.
+   Live-verified CLI configOptions (2026-11-23):
+   - agy acp 1.5.14: thought_level = [low; medium; high; xhigh]
+   - kimi acp 2.7.2: thinking = [low; high; max]
+   - vibe-acp 3.1.0: thinking = [off; high] *)
+let effort_of_driver_string ~driver (raw : string) : Llm_provider.Reasoning_effort.t option =
+  let normalized = String.lowercase_ascii (String.trim raw) in
+  match Llm_provider.Reasoning_effort.of_string normalized with
+  | Some _ as eff -> eff
+  | None ->
+    (match driver, normalized with
+     | Mistral_vibe, "off" -> Some Llm_provider.Reasoning_effort.None_
+     | (Antigravity | Kimi_code | Mistral_vibe), _ -> None)
+;;
+
+let effort_values_for_log ~driver =
+  match driver with
+  | Mistral_vibe -> Llm_provider.Reasoning_effort.values_for_log ^ "/off"
+  | Antigravity | Kimi_code -> Llm_provider.Reasoning_effort.values_for_log
+;;
+
 type mcp_wiring =
   | Session_new_http_mcp
   | Gemini_dir_mcp_config
@@ -2957,88 +2998,152 @@ let is_effort_category = function
   | Some _ | None -> false
 ;;
 
-let resolve_option_value_with
-      ~force_when_current_stale
-      ~driver
-      ~config_id
-      ~requested
-      ~(option : config_option)
-  =
-  let profile = profile_of_driver driver in
-  let trimmed = String.trim requested in
-  if trimmed = ""
-  then None
-  else if String.equal config_id profile.model_config_id
-          && String.equal (String.lowercase_ascii trimmed) "default"
-  then
-    (* "default" is a legacy sentinel meaning "keep the CLI's active model".
-       Vibe 3.1.0 raises InvalidRequestError if "default" is sent to
-       session/set_config_option. *)
-    None
-  else (
-    let is_effort =
-      is_effort_category option.category
-      ||
-      match profile.effort_config_id with
-      | Some eff_id -> String.equal config_id eff_id
-      | None -> false
-    in
-    let mapped =
-      if is_effort && driver = Mistral_vibe
-      then (
-        match String.lowercase_ascii trimmed with
-        | "none" -> "off"
-        | "minimal" -> "low"
-        | other -> other)
-      else trimmed
-    in
-    let candidate =
-      match option.available_values with
-      | [] -> Some mapped
-      | available when List.mem mapped available -> Some mapped
-      | available ->
-        if is_effort
-        then (
-          let lower = String.lowercase_ascii mapped in
-          if String.equal lower "off" || String.equal lower "none"
-          then List.find_opt (fun v -> List.mem v available) [ "off"; "none" ]
-          else (
-            let preference =
-              match lower with
-              | "low" | "minimal" -> [ "low"; "medium"; "high"; "xhigh"; "max" ]
-              | "medium" -> [ "medium"; "high"; "low"; "xhigh"; "max" ]
-              | "high" -> [ "high"; "xhigh"; "max"; "medium"; "low" ]
-              | "xhigh" -> [ "xhigh"; "high"; "max"; "medium"; "low" ]
-              | "max" -> [ "max"; "xhigh"; "high"; "medium"; "low" ]
-              | _ -> [ "high"; "medium"; "low"; "xhigh"; "max" ]
-            in
-            List.find_opt (fun v -> List.mem v available) preference))
-        else (
-          Log.Runtime_agent.warn
-            "skipping unsupported ACP config option %s=%S for %s (available: [%s])"
-            config_id
-            mapped
-            (driver_to_string driver)
-            (String.concat ", " available);
-          None)
-    in
-    match candidate with
-    | Some value
-      when force_when_current_stale || not (String.equal value option.current_value) ->
-      Some value
-    | Some _ | None -> None)
+let parse_wire_effort ~driver (raw : string) : Llm_provider.Reasoning_effort.t option =
+  effort_of_driver_string ~driver raw
 ;;
 
-let resolve_option_value ~driver ~config_id ~requested ~option =
-  resolve_option_value_with
+let preferred_wire_value_of_effort ~driver (effort : Llm_provider.Reasoning_effort.t) : string =
+  let module E = Llm_provider.Reasoning_effort in
+  match driver with
+  | Antigravity | Kimi_code -> E.to_string effort
+  | Mistral_vibe ->
+    (match effort with
+     | E.None_ -> "off"
+     | E.Minimal | E.Low | E.Medium | E.High | E.XHigh | E.Max | E.Ultra ->
+       E.to_string effort)
+;;
+
+let resolve_model_option_value ~driver ~(requested : model_selection) ~(option : config_option) =
+  match requested with
+  | Keep_cli_default -> None
+  | Explicit_model raw ->
+    let trimmed = String.trim raw in
+    if trimmed = ""
+    then None
+    else (
+      let candidate =
+        match option.available_values with
+        | [] -> Some trimmed
+        | available when List.mem trimmed available -> Some trimmed
+        | available ->
+          Log.Runtime_agent.warn
+            "skipping unsupported ACP config option %s=%S for %s (available: [%s])"
+            option.id
+            trimmed
+            (driver_to_string driver)
+            (String.concat ", " available);
+          None
+      in
+      match candidate with
+      | Some value when not (String.equal value option.current_value) -> Some value
+      | Some _ | None -> None)
+;;
+
+(* Clamp a typed {!Llm_provider.Reasoning_effort.t} against the CLI's advertised
+   [available_values] using {!Llm_provider.Reasoning_effort.compare} / [rank].
+   Never silently upgrades upward (e.g. Low -> Medium/High) and never silently
+   disables thinking (positive effort -> None_/off); if no matching effort <=
+   requested exists, logs a warning and returns [None] so the CLI keeps its
+   active default. *)
+let resolve_effort_option_value_with
+      ~force_when_current_stale
+      ~driver
+      ~(requested : Llm_provider.Reasoning_effort.t)
+      ~(option : config_option)
+  =
+  let module E = Llm_provider.Reasoning_effort in
+  let candidate =
+    match option.available_values with
+    | [] -> Some (preferred_wire_value_of_effort ~driver requested)
+    | available ->
+      let parsed_rev, unrecognized_rev =
+        List.fold_left
+          (fun (ok_acc, bad_acc) wire ->
+             match parse_wire_effort ~driver wire with
+             | Some eff -> (eff, wire) :: ok_acc, bad_acc
+             | None -> ok_acc, wire :: bad_acc)
+          ([], [])
+          available
+      in
+      let parsed = List.rev parsed_rev in
+      let unrecognized = List.rev unrecognized_rev in
+      if unrecognized <> []
+      then
+        Log.Runtime_agent.warn
+          "ignoring unrecognized advertised ACP effort values [%s] on %s option %s"
+          (String.concat ", " unrecognized)
+          (driver_to_string driver)
+          option.id;
+      let exact_matches =
+        List.filter_map
+          (fun (eff, wire) -> if E.equal eff requested then Some wire else None)
+          parsed
+      in
+      (match exact_matches with
+       | first :: _ ->
+         if List.mem option.current_value exact_matches
+         then Some option.current_value
+         else (
+           let preferred = preferred_wire_value_of_effort ~driver requested in
+           if List.mem preferred exact_matches then Some preferred else Some first)
+       | [] ->
+         if E.rank requested = 0
+         then (
+           Log.Runtime_agent.warn
+             "skipping ACP effort %s on %s option %s (no %S value advertised in [%s])"
+             (E.to_string requested)
+             (driver_to_string driver)
+             option.id
+             (preferred_wire_value_of_effort ~driver requested)
+             (String.concat ", " available);
+           None)
+         else (
+           let below_positive =
+             List.filter
+               (fun (eff, _) -> E.rank eff > 0 && E.compare eff requested <= 0)
+               parsed
+           in
+           match below_positive with
+           | [] ->
+             Log.Runtime_agent.warn
+               "skipping ACP effort %s on %s option %s (no advertised positive effort <= requested in [%s]; keeping CLI default)"
+               (E.to_string requested)
+               (driver_to_string driver)
+               option.id
+               (String.concat ", " available);
+             None
+           | first :: rest ->
+             let _, wire =
+               List.fold_left
+                 (fun ((best_eff, _) as best) ((cand_eff, _) as cand) ->
+                    if E.compare cand_eff best_eff > 0 then cand else best)
+                 first
+                 rest
+             in
+             Some wire))
+  in
+  match candidate with
+  | Some value
+    when force_when_current_stale || not (String.equal value option.current_value) ->
+    Some value
+  | Some _ | None -> None
+;;
+
+let resolve_effort_option_value ~driver ~requested ~option =
+  resolve_effort_option_value_with
     ~force_when_current_stale:false
     ~driver
-    ~config_id
     ~requested
     ~option
 ;;
 
-let apply_session_options t (info : session_info) ~mode ~model ~effort =
+let apply_session_options
+      t
+      (info : session_info)
+      ~mode
+      ~(model : model_selection option)
+      ~(effort : Llm_provider.Reasoning_effort.t option)
+  =
   let profile = profile_of_driver t.driver in
   let* current_mode_id =
     match mode with
@@ -3085,10 +3190,10 @@ let apply_session_options t (info : session_info) ~mode ~model ~effort =
   in
   let* current_model_id, config_options, effort_current_stale =
     match model with
-    | None -> Ok (info.current_model_id, info.config_options, false)
-    | Some raw_model ->
+    | None | Some Keep_cli_default -> Ok (info.current_model_id, info.config_options, false)
+    | Some (Explicit_model raw_model) ->
       let m = String.trim raw_model in
-      if m = "" || String.equal (String.lowercase_ascii m) "default"
+      if m = ""
       then Ok (info.current_model_id, info.config_options, false)
       else if List.mem m info.available_models
       then (
@@ -3121,10 +3226,9 @@ let apply_session_options t (info : session_info) ~mode ~model ~effort =
         match find_model_option info.config_options with
         | Some option ->
           (match
-             resolve_option_value
+             resolve_model_option_value
                ~driver:t.driver
-               ~config_id:option.id
-               ~requested:m
+               ~requested:(Explicit_model m)
                ~option
            with
            | Some value ->
@@ -3167,10 +3271,9 @@ let apply_session_options t (info : session_info) ~mode ~model ~effort =
       (match effort_opt with
        | Some option ->
          (match
-            resolve_option_value_with
+            resolve_effort_option_value_with
               ~force_when_current_stale:effort_current_stale
               ~driver:t.driver
-              ~config_id:option.id
               ~requested:eff
               ~option
           with
@@ -3572,7 +3675,8 @@ module For_testing = struct
   let choose_permission_option = choose_permission_option
   let parse_config_options = parse_config_options
   let parse_session_info = parse_session_info
-  let resolve_option_value = resolve_option_value
+  let resolve_model_option_value = resolve_model_option_value
+  let resolve_effort_option_value = resolve_effort_option_value
   let parse_session_update = parse_session_update
   let parse_prompt_usage = parse_prompt_usage
   let parse_stop_reason = parse_stop_reason

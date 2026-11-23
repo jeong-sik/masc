@@ -303,6 +303,7 @@ let source_of_requester (requested_by : Schedule_domain.actor) =
   match requested_by.kind with
   | Schedule_domain.Human_operator -> Schedule_domain.Operator_request
   | Schedule_domain.Automated_actor -> Schedule_domain.Automated_request
+  | Schedule_domain.System -> Schedule_domain.System_request
 ;;
 
 (* [source] is not in the tool schemas; a call that skips schema validation

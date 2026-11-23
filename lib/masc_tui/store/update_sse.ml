@@ -168,9 +168,14 @@ let apply_dataset_invalidation (m : Model.t) ds =
                 f.keeper)
               m.knowledge.keeper_memory_facts;
           memory_os_internals =
-            Knowledge_store.String_map.update target
-              (Option.map Observed.mark_stale)
-              m.knowledge.memory_os_internals;
+            (match keeper_opt with
+            | None ->
+                Knowledge_store.String_map.map Observed.mark_stale
+                  m.knowledge.memory_os_internals
+            | Some target ->
+                Knowledge_store.String_map.update target
+                  (Option.map Observed.mark_stale)
+                  m.knowledge.memory_os_internals);
         }
       in
       let base_cmds =

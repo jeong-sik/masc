@@ -80,6 +80,28 @@ type output_accounting =
   | Exclusive_of_thought
       (** Wire [outputTokens] excludes [thoughtTokens]. *)
 
+type mcp_identifier_syntax =
+  | Mcp_call_wrapper
+      (** Structured [call_mcp_tool] wrapper carrying [ServerName]/[ToolName]
+          in [rawInput] (Antigravity). *)
+  | Mcp_paren_wrapper
+      (** [mcp(<server>/<tool>)] or [mcp(<server>:<tool>)] wrapper
+          (Antigravity). *)
+  | Mcp_double_underscore
+      (** [mcp__<server>__<tool>] identifier (Kimi Code). *)
+  | Mcp_dot_prefix
+      (** [mcp_<server>.<tool>] identifier (Mistral Vibe). *)
+  | Mcp_underscore_prefix
+      (** [mcp_<server>_<tool>] identifier (Antigravity, Mistral Vibe). *)
+  | Colon_or_slash_qualified
+      (** [<server>:<tool>] or [<server>/<tool>] identifier (Kimi Code). *)
+  | Server_underscore_prefix
+      (** [<server>_<tool>] identifier scoped to the active MASC server name
+          (Mistral Vibe). *)
+  | Implicit_vendor_mcp_kind
+      (** Unqualified tool name paired with wire [kind = "mcp"]. *)
+[@@deriving show, eq]
+
 type driver_profile =
   { driver : driver
   ; default_command : string
@@ -87,6 +109,7 @@ type driver_profile =
   ; env_set : (string * string) list
   ; default_strip_env : string list
   ; mcp_wiring : mcp_wiring
+  ; mcp_identifier_syntaxes : mcp_identifier_syntax list
   ; system_prompt_channel : system_prompt_channel
   ; input_accounting : input_accounting
   ; output_accounting : output_accounting
@@ -219,15 +242,35 @@ type prompt_block =
       ; base64_data : string
       }
 
+(** Official ACP v1 [ToolKind] wire enum plus vendor ["mcp"] extension and
+    diagnostic {!Tool_unknown}. Security policies treat {!Tool_unknown} as
+    highest-restriction (always denied and effect-fenced). *)
+type tool_kind =
+  | Tool_read
+  | Tool_edit
+  | Tool_delete
+  | Tool_move
+  | Tool_search
+  | Tool_execute
+  | Tool_think
+  | Tool_fetch
+  | Tool_switch_mode
+  | Tool_other
+  | Tool_vendor_mcp
+  | Tool_unknown of string
+[@@deriving show, eq]
+
+val tool_kind_of_string : string -> tool_kind
+val tool_kind_to_string : tool_kind -> string
+
 type mcp_server_qualifier =
   | Explicit_server of string
-      (** Wire payload explicitly named an MCP server (e.g. Antigravity
-          [call_mcp_tool] with [rawInput.ServerName], structured [_meta],
-          [mcp__<srv>__<tool>], [mcp_<srv>.<tool>], [<srv>:<tool>],
-          [<srv>/<tool>]). *)
+      (** Wire payload explicitly named an MCP server using a syntax declared
+          in the active driver's {!driver_profile.mcp_identifier_syntaxes} or
+          structured [_meta]. *)
   | Implicit_mcp_kind
-      (** Wire payload declared ACP tool kind ["mcp"] with an unqualified tool
-          name. *)
+      (** Wire payload declared ACP tool kind {!Tool_vendor_mcp} with an
+          unqualified tool name. *)
 
 type tool_call_identity =
   | Mcp_tool of
@@ -242,7 +285,7 @@ type tool_call_identity =
           MASC-managed [<gemini_dir>/antigravity-cli/mcp/<server>] directory. *)
   | Native_tool of
       { name : string option
-      ; kind : string option
+      ; kind : tool_kind option
       ; locations : string list
       }
 
@@ -259,7 +302,7 @@ type stream_event =
   | Tool_call_started of
       { tool_call_id : string
       ; title : string
-      ; kind : string option
+      ; kind : tool_kind option
       ; status : tool_call_status
       ; raw_input : Yojson.Safe.t option
       ; identity : tool_call_identity
@@ -305,19 +348,22 @@ val should_allow_tool_call : policy:permission_policy -> tool_call_identity -> b
 (** Total permission decision over the closed {!tool_call_identity} variant. *)
 
 val is_masc_mcp_tool
-  :  mcp_server_name:string
+  :  driver:driver
+  -> mcp_server_name:string
   -> allowed_tool_names:string list
   -> title:string
-  -> kind:string option
+  -> kind:tool_kind option
   -> bool
-(** Strict membership predicate for callers that only hold [(title, kind)].
+(** Strict membership predicate for callers that only hold [(driver, title, kind)].
     Prefer matching on {!tool_call_identity} from {!Tool_call_started} so
     structured MCP calls and managed schema reads are classified without
     display-title inspection. *)
 
-val is_read_only_tool_kind : string option -> bool
-(** True for read-only local ACP tool kinds (["read"], ["search"], ["think"]).
-    Network ["fetch"] is excluded so [Native_read] cannot bypass egress/SSRF boundaries. *)
+val is_read_only_tool_kind : tool_kind option -> bool
+(** True for read-only local ACP tool kinds ({!Tool_read}, {!Tool_search},
+    {!Tool_think}). Network {!Tool_fetch}, {!Tool_switch_mode},
+    {!Tool_unknown}, and [None] are excluded so [Native_read] cannot bypass
+    egress/SSRF or mode-switch boundaries. *)
 
 type prompt_result =
   { session_id : string
@@ -585,14 +631,21 @@ module For_testing : sig
     -> string list
   val utf8_safe_suffix : max_bytes:int -> string -> string
   val redact_stderr_text : ?extra_secrets:string list -> string -> string
-  val should_allow_permission : policy:permission_policy -> title:string -> kind:string option -> bool
+  val should_allow_permission
+    :  driver:driver
+    -> policy:permission_policy
+    -> title:string
+    -> kind:tool_kind option
+    -> bool
 
   val classify_tool_call_json
-    :  ?managed_schema_root:string * string
+    :  driver:driver
+    -> ?managed_schema_root:string * string
     -> ?mcp_server_name:string
     -> Yojson.Safe.t
     -> tool_call_identity
 
+  val merge_tool_kind : prior:tool_kind option -> incoming:tool_kind option -> tool_kind option
   val choose_permission_option : allow:bool -> Yojson.Safe.t list -> string option
   val parse_config_options : Yojson.Safe.t -> config_option list
   val parse_session_info : Yojson.Safe.t -> (session_info, string) result
@@ -609,7 +662,7 @@ module For_testing : sig
     -> option:config_option
     -> string option
 
-  val parse_session_update : Yojson.Safe.t -> stream_event option
+  val parse_session_update : driver:driver -> Yojson.Safe.t -> stream_event option
   val parse_prompt_usage : Yojson.Safe.t -> usage
   val parse_stop_reason : string -> stop_reason
   val max_prompt_stream_bytes : int

@@ -83,6 +83,17 @@ type output_accounting =
   | Inclusive_of_thought
   | Exclusive_of_thought
 
+type mcp_identifier_syntax =
+  | Mcp_call_wrapper
+  | Mcp_paren_wrapper
+  | Mcp_double_underscore
+  | Mcp_dot_prefix
+  | Mcp_underscore_prefix
+  | Colon_or_slash_qualified
+  | Server_underscore_prefix
+  | Implicit_vendor_mcp_kind
+[@@deriving show, eq]
+
 type driver_profile =
   { driver : driver
   ; default_command : string
@@ -90,6 +101,7 @@ type driver_profile =
   ; env_set : (string * string) list
   ; default_strip_env : string list
   ; mcp_wiring : mcp_wiring
+  ; mcp_identifier_syntaxes : mcp_identifier_syntax list
   ; system_prompt_channel : system_prompt_channel
   ; input_accounting : input_accounting
   ; output_accounting : output_accounting
@@ -109,6 +121,12 @@ let profile_of_driver = function
     ; env_set = [ "AGY_CLI_DISABLE_AUTO_UPDATE", "true" ]
     ; default_strip_env = []
     ; mcp_wiring = Gemini_dir_mcp_config
+    ; mcp_identifier_syntaxes =
+        [ Mcp_call_wrapper
+        ; Mcp_paren_wrapper
+        ; Mcp_underscore_prefix
+        ; Implicit_vendor_mcp_kind
+        ]
     ; system_prompt_channel = Meta_antigravity_append
     (* Live-verified against agy acp 1.5.14: totalTokens = inputTokens +
        cachedReadTokens + outputTokens (outputTokens already includes thoughtTokens). *)
@@ -128,6 +146,8 @@ let profile_of_driver = function
     ; env_set = []
     ; default_strip_env = []
     ; mcp_wiring = Session_new_http_mcp
+    ; mcp_identifier_syntaxes =
+        [ Mcp_double_underscore; Colon_or_slash_qualified; Implicit_vendor_mcp_kind ]
     ; system_prompt_channel = Framed_in_first_prompt
     ; input_accounting = Inclusive_of_cached
     ; output_accounting = Inclusive_of_thought
@@ -147,6 +167,12 @@ let profile_of_driver = function
        Pro subscription rather than a budget-capped API key. *)
     ; default_strip_env = [ "MISTRAL_API_KEY" ]
     ; mcp_wiring = Session_new_http_mcp
+    ; mcp_identifier_syntaxes =
+        [ Mcp_dot_prefix
+        ; Mcp_underscore_prefix
+        ; Server_underscore_prefix
+        ; Implicit_vendor_mcp_kind
+        ]
     ; system_prompt_channel = Framed_in_first_prompt
     (* Live-verified against vibe-acp 3.1.0: totalTokens = inputTokens +
        outputTokens (inputTokens already includes cachedReadTokens). *)
@@ -380,6 +406,53 @@ type prompt_block =
       ; base64_data : string
       }
 
+type tool_kind =
+  | Tool_read
+  | Tool_edit
+  | Tool_delete
+  | Tool_move
+  | Tool_search
+  | Tool_execute
+  | Tool_think
+  | Tool_fetch
+  | Tool_switch_mode
+  | Tool_other
+  | Tool_vendor_mcp
+  | Tool_unknown of string
+[@@deriving show, eq]
+
+let tool_kind_of_string raw =
+  let trimmed = String.trim raw in
+  match String.lowercase_ascii trimmed with
+  | "read" -> Tool_read
+  | "edit" -> Tool_edit
+  | "delete" -> Tool_delete
+  | "move" -> Tool_move
+  | "search" -> Tool_search
+  | "execute" -> Tool_execute
+  | "think" -> Tool_think
+  | "fetch" -> Tool_fetch
+  | "switch_mode" -> Tool_switch_mode
+  | "other" -> Tool_other
+  | "mcp" -> Tool_vendor_mcp
+  | _ -> Tool_unknown trimmed
+;;
+
+let tool_kind_to_string = function
+  | Tool_read -> "read"
+  | Tool_edit -> "edit"
+  | Tool_delete -> "delete"
+  | Tool_move -> "move"
+  | Tool_search -> "search"
+  | Tool_execute -> "execute"
+  | Tool_think -> "think"
+  | Tool_fetch -> "fetch"
+  | Tool_switch_mode -> "switch_mode"
+  | Tool_other -> "other"
+  | Tool_vendor_mcp -> "mcp"
+  | Tool_unknown s -> s
+;;
+
 type mcp_server_qualifier =
   | Explicit_server of string
   | Implicit_mcp_kind
@@ -395,7 +468,7 @@ type tool_call_identity =
       }
   | Native_tool of
       { name : string option
-      ; kind : string option
+      ; kind : tool_kind option
       ; locations : string list
       }
 
@@ -412,7 +485,7 @@ type stream_event =
   | Tool_call_started of
       { tool_call_id : string
       ; title : string
-      ; kind : string option
+      ; kind : tool_kind option
       ; status : tool_call_status
       ; raw_input : Yojson.Safe.t option
       ; identity : tool_call_identity
@@ -877,18 +950,103 @@ let parse_config_options json =
 ;;
 
 let is_allowed_mcp_kind = function
-  | None | Some ("mcp" | "other") -> true
-  | Some _ -> false
+  | None | Some (Tool_vendor_mcp | Tool_other) -> true
+  | Some
+      ( Tool_read
+      | Tool_edit
+      | Tool_delete
+      | Tool_move
+      | Tool_search
+      | Tool_execute
+      | Tool_think
+      | Tool_fetch
+      | Tool_switch_mode
+      | Tool_unknown _ ) -> false
 ;;
 
 let is_allowed_explicit_mcp_wrapper_kind = function
-  | None | Some ("mcp" | "other" | "execute") -> true
-  | Some _ -> false
+  | None | Some (Tool_vendor_mcp | Tool_other | Tool_execute) -> true
+  | Some
+      ( Tool_read
+      | Tool_edit
+      | Tool_delete
+      | Tool_move
+      | Tool_search
+      | Tool_think
+      | Tool_fetch
+      | Tool_switch_mode
+      | Tool_unknown _ ) -> false
 ;;
 
 let is_read_only_tool_kind = function
-  | Some ("read" | "search" | "think") -> true
-  | Some _ | None -> false
+  | Some (Tool_read | Tool_search | Tool_think) -> true
+  | Some
+      ( Tool_edit
+      | Tool_delete
+      | Tool_move
+      | Tool_execute
+      | Tool_fetch
+      | Tool_switch_mode
+      | Tool_other
+      | Tool_vendor_mcp
+      | Tool_unknown _ )
+  | None -> false
+;;
+
+(* Partial-order security-restriction join for monotonic tool-kind merging:
+   - [Branch_read_only]: [Tool_read] < ({!Tool_search}, {!Tool_think})
+     ([Tool_read] additionally permits managed schema reads).
+   - [Branch_mcp]: [Tool_vendor_mcp] < [Tool_other] < [Tool_execute]
+     (progressively narrower MCP authorization predicates).
+   - [Branch_restricted]: Edit/Delete/Move/Fetch/Switch_mode/Unknown —
+     denied and effect-fenced everywhere.
+   Merging within a branch takes the more restrictive kind; any cross-branch
+   conflict (empty policy intersection, e.g. Read+Execute, Read+Other,
+   Execute+Read) escalates to [Tool_unknown "conflict:<prior>-><incoming>"].
+   Thus every authorization predicate P satisfies P(merge(p, i)) => P(p) && P(i). *)
+type tool_kind_branch =
+  | Branch_read_only
+  | Branch_mcp
+  | Branch_restricted
+
+let branch_of_tool_kind = function
+  | Tool_read | Tool_search | Tool_think -> Branch_read_only
+  | Tool_vendor_mcp | Tool_other | Tool_execute -> Branch_mcp
+  | Tool_edit | Tool_delete | Tool_move | Tool_fetch | Tool_switch_mode | Tool_unknown _ ->
+    Branch_restricted
+;;
+
+let within_branch_rank = function
+  | Tool_read -> 0
+  | Tool_search | Tool_think -> 1
+  | Tool_vendor_mcp -> 0
+  | Tool_other -> 1
+  | Tool_execute -> 2
+  | Tool_edit | Tool_delete | Tool_move | Tool_fetch | Tool_switch_mode | Tool_unknown _ -> 3
+;;
+
+let merge_tool_kind ~(prior : tool_kind option) ~(incoming : tool_kind option)
+  : tool_kind option
+  =
+  match prior, incoming with
+  | None, inc -> inc
+  | (Some _ as prev), None -> prev
+  | Some p, Some i ->
+    if equal_tool_kind p i
+    then Some p
+    else (
+      match branch_of_tool_kind p, branch_of_tool_kind i with
+      | Branch_restricted, (Branch_restricted | Branch_read_only | Branch_mcp) -> Some p
+      | (Branch_read_only | Branch_mcp), Branch_restricted -> Some i
+      | Branch_read_only, Branch_read_only | Branch_mcp, Branch_mcp ->
+        if within_branch_rank i > within_branch_rank p then Some i else Some p
+      | Branch_read_only, Branch_mcp | Branch_mcp, Branch_read_only ->
+        Some
+          (Tool_unknown
+             (Printf.sprintf
+                "conflict:%s->%s"
+                (tool_kind_to_string p)
+                (tool_kind_to_string i))))
 ;;
 
 let trim_nonempty_opt = function
@@ -924,7 +1082,7 @@ type tool_call_wire =
   { tool_call_id : string
   ; title : string option
   ; name : string option
-  ; kind : string option
+  ; kind : tool_kind option
   ; meta_server_name : string option
   ; meta_tool_name : string option
   ; raw_input : Yojson.Safe.t option
@@ -937,7 +1095,7 @@ let parse_tool_call_wire (json : Yojson.Safe.t) : tool_call_wire =
   in
   let title = trim_nonempty_opt (json_string_opt "title" json) in
   let name = trim_nonempty_opt (json_string_opt "name" json) in
-  let kind = trim_nonempty_opt (json_string_opt "kind" json) in
+  let kind = Option.map tool_kind_of_string (trim_nonempty_opt (json_string_opt "kind" json)) in
   let meta = json_field "_meta" json in
   let meta_server_name =
     Option.bind
@@ -968,11 +1126,12 @@ let is_non_empty_raw_input = function
   | Some _ -> true
 ;;
 
-(* Monotonic merge: first-observed identity fields (kind, meta_server_name,
-   meta_tool_name, name, title, non-empty raw_input) are immutable so a later
-   tool_call_update or session/request_permission cannot downgrade e.g.
-   "execute" -> "read" or spoof a benign title/path over an earlier call,
-   while missing fields may still be enriched and locations are unioned. *)
+(* Monotonic merge: first-observed identity fields (meta_server_name,
+   meta_tool_name, name, title, non-empty raw_input) are immutable, while [kind]
+   follows {!merge_tool_kind}'s security-restriction lattice so neither a later
+   downgrade (e.g. Execute -> Read) nor an initial placeholder (e.g. Other ->
+   Execute/Edit) can weaken policy enforcement. Missing fields may still be
+   enriched and locations are unioned. *)
 let merge_tool_call_wire ~(prior : tool_call_wire) ~(incoming : tool_call_wire) : tool_call_wire =
   let keep_first prev inc = match prev with Some _ -> prev | None -> inc in
   let raw_input =
@@ -990,7 +1149,7 @@ let merge_tool_call_wire ~(prior : tool_call_wire) ~(incoming : tool_call_wire) 
       if prior.tool_call_id <> "" then prior.tool_call_id else incoming.tool_call_id
   ; title = keep_first prior.title incoming.title
   ; name = keep_first prior.name incoming.name
-  ; kind = keep_first prior.kind incoming.kind
+  ; kind = merge_tool_kind ~prior:prior.kind ~incoming:incoming.kind
   ; meta_server_name = keep_first prior.meta_server_name incoming.meta_server_name
   ; meta_tool_name = keep_first prior.meta_tool_name incoming.meta_tool_name
   ; raw_input
@@ -1107,69 +1266,144 @@ let parse_explicit_mcp_wrapper candidate =
   else None
 ;;
 
-let parse_qualified_mcp_identifier ?mcp_server_name ~kind candidate =
+let driver_allows_mcp_syntax driver syntax =
+  let profile = profile_of_driver driver in
+  List.exists (equal_mcp_identifier_syntax syntax) profile.mcp_identifier_syntaxes
+;;
+
+let accept_syntax_or_warn ~driver ~syntax ~candidate parsed =
+  if driver_allows_mcp_syntax driver syntax
+  then Some parsed
+  else (
+    Log.Runtime_agent.warn
+      "rejecting cross-driver ACP MCP identifier %S (syntax %s not declared for driver %s)"
+      candidate
+      (show_mcp_identifier_syntax syntax)
+      (driver_to_string driver);
+    None)
+;;
+
+let match_mcp_identifier_syntax ?mcp_server_name ~(kind : tool_kind option) trimmed syntax =
+  match syntax with
+  | Mcp_call_wrapper | Mcp_paren_wrapper -> None
+  | Mcp_double_underscore ->
+    if String.starts_with ~prefix:"mcp__" trimmed
+    then (
+      let rest = String.sub trimmed 5 (String.length trimmed - 5) in
+      match index_of_sub ~needle:"__" rest with
+      | Some idx when idx > 0 && idx + 2 < String.length rest ->
+        let srv = String.sub rest 0 idx in
+        let tool = String.sub rest (idx + 2) (String.length rest - idx - 2) in
+        Some (Mcp_tool { server = Explicit_server srv; tool_name = tool })
+      | Some _ | None -> None)
+    else None
+  | Mcp_dot_prefix ->
+    if String.starts_with ~prefix:"mcp_" trimmed
+    then (
+      let rest = String.sub trimmed 4 (String.length trimmed - 4) in
+      match String.index_opt rest '.' with
+      | Some idx when idx > 0 && idx + 1 < String.length rest ->
+        let srv = String.sub rest 0 idx in
+        let tool = String.sub rest (idx + 1) (String.length rest - idx - 1) in
+        Some (Mcp_tool { server = Explicit_server srv; tool_name = tool })
+      | Some _ | None -> None)
+    else None
+  | Mcp_underscore_prefix ->
+    if String.starts_with ~prefix:"mcp_" trimmed
+    then (
+      let rest = String.sub trimmed 4 (String.length trimmed - 4) in
+      match mcp_server_name with
+      | Some expected_srv
+        when expected_srv <> ""
+             && String.starts_with ~prefix:(expected_srv ^ "_") rest
+             && String.length rest > String.length expected_srv + 1 ->
+        let prefix_len = String.length expected_srv + 1 in
+        let tool = String.sub rest prefix_len (String.length rest - prefix_len) in
+        Some (Mcp_tool { server = Explicit_server expected_srv; tool_name = tool })
+      | Some _ | None -> None)
+    else None
+  | Colon_or_slash_qualified ->
+    let split_single sep =
+      match String.index_opt trimmed sep with
+      | Some idx when idx > 0 && idx + 1 < String.length trimmed ->
+        let srv = String.sub trimmed 0 idx in
+        let tool = String.sub trimmed (idx + 1) (String.length trimmed - idx - 1) in
+        if String.contains srv ':'
+           || String.contains srv '/'
+           || String.contains tool ':'
+           || String.contains tool '/'
+        then None
+        else Some (Mcp_tool { server = Explicit_server srv; tool_name = tool })
+      | Some _ | None -> None
+    in
+    (match split_single ':' with
+     | Some _ as m -> m
+     | None -> split_single '/')
+  | Server_underscore_prefix ->
+    (match mcp_server_name with
+     | Some expected_srv
+       when expected_srv <> ""
+            && String.starts_with ~prefix:(expected_srv ^ "_") trimmed
+            && String.length trimmed > String.length expected_srv + 1 ->
+       let prefix_len = String.length expected_srv + 1 in
+       let tool = String.sub trimmed prefix_len (String.length trimmed - prefix_len) in
+       Some (Mcp_tool { server = Explicit_server expected_srv; tool_name = tool })
+     | Some _ | None -> None)
+  | Implicit_vendor_mcp_kind ->
+    (match kind with
+     | Some Tool_vendor_mcp ->
+       Some (Mcp_tool { server = Implicit_mcp_kind; tool_name = trimmed })
+     | Some
+         ( Tool_read
+         | Tool_edit
+         | Tool_delete
+         | Tool_move
+         | Tool_search
+         | Tool_execute
+         | Tool_think
+         | Tool_fetch
+         | Tool_switch_mode
+         | Tool_other
+         | Tool_unknown _ )
+     | None -> None)
+;;
+
+let parse_qualified_mcp_identifier ~driver ?mcp_server_name ~(kind : tool_kind option) candidate =
   let trimmed = String.trim candidate in
   if trimmed = "" || has_ascii_whitespace trimmed || String.starts_with ~prefix:"mcp(" trimmed
   then None
-  else if String.starts_with ~prefix:"mcp__" trimmed
-  then (
-    let rest = String.sub trimmed 5 (String.length trimmed - 5) in
-    match index_of_sub ~needle:"__" rest with
-    | Some idx when idx > 0 && idx + 2 < String.length rest ->
-      let srv = String.sub rest 0 idx in
-      let tool = String.sub rest (idx + 2) (String.length rest - idx - 2) in
-      Some (Mcp_tool { server = Explicit_server srv; tool_name = tool })
-    | _ -> None)
-  else if String.starts_with ~prefix:"mcp_" trimmed
-  then (
-    let rest = String.sub trimmed 4 (String.length trimmed - 4) in
-    match String.index_opt rest '.' with
-    | Some idx when idx > 0 && idx + 1 < String.length rest ->
-      let srv = String.sub rest 0 idx in
-      let tool = String.sub rest (idx + 1) (String.length rest - idx - 1) in
-      Some (Mcp_tool { server = Explicit_server srv; tool_name = tool })
-    | _ ->
-      (match mcp_server_name with
-       | Some expected_srv
-         when expected_srv <> ""
-              && String.starts_with ~prefix:(expected_srv ^ "_") rest
-              && String.length rest > String.length expected_srv + 1 ->
-         let prefix_len = String.length expected_srv + 1 in
-         let tool = String.sub rest prefix_len (String.length rest - prefix_len) in
-         Some (Mcp_tool { server = Explicit_server expected_srv; tool_name = tool })
-       | _ -> None))
   else (
-    match String.index_opt trimmed ':' with
-    | Some idx when idx > 0 && idx + 1 < String.length trimmed ->
-      let srv = String.sub trimmed 0 idx in
-      let tool = String.sub trimmed (idx + 1) (String.length trimmed - idx - 1) in
-      Some (Mcp_tool { server = Explicit_server srv; tool_name = tool })
-    | _ ->
-      (match
-         if String.starts_with ~prefix:"/" trimmed
-         then None
-         else String.index_opt trimmed '/'
-       with
-       | Some idx when idx > 0 && idx + 1 < String.length trimmed ->
-         let srv = String.sub trimmed 0 idx in
-         let tool = String.sub trimmed (idx + 1) (String.length trimmed - idx - 1) in
-         Some (Mcp_tool { server = Explicit_server srv; tool_name = tool })
-       | _ ->
-         (match mcp_server_name with
-          | Some expected_srv
-            when expected_srv <> ""
-                 && String.starts_with ~prefix:(expected_srv ^ "_") trimmed
-                 && String.length trimmed > String.length expected_srv + 1 ->
-            let prefix_len = String.length expected_srv + 1 in
-            let tool = String.sub trimmed prefix_len (String.length trimmed - prefix_len) in
-            Some (Mcp_tool { server = Explicit_server expected_srv; tool_name = tool })
-          | _ ->
-            if Option.equal String.equal kind (Some "mcp")
-            then Some (Mcp_tool { server = Implicit_mcp_kind; tool_name = trimmed })
-            else None)))
+    let profile = profile_of_driver driver in
+    match
+      List.find_map
+        (match_mcp_identifier_syntax ?mcp_server_name ~kind trimmed)
+        profile.mcp_identifier_syntaxes
+    with
+    | Some _ as matched -> matched
+    | None ->
+      (* Warn only on unambiguous cross-driver MCP prefixes (mcp__, mcp_<srv>.,
+         mcp_<srv>_) so ordinary native tools containing ':' or '/' (URLs, paths,
+         git:status) never trigger false-positive warning spam. *)
+      let explicit_cross_driver_syntaxes =
+        [ Mcp_double_underscore; Mcp_dot_prefix; Mcp_underscore_prefix ]
+      in
+      List.iter
+        (fun syntax ->
+           if not (driver_allows_mcp_syntax driver syntax)
+           then (
+             match match_mcp_identifier_syntax ?mcp_server_name ~kind trimmed syntax with
+             | Some _ ->
+               Log.Runtime_agent.warn
+                 "rejecting cross-driver ACP MCP identifier %S (syntax %s not declared for driver %s)"
+                 trimmed
+                 (show_mcp_identifier_syntax syntax)
+                 (driver_to_string driver)
+             | None -> ()))
+        explicit_cross_driver_syntaxes;
+      None)
 ;;
 
-let classify_tool_call ?managed_schema_root ?mcp_server_name (wire : tool_call_wire)
+let classify_tool_call ~driver ?managed_schema_root ?mcp_server_name (wire : tool_call_wire)
   : tool_call_identity
   =
   let fallback () =
@@ -1183,7 +1417,7 @@ let classify_tool_call ?managed_schema_root ?mcp_server_name (wire : tool_call_w
     in
     Native_tool { name; kind = wire.kind; locations = wire.locations }
   in
-  (* 1. Structured MCP proxy call (e.g. Antigravity [call_mcp_tool] carrying
+  (* 1. Structured MCP proxy call (Antigravity [call_mcp_tool] carrying
         explicit [ServerName]/[server_name]/[mcp_server] and
         [ToolName]/[tool_name]/[name] in [rawInput]/[args]). *)
   let is_call_mcp_tool =
@@ -1195,7 +1429,13 @@ let classify_tool_call ?managed_schema_root ?mcp_server_name (wire : tool_call_w
   in
   if is_call_mcp_tool
   then (
-    if not (is_allowed_explicit_mcp_wrapper_kind wire.kind)
+    if not (driver_allows_mcp_syntax driver Mcp_call_wrapper)
+    then (
+      Log.Runtime_agent.warn
+        "rejecting cross-driver call_mcp_tool wrapper under driver %s"
+        (driver_to_string driver);
+      fallback ())
+    else if not (is_allowed_explicit_mcp_wrapper_kind wire.kind)
     then fallback ()
     else (
       let server =
@@ -1254,8 +1494,10 @@ let classify_tool_call ?managed_schema_root ?mcp_server_name (wire : tool_call_w
           | None | Some "read_file" -> true
           | Some _ -> false
         in
-        match managed_schema_root, wire.kind with
-        | Some (srv, schema_dir), Some "read" when allowed_read_tool_name ->
+        match managed_schema_root with
+        | Some (srv, schema_dir)
+          when allowed_read_tool_name
+               && Option.equal equal_tool_kind wire.kind (Some Tool_read) ->
           (match extract_schema_read_paths wire with
            | None -> None
            | Some paths ->
@@ -1270,19 +1512,17 @@ let classify_tool_call ?managed_schema_root ?mcp_server_name (wire : tool_call_w
                          | None -> false)
                        rest ->
                 Some (Managed_mcp_schema_read { mcp_server_name = srv; path = first })
-              | _ -> None))
-        | _ -> None
+              | Some _ :: _ | None :: _ | [] -> None))
+        | Some _ | None -> None
       in
       (match schema_read with
        | Some id -> id
        | None ->
-         (* 4. Protocol-qualified MCP tool identifiers:
+         (* 4. Driver-scoped protocol-qualified MCP tool identifiers:
                4a. Explicit [mcp(<srv>/<tool>)] / [mcp(<srv>:<tool>)] wrapper
-                   (permitted across None/mcp/other/execute kinds).
-               4b. Standard qualified identifiers (Kimi [mcp__<srv>__<tool>],
-                   Mistral Vibe [mcp_<srv>.<tool>] / [mcp_<srv>_<tool>],
-                   [<srv>:<tool>], [<srv>/<tool>], [<srv>_<tool>], or bare
-                   [kind = "mcp"]) strictly gated on [is_allowed_mcp_kind]. *)
+                   (Antigravity only, permitted across None/mcp/other/execute).
+               4b. Driver-declared qualified identifiers gated strictly on
+                   [is_allowed_mcp_kind] and [driver_profile.mcp_identifier_syntaxes]. *)
          let candidate =
            match wire.meta_tool_name with
            | Some s -> Some s
@@ -1292,23 +1532,29 @@ let classify_tool_call ?managed_schema_root ?mcp_server_name (wire : tool_call_w
               | None -> wire.title)
          in
          (match Option.bind candidate parse_explicit_mcp_wrapper with
-          | Some id when is_allowed_explicit_mcp_wrapper_kind wire.kind -> id
-          | Some _ -> fallback ()
+          | Some id ->
+            if is_allowed_explicit_mcp_wrapper_kind wire.kind
+            then (
+              let cand_str = Option.value candidate ~default:"" in
+              match accept_syntax_or_warn ~driver ~syntax:Mcp_paren_wrapper ~candidate:cand_str id with
+              | Some accepted -> accepted
+              | None -> fallback ())
+            else fallback ()
           | None ->
             if is_allowed_mcp_kind wire.kind
             then (
               match
                 Option.bind
                   candidate
-                  (parse_qualified_mcp_identifier ?mcp_server_name ~kind:wire.kind)
+                  (parse_qualified_mcp_identifier ~driver ?mcp_server_name ~kind:wire.kind)
               with
               | Some id -> id
               | None -> fallback ())
             else fallback ())))
 ;;
 
-let classify_tool_call_json ?managed_schema_root ?mcp_server_name json =
-  parse_tool_call_wire json |> classify_tool_call ?managed_schema_root ?mcp_server_name
+let classify_tool_call_json ~driver ?managed_schema_root ?mcp_server_name json =
+  parse_tool_call_wire json |> classify_tool_call ~driver ?managed_schema_root ?mcp_server_name
 ;;
 
 let should_allow_tool_call ~policy identity =
@@ -1342,25 +1588,25 @@ let should_allow_tool_call ~policy identity =
      | Mcp_tool _ | Managed_mcp_schema_read _ -> false)
 ;;
 
-let is_masc_mcp_tool ~mcp_server_name ~allowed_tool_names ~title ~kind =
+let is_masc_mcp_tool ~driver ~mcp_server_name ~allowed_tool_names ~title ~kind =
   let wire =
     { tool_call_id = ""
     ; title = trim_nonempty_opt (Some title)
     ; name = None
-    ; kind = trim_nonempty_opt kind
+    ; kind
     ; meta_server_name = None
     ; meta_tool_name = None
     ; raw_input = None
     ; locations = []
     }
   in
-  let identity = classify_tool_call ~mcp_server_name wire in
+  let identity = classify_tool_call ~driver ~mcp_server_name wire in
   should_allow_tool_call
     ~policy:(Allow_masc_mcp_only { mcp_server_name; allowed_tool_names })
     identity
 ;;
 
-let should_allow_permission ~policy ~title ~kind =
+let should_allow_permission ~driver ~policy ~title ~kind =
   let mcp_server_name =
     match policy with
     | Allow_masc_mcp_only { mcp_server_name; _ }
@@ -1371,18 +1617,18 @@ let should_allow_permission ~policy ~title ~kind =
     { tool_call_id = ""
     ; title = trim_nonempty_opt (Some title)
     ; name = None
-    ; kind = trim_nonempty_opt kind
+    ; kind
     ; meta_server_name = None
     ; meta_tool_name = None
     ; raw_input = None
     ; locations = []
     }
   in
-  let identity = classify_tool_call ?mcp_server_name wire in
+  let identity = classify_tool_call ~driver ?mcp_server_name wire in
   should_allow_tool_call ~policy identity
 ;;
 
-let parse_session_update_with ?managed_schema_root ?mcp_server_name ?merged_wire params =
+let parse_session_update_with ~driver ?managed_schema_root ?mcp_server_name ?merged_wire params =
   let update =
     match json_field "update" params with
     | Some u -> u
@@ -1411,7 +1657,7 @@ let parse_session_update_with ?managed_schema_root ?mcp_server_name ?merged_wire
       |> Option.map parse_tool_status
       |> Option.value ~default:Tool_pending
     in
-    let identity = classify_tool_call ?managed_schema_root ?mcp_server_name wire in
+    let identity = classify_tool_call ~driver ?managed_schema_root ?mcp_server_name wire in
     Some
       (Tool_call_started
          { tool_call_id = wire.tool_call_id
@@ -1453,7 +1699,9 @@ let parse_session_update_with ?managed_schema_root ?mcp_server_name ?merged_wire
   | _ -> None
 ;;
 
-let parse_session_update params = parse_session_update_with params
+let parse_session_update ~driver params =
+  parse_session_update_with ~driver params
+;;
 
 let parse_prompt_usage result_json =
   match json_field "usage" result_json with
@@ -2262,6 +2510,7 @@ let handle_permission_request t ~id ~params =
       note_activity t;
       let identity =
         classify_tool_call
+          ~driver:t.driver
           ?managed_schema_root:t.managed_schema_root
           ?mcp_server_name
           effective_wire
@@ -2277,7 +2526,7 @@ let handle_permission_request t ~id ~params =
       (Option.value effective_wire.meta_tool_name ~default:"<none>")
       (Option.value effective_wire.name ~default:"<none>")
       (Option.value effective_wire.title ~default:"")
-      (Option.value effective_wire.kind ~default:"<none>")
+      (Option.fold ~none:"<none>" ~some:tool_kind_to_string effective_wire.kind)
       (Option.value req_session_id ~default:"<none>");
   let options = Option.value (json_list_opt "options" params) ~default:[] in
   let outcome =
@@ -2365,6 +2614,7 @@ let dispatch_incoming_message t msg =
     if matches_observer || matches_active then note_activity t;
     let event_opt =
       parse_session_update_with
+        ~driver:t.driver
         ?managed_schema_root:t.managed_schema_root
         ?mcp_server_name
         ?merged_wire
@@ -3672,6 +3922,7 @@ module For_testing = struct
   let redact_stderr_text = redact_stderr_text
   let should_allow_permission = should_allow_permission
   let classify_tool_call_json = classify_tool_call_json
+  let merge_tool_kind = merge_tool_kind
   let choose_permission_option = choose_permission_option
   let parse_config_options = parse_config_options
   let parse_session_info = parse_session_info

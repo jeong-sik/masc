@@ -97,7 +97,7 @@ let test_parse_wire_updates_and_usage () =
       [ "sessionUpdate", `String "agent_message_chunk"
       ; "content", `Assoc [ "type", `String "text"; "text", `String "hello" ]
       ]
-    |> Runtime_acp_client.For_testing.parse_session_update
+    |> Runtime_acp_client.For_testing.parse_session_update ~driver:Antigravity
   in
   check bool "text delta parsed" true (text_ev = Some (Runtime_acp_client.Text_delta "hello"));
   let thought_ev =
@@ -105,7 +105,7 @@ let test_parse_wire_updates_and_usage () =
       [ "sessionUpdate", `String "agent_thought_chunk"
       ; "content", `Assoc [ "type", `String "text"; "text", `String "pondering" ]
       ]
-    |> Runtime_acp_client.For_testing.parse_session_update
+    |> Runtime_acp_client.For_testing.parse_session_update ~driver:Antigravity
   in
   check bool "thought delta parsed" true
     (thought_ev = Some (Runtime_acp_client.Thought_delta "pondering"));
@@ -115,7 +115,7 @@ let test_parse_wire_updates_and_usage () =
       ; "used", `Int 11651
       ; "size", `Int 1048576
       ]
-    |> Runtime_acp_client.For_testing.parse_session_update
+    |> Runtime_acp_client.For_testing.parse_session_update ~driver:Antigravity
   in
   (match usage_ev with
    | Some (Runtime_acp_client.Usage_updated { used = Some 11651; size = Some 1048576; _ }) -> ()
@@ -125,7 +125,7 @@ let test_parse_wire_updates_and_usage () =
       [ "sessionUpdate", `String "current_mode_update"
       ; "currentModeId", `String "auto-approve"
       ]
-    |> Runtime_acp_client.For_testing.parse_session_update
+    |> Runtime_acp_client.For_testing.parse_session_update ~driver:Antigravity
   in
   check bool "mode update parsed" true
     (mode_ev = Some (Runtime_acp_client.Mode_updated "auto-approve"));
@@ -495,36 +495,101 @@ let test_build_argv_and_strict_permission_posture () =
       { mcp_server_name = "masc"; allowed_tool_names }
   in
   let allow = Runtime_acp_client.For_testing.should_allow_permission in
-  (* Positive MASC MCP identities *)
+  (* Driver-scoped positive MASC MCP identities *)
   List.iter
-    (fun (title, kind) ->
+    (fun (driver, title, kind) ->
        check bool ("allows pinned MASC MCP tool " ^ title) true
-         (allow ~policy:mcp_only ~title ~kind))
-    [ "mcp__masc__keeper_skill", None
-    ; "mcp_masc.masc_probe_ping", Some "other"
-    ; "masc:masc_probe_ping", Some "mcp"
-    ; "masc_masc_probe_ping", Some "other"
-    ; "masc/keeper_skill", None
-    ; "keeper_skill", Some "mcp"
+         (allow ~driver ~policy:mcp_only ~title ~kind))
+    [ Runtime_acp_client.Kimi_code, "mcp__masc__keeper_skill", None
+    ; Runtime_acp_client.Mistral_vibe, "mcp_masc.masc_probe_ping", Some Runtime_acp_client.Tool_other
+    ; Runtime_acp_client.Kimi_code, "masc:masc_probe_ping", Some Runtime_acp_client.Tool_vendor_mcp
+    ; Runtime_acp_client.Mistral_vibe, "masc_masc_probe_ping", Some Runtime_acp_client.Tool_other
+    ; Runtime_acp_client.Kimi_code, "masc/keeper_skill", None
+    ; Runtime_acp_client.Antigravity, "keeper_skill", Some Runtime_acp_client.Tool_vendor_mcp
+    ; Runtime_acp_client.Antigravity, "masc_probe_ping", Some Runtime_acp_client.Tool_vendor_mcp
+    ; Runtime_acp_client.Kimi_code, "masc_probe_ping", Some Runtime_acp_client.Tool_vendor_mcp
+    ; Runtime_acp_client.Antigravity, "mcp_masc_masc_probe_ping", Some Runtime_acp_client.Tool_other
+    ];
+  (* Dotted tool name under Antigravity Mcp_underscore_prefix must NOT be shadowed by Vibe Mcp_dot_prefix *)
+  let dotted_policy =
+    Runtime_acp_client.Allow_masc_mcp_only
+      { mcp_server_name = "masc"; allowed_tool_names = [ "v1.status" ] }
+  in
+  check bool "Antigravity mcp_masc_v1.status is not shadowed by Mcp_dot_prefix" true
+    (allow ~driver:Antigravity ~policy:dotted_policy ~title:"mcp_masc_v1.status" ~kind:(Some Tool_other));
+  (* URLs with multiple ':'/'/' are NEVER treated as Colon_or_slash_qualified MCP tools *)
+  check bool "URL title is not misparsed as Colon_or_slash_qualified under Kimi_code" false
+    (allow ~driver:Kimi_code ~policy:mcp_only ~title:"https://example.com/api" ~kind:(Some Tool_other));
+  (* Cross-driver MCP grammar isolation: foreign driver syntax MUST fail closed *)
+  List.iter
+    (fun (driver, title, kind) ->
+       check bool ("rejects cross-driver MCP syntax " ^ title) false
+         (allow ~driver ~policy:mcp_only ~title ~kind))
+    [ Runtime_acp_client.Antigravity, "mcp_masc.masc_probe_ping", Some Runtime_acp_client.Tool_other
+    ; Runtime_acp_client.Antigravity, "mcp__masc__keeper_skill", Some Runtime_acp_client.Tool_other
+    ; Runtime_acp_client.Antigravity, "masc_masc_probe_ping", Some Runtime_acp_client.Tool_other
+    ; Runtime_acp_client.Mistral_vibe, "mcp(masc/keeper_skill)", Some Runtime_acp_client.Tool_other
+    ; Runtime_acp_client.Mistral_vibe, "mcp__masc__keeper_skill", Some Runtime_acp_client.Tool_other
+    ; Runtime_acp_client.Kimi_code, "mcp(masc/keeper_skill)", Some Runtime_acp_client.Tool_other
+    ; Runtime_acp_client.Kimi_code, "mcp_masc.masc_probe_ping", Some Runtime_acp_client.Tool_other
+    ; Runtime_acp_client.Kimi_code, "masc_masc_probe_ping", Some Runtime_acp_client.Tool_other
     ];
   (* Negative security posture checks under Allow_masc_mcp_only *)
-  check bool "denies foreign MCP server even when kind=mcp" false
-    (allow ~policy:mcp_only ~title:"github__delete_repo" ~kind:(Some "mcp"));
+  check bool "denies foreign MCP server even when kind=Tool_vendor_mcp" false
+    (allow ~driver:Kimi_code ~policy:mcp_only ~title:"github__delete_repo" ~kind:(Some Tool_vendor_mcp));
   check bool "denies native execute tool whose title starts with masc_" false
-    (allow ~policy:mcp_only ~title:"masc_rm_rf" ~kind:(Some "execute"));
+    (allow ~driver:Mistral_vibe ~policy:mcp_only ~title:"masc_rm_rf" ~kind:(Some Tool_execute));
   check bool "denies native execute tool even if suffix matches tool name" false
-    (allow ~policy:mcp_only ~title:"masc_masc_probe_ping" ~kind:(Some "execute"));
+    (allow ~driver:Mistral_vibe ~policy:mcp_only ~title:"masc_masc_probe_ping" ~kind:(Some Tool_execute));
   check bool "denies unpinned MASC-prefixed tool" false
-    (allow ~policy:mcp_only ~title:"mcp__masc__unpinned_tool" ~kind:(Some "mcp"));
+    (allow ~driver:Kimi_code ~policy:mcp_only ~title:"mcp__masc__unpinned_tool" ~kind:(Some Tool_vendor_mcp));
   check bool "denies native read tool under Native_none" false
-    (allow ~policy:mcp_only ~title:"read_file" ~kind:(Some "read"));
-  (* Native_read posture *)
+    (allow ~driver:Antigravity ~policy:mcp_only ~title:"read_file" ~kind:(Some Tool_read));
+  (* Native_read posture & official ACP v1 tool_kind lattice *)
   check bool "allows native read tool under Allow_read_and_masc_mcp" true
-    (allow ~policy:read_and_mcp ~title:"read_file" ~kind:(Some "read"));
+    (allow ~driver:Antigravity ~policy:read_and_mcp ~title:"read_file" ~kind:(Some Tool_read));
+  check bool "denies switch_mode under Allow_read_and_masc_mcp" false
+    (allow ~driver:Antigravity ~policy:read_and_mcp ~title:"switch" ~kind:(Some Tool_switch_mode));
+  check bool "denies Tool_unknown under Allow_read_and_masc_mcp" false
+    (allow ~driver:Antigravity ~policy:read_and_mcp ~title:"future_op" ~kind:(Some (Tool_unknown "future_kind")));
   check bool "still denies foreign MCP server under Allow_read_and_masc_mcp" false
-    (allow ~policy:read_and_mcp ~title:"github__delete_repo" ~kind:(Some "mcp"));
+    (allow ~driver:Kimi_code ~policy:read_and_mcp ~title:"github__delete_repo" ~kind:(Some Tool_vendor_mcp));
   check bool "still denies masc_ execute under Allow_read_and_masc_mcp" false
-    (allow ~policy:read_and_mcp ~title:"masc_rm_rf" ~kind:(Some "execute"))
+    (allow ~driver:Mistral_vibe ~policy:read_and_mcp ~title:"masc_rm_rf" ~kind:(Some Tool_execute));
+  (* Monotonic merge_tool_kind partial-order security join *)
+  let merge = Runtime_acp_client.For_testing.merge_tool_kind in
+  let check_kind label expected actual =
+    check bool label true (Option.equal Runtime_acp_client.equal_tool_kind expected actual)
+  in
+  check_kind "Execute -> Read escalates to cross-branch conflict (denied everywhere)"
+    (Some (Tool_unknown "conflict:execute->read"))
+    (merge ~prior:(Some Tool_execute) ~incoming:(Some Tool_read));
+  check_kind "Read -> Execute escalates to cross-branch conflict (never relaxes Read into Execute)"
+    (Some (Tool_unknown "conflict:read->execute"))
+    (merge ~prior:(Some Tool_read) ~incoming:(Some Tool_execute));
+  check_kind "Read -> Other escalates to cross-branch conflict (never preserves Native_read allow)"
+    (Some (Tool_unknown "conflict:read->other"))
+    (merge ~prior:(Some Tool_read) ~incoming:(Some Tool_other));
+  check_kind "Other -> Read escalates to cross-branch conflict (never preserves MCP allow)"
+    (Some (Tool_unknown "conflict:other->read"))
+    (merge ~prior:(Some Tool_other) ~incoming:(Some Tool_read));
+  check_kind "Read -> Vendor_mcp escalates to cross-branch conflict"
+    (Some (Tool_unknown "conflict:read->mcp"))
+    (merge ~prior:(Some Tool_read) ~incoming:(Some Tool_vendor_mcp));
+  check_kind "Vendor_mcp -> Other tightens away Implicit_vendor_mcp_kind"
+    (Some Tool_other) (merge ~prior:(Some Tool_vendor_mcp) ~incoming:(Some Tool_other));
+  check_kind "Read -> Search tightens away Managed_mcp_schema_read"
+    (Some Tool_search) (merge ~prior:(Some Tool_read) ~incoming:(Some Tool_search));
+  check_kind "Edit -> Execute stays Edit (no downgrade)"
+    (Some Tool_edit) (merge ~prior:(Some Tool_edit) ~incoming:(Some Tool_execute));
+  check_kind "Other -> Execute escalates to Execute"
+    (Some Tool_execute) (merge ~prior:(Some Tool_other) ~incoming:(Some Tool_execute));
+  check_kind "Other -> Edit escalates to Edit"
+    (Some Tool_edit) (merge ~prior:(Some Tool_other) ~incoming:(Some Tool_edit));
+  check_kind "Read -> Delete escalates to Delete"
+    (Some Tool_delete) (merge ~prior:(Some Tool_read) ~incoming:(Some Tool_delete));
+  check_kind "Read -> Unknown escalates to Unknown"
+    (Some (Tool_unknown "x")) (merge ~prior:(Some Tool_read) ~incoming:(Some (Tool_unknown "x")))
 ;;
 
 let http_post ~sw ~net ~endpoint ~authorization ?protocol_version body =
@@ -1293,9 +1358,10 @@ let test_vibe_310_config_options_and_permission_hardening () =
   in
   let allow = Runtime_acp_client.For_testing.should_allow_permission in
   check bool "fetch is DENIED under Allow_read_and_masc_mcp (egress/SSRF boundary)" false
-    (allow ~policy:read_and_mcp ~title:"fetch_url" ~kind:(Some "fetch"));
+    (allow ~driver:Mistral_vibe ~policy:read_and_mcp ~title:"fetch_url" ~kind:(Some Tool_fetch));
   check bool "unknown native tool kind is DENIED even with masc prefix" false
-    (allow ~policy:read_and_mcp ~title:"mcp__masc__masc_probe_ping" ~kind:(Some "browser_eval"));
+    (allow ~driver:Kimi_code ~policy:read_and_mcp ~title:"mcp__masc__masc_probe_ping"
+       ~kind:(Some (Tool_unknown "browser_eval")));
   (* Negative usage values are clamped to non-negative *)
   let neg_usage =
     `Assoc
@@ -1363,7 +1429,7 @@ for line in sys.stdin:
             # Send valid permission request AND spoofed wrong-sessionId permission request
             send({"jsonrpc": "2.0", "id": 9001, "method": "session/request_permission", "params": {
                 "sessionId": "sess-1",
-                "toolCall": {"title": "mcp__masc__masc_probe_ping", "kind": "mcp"},
+                "toolCall": {"title": "mcp(masc/masc_probe_ping)", "kind": "mcp"},
                 "options": [
                     {"optionId": "allow_once_id", "kind": "allow_once"},
                     {"optionId": "reject_once_id", "kind": "reject_once"}
@@ -1371,7 +1437,7 @@ for line in sys.stdin:
             }})
             send({"jsonrpc": "2.0", "id": 9002, "method": "session/request_permission", "params": {
                 "sessionId": "sess-spoofed",
-                "toolCall": {"title": "mcp__masc__masc_probe_ping", "kind": "mcp"},
+                "toolCall": {"title": "mcp(masc/masc_probe_ping)", "kind": "mcp"},
                 "options": [
                     {"optionId": "allow_once_id", "kind": "allow_once"},
                     {"optionId": "reject_once_id", "kind": "reject_once"}
@@ -1645,6 +1711,7 @@ let test_typed_tool_call_classification_and_schema_boundary () =
     in
     let classify =
       Runtime_acp_client.For_testing.classify_tool_call_json
+        ~driver:Antigravity
         ~managed_schema_root
         ~mcp_server_name:"masc"
     in
@@ -1762,15 +1829,24 @@ let test_typed_tool_call_classification_and_schema_boundary () =
             ; "kind", `String "mcp"
             ; "_meta", `Assoc [ "server_name", `String "evil" ]
             ]));
-    (* Mistral Vibe 3.1.0 structured _meta.tool_name *)
-    check bool "allows Vibe _meta.tool_name mcp_masc.masc_probe_ping" true
-      (allowed
-         (`Assoc
-            [ "toolCallId", `String "effect-1"
-            ; "title", `String "mcp_masc.masc_probe_ping"
-            ; "kind", `String "other"
-            ; "_meta", `Assoc [ "tool_name", `String "mcp_masc.masc_probe_ping" ]
-            ]));
+    (* Mistral Vibe 3.1.0 structured _meta.tool_name: allowed on Mistral_vibe, denied cross-driver on Antigravity *)
+    let vibe_meta_payload =
+      `Assoc
+        [ "toolCallId", `String "effect-1"
+        ; "title", `String "mcp_masc.masc_probe_ping"
+        ; "kind", `String "other"
+        ; "_meta", `Assoc [ "tool_name", `String "mcp_masc.masc_probe_ping" ]
+        ]
+    in
+    let vibe_classify =
+      Runtime_acp_client.For_testing.classify_tool_call_json
+        ~driver:Mistral_vibe
+        ~mcp_server_name:"masc"
+    in
+    check bool "allows Vibe _meta.tool_name mcp_masc.masc_probe_ping under Mistral_vibe" true
+      (Runtime_acp_client.should_allow_tool_call ~policy (vibe_classify vibe_meta_payload));
+    check bool "denies Vibe mcp_masc.masc_probe_ping cross-driver under Antigravity" false
+      (allowed vibe_meta_payload);
     (* Declarative acp_settings_json SSOT *)
     (match Runtime_antigravity_home.acp_settings_json ~mcp_server_name:"masc" ~gemini_dir:canonical_tmp () with
      | Error err -> failf "acp_settings_json failed: %s" (Runtime_antigravity_home.error_to_string err)
@@ -1929,16 +2005,16 @@ for line in sys.stdin:
             if text == "perm-correlation":
                 pending_perm_prompt = req_id
                 expected_perms = {"vibe-1", "unknown-1", "agy-1"}
-                # 1. Vibe 3.1.0 style: tool_call announces identity, request_permission sends ONLY toolCallId
+                # 1. ToolCallId correlation: tool_call announces Antigravity MCP identity, request_permission sends ONLY toolCallId
                 send({"jsonrpc": "2.0", "method": "session/update", "params": {
                     "sessionId": sid,
                     "update": {
                         "sessionUpdate": "tool_call",
                         "toolCallId": "effect-vibe-1",
-                        "title": "mcp_masc.masc_probe_ping",
+                        "title": "mcp_masc_masc_probe_ping",
                         "kind": "other",
                         "status": "in_progress",
-                        "_meta": {"tool_name": "mcp_masc.masc_probe_ping"}
+                        "_meta": {"tool_name": "mcp_masc_masc_probe_ping"}
                     }
                 }})
                 send({"jsonrpc": "2.0", "id": "vibe-1", "method": "session/request_permission", "params": {
@@ -2205,10 +2281,12 @@ let test_keeper_typed_tool_call_effect_fencing () =
       }
   in
   let native_read =
-    Runtime_acp_client.Native_tool { name = Some "read_file"; kind = Some "read"; locations = [] }
+    Runtime_acp_client.Native_tool
+      { name = Some "read_file"; kind = Some Tool_read; locations = [] }
   in
   let native_exec =
-    Runtime_acp_client.Native_tool { name = Some "run_command"; kind = Some "execute"; locations = [] }
+    Runtime_acp_client.Native_tool
+      { name = Some "run_command"; kind = Some Tool_execute; locations = [] }
   in
   let pinned_implicit_mcp =
     Runtime_acp_client.Mcp_tool
@@ -2217,7 +2295,16 @@ let test_keeper_typed_tool_call_effect_fencing () =
       }
   in
   let native_fetch =
-    Runtime_acp_client.Native_tool { name = Some "fetch_url"; kind = Some "fetch"; locations = [] }
+    Runtime_acp_client.Native_tool
+      { name = Some "fetch_url"; kind = Some Tool_fetch; locations = [] }
+  in
+  let native_switch =
+    Runtime_acp_client.Native_tool
+      { name = Some "switch_mode"; kind = Some Tool_switch_mode; locations = [] }
+  in
+  let native_unmodeled =
+    Runtime_acp_client.Native_tool
+      { name = Some "future_tool"; kind = Some (Tool_unknown "future"); locations = [] }
   in
   let native_unknown =
     Runtime_acp_client.Native_tool { name = Some "mystery_tool"; kind = None; locations = [] }
@@ -2248,6 +2335,10 @@ let test_keeper_typed_tool_call_effect_fencing () =
     (fence ~native_posture:Runtime_native_tools.Native_read native_exec);
   check bool "Native_read fences native fetch (egress boundary)" true
     (fence ~native_posture:Runtime_native_tools.Native_read native_fetch);
+  check bool "Native_read fences native switch_mode" true
+    (fence ~native_posture:Runtime_native_tools.Native_read native_switch);
+  check bool "Native_read fences native Tool_unknown" true
+    (fence ~native_posture:Runtime_native_tools.Native_read native_unmodeled);
   check bool "Native_read fences native tool with kind=None" true
     (fence ~native_posture:Runtime_native_tools.Native_read native_unknown);
   check bool "Native_full fences native read" true
@@ -2756,30 +2847,59 @@ let test_antigravity_acp_mcp_permission_and_call_mcp_tool () =
       ; allowed_tool_names = [ "keeper_memory_search"; "masc_probe_ping" ]
       }
   in
-  let allow = Runtime_acp_client.For_testing.should_allow_permission in
-  let classify = Runtime_acp_client.For_testing.classify_tool_call_json ~mcp_server_name:"masc" in
+  let allow = Runtime_acp_client.For_testing.should_allow_permission ~driver:Antigravity in
+  let classify =
+    Runtime_acp_client.For_testing.classify_tool_call_json
+      ~driver:Antigravity
+      ~mcp_server_name:"masc"
+  in
   let allowed_json json = Runtime_acp_client.should_allow_tool_call ~policy:mcp_only (classify json) in
   (* Live agy acp format: mcp(masc/<tool_name>) across None/mcp/other/execute kinds *)
   List.iter
     (fun kind ->
        check bool "allows agy mcp(masc/keeper_memory_search)" true
          (allow ~policy:mcp_only ~title:"mcp(masc/keeper_memory_search)" ~kind))
-    [ None; Some "mcp"; Some "other"; Some "execute" ];
+    [ None
+    ; Some Runtime_acp_client.Tool_vendor_mcp
+    ; Some Runtime_acp_client.Tool_other
+    ; Some Runtime_acp_client.Tool_execute
+    ];
   check bool "allows mcp(masc:keeper_memory_search)" true
-    (allow ~policy:mcp_only ~title:"mcp(masc:keeper_memory_search)" ~kind:(Some "other"));
+    (allow ~policy:mcp_only ~title:"mcp(masc:keeper_memory_search)" ~kind:(Some Tool_other));
   check bool "allows mcp_masc_keeper_memory_search" true
-    (allow ~policy:mcp_only ~title:"mcp_masc_keeper_memory_search" ~kind:(Some "other"));
+    (allow ~policy:mcp_only ~title:"mcp_masc_keeper_memory_search" ~kind:(Some Tool_other));
   (* Security invariants: unpinned tools, foreign servers, edit/delete kinds, and masc_ execute remain denied *)
   check bool "denies unpinned mcp(masc/unpinned)" false
-    (allow ~policy:mcp_only ~title:"mcp(masc/unpinned)" ~kind:(Some "mcp"));
+    (allow ~policy:mcp_only ~title:"mcp(masc/unpinned)" ~kind:(Some Tool_vendor_mcp));
   check bool "denies foreign mcp(github/keeper_memory_search)" false
-    (allow ~policy:mcp_only ~title:"mcp(github/keeper_memory_search)" ~kind:(Some "mcp"));
+    (allow ~policy:mcp_only ~title:"mcp(github/keeper_memory_search)" ~kind:(Some Tool_vendor_mcp));
   check bool "denies edit kind on mcp(masc/keeper_memory_search)" false
-    (allow ~policy:mcp_only ~title:"mcp(masc/keeper_memory_search)" ~kind:(Some "edit"));
+    (allow ~policy:mcp_only ~title:"mcp(masc/keeper_memory_search)" ~kind:(Some Tool_edit));
   check bool "denies native execute masc_masc_probe_ping" false
-    (allow ~policy:mcp_only ~title:"masc_masc_probe_ping" ~kind:(Some "execute"));
+    (allow ~policy:mcp_only ~title:"masc_masc_probe_ping" ~kind:(Some Tool_execute));
   check bool "denies native execute mcp_masc_keeper_memory_search" false
-    (allow ~policy:mcp_only ~title:"mcp_masc_keeper_memory_search" ~kind:(Some "execute"));
+    (allow ~policy:mcp_only ~title:"mcp_masc_keeper_memory_search" ~kind:(Some Tool_execute));
+  (* Cross-driver check: call_mcp_tool wrapper is rejected under Kimi_code and Mistral_vibe *)
+  let vibe_classify =
+    Runtime_acp_client.For_testing.classify_tool_call_json
+      ~driver:Mistral_vibe
+      ~mcp_server_name:"masc"
+  in
+  let kimi_classify =
+    Runtime_acp_client.For_testing.classify_tool_call_json
+      ~driver:Kimi_code
+      ~mcp_server_name:"masc"
+  in
+  let call_wrapper =
+    `Assoc
+      [ "_meta", `Assoc [ "tool_name", `String "call_mcp_tool" ]
+      ; "rawInput", `Assoc [ "server_name", `String "masc"; "tool_name", `String "keeper_memory_search" ]
+      ]
+  in
+  check bool "call_mcp_tool wrapper rejected under Mistral_vibe" false
+    (Runtime_acp_client.should_allow_tool_call ~policy:mcp_only (vibe_classify call_wrapper));
+  check bool "call_mcp_tool wrapper rejected under Kimi_code" false
+    (Runtime_acp_client.should_allow_tool_call ~policy:mcp_only (kimi_classify call_wrapper));
   (* call_mcp_tool wrapper via _meta.tool_name with rawInput extracts exact server/tool identity *)
   let wrapped_allowed =
     `Assoc
@@ -2923,7 +3043,7 @@ for line in sys.stdin:
                 "toolCall": {"toolCallId": "tc-unknown-3"},
                 "options": opts
             }})
-            # 4. Antigravity agy acp mcp(masc/keeper_memory_write) -> MUST allow_once!
+            # 4. Cross-driver Antigravity mcp(masc/keeper_memory_write) under Mistral_vibe -> MUST reject_once!
             send({"jsonrpc": "2.0", "id": 1004, "method": "session/request_permission", "params": {
                 "sessionId": "sess-vibe",
                 "toolCall": {"toolCallId": "tc-agy-4", "title": "mcp(masc/keeper_memory_write)", "kind": "other"},
@@ -3093,8 +3213,8 @@ for line in sys.stdin:
             "reject_once_id" (option_of "1002");
           check string "unknown toolCallId denied"
             "reject_once_id" (option_of "1003");
-          check string "agy acp mcp(masc/keeper_memory_write) allowed"
-            "allow_once_id" (option_of "1004");
+          check string "cross-driver agy mcp(masc/keeper_memory_write) rejected under Mistral_vibe"
+            "reject_once_id" (option_of "1004");
           check string "agy acp unpinned mcp(masc/unpinned_tool) denied"
             "reject_once_id" (option_of "1005");
           check string "spoofed display title cannot override cached _meta.tool_name=bash"
@@ -3285,7 +3405,7 @@ let test_layer3_policy_mode_redaction_and_oauth_security () =
                     ] )
               ] )
         ]
-      |> Runtime_acp_client.For_testing.parse_session_update
+      |> Runtime_acp_client.For_testing.parse_session_update ~driver:Antigravity
     in
     (match usage_ev with
      | Some
@@ -3891,12 +4011,15 @@ let test_layer4_stream_projection_sse_framing_native_tools_and_zero_usage () =
     (Runtime_acp_client.Tool_call_started
        { tool_call_id = "nat-call-1"
        ; title = "Read file"
-       ; kind = Some "read"
+       ; kind = Some Runtime_acp_client.Tool_read
        ; status = Runtime_acp_client.Tool_in_progress
        ; raw_input = Some (`Assoc [ "path", `String "/tmp/a" ])
        ; identity =
            Runtime_acp_client.Native_tool
-             { name = Some "read_file"; kind = Some "read"; locations = [ "/tmp/a" ] }
+             { name = Some "read_file"
+             ; kind = Some Runtime_acp_client.Tool_read
+             ; locations = [ "/tmp/a" ]
+             }
        });
   on_acp_event
     (Runtime_acp_client.Tool_call_updated

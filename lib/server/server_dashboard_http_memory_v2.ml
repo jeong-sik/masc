@@ -709,20 +709,70 @@ let fact_diff_entry_json ~heat_lookup (fact : Types.fact) =
     ]
 ;;
 
+let source_of_commit_cause (cause : Librarian_log.cause) : Cur.source =
+  let non_empty text fallback =
+    let trimmed = String.trim text in
+    if String.equal trimmed "" then fallback else trimmed
+  in
+  match cause with
+  | Librarian_log.Direct { write = Librarian_direct.Retract _; trace; _ } ->
+    { Cur.kind = Cur.Explicit_retract; trace_id = non_empty trace "explicit_retract" }
+  | Librarian_log.Direct
+      { write = Librarian_direct.(Remember _ | Supersede _); trace; _ } ->
+    { Cur.kind = Cur.Explicit_write; trace_id = non_empty trace "explicit_write" }
+  | Librarian_log.Read { trace; _ } ->
+    { Cur.kind = Cur.Librarian; trace_id = non_empty trace "librarian_read" }
+  | Librarian_log.Make_room { trace; _ } ->
+    { Cur.kind = Cur.Librarian; trace_id = non_empty trace "librarian_make_room" }
+  | Librarian_log.Molt_and_synthesize { trace; _ } ->
+    { Cur.kind = Cur.Librarian; trace_id = non_empty trace "librarian_molt" }
+  | Librarian_log.Adopt { by; _ } ->
+    { Cur.kind = Cur.Librarian; trace_id = non_empty by "adopt" }
+  | Librarian_log.Skip _ ->
+    { Cur.kind = Cur.Librarian; trace_id = "skip" }
+  | Librarian_log.Checkpoint _ ->
+    { Cur.kind = Cur.Librarian; trace_id = "checkpoint" }
+;;
+
 let keeper_diff_json ~now ~config ~keeper_id ~range =
   let base_path = config.Workspace.base_path in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   match Cur.read_for_keepers_dir ~keepers_dir ~keeper_id with
   | Error msg -> error_result Env.Store_unavailable ("snapshot read failed: " ^ msg)
   | Ok snap_opt ->
-    (match Cur.read_journal_tail ~keepers_dir ~keeper_id ~limit:2000 with
-     | Error msg -> error_result Env.Store_unavailable ("journal read failed: " ^ msg)
-     | Ok journal_rows ->
-       let lineage_revisions =
-         match Cur.read_commit_lineage ~keepers_dir ~keeper_id with
-         | Ok lineage -> lineage.revisions
-         | Error _ -> []
-       in
+    let log_path = Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id in
+    (match
+       Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+         Librarian_log_store.fold log_path ~init:([], [])
+           ~f:(fun (rows_rev, revisions_rev) ({ line; _ } : Librarian_log_store.scanned) ->
+             match line with
+             | Ok (Librarian_log.Started _) -> rows_rev, revisions_rev
+             | Ok (Librarian_log.Committed commit) ->
+               let revisions_rev =
+                 List.fold_left
+                   (fun acc ((fact : Types.fact), removal) ->
+                      match removal with
+                      | Librarian_effects.Revised_into into_id
+                      | Librarian_effects.Superseded_by into_id ->
+                        { Types.superseded = Types.memory_id fact
+                        ; superseded_by = into_id
+                        }
+                        :: acc
+                      | Dropped _ | Merged_into _ | Retracted _ | Support_lost _ | Molted _ ->
+                        acc)
+                   revisions_rev
+                   commit.effects.removed
+               in
+               Ok commit :: rows_rev, revisions_rev
+             | Error err -> Error err :: rows_rev, revisions_rev))
+     with
+     | Error err ->
+       error_result
+         Env.Store_unavailable
+         ("commit log read failed: " ^ Private_jsonl_scan.error_to_string err)
+     | Ok (rows_rev, lineage_revisions_rev) ->
+       let journal_rows = List.rev (List.take 2000 rows_rev) in
+       let lineage_revisions = List.rev lineage_revisions_rev in
        let heat_lookup, total_events, unreadable_events =
          build_event_heat_table ~now ~keepers_dir ~keeper_id
        in
@@ -763,8 +813,6 @@ let keeper_diff_json ~now ~config ~keeper_id ~range =
        in
        let invalidated_rev = ref [] in
        let rev_ticks_rev = ref [] in
-       let failure_timestamps = ref [] in
-       let quarantine_timestamps = ref [] in
        let undecodable_lines = ref 0 in
        let min_rev_seen = ref None in
        let max_rev_seen = ref None in
@@ -787,11 +835,10 @@ let keeper_diff_json ~now ~config ~keeper_id ~range =
        List.iter
          (function
            | Error _ -> incr undecodable_lines
-           | Ok (Cur.Journal_failed { recorded_at; _ }) ->
-             failure_timestamps := recorded_at :: !failure_timestamps
-           | Ok (Cur.Journal_quarantined { recorded_at; _ }) ->
-             quarantine_timestamps := recorded_at :: !quarantine_timestamps
-           | Ok (Cur.Journal_committed { recorded_at; revision; source; change; dropped; _ }) ->
+           | Ok (commit : Librarian_log.commit) ->
+             let recorded_at = commit.at in
+             let revision = commit.revision in
+             let source = source_of_commit_cause commit.cause in
              let matches =
                match range with
                | Range_window _ -> in_range_ts recorded_at
@@ -800,58 +847,45 @@ let keeper_diff_json ~now ~config ~keeper_id ~range =
              if matches
              then (
                record_rev revision recorded_at;
-               let drop_reasons = Hashtbl.create 8 in
-               Option.iter
-                 (List.iter (fun (d : Types.dropped_statement) ->
-                    Hashtbl.replace drop_reasons d.memory_id d.reason))
-                 dropped;
                List.iter
                  (fun fact ->
                     let id = Types.memory_id fact in
                     Hashtbl.replace added_map id (fact, revision))
-                 change.added;
+                 commit.effects.added;
+               let commit_invalidated = ref 0 in
                List.iter
-                 (fun fact ->
+                 (fun ((fact : Types.fact), (removal : Librarian_effects.removal)) ->
                     let id = Types.memory_id fact in
-                    let reason = Hashtbl.find_opt drop_reasons id in
+                    let reason =
+                      match removal with
+                      | Librarian_effects.Dropped { reason }
+                      | Librarian_effects.Retracted { reason; _ }
+                      | Librarian_effects.Molted { reason } -> Some reason
+                      | Librarian_effects.Support_lost { missing } ->
+                        incr commit_invalidated;
+                        invalidated_rev :=
+                          ({ Cur.fact; missing_premise_ids = missing }, revision)
+                          :: !invalidated_rev;
+                        None
+                      | Librarian_effects.Merged_into _
+                      | Librarian_effects.Revised_into _
+                      | Librarian_effects.Superseded_by _ -> None
+                    in
                     Hashtbl.replace removed_map id (fact, revision, source, reason))
-                 change.removed;
-               List.iter
-                 (fun (inv : Cur.support_invalidation) ->
-                    invalidated_rev := (inv, revision) :: !invalidated_rev)
-                 change.invalidated;
+                 commit.effects.removed;
                rev_ticks_rev
                := `Assoc
                     [ "rev", `Int revision
                     ; "at_unix", `Float recorded_at
                     ; "source", `String (Cur.source_kind_to_string source.kind)
-                    ; "added", `Int (List.length change.added)
-                    ; "removed", `Int (List.length change.removed)
-                    ; "invalidated", `Int (List.length change.invalidated)
+                    ; "added", `Int (List.length commit.effects.added)
+                    ; "removed", `Int (List.length commit.effects.removed)
+                    ; "invalidated", `Int !commit_invalidated
                     ]
                   :: !rev_ticks_rev))
          journal_rows;
-       let count_ts_in_scope timestamps =
-         match range with
-         | Range_window _ ->
-           List.fold_left
-             (fun acc ts -> if in_range_ts ts then acc + 1 else acc)
-             0
-             timestamps
-         | Range_revs _ ->
-           (match !min_committed_ts, !max_committed_ts with
-            | Some lo, Some hi ->
-              List.fold_left
-                (fun acc ts ->
-                   if Float.compare ts lo >= 0 && Float.compare ts hi <= 0
-                   then acc + 1
-                   else acc)
-                0
-                timestamps
-            | None, _ | _, None -> 0)
-       in
-       let failures_in_window = ref (count_ts_in_scope !failure_timestamps) in
-       let quarantines_in_window = ref (count_ts_in_scope !quarantine_timestamps) in
+       let failures_in_window = ref 0 in
+       let quarantines_in_window = ref 0 in
        (* Classify revision/absorption relations from [Keeper_memory_activity] so
           [program_absorption] and [program_revision] fire accurately in TUI/Dashboard. *)
        let activity = Keeper_memory_activity.read ~keepers_dir ~keeper_id ~limit:200 in

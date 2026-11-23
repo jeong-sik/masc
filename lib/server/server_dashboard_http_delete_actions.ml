@@ -360,21 +360,6 @@ let keeper_artifact_path config keeper_name artifact =
            (Config_dir_resolver.keepers_dir_for_base_path
               ~base_path:config.Workspace.base_path)
          ~keeper_id:keeper_name)
-  | Keeper_memory_epoch_artifact ->
-    Some (Keeper_memory_os_current.epoch_path
-      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
-        ~base_path:config.Workspace.base_path) ~keeper_id:keeper_name)
-  | Keeper_memory_publication_artifact ->
-    Some (Keeper_memory_os_current.publication_receipt_path
-      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
-        ~base_path:config.Workspace.base_path) ~keeper_id:keeper_name)
-  | Keeper_memory_retraction_plan_artifact ->
-    Some
-      (Keeper_memory_os_current.retraction_plan_receipt_path
-         ~keepers_dir:
-           (Config_dir_resolver.keepers_dir_for_base_path
-              ~base_path:config.Workspace.base_path)
-         ~keeper_id:keeper_name)
   | Keeper_memory_source_current_artifact ->
     Some
       (Keeper_memory_source_current.path_for_keepers_dir
@@ -390,28 +375,6 @@ let keeper_artifact_path config keeper_name artifact =
     Some (Keeper_librarian_context.path
       ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
         ~base_path:config.Workspace.base_path) ~keeper_id:keeper_name)
-  | Keeper_memory_journal_artifact ->
-    Some
-      (Keeper_memory_os_current.journal_path_for_keepers_dir
-         ~keepers_dir:
-           (Config_dir_resolver.keepers_dir_for_base_path
-              ~base_path:config.Workspace.base_path)
-         ~keeper_id:keeper_name)
-  | Keeper_memory_journal_lock_artifact ->
-    Some
-      (Keeper_memory_os_current.journal_path_for_keepers_dir
-         ~keepers_dir:
-           (Config_dir_resolver.keepers_dir_for_base_path
-              ~base_path:config.Workspace.base_path)
-         ~keeper_id:keeper_name
-       |> Fs_compat.private_jsonl_lock_path)
-  | Keeper_memory_absorbed_artifact ->
-    Some
-      (Keeper_memory_absorbed.path_for_keepers_dir
-         ~keepers_dir:
-           (Config_dir_resolver.keepers_dir_for_base_path
-              ~base_path:config.Workspace.base_path)
-         ~keeper_id:keeper_name)
   | Keeper_memory_log_artifact ->
     Some
       (Librarian_log_store.path_for_keepers_dir
@@ -739,15 +702,9 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
       | (( Keeper_metrics_store_artifact
          | Keeper_runtime_directory_artifact
          | Keeper_memory_current_artifact
-         | Keeper_memory_epoch_artifact
-         | Keeper_memory_publication_artifact
-         | Keeper_memory_retraction_plan_artifact
          | Keeper_memory_source_current_artifact
          | Keeper_working_context_recall_artifact
          | Keeper_working_context_artifact
-         | Keeper_memory_journal_artifact
-         | Keeper_memory_journal_lock_artifact
-         | Keeper_memory_absorbed_artifact
          | Keeper_memory_log_artifact
          | Keeper_memory_log_lock_artifact
          | Keeper_memory_writer_lock_artifact
@@ -766,18 +723,12 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                 (Keeper_types_support.keeper_metrics_store
                    config
                    keeper_name)
-            | Keeper_memory_journal_artifact
             | Keeper_root_logs_artifact
             | Keeper_runtime_directory_artifact
             | Keeper_memory_current_artifact
-            | Keeper_memory_epoch_artifact
-            | Keeper_memory_publication_artifact
-            | Keeper_memory_retraction_plan_artifact
             | Keeper_memory_source_current_artifact
             | Keeper_working_context_recall_artifact
             | Keeper_working_context_artifact
-            | Keeper_memory_journal_lock_artifact
-            | Keeper_memory_absorbed_artifact
             | Keeper_memory_log_artifact
             | Keeper_memory_log_lock_artifact
             | Keeper_memory_writer_lock_artifact
@@ -801,11 +752,8 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                Keeper_chat_store.purge_transcript path ~remove:remove_path_strict
              | Keeper_metrics_store_artifact | Keeper_root_logs_artifact
              | Keeper_runtime_directory_artifact | Keeper_memory_current_artifact
-             | Keeper_memory_epoch_artifact
-             | Keeper_memory_publication_artifact | Keeper_memory_retraction_plan_artifact
              | Keeper_memory_source_current_artifact | Keeper_working_context_recall_artifact
-             | Keeper_working_context_artifact | Keeper_memory_journal_artifact
-             | Keeper_memory_journal_lock_artifact | Keeper_memory_absorbed_artifact
+             | Keeper_working_context_artifact
              | Keeper_memory_log_artifact
              | Keeper_memory_log_lock_artifact
              | Keeper_memory_writer_lock_artifact
@@ -822,15 +770,9 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                | Keeper_metrics_store_artifact
                | Keeper_root_logs_artifact
                | Keeper_memory_current_artifact
-               | Keeper_memory_epoch_artifact
-               | Keeper_memory_publication_artifact
-               | Keeper_memory_retraction_plan_artifact
                | Keeper_memory_source_current_artifact
                | Keeper_working_context_recall_artifact
                | Keeper_working_context_artifact
-               | Keeper_memory_journal_artifact
-               | Keeper_memory_journal_lock_artifact
-               | Keeper_memory_absorbed_artifact
                | Keeper_memory_log_artifact
                | Keeper_memory_log_lock_artifact
                | Keeper_memory_writer_lock_artifact
@@ -896,9 +838,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
       (fun () ->
         Eio_context.run_on_owner_domain (fun () ->
           Keeper_memory_lane.with_librarian_purge
-            ~base_path:config.Workspace.base_path ~keeper_name (fun () ->
-              Keeper_memory_os_current.with_program_reset
-                ~keepers_dir ~keeper_id:keeper_name remove_artifacts)))
+            ~base_path:config.Workspace.base_path ~keeper_name remove_artifacts))
   with
   | Ok result -> result
   | Error error -> Error ("Librarian lane could not be stopped before purge: "

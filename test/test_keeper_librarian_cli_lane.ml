@@ -301,7 +301,7 @@ let test_domain_failure_kind_survives_failed_cli_slot () =
     check bool
       "the journal classifier keeps the API domain failure"
       true
-      (Runtime.For_testing.classified_error_kind error = Current.Domain_output_invalid);
+      (Runtime.For_testing.classified_error_kind error = Runtime.Domain_output_invalid);
     check_detail
       ~api_failure:"domain output invalid"
       ~cli_failure:

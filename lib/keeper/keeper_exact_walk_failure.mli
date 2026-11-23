@@ -18,7 +18,7 @@ type t = private
           candidate rejections remain neutral. This observation does not prove
           generation dispatch and is independent of both sizing policies. *)
   ; measured_cli_capacity : Keeper_lane_cli_oneshot.input_capacity option
-  ; provider_input_refusals : Keeper_librarian_input_refusal.t list
+  ; provider_input_refusals : Keeper_exact_input_refusal.t list
       (** Distinct, canonically ordered named causes across the walk. These are
           observations, not permission to consume any part of an unread range.
           In particular, invalid output and uncertain execution remain separate. *)
@@ -27,7 +27,7 @@ type t = private
 val empty : t
 val invalid_output : t
 val input_capacity_refusal : t
-val of_input_refusal : Keeper_librarian_input_refusal.t -> t
+val of_input_refusal : Keeper_exact_input_refusal.t -> t
 (** One named input refusal as a whole-walk observation: it shows the range was
     too large and keeps the cause. The same value an actual provider refusal
     with that cause produces in {!of_api_observation}. *)

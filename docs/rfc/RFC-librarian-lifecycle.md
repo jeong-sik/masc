@@ -1,12 +1,12 @@
 ---
 rfc: "librarian-lifecycle"
 title: "Librarian 생명주기 — 끝난 턴을 빠짐없이 순서대로 읽고, 읽은 위치를 남긴다"
-status: Draft
+status: Superseded
 created: 2026-09-18
-updated: 2026-11-07
+updated: 2026-11-23
 author: vincent
 supersedes: []
-superseded_by: null
+superseded_by: "librarian-call-only-proposes-and-one-writer-per-keeper-commits-in-one-line"
 related: ["keeper-context-window-in-tokens", "memory-os-bounded-context-and-librarian-curator", "0456", "0363"]
 implementation_prs: ["#37020", "#37024", "#37027", "#37030", "#37028", "#37031", "#37208", "#37653", "#38477", "#46926"]
 ---

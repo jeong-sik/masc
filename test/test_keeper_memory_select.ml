@@ -23,10 +23,23 @@ let restore ~keepers_dir ~keeper_id capture =
       check string "fixture store hash" (text "sha256" record) (sha bytes);
       Fs_compat.mkdir_p (Filename.dirname path);
       Fs_compat.save_file_atomic_strict path bytes |> require))
-    ["current_snapshot",Current.path_for_keepers_dir ~keepers_dir ~keeper_id;
-     "consumption_and_lookup_receipt",Current.durable_range_receipt_path ~keepers_dir ~keeper_id;
-     "memory_journal",Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id;
-     "pending_queue",Filename.concat keepers_dir (keeper_id ^ ".memory-admission.json")]
+    ["current_snapshot",Current.path_for_keepers_dir ~keepers_dir ~keeper_id]
+
+let write_snapshot ~keepers_dir ~keeper_id ~previous ~now ~source ~facts =
+  let revision = match previous with None -> 1 | Some (s : Current.t) -> s.revision + 1 in
+  let prev_facts = match previous with None -> [] | Some (s : Current.t) -> s.facts in
+  let prev_ids = List.map Memory.memory_id prev_facts in
+  let next_ids = List.map Memory.memory_id facts in
+  let added = List.filter (fun f -> not (List.mem (Memory.memory_id f) prev_ids)) facts in
+  let removed = List.filter (fun f -> not (List.mem (Memory.memory_id f) next_ids)) prev_facts in
+  let retained = List.length facts - List.length added in
+  let next : Current.t =
+    { revision; updated_at = now; source; facts; change = { added; removed; retained; invalidated = [] } }
+  in
+  Fs_compat.save_file_atomic_strict
+    (Current.path_for_keepers_dir ~keepers_dir ~keeper_id)
+    (Yojson.Safe.pretty_to_string (Current.to_json next) ^ "\n")
+  |> Result.map (fun () -> next)
 let answer choice = `Assoc ["type",`String "choice";"choice",`String choice;
   "confidence",`Float 1.;"probabilities",`Assoc (List.map (fun label ->
     label,`Float (if label=choice then 1. else 0.))
@@ -155,9 +168,7 @@ let test_missing_request_context_never_evaluates () =
     ["question_id",question_id] |> require);
   let journal=evaluation_journal ~config ~keeper_id in
   let stores=List.map (fun path -> path,Fs_compat.load_file_opt path)
-    [journal;Current.path_for_keepers_dir ~keepers_dir ~keeper_id;
-     Current.durable_range_receipt_path ~keepers_dir ~keeper_id;
-     Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id] in
+    [journal;Current.path_for_keepers_dir ~keepers_dir ~keeper_id] in
   let output=dispatch () in
   check string "missing owner guidance is an explicit unavailable result" "unavailable" (text "status" output);
   check string "owner policy failure has its own diagnostic" "selection_prompt_unavailable" (text "reason" output);
@@ -169,9 +180,9 @@ let test_missing_request_context_never_evaluates () =
   List.iter (fun (path,bytes) -> check (option string) "no evaluation receipt or authority write"
     bytes (Fs_compat.load_file_opt path)) stores;
   let before=snapshot ~keepers_dir ~keeper_id in
-  ignore (Current.replace ~keepers_dir ~keeper_id ~expected_revision:(Some before.revision)
+  ignore (write_snapshot ~keepers_dir ~keeper_id ~previous:(Some before)
     ~now:(before.updated_at+.1.) ~source:{Current.kind=Explicit_write;trace_id="empty-selection"}
-    ~facts:[] () |> require);
+    ~facts:[] |> require);
   let empty=dispatch () in
   check string "an empty selection needs no unused evaluator context" "completed" (text "status" empty);
   check int "empty authority submits no candidates" 0 (integer "assessed_count" empty);
@@ -203,16 +214,8 @@ let test_grouped_sources_and_compact_results ~limited () =
   let witnesses=List.fold_left (fun count row -> let detail=member "source_detail" row in
     check bool "valid provenance has no added failure field" true (member "receipt_verification" detail=`Null);
     count+List.length (rows "direct_admission_witnesses" detail)+List.length (rows "successor_witnesses" detail)) 0 candidates in
-  check int "all five lineage and direct witnesses reach evaluator" 5 witnesses;
+  check int "legacy witnesses are empty under single-writer store" 0 witnesses;
   let selected=rows "selected" output in
-  let current_claims=List.map (fun (fact : Memory.fact) -> fact.claim) before.facts in
-  let historical_claims=List.concat_map (fun row ->
-    let detail=member "source_detail" row in
-    let witnesses=rows "direct_admission_witnesses" detail @ rows "successor_witnesses" detail in
-    List.map (fun witness -> text "claim" (member "historical_source" witness)) witnesses) candidates in
-  List.iter (fun claim -> if not (List.mem claim current_claims) then
-    check bool "absorbed source text is not echoed into Keeper output" false
-      (String_util.contains_substring (Yojson.Safe.to_string output) (Yojson.Safe.to_string (`String claim)))) historical_claims;
   check (list string) "limit applies after the earlier candidate was omitted"
     (if limited then [second] else [second;third]) (List.map (text "id") selected);
   check (list string) "retrieval roles remain explicit" (if limited then ["comparison"] else ["comparison";"current_decision"])
@@ -245,12 +248,12 @@ let test_negative_or_readded_evidence_changes ~readd () =
   let before=snapshot ~keepers_dir ~keeper_id in
   let mutation=ref (Ok ()) in
   reply:=(fun body ->
-    let result=Current.replace ~keepers_dir ~keeper_id ~expected_revision:(Some before.revision)
-      ~now:(before.updated_at+.1.) ~source:{Current.kind=Explicit_write;trace_id="during-selection"} ~facts:[] () in
+    let result=write_snapshot ~keepers_dir ~keeper_id ~previous:(Some before)
+      ~now:(before.updated_at+.1.) ~source:{Current.kind=Explicit_write;trace_id="during-selection"} ~facts:[] in
     mutation:=(match result with Error detail -> Error detail | Ok removed ->
-      if not readd then Ok () else Current.replace ~keepers_dir ~keeper_id
-        ~expected_revision:(Some removed.revision) ~now:(before.updated_at+.2.)
-        ~source:{Current.kind=Explicit_write;trace_id="readd"} ~facts:before.facts () |> Result.map (fun _ -> ()));
+      if not readd then Ok () else write_snapshot ~keepers_dir ~keeper_id
+        ~previous:(Some removed) ~now:(before.updated_at+.2.)
+        ~source:{Current.kind=Explicit_write;trace_id="readd"} ~facts:before.facts |> Result.map (fun _ -> ()));
     response ~choose:(fun _ -> if readd then "current_decision" else "not_needed") body);
   let output=dispatch () in
   require !mutation;
@@ -439,49 +442,12 @@ let test_stalled_endpoint_ends_at_the_turn_clock () =
     (List.filter (fun status -> List.mem status ["started"; "provider_failed"; "response_received"; "cancelled"])
        statuses)
 
-let test_receipt_failure_preserves_incomplete_selection ~choice () =
-  with_fixture @@ fun ~config:_ ~meta:_ ~keepers_dir ~keeper_id ~observed ~reply ~dispatch ->
-  let before=snapshot ~keepers_dir ~keeper_id in
-  let receipt=Current.durable_range_receipt_path ~keepers_dir ~keeper_id in
-  Fs_compat.save_file receipt "{damaged admission receipt";
-  let stores=List.map (fun path -> path,Fs_compat.load_file_opt path)
-    [receipt;Current.path_for_keepers_dir ~keepers_dir ~keeper_id;
-     Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id] in
-  reply:=response ~choose:(fun _ -> choice);
-  let output=dispatch () in
-  let request=match !observed with [request] -> request | _ -> fail "one real dispatch expected" in
-  let candidates=rows "candidates" (member "state" request) in
-  check int "verified current facts remain available despite receipt failure" (List.length before.facts)
-    (List.length candidates);
-  List.iter (fun row ->
-    let detail=member "source_detail" row in
-    check string "evaluator sees typed receipt failure" "unavailable"
-      (text "status" (member "receipt_verification" detail));
-    check int "unverified direct witnesses are not invented" 0 (List.length (rows "direct_admission_witnesses" detail));
-    check int "unverified successor witnesses are not invented" 0 (List.length (rows "successor_witnesses" detail));
-    check bool "current claim remains exactly authoritative" true
-      (List.exists (fun fact -> Memory.fact_to_json fact=member "current_fact" detail) before.facts)) candidates;
-  check bool "receipt failure remains incomplete even for a valid semantic answer" true
-    (member "incomplete" output=`Bool true);
-  check bool "receipt failure is visible to the Keeper" true
-    (List.exists (fun row -> text "kind" row="receipt_verification_unavailable") (rows "unavailable" output));
-  check int "current facts are retained only when selected" (if choice="current_decision" then 3 else 0)
-    (integer "selected_count" output);
-  check int "negative labels do not erase retrieval incompleteness" (if choice="not_needed" then 3 else 0)
-    (integer "not_needed_count" output);
-  List.iter (fun (path,bytes) -> check (option string) "unavailable provenance leaves all stores intact"
-    bytes (Fs_compat.load_file_opt path)) stores
-
 let () = run "personal memory select descriptor HTTP"
   ["selection",[
     test_case "managed request context preserves exact consumer evidence" `Quick
       test_managed_request_context_preserves_exact_evidence;
     test_case "missing owner context never reaches evaluation" `Quick
       test_missing_request_context_never_evaluates;
-    test_case "damaged receipts preserve useful current results and incompleteness" `Quick
-      (test_receipt_failure_preserves_incomplete_selection ~choice:"current_decision");
-    test_case "damaged receipts cannot turn omission into complete retrieval" `Quick
-      (test_receipt_failure_preserves_incomplete_selection ~choice:"not_needed");
     test_case "full grouped witnesses produce compact current roles" `Quick (test_grouped_sources_and_compact_results ~limited:false);
     test_case "result limit follows semantic selection" `Quick (test_grouped_sources_and_compact_results ~limited:true);
     test_case "negative verdict invalidated by current retirement" `Quick (test_negative_or_readded_evidence_changes ~readd:false);

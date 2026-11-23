@@ -1,7 +1,9 @@
 ---
 title: "결과를 찾을 수 없는 Librarian 원본의 적용을 막고 새 판정을 잇는다"
-status: Draft
+status: Superseded
+superseded_by: "librarian-call-only-proposes-and-one-writer-per-keeper-commits-in-one-line"
 created: 2026-11-10
+updated: 2026-11-23
 related: ["0500", "librarian-history-settles-finished-originals"]
 ---
 

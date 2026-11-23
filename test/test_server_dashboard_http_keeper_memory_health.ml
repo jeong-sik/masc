@@ -52,23 +52,111 @@ let require_ok = function
   | Error detail -> Alcotest.fail detail
 ;;
 
-let write_snapshot ?(now = test_now) ~keepers_dir ~keeper_id facts =
+let write_snapshot ?(now = test_now) ?(invalidated = []) ~keepers_dir ~keeper_id facts =
   Fs_compat.mkdir_p keepers_dir;
-  let expected_revision =
+  let previous =
     match Current.read_for_keepers_dir ~keepers_dir ~keeper_id with
-    | Ok None -> None
-    | Ok (Some snapshot) -> Some snapshot.revision
+    | Ok snap -> snap
     | Error detail -> Alcotest.fail detail
   in
-  Current.replace
-    ~keepers_dir
-    ~keeper_id
-    ~expected_revision
-    ~now
-    ~source
-    ~facts
-    ()
-  |> require_ok
+  let revision, prev_facts =
+    match previous with
+    | None -> 1, []
+    | Some snapshot -> snapshot.revision + 1, snapshot.facts
+  in
+  let prev_ids = List.map Types.memory_id prev_facts in
+  let next_ids = List.map Types.memory_id facts in
+  let added =
+    List.filter (fun f -> not (List.mem (Types.memory_id f) prev_ids)) facts
+  in
+  let removed =
+    List.filter (fun f -> not (List.mem (Types.memory_id f) next_ids)) prev_facts
+  in
+  let retained = List.length facts - List.length added in
+  let snap : Current.t =
+    { revision
+    ; updated_at = now
+    ; source
+    ; facts
+    ; change = { added; removed; retained; invalidated }
+    }
+  in
+  let snap_bytes = Yojson.Safe.pretty_to_string (Current.to_json snap) ^ "\n" in
+  Fs_compat.save_file_atomic_strict
+    (Current.path_for_keepers_dir ~keepers_dir ~keeper_id)
+    snap_bytes
+  |> require_ok;
+  let log_path =
+    Masc.Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id
+  in
+  let at_end =
+    match Masc.Librarian_log_store.read_tail log_path with
+    | Ok Masc.Librarian_log_store.Nothing_written -> 0
+    | Ok (Masc.Librarian_log_store.Written { rows_end; _ }) -> rows_end
+    | Error _ -> 0
+  in
+  let digest = Agent_core.Checkpoint_objects.digest_of_bytes snap_bytes in
+  let qid =
+    match
+      Masc.Librarian_question_id.of_halves
+        ~front:(String.make Masc.Librarian_question_id.half_length 'a')
+        ~back:(String.make Masc.Librarian_question_id.half_length 'b')
+    with
+    | Some id -> id
+    | None -> Alcotest.fail "question id"
+  in
+  let commit : Masc.Librarian_log.commit =
+    { seq = revision
+    ; at = now
+    ; basis = digest
+    ; after = digest
+    ; revision
+    ; cause =
+        Masc.Librarian_log.Read
+          { question = qid
+          ; shown = Masc.Librarian_log.With_memory
+          ; slot = "health-test"
+          ; trace = source.trace_id
+          ; missing = []
+          }
+    ; effects =
+        { Masc.Librarian_effects.empty with
+          added
+        ; removed =
+            List.map
+              (fun f -> f, Masc.Librarian_effects.Dropped { reason = "replaced" })
+              removed
+        }
+    ; turn_log = Masc.Keeper_turn_log.Log_id.fresh ()
+    ; turn_log_offset = 0
+    ; covers_through = Masc.Librarian_log.Before_first
+    ; covered =
+        { Masc.Keeper_turn_log.trace = ""
+        ; closed_messages = 0
+        ; session = ""
+        ; history_bytes = 0
+        ; internal_bytes = 0
+        ; chat_bytes = 0
+        ; external_rows = 0
+        }
+    ; working_state = None
+    }
+  in
+  (match
+     Masc.Librarian_log_store.append
+       ~path:log_path
+       ~at_end
+       (Masc.Librarian_log.Committed commit)
+   with
+   | Ok _ -> ()
+   | Error _ -> Alcotest.fail "commit log append failed");
+  Masc.Keeper_memory_commit_notifications.notify_committed
+    { keepers_dir = Unix.realpath keepers_dir
+    ; keeper_id
+    ; store = Masc.Keeper_memory_commit_notifications.Ordinary
+    ; revision
+    };
+  snap
 ;;
 
 let source_sha256 = "sha256:" ^ String.make 64 'a'
@@ -249,7 +337,13 @@ let test_reports_derived_facts_and_support_invalidations () =
     (int_field "observed_facts" supported_keeper);
   Alcotest.(check int) "one derived fact" 1
     (int_field "derived_facts" supported_keeper);
-  ignore (write_snapshot ~keepers_dir ~keeper_id:"support" [ conclusion ]);
+  ignore
+    (write_snapshot
+       ~invalidated:
+         [ { Current.fact = conclusion; missing_premise_ids = [ Types.memory_id premise ] } ]
+       ~keepers_dir
+       ~keeper_id:"support"
+       []);
   let invalidated = Health.keeper_memory_health_http_json ~base_path:base in
   let invalidated_keeper = keeper_obj "support" invalidated in
   Alcotest.(check int) "unsupported conclusion is absent" 0
@@ -358,7 +452,7 @@ let test_journal_outcome_distinguishes_unreadable_from_empty () =
   let missing = read () in
   Alcotest.(check bool) "a confirmed missing journal is not a read error" true
     (Option.is_none missing.read_error && missing.facts_by_hour = []);
-  let path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let path = Masc.Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id in
   Unix.mkdir path 0o700;
   Fun.protect ~finally:(fun () -> Unix.rmdir path) (fun () ->
     let unavailable = read () in
@@ -393,7 +487,7 @@ let test_journal_failure_keeps_evidence_and_recovers_without_another_commit () =
     (is_null (member "read_error" first));
   (* A real commit invalidates the cached row before its journal is read. *)
   write [ fact "one"; fact "two" ];
-  let path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let path = Masc.Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id in
   let held = path ^ ".held" in
   Unix.rename path held;
   Unix.mkdir path 0o700;

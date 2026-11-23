@@ -4239,22 +4239,30 @@ let test_handle_request_keeper_memory_access_and_readership () =
         | Ok f -> f
         | Error err -> Alcotest.fail err
       in
-      let snap =
-        match
-          Memory_current.replace ~keepers_dir ~keeper_id:"alpha" ~expected_revision:None ~now
-            ~source:{ kind = Memory_current.Librarian; trace_id = "trace-alpha" }
-            ~facts:
-              [ transcript_fact
-              ; public_board_fact
-              ; direct_board_fact
-              ; derived_on_direct
-              ; derived_on_transcript
-              ]
-            ()
-        with
-        | Ok s -> s
-        | Error err -> Alcotest.fail ("Memory_current.replace failed: " ^ err)
+      let facts =
+        [ transcript_fact
+        ; public_board_fact
+        ; direct_board_fact
+        ; derived_on_direct
+        ; derived_on_transcript
+        ]
       in
+      let snap : Memory_current.t =
+        { revision = 1
+        ; updated_at = now
+        ; source = { kind = Memory_current.Librarian; trace_id = "trace-alpha" }
+        ; facts
+        ; change = { added = facts; removed = []; retained = 0; invalidated = [] }
+        }
+      in
+      Fs_compat.mkdir_p keepers_dir;
+      (match
+         Fs_compat.save_file_atomic_strict
+           (Memory_current.path_for_keepers_dir ~keepers_dir ~keeper_id:"alpha")
+           (Yojson.Safe.pretty_to_string (Memory_current.to_json snap) ^ "\n")
+       with
+       | Ok () -> ()
+       | Error err -> Alcotest.fail ("snapshot write failed: " ^ err));
       (* 1. Default omitted caller on handle_read_resource_eio fails closed (-32001). *)
       let read_direct ?caller id_num uri =
         Resource.handle_read_resource_eio ?caller state (`Int id_num)

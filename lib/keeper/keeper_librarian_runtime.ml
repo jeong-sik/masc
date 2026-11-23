@@ -79,7 +79,28 @@ type extraction_error =
       }
   | Domain_output_invalid of string
 
-let rec extraction_error_kind : extraction_error -> Keeper_memory_os_current.librarian_failure_kind
+type failure_kind =
+  | Prompt_render_failure
+  | Execution_clock_unavailable
+  | Exact_setup_failure
+  | Exact_execution_failure
+  | Domain_output_invalid
+  | Runtime_context_unavailable
+  | Lane_cancelled
+  | Unhandled_exception
+
+let failure_kind_to_string = function
+  | Prompt_render_failure -> "prompt_render_failure"
+  | Execution_clock_unavailable -> "execution_clock_unavailable"
+  | Exact_setup_failure -> "exact_setup_failure"
+  | Exact_execution_failure -> "exact_execution_failure"
+  | Domain_output_invalid -> "domain_output_invalid"
+  | Runtime_context_unavailable -> "runtime_context_unavailable"
+  | Lane_cancelled -> "lane_cancelled"
+  | Unhandled_exception -> "unhandled_exception"
+;;
+
+let rec extraction_error_kind : extraction_error -> failure_kind
   = function
   | Prompt_render_failed _ -> Prompt_render_failure
   | Exact_setup_failed _ -> Exact_setup_failure
@@ -350,7 +371,7 @@ type not_committed =
   { input_capacity_evidence : input_capacity_evidence
   ; input_capacity_only : bool
   ; message_descent : message_descent
-  ; provider_input_refusals : Keeper_librarian_input_refusal.t list
+  ; provider_input_refusals : Keeper_exact_input_refusal.t list
   ; detail : string
   ; walk_shows_size : bool
   ; smaller_range_meets_same_failure : bool
@@ -702,21 +723,15 @@ let record_failure_io ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
   in
   let message =
     Printf.sprintf
-      "%s current_snapshot=%s"
+      "%s kind=%s trace_id=%s current_snapshot=%s"
       detail
+      (failure_kind_to_string kind)
+      trace_id
       (if snapshot_absent then "absent" else "present")
   in
   if snapshot_absent
   then Log.Keeper.error ~keeper_name:keeper_id "%s" message
-  else Log.Keeper.warn ~keeper_name:keeper_id "%s" message;
-  Keeper_memory_os_current.append_librarian_failure
-    ~keepers_dir
-    ~keeper_id
-    ~now:(Time_compat.now ())
-    ~trace_id
-    ~kind
-    ~detail
-    ~snapshot_present:(not snapshot_absent)
+  else Log.Keeper.warn ~keeper_name:keeper_id "%s" message
 ;;
 
 let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
@@ -1065,7 +1080,7 @@ let run_best_effort
                   ~keepers_dir
                   ~keeper_id
                   ~trace_id
-                  ~kind:Keeper_memory_os_current.Lane_cancelled
+                  ~kind:Lane_cancelled
                   ~detail:(Printf.sprintf "memory os librarian cancelled lane=%s" exact_lane_id)));
             raise exn
           | exn ->
@@ -1093,7 +1108,7 @@ let run_best_effort
         ~keepers_dir
         ~keeper_id
         ~trace_id
-        ~kind:Keeper_memory_os_current.Runtime_context_unavailable
+        ~kind:Runtime_context_unavailable
         ~detail
   with
   | Eio.Cancel.Cancelled _ as error -> raise error
@@ -1116,7 +1131,7 @@ let run_best_effort
       ~keepers_dir
       ~keeper_id
       ~trace_id
-      ~kind:Keeper_memory_os_current.Unhandled_exception
+      ~kind:Unhandled_exception
       ~detail:
         (Printf.sprintf
            "memory os librarian lane=%s: %s"

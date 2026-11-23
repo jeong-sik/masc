@@ -53,11 +53,21 @@ type message_descent =
   | Invalid_output_blocks_descent
   | Unsettled_native_blocks_descent
 
+type failure_kind =
+  | Prompt_render_failure
+  | Execution_clock_unavailable
+  | Exact_setup_failure
+  | Exact_execution_failure
+  | Domain_output_invalid
+  | Runtime_context_unavailable
+  | Lane_cancelled
+  | Unhandled_exception
+
 type not_committed =
   { input_capacity_evidence : input_capacity_evidence
   ; input_capacity_only : bool
   ; message_descent : message_descent
-  ; provider_input_refusals : Keeper_librarian_input_refusal.t list
+  ; provider_input_refusals : Keeper_exact_input_refusal.t list
   ; detail : string
   ; walk_shows_size : bool
   ; smaller_range_meets_same_failure : bool
@@ -85,7 +95,7 @@ val run_best_effort
 module For_testing : sig
   val cause_input_refusals
     :  Agent_core.Exact_output.execution_error_cause
-    -> Keeper_librarian_input_refusal.t list
+    -> Keeper_exact_input_refusal.t list
 
   val cause_shows_size : Agent_core.Exact_output.execution_error_cause -> bool
   val cli_failure_shows_size : Keeper_lane_cli_oneshot.failure -> bool
@@ -94,7 +104,7 @@ module For_testing : sig
   type classified_error
 
   val classified_error_detail : classified_error -> string
-  val classified_error_kind : classified_error -> Keeper_memory_os_current.librarian_failure_kind
+  val classified_error_kind : classified_error -> failure_kind
 
   val execute_working_context_classified
     :  ?cli_runner:Keeper_lane_cli_oneshot.runner
@@ -112,7 +122,7 @@ module For_testing : sig
     :  keepers_dir:string
     -> keeper_id:string
     -> trace_id:string
-    -> kind:Keeper_memory_os_current.librarian_failure_kind
+    -> kind:failure_kind
     -> detail:string
     -> unit
 end

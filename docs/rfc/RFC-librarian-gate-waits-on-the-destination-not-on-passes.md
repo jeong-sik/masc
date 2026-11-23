@@ -1,12 +1,12 @@
 ---
 rfc: "librarian-gate-waits-on-the-destination-not-on-passes"
 title: "판정 서버가 거절하면 gate 는 그 서버가 다시 받을 때까지 새 시도를 만들지 않는다"
-status: Draft
+status: Superseded
 created: 2026-11-16
-updated: 2026-11-16
+updated: 2026-11-23
 author: vincent + claude
 supersedes: []
-superseded_by: null
+superseded_by: "librarian-call-only-proposes-and-one-writer-per-keeper-commits-in-one-line"
 related: ["librarian-absorb-gate", "0484", "0433", "provider-path-rest"]
 ---
 

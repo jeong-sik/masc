@@ -66,7 +66,7 @@ val failure_evidence : t -> Keeper_exact_walk_failure.t
 val generation_dispatch : t -> Agent_core.Exact_output.generation_dispatch_fact
 (** HTTP generation only. Measurement and official-client dispatch remain
     separate observations, not provider acceptance/billing evidence. *)
-val exhausted_input_refusals : t -> Keeper_librarian_input_refusal.t list option
+val exhausted_input_refusals : t -> Keeper_exact_input_refusal.t list option
 (** Derived nonempty named causes only for an exhausted, fully visited,
     actually dispatched API-only walk without semantic/invalid/local veto. *)
 

@@ -588,11 +588,6 @@ let upsert_file_fact
       let result =
         with_commit_notification
           ~keepers_dir ~keeper_id:meta.Keeper_meta_contract.name (fun on_commit ->
-        Keeper_memory_os_aggregate_lock.with_lock
-          ?clock
-          ~keepers_dir
-          ~keeper_id:meta.Keeper_meta_contract.name
-          (fun () ->
              update_locked
                ?clock
                ~keepers_dir
@@ -664,7 +659,7 @@ let upsert_file_fact
             ; invalidations
             }
           , true
-          , () ))))
+          , () )))
         |> Result.map fst
         |> Result.map_error (fun detail -> Store_write_failed detail)
       in

@@ -431,17 +431,21 @@ let test_a_librarian_fact_is_superseded_like_the_keepers_own () =
       ~now:100.
       ~origin:{ kind = Types.Injected; trace_id = "pass" }
   in
+  let snap : Current.t =
+    { revision = 1
+    ; updated_at = 100.
+    ; source = { Current.kind = Current.Librarian; trace_id = "pass" }
+    ; facts = [ injected ]
+    ; change = { added = [ injected ]; removed = []; retained = 0; invalidated = [] }
+    }
+  in
+  Fs_compat.mkdir_p env.keepers_dir;
   (match
-     Current.replace
-       ~keepers_dir:env.keepers_dir
-       ~keeper_id
-       ~expected_revision:None
-       ~now:100.
-       ~source:{ Current.kind = Current.Librarian; trace_id = "pass" }
-       ~facts:[ injected ]
-       ()
+     Fs_compat.save_file_atomic_strict
+       (Current.path_for_keepers_dir ~keepers_dir:env.keepers_dir ~keeper_id)
+       (Yojson.Safe.pretty_to_string (Current.to_json snap) ^ "\n")
    with
-   | Ok _ -> ()
+   | Ok () -> ()
    | Error detail -> Alcotest.fail detail);
   let injected_id = Types.memory_id injected in
   let response = write env meta ~supersedes:injected_id "my own summary of the session" in
@@ -505,17 +509,25 @@ let test_search_names_each_current_match_origin () =
     | Some current -> current
     | None -> Alcotest.fail "expected the authored write to be current"
   in
+  let next_snap : Current.t =
+    { revision = current.revision + 1
+    ; updated_at = Unix.gettimeofday ()
+    ; source = { Current.kind = Current.Librarian; trace_id = "pass" }
+    ; facts = current.facts @ [ injected ]
+    ; change =
+        { added = [ injected ]
+        ; removed = []
+        ; retained = List.length current.facts
+        ; invalidated = []
+        }
+    }
+  in
   (match
-     Current.replace
-       ~keepers_dir:env.keepers_dir
-       ~keeper_id
-       ~expected_revision:(Some current.revision)
-       ~now:(Unix.gettimeofday ())
-       ~source:{ Current.kind = Current.Librarian; trace_id = "pass" }
-       ~facts:(current.facts @ [ injected ])
-       ()
+     Fs_compat.save_file_atomic_strict
+       (Current.path_for_keepers_dir ~keepers_dir:env.keepers_dir ~keeper_id)
+       (Yojson.Safe.pretty_to_string (Current.to_json next_snap) ^ "\n")
    with
-   | Ok _ -> ()
+   | Ok () -> ()
    | Error detail -> Alcotest.fail detail);
   let response =
     Runtime.keeper_memory_search_json
@@ -612,17 +624,19 @@ let test_search_finds_what_a_supersede_took_out () =
     | Some held -> held
     | None -> Alcotest.fail "expected a current snapshot"
   in
+  let outside : Current.t =
+    { held with
+      revision = held.revision + 1
+    ; updated_at = Unix.gettimeofday ()
+    ; source = { Current.kind = Current.Librarian; trace_id = "outside" }
+    }
+  in
   (match
-     Current.replace
-       ~keepers_dir:env.keepers_dir
-       ~keeper_id:meta.name
-       ~expected_revision:(Some held.revision)
-       ~now:(Unix.gettimeofday ())
-       ~source:{ Current.kind = Current.Librarian; trace_id = "outside" }
-       ~facts:held.facts
-       ()
+     Fs_compat.save_file_atomic
+       (Current.path_for_keepers_dir ~keepers_dir:env.keepers_dir ~keeper_id:meta.name)
+       (Yojson.Safe.to_string (Current.to_json outside))
    with
-   | Ok _ -> ()
+   | Ok () -> ()
    | Error detail -> Alcotest.fail detail);
   Alcotest.(check bool)
     "the next write is refused"

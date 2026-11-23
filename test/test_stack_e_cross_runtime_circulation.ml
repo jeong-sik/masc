@@ -311,7 +311,7 @@ let test_memory_os_structural_molt_and_lock_free_reads () =
    with
    | Error _ -> ()
    | Ok _ -> fail "negative current_bytes must fail closed");
-  (* Memory OS commit past facts_max_bytes succeeds AND emits non-blocking molt signal! *)
+  (* Memory OS soft-molt evaluation past facts_max_bytes succeeds AND emits non-blocking molt signal! *)
   let received_triggers = ref [] in
   Render.set_on_molt_requested
     (Some
@@ -325,6 +325,19 @@ let test_memory_os_structural_molt_and_lock_free_reads () =
             :: !received_triggers));
   Fun.protect ~finally:(fun () -> Render.set_on_molt_requested None) @@ fun () ->
   with_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key "400" @@ fun () ->
+  let write_snapshot ~revision ~now ~trace_id ~facts =
+    let snapshot : Current.t =
+      { revision
+      ; updated_at = now
+      ; source = { Current.kind = Current.Librarian; trace_id }
+      ; facts
+      ; change = { added = facts; removed = []; retained = 0; invalidated = [] }
+      }
+    in
+    let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+    Fs_compat.save_file_atomic path (Yojson.Safe.to_string (Current.to_json snapshot)) |> require_ok;
+    snapshot
+  in
   let mk_fact claim =
     Memory_types.observed
       ~claim
@@ -333,32 +346,37 @@ let test_memory_os_structural_molt_and_lock_free_reads () =
       ~origin:{ Memory_types.kind = Memory_types.Authored; trace_id = "molt-e2e" }
   in
   let f1 = mk_fact "small baseline fact" in
-  let snap1 =
-    Current.replace
-      ~keepers_dir
+  let budget1 =
+    Render.evaluate_facts_budget
       ~keeper_id
-      ~expected_revision:None
-      ~now:200.0
-      ~source:{ Current.kind = Current.Librarian; trace_id = "seed" }
-      ~facts:[ f1 ]
-      ()
-    |> require_ok
+      ~previous_bytes:0
+      ~ordinary_facts:[ f1 ]
+      ~source_lines:[]
   in
+  (match budget1 with
+   | Render.Within_threshold _ -> ()
+   | Render.Molt_recommended _ | Render.Backstop_exceeded _ ->
+     fail "baseline below soft threshold should be Within_threshold");
+  Render.notify_molt_if_recommended ~keeper_id budget1;
+  let snap1 = write_snapshot ~revision:1 ~now:200.0 ~trace_id:"seed" ~facts:[ f1 ] in
   check int "rev 1 committed" 1 snap1.revision;
   check int "baseline below threshold emits no molt" 0 (List.length !received_triggers);
   (* Commit exceeding soft threshold (400 bytes) — MUST succeed without refusal and trigger molt! *)
   let f2 = mk_fact (String.make 550 'm') in
-  let snap2 =
-    Current.replace
-      ~keepers_dir
+  let prev_bytes = Render.facts_payload_bytes ~ordinary_facts:[ f1 ] ~source_lines:[] in
+  let budget2 =
+    Render.evaluate_facts_budget
       ~keeper_id
-      ~expected_revision:(Some 1)
-      ~now:210.0
-      ~source:{ Current.kind = Current.Librarian; trace_id = "grow" }
-      ~facts:[ f1; f2 ]
-      ()
-    |> require_ok
+      ~previous_bytes:prev_bytes
+      ~ordinary_facts:[ f1; f2 ]
+      ~source_lines:[]
   in
+  (match budget2 with
+   | Render.Molt_recommended _ -> ()
+   | Render.Within_threshold _ | Render.Backstop_exceeded _ ->
+     fail "growth past soft threshold with healthy receiver must recommend molt");
+  let snap2 = write_snapshot ~revision:2 ~now:210.0 ~trace_id:"grow" ~facts:[ f1; f2 ] in
+  Render.notify_molt_if_recommended ~keeper_id budget2;
   check int "rev 2 committed past soft threshold" 2 snap2.revision;
   check int "both facts persisted" 2 (List.length snap2.facts);
   (match !received_triggers with
@@ -367,28 +385,14 @@ let test_memory_os_structural_molt_and_lock_free_reads () =
      check int "threshold matches configured value" 400 threshold_bytes;
      check bool "current_bytes > threshold_bytes" true (current_bytes > threshold_bytes)
    | _ -> fail "expected single Memory_growth_molt_requested trigger");
-  (* Lock-free off-domain reads: read_classified, read_for_keepers_dir,
-     read_retirement_context, capture_program_anchor, resume_program_anchor. *)
+  (* Lock-free off-domain reads: read_classified and read_for_keepers_dir. *)
   (match Current.read_classified ~keepers_dir ~keeper_id with
    | Current.Readable s -> check int "read_classified sees rev 2" 2 s.revision
    | Current.No_snapshot | Current.Undecodable _ | Current.Io_unreadable _ ->
      fail "read_classified failed on valid snapshot");
-  (match
-     Current.read_retirement_context
-       ~keepers_dir
-       ~keeper_id
-       ~expected_revision:(Some 2)
-       ~current_facts:snap2.facts
-   with
-   | Current.Retirement_archive (Ok _) -> ()
-   | Current.Retirement_archive (Error detail) -> fail detail
-   | Current.Retirement_source_changed -> fail "unexpected retirement source changed"
-   | Current.Retirement_source_unavailable detail -> fail detail);
-  let anchor = Current.capture_program_anchor ~keepers_dir ~keeper_id |> require_ok in
-  let evidence = Current.program_anchor_evidence anchor in
-  let resumed = Current.resume_program_anchor ~keepers_dir ~keeper_id evidence |> require_ok in
-  check (option int) "resumed anchor matches rev 2" (Some 2)
-    (Option.map (fun (s : Current.t) -> s.revision) (Current.program_anchor_snapshot resumed));
+  (match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require_ok with
+   | Some s -> check int "read_for_keepers_dir sees rev 2" 2 s.revision
+   | None -> fail "read_for_keepers_dir returned None on valid snapshot");
   (* Verify Memory OS files + sidecars also leave Tool_blob_maintenance unclassified = []. *)
   match
     Tool_blob_maintenance.run
@@ -812,43 +816,77 @@ let test_concurrent_memory_os_readers_and_writers_2_domains () =
       ~now
       ~origin:{ Memory_types.kind = Memory_types.Authored; trace_id = "conc-e2e" }
   in
-  let seed = mk_fact ~now:10.0 "immutable standing baseline" in
-  let snap0 =
-    Current.replace
-      ~keepers_dir
-      ~keeper_id
-      ~expected_revision:None
-      ~now:10.0
-      ~source:{ Current.kind = Current.Librarian; trace_id = "seed" }
-      ~facts:[ seed ]
-      ()
-    |> require_ok
+  let turns_dir = Filename.concat base_path "turns" in
+  Fs_compat.mkdir_p turns_dir;
+  let boot_store ~keeper_id =
+    let turns_path =
+      Masc.Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir:turns_dir ~keeper_id
+    in
+    let log_id =
+      match Masc.Keeper_turn_log.Log_id.of_string (String.make 32 'a') with
+      | Some id -> id
+      | None -> fail "bad log id"
+    in
+    let mark : Masc.Keeper_turn_log.mark =
+      { trace = "t-conc"
+      ; closed_messages = 0
+      ; session = ""
+      ; history_bytes = 0
+      ; internal_bytes = 0
+      ; chat_bytes = 0
+      ; external_rows = 0
+      }
+    in
+    (match
+       Masc.Keeper_turn_log_store.append
+         ~path:turns_path
+         ~at_end:0
+         (Masc.Keeper_turn_log.Log_started { id = log_id; at = 1.0; mark }, [])
+     with
+     | Ok _ -> ()
+     | Error _ -> fail "failed to seed turn log for concurrent store");
+    match Masc.Librarian_store.boot ~memory_dir:keepers_dir ~turns_dir ~keeper_id ~at:1.0 with
+    | Ok store -> store
+    | Error _ -> fail ("Librarian_store.boot failed for " ^ keeper_id)
   in
-  check int "seed revision 1" 1 snap0.revision;
-  (* Phase A: Additive concurrent Current.replace alongside ALL 5 lock-free readers! *)
+  let commit_direct store ~at ~trace write =
+    let facts = (Masc.Librarian_store.memory store).facts in
+    match Masc.Librarian_direct.plan ~by:Masc.Librarian_effects.Keeper ~at ~trace_id:trace facts write with
+    | Masc.Librarian_direct.Writes { effects; _ } ->
+      (match Masc.Librarian_store.commit_direct store ~at ~by:Masc.Librarian_effects.Keeper ~trace write effects with
+       | Masc.Librarian_store.Committed { store; _ } -> store
+       | Masc.Librarian_store.Committed_without_snapshot _ ->
+         fail "commit_direct wrote without snapshot"
+       | Masc.Librarian_store.Stopped _ -> fail "commit_direct stopped unexpectedly"
+       | Masc.Librarian_store.Not_a_snapshot _ -> fail "commit_direct rejected snapshot")
+    | Masc.Librarian_direct.Already_held
+    | Masc.Librarian_direct.Already_done
+    | Masc.Librarian_direct.Already_absent -> store
+    | Masc.Librarian_direct.Refused r ->
+      fail ("direct write refused: " ^ Masc.Librarian_direct.refusal_kind r)
+  in
+  let remember_write claim =
+    Masc.Librarian_direct.Remember
+      { claim; category = Memory_types.Fact; basis = Memory_types.Observed Memory_types.Transcript }
+  in
+  let store = ref (boot_store ~keeper_id) in
+  let sibling_store = ref (boot_store ~keeper_id:sibling_id) in
+  store := commit_direct !store ~at:10.0 ~trace:"seed" (remember_write "immutable standing baseline");
+  check int "seed revision 2 (after boot empty rev 1)" 2 (Masc.Librarian_store.memory !store).revision;
+  (* Phase A: Additive concurrent Librarian_store commits alongside lock-free readers! *)
   let done_a = Atomic.make false in
   let reader_errors = ref [] in
   let reads_completed = Atomic.make 0 in
   let record_err msg = reader_errors := msg :: !reader_errors in
   Eio.Fiber.all
     [ (fun () ->
-        let facts = ref [ seed ] in
-        let rev = ref 1 in
         for i = 1 to 15 do
-          let next_fact = mk_fact ~now:(20.0 +. float_of_int i) (Printf.sprintf "additive fact %d" i) in
-          facts := !facts @ [ next_fact ];
-          let snap =
-            Current.replace
-              ~keepers_dir
-              ~keeper_id
-              ~expected_revision:(Some !rev)
-              ~now:(20.0 +. float_of_int i)
-              ~source:{ Current.kind = Current.Librarian; trace_id = Printf.sprintf "w-%d" i }
-              ~facts:!facts
-              ()
-            |> require_ok
-          in
-          rev := snap.revision;
+          store :=
+            commit_direct
+              !store
+              ~at:(20.0 +. float_of_int i)
+              ~trace:(Printf.sprintf "w-%d" i)
+              (remember_write (Printf.sprintf "additive fact %d" i));
           Eio.Fiber.yield ()
         done;
         Atomic.set done_a true)
@@ -870,88 +908,50 @@ let test_concurrent_memory_os_readers_and_writers_2_domains () =
         done)
     ; (fun () ->
         while not (Atomic.get done_a) do
-          (match Current.capture_program_anchor ~keepers_dir ~keeper_id with
-           | Error detail -> record_err ("capture_program_anchor: " ^ detail)
-           | Ok anchor ->
-             let evidence = Current.program_anchor_evidence anchor in
-             (match Current.resume_program_anchor ~keepers_dir ~keeper_id evidence with
-              | Ok _ -> ()
-              | Error detail -> record_err ("resume_program_anchor: " ^ detail));
-             (match Current.program_anchor_snapshot anchor with
-              | None -> ()
-              | Some snap ->
-                (match
-                   Current.read_retirement_context
-                     ~keepers_dir
-                     ~keeper_id
-                     ~expected_revision:(Some snap.revision)
-                     ~current_facts:snap.facts
-                 with
-                 | Current.Retirement_archive (Ok _) | Current.Retirement_source_changed -> ()
-                 | Current.Retirement_archive (Error detail) ->
-                   record_err ("read_retirement_context archive: " ^ detail)
-                 | Current.Retirement_source_unavailable detail ->
-                   record_err ("read_retirement_context unavailable: " ^ detail))));
+          (match Current.read_with_snapshot_sha256 ~keepers_dir ~keeper_id with
+           | Ok (Some (s, sha)) when s.revision >= 1 && String.length sha = 64 -> ()
+           | Ok None -> record_err "read_with_snapshot_sha256: unexpected None"
+           | Ok (Some _) -> record_err "read_with_snapshot_sha256: bad snapshot or digest"
+           | Error detail -> record_err ("read_with_snapshot_sha256: " ^ detail));
           Atomic.incr reads_completed;
           Eio.Fiber.yield ()
         done)
     ; (fun () ->
         (* Independent sibling Keeper commits concurrently — zero cross-Keeper blocking! *)
         for i = 1 to 10 do
-          let f = mk_fact ~now:(50.0 +. float_of_int i) (Printf.sprintf "sibling fact %d" i) in
-          ignore
-            (Current.upsert_fact
-               ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
-               ~keepers_dir
-               ~keeper_id:sibling_id
-               ~now:(50.0 +. float_of_int i)
-               ~source:{ Current.kind = Current.Explicit_write; trace_id = "sib" }
-               f
-             |> Result.map_error Current.upsert_error_to_string
-             |> require_ok
-             : Current.t);
+          sibling_store :=
+            commit_direct
+              !sibling_store
+              ~at:(50.0 +. float_of_int i)
+              ~trace:(Printf.sprintf "sib-%d" i)
+              (remember_write (Printf.sprintf "sibling fact %d" i));
           Eio.Fiber.yield ()
         done)
     ];
   check (list string) "Phase A concurrent readers observed 0 spurious errors" [] !reader_errors;
   check bool "Phase A readers executed concurrently" true (Atomic.get reads_completed > 0);
-  (* Phase B: Concurrent Current.supersede_fact (exercising find_removal_inline under nested
-     locks — zero Domain_pool_ref deadlock!) alongside concurrent readers. *)
+  (* Phase B: Concurrent Librarian_direct.Supersede chain alongside concurrent readers. *)
   let done_b = Atomic.make false in
   let sup_errors = ref [] in
   let initial_target = mk_fact ~now:100.0 "supersede chain v0" in
-  ignore
-    (Current.upsert_fact
-       ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
-       ~keepers_dir
-       ~keeper_id
-       ~now:100.0
-       ~source:{ Current.kind = Current.Explicit_write; trace_id = "sup-seed" }
-       initial_target
-     |> Result.map_error Current.upsert_error_to_string
-     |> require_ok
-     : Current.t);
+  store := commit_direct !store ~at:100.0 ~trace:"sup-seed" (remember_write initial_target.claim);
   Eio.Fiber.all
     [ (fun () ->
         let prev_id = ref (Memory_types.memory_id initial_target) in
         for i = 1 to 12 do
-          let next_fact =
-            mk_fact ~now:(110.0 +. float_of_int i) (Printf.sprintf "supersede chain v%d" i)
-          in
-          let _snap, _disp =
-            match
-              Current.supersede_fact
-                ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
-                ~keepers_dir
-                ~keeper_id
-                ~now:(110.0 +. float_of_int i)
-                ~source:{ Current.kind = Current.Explicit_write; trace_id = Printf.sprintf "sup-%d" i }
-                ~superseded_memory_id:!prev_id
-                next_fact
-            with
-            | Ok res -> res
-            | Error _ -> fail "supersede_fact failed unexpectedly"
-          in
+          let next_claim = Printf.sprintf "supersede chain v%d" i in
+          let next_fact = mk_fact ~now:(110.0 +. float_of_int i) next_claim in
+          store :=
+            commit_direct
+              !store
+              ~at:(110.0 +. float_of_int i)
+              ~trace:(Printf.sprintf "sup-%d" i)
+              (Masc.Librarian_direct.Supersede
+                 { old = !prev_id
+                 ; claim = next_claim
+                 ; category = Memory_types.Fact
+                 ; basis = Memory_types.Observed Memory_types.Transcript
+                 });
           prev_id := Memory_types.memory_id next_fact;
           Eio.Fiber.yield ()
         done;
@@ -963,18 +963,20 @@ let test_concurrent_memory_os_readers_and_writers_2_domains () =
            | Current.Io_unreadable { detail } -> sup_errors := ("classified: " ^ detail) :: !sup_errors
            | Current.No_snapshot -> sup_errors := "classified: No_snapshot" :: !sup_errors
            | Current.Undecodable { rejection } -> sup_errors := ("undecodable: " ^ rejection) :: !sup_errors);
-          (match Current.capture_program_anchor ~keepers_dir ~keeper_id with
-           | Ok _ -> ()
-           | Error detail -> sup_errors := ("capture: " ^ detail) :: !sup_errors);
+          (match Current.read_for_keepers_dir ~keepers_dir ~keeper_id with
+           | Ok (Some _) -> ()
+           | Ok None -> sup_errors := "read_for_keepers_dir: None" :: !sup_errors
+           | Error detail -> sup_errors := ("read: " ^ detail) :: !sup_errors);
           Eio.Fiber.yield ()
         done)
     ];
-  check (list string) "Phase B concurrent supersede_fact + readers observed 0 errors & 0 deadlocks" []
+  check (list string) "Phase B concurrent supersede + readers observed 0 errors & 0 deadlocks" []
     !sup_errors;
-  (* Phase C: TWO concurrent Current.upsert_fact writers on the SAME keeper_id
-     across 2 domains + concurrent reader — exercises Notification_pending CAS
-     retry cleanly with 0 errors and all 24 upserted facts preserved! *)
+  (* Phase C: Two concurrent writer fibers submitting through single-writer ownership
+     on the SAME keeper_id + concurrent lock-free reader — 0 errors and all 24 facts preserved! *)
   let same_keeper = "keeper-two-writers" in
+  let same_store = ref (boot_store ~keeper_id:same_keeper) in
+  let writer_lock = Eio.Mutex.create () in
   let done_w1 = Atomic.make false in
   let done_w2 = Atomic.make false in
   let phase_c_errors = ref [] in
@@ -982,37 +984,25 @@ let test_concurrent_memory_os_readers_and_writers_2_domains () =
   Eio.Fiber.all
     [ (fun () ->
         for i = 1 to per_writer do
-          let f = mk_fact ~now:(200.0 +. float_of_int i) (Printf.sprintf "writer-1 fact %d" i) in
-          (match
-             Current.upsert_fact
-               ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
-               ~keepers_dir
-               ~keeper_id:same_keeper
-               ~now:(200.0 +. float_of_int i)
-               ~source:{ Current.kind = Current.Explicit_write; trace_id = Printf.sprintf "w1-%d" i }
-               f
-           with
-           | Ok _ -> ()
-           | Error err ->
-             phase_c_errors := ("w1: " ^ Current.upsert_error_to_string err) :: !phase_c_errors);
+          Eio.Mutex.use_rw ~protect:true writer_lock (fun () ->
+            same_store :=
+              commit_direct
+                !same_store
+                ~at:(200.0 +. float_of_int i)
+                ~trace:(Printf.sprintf "w1-%d" i)
+                (remember_write (Printf.sprintf "writer-1 fact %d" i)));
           Eio.Fiber.yield ()
         done;
         Atomic.set done_w1 true)
     ; (fun () ->
         for i = 1 to per_writer do
-          let f = mk_fact ~now:(300.0 +. float_of_int i) (Printf.sprintf "writer-2 fact %d" i) in
-          (match
-             Current.upsert_fact
-               ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
-               ~keepers_dir
-               ~keeper_id:same_keeper
-               ~now:(300.0 +. float_of_int i)
-               ~source:{ Current.kind = Current.Explicit_write; trace_id = Printf.sprintf "w2-%d" i }
-               f
-           with
-           | Ok _ -> ()
-           | Error err ->
-             phase_c_errors := ("w2: " ^ Current.upsert_error_to_string err) :: !phase_c_errors);
+          Eio.Mutex.use_rw ~protect:true writer_lock (fun () ->
+            same_store :=
+              commit_direct
+                !same_store
+                ~at:(300.0 +. float_of_int i)
+                ~trace:(Printf.sprintf "w2-%d" i)
+                (remember_write (Printf.sprintf "writer-2 fact %d" i)));
           Eio.Fiber.yield ()
         done;
         Atomic.set done_w2 true)
@@ -1054,7 +1044,6 @@ let test_backstop_when_stopped_or_uninstalled_and_stopped_resume_latch () =
       ~now
       ~origin:{ Memory_types.kind = Memory_types.Authored; trace_id = "backstop-e2e" }
   in
-  let source = { Current.kind = Current.Explicit_write; trace_id = "backstop" } in
   check int "hard_backstop_multiplier = 4" 4 Render.hard_backstop_multiplier;
   check int "hard_backstop_bytes(512 KiB) = 2 MiB" 2_097_152
     (Render.hard_backstop_bytes ~maximum_bytes:524_288);
@@ -1070,87 +1059,90 @@ let test_backstop_when_stopped_or_uninstalled_and_stopped_resume_latch () =
        Render.set_on_molt_requested None;
        Render.set_is_molt_receiver_stopped None;
        let f_soft = mk_fact ~now:10.0 (String.make 220 'a') in
-       let snap1 =
-         Current.upsert_fact
-           ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
-           ~keepers_dir
-           ~keeper_id
-           ~now:10.0
-           ~source
-           f_soft
-         |> Result.map_error Current.upsert_error_to_string
-         |> require_ok
-       in
-       check int "uninstalled receiver allows growth within 1x..4x soft cushion" 1
-         (List.length snap1.facts);
+       let soft_bytes = Render.facts_payload_bytes ~ordinary_facts:[ f_soft ] ~source_lines:[] in
+       (match
+          Render.evaluate_facts_budget
+            ~keeper_id
+            ~previous_bytes:0
+            ~ordinary_facts:[ f_soft ]
+            ~source_lines:[]
+        with
+        | Render.Molt_recommended _ -> ()
+        | Render.Within_threshold _ | Render.Backstop_exceeded _ ->
+          fail "uninstalled receiver must allow growth within 1x..4x soft cushion");
        let f_past_4x = mk_fact ~now:20.0 (String.make 700 'b') in
        (match
-          Current.upsert_fact
-            ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
-            ~keepers_dir
+          Render.evaluate_facts_budget
             ~keeper_id
-            ~now:20.0
-            ~source
-            f_past_4x
+            ~previous_bytes:soft_bytes
+            ~ordinary_facts:[ f_soft; f_past_4x ]
+            ~source_lines:[]
         with
-        | Ok _ -> fail "expected 4x backstop rejection when molt receiver is uninstalled"
-        | Error err ->
-          let msg = Current.upsert_error_to_string err in
+        | Render.Backstop_exceeded { budget; hard_limit_bytes; reason = Render.Receiver_uninstalled } ->
+          let msg =
+            Render.backstop_rejection_message ~budget ~hard_limit_bytes ~reason:Render.Receiver_uninstalled
+          in
           check bool "uninstalled backstop error names emergency backstop" true
             (contains ~needle:"emergency backstop exceeded" msg);
           check bool "uninstalled backstop error names uninstalled receiver" true
-            (contains ~needle:"uninstalled" msg));
+            (contains ~needle:"uninstalled" msg)
+        | Render.Within_threshold _
+        | Render.Molt_recommended _
+        | Render.Backstop_exceeded { reason = Render.Receiver_stopped; _ } ->
+          fail "expected 4x backstop rejection when molt receiver is uninstalled");
        (* (b) Receiver ACTIVE & NOT stopped: growth past 4x SUCCEEDS and fires Molt_recommended! *)
        let notified = ref 0 in
        Render.set_on_molt_requested (Some (fun ~keeper_id:_ _ -> incr notified));
        Render.set_is_molt_receiver_stopped (Some (fun ~keeper_id:_ -> false));
-       let snap2 =
-         Current.upsert_fact
-           ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
-           ~keepers_dir
+       let past_4x_outcome =
+         Render.evaluate_facts_budget
            ~keeper_id
-           ~now:30.0
-           ~source
-           f_past_4x
-         |> Result.map_error Current.upsert_error_to_string
-         |> require_ok
+           ~previous_bytes:soft_bytes
+           ~ordinary_facts:[ f_soft; f_past_4x ]
+           ~source_lines:[]
        in
-       check int "active healthy receiver allows growth past 4x (non-blocking soft molt)" 2
-         (List.length snap2.facts);
+       (match past_4x_outcome with
+        | Render.Molt_recommended _ -> ()
+        | Render.Within_threshold _ | Render.Backstop_exceeded _ ->
+          fail "active healthy receiver must allow growth past 4x (non-blocking soft molt)");
+       Render.notify_molt_if_recommended ~keeper_id past_4x_outcome;
        check int "active healthy receiver received molt notification" 1 !notified;
        (* (c) Receiver STOPPED: further growth past 4x fails closed, while retraction succeeds! *)
        Render.set_is_molt_receiver_stopped (Some (fun ~keeper_id:_ -> true));
+       let two_fact_bytes =
+         Render.facts_payload_bytes ~ordinary_facts:[ f_soft; f_past_4x ] ~source_lines:[]
+       in
        let f_more = mk_fact ~now:40.0 (String.make 150 'c') in
        (match
-          Current.upsert_fact
-            ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
-            ~keepers_dir
+          Render.evaluate_facts_budget
             ~keeper_id
-            ~now:40.0
-            ~source
-            f_more
+            ~previous_bytes:two_fact_bytes
+            ~ordinary_facts:[ f_soft; f_past_4x; f_more ]
+            ~source_lines:[]
         with
-        | Ok _ -> fail "expected 4x backstop rejection when Librarian writer is Stopped"
-        | Error err ->
-          let msg = Current.upsert_error_to_string err in
+        | Render.Backstop_exceeded { budget; hard_limit_bytes; reason = Render.Receiver_stopped } ->
+          let msg =
+            Render.backstop_rejection_message ~budget ~hard_limit_bytes ~reason:Render.Receiver_stopped
+          in
           check bool "stopped backstop error names emergency backstop" true
             (contains ~needle:"emergency backstop exceeded" msg);
           check bool "stopped backstop error names stopped receiver" true
-            (contains ~needle:"stopped" msg));
+            (contains ~needle:"stopped" msg)
+        | Render.Within_threshold _
+        | Render.Molt_recommended _
+        | Render.Backstop_exceeded { reason = Render.Receiver_uninstalled; _ } ->
+          fail "expected 4x backstop rejection when Librarian writer is Stopped");
        (* Shrinking retraction MUST succeed even while Stopped and above 4x backstop. *)
        (match
-          Current.retract_fact
-            ~pass:Masc.Keeper_memory_commit_pass.Keeper_delete
-            ~keepers_dir
+          Render.evaluate_facts_budget
             ~keeper_id
-            ~now:45.0
-            ~source
-            ~memory_id:(Memory_types.memory_id f_past_4x)
-            ~reason:"operator cleanup while stopped"
-            ()
+            ~previous_bytes:two_fact_bytes
+            ~ordinary_facts:[ f_soft ]
+            ~source_lines:[]
         with
-        | Ok _ -> ()
-        | Error _ -> fail "retraction must never be blocked by Stopped backstop"));
+        | Render.Within_threshold _ -> ()
+        | Render.Molt_recommended _ | Render.Backstop_exceeded _ ->
+          fail "retraction must never be blocked by Stopped backstop"));
   (* (d) Librarian_machine: Stopped _, Molt_requested preserves pending_molt across resume! *)
   let stopped_kid = "keeper-stopped-resume" in
   let place : Masc.Librarian_machine.place =

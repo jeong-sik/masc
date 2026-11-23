@@ -9,7 +9,9 @@
     "test_goal_tools",
     "test_goal_verification_agent",
     "test_workspace_memory_ledger",
-    "test_keeper_librarian_continuity",
+    "test_librarian_writer",
+    "test_librarian_writers",
+    "test_living_librarian",
     "test_schedule_store"
   ]
 }

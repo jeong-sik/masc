@@ -1,9 +1,0 @@
-(test
- (name test_keeper_memory_select_capture)
- (modules test_keeper_memory_select_capture)
- (deps fixtures/memory_resolved_selection_replay/actual.json
-  ../config/prompts/keeper.memory.selection.md
-  ../config/prompts/keeper.memory.selection.criteria.md
-  ../config/prompts/keeper.memory.selection.candidate.md
-  ../config/prompts/keeper.memory.selection.request_context.md)
- (libraries masc_test_deps exact_output_fixture masc masc.runtime masc.masc_eio_context eio_main))

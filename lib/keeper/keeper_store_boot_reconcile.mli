@@ -96,13 +96,6 @@ val examine : Workspace.config -> examination
     it. Every call logs that line again, so boot calls [examine] once and
     the line count equals the boot count. *)
 
-val recover_memory_publications : Workspace.config -> refusal list
-(** The explicit boot recovery stage for the existing snapshot-owner scope.
-    A receipt-only first publication remains outside this boot recovery and
-    examination scope. Recovery failures and an unreadable inventory are mandatory refusals,
-    including when the quarantine flag is set. Success does not itself
-    authorize quarantine. *)
-
 val admit
   :  accept_quarantine:bool
   -> examination
@@ -161,9 +154,6 @@ val summary : report -> string
 (** One line for the boot log. *)
 
 module For_testing : sig
-  val recover_memory_publications_with :
-    recover:(keepers_dir:string -> keeper_id:string -> (unit, string) result) ->
-    Workspace.config -> refusal list
   val record_event_queue_failure :
     keeper:string -> Keeper_event_queue_persistence.read_only_failure ->
     examination -> examination

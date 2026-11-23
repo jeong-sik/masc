@@ -45,24 +45,8 @@
   keeper_msg_async_cancel
   keeper_memory_os_current_types
   keeper_memory_os_current_layout
-  keeper_memory_os_current_range_codec
-  keeper_memory_os_current_receipt_store
-  keeper_memory_os_current_journal
-  keeper_memory_os_current_retraction_plan
-  keeper_memory_os_current_publication
-  keeper_memory_os_current_read_anchor
-  keeper_memory_os_current_change_metrics
-  keeper_memory_os_current_update
-  keeper_memory_os_current_revision_evidence
-  keeper_memory_os_current_program_apply
-  keeper_memory_os_current_fact_ops
-  keeper_memory_os_receipt_selection
   keeper_memory_os_support_core
-  keeper_memory_os_disposition_core
   keeper_memory_os_snapshot_codec
-  keeper_memory_os_journal_codec
-  keeper_memory_os_successor_recall
-  keeper_librarian_unread_ledger
   keeper_gate_types
   keeper_gate_projection
   keeper_gate_authorization

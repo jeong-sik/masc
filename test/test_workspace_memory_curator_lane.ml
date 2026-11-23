@@ -15,11 +15,18 @@ let () = Mirage_crypto_rng_unix.use_default ()
 
 let commit_facts ~base_path ~keeper_id claims =
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Fs_compat.mkdir_p keepers_dir;
   let now = 1_700_000_000. in
-  let expected_revision =
-    match get (Current.read_for_keepers_dir ~keepers_dir ~keeper_id) with
-    | None -> None
-    | Some current -> Some current.revision
+  let previous = get (Current.read_for_keepers_dir ~keepers_dir ~keeper_id) in
+  let revision =
+    match previous with
+    | None -> 1
+    | Some current -> current.revision + 1
+  in
+  let previous_facts =
+    match previous with
+    | None -> []
+    | Some current -> current.facts
   in
   let facts =
     List.map
@@ -31,16 +38,31 @@ let commit_facts ~base_path ~keeper_id claims =
            ~origin:{ kind = Types.Authored; trace_id = "curator-test-fixture" })
       claims
   in
-  Current.replace
-    ~keepers_dir
-    ~keeper_id
-    ~expected_revision
-    ~now
-    ~source:{ kind = Current.Librarian; trace_id = "curator-test-fixture" }
-    ~facts
-    ()
-  |> get
-  |> ignore
+  let prev_ids = List.map Types.memory_id previous_facts in
+  let next_ids = List.map Types.memory_id facts in
+  let added = List.filter (fun f -> not (List.mem (Types.memory_id f) prev_ids)) facts in
+  let removed =
+    List.filter (fun f -> not (List.mem (Types.memory_id f) next_ids)) previous_facts
+  in
+  let retained = List.length facts - List.length added in
+  let snapshot : Current.t =
+    { revision
+    ; updated_at = now
+    ; source = { kind = Current.Librarian; trace_id = "curator-test-fixture" }
+    ; facts
+    ; change = { added; removed; retained; invalidated = [] }
+    }
+  in
+  Fs_compat.save_file_atomic_strict
+    (Current.path_for_keepers_dir ~keepers_dir ~keeper_id)
+    (Yojson.Safe.pretty_to_string (Current.to_json snapshot) ^ "\n")
+  |> get;
+  Keeper_memory_commit_notifications.notify_committed
+    { keepers_dir = Unix.realpath keepers_dir
+    ; keeper_id
+    ; store = Keeper_memory_commit_notifications.Ordinary
+    ; revision
+    }
 ;;
 
 let await_owner clock base_path condition =

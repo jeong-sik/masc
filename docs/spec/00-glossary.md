@@ -1042,13 +1042,11 @@ status: reference
   한 회차. 모든 cycle이 모델 호출을 실행하지는 않는다.
 
 **Turn**
-: "turn"만 쓰면 아래 넷 가운데 무엇인지 알 수 없다. 앞의 셋은 단위나 기록이고, 마지막
+: "turn"만 쓰면 아래 셋 가운데 무엇인지 알 수 없다. 앞의 둘은 단위나 기록이고, 마지막
   하나는 실패 원인이다. 문맥 없이 쓰지 않는다.
   - **Keeper Turn** — MASC가 하나의 Keeper 작업을 시도하는 단위. (아래 항목)
   - **agent core Turn** — 하나의 agent core Agent run 내부의 한 단계. Keeper turn과
     동일한 단위가 아니다. (아래 항목)
-  - **Turn Boundary** — 끝난 Keeper turn이 `turn-boundaries.jsonl`에 남기는 한 줄.
-    History 안에는 turn의 경계가 없다. (아래 항목)
   - **Turn Configuration Error** — Keeper turn이 typed Agent Core 구성 오류로 끝난
     latch된 실패 원인. (아래 항목)
 
@@ -4116,53 +4114,6 @@ status: reference
   원장이 아직 세지 않은 위치까지 거절이 앞을 옮길 수 있다. 이때 다음 요청은 턴이
   보관한 Carried Front를 쓴다.
 
-**Turn Boundary**
-: 끝난 Keeper turn이 남기는 한 줄(`keepers/<keeper>/turn-boundaries.jsonl`).
-  `<base>/.masc` 아래에 저장한다. 그 turn이
-  끝났을 때 저장된 History가 몇 Atom인지와 마지막 Atom의 digest를 적는다.
-  History 안에는 turn의 경계가 없으므로, turn이라는 사건을 History 안의 위치로
-  옮겨 적는 유일한 기록이다. turn이 Atom이 없는 History에서 시작했는지
-  (`fresh`/`continued`)도 같이 적는다. 이어지는 History로 시작한 turn은 자기 시작
-  위치(`continued_from`, 시작 Atom 수와 그 Atom을 여는 메시지의 digest)도 적는다.
-  그래야 못 읽는 줄 하나가 회차를 영구히 세우지 않는다 — 뒤따르는 줄이 자기 시작
-  상태를 실어 그 줄의 정체를 가른다. Checkpoint 파일이 있었는지가 아니라 Atom이
-  있었는지로 정한다. Keeper는 빈 Checkpoint를 갖고 만들어지기 때문이다. 읽는 쪽은
-  같은 재시작 구간 안의 줄을 Atom 수로 줄 세운다.
-  같은 파일에 `history_restarted` 줄도 쌓인다. "이 trace의 Atom 번호가 이 줄부터
-  0에서 다시 시작한다"를 말하는 줄이고, History를 다시 시작하게 만든 쪽이 쓴다.
-  `masc_keeper_clear`는 비운 Checkpoint가 저장된 뒤에 쓴다. Atom이 없는 History에서
-  시작하는 turn은, 저장된 History에 Atom이 없는 것을 알면 시작할 때 쓰고,
-  Checkpoint를 못 읽어서 모르면 처음 받아들여진 저장 뒤에 쓴다. 읽는 쪽은 이 줄을
-  보는 즉시 0부터 읽어도 되므로, 어느 쪽도 다시 시작하기 전에 쓰지 않는다. `fresh`
-  줄과 `history_restarted` 줄은 읽는 쪽에 같은 말을 한다. 가장 최근의 이 두 종류
-  중 하나부터 현재 History의 끝 경계를 고른다. 그 앞의 줄은 같은 메시지가 반복되어
-  digest가 맞더라도 쓰지 않으며, `fresh` turn의 자기 끝 경계는 포함한다.
-  이 파일의 Atom 위치는 이 workspace의 History만 가리키는 좌표다.
-
-**Turn Boundary Position (턴 경계 위치)**
-: `turn-boundaries.jsonl`의 `turn_ended` 줄이 적는, 그 turn이 끝났을 때 History의
-  끝이 어디인가. 닫힌 넷이고 wire `kind`가 이름이다 — `Atom_history { end_atom;
-  last_atom_digest }`(`atom_history`), `Empty_atom_history`(`empty_atom_history`),
-  `No_atom_history`(`no_atom_history`), `Stale_noop`(`stale_noop`). 위치(Atom 수와
-  마지막 Atom의 digest)를 갖는 것은 `Atom_history` 하나다. 저장이 Checkpoint를
-  돌려주면 그 messages에서 위치를 세고, Atom이 하나도 없으면 `Empty_atom_history`다.
-  돌려줄 Checkpoint가 없으면 소유자로 갈린다 — 공식 클라이언트 turn은 Agent Core
-  Checkpoint를 저장하지 않으므로 `No_atom_history`, Agent Core turn은 저장 결과가
-  `Stale_noop`일 때만 Checkpoint가 없으므로 `Stale_noop`이다. 저장이 `Error`면 줄을
-  쓰지 않는다
-  (`keeper_agent_run_finalize_response.ml`의 `turn_boundary_position`). 그래서
-  `No_atom_history` 줄은 공식 클라이언트 turn을 가리킨다. 실패로 끝난 turn은 이 저장에
-  닿지 않지만, 마지막으로 보낸 후보가 공식 클라이언트였으면 `No_atom_history` 끝 줄을
-  따로 남긴다. 입력은 이미 그 turn의 History Fragment이고 부른 도구는 이미 행동했을 수
-  있으므로, Librarian 회차가 입력과 도구 관측을 읽어야 하기 때문이다
-  (`record_errored_official_turn_boundary`, #38809). 실패한 Agent Core turn은 stage 저장이
-  Atom을 갖고 있어 다음 끝 줄이 덮고, 어떤 후보도 보내지 못한 turn은 줄을 남기지 않는다.
-  `Stale_noop`은
-  `Keeper_checkpoint_store`의 저장 결과 `Stale_noop`(더 새 writer가 앞서 canonical
-  Checkpoint를 그대로 둔 성공적 no-op)과 이름을 공유하지만 다른 값이다 — 하나는
-  저장 결과, 하나는 turn 경계 위치다.
-  → [Keeper_turn_boundaries](../../lib/keeper/keeper_turn_boundaries.ml)
-
 **Turn Start (턴 시작 위치)**
 : 시작 위치 근거도 흡수 지점도 없을 때 이번 요청이 어디서 시작하는가를 정한 값
   (`Keeper_carried_front.turn_start`). 닫힌 둘이다 — `Turn_boundary { end_atom }`,
@@ -4177,44 +4128,19 @@ status: reference
     무조건 경고를 남기지 않는다. 시작 위치 근거·앞머리 거절 폴백을 거쳐 실제로 알 수 없는
     턴 시작으로 범위를 열어 wire로 전송한 요청에서만
     `warn_range_opens_on_newest_atom` 경고를 낸다(#38365).
-  **경고**: `turn_start`의 `Turn_boundary`·`Turn_boundary_unknown`과 `origin`의
-  `Turn_start`·`Turn_start_unknown`은 `Turn Boundary Position`의 닫힌 넷
-  (`Atom_history`·`Empty_atom_history`·`No_atom_history`·`Stale_noop`)과 **다른
-  타입**이다. 이름이 겹쳐 보여도 하나는 요청이 시작한 자리, 하나는 turn이 끝난
-  History의 끝 위치다.
   → [Keeper_carried_front.turn_start](../../lib/keeper/keeper_carried_front.mli)
 
-**Read Position**
-: Librarian이 History를 어디까지 읽었는지 적은 값(`keepers/<keeper>/librarian-progress.json`).
-  Turn Boundary와 같은 Keeper runtime 디렉터리에 저장한다.
-  Turn Boundary 파일의 줄 번호가 아니라 값이다: trace, 읽은 Atom 수, 마지막으로
-  읽은 Atom을 여는 Message의 digest. 그 파일에는 지난 History의 줄도 남아 있어서
-  줄 번호로는 지금 History 안의 자리를 말할 수 없다. 공식 클라이언트 턴은 Atom을 남기지
-  않으므로 그 위치만은 turn-boundary 파일의 줄 번호로 따로 적는다
-  (`librarian-official-progress.json`의 `boundary_line`,
-  [Keeper_librarian_official_progress](../../lib/keeper/keeper_librarian_official_progress.mli)).
-  turn-boundary 파일은 줄을 뒤에 붙이기만 하고 고쳐 쓰지 않으므로 이 번호는 커지기만 한다.
-  위치 파일은 둘 다, 없으면 아직 읽은 적이 없다는 뜻이다. 못
-  읽는 파일은 "읽은 적 없음"으로 치지 않고 오류로 다룬다. 그렇게 치면 History
-  전체가 안 읽은 것으로 보인다.
-  이 값도 이 workspace의 Turn Boundary와 History에만 의미가 있다.
-  Librarian이 이 값을 언제부터 읽고 쓰는지는 `RFC-librarian-lifecycle` §8을 본다.
-
-**Librarian Range Receipt (완료 범위 영수증)**
-: Memory snapshot을 바꾸기 전에 쓰는 영수증 원장
-  (`<config keepers_dir>/<keeper>.librarian-range-commit.json`). 파일은 `receipts`
-  배열이고, 각 영수증은 `prepared` → `committed` 두 상태를 갖는다. `prepared`는
-  곧 쓸 snapshot의 revision과 전체 바이트 SHA256을 적고, 저장이 끝나면 같은 영수증을
-  `committed`로 바꾼다. 모든 Memory writer는 snapshot을 바꾸기 전에 기존 `prepared`를
-  먼저 판정한다 — SHA256이 현재 snapshot과 같으면 이미 저장된 범위라 `committed`로
-  복구하고, 다르면 저장 전 실패라 영수증을 지운다. 그래서 범위를 저장한 뒤 다른
-  write가 먼저 와도 완료 증거를 덮어쓰지 않는다. Read Position(진행 파일)과 다른
-  파일이고, Keeper purge는 snapshot·journal·진행 파일과 함께 이 원장도 지운다.
-  배포 preflight가 이 원장을 읽어 새 빌드가 못 읽는 원장을 배포 전에 잡는다.
-  끝난 turn의 `Keeper_execution_receipt`(Terminal Reason·Operator Disposition)와
-  다른 영수증이다.
-  → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli),
-  `RFC-librarian-lifecycle` §4.6
+**Memory Commit Log (`<keeper>.memory-log.jsonl`)**
+: 단일 writer-per-keeper Memory OS(`lib/librarian/`, `Librarian_store`)의 append-only 커밋 원장.
+  Keeper turn 기록(`turn-log.jsonl`)의 읽기 위치(`covers_through`), 각 커밋의 추가·재관측·제거·리비전 계보,
+  그리고 최신 스냅샷(`<keeper>.memory-current.json`)의 SHA-256을 한 줄에 기록한다.
+  구 세대의 `turn-boundaries.jsonl`, `librarian-progress.json`, `librarian-official-progress.json`,
+  `.librarian-range-commit.json`, `.memory-journal.jsonl`, `.memory-absorbed.jsonl`,
+  `.memory-publication.json`, `.memory-retraction-plan.json`, `.memory-epoch.json` 사이드카를
+  대체한다.
+  → [Librarian_store](../../lib/librarian/librarian_store.mli) ·
+  [Librarian_log](../../lib/librarian/librarian_log.mli) ·
+  [Keeper_turn_log](../../lib/keeper/keeper_turn_log.mli)
 
 **Trace ID**
 : Keeper를 만들 때 한 번 정하는 실행 식별자. Checkpoint의 `session_id` 필드와
@@ -4246,24 +4172,10 @@ status: reference
 : `keeper_memory_search`는 먼저 쿼리에 맞는 소스 결속 주장과 그 경로·다이제스트를 고른 뒤, 그 후보만 잠금 아래에서 재검증한다. 쿼리에 맞지 않는 소스는 읽거나 무효화하지 않고 저장된 채 미검증으로 둔다. 매칭 후보의 읽기가 끝나지 않으면 본문을 보류하고 `source_verification.status="incomplete"`와 재조회 안내를 돌려준다. 검증된 현재 결과를 가린 뒤가 아니라 후보 검증·제외 후 `limit`을 적용하므로 오래되거나 확인할 수 없는 후보가 유효한 뒤쪽 결과를 밀어내지 않는다.
   → [keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.mli) · [keeper_tool_memory_runtime](../../lib/keeper/keeper_tool_memory_runtime.ml)
 
-**Memory Retraction Plan Receipt (기억 철회 계획 영수증)**
-: Memory OS에서 사유(`reason`)를 수반하는 기억 철회(`retract_fact`) 및 대체(`supersede_fact`) 시, 스냅샷 교체 전에 디스크에 사전 기록되는 영구 복구 증거(#41590). 사전 준비(`prepared`) 단계에서 계획 ID(`plan_id`), 이전/목표 리비전(`prior_revision`·`target_revision`), 이전/목표 스냅샷 SHA-256(`prior_snapshot_sha256`·`target_snapshot_sha256`), 철회 문장 목록(`dropped_statements`)을 사이드카 JSON(`.memory-retraction-plan.json`)으로 기록한다. 스냅샷 교체 후 저널 저널링(`append_removal_journal_and_clear_receipt`)이 완료되어야만 영수증이 삭제되며, 만약 저널 확정 전에 프로세스가 중단되더라도 부팅 시 또는 후속 쓰기자가 `reconcile_retraction_plan_receipt`를 통해 스냅샷과 영수증을 대조하여 저널을 확정한다. 정산되지 않은 대기 영수증이 있는 동안에는 `read_dropped` 조회가 명시적 에러를 반환하고, 후속 쓰기자가 제거된 원본을 다른 내용으로 덮어쓰는 것을 차단한다.
-  → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli) ·
-  [Keeper_memory_os_types](../../lib/keeper/keeper_memory_os_types.mli)
-
 **Committed Revision Lineage (확정된 리비전 계보)**
-: Memory OS에서 지워진 기억의 Memory ID와 그 스냅샷 안의 대상을 잇는 선언된 리비전 링크(`Keeper_memory_os_types.revision`의 `superseded`·`superseded_by` 쌍). Librarian 정리(`revisions`)와 명시적 `supersedes` 쓰기는 스냅샷 교체와 같은 복구 가능한 제거 트랜잭션에 이 링크를 `revision_links`로 기록한다. 저널은 실제로 내용이 바뀐 커밋에만 링크를 싣고, 변화 없는 재관측은 리비전 전이를 만들지 못한다. 미완성 저널 영수증은 쓰기자가 복구할 때까지 증거를 읽을 수 없는 상태다. 빠진 링크 메타데이터는 추론된 관계가 아니라 기록되지 않은 것이다. 대시보드의 `revised_from`과 흡수 기억 연쇄 추적도 이 저널 링크를 읽는다(#37433). 이 링크는 선언된 구조적 계보일 뿐이며, 과거 입력이 후속 기억에도 그대로 적용됨을 뜻하지 않는다 — 후속 기억을 답으로 쓰려면 별도의 범위 판정(→ Demand Retrieval across Revisions)이 필요하다.
-  → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli) ·
-  [12-memory-systems](12-memory-systems.md)
-
-**Demand Retrieval across Revisions (리비전을 넘는 요청 시 검색)**
-: 과거 admission 관측이 확정된 리비전 계보를 따라 현재 후속 기억을 찾아내는 `keeper_memory_search`의 경로(#42029·#42054·#42055). 세 단계가 분리되어 있다.
-  1. **Admission Lookup Binding**: Librarian이 `incorporated`/`already_represented`로 판정한 미룬 명시 쓰기는 원본 관측·후보 식별자·선택된 대상의 조회 결속(`admission_recall_binding`)을 후보 소비와 같은 WAL 트랜잭션으로 커밋한다. `not_durable`·`deferred` 판정은 결속을 만들지 않는다. 결속 대상은 Librarian이 돌려준 claim과 글이 똑같은 선택된 기억으로 정해지고(`fact.claim = claim`), 같은 글의 기억이 둘이면 먼저 찾은 쪽이 대상이다(`lib/keeper/keeper_librarian_runtime.ml`의 `validate_admission_answer` 안 `fact.claim = claim` 선택). 결속은 Librarian이 선언한 관계를 기록할 뿐 그 관계를 독립 검증한 것이 아니다.
-  2. **구조적 후보 수집**: `read_successor_recall_for_keepers_dir`가 커밋된 스냅샷 전이와 리비전 링크만 리비전 순서로 깊이 제한 없이 따라간다. 전이 증거가 빠지면 미해결이고, 철회 뒤 무관하게 같은 글이 다시 추가돼도 끊긴 경로를 되살리지 않는다. 구조적 후보는 아직 답이 아니다.
-  3. **범위 판정**: 후속 선택기(`Keeper_memory_successor_selection`)가 쿼리·원본 관측·대상·커밋된 경로를 보고 현재 대상이 같은 주제·사건·적용 범위를 다루는지 판정한다. 모델 실패·불확실한 범위·바뀐 증거는 미해결로 남기며 직접 일치 결과는 그대로 보존한다 — 권위 있는 "일치 없음" 답으로 바꾸지 않는다.
-  결과의 본문과 Memory ID는 현재 대상 것이고 과거 조회 출처(`lookup_evidence`·`successor_lookup_evidence`)는 별도로 표시된다. 여러 관측이 같은 현재 대상을 가리켜도 결과는 하나다.
-  → [Keeper_memory_successor_selection](../../lib/keeper/keeper_memory_successor_selection.mli) ·
-  [Keeper_memory_os_current.read_successor_recall_for_keepers_dir](../../lib/keeper/keeper_memory_os_current.mli) ·
+: Memory OS에서 지워진 기억의 Memory ID와 그 커밋 안의 대상을 잇는 선언된 리비전 링크(`Librarian_effects.Revised_into`·`Superseded_by`·`Merged_into`). 단일 writer(`Librarian_store`)는 `<keeper>.memory-log.jsonl` 커밋 줄에 제거 사유와 대체·병합 대상을 스냅샷 교체와 같은 커밋으로 기록한다. 대시보드의 `revised_from`, 활동 투영(`Keeper_memory_activity`), TUI v2 `/api/v1/memory/diff`가 모두 `<keeper>.memory-log.jsonl`(`Librarian_log_store`)을 직접 읽어 이 계보를 표시한다.
+  → [Librarian_effects](../../lib/librarian/librarian_effects.mli) ·
+  [Librarian_log_store](../../lib/librarian/librarian_log_store.mli) ·
   [12-memory-systems](12-memory-systems.md)
 
 **Workspace Memory Ledger (작업공간 기억 원장)**
@@ -4508,102 +4420,20 @@ status: reference
   Memory ID를 갖는다. 전제가 모두 살아 있는 유도가 하나라도 남아 있으면 `derived`
   Fact는 유지되고, 그런 유도가 하나도 없으면 무효가 된다.
 
-**Dropped / Supersedes / Absorbs**
-: 기억을 정리하거나 갱신하는 말.
-  - Librarian 회차: `dropped`는 이유를 적고 버린다. `supersedes`는 옛 Fact 하나를
-    새 claim 하나로 고쳐 쓰며(1:1) 옛 id는 `dropped`에도 있어야 한다. `absorbs`는
-    Fact 여러 개를 새 claim 하나가 대신 말하며(N:1) 그 id들은 `dropped`에 없어야
-    한다. 흡수된 원문은 `<keeper>.memory-absorbed.jsonl`에 남는다. Librarian이
-    말하지 않은 Fact는 그대로 남고, 규칙을 어긴 답은 통째로 거절된다. 이미 있는
-    Fact와 같은 글자를 다시 쓰는 것은 새 Fact가 아니라 그 Fact다 — 아무것도 더하지
-    않고 저장된 Fact를 유지하며, 거절이 아니다. 같은 답이 그 Fact를 `dropped`로도
-    적으면 "사라졌다"와 "남는다"를 함께 말한 모순이라 거절한다(`Dropped_memory_id_recreated`).
-    Librarian 프롬프트의 지시(코드가 강제하지 않는다): 한 대상의 움직이는 상태를
-    시점마다 적은 Fact가 여러 개면 claim에 적힌 시점(날짜·순번·프레임 번호)으로 먼저
-    선후를 정하고, 그런 표시가 없으면 `last_seen`이 가장 늦은 것을 현재로 본다. 순서를
-    정할 수 없거나 같은 대상인지 확실하지 않으면 지우지 않는다. 현재가 아닌 상태는
-    `dropped`에 넣고, 현재 상태 claim의 `absorbs`에 넣지 않는다.
-    코드 규칙: absorb gate는 판정 모델에게 흡수된 Fact의 문장마다 새 claim이 그 내용을
-    말하는지 묻는다. 말하지 않는 문장이 하나라도 있으면 그 Fact는 흡수되지 않고 현재
-    Fact로 남는다. 새 claim은 원칙적으로 적용되나, `absorbs`에 지정한 기억 중 어느 것도
-    흡수되지 않은 claim이 기존 기억의 사본이면 남은 기억에 이미 들어 있는지 확인(Reverse Copy Judgment)을
-    거쳐 저장하지 않고 버린다(#38056·#38243). 흡수 대상(`into`)이 잠근 시점의 스냅숏에도,
-    이번 답의 새 claim에도 없으면(회차 도중 Keeper가 그 Fact를 철회하거나 `supersedes`로
-    대체한 경우) 그 흡수는 적용하지 않는다. 원문은 현재 Fact로 남고 지워진 대상은
-    되살아나지 않으며, 회차 도중 없어진 기억을 이어붙이는(supersedes 또는 absorbs) 새
-    claim은 저장하지 않고 실행 기록(`run` 출력)에 `claims_not_applied`로 남긴다.
-    저널의 리비전 링크는 커밋이 실제로 수행한 `supersedes`에만 기록되어 대체된
-    기억은 Keeper가 직접 준 대신하는 기록 하나만 보존하며, 대신하는 기록 중 어느 것도 스냅숏에
-    남지 않은 대체 대상 기억은 퇴역하지 않고 현재 Fact로 남는다(#38231·#38267·#38317).
-  - Keeper 직접 갱신: `keeper_memory_write`는 선택 인자 `supersedes`로 자신이 직접
-    적은 이전 Fact 하나를 새 claim으로 대체할 수 있다(#38122). 원자적(locked) 한 번의
-    커밋으로 이전 Fact를 지우고 새 Fact를 적으며, 저널에 `superseded_by` 사유와
-    리비전 링크를 남긴다. 철회와 마찬가지로 대체된 Fact를 전제로 삼던 유도
-    Fact들도 함께 무효화되며 영수증의 `removed_memory_ids`와 `support_invalidations`로
-    보고된다. 기억 저장소는 Keeper마다 따로라서, 이 Keeper의 현재 Fact가 아닌 id는
-    대체할 대상이 없다. 그때는 이 Keeper의 저널에서 그 id를 지운 줄을 찾아 넷으로
-    나눈다. (1) 이 Keeper가 직접 적었고 Librarian이 이미 지운 Fact면, 새 claim을 보통
-    쓰기로 적고 영수증 `supersedes_already_removed`에 지운 커밋(revision·시각·이유)을
-    적는다. 이 쓰기가 대체한 것이 아니므로 리비전 링크는 남기지 않는다. (2) Keeper
-    자신이나 운영자가 명시적으로 지운(`explicit_write`·`explicit_retract`) id는
-    `supersedes_not_current`로 거절하되 `supersedes_removed`로 그 커밋을 알려 준다.
-    사유가 `superseded_by <id>`면 그 id가 대신하는 기록이다. (3) 지운 기록이 없는 id
-    (알 수 없는 id, 다른 Keeper의 id)는 `supersedes_not_current`로 거절된다. (4) 저널을
-    읽거나 디코드하지 못해 id를 언급한 최신 줄을 확정할 수 없으면
-    `Supersede_journal_unreadable`로 거절한다. 지운 기록이 없다는 판정과 구별하며,
-    기록을 확인할 수 없으므로 대신하는 기록이라는 claim을 쓰지 않는다. 그 밖에
-    `injected` id, 대체할 Fact와 글자까지 똑같은 claim(`supersedes_self`), `source_path`와의 동시 지정,
-    대체될 Fact를 전제로 삼는 유도 claim(`supersedes_premise_of_successor`), 근거 경로가
-    없는 유도 claim(`unsupported_derivation`)도 거절되며 아무것도 적지 않는다.
-  → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.ml) · [Keeper_librarian_absorb_gate](../../lib/keeper/keeper_librarian_absorb_gate.mli) · [librarian.md](../../config/prompts/librarian.md)
-
-**Reverse Copy Judgment (남은 기억에 이미 들어 있는지 확인)**
-: Librarian 회차가 내놓은 새 claim 중 `absorbs`에 기억을 적었으나 실제로는 그 중
-  아무것도 흡수하지 못한 claim에 대해, 남겨진 기억들이 그 claim의 내용을 이미
-  담고 있는지 묻는 역방향 판정. 흡수 판정이 완료된 회차에서 사본 claim은
-  저장하지 않는다(#38243).
-  - 배경: Librarian이 매 회차 같은 주제를 조금씩 다른 문장으로 다시 써서 기존 Fact가
-    흡수되지 않고 paraphrase 사본이 무한 축적되는 문제를 막는다.
-  - 전이 및 판정:
-    - 대상: `absorbs`에 기억을 나열했으나 absorb gate에서 0건만 흡수 승인된 새 claim.
-      단, `supersedes`로 대체 대상이 지정된 claim은 제외한다(`Continues_a_dropped_memory` —
-      버리면 대체 대상만 사라지고 빈자리가 남기 때문).
-    - 절차: 남겨진 원본 기억들을 최대 `state_bytes_limit` 바이트 크기로 묶어 상태를
-      구성하고, 새 claim을 문장 단위(`statements`)로 쪼개어 판정 모델에 묻는다.
-    - 경계: 점수가 `conveyed_boundary`를 엄격히 넘을 때만 전달된 것으로 인정하며,
-      동점(tie)은 claim을 버리지 않도록 미전달로 본다.
-    - 결과: 모든 문장이 전달되었으면 `Copy`로 판정해 원장에 저장하지 않고
-      탈락시킨다(`without_copies`). 전달되지 않은 문장이 하나라도 있으면
-      `Carries_new_statement`로 정상 적용한다. 역방향 판정만 실패하거나 입력이 커서
-      `Not_judged`(`No_source_fits_the_state`·`Statement_too_large`·`No_statement`·`Request_failed`)이면
-      claim을 적용한다. 흡수 판정이 실패해 `Gate_judgment_failed`가 되면 Memory 회차의
-      스냅숏 커밋을 보류한다. 원본을 유지하고 제안된 새 claim도 저장하지 않으며, 같은 입력
-      범위를 다시 처리할 수 있도록 남긴다.
-  - 저장 및 표면: 탈락된 claim은 원장에 쓰이지 않고 로그에 남으며, Librarian 회차
-    실행 결과의 `copy_checks`에 각 판정 결과(`verdict`)와 호출 횟수가 기록된다.
-  → [Keeper_librarian_absorb_gate](../../lib/keeper/keeper_librarian_absorb_gate.mli)
+**Dropped / Supersedes / Merged**
+: 기억을 정리하거나 갱신하는 연산(`Librarian_effects`, `Librarian_direct`).
+  - Librarian 제안(`lib/librarian/`): 모델은 제안만 내놓고, Keeper당 하나의 writer(`Librarian_writer`)가 `<keeper>.memory-log.jsonl`에 커밋 줄을 append한 뒤 `<keeper>.memory-current.json`을 원자적으로 교체한다. 제거 사유는 `Dropped`, `Molted`, `Revised_into`, `Merged_into`, `Retracted`, `Superseded_by`, `Support_lost`의 닫힌 합타입으로 기록된다.
+  - Keeper 직접 갱신: `keeper_memory_write`는 선택 인자 `supersedes`로 이전 Fact 하나를 새 claim으로 대체할 수 있다(`Librarian_direct.Supersede`). 단일 writer가 커밋 줄에 `Superseded_by`를 적고, 대체된 Fact를 전제로 삼던 유도 Fact들은 같은 커밋에서 `Support_lost`로 함께 무효화된다.
+  → [Librarian_effects](../../lib/librarian/librarian_effects.mli) · [Librarian_direct](../../lib/librarian/librarian_direct.mli) · [Librarian_store](../../lib/librarian/librarian_store.mli)
 
 **Memory Event**
 : Fact에 일어난 일의 기록. 사이드카(`<keeper>.memory-events.jsonl`)에는
   `retrieved`(`keeper_memory_search`·`keeper_memory_select` 결과에 나온 것)만 쓴다.
-  고쳐 써진 것(Librarian의 `supersedes`, Keeper의 `keeper_memory_write ?supersedes`)과
-  철회된 것(`keeper_memory_retract`, 운영자 정리)은 그 커밋의 저널 줄이 기록이다
-  (`revision_links`, `explicit_retract` 줄의 `dropped`). 커밋 뒤 따로 쓰던 사이드카
-  `revised`·`retracted` 줄은 커밋과 그 쓰기 사이의 취소나 프로세스 종료로 빠질 수 있어
-  없앴다(#37433). 철회 뒤 같은 claim을 다시 저장하면 같은 Memory ID에 과거 기록이
-  붙는다. TUI의 `History: Retracted`는 그 철회 횟수이며, 현재 Fact의 신뢰도나
-  강화 정도를 뜻하지 않는다.
-  - **교체된 흡수 기억 연쇄 추적**: `keeper_memory_search`는 흡수된(`absorbs`) 기억의
-    대상 claim이 이후 `keeper_memory_write ~supersedes`로 대체된 경우, 버려진(dropped)
-    claim에서 멈춰 `into_current=false`로 보고하지 않고 저널의 리비전 링크(`superseded_by`)를
-    따라 현재 살아 있는 claim까지 연쇄 추적하여 `into_current=true`로 연결한다.
-    매 검색마다 저널 전체를 읽는 부하를 막기 위해 평소에는 흡수 원장(`memory-absorbed.jsonl`)만으로
-    해결하고, 검색어에 답하는 행의 체인 끝이 non-current일 때만 저널을 읽는다. 저널을
-    읽지 못하면 `lineage_read_failed`로 실패를 알린다(#38543·#38552·#37433).
+  대체(`Superseded_by`·`Revised_into`), 병합(`Merged_into`), 철회(`Retracted`)·정리(`Dropped`·`Molted`)·무효화(`Support_lost`)는 모두 `<keeper>.memory-log.jsonl`(`Librarian_log_store`)의 커밋 줄이 단일 진실 원천이다.
   - **Keeper 삭제 시 사이드카 정리**: Keeper를 삭제(`purge_keeper_artifacts`)할 때 이
     사이드카 파일(`<keeper>.memory-events.jsonl`)도 함께 삭제(`Keeper_memory_events_artifact`)된다.
     이 파일은 쓸 때마다 경로를 새로 열어(`Fs_compat.append_private_jsonl_durable_locked_result`)
-    잠긴 채 쓰므로, 동일 프로세스에서 같은 이름으로 다시 생성된 후속 키퍼가 이전의 조회·철회·대체
+    잠긴 채 쓰므로, 동일 프로세스에서 같은 이름으로 다시 생성된 후속 키퍼가 이전의 조회
     이벤트를 상속하거나 삭제된 파일에 쓰는 일이 없다(#38235). 줄바꿈 없이 끊긴 끝 줄은 다음 쓰기가
     잘라 낸다(#38597).
   → [Keeper_shutdown_types](../../lib/keeper/keeper_shutdown_types.mli),
@@ -4679,104 +4509,21 @@ status: reference
   → [Tool_wiki](../../lib/tool_wiki.mli)
 
 **Librarian**
-: Keeper마다 따로 도는 기억 정리자. Keeper의 History와 현재 facts를 읽고 LLM을
-  한 번 불러, 더할 fact와 버릴 fact와 합칠 fact를 정해 Memory OS에 적는다. 같은
-  호출에서 미처리 요청을 묶고 다음 행동을 제안한다. Keeper의 판단을
-  대신하지 않는다.
-  Librarian은 자기가 누구를 위해 정리하는지 대상 Keeper의 식별자(`keeper_id`)를
-  입력(`Keeper_librarian.input`)에 필수로 실어 보낸다.
-  세 프롬프트(`librarian`·`librarian.continuity`·`librarian.working_context`)는 이를
-  `keeper_instructions` 옆 호스트 데이터로 전달받아 그 Keeper의 자리에서 대화를
-  읽으며, 안내문의 호칭(\"너\"·\"당신\")이 이 대상 Keeper를 가리킴을 안다.
-  대상 Keeper 이름이 빈 문자열이면 기본값으로 채우지 않고 입력을 거절하거나 유닛을
-  실패 처리한다.
-  History를 읽는 경로의 구현 진척은 `RFC-librarian-lifecycle` §8을 본다.
-  Agent Core의 읽은 위치가 저장되면 같은 wake에서 남은 이력을 계속 읽는다.
-  읽을 것이 없거나 읽기·저장에 실패하면 멈추고, 실패한 범위는 다음 신호에서 다시 읽는다.
-  매 회차 설정을 확인하므로 꺼진 동안에는 다음 범위를 읽지 않는다.
-  이 이름은 프롬프트 category `librarian`(`config/prompts/librarian.md`,
-  `workspace_memory_curator.md`)과 CLI `masc-librarian-replay`가
-  공유한다. 둘은 서로 다른 것이고, 어느 것도 Skill이 아니다.
-  → [Keeper_librarian](../../lib/keeper/keeper_librarian.mli)
-
-**Librarian Gap (빠진 구간)**
-: 요청(Request)에도 실리지 않고 Librarian 메모리에도 들어가지 않은 Atom들의 범위
-  (`Keeper_carried_front.librarian_gap`). Librarian이 커버하는 끝은 지속성 스냅숏의
-  자르기(`snapshot_cut`)와 내구성 읽은 위치(`read_position`) 중 나중(뒤쪽) 지점이다 —
-  자르기 이전은 요약되었고, 읽은 위치 이전은 메모리에 있다. provider가 직전 요청에서
-  수용한 시작점(`accepted_start`)이 그 끝보다 뒤쪽에 있을 때, 그 끝부터 `accepted_start`
-  직전까지가 빠진 구간이 된다. `accepted_start`가 그 끝 이하이거나 두 위치를 모두 알 수 없으면
-  빠진 구간은 없다(`None`). 현재 이력에 맞지 않는 스냅숏이 남아 있는 동안에는 읽은 위치 대신
-  그 자르기부터 계산되어 빠진 구간이 짧게 산출될 수 있다 (RFC librarian-lifecycle §4.10, rule 3).
-  빠진 구간의 끝(`gap_end_atom`)은 범위에 들지 않는다.
-  규칙은 이 순수 함수 하나다. 경보는 Keeper의 작은 파일(meta, 스냅숏, 진행 파일, 턴 기록)만
-  읽어 그 함수를 부른다(`Keeper_next_request_forecast.librarian_gap`). checkpoint는 읽지 않는다.
-  health JSON의 키는 `librarian.stalled`다. 빠진 구간이 있으면 `kind: "gap"`과 `gap_start_atom`,
-  `gap_end_atom`을 싣고, 빠진 구간이 없으면 `null`이다. 읽어야 할 파일을 못 읽으면 빠진 구간 없음도 빠진 구간도 아닌
-  `kind: "unmeasured"`와 못 읽은 파일(`cause`), 그 오류 문장(`detail`)을 보낸다.
-  TUI는 `Librarian stalled · atoms <a>-<b> are in neither the request nor memory`로 그린다
-  (`<b>`는 빠진 구간의 마지막 atom, 한 atom이면 `atom <a> is ...`). 못 잰 경우는 `Librarian stalled · not measured, <원인> · <detail>`이다.
-  경보이지 Gate가 아니다. Librarian이 받아들여진 시작점에 닿으면 사라진다.
-  → [Keeper_carried_front.librarian_gap](../../lib/keeper/keeper_carried_front.mli),
-  [Keeper_next_request_forecast](../../lib/keeper/keeper_next_request_forecast.mli)
-
-**Librarian Replay**
-: `masc-librarian-replay` CLI. 라이브 워크스페이스의 turn-boundary 로그와 checkpoint에
-  Librarian 읽기 규칙(`Keeper_librarian_range.select`/`slice`)을 오프라인으로 돌려,
-  backlog가 몇 회차에 걸리는지·회차마다 몇 atom을 나르는지·중복 atom이 있는지를
-  센다(RFC librarian-lifecycle §9). 메시지 본문은 출력하지 않고 count·atom 번호·digest만
-  낸다. 아무것도 쓰지 않는다 — progress 파일·boundary line·checkpoint 모두 없다.
-  서버의 Librarian 실행이 아니라 그 읽기 규칙의 측정 하네스다.
-  → [masc_librarian_replay](../../bin/masc_librarian_replay.ml)
-
-**Librarian Pass End (Librarian 회차 종결 상태)**
-: Memory health HTTP API와 TUI Memory 화면이 그리는 Librarian durable 회차의 종결 상태.
-  Memory health의 Librarian 행은 스냅숏의 source가 아니라 저널 최신 줄들을 역순으로 걸어
-  (`server_dashboard_http_keeper_memory_health.ml`), Librarian이 마지막으로 커밋한
-  성공과 그 뒤의 최신 실패를 독립적으로 읽는다. 따라서 키퍼가 `keeper_memory_write`나
-  철회(`retraction`)로 Fact를 직접 기록해도 Librarian의 성공을 지우거나 직전 실패를
-  가리지 않는다(#38049).
-  TUI(`lib/tui_decode_memory_health.ml`, `bin/masc_tui_render_memory.ml`)는 회차 종결 상태와 실패
-  종류를 닫힌 타입으로 디코드하고 wire 단어 대신 일상 단어로 그린다:
-  - 닫힌 여덟 종결 상태(`memory_librarian_pass_end`):
-    `Pass_off`(\"switched off\"), `Pass_lane_unconfigured`(\"no lane set\"),
-    `Pass_drained`(\"caught up\"), `Pass_yielded_to_waiting_unit`(\"yielded\"),
-    `Pass_pending`(대기 관측별 단어 — \"queue full\"·\"processing\"·\"check outcome\"·\"worker offline\"·\"rechecking\"·\"settling\"·\"source changed\"·\"reading parts\"·\"recovery failed\"),
-    `Pass_not_committed`(\"saved none\"),
-    `Pass_stopped`(\"stopped\"), `Pass_raised`(\"crashed\").
-  - 닫힌 열 실패 종류(`memory_librarian_failure_kind`):
-    `Failure_prompt_render`(\"prompt could not be built\"),
-    `Failure_execution_clock_unavailable`(\"no clock to run on\"),
-    `Failure_exact_setup`(\"model call could not be set up\"),
-    `Failure_exact_execution`(\"model call failed\"),
-    `Failure_domain_output_invalid`(\"model answer was not usable\"),
-    `Failure_absorb_judgment`(\"copy check failed; nothing saved\"),
-    `Failure_memory_snapshot_write`(\"Memory could not be saved\"),
-    `Failure_runtime_context_unavailable`(\"no runtime context\"),
-    `Failure_lane_cancelled`(\"cancelled before saving\"),
-    `Failure_unhandled_exception`(\"unexpected crash\").
-  - `Librarian cause`: `Pass_stopped` 또는 `Pass_raised`일 때 서버가 기록한 구체적 원인을
-    별도 행에 그린다.
-  - 행 격리: 서버가 보낸 값을 TUI가 알지 못하면 전체 Memory 화면을 깨뜨리지 않고 해당
-    키퍼 행만 이름과 거절 사유 한 줄(`refusal`)로 격리하며 다른 행들은 정상 표시한다.
-  → [server_dashboard_http_keeper_memory_health](../../lib/server/server_dashboard_http_keeper_memory_health.ml) · [tui_decode_memory_health](../../lib/tui_decode_memory_health.ml) · [masc_tui_render_memory](../../bin/masc_tui_render_memory.ml)
+: Keeper마다 따로 도는 단일 writer 기반 기억 정리자(`lib/librarian/`, `Keeper_memory_writers`).
+  Keeper의 `turn-log.jsonl`과 현재 스냅샷(`<keeper>.memory-current.json`)을 읽고 모델에게
+  기억 추가·수정·병합·제거 및 working context 갱신을 제안받는다. 모델 호출은 제안만 하고,
+  Keeper당 하나의 `Librarian_writer`가 `<keeper>.memory-log.jsonl`에 커밋 줄을 append한 뒤
+  `<keeper>.memory-current.json`을 원자적으로 교체한다.
+  직접 쓰기(`keeper_memory_write`, `keeper_memory_retract`)와 기억 용량 초과 시 비동기
+  molt 정리도 같은 writer가 직렬화한다.
+  → [Librarian_writer](../../lib/librarian/librarian_writer.mli) ·
+  [Librarian_machine](../../lib/librarian/librarian_machine.mli) ·
+  [Keeper_memory_writers](../../lib/keeper/keeper_memory_writers.mli) ·
+  [RFC-librarian-call-only-proposes](../rfc/RFC-librarian-call-only-proposes-and-one-writer-per-keeper-commits-in-one-line.md)
 
 **JEV / Noul**
 : JEV는 TypeSafe AI System One의 모델이다. Noul은 명시한 질문에 대한 답이
-  참일 확률을 반환하는 응답 종류다. Noul 값은 기억 보존율이나 전체 기능의
-  통과율이 아니다. Board의 Choice 판정과도 구분한다.
-  Librarian에서는 새 claim이 흡수할 원문을 전달하는지 검사하며, 이 판정은
-  Memory 저장 성공과 별개다. 실행의 `run.status`와 판정의 `absorb_gate.status`를 구분한다.
-  `skipped`는 검사를 건너뛴 이유, `incomplete`는 중단 전에 완료된 응답만 담는다.
-  `failed`는 검사 실패다. 필요한 흡수 판정이 실패하면 해당 Memory 입력 범위의 저장을
-  보류하고 원본을 유지한다. 제안된 새 claim도 저장하지 않는다. 판정을 끝낸 `judged`에서는
-  모든 문장이 전달된다고 확인된 원문만 흡수하고, 전달되지 않은 원문은 현재 Memory에 남긴다.
-  이때 새 claim은 역방향 사본 판정과 저장 검사를 거쳐 적용한다.
-  `judged`는 검사를 마친 결과다. 검사 비활성화 등 `skipped`일 때는 Librarian의 결정을 그대로 적용한다.
-  취소된 실행에서 완료된 응답이 보여도 Memory가 바뀌었다는 뜻은 아니다.
-  반대로 실행의 `cancelled`도 Memory를 되돌렸다는 뜻은 아니다. 저장 뒤 취소되면
-  `output.after`에 저장된 snapshot과 revision을 남긴다. 저장 전 취소는 이 기록이 없다.
-  이미 저장된 실행 완료 결과는 이후 화면 갱신 알림의 취소로 덮어쓰지 않는다.
+  참일 확률을 반환하는 응답 종류다. Board의 Choice 판정과도 구분한다.
   Board lane 상세의 `JEV OFF`·`JEV CONFIGURED · <model>`·`JEV unavailable: Board lane
   is CLI-only`·`JEV unavailable: Board lane is not ready`는 JEV 모델 자체의 상태가
   아니라 그 lane이 JEV를 쓸 수 있는지의 구성 상태다. decode는 `state` 값 `off`·

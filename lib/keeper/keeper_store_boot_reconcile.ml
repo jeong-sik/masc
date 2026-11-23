@@ -97,7 +97,7 @@ let examine_memory_current (config : Workspace.config) examination =
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
   in
-  match M.list_preflight_keeper_ids ~keepers_dir with
+  match M.list_keeper_ids_with_suffix ~keepers_dir ~suffix:M.suffix with
   | Error rejection ->
     { examination with discovery_failures =
         {store=D.Refusing.Memory_current;path=keepers_dir;rejection} :: examination.discovery_failures }
@@ -277,36 +277,6 @@ let examine config =
   ; unreadable = List.rev examination.unreadable
   ; discovery_failures = List.rev examination.discovery_failures
   }
-;;
-
-let recover_memory_publications_with ~recover (config : Workspace.config) =
-  let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
-  match M.list_preflight_keeper_ids ~keepers_dir with
-  | Error rejection -> [Discovery_failed {store=D.Refusing.Memory_current;path=keepers_dir;rejection}]
-  | Ok keepers ->
-    List.filter_map (fun keeper ->
-      let path = M.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper in
-      let recovered =
-        try
-          match snapshot_entry_exists ~keepers_dir ~path with
-          | Error _ as error -> error
-          | Ok true -> recover ~keepers_dir ~keeper_id:keeper
-          | Ok false ->
-            (* A first receipt with no snapshot was outside the old boot
-               recovery scope and remains the publication owner's work. *)
-            Ok ()
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | (File_lock_eio.Flock_timeout _ | Unix.Unix_error _ | Sys_error _) as exn ->
-          Error (Printexc.to_string exn) in
-      match recovered with
-      | Ok () -> None
-      | Error error -> Some (Unreadable {store=D.Refusing.Memory_current;keeper;path;error})) keepers
-;;
-
-let recover_memory_publications config =
-  recover_memory_publications_with ~recover:M.recover_publication config
 ;;
 
 let admit ~accept_quarantine examination =
@@ -523,6 +493,5 @@ let summary report =
 ;;
 
 module For_testing = struct
-  let recover_memory_publications_with = recover_memory_publications_with
   let record_event_queue_failure = record_event_queue_failure
 end

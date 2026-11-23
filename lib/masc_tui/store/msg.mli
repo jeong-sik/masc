@@ -179,7 +179,6 @@ type sse_event =
   | Sse_observer_delivery of Wire_observer.delivery
   | Sse_fleet of Wire_fleet.fleet_stream_event
   | Sse_log_entry of Wire_infra.system_log_entry
-  | Sse_model_metrics of Wire_runtime.efficiency_month
   | Sse_models_metrics_snapshot of Wire_runtime.models_metrics_snapshot
   | Sse_tool_series of Wire_runtime.tool_series
 

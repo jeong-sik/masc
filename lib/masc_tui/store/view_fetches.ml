@@ -238,7 +238,11 @@ let fetches_for_workspace ~force (m : Model.t) =
            (Cmd.Get_tool_series { bucket = `Hour; since_hours = 24 })
       |> add_if
            (needs_fetch ~force m.runtime.models_metrics)
-           (Cmd.Get_models_metrics { window_minutes = 1440; bucket_minutes = 60 })
+           (Cmd.Get_models_metrics
+                  {
+                    window_minutes = Wire_runtime.models_chart_window_minutes;
+                    bucket_minutes = Wire_runtime.models_chart_bucket_minutes;
+                  })
       |> add_if
            (needs_fetch ~force m.runtime.runtime_metrics)
            Cmd.Get_runtime_metrics
@@ -420,7 +424,11 @@ let fetches_for_workspace ~force (m : Model.t) =
           []
           |> add_if
                (needs_fetch ~force m.runtime.models_metrics)
-               (Cmd.Get_models_metrics { window_minutes = 1440; bucket_minutes = 60 })
+               (Cmd.Get_models_metrics
+                  {
+                    window_minutes = Wire_runtime.models_chart_window_minutes;
+                    bucket_minutes = Wire_runtime.models_chart_bucket_minutes;
+                  })
           |> add_if
                (needs_fetch ~force m.runtime.runtime_metrics)
                Cmd.Get_runtime_metrics

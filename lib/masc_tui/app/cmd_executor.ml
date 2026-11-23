@@ -266,19 +266,36 @@ let decode_hub_event_msgs ~epoch ~observed_at ev =
                      (None, Msg.Sse_event { epoch; event = Msg.Sse_log_entry entry }))
           | exception Yojson.Json_error _ -> [])
       | Sse_hub.Stream_spec.Model_metrics -> (
+          (* The stream is opened with the chart's window and bucket
+             (Wire_runtime.models_metrics_stream_path), so every snapshot
+             frame replaces the chart. A frame that cannot do that is
+             reported like an undecodable observer frame, not dropped. *)
+          let skipped detail =
+            [
+              ( None
+              , Msg.Sse_event
+                  {
+                    epoch;
+                    event =
+                      Msg.Sse_observer_delivery
+                        {
+                          cursor = None;
+                          decoded = Wire_observer.Undecodable detail;
+                        };
+                  } );
+            ]
+          in
           match Yojson.Safe.from_string frame.data with
+          | exception Yojson.Json_error msg ->
+              skipped ("model metrics stream: invalid JSON frame: " ^ msg)
           | json ->
-              if Wire_common.has_field json "schema" then (
-                match Wire_runtime.decode_efficiency_month ~observed_at json with
-                | Ok eff ->
-                    [
-                      ( None
-                      , Msg.Sse_event { epoch; event = Msg.Sse_model_metrics eff } );
-                    ]
-                | Error _ -> [])
-              else if Wire_common.has_field json "window_minutes" then (
+              if Wire_common.has_field json "window_minutes" then (
                 match Wire_runtime.decode_models_metrics ~observed_at json with
-                | Ok snap when snap.bucket_minutes > 0 ->
+                | Ok snap
+                  when snap.window_minutes
+                       = Wire_runtime.models_chart_window_minutes
+                       && snap.bucket_minutes
+                          = Wire_runtime.models_chart_bucket_minutes ->
                     [
                       ( None
                       , Msg.Sse_event
@@ -287,32 +304,22 @@ let decode_hub_event_msgs ~epoch ~observed_at ev =
                             event = Msg.Sse_models_metrics_snapshot snap;
                           } );
                     ]
-                | Ok _ | Error _ ->
-                    (* Unbucketed (bucket_minutes = 0) 30m aggregate frames do
-                       not carry hourly series and must not overwrite the 24h
-                       60m-bucketed chart state. *)
-                    [])
+                | Ok snap ->
+                    skipped
+                      (Printf.sprintf
+                         "model metrics stream answered window=%d \
+                          bucket_min=%d; the chart asked window=%d \
+                          bucket_min=%d"
+                         snap.window_minutes snap.bucket_minutes
+                         Wire_runtime.models_chart_window_minutes
+                         Wire_runtime.models_chart_bucket_minutes)
+                | Error reason -> skipped ("model metrics stream: " ^ reason))
               else if Wire_common.has_field json "error" then
-                let detail =
-                  match Wire_common.optional_nonblank_string json "error" with
+                skipped
+                  (match Wire_common.optional_nonblank_string json "error" with
                   | Ok (Some msg) -> "model metrics stream: " ^ msg
-                  | Ok None | Error _ -> "model metrics stream error"
-                in
-                [
-                  ( None
-                  , Msg.Sse_event
-                      {
-                        epoch;
-                        event =
-                          Msg.Sse_observer_delivery
-                            {
-                              cursor = None;
-                              decoded = Wire_observer.Undecodable detail;
-                            };
-                      } );
-                ]
-              else []
-          | exception Yojson.Json_error _ -> [])
+                  | Ok None | Error _ -> "model metrics stream error")
+              else skipped "model metrics stream: frame has neither window_minutes nor error")
       | Sse_hub.Stream_spec.Tool_metrics_series -> (
           match Yojson.Safe.from_string frame.data with
           | json -> (

@@ -25,7 +25,7 @@ module Stream_spec = struct
   let path = function
     | Observer -> Wire_observer.observer_stream_path
     | Fleet -> Wire_fleet.fleet_stream_path
-    | Model_metrics -> "/api/v1/models/metrics/stream"
+    | Model_metrics -> Wire_runtime.models_metrics_stream_path
     | Tool_metrics_series -> "/api/v1/tool-metrics/series/stream"
     | Logs { since_seq } -> Wire_infra.system_logs_stream_path ?since_seq ()
 

@@ -571,6 +571,7 @@ let set_failure_reason_exact registry_entry ~site reason =
 
 let record_crashed_cycle_failure
       ~(registry_entry : Keeper_registry.registry_entry)
+      ~(sources : Keeper_heartbeat_source_batch.t)
       exn
   =
   (* Capture the backtrace before any other call can clobber it. *)
@@ -594,6 +595,8 @@ let record_crashed_cycle_failure
       ~base_path
       ~keeper_name
       ~at:(Time_compat.now ())
+      ~cause:
+        (Keeper_turn_pulse.cause_of_inputs (Keeper_heartbeat_source_batch.stimuli sources))
       Keeper_turn_pulse.Turn_failed;
     Keeper_row_broadcast.changed ~base_path ~keeper_name);
   Otel_metric_store.inc_counter
@@ -621,12 +624,13 @@ let interrupted_cycle_outcome ~(meta : keeper_meta) ~decided_channel =
   }
 ;;
 
-let handle_cycle_exception ~registry_entry ~(meta : keeper_meta) ~decided_channel exn =
+let handle_cycle_exception ~registry_entry ~(meta : keeper_meta) ~decided_channel ~sources exn =
   if Keeper_registry_types.is_operator_interrupt exn
   then interrupted_cycle_outcome ~meta ~decided_channel
   else (
     record_crashed_cycle_failure
       ~registry_entry
+      ~sources
       exn;
     { meta
     ; cycle_status = Turn_cycle_crashed
@@ -1225,6 +1229,7 @@ let run_keepalive_unified_turn
       | None ->
         record_crashed_cycle_failure
           ~registry_entry
+          ~sources:!source_batch
           (Event_queue_cycle_failed message)
     in
     try
@@ -1675,6 +1680,7 @@ let run_keepalive_unified_turn
         ~registry_entry
         ~meta:meta_after_triage
         ~decided_channel:!decided_channel
+        ~sources:!source_batch
         exn)))
     with
   | Ok (`Ran outcome) -> outcome

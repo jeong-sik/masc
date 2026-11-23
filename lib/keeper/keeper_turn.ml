@@ -1077,6 +1077,8 @@ let run_keeper_invocation_turn_admitted_inner
                 with
                 | Keeper_unified_turn_success.Completed updated_meta -> updated_meta
               in
+              (* The success handler counted this turn in the pulse; row readers redraw. *)
+              Keeper_row_broadcast.changed ~base_path:ctx.config.base_path ~keeper_name:meta.name;
               let checkpoint_yield = Keeper_turn_outcome.equal result.turn_outcome
                   Keeper_turn_outcome.Continuation_checkpoint in
               (* The waits the [keeper_receipt_wait] calls of this turn asked

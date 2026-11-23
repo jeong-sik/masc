@@ -450,8 +450,22 @@ let keeper_list_row_json_of_shape ~shape ~runtime_class config name =
             ; ( "slots"
               , `List
                   (List.map
-                     (fun ({ starts_at; tally = { ok; rested; failed } } : Keeper_turn_pulse.slot) ->
-                        `List [ `Int starts_at; `Int ok; `Int rested; `Int failed ])
+                     (fun ({ starts_at
+                           ; tally = { ok; rested; failed }
+                           ; causes = { scheduled; reacted; chat; own; unknown }
+                           } :
+                            Keeper_turn_pulse.slot) ->
+                        `Assoc
+                          [ "starts_at", `Int starts_at
+                          ; "ok", `Int ok
+                          ; "rested", `Int rested
+                          ; "failed", `Int failed
+                          ; "scheduled", `Int scheduled
+                          ; "reacted", `Int reacted
+                          ; "chat", `Int chat
+                          ; "own", `Int own
+                          ; "unknown", `Int unknown
+                          ])
                      pulse.slots) )
             ]
       in

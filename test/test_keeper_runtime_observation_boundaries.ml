@@ -560,6 +560,7 @@ let test_crashed_tick_replaces_previous_configuration_cause () =
     refresh_failure_reason ~base_path ~keeper_name:meta.name;
     KHL.record_crashed_cycle_failure
       ~registry_entry
+      ~sources:Keeper_heartbeat_source_batch.empty
       (Failure "synthetic cycle crash");
     refresh_failure_reason ~base_path ~keeper_name:meta.name;
     Alcotest.(check int) "both failures counted" 2 (R.get_turn_failures ~base_path meta.name);

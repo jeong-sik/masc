@@ -207,7 +207,12 @@ type keepalive_turn_outcome = {
     [Keeper_unified_turn_failure]), bumps the CycleExceptions counter
     and logs at ERROR. Does not raise. *)
 val record_crashed_cycle_failure :
-  registry_entry:Keeper_registry.registry_entry -> exn -> unit
+  registry_entry:Keeper_registry.registry_entry ->
+  sources:Keeper_heartbeat_source_batch.t ->
+  exn ->
+  unit
+(** [sources] are the queue entries the cycle took before it crashed; the
+    turn pulse counts the crash under the cause they give. *)
 
 (** Convert an exception escaping one autonomous cycle into its accounting
     outcome. Operator interrupts are expected cancellation and do not mutate
@@ -218,6 +223,7 @@ val handle_cycle_exception :
   registry_entry:Keeper_registry.registry_entry ->
   meta:keeper_meta ->
   decided_channel:Keeper_world_observation.keeper_cycle_channel option ->
+  sources:Keeper_heartbeat_source_batch.t ->
   exn -> keepalive_turn_outcome
 
 type turn_terminal_settlement =

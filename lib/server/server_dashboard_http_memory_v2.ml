@@ -741,38 +741,32 @@ let keeper_diff_json ~now ~config ~keeper_id ~range =
   | Error msg -> error_result Env.Store_unavailable ("snapshot read failed: " ^ msg)
   | Ok snap_opt ->
     let log_path = Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id in
+    let max_diff_rows = 2000 in
     (match
        Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-         Librarian_log_store.fold log_path ~init:([], [])
-           ~f:(fun (rows_rev, revisions_rev) ({ line; _ } : Librarian_log_store.scanned) ->
+         let tail_q :
+           (Librarian_log.commit, Librarian_log_store.undecodable) result Queue.t
+           =
+           Queue.create ()
+         in
+         let push_row row =
+           Queue.add row tail_q;
+           if Queue.length tail_q > max_diff_rows then ignore (Queue.take tail_q)
+         in
+         Librarian_log_store.fold log_path ~init:()
+           ~f:(fun () ({ line; _ } : Librarian_log_store.scanned) ->
              match line with
-             | Ok (Librarian_log.Started _) -> rows_rev, revisions_rev
-             | Ok (Librarian_log.Committed commit) ->
-               let revisions_rev =
-                 List.fold_left
-                   (fun acc ((fact : Types.fact), removal) ->
-                      match removal with
-                      | Librarian_effects.Revised_into into_id
-                      | Librarian_effects.Superseded_by into_id ->
-                        { Types.superseded = Types.memory_id fact
-                        ; superseded_by = into_id
-                        }
-                        :: acc
-                      | Dropped _ | Merged_into _ | Retracted _ | Support_lost _ | Molted _ ->
-                        acc)
-                   revisions_rev
-                   commit.effects.removed
-               in
-               Ok commit :: rows_rev, revisions_rev
-             | Error err -> Error err :: rows_rev, revisions_rev))
+             | Ok (Librarian_log.Started _) -> ()
+             | Ok (Librarian_log.Committed commit) -> push_row (Ok commit)
+             | Error err -> push_row (Error err))
+         |> Result.map (fun () ->
+              Queue.fold (fun acc item -> item :: acc) [] tail_q |> List.rev))
      with
      | Error err ->
        error_result
          Env.Store_unavailable
          ("commit log read failed: " ^ Private_jsonl_scan.error_to_string err)
-     | Ok (rows_rev, lineage_revisions_rev) ->
-       let journal_rows = List.rev (List.take 2000 rows_rev) in
-       let lineage_revisions = List.rev lineage_revisions_rev in
+     | Ok journal_rows ->
        let heat_lookup, total_events, unreadable_events =
          build_event_heat_table ~now ~keepers_dir ~keeper_id
        in
@@ -813,6 +807,9 @@ let keeper_diff_json ~now ~config ~keeper_id ~range =
        in
        let invalidated_rev = ref [] in
        let rev_ticks_rev = ref [] in
+       let lineage_revisions_rev = ref [] in
+       let relation_by_pair : (string * string, string) Hashtbl.t = Hashtbl.create 32 in
+       let absorption_pairs_rev : (string * string * int) list ref = ref [] in
        let undecodable_lines = ref 0 in
        let min_rev_seen = ref None in
        let max_rev_seen = ref None in
@@ -853,6 +850,7 @@ let keeper_diff_json ~now ~config ~keeper_id ~range =
                     Hashtbl.replace added_map id (fact, revision))
                  commit.effects.added;
                let commit_invalidated = ref 0 in
+               let commit_rev_targets : (string, string list) Hashtbl.t = Hashtbl.create 4 in
                List.iter
                  (fun ((fact : Types.fact), (removal : Librarian_effects.removal)) ->
                     let id = Types.memory_id fact in
@@ -867,12 +865,32 @@ let keeper_diff_json ~now ~config ~keeper_id ~range =
                           ({ Cur.fact; missing_premise_ids = missing }, revision)
                           :: !invalidated_rev;
                         None
-                      | Librarian_effects.Merged_into _
-                      | Librarian_effects.Revised_into _
-                      | Librarian_effects.Superseded_by _ -> None
+                      | Librarian_effects.Merged_into into_id ->
+                        Hashtbl.replace relation_by_pair (id, into_id) "program_absorption";
+                        absorption_pairs_rev := (id, into_id, revision) :: !absorption_pairs_rev;
+                        None
+                      | Librarian_effects.Revised_into into_id
+                      | Librarian_effects.Superseded_by into_id ->
+                        lineage_revisions_rev :=
+                          { Types.superseded = id; superseded_by = into_id }
+                          :: !lineage_revisions_rev;
+                        let prior =
+                          Option.value ~default:[] (Hashtbl.find_opt commit_rev_targets into_id)
+                        in
+                        Hashtbl.replace commit_rev_targets into_id (id :: prior);
+                        None
                     in
                     Hashtbl.replace removed_map id (fact, revision, source, reason))
                  commit.effects.removed;
+               Hashtbl.iter
+                 (fun into_id old_ids ->
+                    let rel = if List.length old_ids > 1 then "program_revision" else "revision" in
+                    List.iter
+                      (fun old_id ->
+                         if not (Hashtbl.mem relation_by_pair (old_id, into_id))
+                         then Hashtbl.replace relation_by_pair (old_id, into_id) rel)
+                      old_ids)
+                 commit_rev_targets;
                rev_ticks_rev
                := `Assoc
                     [ "rev", `Int revision
@@ -884,71 +902,40 @@ let keeper_diff_json ~now ~config ~keeper_id ~range =
                     ]
                   :: !rev_ticks_rev))
          journal_rows;
+       let lineage_revisions = List.rev !lineage_revisions_rev in
        let failures_in_window = ref 0 in
        let quarantines_in_window = ref 0 in
-       (* Classify revision/absorption relations from [Keeper_memory_activity] so
-          [program_absorption] and [program_revision] fire accurately in TUI/Dashboard. *)
-       let activity = Keeper_memory_activity.read ~keepers_dir ~keeper_id ~limit:200 in
-       let relation_by_pair : (string * string, string) Hashtbl.t = Hashtbl.create 32 in
-       let absorption_pairs_rev : (string * string * int) list ref = ref [] in
-       List.iter
-         (fun (ev : Keeper_memory_activity.event) ->
-            match ev.kind with
-            | Keeper_memory_activity.Absorbed ->
-              List.iter
-                (fun (b : Keeper_memory_activity.fact) ->
-                   List.iter
-                     (fun (a : Keeper_memory_activity.fact) ->
-                        Hashtbl.replace relation_by_pair (b.memory_id, a.memory_id) "program_absorption";
-                        absorption_pairs_rev := (b.memory_id, a.memory_id, ev.revision) :: !absorption_pairs_rev)
-                     ev.after)
-                ev.before
-            | Keeper_memory_activity.Revised ->
-              let rel =
-                match ev.reason with
-                | Some r when String_util.contains_substring (String.lowercase_ascii r) "program" ->
-                  "program_revision"
-                | _ ->
-                  if List.length ev.before > 1 then "program_revision" else "revision"
-              in
-              List.iter
-                (fun (b : Keeper_memory_activity.fact) ->
-                   List.iter
-                     (fun (a : Keeper_memory_activity.fact) ->
-                        if not (Hashtbl.mem relation_by_pair (b.memory_id, a.memory_id))
-                        then Hashtbl.replace relation_by_pair (b.memory_id, a.memory_id) rel)
-                     ev.after)
-                ev.before
-            | Created | Reobserved | Retracted | Removed | Invalidated | Relation_unavailable -> ())
-         activity.events;
        (* Pair explicit revision and absorption links into structured [updated] entries *)
        let paired_old = Hashtbl.create 16 in
        let paired_new = Hashtbl.create 16 in
        let revision_updated_json =
          List.filter_map
            (fun (rev_link : Types.revision) ->
-              match
-                ( Hashtbl.find_opt removed_map rev_link.superseded
-                , Hashtbl.find_opt added_map rev_link.superseded_by )
-              with
-              | Some (old_f, _old_rev, _src, _reason), Some (new_f, new_rev) ->
-                Hashtbl.replace paired_old rev_link.superseded ();
-                Hashtbl.replace paired_new rev_link.superseded_by ();
-                let relation =
-                  match
-                    Hashtbl.find_opt relation_by_pair (rev_link.superseded, rev_link.superseded_by)
-                  with
-                  | Some rel -> rel
-                  | None -> "revision"
-                in
-                Some
-                  (`Assoc
-                    [ "relation", `String relation
-                    ; "at_rev", `Int new_rev
-                    ; "before", fact_diff_entry_json ~heat_lookup old_f
-                    ; "after", fact_diff_entry_json ~heat_lookup new_f
-                    ])
-              | _ -> None)
+              if Hashtbl.mem paired_old rev_link.superseded
+              then None
+              else (
+                match
+                  ( Hashtbl.find_opt removed_map rev_link.superseded
+                  , Hashtbl.find_opt added_map rev_link.superseded_by )
+                with
+                | Some (old_f, _old_rev, _src, _reason), Some (new_f, new_rev) ->
+                  Hashtbl.replace paired_old rev_link.superseded ();
+                  Hashtbl.replace paired_new rev_link.superseded_by ();
+                  let relation =
+                    match
+                      Hashtbl.find_opt relation_by_pair (rev_link.superseded, rev_link.superseded_by)
+                    with
+                    | Some rel -> rel
+                    | None -> "revision"
+                  in
+                  Some
+                    (`Assoc
+                      [ "relation", `String relation
+                      ; "at_rev", `Int new_rev
+                      ; "before", fact_diff_entry_json ~heat_lookup old_f
+                      ; "after", fact_diff_entry_json ~heat_lookup new_f
+                      ])
+                | _ -> None))
            lineage_revisions
        in
        let current_facts_by_id = Hashtbl.create (max 16 (List.length current_facts)) in

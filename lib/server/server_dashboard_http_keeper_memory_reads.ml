@@ -219,17 +219,35 @@ let read_memory_log_tail_projection ~keepers_dir ~keeper_id ~limit =
   else
     let log_path = Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id in
     Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+      let tail_q :
+        (int * (Librarian_log.commit, Librarian_log_store.undecodable) result) Queue.t
+        =
+        Queue.create ()
+      in
+      let pre_tail_count = ref 0 in
+      let push_row row =
+        Queue.add row tail_q;
+        if Queue.length tail_q > limit
+        then (
+          match Queue.take tail_q with
+          | _, Error _ -> ()
+          | _, Ok (evicted : Librarian_log.commit) ->
+            let added_n = List.length evicted.effects.added in
+            let removed_n = List.length evicted.effects.removed in
+            let retained = max 0 (!pre_tail_count - removed_n) in
+            pre_tail_count := max 0 (retained + added_n))
+      in
       match
-        Librarian_log_store.fold log_path ~init:[]
-          ~f:(fun acc ({ at; line } : Librarian_log_store.scanned) ->
+        Librarian_log_store.fold log_path ~init:()
+          ~f:(fun () ({ at; line } : Librarian_log_store.scanned) ->
             match line with
-            | Ok (Librarian_log.Started _) -> acc
-            | Ok (Librarian_log.Committed commit) -> (at, Ok commit) :: acc
-            | Error err -> (at, Error err) :: acc)
+            | Ok (Librarian_log.Started _) -> ()
+            | Ok (Librarian_log.Committed commit) -> push_row (at, Ok commit)
+            | Error err -> push_row (at, Error err))
       with
       | Error err -> Error (Private_jsonl_scan.error_to_string err)
-      | Ok rows_rev ->
-        let tail_rows = List.rev (List.take limit rows_rev) in
+      | Ok () ->
+        let tail_rows = Queue.fold (fun acc item -> item :: acc) [] tail_q |> List.rev in
         let anchored =
           match Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id with
           | Ok (Some snap) ->
@@ -255,7 +273,7 @@ let read_memory_log_tail_projection ~keepers_dir ~keeper_id ~limit =
                 let after = max 0 (retained + added_n) in
                 walk_forward after ((at, Ok (commit, retained)) :: acc) newer
             in
-            walk_forward 0 [] tail_rows
+            walk_forward !pre_tail_count [] tail_rows
         in
         Ok
           (List.map

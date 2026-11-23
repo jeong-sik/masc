@@ -192,11 +192,20 @@ let read_inline ~keepers_dir ~keeper_id ~limit =
          (fun f -> Hashtbl.replace known_facts (Memory.memory_id f) f)
          snap.facts
      | No_snapshot | Undecodable _ | Io_unreadable _ -> ());
+    let tail_q :
+      (int * (Librarian_log.commit, Librarian_log_store.undecodable) result) Queue.t
+      =
+      Queue.create ()
+    in
+    let push_row row =
+      Queue.add row tail_q;
+      if Queue.length tail_q > limit then ignore (Queue.take tail_q)
+    in
     match
-      Librarian_log_store.fold log_path ~init:[]
-        ~f:(fun acc ({ at; line } : Librarian_log_store.scanned) ->
+      Librarian_log_store.fold log_path ~init:()
+        ~f:(fun () ({ at; line } : Librarian_log_store.scanned) ->
           match line with
-          | Ok (Librarian_log.Started _) -> acc
+          | Ok (Librarian_log.Started _) -> ()
           | Ok (Librarian_log.Committed commit) ->
             List.iter
               (fun f -> Hashtbl.replace known_facts (Memory.memory_id f) f)
@@ -207,8 +216,8 @@ let read_inline ~keepers_dir ~keeper_id ~limit =
                  if not (Hashtbl.mem known_facts id)
                  then Hashtbl.replace known_facts id f)
               commit.effects.removed;
-            (at, Ok commit) :: acc
-          | Error err -> (at, Error err) :: acc)
+            push_row (at, Ok commit)
+          | Error err -> push_row (at, Error err))
     with
     | Error err ->
       { limit
@@ -216,8 +225,8 @@ let read_inline ~keepers_dir ~keeper_id ~limit =
       ; events = []
       ; notes = [ Private_jsonl_scan.error_to_string err ]
       }
-    | Ok rows_rev ->
-      let rows = List.rev (List.take limit rows_rev) in
+    | Ok () ->
+      let rows = Queue.fold (fun acc item -> item :: acc) [] tail_q |> List.rev in
       let lookup_fact id = Hashtbl.find_opt known_facts id in
       let events_rev, notes_rev =
         List.fold_left

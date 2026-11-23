@@ -3365,17 +3365,52 @@ let test_memory_os_world_mvcc_and_keeper_internals () =
       }
     in
     let log_path = Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id:"alpha" in
-    (match Librarian_log_store.append ~path:log_path ~at_end:0 (Librarian_log.Committed absorb_commit) with
-     | Ok _ -> ()
-     | Error _ -> Alcotest.fail "append absorb commit log failed");
+    let next_end =
+      match Librarian_log_store.append ~path:log_path ~at_end:0 (Librarian_log.Committed absorb_commit) with
+      | Ok { Librarian_log_store.new_end; _ } -> ref new_end
+      | Error _ -> Alcotest.fail "append absorb commit log failed"
+    in
+    (* Append 205 newer commits after the absorption so [absorb_commit] sits >200
+       commits back from the tail (still well inside the 2000-commit diff window). *)
+    for i = 2 to 206 do
+      let filler_fact =
+        Keeper_memory_os_types.observed
+          ~claim:(Printf.sprintf "Filler fact %d after absorption" i)
+          ~category:Keeper_memory_os_types.Fact
+          ~now:(now -. 5.0)
+          ~origin:{ kind = Keeper_memory_os_types.Authored; trace_id = Printf.sprintf "filler-%d" i }
+      in
+      let filler_commit : Librarian_log.commit =
+        { absorb_commit with
+          seq = i
+        ; at = now -. 5.0
+        ; revision = i
+        ; cause =
+            Librarian_log.Direct
+              { by = Librarian_effects.Keeper
+              ; trace = Printf.sprintf "filler-%d" i
+              ; write =
+                  Librarian_direct.Remember
+                    { claim = filler_fact.claim
+                    ; category = filler_fact.category
+                    ; basis = filler_fact.basis
+                    }
+              }
+        ; effects = { Librarian_effects.empty with added = [ filler_fact ] }
+        }
+      in
+      match Librarian_log_store.append ~path:log_path ~at_end:!next_end (Librarian_log.Committed filler_commit) with
+      | Ok { Librarian_log_store.new_end; _ } -> next_end := new_end
+      | Error _ -> Alcotest.fail "append filler commit log failed"
+    done;
     let kdiff =
       Memory_api.diff_json ~now ~config ~scope:(Scope_keeper "alpha")
         ~range:(Range_window Window_24h) ()
-      |> ok_or_fail "GET /api/v1/memory/diff?scope=keeper:alpha (absorption)"
+      |> ok_or_fail "GET /api/v1/memory/diff?scope=keeper:alpha (absorption >200 commits back)"
       |> json_member_exn "data"
     in
     let updated = json_list_exn "updated" kdiff in
-    Alcotest.(check bool) "keeper diff emits program_absorption relation" true
+    Alcotest.(check bool) "keeper diff emits program_absorption relation even >200 commits back" true
       (List.exists (fun u -> json_string_exn "relation" u = "program_absorption") updated))
 ;;
 

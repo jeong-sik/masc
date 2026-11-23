@@ -867,17 +867,38 @@ let read_keeper_memory_health_json ~base_path ~caller ~keeper =
              let log_path =
                Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper
              in
+             let max_recent = 20 in
+             let tail_q :
+               (Librarian_log.commit, Librarian_log_store.undecodable) result Queue.t
+               =
+               Queue.create ()
+             in
+             let pre_tail_count = ref 0 in
+             let push_row row =
+               Queue.add row tail_q;
+               if Queue.length tail_q > max_recent
+               then (
+                 match Queue.take tail_q with
+                 | Error _ -> ()
+                 | Ok (evicted : Librarian_log.commit) ->
+                   let added_n = List.length evicted.effects.added in
+                   let removed_n = List.length evicted.effects.removed in
+                   let retained = max 0 (!pre_tail_count - removed_n) in
+                   pre_tail_count := max 0 (retained + added_n))
+             in
              match
-               Librarian_log_store.fold log_path ~init:[]
-                 ~f:(fun acc ({ line; _ } : Librarian_log_store.scanned) ->
+               Librarian_log_store.fold log_path ~init:()
+                 ~f:(fun () ({ line; _ } : Librarian_log_store.scanned) ->
                    match line with
-                   | Ok (Librarian_log.Started _) -> acc
-                   | Ok (Librarian_log.Committed commit) -> Ok commit :: acc
-                   | Error err -> Error err :: acc)
+                   | Ok (Librarian_log.Started _) -> ()
+                   | Ok (Librarian_log.Committed commit) -> push_row (Ok commit)
+                   | Error err -> push_row (Error err))
              with
              | Error _ -> `Assoc [ "status", `String "unreadable" ]
-             | Ok rows_rev ->
-               let tail_rows = List.rev (List.take 20 rows_rev) in
+             | Ok () ->
+               let tail_rows =
+                 Queue.fold (fun acc item -> item :: acc) [] tail_q |> List.rev
+               in
                let retained_of_commits =
                  match ordinary with
                  | Keeper_memory_os_current.Readable snap ->
@@ -903,7 +924,7 @@ let read_keeper_memory_health_json ~base_path ~caller ~keeper =
                        let after = max 0 (retained + added_n) in
                        walk_forward after (Ok (commit, retained) :: acc) newer
                    in
-                   walk_forward 0 [] tail_rows
+                   walk_forward !pre_tail_count [] tail_rows
                in
                let entries, undecodable_count =
                  List.fold_left

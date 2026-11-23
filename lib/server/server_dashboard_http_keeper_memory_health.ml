@@ -352,15 +352,34 @@ let invalidate_after_store_write ~keepers_dir ~keeper_id =
   invalidate_after_write ~keepers_dir:(health_directory_identity keepers_dir) ~keeper_id
 ;;
 
-let install () =
-  let retained = ref [] in
-  let register restore = retained := restore :: !retained in
-  register
-    (Keeper_memory_commit_notifications.subscribe (fun event ->
-       invalidate_after_store_write
-         ~keepers_dir:event.keepers_dir
-         ~keeper_id:event.keeper_id));
-  register (Keeper_memory_source_current.install_commit_observer invalidate_after_store_write)
+let install_mutex = Mutex.create ()
+let active_unsubscribe : (unit -> unit) option ref = ref None
+
+let uninstall_if_current unsubscribe =
+  Stdlib.Mutex.protect install_mutex (fun () ->
+    match !active_unsubscribe with
+    | Some current when current == unsubscribe ->
+      current ();
+      active_unsubscribe := None
+    | Some _ | None -> ())
+;;
+
+let install ?sw () =
+  let unsubscribe =
+    Stdlib.Mutex.protect install_mutex (fun () ->
+      Option.iter (fun prev -> prev ()) !active_unsubscribe;
+      let unsubscribe =
+        Keeper_memory_commit_notifications.subscribe (fun event ->
+          invalidate_after_write
+            ~keepers_dir:event.keepers_dir
+            ~keeper_id:event.keeper_id)
+      in
+      active_unsubscribe := Some unsubscribe;
+      unsubscribe)
+  in
+  Option.iter
+    (fun sw -> Eio.Switch.on_release sw (fun () -> uninstall_if_current unsubscribe))
+    sw
 ;;
 
 let alerts (h : keeper_health) =
@@ -627,7 +646,7 @@ module For_testing = struct
     health_reader := reader;
     let restore =
       Keeper_memory_commit_notifications.subscribe (fun event ->
-        invalidate_after_store_write
+        invalidate_after_write
           ~keepers_dir:event.keepers_dir
           ~keeper_id:event.keeper_id)
     in

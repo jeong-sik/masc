@@ -7908,6 +7908,32 @@ let test_context_tab_reads_turn_records_and_costs () =
        (Observed.to_option (Fleet_store.turn_records_for ~keeper:"alpha" m_ok.fleet)));
   Alcotest.(check bool) "a fresh slot is not read again" false
     (sent_get turn_records (View_fetches.fetches_for_current_view m_ok));
+  (* Opened over alpha's chat, the drawer reads the turns alpha finishes:
+     the roster the finished turn brings leaves the records stale. *)
+  let in_chat =
+    {
+      m_ok with
+      nav =
+        {
+          m_ok.nav with
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat } ];
+        };
+      fleet = Fleet_store.mark_keepers_stale m_ok.fleet;
+    }
+  in
+  let _, roster_cmds =
+    Update.step ~now:t1 in_chat
+      (Msg.Http_reply
+         {
+           epoch = in_chat.epoch;
+           reply =
+             Msg.Reply_keepers_roster (Ok (roster_of [ sample_keeper "alpha" ]));
+         })
+  in
+  Alcotest.(check bool)
+    "a roster reply under a chat dive reads the stale turn records" true
+    (sent_get turn_records roster_cmds);
   let m_err, _ =
     Update.step ~now:t1 m_ctx
       (Msg.Http_reply

@@ -559,6 +559,11 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
   in
   List.map (fun req -> Cmd.Http_get { epoch = m.epoch; req }) reqs
 
+let overlay_fetches (m : Model.t) =
+  List.map
+    (fun req -> Cmd.Http_get { epoch = m.epoch; req })
+    (fetches_for_overlay ~force:false m)
+
 let selected_wiki_page_fetch (m : Model.t) =
   let wiki_tab_shown =
     Nav.equal_workspace m.nav.workspace Nav.Knowledge

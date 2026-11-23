@@ -356,13 +356,15 @@ let apply_http_reply ~now (m : Model.t) reply =
         |> refresh_404_fallbacks ~now
         |> Model.sync_effective_scorecard ~now
       in
+      (* A roster change can mean a finished turn, which leaves the Context
+         tab's turn records stale; the drawer opens over any view. *)
       let cmds =
         if
           Nav.equal_workspace next.nav.workspace Nav.Keepers
           && next.nav.dive_stack = []
           && Option.is_some fleet.selected_keeper
         then View_fetches.fetches_for_current_view next
-        else []
+        else View_fetches.overlay_fetches next
       in
       (next, cmds)
   | Msg.Reply_keepers_roster (Error err) ->

@@ -8,7 +8,7 @@
        ([started_at], verification evidence, goal link status), and Schedules
        table with last wake disposition & output summary.
     3. [render_inbox]: Rapid-fire triage split (Held Tool Calls -> Keeper Asks
-       -> Goal Confirmations -> Board Quarantines) with Markdown preview,
+       -> Goal Confirmations) with Markdown preview,
        structured tool args via [Json_tree], instant [1..4] choices, and clean
        empty-state 24h Recent Decisions Audit + Approval/Sandbox Policy Summary.
     4. [render_candle_scorecard]: Decaying balances + half-life decay curve

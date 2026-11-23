@@ -149,7 +149,7 @@ type keepers_roster = {
 type attention_bucket =
   | Bucket_asks
   | Bucket_approvals
-  | Bucket_confirmations_quarantine
+  | Bucket_confirmations
 
 type attention_item = {
   id : string;
@@ -978,16 +978,9 @@ let decode_attention_item json =
         in
         let* keeper = optional_nonblank_string json "keeper" in
         Ok
-          ( Bucket_confirmations_quarantine
+          ( Bucket_confirmations
           , Health.Goal_confirmation { goal_id }
           , keeper )
-    | "board_quarantine" ->
-        let* keeper = required_nonblank_string json "keeper" in
-        let* count = required_nonnegative_int_field json "count" in
-        Ok
-          ( Bucket_confirmations_quarantine
-          , Health.Board_quarantine { keeper; count }
-          , Some keeper )
     | other -> Error (Printf.sprintf "unknown attention kind %S" other)
   in
   Ok { id; bucket; kind; title; summary; created_at_unix; keeper }

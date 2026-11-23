@@ -6,7 +6,6 @@ type payload =
   | Payload_gate of Wire_work.gate_pending
   | Payload_ask of Wire_work.ask_row
   | Payload_goal_confirmation of Wire_work.goal
-  | Payload_quarantine of Wire_knowledge.quarantine_candidate
 
 type entry = {
   id : string;
@@ -16,12 +15,6 @@ type entry = {
   summary : string;
   keeper : string option;
   created_at_unix : float option;
-}
-
-type bucket_counts = {
-  asks : int;
-  approvals : int;
-  confirmations_quarantine : int;
 }
 
 type t = {
@@ -45,7 +38,6 @@ let urgency_rank = function
   | Health.Held_tool_approval _ -> 400
   | Health.Pending_ask _ -> 300
   | Health.Goal_confirmation _ -> 200
-  | Health.Board_quarantine _ -> 100
 
 let compare_opt_float a b =
   match a, b with
@@ -151,24 +143,12 @@ let entry_of_goal (g : Wire_work.goal) : entry option =
   | Wire_work.Blocked _ ->
       None
 
-let entry_of_quarantine (q : Wire_knowledge.quarantine_candidate) : entry =
-  {
-    id = "quarantine:" ^ q.quarantine_id;
-    kind = Health.Board_quarantine { keeper = q.keeper; count = 1 };
-    payload = Payload_quarantine q;
-    title = q.keeper ^ " · Quarantine";
-    summary = q.failure_reason;
-    keeper = Some q.keeper;
-    created_at_unix = q.quarantined_at_unix;
-  }
-
-let rebuild ~asks ~tool_approvals ~gate_pending ~goals ~quarantines t =
+let rebuild ~asks ~tool_approvals ~gate_pending ~goals t =
   let raw =
     List.map entry_of_tool_approval tool_approvals
     @ List.map entry_of_gate gate_pending
     @ List.filter_map entry_of_ask asks
     @ List.filter_map entry_of_goal goals
-    @ List.map entry_of_quarantine quarantines
   in
   let items = sort_and_dedup raw in
   let present_ids = List.map (fun (e : entry) -> e.id) items in
@@ -278,20 +258,5 @@ let advance_after_resolution ~resolved_id t =
 
 let count t = List.length t.items
 let is_empty t = match t.items with [] -> true | _ :: _ -> false
-
-let bucket_counts t =
-  List.fold_left
-    (fun acc (e : entry) ->
-      match e.kind with
-      | Health.Pending_ask _ -> { acc with asks = acc.asks + 1 }
-      | Health.Held_tool_approval _ ->
-          { acc with approvals = acc.approvals + 1 }
-      | Health.Goal_confirmation _ | Health.Board_quarantine _ ->
-          {
-            acc with
-            confirmations_quarantine = acc.confirmations_quarantine + 1;
-          })
-    { asks = 0; approvals = 0; confirmations_quarantine = 0 }
-    t.items
 
 let has_actionable_fast_path t = Option.is_some (top_fast_path t)

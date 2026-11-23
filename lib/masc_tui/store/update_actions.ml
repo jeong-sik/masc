@@ -296,8 +296,7 @@ let find_actionable_ask (m : Model.t) =
             ( Attention.Payload_ask _
             | Attention.Payload_tool_approval _
             | Attention.Payload_gate _
-            | Attention.Payload_goal_confirmation _
-            | Attention.Payload_quarantine _ );
+            | Attention.Payload_goal_confirmation _ );
           _;
         }
     | None ->
@@ -313,8 +312,7 @@ let find_actionable_ask (m : Model.t) =
             ( Attention.Payload_ask _
             | Attention.Payload_tool_approval _
             | Attention.Payload_gate _
-            | Attention.Payload_goal_confirmation _
-            | Attention.Payload_quarantine _ );
+            | Attention.Payload_goal_confirmation _ );
           _;
         }
     | None -> (
@@ -329,8 +327,7 @@ let find_actionable_ask (m : Model.t) =
                   | Attention.Payload_ask ask -> Some ask
                   | Attention.Payload_tool_approval _
                   | Attention.Payload_gate _
-                  | Attention.Payload_goal_confirmation _
-                  | Attention.Payload_quarantine _ ->
+                  | Attention.Payload_goal_confirmation _ ->
                       None)
               m.attention.items)
 
@@ -2222,8 +2219,7 @@ and execute_action ~now (m : Model.t) action =
                                 payload =
                                   ( Attention.Payload_tool_approval _
                                   | Attention.Payload_gate _
-                                  | Attention.Payload_goal_confirmation _
-                                  | Attention.Payload_quarantine _ );
+                                  | Attention.Payload_goal_confirmation _ );
                                 summary;
                                 _;
                               } ->

@@ -125,8 +125,6 @@ type http_reply =
       ( Wire_knowledge.board_post * Wire_knowledge.board_comment list
       , http_error )
       result
-  | Reply_quarantines of
-      (Wire_knowledge.quarantine_candidate list, http_error) result
   | Reply_wiki_index of (Wire_knowledge.wiki_index, http_error) result
   | Reply_wiki_page of (Wire_knowledge.wiki_page_detail, http_error) result
   | Reply_wiki_log of (Wire_knowledge.wiki_log_response, http_error) result

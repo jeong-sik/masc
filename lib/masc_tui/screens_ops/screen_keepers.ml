@@ -12,8 +12,7 @@ let attention_items_for_grouping (attn : Attention.t) :
         match e.kind with
         | Health.Pending_ask _ -> Wire_fleet.Bucket_asks
         | Health.Held_tool_approval _ -> Wire_fleet.Bucket_approvals
-        | Health.Goal_confirmation _ | Health.Board_quarantine _ ->
-            Wire_fleet.Bucket_confirmations_quarantine
+        | Health.Goal_confirmation _ -> Wire_fleet.Bucket_confirmations
       in
       {
         Wire_fleet.id = e.id;

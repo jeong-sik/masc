@@ -31,7 +31,6 @@ type get_request =
       offset : int option;
     }
   | Get_board_thread of { post_id : string; comment_limit : int option }
-  | Get_quarantines of { keeper : string }
   | Get_wiki_index of {
       tag : string option;
       source : string option;
@@ -109,12 +108,6 @@ type post_request =
       verification_id : string;
       verdict : Wire_work.operator_verdict;
       notes : string option;
-    }
-  | Post_quarantine_requeue of {
-      keeper : string;
-      partition_id : string;
-      quarantine_id : string;
-      reason : string option;
     }
   | Post_memory_act of {
       keeper : string;
@@ -242,8 +235,6 @@ let get_request_path = function
         ?offset ()
   | Get_board_thread { post_id; comment_limit } ->
       Wire_knowledge.board_post_path ~post_id ?comment_limit ()
-  | Get_quarantines { keeper } ->
-      Wire_knowledge.keeper_quarantines_path ~keeper
   | Get_wiki_index { tag; source; sort } ->
       Wire_knowledge.wiki_index_path ?tag ?source ?sort ()
   | Get_wiki_page { page } -> Wire_knowledge.wiki_page_path ~page
@@ -313,8 +304,6 @@ let post_request_path = function
   | Post_goal_transition _ -> "/api/v1/tools/masc_goal_transition"
   | Post_goal_confirmation _ -> Wire_work.goal_confirmation_path
   | Post_verification_verdict _ -> Wire_work.verification_verdict_path
-  | Post_quarantine_requeue { keeper; partition_id; _ } ->
-      Wire_knowledge.keeper_quarantine_requeue_path ~keeper ~partition_id
   | Post_memory_act { keeper; _ } ->
       Wire_knowledge.keeper_memory_act_path ~keeper
   | Post_fusion_launch { keeper; _ } -> Wire_runtime.fusion_launch_path ~keeper
@@ -349,8 +338,6 @@ let post_request_body = function
   | Post_verification_verdict { task_id; verification_id; verdict; notes } ->
       Wire_work.encode_verification_verdict ~task_id ~verification_id ~verdict
         ~notes
-  | Post_quarantine_requeue { quarantine_id; reason; _ } ->
-      Wire_knowledge.encode_quarantine_requeue_request ~quarantine_id ~reason
   | Post_memory_act { act; _ } -> Wire_knowledge.encode_memory_act_request act
   | Post_fusion_launch { request; _ } -> Wire_runtime.encode_fusion_launch request
   | Post_runtime_assignment

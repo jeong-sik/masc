@@ -130,7 +130,7 @@ type keepers_roster = {
 type attention_bucket =
   | Bucket_asks
   | Bucket_approvals
-  | Bucket_confirmations_quarantine
+  | Bucket_confirmations
 
 type attention_item = {
   id : string;

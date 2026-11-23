@@ -1,9 +1,8 @@
 (** Channel 1 Human Action Queue.
 
     Aggregates items requiring an operator decision right now
-    ({!Health.attention_kind}): held tool approvals, pending keeper asks,
-    verified goals awaiting completion confirmation, and quarantined board
-    candidates. Sorted strictly by operational urgency, powering both the
+    ({!Health.attention_kind}): held tool approvals, pending keeper asks, and
+    verified goals awaiting completion confirmation. Sorted strictly by operational urgency, powering both the
     persistent fast-path Approval Strip ([Y]/[N]) and rapid 1-key Ask triage. *)
 
 open Masc_tui_core
@@ -14,7 +13,6 @@ type payload =
   | Payload_gate of Wire_work.gate_pending
   | Payload_ask of Wire_work.ask_row
   | Payload_goal_confirmation of Wire_work.goal
-  | Payload_quarantine of Wire_knowledge.quarantine_candidate
 
 type entry = {
   id : string;
@@ -24,12 +22,6 @@ type entry = {
   summary : string;
   keeper : string option;
   created_at_unix : float option;
-}
-
-type bucket_counts = {
-  asks : int;
-  approvals : int;
-  confirmations_quarantine : int;
 }
 
 type t = {
@@ -44,15 +36,13 @@ val empty : t
 
 val urgency_rank : Health.attention_kind -> int
 (** Higher values indicate higher operator urgency:
-    [Held_tool_approval] > [Pending_ask] > [Goal_confirmation] >
-    [Board_quarantine]. *)
+    [Held_tool_approval] > [Pending_ask] > [Goal_confirmation]. *)
 
 val rebuild :
   asks:Wire_work.ask_row list ->
   tool_approvals:Wire_work.held_tool_approval list ->
   gate_pending:Wire_work.gate_pending list ->
   goals:Wire_work.goal list ->
-  quarantines:Wire_knowledge.quarantine_candidate list ->
   t ->
   t
 (** Rebuild the sorted queue from authoritative server slices while preserving
@@ -88,5 +78,4 @@ val advance_after_resolution : resolved_id:string -> t -> t
 
 val count : t -> int
 val is_empty : t -> bool
-val bucket_counts : t -> bucket_counts
 val has_actionable_fast_path : t -> bool

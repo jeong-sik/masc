@@ -36,14 +36,6 @@ let board_post_path ~post_id ?comment_offset ?comment_limit () =
   Printf.sprintf "/api/v1/board/%s?%s" (percent_encode post_id)
     (String.concat "&" params)
 
-let keeper_quarantines_path ~keeper =
-  Printf.sprintf "/api/v1/keepers/%s/board-attention/quarantines"
-    (percent_encode keeper)
-
-let keeper_quarantine_requeue_path ~keeper ~partition_id =
-  Printf.sprintf "%s/%s/recovery" (keeper_quarantines_path ~keeper)
-    (percent_encode partition_id)
-
 let wiki_index_path ?tag ?source ?sort () =
   let params =
     (match tag with None -> [] | Some t -> [ "tag=" ^ percent_encode t ])
@@ -167,16 +159,6 @@ type board_feed = {
   count : int;
   sort_by : string;
   signal_only : bool;
-}
-
-type quarantine_candidate = {
-  partition_id : string;
-  quarantine_id : string;
-  keeper : string;
-  post_id : string;
-  status : string;
-  failure_reason : string;
-  quarantined_at_unix : float option;
 }
 
 let post_kind_of_string raw =
@@ -323,37 +305,6 @@ let decode_board_thread ~observed_at json =
   let* comment_items = optional_list_field body "comments" in
   let* comments = decode_list "comments" decode_board_comment comment_items in
   Ok (post, comments)
-
-let decode_quarantine_candidate json =
-  let* partition_id = required_nonblank_string json "partition_id" in
-  let* quarantine_id = required_nonblank_string json "quarantine_id" in
-  let* keeper = required_nonblank_string json "keeper" in
-  let* post_id = required_nonblank_string json "post_id" in
-  let* status = required_nonblank_string json "status" in
-  let* failure_reason = required_string_field json "failure_reason" in
-  let* quarantined_at_unix =
-    decode_optional_timestamp_unix json "quarantined_at_unix"
-  in
-  Ok
-    {
-      partition_id;
-      quarantine_id;
-      keeper;
-      post_id;
-      status;
-      failure_reason;
-      quarantined_at_unix;
-    }
-
-let decode_quarantines json =
-  let* _, body = unwrap_v2_or_raw json in
-  let* items = required_list_field body "quarantines" in
-  decode_list "quarantines" decode_quarantine_candidate items
-
-let encode_quarantine_requeue_request ~quarantine_id ~reason =
-  `Assoc
-    ([ ("quarantine_id", `String quarantine_id) ]
-    @ match reason with None -> [] | Some r -> [ ("reason", `String r) ])
 
 type wiki_source =
   | Source_direct_experience

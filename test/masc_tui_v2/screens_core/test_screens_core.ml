@@ -556,19 +556,6 @@ let populated_model ~cols ~rows ~lang =
         };
     }
   in
-  let quarantines : Wire_knowledge.quarantine_candidate list =
-    [
-      {
-        partition_id = "part-1";
-        quarantine_id = "q-1";
-        keeper = "wkbl-front";
-        post_id = "p-1";
-        status = "quarantined";
-        failure_reason = "durable_partition_invariant";
-        quarantined_at_unix = Some (now_unix -. 300.0);
-      };
-    ]
-  in
   let artifacts : Wire_knowledge.artifact_entry list =
     [
       {
@@ -593,7 +580,6 @@ let populated_model ~cols ~rows ~lang =
     |> Knowledge_store.apply_board ~observed_at:Clock.Mono.zero board_feed
     |> Knowledge_store.apply_world_memory ~observed_at:Clock.Mono.zero world_memory
     |> Knowledge_store.apply_wiki_index ~observed_at:Clock.Mono.zero wiki_index
-    |> Knowledge_store.apply_quarantines ~observed_at:Clock.Mono.zero quarantines
     |> Knowledge_store.apply_artifacts ~observed_at:Clock.Mono.zero artifacts
   in
   let efficiency : Wire_runtime.efficiency_month =
@@ -2442,7 +2428,7 @@ let test_v25_round55_attention_bar_5companies_fail_and_settings_polish () =
           (* Case A: Goal_confirmation with keeper = None and huge title *)
           let attn_goal =
             Attention.rebuild ~asks:[] ~tool_approvals:[] ~gate_pending:[]
-              ~goals:[ long_goal ] ~quarantines:[] Attention.empty
+              ~goals:[ long_goal ] Attention.empty
           in
           let m_goal = { base with attention = attn_goal } in
           let layout_g = Chrome.compute_layout ~model:m_goal ~cols ~rows in
@@ -2470,7 +2456,7 @@ let test_v25_round55_attention_bar_5companies_fail_and_settings_polish () =
           (* Case B: Held_tool_approval with long summary *)
           let attn_tool =
             Attention.rebuild ~asks:[] ~tool_approvals:[ long_approval ]
-              ~gate_pending:[] ~goals:[] ~quarantines:[] Attention.empty
+              ~gate_pending:[] ~goals:[] Attention.empty
           in
           let m_tool = { base with attention = attn_tool } in
           let layout_t = Chrome.compute_layout ~model:m_tool ~cols ~rows in

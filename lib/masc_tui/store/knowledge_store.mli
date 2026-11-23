@@ -1,6 +1,6 @@
 (** Knowledge domain sub-store: Signal-first Board ([signal_only = true] by
-    default), succession chain expand set, Quarantine list, Wiki index/page/
-    log/search/lint + inline edit draft, Artifacts, World Memory conflicts +
+    default), succession chain expand set, Wiki index/page/log/search/lint
+    + the edit form's base page, Artifacts, World Memory conflicts +
     Librarian writer recovery acts, and Temporal Memory Diff
     ([24h | 7d | 30d | revs]). *)
 
@@ -124,7 +124,6 @@ type t = {
   expanded_succession_chains : String_set.t;
   active_thread :
     (Wire_knowledge.board_post * Wire_knowledge.board_comment list) Observed.t;
-  quarantines : Wire_knowledge.quarantine_candidate list Observed.t;
   wiki_artifacts_submode : [ `Wiki | `Artifacts ];
   wiki_index : Wire_knowledge.wiki_index Observed.t;
   wiki_page : Wire_knowledge.wiki_page_detail Observed.t;
@@ -252,8 +251,6 @@ val apply_thread :
   Wire_knowledge.board_post * Wire_knowledge.board_comment list ->
   t ->
   t
-val apply_quarantines :
-  observed_at:Clock.Mono.t -> Wire_knowledge.quarantine_candidate list -> t -> t
 val apply_wiki_index :
   observed_at:Clock.Mono.t -> Wire_knowledge.wiki_index -> t -> t
 val apply_wiki_page :
@@ -330,7 +327,6 @@ val cluster_wiki_pages :
 val wiki_display_pages : t -> Wire_knowledge.wiki_page_summary list
 (** Flattened visual display order matching {!cluster_wiki_pages}. *)
 
-val quarantines_list : t -> Wire_knowledge.quarantine_candidate list
 val filtered_memory_conflicts : t -> Wire_knowledge.memory_conflict list
 val filtered_memory_claims : t -> Wire_knowledge.world_claim list
 val filtered_librarian_writers : t -> Wire_knowledge.librarian_writer_row list

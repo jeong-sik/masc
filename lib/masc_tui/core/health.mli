@@ -11,7 +11,6 @@ type attention_kind =
   | Pending_ask of { ask_id : string; keeper : string }
   | Held_tool_approval of { request_id : string; keeper : string; tool : string }
   | Goal_confirmation of { goal_id : string }
-  | Board_quarantine of { keeper : string; count : int }
 
 type live_state =
   | Healthy

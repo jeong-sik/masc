@@ -2,7 +2,6 @@ type attention_kind =
   | Pending_ask of { ask_id : string; keeper : string }
   | Held_tool_approval of { request_id : string; keeper : string; tool : string }
   | Goal_confirmation of { goal_id : string }
-  | Board_quarantine of { keeper : string; count : int }
 
 type live_state =
   | Healthy
@@ -89,12 +88,9 @@ let equal_attention_kind a b =
       && String.equal x.tool y.tool
   | Goal_confirmation x, Goal_confirmation y ->
       String.equal x.goal_id y.goal_id
-  | Board_quarantine x, Board_quarantine y ->
-      String.equal x.keeper y.keeper && Int.equal x.count y.count
-  | Pending_ask _, (Held_tool_approval _ | Goal_confirmation _ | Board_quarantine _)
-  | Held_tool_approval _, (Pending_ask _ | Goal_confirmation _ | Board_quarantine _)
-  | Goal_confirmation _, (Pending_ask _ | Held_tool_approval _ | Board_quarantine _)
-  | Board_quarantine _, (Pending_ask _ | Held_tool_approval _ | Goal_confirmation _) ->
+  | Pending_ask _, (Held_tool_approval _ | Goal_confirmation _)
+  | Held_tool_approval _, (Pending_ask _ | Goal_confirmation _)
+  | Goal_confirmation _, (Pending_ask _ | Held_tool_approval _) ->
       false
 
 let equal_live_state a b =

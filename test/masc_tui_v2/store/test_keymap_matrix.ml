@@ -1019,7 +1019,7 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
     if not with_attention then Attention.empty
     else
       Attention.rebuild ~asks ~tool_approvals ~gate_pending ~goals
-        ~quarantines:[] Attention.empty
+        Attention.empty
   in
   let cfg_schema : Wire_config.config_schema =
     {
@@ -3115,7 +3115,7 @@ let test_journeys_tab_multipane_dives_safety () =
          | _ -> false)
        cmds_wy);
 
-  (* R11: Work_inbox Approval Strip parity + Quarantine Y/N & Ask N stay active *)
+  (* R11: Work_inbox Approval Strip parity + Ask N stays active *)
   record_case ();
   let m_inb_ask =
     {
@@ -3146,51 +3146,6 @@ let test_journeys_tab_multipane_dives_safety () =
              true
          | _ -> false)
        cmds_inb_ask_n);
-  let q_item : Wire_knowledge.quarantine_candidate =
-    {
-      partition_id = "part-1";
-      quarantine_id = "q-1";
-      keeper = "alpha";
-      post_id = "post-q1";
-      status = "quarantined";
-      failure_reason = "policy";
-      quarantined_at_unix = Some 1700000000.0;
-    }
-  in
-  let m_inb_q =
-    let attention =
-      Attention.rebuild ~asks:[] ~tool_approvals:[] ~gate_pending:[] ~goals:[]
-        ~quarantines:[ q_item ] Attention.empty
-    in
-    {
-      base with
-      attention;
-      nav = { base.nav with workspace = Nav.Work };
-      work = Work_store.set_tab Nav.Work_inbox base.work;
-    }
-  in
-  Alcotest.(check bool)
-    "R11 Work_inbox Quarantine keeps bottom Approval Strip hidden"
-    true
-    (Option.is_none (Model.fast_approval_strip_item m_inb_q));
-  let _, cmds_q_y = step m_inb_q (char_key ~shift:true "Y") in
-  Alcotest.(check bool)
-    "R11 Work_inbox Quarantine 'Y' emits Post_quarantine_requeue"
-    true
-    (has_cmd
-       (function
-         | Cmd.Http_post
-             { req = Cmd.Post_quarantine_requeue { quarantine_id = "q-1"; _ }; _ } ->
-             true
-         | _ -> false)
-       cmds_q_y);
-  let m_q_n, _ = step m_inb_q (char_key ~shift:true "N") in
-  Alcotest.(check bool)
-    "R11 Work_inbox Quarantine 'N' skips with toast"
-    true
-    (match m_q_n.toast with
-     | Some t -> Store_scroll.contains_ci ~needle:"Skipped quarantine" t.message.en
-     | None -> false);
 
   (* R12: apply_paste submitting guard + Server_offline clears inline_modal *)
   record_case ();

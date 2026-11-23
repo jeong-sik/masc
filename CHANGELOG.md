@@ -4,9 +4,12 @@
 
 ### 요약
 
-- 이 릴리스는 `v0.80.0`(`c5363d75`) 이후 `main`에 착지한 5 PR(`#54429`, `#54430`, `#54434`, `#54436`, `#54440`)을 `0.81.0`(minor)으로 내보냅니다.
+- 이 릴리스는 `v0.80.0`(`c5363d75`) 이후 `main`에 착지한 24 PR(`#54343`, `#54415`, `#54417`, `#54429`, `#54430`, `#54434`, `#54436`, `#54437`, `#54438`, `#54440`, `#54444`, `#54445`, `#54446`, `#54448`, `#54449`, `#54450`, `#54451`, `#54452`, `#54453`, `#54454`, `#54455`, `#54456`, `#54457`, `#54458`)을 `0.81.0`(minor)으로 내보냅니다. 처음 5 PR(`#54429`, `#54430`, `#54434`, `#54436`, `#54440`) 위에 컷 이후 19 PR이 더해졌습니다.
 - **ACP·비전·쿼터 하드닝**: fix(runtime): typed ACP tool-call correlation, session/set_model negotiation, and activity-based prompt liveness (#54429) · fix(keeper,acp): enforce operator max-context rollover cap, typed MCP effect fencing, tool activity liveness, and live catalog alignment (#54430) · fix(vision,acp,quota): fix vision split-brain, ACP/Antigravity quota failover, and Vibe/Agy MCP permission handling (#54434).
 - **설정·Memory OS·TUI 고도화**: fix(setup,memory-os,tui): ACP/Gemini/Vertex setup, MVCC World Memory & Memory OS internals, TUI quota/effort/assignment wiring (#54436) · fix(tui): interactive / slash & @ popup, unified Ctrl+K palette, Tab multi-pane focus, key safety & 1,226-case matrix (#54440).
+- **Keeper ACP·Gate 하드닝 (후속)**: Keeper ACP 연속성·rollover·Gate 일시정지 이어가기, SSE 방출 직렬화와 MCP call_id 소유권을 다듬었습니다 (#54437, #54438).
+- **TUI 정렬·Keeper/Memory 정리**: TUI 키맵·포커스·chat transcript 정렬(#54445, #54446, #54450, #54453)과 old-Librarian/Memory OS 정리 L10c~L10e(#54448, #54451, #54452, #54454)를 포함합니다.
+- **DOS INT 트레일·RC1 수리**: `masc_dos_screen` `include_ints`로 DOS INT-entry 트레일을 봅니다(#54417). RC1에서 실패한 설치 테스트 spec을 고쳤습니다(#54456).
 
 ### Fixed
 

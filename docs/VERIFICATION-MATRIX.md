@@ -10,8 +10,8 @@
   - 스택 최상단 병합 대상 head에 대한 컴파일·타입 게이트(`merge-compile`)와 현재 head 독립 소스 리뷰를 확인한다.
 - **릴리스 후보 검증 (`release-candidate.yml` + `config/release-behavior.json`)**:
   - 전체 컴파일/타입 검증, 4개 플랫폼 설치 검증, 그리고 `config/release-behavior.json`(`release-behavior.yml`)에 고정된 핵심 동작 테스트를 실행한다.
-- **일일 및 수동 회귀 검증 (`test.yml`)**:
-  - 루트 `@runtest` 전체 단위/통합 테스트 묶음은 일일 스케줄 및 `workflow_dispatch`에서 실행된다.
+- **수동 회귀 검증 (`test.yml`)**:
+  - 루트 `@runtest` 전체 단위/통합 테스트 묶음은 `workflow_dispatch`나 다른 workflow의 호출로만 실행된다.
 
 ## 2. Hermetic Test Suites
 

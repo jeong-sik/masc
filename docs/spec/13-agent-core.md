@@ -37,7 +37,7 @@ Fusion      -> Runtime_agent.build -> Agent_core.Async_agent
   (`#43427`, `#43512`), and records HTTP request body component attribution
   (system prompt, dynamic context, conversation history, tool schemas) at the
   wire observation boundary (`#43388`).
-- `Agent_core.Runtime_output_schema` owns provider-aware structured output
+- `packages/agent_core/lib/llm_provider/exact_output.mli` owns provider-aware structured output
   schema validation, wire-format normalization, and exact-output decoding.
 - `Agent_core.Capability_manifest` owns runtime capability manifests and
   provider/model capability derivation (including explicit OpenAI Chat model
@@ -79,7 +79,6 @@ timestamps. MASC-owned domain events use the process-wide bus in
 
 ## Required proof
 
-- `scripts/audit-sublib-cycle.py --closed-source-root packages/agent_core --required-local-library masc.agent_core`
 - `@packages/agent_core/test/runtest`
 - `@test/runtest-test_keeper_hooks_agent_core_introspection`
 - `@test/runtest-test_keeper_execution_join`

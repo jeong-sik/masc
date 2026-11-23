@@ -9,7 +9,6 @@ status: reference
 | Status | Draft |
 | Team | Server |
 | Maps to | `lib/server/`, `lib/sse.ml`, `lib/transport.ml`, `lib/http_server_eio.ml`, `lib/mcp_server_eio*.ml`, `bin/main_eio.ml`, `bin/main_stdio_eio.ml` |
-| Dependencies | 02-types-and-invariants |
 | Modules | `lib/server/` and the files in Maps to are the inventory SSOT |
 | LOC | Derived from the source tree, not duplicated here |
 
@@ -934,4 +933,3 @@ sequenceDiagram
 | grpc-direct | `workspace/yousleepwhen/grpc-direct` |
 | Cloudflare Tunnel | `docs/spec/01-system-overview.md` |
 | README quickstart | `README.md#start-here` |
-| 02-types-and-invariants | `docs/spec/02-types-and-invariants.md` |

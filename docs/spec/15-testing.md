@@ -98,8 +98,7 @@ rg -n '^\((test|tests|executable)\b|^\s+\((name|names|modules)\b' test/dune test
 
 테스트는 입력에 대한 제품의 출력·상태 변화·저장·복구를 검증한다. 소스의 함수 호출
 횟수, 문구·파일명·구현 형태를 고정하는 검사, 과거 호환만 유지하는 검사와 폐기한 기능의 부재 검사는 두지 않는다.
-TUI 화면 문구·배치·폭별 레이아웃·행 순서를 확인하는 테스트(PTY 시나리오 포함)도 두지 않는다
-(`v0.51.0`에서 181개 Python PTY 시나리오와 48개 OCaml TUI 레이아웃 테스트 제거).
+TUI 화면 문구·배치·폭별 레이아웃·행 순서를 확인하는 테스트(PTY 시나리오 포함)도 두지 않는다.
 TUI 는 자주 바뀐다. TUI 검사는 보낸 요청·저장한 상태·결정만 본다.
 기능 검증에 필요한 프로토콜·권한·자원 경계는 실제 입력과 결과로 확인한다.
 
@@ -233,10 +232,9 @@ MASC_E2E_TESTS=true scripts/dune-local.sh build @test/runtest-test_sse_storm_e2e
 ```
 
 일반 스택 병합 대상 head는 소스 리뷰와 `merge-compile` 권고 기록을 확인하고,
-`.github/workflows/test.yml`은 일일(daily) 스케줄 및 수동 실행으로 전체 행동/단위 회귀
+`.github/workflows/test.yml`은 수동 실행이나 다른 workflow의 호출로만 전체 행동/단위 회귀
 (`@runtest`)를 검증한다. Release/Tag 후보 검증은 `.github/workflows/release-candidate.yml`이
-`config/release-behavior.json`에 선언된 통합 행동 스위트(bootstrap, TUI,
-dashboard, lane add-on smoke)를 실행한다.
+`config/release-behavior.json`에 선언된 스위트를 실행한다.
 
 ### 6.3 Contract Harness
 
@@ -265,7 +263,7 @@ bisect-ppx-report html --coverage-path _coverage
 
 ### 7.2 Coverage 파일 분포
 
-45개의 `*_coverage.ml` 파일이 커버리지 보강 목적으로 존재한다 (`test/dune`이 SSOT). 이 파일들은 기존 기능 테스트에서 누락된 분기 경로를 보완한다.
+`*_coverage.ml` 파일이 커버리지 보강 목적으로 존재한다 (`test/dune`이 SSOT). 이 파일들은 기존 기능 테스트에서 누락된 분기 경로를 보완한다.
 
 ---
 

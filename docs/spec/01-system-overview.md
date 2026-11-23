@@ -103,13 +103,13 @@ MASC는 최상위 public library(`masc`)와 `lib/` 아래의 도메인별 내부
 | `lib/goal/`, `lib/candle*/` | Goal phase 상태 기계, 측정값, Candle 원장 및 정산 |
 | `lib/lane_addon/`, `lib/msx_lane/`, `lib/dos_lane/`, `lib/browser_lane/` | Lane Add-on 호스트, MSX/DOS 공유 머신 레인, Browser 레인 |
 | `lib/operator/` | Operator 제어 및 관측 표면 |
-| `lib/server/masc_grpc_server.ml`, `lib/server/masc_grpc_service.ml` | gRPC transport (`MascCoord` 서비스) |
+| `lib/server/masc_grpc_server.ml`, `lib/server/masc_grpc_service.ml` | gRPC transport (`MascWorkspace` 서비스) |
 | `lib/voice/` | Voice/TTS 브리지 |
 | `lib/` (root 및 기타 하위 디렉터리) | Tool dispatch, types, Memory OS, Wiki, Schedule, Fusion 등 |
 
 ## 6. Executable Inventory
 
-공개 실행 파일 (`bin/dune`의 `public_name` 기준 24종):
+공개 실행 파일 (`bin/dune`의 `public_name` 기준):
 
 | Executable | Public Name | Entry Point | 역할 |
 |------------|-------------|-------------|------|
@@ -131,7 +131,7 @@ MASC는 최상위 public library(`masc`)와 `lib/` 아래의 도메인별 내부
 | `masc_native_addon_launcher` | `masc-native-addon-launcher` | `bin/masc_native_addon_launcher.ml` | native Add-on worker를 인스턴스 ID와 비공개 slot 디렉터리를 잡고 실행하는 런처. |
 | `masc_browser_addon_worker` | `masc-browser-addon-worker` | `bin/masc_browser_addon_worker.ml` | Browser Lane Add-on worker. 한 번에 browser 출처 하나만 맡는다. |
 
-내부용 실행 파일 (`public_name` 없음, 빌드 산출물로 직접 실행, 4종):
+내부용 실행 파일 (`public_name` 없음, 빌드 산출물로 직접 실행):
 
 | Executable | Entry Point | 역할 |
 |------------|-------------|------|

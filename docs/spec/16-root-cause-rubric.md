@@ -4,7 +4,6 @@ status: reference
 
 # Root-Cause Rubric
 
-> Supersedes the ad-hoc 5-category list in `PRODUCT-OPERATING-PLAN.md` (Model-Agnostic MASC Epic, #6715) and the 4-category grouping in historical 2026-04-09 tool-failure notes.
 > Status: Living — markers are refined when detection signal drops on the external BookShelf benchmark suite.
 > Last Updated: 2026-10-17
 
@@ -91,24 +90,6 @@ The rubric is applied two ways:
 | Marker | A step whose outcome is not deterministic (provider call, network, scheduler) is treated as if it were: no retry, no fallback lane, no jitter, so one unlucky outcome becomes a stuck state |
 | Example | A single-candidate runtime candidate order makes the fallback a no-op; a keeper turn that ends on the first provider error |
 | Issue body triggers | "no retry", "no fallback", "single candidate", "stuck after one failure", "jitter" |
-
-## Mapping from Prior Categorizations
-
-The Model-Agnostic MASC Epic (`#6715`, 2026-04-12) and the 2026-04-09 tool-failure memory used partially overlapping taxonomies. The 8-category rubric subsumes them:
-
-| Prior category | New categories |
-|----------------|----------------|
-| `classify_model_family` stringly-typed | STR + VAR |
-| Inference parameter hardcoding | SSOT + BND |
-| Spawn CLI hardcoding | SSOT |
-| Vendor-specific branching | STR + DET |
-| Runtime-specific fallbacks | SIL + VAR |
-| Guard false positives (`#6166`) | SIL |
-| Read-path mismatch (`#6167`) | DET |
-| Readonly bash crash (`#6168`) | STR |
-| Dashboard loss of detail (`#6169`) | TEL |
-
-Complex issues carry multiple labels. Empirically ≥30% of open issues fall into 2+ categories (e.g. `#7716` null `pause_reason` is both DET and TEL).
 
 ## Application Procedure
 

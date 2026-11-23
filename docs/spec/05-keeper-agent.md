@@ -9,7 +9,7 @@ status: reference
 | Status | Draft |
 | Team | Keeper |
 | Maps to | `lib/keeper/` |
-| Dependencies | 02-types-and-invariants, 13-agent-core-integration |
+| Dependencies | 13-agent-core |
 | Modules | `lib/keeper/` source tree is the inventory SSOT |
 | LOC | Derived from the source tree, not duplicated here |
 | MCP Tools | `tool_keeper` |

@@ -61,8 +61,8 @@ The Gate view exposes the configured mode (`.masc/gate/`, including persisted
 
 - `Always_allow` and `Yolo` dispatch evidence;
 - `Auto_judge` verdict, rationale, runtime/model, and evidence;
-- `Manual` pending request, rule renewal expiry (`renewed_expires_at` / v12
-  receipt provenance), and explicit operator resolution.
+- `Manual` pending request, rule expiry (`expires_at`), and explicit operator
+  resolution.
 
 The dashboard does not calculate risk tiers, recognize product/tool names, or
 invent local vetoes. Resolving one request wakes only its originating Keeper

@@ -74,13 +74,7 @@ asks through, for classification and for the briefing. First-run setup does
 not fill it; the operator declares its slots. Without this table the curator
 asks no model, and declaring `librarian_memory` does not start it. Its asks
 keep no run record: what the curator committed is in the World Memory log and
-ledger. The curator does not read the Addon tables below.
-
-Workspace Curator selects models per installed Addon, using
-`[runtime.addon_exact_lanes.<installation-id>.classification]` and
-`[runtime.addon_exact_lanes.<installation-id>.briefing]`. Each output independently
-declares ordered `slots` and `cli_slots`; the installation's actual ID selects
-these tables.
+ledger. The curator does not read the Addon tables.
 
 A Keeper assignment (`[runtime.assignments]`, or a lane id in
 `[runtime.lanes]`) names a routing id, not a binding. `resolve_assignment`
@@ -211,19 +205,14 @@ Saving a connection then requires the separate response and MCP tool challenge.
 Gate configuration (`.masc/gate/`) is deliberately small:
 
 ```text
-mode = Always_allow | Auto_judge | Manual | Yolo
+mode = Always_allow | Auto_judge | Manual
 judge_runtime = <runtime-id>   # required only for Auto_judge
 ```
 
 - `Always_allow` dispatches after the owning domain's objective invariants.
 - `Auto_judge` calls the configured LLM and persists verdict, rationale,
   provenance, and correlation.
-- `Manual` persists nonblocking HITL and returns `Deferred` (with v12 rule
-  renewal expiry `renewed_expires_at` recorded when an operator renews an
-  approval rule).
-- `Yolo` is an operator-persisted bypass mode that dispatches registered tool
-  effects immediately while recording explicit `yolo` mode provenance in the
-  durable receipt.
+- `Manual` persists nonblocking HITL and returns `Deferred`.
 
 Configuration contains no risk hierarchy, risk score, privileged actor,
 product-specific credential/repository case, tool-name allowlist, or automatic
@@ -278,36 +267,8 @@ Antigravity from a TUI or browser connected to the server. Login runs in the
 selected account's environment. It never changes the server environment or sends
 operator input to a Keeper.
 
-In the TUI, `/login` opens the account panel on the official clients, each with its
-number of configured accounts; Enter lists that client's accounts, by email,
-under a `+ 새 계정` row. `/login codex`, `/login claude`, and `/login antigravity`
-open a client's accounts directly. Enter on `+ 새 계정` (or
-`n`) starts a new account, Enter on an account signs in as that account, `D`
-previews removing it, and Esc goes back to the clients. Login codes stay
-masked in the panel and terminal keys are sent to that login process. Ctrl-C
-cancels; `r` retrieves the recovery receipt. After authentication, choose a model
-and press Enter to verify and save.
-After saving, the panel requests runtime activation and refreshes the runtime
-catalog and configuration lists. Saving and activation have separate results:
-if activation is unconfirmed, `r` or Enter retries activation without repeating
-login or saving the connection again. The saved model verification results
-remain visible, including usage-limited models. A confirmed runtime activation
-also reports when the exact-output authority is still unavailable.
-Esc closes the panel while a model save or pending activation continues. The
-original save receipt still triggers activation when it arrives; reopening a
-pending save does not resend it. A failed save remains available with its actual
-error for explicit reconciliation, without inferring a commit from the inventory.
-Account deletion is a separate operation. Within the same
-TUI session, `/login` or a matching account/client request reopens that saved
-result: a pending request is not restarted, and an unconfirmed result retains
-the activation-only retry. Withdrawing workspace authority cancels and clears
-all open and closed activation views. Closing another account preserves earlier
-saved activation receipts; reopening a named account selects its own result.
-Configuration reads run one at a time. A successful activation queues a fresh
-read after any older request, so an older response cannot overwrite its model list.
-The current default and its declared fallback order remain ahead of the added
-model. In dashboard runtime setup, the equivalent login panel retains the
-selected account through model discovery and save.
+In dashboard runtime setup, the login panel retains the selected account
+through model discovery and save.
 
 `POST /api/v1/setup/accounts/login` accepts `integration_id` and an optional
 `account_ref`. Omitting the reference adds a private new account; supplying one

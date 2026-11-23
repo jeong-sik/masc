@@ -1,7 +1,7 @@
 # Canonical Projection SSOT — agent_core should own the serialization of its own ADTs
 
 - Date: 2026-06-29
-- Status: in progress (F1–F3 landed; F4–F14 are follow-ups)
+- Status: in progress (F1, F2, F4 and F12 landed; the other rows are follow-ups)
 - Motivating PR: `refactor(stop-reason): single SSOT for stop_reason wire serialization`
 
 ## Problem
@@ -13,21 +13,7 @@ expose the *canonical projection* of those types — `to_string`, `to_label`,
 consumers (including agent_core's own modules) re-spell it locally, and the copies
 drift.
 
-This is an agent_core-internal defect first. The clearest proof needs no external
-consumer: `stop_reason -> string` was re-implemented in four agent_core modules with
-**divergent output**:
-
-| variant | `agent.ml` (label) | `agent_tool.ml` | `cache.ml` | `response_shape.ml` (diag) |
-|---|---|---|---|---|
-| `StopToolUse` | `stop_tool_use` | `tool_use` | `tool_use` | `tool_use` |
-| `ContextWindowExceeded` | `model_context_window_exceeded` | `model_context_window_exceeded` | `model_context_window_exceeded` | `context_window_exceeded` |
-| `Unknown s` | `"unknown:" ^ s` | `s` | `s` | `unknown(%S)` |
-
-Meanwhile `Types.stop_reason_of_string` (the decoder) defines the *real*
-canonical vocabulary, so three of the four `to_string` copies were silently
-"correct" and one (`agent.ml`) was not round-trippable.
-
-The same shape repeats for other ADTs — see the follow-up table.
+The follow-up table lists the projections that are still re-spelled.
 
 ## Principle
 
@@ -47,10 +33,8 @@ Collapsing these two into one string type is what produced the drift.
 ## Boundary note (MASC)
 
 agent_core must never reference MASC; this initiative does not change that. MASC is one
-downstream consumer that *also* re-implements these projections
-(`keeper_hooks_oas_types.stop_reason_to_label`,
-`keeper_event_bridge_error_json.stop_reason_to_wire`, `inference_utils.zero_usage`,
-`summarize_thinking_blocks`, …). Every projection agent_core exposes lets a MASC copy be
+downstream consumer that *also* re-implements some of these projections (see
+the follow-up table). Every projection agent_core exposes lets a MASC copy be
 deleted in favor of `Agent_core.*` — the dependency direction stays MASC→agent_core.
 What stays in MASC is policy: identity redaction, Otel label keys, per-keeper
 routing headers, cost-ledger and operator-alert routing.
@@ -60,34 +44,28 @@ routing headers, cost-ledger and operator-alert routing.
 - `Types.stop_reason_to_string` (inverse of `stop_reason_of_string`) +
   `Types.stop_reason_to_metric_label` (stable). Explicit constructor list, no
   wildcard, so a new variant fails to compile until handled.
-- Byte-identical copies in `agent_tool.ml` and `cache.ml` delegate to the SSOT
-  (zero behavior change; cache `schema_version` "1" preserved).
+- `agent.ml` and `cache.ml` call the SSOT.
 - `test/test_stop_reason_ssot.ml` pins the canonical strings + round-trip.
-- **Deferred on purpose**: `agent.ml` (metric label, `stop_tool_use` /
-  `unknown:`+s) and `response_shape.ml` (operator diagnostic,
-  `context_window_exceeded` / `unknown(%S)`) emit different strings. Migrating
-  them changes telemetry / diagnostic output — a behavior change that needs
-  consumer analysis, not a silent unify. Tracked separately in #2241.
+- `Response_shape.stop_reason_diagnostic_string` delegates to the SSOT for every
+  constructor except `Unknown raw`, which it prints as `unknown(%S)` for
+  operator diagnostics.
 
 ## Follow-up projections to expose (roadmap)
 
 | # | ADT / concern | Add to agent_core | Drops these duplicates |
 |---|---|---|---|
 | F2 (landed) | `content_block` thinking summary | `Response_shape.summarize_blocks : content_block list -> t` | MASC `summarize_thinking_blocks` |
-| F3 (landed) | `content_block`/`message` UTF-8 sanitize | `Utf8_sanitize.sanitize_message(s)` | MASC `inference_utils.sanitize_*_utf8` |
-| F4 | `api_usage` zero | use existing `Types.zero_api_usage` | MASC `zero_usage` ×2 |
-| F5 | `Capabilities.capabilities` ↔ `Provider.capabilities` | transparent alias or `to_provider_capabilities` | MASC `agent_capabilities_of_llm_capabilities` 35-field copy |
-| F6 | `provider_kind -> request_kind` | `Provider_config.request_kind_of_provider_kind` | MASC `request_kind_of_provider_cfg` |
-| F7 | per-kind non-auth headers | `Api_common.non_auth_headers_for_kind` (anthropic-version) | MASC `default_headers_for_kind` ×2 (self-flagged "keep in sync") |
+| F3 | `content_block`/`message` UTF-8 sanitize | `Utf8_sanitize.sanitize_message(s)` | MASC `inference_utils.sanitize_*_utf8` |
+| F4 (landed) | `api_usage` zero | use existing `Types.zero_api_usage` | MASC `zero_usage` ×2 |
+| F7 | per-kind non-auth headers | `Api_common.non_auth_headers_for_kind` (anthropic-version) | MASC `Runtime_provider_binding.default_headers_for_kind` |
 | F9 | `api_usage` sanity validation | `usage_validation.classify` | MASC `keeper_usage_trust.classify` (keep `warns_operator`) |
-| F10 | JSON-schema `required`/`properties` extraction | `Mcp_schema.{required,property}_names_of_schema` | MASC `tool_input_validation.{required_names,schema_property_names}` (keep oneOf/additionalProperties + diagnostics) |
+| F10 | JSON-schema `required`/`properties` extraction | `Mcp_schema.{required,property}_names_of_schema` | MASC `tool_input_contract.{required_names,schema_property_names}` (keep oneOf/additionalProperties + diagnostics) |
 | F11 | wall tok/s from `inference_telemetry` | `usage_projection.wall_tokens_per_second` | MASC `wall_tokens_per_second` |
-| F12 | `api_usage` total | `Types.total_tokens` | MASC `total_tokens` ×2 |
-| F13 | misc usage/telemetry/cost helpers | `Types`/`pricing` helpers | MASC `keeper_hooks_oas_types.{usage_has_tokens,context_max_of_telemetry,oas_reported_cost}` |
-| F14 | `stop_reason` metric/diagnostic migration | consumer analysis for `agent.ml` labels and `response_shape.ml` diagnostics (#2241) | legacy agent_core-local `stop_reason` string variants, if migration is safe |
+| F12 (landed) | `api_usage` total | `Types.total_tokens` | MASC `total_tokens` ×2 |
+| F13 | misc usage/telemetry/cost helpers | `Types`/`pricing` helpers | MASC `keeper_hooks_agent_core_types.{usage_has_tokens,context_max_of_telemetry,agent_core_reported_cost}` |
 
-Sequencing: F4/F12 (trivial) → F5/F6/F7 (agent_core-internal, immediate value) →
-F2/F3 (content_block utils) → F9/F10/F11/F13/F14.
+Sequencing for the open rows: F7 (agent_core-internal, immediate value) →
+F3 (content_block utils) → F9/F10/F11/F13.
 
 Rule for every step: agent_core exposes a generic util; consumers call it. Never the
 reverse.

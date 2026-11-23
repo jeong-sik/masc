@@ -26,7 +26,7 @@ request, with no deprecation window, version bump or migration guide.
 ### Evolving
 
 - Modules under active development.
-- New features (runtime evidence, structured output, harness) that have not yet settled.
+- New features (structured output) that have not yet settled.
 - Runtime orchestration helpers whose API is still being refined.
 
 ### Internal
@@ -72,6 +72,7 @@ Core types and interfaces that most of the repository depends on.
 | Raw_trace | `lib/raw_trace.mli` |
 | Checkpoint | `lib/checkpoint.mli` |
 | Context | `lib/base/context.mli` |
+| Result_syntax | `lib/base/result_syntax.mli` |
 
 ### Evolving modules
 
@@ -87,10 +88,6 @@ Representative modules:
 | Canonical_tool | `lib/llm_provider/canonical_tool.mli` | Canonical tool descriptor and schema surface |
 | Wire_observer | `lib/llm_provider/wire_observer.mli` | Caller-owned wire observation boundary is still evolving |
 | Request_wire_observer | `lib/llm_provider/request_wire_observer.mli` | Request body component attribution and wire observation |
-
-CDAL proof-bundle artifacts are intentionally schema-only in agent_core. They are
-tracked in `docs/schema-surfaces/runtime-output-surfaces.v1.json`, not as
-public OCaml modules in this stability table.
 
 ### Internal modules
 
@@ -113,9 +110,8 @@ cursors and immutable read pages without exposing Store/WAL/reconciliation.
 Caller-owned checkpoint sinks remain typed conversation snapshot boundaries.
 
 This API classification is not proof that every Event_bus/Raw_trace callback is
-already a cursor-bound post-commit projection. That integration and finite-scope
-retention acceptance remain tracked in masc#27890. Ordinary transient Agent use
-without a store does not provide durable replay.
+a cursor-bound post-commit projection. Ordinary transient Agent use without a
+store does not provide durable replay.
 
 ## Verification
 

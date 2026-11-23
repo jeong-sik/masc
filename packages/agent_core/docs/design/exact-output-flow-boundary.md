@@ -178,10 +178,11 @@ is recorded and before that candidate receives its fresh attempt. Such a
 snapshot is point-in-time evidence, not a fabricated attempt or a terminal
 state.
 
-`flow_execution_error_outward_dispatch` projects one closed fact about the
-invocation returning the error: `No_outward_dispatch` or
-`Outward_dispatch_started`. The fact says only whether that invocation began
-its one outward completion dispatch. It does not claim provider acceptance,
+`flow_evidence_generation_dispatch` projects one closed fact about the whole
+flow walk: `No_generation_dispatch` or `Generation_dispatch_started`. The fact
+says only whether any candidate the flow reached began its one outward
+completion (generation) dispatch. A token-count measurement is a separate
+outward call and is not counted. The fact does not claim provider acceptance,
 response receipt, billing, physical execution, retryability, failover
 eligibility, or any Pricing decision. agent_core derives it from affine flow control
 and private receipt state; callers do not decode phases, counts, HTTP status, or
@@ -204,6 +205,3 @@ provider policy.
 - There is no flow preference store, domain lifecycle, recovery store, or scope
   retirement implementation behind the public facade.
 - Before 1.0, obsolete runtime assets are reset rather than reconciled.
-
-Archived cascade documents describe an earlier ownership decision and are not
-the active exact-output contract.

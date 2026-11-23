@@ -7,10 +7,6 @@ relate, and the contracts downstream consumers can rely on.
 **Scope**: `agent_core` library (`lib/`).
 **Status**: Stable catalog; entries marked *Evolving* may change with
 deprecation notice.
-**Last updated**: v0.216.0.
-
-> **Note**: The runtime surface is `Runtime_store` (file-based session
-> store) and `Runtime.event`.
 
 ---
 
@@ -77,8 +73,10 @@ Pattern-matchable OCaml sum type. **Stable across every provider.**
 
 | Variant | Emit site | Semantic |
 |---------|-----------|---------|
-| `AgentStarted` | `agent/agent.ml` (`run`, `run_stream` — incl. `run_with_handoffs`) | Run lifecycle start |
+| `AgentStarted` | `agent/agent_lifecycle_events.ml` (wrapping `run`, `run_stream` — incl. `run_with_handoffs`) | Run lifecycle start |
 | `AgentCompleted` | `agent/agent_lifecycle_events.ml` (wrapping `run`, `run_stream` — incl. `run_with_handoffs`) | Successful run lifecycle completion (carries the response) |
+| `AgentYielded` | `agent/agent_lifecycle_events.ml` | Run outcome: the run yielded (carries the turn number) |
+| `AgentInputRequired` | `agent/agent_lifecycle_events.ml` | Run outcome: caller input is required (carries the `Error.input_required` request) |
 | `AgentFailed` | `agent/agent_lifecycle_events.ml` (wrapping `run`, `run_stream` — incl. `run_with_handoffs`) | Failed run lifecycle terminal outcome; mutually exclusive with `AgentCompleted` |
 | `TurnStarted` | `pipeline/pipeline_stage_prepare.ml` | Start of a single agent turn |
 | `TurnReady` | `pipeline/pipeline_stage_prepare.ml` | Exact caller-supplied tool surface serialized for this turn |
@@ -106,7 +104,7 @@ identifier.** The following prefixes are reserved:
 
 | Prefix | Owner | Purpose |
 |--------|-------|---------|
-| `runtime.*` | AGENT_CORE | Events from `Runtime` session protocol (§5) |
+| `runtime.*` | AGENT_CORE | Events from `Runtime` session protocol |
 | `provider.*` | AGENT_CORE | Provider-specific escape hatch — e.g. `provider.anthropic.cache_hit`, `provider.openai.reasoning_tokens`, `provider.gemini.safety_rating` |
 | `agent_core.*` | AGENT_CORE | Reserved for future AGENT_CORE use |
 | `<downstream>.*` | Downstream | Any other prefix; pick one and stick to it |
@@ -165,7 +163,7 @@ Hooks are synchronous interception points registered on `Agent` at build
 time. Use Hooks when you need to **audit** or **interfere with** a step;
 use Event_bus when you only need to **observe**.
 
-Available hooks (post-v0.154.0):
+Available hooks:
 
 | Hook | Signature | Purpose |
 |------|-----------|---------|
@@ -217,11 +215,8 @@ repeat the effect. Caller-owned checkpoint sinks remain typed conversation
 snapshot boundaries; a failed sink does not certify a later mutation stage.
 
 Event_bus and Raw_trace expose observational callbacks as well. They do not
-supply replay or external-effect authority. Their complete conversion to
-cursor-bound, read-only post-commit projections, and finite-scope retention
-acceptance, remain explicit integration requirements in masc#27890; removing a
-writer API alone does not prove those requirements. A transient Agent run
-without an execution store has no durable history to recover.
+supply replay or external-effect authority. A transient Agent run without an
+execution store has no durable history to recover.
 
 ---
 
@@ -275,23 +270,23 @@ Every AGENT_CORE-supported LLM vendor produces the **same native Event_bus
 payload variants** when running via AGENT_CORE. Provider-specific signals go
 through `Custom("provider.<name>.<event>", ...)`.
 
-| Provider | Native: Agent/Turn/Tool | Native: Handoff | Native: Context* | Provider-specific Custom |
-|----------|------------------------|-----------------|------------------|--------------------------|
-| Anthropic | ✓ | ✓ | ✓ | `provider.anthropic.cache_hit`, `provider.anthropic.thinking` |
-| OpenAI (Chat/Responses) | ✓ | ✓ | ✓ | `provider.openai.reasoning_tokens`, `provider.openai.prompt_cache_hit` |
-| Gemini | ✓ | ✓ | ✓ | `provider.gemini.safety_rating`, `provider.gemini.thinking` |
-| GLM / ZhipuAI | ✓ | ✓ | ✓ | `provider.glm.*` |
-| OpenRouter | ✓ | ✓ | ✓ | inherits upstream, namespaced under `provider.openrouter.*` |
-| Groq / DeepSeek / Alibaba / SiliconFlow / xAI | ✓ | ✓ | ✓ | `provider.<name>.*` |
-| llama.cpp / llama-server (local) | ✓ | ✓ | ✓ | `provider.llama.*` |
-| Ollama (local) | ✓ | ✓ | ✓ | `provider.ollama.*` |
-| vLLM / LM Studio / TGI / MLX (local) | ✓ | ✓ | ✓ | `provider.<runtime>.*` |
-| Caller-supplied typed endpoint | ✓ | ✓ | ✓ | caller-defined |
+| Provider | Native: Agent/Turn/Tool | Native: Handoff | Provider-specific Custom |
+|----------|------------------------|-----------------|--------------------------|
+| Anthropic | ✓ | ✓ | `provider.anthropic.cache_hit`, `provider.anthropic.thinking` |
+| OpenAI (Chat/Responses) | ✓ | ✓ | `provider.openai.reasoning_tokens`, `provider.openai.prompt_cache_hit` |
+| Gemini | ✓ | ✓ | `provider.gemini.safety_rating`, `provider.gemini.thinking` |
+| GLM / ZhipuAI | ✓ | ✓ | `provider.glm.*` |
+| OpenRouter | ✓ | ✓ | inherits upstream, namespaced under `provider.openrouter.*` |
+| Groq / DeepSeek / Alibaba / SiliconFlow / xAI | ✓ | ✓ | `provider.<name>.*` |
+| llama.cpp / llama-server (local) | ✓ | ✓ | `provider.llama.*` |
+| Ollama (local) | ✓ | ✓ | `provider.ollama.*` |
+| vLLM / LM Studio / TGI / MLX (local) | ✓ | ✓ | `provider.<runtime>.*` |
+| Caller-supplied typed endpoint | ✓ | ✓ | caller-defined |
 
-**Verification**: `test/test_multivendor_events.ml` asserts a golden
+**Verification**: `test/test_multivendor_events.ml` asserts that the golden
 Event_bus sequence (`AgentStarted → TurnStarted → ToolCalled →
-ToolCompleted → TurnCompleted → AgentCompleted`) across every available
-provider. Missing credentials / endpoints skip gracefully.
+ToolCompleted → TurnCompleted → AgentCompleted`) round-trips through the bus.
+It builds the payloads directly and makes no LLM call.
 
 ---
 
@@ -359,6 +354,6 @@ provider. Missing credentials / endpoints skip gracefully.
 ## 10. Stability
 
 Entries in this catalog carry the stability tier of their module (see
-`docs/api-stability.md`). Breaking changes are tracked in `CHANGELOG.md`
-under standard Keep a Changelog release headings (`Added` / `Changed` /
+`docs/api-stability.md`). Breaking changes are tracked in the repository root
+`CHANGELOG.md` under standard Keep a Changelog release headings (`Added` / `Changed` /
 `Removed`).

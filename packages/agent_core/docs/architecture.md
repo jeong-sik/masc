@@ -21,7 +21,7 @@ Single-agent execution engine.
 | `Agent` | Lifecycle: create, run, resume |
 | `Pipeline` | Turn preparation, provider routing, extraction, tools, and state update |
 | `Llm_provider` | Multi-provider API dispatch (Anthropic, OpenAI, Gemini, Ollama, OpenAI-compat) |
-| `Error` | 9-domain structured ADT errors (`Error.t`) |
+| `Error` | Structured ADT errors by domain (`Error.t`) |
 | `Hooks` | BeforeTurn, AfterTurn, PreToolUse, PostToolUse hooks |
 | `Tracing` | TRACER module type, Null/Fmt/OTel implementations |
 | `Metrics` | Counter + histogram collection, OTLP JSON export |
@@ -30,7 +30,7 @@ Single-agent execution engine.
 ## Error model
 
 ```
-sdk_error
+Error.t
 ├── Api of api_error          (provider API and transport failures)
 ├── Provider of provider_error (provider configuration, request, and parse failures)
 ├── Agent of agent_error      (stop reason, round limit, hook, terminal tool, or input request)
@@ -39,7 +39,9 @@ sdk_error
 ├── Serialization of serialization_error
 ├── Io of io_error
 ├── Orchestration of orchestration_error
-└── Internal of string
+├── Media of History.media_error (media store or provider payload decode failure)
+├── Internal of string
+└── Internal_carried of { message; carrier } (host-typed payload)
 ```
 
 All error domains use record payloads for context. Pattern matching is exhaustive — adding a new domain causes compile errors at all handler sites.

@@ -9,30 +9,10 @@ docs and the current agent_core serializers on 2026-04-21. GLM/Ollama thinking
 wire notes were revalidated against official docs and a live Ollama Cloud
 smoke on 2026-06-29.
 
-## Historical Baseline (v0.71.0)
-
-```ocaml
-type capabilities = {
-  supports_tools: bool;
-  supports_tool_choice: bool;
-  supports_required_tool_choice: bool;
-  supports_reasoning: bool;
-  supports_response_format_json: bool;
-  supports_multimodal_inputs: bool;
-  supports_native_streaming: bool;
-  supports_top_k: bool;
-  supports_min_p: bool;
-}
-```
-
-8 boolean fields. No numeric limits. `supports_reasoning` conflates
-4 distinct mechanisms. `supports_multimodal_inputs` conflates 3 modalities.
-
-Current agent_core code has already added many of the proposed fields in
-`lib/llm_provider/capabilities.ml`. This document is still useful as a
-design note, but the structured output section below is the authoritative
-reference for the difference between official provider support and current
-agent_core wiring.
+The current record is `Capabilities.capabilities` in
+`lib/llm_provider/capabilities.mli`. The structured output section below is
+the authoritative reference for the difference between official provider
+support and current agent_core wiring.
 
 ## Proposed: 3-Tier Capability Model
 
@@ -84,7 +64,6 @@ Consider adding:
 
 | Field | Rationale |
 |-------|-----------|
-| `Openai_responses` request_kind | OpenAI Responses API: server-side state, built-in tools, remote MCP. Distinct from chat completions. |
 | `supports_remote_mcp` | OpenAI Responses API passes MCP servers as API parameters. |
 
 ## Structured Output Semantics (updated 2026-05-05)
@@ -176,7 +155,7 @@ availability:
 | Video | Gemini, Qwen 3.5 large only |
 
 Minimum viable split: `supports_image_input`, keep `supports_multimodal_inputs`
-as the union. Audio/video can be added later.
+as the union.
 
 ## Model Capability Matrix (reference)
 
@@ -201,26 +180,6 @@ runtime distinction.
 | Cohere Command A | 256K | 32K | Y | Y | N | Y | N | ? |
 | Grok 4 | 2M | ? | Y | Y | Y | Y | limited | Y |
 | GLM-5 | 200K | 128K | Y | ? | Y | JSON only | ? | ? |
-
-## Implementation Plan
-
-### Phase 1: Numeric limits + critical booleans
-- Add `max_context_tokens`, `max_output_tokens` to capabilities
-- Add `supports_parallel_tool_calls`, `supports_system_prompt`
-- Add lookup table for known models (keyed by model_id prefix)
-- Wire Discovery.ctx_size into capabilities
-
-### Phase 2: Thinking split + structured output
-- Keep `supports_structured_output` and `supports_response_format_json` as distinct contracts
-- Wire native schema request paths only where the official provider API exposes them
-- Keep JSON mode + caller-side validation for providers whose current official docs stop at `json_object`
-
-### Phase 3: New modalities
-- Split multimodal → `supports_image_input` (keep union)
-
-### Phase 4: Protocol evolution
-- Add `Openai_responses` request_kind
-- Add `supports_remote_mcp`
 
 ## Sources
 
@@ -261,10 +220,8 @@ Other models retain their declared/provider-default behavior.
 
 Source: [Haiku 5.5 migration guide](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide#replace-assistant-prefill).
 
-This declaration repairs the Haiku row, not every Claude model. Server-tool
-`pause_turn` replay is a distinct protocol: it must replay the provider's
-assistant content and preserve the same tools. The current closed content-block
-type cannot carry `server_tool_use` or server-tool result blocks and its decoder
-refuses them; this change adds no guessed exemption or continuation conversion.
-Typed server-tool continuation and other Claude rows remain tracked by #41852.
+Server-tool `pause_turn` replay is a distinct protocol: it must replay the
+provider's assistant content and preserve the same tools. The current closed
+content-block type cannot carry `server_tool_use` or server-tool result blocks
+and its decoder refuses them.
 See [server-tool continuation](https://platform.claude.com/docs/en/agents-and-tools/tool-use/server-tools).

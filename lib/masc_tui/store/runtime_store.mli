@@ -130,6 +130,11 @@ val apply_tool_series :
   observed_at:Clock.Mono.t -> Wire_runtime.tool_series -> t -> t
 val apply_tools_catalog :
   observed_at:Clock.Mono.t -> Wire_runtime.tool_summary list -> t -> t
+
+val apply_tools_warming : observed_at:Clock.Mono.t -> t -> t
+(** The server answered its warming payload. A loaded catalog stays, marked
+    stale; otherwise the panel waits ([Loading]). Either way the next view of
+    the panel asks again. *)
 val apply_connectors :
   observed_at:Clock.Mono.t -> Wire_runtime.connector_row list -> t -> t
 val apply_browser_lane :

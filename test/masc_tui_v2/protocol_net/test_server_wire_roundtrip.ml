@@ -70,10 +70,24 @@ let test_schedule_wake_roundtrip () =
   | Ok (_, _) -> Alcotest.fail "expected exactly one schedule row"
 
 (* GET /api/v1/dashboard/tools: usage comes from the server's own summary
-   report; a tool outside [top_20] has no usage row. *)
+   report. [by_tool] covers every called tool, past the top 20; a tool the
+   report lists as never called counts 0; a name the report never mentions
+   stays Unreported. *)
 let test_tools_catalog_roundtrip () =
+  let busy = List.init 20 (fun i -> Printf.sprintf "busy_tool_%02d" i) in
   let seeded =
     Tool_metrics.replace_samples (fun add ->
+        List.iter
+          (fun tool_name ->
+            for _i = 1 to 3 do
+              add
+                {
+                  Tool_metrics.tool_name;
+                  disposition = Tool_metrics.Completed;
+                  duration_ms = 5.0;
+                }
+            done)
+          busy;
         add
           {
             Tool_metrics.tool_name = "masc_status";
@@ -92,59 +106,87 @@ let test_tools_catalog_roundtrip () =
   | Ok () -> ()
   | Error () -> Alcotest.fail "seeding tool metrics failed");
   Fun.protect ~finally:Tool_metrics.clear (fun () ->
-      let inventory =
-        `Assoc
-          [
-            ( "tools",
-              `List
-                [
-                  `Assoc
-                    [
-                      ("name", `String "masc_status");
-                      ("description", `String "Room status");
-                    ];
-                  `Assoc
-                    [
-                      ("name", `String "masc_tasks");
-                      ("description", `String "Task list");
-                    ];
-                ] );
-          ]
+      let usage = Masc.Tool_unified.summary_report () in
+      let row_named name row =
+        match Yojson.Safe.Util.member "name" row with
+        | `String n -> String.equal n name
+        | _ -> false
+      in
+      (match Yojson.Safe.Util.member "top_20" usage with
+      | `List rows ->
+          Alcotest.(check bool) "masc_status ranks past the top 20" false
+            (List.exists (row_named "masc_status") rows)
+      | _ -> Alcotest.fail "summary report without top_20");
+      let never_called_name =
+        match Yojson.Safe.Util.member "never_called" usage with
+        | `List (row :: _) -> (
+            match Yojson.Safe.Util.member "name" row with
+            | `String name -> name
+            | _ -> Alcotest.fail "never_called row without a name")
+        | _ -> Alcotest.fail "the catalog has no never-called tool"
+      in
+      let tool name =
+        `Assoc [ ("name", `String name); ("description", `String "d") ]
       in
       let body =
         `Assoc
           [
-            ("tool_inventory", inventory);
-            ("tool_usage", Masc.Tool_unified.summary_report ());
+            ( "tool_inventory",
+              `Assoc
+                [
+                  ( "tools",
+                    `List
+                      [
+                        tool "masc_status";
+                        tool never_called_name;
+                        tool "not_in_the_usage_report";
+                      ] );
+                ] );
+            ("tool_usage", usage);
           ]
       in
       match Wire_runtime.decode_tools_catalog ~observed_at body with
       | Error e -> Alcotest.fail ("tools catalog decode failed: " ^ e)
-      | Ok tools ->
+      | Ok Wire_runtime.Tools_warming ->
+          Alcotest.fail "a ready body decodes as ready"
+      | Ok (Wire_runtime.Tools_ready tools) ->
           let find name =
-            List.find_opt
-              (fun (t : Wire_runtime.tool_summary) -> String.equal t.name name)
-              tools
+            match
+              List.find_opt
+                (fun (t : Wire_runtime.tool_summary) -> String.equal t.name name)
+                tools
+            with
+            | Some t -> t
+            | None -> Alcotest.fail (name ^ " missing from catalog")
           in
-          (match find "masc_status" with
-          | Some t ->
-              Alcotest.(check (option int))
-                "called tool reports its call count" (Some 2)
-                (Observed.to_option t.calls);
-              Alcotest.(check (option (float 0.001)))
-                "failure rate from failure_count / call_count" (Some 50.0)
-                (Observed.to_option t.failure_rate_pct)
-          | None -> Alcotest.fail "masc_status missing from catalog");
-          match find "masc_tasks" with
-          | Some t ->
-              Alcotest.(check bool)
-                "tool outside top_20 stays Unreported" true
-                (match t.calls with
-                | Observed.Unreported -> true
-                | Observed.Loading _ | Observed.Value _ | Observed.Absent
-                | Observed.Failed _ ->
-                    false)
-          | None -> Alcotest.fail "masc_tasks missing from catalog")
+          let status = find "masc_status" in
+          Alcotest.(check (option int))
+            "a tool past the top 20 reports its call count" (Some 2)
+            (Observed.to_option status.calls);
+          Alcotest.(check (option (float 0.001)))
+            "failure rate from failure_count / call_count" (Some 50.0)
+            (Observed.to_option status.failure_rate_pct);
+          Alcotest.(check (option int)) "a never-called tool counts 0" (Some 0)
+            (Observed.to_option (find never_called_name).calls);
+          Alcotest.(check bool) "a tool the report never names stays Unreported"
+            true
+            (match (find "not_in_the_usage_report").calls with
+            | Observed.Unreported -> true
+            | Observed.Loading _ | Observed.Value _ | Observed.Absent
+            | Observed.Failed _ ->
+                false))
+
+(* The server answers its warming body until the first tools compute
+   finishes; that is not an empty catalog. *)
+let test_tools_warming_roundtrip () =
+  match
+    Wire_runtime.decode_tools_catalog ~observed_at
+      (Server_dashboard_http_runtime_info.dashboard_tools_warming_json ())
+  with
+  | Ok Wire_runtime.Tools_warming -> ()
+  | Ok (Wire_runtime.Tools_ready _) ->
+      Alcotest.fail "the warming body decodes as an empty catalog"
+  | Error e -> Alcotest.fail ("warming body decode failed: " ^ e)
 
 let () =
   Eio_main.run @@ fun env ->
@@ -160,5 +202,7 @@ let () =
         [
           Alcotest.test_case "tool usage summary -> decode_tools_catalog" `Quick
             test_tools_catalog_roundtrip;
+          Alcotest.test_case "warming tools body -> Tools_warming" `Quick
+            test_tools_warming_roundtrip;
         ] );
     ]

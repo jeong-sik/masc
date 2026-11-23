@@ -143,6 +143,10 @@ val invalidate_dashboard_tools : base_path:string -> unit
 (** Retire the shared HTTP query cache before a successful source-owned Tools
     publication, including pending computations and exact-Keeper fallbacks. *)
 
+val dashboard_tools_warming_json : unit -> Yojson.Safe.t
+(** The body [/api/v1/dashboard/tools] serves until its first compute
+    finishes ([is_warming: true], empty inventory and usage). *)
+
 val dashboard_tools_http_result :
   ?read_policy:Dashboard_projection_read.t ->
   ?keeper:string ->

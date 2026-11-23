@@ -251,6 +251,16 @@ let apply_tool_series ~observed_at series t =
 let apply_tools_catalog ~observed_at catalog t =
   { t with tools_catalog = Observed.value ~observed_at catalog }
 
+let apply_tools_warming ~observed_at t =
+  let tools_catalog =
+    match t.tools_catalog with
+    | Observed.Value _ as loaded -> Observed.mark_stale loaded
+    | Observed.Loading _ | Observed.Absent | Observed.Unreported
+    | Observed.Failed _ ->
+        Observed.loading ~since_ns:observed_at
+  in
+  { t with tools_catalog }
+
 let apply_connectors ~observed_at connectors t =
   { t with connectors = Observed.value ~observed_at connectors }
 

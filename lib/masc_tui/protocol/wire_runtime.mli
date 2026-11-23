@@ -501,13 +501,20 @@ type tool_summary = {
   name : string;
   description : string option;
   calls : int Observed.t;
-      (** Calls over the server's retained metrics window. Unreported when the
-          tool is outside the server's top-20 usage list. *)
+      (** Calls over the server's retained metrics window, [0] for a tool the
+          server lists as never called. Unreported when the usage report names
+          the tool nowhere (a hidden tool with no call). *)
   failure_rate_pct : float Observed.t;
 }
 
+type tools_catalog =
+  | Tools_warming
+      (** The server's first tools compute has not finished; it answered its
+          warming payload. *)
+  | Tools_ready of tool_summary list
+
 val decode_tools_catalog :
-  observed_at:Clock.Mono.t -> Yojson.Safe.t -> (tool_summary list, string) result
+  observed_at:Clock.Mono.t -> Yojson.Safe.t -> (tools_catalog, string) result
 
 type connector_connection =
   | Connector_connected

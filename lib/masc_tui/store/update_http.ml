@@ -1527,11 +1527,17 @@ let apply_http_reply ~now (m : Model.t) reply =
                { x with tool_series = failed_slot err x.tool_series }))
         ~source:(Health.Source_runtime "tools") ~ko:"도구 시계열 조회"
         ~en:"Tool series fetch" err
-  | Msg.Reply_tools_catalog (Ok tools) ->
+  | Msg.Reply_tools_catalog (Ok (Wire_runtime.Tools_ready tools)) ->
       ( {
           m with
           runtime =
             Runtime_store.apply_tools_catalog ~observed_at:now tools m.runtime;
+        }
+      , [] )
+  | Msg.Reply_tools_catalog (Ok Wire_runtime.Tools_warming) ->
+      ( {
+          m with
+          runtime = Runtime_store.apply_tools_warming ~observed_at:now m.runtime;
         }
       , [] )
   | Msg.Reply_tools_catalog (Error err) ->

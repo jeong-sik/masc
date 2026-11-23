@@ -41,6 +41,7 @@
   masc.fs_compat
   masc.masc_schedule
   masc.masc_tool_surface
+  masc.server
   masc_tui_core
   masc_tui_protocol
   yojson))

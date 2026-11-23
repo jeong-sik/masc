@@ -12,9 +12,11 @@ let infra_sandbox_keeper_path ~keeper =
 let infra_sandboxes_probe_path = "/api/v1/infra/sandboxes/probe"
 let repositories_path = "/api/v1/repositories"
 
-let keeper_file_changes_path ~keeper ?(window_hours = 24.0) () =
-  Printf.sprintf "/api/v1/keepers/%s/file-changes?window_hours=%g"
-    (percent_encode keeper) window_hours
+let repository_activity_window_hours = 24.0
+
+let repository_activity_path ~repo_id =
+  Printf.sprintf "/api/v1/ide/repository-activity?repo_id=%s&window_hours=%g"
+    (percent_encode repo_id) repository_activity_window_hours
 
 let system_logs_path ?(limit = 200) ?level () =
   let params =
@@ -618,19 +620,52 @@ type repository = {
   auto_sync : bool;
 }
 
-type file_change_kind =
-  | File_added
-  | File_modified
-  | File_deleted
-  | File_renamed
+type line_range = {
+  start_line : int;
+  end_line : int;
+}
+
+type edit_occurrence = {
+  old_range : line_range;
+  new_range : line_range option;
+}
+
+type line_evidence =
+  | Edit_ranges of edit_occurrence list
+  | Edit_ranges_omitted
+  | Write_range of line_range option
+
+type change_kind =
+  | Change_edit of {
+      before : string;
+      after : string;
+      replace_all : bool;
+    }
+  | Change_write of { content : string }
+  | Change_insert of {
+      line : int;
+      text : string;
+    }
+  | Change_materialize of { sha256 : string }
 
 type file_change = {
   path : string;
-  kind : file_change_kind;
-  additions : int Observed.t;
-  deletions : int Observed.t;
-  keeper : string option;
-  diff_preview : string option;
+  keeper : string;
+  change : change_kind;
+  line_evidence : line_evidence option;
+  succeeded : bool;
+}
+
+type repository_activity = {
+  window_hours : float;
+  changes : file_change list;
+  incomplete : int;
+  unattributed : int;
+}
+
+type line_counts = {
+  added : int option;
+  removed : int option;
 }
 
 (* The four words [Repo_manager_types.status_wire_name] writes. The server
@@ -679,27 +714,179 @@ let decode_repositories json =
   let* items = required_list_field body "repositories" in
   decode_list "repositories" decode_repository items
 
-let file_change_kind_of_string raw =
-  match String.lowercase_ascii (String.trim raw) with
-  | "added" | "add" | "a" -> Some File_added
-  | "modified" | "modify" | "m" -> Some File_modified
-  | "deleted" | "delete" | "d" -> Some File_deleted
-  | "renamed" | "rename" | "r" -> Some File_renamed
-  | _ -> None
+(* Each change row is one logged file-writing tool call, as
+   [Keeper_tool_call_file_change.to_json] writes it. *)
 
-let decode_file_change ~observed_at json =
-  let* path = required_nonblank_string json "path" in
-  let* kind = decode_enum ~field:"kind" file_change_kind_of_string json in
-  let* additions = observed_int ~observed_at json "additions" in
-  let* deletions = observed_int ~observed_at json "deletions" in
-  let* keeper = optional_nonblank_string json "keeper" in
-  let* diff_preview = optional_string_field json "diff_preview" in
-  Ok { path; kind; additions; deletions; keeper; diff_preview }
+let decode_line_range json =
+  let* start_line = required_int_field json "start_line" in
+  let* end_line = required_int_field json "end_line" in
+  if start_line < 1 then Error "line range start_line must be at least 1"
+  else if end_line < start_line then
+    Error "line range end_line must not precede start_line"
+  else Ok { start_line; end_line }
 
-let decode_file_changes ~observed_at json =
-  let* _, body = unwrap_v2_or_raw json in
-  let* items = required_list_field body "changes" in
-  decode_list "changes" (decode_file_change ~observed_at) items
+let decode_nullable_line_range json key =
+  let* value = required_member json key in
+  match value with
+  | `Null -> Ok None
+  | `Assoc _ as range ->
+      let* decoded = decode_line_range range in
+      Ok (Some decoded)
+  | bad -> field_type_error key "a line range or null" bad
+
+let decode_edit_occurrence json =
+  let* old_obj = required_object_field json "old_range" in
+  let* old_range = decode_line_range old_obj in
+  let* new_range = decode_nullable_line_range json "new_range" in
+  Ok { old_range; new_range }
+
+(* [null] on rows logged before the producer recorded line evidence.
+   [occurrences] is [null] only above the producer's range limit, and is
+   otherwise one entry per occurrence. *)
+let decode_line_evidence json =
+  let* evidence = required_member json "line_evidence" in
+  match evidence with
+  | `Null -> Ok None
+  | `Assoc _ as ev -> (
+      let* kind = required_nonblank_string ev "kind" in
+      match kind with
+      | "edit" -> (
+          let* occurrence_count = required_int_field ev "occurrence_count" in
+          let* occurrences = required_member ev "occurrences" in
+          match occurrences with
+          | `Null -> Ok (Some Edit_ranges_omitted)
+          | `List items ->
+              let* ranges =
+                decode_list "occurrences" decode_edit_occurrence items
+              in
+              if Int.equal (List.length ranges) occurrence_count then
+                Ok (Some (Edit_ranges ranges))
+              else
+                Error
+                  (Printf.sprintf
+                     "line_evidence occurrence_count %d names %d occurrences"
+                     occurrence_count (List.length ranges))
+          | bad -> field_type_error "occurrences" "a list or null" bad)
+      | "write" ->
+          let* new_range = decode_nullable_line_range ev "new_range" in
+          Ok (Some (Write_range new_range))
+      | other -> Error (Printf.sprintf "unknown line_evidence kind %S" other))
+  | bad -> field_type_error "line_evidence" "an object or null" bad
+
+let decode_change_kind json =
+  let* change = required_object_field json "change" in
+  let* kind = required_nonblank_string change "kind" in
+  match kind with
+  | "edit" ->
+      let* before = required_string_field change "before" in
+      let* after = required_string_field change "after" in
+      let* replace_all = required_bool_field change "replace_all" in
+      Ok (Change_edit { before; after; replace_all })
+  | "write" ->
+      let* content = required_string_field change "content" in
+      Ok (Change_write { content })
+  | "insert" ->
+      let* line = required_int_field change "line" in
+      let* text = required_string_field change "text" in
+      Ok (Change_insert { line; text })
+  | "materialize" ->
+      let* sha256 = required_nonblank_string change "sha256" in
+      Ok (Change_materialize { sha256 })
+  | other -> Error (Printf.sprintf "unknown file change kind %S" other)
+
+(* The server keeps only rows whose location is [repo] with the asked id
+   ([Server_ide_http.repository_activity_json]). The location is read as the
+   closed set the projection writes; a bundle or absolute target, or another
+   repository, means the answer is not for this repository. *)
+let decode_repo_change_path ~repo_id json =
+  let* location = required_object_field json "location" in
+  let* kind = required_nonblank_string location "kind" in
+  match kind with
+  | "repo" ->
+      let* row_repo_id = required_nonblank_string location "repo_id" in
+      let* path = required_string_field location "path" in
+      if String.equal row_repo_id repo_id then Ok path
+      else
+        Error
+          (Printf.sprintf "a change in repository %S answered for %S"
+             row_repo_id repo_id)
+  | "bundle" | "absolute" ->
+      Error
+        (Printf.sprintf "repository activity for %S carries a %s location"
+           repo_id kind)
+  | other -> Error (Printf.sprintf "unknown change location kind %S" other)
+
+let decode_repo_file_change ~repo_id json =
+  let* path = decode_repo_change_path ~repo_id json in
+  let* keeper = required_nonblank_string json "keeper" in
+  let* change = decode_change_kind json in
+  let* line_evidence = decode_line_evidence json in
+  let* succeeded = required_bool_field json "succeeded" in
+  Ok { path; keeper; change; line_evidence; succeeded }
+
+let refused_repository_activity json =
+  let* error = optional_nonblank_string json "error" in
+  match error with
+  | Some reason -> Error ("repository activity refused: " ^ reason)
+  | None -> Error "repository activity answered ok=false without an error"
+
+(* [Server_ide_http.json_ok] wraps the answer as [{ok; data}]. *)
+let decode_repository_activity ~repo_id json =
+  let* ok = required_bool_field json "ok" in
+  if not ok then refused_repository_activity json
+  else
+    let* data = required_object_field json "data" in
+    let* answered_repo_id = required_nonblank_string data "repo_id" in
+    if not (String.equal answered_repo_id repo_id) then
+      Error
+        (Printf.sprintf "repository activity for %S answered for %S" repo_id
+           answered_repo_id)
+    else
+      let* window_hours = required_finite_float data "window_hours" in
+      let* items = required_list_field data "changes" in
+      let* changes =
+        decode_list "changes" (decode_repo_file_change ~repo_id) items
+      in
+      let* incomplete = required_nonnegative_int_field data "incomplete" in
+      let* unattributed = required_nonnegative_int_field data "unattributed" in
+      Ok { window_hours; changes; incomplete; unattributed }
+
+(* The ranges are the lines the replaced and the replacing text occupy
+   ([Keeper_file_change_evidence]), so their lengths are exact. An insert is
+   one non-empty line put above an existing one
+   ([Keeper_tool_patch.Insert_before_line]); its evidence also spans the line
+   it went above, which did not change, so the insert is counted from its kind
+   instead. Anything the row does not determine stays [None]. *)
+let range_line_count range = range.end_line - range.start_line + 1
+
+let optional_range_line_count = function
+  | Some range -> range_line_count range
+  | None -> 0
+
+let unreported_line_counts = { added = None; removed = None }
+
+let file_change_line_counts change =
+  if not change.succeeded then unreported_line_counts
+  else
+    match (change.change, change.line_evidence) with
+    | Change_edit _, Some (Edit_ranges occurrences) ->
+        let sum count_of =
+          List.fold_left (fun total occ -> total + count_of occ) 0 occurrences
+        in
+        {
+          added = Some (sum (fun occ -> optional_range_line_count occ.new_range));
+          removed = Some (sum (fun occ -> range_line_count occ.old_range));
+        }
+    | Change_write _, Some (Write_range new_range) ->
+        { added = Some (optional_range_line_count new_range); removed = None }
+    | ( Change_insert _,
+        (None | Some (Edit_ranges _ | Edit_ranges_omitted | Write_range _)) ) ->
+        { added = Some 1; removed = Some 0 }
+    | Change_edit _, (None | Some (Edit_ranges_omitted | Write_range _))
+    | Change_write _, (None | Some (Edit_ranges _ | Edit_ranges_omitted))
+    | ( Change_materialize _,
+        (None | Some (Edit_ranges _ | Edit_ranges_omitted | Write_range _)) ) ->
+        unreported_line_counts
 
 type log_level =
   | Log_debug

@@ -76,7 +76,7 @@ type get_request =
   | Get_sandboxes
   | Get_keeper_sandbox of { keeper : string }
   | Get_repositories
-  | Get_file_changes of { keeper : string; window_hours : float option }
+  | Get_repository_activity of { repo_id : string }
   | Get_system_logs of {
       limit : int option;
       level : Wire_infra.log_level option;

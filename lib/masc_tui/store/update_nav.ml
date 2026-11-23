@@ -3898,10 +3898,11 @@ let infra_detail_max_scroll (m : Model.t) =
                          m.infra
                       - rem_rows)))
   | Nav.Infra_repos_changes -> (
-      match Infra_store.selected_repo_file_change m.infra with
+      match Infra_store.selected_change m.infra with
       | Some fc -> (
-          match fc.diff_preview with
-          | Some dp when not (String.equal dp "") ->
+          match Infra_store.change_preview_rows fc with
+          | [] -> 0
+          | rows ->
               let _, right_rect =
                 Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
                   ~left_ratio:0.42 ~top_ratio:0.46 bp br
@@ -3916,8 +3917,7 @@ let infra_detail_max_scroll (m : Model.t) =
                   else 0
                 in
                 let diff_h = max 1 (inner.h - band_h - link_h - 1) in
-                max 0 (List.length (Masc_tui_ui.Diff.parse_unified dp) - diff_h)
-          | Some _ | None -> 0)
+                max 0 (List.length rows - diff_h))
       | None -> 0)
   | Nav.Infra_activity_logs -> (
       match Infra_store.selected_log m.infra with
@@ -5545,30 +5545,18 @@ let apply_move (m : Model.t) dir =
                                  (Option.equal
                                     (fun (a : Wire_infra.repository) b ->
                                       String.equal a.id b.id)
-                                    prev (Some cur)) -> (
-                            match cur.keepers with
-                            | keeper :: _ ->
-                                let infra1 =
-                                  if
-                                    Option.equal String.equal
-                                      infra0.file_changes_keeper (Some keeper)
-                                  then infra0
-                                  else
-                                    infra0 |> Infra_store.clear_file_changes
-                                    |> Infra_store.mark_file_changes_requested
-                                         ~keeper
-                                in
-                                ( infra1
-                                , [
-                                    Cmd.Http_get
-                                      {
-                                        epoch = m.epoch;
-                                        req =
-                                          Cmd.Get_file_changes
-                                            { keeper; window_hours = Some 24.0 };
-                                      };
-                                  ] )
-                            | [] -> (Infra_store.clear_file_changes infra0, []))
+                                    prev (Some cur)) ->
+                            ( Infra_store.request_repo_activity ~repo_id:cur.id
+                                infra0
+                            , [
+                                Cmd.Http_get
+                                  {
+                                    epoch = m.epoch;
+                                    req =
+                                      Cmd.Get_repository_activity
+                                        { repo_id = cur.id };
+                                  };
+                              ] )
                         | Some _, Some _
                         | None, Some _
                         | Some _, None

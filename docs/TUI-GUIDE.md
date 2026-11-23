@@ -371,7 +371,10 @@ Three sub-tabs (`[` / `]` or `←` / `→`):
    Docker keepers (`Enter` opens Sandbox Dive inspector; `p` probes selected
    keeper or all).
 2. **Repos & Changes**: registered repositories (`n` opens add-repo modal, `o`
-   opens repository URL, `y` copies repository URL) and Keeper file changes.
+   opens repository URL, `y` copies repository URL) and the selected
+   repository's file-writing tool calls from the last 24 hours, with the
+   recorded text in the preview pane. Calls the server could not read are
+   counted in the changes card's subtitle.
 3. **Activity & Logs**: unified live **System Logs** stream (view-scoped
    `logs/stream` SSE) + **Live Events** strip (`observer/stream` activity
    events) + structured key/value detail pane (`Space` cycles log level filter

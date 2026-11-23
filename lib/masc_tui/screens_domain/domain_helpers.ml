@@ -500,8 +500,6 @@ let short_hash ?(len = 8) s =
 let human_account_alias (acct : Wire_runtime.account_usage) =
   Wire_runtime.human_provider_label acct
 
-let parse_unified_diff raw = Diff.parse_unified raw
-
 let format_json_scalar = function
   | `String s ->
       if Json_tree.is_secret_value s then "[REDACTED]"

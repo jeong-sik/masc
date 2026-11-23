@@ -10,7 +10,8 @@ val infra_sandboxes_path : string
 val infra_sandbox_keeper_path : keeper:string -> string
 val infra_sandboxes_probe_path : string
 val repositories_path : string
-val keeper_file_changes_path : keeper:string -> ?window_hours:float -> unit -> string
+val repository_activity_path : repo_id:string -> string
+(** [GET /api/v1/ide/repository-activity] for the last 24 hours. *)
 val system_logs_path : ?limit:int -> ?level:string -> unit -> string
 val system_logs_stream_path : ?since_seq:int -> unit -> string
 
@@ -199,25 +200,86 @@ type repository = {
   auto_sync : bool;
 }
 
-type file_change_kind =
-  | File_added
-  | File_modified
-  | File_deleted
-  | File_renamed
-
-type file_change = {
-  path : string;
-  kind : file_change_kind;
-  additions : int Observed.t;
-  deletions : int Observed.t;
-  keeper : string option;
-  diff_preview : string option;
-}
-
 val decode_repositories : Yojson.Safe.t -> (repository list, string) result
 
-val decode_file_changes :
-  observed_at:Clock.Mono.t -> Yojson.Safe.t -> (file_change list, string) result
+(** {2 Repository activity}
+
+    One row per logged file-writing tool call, as
+    [Keeper_tool_call_file_change.to_json] writes it. The server keeps the
+    rows whose target is a file in the asked repository. *)
+
+type line_range = {
+  start_line : int;
+  end_line : int;
+}
+(** 1-based, inclusive. *)
+
+type edit_occurrence = {
+  old_range : line_range;
+  new_range : line_range option;  (** [None] when the edit deleted the text. *)
+}
+
+(** The producer's record of the lines a completed change touched. *)
+type line_evidence =
+  | Edit_ranges of edit_occurrence list  (** One per replaced occurrence. *)
+  | Edit_ranges_omitted
+      (** More occurrences than the producer records ranges for. *)
+  | Write_range of line_range option
+      (** The written body's lines; [None] for an empty body. *)
+
+type change_kind =
+  | Change_edit of {
+      before : string;
+      after : string;
+      replace_all : bool;
+    }
+  | Change_write of { content : string }  (** The whole file body. *)
+  | Change_insert of {
+      line : int;  (** The line the text went above. *)
+      text : string;
+    }
+  | Change_materialize of { sha256 : string }
+      (** A blob written into the file; the row names the blob, not its
+          text. *)
+
+type file_change = {
+  path : string;  (** Relative to the repository root. *)
+  keeper : string;
+  change : change_kind;
+  line_evidence : line_evidence option;
+      (** [None] on rows logged before the producer recorded it. *)
+  succeeded : bool;
+      (** A failed or deferred call is still listed: it is a change the keeper
+          attempted. *)
+}
+
+type repository_activity = {
+  window_hours : float;
+  changes : file_change list;
+  incomplete : int;
+      (** Calls in this repository whose row could not be read: over the
+          log's inline budget, or malformed. *)
+  unattributed : int;
+      (** Unreadable calls anywhere in the fleet whose target is unknown. *)
+}
+
+val decode_repository_activity :
+  repo_id:string -> Yojson.Safe.t -> (repository_activity, string) result
+(** Rejects an answer for another repository and a change whose location is
+    not this repository. *)
+
+type line_counts = {
+  added : int option;
+  removed : int option;
+}
+(** [None] where the row does not determine the count. *)
+
+val file_change_line_counts : file_change -> line_counts
+(** Exact counts only. An edit with ranges counts the lines its replaced text
+    ([old_range]) and its replacement ([new_range]) occupy. A write with a
+    range counts the body's lines; what it replaced is not in the row. An
+    insert is one line added. A failed call, an edit or write without ranges,
+    and a materialized blob count nothing. *)
 
 (** {1 Unified Activity & System Logs} *)
 

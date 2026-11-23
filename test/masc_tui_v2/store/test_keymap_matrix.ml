@@ -913,36 +913,51 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
       };
     ]
   in
-  let file_changes : Wire_infra.file_change list =
-    [
-      {
-        path = "lib/masc_tui/keymap/keymap.ml";
-        kind = Wire_infra.File_modified;
-        additions = obs 12;
-        deletions = obs 3;
-        keeper = Some "alpha";
-        diff_preview =
-          Some
-            "@@ -1,3 +1,5 @@\n let x = 1\n+let y = 2\n+let z = 3\n let a = 4\n \
-             let b = 5\n let c = 6";
-      };
-      {
-        path = "lib/masc_tui/store/update_nav.ml";
-        kind = Wire_infra.File_modified;
-        additions = obs 20;
-        deletions = obs 4;
-        keeper = Some "beta";
-        diff_preview = Some "@@ -10,2 +10,3 @@\n let f = 1\n+let g = 2";
-      };
-      {
-        path = "docs/TUI-GUIDE.md";
-        kind = Wire_infra.File_added;
-        additions = obs 30;
-        deletions = obs 0;
-        keeper = Some "gamma";
-        diff_preview = Some "@@ -0,0 +1,2 @@\n+# Guide\n+Updated";
-      };
-    ]
+  let repo_activity : Wire_infra.repository_activity =
+    {
+      window_hours = 24.0;
+      changes =
+        [
+          {
+            path = "lib/masc_tui/keymap/keymap.ml";
+            keeper = "alpha";
+            change =
+              Wire_infra.Change_edit
+                {
+                  before = "let x = 1\nlet a = 4";
+                  after = "let x = 1\nlet y = 2\nlet z = 3\nlet a = 4";
+                  replace_all = false;
+                };
+            line_evidence =
+              Some
+                (Wire_infra.Edit_ranges
+                   [
+                     {
+                       old_range = { start_line = 1; end_line = 2 };
+                       new_range = Some { start_line = 1; end_line = 4 };
+                     };
+                   ]);
+            succeeded = true;
+          };
+          {
+            path = "lib/masc_tui/store/update_nav.ml";
+            keeper = "beta";
+            change = Wire_infra.Change_insert { line = 10; text = "let g = 2" };
+            line_evidence = None;
+            succeeded = true;
+          };
+          {
+            path = "docs/TUI-GUIDE.md";
+            keeper = "gamma";
+            change = Wire_infra.Change_write { content = "# Guide\nUpdated\n" };
+            line_evidence =
+              Some (Wire_infra.Write_range (Some { start_line = 1; end_line = 2 }));
+            succeeded = true;
+          };
+        ];
+      incomplete = 0;
+      unattributed = 0;
+    }
   in
   let logs : Wire_infra.system_log_entry list =
     [
@@ -976,7 +991,8 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
     Infra_store.empty
     |> Infra_store.apply_sandboxes ~observed_at:t0 sandboxes
     |> Infra_store.apply_repositories ~observed_at:t0 repos
-    |> Infra_store.apply_file_changes ~observed_at:t0 file_changes
+    |> Infra_store.apply_repo_activity ~repo_id:"repo-masc" ~observed_at:t0
+         repo_activity
     |> Infra_store.apply_log_snapshot logs
   in
   let incidents, _ =
@@ -2360,27 +2376,33 @@ let test_journeys_tab_multipane_dives_safety () =
   (* J17: Infra Repos & Changes 3 panes *)
   record_case ();
   let m_ir =
-    let long_diff =
-      "@@ -1,4 +1,45 @@\n"
-      ^ (List.init 45 (fun i -> Printf.sprintf "+let added_line_%02d = %d" i i)
-         |> String.concat "\n")
+    let long_body =
+      List.init 45 (fun i -> Printf.sprintf "let added_line_%02d = %d" i i)
+      |> String.concat "\n"
     in
-    let long_changes =
-      match Observed.to_option base.infra.file_changes with
-      | Some xs ->
-          List.map
-            (fun (fc : Wire_infra.file_change) ->
-              { fc with diff_preview = Some long_diff })
-            xs
-      | None -> []
+    let long_activity : Wire_infra.repository_activity =
+      {
+        window_hours = 24.0;
+        changes =
+          List.init 3 (fun i : Wire_infra.file_change ->
+              {
+                path = Printf.sprintf "lib/long_%d.ml" i;
+                keeper = "alpha";
+                change = Wire_infra.Change_write { content = long_body };
+                line_evidence = None;
+                succeeded = true;
+              });
+        incomplete = 0;
+        unattributed = 0;
+      }
     in
     {
       base with
       nav = { base.nav with workspace = Nav.Infra };
       infra =
         base.infra
-        |> Infra_store.apply_file_changes ~observed_at:t0 ~keeper:"alpha"
-             long_changes
+        |> Infra_store.apply_repo_activity ~repo_id:"repo-masc" ~observed_at:t0
+             long_activity
         |> Infra_store.set_tab Nav.Infra_repos_changes;
     }
   in
@@ -2397,10 +2419,14 @@ let test_journeys_tab_multipane_dives_safety () =
   Alcotest.(check int) "J17 Infra Repos pane 2 moves change_selected_index" 1
     m_ir_c1.infra.change_selected_index;
   let ir_cmds = View_fetches.fetches_for_current_view ~force:true m_ir in
-  Alcotest.(check bool) "J17 Infra Repos fetches Get_file_changes" true
+  Alcotest.(check bool)
+    "J17 Infra Repos fetches the selected repository's activity" true
     (List.exists
        (function
-         | Cmd.Http_get { req = Cmd.Get_file_changes _; _ } -> true
+         | Cmd.Http_get
+             { req = Cmd.Get_repository_activity { repo_id = "repo-masc" }; _ }
+           ->
+             true
          | _ -> false)
        ir_cmds);
 
@@ -2931,7 +2957,7 @@ let test_journeys_tab_multipane_dives_safety () =
   in
   ignore (render_full ~model:m_mem_dive);
 
-  (* R9: Infra_repos_changes stale Reply_file_changes rejected + keepers=[] clears changes *)
+  (* R9: Infra_repos_changes follows the selected repository; a stale reply is dropped *)
   record_case ();
   let repo_no_keeper : Wire_infra.repository =
     {
@@ -2961,21 +2987,31 @@ let test_journeys_tab_multipane_dives_safety () =
     }
   in
   let m_ir1, cmds_ir1 = step m_ir0 (mk_key Keymap.Input.Down) in
-  Alcotest.(check bool) "R9 switching to repo with keeper 'gamma' emits Get_file_changes"
+  Alcotest.(check bool) "R9 moving to repo-docs asks for repo-docs' activity"
     true
     (has_cmd
        (function
-         | Cmd.Http_get { req = Cmd.Get_file_changes { keeper = "gamma"; _ }; _ } -> true
+         | Cmd.Http_get
+             { req = Cmd.Get_repository_activity { repo_id = "repo-docs" }; _ }
+           ->
+             true
          | _ -> false)
        cmds_ir1);
-  let stale_change : Wire_infra.file_change =
+  let stale_activity : Wire_infra.repository_activity =
     {
-      path = "stale/alpha.ml";
-      kind = Wire_infra.File_modified;
-      additions = obs 1;
-      deletions = obs 0;
-      keeper = Some "alpha";
-      diff_preview = Some "+stale";
+      window_hours = 24.0;
+      changes =
+        [
+          {
+            path = "stale/alpha.ml";
+            keeper = "alpha";
+            change = Wire_infra.Change_write { content = "stale\n" };
+            line_evidence = None;
+            succeeded = true;
+          };
+        ];
+      incomplete = 0;
+      unattributed = 0;
     }
   in
   let m_ir_stale, _ =
@@ -2984,17 +3020,33 @@ let test_journeys_tab_multipane_dives_safety () =
          {
            epoch = m_ir1.epoch;
            reply =
-             Msg.Reply_file_changes { keeper = "alpha"; result = Ok [ stale_change ] };
+             Msg.Reply_repository_activity
+               { repo_id = "repo-masc"; result = Ok stale_activity };
          })
   in
-  Alcotest.(check bool) "R9 stale Reply_file_changes for 'alpha' ignored while 'gamma' repo selected"
-    true
-    (Option.is_none m_ir_stale.infra.file_changes_keeper);
-  let m_ir_empty, _ = step m_ir1 (mk_key Keymap.Input.Down) in
-  Alcotest.(check int) "R9 repo with keepers=[] has focusable_pane_count = 2" 2
+  Alcotest.(check (list string))
+    "R9 a reply for repo-masc is dropped while repo-docs is selected" []
+    (List.map
+       (fun (fc : Wire_infra.file_change) -> fc.path)
+       (Infra_store.repo_changes m_ir_stale.infra));
+  Alcotest.(check (option string)) "R9 the slot stays on repo-docs"
+    (Some "repo-docs")
+    (Option.map
+       (fun (slot : Infra_store.repo_activity) -> slot.repo_id)
+       m_ir_stale.infra.repo_activity);
+  let m_ir_empty, cmds_ir_empty = step m_ir1 (mk_key Keymap.Input.Down) in
+  Alcotest.(check int) "R9 a repo whose answer is not in has focusable_pane_count = 2" 2
     (Model.focusable_pane_count m_ir_empty);
-  Alcotest.(check bool) "R9 repo with keepers=[] clears file_changes_keeper" true
-    (Option.is_none m_ir_empty.infra.file_changes_keeper);
+  Alcotest.(check bool)
+    "R9 a repo with no assigned keepers still asks for its activity" true
+    (has_cmd
+       (function
+         | Cmd.Http_get
+             { req = Cmd.Get_repository_activity { repo_id = "repo-empty" }; _ }
+           ->
+             true
+         | _ -> false)
+       cmds_ir_empty);
 
   (* R10: Cross-dive isolation on 'o' (Open_external) & 'y' (Copy_selected) + Wiki slug parity *)
   record_case ();
@@ -4565,20 +4617,26 @@ let test_pillar2_scroll_bounds_all_surfaces () =
     ~needle:"LOG_JSON_BOTTOM_29"
     ~get_off:(fun m -> m.infra.detail_scroll_offset)
     m_logs_p1;
-  let big_repo_diff =
-    "@@ -1,1 +1,45 @@\n"
-    ^ (List.init 45 (fun i -> Printf.sprintf "+let repo_line_%02d = %d" i i)
-       |> String.concat "\n")
+  let big_repo_body =
+    List.init 45 (fun i -> Printf.sprintf "let repo_line_%02d = %d" i i)
+    |> String.concat "\n"
   in
   let m_repos_p1 =
-    let fc : Wire_infra.file_change =
+    let activity : Wire_infra.repository_activity =
       {
-        path = "lib/masc_tui/store/update_nav.ml";
-        kind = Wire_infra.File_modified;
-        additions = obs 45;
-        deletions = obs 0;
-        keeper = Some "alpha";
-        diff_preview = Some big_repo_diff;
+        window_hours = 24.0;
+        changes =
+          [
+            {
+              path = "lib/masc_tui/store/update_nav.ml";
+              keeper = "alpha";
+              change = Wire_infra.Change_write { content = big_repo_body };
+              line_evidence = None;
+              succeeded = true;
+            };
+          ];
+        incomplete = 0;
+        unattributed = 0;
       }
     in
     {
@@ -4587,7 +4645,8 @@ let test_pillar2_scroll_bounds_all_surfaces () =
       infra =
         base.infra
         |> Infra_store.set_tab Nav.Infra_repos_changes
-        |> Infra_store.apply_file_changes ~observed_at:t0 ~keeper:"alpha" [ fc ];
+        |> Infra_store.apply_repo_activity ~repo_id:"repo-masc" ~observed_at:t0
+             activity;
     }
   in
   assert_scroll_exact ~label:"Infra > Repos pane 1 (with sel_repo link row)"

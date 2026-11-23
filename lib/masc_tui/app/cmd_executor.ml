@@ -906,14 +906,14 @@ let execute_get t ~epoch req =
                    ~decode:Wire_infra.decode_repositories)
             in
             Msg.Http_reply { epoch; reply }
-        | Cmd.Get_file_changes { keeper; _ } ->
+        | Cmd.Get_repository_activity { repo_id } ->
             let reply =
-              Msg.Reply_file_changes
+              Msg.Reply_repository_activity
                 {
-                  keeper;
+                  repo_id;
                   result =
                     fetch_and_decode_get t ~path
-                      ~decode:(Wire_infra.decode_file_changes ~observed_at);
+                      ~decode:(Wire_infra.decode_repository_activity ~repo_id);
                 }
             in
             Msg.Http_reply { epoch; reply }

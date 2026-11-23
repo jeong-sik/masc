@@ -1013,6 +1013,170 @@ let test_repositories_roundtrip () =
            (fun (r : Wire_infra.repository) -> r.resolved_local_path)
            decoded)
 
+(* GET /api/v1/ide/repository-activity. Each row is encoded by the
+   projection's own [to_json], and edit and insert evidence comes from the
+   patch step that writes the file. The envelope is the one
+   [Server_ide_http.repository_activity_json] builds inside [json_ok]. *)
+module Change = Masc.Keeper_tool_call_file_change
+module Evidence = Masc.Keeper_file_change_evidence
+module Patch = Masc.Keeper_tool_patch
+
+let patch_evidence operation content =
+  match Patch.apply operation content with
+  | Ok application -> Patch.file_change_evidence application
+  | Error e -> Alcotest.fail ("patch failed: " ^ e)
+
+let change_row ?(succeeded = true) ?line_evidence ~path kind : Change.t =
+  {
+    at = 1795173600.0;
+    keeper = "alpha";
+    turn = Some 3;
+    task_id = None;
+    execution_id = Some ("exec-" ^ path);
+    line_evidence;
+    location = Change.In_repo { repo_id = "masc"; relative_path = path };
+    kind;
+    succeeded;
+  }
+
+let activity_body ~repo_id rows =
+  `Assoc
+    [
+      ("ok", `Bool true);
+      ( "data",
+        `Assoc
+          [
+            ("repo_id", `String repo_id);
+            ("window_hours", `Float 24.0);
+            ("changes", `List (List.map Change.to_json rows));
+            ("incomplete", `Int 2);
+            ("unattributed", `Int 1);
+          ] );
+    ]
+
+(* Exhaustive over the server's kind, so a kind added there stops this file
+   from compiling until the TUI reads it. *)
+let server_change_label (row : Change.t) =
+  let kind =
+    match row.kind with
+    | Change.Edited { before; after; replace_all } ->
+        Printf.sprintf "edit %S -> %S replace_all=%b" before after replace_all
+    | Change.Written { content } -> Printf.sprintf "write %S" content
+    | Change.Inserted { line; text } -> Printf.sprintf "insert %d %S" line text
+    | Change.Materialized { sha256 } -> "materialize " ^ sha256
+  in
+  let path =
+    match row.location with
+    | Change.In_repo { relative_path; _ } -> relative_path
+    | Change.In_bundle { bundle_path } -> "bundle:" ^ bundle_path
+    | Change.At_absolute_path { path } -> "absolute:" ^ path
+  in
+  Printf.sprintf "%s %s @%s ok=%b" path kind row.keeper row.succeeded
+
+let tui_change_label (fc : Wire_infra.file_change) =
+  let kind =
+    match fc.change with
+    | Wire_infra.Change_edit { before; after; replace_all } ->
+        Printf.sprintf "edit %S -> %S replace_all=%b" before after replace_all
+    | Wire_infra.Change_write { content } -> Printf.sprintf "write %S" content
+    | Wire_infra.Change_insert { line; text } ->
+        Printf.sprintf "insert %d %S" line text
+    | Wire_infra.Change_materialize { sha256 } -> "materialize " ^ sha256
+  in
+  Printf.sprintf "%s %s @%s ok=%b" fc.path kind fc.keeper fc.succeeded
+
+let line_counts_label (fc : Wire_infra.file_change) =
+  let counts = Wire_infra.file_change_line_counts fc in
+  let side = function Some n -> string_of_int n | None -> "?" in
+  Printf.sprintf "%s +%s -%s" fc.path (side counts.added) (side counts.removed)
+
+let test_repository_activity_roundtrip () =
+  let edit_before = "let x = 1\nlet y = 2" in
+  let edit_after = "let x = 1\nlet y = 3\nlet z = 4" in
+  let rows =
+    [
+      change_row ~path:"lib/edit.ml"
+        ~line_evidence:
+          (patch_evidence
+             (Patch.Replace
+                {
+                  old_string = edit_before;
+                  new_string = edit_after;
+                  replace_all = false;
+                })
+             "(* head *)\nlet x = 1\nlet y = 2\n")
+        (Change.Edited
+           { before = edit_before; after = edit_after; replace_all = false });
+      change_row ~path:"lib/all.ml"
+        ~line_evidence:
+          (patch_evidence
+             (Patch.Replace
+                { old_string = "foo"; new_string = "bar\nbaz"; replace_all = true })
+             "foo\nx\nfoo\n")
+        (Change.Edited { before = "foo"; after = "bar\nbaz"; replace_all = true });
+      change_row ~path:"docs/new.md"
+        ~line_evidence:(Evidence.written "a\nb\nc\n")
+        (Change.Written { content = "a\nb\nc\n" });
+      change_row ~path:"lib/memo.ml"
+        ~line_evidence:
+          (patch_evidence
+             (Patch.Insert_before_line { line = 2; text = "(* note *)" })
+             "let a = 1\nlet q = 0\n")
+        (Change.Inserted { line = 2; text = "(* note *)" });
+      change_row ~path:"assets/blob.bin"
+        ~line_evidence:(Evidence.written "x\ny")
+        (Change.Materialized { sha256 = String.make 64 'a' });
+      change_row ~path:"lib/failed.ml" ~succeeded:false
+        (Change.Written { content = "zzz" });
+      change_row ~path:"lib/old.ml"
+        (Change.Edited { before = "a"; after = "b"; replace_all = false });
+      change_row ~path:"lib/many.ml"
+        ~line_evidence:
+          (Evidence.edited_ranges_omitted
+             ~occurrence_count:(Evidence.max_recorded_edit_occurrences + 1))
+        (Change.Edited { before = "a"; after = "b"; replace_all = true });
+    ]
+  in
+  match
+    Wire_infra.decode_repository_activity ~repo_id:"masc"
+      (activity_body ~repo_id:"masc" rows)
+  with
+  | Error e -> Alcotest.fail ("repository activity decode failed: " ^ e)
+  | Ok activity ->
+      Alcotest.(check (list string)) "every row keeps its path, kind and outcome"
+        (List.map server_change_label rows)
+        (List.map tui_change_label activity.changes);
+      Alcotest.(check (list string))
+        "line counts come only from what the row determines"
+        [
+          "lib/edit.ml +3 -2";
+          "lib/all.ml +4 -2";
+          "docs/new.md +3 -?";
+          "lib/memo.ml +1 -0";
+          "assets/blob.bin +? -?";
+          "lib/failed.ml +? -?";
+          "lib/old.ml +? -?";
+          "lib/many.ml +? -?";
+        ]
+        (List.map line_counts_label activity.changes);
+      Alcotest.(check (pair int int)) "unreadable counts are carried"
+        (2, 1)
+        (activity.incomplete, activity.unattributed);
+      Alcotest.(check bool) "an answer for another repository is rejected" true
+        (Result.is_error
+           (Wire_infra.decode_repository_activity ~repo_id:"docs"
+              (activity_body ~repo_id:"masc" rows)));
+      let bundle_row =
+        {
+          (change_row ~path:"notes.md" (Change.Written { content = "n" })) with
+          location = Change.In_bundle { bundle_path = "notes.md" };
+        }
+      in
+      Alcotest.(check bool) "a change outside the repository is rejected" true
+        (Result.is_error
+           (Wire_infra.decode_repository_activity ~repo_id:"masc"
+              (activity_body ~repo_id:"masc" [ bundle_row ])))
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1064,5 +1228,8 @@ let () =
         [
           Alcotest.test_case "repository_json -> decode_repositories" `Quick
             test_repositories_roundtrip;
+          Alcotest.test_case
+            "file change to_json -> decode_repository_activity" `Quick
+            test_repository_activity_roundtrip;
         ] );
     ]

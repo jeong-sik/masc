@@ -448,21 +448,36 @@ type error =
       }
   | Client_closed
 
+let rec redact_string_value ~depth (raw : string) : string =
+  let trimmed = String.trim raw in
+  let looks_like_json =
+    String.length trimmed > 0 && (trimmed.[0] = '{' || trimmed.[0] = '[')
+  in
+  if depth < 2 && looks_like_json
+  then
+    if String.length trimmed <= 16384
+    then (
+      match Yojson.Safe.from_string trimmed with
+      | parsed ->
+        Yojson.Safe.to_string
+          (Secret_patterns.redact_json_with
+             ~on_string:(redact_string_value ~depth:(depth + 1))
+             parsed)
+      | exception Yojson.Json_error _ ->
+        Printf.sprintf "[redacted malformed JSON string (%d bytes)]" (String.length raw))
+    else Printf.sprintf "[redacted oversized JSON string (%d bytes)]" (String.length raw)
+  else Secret_patterns.redact_text raw
+;;
+
 let bounded_redacted_json_summary (json : Yojson.Safe.t) =
   let max_bytes = 512 in
-  let redacted = Yojson.Safe.to_string (Secret_patterns.redact_json_strings json) in
+  let redacted =
+    Yojson.Safe.to_string
+      (Secret_patterns.redact_json_with ~on_string:(redact_string_value ~depth:0) json)
+  in
   if String.length redacted <= max_bytes
   then redacted
-  else (
-    let payload_cap = max_bytes - 3 in
-    let rec trim_utf8 i =
-      if i <= 0
-      then 0
-      else if (Char.code redacted.[i] land 0xC0) = 0x80
-      then trim_utf8 (i - 1)
-      else i
-    in
-    String.sub redacted 0 (trim_utf8 payload_cap) ^ "...")
+  else String_util.utf8_prefix ~max_bytes:(max_bytes - 3) redacted ^ "..."
 ;;
 
 let error_to_string = function
@@ -514,6 +529,7 @@ let jsonrpc_code_of_int = function
 
 type rpc_error_class =
   | Rpc_context_overflow of { limit : int option }
+  | Rpc_request_body_too_large
   | Rpc_hard_quota of { retry_after : float option }
   | Rpc_rate_limited of { retry_after : float option }
   | Rpc_auth_error
@@ -525,6 +541,7 @@ let signal_retry_after = function
   | Llm_provider.Retry.Signal_hard_quota { retry_after; _ }
   | Llm_provider.Retry.Signal_rate_limited { retry_after; _ } -> retry_after
   | Llm_provider.Retry.Signal_context_overflow _
+  | Llm_provider.Retry.Signal_request_body_too_large _
   | Llm_provider.Retry.Signal_auth_error _
   | Llm_provider.Retry.Signal_authorization_error _
   | Llm_provider.Retry.Signal_provider_unavailable _ -> None
@@ -532,6 +549,7 @@ let signal_retry_after = function
 
 let signal_limit = function
   | Llm_provider.Retry.Signal_context_overflow { limit; _ } -> limit
+  | Llm_provider.Retry.Signal_request_body_too_large _
   | Llm_provider.Retry.Signal_hard_quota _
   | Llm_provider.Retry.Signal_rate_limited _
   | Llm_provider.Retry.Signal_auth_error _
@@ -544,6 +562,7 @@ let first_some xs = List.find_map Fun.id xs
 let rpc_error_class_of_signal ~retry_after ~limit = function
   | Llm_provider.Retry.Signal_context_overflow { limit = sig_limit; _ } ->
     Rpc_context_overflow { limit = first_some [ sig_limit; limit ] }
+  | Llm_provider.Retry.Signal_request_body_too_large _ -> Rpc_request_body_too_large
   | Llm_provider.Retry.Signal_hard_quota { retry_after = sig_retry; _ } ->
     Rpc_hard_quota { retry_after = first_some [ sig_retry; retry_after ] }
   | Llm_provider.Retry.Signal_rate_limited { retry_after = sig_retry; _ } ->
@@ -568,31 +587,41 @@ let extract_data_evidence ~fallback_message (data : Yojson.Safe.t option) =
   | None -> None, None, None, None, None
   | Some (`Assoc _ as obj) -> inspect_assoc obj
   | Some (`List items) ->
-    let rec walk remaining items =
+    let rec walk remaining ~best_status ~best_retry ~best_n_ctx ~best_obj items =
       if remaining <= 0
-      then None, None, None, None, None
+      then best_status, best_retry, best_n_ctx, None, best_obj
       else (
         match items with
-        | [] -> None, None, None, None, None
+        | [] -> best_status, best_retry, best_n_ctx, None, best_obj
         | (`Assoc _ as obj) :: rest ->
           let status, retry, n_ctx, field_signal, matched_obj = inspect_assoc obj in
           if Option.is_some field_signal
-             || Option.is_some status
-             || Option.is_some retry
-             || Option.is_some n_ctx
-          then status, retry, n_ctx, field_signal, matched_obj
-          else walk (remaining - 1) rest
+          then
+            ( first_some [ status; best_status ]
+            , first_some [ retry; best_retry ]
+            , first_some [ n_ctx; best_n_ctx ]
+            , field_signal
+            , matched_obj )
+          else
+            walk
+              (remaining - 1)
+              ~best_status:(first_some [ best_status; status ])
+              ~best_retry:(first_some [ best_retry; retry ])
+              ~best_n_ctx:(first_some [ best_n_ctx; n_ctx ])
+              ~best_obj:(first_some [ best_obj; matched_obj ])
+              rest
         | (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) :: rest ->
-          walk (remaining - 1) rest)
+          walk (remaining - 1) ~best_status ~best_retry ~best_n_ctx ~best_obj rest)
     in
-    walk 8 items
+    walk 8 ~best_status:None ~best_retry:None ~best_n_ctx:None ~best_obj:None items
   | Some (`String raw) ->
-    let sig_from_str =
-      match R.classify_embedded_json raw with
-      | Some _ as s -> s
-      | None -> R.classify_machine_tokens raw
-    in
-    None, Option.bind sig_from_str signal_retry_after, Option.bind sig_from_str signal_limit, sig_from_str, None
+    let str_status = R.http_status_of_machine_tokens raw in
+    let sig_from_str = R.classify_text raw in
+    ( str_status
+    , Option.bind sig_from_str signal_retry_after
+    , Option.bind sig_from_str signal_limit
+    , sig_from_str
+    , None )
   | Some (`Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) -> None, None, None, None, None
 ;;
 
@@ -612,55 +641,47 @@ let classify_rpc_error ~method_name:_ ~code ~message ~data =
   let data_status, data_retry, data_n_ctx, data_field_signal, data_assoc =
     extract_data_evidence ~fallback_message:message data
   in
-  let effective_http_status = first_some [ code_http_status; data_status ] in
-  (* Extract pure structured signals from [message] without forcing caller HTTP
-     status yet, so an unrelated leading JSON object cannot prematurely short-
-     circuit a quota signal later in the message. *)
-  let msg_json_signal = R.classify_embedded_json ?retry_after:data_retry message in
-  let msg_token_signal = R.classify_machine_tokens ?retry_after:data_retry message in
+  let msg_http_status = R.http_status_of_machine_tokens message in
+  let effective_http_status =
+    first_some [ code_http_status; data_status; msg_http_status ]
+  in
+  let msg_signal =
+    R.classify_text ?http_status:effective_http_status ?retry_after:data_retry message
+  in
   let best_retry =
     first_some
       [ data_retry
       ; Option.bind data_field_signal signal_retry_after
-      ; Option.bind msg_json_signal signal_retry_after
-      ; Option.bind msg_token_signal signal_retry_after
+      ; Option.bind msg_signal signal_retry_after
       ]
   in
   let best_limit =
     first_some
       [ data_n_ctx
       ; Option.bind data_field_signal signal_limit
-      ; Option.bind msg_json_signal signal_limit
-      ; Option.bind msg_token_signal signal_limit
+      ; Option.bind msg_signal signal_limit
       ]
   in
   let is_hard_quota = function
     | Some (R.Signal_hard_quota _) -> true
     | Some
         ( R.Signal_context_overflow _
+        | R.Signal_request_body_too_large _
         | R.Signal_rate_limited _
         | R.Signal_auth_error _
         | R.Signal_authorization_error _
         | R.Signal_provider_unavailable _ )
     | None -> false
   in
-  let candidates = [ data_field_signal; msg_json_signal; msg_token_signal ] in
+  let candidates = [ data_field_signal; msg_signal ] in
   let best_signal =
     match List.find_opt is_hard_quota candidates with
     | Some (Some _ as q) -> q
     | Some None | None -> first_some candidates
   in
-  let anthropic_400_fallback () =
-    let from_data_400 =
-      Option.bind data_assoc (fun obj ->
-        R.classify_structured_json ~http_status:400 ~fallback_message:message obj)
-    in
-    match from_data_400 with
-    | Some _ as s -> s
-    | None -> R.classify_embedded_json ~http_status:400 ?retry_after:best_retry message
-  in
-  (* Enforce HTTP refusal status precedence (#354 P1 #1) so HTTP 429/402/401/
-     403/5xx never misclassify as context overflow (which would falsely clear
+  (* Enforce HTTP refusal status precedence across all sources (RPC code,
+     structured data, and message HTTP tokens) so HTTP 401/402/403/413/429/5xx
+     can never misclassify as context overflow (which would falsely clear
      Native_full effect fences or evict persistent children). *)
   match effective_http_status with
   | Some 402 -> Rpc_hard_quota { retry_after = best_retry }
@@ -673,14 +694,19 @@ let classify_rpc_error ~method_name:_ ~code ~message ~data =
     if is_hard_quota best_signal
     then Rpc_hard_quota { retry_after = best_retry }
     else Rpc_rate_limited { retry_after = best_retry }
-  | Some 413 -> Rpc_context_overflow { limit = best_limit }
-  | Some 400 ->
-    (match best_signal with
+  | Some 413 -> Rpc_request_body_too_large
+  | Some (400 | 422 as status) ->
+    let from_data_status =
+      Option.bind data_assoc (fun obj ->
+        R.classify_structured_json
+          ~http_status:status
+          ?retry_after:best_retry
+          ~fallback_message:message
+          obj)
+    in
+    (match first_some [ from_data_status; msg_signal; data_field_signal ] with
      | Some s -> rpc_error_class_of_signal ~retry_after:best_retry ~limit:best_limit s
-     | None ->
-       (match anthropic_400_fallback () with
-        | Some s -> rpc_error_class_of_signal ~retry_after:best_retry ~limit:best_limit s
-        | None -> Rpc_unclassified))
+     | None -> Rpc_unclassified)
   | Some status ->
     (match R.server_status_class_of_code status with
      | Some (R.Overloaded_status | R.Server_error_status) -> Rpc_provider_unavailable
@@ -697,6 +723,7 @@ let classify_rpc_error ~method_name:_ ~code ~message ~data =
 let is_context_overflow_rpc_error ~method_name ~code ~message ~data =
   match classify_rpc_error ~method_name ~code ~message ~data with
   | Rpc_context_overflow _ -> true
+  | Rpc_request_body_too_large
   | Rpc_hard_quota _
   | Rpc_rate_limited _
   | Rpc_auth_error

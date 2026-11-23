@@ -2166,9 +2166,32 @@ let test_acp_rpc_error_classification_pool_preservation_and_scopes () =
     (has_sub ~needle:"opaque-vendor-secret-999" rendered);
   check bool "error_to_string bounds long multi-byte data summary" true
     (String.length rendered <= 600);
-  (* P1/P2 precedence regressions: HTTP status over embedded overflow JSON,
-     integer data.code=429 + QUOTA_EXCEEDED in message, 413 preserving n_ctx,
-     and String/List JSON-RPC error.data envelopes. *)
+  (* Stringified JSON & malformed JSON error.data secret redaction (P2-1) *)
+  let stringified_secret_rendered =
+    Runtime_acp_client.error_to_string
+      (Runtime_acp_client.Rpc_error
+         { method_name = "session/prompt"
+         ; code = -32000
+         ; message = "failed"
+         ; data = Some (`String {|{"api_key":"opaque-stringified-secret-111","code":429}|})
+         })
+  in
+  check bool "stringified JSON error.data redacts api_key" false
+    (has_sub ~needle:"opaque-stringified-secret-111" stringified_secret_rendered);
+  let malformed_json_secret_rendered =
+    Runtime_acp_client.error_to_string
+      (Runtime_acp_client.Rpc_error
+         { method_name = "session/prompt"
+         ; code = -32000
+         ; message = "failed"
+         ; data = Some (`String {|{"api_key":"sk-ant-truncated-secret-222"|})
+         })
+  in
+  check bool "malformed JSON error.data does not leak raw secret" false
+    (has_sub ~needle:"sk-ant-truncated-secret-222" malformed_json_secret_rendered);
+  (* P1/P2 precedence regressions: HTTP status (from code, data, or message text)
+     over embedded overflow JSON, 413 separated from context overflow, shared
+     ACP/Antigravity parity table, and String/List JSON-RPC error.data envelopes. *)
   (match
      Runtime_acp_client.classify_rpc_error
        ~method_name:"session/prompt"
@@ -2178,6 +2201,57 @@ let test_acp_rpc_error_classification_pool_preservation_and_scopes () =
    with
    | Runtime_acp_client.Rpc_rate_limited _ -> ()
    | _ -> fail "HTTP 429 must take precedence over embedded request_too_large JSON");
+  (* Exact P1 repro + shared ACP/Antigravity SSOT parity table *)
+  let shared_p1_repro =
+    {|HTTP 429 Too Many Requests: {"error":{"code":"request_too_large"}}|}
+  in
+  (match
+     ( Runtime_acp_client.classify_rpc_error
+         ~method_name:"session/prompt"
+         ~code:(-32000)
+         ~message:shared_p1_repro
+         ~data:None
+     , Runtime_antigravity.classify_turn_failure shared_p1_repro )
+   with
+   | Runtime_acp_client.Rpc_rate_limited _, Some (Llm_provider.Retry.Signal_rate_limited _) ->
+     ()
+   | _ ->
+     fail
+       "HTTP 429 in message text must classify identically as rate-limited (never overflow) in both ACP and Antigravity");
+  check bool "HTTP 429 in message text with embedded request_too_large is NOT context overflow"
+    false
+    (Runtime_acp_client.is_context_overflow_rpc_error
+       ~method_name:"session/prompt"
+       ~code:(-32000)
+       ~message:shared_p1_repro
+       ~data:None);
+  let google_quota_exhausted =
+    "You have exhausted your capacity on this model. Your quota will reset after 4h41m7s. reason=QUOTA_EXHAUSTED"
+  in
+  (match
+     ( Runtime_acp_client.classify_rpc_error
+         ~method_name:"session/prompt"
+         ~code:(-32000)
+         ~message:google_quota_exhausted
+         ~data:None
+     , Runtime_antigravity.classify_turn_failure google_quota_exhausted )
+   with
+   | Runtime_acp_client.Rpc_hard_quota _, Some (Llm_provider.Retry.Signal_hard_quota _) -> ()
+   | _ -> fail "reason=QUOTA_EXHAUSTED must classify identically as hard quota in both ACP and Antigravity");
+  let retry_info_payload =
+    {|{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"39s"}]}}|}
+  in
+  (match
+     ( Runtime_acp_client.classify_rpc_error
+         ~method_name:"session/prompt"
+         ~code:(-32000)
+         ~message:retry_info_payload
+         ~data:None
+     , Runtime_antigravity.classify_turn_failure retry_info_payload )
+   with
+   | ( Runtime_acp_client.Rpc_rate_limited { retry_after = Some 39.0 }
+     , Some (Llm_provider.Retry.Signal_rate_limited { retry_after = Some 39.0; _ }) ) -> ()
+   | _ -> fail "google.rpc.RetryInfo retryDelay must propagate 39.0s in both ACP and Antigravity");
   (match
      Runtime_acp_client.classify_rpc_error
        ~method_name:"session/prompt"
@@ -2194,8 +2268,29 @@ let test_acp_rpc_error_classification_pool_preservation_and_scopes () =
        ~message:"payload too large"
        ~data:(Some (`Assoc [ "n_ctx", `Int 128000 ]))
    with
-   | Runtime_acp_client.Rpc_context_overflow { limit = Some 128000 } -> ()
-   | _ -> fail "HTTP 413 must preserve n_ctx limit from error.data");
+   | Runtime_acp_client.Rpc_request_body_too_large -> ()
+   | _ -> fail "HTTP 413 must classify as Rpc_request_body_too_large (separated from context overflow)");
+  check bool "HTTP 413 is_context_overflow_rpc_error=false" false
+    (Runtime_acp_client.is_context_overflow_rpc_error
+       ~method_name:"session/prompt"
+       ~code:413
+       ~message:"payload too large"
+       ~data:(Some (`Assoc [ "n_ctx", `Int 128000 ])));
+  (match
+     Runtime_acp_client.classify_rpc_error
+       ~method_name:"session/prompt"
+       ~code:(-32603)
+       ~message:"Internal error"
+       ~data:
+         (Some
+            (`List
+               [ `Assoc [ "code", `Int 404 ]
+               ; `Assoc
+                   [ "error", `Assoc [ "code", `String "insufficient_quota"; "retryAfter", `Int 45 ] ]
+               ]))
+   with
+   | Runtime_acp_client.Rpc_hard_quota { retry_after = Some 45.0 } -> ()
+   | _ -> fail "List error.data must continue scanning past status-only item to later refusal signal");
   (match
      Runtime_acp_client.classify_rpc_error
        ~method_name:"session/prompt"

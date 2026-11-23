@@ -352,6 +352,7 @@ val is_context_overflow_rpc_error
 
 type rpc_error_class =
   | Rpc_context_overflow of { limit : int option }
+  | Rpc_request_body_too_large
   | Rpc_hard_quota of { retry_after : float option }
   | Rpc_rate_limited of { retry_after : float option }
   | Rpc_auth_error
@@ -367,13 +368,14 @@ val classify_rpc_error
   -> rpc_error_class
 (** Classify an upstream ACP JSON-RPC error into a closed provider-refusal
     class by delegating strictly to {!Llm_provider.Retry}:
-    1. structured JSON [data] ([Retry.classify_structured_json]),
-    2. embedded JSON envelope in [message] ([Retry.classify_embedded_json]),
-    3. exact ASCII-boundary machine wire tokens or explicit [HTTP <4xx|5xx>]
-       status tokens ([Retry.classify_machine_tokens]) paired with any
-       {!Jsonrpc_http_status} / [data] HTTP status.
-    Free-form English prose without structured evidence returns
-    {!Rpc_unclassified}. *)
+    1. structured JSON [data] ([Retry.classify_structured_json] /
+       [Retry.classify_text]),
+    2. unified text refusal classification on [message] ([Retry.classify_text]),
+    under one HTTP status precedence gate combining {!Jsonrpc_http_status},
+    [data] status fields, and explicit [HTTP <4xx|5xx>] tokens in [message] so
+    HTTP [401]/[402]/[403]/[413]/[429]/[5xx] never downgrade into
+    {!Rpc_context_overflow}. Free-form English prose without structured evidence
+    returns {!Rpc_unclassified}. *)
 
 val image_input_unsupported_detail : driver -> string
 (** Canonical refusal detail when an ACP server advertises

@@ -1280,42 +1280,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
 ;;
 
 let classify_turn_failure (detail : string) : Llm_provider.Retry.signal_refusal option =
-  let module R = Llm_provider.Retry in
-  let from_json = R.classify_embedded_json detail in
-  let from_tokens = R.classify_machine_tokens detail in
-  match from_json with
-  | Some (R.Signal_hard_quota _ as q) -> Some q
-  | Some (R.Signal_rate_limited { retry_after; message } as j) ->
-    (match from_tokens with
-     | Some (R.Signal_hard_quota { retry_after = tok_retry; _ }) ->
-       let retry_after =
-         match retry_after with
-         | Some _ as r -> r
-         | None -> tok_retry
-       in
-       Some (R.Signal_hard_quota { retry_after; message })
-     | Some
-         ( R.Signal_rate_limited _
-         | R.Signal_context_overflow _
-         | R.Signal_auth_error _
-         | R.Signal_authorization_error _
-         | R.Signal_provider_unavailable _ )
-     | None -> Some j)
-  | Some
-      (( R.Signal_context_overflow _
-       | R.Signal_auth_error _
-       | R.Signal_authorization_error _
-       | R.Signal_provider_unavailable _ ) as j) ->
-    (match from_tokens with
-     | Some (R.Signal_hard_quota _ as q) -> Some q
-     | Some
-         ( R.Signal_rate_limited _
-         | R.Signal_context_overflow _
-         | R.Signal_auth_error _
-         | R.Signal_authorization_error _
-         | R.Signal_provider_unavailable _ )
-     | None -> Some j)
-  | None -> from_tokens
+  Llm_provider.Retry.classify_text detail
 ;;
 
 module For_testing = struct

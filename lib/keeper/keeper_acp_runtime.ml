@@ -197,6 +197,12 @@ let acp_error_to_core_error = function
                 Printf.sprintf "ACP RPC %s context overflow (%d): %s" method_name code message
             ; limit
             })
+     | Acp.Rpc_request_body_too_large ->
+       Agent_core.Error.Api
+         (Agent_core.Retry.InvalidRequest
+            { message = detail
+            ; reason = Agent_core.Retry.Request_body_refused_by_provider { status = 413 }
+            })
      | Acp.Rpc_hard_quota { retry_after } ->
        Agent_core.Error.Provider
          (Llm_provider.Error.HardQuota { provider = "acp"; retry_after; detail })
@@ -249,6 +255,7 @@ let should_evict_persistent_child_on_error = function
     (match Acp.classify_rpc_error ~method_name ~code ~message ~data with
      | Acp.Rpc_hard_quota _ | Acp.Rpc_rate_limited _ -> false
      | Acp.Rpc_context_overflow _
+     | Acp.Rpc_request_body_too_large
      | Acp.Rpc_auth_error
      | Acp.Rpc_authorization_error
      | Acp.Rpc_provider_unavailable

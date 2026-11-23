@@ -506,6 +506,7 @@ let standing_of_rpc_error_class ~now = function
   | Runtime_acp_client.Rpc_auth_error ->
     Some (Runtime_candidate_standing.Credential_refused { noted_at = now })
   | Runtime_acp_client.Rpc_context_overflow _
+  | Runtime_acp_client.Rpc_request_body_too_large
   | Runtime_acp_client.Rpc_authorization_error
   | Runtime_acp_client.Rpc_provider_unavailable
   | Runtime_acp_client.Rpc_unclassified -> None
@@ -524,6 +525,7 @@ let standing_of_signal_refusal ~now = function
     Some (Runtime_candidate_standing.Credential_refused { noted_at = now })
   | Some
       ( Llm_provider.Retry.Signal_context_overflow _
+      | Llm_provider.Retry.Signal_request_body_too_large _
       | Llm_provider.Retry.Signal_authorization_error _
       | Llm_provider.Retry.Signal_provider_unavailable _ )
   | None -> None

@@ -250,28 +250,65 @@ let is_structured_overflow_code code =
        ; n_ctx = None
        }
 
-let json_body_is_structured_overflow body =
-  match Llm_provider.Retry.classify_embedded_json body with
+let json_body_is_structured_overflow ?http_status body =
+  match Llm_provider.Retry.classify_embedded_json ?http_status body with
   | Some (Llm_provider.Retry.Signal_context_overflow _) -> true
   | Some
-      ( Llm_provider.Retry.Signal_hard_quota _
+      ( Llm_provider.Retry.Signal_request_body_too_large _
+      | Llm_provider.Retry.Signal_hard_quota _
       | Llm_provider.Retry.Signal_rate_limited _
       | Llm_provider.Retry.Signal_auth_error _
       | Llm_provider.Retry.Signal_authorization_error _
       | Llm_provider.Retry.Signal_provider_unavailable _ )
   | None -> false
 
+let is_non_overflow_http_refusal_status = function
+  | Some (401 | 402 | 403 | 413 | 429) -> true
+  | Some status ->
+    Option.is_some (Llm_provider.Retry.server_status_class_of_code status)
+  | None -> false
+
+let json_body_is_non_overflow_refusal body =
+  match Llm_provider.Retry.classify_embedded_json body with
+  | Some
+      ( Llm_provider.Retry.Signal_request_body_too_large _
+      | Llm_provider.Retry.Signal_hard_quota _
+      | Llm_provider.Retry.Signal_rate_limited _
+      | Llm_provider.Retry.Signal_auth_error _
+      | Llm_provider.Retry.Signal_authorization_error _
+      | Llm_provider.Retry.Signal_provider_unavailable _ ) -> true
+  | Some (Llm_provider.Retry.Signal_context_overflow _) | None -> false
+
 let is_structured_context_overflow ~error_code ~detail ~stderr =
-  let code_matches =
-    match error_code with
-    | Some code -> is_structured_overflow_code code
-    | None -> false
-  in
-  code_matches
-  || json_body_is_structured_overflow detail
-  || (stderr <> ""
-      && (json_body_is_structured_overflow stderr
-          || List.exists json_body_is_structured_overflow (String.split_on_char '\n' stderr)))
+  let detail_http_status = Llm_provider.Retry.http_status_of_machine_tokens detail in
+  let stderr_http_status = Llm_provider.Retry.http_status_of_machine_tokens stderr in
+  (* Enforce the HTTP/refusal precedence invariant across ALL branches,
+     including top-level [error_code]: an explicit HTTP 401/402/403/413/429/5xx
+     status or non-overflow JSON refusal in [detail]/[stderr] must NEVER enter
+     context-overflow shrink-retry. *)
+  if is_non_overflow_http_refusal_status detail_http_status
+     || is_non_overflow_http_refusal_status stderr_http_status
+     || json_body_is_non_overflow_refusal detail
+     || (stderr <> "" && json_body_is_non_overflow_refusal stderr)
+  then false
+  else (
+    let code_matches =
+      match error_code with
+      | Some code -> is_structured_overflow_code code
+      | None -> false
+    in
+    let effective_stderr_status =
+      match stderr_http_status with
+      | Some _ as s -> s
+      | None -> detail_http_status
+    in
+    code_matches
+    || json_body_is_structured_overflow ?http_status:detail_http_status detail
+    || (stderr <> ""
+        && (json_body_is_structured_overflow ?http_status:effective_stderr_status stderr
+            || List.exists
+                 (json_body_is_structured_overflow ?http_status:effective_stderr_status)
+                 (String.split_on_char '\n' stderr))))
 
 let format_turn_failed_detail ~error_code detail =
   let is_ident = function

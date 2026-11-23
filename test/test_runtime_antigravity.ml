@@ -2454,7 +2454,37 @@ let test_structured_context_window_exceeded_classification () =
        match run_fixture path with
        | Error (Runtime_antigravity.Turn_failed _) -> ()
        | Error err -> fail ("free-form prose must stay Turn_failed, got " ^ Runtime_antigravity.error_to_string err)
-       | Ok _ -> fail "prose error unexpectedly succeeded")
+       | Ok _ -> fail "prose error unexpectedly succeeded");
+  (* 7. HTTP 429 / 413 in detail MUST override top-level error_code="request_too_large"
+     so non-overflow HTTP refusals never trigger Context_window_exceeded shrink-retry. *)
+  with_fixture
+    [ init ()
+    ; result_with_code ~error_code:"request_too_large" ~error:"HTTP 429 Too Many Requests" ()
+    ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Turn_failed detail) ->
+         (match Runtime_antigravity.classify_turn_failure detail with
+          | Some (Llm_provider.Retry.Signal_rate_limited _) -> ()
+          | _ -> fail ("expected Signal_rate_limited for HTTP 429 detail, got detail=" ^ detail))
+       | Error err ->
+         fail ("HTTP 429 with error_code=request_too_large must stay Turn_failed (not Context_window_exceeded), got "
+               ^ Runtime_antigravity.error_to_string err)
+       | Ok _ -> fail "HTTP 429 result unexpectedly succeeded");
+  with_fixture
+    [ init ()
+    ; result_with_code ~error_code:"request_too_large" ~error:"HTTP 413 Payload Too Large" ()
+    ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Turn_failed detail) ->
+         (match Runtime_antigravity.classify_turn_failure detail with
+          | Some (Llm_provider.Retry.Signal_request_body_too_large _) -> ()
+          | _ -> fail ("expected Signal_request_body_too_large for HTTP 413 detail, got detail=" ^ detail))
+       | Error err ->
+         fail ("HTTP 413 with error_code=request_too_large must stay Turn_failed (not Context_window_exceeded), got "
+               ^ Runtime_antigravity.error_to_string err)
+       | Ok _ -> fail "HTTP 413 result unexpectedly succeeded")
 ;;
 
 (* #173 / #210 #4: Runtime_antigravity.Xhigh emits [--effort xhigh] on the CLI argv. *)

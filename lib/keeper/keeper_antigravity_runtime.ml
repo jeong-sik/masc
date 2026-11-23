@@ -48,6 +48,12 @@ let runtime_error_to_core_error = function
      | Some (Llm_provider.Retry.Signal_provider_unavailable _) ->
        Agent_core.Error.Provider
          (Llm_provider.Error.ProviderUnavailable { provider = "antigravity_cli"; detail })
+     | Some (Llm_provider.Retry.Signal_request_body_too_large _) ->
+       Agent_core.Error.Api
+         (Agent_core.Retry.InvalidRequest
+            { message = detail
+            ; reason = Agent_core.Retry.Request_body_refused_by_provider { status = 413 }
+            })
      | Some (Llm_provider.Retry.Signal_context_overflow _) | None ->
        Agent_core.Error.Provider
          (Llm_provider.Error.ProviderReportedError

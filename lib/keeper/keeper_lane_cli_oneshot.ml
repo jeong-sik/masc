@@ -108,6 +108,7 @@ let rpc_error_class_is_binding_rest = function
   | Runtime_acp_client.Rpc_hard_quota _
   | Runtime_acp_client.Rpc_rate_limited _ -> true
   | Runtime_acp_client.Rpc_context_overflow _
+  | Runtime_acp_client.Rpc_request_body_too_large
   | Runtime_acp_client.Rpc_auth_error
   | Runtime_acp_client.Rpc_authorization_error
   | Runtime_acp_client.Rpc_provider_unavailable
@@ -119,6 +120,7 @@ let signal_refusal_is_binding_rest = function
     true
   | Some
       ( Llm_provider.Retry.Signal_context_overflow _
+      | Llm_provider.Retry.Signal_request_body_too_large _
       | Llm_provider.Retry.Signal_auth_error _
       | Llm_provider.Retry.Signal_authorization_error _
       | Llm_provider.Retry.Signal_provider_unavailable _ )

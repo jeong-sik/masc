@@ -637,9 +637,9 @@ let bindings : binding list =
         ~footer_priority:0 (bare_char 's');
       (* --- Composer-Focused Bindings --- *)
       bind ~scope:Composer_focused ~tier:Bare_unfocused ~category:Cat_composer
-        ~action:Submit_steer ~key_display:"Enter"
-        ~hint_label:(Say.make ~ko:"전송/Steer" ~en:"Steer")
-        ~help_desc:(Say.make ~ko:"메시지 전송 또는 턴 중 Steer" ~en:"Send message or steer active turn")
+        ~action:Submit_followup ~key_display:"Enter"
+        ~hint_label:(Say.make ~ko:"전송" ~en:"Send")
+        ~help_desc:(Say.make ~ko:"메시지 전송 (턴이 돌고 있으면 끝난 뒤 전송)" ~en:"Send message (waits for an active turn to finish)")
         ~footer_priority:1 (mk_chord Input.Enter);
       bind ~scope:Composer_focused ~tier:Modern_accel ~category:Cat_composer
         ~action:Composer_newline ~key_display:"Shift+Enter"
@@ -647,14 +647,14 @@ let bindings : binding list =
         ~help_desc:(Say.make ~ko:"컴포저에 줄바꿈 삽입" ~en:"Insert literal newline")
         ~footer_priority:2 (mk_chord ~shift:true Input.Enter);
       bind ~scope:Composer_focused ~tier:Modern_accel ~category:Cat_composer
-        ~action:Submit_followup ~key_display:"Alt+Enter"
-        ~hint_label:(Say.make ~ko:"후속 큐" ~en:"Follow-up")
-        ~help_desc:(Say.make ~ko:"현재 턴 종료 후 후속 메시지로 예약" ~en:"Queue as end-of-turn follow-up")
+        ~action:Submit_steer ~key_display:"Alt+Enter"
+        ~hint_label:(Say.make ~ko:"Steer" ~en:"Steer")
+        ~help_desc:(Say.make ~ko:"내 요청이 돌고 있으면 끊고 Steer (남의 턴이면 대기열로)" ~en:"Steer: cut your own running request (queues behind other turns)")
         ~footer_priority:3 (mk_chord ~alt:true Input.Enter);
       bind ~scope:Composer_focused ~tier:Modern_accel ~category:Cat_composer
-        ~action:Submit_followup ~key_display:"Ctrl+Enter"
-        ~hint_label:(Say.make ~ko:"후속 큐" ~en:"Follow-up")
-        ~help_desc:(Say.make ~ko:"현재 턴 종료 후 후속 메시지로 예약" ~en:"Queue as end-of-turn follow-up")
+        ~action:Submit_steer ~key_display:"Ctrl+Enter"
+        ~hint_label:(Say.make ~ko:"Steer" ~en:"Steer")
+        ~help_desc:(Say.make ~ko:"내 요청이 돌고 있으면 끊고 Steer (남의 턴이면 대기열로)" ~en:"Steer: cut your own running request (queues behind other turns)")
         ~footer_priority:0 (mk_chord ~ctrl:true Input.Enter);
       bind ~scope:Composer_focused ~tier:Universal_ctrl ~category:Cat_composer
         ~action:Composer_newline ~key_display:"Ctrl+J"

@@ -178,12 +178,16 @@ let test_keymap_scopes_and_3_tiers () =
     (Option.equal Keymap.equal_action (Some Keymap.Composer_newline)
        (Keymap.dispatch ~scope_chain:comp_strip_chain
           (key_ev ~shift:true Input.Enter)));
-  Alcotest.(check bool) "Ctrl+Enter followup in Composer" true
+  Alcotest.(check bool) "Enter queues a follow-up in Composer (never steers)"
+    true
     (Option.equal Keymap.equal_action (Some Keymap.Submit_followup)
+       (Keymap.dispatch ~scope_chain:comp_strip_chain (key_ev Input.Enter)));
+  Alcotest.(check bool) "Ctrl+Enter steers in Composer" true
+    (Option.equal Keymap.equal_action (Some Keymap.Submit_steer)
        (Keymap.dispatch ~scope_chain:comp_strip_chain
           (key_ev ~ctrl:true Input.Enter)));
-  Alcotest.(check bool) "Alt+Enter followup in Composer" true
-    (Option.equal Keymap.equal_action (Some Keymap.Submit_followup)
+  Alcotest.(check bool) "Alt+Enter steers in Composer" true
+    (Option.equal Keymap.equal_action (Some Keymap.Submit_steer)
        (Keymap.dispatch ~scope_chain:comp_strip_chain
           (key_ev ~alt:true Input.Enter)));
   Alcotest.(check bool) "Esc pops, never quits" true

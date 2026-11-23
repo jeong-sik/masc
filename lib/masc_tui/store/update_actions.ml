@@ -1075,7 +1075,7 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Dive_selected -> Update_nav.dive_selected m
   | Keymap.Confirm_selected -> (
       if Option.is_none m.nav.overlay && Drafts.is_focused m.drafts then
-        submit_composer ~now ~mode:Drafts.Mode_steer m
+        submit_composer ~now ~mode:Drafts.Mode_follow_up m
       else
         match m.nav.overlay with
         | Some Nav.Palette -> confirm_palette ~now m

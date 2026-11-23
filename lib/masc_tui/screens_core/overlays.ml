@@ -3259,15 +3259,15 @@ let compact_help_group ~lang (grp : Keymap.help_group) : Keymap.help_group =
                   slash_twin = None;
                 }
             end
-        | Keymap.Submit_followup ->
+        | Keymap.Submit_steer ->
             Some
               {
                 e with
                 keys = [ "Alt+↵"; "Ctrl+↵" ];
                 desc =
                   Say.resolve lang
-                    (Say.make ~ko:"턴 종료 후 후속 메시지 예약"
-                       ~en:"Queue end-of-turn follow-up");
+                    (Say.make ~ko:"내 요청을 끊고 Steer"
+                       ~en:"Steer: cut your own running request");
               }
         | Keymap.Composer_newline ->
             Some
@@ -3390,7 +3390,7 @@ let compact_help_group ~lang (grp : Keymap.help_group) : Keymap.help_group =
         | Keymap.Open_model_switcher
         | Keymap.Toggle_tool_details
         | Keymap.Composer_kill_word
-        | Keymap.Submit_steer
+        | Keymap.Submit_followup
         | Keymap.Toggle_expand
         | Keymap.Create_new
         | Keymap.Refresh

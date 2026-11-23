@@ -201,6 +201,23 @@ let fetches_for_dive ~force (m : Model.t) =
                (Cmd.Get_runtime_probe { force = false })
       | Nav.Incident_dive _ -> [])
 
+(* The Wiki tab shows the selected page's body, so it needs that page unless
+   the slot already holds it fresh. *)
+let selected_wiki_page_reqs ~force (m : Model.t) =
+  match m.knowledge.wiki_artifacts_submode with
+  | `Artifacts -> []
+  | `Wiki -> (
+      match Knowledge_store.selected_wiki_page m.knowledge with
+      | None -> []
+      | Some p ->
+          if
+            needs_target_fetch ~force
+              ~holds_target:(fun (d : Wire_knowledge.wiki_page_detail) ->
+                String.equal d.slug p.slug)
+              m.knowledge.wiki_page
+          then [ Cmd.Get_wiki_page { page = p.slug } ]
+          else [])
+
 let fetches_for_workspace ~force (m : Model.t) =
   match m.nav.workspace with
   | Nav.Pulse ->
@@ -302,28 +319,13 @@ let fetches_for_workspace ~force (m : Model.t) =
                     offset = None;
                   })
       | Nav.Knowledge_wiki_artifacts ->
-          let selected_wiki_req =
-            match m.knowledge.wiki_artifacts_submode with
-            | `Wiki -> (
-                match Knowledge_store.selected_wiki_page m.knowledge with
-                | None -> []
-                | Some p ->
-                    if
-                      needs_target_fetch ~force
-                        ~holds_target:(fun (d : Wire_knowledge.wiki_page_detail) ->
-                          String.equal d.slug p.slug)
-                        m.knowledge.wiki_page
-                    then [ Cmd.Get_wiki_page { page = p.slug } ]
-                    else [])
-            | `Artifacts -> []
-          in
           ([]
           |> add_if
                (needs_fetch ~force m.knowledge.wiki_index)
                (Cmd.Get_wiki_index { tag = None; source = None; sort = None })
           |> add_if (needs_fetch ~force m.knowledge.wiki_lint) Cmd.Get_wiki_lint
           |> add_if (needs_fetch ~force m.knowledge.artifacts) Cmd.Get_artifacts)
-          @ selected_wiki_req
+          @ selected_wiki_page_reqs ~force m
       | Nav.Knowledge_memory ->
           let keeper_scoped_reqs =
             match m.knowledge.memory_diff_keeper with
@@ -525,6 +527,19 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
     |> dedup_reqs
   in
   List.map (fun req -> Cmd.Http_get { epoch = m.epoch; req }) reqs
+
+let selected_wiki_page_fetch (m : Model.t) =
+  let wiki_tab_shown =
+    Nav.equal_workspace m.nav.workspace Nav.Knowledge
+    && Option.is_none (Model.active_dive m)
+    && Nav.equal_knowledge_tab m.knowledge.active_tab
+         Nav.Knowledge_wiki_artifacts
+  in
+  if wiki_tab_shown then
+    List.map
+      (fun req -> Cmd.Http_get { epoch = m.epoch; req })
+      (selected_wiki_page_reqs ~force:false m)
+  else []
 
 let bootstrap_fetches (m : Model.t) =
   let core_reqs =

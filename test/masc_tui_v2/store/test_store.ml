@@ -7233,6 +7233,143 @@ let test_failure_is_asked_again_for_a_new_question () =
   Alcotest.(check bool) "a keeper's sandbox is asked after another 400" true
     asks_beta
 
+(* On a first visit to the Wiki tab the fetch list is built before the index
+   lands, so it names no page. The index reply asks for the page it selects. *)
+let test_wiki_index_reply_requests_selected_page () =
+  let summary : Wire_knowledge.wiki_page_summary =
+    {
+      slug = "guide";
+      file = "guide.md";
+      title = "Guide";
+      summary = "Summary";
+      source = Wire_knowledge.Source_observation;
+      author = "alpha";
+      created = "2026-11-20";
+      updated = "2026-11-22";
+      revision = 3;
+      tags = [ "ops" ];
+      backlink_count = 0;
+      outgoing_link_count = 0;
+      sources_count = 1;
+      hearsay_count = 0;
+      sha256 = "sha-w3";
+    }
+  in
+  let lint : Wire_knowledge.wiki_index_lint =
+    {
+      total_findings = 0;
+      counts =
+        {
+          broken_link = 0;
+          unsupported_link = 0;
+          orphan = 0;
+          orphan_unconfirmed = 0;
+          missing_sources = 0;
+          hearsay_only = 0;
+          unreadable_page = 0;
+          revision_log_gap = 0;
+          revision_log_hole = 0;
+          duplicate_title_candidates = 0;
+        };
+      log_hole_suppressed = false;
+      orphans = [];
+      duplicate_title_candidates = [];
+      findings = [];
+    }
+  in
+  let index : Wire_knowledge.wiki_index =
+    {
+      pages_total = 1;
+      pages_readable = 1;
+      pages_unreadable = 0;
+      pages = [ summary ];
+      unreadable_pages = [];
+      lint;
+    }
+  in
+  let detail : Wire_knowledge.wiki_page_detail =
+    {
+      page = "guide";
+      slug = "guide";
+      file = "guide.md";
+      frontmatter =
+        {
+          title = "Guide";
+          summary = "Summary";
+          source = Wire_knowledge.Source_observation;
+          author = "alpha";
+          created = "2026-11-20";
+          updated = "2026-11-22";
+          revision = 3;
+          tags = [ "ops" ];
+        };
+      sha256 = "sha-w3";
+      body_markdown = "# Guide\nBody text";
+      outgoing_links = [];
+      backlinks = [];
+      lint_findings = [];
+    }
+  in
+  let wiki_page_gets cmds =
+    List.filter_map
+      (function
+        | Cmd.Http_get { req = Cmd.Get_wiki_page { page }; _ } -> Some page
+        | _ -> None)
+      (Cmd.flatten cmds)
+  in
+  let index_reply (m : Model.t) =
+    snd
+      (Update.step ~now:t1 m
+         (Msg.Http_reply
+            { epoch = m.epoch; reply = Msg.Reply_wiki_index (Ok index) }))
+  in
+  let m0 = Model.initial () in
+  let on_wiki_tab =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Knowledge; dive_stack = [] };
+      knowledge =
+        Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts m0.knowledge;
+    }
+  in
+  Alcotest.(check (list string))
+    "the index reply asks for the page it selects" [ "guide" ]
+    (wiki_page_gets (index_reply on_wiki_tab));
+  let page_loaded =
+    {
+      on_wiki_tab with
+      knowledge =
+        Knowledge_store.apply_wiki_page ~observed_at:t0 detail
+          on_wiki_tab.knowledge;
+    }
+  in
+  Alcotest.(check (list string))
+    "a page already held fresh is not asked for again" []
+    (wiki_page_gets (index_reply page_loaded));
+  let on_artifacts =
+    {
+      on_wiki_tab with
+      knowledge =
+        Knowledge_store.toggle_wiki_artifacts_submode on_wiki_tab.knowledge;
+    }
+  in
+  Alcotest.(check (list string))
+    "the Artifacts view shows no page body, so none is asked for" []
+    (wiki_page_gets (index_reply on_artifacts));
+  let in_wiki_dive =
+    {
+      on_wiki_tab with
+      nav =
+        {
+          on_wiki_tab.nav with
+          dive_stack = [ Nav.Dive_knowledge (Nav.Wiki_dive "other-page") ];
+        };
+    }
+  in
+  Alcotest.(check (list string))
+    "an open dive keeps its own page in the slot" []
+    (wiki_page_gets (index_reply in_wiki_dive))
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -7330,5 +7467,7 @@ let () =
             `Quick test_fetch_failure_lands_on_panel_slot;
           Alcotest.test_case "A failure is asked again for new parameters or another keeper"
             `Quick test_failure_is_asked_again_for_a_new_question;
+          Alcotest.test_case "The wiki index reply asks for the page it selects"
+            `Quick test_wiki_index_reply_requests_selected_page;
         ] );
     ]

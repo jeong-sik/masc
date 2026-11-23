@@ -2,7 +2,7 @@
     painting directly onto {!Masc_tui_term.Cell_grid.t}.
 
     Bin geometry matches the server SSOT ([Keeper_memory_age_bins], 24 bins
-    spanning [<17m] to [>=30d]):
+    spanning [<1h] to [>=30d]):
     - Bin [0] is the newest bucket; bin [23] is the oldest ([>=30d]).
     - Canonical boundary bins: [1] ([1h]), [9] ([1d]), [17] ([7d]), [23] ([30d]).
     - Rendered left-to-right from oldest ([30d]) to newest ([1h]) so time flows

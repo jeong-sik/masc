@@ -524,6 +524,14 @@ let cycle_memory_diff_window t =
   in
   set_memory_diff_window next t
 
+let reset_scoped_slot_on_switch ~changed obs =
+  if not changed then Observed.mark_stale obs
+  else
+    match obs with
+    | Observed.Failed _ | Observed.Absent -> Observed.unreported
+    | Observed.Loading _ | Observed.Value _ | Observed.Unreported ->
+        Observed.mark_stale obs
+
 let set_memory_diff_keeper memory_diff_keeper t =
   let changed =
     not (Option.equal String.equal t.memory_diff_keeper memory_diff_keeper)
@@ -531,10 +539,13 @@ let set_memory_diff_keeper memory_diff_keeper t =
   {
     t with
     memory_diff_keeper;
-    memory_diff = Observed.mark_stale t.memory_diff;
-    memory_os_internals = Observed.mark_stale t.memory_os_internals;
-    keeper_memory_facts = Observed.mark_stale t.keeper_memory_facts;
-    keeper_memory_activity = Observed.mark_stale t.keeper_memory_activity;
+    memory_diff = reset_scoped_slot_on_switch ~changed t.memory_diff;
+    memory_os_internals =
+      reset_scoped_slot_on_switch ~changed t.memory_os_internals;
+    keeper_memory_facts =
+      reset_scoped_slot_on_switch ~changed t.keeper_memory_facts;
+    keeper_memory_activity =
+      reset_scoped_slot_on_switch ~changed t.keeper_memory_activity;
     selected_fact_index = if changed then 0 else t.selected_fact_index;
     facts_scroll_offset = if changed then 0 else t.facts_scroll_offset;
     selected_activity_index = if changed then 0 else t.selected_activity_index;
@@ -584,12 +595,479 @@ let open_memory_reading entry t =
 let close_memory_reading t =
   { t with memory_reading = None; memory_reading_scroll = 0 }
 
+let memory_reading_matches_scope ~keeper_opt = function
+  | Reading_activity { keeper; _ }
+  | Reading_ordinary_fact { keeper; _ }
+  | Reading_source_fact { keeper; _ }
+  | Reading_source_invalidation { keeper; _ } ->
+      Option.equal String.equal keeper_opt (Some keeper)
+  | Reading_diff_item { keeper; _ } ->
+      Option.equal String.equal keeper_opt keeper
+
 let scroll_memory_reading ~max_scroll ~delta t =
   let memory_reading_scroll =
     Store_scroll.clamp_scroll ~max_scroll:(max 0 max_scroll)
       (t.memory_reading_scroll + delta)
   in
   { t with memory_reading_scroll }
+
+type reading_line_tone =
+  | Reading_anchor
+  | Reading_primary
+  | Reading_structure of { bold : bool }
+  | Reading_whisper of { italic : bool }
+  | Reading_status of { tone : Theme.status_token; bold : bool }
+
+type reading_line = {
+  rail : Theme.status_token option;
+  tone : reading_line_tone;
+  text : string;
+}
+
+let split_graphemes_to_width ~max_w text =
+  let clusters = Masc_tui_term.Grapheme.split_clusters text in
+  let lines = ref [] in
+  let cur = Buffer.create 64 in
+  let cur_w = ref 0 in
+  let flush () =
+    lines := Buffer.contents cur :: !lines;
+    Buffer.clear cur;
+    cur_w := 0
+  in
+  List.iter
+    (fun (bytes, width) ->
+      let gw = Int.max 1 width in
+      if !cur_w + gw > max_w && !cur_w > 0 then flush ();
+      Buffer.add_string cur bytes;
+      cur_w := !cur_w + gw)
+    clusters;
+  if !cur_w > 0 || !lines = [] then flush ();
+  List.rev !lines
+
+let wrap_single_paragraph ~max_width text =
+  let max_w = Int.max 1 max_width in
+  if String.equal text "" then [ "" ]
+  else if Masc_tui_term.Grapheme.display_width text <= max_w then [ text ]
+  else
+    let words = String.split_on_char ' ' text in
+    let lines = ref [] in
+    let cur = Buffer.create 64 in
+    let cur_w = ref 0 in
+    let flush () =
+      lines := Buffer.contents cur :: !lines;
+      Buffer.clear cur;
+      cur_w := 0
+    in
+    let push_long_word word =
+      match split_graphemes_to_width ~max_w word with
+      | [] -> ()
+      | chunks ->
+          let rec emit = function
+            | [] -> ()
+            | [ last ] ->
+                Buffer.add_string cur last;
+                cur_w := Masc_tui_term.Grapheme.display_width last
+            | hd :: tl ->
+                lines := hd :: !lines;
+                emit tl
+          in
+          emit chunks
+    in
+    List.iter
+      (fun word ->
+        let ww = Masc_tui_term.Grapheme.display_width word in
+        if !cur_w = 0 then begin
+          if ww <= max_w then begin
+            Buffer.add_string cur word;
+            cur_w := ww
+          end
+          else push_long_word word
+        end
+        else if !cur_w + 1 + ww <= max_w then begin
+          Buffer.add_char cur ' ';
+          Buffer.add_string cur word;
+          cur_w := !cur_w + 1 + ww
+        end
+        else begin
+          flush ();
+          if ww <= max_w then begin
+            Buffer.add_string cur word;
+            cur_w := ww
+          end
+          else push_long_word word
+        end)
+      words;
+    if !cur_w > 0 || !lines = [] then flush ();
+    List.rev !lines
+
+let wrap_lines ~max_width text =
+  let max_w = Int.max 1 max_width in
+  let paragraphs = String.split_on_char '\n' text in
+  List.concat_map (wrap_single_paragraph ~max_width:max_w) paragraphs
+
+let reading_say (lang : Say.lang) ~ko ~en = Say.resolve lang (Say.make ~ko ~en)
+
+let reading_sanitize_single_line s =
+  let buf = Buffer.create (String.length s) in
+  let prev_space = ref false in
+  String.iter
+    (fun c ->
+      let code = Char.code c in
+      if c = '\n' || c = '\r' || c = '\t' then begin
+        if not !prev_space then Buffer.add_char buf ' ';
+        prev_space := true
+      end
+      else if code >= 32 then begin
+        Buffer.add_char buf c;
+        prev_space := c = ' '
+      end)
+    s;
+  String.trim (Buffer.contents buf)
+
+let reading_format_age ~now_unix ts_unix =
+  if
+    (not (Float.is_finite now_unix))
+    || (not (Float.is_finite ts_unix))
+    || now_unix <= 0.0
+    || ts_unix <= 0.0
+  then Glyph.to_utf8 Glyph.Missing_absent
+  else
+    let delta = Float.max 0.0 (now_unix -. ts_unix) in
+    if delta < 5.0 then "now" else Format_val.format_duration_s delta
+
+let reading_activity_kind_spec ~lang = function
+  | Wire_knowledge.Activity_created ->
+      ("+", reading_say lang ~ko:"생성" ~en:"Created", Theme.Status_ok)
+  | Wire_knowledge.Activity_reobserved ->
+      ("↻", reading_say lang ~ko:"재관측" ~en:"Reobserved", Theme.Status_active)
+  | Wire_knowledge.Activity_revised ->
+      ("~", reading_say lang ~ko:"수정" ~en:"Revised", Theme.Status_active)
+  | Wire_knowledge.Activity_absorbed ->
+      ("⊕", reading_say lang ~ko:"흡수" ~en:"Absorbed", Theme.Status_ai)
+  | Wire_knowledge.Activity_retracted ->
+      ("-", reading_say lang ~ko:"철회" ~en:"Retracted", Theme.Status_critical)
+  | Wire_knowledge.Activity_removed ->
+      ("✕", reading_say lang ~ko:"삭제" ~en:"Removed", Theme.Status_critical)
+  | Wire_knowledge.Activity_invalidated ->
+      ("!", reading_say lang ~ko:"무효화" ~en:"Invalidated", Theme.Status_attention)
+  | Wire_knowledge.Activity_relation_unavailable ->
+      ( "?"
+      , reading_say lang ~ko:"관계 미확인" ~en:"Relation N/A"
+      , Theme.Status_attention )
+
+let reading_relation_label ~lang = function
+  | Wire_knowledge.Revision -> reading_say lang ~ko:"개정" ~en:"rev"
+  | Wire_knowledge.Program_revision ->
+      reading_say lang ~ko:"규칙 개정" ~en:"prog-rev"
+  | Wire_knowledge.Program_absorption ->
+      reading_say lang ~ko:"흡수" ~en:"absorb"
+
+let reading_heat_label = function
+  | Wire_knowledge.Heat_hot -> "HOT"
+  | Wire_knowledge.Heat_warm -> "WARM"
+  | Wire_knowledge.Heat_cold -> "COLD"
+  | Wire_knowledge.Heat_never_retrieved -> "0x"
+
+let reading_json_kv_summary = function
+  | `Assoc fields ->
+      List.filter_map
+        (fun (k, v) ->
+          match v with
+          | `String s -> Some (k, reading_sanitize_single_line s)
+          | `Int n -> Some (k, string_of_int n)
+          | `Float f -> Some (k, Printf.sprintf "%.2f" f)
+          | `Bool b -> Some (k, string_of_bool b)
+          | `Null | `List _ | `Assoc _ | `Intlit _ -> None)
+        fields
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
+
+let reading_format_basis_lines ~lang = function
+  | Wire_knowledge.Basis_observed ->
+      [ reading_say lang ~ko:"관측 (Observed)" ~en:"Observed" ]
+  | Wire_knowledge.Basis_observed_board { post_id; comment_id } ->
+      let c_part =
+        match comment_id with Some c -> " / comment:" ^ c | None -> ""
+      in
+      [
+        Printf.sprintf "%s (board post:%s%s)"
+          (reading_say lang ~ko:"관측 · 보드" ~en:"Observed · Board")
+          post_id c_part;
+      ]
+  | Wire_knowledge.Basis_derived derivs ->
+      List.map
+        (fun (d : Wire_knowledge.memory_derivation_ref) ->
+          Printf.sprintf "%s %s ← [%s]"
+            (reading_say lang ~ko:"유도 규칙" ~en:"Derived rule")
+            d.rule_id
+            (String.concat ", " d.premise_ids))
+        derivs
+
+let project_memory_reading_lines ~width ~lang ~now_unix entry =
+  let text_w = Int.max 1 (width - 2) in
+  let acc = ref [] in
+  let push ?rail ~tone text = acc := { rail; tone; text } :: !acc in
+  let push_wrapped ?rail ~tone text =
+    List.iter (fun ln -> push ?rail ~tone ln) (wrap_lines ~max_width:text_w text)
+  in
+  let push_blank () = push ~tone:Reading_primary "" in
+  let push_section ?rail label =
+    push ?rail ~tone:(Reading_structure { bold = true }) label
+  in
+  let push_kv key value =
+    push_wrapped ~tone:Reading_primary (Printf.sprintf "%s: %s" key value)
+  in
+  (match entry with
+  | Reading_activity { keeper; event; notes } ->
+      let g, lbl, tone = reading_activity_kind_spec ~lang event.kind in
+      push_wrapped ~rail:tone ~tone:(Reading_status { tone; bold = true })
+        (Printf.sprintf "%s %s  ·  @%s  ·  r%d  ·  %s (%s)" g lbl keeper
+           event.revision
+           (Wire_common.format_unix_rfc3339 event.recorded_at_unix)
+           (reading_format_age ~now_unix event.recorded_at_unix));
+      push_wrapped ~tone:(Reading_whisper { italic = true })
+        ("ID: " ^ event.identity);
+      push_blank ();
+      (match event.reason with
+      | Some r when not (String.equal (String.trim r) "") ->
+          push_section ~rail:Theme.Status_attention
+            (reading_say lang ~ko:"사유 (Reason)" ~en:"Reason");
+          push_wrapped ~rail:Theme.Status_attention ~tone:Reading_primary r;
+          push_blank ()
+      | Some _ | None -> ());
+      push_section ~rail:Theme.Status_critical
+        (Printf.sprintf "%s (%d)"
+           (reading_say lang ~ko:"이전 기억 (Before)" ~en:"Before")
+           (List.length event.before));
+      if event.before = [] then
+        push ~tone:(Reading_whisper { italic = true })
+          (reading_say lang ~ko:"(없음 — 신규 생성)" ~en:"(none — newly created)")
+      else
+        List.iteri
+          (fun idx (f : Wire_knowledge.memory_activity_fact) ->
+            push_wrapped ~rail:Theme.Status_critical
+              ~tone:(Reading_whisper { italic = false })
+              (Printf.sprintf "#%d  %s" (idx + 1) f.memory_id);
+            let claim_s =
+              Option.value f.claim
+                ~default:
+                  (reading_say lang ~ko:"(본문 미기록)" ~en:"(claim unavailable)")
+            in
+            push_wrapped ~rail:Theme.Status_critical ~tone:Reading_primary
+              claim_s)
+          event.before;
+      push_blank ();
+      push_section ~rail:Theme.Status_ok
+        (Printf.sprintf "%s (%d)"
+           (reading_say lang ~ko:"이후 기억 (After)" ~en:"After")
+           (List.length event.after));
+      if event.after = [] then
+        push ~tone:(Reading_whisper { italic = true })
+          (reading_say lang ~ko:"(없음 — 철회/삭제/무효화)"
+             ~en:"(none — retracted/removed/invalidated)")
+      else
+        List.iteri
+          (fun idx (f : Wire_knowledge.memory_activity_fact) ->
+            push_wrapped ~rail:Theme.Status_ok
+              ~tone:(Reading_whisper { italic = false })
+              (Printf.sprintf "#%d  %s" (idx + 1) f.memory_id);
+            let claim_s =
+              Option.value f.claim
+                ~default:
+                  (reading_say lang ~ko:"(본문 미기록)" ~en:"(claim unavailable)")
+            in
+            push_wrapped ~rail:Theme.Status_ok ~tone:Reading_primary claim_s)
+          event.after;
+      if notes <> [] then begin
+        push_blank ();
+        push_section (reading_say lang ~ko:"저널 노트 (Notes)" ~en:"Journal Notes");
+        List.iter
+          (fun n ->
+            push_wrapped ~tone:(Reading_whisper { italic = true }) ("· " ^ n))
+          notes
+      end
+  | Reading_ordinary_fact { keeper; revision; fact } ->
+      let cat_s = Wire_knowledge.memory_fact_category_to_string fact.category in
+      let orig_s = Wire_knowledge.memory_fact_origin_to_string fact.origin in
+      push_wrapped ~rail:Theme.Status_active ~tone:Reading_anchor
+        (Printf.sprintf "@%s  ·  [%s]  ·  %s  ·  r%d" keeper cat_s orig_s
+           revision);
+      push_wrapped ~tone:(Reading_whisper { italic = true })
+        ("ID: " ^ fact.memory_id);
+      push_blank ();
+      push_section ~rail:Theme.Status_ok
+        (reading_say lang ~ko:"전체 기억 내용 (Claim)" ~en:"Full Claim");
+      push_wrapped ~rail:Theme.Status_ok ~tone:Reading_primary fact.claim;
+      push_blank ();
+      push_section
+        (reading_say lang ~ko:"메타데이터 · 조회 이력" ~en:"Metadata & Retrieval");
+      push_kv
+        (reading_say lang ~ko:"최초 관측" ~en:"First seen")
+        (Printf.sprintf "%s (%s)"
+           (Wire_common.format_unix_rfc3339 fact.first_seen_unix)
+           (reading_format_age ~now_unix fact.first_seen_unix));
+      push_kv
+        (reading_say lang ~ko:"최근 관측" ~en:"Last seen")
+        (Printf.sprintf "%s (%s)"
+           (Wire_common.format_unix_rfc3339 fact.last_seen_unix)
+           (reading_format_age ~now_unix fact.last_seen_unix));
+      let ret_str =
+        match fact.events.retrieval with
+        | Wire_knowledge.Never_retrieved ->
+            reading_say lang ~ko:"미조회 (0회)" ~en:"Never retrieved (0x)"
+        | Wire_knowledge.Retrieved { count; distinct_days; last_at_unix } ->
+            Printf.sprintf "%dx · %dd · %s (%s)" count distinct_days
+              (Wire_common.format_unix_rfc3339 last_at_unix)
+              (reading_format_age ~now_unix last_at_unix)
+      in
+      push_kv (reading_say lang ~ko:"조회 기록" ~en:"Retrieval") ret_str;
+      if fact.events.retracted_count > 0 then
+        push_kv
+          (reading_say lang ~ko:"철회 횟수" ~en:"Retracted count")
+          (string_of_int fact.events.retracted_count);
+      push_blank ();
+      push_section ~rail:Theme.Status_ai
+        (reading_say lang ~ko:"근거 (Basis)" ~en:"Basis");
+      List.iter
+        (fun ln -> push_wrapped ~rail:Theme.Status_ai ~tone:Reading_primary ln)
+        (reading_format_basis_lines ~lang fact.basis);
+      if fact.events.revised_from <> [] then begin
+        push_blank ();
+        push_section ~rail:Theme.Status_active
+          (reading_say lang ~ko:"개정 계보 (Supersedes / Revised From)"
+             ~en:"Lineage (Revised From)");
+        List.iter
+          (fun prev_id ->
+            push_wrapped ~rail:Theme.Status_active
+              ~tone:(Reading_structure { bold = false })
+              ("← " ^ prev_id))
+          fact.events.revised_from
+      end
+  | Reading_source_fact { keeper; fact } ->
+      push_wrapped ~rail:Theme.Status_ai ~tone:Reading_anchor
+        (Printf.sprintf "@%s  ·  [source-bound]" keeper);
+      push_kv (reading_say lang ~ko:"소스 경로" ~en:"Source path") fact.path;
+      push_kv "SHA-256" fact.sha256;
+      push_kv
+        (reading_say lang ~ko:"최초 관측" ~en:"First seen")
+        (Wire_common.format_unix_rfc3339 fact.first_seen_unix);
+      push_blank ();
+      push_section ~rail:Theme.Status_ai
+        (reading_say lang ~ko:"전체 기억 내용 (Claim)" ~en:"Full Claim");
+      push_wrapped ~rail:Theme.Status_ai ~tone:Reading_primary fact.claim
+  | Reading_source_invalidation { keeper; invalidation } ->
+      push_wrapped ~rail:Theme.Status_attention
+        ~tone:(Reading_status { tone = Theme.Status_attention; bold = true })
+        (Printf.sprintf "! @%s  ·  %s" keeper
+           (reading_say lang ~ko:"소스 기반 기억 무효화"
+              ~en:"Source-bound Invalidation"));
+      push_blank ();
+      push_kv
+        (reading_say lang ~ko:"소스 경로" ~en:"Source path")
+        invalidation.source_path;
+      push_kv
+        (reading_say lang ~ko:"사유" ~en:"Reason")
+        (Wire_knowledge.source_invalidation_reason_to_string invalidation.reason);
+      push_kv
+        (reading_say lang ~ko:"무효화 시각" ~en:"Invalidated at")
+        (Wire_common.format_unix_rfc3339 invalidation.invalidated_at_unix)
+  | Reading_diff_item { keeper; item } -> (
+      let scope_s =
+        match keeper with
+        | Some kp -> "@" ^ kp
+        | None -> reading_say lang ~ko:"월드 메모리" ~en:"World Memory"
+      in
+      match item with
+      | Keeper_added f ->
+          let h_lbl = reading_heat_label f.heat in
+          push_wrapped ~rail:Theme.Status_ok
+            ~tone:(Reading_status { tone = Theme.Status_ok; bold = true })
+            (Printf.sprintf "+ %s  ·  [%s] %s  ·  %s %dx" scope_s f.category
+               f.origin h_lbl f.retrieval_count);
+          push_wrapped ~tone:(Reading_whisper { italic = true })
+            ("ID: " ^ f.memory_id);
+          push_blank ();
+          push_wrapped ~rail:Theme.Status_ok ~tone:Reading_primary f.text
+      | Keeper_updated u ->
+          push_wrapped ~rail:Theme.Status_active
+            ~tone:(Reading_status { tone = Theme.Status_active; bold = true })
+            (Printf.sprintf "~ %s  ·  [%s] %s @r%d" scope_s u.after.category
+               (reading_relation_label ~lang u.relation)
+               u.at_rev);
+          push_blank ();
+          push_section ~rail:Theme.Status_critical
+            (reading_say lang ~ko:"이전 (Before)" ~en:"Before");
+          push_wrapped ~rail:Theme.Status_critical ~tone:Reading_primary
+            u.before.text;
+          push_blank ();
+          push_section ~rail:Theme.Status_ok
+            (reading_say lang ~ko:"이후 (After)" ~en:"After");
+          push_wrapped ~rail:Theme.Status_ok ~tone:Reading_primary u.after.text
+      | Keeper_retracted r ->
+          push_wrapped ~rail:Theme.Status_critical
+            ~tone:(Reading_status { tone = Theme.Status_critical; bold = true })
+            (Printf.sprintf "- %s  ·  [%s] @r%d  ·  %s" scope_s r.category
+               r.removed_at_rev r.removed_by);
+          (match r.drop_reason with
+          | Some rs -> push_kv (reading_say lang ~ko:"사유" ~en:"Reason") rs
+          | None -> ());
+          push_blank ();
+          push_wrapped ~rail:Theme.Status_critical ~tone:Reading_primary r.text
+      | Keeper_invalidated inv ->
+          push_wrapped ~rail:Theme.Status_attention
+            ~tone:(Reading_status { tone = Theme.Status_attention; bold = true })
+            (Printf.sprintf "! %s  ·  @r%d" scope_s inv.at_rev);
+          push_kv
+            (reading_say lang ~ko:"유실된 전제" ~en:"Missing premises")
+            (String.concat ", " inv.missing_premise_ids);
+          push_blank ();
+          push_wrapped ~rail:Theme.Status_attention ~tone:Reading_primary
+            inv.text
+      | World_added e ->
+          let tone = Theme.Status_ok in
+          push_wrapped ~rail:tone ~tone:(Reading_status { tone; bold = true })
+            (Printf.sprintf "+ %s  ·  #%d [%s]" scope_s e.seq e.fact_id);
+          push_kv (reading_say lang ~ko:"시각" ~en:"Recorded at") e.recorded_at;
+          push_blank ();
+          push_wrapped ~rail:tone ~tone:Reading_primary e.summary;
+          let kvs = reading_json_kv_summary e.payload in
+          if kvs <> [] then begin
+            push_blank ();
+            List.iter (fun (k, v) -> push_kv k v) kvs
+          end
+      | World_retracted e ->
+          let tone = Theme.Status_critical in
+          push_wrapped ~rail:tone ~tone:(Reading_status { tone; bold = true })
+            (Printf.sprintf "- %s  ·  #%d [%s]" scope_s e.seq e.fact_id);
+          push_kv (reading_say lang ~ko:"시각" ~en:"Recorded at") e.recorded_at;
+          push_blank ();
+          push_wrapped ~rail:tone ~tone:Reading_primary e.summary;
+          let kvs = reading_json_kv_summary e.payload in
+          if kvs <> [] then begin
+            push_blank ();
+            List.iter (fun (k, v) -> push_kv k v) kvs
+          end
+      | World_updated u ->
+          push_wrapped ~rail:Theme.Status_active
+            ~tone:(Reading_status { tone = Theme.Status_active; bold = true })
+            (Printf.sprintf "~ %s  ·  #%d [%s]" scope_s u.seq u.fact_id);
+          push_kv (reading_say lang ~ko:"시각" ~en:"Recorded at") u.recorded_at;
+          push_blank ();
+          push_wrapped ~rail:Theme.Status_active ~tone:Reading_primary u.summary;
+          let b_kvs = reading_json_kv_summary u.before in
+          if b_kvs <> [] then begin
+            push_blank ();
+            push_section ~rail:Theme.Status_critical
+              (reading_say lang ~ko:"이전 (Before)" ~en:"Before");
+            List.iter (fun (k, v) -> push_kv k v) b_kvs
+          end;
+          let a_kvs = reading_json_kv_summary u.after in
+          if a_kvs <> [] then begin
+            push_blank ();
+            push_section ~rail:Theme.Status_ok
+              (reading_say lang ~ko:"이후 (After)" ~en:"After");
+            List.iter (fun (k, v) -> push_kv k v) a_kvs
+          end));
+  List.rev !acc
 
 let apply_board ~observed_at feed t =
   let prev_id =
@@ -939,10 +1417,7 @@ let selected_activity_event_for ~keeper t =
 let selected_activity_event t =
   match t.memory_diff_keeper with
   | Some kp -> selected_activity_event_for ~keeper:kp t
-  | None -> (
-      match Observed.to_option t.keeper_memory_activity with
-      | Some act -> selected_activity_event_for ~keeper:act.keeper t
-      | None -> None)
+  | None -> None
 
 let fact_retrieval_sort_key (f : Wire_knowledge.keeper_ordinary_fact) =
   match f.events.retrieval with
@@ -1077,16 +1552,19 @@ let move_pulse_thread ?viewport_rows:_ ~delta t =
   let pulse_thread_index = clamp_index len (t.pulse_thread_index + delta) in
   { t with pulse_thread_index }
 
-let filtered_memory_diff_items t =
-  match Observed.to_option t.memory_diff with
-  | None -> []
-  | Some
-      {
-        body =
-          Wire_knowledge.Keeper_diff
-            { added; updated; retracted; invalidated; _ };
-        _;
-      } ->
+let filtered_memory_diff_items_for ~keeper_opt t =
+  match keeper_opt, Observed.to_option t.memory_diff with
+  | _, None -> []
+  | ( Some kp
+    , Some
+        {
+          scope = Wire_knowledge.Scope_keeper k;
+          body =
+            Wire_knowledge.Keeper_diff
+              { added; updated; retracted; invalidated; _ };
+          _;
+        } )
+    when String.equal kp k ->
       let a =
         List.filter_map
           (fun (f : Wire_knowledge.memory_fact_entry) ->
@@ -1128,11 +1606,13 @@ let filtered_memory_diff_items t =
           invalidated
       in
       a @ u @ r @ inv
-  | Some
-      {
-        body = Wire_knowledge.World_diff { added; updated; retracted; _ };
-        _;
-      } ->
+  | ( None
+    , Some
+        {
+          scope = Wire_knowledge.Scope_world;
+          body = Wire_knowledge.World_diff { added; updated; retracted; _ };
+          _;
+        } ) ->
       let a =
         List.filter_map
           (fun (e : Wire_knowledge.world_change_entry) ->
@@ -1158,12 +1638,26 @@ let filtered_memory_diff_items t =
           retracted
       in
       a @ u @ r
+  | ( (Some _ | None)
+    , Some
+        {
+          scope = Wire_knowledge.Scope_world | Wire_knowledge.Scope_keeper _;
+          body = Wire_knowledge.Keeper_diff _ | Wire_knowledge.World_diff _;
+          _;
+        } ) ->
+      []
+
+let filtered_memory_diff_items t =
+  filtered_memory_diff_items_for ~keeper_opt:t.memory_diff_keeper t
 
 let memory_diff_entry_count t = List.length (filtered_memory_diff_items t)
 
-let selected_memory_diff_item t =
-  let items = filtered_memory_diff_items t in
+let selected_memory_diff_item_for ~keeper_opt t =
+  let items = filtered_memory_diff_items_for ~keeper_opt t in
   List.nth_opt items (clamp_index (List.length items) t.selected_diff_index)
+
+let selected_memory_diff_item t =
+  selected_memory_diff_item_for ~keeper_opt:t.memory_diff_keeper t
 
 let move_memory_diff_cursor ~delta t =
   let len = memory_diff_entry_count t in
@@ -1346,6 +1840,8 @@ let set_filter filter_query t =
     selected_activity_index = 0;
     activity_scroll_offset = 0;
     selected_diff_index = 0;
+    memory_reading = None;
+    memory_reading_scroll = 0;
   }
 
 let mark_stale_all t =

@@ -456,6 +456,18 @@ let sync_config_for_keeper_view (m : Model.t) =
       | None -> (
           match m.nav.workspace, Fleet_store.selected_keeper_summary m.fleet with
           | Nav.Keepers, Some k ->
+              let knowledge =
+                if Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
+                then
+                  if
+                    Option.equal String.equal m.knowledge.memory_diff_keeper
+                      (Some k.name)
+                  then m.knowledge
+                  else
+                    Knowledge_store.set_memory_diff_keeper (Some k.name)
+                      m.knowledge
+                else Knowledge_store.close_memory_reading m.knowledge
+              in
               {
                 m with
                 config =
@@ -464,8 +476,13 @@ let sync_config_for_keeper_view (m : Model.t) =
                 fleet =
                   sync_fleet_for_keeper_tab ~name:k.name
                     ~tab:m.fleet.keeper_dive_tab m.fleet;
+                knowledge;
               }
-          | Nav.Keepers, None
+          | Nav.Keepers, None ->
+              {
+                m with
+                knowledge = Knowledge_store.close_memory_reading m.knowledge;
+              }
           | (Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Runtime | Nav.Infra), _ ->
               m))
 
@@ -484,8 +501,9 @@ let switch_workspace (m : Model.t) ws =
   in
   let drafts = Drafts.set_focus false m.drafts in
   let config = Config_store.cancel_edit_field m.config in
+  let knowledge = Knowledge_store.close_memory_reading m.knowledge in
   let next =
-    { m with nav; drafts; config; inline_modal = None }
+    { m with nav; drafts; config; knowledge; inline_modal = None }
     |> sync_config_for_keeper_view
   in
   (next, View_fetches.fetches_for_current_view next)
@@ -662,6 +680,10 @@ let push_dive (m : Model.t) dive =
     match dive with
     | Nav.Dive_keeper { name; tab = Nav.Keeper_memory } ->
         Knowledge_store.set_memory_diff_keeper (Some name) m.knowledge
+    | Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; _ }) ->
+        if Option.equal String.equal m.knowledge.memory_diff_keeper keeper then
+          Knowledge_store.close_memory_reading m.knowledge
+        else Knowledge_store.set_memory_diff_keeper keeper m.knowledge
     | Nav.Dive_keeper
         {
           tab =
@@ -672,7 +694,8 @@ let push_dive (m : Model.t) dive =
           _;
         }
     | Nav.Dive_work _
-    | Nav.Dive_knowledge _
+    | Nav.Dive_knowledge
+        (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
     | Nav.Dive_infra _ ->
         Knowledge_store.close_memory_reading m.knowledge
   in
@@ -1493,42 +1516,50 @@ let dive_attention_entry (m : Model.t) (entry : Attention.entry) =
       in
       switch_workspace { m with knowledge } Nav.Knowledge
 
-let open_memory_reading_for ~keeper_opt (m : Model.t) =
+let open_memory_reading_for ?(force_diff = false) ~keeper_opt (m : Model.t) =
   let k = m.knowledge in
   if Option.is_some k.memory_reading then (m, [])
   else
     let entry_opt =
-      match keeper_opt, k.memory_view_mode with
-      | Some kp, Knowledge_store.View_evolution -> (
-          match Knowledge_store.selected_activity_event_for ~keeper:kp k with
-          | None -> None
-          | Some event ->
-              let notes =
-                match Observed.to_option k.keeper_memory_activity with
-                | Some act when String.equal act.keeper kp -> act.notes
-                | Some _ | None -> []
-              in
-              Some (Knowledge_store.Reading_activity { keeper = kp; event; notes }))
-      | Some kp, Knowledge_store.View_facts -> (
-          match Knowledge_store.selected_memory_fact_row ~keeper:kp k with
-          | None -> None
-          | Some (Knowledge_store.Fact_ordinary { revision; fact }) ->
-              Some
-                (Knowledge_store.Reading_ordinary_fact
-                   { keeper = kp; revision; fact })
-          | Some (Knowledge_store.Fact_source fact) ->
-              Some (Knowledge_store.Reading_source_fact { keeper = kp; fact })
-          | Some (Knowledge_store.Fact_source_invalidation invalidation) ->
-              Some
-                (Knowledge_store.Reading_source_invalidation
-                   { keeper = kp; invalidation }))
-      | _, Knowledge_store.View_diff
-      | None, (Knowledge_store.View_evolution | Knowledge_store.View_facts) -> (
-          match Knowledge_store.selected_memory_diff_item k with
-          | Some item ->
-              Some
-                (Knowledge_store.Reading_diff_item { keeper = keeper_opt; item })
-          | None -> None)
+      if force_diff then
+        match Knowledge_store.selected_memory_diff_item_for ~keeper_opt k with
+        | Some item ->
+            Some (Knowledge_store.Reading_diff_item { keeper = keeper_opt; item })
+        | None -> None
+      else
+        match keeper_opt, k.memory_view_mode with
+        | Some kp, Knowledge_store.View_evolution -> (
+            match Knowledge_store.selected_activity_event_for ~keeper:kp k with
+            | None -> None
+            | Some event ->
+                let notes =
+                  match Observed.to_option k.keeper_memory_activity with
+                  | Some act when String.equal act.keeper kp -> act.notes
+                  | Some _ | None -> []
+                in
+                Some
+                  (Knowledge_store.Reading_activity { keeper = kp; event; notes }))
+        | Some kp, Knowledge_store.View_facts -> (
+            match Knowledge_store.selected_memory_fact_row ~keeper:kp k with
+            | None -> None
+            | Some (Knowledge_store.Fact_ordinary { revision; fact }) ->
+                Some
+                  (Knowledge_store.Reading_ordinary_fact
+                     { keeper = kp; revision; fact })
+            | Some (Knowledge_store.Fact_source fact) ->
+                Some (Knowledge_store.Reading_source_fact { keeper = kp; fact })
+            | Some (Knowledge_store.Fact_source_invalidation invalidation) ->
+                Some
+                  (Knowledge_store.Reading_source_invalidation
+                     { keeper = kp; invalidation }))
+        | _, Knowledge_store.View_diff
+        | None, (Knowledge_store.View_evolution | Knowledge_store.View_facts) -> (
+            match Knowledge_store.selected_memory_diff_item_for ~keeper_opt k with
+            | Some item ->
+                Some
+                  (Knowledge_store.Reading_diff_item
+                     { keeper = keeper_opt; item })
+            | None -> None)
     in
     match entry_opt with
     | Some entry ->
@@ -1541,7 +1572,7 @@ let dive_selected (m : Model.t) =
   | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
       open_memory_reading_for ~keeper_opt:(Some name) m
   | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; _ })) ->
-      open_memory_reading_for ~keeper_opt:keeper m
+      open_memory_reading_for ~force_diff:true ~keeper_opt:keeper m
   | Some
       ( Nav.Dive_keeper
           {
@@ -3715,6 +3746,109 @@ let keeper_tab_max_scroll ~embedded (m : Model.t) ~name ~tab =
         max 0 (n_logs - body_logs_h)
     | Nav.Keeper_chat | Nav.Keeper_config -> 0
 
+let memory_reading_max_scroll (m : Model.t) =
+  match m.knowledge.memory_reading with
+  | None -> 0
+  | Some entry ->
+      let bp = ui_bp m in
+      let br = ui_body_rect m in
+      let rect_w, rect_h =
+        match Model.active_dive m with
+        | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ }) ->
+            let cw, ch =
+              Chat_transcript.keeper_content_rect_size ~embedded:false ~model:m
+            in
+            let footer_h = if ch >= 7 then 2 else 0 in
+            (cw, max 0 (ch - footer_h))
+        | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive _)) ->
+            let body_after_bar =
+              match
+                Masc_tui_ui.Layout.split_v br
+                  [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
+              with
+              | [ _; b ] -> b
+              | _ -> br
+            in
+            let right_rect =
+              if m.nav.zoomed then body_after_bar
+              else
+                snd
+                  (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+                     ~left_ratio:0.48 ~top_ratio:0.48 bp body_after_bar)
+            in
+            let content = right_rect |> ui_card_inner |> ui_pad_content ~bp in
+            (content.w, content.h)
+        | Some
+            ( Nav.Dive_keeper
+                {
+                  tab =
+                    ( Nav.Keeper_chat
+                    | Nav.Keeper_work_candle
+                    | Nav.Keeper_sandbox
+                    | Nav.Keeper_config );
+                  _;
+                }
+            | Nav.Dive_work _
+            | Nav.Dive_knowledge
+                (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+            | Nav.Dive_infra _ ) ->
+            (0, 0)
+        | None -> (
+            match m.nav.workspace with
+            | Nav.Keepers
+              when Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
+              ->
+                let zoomed_keeper =
+                  m.nav.zoomed && Model.can_zoom_current_view m
+                in
+                let cw, ch =
+                  Chat_transcript.keeper_content_rect_size
+                    ~embedded:(not zoomed_keeper) ~model:m
+                in
+                let footer_h = if ch >= 7 then 2 else 0 in
+                (cw, max 0 (ch - footer_h))
+            | Nav.Knowledge
+              when Nav.equal_knowledge_tab m.knowledge.active_tab
+                     Nav.Knowledge_memory ->
+                let body_after_bar =
+                  match
+                    Masc_tui_ui.Layout.split_v br
+                      [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
+                  with
+                  | [ _; b ] -> b
+                  | _ -> br
+                in
+                let right_rect =
+                  if m.nav.zoomed then body_after_bar
+                  else
+                    snd
+                      (Masc_tui_ui.Layout.adaptive_split_2
+                         ~stack_on_compact:true ~left_ratio:0.48 ~top_ratio:0.48
+                         bp body_after_bar)
+                in
+                let content =
+                  right_rect |> ui_card_inner |> ui_pad_content ~bp
+                in
+                (content.w, content.h)
+            | Nav.Pulse
+            | Nav.Work
+            | Nav.Keepers
+            | Nav.Knowledge
+            | Nav.Runtime
+            | Nav.Infra ->
+                (0, 0))
+      in
+      if rect_w <= 0 || rect_h <= 1 then 0
+      else
+        (* [render_full_reading] reserves 1 row for the Full Reading header. *)
+        let body_h = max 1 (rect_h - 1) in
+        let total =
+          List.length
+            (Knowledge_store.project_memory_reading_lines ~width:rect_w
+               ~lang:m.lang ~now_unix:m.freshness.last_wall_unix entry)
+        in
+        max 0 (total - body_h)
+
 let dive_max_scroll (m : Model.t) active =
   let bp = ui_bp m in
   let br = ui_body_rect m in
@@ -4488,11 +4622,19 @@ let apply_move (m : Model.t) dir =
                 move_keeper_config_selection ~embedded:false ~name
                   ~delta:(move_delta dir) m
             | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
-                if Option.is_some m.knowledge.memory_reading then
+                let has_matching_reading =
+                  match m.knowledge.memory_reading with
+                  | Some entry ->
+                      Knowledge_store.memory_reading_matches_scope
+                        ~keeper_opt:(Some name) entry
+                  | None -> false
+                in
+                if has_matching_reading then
                   let sd = scroll_delta dir in
+                  let max_scroll = memory_reading_max_scroll m in
                   let knowledge =
-                    Knowledge_store.scroll_memory_reading ~max_scroll:200
-                      ~delta:sd m.knowledge
+                    Knowledge_store.scroll_memory_reading ~max_scroll ~delta:sd
+                      m.knowledge
                   in
                   ({ m with knowledge }, [])
                 else (
@@ -4529,20 +4671,21 @@ let apply_move (m : Model.t) dir =
                           knowledge;
                         }
                       , [] ))
-            | Some
-                (( Nav.Dive_keeper
-                     {
-                       tab = (Nav.Keeper_work_candle | Nav.Keeper_sandbox);
-                       _;
-                     }
-                 | Nav.Dive_work _
-                 | Nav.Dive_knowledge _
-                 | Nav.Dive_infra _ ) as active) ->
-                if Option.is_some m.knowledge.memory_reading then
+            | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; _ }) as active)
+              ->
+                let has_matching_reading =
+                  match m.knowledge.memory_reading with
+                  | Some entry ->
+                      Knowledge_store.memory_reading_matches_scope
+                        ~keeper_opt:keeper entry
+                  | None -> false
+                in
+                if has_matching_reading then
                   let sd = scroll_delta dir in
+                  let max_scroll = memory_reading_max_scroll m in
                   let knowledge =
-                    Knowledge_store.scroll_memory_reading ~max_scroll:200
-                      ~delta:sd m.knowledge
+                    Knowledge_store.scroll_memory_reading ~max_scroll ~delta:sd
+                      m.knowledge
                   in
                   ({ m with knowledge }, [])
                 else
@@ -4552,7 +4695,29 @@ let apply_move (m : Model.t) dir =
                     Store_scroll.clamp_scroll ~max_scroll
                       (m.nav.dive_scroll_offset + delta)
                   in
-                  ({ m with nav = { m.nav with dive_scroll_offset } }, [])
+                  let knowledge =
+                    Knowledge_store.move_memory_diff_cursor
+                      ~delta:(move_delta dir) m.knowledge
+                  in
+                  ( { m with nav = { m.nav with dive_scroll_offset }; knowledge }
+                  , [] )
+            | Some
+                (( Nav.Dive_keeper
+                     {
+                       tab = (Nav.Keeper_work_candle | Nav.Keeper_sandbox);
+                       _;
+                     }
+                 | Nav.Dive_work _
+                 | Nav.Dive_knowledge
+                     (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+                 | Nav.Dive_infra _ ) as active) ->
+                let delta = scroll_delta dir in
+                let max_scroll = dive_max_scroll m active in
+                let dive_scroll_offset =
+                  Store_scroll.clamp_scroll ~max_scroll
+                    (m.nav.dive_scroll_offset + delta)
+                in
+                ({ m with nav = { m.nav with dive_scroll_offset } }, [])
             | None -> (
                 let delta = move_delta dir in
                 let pane_index = m.nav.pane_index in
@@ -4610,11 +4775,19 @@ let apply_move (m : Model.t) dir =
                               move_keeper_config_selection ~embedded
                                 ~name:k.name ~delta:(move_delta dir) m
                           | Nav.Keeper_memory ->
-                              if Option.is_some m.knowledge.memory_reading then
+                              let has_matching_reading =
+                                match m.knowledge.memory_reading with
+                                | Some entry ->
+                                    Knowledge_store.memory_reading_matches_scope
+                                      ~keeper_opt:(Some k.name) entry
+                                | None -> false
+                              in
+                              if has_matching_reading then
                                 let sd = scroll_delta dir in
+                                let max_scroll = memory_reading_max_scroll m in
                                 let knowledge =
                                   Knowledge_store.scroll_memory_reading
-                                    ~max_scroll:200 ~delta:sd m.knowledge
+                                    ~max_scroll ~delta:sd m.knowledge
                                 in
                                 ({ m with knowledge }, [])
                               else (
@@ -4808,17 +4981,31 @@ let apply_move (m : Model.t) dir =
                           }
                         , [] ))
                 | Nav.Knowledge ->
+                    let eff_pane =
+                      if m.nav.zoomed && Model.can_zoom_current_view m then 1
+                      else pane_index
+                    in
                     let prev_slug =
                       match Knowledge_store.selected_wiki_page m.knowledge with
                       | Some p -> Some p.slug
                       | None -> None
                     in
                     let prev_mem_keeper = m.knowledge.memory_diff_keeper in
+                    let has_matching_reading =
+                      Nav.equal_knowledge_tab m.knowledge.active_tab
+                        Nav.Knowledge_memory
+                      &&
+                      match m.knowledge.memory_reading with
+                      | Some entry ->
+                          Knowledge_store.memory_reading_matches_scope
+                            ~keeper_opt:m.knowledge.memory_diff_keeper entry
+                      | None -> false
+                    in
                     let is_memory_list_cursor =
                       Nav.equal_knowledge_tab m.knowledge.active_tab
                         Nav.Knowledge_memory
-                      && pane_index = 1
-                      && Option.is_none m.knowledge.memory_reading
+                      && eff_pane = 1
+                      && (not has_matching_reading)
                       && Option.is_some m.knowledge.memory_diff_keeper
                       &&
                       match m.knowledge.memory_view_mode with
@@ -4828,27 +5015,28 @@ let apply_move (m : Model.t) dir =
                       | Knowledge_store.View_diff -> false
                     in
                     let eff_delta =
-                      if pane_index = 1 && not is_memory_list_cursor then
+                      if eff_pane = 1 && not is_memory_list_cursor then
                         scroll_delta dir
                       else delta
                     in
                     let max_detail_scroll =
-                      if pane_index = 1 then
-                        if Option.is_some m.knowledge.memory_reading then
-                          Some 200
+                      if eff_pane = 1 then
+                        if has_matching_reading then
+                          Some (memory_reading_max_scroll m)
                         else Some (knowledge_detail_max_scroll m)
                       else None
                     in
                     let knowledge =
-                      Knowledge_store.move_selection ~pane_index ~viewport_rows
-                        ?max_detail_scroll ~delta:eff_delta m.knowledge
+                      Knowledge_store.move_selection ~pane_index:eff_pane
+                        ~viewport_rows ?max_detail_scroll ~delta:eff_delta
+                        m.knowledge
                     in
                     let next = { m with knowledge } in
                     let nav_cmds =
                       match
                         knowledge.active_tab
                       , knowledge.wiki_artifacts_submode
-                      , pane_index
+                      , eff_pane
                       with
                       | Nav.Knowledge_wiki_artifacts, `Wiki, 0 -> (
                           match Knowledge_store.selected_wiki_page knowledge with

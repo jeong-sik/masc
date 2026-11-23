@@ -3866,6 +3866,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
         };
       knowledge =
         base.knowledge
+        |> Knowledge_store.set_memory_diff_keeper (Some "alpha")
         |> Knowledge_store.set_memory_view_mode Knowledge_store.View_diff
         |> Knowledge_store.apply_memory_diff ~observed_at:t0 big_diff;
     }

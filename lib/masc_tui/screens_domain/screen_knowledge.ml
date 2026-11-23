@@ -2231,7 +2231,7 @@ let draw_temporal_memory_diff ~(model : Model.t) ~grid ~cache ~(rect : Rect.t)
           ~diff_scroll:k.diff_scroll_offset
     | None ->
         Masc_tui_screens_core.Memory_explorer.render_world_diff_body ~grid
-          ~rect:content ~theme ~lang ~now_unix ~k
+          ~rect:content ~theme ~lang ~now_unix ~k ~focused
           ~diff_scroll:k.diff_scroll_offset
 
 let render_memory ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)

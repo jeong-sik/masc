@@ -39,33 +39,7 @@ let format_age ~now_unix ts_unix =
     let delta = Float.max 0.0 (now_unix -. ts_unix) in
     if delta < 5.0 then "now" else Format_val.format_duration_s delta
 
-let wrap_single_paragraph ~max_width text =
-  let max_w = Int.max 4 max_width in
-  if String.equal text "" then [ "" ]
-  else
-    let clusters = Grapheme.split_clusters text in
-    let lines = ref [] in
-    let cur = Buffer.create 64 in
-    let cur_w = ref 0 in
-    let flush () =
-      lines := Buffer.contents cur :: !lines;
-      Buffer.clear cur;
-      cur_w := 0
-    in
-    List.iter
-      (fun (bytes, width) ->
-        let gw = Int.max 1 width in
-        if !cur_w + gw > max_w && !cur_w > 0 then flush ();
-        Buffer.add_string cur bytes;
-        cur_w := !cur_w + gw)
-      clusters;
-    if !cur_w > 0 || !lines = [] then flush ();
-    List.rev !lines
-
-let wrap_lines ~max_width text =
-  let max_w = Int.max 4 max_width in
-  let paragraphs = String.split_on_char '\n' text in
-  List.concat_map (wrap_single_paragraph ~max_width:max_w) paragraphs
+let wrap_lines = Knowledge_store.wrap_lines
 
 let put_clipped ~grid ~clip ~x ~y ~max_w ~style s =
   if max_w <= 0 then 0
@@ -188,314 +162,17 @@ let json_kv_summary = function
         fields
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
 
-let format_basis_lines ~lang = function
-  | Wire_knowledge.Basis_observed ->
-      [ say lang ~ko:"관측 (Observed)" ~en:"Observed" ]
-  | Wire_knowledge.Basis_observed_board { post_id; comment_id } ->
-      let c_part =
-        match comment_id with Some c -> " / comment:" ^ c | None -> ""
-      in
-      [
-        Printf.sprintf "%s (board post:%s%s)"
-          (say lang ~ko:"관측 · 보드" ~en:"Observed · Board")
-          post_id c_part;
-      ]
-  | Wire_knowledge.Basis_derived derivs ->
-      List.map
-        (fun (d : Wire_knowledge.memory_derivation_ref) ->
-          Printf.sprintf "%s %s ← [%s]"
-            (say lang ~ko:"유도 규칙" ~en:"Derived rule")
-            d.rule_id
-            (String.concat ", " d.premise_ids))
-        derivs
-
 (* --- Full Reading Renderer (scrollable word-wrapped detail) --- *)
 
-type reading_line = {
-  rail : Theme.status_token option;
-  style : Style.t;
-  text : string;
-}
-
-let build_reading_lines ~theme ~bg ~width ~lang ~now_unix
-    (entry : Knowledge_store.memory_reading_entry) : reading_line list =
-  let text_w = Int.max 12 (width - 2) in
-  let acc = ref [] in
-  let push ?rail ~style text = acc := { rail; style; text } :: !acc in
-  let push_wrapped ?rail ~style text =
-    List.iter (fun ln -> push ?rail ~style ln) (wrap_lines ~max_width:text_w text)
-  in
-  let push_blank () = push ~style:(Typography.primary ~bg theme) "" in
-  let push_section ?rail label =
-    push ?rail ~style:(Typography.structure ~bg ~bold:true theme) label
-  in
-  let push_kv key value =
-    push_wrapped
-      ~style:(Typography.primary ~bg theme)
-      (Printf.sprintf "%s: %s" key value)
-  in
-  (match entry with
-  | Knowledge_store.Reading_activity { keeper; event; notes } ->
-      let g, lbl, tone = activity_kind_spec ~lang event.kind in
-      push ~rail:tone
-        ~style:(Typography.status ~bg ~bold:true theme tone)
-        (Printf.sprintf "%s %s  ·  @%s  ·  r%d  ·  %s (%s)" g lbl keeper
-           event.revision
-           (Wire_common.format_unix_rfc3339 event.recorded_at_unix)
-           (format_age ~now_unix event.recorded_at_unix));
-      push ~style:(Typography.whisper ~bg theme) ("ID: " ^ event.identity);
-      push_blank ();
-      (match event.reason with
-      | Some r when not (String.equal (String.trim r) "") ->
-          push_section ~rail:Theme.Status_attention
-            (say lang ~ko:"사유 (Reason)" ~en:"Reason");
-          push_wrapped ~rail:Theme.Status_attention
-            ~style:(Typography.primary ~bg theme) r;
-          push_blank ()
-      | Some _ | None -> ());
-      push_section ~rail:Theme.Status_critical
-        (Printf.sprintf "%s (%d)"
-           (say lang ~ko:"이전 기억 (Before)" ~en:"Before")
-           (List.length event.before));
-      if event.before = [] then
-        push ~style:(Typography.whisper ~bg theme)
-          (say lang ~ko:"(없음 — 신규 생성)" ~en:"(none — newly created)")
-      else
-        List.iteri
-          (fun idx (f : Wire_knowledge.memory_activity_fact) ->
-            push ~rail:Theme.Status_critical
-              ~style:(Typography.whisper ~bg ~italic:false theme)
-              (Printf.sprintf "#%d  %s" (idx + 1) f.memory_id);
-            let claim_s =
-              Option.value f.claim
-                ~default:
-                  (say lang ~ko:"(본문 미기록)" ~en:"(claim unavailable)")
-            in
-            push_wrapped ~rail:Theme.Status_critical
-              ~style:(Typography.primary ~bg theme) claim_s)
-          event.before;
-      push_blank ();
-      push_section ~rail:Theme.Status_ok
-        (Printf.sprintf "%s (%d)"
-           (say lang ~ko:"이후 기억 (After)" ~en:"After")
-           (List.length event.after));
-      if event.after = [] then
-        push ~style:(Typography.whisper ~bg theme)
-          (say lang ~ko:"(없음 — 철회/삭제/무효화)" ~en:"(none — retracted/removed/invalidated)")
-      else
-        List.iteri
-          (fun idx (f : Wire_knowledge.memory_activity_fact) ->
-            push ~rail:Theme.Status_ok
-              ~style:(Typography.whisper ~bg ~italic:false theme)
-              (Printf.sprintf "#%d  %s" (idx + 1) f.memory_id);
-            let claim_s =
-              Option.value f.claim
-                ~default:
-                  (say lang ~ko:"(본문 미기록)" ~en:"(claim unavailable)")
-            in
-            push_wrapped ~rail:Theme.Status_ok
-              ~style:(Typography.primary ~bg theme) claim_s)
-          event.after;
-      if notes <> [] then begin
-        push_blank ();
-        push_section (say lang ~ko:"저널 노트 (Notes)" ~en:"Journal Notes");
-        List.iter
-          (fun n ->
-            push_wrapped ~style:(Typography.whisper ~bg theme) ("· " ^ n))
-          notes
-      end
-  | Knowledge_store.Reading_ordinary_fact { keeper; revision; fact } ->
-      let cat_s = Wire_knowledge.memory_fact_category_to_string fact.category in
-      let orig_s = Wire_knowledge.memory_fact_origin_to_string fact.origin in
-      push ~rail:Theme.Status_active
-        ~style:(Typography.anchor ~bg theme)
-        (Printf.sprintf "@%s  ·  [%s]  ·  %s  ·  r%d" keeper cat_s orig_s
-           revision);
-      push ~style:(Typography.whisper ~bg theme) ("ID: " ^ fact.memory_id);
-      push_blank ();
-      push_section ~rail:Theme.Status_ok
-        (say lang ~ko:"전체 기억 내용 (Claim)" ~en:"Full Claim");
-      push_wrapped ~rail:Theme.Status_ok
-        ~style:(Typography.primary ~bg theme) fact.claim;
-      push_blank ();
-      push_section (say lang ~ko:"메타데이터 · 조회 이력" ~en:"Metadata & Retrieval");
-      push_kv
-        (say lang ~ko:"최초 관측" ~en:"First seen")
-        (Printf.sprintf "%s (%s)"
-           (Wire_common.format_unix_rfc3339 fact.first_seen_unix)
-           (format_age ~now_unix fact.first_seen_unix));
-      push_kv
-        (say lang ~ko:"최근 관측" ~en:"Last seen")
-        (Printf.sprintf "%s (%s)"
-           (Wire_common.format_unix_rfc3339 fact.last_seen_unix)
-           (format_age ~now_unix fact.last_seen_unix));
-      let ret_str =
-        match fact.events.retrieval with
-        | Wire_knowledge.Never_retrieved ->
-            say lang ~ko:"미조회 (0회)" ~en:"Never retrieved (0x)"
-        | Wire_knowledge.Retrieved { count; distinct_days; last_at_unix } ->
-            Printf.sprintf "%dx · %dd · %s (%s)" count distinct_days
-              (Wire_common.format_unix_rfc3339 last_at_unix)
-              (format_age ~now_unix last_at_unix)
-      in
-      push_kv (say lang ~ko:"조회 기록" ~en:"Retrieval") ret_str;
-      if fact.events.retracted_count > 0 then
-        push_kv
-          (say lang ~ko:"철회 횟수" ~en:"Retracted count")
-          (string_of_int fact.events.retracted_count);
-      push_blank ();
-      push_section ~rail:Theme.Status_ai
-        (say lang ~ko:"근거 (Basis)" ~en:"Basis");
-      List.iter
-        (fun ln ->
-          push_wrapped ~rail:Theme.Status_ai
-            ~style:(Typography.primary ~bg theme) ln)
-        (format_basis_lines ~lang fact.basis);
-      if fact.events.revised_from <> [] then begin
-        push_blank ();
-        push_section ~rail:Theme.Status_active
-          (say lang ~ko:"개정 계보 (Supersedes / Revised From)"
-             ~en:"Lineage (Revised From)");
-        List.iter
-          (fun prev_id ->
-            push ~rail:Theme.Status_active
-              ~style:(Typography.structure ~bg theme)
-              ("← " ^ prev_id))
-          fact.events.revised_from
-      end
-  | Knowledge_store.Reading_source_fact { keeper; fact } ->
-      push ~rail:Theme.Status_ai
-        ~style:(Typography.anchor ~bg theme)
-        (Printf.sprintf "@%s  ·  [source-bound]" keeper);
-      push_kv (say lang ~ko:"소스 경로" ~en:"Source path") fact.path;
-      push_kv "SHA-256" fact.sha256;
-      push_kv
-        (say lang ~ko:"최초 관측" ~en:"First seen")
-        (Wire_common.format_unix_rfc3339 fact.first_seen_unix);
-      push_blank ();
-      push_section ~rail:Theme.Status_ai
-        (say lang ~ko:"전체 기억 내용 (Claim)" ~en:"Full Claim");
-      push_wrapped ~rail:Theme.Status_ai
-        ~style:(Typography.primary ~bg theme) fact.claim
-  | Knowledge_store.Reading_source_invalidation { keeper; invalidation } ->
-      push ~rail:Theme.Status_attention
-        ~style:(Typography.status ~bg ~bold:true theme Theme.Status_attention)
-        (Printf.sprintf "! @%s  ·  %s" keeper
-           (say lang ~ko:"소스 기반 기억 무효화" ~en:"Source-bound Invalidation"));
-      push_blank ();
-      push_kv
-        (say lang ~ko:"소스 경로" ~en:"Source path")
-        invalidation.source_path;
-      push_kv
-        (say lang ~ko:"사유" ~en:"Reason")
-        (Wire_knowledge.source_invalidation_reason_to_string invalidation.reason);
-      push_kv
-        (say lang ~ko:"무효화 시각" ~en:"Invalidated at")
-        (Wire_common.format_unix_rfc3339 invalidation.invalidated_at_unix)
-  | Knowledge_store.Reading_diff_item { keeper; item } -> (
-      let scope_s =
-        match keeper with
-        | Some kp -> "@" ^ kp
-        | None -> say lang ~ko:"월드 메모리" ~en:"World Memory"
-      in
-      match item with
-      | Knowledge_store.Keeper_added f ->
-          let h_lbl, _ = heat_badge f.heat in
-          push ~rail:Theme.Status_ok
-            ~style:(Typography.status ~bg ~bold:true theme Theme.Status_ok)
-            (Printf.sprintf "+ %s  ·  [%s] %s  ·  %s %dx" scope_s f.category
-               f.origin h_lbl f.retrieval_count);
-          push ~style:(Typography.whisper ~bg theme) ("ID: " ^ f.memory_id);
-          push_blank ();
-          push_wrapped ~rail:Theme.Status_ok
-            ~style:(Typography.primary ~bg theme) f.text
-      | Knowledge_store.Keeper_updated u ->
-          push ~rail:Theme.Status_active
-            ~style:(Typography.status ~bg ~bold:true theme Theme.Status_active)
-            (Printf.sprintf "~ %s  ·  [%s] %s @r%d" scope_s u.after.category
-               (relation_label ~lang u.relation)
-               u.at_rev);
-          push_blank ();
-          push_section ~rail:Theme.Status_critical
-            (say lang ~ko:"이전 (Before)" ~en:"Before");
-          push_wrapped ~rail:Theme.Status_critical
-            ~style:(Typography.primary ~bg theme) u.before.text;
-          push_blank ();
-          push_section ~rail:Theme.Status_ok
-            (say lang ~ko:"이후 (After)" ~en:"After");
-          push_wrapped ~rail:Theme.Status_ok
-            ~style:(Typography.primary ~bg theme) u.after.text
-      | Knowledge_store.Keeper_retracted r ->
-          push ~rail:Theme.Status_critical
-            ~style:(Typography.status ~bg ~bold:true theme Theme.Status_critical)
-            (Printf.sprintf "- %s  ·  [%s] @r%d  ·  %s" scope_s r.category
-               r.removed_at_rev r.removed_by);
-          (match r.drop_reason with
-          | Some rs ->
-              push_kv (say lang ~ko:"사유" ~en:"Reason") rs
-          | None -> ());
-          push_blank ();
-          push_wrapped ~rail:Theme.Status_critical
-            ~style:(Typography.primary ~bg theme) r.text
-      | Knowledge_store.Keeper_invalidated inv ->
-          push ~rail:Theme.Status_attention
-            ~style:(Typography.status ~bg ~bold:true theme Theme.Status_attention)
-            (Printf.sprintf "! %s  ·  @r%d" scope_s inv.at_rev);
-          push_kv
-            (say lang ~ko:"유실된 전제" ~en:"Missing premises")
-            (String.concat ", " inv.missing_premise_ids);
-          push_blank ();
-          push_wrapped ~rail:Theme.Status_attention
-            ~style:(Typography.primary ~bg theme) inv.text
-      | Knowledge_store.World_added e ->
-          let tone = Theme.Status_ok in
-          push ~rail:tone
-            ~style:(Typography.status ~bg ~bold:true theme tone)
-            (Printf.sprintf "+ %s  ·  #%d [%s]" scope_s e.seq e.fact_id);
-          push_kv (say lang ~ko:"시각" ~en:"Recorded at") e.recorded_at;
-          push_blank ();
-          push_wrapped ~rail:tone ~style:(Typography.primary ~bg theme) e.summary;
-          let kvs = json_kv_summary e.payload in
-          if kvs <> [] then begin
-            push_blank ();
-            List.iter (fun (k, v) -> push_kv k v) kvs
-          end
-      | Knowledge_store.World_retracted e ->
-          let tone = Theme.Status_critical in
-          push ~rail:tone
-            ~style:(Typography.status ~bg ~bold:true theme tone)
-            (Printf.sprintf "- %s  ·  #%d [%s]" scope_s e.seq e.fact_id);
-          push_kv (say lang ~ko:"시각" ~en:"Recorded at") e.recorded_at;
-          push_blank ();
-          push_wrapped ~rail:tone ~style:(Typography.primary ~bg theme) e.summary;
-          let kvs = json_kv_summary e.payload in
-          if kvs <> [] then begin
-            push_blank ();
-            List.iter (fun (k, v) -> push_kv k v) kvs
-          end
-      | Knowledge_store.World_updated u ->
-          push ~rail:Theme.Status_active
-            ~style:(Typography.status ~bg ~bold:true theme Theme.Status_active)
-            (Printf.sprintf "~ %s  ·  #%d [%s]" scope_s u.seq u.fact_id);
-          push_kv (say lang ~ko:"시각" ~en:"Recorded at") u.recorded_at;
-          push_blank ();
-          push_wrapped ~rail:Theme.Status_active
-            ~style:(Typography.primary ~bg theme) u.summary;
-          let b_kvs = json_kv_summary u.before in
-          if b_kvs <> [] then begin
-            push_blank ();
-            push_section ~rail:Theme.Status_critical
-              (say lang ~ko:"이전 (Before)" ~en:"Before");
-            List.iter (fun (k, v) -> push_kv k v) b_kvs
-          end;
-          let a_kvs = json_kv_summary u.after in
-          if a_kvs <> [] then begin
-            push_blank ();
-            push_section ~rail:Theme.Status_ok
-              (say lang ~ko:"이후 (After)" ~en:"After");
-            List.iter (fun (k, v) -> push_kv k v) a_kvs
-          end));
-  List.rev !acc
+let style_of_reading_tone ~theme ~bg = function
+  | Knowledge_store.Reading_anchor -> Typography.anchor ~bg theme
+  | Knowledge_store.Reading_primary -> Typography.primary ~bg theme
+  | Knowledge_store.Reading_structure { bold } ->
+      Typography.structure ~bg ~bold theme
+  | Knowledge_store.Reading_whisper { italic } ->
+      Typography.whisper ~bg ~italic theme
+  | Knowledge_store.Reading_status { tone; bold } ->
+      Typography.status ~bg ~bold theme tone
 
 let render_full_reading ~grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(lang : Say.lang) ~now_unix ~entry ~scroll =
@@ -528,7 +205,8 @@ let render_full_reading ~grid ~(rect : Rect.t) ~(theme : Theme.t)
            hint);
     if not (Rect.is_empty body_rect) then begin
       let lines =
-        build_reading_lines ~theme ~bg ~width:body_rect.w ~lang ~now_unix entry
+        Knowledge_store.project_memory_reading_lines ~width:body_rect.w ~lang
+          ~now_unix entry
       in
       let vis_h = Int.max 1 body_rect.h in
       let max_scroll = Int.max 0 (List.length lines - vis_h) in
@@ -536,7 +214,7 @@ let render_full_reading ~grid ~(rect : Rect.t) ~(theme : Theme.t)
       let y = ref body_rect.y in
       let bottom = Rect.bottom body_rect in
       List.iter
-        (fun (ln : reading_line) ->
+        (fun (ln : Knowledge_store.reading_line) ->
           if !y < bottom then begin
             let tx =
               match ln.rail with
@@ -546,10 +224,11 @@ let render_full_reading ~grid ~(rect : Rect.t) ~(theme : Theme.t)
                   body_rect.x + 2
               | None -> body_rect.x
             in
+            let style = style_of_reading_tone ~theme ~bg ln.tone in
             ignore
               (put_clipped ~grid ~clip:body_rect ~x:tx ~y:!y
                  ~max_w:(Int.max 0 (Rect.right body_rect - tx))
-                 ~style:ln.style ln.text);
+                 ~style ln.text);
             incr y
           end)
         (Store_scroll.drop skip lines)
@@ -723,8 +402,62 @@ let draw_keeper_chart_strip ~grid ~(rect : Rect.t) ~(theme : Theme.t)
   else
     let y = ref rect.y in
     let bottom = Rect.bottom rect in
+    let draw_source_err_if_any (row : Wire_knowledge.keeper_memory_health_row) =
+      match row.source_read_error with
+      | Some serr when !y < bottom ->
+          Card.draw_left_rail ~bg ~tone:Theme.Status_attention grid ~x:rect.x
+            ~y:!y ~h:1 ~theme;
+          let msg =
+            Printf.sprintf "%s %s: %s"
+              (Glyph.to_utf8 Glyph.Warning_triangle)
+              (say lang ~ko:"소스 기억 읽기 오류" ~en:"Source read error")
+              serr
+          in
+          ignore
+            (put_clipped ~grid ~clip:rect ~x:(rect.x + 2) ~y:!y
+               ~max_w:(Int.max 0 (rect.w - 2))
+               ~style:(Typography.status ~bg theme Theme.Status_attention)
+               msg);
+          incr y
+      | Some _ | None -> ()
+    in
     let health_opt = Knowledge_store.health_row_for_keeper ~keeper k in
     (match health_opt with
+    | Some row when Option.is_some row.read_error ->
+        let err = Option.value row.read_error ~default:"" in
+        if !y < bottom then begin
+          Card.draw_left_rail ~bg ~tone:Theme.Status_critical grid ~x:rect.x
+            ~y:!y ~h:1 ~theme;
+          let msg =
+            Printf.sprintf "%s %s: %s"
+              (Glyph.to_utf8 Glyph.Live_failing)
+              (say lang ~ko:"스냅샷 읽기 오류" ~en:"Snapshot read error")
+              err
+          in
+          ignore
+            (put_clipped ~grid ~clip:rect ~x:(rect.x + 2) ~y:!y
+               ~max_w:(Int.max 0 (rect.w - 2))
+               ~style:
+                 (Typography.status ~bg ~bold:true theme Theme.Status_critical)
+               msg);
+          incr y
+        end;
+        draw_source_err_if_any row
+    | Some row when not row.snapshot_present ->
+        if !y < bottom then begin
+          let msg =
+            Printf.sprintf "%s %s"
+              (Glyph.to_utf8 Glyph.Missing_absent)
+              (say lang ~ko:"기억 스냅샷 없음 (커밋 대기 중)"
+                 ~en:"No memory snapshot yet")
+          in
+          ignore
+            (put_clipped ~grid ~clip:rect ~x:rect.x ~y:!y ~max_w:rect.w
+               ~style:(Typography.whisper ~bg theme)
+               msg);
+          incr y
+        end;
+        draw_source_err_if_any row
     | Some row when bottom - !y >= 8 ->
         let chart_h = if bottom - !y >= 14 then 5 else 4 in
         let chart_r = Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:chart_h in
@@ -789,7 +522,8 @@ let draw_keeper_chart_strip ~grid ~(rect : Rect.t) ~(theme : Theme.t)
             (put_clipped ~grid ~clip:rect ~x:rect.x ~y:!y ~max_w:rect.w ~style:st
                stat);
           incr y
-        end
+        end;
+        draw_source_err_if_any row
     | Some row when bottom - !y >= 5 ->
         let compact_r = Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:3 in
         let used =
@@ -798,7 +532,8 @@ let draw_keeper_chart_strip ~grid ~(rect : Rect.t) ~(theme : Theme.t)
             ~observed_derived:(row.observed_facts, row.derived_facts)
             row.age_bins
         in
-        y := !y + used
+        y := !y + used;
+        draw_source_err_if_any row
     | Some _ | None -> ());
     if !y < bottom then begin
       if
@@ -1589,7 +1324,10 @@ let render_keeper_diff_view ~grid ~(rect : Rect.t) ~(theme : Theme.t)
                 incr y
               end
             end;
-            let items = Knowledge_store.filtered_memory_diff_items k in
+            let items =
+              Knowledge_store.filtered_memory_diff_items_for
+                ~keeper_opt:(Some keeper) k
+            in
             if items = [] then begin
               if !y < bottom then
                 ignore
@@ -1641,10 +1379,12 @@ let render_keeper_memory ~grid ~(rect : Rect.t) ~(theme : Theme.t)
     let k = model.knowledge in
     let bg = Color.of_rgb theme.surface_1 in
     match k.memory_reading with
-    | Some entry ->
+    | Some entry
+      when Knowledge_store.memory_reading_matches_scope
+             ~keeper_opt:(Some keeper) entry ->
         render_full_reading ~grid ~rect ~theme ~lang ~now_unix ~entry
           ~scroll:k.memory_reading_scroll
-    | None ->
+    | Some _ | None ->
         let bar_rect, body_rect = Rect.split_v rect ~top_h:1 in
         draw_mode_pills ~grid ~rect:bar_rect ~theme ~lang ~bg ~k ~keeper;
         if not (Rect.is_empty body_rect) then begin
@@ -1669,155 +1409,174 @@ let render_keeper_memory ~grid ~(rect : Rect.t) ~(theme : Theme.t)
         end
 
 let render_world_diff_body ~grid ~(rect : Rect.t) ~(theme : Theme.t)
-    ~(lang : Say.lang) ~now_unix ~(k : Knowledge_store.t) ~diff_scroll =
+    ~(lang : Say.lang) ~now_unix ~(k : Knowledge_store.t) ~focused ~diff_scroll
+    =
   if Rect.is_empty rect then ()
   else
     let bg = Color.of_rgb theme.surface_1 in
     match k.memory_reading with
-    | Some entry ->
+    | Some entry
+      when Knowledge_store.memory_reading_matches_scope ~keeper_opt:None entry
+      ->
         render_full_reading ~grid ~rect ~theme ~lang ~now_unix ~entry
           ~scroll:k.memory_reading_scroll
-    | None -> (
+    | Some _ | None -> (
         match k.memory_diff with
-        | Observed.Value { data = diff; _ } ->
-            let y = ref rect.y in
-            let bottom = Rect.bottom rect in
-            let win_str =
-              match k.memory_diff_window with
-              | Knowledge_store.Window_24h -> "24h"
-              | Knowledge_store.Window_7d -> "7d"
-              | Knowledge_store.Window_30d -> "30d"
-              | Knowledge_store.Window_revs { from_rev; to_rev } ->
-                  Printf.sprintf "rev %d→%d" from_rev to_rev
-            in
-            if !y < bottom then begin
-              let rev_range =
-                match diff.range.from_rev, diff.range.to_rev with
-                | Some a, Some b -> Printf.sprintf "rev %d → %d" a b
-                | Some a, None -> Printf.sprintf "rev %d+" a
-                | None, Some b -> Printf.sprintf "..rev %d" b
-                | None, None -> win_str
-              in
-              let line =
-                match diff.body with
-                | Wire_knowledge.World_diff { counts; _ } ->
+        | Observed.Value { data = diff; _ } -> (
+            match diff.scope, diff.body with
+            | ( Wire_knowledge.Scope_world
+              , Wire_knowledge.World_diff { counts; _ } ) ->
+                let y = ref rect.y in
+                let bottom = Rect.bottom rect in
+                let win_str =
+                  match k.memory_diff_window with
+                  | Knowledge_store.Window_24h -> "24h"
+                  | Knowledge_store.Window_7d -> "7d"
+                  | Knowledge_store.Window_30d -> "30d"
+                  | Knowledge_store.Window_revs { from_rev; to_rev } ->
+                      Printf.sprintf "rev %d→%d" from_rev to_rev
+                in
+                if !y < bottom then begin
+                  let rev_range =
+                    match diff.range.from_rev, diff.range.to_rev with
+                    | Some a, Some b -> Printf.sprintf "rev %d → %d" a b
+                    | Some a, None -> Printf.sprintf "rev %d+" a
+                    | None, Some b -> Printf.sprintf "..rev %d" b
+                    | None, None -> win_str
+                  in
+                  let line =
                     Printf.sprintf "%s · %d %s · +%d ~%d -%d" rev_range
                       counts.total_claims_now
                       (say lang ~ko:"주장" ~en:"claims")
                       counts.added counts.updated counts.retracted
-                | Wire_knowledge.Keeper_diff { counts; _ } ->
-                    Printf.sprintf "%s · %d %s · +%d ~%d -%d !%d" rev_range
-                      counts.total_facts_now
-                      (say lang ~ko:"사실" ~en:"facts")
-                      counts.added counts.updated counts.retracted
-                      counts.invalidated
-              in
-              ignore
-                (put_clipped ~grid ~clip:rect ~x:rect.x ~y:!y ~max_w:rect.w
-                   ~style:(Typography.anchor ~bg theme)
-                   line);
-              incr y
-            end;
-            if !y + 1 < bottom then begin
-              let h = diff.retrieval_heat in
-              let bar_rect = Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:2 in
-              let heat_spec : Chart.Spec.t =
-                {
-                  title = Say.make ~ko:"기억 계층" ~en:"Memory Tiers";
-                  hotkey_hint = None;
-                  kind =
-                    Chart.Spec.Stacked_bar
-                      {
-                        segments =
-                          [
-                            ( Say.literal "HOT"
-                            , float_of_int h.hot
-                            , Theme.Status_attention );
-                            ( Say.literal "WARM"
-                            , float_of_int h.warm
-                            , Theme.Status_active );
-                            ( Say.literal "COLD"
-                            , float_of_int (h.cold + h.never_retrieved)
-                            , Theme.Status_historical );
-                          ];
-                        total_label =
-                          Say.literal (Printf.sprintf "%d hits" h.total_events);
-                        unit = Format_val.Count;
-                      };
-                }
-              in
-              ignore
-                (Chart.draw grid ~rect:bar_rect ~theme ~caps:default_caps ~lang
-                   ~show_title:false heat_spec);
-              y := !y + 2
-            end;
-            (* Fleet-aggregated 24-bin Age Ladder when fleet health is loaded *)
-            (match Observed.to_option k.keeper_memory_health with
-            | Some fleet when bottom - !y >= 10 ->
-                let fleet_bins =
-                  List.filter_map
-                    (fun (r : Wire_knowledge.keeper_memory_health_row) ->
-                      r.age_bins)
-                    fleet.keepers
-                  |> Memory_charts.aggregate_fleet_age_bins
+                  in
+                  ignore
+                    (put_clipped ~grid ~clip:rect ~x:rect.x ~y:!y ~max_w:rect.w
+                       ~style:(Typography.anchor ~bg theme)
+                       line);
+                  incr y
+                end;
+                if !y + 1 < bottom then begin
+                  let h = diff.retrieval_heat in
+                  let bar_rect = Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:2 in
+                  let heat_spec : Chart.Spec.t =
+                    {
+                      title = Say.make ~ko:"기억 계층" ~en:"Memory Tiers";
+                      hotkey_hint = None;
+                      kind =
+                        Chart.Spec.Stacked_bar
+                          {
+                            segments =
+                              [
+                                ( Say.literal "HOT"
+                                , float_of_int h.hot
+                                , Theme.Status_attention );
+                                ( Say.literal "WARM"
+                                , float_of_int h.warm
+                                , Theme.Status_active );
+                                ( Say.literal "COLD"
+                                , float_of_int (h.cold + h.never_retrieved)
+                                , Theme.Status_historical );
+                              ];
+                            total_label =
+                              Say.literal
+                                (Printf.sprintf "%d hits" h.total_events);
+                            unit = Format_val.Count;
+                          };
+                    }
+                  in
+                  ignore
+                    (Chart.draw grid ~rect:bar_rect ~theme ~caps:default_caps
+                       ~lang ~show_title:false heat_spec);
+                  y := !y + 2
+                end;
+                (* Fleet-aggregated 24-bin Age Ladder when fleet health is loaded *)
+                (match Observed.to_option k.keeper_memory_health with
+                | Some fleet when bottom - !y >= 10 ->
+                    let fleet_bins =
+                      List.filter_map
+                        (fun (r : Wire_knowledge.keeper_memory_health_row) ->
+                          r.age_bins)
+                        fleet.keepers
+                      |> Memory_charts.aggregate_fleet_age_bins
+                    in
+                    (match fleet_bins with
+                    | Some _ ->
+                        let obs_tot =
+                          List.fold_left
+                            (fun acc
+                                 (r : Wire_knowledge.keeper_memory_health_row)
+                             -> acc + r.observed_facts)
+                            0 fleet.keepers
+                        in
+                        let drv_tot =
+                          List.fold_left
+                            (fun acc
+                                 (r : Wire_knowledge.keeper_memory_health_row)
+                             -> acc + r.derived_facts)
+                            0 fleet.keepers
+                        in
+                        let ladder_r =
+                          Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:4
+                        in
+                        let used =
+                          Memory_charts.draw_age_ladder grid ~rect:ladder_r
+                            ~theme ~caps:default_caps ~lang ~bg
+                            ~title:
+                              (say lang ~ko:"함대 기억 연령 분포 (24-bin)"
+                                 ~en:"Fleet Fact Age Ladder (24-bin)")
+                            ~observed_derived:(obs_tot, drv_tot) fleet_bins
+                        in
+                        y := !y + used
+                    | None -> ())
+                | Some _ | None -> ());
+                if !y < bottom then begin
+                  Card.draw_hairline ~pad_x:0 ~bg grid ~rect ~y:!y ~theme;
+                  incr y
+                end;
+                let items =
+                  Knowledge_store.filtered_memory_diff_items_for
+                    ~keeper_opt:None k
                 in
-                (match fleet_bins with
-                | Some _ ->
-                    let obs_tot =
-                      List.fold_left
-                        (fun acc (r : Wire_knowledge.keeper_memory_health_row) ->
-                          acc + r.observed_facts)
-                        0 fleet.keepers
+                if items = [] then begin
+                  if !y < bottom then
+                    let q = String.trim k.filter_query in
+                    let msg =
+                      if String.equal q "" then
+                        say lang ~ko:"이 기간 내 월드 메모리 변동 없음"
+                          ~en:"No world memory changes in this window"
+                      else
+                        say lang ~ko:"필터에 일치하는 월드 메모리 변동 없음"
+                          ~en:"No world memory changes match filter"
                     in
-                    let drv_tot =
-                      List.fold_left
-                        (fun acc (r : Wire_knowledge.keeper_memory_health_row) ->
-                          acc + r.derived_facts)
-                        0 fleet.keepers
-                    in
-                    let ladder_r = Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:4 in
-                    let used =
-                      Memory_charts.draw_age_ladder grid ~rect:ladder_r ~theme
-                        ~caps:default_caps ~lang ~bg
-                        ~title:
-                          (say lang ~ko:"함대 기억 연령 분포 (24-bin)"
-                             ~en:"Fleet Fact Age Ladder (24-bin)")
-                        ~observed_derived:(obs_tot, drv_tot) fleet_bins
-                    in
-                    y := !y + used
-                | None -> ())
-            | Some _ | None -> ());
-            if !y < bottom then begin
-              Card.draw_hairline ~pad_x:0 ~bg grid ~rect ~y:!y ~theme;
-              incr y
-            end;
-            let items = Knowledge_store.filtered_memory_diff_items k in
-            if items = [] then begin
-              if !y < bottom then
-                let q = String.trim k.filter_query in
+                    ignore
+                      (put_clipped ~grid ~clip:rect ~x:rect.x ~y:!y
+                         ~max_w:rect.w ~style:(Typography.whisper ~bg theme) msg)
+                end
+                else
+                  let sel_idx =
+                    Store_scroll.clamp_index (List.length items)
+                      k.selected_diff_index
+                  in
+                  let rows =
+                    build_diff_visual_rows ~theme ~bg ~lang ~now_unix
+                      ~wrap_w:(Int.max 10 (rect.w - 2)) ~selected_idx:sel_idx
+                      items
+                  in
+                  draw_diff_rows ~grid ~content:rect ~y ~bottom ~theme ~bg
+                    ~scroll:diff_scroll ~focused rows
+            | ( (Wire_knowledge.Scope_world | Wire_knowledge.Scope_keeper _)
+              , (Wire_knowledge.World_diff _ | Wire_knowledge.Keeper_diff _) )
+              ->
                 let msg =
-                  if String.equal q "" then
-                    say lang ~ko:"이 기간 내 월드 메모리 변동 없음"
-                      ~en:"No world memory changes in this window"
-                  else
-                    say lang ~ko:"필터에 일치하는 월드 메모리 변동 없음"
-                      ~en:"No world memory changes match filter"
+                  say lang
+                    ~ko:"월드 메모리 Diff 불러오기 대기 중 · [r] 키로 새로고침"
+                    ~en:"Awaiting world memory diff · press [r] to refresh"
                 in
                 ignore
-                  (put_clipped ~grid ~clip:rect ~x:rect.x ~y:!y ~max_w:rect.w
-                     ~style:(Typography.whisper ~bg theme)
-                     msg)
-            end
-            else
-              let sel_idx =
-                Store_scroll.clamp_index (List.length items) k.selected_diff_index
-              in
-              let rows =
-                build_diff_visual_rows ~theme ~bg ~lang ~now_unix
-                  ~wrap_w:(Int.max 10 (rect.w - 2)) ~selected_idx:sel_idx items
-              in
-              draw_diff_rows ~grid ~content:rect ~y ~bottom ~theme ~bg
-                ~scroll:diff_scroll ~focused:false rows
+                  (put_clipped ~grid ~clip:rect ~x:rect.x ~y:rect.y
+                     ~max_w:rect.w ~style:(Typography.whisper ~bg theme)
+                     (Glyph.to_utf8 Glyph.Transport_reconnecting ^ " " ^ msg)))
         | ( Observed.Loading _
           | Observed.Absent
           | Observed.Unreported

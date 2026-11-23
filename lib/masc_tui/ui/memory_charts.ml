@@ -123,9 +123,11 @@ let ascii_levels = [| "."; ":"; "-"; "="; "+"; "*"; "#"; "@" |]
 let level_glyph ~unicode ~count ~max_count =
   if count <= 0 then if unicode then "·" else "."
   else
-    let denom = Int.max 1 max_count in
+    let denom = float_of_int (Int.max 1 max_count) in
     let idx =
-      let scaled = ((count * 8) + denom - 1) / denom - 1 in
+      let scaled =
+        int_of_float (Float.ceil (float_of_int count *. 8.0 /. denom)) - 1
+      in
       Int.max 0 (Int.min 7 scaled)
     in
     if unicode then unicode_levels.(idx) else ascii_levels.(idx)
@@ -427,11 +429,14 @@ let draw_facts_trend grid ~(rect : Rect.t) ~(theme : Theme.t)
           in
           let avg_f = float_of_int sum_n /. float_of_int (List.length points) in
           let delta =
-            if first_n > 0 then
-              Some
-                (float_of_int (last_n - first_n)
-                *. 100.0 /. float_of_int first_n)
-            else None
+            match points with
+            | [] | [ _ ] -> None
+            | _ ->
+                if first_n > 0 then
+                  Some
+                    (float_of_int (last_n - first_n)
+                    *. 100.0 /. float_of_int first_n)
+                else None
           in
           ( Observed.value ~observed_at:epoch_zero (float_of_int last_n)
           , Observed.value ~observed_at:epoch_zero (float_of_int peak_n)

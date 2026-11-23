@@ -687,108 +687,286 @@ let apply_http_reply ~now (m : Model.t) reply =
   | Msg.Reply_world_memory (Error err) ->
       err_reply ~source:Health.Source_client_http ~ko:"세계 기억 조회"
         ~en:"World memory fetch" err
-  | Msg.Reply_memory_diff (Ok diff) ->
-      ( {
-          m with
-          knowledge =
-            Knowledge_store.apply_memory_diff ~observed_at:now diff m.knowledge;
-        }
-      , [] )
-  | Msg.Reply_memory_diff (Error err) ->
-      err_reply ~source:Health.Source_client_http ~ko:"기억 변화 조회"
-        ~en:"Memory diff fetch" err
-  | Msg.Reply_keeper_memory_os_internals (Ok internals) ->
-      ( {
-          m with
-          knowledge =
-            Knowledge_store.apply_memory_os_internals ~observed_at:now internals
-              m.knowledge;
-        }
-      , [] )
-  | Msg.Reply_keeper_memory_os_internals (Error err) -> (
-      match err with
-      | Msg.Http_error { status = 404; _ } ->
-          let knowledge =
-            {
-              m.knowledge with
-              memory_os_internals = Observed.absent;
-            }
-          in
-          ({ m with knowledge }, [])
-      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
-      | Msg.Decode_error _ ->
-          err_reply ~source:Health.Source_client_http ~ko:"메모리 OS 내부 상태 조회"
-            ~en:"Memory OS internals fetch" err)
-  | Msg.Reply_keeper_memory_facts { keeper = _; result = Ok facts } ->
-      ( {
-          m with
-          knowledge =
-            Knowledge_store.apply_keeper_memory_facts ~observed_at:now facts
-              m.knowledge;
-        }
-      , [] )
-  | Msg.Reply_keeper_memory_facts { keeper; result = Error err } -> (
-      match err with
-      | Msg.Http_error { status = 404; _ } ->
-          let knowledge =
-            { m.knowledge with keeper_memory_facts = Observed.absent }
-          in
-          ({ m with knowledge }, [])
-      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
-      | Msg.Decode_error _ ->
-          let retryable =
-            match err with
-            | Msg.Transport _ -> true
-            | Msg.Http_error { status; _ } when status >= 500 && status <= 599
+  | Msg.Reply_memory_diff { keeper; result } ->
+      let expected =
+        match Model.active_dive m with
+        | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) -> Some name
+        | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper = dk; _ })) ->
+            dk
+        | Some
+            ( Nav.Dive_keeper
+                {
+                  tab =
+                    ( Nav.Keeper_chat
+                    | Nav.Keeper_work_candle
+                    | Nav.Keeper_sandbox
+                    | Nav.Keeper_config );
+                  _;
+                }
+            | Nav.Dive_work _
+            | Nav.Dive_knowledge
+                (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+            | Nav.Dive_infra _ ) ->
+            m.knowledge.memory_diff_keeper
+        | None -> (
+            match m.nav.workspace with
+            | Nav.Keepers
+              when Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
               ->
-                true
-            | Msg.Http_error _ | Msg.Workspace_mismatch _ | Msg.Decode_error _ ->
-                false
-          in
-          let knowledge =
-            Knowledge_store.fail_keeper_memory_facts ~keeper
-              ~reason:(Msg.http_error_detail err) ~retryable ~at:now m.knowledge
-          in
-          record_http_incident ~now ~source:(Health.Source_keeper keeper)
-            ~context:
-              (Say.make ~ko:("키퍼 기억 사실 조회: " ^ keeper)
-                 ~en:("Keeper memory facts fetch: " ^ keeper))
-            err { m with knowledge })
-  | Msg.Reply_keeper_memory_activity { keeper = _; result = Ok activity } ->
-      ( {
-          m with
-          knowledge =
-            Knowledge_store.apply_keeper_memory_activity ~observed_at:now
-              activity m.knowledge;
-        }
-      , [] )
-  | Msg.Reply_keeper_memory_activity { keeper; result = Error err } -> (
-      match err with
-      | Msg.Http_error { status = 404; _ } ->
-          let knowledge =
-            { m.knowledge with keeper_memory_activity = Observed.absent }
-          in
-          ({ m with knowledge }, [])
-      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
-      | Msg.Decode_error _ ->
-          let retryable =
-            match err with
-            | Msg.Transport _ -> true
-            | Msg.Http_error { status; _ } when status >= 500 && status <= 599
+                Option.map
+                  (fun (k : Wire_fleet.keeper_summary) -> k.name)
+                  (Fleet_store.selected_keeper_summary m.fleet)
+            | Nav.Pulse
+            | Nav.Work
+            | Nav.Keepers
+            | Nav.Knowledge
+            | Nav.Runtime
+            | Nav.Infra ->
+                m.knowledge.memory_diff_keeper)
+      in
+      if not (Option.equal String.equal expected keeper) then (m, [])
+      else (
+        match result with
+        | Ok diff ->
+            let scope_ok =
+              match keeper, diff.scope with
+              | None, Wire_knowledge.Scope_world -> true
+              | Some kp, Wire_knowledge.Scope_keeper dk -> String.equal kp dk
+              | None, Wire_knowledge.Scope_keeper _
+              | Some _, Wire_knowledge.Scope_world ->
+                  false
+            in
+            if scope_ok then
+              ( {
+                  m with
+                  knowledge =
+                    Knowledge_store.apply_memory_diff ~observed_at:now diff
+                      m.knowledge;
+                }
+              , [] )
+            else (m, [])
+        | Error err ->
+            err_reply ~source:Health.Source_client_http ~ko:"기억 변화 조회"
+              ~en:"Memory diff fetch" err)
+  | Msg.Reply_keeper_memory_os_internals { keeper; result } ->
+      let expected =
+        match Model.active_dive m with
+        | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) -> Some name
+        | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper = dk; _ })) ->
+            dk
+        | Some
+            ( Nav.Dive_keeper
+                {
+                  tab =
+                    ( Nav.Keeper_chat
+                    | Nav.Keeper_work_candle
+                    | Nav.Keeper_sandbox
+                    | Nav.Keeper_config );
+                  _;
+                }
+            | Nav.Dive_work _
+            | Nav.Dive_knowledge
+                (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+            | Nav.Dive_infra _ ) ->
+            m.knowledge.memory_diff_keeper
+        | None -> (
+            match m.nav.workspace with
+            | Nav.Keepers
+              when Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
               ->
-                true
-            | Msg.Http_error _ | Msg.Workspace_mismatch _ | Msg.Decode_error _ ->
-                false
-          in
-          let knowledge =
-            Knowledge_store.fail_keeper_memory_activity ~keeper
-              ~reason:(Msg.http_error_detail err) ~retryable ~at:now m.knowledge
-          in
-          record_http_incident ~now ~source:(Health.Source_keeper keeper)
-            ~context:
-              (Say.make ~ko:("키퍼 기억 변천 조회: " ^ keeper)
-                 ~en:("Keeper memory activity fetch: " ^ keeper))
-            err { m with knowledge })
+                Option.map
+                  (fun (k : Wire_fleet.keeper_summary) -> k.name)
+                  (Fleet_store.selected_keeper_summary m.fleet)
+            | Nav.Pulse
+            | Nav.Work
+            | Nav.Keepers
+            | Nav.Knowledge
+            | Nav.Runtime
+            | Nav.Infra ->
+                m.knowledge.memory_diff_keeper)
+      in
+      if not (Option.equal String.equal expected (Some keeper)) then (m, [])
+      else (
+        match result with
+        | Ok internals when String.equal internals.keeper keeper ->
+            ( {
+                m with
+                knowledge =
+                  Knowledge_store.apply_memory_os_internals ~observed_at:now
+                    internals m.knowledge;
+              }
+            , [] )
+        | Ok _ -> (m, [])
+        | Error (Msg.Http_error { status = 404; _ }) ->
+            let knowledge =
+              { m.knowledge with memory_os_internals = Observed.absent }
+            in
+            ({ m with knowledge }, [])
+        | Error
+            (( Msg.Http_error _
+             | Msg.Transport _
+             | Msg.Workspace_mismatch _
+             | Msg.Decode_error _ ) as err) ->
+            err_reply ~source:Health.Source_client_http
+              ~ko:"메모리 OS 내부 상태 조회" ~en:"Memory OS internals fetch" err)
+  | Msg.Reply_keeper_memory_facts { keeper; result } ->
+      let expected =
+        match Model.active_dive m with
+        | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) -> Some name
+        | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper = dk; _ })) ->
+            dk
+        | Some
+            ( Nav.Dive_keeper
+                {
+                  tab =
+                    ( Nav.Keeper_chat
+                    | Nav.Keeper_work_candle
+                    | Nav.Keeper_sandbox
+                    | Nav.Keeper_config );
+                  _;
+                }
+            | Nav.Dive_work _
+            | Nav.Dive_knowledge
+                (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+            | Nav.Dive_infra _ ) ->
+            m.knowledge.memory_diff_keeper
+        | None -> (
+            match m.nav.workspace with
+            | Nav.Keepers
+              when Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
+              ->
+                Option.map
+                  (fun (k : Wire_fleet.keeper_summary) -> k.name)
+                  (Fleet_store.selected_keeper_summary m.fleet)
+            | Nav.Pulse
+            | Nav.Work
+            | Nav.Keepers
+            | Nav.Knowledge
+            | Nav.Runtime
+            | Nav.Infra ->
+                m.knowledge.memory_diff_keeper)
+      in
+      if not (Option.equal String.equal expected (Some keeper)) then (m, [])
+      else (
+        match result with
+        | Ok facts when String.equal facts.keeper keeper ->
+            ( {
+                m with
+                knowledge =
+                  Knowledge_store.apply_keeper_memory_facts ~observed_at:now
+                    facts m.knowledge;
+              }
+            , [] )
+        | Ok _ -> (m, [])
+        | Error (Msg.Http_error { status = 404; _ }) ->
+            let knowledge =
+              { m.knowledge with keeper_memory_facts = Observed.absent }
+            in
+            ({ m with knowledge }, [])
+        | Error
+            (( Msg.Http_error _
+             | Msg.Transport _
+             | Msg.Workspace_mismatch _
+             | Msg.Decode_error _ ) as err) ->
+            let retryable =
+              match err with
+              | Msg.Transport _ -> true
+              | Msg.Http_error { status; _ } when status >= 500 && status <= 599
+                ->
+                  true
+              | Msg.Http_error _ | Msg.Workspace_mismatch _ | Msg.Decode_error _
+                ->
+                  false
+            in
+            let knowledge =
+              Knowledge_store.fail_keeper_memory_facts ~keeper
+                ~reason:(Msg.http_error_detail err) ~retryable ~at:now
+                m.knowledge
+            in
+            record_http_incident ~now ~source:(Health.Source_keeper keeper)
+              ~context:
+                (Say.make ~ko:("키퍼 기억 사실 조회: " ^ keeper)
+                   ~en:("Keeper memory facts fetch: " ^ keeper))
+              err { m with knowledge })
+  | Msg.Reply_keeper_memory_activity { keeper; result } ->
+      let expected =
+        match Model.active_dive m with
+        | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) -> Some name
+        | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper = dk; _ })) ->
+            dk
+        | Some
+            ( Nav.Dive_keeper
+                {
+                  tab =
+                    ( Nav.Keeper_chat
+                    | Nav.Keeper_work_candle
+                    | Nav.Keeper_sandbox
+                    | Nav.Keeper_config );
+                  _;
+                }
+            | Nav.Dive_work _
+            | Nav.Dive_knowledge
+                (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+            | Nav.Dive_infra _ ) ->
+            m.knowledge.memory_diff_keeper
+        | None -> (
+            match m.nav.workspace with
+            | Nav.Keepers
+              when Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
+              ->
+                Option.map
+                  (fun (k : Wire_fleet.keeper_summary) -> k.name)
+                  (Fleet_store.selected_keeper_summary m.fleet)
+            | Nav.Pulse
+            | Nav.Work
+            | Nav.Keepers
+            | Nav.Knowledge
+            | Nav.Runtime
+            | Nav.Infra ->
+                m.knowledge.memory_diff_keeper)
+      in
+      if not (Option.equal String.equal expected (Some keeper)) then (m, [])
+      else (
+        match result with
+        | Ok activity when String.equal activity.keeper keeper ->
+            ( {
+                m with
+                knowledge =
+                  Knowledge_store.apply_keeper_memory_activity ~observed_at:now
+                    activity m.knowledge;
+              }
+            , [] )
+        | Ok _ -> (m, [])
+        | Error (Msg.Http_error { status = 404; _ }) ->
+            let knowledge =
+              { m.knowledge with keeper_memory_activity = Observed.absent }
+            in
+            ({ m with knowledge }, [])
+        | Error
+            (( Msg.Http_error _
+             | Msg.Transport _
+             | Msg.Workspace_mismatch _
+             | Msg.Decode_error _ ) as err) ->
+            let retryable =
+              match err with
+              | Msg.Transport _ -> true
+              | Msg.Http_error { status; _ } when status >= 500 && status <= 599
+                ->
+                  true
+              | Msg.Http_error _ | Msg.Workspace_mismatch _ | Msg.Decode_error _
+                ->
+                  false
+            in
+            let knowledge =
+              Knowledge_store.fail_keeper_memory_activity ~keeper
+                ~reason:(Msg.http_error_detail err) ~retryable ~at:now
+                m.knowledge
+            in
+            record_http_incident ~now ~source:(Health.Source_keeper keeper)
+              ~context:
+                (Say.make ~ko:("키퍼 기억 변천 조회: " ^ keeper)
+                   ~en:("Keeper memory activity fetch: " ^ keeper))
+              err { m with knowledge })
   | Msg.Reply_keeper_memory_health (Ok fleet) ->
       ( {
           m with

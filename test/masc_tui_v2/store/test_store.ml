@@ -6484,9 +6484,39 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
         String.equal event.identity "ev-2"
     | _ -> false);
   Alcotest.(check int) "dive_stack not deepened" 0 (List.length m_read.nav.dive_stack);
-  let m_read_scr, _ = Update.step ~now:t0 m_read (Msg.Key_event (char_key "j")) in
-  Alcotest.(check int) "j scrolls memory_reading_scroll" 1
+  (* Short entry does NOT overshoot scroll past its exact projected line bound;
+     long multi-line entry scrolls cleanly up to exact projected max_scroll (< 200) and stops. *)
+  let m_read_short_scr, _ = Update.step ~now:t0 m_read (Msg.Key_event (char_key "j")) in
+  Alcotest.(check int) "short reading clamps at exact max_scroll (0)" 0
+    m_read_short_scr.knowledge.memory_reading_scroll;
+  let long_claim =
+    String.concat "\n" (List.init 45 (fun i -> Printf.sprintf "Long reading paragraph line %02d" i))
+  in
+  let long_entry =
+    Knowledge_store.Reading_ordinary_fact
+      {
+        keeper = "alpha";
+        revision = 5;
+        fact = { f_recent_low with claim = long_claim };
+      }
+  in
+  let m_read_long =
+    { m_read with knowledge = Knowledge_store.open_memory_reading long_entry m_read.knowledge }
+  in
+  let m_read_scr, _ = Update.step ~now:t0 m_read_long (Msg.Key_event (char_key "j")) in
+  Alcotest.(check int) "j scrolls memory_reading_scroll on overflowing entry" 1
     m_read_scr.knowledge.memory_reading_scroll;
+  let m_read_end, _ =
+    Update.step ~now:t0 m_read_scr
+      (Msg.Key_event { Keymap.Input.key = Keymap.Input.End; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check bool) "End lands on positive exact bound (< 200)" true
+    (m_read_end.knowledge.memory_reading_scroll > 5
+     && m_read_end.knowledge.memory_reading_scroll < 100);
+  let m_read_end_dn, _ = Update.step ~now:t0 m_read_end (Msg.Key_event (char_key "j")) in
+  Alcotest.(check int) "j at End does not overshoot exact max_scroll"
+    m_read_end.knowledge.memory_reading_scroll
+    m_read_end_dn.knowledge.memory_reading_scroll;
   let m_closed, _ =
     Update.step ~now:t0 m_read_scr
       (Msg.Key_event { Keymap.Input.key = Keymap.Input.Escape; mods = Keymap.Input.no_mods })
@@ -6595,7 +6625,315 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
       (Msg.Key_event { Keymap.Input.key = Keymap.Input.Escape; mods = Keymap.Input.no_mods })
   in
   Alcotest.(check int) "Second Esc pops dive_stack" 0
-    (List.length m_dive_esc2.nav.dive_stack)
+    (List.length m_dive_esc2.nav.dive_stack);
+
+  (* 6. P1 #1: Cross-keeper late replies (Ok/404/Error) dropped; non-retryable failure resets on keeper switch;
+        World scope ignores stale keeper diff and returns None for selected_activity_event *)
+  let m_beta =
+    {
+      m_loaded with
+      knowledge = Knowledge_store.set_memory_diff_keeper (Some "beta") m_loaded.knowledge;
+    }
+  in
+  let late_alpha_facts =
+    Msg.Http_reply
+      {
+        epoch = m_beta.epoch;
+        reply =
+          Msg.Reply_keeper_memory_facts
+            {
+              keeper = "alpha";
+              result =
+                Error
+                  (Msg.Http_error
+                     { status = 404; body = "not found"; api_error = None });
+            };
+      }
+  in
+  let m_after_late_404, _ = Update.step ~now:t0 m_beta late_alpha_facts in
+  Alcotest.(check bool) "late alpha 404 dropped when viewing beta" true
+    (match m_after_late_404.knowledge.keeper_memory_facts with
+    | Observed.Value { data; _ } -> String.equal data.keeper "alpha"
+    | _ -> false);
+  let late_alpha_err =
+    Msg.Http_reply
+      {
+        epoch = m_beta.epoch;
+        reply =
+          Msg.Reply_keeper_memory_activity
+            {
+              keeper = "alpha";
+              result = Error (Msg.Decode_error "stale decode failure");
+            };
+      }
+  in
+  let m_after_late_err, _ = Update.step ~now:t0 m_after_late_404 late_alpha_err in
+  Alcotest.(check bool) "late alpha decode error dropped when viewing beta" true
+    (Observed.is_value m_after_late_err.knowledge.keeper_memory_activity);
+  (* Non-retryable Failed on beta resets to Unreported when switching to alpha so alpha fetches *)
+  let m_beta_failed, _ =
+    Update.step ~now:t0 m_beta
+      (Msg.Http_reply
+         {
+           epoch = m_beta.epoch;
+           reply =
+             Msg.Reply_keeper_memory_facts
+               { keeper = "beta"; result = Error (Msg.Decode_error "bad beta json") };
+         })
+  in
+  Alcotest.(check bool) "beta facts marked Failed(retryable=false)" true
+    (match m_beta_failed.knowledge.keeper_memory_facts with
+    | Observed.Failed { retryable = false; _ } -> true
+    | _ -> false);
+  let m_back_alpha =
+    {
+      m_beta_failed with
+      knowledge =
+        Knowledge_store.set_memory_diff_keeper (Some "alpha")
+          m_beta_failed.knowledge;
+    }
+  in
+  Alcotest.(check bool) "switching from failed beta to alpha resets Failed -> Unreported" true
+    (match m_back_alpha.knowledge.keeper_memory_facts with
+    | Observed.Unreported -> true
+    | _ -> false);
+  let alpha_refetch_paths = get_paths (View_fetches.fetches_for_current_view m_back_alpha) in
+  Alcotest.(check bool) "alpha facts immediately refetched after beta non-retryable failure" true
+    (has_path "/api/v1/keepers/alpha/memory-facts" alpha_refetch_paths);
+  (* World scope ignores stale keeper diff & returns None for selected_activity_event *)
+  let keeper_diff : Wire_knowledge.memory_diff =
+    {
+      scope = Wire_knowledge.Scope_keeper "alpha";
+      range =
+        {
+          window = Some "24h";
+          from_rev = Some 1;
+          to_rev = Some 5;
+          from_unix = None;
+          to_unix = None;
+        };
+      retrieval_heat =
+        {
+          hot = 1;
+          warm = 0;
+          cold = 0;
+          never_retrieved = 0;
+          total_events = 1;
+          unreadable_event_lines = 0;
+        };
+      body =
+        Wire_knowledge.Keeper_diff
+          {
+            counts =
+              {
+                total_facts_now = 1;
+                added = 1;
+                updated = 0;
+                retracted = 0;
+                invalidated = 0;
+                journal_failures_in_window = 0;
+                journal_quarantines_in_window = 0;
+                undecodable_journal_lines = 0;
+              };
+            revisions = [];
+            added =
+              [
+                {
+                  added_at_rev = Some 5;
+                  memory_id = "md-1";
+                  category = "fact";
+                  origin = "authored";
+                  text = "Alpha diff entry";
+                  first_seen_unix = 1795252000.0;
+                  last_seen_unix = Some 1795252000.0;
+                  retrieval_count = 1;
+                  last_retrieved_at_unix = Some 1795252000.0;
+                  heat = Wire_knowledge.Heat_hot;
+                };
+              ];
+            updated = [];
+            retracted = [];
+            invalidated = [];
+            writer_status = None;
+          };
+    }
+  in
+  let m_with_kdiff =
+    {
+      m_loaded with
+      knowledge =
+        Knowledge_store.apply_memory_diff ~observed_at:t0 keeper_diff
+          m_loaded.knowledge;
+    }
+  in
+  let k_world = Knowledge_store.set_memory_diff_keeper None m_with_kdiff.knowledge in
+  Alcotest.(check int) "World scope filtered_memory_diff_items ignores stale keeper diff" 0
+    (List.length (Knowledge_store.filtered_memory_diff_items k_world));
+  Alcotest.(check bool) "World scope selected_activity_event is None" true
+    (Option.is_none (Knowledge_store.selected_activity_event k_world));
+
+  (* 7. P1 #2: memory_reading closes on workspace switch, Dive_keeper c hotkey, set_filter;
+        stale reading never hijacks Esc outside Memory view *)
+  let m_ws_switched, _ = Update.step ~now:t0 m_read (Msg.Key_event (char_key "1")) in
+  Alcotest.(check bool) "switch_workspace closes memory_reading" true
+    (Option.is_none m_ws_switched.knowledge.memory_reading);
+  let m_filtered =
+    { m_read with knowledge = Knowledge_store.set_filter "foo" m_read.knowledge }
+  in
+  Alcotest.(check bool) "set_filter closes memory_reading" true
+    (Option.is_none m_filtered.knowledge.memory_reading);
+  let m_dive_c, _ = Update.step ~now:t0 m_dive_read (Msg.Key_event (char_key "c")) in
+  Alcotest.(check bool) "Dive_keeper c hotkey closes memory_reading" true
+    (Option.is_none m_dive_c.knowledge.memory_reading);
+  (* Even if a reading remained set on a non-memory workspace, Esc pops dive / does NOT hijack *)
+  let m_stale_on_other_dive =
+    {
+      m_dive_read with
+      nav =
+        {
+          m_dive_read.nav with
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_sandbox } ];
+        };
+    }
+  in
+  let m_esc_other, _ =
+    Update.step ~now:t0 m_stale_on_other_dive
+      (Msg.Key_event { Keymap.Input.key = Keymap.Input.Escape; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check int) "Esc on Keeper_sandbox pops dive instead of hijacking stale reading" 0
+    (List.length m_esc_other.nav.dive_stack);
+
+  (* 8. P1 #4: Zoomed (z) 3->기억 scrolls right pane (not hidden left pane);
+        Zoomed 4->Keepers->기억 accepts e/f/d mode hotkeys *)
+  let m_zoomed_mem =
+    {
+      m_loaded with
+      nav = { m_loaded.nav with pane_index = 0; zoomed = true };
+    }
+  in
+  let m_zoomed_j, _ = Update.step ~now:t0 m_zoomed_mem (Msg.Key_event (char_key "j")) in
+  Alcotest.(check (option string)) "zoomed 3->기억 j keeps alpha scope" (Some "alpha")
+    m_zoomed_j.knowledge.memory_diff_keeper;
+  Alcotest.(check int) "zoomed 3->기억 j advances right-pane activity cursor" 1
+    m_zoomed_j.knowledge.selected_activity_index;
+  let m_keepers_zoomed =
+    let base = Model.initial ~cols:140 ~rows:40 () in
+    let fleet =
+      base.fleet
+      |> Fleet_store.apply_keepers ~observed_at:t0
+           [ sample_keeper "alpha"; sample_keeper "beta" ]
+      |> Fleet_store.select_keeper "alpha"
+      |> Fleet_store.set_keeper_dive_tab Nav.Keeper_memory
+    in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Keepers; pane_index = 0; zoomed = true };
+      fleet;
+      knowledge = Knowledge_store.set_memory_diff_keeper (Some "alpha") base.knowledge;
+    }
+  in
+  let m_kz_f, _ = Update.step ~now:t0 m_keepers_zoomed (Msg.Key_event (char_key "f")) in
+  Alcotest.(check bool) "zoomed 4->Keepers->기억 f switches to View_facts" true
+    (Knowledge_store.equal_memory_view_mode m_kz_f.knowledge.memory_view_mode
+       Knowledge_store.View_facts);
+  (* Embedded 4->Keepers pane-0 keeper switch closes memory_reading & syncs memory_diff_keeper *)
+  let m_emb_read =
+    {
+      m_keepers_zoomed with
+      nav = { m_keepers_zoomed.nav with zoomed = false; pane_index = 0 };
+      knowledge =
+        Knowledge_store.open_memory_reading
+          (Knowledge_store.Reading_activity { keeper = "alpha"; event = ev1; notes = [] })
+          m_keepers_zoomed.knowledge;
+    }
+  in
+  let m_emb_switched, _ = Update.step ~now:t0 m_emb_read (Msg.Key_event (char_key "j")) in
+  Alcotest.(check (option string)) "embedded Keepers pane-0 j syncs memory_diff_keeper to beta"
+    (Some "beta") m_emb_switched.knowledge.memory_diff_keeper;
+  Alcotest.(check bool) "embedded Keepers pane-0 j closes alpha memory_reading" true
+    (Option.is_none m_emb_switched.knowledge.memory_reading);
+  (* Embedded 4->Keepers sub-tab cycle away from Keeper_memory closes memory_reading *)
+  let m_emb_tab_read =
+    {
+      m_emb_read with
+      nav = { m_emb_read.nav with pane_index = 1 };
+    }
+  in
+  let m_emb_tab_away, _ =
+    Update.step ~now:t0 m_emb_tab_read
+      (Msg.Key_event { Keymap.Input.key = Keymap.Input.Right; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check bool) "embedded Keepers sub-tab cycle closes memory_reading" true
+    (Option.is_none m_emb_tab_away.knowledge.memory_reading);
+
+  (* 9. P2 #5: Memory_diff_dive Enter always opens Reading_diff_item even in View_evolution *)
+  let m_diff_dive =
+    {
+      m_with_kdiff with
+      nav =
+        {
+          m_with_kdiff.nav with
+          dive_stack =
+            [
+              Nav.Dive_knowledge
+                (Nav.Memory_diff_dive
+                   { keeper = Some "alpha"; from_rev = 1; to_rev = 5 });
+            ];
+        };
+      knowledge =
+        { m_with_kdiff.knowledge with memory_view_mode = Knowledge_store.View_evolution };
+    }
+  in
+  let m_dd_enter, _ =
+    Update.step ~now:t0 m_diff_dive
+      (Msg.Key_event { Keymap.Input.key = Keymap.Input.Enter; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check bool) "Memory_diff_dive Enter opens Reading_diff_item regardless of view mode" true
+    (match m_dd_enter.knowledge.memory_reading with
+    | Some (Knowledge_store.Reading_diff_item { keeper = Some "alpha"; item = Knowledge_store.Keeper_added f }) ->
+        String.equal f.memory_id "md-1"
+    | _ -> false);
+
+  (* 10. P2 #6: Cross-keeper SSE events do NOT mark alpha's loaded slots stale *)
+  let m_sse_other_health, _ =
+    Update.step ~now:t0 m_loaded
+      (Msg.Sse_event
+         {
+           epoch = m_loaded.epoch;
+           event =
+             Msg.Sse_observer_delivery
+               {
+                 cursor = Some 11;
+                 decoded =
+                   Wire_observer.Event
+                     (Wire_observer.Dataset_changed
+                        (Wire_observer.Dataset_memory_health (Some "other")));
+               };
+         })
+  in
+  Alcotest.(check bool) "other-keeper Dataset_memory_health keeps alpha facts fresh" false
+    (Observed.is_stale m_sse_other_health.knowledge.keeper_memory_facts);
+  let m_sse_other_journal, _ =
+    Update.step ~now:t0 m_loaded
+      (Msg.Sse_event
+         {
+           epoch = m_loaded.epoch;
+           event =
+             Msg.Sse_observer_delivery
+               {
+                 cursor = Some 12;
+                 decoded =
+                   Wire_observer.Event
+                     (Wire_observer.Keeper_memory_journal_appended
+                        { keeper = "other"; at_unix = 1795252060.0 });
+               };
+         })
+  in
+  Alcotest.(check bool) "other-keeper journal append keeps alpha activity fresh" false
+    (Observed.is_stale m_sse_other_journal.knowledge.keeper_memory_activity);
+  Alcotest.(check bool) "other-keeper journal append keeps alpha facts fresh" false
+    (Observed.is_stale m_sse_other_journal.knowledge.keeper_memory_facts)
 
 let () =
   Alcotest.run "masc_tui_store"

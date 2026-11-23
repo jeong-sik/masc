@@ -1367,10 +1367,11 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
             |> Fleet_store.mark_chat_history_loading ~keeper:name
           in
           let config = Config_store.cancel_edit_field m.config in
+          let knowledge = Knowledge_store.close_memory_reading m.knowledge in
           let drafts =
             m.drafts |> Drafts.set_active_keeper name |> Drafts.set_focus true
           in
-          let next = { m with nav; fleet; config; drafts } in
+          let next = { m with nav; fleet; config; knowledge; drafts } in
           (next, View_fetches.fetches_for_current_view next)
       | Nav.Keeper_config, Some "e" ->
           let config =
@@ -1488,7 +1489,10 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
               (m, []))
       | Nav.Keepers -> (
           let split_keeper_opt =
-            if m.nav.pane_index = 1 then
+            if
+              m.nav.pane_index = 1
+              || (m.nav.zoomed && Model.can_zoom_current_view m)
+            then
               Option.map
                 (fun (k : Wire_fleet.keeper_summary) -> k.name)
                 (Fleet_store.selected_keeper_summary m.fleet)

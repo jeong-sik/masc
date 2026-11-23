@@ -47,5 +47,6 @@ val render_world_diff_body :
   lang:Say.lang ->
   now_unix:float ->
   k:Knowledge_store.t ->
+  focused:bool ->
   diff_scroll:int ->
   unit

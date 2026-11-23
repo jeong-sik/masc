@@ -123,9 +123,14 @@ type http_reply =
     }
   | Reply_artifacts of (Wire_knowledge.artifact_entry list, http_error) result
   | Reply_world_memory of (Wire_knowledge.world_memory, http_error) result
-  | Reply_memory_diff of (Wire_knowledge.memory_diff, http_error) result
-  | Reply_keeper_memory_os_internals of
-      (Wire_knowledge.memory_os_internals, http_error) result
+  | Reply_memory_diff of {
+      keeper : string option;
+      result : (Wire_knowledge.memory_diff, http_error) result;
+    }
+  | Reply_keeper_memory_os_internals of {
+      keeper : string;
+      result : (Wire_knowledge.memory_os_internals, http_error) result;
+    }
   | Reply_keeper_memory_facts of {
       keeper : string;
       result : (Wire_knowledge.keeper_memory_facts, http_error) result;

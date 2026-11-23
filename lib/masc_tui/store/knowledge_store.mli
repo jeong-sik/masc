@@ -154,7 +154,34 @@ val set_memory_facts_sort : memory_facts_sort -> t -> t
 val toggle_memory_facts_sort : t -> t
 val open_memory_reading : memory_reading_entry -> t -> t
 val close_memory_reading : t -> t
+val memory_reading_matches_scope :
+  keeper_opt:string option -> memory_reading_entry -> bool
 val scroll_memory_reading : max_scroll:int -> delta:int -> t -> t
+
+type reading_line_tone =
+  | Reading_anchor
+  | Reading_primary
+  | Reading_structure of { bold : bool }
+  | Reading_whisper of { italic : bool }
+  | Reading_status of { tone : Theme.status_token; bold : bool }
+
+type reading_line = {
+  rail : Theme.status_token option;
+  tone : reading_line_tone;
+  text : string;
+}
+
+val wrap_lines : max_width:int -> string -> string list
+(** Word-aware, grapheme-safe UTF-8/CJK multi-line text wrapping. *)
+
+val project_memory_reading_lines :
+  width:int ->
+  lang:Say.lang ->
+  now_unix:float ->
+  memory_reading_entry ->
+  reading_line list
+(** Single-SSOT wrapped full-reading line layout shared by {!Update_nav}
+    scroll bounds and [Memory_explorer.render_full_reading]. *)
 val move_memory_activity :
   keeper:string -> ?viewport_rows:int -> delta:int -> t -> t
 val move_memory_facts :
@@ -275,9 +302,17 @@ val filtered_memory_fact_rows :
 val selected_memory_fact_row :
   keeper:string -> t -> memory_fact_row option
 
+val filtered_memory_diff_items_for :
+  keeper_opt:string option -> t -> memory_diff_item list
+(** Scope-explicit filtered diff items: only yields items when [memory_diff]
+    matches [keeper_opt] ([None] for [Scope_world], [Some kp] for
+    [Scope_keeper kp]). *)
+
 val filtered_memory_diff_items : t -> memory_diff_item list
-(** Single-SSOT filtered diff items shared by [Screen_knowledge] and
-    {!Update_nav} (matching [inv.missing_premise_ids] too). *)
+(** Single-SSOT filtered diff items for [t.memory_diff_keeper]. *)
+
+val selected_memory_diff_item_for :
+  keeper_opt:string option -> t -> memory_diff_item option
 
 val selected_memory_diff_item : t -> memory_diff_item option
 

@@ -131,6 +131,15 @@ let apply_dataset_invalidation (m : Model.t) ds =
       in
       ({ m with knowledge }, cmds)
   | Wire_observer.Dataset_memory_health keeper_opt ->
+      let mark_if_matching ~get_keeper obs =
+        match keeper_opt with
+        | None -> Observed.mark_stale obs
+        | Some target -> (
+            match Observed.to_option obs with
+            | Some data when String.equal (get_keeper data) target ->
+                Observed.mark_stale obs
+            | Some _ | None -> obs)
+      in
       let knowledge =
         {
           m.knowledge with
@@ -138,9 +147,15 @@ let apply_dataset_invalidation (m : Model.t) ds =
           keeper_memory_health =
             Observed.mark_stale m.knowledge.keeper_memory_health;
           keeper_memory_facts =
-            Observed.mark_stale m.knowledge.keeper_memory_facts;
+            mark_if_matching
+              ~get_keeper:(fun (f : Wire_knowledge.keeper_memory_facts) ->
+                f.keeper)
+              m.knowledge.keeper_memory_facts;
           memory_os_internals =
-            Observed.mark_stale m.knowledge.memory_os_internals;
+            mark_if_matching
+              ~get_keeper:(fun (i : Wire_knowledge.memory_os_internals) ->
+                i.keeper)
+              m.knowledge.memory_os_internals;
         }
       in
       let base_cmds =
@@ -654,18 +669,44 @@ let apply_observer_event (m : Model.t) = function
       in
       ({ m with fleet }, cmds)
   | Wire_observer.Keeper_memory_journal_appended { keeper; _ } ->
+      let mark_keeper_slot ~get_keeper obs =
+        match Observed.to_option obs with
+        | Some data when String.equal (get_keeper data) keeper ->
+            Observed.mark_stale obs
+        | Some _ | None -> obs
+      in
+      let memory_diff =
+        match Observed.to_option m.knowledge.memory_diff with
+        | Some (diff : Wire_knowledge.memory_diff) -> (
+            match diff.scope with
+            | Wire_knowledge.Scope_keeper k when String.equal k keeper ->
+                Observed.mark_stale m.knowledge.memory_diff
+            | Wire_knowledge.Scope_world ->
+                Observed.mark_stale m.knowledge.memory_diff
+            | Wire_knowledge.Scope_keeper _ -> m.knowledge.memory_diff)
+        | None -> m.knowledge.memory_diff
+      in
       let knowledge =
         {
           m.knowledge with
-          memory_diff = Observed.mark_stale m.knowledge.memory_diff;
+          memory_diff;
           keeper_memory_activity =
-            Observed.mark_stale m.knowledge.keeper_memory_activity;
+            mark_keeper_slot
+              ~get_keeper:(fun (a : Wire_knowledge.keeper_memory_activity) ->
+                a.keeper)
+              m.knowledge.keeper_memory_activity;
           keeper_memory_facts =
-            Observed.mark_stale m.knowledge.keeper_memory_facts;
+            mark_keeper_slot
+              ~get_keeper:(fun (f : Wire_knowledge.keeper_memory_facts) ->
+                f.keeper)
+              m.knowledge.keeper_memory_facts;
           keeper_memory_health =
             Observed.mark_stale m.knowledge.keeper_memory_health;
           memory_os_internals =
-            Observed.mark_stale m.knowledge.memory_os_internals;
+            mark_keeper_slot
+              ~get_keeper:(fun (i : Wire_knowledge.memory_os_internals) ->
+                i.keeper)
+              m.knowledge.memory_os_internals;
         }
       in
       let e = m.epoch in

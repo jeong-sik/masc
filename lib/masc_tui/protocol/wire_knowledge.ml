@@ -2088,20 +2088,16 @@ let source_invalidation_reason_to_string = function
   | Source_unavailable -> "source_unavailable"
 
 let is_valid_custom_category raw =
+  let letter = function 'a' .. 'z' -> true | _ -> false in
+  let word_char c = letter c || (c >= '0' && c <= '9') in
   let len = String.length raw in
-  if len = 0 then false
-  else
-    let c0 = raw.[0] in
-    let starts_lower = c0 >= 'a' && c0 <= 'z' in
-    let rec all_ok i =
-      if i >= len then true
-      else
-        let c = raw.[i] in
-        if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '_' then
-          all_ok (i + 1)
-        else false
-    in
-    starts_lower && all_ok 1
+  let rec valid i after_sep =
+    if i = len then not after_sep
+    else if word_char raw.[i] then valid (i + 1) false
+    else if raw.[i] = '_' && not after_sep then valid (i + 1) true
+    else false
+  in
+  len > 0 && letter raw.[0] && valid 1 false
 
 let decode_memory_fact_category raw =
   match raw with
@@ -2129,10 +2125,23 @@ let source_invalidation_reason_of_string = function
   | "source_unavailable" -> Some Source_unavailable
   | _ -> None
 
+let decode_nonblank_string_list json key =
+  let* raw_items = required_list_field json key in
+  decode_list key
+    (function
+      | `String s ->
+          if String.equal (String.trim s) "" then
+            Error (Printf.sprintf "field %S contains blank string" key)
+          else Ok s
+      | other -> field_type_error key "non-blank string" other)
+    raw_items
+
 let decode_derivation_ref json =
   let* rule_id = required_nonblank_string json "rule_id" in
-  let* premise_ids = decode_string_name_list json "premise_ids" in
-  Ok { rule_id; premise_ids }
+  let* premise_ids = decode_nonblank_string_list json "premise_ids" in
+  if premise_ids = [] then
+    Error "field \"premise_ids\" must not be empty"
+  else Ok { rule_id; premise_ids }
 
 let decode_memory_fact_basis json =
   let* kind = required_nonblank_string json "kind" in
@@ -2215,9 +2224,11 @@ let decode_keeper_support_invalidation json =
   let* basis_obj = required_object_field json "basis" in
   let* basis = decode_memory_fact_basis basis_obj in
   let* missing_premise_ids =
-    decode_string_name_list json "missing_premise_ids"
+    decode_nonblank_string_list json "missing_premise_ids"
   in
-  Ok { memory_id; claim; basis; missing_premise_ids }
+  if missing_premise_ids = [] then
+    Error "field \"missing_premise_ids\" must not be empty"
+  else Ok { memory_id; claim; basis; missing_premise_ids }
 
 let decode_ordinary_memory_state json =
   if has_field json "read_error" then
@@ -2234,7 +2245,7 @@ let decode_ordinary_memory_state json =
       let* facts =
         decode_list "ordinary.facts" decode_keeper_ordinary_fact raw_facts
       in
-      let* raw_invs = optional_list_field json "support_invalidations" in
+      let* raw_invs = required_list_field json "support_invalidations" in
       let* support_invalidations =
         decode_list "ordinary.support_invalidations"
           decode_keeper_support_invalidation raw_invs
@@ -2379,15 +2390,15 @@ let memory_activity_kind_of_string = function
 
 let decode_memory_activity_fact json =
   let* memory_id = required_nonblank_string json "memory_id" in
-  let* claim = required_nullable_string_field json "claim" in
-  let claim =
-    match claim with
-    | Some s when String.equal (String.trim s) "" -> None
-    | Some _ | None -> claim
-  in
+  let* claim = required_nullable_nonblank_string_field json "claim" in
   Ok { memory_id; claim }
 
 let validate_activity_event_shape (ev : memory_activity_event) =
+  let complete facts =
+    List.for_all
+      (fun (f : memory_activity_fact) -> Option.is_some f.claim)
+      facts
+  in
   let has_before = ev.before <> [] in
   let has_after = ev.after <> [] in
   let has_reason =
@@ -2397,38 +2408,51 @@ let validate_activity_event_shape (ev : memory_activity_event) =
   in
   match ev.kind with
   | Activity_created ->
-      if (not has_before) && has_after then Ok ()
-      else Error "created activity event requires empty before and non-empty after"
-  | Activity_reobserved | Activity_revised | Activity_absorbed ->
-      if has_before && has_after then Ok ()
+      if (not has_before) && has_after && complete ev.after then Ok ()
       else
         Error
-          (Printf.sprintf "%s activity event requires non-empty before and after"
-             (memory_activity_kind_to_string ev.kind))
-  | Activity_retracted | Activity_removed | Activity_invalidated ->
-      if has_before && not has_after then Ok ()
+          "created activity event requires empty before and non-empty complete \
+           after"
+  | Activity_reobserved | Activity_revised | Activity_absorbed ->
+      if has_before && has_after && complete ev.before && complete ev.after then
+        Ok ()
       else
         Error
           (Printf.sprintf
-             "%s activity event requires non-empty before and empty after"
+             "%s activity event requires non-empty complete before and after"
              (memory_activity_kind_to_string ev.kind))
-  | Activity_relation_unavailable ->
-      if (has_before || has_after) && has_reason then Ok ()
+  | Activity_retracted | Activity_removed | Activity_invalidated ->
+      if has_before && (not has_after) && complete ev.before then Ok ()
       else
         Error
-          "relation_unavailable activity event requires fact references and a \
-           non-blank reason"
+          (Printf.sprintf
+             "%s activity event requires non-empty complete before and empty \
+              after"
+             (memory_activity_kind_to_string ev.kind))
+  | Activity_relation_unavailable ->
+      if has_before && complete ev.before && has_reason then Ok ()
+      else
+        Error
+          "relation_unavailable activity event requires non-empty complete \
+           before and a non-blank reason"
 
 let decode_memory_activity_event json =
   let* identity = required_nonblank_string json "identity" in
   let* recorded_at_unix = decode_timestamp_unix json "recorded_at" in
+  let* () =
+    if Float.is_finite recorded_at_unix && recorded_at_unix >= 0.0 then Ok ()
+    else
+      Error
+        (Printf.sprintf "field \"recorded_at\" must be finite and >= 0, got %g"
+           recorded_at_unix)
+  in
   let* revision = required_nonnegative_int_field json "revision" in
   let* kind = decode_enum ~field:"kind" memory_activity_kind_of_string json in
   let* raw_before = required_list_field json "before" in
   let* before = decode_list "before" decode_memory_activity_fact raw_before in
   let* raw_after = required_list_field json "after" in
   let* after = decode_list "after" decode_memory_activity_fact raw_after in
-  let* reason = optional_nullable_string_field json "reason" in
+  let* reason = required_nullable_nonblank_string_field json "reason" in
   let ev =
     { identity; recorded_at_unix; revision; kind; before; after; reason }
   in
@@ -2579,7 +2603,7 @@ let decode_keeper_memory_health_row json =
   let* observed_facts = required_nonnegative_int_field json "observed_facts" in
   let* derived_facts = required_nonnegative_int_field json "derived_facts" in
   let* support_invalidations =
-    optional_nonnegative_count json "support_invalidations"
+    required_nonnegative_int_field json "support_invalidations"
   in
   let* snapshot_bytes = required_nonnegative_int_field json "snapshot_bytes" in
   let* added = required_nonnegative_int_field json "added" in
@@ -2594,22 +2618,22 @@ let decode_keeper_memory_health_row json =
     required_nonnegative_int_field json "librarian_failures"
   in
   let* vision_ingest_errors =
-    optional_nonnegative_count json "vision_ingest_errors"
+    required_nonnegative_int_field json "vision_ingest_errors"
   in
   let* read_error = required_nullable_nonblank_string_field json "read_error" in
-  let* source_revision = optional_nonnegative_count json "source_revision" in
-  let* source_facts = optional_nonnegative_count json "source_facts" in
+  let* source_revision = required_nonnegative_int_field json "source_revision" in
+  let* source_facts = required_nonnegative_int_field json "source_facts" in
   let* source_invalidations =
-    optional_nonnegative_count json "source_invalidations"
+    required_nonnegative_int_field json "source_invalidations"
   in
   let* source_snapshot_bytes =
-    optional_nonnegative_count json "source_snapshot_bytes"
+    required_nonnegative_int_field json "source_snapshot_bytes"
   in
   let* source_snapshot_present =
-    decode_bool_field_or json "source_snapshot_present" ~default:false
+    required_bool_field json "source_snapshot_present"
   in
   let* source_read_error =
-    optional_nullable_string_field json "source_read_error"
+    required_nullable_nonblank_string_field json "source_read_error"
   in
   let* raw_alerts = required_list_field json "alerts" in
   let* alerts = decode_list "alerts" decode_memory_health_alert raw_alerts in

@@ -1556,35 +1556,138 @@ let partition_probe_by_active_lanes ~lanes (probe : runtime_probe_snapshot) =
     (fun (row : provider_probe_row) -> Hashtbl.mem active_ids row.runtime_id)
     probe.providers
 
+type exact_output_status =
+  | Exact_running
+  | Exact_succeeded
+  | Exact_cancelled
+  | Exact_failed of { code : string; detail : string }
+  | Exact_completion_persistence_failed
+  | Exact_completion_durability_unknown
+
+type task_review_status =
+  | Task_review_running
+  | Task_review_approved
+  | Task_review_rejected
+  | Task_review_infrastructure_unavailable
+  | Task_review_not_reviewed
+  | Task_review_commit_failed
+  | Task_review_execution_pending
+  | Task_review_execution_repair_required
+  | Task_review_raised
+  | Task_review_cancelled
+  | Task_review_superseded
+
+type goal_review_status =
+  | Goal_review_running
+  | Goal_review_reviewed
+  | Goal_review_committed
+  | Goal_review_superseded
+  | Goal_review_deferred
+  | Goal_review_raised
+  | Goal_review_cancelled
+
+type lane_run_status =
+  | Exact_output of exact_output_status
+  | Task_verification of task_review_status
+  | Goal_verification of goal_review_status
+
 type exact_lane_run = {
   run_id : string;
   lane : string;
-  status : string;
-  started_at_unix : float option;
-  finished_at_unix : float option;
-  summary : string option;
+  subject_id : string option;
+  status : lane_run_status;
+  started_at_unix : float;
 }
+
+let lane_run_status_label = function
+  | Exact_output Exact_running -> "running"
+  | Exact_output Exact_succeeded -> "succeeded"
+  | Exact_output Exact_cancelled -> "cancelled"
+  | Exact_output (Exact_failed _) -> "failed"
+  | Exact_output Exact_completion_persistence_failed ->
+      "completion_persistence_failed"
+  | Exact_output Exact_completion_durability_unknown ->
+      "completion_durability_unknown"
+  | Task_verification Task_review_running -> "running"
+  | Task_verification Task_review_approved -> "approved"
+  | Task_verification Task_review_rejected -> "rejected"
+  | Task_verification Task_review_infrastructure_unavailable ->
+      "infrastructure_unavailable"
+  | Task_verification Task_review_not_reviewed -> "not_reviewed"
+  | Task_verification Task_review_commit_failed -> "commit_failed"
+  | Task_verification Task_review_execution_pending -> "execution_pending"
+  | Task_verification Task_review_execution_repair_required ->
+      "execution_repair_required"
+  | Task_verification Task_review_raised -> "raised"
+  | Task_verification Task_review_cancelled -> "review_cancelled"
+  | Task_verification Task_review_superseded -> "superseded_by"
+  | Goal_verification Goal_review_running -> "running"
+  | Goal_verification Goal_review_reviewed -> "reviewed"
+  | Goal_verification Goal_review_committed -> "committed"
+  | Goal_verification Goal_review_superseded -> "superseded"
+  | Goal_verification Goal_review_deferred -> "deferred"
+  | Goal_verification Goal_review_raised -> "raised"
+  | Goal_verification Goal_review_cancelled -> "review_cancelled"
+
+let decode_exact_output_status json = function
+  | "running" -> Ok Exact_running
+  | "succeeded" -> Ok Exact_succeeded
+  | "cancelled" -> Ok Exact_cancelled
+  | "failed" ->
+      let* code = required_string_field json "code" in
+      let* detail = required_string_field json "detail" in
+      Ok (Exact_failed { code; detail })
+  | "completion_persistence_failed" -> Ok Exact_completion_persistence_failed
+  | "completion_durability_unknown" -> Ok Exact_completion_durability_unknown
+  | other -> Error (Printf.sprintf "unknown exact_output run status %S" other)
+
+let decode_task_review_status = function
+  | "running" -> Ok Task_review_running
+  | "approved" -> Ok Task_review_approved
+  | "rejected" -> Ok Task_review_rejected
+  | "infrastructure_unavailable" -> Ok Task_review_infrastructure_unavailable
+  | "not_reviewed" -> Ok Task_review_not_reviewed
+  | "commit_failed" -> Ok Task_review_commit_failed
+  | "execution_pending" -> Ok Task_review_execution_pending
+  | "execution_repair_required" -> Ok Task_review_execution_repair_required
+  | "raised" -> Ok Task_review_raised
+  | "review_cancelled" -> Ok Task_review_cancelled
+  | "superseded_by" -> Ok Task_review_superseded
+  | other ->
+      Error (Printf.sprintf "unknown task_verification run status %S" other)
+
+let decode_goal_review_status = function
+  | "running" -> Ok Goal_review_running
+  | "reviewed" -> Ok Goal_review_reviewed
+  | "committed" -> Ok Goal_review_committed
+  | "superseded" -> Ok Goal_review_superseded
+  | "deferred" -> Ok Goal_review_deferred
+  | "raised" -> Ok Goal_review_raised
+  | "review_cancelled" -> Ok Goal_review_cancelled
+  | other ->
+      Error (Printf.sprintf "unknown goal_verification run status %S" other)
 
 let decode_exact_lane_run json =
   let* run_id = required_nonblank_string json "run_id" in
+  let* run_kind = required_nonblank_string json "run_kind" in
   let* lane = required_nonblank_string json "lane" in
-  let* status = required_nonblank_string json "status" in
-  let* started_at_unix = decode_optional_timestamp_unix json "started_at" in
-  let* finished_at_unix = decode_optional_timestamp_unix json "finished_at" in
-  let* summary_opt = optional_nonblank_string json "summary" in
-  let* detail_opt = optional_nonblank_string json "detail" in
-  let* subject_opt = optional_nonblank_string json "subject_id" in
-  let summary =
-    match summary_opt with
-    | Some _ as s -> s
-    | None -> (
-        match (subject_opt, detail_opt) with
-        | Some sub, Some det -> Some (sub ^ " · " ^ det)
-        | Some sub, None -> Some sub
-        | None, Some det -> Some det
-        | None, None -> None)
+  let* subject_id = optional_nonblank_string json "subject_id" in
+  let* status_label = required_nonblank_string json "status" in
+  let* started_at_unix = required_finite_float json "started_at" in
+  let* status =
+    match run_kind with
+    | "exact_output" ->
+        let* s = decode_exact_output_status json status_label in
+        Ok (Exact_output s)
+    | "task_verification" ->
+        let* s = decode_task_review_status status_label in
+        Ok (Task_verification s)
+    | "goal_verification" ->
+        let* s = decode_goal_review_status status_label in
+        Ok (Goal_verification s)
+    | other -> Error (Printf.sprintf "unknown lane run_kind %S" other)
   in
-  Ok { run_id; lane; status; started_at_unix; finished_at_unix; summary }
+  Ok { run_id; lane; subject_id; status; started_at_unix }
 
 let decode_exact_lane_runs json =
   let* _, body = unwrap_v2_or_raw json in

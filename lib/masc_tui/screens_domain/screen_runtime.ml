@@ -2864,6 +2864,20 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
     end;
     (match rt.exact_lane_runs with
      | Observed.Value { data = runs; _ } when runs <> [] ->
+         let run_note (r : Wire_runtime.exact_lane_run) =
+           match r.status with
+           | Wire_runtime.Exact_output
+               (Wire_runtime.Exact_failed { code; detail }) ->
+               Some (code ^ " · " ^ detail)
+           | Wire_runtime.Exact_output
+               ( Wire_runtime.Exact_running | Wire_runtime.Exact_succeeded
+               | Wire_runtime.Exact_cancelled
+               | Wire_runtime.Exact_completion_persistence_failed
+               | Wire_runtime.Exact_completion_durability_unknown )
+           | Wire_runtime.Task_verification _ | Wire_runtime.Goal_verification _
+             ->
+               r.subject_id
+         in
          let dedup_runs (xs : Wire_runtime.exact_lane_run list) =
            let order = ref [] in
            let tbl : (string, Wire_runtime.exact_lane_run * int) Hashtbl.t =
@@ -2872,8 +2886,9 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
            List.iter
              (fun (r : Wire_runtime.exact_lane_run) ->
                let key =
-                 Printf.sprintf "%s\x00%s\x00%s" r.lane r.status
-                   (match r.summary with Some s -> s | None -> "")
+                 Printf.sprintf "%s\x00%s\x00%s" r.lane
+                   (Wire_runtime.lane_run_status_label r.status)
+                   (match run_note r with Some s -> s | None -> "")
                in
                match Hashtbl.find_opt tbl key with
                | None ->
@@ -2881,42 +2896,66 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
                    Hashtbl.add tbl key (r, 1)
                | Some (prev, cnt) ->
                    let best =
-                     match (prev.started_at_unix, r.started_at_unix) with
-                     | Some a, Some b when b > a -> r
-                     | None, Some _ -> r
-                     | Some _, Some _ | Some _, None | None, None -> prev
+                     if r.started_at_unix > prev.started_at_unix then r else prev
                    in
                    Hashtbl.replace tbl key (best, cnt + 1))
              xs;
            List.rev !order |> List.filter_map (fun k -> Hashtbl.find_opt tbl k)
          in
-         let exact_status_display status =
-           match String.lowercase_ascii (String.trim status) with
-           | "succeeded" | "completed" | "approved" | "ok" ->
+         (* A verdict (rejected) or a replaced run (superseded, deferred) is
+            the lane working; only a run that broke is critical. *)
+         let exact_status_display (status : Wire_runtime.lane_run_status) =
+           match status with
+           | Wire_runtime.Exact_output Wire_runtime.Exact_succeeded
+           | Wire_runtime.Task_verification Wire_runtime.Task_review_approved
+           | Wire_runtime.Goal_verification
+               (Wire_runtime.Goal_review_reviewed
+               | Wire_runtime.Goal_review_committed) ->
                (Glyph.Live_healthy, Theme.Status_ok)
-           | "running" | "execution_pending" ->
+           | Wire_runtime.Exact_output Wire_runtime.Exact_running
+           | Wire_runtime.Task_verification
+               ( Wire_runtime.Task_review_running
+               | Wire_runtime.Task_review_execution_pending )
+           | Wire_runtime.Goal_verification Wire_runtime.Goal_review_running ->
                (Glyph.Live_working, Theme.Status_active)
-           | "cancelled" | "review_cancelled" | "not_reviewed" ->
+           | Wire_runtime.Exact_output Wire_runtime.Exact_cancelled
+           | Wire_runtime.Task_verification
+               ( Wire_runtime.Task_review_cancelled
+               | Wire_runtime.Task_review_not_reviewed
+               | Wire_runtime.Task_review_superseded )
+           | Wire_runtime.Goal_verification
+               ( Wire_runtime.Goal_review_cancelled
+               | Wire_runtime.Goal_review_superseded
+               | Wire_runtime.Goal_review_deferred ) ->
                (Glyph.Live_paused, Theme.Status_historical)
-           | "infrastructure_unavailable" | "execution_repair_required" ->
+           | Wire_runtime.Exact_output
+               Wire_runtime.Exact_completion_durability_unknown
+           | Wire_runtime.Task_verification
+               ( Wire_runtime.Task_review_rejected
+               | Wire_runtime.Task_review_infrastructure_unavailable
+               | Wire_runtime.Task_review_execution_repair_required ) ->
                (Glyph.Warning_triangle, Theme.Status_attention)
-           | _ -> (Glyph.Live_failing, Theme.Status_critical)
+           | Wire_runtime.Exact_output
+               ( Wire_runtime.Exact_failed _
+               | Wire_runtime.Exact_completion_persistence_failed )
+           | Wire_runtime.Task_verification
+               ( Wire_runtime.Task_review_commit_failed
+               | Wire_runtime.Task_review_raised )
+           | Wire_runtime.Goal_verification Wire_runtime.Goal_review_raised ->
+               (Glyph.Live_failing, Theme.Status_critical)
          in
          let max_exact = Int.max 1 ((bot - !y) / 2) in
          List.iter
            (fun ((r : Wire_runtime.exact_lane_run), count) ->
              if !y < bot then begin
                let g, tone = exact_status_display r.status in
-               let age =
-                 match r.started_at_unix with
-                 | Some ts -> H.format_age ~now_unix ts
-                 | None -> Glyph.to_utf8 Glyph.Missing_absent
-               in
+               let age = H.format_age ~now_unix r.started_at_unix in
                let cnt_s = if count > 1 then Printf.sprintf " ×%d" count else "" in
-               let sum = match r.summary with Some s -> " · " ^ s | None -> "" in
+               let sum = match run_note r with Some s -> " · " ^ s | None -> "" in
                let left_s =
                  Printf.sprintf "%s %s [%s]%s%s" (Glyph.to_utf8 g) r.lane
-                   r.status cnt_s sum
+                   (Wire_runtime.lane_run_status_label r.status)
+                   cnt_s sum
                in
                let aw = Grapheme.display_width age in
                ignore

@@ -188,6 +188,200 @@ let test_tools_warming_roundtrip () =
       Alcotest.fail "the warming body decodes as an empty catalog"
   | Error e -> Alcotest.fail ("warming body decode failed: " ^ e)
 
+(* GET /api/v1/dashboard/exact-lane-runs: the server projection merges three
+   registries, each with its own status words. Every status any of them can
+   name decodes, and the TUI spells it back the way the server did. *)
+let test_lane_run_statuses_roundtrip () =
+  let module Projection = Server_standalone_lane_projection in
+  let module Exact = Masc.Exact_lane_run_registry in
+  let module Verification = Masc.Verification_run_registry in
+  let module Goal = Masc.Goal_verification_run_registry in
+  let started_at = 1795173600.0 in
+  let exact_run ~run_id status : Exact.run =
+    {
+      run_id;
+      lane = Exact.Librarian;
+      actor = "keeper-test";
+      started_at;
+      input = Exact.Exact_input (`Assoc []);
+      status;
+      slot_observations = None;
+      input_availability = Exact.Available;
+      output_availability =
+        (match status with
+        | Exact.Running -> None
+        | Exact.Completed _ | Exact.Completion_persistence_failed _ ->
+            Some Exact.Available);
+    }
+  in
+  let exact_completed outcome =
+    Exact.Completed
+      {
+        outcome;
+        origin = Exact.Producer;
+        elapsed_s = None;
+        output = `Null;
+        selected_slot = None;
+        usage = None;
+      }
+  in
+  let exact_unpersisted state =
+    Exact.Completion_persistence_failed
+      {
+        intended_outcome = Exact.Succeeded;
+        elapsed_s = None;
+        output = `Null;
+        selected_slot = None;
+        usage = None;
+        failure = { Exact.detail = "disk full"; state };
+      }
+  in
+  let exact_runs =
+    List.mapi
+      (fun i status -> exact_run ~run_id:(Printf.sprintf "exact-%d" i) status)
+      [
+        Exact.Running;
+        exact_completed Exact.Succeeded;
+        exact_completed Exact.Cancelled;
+        exact_completed (Exact.Failed { code = "provider"; detail = "offline" });
+        exact_unpersisted Exact.Not_persisted;
+        exact_unpersisted Exact.Durability_unknown;
+      ]
+  in
+  let task_run ~verification_id status : Verification.run =
+    {
+      verification_id;
+      task_id = "task-9";
+      producer = "keeper-test";
+      authority_kind = "system_llm";
+      authority_actor = "verifier";
+      started_at;
+      status;
+    }
+  in
+  let task_completed outcome =
+    Verification.Completed
+      { outcome; evaluator_runtime = None; elapsed_s = 1.0; tools = [] }
+  in
+  let verification_runs =
+    List.mapi
+      (fun i status ->
+        task_run ~verification_id:(Printf.sprintf "task-run-%d" i) status)
+      (Verification.Running
+      :: List.map task_completed
+           [
+             Verification.Approved { reason = "" };
+             Verification.Rejected { reason = "missing proof" };
+             Verification.Infrastructure_unavailable
+               { stage = Verification.Review_preparation; detail = "" };
+             Verification.Not_reviewed { gate = "gate"; detail = "" };
+             Verification.Commit_failed { detail = "" };
+             Verification.Execution_pending { detail = "" };
+             Verification.Execution_repair_required { detail = "" };
+             Verification.Raised { detail = "" };
+             Verification.Review_cancelled { detail = "" };
+             Verification.Superseded_by { authority = "hitl" };
+           ])
+  in
+  let goal_run ~run_id status : Goal.run =
+    {
+      run_id;
+      goal_id = "goal-4";
+      request_id = "proof-request-" ^ run_id;
+      criterion =
+        Goal_store.Criterion
+          {
+            revision = "criterion-4";
+            title = "Four verified services";
+            measure = Goal_measure_fixture.done_when "4";
+            procedure = "verified services";
+          };
+      review_kind = Goal.Proof;
+      authority_actor = "verifier";
+      started_at;
+      status;
+    }
+  in
+  let goal_completed outcome =
+    Goal.Completed
+      {
+        outcome;
+        evaluated_verdict = None;
+        evaluator_runtime = None;
+        elapsed_s = 1.0;
+        tools = [];
+      }
+  in
+  let goal_verification_runs =
+    List.mapi
+      (fun i status -> goal_run ~run_id:(Printf.sprintf "goal-run-%d" i) status)
+      (Goal.Running
+      :: List.map goal_completed
+           [
+             Goal.Reviewed;
+             Goal.Committed;
+             Goal.Superseded { detail = "" };
+             Goal.Deferred { detail = "" };
+             Goal.Raised { detail = "" };
+             Goal.Review_cancelled { detail = "" };
+           ])
+  in
+  let expected =
+    List.map (fun (r : Exact.run) -> (r.run_id, Exact.status_label r.status)) exact_runs
+    @ List.map
+        (fun (r : Verification.run) ->
+          (r.verification_id, Verification.status_label r.status))
+        verification_runs
+    @ List.map (fun (r : Goal.run) -> (r.run_id, Goal.status_label r.status))
+        goal_verification_runs
+  in
+  let page =
+    match
+      Projection.For_testing.recent_run_page_json_with ~limit:100 ~before:None
+        ~lane:None ~run_kind:None ~exact_runs ~verification_runs
+        ~goal_verification_runs
+    with
+    | Ok json -> json
+    | Error detail -> Alcotest.fail ("server run page failed: " ^ detail)
+  in
+  match Wire_runtime.decode_exact_lane_runs page with
+  | Error e -> Alcotest.fail ("exact-lane runs decode failed: " ^ e)
+  | Ok runs ->
+      let decoded =
+        List.map
+          (fun (r : Wire_runtime.exact_lane_run) ->
+            (r.run_id, Wire_runtime.lane_run_status_label r.status))
+          runs
+      in
+      let sort = List.sort (fun (a, _) (b, _) -> String.compare a b) in
+      Alcotest.(check (list (pair string string)))
+        "every server status decodes and keeps its spelling" (sort expected)
+        (sort decoded);
+      (match
+         List.find_opt
+           (fun (r : Wire_runtime.exact_lane_run) -> String.equal r.run_id "exact-3")
+           runs
+       with
+      | Some
+          {
+            status =
+              Wire_runtime.Exact_output
+                (Wire_runtime.Exact_failed { code = "provider"; detail = "offline" });
+            _;
+          } ->
+          ()
+      | Some _ | None -> Alcotest.fail "failed exact run keeps its code and detail");
+      match
+        List.find_opt
+          (fun (r : Wire_runtime.exact_lane_run) ->
+            String.equal r.run_id "task-run-0")
+          runs
+      with
+      | Some r ->
+          Alcotest.(check (option string))
+            "a task review names its task" (Some "task-9") r.subject_id
+      | None -> Alcotest.fail "task review row missing"
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -204,5 +398,7 @@ let () =
             test_tools_catalog_roundtrip;
           Alcotest.test_case "warming tools body -> Tools_warming" `Quick
             test_tools_warming_roundtrip;
+          Alcotest.test_case "lane run page -> decode_exact_lane_runs" `Quick
+            test_lane_run_statuses_roundtrip;
         ] );
     ]

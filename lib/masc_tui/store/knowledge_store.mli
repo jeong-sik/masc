@@ -283,6 +283,24 @@ val move_memory_facts :
   keeper:string -> ?viewport_rows:int -> delta:int -> t -> t
 val move_memory_diff_cursor : delta:int -> t -> t
 
+val scope_memory_diff_dive :
+  keeper:string option -> from_rev:int -> to_rev:int -> t -> t
+(** [t] reading [keeper]'s diff over [Window_revs { from_rev; to_rev }], the
+    slot a [Memory_diff_dive] fetches into. The result's [memory_diff_keeper]
+    and [memory_diff_window] belong to the dive, not to the Memory tab: keep
+    the original [t] as the model's knowledge. *)
+
+val move_memory_diff_dive_cursor :
+  keeper:string option ->
+  from_rev:int ->
+  to_rev:int ->
+  delta:int ->
+  t ->
+  t
+(** {!move_memory_diff_cursor} over the dive's own diff. Only
+    [selected_diff_index] of [t] changes; the Memory tab's window and keeper
+    stay as they were. *)
+
 val apply_board :
   observed_at:Clock.Mono.t -> Wire_knowledge.board_feed -> t -> t
 val apply_thread :

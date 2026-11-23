@@ -4508,6 +4508,8 @@ let test_pillar2_scroll_bounds_all_surfaces () =
     ~needle:"WORLD_CLAIM_LAST_39"
     ~get_off:(fun m -> m.knowledge.diff_scroll_offset)
     m_mem_world;
+  (* The dive fetches into the Window_revs slot of its own range, not the
+     Memory tab's Window_24h slot. *)
   let m_mem_dive_z =
     {
       m_mem_world with
@@ -4521,6 +4523,11 @@ let test_pillar2_scroll_bounds_all_surfaces () =
                 (Nav.Memory_diff_dive { keeper = None; from_rev = 1; to_rev = 40 });
             ];
         };
+      knowledge =
+        Knowledge_store.set_memory_diff ~keeper:None
+          ~window:(Knowledge_store.Window_revs { from_rev = 1; to_rev = 40 })
+          (Observed.value ~observed_at:t0 world_diff_40)
+          m_mem_world.knowledge;
     }
   in
   assert_scroll_exact ~label:"Memory_diff_dive (World_diff + zoomed)"

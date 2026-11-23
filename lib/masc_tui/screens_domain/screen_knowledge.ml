@@ -2574,9 +2574,9 @@ let render_dive_memory ~keeper ~from_rev ~to_rev ~(model : Model.t) ~cache
     ~(rect : Rect.t) ~(theme : Theme.t) ~bp grid =
   let k_scoped =
     {
-      model.knowledge with
-      memory_diff_keeper = keeper;
-      memory_diff_window = Knowledge_store.Window_revs { from_rev; to_rev };
+      (Knowledge_store.scope_memory_diff_dive ~keeper ~from_rev ~to_rev
+         model.knowledge)
+      with
       memory_view_mode = Knowledge_store.View_diff;
       diff_scroll_offset = model.nav.dive_scroll_offset;
     }

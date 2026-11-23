@@ -1845,10 +1845,16 @@ let enter_plan (m : Model.t) : enter_plan =
       memory_reading_plan ~keeper_opt:(Some name)
         ~otherwise:(fun () -> Enter_noop)
         m
-  | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; _ })) ->
+  | Some
+      (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; from_rev; to_rev })) ->
       memory_reading_plan ~force_diff:true ~keeper_opt:keeper
         ~otherwise:(fun () -> Enter_noop)
-        m
+        {
+          m with
+          knowledge =
+            Knowledge_store.scope_memory_diff_dive ~keeper ~from_rev ~to_rev
+              m.knowledge;
+        }
   | Some
       ( Nav.Dive_keeper
           {
@@ -4211,11 +4217,8 @@ let dive_max_scroll (m : Model.t) active =
                ~left_ratio:0.48 ~top_ratio:0.48 bp body_rect)
       in
       let k_scoped =
-        {
-          m.knowledge with
-          memory_diff_keeper = keeper;
-          memory_diff_window = Knowledge_store.Window_revs { from_rev; to_rev };
-        }
+        Knowledge_store.scope_memory_diff_dive ~keeper ~from_rev ~to_rev
+          m.knowledge
       in
       memory_right_pane_max_scroll ~bp ~rect:right_rect k_scoped
   | Nav.Dive_knowledge (Nav.Thread_dive post_id) -> (
@@ -5014,7 +5017,9 @@ let apply_move (m : Model.t) dir =
                           knowledge;
                         }
                       , [] ))
-            | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; _ }) as active)
+            | Some
+                (Nav.Dive_knowledge
+                   (Nav.Memory_diff_dive { keeper; from_rev; to_rev }) as active)
               ->
                 let has_matching_reading =
                   match m.knowledge.memory_reading with
@@ -5039,8 +5044,8 @@ let apply_move (m : Model.t) dir =
                       (m.nav.dive_scroll_offset + delta)
                   in
                   let knowledge =
-                    Knowledge_store.move_memory_diff_cursor
-                      ~delta:(move_delta dir) m.knowledge
+                    Knowledge_store.move_memory_diff_dive_cursor ~keeper
+                      ~from_rev ~to_rev ~delta:(move_delta dir) m.knowledge
                   in
                   ( { m with nav = { m.nav with dive_scroll_offset }; knowledge }
                   , [] )

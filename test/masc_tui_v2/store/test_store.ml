@@ -7338,13 +7338,16 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
   Alcotest.(check bool) "embedded Keepers sub-tab cycle closes memory_reading" true
     (Option.is_none m_emb_tab_away.knowledge.memory_reading);
 
-  (* 9. P2 #5: Memory_diff_dive Enter always opens Reading_diff_item even in View_evolution *)
+  (* 9. P2 #5: Memory_diff_dive Enter always opens Reading_diff_item even in View_evolution.
+     The dive fetches into the Window_revs slot of its own range; the Memory
+     tab's Window_24h slot is empty here, so Enter must read the dive's slot. *)
+  let dive_window = Knowledge_store.Window_revs { from_rev = 1; to_rev = 5 } in
   let m_diff_dive =
     {
-      m_with_kdiff with
+      m_loaded with
       nav =
         {
-          m_with_kdiff.nav with
+          m_loaded.nav with
           dive_stack =
             [
               Nav.Dive_knowledge
@@ -7353,7 +7356,14 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
             ];
         };
       knowledge =
-        { m_with_kdiff.knowledge with memory_view_mode = Knowledge_store.View_evolution };
+        {
+          (Knowledge_store.set_memory_diff ~keeper:(Some "alpha")
+             ~window:dive_window
+             (Observed.value ~observed_at:t0 keeper_diff)
+             m_loaded.knowledge)
+          with
+          memory_view_mode = Knowledge_store.View_evolution;
+        };
     }
   in
   let m_dd_enter, _ =
@@ -7364,6 +7374,109 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
     (match m_dd_enter.knowledge.memory_reading with
     | Some (Knowledge_store.Reading_diff_item { keeper = Some "alpha"; item = Knowledge_store.Keeper_added f }) ->
         String.equal f.memory_id "md-1"
+    | _ -> false);
+
+  (* 9b. Memory_diff_dive Down moves the cursor over the dive's own slot, keeps
+     the Memory tab's window and keeper, and Enter then opens the second item. *)
+  let keeper_diff_two : Wire_knowledge.memory_diff =
+    {
+      scope = Wire_knowledge.Scope_keeper "alpha";
+      range =
+        {
+          window = Some "24h";
+          from_rev = Some 1;
+          to_rev = Some 5;
+          from_unix = None;
+          to_unix = None;
+        };
+      retrieval_heat =
+        {
+          hot = 2;
+          warm = 0;
+          cold = 0;
+          never_retrieved = 0;
+          total_events = 2;
+          unreadable_event_lines = 0;
+        };
+      body =
+        Wire_knowledge.Keeper_diff
+          {
+            counts =
+              {
+                total_facts_now = 2;
+                added = 2;
+                updated = 0;
+                retracted = 0;
+                invalidated = 0;
+                journal_failures_in_window = 0;
+                journal_quarantines_in_window = 0;
+                undecodable_journal_lines = 0;
+              };
+            revisions = [];
+            added =
+              [
+                {
+                  added_at_rev = Some 4;
+                  memory_id = "md-1";
+                  category = "fact";
+                  origin = "authored";
+                  text = "Alpha diff entry";
+                  first_seen_unix = 1795252000.0;
+                  last_seen_unix = Some 1795252000.0;
+                  retrieval_count = 1;
+                  last_retrieved_at_unix = Some 1795252000.0;
+                  heat = Wire_knowledge.Heat_hot;
+                };
+                {
+                  added_at_rev = Some 5;
+                  memory_id = "md-2";
+                  category = "fact";
+                  origin = "authored";
+                  text = "Alpha second diff entry";
+                  first_seen_unix = 1795252100.0;
+                  last_seen_unix = Some 1795252100.0;
+                  retrieval_count = 1;
+                  last_retrieved_at_unix = Some 1795252100.0;
+                  heat = Wire_knowledge.Heat_hot;
+                };
+              ];
+            updated = [];
+            retracted = [];
+            invalidated = [];
+            writer_status = None;
+          };
+    }
+  in
+  let m_diff_dive_two =
+    {
+      m_diff_dive with
+      knowledge =
+        Knowledge_store.set_memory_diff ~keeper:(Some "alpha")
+          ~window:dive_window
+          (Observed.value ~observed_at:t0 keeper_diff_two)
+          m_diff_dive.knowledge;
+    }
+  in
+  let m_dd_down, _ =
+    Update.step ~now:t0 m_diff_dive_two
+      (Msg.Key_event { Keymap.Input.key = Keymap.Input.Down; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check int) "Memory_diff_dive Down moves the cursor over the dive's own slot" 1
+    m_dd_down.knowledge.selected_diff_index;
+  Alcotest.(check bool) "Memory_diff_dive Down keeps the Memory tab's window and keeper" true
+    (Knowledge_store.equal_memory_diff_window
+       m_dd_down.knowledge.memory_diff_window
+       m_diff_dive_two.knowledge.memory_diff_window
+    && Option.equal String.equal m_dd_down.knowledge.memory_diff_keeper
+         m_diff_dive_two.knowledge.memory_diff_keeper);
+  let m_dd_down_enter, _ =
+    Update.step ~now:t0 m_dd_down
+      (Msg.Key_event { Keymap.Input.key = Keymap.Input.Enter; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check bool) "Memory_diff_dive Enter opens the item under the cursor" true
+    (match m_dd_down_enter.knowledge.memory_reading with
+    | Some (Knowledge_store.Reading_diff_item { keeper = Some "alpha"; item = Knowledge_store.Keeper_added f }) ->
+        String.equal f.memory_id "md-2"
     | _ -> false);
 
   (* 10. P2 #6: Cross-keeper SSE events do NOT mark alpha's loaded slots stale *)

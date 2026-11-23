@@ -1798,6 +1798,24 @@ let move_memory_diff_cursor ~delta t =
   let selected_diff_index = clamp_index len (t.selected_diff_index + delta) in
   { t with selected_diff_index }
 
+(* A [Memory_diff_dive] fetches into the [Window_revs] slot of its own
+   revision range, which is not the slot of the Memory tab's window. Every
+   reader of the dive's diff (render, scroll bound, cursor, Enter) goes
+   through this scope; the tab keeps reading the unscoped [t]. *)
+let scope_memory_diff_dive ~keeper ~from_rev ~to_rev t =
+  {
+    t with
+    memory_diff_keeper = keeper;
+    memory_diff_window = Window_revs { from_rev; to_rev };
+  }
+
+let move_memory_diff_dive_cursor ~keeper ~from_rev ~to_rev ~delta t =
+  let moved =
+    move_memory_diff_cursor ~delta
+      (scope_memory_diff_dive ~keeper ~from_rev ~to_rev t)
+  in
+  { t with selected_diff_index = moved.selected_diff_index }
+
 let json_has_kv_summary = function
   | `Assoc (_ :: _) -> true
   | `Assoc [] | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _

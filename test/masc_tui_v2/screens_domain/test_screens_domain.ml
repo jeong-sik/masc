@@ -5,6 +5,17 @@ open Masc_tui_protocol
 open Masc_tui_store
 open Masc_tui_screens_domain
 
+(* A measured context reading: [ratio] of a 200k-token window. *)
+let measured_context ratio : Wire_fleet.context_reading =
+  Wire_fleet.Context_measured
+    {
+      ratio = Some ratio;
+      tokens = Float.to_int (ratio *. 200_000.0);
+      window = Some 200_000;
+      absolute_turn = None;
+      measured_at_unix = None;
+    }
+
 let now_mono = Clock.Mono.of_ns 1_000_000_000L
 let now_unix = 1_795_252_092.0
 
@@ -162,10 +173,8 @@ let make_rich_model ~lang ~cols ~rows =
       runtime_id = "claude-opus-1";
       model_id = Some "claude-opus-4";
       current_task_id = Some "task-3898";
-      context_ratio = Observed.value ~observed_at:now_mono 0.48;
+      context = Observed.value ~observed_at:now_mono (measured_context 0.48);
       total_turns = Observed.value ~observed_at:now_mono 312;
-      total_tokens = Observed.value ~observed_at:now_mono 1_250_000;
-      cost_24h_usd = Observed.value ~observed_at:now_mono 21.40;
       last_turn_at_unix = Some (now_unix -. 30.0);
       active_turn = None;
       activity_sparkline_24h = [ 1.0; 3.0; 5.0; 4.0 ];
@@ -178,7 +187,6 @@ let make_rich_model ~lang ~cols ~rows =
       group = Some "Code Review Family";
       company = "Code Review Family";
       runtime_id = "glm-5-3";
-      cost_24h_usd = Observed.value ~observed_at:now_mono 63.10;
     }
   in
   let fleet = Fleet_store.apply_keepers ~observed_at:now_mono [ keeper_a; keeper_b ] m0.fleet in
@@ -2636,10 +2644,8 @@ let test_p1_7_fleet_health_counts_ssot () =
       runtime_id = "sonnet";
       model_id = Some "claude-sonnet-4";
       current_task_id = None;
-      context_ratio = Observed.unreported;
+      context = Observed.unreported;
       total_turns = Observed.unreported;
-      total_tokens = Observed.unreported;
-      cost_24h_usd = Observed.unreported;
       last_turn_at_unix = None;
       active_turn = None;
       activity_sparkline_24h = [];
@@ -2707,10 +2713,8 @@ let test_p1_5_infra_sandboxes_404_fallback_honesty () =
       runtime_id = "sonnet";
       model_id = None;
       current_task_id = None;
-      context_ratio = Observed.unreported;
+      context = Observed.unreported;
       total_turns = Observed.unreported;
-      total_tokens = Observed.unreported;
-      cost_24h_usd = Observed.unreported;
       last_turn_at_unix = None;
       active_turn = None;
       activity_sparkline_24h = [];
@@ -2822,10 +2826,8 @@ let test_p0_1_p0_2_runtime_spend_provenance_mtd_and_dual_usd () =
           runtime_id = "sonnet";
           model_id = None;
           current_task_id = None;
-          context_ratio = Observed.unreported;
+          context = Observed.unreported;
           total_turns = Observed.unreported;
-          total_tokens = Observed.unreported;
-          cost_24h_usd = Observed.unreported;
           last_turn_at_unix = None;
           active_turn = None;
           activity_sparkline_24h = [];
@@ -3423,10 +3425,8 @@ let test_nav_display_order_monotonic_screen_rows () =
       runtime_id = "rt-1";
       model_id = Some "model-1";
       current_task_id = None;
-      context_ratio = Observed.value ~observed_at:now_mono 0.30;
+      context = Observed.value ~observed_at:now_mono (measured_context 0.30);
       total_turns = Observed.value ~observed_at:now_mono 20;
-      total_tokens = Observed.value ~observed_at:now_mono 10_000;
-      cost_24h_usd = Observed.value ~observed_at:now_mono 1.0;
       last_turn_at_unix = Some now_unix;
       active_turn = None;
       activity_sparkline_24h = [ 1.0; 2.0 ];

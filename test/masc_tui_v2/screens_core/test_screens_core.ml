@@ -5,6 +5,17 @@ open Masc_tui_protocol
 open Masc_tui_store
 open Masc_tui_screens_core
 
+(* A measured context reading: [ratio] of a 200k-token window. *)
+let measured_context ratio : Wire_fleet.context_reading =
+  Wire_fleet.Context_measured
+    {
+      ratio = Some ratio;
+      tokens = Float.to_int (ratio *. 200_000.0);
+      window = Some 200_000;
+      absolute_turn = None;
+      measured_at_unix = None;
+    }
+
 let obs v = Observed.value ~observed_at:Clock.Mono.zero v
 
 let grid_row_text (grid : Cell_grid.t) y =
@@ -95,10 +106,8 @@ let mk_keeper ~name ~company ~health ?(turns = 120) ?(ctx = 0.42) () :
     runtime_id = "sonnet-med-glm";
     model_id = Some "claude-sonnet-4";
     current_task_id = Some "task-3898";
-    context_ratio = obs ctx;
+    context = obs (measured_context ctx);
     total_turns = obs turns;
-    total_tokens = obs 420_000;
-    cost_24h_usd = obs 12.4;
     last_turn_at_unix = Some 1763700000.0;
     active_turn = None;
     activity_sparkline_24h = [ 1.0; 3.0; 5.0; 9.0; 7.0; 12.0; 8.0; 4.0 ];
@@ -137,7 +146,6 @@ let populated_model ~cols ~rows ~lang =
       tasks_todo = obs 522;
       tasks_cancelled = obs 4;
       goals_completed_24h = obs 3;
-      prs_reviewed_24h = obs 48;
       verifications_passed_24h = obs 31;
       verifications_rejected_24h = obs 3;
       board_posts_24h = obs 19;
@@ -2045,7 +2053,6 @@ let test_v25_pulse_honest_observed_and_no_fabricated_zeros () =
                 sh.scorecard_24h with
                 tasks_done_24h = Observed.unreported;
                 tasks_done_total = obs 730;
-                prs_reviewed_24h = Observed.unreported;
                 turns_24h = obs 1450;
                 cost_24h_usd = Observed.unreported;
               }
@@ -2830,10 +2837,8 @@ let test_p1_pulse_collapsed_company_highlight_and_scroll () =
       runtime_id = "rt-1";
       model_id = Some "model-1";
       current_task_id = None;
-      context_ratio = Observed.value ~observed_at:Clock.Mono.zero 0.30;
+      context = Observed.value ~observed_at:Clock.Mono.zero (measured_context 0.30);
       total_turns = Observed.value ~observed_at:Clock.Mono.zero 20;
-      total_tokens = Observed.value ~observed_at:Clock.Mono.zero 8000;
-      cost_24h_usd = Observed.value ~observed_at:Clock.Mono.zero 2.0;
       last_turn_at_unix = Some 1_795_200_000.0;
       active_turn = None;
       activity_sparkline_24h = [ 1.0; 2.0 ];

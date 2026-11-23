@@ -6,6 +6,17 @@ open Masc_tui_protocol
 open Masc_tui_store
 open Masc_tui_screens_ops
 
+(* A measured context reading: [ratio] of a 200k-token window. *)
+let measured_context ratio : Wire_fleet.context_reading =
+  Wire_fleet.Context_measured
+    {
+      ratio = Some ratio;
+      tokens = Float.to_int (ratio *. 200_000.0);
+      window = Some 200_000;
+      absolute_turn = None;
+      measured_at_unix = None;
+    }
+
 let grid_row_text (grid : Cell_grid.t) ~y =
   let buf = Buffer.create (Cell_grid.cols grid) in
   for x = 0 to Cell_grid.cols grid - 1 do
@@ -72,10 +83,8 @@ let sample_keepers : Wire_fleet.keeper_summary list =
       runtime_id = "sonnet-med-cascade";
       model_id = Some "claude-sonnet-4-6";
       current_task_id = Some "task-3898";
-      context_ratio = Observed.value ~observed_at:now_mono 0.48;
+      context = Observed.value ~observed_at:now_mono (measured_context 0.48);
       total_turns = Observed.value ~observed_at:now_mono 412;
-      total_tokens = Observed.value ~observed_at:now_mono 980_000;
-      cost_24h_usd = Observed.value ~observed_at:now_mono 12.40;
       last_turn_at_unix = Some (now_unix -. 45.0);
       active_turn = None;
       activity_sparkline_24h = [ 2.0; 5.0; 9.0; 7.0; 11.0; 8.0; 6.0; 10.0 ];
@@ -91,10 +100,8 @@ let sample_keepers : Wire_fleet.keeper_summary list =
       runtime_id = "gpt-6.2-sol";
       model_id = Some "gpt-6.2-sol";
       current_task_id = Some "task-3215";
-      context_ratio = Observed.value ~observed_at:now_mono 0.44;
+      context = Observed.value ~observed_at:now_mono (measured_context 0.44);
       total_turns = Observed.value ~observed_at:now_mono 288;
-      total_tokens = Observed.value ~observed_at:now_mono 640_000;
-      cost_24h_usd = Observed.value ~observed_at:now_mono 8.15;
       last_turn_at_unix = Some (now_unix -. 240.0);
       active_turn =
         Some
@@ -119,10 +126,8 @@ let sample_keepers : Wire_fleet.keeper_summary list =
       runtime_id = "glm-5-3";
       model_id = Some "glm-5-3";
       current_task_id = Some "task-3900";
-      context_ratio = Observed.value ~observed_at:now_mono 0.62;
+      context = Observed.value ~observed_at:now_mono (measured_context 0.62);
       total_turns = Observed.value ~observed_at:now_mono 520;
-      total_tokens = Observed.value ~observed_at:now_mono 1_240_000;
-      cost_24h_usd = Observed.value ~observed_at:now_mono 18.90;
       last_turn_at_unix = Some (now_unix -. 12.0);
       active_turn =
         Some
@@ -147,10 +152,8 @@ let sample_keepers : Wire_fleet.keeper_summary list =
       runtime_id = "local-qwen";
       model_id = None;
       current_task_id = None;
-      context_ratio = Observed.unreported;
+      context = Observed.unreported;
       total_turns = Observed.value ~observed_at:now_mono 44;
-      total_tokens = Observed.unreported;
-      cost_24h_usd = Observed.value ~observed_at:now_mono 0.0;
       last_turn_at_unix = None;
       active_turn = None;
       activity_sparkline_24h = [ 0.0; 0.0; 1.0; 2.0; 0.0; 0.0; 0.0; 0.0 ];
@@ -842,7 +845,6 @@ let make_populated_model ~cols ~rows ~lang =
             tasks_todo = Observed.value ~observed_at:now_mono 18;
             tasks_cancelled = Observed.value ~observed_at:now_mono 1;
             goals_completed_24h = Observed.value ~observed_at:now_mono 3;
-            prs_reviewed_24h = Observed.value ~observed_at:now_mono 48;
             verifications_passed_24h = Observed.value ~observed_at:now_mono 31;
             verifications_rejected_24h = Observed.value ~observed_at:now_mono 3;
             board_posts_24h = Observed.value ~observed_at:now_mono 19;
@@ -1927,7 +1929,6 @@ let test_v25_candle_peer_cards_zero_nested_boxes_and_violet_ai () =
   let sc_unrep_pr : Wire_fleet.daily_scorecard =
     {
       (Model.effective_scorecard m_ko0) with
-      prs_reviewed_24h = Observed.unreported;
       board_posts_24h = Observed.value ~observed_at:now_mono 14;
       goals_completed_24h = Observed.value ~observed_at:now_mono 2;
     }
@@ -2002,10 +2003,8 @@ let test_v25_keepers_5_company_fleet_tree_and_preview_inspector () =
       runtime_id = "claude_code_a1b2c3d4.claude-sonnet-4-6";
       model_id = Some "claude-sonnet-4-6";
       current_task_id = Some "task-501";
-      context_ratio = Observed.value ~observed_at:now_mono 0.42;
+      context = Observed.value ~observed_at:now_mono (measured_context 0.42);
       total_turns = Observed.value ~observed_at:now_mono 120;
-      total_tokens = Observed.value ~observed_at:now_mono 350_000;
-      cost_24h_usd = Observed.unreported;
       last_turn_at_unix = Some (now_unix -. 60.0);
       active_turn = None;
       activity_sparkline_24h = spark;
@@ -2451,13 +2450,12 @@ let test_p2_standard_viewport_keepers_split_and_kpi_visibility () =
           }
           m0.runtime
       in
-      (* Clear direct cost_24h_usd so preview uses keeper_costs_24h_assoc ($6.75) *)
+      (* The preview reads the keeper's cost from keeper_costs ($6.75) *)
       let k_leader =
         {
           (List.hd sample_keepers) with
-          context_ratio = Observed.value ~observed_at:now_mono 0.42;
+          context = Observed.value ~observed_at:now_mono (measured_context 0.42);
           total_turns = Observed.value ~observed_at:now_mono 120;
-          cost_24h_usd = Observed.value ~observed_at:now_mono 6.75;
           activity_sparkline_24h = [];
         }
       in
@@ -2681,10 +2679,8 @@ let test_nav_keepers_display_order_monotonic_screen_rows () =
       runtime_id = "rt-1";
       model_id = Some "model-1";
       current_task_id = None;
-      context_ratio = Observed.value ~observed_at:now_mono 0.25;
+      context = Observed.value ~observed_at:now_mono (measured_context 0.25);
       total_turns = Observed.value ~observed_at:now_mono 10;
-      total_tokens = Observed.value ~observed_at:now_mono 5000;
-      cost_24h_usd = Observed.value ~observed_at:now_mono 1.0;
       last_turn_at_unix = Some now_unix;
       active_turn = None;
       activity_sparkline_24h = [ 1.0; 2.0 ];
@@ -2763,10 +2759,8 @@ let test_p1_chat_transcript_render_parity () =
       runtime_id = "rt-1";
       model_id = Some "model-1";
       current_task_id = None;
-      context_ratio = Observed.value ~observed_at:now_mono 0.25;
+      context = Observed.value ~observed_at:now_mono (measured_context 0.25);
       total_turns = Observed.value ~observed_at:now_mono 10;
-      total_tokens = Observed.value ~observed_at:now_mono 5000;
-      cost_24h_usd = Observed.value ~observed_at:now_mono 1.0;
       last_turn_at_unix = Some now_unix;
       active_turn = None;
       activity_sparkline_24h = [ 1.0; 2.0 ];
@@ -3060,10 +3054,8 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
       runtime_id = "rt-1";
       model_id = Some "model-1";
       current_task_id = None;
-      context_ratio = Observed.value ~observed_at:now_mono 0.25;
+      context = Observed.value ~observed_at:now_mono (measured_context 0.25);
       total_turns = Observed.value ~observed_at:now_mono 3;
-      total_tokens = Observed.value ~observed_at:now_mono 900;
-      cost_24h_usd = Observed.value ~observed_at:now_mono 0.1;
       last_turn_at_unix = Some now_unix;
       active_turn = None;
       activity_sparkline_24h = [ 1.0 ];

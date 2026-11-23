@@ -169,7 +169,10 @@ let test_wire_fleet () =
         ]
       }|}
   in
-  let keepers = expect_ok "roster" (Wire_fleet.decode_keepers_roster ~observed_at:t0 roster_json) in
+  let keepers =
+    (expect_ok "roster" (Wire_fleet.decode_keepers_roster ~observed_at:t0 roster_json))
+      .keepers
+  in
   let companies = Wire_fleet.group_by_company keepers in
   Alcotest.(check (list string)) "company grouping"
     [ "review"; "wkbl-startup"; "Other" ]
@@ -2232,12 +2235,13 @@ let test_v25_data_pipeline_decoders () =
             }
           }
         ],
-        "candle": { "issued_milli": "10000", "burned_milli": "2000", "circulating_milli": "8000" }
+        "candle": { "status": "ready", "issued_milli": "10000", "burned_milli": "2000", "circulating_milli": "8000" }
       }|}
   in
   let ks =
-    expect_ok "live keeper decode"
-      (Wire_fleet.decode_keepers_roster ~observed_at:t0 live_keeper_json)
+    (expect_ok "live keeper decode"
+       (Wire_fleet.decode_keepers_roster ~observed_at:t0 live_keeper_json))
+      .keepers
   in
   let k0 = List.hd ks in
   Alcotest.(check (option int)) "turn_count fallback from runtime_lane_observation"
@@ -2252,16 +2256,17 @@ let test_v25_data_pipeline_decoders () =
     (List.assoc_opt "alpha-builder" extras.sandbox_profiles
      = Some Wire_fleet.Profile_microvm);
   Alcotest.(check (option string)) "candle circulating fallback" (Some "8000")
-    (Option.map (fun (c : Wire_fleet.candle_summary_fallback) -> c.circulating_milli)
-       extras.candle_summary);
+    (match extras.candle_summary with
+     | Some (Wire_fleet.Candle_ready c) -> Some c.circulating_milli
+     | Some (Wire_fleet.Candle_off | Wire_fleet.Candle_disabled _) | None -> None);
   let enrichments, _ =
     expect_ok "decode_execution_keeper_enrichments"
       (Wire_fleet.decode_execution_keeper_enrichments
          (parse_json
-            {|{ "keepers": [{ "name": "alpha-builder", "context_ratio": 0.42, "sandbox_profile": "remote_ssh" }] }|}))
+            {|{ "keepers": [{ "name": "alpha-builder", "sandbox_profile": "remote_ssh" }] }|}))
   in
-  Alcotest.(check (option (float 0.01))) "execution enrichment context_ratio"
-    (Some 0.42) (List.hd enrichments).context_ratio;
+  Alcotest.(check bool) "execution enrichment sandbox_profile" true
+    ((List.hd enrichments).sandbox_profile = Some Wire_fleet.Profile_remote_ssh);
   let companies =
     Wire_fleet.group_by_company ~sandbox_profiles:extras.sandbox_profiles
       ~keeper_costs_24h:[ ("alpha-builder", 0.35) ]
@@ -2528,10 +2533,8 @@ let test_p1_7_wire_fleet_offline_vs_failing_ssot () =
       runtime_id = "sonnet";
       model_id = Some "claude-sonnet-4";
       current_task_id = None;
-      context_ratio = Observed.unreported;
+      context = Observed.unreported;
       total_turns = Observed.unreported;
-      total_tokens = Observed.unreported;
-      cost_24h_usd = Observed.unreported;
       last_turn_at_unix = None;
       active_turn = None;
       activity_sparkline_24h = [];

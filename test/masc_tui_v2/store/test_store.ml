@@ -3647,13 +3647,13 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
   (* P2-7b: Media_viewer [y] copies selected artifact SHA256 *)
   let art1 : Wire_knowledge.artifact_entry =
     {
-      sha256 = "deadbeef0123456789";
-      name = "report.png";
-      mime_type = "image/png";
-      bytes = 1024;
-      created_at_unix = None;
-      producer = Some "alpha";
-      title = Some "Report";
+      id = "artifact-0123456789abcdef0123456789abcdef";
+      revision = 1;
+      title = "Report";
+      summary = "Daily report";
+      author = "alpha";
+      created_at_unix = 1700000000.0;
+      body = { sha256 = "deadbeef0123456789"; bytes = 1024; mime = "text/markdown" };
     }
   in
   let m_mv =

@@ -469,13 +469,19 @@ let make_rich_model ~lang ~cols ~rows =
   in
   let artifact_1 : Wire_knowledge.artifact_entry =
     {
-      sha256 = "e3b0c44298fc1c149afbf4c8996fb924";
-      name = "daily-scorecard-2026-11-21.html";
-      mime_type = "text/html";
-      bytes = 48_120;
-      created_at_unix = Some (now_unix -. 1200.0);
-      producer = Some "wkbl-web-leader";
-      title = Some "일일 성과 리포트";
+      id = "artifact-e3b0c44298fc1c149afbf4c8996fb924";
+      revision = 3;
+      title = "일일 성과 리포트";
+      summary = "2026-11-21 경기 지표 요약";
+      author = "wkbl-web-leader";
+      created_at_unix = now_unix -. 1200.0;
+      body =
+        {
+          sha256 =
+            "e3b0c44298fc1c149afbf4c8996fb924e3b0c44298fc1c149afbf4c8996fb924";
+          bytes = 48_120;
+          mime = "text/html";
+        };
     }
   in
   let world_memory : Wire_knowledge.world_memory =
@@ -1508,7 +1514,7 @@ let test_knowledge_all_tabs_and_dives () =
             [
               Nav.Thread_dive "p-chain-22";
               Nav.Wiki_dive "release-runbook";
-              Nav.Artifact_dive "e3b0c44298fc1c149afbf4c8996fb924";
+              Nav.Artifact_dive "artifact-e3b0c44298fc1c149afbf4c8996fb924";
               Nav.Memory_diff_dive
                 {
                   keeper = Some "e-masc-the-leader";
@@ -1916,24 +1922,24 @@ let test_p1_p2_verifier_regressions () =
     (contains_sub ~needle:"릴리스 런북" ~haystack:txt_wf);
   let art_a : Wire_knowledge.artifact_entry =
     {
-      sha256 = "aaaa111122223333";
-      name = "alpha-report.html";
-      mime_type = "text/html";
-      bytes = 1024;
-      created_at_unix = None;
-      producer = None;
-      title = Some "Alpha Report";
+      id = "artifact-aaaa111122223333aaaa111122223333";
+      revision = 1;
+      title = "Alpha Report";
+      summary = "First report";
+      author = "alpha-writer";
+      created_at_unix = now_unix -. 600.0;
+      body = { sha256 = "aaaa111122223333"; bytes = 1024; mime = "text/html" };
     }
   in
   let art_b : Wire_knowledge.artifact_entry =
     {
-      sha256 = "bbbb444455556666";
-      name = "beta-report.html";
-      mime_type = "text/html";
-      bytes = 2048;
-      created_at_unix = None;
-      producer = None;
-      title = Some "Beta Report";
+      id = "artifact-bbbb444455556666bbbb444455556666";
+      revision = 1;
+      title = "Beta Report";
+      summary = "Second report";
+      author = "alpha-writer";
+      created_at_unix = now_unix -. 300.0;
+      body = { sha256 = "bbbb444455556666"; bytes = 2048; mime = "text/html" };
     }
   in
   let m_art_f =

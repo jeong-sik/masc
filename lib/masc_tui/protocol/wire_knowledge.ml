@@ -955,25 +955,47 @@ let encode_wiki_put_request req =
         ("note", `String req.note);
       ])
 
-type artifact_entry = {
+type artifact_body = {
   sha256 : string;
-  name : string;
-  mime_type : string;
   bytes : int;
-  created_at_unix : float option;
-  producer : string option;
-  title : string option;
+  mime : string;
 }
 
+type artifact_entry = {
+  id : string;
+  revision : int;
+  title : string;
+  summary : string;
+  author : string;
+  created_at_unix : float;
+  body : artifact_body;
+}
+
+(* A row is [Published_artifact.summary_to_json]: the latest revision of one
+   artifact, its body a content-addressed [_blob] reference. *)
+let decode_artifact_body json =
+  let* blob = required_object_field json "_blob" in
+  let* sha256 = required_nonblank_string blob "sha256" in
+  let* bytes = required_nonnegative_int_field blob "bytes" in
+  let* mime = required_nonblank_string blob "mime" in
+  Ok ({ sha256; bytes; mime } : artifact_body)
+
 let decode_artifact_entry json =
-  let* sha256 = required_nonblank_string json "sha256" in
-  let* name = required_nonblank_string json "name" in
-  let* mime_type = required_nonblank_string json "mime_type" in
-  let* bytes = required_nonnegative_int_field json "bytes" in
-  let* created_at_unix = decode_optional_timestamp_unix json "created_at_unix" in
-  let* producer = optional_nonblank_string json "producer" in
-  let* title = optional_nonblank_string json "title" in
-  Ok { sha256; name; mime_type; bytes; created_at_unix; producer; title }
+  let* id = required_nonblank_string json "id" in
+  let* revision = required_int_field json "revision" in
+  let* () =
+    if revision >= 1 then Ok ()
+    else Error (Printf.sprintf "field \"revision\" must be >= 1, got %d" revision)
+  in
+  let* title = required_nonblank_string json "title" in
+  let* summary = required_nonblank_string json "summary" in
+  let* author = required_nonblank_string json "author" in
+  let* created_at_unix = decode_timestamp_unix json "created_at" in
+  let* body_obj = required_object_field json "body" in
+  let* body = decode_artifact_body body_obj in
+  Ok
+    ({ id; revision; title; summary; author; created_at_unix; body }
+      : artifact_entry)
 
 let decode_artifacts_list json =
   let* _, body = unwrap_v2_or_raw json in

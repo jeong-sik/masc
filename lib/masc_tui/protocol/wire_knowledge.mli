@@ -352,14 +352,24 @@ val encode_wiki_put_request : wiki_put_request -> Yojson.Safe.t
 
 (** {1 Artifacts} *)
 
-type artifact_entry = {
+(** The content-addressed body of an artifact's latest revision. *)
+type artifact_body = {
   sha256 : string;
-  name : string;
-  mime_type : string;
   bytes : int;
-  created_at_unix : float option;
-  producer : string option;
-  title : string option;
+  mime : string;
+}
+
+(** One [GET /api/v1/published-artifacts] row: the latest revision of a
+    published artifact. [id] is the stable [artifact-<32hex>] key; [body]
+    changes with every revision. *)
+type artifact_entry = {
+  id : string;
+  revision : int;
+  title : string;
+  summary : string;
+  author : string;
+  created_at_unix : float;
+  body : artifact_body;
 }
 
 val decode_artifacts_list : Yojson.Safe.t -> (artifact_entry list, string) result

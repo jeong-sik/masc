@@ -50,6 +50,7 @@
   masc.masc_board
   masc.masc_goal
   masc.masc_schedule
+  masc.masc_tool_blob_store
   masc.masc_tool_surface
   masc.server
   masc_tui_core

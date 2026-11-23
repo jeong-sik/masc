@@ -527,6 +527,57 @@ let test_board_comment_votes_roundtrip () =
       Alcotest.fail
         (Printf.sprintf "expected one comment, got %d" (List.length comments))
 
+(* GET /api/v1/published-artifacts: each row is the latest revision's summary
+   and its body is a content-addressed [_blob] reference. *)
+let test_published_artifact_roundtrip () =
+  let sha256 = String.make 64 'a' in
+  let body =
+    match
+      Tool_output.make_artifact_ref ~sha256 ~bytes:2048 ~preview:"# Weekly"
+        ~mime:"text/markdown"
+    with
+    | Ok body -> body
+    | Error e -> Alcotest.fail (Tool_output.make_error_to_string e)
+  in
+  let revision : Masc.Published_artifact.revision =
+    {
+      revision = 2;
+      title = "Weekly report";
+      summary = "Throughput and failures";
+      format = Masc.Published_artifact.Markdown;
+      author = "e-masc-the-leader";
+      created_at = "2026-11-23T01:02:03Z";
+      body;
+      task_id = None;
+      goal_id = None;
+    }
+  in
+  let id = "artifact-0123456789abcdef0123456789abcdef" in
+  let response =
+    `Assoc
+      [
+        ( "artifacts",
+          `List [ Masc.Published_artifact.summary_to_json ~id revision ] );
+        ("diagnostics", `List []);
+      ]
+  in
+  match Wire_knowledge.decode_artifacts_list response with
+  | Error e -> Alcotest.fail ("published artifacts decode failed: " ^ e)
+  | Ok [ a ] ->
+      Alcotest.(check string) "id" id a.id;
+      Alcotest.(check int) "revision" 2 a.revision;
+      Alcotest.(check string) "title" "Weekly report" a.title;
+      Alcotest.(check string) "summary" "Throughput and failures" a.summary;
+      Alcotest.(check string) "author" "e-masc-the-leader" a.author;
+      Alcotest.(check (float 0.001))
+        "created_at reads the RFC3339 string" 1795395723.0 a.created_at_unix;
+      Alcotest.(check string) "body sha256" sha256 a.body.sha256;
+      Alcotest.(check int) "body bytes" 2048 a.body.bytes;
+      Alcotest.(check string) "body mime" "text/markdown" a.body.mime
+  | Ok rows ->
+      Alcotest.fail
+        (Printf.sprintf "expected one artifact row, got %d" (List.length rows))
+
 (* Removes a temporary workspace. Cleanup errors are ignored: the assertions
    have already run. *)
 let rec rm_rf path =
@@ -706,6 +757,9 @@ let () =
           Alcotest.test_case
             "board comment dashboard row -> decode_board_thread" `Quick
             test_board_comment_votes_roundtrip;
+          Alcotest.test_case
+            "published artifact summary -> decode_artifacts_list" `Quick
+            test_published_artifact_roundtrip;
           Alcotest.test_case "wiki page links -> decode_wiki_page_detail"
             `Quick test_wiki_page_links_roundtrip;
         ] );

@@ -66,6 +66,13 @@ type http_reply =
       keeper : string option;
       result : (unit, http_error) result;
     }
+  | Reply_tool_approval of {
+      keeper : string;
+      approval_id : string;
+      attention_id : string;
+      decision : Wire_work.tool_approval_decision;
+      result : (Wire_work.tool_approval_outcome, http_error) result;
+    }
   (* Knowledge *)
   | Reply_board_feed of (Wire_knowledge.board_feed, http_error) result
   | Reply_board_thread of
@@ -82,7 +89,7 @@ type http_reply =
   | Reply_wiki_lint of (Wire_knowledge.wiki_lint_report, http_error) result
   | Reply_wiki_put of {
       page : string;
-      result : (Wire_knowledge.wiki_page_detail, http_error) result;
+      result : (Wire_knowledge.wiki_put_result, http_error) result;
     }
   | Reply_artifacts of (Wire_knowledge.artifact_entry list, http_error) result
   | Reply_world_memory of (Wire_knowledge.world_memory, http_error) result

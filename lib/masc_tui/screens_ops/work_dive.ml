@@ -644,7 +644,7 @@ let render_task_dive ~task_id ~(model : Model.t) ~cache ~(rect : Rect.t)
         (Card.default_spec ~title) with
         subtitle = (match tk_opt with Some tk -> Some tk.title | None -> None);
         badge;
-        hotkey = Some "[x] Cancel · [h] Overrule · [Space] JSON · [Esc] Back";
+        hotkey = Some "[x] Cancel · [Space] JSON · [Esc] Back";
         focused = true;
       }
     in
@@ -793,7 +793,6 @@ let render_task_dive ~task_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                  ~theme ~bg
                  [
                    ("x", Ops_common.say model ~ko:"작업 취소" ~en:"Cancel");
-                   ("h", Ops_common.say model ~ko:"판정 재정의" ~en:"Overrule");
                    ("Space", "JSON");
                    ("Esc", Ops_common.say model ~ko:"돌아가기" ~en:"Back");
                  ])
@@ -842,7 +841,7 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
         (Card.default_spec ~title) with
         subtitle = (match v_opt with Some v -> Some v.task_title | None -> None);
         badge;
-        hotkey = Some "[a] Approve · [x] Reject · [h] Overrule · [Space] JSON · [Esc] Back";
+        hotkey = Some "[a] Approve · [x] Reject · [Space] JSON · [Esc] Back";
         focused = true;
       }
     in
@@ -954,7 +953,6 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                  [
                    ("a", Ops_common.say model ~ko:"승인" ~en:"Approve");
                    ("x", Ops_common.say model ~ko:"반려" ~en:"Reject");
-                   ("h", Ops_common.say model ~ko:"판정 재정의" ~en:"Overrule");
                    ("Space", "JSON");
                    ("Esc", Ops_common.say model ~ko:"돌아가기" ~en:"Back");
                  ])

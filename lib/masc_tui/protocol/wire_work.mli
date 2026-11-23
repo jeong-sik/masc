@@ -92,7 +92,13 @@ val decode_goal :
   observed_at:Clock.Mono.t -> Yojson.Safe.t -> (goal, string) result
 
 val encode_goal_transition :
-  goal_id:string -> action:goal_action -> note:string option -> Yojson.Safe.t
+  goal_id:string ->
+  action:goal_action ->
+  note:string option ->
+  expected_workspace:expected_workspace ->
+  Yojson.Safe.t
+(** Body for [POST /api/v1/tools/masc_goal_transition]. The route refuses a
+    transition whose body does not name the workspace the operator saw. *)
 
 val encode_goal_confirmation : goal_confirmation_request -> Yojson.Safe.t
 (** Encode strict allowlist request body for [POST /api/v1/goals/confirmation]. *)
@@ -154,6 +160,14 @@ val decode_task : Yojson.Safe.t -> (task, string) result
 val check_goal_link_assignable : task -> (unit, string) result
 (** Per constitution [goal_link]: goalless tasks may be linked once; tasks
     already carrying a [goal_id] are refused with [Already_assigned]. *)
+
+val encode_task_cancel :
+  task_id:string ->
+  reason:string option ->
+  expected_workspace:expected_workspace ->
+  Yojson.Safe.t
+(** Body for [POST /api/v1/dashboard/tasks/cancel]: [task_id], the trimmed
+    [reason] when it is not blank, and the required [expected_workspace]. *)
 
 val decode_planning_snapshot :
   observed_at:Clock.Mono.t -> Yojson.Safe.t -> (planning_snapshot, string) result
@@ -271,6 +285,24 @@ val decode_schedules_snapshot :
 (** Decode [GET /api/v1/dashboard/scheduled-automation] ([requests] array +
     [next_cursor]). *)
 
+type schedule_repeat =
+  | Repeat_once
+  | Repeat_every of { interval_sec : int }
+
+(** A Keeper wake the Schedule form creates. [first_due_in_sec] is a delay
+    from when the server receives the request. *)
+type schedule_create_request = {
+  keeper_name : string;
+  message : string;
+  first_due_in_sec : int;
+  repeat : schedule_repeat;
+}
+
+val encode_schedule_create : schedule_create_request -> Yojson.Safe.t
+(** Body for [POST /api/v1/tools/masc_schedule_create]: [keeper_name],
+    [message], [due_in_sec] and the recurrence ([one_shot], or [interval] with
+    [recurrence_interval_sec]). *)
+
 (** {1 Approvals & Asks Inbox} *)
 
 type ask_mode =
@@ -361,6 +393,20 @@ val encode_tool_approval_decision :
   Yojson.Safe.t
 (** Encode [POST /api/v1/keepers/tool-approval] with server keys ["name"],
     ["tool_call_id"], ["approval_id"], and ["decision"] (["approve"|"deny"]). *)
+
+type tool_approval_outcome =
+  | Tool_approval_settled  (** The waiting call received the decision. *)
+  | Tool_approval_remembered
+      (** The wait had ended. The decision stands for the identical retried
+          call. *)
+  | Tool_approval_no_waiting_call
+      (** No call was waiting and no matching ask was found, so the decision
+          reached nothing. *)
+
+val decode_tool_approval_outcome :
+  Yojson.Safe.t -> (tool_approval_outcome, string) result
+(** Decode the [{settled, remembered}] answer of
+    [POST /api/v1/keepers/tool-approval]. Both true is an error. *)
 
 val encode_gate_resolution :
   id:string -> approved:bool -> reason:string option -> Yojson.Safe.t

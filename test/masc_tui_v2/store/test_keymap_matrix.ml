@@ -1526,8 +1526,6 @@ let test_axis_b_overlay_isolation_matrix () =
       ("Overlay/Modal/GateReject", with_modal (Nav.Gate_reject "gate-1"));
       ( "Overlay/Modal/VerifReject"
       , with_modal (Nav.Verification_reject "task-1") );
-      ( "Overlay/Modal/HarnessOverrule"
-      , with_modal (Nav.Harness_overrule "task-1") );
       ("Overlay/Modal/TaskCancel", with_modal (Nav.Task_cancel "task-1"));
       ("Overlay/Modal/ScheduleForm", with_modal Nav.Schedule_form);
       ("Overlay/Modal/ConnectorForm", with_modal Nav.Connector_form);
@@ -1563,7 +1561,7 @@ let test_axis_b_overlay_isolation_matrix () =
       ("Ctrl+A", char_key ~ctrl:true "a");
     ]
   in
-  Alcotest.(check int) "Axis B states" 33 (List.length states);
+  Alcotest.(check int) "Axis B states" 32 (List.length states);
   Alcotest.(check int) "Axis B isolation keys" 14 (List.length iso_keys);
   List.iter
     (fun (sname, (m : Model.t)) ->
@@ -5244,7 +5242,7 @@ let () =
         ] );
       ( "axis_b_overlay_focus_x_isolation"
       , [
-          Alcotest.test_case "33 states x 14 isolation keys (462 cases)" `Quick
+          Alcotest.test_case "32 states x 14 isolation keys (448 cases)" `Quick
             test_axis_b_overlay_isolation_matrix;
         ] );
       ( "dynamic_rendered_hints"

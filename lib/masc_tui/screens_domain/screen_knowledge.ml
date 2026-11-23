@@ -725,26 +725,8 @@ let draw_wiki_preview ~target_slug ~scroll ~grid ~cache ~(rect : Rect.t)
         | Some d, None -> Some d
         | Some _, Some _ | None, _ -> None)
   in
-  let draft_active =
-    match k.wiki_edit_draft, target_slug with
-    | Some d, Some want -> if String.equal d.slug want then Some d else None
-    | d_opt, None -> d_opt
-    | None, Some _ -> None
-  in
   let title, badge =
-    match draft_active with
-    | Some d ->
-        let state_txt =
-          if d.saving then Say.resolve lang (Say.make ~ko:"저장 중" ~en:"Saving")
-          else if d.dirty then
-            Say.resolve lang (Say.make ~ko:"편집 중*" ~en:"Editing*")
-          else Say.resolve lang (Say.make ~ko:"인라인 편집" ~en:"Inline Edit")
-        in
-        ( Printf.sprintf "%s %s" (Glyph.to_utf8 Glyph.Spark_mark) d.slug
-        , Some
-            (H.make_badge ~glyph:Glyph.Spark_mark ~tone:Theme.Status_attention
-               state_txt) )
-    | None -> (
+    (
         match page_detail, sel_summary with
         | Some d, _ ->
             ( d.frontmatter.title
@@ -783,34 +765,7 @@ let draw_wiki_preview ~target_slug ~scroll ~grid ~cache ~(rect : Rect.t)
   if Rect.is_empty inner then ()
   else
     let pad_x = Layout.card_pad_x bp in
-    match draft_active with
-    | Some d ->
-        let cas =
-          match d.expected_revision with
-          | Some r -> Printf.sprintf "CAS r%d" r
-          | None -> "CAS new"
-        in
-        Card.draw_section_band ~pad_x grid
-          ~rect:(Rect.make ~x:inner.x ~y:inner.y ~w:inner.w ~h:1)
-          ~theme
-          ~left_title:
-            (Printf.sprintf "%s %s"
-               (Glyph.to_utf8 Glyph.Spark_mark)
-               (Say.resolve lang
-                  (Say.make ~ko:"인라인 위키 편집 활성화"
-                     ~en:"Inline Wiki Edit Active")))
-          ~right_meta:
-            (Printf.sprintf "%s · %s" cas
-               (if String.equal d.note "" then "(no note)" else d.note))
-          ();
-        let md_rect =
-          Rect.make ~x:inner.x ~y:(inner.y + 1) ~w:inner.w
-            ~h:(Int.max 0 (inner.h - 1))
-          |> H.pad_content ~bp
-        in
-        if not (Rect.is_empty md_rect) then
-          ignore (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true ~scroll d.body)
-    | None -> (
+    (
         match page_detail with
         | Some d ->
             let tags =
@@ -1254,11 +1209,6 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
                    | Some s -> Some s.slug
                    | None -> None
                  in
-                 let draft_slug =
-                   match k.wiki_edit_draft with
-                   | Some d -> Some d.slug
-                   | None -> None
-                 in
                  let rows_acc = ref [] in
                  List.iter
                    (fun (topic_opt, ps) ->
@@ -1276,12 +1226,7 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
                            | Some sl -> String.equal sl p.slug
                            | None -> false
                          in
-                         let is_editing =
-                           match draft_slug with
-                           | Some sl -> String.equal sl p.slug
-                           | None -> false
-                         in
-                         rows_acc := (`Page (p, is_sel, is_editing)) :: !rows_acc)
+                         rows_acc := (`Page (p, is_sel)) :: !rows_acc)
                        ps)
                    clusters;
                  let arr = Array.of_list (List.rev !rows_acc) in
@@ -1290,8 +1235,8 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
                    let found = ref None in
                    for i = 0 to total - 1 do
                      match arr.(i) with
-                     | `Page (_, true, _) -> found := Some i
-                     | `Page (_, false, _) | `Topic _ -> ()
+                     | `Page (_, true) -> found := Some i
+                     | `Page (_, false) | `Topic _ -> ()
                    done;
                    !found
                  in
@@ -1326,7 +1271,7 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
                            (H.put_right ~grid ~clip:r_rect ~right_x:right_edge
                               ~y:py ~max_w:6 ~style:(H.whisper_style ~theme ())
                               cnt_s)
-                     | `Page (p, is_sel, is_editing) ->
+                     | `Page (p, is_sel) ->
                          let row_bg =
                            if is_sel then theme.selection_bg else theme.surface_1
                          in
@@ -1334,14 +1279,9 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
                            H.paint_selected_row_bg ~grid ~clip:list_area
                              ~row_rect:r_rect ~theme ();
                          let meta =
-                           let edit_t =
-                             if is_editing then
-                               " " ^ Glyph.to_utf8 Glyph.Spark_mark
-                             else ""
-                           in
-                           Printf.sprintf "%s%d r%d%s"
+                           Printf.sprintf "%s%d r%d"
                              (Glyph.to_utf8 Glyph.External_arrow)
-                             p.backlink_count p.revision edit_t
+                             p.backlink_count p.revision
                          in
                          let mw = Grapheme.display_width meta in
                          let tx = list_area.x + 4 in

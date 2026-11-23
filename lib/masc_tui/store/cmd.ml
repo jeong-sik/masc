@@ -100,6 +100,7 @@ type post_request =
       goal_id : string;
       action : Wire_work.goal_action;
       note : string option;
+      expected_workspace : Wire_work.expected_workspace;
     }
   | Post_goal_confirmation of Wire_work.goal_confirmation_request
   | Post_verification_verdict of {
@@ -150,15 +151,18 @@ type post_request =
       body : string;
       hearth : string option;
     }
-  | Post_schedule_create of {
-      keeper : string;
-      recurrence : string;
-      prompt : string;
+  | Post_schedule_create of Wire_work.schedule_create_request
+  | Post_connector_bind of {
+      connector : string;
+      channel_id : string;
+      keeper_name : string;
     }
-  | Post_connector_create of { connector : string; channel : string }
   | Post_repo_add of { url : string; branch : string option }
-  | Post_task_cancel of { task_id : string; reason : string option }
-  | Post_harness_overrule of { target_id : string; reason : string }
+  | Post_task_cancel of {
+      task_id : string;
+      reason : string option;
+      expected_workspace : Wire_work.expected_workspace;
+    }
 
 type put_request =
   | Put_wiki_page of { page : string; request : Wire_knowledge.wiki_put_request }
@@ -322,10 +326,10 @@ let post_request_path = function
   | Post_keeper_turn_interrupt _ -> Wire_fleet.keeper_turn_interrupt_path
   | Post_board_create _ -> "/api/v1/tools/masc_board_post"
   | Post_schedule_create _ -> "/api/v1/tools/masc_schedule_create"
-  | Post_connector_create _ -> "/api/v1/gate/connector/bind"
+  | Post_connector_bind { connector; _ } ->
+      Wire_runtime.connector_bind_path ~connector
   | Post_repo_add _ -> Wire_infra.repositories_path
   | Post_task_cancel _ -> "/api/v1/dashboard/tasks/cancel"
-  | Post_harness_overrule _ -> "/api/v1/dashboard/harness-label"
 
 let post_request_body = function
   | Post_ask_answer { keeper; ask_id; answers } ->
@@ -336,8 +340,9 @@ let post_request_body = function
         ~decision ?expected_workspace ()
   | Post_gate_resolution { id; approved; reason } ->
       Wire_work.encode_gate_resolution ~id ~approved ~reason
-  | Post_goal_transition { goal_id; action; note } ->
+  | Post_goal_transition { goal_id; action; note; expected_workspace } ->
       Wire_work.encode_goal_transition ~goal_id ~action ~note
+        ~expected_workspace
   | Post_goal_confirmation req -> Wire_work.encode_goal_confirmation req
   | Post_verification_verdict { task_id; verification_id; verdict; notes } ->
       Wire_work.encode_verification_verdict ~task_id ~verification_id ~verdict
@@ -378,15 +383,9 @@ let post_request_body = function
         | Some _ | None -> base
       in
       `Assoc fields
-  | Post_schedule_create { keeper; recurrence; prompt } ->
-      `Assoc
-        [
-          ("keeper", `String keeper);
-          ("recurrence", `String recurrence);
-          ("prompt", `String prompt);
-        ]
-  | Post_connector_create { connector; channel } ->
-      `Assoc [ ("connector", `String connector); ("channel", `String channel) ]
+  | Post_schedule_create req -> Wire_work.encode_schedule_create req
+  | Post_connector_bind { connector = _; channel_id; keeper_name } ->
+      Wire_runtime.encode_connector_bind ~channel_id ~keeper_name
   | Post_repo_add { url; branch } ->
       let base = [ ("url", `String url) ] in
       let fields =
@@ -396,17 +395,8 @@ let post_request_body = function
         | Some _ | None -> base
       in
       `Assoc fields
-  | Post_task_cancel { task_id; reason } ->
-      let base = [ ("task_id", `String task_id) ] in
-      let fields =
-        match reason with
-        | Some r when not (String.equal (String.trim r) "") ->
-            base @ [ ("reason", `String (String.trim r)) ]
-        | Some _ | None -> base
-      in
-      `Assoc fields
-  | Post_harness_overrule { target_id; reason } ->
-      `Assoc [ ("target_id", `String target_id); ("reason", `String reason) ]
+  | Post_task_cancel { task_id; reason; expected_workspace } ->
+      Wire_work.encode_task_cancel ~task_id ~reason ~expected_workspace
 
 let put_request_path = function
   | Put_wiki_page { page; _ } -> Wire_knowledge.wiki_page_path ~page

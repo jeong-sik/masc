@@ -531,7 +531,54 @@ let test_three_channel_separation () =
   Alcotest.(check int) "ask removed on server ack" 3
     (Attention.count m12.attention);
   Alcotest.(check int) "recent 24h decision recorded" 1
-    (List.length m12.work.recent_decisions_24h)
+    (List.length m12.work.recent_decisions_24h);
+  (* The fast approval of tool:ap-1 is still in flight. Its answer decides
+     whether the item is resolved. *)
+  let tool_reply outcome =
+    Msg.Http_reply
+      {
+        epoch = m12.epoch;
+        reply =
+          Msg.Reply_tool_approval
+            {
+              keeper = "alpha";
+              approval_id = "ap-1";
+              attention_id = "tool:ap-1";
+              decision = Wire_work.Tool_approve;
+              result = Ok outcome;
+            };
+      }
+  in
+  let m_unclaimed, cmds_unclaimed =
+    Update.step ~now:t2 m12 (tool_reply Wire_work.Tool_approval_no_waiting_call)
+  in
+  Alcotest.(check bool) "an approval no call took is no longer in flight" false
+    (Attention.is_in_flight ~id:"tool:ap-1" m_unclaimed.attention);
+  Alcotest.(check int) "an approval no call took keeps the item" 3
+    (Attention.count m_unclaimed.attention);
+  Alcotest.(check int) "an approval no call took records no decision" 1
+    (List.length m_unclaimed.work.recent_decisions_24h);
+  Alcotest.(check bool) "an approval no call took reads the held approvals again"
+    true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_tool_approvals; _ } -> true
+         | _ -> false)
+       cmds_unclaimed);
+  let m_settled, _ =
+    Update.step ~now:t2 m12 (tool_reply Wire_work.Tool_approval_settled)
+  in
+  Alcotest.(check int) "a settled approval resolves the item" 2
+    (Attention.count m_settled.attention);
+  Alcotest.(check int) "a settled approval records the decision" 2
+    (List.length m_settled.work.recent_decisions_24h);
+  let m_remembered, _ =
+    Update.step ~now:t2 m12 (tool_reply Wire_work.Tool_approval_remembered)
+  in
+  Alcotest.(check int) "a remembered approval resolves the item" 2
+    (Attention.count m_remembered.attention);
+  Alcotest.(check int) "a remembered approval records the decision" 2
+    (List.length m_remembered.work.recent_decisions_24h)
 
 (* 3. Compact composer auto-fold, draft preservation & transmission lifecycle *)
 let test_compact_composer_and_drafts () =
@@ -1524,7 +1571,14 @@ let test_verifier_regressions () =
   Alcotest.(check string) "Post_task_cancel path"
     "/api/v1/dashboard/tasks/cancel"
     (Cmd.post_request_path
-       (Cmd.Post_task_cancel { task_id = "t1"; reason = None }));
+       (Cmd.Post_task_cancel
+          {
+            task_id = "t1";
+            reason = None;
+            expected_workspace =
+              ({ base_path = "/repo"; masc_root = "/repo/.masc" }
+                : Wire_work.expected_workspace);
+          }));
   let m_goal, _ =
     Update.step ~now:t0 m0
       (Msg.Http_reply
@@ -1642,10 +1696,9 @@ let test_verifier_regressions () =
         | Cmd.Post_keeper_turn_interrupt _
         | Cmd.Post_board_create _
         | Cmd.Post_schedule_create _
-        | Cmd.Post_connector_create _
+        | Cmd.Post_connector_bind _
         | Cmd.Post_repo_add _
-        | Cmd.Post_task_cancel _
-        | Cmd.Post_harness_overrule _ ->
+        | Cmd.Post_task_cancel _ ->
             false)
     | Cmd.Batch _
     | Cmd.Http_get _
@@ -3123,7 +3176,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     (Option.equal Nav.equal_overlay m_sched_modal.nav.overlay
        (Some (Nav.Inline_action Nav.Schedule_form)));
 
-  (* Verification_dive: [a] approve, [x] -> Verification_reject modal -> submit, [h] -> Harness_overrule modal -> submit, [Space] JSON *)
+  (* Verification_dive: [a] approve, [x] -> Verification_reject modal -> submit, [Space] JSON *)
   let m_vdive =
     {
       m_work with
@@ -3175,20 +3228,6 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     true
     (Option.is_none m_vrej_done.inline_modal
      && Option.is_none m_vrej_done.nav.overlay);
-  let m_hov, _ = step m_vdive (char_key "h") in
-  Alcotest.(check bool) "Verification_dive [h] opens Harness_overrule modal" true
-    (Option.equal Nav.equal_overlay m_hov.nav.overlay
-       (Some (Nav.Inline_action (Nav.Harness_overrule "task-100"))));
-  let m_hov_typed, _ = step m_hov (char_key "r") in
-  let _, cmds_hov = step m_hov_typed (key Keymap.Input.Enter) in
-  Alcotest.(check bool) "Harness_overrule submit emits Post_harness_overrule" true
-    (has_cmd
-       (function
-         | Cmd.Http_post
-             { req = Cmd.Post_harness_overrule { target_id = "task-100"; _ }; _ } ->
-             true
-         | _ -> false)
-       cmds_hov);
   let m_vjson, _ = step m_vdive (char_key " ") in
   Alcotest.(check bool) "Work_dive [Space] toggles show_raw_json" true
     m_vjson.infra.show_raw_json;
@@ -3213,6 +3252,137 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
              true
          | _ -> false)
        cmds_tc);
+  (* What goes on the wire: the cancel and Goal routes refuse a body that does
+     not name the workspace [/health] reported. *)
+  let posted_requests cmds =
+    List.filter_map
+      (function
+        | Cmd.Http_post { req; _ } -> Some req
+        | Cmd.Batch _ | Cmd.Http_get _ | Cmd.Http_put _
+        | Cmd.Http_post_stream _ | Cmd.Sync_streams _
+        | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
+        | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _
+        | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Start_local_server
+        | Cmd.Restart_tui | Cmd.Quit _ ->
+            None)
+      (Cmd.flatten cmds)
+  in
+  let posted_bodies cmds =
+    List.map Cmd.post_request_body (posted_requests cmds)
+  in
+  let posted_field key cmds =
+    List.map
+      (fun body -> Yojson.Safe.to_string (Yojson.Safe.Util.member key body))
+      (posted_bodies cmds)
+  in
+  let health_workspace_json =
+    Yojson.Safe.to_string
+      (`Assoc
+         [
+           ("base_path", `String ws_id.base_path);
+           ("masc_root", `String ws_id.masc_root);
+         ])
+  in
+  Alcotest.(check (list string))
+    "Task_cancel body names the workspace /health reported"
+    [ health_workspace_json ]
+    (posted_field "expected_workspace" cmds_tc);
+  let without_workspace (m : Model.t) =
+    { m with server_identity = { m.server_identity with workspace = None } }
+  in
+  let m_tc_unknown, cmds_tc_unknown =
+    step (without_workspace m_tc) (key Keymap.Input.Enter)
+  in
+  Alcotest.(check int) "Task_cancel posts nothing before /health names the workspace"
+    0
+    (List.length (posted_bodies cmds_tc_unknown));
+  Alcotest.(check bool) "Task_cancel keeps its modal open with an error" true
+    (match m_tc_unknown.inline_modal with
+    | Some md -> Option.is_some md.error
+    | None -> false);
+
+  (* Schedule form -> the masc_schedule_create fields: a Keeper wake, one
+     delay as its due input, and the repeat it reads. *)
+  let fill_modal values (m : Model.t) =
+    match m.inline_modal with
+    | None -> Alcotest.fail "expected an open modal"
+    | Some md ->
+        let fields =
+          List.map
+            (fun (f : Model.modal_form_field) ->
+              match List.assoc_opt f.key values with
+              | Some value -> { f with value }
+              | None -> f)
+            md.fields
+        in
+        { m with inline_modal = Some { md with fields } }
+  in
+  let _, cmds_sched =
+    step
+      (fill_modal
+         [
+           ("keeper", "alpha");
+           ("first_run_in", "10m");
+           ("prompt", "Check the queue");
+         ]
+         m_sched_modal)
+      (key Keymap.Input.Enter)
+  in
+  Alcotest.(check bool) "Schedule form posts keeper_name, message, delay and repeat"
+    true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_schedule_create
+                   {
+                     keeper_name = "alpha";
+                     message = "Check the queue";
+                     first_due_in_sec = 600;
+                     repeat = Wire_work.Repeat_every { interval_sec = 3600 };
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       cmds_sched);
+  let m_sched_bad, cmds_sched_bad =
+    step
+      (fill_modal
+         [
+           ("keeper", "alpha");
+           ("recurrence", "hourly");
+           ("first_run_in", "10m");
+           ("prompt", "Check the queue");
+         ]
+         m_sched_modal)
+      (key Keymap.Input.Enter)
+  in
+  Alcotest.(check int) "Schedule form posts nothing for a repeat it cannot read" 0
+    (List.length (posted_bodies cmds_sched_bad));
+  Alcotest.(check bool) "Schedule form stays open with an error" true
+    (match m_sched_bad.inline_modal with
+    | Some md -> Option.is_some md.error
+    | None -> false);
+
+  (* Connector form -> the bind route's only inputs: the connector as the
+     [name] query parameter, and channel_id and keeper_name in the body. *)
+  let m_conn_modal, _ = Update_nav.open_inline_modal m_work Nav.Connector_form in
+  let _, cmds_conn =
+    step
+      (fill_modal
+         [ ("connector", "discord"); ("channel", "1234"); ("keeper", "alpha") ]
+         m_conn_modal)
+      (key Keymap.Input.Enter)
+  in
+  Alcotest.(check (list string)) "Connector form names the connector in the query"
+    [ "/api/v1/gate/connector/bind?name=discord" ]
+    (List.map Cmd.post_request_path (posted_requests cmds_conn));
+  Alcotest.(check (list string)) "Connector form posts channel_id and keeper_name"
+    [ {|{"channel_id":"1234","keeper_name":"alpha"}|} ]
+    (List.map Yojson.Safe.to_string (posted_bodies cmds_conn));
 
   (* Goal_dive: Awaiting_confirmation [a] NEVER fabricates proof — opens explicit server-proof modal *)
   let m_gdive_conf =
@@ -3310,6 +3480,14 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
              true
          | _ -> false)
        cmds_greq);
+  Alcotest.(check (list string))
+    "Goal transition body names the workspace /health reported"
+    [ health_workspace_json ]
+    (posted_field "expected_workspace" cmds_greq);
+  let _, cmds_greq_unknown = step (without_workspace m_gdive_exec) (char_key "a") in
+  Alcotest.(check int)
+    "Goal transition posts nothing before /health names the workspace" 0
+    (List.length (posted_bodies cmds_greq_unknown));
   let _, cmds_gpause = step m_gdive_exec (char_key "x") in
   Alcotest.(check bool) "Goal_dive Executing [x] emits Pause" true
     (has_cmd
@@ -3405,6 +3583,76 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
   Alcotest.(check bool) "Wiki [e] modal closes on submit (no hang)" true
     (Option.is_none m_wedit_done.inline_modal
      && Option.is_none m_wedit_done.nav.overlay);
+  (* The PUT answer names the revision written but no page, so the stored
+     page is stale and the Wiki dive reads it again. *)
+  let saved : Wire_knowledge.wiki_put_result =
+    { action = Wire_knowledge.Wiki_page_updated; revision = 4; warnings = [] }
+  in
+  let m_wsaved, cmds_wsaved =
+    Update.step ~now:t1 m_wedit_done
+      (Msg.Http_reply
+         {
+           epoch = m_wedit_done.epoch;
+           reply = Msg.Reply_wiki_put { page = "guide"; result = Ok saved };
+         })
+  in
+  Alcotest.(check bool) "a saved wiki page is stale until it is read again" true
+    (Observed.is_stale m_wsaved.knowledge.wiki_page);
+  Alcotest.(check bool) "the Wiki dive reads the saved page again" true
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_wiki_page { page = "guide" }; _ } -> true
+         | _ -> false)
+       cmds_wsaved);
+  (* Until that read lands the slot holds revision 3, so [e] waits for the
+     page instead of opening a form on the text the save replaced. *)
+  let m_wagain, cmds_wagain = step m_wsaved (char_key "e") in
+  Alcotest.(check bool) "[e] right after a save opens no form" true
+    (Option.is_none m_wagain.inline_modal);
+  Alcotest.(check bool) "[e] right after a save asks for the page" true
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_wiki_page { page = "guide" }; _ } -> true
+         | _ -> false)
+       cmds_wagain);
+  (* A form opened on revision 3 saves against revision 3 even when
+     revision 4 lands while it is open: the server then refuses the save
+     instead of writing the old text over revision 4. *)
+  let m_wopen, _ = step m_wiki (char_key "e") in
+  let page_r4 =
+    {
+      wiki_page with
+      frontmatter = { wiki_page.frontmatter with revision = 4 };
+      sha256 = "sha-w4";
+    }
+  in
+  let m_wr4, _ =
+    Update.step ~now:t1 m_wopen
+      (Msg.Http_reply
+         { epoch = m_wopen.epoch; reply = Msg.Reply_wiki_page (Ok page_r4) })
+  in
+  let _, cmds_wbase = step m_wr4 (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "the save names the revision the form opened on" true
+    (has_cmd
+       (function
+         | Cmd.Http_put
+             {
+               req =
+                 Cmd.Put_wiki_page
+                   {
+                     page = "guide";
+                     request =
+                       {
+                         expected_revision = Some 3;
+                         expected_sha256 = Some "sha-w3";
+                         _;
+                       };
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       cmds_wbase);
   let m_mact_mod, _ = step m_kmem (char_key "A") in
   let m_mact_done, cmds_mact_mod = step m_mact_mod (key Keymap.Input.Enter) in
   Alcotest.(check bool) "Memory [A] modal closes on submit and emits Post_memory_act"

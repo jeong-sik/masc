@@ -620,16 +620,6 @@ let inline_modal_for kind =
             secret = false;
           };
         ]
-    | Nav.Harness_overrule _ ->
-        [
-          {
-            key = "reason";
-            label = Say.make ~ko:"판정 재정의 사유" ~en:"Overrule reason";
-            value = "";
-            required = true;
-            secret = false;
-          };
-        ]
     | Nav.Task_cancel _ ->
         [
           {
@@ -651,8 +641,18 @@ let inline_modal_for kind =
           };
           {
             key = "recurrence";
-            label = Say.make ~ko:"반복 주기" ~en:"Recurrence";
+            label =
+              Say.make ~ko:"반복 (once 또는 every 1h)"
+                ~en:"Repeat (once or every 1h)";
             value = "every 1h";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "first_run_in";
+            label =
+              Say.make ~ko:"첫 실행까지 (예: 10m)" ~en:"First run in (e.g. 10m)";
+            value = "";
             required = true;
             secret = false;
           };
@@ -675,7 +675,14 @@ let inline_modal_for kind =
           };
           {
             key = "channel";
-            label = Say.make ~ko:"채널" ~en:"Channel";
+            label = Say.make ~ko:"채널 ID" ~en:"Channel ID";
+            value = "";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "keeper";
+            label = Say.make ~ko:"연결할 키퍼" ~en:"Keeper to bind";
             value = "";
             required = true;
             secret = false;

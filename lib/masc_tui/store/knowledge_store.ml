@@ -98,18 +98,12 @@ type memory_diagram_state = {
   copy_source : string;
 }
 
-type wiki_edit_draft = {
+type wiki_edit_base = {
   slug : string;
-  expected_revision : int option;
-  expected_sha256 : string option;
-  title : string;
-  summary : string;
+  revision : int;
+  sha256 : string;
   source : Wire_knowledge.wiki_source;
   tags : string list;
-  body : string;
-  note : string;
-  dirty : bool;
-  saving : bool;
 }
 
 type t = {
@@ -128,7 +122,7 @@ type t = {
   wiki_log : Wire_knowledge.wiki_log_response Observed.t;
   wiki_search : Wire_knowledge.wiki_search_response Observed.t;
   wiki_lint : Wire_knowledge.wiki_lint_report Observed.t;
-  wiki_edit_draft : wiki_edit_draft option;
+  wiki_edit_base : wiki_edit_base option;
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
   world_memory : Wire_knowledge.world_memory Observed.t;
   memory_diff : Wire_knowledge.memory_diff Observed.t;
@@ -174,7 +168,7 @@ let empty =
     wiki_log = Observed.unreported;
     wiki_search = Observed.absent;
     wiki_lint = Observed.unreported;
-    wiki_edit_draft = None;
+    wiki_edit_base = None;
     artifacts = Observed.unreported;
     world_memory = Observed.unreported;
     memory_diff = Observed.unreported;
@@ -1348,54 +1342,20 @@ let record_memory_act_answer ~keeper ans t =
   { t with last_memory_act_answer = Some (keeper, ans) }
 
 let begin_wiki_edit (page : Wire_knowledge.wiki_page_detail) t =
-  let draft =
-    {
-      slug = page.slug;
-      expected_revision = Some page.frontmatter.revision;
-      expected_sha256 = Some page.sha256;
-      title = page.frontmatter.title;
-      summary = page.frontmatter.summary;
-      source = page.frontmatter.source;
-      tags = page.frontmatter.tags;
-      body = page.body_markdown;
-      note = "";
-      dirty = false;
-      saving = false;
-    }
-  in
-  { t with wiki_edit_draft = Some draft }
-
-let update_wiki_edit_body body t =
-  match t.wiki_edit_draft with
-  | None -> t
-  | Some d -> { t with wiki_edit_draft = Some { d with body; dirty = true } }
-
-let update_wiki_edit_note note t =
-  match t.wiki_edit_draft with
-  | None -> t
-  | Some d -> { t with wiki_edit_draft = Some { d with note; dirty = true } }
-
-let mark_wiki_edit_saving saving t =
-  match t.wiki_edit_draft with
-  | None -> t
-  | Some d -> { t with wiki_edit_draft = Some { d with saving } }
-
-let cancel_wiki_edit t = { t with wiki_edit_draft = None }
-
-let wiki_put_request_of_draft (d : wiki_edit_draft) :
-    Wire_knowledge.wiki_put_request =
   {
-    expected_revision = d.expected_revision;
-    expected_sha256 = d.expected_sha256;
-    title = d.title;
-    summary = d.summary;
-    source = d.source;
-    tags = d.tags;
-    body = d.body;
-    note =
-      if String.equal (String.trim d.note) "" then "Edited in MASC TUI"
-      else d.note;
+    t with
+    wiki_edit_base =
+      Some
+        {
+          slug = page.slug;
+          revision = page.frontmatter.revision;
+          sha256 = page.sha256;
+          source = page.frontmatter.source;
+          tags = page.frontmatter.tags;
+        };
   }
+
+let end_wiki_edit t = { t with wiki_edit_base = None }
 
 let quarantines_list t =
   match Observed.to_option t.quarantines with Some xs -> xs | None -> []
@@ -1876,13 +1836,10 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
                   match t.wiki_artifacts_submode with
                   | `Wiki -> (
                       let body_opt =
-                        match t.wiki_edit_draft with
-                        | Some d -> Some d.body
-                        | None ->
-                            Option.map
-                              (fun (p : Wire_knowledge.wiki_page_detail) ->
-                                p.body_markdown)
-                              (Observed.to_option t.wiki_page)
+                        Option.map
+                          (fun (p : Wire_knowledge.wiki_page_detail) ->
+                            p.body_markdown)
+                          (Observed.to_option t.wiki_page)
                       in
                       match body_opt with
                       | Some body ->

@@ -234,13 +234,17 @@ Four sub-tabs (`[` / `]` or `←` / `→`):
    - Goal hotkeys: `a` advance/approve (opens server-issued confirmation proof
      modal when `Awaiting_confirmation`), `c` request completion verification,
      `x` pause (or drop when already paused).
-   - Verification hotkeys: `a` approve verdict, `x` reject modal, `h` / `X`
-     harness overrule modal.
+   - Verification hotkeys: `a` approve verdict, `x` reject modal.
 2. **Tasks & Schedules**: workspace task backlog and scheduled automations
    (`Space` cycles the status chip All → Active → AwaitingVerify → Todo →
    Unlinked → Done → Schedules, `/` narrows by title or id within the chip,
    `Enter` dives into Task detail, `n` opens new Schedule form, `x` opens Task
-   cancel modal, `h` / `X` opens harness overrule modal).
+   cancel modal).
+   - Schedule form: target Keeper, repeat (`once`, or `every` with a delay
+     such as `every 30m`), first run delay (`90s`, `10m`, `2h`, `1d`), and the
+     prompt the Keeper is woken with. A repeat or delay in any other form keeps
+     the form open with an error. Daily and cron schedules are created with
+     `masc_schedule_create`, not from this form.
 3. **Inbox** (Action Inbox): unified operator triage queue (see
    [Approvals](#approvals) below).
 4. **Candle & Scorecard**: fleet Candle ledger (`GET /api/v1/candle/ledger`),
@@ -259,6 +263,11 @@ Pending operator decisions appear in two places:
     rejection).
   - While typing in the composer: use **`Alt+Y`** and **`Alt+N`** without
     losing your draft.
+  - A Tool Approval answer toasts what the server did with it: the waiting
+    call took it, the call had stopped waiting and the answer applies when
+    the same call is retried, or no call was waiting. In the last case
+    nothing is recorded, the item stays, and the held approvals are read
+    again.
   - For **Goal confirmations**, `Y` never fabricates proof tokens — it dives
     into **Goal Dive** so you can review verified proof and submit the exact
     server-issued `criterion_revision`, `request_id`, `verification_run_id`,
@@ -282,7 +291,9 @@ Three sub-tabs (`[` / `]` or `←` / `→`):
    - **Wiki mode**: `Enter` opens Wiki Dive (Markdown body, outgoing links,
      revision log), `e` opens inline Markdown edit modal (`PUT` with
      `expected_revision`/`expected_sha256`), `Ctrl+E` opens in `$EDITOR`, `y`
-     copies Markdown body, `o` opens the first `http(s)` URL.
+     copies Markdown body, `o` opens the first `http(s)` URL. A save toasts the
+     revision it wrote, as a warning when the journal or index write failed,
+     and the page is read again.
    - **Artifacts mode**: `Enter` opens Artifact Dive (title, summary,
      revision, MIME, size, SHA-256, author, created time, and the list of
      published artifacts), `o` opens the Media & Artifact Viewer overlay, `y`
@@ -347,7 +358,8 @@ Four sub-tabs (`[` / `]` or `←` / `→`):
    lanes), and **Fusion** runs (`f` opens the Fusion launch modal).
 4. **Tools & Connectors**: 24h tool metrics series (live updates via
    view-scoped `tool-metrics/series/stream` SSE), Tools catalog, Channel Gate
-   Connectors (`n` opens Connector form), **Browser Lane** summary, and
+   Connectors (`n` opens the Connector bind form: connector name such as
+   `discord`, channel ID, and the Keeper to bind), **Browser Lane** summary, and
    **Connected MCP Clients**.
 
 ### `6` Infra

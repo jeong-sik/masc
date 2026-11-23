@@ -35,6 +35,9 @@ val fusion_runs_path : string
 val fusion_launch_path : keeper:string -> string
 val exact_lane_runs_path : ?lane:string -> ?limit:int -> unit -> string
 val connectors_path : string
+
+val connector_bind_path : connector:string -> string
+(** [POST /api/v1/gate/connector/bind?name=<connector>]. *)
 val browser_lane_path : string
 val mcp_clients_path : string
 
@@ -583,6 +586,11 @@ type connector_row = {
 }
 
 val decode_connectors : Yojson.Safe.t -> (connector_row list, string) result
+
+val encode_connector_bind :
+  channel_id:string -> keeper_name:string -> Yojson.Safe.t
+(** Body for {!connector_bind_path}: the channel to bind and the Keeper that
+    answers it. *)
 
 type browser_lane_status = {
   ok : bool;

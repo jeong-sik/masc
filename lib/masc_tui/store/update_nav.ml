@@ -601,7 +601,6 @@ let open_inline_modal (m : Model.t) kind =
     | ( Nav.Btw_query
       | Nav.Gate_reject _
       | Nav.Verification_reject _
-      | Nav.Harness_overrule _
       | Nav.Task_cancel _
       | Nav.Schedule_form
       | Nav.Connector_form
@@ -2116,12 +2115,57 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
   | ( Nav.Btw_query
     | Nav.Gate_reject _
     | Nav.Verification_reject _
-    | Nav.Harness_overrule _
     | Nav.Task_cancel _
     | Nav.Schedule_form
     | Nav.Connector_form
     | Nav.Repo_add_form ) as std ->
       Form_standard std
+
+(* The Schedule form's operator text. A delay is a whole count and one unit,
+   [90s], [10m], [2h] or [1d]; anything else is refused rather than read as
+   a guess. *)
+let seconds_per_delay_unit = function
+  | 's' -> Some 1
+  | 'm' -> Some 60
+  | 'h' -> Some 3600
+  | 'd' -> Some 86400
+  | _ -> None
+
+let parse_schedule_delay raw =
+  let text = String.lowercase_ascii (String.trim raw) in
+  let len = String.length text in
+  let refused =
+    Error
+      (Printf.sprintf "\"%s\" is not a delay such as 90s, 10m, 2h or 1d" raw)
+  in
+  if len < 2 then refused
+  else
+    let digits = String.sub text 0 (len - 1) in
+    let count =
+      if String.for_all (fun c -> c >= '0' && c <= '9') digits then
+        int_of_string_opt digits
+      else None
+    in
+    match (count, seconds_per_delay_unit text.[len - 1]) with
+    | Some n, Some unit_sec when n >= 1 && n <= max_int / unit_sec ->
+        Ok (n * unit_sec)
+    | Some _, Some _ | Some _, None | None, Some _ | None, None -> refused
+
+let parse_schedule_repeat raw =
+  let words =
+    String.split_on_char ' ' (String.lowercase_ascii (String.trim raw))
+    |> List.filter (fun w -> not (String.equal w ""))
+  in
+  match words with
+  | [ "once" ] -> Ok Wire_work.Repeat_once
+  | [ "every"; delay ] ->
+      Result.map
+        (fun interval_sec -> Wire_work.Repeat_every { interval_sec })
+        (parse_schedule_delay delay)
+  | _ ->
+      Error
+        (Printf.sprintf "\"%s\" is not a repeat such as once or every 1h"
+           raw)
 
 let submit_inline_modal ~now (m : Model.t) =
   match m.inline_modal with
@@ -2219,51 +2263,61 @@ let submit_inline_modal ~now (m : Model.t) =
                               };
                         };
                     ] ))
-          | Form_standard (Nav.Harness_overrule target_id) ->
-              let reason = Model.modal_field_value ~key:"reason" modal in
-              ( mark_submitting m
-              , [
-                  Cmd.Http_post
-                    {
-                      epoch = m.epoch;
-                      req = Cmd.Post_harness_overrule { target_id; reason };
-                    };
-                ] )
-          | Form_standard (Nav.Task_cancel task_id) ->
+          | Form_standard (Nav.Task_cancel task_id) -> (
               let reason_raw = Model.modal_field_value ~key:"reason" modal in
               let reason =
                 if String.equal reason_raw "" then None else Some reason_raw
               in
-              ( mark_submitting m
-              , [
-                  Cmd.Http_post
-                    {
-                      epoch = m.epoch;
-                      req = Cmd.Post_task_cancel { task_id; reason };
-                    };
-                ] )
-          | Form_standard Nav.Schedule_form ->
-              let keeper = Model.modal_field_value ~key:"keeper" modal in
-              let recurrence = Model.modal_field_value ~key:"recurrence" modal in
-              let prompt = Model.modal_field_value ~key:"prompt" modal in
+              match expected_workspace_of m with
+              | None ->
+                  set_modal_error
+                    "Server workspace identity must be loaded before \
+                     cancelling a task"
+              | Some expected_workspace ->
+                  ( mark_submitting m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_task_cancel
+                              { task_id; reason; expected_workspace };
+                        };
+                    ] ))
+          | Form_standard Nav.Schedule_form -> (
+              let keeper_name = Model.modal_field_value ~key:"keeper" modal in
+              let message = Model.modal_field_value ~key:"prompt" modal in
+              match
+                ( parse_schedule_repeat
+                    (Model.modal_field_value ~key:"recurrence" modal),
+                  parse_schedule_delay
+                    (Model.modal_field_value ~key:"first_run_in" modal) )
+              with
+              | Error err, (Ok _ | Error _) | Ok _, Error err ->
+                  set_modal_error err
+              | Ok repeat, Ok first_due_in_sec ->
+                  ( mark_submitting m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_schedule_create
+                              { keeper_name; message; first_due_in_sec; repeat };
+                        };
+                    ] ))
+          | Form_standard Nav.Connector_form ->
+              let connector = Model.modal_field_value ~key:"connector" modal in
+              let channel_id = Model.modal_field_value ~key:"channel" modal in
+              let keeper_name = Model.modal_field_value ~key:"keeper" modal in
               ( mark_submitting m
               , [
                   Cmd.Http_post
                     {
                       epoch = m.epoch;
                       req =
-                        Cmd.Post_schedule_create { keeper; recurrence; prompt };
-                    };
-                ] )
-          | Form_standard Nav.Connector_form ->
-              let connector = Model.modal_field_value ~key:"connector" modal in
-              let channel = Model.modal_field_value ~key:"channel" modal in
-              ( mark_submitting m
-              , [
-                  Cmd.Http_post
-                    {
-                      epoch = m.epoch;
-                      req = Cmd.Post_connector_create { connector; channel };
+                        Cmd.Post_connector_bind
+                          { connector; channel_id; keeper_name };
                     };
                 ] )
           | Form_standard Nav.Repo_add_form ->
@@ -2458,31 +2512,20 @@ let submit_inline_modal ~now (m : Model.t) =
               let note =
                 if String.equal note_raw "" then "TUI inline edit" else note_raw
               in
+              (* The save names the revision the form opened on, not the
+                 one the slot holds now: a page read again while the form is
+                 open must not let the old text pass the server's check. A
+                 slug typed over the base's creates a page, which the server
+                 refuses if one exists. *)
               let expected_revision, expected_sha256, source, tags =
-                match Observed.to_option m.knowledge.wiki_page with
-                | Some detail when String.equal detail.slug slug ->
-                    ( Some detail.frontmatter.revision
-                    , Some detail.sha256
-                    , detail.frontmatter.source
-                    , detail.frontmatter.tags )
-                | Some _ | None -> (
-                    match Observed.to_option m.knowledge.wiki_index with
-                    | Some idx -> (
-                        match
-                          List.find_opt
-                            (fun (p : Wire_knowledge.wiki_page_summary) ->
-                              String.equal p.slug slug)
-                            idx.pages
-                        with
-                        | Some s ->
-                            ( Some s.revision
-                            , Some s.sha256
-                            , s.source
-                            , s.tags )
-                        | None ->
-                            (None, None, Wire_knowledge.Source_observation, []))
-                    | None ->
-                        (None, None, Wire_knowledge.Source_observation, []))
+                match m.knowledge.wiki_edit_base with
+                | Some base when String.equal base.slug slug ->
+                    ( Some base.revision
+                    , Some base.sha256
+                    , base.source
+                    , base.tags )
+                | Some _ | None ->
+                    (None, None, Wire_knowledge.Source_observation, [])
               in
               let request : Wire_knowledge.wiki_put_request =
                 {
@@ -2501,7 +2544,10 @@ let submit_inline_modal ~now (m : Model.t) =
                     (Say.make
                        ~ko:("위키 문서 저장 중: " ^ slug)
                        ~en:("Saving wiki page: " ^ slug))
-                  m
+                  {
+                    m with
+                    knowledge = Knowledge_store.end_wiki_edit m.knowledge;
+                  }
               , [
                   Cmd.Http_put
                     {
@@ -3291,23 +3337,7 @@ let wiki_preview_max_scroll ~bp ~theme ~(rect : Rect.t)
           | None -> None)
       | None -> Knowledge_store.selected_wiki_page k
     in
-    let active_draft =
-      match target_slug with
-      | None -> k.wiki_edit_draft
-      | Some want -> (
-          match k.wiki_edit_draft with
-          | Some d when String.equal d.slug want -> Some d
-          | Some _ | None -> None)
-    in
-    match active_draft with
-    | Some d ->
-        let md_rect =
-          Rect.make ~x:inner.x ~y:(inner.y + 1) ~w:inner.w
-            ~h:(max 0 (inner.h - 1))
-          |> ui_pad_content ~bp
-        in
-        markdown_max_scroll ~theme ~width:md_rect.w ~height:md_rect.h d.body
-    | None -> (
+    (
         let page_detail =
           match Observed.to_option k.wiki_page with
           | Some d -> (
@@ -4869,7 +4899,6 @@ let apply_move (m : Model.t) dir =
                   false
               | ( ( Nav.Gate_reject _
                   | Nav.Verification_reject _
-                  | Nav.Harness_overrule _
                   | Nav.Task_cancel _
                   | Nav.Schedule_form
                   | Nav.Connector_form

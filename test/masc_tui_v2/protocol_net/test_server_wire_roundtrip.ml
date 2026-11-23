@@ -13,8 +13,46 @@ module Wire_work = Masc_tui_protocol.Wire_work
 module Wire_fleet = Masc_tui_protocol.Wire_fleet
 module Stream_route = Server_routes_http_keeper_stream
 module Owner_registry = Masc.Keeper_owner_registry
+module Workspace = Masc.Workspace
 
 let observed_at = Clock.Mono.of_ns 1_000_000_000L
+
+(* Removes a temporary workspace. Cleanup errors are ignored: the assertions
+   have already run. *)
+let rec rm_rf path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+      (try
+         Array.iter
+           (fun entry -> rm_rf (Filename.concat path entry))
+           (Sys.readdir path)
+       with Sys_error _ -> ());
+      (try Unix.rmdir path with Unix.Unix_error _ -> ())
+  | {
+      Unix.st_kind =
+        ( Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO
+        | Unix.S_SOCK );
+      _;
+    } -> (
+      try Unix.unlink path with Unix.Unix_error _ -> ())
+
+(* A fresh workspace, and the [expected_workspace] pair the TUI sends for it:
+   the canonical paths [/health] reports, which is what the TUI stores. *)
+let with_workspace f =
+  let base = Filename.temp_dir "masc_tui_wire_rt_" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base)
+    (fun () ->
+      let config = Workspace.default_config base in
+      ignore (Workspace.init config ~agent_name:None : string);
+      let expected_workspace : Wire_work.expected_workspace =
+        {
+          base_path = Unix.realpath config.Workspace.base_path;
+          masc_root = Unix.realpath (Workspace.masc_dir config);
+        }
+      in
+      f config expected_workspace)
 
 (* GET /api/v1/dashboard/scheduled-automation: a keeper wake stores its
    enqueue receipt object in [detail]; a failed wake carries [error]. *)
@@ -578,26 +616,6 @@ let test_published_artifact_roundtrip () =
       Alcotest.fail
         (Printf.sprintf "expected one artifact row, got %d" (List.length rows))
 
-(* Removes a temporary workspace. Cleanup errors are ignored: the assertions
-   have already run. *)
-let rec rm_rf path =
-  match Unix.lstat path with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
-  | { Unix.st_kind = Unix.S_DIR; _ } ->
-      (try
-         Array.iter
-           (fun entry -> rm_rf (Filename.concat path entry))
-           (Sys.readdir path)
-       with Sys_error _ -> ());
-      (try Unix.rmdir path with Unix.Unix_error _ -> ())
-  | {
-      Unix.st_kind =
-        ( Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO
-        | Unix.S_SOCK );
-      _;
-    } -> (
-      try Unix.unlink path with Unix.Unix_error _ -> ())
-
 let rec mkdir_p path =
   if not (Sys.file_exists path) then begin
     mkdir_p (Filename.dirname path);
@@ -725,6 +743,197 @@ let test_wiki_page_links_roundtrip () =
           Alcotest.(check (list (pair string link_target)))
             "every link shape decodes to its kind" expected decoded)
 
+(* POST /api/v1/tools/masc_goal_transition refuses a body without
+   [expected_workspace]. The check it then runs accepts the pair the TUI sends
+   and strips it, so the Goal tool reads only the transition itself. *)
+let test_goal_transition_workspace_roundtrip () =
+  with_workspace (fun config expected_workspace ->
+      let body =
+        Wire_work.encode_goal_transition ~goal_id:"goal-1"
+          ~action:Wire_work.Pause ~note:None ~expected_workspace
+      in
+      Alcotest.(check bool)
+        "the body names the workspace" true
+        (List.mem "expected_workspace" (Yojson.Safe.Util.keys body));
+      match Workspace.validate_expected_workspace ~config body with
+      | Ok args ->
+          Alcotest.(check (list string))
+            "the Goal tool reads goal_id and action" [ "action"; "goal_id" ]
+            (List.sort String.compare (Yojson.Safe.Util.keys args))
+      | Error error ->
+          Alcotest.fail (Workspace.expected_workspace_error_message error))
+
+(* POST /api/v1/dashboard/tasks/cancel: the route's own parser and commit
+   take the body the TUI encodes. The body the TUI sent before, without
+   [expected_workspace], is refused. *)
+let test_task_cancel_roundtrip () =
+  with_workspace (fun config expected_workspace ->
+      ignore
+        (Workspace.add_task config ~title:"Cancel from the terminal" ~priority:1
+           ~description:""
+          : string);
+      let module Route = Server_routes_http_routes_verification.For_testing in
+      let commit body =
+        Route.commit_operator_cancel_json ~config ~operator_id:"operator-test"
+          body
+      in
+      (match commit (`Assoc [ ("task_id", `String "task-001") ]) with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "a cancel without expected_workspace committed");
+      match
+        commit
+          (Wire_work.encode_task_cancel ~task_id:"task-001"
+             ~reason:(Some "wrong scope") ~expected_workspace)
+      with
+      | Ok outcome ->
+          Alcotest.(check bool)
+            "the cancel commits instead of a no-op" false outcome.Workspace.noop
+      | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error))
+
+(* POST /api/v1/tools/masc_schedule_create validates the body against the
+   tool schema, then the tool reads a Keeper wake, a recurrence and exactly
+   one due input from it. The body the form sent before is refused by the
+   schema. *)
+let test_schedule_create_roundtrip () =
+  let schema =
+    match Tool_schemas_schedule.find_definition "masc_schedule_create" with
+    | Some definition -> definition.Tool_schemas_schedule.schema.input_schema
+    | None -> Alcotest.fail "masc_schedule_create has no registered schema"
+  in
+  let validate args =
+    Masc.Tool_input_validation.validate ~schema ~name:"masc_schedule_create"
+      ~args ()
+  in
+  (match
+     validate
+       (`Assoc
+          [
+            ("keeper", `String "alpha");
+            ("recurrence", `String "every 1h");
+            ("prompt", `String "Check the queue");
+          ])
+   with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "the old form body passed the schema");
+  let dispatched_at = 1_795_000_000.0 in
+  List.iter
+    (fun (label, repeat, expected_recurrence) ->
+      let body =
+        Wire_work.encode_schedule_create
+          {
+            keeper_name = "alpha";
+            message = "Check the queue";
+            first_due_in_sec = 600;
+            repeat;
+          }
+      in
+      match validate body with
+      | Error rejection ->
+          Alcotest.fail
+            (label ^ ": " ^ rejection.Masc.Tool_input_validation.message)
+      | Ok args -> (
+          (match Masc.Tool_schedule.payload_from_args args with
+          | Ok _ -> ()
+          | Error e -> Alcotest.fail (label ^ ": " ^ e));
+          match Masc.Tool_schedule.recurrence_of_arg args with
+          | Error e -> Alcotest.fail (label ^ ": " ^ e)
+          | Ok recurrence -> (
+              Alcotest.(check string)
+                (label ^ ": recurrence") expected_recurrence
+                (Yojson.Safe.to_string
+                   (Schedule_domain.recurrence_to_yojson recurrence));
+              match
+                Masc.Tool_schedule.resolve_due_at ~dispatched_at recurrence
+                  args
+              with
+              | Ok due_at ->
+                  Alcotest.(check (float 0.001))
+                    (label ^ ": first due counts from the server clock")
+                    (dispatched_at +. 600.0) due_at
+              | Error _ -> Alcotest.fail (label ^ ": no single due input"))))
+    [
+      ("once", Wire_work.Repeat_once, {|{"kind":"one_shot"}|});
+      ( "every 30m",
+        Wire_work.Repeat_every { interval_sec = 1800 },
+        {|{"kind":"interval","interval_sec":1800}|} );
+    ]
+
+(* PUT /api/v1/wiki/:slug answers with the revision it wrote and no page.
+   The decoded answer agrees with the page read back with GET, and a second
+   save that names the page read back is accepted as an update. *)
+let test_wiki_put_roundtrip () =
+  with_workspace (fun config _ ->
+      let base_path = config.Workspace.base_path in
+      let put ~expected_revision ~expected_sha256 body =
+        let request : Wire_knowledge.wiki_put_request =
+          {
+            expected_revision;
+            expected_sha256;
+            title = "Guide";
+            summary = "How the operator runs the room";
+            source = Wire_knowledge.Source_observation;
+            tags = [ "ops" ];
+            body;
+            note = "TUI inline edit";
+          }
+        in
+        match
+          Server_dashboard_http_wiki.put_page_json ~config ~actor:"operator"
+            ~slug:"guide"
+            ~body_str:
+              (Yojson.Safe.to_string
+                 (Wire_knowledge.encode_wiki_put_request request))
+            ()
+        with
+        | Error (status, json) ->
+            Alcotest.failf "PUT refused (HTTP %d): %s"
+              (Httpun.Status.to_code status)
+              (Yojson.Safe.to_string json)
+        | Ok json -> (
+            match Wire_knowledge.decode_wiki_put_result json with
+            | Ok saved -> saved
+            | Error e -> Alcotest.fail ("PUT answer: " ^ e))
+      in
+      let read_back () =
+        match Server_dashboard_http_wiki.get_page_json ~base_path ~slug:"guide" ()
+        with
+        | Error (status, json) ->
+            Alcotest.failf "GET refused (HTTP %d): %s"
+              (Httpun.Status.to_code status)
+              (Yojson.Safe.to_string json)
+        | Ok json -> (
+            match Wire_knowledge.decode_wiki_page_detail json with
+            | Ok page -> page
+            | Error e -> Alcotest.fail ("GET answer: " ^ e))
+      in
+      let created =
+        put ~expected_revision:None ~expected_sha256:None "# Guide\n\nFirst."
+      in
+      (match created.action with
+      | Wire_knowledge.Wiki_page_created -> ()
+      | Wire_knowledge.Wiki_page_updated ->
+          Alcotest.fail "a new page decoded as an update");
+      let page = read_back () in
+      Alcotest.(check int)
+        "the created revision is the page's" page.frontmatter.revision
+        created.revision;
+      let updated =
+        put ~expected_revision:(Some page.frontmatter.revision)
+          ~expected_sha256:(Some page.sha256) "# Guide\n\nSecond."
+      in
+      (match updated.action with
+      | Wire_knowledge.Wiki_page_updated -> ()
+      | Wire_knowledge.Wiki_page_created ->
+          Alcotest.fail "an update decoded as a new page");
+      Alcotest.(check int)
+        "the update writes the page's next revision"
+        (created.revision + 1) updated.revision;
+      Alcotest.(check int)
+        "the page read back has the revision the update named" updated.revision
+        (read_back ()).frontmatter.revision;
+      Alcotest.(check (list string))
+        "no journal or index write failed" [] updated.warnings)
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -736,6 +945,13 @@ let () =
             `Quick test_schedule_wake_roundtrip;
           Alcotest.test_case "approval queue state -> decode_gate_pending_list"
             `Quick test_gate_queue_state_roundtrip;
+          Alcotest.test_case
+            "goal transition body -> validate_expected_workspace" `Quick
+            test_goal_transition_workspace_roundtrip;
+          Alcotest.test_case "task cancel body -> commit_operator_cancel_json"
+            `Quick test_task_cancel_roundtrip;
+          Alcotest.test_case "schedule create body -> masc_schedule_create"
+            `Quick test_schedule_create_roundtrip;
         ] );
       ( "runtime",
         [
@@ -762,5 +978,7 @@ let () =
             test_published_artifact_roundtrip;
           Alcotest.test_case "wiki page links -> decode_wiki_page_detail"
             `Quick test_wiki_page_links_roundtrip;
+          Alcotest.test_case "wiki PUT answer -> decode_wiki_put_result" `Quick
+            test_wiki_put_roundtrip;
         ] );
     ]

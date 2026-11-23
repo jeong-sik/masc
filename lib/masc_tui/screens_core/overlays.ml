@@ -2697,7 +2697,6 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
   | ( Nav.Btw_query
     | Nav.Gate_reject _
     | Nav.Verification_reject _
-    | Nav.Harness_overrule _
     | Nav.Task_cancel _
     | Nav.Schedule_form
     | Nav.Connector_form
@@ -2738,9 +2737,6 @@ let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
   | Form_standard (Nav.Verification_reject id) ->
       Say.resolve lang
         (Say.make ~ko:("검증 거절 · " ^ id) ~en:("Verification Reject · " ^ id))
-  | Form_standard (Nav.Harness_overrule id) ->
-      Say.resolve lang
-        (Say.make ~ko:("판정 재정의 · " ^ id) ~en:("Harness Overrule · " ^ id))
   | Form_standard (Nav.Task_cancel id) ->
       Say.resolve lang
         (Say.make ~ko:("작업 취소 · " ^ id) ~en:("Cancel Task · " ^ id))
@@ -2790,7 +2786,6 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             13)
     | Nav.Gate_reject _
     | Nav.Verification_reject _
-    | Nav.Harness_overrule _
     | Nav.Task_cancel _
     | Nav.Schedule_form
     | Nav.Connector_form
@@ -2908,7 +2903,6 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                            (Glyph.to_utf8 Glyph.Live_failing) keeper reason))))
       | Nav.Gate_reject _
       | Nav.Verification_reject _
-      | Nav.Harness_overrule _
       | Nav.Task_cancel _
       | Nav.Schedule_form
       | Nav.Connector_form

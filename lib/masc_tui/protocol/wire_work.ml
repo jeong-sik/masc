@@ -296,19 +296,22 @@ let encode_expected_workspace (ws : expected_workspace) =
   `Assoc
     [ ("base_path", `String ws.base_path); ("masc_root", `String ws.masc_root) ]
 
-let encode_goal_transition ~goal_id ~action ~note =
-  let base =
-    [
-      ("goal_id", `String goal_id);
-      ("action", `String (goal_action_to_string action));
-    ]
-  in
-  let fields =
+(* The route refuses a transition that does not name the workspace the
+   operator read the Goal from ([validate_goal_workspace] in
+   server_routes_http_routes_activity.ml), so the field is not optional. *)
+let encode_goal_transition ~goal_id ~action ~note ~expected_workspace =
+  let note_field =
     match note with
-    | None -> base
-    | Some n -> base @ [ ("note", `String n) ]
+    | None -> []
+    | Some n -> [ ("note", `String n) ]
   in
-  `Assoc fields
+  `Assoc
+    ([
+       ("goal_id", `String goal_id);
+       ("action", `String (goal_action_to_string action));
+     ]
+    @ note_field
+    @ [ ("expected_workspace", encode_expected_workspace expected_workspace) ])
 
 let encode_goal_confirmation (req : goal_confirmation_request) =
   (* Exact 7-field allowlist enforced by [server_routes_http_routes_verification.ml:204]. *)
@@ -454,6 +457,21 @@ let check_goal_link_assignable (t : task) =
   | Linked goal_id ->
       Error
         (Printf.sprintf "task %S is already assigned to goal %S" t.id goal_id)
+
+(* The route's allowlist is exactly these three fields, and it refuses a body
+   without [expected_workspace] ([commit_operator_cancel_json] in
+   server_routes_http_routes_verification.ml). A blank reason is left out. *)
+let encode_task_cancel ~task_id ~reason ~expected_workspace =
+  let reason_field =
+    match reason with
+    | Some r when not (String.equal (String.trim r) "") ->
+        [ ("reason", `String (String.trim r)) ]
+    | Some _ | None -> []
+  in
+  `Assoc
+    ([ ("task_id", `String task_id) ]
+    @ reason_field
+    @ [ ("expected_workspace", encode_expected_workspace expected_workspace) ])
 
 let enrich_planning_with_tasks ~observed_at (snap : planning_snapshot) tasks =
   let count_for_goal goal_id =
@@ -804,6 +822,39 @@ let decode_schedules_snapshot json =
       Error ("schedule cursor rejected: " ^ reason)
   | other -> Error (Printf.sprintf "unknown scheduled-automation status %S" other)
 
+type schedule_repeat =
+  | Repeat_once
+  | Repeat_every of { interval_sec : int }
+
+type schedule_create_request = {
+  keeper_name : string;
+  message : string;
+  first_due_in_sec : int;
+  repeat : schedule_repeat;
+}
+
+(* The route validates the body against the [masc_schedule_create] tool
+   schema, which takes no other field (config/tools/masc_schedule_create.toml).
+   The first due time is a delay, so it counts from the server's clock and
+   not the terminal's. *)
+let encode_schedule_create (req : schedule_create_request) =
+  let recurrence =
+    match req.repeat with
+    | Repeat_once -> [ ("recurrence_kind", `String "one_shot") ]
+    | Repeat_every { interval_sec } ->
+        [
+          ("recurrence_kind", `String "interval");
+          ("recurrence_interval_sec", `Int interval_sec);
+        ]
+  in
+  `Assoc
+    ([
+       ("keeper_name", `String req.keeper_name);
+       ("message", `String req.message);
+       ("due_in_sec", `Int req.first_due_in_sec);
+     ]
+    @ recurrence)
+
 type ask_mode =
   | Ask_single
   | Ask_multi
@@ -1043,6 +1094,23 @@ let encode_tool_approval_decision ~keeper ~tool_call_id ~approval_id ~decision
        ("decision", `String decision_str);
      ]
     @ ws_field)
+
+(* The tool-approval route answers 200 with [settled] and [remembered]
+   (server_routes_http_keeper_control.ml). [remembered] is only read when
+   [settled] is false, so the server never sends both as true. *)
+type tool_approval_outcome =
+  | Tool_approval_settled
+  | Tool_approval_remembered
+  | Tool_approval_no_waiting_call
+
+let decode_tool_approval_outcome json =
+  let* settled = required_bool_field json "settled" in
+  let* remembered = required_bool_field json "remembered" in
+  match (settled, remembered) with
+  | true, false -> Ok Tool_approval_settled
+  | false, true -> Ok Tool_approval_remembered
+  | false, false -> Ok Tool_approval_no_waiting_call
+  | true, true -> Error "tool approval answer is both settled and remembered"
 
 let encode_gate_resolution ~id ~approved ~reason =
   `Assoc

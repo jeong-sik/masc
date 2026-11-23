@@ -80,7 +80,6 @@ type inline_action_kind =
   | Btw_query
   | Gate_reject of string
   | Verification_reject of string
-  | Harness_overrule of string
   | Task_cancel of string
   | Schedule_form
   | Connector_form
@@ -445,18 +444,16 @@ let equal_inline_action_kind a b =
       true
   | Gate_reject x, Gate_reject y
   | Verification_reject x, Verification_reject y
-  | Harness_overrule x, Harness_overrule y
   | Task_cancel x, Task_cancel y ->
       String.equal x y
-  | Btw_query, (Gate_reject _ | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post)
-  | Gate_reject _, (Btw_query | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post)
-  | Verification_reject _, (Btw_query | Gate_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post)
-  | Harness_overrule _, (Btw_query | Gate_reject _ | Verification_reject _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post)
-  | Task_cancel _, (Btw_query | Gate_reject _ | Verification_reject _ | Harness_overrule _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post)
-  | Schedule_form, (Btw_query | Gate_reject _ | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Connector_form | Repo_add_form | Board_new_post)
-  | Connector_form, (Btw_query | Gate_reject _ | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Repo_add_form | Board_new_post)
-  | Repo_add_form, (Btw_query | Gate_reject _ | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Connector_form | Board_new_post)
-  | Board_new_post, (Btw_query | Gate_reject _ | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form) ->
+  | Btw_query, (Gate_reject _ | Verification_reject _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post)
+  | Gate_reject _, (Btw_query | Verification_reject _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post)
+  | Verification_reject _, (Btw_query | Gate_reject _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post)
+  | Task_cancel _, (Btw_query | Gate_reject _ | Verification_reject _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post)
+  | Schedule_form, (Btw_query | Gate_reject _ | Verification_reject _ | Task_cancel _ | Connector_form | Repo_add_form | Board_new_post)
+  | Connector_form, (Btw_query | Gate_reject _ | Verification_reject _ | Task_cancel _ | Schedule_form | Repo_add_form | Board_new_post)
+  | Repo_add_form, (Btw_query | Gate_reject _ | Verification_reject _ | Task_cancel _ | Schedule_form | Connector_form | Board_new_post)
+  | Board_new_post, (Btw_query | Gate_reject _ | Verification_reject _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form) ->
       false
 
 let system_gate_index = function

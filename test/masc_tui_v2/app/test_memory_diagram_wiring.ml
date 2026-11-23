@@ -226,7 +226,7 @@ let test_wire_to_lineage_adapter () =
   check bool "narrow Mermaid fallback produces lines" true
     (List.length narrow_rows > 0);
   check bool "narrow Mermaid produces diagnostic note when too wide" true
-    (Option.is_some narrow_note || List.length narrow_rows > 0);
+    (Option.is_some narrow_note);
   let tree_rows =
     Memory_diagram.render_tree_lines ~ko:false ~now:1_700_000_500.0
       ~keeper_name:"alpha" ~max_width:60 chart
@@ -287,6 +287,7 @@ let find_render_cmd cmds =
       | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
+      | Cmd.Cancel_memory_diagram
       | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _
       | Cmd.Start_local_server
@@ -295,23 +296,80 @@ let find_render_cmd cmds =
           false)
     (Cmd.flatten cmds)
 
+let has_cancel_diagram_cmd cmds =
+  List.exists
+    (function
+      | Cmd.Cancel_memory_diagram -> true
+      | Cmd.Batch _
+      | Cmd.Http_get _
+      | Cmd.Http_post _
+      | Cmd.Http_put _
+      | Cmd.Http_post_stream _
+      | Cmd.Sync_streams _
+      | Cmd.Update_workspace_guard _
+      | Cmd.Voice_cmd _
+      | Cmd.Copy_clipboard _
+      | Cmd.Render_memory_diagram _
+      | Cmd.Open_external_url _
+      | Cmd.Open_editor_escape_hatch _
+      | Cmd.Start_local_server
+      | Cmd.Restart_tui
+      | Cmd.Quit _ ->
+          false)
+    (Cmd.flatten cmds)
+
+let has_substring s sub =
+  let n = String.length s in
+  let m = String.length sub in
+  if m = 0 then true
+  else
+    let rec loop i =
+      if i + m > n then false
+      else if String.equal (String.sub s i m) sub then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let parse_kitty_param s key =
+  let needle = "," ^ key ^ "=" in
+  let n = String.length s in
+  let m = String.length needle in
+  let rec find i =
+    if i + m > n then None
+    else if String.equal (String.sub s i m) needle then
+      let start = i + m in
+      let rec scan j =
+        if j < n && s.[j] >= '0' && s.[j] <= '9' then scan (j + 1) else j
+      in
+      let stop = scan start in
+      if stop > start then int_of_string_opt (String.sub s start (stop - start))
+      else None
+    else find (i + 1)
+  in
+  find 0
+
 let test_store_diagram_keybindings_and_scope_safety () =
   let m0 = model_in_keeper_memory_dive ~keeper:"alpha" in
   (* Press '.' -> opens Diagram_pele_card in Auto mode & emits Render_memory_diagram *)
   let m1, cmds1 = Update.step ~now:now0 m0 (Msg.Key_event (key_char ".")) in
-  (match m1.knowledge.memory_diagram with
-  | Some d ->
-      check string "keeper matches" "alpha" d.keeper;
-      check string "event_identity matches first event" "ev-1" d.event_identity;
-      check bool "kind is Diagram_pele_card" true
-        (Knowledge_store.equal_memory_diagram_kind d.kind
-           Knowledge_store.Diagram_pele_card);
-      check bool "mode is Auto" true
-        (Knowledge_store.equal_memory_diagram_mode d.mode
-           Knowledge_store.Diagram_mode_auto);
-      check bool "payload is Loading" true (Observed.is_loading d.payload);
-      check bool "copy_source populated" true (String.length d.copy_source > 0)
-  | None -> fail "expected memory_diagram open after '.'");
+  let req_id1 =
+    match m1.knowledge.memory_diagram with
+    | Some d ->
+        check string "keeper matches" "alpha" d.keeper;
+        check string "event_identity matches first event" "ev-1"
+          d.event_identity;
+        check bool "kind is Diagram_pele_card" true
+          (Knowledge_store.equal_memory_diagram_kind d.kind
+             Knowledge_store.Diagram_pele_card);
+        check bool "mode is Auto" true
+          (Knowledge_store.equal_memory_diagram_mode d.mode
+             Knowledge_store.Diagram_mode_auto);
+        check bool "payload is Loading" true (Observed.is_loading d.payload);
+        check bool "copy_source populated" true (String.length d.copy_source > 0);
+        check bool "request_id is positive" true (d.request_id > 0);
+        d.request_id
+    | None -> fail "expected memory_diagram open after '.'"
+  in
   check bool "emits Cmd.Render_memory_diagram" true
     (Option.is_some (find_render_cmd cmds1));
 
@@ -321,6 +379,7 @@ let test_store_diagram_keybindings_and_scope_safety () =
     Msg.Memory_diagram_rendered
       {
         epoch = Epoch.next m1.epoch;
+        request_id = req_id1;
         keeper = "alpha";
         event_identity = "ev-1";
         kind = Knowledge_store.Diagram_pele_card;
@@ -332,11 +391,29 @@ let test_store_diagram_keybindings_and_scope_safety () =
   check bool "stale epoch reply dropped" true
     (Observed.is_loading (Option.get m_stale_ep.knowledge.memory_diagram).payload);
 
+  (* Stale request_id reply with identical 5-tuple dropped *)
+  let stale_req_msg =
+    Msg.Memory_diagram_rendered
+      {
+        epoch = m1.epoch;
+        request_id = req_id1 - 1;
+        keeper = "alpha";
+        event_identity = "ev-1";
+        kind = Knowledge_store.Diagram_pele_card;
+        mode = Knowledge_store.Diagram_mode_auto;
+        result = Ok (Knowledge_store.Diagram_text { lines = long_lines; note = None });
+      }
+  in
+  let m_stale_req, _ = Update.step ~now:now0 m1 stale_req_msg in
+  check bool "stale request_id reply dropped" true
+    (Observed.is_loading (Option.get m_stale_req.knowledge.memory_diagram).payload);
+
   (* Wrong keeper reply dropped *)
   let wrong_keeper_msg =
     Msg.Memory_diagram_rendered
       {
         epoch = m1.epoch;
+        request_id = req_id1;
         keeper = "beta";
         event_identity = "ev-1";
         kind = Knowledge_store.Diagram_pele_card;
@@ -353,6 +430,7 @@ let test_store_diagram_keybindings_and_scope_safety () =
     Msg.Memory_diagram_rendered
       {
         epoch = m1.epoch;
+        request_id = req_id1;
         keeper = "alpha";
         event_identity = "ev-1";
         kind = Knowledge_store.Diagram_pele_card;
@@ -369,6 +447,7 @@ let test_store_diagram_keybindings_and_scope_safety () =
     Msg.Memory_diagram_rendered
       {
         epoch = m1.epoch;
+        request_id = req_id1;
         keeper = "alpha";
         event_identity = "ev-1";
         kind = Knowledge_store.Diagram_pele_card;
@@ -412,6 +491,7 @@ let test_store_diagram_keybindings_and_scope_safety () =
         | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Render_memory_diagram _
+        | Cmd.Cancel_memory_diagram
         | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
@@ -423,33 +503,53 @@ let test_store_diagram_keybindings_and_scope_safety () =
   check (option string) "y copies diagram copy_source" (Some expected_copy)
     copied;
 
-  (* [v] cycles Auto -> Mermaid -> Tree -> Auto *)
+  (* [v] cycles Auto -> Mermaid -> Tree -> Auto with strictly increasing request_id *)
   let m_v1, cmds_v1 = Update.step ~now:now0 m2 (Msg.Key_event (key_char "v")) in
+  let d_v1 = Option.get m_v1.knowledge.memory_diagram in
   check bool "v #1 switches to Mermaid" true
-    (Knowledge_store.equal_memory_diagram_mode
-       (Option.get m_v1.knowledge.memory_diagram).mode
+    (Knowledge_store.equal_memory_diagram_mode d_v1.mode
        Knowledge_store.Diagram_mode_mermaid);
+  check bool "v #1 increments request_id" true (d_v1.request_id > req_id1);
   check bool "v #1 re-dispatches Render_memory_diagram" true
     (Option.is_some (find_render_cmd cmds_v1));
   let m_v2, _ = Update.step ~now:now0 m_v1 (Msg.Key_event (key_char "v")) in
+  let d_v2 = Option.get m_v2.knowledge.memory_diagram in
   check bool "v #2 switches to Tree" true
-    (Knowledge_store.equal_memory_diagram_mode
-       (Option.get m_v2.knowledge.memory_diagram).mode
+    (Knowledge_store.equal_memory_diagram_mode d_v2.mode
        Knowledge_store.Diagram_mode_tree);
   let m_v3, _ = Update.step ~now:now0 m_v2 (Msg.Key_event (key_char "v")) in
+  let d_v3 = Option.get m_v3.knowledge.memory_diagram in
   check bool "v #3 wraps back to Auto" true
-    (Knowledge_store.equal_memory_diagram_mode
-       (Option.get m_v3.knowledge.memory_diagram).mode
+    (Knowledge_store.equal_memory_diagram_mode d_v3.mode
        Knowledge_store.Diagram_mode_auto);
+  check bool "v #3 request_id strictly > initial Auto request_id" true
+    (d_v3.request_id > req_id1);
+  (* Late reply from initial Auto request_id MUST NOT overwrite v #3 Auto diagram *)
+  let m_v3_after_stale, _ = Update.step ~now:now0 m_v3 ok_msg in
+  check bool "late Auto reply with old request_id dropped after 3x v" true
+    (Observed.is_loading
+       (Option.get m_v3_after_stale.knowledge.memory_diagram).payload);
 
-  (* Esc closes diagram without popping dive *)
-  let m_esc, _ =
+  (* Esc closes diagram without popping dive AND emits Cancel_memory_diagram *)
+  let m_esc, esc_cmds =
     Update.step ~now:now0 m2 (Msg.Key_event (key_special Keymap.Input.Escape))
   in
   check bool "Esc closes memory_diagram" true
     (Option.is_none m_esc.knowledge.memory_diagram);
+  check bool "Esc emits Cancel_memory_diagram" true
+    (has_cancel_diagram_cmd esc_cmds);
   check bool "Esc preserves Dive_keeper" true
     (Option.is_some (Model.active_dive m_esc));
+
+  (* Re-opening with '.' after Esc allocates strictly higher request_id *)
+  let m_reopen, _ = Update.step ~now:now0 m_esc (Msg.Key_event (key_char ".")) in
+  let d_reopen = Option.get m_reopen.knowledge.memory_diagram in
+  check bool "reopen request_id strictly greater than closed diagram" true
+    (d_reopen.request_id > req_id1);
+  let m_reopen_stale, _ = Update.step ~now:now0 m_reopen ok_msg in
+  check bool "reply from pre-Esc request_id dropped after reopen" true
+    (Observed.is_loading
+       (Option.get m_reopen_stale.knowledge.memory_diagram).payload);
 
   (* Ctrl+O opens Diagram_formation_tree *)
   let m_tree, cmds_tree =
@@ -479,9 +579,13 @@ let test_store_diagram_keybindings_and_scope_safety () =
   check bool "keeper switch closes diagram" true
     (Option.is_none m_kp_switch.knowledge.memory_diagram);
 
-  let m_chat, _ = Update.step ~now:now0 m_tree (Msg.Key_event (key_char "c")) in
+  let m_chat, chat_cmds =
+    Update.step ~now:now0 m_tree (Msg.Key_event (key_char "c"))
+  in
   check bool "c chat hotkey closes diagram" true
     (Option.is_none m_chat.knowledge.memory_diagram);
+  check bool "c chat hotkey closing diagram emits Cancel_memory_diagram" true
+    (has_cancel_diagram_cmd chat_cmds);
 
   (* View_facts fact -> latest matching event resolution *)
   let m_facts =
@@ -617,13 +721,15 @@ let test_cmd_executor_render_decisions () =
 
 let test_graphics_overlay_lifecycle () =
   let m0 = model_in_keeper_memory_dive ~keeper:"alpha" in
-  let png = sample_png ~w:1240 ~h:620 in
+  let png = sample_png ~w:1240 ~h:540 in
   let m_open, _ = Update.step ~now:now0 m0 (Msg.Key_event (key_char ".")) in
+  let req_id = (Option.get m_open.knowledge.memory_diagram).request_id in
   let m_png, _ =
     Update.step ~now:now0 m_open
       (Msg.Memory_diagram_rendered
          {
            epoch = m_open.epoch;
+           request_id = req_id;
            keeper = "alpha";
            event_identity = "ev-1";
            kind = Knowledge_store.Diagram_pele_card;
@@ -633,7 +739,7 @@ let test_graphics_overlay_lifecycle () =
                (Knowledge_store.Diagram_pele_png
                   {
                     png;
-                    pixel_size = Some (1240, 620);
+                    pixel_size = Some (1240, 540);
                     format_label = "Pele SVG";
                     fallback_lines = [ "fallback" ];
                   });
@@ -649,8 +755,9 @@ let test_graphics_overlay_lifecycle () =
   let mem_id_token =
     Printf.sprintf "i=%d" (Graphics.image_id Graphics.Memory_diagram)
   in
+  let body_rect = Option.get (Memory_diagram.active_diagram_body_rect m_png) in
 
-  (* Transition 1: None -> active PNG emits Kitty place_slot once with Memory_diagram slot ID *)
+  (* Transition 1: None -> active PNG emits bounded Kitty replace_png once with Memory_diagram slot ID *)
   let s1 =
     App.step_memory_graphic ~active:None ~probe:kitty_probe ~term_program:None
       ~in_tmux:false ~model:m_png ~full_repaint:false
@@ -660,14 +767,54 @@ let test_graphics_overlay_lifecycle () =
     (String.length s1.post_present_bytes > 0);
   check bool "placement binds Memory_diagram slot id" true
     (String.contains s1.post_present_bytes '\x1b'
-    &&
-    let rec has_sub s sub i =
-      if i + String.length sub > String.length s then false
-      else if String.equal (String.sub s i (String.length sub)) sub then true
-      else has_sub s sub (i + 1)
-    in
-    has_sub s1.post_present_bytes mem_id_token 0);
+    && has_substring s1.post_present_bytes mem_id_token);
+  (match
+     parse_kitty_param s1.post_present_bytes "c",
+     parse_kitty_param s1.post_present_bytes "r"
+   with
+  | Some c, Some r ->
+      check bool "Kitty c= strictly within body_rect.w" true
+        (c >= 1 && c <= body_rect.w);
+      check bool "Kitty r= strictly within body_rect.h" true
+        (r >= 1 && r <= body_rect.h)
+  | (Some _ | None), (Some _ | None) ->
+      fail "expected explicit c= and r= bounds on Kitty placement");
   check bool "tracks active graphic state" true (Option.is_some s1.next_state);
+
+  (* Kitty with cell_pixels = None MUST still bound both c= and r= with 1:2 aspect ratio *)
+  let cols_no_cp, rows_no_cp =
+    Graphics.fit_cells ~cell_pixels:None ~image_pixels:(Some (1240, 540))
+      ~columns:66 ~rows:30
+  in
+  check (pair int int) "1240x540 in 66x30 without cell_pixels -> (66, 14)"
+    (66, 14) (cols_no_cp, rows_no_cp);
+  let cols_banner, rows_banner =
+    Graphics.fit_cells ~cell_pixels:(Some (10, 20))
+      ~image_pixels:(Some (1240, 100)) ~columns:12 ~rows:10
+  in
+  check (pair int int) "wide banner in 12x10 bounds c=12, r=1" (12, 1)
+    (cols_banner, rows_banner);
+  let cols_no_img, rows_no_img =
+    Graphics.fit_cells ~cell_pixels:None ~image_pixels:None ~columns:40 ~rows:20
+  in
+  check (pair int int) "missing image_pixels caps strictly to box" (40, 20)
+    (cols_no_img, rows_no_img);
+  let kitty_no_cell_pixels = { kitty_probe with cell_pixels = None } in
+  let s_no_cp =
+    App.step_memory_graphic ~active:None ~probe:kitty_no_cell_pixels
+      ~term_program:None ~in_tmux:false ~model:m_png ~full_repaint:false
+  in
+  (match
+     parse_kitty_param s_no_cp.post_present_bytes "c",
+     parse_kitty_param s_no_cp.post_present_bytes "r"
+   with
+  | Some c, Some r ->
+      check bool "cell_pixels=None c= bounded" true
+        (c >= 1 && c <= body_rect.w);
+      check bool "cell_pixels=None r= bounded" true
+        (r >= 1 && r <= body_rect.h)
+  | (Some _ | None), (Some _ | None) ->
+      fail "expected explicit c= and r= when cell_pixels = None");
 
   (* Transition 2: Unchanged key + rect skips redundant re-emit *)
   let s2 =
@@ -679,6 +826,54 @@ let test_graphics_overlay_lifecycle () =
   check string "unchanged -> skips redundant place" "" s2.post_present_bytes;
   check bool "unchanged -> preserves active state" true
     (Option.equal App.equal_memory_graphic_state s1.next_state s2.next_state);
+
+  (* Transition 2b: Composer '/' and '@' popups clear Kitty graphic + invalidate, then re-place on dismiss *)
+  let m_focused, _ = Update.step ~now:now0 m_png (Msg.Key_event (key_char "i")) in
+  let m_slash, _ =
+    Update.step ~now:now0 m_focused (Msg.Key_event (key_char "/"))
+  in
+  check bool "composer slash popup active" true
+    (match Update_nav.resolve_composer_popup m_slash with
+    | Update_nav.Composer_popup_slash _ -> true
+    | Update_nav.Composer_popup_none | Update_nav.Composer_popup_mention _ ->
+        false);
+  let s_popup =
+    App.step_memory_graphic ~active:s2.next_state ~probe:kitty_probe
+      ~term_program:None ~in_tmux:false ~model:m_slash ~full_repaint:false
+  in
+  check string "slash popup emits Kitty delete_image"
+    (Graphics.delete_image ~image_id:(Graphics.image_id Graphics.Memory_diagram))
+    s_popup.pre_present_bytes;
+  check bool "slash popup invalidates presenter" true
+    s_popup.invalidate_presenter;
+  check string "slash popup suppresses placement" "" s_popup.post_present_bytes;
+  check bool "slash popup clears active state" true
+    (Option.is_none s_popup.next_state);
+  let m_dismiss, _ =
+    Update.step ~now:now0 m_slash (Msg.Key_event (key_special Keymap.Input.Escape))
+  in
+  let s_after_dismiss =
+    App.step_memory_graphic ~active:s_popup.next_state ~probe:kitty_probe
+      ~term_program:None ~in_tmux:false ~model:m_dismiss ~full_repaint:false
+  in
+  check bool "dismissing slash popup re-places Kitty graphic" true
+    (String.length s_after_dismiss.post_present_bytes > 0
+    && Option.is_some s_after_dismiss.next_state);
+
+  let m_mention, _ =
+    Update.step ~now:now0 m_focused (Msg.Key_event (key_char "@"))
+  in
+  check bool "composer mention popup active" true
+    (match Update_nav.resolve_composer_popup m_mention with
+    | Update_nav.Composer_popup_mention _ -> true
+    | Update_nav.Composer_popup_none | Update_nav.Composer_popup_slash _ ->
+        false);
+  let s_mention =
+    App.step_memory_graphic ~active:s2.next_state ~probe:kitty_probe
+      ~term_program:None ~in_tmux:false ~model:m_mention ~full_repaint:false
+  in
+  check bool "mention popup clears graphic and invalidates" true
+    (s_mention.invalidate_presenter && Option.is_none s_mention.next_state);
 
   (* Transition 3: Mode switch to Mermaid emits delete_image + invalidates presenter *)
   let m_mermaid, _ = Update.step ~now:now0 m_png (Msg.Key_event (key_char "v")) in
@@ -711,7 +906,7 @@ let test_graphics_overlay_lifecycle () =
   check bool "Esc clears active graphic state" true
     (Option.is_none s4.next_state);
 
-  (* Transition 5: iTerm2 protocol uses OSC 1337 placement & invalidates on close *)
+  (* Transition 5: iTerm2 protocol uses OSC 1337 placement, clears on popup & close, and re-places *)
   let s_it2 =
     App.step_memory_graphic ~active:None ~probe:Probe.empty_observation
       ~term_program:(Some "iTerm.app") ~in_tmux:false ~model:m_png
@@ -719,6 +914,22 @@ let test_graphics_overlay_lifecycle () =
   in
   check bool "iTerm2 emits OSC 1337 placement" true
     (String.length s_it2.post_present_bytes > 0);
+  let s_it2_popup =
+    App.step_memory_graphic ~active:s_it2.next_state
+      ~probe:Probe.empty_observation ~term_program:(Some "iTerm.app")
+      ~in_tmux:false ~model:m_slash ~full_repaint:false
+  in
+  check bool "iTerm2 slash popup invalidates presenter & clears active state"
+    true
+    (s_it2_popup.invalidate_presenter && Option.is_none s_it2_popup.next_state);
+  let s_it2_after =
+    App.step_memory_graphic ~active:s_it2_popup.next_state
+      ~probe:Probe.empty_observation ~term_program:(Some "iTerm.app")
+      ~in_tmux:false ~model:m_dismiss ~full_repaint:false
+  in
+  check bool "iTerm2 re-places image cleanly after popup dismiss" true
+    (String.length s_it2_after.post_present_bytes > 0
+    && Option.is_some s_it2_after.next_state);
   let s_it2_close =
     App.step_memory_graphic ~active:s_it2.next_state
       ~probe:Probe.empty_observation ~term_program:(Some "iTerm.app")
@@ -729,6 +940,384 @@ let test_graphics_overlay_lifecycle () =
   check bool "iTerm2 close still invalidates presenter to repaint cells" true
     s_it2_close.invalidate_presenter
 
+(* 6. TERM=dumb + TERM_PROGRAM=iTerm.app masking *)
+
+let test_term_dumb_masks_term_program () =
+  let env_of pairs k = List.assoc_opt k pairs in
+  check (option string) "TERM=dumb masks iTerm.app" None
+    (Graphics.effective_term_program
+       ~getenv:(env_of [ ("TERM", "dumb"); ("TERM_PROGRAM", "iTerm.app") ]));
+  check (option string) "TERM=DUMB masks iTerm.app" None
+    (Graphics.effective_term_program
+       ~getenv:(env_of [ ("TERM", " DUMB "); ("TERM_PROGRAM", "iTerm.app") ]));
+  check (option string) "empty TERM masks iTerm.app" None
+    (Graphics.effective_term_program
+       ~getenv:(env_of [ ("TERM", ""); ("TERM_PROGRAM", "iTerm.app") ]));
+  check (option string) "missing TERM masks iTerm.app" None
+    (Graphics.effective_term_program
+       ~getenv:(env_of [ ("TERM_PROGRAM", "iTerm.app") ]));
+  check (option string) "xterm-256color preserves iTerm.app" (Some "iTerm.app")
+    (Graphics.effective_term_program
+       ~getenv:
+         (env_of [ ("TERM", "xterm-256color"); ("TERM_PROGRAM", "iTerm.app") ]));
+
+  let term_program =
+    Graphics.effective_term_program
+      ~getenv:(env_of [ ("TERM", "dumb"); ("TERM_PROGRAM", "iTerm.app") ])
+  in
+  check bool "dumb terminal resolves to Unsupported_protocol" true
+    (Graphics.equal_graphics_protocol
+       (Graphics.protocol_of_probe ~graphics:None ~term_program)
+       Graphics.Unsupported_protocol);
+  let act = sample_activity ~keeper:"alpha" in
+  let facts = sample_facts ~keeper:"alpha" in
+  let chart =
+    Memory_diagram.chart_of_activity ~keeper:"alpha" ~activity:act
+      ~facts:(Some facts) ~selected:(List.hd act.events)
+    |> Option.get
+  in
+  let pele_calls = ref 0 in
+  let payload =
+    Cmd_executor.render_memory_diagram_payload
+      ~run_pele:(fun _ ->
+        incr pele_calls;
+        Ok (sample_png ~w:1240 ~h:540))
+      ~probe:Probe.empty_observation ~term_program
+      ~palette:(Some (sample_palette ())) ~keeper:"alpha"
+      ~kind:Knowledge_store.Diagram_pele_card
+      ~mode:Knowledge_store.Diagram_mode_auto ~ko:false ~tz_offset_sec:0
+      ~now_unix:1_700_000_500.0 ~max_width:80 ~chart ()
+  in
+  check int "dumb + iTerm.app never calls Pele" 0 !pele_calls;
+  (match payload with
+  | Knowledge_store.Diagram_text { lines = _ :: _; note = Some _ } -> ()
+  | Knowledge_store.Diagram_text _ | Knowledge_store.Diagram_pele_png _ ->
+      fail "expected text fallback on TERM=dumb");
+  let m0 = model_in_keeper_memory_dive ~keeper:"alpha" in
+  let m_open, _ = Update.step ~now:now0 m0 (Msg.Key_event (key_char ".")) in
+  let req_id = (Option.get m_open.knowledge.memory_diagram).request_id in
+  let m_png, _ =
+    Update.step ~now:now0 m_open
+      (Msg.Memory_diagram_rendered
+         {
+           epoch = m_open.epoch;
+           request_id = req_id;
+           keeper = "alpha";
+           event_identity = "ev-1";
+           kind = Knowledge_store.Diagram_pele_card;
+           mode = Knowledge_store.Diagram_mode_auto;
+           result =
+             Ok
+               (Knowledge_store.Diagram_pele_png
+                  {
+                    png = sample_png ~w:1240 ~h:540;
+                    pixel_size = Some (1240, 540);
+                    format_label = "Pele SVG";
+                    fallback_lines = [ "fallback" ];
+                  });
+         })
+  in
+  let step_dumb =
+    App.step_memory_graphic ~active:None ~probe:Probe.empty_observation
+      ~term_program ~in_tmux:false ~model:m_png ~full_repaint:false
+  in
+  check string "TERM=dumb emits zero OSC 1337 bytes" ""
+    step_dumb.post_present_bytes
+
+(* 7. Hidden diagram on narrow 4 Keepers / Micro does not hijack Esc/y/v,
+      Enter is no-op in 3 -> Memory when diagram open,
+      [r] retries failed diagram, Msg.Resize re-layouts open text diagram *)
+
+let test_visibility_enter_refresh_and_resize () =
+  (* 7a. Narrow 4 Keepers non-zoomed hides memory pane -> active_diagram = None, no key hijack *)
+  let m0 =
+    Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_ko
+      ~wall_unix:1_700_000_500.0 ()
+  in
+  let fleet =
+    Fleet_store.empty
+    |> Fleet_store.apply_keepers ~observed_at:now0
+         [ sample_keeper "alpha"; sample_keeper "beta" ]
+    |> Fleet_store.select_keeper "alpha"
+    |> Fleet_store.set_keeper_dive_tab Nav.Keeper_memory
+  in
+  let knowledge =
+    Knowledge_store.empty
+    |> Knowledge_store.set_memory_diff_keeper (Some "alpha")
+    |> Knowledge_store.apply_keeper_memory_activity ~observed_at:now0
+         (sample_activity ~keeper:"alpha")
+    |> Knowledge_store.apply_keeper_memory_facts ~observed_at:now0
+         (sample_facts ~keeper:"alpha")
+  in
+  let m_kp0, _ = Update_nav.switch_workspace { m0 with fleet; knowledge } Nav.Keepers in
+  let m_kp_open, _ = Update.step ~now:now0 m_kp0 (Msg.Key_event (key_char ".")) in
+  check bool "diagram active on wide split 4 Keepers" true
+    (Option.is_some (Memory_diagram.active_diagram m_kp_open));
+  (* Shrink to narrow Compact (cols=80, rows=30) where Screen_keepers hides split right pane *)
+  let m_narrow, _ =
+    Update.step ~now:now0 m_kp_open (Msg.Resize { cols = 80; rows = 30 })
+  in
+  check bool "narrow unsplit 4 Keepers hides active_memory_keeper" true
+    (Option.is_none (Memory_diagram.active_memory_keeper m_narrow));
+  check bool "narrow unsplit 4 Keepers hides active_diagram" true
+    (Option.is_none (Memory_diagram.active_diagram m_narrow));
+  let m_narrow_v, cmds_narrow_v =
+    Update.step ~now:now0 m_narrow (Msg.Key_event (key_char "v"))
+  in
+  check bool "v does not re-render hidden diagram on narrow 4 Keepers" true
+    (Option.is_none (find_render_cmd cmds_narrow_v));
+  check bool "hidden diagram mode unchanged by v" true
+    (Knowledge_store.equal_memory_diagram_mode
+       (Option.get m_narrow_v.knowledge.memory_diagram).mode
+       Knowledge_store.Diagram_mode_auto);
+  let _, cmds_narrow_y =
+    Update.step ~now:now0 m_narrow (Msg.Key_event (key_char "y"))
+  in
+  let copied_hidden =
+    List.exists
+      (function
+        | Cmd.Copy_clipboard s ->
+            String.equal s
+              (Option.get m_narrow.knowledge.memory_diagram).copy_source
+        | Cmd.Batch _
+        | Cmd.Http_get _
+        | Cmd.Http_post _
+        | Cmd.Http_put _
+        | Cmd.Http_post_stream _
+        | Cmd.Sync_streams _
+        | Cmd.Update_workspace_guard _
+        | Cmd.Voice_cmd _
+        | Cmd.Render_memory_diagram _
+        | Cmd.Cancel_memory_diagram
+        | Cmd.Open_external_url _
+        | Cmd.Open_editor_escape_hatch _
+        | Cmd.Start_local_server
+        | Cmd.Restart_tui
+        | Cmd.Quit _ ->
+            false)
+      (Cmd.flatten cmds_narrow_y)
+  in
+  check bool "y does not copy hidden diagram on narrow 4 Keepers" false
+    copied_hidden;
+  let m_narrow_esc, _ =
+    Update.step ~now:now0 m_narrow (Msg.Key_event (key_special Keymap.Input.Escape))
+  in
+  check bool "Esc does not hijack/close hidden diagram on narrow 4 Keepers" true
+    (Option.is_some m_narrow_esc.knowledge.memory_diagram);
+
+  (* Micro viewport also hides active_diagram on Dive_keeper *)
+  let m_dive = model_in_keeper_memory_dive ~keeper:"alpha" in
+  let m_dive_open, _ = Update.step ~now:now0 m_dive (Msg.Key_event (key_char ".")) in
+  let m_micro, _ =
+    Update.step ~now:now0 m_dive_open (Msg.Resize { cols = 50; rows = 14 })
+  in
+  check bool "Micro viewport hides active_diagram" true
+    (Option.is_none (Memory_diagram.active_diagram m_micro));
+
+  (* 7b. Enter in 3 -> Memory with open diagram is a no-op (never pushes Memory_diff_dive) *)
+  let diff_snap : Wire_knowledge.memory_diff =
+    {
+      scope = Wire_knowledge.Scope_keeper "alpha";
+      range =
+        {
+          from_rev = Some 1;
+          to_rev = Some 3;
+          from_unix = Some 1_700_000_100.0;
+          to_unix = Some 1_700_000_300.0;
+          window = Some "24h";
+        };
+      retrieval_heat =
+        {
+          hot = 0;
+          warm = 0;
+          cold = 0;
+          never_retrieved = 0;
+          total_events = 0;
+          unreadable_event_lines = 0;
+        };
+      body =
+        Wire_knowledge.Keeper_diff
+          {
+            counts =
+              {
+                total_facts_now = 2;
+                added = 0;
+                updated = 0;
+                retracted = 0;
+                invalidated = 0;
+                journal_failures_in_window = 0;
+                journal_quarantines_in_window = 0;
+                undecodable_journal_lines = 0;
+              };
+            revisions = [];
+            added = [];
+            updated = [];
+            retracted = [];
+            invalidated = [];
+            writer_status = None;
+          };
+    }
+  in
+  let k_mem =
+    knowledge
+    |> Knowledge_store.set_tab Nav.Knowledge_memory
+    |> Knowledge_store.set_memory_diff_keeper (Some "alpha")
+    |> Knowledge_store.apply_memory_diff ~observed_at:now0 diff_snap
+  in
+  let m_k3, _ =
+    Update_nav.switch_workspace { m0 with fleet; knowledge = k_mem } Nav.Knowledge
+  in
+  let m_k3_open, _ = Update.step ~now:now0 m_k3 (Msg.Key_event (key_char ".")) in
+  check bool "3 -> Memory opens diagram" true
+    (Option.is_some (Memory_diagram.active_diagram m_k3_open));
+  let m_k3_enter, _ =
+    Update.step ~now:now0 m_k3_open (Msg.Key_event (key_special Keymap.Input.Enter))
+  in
+  check bool "Enter in 3 -> Memory does not push Memory_diff_dive" true
+    (Option.is_none (Model.active_dive m_k3_enter));
+  check bool "Enter in 3 -> Memory keeps diagram open" true
+    (Option.is_some (Memory_diagram.active_diagram m_k3_enter));
+
+  (* 7c. [r] retries a Failed diagram with incremented request_id *)
+  let req_failed = (Option.get m_dive_open.knowledge.memory_diagram).request_id in
+  let m_failed, _ =
+    Update.step ~now:now0 m_dive_open
+      (Msg.Memory_diagram_rendered
+         {
+           epoch = m_dive_open.epoch;
+           request_id = req_failed;
+           keeper = "alpha";
+           event_identity = "ev-1";
+           kind = Knowledge_store.Diagram_pele_card;
+           mode = Knowledge_store.Diagram_mode_auto;
+           result = Error "transient pele failure";
+         })
+  in
+  check bool "diagram enters Failed state" true
+    (match (Option.get m_failed.knowledge.memory_diagram).payload with
+    | Observed.Failed { retryable = true; _ } -> true
+    | Observed.Failed { retryable = false; _ }
+    | Observed.Loading _
+    | Observed.Value _
+    | Observed.Absent
+    | Observed.Unreported ->
+        false);
+  let m_retry, retry_cmds =
+    Update.step ~now:now0 m_failed (Msg.Key_event (key_char "r"))
+  in
+  let d_retry = Option.get m_retry.knowledge.memory_diagram in
+  check bool "[r] puts failed diagram back into Loading" true
+    (Observed.is_loading d_retry.payload);
+  check bool "[r] allocates fresh request_id" true
+    (d_retry.request_id > req_failed);
+  check bool "[r] emits Cmd.Render_memory_diagram" true
+    (Option.is_some (find_render_cmd retry_cmds));
+
+  (* 7d. Msg.Resize re-layouts open text/fallback diagram to new width,
+         but avoids redundant Pele re-dispatch for active PNGs *)
+  let m_text, _ =
+    Update.step ~now:now0 m_retry
+      (Msg.Memory_diagram_rendered
+         {
+           epoch = m_retry.epoch;
+           request_id = d_retry.request_id;
+           keeper = "alpha";
+           event_identity = "ev-1";
+           kind = Knowledge_store.Diagram_pele_card;
+           mode = Knowledge_store.Diagram_mode_auto;
+           result =
+             Ok
+               (Knowledge_store.Diagram_text
+                  { lines = [ "wide-layout" ]; note = None });
+         })
+  in
+  let m_resized_text, resize_text_cmds =
+    Update.step ~now:now0 m_text (Msg.Resize { cols = 96; rows = 40 })
+  in
+  let d_resized = Option.get m_resized_text.knowledge.memory_diagram in
+  check bool "Resize on text diagram increments request_id" true
+    (d_resized.request_id > d_retry.request_id);
+  (match find_render_cmd resize_text_cmds with
+  | Some (Cmd.Render_memory_diagram { max_width; request_id; _ }) ->
+      check int "Resize command carries new request_id" d_resized.request_id
+        request_id;
+      check bool "Resize command uses narrowed max_width (< 100)" true
+        (max_width < 100)
+  | Some _ | None ->
+      fail "expected Cmd.Render_memory_diagram when resizing open text diagram");
+
+  let m_png_live, _ =
+    Update.step ~now:now0 m_resized_text
+      (Msg.Memory_diagram_rendered
+         {
+           epoch = m_resized_text.epoch;
+           request_id = d_resized.request_id;
+           keeper = "alpha";
+           event_identity = "ev-1";
+           kind = Knowledge_store.Diagram_pele_card;
+           mode = Knowledge_store.Diagram_mode_auto;
+           result =
+             Ok
+               (Knowledge_store.Diagram_pele_png
+                  {
+                    png = sample_png ~w:1240 ~h:540;
+                    pixel_size = Some (1240, 540);
+                    format_label = "Pele SVG";
+                    fallback_lines = [ "fallback" ];
+                  });
+         })
+  in
+  let _, resize_png_cmds =
+    Update.step ~now:now0 m_png_live (Msg.Resize { cols = 120; rows = 40 })
+  in
+  check bool "Resize on visible PNG does not re-spawn Pele" true
+    (Option.is_none (find_render_cmd resize_png_cmds))
+
+(* 8. Cooperative Pele subprocess cancellation kills sleeping helper promptly *)
+
+let test_pele_cooperative_cancellation () =
+  let tmp_dir = Filename.temp_file "masc-pele-cancel-" "" in
+  Sys.remove tmp_dir;
+  Unix.mkdir tmp_dir 0o700;
+  let script = Filename.concat tmp_dir "slow-pele.sh" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.remove script with Sys_error _ -> ());
+      try Unix.rmdir tmp_dir with Unix.Unix_error _ -> ())
+    (fun () ->
+      Out_channel.with_open_bin script (fun oc ->
+          Out_channel.output_string oc "#!/bin/sh\nexec /bin/sleep 5\n");
+      Unix.chmod script 0o700;
+      let cancelled = Atomic.make false in
+      let scene =
+        Pele.scene ~format:Pele.Svg ~max_width:800 ~font_size:14 ~now_ms:0L
+          ~colors:None "<svg/>"
+      in
+      let runner =
+        Pele.process_runner ~executable:script ~timeout_s:5.0
+          ~cancelled:(fun () -> Atomic.get cancelled)
+          ()
+      in
+      let t0 = Clock.Mono.now () in
+      let res = ref (Ok "") in
+      Eio_main.run (fun env ->
+          let clock = Eio.Stdenv.clock env in
+          Eio.Fiber.both
+            (fun () ->
+              res :=
+                Eio_unix.run_in_systhread (fun () ->
+                    Pele.render ~cache_dir:tmp_dir ~timeout_s:5.0
+                      ~cancelled:(fun () -> Atomic.get cancelled)
+                      ~runner scene))
+            (fun () ->
+              Eio.Time.sleep clock 0.05;
+              Atomic.set cancelled true));
+      let elapsed = Clock.Mono.seconds_since (Clock.Mono.now ()) ~since:t0 in
+      check (result string string) "cancelled Pele returns Error"
+        (Error "Pele was cancelled") !res;
+      check bool "cancelled sleeping helper killed promptly (< 1.5s)" true
+        (elapsed < 1.5))
+
 let () =
   run "masc_tui_v2_memory_diagram_wiring"
     [
@@ -737,11 +1326,20 @@ let () =
           test_case "Wire_knowledge -> Memory_lineage adapter & fallbacks" `Quick
             test_wire_to_lineage_adapter;
           test_case "PNG IHDR parser validation" `Quick test_png_ihdr_parser;
-          test_case "Store/Update keybindings, gating, scope safety & scroll bounds"
+          test_case
+            "Store/Update keybindings, request_id gating, scope safety & scroll bounds"
             `Quick test_store_diagram_keybindings_and_scope_safety;
           test_case "Cmd_executor Auto/Mermaid/Tree & Pele fallback decisions"
             `Quick test_cmd_executor_render_decisions;
-          test_case "Kitty/iTerm2 graphics overlay lifecycle transitions" `Quick
-            test_graphics_overlay_lifecycle;
+          test_case
+            "Kitty/iTerm2 graphics bounds, composer popup clear & lifecycle"
+            `Quick test_graphics_overlay_lifecycle;
+          test_case "TERM=dumb masks TERM_PROGRAM=iTerm.app everywhere" `Quick
+            test_term_dumb_masks_term_program;
+          test_case
+            "Narrow/Micro non-hijack, 3->Memory Enter no-op, [r] retry & Resize relayout"
+            `Quick test_visibility_enter_refresh_and_resize;
+          test_case "Pele cooperative cancellation kills sleeping helper promptly"
+            `Quick test_pele_cooperative_cancellation;
         ] );
     ]

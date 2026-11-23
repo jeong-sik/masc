@@ -107,8 +107,9 @@ val plan_memory_graphic_place :
   full_repaint:bool ->
   string * memory_graphic_state option
 (** Post-present graphics transition returning [(place_bytes, next_active)].
-    Emits Kitty {!Graphics.place_slot} or iTerm2 {!Graphics.iterm2_place} once
-    per unique key+rect and skips redundant re-emission when unchanged. *)
+    Emits aspect-fitted Kitty {!Graphics.replace_png} (bounded on both [c=] and
+    [r=] via {!Graphics.fit_cells}) or iTerm2 {!Graphics.iterm2_place} once per
+    unique key+rect and skips redundant re-emission when unchanged. *)
 
 val step_memory_graphic :
   active:memory_graphic_state option ->

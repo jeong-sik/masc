@@ -1559,8 +1559,12 @@ let launch_memory_diagram ~now ~keeper ~(content_rect : Rect.t) ~kind ~mode
         Memory_diagram.copy_source_of_chart ~tz_offset_sec:m.tz_offset_sec ~ko
           ~now:now_unix ~keeper_name:keeper ~max_width ~kind ~mode chart
       in
+      let request_id =
+        Knowledge_store.next_memory_diagram_request_id m.knowledge
+      in
       let state : Knowledge_store.memory_diagram_state =
         {
+          request_id;
           keeper;
           event_identity = selected.identity;
           revision = selected.revision;
@@ -1596,6 +1600,7 @@ let launch_memory_diagram ~now ~keeper ~(content_rect : Rect.t) ~kind ~mode
         Cmd.Render_memory_diagram
           {
             epoch = m.epoch;
+            request_id;
             keeper;
             event_identity = selected.identity;
             kind;
@@ -1984,13 +1989,15 @@ let dive_selected (m : Model.t) =
                       ] )
               in
               if m.nav.pane_index = 1 || m.nav.zoomed then
-                let opened, cmds =
-                  open_memory_reading_for
-                    ~keeper_opt:m.knowledge.memory_diff_keeper m
-                in
-                if Option.is_some opened.knowledge.memory_reading then
-                  (opened, cmds)
-                else enter_diff_dive ()
+                if Option.is_some (Memory_diagram.active_diagram m) then (m, [])
+                else
+                  let opened, cmds =
+                    open_memory_reading_for
+                      ~keeper_opt:m.knowledge.memory_diff_keeper m
+                  in
+                  if Option.is_some opened.knowledge.memory_reading then
+                    (opened, cmds)
+                  else enter_diff_dive ()
               else
                 match Knowledge_store.selected_memory_left_row m.knowledge with
                 | Some (Knowledge_store.Left_writer w) ->
@@ -4913,11 +4920,7 @@ let apply_move (m : Model.t) dir =
                   ~delta:(move_delta dir) m
             | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
                 let has_matching_diagram =
-                  match m.knowledge.memory_diagram with
-                  | Some d ->
-                      Knowledge_store.memory_diagram_matches_scope
-                        ~keeper_opt:(Some name) d
-                  | None -> false
+                  Option.is_some (Memory_diagram.active_diagram m)
                 in
                 let has_matching_reading =
                   match m.knowledge.memory_reading with
@@ -5081,11 +5084,7 @@ let apply_move (m : Model.t) dir =
                                 ~name:k.name ~delta:(move_delta dir) m
                           | Nav.Keeper_memory ->
                               let has_matching_diagram =
-                                match m.knowledge.memory_diagram with
-                                | Some d ->
-                                    Knowledge_store.memory_diagram_matches_scope
-                                      ~keeper_opt:(Some k.name) d
-                                | None -> false
+                                Option.is_some (Memory_diagram.active_diagram m)
                               in
                               let has_matching_reading =
                                 match m.knowledge.memory_reading with
@@ -5314,12 +5313,7 @@ let apply_move (m : Model.t) dir =
                     let has_matching_diagram =
                       Nav.equal_knowledge_tab m.knowledge.active_tab
                         Nav.Knowledge_memory
-                      &&
-                      match m.knowledge.memory_diagram with
-                      | Some d ->
-                          Knowledge_store.memory_diagram_matches_scope
-                            ~keeper_opt:m.knowledge.memory_diff_keeper d
-                      | None -> false
+                      && Option.is_some (Memory_diagram.active_diagram m)
                     in
                     let has_matching_reading =
                       Nav.equal_knowledge_tab m.knowledge.active_tab

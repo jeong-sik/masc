@@ -18,6 +18,7 @@ let has_explicit_sync_streams cmds =
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
       | Cmd.Render_memory_diagram _
+      | Cmd.Cancel_memory_diagram
       | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _
       | Cmd.Start_local_server
@@ -42,12 +43,33 @@ let reconcile_streams ~(before : Model.t) ~(after : Model.t) cmds =
   then cmds
   else cmds @ [ Cmd.Sync_streams { epoch = after.epoch; streams = new_plan } ]
 
-let apply_resize (m : Model.t) ~cols ~rows =
+let reconcile_memory_diagram ~(before : Model.t) ~(after : Model.t) cmds =
+  match before.knowledge.memory_diagram, after.knowledge.memory_diagram with
+  | Some _, None -> cmds @ [ Cmd.Cancel_memory_diagram ]
+  | (Some _ | None), Some _ | None, None -> cmds
+
+let apply_resize ~now (m : Model.t) ~cols ~rows =
   let viewport = { Model.cols = max 0 cols; rows = max 0 rows } in
   let breakpoint = Model.classify_viewport viewport in
+  let next = { m with viewport; breakpoint } in
   (* Never clobber [m.nav.overlay] or [m.inline_modal]; [Micro_viewport] gating
      is evaluated dynamically from [Model.is_too_small_viewport m.viewport]. *)
-  ({ m with viewport; breakpoint }, [])
+  match
+    Memory_diagram.active_diagram next,
+    Memory_diagram.active_memory_content_rect next
+  with
+  | Some d, Some (_, content_rect) ->
+      let prev_w =
+        Option.map
+          (fun (_, (r : Rect.t)) -> r.w)
+          (Memory_diagram.active_memory_content_rect m)
+      in
+      if
+        (not (Option.equal Int.equal prev_w (Some content_rect.w)))
+        && not (Memory_diagram.can_render_png_in_rect ~content_rect d)
+      then Update_nav.refresh_open_memory_diagram ~now next
+      else (next, [])
+  | (Some _ | None), (Some _ | None) -> (next, [])
 
 let apply_server_health ~now (m : Model.t)
     (result : (Wire_common.server_health, Msg.http_error) result) =
@@ -177,7 +199,7 @@ let step_raw ~now (m : Model.t) = function
   | Msg.Key_event ev -> Update_input.apply_key_event ~now m ev
   | Msg.Paste_text text -> Update_input.apply_paste ~now m text
   | Msg.Mouse_event ev -> Update_input.apply_mouse ~now m ev
-  | Msg.Resize { cols; rows } -> apply_resize m ~cols ~rows
+  | Msg.Resize { cols; rows } -> apply_resize ~now m ~cols ~rows
   | Msg.Tick { wall_unix } ->
       (* Zero idle HTTP polling: ticks only record wall time, expire toasts,
          update voice recording elapsed seconds, and advance bounded rechecks
@@ -287,12 +309,12 @@ let step_raw ~now (m : Model.t) = function
         Update_sse.apply_chat_stream_done ~now ~keeper ~request_id ~is_btw
           ~result m
   | Msg.Memory_diagram_rendered
-      { epoch; keeper; event_identity; kind; mode; result } ->
+      { epoch; request_id; keeper; event_identity; kind; mode; result } ->
       if not (Epoch.is_current ~current:m.epoch ~reply:epoch) then (m, [])
       else
         let knowledge =
-          Knowledge_store.apply_memory_diagram_result ~observed_at:now ~keeper
-            ~event_identity ~kind ~mode result m.knowledge
+          Knowledge_store.apply_memory_diagram_result ~observed_at:now
+            ~request_id ~keeper ~event_identity ~kind ~mode result m.knowledge
         in
         ({ m with knowledge }, [])
   | Msg.Voice_event ev -> apply_voice_event ~now m ev
@@ -300,5 +322,9 @@ let step_raw ~now (m : Model.t) = function
 
 let step ~now m msg =
   let next, cmds = step_raw ~now m msg in
-  let final_cmds = reconcile_streams ~before:m ~after:next cmds in
+  let final_cmds =
+    cmds
+    |> reconcile_streams ~before:m ~after:next
+    |> reconcile_memory_diagram ~before:m ~after:next
+  in
   (next, final_cmds)

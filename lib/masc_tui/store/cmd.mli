@@ -202,6 +202,7 @@ type t =
   | Copy_clipboard of string
   | Render_memory_diagram of {
       epoch : Epoch.t;
+      request_id : int;
       keeper : string;
       event_identity : string;
       kind : Knowledge_store.memory_diagram_kind;
@@ -212,6 +213,7 @@ type t =
       max_width : int;
       chart : Masc_tui_ui.Memory_lineage.chart;
     }
+  | Cancel_memory_diagram
   | Open_external_url of string
   | Open_editor_escape_hatch of editor_target
   | Start_local_server

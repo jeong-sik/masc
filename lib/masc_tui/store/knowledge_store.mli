@@ -93,6 +93,7 @@ type memory_diagram_payload =
     }
 
 type memory_diagram_state = {
+  request_id : int;
   keeper : string;
   event_identity : string;
   revision : int;
@@ -153,6 +154,7 @@ type t = {
   memory_reading : memory_reading_entry option;
   memory_reading_scroll : int;
   memory_diagram : memory_diagram_state option;
+  memory_diagram_seq : int;
   last_memory_act_answer : (string * Wire_knowledge.memory_act_answer) option;
   selected_index : int;
   scroll_offset : int;
@@ -196,6 +198,10 @@ val memory_reading_matches_scope :
   keeper_opt:string option -> memory_reading_entry -> bool
 val scroll_memory_reading : max_scroll:int -> delta:int -> t -> t
 
+val next_memory_diagram_request_id : t -> int
+(** Next strictly monotonic request nonce for opening/refreshing a memory
+    diagram. Never resets on diagram close or scope change. *)
+
 val open_memory_diagram : memory_diagram_state -> t -> t
 val close_memory_diagram : t -> t
 val memory_diagram_matches_scope :
@@ -203,6 +209,7 @@ val memory_diagram_matches_scope :
 val scroll_memory_diagram : max_scroll:int -> delta:int -> t -> t
 val apply_memory_diagram_result :
   observed_at:Clock.Mono.t ->
+  request_id:int ->
   keeper:string ->
   event_identity:string ->
   kind:memory_diagram_kind ->

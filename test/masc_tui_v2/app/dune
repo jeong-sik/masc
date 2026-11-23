@@ -48,6 +48,7 @@
   masc_tui_store
   masc_tui_app
   eio
+  eio.unix
   eio_main
   unix
   yojson

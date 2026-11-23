@@ -163,8 +163,16 @@ let teardown_memory_graphic_bytes ~in_tmux = function
   | None ->
       ""
 
+let composer_popup_open (model : Model.t) =
+  match Update_nav.resolve_composer_popup model with
+  | Update_nav.Composer_popup_none -> false
+  | Update_nav.Composer_popup_slash _ | Update_nav.Composer_popup_mention _ ->
+      true
+
 let desired_memory_graphic ~(probe : Probe.observation) ~term_program
     ~(model : Model.t) =
+  if composer_popup_open model then None
+  else
   let protocol =
     Graphics.protocol_of_probe ~graphics:probe.graphics ~term_program
   in
@@ -192,9 +200,17 @@ let desired_memory_graphic ~(probe : Probe.observation) ~term_program
                   | Knowledge_store.Diagram_pele_card -> "card"
                   | Knowledge_store.Diagram_formation_tree -> "tree"
                 in
+                let fit_cols, fit_rows =
+                  match protocol with
+                  | Graphics.Kitty_protocol ->
+                      Graphics.fit_cells ~cell_pixels:probe.cell_pixels
+                        ~image_pixels:pixel_size ~columns:rect.w ~rows:rect.h
+                  | Graphics.ITerm2_protocol | Graphics.Unsupported_protocol ->
+                      (rect.w, rect.h)
+                in
                 let key =
-                  Printf.sprintf "%s|%s|%s|%s" keeper d.event_identity kind_s
-                    (Digest.to_hex (Digest.string png))
+                  Printf.sprintf "%s|%s|%s|%dx%d|%s" keeper d.event_identity
+                    kind_s fit_cols fit_rows (Digest.to_hex (Digest.string png))
                 in
                 Some ({ key; rect; protocol }, png, pixel_size)
               else None
@@ -225,13 +241,14 @@ let plan_memory_graphic_place ~active ~probe ~term_program ~in_tmux ~model
       let payload =
         match next.protocol with
         | Graphics.Kitty_protocol ->
-            let rows =
-              Graphics.fit_rows ~cell_pixels:probe.cell_pixels
+            let cols, rows =
+              Graphics.fit_cells ~cell_pixels:probe.cell_pixels
                 ~image_pixels:pixel_size ~columns:next.rect.w ~rows:next.rect.h
             in
             wrap_tmux ~in_tmux
-              (Graphics.place_slot ~image:Graphics.Memory_diagram
-                 ~placement_id:1 ~data:png ~rows)
+              (Graphics.replace_png
+                 ~image_id:(Graphics.image_id Graphics.Memory_diagram)
+                 ~placement_id:1 ~data:png ~rows ~cols ~crop:None)
         | Graphics.ITerm2_protocol ->
             wrap_tmux ~in_tmux
               (Graphics.iterm2_place ~data:png
@@ -775,7 +792,9 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
         Terminal_out.install_switch_teardown ~sw
           ~kitty_keyboard:caps.kitty_keyboard ();
 
-        let term_program = Sys.getenv_opt "TERM_PROGRAM" in
+        let term_program =
+          Graphics.effective_term_program ~getenv:Sys.getenv_opt
+        in
         let in_tmux =
           match Sys.getenv_opt "TMUX" with
           | Some s -> not (String.equal (String.trim s) "")

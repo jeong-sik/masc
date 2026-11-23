@@ -87,6 +87,7 @@ type memory_diagram_payload =
     }
 
 type memory_diagram_state = {
+  request_id : int;
   keeper : string;
   event_identity : string;
   revision : int;
@@ -147,6 +148,7 @@ type t = {
   memory_reading : memory_reading_entry option;
   memory_reading_scroll : int;
   memory_diagram : memory_diagram_state option;
+  memory_diagram_seq : int;
   last_memory_act_answer : (string * Wire_knowledge.memory_act_answer) option;
   selected_index : int;
   scroll_offset : int;
@@ -192,6 +194,7 @@ let empty =
     memory_reading = None;
     memory_reading_scroll = 0;
     memory_diagram = None;
+    memory_diagram_seq = 0;
     last_memory_act_answer = None;
     selected_index = 0;
     scroll_offset = 0;
@@ -673,10 +676,13 @@ let scroll_memory_reading ~max_scroll ~delta t =
   in
   { t with memory_reading_scroll }
 
-let open_memory_diagram state t =
+let next_memory_diagram_request_id t = t.memory_diagram_seq + 1
+
+let open_memory_diagram (state : memory_diagram_state) t =
   {
     t with
     memory_diagram = Some state;
+    memory_diagram_seq = Int.max t.memory_diagram_seq state.request_id;
     memory_reading = None;
     memory_reading_scroll = 0;
   }
@@ -696,11 +702,12 @@ let scroll_memory_diagram ~max_scroll ~delta t =
       in
       { t with memory_diagram = Some { d with scroll } }
 
-let apply_memory_diagram_result ~observed_at ~keeper ~event_identity ~kind ~mode
-    result t =
+let apply_memory_diagram_result ~observed_at ~request_id ~keeper ~event_identity
+    ~kind ~mode result t =
   match t.memory_diagram with
   | Some d
-    when String.equal d.keeper keeper
+    when Int.equal d.request_id request_id
+         && String.equal d.keeper keeper
          && String.equal d.event_identity event_identity
          && equal_memory_diagram_kind d.kind kind
          && equal_memory_diagram_mode d.mode mode ->

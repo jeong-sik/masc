@@ -180,52 +180,6 @@ let copy_source_of_chart ?tz_offset_sec ~ko ?now ?keeper_name ~max_width ~kind
 
 (* --- Single-SSOT Screen Geometry (matches Chrome + Knowledge + Keepers) --- *)
 
-let active_memory_keeper (m : Model.t) =
-  if Option.is_some m.nav.overlay then None
-  else
-    match Model.active_dive m with
-    | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) -> Some name
-    | Some
-        ( Nav.Dive_keeper
-            {
-              tab =
-                ( Nav.Keeper_chat
-                | Nav.Keeper_work_candle
-                | Nav.Keeper_sandbox
-                | Nav.Keeper_config );
-              _;
-            }
-        | Nav.Dive_work _
-        | Nav.Dive_knowledge _
-        | Nav.Dive_infra _ ) ->
-        None
-    | None -> (
-        match m.nav.workspace with
-        | Nav.Knowledge
-          when Nav.equal_knowledge_tab m.knowledge.active_tab
-                 Nav.Knowledge_memory ->
-            m.knowledge.memory_diff_keeper
-        | Nav.Keepers
-          when Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory ->
-            Option.map
-              (fun (k : Wire_fleet.keeper_summary) -> k.name)
-              (Fleet_store.selected_keeper_summary m.fleet)
-        | Nav.Pulse
-        | Nav.Work
-        | Nav.Keepers
-        | Nav.Knowledge
-        | Nav.Runtime
-        | Nav.Infra ->
-            None)
-
-let active_diagram (m : Model.t) =
-  match active_memory_keeper m, m.knowledge.memory_diagram with
-  | Some keeper, Some d
-    when Knowledge_store.memory_diagram_matches_scope ~keeper_opt:(Some keeper)
-           d ->
-      Some d
-  | (Some _ | None), (Some _ | None) -> None
-
 let model_bp_of_layout = function
   | Layout.Wide -> Model.Wide
   | Layout.Standard -> Model.Standard
@@ -452,6 +406,17 @@ let active_memory_content_rect (m : Model.t) =
             | Nav.Runtime
             | Nav.Infra ->
                 None))
+
+let active_memory_keeper (m : Model.t) =
+  Option.map fst (active_memory_content_rect m)
+
+let active_diagram (m : Model.t) =
+  match active_memory_content_rect m, m.knowledge.memory_diagram with
+  | Some (keeper, _), Some d
+    when Knowledge_store.memory_diagram_matches_scope ~keeper_opt:(Some keeper)
+           d ->
+      Some d
+  | (Some _ | None), (Some _ | None) -> None
 
 let can_render_png_in_rect ~(content_rect : Rect.t)
     (d : Knowledge_store.memory_diagram_state) =

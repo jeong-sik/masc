@@ -96,14 +96,16 @@ val copy_source_of_chart :
     (Mermaid source or rendered formation tree text). *)
 
 val active_memory_keeper : Model.t -> string option
-(** Resolve the Keeper currently displayed in a Memory Explorer surface
-    ([3 -> 기억], [4 -> Keeper -> 기억] dive, or embedded/zoomed [4 Keepers] on
-    the Memory tab), or [None] when an overlay is open or another surface is
-    active. *)
+(** Resolve the Keeper currently visibly displayed in a Memory Explorer surface
+    ([3 -> 기억], [4 -> Keeper -> 기억] dive, or split/zoomed [4 Keepers] on
+    the Memory tab), derived directly from {!active_memory_content_rect}.
+    Returns [None] on too-small/Micro viewports, unsplit narrow [4 Keepers],
+    open overlays, or non-memory surfaces. *)
 
 val active_diagram : Model.t -> Knowledge_store.memory_diagram_state option
 (** Return [Some d] iff [m.knowledge.memory_diagram] is open and strictly
-    matches {!active_memory_keeper}. *)
+    matches the visibly rendered {!active_memory_keeper} (never hijacking keys
+    when the Memory Explorer surface is hidden). *)
 
 val active_memory_content_rect : Model.t -> (string * Rect.t) option
 (** Exact terminal-grid screen [Rect.t] passed to

@@ -1747,6 +1747,7 @@ and execute_action ~now (m : Model.t) action =
                   | Cmd.Voice_cmd _
                   | Cmd.Copy_clipboard _
                   | Cmd.Render_memory_diagram _
+                  | Cmd.Cancel_memory_diagram
                   | Cmd.Open_external_url _
                   | Cmd.Open_editor_escape_hatch _
                   | Cmd.Start_local_server
@@ -1944,10 +1945,15 @@ and execute_action ~now (m : Model.t) action =
               | Nav.Runtime_tools_connectors ) ) ->
               []
         in
+        let next, diagram_cmds =
+          if Option.is_some (Memory_diagram.active_diagram next) then
+            Update_nav.refresh_open_memory_diagram ~now next
+          else (next, [])
+        in
         ( Model.with_toast ~now ~level:Model.Toast_info
             (Say.make ~ko:"현재 화면 새로고침 중" ~en:"Refreshing active view")
             next
-        , view_cmds @ probe_cmd )
+        , view_cmds @ probe_cmd @ diagram_cmds )
   | Keymap.Copy_selected -> (
       let text_opt =
         match m.nav.overlay with

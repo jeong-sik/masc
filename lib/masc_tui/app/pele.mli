@@ -73,18 +73,22 @@ val process_runner :
   ?executable:string ->
   ?timeout_s:float ->
   ?clock:_ Eio.Time.clock ->
+  ?cancelled:(unit -> bool) ->
   unit ->
   runner
 (** Direct [Unix.create_process] runner with [Unix.O_CLOEXEC] temp descriptors,
-    bounded timeout, and clean kill-and-reap on deadline expiry, [WSTOPPED], or
-    [Eio.Cancel.Cancelled]. Callers running inside an Eio event loop must pass
-    [?clock] (or dispatch onto {!Masc_tui_net.Worker_pool} /
-    [Eio_unix.run_in_systhread]) so polling never blocks the UI domain. *)
+    bounded timeout, cooperative [?cancelled] polling (killing and reaping the
+    child promptly when [cancelled ()] turns [true]), and clean kill-and-reap on
+    deadline expiry, [WSTOPPED], or [Eio.Cancel.Cancelled]. Callers running
+    inside an Eio event loop must pass [?clock] or dispatch onto
+    {!Masc_tui_net.Worker_pool} / [Eio_unix.run_in_systhread] so blocking
+    syscalls never stall the UI domain. *)
 
 val render :
   cache_dir:string ->
   ?timeout_s:float ->
   ?clock:_ Eio.Time.clock ->
+  ?cancelled:(unit -> bool) ->
   ?raster:raster ->
   ?runner:runner ->
   scene ->

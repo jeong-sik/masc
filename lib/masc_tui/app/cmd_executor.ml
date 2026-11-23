@@ -187,6 +187,7 @@ type t = {
   endpoint : Http_client.endpoint Atomic.t;
   stream_epoch : Epoch.t Atomic.t;
   owned_server : Masc_server_lifecycle.owned_server option Atomic.t;
+  active_memory_diagram_cancel : bool Atomic.t option Atomic.t;
   sse_hub : Sse_hub.t;
   voice_runner : Voice_runner.t;
   editor_handoff : editor_handoff;
@@ -346,6 +347,7 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
   let endpoint = Atomic.make initial_ep in
   let stream_epoch = Atomic.make Epoch.initial in
   let owned_server = Atomic.make None in
+  let active_memory_diagram_cancel = Atomic.make None in
   let sse_hub =
     Sse_hub.create ~io ~clock ~endpoint:initial_ep
       ~on_event:(publish_hub_event ~bus ~stream_epoch)
@@ -360,7 +362,11 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
         Ui_bus.publish_stream bus (Msg.Voice_event (msg_of_voice_event ev)))
   in
   let closed = Atomic.make false in
-  Eio.Switch.on_release sw (fun () -> Atomic.set closed true);
+  Eio.Switch.on_release sw (fun () ->
+      Atomic.set closed true;
+      match Atomic.exchange active_memory_diagram_cancel None with
+      | Some flag -> Atomic.set flag true
+      | None -> ());
   {
     sw;
     closed;
@@ -373,6 +379,7 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
     endpoint;
     stream_epoch;
     owned_server;
+    active_memory_diagram_cancel;
     sse_hub;
     voice_runner;
     editor_handoff;
@@ -1754,39 +1761,92 @@ let ensure_pele_cache_dir ~base_path =
     dir
   with Sys_error _ | Unix.Unix_error _ -> Filename.get_temp_dir_name ()
 
-let execute_render_memory_diagram t ~epoch ~keeper ~event_identity ~kind ~mode
-    ~ko ~tz_offset_sec ~now_unix ~max_width ~chart =
-  fork_safe t (fun () ->
-      Eio.Fiber.yield ();
-      let result =
-        try
-          let probe = Probe.current_observation () in
-          let term_program = Sys.getenv_opt "TERM_PROGRAM" in
-          let palette =
-            match Palette.current () with
-            | Some _ as p -> p
-            | None -> probe.palette
-          in
-          let run_pele scene =
-            let cache_dir =
-              Eio_unix.run_in_systhread (fun () ->
-                  ensure_pele_cache_dir ~base_path:t.cli.base_path)
-            in
-            Pele.render ~cache_dir ~timeout_s:pele_timeout_s ~clock:t.clock scene
-          in
-          let payload =
-            render_memory_diagram_payload ~run_pele ~probe ~term_program
-              ~palette ~keeper ~kind ~mode ~ko ~tz_offset_sec ~now_unix
-              ~max_width ~chart ()
-          in
-          Ok payload
-        with
-        | Eio.Cancel.Cancelled _ as ex -> raise ex
-        | ex -> Error (Printexc.to_string ex)
-      in
-      Ui_bus.publish_stream t.bus
-        (Msg.Memory_diagram_rendered
-           { epoch; keeper; event_identity; kind; mode; result }))
+let cancel_active_memory_diagram t =
+  match Atomic.exchange t.active_memory_diagram_cancel None with
+  | Some flag -> Atomic.set flag true
+  | None -> ()
+
+let execute_render_memory_diagram t ~epoch ~request_id ~keeper ~event_identity
+    ~kind ~mode ~ko ~tz_offset_sec ~now_unix ~max_width ~chart =
+  if Atomic.get t.closed then cancel_active_memory_diagram t
+  else
+    let cancel_flag = Atomic.make false in
+    let slot = Some cancel_flag in
+    (match Atomic.exchange t.active_memory_diagram_cancel slot with
+    | Some prev -> Atomic.set prev true
+    | None -> ());
+    let is_cancelled () = Atomic.get cancel_flag || Atomic.get t.closed in
+    let probe = Probe.current_observation () in
+    let term_program =
+      Graphics.effective_term_program ~getenv:Sys.getenv_opt
+    in
+    let palette =
+      match Palette.current () with
+      | Some _ as p -> p
+      | None -> probe.palette
+    in
+    fork_safe t (fun () ->
+        let release_slot () =
+          ignore
+            (Atomic.compare_and_set t.active_memory_diagram_cancel slot None
+              : bool)
+        in
+        Fun.protect ~finally:release_slot (fun () ->
+            Eio.Fiber.yield ();
+            if not (is_cancelled ()) then begin
+              let done_p, done_u = Eio.Promise.create () in
+              let result_ref = ref None in
+              Eio.Fiber.both
+                (fun () ->
+                  try Eio.Promise.await done_p
+                  with Eio.Cancel.Cancelled _ as ex ->
+                    Atomic.set cancel_flag true;
+                    raise ex)
+                (fun () ->
+                  Fun.protect
+                    ~finally:(fun () -> Eio.Promise.resolve done_u ())
+                    (fun () ->
+                      let res =
+                        Eio_unix.run_in_systhread (fun () ->
+                            if is_cancelled () then Error "Pele was cancelled"
+                            else
+                              try
+                                let run_pele scene =
+                                  if is_cancelled () then
+                                    Error "Pele was cancelled"
+                                  else
+                                    let cache_dir =
+                                      ensure_pele_cache_dir
+                                        ~base_path:t.cli.base_path
+                                    in
+                                    Pele.render ~cache_dir
+                                      ~timeout_s:pele_timeout_s
+                                      ~cancelled:is_cancelled scene
+                                in
+                                Ok
+                                  (render_memory_diagram_payload ~run_pele
+                                     ~probe ~term_program ~palette ~keeper
+                                     ~kind ~mode ~ko ~tz_offset_sec ~now_unix
+                                     ~max_width ~chart ())
+                              with ex -> Error (Printexc.to_string ex))
+                      in
+                      result_ref := Some res));
+              if not (is_cancelled ()) then
+                match !result_ref with
+                | Some result ->
+                    Ui_bus.publish_stream t.bus
+                      (Msg.Memory_diagram_rendered
+                         {
+                           epoch;
+                           request_id;
+                           keeper;
+                           event_identity;
+                           kind;
+                           mode;
+                           result;
+                         })
+                | None -> ()
+            end))
 
 let rec execute t = function
   | Cmd.Batch cmds -> List.iter (execute t) cmds
@@ -1836,6 +1896,7 @@ let rec execute t = function
   | Cmd.Render_memory_diagram
       {
         epoch;
+        request_id;
         keeper;
         event_identity;
         kind;
@@ -1846,8 +1907,9 @@ let rec execute t = function
         max_width;
         chart;
       } ->
-      execute_render_memory_diagram t ~epoch ~keeper ~event_identity ~kind ~mode
-        ~ko ~tz_offset_sec ~now_unix ~max_width ~chart
+      execute_render_memory_diagram t ~epoch ~request_id ~keeper ~event_identity
+        ~kind ~mode ~ko ~tz_offset_sec ~now_unix ~max_width ~chart
+  | Cmd.Cancel_memory_diagram -> cancel_active_memory_diagram t
   | Cmd.Open_external_url url ->
       if is_safe_external_url url then
         fork_safe t (fun () ->
@@ -1877,6 +1939,7 @@ let execute_all t cmds = List.iter (execute t) (Cmd.flatten cmds)
 
 let shutdown ?(preserve_owned_server = false) t =
   Atomic.set t.closed true;
+  cancel_active_memory_diagram t;
   Voice_runner.stop t.voice_runner;
   Sse_hub.shutdown t.sse_hub;
   if not preserve_owned_server then

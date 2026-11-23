@@ -268,6 +268,7 @@ type t =
     }
   | Memory_diagram_rendered of {
       epoch : Epoch.t;
+      request_id : int;
       keeper : string;
       event_identity : string;
       kind : Knowledge_store.memory_diagram_kind;

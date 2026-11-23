@@ -92,6 +92,13 @@ let fixture
 
 let with_switch body = Eio_main.run (fun (_ : Eio_unix.Stdenv.base) -> Eio.Switch.run body)
 
+(* Like [with_switch], but also hands the body the real clock so a wait can let
+   wall time pass while a systhread-backed write finishes. *)
+let with_clock_switch body =
+  Eio_main.run (fun env ->
+    let clock = Eio.Stdenv.clock env in
+    Eio.Switch.run (fun sw -> body ~clock sw))
+
 let stop_text : Store.stop -> string = function
   | Log_diverged _ -> "diverged"
   | Memory_unreadable -> "memory unreadable"
@@ -376,7 +383,7 @@ let test_a_reserved_exception_goes_up () =
 ;;
 
 let test_world_promotions_dispatch_once_across_compact_and_subsequent_events () =
-  with_switch (fun sw ->
+  with_clock_switch (fun ~clock sw ->
     let memory_dir = Filename.temp_dir "memory_promo" "" in
     let turns_dir = Filename.temp_dir "turns_promo" "" in
     let place keeper_id : Machine.place = { memory_dir; turns_dir; keeper_id } in
@@ -481,10 +488,10 @@ let test_world_promotions_dispatch_once_across_compact_and_subsequent_events () 
         if pred () then ()
         else if attempts <= 0 then fail "timed out waiting for writer state"
         else (
-          Eio.Fiber.yield ();
+          Eio.Time.sleep clock 0.001;
           loop (attempts - 1))
       in
-      loop 200
+      loop 5000
     in
     let writer_idle () =
       match Writers.held writers with

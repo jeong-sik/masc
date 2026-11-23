@@ -53,6 +53,7 @@
   masc.masc_tool_blob_store
   masc.masc_tool_surface
   masc.masc_types
+  masc.repo_manager
   masc.server
   masc.tool_schemas
   masc_tui_core

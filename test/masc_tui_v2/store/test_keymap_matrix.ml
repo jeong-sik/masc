@@ -894,10 +894,10 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
         name = "masc";
         codebase = None;
         url = "https://example.invalid/masc";
-        local_path = "/workspace/masc";
+        resolved_local_path = "/workspace/masc";
         default_branch = "main";
         auto_sync = true;
-        status = Wire_infra.Repo_synced;
+        status = Wire_infra.Repo_active;
         keepers = [ "alpha"; "beta" ];
       };
       {
@@ -905,10 +905,10 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
         name = "masc-docs";
         codebase = None;
         url = "https://example.invalid/masc-docs";
-        local_path = "/workspace/masc-docs";
+        resolved_local_path = "/workspace/masc-docs";
         default_branch = "main";
         auto_sync = false;
-        status = Wire_infra.Repo_dirty;
+        status = Wire_infra.Repo_cloning;
         keepers = [ "gamma" ];
       };
     ]
@@ -2939,10 +2939,10 @@ let test_journeys_tab_multipane_dives_safety () =
       name = "masc-empty";
       codebase = None;
       url = "https://example.invalid/masc-empty";
-      local_path = "/workspace/masc-empty";
+      resolved_local_path = "/workspace/masc-empty";
       default_branch = "main";
       auto_sync = false;
-      status = Wire_infra.Repo_synced;
+      status = Wire_infra.Repo_active;
       keepers = [];
     }
   in

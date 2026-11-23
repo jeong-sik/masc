@@ -180,18 +180,19 @@ val encode_sandbox_probe_request :
 (** {1 Repositories & Read-Only Git / Keeper Diffs} *)
 
 type repo_status =
-  | Repo_synced
-  | Repo_syncing
-  | Repo_dirty
-  | Repo_error of string
-  | Repo_unknown of string
+  | Repo_active
+  | Repo_paused
+  | Repo_cloning
+  | Repo_error of string  (** The server's [error_message]. *)
 
 type repository = {
   id : string;
   name : string;
   codebase : string option;
   url : string;
-  local_path : string;
+  resolved_local_path : string;
+      (** The absolute checkout path the server resolved against its base
+          path. *)
   default_branch : string;
   status : repo_status;
   keepers : string list;

@@ -8,6 +8,7 @@
 
 open Masc_tui_core
 module Wire_knowledge = Masc_tui_protocol.Wire_knowledge
+module Wire_infra = Masc_tui_protocol.Wire_infra
 module Wire_runtime = Masc_tui_protocol.Wire_runtime
 module Wire_work = Masc_tui_protocol.Wire_work
 module Wire_fleet = Masc_tui_protocol.Wire_fleet
@@ -934,6 +935,84 @@ let test_wiki_put_roundtrip () =
       Alcotest.(check (list string))
         "no journal or index write failed" [] updated.warnings)
 
+(* GET /api/v1/repositories. The match is exhaustive over the server's
+   status type, so a status added there stops this file from compiling until
+   the TUI reads it. *)
+let tui_status_of_server (status : Repo_manager_types.repository_status) :
+    Wire_infra.repo_status =
+  match status with
+  | Repo_manager_types.Active -> Wire_infra.Repo_active
+  | Repo_manager_types.Paused -> Wire_infra.Repo_paused
+  | Repo_manager_types.Cloning -> Wire_infra.Repo_cloning
+  | Repo_manager_types.Error message -> Wire_infra.Repo_error message
+
+let repo_status_label = function
+  | Wire_infra.Repo_active -> "active"
+  | Wire_infra.Repo_paused -> "paused"
+  | Wire_infra.Repo_cloning -> "cloning"
+  | Wire_infra.Repo_error message -> "error: " ^ message
+
+let test_repositories_roundtrip () =
+  let base_path = "/srv/masc-base" in
+  let statuses =
+    [
+      Repo_manager_types.Active;
+      Repo_manager_types.Paused;
+      Repo_manager_types.Cloning;
+      Repo_manager_types.Error "fetch failed: authentication required";
+    ]
+  in
+  let repos =
+    List.mapi
+      (fun i status : Repo_manager_types.repository ->
+        {
+          id = Printf.sprintf "repo-%d" i;
+          name = Printf.sprintf "repo-%d" i;
+          url = Printf.sprintf "https://github.com/example/repo-%d" i;
+          local_path = Printf.sprintf "repos/repo-%d" i;
+          aliases = [];
+          default_branch = "main";
+          keepers = [ "alpha" ];
+          status;
+          auto_sync = true;
+          sync_interval = 300;
+          created_at = 0L;
+          updated_at = 0L;
+        })
+      statuses
+  in
+  let body =
+    `Assoc
+      [
+        ( "repositories",
+          `List
+            (List.map
+               (Server_routes_http_routes_repositories.repository_json
+                  ~base_path)
+               repos) );
+        ("total", `Int (List.length repos));
+      ]
+  in
+  match Wire_infra.decode_repositories body with
+  | Error e -> Alcotest.fail ("repositories decode failed: " ^ e)
+  | Ok decoded ->
+      Alcotest.(check (list string))
+        "every server status reads as its own TUI status"
+        (List.map
+           (fun (r : Repo_manager_types.repository) ->
+             repo_status_label (tui_status_of_server r.status))
+           repos)
+        (List.map
+           (fun (r : Wire_infra.repository) -> repo_status_label r.status)
+           decoded);
+      Alcotest.(check (list string))
+        "the link path is the absolute one the server resolved"
+        (List.init (List.length repos)
+           (Printf.sprintf "/srv/masc-base/repos/repo-%d"))
+        (List.map
+           (fun (r : Wire_infra.repository) -> r.resolved_local_path)
+           decoded)
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -980,5 +1059,10 @@ let () =
             `Quick test_wiki_page_links_roundtrip;
           Alcotest.test_case "wiki PUT answer -> decode_wiki_put_result" `Quick
             test_wiki_put_roundtrip;
+        ] );
+      ( "infra",
+        [
+          Alcotest.test_case "repository_json -> decode_repositories" `Quick
+            test_repositories_roundtrip;
         ] );
     ]

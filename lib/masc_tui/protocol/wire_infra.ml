@@ -585,18 +585,17 @@ let encode_sandbox_probe_request = function
       `Assoc [ ("scope", `Assoc [ ("ssh_pool", `String pool) ]) ]
 
 type repo_status =
-  | Repo_synced
-  | Repo_syncing
-  | Repo_dirty
+  | Repo_active
+  | Repo_paused
+  | Repo_cloning
   | Repo_error of string
-  | Repo_unknown of string
 
 type repository = {
   id : string;
   name : string;
   codebase : string option;
   url : string;
-  local_path : string;
+  resolved_local_path : string;
   default_branch : string;
   status : repo_status;
   keepers : string list;
@@ -618,24 +617,32 @@ type file_change = {
   diff_preview : string option;
 }
 
+(* The four words [Repo_manager_types.status_wire_name] writes. The server
+   sends [error_message] beside "error" every time, so an "error" without its
+   cause is not a status this can complete. *)
+let decode_repo_status json =
+  let* word = required_nonblank_string json "status" in
+  let* error_message = optional_nonblank_string json "error_message" in
+  match word with
+  | "active" -> Ok Repo_active
+  | "paused" -> Ok Repo_paused
+  | "cloning" -> Ok Repo_cloning
+  | "error" -> (
+      match error_message with
+      | Some message -> Ok (Repo_error message)
+      | None -> Error "repository status \"error\" carries no error_message")
+  | other -> Error (Printf.sprintf "unknown repository status %S" other)
+
 let decode_repository json =
   let* id = required_nonblank_string json "id" in
   let* name = required_nonblank_string json "name" in
   let* codebase = optional_nonblank_string json "codebase" in
   let* url = required_nonblank_string json "url" in
-  let* local_path = required_nonblank_string json "local_path" in
+  (* [local_path] is the stored declaration and is often relative to the
+     server's base path, which only the server knows. *)
+  let* resolved_local_path = required_nonblank_string json "resolved_local_path" in
   let* default_branch = required_nonblank_string json "default_branch" in
-  let* status_str = required_nonblank_string json "status" in
-  let* error_message = optional_nonblank_string json "error_message" in
-  let status =
-    match String.lowercase_ascii status_str with
-    | "synced" | "ready" | "clean" -> Repo_synced
-    | "syncing" | "cloning" -> Repo_syncing
-    | "dirty" -> Repo_dirty
-    | "error" | "failed" ->
-        Repo_error (match error_message with Some m -> m | None -> "error")
-    | other -> Repo_unknown other
-  in
+  let* status = decode_repo_status json in
   let* keepers = optional_string_list json "keepers" in
   let* auto_sync = decode_bool_field_or json "auto_sync" ~default:false in
   Ok
@@ -644,7 +651,7 @@ let decode_repository json =
       name;
       codebase;
       url;
-      local_path;
+      resolved_local_path;
       default_branch;
       status;
       keepers;

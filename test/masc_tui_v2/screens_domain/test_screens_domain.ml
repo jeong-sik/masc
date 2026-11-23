@@ -1221,9 +1221,9 @@ let make_rich_model ~lang ~cols ~rows =
       name = "masc";
       codebase = Some "ocaml";
       url = "https://github.com/jeong-sik/masc";
-      local_path = "/workspace/masc";
+      resolved_local_path = "/workspace/masc";
       default_branch = "main";
-      status = Wire_infra.Repo_dirty;
+      status = Wire_infra.Repo_cloning;
       keepers = [ "e-masc-the-leader"; "code-reviewer" ];
       auto_sync = true;
     }

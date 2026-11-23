@@ -4932,9 +4932,9 @@ let test_nav_fix7_symmetric_viewport_scrolling_all_stores () =
           name = Printf.sprintf "repo-%02d" i;
           codebase = None;
           url = "https://example.invalid/repo";
-          local_path = "/tmp/repo";
+          resolved_local_path = "/tmp/repo";
           default_branch = "main";
-          status = Wire_infra.Repo_synced;
+          status = Wire_infra.Repo_active;
           keepers = [];
           auto_sync = false;
         })

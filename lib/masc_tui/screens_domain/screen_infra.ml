@@ -1285,21 +1285,19 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
 (* --- 2. Sub-Tab 2: Repos & Read-Only Syntax-Highlighted Diffs --- *)
 
 let repo_status_display ~lang = function
-  | Wire_infra.Repo_synced ->
+  | Wire_infra.Repo_active ->
       ( Glyph.Live_healthy
       , Theme.Status_ok
-      , Say.resolve lang (Say.make ~ko:"동기화" ~en:"synced") )
-  | Wire_infra.Repo_syncing ->
+      , Say.resolve lang (Say.make ~ko:"활성" ~en:"active") )
+  | Wire_infra.Repo_paused ->
+      ( Glyph.Live_paused
+      , Theme.Status_historical
+      , Say.resolve lang (Say.make ~ko:"일시 정지" ~en:"paused") )
+  | Wire_infra.Repo_cloning ->
       ( Glyph.Live_working
       , Theme.Status_active
-      , Say.resolve lang (Say.make ~ko:"동기화 중" ~en:"syncing") )
-  | Wire_infra.Repo_dirty ->
-      ( Glyph.Warning_triangle
-      , Theme.Status_attention
-      , Say.resolve lang (Say.make ~ko:"변경 있음" ~en:"dirty") )
+      , Say.resolve lang (Say.make ~ko:"복제 중" ~en:"cloning") )
   | Wire_infra.Repo_error e -> (Glyph.Live_failing, Theme.Status_critical, e)
-  | Wire_infra.Repo_unknown s ->
-      (Glyph.Missing_unreported, Theme.Status_historical, s)
 
 let file_change_kind_badge = function
   | Wire_infra.File_added -> ("+", Theme.Status_ok)
@@ -1543,11 +1541,11 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
                ~w:(Int.max 0 (diff_inner.w - (2 * pad_x)))
                ~h:1
            in
-           let file_uri = "file://" ^ r.local_path in
+           let file_uri = "file://" ^ r.resolved_local_path in
            let adv =
              H.put_link ~grid ~clip:link_rect ~x:link_rect.x ~y:!y
                ~max_w:link_rect.w ~style:(H.accent_style ~theme ())
-               ~uri:file_uri ("file://" ^ r.local_path)
+               ~uri:file_uri file_uri
            in
            let rem = link_rect.w - adv - 3 in
            if rem > 6 && not (String.equal r.url "") then

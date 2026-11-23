@@ -124,6 +124,10 @@ let run_keeper_cycle_admitted
       ~base_path:ctx.config.base_path
       ~keeper_name:meta_after_triage.name
       ~at:(Time_compat.now ())
+      ~cause:
+        (Keeper_turn_pulse.cause_of_inputs
+           (Keeper_heartbeat_source_batch.stimuli
+              (Keeper_heartbeat_source_batch.sources turn_input)))
       outcome;
     Keeper_row_broadcast.changed
       ~base_path:ctx.config.base_path

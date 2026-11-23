@@ -161,10 +161,34 @@ type candle_observation =
   | Candle_disabled of { reason : string }
   | Candle_ready of candle_supply
 
+(** One half-hour slot of a keeper's turn pulse. Each turn is counted twice:
+    by outcome ([ok] [rested] [failed]) and by what started it. *)
+type turn_slot = {
+  starts_at : int;  (** Unix seconds, a multiple of {!turn_slot_seconds}. *)
+  ok : int;
+  rested : int;
+  failed : int;
+  scheduled : int;
+  reacted : int;
+  chat : int;
+  own : int;
+  unknown : int;
+}
+
+type turn_pulse = {
+  known_since : float;
+      (** The server knows every turn that ended at or after this Unix time. *)
+  slots : turn_slot list;  (** Oldest first; a slot with no turn is absent. *)
+}
+
+val turn_slot_seconds : int
+(** 1800, the server's slot width. *)
+
 type keeper_roster_extras = {
   sandbox_profiles : (string * keeper_sandbox_profile) list;
   candle_balances_milli : (string * int) list;
   candle_summary : candle_observation option;
+  turn_pulses : (string * turn_pulse) list;
 }
 
 type execution_keeper_enrichment = {

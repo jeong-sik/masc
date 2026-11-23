@@ -2219,6 +2219,7 @@ let test_v25_data_pipeline_decoders () =
             "candle_balance_milli": 5000,
             "runtime_lane_observation": { "turn": { "turn_count": 77 } },
             "recent_turns": {
+              "known_since": 1795166000,
               "slots": [
                 { "starts_at": 1795253600, "ok": 3, "rested": 0, "failed": 1,
                   "scheduled": 2, "reacted": 1, "chat": 1, "own": 0, "unknown": 0 },
@@ -2239,8 +2240,9 @@ let test_v25_data_pipeline_decoders () =
   let k0 = List.hd ks in
   Alcotest.(check (option int)) "turn_count fallback from runtime_lane_observation"
     (Some 77) (Observed.to_option k0.total_turns);
-  Alcotest.(check (list (float 0.01))) "recent_turns.slots sorted ascending (ok+fail)"
-    [ 1.0; 4.0 ] k0.activity_sparkline_24h;
+  Alcotest.(check (list (float 0.01)))
+    "recent_turns.slots oldest first (ok+fail), the empty slot between drawn as zero"
+    [ 1.0; 0.0; 4.0 ] k0.activity_sparkline_24h;
   let extras =
     expect_ok "decode_keepers_roster_extras"
       (Wire_fleet.decode_keepers_roster_extras live_keeper_json)
@@ -2248,6 +2250,16 @@ let test_v25_data_pipeline_decoders () =
   Alcotest.(check bool) "sandbox_profile = microvm" true
     (List.assoc_opt "alpha-builder" extras.sandbox_profiles
      = Some Wire_fleet.Profile_microvm);
+  (match List.assoc_opt "alpha-builder" extras.turn_pulses with
+   | Some { Wire_fleet.slots = [ older; newer ]; known_since } ->
+       Alcotest.(check (float 0.5)) "pulse known_since" 1795166000.0 known_since;
+       Alcotest.(check (list int)) "older slot causes: own"
+         [ 0; 0; 0; 1; 0 ]
+         [ older.scheduled; older.reacted; older.chat; older.own; older.unknown ];
+       Alcotest.(check (list int)) "newer slot causes: scheduled, reacted, chat"
+         [ 2; 1; 1; 0; 0 ]
+         [ newer.scheduled; newer.reacted; newer.chat; newer.own; newer.unknown ]
+   | Some _ | None -> Alcotest.fail "expected alpha-builder's two pulse slots, oldest first");
   Alcotest.(check (option string)) "candle circulating fallback" (Some "8000")
     (match extras.candle_summary with
      | Some (Wire_fleet.Candle_ready c) -> Some c.circulating_milli

@@ -54,6 +54,7 @@ type t = {
   sandbox_profiles : Wire_fleet.keeper_sandbox_profile String_map.t;
   candle_balances_milli : int String_map.t;
   candle_summary_fallback : Wire_fleet.candle_observation option;
+  turn_pulses : Wire_fleet.turn_pulse String_map.t;
   fleet_reading : Wire_fleet.fleet_stream_reading Observed.t;
   fleet_degradation : Wire_fleet.fleet_degradation option;
   fleet_mode : Nav.keepers_fleet_mode;
@@ -86,6 +87,7 @@ let empty =
     sandbox_profiles = String_map.empty;
     candle_balances_milli = String_map.empty;
     candle_summary_fallback = None;
+    turn_pulses = String_map.empty;
     fleet_reading = Observed.unreported;
     fleet_degradation = None;
     fleet_mode = Nav.Fleet_companies;
@@ -590,7 +592,16 @@ let apply_roster_extras (extras : Wire_fleet.keeper_roster_extras) t =
     | Some _ as cs -> cs
     | None -> t.candle_summary_fallback
   in
-  { t with sandbox_profiles; candle_balances_milli; candle_summary_fallback }
+  (* The roster read carries every keeper's pulse, so it replaces the map: a
+     keeper whose row no longer sends one has none. *)
+  let turn_pulses =
+    List.fold_left
+      (fun acc (name, pulse) -> String_map.add name pulse acc)
+      String_map.empty extras.turn_pulses
+  in
+  { t with sandbox_profiles; candle_balances_milli; candle_summary_fallback; turn_pulses }
+
+let turn_pulse t name = String_map.find_opt name t.turn_pulses
 
 let apply_execution_enrichments ~observed_at (enrichments, candle_opt) t =
   let by_name = Hashtbl.create (max 8 (List.length enrichments)) in

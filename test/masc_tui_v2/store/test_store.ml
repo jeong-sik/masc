@@ -7368,7 +7368,16 @@ let test_wiki_index_reply_requests_selected_page () =
   in
   Alcotest.(check (list string))
     "an open dive keeps its own page in the slot" []
-    (wiki_page_gets (index_reply in_wiki_dive))
+    (wiki_page_gets (index_reply in_wiki_dive));
+  let dive_with_index, _ =
+    Update.step ~now:t1 in_wiki_dive
+      (Msg.Http_reply
+         { epoch = in_wiki_dive.epoch; reply = Msg.Reply_wiki_index (Ok index) })
+  in
+  Alcotest.(check (list string))
+    "a refresh under a Wiki dive asks only for the dive's page"
+    [ "other-page" ]
+    (wiki_page_gets (View_fetches.fetches_for_current_view dive_with_index))
 
 let () =
   Alcotest.run "masc_tui_store"

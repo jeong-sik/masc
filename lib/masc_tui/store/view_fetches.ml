@@ -202,11 +202,13 @@ let fetches_for_dive ~force (m : Model.t) =
       | Nav.Incident_dive _ -> [])
 
 (* The Wiki tab shows the selected page's body, so it needs that page unless
-   the slot already holds it fresh. *)
+   the slot already holds it fresh. A dive covers the tab, and a Wiki dive
+   keeps its own page in the same slot, so nothing is asked while one is
+   open. *)
 let selected_wiki_page_reqs ~force (m : Model.t) =
-  match m.knowledge.wiki_artifacts_submode with
-  | `Artifacts -> []
-  | `Wiki -> (
+  match (Model.active_dive m, m.knowledge.wiki_artifacts_submode) with
+  | Some _, (`Wiki | `Artifacts) | None, `Artifacts -> []
+  | None, `Wiki -> (
       match Knowledge_store.selected_wiki_page m.knowledge with
       | None -> []
       | Some p ->
@@ -531,7 +533,6 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
 let selected_wiki_page_fetch (m : Model.t) =
   let wiki_tab_shown =
     Nav.equal_workspace m.nav.workspace Nav.Knowledge
-    && Option.is_none (Model.active_dive m)
     && Nav.equal_knowledge_tab m.knowledge.active_tab
          Nav.Knowledge_wiki_artifacts
   in

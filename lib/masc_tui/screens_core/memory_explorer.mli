@@ -19,6 +19,16 @@ open Masc_tui_store
 val wrap_lines : max_width:int -> string -> string list
 (** Grapheme-aware UTF-8/CJK multi-line text wrapping for memory claims. *)
 
+val diff_viewport_skip :
+  total_rows:int ->
+  avail_h:int ->
+  scroll:int ->
+  selected_range:(int * int) option ->
+  int
+(** Pure viewport skip projection for multi-row diff entries: keeps the
+    selected item's visual row block [[sel_start, min sel_end (sel_start + vis_h - 1)]]
+    within [[skip, skip + vis_h - 1]] and clamped to [[0, max_skip]]. *)
+
 val render_full_reading :
   grid:Cell_grid.t ->
   rect:Rect.t ->

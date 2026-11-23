@@ -2925,6 +2925,40 @@ let test_setup_key_inline_modal_masks_secret () =
   assert_not_contains ~label:"setup_key_raw_secret_never_rendered"
     ~needle:"sk-SUPER-SECRET-TOKEN-999" txt
 
+let test_memory_diff_viewport_skip_multi_row_selection () =
+  let skip = Masc_tui_screens_core.Memory_explorer.diff_viewport_skip in
+  (* Selected 3-row block [30..32] starts past avail_h=12 when scroll=15:
+     skip must advance so [30, 32] lies inside [skip, skip + 11]. *)
+  let s1 =
+    skip ~total_rows:80 ~avail_h:12 ~scroll:15 ~selected_range:(Some (30, 32))
+  in
+  Alcotest.(check int) "advances skip so multi-row selection stays visible" 21 s1;
+  Alcotest.(check bool) "sel_start >= skip" true (30 >= s1);
+  Alcotest.(check bool) "sel_end <= skip + avail_h - 1" true (32 <= s1 + 11);
+  (* Selected block above current scroll pulls viewport back up to sel_start *)
+  let s2 =
+    skip ~total_rows:80 ~avail_h:12 ~scroll:20 ~selected_range:(Some (5, 7))
+  in
+  Alcotest.(check int) "pulls skip up to sel_start" 5 s2;
+  (* Tall wrapped entry taller than avail_h pins header at top of viewport *)
+  let s3 =
+    skip ~total_rows:80 ~avail_h:12 ~scroll:10 ~selected_range:(Some (40, 65))
+  in
+  Alcotest.(check int) "pins tall entry header at sel_start" 40 s3;
+  (* Already-visible selection leaves scroll untouched *)
+  let s4 =
+    skip ~total_rows:80 ~avail_h:12 ~scroll:10 ~selected_range:(Some (12, 14))
+  in
+  Alcotest.(check int) "keeps scroll when selection already visible" 10 s4;
+  (* Bottom clamp respects max_skip *)
+  let s5 =
+    skip ~total_rows:40 ~avail_h:12 ~scroll:999 ~selected_range:(Some (38, 39))
+  in
+  Alcotest.(check int) "clamps to max_skip at bottom" 28 s5;
+  (* None selection preserves clamped scroll *)
+  let s6 = skip ~total_rows:40 ~avail_h:12 ~scroll:9 ~selected_range:None in
+  Alcotest.(check int) "None selection keeps clamped scroll" 9 s6
+
 let () =
   Alcotest.run "masc_tui_screens_core"
     [
@@ -2978,5 +3012,11 @@ let () =
             `Quick test_p0_toast_above_active_overlay_and_settings_tab_focus;
           Alcotest.test_case "Setup API key inline modal masks secret field on screen"
             `Quick test_setup_key_inline_modal_masks_secret;
+        ] );
+      ( "memory_explorer",
+        [
+          Alcotest.test_case
+            "diff_viewport_skip keeps multi-row selection inside visible slice"
+            `Quick test_memory_diff_viewport_skip_multi_row_selection;
         ] );
     ]

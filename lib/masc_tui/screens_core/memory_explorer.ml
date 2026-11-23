@@ -1178,25 +1178,55 @@ let build_diff_visual_rows ~theme ~bg ~lang ~now_unix ~wrap_w ~selected_idx
     items;
   List.rev !acc
 
+let diff_viewport_skip ~total_rows ~avail_h ~scroll ~selected_range =
+  let vis_h = Int.max 1 avail_h in
+  let max_skip = Int.max 0 (total_rows - vis_h) in
+  let base_skip = Int.min max_skip (Int.max 0 scroll) in
+  match selected_range with
+  | None -> base_skip
+  | Some (sel_start, sel_end) ->
+      let target_end = Int.min sel_end (sel_start + vis_h - 1) in
+      let adjusted =
+        if sel_start < base_skip then sel_start
+        else if target_end >= base_skip + vis_h then target_end - vis_h + 1
+        else base_skip
+      in
+      Int.min max_skip (Int.max 0 adjusted)
+
+let diff_row_selected = function
+  | Diff_header_heat_age { selected; _ }
+  | Diff_header_right { selected; _ }
+  | Diff_plain { selected; _ } ->
+      selected
+
+let selected_visual_range rows =
+  let rec scan idx first last = function
+    | [] -> (
+        match first, last with
+        | Some s, Some e -> Some (s, e)
+        | (Some _ | None), (Some _ | None) -> None)
+    | row :: rest ->
+        if diff_row_selected row then
+          let first' = match first with Some _ -> first | None -> Some idx in
+          scan (idx + 1) first' (Some idx) rest
+        else scan (idx + 1) first last rest
+  in
+  scan 0 None None rows
+
 let draw_diff_rows ~grid ~content ~y ~bottom ~(theme : Theme.t) ~bg ~scroll
     ~focused rows =
   let avail_h = Int.max 1 (bottom - !y) in
-  let max_skip = Int.max 0 (List.length rows - avail_h) in
-  let skip = Int.min max_skip (Int.max 0 scroll) in
+  let selected_range = selected_visual_range rows in
+  let skip =
+    diff_viewport_skip ~total_rows:(List.length rows) ~avail_h ~scroll
+      ~selected_range
+  in
   let tx = content.Rect.x + 2 in
   let tw = Int.max 0 (content.Rect.w - 2) in
   List.iter
     (fun row ->
       if !y < bottom then begin
-        let sel =
-          focused
-          &&
-          match row with
-          | Diff_header_heat_age { selected; _ }
-          | Diff_header_right { selected; _ }
-          | Diff_plain { selected; _ } ->
-              selected
-        in
+        let sel = focused && diff_row_selected row in
         let row_bg = if sel then Color.of_rgb theme.selection_bg else bg in
         if sel then
           Cell_grid.fill_rect ~clip:content grid

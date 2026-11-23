@@ -3752,6 +3752,14 @@ let memory_reading_max_scroll (m : Model.t) =
   | Some entry ->
       let bp = ui_bp m in
       let br = ui_body_rect m in
+      let keeper_padded_w cw =
+        let pad_x =
+          if cw < 20 then 0
+          else if cw < 44 then 1
+          else Masc_tui_ui.Layout.card_pad_x bp
+        in
+        max 0 (cw - (2 * pad_x))
+      in
       let rect_w, rect_h =
         match Model.active_dive m with
         | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ }) ->
@@ -3759,7 +3767,7 @@ let memory_reading_max_scroll (m : Model.t) =
               Chat_transcript.keeper_content_rect_size ~embedded:false ~model:m
             in
             let footer_h = if ch >= 7 then 2 else 0 in
-            (cw, max 0 (ch - footer_h))
+            (keeper_padded_w cw, max 0 (ch - footer_h))
         | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive _)) ->
             let body_after_bar =
               match
@@ -3806,7 +3814,7 @@ let memory_reading_max_scroll (m : Model.t) =
                     ~embedded:(not zoomed_keeper) ~model:m
                 in
                 let footer_h = if ch >= 7 then 2 else 0 in
-                (cw, max 0 (ch - footer_h))
+                (keeper_padded_w cw, max 0 (ch - footer_h))
             | Nav.Knowledge
               when Nav.equal_knowledge_tab m.knowledge.active_tab
                      Nav.Knowledge_memory ->

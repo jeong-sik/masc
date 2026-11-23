@@ -2,6 +2,54 @@ open Masc_tui_core
 open Masc_tui_keymap
 open Masc_tui_protocol
 
+let active_memory_reading (m : Model.t) :
+    Knowledge_store.memory_reading_entry option =
+  let scope_opt =
+    match Model.active_dive m with
+    | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
+        Some (Some name)
+    | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; _ })) ->
+        Some keeper
+    | Some
+        ( Nav.Dive_keeper
+            {
+              tab =
+                ( Nav.Keeper_chat
+                | Nav.Keeper_work_candle
+                | Nav.Keeper_sandbox
+                | Nav.Keeper_config );
+              _;
+            }
+        | Nav.Dive_work _
+        | Nav.Dive_knowledge
+            (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+        | Nav.Dive_infra _ ) ->
+        None
+    | None -> (
+        match m.nav.workspace with
+        | Nav.Knowledge
+          when Nav.equal_knowledge_tab m.knowledge.active_tab
+                 Nav.Knowledge_memory ->
+            Some m.knowledge.memory_diff_keeper
+        | Nav.Keepers
+          when Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory -> (
+            match Fleet_store.selected_keeper_summary m.fleet with
+            | Some k -> Some (Some k.name)
+            | None -> None)
+        | Nav.Pulse
+        | Nav.Work
+        | Nav.Keepers
+        | Nav.Knowledge
+        | Nav.Runtime
+        | Nav.Infra ->
+            None)
+  in
+  match scope_opt, m.knowledge.memory_reading with
+  | Some keeper_opt, Some entry
+    when Knowledge_store.memory_reading_matches_scope ~keeper_opt entry ->
+      Some entry
+  | (Some _ | None), (Some _ | None) -> None
+
 let next_theme_preset = function
   | Theme.Midnight -> Theme.Arcade_hi
   | Theme.Arcade_hi -> Theme.Paper_light
@@ -1216,61 +1264,9 @@ and execute_action ~now (m : Model.t) action =
               Model.is_keeper_config_active m
               && not (String.equal m.config.search_query "")
             in
-            let active_memory_reading_opt =
-              let scope_opt =
-                match Model.active_dive m with
-                | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
-                    Some (Some name)
-                | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; _ }))
-                  ->
-                    Some keeper
-                | Some
-                    ( Nav.Dive_keeper
-                        {
-                          tab =
-                            ( Nav.Keeper_chat
-                            | Nav.Keeper_work_candle
-                            | Nav.Keeper_sandbox
-                            | Nav.Keeper_config );
-                          _;
-                        }
-                    | Nav.Dive_work _
-                    | Nav.Dive_knowledge
-                        ( Nav.Thread_dive _
-                        | Nav.Wiki_dive _
-                        | Nav.Artifact_dive _ )
-                    | Nav.Dive_infra _ ) ->
-                    None
-                | None -> (
-                    match m.nav.workspace with
-                    | Nav.Knowledge
-                      when Nav.equal_knowledge_tab m.knowledge.active_tab
-                             Nav.Knowledge_memory ->
-                        Some m.knowledge.memory_diff_keeper
-                    | Nav.Keepers
-                      when Nav.equal_keeper_tab m.fleet.keeper_dive_tab
-                             Nav.Keeper_memory -> (
-                        match Fleet_store.selected_keeper_summary m.fleet with
-                        | Some k -> Some (Some k.name)
-                        | None -> None)
-                    | Nav.Pulse
-                    | Nav.Work
-                    | Nav.Keepers
-                    | Nav.Knowledge
-                    | Nav.Runtime
-                    | Nav.Infra ->
-                        None)
-              in
-              match scope_opt, m.knowledge.memory_reading with
-              | Some keeper_opt, Some entry
-                when Knowledge_store.memory_reading_matches_scope ~keeper_opt
-                       entry ->
-                  Some entry
-              | (Some _ | None), (Some _ | None) -> None
-            in
             if keeper_config_has_search then
               ({ m with config = Config_store.set_search_query "" m.config }, [])
-            else if Option.is_some active_memory_reading_opt then
+            else if Option.is_some (active_memory_reading m) then
               ( {
                   m with
                   knowledge = Knowledge_store.close_memory_reading m.knowledge;
@@ -1949,57 +1945,8 @@ and execute_action ~now (m : Model.t) action =
                 (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline) ) ->
             None
         | None -> (
-            let reading_scope_opt =
-              match Model.active_dive m with
-              | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
-                  Some (Some name)
-              | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; _ })) ->
-                  Some keeper
-              | Some
-                  ( Nav.Dive_keeper
-                      {
-                        tab =
-                          ( Nav.Keeper_chat
-                          | Nav.Keeper_work_candle
-                          | Nav.Keeper_sandbox
-                          | Nav.Keeper_config );
-                        _;
-                      }
-                  | Nav.Dive_work _
-                  | Nav.Dive_knowledge
-                      (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
-                  | Nav.Dive_infra _ ) ->
-                  None
-              | None -> (
-                  match m.nav.workspace with
-                  | Nav.Knowledge
-                    when Nav.equal_knowledge_tab m.knowledge.active_tab
-                           Nav.Knowledge_memory ->
-                      Some m.knowledge.memory_diff_keeper
-                  | Nav.Keepers
-                    when Nav.equal_keeper_tab m.fleet.keeper_dive_tab
-                           Nav.Keeper_memory -> (
-                      match Fleet_store.selected_keeper_summary m.fleet with
-                      | Some k -> Some (Some k.name)
-                      | None -> None)
-                  | Nav.Pulse
-                  | Nav.Work
-                  | Nav.Keepers
-                  | Nav.Knowledge
-                  | Nav.Runtime
-                  | Nav.Infra ->
-                      None)
-            in
-            let active_reading =
-              match reading_scope_opt, m.knowledge.memory_reading with
-              | Some keeper_opt, Some entry
-                when Knowledge_store.memory_reading_matches_scope ~keeper_opt
-                       entry ->
-                  Some entry
-              | (Some _ | None), (Some _ | None) -> None
-            in
             let reading_copy_opt =
-              match active_reading with
+              match active_memory_reading m with
               | None -> None
               | Some (Knowledge_store.Reading_activity { event; _ }) ->
                   let claims =

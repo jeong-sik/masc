@@ -425,6 +425,18 @@ let declare ?source declared id ~label ~shape ~explicit =
       Option.iter (fun sources -> Hashtbl.replace sources id source) declared.node_sources;
       Option.iter (fun emit -> emit (Node_label id) source) declared.on_label
 
+let find_closing_quote text from =
+  let len = String.length text in
+  let rec go i =
+    if i >= len then None
+    else if text.[i] = '\\' && i + 1 < len then go (i + 2)
+    else if text.[i] = '"' then Some i
+    else go (i + 1)
+  in
+  go from
+
+let is_class_char ch = is_id_char ch || ch = '-'
+
 let parse_node c declared =
   skip_spaces c;
   let id_start = c.pos in
@@ -444,7 +456,7 @@ let parse_node c declared =
                quote, so the bracket is looked for after it. *)
             let after_quote =
               if start < String.length c.text && c.text.[start] = '"' then
-                match find_from c.text (start + 1) "\"" with
+                match find_closing_quote c.text (start + 1) with
                 | Some quote -> Some (quote + 1)
                 | None -> None
               else Some start
@@ -462,7 +474,17 @@ let parse_node c declared =
                     Ok (Named id)))
           else try_openers rest
     in
-    try_openers openers
+    let* node_id = try_openers openers in
+    (* Optional Mermaid [:::className] node-class attachment suffix.
+       Like sequence activation marks, styling suffixes on a drawn node do not
+       change the text canvas and are accepted without emitting interior
+       undrawn fragments. *)
+    if starts c ":::" then (
+      c.pos <- c.pos + 3;
+      let cls = read_while c is_class_char in
+      if cls = "" then Error "expected a class name after :::"
+      else Ok node_id)
+    else Ok node_id
 
 type arrow = {
   arrow_style : line_style;
@@ -579,14 +601,33 @@ let source_lines ?on_undrawn text =
       Option.iter (fun emit -> emit (Source_fragment (start, start + String.length line))) on_undrawn;
     line <> "" && not (String.starts_with ~prefix:"%%" line))
 
+let split_semicolons_outside_quotes line =
+  let len = String.length line in
+  let rec loop i seg_start in_quote acc =
+    if i >= len then
+      List.rev ((seg_start, String.sub line seg_start (len - seg_start)) :: acc)
+    else
+      let ch = line.[i] in
+      if in_quote then
+        if ch = '\\' && i + 1 < len then loop (i + 2) seg_start true acc
+        else if ch = '"' then loop (i + 1) seg_start false acc
+        else loop (i + 1) seg_start true acc
+      else if ch = '"' then loop (i + 1) seg_start true acc
+      else if ch = ';' then
+        let raw = String.sub line seg_start (i - seg_start) in
+        loop (i + 1) (i + 1) false ((seg_start, raw) :: acc)
+      else loop (i + 1) seg_start false acc
+  in
+  loop 0 0 false []
+
 let split_statements lines =
-  List.concat_map (fun (number, base, line) ->
-    let offset = ref base in
-    String.split_on_char ';' line |> List.filter_map (fun raw ->
-      let base = !offset in
-      offset := base + String.length raw + 1;
-      let base, statement = trim_located base raw in
-      if statement = "" then None else Some (number, base, statement))) lines
+  List.concat_map
+    (fun (number, base, line) ->
+      split_semicolons_outside_quotes line
+      |> List.filter_map (fun (rel_start, raw) ->
+             let stmt_base, statement = trim_located (base + rel_start) raw in
+             if statement = "" then None else Some (number, stmt_base, statement)))
+    lines
 
 (* A sequence statement. The first word decides: a declaration, a note, a
    block boundary, a line that only styles, or else a message. *)

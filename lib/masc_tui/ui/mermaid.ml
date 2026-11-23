@@ -1558,7 +1558,9 @@ let render_with_status ~cols text =
   Ok {rows=rendered.canvas_rows; undrawn_sources}
 
 let render ~cols text =
-  Result.map (fun rendered -> rendered.rows) (render_with_status ~cols text)
+  let* diagram = parse_internal text in
+  let* rendered = render_diagram_internal ~trace:false ~cols diagram in
+  Ok rendered.canvas_rows
 
 type rendered_with_sources = {
   rendered_rows : string list;

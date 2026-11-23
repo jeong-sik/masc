@@ -1,4 +1,5 @@
 module Lineage = Masc_tui_ui.Memory_lineage
+module Mermaid = Masc_tui_ui.Mermaid
 module Tree = Masc_tui_ui.Memory_tree
 module Palette = Masc_tui_term.Palette
 module Grapheme = Masc_tui_term.Grapheme
@@ -301,6 +302,38 @@ let test_sanitization_and_fact_status_consistency () =
        (Lineage.fact_claim_text ~ko:false blank_chart
           { memory_id = "mem-blank"; claim = Some "   \t  " }))
 
+let test_lineage_mermaid_roundtrip_into_mermaid_render () =
+  let e1 =
+    event ~kind:Lineage.Revised ~reason:"규칙 \"A; B\" #1 & 검증" "e1"
+      [ fact ~claim:"이전 주장: \"키; 값\" #35 & 한국어" "m1" ]
+      [ fact ~claim:"이후 주장: \"결과; 확정\" & 완료" "m2" ]
+  in
+  let e2 =
+    event ~kind:Lineage.Relation_unavailable "e2"
+      [ fact ~claim:"이후 주장: \"결과; 확정\" & 완료" "m2" ]
+      []
+  in
+  let chart =
+    Lineage.select ~event_id:"e1"
+      (activity ~notes:[ "부분 관측; #1 & \"주의\"" ] [ e1; e2 ])
+    |> Option.get
+  in
+  let check_render label src =
+    match Mermaid.render ~cols:400 src with
+    | Ok rows ->
+        Alcotest.(check bool) (label ^ " renders non-empty rows") true
+          (rows <> [])
+    | Error (Mermaid.Unsupported what) ->
+        Alcotest.failf "%s failed Unsupported: %s\nsrc:\n%s" label what src
+    | Error (Mermaid.Parse_error { line; what }) ->
+        Alcotest.failf "%s failed Parse_error line %d: %s\nsrc:\n%s" label line
+          what src
+    | Error (Mermaid.Too_wide { cells; cols; _ }) ->
+        Alcotest.failf "%s failed Too_wide (%d > %d)" label cells cols
+  in
+  check_render "transition_mermaid" (Lineage.transition_mermaid ~ko:true chart);
+  check_render "full lineage mermaid" (Lineage.mermaid ~ko:true chart)
+
 let () =
   Alcotest.run "masc_tui_v2_memory_lineage"
     [
@@ -316,5 +349,7 @@ let () =
             `Quick test_formation_graph_json_and_memory_tree;
           Alcotest.test_case "ANSI/control sanitization & fact_status consistency"
             `Quick test_sanitization_and_fact_status_consistency;
+          Alcotest.test_case "transition_mermaid & mermaid round-trip into Mermaid.render"
+            `Quick test_lineage_mermaid_roundtrip_into_mermaid_render;
         ] );
     ]

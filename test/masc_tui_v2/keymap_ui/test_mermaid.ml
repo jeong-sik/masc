@@ -290,6 +290,41 @@ let test_canvas_source_positions_and_undrawn () =
   | Ok { undrawn_sources = [ { placement = Mermaid.After_diagram; _ } ]; _ } -> ()
   | _ -> Alcotest.fail "trailing style should report After_diagram undrawn span"
 
+let test_quoted_semicolons_and_class_attachment () =
+  let semi_src =
+    "flowchart TD\nA[\"a; b\"] --> B[\"#quot;x#quot;\"]\nA --> C[\"c; d\"]; C --> B"
+  in
+  let g = parsed semi_src in
+  Alcotest.(check (list string)) "quoted labels keep semicolons and entities"
+    [ "a; b"; "#quot;x#quot;"; "c; d" ]
+    (List.map (fun (n : Mermaid.node) -> n.label) g.nodes);
+  let semi_rows = render ~cols:100 semi_src in
+  Alcotest.(check bool) "quoted semicolon flowchart renders" true
+    (semi_rows <> []);
+  let cls_src =
+    "flowchart TD\n\
+     classDef ok fill:#052e16\n\
+     classDef warn fill:#451a03\n\
+     A[\"hello\"]:::ok --> B[\"world\"]:::warn\n\
+     B -.-> C:::ok"
+  in
+  let gc = parsed cls_src in
+  Alcotest.(check (list string)) ":::className attaches cleanly without polluting labels"
+    [ "hello"; "world"; "C" ]
+    (List.map (fun (n : Mermaid.node) -> n.label) gc.nodes);
+  let cls_rows = render ~cols:100 cls_src in
+  Alcotest.(check bool) ":::className flowchart renders" true (cls_rows <> []);
+  (match Mermaid.render_with_source_labels ~cols:100 "flowchart TD\nA[\"a; b\"]:::ok --> B[\"#quot;x#quot;\"]:::warn" with
+   | Ok { labels = Mermaid.Complete _; rendered_rows; _ } ->
+       Alcotest.(check bool) "traced render succeeds with quoted ; and :::class"
+         true (rendered_rows <> [])
+   | Ok { labels = Mermaid.Incomplete _; _ } | Error _ ->
+       Alcotest.fail "traced render must map quoted ; and :::class completely");
+  match failure "flowchart TD\nA[\"bad\"]::: --> B" with
+  | Mermaid.Parse_error { line; _ } -> Alcotest.(check int) "empty ::: fails line 2" 2 line
+  | Mermaid.Unsupported _ | Mermaid.Too_wide _ ->
+      Alcotest.fail "expected Parse_error for empty ::: class name"
+
 let () =
   Alcotest.run "masc_tui_v2_mermaid"
     [
@@ -307,5 +342,7 @@ let () =
             test_refusals_and_failures;
           Alcotest.test_case "source byte positions & undrawn source decisions" `Quick
             test_canvas_source_positions_and_undrawn;
+          Alcotest.test_case "quoted semicolons & :::className suffixes" `Quick
+            test_quoted_semicolons_and_class_attachment;
         ] );
     ]

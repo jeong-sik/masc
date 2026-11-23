@@ -89,6 +89,19 @@ let workspace_memory_inventory_path = "/api/v1/dashboard/workspace-memory-invent
 let keeper_memory_os_internals_path ~keeper =
   Printf.sprintf "/api/v1/keepers/%s/memory-os-internals" (percent_encode keeper)
 
+let keeper_memory_facts_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/memory-facts" (percent_encode keeper)
+
+let keeper_memory_activity_path ~keeper ?(limit = 50) () =
+  Printf.sprintf "/api/v1/keepers/%s/memory-journal?activity=1&limit=%d"
+    (percent_encode keeper) (max 1 limit)
+
+let keeper_memory_health_path ?keeper () =
+  match keeper with
+  | None -> "/api/v1/dashboard/keeper-memory-health"
+  | Some k ->
+      "/api/v1/dashboard/keeper-memory-health?keeper=" ^ percent_encode k
+
 let memory_diff_path ~keeper ?window ?from_rev ?to_rev () =
   let params =
     (match keeper with
@@ -1945,3 +1958,712 @@ let decode_memory_os_internals json =
           available_act_tokens;
         };
     }
+
+(* {1 Per-Keeper Memory Facts ([/api/v1/keepers/:name/memory-facts])} *)
+
+type memory_fact_category =
+  | Cat_code_change
+  | Cat_fact
+  | Cat_preference
+  | Cat_blocker
+  | Cat_goal
+  | Cat_constraint
+  | Cat_validated_approach
+  | Cat_lesson
+  | Cat_custom of string
+
+type memory_fact_origin =
+  | Origin_authored
+  | Origin_injected
+
+type memory_board_ref = {
+  post_id : string;
+  comment_id : string option;
+}
+
+type memory_derivation_ref = {
+  rule_id : string;
+  premise_ids : string list;
+}
+
+type memory_fact_basis =
+  | Basis_observed
+  | Basis_observed_board of memory_board_ref
+  | Basis_derived of memory_derivation_ref list
+
+type memory_retrieval_state =
+  | Never_retrieved
+  | Retrieved of {
+      count : int;
+      distinct_days : int;
+      last_at_unix : float;
+    }
+
+type memory_fact_events = {
+  retrieval : memory_retrieval_state;
+  retracted_count : int;
+  revised_from : string list;
+}
+
+type keeper_ordinary_fact = {
+  memory_id : string;
+  claim : string;
+  category : memory_fact_category;
+  origin : memory_fact_origin;
+  basis : memory_fact_basis;
+  first_seen_unix : float;
+  last_seen_unix : float;
+  events : memory_fact_events;
+}
+
+type keeper_support_invalidation = {
+  memory_id : string;
+  claim : string;
+  basis : memory_fact_basis;
+  missing_premise_ids : string list;
+}
+
+type keeper_ordinary_memory = {
+  revision : int;
+  snapshot_sha256 : string;
+  updated_at_unix : float;
+  facts : keeper_ordinary_fact list;
+  support_invalidations : keeper_support_invalidation list;
+}
+
+type keeper_source_fact = {
+  claim : string;
+  first_seen_unix : float;
+  path : string;
+  sha256 : string;
+}
+
+type source_invalidation_reason =
+  | Source_changed
+  | Source_unavailable
+
+type keeper_source_invalidation = {
+  source_path : string;
+  invalidated_at_unix : float;
+  reason : source_invalidation_reason;
+}
+
+type keeper_source_memory = {
+  revision : int;
+  updated_at_unix : float;
+  facts : keeper_source_fact list;
+  invalidations : keeper_source_invalidation list;
+}
+
+type 'a memory_store_state =
+  | Memory_store_read_error of string
+  | Memory_store_absent
+  | Memory_store_present of 'a
+
+type keeper_memory_facts = {
+  keeper : string;
+  ordinary : keeper_ordinary_memory memory_store_state;
+  source_bound : keeper_source_memory memory_store_state;
+  events_unreadable_lines : int;
+  events_read_error : string option;
+}
+
+let memory_fact_category_to_string = function
+  | Cat_code_change -> "code_change"
+  | Cat_fact -> "fact"
+  | Cat_preference -> "preference"
+  | Cat_blocker -> "blocker"
+  | Cat_goal -> "goal"
+  | Cat_constraint -> "constraint"
+  | Cat_validated_approach -> "validated_approach"
+  | Cat_lesson -> "lesson"
+  | Cat_custom s -> s
+
+let memory_fact_origin_to_string = function
+  | Origin_authored -> "authored"
+  | Origin_injected -> "injected"
+
+let source_invalidation_reason_to_string = function
+  | Source_changed -> "source_changed"
+  | Source_unavailable -> "source_unavailable"
+
+let is_valid_custom_category raw =
+  let len = String.length raw in
+  if len = 0 then false
+  else
+    let c0 = raw.[0] in
+    let starts_lower = c0 >= 'a' && c0 <= 'z' in
+    let rec all_ok i =
+      if i >= len then true
+      else
+        let c = raw.[i] in
+        if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '_' then
+          all_ok (i + 1)
+        else false
+    in
+    starts_lower && all_ok 1
+
+let decode_memory_fact_category raw =
+  match raw with
+  | "code_change" -> Ok Cat_code_change
+  | "fact" -> Ok Cat_fact
+  | "preference" -> Ok Cat_preference
+  | "blocker" -> Ok Cat_blocker
+  | "goal" -> Ok Cat_goal
+  | "constraint" -> Ok Cat_constraint
+  | "validated_approach" -> Ok Cat_validated_approach
+  | "lesson" -> Ok Cat_lesson
+  | "all" | "source" | "dropped" ->
+      Error (Printf.sprintf "forbidden fact category %S" raw)
+  | other ->
+      if is_valid_custom_category other then Ok (Cat_custom other)
+      else Error (Printf.sprintf "invalid fact category %S" other)
+
+let memory_fact_origin_of_string = function
+  | "authored" -> Some Origin_authored
+  | "injected" -> Some Origin_injected
+  | _ -> None
+
+let source_invalidation_reason_of_string = function
+  | "source_changed" -> Some Source_changed
+  | "source_unavailable" -> Some Source_unavailable
+  | _ -> None
+
+let decode_derivation_ref json =
+  let* rule_id = required_nonblank_string json "rule_id" in
+  let* premise_ids = decode_string_name_list json "premise_ids" in
+  Ok { rule_id; premise_ids }
+
+let decode_memory_fact_basis json =
+  let* kind = required_nonblank_string json "kind" in
+  match kind with
+  | "observed" -> (
+      match optional_object_field json "board" with
+      | Error _ as err -> err
+      | Ok None -> Ok Basis_observed
+      | Ok (Some board_obj) ->
+          let* post_id = required_nonblank_string board_obj "post_id" in
+          let* comment_id = optional_nonblank_string board_obj "comment_id" in
+          Ok (Basis_observed_board { post_id; comment_id }))
+  | "derived" ->
+      let* raw_derivs = required_list_field json "derivations" in
+      let* derivs =
+        decode_list "basis.derivations" decode_derivation_ref raw_derivs
+      in
+      if derivs = [] then Error "basis.derivations must not be empty"
+      else Ok (Basis_derived derivs)
+  | other -> Error (Printf.sprintf "unknown memory fact basis kind %S" other)
+
+let decode_memory_fact_events json =
+  let* retrieved_count =
+    required_nonnegative_int_field json "retrieved_count"
+  in
+  let* retrieved_distinct_days =
+    required_nonnegative_int_field json "retrieved_distinct_days"
+  in
+  let* last_retrieved_at =
+    required_nullable_float_field json "last_retrieved_at"
+  in
+  let* retracted_count =
+    required_nonnegative_int_field json "retracted_count"
+  in
+  let* revised_from = required_string_list json "revised_from" in
+  let* retrieval =
+    match retrieved_count, retrieved_distinct_days, last_retrieved_at with
+    | 0, 0, None -> Ok Never_retrieved
+    | c, d, Some t when c > 0 && d > 0 && d <= c && Float.is_finite t ->
+        Ok (Retrieved { count = c; distinct_days = d; last_at_unix = t })
+    | _ ->
+        Error
+          (Printf.sprintf
+             "inconsistent retrieval events (count=%d, distinct_days=%d, \
+              has_last=%b)"
+             retrieved_count retrieved_distinct_days
+             (Option.is_some last_retrieved_at))
+  in
+  Ok { retrieval; retracted_count; revised_from }
+
+let decode_keeper_ordinary_fact json =
+  let* memory_id = required_nonblank_string json "memory_id" in
+  let* claim = required_nonblank_string json "claim" in
+  let* cat_raw = required_nonblank_string json "category" in
+  let* category = decode_memory_fact_category cat_raw in
+  let* origin =
+    decode_enum ~field:"origin" memory_fact_origin_of_string json
+  in
+  let* first_seen_unix = required_finite_float json "first_seen" in
+  let* last_seen_unix = required_finite_float json "last_seen" in
+  let* basis_obj = required_object_field json "basis" in
+  let* basis = decode_memory_fact_basis basis_obj in
+  let* events_obj = required_object_field json "events" in
+  let* events = decode_memory_fact_events events_obj in
+  Ok
+    {
+      memory_id;
+      claim;
+      category;
+      origin;
+      basis;
+      first_seen_unix;
+      last_seen_unix;
+      events;
+    }
+
+let decode_keeper_support_invalidation json =
+  let* memory_id = required_nonblank_string json "memory_id" in
+  let* claim = required_nonblank_string json "claim" in
+  let* basis_obj = required_object_field json "basis" in
+  let* basis = decode_memory_fact_basis basis_obj in
+  let* missing_premise_ids =
+    decode_string_name_list json "missing_premise_ids"
+  in
+  Ok { memory_id; claim; basis; missing_premise_ids }
+
+let decode_ordinary_memory_state json =
+  if has_field json "read_error" then
+    let* err_msg = required_nonblank_string json "read_error" in
+    Ok (Memory_store_read_error err_msg)
+  else
+    let* present = required_bool_field json "present" in
+    if not present then Ok Memory_store_absent
+    else
+      let* revision = required_nonnegative_int_field json "revision" in
+      let* snapshot_sha256 = required_nonblank_string json "snapshot_sha256" in
+      let* updated_at_unix = required_finite_float json "updated_at" in
+      let* raw_facts = required_list_field json "facts" in
+      let* facts =
+        decode_list "ordinary.facts" decode_keeper_ordinary_fact raw_facts
+      in
+      let* raw_invs = optional_list_field json "support_invalidations" in
+      let* support_invalidations =
+        decode_list "ordinary.support_invalidations"
+          decode_keeper_support_invalidation raw_invs
+      in
+      Ok
+        (Memory_store_present
+           {
+             revision;
+             snapshot_sha256;
+             updated_at_unix;
+             facts;
+             support_invalidations;
+           })
+
+let decode_keeper_source_fact json =
+  let* claim = required_nonblank_string json "claim" in
+  let* first_seen_unix = required_finite_float json "first_seen" in
+  let* path = required_nonblank_string json "path" in
+  let* sha256 = required_nonblank_string json "sha256" in
+  Ok { claim; first_seen_unix; path; sha256 }
+
+let decode_keeper_source_invalidation json =
+  let* source_path = required_nonblank_string json "source_path" in
+  let* invalidated_at_unix = required_finite_float json "invalidated_at" in
+  let* reason =
+    decode_enum ~field:"reason" source_invalidation_reason_of_string json
+  in
+  Ok { source_path; invalidated_at_unix; reason }
+
+let decode_source_memory_state json =
+  if has_field json "read_error" then
+    let* err_msg = required_nonblank_string json "read_error" in
+    Ok (Memory_store_read_error err_msg)
+  else
+    let* present = required_bool_field json "present" in
+    if not present then Ok Memory_store_absent
+    else
+      let* revision = required_nonnegative_int_field json "revision" in
+      let* updated_at_unix = required_finite_float json "updated_at" in
+      let* raw_facts = required_list_field json "facts" in
+      let* facts =
+        decode_list "source_bound.facts" decode_keeper_source_fact raw_facts
+      in
+      let* raw_invs = required_list_field json "invalidations" in
+      let* invalidations =
+        decode_list "source_bound.invalidations"
+          decode_keeper_source_invalidation raw_invs
+      in
+      Ok (Memory_store_present { revision; updated_at_unix; facts; invalidations })
+
+let decode_keeper_memory_facts json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* keeper = required_nonblank_string body "keeper" in
+  let* ord_obj = required_object_field body "ordinary" in
+  let* ordinary = decode_ordinary_memory_state ord_obj in
+  let* src_obj = required_object_field body "source_bound" in
+  let* source_bound = decode_source_memory_state src_obj in
+  let* events_unreadable_lines =
+    required_nonnegative_int_field body "events_unreadable_lines"
+  in
+  let* events_read_error =
+    required_nullable_nonblank_string_field body "events_read_error"
+  in
+  Ok
+    {
+      keeper;
+      ordinary;
+      source_bound;
+      events_unreadable_lines;
+      events_read_error;
+    }
+
+(* {1 Per-Keeper Memory Evolution / Activity ([/api/v1/keepers/:name/memory-journal?activity=1])} *)
+
+type memory_activity_kind =
+  | Activity_created
+  | Activity_reobserved
+  | Activity_revised
+  | Activity_absorbed
+  | Activity_retracted
+  | Activity_removed
+  | Activity_invalidated
+  | Activity_relation_unavailable
+
+type memory_activity_fact = {
+  memory_id : string;
+  claim : string option;
+}
+
+type memory_activity_event = {
+  identity : string;
+  recorded_at_unix : float;
+  revision : int;
+  kind : memory_activity_kind;
+  before : memory_activity_fact list;
+  after : memory_activity_fact list;
+  reason : string option;
+}
+
+type keeper_memory_activity = {
+  keeper : string;
+  limit : int;
+  journal_lines : int;
+  undecodable_lines : int;
+  events : memory_activity_event list;
+  notes : string list;
+}
+
+let memory_activity_kind_rank = function
+  | Activity_created -> 0
+  | Activity_reobserved -> 1
+  | Activity_revised -> 2
+  | Activity_absorbed -> 3
+  | Activity_retracted -> 4
+  | Activity_removed -> 5
+  | Activity_invalidated -> 6
+  | Activity_relation_unavailable -> 7
+
+let equal_memory_activity_kind a b =
+  Int.equal (memory_activity_kind_rank a) (memory_activity_kind_rank b)
+
+let memory_activity_kind_to_string = function
+  | Activity_created -> "created"
+  | Activity_reobserved -> "reobserved"
+  | Activity_revised -> "revised"
+  | Activity_absorbed -> "absorbed"
+  | Activity_retracted -> "retracted"
+  | Activity_removed -> "removed"
+  | Activity_invalidated -> "invalidated"
+  | Activity_relation_unavailable -> "relation_unavailable"
+
+let memory_activity_kind_of_string = function
+  | "created" -> Some Activity_created
+  | "reobserved" -> Some Activity_reobserved
+  | "revised" -> Some Activity_revised
+  | "absorbed" -> Some Activity_absorbed
+  | "retracted" -> Some Activity_retracted
+  | "removed" -> Some Activity_removed
+  | "invalidated" -> Some Activity_invalidated
+  | "relation_unavailable" -> Some Activity_relation_unavailable
+  | _ -> None
+
+let decode_memory_activity_fact json =
+  let* memory_id = required_nonblank_string json "memory_id" in
+  let* claim = required_nullable_string_field json "claim" in
+  let claim =
+    match claim with
+    | Some s when String.equal (String.trim s) "" -> None
+    | Some _ | None -> claim
+  in
+  Ok { memory_id; claim }
+
+let validate_activity_event_shape (ev : memory_activity_event) =
+  let has_before = ev.before <> [] in
+  let has_after = ev.after <> [] in
+  let has_reason =
+    match ev.reason with
+    | Some r -> not (String.equal (String.trim r) "")
+    | None -> false
+  in
+  match ev.kind with
+  | Activity_created ->
+      if (not has_before) && has_after then Ok ()
+      else Error "created activity event requires empty before and non-empty after"
+  | Activity_reobserved | Activity_revised | Activity_absorbed ->
+      if has_before && has_after then Ok ()
+      else
+        Error
+          (Printf.sprintf "%s activity event requires non-empty before and after"
+             (memory_activity_kind_to_string ev.kind))
+  | Activity_retracted | Activity_removed | Activity_invalidated ->
+      if has_before && not has_after then Ok ()
+      else
+        Error
+          (Printf.sprintf
+             "%s activity event requires non-empty before and empty after"
+             (memory_activity_kind_to_string ev.kind))
+  | Activity_relation_unavailable ->
+      if (has_before || has_after) && has_reason then Ok ()
+      else
+        Error
+          "relation_unavailable activity event requires fact references and a \
+           non-blank reason"
+
+let decode_memory_activity_event json =
+  let* identity = required_nonblank_string json "identity" in
+  let* recorded_at_unix = decode_timestamp_unix json "recorded_at" in
+  let* revision = required_nonnegative_int_field json "revision" in
+  let* kind = decode_enum ~field:"kind" memory_activity_kind_of_string json in
+  let* raw_before = required_list_field json "before" in
+  let* before = decode_list "before" decode_memory_activity_fact raw_before in
+  let* raw_after = required_list_field json "after" in
+  let* after = decode_list "after" decode_memory_activity_fact raw_after in
+  let* reason = optional_nullable_string_field json "reason" in
+  let ev =
+    { identity; recorded_at_unix; revision; kind; before; after; reason }
+  in
+  let* () = validate_activity_event_shape ev in
+  Ok ev
+
+let ensure_unique_activity_identities events =
+  let seen = Hashtbl.create (max 16 (List.length events)) in
+  let rec loop = function
+    | [] -> Ok ()
+    | (ev : memory_activity_event) :: rest ->
+        if Hashtbl.mem seen ev.identity then
+          Error (Printf.sprintf "duplicate activity event identity %S" ev.identity)
+        else begin
+          Hashtbl.add seen ev.identity ();
+          loop rest
+        end
+  in
+  loop events
+
+let decode_keeper_memory_activity json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* keeper = required_nonblank_string body "keeper" in
+  let* undecodable_lines =
+    required_nonnegative_int_field body "undecodable_lines"
+  in
+  let* act_obj = required_object_field body "activity" in
+  let* limit = required_int_field act_obj "limit" in
+  let* () =
+    if limit > 0 then Ok ()
+    else Error (Printf.sprintf "activity.limit must be > 0, got %d" limit)
+  in
+  let* journal_lines = required_nonnegative_int_field act_obj "journal_lines" in
+  let* () =
+    if journal_lines <= limit then Ok ()
+    else
+      Error
+        (Printf.sprintf "activity.journal_lines (%d) exceeds activity.limit (%d)"
+           journal_lines limit)
+  in
+  let* raw_events = required_list_field act_obj "events" in
+  let* events =
+    decode_list "activity.events" decode_memory_activity_event raw_events
+  in
+  let* () = ensure_unique_activity_identities events in
+  let* notes = required_string_list act_obj "notes" in
+  Ok { keeper; limit; journal_lines; undecodable_lines; events; notes }
+
+(* {1 Fleet Keeper Memory Health ([/api/v1/dashboard/keeper-memory-health])} *)
+
+type memory_health_alert_severity =
+  | Alert_warn
+  | Alert_error
+
+type memory_health_alert = {
+  code : string;
+  severity : memory_health_alert_severity;
+  target : string;
+  label : string;
+  message : string;
+}
+
+type keeper_memory_health_row = {
+  keeper_id : string;
+  revision : int;
+  updated_at_unix : float option;
+  facts : int;
+  observed_facts : int;
+  derived_facts : int;
+  support_invalidations : int;
+  snapshot_bytes : int;
+  added : int;
+  removed : int;
+  snapshot_present : bool;
+  age_bins : int array option;
+  facts_by_hour : (float * int) list;
+  librarian_failures : int;
+  vision_ingest_errors : int;
+  read_error : string option;
+  source_revision : int;
+  source_facts : int;
+  source_invalidations : int;
+  source_snapshot_bytes : int;
+  source_snapshot_present : bool;
+  source_read_error : string option;
+  alerts : memory_health_alert list;
+}
+
+type keeper_memory_health_fleet = {
+  schema : string;
+  generated_at_unix : float;
+  keepers : keeper_memory_health_row list;
+}
+
+let memory_health_alert_severity_of_string = function
+  | "warn" -> Some Alert_warn
+  | "error" -> Some Alert_error
+  | _ -> None
+
+let decode_memory_health_alert json =
+  let* code = required_nonblank_string json "code" in
+  let* severity =
+    decode_enum ~field:"severity" memory_health_alert_severity_of_string json
+  in
+  let* target = required_nonblank_string json "target" in
+  let* label = required_string_field json "label" in
+  let* message = required_string_field json "message" in
+  Ok { code; severity; target; label; message }
+
+let decode_age_bins_opt json =
+  let* raw = required_member json "age_bins" in
+  match raw with
+  | `Null -> Ok None
+  | `List xs ->
+      if List.length xs <> 24 then
+        Error
+          (Printf.sprintf "field \"age_bins\" must have 24 bins, got %d"
+             (List.length xs))
+      else
+        let* vals =
+          decode_list "age_bins"
+            (function
+              | `Int n when n >= 0 -> Ok n
+              | `Int n ->
+                  Error (Printf.sprintf "age_bins entry must be >= 0, got %d" n)
+              | other -> field_type_error "age_bins" "non-negative int" other)
+            xs
+        in
+        Ok (Some (Array.of_list vals))
+  | other -> field_type_error "age_bins" "array of 24 ints or null" other
+
+let decode_facts_by_hour_point json =
+  let* recorded_at = required_finite_float json "recorded_at" in
+  let* facts = required_nonnegative_int_field json "facts" in
+  Ok (recorded_at, facts)
+
+let decode_keeper_memory_health_row json =
+  let* keeper_id = required_nonblank_string json "keeper_id" in
+  let* revision = required_nonnegative_int_field json "revision" in
+  let* updated_at_unix = required_nullable_float_field json "updated_at" in
+  let* () =
+    match updated_at_unix with
+    | Some t when not (Float.is_finite t) ->
+        Error "field \"updated_at\" must be finite"
+    | Some _ | None -> Ok ()
+  in
+  let* facts = required_nonnegative_int_field json "facts" in
+  let* observed_facts = required_nonnegative_int_field json "observed_facts" in
+  let* derived_facts = required_nonnegative_int_field json "derived_facts" in
+  let* support_invalidations =
+    optional_nonnegative_count json "support_invalidations"
+  in
+  let* snapshot_bytes = required_nonnegative_int_field json "snapshot_bytes" in
+  let* added = required_nonnegative_int_field json "added" in
+  let* removed = required_nonnegative_int_field json "removed" in
+  let* snapshot_present = required_bool_field json "snapshot_present" in
+  let* age_bins = decode_age_bins_opt json in
+  let* raw_fbh = required_list_field json "facts_by_hour" in
+  let* facts_by_hour =
+    decode_list "facts_by_hour" decode_facts_by_hour_point raw_fbh
+  in
+  let* librarian_failures =
+    required_nonnegative_int_field json "librarian_failures"
+  in
+  let* vision_ingest_errors =
+    optional_nonnegative_count json "vision_ingest_errors"
+  in
+  let* read_error = required_nullable_nonblank_string_field json "read_error" in
+  let* source_revision = optional_nonnegative_count json "source_revision" in
+  let* source_facts = optional_nonnegative_count json "source_facts" in
+  let* source_invalidations =
+    optional_nonnegative_count json "source_invalidations"
+  in
+  let* source_snapshot_bytes =
+    optional_nonnegative_count json "source_snapshot_bytes"
+  in
+  let* source_snapshot_present =
+    decode_bool_field_or json "source_snapshot_present" ~default:false
+  in
+  let* source_read_error =
+    optional_nullable_string_field json "source_read_error"
+  in
+  let* raw_alerts = required_list_field json "alerts" in
+  let* alerts = decode_list "alerts" decode_memory_health_alert raw_alerts in
+  Ok
+    {
+      keeper_id;
+      revision;
+      updated_at_unix;
+      facts;
+      observed_facts;
+      derived_facts;
+      support_invalidations;
+      snapshot_bytes;
+      added;
+      removed;
+      snapshot_present;
+      age_bins;
+      facts_by_hour;
+      librarian_failures;
+      vision_ingest_errors;
+      read_error;
+      source_revision;
+      source_facts;
+      source_invalidations;
+      source_snapshot_bytes;
+      source_snapshot_present;
+      source_read_error;
+      alerts;
+    }
+
+let decode_keeper_memory_health_fleet json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* schema = required_nonblank_string body "schema" in
+  let* () =
+    if String.equal schema "keeper.memory_os.current_health.v19" then Ok ()
+    else
+      Error
+        (Printf.sprintf
+           "unsupported keeper memory health schema %S (expected \
+            \"keeper.memory_os.current_health.v19\")"
+           schema)
+  in
+  let* generated_at_unix = required_finite_float body "generated_at" in
+  let* keepers =
+    if has_field body "keepers" then
+      let* raw_rows = required_list_field body "keepers" in
+      decode_list "keepers" decode_keeper_memory_health_row raw_rows
+    else if has_field body "keeper" then
+      match required_member body "keeper" with
+      | Error _ as err -> err
+      | Ok `Null -> Ok []
+      | Ok row_json ->
+          let* row = decode_keeper_memory_health_row row_json in
+          Ok [ row ]
+    else missing_field "keepers"
+  in
+  Ok { schema; generated_at_unix; keepers }

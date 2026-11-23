@@ -16,6 +16,61 @@ type memory_diff_window =
   | Window_30d
   | Window_revs of { from_rev : int; to_rev : int }
 
+type memory_view_mode =
+  | View_evolution
+  | View_facts
+  | View_diff
+
+type memory_facts_sort =
+  | Sort_recency
+  | Sort_retrieved
+
+type memory_left_row =
+  | Left_conflict of Wire_knowledge.memory_conflict
+  | Left_world_scope
+  | Left_writer of Wire_knowledge.librarian_writer_row
+
+type memory_fact_row =
+  | Fact_ordinary of {
+      revision : int;
+      fact : Wire_knowledge.keeper_ordinary_fact;
+    }
+  | Fact_source of Wire_knowledge.keeper_source_fact
+  | Fact_source_invalidation of Wire_knowledge.keeper_source_invalidation
+
+type memory_diff_item =
+  | Keeper_added of Wire_knowledge.memory_fact_entry
+  | Keeper_updated of Wire_knowledge.memory_updated_fact
+  | Keeper_retracted of Wire_knowledge.memory_retracted_fact
+  | Keeper_invalidated of Wire_knowledge.memory_invalidated_fact
+  | World_added of Wire_knowledge.world_change_entry
+  | World_updated of Wire_knowledge.world_updated_entry
+  | World_retracted of Wire_knowledge.world_change_entry
+
+type memory_reading_entry =
+  | Reading_activity of {
+      keeper : string;
+      event : Wire_knowledge.memory_activity_event;
+      notes : string list;
+    }
+  | Reading_ordinary_fact of {
+      keeper : string;
+      revision : int;
+      fact : Wire_knowledge.keeper_ordinary_fact;
+    }
+  | Reading_source_fact of {
+      keeper : string;
+      fact : Wire_knowledge.keeper_source_fact;
+    }
+  | Reading_source_invalidation of {
+      keeper : string;
+      invalidation : Wire_knowledge.keeper_source_invalidation;
+    }
+  | Reading_diff_item of {
+      keeper : string option;
+      item : memory_diff_item;
+    }
+
 type wiki_edit_draft = {
   slug : string;
   expected_revision : int option;
@@ -51,8 +106,20 @@ type t = {
   world_memory : Wire_knowledge.world_memory Observed.t;
   memory_diff : Wire_knowledge.memory_diff Observed.t;
   memory_os_internals : Wire_knowledge.memory_os_internals Observed.t;
+  keeper_memory_facts : Wire_knowledge.keeper_memory_facts Observed.t;
+  keeper_memory_activity : Wire_knowledge.keeper_memory_activity Observed.t;
+  keeper_memory_health : Wire_knowledge.keeper_memory_health_fleet Observed.t;
   memory_diff_window : memory_diff_window;
   memory_diff_keeper : string option;
+  memory_view_mode : memory_view_mode;
+  memory_facts_sort : memory_facts_sort;
+  selected_fact_index : int;
+  facts_scroll_offset : int;
+  selected_activity_index : int;
+  activity_scroll_offset : int;
+  selected_diff_index : int;
+  memory_reading : memory_reading_entry option;
+  memory_reading_scroll : int;
   last_memory_act_answer : (string * Wire_knowledge.memory_act_answer) option;
   selected_index : int;
   scroll_offset : int;
@@ -66,6 +133,8 @@ val empty : t
 
 val memory_diff_window_query : memory_diff_window -> string option
 val equal_memory_diff_window : memory_diff_window -> memory_diff_window -> bool
+val equal_memory_view_mode : memory_view_mode -> memory_view_mode -> bool
+val equal_memory_facts_sort : memory_facts_sort -> memory_facts_sort -> bool
 
 val set_tab : Nav.knowledge_tab -> t -> t
 val cycle_tab : Keymap.cycle_dir -> t -> t
@@ -79,6 +148,18 @@ val is_succession_chain_expanded : root_id:string -> t -> bool
 val set_memory_diff_window : memory_diff_window -> t -> t
 val cycle_memory_diff_window : t -> t
 val set_memory_diff_keeper : string option -> t -> t
+val set_memory_view_mode : memory_view_mode -> t -> t
+val cycle_memory_view_mode : t -> t
+val set_memory_facts_sort : memory_facts_sort -> t -> t
+val toggle_memory_facts_sort : t -> t
+val open_memory_reading : memory_reading_entry -> t -> t
+val close_memory_reading : t -> t
+val scroll_memory_reading : max_scroll:int -> delta:int -> t -> t
+val move_memory_activity :
+  keeper:string -> ?viewport_rows:int -> delta:int -> t -> t
+val move_memory_facts :
+  keeper:string -> ?viewport_rows:int -> delta:int -> t -> t
+val move_memory_diff_cursor : delta:int -> t -> t
 
 val apply_board :
   observed_at:Clock.Mono.t -> Wire_knowledge.board_feed -> t -> t
@@ -107,6 +188,28 @@ val apply_memory_diff :
   observed_at:Clock.Mono.t -> Wire_knowledge.memory_diff -> t -> t
 val apply_memory_os_internals :
   observed_at:Clock.Mono.t -> Wire_knowledge.memory_os_internals -> t -> t
+val apply_keeper_memory_facts :
+  observed_at:Clock.Mono.t -> Wire_knowledge.keeper_memory_facts -> t -> t
+val apply_keeper_memory_activity :
+  observed_at:Clock.Mono.t -> Wire_knowledge.keeper_memory_activity -> t -> t
+val apply_keeper_memory_health :
+  observed_at:Clock.Mono.t -> Wire_knowledge.keeper_memory_health_fleet -> t -> t
+val fail_keeper_memory_facts :
+  keeper:string ->
+  reason:string ->
+  retryable:bool ->
+  at:Clock.Mono.t ->
+  t ->
+  t
+val fail_keeper_memory_activity :
+  keeper:string ->
+  reason:string ->
+  retryable:bool ->
+  at:Clock.Mono.t ->
+  t ->
+  t
+val fail_keeper_memory_health :
+  reason:string -> retryable:bool -> at:Clock.Mono.t -> t -> t
 val record_memory_act_answer :
   keeper:string -> Wire_knowledge.memory_act_answer -> t -> t
 
@@ -149,20 +252,34 @@ val quarantines_list : t -> Wire_knowledge.quarantine_candidate list
 val filtered_memory_conflicts : t -> Wire_knowledge.memory_conflict list
 val filtered_memory_claims : t -> Wire_knowledge.world_claim list
 val filtered_librarian_writers : t -> Wire_knowledge.librarian_writer_row list
+val memory_left_rows : t -> memory_left_row list
+val selected_memory_left_row : t -> memory_left_row option
 val memory_diff_matches_filter : t -> string -> bool
 
-type memory_diff_item =
-  | Keeper_added of Wire_knowledge.memory_fact_entry
-  | Keeper_updated of Wire_knowledge.memory_updated_fact
-  | Keeper_retracted of Wire_knowledge.memory_retracted_fact
-  | Keeper_invalidated of Wire_knowledge.memory_invalidated_fact
-  | World_added of Wire_knowledge.world_change_entry
-  | World_updated of Wire_knowledge.world_updated_entry
-  | World_retracted of Wire_knowledge.world_change_entry
+val health_row_for_keeper :
+  keeper:string -> t -> Wire_knowledge.keeper_memory_health_row option
+
+val filtered_memory_activity_events :
+  keeper:string -> t -> Wire_knowledge.memory_activity_event list
+
+val selected_activity_event_for :
+  keeper:string -> t -> Wire_knowledge.memory_activity_event option
+
+val selected_activity_event : t -> Wire_knowledge.memory_activity_event option
+(** Selected memory activity event in the current memory explorer scope.
+    Clean hook for PR 2 Pele Card ([.]) and Formation Tree ([Ctrl+O]). *)
+
+val filtered_memory_fact_rows :
+  keeper:string -> t -> memory_fact_row list
+
+val selected_memory_fact_row :
+  keeper:string -> t -> memory_fact_row option
 
 val filtered_memory_diff_items : t -> memory_diff_item list
 (** Single-SSOT filtered diff items shared by [Screen_knowledge] and
     {!Update_nav} (matching [inv.missing_premise_ids] too). *)
+
+val selected_memory_diff_item : t -> memory_diff_item option
 
 val memory_diff_entry_count : t -> int
 val memory_diff_line_count : t -> int

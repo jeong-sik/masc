@@ -52,6 +52,8 @@ type action =
   | Copy_selected
   | Open_external
   | Toggle_zoom
+  | Cycle_memory_view
+  | Toggle_memory_sort
   | Quit_app
 
 type scope =
@@ -176,7 +178,9 @@ let action_tag = function
   | Copy_selected -> 31
   | Open_external -> 32
   | Toggle_zoom -> 33
-  | Quit_app -> 34
+  | Cycle_memory_view -> 34
+  | Toggle_memory_sort -> 35
+  | Quit_app -> 36
 
 let equal_action a b =
   if not (Int.equal (action_tag a) (action_tag b)) then false
@@ -216,6 +220,8 @@ let equal_action a b =
     | Copy_selected, Copy_selected
     | Open_external, Open_external
     | Toggle_zoom, Toggle_zoom
+    | Cycle_memory_view, Cycle_memory_view
+    | Toggle_memory_sort, Toggle_memory_sort
     | Quit_app, Quit_app ->
         true
     | ( Switch_workspace _
@@ -252,6 +258,8 @@ let equal_action a b =
       | Copy_selected
       | Open_external
       | Toggle_zoom
+      | Cycle_memory_view
+      | Toggle_memory_sort
       | Quit_app ),
       _ ->
         false
@@ -617,6 +625,16 @@ let bindings : binding list =
         ~hint_label:(Say.make ~ko:"확대" ~en:"Zoom")
         ~help_desc:(Say.make ~ko:"상세 패널 전체 폭 확대/복원" ~en:"Toggle detail pane zoom")
         ~footer_priority:0 (bare_char 'z');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
+        ~action:Cycle_memory_view ~key_display:"t"
+        ~hint_label:(Say.make ~ko:"기억 보기" ~en:"Mem View")
+        ~help_desc:(Say.make ~ko:"기억 보기 모드 순환 (변천/전체/Diff)" ~en:"Cycle Memory view mode (Evolution/Facts/Diff)")
+        ~footer_priority:0 (bare_char 't');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Toggle_memory_sort ~key_display:"s"
+        ~hint_label:(Say.make ~ko:"기억 정렬" ~en:"Mem Sort")
+        ~help_desc:(Say.make ~ko:"기억 목록 정렬 전환 (최근순/조회순)" ~en:"Toggle Memory facts sort (Recency/Retrieved)")
+        ~footer_priority:0 (bare_char 's');
       (* --- Composer-Focused Bindings --- *)
       bind ~scope:Composer_focused ~tier:Bare_unfocused ~category:Cat_composer
         ~action:Submit_steer ~key_display:"Enter"
@@ -1036,6 +1054,8 @@ let palette_commands ~lang =
           | Copy_selected
           | Open_external
           | Toggle_zoom
+          | Cycle_memory_view
+          | Toggle_memory_sort
           | Quit_app ->
               true
         in

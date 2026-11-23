@@ -719,6 +719,111 @@ let apply_http_reply ~now (m : Model.t) reply =
       | Msg.Decode_error _ ->
           err_reply ~source:Health.Source_client_http ~ko:"메모리 OS 내부 상태 조회"
             ~en:"Memory OS internals fetch" err)
+  | Msg.Reply_keeper_memory_facts { keeper = _; result = Ok facts } ->
+      ( {
+          m with
+          knowledge =
+            Knowledge_store.apply_keeper_memory_facts ~observed_at:now facts
+              m.knowledge;
+        }
+      , [] )
+  | Msg.Reply_keeper_memory_facts { keeper; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          let knowledge =
+            { m.knowledge with keeper_memory_facts = Observed.absent }
+          in
+          ({ m with knowledge }, [])
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          let retryable =
+            match err with
+            | Msg.Transport _ -> true
+            | Msg.Http_error { status; _ } when status >= 500 && status <= 599
+              ->
+                true
+            | Msg.Http_error _ | Msg.Workspace_mismatch _ | Msg.Decode_error _ ->
+                false
+          in
+          let knowledge =
+            Knowledge_store.fail_keeper_memory_facts ~keeper
+              ~reason:(Msg.http_error_detail err) ~retryable ~at:now m.knowledge
+          in
+          record_http_incident ~now ~source:(Health.Source_keeper keeper)
+            ~context:
+              (Say.make ~ko:("키퍼 기억 사실 조회: " ^ keeper)
+                 ~en:("Keeper memory facts fetch: " ^ keeper))
+            err { m with knowledge })
+  | Msg.Reply_keeper_memory_activity { keeper = _; result = Ok activity } ->
+      ( {
+          m with
+          knowledge =
+            Knowledge_store.apply_keeper_memory_activity ~observed_at:now
+              activity m.knowledge;
+        }
+      , [] )
+  | Msg.Reply_keeper_memory_activity { keeper; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          let knowledge =
+            { m.knowledge with keeper_memory_activity = Observed.absent }
+          in
+          ({ m with knowledge }, [])
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          let retryable =
+            match err with
+            | Msg.Transport _ -> true
+            | Msg.Http_error { status; _ } when status >= 500 && status <= 599
+              ->
+                true
+            | Msg.Http_error _ | Msg.Workspace_mismatch _ | Msg.Decode_error _ ->
+                false
+          in
+          let knowledge =
+            Knowledge_store.fail_keeper_memory_activity ~keeper
+              ~reason:(Msg.http_error_detail err) ~retryable ~at:now m.knowledge
+          in
+          record_http_incident ~now ~source:(Health.Source_keeper keeper)
+            ~context:
+              (Say.make ~ko:("키퍼 기억 변천 조회: " ^ keeper)
+                 ~en:("Keeper memory activity fetch: " ^ keeper))
+            err { m with knowledge })
+  | Msg.Reply_keeper_memory_health (Ok fleet) ->
+      ( {
+          m with
+          knowledge =
+            Knowledge_store.apply_keeper_memory_health ~observed_at:now fleet
+              m.knowledge;
+        }
+      , [] )
+  | Msg.Reply_keeper_memory_health (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          let knowledge =
+            { m.knowledge with keeper_memory_health = Observed.absent }
+          in
+          ({ m with knowledge }, [])
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          let retryable =
+            match err with
+            | Msg.Transport _ -> true
+            | Msg.Http_error { status; _ } when status >= 500 && status <= 599
+              ->
+                true
+            | Msg.Http_error _ | Msg.Workspace_mismatch _ | Msg.Decode_error _ ->
+                false
+          in
+          let knowledge =
+            Knowledge_store.fail_keeper_memory_health
+              ~reason:(Msg.http_error_detail err) ~retryable ~at:now m.knowledge
+          in
+          record_http_incident ~now ~source:Health.Source_client_http
+            ~context:
+              (Say.make ~ko:"키퍼 기억 상태 지표 조회"
+                 ~en:"Keeper memory health fetch")
+            err { m with knowledge })
   | Msg.Reply_memory_act { keeper; result = Ok ans } ->
       let knowledge =
         Knowledge_store.record_memory_act_answer ~keeper ans m.knowledge

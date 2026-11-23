@@ -126,6 +126,16 @@ type http_reply =
   | Reply_memory_diff of (Wire_knowledge.memory_diff, http_error) result
   | Reply_keeper_memory_os_internals of
       (Wire_knowledge.memory_os_internals, http_error) result
+  | Reply_keeper_memory_facts of {
+      keeper : string;
+      result : (Wire_knowledge.keeper_memory_facts, http_error) result;
+    }
+  | Reply_keeper_memory_activity of {
+      keeper : string;
+      result : (Wire_knowledge.keeper_memory_activity, http_error) result;
+    }
+  | Reply_keeper_memory_health of
+      (Wire_knowledge.keeper_memory_health_fleet, http_error) result
   | Reply_memory_act of {
       keeper : string;
       result : (Wire_knowledge.memory_act_answer, http_error) result;

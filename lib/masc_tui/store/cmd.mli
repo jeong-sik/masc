@@ -53,6 +53,9 @@ type get_request =
       window : Knowledge_store.memory_diff_window;
     }
   | Get_keeper_memory_os_internals of { keeper : string }
+  | Get_keeper_memory_facts of { keeper : string }
+  | Get_keeper_memory_activity of { keeper : string; limit : int }
+  | Get_keeper_memory_health
   | Get_provider_usage of { days : int }
   | Get_keeper_costs of { window_minutes : int }
   | Get_efficiency of { month : string option }

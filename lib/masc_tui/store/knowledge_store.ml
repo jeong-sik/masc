@@ -10,6 +10,61 @@ type memory_diff_window =
   | Window_30d
   | Window_revs of { from_rev : int; to_rev : int }
 
+type memory_view_mode =
+  | View_evolution
+  | View_facts
+  | View_diff
+
+type memory_facts_sort =
+  | Sort_recency
+  | Sort_retrieved
+
+type memory_left_row =
+  | Left_conflict of Wire_knowledge.memory_conflict
+  | Left_world_scope
+  | Left_writer of Wire_knowledge.librarian_writer_row
+
+type memory_fact_row =
+  | Fact_ordinary of {
+      revision : int;
+      fact : Wire_knowledge.keeper_ordinary_fact;
+    }
+  | Fact_source of Wire_knowledge.keeper_source_fact
+  | Fact_source_invalidation of Wire_knowledge.keeper_source_invalidation
+
+type memory_diff_item =
+  | Keeper_added of Wire_knowledge.memory_fact_entry
+  | Keeper_updated of Wire_knowledge.memory_updated_fact
+  | Keeper_retracted of Wire_knowledge.memory_retracted_fact
+  | Keeper_invalidated of Wire_knowledge.memory_invalidated_fact
+  | World_added of Wire_knowledge.world_change_entry
+  | World_updated of Wire_knowledge.world_updated_entry
+  | World_retracted of Wire_knowledge.world_change_entry
+
+type memory_reading_entry =
+  | Reading_activity of {
+      keeper : string;
+      event : Wire_knowledge.memory_activity_event;
+      notes : string list;
+    }
+  | Reading_ordinary_fact of {
+      keeper : string;
+      revision : int;
+      fact : Wire_knowledge.keeper_ordinary_fact;
+    }
+  | Reading_source_fact of {
+      keeper : string;
+      fact : Wire_knowledge.keeper_source_fact;
+    }
+  | Reading_source_invalidation of {
+      keeper : string;
+      invalidation : Wire_knowledge.keeper_source_invalidation;
+    }
+  | Reading_diff_item of {
+      keeper : string option;
+      item : memory_diff_item;
+    }
+
 type wiki_edit_draft = {
   slug : string;
   expected_revision : int option;
@@ -45,8 +100,20 @@ type t = {
   world_memory : Wire_knowledge.world_memory Observed.t;
   memory_diff : Wire_knowledge.memory_diff Observed.t;
   memory_os_internals : Wire_knowledge.memory_os_internals Observed.t;
+  keeper_memory_facts : Wire_knowledge.keeper_memory_facts Observed.t;
+  keeper_memory_activity : Wire_knowledge.keeper_memory_activity Observed.t;
+  keeper_memory_health : Wire_knowledge.keeper_memory_health_fleet Observed.t;
   memory_diff_window : memory_diff_window;
   memory_diff_keeper : string option;
+  memory_view_mode : memory_view_mode;
+  memory_facts_sort : memory_facts_sort;
+  selected_fact_index : int;
+  facts_scroll_offset : int;
+  selected_activity_index : int;
+  activity_scroll_offset : int;
+  selected_diff_index : int;
+  memory_reading : memory_reading_entry option;
+  memory_reading_scroll : int;
   last_memory_act_answer : (string * Wire_knowledge.memory_act_answer) option;
   selected_index : int;
   scroll_offset : int;
@@ -77,8 +144,20 @@ let empty =
     world_memory = Observed.unreported;
     memory_diff = Observed.unreported;
     memory_os_internals = Observed.unreported;
+    keeper_memory_facts = Observed.unreported;
+    keeper_memory_activity = Observed.unreported;
+    keeper_memory_health = Observed.unreported;
     memory_diff_window = Window_24h;
     memory_diff_keeper = None;
+    memory_view_mode = View_evolution;
+    memory_facts_sort = Sort_recency;
+    selected_fact_index = 0;
+    facts_scroll_offset = 0;
+    selected_activity_index = 0;
+    activity_scroll_offset = 0;
+    selected_diff_index = 0;
+    memory_reading = None;
+    memory_reading_scroll = 0;
     last_memory_act_answer = None;
     selected_index = 0;
     scroll_offset = 0;
@@ -105,6 +184,21 @@ let equal_memory_diff_window a b =
   | Window_30d, (Window_24h | Window_7d | Window_revs _)
   | Window_revs _, (Window_24h | Window_7d | Window_30d) ->
       false
+
+let memory_view_mode_rank = function
+  | View_evolution -> 0
+  | View_facts -> 1
+  | View_diff -> 2
+
+let equal_memory_view_mode a b =
+  Int.equal (memory_view_mode_rank a) (memory_view_mode_rank b)
+
+let memory_facts_sort_rank = function
+  | Sort_recency -> 0
+  | Sort_retrieved -> 1
+
+let equal_memory_facts_sort a b =
+  Int.equal (memory_facts_sort_rank a) (memory_facts_sort_rank b)
 
 let contains_ci = Store_scroll.contains_ci
 let adjust_grouped_scroll = Store_scroll.adjust_grouped_scroll
@@ -349,6 +443,8 @@ let set_tab active_tab t =
     scroll_offset = 0;
     diff_scroll_offset = 0;
     detail_scroll_offset = 0;
+    memory_reading = None;
+    memory_reading_scroll = 0;
   }
 
 let cycle_tab dir t =
@@ -429,12 +525,71 @@ let cycle_memory_diff_window t =
   set_memory_diff_window next t
 
 let set_memory_diff_keeper memory_diff_keeper t =
+  let changed =
+    not (Option.equal String.equal t.memory_diff_keeper memory_diff_keeper)
+  in
   {
     t with
     memory_diff_keeper;
     memory_diff = Observed.mark_stale t.memory_diff;
     memory_os_internals = Observed.mark_stale t.memory_os_internals;
+    keeper_memory_facts = Observed.mark_stale t.keeper_memory_facts;
+    keeper_memory_activity = Observed.mark_stale t.keeper_memory_activity;
+    selected_fact_index = if changed then 0 else t.selected_fact_index;
+    facts_scroll_offset = if changed then 0 else t.facts_scroll_offset;
+    selected_activity_index = if changed then 0 else t.selected_activity_index;
+    activity_scroll_offset = if changed then 0 else t.activity_scroll_offset;
+    selected_diff_index = if changed then 0 else t.selected_diff_index;
+    diff_scroll_offset = if changed then 0 else t.diff_scroll_offset;
+    memory_reading = if changed then None else t.memory_reading;
+    memory_reading_scroll = if changed then 0 else t.memory_reading_scroll;
   }
+
+let set_memory_view_mode memory_view_mode t =
+  {
+    t with
+    memory_view_mode;
+    memory_reading = None;
+    memory_reading_scroll = 0;
+  }
+
+let cycle_memory_view_mode t =
+  let next =
+    match t.memory_view_mode with
+    | View_evolution -> View_facts
+    | View_facts -> View_diff
+    | View_diff -> View_evolution
+  in
+  set_memory_view_mode next t
+
+let set_memory_facts_sort memory_facts_sort t =
+  {
+    t with
+    memory_facts_sort;
+    selected_fact_index = 0;
+    facts_scroll_offset = 0;
+  }
+
+let toggle_memory_facts_sort t =
+  let next =
+    match t.memory_facts_sort with
+    | Sort_recency -> Sort_retrieved
+    | Sort_retrieved -> Sort_recency
+  in
+  set_memory_facts_sort next t
+
+let open_memory_reading entry t =
+  { t with memory_reading = Some entry; memory_reading_scroll = 0 }
+
+let close_memory_reading t =
+  { t with memory_reading = None; memory_reading_scroll = 0 }
+
+let scroll_memory_reading ~max_scroll ~delta t =
+  let memory_reading_scroll =
+    Store_scroll.clamp_scroll ~max_scroll:(max 0 max_scroll)
+      (t.memory_reading_scroll + delta)
+  in
+  { t with memory_reading_scroll }
 
 let apply_board ~observed_at feed t =
   let prev_id =
@@ -516,6 +671,80 @@ let apply_memory_diff ~observed_at diff t =
 
 let apply_memory_os_internals ~observed_at internals t =
   { t with memory_os_internals = Observed.value ~observed_at internals }
+
+let apply_keeper_memory_facts ~observed_at
+    (facts : Wire_knowledge.keeper_memory_facts) t =
+  let same_keeper =
+    match Observed.to_option t.keeper_memory_facts with
+    | Some prev -> String.equal prev.keeper facts.keeper
+    | None -> false
+  in
+  {
+    t with
+    keeper_memory_facts = Observed.value ~observed_at facts;
+    selected_fact_index = if same_keeper then t.selected_fact_index else 0;
+    facts_scroll_offset = if same_keeper then t.facts_scroll_offset else 0;
+  }
+
+let apply_keeper_memory_activity ~observed_at
+    (activity : Wire_knowledge.keeper_memory_activity) t =
+  let same_keeper =
+    match Observed.to_option t.keeper_memory_activity with
+    | Some prev -> String.equal prev.keeper activity.keeper
+    | None -> false
+  in
+  {
+    t with
+    keeper_memory_activity = Observed.value ~observed_at activity;
+    selected_activity_index =
+      if same_keeper then t.selected_activity_index else 0;
+    activity_scroll_offset =
+      if same_keeper then t.activity_scroll_offset else 0;
+  }
+
+let apply_keeper_memory_health ~observed_at
+    (fleet : Wire_knowledge.keeper_memory_health_fleet) t =
+  { t with keeper_memory_health = Observed.value ~observed_at fleet }
+
+let fail_keeper_memory_facts ~keeper ~reason ~retryable ~at t =
+  let keeper_memory_facts =
+    match t.keeper_memory_facts with
+    | Observed.Value { data; _ } when String.equal data.keeper keeper ->
+        Observed.mark_stale t.keeper_memory_facts
+    | Observed.Value _
+    | Observed.Loading _
+    | Observed.Absent
+    | Observed.Unreported
+    | Observed.Failed _ ->
+        Observed.failed ~reason ~retryable ~at
+  in
+  { t with keeper_memory_facts }
+
+let fail_keeper_memory_activity ~keeper ~reason ~retryable ~at t =
+  let keeper_memory_activity =
+    match t.keeper_memory_activity with
+    | Observed.Value { data; _ } when String.equal data.keeper keeper ->
+        Observed.mark_stale t.keeper_memory_activity
+    | Observed.Value _
+    | Observed.Loading _
+    | Observed.Absent
+    | Observed.Unreported
+    | Observed.Failed _ ->
+        Observed.failed ~reason ~retryable ~at
+  in
+  { t with keeper_memory_activity }
+
+let fail_keeper_memory_health ~reason ~retryable ~at t =
+  let keeper_memory_health =
+    match t.keeper_memory_health with
+    | Observed.Value _ -> Observed.mark_stale t.keeper_memory_health
+    | Observed.Loading _
+    | Observed.Absent
+    | Observed.Unreported
+    | Observed.Failed _ ->
+        Observed.failed ~reason ~retryable ~at
+  in
+  { t with keeper_memory_health }
 
 let record_memory_act_answer ~keeper ans t =
   { t with last_memory_act_answer = Some (keeper, ans) }
@@ -649,6 +878,179 @@ let filtered_librarian_writers t =
         contains_ci ~needle:q w.keeper)
       all
 
+let memory_left_rows t =
+  let conflicts =
+    List.map (fun c -> Left_conflict c) (filtered_memory_conflicts t)
+  in
+  let writers = filtered_librarian_writers t in
+  if writers = [] then conflicts
+  else conflicts @ (Left_world_scope :: List.map (fun w -> Left_writer w) writers)
+
+let selected_memory_left_row t =
+  let rows = memory_left_rows t in
+  List.nth_opt rows (clamp_index (List.length rows) t.selected_index)
+
+let health_row_for_keeper ~keeper t =
+  match Observed.to_option t.keeper_memory_health with
+  | None -> None
+  | Some fleet ->
+      List.find_opt
+        (fun (row : Wire_knowledge.keeper_memory_health_row) ->
+          String.equal row.keeper_id keeper)
+        fleet.keepers
+
+let filtered_memory_activity_events ~keeper t =
+  match Observed.to_option t.keeper_memory_activity with
+  | Some act when String.equal act.keeper keeper ->
+      let q = String.trim t.filter_query in
+      if String.equal q "" then act.events
+      else
+        List.filter
+          (fun (ev : Wire_knowledge.memory_activity_event) ->
+            contains_ci ~needle:q ev.identity
+            || contains_ci ~needle:q
+                 (Wire_knowledge.memory_activity_kind_to_string ev.kind)
+            || (match ev.reason with
+               | Some r -> contains_ci ~needle:q r
+               | None -> false)
+            || List.exists
+                 (fun (f : Wire_knowledge.memory_activity_fact) ->
+                   contains_ci ~needle:q f.memory_id
+                   ||
+                   match f.claim with
+                   | Some c -> contains_ci ~needle:q c
+                   | None -> false)
+                 ev.before
+            || List.exists
+                 (fun (f : Wire_knowledge.memory_activity_fact) ->
+                   contains_ci ~needle:q f.memory_id
+                   ||
+                   match f.claim with
+                   | Some c -> contains_ci ~needle:q c
+                   | None -> false)
+                 ev.after)
+          act.events
+  | Some _ | None -> []
+
+let selected_activity_event_for ~keeper t =
+  let events = filtered_memory_activity_events ~keeper t in
+  List.nth_opt events (clamp_index (List.length events) t.selected_activity_index)
+
+let selected_activity_event t =
+  match t.memory_diff_keeper with
+  | Some kp -> selected_activity_event_for ~keeper:kp t
+  | None -> (
+      match Observed.to_option t.keeper_memory_activity with
+      | Some act -> selected_activity_event_for ~keeper:act.keeper t
+      | None -> None)
+
+let fact_retrieval_sort_key (f : Wire_knowledge.keeper_ordinary_fact) =
+  match f.events.retrieval with
+  | Wire_knowledge.Never_retrieved -> (0, 0, f.last_seen_unix)
+  | Wire_knowledge.Retrieved { count; distinct_days; last_at_unix } ->
+      (count, distinct_days, last_at_unix)
+
+let filtered_memory_fact_rows ~keeper t =
+  match Observed.to_option t.keeper_memory_facts with
+  | Some mf when String.equal mf.keeper keeper ->
+      let q = String.trim t.filter_query in
+      let matches_text s = String.equal q "" || contains_ci ~needle:q s in
+      let ord_rows =
+        match mf.ordinary with
+        | Wire_knowledge.Memory_store_present ord ->
+            let filtered =
+              List.filter
+                (fun (f : Wire_knowledge.keeper_ordinary_fact) ->
+                  matches_text f.claim || matches_text f.memory_id
+                  || matches_text
+                       (Wire_knowledge.memory_fact_category_to_string f.category)
+                  || matches_text
+                       (Wire_knowledge.memory_fact_origin_to_string f.origin))
+                ord.facts
+            in
+            let sorted =
+              match t.memory_facts_sort with
+              | Sort_recency ->
+                  List.stable_sort
+                    (fun (a : Wire_knowledge.keeper_ordinary_fact)
+                         (b : Wire_knowledge.keeper_ordinary_fact) ->
+                      let c = Float.compare b.last_seen_unix a.last_seen_unix in
+                      if c <> 0 then c
+                      else Float.compare b.first_seen_unix a.first_seen_unix)
+                    filtered
+              | Sort_retrieved ->
+                  List.stable_sort
+                    (fun (a : Wire_knowledge.keeper_ordinary_fact)
+                         (b : Wire_knowledge.keeper_ordinary_fact) ->
+                      let ca, da, ta = fact_retrieval_sort_key a in
+                      let cb, db, tb = fact_retrieval_sort_key b in
+                      if cb <> ca then Int.compare cb ca
+                      else if db <> da then Int.compare db da
+                      else Float.compare tb ta)
+                    filtered
+            in
+            List.map
+              (fun fact -> Fact_ordinary { revision = ord.revision; fact })
+              sorted
+        | Wire_knowledge.Memory_store_absent
+        | Wire_knowledge.Memory_store_read_error _ ->
+            []
+      in
+      let src_rows =
+        match mf.source_bound with
+        | Wire_knowledge.Memory_store_present src ->
+            let fs =
+              List.filter_map
+                (fun (sf : Wire_knowledge.keeper_source_fact) ->
+                  if matches_text sf.claim || matches_text sf.path then
+                    Some (Fact_source sf)
+                  else None)
+                src.facts
+            in
+            let invs =
+              List.filter_map
+                (fun (inv : Wire_knowledge.keeper_source_invalidation) ->
+                  if
+                    matches_text inv.source_path
+                    || matches_text
+                         (Wire_knowledge.source_invalidation_reason_to_string
+                            inv.reason)
+                  then Some (Fact_source_invalidation inv)
+                  else None)
+                src.invalidations
+            in
+            fs @ invs
+        | Wire_knowledge.Memory_store_absent
+        | Wire_knowledge.Memory_store_read_error _ ->
+            []
+      in
+      ord_rows @ src_rows
+  | Some _ | None -> []
+
+let selected_memory_fact_row ~keeper t =
+  let rows = filtered_memory_fact_rows ~keeper t in
+  List.nth_opt rows (clamp_index (List.length rows) t.selected_fact_index)
+
+let move_memory_activity ~keeper ?viewport_rows ~delta t =
+  let len = List.length (filtered_memory_activity_events ~keeper t) in
+  let selected_activity_index =
+    clamp_index len (t.selected_activity_index + delta)
+  in
+  let activity_scroll_offset =
+    Store_scroll.adjust_scroll ?viewport_rows ~scroll:t.activity_scroll_offset
+      selected_activity_index
+  in
+  { t with selected_activity_index; activity_scroll_offset }
+
+let move_memory_facts ~keeper ?viewport_rows ~delta t =
+  let len = List.length (filtered_memory_fact_rows ~keeper t) in
+  let selected_fact_index = clamp_index len (t.selected_fact_index + delta) in
+  let facts_scroll_offset =
+    Store_scroll.adjust_scroll ?viewport_rows ~scroll:t.facts_scroll_offset
+      selected_fact_index
+  in
+  { t with selected_fact_index; facts_scroll_offset }
+
 let hottest_signal_threads t =
   match Observed.to_option t.board with
   | None -> []
@@ -674,15 +1076,6 @@ let move_pulse_thread ?viewport_rows:_ ~delta t =
   let len = List.length (hottest_signal_threads t) in
   let pulse_thread_index = clamp_index len (t.pulse_thread_index + delta) in
   { t with pulse_thread_index }
-
-type memory_diff_item =
-  | Keeper_added of Wire_knowledge.memory_fact_entry
-  | Keeper_updated of Wire_knowledge.memory_updated_fact
-  | Keeper_retracted of Wire_knowledge.memory_retracted_fact
-  | Keeper_invalidated of Wire_knowledge.memory_invalidated_fact
-  | World_added of Wire_knowledge.world_change_entry
-  | World_updated of Wire_knowledge.world_updated_entry
-  | World_retracted of Wire_knowledge.world_change_entry
 
 let filtered_memory_diff_items t =
   match Observed.to_option t.memory_diff with
@@ -768,6 +1161,15 @@ let filtered_memory_diff_items t =
 
 let memory_diff_entry_count t = List.length (filtered_memory_diff_items t)
 
+let selected_memory_diff_item t =
+  let items = filtered_memory_diff_items t in
+  List.nth_opt items (clamp_index (List.length items) t.selected_diff_index)
+
+let move_memory_diff_cursor ~delta t =
+  let len = memory_diff_entry_count t in
+  let selected_diff_index = clamp_index len (t.selected_diff_index + delta) in
+  { t with selected_diff_index }
+
 let json_has_kv_summary = function
   | `Assoc (_ :: _) -> true
   | `Assoc [] | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _
@@ -825,10 +1227,7 @@ let active_list_len t =
       match t.wiki_artifacts_submode with
       | `Wiki -> List.length (wiki_display_pages t)
       | `Artifacts -> List.length (artifacts_filtered t))
-  | Nav.Knowledge_memory ->
-      let conflicts = filtered_memory_conflicts t in
-      if conflicts <> [] then List.length conflicts
-      else List.length (filtered_librarian_writers t)
+  | Nav.Knowledge_memory -> List.length (memory_left_rows t)
 
 let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t =
   match t.active_tab with
@@ -891,21 +1290,36 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
         { t with selected_index; scroll_offset; detail_scroll_offset }
   | Nav.Knowledge_memory ->
       if pane_index = 1 then
-        let max_scroll =
-          match max_detail_scroll with
-          | Some ms -> max 0 ms
-          | None ->
-              let vis =
-                max 1
-                  (Option.value viewport_rows
-                     ~default:Store_scroll.default_viewport_rows)
+        if Option.is_some t.memory_reading then
+          let max_scroll = Option.value max_detail_scroll ~default:200 in
+          scroll_memory_reading ~max_scroll ~delta t
+        else
+          match t.memory_diff_keeper, t.memory_view_mode with
+          | Some kp, View_evolution ->
+              move_memory_activity ~keeper:kp ?viewport_rows ~delta t
+          | Some kp, View_facts ->
+              move_memory_facts ~keeper:kp ?viewport_rows ~delta t
+          | Some _, View_diff | None, (View_evolution | View_facts | View_diff) ->
+              let max_scroll =
+                match max_detail_scroll with
+                | Some ms -> max 0 ms
+                | None ->
+                    let vis =
+                      max 1
+                        (Option.value viewport_rows
+                           ~default:Store_scroll.default_viewport_rows)
+                    in
+                    max 0 (memory_diff_line_count t - vis)
               in
-              max 0 (memory_diff_line_count t - vis)
-        in
-        let diff_scroll_offset =
-          Store_scroll.clamp_scroll ~max_scroll (t.diff_scroll_offset + delta)
-        in
-        { t with diff_scroll_offset }
+              let diff_scroll_offset =
+                Store_scroll.clamp_scroll ~max_scroll
+                  (t.diff_scroll_offset + delta)
+              in
+              let selected_diff_index =
+                clamp_index (memory_diff_entry_count t)
+                  (t.selected_diff_index + delta)
+              in
+              { t with diff_scroll_offset; selected_diff_index }
       else
         let len = active_list_len t in
         let selected_index = clamp_index len (t.selected_index + delta) in
@@ -913,7 +1327,11 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
           Store_scroll.adjust_scroll ?viewport_rows ~scroll:t.scroll_offset
             selected_index
         in
-        { t with selected_index; scroll_offset }
+        let moved = { t with selected_index; scroll_offset } in
+        match selected_memory_left_row moved with
+        | Some Left_world_scope -> set_memory_diff_keeper None moved
+        | Some (Left_writer w) -> set_memory_diff_keeper (Some w.keeper) moved
+        | Some (Left_conflict _) | None -> moved
 
 let set_filter filter_query t =
   {
@@ -923,6 +1341,11 @@ let set_filter filter_query t =
     scroll_offset = 0;
     diff_scroll_offset = 0;
     detail_scroll_offset = 0;
+    selected_fact_index = 0;
+    facts_scroll_offset = 0;
+    selected_activity_index = 0;
+    activity_scroll_offset = 0;
+    selected_diff_index = 0;
   }
 
 let mark_stale_all t =
@@ -939,4 +1362,7 @@ let mark_stale_all t =
     world_memory = Observed.mark_stale t.world_memory;
     memory_diff = Observed.mark_stale t.memory_diff;
     memory_os_internals = Observed.mark_stale t.memory_os_internals;
+    keeper_memory_facts = Observed.mark_stale t.keeper_memory_facts;
+    keeper_memory_activity = Observed.mark_stale t.keeper_memory_activity;
+    keeper_memory_health = Observed.mark_stale t.keeper_memory_health;
   }

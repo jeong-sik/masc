@@ -158,6 +158,9 @@ let has_get_health cmds =
               | Cmd.Get_world_memory
               | Cmd.Get_memory_diff _
               | Cmd.Get_keeper_memory_os_internals _
+              | Cmd.Get_keeper_memory_facts _
+              | Cmd.Get_keeper_memory_activity _
+              | Cmd.Get_keeper_memory_health
               | Cmd.Get_provider_usage _
               | Cmd.Get_keeper_costs _
               | Cmd.Get_efficiency _
@@ -6249,6 +6252,351 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
   Alcotest.(check int) "[X] does NOT dismiss chat errors when embedded tab is Keeper_memory" 1
     (List.length (Drafts.pending_txs_for_keeper ~keeper:"alpha-leader" m_emb_mem_x.drafts))
 
+let test_memory_explorer_store_fetches_reading_and_sse () =
+  let t0 = Clock.Mono.of_ns 5_000_000_000L in
+  let get_paths cmds =
+    List.filter_map
+      (function
+        | Cmd.Http_get { req; _ } -> Some (Cmd.get_request_path req)
+        | Cmd.Batch _
+        | Cmd.Http_post _
+        | Cmd.Http_put _
+        | Cmd.Http_post_stream _
+        | Cmd.Sync_streams _
+        | Cmd.Update_workspace_guard _
+        | Cmd.Voice_cmd _
+        | Cmd.Copy_clipboard _
+        | Cmd.Open_external_url _
+        | Cmd.Open_editor_escape_hatch _
+        | Cmd.Start_local_server
+        | Cmd.Restart_tui
+        | Cmd.Quit _ ->
+            None)
+      (Cmd.flatten cmds)
+  in
+  let has_path p paths = List.exists (String.equal p) paths in
+  (* 1. Fix 3 -> 기억 dead set_memory_diff_keeper bug: selecting writer in pane 0 scopes + fetches all 5 endpoints *)
+  let wm : Wire_knowledge.world_memory =
+    {
+      ledger_state = Wire_knowledge.World_ledger_available;
+      ledger_sha256 = Some "sha-wm";
+      claims_count = 3;
+      facts_count = 10;
+      conflicts_count = 0;
+      excluded_count = 0;
+      claims = [];
+      active_conflicts = [];
+      briefing =
+        {
+          status = Wire_knowledge.Briefing_current;
+          text = Some "world ok";
+          source_ids_count = 1;
+          error = None;
+          building_pass = None;
+        };
+      librarian_writers =
+        Wire_knowledge.Writers_running
+          {
+            error_count = 0;
+            warn_count = 0;
+            keepers =
+              [
+                {
+                  keeper = "alpha";
+                  state = Wire_knowledge.Writer_idle;
+                  available_act_tokens = [];
+                  snapshot_file = None;
+                };
+                {
+                  keeper = "beta";
+                  state = Wire_knowledge.Writer_open;
+                  available_act_tokens = [ "resume" ];
+                  snapshot_file = None;
+                };
+              ];
+          };
+      ordinary_absence_detail = None;
+    }
+  in
+  let m0 =
+    let base = Model.initial ~cols:140 ~rows:40 () in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Knowledge; pane_index = 0 };
+      knowledge =
+        base.knowledge
+        |> Knowledge_store.set_tab Nav.Knowledge_memory
+        |> Knowledge_store.apply_world_memory ~observed_at:t0 wm;
+    }
+  in
+  Alcotest.(check (option string)) "initial scope is World (None)" None
+    m0.knowledge.memory_diff_keeper;
+  (* Move Down from World Memory (idx 0) -> writer alpha (idx 1) *)
+  let m1, cmds1 = Update.step ~now:t0 m0 (Msg.Key_event (char_key "j")) in
+  Alcotest.(check (option string)) "Down onto alpha sets memory_diff_keeper"
+    (Some "alpha") m1.knowledge.memory_diff_keeper;
+  let paths1 = get_paths cmds1 in
+  Alcotest.(check bool) "fetches alpha memory-facts" true
+    (has_path "/api/v1/keepers/alpha/memory-facts" paths1);
+  Alcotest.(check bool) "fetches alpha memory-journal?activity=1&limit=50" true
+    (has_path "/api/v1/keepers/alpha/memory-journal?activity=1&limit=50" paths1);
+  Alcotest.(check bool) "fetches alpha memory-diff" true
+    (has_path "/api/v1/memory/diff?scope=keeper&keeper=alpha&window=24h" paths1);
+  Alcotest.(check bool) "fetches alpha memory-os-internals" true
+    (has_path "/api/v1/keepers/alpha/memory-os-internals" paths1);
+  Alcotest.(check bool) "fetches fleet keeper-memory-health" true
+    (has_path "/api/v1/dashboard/keeper-memory-health" paths1);
+  (* Move Up back to World Memory (idx 0) resets memory_diff_keeper to None *)
+  let m_world, cmds_w = Update.step ~now:t0 m1 (Msg.Key_event (char_key "k")) in
+  Alcotest.(check (option string)) "Up back to idx 0 restores World scope" None
+    m_world.knowledge.memory_diff_keeper;
+  Alcotest.(check bool) "fetches world memory diff" true
+    (has_path "/api/v1/memory/diff?scope=world&window=24h" (get_paths cmds_w));
+  (* Move Down onto alpha and press Enter -> scopes + focuses pane 1 *)
+  let m_enter_pane, _ =
+    Update.step ~now:t0 m1
+      (Msg.Key_event { Keymap.Input.key = Keymap.Input.Enter; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check int) "Enter on writer row focuses pane 1" 1
+    m_enter_pane.nav.pane_index;
+  Alcotest.(check (option string)) "Enter keeps alpha scope" (Some "alpha")
+    m_enter_pane.knowledge.memory_diff_keeper;
+
+  (* 2. Populate activity + facts + health; verify PR 2 selected_activity_event hook, modes, sort, and reading *)
+  let ev1 : Wire_knowledge.memory_activity_event =
+    {
+      identity = "ev-1";
+      recorded_at_unix = 1795252001.0;
+      revision = 4;
+      kind = Wire_knowledge.Activity_created;
+      before = [];
+      after = [ { memory_id = "m-1"; claim = Some "First claim" } ];
+      reason = None;
+    }
+  in
+  let ev2 : Wire_knowledge.memory_activity_event =
+    {
+      identity = "ev-2";
+      recorded_at_unix = 1795252002.0;
+      revision = 5;
+      kind = Wire_knowledge.Activity_revised;
+      before = [ { memory_id = "m-1"; claim = Some "First claim" } ];
+      after = [ { memory_id = "m-2"; claim = Some "Revised claim" } ];
+      reason = Some "Updated after test";
+    }
+  in
+  let act_data : Wire_knowledge.keeper_memory_activity =
+    {
+      keeper = "alpha";
+      limit = 50;
+      journal_lines = 2;
+      undecodable_lines = 0;
+      events = [ ev1; ev2 ];
+      notes = [];
+    }
+  in
+  let f_recent_low : Wire_knowledge.keeper_ordinary_fact =
+    {
+      memory_id = "f-rec";
+      claim = "Recent but unretrieved";
+      category = Wire_knowledge.Cat_fact;
+      origin = Wire_knowledge.Origin_authored;
+      basis = Wire_knowledge.Basis_observed;
+      first_seen_unix = 1795251000.0;
+      last_seen_unix = 1795252000.0;
+      events = { retrieval = Wire_knowledge.Never_retrieved; retracted_count = 0; revised_from = [] };
+    }
+  in
+  let f_older_hot : Wire_knowledge.keeper_ordinary_fact =
+    {
+      memory_id = "f-hot";
+      claim = "Older but retrieved 9x";
+      category = Wire_knowledge.Cat_lesson;
+      origin = Wire_knowledge.Origin_authored;
+      basis = Wire_knowledge.Basis_observed;
+      first_seen_unix = 1795200000.0;
+      last_seen_unix = 1795210000.0;
+      events =
+        {
+          retrieval =
+            Wire_knowledge.Retrieved
+              { count = 9; distinct_days = 4; last_at_unix = 1795251900.0 };
+          retracted_count = 0;
+          revised_from = [ "f-old" ];
+        };
+    }
+  in
+  let facts_data : Wire_knowledge.keeper_memory_facts =
+    {
+      keeper = "alpha";
+      ordinary =
+        Wire_knowledge.Memory_store_present
+          {
+            revision = 5;
+            snapshot_sha256 = "sha5";
+            updated_at_unix = 1795252000.0;
+            facts = [ f_recent_low; f_older_hot ];
+            support_invalidations = [];
+          };
+      source_bound = Wire_knowledge.Memory_store_absent;
+      events_unreadable_lines = 0;
+      events_read_error = None;
+    }
+  in
+  let m_loaded, _ =
+    Update.step ~now:t0 m_enter_pane
+      (Msg.Http_reply
+         {
+           epoch = m_enter_pane.epoch;
+           reply =
+             Msg.Reply_keeper_memory_activity
+               { keeper = "alpha"; result = Ok act_data };
+         })
+  in
+  let m_loaded, _ =
+    Update.step ~now:t0 m_loaded
+      (Msg.Http_reply
+         {
+           epoch = m_loaded.epoch;
+           reply =
+             Msg.Reply_keeper_memory_facts
+               { keeper = "alpha"; result = Ok facts_data };
+         })
+  in
+  (* PR 2 hook selected_activity_event tracks j/k in pane 1 Evolution *)
+  Alcotest.(check (option string)) "selected_activity_event initially ev-1"
+    (Some "ev-1")
+    (Option.map (fun (e : Wire_knowledge.memory_activity_event) -> e.identity)
+       (Knowledge_store.selected_activity_event m_loaded.knowledge));
+  let m_ev2, _ = Update.step ~now:t0 m_loaded (Msg.Key_event (char_key "j")) in
+  Alcotest.(check (option string)) "selected_activity_event moves to ev-2"
+    (Some "ev-2")
+    (Option.map (fun (e : Wire_knowledge.memory_activity_event) -> e.identity)
+       (Knowledge_store.selected_activity_event m_ev2.knowledge));
+  (* Enter opens full reading without pushing dive_stack; Esc closes reading *)
+  let m_read, _ =
+    Update.step ~now:t0 m_ev2
+      (Msg.Key_event { Keymap.Input.key = Keymap.Input.Enter; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check bool) "Enter opens Reading_activity" true
+    (match m_read.knowledge.memory_reading with
+    | Some (Knowledge_store.Reading_activity { event; _ }) ->
+        String.equal event.identity "ev-2"
+    | _ -> false);
+  Alcotest.(check int) "dive_stack not deepened" 0 (List.length m_read.nav.dive_stack);
+  let m_read_scr, _ = Update.step ~now:t0 m_read (Msg.Key_event (char_key "j")) in
+  Alcotest.(check int) "j scrolls memory_reading_scroll" 1
+    m_read_scr.knowledge.memory_reading_scroll;
+  let m_closed, _ =
+    Update.step ~now:t0 m_read_scr
+      (Msg.Key_event { Keymap.Input.key = Keymap.Input.Escape; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check bool) "Esc closes memory_reading" true
+    (Option.is_none m_closed.knowledge.memory_reading);
+
+  (* Mode switch (t, f, d, e) & Facts sort toggle (s) *)
+  let m_facts, _ = Update.step ~now:t0 m_closed (Msg.Key_event (char_key "f")) in
+  Alcotest.(check bool) "f switches to View_facts" true
+    (Knowledge_store.equal_memory_view_mode m_facts.knowledge.memory_view_mode
+       Knowledge_store.View_facts);
+  let first_id st =
+    match Knowledge_store.filtered_memory_fact_rows ~keeper:"alpha" st with
+    | Knowledge_store.Fact_ordinary { fact; _ } :: _ -> Some fact.memory_id
+    | _ -> None
+  in
+  Alcotest.(check (option string)) "Recency sort puts f-rec first" (Some "f-rec")
+    (first_id m_facts.knowledge);
+  let m_facts_sorted, _ = Update.step ~now:t0 m_facts (Msg.Key_event (char_key "s")) in
+  Alcotest.(check (option string)) "s toggles Retrieved sort putting f-hot first"
+    (Some "f-hot") (first_id m_facts_sorted.knowledge);
+  let m_diff_mode, _ = Update.step ~now:t0 m_facts_sorted (Msg.Key_event (char_key "t")) in
+  Alcotest.(check bool) "t cycles Facts -> Diff" true
+    (Knowledge_store.equal_memory_view_mode m_diff_mode.knowledge.memory_view_mode
+       Knowledge_store.View_diff);
+
+  (* 3. Separate Observed.t isolation: failed health fetch NEVER overwrites facts/activity *)
+  let m_health_err, _ =
+    Update.step ~now:t0 m_loaded
+      (Msg.Http_reply
+         {
+           epoch = m_loaded.epoch;
+           reply =
+             Msg.Reply_keeper_memory_health
+               (Error (Msg.Transport Health.Timeout));
+         })
+  in
+  Alcotest.(check bool) "health becomes Failed" true
+    (match m_health_err.knowledge.keeper_memory_health with
+    | Observed.Failed { retryable = true; _ } -> true
+    | _ -> false);
+  Alcotest.(check bool) "facts stay Value" true
+    (Observed.is_value m_health_err.knowledge.keeper_memory_facts);
+  Alcotest.(check bool) "activity stays Value" true
+    (Observed.is_value m_health_err.knowledge.keeper_memory_activity);
+
+  (* 4. SSE invalidation: Keeper_memory_journal_appended & Dataset_memory_health refetch scoped keeper *)
+  let m_sse1, cmds_sse1 =
+    Update.step ~now:t0 m_loaded
+      (Msg.Sse_event
+         {
+           epoch = m_loaded.epoch;
+           event =
+             Msg.Sse_observer_delivery
+               {
+                 cursor = Some 10;
+                 decoded =
+                   Wire_observer.Event
+                     (Wire_observer.Keeper_memory_journal_appended
+                        { keeper = "alpha"; at_unix = 1795252050.0 });
+               };
+         })
+  in
+  Alcotest.(check bool) "activity marked stale on journal append" true
+    (Observed.is_stale m_sse1.knowledge.keeper_memory_activity);
+  let sse_paths = get_paths cmds_sse1 in
+  Alcotest.(check bool) "journal append refetches activity" true
+    (has_path "/api/v1/keepers/alpha/memory-journal?activity=1&limit=50" sse_paths);
+  Alcotest.(check bool) "journal append refetches facts" true
+    (has_path "/api/v1/keepers/alpha/memory-facts" sse_paths);
+  Alcotest.(check bool) "journal append refetches health" true
+    (has_path "/api/v1/dashboard/keeper-memory-health" sse_paths);
+
+  (* 5. Dive_keeper Keeper_memory: Enter opens reading without deepening dive_stack; Esc closes reading first *)
+  let m_dive =
+    {
+      m_loaded with
+      nav =
+        {
+          m_loaded.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory } ];
+        };
+    }
+  in
+  let m_dive_read, _ =
+    Update.step ~now:t0 m_dive
+      (Msg.Key_event { Keymap.Input.key = Keymap.Input.Enter; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check int) "Enter in Keeper_memory dive keeps dive_stack depth=1" 1
+    (List.length m_dive_read.nav.dive_stack);
+  Alcotest.(check bool) "Enter in Keeper_memory dive opens full reading" true
+    (Option.is_some m_dive_read.knowledge.memory_reading);
+  let m_dive_esc1, _ =
+    Update.step ~now:t0 m_dive_read
+      (Msg.Key_event { Keymap.Input.key = Keymap.Input.Escape; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check bool) "First Esc closes reading" true
+    (Option.is_none m_dive_esc1.knowledge.memory_reading);
+  Alcotest.(check int) "First Esc keeps dive_stack depth=1" 1
+    (List.length m_dive_esc1.nav.dive_stack);
+  let m_dive_esc2, _ =
+    Update.step ~now:t0 m_dive_esc1
+      (Msg.Key_event { Keymap.Input.key = Keymap.Input.Escape; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check int) "Second Esc pops dive_stack" 0
+    (List.length m_dive_esc2.nav.dive_stack)
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -6332,5 +6680,7 @@ let () =
             `Quick test_p2_schedules_attention_scroll_and_filter_guard;
           Alcotest.test_case "AG-UI chat stream lifecycle, ownership, provenance dedup & SSOT phase (15 bugs)"
             `Quick test_agui_chat_stream_lifecycle_15_bugs;
+          Alcotest.test_case "Memory explorer: set_memory_diff_keeper, 5 fetches, modes/sort, reading, Observed isolation & SSE"
+            `Quick test_memory_explorer_store_fetches_reading_and_sse;
         ] );
     ]

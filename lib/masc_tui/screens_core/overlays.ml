@@ -3209,6 +3209,8 @@ let compact_help_group ~lang (grp : Keymap.help_group) : Keymap.help_group =
         | Keymap.Create_new
         | Keymap.Refresh
         | Keymap.Toggle_zoom
+        | Keymap.Cycle_memory_view
+        | Keymap.Toggle_memory_sort
         | Keymap.Quit_app ->
             Some e)
       grp.entries

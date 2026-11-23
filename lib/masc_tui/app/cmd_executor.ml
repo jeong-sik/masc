@@ -717,6 +717,35 @@ let execute_get t ~epoch req =
                    ~decode:Wire_knowledge.decode_memory_os_internals)
             in
             Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_memory_facts { keeper } ->
+            let reply =
+              Msg.Reply_keeper_memory_facts
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_knowledge.decode_keeper_memory_facts;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_memory_activity { keeper; _ } ->
+            let reply =
+              Msg.Reply_keeper_memory_activity
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_knowledge.decode_keeper_memory_activity;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_memory_health ->
+            let reply =
+              Msg.Reply_keeper_memory_health
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_knowledge.decode_keeper_memory_health_fleet)
+            in
+            Msg.Http_reply { epoch; reply }
         | Cmd.Get_provider_usage _ ->
             let reply =
               Msg.Reply_provider_usage_history

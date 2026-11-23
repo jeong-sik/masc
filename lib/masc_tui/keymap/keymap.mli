@@ -64,6 +64,8 @@ type action =
   | Copy_selected
   | Open_external
   | Toggle_zoom
+  | Cycle_memory_view
+  | Toggle_memory_sort
   | Quit_app
 
 type scope =

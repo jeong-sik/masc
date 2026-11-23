@@ -54,7 +54,8 @@ let test_schedule_wake_roundtrip () =
       ]
   in
   match
-    Wire_work.decode_schedules_snapshot (`Assoc [ ("requests", `List [ row ]) ])
+    Wire_work.decode_schedules_snapshot
+      (`Assoc [ ("status", `String "ok"); ("requests", `List [ row ]) ])
   with
   | Error e -> Alcotest.fail ("schedules decode failed: " ^ e)
   | Ok ([ (r : Wire_work.schedule_row) ], _) -> (
@@ -382,6 +383,34 @@ let test_lane_run_statuses_roundtrip () =
             "a task review names its task" (Some "task-9") r.subject_id
       | None -> Alcotest.fail "task review row missing"
 
+(* GET /api/v1/dashboard/gate: Dashboard_gate.dashboard_json sends a null
+   approval_queue beside the unavailable state when the queue store cannot be
+   read. The TUI must report the failure instead of an empty queue. *)
+let test_gate_queue_state_roundtrip () =
+  let module Queue_result = Masc.Keeper_approval_queue_result in
+  let gate ~queue ~state =
+    `Assoc [ ("approval_queue", queue); ("approval_queue_state", state) ]
+  in
+  (match
+     Wire_work.decode_gate_pending_list
+       (gate ~queue:(`List []) ~state:Queue_result.approval_queue_ready_state_json)
+   with
+  | Ok [] -> ()
+  | Ok _ -> Alcotest.fail "ready empty queue decodes to no rows"
+  | Error e -> Alcotest.fail ("ready gate decode failed: " ^ e));
+  match
+    Wire_work.decode_gate_pending_list
+      (gate ~queue:`Null
+         ~state:
+           (Queue_result.approval_queue_unavailable_state_json
+              { Queue_result.path = "/srv/masc/.masc/approvals"; reason = "corrupt" }))
+  with
+  | Error reason ->
+      Alcotest.(check bool) "failure names the server's title" true
+        (String.starts_with
+           ~prefix:Queue_result.approval_queue_unavailable_title reason)
+  | Ok _ -> Alcotest.fail "an unavailable queue must not decode as empty"
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -391,6 +420,8 @@ let () =
         [
           Alcotest.test_case "schedule wake record -> decode_schedules_snapshot"
             `Quick test_schedule_wake_roundtrip;
+          Alcotest.test_case "approval queue state -> decode_gate_pending_list"
+            `Quick test_gate_queue_state_roundtrip;
         ] );
       ( "runtime",
         [

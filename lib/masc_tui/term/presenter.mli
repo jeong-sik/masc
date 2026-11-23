@@ -11,6 +11,10 @@ type capabilities = {
   osc8_hyperlinks : bool;
   osc52_clipboard : bool;
   kitty_keyboard : bool;
+  graphics : Probe.graphics_reply option;
+      (** Observed Kitty graphics probe reply, or [None] when unreported. *)
+  cell_pixels : (int * int) option;
+      (** Observed CSI 16t terminal cell dimensions [(width_px, height_px)]. *)
 }
 
 type cursor_shape =
@@ -36,6 +40,10 @@ type diff_stats = {
 type t
 
 val default_capabilities : capabilities
+val apply_probe_observation : Probe.observation -> capabilities -> capabilities
+(** Merge observed {!Probe.observation} graphics and cell pixel dimensions into
+    [capabilities] without discarding previously observed values. *)
+
 val hidden_cursor : cursor
 
 val create : cols:int -> rows:int -> capabilities:capabilities -> t

@@ -24,6 +24,47 @@ val drain_budget_ns : int64
 val voice_tick_interval_ns : int64
 (** Voice recording elapsed-time tick cadence: [100_000_000L] ns (100 ms / 10 Hz). *)
 
+val probe_timeout_s : float
+(** Bounded non-blocking startup terminal probe deadline ([0.15] seconds) so
+    non-responding terminals never hang TUI startup. *)
+
+val palette_requested_of_env : getenv:(string -> string option) -> bool
+(** Decide whether to query OSC 10/11/4 palette at startup: returns [false] when
+    [TERM] is absent, empty, or case-insensitively ["dumb"] (regardless of
+    [MASC_TUI_FORCE_COLOR]), or when [NO_COLOR] is non-empty without
+    [MASC_TUI_FORCE_COLOR=1]. *)
+
+val collect_startup_probe :
+  ?timeout_s:float ->
+  ?max_bytes:int ->
+  clock:_ Eio.Time.clock ->
+  fd:Unix.file_descr ->
+  palette_requested:bool ->
+  unit ->
+  Probe.decoder
+(** Collect startup terminal replies (CSI 16t cell pixels, optional OSC 10/11/4
+    palette, Kitty APC G graphics) from [fd] within [timeout_s] without blocking
+    or discarding early user keystrokes. Callers should pass an [O_NONBLOCK]
+    descriptor; reads are additionally guarded with zero-timeout [Unix.select]
+    against spurious wakeups, and [Unix_error] on [await_readable]/[read]
+    returns the accumulated decoder cleanly while preserving
+    [Eio.Cancel.Cancelled]. Stops immediately on [Input_ready] or
+    [Replies_ready] and returns the live {!Probe.decoder} with intact replay
+    and pending state for handoff to the input reader. *)
+
+val apply_probe_observation :
+  presenter:Presenter.t -> Probe.observation -> unit
+(** Publish [obs] to {!Probe.set_current_observation}, update
+    {!Palette.set_current} when a palette was observed, and update [presenter]'s
+    {!Presenter.capabilities} with observed [graphics] and [cell_pixels]. *)
+
+val apply_terminal_reply :
+  probe_decoder:Probe.decoder ->
+  Input_decoder.terminal_reply ->
+  Probe.observation option
+(** Feed a late {!Input_decoder.terminal_reply} back into the owning
+    [probe_decoder]. Returns [Some obs] iff the observed capabilities changed. *)
+
 val is_ctrl_c : Input_decoder.key_event -> bool
 (** [true] iff [ev] represents [Ctrl+C] (e.g. Kitty [CSI u] [\x1b[99;5u]] or
     raw control byte). *)
@@ -46,11 +87,13 @@ val dispatch_decoded_events :
   signals:Signals.t ->
   bell:Wake_bell.t ->
   input_queue:Msg.t Eio.Stream.t ->
+  ?on_reply:(Input_decoder.terminal_reply -> unit) ->
   Input_decoder.event list ->
   unit
 (** Route decoded terminal input events into {!Signals}, {!Wake_bell}, and
     [input_queue]. [Ctrl+C] arms/confirms interrupt; ordinary keys, bracketed
-    pastes, and mouse events withdraw an armed interrupt. *)
+    pastes, and mouse events withdraw an armed interrupt. Late terminal probe
+    replies invoke [on_reply] when supplied. *)
 
 val should_emit_tick :
   now_ns:int64 ->

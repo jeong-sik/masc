@@ -9,6 +9,129 @@ type render_frame =
 
 let drain_budget_ns = 3_000_000L
 let voice_tick_interval_ns = 100_000_000L
+let probe_timeout_s = 0.15
+
+let palette_requested_of_env ~getenv =
+  let term_usable =
+    match getenv "TERM" with
+    | Some term ->
+        let trimmed = String.trim term in
+        String.length trimmed > 0
+        && not (String.equal (String.lowercase_ascii trimmed) "dumb")
+    | None -> false
+  in
+  if not term_usable then false
+  else
+    match getenv "MASC_TUI_FORCE_COLOR" with
+    | Some "1" -> true
+    | Some _ | None -> (
+        match getenv "NO_COLOR" with
+        | Some value when String.length value > 0 -> false
+        | Some _ | None -> true)
+
+let rec fd_immediately_readable fd =
+  match Unix.select [ fd ] [] [] 0.0 with
+  | _ :: _, _, _ -> `Ready
+  | [], _, _ -> `Not_ready
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> fd_immediately_readable fd
+  | exception Unix.Unix_error _ -> `Error
+
+let collect_startup_probe ?(timeout_s = probe_timeout_s)
+    ?(max_bytes = Probe.max_bytes) ~clock ~fd ~palette_requested () =
+  let decoder = Probe.create ~palette_requested in
+  let timeout_s =
+    if Float.is_finite timeout_s && timeout_s > 0.0 then timeout_s else 0.0
+  in
+  let deadline = Clock.Mono.after_s (Clock.Mono.now ()) timeout_s in
+  let buf = Bytes.create 256 in
+  let bytes_read = ref 0 in
+  let read_once () =
+    let room = Int.min (Bytes.length buf) (max_bytes - !bytes_read) in
+    if room <= 0 then `Stop
+    else
+      match Unix.read fd buf 0 room with
+      | 0 -> `Stop
+      | n ->
+          bytes_read := !bytes_read + n;
+          for i = 0 to n - 1 do
+            Probe.feed decoder (Bytes.get buf i)
+          done;
+          `Continue
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> `Continue
+      | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
+          `Continue
+      | exception Unix.Unix_error _ -> `Stop
+  in
+  let rec loop () =
+    if !bytes_read >= max_bytes then ()
+    else
+      match Probe.startup_status decoder with
+      | Probe.Input_ready | Probe.Replies_ready -> ()
+      | Probe.Awaiting_replies ->
+          (* Validate fd and drain already-buffered bytes before registering
+             with Eio's poll loop (prevents Eio_posix POLLNVAL assertions on
+             closed/invalid fds). *)
+          (match fd_immediately_readable fd with
+           | `Error -> ()
+           | `Ready -> (
+               match read_once () with
+               | `Stop -> ()
+               | `Continue -> loop ())
+           | `Not_ready ->
+               let remaining_s =
+                 Clock.Mono.seconds_since deadline ~since:(Clock.Mono.now ())
+               in
+               if remaining_s <= 0.0 then ()
+               else
+                 let ready =
+                   Eio.Fiber.first
+                     (fun () ->
+                       match Eio_unix.await_readable fd with
+                       | () -> `Readable
+                       | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
+                       | exception Unix.Unix_error _ -> `Error)
+                     (fun () ->
+                       Eio.Time.sleep clock remaining_s;
+                       `Timeout)
+                 in
+                 (match ready with
+                  | `Timeout | `Error -> ()
+                  | `Readable -> (
+                      match fd_immediately_readable fd with
+                      | `Error -> ()
+                      | `Not_ready -> loop ()
+                      | `Ready -> (
+                          match read_once () with
+                          | `Stop -> ()
+                          | `Continue -> loop ()))))
+  in
+  loop ();
+  decoder
+
+let apply_probe_observation ~presenter (obs : Probe.observation) =
+  Probe.set_current_observation obs;
+  (match obs.palette with
+   | Some _ as p -> Palette.set_current p
+   | None -> ());
+  let caps =
+    Presenter.apply_probe_observation obs (Presenter.capabilities presenter)
+  in
+  Presenter.set_capabilities presenter caps
+
+let apply_terminal_reply ~probe_decoder
+    (reply : Input_decoder.terminal_reply) =
+  let before = Probe.observation probe_decoder in
+  (match reply with
+   | Input_decoder.Palette_reply { slot; color } ->
+       Probe.observe_palette probe_decoder slot color
+   | Input_decoder.Cell_pixels_reply { width; height } ->
+       Probe.observe_cell_pixels probe_decoder (width, height)
+   | Input_decoder.Graphics_reply body -> (
+       match Probe.parse_graphics_reply body with
+       | Some r -> Probe.observe_graphics probe_decoder r
+       | None -> ()));
+  let after = Probe.observation probe_decoder in
+  if Probe.equal_observation before after then None else Some after
 
 let local_tz_offset_sec ?(at = Unix.time ()) () =
   let lt = Unix.localtime at in
@@ -236,7 +359,7 @@ type input_reader_handle = {
   stopped : unit Eio.Promise.t;
 }
 
-let dispatch_decoded_events ~signals ~bell ~input_queue events =
+let dispatch_decoded_events ~signals ~bell ~input_queue ?on_reply events =
   let pushed = ref false in
   List.iter
     (function
@@ -255,14 +378,16 @@ let dispatch_decoded_events ~signals ~bell ~input_queue events =
           Signals.withdraw_interrupt signals;
           Eio.Stream.add input_queue (Msg.Mouse_event mev);
           pushed := true
-      | Input_decoder.Reply _
+      | Input_decoder.Reply reply ->
+          Option.iter (fun f -> f reply) on_reply
       | Input_decoder.Unknown_escape
       | Input_decoder.Invalid_utf8 ->
           ())
     events;
   if !pushed then Wake_bell.ring bell Wake_bell.Ui_bus
 
-let start_input_reader ~sw ~clock ~signals ~bell ~input_queue =
+let start_input_reader ~sw ~clock ~signals ~bell ~input_queue ?probe_decoder
+    ?on_observation () =
   Eio.Switch.check sw;
   let stop_p, stop_u = Eio.Promise.create () in
   let stopped, mark_stopped = Eio.Promise.create () in
@@ -270,7 +395,60 @@ let start_input_reader ~sw ~clock ~signals ~bell ~input_queue =
   Eio.Fiber.fork_daemon ~sw (fun () ->
       let decoder = Input_decoder.create () in
       let buf = Bytes.create 256 in
-      let emit_events = dispatch_decoded_events ~signals ~bell ~input_queue in
+      let last_obs =
+        ref
+          (match probe_decoder with
+           | Some pd -> Probe.observation pd
+           | None -> Probe.empty_observation)
+      in
+      let publish_if_changed () =
+        match probe_decoder with
+        | None -> ()
+        | Some pd ->
+            let cur = Probe.observation pd in
+            if not (Probe.equal_observation !last_obs cur) then begin
+              last_obs := cur;
+              Option.iter (fun f -> f cur) on_observation
+            end
+      in
+      let on_reply reply =
+        match probe_decoder with
+        | None -> ()
+        | Some pd ->
+            (match apply_terminal_reply ~probe_decoder:pd reply with
+             | Some obs ->
+                 last_obs := obs;
+                 Option.iter (fun f -> f obs) on_observation
+             | None -> ())
+      in
+      let emit_events =
+        dispatch_decoded_events ~signals ~bell ~input_queue ~on_reply
+      in
+      let probe_active () =
+        match probe_decoder with
+        | None -> false
+        | Some pd ->
+            (not (Probe.complete pd))
+            || Probe.has_replay pd
+            || Option.is_some (Probe.pending pd)
+      in
+      let drain_probe_replay () =
+        match probe_decoder with
+        | None -> ()
+        | Some pd ->
+            let rec drain () =
+              if Probe.has_replay pd then
+                match Probe.next pd ~next_raw:(fun () -> None) with
+                | Some ch ->
+                    emit_events (Input_decoder.feed decoder ch);
+                    drain ()
+                | None -> ()
+            in
+            drain ()
+      in
+      (* Replay any early user keystrokes buffered during startup probe
+         immediately before sleeping on stdin. *)
+      drain_probe_replay ();
       let rec loop () =
         Eio.Switch.check sw;
         if Eio.Promise.is_resolved stop_p then begin
@@ -278,8 +456,16 @@ let start_input_reader ~sw ~clock ~signals ~bell ~input_queue =
           `Stop_daemon
         end
         else
+          let pending_state =
+            match probe_decoder with
+            | Some pd when probe_active () -> (
+                match Probe.pending pd with
+                | Some _ as p -> p
+                | None -> Input_decoder.pending decoder)
+            | Some _ | None -> Input_decoder.pending decoder
+          in
           let wait_result =
-            match Input_decoder.pending decoder with
+            match pending_state with
             | None ->
                 Eio.Fiber.first
                   (fun () ->
@@ -308,6 +494,17 @@ let start_input_reader ~sw ~clock ~signals ~bell ~input_queue =
               finish ();
               `Stop_daemon
           | `Idle_flush ->
+              (match probe_decoder with
+               | Some pd when probe_active () ->
+                   if Probe.holds_incomplete_sequence pd then
+                     Probe.discard_incomplete_sequence pd
+                   else if Option.is_some (Probe.pending pd) then
+                     (match Probe.next pd ~next_raw:(fun () -> None) with
+                      | Some ch -> emit_events (Input_decoder.feed decoder ch)
+                      | None -> ());
+                   drain_probe_replay ();
+                   publish_if_changed ()
+               | Some _ | None -> ());
               emit_events (Input_decoder.idle decoder);
               loop ()
           | `Readable -> (
@@ -317,8 +514,16 @@ let start_input_reader ~sw ~clock ~signals ~bell ~input_queue =
                   finish ();
                   `Stop_daemon
               | n ->
-                  let chunk = Bytes.sub_string buf 0 n in
-                  emit_events (Input_decoder.feed_string decoder chunk);
+                  (match probe_decoder with
+                   | Some pd when probe_active () ->
+                       for i = 0 to n - 1 do
+                         Probe.feed pd (Bytes.get buf i)
+                       done;
+                       drain_probe_replay ();
+                       publish_if_changed ()
+                   | Some _ | None ->
+                       let chunk = Bytes.sub_string buf 0 n in
+                       emit_events (Input_decoder.feed_string decoder chunk));
                   loop ()
               | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
               | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
@@ -441,6 +646,30 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
           ~kitty_keyboard:caps.kitty_keyboard ();
 
         let clock = Eio.Stdenv.clock env in
+        (* Bounded startup terminal probe (CSI 16t cell pixels, optional
+           OSC 10/11/4 palette, Kitty APC G graphics). Early user keystrokes
+           stay in [probe_decoder]'s replay buffer and are drained immediately
+           by [start_input_reader]. *)
+        let palette_requested =
+          palette_requested_of_env ~getenv:Sys.getenv_opt
+        in
+        Terminal_out.write (Probe.query ~palette:palette_requested);
+        Terminal_out.flush ();
+        let probe_decoder =
+          collect_startup_probe ~clock ~fd:Unix.stdin ~palette_requested ()
+        in
+        let initial_obs = Probe.observation probe_decoder in
+        let pending_probe_obs = Atomic.make initial_obs in
+        let applied_probe_obs = ref initial_obs in
+        let on_probe_observation (obs : Probe.observation) =
+          Probe.set_current_observation obs;
+          (match obs.palette with
+           | Some _ as p -> Palette.set_current p
+           | None -> ());
+          Atomic.set pending_probe_obs obs;
+          Wake_bell.ring bell Wake_bell.Ui_bus
+        in
+
         let io = Io_domain.start ~sw ~env in
         let worker = Worker_pool.create ~sw (Eio.Stdenv.domain_mgr env) in
 
@@ -455,13 +684,16 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
         let presenter =
           Presenter.create ~cols:init_cols ~rows:init_rows ~capabilities:caps
         in
+        apply_probe_observation ~presenter initial_obs;
         let card_cache = Card.Cache.create () in
         let scheduler = ref (Frame_scheduler.create ()) in
 
         let input_queue : Msg.t Eio.Stream.t = Eio.Stream.create max_int in
         let input_handle : input_reader_handle option ref =
           ref
-            (Some (start_input_reader ~sw ~clock ~signals ~bell ~input_queue))
+            (Some
+               (start_input_reader ~sw ~clock ~signals ~bell ~input_queue
+                  ~probe_decoder ~on_observation:on_probe_observation ()))
         in
 
         let should_quit = ref false in
@@ -504,7 +736,8 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                 Card.Cache.clear card_cache;
                 input_handle :=
                   Some
-                    (start_input_reader ~sw ~clock ~signals ~bell ~input_queue);
+                    (start_input_reader ~sw ~clock ~signals ~bell ~input_queue
+                       ~probe_decoder ~on_observation:on_probe_observation ());
                 scheduler :=
                   Frame_scheduler.mark_dirty
                     ~pace:Frame_scheduler.Pace_interactive !scheduler;
@@ -675,6 +908,18 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                     Frame_scheduler.mark_dirty
                       ~pace:Frame_scheduler.Pace_interactive !scheduler
                 end
+              end;
+
+              (* Sync any late terminal probe observation into Presenter capabilities. *)
+              let latest_obs = Atomic.get pending_probe_obs in
+              if not (Probe.equal_observation latest_obs !applied_probe_obs) then begin
+                applied_probe_obs := latest_obs;
+                Presenter.set_capabilities presenter
+                  (Presenter.apply_probe_observation latest_obs
+                     (Presenter.capabilities presenter));
+                scheduler :=
+                  Frame_scheduler.mark_dirty
+                    ~pace:Frame_scheduler.Pace_interactive !scheduler
               end;
 
               (* Recover from lost terminal writes by forcing full repaint. *)

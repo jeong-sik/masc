@@ -9,3 +9,8 @@
  (name test_input_decoder_matrix)
  (modules test_input_decoder_matrix)
  (libraries masc_tui_core masc_tui_term masc_tui_keymap unix alcotest))
+
+(test
+ (name test_graphics)
+ (modules test_graphics)
+ (libraries masc_tui_core masc_tui_term base64 alcotest))

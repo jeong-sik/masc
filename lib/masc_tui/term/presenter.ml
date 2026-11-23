@@ -8,6 +8,8 @@ type capabilities = {
   osc8_hyperlinks : bool;
   osc52_clipboard : bool;
   kitty_keyboard : bool;
+  graphics : Probe.graphics_reply option;
+  cell_pixels : (int * int) option;
 }
 
 type cursor_shape =
@@ -39,7 +41,22 @@ let default_capabilities =
     osc8_hyperlinks = true;
     osc52_clipboard = true;
     kitty_keyboard = true;
+    graphics = None;
+    cell_pixels = None;
   }
+
+let apply_probe_observation (obs : Probe.observation) (caps : capabilities) =
+  let graphics =
+    match obs.graphics with
+    | Some _ as g -> g
+    | None -> caps.graphics
+  in
+  let cell_pixels =
+    match obs.cell_pixels with
+    | Some _ as px -> px
+    | None -> caps.cell_pixels
+  in
+  { caps with graphics; cell_pixels }
 
 let hidden_cursor = { x = 0; y = 0; visible = false; shape = Block }
 

@@ -38,6 +38,7 @@ board_interests = []
 Current `[keeper]` fields:
 
 - `name`
+- `group`
 - `instructions`
 - `activation_mode`
 - `mention_targets`
@@ -56,6 +57,7 @@ Current `[keeper]` fields:
 - `always_allow`
 - `voice_always_allow`
 - `tools.native`
+- `tools.masc_enabled`
 - `tools.attached_allow`
 - `tools.deny`
 - `skills.names`
@@ -121,9 +123,8 @@ supplying `enable_thinking` at that boundary fails before dispatch.
 ## Creation and update
 
 `masc_keeper_up` accepts `name` and, for first creation or an explicit prompt
-update, `instructions`. Persistence writes operational values to
-`keepers/<name>.toml` and writes the prompt atomically to
-`keepers/<name>.toml`.
+update, `instructions`. Persistence writes the operational values and the
+prompt atomically to `keepers/<name>.toml`.
 
 ```text
 masc_keeper_up(

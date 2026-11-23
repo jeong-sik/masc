@@ -14,12 +14,12 @@
 기본 Markdown 본문 자체는 프리셋으로 저장하거나 복원하지 않는다.
 
 상세 조회와 복원 결과의 `default_prompts`는 저장 당시와 현재 기본값의 일치 여부와
-변경·추가·누락된 키를 보여 준다. TUI Config의 프리셋 상세와 복원 결과에도 표시한다.
+변경·추가·누락된 키를 보여 준다.
 기준 정보가 없으면 `unknown`으로 표시한다. 이 비교는 관측 정보이며 복원을 막지 않는다.
 
 ## 자리는 셋뿐이다
 
-모델 호출 하나는 **system prompt · user message · tool result** 로 나뉜다. `config/prompts` 의 파일 23개(22 `.md` + 1 `.txt`)는 이 셋 중 어디에 붙느냐(또는 비모델 프로토콜 안내인지)로 갈린다.
+모델 호출 하나는 **system prompt · user message · tool result** 로 나뉜다. `config/prompts` 의 파일은 이 셋 중 어디에 붙느냐(또는 비모델 프로토콜 안내인지)로 갈린다.
 
 ## Keeper 한 턴
 
@@ -45,11 +45,12 @@ keeper.md ### workspace                         ← 샌드박스 루트
 ```
 keeper.md ### world.frame.frame
 그 아래 층이 Keeper_context_layers.ordered 순서로:
-  active_goals · current_task · approval_authority · connected_surfaces
-  namespace_state · autonomous_trigger
+  active_goals · direct_input_source · goal_observations · goals_awaiting_proof
+  current_task · approval_authority · connected_surfaces · namespace_state
+  workspace_memory · wiki · lane_updates · autonomous_trigger
   scheduled_automation · completion_authority · task_cancellations
   pending_mentions · own_board_posts · board_activity
-  own_recent_actions · fleet_messages
+  own_recent_actions · recent_work · fleet_messages
 ```
 
 각 층이 `keeper.md` 의 슬롯을 골라 쓴다. 층에 내용이 없으면 통째로 빠지고, 예산을 넘으면 뒤에서부터 잘린다.
@@ -78,7 +79,7 @@ Claude Code·Codex 처럼 공식 클라이언트 세션을 이어 쓰는 런타�
 | 파일 | 호출하는 곳 | 자리 |
 |---|---|---|
 | `librarian.md` | `keeper_librarian_runtime.ml` — 턴 끝 기억 선별 | user (system 은 빈 문자열) |
-| `workspace_memory_curator.md` | `workspace_curator.ml` — 공유 작업 공간 기억 합성 | system / user |
+| `workspace_memory_curator.md` | `server/server_workspace_memory_curator.ml` — 공유 작업 공간 기억 합성 | system / user |
 | `workspace_memory_briefing.md` | 공유 기억 브리핑 서식 | 조립용 슬롯 |
 | `verification.md` | `task/anti_rationalization.ml` — Task 완료 검증 | system. 계약·증거·조회도구 슬롯이 본문에 끼워짐 |
 | `judge.md ### effect` | `keeper/hitl_summary_flow_prepare.ml` — 외부 효과 승인 판정 | system. `effect.output_contract` 가 JSON 계약 |
@@ -117,17 +118,6 @@ Claude Code·Codex 처럼 공식 클라이언트 세션을 이어 쓰는 런타�
 | 나머지 | 6,510 | 4.3% |
 
 프롬프트 파일을 정리해도 모델이 읽는 양의 대부분은 도구 스키마와 기억 회상이다. 창을 줄이려면 그 둘을 봐야 한다.
-
-## 슬롯의 성격
-
-`keeper.md` 슬롯 110개를 본문 모양으로 세면:
-
-| 그룹 | 슬롯 | 문장 | 서식(제목·라벨·행 틀) |
-|---|---|---|---|
-| `world.*` | 82 | 32 | 50 |
-| `context.*` | 13 | 6 | 7 |
-| `observation.*` | 8 | 4 | 4 |
-| `gate_replay.*` | 7 | 7 | 0 |
 
 ## 등급의 기준
 

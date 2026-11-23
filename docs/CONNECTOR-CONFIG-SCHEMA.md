@@ -120,7 +120,7 @@ cannot be discovered from masc — see #30596.
 
 #### Checking that it works
 
-`GET /api/v1/gate/connectors`, or the same fields in the TUI and the dashboard:
+`GET /api/v1/gate/connectors` reports these fields:
 
 | Field | Healthy |
 |---|---|

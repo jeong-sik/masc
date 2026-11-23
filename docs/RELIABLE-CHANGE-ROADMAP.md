@@ -9,7 +9,7 @@
 끊기면 적용된 결과부터 확인해 남은 작업을 이어가고, 검증된 결과나 사람이 결정할 사항을 돌려준다.
 이 보장을 유지하며 더 많은 작업을 동시에 처리한다.**
 
-Keeper·Task·Goal·Skill·composition·MCP는 이 약속을 수행하는 내부 수단이다.
+Keeper·Task·Goal·Skill·MCP는 이 약속을 수행하는 내부 수단이다.
 사용자는 요청, 완료 조건, 결과와 근거, 남은 문제, 자신이 결정할 사항을 확인할 수 있어야 한다.
 Scale-out은 검증된 완료 처리량을 높이는 기능으로 개발한다. 실행 중 에이전트 수는 성과가 아니다.
 
@@ -22,18 +22,15 @@ Scale-out은 검증된 완료 처리량을 높이는 기능으로 개발한다. 
 | 영역 | 재사용할 구현 | 이번 로드맵에서 보완할 것 |
 | --- | --- | --- |
 | 변경의 실행 | Keeper의 기존 tool dispatch·sandbox·Gate | 명령 응답, 외부 효과, acceptance 결과를 구분해 Task 결과까지 연결 |
-| 절차·합성 | Instruction/Composition Skill, typed plan, batch 실행 | 실제 선택·결과 측정; 고정 workflow부터 재개 위치와 대상 확인 연결 |
+| 절차·합성 | Instruction Skill, typed plan, batch 실행 | 실제 선택·결과 측정; 고정 workflow부터 재개 위치와 대상 확인 연결 |
 | 복구 | 승인 소비·replay·indeterminate, Keeper 지속 상태 | 효과 이후 crash window의 대상 조회와 다음 단계 재개 |
 | 병렬 처리 | dependency graph와 Eio batch 실행 | 의존성이 준비된 작업의 실행, 충돌 소유권, 공통 검증, 장애 격리 |
 | 결과 확인 | Task·Goal verifier, run/turn/receipt | 요청·attempt·수정 revision·대상 결과·독립 검증 사이의 정확한 연결 |
 | 측정 | coding harness와 cost ledger | 현재 null인 harness usage의 실제 관측 연결; 실패·재시도 비용 포함 |
 | 사용자 경험 | TUI, Dashboard, MCP | 요청별 완료/복구/결정 필요 상태와 근거를 한 곳에서 보여 줌 |
 
-현재 async composition은 read-only이며, inline composition에는 영속 node cursor가 없다.
 `Completed`/`effect=applied`는 업무 성공 판정이 아니다. 이 제약을 숨기는 홍보 문구는 쓰지 않는다.
-근거: [async admission](../lib/keeper/keeper_tool_composition_catalog.ml),
-[composition boundary](../lib/keeper/keeper_tool_composition_surface.ml),
-[replay](../lib/keeper/keeper_gate_replay.ml), [coding harness](../scripts/harness_coding_eval.sh).
+근거: [replay](../lib/keeper/keeper_gate_replay.ml), [coding harness](../scripts/harness_coding_eval.sh).
 
 ## Goal 진행 방식
 
@@ -146,7 +143,6 @@ live manifest 필드, 그리고 제거된 JSON contract(`9e727d89d^`)에 적혀 
 | 단계 | 선행 조건 | 이유 |
 | --- | --- | --- |
 | checker·manifest 구현 | 없음 | 지금 진행 |
-| Goal 재등록의 영속성 | goal-store-typed-unavailable | `goal_store.ml`의 `read_state`가 아직 `Undecodable`을 빈 store로 접는다. 그대로 등록하면 09-08 손실이 반복된다 |
 | 18+3 정식 실행 | contract-absent-submit-refusal | 계약 없는 제출을 거부하기 전에는 APPROVE가 아무것도 검사하지 않은 APPROVE와 구분되지 않는다 |
 | 재시작 포함 live 자격 | port-bind-or-refuse | 8935 → 56209 → 54984 → 60690으로 네 번 옮겨 다닌 포트로는 같은 런타임을 측정한다고 말할 수 없다 |
 | 최종 종료 | 위 전부 + 사람 확인 | 감사 finding 전부 해결, 런타임 재작성, hard-quota 회전, witness WAL은 선행 조건이 아니다 |

@@ -18,35 +18,24 @@ screen, so it is not repeated here.
 
 | | Services | Setup |
 |---|---|---|
-| **Just works** | 69 -- Atlassian, Linear, Notion, Sentry, Stripe, Algolia, CircleCI, DeepL, Postman, Sanity … | none (Enter immediately opens browser) |
-| **App first** | Slack, GitHub, Figma, Google's eight, Zendesk, and others | one app per service (`A` or `a` key to configure) |
+| **Just works** | 69 -- Atlassian, Linear, Notion, Sentry, Stripe, Algolia, CircleCI, DeepL, Postman, Sanity … | none |
+| **App first** | Slack, Figma, Google's eight, Zendesk, and others | one app per service |
 
 What separates them: the first group lets masc register a client when it
 needs one. masc registers a fresh one on every login, naming the callback the
 server answers at right then, so changing the server's base URL never leaves
 an older registration pointing at the old address. The second group does not
 offer registration. Google does not do it at all, and
-Figma's endpoint answers 403 to anyone who asks. Pressing Enter displays the
-error notice, and pressing `A` or `a` opens the app configuration form directly
-in the TUI (Client ID, Client Secret, Scopes).
+Figma's endpoint answers 403 to anyone who asks.
+
+GitHub is neither. It attaches with the token that Keeper's GitHub CLI already
+holds, so log the Keeper in first with `masc keeper-github login --keeper <name>`.
 
 ## The ones that just work
 
-**TUI**
-
-```
-Keepers → pick a keeper → [ or ] in the right pane to reach Identity
-arrows to pick a service → enter
-```
-
-A browser opens. If it does not, the URL is printed on the pane. Approve, come
-back, and the tab notices on its own -- no refresh needed.
-
-Digits `1`-`9` jump to the first nine. Past that the arrows are the way.
-
-**Dashboard**
-
-`업무 서비스 연결` on the Keeper page, then `연결`.
+On the dashboard, open `업무 서비스 연결` on the Keeper page and press `연결`.
+A new browser tab opens on the service's consent page. If it does not, the
+panel shows the link.
 
 ## The ones needing an app
 
@@ -70,11 +59,6 @@ enter it against any one of them, and Gmail, Drive, Docs, Sheets, Slides,
 Calendar, Chat and Contacts all read it. A client belongs to an authorization
 server rather than to a resource, and all eight sit behind the same
 `accounts.google.com`.
-
-**Slack and GitHub need one more thing.** masc refuses a token answer that
-carries neither an expiry nor a refresh token. Turn on token rotation for the
-Slack app, token expiration for the GitHub app. Without it the approval
-succeeds and the last step does not.
 
 ### In order
 
@@ -104,13 +88,10 @@ the current one, and fall back to the same https address if refused.
 
 1. Create an app at `api.slack.com/apps`.
 2. OAuth & Permissions → Redirect URLs → add the callback.
-3. **Turn on token rotation.** masc refuses an answer carrying neither an
-   expiry nor a refresh token, so without it the consent succeeds and the
-   exchange does not.
-4. Set the user token scopes you want.
-5. Copy the Client ID and Client Secret from Basic Information.
-6. Dashboard → that Keeper → `업무 서비스 연결` → `내 앱 쓰기` on the Slack row.
-7. Press Slack to connect.
+3. Set the user token scopes you want.
+4. Copy the Client ID and Client Secret from Basic Information.
+5. Dashboard → that Keeper → `업무 서비스 연결` → `내 앱 쓰기` on the Slack row.
+6. Press Slack to connect.
 
 **2. Figma**
 
@@ -120,12 +101,7 @@ the current one, and fall back to the same https address if refused.
 4. Save them under `내 앱 쓰기`.
 5. Press Figma to connect.
 
-**3. GitHub**
-
-As Slack, with an OAuth App: callback, **token expiration on**, then the id
-and secret.
-
-**4. Google — one app for eight**
+**3. Google — one app for eight**
 
 1. Google Cloud Console → your project → APIs & Services → Credentials.
 2. Create an OAuth client ID (Web application).
@@ -141,8 +117,8 @@ Tool names read `<service>_<original name>`, so fetching a Jira issue is
 `atlassian_getJiraIssue`. Two services using the same name do not collide.
 
 The tool list is read once, when the service attaches. Nothing re-reads it on
-a timer -- press `R` (`도구 새로고침` on the dashboard) when a service has
-added tools.
+a timer -- press `도구 새로고침` on the dashboard when a service has added
+tools.
 
 Tokens renew before they expire, by the margin the declaration names.
 
@@ -152,33 +128,34 @@ Keeper's approval posture alongside attaching it.
 
 ## Detaching a service
 
-Press `D` twice in the Services tab of the Keeper detail pane. The first
-press arms the row under the cursor and says so; the second press on that
-same row detaches it. The pane then says what was removed and whether the
-service was asked to revoke what it still holds. The two are different
-facts:
+Send `POST /api/v1/keepers/oauth/disconnect` with an admin token and the body
+`{"keeper":"<keeper>","provider":"<service id>"}`. The dashboard panel has no
+detach button. The answer says what was removed and whether the service was
+asked to revoke what it still holds. The two are different facts:
 
 - **Stored tokens.** The refresh-token file entry and the access-token and
   expiry environment entries are deleted, and the tool catalog for that
   Keeper and service goes with them, so the next turn stops being handed
   those tools.
 - **Provider revoke.** If the service publishes a revocation endpoint, masc
-  posts the refresh token to it, best effort. `revoke: taken` means the
-  service answered; `revoke: failed` means it refused or could not be
-  reached, and the local deletion still stands; `revoke: not offered` means
-  the service publishes no revocation endpoint, so the token is gone from
-  here but the service may keep honouring it until it expires or is revoked
-  from the service's own settings.
+  posts the refresh token to it, best effort. The answer's `revocation.kind`
+  is `revoked` when the service answered; `failed` when it refused or could
+  not be reached, and the local deletion still stands; `not_published` when
+  there was nowhere to send it or nothing to send -- the service publishes no
+  revocation endpoint, or masc held no refresh token -- so the token is gone
+  from here but the service may keep honouring it until it expires or is
+  revoked from the service's own settings; `not_sent` when masc could not
+  name the client the token was issued to, so no request went out.
 
 Deleting locally and revoking at the service are not the same act. A detach
-always deletes; it can only *ask* the service. If the pane says `failed` or
-`not offered` and the service must forget the token now, revoke it from the
-service's own account settings.
+always deletes; it can only *ask* the service. If the answer says `failed`,
+`not_published` or `not_sent` and the service must forget the token now,
+revoke it from the service's own account settings.
 
-A detach is not the switch. The switch (`T`) turns a service off for a Keeper
-and keeps its token, so a later `T` brings it back without consenting again.
-Detaching forgets the token, and attaching the service again means a new
-consent.
+A detach is not the switch. The switch (`끄기` / `켜기` on the dashboard) turns
+a service off for a Keeper and keeps its token, so turning it back on needs no
+new consent. Detaching forgets the token, and attaching the service again
+means a new consent.
 
 ## When it does not work
 
@@ -190,7 +167,7 @@ The message names the cause.
 | `publishes no S256` | the server does not do PKCE | cannot be attached |
 | `could not find out where authorization lives` | the service publishes no metadata | check the URL |
 | `the provider refused the exchange` | the service said no | read the service's own reason, which follows |
-| `returned no refresh token` | rotation is off on the app | turn it on |
+| `returned no refresh token` | a warning, not a failure: the service is attached, but its token expires and cannot be renewed | attach it again when it expires |
 | `callback echoed a state this exchange did not send` | the approval window sat too long, or the server restarted | press it again |
 
 ## Where things are kept

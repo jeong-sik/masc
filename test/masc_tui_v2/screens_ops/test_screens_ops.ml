@@ -885,7 +885,9 @@ let make_populated_model ~cols ~rows ~lang =
   in
   let knowledge =
     m0.knowledge
-    |> Knowledge_store.apply_memory_diff ~observed_at:now_mono sample_memory_diff
+    |> Knowledge_store.set_memory_diff ~keeper:(Some "e-masc-the-leader")
+         ~window:Knowledge_store.Window_24h
+         (Observed.value ~observed_at:now_mono sample_memory_diff)
     |> Knowledge_store.apply_board ~observed_at:now_mono
          {
            posts =

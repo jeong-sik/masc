@@ -3,12 +3,38 @@ open Masc_tui_keymap
 open Masc_tui_protocol
 
 module String_set = Set.Make (String)
+module String_map = Map.Make (String)
 
 type memory_diff_window =
   | Window_24h
   | Window_7d
   | Window_30d
   | Window_revs of { from_rev : int; to_rev : int }
+
+let compare_memory_diff_window a b =
+  match a, b with
+  | Window_24h, Window_24h | Window_7d, Window_7d | Window_30d, Window_30d -> 0
+  | Window_revs x, Window_revs y -> (
+      match Int.compare x.from_rev y.from_rev with
+      | 0 -> Int.compare x.to_rev y.to_rev
+      | c -> c)
+  | Window_24h, (Window_7d | Window_30d | Window_revs _)
+  | Window_7d, (Window_30d | Window_revs _)
+  | Window_30d, Window_revs _ ->
+      -1
+  | Window_7d, Window_24h
+  | Window_30d, (Window_24h | Window_7d)
+  | Window_revs _, (Window_24h | Window_7d | Window_30d) ->
+      1
+
+module Memory_diff_map = Map.Make (struct
+  type t = string option * memory_diff_window
+
+  let compare (keeper_a, window_a) (keeper_b, window_b) =
+    match Option.compare String.compare keeper_a keeper_b with
+    | 0 -> compare_memory_diff_window window_a window_b
+    | c -> c
+end)
 
 type memory_view_mode =
   | View_evolution
@@ -117,15 +143,16 @@ type t = {
     (Wire_knowledge.board_post * Wire_knowledge.board_comment list) Observed.t;
   wiki_artifacts_submode : [ `Wiki | `Artifacts ];
   wiki_index : Wire_knowledge.wiki_index Observed.t;
-  wiki_page : Wire_knowledge.wiki_page_detail Observed.t;
+  wiki_pages : Wire_knowledge.wiki_page_detail Observed.t String_map.t;
   wiki_log : Wire_knowledge.wiki_log_response Observed.t;
   wiki_search : Wire_knowledge.wiki_search_response Observed.t;
   wiki_lint : Wire_knowledge.wiki_lint_report Observed.t;
   wiki_edit_base : wiki_edit_base option;
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
   world_memory : Wire_knowledge.world_memory Observed.t;
-  memory_diff : Wire_knowledge.memory_diff Observed.t;
-  memory_os_internals : Wire_knowledge.memory_os_internals Observed.t;
+  memory_diffs : Wire_knowledge.memory_diff Observed.t Memory_diff_map.t;
+  memory_os_internals :
+    Wire_knowledge.memory_os_internals Observed.t String_map.t;
   keeper_memory_facts : Wire_knowledge.keeper_memory_facts Observed.t;
   keeper_memory_activity : Wire_knowledge.keeper_memory_activity Observed.t;
   keeper_memory_health : Wire_knowledge.keeper_memory_health_fleet Observed.t;
@@ -162,15 +189,15 @@ let empty =
     active_thread = Observed.absent;
     wiki_artifacts_submode = `Wiki;
     wiki_index = Observed.unreported;
-    wiki_page = Observed.absent;
+    wiki_pages = String_map.empty;
     wiki_log = Observed.unreported;
     wiki_search = Observed.absent;
     wiki_lint = Observed.unreported;
     wiki_edit_base = None;
     artifacts = Observed.unreported;
     world_memory = Observed.unreported;
-    memory_diff = Observed.unreported;
-    memory_os_internals = Observed.unreported;
+    memory_diffs = Memory_diff_map.empty;
+    memory_os_internals = String_map.empty;
     keeper_memory_facts = Observed.unreported;
     keeper_memory_activity = Observed.unreported;
     keeper_memory_health = Observed.unreported;
@@ -194,6 +221,39 @@ let empty =
     detail_scroll_offset = 0;
     pulse_thread_index = 0;
     filter_query = "";
+  }
+
+let wiki_page_for ~slug t =
+  match String_map.find_opt slug t.wiki_pages with
+  | Some obs -> obs
+  | None -> Observed.unreported
+
+let set_wiki_page ~slug obs t =
+  { t with wiki_pages = String_map.add slug obs t.wiki_pages }
+
+let memory_diff_for ~keeper ~window t =
+  match Memory_diff_map.find_opt (keeper, window) t.memory_diffs with
+  | Some obs -> obs
+  | None -> Observed.unreported
+
+let set_memory_diff ~keeper ~window obs t =
+  {
+    t with
+    memory_diffs = Memory_diff_map.add (keeper, window) obs t.memory_diffs;
+  }
+
+let current_memory_diff t =
+  memory_diff_for ~keeper:t.memory_diff_keeper ~window:t.memory_diff_window t
+
+let memory_os_internals_for ~keeper t =
+  match String_map.find_opt keeper t.memory_os_internals with
+  | Some obs -> obs
+  | None -> Observed.unreported
+
+let set_memory_os_internals ~keeper obs t =
+  {
+    t with
+    memory_os_internals = String_map.add keeper obs t.memory_os_internals;
   }
 
 let memory_diff_window_query = function
@@ -573,7 +633,7 @@ let toggle_succession_chain ~root_id t =
   { next with selected_index; scroll_offset }
 
 let set_memory_diff_window memory_diff_window t =
-  { t with memory_diff_window; memory_diff = Observed.mark_stale t.memory_diff }
+  { t with memory_diff_window }
 
 let cycle_memory_diff_window t =
   let next =
@@ -600,9 +660,6 @@ let set_memory_diff_keeper memory_diff_keeper t =
   {
     t with
     memory_diff_keeper;
-    memory_diff = reset_scoped_slot_on_switch ~changed t.memory_diff;
-    memory_os_internals =
-      reset_scoped_slot_on_switch ~changed t.memory_os_internals;
     keeper_memory_facts =
       reset_scoped_slot_on_switch ~changed t.keeper_memory_facts;
     keeper_memory_activity =
@@ -1235,9 +1292,6 @@ let apply_wiki_index ~observed_at idx t =
     in
     { next with selected_index; scroll_offset }
 
-let apply_wiki_page ~observed_at page t =
-  { t with wiki_page = Observed.value ~observed_at page }
-
 let apply_wiki_log ~observed_at log t =
   { t with wiki_log = Observed.value ~observed_at log }
 
@@ -1252,12 +1306,6 @@ let apply_artifacts ~observed_at artifacts t =
 
 let apply_world_memory ~observed_at mem t =
   { t with world_memory = Observed.value ~observed_at mem }
-
-let apply_memory_diff ~observed_at diff t =
-  { t with memory_diff = Observed.value ~observed_at diff }
-
-let apply_memory_os_internals ~observed_at internals t =
-  { t with memory_os_internals = Observed.value ~observed_at internals }
 
 let apply_keeper_memory_facts ~observed_at
     (facts : Wire_knowledge.keeper_memory_facts) t =
@@ -1635,7 +1683,11 @@ let move_pulse_thread ?viewport_rows:_ ~delta t =
   { t with pulse_thread_index }
 
 let filtered_memory_diff_items_for ~keeper_opt t =
-  match keeper_opt, Observed.to_option t.memory_diff with
+  match
+    ( keeper_opt,
+      Observed.to_option
+        (memory_diff_for ~keeper:keeper_opt ~window:t.memory_diff_window t) )
+  with
   | _, None -> []
   | ( Some kp
     , Some
@@ -1768,7 +1820,10 @@ let memory_diff_line_count t =
     (filtered_memory_diff_items t)
 
 let keeper_memory_diff_line_count ~name t =
-  match Observed.to_option t.memory_diff with
+  match
+    Observed.to_option
+      (memory_diff_for ~keeper:(Some name) ~window:t.memory_diff_window t)
+  with
   | Some
       {
         scope = Wire_knowledge.Scope_keeper k;
@@ -1828,10 +1883,13 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
                   match t.wiki_artifacts_submode with
                   | `Wiki -> (
                       let body_opt =
-                        Option.map
-                          (fun (p : Wire_knowledge.wiki_page_detail) ->
-                            p.body_markdown)
-                          (Observed.to_option t.wiki_page)
+                        Option.bind (selected_wiki_page t)
+                          (fun (s : Wire_knowledge.wiki_page_summary) ->
+                            Option.map
+                              (fun (p : Wire_knowledge.wiki_page_detail) ->
+                                p.body_markdown)
+                              (Observed.to_option
+                                 (wiki_page_for ~slug:s.slug t)))
                       in
                       match body_opt with
                       | Some body ->
@@ -1941,13 +1999,14 @@ let mark_stale_all t =
     board = Observed.mark_stale t.board;
     active_thread = Observed.mark_stale t.active_thread;
     wiki_index = Observed.mark_stale t.wiki_index;
-    wiki_page = Observed.mark_stale t.wiki_page;
+    wiki_pages = String_map.map Observed.mark_stale t.wiki_pages;
     wiki_log = Observed.mark_stale t.wiki_log;
     wiki_lint = Observed.mark_stale t.wiki_lint;
     artifacts = Observed.mark_stale t.artifacts;
     world_memory = Observed.mark_stale t.world_memory;
-    memory_diff = Observed.mark_stale t.memory_diff;
-    memory_os_internals = Observed.mark_stale t.memory_os_internals;
+    memory_diffs = Memory_diff_map.map Observed.mark_stale t.memory_diffs;
+    memory_os_internals =
+      String_map.map Observed.mark_stale t.memory_os_internals;
     keeper_memory_facts = Observed.mark_stale t.keeper_memory_facts;
     keeper_memory_activity = Observed.mark_stale t.keeper_memory_activity;
     keeper_memory_health = Observed.mark_stale t.keeper_memory_health;

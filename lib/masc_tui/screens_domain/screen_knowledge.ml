@@ -594,18 +594,13 @@ let draw_wiki_preview ~target_slug ~scroll ~grid ~cache ~(rect : Rect.t)
         | None -> None)
     | None -> Knowledge_store.selected_wiki_page k
   in
-  let page_detail =
-    match target_slug with
-    | Some want -> (
-        match Observed.to_option k.wiki_page with
-        | Some d when String.equal d.slug want -> Some d
-        | Some _ | None -> None)
-    | None -> (
-        match Observed.to_option k.wiki_page, sel_summary with
-        | Some d, Some s when String.equal d.slug s.slug -> Some d
-        | Some d, None -> Some d
-        | Some _, Some _ | None, _ -> None)
+  let page_obs =
+    match target_slug, sel_summary with
+    | Some slug, _ -> Knowledge_store.wiki_page_for ~slug k
+    | None, Some s -> Knowledge_store.wiki_page_for ~slug:s.slug k
+    | None, None -> Observed.unreported
   in
+  let page_detail = Observed.to_option page_obs in
   let title, badge =
     (
         match page_detail, sel_summary with
@@ -881,22 +876,9 @@ let draw_wiki_preview ~target_slug ~scroll ~grid ~cache ~(rect : Rect.t)
             | None -> (
                 let content = H.pad_content ~bp inner in
                 match target_slug with
-                | Some want -> (
-                    match k.wiki_page with
-                    | Observed.Value _ ->
-                        H.draw_empty_notice ~grid ~rect:content ~theme
-                          (Printf.sprintf "%s %s: %s"
-                             (Glyph.to_utf8 Glyph.Transport_reconnecting)
-                             (Say.resolve lang
-                                (Say.make ~ko:"위키 페이지 불러오는 중"
-                                   ~en:"Loading wiki page"))
-                             want)
-                    | Observed.Loading _
-                    | Observed.Absent
-                    | Observed.Unreported
-                    | Observed.Failed _ ->
-                        H.draw_observed_placeholder ~grid ~rect:content ~theme
-                          ~lang k.wiki_page)
+                | Some _ ->
+                    H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang
+                      page_obs
                 | None ->
                     H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang
                       k.wiki_index)))
@@ -1903,7 +1885,7 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               |> unique_strings
         in
         let keeper_diff_tokens =
-          match Observed.to_option k.memory_diff with
+          match Observed.to_option (Knowledge_store.current_memory_diff k) with
           | None -> []
           | Some { body = Wire_knowledge.World_diff _; _ } -> []
           | Some { body = Wire_knowledge.Keeper_diff { writer_status; _ }; _ } -> (
@@ -2393,8 +2375,9 @@ let render_dive_wiki ~slug ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   if not (Rect.is_empty side_inner) then begin
     let y = ref side_inner.y and bottom = Rect.bottom side_inner in
-    match Observed.to_option k.wiki_page with
-    | Some d when String.equal d.slug slug ->
+    let page_obs = Knowledge_store.wiki_page_for ~slug k in
+    match Observed.to_option page_obs with
+    | Some d ->
         if !y < bottom then begin
           H.draw_divider ~grid ~rect:side_inner ~y:!y ~theme
             ~label:
@@ -2484,16 +2467,9 @@ let render_dive_wiki ~slug ~(model : Model.t) ~cache ~(rect : Rect.t)
               end)
             (H.safe_take 4 d.lint_findings)
         end
-    | Some _ ->
-        H.draw_empty_notice ~grid ~rect:side_inner ~theme
-          (Printf.sprintf "%s %s: %s"
-             (Glyph.to_utf8 Glyph.Transport_reconnecting)
-             (Say.resolve lang
-                (Say.make ~ko:"페이지 링크 불러오는 중" ~en:"Loading page links"))
-             slug)
     | None ->
         H.draw_observed_placeholder ~grid ~rect:side_inner ~theme ~lang
-          k.wiki_page
+          page_obs
   end
 
 let render_dive_artifact ~id ~(model : Model.t) ~cache ~(rect : Rect.t)

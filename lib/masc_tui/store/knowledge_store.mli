@@ -9,12 +9,18 @@ open Masc_tui_keymap
 open Masc_tui_protocol
 
 module String_set : Set.S with type elt = string
+module String_map : Map.S with type key = string
 
 type memory_diff_window =
   | Window_24h
   | Window_7d
   | Window_30d
   | Window_revs of { from_rev : int; to_rev : int }
+
+module Memory_diff_map :
+  Map.S with type key = string option * memory_diff_window
+(** Memory diffs by what the request asked for: the keeper ([None] for world
+    memory) and the window. *)
 
 type memory_view_mode =
   | View_evolution
@@ -126,15 +132,18 @@ type t = {
     (Wire_knowledge.board_post * Wire_knowledge.board_comment list) Observed.t;
   wiki_artifacts_submode : [ `Wiki | `Artifacts ];
   wiki_index : Wire_knowledge.wiki_index Observed.t;
-  wiki_page : Wire_knowledge.wiki_page_detail Observed.t;
+  wiki_pages : Wire_knowledge.wiki_page_detail Observed.t String_map.t;
+      (** One slot per page slug. *)
   wiki_log : Wire_knowledge.wiki_log_response Observed.t;
   wiki_search : Wire_knowledge.wiki_search_response Observed.t;
   wiki_lint : Wire_knowledge.wiki_lint_report Observed.t;
   wiki_edit_base : wiki_edit_base option;
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
   world_memory : Wire_knowledge.world_memory Observed.t;
-  memory_diff : Wire_knowledge.memory_diff Observed.t;
-  memory_os_internals : Wire_knowledge.memory_os_internals Observed.t;
+  memory_diffs : Wire_knowledge.memory_diff Observed.t Memory_diff_map.t;
+  memory_os_internals :
+    Wire_knowledge.memory_os_internals Observed.t String_map.t;
+      (** One slot per keeper. *)
   keeper_memory_facts : Wire_knowledge.keeper_memory_facts Observed.t;
   keeper_memory_activity : Wire_knowledge.keeper_memory_activity Observed.t;
   keeper_memory_health : Wire_knowledge.keeper_memory_health_fleet Observed.t;
@@ -161,6 +170,36 @@ type t = {
 }
 
 val empty : t
+
+val wiki_page_for :
+  slug:string -> t -> Wire_knowledge.wiki_page_detail Observed.t
+(** [slug]'s slot. [Unreported] until the page route answers for [slug]. *)
+val set_wiki_page :
+  slug:string -> Wire_knowledge.wiki_page_detail Observed.t -> t -> t
+
+val memory_diff_for :
+  keeper:string option ->
+  window:memory_diff_window ->
+  t ->
+  Wire_knowledge.memory_diff Observed.t
+(** The diff of [keeper]'s memory ([None]: world memory) over [window].
+    [Unreported] until the diff route answers for that pair. *)
+val set_memory_diff :
+  keeper:string option ->
+  window:memory_diff_window ->
+  Wire_knowledge.memory_diff Observed.t ->
+  t ->
+  t
+val current_memory_diff : t -> Wire_knowledge.memory_diff Observed.t
+(** The Knowledge Memory tab's diff: [memory_diff_keeper] over
+    [memory_diff_window]. *)
+
+val memory_os_internals_for :
+  keeper:string -> t -> Wire_knowledge.memory_os_internals Observed.t
+(** [keeper]'s slot. [Unreported] until the internals route answers for
+    [keeper]. *)
+val set_memory_os_internals :
+  keeper:string -> Wire_knowledge.memory_os_internals Observed.t -> t -> t
 
 val memory_diff_window_query : memory_diff_window -> string option
 val equal_memory_diff_window : memory_diff_window -> memory_diff_window -> bool
@@ -253,8 +292,6 @@ val apply_thread :
   t
 val apply_wiki_index :
   observed_at:Clock.Mono.t -> Wire_knowledge.wiki_index -> t -> t
-val apply_wiki_page :
-  observed_at:Clock.Mono.t -> Wire_knowledge.wiki_page_detail -> t -> t
 val apply_wiki_log :
   observed_at:Clock.Mono.t -> Wire_knowledge.wiki_log_response -> t -> t
 val apply_wiki_search :
@@ -265,10 +302,6 @@ val apply_artifacts :
   observed_at:Clock.Mono.t -> Wire_knowledge.artifact_entry list -> t -> t
 val apply_world_memory :
   observed_at:Clock.Mono.t -> Wire_knowledge.world_memory -> t -> t
-val apply_memory_diff :
-  observed_at:Clock.Mono.t -> Wire_knowledge.memory_diff -> t -> t
-val apply_memory_os_internals :
-  observed_at:Clock.Mono.t -> Wire_knowledge.memory_os_internals -> t -> t
 val apply_keeper_memory_facts :
   observed_at:Clock.Mono.t -> Wire_knowledge.keeper_memory_facts -> t -> t
 val apply_keeper_memory_activity :
@@ -355,9 +388,8 @@ val selected_memory_fact_row :
 
 val filtered_memory_diff_items_for :
   keeper_opt:string option -> t -> memory_diff_item list
-(** Scope-explicit filtered diff items: only yields items when [memory_diff]
-    matches [keeper_opt] ([None] for [Scope_world], [Some kp] for
-    [Scope_keeper kp]). *)
+(** Filtered items of [keeper_opt]'s diff over [memory_diff_window]
+    ([None]: world memory). *)
 
 val filtered_memory_diff_items : t -> memory_diff_item list
 (** Single-SSOT filtered diff items for [t.memory_diff_keeper]. *)
@@ -373,8 +405,8 @@ val memory_diff_line_count : t -> int
     line-level scrolling in [3 Knowledge > Memory] and [Memory_diff_dive]. *)
 
 val keeper_memory_diff_line_count : name:string -> t -> int
-(** Exact rendered line count for [Keeper_memory] tab when [memory_diff]
-    matches [Scope_keeper name]. *)
+(** Exact rendered line count of [name]'s diff over [memory_diff_window] in
+    the [Keeper_memory] tab. *)
 
 val hottest_signal_threads : t -> Wire_knowledge.board_post list
 val selected_pulse_thread : t -> Wire_knowledge.board_post option

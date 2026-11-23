@@ -2732,8 +2732,10 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                    (say ~ko:"턴 기록 대기 중" ~en:"Awaiting turn records"));
             incr y;
             (* Latest compaction and history reset facts. *)
-            (match model.knowledge.memory_os_internals with
-             | Observed.Value { data; _ } when String.equal data.keeper keeper ->
+            (match
+               Knowledge_store.memory_os_internals_for ~keeper model.knowledge
+             with
+             | Observed.Value { data; _ } ->
                  let compaction =
                    if data.compaction.present then
                      let covers =
@@ -2773,7 +2775,7 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                  put_body_line ~style:crit_st
                    (say ~ko:("압축 기록 조회 실패: " ^ reason)
                       ~en:("Compaction facts fetch failed: " ^ reason))
-             | Observed.Value _ | Observed.Loading _ ->
+             | Observed.Loading _ ->
                  put_body_line ~style:whisper_st
                    (say ~ko:"압축 기록 불러오는 중…" ~en:"Loading compaction facts…")
              | Observed.Absent | Observed.Unreported ->

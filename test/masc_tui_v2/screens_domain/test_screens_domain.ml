@@ -684,13 +684,16 @@ let make_rich_model ~lang ~cols ~rows =
          }
     |> Knowledge_store.apply_thread ~observed_at:now_mono (p1, comments)
     |> Knowledge_store.apply_wiki_index ~observed_at:now_mono wiki_index
-    |> Knowledge_store.apply_wiki_page ~observed_at:now_mono wiki_detail
+    |> Knowledge_store.set_wiki_page ~slug:wiki_detail.slug
+         (Observed.value ~observed_at:now_mono wiki_detail)
     |> Knowledge_store.apply_wiki_log ~observed_at:now_mono wiki_log
     |> Knowledge_store.apply_artifacts ~observed_at:now_mono [ artifact_1 ]
     |> Knowledge_store.apply_world_memory ~observed_at:now_mono world_memory
     |> Knowledge_store.set_memory_diff_keeper (Some "e-masc-the-leader")
     |> Knowledge_store.set_memory_view_mode Knowledge_store.View_diff
-    |> Knowledge_store.apply_memory_diff ~observed_at:now_mono keeper_diff
+    |> Knowledge_store.set_memory_diff ~keeper:(Some "e-masc-the-leader")
+         ~window:Knowledge_store.Window_24h
+         (Observed.value ~observed_at:now_mono keeper_diff)
     |> Knowledge_store.record_memory_act_answer ~keeper:"wkbl-growth"
          (Wire_knowledge.Memory_act_done Wire_knowledge.Writer_idle)
   in
@@ -1486,8 +1489,9 @@ let test_knowledge_all_tabs_and_dives () =
                        knowledge =
                          m.knowledge
                          |> Knowledge_store.set_memory_diff_keeper None
-                         |> Knowledge_store.apply_memory_diff
-                              ~observed_at:now_mono world_diff;
+                         |> Knowledge_store.set_memory_diff ~keeper:None
+                              ~window:Knowledge_store.Window_24h
+                              (Observed.value ~observed_at:now_mono world_diff);
                      }
                    in
                    let g_wd =

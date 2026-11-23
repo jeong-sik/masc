@@ -126,7 +126,10 @@ type http_reply =
       , http_error )
       result
   | Reply_wiki_index of (Wire_knowledge.wiki_index, http_error) result
-  | Reply_wiki_page of (Wire_knowledge.wiki_page_detail, http_error) result
+  | Reply_wiki_page of {
+      page : string;
+      result : (Wire_knowledge.wiki_page_detail, http_error) result;
+    }
   | Reply_wiki_log of (Wire_knowledge.wiki_log_response, http_error) result
   | Reply_wiki_search of
       (Wire_knowledge.wiki_search_response, http_error) result
@@ -139,6 +142,7 @@ type http_reply =
   | Reply_world_memory of (Wire_knowledge.world_memory, http_error) result
   | Reply_memory_diff of {
       keeper : string option;
+      window : Knowledge_store.memory_diff_window;
       result : (Wire_knowledge.memory_diff, http_error) result;
     }
   | Reply_keeper_memory_os_internals of {
@@ -202,8 +206,10 @@ type http_reply =
       (Wire_runtime.browser_lane_status, http_error) result
   | Reply_mcp_clients of (Wire_runtime.mcp_client_row list, http_error) result
   | Reply_sandboxes of (Wire_infra.sandboxes_snapshot, http_error) result
-  | Reply_keeper_sandbox of
-      (Wire_infra.keeper_sandbox_response, http_error) result
+  | Reply_keeper_sandbox of {
+      keeper : string;
+      result : (Wire_infra.keeper_sandbox_response, http_error) result;
+    }
   | Reply_repositories of (Wire_infra.repository list, http_error) result
   | Reply_repository_activity of {
       repo_id : string;

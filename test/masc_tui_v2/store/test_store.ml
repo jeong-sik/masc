@@ -2136,16 +2136,44 @@ let test_round2_store_regressions () =
       m_k with
       fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_memory m_k.fleet;
       knowledge =
-        Knowledge_store.apply_memory_diff ~observed_at:t1 alpha_mem_diff
+        Knowledge_store.set_memory_diff ~keeper:(Some "alpha")
+          ~window:Knowledge_store.Window_24h
+          (Observed.value ~observed_at:t1 alpha_mem_diff)
           m_k.knowledge;
     }
   in
-  let _, cmds_kmem_beta =
+  let m_kmem_beta, cmds_kmem_beta =
     Update.step ~now:t2 m_kmem_alpha (Msg.Key_event (char_key "j"))
   in
   Alcotest.(check bool)
     "Keeper_memory move alpha->beta fetches Get_memory_diff(beta)" true
     (has_get (is_mem_diff_for "beta") cmds_kmem_beta);
+  (* beta's diff lands; k returns to alpha, whose diff is still fresh *)
+  let m_kmem_beta_loaded, _ =
+    Update.step ~now:t2 m_kmem_beta
+      (Msg.Http_reply
+         {
+           epoch = m_kmem_beta.epoch;
+           reply =
+             Msg.Reply_memory_diff
+               {
+                 keeper = Some "beta";
+                 window = Knowledge_store.Window_24h;
+                 result =
+                   Ok
+                     {
+                       alpha_mem_diff with
+                       scope = Wire_knowledge.Scope_keeper "beta";
+                     };
+               };
+         })
+  in
+  let _, cmds_kmem_back =
+    Update.step ~now:t2 m_kmem_beta_loaded (Msg.Key_event (char_key "k"))
+  in
+  Alcotest.(check bool)
+    "Keeper_memory back to alpha does not ask alpha's fresh diff again" false
+    (has_get (is_mem_diff_for "alpha") cmds_kmem_back);
 
   (* 2. Keeper_sandbox: loaded fresh for alpha, pressing j -> beta fetches beta's sandbox *)
   let m_ksb_alpha =
@@ -2153,7 +2181,9 @@ let test_round2_store_regressions () =
       m_k with
       fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_sandbox m_k.fleet;
       infra =
-        Infra_store.apply_keeper_sandbox ~observed_at:t1 alpha_sandbox m_k.infra;
+        Infra_store.set_keeper_sandbox ~keeper:"alpha"
+          (Observed.value ~observed_at:t1 alpha_sandbox)
+          m_k.infra;
     }
   in
   let _, cmds_ksb_beta =
@@ -3551,7 +3581,8 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
         };
       knowledge =
         Knowledge_store.empty
-        |> Knowledge_store.apply_wiki_page ~observed_at:t0 wiki_page;
+        |> Knowledge_store.set_wiki_page ~slug:wiki_page.slug
+             (Observed.value ~observed_at:t0 wiki_page);
     }
   in
   let m_wedit, _ = step m_wiki (char_key "e") in
@@ -3586,7 +3617,8 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
          })
   in
   Alcotest.(check bool) "a saved wiki page is stale until it is read again" true
-    (Observed.is_stale m_wsaved.knowledge.wiki_page);
+    (Observed.is_stale
+       (Knowledge_store.wiki_page_for ~slug:"guide" m_wsaved.knowledge));
   Alcotest.(check bool) "the Wiki dive reads the saved page again" true
     (has_cmd
        (function
@@ -3618,7 +3650,11 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
   let m_wr4, _ =
     Update.step ~now:t1 m_wopen
       (Msg.Http_reply
-         { epoch = m_wopen.epoch; reply = Msg.Reply_wiki_page (Ok page_r4) })
+         {
+           epoch = m_wopen.epoch;
+           reply =
+             Msg.Reply_wiki_page { page = page_r4.slug; result = Ok page_r4 };
+         })
   in
   let _, cmds_wbase = step m_wr4 (key Keymap.Input.Enter) in
   Alcotest.(check bool) "the save names the revision the form opened on" true
@@ -4794,7 +4830,9 @@ let test_nav_fix6_work_inbox_filter_and_split_pane_clamping () =
         Knowledge_store.empty
         |> Knowledge_store.set_tab Nav.Knowledge_memory
         |> Knowledge_store.apply_world_memory ~observed_at:t0 world_mem
-        |> Knowledge_store.apply_memory_diff ~observed_at:t0 diff1;
+        |> Knowledge_store.set_memory_diff ~keeper:None
+             ~window:Knowledge_store.Window_24h
+             (Observed.value ~observed_at:t0 diff1);
     }
   in
   let m_km_end, _ =
@@ -7193,7 +7231,9 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
     {
       m_loaded with
       knowledge =
-        Knowledge_store.apply_memory_diff ~observed_at:t0 keeper_diff
+        Knowledge_store.set_memory_diff ~keeper:(Some "alpha")
+          ~window:Knowledge_store.Window_24h
+          (Observed.value ~observed_at:t0 keeper_diff)
           m_loaded.knowledge;
     }
   in
@@ -7444,8 +7484,7 @@ let test_fetch_failure_lands_on_panel_slot () =
       Alcotest.fail "a failed refetch keeps the last good value"
 
 (* A failure that is not retryable is asked again once the question changes.
-   New parameters mark it stale, and a slot that holds one keeper at a time
-   cannot tell which keeper failed. *)
+   New parameters mark it stale, and another keeper has its own slot. *)
 let test_failure_is_asked_again_for_a_new_question () =
   (match
      Observed.mark_stale
@@ -7468,9 +7507,13 @@ let test_failure_is_asked_again_for_a_new_question () =
            epoch = m0.epoch;
            reply =
              Msg.Reply_keeper_sandbox
-               (Error
-                  (Msg.Http_error
-                     { status = 400; body = "bad keeper"; api_error = None }));
+               {
+                 keeper = "alpha";
+                 result =
+                   Error
+                     (Msg.Http_error
+                        { status = 400; body = "bad keeper"; api_error = None });
+               };
          })
   in
   let beta =
@@ -7502,6 +7545,73 @@ let test_failure_is_asked_again_for_a_new_question () =
   in
   Alcotest.(check bool) "a keeper's sandbox is asked after another 400" true
     asks_beta
+
+(* Each answer lands in its own target's slot: one keeper's failure or 404
+   does not touch another keeper's slot. *)
+let test_answers_land_on_their_own_target () =
+  let m0 = Model.initial () in
+  let reply (m : Model.t) r =
+    fst (Update.step ~now:t1 m (Msg.Http_reply { epoch = m.epoch; reply = r }))
+  in
+  let http status = Msg.Http_error { status; body = "x"; api_error = None } in
+  let retryable_failure = function
+    | Observed.Failed { retryable; _ } -> Some retryable
+    | Observed.Value _ | Observed.Loading _ | Observed.Absent
+    | Observed.Unreported ->
+        None
+  in
+  let sandbox_error keeper status =
+    Msg.Reply_keeper_sandbox { keeper; result = Error (http status) }
+  in
+  let m1 =
+    reply (reply m0 (sandbox_error "alpha" 503)) (sandbox_error "beta" 400)
+  in
+  Alcotest.(check (option bool)) "alpha keeps its own retryable failure"
+    (Some true)
+    (retryable_failure
+       (Infra_store.keeper_sandbox_for ~keeper:"alpha" m1.infra));
+  Alcotest.(check (option bool)) "beta's 400 lands on beta" (Some false)
+    (retryable_failure (Infra_store.keeper_sandbox_for ~keeper:"beta" m1.infra));
+  let on_beta_sandbox =
+    {
+      m1 with
+      nav =
+        {
+          m1.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "beta"; tab = Nav.Keeper_sandbox } ];
+        };
+    }
+  in
+  let asks_sandbox_of keeper =
+    List.exists
+      (function
+        | Cmd.Http_get { req = Cmd.Get_keeper_sandbox { keeper = k }; _ } ->
+            String.equal k keeper
+        | _ -> false)
+      (Cmd.flatten (View_fetches.fetches_for_current_view on_beta_sandbox))
+  in
+  Alcotest.(check bool) "beta's 400 is not asked again on the next plan" false
+    (asks_sandbox_of "beta");
+  let internals_error keeper status =
+    Msg.Reply_keeper_memory_os_internals { keeper; result = Error (http status) }
+  in
+  let m2 =
+    reply (reply m0 (internals_error "alpha" 503)) (internals_error "beta" 404)
+  in
+  Alcotest.(check (option bool)) "beta's 404 leaves alpha's internals alone"
+    (Some true)
+    (retryable_failure
+       (Knowledge_store.memory_os_internals_for ~keeper:"alpha" m2.knowledge));
+  Alcotest.(check bool) "beta's 404 is Absent on beta" true
+    (match
+       Knowledge_store.memory_os_internals_for ~keeper:"beta" m2.knowledge
+     with
+     | Observed.Absent -> true
+     | Observed.Value _ | Observed.Loading _ | Observed.Unreported
+     | Observed.Failed _ ->
+         false)
 
 (* On a first visit to the Wiki tab the fetch list is built before the index
    lands, so it names no page. The index reply asks for the page it selects. *)
@@ -7609,7 +7719,8 @@ let test_wiki_index_reply_requests_selected_page () =
     {
       on_wiki_tab with
       knowledge =
-        Knowledge_store.apply_wiki_page ~observed_at:t0 detail
+        Knowledge_store.set_wiki_page ~slug:detail.slug
+          (Observed.value ~observed_at:t0 detail)
           on_wiki_tab.knowledge;
     }
   in
@@ -8344,6 +8455,8 @@ let () =
             `Quick test_fetch_failure_lands_on_panel_slot;
           Alcotest.test_case "A failure is asked again for new parameters or another keeper"
             `Quick test_failure_is_asked_again_for_a_new_question;
+          Alcotest.test_case "An answer lands on its own target's slot"
+            `Quick test_answers_land_on_their_own_target;
           Alcotest.test_case "The wiki index reply asks for the page it selects"
             `Quick test_wiki_index_reply_requests_selected_page;
           Alcotest.test_case "Infra changes follow the selected repository"

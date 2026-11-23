@@ -1309,7 +1309,11 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
       end
     in
     let writer_status_opt =
-      match Observed.to_option model.knowledge.memory_diff with
+      match
+        Observed.to_option
+          (Knowledge_store.memory_diff_for ~keeper:(Some name)
+             ~window:model.knowledge.memory_diff_window model.knowledge)
+      with
       | Some
           {
             scope = Wire_knowledge.Scope_keeper kp;
@@ -1720,8 +1724,10 @@ let find_ssh_pool_for_keeper (model : Model.t) ~name =
         snap.ssh_pools
 
 let resolve_keeper_sandbox (model : Model.t) ~name =
-  match Observed.to_option model.infra.keeper_sandbox with
-  | Some resp when String.equal resp.keeper name ->
+  match
+    Observed.to_option (Infra_store.keeper_sandbox_for ~keeper:name model.infra)
+  with
+  | Some resp ->
       let pool_opt =
         match resp.sandbox with
         | Wire_infra.Sandbox_ssh_keeper { pool = Some p; _ } -> Some p
@@ -1733,7 +1739,7 @@ let resolve_keeper_sandbox (model : Model.t) ~name =
             None
       in
       Some (resp.sandbox, pool_opt)
-  | Some _ | None -> (
+  | None -> (
       match Observed.to_option model.infra.sandboxes with
       | None -> None
       | Some snap -> (
@@ -1881,6 +1887,9 @@ let render_sandbox_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
       let m24_opt =
         match resolve_keeper_sandbox model ~name with
         | None ->
+            let sandbox_obs =
+              Infra_store.keeper_sandbox_for ~keeper:name model.infra
+            in
             (match Fleet_store.sandbox_profile_of ~keeper:name model.fleet with
             | Some _ ->
                 let lbl, tone = Ops_common.keeper_sandbox_label ~model name in
@@ -1889,17 +1898,27 @@ let render_sandbox_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                   ~key:(Ops_common.say model ~ko:"프로필" ~en:"Profile")
                   ~value:lbl ~val_fg:(Theme.status_color theme tone)
                   ~val_attrs:Attr.bold ();
-                if top_rect.h >= 2 then
+                if top_rect.h >= 2 then begin
+                  let style, line =
+                    match sandbox_obs with
+                    | Observed.Failed { reason; _ } ->
+                        ( Typography.status ~bg theme Theme.Status_critical
+                        , Ops_common.say model ~ko:("조회 실패: " ^ reason)
+                            ~en:("Fetch failed: " ^ reason) )
+                    | Observed.Loading _ | Observed.Unreported
+                    | Observed.Absent | Observed.Value _ ->
+                        ( Typography.whisper ~bg theme
+                        , Ops_common.say model
+                            ~ko:"상세 샌드박스 프로브 데이터 대기 중"
+                            ~en:"Detailed sandbox telemetry pending" )
+                  in
                   ignore
                     (Ops_common.put_line ~clip:top_rect grid ~x:top_rect.x
-                       ~y:(top_rect.y + 1) ~max_w:top_rect.w
-                       ~style:(Typography.whisper ~bg theme)
-                       (Ops_common.say model
-                          ~ko:"상세 샌드박스 프로브 데이터 대기 중"
-                          ~en:"Detailed sandbox telemetry pending"))
+                       ~y:(top_rect.y + 1) ~max_w:top_rect.w ~style line)
+                end
             | None ->
                 Ops_common.draw_observed_empty grid ~rect:top_rect ~theme
-                  ~lang:model.lang model.infra.keeper_sandbox
+                  ~lang:model.lang sandbox_obs
                   ~empty_msg:
                     (Say.make ~ko:"이 키퍼의 샌드박스 정보 없음"
                        ~en:"No sandbox telemetry for this keeper"));

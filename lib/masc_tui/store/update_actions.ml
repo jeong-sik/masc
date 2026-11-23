@@ -2099,10 +2099,13 @@ and execute_action ~now (m : Model.t) action =
                     | Some p -> Some p.body
                     | None -> Some id)
                 | Nav.Wiki_dive slug -> (
-                    match Observed.to_option m.knowledge.wiki_page with
+                    match
+                      Observed.to_option
+                        (Knowledge_store.wiki_page_for ~slug m.knowledge)
+                    with
                     | Some detail
-                      when String.equal detail.slug slug
-                           && not (String.equal (String.trim detail.body_markdown) "")
+                      when not
+                             (String.equal (String.trim detail.body_markdown) "")
                       ->
                         Some detail.body_markdown
                     | Some _ | None -> Some slug)
@@ -2133,13 +2136,16 @@ and execute_action ~now (m : Model.t) action =
                             match Knowledge_store.selected_wiki_page m.knowledge with
                             | None -> None
                             | Some sel -> (
-                                match Observed.to_option m.knowledge.wiki_page with
+                                match
+                                  Observed.to_option
+                                    (Knowledge_store.wiki_page_for ~slug:sel.slug
+                                       m.knowledge)
+                                with
                                 | Some detail
-                                  when String.equal detail.slug sel.slug
-                                       && not
-                                            (String.equal
-                                               (String.trim detail.body_markdown)
-                                               "") ->
+                                  when not
+                                         (String.equal
+                                            (String.trim detail.body_markdown)
+                                            "") ->
                                     Some detail.body_markdown
                                 | Some _ | None -> Some sel.slug))
                         | `Artifacts ->
@@ -2288,8 +2294,11 @@ and execute_action ~now (m : Model.t) action =
                 , [] )
           in
           let wiki_external_url ~expected_slug () =
-            match Observed.to_option m.knowledge.wiki_page with
-            | Some detail when String.equal detail.slug expected_slug -> (
+            match
+              Observed.to_option
+                (Knowledge_store.wiki_page_for ~slug:expected_slug m.knowledge)
+            with
+            | Some detail -> (
                 match
                   List.find_map
                     (fun (lnk : Wire_knowledge.wiki_outgoing_link) ->
@@ -2304,7 +2313,7 @@ and execute_action ~now (m : Model.t) action =
                 with
                 | Some u -> Some u
                 | None -> extract_first_http_url detail.body_markdown)
-            | Some _ | None -> None
+            | None -> None
           in
           match Model.active_dive m with
           | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) ->

@@ -926,9 +926,8 @@ let open_memory_act_modal (m : Model.t) ~(keeper_default : string) =
    again. The page it opens on becomes the edit's base, so the save names the
    revision the form's text came from. *)
 let open_wiki_edit_modal ~now (m : Model.t) ~(slug : string) =
-  match m.knowledge.wiki_page with
-  | Observed.Value { data = d; stale = false; _ } when String.equal d.slug slug
-    ->
+  match Knowledge_store.wiki_page_for ~slug m.knowledge with
+  | Observed.Value { data = d; stale = false; _ } ->
       open_custom_inline_modal
         { m with knowledge = Knowledge_store.begin_wiki_edit d m.knowledge }
         [

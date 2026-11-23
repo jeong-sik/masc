@@ -1950,7 +1950,10 @@ let enter_plan (m : Model.t) : enter_plan =
           | Nav.Knowledge_memory -> (
               let diff_plan () =
                 let rev_bounds =
-                  match Observed.to_option m.knowledge.memory_diff with
+                  match
+                    Observed.to_option
+                      (Knowledge_store.current_memory_diff m.knowledge)
+                  with
                   | None -> None
                   | Some diff -> (
                       match diff.range.from_rev, diff.range.to_rev with
@@ -3131,10 +3134,10 @@ let sandbox_entry_info_for_keeper ~use_keeper_detail ~keeper
   let from_detail =
     if not use_keeper_detail then None
     else
-      match Observed.to_option inf.keeper_sandbox with
-      | Some resp when String.equal resp.keeper keeper ->
-          Some (sandbox_entry_info_of_detail ~sandboxes resp.sandbox)
-      | Some _ | None -> None
+      Option.map
+        (fun (resp : Wire_infra.keeper_sandbox_response) ->
+          sandbox_entry_info_of_detail ~sandboxes resp.sandbox)
+        (Observed.to_option (Infra_store.keeper_sandbox_for ~keeper inf))
   in
   match from_detail with
   | Some _ as found -> found
@@ -3331,14 +3334,12 @@ let wiki_preview_max_scroll ~bp ~theme ~(rect : Rect.t)
     in
     (
         let page_detail =
-          match Observed.to_option k.wiki_page with
-          | Some d -> (
-              match target_slug, sel_summary with
-              | Some want, _ when String.equal d.slug want -> Some d
-              | None, Some s when String.equal d.slug s.slug -> Some d
-              | None, None -> Some d
-              | Some _, _ | None, Some _ -> None)
-          | None -> None
+          match target_slug, sel_summary with
+          | Some slug, _ ->
+              Observed.to_option (Knowledge_store.wiki_page_for ~slug k)
+          | None, Some s ->
+              Observed.to_option (Knowledge_store.wiki_page_for ~slug:s.slug k)
+          | None, None -> None
         in
         match page_detail with
         | Some d ->
@@ -3384,7 +3385,7 @@ let memory_right_pane_max_scroll ~bp ~(rect : Rect.t)
   let content = ui_pad_content ~bp inner in
   if Rect.is_empty content then 0
   else
-    match Observed.to_option k.memory_diff with
+    match Observed.to_option (Knowledge_store.current_memory_diff k) with
     | None -> 0
     | Some _ ->
         (* Matches draw_temporal_memory_diff (screen_knowledge.ml:2183-2317):
@@ -3395,10 +3396,13 @@ let memory_right_pane_max_scroll ~bp ~(rect : Rect.t)
         let bottom = content.h in
         if !y < bottom then incr y;
         if !y + 1 < bottom then y := !y + 2;
-        (match k.memory_diff_keeper, Observed.to_option k.memory_os_internals with
-        | Some kp, Some intr when String.equal intr.keeper kp && !y < bottom ->
-            incr y
-        | Some _, Some _ | Some _, None | None, Some _ | None, None -> ());
+        (match
+           Option.bind k.memory_diff_keeper (fun keeper ->
+               Observed.to_option
+                 (Knowledge_store.memory_os_internals_for ~keeper k))
+         with
+        | Some _ when !y < bottom -> incr y
+        | Some _ | None -> ());
         if !y < bottom then incr y;
         let avail_h = max 1 (bottom - !y) in
         max 0 (Knowledge_store.memory_diff_line_count k - avail_h)
@@ -3963,19 +3967,19 @@ let keeper_tab_max_scroll ~embedded (m : Model.t) ~name ~tab =
         let footer_h = if content_h >= 7 then 2 else 0 in
         let body_h = max 0 (content_h - footer_h) in
         let hdr_rows =
-          match Observed.to_option m.knowledge.memory_diff with
+          match
+            Observed.to_option
+              (Knowledge_store.memory_diff_for ~keeper:(Some name)
+                 ~window:m.knowledge.memory_diff_window m.knowledge)
+          with
           | Some
-              {
-                scope = Wire_knowledge.Scope_keeper k;
-                retrieval_heat = heat;
-                body = Wire_knowledge.Keeper_diff _;
-                _;
-              }
-            when String.equal k name ->
+              { retrieval_heat = heat; body = Wire_knowledge.Keeper_diff _; _ }
+            ->
               let has_os =
-                match Observed.to_option m.knowledge.memory_os_internals with
-                | Some intr -> String.equal intr.keeper name
-                | None -> false
+                Option.is_some
+                  (Observed.to_option
+                     (Knowledge_store.memory_os_internals_for ~keeper:name
+                        m.knowledge))
               in
               let heat_total =
                 heat.hot + heat.warm + heat.cold + heat.never_retrieved
@@ -3985,14 +3989,7 @@ let keeper_tab_max_scroll ~embedded (m : Model.t) ~name ~tab =
                 if heat_total > 0 && body_h - base >= 4 then 3 else 0
               in
               base + heat_rows
-          | Some
-              {
-                scope = Wire_knowledge.Scope_world | Wire_knowledge.Scope_keeper _;
-                body = Wire_knowledge.Keeper_diff _ | Wire_knowledge.World_diff _;
-                _;
-              }
-          | None ->
-              0
+          | Some { body = Wire_knowledge.World_diff _; _ } | None -> 0
         in
         let vis_h = max 1 (body_h - hdr_rows) in
         let total =
@@ -5341,11 +5338,6 @@ let apply_move (m : Model.t) dir =
                       if m.nav.zoomed && Model.can_zoom_current_view m then 1
                       else pane_index
                     in
-                    let prev_slug =
-                      match Knowledge_store.selected_wiki_page m.knowledge with
-                      | Some p -> Some p.slug
-                      | None -> None
-                    in
                     let prev_mem_keeper = m.knowledge.memory_diff_keeper in
                     let has_matching_diagram =
                       Nav.equal_knowledge_tab m.knowledge.active_tab
@@ -5402,29 +5394,8 @@ let apply_move (m : Model.t) dir =
                       , knowledge.wiki_artifacts_submode
                       , eff_pane
                       with
-                      | Nav.Knowledge_wiki_artifacts, `Wiki, 0 -> (
-                          match Knowledge_store.selected_wiki_page knowledge with
-                          | Some p ->
-                              let loaded_matches =
-                                match Observed.to_option knowledge.wiki_page with
-                                | Some d -> String.equal d.slug p.slug
-                                | None -> false
-                              in
-                              if
-                                (not
-                                   (Option.equal String.equal prev_slug
-                                      (Some p.slug)))
-                                || not loaded_matches
-                              then
-                                [
-                                  Cmd.Http_get
-                                    {
-                                      epoch = m.epoch;
-                                      req = Cmd.Get_wiki_page { page = p.slug };
-                                    };
-                                ]
-                              else []
-                          | None -> [])
+                      | Nav.Knowledge_wiki_artifacts, `Wiki, 0 ->
+                          View_fetches.selected_wiki_page_fetch next
                       | Nav.Knowledge_memory, _, 0 ->
                           if
                             not

@@ -7,6 +7,8 @@ open Masc_tui_core
 open Masc_tui_keymap
 open Masc_tui_protocol
 
+module String_map : Map.S with type key = string
+
 val max_logs : int
 val max_activity : int
 
@@ -33,7 +35,8 @@ type t = {
   active_tab : Nav.infra_tab;
   sandboxes : Wire_infra.sandboxes_snapshot Observed.t;
   sandboxes_fallback_404 : bool;
-  keeper_sandbox : Wire_infra.keeper_sandbox_response Observed.t;
+  keeper_sandboxes : Wire_infra.keeper_sandbox_response Observed.t String_map.t;
+      (** One slot per keeper the sandbox route was asked about. *)
   repositories : Wire_infra.repository list Observed.t;
   repo_activity : repo_activity option;
   logs : Wire_infra.system_log_entry list;
@@ -71,8 +74,11 @@ val apply_sandboxes_fallback :
 (** Synthesize a truthful fallback {!Wire_infra.sandboxes_snapshot} from
     keeper [meta.sandbox_profile] and 24h [tool_series] totals when
     [/api/v1/infra/sandboxes] returns HTTP 404 on older servers. *)
-val apply_keeper_sandbox :
-  observed_at:Clock.Mono.t -> Wire_infra.keeper_sandbox_response -> t -> t
+val keeper_sandbox_for :
+  keeper:string -> t -> Wire_infra.keeper_sandbox_response Observed.t
+(** [keeper]'s slot. [Unreported] until the route answers for [keeper]. *)
+val set_keeper_sandbox :
+  keeper:string -> Wire_infra.keeper_sandbox_response Observed.t -> t -> t
 val apply_repositories :
   observed_at:Clock.Mono.t -> Wire_infra.repository list -> t -> t
 val request_repo_activity : repo_id:string -> t -> t

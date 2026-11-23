@@ -7023,7 +7023,8 @@ let test_failure_is_asked_again_for_a_new_question () =
         | Cmd.Http_get _ | Cmd.Batch _ | Cmd.Http_post _ | Cmd.Http_put _
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
-        | Cmd.Copy_clipboard _ | Cmd.Open_external_url _
+        | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _
+        | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
             false)

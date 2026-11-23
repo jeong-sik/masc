@@ -764,8 +764,9 @@ and submit_composer ~now ~mode (m : Model.t) =
               || Fleet_store.has_active_chat_stream ~keeper m.fleet
               || Drafts.has_active_tx_for ~keeper m.drafts
             in
-            (* A busy Keeper queues the message. Only a steer cuts a turn, and
-               only the operation this TUI's own request is streaming. *)
+            (* A busy Keeper queues the message. Of the ways to send, only a
+               steer cuts a turn, and only the operation this TUI's own request
+               is streaming. The interrupt key is a separate action. *)
             let effective_mode, wire_mode, steer_refusal =
               if not keeper_is_busy then
                 (Drafts.Mode_direct, Wire_fleet.Follow_up, None)

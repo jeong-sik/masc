@@ -184,11 +184,6 @@ metadata yet. Default false: creation is rejected because such a wake can \
 never be settled until the keeper exists."""
 
 [[params]]
-name = "source"
-type = "string"
-enum = ["operator_request", "automated_request", "system_request"]
-
-[[params]]
 name = "installation_id"
 type = "string"
 description = """

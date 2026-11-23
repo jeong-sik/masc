@@ -168,11 +168,6 @@ description = """
 Allow a wake whose target Keeper has no durable metadata yet. Default false."""
 
 [[params]]
-name = "source"
-type = "string"
-enum = ["operator_request", "automated_request", "system_request"]
-
-[[params]]
 name = "installation_id"
 type = "string"
 description = """

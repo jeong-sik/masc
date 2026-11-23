@@ -1651,8 +1651,7 @@ let test_verifier_regressions () =
         | Cmd.Post_schedule_create _
         | Cmd.Post_connector_bind _
         | Cmd.Post_repo_add _
-        | Cmd.Post_task_cancel _
-        | Cmd.Post_harness_overrule _ ->
+        | Cmd.Post_task_cancel _ ->
             false)
     | Cmd.Batch _
     | Cmd.Http_get _
@@ -3130,7 +3129,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     (Option.equal Nav.equal_overlay m_sched_modal.nav.overlay
        (Some (Nav.Inline_action Nav.Schedule_form)));
 
-  (* Verification_dive: [a] approve, [x] -> Verification_reject modal -> submit, [h] -> Harness_overrule modal -> submit, [Space] JSON *)
+  (* Verification_dive: [a] approve, [x] -> Verification_reject modal -> submit, [Space] JSON *)
   let m_vdive =
     {
       m_work with
@@ -3182,20 +3181,6 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     true
     (Option.is_none m_vrej_done.inline_modal
      && Option.is_none m_vrej_done.nav.overlay);
-  let m_hov, _ = step m_vdive (char_key "h") in
-  Alcotest.(check bool) "Verification_dive [h] opens Harness_overrule modal" true
-    (Option.equal Nav.equal_overlay m_hov.nav.overlay
-       (Some (Nav.Inline_action (Nav.Harness_overrule "task-100"))));
-  let m_hov_typed, _ = step m_hov (char_key "r") in
-  let _, cmds_hov = step m_hov_typed (key Keymap.Input.Enter) in
-  Alcotest.(check bool) "Harness_overrule submit emits Post_harness_overrule" true
-    (has_cmd
-       (function
-         | Cmd.Http_post
-             { req = Cmd.Post_harness_overrule { target_id = "task-100"; _ }; _ } ->
-             true
-         | _ -> false)
-       cmds_hov);
   let m_vjson, _ = step m_vdive (char_key " ") in
   Alcotest.(check bool) "Work_dive [Space] toggles show_raw_json" true
     m_vjson.infra.show_raw_json;

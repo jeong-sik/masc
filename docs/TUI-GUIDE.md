@@ -234,13 +234,12 @@ Four sub-tabs (`[` / `]` or `←` / `→`):
    - Goal hotkeys: `a` advance/approve (opens server-issued confirmation proof
      modal when `Awaiting_confirmation`), `c` request completion verification,
      `x` pause (or drop when already paused).
-   - Verification hotkeys: `a` approve verdict, `x` reject modal, `h` / `X`
-     harness overrule modal.
+   - Verification hotkeys: `a` approve verdict, `x` reject modal.
 2. **Tasks & Schedules**: workspace task backlog and scheduled automations
    (`Space` cycles the status chip All → Active → AwaitingVerify → Todo →
    Unlinked → Done → Schedules, `/` narrows by title or id within the chip,
    `Enter` dives into Task detail, `n` opens new Schedule form, `x` opens Task
-   cancel modal, `h` / `X` opens harness overrule modal).
+   cancel modal).
    - Schedule form: target Keeper, repeat (`once`, or `every` with a delay
      such as `every 30m`), first run delay (`90s`, `10m`, `2h`, `1d`), and the
      prompt the Keeper is woken with. A repeat or delay in any other form keeps

@@ -1242,16 +1242,6 @@ let execute_post t ~epoch req =
                    label = Say.make ~ko:"작업 취소 완료" ~en:"Task cancelled";
                    result;
                  })
-        | Cmd.Post_harness_overrule _ ->
-            let result = post_ack t ~path ~body in
-            Some
-              (Msg.Reply_action_ack
-                 {
-                   label =
-                     Say.make ~ko:"하네스 판정 재지정 완료"
-                       ~en:"Harness label updated";
-                   result;
-                 })
       in
       Option.iter
         (fun reply ->

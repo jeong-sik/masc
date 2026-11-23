@@ -601,7 +601,6 @@ let open_inline_modal (m : Model.t) kind =
     | ( Nav.Btw_query
       | Nav.Gate_reject _
       | Nav.Verification_reject _
-      | Nav.Harness_overrule _
       | Nav.Task_cancel _
       | Nav.Schedule_form
       | Nav.Connector_form
@@ -2116,7 +2115,6 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
   | ( Nav.Btw_query
     | Nav.Gate_reject _
     | Nav.Verification_reject _
-    | Nav.Harness_overrule _
     | Nav.Task_cancel _
     | Nav.Schedule_form
     | Nav.Connector_form
@@ -2265,16 +2263,6 @@ let submit_inline_modal ~now (m : Model.t) =
                               };
                         };
                     ] ))
-          | Form_standard (Nav.Harness_overrule target_id) ->
-              let reason = Model.modal_field_value ~key:"reason" modal in
-              ( mark_submitting m
-              , [
-                  Cmd.Http_post
-                    {
-                      epoch = m.epoch;
-                      req = Cmd.Post_harness_overrule { target_id; reason };
-                    };
-                ] )
           | Form_standard (Nav.Task_cancel task_id) -> (
               let reason_raw = Model.modal_field_value ~key:"reason" modal in
               let reason =
@@ -4935,7 +4923,6 @@ let apply_move (m : Model.t) dir =
                   false
               | ( ( Nav.Gate_reject _
                   | Nav.Verification_reject _
-                  | Nav.Harness_overrule _
                   | Nav.Task_cancel _
                   | Nav.Schedule_form
                   | Nav.Connector_form

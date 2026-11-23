@@ -84,7 +84,6 @@ type inline_action_kind =
   | Btw_query
   | Gate_reject of string
   | Verification_reject of string
-  | Harness_overrule of string
   | Task_cancel of string
   | Schedule_form
   | Connector_form

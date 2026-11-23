@@ -163,7 +163,6 @@ type post_request =
       reason : string option;
       expected_workspace : Wire_work.expected_workspace;
     }
-  | Post_harness_overrule of { target_id : string; reason : string }
 
 type put_request =
   | Put_wiki_page of { page : string; request : Wire_knowledge.wiki_put_request }
@@ -331,7 +330,6 @@ let post_request_path = function
       Wire_runtime.connector_bind_path ~connector
   | Post_repo_add _ -> Wire_infra.repositories_path
   | Post_task_cancel _ -> "/api/v1/dashboard/tasks/cancel"
-  | Post_harness_overrule _ -> "/api/v1/dashboard/harness-label"
 
 let post_request_body = function
   | Post_ask_answer { keeper; ask_id; answers } ->
@@ -399,8 +397,6 @@ let post_request_body = function
       `Assoc fields
   | Post_task_cancel { task_id; reason; expected_workspace } ->
       Wire_work.encode_task_cancel ~task_id ~reason ~expected_workspace
-  | Post_harness_overrule { target_id; reason } ->
-      `Assoc [ ("target_id", `String target_id); ("reason", `String reason) ]
 
 let put_request_path = function
   | Put_wiki_page { page; _ } -> Wire_knowledge.wiki_page_path ~page

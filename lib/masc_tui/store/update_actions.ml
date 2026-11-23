@@ -954,7 +954,6 @@ and execute_action ~now (m : Model.t) action =
                     false
                 | ( ( Nav.Gate_reject _
                     | Nav.Verification_reject _
-                    | Nav.Harness_overrule _
                     | Nav.Task_cancel _
                     | Nav.Schedule_form
                     | Nav.Connector_form
@@ -1225,7 +1224,6 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Btw_query -> Drafts.clear_btw m.drafts
             | Nav.Gate_reject _
             | Nav.Verification_reject _
-            | Nav.Harness_overrule _
             | Nav.Task_cancel _
             | Nav.Schedule_form
             | Nav.Connector_form

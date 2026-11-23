@@ -1297,7 +1297,7 @@ let test_all_7_overlays () =
               assert_clean_grid ~label:"overlay_queue_context" g)
             Nav.all_queue_context_tabs;
 
-          (* 5. Inline Action & /btw Modal (all 9 kinds + btw streaming/answered) *)
+          (* 5. Inline Action & /btw Modal (all 8 kinds + btw streaming/answered) *)
           let btw_drafts, req_id =
             Drafts.start_btw ~now:Clock.Mono.zero ~keeper:"e-masc-the-leader"
               ~prompt:"Summarize PR #54340" base.drafts
@@ -1311,7 +1311,6 @@ let test_all_7_overlays () =
               Nav.Btw_query;
               Nav.Gate_reject "gate-1";
               Nav.Verification_reject "ver-1";
-              Nav.Harness_overrule "har-1";
               Nav.Task_cancel "task-3898";
               Nav.Schedule_form;
               Nav.Connector_form;

@@ -1202,10 +1202,6 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
             ] )
       | Some "x", _ ->
           Update_nav.open_inline_modal m (Nav.Verification_reject req_id)
-      | Some ("h" | "X"), Some v ->
-          Update_nav.open_inline_modal m (Nav.Harness_overrule v.task_id)
-      | Some ("h" | "X"), None ->
-          Update_nav.open_inline_modal m (Nav.Harness_overrule req_id)
       | _ -> (m, []))
   | Some (Nav.Dive_work (Nav.Goal_dive goal_id)) -> (
       let goal_opt =
@@ -1227,8 +1223,6 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
   | Some (Nav.Dive_work (Nav.Task_dive task_id)) -> (
       match printable_char with
       | Some "x" -> Update_nav.open_inline_modal m (Nav.Task_cancel task_id)
-      | Some ("h" | "X") ->
-          Update_nav.open_inline_modal m (Nav.Harness_overrule task_id)
       | _ -> (m, []))
   | Some (Nav.Dive_knowledge (Nav.Wiki_dive slug)) ->
       if is_ctrl_e then
@@ -1739,17 +1733,12 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                   | Some "x" ->
                       Update_nav.open_inline_modal m
                         (Nav.Verification_reject v.request_id)
-                  | Some ("h" | "X") ->
-                      Update_nav.open_inline_modal m
-                        (Nav.Harness_overrule v.task_id)
                   | _ -> (m, []))
               | `None -> (m, []))
           | Nav.Work_tasks_schedules -> (
               match Work_store.selected_task m.work, printable_char with
               | Some task, Some "x" ->
                   Update_nav.open_inline_modal m (Nav.Task_cancel task.id)
-              | Some task, Some ("h" | "X") ->
-                  Update_nav.open_inline_modal m (Nav.Harness_overrule task.id)
               | _ -> (m, []))
           | Nav.Work_inbox | Nav.Work_candle_scorecard -> (m, []))
       | Nav.Pulse -> (m, [])))
@@ -2110,7 +2099,6 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         false
                     | ( ( Nav.Gate_reject _
                         | Nav.Verification_reject _
-                        | Nav.Harness_overrule _
                         | Nav.Task_cancel _
                         | Nav.Schedule_form
                         | Nav.Connector_form
@@ -2551,7 +2539,6 @@ let apply_paste ~now:_ (m : Model.t) text =
                   false
               | ( ( Nav.Gate_reject _
                   | Nav.Verification_reject _
-                  | Nav.Harness_overrule _
                   | Nav.Task_cancel _
                   | Nav.Schedule_form
                   | Nav.Connector_form

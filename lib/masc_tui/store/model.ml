@@ -620,16 +620,6 @@ let inline_modal_for kind =
             secret = false;
           };
         ]
-    | Nav.Harness_overrule _ ->
-        [
-          {
-            key = "reason";
-            label = Say.make ~ko:"판정 재정의 사유" ~en:"Overrule reason";
-            value = "";
-            required = true;
-            secret = false;
-          };
-        ]
     | Nav.Task_cancel _ ->
         [
           {

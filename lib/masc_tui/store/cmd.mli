@@ -169,7 +169,6 @@ type post_request =
       reason : string option;
       expected_workspace : Wire_work.expected_workspace;
     }
-  | Post_harness_overrule of { target_id : string; reason : string }
 
 type put_request =
   | Put_wiki_page of { page : string; request : Wire_knowledge.wiki_put_request }

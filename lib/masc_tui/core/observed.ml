@@ -50,7 +50,8 @@ let is_stale = function
 let mark_stale = function
   | Value { data; observed_at; stale = _ } ->
       Value { data; observed_at; stale = true }
-  | (Loading _ | Absent | Unreported | Failed _) as other -> other
+  | Failed { reason; retryable = _; at } -> Failed { reason; retryable = true; at }
+  | (Loading _ | Absent | Unreported) as other -> other
 
 let observed_at = function
   | Value { observed_at; data = _; stale = _ } -> Some observed_at

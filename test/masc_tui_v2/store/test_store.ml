@@ -6973,6 +6973,65 @@ let test_fetch_failure_lands_on_panel_slot () =
   | Observed.Unreported ->
       Alcotest.fail "a failed refetch keeps the last good value"
 
+(* A failure that is not retryable is asked again once the question changes.
+   New parameters mark it stale, and a slot that holds one keeper at a time
+   cannot tell which keeper failed. *)
+let test_failure_is_asked_again_for_a_new_question () =
+  (match
+     Observed.mark_stale
+       (Observed.fetch_failed ~reason:"board[0]: drift" ~retryable:false
+          ~at:t0 Observed.unreported)
+   with
+  | Observed.Failed { retryable; reason; _ } ->
+      Alcotest.(check bool) "new parameters make the failure retryable" true
+        retryable;
+      Alcotest.(check string) "the panel keeps the reason" "board[0]: drift"
+        reason
+  | Observed.Loading _ | Observed.Value _ | Observed.Absent
+  | Observed.Unreported ->
+      Alcotest.fail "a stale failure stays a failure");
+  let m0 = Model.initial () in
+  let failed, _ =
+    Update.step ~now:t1 m0
+      (Msg.Http_reply
+         {
+           epoch = m0.epoch;
+           reply =
+             Msg.Reply_keeper_sandbox
+               (Error
+                  (Msg.Http_error
+                     { status = 400; body = "bad keeper"; api_error = None }));
+         })
+  in
+  let beta =
+    {
+      failed with
+      nav =
+        {
+          failed.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "beta"; tab = Nav.Keeper_sandbox } ];
+        };
+    }
+  in
+  let asks_beta =
+    List.exists
+      (function
+        | Cmd.Http_get { req = Cmd.Get_keeper_sandbox { keeper }; _ } ->
+            String.equal keeper "beta"
+        | Cmd.Http_get _ | Cmd.Batch _ | Cmd.Http_post _ | Cmd.Http_put _
+        | Cmd.Http_post_stream _ | Cmd.Sync_streams _
+        | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
+        | Cmd.Copy_clipboard _ | Cmd.Open_external_url _
+        | Cmd.Open_editor_escape_hatch _ | Cmd.Start_local_server
+        | Cmd.Restart_tui | Cmd.Quit _ ->
+            false)
+      (Cmd.flatten (View_fetches.fetches_for_current_view beta))
+  in
+  Alcotest.(check bool) "a keeper's sandbox is asked after another 400" true
+    asks_beta
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -7060,5 +7119,7 @@ let () =
             `Quick test_memory_explorer_store_fetches_reading_and_sse;
           Alcotest.test_case "A failed fetch lands on the panel slot, keeping the last value"
             `Quick test_fetch_failure_lands_on_panel_slot;
+          Alcotest.test_case "A failure is asked again for new parameters or another keeper"
+            `Quick test_failure_is_asked_again_for_a_new_question;
         ] );
     ]

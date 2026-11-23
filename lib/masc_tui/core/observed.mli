@@ -34,6 +34,10 @@ val is_loading : 'a t -> bool
 val is_value : 'a t -> bool
 val is_stale : 'a t -> bool
 val mark_stale : 'a t -> 'a t
+(** The question behind the slot changed: new parameters, a reconnect, a
+    dataset event. A [Value] keeps its data and is marked stale. A [Failed]
+    keeps its reason and becomes retryable, because the next request is no
+    longer the one that failed. Other states are unchanged. *)
 
 val observed_at : 'a t -> Clock.Mono.t option
 (** [Some observed_at] for [Value _]; [None] for all other states. *)

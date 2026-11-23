@@ -14,6 +14,28 @@ let needs_fetch ~force obs =
     | Observed.Failed { retryable = true; _ } ->
         true
 
+(* A slot that holds one target's answer at a time: a keeper's sandbox or
+   memory internals, a scope's memory diff, a wiki page. A value for another
+   target asks again. So does a failure, which does not record the target
+   that failed. *)
+let needs_target_fetch ~force ~holds_target obs =
+  match obs with
+  | Observed.Value { data; stale = false; _ } ->
+      force || not (holds_target data)
+  | Observed.Failed _ -> true
+  | Observed.Loading _
+  | Observed.Value { stale = true; _ }
+  | Observed.Absent
+  | Observed.Unreported ->
+      needs_fetch ~force obs
+
+let memory_diff_holds ~keeper (diff : Wire_knowledge.memory_diff) =
+  match (diff.scope, keeper) with
+  | Wire_knowledge.Scope_keeper k, Some name -> String.equal k name
+  | Wire_knowledge.Scope_world, None -> true
+  | Wire_knowledge.Scope_keeper _, None | Wire_knowledge.Scope_world, Some _ ->
+      false
+
 let add_if cond req acc = if cond then req :: acc else acc
 
 let dedup_reqs reqs =
@@ -64,30 +86,15 @@ let fetches_for_keeper_tab ~force ~name ~tab (m : Model.t) =
               { keeper = name; limit = Some 80; cursor = None })
   | Nav.Keeper_memory ->
       let diff_needed =
-        match m.knowledge.memory_diff with
-        | Observed.Value { data; stale = false; _ } -> (
-            force
-            ||
-            match data.scope with
-            | Wire_knowledge.Scope_keeper k -> not (String.equal k name)
-            | Wire_knowledge.Scope_world -> true)
-        | Observed.Loading _
-        | Observed.Value { stale = true; _ }
-        | Observed.Absent
-        | Observed.Unreported
-        | Observed.Failed _ ->
-            needs_fetch ~force m.knowledge.memory_diff
+        needs_target_fetch ~force
+          ~holds_target:(memory_diff_holds ~keeper:(Some name))
+          m.knowledge.memory_diff
       in
       let internals_needed =
-        match m.knowledge.memory_os_internals with
-        | Observed.Value { data; stale = false; _ } ->
-            force || not (String.equal data.keeper name)
-        | Observed.Loading _
-        | Observed.Value { stale = true; _ }
-        | Observed.Absent
-        | Observed.Unreported
-        | Observed.Failed _ ->
-            needs_fetch ~force m.knowledge.memory_os_internals
+        needs_target_fetch ~force
+          ~holds_target:(fun (i : Wire_knowledge.memory_os_internals) ->
+            String.equal i.keeper name)
+          m.knowledge.memory_os_internals
       in
       let facts_needed =
         match m.knowledge.keeper_memory_facts with
@@ -133,15 +140,10 @@ let fetches_for_keeper_tab ~force ~name ~tab (m : Model.t) =
            (Cmd.Get_candle_ledger { limit = Some 50 })
   | Nav.Keeper_sandbox ->
       let sandbox_needed =
-        match m.infra.keeper_sandbox with
-        | Observed.Value { data; stale = false; _ } ->
-            force || not (String.equal data.keeper name)
-        | Observed.Loading _
-        | Observed.Value { stale = true; _ }
-        | Observed.Absent
-        | Observed.Unreported
-        | Observed.Failed _ ->
-            needs_fetch ~force m.infra.keeper_sandbox
+        needs_target_fetch ~force
+          ~holds_target:(fun (s : Wire_infra.keeper_sandbox_response) ->
+            String.equal s.keeper name)
+          m.infra.keeper_sandbox
       in
       []
       |> add_if sandbox_needed (Cmd.Get_keeper_sandbox { keeper = name })
@@ -302,19 +304,13 @@ let fetches_for_workspace ~force (m : Model.t) =
                 match Knowledge_store.selected_wiki_page m.knowledge with
                 | None -> []
                 | Some p ->
-                    let page_matches =
-                      match m.knowledge.wiki_page with
-                      | Observed.Value { data; stale = false; _ } ->
-                          String.equal data.slug p.slug && not force
-                      | Observed.Loading _
-                      | Observed.Value { stale = true; _ }
-                      | Observed.Absent
-                      | Observed.Unreported
-                      | Observed.Failed _ ->
-                          false
-                    in
-                    if page_matches then []
-                    else [ Cmd.Get_wiki_page { page = p.slug } ])
+                    if
+                      needs_target_fetch ~force
+                        ~holds_target:(fun (d : Wire_knowledge.wiki_page_detail) ->
+                          String.equal d.slug p.slug)
+                        m.knowledge.wiki_page
+                    then [ Cmd.Get_wiki_page { page = p.slug } ]
+                    else [])
             | `Artifacts -> []
           in
           ([]
@@ -330,15 +326,10 @@ let fetches_for_workspace ~force (m : Model.t) =
             | None -> []
             | Some keeper ->
                 let internals_needed =
-                  match m.knowledge.memory_os_internals with
-                  | Observed.Value { data; stale = false; _ } ->
-                      force || not (String.equal data.keeper keeper)
-                  | Observed.Loading _
-                  | Observed.Value { stale = true; _ }
-                  | Observed.Absent
-                  | Observed.Unreported
-                  | Observed.Failed _ ->
-                      needs_fetch ~force m.knowledge.memory_os_internals
+                  needs_target_fetch ~force
+                    ~holds_target:(fun (i : Wire_knowledge.memory_os_internals) ->
+                      String.equal i.keeper keeper)
+                    m.knowledge.memory_os_internals
                 in
                 let facts_needed =
                   match m.knowledge.keeper_memory_facts with
@@ -371,23 +362,10 @@ let fetches_for_workspace ~force (m : Model.t) =
                      (Cmd.Get_keeper_memory_activity { keeper; limit = 50 })
           in
           let diff_needed =
-            match m.knowledge.memory_diff with
-            | Observed.Value { data; stale = false; _ } -> (
-                force
-                ||
-                match m.knowledge.memory_diff_keeper, data.scope with
-                | None, Wire_knowledge.Scope_world -> false
-                | Some kp, Wire_knowledge.Scope_keeper k ->
-                    not (String.equal kp k)
-                | None, Wire_knowledge.Scope_keeper _
-                | Some _, Wire_knowledge.Scope_world ->
-                    true)
-            | Observed.Loading _
-            | Observed.Value { stale = true; _ }
-            | Observed.Absent
-            | Observed.Unreported
-            | Observed.Failed _ ->
-                needs_fetch ~force m.knowledge.memory_diff
+            needs_target_fetch ~force
+              ~holds_target:
+                (memory_diff_holds ~keeper:m.knowledge.memory_diff_keeper)
+              m.knowledge.memory_diff
           in
           ([]
           |> add_if

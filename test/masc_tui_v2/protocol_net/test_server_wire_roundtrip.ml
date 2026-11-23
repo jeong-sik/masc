@@ -17,6 +17,8 @@ module Workspace = Masc.Workspace
 
 let observed_at = Clock.Mono.of_ns 1_000_000_000L
 
+(* Removes a temporary workspace. Cleanup errors are ignored: the assertions
+   have already run. *)
 let rec rm_rf path =
   match Unix.lstat path with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
@@ -27,7 +29,13 @@ let rec rm_rf path =
            (Sys.readdir path)
        with Sys_error _ -> ());
       (try Unix.rmdir path with Unix.Unix_error _ -> ())
-  | _ -> ( try Unix.unlink path with Unix.Unix_error _ -> ())
+  | {
+      Unix.st_kind =
+        ( Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO
+        | Unix.S_SOCK );
+      _;
+    } -> (
+      try Unix.unlink path with Unix.Unix_error _ -> ())
 
 (* A fresh workspace, and the [expected_workspace] pair the TUI sends for it:
    the canonical paths [/health] reports, which is what the TUI stores. *)
@@ -607,26 +615,6 @@ let test_published_artifact_roundtrip () =
   | Ok rows ->
       Alcotest.fail
         (Printf.sprintf "expected one artifact row, got %d" (List.length rows))
-
-(* Removes a temporary workspace. Cleanup errors are ignored: the assertions
-   have already run. *)
-let rec rm_rf path =
-  match Unix.lstat path with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
-  | { Unix.st_kind = Unix.S_DIR; _ } ->
-      (try
-         Array.iter
-           (fun entry -> rm_rf (Filename.concat path entry))
-           (Sys.readdir path)
-       with Sys_error _ -> ());
-      (try Unix.rmdir path with Unix.Unix_error _ -> ())
-  | {
-      Unix.st_kind =
-        ( Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO
-        | Unix.S_SOCK );
-      _;
-    } -> (
-      try Unix.unlink path with Unix.Unix_error _ -> ())
 
 let rec mkdir_p path =
   if not (Sys.file_exists path) then begin

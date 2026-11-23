@@ -1096,16 +1096,24 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               true
           | None -> Model.focusable_pane_count model > 1
         in
-        if show_tab_hint then raw
-        else
-          List.filter
-            (fun (h : Keymap.footer_hint) ->
-              not
-                (Keymap.equal_action h.action
-                   (Keymap.Cycle_focus_pane Keymap.Next)
-                 || Keymap.equal_action h.action
-                      (Keymap.Cycle_focus_pane Keymap.Prev)))
-            raw
+        let show_dive_hint =
+          match model.nav.overlay with
+          | None -> Update_nav.enter_has_effect model
+          | Some _ -> true
+        in
+        List.filter
+          (fun (h : Keymap.footer_hint) ->
+            let is_tab_hint =
+              Keymap.equal_action h.action (Keymap.Cycle_focus_pane Keymap.Next)
+              || Keymap.equal_action h.action
+                   (Keymap.Cycle_focus_pane Keymap.Prev)
+            in
+            let is_dive_hint =
+              Keymap.equal_action h.action Keymap.Dive_selected
+            in
+            (show_tab_hint || not is_tab_hint)
+            && (show_dive_hint || not is_dive_hint))
+          raw
     in
     let rec draw_keycaps count = function
       | [] -> ()

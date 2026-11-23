@@ -3873,6 +3873,17 @@ let test_nav_fix4_knowledge_board_chains_and_wiki_clusters () =
     "Down on collapsed board steps a-1 -> b-1" (Some "b-1")
     (Option.map (fun (p : Wire_knowledge.board_post) -> p.id)
        (Knowledge_store.selected_post k1));
+  let space_chain_root k =
+    match Knowledge_store.board_space_effect k with
+    | Knowledge_store.Board_space_toggle_chain root_id -> Some root_id
+    | Knowledge_store.Board_space_toggle_signal_only -> None
+  in
+  Alcotest.(check (option string))
+    "Space on a chained post folds its chain" (Some "root-a")
+    (space_chain_root k0);
+  Alcotest.(check (option string))
+    "Space on a singleton post flips the signal-only filter" None
+    (space_chain_root k1);
   (* Expand root-a while b-1 is selected -> preserves b-1 and re-syncs index to 3 *)
   let k_exp = Knowledge_store.toggle_succession_chain ~root_id:"root-a" k1 in
   Alcotest.(check (list string))

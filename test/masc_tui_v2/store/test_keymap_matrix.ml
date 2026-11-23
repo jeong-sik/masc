@@ -5137,9 +5137,68 @@ let test_pillar3_keeper_chat_empty_loading_and_korean_ime () =
      | Some (Observed.Loading _) -> true
      | _ -> false)
 
+let test_enter_hint_follows_enter_plan () =
+  let m_base = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let no_target_views : (string * Model.t) list =
+    [
+      ( "Runtime/Tools"
+      , {
+          m_base with
+          nav = { m_base.nav with workspace = Nav.Runtime };
+          runtime =
+            Runtime_store.set_tab Nav.Runtime_tools_connectors m_base.runtime;
+        } );
+      ( "Infra/Repos"
+      , {
+          m_base with
+          nav = { m_base.nav with workspace = Nav.Infra };
+          infra = Infra_store.set_tab Nav.Infra_repos_changes m_base.infra;
+        } );
+      ( "Infra/Logs"
+      , {
+          m_base with
+          nav = { m_base.nav with workspace = Nav.Infra };
+          infra = Infra_store.set_tab Nav.Infra_activity_logs m_base.infra;
+        } );
+      ( "Work/Candle"
+      , {
+          m_base with
+          nav = { m_base.nav with workspace = Nav.Work };
+          work = Work_store.set_tab Nav.Work_candle_scorecard m_base.work;
+        } );
+    ]
+  in
+  List.iter
+    (fun (label, (m : Model.t)) ->
+      Alcotest.(check bool)
+        (label ^ ": footer drops Enter")
+        false
+        (Update_nav.enter_has_effect m);
+      let m', cmds = Update_nav.dive_selected m in
+      Alcotest.(check int)
+        (label ^ ": Enter pushes no dive")
+        (List.length m.nav.dive_stack)
+        (List.length m'.nav.dive_stack);
+      Alcotest.(check int) (label ^ ": Enter sends no request") 0
+        (List.length cmds))
+    no_target_views;
+  let keepers =
+    { m_base with nav = { m_base.nav with workspace = Nav.Keepers } }
+  in
+  Alcotest.(check bool) "Keepers: footer offers Enter" true
+    (Update_nav.enter_has_effect keepers);
+  let dived, _ = Update_nav.dive_selected keepers in
+  Alcotest.(check int) "Keepers: Enter pushes the keeper dive" 1
+    (List.length dived.nav.dive_stack)
+
 let () =
   Alcotest.run "masc_tui_keymap_matrix"
     [
+      ( "enter_hint"
+      , [
+          Alcotest.test_case "footer offers Enter only where Enter acts"
+            `Quick test_enter_hint_follows_enter_plan;
+        ] );
       ( "axis_a_screen_dive_x_keys"
       , [
           Alcotest.test_case "34 contexts x 20 keys (680 cases)" `Quick

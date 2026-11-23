@@ -1621,8 +1621,8 @@ and execute_action ~now (m : Model.t) action =
               | Nav.Knowledge -> (
                   match m.knowledge.active_tab with
                   | Nav.Knowledge_board -> (
-                      match Knowledge_store.selected_post m.knowledge with
-                      | Some { succession_chain_root_id = Some root_id; _ } ->
+                      match Knowledge_store.board_space_effect m.knowledge with
+                      | Knowledge_store.Board_space_toggle_chain root_id ->
                           ( {
                               m with
                               knowledge =
@@ -1630,7 +1630,7 @@ and execute_action ~now (m : Model.t) action =
                                   m.knowledge;
                             }
                           , [] )
-                      | Some { succession_chain_root_id = None; _ } | None ->
+                      | Knowledge_store.Board_space_toggle_signal_only ->
                           let knowledge =
                             Knowledge_store.toggle_signal_only m.knowledge
                           in

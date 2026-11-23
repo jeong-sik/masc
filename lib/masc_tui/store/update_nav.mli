@@ -112,6 +112,11 @@ val cycle_memory_diagram_mode :
 val refresh_open_memory_diagram :
   now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
 
+val enter_has_effect : Model.t -> bool
+(** [true] when Enter on the current unfocused view dives, toggles, or fetches.
+    [dive_selected] runs the same plan, so the footer offers Enter only where
+    the key does something. *)
+
 val current_filter_query : Model.t -> string
 val set_active_filter_query : string -> Model.t -> Model.t
 

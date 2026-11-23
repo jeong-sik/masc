@@ -411,10 +411,19 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
              ~ko:(Printf.sprintf "전체 보드 · %d건" (List.length filtered))
              ~en:(Printf.sprintf "All Board · %d" (List.length filtered)))
     in
+    let space_hint =
+      match Knowledge_store.board_space_effect k with
+      | Knowledge_store.Board_space_toggle_chain _ ->
+          Say.make ~ko:"[Space] 계승" ~en:"[Space] Chain"
+      | Knowledge_store.Board_space_toggle_signal_only ->
+          if k.board_signal_only then
+            Say.make ~ko:"[Space] 전체 보기" ~en:"[Space] Show all"
+          else Say.make ~ko:"[Space] 신호만" ~en:"[Space] Signal only"
+    in
     let list_inner =
       Card.draw ~cache grid ~rect:list_rect ~theme
         (H.card_spec ~focused:(model.nav.pane_index = 0)
-           ~hotkey:(Say.resolve lang (Say.make ~ko:"[Space] 계승" ~en:"[Space] Chain"))
+           ~hotkey:(Say.resolve lang space_hint)
            list_title)
     in
     if not (Rect.is_empty list_inner) then begin

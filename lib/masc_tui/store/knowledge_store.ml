@@ -462,6 +462,17 @@ let selected_post t =
   let ps = board_display_posts t in
   List.nth_opt ps (clamp_index (List.length ps) t.selected_index)
 
+type board_space_effect =
+  | Board_space_toggle_chain of string
+  | Board_space_toggle_signal_only
+
+let board_space_effect t =
+  match selected_post t with
+  | Some { Wire_knowledge.succession_chain_root_id = Some root_id; _ } ->
+      Board_space_toggle_chain root_id
+  | Some { Wire_knowledge.succession_chain_root_id = None; _ } | None ->
+      Board_space_toggle_signal_only
+
 let selected_wiki_page t =
   let ps = wiki_display_pages t in
   List.nth_opt ps (clamp_index (List.length ps) t.selected_index)

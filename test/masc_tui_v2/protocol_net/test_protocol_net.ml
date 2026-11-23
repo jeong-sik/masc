@@ -2220,8 +2220,10 @@ let test_v25_data_pipeline_decoders () =
             "runtime_lane_observation": { "turn": { "turn_count": 77 } },
             "recent_turns": {
               "slots": [
-                [1795253600, 3, 0, 1],
-                [1795250000, 1, 0, 0]
+                { "starts_at": 1795253600, "ok": 3, "rested": 0, "failed": 1,
+                  "scheduled": 2, "reacted": 1, "chat": 1, "own": 0, "unknown": 0 },
+                { "starts_at": 1795250000, "ok": 1, "rested": 0, "failed": 0,
+                  "scheduled": 0, "reacted": 0, "chat": 0, "own": 1, "unknown": 0 }
               ]
             }
           }

@@ -30,12 +30,24 @@ const KeeperLastFailureWireSchema = Schema.Struct({
   at_unix: Schema.NullOr(Schema.Number.pipe(Schema.filter(Number.isFinite))),
 })
 
-// Half-hour slots of the last day (RFC-0515 §2.1): [starts_at, ok, rested, failed].
+// Half-hour slots of the last day (RFC-0515 §2.1, RFC-0511 D5). Each slot
+// counts its turns twice: by outcome (ok, rested, failed) and by what started
+// them (scheduled, reacted, chat, own, unknown).
+const RecentTurnsSlotWireSchema = Schema.Struct({
+  starts_at: Schema.Number,
+  ok: Schema.Number,
+  rested: Schema.Number,
+  failed: Schema.Number,
+  scheduled: Schema.Number,
+  reacted: Schema.Number,
+  chat: Schema.Number,
+  own: Schema.Number,
+  unknown: Schema.Number,
+})
+
 const RecentTurnsWireSchema = Schema.Struct({
   known_since: Schema.Number,
-  slots: Schema.Array(
-    Schema.Tuple(Schema.Number, Schema.Number, Schema.Number, Schema.Number)
-  ),
+  slots: Schema.Array(RecentTurnsSlotWireSchema),
 })
 
 // Mirror of the healthy row built by keeper_list_row_json in

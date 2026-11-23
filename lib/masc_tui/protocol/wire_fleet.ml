@@ -513,26 +513,11 @@ let decode_recent_turns_sparkline json =
   | Ok None -> Ok []
   | Ok (Some rt) ->
       let* raw_slots = optional_list_field rt "slots" in
-      let parse_slot = function
-        | `List [ ts_j; ok_j; _rested_j; fail_j ] ->
-            let ts_res =
-              match ts_j with
-              | `Int i -> Ok (Float.of_int i)
-              | `Float f when Float.is_finite f -> Ok f
-              | bad -> field_type_error "recent_turns.slots[0]" "a timestamp number" bad
-            in
-            let count_res label = function
-              | `Int i when i >= 0 -> Ok i
-              | `Float f when Float.is_finite f && f >= 0.0 -> Ok (Int.of_float f)
-              | bad -> field_type_error label "a non-negative count" bad
-            in
-            let* ts = ts_res in
-            let* ok_c = count_res "recent_turns.slots[1]" ok_j in
-            let* fail_c = count_res "recent_turns.slots[3]" fail_j in
-            Ok (ts, Float.of_int (ok_c + fail_c))
-        | bad ->
-            field_type_error "recent_turns.slots[]"
-              "a 4-element [ts, ok, rested, failed] array" bad
+      let parse_slot slot =
+        let* starts_at = required_int_field slot "starts_at" in
+        let* ok_c = required_nonnegative_int_field slot "ok" in
+        let* fail_c = required_nonnegative_int_field slot "failed" in
+        Ok (Float.of_int starts_at, Float.of_int (ok_c + fail_c))
       in
       let* parsed = decode_list "recent_turns.slots" parse_slot raw_slots in
       let chronological =

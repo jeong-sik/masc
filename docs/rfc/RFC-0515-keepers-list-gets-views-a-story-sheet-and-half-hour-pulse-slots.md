@@ -80,7 +80,8 @@ Keepers 목록은 `[` `]` 를 쓰지 않는다. `K` 창이 열려 있을 때만 
 
 ```ocaml
 type tally = { ok : int; rested : int; failed : int }
-type slot = { starts_at : int; tally : tally }   (* Unix 초, 30분 경계에 맞춘 칸 *)
+type causes = { scheduled : int; reacted : int; chat : int; own : int; unknown : int }
+type slot = { starts_at : int; tally : tally; causes : causes }   (* Unix 초, 30분 경계에 맞춘 칸 *)
 type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 ```
 
@@ -88,7 +89,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 - 칸을 지우는 때는 기록할 때뿐이다. 가장 새 칸보다 24시간 넘게 앞선 칸을 지운다. 그때 `known_since` 가 `가장 새 칸 − 24시간` 보다 앞이면 그 시각으로 올린다. 지운 칸이 없어도 같다. 읽을 때는 아무것도 계산하지 않는다. 그래서 행 JSON 은 턴이 기록될 때만 바뀐다(RFC-0481 조건 유지).
 - Keeper 하나가 들고 있는 칸은 시간으로 정해진다. 24시간 = 48칸에 지금 칸 하나를 더해 최대 49칸이다. 턴이 몇 개든 같다.
 - `known_since` 는 "이 시각부터는 턴을 빠짐없이 안다" 는 서버의 말이다. 서버가 켜질 때 결정 로그에서 다시 채우는 범위(시드)가 정한다.
-  - 시드는 자율 사이클 턴(`execution_path = autonomous_cycle`)만 센다. 채팅 턴은 실시간 기록에 없어서 시드에서도 뺀다. 지금보다 뒤로 찍힌 줄은 버린다.
+  - 시드는 자율 사이클 턴과 성공한 채팅 턴을 센다. 실패한 채팅 요청은 결정 행을 남기지 않아서 실시간 기록에서도 세지 않는다. 지금보다 뒤로 찍힌 줄은 버린다. 깨운 이유는 RFC-0511 D5(2026-11-23 개정)를 따른다.
   - 시드는 주 로그 `decisions.jsonl` 의 꼬리를 읽는다. 주 로그가 없거나, 주 로그를 처음부터 다 읽고도 창 시작에 못 닿으면 회전 로그 `decisions.jsonl.1` 을 이어 읽는다.
   - 창보다 오래된 줄을 읽으면 창의 시작이다. 줄의 이벤트 종류는 가리지 않는다. 그 줄 뒤의 줄은 모두 읽었기 때문이다.
   - 그런 줄 없이 읽기가 끝나면 두 로그에서 읽은 줄 중 가장 오래된 시각이다. 꼬리 읽기가 4MB · 1만 줄에서 끊긴 때와 로그가 창 안에서 시작하는 때가 여기다.
@@ -96,7 +97,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
   - 시드가 없는 Keeper 를 처음 기록하면 그 턴 시각이다.
   - 기록할 때 `가장 새 칸 − 24시간` 보다 앞이면 그 시각으로 올라간다. 그 밖에는 바뀌지 않는다.
 - 아는 틈: 쉼 턴은 결정 로그에 실패로 적히고, 결정 행 없이 끝나는 실패가 있다. 그래서 재시작 뒤 일부 칸의 결과가 바뀐다(#50211). 부팅 때 Keeper 시작이 시드보다 앞이라, 첫 턴이 시드보다 먼저 기록되면 시드를 건너뛰고 지난 하루를 잃는다. 기본 warmup 60초에서는 시드가 대개 먼저 끝난다(#50258).
-- 행 JSON `recent_turns` 는 `{known_since, slots: [[starts_at, ok, rested, failed], ...]}` 이다. 옛 `{truncated, turns}` 는 hard cut 이고 읽지 않는다.
+- 행 JSON `recent_turns` 는 `{known_since, slots: [{starts_at, ok, rested, failed, scheduled, reacted, chat, own, unknown}, ...]}` 이다. 옛 `{truncated, turns}` 와 칸 배열 `[starts_at, ok, rested, failed]` 는 hard cut 이고 읽지 않는다.
 - 한 축 줄 보기는 행에 30분 칸을 `pulseW` 개(§2.4.1, 최대 24) 그린다. 칸 글리프는 §2.4.3 이다. 목록 보기는 지금처럼 벽시계 정시 1시간 칸 12개를 그린다(E2).
 
 ### 2.2 Detailed 둘째 줄은 첫 줄 문장을 다시 쓰지 않는다

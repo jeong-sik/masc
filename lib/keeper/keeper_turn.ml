@@ -1077,16 +1077,7 @@ let run_keeper_invocation_turn_admitted_inner
                 with
                 | Keeper_unified_turn_success.Completed updated_meta -> updated_meta
               in
-              (* A direct turn counts in the pulse where its decision row is
-                 written: on success only. A failed direct request writes no
-                 decision row, so counting it live would make the seeded pulse
-                 disagree after a restart (#49984). *)
-              Keeper_turn_pulse.record
-                ~base_path:ctx.config.base_path
-                ~keeper_name:meta.name
-                ~at:(Time_compat.now ())
-                ~cause:Keeper_turn_pulse.Chat
-                Keeper_turn_pulse.Turn_ok;
+              (* The success handler counted this turn in the pulse; row readers redraw. *)
               Keeper_row_broadcast.changed ~base_path:ctx.config.base_path ~keeper_name:meta.name;
               let checkpoint_yield = Keeper_turn_outcome.equal result.turn_outcome
                   Keeper_turn_outcome.Continuation_checkpoint in

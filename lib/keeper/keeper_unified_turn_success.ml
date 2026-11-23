@@ -652,6 +652,20 @@ let handle
       ~result:(Some result)
       ~usage_resolution:(Some usage_resolution)
       ());
+  (* A direct turn counts in the pulse right after its decision row, so a
+     later step that raises cannot leave a row the seed counts but the live
+     pulse missed. A failed direct request writes no decision row (#49984),
+     so only this success path counts one. An autonomous cycle counts where
+     the heartbeat loop knows the inputs that started it. *)
+  (match Keeper_execution_outcome.lane execution_outcome with
+   | Keeper_execution_outcome.Direct ->
+     Keeper_turn_pulse.record
+       ~base_path:config.Workspace.base_path
+       ~keeper_name:meta.name
+       ~at:(Time_compat.now ())
+       ~cause:Keeper_turn_pulse.Chat
+       Keeper_turn_pulse.Turn_ok
+   | Keeper_execution_outcome.Autonomous _ -> ());
   run_projection KTP.Usage_metrics (fun () ->
     emit_usage_metrics_and_log
       ~updated_meta

@@ -4,7 +4,7 @@
 
 ### 요약
 
-- 이 릴리스는 `v0.80.0`(`c5363d75`) 이후 `main`에 착지한 변경 가운데, 이 절에 기록한 33 PR(`#54343`, `#54415`, `#54417`, `#54429`, `#54430`, `#54434`, `#54436`, `#54437`, `#54438`, `#54440`, `#54444`, `#54445`, `#54446`, `#54448`, `#54449`, `#54450`, `#54451`, `#54452`, `#54453`, `#54454`, `#54455`, `#54456`, `#54457`, `#54458`, `#54459`, `#54460`, `#54461`, `#54462`, `#54463`, `#54487`, `#54493`, `#54496`, `#54499`)을 `0.81.0`(minor)으로 내보냅니다. 처음 5 PR(`#54429`, `#54430`, `#54434`, `#54436`, `#54440`) 위에 컷 이후 28 PR이 더해졌습니다.
+- 이 릴리스는 `v0.80.0`(`c5363d75`) 이후 `main`에 착지한 변경 가운데, 이 절에 기록한 34 PR(`#54343`, `#54415`, `#54417`, `#54429`, `#54430`, `#54434`, `#54436`, `#54437`, `#54438`, `#54440`, `#54444`, `#54445`, `#54446`, `#54448`, `#54449`, `#54450`, `#54451`, `#54452`, `#54453`, `#54454`, `#54455`, `#54456`, `#54457`, `#54458`, `#54459`, `#54460`, `#54461`, `#54462`, `#54463`, `#54487`, `#54493`, `#54496`, `#54499`, `#54500`)을 `0.81.0`(minor)으로 내보냅니다. 처음 5 PR(`#54429`, `#54430`, `#54434`, `#54436`, `#54440`) 위에 컷 이후 29 PR이 더해졌습니다.
 - **ACP·비전·쿼터 하드닝**: fix(runtime): typed ACP tool-call correlation, session/set_model negotiation, and activity-based prompt liveness (#54429) · fix(keeper,acp): enforce operator max-context rollover cap, typed MCP effect fencing, tool activity liveness, and live catalog alignment (#54430) · fix(vision,acp,quota): fix vision split-brain, ACP/Antigravity quota failover, and Vibe/Agy MCP permission handling (#54434).
 - **설정·Memory OS·TUI 고도화**: fix(setup,memory-os,tui): ACP/Gemini/Vertex setup, MVCC World Memory & Memory OS internals, TUI quota/effort/assignment wiring (#54436) · fix(tui): interactive / slash & @ popup, unified Ctrl+K palette, Tab multi-pane focus, key safety & 1,226-case matrix (#54440).
 - **Keeper ACP·Gate 하드닝 (후속)**: Keeper ACP 연속성·rollover·Gate 일시정지 이어가기, SSE 방출 직렬화와 MCP call_id 소유권을 다듬었습니다 (#54437, #54438).
@@ -53,6 +53,7 @@
 - The TUI chat names who wrote each incoming message: another Keeper's
   message or broadcast, or a connector author, no longer appears as the
   operator's (#54499).
+- A schedule a Keeper creates through the schedule tool is recorded as `automated_request`, not `operator_request`. `source` now follows the requester's kind instead of a call argument, and a call that sends a `source` disagreeing with the requester is refused with `actor_mismatch` (#54500).
 
 ### Fresh state required
 

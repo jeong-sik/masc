@@ -507,6 +507,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history is needed so release-coverage can locate the version-cut
+          # commit in dune-project and scan every PR merged between cut and HEAD.
+          fetch-depth: 0
+
+      - name: Check post-cut changelog coverage before tagging
+        # Guard against post-cut PRs landing after bump-version.sh without being
+        # folded into CHANGELOG.md's `## [<version>]` section (task-4003).
+        # Distinct from the tag-ancestor, RC-recency, and section-date guards,
+        # and complementary to `missing --strict` (which only checks pre-fold
+        # fragment presence).
+        run: |
+          ver="$(sed -n 's/^(version \(.*\))$/\1/p' dune-project)"
+          test -n "$ver"
+          python3 scripts/changelog-fragments.py release-coverage --version "$ver" --head HEAD
 
       - name: Check the release body and its date before tagging
         env:

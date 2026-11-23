@@ -2277,6 +2277,67 @@ let render_incidents_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
 
 (* ---------- Overlay 4: Ctrl+T Keeper Queue, Context & Schedules Drawer ---------- *)
 
+(* ---------- Ctrl+T Context tab ---------- *)
+
+(* The gauge reads the roster's context projection: a measured fill, the
+   server's estimate (flagged so the title can say so), or no fill. The hint
+   carries the measured tokens and window, or the server's reason when there
+   is no measured fill. *)
+let context_gauge_reading (k : Wire_fleet.keeper_summary) =
+  match k.context with
+  | Observed.Value { data; observed_at; stale } ->
+      let used, estimated =
+        match Fleet_store.context_display data with
+        | Fleet_store.Context_fill { ratio; estimated } ->
+            (Observed.value ~observed_at ~stale (ratio *. 100.0), estimated)
+        | Fleet_store.Context_tokens_only _ | Fleet_store.Context_unavailable _
+          ->
+            (Observed.absent, false)
+      in
+      let hint =
+        match data with
+        | Wire_fleet.Context_measured { tokens; window; absolute_turn; _ } -> (
+            let tok =
+              Format_val.format_value Format_val.Count (Float.of_int tokens)
+            in
+            let turn =
+              match absolute_turn with
+              | Some n -> Printf.sprintf " · #%d" n
+              | None -> ""
+            in
+            match window with
+            | Some w ->
+                Say.literal
+                  (Printf.sprintf "%s / %s tok%s" tok
+                     (Format_val.format_value Format_val.Count (Float.of_int w))
+                     turn)
+            | None ->
+                Say.make
+                  ~ko:(Printf.sprintf "%s tok · 창 크기 미보고%s" tok turn)
+                  ~en:(Printf.sprintf "%s tok · window unreported%s" tok turn))
+        | Wire_fleet.Context_not_measured { reason; _ } ->
+            Fleet_store.context_unavailable_label reason
+      in
+      (used, Some hint, estimated)
+  | Observed.Loading { since_ns } -> (Observed.loading ~since_ns, None, false)
+  | Observed.Absent -> (Observed.absent, None, false)
+  | Observed.Unreported -> (Observed.unreported, None, false)
+  | Observed.Failed { reason; retryable; at } ->
+      (Observed.failed ~reason ~retryable ~at, None, false)
+
+(* One sample per turn record, oldest first. A turn the server would not
+   count as a measured request stays blank instead of reading as zero. *)
+let context_history_samples (fills : float option list) =
+  Array.of_list
+    (List.map
+       (function
+         | Some r when r > 0.0 -> Chart.Series.Value (r *. 100.0)
+         | Some _ -> Chart.Series.Zero
+         | None -> Chart.Series.Absent)
+       fills)
+
+let context_pct r = Printf.sprintf "%.0f%%" (r *. 100.0)
+
 let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~active_tab =
   let w = Int.min (Int.max 0 (rect.w - 2)) (Int.max 76 (rect.w * 3 / 4)) in
@@ -2476,26 +2537,39 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             in
             let y = ref body_r.y in
             let bottom = Rect.bottom body_r in
-            let ctx_obs =
+            let put_body_line ~style txt =
+              if !y < bottom then begin
+                ignore
+                  (Cell_grid.put_text ~clip:body_r grid ~x:body_r.x ~y:!y ~style
+                     (Grapheme.truncate_to_width ~max_width:body_r.w txt));
+                incr y
+              end
+            in
+            let say ~ko ~en = Say.resolve lang (Say.make ~ko ~en) in
+            let ctx_used, ctx_hint, ctx_estimated =
               match keeper_opt with
-              | Some k -> Observed.map (fun r -> r *. 100.0) k.context_ratio
-              | None -> Observed.unreported
+              | Some k -> context_gauge_reading k
+              | None -> (Observed.unreported, None, false)
             in
             if body_r.h >= 3 then begin
               let gauge_r = Rect.make ~x:body_r.x ~y:!y ~w:body_r.w ~h:2 in
               let spec : Chart.Spec.t =
                 {
                   title =
-                    Say.make ~ko:"컨텍스트 윈도우 점유율"
-                      ~en:"Context Window Fill";
+                    (if ctx_estimated then
+                       Say.make ~ko:"컨텍스트 윈도우 점유율 (추정)"
+                         ~en:"Context Window Fill (estimate)"
+                     else
+                       Say.make ~ko:"컨텍스트 윈도우 점유율"
+                         ~en:"Context Window Fill");
                   kind =
                     Chart.Spec.Ratio_gauge
                       {
-                        used = ctx_obs;
+                        used = ctx_used;
                         limit = Observed.value ~observed_at:Clock.Mono.zero 100.0;
                         unit = Format_val.Percent;
                         gradient = Chart.Gradient.Thermal;
-                        reset_hint = None;
+                        reset_hint = ctx_hint;
                       };
                   hotkey_hint = None;
                 }
@@ -2503,6 +2577,120 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               ignore (Chart.draw grid ~rect:gauge_r ~theme ~caps ~lang spec);
               y := !y + 3
             end;
+            (* Per-turn fill from the keeper's recent turn records. *)
+            (match Fleet_store.turn_records_for ~keeper model.fleet with
+             | Observed.Value { data; _ } -> (
+                 let fills =
+                   List.map Wire_fleet.turn_record_context_fill data.rows
+                 in
+                 let measured = List.filter_map Fun.id fills in
+                 put_body_line ~style:pri_st
+                   (say
+                      ~ko:
+                        (Printf.sprintf "턴별 컨텍스트 · 최근 %d턴 중 측정 %d턴"
+                           (List.length fills) (List.length measured))
+                      ~en:
+                        (Printf.sprintf
+                           "Context per turn · %d of the last %d turns measured"
+                           (List.length measured) (List.length fills)));
+                 (match measured with
+                  | [] ->
+                      put_body_line ~style:whisper_st
+                        (say ~ko:"측정된 턴이 없습니다"
+                           ~en:"No measured turn in this window")
+                  | first :: _ ->
+                      let samples = context_history_samples fills in
+                      if !y < bottom then begin
+                        ignore
+                          (Chart.draw_sparkline_run ~clip:body_r grid
+                             ~x:body_r.x ~y:!y
+                             ~width:(Int.min body_r.w (Array.length samples))
+                             ~theme ~bg ~unicode:true
+                             ~gradient:Chart.Gradient.Thermal samples);
+                        incr y
+                      end;
+                      let latest = List.fold_left (fun _ r -> r) first measured in
+                      let low = List.fold_left Float.min first measured in
+                      let high = List.fold_left Float.max first measured in
+                      put_body_line ~style:struct_st
+                        (say
+                           ~ko:
+                             (Printf.sprintf "최근 %s · 최저 %s · 최고 %s"
+                                (context_pct latest) (context_pct low)
+                                (context_pct high))
+                           ~en:
+                             (Printf.sprintf "Latest %s · Low %s · High %s"
+                                (context_pct latest) (context_pct low)
+                                (context_pct high))));
+                 if data.skipped_rows > 0 then
+                   put_body_line ~style:attn_st
+                     (say
+                        ~ko:
+                          (Printf.sprintf "읽지 못한 턴 기록 %d행"
+                             data.skipped_rows)
+                        ~en:
+                          (Printf.sprintf "%d unreadable turn record rows"
+                             data.skipped_rows)))
+             | Observed.Loading _ ->
+                 put_body_line ~style:whisper_st
+                   (say ~ko:"턴 기록 불러오는 중…" ~en:"Loading turn records…")
+             | Observed.Failed { reason; _ } ->
+                 put_body_line ~style:crit_st
+                   (say ~ko:("턴 기록 조회 실패: " ^ reason)
+                      ~en:("Turn records fetch failed: " ^ reason))
+             | Observed.Absent | Observed.Unreported ->
+                 put_body_line ~style:whisper_st
+                   (say ~ko:"턴 기록 대기 중" ~en:"Awaiting turn records"));
+            incr y;
+            (* Latest compaction and history reset facts. *)
+            (match model.knowledge.memory_os_internals with
+             | Observed.Value { data; _ } when String.equal data.keeper keeper ->
+                 let compaction =
+                   if data.compaction.present then
+                     let covers =
+                       match data.compaction.covers_through_turn with
+                       | Some turn -> " → " ^ turn
+                       | None -> ""
+                     in
+                     say
+                       ~ko:
+                         (Printf.sprintf "압축 %d회%s"
+                            data.compaction.epoch_count covers)
+                       ~en:
+                         (Printf.sprintf "Compacted %d times%s"
+                            data.compaction.epoch_count covers)
+                   else say ~ko:"압축 없음" ~en:"Never compacted"
+                 in
+                 let reset_age =
+                   match
+                     Option.bind data.canonical_turns.latest_reset_at_unix
+                       (fun at_unix ->
+                         Render_util.format_relative_age
+                           ~now_unix:model.freshness.last_wall_unix ~at_unix)
+                   with
+                   | Some age -> say ~ko:(" · 최근 " ^ age ^ " 전") ~en:(" · last " ^ age ^ " ago")
+                   | None -> ""
+                 in
+                 put_body_line ~style:struct_st
+                   (Printf.sprintf "%s%s%s" compaction Typography.sep_dot
+                      (say
+                         ~ko:
+                           (Printf.sprintf "기록 리셋 %d회%s"
+                              data.canonical_turns.history_resets_count reset_age)
+                         ~en:
+                           (Printf.sprintf "History resets %d%s"
+                              data.canonical_turns.history_resets_count reset_age)))
+             | Observed.Failed { reason; _ } ->
+                 put_body_line ~style:crit_st
+                   (say ~ko:("압축 기록 조회 실패: " ^ reason)
+                      ~en:("Compaction facts fetch failed: " ^ reason))
+             | Observed.Value _ | Observed.Loading _ ->
+                 put_body_line ~style:whisper_st
+                   (say ~ko:"압축 기록 불러오는 중…" ~en:"Loading compaction facts…")
+             | Observed.Absent | Observed.Unreported ->
+                 put_body_line ~style:whisper_st
+                   (say ~ko:"압축 기록 미보고" ~en:"Compaction facts unreported"));
+            incr y;
             (match eff_row with
              | Some r when !y + 2 <= bottom ->
                  let cache_r =
@@ -2560,33 +2748,27 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                  ignore (Chart.draw grid ~rect:bar_r ~theme ~caps ~lang spec);
                  y := !y + 4
              | Some _ | None ->
-                 if !y < bottom then begin
-                   let msg =
-                     Say.resolve lang
-                       (Say.make ~ko:"토큰·캐시 효율 스냅샷 대기 중"
-                          ~en:"Awaiting token & cache breakdown snapshot")
-                   in
-                   ignore
-                     (Cell_grid.put_text ~clip:body_r grid ~x:body_r.x ~y:!y
-                        ~style:whisper_st msg);
-                   incr y
-                 end);
+                 put_body_line ~style:whisper_st
+                   (say ~ko:"토큰·캐시 효율 스냅샷 대기 중"
+                      ~en:"Awaiting token & cache breakdown snapshot"));
             (match keeper_opt with
-             | Some k when !y < bottom ->
-                 let info =
-                   Printf.sprintf "Runtime: %s · Turns: %s · Cost 24h: %s"
-                     k.runtime_id
-                     (Format_val.format_observed Format_val.Count
-                        (Observed.map float_of_int k.total_turns)
-                        ~lang)
-                     (Format_val.format_observed Format_val.Usd k.cost_24h_usd
-                        ~lang)
+             | Some k ->
+                 (* Cost comes from keeper-costs over its trailing window. *)
+                 let cost_label =
+                   match Runtime_store.keeper_costs_window_label model.runtime with
+                   | Some w -> "Cost " ^ w
+                   | None -> "Cost"
                  in
-                 ignore
-                   (Cell_grid.put_text ~clip:body_r grid ~x:body_r.x ~y:!y
-                      ~style:struct_st
-                      (Grapheme.truncate_to_width ~max_width:body_r.w info))
-             | Some _ | None -> ())
+                 let cost = Runtime_store.keeper_cost_usd ~keeper model.runtime in
+                 put_body_line ~style:struct_st
+                   (Printf.sprintf "Runtime: %s · Turns: %s · %s: %s"
+                      k.runtime_id
+                      (Format_val.format_observed Format_val.Count
+                         (Observed.map float_of_int k.total_turns)
+                         ~lang)
+                      cost_label
+                      (Format_val.format_observed Format_val.Usd cost ~lang))
+             | None -> ())
         | Nav.Drawer_schedules ->
             let scheds = Work_store.schedules_list model.work in
             let sorted =

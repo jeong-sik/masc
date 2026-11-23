@@ -12,20 +12,14 @@ let layout_breakpoint_of_model = function
   | Model.Micro -> Layout.Micro
 
 let target_keeper_of_model (m : Model.t) =
-  match m.drafts.active_keeper with
-  | Some k when not (String.equal (String.trim k) "") -> String.trim k
-  | Some _ | None -> (
-      match Fleet_store.selected_keeper_summary m.fleet with
-      | Some k -> k.name
-      | None -> Drafts.target_keeper_key m.drafts)
+  match Model.target_keeper m with
+  | Some k -> k
+  | None -> Drafts.target_keeper_key m.drafts
 
 let display_target_keeper_of_model (m : Model.t) =
-  match m.drafts.active_keeper with
-  | Some k when not (String.equal (String.trim k) "") -> String.trim k
-  | Some _ | None -> (
-      match Fleet_store.selected_keeper_summary m.fleet with
-      | Some k -> k.name
-      | None -> Say.resolve m.lang (Say.make ~ko:"미선택" ~en:"none"))
+  match Model.target_keeper m with
+  | Some k -> k
+  | None -> Say.resolve m.lang (Say.make ~ko:"미선택" ~en:"none")
 
 let voice_state_of_drafts (drafts : Drafts.t) =
   match drafts.voice with

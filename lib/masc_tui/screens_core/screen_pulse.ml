@@ -1764,29 +1764,26 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
                  ~en:(Printf.sprintf "Ver %s" m))
         in
         let third_part =
-          match Observed.to_option sc.prs_reviewed_24h with
-          | Some n -> Some (Printf.sprintf "PR %d" n)
+          match Observed.to_option sc.turns_24h with
+          | Some n ->
+              Some
+                (Say.resolve lang
+                   (Say.make
+                      ~ko:(Printf.sprintf "턴 %s"
+                             (Format_val.format_value Format_val.Count
+                                (float_of_int n)))
+                      ~en:(Printf.sprintf "Turns %s"
+                             (Format_val.format_value Format_val.Count
+                                (float_of_int n)))))
           | None -> (
-              match Observed.to_option sc.turns_24h with
+              match Observed.to_option sc.board_posts_24h with
               | Some n ->
                   Some
                     (Say.resolve lang
                        (Say.make
-                          ~ko:(Printf.sprintf "턴 %s"
-                                 (Format_val.format_value Format_val.Count
-                                    (float_of_int n)))
-                          ~en:(Printf.sprintf "Turns %s"
-                                 (Format_val.format_value Format_val.Count
-                                    (float_of_int n)))))
-              | None -> (
-                  match Observed.to_option sc.board_posts_24h with
-                  | Some n ->
-                      Some
-                        (Say.resolve lang
-                           (Say.make
-                              ~ko:(Printf.sprintf "토론 %d" n)
-                              ~en:(Printf.sprintf "Posts %d" n)))
-                  | None -> None))
+                          ~ko:(Printf.sprintf "토론 %d" n)
+                          ~en:(Printf.sprintf "Posts %d" n)))
+              | None -> None)
         in
         let left_s =
           [ Some done_part; Some ver_part; third_part ]

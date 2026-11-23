@@ -161,11 +161,6 @@ val human_runtime_label :
 (** Resolve a clean human runtime/model label via
     {!Wire_runtime.human_runtime_slot_label}, stripping raw provider hashes. *)
 
-val keeper_cost_24h :
-  model:Model.t -> Wire_fleet.keeper_summary -> float Observed.t
-(** Authoritative 24h USD cost for a keeper, preferring [k.cost_24h_usd] and
-    falling back to {!Runtime_store.keeper_costs_24h_assoc}. *)
-
 val keeper_candle_milli :
   model:Model.t -> string -> (int * string) option
 (** Return [(nominal_milli, decayed_milli_str)] for a keeper from the Candle

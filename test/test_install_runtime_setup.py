@@ -61,10 +61,16 @@ def spec(choice='vllm'):
     # 100000 and RuntimeSpecWindowFloor's assertion in the same commit.
     max_context = 100000 if choice == 'claude_code' else 8192
     result = dict(choice=choice, model='operator/model-exact', max_context=max_context, tools=True, streaming=False)
-    if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama', 'messages'):
+    if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama', 'messages', 'gemini'):
         result['endpoint'] = 'http://127.0.0.1:9/v1'
         if choice == 'messages':
             result['provider_kind'] = 'anthropic'
+    elif choice == 'vertex_gemini':
+        # Vertex rejects a non-canonical publisher URL in stage_validated
+        # (llm_provider/vertex_endpoint.ml parse_base_url), so the fixture
+        # declares the canonical shape. No network: verify=False and the
+        # ADC credential source is a lazy closure.
+        result['endpoint'] = 'https://aiplatform.googleapis.com/v1/projects/fixture-project/locations/global/publishers/google'
     elif choice == 'antigravity':
         result.update(credential_file='/operator/token-file', timeout_s=180)
     return result

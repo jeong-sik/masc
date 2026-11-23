@@ -2758,3 +2758,29 @@ let decode_keeper_memory_health_fleet json =
     else missing_field "keepers"
   in
   Ok { schema; generated_at_unix; keepers }
+
+(* [PUT /api/v1/wiki/:slug] answers in the v2 envelope with the action it
+   took, the revision it wrote, and the journal or index writes that failed
+   after the page itself was saved ([put_page_json] in
+   server_dashboard_http_wiki.ml). It carries no rendered page. *)
+type wiki_put_action =
+  | Wiki_page_created
+  | Wiki_page_updated
+
+type wiki_put_result = {
+  action : wiki_put_action;
+  revision : int;
+  warnings : string list;
+}
+
+let wiki_put_action_of_string = function
+  | "created" -> Some Wiki_page_created
+  | "updated" -> Some Wiki_page_updated
+  | _ -> None
+
+let decode_wiki_put_result json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* action = decode_enum ~field:"action" wiki_put_action_of_string body in
+  let* revision = required_nonnegative_int_field body "revision" in
+  let* warnings = required_string_list body "warnings" in
+  Ok { action; revision; warnings }

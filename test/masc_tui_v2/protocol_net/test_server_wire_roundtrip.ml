@@ -870,6 +870,82 @@ let test_schedule_create_roundtrip () =
         {|{"kind":"interval","interval_sec":1800}|} );
     ]
 
+(* PUT /api/v1/wiki/:slug answers with the revision it wrote and no page.
+   The decoded answer agrees with the page read back with GET, and a second
+   save that names the page read back is accepted as an update. *)
+let test_wiki_put_roundtrip () =
+  with_workspace (fun config _ ->
+      let base_path = config.Workspace.base_path in
+      let put ~expected_revision ~expected_sha256 body =
+        let request : Wire_knowledge.wiki_put_request =
+          {
+            expected_revision;
+            expected_sha256;
+            title = "Guide";
+            summary = "How the operator runs the room";
+            source = Wire_knowledge.Source_observation;
+            tags = [ "ops" ];
+            body;
+            note = "TUI inline edit";
+          }
+        in
+        match
+          Server_dashboard_http_wiki.put_page_json ~config ~actor:"operator"
+            ~slug:"guide"
+            ~body_str:
+              (Yojson.Safe.to_string
+                 (Wire_knowledge.encode_wiki_put_request request))
+            ()
+        with
+        | Error (status, json) ->
+            Alcotest.failf "PUT refused (HTTP %d): %s"
+              (Httpun.Status.to_code status)
+              (Yojson.Safe.to_string json)
+        | Ok json -> (
+            match Wire_knowledge.decode_wiki_put_result json with
+            | Ok saved -> saved
+            | Error e -> Alcotest.fail ("PUT answer: " ^ e))
+      in
+      let read_back () =
+        match Server_dashboard_http_wiki.get_page_json ~base_path ~slug:"guide" ()
+        with
+        | Error (status, json) ->
+            Alcotest.failf "GET refused (HTTP %d): %s"
+              (Httpun.Status.to_code status)
+              (Yojson.Safe.to_string json)
+        | Ok json -> (
+            match Wire_knowledge.decode_wiki_page_detail json with
+            | Ok page -> page
+            | Error e -> Alcotest.fail ("GET answer: " ^ e))
+      in
+      let created =
+        put ~expected_revision:None ~expected_sha256:None "# Guide\n\nFirst."
+      in
+      (match created.action with
+      | Wire_knowledge.Wiki_page_created -> ()
+      | Wire_knowledge.Wiki_page_updated ->
+          Alcotest.fail "a new page decoded as an update");
+      let page = read_back () in
+      Alcotest.(check int)
+        "the created revision is the page's" page.frontmatter.revision
+        created.revision;
+      let updated =
+        put ~expected_revision:(Some page.frontmatter.revision)
+          ~expected_sha256:(Some page.sha256) "# Guide\n\nSecond."
+      in
+      (match updated.action with
+      | Wire_knowledge.Wiki_page_updated -> ()
+      | Wire_knowledge.Wiki_page_created ->
+          Alcotest.fail "an update decoded as a new page");
+      Alcotest.(check int)
+        "the update writes the page's next revision"
+        (created.revision + 1) updated.revision;
+      Alcotest.(check int)
+        "the page read back has the revision the update named" updated.revision
+        (read_back ()).frontmatter.revision;
+      Alcotest.(check (list string))
+        "no journal or index write failed" [] updated.warnings)
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -914,5 +990,10 @@ let () =
             test_published_artifact_roundtrip;
           Alcotest.test_case "wiki page links -> decode_wiki_page_detail"
             `Quick test_wiki_page_links_roundtrip;
+        ] );
+      ( "knowledge",
+        [
+          Alcotest.test_case "wiki PUT answer -> decode_wiki_put_result" `Quick
+            test_wiki_put_roundtrip;
         ] );
     ]

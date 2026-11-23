@@ -124,7 +124,7 @@ type http_reply =
   | Reply_wiki_lint of (Wire_knowledge.wiki_lint_report, http_error) result
   | Reply_wiki_put of {
       page : string;
-      result : (Wire_knowledge.wiki_page_detail, http_error) result;
+      result : (Wire_knowledge.wiki_put_result, http_error) result;
     }
   | Reply_artifacts of (Wire_knowledge.artifact_entry list, http_error) result
   | Reply_world_memory of (Wire_knowledge.world_memory, http_error) result

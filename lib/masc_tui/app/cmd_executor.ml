@@ -1257,7 +1257,7 @@ let execute_put t ~epoch req =
           let ep = Atomic.get t.endpoint in
           let result =
             Http_client.put_json ~io:t.io ~clock:t.clock ep ~path ~body
-              ~decode:Wire_knowledge.decode_wiki_page_detail
+              ~decode:Wire_knowledge.decode_wiki_put_result
             |> Result.map_error msg_error_of_http
           in
           Ui_bus.publish_stream t.bus

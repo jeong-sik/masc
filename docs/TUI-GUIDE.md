@@ -286,7 +286,9 @@ Three sub-tabs (`[` / `]` or `←` / `→`):
    - **Wiki mode**: `Enter` opens Wiki Dive (Markdown body, outgoing links,
      revision log), `e` opens inline Markdown edit modal (`PUT` with
      `expected_revision`/`expected_sha256`), `Ctrl+E` opens in `$EDITOR`, `y`
-     copies Markdown body, `o` opens the first `http(s)` URL.
+     copies Markdown body, `o` opens the first `http(s)` URL. A save toasts the
+     revision it wrote, as a warning when the journal or index write failed,
+     and the page is read again.
    - **Artifacts mode**: `Enter` opens Artifact Dive (title, summary,
      revision, MIME, size, SHA-256, author, created time, and the list of
      published artifacts), `o` opens the Media & Artifact Viewer overlay, `y`

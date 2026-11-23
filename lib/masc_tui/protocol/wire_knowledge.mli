@@ -350,6 +350,22 @@ val decode_wiki_search : Yojson.Safe.t -> (wiki_search_response, string) result
 val decode_wiki_lint : Yojson.Safe.t -> (wiki_lint_report, string) result
 val encode_wiki_put_request : wiki_put_request -> Yojson.Safe.t
 
+type wiki_put_action =
+  | Wiki_page_created
+  | Wiki_page_updated
+
+type wiki_put_result = {
+  action : wiki_put_action;
+  revision : int;
+  warnings : string list;
+      (** Journal or index writes that failed after the page was saved. *)
+}
+
+val decode_wiki_put_result : Yojson.Safe.t -> (wiki_put_result, string) result
+(** Decode the [PUT /api/v1/wiki/:slug] answer. It names the revision written
+    but carries no rendered page, so the page is read again with
+    [GET /api/v1/wiki/:slug]. *)
+
 (** {1 Artifacts} *)
 
 (** The content-addressed body of an artifact's latest revision. *)

@@ -743,25 +743,37 @@ let apply_http_reply ~now (m : Model.t) reply =
                { x with wiki_lint = failed_slot err x.wiki_lint }))
         ~source:Health.Source_client_http ~ko:"위키 린트 조회"
         ~en:"Wiki lint fetch" err
-  | Msg.Reply_wiki_put { page; result = Ok detail } ->
+  | Msg.Reply_wiki_put { page; result = Ok saved } ->
+      (* The answer names the revision written but no rendered page, so the
+         stored page and index are marked stale and the current view reads
+         them again instead of patching them. *)
       let knowledge =
-        m.knowledge
-        |> Knowledge_store.apply_wiki_page ~observed_at:now detail
-        |> Knowledge_store.cancel_wiki_edit
+        let k = Knowledge_store.cancel_wiki_edit m.knowledge in
+        {
+          k with
+          wiki_page = Observed.mark_stale k.wiki_page;
+          wiki_index = Observed.mark_stale k.wiki_index;
+        }
       in
+      let done_ko, done_en =
+        match saved.action with
+        | Wire_knowledge.Wiki_page_created -> ("위키 생성 완료", "Created wiki")
+        | Wire_knowledge.Wiki_page_updated -> ("위키 저장 완료", "Saved wiki")
+      in
+      let level, warning_note =
+        match saved.warnings with
+        | [] -> (Model.Toast_success, "")
+        | warnings -> (Model.Toast_warning, " · " ^ String.concat "; " warnings)
+      in
+      let saved_page = Printf.sprintf "%s (rev %d)" page saved.revision in
       let next =
         { m with knowledge }
-        |> Model.with_toast ~now ~level:Model.Toast_success
-             (Say.make ~ko:("위키 저장 완료: " ^ page) ~en:("Saved wiki: " ^ page))
+        |> Model.with_toast ~now ~level
+             (Say.make
+                ~ko:(done_ko ^ ": " ^ saved_page ^ warning_note)
+                ~en:(done_en ^ ": " ^ saved_page ^ warning_note))
       in
-      ( next
-      , [
-          Cmd.Http_get
-            {
-              epoch = m.epoch;
-              req = Cmd.Get_wiki_index { tag = None; source = None; sort = None };
-            };
-        ] )
+      (next, View_fetches.fetches_for_current_view next)
   | Msg.Reply_wiki_put { page; result = Error err } ->
       let knowledge = Knowledge_store.mark_wiki_edit_saving false m.knowledge in
       let next, cmds =

@@ -3535,6 +3535,27 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
   Alcotest.(check bool) "Wiki [e] modal closes on submit (no hang)" true
     (Option.is_none m_wedit_done.inline_modal
      && Option.is_none m_wedit_done.nav.overlay);
+  (* The PUT answer names the revision written but no page, so the stored
+     page is stale and the Wiki dive reads it again. *)
+  let saved : Wire_knowledge.wiki_put_result =
+    { action = Wire_knowledge.Wiki_page_updated; revision = 4; warnings = [] }
+  in
+  let m_wsaved, cmds_wsaved =
+    Update.step ~now:t1 m_wedit_done
+      (Msg.Http_reply
+         {
+           epoch = m_wedit_done.epoch;
+           reply = Msg.Reply_wiki_put { page = "guide"; result = Ok saved };
+         })
+  in
+  Alcotest.(check bool) "a saved wiki page is stale until it is read again" true
+    (Observed.is_stale m_wsaved.knowledge.wiki_page);
+  Alcotest.(check bool) "the Wiki dive reads the saved page again" true
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_wiki_page { page = "guide" }; _ } -> true
+         | _ -> false)
+       cmds_wsaved);
   let m_mact_mod, _ = step m_kmem (char_key "A") in
   let m_mact_done, cmds_mact_mod = step m_mact_mod (key Keymap.Input.Enter) in
   Alcotest.(check bool) "Memory [A] modal closes on submit and emits Post_memory_act"

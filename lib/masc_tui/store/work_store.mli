@@ -88,13 +88,16 @@ val apply_candle_ledger :
   observed_at:Clock.Mono.t -> Wire_work.candle_ledger -> t -> t
 val apply_candle_ledger_fallback :
   observed_at:Clock.Mono.t ->
-  summary:Wire_fleet.candle_summary_fallback option ->
+  summary:Wire_fleet.candle_observation option ->
   balances:(string * int) list ->
   t ->
   t
-(** Synthesize a truthful fallback {!Wire_work.candle_ledger} from
+(** Synthesize a fallback {!Wire_work.candle_ledger} from
     [/api/v1/gate/keepers] / [/api/v1/dashboard/execution] when
-    [/api/v1/candle/ledger] returns HTTP 404 on older servers. *)
+    [/api/v1/candle/ledger] returns HTTP 404 on older servers. Only
+    [Candle_ready] yields a ledger: [Candle_off] is [Absent],
+    [Candle_disabled] is [Failed] with its reason, and no summary is
+    [Unreported]. *)
 
 val effective_task_counts : t -> Wire_work.task_backlog_counts option
 (** Aggregate task status counts from [backlog_counts] or decoded [tasks]. *)

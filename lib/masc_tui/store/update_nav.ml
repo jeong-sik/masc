@@ -735,7 +735,8 @@ let cycle_sub_tab (m : Model.t) dir =
         | Keymap.Next -> Nav.next_queue_context_tab tab
         | Keymap.Prev -> Nav.prev_queue_context_tab tab
       in
-      ( {
+      let next =
+        {
           m with
           nav =
             {
@@ -744,7 +745,8 @@ let cycle_sub_tab (m : Model.t) dir =
               queue_scroll_offset = 0;
             };
         }
-      , [] )
+      in
+      (next, View_fetches.fetches_for_current_view next)
   | Some
       ( Nav.Palette
       | Nav.Incidents

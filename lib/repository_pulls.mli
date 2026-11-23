@@ -15,10 +15,13 @@
 type check_state =
   | Checks_passing
   | Checks_failing
+      (** A check run or status on the head commit failed. A cancelled run is
+          no verdict and does not count. *)
   | Checks_running
   | Checks_none
       (** The head commit has no status check rollup, or the pull request
-          reported no commit. *)
+          reported no commit, or the head commit has no check run or commit
+          status other than cancelled runs. *)
 
 type review_state =
   | Review_approved

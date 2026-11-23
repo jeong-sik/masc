@@ -36,6 +36,11 @@ let board_post_path ~post_id ?comment_offset ?comment_limit () =
   Printf.sprintf "/api/v1/board/%s?%s" (percent_encode post_id)
     (String.concat "&" params)
 
+let board_hearths_path = "/api/v1/board/hearths"
+let board_comment_path = "/api/v1/tools/masc_board_comment"
+let board_vote_path = "/api/v1/tools/masc_board_vote"
+let board_comment_vote_path = "/api/v1/tools/masc_board_comment_vote"
+
 let wiki_index_path ?tag ?source ?sort () =
   let params =
     (match tag with None -> [] | Some t -> [ "tag=" ^ percent_encode t ])
@@ -82,6 +87,9 @@ let published_artifact_detail_path ~id ?revision () =
   match revision with
   | Some r when r > 0 -> Printf.sprintf "%s?revision=%d" base r
   | Some _ | None -> base
+
+let published_artifact_checks_path = "/api/v1/published-artifact-checks"
+let published_artifact_shares_path = "/api/v1/published-artifact-shares"
 
 let world_memory_path = "/api/v1/memory/world"
 let workspace_memory_inventory_path = "/api/v1/dashboard/workspace-memory-inventory"
@@ -275,19 +283,16 @@ let decode_board_comment json =
       decode_timestamp_unix json "created_at_unix"
     else decode_timestamp_unix json "created_at"
   in
-  (* A thread comment carries its vote tallies, not a score. *)
-  let* votes_up = required_nonnegative_int_field json "votes_up" in
-  let* votes_down = required_nonnegative_int_field json "votes_down" in
-  Ok
-    {
-      id;
-      post_id;
-      parent_id;
-      author;
-      body;
-      created_at_unix;
-      score = votes_up - votes_down;
-    }
+  (* A live thread comment carries its vote tallies (votes_up/votes_down);
+     allow an explicit score field only when present in synthetic fixtures. *)
+  let* score =
+    if has_field json "score" then required_int_field json "score"
+    else
+      let* votes_up = required_nonnegative_int_field json "votes_up" in
+      let* votes_down = required_nonnegative_int_field json "votes_down" in
+      Ok (votes_up - votes_down)
+  in
+  Ok { id; post_id; parent_id; author; body; created_at_unix; score }
 
 let decode_board_feed ~observed_at json =
   let* _, body = unwrap_v2_or_raw json in
@@ -1086,6 +1091,142 @@ let decode_published_artifact_detail json =
   let* share_ver_opt = optional_int_field body "share_version" in
   let share_version = Option.value ~default:0 share_ver_opt in
   Ok { artifact; content; revisions; shared; share_version }
+
+type board_hearth_entry = {
+  name : string;
+  count : int;
+}
+
+let decode_board_hearth_entry json =
+  let* name = required_nonblank_string json "name" in
+  let* count = required_nonnegative_int_field json "count" in
+  Ok { name; count }
+
+let decode_board_hearths json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* items = required_list_field body "hearths" in
+  decode_list "hearths" decode_board_hearth_entry items
+
+let encode_board_comment ~post_id ~content ?parent_id () =
+  let base =
+    [ ("post_id", `String post_id); ("content", `String content) ]
+  in
+  let fields =
+    match parent_id with
+    | Some pid when not (String.equal (String.trim pid) "") ->
+        base @ [ ("parent_id", `String (String.trim pid)) ]
+    | Some _ | None -> base
+  in
+  `Assoc fields
+
+let vote_dir_str = function `Up -> "up" | `Down -> "down"
+
+let encode_board_vote ~post_id ~direction =
+  `Assoc
+    [ ("post_id", `String post_id); ("direction", `String (vote_dir_str direction)) ]
+
+let encode_board_comment_vote ~comment_id ~direction =
+  `Assoc
+    [
+      ("comment_id", `String comment_id);
+      ("direction", `String (vote_dir_str direction));
+    ]
+
+type artifact_check = {
+  id : string;
+  revision : int;
+  body_sha256 : string;
+  checked : bool;
+  change_id : string;
+  changed_by : string;
+  changed_at : string;
+}
+
+type artifact_share_result = {
+  id : string;
+  shared : bool;
+  version : int;
+  outcome : [ `Applied | `Conflict ];
+}
+
+let decode_artifact_check_entry json =
+  let* id = required_nonblank_string json "id" in
+  let* revision = required_int_field json "revision" in
+  let* body_sha256 = required_nonblank_string json "body_sha256" in
+  let* checked = required_bool_field json "checked" in
+  let* change_id = required_nonblank_string json "change_id" in
+  let* changed_by = required_nonblank_string json "changed_by" in
+  let* changed_at = required_nonblank_string json "changed_at" in
+  Ok { id; revision; body_sha256; checked; change_id; changed_by; changed_at }
+
+let decode_artifact_checks json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* items = required_list_field body "checks" in
+  decode_list "checks" decode_artifact_check_entry items
+
+let decode_artifact_check_reply json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* check_obj = required_object_field body "check" in
+  decode_artifact_check_entry check_obj
+
+let encode_artifact_check_request ?expected_workspace ~id ~revision ~body_sha256
+    ~checked ~expected_change_id () =
+  let ws_fields =
+    match expected_workspace with
+    | Some (base_path, masc_root) ->
+        [
+          ( "expected_workspace",
+            `Assoc
+              [ ("base_path", `String base_path); ("masc_root", `String masc_root) ] );
+        ]
+    | None -> []
+  in
+  let exp_change =
+    match expected_change_id with
+    | Some cid -> `String cid
+    | None -> `Null
+  in
+  `Assoc
+    (ws_fields
+    @ [
+        ("id", `String id);
+        ("revision", `Int revision);
+        ("body_sha256", `String body_sha256);
+        ("checked", `Bool checked);
+        ("expected_change_id", exp_change);
+      ])
+
+let encode_artifact_share_request ~expected_workspace:(base_path, masc_root) ~id
+    ~shared ~operation_id ~expected_version ~expected_artifact_revision
+    ~expected_artifact_sha256 =
+  `Assoc
+    [
+      ( "expected_workspace",
+        `Assoc
+          [ ("base_path", `String base_path); ("masc_root", `String masc_root) ] );
+      ("id", `String id);
+      ("shared", `Bool shared);
+      ("operation_id", `String operation_id);
+      ("expected_version", `Int expected_version);
+      ("expected_artifact_revision", `Int expected_artifact_revision);
+      ("expected_artifact_sha256", `String expected_artifact_sha256);
+    ]
+
+let decode_artifact_share_response json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* id = required_nonblank_string body "id" in
+  let* cur = required_object_field body "current" in
+  let* shared = required_bool_field cur "shared" in
+  let* version = required_nonnegative_int_field cur "version" in
+  let* receipt = required_object_field body "receipt" in
+  let* outcome_str = required_nonblank_string receipt "outcome" in
+  let* outcome =
+    match outcome_str with
+    | "applied" -> Ok `Applied
+    | "conflict" -> Ok `Conflict
+    | other -> Error ("unknown artifact share outcome: " ^ other)
+  in
+  Ok { id; shared; version; outcome }
 
 type world_ledger_state =
   | World_ledger_missing

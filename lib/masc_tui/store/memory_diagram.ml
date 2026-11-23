@@ -258,8 +258,20 @@ let chrome_body_rect (m : Model.t) =
     in
     let approval_y = rows - footer_h - footer_sep_h - comp_h - approval_h in
     let body_h = Int.max 0 (approval_y - top_h) in
-    let body =
+    let full_body =
       Layout.inset_body bp (Rect.make ~x:0 ~y:top_h ~w:cols ~h:body_h)
+    in
+    let body =
+      if
+        Model.sidebar_docked sized_model
+        && full_body.w >= Model.sidebar_width + 20
+      then
+        let sw = Model.sidebar_width in
+        let gap = Model.sidebar_gap in
+        Rect.make ~x:(full_body.x + sw + gap) ~y:full_body.y
+          ~w:(Int.max 0 (full_body.w - sw - gap))
+          ~h:full_body.h
+      else full_body
     in
     Some (bp, body)
 
@@ -316,6 +328,8 @@ let active_memory_content_rect (m : Model.t) =
                 {
                   tab =
                     ( Nav.Keeper_chat
+                    | Nav.Keeper_context
+                    | Nav.Keeper_tool_calls
                     | Nav.Keeper_work_candle
                     | Nav.Keeper_sandbox
                     | Nav.Keeper_config );
@@ -323,6 +337,7 @@ let active_memory_content_rect (m : Model.t) =
                 }
             | Nav.Dive_work _
             | Nav.Dive_knowledge _
+            | Nav.Dive_runtime _
             | Nav.Dive_infra _ ) ->
             None
         | None -> (

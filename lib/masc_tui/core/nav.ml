@@ -8,7 +8,8 @@ type workspace =
 
 type work_tab =
   | Work_pipeline
-  | Work_tasks_schedules
+  | Work_tasks
+  | Work_schedules
   | Work_inbox
   | Work_candle_scorecard
 
@@ -27,7 +28,9 @@ type runtime_tab =
   | Runtime_quotas_credits
   | Runtime_efficiency_spend
   | Runtime_failover_lanes
-  | Runtime_tools_connectors
+  | Runtime_fusion
+  | Runtime_tools_usage
+  | Runtime_connectors
   | Runtime_addons_browser
 
 type infra_tab =
@@ -37,6 +40,8 @@ type infra_tab =
 
 type keeper_tab =
   | Keeper_chat
+  | Keeper_context
+  | Keeper_tool_calls
   | Keeper_memory
   | Keeper_work_candle
   | Keeper_sandbox
@@ -53,6 +58,9 @@ type knowledge_dive_target =
   | Artifact_dive of string
   | Memory_diff_dive of { keeper : string option; from_rev : int; to_rev : int }
 
+type runtime_dive_target =
+  | Tool_dive of string
+
 type infra_dive_target =
   | Sandbox_dive of string
   | Lane_dive of string
@@ -62,6 +70,7 @@ type dive =
   | Dive_keeper of { name : string; tab : keeper_tab }
   | Dive_work of work_dive_target
   | Dive_knowledge of knowledge_dive_target
+  | Dive_runtime of runtime_dive_target
   | Dive_infra of infra_dive_target
 
 type settings_tab =
@@ -82,11 +91,13 @@ type inline_action_kind =
   | Btw_query
   | Gate_reject of string
   | Verification_reject of string
+  | Harness_overrule of string
   | Task_cancel of string
   | Schedule_form
   | Connector_form
   | Repo_add_form
   | Board_new_post
+  | Board_comment of { post_id : string; parent_id : string option }
 
 type system_gate_kind =
   | Micro_viewport
@@ -140,24 +151,33 @@ let workspace_label = function
   | Infra -> Say.make ~ko:"인프라" ~en:"Infra"
 
 let all_work_tabs =
-  [ Work_pipeline; Work_tasks_schedules; Work_inbox; Work_candle_scorecard ]
+  [
+    Work_pipeline;
+    Work_tasks;
+    Work_schedules;
+    Work_inbox;
+    Work_candle_scorecard;
+  ]
 
 let work_tab_label = function
   | Work_pipeline -> Say.make ~ko:"목표" ~en:"Goals"
-  | Work_tasks_schedules -> Say.make ~ko:"작업 · 일정" ~en:"Tasks & Schedules"
+  | Work_tasks -> Say.make ~ko:"작업" ~en:"Tasks"
+  | Work_schedules -> Say.make ~ko:"일정" ~en:"Schedules"
   | Work_inbox -> Say.make ~ko:"수신함" ~en:"Inbox"
   | Work_candle_scorecard -> Say.make ~ko:"캔들 · 성과" ~en:"Candle & Scorecard"
 
 let next_work_tab = function
-  | Work_pipeline -> Work_tasks_schedules
-  | Work_tasks_schedules -> Work_inbox
+  | Work_pipeline -> Work_tasks
+  | Work_tasks -> Work_schedules
+  | Work_schedules -> Work_inbox
   | Work_inbox -> Work_candle_scorecard
   | Work_candle_scorecard -> Work_pipeline
 
 let prev_work_tab = function
   | Work_pipeline -> Work_candle_scorecard
-  | Work_tasks_schedules -> Work_pipeline
-  | Work_inbox -> Work_tasks_schedules
+  | Work_tasks -> Work_pipeline
+  | Work_schedules -> Work_tasks
+  | Work_inbox -> Work_schedules
   | Work_candle_scorecard -> Work_inbox
 
 let all_knowledge_tabs =
@@ -194,12 +214,19 @@ let next_keepers_fleet_mode = function
   | Fleet_attention -> Fleet_pulse_wall
   | Fleet_pulse_wall -> Fleet_companies
 
+let prev_keepers_fleet_mode = function
+  | Fleet_companies -> Fleet_pulse_wall
+  | Fleet_attention -> Fleet_companies
+  | Fleet_pulse_wall -> Fleet_attention
+
 let all_runtime_tabs =
   [
     Runtime_quotas_credits;
     Runtime_efficiency_spend;
     Runtime_failover_lanes;
-    Runtime_tools_connectors;
+    Runtime_fusion;
+    Runtime_tools_usage;
+    Runtime_connectors;
     Runtime_addons_browser;
   ]
 
@@ -207,22 +234,28 @@ let runtime_tab_label = function
   | Runtime_quotas_credits -> Say.make ~ko:"할당 · 크레딧" ~en:"Quotas & Credits"
   | Runtime_efficiency_spend -> Say.make ~ko:"효율 · 지출" ~en:"Efficiency & Spend"
   | Runtime_failover_lanes -> Say.make ~ko:"페일오버 레인" ~en:"Failover Lanes"
-  | Runtime_tools_connectors -> Say.make ~ko:"도구 · 커넥터" ~en:"Tools & Connectors"
+  | Runtime_fusion -> Say.make ~ko:"퓨전" ~en:"Fusion"
+  | Runtime_tools_usage -> Say.make ~ko:"도구 · 사용량" ~en:"Tools & Usage"
+  | Runtime_connectors -> Say.make ~ko:"커넥터 · 클라이언트" ~en:"Connectors"
   | Runtime_addons_browser -> Say.make ~ko:"애드온 · 브라우저" ~en:"Addons & Browser"
 
 let next_runtime_tab = function
   | Runtime_quotas_credits -> Runtime_efficiency_spend
   | Runtime_efficiency_spend -> Runtime_failover_lanes
-  | Runtime_failover_lanes -> Runtime_tools_connectors
-  | Runtime_tools_connectors -> Runtime_addons_browser
+  | Runtime_failover_lanes -> Runtime_fusion
+  | Runtime_fusion -> Runtime_tools_usage
+  | Runtime_tools_usage -> Runtime_connectors
+  | Runtime_connectors -> Runtime_addons_browser
   | Runtime_addons_browser -> Runtime_quotas_credits
 
 let prev_runtime_tab = function
   | Runtime_quotas_credits -> Runtime_addons_browser
   | Runtime_efficiency_spend -> Runtime_quotas_credits
   | Runtime_failover_lanes -> Runtime_efficiency_spend
-  | Runtime_tools_connectors -> Runtime_failover_lanes
-  | Runtime_addons_browser -> Runtime_tools_connectors
+  | Runtime_fusion -> Runtime_failover_lanes
+  | Runtime_tools_usage -> Runtime_fusion
+  | Runtime_connectors -> Runtime_tools_usage
+  | Runtime_addons_browser -> Runtime_connectors
 
 let all_infra_tabs =
   [ Infra_sandboxes; Infra_repos_changes; Infra_activity_logs ]
@@ -243,17 +276,29 @@ let prev_infra_tab = function
   | Infra_activity_logs -> Infra_repos_changes
 
 let all_keeper_tabs =
-  [ Keeper_chat; Keeper_memory; Keeper_work_candle; Keeper_sandbox; Keeper_config ]
+  [
+    Keeper_chat;
+    Keeper_context;
+    Keeper_tool_calls;
+    Keeper_memory;
+    Keeper_work_candle;
+    Keeper_sandbox;
+    Keeper_config;
+  ]
 
 let keeper_tab_label = function
-  | Keeper_chat -> Say.make ~ko:"대화 · 스트림" ~en:"Chat & Stream"
+  | Keeper_chat -> Say.make ~ko:"대화 · 스트림" ~en:"Chat"
+  | Keeper_context -> Say.make ~ko:"컨텍스트 · 턴" ~en:"Context & Turns"
+  | Keeper_tool_calls -> Say.make ~ko:"도구 호출" ~en:"Tool Calls"
   | Keeper_memory -> Say.make ~ko:"기억" ~en:"Memory"
   | Keeper_work_candle -> Say.make ~ko:"작업 · 캔들" ~en:"Work & Candle"
   | Keeper_sandbox -> Say.make ~ko:"샌드박스" ~en:"Sandbox"
   | Keeper_config -> Say.make ~ko:"설정" ~en:"Config"
 
 let next_keeper_tab = function
-  | Keeper_chat -> Keeper_memory
+  | Keeper_chat -> Keeper_context
+  | Keeper_context -> Keeper_tool_calls
+  | Keeper_tool_calls -> Keeper_memory
   | Keeper_memory -> Keeper_work_candle
   | Keeper_work_candle -> Keeper_sandbox
   | Keeper_sandbox -> Keeper_config
@@ -261,7 +306,9 @@ let next_keeper_tab = function
 
 let prev_keeper_tab = function
   | Keeper_chat -> Keeper_config
-  | Keeper_memory -> Keeper_chat
+  | Keeper_context -> Keeper_chat
+  | Keeper_tool_calls -> Keeper_context
+  | Keeper_memory -> Keeper_tool_calls
   | Keeper_work_candle -> Keeper_memory
   | Keeper_sandbox -> Keeper_work_candle
   | Keeper_config -> Keeper_sandbox
@@ -326,9 +373,10 @@ let equal_workspace a b =
 
 let work_tab_index = function
   | Work_pipeline -> 0
-  | Work_tasks_schedules -> 1
-  | Work_inbox -> 2
-  | Work_candle_scorecard -> 3
+  | Work_tasks -> 1
+  | Work_schedules -> 2
+  | Work_inbox -> 3
+  | Work_candle_scorecard -> 4
 
 let equal_work_tab a b = Int.equal (work_tab_index a) (work_tab_index b)
 
@@ -353,8 +401,10 @@ let runtime_tab_index = function
   | Runtime_quotas_credits -> 0
   | Runtime_efficiency_spend -> 1
   | Runtime_failover_lanes -> 2
-  | Runtime_tools_connectors -> 3
-  | Runtime_addons_browser -> 4
+  | Runtime_fusion -> 3
+  | Runtime_tools_usage -> 4
+  | Runtime_connectors -> 5
+  | Runtime_addons_browser -> 6
 
 let equal_runtime_tab a b =
   Int.equal (runtime_tab_index a) (runtime_tab_index b)
@@ -368,10 +418,12 @@ let equal_infra_tab a b = Int.equal (infra_tab_index a) (infra_tab_index b)
 
 let keeper_tab_index = function
   | Keeper_chat -> 0
-  | Keeper_memory -> 1
-  | Keeper_work_candle -> 2
-  | Keeper_sandbox -> 3
-  | Keeper_config -> 4
+  | Keeper_context -> 1
+  | Keeper_tool_calls -> 2
+  | Keeper_memory -> 3
+  | Keeper_work_candle -> 4
+  | Keeper_sandbox -> 5
+  | Keeper_config -> 6
 
 let equal_keeper_tab a b = Int.equal (keeper_tab_index a) (keeper_tab_index b)
 
@@ -402,6 +454,9 @@ let equal_knowledge_dive_target a b =
   | Memory_diff_dive _, (Thread_dive _ | Wiki_dive _ | Artifact_dive _) ->
       false
 
+let equal_runtime_dive_target a b =
+  match a, b with Tool_dive x, Tool_dive y -> String.equal x y
+
 let equal_infra_dive_target a b =
   match a, b with
   | Sandbox_dive x, Sandbox_dive y | Lane_dive x, Lane_dive y ->
@@ -418,11 +473,13 @@ let equal_dive a b =
       String.equal x.name y.name && equal_keeper_tab x.tab y.tab
   | Dive_work x, Dive_work y -> equal_work_dive_target x y
   | Dive_knowledge x, Dive_knowledge y -> equal_knowledge_dive_target x y
+  | Dive_runtime x, Dive_runtime y -> equal_runtime_dive_target x y
   | Dive_infra x, Dive_infra y -> equal_infra_dive_target x y
-  | Dive_keeper _, (Dive_work _ | Dive_knowledge _ | Dive_infra _)
-  | Dive_work _, (Dive_keeper _ | Dive_knowledge _ | Dive_infra _)
-  | Dive_knowledge _, (Dive_keeper _ | Dive_work _ | Dive_infra _)
-  | Dive_infra _, (Dive_keeper _ | Dive_work _ | Dive_knowledge _) ->
+  | Dive_keeper _, (Dive_work _ | Dive_knowledge _ | Dive_runtime _ | Dive_infra _)
+  | Dive_work _, (Dive_keeper _ | Dive_knowledge _ | Dive_runtime _ | Dive_infra _)
+  | Dive_knowledge _, (Dive_keeper _ | Dive_work _ | Dive_runtime _ | Dive_infra _)
+  | Dive_runtime _, (Dive_keeper _ | Dive_work _ | Dive_knowledge _ | Dive_infra _)
+  | Dive_infra _, (Dive_keeper _ | Dive_work _ | Dive_knowledge _ | Dive_runtime _) ->
       false
 
 let settings_tab_index = function
@@ -457,14 +514,21 @@ let equal_inline_action_kind a b =
   | Verification_reject x, Verification_reject y
   | Task_cancel x, Task_cancel y ->
       String.equal x y
-  | Btw_query, (Gate_reject _ | Verification_reject _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post)
-  | Gate_reject _, (Btw_query | Verification_reject _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post)
-  | Verification_reject _, (Btw_query | Gate_reject _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post)
-  | Task_cancel _, (Btw_query | Gate_reject _ | Verification_reject _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post)
-  | Schedule_form, (Btw_query | Gate_reject _ | Verification_reject _ | Task_cancel _ | Connector_form | Repo_add_form | Board_new_post)
-  | Connector_form, (Btw_query | Gate_reject _ | Verification_reject _ | Task_cancel _ | Schedule_form | Repo_add_form | Board_new_post)
-  | Repo_add_form, (Btw_query | Gate_reject _ | Verification_reject _ | Task_cancel _ | Schedule_form | Connector_form | Board_new_post)
-  | Board_new_post, (Btw_query | Gate_reject _ | Verification_reject _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form) ->
+  | Harness_overrule x, Harness_overrule y ->
+      String.equal x y
+  | Board_comment x, Board_comment y ->
+      String.equal x.post_id y.post_id
+      && Option.equal String.equal x.parent_id y.parent_id
+  | Btw_query, (Gate_reject _ | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post | Board_comment _)
+  | Gate_reject _, (Btw_query | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post | Board_comment _)
+  | Verification_reject _, (Btw_query | Gate_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post | Board_comment _)
+  | Harness_overrule _, (Btw_query | Gate_reject _ | Verification_reject _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post | Board_comment _)
+  | Task_cancel _, (Btw_query | Gate_reject _ | Verification_reject _ | Harness_overrule _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post | Board_comment _)
+  | Schedule_form, (Btw_query | Gate_reject _ | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Connector_form | Repo_add_form | Board_new_post | Board_comment _)
+  | Connector_form, (Btw_query | Gate_reject _ | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Repo_add_form | Board_new_post | Board_comment _)
+  | Repo_add_form, (Btw_query | Gate_reject _ | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Connector_form | Board_new_post | Board_comment _)
+  | Board_new_post, (Btw_query | Gate_reject _ | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_comment _)
+  | Board_comment _, (Btw_query | Gate_reject _ | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post) ->
       false
 
 let system_gate_index = function
@@ -525,6 +589,7 @@ type menu_target =
   | Menu_work of work_tab
   | Menu_knowledge of knowledge_tab
   | Menu_keepers
+  | Menu_keeper_tab of keeper_tab
   | Menu_runtime of runtime_tab
   | Menu_infra of infra_tab
   | Menu_settings
@@ -578,18 +643,20 @@ let equal_menu_target a b =
       true
   | Menu_work x, Menu_work y -> equal_work_tab x y
   | Menu_knowledge x, Menu_knowledge y -> equal_knowledge_tab x y
+  | Menu_keeper_tab x, Menu_keeper_tab y -> equal_keeper_tab x y
   | Menu_runtime x, Menu_runtime y -> equal_runtime_tab x y
   | Menu_infra x, Menu_infra y -> equal_infra_tab x y
-  | Menu_pulse, (Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
-  | Menu_work _, (Menu_pulse | Menu_knowledge _ | Menu_keepers | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
-  | Menu_knowledge _, (Menu_pulse | Menu_work _ | Menu_keepers | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
-  | Menu_keepers, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
-  | Menu_runtime _, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
-  | Menu_infra _, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_runtime _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
-  | Menu_settings, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_runtime _ | Menu_infra _ | Menu_incidents | Menu_queue_context | Menu_help)
-  | Menu_incidents, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_queue_context | Menu_help)
-  | Menu_queue_context, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_help)
-  | Menu_help, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context) ->
+  | Menu_pulse, (Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_keeper_tab _ | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
+  | Menu_work _, (Menu_pulse | Menu_knowledge _ | Menu_keepers | Menu_keeper_tab _ | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
+  | Menu_knowledge _, (Menu_pulse | Menu_work _ | Menu_keepers | Menu_keeper_tab _ | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
+  | Menu_keepers, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keeper_tab _ | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
+  | Menu_keeper_tab _, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
+  | Menu_runtime _, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_keeper_tab _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
+  | Menu_infra _, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_keeper_tab _ | Menu_runtime _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
+  | Menu_settings, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_keeper_tab _ | Menu_runtime _ | Menu_infra _ | Menu_incidents | Menu_queue_context | Menu_help)
+  | Menu_incidents, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_keeper_tab _ | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_queue_context | Menu_help)
+  | Menu_queue_context, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_keeper_tab _ | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_help)
+  | Menu_help, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_keeper_tab _ | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context) ->
       false
 
 let all_menu_items =
@@ -608,8 +675,14 @@ let all_menu_items =
     };
     {
       section = Sec_work;
-      target = Menu_work Work_tasks_schedules;
-      label = work_tab_label Work_tasks_schedules;
+      target = Menu_work Work_tasks;
+      label = work_tab_label Work_tasks;
+      shortcut = None;
+    };
+    {
+      section = Sec_work;
+      target = Menu_work Work_schedules;
+      label = work_tab_label Work_schedules;
       shortcut = None;
     };
     {
@@ -655,6 +728,18 @@ let all_menu_items =
       shortcut = Some "4";
     };
     {
+      section = Sec_fleet;
+      target = Menu_keeper_tab Keeper_context;
+      label = keeper_tab_label Keeper_context;
+      shortcut = None;
+    };
+    {
+      section = Sec_fleet;
+      target = Menu_keeper_tab Keeper_tool_calls;
+      label = keeper_tab_label Keeper_tool_calls;
+      shortcut = None;
+    };
+    {
       section = Sec_runtime;
       target = Menu_runtime Runtime_quotas_credits;
       label = runtime_tab_label Runtime_quotas_credits;
@@ -674,8 +759,20 @@ let all_menu_items =
     };
     {
       section = Sec_runtime;
-      target = Menu_runtime Runtime_tools_connectors;
-      label = runtime_tab_label Runtime_tools_connectors;
+      target = Menu_runtime Runtime_fusion;
+      label = runtime_tab_label Runtime_fusion;
+      shortcut = None;
+    };
+    {
+      section = Sec_runtime;
+      target = Menu_runtime Runtime_tools_usage;
+      label = runtime_tab_label Runtime_tools_usage;
+      shortcut = None;
+    };
+    {
+      section = Sec_runtime;
+      target = Menu_runtime Runtime_connectors;
+      label = runtime_tab_label Runtime_connectors;
       shortcut = None;
     };
     {
@@ -731,26 +828,38 @@ let all_menu_items =
 let menu_item_index = function
   | Menu_pulse -> 0
   | Menu_work Work_pipeline -> 1
-  | Menu_work Work_tasks_schedules -> 2
-  | Menu_work Work_inbox -> 3
-  | Menu_work Work_candle_scorecard -> 4
-  | Menu_knowledge Knowledge_board -> 5
-  | Menu_knowledge Knowledge_wiki -> 6
-  | Menu_knowledge Knowledge_artifacts -> 7
-  | Menu_knowledge Knowledge_memory -> 8
-  | Menu_keepers -> 9
-  | Menu_runtime Runtime_quotas_credits -> 10
-  | Menu_runtime Runtime_efficiency_spend -> 11
-  | Menu_runtime Runtime_failover_lanes -> 12
-  | Menu_runtime Runtime_tools_connectors -> 13
-  | Menu_runtime Runtime_addons_browser -> 14
-  | Menu_infra Infra_sandboxes -> 15
-  | Menu_infra Infra_repos_changes -> 16
-  | Menu_infra Infra_activity_logs -> 17
-  | Menu_settings -> 18
-  | Menu_incidents -> 19
-  | Menu_queue_context -> 20
-  | Menu_help -> 21
+  | Menu_work Work_tasks -> 2
+  | Menu_work Work_schedules -> 3
+  | Menu_work Work_inbox -> 4
+  | Menu_work Work_candle_scorecard -> 5
+  | Menu_knowledge Knowledge_board -> 6
+  | Menu_knowledge Knowledge_wiki -> 7
+  | Menu_knowledge Knowledge_artifacts -> 8
+  | Menu_knowledge Knowledge_memory -> 9
+  | Menu_keepers -> 10
+  | Menu_keeper_tab Keeper_context -> 11
+  | Menu_keeper_tab Keeper_tool_calls -> 12
+  | Menu_keeper_tab
+      ( Keeper_chat
+      | Keeper_memory
+      | Keeper_work_candle
+      | Keeper_sandbox
+      | Keeper_config ) ->
+      10
+  | Menu_runtime Runtime_quotas_credits -> 13
+  | Menu_runtime Runtime_efficiency_spend -> 14
+  | Menu_runtime Runtime_failover_lanes -> 15
+  | Menu_runtime Runtime_fusion -> 16
+  | Menu_runtime Runtime_tools_usage -> 17
+  | Menu_runtime Runtime_connectors -> 18
+  | Menu_runtime Runtime_addons_browser -> 19
+  | Menu_infra Infra_sandboxes -> 20
+  | Menu_infra Infra_repos_changes -> 21
+  | Menu_infra Infra_activity_logs -> 22
+  | Menu_settings -> 23
+  | Menu_incidents -> 24
+  | Menu_queue_context -> 25
+  | Menu_help -> 26
 
 let menu_item_of_index idx = List.nth_opt all_menu_items idx
 
@@ -760,6 +869,7 @@ let is_overlay_menu_target = function
   | Menu_work _
   | Menu_knowledge _
   | Menu_keepers
+  | Menu_keeper_tab _
   | Menu_runtime _
   | Menu_infra _ ->
       false

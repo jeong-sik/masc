@@ -127,10 +127,14 @@ type http_reply =
       result : (Wire_work.tool_approval_outcome, http_error) result;
     }
   | Reply_board_feed of (Wire_knowledge.board_feed, http_error) result
+  | Reply_board_hearths of
+      (Wire_knowledge.board_hearth_entry list, http_error) result
   | Reply_board_thread of
       ( Wire_knowledge.board_post * Wire_knowledge.board_comment list
       , http_error )
       result
+  | Reply_board_comment of { post_id : string; result : (unit, http_error) result }
+  | Reply_board_vote of { post_id : string; result : (unit, http_error) result }
   | Reply_wiki_index of (Wire_knowledge.wiki_index, http_error) result
   | Reply_wiki_page of {
       page : string;
@@ -148,6 +152,16 @@ type http_reply =
   | Reply_artifact_detail of {
       id : string;
       result : (Wire_knowledge.published_artifact_detail, http_error) result;
+    }
+  | Reply_artifact_checks of
+      (Wire_knowledge.artifact_check list, http_error) result
+  | Reply_artifact_check of {
+      id : string;
+      result : (Wire_knowledge.artifact_check, http_error) result;
+    }
+  | Reply_artifact_share of {
+      id : string;
+      result : (Wire_knowledge.artifact_share_result, http_error) result;
     }
   | Reply_world_memory of (Wire_knowledge.world_memory, http_error) result
   | Reply_memory_diff of {
@@ -172,6 +186,50 @@ type http_reply =
   | Reply_memory_act of {
       keeper : string;
       result : (Wire_knowledge.memory_act_answer, http_error) result;
+    }
+  | Reply_keeper_context_turn_records of {
+      keeper : string;
+      result : (Wire_keeper_context.turn_records_page, http_error) result;
+    }
+  | Reply_keeper_provider_input of {
+      keeper : string;
+      turn_ref : string;
+      result : (Wire_keeper_context.provider_input_manifest, http_error) result;
+    }
+  | Reply_keeper_provider_input_part of {
+      keeper : string;
+      turn_ref : string;
+      index : int;
+      result :
+        (Wire_keeper_context.provider_input_part_content, http_error) result;
+    }
+  | Reply_keeper_cache_outcome of {
+      keeper : string;
+      turn_ref : string;
+      result : (Keeper_cache_outcome_reading.reading, http_error) result;
+    }
+  | Reply_keeper_next_request of {
+      keeper : string;
+      result : (Wire_keeper_context.next_request_forecast, http_error) result;
+    }
+  | Reply_keeper_turn_transcript of {
+      keeper : string;
+      turn_ref : string;
+      result : (Wire_keeper_context.turn_transcript, http_error) result;
+    }
+  | Reply_keeper_tool_stats of {
+      keeper : string;
+      result : (Wire_keeper_context.keeper_tool_stats, http_error) result;
+    }
+  | Reply_keeper_tool_calls of {
+      keeper : string;
+      turn_ref : string option;
+      result : (Wire_keeper_context.keeper_tool_calls_page, http_error) result;
+    }
+  | Reply_keeper_tool_result of {
+      keeper : string;
+      execution_id : string;
+      result : (Wire_keeper_context.tool_result_response, http_error) result;
     }
   | Reply_provider_usage of
       (Wire_runtime.provider_usage_windows, http_error) result
@@ -210,7 +268,17 @@ type http_reply =
   | Reply_fusion_runs of (Wire_runtime.fusion_run list, http_error) result
   | Reply_fusion_launch of (unit, http_error) result
   | Reply_tool_series of (Wire_runtime.tool_series, http_error) result
+  | Reply_tool_series_summary of {
+      tool : string option;
+      since_hours : int;
+      result : (Wire_runtime.tool_series_summary, http_error) result;
+    }
+  | Reply_tools_dashboard of {
+      keeper : string option;
+      result : (Wire_runtime.tools_dashboard_snapshot, http_error) result;
+    }
   | Reply_tools_catalog of (Wire_runtime.tools_catalog, http_error) result
+  | Reply_skills of (Wire_runtime.skills_snapshot, http_error) result
   | Reply_connectors of (Wire_runtime.connector_row list, http_error) result
   | Reply_browser_lane of
       (Wire_runtime.browser_lane_status, http_error) result

@@ -29,7 +29,6 @@ type task_status_filter =
   | Status_todo
   | Status_unlinked
   | Status_done
-  | Status_schedules
 
 type t = {
   active_tab : Nav.work_tab;
@@ -368,7 +367,6 @@ let filtered_goals t =
 let task_matches_status filter (tk : Wire_work.task) =
   match filter with
   | Status_all -> true
-  | Status_schedules -> false
   | Status_active -> task_is_active tk.status
   | Status_awaiting_verification -> task_is_awaiting_verification tk.status
   | Status_todo -> (
@@ -411,16 +409,7 @@ let filtered_verifications t =
 
 let filtered_schedules t =
   let q_low = String.lowercase_ascii (String.trim t.filter_query) in
-  let all =
-    match t.task_status_filter with
-    | Status_all | Status_schedules -> schedules_list t
-    | Status_active
-    | Status_awaiting_verification
-    | Status_todo
-    | Status_unlinked
-    | Status_done ->
-        []
-  in
+  let all = schedules_list t in
   if String.equal q_low "" then all
   else
     List.filter
@@ -505,45 +494,13 @@ let selected_verification t =
 
 let selected_schedule t =
   let ss = filtered_schedules t in
-  let offset =
-    match t.active_tab with
-    | Nav.Work_tasks_schedules -> t.selected_index - List.length (filtered_tasks t)
-    | Nav.Work_pipeline | Nav.Work_inbox | Nav.Work_candle_scorecard ->
-        t.selected_index
-  in
-  if offset < 0 then None else List.nth_opt ss offset
+  if t.selected_index < 0 then None else List.nth_opt ss t.selected_index
 
 let selected_open_ask t =
   let xs = open_asks t in
   if t.selected_index < 0 then None else List.nth_opt xs t.selected_index
 
 let reset_detail_scroll t = { t with detail_scroll_offset = 0 }
-
-let jump_tasks_schedules_pane ~pane_index t =
-  if not (Nav.equal_work_tab t.active_tab Nav.Work_tasks_schedules) then t
-  else
-    let n_tasks = List.length (filtered_tasks t) in
-    let n_scheds = List.length (filtered_schedules t) in
-    if pane_index = 1 && n_scheds > 0 then
-      let selected_index =
-        if t.selected_index >= n_tasks && t.selected_index < n_tasks + n_scheds
-        then t.selected_index
-        else n_tasks
-      in
-      let sched_idx = selected_index - n_tasks in
-      let schedules_scroll_offset =
-        adjust_scroll ~viewport_rows:7 ~scroll:t.schedules_scroll_offset sched_idx
-      in
-      { t with selected_index; schedules_scroll_offset }
-    else if pane_index = 0 && n_tasks > 0 then
-      let selected_index =
-        if t.selected_index < n_tasks then t.selected_index else 0
-      in
-      let scroll_offset =
-        adjust_scroll ~scroll:t.scroll_offset selected_index
-      in
-      { t with selected_index; scroll_offset }
-    else t
 
 let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
     ?max_detail_scroll ~delta t =
@@ -597,30 +554,21 @@ let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
             else 0
           in
           { t with selected_index; scroll_offset; detail_scroll_offset })
-  | Nav.Work_tasks_schedules ->
-      let n_tasks = List.length (filtered_tasks t) in
-      let len = n_tasks + List.length (filtered_schedules t) in
+  | Nav.Work_tasks ->
+      let len = List.length (filtered_tasks t) in
       let selected_index = clamp_index len (t.selected_index + delta) in
-      if selected_index < n_tasks then
-        let scroll_offset =
-          adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
-        in
-        { t with selected_index; scroll_offset }
-      else
-        let sched_idx = selected_index - n_tasks in
-        let sched_vr =
-          if n_tasks = 0 then
-            Option.value ~default:default_viewport_rows viewport_rows
-          else
-            match viewport_rows with
-            | Some vr -> min 7 (max 2 vr)
-            | None -> 7
-        in
-        let schedules_scroll_offset =
-          adjust_scroll ~viewport_rows:sched_vr
-            ~scroll:t.schedules_scroll_offset sched_idx
-        in
-        { t with selected_index; schedules_scroll_offset }
+      let scroll_offset =
+        adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
+      in
+      { t with selected_index; scroll_offset }
+  | Nav.Work_schedules ->
+      let len = List.length (filtered_schedules t) in
+      let selected_index = clamp_index len (t.selected_index + delta) in
+      let schedules_scroll_offset =
+        adjust_scroll ?viewport_rows ~scroll:t.schedules_scroll_offset
+          selected_index
+      in
+      { t with selected_index; schedules_scroll_offset }
   | Nav.Work_inbox ->
       if pane_index = 1 then
         let max_scroll =
@@ -674,16 +622,14 @@ let equal_task_status_filter a b =
   | Status_awaiting_verification, Status_awaiting_verification
   | Status_todo, Status_todo
   | Status_unlinked, Status_unlinked
-  | Status_done, Status_done
-  | Status_schedules, Status_schedules ->
+  | Status_done, Status_done ->
       true
   | ( ( Status_all
       | Status_active
       | Status_awaiting_verification
       | Status_todo
       | Status_unlinked
-      | Status_done
-      | Status_schedules ),
+      | Status_done ),
       _ ) ->
       false
 
@@ -695,7 +641,6 @@ let all_task_status_filters =
     Status_todo;
     Status_unlinked;
     Status_done;
-    Status_schedules;
   ]
 
 let set_task_status_filter task_status_filter t =
@@ -716,8 +661,7 @@ let cycle_task_status_filter t =
     | Status_awaiting_verification -> Status_todo
     | Status_todo -> Status_unlinked
     | Status_unlinked -> Status_done
-    | Status_done -> Status_schedules
-    | Status_schedules -> Status_all
+    | Status_done -> Status_all
   in
   set_task_status_filter next t
 

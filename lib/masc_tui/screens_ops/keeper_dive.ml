@@ -3159,6 +3159,12 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
         | Nav.Keeper_chat ->
             render_chat_tab grid ~rect:content_rect ~theme ~model ~name
               keeper_opt
+        | Nav.Keeper_context ->
+            Keeper_context_view.draw_context_tab grid ~rect:content_rect ~theme
+              ~model ~name
+        | Nav.Keeper_tool_calls ->
+            Keeper_context_view.draw_tool_calls_tab grid ~rect:content_rect
+              ~theme ~model ~name
         | Nav.Keeper_memory ->
             render_memory_tab grid ~rect:content_rect ~theme ~model ~name
         | Nav.Keeper_work_candle ->

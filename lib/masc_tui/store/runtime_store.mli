@@ -62,6 +62,27 @@ type company_spend_group = {
   members : keeper_spend_row list;
 }
 
+type tools_subview =
+  | Tools_usage_calls
+  | Tools_catalog_tree
+  | Tools_keeper_skills
+
+type tools_window =
+  | Tools_win_24h
+  | Tools_win_7d
+  | Tools_win_14d
+
+type tool_family_group = {
+  family : string;
+  tools : Wire_runtime.tool_catalog_entry list;
+}
+
+type tool_domain_group = {
+  domain : string;
+  families : tool_family_group list;
+  total_calls : int;
+}
+
 type t = {
   active_tab : Nav.runtime_tab;
   usage_windows : Wire_runtime.provider_usage_windows Observed.t;
@@ -79,7 +100,16 @@ type t = {
   fusion_runs : Wire_runtime.fusion_run list Observed.t;
   fusion_launch_draft : fusion_draft;
   tool_series : Wire_runtime.tool_series Observed.t;
+  tool_series_summary : Wire_runtime.tool_series_summary Observed.t;
+  tool_detail_series : (string * Wire_runtime.tool_series_summary) Observed.t;
+  tools_dashboard : Wire_runtime.tools_dashboard_snapshot Observed.t;
   tools_catalog : Wire_runtime.tool_summary list Observed.t;
+  skills : Wire_runtime.skills_snapshot Observed.t;
+  tools_subview : tools_subview;
+  tools_window : tools_window;
+  tools_surface_keeper_idx : int;
+  tools_catalog_selected_index : int;
+  tools_catalog_scroll_offset : int;
   connectors : Wire_runtime.connector_row list Observed.t;
   browser_lane : Wire_runtime.browser_lane_status Observed.t;
   browser_tabs : Wire_runtime.browser_tabs_response Observed.t String_map.t;
@@ -91,8 +121,12 @@ type t = {
   selected_index : int;
   scroll_offset : int;
   quota_scroll_offset : int;
+  fusion_selected_index : int;
+  fusion_scroll_offset : int;
   connector_selected_index : int;
   connector_scroll_offset : int;
+  mcp_client_selected_index : int;
+  mcp_client_scroll_offset : int;
   addon_selected_index : int;
   addon_scroll_offset : int;
   browser_client_selected_index : int;
@@ -103,6 +137,18 @@ type t = {
   detail_scroll_offset : int;
   filter_query : string;
 }
+
+val equal_tools_subview : tools_subview -> tools_subview -> bool
+val equal_tools_window : tools_window -> tools_window -> bool
+val tools_window_params : tools_window -> [ `Hour | `Day ] * int
+val tools_window_label : tools_window -> string
+val cycle_tools_subview : t -> t
+val set_tools_subview : tools_subview -> t -> t
+val cycle_tools_window : t -> t
+val step_tools_surface_keeper :
+  keeper_names:string list -> delta:int -> t -> t * string option
+val selected_tools_surface_keeper :
+  keeper_names:string list -> t -> string option
 
 val empty_fusion_draft : fusion_draft
 val empty : t
@@ -137,13 +183,25 @@ val apply_fusion_runs :
   observed_at:Clock.Mono.t -> Wire_runtime.fusion_run list -> t -> t
 val apply_tool_series :
   observed_at:Clock.Mono.t -> Wire_runtime.tool_series -> t -> t
+val apply_tool_series_summary :
+  observed_at:Clock.Mono.t -> Wire_runtime.tool_series_summary -> t -> t
+val apply_tool_detail_series :
+  observed_at:Clock.Mono.t ->
+  tool:string ->
+  Wire_runtime.tool_series_summary ->
+  t ->
+  t
+val apply_tools_dashboard :
+  observed_at:Clock.Mono.t -> Wire_runtime.tools_dashboard_snapshot -> t -> t
 val apply_tools_catalog :
   observed_at:Clock.Mono.t -> Wire_runtime.tool_summary list -> t -> t
-
 val apply_tools_warming : observed_at:Clock.Mono.t -> t -> t
 (** The server answered its warming payload. A loaded catalog stays, marked
     stale; otherwise the panel waits ([Loading]). Either way the next view of
     the panel asks again. *)
+
+val apply_skills :
+  observed_at:Clock.Mono.t -> Wire_runtime.skills_snapshot -> t -> t
 val apply_connectors :
   observed_at:Clock.Mono.t -> Wire_runtime.connector_row list -> t -> t
 val apply_browser_lane :
@@ -302,7 +360,15 @@ val to_fusion_launch_request :
 
 val filtered_lanes : t -> Wire_runtime.failover_lane list
 val filtered_tools : t -> Wire_runtime.tool_summary list
+val filtered_tool_catalog_entries : t -> Wire_runtime.tool_catalog_entry list
+val grouped_tools_catalog : t -> tool_domain_group list
+val tools_catalog_display_entries : t -> Wire_runtime.tool_catalog_entry list
+val selected_tool_catalog_entry : t -> Wire_runtime.tool_catalog_entry option
+val filtered_fusion_runs : t -> Wire_runtime.fusion_run list
+val selected_fusion_run : t -> Wire_runtime.fusion_run option
 val filtered_connectors : t -> Wire_runtime.connector_row list
+val filtered_mcp_clients : t -> Wire_runtime.mcp_client_row list
+val selected_mcp_client : t -> Wire_runtime.mcp_client_row option
 val filtered_addon_instances : t -> Wire_runtime.addon_instance list
 val declaration_for_addon :
   Wire_runtime.addon_instance -> t -> Wire_runtime.addon_declaration option

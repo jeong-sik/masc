@@ -145,6 +145,7 @@ let has_get_health cmds =
               | Cmd.Get_gate_pending
               | Cmd.Get_candle_ledger _
               | Cmd.Get_board_feed _
+              | Cmd.Get_board_hearths
               | Cmd.Get_board_thread _
               | Cmd.Get_wiki_index _
               | Cmd.Get_wiki_page _
@@ -153,12 +154,22 @@ let has_get_health cmds =
               | Cmd.Get_wiki_lint
               | Cmd.Get_artifacts
               | Cmd.Get_artifact_detail _
+              | Cmd.Get_artifact_checks
               | Cmd.Get_world_memory
               | Cmd.Get_memory_diff _
               | Cmd.Get_keeper_memory_os_internals _
               | Cmd.Get_keeper_memory_facts _
               | Cmd.Get_keeper_memory_activity _
               | Cmd.Get_keeper_memory_health
+              | Cmd.Get_keeper_context_turn_records _
+              | Cmd.Get_keeper_provider_input _
+              | Cmd.Get_keeper_provider_input_part _
+              | Cmd.Get_keeper_cache_outcome _
+              | Cmd.Get_keeper_next_request _
+              | Cmd.Get_keeper_turn_transcript _
+              | Cmd.Get_keeper_tool_stats _
+              | Cmd.Get_keeper_tool_calls _
+              | Cmd.Get_keeper_tool_result _
               | Cmd.Get_provider_usage _
               | Cmd.Get_keeper_costs _
               | Cmd.Get_efficiency _
@@ -172,7 +183,9 @@ let has_get_health cmds =
               | Cmd.Get_exact_lane_runs _
               | Cmd.Get_fusion_runs
               | Cmd.Get_tool_series _
+              | Cmd.Get_tool_series_filtered _
               | Cmd.Get_tools_catalog _
+              | Cmd.Get_skills
               | Cmd.Get_connectors
               | Cmd.Get_browser_lane
               | Cmd.Get_lane_addons
@@ -1014,9 +1027,11 @@ let test_subscriptions_bounded_and_zero_polling () =
         match tab with
         | Nav.Runtime_quotas_credits
         | Nav.Runtime_failover_lanes
+        | Nav.Runtime_fusion
+        | Nav.Runtime_connectors
         | Nav.Runtime_addons_browser ->
             0
-        | Nav.Runtime_efficiency_spend | Nav.Runtime_tools_connectors -> 1
+        | Nav.Runtime_efficiency_spend | Nav.Runtime_tools_usage -> 1
       in
       check_plan "Runtime" m ~expected_view)
     Nav.all_runtime_tabs;
@@ -1112,7 +1127,7 @@ let test_keymap_and_slash_commands () =
   (* ] and [ cycle sub-tabs *)
   let m_tab2, _ = Update.step ~now:t0 m_work (Msg.Key_event (char_key "]")) in
   Alcotest.(check bool) "']' advances Work tab" true
-    (Nav.equal_work_tab m_tab2.work.active_tab Nav.Work_tasks_schedules);
+    (Nav.equal_work_tab m_tab2.work.active_tab Nav.Work_tasks);
   let m_tab1, _ = Update.step ~now:t0 m_tab2 (Msg.Key_event (char_key "[")) in
   Alcotest.(check bool) "'[' goes back to Pipeline" true
     (Nav.equal_work_tab m_tab1.work.active_tab Nav.Work_pipeline);
@@ -1696,6 +1711,13 @@ let test_verifier_regressions () =
         | Cmd.Post_connector_bind _
         | Cmd.Post_repo_add _
         | Cmd.Post_task_cancel _
+        | Cmd.Post_harness_overrule _
+        | Cmd.Post_board_comment _
+        | Cmd.Post_board_vote _
+        | Cmd.Post_board_comment_vote _
+        | Cmd.Post_artifact_check _
+        | Cmd.Post_artifact_share _
+        | Cmd.Post_connector_unbind _
         | Cmd.Post_browser_tabs _ ->
             false)
     | Cmd.Batch _
@@ -3242,10 +3264,10 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     | Some (Nav.Dive_work (Nav.Verification_dive "ver-100")) -> true
     | _ -> false);
   let m_sched_tab =
-    { m_work with work = Work_store.set_tab Nav.Work_tasks_schedules m_work.work }
+    { m_work with work = Work_store.set_tab Nav.Work_schedules m_work.work }
   in
   let m_sched_modal, _ = step m_sched_tab (char_key "n") in
-  Alcotest.(check bool) "[n] on Work_tasks_schedules opens Schedule_form" true
+  Alcotest.(check bool) "[n] on Work_schedules opens Schedule_form" true
     (Option.equal Nav.equal_overlay m_sched_modal.nav.overlay
        (Some (Nav.Inline_action Nav.Schedule_form)));
 
@@ -3301,6 +3323,40 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     true
     (Option.is_none m_vrej_done.inline_modal
      && Option.is_none m_vrej_done.nav.overlay);
+  let m_hov, _ = step m_vdive (char_key "h") in
+  Alcotest.(check bool) "Verification_dive [h] opens Harness_overrule modal with empty hash" true
+    (Option.equal Nav.equal_overlay m_hov.nav.overlay
+       (Some (Nav.Inline_action (Nav.Harness_overrule ""))));
+  let valid_hash64 =
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  in
+  let m_hov_hash =
+    String.fold_left
+      (fun acc ch -> fst (step acc (char_key (String.make 1 ch))))
+      m_hov valid_hash64
+  in
+  let m_hov_f1, _ = step m_hov_hash (key Keymap.Input.Down) in
+  let m_hov_f2, _ = step m_hov_f1 (key Keymap.Input.Down) in
+  let m_hov_typed, _ = step m_hov_f2 (char_key "r") in
+  let _, cmds_hov = step m_hov_typed (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Harness_overrule submit emits Post_harness_overrule" true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_harness_overrule
+                   {
+                     notes_hash;
+                     verdict = `Approve;
+                     reason = "r";
+                   };
+               _;
+             }
+           when String.equal notes_hash valid_hash64 ->
+             true
+         | _ -> false)
+       cmds_hov);
   let m_vjson, _ = step m_vdive (char_key " ") in
   Alcotest.(check bool) "Work_dive [Space] toggles show_raw_json" true
     m_vjson.infra.show_raw_json;
@@ -4941,7 +4997,7 @@ let test_nav_fix6_work_inbox_filter_and_split_pane_clamping () =
   in
   let w_ts =
     Work_store.empty
-    |> Work_store.set_tab Nav.Work_tasks_schedules
+    |> Work_store.set_tab Nav.Work_tasks
     |> Work_store.apply_planning ~observed_at:t0 { goals = []; tasks }
     |> Work_store.apply_schedules ~observed_at:t0
          ([ mk_sched "s-1"; mk_sched "s-2" ], None)
@@ -4953,14 +5009,10 @@ let test_nav_fix6_work_inbox_filter_and_split_pane_clamping () =
     (List.length (Work_store.filtered_tasks (with_status Work_store.Status_todo)));
   Alcotest.(check int) "Done chip returns 1 done task" 1
     (List.length (Work_store.filtered_tasks (with_status Work_store.Status_done)));
-  Alcotest.(check int) "Done chip hides schedules" 0
-    (List.length (Work_store.filtered_schedules (with_status Work_store.Status_done)));
   Alcotest.(check int) "text 'active' is a plain search, not a status chip" 0
     (List.length (Work_store.filtered_tasks (Work_store.set_filter "active" w_ts)));
-  let w_sched = with_status Work_store.Status_schedules in
-  Alcotest.(check int) "Schedules chip returns 0 tasks" 0
-    (List.length (Work_store.filtered_tasks w_sched));
-  Alcotest.(check int) "Schedules chip has 2 schedules" 2
+  let w_sched = Work_store.set_tab Nav.Work_schedules w_ts in
+  Alcotest.(check int) "Schedules 1st-class tab has 2 schedules" 2
     (List.length (Work_store.filtered_schedules w_sched));
   let w_cycled =
     List.fold_left
@@ -4977,7 +5029,7 @@ let test_nav_fix6_work_inbox_filter_and_split_pane_clamping () =
   let m_space, _ =
     Update.step ~now:t0 m_tasks (Msg.Key_event (char_key " "))
   in
-  Alcotest.(check bool) "Space on Tasks & Schedules selects the Active chip" true
+  Alcotest.(check bool) "Space on Work_tasks selects the Active chip" true
     (Work_store.equal_task_status_filter Work_store.Status_active
        m_space.work.task_status_filter);
   let m_chip_esc, _ =
@@ -4987,7 +5039,7 @@ let test_nav_fix6_work_inbox_filter_and_split_pane_clamping () =
     (Work_store.equal_task_status_filter Work_store.Status_all
        m_chip_esc.work.task_status_filter);
   let w_sched_clamped = Work_store.move_selection ~delta:99 w_sched in
-  Alcotest.(check int) "Schedules chip clamps cleanly at 1 (no dead zone)" 1
+  Alcotest.(check int) "Schedules tab clamps cleanly at 1 (no dead zone)" 1
     w_sched_clamped.selected_index;
 
   (* 3. Split-pane dead-zone clamping on Tab (Work_pipeline, Runtime_tools_connectors, Knowledge_memory) *)
@@ -5040,18 +5092,9 @@ let test_nav_fix6_work_inbox_filter_and_split_pane_clamping () =
   Alcotest.(check int) "Down on pane 1 preserves Goals selected_index (4)" 4
     m_pipe_dn.work.selected_index;
 
-  (* Runtime_tools_connectors: 6 tools on pane 0, 2 connectors on pane 1 *)
-  let tools6 =
-    List.init 6 (fun i : Wire_runtime.tool_summary ->
-        {
-          name = Printf.sprintf "tool_%d" i;
-          description = None;
-          calls = Observed.value ~observed_at:t0 i;
-          failure_rate_pct = Observed.value ~observed_at:t0 0.0;
-        })
-  in
-  let conns2 =
-    List.init 2 (fun i : Wire_runtime.connector_row ->
+  (* Runtime_connectors: 6 connectors on pane 0, 2 MCP clients on pane 1 *)
+  let conns6 =
+    List.init 6 (fun i : Wire_runtime.connector_row ->
         {
           connector_id = Printf.sprintf "conn-%d" i;
           display_name = Printf.sprintf "Conn %d" i;
@@ -5059,6 +5102,21 @@ let test_nav_fix6_work_inbox_filter_and_split_pane_clamping () =
           channel = None;
           error = None;
           binding_count = 1;
+          configured_bindings = [];
+        })
+  in
+  let mcps2 =
+    List.init 2 (fun i : Wire_runtime.mcp_client_row ->
+        {
+          name = Printf.sprintf "mcp-%d" i;
+          agent_type = "mcp";
+          keeper_name = None;
+          keeper_id = None;
+          status = "active";
+          current_task = None;
+          session_bound_at_unix = Some 90.0;
+          last_seen_unix = Some 100.0;
+          capabilities = [];
         })
   in
   let m_tc =
@@ -5067,30 +5125,30 @@ let test_nav_fix6_work_inbox_filter_and_split_pane_clamping () =
       nav = { m0.nav with workspace = Nav.Runtime; pane_index = 0 };
       runtime =
         Runtime_store.empty
-        |> Runtime_store.set_tab Nav.Runtime_tools_connectors
-        |> Runtime_store.apply_tools_catalog ~observed_at:t0 tools6
-        |> Runtime_store.apply_connectors ~observed_at:t0 conns2;
+        |> Runtime_store.set_tab Nav.Runtime_connectors
+        |> Runtime_store.apply_connectors ~observed_at:t0 conns6
+        |> Runtime_store.apply_mcp_clients ~observed_at:t0 mcps2;
     }
   in
   let m_tc_end, _ =
     Update.step ~now:t0 m_tc (Msg.Key_event (key Keymap.Input.End))
   in
-  Alcotest.(check int) "Runtime tools pane 0 End lands on index 5" 5
-    m_tc_end.runtime.selected_index;
+  Alcotest.(check int) "Runtime connectors pane 0 End lands on index 5" 5
+    m_tc_end.runtime.connector_selected_index;
   let m_tc_tab, _ =
     Update.step ~now:t0 m_tc_end (Msg.Key_event (key Keymap.Input.Tab))
   in
-  Alcotest.(check int) "Tab preserves Tools selected_index (5)" 5
-    m_tc_tab.runtime.selected_index;
-  Alcotest.(check int) "Tab keeps Connectors index clamped (0)" 0
+  Alcotest.(check int) "Tab preserves Connectors selected_index (5)" 5
     m_tc_tab.runtime.connector_selected_index;
+  Alcotest.(check int) "Tab keeps MCP Clients index clamped (0)" 0
+    m_tc_tab.runtime.mcp_client_selected_index;
   let m_tc_dn, _ =
     Update.step ~now:t0 m_tc_tab (Msg.Key_event (key Keymap.Input.Down))
   in
-  Alcotest.(check int) "Down on pane 1 moves connector_selected_index to 1" 1
+  Alcotest.(check int) "Down on pane 1 moves mcp_client_selected_index to 1" 1
+    m_tc_dn.runtime.mcp_client_selected_index;
+  Alcotest.(check int) "Down on pane 1 preserves Connectors index (5)" 5
     m_tc_dn.runtime.connector_selected_index;
-  Alcotest.(check int) "Down on pane 1 preserves Tools selected_index (5)" 5
-    m_tc_dn.runtime.selected_index;
 
   (* Knowledge_memory: 4 conflicts on pane 0, 1 diff entry on pane 1 *)
   let conflicts4 =
@@ -5353,8 +5411,11 @@ let test_nav_left_right_subtab_cycling_and_guards () =
   (* 2. Work, Knowledge, Runtime, Infra cycle sub-tabs on Right/Left *)
   let m_w = { m0 with nav = { m0.nav with workspace = Nav.Work } } in
   let m_w1, _ = step m_w (key Keymap.Input.Right) in
-  Alcotest.(check bool) "Work Right -> Work_tasks_schedules" true
-    (Nav.equal_work_tab m_w1.work.active_tab Nav.Work_tasks_schedules);
+  Alcotest.(check bool) "Work Right -> Work_tasks" true
+    (Nav.equal_work_tab m_w1.work.active_tab Nav.Work_tasks);
+  let m_w2, _ = step m_w1 (key Keymap.Input.Right) in
+  Alcotest.(check bool) "Work second Right -> Work_schedules" true
+    (Nav.equal_work_tab m_w2.work.active_tab Nav.Work_schedules);
   let m_w0, _ = step m_w1 (key Keymap.Input.Left) in
   Alcotest.(check bool) "Work Left -> Work_pipeline" true
     (Nav.equal_work_tab m_w0.work.active_tab Nav.Work_pipeline);
@@ -5362,8 +5423,10 @@ let test_nav_left_right_subtab_cycling_and_guards () =
   let m_kn = { m0 with nav = { m0.nav with workspace = Nav.Knowledge } } in
   let m_kn1, _ = step m_kn (key Keymap.Input.Right) in
   Alcotest.(check bool) "Knowledge Right -> Knowledge_wiki" true
-    (Nav.equal_knowledge_tab m_kn1.knowledge.active_tab
-       Nav.Knowledge_wiki);
+    (Nav.equal_knowledge_tab m_kn1.knowledge.active_tab Nav.Knowledge_wiki);
+  let m_kn2, _ = step m_kn1 (key Keymap.Input.Right) in
+  Alcotest.(check bool) "Knowledge second Right -> Knowledge_artifacts" true
+    (Nav.equal_knowledge_tab m_kn2.knowledge.active_tab Nav.Knowledge_artifacts);
 
   let m_rt = { m0 with nav = { m0.nav with workspace = Nav.Runtime } } in
   let m_rt1, _ = step m_rt (key Keymap.Input.Right) in
@@ -5376,7 +5439,7 @@ let test_nav_left_right_subtab_cycling_and_guards () =
   Alcotest.(check bool) "Infra Right -> Infra_repos_changes" true
     (Nav.equal_infra_tab m_in1.infra.active_tab Nav.Infra_repos_changes);
 
-  (* 3. Dive_keeper unfocused: Right cycles Chat -> Memory -> Work_candle; Left reverses *)
+  (* 3. Dive_keeper unfocused: Right cycles Chat -> Context -> Tool_calls -> Memory; Left reverses *)
   let m_dive =
     {
       m0 with
@@ -5390,8 +5453,11 @@ let test_nav_left_right_subtab_cycling_and_guards () =
     }
   in
   let m_d1, _ = step m_dive (key Keymap.Input.Right) in
-  Alcotest.(check bool) "Dive_keeper Right -> Keeper_memory" true
-    (Nav.equal_keeper_tab m_d1.fleet.keeper_dive_tab Nav.Keeper_memory);
+  Alcotest.(check bool) "Dive_keeper Right -> Keeper_context" true
+    (Nav.equal_keeper_tab m_d1.fleet.keeper_dive_tab Nav.Keeper_context);
+  let m_d2, _ = step m_d1 (key Keymap.Input.Right) in
+  Alcotest.(check bool) "Dive_keeper second Right -> Keeper_tool_calls" true
+    (Nav.equal_keeper_tab m_d2.fleet.keeper_dive_tab Nav.Keeper_tool_calls);
   let m_d0, _ = step m_d1 (key Keymap.Input.Left) in
   Alcotest.(check bool) "Dive_keeper Left -> Keeper_chat" true
     (Nav.equal_keeper_tab m_d0.fleet.keeper_dive_tab Nav.Keeper_chat);
@@ -6099,7 +6165,7 @@ let test_p2_schedules_attention_scroll_and_filter_guard () =
   in
   let w0 =
     Work_store.empty
-    |> Work_store.set_tab Nav.Work_tasks_schedules
+    |> Work_store.set_tab Nav.Work_tasks
     |> Work_store.apply_planning ~observed_at:t0
          { goals = []; tasks = List.init 10 mk_task }
     |> Work_store.apply_schedules ~observed_at:t0
@@ -6107,16 +6173,14 @@ let test_p2_schedules_attention_scroll_and_filter_guard () =
   in
   let w_tasks = Work_store.move_selection ~viewport_rows:5 ~delta:9 w0 in
   Alcotest.(check int) "Tasks scroll_offset = 5" 5 w_tasks.scroll_offset;
-  Alcotest.(check int) "Schedules scroll_offset starts at 0" 0
-    w_tasks.schedules_scroll_offset;
-  let w_scheds = Work_store.move_selection ~viewport_rows:5 ~delta:9 w_tasks in
-  Alcotest.(check int) "Upper Tasks scroll_offset stays untouched (=5) while scrolling Schedules"
-    5 w_scheds.scroll_offset;
-  Alcotest.(check int) "Schedules scroll_offset scrolls symmetrically (8 - 5 + 1 = 4)"
-    4 w_scheds.schedules_scroll_offset;
+  let w_sched0 = Work_store.set_tab Nav.Work_schedules w0 in
+  let w_scheds = Work_store.move_selection ~viewport_rows:5 ~delta:8 w_sched0 in
+  Alcotest.(check int)
+    "Schedules tab scroll_offset scrolls symmetrically (8 - 5 + 1 = 4)" 4
+    w_scheds.schedules_scroll_offset;
   let w_scheds_up1 = Work_store.move_selection ~viewport_rows:5 ~delta:(-1) w_scheds in
-  Alcotest.(check int) "Schedules Up inside window keeps schedules_scroll_offset=4"
-    4 w_scheds_up1.schedules_scroll_offset;
+  Alcotest.(check int) "Schedules Up inside window keeps scroll_offset=4" 4
+    w_scheds_up1.schedules_scroll_offset;
 
   (* 2. Attention.move_triage symmetric triage_scroll_offset *)
   let asks10 =
@@ -6155,7 +6219,7 @@ let test_p2_schedules_attention_scroll_and_filter_guard () =
   let m_after_r, _ = Update_nav.apply_move m_filt Keymap.Right in
   Alcotest.(check bool) "apply_move Right does not cycle tab when filter_focused=true"
     true
-    (Nav.equal_work_tab m_after_r.work.active_tab Nav.Work_tasks_schedules)
+    (Nav.equal_work_tab m_after_r.work.active_tab Nav.Work_tasks)
 
 (* The Keepers list and a keeper's work tab read the active schedules: the
    list's next-due column and the tab's schedule rows depend on them. The tab
@@ -8281,7 +8345,8 @@ let test_wiki_index_reply_requests_selected_page () =
   let on_artifacts =
     {
       on_wiki_tab with
-      knowledge = Knowledge_store.set_tab Nav.Knowledge_artifacts on_wiki_tab.knowledge;
+      knowledge =
+        Knowledge_store.set_tab Nav.Knowledge_artifacts on_wiki_tab.knowledge;
     }
   in
   Alcotest.(check (list string))
@@ -10839,7 +10904,132 @@ let test_media_viewer_follows_artifact_dive_target () =
   Alcotest.(check int) "missing dive [o] emits no export command" 0
     (List.length (Cmd.flatten cmds_o_miss));
   Alcotest.(check bool) "missing dive [o] emits warning toast" true
-    (Option.is_some m_o_miss.toast)
+    (Option.is_some m_o_miss.toast);
+  (* active_artifact_target under Media_viewer:
+     (a) list filter hiding selected_artifact still lets [v] and share/copy act on Artifact_dive;
+     (b) missing Artifact_dive target never falls back to selected list item. *)
+  let ws_id : Wire_common.workspace_identity =
+    {
+      instance_id = Some "inst-media-test";
+      base_path = "/tmp/test-ws";
+      masc_root = "/tmp/test-ws/.masc";
+      workspace_sha256 = None;
+    }
+  in
+  let dive_detail : Wire_knowledge.published_artifact_detail =
+    {
+      artifact = art_dive;
+      content = "<h1>Dive</h1>";
+      revisions = [];
+      shared = false;
+      share_version = 1;
+    }
+  in
+  let list_detail : Wire_knowledge.published_artifact_detail =
+    {
+      artifact = art_list;
+      content = "# List";
+      revisions = [];
+      shared = false;
+      share_version = 1;
+    }
+  in
+  let m_filtered =
+    let k_filtered =
+      m0.knowledge
+      |> Knowledge_store.apply_artifact_detail ~observed_at:t0 dive_detail
+      |> Knowledge_store.set_filter "unmatched-filter-xyz"
+    in
+    {
+      m0 with
+      knowledge = k_filtered;
+      server_identity = { m0.server_identity with workspace = Some ws_id };
+    }
+  in
+  Alcotest.(check bool) "filtered artifact list has selected_artifact = None" true
+    (Option.is_none (Knowledge_store.selected_artifact m_filtered.knowledge));
+  let m_v_filt, _ = step_char "v" m_filtered in
+  Alcotest.(check bool)
+    "Media_viewer [v] toggles view mode for Artifact_dive even when list filter empties selected_artifact"
+    true
+    (m_v_filt.knowledge.artifact_view_mode = `Raw_source);
+  let _, cmds_hash_filt =
+    Update_actions.execute_action ~now:t1 m_filtered Keymap.Copy_hash
+  in
+  Alcotest.(check bool)
+    "Copy_hash under Media_viewer + filtered list copies Artifact_dive SHA-256"
+    true
+    (List.exists
+       (function
+         | Cmd.Copy_clipboard s -> String.equal s art_dive.body.sha256
+         | _ -> false)
+       (Cmd.flatten cmds_hash_filt));
+  let _, cmds_url_filt =
+    Update_actions.execute_action ~now:t1 m_filtered Keymap.Copy_public_url
+  in
+  Alcotest.(check bool)
+    "Copy_public_url under Media_viewer + filtered list copies Artifact_dive URL"
+    true
+    (List.exists
+       (function
+         | Cmd.Copy_clipboard s ->
+             String.equal s ("/published-artifacts/" ^ art_dive.id)
+         | _ -> false)
+       (Cmd.flatten cmds_url_filt));
+  let _, cmds_share_filt =
+    Update_actions.execute_action ~now:t1 m_filtered Keymap.Toggle_artifact_share
+  in
+  Alcotest.(check bool)
+    "Toggle_artifact_share under Media_viewer + filtered list targets Artifact_dive"
+    true
+    (List.exists
+       (function
+         | Cmd.Http_post { req = Cmd.Post_artifact_share { id; _ }; _ } ->
+             String.equal id art_dive.id
+         | _ -> false)
+       (Cmd.flatten cmds_share_filt));
+  let m_missing_with_list =
+    let k_list_detail =
+      Knowledge_store.apply_artifact_detail ~observed_at:t0 list_detail
+        m_missing.knowledge
+    in
+    {
+      m_missing with
+      knowledge = k_list_detail;
+      server_identity = { m_missing.server_identity with workspace = Some ws_id };
+    }
+  in
+  Alcotest.(check (option string))
+    "unrelated list artifact is selected while Artifact_dive target is missing"
+    (Some art_list.id)
+    (Option.map (fun (a : Wire_knowledge.artifact_entry) -> a.id)
+       (Knowledge_store.selected_artifact m_missing_with_list.knowledge));
+  let m_v_miss, cmds_v_miss = step_char "v" m_missing_with_list in
+  Alcotest.(check bool)
+    "missing Artifact_dive [v] does not toggle artifact_view_mode" true
+    (m_v_miss.knowledge.artifact_view_mode = `Document);
+  Alcotest.(check int) "missing Artifact_dive [v] emits 0 cmds" 0
+    (List.length (Cmd.flatten cmds_v_miss));
+  let _, cmds_share_miss =
+    Update_actions.execute_action ~now:t1 m_missing_with_list
+      Keymap.Toggle_artifact_share
+  in
+  Alcotest.(check int)
+    "missing Artifact_dive Toggle_artifact_share does not touch list artifact" 0
+    (List.length (Cmd.flatten cmds_share_miss));
+  let _, cmds_hash_miss =
+    Update_actions.execute_action ~now:t1 m_missing_with_list Keymap.Copy_hash
+  in
+  Alcotest.(check int)
+    "missing Artifact_dive Copy_hash does not touch list artifact" 0
+    (List.length (Cmd.flatten cmds_hash_miss));
+  let _, cmds_url_miss =
+    Update_actions.execute_action ~now:t1 m_missing_with_list
+      Keymap.Copy_public_url
+  in
+  Alcotest.(check int)
+    "missing Artifact_dive Copy_public_url does not touch list artifact" 0
+    (List.length (Cmd.flatten cmds_url_miss))
 
 let () =
   Alcotest.run "masc_tui_store"

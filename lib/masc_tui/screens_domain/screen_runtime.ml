@@ -3047,7 +3047,1189 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
             ~theme ~lang obs
   end
 
-(* --- 4. Sub-Tab 4: Tools & Connectors --- *)
+(* --- 4. Sub-Tab 4: Fusion (1st-class sub-tab) --- *)
+
+let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
+    ~bp grid =
+  let lang = model.lang in
+  let rt = model.runtime in
+  let now_unix = model.freshness.last_wall_unix in
+  let runs = Runtime_store.filtered_fusion_runs rt in
+  let exact_runs =
+    match Observed.to_option rt.exact_lane_runs with Some xs -> xs | None -> []
+  in
+  let bar_rect, body_rect =
+    match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
+    | [ a; b ] -> (a, b)
+    | _ -> (Rect.empty, rect)
+  in
+  let running_n =
+    List.fold_left
+      (fun acc (f : Wire_runtime.fusion_run) ->
+        match f.status with
+        | Wire_runtime.Fusion_running -> acc + 1
+        | Wire_runtime.Fusion_completed | Wire_runtime.Fusion_failed _ -> acc)
+      0 runs
+  in
+  let pills =
+    [
+      {
+        H.label =
+          Printf.sprintf "%s (%d · %d %s)"
+            (Say.resolve lang (Say.make ~ko:"퓨전 실행" ~en:"Fusion Runs"))
+            (List.length runs) running_n
+            (Say.resolve lang (Say.make ~ko:"실행중" ~en:"active"));
+        active = true;
+        tone = Some (if running_n > 0 then Theme.Status_active else Theme.Status_ok);
+        glyph = Some (if running_n > 0 then Glyph.Live_working else Glyph.Live_healthy);
+      };
+      {
+        H.label =
+          Printf.sprintf "%s (%d)"
+            (Say.resolve lang (Say.make ~ko:"Exact 레인" ~en:"Exact Lanes"))
+            (List.length exact_runs);
+        active = false;
+        tone = Some Theme.Status_historical;
+        glyph = None;
+      };
+    ]
+  in
+  ignore
+    (H.draw_pills ~grid ~rect:bar_rect ~theme
+       ~right_hint:
+         (Say.resolve lang
+            (Say.make ~ko:"[f] 새 퓨전 패널 실행 · [r] 새로고침"
+               ~en:"[f] Launch Fusion Panel · [r] Refresh"))
+       pills);
+  let left_rect, right_rect =
+    Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.54
+      ~top_ratio:0.52 bp body_rect
+  in
+  let left_inner =
+    Card.draw ~cache grid ~rect:left_rect ~theme
+      (H.card_spec ~focused:(Model.pane_focused model 0)
+         ~hotkey:(Say.resolve lang (Say.make ~ko:"[f] 실행" ~en:"[f] Launch"))
+         (Say.resolve lang (Say.make ~ko:"Fusion 팬아웃 목록" ~en:"Fusion Panel Runs")))
+  in
+  if not (Rect.is_empty left_inner) then begin
+    match rt.fusion_runs with
+    | Observed.Value _ when runs <> [] ->
+        let columns : Table.column list =
+          [
+            {
+              id = "st";
+              header = Say.make ~ko:"상태" ~en:"St";
+              priority = 0;
+              min_width = 7;
+              max_width = Some 10;
+              weight = 1;
+              align = Table.Left;
+            };
+            {
+              id = "keeper";
+              header = Say.make ~ko:"키퍼" ~en:"Keeper";
+              priority = 0;
+              min_width = 12;
+              max_width = Some 20;
+              weight = 2;
+              align = Table.Left;
+            };
+            {
+              id = "preset";
+              header = Say.make ~ko:"프리셋/토폴로지" ~en:"Preset/Topo";
+              priority = 1;
+              min_width = 12;
+              max_width = None;
+              weight = 3;
+              align = Table.Left;
+            };
+            {
+              id = "stage";
+              header = Say.make ~ko:"단계" ~en:"Stage";
+              priority = 2;
+              min_width = 8;
+              max_width = Some 14;
+              weight = 1;
+              align = Table.Left;
+            };
+            {
+              id = "age";
+              header = Say.make ~ko:"경과" ~en:"Age";
+              priority = 2;
+              min_width = 5;
+              max_width = Some 8;
+              weight = 1;
+              align = Table.Right;
+            };
+          ]
+        in
+        let rows =
+          List.map
+            (fun (f : Wire_runtime.fusion_run) ->
+              let g, tone, st_lbl =
+                match f.status with
+                | Wire_runtime.Fusion_running ->
+                    (Glyph.Live_working, Theme.Status_active, "Run")
+                | Wire_runtime.Fusion_completed ->
+                    (Glyph.Live_healthy, Theme.Status_ok, "Done")
+                | Wire_runtime.Fusion_failed _ ->
+                    (Glyph.Live_failing, Theme.Status_critical, "Fail")
+              in
+              let pt =
+                Printf.sprintf "%s / %s" f.preset
+                  (Wire_runtime.fusion_topology_to_string f.topology)
+              in
+              {
+                Table.id = f.run_id;
+                cells =
+                  [
+                    ( "st"
+                    , Table.Badge
+                        { glyph = Some g; text = st_lbl; tone } );
+                    ("keeper", Table.text_cell f.keeper);
+                    ("preset", Table.text_cell pt);
+                    ( "stage"
+                    , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
+                        f.stage );
+                    ( "age"
+                    , Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
+                        (H.format_age ~now_unix f.started_at_unix) );
+                  ];
+              })
+            runs
+        in
+        let sel = H.clamp_index (List.length runs) rt.fusion_selected_index in
+        ignore
+          (Table.draw grid ~rect:left_inner ~theme ~caps:H.default_caps ~lang
+             ~col_gap:(Layout.table_col_gap bp) ~scroll:rt.fusion_scroll_offset
+             ~selected:sel ~columns rows)
+    | Observed.Value _ ->
+        H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp left_inner) ~theme
+          ~hint:
+            (Say.resolve lang
+               (Say.make ~ko:"[f] 키를 눌러 새 퓨전 패널을 실행하세요"
+                  ~en:"Press [f] to launch a new Fusion panel"))
+          (Say.resolve lang
+             (Say.make ~ko:"최근 Fusion 실행 이력이 없습니다"
+                ~en:"No recent Fusion runs"))
+    | ( Observed.Loading _
+      | Observed.Absent
+      | Observed.Unreported
+      | Observed.Failed _ ) as obs ->
+        H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp left_inner)
+          ~theme ~lang obs
+  end;
+  let det_rect, exact_rect =
+    match
+      Layout.split_v_bp bp right_rect [ Layout.Ratio 0.56; Layout.Flex 1 ]
+    with
+    | [ a; b ] -> (a, b)
+    | _ -> (right_rect, Rect.empty)
+  in
+  let det_inner =
+    Card.draw ~cache grid ~rect:det_rect ~theme
+      (H.card_spec ~focused:(Model.pane_focused model 1)
+         (Say.resolve lang (Say.make ~ko:"선택 Fusion 상세" ~en:"Selected Fusion Run")))
+  in
+  if not (Rect.is_empty det_inner) then begin
+    let c = H.pad_content ~bp det_inner in
+    match Runtime_store.selected_fusion_run rt with
+    | None ->
+        H.draw_empty_notice ~grid ~rect:c ~theme
+          (Say.resolve lang
+             (Say.make ~ko:"Fusion 실행을 선택하세요" ~en:"Select a Fusion run"))
+    | Some f ->
+        let y = ref c.y and bot = Rect.bottom c in
+        let put_kv key v =
+          if !y < bot then begin
+            H.put_kv ~grid ~clip:c ~x:c.x ~y:!y ~max_w:c.w ~theme ~key_w:10
+              ~key v;
+            incr y
+          end
+        in
+        put_kv "Run ID" f.run_id;
+        put_kv (Say.resolve lang (Say.make ~ko:"키퍼" ~en:"Keeper")) ("@" ^ f.keeper);
+        put_kv (Say.resolve lang (Say.make ~ko:"프리셋" ~en:"Preset"))
+          (Printf.sprintf "%s · %s" f.preset
+             (Wire_runtime.fusion_topology_to_string f.topology));
+        let st_s =
+          match f.status with
+          | Wire_runtime.Fusion_running -> "Running (" ^ f.stage ^ ")"
+          | Wire_runtime.Fusion_completed -> "Completed (" ^ f.stage ^ ")"
+          | Wire_runtime.Fusion_failed { code; error } ->
+              Printf.sprintf "Failed [%s]: %s" code error
+        in
+        put_kv (Say.resolve lang (Say.make ~ko:"상태" ~en:"Status")) st_s;
+        (match f.decision with
+         | Some d ->
+             put_kv (Say.resolve lang (Say.make ~ko:"판정" ~en:"Decision")) d
+         | None -> ());
+        (match f.summary with
+         | Some s when !y < bot ->
+             H.draw_divider ~grid ~rect:c ~y:!y ~theme
+               ~label:(Say.resolve lang (Say.make ~ko:"요약" ~en:"Summary")) ();
+             incr y;
+             let md_r = Rect.make ~x:c.x ~y:!y ~w:c.w ~h:(Int.max 0 (bot - !y)) in
+             if not (Rect.is_empty md_r) then
+               ignore
+                 (Markdown.draw grid ~rect:md_r ~theme ~osc8:true
+                    ~scroll:rt.detail_scroll_offset s)
+         | Some _ | None -> ())
+  end;
+  if not (Rect.is_empty exact_rect) then begin
+    let ex_inner =
+      Card.draw ~cache grid ~rect:exact_rect ~theme
+        (H.card_spec
+           (Say.resolve lang (Say.make ~ko:"Exact 레인 실행" ~en:"Exact Lane Runs")))
+    in
+    let ec = H.pad_content ~bp ex_inner in
+    if not (Rect.is_empty ec) then
+      if exact_runs = [] then
+        H.draw_empty_notice ~grid ~rect:ec ~theme
+          (Say.resolve lang
+             (Say.make ~ko:"최근 Exact 레인 실행 없음" ~en:"No recent Exact lane runs"))
+      else
+        let y = ref ec.y and bot = Rect.bottom ec in
+        List.iter
+          (fun (r : Wire_runtime.exact_lane_run) ->
+            if !y < bot then begin
+              let note =
+                match r.status with
+                | Wire_runtime.Exact_output
+                    (Wire_runtime.Exact_failed { code; detail }) ->
+                    " · " ^ code ^ " · " ^ detail
+                | Wire_runtime.Exact_output
+                    ( Wire_runtime.Exact_running
+                    | Wire_runtime.Exact_succeeded
+                    | Wire_runtime.Exact_cancelled
+                    | Wire_runtime.Exact_completion_persistence_failed
+                    | Wire_runtime.Exact_completion_durability_unknown )
+                | Wire_runtime.Task_verification _
+                | Wire_runtime.Goal_verification _ -> (
+                    match r.subject_id with Some s -> " · " ^ s | None -> "")
+              in
+              let age = H.format_age ~now_unix r.started_at_unix in
+              let aw = Grapheme.display_width age in
+              ignore
+                (H.put_clipped ~grid ~clip:ec ~x:ec.x ~y:!y
+                   ~max_w:(Int.max 8 (ec.w - aw - 2))
+                   ~style:(H.secondary_style ~theme ())
+                   (Printf.sprintf "%s [%s]%s" r.lane
+                      (Wire_runtime.lane_run_status_label r.status)
+                      note));
+              ignore
+                (H.put_right ~grid ~clip:ec ~right_x:(Rect.right ec) ~y:!y
+                   ~max_w:aw ~style:(H.whisper_style ~theme ()) age);
+              incr y
+            end)
+          exact_runs
+  end
+
+(* --- 5. Sub-Tab 5: Tools & Usage (3 Switchable Sub-Views + Live P0 Wire Fix) --- *)
+
+let format_bucket_ts ~tz_offset_sec ~bucket_width ts_unix =
+  let secs = int_of_float (Float.floor (ts_unix +. float_of_int tz_offset_sec)) in
+  let day_secs = ((secs mod 86400) + 86400) mod 86400 in
+  match bucket_width with
+  | `Hour ->
+      let hh = day_secs / 3600 in
+      let mm = (day_secs mod 3600) / 60 in
+      Printf.sprintf "%02d:%02d" hh mm
+  | `Day ->
+      (* Civil date from Unix days (Howard Hinnant's algorithm, pure integer math) *)
+      let z = (secs - day_secs) / 86400 + 719468 in
+      let era = (if z >= 0 then z else z - 146096) / 146097 in
+      let doe = z - (era * 146097) in
+      let yoe = (doe - (doe / 1460) + (doe / 36524) - (doe / 146096)) / 365 in
+      let doy = doe - ((365 * yoe) + (yoe / 4) - (yoe / 100)) in
+      let mp = ((5 * doy) + 2) / 153 in
+      let d = doy - (((153 * mp) + 2) / 5) + 1 in
+      let m = mp + (if mp < 10 then 3 else -9) in
+      Printf.sprintf "%02d-%02d" m d
+
+let draw_tool_series_analytics ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
+    ~bp ~(model : Model.t) ~(series : Wire_runtime.tool_series)
+    ~(summary : Wire_runtime.tool_series_summary option) ~show_err_classes =
+  let lang = model.lang in
+  let rt = model.runtime in
+  let buckets = series.buckets in
+  let total_calls, total_fail, total_def, p50_opt, p95_opt =
+    match summary with
+    | Some s ->
+        (s.total_calls, s.total_failures, s.total_deferred, s.p50_ms, s.p95_ms)
+    | None ->
+        let c, f, d, max_p95 =
+          List.fold_left
+            (fun (c, f, d, mp) (b : Wire_runtime.tool_series_bucket) ->
+              match b.activity with
+              | Wire_runtime.Series_idle -> (c, f, d, mp)
+              | Wire_runtime.Series_active { calls; failures; deferred; p95_ms } ->
+                  (c + calls, f + failures, d + deferred, Float.max mp p95_ms))
+            (0, 0, 0, 0.0) buckets
+        in
+        (c, f, d, None, if max_p95 > 0.0 then Some max_p95 else None)
+  in
+  let fail_pct =
+    if total_calls > 0 then
+      float_of_int total_fail /. float_of_int total_calls *. 100.0
+    else 0.0
+  in
+  let strip_rect, main_rect =
+    match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
+    | [ a; b ] -> (a, b)
+    | _ -> (Rect.empty, rect)
+  in
+  let win_pills =
+    List.map
+      (fun w ->
+        {
+          H.label = Runtime_store.tools_window_label w;
+          active = Runtime_store.equal_tools_window rt.tools_window w;
+          tone = Some Theme.Status_active;
+          glyph = None;
+        })
+      [
+        Runtime_store.Tools_win_24h;
+        Runtime_store.Tools_win_7d;
+        Runtime_store.Tools_win_14d;
+      ]
+  in
+  let p50_s =
+    match p50_opt with
+    | Some v -> Format_val.format_value Format_val.Milliseconds v
+    | None -> "—"
+  in
+  let p95_s =
+    match p95_opt with
+    | Some v -> Format_val.format_value Format_val.Milliseconds v
+    | None -> "—"
+  in
+  let totals_hint =
+    Printf.sprintf "[w] · %d calls · %d fail (%.1f%%) · %d def · p50 %s · p95 %s"
+      total_calls total_fail fail_pct total_def p50_s p95_s
+  in
+  ignore
+    (H.draw_pills ~grid ~rect:strip_rect ~theme ~right_hint:totals_hint
+       win_pills);
+  let charts_h = if main_rect.h >= 22 then 9 else if main_rect.h >= 14 then 6 else 0 in
+  let charts_rect, bottom_rect =
+    if charts_h > 0 then
+      match
+        Layout.split_v_bp bp main_rect
+          [ Layout.Fixed charts_h; Layout.Flex 1 ]
+      with
+      | [ a; b ] -> (a, b)
+      | _ -> (Rect.empty, main_rect)
+    else (Rect.empty, main_rect)
+  in
+  let chart_win =
+    match rt.tools_window with
+    | Runtime_store.Tools_win_24h -> Chart.Time_window.Last_24h
+    | Runtime_store.Tools_win_7d -> Chart.Time_window.Last_7d
+    | Runtime_store.Tools_win_14d -> Chart.Time_window.Last_14d
+  in
+  if not (Rect.is_empty charts_rect) then begin
+    let mk_samples extract =
+      Array.of_list
+        (List.map
+           (fun (b : Wire_runtime.tool_series_bucket) ->
+             match b.activity with
+             | Wire_runtime.Series_idle -> Chart.Series.Zero
+             | Wire_runtime.Series_active { calls; failures; deferred; p95_ms } ->
+                 let v = extract ~calls ~failures ~deferred ~p95_ms in
+                 if v <= 0.0 then Chart.Series.Zero else Chart.Series.Value v)
+           buckets)
+    in
+    let calls_s = mk_samples (fun ~calls ~failures:_ ~deferred:_ ~p95_ms:_ -> float_of_int calls) in
+    let fail_s = mk_samples (fun ~calls:_ ~failures ~deferred:_ ~p95_ms:_ -> float_of_int failures) in
+    let p95_s_arr = mk_samples (fun ~calls:_ ~failures:_ ~deferred:_ ~p95_ms -> p95_ms) in
+    let draw_curve_card ~rect:cr ~title ~unit ~gradient samples =
+      let inner =
+        Card.draw ~cache grid ~rect:cr ~theme (H.card_spec (Say.resolve lang title))
+      in
+      let content = H.pad_content ~bp inner in
+      if not (Rect.is_empty content) then begin
+        let cur, peak, avg = series_stats samples in
+        let spec : Chart.Spec.t =
+          {
+            title;
+            hotkey_hint = None;
+            kind =
+              Chart.Spec.Time_series
+                {
+                  series =
+                    {
+                      label = title;
+                      unit;
+                      gradient;
+                      samples;
+                      current = cur;
+                      peak;
+                      avg;
+                      delta_pct = None;
+                    };
+                  scale = Chart.Scale.Auto_ceil { floor = 0.0; nice_step = true };
+                  window = chart_win;
+                };
+          }
+        in
+        ignore
+          (Chart.draw grid ~rect:content ~theme ~caps:H.default_caps ~lang
+             ~show_title:false spec)
+      end
+    in
+    if charts_rect.w >= 90 then
+      match
+        Layout.split_h_bp bp charts_rect
+          [ Layout.Flex 1; Layout.Flex 1; Layout.Flex 1 ]
+      with
+      | [ c1; c2; c3 ] ->
+          draw_curve_card ~rect:c1
+            ~title:(Say.make ~ko:"호출량" ~en:"Calls")
+            ~unit:Format_val.Count ~gradient:Chart.Gradient.Cool_flow calls_s;
+          draw_curve_card ~rect:c2
+            ~title:(Say.make ~ko:"실패" ~en:"Failed")
+            ~unit:Format_val.Count ~gradient:Chart.Gradient.Warm_flow fail_s;
+          draw_curve_card ~rect:c3
+            ~title:(Say.make ~ko:"지연 p95" ~en:"Latency p95")
+            ~unit:Format_val.Milliseconds ~gradient:Chart.Gradient.Thermal
+            p95_s_arr
+      | _ -> ()
+    else
+      match Layout.split_h_bp bp charts_rect [ Layout.Flex 1; Layout.Flex 1 ] with
+      | [ c1; c2 ] ->
+          draw_curve_card ~rect:c1
+            ~title:(Say.make ~ko:"호출량" ~en:"Calls")
+            ~unit:Format_val.Count ~gradient:Chart.Gradient.Cool_flow calls_s;
+          draw_curve_card ~rect:c2
+            ~title:(Say.make ~ko:"지연 p95" ~en:"Latency p95")
+            ~unit:Format_val.Milliseconds ~gradient:Chart.Gradient.Thermal
+            p95_s_arr
+      | _ -> ()
+  end;
+  let tbl_rect, err_rect =
+    if show_err_classes && bottom_rect.w >= 86 then
+      match
+        Layout.split_h_bp bp bottom_rect [ Layout.Ratio 0.62; Layout.Flex 1 ]
+      with
+      | [ l; r ] -> (l, r)
+      | _ -> (bottom_rect, Rect.empty)
+    else (bottom_rect, Rect.empty)
+  in
+  let tbl_inner =
+    Card.draw ~cache grid ~rect:tbl_rect ~theme
+      (H.card_spec ~focused:(Model.pane_focused model 0)
+         (Say.resolve lang
+            (Say.make ~ko:"시간대별 도구 호출 버킷 (최신순)"
+               ~en:"Bucket Breakdown (Newest First)")))
+  in
+  if not (Rect.is_empty tbl_inner) then begin
+    let newest_first = List.rev buckets in
+    let max_calls =
+      List.fold_left
+        (fun acc (b : Wire_runtime.tool_series_bucket) ->
+          match b.activity with
+          | Wire_runtime.Series_idle -> acc
+          | Wire_runtime.Series_active { calls; _ } -> Int.max acc calls)
+        1 newest_first
+    in
+    let bucket_hdr =
+      match series.bucket_width with
+      | `Hour -> Say.make ~ko:"시각" ~en:"HOUR"
+      | `Day -> Say.make ~ko:"날짜" ~en:"DAY"
+    in
+    let columns : Table.column list =
+      [
+        {
+          id = "ts";
+          header = bucket_hdr;
+          priority = 0;
+          min_width = 6;
+          max_width = Some 8;
+          weight = 1;
+          align = Table.Left;
+        };
+        {
+          id = "calls";
+          header = Say.literal "CALLS";
+          priority = 0;
+          min_width = 6;
+          max_width = Some 8;
+          weight = 1;
+          align = Table.Right;
+        };
+        {
+          id = "failed";
+          header = Say.literal "FAILED";
+          priority = 1;
+          min_width = 6;
+          max_width = Some 8;
+          weight = 1;
+          align = Table.Right;
+        };
+        {
+          id = "fpct";
+          header = Say.literal "FAIL%";
+          priority = 1;
+          min_width = 6;
+          max_width = Some 8;
+          weight = 1;
+          align = Table.Right;
+        };
+        {
+          id = "p95";
+          header = Say.literal "P95";
+          priority = 1;
+          min_width = 7;
+          max_width = Some 10;
+          weight = 1;
+          align = Table.Right;
+        };
+        {
+          id = "load";
+          header = Say.literal "LOAD";
+          priority = 2;
+          min_width = 10;
+          max_width = Some 18;
+          weight = 2;
+          align = Table.Left;
+        };
+      ]
+    in
+    let rows =
+      List.mapi
+        (fun idx (b : Wire_runtime.tool_series_bucket) ->
+          let ts_s =
+            format_bucket_ts ~tz_offset_sec:model.tz_offset_sec
+              ~bucket_width:series.bucket_width b.start_unix
+          in
+          let c, f, p95_s, fp_s, fp_fg, ratio =
+            match b.activity with
+            | Wire_runtime.Series_idle ->
+                ("0", "0", "—", "0.0%", Some (Color.of_rgb theme.text_muted), 0.0)
+            | Wire_runtime.Series_active { calls; failures; p95_ms; _ } ->
+                let fp =
+                  if calls > 0 then
+                    float_of_int failures /. float_of_int calls *. 100.0
+                  else 0.0
+                in
+                let fg =
+                  if fp >= 10.0 then Some (Color.of_rgb theme.status_critical)
+                  else if fp > 0.0 then Some (Color.of_rgb theme.status_attention)
+                  else Some (Color.of_rgb theme.text_muted)
+                in
+                ( Int.to_string calls
+                , Int.to_string failures
+                , Format_val.format_value Format_val.Milliseconds p95_ms
+                , Printf.sprintf "%.1f%%" fp
+                , fg
+                , float_of_int calls /. float_of_int max_calls )
+          in
+          {
+            Table.id = Int.to_string idx;
+            cells =
+              [
+                ("ts", Table.text_cell ~fg:(Color.of_rgb theme.text_secondary) ts_s);
+                ("calls", Table.text_cell c);
+                ("failed", Table.text_cell ?fg:fp_fg f);
+                ("fpct", Table.text_cell ?fg:fp_fg fp_s);
+                ("p95", Table.text_cell p95_s);
+                ( "load"
+                , Table.Gauge
+                    { ratio; gradient = Chart.Gradient.Cool_flow; label = None } );
+              ];
+          })
+        newest_first
+    in
+    ignore
+      (Table.draw grid ~rect:tbl_inner ~theme ~caps:H.default_caps ~lang
+         ~col_gap:(Layout.table_col_gap bp) ~scroll:rt.scroll_offset
+         ~columns rows)
+  end;
+  if not (Rect.is_empty err_rect) then begin
+    let err_inner =
+      Card.draw ~cache grid ~rect:err_rect ~theme
+        (H.card_spec
+           (Say.resolve lang
+              (Say.make ~ko:"오류 분류 (4+2 클래스)" ~en:"Failure Classes")))
+    in
+    let ec = H.pad_content ~bp err_inner in
+    if not (Rect.is_empty ec) then begin
+      let fc_opt =
+        match summary with
+        | Some s ->
+            let fc = s.failure_classes in
+            Some
+              ( fc.policy_rejection
+              , fc.workflow_rejection
+              , fc.dependency_unavailable
+              , fc.runtime_failure
+              , fc.operator_cancelled
+              , fc.unclassified )
+        | None -> (
+            match Observed.to_option model.infra.sandboxes with
+            | Some sb ->
+                let fc = sb.fleet_metrics_24h.failure_classes in
+                Some
+                  ( fc.policy_rejection
+                  , fc.workflow_rejection
+                  , fc.dependency_unavailable
+                  , fc.runtime_failure
+                  , 0
+                  , 0 )
+            | None -> None)
+      in
+      match fc_opt with
+      | None ->
+          H.draw_observed_placeholder ~grid ~rect:ec ~theme ~lang
+            model.infra.sandboxes
+      | Some (pr, wr, du, rf, oc, uc) ->
+          let y = ref ec.y and bot = Rect.bottom ec in
+          if !y + 2 <= bot then begin
+            let bar_r = Rect.make ~x:ec.x ~y:!y ~w:ec.w ~h:2 in
+            let spec : Chart.Spec.t =
+              {
+                title = Say.make ~ko:"오류 분류" ~en:"Failure Classes";
+                hotkey_hint = None;
+                kind =
+                  Chart.Spec.Stacked_bar
+                    {
+                      segments =
+                        [
+                          (Say.literal "policy", float_of_int pr, Theme.Status_attention);
+                          (Say.literal "workflow", float_of_int wr, Theme.Status_active);
+                          (Say.literal "dep_unavail", float_of_int du, Theme.Status_historical);
+                          (Say.literal "runtime", float_of_int rf, Theme.Status_critical);
+                        ];
+                      total_label =
+                        Say.literal
+                          (Printf.sprintf "%d err" (pr + wr + du + rf + oc + uc));
+                      unit = Format_val.Count;
+                    };
+              }
+            in
+            ignore
+              (Chart.draw grid ~rect:bar_r ~theme ~caps:H.default_caps ~lang
+                 ~show_title:false spec);
+            y := !y + 3
+          end;
+          let items =
+            [
+              ("policy_rejection", pr, Theme.Status_attention);
+              ("workflow_rejection", wr, Theme.Status_active);
+              ("dependency_unavailable", du, Theme.Status_historical);
+              ("runtime_failure", rf, Theme.Status_critical);
+              ("operator_cancelled", oc, Theme.Status_historical);
+              ("unclassified", uc, Theme.Status_historical);
+            ]
+          in
+          List.iter
+            (fun (lbl, cnt, tone) ->
+              if !y < bot then begin
+                H.put_kv ~grid ~clip:ec ~x:ec.x ~y:!y ~max_w:ec.w ~theme
+                  ~key_w:22 ~key:lbl ~value_style:(H.status_style ~theme tone)
+                  (Int.to_string cnt);
+                incr y
+              end)
+            items
+    end
+  end
+
+let render_tools_catalog_tree ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
+    ~bp ~(model : Model.t) =
+  let lang = model.lang in
+  let rt = model.runtime in
+  let groups = Runtime_store.grouped_tools_catalog rt in
+  let display_entries = Runtime_store.tools_catalog_display_entries rt in
+  let dash_opt = Observed.to_option rt.tools_dashboard in
+  let sub_s =
+    match dash_opt with
+    | Some d ->
+        Printf.sprintf "%d reg · %d called · %d total%s" d.registered_count
+          d.distinct_tools_called d.total_calls
+          (match d.volume_gc_summary with Some g -> " · " ^ g | None -> "")
+    | None -> Printf.sprintf "%d tools" (List.length display_entries)
+  in
+  let inner =
+    Card.draw ~cache grid ~rect ~theme
+      (H.card_spec ~focused:(Model.body_has_focus model) ~subtitle:sub_s
+         ~hotkey:
+           (Say.resolve lang
+              (Say.make ~ko:"[Enter] 도구 상세 · [/] 필터"
+                 ~en:"[Enter] Tool Dive · [/] Filter"))
+         (Say.resolve lang
+            (Say.make ~ko:"도구 카탈로그 트리 (도메인 → 패밀리 → 도구)"
+               ~en:"Tools Catalog Tree (Domain → Family → Tool)")))
+  in
+  if not (Rect.is_empty inner) then begin
+    if display_entries = [] then
+      H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner) ~theme
+        ~lang rt.tools_dashboard
+    else
+      let columns : Table.column list =
+        [
+          {
+            id = "tool";
+            header = Say.make ~ko:"도구" ~en:"Tool";
+            priority = 0;
+            min_width = 18;
+            max_width = None;
+            weight = 4;
+            align = Table.Left;
+          };
+          {
+            id = "calls";
+            header = Say.make ~ko:"호출" ~en:"Calls";
+            priority = 0;
+            min_width = 6;
+            max_width = Some 9;
+            weight = 1;
+            align = Table.Right;
+          };
+          {
+            id = "fail";
+            header = Say.literal "Fail%";
+            priority = 1;
+            min_width = 6;
+            max_width = Some 8;
+            weight = 1;
+            align = Table.Right;
+          };
+          {
+            id = "p95";
+            header = Say.literal "P95";
+            priority = 1;
+            min_width = 7;
+            max_width = Some 10;
+            weight = 1;
+            align = Table.Right;
+          };
+          {
+            id = "direct";
+            header = Say.make ~ko:"직접" ~en:"Direct";
+            priority = 2;
+            min_width = 6;
+            max_width = Some 7;
+            weight = 1;
+            align = Table.Center;
+          };
+          {
+            id = "surf";
+            header = Say.make ~ko:"표면" ~en:"Surfaces";
+            priority = 2;
+            min_width = 10;
+            max_width = Some 22;
+            weight = 2;
+            align = Table.Left;
+          };
+        ]
+      in
+      let sel_tool_name =
+        match Runtime_store.selected_tool_catalog_entry rt with
+        | Some t -> Some t.name
+        | None -> None
+      in
+      let rows_acc = ref [] in
+      let selected_row_idx = ref None in
+      let push r = rows_acc := r :: !rows_acc in
+      List.iter
+        (fun (dg : Runtime_store.tool_domain_group) ->
+          push
+            {
+              Table.id = "dom:" ^ dg.domain;
+              cells =
+                [
+                  ( "tool"
+                  , Table.text_cell ~fg:(Color.of_rgb theme.accent)
+                      ~attrs:Attr.bold
+                      (Printf.sprintf "%s %s" (Glyph.to_utf8 Glyph.Expand_open)
+                         (String.uppercase_ascii dg.domain)) );
+                  ( "calls"
+                  , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
+                      (Int.to_string dg.total_calls) );
+                ];
+            };
+          List.iter
+            (fun (fg : Runtime_store.tool_family_group) ->
+              if List.length dg.families > 1 then
+                push
+                  {
+                    Table.id = "fam:" ^ dg.domain ^ ":" ^ fg.family;
+                    cells =
+                      [
+                        ( "tool"
+                        , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
+                            ~attrs:Attr.bold
+                            (Printf.sprintf "  %s %s (%d)"
+                               (Glyph.to_utf8 Glyph.Tree_tee) fg.family
+                               (List.length fg.tools)) );
+                      ];
+                  };
+              List.iter
+                (fun (t : Wire_runtime.tool_catalog_entry) ->
+                  let row_idx = List.length !rows_acc in
+                  (match sel_tool_name with
+                   | Some sn when String.equal sn t.name ->
+                       selected_row_idx := Some row_idx
+                   | _ -> ());
+                  let calls_s =
+                    Format_val.format_observed Format_val.Count
+                      (Observed.map float_of_int t.calls_count)
+                      ~lang
+                  in
+                  let fail_fg =
+                    match Observed.to_option t.failure_rate_pct with
+                    | Some f when f >= 10.0 -> Some (Color.of_rgb theme.status_critical)
+                    | Some f when f > 0.0 -> Some (Color.of_rgb theme.status_attention)
+                    | Some _ | None -> Some (Color.of_rgb theme.text_muted)
+                  in
+                  let p95_s =
+                    match t.p95_ms with
+                    | Some v -> Format_val.format_value Format_val.Milliseconds v
+                    | None -> Glyph.to_utf8 Glyph.Missing_absent
+                  in
+                  let direct_cell =
+                    match t.direct_call_allowed with
+                    | Some true ->
+                        Table.Badge
+                          { glyph = None; text = "yes"; tone = Theme.Status_ok }
+                    | Some false ->
+                        Table.Badge
+                          { glyph = None; text = "no"; tone = Theme.Status_historical }
+                    | None ->
+                        Table.text_cell ~fg:(Color.of_rgb theme.text_muted) "—"
+                  in
+                  let surf_s =
+                    if t.surfaces = [] then "—"
+                    else String.concat "," (H.safe_take 3 t.surfaces)
+                  in
+                  push
+                    {
+                      Table.id = "tool:" ^ t.name;
+                      cells =
+                        [
+                          ("tool", Table.text_cell ("    " ^ t.name));
+                          ("calls", Table.text_cell calls_s);
+                          ( "fail"
+                          , Table.text_cell ?fg:fail_fg
+                              (Format_val.format_observed Format_val.Percent
+                                 t.failure_rate_pct ~lang) );
+                          ("p95", Table.text_cell p95_s);
+                          ("direct", direct_cell);
+                          ( "surf"
+                          , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
+                              surf_s );
+                        ];
+                    })
+                fg.tools)
+            dg.families)
+        groups;
+      let rows = List.rev !rows_acc in
+      ignore
+        (Table.draw grid ~rect:inner ~theme ~caps:H.default_caps ~lang
+           ~col_gap:(Layout.table_col_gap bp)
+           ~scroll:rt.tools_catalog_scroll_offset ?selected:!selected_row_idx
+           ~columns rows)
+  end
+
+let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
+    ~bp ~(model : Model.t) =
+  let lang = model.lang in
+  let rt = model.runtime in
+  let keeper_names =
+    match Observed.to_option model.fleet.keepers with
+    | Some ks -> List.map (fun (k : Wire_fleet.keeper_summary) -> k.name) ks
+    | None -> []
+  in
+  let sel_keeper =
+    Runtime_store.selected_tools_surface_keeper ~keeper_names rt
+  in
+  let left_rect, right_rect =
+    Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.52
+      ~top_ratio:0.50 bp rect
+  in
+  let k_sub =
+    match sel_keeper with Some k -> "@" ^ k | None -> "—"
+  in
+  let left_inner =
+    Card.draw ~cache grid ~rect:left_rect ~theme
+      (H.card_spec ~focused:(Model.pane_focused model 0) ~subtitle:k_sub
+         ~hotkey:(Say.resolve lang (Say.make ~ko:"[< >] 키퍼 전환" ~en:"[< >] Keeper"))
+         (Say.resolve lang
+            (Say.make ~ko:"키퍼 유효 도구 표면" ~en:"Effective Keeper Surface")))
+  in
+  let lc = H.pad_content ~bp left_inner in
+  if not (Rect.is_empty lc) then begin
+    let y = ref lc.y and bot = Rect.bottom lc in
+    match Observed.to_option rt.tools_dashboard with
+    | None ->
+        H.draw_observed_placeholder ~grid ~rect:lc ~theme ~lang rt.tools_dashboard
+    | Some dash -> (
+        (match dash.effective_keeper_surface with
+         | None ->
+             H.draw_empty_notice ~grid ~rect:lc ~theme
+               (Say.resolve lang
+                  (Say.make ~ko:"[< >] 키퍼를 선택하면 유효 도구 표면이 조회됩니다"
+                     ~en:"Use [< >] to select a keeper for effective tool surface"))
+         | Some (Wire_runtime.Keeper_surface_unavailable { keeper_name; reason; detail }) ->
+             Card.draw_left_rail ~tone:Theme.Status_attention grid ~x:lc.x ~y:!y
+               ~h:(Int.min 2 (bot - !y)) ~theme;
+             ignore
+               (H.put_clipped ~grid ~clip:lc ~x:(lc.x + 2) ~y:!y
+                  ~max_w:(Int.max 0 (lc.w - 2))
+                  ~style:(H.status_style ~theme ~attrs:Attr.bold Theme.Status_attention)
+                  (Printf.sprintf "@%s unavailable: %s" keeper_name reason));
+             incr y;
+             if !y < bot then
+               ignore
+                 (H.put_clipped ~grid ~clip:lc ~x:(lc.x + 2) ~y:!y
+                    ~max_w:(Int.max 0 (lc.w - 2))
+                    ~style:(H.whisper_style ~theme ()) detail)
+         | Some
+             (Wire_runtime.Keeper_surface_available
+                {
+                  keeper_name;
+                  runtime_id;
+                  tool_delivery;
+                  tool_surface_bytes;
+                  skill_tool_surface_bytes;
+                  skill_discovery_bytes;
+                  skill_body_bytes;
+                  tool_surface_sha256;
+                  tools;
+                  skills_left_out;
+                  lane_addon_conflicts;
+                }) ->
+             let put_kv k v =
+               if !y < bot then begin
+                 H.put_kv ~grid ~clip:lc ~x:lc.x ~y:!y ~max_w:lc.w ~theme
+                   ~key_w:12 ~key:k v;
+                 incr y
+               end
+             in
+             put_kv "Keeper" (Printf.sprintf "@%s · %s" keeper_name runtime_id);
+             put_kv "Delivery"
+               (Printf.sprintf "%s · sha %s" tool_delivery
+                  (match tool_surface_sha256 with
+                   | Some s -> H.short_hash ~len:10 s
+                   | None -> "—"));
+             put_kv "Budgets"
+               (Printf.sprintf "tools %s · sk_tools %s · disc %s · body %s"
+                  (Format_val.format_value Format_val.Bytes (float_of_int tool_surface_bytes))
+                  (Format_val.format_value Format_val.Bytes (float_of_int skill_tool_surface_bytes))
+                  (Format_val.format_value Format_val.Bytes (float_of_int skill_discovery_bytes))
+                  (Format_val.format_value Format_val.Bytes (float_of_int skill_body_bytes)));
+             if skills_left_out <> [] && !y < bot then begin
+               Card.draw_left_rail ~tone:Theme.Status_attention grid ~x:lc.x
+                 ~y:!y ~h:1 ~theme;
+               ignore
+                 (H.put_clipped ~grid ~clip:lc ~x:(lc.x + 2) ~y:!y
+                    ~max_w:(Int.max 0 (lc.w - 2))
+                    ~style:(H.status_style ~theme Theme.Status_attention)
+                    ("Left out: " ^ String.concat ", " skills_left_out));
+               incr y
+             end;
+             if lane_addon_conflicts <> [] && !y < bot then begin
+               Card.draw_left_rail ~tone:Theme.Status_critical grid ~x:lc.x ~y:!y
+                 ~h:1 ~theme;
+               ignore
+                 (H.put_clipped ~grid ~clip:lc ~x:(lc.x + 2) ~y:!y
+                    ~max_w:(Int.max 0 (lc.w - 2))
+                    ~style:(H.status_style ~theme Theme.Status_critical)
+                    ("Conflicts: " ^ String.concat ", " lane_addon_conflicts));
+               incr y
+             end;
+             (match (dash.volume_gc_summary, dash.keeper_cleanup_summary) with
+              | Some g, Some c when !y < bot ->
+                  put_kv "Maintenance" (g ^ " · " ^ c)
+              | Some g, None when !y < bot -> put_kv "Volume GC" g
+              | None, Some c when !y < bot -> put_kv "Cleanup" c
+              | _ -> ());
+             if !y < bot then begin
+               H.draw_divider ~grid ~rect:lc ~y:!y ~theme
+                 ~label:(Printf.sprintf "Effective Tools (%d)" (List.length tools))
+                 ();
+               incr y
+             end;
+             let skip =
+               Int.min
+                 (Int.max 0 (List.length tools - Int.max 1 (bot - !y)))
+                 (Int.max 0 rt.scroll_offset)
+             in
+             List.iter
+               (fun (et : Wire_runtime.effective_keeper_tool_entry) ->
+                 if !y < bot then begin
+                   let ow = Grapheme.display_width et.origin in
+                   ignore
+                     (H.put_clipped ~grid ~clip:lc ~x:lc.x ~y:!y
+                        ~max_w:(Int.max 8 (lc.w - ow - 2))
+                        ~style:(H.text_style ~theme ()) et.name);
+                   ignore
+                     (H.put_right ~grid ~clip:lc ~right_x:(Rect.right lc) ~y:!y
+                        ~max_w:ow ~style:(H.whisper_style ~theme ()) et.origin);
+                   incr y
+                 end)
+               (Store_scroll.drop skip tools))
+    )
+  end;
+  let right_inner =
+    Card.draw ~cache grid ~rect:right_rect ~theme
+      (H.card_spec ~focused:(Model.pane_focused model 1)
+         (Say.resolve lang
+            (Say.make ~ko:"스킬 프로파일 · 그림자 · 거절"
+               ~en:"Skills Profiles, Shadows & Rejections")))
+  in
+  let rc = H.pad_content ~bp right_inner in
+  if not (Rect.is_empty rc) then begin
+    match rt.skills with
+    | Observed.Value { data = sk; _ } ->
+        let y = ref rc.y and bot = Rect.bottom rc in
+        if !y < bot then begin
+          let rev_s =
+            match sk.snapshot_revision with Some r -> " · rev " ^ r | None -> ""
+          in
+          ignore
+            (H.put_clipped ~grid ~clip:rc ~x:rc.x ~y:!y ~max_w:rc.w
+               ~style:(H.anchor_style ~theme ())
+               (Printf.sprintf "State: %s%s · %d skills · %d shadows · %d rejected"
+                  sk.state rev_s (List.length sk.surfaces)
+                  (List.length sk.shadows) (List.length sk.rejections)));
+          incr y
+        end;
+        if sk.rejections <> [] && !y < bot then begin
+          Card.draw_left_rail ~tone:Theme.Status_critical grid ~x:rc.x ~y:!y
+            ~h:1 ~theme;
+          ignore
+            (H.put_clipped ~grid ~clip:rc ~x:(rc.x + 2) ~y:!y
+               ~max_w:(Int.max 0 (rc.w - 2))
+               ~style:(H.status_style ~theme Theme.Status_critical)
+               ("Rejected: " ^ String.concat "; " (H.safe_take 3 sk.rejections)));
+          incr y
+        end;
+        if sk.shadows <> [] && !y < bot then begin
+          Card.draw_left_rail ~tone:Theme.Status_attention grid ~x:rc.x ~y:!y
+            ~h:1 ~theme;
+          ignore
+            (H.put_clipped ~grid ~clip:rc ~x:(rc.x + 2) ~y:!y
+               ~max_w:(Int.max 0 (rc.w - 2))
+               ~style:(H.status_style ~theme Theme.Status_attention)
+               ("Shadowed: " ^ String.concat ", " (H.safe_take 4 sk.shadows)));
+          incr y
+        end;
+        if !y < bot then begin
+          H.draw_divider ~grid ~rect:rc ~y:!y ~theme
+            ~label:(Say.resolve lang (Say.make ~ko:"스킬 목록" ~en:"Skill Surfaces"))
+            ();
+          incr y
+        end;
+        let skip =
+          Int.min
+            (Int.max 0 (List.length sk.surfaces - Int.max 1 (bot - !y)))
+            (Int.max 0 rt.detail_scroll_offset)
+        in
+        List.iter
+          (fun (sf : Wire_runtime.skill_surface_entry) ->
+            if !y < bot then begin
+              let kind_tone =
+                match sf.kind with
+                | "composition" -> Theme.Status_ai
+                | "instruction" -> Theme.Status_ok
+                | _ -> Theme.Status_attention
+              in
+              let tag = Printf.sprintf "[%s] " sf.kind in
+              let adv =
+                H.put_clipped ~grid ~clip:rc ~x:rc.x ~y:!y ~max_w:15
+                  ~style:(H.status_style ~theme ~attrs:Attr.bold kind_tone) tag
+              in
+              let extra =
+                match (sf.error, sf.summary) with
+                | Some e, _ -> " · err: " ^ e
+                | None, Some s -> " · " ^ H.sanitize_single_line s
+                | None, None -> ""
+              in
+              ignore
+                (H.put_clipped ~grid ~clip:rc ~x:(rc.x + adv) ~y:!y
+                   ~max_w:(Int.max 0 (rc.w - adv))
+                   ~style:(H.text_style ~theme ()) (sf.reference ^ extra));
+              incr y
+            end)
+          (Store_scroll.drop skip sk.surfaces)
+    | ( Observed.Loading _
+      | Observed.Absent
+      | Observed.Unreported
+      | Observed.Failed _ ) as obs ->
+        H.draw_observed_placeholder ~grid ~rect:rc ~theme ~lang obs
+  end
+
+let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
+    ~(theme : Theme.t) ~bp grid =
+  let lang = model.lang in
+  let rt = model.runtime in
+  let bar_rect, body_rect =
+    match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
+    | [ a; b ] -> (a, b)
+    | _ -> (Rect.empty, rect)
+  in
+  let pills =
+    [
+      {
+        H.label = Say.resolve lang (Say.make ~ko:"사용량 추이" ~en:"Usage Calls");
+        active =
+          Runtime_store.equal_tools_subview rt.tools_subview
+            Runtime_store.Tools_usage_calls;
+        tone = Some Theme.Status_active;
+        glyph = Some Glyph.Live_healthy;
+      };
+      {
+        H.label = Say.resolve lang (Say.make ~ko:"카탈로그 트리" ~en:"Catalog Tree");
+        active =
+          Runtime_store.equal_tools_subview rt.tools_subview
+            Runtime_store.Tools_catalog_tree;
+        tone = Some Theme.Status_ok;
+        glyph = None;
+      };
+      {
+        H.label =
+          Say.resolve lang
+            (Say.make ~ko:"키퍼 표면 · 스킬" ~en:"Keeper Surface & Skills");
+        active =
+          Runtime_store.equal_tools_subview rt.tools_subview
+            Runtime_store.Tools_keeper_skills;
+        tone = Some Theme.Status_ai;
+        glyph = None;
+      };
+    ]
+  in
+  ignore
+    (H.draw_pills ~grid ~rect:bar_rect ~theme
+       ~right_hint:
+         (Say.resolve lang
+            (Say.make ~ko:"[v] 하위뷰 · [w] 기간 · [< >] 키퍼"
+               ~en:"[v] View · [w] Window · [< >] Keeper"))
+       pills);
+  match rt.tools_subview with
+  | Runtime_store.Tools_usage_calls -> (
+      match (Observed.to_option rt.tool_series_summary, Observed.to_option rt.tool_series) with
+      | Some s, _ ->
+          draw_tool_series_analytics ~grid ~cache ~rect:body_rect ~theme ~bp
+            ~model ~series:s.series ~summary:(Some s) ~show_err_classes:true
+      | None, Some series ->
+          draw_tool_series_analytics ~grid ~cache ~rect:body_rect ~theme ~bp
+            ~model ~series ~summary:None ~show_err_classes:true
+      | None, None ->
+          let inner =
+            Card.draw ~cache grid ~rect:body_rect ~theme
+              (H.card_spec
+                 (Say.resolve lang (Say.make ~ko:"도구 사용량" ~en:"Tool Usage")))
+          in
+          H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner)
+            ~theme ~lang rt.tool_series)
+  | Runtime_store.Tools_catalog_tree ->
+      render_tools_catalog_tree ~grid ~cache ~rect:body_rect ~theme ~bp ~model
+  | Runtime_store.Tools_keeper_skills ->
+      render_tools_keeper_skills ~grid ~cache ~rect:body_rect ~theme ~bp ~model
+
+(* --- 6. Sub-Tab 6: Connectors & MCP Clients (Dedicated 2-Pane Screen) --- *)
 
 let connector_status_display ~lang = function
   | Wire_runtime.Connector_connected ->
@@ -3071,183 +4253,63 @@ let connector_status_display ~lang = function
       , Theme.Status_attention
       , Say.resolve lang (Say.make ~ko:"오래됨" ~en:"Stale") )
 
-let render_tools_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
+let render_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp grid =
   let lang = model.lang in
   let rt = model.runtime in
-  let top_h = if rect.h >= 30 then 13 else 9 in
-  let top_rect, bottom_rect =
-    match
-      Layout.split_v_bp bp rect [ Layout.Fixed top_h; Layout.Flex 1 ]
-    with
-    | [ a; b ] -> (a, b)
-    | _ -> (rect, Rect.empty)
-  in
-  let p95_rect, err_bar_rect =
-    match Layout.split_v_bp bp top_rect [ Layout.Flex 1; Layout.Fixed 4 ] with
-    | [ a; b ] -> (a, b)
-    | _ -> (top_rect, Rect.empty)
-  in
-  let p95_inner =
-    Card.draw ~cache grid ~rect:p95_rect ~theme
-      (H.card_spec ~subtitle:"p95 ms"
-         (Say.resolve lang
-            (Say.make ~ko:"도구 호출 지연시간 (p95)"
-               ~en:"Tool Call Latency (p95)")))
-  in
-  let p95_content = H.pad_content ~bp p95_inner in
-  if not (Rect.is_empty p95_content) then begin
-    match rt.tool_series with
-    | Observed.Value { data = series; _ } ->
-        let samples =
-          Array.of_list
-            (List.map
-               (fun (b : Wire_runtime.tool_series_bucket) ->
-                 match b.activity with
-                 | Wire_runtime.Series_idle -> Chart.Series.Zero
-                 | Wire_runtime.Series_active { p95_ms; _ } ->
-                     if p95_ms <= 0.0 then Chart.Series.Zero
-                     else Chart.Series.Value p95_ms)
-               series.buckets)
-        in
-        let cur, peak, avg = series_stats samples in
-        let win =
-          match series.bucket_width with
-          | `Hour -> Chart.Time_window.Last_24h
-          | `Day -> Chart.Time_window.Last_7d
-        in
-        let spec : Chart.Spec.t =
-          {
-            title = Say.make ~ko:"도구 지연시간 p95" ~en:"Tool Latency p95";
-            hotkey_hint = None;
-            kind =
-              Chart.Spec.Time_series
-                {
-                  series =
-                    {
-                      label = Say.make ~ko:"지연 p95" ~en:"Latency p95";
-                      unit = Format_val.Milliseconds;
-                      gradient = Chart.Gradient.Thermal;
-                      samples;
-                      current = cur;
-                      peak;
-                      avg;
-                      delta_pct = None;
-                    };
-                  scale = Chart.Scale.Auto_ceil { floor = 0.0; nice_step = true };
-                  window = win;
-                };
-          }
-        in
-        ignore
-          (Chart.draw grid ~rect:p95_content ~theme ~caps:H.default_caps ~lang
-             ~show_title:false spec)
-    | Observed.Loading _ | Observed.Absent | Observed.Unreported
-    | Observed.Failed _ ->
-        H.draw_observed_placeholder ~grid ~rect:p95_content ~theme ~lang
-          rt.tool_series
-  end;
-  let err_inner =
-    Card.draw ~cache grid ~rect:err_bar_rect ~theme
-      (H.card_spec
-         (Say.resolve lang
-            (Say.make ~ko:"4-버킷 도구 오류 분류 (24h)"
-               ~en:"4-Bucket Tool Error Classes (24h)")))
-  in
-  let err_content = H.pad_content ~bp err_inner in
-  if not (Rect.is_empty err_content) then begin
-    match model.infra.sandboxes with
-    | Observed.Value { data = s; _ } ->
-        let fc = s.fleet_metrics_24h.failure_classes in
-        let spec : Chart.Spec.t =
-          {
-            title = Say.make ~ko:"오류 분류" ~en:"Error Classes";
-            hotkey_hint = None;
-            kind =
-              Chart.Spec.Stacked_bar
-                {
-                  segments =
-                    [
-                      ( Say.literal "policy_rejection"
-                      , float_of_int fc.policy_rejection
-                      , Theme.Status_attention );
-                      ( Say.literal "workflow_rejection"
-                      , float_of_int fc.workflow_rejection
-                      , Theme.Status_active );
-                      ( Say.literal "dependency_unavailable"
-                      , float_of_int fc.dependency_unavailable
-                      , Theme.Status_historical );
-                      ( Say.literal "runtime_failure"
-                      , float_of_int fc.runtime_failure
-                      , Theme.Status_critical );
-                    ];
-                  total_label = Say.make ~ko:"오류 합계" ~en:"Total errors";
-                  unit = Format_val.Count;
-                };
-          }
-        in
-        ignore
-          (Chart.draw grid ~rect:err_content ~theme ~caps:H.default_caps ~lang
-             ~show_title:false spec)
-    | ( Observed.Loading _
-      | Observed.Absent
-      | Observed.Unreported
-      | Observed.Failed _ ) as obs ->
-        H.draw_observed_placeholder ~grid ~rect:err_content ~theme ~lang obs
-  end;
   let left_rect, right_rect =
     Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.50
-      ~top_ratio:0.50 bp bottom_rect
+      ~top_ratio:0.52 bp rect
   in
-  let tools_sse_badge =
-    match model.freshness.view_stream with
-    | Some (Health.Live _) ->
-        Some
-          (H.make_badge ~glyph:Glyph.Live_healthy ~tone:Theme.Status_ok
-             "LIVE SSE")
-    | Some (Health.Reconnecting _ | Health.Stale _) ->
-        Some
-          (H.make_badge ~glyph:Glyph.Transport_reconnecting
-             ~tone:Theme.Status_attention "SSE RECON")
-    | Some (Health.Connecting | Health.Disconnected _ | Health.Workspace_mismatch _)
-    | None ->
-        None
-  in
-  let tools_inner =
+  let left_inner =
     Card.draw ~cache grid ~rect:left_rect ~theme
-      (H.card_spec ?badge:tools_sse_badge ~focused:(Model.pane_focused model 0)
-         (Say.resolve lang (Say.make ~ko:"도구 카탈로그" ~en:"Tools Catalog")))
+      (H.card_spec ~focused:(Model.pane_focused model 0)
+         ~hotkey:
+           (Say.resolve lang
+              (Say.make ~ko:"[n] 바인드 · [U] 언바인드 · [r] 새로고침"
+                 ~en:"[n] Bind · [U] Unbind · [r] Refresh"))
+         (Say.resolve lang
+            (Say.make ~ko:"채널 게이트 커넥터" ~en:"Channel Gate Connectors")))
   in
-  if not (Rect.is_empty tools_inner) then begin
-    let tools = Runtime_store.filtered_tools rt in
-    match rt.tools_catalog with
-    | Observed.Value _ when tools <> [] ->
+  if not (Rect.is_empty left_inner) then begin
+    let cs = Runtime_store.filtered_connectors rt in
+    match rt.connectors with
+    | Observed.Value _ when cs <> [] ->
         let columns : Table.column list =
           [
             {
-              id = "name";
-              header = Say.make ~ko:"도구" ~en:"Tool";
+              id = "st";
+              header = Say.make ~ko:"상태" ~en:"Status";
               priority = 0;
-              min_width = 16;
+              min_width = 9;
+              max_width = Some 14;
+              weight = 2;
+              align = Table.Left;
+            };
+            {
+              id = "name";
+              header = Say.make ~ko:"커넥터" ~en:"Connector";
+              priority = 0;
+              min_width = 12;
               max_width = None;
               weight = 3;
               align = Table.Left;
             };
             {
-              id = "calls";
-              header = Say.make ~ko:"호출" ~en:"Calls";
+              id = "ch";
+              header = Say.make ~ko:"채널" ~en:"Channel";
               priority = 1;
               min_width = 8;
-              max_width = Some 11;
-              weight = 1;
-              align = Table.Right;
+              max_width = Some 16;
+              weight = 2;
+              align = Table.Left;
             };
             {
-              id = "fail";
-              header = Say.make ~ko:"실패율" ~en:"Fail %";
+              id = "bind";
+              header = Say.make ~ko:"바인딩" ~en:"Binds";
               priority = 1;
-              min_width = 8;
-              max_width = Some 11;
+              min_width = 5;
+              max_width = Some 7;
               weight = 1;
               align = Table.Right;
             };
@@ -3255,49 +4317,50 @@ let render_tools_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
         in
         let rows =
           List.map
-            (fun (t : Wire_runtime.tool_summary) ->
-              let calls_obs = Observed.map float_of_int t.calls in
-              let fail_fg =
-                match Observed.to_option t.failure_rate_pct with
-                | Some f when f >= 10.0 -> Some (Color.of_rgb theme.status_critical)
-                | Some f when f > 0.0 -> Some (Color.of_rgb theme.status_attention)
-                | Some _ -> Some (Color.of_rgb theme.text_muted)
-                | None -> Some (Color.of_rgb theme.text_muted)
+            (fun (c : Wire_runtime.connector_row) ->
+              let g, tone, st = connector_status_display ~lang c.connection in
+              let ch =
+                match c.channel with
+                | Some s ->
+                    if String.starts_with ~prefix:"#" s then s else "#" ^ s
+                | None -> Glyph.to_utf8 Glyph.Missing_absent
+              in
+              let name_s =
+                match c.error with
+                | Some e -> Printf.sprintf "%s (%s)" c.display_name e
+                | None -> c.display_name
               in
               {
-                Table.id = t.name;
+                Table.id = c.connector_id;
                 cells =
                   [
-                    ("name", Table.text_cell t.name);
-                    ( "calls"
-                    , Table.text_cell
-                        (Format_val.format_observed Format_val.Count calls_obs
-                           ~lang) );
-                    ( "fail"
-                    , Table.text_cell ?fg:fail_fg
-                        (Format_val.format_observed Format_val.Percent
-                           t.failure_rate_pct ~lang) );
+                    ("st", Table.Badge { glyph = Some g; text = st; tone });
+                    ("name", Table.text_cell name_s);
+                    ( "ch"
+                    , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary) ch );
+                    ("bind", Table.text_cell (Int.to_string c.binding_count));
                   ];
               })
-            tools
+            cs
         in
+        let sel = H.clamp_index (List.length cs) rt.connector_selected_index in
         ignore
-          (Table.draw grid ~rect:tools_inner ~theme ~caps:H.default_caps ~lang
-             ~col_gap:(Layout.table_col_gap bp) ~scroll:rt.scroll_offset
-             ~selected:rt.selected_index ~columns rows)
+          (Table.draw grid ~rect:left_inner ~theme ~caps:H.default_caps ~lang
+             ~col_gap:(Layout.table_col_gap bp)
+             ~scroll:rt.connector_scroll_offset ~selected:sel ~columns rows)
     | Observed.Value _ ->
-        H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp tools_inner) ~theme
+        H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp left_inner) ~theme
+          ~hint:
+            (Say.resolve lang
+               (Say.make ~ko:"[n] 키로 새 채널 커넥터를 바인드하세요"
+                  ~en:"Press [n] to bind a channel connector"))
           (Say.resolve lang
-             (if String.equal (String.trim rt.filter_query) "" then
-                Say.make ~ko:"등록된 도구 없음" ~en:"No tools registered"
-              else
-                Say.make ~ko:"필터에 일치하는 도구 없음"
-                  ~en:"No tools match filter"))
+             (Say.make ~ko:"등록된 채널 커넥터 없음" ~en:"No channel connectors"))
     | ( Observed.Loading _
       | Observed.Absent
       | Observed.Unreported
       | Observed.Failed _ ) as obs ->
-        H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp tools_inner)
+        H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp left_inner)
           ~theme ~lang obs
   end;
   let right_inner =
@@ -3308,211 +4371,169 @@ let render_tools_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
               "SNAPSHOT · [r]")
          ~focused:(Model.pane_focused model 1)
          (Say.resolve lang
-            (Say.make ~ko:"커넥터 · 브라우저 레인 · MCP"
-               ~en:"Connectors · Browser · MCP")))
+            (Say.make ~ko:"MCP 클라이언트 · 브라우저 레인"
+               ~en:"MCP Clients & Browser Lane")))
   in
-  let right_content = H.pad_content ~bp right_inner in
-  if not (Rect.is_empty right_content) then begin
-    let y = ref right_content.y in
-    let bottom = Rect.bottom right_content in
-    if !y < bottom then begin
-      H.draw_divider ~grid ~rect:right_content ~y:!y ~theme
-        ~label:
-          (Say.resolve lang
-             (Say.make ~ko:"채널 게이트 커넥터" ~en:"Channel Gate Connectors"))
-        ();
-      incr y
-    end;
-    (let cs = Runtime_store.filtered_connectors rt in
-     match rt.connectors with
-     | Observed.Value _ when cs <> [] ->
-         let total_cs = List.length cs in
-         let max_conn_rows =
-           Int.max 1 (Int.min total_cs (Int.max 4 (bottom - !y - 4)))
+  if not (Rect.is_empty right_inner) then begin
+    let summary_h = if right_inner.h >= 8 then 3 else 0 in
+    let mcp_rect =
+      Rect.make ~x:right_inner.x ~y:right_inner.y ~w:right_inner.w
+        ~h:(Int.max 0 (right_inner.h - summary_h))
+    in
+    let clients = Runtime_store.filtered_mcp_clients rt in
+    (match rt.mcp_clients with
+     | Observed.Value _ when clients <> [] ->
+         let columns : Table.column list =
+           [
+             {
+               id = "name";
+               header = Say.make ~ko:"클라이언트" ~en:"Client";
+               priority = 0;
+               min_width = 12;
+               max_width = None;
+               weight = 3;
+               align = Table.Left;
+             };
+             {
+               id = "type";
+               header = Say.make ~ko:"유형" ~en:"Type";
+               priority = 1;
+               min_width = 8;
+               max_width = Some 14;
+               weight = 1;
+               align = Table.Left;
+             };
+             {
+               id = "st";
+               header = Say.make ~ko:"상태" ~en:"Status";
+               priority = 0;
+               min_width = 7;
+               max_width = Some 10;
+               weight = 1;
+               align = Table.Left;
+             };
+             {
+               id = "keeper";
+               header = Say.make ~ko:"키퍼" ~en:"Keeper";
+               priority = 1;
+               min_width = 8;
+               max_width = Some 16;
+               weight = 2;
+               align = Table.Left;
+             };
+             {
+               id = "caps";
+               header = Say.literal "Caps";
+               priority = 2;
+               min_width = 4;
+               max_width = Some 6;
+               weight = 1;
+               align = Table.Right;
+             };
+           ]
          in
-         let sel_c = H.clamp_index total_cs rt.connector_selected_index in
-         let start_c, _ =
-           Table.compute_viewport ~total_rows:total_cs
-             ~viewport_rows:max_conn_rows ~scroll:rt.connector_scroll_offset
-             ~selected:(Some sel_c)
+         let rows =
+           List.map
+             (fun (cl : Wire_runtime.mcp_client_row) ->
+               let kp =
+                 match cl.keeper_name with
+                 | Some k -> "@" ^ k
+                 | None -> Glyph.to_utf8 Glyph.Missing_absent
+               in
+               {
+                 Table.id = cl.name;
+                 cells =
+                   [
+                     ("name", Table.text_cell cl.name);
+                     ( "type"
+                     , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
+                         cl.agent_type );
+                     ( "st"
+                     , Table.Badge
+                         {
+                           glyph = Some Glyph.Live_healthy;
+                           text = cl.status;
+                           tone = Theme.Status_ok;
+                         } );
+                     ("keeper", Table.text_cell kp);
+                     ( "caps"
+                     , Table.text_cell
+                         (Int.to_string (List.length cl.capabilities)) );
+                   ];
+               })
+             clients
          in
-         let conn_focused = Model.pane_focused model 1 in
-         List.iteri
-           (fun local_i (c : Wire_runtime.connector_row) ->
-             let idx = start_c + local_i in
-             if !y < bottom then begin
-               let is_sel = Int.equal idx sel_c in
-               let row_bg =
-                 if is_sel && conn_focused then theme.selection_bg
-                 else theme.surface_1
-               in
-               if is_sel && conn_focused then begin
-                 let r_rect =
-                   Rect.make ~x:right_content.x ~y:!y ~w:right_content.w ~h:1
-                 in
-                 H.paint_selected_row_bg ~grid ~clip:right_content
-                   ~row_rect:r_rect ~theme ()
-               end;
-               let g, tone, st = connector_status_display ~lang c.connection in
-               let ch = match c.channel with Some s -> " #" ^ s | None -> "" in
-               let err = match c.error with Some e -> " · " ^ e | None -> "" in
-               let prefix =
-                 if is_sel && conn_focused then
-                   Glyph.to_utf8 Glyph.Focus_caret ^ " "
-                 else ""
-               in
-               let line =
-                 Printf.sprintf "%s%s %s (%s%s · %d bind)%s" prefix
-                   (Glyph.to_utf8 g) c.display_name st ch c.binding_count err
-               in
-               let style =
-                 if is_sel && conn_focused then
-                   H.status_style ~theme ~bg:row_bg ~attrs:Attr.bold tone
-                 else H.status_style ~theme ~bg:row_bg tone
-               in
-               ignore
-                 (H.put_clipped ~grid ~clip:right_content ~x:right_content.x
-                    ~y:!y ~max_w:right_content.w ~style line);
-               incr y
-             end)
-           (Store_scroll.drop start_c cs |> H.safe_take max_conn_rows)
+         let sel =
+           H.clamp_index (List.length clients) rt.mcp_client_selected_index
+         in
+         ignore
+           (Table.draw grid ~rect:mcp_rect ~theme ~caps:H.default_caps ~lang
+              ~col_gap:(Layout.table_col_gap bp)
+              ~scroll:rt.mcp_client_scroll_offset ~selected:sel ~columns rows)
      | Observed.Value _ ->
-         if !y < bottom then begin
+         H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp mcp_rect) ~theme
+           (Say.resolve lang
+              (Say.make ~ko:"연결된 MCP 클라이언트 없음"
+                 ~en:"No connected MCP clients"))
+     | ( Observed.Loading _
+       | Observed.Absent
+       | Observed.Unreported
+       | Observed.Failed _ ) as obs ->
+         H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp mcp_rect)
+           ~theme ~lang obs);
+    if summary_h > 0 then begin
+      let sum_r =
+        Rect.make ~x:right_inner.x ~y:(right_inner.y + mcp_rect.h)
+          ~w:right_inner.w ~h:summary_h
+        |> H.pad_content ~bp
+      in
+      let y = ref sum_r.y and bot = Rect.bottom sum_r in
+      if !y < bot then begin
+        H.draw_divider ~grid ~rect:sum_r ~y:!y ~theme
+          ~label:
+            (Say.resolve lang
+               (Say.make ~ko:"브라우저 · 애드온 요약"
+                  ~en:"Browser & Addons Summary"))
+          ();
+        incr y
+      end;
+      (match Observed.to_option rt.browser_lane with
+       | Some bl when !y < bot ->
+           let g, tone =
+             if bl.ok && bl.available then (Glyph.Live_healthy, Theme.Status_ok)
+             else if bl.available then
+               (Glyph.Warning_triangle, Theme.Status_attention)
+             else (Glyph.Live_idle, Theme.Status_historical)
+           in
+           let line =
+             Printf.sprintf "%s Browser avail=%b · clients=%d · issues=%d · auto=%b"
+               (Glyph.to_utf8 g) bl.available bl.client_count bl.issue_count
+               bl.automatic_browse_ok
+           in
            ignore
-             (H.put_clipped ~grid ~clip:right_content ~x:right_content.x ~y:!y
-                ~max_w:right_content.w ~style:(H.whisper_style ~theme ())
-                (Say.resolve lang
-                   (if String.equal (String.trim rt.filter_query) "" then
-                      Say.make ~ko:"커넥터 없음" ~en:"No connectors"
-                    else
-                      Say.make ~ko:"필터에 일치하는 커넥터 없음"
-                        ~en:"No connectors match filter")));
+             (H.put_clipped ~grid ~clip:sum_r ~x:sum_r.x ~y:!y ~max_w:sum_r.w
+                ~style:(H.status_style ~theme tone) line);
            incr y
-         end
-     | ( Observed.Loading _
-       | Observed.Absent
-       | Observed.Unreported
-       | Observed.Failed _ ) as obs ->
-         if !y < bottom then begin
-           H.draw_observed_placeholder ~grid
-             ~rect:(Rect.make ~x:right_content.x ~y:!y ~w:right_content.w ~h:1)
-             ~theme ~lang obs;
-           incr y
-         end);
-    if !y < bottom then begin
-      H.draw_divider ~grid ~rect:right_content ~y:!y ~theme
-        ~label:
-          (Say.resolve lang
-             (Say.make ~ko:"브라우저 · 애드온 요약"
-                ~en:"Browser & Addons Summary"))
-        ();
-      incr y
-    end;
-    (match rt.browser_lane with
-     | Observed.Value { data = bl; _ } when !y < bottom ->
-         let g, tone =
-           if bl.ok && bl.available then (Glyph.Live_healthy, Theme.Status_ok)
-           else if bl.available then
-             (Glyph.Warning_triangle, Theme.Status_attention)
-           else (Glyph.Live_idle, Theme.Status_historical)
-         in
-         let det = match bl.detail with Some d -> " · " ^ d | None -> "" in
-         let line =
-           Printf.sprintf "%s Browser avail=%b · clients=%d · issues=%d · auto=%b%s"
-             (Glyph.to_utf8 g) bl.available bl.client_count bl.issue_count
-             bl.automatic_browse_ok det
-         in
-         ignore
-           (H.put_clipped ~grid ~clip:right_content ~x:right_content.x ~y:!y
-              ~max_w:right_content.w ~style:(H.status_style ~theme tone) line);
-         incr y
-     | Observed.Value _ -> ()
-     | ( Observed.Loading _
-       | Observed.Absent
-       | Observed.Unreported
-       | Observed.Failed _ ) as obs ->
-         if !y < bottom then begin
-           H.draw_observed_placeholder ~grid
-             ~rect:(Rect.make ~x:right_content.x ~y:!y ~w:right_content.w ~h:1)
-             ~theme ~lang obs;
-           incr y
-         end);
-    (match rt.lane_addons with
-     | Observed.Value { data = la; _ } when !y < bottom ->
-         let live_n =
-           List.fold_left
-             (fun acc (i : Wire_runtime.addon_instance) ->
-               match i.runtime_presence with
-               | Wire_runtime.Addon_live -> acc + 1
-               | Wire_runtime.Addon_retained -> acc)
-             0 la.instances
-         in
-         let line =
-           Printf.sprintf "%s Addons: %d live / %d total (%d decl) · [→] %s"
-             (Glyph.to_utf8
-                (if live_n > 0 then Glyph.Live_healthy else Glyph.Live_idle))
-             live_n (List.length la.instances) (List.length la.declarations)
-             (Say.resolve lang (Say.make ~ko:"애드온 · 브라우저" ~en:"Addons & Browser"))
-         in
-         ignore
-           (H.put_clipped ~grid ~clip:right_content ~x:right_content.x ~y:!y
-              ~max_w:right_content.w ~style:(H.secondary_style ~theme ()) line);
-         incr y
-     | Observed.Value _
-     | Observed.Loading _
-     | Observed.Absent
-     | Observed.Unreported
-     | Observed.Failed _ ->
-         ());
-    if !y < bottom then begin
-      H.draw_divider ~grid ~rect:right_content ~y:!y ~theme
-        ~label:
-          (Say.resolve lang
-             (Say.make ~ko:"연결된 MCP 클라이언트" ~en:"Connected MCP Clients"))
-        ();
-      incr y
-    end;
-    match rt.mcp_clients with
-    | Observed.Value { data = clients; _ } when clients <> [] ->
-        List.iter
-          (fun (cl : Wire_runtime.mcp_client_row) ->
-            if !y < bottom then begin
-              let kp =
-                match cl.keeper_name with Some k -> " @" ^ k | None -> ""
-              in
-              let task =
-                match cl.current_task with Some t -> " · " ^ t | None -> ""
-              in
-              let line =
-                Printf.sprintf "%s %s [%s/%s]%s (%d cap)%s"
-                  (Glyph.to_utf8 Glyph.Live_healthy)
-                  cl.name cl.agent_type cl.status kp
-                  (List.length cl.capabilities)
-                  task
-              in
-              ignore
-                (H.put_clipped ~grid ~clip:right_content ~x:right_content.x
-                   ~y:!y ~max_w:right_content.w ~style:(H.text_style ~theme ())
-                   line);
-              incr y
-            end)
-          clients
-    | Observed.Value _ ->
-        if !y < bottom then
-          ignore
-            (H.put_clipped ~grid ~clip:right_content ~x:right_content.x ~y:!y
-               ~max_w:right_content.w ~style:(H.whisper_style ~theme ())
-               (Say.resolve lang
-                  (Say.make ~ko:"연결된 MCP 클라이언트 없음"
-                     ~en:"No connected MCP clients")))
-    | ( Observed.Loading _
-      | Observed.Absent
-      | Observed.Unreported
-      | Observed.Failed _ ) as obs ->
-        if !y < bottom then
-          H.draw_observed_placeholder ~grid
-            ~rect:(Rect.make ~x:right_content.x ~y:!y ~w:right_content.w ~h:1)
-            ~theme ~lang obs
+       | Some _ | None -> ());
+      (match Observed.to_option rt.lane_addons with
+       | Some la when !y < bot ->
+           let live_n =
+             List.fold_left
+               (fun acc (i : Wire_runtime.addon_instance) ->
+                 match i.runtime_presence with
+                 | Wire_runtime.Addon_live -> acc + 1
+                 | Wire_runtime.Addon_retained -> acc)
+               0 la.instances
+           in
+           ignore
+             (H.put_clipped ~grid ~clip:sum_r ~x:sum_r.x ~y:!y ~max_w:sum_r.w
+                ~style:(H.secondary_style ~theme ())
+                (Printf.sprintf "Addons: %d live / %d total · [→] %s" live_n
+                   (List.length la.instances)
+                   (Say.resolve lang
+                      (Say.make ~ko:"애드온 · 브라우저" ~en:"Addons & Browser"))))
+       | Some _ | None -> ())
+    end
   end
 
 (* --- 5. Addons & Browser Dedicated Runtime Table --- *)
@@ -4065,18 +5086,18 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
                         id = "title";
                         header = Say.make ~ko:"제목" ~en:"Title";
                         priority = 0;
-                        min_width = 12;
+                        min_width = 14;
                         max_width = None;
-                        weight = 2;
+                        weight = 3;
                         align = Table.Left;
                       };
                       {
                         id = "url";
                         header = Say.literal "URL";
                         priority = 0;
-                        min_width = 16;
+                        min_width = 14;
                         max_width = None;
-                        weight = 3;
+                        weight = 2;
                         align = Table.Left;
                       };
                     ]
@@ -4156,7 +5177,7 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
     end
   end
 
-(* --- 6. Top-Level Runtime Workspace Entry --- *)
+(* --- 8. Top-Level Runtime Workspace Entry & Tool Detail Dive --- *)
 
 let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
   if Rect.is_empty rect then ()
@@ -4171,7 +5192,119 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         render_efficiency_spend ~model ~cache ~rect:body ~theme ~bp grid
     | Nav.Runtime_failover_lanes ->
         render_failover_lanes ~model ~cache ~rect:body ~theme ~bp grid
-    | Nav.Runtime_tools_connectors ->
-        render_tools_connectors ~model ~cache ~rect:body ~theme ~bp grid
+    | Nav.Runtime_fusion ->
+        render_fusion ~model ~cache ~rect:body ~theme ~bp grid
+    | Nav.Runtime_tools_usage ->
+        render_tools_usage ~model ~cache ~rect:body ~theme ~bp grid
+    | Nav.Runtime_connectors ->
+        render_connectors ~model ~cache ~rect:body ~theme ~bp grid
     | Nav.Runtime_addons_browser ->
         render_addons_browser ~model ~cache ~rect:body ~theme ~bp grid
+
+let render_dive ~(target : Nav.runtime_dive_target) ~(model : Model.t) ~cache
+    ~(rect : Rect.t) grid =
+  if Rect.is_empty rect then ()
+  else
+    let theme = Theme.of_preset model.theme_preset in
+    let bp = H.layout_bp ~model ~rect in
+    let body = H.body_rect ~bp rect in
+    let lang = model.lang in
+    let rt = model.runtime in
+    match target with
+    | Nav.Tool_dive tool_name ->
+        let entry_opt =
+          match Observed.to_option rt.tools_dashboard with
+          | Some d ->
+              List.find_opt
+                (fun (e : Wire_runtime.tool_catalog_entry) ->
+                  String.equal e.name tool_name)
+                d.entries
+          | None -> None
+        in
+        let top_h = if body.h >= 20 then 9 else 6 in
+        let meta_rect, series_rect =
+          match
+            Layout.split_v_bp bp body [ Layout.Fixed top_h; Layout.Flex 1 ]
+          with
+          | [ a; b ] -> (a, b)
+          | _ -> (body, Rect.empty)
+        in
+        let badge =
+          match entry_opt with
+          | Some e ->
+              Some
+                (H.make_badge ~tone:Theme.Status_active
+                   (Printf.sprintf "%s / %s" e.domain e.family))
+          | None -> None
+        in
+        let meta_inner =
+          Card.draw ~cache grid ~rect:meta_rect ~theme
+            (H.card_spec ?badge ~focused:(Model.body_has_focus model)
+               ~hotkey:
+                 (Say.resolve lang
+                    (Say.make ~ko:"[w] 기간(24h/7d/14d) · [Esc] 뒤로"
+                       ~en:"[w] Window(24h/7d/14d) · [Esc] Back"))
+               (Printf.sprintf "%s > %s"
+                  (Say.resolve lang (Say.make ~ko:"도구 상세" ~en:"Tool Detail"))
+                  tool_name))
+        in
+        let mc = H.pad_content ~bp meta_inner in
+        if not (Rect.is_empty mc) then begin
+          let y = ref mc.y and bot = Rect.bottom mc in
+          match entry_opt with
+          | None ->
+              H.draw_empty_notice ~grid ~rect:mc ~theme
+                (Printf.sprintf "Tool: %s" tool_name)
+          | Some e ->
+              let direct_s =
+                match e.direct_call_allowed with
+                | Some true -> "yes"
+                | Some false -> "no"
+                | None -> "—"
+              in
+              let surf_s =
+                if e.surfaces = [] then "—" else String.concat ", " e.surfaces
+              in
+              let pub_s =
+                if e.public_names = [] then "—"
+                else String.concat ", " e.public_names
+              in
+              if !y < bot then begin
+                H.put_kv ~grid ~clip:mc ~x:mc.x ~y:!y ~max_w:mc.w ~theme
+                  ~key_w:10 ~key:"Surface"
+                  (Printf.sprintf "%s · Direct=%s · Public: %s" surf_s direct_s
+                     pub_s);
+                incr y
+              end;
+              if e.doc_refs <> [] && !y < bot then begin
+                H.put_kv ~grid ~clip:mc ~x:mc.x ~y:!y ~max_w:mc.w ~theme
+                  ~key_w:10 ~key:"Docs" (String.concat ", " e.doc_refs);
+                incr y
+              end;
+              (match e.description with
+               | Some desc when !y < bot ->
+                   let md_r =
+                     Rect.make ~x:mc.x ~y:!y ~w:mc.w ~h:(Int.max 0 (bot - !y))
+                   in
+                   ignore
+                     (Markdown.draw grid ~rect:md_r ~theme ~osc8:true
+                        ~scroll:model.nav.dive_scroll_offset desc)
+               | Some _ | None -> ())
+        end;
+        if not (Rect.is_empty series_rect) then begin
+          match Observed.to_option rt.tool_detail_series with
+          | Some (tn, summary) when String.equal tn tool_name ->
+              draw_tool_series_analytics ~grid ~cache ~rect:series_rect ~theme
+                ~bp ~model ~series:summary.series ~summary:(Some summary)
+                ~show_err_classes:true
+          | _ ->
+              let inner =
+                Card.draw ~cache grid ~rect:series_rect ~theme
+                  (H.card_spec
+                     (Say.resolve lang
+                        (Say.make ~ko:"도구별 시계열 추이"
+                           ~en:"Per-Tool Time Series")))
+              in
+              H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner)
+                ~theme ~lang rt.tool_detail_series
+        end

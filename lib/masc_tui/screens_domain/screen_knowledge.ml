@@ -118,6 +118,32 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
         else
           let y = ref content.y in
           let bottom = Rect.bottom content in
+          (match k.armed_vote with
+           | Some (Knowledge_store.Vote_post pid, dir)
+             when String.equal pid p.id && !y < bottom ->
+               let key_s = match dir with `Up -> "[+]" | `Down -> "[-]" in
+               let verb =
+                 match dir with
+                 | `Up -> Say.resolve lang (Say.make ~ko:"추천" ~en:"upvote")
+                 | `Down -> Say.resolve lang (Say.make ~ko:"비추천" ~en:"downvote")
+               in
+               Card.draw_left_rail ~tone:Theme.Status_attention grid ~x:content.x
+                 ~y:!y ~h:1 ~theme;
+               ignore
+                 (H.put_clipped ~grid ~clip:content ~x:(content.x + 2) ~y:!y
+                    ~max_w:(Int.max 0 (content.w - 2))
+                    ~style:
+                      (H.status_style ~theme ~attrs:Attr.bold
+                         Theme.Status_attention)
+                    (Printf.sprintf "%s %s" key_s
+                       (Say.resolve lang
+                          (Say.make
+                             ~ko:(Printf.sprintf "한 번 더 눌러 %s 확정" verb)
+                             ~en:(Printf.sprintf "Press again to confirm %s" verb)))));
+               incr y
+           | Some ((Knowledge_store.Vote_post _ | Knowledge_store.Vote_comment _), _)
+           | None ->
+               ());
           (* Succession chain strip when post belongs to a chain *)
           (match p.succession_chain_root_id, p.chain_depth with
            | Some _, Some d when d > 1 && !y < bottom ->
@@ -238,10 +264,16 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
            ~en:(Printf.sprintf "Signal Only (-%d Verify)" hidden_verify))
     else Say.resolve lang (Say.make ~ko:"신호만" ~en:"Signal Only")
   in
+  let sort_lbl = Printf.sprintf "[S] %s" k.board_sort_by in
+  let hearth_pill_lbl =
+    match k.board_hearth with
+    | Some h -> "[h] #" ^ h
+    | None -> Say.resolve lang (Say.make ~ko:"[h] 전체 하스" ~en:"[h] All Hearths")
+  in
   let pills =
     [
       {
-        H.label = signal_lbl;
+        H.label = "[s] " ^ signal_lbl;
         active = k.board_signal_only;
         tone = Some Theme.Status_ok;
         glyph = Some Glyph.Live_healthy;
@@ -256,7 +288,19 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         glyph = None;
       };
       {
-        H.label = Printf.sprintf "Verify/Sys (%d)" verify_count;
+        H.label = sort_lbl;
+        active = not (String.equal k.board_sort_by "recent");
+        tone = Some Theme.Status_active;
+        glyph = None;
+      };
+      {
+        H.label = hearth_pill_lbl;
+        active = Option.is_some k.board_hearth;
+        tone = Some Theme.Status_ai;
+        glyph = None;
+      };
+      {
+        H.label = Printf.sprintf "Verify (%d)" verify_count;
         active = false;
         tone = Some Theme.Status_historical;
         glyph = None;
@@ -308,11 +352,15 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     let space_hint =
       match Knowledge_store.board_space_effect k with
       | Knowledge_store.Board_space_toggle_chain _ ->
-          Say.make ~ko:"[Space] 계승" ~en:"[Space] Chain"
+          Say.make ~ko:"[Space] 계승 · [c] 댓글 · [+][-] 투표"
+            ~en:"[Space] Chain · [c] Comment · [+][-] Vote"
       | Knowledge_store.Board_space_toggle_signal_only ->
           if k.board_signal_only then
-            Say.make ~ko:"[Space] 전체 보기" ~en:"[Space] Show all"
-          else Say.make ~ko:"[Space] 신호만" ~en:"[Space] Signal only"
+            Say.make ~ko:"[s] 전체 보기 · [c] 댓글 · [+][-] 투표"
+              ~en:"[s] Show all · [c] Comment · [+][-] Vote"
+          else
+            Say.make ~ko:"[s] 신호만 · [c] 댓글 · [+][-] 투표"
+              ~en:"[s] Signal only · [c] Comment · [+][-] Vote"
     in
     let list_inner =
       Card.draw ~cache grid ~rect:list_rect ~theme
@@ -322,10 +370,17 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     in
     if not (Rect.is_empty list_inner) then begin
       let pad_x = Layout.card_pad_x bp in
-      let hearths =
-        all_posts
-        |> List.filter_map (fun (p : Wire_knowledge.board_post) -> p.hearth)
-        |> unique_strings |> H.safe_take 8
+      let live_hearths =
+        match Observed.to_option k.board_hearths with
+        | Some hs when hs <> [] ->
+            hs |> H.safe_take 8
+            |> List.map (fun (h : Wire_knowledge.board_hearth_entry) ->
+                   (h.name, Some h.count))
+        | Some _ | None ->
+            all_posts
+            |> List.filter_map (fun (p : Wire_knowledge.board_post) -> p.hearth)
+            |> unique_strings |> H.safe_take 8
+            |> List.map (fun h -> (h, None))
       in
       let hearth_rows =
         if list_inner.h >= 6 then 2 else if list_inner.h >= 4 then 1 else 0
@@ -346,19 +401,24 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             glyph = None;
           }
           :: List.map
-               (fun h ->
+               (fun (h, cnt_opt) ->
                  let is_sel =
                    match k.board_hearth with
                    | Some cur -> String.equal cur h
                    | None -> false
                  in
+                 let lbl =
+                   match cnt_opt with
+                   | Some c -> Printf.sprintf "#%s(%d)" h c
+                   | None -> "#" ^ h
+                 in
                  {
-                   H.label = "#" ^ h;
+                   H.label = lbl;
                    active = is_sel;
                    tone = None;
                    glyph = None;
                  })
-               hearths
+               live_hearths
         in
         ignore
           (H.draw_pills ~grid ~rect:h_rect ~theme ~bg:theme.surface_1 h_pills);
@@ -883,8 +943,8 @@ let draw_wiki_preview ~target_slug ~scroll ~grid ~cache ~(rect : Rect.t)
                     H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang
                       k.wiki_index)))
 
-let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
-    ~bp grid =
+let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
+    grid =
   let lang = model.lang in
   let k = model.knowledge in
   let now_unix = model.freshness.last_wall_unix in
@@ -975,7 +1035,7 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       {
         H.label =
           Printf.sprintf "%s (%d)"
-            (Say.resolve lang (Say.make ~ko:"위키" ~en:"Wiki"))
+            (Say.resolve lang (Say.make ~ko:"위키 페이지" ~en:"Wiki Pages"))
             wiki_n;
         active = true;
         tone = Some Theme.Status_active;
@@ -987,241 +1047,639 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     (H.draw_pills ~grid ~rect:bar_rect ~theme ~right_hint:lint_hint_str
        mode_pills);
   if model.nav.zoomed then
-        draw_wiki_preview ~target_slug:None ~scroll:k.detail_scroll_offset
-          ~grid ~cache ~rect:body_rect ~theme
-          ~bp ~lang ~k ~focused:(Model.body_has_focus model)
-      else
-        let left_rect, right_rect =
-          Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.38
-            ~top_ratio:0.48 bp body_rect
-        in
-        let left_inner =
-          Card.draw ~cache grid ~rect:left_rect ~theme
-            (H.card_spec ~focused:(Model.pane_focused model 0)
+    draw_wiki_preview ~target_slug:None ~scroll:k.detail_scroll_offset
+      ~grid ~cache ~rect:body_rect ~theme ~bp ~lang ~k
+      ~focused:(Model.body_has_focus model)
+  else
+    let left_rect, right_rect =
+      Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.38
+        ~top_ratio:0.48 bp body_rect
+    in
+    let left_inner =
+      Card.draw ~cache grid ~rect:left_rect ~theme
+        (H.card_spec ~focused:(Model.pane_focused model 0)
+           (Say.resolve lang
+              (Say.make ~ko:"위키 주제 트리 · log.md"
+                 ~en:"Wiki Topic Tree · log.md")))
+    in
+    if not (Rect.is_empty left_inner) then begin
+      let pad_x = Layout.card_pad_x bp in
+      let log_entries =
+        match Observed.to_option k.wiki_log with
+        | Some log -> log.entries
+        | None -> []
+      in
+      let lint_rows =
+        match lint_summary with
+        | Some (dup, orph, _, _, dups, orphs)
+          when (dup > 0 || orph > 0) && left_inner.h >= 10 ->
+            Int.min 3 (1 + List.length dups + if orphs <> [] then 1 else 0)
+        | Some _ | None -> 0
+      in
+      let log_rows =
+        if log_entries <> [] && left_inner.h >= 8 then
+          Int.min 4 (1 + List.length log_entries)
+        else 0
+      in
+      let list_h = Int.max 0 (left_inner.h - lint_rows - log_rows) in
+      let cur_y = ref left_inner.y in
+      let list_area =
+        Rect.make ~x:left_inner.x ~y:!cur_y ~w:left_inner.w ~h:list_h
+      in
+      cur_y := !cur_y + list_h;
+      let pad_r = if left_inner.w >= 24 then 2 else 1 in
+      (match k.wiki_index with
+       | Observed.Value _ ->
+           let q = String.trim k.filter_query in
+           let visible_pages = Knowledge_store.wiki_pages_filtered k in
+           if visible_pages = [] then
+             H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp list_area) ~theme
                (Say.resolve lang
-                  (Say.make ~ko:"위키 주제 트리 · log.md"
-                     ~en:"Wiki Topic Tree · log.md")))
-        in
-        if not (Rect.is_empty left_inner) then begin
-          let pad_x = Layout.card_pad_x bp in
-          let log_entries =
-            match Observed.to_option k.wiki_log with
-            | Some log -> log.entries
-            | None -> []
-          in
-          let lint_rows =
-            match lint_summary with
-            | Some (dup, orph, _, _, dups, orphs)
-              when (dup > 0 || orph > 0) && left_inner.h >= 10 ->
-                Int.min 3 (1 + List.length dups + if orphs <> [] then 1 else 0)
-            | Some _ | None -> 0
-          in
-          let log_rows =
-            if log_entries <> [] && left_inner.h >= 8 then
-              Int.min 4 (1 + List.length log_entries)
-            else 0
-          in
-          let list_h = Int.max 0 (left_inner.h - lint_rows - log_rows) in
-          let cur_y = ref left_inner.y in
-          let list_area =
-            Rect.make ~x:left_inner.x ~y:!cur_y ~w:left_inner.w ~h:list_h
-          in
-          cur_y := !cur_y + list_h;
-          let pad_r = if left_inner.w >= 24 then 2 else 1 in
-          (match k.wiki_index with
-           | Observed.Value _ ->
-               let q = String.trim k.filter_query in
-               let visible_pages = Knowledge_store.wiki_pages_filtered k in
-               if visible_pages = [] then
-                 H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp list_area)
-                   ~theme
-                   (Say.resolve lang
-                      (if String.equal q "" then
-                         Say.make ~ko:"위키 페이지가 없습니다" ~en:"No wiki pages"
-                       else
-                         Say.make ~ko:"필터에 일치하는 위키 페이지 없음"
-                           ~en:"No wiki pages match filter"))
-               else
-                 let clusters = Knowledge_store.cluster_wiki_pages visible_pages in
-                 let sel_slug =
-                   match Knowledge_store.selected_wiki_page k with
-                   | Some s -> Some s.slug
-                   | None -> None
+                  (if String.equal q "" then
+                     Say.make ~ko:"위키 페이지가 없습니다" ~en:"No wiki pages"
+                   else
+                     Say.make ~ko:"필터에 일치하는 위키 페이지 없음"
+                       ~en:"No wiki pages match filter"))
+           else
+             let clusters = Knowledge_store.cluster_wiki_pages visible_pages in
+             let sel_slug =
+               match Knowledge_store.selected_wiki_page k with
+               | Some s -> Some s.slug
+               | None -> None
+             in
+             let rows_acc = ref [] in
+             List.iter
+               (fun (topic_opt, ps) ->
+                 let topic =
+                   match topic_opt with
+                   | Some t -> t
+                   | None -> Say.resolve lang (Say.make ~ko:"일반" ~en:"General")
                  in
-                 let rows_acc = ref [] in
+                 rows_acc := (`Topic (topic, List.length ps)) :: !rows_acc;
                  List.iter
-                   (fun (topic_opt, ps) ->
-                     let topic =
-                       match topic_opt with
-                       | Some t -> t
-                       | None ->
-                           Say.resolve lang (Say.make ~ko:"일반" ~en:"General")
+                   (fun (p : Wire_knowledge.wiki_page_summary) ->
+                     let is_sel =
+                       match sel_slug with
+                       | Some sl -> String.equal sl p.slug
+                       | None -> false
                      in
-                     rows_acc := (`Topic (topic, List.length ps)) :: !rows_acc;
-                     List.iter
-                       (fun (p : Wire_knowledge.wiki_page_summary) ->
-                         let is_sel =
-                           match sel_slug with
-                           | Some sl -> String.equal sl p.slug
-                           | None -> false
-                         in
-                         rows_acc := (`Page (p, is_sel)) :: !rows_acc)
-                       ps)
-                   clusters;
-                 let arr = Array.of_list (List.rev !rows_acc) in
-                 let total = Array.length arr in
-                 let sel_row =
-                   let found = ref None in
-                   for i = 0 to total - 1 do
-                     match arr.(i) with
-                     | `Page (_, true) -> found := Some i
-                     | `Page (_, false) | `Topic _ -> ()
-                   done;
-                   !found
+                     rows_acc := (`Page (p, is_sel)) :: !rows_acc)
+                   ps)
+               clusters;
+             let arr = Array.of_list (List.rev !rows_acc) in
+             let total = Array.length arr in
+             let sel_row =
+               let found = ref None in
+               for i = 0 to total - 1 do
+                 match arr.(i) with
+                 | `Page (_, true) -> found := Some i
+                 | `Page (_, false) | `Topic _ -> ()
+               done;
+               !found
+             in
+             let start, _ =
+               Table.compute_viewport ~total_rows:total
+                 ~viewport_rows:list_area.h ~scroll:k.scroll_offset
+                 ~selected:sel_row
+             in
+             for i = 0 to list_area.h - 1 do
+               let idx_row = start + i in
+               if idx_row < total then begin
+                 let py = list_area.y + i in
+                 let r_rect =
+                   Rect.make ~x:list_area.x ~y:py ~w:list_area.w ~h:1
                  in
-                 let start, _ =
-                   Table.compute_viewport ~total_rows:total
-                     ~viewport_rows:list_area.h ~scroll:k.scroll_offset
-                     ~selected:sel_row
-                 in
-                 for i = 0 to list_area.h - 1 do
-                   let idx_row = start + i in
-                   if idx_row < total then begin
-                     let py = list_area.y + i in
-                     let r_rect =
-                       Rect.make ~x:list_area.x ~y:py ~w:list_area.w ~h:1
+                 let right_edge = Rect.right list_area - pad_r in
+                 match arr.(idx_row) with
+                 | `Topic (topic, cnt) ->
+                     let hdr =
+                       Printf.sprintf "%s #%s"
+                         (Glyph.to_utf8 Glyph.Expand_open) topic
                      in
-                     let right_edge = Rect.right list_area - pad_r in
-                     match arr.(idx_row) with
-                     | `Topic (topic, cnt) ->
-                         let hdr =
-                           Printf.sprintf "%s #%s"
-                             (Glyph.to_utf8 Glyph.Expand_open)
-                             topic
-                         in
-                         let cnt_s = Printf.sprintf "(%d)" cnt in
-                         ignore
-                           (H.put_clipped ~grid ~clip:r_rect
-                              ~x:(list_area.x + 2) ~y:py
-                              ~max_w:(Int.max 6 (right_edge - list_area.x - 8))
-                              ~style:(H.secondary_style ~theme ~attrs:Attr.bold ())
-                              hdr);
-                         ignore
-                           (H.put_right ~grid ~clip:r_rect ~right_x:right_edge
-                              ~y:py ~max_w:6 ~style:(H.whisper_style ~theme ())
-                              cnt_s)
-                     | `Page (p, is_sel) ->
-                         let row_bg =
-                           if is_sel then theme.selection_bg else theme.surface_1
-                         in
-                         if is_sel then
-                           H.paint_selected_row_bg ~grid ~clip:list_area
-                             ~row_rect:r_rect ~theme ();
-                         let meta =
-                           Printf.sprintf "%s%d r%d"
-                             (Glyph.to_utf8 Glyph.External_arrow)
-                             p.backlink_count p.revision
-                         in
-                         let mw = Grapheme.display_width meta in
-                         let tx = list_area.x + 4 in
-                         let title_style =
-                           if is_sel then H.anchor_style ~theme ~bg:row_bg ()
-                           else H.text_style ~theme ~bg:row_bg ()
-                         in
-                         ignore
-                           (H.put_clipped ~grid ~clip:r_rect ~x:tx ~y:py
-                              ~max_w:(Int.max 4 (right_edge - tx - mw - 2))
-                              ~style:title_style p.title);
-                         ignore
-                           (H.put_right ~grid ~clip:r_rect ~right_x:right_edge
-                              ~y:py ~max_w:mw
-                              ~style:(H.whisper_style ~theme ~bg:row_bg ())
-                              meta)
-                   end
-                 done
-           | ( Observed.Loading _
-             | Observed.Absent
-             | Observed.Unreported
-             | Observed.Failed _ ) as obs ->
-               H.draw_observed_placeholder ~grid
-                 ~rect:(H.pad_content ~bp list_area) ~theme ~lang obs);
-          if lint_rows > 0 then begin
-            let l_rect =
-              Rect.make ~x:left_inner.x ~y:!cur_y ~w:left_inner.w ~h:lint_rows
-            in
-            cur_y := !cur_y + lint_rows;
-            let ly = ref l_rect.y and l_bot = Rect.bottom l_rect in
-            H.draw_divider ~grid ~rect:l_rect ~y:!ly ~theme ~pad_x
-              ~label:"wiki-lint" ();
-            incr ly;
-            let tx = l_rect.x + pad_x in
-            let tw = Int.max 0 (l_rect.w - (2 * pad_x)) in
-            match lint_summary with
-            | Some (_, _, _, _, dups, orphs) ->
-                List.iter
-                  (fun (d : Wire_knowledge.wiki_duplicate_candidate) ->
-                    if !ly < l_bot then begin
-                      Card.draw_left_rail ~tone:Theme.Status_attention grid
-                        ~x:tx ~y:!ly ~h:1 ~theme;
-                      let txt =
-                        Printf.sprintf "dup: %s / %s" d.page_a d.page_b
-                      in
-                      ignore
-                        (H.put_clipped ~grid ~clip:l_rect ~x:(tx + 2) ~y:!ly
-                           ~max_w:(Int.max 0 (tw - 2))
-                           ~style:(H.status_style ~theme Theme.Status_attention)
-                           txt);
-                      incr ly
-                    end)
-                  dups;
-                if orphs <> [] && !ly < l_bot then begin
+                     let cnt_s = Printf.sprintf "(%d)" cnt in
+                     ignore
+                       (H.put_clipped ~grid ~clip:r_rect ~x:(list_area.x + 2)
+                          ~y:py ~max_w:(Int.max 6 (right_edge - list_area.x - 8))
+                          ~style:(H.secondary_style ~theme ~attrs:Attr.bold ())
+                          hdr);
+                     ignore
+                       (H.put_right ~grid ~clip:r_rect ~right_x:right_edge ~y:py
+                          ~max_w:6 ~style:(H.whisper_style ~theme ()) cnt_s)
+                 | `Page (p, is_sel) ->
+                     let row_bg =
+                       if is_sel then theme.selection_bg else theme.surface_1
+                     in
+                     if is_sel then
+                       H.paint_selected_row_bg ~grid ~clip:list_area
+                         ~row_rect:r_rect ~theme ();
+                     let meta =
+                       Printf.sprintf "%s%d r%d"
+                         (Glyph.to_utf8 Glyph.External_arrow)
+                         p.backlink_count p.revision
+                     in
+                     let mw = Grapheme.display_width meta in
+                     let tx = list_area.x + 4 in
+                     let title_style =
+                       if is_sel then H.anchor_style ~theme ~bg:row_bg ()
+                       else H.text_style ~theme ~bg:row_bg ()
+                     in
+                     ignore
+                       (H.put_clipped ~grid ~clip:r_rect ~x:tx ~y:py
+                          ~max_w:(Int.max 4 (right_edge - tx - mw - 2))
+                          ~style:title_style p.title);
+                     ignore
+                       (H.put_right ~grid ~clip:r_rect ~right_x:right_edge ~y:py
+                          ~max_w:mw ~style:(H.whisper_style ~theme ~bg:row_bg ())
+                          meta)
+               end
+             done
+       | ( Observed.Loading _
+         | Observed.Absent
+         | Observed.Unreported
+         | Observed.Failed _ ) as obs ->
+           H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp list_area)
+             ~theme ~lang obs);
+      if lint_rows > 0 then begin
+        let l_rect =
+          Rect.make ~x:left_inner.x ~y:!cur_y ~w:left_inner.w ~h:lint_rows
+        in
+        cur_y := !cur_y + lint_rows;
+        let ly = ref l_rect.y and l_bot = Rect.bottom l_rect in
+        H.draw_divider ~grid ~rect:l_rect ~y:!ly ~theme ~pad_x ~label:"wiki-lint"
+          ();
+        incr ly;
+        let tx = l_rect.x + pad_x in
+        let tw = Int.max 0 (l_rect.w - (2 * pad_x)) in
+        match lint_summary with
+        | Some (_, _, _, _, dups, orphs) ->
+            List.iter
+              (fun (d : Wire_knowledge.wiki_duplicate_candidate) ->
+                if !ly < l_bot then begin
                   Card.draw_left_rail ~tone:Theme.Status_attention grid ~x:tx
                     ~y:!ly ~h:1 ~theme;
-                  let txt =
-                    Printf.sprintf "orphan: %s"
-                      (String.concat ", " (H.safe_take 4 orphs))
-                  in
+                  let txt = Printf.sprintf "dup: %s / %s" d.page_a d.page_b in
                   ignore
                     (H.put_clipped ~grid ~clip:l_rect ~x:(tx + 2) ~y:!ly
                        ~max_w:(Int.max 0 (tw - 2))
-                       ~style:(H.status_style ~theme Theme.Status_attention)
-                       txt)
-                end
-            | None -> ()
-          end;
-          if log_rows > 0 then begin
-            let log_rect =
-              Rect.make ~x:left_inner.x ~y:!cur_y ~w:left_inner.w ~h:log_rows
-            in
-            let ly = ref log_rect.y and l_bot = Rect.bottom log_rect in
-            H.draw_divider ~grid ~rect:log_rect ~y:!ly ~theme ~pad_x
-              ~label:"log.md" ();
-            incr ly;
-            let tx = log_rect.x + pad_x in
-            let right_e = Rect.right log_rect - pad_x in
-            List.iter
-              (fun (e : Wire_knowledge.wiki_log_entry) ->
-                if !ly < l_bot then begin
-                  let age = H.format_age ~now_unix e.written_at_unix in
-                  let aw = Grapheme.display_width age in
-                  let line =
-                    Printf.sprintf "r%d %s %s" e.revision e.action e.page
-                  in
-                  ignore
-                    (H.put_clipped ~grid ~clip:log_rect ~x:tx ~y:!ly
-                       ~max_w:(Int.max 4 (right_e - tx - aw - 2))
-                       ~style:(H.secondary_style ~theme ()) line);
-                  ignore
-                    (H.put_right ~grid ~clip:log_rect ~right_x:right_e ~y:!ly
-                       ~max_w:aw ~style:(H.whisper_style ~theme ()) age);
+                       ~style:(H.status_style ~theme Theme.Status_attention) txt);
                   incr ly
                 end)
-              (H.safe_take (log_rows - 1) log_entries)
+              dups;
+            if orphs <> [] && !ly < l_bot then begin
+              Card.draw_left_rail ~tone:Theme.Status_attention grid ~x:tx ~y:!ly
+                ~h:1 ~theme;
+              let txt =
+                Printf.sprintf "orphan: %s"
+                  (String.concat ", " (H.safe_take 4 orphs))
+              in
+              ignore
+                (H.put_clipped ~grid ~clip:l_rect ~x:(tx + 2) ~y:!ly
+                   ~max_w:(Int.max 0 (tw - 2))
+                   ~style:(H.status_style ~theme Theme.Status_attention) txt)
+            end
+        | None -> ()
+      end;
+      if log_rows > 0 then begin
+        let log_rect =
+          Rect.make ~x:left_inner.x ~y:!cur_y ~w:left_inner.w ~h:log_rows
+        in
+        let ly = ref log_rect.y and l_bot = Rect.bottom log_rect in
+        H.draw_divider ~grid ~rect:log_rect ~y:!ly ~theme ~pad_x ~label:"log.md"
+          ();
+        incr ly;
+        let tx = log_rect.x + pad_x in
+        let right_e = Rect.right log_rect - pad_x in
+        List.iter
+          (fun (e : Wire_knowledge.wiki_log_entry) ->
+            if !ly < l_bot then begin
+              let age = H.format_age ~now_unix e.written_at_unix in
+              let aw = Grapheme.display_width age in
+              let line = Printf.sprintf "r%d %s %s" e.revision e.action e.page in
+              ignore
+                (H.put_clipped ~grid ~clip:log_rect ~x:tx ~y:!ly
+                   ~max_w:(Int.max 4 (right_e - tx - aw - 2))
+                   ~style:(H.secondary_style ~theme ()) line);
+              ignore
+                (H.put_right ~grid ~clip:log_rect ~right_x:right_e ~y:!ly
+                   ~max_w:aw ~style:(H.whisper_style ~theme ()) age);
+              incr ly
+            end)
+          (H.safe_take (log_rows - 1) log_entries)
+      end
+    end;
+    draw_wiki_preview ~target_slug:None ~scroll:k.detail_scroll_offset ~grid
+      ~cache ~rect:right_rect ~theme ~bp ~lang ~k
+      ~focused:(Model.pane_focused model 1)
+
+(* --- 2b. Rich HTML & Markdown Artifacts Renderer (1st-class sub-tab + Dive) --- *)
+
+let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
+    ~lang ~(k : Knowledge_store.t) ~scroll ~is_dive ?dive_target_id ~focused
+    (art_opt : Wire_knowledge.artifact_entry option) =
+  let detail_opt =
+    match art_opt with
+    | Some a -> Knowledge_store.artifact_detail_for_entry a k
+    | None -> None
+  in
+  let fmt_tok =
+    match art_opt with
+    | Some a -> (
+        match Wire_knowledge.artifact_format_of_entry a with
+        | `Html -> "HTML"
+        | `Markdown -> "MD")
+    | None -> "MD"
+  in
+  let mode_lbl =
+    match k.artifact_view_mode with
+    | `Document -> Say.resolve lang (Say.make ~ko:"문서" ~en:"Doc")
+    | `Raw_source -> Say.resolve lang (Say.make ~ko:"원본" ~en:"Raw")
+  in
+  let badge =
+    match art_opt with
+    | None -> None
+    | Some a ->
+        let rev_total =
+          match detail_opt with
+          | Some d when d.revisions <> [] -> List.length d.revisions
+          | Some _ | None -> a.revision
+        in
+        let eff_rev =
+          match detail_opt with
+          | Some d -> d.artifact.revision
+          | None -> a.revision
+        in
+        let chk_s =
+          match Knowledge_store.artifact_check_for ~id:a.id ~revision:eff_rev k with
+          | Some c when c.checked -> Glyph.to_utf8 Glyph.Check_mark ^ " "
+          | Some _ | None -> ""
+        in
+        let share_s =
+          match detail_opt with
+          | Some d when d.shared -> " · Shared"
+          | Some _ | None -> ""
+        in
+        Some
+          (H.make_badge ~tone:Theme.Status_active
+             (Printf.sprintf "%s%s · r%d/%d · %s%s" chk_s fmt_tok eff_rev
+                (Int.max eff_rev rev_total) mode_lbl share_s))
+  in
+  let hotkey =
+    let ext_s, fmt_s =
+      match art_opt with
+      | Some a ->
+          let fmt = Wire_knowledge.artifact_format_of_entry a in
+          ( Wire_knowledge.artifact_extension fmt
+          , match fmt with `Html -> "HTML" | `Markdown -> "MD" )
+      | None -> (".md", "MD")
+    in
+    if is_dive then
+      Say.resolve lang
+        (Say.make
+           ~ko:
+             (Printf.sprintf
+                "[v] 뷰 · [y] %s · [e] %s · [{ }] 리비전 · [c] 확인 · [P] 공유 · [/] 검색"
+                fmt_s ext_s)
+           ~en:
+             (Printf.sprintf
+                "[v] View · [y] %s · [e] %s · [{ }] Rev · [c] Check · [P] Share · [/] Search"
+                fmt_s ext_s))
+    else
+      Say.resolve lang
+        (Say.make
+           ~ko:
+             (Printf.sprintf
+                "[v] 뷰 · [y] %s · [e] %s · [c] 확인 · [P] 공유 · [Enter] 전체뷰"
+                fmt_s ext_s)
+           ~en:
+             (Printf.sprintf
+                "[v] View · [y] %s · [e] %s · [c] Check · [P] Share · [Enter] Dive"
+                fmt_s ext_s))
+  in
+  let title =
+    if is_dive then
+      Say.resolve lang
+        (Say.make ~ko:"지식 > 아티팩트 뷰어" ~en:"Knowledge > Artifact Viewer")
+    else Say.resolve lang (Say.make ~ko:"아티팩트 프리뷰" ~en:"Artifact Preview")
+  in
+  let inner =
+    Card.draw ~cache grid ~rect ~theme
+      (H.card_spec ?badge ~focused ~hotkey title)
+  in
+  if Rect.is_empty inner then ()
+  else
+    match art_opt with
+    | None -> (
+        let content = H.pad_content ~bp inner in
+        match (dive_target_id, Observed.to_option k.artifacts) with
+        | Some target_id, Some (_ :: _) ->
+            H.draw_empty_notice ~grid ~rect:content ~theme
+              (Say.resolve lang
+                 (Say.make
+                    ~ko:
+                      (Printf.sprintf "아티팩트 '%s'을(를) 목록에서 찾을 수 없음"
+                         (H.short_hash ~len:14 target_id))
+                    ~en:
+                      (Printf.sprintf "Artifact '%s' not found in list"
+                         (H.short_hash ~len:14 target_id))))
+        | _ ->
+            H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang
+              k.artifacts)
+    | Some a ->
+        let pad_x = Layout.card_pad_x bp in
+        let title_s =
+          if String.trim a.title <> "" then a.title else a.id
+        in
+        let fmt = Wire_knowledge.artifact_format_of_entry a in
+        let band_h = if inner.h >= 7 then 2 else 1 in
+        let eff_rev =
+          match detail_opt with
+          | Some d -> d.artifact.revision
+          | None -> a.revision
+        in
+        let check_opt =
+          Knowledge_store.artifact_check_for ~id:a.id ~revision:eff_rev k
+        in
+        let checked =
+          match check_opt with Some c -> c.checked | None -> false
+        in
+        let shared =
+          match detail_opt with Some d -> d.shared | None -> false
+        in
+        let sub_s =
+          Printf.sprintf "%s · %s · %s · %s" a.id a.body.mime
+            (if checked then
+               Glyph.to_utf8 Glyph.Check_mark ^ " "
+               ^ Say.resolve lang (Say.make ~ko:"확인됨" ~en:"Checked")
+             else
+               Glyph.to_utf8 Glyph.Live_idle ^ " "
+               ^ Say.resolve lang (Say.make ~ko:"미확인" ~en:"Unchecked"))
+            (if shared then
+               Say.resolve lang (Say.make ~ko:"외부 공유 중" ~en:"Shared")
+             else Say.resolve lang (Say.make ~ko:"비공개" ~en:"Private"))
+        in
+        Card.draw_section_band ~pad_x grid
+          ~rect:(Rect.make ~x:inner.x ~y:inner.y ~w:inner.w ~h:band_h)
+          ~theme ~left_title:title_s
+          ~right_meta:
+            (Format_val.format_value Format_val.Bytes
+               (float_of_int a.body.bytes))
+          ?subtitle:(if band_h >= 2 then Some sub_s else None)
+          ();
+        let content =
+          Rect.make ~x:inner.x ~y:(inner.y + band_h) ~w:inner.w
+            ~h:(Int.max 0 (inner.h - band_h))
+          |> H.pad_content ~bp
+        in
+        if Rect.is_empty content then ()
+        else
+          let y = ref content.y and bot = Rect.bottom content in
+          (* Compact metadata strip *)
+          if !y < bot then begin
+            let prod_s =
+              if String.trim a.author <> "" then a.author else "—"
+            in
+            let meta_line =
+              Printf.sprintf "SHA:%s · %s"
+                (H.short_hash ~len:10 a.body.sha256)
+                prod_s
+            in
+            ignore
+              (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                 ~max_w:content.w ~style:(H.whisper_style ~theme ()) meta_line);
+            incr y
+          end;
+          let raw_body =
+            match detail_opt with
+            | Some d -> d.content
+            | None -> ""
+          in
+          let search_q =
+            if is_dive then String.trim k.artifact_search_query else ""
+          in
+          let active_match_line =
+            if not (String.equal search_q "") && !y < bot then begin
+              let matches =
+                let is_json = Knowledge_store.is_json_artifact a in
+                let q_lc = String.lowercase_ascii search_q in
+                let collect_strings lines =
+                  let rec collect i acc = function
+                    | [] -> List.rev acc
+                    | ln :: rest ->
+                        let next =
+                          if H.contains_ci ~needle:q_lc ln then i :: acc
+                          else acc
+                        in
+                        collect (i + 1) next rest
+                  in
+                  collect 0 [] lines
+                in
+                match (k.artifact_view_mode, fmt) with
+                | `Document, `Html ->
+                    Html_doc.search_match_lines ~theme ~width:content.w ~lang
+                      ~query:search_q raw_body
+                | `Document, `Markdown when is_json ->
+                    let pretty =
+                      match Yojson.Safe.from_string raw_body with
+                      | j -> Yojson.Safe.pretty_to_string j
+                      | exception Yojson.Json_error _ -> raw_body
+                    in
+                    collect_strings (String.split_on_char '\n' pretty)
+                | `Document, `Markdown ->
+                    let rendered =
+                      Markdown.render_lines ~width:content.w ~theme raw_body
+                    in
+                    let line_texts =
+                      List.map
+                        (fun (ln : Markdown.rendered_line) ->
+                          ln.spans
+                          |> List.map (fun (s : Markdown.styled_span) -> s.text)
+                          |> String.concat "")
+                        rendered
+                    in
+                    collect_strings line_texts
+                | `Raw_source, (`Html | `Markdown) ->
+                    collect_strings (String.split_on_char '\n' raw_body)
+              in
+              let n_matches = List.length matches in
+              let cur_idx =
+                if n_matches = 0 then 0
+                else Int.max 0 (Int.min (n_matches - 1) k.artifact_search_match_idx)
+              in
+              let banner =
+                if n_matches = 0 then
+                  Printf.sprintf "/%s · 0 matches" search_q
+                else
+                  Printf.sprintf "/%s · %d/%d ([n]/[N])" search_q (cur_idx + 1)
+                    n_matches
+              in
+              ignore
+                (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                   ~max_w:content.w
+                   ~style:(H.status_style ~theme ~attrs:Attr.bold Theme.Status_attention)
+                   banner);
+              incr y;
+              List.nth_opt matches cur_idx
+            end
+            else None
+          in
+          if !y < bot then begin
+            H.draw_divider ~grid ~rect:content ~y:!y ~theme ();
+            incr y
+          end;
+          let doc_r =
+            Rect.make ~x:content.x ~y:!y ~w:content.w
+              ~h:(Int.max 0 (bot - !y))
+          in
+          if not (Rect.is_empty doc_r) then begin
+            let rev_lines =
+              if not is_dive then []
+              else
+                match detail_opt with
+                | Some d when d.revisions <> [] ->
+                    ("── "
+                    ^ Say.resolve lang
+                        (Say.make ~ko:"리비전 이력 ([{] / [}])"
+                           ~en:"Revision History ([{] / [}])"))
+                    :: List.map
+                         (fun (r : Wire_knowledge.artifact_revision_summary) ->
+                           let cur =
+                             if Int.equal r.revision a.revision then "● "
+                             else "  "
+                           in
+                           Printf.sprintf "%sr%d · %s · %s · %s" cur r.revision
+                             r.title r.author (H.short_hash ~len:8 r.sha256))
+                         d.revisions
+                | Some _ | None -> (
+                    match Observed.to_option k.artifacts with
+                    | Some items when List.length items > 1 ->
+                        ("── "
+                        ^ Say.resolve lang
+                            (Say.make ~ko:"발행 아티팩트 목록"
+                               ~en:"Published Artifacts"))
+                        :: List.map
+                             (fun (it : Wire_knowledge.artifact_entry) ->
+                               let cur =
+                                 if String.equal it.id a.id then "● " else "  "
+                               in
+                               Printf.sprintf "%sr%d · %s · %s" cur it.revision
+                                 (if String.trim it.title <> "" then it.title
+                                  else it.id)
+                                 (H.short_hash ~len:8 it.body.sha256))
+                             items
+                    | Some _ | None -> [])
+            in
+            let draw_trailing_revs ~body_total =
+              if rev_lines <> [] then begin
+                let start_in_doc = body_total - Int.max 0 scroll in
+                let rev_skip = Int.max 0 (-start_in_doc) in
+                let dy = ref (doc_r.y + Int.max 0 start_in_doc) in
+                List.iter
+                  (fun ln ->
+                    if !dy < Rect.bottom doc_r then begin
+                      let st =
+                        if String.starts_with ~prefix:"──" ln then
+                          H.accent_style ~theme ()
+                        else H.secondary_style ~theme ()
+                      in
+                      ignore
+                        (H.put_clipped ~grid ~clip:doc_r ~x:doc_r.x ~y:!dy
+                           ~max_w:doc_r.w ~style:st ln);
+                      incr dy
+                    end)
+                  (Store_scroll.drop rev_skip rev_lines)
+              end
+            in
+            if String.equal (String.trim raw_body) "" && rev_lines = [] then
+              (match detail_opt with
+              | Some _ ->
+                  H.draw_empty_notice ~grid ~rect:doc_r ~theme
+                    (Say.resolve lang
+                       (Say.make ~ko:"(아티팩트 본문이 비어 있습니다)"
+                          ~en:"(Empty artifact body)"))
+              | None -> (
+                  match Knowledge_store.artifact_detail_failure_for_entry a k with
+                  | Some reason ->
+                      H.draw_empty_notice ~grid ~rect:doc_r ~theme
+                        (Say.resolve lang
+                           (Say.make
+                              ~ko:(Printf.sprintf "본문 조회 실패: %s · [r] 재시도"
+                                     reason)
+                              ~en:(Printf.sprintf "Body fetch failed: %s · [r] retry"
+                                     reason)))
+                  | None -> (
+                      match k.active_artifact_detail with
+                      | Observed.Failed _ | Observed.Absent ->
+                          H.draw_observed_placeholder ~grid ~rect:doc_r ~theme
+                            ~lang k.active_artifact_detail
+                      | Observed.Loading _ | Observed.Unreported
+                      | Observed.Value _ ->
+                          H.draw_empty_notice ~grid ~rect:doc_r ~theme
+                            (Say.resolve lang
+                               (Say.make ~ko:"아티팩트 본문을 불러오는 중..."
+                                  ~en:"Loading artifact body...")))))
+            else if String.equal (String.trim raw_body) "" then
+              draw_trailing_revs ~body_total:0
+            else
+              let body_total =
+                match (k.artifact_view_mode, fmt) with
+                | `Document, `Html ->
+                    Html_doc.draw grid ~rect:doc_r ~theme ~lang
+                      ~scroll:(Int.max 0 scroll)
+                      ?search_query:
+                        (if String.equal search_q "" then None
+                         else Some search_q)
+                      ?active_match_line raw_body
+                | `Document, `Markdown ->
+                    let is_json = Knowledge_store.is_json_artifact a in
+                    if is_json then begin
+                      let pretty =
+                        match Yojson.Safe.from_string raw_body with
+                        | j -> Yojson.Safe.pretty_to_string j
+                        | exception Yojson.Json_error _ -> raw_body
+                      in
+                      let lines = String.split_on_char '\n' pretty in
+                      let skip = Int.max 0 scroll in
+                      let dy = ref doc_r.y in
+                      List.iter
+                        (fun ln ->
+                          if !dy < Rect.bottom doc_r then begin
+                            ignore
+                              (H.put_clipped ~grid ~clip:doc_r ~x:doc_r.x ~y:!dy
+                                 ~max_w:doc_r.w ~style:(H.text_style ~theme ())
+                                 ln);
+                            incr dy
+                          end)
+                        (Store_scroll.drop skip lines);
+                      List.length lines
+                    end
+                    else
+                      Markdown.draw grid ~rect:doc_r ~theme ~osc8:true
+                        ~scroll:(Int.max 0 scroll) raw_body
+                | `Raw_source, (`Html | `Markdown) ->
+                    let lines = String.split_on_char '\n' raw_body in
+                    let skip = Int.max 0 scroll in
+                    let dy = ref doc_r.y in
+                    List.iteri
+                      (fun idx ln ->
+                        if !dy < Rect.bottom doc_r then begin
+                          let line_num = skip + idx + 1 in
+                          let num_s = Printf.sprintf "%4d " line_num in
+                          let nw = Grapheme.display_width num_s in
+                          ignore
+                            (H.put_clipped ~grid ~clip:doc_r ~x:doc_r.x ~y:!dy
+                               ~max_w:nw ~style:(H.whisper_style ~theme ())
+                               num_s);
+                          ignore
+                            (H.put_clipped ~grid ~clip:doc_r ~x:(doc_r.x + nw)
+                               ~y:!dy ~max_w:(Int.max 0 (doc_r.w - nw))
+                               ~style:(H.text_style ~theme ()) ln);
+                          incr dy
+                        end)
+                      (Store_scroll.drop skip lines);
+                    List.length lines
+              in
+              draw_trailing_revs ~body_total:(body_total + 1)
           end
-        end;
-        draw_wiki_preview ~target_slug:None ~scroll:k.detail_scroll_offset
-          ~grid ~cache ~rect:right_rect ~theme ~bp ~lang ~k
-          ~focused:(Model.pane_focused model 1)
 
 let render_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp grid =
@@ -1235,6 +1693,11 @@ let render_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
     | [ a; b ] -> (a, b)
     | _ -> (Rect.empty, rect)
   in
+  let mode_lbl =
+    match k.artifact_view_mode with
+    | `Document -> Say.resolve lang (Say.make ~ko:"[v] 문서 뷰" ~en:"[v] Doc View")
+    | `Raw_source -> Say.resolve lang (Say.make ~ko:"[v] 원본 소스" ~en:"[v] Raw Source")
+  in
   let pills =
     [
       {
@@ -1246,270 +1709,174 @@ let render_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
         tone = Some Theme.Status_ok;
         glyph = Some Glyph.Tool_square;
       };
+      {
+        H.label = mode_lbl;
+        active = false;
+        tone = Some Theme.Status_active;
+        glyph = None;
+      };
     ]
   in
-  ignore (H.draw_pills ~grid ~rect:bar_rect ~theme pills);
-  let left_rect, right_rect =
-        Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.56
-          ~top_ratio:0.54 bp body_rect
-      in
-      let left_inner =
-        Card.draw ~cache grid ~rect:left_rect ~theme
-          (H.card_spec ~focused:(Model.pane_focused model 0)
+  ignore
+    (H.draw_pills ~grid ~rect:bar_rect ~theme
+       ~right_hint:
+         (Say.resolve lang
+            (Say.make ~ko:"[{ }] 리비전 · [c] 확인 · [P] 공유 · [Y] URL · [z] 확대"
+               ~en:"[{ }] Rev · [c] Check · [P] Share · [Y] URL · [z] Zoom"))
+       pills);
+  let sel_art = Knowledge_store.selected_artifact k in
+  if model.nav.zoomed then
+    draw_rich_artifact_pane ~grid ~cache ~rect:body_rect ~theme ~bp ~lang ~k
+      ~scroll:k.detail_scroll_offset ~is_dive:false ~focused:(Model.body_has_focus model) sel_art
+  else
+    let left_rect, right_rect =
+      Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.44
+        ~top_ratio:0.48 bp body_rect
+    in
+    let left_inner =
+      Card.draw ~cache grid ~rect:left_rect ~theme
+        (H.card_spec ~focused:(Model.pane_focused model 0)
+           ~hotkey:
              (Say.resolve lang
-                (Say.make ~ko:"발행 아티팩트 / 보고서"
-                   ~en:"Published Artifacts & Reports")))
-      in
-      if not (Rect.is_empty left_inner) then begin
-        match k.artifacts with
-        | Observed.Value _ ->
-            let q = String.trim k.filter_query in
-            let visible_items = Knowledge_store.artifacts_filtered k in
-            if visible_items = [] then
-              H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp left_inner)
-                ~theme
-                (Say.resolve lang
-                   (if String.equal q "" then
-                      Say.make ~ko:"발행된 아티팩트가 없습니다"
-                        ~en:"No published artifacts"
+                (Say.make ~ko:"[c] 확인 · [P] 공유 · [Enter] 뷰어"
+                   ~en:"[c] Check · [P] Share · [Enter] Viewer"))
+           (Say.resolve lang
+              (Say.make ~ko:"발행 아티팩트 / 보고서"
+                 ~en:"Published Artifacts & Reports")))
+    in
+    if not (Rect.is_empty left_inner) then begin
+      match k.artifacts with
+      | Observed.Value _ ->
+          let q = String.trim k.filter_query in
+          let visible_items = Knowledge_store.artifacts_filtered k in
+          if visible_items = [] then
+            H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp left_inner) ~theme
+              (Say.resolve lang
+                 (if String.equal q "" then
+                    Say.make ~ko:"발행된 아티팩트가 없습니다"
+                      ~en:"No published artifacts"
+                  else
+                    Say.make ~ko:"필터에 일치하는 아티팩트 없음"
+                      ~en:"No artifacts match filter"))
+          else
+            let columns : Table.column list =
+              [
+                {
+                  id = "chk";
+                  header = Say.literal "✓";
+                  priority = 0;
+                  min_width = 2;
+                  max_width = Some 3;
+                  weight = 1;
+                  align = Table.Center;
+                };
+                {
+                  id = "name";
+                  header = Say.make ~ko:"이름" ~en:"Name";
+                  priority = 0;
+                  min_width = 14;
+                  max_width = None;
+                  weight = 3;
+                  align = Table.Left;
+                };
+                {
+                  id = "fmt";
+                  header = Say.make ~ko:"형식" ~en:"Fmt";
+                  priority = 1;
+                  min_width = 6;
+                  max_width = Some 9;
+                  weight = 1;
+                  align = Table.Left;
+                };
+                {
+                  id = "size";
+                  header = Say.make ~ko:"크기" ~en:"Size";
+                  priority = 2;
+                  min_width = 7;
+                  max_width = Some 10;
+                  weight = 1;
+                  align = Table.Right;
+                };
+                {
+                  id = "producer";
+                  header = Say.make ~ko:"생성자" ~en:"Producer";
+                  priority = 3;
+                  min_width = 10;
+                  max_width = Some 16;
+                  weight = 1;
+                  align = Table.Left;
+                };
+              ]
+            in
+            let rows =
+              List.map
+                (fun (a : Wire_knowledge.artifact_entry) ->
+                  let display =
+                    if String.trim a.title <> "" then a.title else a.id
+                  in
+                  let prod =
+                    if String.trim a.author <> "" then a.author
+                    else Glyph.to_utf8 Glyph.Missing_absent
+                  in
+                  let checked =
+                    match
+                      Knowledge_store.artifact_check_for ~id:a.id
+                        ~revision:a.revision k
+                    with
+                    | Some c -> c.checked
+                    | None -> false
+                  in
+                  let chk_cell =
+                    if checked then
+                      Table.text_cell ~fg:(Color.of_rgb theme.status_ok)
+                        ~attrs:Attr.bold (Glyph.to_utf8 Glyph.Check_mark)
                     else
-                      Say.make ~ko:"필터에 일치하는 아티팩트 없음"
-                        ~en:"No artifacts match filter"))
-            else
-              let columns : Table.column list =
-                [
+                      Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
+                        (Glyph.to_utf8 Glyph.Live_idle)
+                  in
+                  let fmt_s =
+                    Printf.sprintf "%s r%d"
+                      (match Wire_knowledge.artifact_format_of_entry a with
+                       | `Html -> "HTML"
+                       | `Markdown -> "MD")
+                      a.revision
+                  in
                   {
-                    id = "name";
-                    header = Say.make ~ko:"이름" ~en:"Name";
-                    priority = 0;
-                    min_width = 16;
-                    max_width = None;
-                    weight = 3;
-                    align = Table.Left;
-                  };
-                  {
-                    id = "mime";
-                    header = Say.make ~ko:"형식" ~en:"MIME";
-                    priority = 2;
-                    min_width = 10;
-                    max_width = Some 18;
-                    weight = 1;
-                    align = Table.Left;
-                  };
-                  {
-                    id = "size";
-                    header = Say.make ~ko:"크기" ~en:"Size";
-                    priority = 1;
-                    min_width = 8;
-                    max_width = Some 12;
-                    weight = 1;
-                    align = Table.Right;
-                  };
-                  {
-                    id = "author";
-                    header = Say.make ~ko:"작성자" ~en:"Author";
-                    priority = 3;
-                    min_width = 10;
-                    max_width = Some 18;
-                    weight = 1;
-                    align = Table.Left;
-                  };
-                ]
-              in
-              let rows =
-                List.map
-                  (fun (a : Wire_knowledge.artifact_entry) ->
-                    {
-                      Table.id = a.id;
-                      cells =
-                        [
-                          ("name", Table.text_cell a.title);
-                          ( "mime"
-                          , Table.text_cell
-                              ~fg:(Color.of_rgb theme.text_secondary)
-                              a.body.mime );
-                          ( "size"
-                          , Table.text_cell
-                              (Format_val.format_value Format_val.Bytes
-                                 (float_of_int a.body.bytes)) );
-                          ("author", Table.text_cell a.author);
-                        ];
-                    })
-                  visible_items
-              in
-              let sel =
-                H.clamp_index (List.length visible_items) k.selected_index
-              in
-              ignore
-                (Table.draw grid ~rect:left_inner ~theme ~caps:H.default_caps
-                   ~lang ~col_gap:(Layout.table_col_gap bp)
-                   ~scroll:k.scroll_offset ~selected:sel ~columns rows)
-        | ( Observed.Loading _
-          | Observed.Absent
-          | Observed.Unreported
-          | Observed.Failed _ ) as obs ->
-            H.draw_observed_placeholder ~grid
-              ~rect:(H.pad_content ~bp left_inner) ~theme ~lang obs
-      end;
-      let sel_art = Knowledge_store.selected_artifact k in
-      let art_hotkey =
-        let fmt_tok, ext_tok =
-          match sel_art with
-          | Some a -> (
-              match Wire_knowledge.artifact_format_of_entry a with
-              | `Html -> ("HTML", ".html")
-              | `Markdown -> ("MD", ".md"))
-          | None -> ("MD", ".md")
-        in
-        Say.resolve lang
-          (Say.make
-             ~ko:
-               (Printf.sprintf
-                  "[y] %s 복사 · [e] %s 내보내기 · [o] 열기 · [H] SHA · [Enter] 상세"
-                  fmt_tok ext_tok)
-             ~en:
-               (Printf.sprintf
-                  "[y] Copy %s · [e] Export %s · [o] Open · [H] SHA · [Enter] Dive"
-                  fmt_tok ext_tok))
-      in
-      let right_inner =
-        Card.draw ~cache grid ~rect:right_rect ~theme
-          (H.card_spec ~focused:(Model.pane_focused model 1)
-             ~hotkey:art_hotkey
-             (Say.resolve lang (Say.make ~ko:"아티팩트 상세" ~en:"Artifact Detail")))
-      in
-      if not (Rect.is_empty right_inner) then begin
-        match sel_art with
-        | None ->
-            H.draw_observed_placeholder ~grid
-              ~rect:(H.pad_content ~bp right_inner) ~theme ~lang k.artifacts
-        | Some a ->
-            let pad_x = Layout.card_pad_x bp in
-            let fmt_tok, ext_tok =
-              match Wire_knowledge.artifact_format_of_entry a with
-              | `Html -> ("HTML", ".html")
-              | `Markdown -> ("MD", ".md")
+                    Table.id =
+                      if not (String.equal a.id "") then a.id else a.body.sha256;
+                    cells =
+                      [
+                        ("chk", chk_cell);
+                        ("name", Table.text_cell display);
+                        ( "fmt"
+                        , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
+                            fmt_s );
+                        ( "size"
+                        , Table.text_cell
+                            (Format_val.format_value Format_val.Bytes
+                               (float_of_int a.body.bytes)) );
+                        ("producer", Table.text_cell prod);
+                      ];
+                  })
+                visible_items
             in
-            let band_h = if right_inner.h >= 7 then 2 else 1 in
-            Card.draw_section_band ~pad_x grid
-              ~rect:(Rect.make ~x:right_inner.x ~y:right_inner.y
-                       ~w:right_inner.w ~h:band_h)
-              ~theme ~left_title:a.title
-              ~right_meta:
-                (Format_val.format_value Format_val.Bytes
-                   (float_of_int a.body.bytes))
-              ?subtitle:
-                (if band_h >= 2 then
-                   Some
-                     (Printf.sprintf "%s · r%d · %s" fmt_tok a.revision
-                        a.body.mime)
-                 else None)
-              ();
-            let content =
-              Rect.make ~x:right_inner.x ~y:(right_inner.y + band_h)
-                ~w:right_inner.w ~h:(Int.max 0 (right_inner.h - band_h))
-              |> H.pad_content ~bp
+            let sel =
+              H.clamp_index (List.length visible_items) k.selected_index
             in
-            (* Update_nav.knowledge_detail_max_scroll counts these rows. *)
-            let detail_opt = Knowledge_store.artifact_detail_for_entry a k in
-            let preview_lines =
-              Knowledge_store.artifact_preview_lines a detail_opt
-            in
-            let rows_acc = ref [] in
-            let push_kv key value = rows_acc := `Kv (key, value) :: !rows_acc in
-            push_kv "ID" (Printf.sprintf "%s (r%d)" a.id a.revision);
-            push_kv "SHA-256" a.body.sha256;
-            push_kv
-              (Say.resolve lang (Say.make ~ko:"작성자" ~en:"Author"))
-              a.author;
-            push_kv
-              (Say.resolve lang (Say.make ~ko:"생성" ~en:"Created"))
-              (Wire_common.format_unix_rfc3339 a.created_at_unix);
-            push_kv
-              (Say.resolve lang (Say.make ~ko:"요약" ~en:"Summary"))
-              a.summary;
-            rows_acc := `Actions (a.body.sha256, fmt_tok, ext_tok) :: !rows_acc;
-            if preview_lines <> [] then begin
-              rows_acc :=
-                `Divider
-                  (Say.resolve lang
-                     (Say.make
-                        ~ko:(Printf.sprintf "%s 본문 미리보기 (%d줄)" fmt_tok
-                               (List.length preview_lines))
-                        ~en:(Printf.sprintf "%s Body Preview (%d lines)" fmt_tok
-                               (List.length preview_lines))))
-                :: !rows_acc;
-              List.iter
-                (fun line -> rows_acc := `Body_line line :: !rows_acc)
-                preview_lines
-            end
-            else
-              (match Knowledge_store.artifact_detail_failure_for_entry a k with
-               | Some reason ->
-                   rows_acc :=
-                     `Notice
-                       (Say.resolve lang
-                          (Say.make
-                             ~ko:(Printf.sprintf "본문 조회 실패: %s · [r] 재시도" reason)
-                             ~en:(Printf.sprintf "Body fetch failed: %s · [r] retry" reason)))
-                     :: !rows_acc
-               | None -> ());
-            let rows = List.rev !rows_acc in
-            let vis_h = Int.max 1 content.h in
-            let max_skip = Int.max 0 (List.length rows - vis_h) in
-            let skip = Int.min max_skip (Int.max 0 k.detail_scroll_offset) in
-            let y = ref content.y and bottom = Rect.bottom content in
-            List.iter
-              (function
-                | `Kv (key, value) ->
-                    if !y < bottom then begin
-                      H.put_kv ~grid ~clip:content ~x:content.x ~y:!y
-                        ~max_w:content.w ~theme ~key_w:9 ~key value;
-                      incr y
-                    end
-                | `Actions (sha, ft, et) ->
-                    if !y < bottom then begin
-                      let uri = "masc://artifact/" ^ sha in
-                      ignore
-                        (H.put_link ~grid ~clip:content ~x:content.x ~y:!y
-                           ~max_w:content.w ~style:(H.accent_style ~theme ())
-                           ~uri
-                           (Say.resolve lang
-                              (Say.make
-                                 ~ko:
-                                   (Printf.sprintf
-                                      "[y] %s 복사 · [e] %s 저장 · [o] 브라우저 열기 · [H] SHA"
-                                      ft et)
-                                 ~en:
-                                   (Printf.sprintf
-                                      "[y] Copy %s · [e] Export %s · [o] Open · [H] SHA"
-                                      ft et))));
-                      incr y
-                    end
-                | `Divider lbl ->
-                    if !y < bottom then begin
-                      H.draw_divider ~grid ~rect:content ~y:!y ~theme ~label:lbl
-                        ();
-                      incr y
-                    end
-                | `Body_line line ->
-                    if !y < bottom then begin
-                      ignore
-                        (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-                           ~max_w:content.w ~style:(H.text_style ~theme ()) line);
-                      incr y
-                    end
-                | `Notice msg ->
-                    if !y < bottom then begin
-                      ignore
-                        (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-                           ~max_w:content.w
-                           ~style:(H.status_style ~theme Theme.Status_attention)
-                           msg);
-                      incr y
-                    end)
-              (Store_scroll.drop skip rows)
-      end
+            ignore
+              (Table.draw grid ~rect:left_inner ~theme ~caps:H.default_caps ~lang
+                 ~col_gap:(Layout.table_col_gap bp) ~scroll:k.scroll_offset
+                 ~selected:sel ~columns rows)
+      | ( Observed.Loading _
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ) as obs ->
+          H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp left_inner)
+            ~theme ~lang obs
+    end;
+    draw_rich_artifact_pane ~grid ~cache ~rect:right_rect ~theme ~bp ~lang ~k
+      ~scroll:k.detail_scroll_offset ~is_dive:false
+      ~focused:(Model.pane_focused model 1) sel_art
 
 (* --- 3. Memory (World MVCC Conflicts with Violet/Amber Rails + Stacked_bar Heat) --- *)
 
@@ -2110,8 +2477,8 @@ let draw_temporal_memory_diff ~(model : Model.t) ~grid ~cache ~(rect : Rect.t)
             (Say.make ~ko:"시간축 메모리 Diff 스크러버"
                ~en:"Temporal Memory Diff Scrubber")
         , Say.resolve lang
-            (Say.make ~ko:"[Space] 창 · [g] 흐름/총량"
-               ~en:"[Space] Window · [g] Flow/Net") )
+            (Say.make ~ko:"[w] 창 · [m] 범위 · [g] 흐름/총량"
+               ~en:"[w] Window · [m] Scope · [g] Flow/Net") )
   in
   let inner =
     Card.draw ~cache grid ~rect ~theme
@@ -2314,10 +2681,25 @@ let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
         glyph = Some Glyph.Focus_caret;
       };
       {
-        H.label = "[+] Karma";
+        H.label = Say.resolve lang (Say.make ~ko:"[c] 댓글" ~en:"[c] Comment");
         active = false;
-        tone = Some Theme.Status_ok;
+        tone = Some Theme.Status_active;
+        glyph = None;
+      };
+      {
+        H.label = "[+][-] Vote";
+        active = Option.is_some k.armed_vote;
+        tone =
+          Some
+            (if Option.is_some k.armed_vote then Theme.Status_attention
+             else Theme.Status_ok);
         glyph = Some Glyph.Delta_up;
+      };
+      {
+        H.label = Say.resolve lang (Say.make ~ko:"[< >] 댓글 선택" ~en:"[< >] Comment");
+        active = Option.is_some k.thread_selected_comment;
+        tone = Some Theme.Status_ai;
+        glyph = None;
       };
     ]
   in
@@ -2371,12 +2753,38 @@ let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
         in
         if not (Rect.is_empty content) then begin
           let y = ref content.y and bottom = Rect.bottom content in
+          (match k.armed_vote with
+           | Some (target, dir) when !y < bottom ->
+               let key_s = match dir with `Up -> "[+]" | `Down -> "[-]" in
+               let target_s =
+                 match target with
+                 | Knowledge_store.Vote_post _ ->
+                     Say.resolve lang (Say.make ~ko:"게시글" ~en:"post")
+                 | Knowledge_store.Vote_comment _ ->
+                     Say.resolve lang (Say.make ~ko:"선택 댓글" ~en:"selected comment")
+               in
+               Card.draw_left_rail ~tone:Theme.Status_attention grid ~x:content.x
+                 ~y:!y ~h:1 ~theme;
+               ignore
+                 (H.put_clipped ~grid ~clip:content ~x:(content.x + 2) ~y:!y
+                    ~max_w:(Int.max 0 (content.w - 2))
+                    ~style:
+                      (H.status_style ~theme ~attrs:Attr.bold
+                         Theme.Status_attention)
+                    (Printf.sprintf "%s %s (%s)" key_s
+                       (Say.resolve lang
+                          (Say.make ~ko:"한 번 더 눌러 투표 확정"
+                             ~en:"Press again to confirm vote"))
+                       target_s));
+               incr y
+           | Some _ | None -> ());
+          let threaded = Knowledge_store.order_comments_threaded comments in
           let comments_h =
-            if comments = [] then 0
+            if threaded = [] then 0
             else
               Int.min
-                (Int.max 3 ((bottom - !y) / 3))
-                (2 + (List.length comments * 2))
+                (Int.max 4 ((bottom - !y) / 2))
+                (2 + (List.length threaded * 2))
           in
           let body_h = Int.max 0 (bottom - !y - comments_h) in
           let body_max =
@@ -2398,22 +2806,39 @@ let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
           if comments_h > 0 && !y < bottom then begin
             H.draw_divider ~grid ~rect:content ~y:!y ~theme
               ~label:
-                (Printf.sprintf "%s (%d)"
+                (Printf.sprintf "%s (%d) · [c] %s"
                    (Say.resolve lang (Say.make ~ko:"댓글" ~en:"Comments"))
-                   (List.length comments))
+                   (List.length threaded)
+                   (Say.resolve lang (Say.make ~ko:"답글" ~en:"Reply")))
               ();
             incr y;
             let c_lines =
-              List.concat_map
-                (fun (c : Wire_knowledge.board_comment) ->
-                  let c_age = H.format_age ~now_unix c.created_at_unix in
-                  let hdr =
-                    Printf.sprintf "@%s · %s+%d" c.author
-                      (Glyph.to_utf8 Glyph.Delta_up)
-                      c.score
-                  in
-                  [ `Hdr (hdr, c_age); `Body c.body ])
-                comments
+              List.concat
+                (List.mapi
+                   (fun idx (tc : Knowledge_store.threaded_comment) ->
+                     let c = tc.comment in
+                     let is_sel =
+                       Option.equal Int.equal k.thread_selected_comment (Some idx)
+                     in
+                     let indent =
+                       if tc.depth <= 0 then ""
+                       else
+                         let prefix =
+                           String.concat "" (List.init (tc.depth - 1) (fun _ -> "│ "))
+                         in
+                         prefix ^ "└─ "
+                     in
+                     let c_age = H.format_age ~now_unix c.created_at_unix in
+                     let hdr =
+                       Printf.sprintf "%s@%s · %s%d" indent c.author
+                         (Glyph.to_utf8 Glyph.Delta_up) c.score
+                     in
+                     let body_indent = String.make (tc.depth * 2) ' ' in
+                     [
+                       `Hdr (hdr, c_age, is_sel);
+                       `Body (body_indent ^ H.sanitize_single_line c.body, is_sel);
+                     ])
+                   threaded)
             in
             let c_vis_h = Int.max 1 (bottom - !y) in
             let c_max = Int.max 0 (List.length c_lines - c_vis_h) in
@@ -2421,29 +2846,46 @@ let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
             let tx = content.x + 2 and tw = Int.max 0 (content.w - 2) in
             List.iter
               (function
-                | `Hdr (hdr, c_age) ->
+                | `Hdr (hdr, c_age, is_sel) ->
                     if !y < bottom then begin
-                      Card.draw_left_rail ~color:theme.border_inactive grid
-                        ~x:content.x ~y:!y ~h:1 ~theme;
+                      let row_bg =
+                        if is_sel then theme.selection_bg else theme.surface_1
+                      in
+                      if is_sel then
+                        H.paint_selected_row_bg ~grid ~clip:content
+                          ~row_rect:(Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1)
+                          ~theme ()
+                      else
+                        Card.draw_left_rail ~color:theme.border_inactive grid
+                          ~x:content.x ~y:!y ~h:1 ~theme;
                       let aw = Grapheme.display_width c_age in
                       ignore
                         (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y
                            ~max_w:(Int.max 6 (tw - aw - 2))
-                           ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
+                           ~style:
+                             (H.accent_style ~theme ~bg:row_bg ~attrs:Attr.bold ())
                            hdr);
                       ignore
                         (H.put_right ~grid ~clip:content
                            ~right_x:(Rect.right content) ~y:!y ~max_w:aw
-                           ~style:(H.whisper_style ~theme ()) c_age);
+                           ~style:(H.whisper_style ~theme ~bg:row_bg ()) c_age);
                       incr y
                     end
-                | `Body body_s ->
+                | `Body (body_s, is_sel) ->
                     if !y < bottom then begin
-                      Card.draw_left_rail ~color:theme.border_inactive grid
-                        ~x:content.x ~y:!y ~h:1 ~theme;
+                      let row_bg =
+                        if is_sel then theme.selection_bg else theme.surface_1
+                      in
+                      if is_sel then
+                        H.paint_selected_row_bg ~grid ~clip:content
+                          ~row_rect:(Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1)
+                          ~theme ()
+                      else
+                        Card.draw_left_rail ~color:theme.border_inactive grid
+                          ~x:content.x ~y:!y ~h:1 ~theme;
                       ignore
                         (H.put_clipped ~grid ~clip:content ~x:tx ~y:!y ~max_w:tw
-                           ~style:(H.text_style ~theme ()) body_s);
+                           ~style:(H.text_style ~theme ~bg:row_bg ()) body_s);
                       incr y
                     end)
               (Store_scroll.drop c_skip c_lines)
@@ -2572,191 +3014,10 @@ let render_dive_artifact ~id ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp grid =
   let lang = model.lang in
   let k = model.knowledge in
-  let artifacts =
-    match Observed.to_option k.artifacts with Some xs -> xs | None -> []
-  in
   let target = Knowledge_store.find_artifact_by_id_or_sha id k in
-  let fmt_tok, ext_tok =
-    match target with
-    | Some a -> (
-        match Wire_knowledge.artifact_format_of_entry a with
-        | `Html -> ("HTML", ".html")
-        | `Markdown -> ("MD", ".md"))
-    | None -> ("MD", ".md")
-  in
-  let inner =
-    Card.draw ~cache grid ~rect ~theme
-      (H.card_spec ~focused:(Model.body_has_focus model)
-         ~subtitle:(H.short_hash ~len:14 id)
-         ~hotkey:
-           (Say.resolve lang
-              (Say.make
-                 ~ko:
-                   (Printf.sprintf
-                      "[y] %s 복사 · [e] %s 내보내기 · [o] 열기 · [H] SHA · [Esc] 뒤로"
-                      fmt_tok ext_tok)
-                 ~en:
-                   (Printf.sprintf
-                      "[y] Copy %s · [e] Export %s · [o] Open · [H] SHA · [Esc] Back"
-                      fmt_tok ext_tok)))
-         (Say.resolve lang
-            (Say.make ~ko:"지식 > 아티팩트 뷰어" ~en:"Knowledge > Artifact Viewer")))
-  in
-  let content = H.pad_content ~bp inner in
-  if Rect.is_empty content then ()
-  else
-    let rows_acc = ref [] in
-    let push r = rows_acc := r :: !rows_acc in
-    (match target with
-     | None ->
-         if artifacts <> [] then
-           push
-             (`Notice
-                (Say.resolve lang
-                   (Say.make
-                      ~ko:
-                        (Printf.sprintf "아티팩트 '%s'을(를) 목록에서 찾을 수 없음"
-                           (H.short_hash ~len:14 id))
-                      ~en:
-                        (Printf.sprintf "Artifact '%s' not found in list"
-                           (H.short_hash ~len:14 id)))))
-     | Some a ->
-         let detail_opt = Knowledge_store.artifact_detail_for_entry a k in
-         let preview_lines =
-           Knowledge_store.artifact_preview_lines a detail_opt
-         in
-         push (`Kv ("ID", Printf.sprintf "%s (r%d)" a.id a.revision));
-         push (`Kv (Say.resolve lang (Say.make ~ko:"제목" ~en:"Title"), a.title));
-         if String.trim a.summary <> "" then
-           push
-             (`Kv (Say.resolve lang (Say.make ~ko:"요약" ~en:"Summary"), a.summary));
-         push (`Kv ("MIME", a.body.mime));
-         push
-           (`Kv
-              ( Say.resolve lang (Say.make ~ko:"크기" ~en:"Size")
-              , Format_val.format_value Format_val.Bytes
-                  (float_of_int a.body.bytes) ));
-         push (`Kv ("SHA-256", a.body.sha256));
-         if String.trim a.author <> "" then
-           push
-             (`Kv (Say.resolve lang (Say.make ~ko:"작성자" ~en:"Author"), a.author));
-         push
-           (`Kv
-              ( Say.resolve lang (Say.make ~ko:"생성" ~en:"Created")
-              , Wire_common.format_unix_rfc3339 a.created_at_unix ));
-         push (`Actions (a.body.sha256, fmt_tok, ext_tok));
-         if preview_lines <> [] then begin
-           push
-             (`Divider
-                (Say.resolve lang
-                   (Say.make
-                      ~ko:(Printf.sprintf "%s 본문 미리보기 (%d줄)" fmt_tok
-                             (List.length preview_lines))
-                      ~en:(Printf.sprintf "%s Body Preview (%d lines)" fmt_tok
-                             (List.length preview_lines)))));
-           List.iter (fun l -> push (`Body_line l)) preview_lines
-         end
-         else
-           match Knowledge_store.artifact_detail_failure_for_entry a k with
-           | Some reason ->
-               push
-                 (`Notice
-                    (Say.resolve lang
-                       (Say.make
-                          ~ko:(Printf.sprintf "본문 조회 실패: %s · [r] 재시도" reason)
-                          ~en:(Printf.sprintf "Body fetch failed: %s · [r] retry" reason))))
-           | None -> ());
-    if artifacts <> [] then begin
-      push
-        (`Divider
-           (Say.resolve lang
-              (Say.make ~ko:"아티팩트 리비전 목록" ~en:"Artifact Revisions")));
-      List.iter (fun a -> push (`Rev a)) artifacts
-    end;
-    let rows = List.rev !rows_acc in
-    if rows = [] then
-      H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang k.artifacts
-    else
-      let vis_h = Int.max 1 content.h in
-      let max_skip = Int.max 0 (List.length rows - vis_h) in
-      let skip = Int.min max_skip (Int.max 0 model.nav.dive_scroll_offset) in
-      let y = ref content.y and bottom = Rect.bottom content in
-      List.iter
-        (function
-          | `Kv (key, v) ->
-              if !y < bottom then begin
-                H.put_kv ~grid ~clip:content ~x:content.x ~y:!y ~max_w:content.w
-                  ~theme ~key_w:9 ~key v;
-                incr y
-              end
-          | `Actions (sha, ft, et) ->
-              if !y < bottom then begin
-                ignore
-                  (H.put_link ~grid ~clip:content ~x:content.x ~y:!y
-                     ~max_w:content.w
-                     ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
-                     ~uri:("masc://artifact/" ^ sha)
-                     (Say.resolve lang
-                        (Say.make
-                           ~ko:
-                             (Printf.sprintf
-                                "[y] %s 본문 복사 · [e] %s 저장 · [o] 기본 앱 열기 · [H] SHA 복사"
-                                ft et)
-                           ~en:
-                             (Printf.sprintf
-                                "[y] Copy %s body · [e] Export %s · [o] Open default · [H] Copy SHA"
-                                ft et))));
-                incr y
-              end
-          | `Divider lbl ->
-              if !y < bottom then begin
-                H.draw_divider ~grid ~rect:content ~y:!y ~theme ~label:lbl ();
-                incr y
-              end
-          | `Body_line l ->
-              if !y < bottom then begin
-                ignore
-                  (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-                     ~max_w:content.w ~style:(H.text_style ~theme ()) l);
-                incr y
-              end
-          | `Notice msg ->
-              if !y < bottom then begin
-                ignore
-                  (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-                     ~max_w:content.w
-                     ~style:(H.status_style ~theme Theme.Status_attention) msg);
-                incr y
-              end
-          | `Rev (a : Wire_knowledge.artifact_entry) ->
-              if !y < bottom then begin
-                let is_cur =
-                  String.equal a.id id || String.equal a.body.sha256 id
-                in
-                let row_rect =
-                  Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1
-                in
-                let row_bg =
-                  if is_cur then theme.selection_bg else theme.surface_1
-                in
-                if is_cur then
-                  H.paint_selected_row_bg ~grid ~clip:content ~row_rect ~theme
-                    ();
-                let style =
-                  if is_cur then H.anchor_style ~theme ~bg:row_bg ()
-                  else H.secondary_style ~theme ~bg:row_bg ()
-                in
-                let line =
-                  Printf.sprintf "r%d · %s · %s" a.revision a.title
-                    (Format_val.format_value Format_val.Bytes
-                       (float_of_int a.body.bytes))
-                in
-                ignore
-                  (H.put_clipped ~grid ~clip:content ~x:(content.x + 2) ~y:!y
-                     ~max_w:(Int.max 0 (content.w - 2)) ~style line);
-                incr y
-              end)
-        (Store_scroll.drop skip rows)
+  draw_rich_artifact_pane ~grid ~cache ~rect ~theme ~bp ~lang ~k
+    ~scroll:model.nav.dive_scroll_offset ~is_dive:true ~dive_target_id:id
+    ~focused:(Model.body_has_focus model) target
 
 let render_dive_memory ~keeper ~from_rev ~to_rev ~(model : Model.t) ~cache
     ~(rect : Rect.t) ~(theme : Theme.t) ~bp grid =

@@ -41,6 +41,7 @@ type get_request =
       limit : int option;
       offset : int option;
     }
+  | Get_board_hearths
   | Get_board_thread of { post_id : string; comment_limit : int option }
   | Get_wiki_index of {
       tag : string option;
@@ -53,6 +54,7 @@ type get_request =
   | Get_wiki_lint
   | Get_artifacts
   | Get_artifact_detail of { id : string; revision : int option }
+  | Get_artifact_checks
   | Get_world_memory
   | Get_memory_diff of {
       keeper : string option;
@@ -62,6 +64,34 @@ type get_request =
   | Get_keeper_memory_facts of { keeper : string }
   | Get_keeper_memory_activity of { keeper : string; limit : int }
   | Get_keeper_memory_health
+  | Get_keeper_context_turn_records of {
+      keeper : string;
+      limit : int option;
+      turn_ref : string option;
+    }
+  | Get_keeper_provider_input of { keeper : string; turn_ref : string }
+  | Get_keeper_provider_input_part of {
+      keeper : string;
+      turn_ref : string;
+      index : int;
+    }
+  | Get_keeper_cache_outcome of { keeper : string; turn_ref : string }
+  | Get_keeper_next_request of { keeper : string }
+  | Get_keeper_turn_transcript of { keeper : string; turn_ref : string }
+  | Get_keeper_tool_stats of { keeper : string; window_hours : int option }
+  | Get_keeper_tool_calls of {
+      keeper : string;
+      limit : int option;
+      execution_ids : string list option;
+      turn_ref : string option;
+    }
+  | Get_keeper_tool_result of {
+      keeper : string;
+      execution_id : string;
+      offset : int option;
+      max_bytes : int option;
+      source_id : string option;
+    }
   | Get_provider_usage of { days : int }
   | Get_keeper_costs of { window_minutes : int }
   | Get_efficiency of { month : string option }
@@ -75,7 +105,13 @@ type get_request =
   | Get_exact_lane_runs of { lane : string option; limit : int option }
   | Get_fusion_runs
   | Get_tool_series of { bucket : [ `Hour | `Day ]; since_hours : int }
+  | Get_tool_series_filtered of {
+      bucket : [ `Hour | `Day ];
+      since_hours : int;
+      tool : string option;
+    }
   | Get_tools_catalog of { keeper : string option }
+  | Get_skills
   | Get_connectors
   | Get_browser_lane
   | Get_lane_addons
@@ -158,17 +194,55 @@ type post_request =
       body : string;
       hearth : string option;
     }
+  | Post_board_comment of {
+      post_id : string;
+      content : string;
+      parent_id : string option;
+    }
+  | Post_board_vote of { post_id : string; direction : [ `Up | `Down ] }
+  | Post_board_comment_vote of {
+      post_id : string;
+      comment_id : string;
+      direction : [ `Up | `Down ];
+    }
+  | Post_artifact_check of {
+      expected_workspace : (string * string) option;
+      id : string;
+      revision : int;
+      body_sha256 : string;
+      checked : bool;
+      expected_change_id : string option;
+    }
+  | Post_artifact_share of {
+      expected_workspace : string * string;
+      id : string;
+      shared : bool;
+      operation_id : string;
+      expected_version : int;
+      expected_artifact_revision : int;
+      expected_artifact_sha256 : string;
+    }
   | Post_schedule_create of Wire_work.schedule_create_request
   | Post_connector_bind of {
       connector : string;
       channel_id : string;
       keeper_name : string;
     }
+  | Post_connector_unbind of {
+      connector : string;
+      channel_id : string;
+      keeper_name : string option;
+    }
   | Post_repo_add of { url : string; branch : string option }
   | Post_task_cancel of {
       task_id : string;
       reason : string option;
       expected_workspace : Wire_work.expected_workspace;
+    }
+  | Post_harness_overrule of {
+      notes_hash : string;
+      verdict : [ `Approve | `Reject ];
+      reason : string;
     }
   | Post_browser_tabs of { client_id : string }
 

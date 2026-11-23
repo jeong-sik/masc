@@ -55,11 +55,42 @@ type action =
   | Toggle_zoom
   | Cycle_memory_view
   | Toggle_memory_sort
+  | Cycle_signal_or_source
+  | Cycle_sort_or_speak
+  | Cycle_hearth_or_overrule
+  | Cycle_time_window
+  | Cycle_view_mode
+  | Context_primary_action
+  | Toggle_artifact_share
+  | Step_revision of cycle_dir
+  | Step_context_item of cycle_dir
+  | Launch_fusion
+  | Toggle_unreported
+  | Unbind_connector
+  | Entity_approve_or_assign
+  | Entity_reject_or_cancel
+  | Edit_or_export
+  | Configure_provider_key
+  | Account_login
+  | Poll_account_login
+  | Copy_hash
+  | Dismiss_errors
+  | Board_vote of [ `Up | `Down ]
+  | Toggle_memory_scope
+  | Copy_public_url
+  | Probe_sandbox
+  | Refresh_browser_tabs
+  | Open_memory_recovery
+  | Search_prev_match
+  | Toggle_memory_chart
+  | Open_external_editor
+  | Interrupt_turn
   | Quit_app
 
 type scope =
   | Global
   | Unfocused_nav
+  | Screen_context
   | Ask_choice_focused
   | Approval_strip_focused
   | Approval_strip_chords
@@ -148,41 +179,71 @@ let action_tag = function
   | Switch_workspace _ -> 0
   | Sub_tab _ -> 1
   | Cycle_focus_pane _ -> 2
-  | Focus_composer -> 3
-  | Focus_filter -> 4
-  | Dive_selected -> 5
-  | Confirm_selected -> 6
-  | Pop_back_or_close -> 7
-  | Open_settings -> 8
-  | Teleport_blocked -> 9
-  | Open_incidents -> 10
-  | Voice_ptt_toggle -> 11
-  | Fast_approve_top -> 12
-  | Fast_deny_top -> 13
-  | Ask_select_choice _ -> 14
-  | Open_help -> 15
-  | Open_palette -> 16
-  | Open_keeper_switcher -> 17
-  | Open_model_switcher -> 18
-  | Toggle_tool_details -> 19
-  | Open_queue_context -> 20
-  | Toggle_thinking -> 21
-  | Cycle_origin_mode -> 22
-  | Composer_kill_word -> 23
-  | Composer_newline -> 24
-  | Submit_steer -> 25
-  | Submit_followup -> 26
-  | Move _ -> 27
-  | Toggle_expand -> 28
-  | Create_new -> 29
-  | Refresh -> 30
-  | Copy_selected -> 31
-  | Open_external -> 32
-  | Toggle_zoom -> 33
-  | Cycle_memory_view -> 34
-  | Toggle_memory_sort -> 35
-  | Quit_app -> 36
-  | Toggle_sidebar -> 37
+  | Toggle_sidebar -> 3
+  | Focus_composer -> 4
+  | Focus_filter -> 5
+  | Dive_selected -> 6
+  | Confirm_selected -> 7
+  | Pop_back_or_close -> 8
+  | Open_settings -> 9
+  | Teleport_blocked -> 10
+  | Open_incidents -> 11
+  | Voice_ptt_toggle -> 12
+  | Fast_approve_top -> 13
+  | Fast_deny_top -> 14
+  | Ask_select_choice _ -> 15
+  | Open_help -> 16
+  | Open_palette -> 17
+  | Open_keeper_switcher -> 18
+  | Open_model_switcher -> 19
+  | Toggle_tool_details -> 20
+  | Open_queue_context -> 21
+  | Toggle_thinking -> 22
+  | Cycle_origin_mode -> 23
+  | Composer_kill_word -> 24
+  | Composer_newline -> 25
+  | Submit_steer -> 26
+  | Submit_followup -> 27
+  | Move _ -> 28
+  | Toggle_expand -> 29
+  | Create_new -> 30
+  | Refresh -> 31
+  | Copy_selected -> 32
+  | Open_external -> 33
+  | Toggle_zoom -> 34
+  | Cycle_memory_view -> 35
+  | Toggle_memory_sort -> 36
+  | Cycle_signal_or_source -> 37
+  | Cycle_sort_or_speak -> 38
+  | Cycle_hearth_or_overrule -> 39
+  | Cycle_time_window -> 40
+  | Cycle_view_mode -> 41
+  | Context_primary_action -> 42
+  | Toggle_artifact_share -> 43
+  | Step_revision _ -> 44
+  | Step_context_item _ -> 45
+  | Launch_fusion -> 46
+  | Toggle_unreported -> 47
+  | Unbind_connector -> 48
+  | Entity_approve_or_assign -> 49
+  | Entity_reject_or_cancel -> 50
+  | Edit_or_export -> 51
+  | Configure_provider_key -> 52
+  | Account_login -> 53
+  | Poll_account_login -> 54
+  | Copy_hash -> 55
+  | Dismiss_errors -> 56
+  | Board_vote _ -> 57
+  | Toggle_memory_scope -> 58
+  | Copy_public_url -> 59
+  | Probe_sandbox -> 60
+  | Refresh_browser_tabs -> 61
+  | Open_memory_recovery -> 62
+  | Search_prev_match -> 64
+  | Toggle_memory_chart -> 65
+  | Open_external_editor -> 66
+  | Interrupt_turn -> 67
+  | Quit_app -> 68
 
 let equal_action a b =
   if not (Int.equal (action_tag a) (action_tag b)) then false
@@ -191,8 +252,13 @@ let equal_action a b =
     | Switch_workspace x, Switch_workspace y -> Nav.equal_workspace x y
     | Sub_tab x, Sub_tab y -> equal_cycle_dir x y
     | Cycle_focus_pane x, Cycle_focus_pane y -> equal_cycle_dir x y
+    | Step_revision x, Step_revision y -> equal_cycle_dir x y
+    | Step_context_item x, Step_context_item y -> equal_cycle_dir x y
     | Ask_select_choice x, Ask_select_choice y -> Int.equal x y
     | Move x, Move y -> equal_move_dir x y
+    | Board_vote `Up, Board_vote `Up | Board_vote `Down, Board_vote `Down -> true
+    | Board_vote `Up, Board_vote `Down | Board_vote `Down, Board_vote `Up -> false
+    | Toggle_sidebar, Toggle_sidebar
     | Focus_composer, Focus_composer
     | Focus_filter, Focus_filter
     | Dive_selected, Dive_selected
@@ -224,12 +290,39 @@ let equal_action a b =
     | Toggle_zoom, Toggle_zoom
     | Cycle_memory_view, Cycle_memory_view
     | Toggle_memory_sort, Toggle_memory_sort
-    | Toggle_sidebar, Toggle_sidebar
+    | Cycle_signal_or_source, Cycle_signal_or_source
+    | Cycle_sort_or_speak, Cycle_sort_or_speak
+    | Cycle_hearth_or_overrule, Cycle_hearth_or_overrule
+    | Cycle_time_window, Cycle_time_window
+    | Cycle_view_mode, Cycle_view_mode
+    | Context_primary_action, Context_primary_action
+    | Toggle_artifact_share, Toggle_artifact_share
+    | Launch_fusion, Launch_fusion
+    | Toggle_unreported, Toggle_unreported
+    | Unbind_connector, Unbind_connector
+    | Entity_approve_or_assign, Entity_approve_or_assign
+    | Entity_reject_or_cancel, Entity_reject_or_cancel
+    | Edit_or_export, Edit_or_export
+    | Configure_provider_key, Configure_provider_key
+    | Account_login, Account_login
+    | Poll_account_login, Poll_account_login
+    | Copy_hash, Copy_hash
+    | Dismiss_errors, Dismiss_errors
+    | Toggle_memory_scope, Toggle_memory_scope
+    | Copy_public_url, Copy_public_url
+    | Probe_sandbox, Probe_sandbox
+    | Refresh_browser_tabs, Refresh_browser_tabs
+    | Open_memory_recovery, Open_memory_recovery
+    | Search_prev_match, Search_prev_match
+    | Toggle_memory_chart, Toggle_memory_chart
+    | Open_external_editor, Open_external_editor
+    | Interrupt_turn, Interrupt_turn
     | Quit_app, Quit_app ->
         true
     | ( Switch_workspace _
       | Sub_tab _
       | Cycle_focus_pane _
+      | Toggle_sidebar
       | Focus_composer
       | Focus_filter
       | Dive_selected
@@ -263,7 +356,36 @@ let equal_action a b =
       | Toggle_zoom
       | Cycle_memory_view
       | Toggle_memory_sort
-      | Toggle_sidebar
+      | Cycle_signal_or_source
+      | Cycle_sort_or_speak
+      | Cycle_hearth_or_overrule
+      | Cycle_time_window
+      | Cycle_view_mode
+      | Context_primary_action
+      | Toggle_artifact_share
+      | Step_revision _
+      | Step_context_item _
+      | Launch_fusion
+      | Toggle_unreported
+      | Unbind_connector
+      | Entity_approve_or_assign
+      | Entity_reject_or_cancel
+      | Edit_or_export
+      | Configure_provider_key
+      | Account_login
+      | Poll_account_login
+      | Copy_hash
+      | Dismiss_errors
+      | Board_vote _
+      | Toggle_memory_scope
+      | Copy_public_url
+      | Probe_sandbox
+      | Refresh_browser_tabs
+      | Open_memory_recovery
+      | Search_prev_match
+      | Toggle_memory_chart
+      | Open_external_editor
+      | Interrupt_turn
       | Quit_app ),
       _ ->
         false
@@ -271,11 +393,12 @@ let equal_action a b =
 let scope_rank = function
   | Global -> 0
   | Unfocused_nav -> 1
-  | Ask_choice_focused -> 2
-  | Approval_strip_focused -> 3
-  | Approval_strip_chords -> 4
-  | Composer_focused -> 5
-  | Overlay_focused -> 6
+  | Screen_context -> 2
+  | Ask_choice_focused -> 3
+  | Approval_strip_focused -> 4
+  | Approval_strip_chords -> 5
+  | Composer_focused -> 6
+  | Overlay_focused -> 7
 
 let equal_scope a b = Int.equal (scope_rank a) (scope_rank b)
 
@@ -299,6 +422,7 @@ let all_scopes =
   [
     Global;
     Unfocused_nav;
+    Screen_context;
     Ask_choice_focused;
     Approval_strip_focused;
     Approval_strip_chords;
@@ -311,7 +435,7 @@ let all_categories =
 
 let category_title = function
   | Cat_navigation -> Say.make ~ko:"탐색" ~en:"Navigation"
-  | Cat_actions -> Say.make ~ko:"작업 및 실행" ~en:"Actions"
+  | Cat_actions -> Say.make ~ko:"작업 및 화면 단축키" ~en:"Actions & Screen Keys"
   | Cat_overlays -> Say.make ~ko:"오버레이 및 전환" ~en:"Overlays & Pickers"
   | Cat_composer -> Say.make ~ko:"컴포저" ~en:"Composer"
   | Cat_approval -> Say.make ~ko:"빠른 승인 및 질문" ~en:"Fast Approval & Ask"
@@ -478,6 +602,7 @@ let say_composer = Say.make ~ko:"입력" ~en:"Write"
 let say_filter = Say.make ~ko:"검색" ~en:"Filter"
 let say_sub_prev = Say.make ~ko:"이전 탭" ~en:"Prev Tab"
 let say_sub_next = Say.make ~ko:"다음 탭" ~en:"Next Tab"
+let say_menu = Say.make ~ko:"메뉴" ~en:"Menu"
 let say_quit = Say.make ~ko:"종료" ~en:"Quit"
 
 let bindings : binding list =
@@ -503,14 +628,13 @@ let bindings : binding list =
         ~action:Fast_deny_top ~key_display:"Alt+N" ~hint_label:say_deny
         ~help_desc:(Say.make ~ko:"대기 중 승인 항목 거절(인라인 사유)" ~en:"Fast-deny top pending item")
         ~footer_priority:2 (alt_char 'n');
-      (* --- Monitor-First Bare Keys (Composer unfocused; NO bare 'p' or 'v') --- *)
+      (* --- Monitor-First Bare Keys (Composer unfocused; bare 'p' unbound here) --- *)
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:Dive_selected ~key_display:"Enter" ~hint_label:say_dive
         ~help_desc:(Say.make ~ko:"선택 항목 1-Hop 상세 진입" ~en:"Dive into selected entity")
         ~footer_priority:1 (mk_chord Input.Enter);
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
-        ~action:Toggle_sidebar ~key_display:"b"
-        ~hint_label:(Say.make ~ko:"메뉴" ~en:"Menu")
+        ~action:Toggle_sidebar ~key_display:"b" ~hint_label:say_menu
         ~help_desc:(Say.make ~ko:"좌측 전체 메뉴 사이드바 열기/포커스/접기" ~en:"Open, focus, or collapse left navigation menu")
         ~footer_priority:2 (bare_char 'b');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
@@ -527,7 +651,7 @@ let bindings : binding list =
         ~footer_priority:2 (bare_char 'i');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:Focus_filter ~key_display:"/" ~hint_label:say_filter
-        ~help_desc:(Say.make ~ko:"현재 목록 필터 또는 슬래시 명령" ~en:"Filter list or enter slash command")
+        ~help_desc:(Say.make ~ko:"현재 목록 필터 또는 산출물 본문 검색" ~en:"Filter list or search artifact document")
         ~footer_priority:6 (bare_char '/');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_overlays
         ~action:Open_settings ~key_display:"," ~hint_label:say_settings
@@ -587,7 +711,7 @@ let bindings : binding list =
         ~footer_priority:0 (mk_chord Input.Home);
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Move Home) ~key_display:"g" ~hint_label:(Say.make ~ko:"처음" ~en:"Top")
-        ~help_desc:(Say.make ~ko:"맨 위로 이동" ~en:"Jump to top")
+        ~help_desc:(Say.make ~ko:"맨 위로 이동 (기억 탭: 그래프 모드 전환)" ~en:"Jump to top (Memory: toggle flow chart mode)")
         ~footer_priority:0 (bare_char 'g');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Move End) ~key_display:"End" ~hint_label:(Say.make ~ko:"끝" ~en:"End")
@@ -612,13 +736,13 @@ let bindings : binding list =
         ~hint_label:(Say.make ~ko:"토글" ~en:"Toggle")
         ~help_desc:
           (Say.make
-             ~ko:"컨텍스트 토글 (접기/펼치기 · 필터 · Diff 창 · 로그 레벨)"
-             ~en:"Context toggle (expand/fold · filter · Diff window · Log level)")
+             ~ko:"컨텍스트 토글 (접기/펼치기 · 필터 · Diff 창 · 로그 레벨 · 턴 상세)"
+             ~en:"Context toggle (expand/fold · filter · Diff window · Log level · Turn detail)")
         ~footer_priority:0 (bare_char ' ');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Create_new ~key_display:"n"
         ~hint_label:(Say.make ~ko:"새로 만들기" ~en:"New")
-        ~help_desc:(Say.make ~ko:"현재 워크스페이스 새 항목 생성" ~en:"Create new item in workspace")
+        ~help_desc:(Say.make ~ko:"현재 워크스페이스 새 항목 생성 (검색 중 다음 일치)" ~en:"Create new item (next match in artifact search)")
         ~footer_priority:0 (bare_char 'n');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Refresh ~key_display:"r"
@@ -633,7 +757,7 @@ let bindings : binding list =
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Open_external ~key_display:"o"
         ~hint_label:(Say.make ~ko:"열기" ~en:"Open")
-        ~help_desc:(Say.make ~ko:"연결된 PR/문서/경로를 외부 앱에서 열기" ~en:"Open linked PR/artifact/path externally")
+        ~help_desc:(Say.make ~ko:"연결된 PR/문서/산출물을 외부 앱에서 열기" ~en:"Open linked PR/artifact/path externally")
         ~footer_priority:0 (bare_char 'o');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:Toggle_zoom ~key_display:"z"
@@ -650,6 +774,173 @@ let bindings : binding list =
         ~hint_label:(Say.make ~ko:"기억 정렬" ~en:"Mem Sort")
         ~help_desc:(Say.make ~ko:"기억 목록 정렬 전환 (최근순/조회순)" ~en:"Toggle Memory facts sort (Recency/Retrieved)")
         ~footer_priority:0 (bare_char 's');
+      (* --- Screen Hotkeys Registered in Single SSOT --- *)
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Cycle_sort_or_speak ~key_display:"S"
+        ~hint_label:(Say.make ~ko:"정렬" ~en:"Sort")
+        ~help_desc:(Say.make ~ko:"보드 정렬(recent|active|top)" ~en:"Board sort cycle (recent|active|top)")
+        ~footer_priority:0 (bare_char 'S');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Cycle_hearth_or_overrule ~key_display:"h"
+        ~hint_label:(Say.make ~ko:"서브보드/재정의" ~en:"Hearth/Overrule")
+        ~help_desc:(Say.make ~ko:"보드 서브보드(hearth) 순환 / 하네스 판정 재정의" ~en:"Board hearth picker cycle / Harness overrule")
+        ~footer_priority:0 (bare_char 'h');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Cycle_time_window ~key_display:"w"
+        ~hint_label:(Say.make ~ko:"기간 창" ~en:"Window")
+        ~help_desc:(Say.make ~ko:"기억 비교 창(24h|7d|30d) / 도구 호출 기간(24h|7d|14d)" ~en:"Memory diff window (24h|7d|30d) / Tools window (24h|7d|14d)")
+        ~footer_priority:0 (bare_char 'w');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Cycle_view_mode ~key_display:"v"
+        ~hint_label:(Say.make ~ko:"보기 전환" ~en:"View")
+        ~help_desc:(Say.make ~ko:"산출물 문서/원본 · 도구 하위뷰 · 컨텍스트 탭 · 파이프라인 검증 · 기억 다이어그램 모드 전환" ~en:"Switch Artifact Doc/Raw, Tools sub-view, Context tab, Pipeline verify view, or Memory diagram mode")
+        ~footer_priority:0 (bare_char 'v');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Context_primary_action ~key_display:"c"
+        ~hint_label:(Say.make ~ko:"확인/댓글/채팅" ~en:"Check/Reply/Chat")
+        ~help_desc:(Say.make ~ko:"산출물 확인 체크 / 보드 댓글 작성 / 키퍼 빠른 채팅 / 목표 완료 요청" ~en:"Artifact check toggle / Board comment / Quick keeper chat / Goal complete")
+        ~footer_priority:0 (bare_char 'c');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Toggle_artifact_share ~key_display:"P"
+        ~hint_label:(Say.make ~ko:"외부 공유" ~en:"Share")
+        ~help_desc:(Say.make ~ko:"산출물 CAS 외부 공유 켜기/끄기" ~en:"Toggle Published Artifact CAS external share")
+        ~footer_priority:0 (bare_char 'P');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
+        ~action:(Step_revision Prev) ~key_display:"{"
+        ~hint_label:(Say.make ~ko:"이전 리비전" ~en:"Prev Rev")
+        ~help_desc:(Say.make ~ko:"산출물 이전 리비전으로 이동" ~en:"Step to older artifact revision")
+        ~footer_priority:0 (bare_char '{');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
+        ~action:(Step_revision Next) ~key_display:"}"
+        ~hint_label:(Say.make ~ko:"다음 리비전" ~en:"Next Rev")
+        ~help_desc:(Say.make ~ko:"산출물 다음 리비전으로 이동" ~en:"Step to newer artifact revision")
+        ~footer_priority:0 (bare_char '}');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
+        ~action:(Step_context_item Prev) ~key_display:"<"
+        ~hint_label:(Say.make ~ko:"이전 턴/키퍼" ~en:"Prev Turn")
+        ~help_desc:(Say.make ~ko:"컨텍스트 이전 턴 / 도구 표면 이전 키퍼" ~en:"Older turn in Context Inspector / Previous keeper in Tools Surface")
+        ~footer_priority:0 (bare_char '<');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
+        ~action:(Step_context_item Next) ~key_display:">"
+        ~hint_label:(Say.make ~ko:"다음 턴/키퍼" ~en:"Next Turn")
+        ~help_desc:(Say.make ~ko:"컨텍스트 다음 턴 / 도구 표면 다음 키퍼" ~en:"Newer turn in Context Inspector / Next keeper in Tools Surface")
+        ~footer_priority:0 (bare_char '>');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Launch_fusion ~key_display:"f"
+        ~hint_label:(Say.make ~ko:"퓨전/기억사실" ~en:"Fusion/Facts")
+        ~help_desc:(Say.make ~ko:"Runtime 퓨전 패널 실행 모달 열기 / 기억 전체 사실 보기" ~en:"Open Runtime Fusion launch modal / Memory Explorer Facts view")
+        ~footer_priority:0 (bare_char 'f');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Toggle_unreported ~key_display:"u"
+        ~hint_label:(Say.make ~ko:"미보고 계정" ~en:"Unreported")
+        ~help_desc:(Say.make ~ko:"Quotas 미보고 계정 섹션 펼치기/접기" ~en:"Toggle unreported accounts in Quotas")
+        ~footer_priority:0 (bare_char 'u');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Unbind_connector ~key_display:"U"
+        ~hint_label:(Say.make ~ko:"연결 해제" ~en:"Unbind")
+        ~help_desc:(Say.make ~ko:"선택 커넥터 채널 바인딩 해제" ~en:"Unbind selected connector channel")
+        ~footer_priority:0 (bare_char 'U');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Entity_approve_or_assign ~key_display:"a"
+        ~hint_label:(Say.make ~ko:"승인/배정" ~en:"Approve/Assign")
+        ~help_desc:(Say.make ~ko:"목표·검증 승인 / 런타임 배정 / 사서 라이터 재개" ~en:"Approve goal/verification, assign runtime, or resume librarian writer")
+        ~footer_priority:0 (bare_char 'a');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Entity_reject_or_cancel ~key_display:"x"
+        ~hint_label:(Say.make ~ko:"반려/취소" ~en:"Reject/Cancel")
+        ~help_desc:(Say.make ~ko:"작업 취소 / 검증 반려 / 목표 일시중지" ~en:"Cancel task, reject verification, or pause goal")
+        ~footer_priority:0 (bare_char 'x');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Edit_or_export ~key_display:"e"
+        ~hint_label:(Say.make ~ko:"편집/내보내기" ~en:"Edit/Export")
+        ~help_desc:(Say.make ~ko:"위키 편집 / 산출물 파일 내보내기 / 키퍼 설정 편집 / 기억 변천 보기" ~en:"Edit wiki, export artifact file, edit keeper config, or Memory Evolution view")
+        ~footer_priority:0 (bare_char 'e');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Configure_provider_key ~key_display:"K"
+        ~hint_label:(Say.make ~ko:"API 키" ~en:"API Key")
+        ~help_desc:(Say.make ~ko:"프로바이더 API 키 설정 모달 열기" ~en:"Configure provider API key")
+        ~footer_priority:0 (bare_char 'K');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Account_login ~key_display:"l"
+        ~hint_label:(Say.make ~ko:"로그인" ~en:"Login")
+        ~help_desc:(Say.make ~ko:"프로바이더 계정 로그인 시작" ~en:"Start provider account login")
+        ~footer_priority:0 (bare_char 'l');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Poll_account_login ~key_display:"L"
+        ~hint_label:(Say.make ~ko:"로그인 확인" ~en:"Poll Login")
+        ~help_desc:(Say.make ~ko:"진행 중인 계정 로그인 영수증 조회" ~en:"Poll in-flight account login receipt")
+        ~footer_priority:0 (bare_char 'L');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Copy_hash ~key_display:"H"
+        ~hint_label:(Say.make ~ko:"SHA 복사" ~en:"Copy SHA")
+        ~help_desc:(Say.make ~ko:"산출물 SHA-256 다이제스트 복사" ~en:"Copy artifact SHA-256 digest")
+        ~footer_priority:0 (bare_char 'H');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Dismiss_errors ~key_display:"X"
+        ~hint_label:(Say.make ~ko:"오류 닫기" ~en:"Dismiss")
+        ~help_desc:(Say.make ~ko:"채팅 실패 알림 닫기 / 하네스 판정 재정의" ~en:"Dismiss chat failure notices / Harness overrule")
+        ~footer_priority:0 (bare_char 'X');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:(Board_vote `Up) ~key_display:"+"
+        ~hint_label:(Say.make ~ko:"추천" ~en:"Upvote")
+        ~help_desc:(Say.make ~ko:"보드 글·댓글 추천 (2회 입력 확정)" ~en:"Board post/comment upvote (2-press armed)")
+        ~footer_priority:0 (bare_char '+');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:(Board_vote `Down) ~key_display:"-"
+        ~hint_label:(Say.make ~ko:"비추천" ~en:"Downvote")
+        ~help_desc:(Say.make ~ko:"보드 글·댓글 비추천 (2회 입력 확정)" ~en:"Board post/comment downvote (2-press armed)")
+        ~footer_priority:0 (bare_char '-');
+      (* --- Screen-Context Specialized Hotkeys (Zero Collisions in Unfocused_nav) --- *)
+      bind ~scope:Screen_context ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Cycle_signal_or_source ~key_display:"s"
+        ~hint_label:(Say.make ~ko:"신호/소스" ~en:"Signal/Src")
+        ~help_desc:(Say.make ~ko:"[보드/인프라] 보드 신호 필터 / 인프라 로그 소스 전환" ~en:"[Board/Infra] Board Signal-Only toggle / Infra log source cycle")
+        ~footer_priority:0 (bare_char 's');
+      bind ~scope:Screen_context ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Toggle_memory_scope ~key_display:"m"
+        ~hint_label:(Say.make ~ko:"월드/키퍼" ~en:"World/Keeper")
+        ~help_desc:(Say.make ~ko:"[기억 탭] 월드 vs 선택 키퍼 범위 전환" ~en:"[Memory tab] Toggle World vs Keeper scope")
+        ~footer_priority:0 (bare_char 'm');
+      bind ~scope:Screen_context ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Copy_public_url ~key_display:"Y"
+        ~hint_label:(Say.make ~ko:"공유 URL" ~en:"Public URL")
+        ~help_desc:(Say.make ~ko:"[산출물] 공개 공유 URL 복사" ~en:"[Artifacts] Copy public share URL")
+        ~footer_priority:0 (bare_char 'Y');
+      bind ~scope:Screen_context ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Probe_sandbox ~key_display:"p"
+        ~hint_label:(Say.make ~ko:"프로브" ~en:"Probe")
+        ~help_desc:(Say.make ~ko:"[샌드박스] 샌드박스 상태 프로브 실행" ~en:"[Sandboxes] Probe sandbox health")
+        ~footer_priority:0 (bare_char 'p');
+      bind ~scope:Screen_context ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Refresh_browser_tabs ~key_display:"t"
+        ~hint_label:(Say.make ~ko:"탭 새로고침" ~en:"Tabs")
+        ~help_desc:(Say.make ~ko:"[애드온·브라우저] 브라우저 탭 목록 새로고침" ~en:"[Addons & Browser] Refresh browser tabs")
+        ~footer_priority:0 (bare_char 't');
+      bind ~scope:Screen_context ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Open_memory_recovery ~key_display:"A"
+        ~hint_label:(Say.make ~ko:"기억 복구" ~en:"Recovery")
+        ~help_desc:(Say.make ~ko:"[기억 탭] 사서 라이터 복구 모달 열기" ~en:"[Memory] Open librarian writer recovery modal")
+        ~footer_priority:0 (bare_char 'A');
+      bind ~scope:Screen_context ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Search_prev_match ~key_display:"N"
+        ~hint_label:(Say.make ~ko:"이전 일치" ~en:"Prev match")
+        ~help_desc:(Say.make ~ko:"[산출물 상세] 이전 검색 결과로 이동" ~en:"[Artifact Dive] Jump to previous search match")
+        ~footer_priority:0 (bare_char 'N');
+      bind ~scope:Screen_context ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Toggle_memory_chart ~key_display:"g"
+        ~hint_label:(Say.make ~ko:"그래프 모드" ~en:"Chart mode")
+        ~help_desc:(Say.make ~ko:"[기억 탭] 기억 유입/순합 그래프 모드 전환" ~en:"[Memory] Toggle Flow I/O vs Net Total chart mode")
+        ~footer_priority:0 (bare_char 'g');
+      bind ~scope:Screen_context ~tier:Universal_ctrl ~category:Cat_actions
+        ~action:Open_external_editor ~key_display:"Ctrl+E"
+        ~hint_label:(Say.make ~ko:"외부 편집기" ~en:"$EDITOR")
+        ~help_desc:(Say.make ~ko:"[위키/설정] 외부 $EDITOR 열기 · [컴포저] 줄 끝 이동" ~en:"[Wiki/Settings] Open $EDITOR · [Composer] End of line")
+        ~footer_priority:0 (ctrl_char 'e');
+      bind ~scope:Screen_context ~tier:Universal_ctrl ~category:Cat_actions
+        ~action:Interrupt_turn ~key_display:"Ctrl+X"
+        ~hint_label:(Say.make ~ko:"턴 중단" ~en:"Interrupt")
+        ~help_desc:(Say.make ~ko:"진행 중인 키퍼 턴 중단 요청" ~en:"Interrupt active keeper turn")
+        ~footer_priority:0 (ctrl_char 'x');
       (* --- Composer-Focused Bindings --- *)
       bind ~scope:Composer_focused ~tier:Bare_unfocused ~category:Cat_composer
         ~action:Submit_followup ~key_display:"Enter"
@@ -732,8 +1023,12 @@ let bindings : binding list =
       (* --- Global Universal VT100-Safe Ctrl Chords + Esc (work inside Composer too) --- *)
       bind ~scope:Global ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:Pop_back_or_close ~key_display:"Esc" ~hint_label:say_back
-        ~help_desc:(Say.make ~ko:"오버레이 닫기 / 상세 복귀 / 입력 포커스 해제 (종료 안 함)" ~en:"Close overlay / pop dive / blur composer (never quits)")
+        ~help_desc:(Say.make ~ko:"오버레이 닫기 / 상세 복귀 / 레일·입력 포커스 해제 (종료 안 함)" ~en:"Close overlay / pop dive / blur rail or composer (never quits)")
         ~footer_priority:3 (mk_chord Input.Escape);
+      bind ~scope:Global ~tier:Universal_ctrl ~category:Cat_navigation
+        ~action:Toggle_sidebar ~key_display:"Ctrl+B" ~hint_label:say_menu
+        ~help_desc:(Say.make ~ko:"좌측 전체 메뉴 사이드바 열기/포커스/접기" ~en:"Open, focus, or collapse left navigation menu")
+        ~footer_priority:0 (ctrl_char 'b');
       bind ~scope:Global ~tier:Universal_ctrl ~category:Cat_overlays
         ~action:Open_palette ~key_display:"Ctrl+K" ~hint_label:say_palette
         ~help_desc:(Say.make ~ko:"통합 명령·엔티티 팔레트 열기 (승인과 완전 분리)" ~en:"Open Universal Command & Entity Palette")
@@ -757,10 +1052,6 @@ let bindings : binding list =
         ~action:Open_queue_context ~key_display:"Ctrl+T" ~hint_label:say_queue
         ~help_desc:(Say.make ~ko:"키퍼 큐·컨텍스트·예약 서랍 열기" ~en:"Open Queue & Context drawer")
         ~slash_twin:"/queue" ~footer_priority:7 (ctrl_char 't');
-      bind ~scope:Global ~tier:Universal_ctrl ~category:Cat_actions
-        ~action:Voice_ptt_toggle ~key_display:"Ctrl+B" ~hint_label:say_voice
-        ~help_desc:(Say.make ~ko:"음성 입력(PTT) 시작/중지" ~en:"Toggle Voice Push-to-Talk")
-        ~slash_twin:"/voice" ~footer_priority:8 (ctrl_char 'b');
       bind ~scope:Global ~tier:Universal_ctrl ~category:Cat_actions
         ~action:Cycle_origin_mode ~key_display:"Ctrl+F"
         ~hint_label:(Say.make ~ko:"표시 모드" ~en:"Origin")
@@ -794,7 +1085,7 @@ let bindings : binding list =
       bind ~scope:Global ~tier:Modern_accel ~category:Cat_actions
         ~action:Voice_ptt_toggle ~key_display:"Alt+V" ~hint_label:say_voice
         ~help_desc:(Say.make ~ko:"음성 입력(PTT) 시작/중지" ~en:"Toggle Voice Push-to-Talk")
-        ~slash_twin:"/voice" ~footer_priority:0 (alt_char 'v');
+        ~slash_twin:"/voice" ~footer_priority:8 (alt_char 'v');
       bind ~scope:Global ~tier:Modern_accel ~category:Cat_actions
         ~action:Voice_ptt_toggle ~key_display:"F8" ~hint_label:say_voice
         ~help_desc:(Say.make ~ko:"음성 입력(PTT) 시작/중지" ~en:"Toggle Voice Push-to-Talk")
@@ -856,7 +1147,11 @@ let scope_chain_of_focus ?(approval_strip_active = false)
       [ Overlay_focused; Global ]
 
 let allows_ime_replay = function
-  | Unfocused_nav | Ask_choice_focused | Approval_strip_focused -> true
+  | Unfocused_nav
+  | Screen_context
+  | Ask_choice_focused
+  | Approval_strip_focused ->
+      true
   | Global | Approval_strip_chords | Composer_focused | Overlay_focused -> false
 
 let find_in_scope scope chord =
@@ -943,8 +1238,6 @@ let hint_width (h : footer_hint) =
 let footer_hints ~scope_chain ~max_width ~lang =
   if max_width <= 0 then []
   else
-    (* Collect candidate bindings in scope_chain order so more local scopes win
-       when deduplicating actions (e.g., ',' over 'Ctrl+,' when unfocused). *)
     let seen_actions = ref [] in
     let candidates = ref [] in
     List.iter
@@ -1010,9 +1303,14 @@ let contextual_memory_help_entries ~lang =
   ]
 
 let help_entries ~scope_chain ~lang =
+  let effective_scopes =
+    if List.exists (equal_scope Unfocused_nav) scope_chain then
+      scope_chain @ [ Screen_context ]
+    else scope_chain
+  in
   let active_bindings =
     List.filter
-      (fun (b : binding) -> List.exists (equal_scope b.scope) scope_chain)
+      (fun (b : binding) -> List.exists (equal_scope b.scope) effective_scopes)
       bindings
   in
   let include_contextual_memory =
@@ -1021,7 +1319,9 @@ let help_entries ~scope_chain ~lang =
   List.filter_map
     (fun category ->
       let cat_bindings =
-        List.filter (fun (b : binding) -> equal_help_category b.category category) active_bindings
+        List.filter
+          (fun (b : binding) -> equal_help_category b.category category)
+          active_bindings
       in
       let entries =
         List.fold_left
@@ -1112,6 +1412,36 @@ let palette_commands ~lang =
           | Toggle_zoom
           | Cycle_memory_view
           | Toggle_memory_sort
+          | Cycle_signal_or_source
+          | Cycle_sort_or_speak
+          | Cycle_hearth_or_overrule
+          | Cycle_time_window
+          | Cycle_view_mode
+          | Context_primary_action
+          | Toggle_artifact_share
+          | Step_revision _
+          | Step_context_item _
+          | Launch_fusion
+          | Toggle_unreported
+          | Unbind_connector
+          | Entity_approve_or_assign
+          | Entity_reject_or_cancel
+          | Edit_or_export
+          | Configure_provider_key
+          | Account_login
+          | Poll_account_login
+          | Copy_hash
+          | Dismiss_errors
+          | Board_vote _
+          | Toggle_memory_scope
+          | Copy_public_url
+          | Probe_sandbox
+          | Refresh_browser_tabs
+          | Open_memory_recovery
+          | Search_prev_match
+          | Toggle_memory_chart
+          | Open_external_editor
+          | Interrupt_turn
           | Quit_app ->
               true
         in
@@ -1132,6 +1462,7 @@ let palette_commands ~lang =
 let scope_name = function
   | Global -> "Global"
   | Unfocused_nav -> "Unfocused"
+  | Screen_context -> "Screen Context"
   | Ask_choice_focused -> "Ask Choice"
   | Approval_strip_focused -> "Approval Strip (Unfocused)"
   | Approval_strip_chords -> "Approval Strip (Chord)"

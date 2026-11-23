@@ -7,8 +7,10 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     match model.work.active_tab with
     | Nav.Work_pipeline ->
         Work_views.render_pipeline ~model ~cache ~rect grid
-    | Nav.Work_tasks_schedules ->
-        Work_views.render_tasks_schedules ~model ~cache ~rect grid
+    | Nav.Work_tasks ->
+        Work_views.render_tasks ~model ~cache ~rect grid
+    | Nav.Work_schedules ->
+        Work_views.render_schedules ~model ~cache ~rect grid
     | Nav.Work_inbox ->
         Work_views.render_inbox ~model ~cache ~rect grid
     | Nav.Work_candle_scorecard ->

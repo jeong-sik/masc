@@ -808,6 +808,175 @@ let apply_http_reply ~now (m : Model.t) reply =
                { x with active_thread = failed_slot err x.active_thread }))
         ~source:Health.Source_client_http ~ko:"보드 스레드 조회"
         ~en:"Board thread fetch" err
+  | Msg.Reply_board_hearths (Ok hs) ->
+      ( {
+          m with
+          knowledge =
+            Knowledge_store.apply_board_hearths ~observed_at:now hs m.knowledge;
+        }
+      , [] )
+  | Msg.Reply_board_hearths (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ({ m with knowledge = { m.knowledge with board_hearths = Observed.absent } }, [])
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:
+              (on_knowledge (fun (x : Knowledge_store.t) ->
+                   { x with board_hearths = failed_slot err x.board_hearths }))
+            ~source:Health.Source_client_http ~ko:"서브보드 목록 조회"
+            ~en:"Board hearths fetch" err)
+  | Msg.Reply_board_comment { post_id; result = Ok () } ->
+      let is_board_comment_kind = function
+        | Nav.Board_comment _ -> true
+        | Nav.Btw_query
+        | Nav.Gate_reject _
+        | Nav.Verification_reject _
+        | Nav.Harness_overrule _
+        | Nav.Task_cancel _
+        | Nav.Schedule_form
+        | Nav.Connector_form
+        | Nav.Repo_add_form
+        | Nav.Board_new_post ->
+            false
+      in
+      let matches_modal =
+        match m.inline_modal with
+        | Some modal -> is_board_comment_kind modal.kind
+        | None -> false
+      in
+      let nav =
+        if not matches_modal then m.nav
+        else
+          match m.nav.overlay with
+          | Some (Nav.Inline_action k) when is_board_comment_kind k ->
+              { m.nav with overlay = None }
+          | Some
+              ( Nav.Inline_action _
+              | Nav.Palette
+              | Nav.Settings _
+              | Nav.Incidents
+              | Nav.Queue_context _
+              | Nav.Help
+              | Nav.System_gate _ )
+          | None ->
+              m.nav
+      in
+      let inline_modal = if matches_modal then None else m.inline_modal in
+      let next =
+        { m with nav; inline_modal }
+        |> Model.with_toast ~now ~level:Model.Toast_success
+             (Say.make ~ko:"댓글이 등록되었습니다" ~en:"Comment posted")
+      in
+      ( next
+      , [
+          Cmd.Http_get
+            {
+              epoch = m.epoch;
+              req = Cmd.Get_board_thread { post_id; comment_limit = Some 100 };
+            };
+          Cmd.Http_get
+            {
+              epoch = m.epoch;
+              req =
+                Cmd.Get_board_feed
+                  {
+                    sort_by = next.knowledge.board_sort_by;
+                    hearth = next.knowledge.board_hearth;
+                    signal_only = next.knowledge.board_signal_only;
+                    limit = Some 50;
+                    offset = None;
+                  };
+            };
+        ] )
+  | Msg.Reply_board_comment { post_id = _; result = Error err } ->
+      let inline_modal =
+        Option.map
+          (fun (modal : Model.inline_modal_state) ->
+            match modal.kind with
+            | Nav.Board_comment _ ->
+                {
+                  modal with
+                  submitting = false;
+                  error = Some (Msg.http_error_detail err);
+                }
+            | Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Harness_overrule _
+            | Nav.Task_cancel _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post ->
+                modal)
+          m.inline_modal
+      in
+      let next, cmds =
+        record_http_incident ~now ~source:Health.Source_client_http
+          ~context:(Say.make ~ko:"댓글 등록" ~en:"Board comment")
+          err { m with inline_modal }
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_board_vote { post_id; result = Ok () } ->
+      let next =
+        Model.with_toast ~now ~level:Model.Toast_success
+          (Say.make ~ko:"투표가 반영되었습니다" ~en:"Vote recorded")
+          m
+      in
+      let thread_cmds =
+        match Model.active_dive next with
+        | Some (Nav.Dive_knowledge (Nav.Thread_dive pid))
+          when String.equal pid post_id ->
+            [
+              Cmd.Http_get
+                {
+                  epoch = m.epoch;
+                  req =
+                    Cmd.Get_board_thread { post_id; comment_limit = Some 100 };
+                };
+            ]
+        | Some
+            ( Nav.Dive_knowledge
+                ( Nav.Thread_dive _
+                | Nav.Wiki_dive _
+                | Nav.Artifact_dive _
+                | Nav.Memory_diff_dive _ )
+            | Nav.Dive_keeper _
+            | Nav.Dive_work _
+            | Nav.Dive_runtime _
+            | Nav.Dive_infra _ )
+        | None ->
+            []
+      in
+      let feed_cmd =
+        Cmd.Http_get
+          {
+            epoch = m.epoch;
+            req =
+              Cmd.Get_board_feed
+                {
+                  sort_by = next.knowledge.board_sort_by;
+                  hearth = next.knowledge.board_hearth;
+                  signal_only = next.knowledge.board_signal_only;
+                  limit = Some 50;
+                  offset = None;
+                };
+          }
+      in
+      (next, feed_cmd :: thread_cmds)
+  | Msg.Reply_board_vote { post_id = _; result = Error err } ->
+      let next, cmds =
+        record_http_incident ~now ~source:Health.Source_client_http
+          ~context:(Say.make ~ko:"보드 투표" ~en:"Board vote")
+          err m
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
   | Msg.Reply_wiki_index (Ok idx) ->
       let next =
         {
@@ -954,6 +1123,7 @@ let apply_http_reply ~now (m : Model.t) reply =
           | Some
               ( Nav.Dive_keeper _
               | Nav.Dive_work _
+              | Nav.Dive_runtime _
               | Nav.Dive_infra _
               | Nav.Dive_knowledge
                   ( Nav.Thread_dive _
@@ -1021,6 +1191,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some
             ( Nav.Dive_keeper _
             | Nav.Dive_work _
+            | Nav.Dive_runtime _
             | Nav.Dive_infra _
             | Nav.Dive_knowledge
                 ( Nav.Thread_dive _
@@ -1032,7 +1203,11 @@ let apply_http_reply ~now (m : Model.t) reply =
                 matches_target sel.id || matches_target sel.body.sha256
             | None -> true)
       in
-      if not matches_active then (m, [])
+      let matches_rev =
+        Knowledge_store.matches_pending_artifact_revision
+          ~id:detail.artifact.id ~revision:detail.artifact.revision m.knowledge
+      in
+      if not (matches_active && matches_rev) then (m, [])
       else
         ( {
             m with
@@ -1054,6 +1229,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some
             ( Nav.Dive_keeper _
             | Nav.Dive_work _
+            | Nav.Dive_runtime _
             | Nav.Dive_infra _
             | Nav.Dive_knowledge
                 ( Nav.Thread_dive _
@@ -1080,6 +1256,87 @@ let apply_http_reply ~now (m : Model.t) reply =
         record_http_incident ~now ~source:Health.Source_client_http
           ~context:(Say.make ~ko:"산출물 본문 조회" ~en:"Artifact detail fetch")
           err { m with knowledge }
+  | Msg.Reply_artifact_checks (Ok checks) ->
+      ( {
+          m with
+          knowledge =
+            Knowledge_store.apply_artifact_checks ~observed_at:now checks
+              m.knowledge;
+        }
+      , [] )
+  | Msg.Reply_artifact_checks (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( { m with knowledge = { m.knowledge with artifact_checks = Observed.absent } }
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:
+              (on_knowledge (fun (x : Knowledge_store.t) ->
+                   { x with artifact_checks = failed_slot err x.artifact_checks }))
+            ~source:Health.Source_client_http ~ko:"산출물 확인 체크 조회"
+            ~en:"Artifact checks fetch" err)
+  | Msg.Reply_artifact_check { id = _; result = Ok chk } ->
+      let knowledge =
+        Knowledge_store.apply_artifact_check_update ~observed_at:now chk
+          m.knowledge
+      in
+      let msg =
+        if chk.checked then
+          Say.make ~ko:"산출물 확인 체크됨 (✓)" ~en:"Artifact marked checked (✓)"
+        else
+          Say.make ~ko:"산출물 확인 체크 해제됨" ~en:"Artifact check cleared"
+      in
+      (Model.with_toast ~now ~level:Model.Toast_success msg { m with knowledge }, [])
+  | Msg.Reply_artifact_check { id = _; result = Error err } ->
+      let next, cmds =
+        record_http_incident ~now ~source:Health.Source_client_http
+          ~context:(Say.make ~ko:"산출물 확인 체크" ~en:"Artifact check update")
+          err m
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_artifact_share { id; result = Ok res } ->
+      let knowledge =
+        Knowledge_store.apply_artifact_share_result ~observed_at:now res
+          m.knowledge
+      in
+      let level, msg, refresh_cmds =
+        match res.outcome with
+        | `Conflict ->
+            ( Model.Toast_warning
+            , Say.make ~ko:"공유 버전 충돌 — 최신 상태를 다시 불러옵니다"
+                ~en:"Share version conflict — refreshing detail"
+            , [
+                Cmd.Http_get
+                  {
+                    epoch = m.epoch;
+                    req = Cmd.Get_artifact_detail { id; revision = None };
+                  };
+              ] )
+        | `Applied ->
+            let s =
+              if res.shared then
+                Say.make ~ko:"외부 공유 활성화됨 ([Y] 공개 URL 복사)"
+                  ~en:"External sharing enabled ([Y] copy public URL)"
+              else
+                Say.make ~ko:"외부 공유 비활성화됨" ~en:"External sharing disabled"
+            in
+            (Model.Toast_success, s, [])
+      in
+      ( Model.with_toast ~now ~level msg { m with knowledge }
+      , refresh_cmds )
+  | Msg.Reply_artifact_share { id = _; result = Error err } ->
+      let next, cmds =
+        record_http_incident ~now ~source:Health.Source_client_http
+          ~context:(Say.make ~ko:"산출물 외부 공유" ~en:"Artifact share toggle")
+          err m
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
   | Msg.Reply_world_memory (Ok wm) ->
       ( {
           m with
@@ -1297,6 +1554,338 @@ let apply_http_reply ~now (m : Model.t) reply =
         ~fail:Fun.id
         ~source:(Health.Source_keeper keeper) ~ko:"사서 기억 복구"
         ~en:"Memory recovery act" err
+  | Msg.Reply_keeper_context_turn_records { keeper; result = Ok page } ->
+      let keeper_context =
+        Keeper_context_store.apply_turn_records ~observed_at:now ~keeper page
+          m.keeper_context
+      in
+      let next = { m with keeper_context } in
+      (next, View_fetches.fetches_for_current_view next)
+  | Msg.Reply_keeper_context_turn_records { keeper; result = Error err } -> (
+      let reason = Msg.http_error_detail err in
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( {
+              m with
+              keeper_context =
+                Keeper_context_store.mark_turn_records_failed ~at:now ~keeper
+                  ~reason ~retryable:false m.keeper_context;
+            }
+          , [] )
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:(fun m ->
+              {
+                m with
+                keeper_context =
+                  Keeper_context_store.mark_turn_records_failed ~at:now ~keeper
+                    ~reason ~retryable:false m.keeper_context;
+              })
+            ~source:(Health.Source_keeper keeper) ~ko:"키퍼 턴 기록 조회"
+            ~en:"Keeper turn records fetch" err
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _ ->
+          err_reply
+            ~fail:(fun m ->
+              {
+                m with
+                keeper_context =
+                  Keeper_context_store.mark_turn_records_failed ~at:now ~keeper
+                    ~reason ~retryable:true m.keeper_context;
+              })
+            ~source:(Health.Source_keeper keeper) ~ko:"키퍼 턴 기록 조회"
+            ~en:"Keeper turn records fetch" err)
+  | Msg.Reply_keeper_provider_input { keeper; turn_ref; result = Ok manifest } ->
+      ( {
+          m with
+          keeper_context =
+            Keeper_context_store.apply_provider_input ~observed_at:now ~keeper
+              ~turn_ref manifest m.keeper_context;
+        }
+      , [] )
+  | Msg.Reply_keeper_provider_input { keeper; turn_ref; result = Error err }
+    -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          ( {
+              m with
+              keeper_context =
+                Keeper_context_store.mark_provider_input_denied ~at:now ~keeper
+                  ~turn_ref ~reason:(Msg.http_error_detail err) m.keeper_context;
+            }
+          , [] )
+      | Msg.Http_error { status = 404; _ } ->
+          ( {
+              m with
+              keeper_context =
+                Keeper_context_store.mark_provider_input_absent ~keeper
+                  ~turn_ref m.keeper_context;
+            }
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          let on_kc f (m : Model.t) =
+            let st = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+            let by_keeper =
+              Keeper_context_store.String_map.add keeper (f st)
+                m.keeper_context.by_keeper
+            in
+            { m with keeper_context = { by_keeper } }
+          in
+          err_reply
+            ~fail:
+              (on_kc (fun s ->
+                   { s with provider_input = failed_slot err s.provider_input }))
+            ~source:(Health.Source_keeper keeper) ~ko:"프로바이더 입력 조회"
+            ~en:"Provider input fetch" err)
+  | Msg.Reply_keeper_provider_input_part
+      { keeper; turn_ref; index; result = Ok content } ->
+      ( {
+          m with
+          keeper_context =
+            Keeper_context_store.apply_provider_input_part ~observed_at:now
+              ~keeper ~turn_ref ~index content m.keeper_context;
+        }
+      , [] )
+  | Msg.Reply_keeper_provider_input_part
+      { keeper; turn_ref; index; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          ( {
+              m with
+              keeper_context =
+                Keeper_context_store.mark_provider_input_part_denied ~at:now
+                  ~keeper ~turn_ref ~index ~reason:(Msg.http_error_detail err)
+                  m.keeper_context;
+            }
+          , [] )
+      | Msg.Http_error { status = 404; _ } -> (m, [])
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:(fun m ->
+              let st = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+              let by_keeper =
+                Keeper_context_store.String_map.add keeper
+                  { st with part_content = failed_slot err st.part_content }
+                  m.keeper_context.by_keeper
+              in
+              { m with keeper_context = { by_keeper } })
+            ~source:(Health.Source_keeper keeper) ~ko:"입력 파트 본문 조회"
+            ~en:"Provider input part fetch" err)
+  | Msg.Reply_keeper_cache_outcome { keeper; turn_ref; result = Ok reading } ->
+      ( {
+          m with
+          keeper_context =
+            Keeper_context_store.apply_cache_outcome ~observed_at:now ~keeper
+              ~turn_ref reading m.keeper_context;
+        }
+      , [] )
+  | Msg.Reply_keeper_cache_outcome { keeper; turn_ref; result = Error err }
+    -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( {
+              m with
+              keeper_context =
+                Keeper_context_store.mark_cache_outcome_absent ~keeper ~turn_ref
+                  m.keeper_context;
+            }
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:(fun m ->
+              let st = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+              let by_keeper =
+                Keeper_context_store.String_map.add keeper
+                  { st with cache_outcome = failed_slot err st.cache_outcome }
+                  m.keeper_context.by_keeper
+              in
+              { m with keeper_context = { by_keeper } })
+            ~source:(Health.Source_keeper keeper) ~ko:"캐시 진단 조회"
+            ~en:"Cache outcome fetch" err)
+  | Msg.Reply_keeper_next_request { keeper; result = Ok forecast } ->
+      ( {
+          m with
+          keeper_context =
+            Keeper_context_store.apply_next_request ~observed_at:now ~keeper
+              forecast m.keeper_context;
+        }
+      , [] )
+  | Msg.Reply_keeper_next_request { keeper; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( {
+              m with
+              keeper_context =
+                Keeper_context_store.mark_next_request_absent ~keeper
+                  m.keeper_context;
+            }
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:(fun m ->
+              let st = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+              let by_keeper =
+                Keeper_context_store.String_map.add keeper
+                  { st with next_request = failed_slot err st.next_request }
+                  m.keeper_context.by_keeper
+              in
+              { m with keeper_context = { by_keeper } })
+            ~source:(Health.Source_keeper keeper) ~ko:"다음 요청 예측 조회"
+            ~en:"Next request forecast fetch" err)
+  | Msg.Reply_keeper_turn_transcript { keeper; turn_ref; result = Ok tr } ->
+      ( {
+          m with
+          keeper_context =
+            Keeper_context_store.apply_turn_transcript ~observed_at:now ~keeper
+              ~turn_ref tr m.keeper_context;
+        }
+      , [] )
+  | Msg.Reply_keeper_turn_transcript { keeper; turn_ref; result = Error err }
+    -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( {
+              m with
+              keeper_context =
+                Keeper_context_store.mark_turn_transcript_absent ~keeper
+                  ~turn_ref m.keeper_context;
+            }
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:(fun m ->
+              let st = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+              let by_keeper =
+                Keeper_context_store.String_map.add keeper
+                  { st with turn_transcript = failed_slot err st.turn_transcript }
+                  m.keeper_context.by_keeper
+              in
+              { m with keeper_context = { by_keeper } })
+            ~source:(Health.Source_keeper keeper) ~ko:"턴 전사 조회"
+            ~en:"Turn transcript fetch" err)
+  | Msg.Reply_keeper_tool_stats { keeper; result = Ok stats } ->
+      ( {
+          m with
+          keeper_context =
+            Keeper_context_store.apply_tool_stats ~observed_at:now ~keeper stats
+              m.keeper_context;
+        }
+      , [] )
+  | Msg.Reply_keeper_tool_stats { keeper; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( {
+              m with
+              keeper_context =
+                Keeper_context_store.mark_tool_stats_absent ~keeper
+                  m.keeper_context;
+            }
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:(fun m ->
+              let st = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+              let by_keeper =
+                Keeper_context_store.String_map.add keeper
+                  { st with tool_stats = failed_slot err st.tool_stats }
+                  m.keeper_context.by_keeper
+              in
+              { m with keeper_context = { by_keeper } })
+            ~source:(Health.Source_keeper keeper) ~ko:"키퍼 도구 통계 조회"
+            ~en:"Keeper tool stats fetch" err)
+  | Msg.Reply_keeper_tool_calls { keeper; turn_ref; result = Ok page } ->
+      let keeper_context =
+        match turn_ref with
+        | Some tr ->
+            Keeper_context_store.apply_call_evidence ~observed_at:now ~keeper
+              ~turn_ref:tr page.entries m.keeper_context
+        | None ->
+            Keeper_context_store.apply_tool_calls ~observed_at:now ~keeper page
+              m.keeper_context
+      in
+      ({ m with keeper_context }, [])
+  | Msg.Reply_keeper_tool_calls { keeper; turn_ref; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          let keeper_context =
+            match turn_ref with
+            | Some tr ->
+                Keeper_context_store.mark_call_evidence_denied ~at:now ~keeper
+                  ~turn_ref:tr ~reason:(Msg.http_error_detail err)
+                  m.keeper_context
+            | None ->
+                Keeper_context_store.mark_tool_calls_denied ~at:now ~keeper
+                  ~reason:(Msg.http_error_detail err) m.keeper_context
+          in
+          ({ m with keeper_context }, [])
+      | Msg.Http_error { status = 404; _ } ->
+          let keeper_context =
+            match turn_ref with
+            | Some tr ->
+                Keeper_context_store.mark_call_evidence_absent ~keeper
+                  ~turn_ref:tr m.keeper_context
+            | None ->
+                Keeper_context_store.mark_tool_calls_absent ~keeper
+                  m.keeper_context
+          in
+          ({ m with keeper_context }, [])
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:(fun m ->
+              let st = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+              let st' =
+                match turn_ref with
+                | Some _ ->
+                    { st with call_evidence = failed_slot err st.call_evidence }
+                | None -> { st with tool_calls = failed_slot err st.tool_calls }
+              in
+              let by_keeper =
+                Keeper_context_store.String_map.add keeper st'
+                  m.keeper_context.by_keeper
+              in
+              { m with keeper_context = { by_keeper } })
+            ~source:(Health.Source_keeper keeper) ~ko:"키퍼 도구 호출 조회"
+            ~en:"Keeper tool calls fetch" err)
+  | Msg.Reply_keeper_tool_result { keeper; execution_id; result = Ok res } ->
+      ( {
+          m with
+          keeper_context =
+            Keeper_context_store.apply_tool_result ~observed_at:now ~keeper
+              ~execution_id res m.keeper_context;
+        }
+      , [] )
+  | Msg.Reply_keeper_tool_result
+      { keeper; execution_id; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          ( {
+              m with
+              keeper_context =
+                Keeper_context_store.mark_tool_result_denied ~at:now ~keeper
+                  ~execution_id ~reason:(Msg.http_error_detail err)
+                  m.keeper_context;
+            }
+          , [] )
+      | Msg.Http_error { status = 404; _ } -> (m, [])
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:(fun m ->
+              let st = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+              let by_keeper =
+                Keeper_context_store.String_map.add keeper
+                  { st with tool_result = failed_slot err st.tool_result }
+                  m.keeper_context.by_keeper
+              in
+              { m with keeper_context = { by_keeper } })
+            ~source:(Health.Source_keeper keeper) ~ko:"도구 실행 결과 조회"
+            ~en:"Tool result fetch" err)
   | Msg.Reply_provider_usage (Ok uw) ->
       ( {
           m with
@@ -1667,6 +2256,83 @@ let apply_http_reply ~now (m : Model.t) reply =
                { x with tool_series = failed_slot err x.tool_series }))
         ~source:(Health.Source_runtime "tools") ~ko:"도구 시계열 조회"
         ~en:"Tool series fetch" err
+  | Msg.Reply_tool_series_summary { tool; since_hours; result = Ok summary } ->
+      let _, expected_hours =
+        Runtime_store.tools_window_params m.runtime.tools_window
+      in
+      let runtime =
+        match tool with
+        | Some t_name ->
+            if Int.equal since_hours expected_hours then
+              Runtime_store.apply_tool_detail_series ~observed_at:now
+                ~tool:t_name summary m.runtime
+            else m.runtime
+        | None ->
+            if Int.equal since_hours expected_hours then
+              Runtime_store.apply_tool_series_summary ~observed_at:now summary
+                m.runtime
+            else m.runtime
+      in
+      let next = { m with runtime } |> refresh_404_fallbacks ~now in
+      (next, [])
+  | Msg.Reply_tool_series_summary { tool; since_hours = _; result = Error err } ->
+      err_reply
+        ~fail:
+          (on_runtime (fun (x : Runtime_store.t) ->
+               match tool with
+               | Some _ ->
+                   { x with tool_detail_series = failed_slot err x.tool_detail_series }
+               | None ->
+                   { x with tool_series_summary = failed_slot err x.tool_series_summary }))
+        ~source:(Health.Source_runtime "tools") ~ko:"도구 시계열 요약 조회"
+        ~en:"Tool series summary fetch" err
+  | Msg.Reply_tools_dashboard { keeper = req_keeper; result = Ok snap } ->
+      let keeper_names =
+        match Observed.to_option m.fleet.keepers with
+        | Some ks ->
+            List.map (fun (k : Wire_fleet.keeper_summary) -> k.name) ks
+        | None -> []
+      in
+      let expected_keeper =
+        Runtime_store.selected_tools_surface_keeper ~keeper_names m.runtime
+      in
+      let prev_surf =
+        Option.bind
+          (Observed.to_option m.runtime.tools_dashboard)
+          (fun (d : Wire_runtime.tools_dashboard_snapshot) ->
+            d.effective_keeper_surface)
+      in
+      let guarded_snap =
+        match expected_keeper with
+        | Some exp -> (
+            match req_keeper with
+            | Some rk when String.equal rk exp -> (
+                match snap.effective_keeper_surface with
+                | Some
+                    ( Wire_runtime.Keeper_surface_available { keeper_name; _ }
+                    | Wire_runtime.Keeper_surface_unavailable { keeper_name; _ }
+                    ) ->
+                    if String.equal keeper_name exp then snap
+                    else { snap with effective_keeper_surface = prev_surf }
+                | None -> snap)
+            | Some _ | None ->
+                { snap with effective_keeper_surface = prev_surf })
+        | None -> snap
+      in
+      ( {
+          m with
+          runtime =
+            Runtime_store.apply_tools_dashboard ~observed_at:now guarded_snap
+              m.runtime;
+        }
+      , [] )
+  | Msg.Reply_tools_dashboard { keeper = _; result = Error err } ->
+      err_reply
+        ~fail:
+          (on_runtime (fun (x : Runtime_store.t) ->
+               { x with tools_dashboard = failed_slot err x.tools_dashboard }))
+        ~source:(Health.Source_runtime "tools") ~ko:"도구 대시보드 조회"
+        ~en:"Tools dashboard fetch" err
   | Msg.Reply_tools_catalog (Ok (Wire_runtime.Tools_ready tools)) ->
       ( {
           m with
@@ -1687,6 +2353,25 @@ let apply_http_reply ~now (m : Model.t) reply =
                { x with tools_catalog = failed_slot err x.tools_catalog }))
         ~source:(Health.Source_runtime "tools") ~ko:"도구 목록 조회"
         ~en:"Tools catalog fetch" err
+  | Msg.Reply_skills (Ok snap) ->
+      ( {
+          m with
+          runtime = Runtime_store.apply_skills ~observed_at:now snap m.runtime;
+        }
+      , [] )
+  | Msg.Reply_skills (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403 | 404; _ } ->
+          ( { m with runtime = { m.runtime with skills = Observed.absent } }
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:
+              (on_runtime (fun (x : Runtime_store.t) ->
+                   { x with skills = failed_slot err x.skills }))
+            ~source:(Health.Source_runtime "skills") ~ko:"스킬 스냅샷 조회"
+            ~en:"Skills snapshot fetch" err)
   | Msg.Reply_connectors (Ok conns) ->
       ( {
           m with

@@ -1,17 +1,20 @@
-(** The 4 sub-tabs of [[2] Work]:
+(** The 5 sub-tabs of [[2] Work]:
     1. [render_pipeline]: Goals Master-Detail with closed-sum [Goal_phase] badge,
        measure ratio gauge, unlinked-task/unattributed-Candle callout, rich
        Markdown measure & procedure (OSC 8 links, zero raw [board:p-...]),
        Pipeline Stage Stepper, linked tasks, criterion review, and structured
        Rejection Diff.
-    2. [render_tasks_schedules]: Filterable status pills, Task detail pane
-       ([started_at], verification evidence, goal link status), and Schedules
-       table with last wake disposition & output summary.
-    3. [render_inbox]: Rapid-fire triage split (Held Tool Calls -> Keeper Asks
+    2. [render_tasks]: Filterable status pills and Task detail pane
+       ([started_at], verification evidence, goal link status, [[x]] cancel,
+       [[h]] harness overrule).
+    3. [render_schedules]: Dedicated Schedules table with last wake disposition,
+       output summary, detail inspector, and [[n]] new schedule — always
+       reachable even when empty.
+    4. [render_inbox]: Rapid-fire triage split (Held Tool Calls -> Keeper Asks
        -> Goal Confirmations) with Markdown preview,
        structured tool args via [Json_tree], instant [a..d] choices, and clean
        empty-state 24h Recent Decisions Audit + Approval/Sandbox Policy Summary.
-    4. [render_candle_scorecard]: Decaying balances + half-life decay curve
+    5. [render_candle_scorecard]: Decaying balances + half-life decay curve
        ([Chart.Time_series]), append-only [candle-ledger.jsonl] event table,
        root-cause banner for [unattributed]/[backlog_fenced] Goals, contract
        note (portrait accessories only), and Company/Keeper Leaderboard. *)
@@ -47,7 +50,14 @@ val render_pipeline :
   Cell_grid.t ->
   unit
 
-val render_tasks_schedules :
+val render_tasks :
+  model:Model.t ->
+  cache:Card.Cache.t ->
+  rect:Rect.t ->
+  Cell_grid.t ->
+  unit
+
+val render_schedules :
   model:Model.t ->
   cache:Card.Cache.t ->
   rect:Rect.t ->

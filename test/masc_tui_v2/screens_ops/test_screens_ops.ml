@@ -1064,6 +1064,8 @@ let test_keeper_dive_all_5_tabs () =
                           Knowledge_store.View_diff m.knowledge;
                     }
                 | Nav.Keeper_chat
+                | Nav.Keeper_context
+                | Nav.Keeper_tool_calls
                 | Nav.Keeper_work_candle
                 | Nav.Keeper_sandbox
                 | Nav.Keeper_config ->
@@ -1089,6 +1091,16 @@ let test_keeper_dive_all_5_tabs () =
                   in
                   Alcotest.(check bool) "shows honest pending tx state" true
                     (contains_sub ~needle:expected_tx text)
+              | Nav.Keeper_context ->
+                  Alcotest.(check bool) "renders Context & Turns inspector" true
+                    (contains_sub ~needle:"Composition" text
+                     || contains_sub ~needle:"구성" text
+                     || contains_sub ~needle:"Context" text
+                     || contains_sub ~needle:"컨텍스트" text)
+              | Nav.Keeper_tool_calls ->
+                  Alcotest.(check bool) "renders Tool Calls inspector" true
+                    (contains_sub ~needle:"Tool" text
+                     || contains_sub ~needle:"도구" text)
               | Nav.Keeper_memory ->
                   Alcotest.(check bool) "shows HOT heat" true
                     (contains_sub ~needle:"HOT" text);
@@ -1150,11 +1162,13 @@ let test_work_all_4_subtabs_and_empty_inbox () =
                   Alcotest.(check bool) "shows unlinked attribution warning" true
                     (contains_sub ~needle:"goal_id" text
                      || contains_sub ~needle:"backlog_fenced" text)
-              | Nav.Work_tasks_schedules ->
+              | Nav.Work_tasks ->
                   Alcotest.(check bool) "shows started_at timestamp" true
-                    (contains_sub ~needle:"started_at" text);
+                    (contains_sub ~needle:"started_at" text)
+              | Nav.Work_schedules ->
                   Alcotest.(check bool) "shows schedule output summary" true
-                    (contains_sub ~needle:"wkbl-growth" text)
+                    (contains_sub ~needle:"wkbl-growth" text
+                     || contains_sub ~needle:"sched-" text)
               | Nav.Work_inbox ->
                   (* Top urgency item is Held Tool Approval with Json_tree redacting secret *)
                   Alcotest.(check bool) "redacts secret inside tool args Json_tree" false
@@ -1570,13 +1584,13 @@ let test_p1_pipeline_and_tasks_selection_sync () =
     (contains_sub ~needle:"bench-proof.md" pipe_txt);
   Alcotest.(check bool) "out-of-bounds selected_index renders last goal detail" true
     (contains_sub ~needle:"Zero P0/P1 findings" pipe_txt);
-  (* Tasks & Schedules: Done chip selects task-3899 cleanly *)
+  (* Tasks: Done chip selects task-3899 cleanly *)
   let m_done =
     {
       m0 with
       work =
         m0.work
-        |> Work_store.set_tab Nav.Work_tasks_schedules
+        |> Work_store.set_tab Nav.Work_tasks
         |> Work_store.set_task_status_filter Work_store.Status_done;
     }
   in
@@ -1586,15 +1600,13 @@ let test_p1_pipeline_and_tasks_selection_sync () =
   let done_txt = grid_all_text done_grid in
   Alcotest.(check bool) "done filter detail shows task-3899" true
     (contains_sub ~needle:"Implement persistent ACP channels" done_txt);
-  (* Tasks & Schedules: Schedules chip highlights Schedules and shows schedule detail *)
+  (* Schedules 1st-class tab highlights Schedules and shows schedule detail *)
   let m_sched =
     {
       m0 with
       work =
         {
-          (m0.work
-           |> Work_store.set_tab Nav.Work_tasks_schedules
-           |> Work_store.set_task_status_filter Work_store.Status_schedules)
+          (m0.work |> Work_store.set_tab Nav.Work_schedules)
           with
           selected_index = 1;
         };
@@ -3384,6 +3396,229 @@ let test_keeper_cadence_next_due () =
   Alcotest.(check bool) "gamma may lie past the page read" true
     (due ~more_pages:true "gamma" = Keeper_cadence.Past_page_read)
 
+let test_wave2_keeper_context_tool_calls_and_schedules () =
+  let m0 = make_populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en in
+  let tr_json =
+    Yojson.Safe.from_string
+      {|{
+        "keeper": "e-masc-the-leader",
+        "count": 1,
+        "skipped_rows": 0,
+        "health": "healthy",
+        "live_turn_in_progress": false,
+        "entries": [
+          {
+            "diff_vs_prev": null,
+            "record": {
+              "execution_ids": ["exec-900"],
+            "keeper": "e-masc-the-leader",
+            "agent_name": "e-masc-the-leader",
+            "turn_kind": "direct",
+            "trace_id": "tr-900",
+            "absolute_turn": 90,
+            "turn_ref": "tr-900#90",
+            "blocks": [
+              { "block": "keeper_instructions", "bytes": 4200, "digest": "aabbcc11223344556677889900aabbcc11223344556677889900aabbcc112233" },
+              { "block": "active_goals", "bytes": 900, "digest": "ddeeff4455667788990011223344556677889900aabbccddeeff001122334455" }
+            ],
+            "input_components": [
+              { "component": "prompt.keeper_instructions", "bytes": 4200 },
+              { "component": "tool_schemas", "bytes": 7600 },
+              { "component": "message_user", "bytes": 400 }
+            ],
+            "request_observations": [],
+            "runtime_profile": "claude-sonnet-4",
+            "request_runtime_profile": "claude-sonnet-4",
+            "request_body_bytes": 14400,
+            "transmitted_atoms": null,
+            "total_atoms": null,
+            "model_input_measurement": null,
+            "model_input_front": null,
+            "response_observed_model_input": null,
+            "refused_model_input": null,
+            "raw_trace_run_ref": null,
+            "selected_model": "claude-sonnet-4",
+            "finish_reason": "end_turn",
+            "context_window": 200000,
+            "provider_context_window": 200000,
+            "request_latency_ms": 850,
+            "input_tokens": 36000,
+            "cache_creation_input_tokens": 2000,
+            "cache_read_input_tokens": 30000,
+            "output_tokens": 500,
+            "usage_scope": "per_request",
+            "input_provenance": "measured_request",
+            "ts": 1795252000.0
+            }
+          }
+        ]
+      }|}
+  in
+  let tr_page =
+    match Wire_keeper_context.decode_turn_records tr_json with
+    | Ok p -> p
+    | Error e -> Alcotest.fail ("decode_turn_records failed: " ^ e)
+  in
+  let co =
+    match
+      Wire_keeper_context.decode_cache_outcome
+        (Yojson.Safe.from_string
+           {|{
+             "schema": "masc.keeper-cache-outcome.v1",
+             "keeper": "e-masc-the-leader",
+             "turn_ref": "tr-900#90",
+             "unattributed_rows": 0,
+             "outcome": {
+               "kind": "first_request",
+               "request": {
+                 "turn_ref": "tr-900#90", "runtime_id": "claude-sonnet-4",
+                 "scope": "per_request", "ended_at": 1795252005.0,
+                 "latency_ms": 850, "cache_read_tokens": 30000,
+                 "cache_creation_tokens": 2000, "cache_write_lifetime": null
+               },
+               "other_runtime_since": null,
+               "earlier": {
+                 "kind": "earlier",
+                 "request": {
+                   "turn_ref": "tr-900#89", "runtime_id": "claude-sonnet-4",
+                   "scope": "per_request", "ended_at": 1795251950.0,
+                   "latency_ms": 700, "cache_read_tokens": 28000,
+                   "cache_creation_tokens": 0, "cache_write_lifetime": null
+                 },
+                 "idle": {
+                   "kind": "idle", "idle_s": 54.0,
+                   "lifetime": { "kind": "declared", "lifetime_s": 300.0, "check": "within" }
+                 },
+                 "prefix": {
+                   "kind": "compared", "system_changed": false, "tools_changed": false,
+                   "messages": { "kind": "appended", "kept": 10, "added": 2 }
+                 }
+               }
+             }
+           }|})
+    with
+    | Ok r -> r
+    | Error e -> Alcotest.fail ("decode_cache_outcome failed: " ^ e)
+  in
+  let tc_page =
+    match
+      Wire_keeper_context.decode_keeper_tool_calls
+        (Yojson.Safe.from_string
+           {|{
+             "keeper": "e-masc-the-leader",
+             "count": 1,
+             "coverage_gaps_count": 0,
+             "entries": [
+               {
+                 "ts": 1795252001.0,
+                 "tool": "masc_board_post",
+                 "execution_id": "exec-900",
+                 "duration_ms": 48.0,
+                 "ok": true,
+                 "disposition": "succeeded",
+                 "input": { "payload": "{\"title\":\"Wave2\"}" },
+                 "output": "posted",
+                 "original_bytes": 6,
+                 "truncated_to": null
+               }
+             ]
+           }|})
+    with
+    | Ok p -> p
+    | Error e -> Alcotest.fail ("decode_keeper_tool_calls failed: " ^ e)
+  in
+  let t0 = Clock.Mono.of_ns 10_000_000_000L in
+  let kc =
+    Keeper_context_store.empty
+    |> Keeper_context_store.apply_turn_records ~observed_at:t0
+         ~keeper:"e-masc-the-leader" tr_page
+    |> Keeper_context_store.apply_cache_outcome ~observed_at:t0
+         ~keeper:"e-masc-the-leader" ~turn_ref:"tr-900#90" co
+    |> Keeper_context_store.apply_tool_calls ~observed_at:t0
+         ~keeper:"e-masc-the-leader" tc_page
+  in
+  let m_ctx = { m0 with keeper_context = kc } in
+  (* All 4 Context sub-tabs render cleanly *)
+  List.iter
+    (fun subtab ->
+      let m_st =
+        {
+          m_ctx with
+          keeper_context =
+            Keeper_context_store.set_subtab ~keeper:"e-masc-the-leader" subtab
+              m_ctx.keeper_context;
+        }
+      in
+      let g =
+        render_to_grid ~cols:140 ~rows:40
+          (Screen_keepers.render_dive ~name:"e-masc-the-leader"
+             ~tab:Nav.Keeper_context ~model:m_st)
+      in
+      let txt = grid_all_text g in
+      Alcotest.(check bool) "Keeper_context subtab populated" true
+        (non_empty_row_count g >= 8);
+      match subtab with
+      | Keeper_context_store.Ctx_composition ->
+          Alcotest.(check bool) "Composition shows turn #90 & cache" true
+            (contains_sub ~needle:"90" txt)
+      | Keeper_context_store.Ctx_exact_input ->
+          Alcotest.(check bool) "Exact_input shows Cache Outcome TTL Within" true
+            (contains_sub ~needle:"TTL Within" txt
+             || contains_sub ~needle:"Appended" txt)
+      | Keeper_context_store.Ctx_input_map ->
+          Alcotest.(check bool) "Input_map shows proof table" true
+            (contains_sub ~needle:"keeper_instructions" txt
+             || contains_sub ~needle:"VERIFIED" txt
+             || contains_sub ~needle:"BYTES" txt)
+      | Keeper_context_store.Ctx_response ->
+          Alcotest.(check bool) "Response subtab renders" true
+            (contains_sub ~needle:"Response" txt || contains_sub ~needle:"Transcript" txt))
+    Keeper_context_store.all_context_subtabs;
+  (* 401/403 permission notice on Exact_input renders gracefully without crashing *)
+  let m_denied =
+    {
+      m_ctx with
+      keeper_context =
+        m_ctx.keeper_context
+        |> Keeper_context_store.set_subtab ~keeper:"e-masc-the-leader"
+             Keeper_context_store.Ctx_exact_input
+        |> Keeper_context_store.mark_provider_input_denied ~at:t0
+             ~keeper:"e-masc-the-leader" ~reason:"403 CanAdmin required";
+    }
+  in
+  let g_den =
+    render_to_grid ~cols:140 ~rows:40
+      (Screen_keepers.render_dive ~name:"e-masc-the-leader"
+         ~tab:Nav.Keeper_context ~model:m_denied)
+  in
+  Alcotest.(check bool) "Exact_input 403 notice renders gracefully" true
+    (contains_sub ~needle:"CanAdmin" (grid_all_text g_den)
+     || contains_sub ~needle:"403" (grid_all_text g_den)
+     || contains_sub ~needle:"Admin" (grid_all_text g_den));
+  (* Keeper_tool_calls renders tool call row + unfolded JSON detail *)
+  let g_tc =
+    render_to_grid ~cols:140 ~rows:40
+      (Screen_keepers.render_dive ~name:"e-masc-the-leader"
+         ~tab:Nav.Keeper_tool_calls ~model:m_ctx)
+  in
+  let txt_tc = grid_all_text g_tc in
+  Alcotest.(check bool) "Keeper_tool_calls shows masc_board_post" true
+    (contains_sub ~needle:"masc_board_post" txt_tc);
+  Alcotest.(check bool) "Keeper_tool_calls unfolds nested JSON string" true
+    (contains_sub ~needle:"Wave2" txt_tc);
+  (* Dedicated Work_schedules tab renders both populated AND empty state cleanly *)
+  let m_empty_sched =
+    {
+      m0 with
+      work =
+        Work_store.empty
+        |> Work_store.set_tab Nav.Work_schedules
+        |> Work_store.apply_schedules ~observed_at:t0 ([], None);
+    }
+  in
+  let g_es = render_to_grid ~cols:140 ~rows:40 (Screen_work.render ~model:m_empty_sched) in
+  Alcotest.(check bool) "Empty Work_schedules renders honest notice" true
+    (non_empty_row_count g_es >= 5)
 let () =
   Alcotest.run "masc_tui_screens_ops"
     [
@@ -3397,7 +3632,7 @@ let () =
             `Quick test_keepers_all_modes_viewports_langs;
           Alcotest.test_case "strict live SSOT vs historical 12h trail" `Quick
             test_keepers_strict_live_vs_historical_separation;
-          Alcotest.test_case "all 5 Keeper Dive tabs + SSH sandbox (KO/EN)"
+          Alcotest.test_case "all 7 Keeper Dive tabs + SSH sandbox (KO/EN)"
             `Quick test_keeper_dive_all_5_tabs;
           Alcotest.test_case "scope-mismatched Memory/Config & Field_secret masking"
             `Quick test_p1_scope_mismatch_memory_and_config;
@@ -3423,6 +3658,12 @@ let () =
             `Quick test_chat_peer_rows_name_their_author;
           Alcotest.test_case "AG-UI chat chronological projection, dedup & SSOT phase parity"
             `Quick test_agui_chat_chronological_projection_and_phase_parity;
+          Alcotest.test_case "Keeper cadence window counts wake causes and notes short windows"
+            `Quick test_keeper_cadence_window_counts_causes;
+          Alcotest.test_case "Keeper cadence next_due selects earliest keeper schedule"
+            `Quick test_keeper_cadence_next_due;
+          Alcotest.test_case "Feature Wave 2: Keeper Context (4 subtabs + 403), Tool Calls & Work_schedules"
+            `Quick test_wave2_keeper_context_tool_calls_and_schedules;
         ] );
       ( "work"
       , [

@@ -1879,6 +1879,7 @@ type canonical_turns_internals = {
   compaction_watermark_seq : int option;
   compaction_watermark_epoch : int option;
   history_resets_count : int;
+  latest_reset_at_unix : float option;
   read_error : string option;
 }
 
@@ -1953,6 +1954,9 @@ let decode_memory_os_internals json =
   let* history_resets_count =
     optional_nonnegative_count turns_obj "history_resets_count"
   in
+  let* latest_reset_at_unix =
+    decode_optional_timestamp_unix turns_obj "latest_reset_at"
+  in
   let* turns_read_error = optional_nonblank_string turns_obj "read_error" in
   let* dig_obj = required_object_field body "memory_digest" in
   let* dig_present = required_bool_field dig_obj "present" in
@@ -2005,6 +2009,7 @@ let decode_memory_os_internals json =
           compaction_watermark_seq;
           compaction_watermark_epoch;
           history_resets_count;
+          latest_reset_at_unix;
           read_error = turns_read_error;
         };
       memory_digest =

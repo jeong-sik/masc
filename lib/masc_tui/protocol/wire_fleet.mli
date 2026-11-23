@@ -64,6 +64,38 @@ type keeper_turn_row = {
   state : keeper_turn_state;
 }
 
+(** Why the server has no measured context ratio for a keeper's newest turn
+    (the closed reason set of [context_metrics_unavailable_reason]). *)
+type context_unavailable_reason =
+  | Context_measurement_missing
+  | Context_record_undecodable
+  | Context_record_read_failed
+  | Context_record_without_usage
+  | Context_trace_mismatch
+  | Context_cumulative_usage
+  | Context_turn_total_usage
+  | Context_usage_scope_unavailable
+  | Context_tokens_exceed_window
+  | Context_input_estimate
+  | Context_input_provenance_unavailable
+
+(** The server's context projection for a keeper's newest turn record.
+    [Context_measured] is a dispatched request's provider-reported input;
+    [ratio] is [None] when no window was reported. [Context_not_measured]
+    carries the reason and, for an estimated input, the server's estimate. *)
+type context_reading =
+  | Context_measured of {
+      ratio : float option;
+      tokens : int;
+      window : int option;
+      absolute_turn : int option;
+      measured_at_unix : float option;
+    }
+  | Context_not_measured of {
+      reason : context_unavailable_reason;
+      estimated_ratio : float option;
+    }
+
 type keeper_summary = {
   name : string;
   group : string option;
@@ -75,13 +107,24 @@ type keeper_summary = {
   runtime_id : string;
   model_id : string option;
   current_task_id : string option;
-  context_ratio : float Observed.t;
+  context : context_reading Observed.t;
+      (** [Unreported] when the row has no [context_provenance]. *)
   total_turns : int Observed.t;
-  total_tokens : int Observed.t;
-  cost_24h_usd : float Observed.t;
   last_turn_at_unix : float option;
   active_turn : active_turn option;
   activity_sparkline_24h : float list;
+}
+
+(** A roster row whose effective meta did not read: the server sends only the
+    name and [effective_meta_error.message]. *)
+type unreadable_keeper = {
+  name : string;
+  reason : string;
+}
+
+type keepers_roster = {
+  keepers : keeper_summary list;
+  unreadable : unreadable_keeper list;
 }
 
 type attention_bucket =
@@ -105,21 +148,27 @@ type keeper_sandbox_profile =
   | Profile_docker
   | Profile_other of string
 
-type candle_summary_fallback = {
+type candle_supply = {
   issued_milli : string;
   burned_milli : string;
   circulating_milli : string;
 }
 
+(** The top-level [candle] object (Candle_observation): only a ready ledger
+    carries a supply. *)
+type candle_observation =
+  | Candle_off
+  | Candle_disabled of { reason : string }
+  | Candle_ready of candle_supply
+
 type keeper_roster_extras = {
   sandbox_profiles : (string * keeper_sandbox_profile) list;
   candle_balances_milli : (string * int) list;
-  candle_summary : candle_summary_fallback option;
+  candle_summary : candle_observation option;
 }
 
 type execution_keeper_enrichment = {
   keeper_name : string;
-  context_ratio : float option;
   sandbox_profile : keeper_sandbox_profile option;
   total_turns : int option;
 }
@@ -149,7 +198,6 @@ type daily_scorecard = {
   tasks_todo : int Observed.t;
   tasks_cancelled : int Observed.t;
   goals_completed_24h : int Observed.t;
-  prs_reviewed_24h : int Observed.t;
   verifications_passed_24h : int Observed.t;
   verifications_rejected_24h : int Observed.t;
   board_posts_24h : int Observed.t;
@@ -204,11 +252,10 @@ val keeper_health_of_string : string -> keeper_health option
 val activation_mode_of_string : string -> activation_mode option
 val turn_lane_of_string : string -> turn_lane option
 
-val decode_keeper_summary :
-  observed_at:Clock.Mono.t -> Yojson.Safe.t -> (keeper_summary, string) result
-
 val decode_keepers_roster :
-  observed_at:Clock.Mono.t -> Yojson.Safe.t -> (keeper_summary list, string) result
+  observed_at:Clock.Mono.t -> Yojson.Safe.t -> (keepers_roster, string) result
+(** A row with an [effective_meta_error] object decodes into [unreadable];
+    every other row must be a full keeper summary. *)
 
 val decode_keepers_roster_extras :
   Yojson.Safe.t -> (keeper_roster_extras, string) result
@@ -217,9 +264,48 @@ val decode_keepers_roster_extras :
 
 val decode_execution_keeper_enrichments :
   Yojson.Safe.t ->
-  (execution_keeper_enrichment list * candle_summary_fallback option, string) result
-(** Decode per-keeper [context_ratio] / [sandbox_profile] and top-level
-    [candle] summary from [GET /api/v1/dashboard/execution?light=true]. *)
+  (execution_keeper_enrichment list * candle_observation option, string) result
+(** Decode per-keeper [sandbox_profile] / turn count and the top-level
+    [candle] observation from [GET /api/v1/dashboard/execution?light=true]. *)
+
+(** {1 Keeper Turn Records ([GET /api/v1/keepers/:name/turn-records])} *)
+
+type turn_usage_scope =
+  | Usage_per_request
+  | Usage_turn_total
+  | Usage_conversation_cumulative
+  | Usage_scope_unavailable
+
+type turn_input_provenance =
+  | Input_measured_request
+  | Input_context_estimate
+
+type turn_record_row = {
+  absolute_turn : int;
+  input_tokens : int option;
+  usage_scope : turn_usage_scope;
+  input_provenance : turn_input_provenance option;
+  context_window : int option;
+  provider_context_window : int option;
+}
+
+type keeper_turn_records = {
+  keeper : string;
+  skipped_rows : int;
+  rows : turn_record_row list;  (** Oldest first, as the server sends them. *)
+}
+
+val keeper_turn_records_path : keeper:string -> limit:int -> string
+(** [limit] is clamped to the server's [1..500]. *)
+
+val decode_keeper_turn_records :
+  Yojson.Safe.t -> (keeper_turn_records, string) result
+
+val turn_record_context_fill : turn_record_row -> float option
+(** The record's measured context fill (input / window), under the rule the
+    server applies to a keeper's newest record: per-request usage, input
+    provenance [measured_request], the provider window else the configured
+    one, and input not above that window. [None] for every other record. *)
 
 val decode_keeper_turns : Yojson.Safe.t -> (keeper_turn_row list, string) result
 

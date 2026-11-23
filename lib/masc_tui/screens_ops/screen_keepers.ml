@@ -141,6 +141,27 @@ let keeper_table_row ~(model : Model.t) ~(theme : Theme.t) ~indent_name
   in
   let cost_obs = Runtime_store.keeper_cost_usd ~keeper:k.name model.runtime in
   let cost_str = Format_val.format_observed Format_val.Usd cost_obs ~lang:model.lang in
+  let muted_cell glyph = Table.text_cell ~fg:(Color.of_rgb theme.text_muted) (Glyph.to_utf8 glyph) in
+  let next_cell =
+    match Observed.to_option model.work.schedules with
+    | None -> muted_cell Glyph.Missing_unreported
+    | Some (rows, _cursor) -> (
+        match
+          Keeper_cadence.next_due ~now_unix:model.freshness.last_wall_unix
+            (Keeper_cadence.keeper_schedules ~name:k.name rows)
+        with
+        | Keeper_cadence.No_schedule -> muted_cell Glyph.Separator_dot
+        | Keeper_cadence.Due_unknown -> muted_cell Glyph.Missing_absent
+        | Keeper_cadence.Due_in s ->
+            Table.text_cell ~fg:(Color.of_rgb theme.text_secondary) (Format_val.format_duration_s s)
+        | Keeper_cadence.Late_by s ->
+            Table.Badge
+              {
+                glyph = Some Glyph.Warning_triangle;
+                text = Format_val.format_duration_s s;
+                tone = Theme.Status_attention;
+              })
+  in
   {
     Table.id = k.name;
     cells =
@@ -155,6 +176,7 @@ let keeper_table_row ~(model : Model.t) ~(theme : Theme.t) ~indent_name
         , Table.Sparkline
             { samples = spark_samples; gradient = Chart.Gradient.Cool_flow } );
         ("turns", Table.text_cell ~fg:(Color.of_rgb theme.text_secondary) turns_str);
+        ("next", next_cell);
         ("cost", Table.text_cell ~fg:(Color.of_rgb theme.text_secondary) cost_str);
         ("trail", trail_cell);
       ];
@@ -217,6 +239,15 @@ let standard_roster_columns : Table.column list =
       align = Table.Left;
     };
     {
+      id = "next";
+      header = Say.make ~ko:"다음 예약" ~en:"Next due";
+      priority = 4;
+      min_width = 6;
+      max_width = Some 10;
+      weight = 1;
+      align = Table.Right;
+    };
+    {
       id = "trail";
       header = Say.make ~ko:"이력" ~en:"Trail";
       priority = 5;
@@ -262,6 +293,15 @@ let pulse_wall_columns : Table.column list =
       priority = 2;
       min_width = 6;
       max_width = Some 9;
+      weight = 1;
+      align = Table.Right;
+    };
+    {
+      id = "next";
+      header = Say.make ~ko:"다음 예약" ~en:"Next due";
+      priority = 3;
+      min_width = 6;
+      max_width = Some 10;
       weight = 1;
       align = Table.Right;
     };

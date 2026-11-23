@@ -120,6 +120,7 @@ let latest_keeper_reply_text (m : Model.t) : (string * string) option =
                           Some (keeper, msg.content)
                       | Wire_fleet.Role_assistant
                       | Wire_fleet.Role_user
+                      | Wire_fleet.Role_peer _
                       | Wire_fleet.Role_system
                       | Wire_fleet.Role_tool
                       | Wire_fleet.Role_request_failure ->
@@ -749,7 +750,8 @@ and submit_composer ~now ~mode (m : Model.t) =
                       List.filter_map
                         (fun (msg : Wire_fleet.chat_message) ->
                           match msg.role with
-                          | Wire_fleet.Role_user -> Some msg.id
+                          | Wire_fleet.Role_user | Wire_fleet.Role_peer _ ->
+                              Some msg.id
                           | Wire_fleet.Role_assistant
                           | Wire_fleet.Role_system
                           | Wire_fleet.Role_tool

@@ -1147,6 +1147,7 @@ let latest_reply_for_tts (m : Model.t) =
                           Some (keeper, msg.content)
                       | Wire_fleet.Role_assistant
                       | Wire_fleet.Role_user
+                      | Wire_fleet.Role_peer _
                       | Wire_fleet.Role_system
                       | Wire_fleet.Role_tool
                       | Wire_fleet.Role_request_failure ->

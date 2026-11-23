@@ -8,3 +8,16 @@ val execute_action :
 
 val execute_slash :
   now:Clock.Mono.t -> Model.t -> Slash.parsed -> Model.t * Cmd.t list
+
+val apply_staged_tui_pref_if_needed :
+  now:Clock.Mono.t ->
+  key:string ->
+  Model.t ->
+  Config_store.t ->
+  (Model.t * Cmd.t list) option
+
+val save_settings_config :
+  now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
+
+val step_settings_pane_lr :
+  now:Clock.Mono.t -> Model.t -> Keymap.move_dir -> Model.t * Cmd.t list

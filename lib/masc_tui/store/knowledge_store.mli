@@ -148,8 +148,31 @@ val wiki_display_pages : t -> Wire_knowledge.wiki_page_summary list
 val quarantines_list : t -> Wire_knowledge.quarantine_candidate list
 val filtered_memory_conflicts : t -> Wire_knowledge.memory_conflict list
 val filtered_memory_claims : t -> Wire_knowledge.world_claim list
+val filtered_librarian_writers : t -> Wire_knowledge.librarian_writer_row list
 val memory_diff_matches_filter : t -> string -> bool
+
+type memory_diff_item =
+  | Keeper_added of Wire_knowledge.memory_fact_entry
+  | Keeper_updated of Wire_knowledge.memory_updated_fact
+  | Keeper_retracted of Wire_knowledge.memory_retracted_fact
+  | Keeper_invalidated of Wire_knowledge.memory_invalidated_fact
+  | World_added of Wire_knowledge.world_change_entry
+  | World_updated of Wire_knowledge.world_updated_entry
+  | World_retracted of Wire_knowledge.world_change_entry
+
+val filtered_memory_diff_items : t -> memory_diff_item list
+(** Single-SSOT filtered diff items shared by [Screen_knowledge] and
+    {!Update_nav} (matching [inv.missing_premise_ids] too). *)
+
 val memory_diff_entry_count : t -> int
+val memory_diff_line_count : t -> int
+(** Exact flattened visual line count of {!filtered_memory_diff_items} for
+    line-level scrolling in [3 Knowledge > Memory] and [Memory_diff_dive]. *)
+
+val keeper_memory_diff_line_count : name:string -> t -> int
+(** Exact rendered line count for [Keeper_memory] tab when [memory_diff]
+    matches [Scope_keeper name]. *)
+
 val hottest_signal_threads : t -> Wire_knowledge.board_post list
 val selected_pulse_thread : t -> Wire_knowledge.board_post option
 val move_pulse_thread : ?viewport_rows:int -> delta:int -> t -> t
@@ -158,7 +181,12 @@ val selected_wiki_page : t -> Wire_knowledge.wiki_page_summary option
 val selected_artifact : t -> Wire_knowledge.artifact_entry option
 
 val move_selection :
-  ?pane_index:int -> ?viewport_rows:int -> delta:int -> t -> t
+  ?pane_index:int ->
+  ?viewport_rows:int ->
+  ?max_detail_scroll:int ->
+  delta:int ->
+  t ->
+  t
 val reset_detail_scroll : t -> t
 val set_filter : string -> t -> t
 val mark_stale_all : t -> t

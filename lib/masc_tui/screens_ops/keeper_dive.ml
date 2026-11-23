@@ -772,162 +772,177 @@ let render_empty_chat_context grid ~(rect : Rect.t) ~(theme : Theme.t)
     let bg = Color.of_rgb theme.surface_1 in
     let pad_x = Ops_common.pad_x_for ~model rect in
     let inner_c = Card.pad_inner ~pad_x rect in
-    let box_w = Int.min inner_c.w 76 in
-    let box_x = inner_c.x + Int.max 0 ((inner_c.w - box_w) / 2) in
-    let desired_h = 13 in
-    let start_y =
-      if inner_c.h >= desired_h + 2 then
-        inner_c.y + ((inner_c.h - desired_h) / 3)
-      else inner_c.y
-    in
-    let panel =
-      Rect.make ~x:box_x ~y:start_y ~w:box_w
-        ~h:(Int.max 0 (Rect.bottom inner_c - start_y))
-    in
+    let col_w = Int.min inner_c.w 96 in
+    let panel = Rect.make ~x:inner_c.x ~y:inner_c.y ~w:col_w ~h:inner_c.h in
     if Rect.is_empty panel then ()
-    else begin
-      let y = ref panel.y in
-      let bot = Rect.bottom panel in
-      let has_attn = Ops_common.keeper_has_attention model.attention name in
-      let company_s, rt_s, status_s, task_s, turns_s =
-        match keeper_opt with
-        | Some k ->
-            let g, _, slbl = Ops_common.keeper_live_status ~has_attention:has_attn k in
-            let rt = Ops_common.human_runtime_label ~model k in
-            let tk =
-              match k.current_task_id with
-              | Some tid -> tid
-              | None -> Ops_common.keeper_turn_summary ~lang:model.lang k
-            in
-            let tr =
-              Format_val.format_observed Format_val.Count
-                (Observed.map Float.of_int k.total_turns)
-                ~lang:model.lang
-            in
-            ( k.company
-            , rt
-            , Glyph.to_utf8 g ^ " " ^ Say.resolve model.lang slbl
-            , tk
-            , tr )
-        | None ->
-            let dash = Glyph.to_utf8 Glyph.Missing_absent in
-            (dash, dash, Glyph.to_utf8 Glyph.Live_idle ^ " " ^ dash, dash, dash)
-      in
-      let sb_lbl, sb_tone = Ops_common.keeper_sandbox_label ~model name in
-      let candle_s =
-        match Ops_common.keeper_candle_milli ~model name with
-        | Some (_, dec) ->
-            Glyph.to_utf8 Glyph.Ai_spark ^ " "
-            ^ Ops_common.format_milli_string dec
-        | None -> Glyph.to_utf8 Glyph.Missing_absent
-      in
-      (* 1. Sleek elevated surface_2 Identity Band (NO nested Card!) *)
-      if bot - !y >= 3 then begin
-        Card.draw_section_band ~pad_x:2 grid
-          ~rect:(Rect.make ~x:panel.x ~y:!y ~w:panel.w ~h:2)
-          ~theme ~left_title:("@" ^ name) ~right_meta:status_s
-          ~subtitle:(Printf.sprintf "%s · %s" company_s sb_lbl)
-          ();
-        y := !y + 3
-      end;
-      let spec_r =
-        Rect.make ~x:(panel.x + 1) ~y:!y ~w:(Int.max 0 (panel.w - 2))
-          ~h:(Int.max 0 (bot - !y))
-      in
-      (* 2. Compact 3-line Spec Strip *)
-      if !y < bot then begin
-        Ops_common.draw_kv_row grid ~rect:spec_r ~y:!y ~theme ~bg ~label_w:12
-          ~key:(Ops_common.say model ~ko:"런타임" ~en:"Runtime")
-          ~value:rt_s ();
-        incr y
-      end;
-      if !y < bot then begin
-        Ops_common.draw_kv_row grid ~rect:spec_r ~y:!y ~theme ~bg ~label_w:12
-          ~key:(Ops_common.say model ~ko:"격리 · 작업" ~en:"Sandbox / Task")
-          ~value:(Printf.sprintf "%s · %s" sb_lbl task_s)
-          ~val_fg:(Theme.status_color theme sb_tone) ();
-        incr y
-      end;
-      if !y < bot then begin
-        Ops_common.draw_kv_row grid ~rect:spec_r ~y:!y ~theme ~bg ~label_w:12
-          ~key:(Ops_common.say model ~ko:"누적 턴 · 캔들" ~en:"Total · Candle")
-          ~value:
-            (Printf.sprintf "%s %s  ·  %s" turns_s
-               (Ops_common.say model ~ko:"누적 턴" ~en:"total turns")
-               candle_s)
-          ~val_fg:theme.status_ai ();
-        incr y
-      end;
-      (* 3. Honest observation status or Hairline + Tier-4 italic guidance *)
-      if !y < bot then begin
-        Card.draw_hairline ~pad_x:0 ~bg grid ~rect:spec_r ~y:!y ~theme;
-        incr y
-      end;
-      if !y < bot then begin
-        (match hist_obs with
-        | Observed.Failed { reason; _ } ->
-            Card.draw_left_rail ~bg ~tone:Theme.Status_critical grid
-              ~x:spec_r.x ~y:!y ~h:1 ~theme;
-            ignore
-              (Ops_common.put_line ~clip:spec_r grid ~x:(spec_r.x + 2) ~y:!y
-                 ~max_w:(Int.max 0 (spec_r.w - 2))
-                 ~style:
-                   (Typography.status ~bg ~bold:true theme Theme.Status_critical)
-                 (Glyph.to_utf8 Glyph.Live_failing ^ " "
-                  ^ Ops_common.say model
-                      ~ko:("대화 이력 조회 실패: " ^ reason)
-                      ~en:("Chat history fetch failed: " ^ reason)))
-        | Observed.Loading _ ->
-            ignore
-              (Ops_common.put_line ~clip:spec_r grid ~x:spec_r.x ~y:!y
-                 ~max_w:spec_r.w
-                 ~style:(Typography.status ~bg ~italic:true theme Theme.Status_active)
-                 (Glyph.to_utf8 Glyph.Transport_reconnecting ^ " "
-                  ^ Ops_common.say model ~ko:"대화 이력을 불러오는 중…"
-                      ~en:"Loading chat history…"))
-        | Observed.Value _ | Observed.Absent | Observed.Unreported ->
-            ignore
-              (Ops_common.put_line ~clip:spec_r grid ~x:spec_r.x ~y:!y
-                 ~max_w:spec_r.w ~style:(Typography.whisper ~bg theme)
-                 (Ops_common.say model
-                    ~ko:"아직 대화 이력이 없습니다 · 아래 예시로 바로 대화를 시작하세요."
-                    ~en:"No conversation history yet · try one of these starters:")));
-        incr y
-      end;
-      (* 4. Three Violet-railed italic example prompt starters *)
-      let starters =
-        [
-          Ops_common.say model
-            ~ko:"\"현재 진행 중인 작업과 차단 요인을 요약해줘\""
-            ~en:"\"Summarize your current task and any blockers\"";
-          Ops_common.say model
-            ~ko:"\"최근 24시간 기억 변경 사항과 핵심 결정을 알려줘\""
-            ~en:"\"What changed in your memory over the last 24h?\"";
-          Ops_common.say model
-            ~ko:"\"/help  ·  [i] 메시지 입력  ·  [V] 음성 PTT\""
-            ~en:"\"/help  ·  [i] Compose message  ·  [V] Voice PTT\"";
-        ]
-      in
-      List.iter
-        (fun prompt ->
+    else
+      match hist_obs with
+      | Observed.Loading _ ->
+          (* Pillar 3: During initial history fetch, show a calm left-aligned
+             1-line loading whisper on surface_1 — never flash a floating
+             centered surface_2 rectangle. *)
+          ignore
+            (Ops_common.put_line ~clip:panel grid ~x:panel.x ~y:panel.y
+               ~max_w:panel.w
+               ~style:(Typography.status ~bg ~italic:true theme Theme.Status_active)
+               (Glyph.to_utf8 Glyph.Transport_reconnecting ^ " "
+                ^ Ops_common.say model ~ko:"대화 이력을 불러오는 중…"
+                    ~en:"Loading chat history…"))
+      | Observed.Value _ | Observed.Absent | Observed.Unreported
+      | Observed.Failed _ ->
+          let y = ref panel.y in
+          let bot = Rect.bottom panel in
+          let has_attn = Ops_common.keeper_has_attention model.attention name in
+          let company_s, rt_s, status_s, task_s, turns_s =
+            match keeper_opt with
+            | Some k ->
+                let g, _, slbl =
+                  Ops_common.keeper_live_status ~has_attention:has_attn k
+                in
+                let rt = Ops_common.human_runtime_label ~model k in
+                let tk =
+                  match k.current_task_id with
+                  | Some tid -> tid
+                  | None -> Ops_common.keeper_turn_summary ~lang:model.lang k
+                in
+                let tr =
+                  Format_val.format_observed Format_val.Count
+                    (Observed.map Float.of_int k.total_turns)
+                    ~lang:model.lang
+                in
+                ( k.company
+                , rt
+                , Glyph.to_utf8 g ^ " " ^ Say.resolve model.lang slbl
+                , tk
+                , tr )
+            | None ->
+                let dash = Glyph.to_utf8 Glyph.Missing_absent in
+                ( dash
+                , dash
+                , Glyph.to_utf8 Glyph.Live_idle ^ " " ^ dash
+                , dash
+                , dash )
+          in
+          let sb_lbl, sb_tone = Ops_common.keeper_sandbox_label ~model name in
+          let candle_s =
+            match Ops_common.keeper_candle_milli ~model name with
+            | Some (_, dec) ->
+                Glyph.to_utf8 Glyph.Ai_spark ^ " "
+                ^ Ops_common.format_milli_string dec
+            | None -> Glyph.to_utf8 Glyph.Missing_absent
+          in
+          (* 1. Calm left-aligned surface_1 Identity Header (NO centered surface_2 rectangle) *)
           if !y < bot then begin
-            Card.draw_left_rail ~bg ~tone:Theme.Status_ai grid ~x:spec_r.x ~y:!y
-              ~h:1 ~theme;
-            let caret_adv =
-              Ops_common.put_line ~clip:spec_r grid ~x:(spec_r.x + 2) ~y:!y
-                ~max_w:2 ~style:(Typography.ai ~bg theme)
-                (Glyph.to_utf8 Glyph.Prompt_caret ^ " ")
+            let hdr_left = Printf.sprintf "@%s  %s" name status_s in
+            let adv =
+              Ops_common.put_line ~clip:panel grid ~x:panel.x ~y:!y
+                ~max_w:panel.w ~style:(Typography.anchor ~bg theme) hdr_left
             in
-            ignore
-              (Ops_common.put_line ~clip:spec_r grid
-                 ~x:(spec_r.x + 2 + caret_adv) ~y:!y
-                 ~max_w:(Int.max 0 (spec_r.w - 2 - caret_adv))
-                 ~style:(Typography.whisper ~bg theme)
-                 prompt);
+            let sub = Printf.sprintf "  %s · %s" company_s sb_lbl in
+            if panel.w - adv >= 8 then
+              ignore
+                (Ops_common.put_line ~clip:panel grid ~x:(panel.x + adv) ~y:!y
+                   ~max_w:(panel.w - adv) ~style:(Typography.whisper ~bg theme)
+                   sub);
             incr y
-          end)
-        starters
-    end
+          end;
+          if !y < bot then begin
+            Card.draw_hairline ~pad_x:0 ~bg grid ~rect:panel ~y:!y ~theme;
+            incr y
+          end;
+          let spec_r =
+            Rect.make ~x:panel.x ~y:!y ~w:panel.w ~h:(Int.max 0 (bot - !y))
+          in
+          (* 2. Compact 3-line Spec Strip *)
+          if !y < bot then begin
+            Ops_common.draw_kv_row grid ~rect:spec_r ~y:!y ~theme ~bg
+              ~label_w:14
+              ~key:(Ops_common.say model ~ko:"런타임" ~en:"Runtime")
+              ~value:rt_s ();
+            incr y
+          end;
+          if !y < bot then begin
+            Ops_common.draw_kv_row grid ~rect:spec_r ~y:!y ~theme ~bg
+              ~label_w:14
+              ~key:(Ops_common.say model ~ko:"격리 · 작업" ~en:"Sandbox / Task")
+              ~value:(Printf.sprintf "%s · %s" sb_lbl task_s)
+              ~val_fg:(Theme.status_color theme sb_tone) ();
+            incr y
+          end;
+          if !y < bot then begin
+            Ops_common.draw_kv_row grid ~rect:spec_r ~y:!y ~theme ~bg
+              ~label_w:14
+              ~key:(Ops_common.say model ~ko:"누적 턴 · 캔들" ~en:"Total · Candle")
+              ~value:
+                (Printf.sprintf "%s %s  ·  %s" turns_s
+                   (Ops_common.say model ~ko:"누적 턴" ~en:"total turns")
+                   candle_s)
+              ~val_fg:theme.status_ai ();
+            incr y
+          end;
+          (* 3. Honest observation status *)
+          if !y < bot then begin
+            Card.draw_hairline ~pad_x:0 ~bg grid ~rect:spec_r ~y:!y ~theme;
+            incr y
+          end;
+          if !y < bot then begin
+            (match hist_obs with
+            | Observed.Failed { reason; _ } ->
+                Card.draw_left_rail ~bg ~tone:Theme.Status_critical grid
+                  ~x:spec_r.x ~y:!y ~h:1 ~theme;
+                ignore
+                  (Ops_common.put_line ~clip:spec_r grid ~x:(spec_r.x + 2) ~y:!y
+                     ~max_w:(Int.max 0 (spec_r.w - 2))
+                     ~style:
+                       (Typography.status ~bg ~bold:true theme
+                          Theme.Status_critical)
+                     (Glyph.to_utf8 Glyph.Live_failing ^ " "
+                      ^ Ops_common.say model
+                          ~ko:("대화 이력 조회 실패: " ^ reason)
+                          ~en:("Chat history fetch failed: " ^ reason)))
+            | Observed.Loading _ -> ()
+            | Observed.Value _ | Observed.Absent | Observed.Unreported ->
+                ignore
+                  (Ops_common.put_line ~clip:spec_r grid ~x:spec_r.x ~y:!y
+                     ~max_w:spec_r.w ~style:(Typography.whisper ~bg theme)
+                     (Ops_common.say model
+                        ~ko:"아직 대화 이력이 없습니다 · 아래 예시로 바로 대화를 시작하세요."
+                        ~en:"No conversation history yet · try one of these starters:")));
+            incr y
+          end;
+          (* 4. Three Violet-railed italic example prompt starters *)
+          let starters =
+            [
+              Ops_common.say model
+                ~ko:"\"현재 진행 중인 작업과 차단 요인을 요약해줘\""
+                ~en:"\"Summarize your current task and any blockers\"";
+              Ops_common.say model
+                ~ko:"\"최근 24시간 기억 변경 사항과 핵심 결정을 알려줘\""
+                ~en:"\"What changed in your memory over the last 24h?\"";
+              Ops_common.say model
+                ~ko:"\"/help  ·  [i] 메시지 입력  ·  [V] 음성 PTT\""
+                ~en:"\"/help  ·  [i] Compose message  ·  [V] Voice PTT\"";
+            ]
+          in
+          List.iter
+            (fun prompt ->
+              if !y < bot then begin
+                Card.draw_left_rail ~bg ~tone:Theme.Status_ai grid ~x:spec_r.x
+                  ~y:!y ~h:1 ~theme;
+                let caret_adv =
+                  Ops_common.put_line ~clip:spec_r grid ~x:(spec_r.x + 2) ~y:!y
+                    ~max_w:2 ~style:(Typography.ai ~bg theme)
+                    (Glyph.to_utf8 Glyph.Prompt_caret ^ " ")
+                in
+                ignore
+                  (Ops_common.put_line ~clip:spec_r grid
+                     ~x:(spec_r.x + 2 + caret_adv) ~y:!y
+                     ~max_w:(Int.max 0 (spec_r.w - 2 - caret_adv))
+                     ~style:(Typography.whisper ~bg theme)
+                     prompt);
+                incr y
+              end)
+            starters
 
 let draw_keeper_status_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~name (keeper_opt : Wire_fleet.keeper_summary option) =
@@ -1455,49 +1470,32 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
                   incr y
                 end
               end;
-              let skipped = ref 0 in
-              let scroll = model.nav.dive_scroll_offset in
-              let emit_railed ?rail_tone ~fg ~attrs line =
-                if !skipped < scroll then incr skipped
-                else if !y < bottom then begin
-                  let x0 =
-                    match rail_tone with
-                    | Some tok ->
-                        Card.draw_left_rail ~bg ~tone:tok grid ~x:content.x
-                          ~y:!y ~h:1 ~theme;
-                        content.x + 2
-                    | None -> content.x + 2
-                  in
-                  let st = Style.make ~fg:(Color.of_rgb fg) ~bg ~attrs () in
-                  ignore
-                    (Ops_common.put_line ~clip:content grid ~x:x0 ~y:!y
-                       ~max_w:(Int.max 0 (Rect.right content - x0))
-                       ~style:st line);
-                  incr y
-                end
+              let rows_acc = ref [] in
+              let push_railed ?rail_tone ~fg ~attrs line =
+                rows_acc := (rail_tone, fg, attrs, line) :: !rows_acc
               in
               List.iter
                 (fun (f : Wire_knowledge.memory_fact_entry) ->
                   let h_lbl, _ = heat_badge f.heat in
-                  emit_railed ~rail_tone:Theme.Status_ok ~fg:theme.status_ok
+                  push_railed ~rail_tone:Theme.Status_ok ~fg:theme.status_ok
                     ~attrs:Attr.bold
                     (Printf.sprintf "+ [%s] %s · %s %dx" f.category f.origin
                        h_lbl f.retrieval_count);
-                  emit_railed ~rail_tone:Theme.Status_ok ~fg:theme.text_primary
+                  push_railed ~rail_tone:Theme.Status_ok ~fg:theme.text_primary
                     ~attrs:Attr.none ("  " ^ f.text))
                 added;
               List.iter
                 (fun (u : Wire_knowledge.memory_updated_fact) ->
                   let h_lbl, _ = heat_badge u.after.heat in
-                  emit_railed ~rail_tone:Theme.Status_active
+                  push_railed ~rail_tone:Theme.Status_active
                     ~fg:theme.status_active ~attrs:Attr.bold
                     (Printf.sprintf "~ [%s] %s rev %d · %s %dx" u.after.category
                        (relation_label ~lang:model.lang u.relation)
                        u.at_rev h_lbl u.after.retrieval_count);
-                  emit_railed ~rail_tone:Theme.Status_active
+                  push_railed ~rail_tone:Theme.Status_active
                     ~fg:theme.status_critical ~attrs:Attr.none
                     ("  - " ^ u.before.text);
-                  emit_railed ~rail_tone:Theme.Status_active ~fg:theme.status_ok
+                  push_railed ~rail_tone:Theme.Status_active ~fg:theme.status_ok
                     ~attrs:Attr.none ("  + " ^ u.after.text))
                 updated;
               List.iter
@@ -1507,29 +1505,54 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
                     | Some rs -> " (" ^ rs ^ ")"
                     | None -> ""
                   in
-                  emit_railed ~rail_tone:Theme.Status_critical
+                  push_railed ~rail_tone:Theme.Status_critical
                     ~fg:theme.status_critical ~attrs:Attr.bold
                     (Printf.sprintf "- [%s] rev %d · %s%s" r.category
                        r.removed_at_rev r.removed_by reason_s);
-                  emit_railed ~rail_tone:Theme.Status_critical
+                  push_railed ~rail_tone:Theme.Status_critical
                     ~fg:theme.text_muted ~attrs:Attr.italic ("  " ^ r.text))
                 retracted;
               List.iter
                 (fun (inv : Wire_knowledge.memory_invalidated_fact) ->
-                  emit_railed ~rail_tone:Theme.Status_attention
+                  push_railed ~rail_tone:Theme.Status_attention
                     ~fg:theme.status_attention ~attrs:Attr.bold
                     (Printf.sprintf "! rev %d · missing premises: %s" inv.at_rev
                        (String.concat ", " inv.missing_premise_ids));
-                  emit_railed ~rail_tone:Theme.Status_attention
+                  push_railed ~rail_tone:Theme.Status_attention
                     ~fg:theme.text_secondary ~attrs:Attr.none ("  " ^ inv.text))
                 invalidated;
               if
                 added = [] && updated = [] && retracted = [] && invalidated = []
               then
-                emit_railed ~fg:theme.text_muted ~attrs:Attr.italic
+                push_railed ~fg:theme.text_muted ~attrs:Attr.italic
                   (Ops_common.say model
                      ~ko:"선택한 기간 내 기억 변경 사항이 없습니다."
                      ~en:"No memory changes recorded in this window.");
+              let rows = List.rev !rows_acc in
+              let vis_h = Int.max 1 (bottom - !y) in
+              let max_scroll = Int.max 0 (List.length rows - vis_h) in
+              let scroll =
+                Int.min max_scroll (Int.max 0 model.nav.dive_scroll_offset)
+              in
+              List.iter
+                (fun (rail_tone, fg, attrs, line) ->
+                  if !y < bottom then begin
+                    let x0 =
+                      match rail_tone with
+                      | Some tok ->
+                          Card.draw_left_rail ~bg ~tone:tok grid ~x:content.x
+                            ~y:!y ~h:1 ~theme;
+                          content.x + 2
+                      | None -> content.x + 2
+                    in
+                    let st = Style.make ~fg:(Color.of_rgb fg) ~bg ~attrs () in
+                    ignore
+                      (Ops_common.put_line ~clip:content grid ~x:x0 ~y:!y
+                         ~max_w:(Int.max 0 (Rect.right content - x0))
+                         ~style:st line);
+                    incr y
+                  end)
+                (Store_scroll.drop scroll rows);
               draw_librarian_footer writer_status
             end
         | Wire_knowledge.World_diff { counts; _ } ->
@@ -1605,44 +1628,18 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
         (fun (p : Wire_knowledge.board_post) -> String.equal p.author name)
         (Knowledge_store.filtered_posts model.knowledge)
     in
-    let skip = Int.max 0 model.nav.dive_scroll_offset in
-    let vrow = ref 0 in
-    let y = ref l_content.y in
-    let bottom = Rect.bottom l_content in
-    let emit_hairline label =
-      let cur = !vrow in
-      incr vrow;
-      if cur >= skip && !y < bottom then begin
-        Card.draw_hairline ~pad_x:0 ~bg ~label grid ~rect:l_content ~y:!y ~theme;
-        incr y
-      end
-    in
-    let emit ~fg ~attrs line =
-      let cur = !vrow in
-      incr vrow;
-      if cur >= skip && !y < bottom then begin
-        let st = Style.make ~fg:(Color.of_rgb fg) ~bg ~attrs () in
-        ignore
-          (Ops_common.put_line ~clip:l_content grid ~x:l_content.x ~y:!y
-             ~max_w:l_content.w ~style:st line);
-        incr y
-      end
+    let rows_acc = ref [] in
+    let push_hairline label = rows_acc := `Hairline label :: !rows_acc in
+    let push_line ~fg ~attrs line =
+      rows_acc := `Line (fg, attrs, line) :: !rows_acc
     in
     let total_tasks = List.length keeper_tasks in
-    let shown_tasks =
-      if skip > 0 then keeper_tasks else List.take 5 keeper_tasks
-    in
-    let tasks_count_lbl =
-      if total_tasks > List.length shown_tasks then
-        Printf.sprintf "%d/%d" (List.length shown_tasks) total_tasks
-      else Int.to_string total_tasks
-    in
-    emit_hairline
-      (Printf.sprintf "%s (%s)"
+    push_hairline
+      (Printf.sprintf "%s (%d)"
          (Ops_common.say model ~ko:"할당 작업" ~en:"Assigned Tasks")
-         tasks_count_lbl);
+         total_tasks);
     if keeper_tasks = [] then
-      emit ~fg:theme.text_muted ~attrs:Attr.italic
+      push_line ~fg:theme.text_muted ~attrs:Attr.italic
         (Ops_common.say model ~ko:"할당된 작업이 없습니다" ~en:"No assigned tasks")
     else
       List.iter
@@ -1655,24 +1652,16 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                 Glyph.to_utf8 Glyph.Warning_triangle ^ " "
                 ^ Ops_common.say model ~ko:"미연결" ~en:"unlinked"
           in
-          emit ~fg:(Theme.status_color theme tok) ~attrs:Attr.none
+          push_line ~fg:(Theme.status_color theme tok) ~attrs:Attr.none
             (Printf.sprintf "%s %s %s %s" (Glyph.to_utf8 g) tk.id tk.title gl))
-        shown_tasks;
+        keeper_tasks;
     let total_scheds = List.length keeper_scheds in
-    let shown_scheds =
-      if skip > 0 then keeper_scheds else List.take 4 keeper_scheds
-    in
-    let scheds_count_lbl =
-      if total_scheds > List.length shown_scheds then
-        Printf.sprintf "%d/%d" (List.length shown_scheds) total_scheds
-      else Int.to_string total_scheds
-    in
-    emit_hairline
-      (Printf.sprintf "%s (%s)"
+    push_hairline
+      (Printf.sprintf "%s (%d)"
          (Ops_common.say model ~ko:"예약 일정" ~en:"Schedules")
-         scheds_count_lbl);
+         total_scheds);
     if keeper_scheds = [] then
-      emit ~fg:theme.text_muted ~attrs:Attr.italic
+      push_line ~fg:theme.text_muted ~attrs:Attr.italic
         (Ops_common.say model ~ko:"등록된 일정이 없습니다" ~en:"No scheduled jobs")
     else
       List.iter
@@ -1684,53 +1673,52 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
           let summary =
             match sc.payload_summary with Some s -> " · " ^ s | None -> ""
           in
-          emit ~fg:(Theme.status_color theme wake_tok) ~attrs:Attr.none
+          push_line ~fg:(Theme.status_color theme wake_tok) ~attrs:Attr.none
             (Printf.sprintf "%s · %s%s" sc.recurrence_summary wake_txt summary))
-        shown_scheds;
+        keeper_scheds;
     let total_posts = List.length keeper_posts in
-    let avail_post_rows = Int.max 0 (bottom - (!y + 1)) in
-    let posts_overflow = skip = 0 && total_posts > avail_post_rows in
-    let shown_post_limit =
-      if posts_overflow then Int.max 0 (avail_post_rows - 1) else total_posts
-    in
-    let shown_posts = List.take shown_post_limit keeper_posts in
-    let posts_count_lbl =
-      if posts_overflow && shown_post_limit > 0 then
-        Printf.sprintf "%d/%d" (List.length shown_posts) total_posts
-      else Int.to_string total_posts
-    in
-    emit_hairline
-      (Printf.sprintf "%s (%s)"
+    push_hairline
+      (Printf.sprintf "%s (%d)"
          (Ops_common.say model ~ko:"최근 보드 글" ~en:"Recent Board Posts")
-         posts_count_lbl);
+         total_posts);
     if keeper_posts = [] then
-      emit ~fg:theme.text_muted ~attrs:Attr.italic
+      push_line ~fg:theme.text_muted ~attrs:Attr.italic
         (Ops_common.say model ~ko:"최근 보드 작성 글 없음"
            ~en:"No recent board posts")
-    else begin
+    else
       List.iter
         (fun (p : Wire_knowledge.board_post) ->
           let hearth =
             match p.hearth with Some h -> "#" ^ h | None -> "#all"
           in
-          emit ~fg:theme.text_primary ~attrs:Attr.none
+          push_line ~fg:theme.text_primary ~attrs:Attr.none
             (Printf.sprintf "%s %s (%s+%d · %dc)" hearth p.title
                (Glyph.to_utf8 Glyph.Delta_up)
                p.score p.comment_count))
-        shown_posts;
-      let hidden_posts = total_posts - List.length shown_posts in
-      if hidden_posts > 0 then
-        emit ~fg:theme.text_muted ~attrs:Attr.italic
-          (Ops_common.say model
-             ~ko:
-               (Printf.sprintf "%s 외 %d건"
-                  (Glyph.to_utf8 Glyph.Ellipsis)
-                  hidden_posts)
-             ~en:
-               (Printf.sprintf "%s +%d more"
-                  (Glyph.to_utf8 Glyph.Ellipsis)
-                  hidden_posts))
-    end;
+        keeper_posts;
+    let rows = List.rev !rows_acc in
+    let vis_h = Int.max 1 l_content.h in
+    let max_skip = Int.max 0 (List.length rows - vis_h) in
+    let skip = Int.min max_skip (Int.max 0 model.nav.dive_scroll_offset) in
+    let y = ref l_content.y in
+    let bottom = Rect.bottom l_content in
+    List.iter
+      (function
+        | `Hairline label ->
+            if !y < bottom then begin
+              Card.draw_hairline ~pad_x:0 ~bg ~label grid ~rect:l_content ~y:!y
+                ~theme;
+              incr y
+            end
+        | `Line (fg, attrs, line) ->
+            if !y < bottom then begin
+              let st = Style.make ~fg:(Color.of_rgb fg) ~bg ~attrs () in
+              ignore
+                (Ops_common.put_line ~clip:l_content grid ~x:l_content.x ~y:!y
+                   ~max_w:l_content.w ~style:st line);
+              incr y
+            end)
+      (Store_scroll.drop skip rows);
     (* Right/Bottom: Candle Balance + Violet Half-Life Decay Gauge + Portrait Ornaments (NO nested Card!) *)
     if not (Rect.is_empty right_rect) then begin
       let r_content = Card.pad_inner ~pad_x right_rect in
@@ -2617,7 +2605,7 @@ let form_value_of_patch_op (f : Wire_config.schema_field) op =
             Form.Text_val value)
     | Wire_config.Set_string_array { values; _ } ->
         Form.Text_val (String.concat ", " values)
-    | Wire_config.Remove_key _ -> Form.Text_val ""
+    | Wire_config.Remove_key _ -> Form.Text_val "(removed)"
 
 let parse_hunk_header line =
   let len = String.length line in
@@ -2702,19 +2690,21 @@ let numbered_of_patch_response (resp : Wire_config.patch_response) =
 let build_keeper_form_state ~(model : Model.t) ~name ~target_matches
     ~suppress_local_diff (keeper_opt : Wire_fleet.keeper_summary option) =
   let cfg = model.config in
-  let schema_fields =
+  let schema_loaded_for_target =
     match Observed.to_option cfg.schema with
-    | Some schema
-      when target_matches
-           && Config_store.equal_config_target schema.target
-                (Wire_config.Target_keeper name) ->
-        List.concat_map
-          (fun (sec : Wire_config.schema_section) -> sec.fields)
-          schema.sections
-    | Some _ | None -> []
+    | Some schema ->
+        target_matches
+        && Config_store.equal_config_target schema.target
+             (Wire_config.Target_keeper name)
+    | None -> false
+  in
+  let schema_fields =
+    if schema_loaded_for_target then
+      Config_store.keeper_visible_fields ~lang:model.lang cfg
+    else []
   in
   let fields =
-    if schema_fields <> [] then
+    if schema_loaded_for_target then
       List.map
         (fun (f : Wire_config.schema_field) ->
           let is_sec = is_secret_schema_field f in
@@ -2727,7 +2717,7 @@ let build_keeper_form_state ~(model : Model.t) ~name ~target_matches
           let current_val =
             match cfg.editing_field_key with
             | Some ek when (not is_sec) && String.equal ek f.full_key ->
-                Form.Text_val cfg.editing_buffer
+                Form.Text_val (cfg.editing_buffer ^ "_")
             | Some _ | None -> staged_val
           in
           let help =
@@ -2808,63 +2798,22 @@ let build_keeper_form_state ~(model : Model.t) ~name ~target_matches
           ]
       | None -> []
   in
-  let filter = if target_matches then cfg.search_query else "" in
-  let st0 = { (Form.create fields) with filter } in
-  let vis = Form.visible_indices st0 in
-  let in_config_view =
-    match Model.active_dive model with
-    | Some (Nav.Dive_keeper { tab = Nav.Keeper_config; _ }) -> true
-    | Some
-        ( Nav.Dive_keeper
-            {
-              tab =
-                ( Nav.Keeper_chat
-                | Nav.Keeper_memory
-                | Nav.Keeper_work_candle
-                | Nav.Keeper_sandbox );
-              _;
-            }
-        | Nav.Dive_work _
-        | Nav.Dive_knowledge _
-        | Nav.Dive_infra _ ) ->
-        false
-    | None ->
-        Nav.equal_workspace model.nav.workspace Nav.Keepers
-        && Nav.equal_keeper_tab model.fleet.keeper_dive_tab Nav.Keeper_config
-  in
+  (* Single-SSOT filtering already applied by Config_store.keeper_visible_fields:
+     pass filter = "" to Form.create so no duplicate Form.filter pass occurs. *)
+  let st0 = { (Form.create fields) with filter = "" } in
+  let len = Array.length st0.fields in
   let focused =
-    let vlen = List.length vis in
-    if vlen = 0 then 0
-    else if in_config_view || model.nav.dive_scroll_offset > 0 then
-      let clamped = Int.max 0 (Int.min (vlen - 1) model.nav.dive_scroll_offset) in
-      match List.nth_opt vis clamped with Some idx -> idx | None -> 0
-    else if not target_matches then 0
-    else
-      let matched_by_store_sel =
-        match Config_store.selected_field cfg with
-        | None -> None
-        | Some sf ->
-            let n = Array.length st0.fields in
-            let rec find i =
-              if i >= n then None
-              else if String.equal st0.fields.(i).key sf.full_key then Some i
-              else find (i + 1)
-            in
-            find 0
-      in
-      match matched_by_store_sel with
-      | Some idx -> idx
-      | None ->
-          let clamped =
-            Int.max 0 (Int.min (vlen - 1) cfg.selected_field_index)
-          in
-          (match List.nth_opt vis clamped with Some idx -> idx | None -> 0)
+    if len = 0 then 0
+    else if target_matches then
+      Store_scroll.clamp_index len cfg.selected_field_index
+    else 0
   in
-  {
-    st0 with
-    focused;
-    editing = target_matches && Option.is_some cfg.editing_field_key;
-  }
+  ( {
+      st0 with
+      focused;
+      editing = target_matches && Option.is_some cfg.editing_field_key;
+    }
+  , schema_loaded_for_target )
 
 let render_config_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~name keeper_opt =
@@ -2880,15 +2829,22 @@ let render_config_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
     let dirty_n =
       if target_matches then Config_store.dirty_count model.config else 0
     in
+    let diff_hint =
+      if dirty_n > 0 then
+        Ops_common.say model ~ko:" · [Space] Diff" ~en:" · [Space] Diff"
+      else ""
+    in
     let hdr_str =
-      Printf.sprintf "%s %s %s %s %d %s"
-        (Ops_common.say model ~ko:"키퍼 설정 요약" ~en:"Scoped Keeper Settings")
+      Printf.sprintf "%s %s %s %s %d %s%s"
+        (Ops_common.say model ~ko:"키퍼 설정" ~en:"Keeper Settings")
         (Glyph.to_utf8 Glyph.Separator_dot)
         name
         (Glyph.to_utf8 Glyph.Separator_dot)
         dirty_n
-        (Ops_common.say model ~ko:"건 변경 대기 · [e] Settings에서 편집 · [/] 검색"
-           ~en:"staged · [e] Edit in Settings · [/] Search")
+        (Ops_common.say model
+           ~ko:"건 변경 대기 · [↑↓] 필드 · [←→] 값 변경 · [Enter] 편집 · [Ctrl+S] 저장 · [[ ]] 탭"
+           ~en:"staged · [↑↓] Field · [←→] Cycle · [Enter] Edit · [Ctrl+S] Save · [[ ]] Tabs")
+        diff_hint
     in
     let hdr_st =
       if dirty_n > 0 then Typography.status ~bg ~bold:true theme Theme.Status_attention
@@ -2923,7 +2879,7 @@ let render_config_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
     let form_rect, diff_rect =
       Rect.split_v rest ~top_h:(Int.max 0 (rest.h - diff_h))
     in
-    let form_st =
+    let form_st, schema_loaded_for_target =
       build_keeper_form_state ~model ~name ~target_matches
         ~suppress_local_diff:(diff_h >= 2) keeper_opt
     in
@@ -2938,12 +2894,31 @@ let render_config_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
         reload_scope = Form.Hot_reload;
       }
     in
-    if Array.length form_st.fields = 0 then
-      Ops_common.draw_observed_empty grid ~rect:form_rect ~theme
-        ~lang:model.lang model.config.schema
-        ~empty_msg:
-          (Say.make ~ko:"키퍼 설정 스키마를 불러오는 중"
-             ~en:"Loading keeper configuration schema")
+    if Array.length form_st.fields = 0 then begin
+      if
+        schema_loaded_for_target
+        && not (String.equal (String.trim model.config.search_query) "")
+      then begin
+        let content = Card.pad_inner ~pad_x form_rect in
+        if not (Rect.is_empty content) then
+          ignore
+            (Ops_common.put_line ~clip:content grid ~x:content.x ~y:content.y
+               ~max_w:content.w ~style:(Typography.whisper ~bg theme)
+               (Ops_common.say model
+                  ~ko:
+                    (Printf.sprintf "검색어 \"%s\"에 일치하는 설정이 없습니다 ([Esc] 초기화)"
+                       model.config.search_query)
+                  ~en:
+                    (Printf.sprintf "No settings match \"%s\" ([Esc] Clear)"
+                       model.config.search_query)))
+      end
+      else
+        Ops_common.draw_observed_empty grid ~rect:form_rect ~theme
+          ~lang:model.lang model.config.schema
+          ~empty_msg:
+            (Say.make ~ko:"키퍼 설정 스키마를 불러오는 중"
+               ~en:"Loading keeper configuration schema")
+    end
     else
       ignore
         (Form.draw grid ~rect:form_rect ~theme ~lang:model.lang ~pad_x
@@ -2962,7 +2937,8 @@ let render_config_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
             ~h:(Int.max 0 (diff_c.h - 1))
         in
         ignore
-          (Diff.draw grid ~rect:body ~theme ~language:Code_lexer.Toml numbered)
+          (Diff.draw grid ~rect:body ~theme ~language:Code_lexer.Toml
+             ~scroll:model.config.dry_run_scroll_offset numbered)
     | Some _ | None -> ()
 
 (* --- Embedded Live Keeper Preview Header + 4-Metric Telemetry Strip --- *)
@@ -3181,9 +3157,20 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
     let has_running_turn = Chat_transcript.is_phase_interruptible chat_phase in
     let hotkey =
       if embedded then
+        if Nav.equal_keeper_tab tab Nav.Keeper_config then
+          Some
+            (Ops_common.say model
+               ~ko:"[←→] 값 · [Enter] 편집 · [Ctrl+S] 저장 · [[ ]] 탭"
+               ~en:"[←→] Cycle · [Enter] Edit · [Ctrl+S] Save · [[ ]] Tabs")
+        else
+          Some
+            (Ops_common.say model ~ko:"[Ctrl+T] 큐 · [z] 확대"
+               ~en:"[Ctrl+T] Queue · [z] Zoom")
+      else if Nav.equal_keeper_tab tab Nav.Keeper_config then
         Some
-          (Ops_common.say model ~ko:"[Ctrl+T] 큐 · [z] 확대"
-             ~en:"[Ctrl+T] Queue · [z] Zoom")
+          (Ops_common.say model
+             ~ko:"[←→] 값 변경 · [Enter] 편집 · [Ctrl+S] 저장 · [[ ]] 탭 · [Esc] 목록"
+             ~en:"[←→] Cycle · [Enter] Edit · [Ctrl+S] Save · [[ ]] Tabs · [Esc] Fleet")
       else if Nav.equal_keeper_tab tab Nav.Keeper_chat && has_running_turn then
         Some
           (Ops_common.say model ~ko:"[Esc/Ctrl+X] 턴 중단 · [y] 복사 · [←→] 탭"

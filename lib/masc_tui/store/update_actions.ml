@@ -296,18 +296,54 @@ let schema_has_field_key (config : Config_store.t) key =
             sec.fields)
         s.sections
 
+let schema_field_by_key (config : Config_store.t) key =
+  match Observed.to_option config.schema with
+  | None -> None
+  | Some s ->
+      List.find_map
+        (fun (sec : Wire_config.schema_section) ->
+          List.find_opt
+            (fun (f : Wire_config.schema_field) -> String.equal f.full_key key)
+            sec.fields)
+        s.sections
+
+let op_of_schema_field_original (f : Wire_config.schema_field) =
+  match f.value with
+  | Wire_config.Val_string value ->
+      Some (Wire_config.Set_scalar { table = f.table; key = f.key; value })
+  | Wire_config.Val_bool value ->
+      Some (Wire_config.Set_bool { table = f.table; key = f.key; value })
+  | Wire_config.Val_int _
+  | Wire_config.Val_float _
+  | Wire_config.Val_string_list _
+  | Wire_config.Val_structured _
+  | Wire_config.Val_secret _
+  | Wire_config.Val_null ->
+      None
+
 let apply_staged_tui_pref_if_needed ~now ~key (m : Model.t)
     (config : Config_store.t) : (Model.t * Cmd.t list) option =
   if not (Config_store.is_tui_pref_key key) then None
   else
-    match Config_store.String_map.find_opt key config.dirty_fields with
+    let op_opt, was_staged =
+      match Config_store.String_map.find_opt key config.dirty_fields with
+      | Some op -> (Some op, true)
+      | None -> (
+          (* Stepping a tui.* field back to its original schema value calls
+             unstage_patch, so synthesize the original value op to live-revert
+             theme/language/preferences and persist via Post_tui_preference. *)
+          match schema_field_by_key config key with
+          | Some f -> (op_of_schema_field_original f, false)
+          | None -> (None, false))
+    in
+    match op_opt with
     | None -> None
     | Some op ->
         let config1 =
           Config_store.apply_tui_pref_op ~observed_at:now ~full_key:key op config
         in
         let config2 =
-          if schema_has_field_key config1 key then config1
+          if (not was_staged) || schema_has_field_key config1 key then config1
           else Config_store.unstage_patch ~full_key:key config1
         in
         let m1 = { m with config = config2 } in
@@ -359,6 +395,94 @@ let apply_staged_tui_pref_if_needed ~now ~key (m : Model.t)
                  ~en:"TUI preference updated")
               m2
           , cmds )
+
+let save_settings_config ~now (m : Model.t) =
+  match Config_store.build_patch_request ~dry_run:false m.config with
+  | Ok req ->
+      let config = Config_store.mark_save_in_flight m.config in
+      ( { m with config }
+      , [ Cmd.Http_post { epoch = m.epoch; req = Cmd.Post_config_patch req } ] )
+  | Error reason ->
+      ( Model.with_toast ~now ~level:Model.Toast_warning (Say.literal reason) m
+      , [] )
+
+let step_settings_pane_lr ~now (m : Model.t) (dir : Keymap.move_dir) =
+  let two_pane = Config_store.is_two_pane_width ~cols:m.viewport.cols in
+  let cfg0 =
+    if not two_pane then
+      Config_store.set_pane Config_store.Pane_inspector m.config
+    else m.config
+  in
+  match cfg0.settings_pane with
+  | Config_store.Pane_tree ->
+      let config =
+        match dir with
+        | Keymap.Left -> Config_store.collapse_or_leave cfg0
+        | Keymap.Right -> Config_store.expand_or_enter cfg0
+        | Keymap.Up
+        | Keymap.Down
+        | Keymap.Page_up
+        | Keymap.Page_down
+        | Keymap.Home
+        | Keymap.End ->
+            cfg0
+      in
+      let nav = { m.nav with overlay = Some (Nav.Settings config.active_tab) } in
+      ({ m with nav; config }, [])
+  | Config_store.Pane_inspector -> (
+      let delta =
+        match dir with
+        | Keymap.Left -> -1
+        | Keymap.Right -> 1
+        | Keymap.Up
+        | Keymap.Down
+        | Keymap.Page_up
+        | Keymap.Page_down
+        | Keymap.Home
+        | Keymap.End ->
+            0
+      in
+      let sel_key_opt =
+        Option.map
+          (fun (f : Wire_config.schema_field) -> f.full_key)
+          (Config_store.selected_field cfg0)
+      in
+      match Config_store.step_selected_field ~delta cfg0 with
+      | Ok (config, true) -> (
+          let config =
+            if not two_pane then { config with settings_pane = m.config.settings_pane }
+            else config
+          in
+          match
+            Option.bind sel_key_opt (fun key ->
+                apply_staged_tui_pref_if_needed ~now ~key m config)
+          with
+          | Some res -> res
+          | None -> ({ m with config }, []))
+      | Ok (_, false) ->
+          if Keymap.equal_move_dir dir Keymap.Left && two_pane then
+            let config = Config_store.collapse_or_leave cfg0 in
+            let nav =
+              { m.nav with overlay = Some (Nav.Settings config.active_tab) }
+            in
+            ({ m with nav; config }, [])
+          else
+            ( Model.with_toast ~now ~level:Model.Toast_info
+                (Say.make ~ko:"[Enter] 키로 텍스트 값을 편집하세요"
+                   ~en:"Press [Enter] to edit text value")
+                m
+            , [] )
+      | Error reason ->
+          if Keymap.equal_move_dir dir Keymap.Left && two_pane then
+            let config = Config_store.collapse_or_leave cfg0 in
+            let nav =
+              { m.nav with overlay = Some (Nav.Settings config.active_tab) }
+            in
+            ({ m with nav; config }, [])
+          else
+            ( Model.with_toast ~now ~level:Model.Toast_info (Say.literal reason)
+                m
+            , [] ))
 
 let focus_composer_for_slash (m : Model.t) =
   let cur = (Drafts.current_draft m.drafts).text in
@@ -842,42 +966,35 @@ and execute_action ~now (m : Model.t) action =
             | Nav.System_gate _ ) ->
             (m, [])
         | None -> (
-            match Model.active_dive m with
-            | Some (Nav.Dive_keeper { tab = Nav.Keeper_config; _ }) ->
-                ( {
-                    m with
-                    nav = { m.nav with filter_focused = true };
-                    drafts = Drafts.set_focus false m.drafts;
-                  }
-                , [] )
-            | Some
-                ( Nav.Dive_keeper
-                    {
-                      tab =
-                        ( Nav.Keeper_chat
-                        | Nav.Keeper_memory
-                        | Nav.Keeper_work_candle
-                        | Nav.Keeper_sandbox );
-                      _;
-                    }
-                | Nav.Dive_work _
-                | Nav.Dive_knowledge _
-                | Nav.Dive_infra _ ) ->
-                focus_composer_for_slash m
-            | None -> (
-                match m.nav.workspace with
-                | Nav.Pulse -> focus_composer_for_slash m
-                | Nav.Work
-                | Nav.Knowledge
-                | Nav.Keepers
-                | Nav.Runtime
-                | Nav.Infra ->
-                    ( {
-                        m with
-                        nav = { m.nav with filter_focused = true };
-                        drafts = Drafts.set_focus false m.drafts;
-                      }
-                    , [] ))))
+            if Model.is_keeper_config_active m then
+              ( {
+                  m with
+                  nav = { m.nav with filter_focused = true };
+                  drafts = Drafts.set_focus false m.drafts;
+                }
+              , [] )
+            else
+              match Model.active_dive m with
+              | Some
+                  ( Nav.Dive_keeper _
+                  | Nav.Dive_work _
+                  | Nav.Dive_knowledge _
+                  | Nav.Dive_infra _ ) ->
+                  focus_composer_for_slash m
+              | None -> (
+                  match m.nav.workspace with
+                  | Nav.Pulse -> focus_composer_for_slash m
+                  | Nav.Work
+                  | Nav.Knowledge
+                  | Nav.Keepers
+                  | Nav.Runtime
+                  | Nav.Infra ->
+                      ( {
+                          m with
+                          nav = { m.nav with filter_focused = true };
+                          drafts = Drafts.set_focus false m.drafts;
+                        }
+                      , [] ))))
   | Keymap.Dive_selected -> Update_nav.dive_selected m
   | Keymap.Confirm_selected -> (
       if Option.is_none m.nav.overlay && Drafts.is_focused m.drafts then
@@ -975,17 +1092,19 @@ and execute_action ~now (m : Model.t) action =
               }
             , [] )
           else
+          let close_overlay_and_resync (base_m : Model.t) =
             let closed =
               {
-                m with
-                nav = { m.nav with overlay = None; filter_focused = false };
+                base_m with
+                nav = { base_m.nav with overlay = None; filter_focused = false };
+                config = Config_store.cancel_edit_field base_m.config;
                 inline_modal = None;
               }
               |> Update_nav.sync_config_for_keeper_view
             in
             let target_changed =
               not
-                (Config_store.equal_config_target m.config.target
+                (Config_store.equal_config_target base_m.config.target
                    closed.config.target)
             in
             let cmds =
@@ -993,6 +1112,8 @@ and execute_action ~now (m : Model.t) action =
               else []
             in
             (closed, cmds)
+          in
+          close_overlay_and_resync m
       | Some Nav.Incidents ->
           if not (String.equal m.incidents.filter_query "") then
             ( {
@@ -1002,12 +1123,24 @@ and execute_action ~now (m : Model.t) action =
               }
             , [] )
           else
-            ( {
+            let closed =
+              {
                 m with
                 nav = { m.nav with overlay = None; filter_focused = false };
+                config = Config_store.cancel_edit_field m.config;
                 inline_modal = None;
               }
-            , [] )
+              |> Update_nav.sync_config_for_keeper_view
+            in
+            let cmds =
+              if
+                not
+                  (Config_store.equal_config_target m.config.target
+                     closed.config.target)
+              then View_fetches.fetches_for_current_view closed
+              else []
+            in
+            (closed, cmds)
       | Some (Nav.Inline_action kind) ->
           let drafts =
             match kind with
@@ -1022,24 +1155,48 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Board_new_post ->
                 m.drafts
           in
-          ( {
+          let closed =
+            {
               m with
               nav = { m.nav with overlay = None; filter_focused = false };
+              config = Config_store.cancel_edit_field m.config;
               drafts;
               inline_modal = None;
             }
-          , [] )
+            |> Update_nav.sync_config_for_keeper_view
+          in
+          let cmds =
+            if
+              not
+                (Config_store.equal_config_target m.config.target
+                   closed.config.target)
+            then View_fetches.fetches_for_current_view closed
+            else []
+          in
+          (closed, cmds)
       | Some
           ( Nav.Palette
           | Nav.Queue_context _
           | Nav.Help
           | Nav.System_gate Nav.Media_viewer ) ->
-          ( {
+          let closed =
+            {
               m with
               nav = { m.nav with overlay = None; filter_focused = false };
+              config = Config_store.cancel_edit_field m.config;
               inline_modal = None;
             }
-          , [] )
+            |> Update_nav.sync_config_for_keeper_view
+          in
+          let cmds =
+            if
+              not
+                (Config_store.equal_config_target m.config.target
+                   closed.config.target)
+            then View_fetches.fetches_for_current_view closed
+            else []
+          in
+          (closed, cmds)
       | None ->
           if m.nav.filter_focused then
             let cleared = Update_nav.set_active_filter_query "" m in
@@ -1051,26 +1208,13 @@ and execute_action ~now (m : Model.t) action =
                 ({ m with drafts = Drafts.dismiss_popup m.drafts }, [])
             | Update_nav.Composer_popup_none ->
                 ({ m with drafts = Drafts.set_focus false m.drafts }, [])
+          else if Model.is_keeper_config_active m
+                  && Config_store.is_editing_field m.config
+          then ({ m with config = Config_store.cancel_edit_field m.config }, [])
           else
             let keeper_config_has_search =
-              match Model.active_dive m with
-              | Some (Nav.Dive_keeper { tab = Nav.Keeper_config; _ }) ->
-                  not (String.equal m.config.search_query "")
-              | Some
-                  ( Nav.Dive_keeper
-                      {
-                        tab =
-                          ( Nav.Keeper_chat
-                          | Nav.Keeper_memory
-                          | Nav.Keeper_work_candle
-                          | Nav.Keeper_sandbox );
-                        _;
-                      }
-                  | Nav.Dive_work _
-                  | Nav.Dive_knowledge _
-                  | Nav.Dive_infra _ )
-              | None ->
-                  false
+              Model.is_keeper_config_active m
+              && not (String.equal m.config.search_query "")
             in
             if keeper_config_has_search then
               ({ m with config = Config_store.set_search_query "" m.config }, [])
@@ -1210,6 +1354,13 @@ and execute_action ~now (m : Model.t) action =
                       if m.nav.zoomed then
                         ({ m with nav = { m.nav with zoomed = false } }, [])
                       else if
+                        Nav.equal_workspace m.nav.workspace Nav.Keepers
+                        && m.nav.pane_index = 1
+                        && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                             Nav.Keeper_config
+                      then
+                        ({ m with nav = { m.nav with pane_index = 0 } }, [])
+                      else if
                         not (String.equal (Update_nav.current_filter_query m) "")
                       then (Update_nav.set_active_filter_query "" m, [])
                       else if
@@ -1283,7 +1434,34 @@ and execute_action ~now (m : Model.t) action =
       ({ m with drafts = Drafts.insert_newline m.drafts }, [])
   | Keymap.Submit_steer -> submit_composer ~now ~mode:Drafts.Mode_steer m
   | Keymap.Submit_followup -> submit_composer ~now ~mode:Drafts.Mode_follow_up m
-  | Keymap.Move dir -> Update_nav.apply_move m dir
+  | Keymap.Move dir -> (
+      match m.nav.overlay, dir with
+      | Some (Nav.Settings _), (Keymap.Left | Keymap.Right) ->
+          step_settings_pane_lr ~now m dir
+      | ( Some (Nav.Settings _)
+        , ( Keymap.Up
+          | Keymap.Down
+          | Keymap.Page_up
+          | Keymap.Page_down
+          | Keymap.Home
+          | Keymap.End ) )
+      | ( ( Some
+              ( Nav.Palette
+              | Nav.Incidents
+              | Nav.Queue_context _
+              | Nav.Inline_action _
+              | Nav.Help
+              | Nav.System_gate _ )
+          | None )
+        , ( Keymap.Up
+          | Keymap.Down
+          | Keymap.Left
+          | Keymap.Right
+          | Keymap.Page_up
+          | Keymap.Page_down
+          | Keymap.Home
+          | Keymap.End ) ) ->
+          Update_nav.apply_move m dir)
   | Keymap.Toggle_expand -> (
       match m.nav.overlay with
       | Some (Nav.Settings _) -> (

@@ -2464,6 +2464,7 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                     in
                     ignore
                       (Markdown.draw grid ~rect:q_rect ~theme ~osc8:true
+                         ~scroll:model.work.detail_scroll_offset
                          (Ops_common.rewrite_masc_links_for_markdown ta.question));
                     y := !y + q_h
                   end;

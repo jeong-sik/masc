@@ -2403,22 +2403,34 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
         let avail_h = Int.max 0 (cascade_inner.h - reserve_ext) in
         let visual_rows = ref [] in
         let sel_v_row = ref None in
+        let sel_v_end = ref None in
         List.iteri
           (fun idx (lane : Wire_runtime.failover_lane) ->
             let is_sel = Int.equal idx sel_idx in
-            if is_sel then sel_v_row := Some (List.length !visual_rows);
+            let row_start = List.length !visual_rows in
             visual_rows := `Lane (lane, is_sel) :: !visual_rows;
             let slot_n = List.length lane.runtime_ids in
             List.iteri
               (fun si rid ->
                 visual_rows := `Slot (si, slot_n, rid, is_sel) :: !visual_rows)
-              lane.runtime_ids)
+              lane.runtime_ids;
+            if is_sel then begin
+              sel_v_row := Some row_start;
+              sel_v_end := Some (row_start + slot_n)
+            end)
           lanes;
         let v_arr = Array.of_list (List.rev !visual_rows) in
         let total_v = Array.length v_arr in
-        let start_v, _ =
+        let start_v0, _ =
           Table.compute_viewport ~total_rows:total_v ~viewport_rows:avail_h
             ~scroll:rt.scroll_offset ~selected:!sel_v_row
+        in
+        let start_v =
+          match !sel_v_row, !sel_v_end with
+          | Some r0, Some r1 when avail_h > 0 && r1 >= start_v0 + avail_h ->
+              let needed = Int.min r0 (Int.max 0 (r1 - avail_h + 1)) in
+              Int.min (Int.max 0 (total_v - avail_h)) needed
+          | _ -> start_v0
         in
         let y = ref cascade_inner.y in
         for row_i = 0 to avail_h - 1 do

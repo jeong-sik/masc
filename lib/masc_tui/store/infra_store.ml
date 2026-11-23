@@ -1,6 +1,7 @@
 open Masc_tui_core
 open Masc_tui_keymap
 open Masc_tui_protocol
+open Masc_tui_ui
 
 let max_logs = 512
 let max_activity = 256
@@ -474,24 +475,75 @@ let selected_repository t =
   let repos = filtered_repositories t in
   List.nth_opt repos (clamp_index (List.length repos) t.selected_index)
 
+let repo_scoped_file_changes t =
+  let all_changes = filtered_file_changes t in
+  match selected_repository t with
+  | Some r -> (
+      if r.keepers = [] then []
+      else
+        match t.file_changes_keeper with
+        | Some k when List.exists (String.equal k) r.keepers -> all_changes
+        | Some _ | None -> [])
+  | None -> all_changes
+
 let selected_file_change t =
   let changes = filtered_file_changes t in
   List.nth_opt changes (clamp_index (List.length changes) t.change_selected_index)
+
+let selected_repo_file_change t =
+  let changes = repo_scoped_file_changes t in
+  List.nth_opt changes
+    (clamp_index (List.length changes) t.change_selected_index)
 
 let selected_log t =
   let vis = visible_logs t in
   List.nth_opt vis (clamp_index (List.length vis) t.selected_index)
 
+let sandbox_inspector_event_count ~keeper t =
+  let keeper_logs =
+    List.filter
+      (fun (e : Wire_infra.system_log_entry) ->
+        match e.keeper with Some k -> String.equal k keeper | None -> false)
+      t.logs
+  in
+  let display_logs =
+    if keeper_logs <> [] then keeper_logs
+    else
+      List.filter
+        (fun (e : Wire_infra.system_log_entry) ->
+          contains_ci ~needle:"sandbox" e.source
+          || contains_ci ~needle:"vm" e.module_name
+          || contains_ci ~needle:"ssh" e.module_name)
+        t.logs
+  in
+  let keeper_acts =
+    List.filter
+      (fun (ev : activity_row) ->
+        match ev.keeper with Some k -> String.equal k keeper | None -> false)
+      t.activity_events
+  in
+  List.length display_logs + List.length keeper_acts
+
 let adjust_scroll = Store_scroll.adjust_scroll
 
 let reset_detail_scroll t = { t with detail_scroll_offset = 0; diff_scroll_offset = 0 }
 
-let move_selection ?(pane_index = 0) ?viewport_rows ~delta t =
+let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t =
   match t.active_tab with
   | Nav.Infra_sandboxes ->
       if pane_index = 1 then
+        let max_scroll =
+          match max_detail_scroll with
+          | Some ms -> max 0 ms
+          | None -> (
+              match selected_sandbox_keeper t with
+              | Some kp ->
+                  let vis = max 1 (Option.value viewport_rows ~default:8) in
+                  max 0 (sandbox_inspector_event_count ~keeper:kp t - vis)
+              | None -> 0)
+        in
         let detail_scroll_offset =
-          Store_scroll.clamp_scroll ~max_scroll:64
+          Store_scroll.clamp_scroll ~max_scroll
             (t.detail_scroll_offset + delta)
         in
         { t with detail_scroll_offset }
@@ -511,20 +563,28 @@ let move_selection ?(pane_index = 0) ?viewport_rows ~delta t =
       match pane_index with
       | 1 ->
           let max_scroll =
-            match selected_file_change t with
-            | Some fc -> (
-                match fc.diff_preview with
-                | Some dp when not (String.equal dp "") ->
-                    max 1 (List.length (String.split_on_char '\n' dp) - 1)
-                | Some _ | None -> 64)
-            | None -> 64
+            match max_detail_scroll with
+            | Some ms -> max 0 ms
+            | None -> (
+                match selected_repo_file_change t with
+                | Some fc -> (
+                    match fc.diff_preview with
+                    | Some dp when not (String.equal dp "") ->
+                        let vis =
+                          max 1
+                            (Option.value viewport_rows
+                               ~default:Store_scroll.default_viewport_rows)
+                        in
+                        max 0 (List.length (Diff.parse_unified dp) - vis)
+                    | Some _ | None -> 0)
+                | None -> 0)
           in
           let diff_scroll_offset =
             Store_scroll.clamp_scroll ~max_scroll (t.diff_scroll_offset + delta)
           in
           { t with diff_scroll_offset }
       | 2 ->
-          let len = List.length (filtered_file_changes t) in
+          let len = List.length (repo_scoped_file_changes t) in
           let change_selected_index =
             clamp_index len (t.change_selected_index + delta)
           in
@@ -562,8 +622,23 @@ let move_selection ?(pane_index = 0) ?viewport_rows ~delta t =
             })
   | Nav.Infra_activity_logs ->
       if pane_index = 1 then
+        let max_scroll =
+          match max_detail_scroll with
+          | Some ms -> max 0 ms
+          | None -> (
+              match selected_log t with
+              | Some e ->
+                  let vis = max 1 (Option.value viewport_rows ~default:8) in
+                  let total =
+                    List.length
+                      (Json_tree.flatten ~max_depth:4 ~redact_secrets:true
+                         e.details)
+                  in
+                  max 0 (total - vis)
+              | None -> 0)
+        in
         let detail_scroll_offset =
-          Store_scroll.clamp_scroll ~max_scroll:64
+          Store_scroll.clamp_scroll ~max_scroll
             (t.detail_scroll_offset + delta)
         in
         { t with detail_scroll_offset }

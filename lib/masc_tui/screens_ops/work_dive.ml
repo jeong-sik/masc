@@ -150,82 +150,98 @@ let render_opt_in_json_tree grid ~(rect : Rect.t) ~(theme : Theme.t)
          ~scroll:model.nav.dive_scroll_offset lines)
   end
 
-let draw_evidence_checklist grid ~(rect : Rect.t) ~(theme : Theme.t)
-    ~(model : Model.t) (v : Wire_work.verification_request) =
+let draw_evidence_checklist ?(scroll = 0) grid ~(rect : Rect.t)
+    ~(theme : Theme.t) ~(model : Model.t) (v : Wire_work.verification_request) =
   if Rect.is_empty rect then ()
   else
     let bg = Color.of_rgb theme.surface_1 in
+    let rows_acc = ref [] in
+    List.iter
+      (fun req ->
+        let present =
+          List.exists
+            (fun ev -> Ops_common.contains_ci ~needle:req ev)
+            v.submitted_evidence
+        in
+        rows_acc := `Req (req, present) :: !rows_acc)
+      v.required_artifacts;
+    List.iter (fun ev -> rows_acc := `Ev ev :: !rows_acc) v.submitted_evidence;
+    (match v.evidence_projection_error with
+    | Some err -> rows_acc := `Err err :: !rows_acc
+    | None -> ());
+    let rows = List.rev !rows_acc in
+    let vis_h = Int.max 1 rect.h in
+    let max_skip = Int.max 0 (List.length rows - vis_h) in
+    let skip = Int.min max_skip (Int.max 0 scroll) in
     let y = ref rect.y in
     let bot = Rect.bottom rect in
     List.iter
-      (fun req ->
-        if !y < bot then begin
-          let present =
-            List.exists
-              (fun ev -> Ops_common.contains_ci ~needle:req ev)
-              v.submitted_evidence
-          in
-          let g, tok =
-            if present then (Glyph.Check_mark, Theme.Status_ok)
-            else (Glyph.Live_failing, Theme.Status_critical)
-          in
-          let st_g = Typography.status ~bg ~bold:true theme tok in
-          let st_txt =
-            if present then Typography.primary ~bg theme
-            else Typography.status ~bg theme Theme.Status_critical
-          in
-          let tag =
-            Printf.sprintf "%s %s: " (Glyph.to_utf8 g)
-              (Ops_common.say model ~ko:"필수" ~en:"Required")
-          in
-          let adv =
-            Ops_common.put_line ~clip:rect grid ~x:rect.x ~y:!y ~max_w:rect.w
-              ~style:st_g tag
-          in
-          ignore
-            (Ops_common.put_line ~clip:rect grid ~x:(rect.x + adv) ~y:!y
-               ~max_w:(Int.max 0 (rect.w - adv))
-               ~style:st_txt req);
-          incr y
-        end)
-      v.required_artifacts;
-    List.iter
-      (fun ev ->
-        if !y < bot then begin
-          let tag =
-            Printf.sprintf "%s %s: "
-              (Glyph.to_utf8 Glyph.Check_mark)
-              (Ops_common.say model ~ko:"증거" ~en:"Evidence")
-          in
-          let adv =
-            Ops_common.put_line ~clip:rect grid ~x:rect.x ~y:!y ~max_w:rect.w
-              ~style:(Typography.status ~bg ~bold:true theme Theme.Status_ok)
-              tag
-          in
-          ignore
-            (Ops_common.put_line ~clip:rect grid ~x:(rect.x + adv) ~y:!y
-               ~max_w:(Int.max 0 (rect.w - adv))
-               ~style:(Typography.primary ~bg theme)
-               ev);
-          incr y
-        end)
-      v.submitted_evidence;
-    match v.evidence_projection_error with
-    | Some err when !y < bot ->
-        Card.draw_left_rail ~bg ~tone:Theme.Status_critical grid ~x:rect.x
-          ~y:!y ~h:1 ~theme;
-        let line =
-          Printf.sprintf "%s %s: %s"
-            (Glyph.to_utf8 Glyph.Live_failing)
-            (Ops_common.say model ~ko:"증거 오류" ~en:"Evidence Error")
-            err
-        in
-        ignore
-          (Ops_common.put_line ~clip:rect grid ~x:(rect.x + 2) ~y:!y
-             ~max_w:(Int.max 0 (rect.w - 2))
-             ~style:(Typography.status ~bg ~bold:true theme Theme.Status_critical)
-             line)
-    | Some _ | None -> ()
+      (function
+        | `Req (req, present) ->
+            if !y < bot then begin
+              let g, tok =
+                if present then (Glyph.Check_mark, Theme.Status_ok)
+                else (Glyph.Live_failing, Theme.Status_critical)
+              in
+              let st_g = Typography.status ~bg ~bold:true theme tok in
+              let st_txt =
+                if present then Typography.primary ~bg theme
+                else Typography.status ~bg theme Theme.Status_critical
+              in
+              let tag =
+                Printf.sprintf "%s %s: " (Glyph.to_utf8 g)
+                  (Ops_common.say model ~ko:"필수" ~en:"Required")
+              in
+              let adv =
+                Ops_common.put_line ~clip:rect grid ~x:rect.x ~y:!y
+                  ~max_w:rect.w ~style:st_g tag
+              in
+              ignore
+                (Ops_common.put_line ~clip:rect grid ~x:(rect.x + adv) ~y:!y
+                   ~max_w:(Int.max 0 (rect.w - adv))
+                   ~style:st_txt req);
+              incr y
+            end
+        | `Ev ev ->
+            if !y < bot then begin
+              let tag =
+                Printf.sprintf "%s %s: "
+                  (Glyph.to_utf8 Glyph.Check_mark)
+                  (Ops_common.say model ~ko:"증거" ~en:"Evidence")
+              in
+              let adv =
+                Ops_common.put_line ~clip:rect grid ~x:rect.x ~y:!y
+                  ~max_w:rect.w
+                  ~style:(Typography.status ~bg ~bold:true theme Theme.Status_ok)
+                  tag
+              in
+              ignore
+                (Ops_common.put_line ~clip:rect grid ~x:(rect.x + adv) ~y:!y
+                   ~max_w:(Int.max 0 (rect.w - adv))
+                   ~style:(Typography.primary ~bg theme)
+                   ev);
+              incr y
+            end
+        | `Err err ->
+            if !y < bot then begin
+              Card.draw_left_rail ~bg ~tone:Theme.Status_critical grid
+                ~x:rect.x ~y:!y ~h:1 ~theme;
+              let line =
+                Printf.sprintf "%s %s: %s"
+                  (Glyph.to_utf8 Glyph.Live_failing)
+                  (Ops_common.say model ~ko:"증거 오류" ~en:"Evidence Error")
+                  err
+              in
+              ignore
+                (Ops_common.put_line ~clip:rect grid ~x:(rect.x + 2) ~y:!y
+                   ~max_w:(Int.max 0 (rect.w - 2))
+                   ~style:
+                     (Typography.status ~bg ~bold:true theme
+                        Theme.Status_critical)
+                   line);
+              incr y
+            end)
+      (Store_scroll.drop skip rows)
 
 let render_goal_dive ~goal_id ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) grid =
@@ -388,6 +404,11 @@ let render_goal_dive ~goal_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                         ~en:"No tasks linked to this goal"))
             end
             else
+              let linked_skip =
+                Int.min
+                  (Int.max 0 (List.length linked - Int.max 1 t_body.h))
+                  (Int.max 0 model.nav.dive_scroll_offset)
+              in
               List.iteri
                 (fun idx (tk : Wire_work.task) ->
                   let py = t_body.y + idx in
@@ -425,7 +446,7 @@ let render_goal_dive ~goal_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                            ~style:(Typography.whisper ~bg theme)
                            who)
                   end)
-                (List.take t_body.h linked);
+                (Store_scroll.drop linked_skip linked |> List.take t_body.h);
             if not (Rect.is_empty verif_r) then begin
               Card.draw_hairline ~pad_x:0 ~bg
                 ~label:
@@ -455,7 +476,8 @@ let render_goal_dive ~goal_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                     | [ a; b ] -> (a, b)
                     | _ -> (v_body, Rect.empty)
                   in
-                  draw_evidence_checklist grid ~rect:check_r ~theme ~model v;
+                  draw_evidence_checklist ~scroll:model.nav.dive_scroll_offset
+                    grid ~rect:check_r ~theme ~model v;
                   if not (Rect.is_empty diff_r) then
                     ignore
                       (Diff.draw grid ~rect:diff_r ~theme
@@ -756,7 +778,8 @@ let render_task_dive ~task_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                 | [ a; b ] -> (a, b)
                 | _ -> (vr, Rect.empty)
               in
-              draw_evidence_checklist grid ~rect:chk_r ~theme ~model v;
+              draw_evidence_checklist ~scroll:model.nav.dive_scroll_offset grid
+                ~rect:chk_r ~theme ~model v;
               if not (Rect.is_empty diff_r) then
                 ignore
                   (Diff.draw grid ~rect:diff_r ~theme
@@ -902,7 +925,7 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                 (Ops_common.say model ~ko:"증거 참조 체크리스트"
                    ~en:"Evidence Refs Checklist")
               grid ~rect:chk_r ~y:chk_r.y ~theme;
-            draw_evidence_checklist grid
+            draw_evidence_checklist ~scroll:model.nav.dive_scroll_offset grid
               ~rect:
                 (Rect.make ~x:chk_r.x ~y:(chk_r.y + 1) ~w:chk_r.w
                    ~h:(Int.max 0 (chk_r.h - 1)))

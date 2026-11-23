@@ -99,10 +99,20 @@ type viewport_geometry = {
   prose_w : int;
 }
 
+val keeper_content_rect_size : embedded:bool -> model:Model.t -> int * int
+(** Exact [(content_w, content_h)] of the tab content rect inside
+    [Keeper_dive.render_tabs_body] for both Dive ([embedded = false]) and
+    [4 Keepers] Split [pane 1] ([embedded = true]). *)
+
 val chat_viewport_geometry : model:Model.t -> viewport_geometry
 (** Exact Keeper Dive chat transcript viewport height and prose column width
     matching [Chrome.compute_layout], [Layout.inset_body], [Card.draw], and
     [Keeper_dive.render_chat_tab]. *)
+
+val chat_viewport_geometry_for :
+  embedded:bool -> model:Model.t -> viewport_geometry
+(** Parameterized {!chat_viewport_geometry} for both Dive ([embedded = false])
+    and [4 Keepers] Split [pane 1] ([embedded = true]). *)
 
 val count_transcript_rows : model:Model.t -> keeper:string -> width:int -> int
 (** Exact rendered transcript row count (history + active/unpersisted stream +
@@ -112,3 +122,8 @@ val count_transcript_rows : model:Model.t -> keeper:string -> width:int -> int
 val max_scroll_for_model : model:Model.t -> keeper:string -> int
 (** Exact upper bound [max 0 (total_rows - body_h)] for [chat_scroll_offset]
     matching [Keeper_dive.draw_transcript_rows]. *)
+
+val max_scroll_for_model_in :
+  embedded:bool -> model:Model.t -> keeper:string -> int
+(** Parameterized {!max_scroll_for_model} for both Dive ([embedded = false])
+    and [4 Keepers] Split [pane 1] ([embedded = true]). *)

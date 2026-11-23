@@ -1034,7 +1034,7 @@ let voice_state_of_drafts (drafts : Drafts.t) =
       Composer.Voice_recording { levels = Array.of_list levels; elapsed_s }
   | Drafts.Voice_transcribing -> Composer.Voice_transcribing
 
-let chat_viewport_geometry ~(model : Model.t) =
+let keeper_content_rect_size ~embedded ~(model : Model.t) =
   let cols = Int.max 0 model.viewport.cols in
   let rows = Int.max 0 model.viewport.rows in
   let breakpoint = Layout.classify_viewport ~cols ~rows in
@@ -1099,13 +1099,57 @@ let chat_viewport_geometry ~(model : Model.t) =
     Layout.inset_body breakpoint
       (Rect.make ~x:0 ~y:top_h ~w:cols ~h:body_outer_h)
   in
+  let target_rect =
+    if
+      embedded && (not model.nav.zoomed)
+      && (Layout.equal_breakpoint breakpoint Layout.Wide
+          || Layout.equal_breakpoint breakpoint Layout.Standard)
+      && body_outer.w >= 104
+    then
+      let split_gap = Layout.card_gap_x breakpoint in
+      let split_budget = Int.max 0 (body_outer.w - split_gap) in
+      let left_w =
+        Int.max 34
+          (Int.min 46
+             (int_of_float (Float.floor (float_of_int split_budget *. 0.36))))
+      in
+      match
+        Layout.split_h_bp breakpoint body_outer
+          [ Layout.Fixed left_w; Layout.Flex 1 ]
+      with
+      | [ _; right_rect ] -> right_rect
+      | _ -> body_outer
+    else body_outer
+  in
   (* Card.draw removes 1 cell border on each side when w >= 2 && h >= 2 *)
   let card_inner_w =
-    if body_outer.w >= 2 && body_outer.h >= 2 then body_outer.w - 2 else 0
+    if target_rect.w >= 2 && target_rect.h >= 2 then target_rect.w - 2 else 0
   in
   let card_inner_h =
-    if body_outer.w >= 2 && body_outer.h >= 2 then body_outer.h - 2 else 0
+    if target_rect.w >= 2 && target_rect.h >= 2 then target_rect.h - 2 else 0
   in
+  if not embedded then (card_inner_w, card_inner_h)
+  else
+    let has_keeper =
+      Option.is_some (Fleet_store.selected_keeper_summary model.fleet)
+    in
+    let after_hero_h =
+      if has_keeper && card_inner_h >= 16 then card_inner_h - 5
+      else card_inner_h
+    in
+    let content_h =
+      if after_hero_h >= 3 then
+        let body_h1 = after_hero_h - 1 in
+        if body_h1 >= 6 then body_h1 - 1 else body_h1
+      else after_hero_h
+    in
+    (card_inner_w, Int.max 0 content_h)
+
+let chat_viewport_geometry_for ~embedded ~(model : Model.t) =
+  let cols = Int.max 0 model.viewport.cols in
+  let rows = Int.max 0 model.viewport.rows in
+  let breakpoint = Layout.classify_viewport ~cols ~rows in
+  let card_inner_w, card_inner_h = keeper_content_rect_size ~embedded ~model in
   (* render_chat_tab reserves 1 bottom status strip when card_inner_h >= 2 *)
   let status_h = if card_inner_h >= 2 then 1 else 0 in
   let body_h = Int.max 1 (Int.max 0 (card_inner_h - status_h)) in
@@ -1118,6 +1162,9 @@ let chat_viewport_geometry ~(model : Model.t) =
     Int.max 16 (Int.min (Int.max 16 (card_inner_w - (2 * pad_x))) 96)
   in
   { body_h; prose_w }
+
+let chat_viewport_geometry ~(model : Model.t) =
+  chat_viewport_geometry_for ~embedded:false ~model
 
 let count_tool_output_rows ~tools_mode ~width raw =
   let shown, hidden = tool_output_display_lines ~tools_mode ~width raw in
@@ -1276,7 +1323,10 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
   in
   total
 
-let max_scroll_for_model ~(model : Model.t) ~keeper =
-  let { body_h; prose_w } = chat_viewport_geometry ~model in
+let max_scroll_for_model_in ~embedded ~(model : Model.t) ~keeper =
+  let { body_h; prose_w } = chat_viewport_geometry_for ~embedded ~model in
   let total = count_transcript_rows ~model ~keeper ~width:prose_w in
   Int.max 0 (total - body_h)
+
+let max_scroll_for_model ~(model : Model.t) ~keeper =
+  max_scroll_for_model_in ~embedded:false ~model ~keeper

@@ -215,4 +215,7 @@ val set_filter : string -> t -> t
 
 val mark_stale_all : t -> t
 val mark_keepers_stale : t -> t
+val mark_chat_history_loading : keeper:string -> t -> t
+val mark_chat_history_failed :
+  at:Clock.Mono.t -> keeper:string -> reason:string -> retryable:bool -> t -> t
 val mark_chat_history_stale : keeper:string -> t -> t

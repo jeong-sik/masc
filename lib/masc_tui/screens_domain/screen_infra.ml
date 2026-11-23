@@ -2535,7 +2535,8 @@ let render_dive_incident ~incident_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                 Rect.make ~x:content.x ~y:!y ~w:content.w
                   ~h:(Int.max 0 (bot - !y))
               in
-              draw_tail_logs ~grid ~rect:log_area ~theme ~lang
+              draw_tail_logs ~scroll:model.nav.dive_scroll_offset ~grid
+                ~rect:log_area ~theme ~lang
                 ~tz_offset_sec:model.tz_offset_sec ~filter_opt inf.logs
             end
           end

@@ -253,3 +253,88 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ?language ?(scroll = 0)
             ignore (Cell_grid.put_text ~clip:row_rect grid ~x:body_x ~y:py ~style text)
     done;
     total
+
+let parse_int_prefix s start =
+  let len = String.length s in
+  let rec loop i acc digits =
+    if i >= len then if digits > 0 then Some acc else None
+    else
+      match s.[i] with
+      | '0' .. '9' as c ->
+          loop (i + 1) ((acc * 10) + (Char.code c - Char.code '0')) (digits + 1)
+      | _ -> if digits > 0 then Some acc else None
+  in
+  loop start 0 0
+
+let parse_hunk_header line =
+  if not (String.starts_with ~prefix:"@@ " line) then None
+  else
+    let minus_idx = String.index_opt line '-' in
+    let plus_idx = String.index_opt line '+' in
+    match minus_idx, plus_idx with
+    | Some mi, Some pi -> (
+        match parse_int_prefix line (mi + 1), parse_int_prefix line (pi + 1) with
+        | Some o, Some n -> Some (o, n)
+        | Some _, None | None, Some _ | None, None -> None)
+    | Some _, None | None, Some _ | None, None -> None
+
+let parse_unified raw =
+  let lines = String.split_on_char '\n' raw in
+  let old_ln = ref 1 in
+  let new_ln = ref 1 in
+  let acc = ref [] in
+  List.iter
+    (fun line ->
+      if
+        String.starts_with ~prefix:"diff --git " line
+        || String.starts_with ~prefix:"index " line
+        || String.starts_with ~prefix:"--- " line
+        || String.starts_with ~prefix:"+++ " line
+      then ()
+      else
+        match parse_hunk_header line with
+        | Some (o, n) ->
+            old_ln := o;
+            new_ln := n;
+            acc :=
+              { nrow = Context line; old_line = None; new_line = None } :: !acc
+        | None ->
+            if String.length line > 0 && Char.equal line.[0] '+' then begin
+              let text = String.sub line 1 (String.length line - 1) in
+              acc :=
+                { nrow = Added text; old_line = None; new_line = Some !new_ln }
+                :: !acc;
+              incr new_ln
+            end
+            else if String.length line > 0 && Char.equal line.[0] '-' then begin
+              let text = String.sub line 1 (String.length line - 1) in
+              acc :=
+                { nrow = Removed text; old_line = Some !old_ln; new_line = None }
+                :: !acc;
+              incr old_ln
+            end
+            else if String.length line > 0 && Char.equal line.[0] ' ' then begin
+              let text = String.sub line 1 (String.length line - 1) in
+              acc :=
+                {
+                  nrow = Context text;
+                  old_line = Some !old_ln;
+                  new_line = Some !new_ln;
+                }
+                :: !acc;
+              incr old_ln;
+              incr new_ln
+            end
+            else if not (String.equal line "") then begin
+              acc :=
+                {
+                  nrow = Context line;
+                  old_line = Some !old_ln;
+                  new_line = Some !new_ln;
+                }
+                :: !acc;
+              incr old_ln;
+              incr new_ln
+            end)
+    lines;
+  List.rev !acc

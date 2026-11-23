@@ -1290,6 +1290,31 @@ let mark_keepers_stale t =
     turns = Observed.mark_stale t.turns;
   }
 
+let mark_chat_history_loading ~keeper t =
+  match String_map.find_opt keeper t.chat_histories with
+  | None ->
+      {
+        t with
+        chat_histories =
+          String_map.add keeper
+            (Observed.loading ~since_ns:Clock.Mono.zero)
+            t.chat_histories;
+      }
+  | Some _ -> t
+
+let mark_chat_history_failed ~at ~keeper ~reason ~retryable t =
+  match String_map.find_opt keeper t.chat_histories with
+  | None
+  | Some (Observed.Loading _ | Observed.Unreported | Observed.Failed _) ->
+      {
+        t with
+        chat_histories =
+          String_map.add keeper
+            (Observed.failed ~at ~reason ~retryable)
+            t.chat_histories;
+      }
+  | Some (Observed.Value _ | Observed.Absent) -> t
+
 let mark_chat_history_stale ~keeper t =
   match String_map.find_opt keeper t.chat_histories with
   | None -> t

@@ -147,6 +147,7 @@ val toggle_unreported_accounts : t -> t
 val set_show_unreported_accounts : bool -> t -> t
 
 val filtered_accounts : t -> Wire_runtime.account_usage list
+val subscription_window_count : t -> int
 val partition_accounts : t -> partitioned_accounts
 (** Signal-first 3-tier account partition for [Quotas & Credits]:
     1. [exhausted_and_credits] (Exhausted first, then metered USD balances by
@@ -261,7 +262,12 @@ val selected_connector : t -> Wire_runtime.connector_row option
 val runtime_options : t -> Wire_runtime.runtime_option list
 
 val move_selection :
-  ?pane_index:int -> ?viewport_rows:int -> delta:int -> t -> t
+  ?pane_index:int ->
+  ?viewport_rows:int ->
+  ?max_detail_scroll:int ->
+  delta:int ->
+  t ->
+  t
 val reset_detail_scroll : t -> t
 val set_filter : string -> t -> t
 val mark_stale_all : t -> t

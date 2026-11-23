@@ -60,6 +60,7 @@ type t = {
   search_query : string;
   dirty_fields : Wire_config.patch_op String_map.t;
   dry_run_preview : dry_run_state;
+  dry_run_scroll_offset : int;
   save_state : save_state;
   last_snapshot_id : string option;
   new_keeper_name : string;
@@ -106,6 +107,7 @@ let empty =
     search_query = "";
     dirty_fields = String_map.empty;
     dry_run_preview = Dry_run_idle;
+    dry_run_scroll_offset = 0;
     save_state = Save_idle;
     last_snapshot_id = None;
     new_keeper_name = "";
@@ -213,11 +215,14 @@ let dominant_reload_scope fields =
     (fun best (f : Wire_config.schema_field) -> max_reload best f.reload_scope)
     Wire_config.Hot_reload fields
 
-let field_matches_query ~q (f : Wire_config.schema_field) =
+let field_matches_query ?lang ~q (f : Wire_config.schema_field) =
   contains_ci ~needle:q f.full_key
   || contains_ci ~needle:q f.label
-  || contains_ci ~needle:q (Wire_config.field_leaf_label ~lang:Say.Lang_ko f)
-  || contains_ci ~needle:q (Wire_config.field_leaf_label ~lang:Say.Lang_en f)
+  || contains_ci ~needle:q (field_label ~lang:Say.Lang_ko f)
+  || contains_ci ~needle:q (field_label ~lang:Say.Lang_en f)
+  || (match lang with
+     | Some l -> contains_ci ~needle:q (field_label ~lang:l f)
+     | None -> false)
   ||
   match f.description with
   | Some d -> contains_ci ~needle:q d
@@ -696,6 +701,7 @@ let set_target target t =
       field_meta = String_map.empty;
       dirty_fields = String_map.empty;
       dry_run_preview = Dry_run_idle;
+      dry_run_scroll_offset = 0;
       save_state = Save_idle;
       selected_section_idx = 0;
       tree_scroll_offset = 0;
@@ -878,11 +884,13 @@ let apply_schema ?field_meta ~observed_at (schema : Wire_config.config_schema) t
     { next with selected_section_idx = idx; selected_field_index = 0 }
   else t
 
-let mark_dry_run_loading t = { t with dry_run_preview = Dry_run_loading }
+let mark_dry_run_loading t =
+  { t with dry_run_preview = Dry_run_loading; dry_run_scroll_offset = 0 }
 let mark_save_in_flight t = { t with save_state = Save_in_flight }
 
 let apply_patch_response ~dry_run (resp : Wire_config.patch_response) t =
-  if dry_run then { t with dry_run_preview = Dry_run_ready resp }
+  if dry_run then
+    { t with dry_run_preview = Dry_run_ready resp; dry_run_scroll_offset = 0 }
   else
     let last_snapshot_id =
       match resp.snapshot_id with
@@ -893,13 +901,15 @@ let apply_patch_response ~dry_run (resp : Wire_config.patch_response) t =
       t with
       dirty_fields = String_map.empty;
       dry_run_preview = Dry_run_idle;
+      dry_run_scroll_offset = 0;
       save_state = Save_succeeded resp;
       last_snapshot_id;
       schema = Observed.mark_stale t.schema;
     }
 
 let apply_patch_error ~dry_run reason t =
-  if dry_run then { t with dry_run_preview = Dry_run_failed reason }
+  if dry_run then
+    { t with dry_run_preview = Dry_run_failed reason; dry_run_scroll_offset = 0 }
   else { t with save_state = Save_failed reason }
 
 let visible_fields t =
@@ -923,6 +933,25 @@ let visible_fields t =
       in
       if String.equal q "" then fields
       else List.filter (field_matches_query ~q) fields
+
+let keeper_visible_fields ?lang t =
+  match Observed.to_option t.schema with
+  | None -> []
+  | Some schema ->
+      if not (equal_config_target schema.target t.target) then []
+      else
+        let fields =
+          List.concat_map
+            (fun (s : Wire_config.schema_section) -> s.fields)
+            schema.sections
+        in
+        let q = String.trim t.search_query in
+        if String.equal q "" then fields
+        else List.filter (field_matches_query ?lang ~q) fields
+
+let keeper_selected_field ?lang t =
+  let fs = keeper_visible_fields ?lang t in
+  List.nth_opt fs (clamp_index (List.length fs) t.selected_field_index)
 
 let is_tui_pref_key = function
   | "tui.theme"
@@ -1058,6 +1087,7 @@ let stage_patch ~full_key op t =
     t with
     dirty_fields = String_map.add full_key op t.dirty_fields;
     dry_run_preview = Dry_run_idle;
+    dry_run_scroll_offset = 0;
   }
 
 let unstage_patch ~full_key t =
@@ -1065,6 +1095,7 @@ let unstage_patch ~full_key t =
     t with
     dirty_fields = String_map.remove full_key t.dirty_fields;
     dry_run_preview = Dry_run_idle;
+    dry_run_scroll_offset = 0;
   }
 
 let clear_dirty t =
@@ -1072,11 +1103,214 @@ let clear_dirty t =
     t with
     dirty_fields = String_map.empty;
     dry_run_preview = Dry_run_idle;
+    dry_run_scroll_offset = 0;
     editing_field_key = None;
     editing_buffer = "";
   }
 
 let dirty_count t = String_map.cardinal t.dirty_fields
+
+let step_field ~delta (f : Wire_config.schema_field) t =
+  if not f.writable then
+    Error (Printf.sprintf "Field %s is read-only" f.full_key)
+  else if f.secret then
+    Error
+      (Printf.sprintf
+         "Secret %s cannot be edited inline; set via environment variable"
+         f.full_key)
+  else
+    match f.kind with
+    | Wire_config.Field_secret ->
+        Error
+          (Printf.sprintf
+             "Secret %s cannot be edited inline; set via environment variable"
+             f.full_key)
+    | Wire_config.Field_structured ->
+        Error
+          (Printf.sprintf
+             "Structured field %s requires opt-in Ctrl+E editor" f.full_key)
+    | Wire_config.Field_enum allowed -> (
+        match allowed with
+        | [] -> Ok (t, false)
+        | first :: _ ->
+            let orig_val =
+              match f.value with
+              | Wire_config.Val_string s -> Some s
+              | Wire_config.Val_bool _
+              | Wire_config.Val_int _
+              | Wire_config.Val_float _
+              | Wire_config.Val_string_list _
+              | Wire_config.Val_structured _
+              | Wire_config.Val_secret _
+              | Wire_config.Val_null ->
+                  None
+            in
+            let current_val =
+              match String_map.find_opt f.full_key t.dirty_fields with
+              | Some (Wire_config.Set_scalar { value; _ }) -> value
+              | Some
+                  ( Wire_config.Set_bool _
+                  | Wire_config.Set_int _
+                  | Wire_config.Set_float _
+                  | Wire_config.Set_string_array _
+                  | Wire_config.Remove_key _ )
+              | None ->
+                  Option.value orig_val ~default:first
+            in
+            let len = List.length allowed in
+            let cur_idx =
+              let rec find i = function
+                | [] -> 0
+                | x :: xs -> if String.equal x current_val then i else find (i + 1) xs
+              in
+              find 0 allowed
+            in
+            let next_idx = ((cur_idx + delta) mod len + len) mod len in
+            let next_val =
+              Option.value (List.nth_opt allowed next_idx) ~default:first
+            in
+            if Option.equal String.equal (Some next_val) orig_val then
+              Ok (unstage_patch ~full_key:f.full_key t, true)
+            else
+              let op =
+                Wire_config.Set_scalar
+                  { table = f.table; key = f.key; value = next_val }
+              in
+              Ok (stage_patch ~full_key:f.full_key op t, true))
+    | Wire_config.Field_bool ->
+        let orig_val =
+          match f.value with
+          | Wire_config.Val_bool b -> Some b
+          | Wire_config.Val_int _
+          | Wire_config.Val_float _
+          | Wire_config.Val_string _
+          | Wire_config.Val_string_list _
+          | Wire_config.Val_structured _
+          | Wire_config.Val_secret _
+          | Wire_config.Val_null ->
+              None
+        in
+        let current_val =
+          match String_map.find_opt f.full_key t.dirty_fields with
+          | Some (Wire_config.Set_bool { value; _ }) -> value
+          | Some
+              ( Wire_config.Set_scalar _
+              | Wire_config.Set_int _
+              | Wire_config.Set_float _
+              | Wire_config.Set_string_array _
+              | Wire_config.Remove_key _ )
+          | None -> (
+              match orig_val with Some b -> b | None -> false)
+        in
+        let next_val = not current_val in
+        if Option.equal Bool.equal (Some next_val) orig_val then
+          Ok (unstage_patch ~full_key:f.full_key t, true)
+        else
+          let op =
+            Wire_config.Set_bool
+              { table = f.table; key = f.key; value = next_val }
+          in
+          Ok (stage_patch ~full_key:f.full_key op t, true)
+    | Wire_config.Field_int { min = min_v; max = max_v } ->
+        let orig_val =
+          match f.value with
+          | Wire_config.Val_int n -> Some n
+          | Wire_config.Val_bool _
+          | Wire_config.Val_float _
+          | Wire_config.Val_string _
+          | Wire_config.Val_string_list _
+          | Wire_config.Val_structured _
+          | Wire_config.Val_secret _
+          | Wire_config.Val_null ->
+              None
+        in
+        let current_val =
+          match String_map.find_opt f.full_key t.dirty_fields with
+          | Some (Wire_config.Set_int { value; _ }) -> value
+          | Some
+              ( Wire_config.Set_scalar _
+              | Wire_config.Set_bool _
+              | Wire_config.Set_float _
+              | Wire_config.Set_string_array _
+              | Wire_config.Remove_key _ )
+          | None -> (
+              match orig_val with
+              | Some n -> n
+              | None -> Option.value min_v ~default:0)
+        in
+        let next_raw = current_val + delta in
+        let next_val =
+          let lo = match min_v with Some m -> max m next_raw | None -> next_raw in
+          match max_v with Some hi -> min hi lo | None -> lo
+        in
+        if Option.equal Int.equal (Some next_val) orig_val then
+          Ok (unstage_patch ~full_key:f.full_key t, true)
+        else
+          let op =
+            Wire_config.Set_int
+              { table = f.table; key = f.key; value = next_val }
+          in
+          Ok (stage_patch ~full_key:f.full_key op t, true)
+    | Wire_config.Field_float { min = min_v; max = max_v } ->
+        let orig_val =
+          match f.value with
+          | Wire_config.Val_float v -> Some v
+          | Wire_config.Val_bool _
+          | Wire_config.Val_int _
+          | Wire_config.Val_string _
+          | Wire_config.Val_string_list _
+          | Wire_config.Val_structured _
+          | Wire_config.Val_secret _
+          | Wire_config.Val_null ->
+              None
+        in
+        let current_val =
+          match String_map.find_opt f.full_key t.dirty_fields with
+          | Some (Wire_config.Set_float { value; _ }) -> value
+          | Some
+              ( Wire_config.Set_scalar _
+              | Wire_config.Set_bool _
+              | Wire_config.Set_int _
+              | Wire_config.Set_string_array _
+              | Wire_config.Remove_key _ )
+          | None -> (
+              match orig_val with
+              | Some v -> v
+              | None -> Option.value min_v ~default:0.0)
+        in
+        let next_raw =
+          Float.round ((current_val +. (Float.of_int delta *. 0.1)) *. 1000.0)
+          /. 1000.0
+        in
+        let next_val =
+          let lo =
+            match min_v with Some m -> Float.max m next_raw | None -> next_raw
+          in
+          match max_v with Some hi -> Float.min hi lo | None -> lo
+        in
+        let matches_orig =
+          match orig_val with
+          | Some ov -> Float.abs (next_val -. ov) < 1e-6
+          | None -> false
+        in
+        if matches_orig then Ok (unstage_patch ~full_key:f.full_key t, true)
+        else
+          let op =
+            Wire_config.Set_float
+              { table = f.table; key = f.key; value = next_val }
+          in
+          Ok (stage_patch ~full_key:f.full_key op t, true)
+    | Wire_config.Field_string | Wire_config.Field_string_list -> Ok (t, false)
+
+let step_selected_field ~delta t =
+  match selected_field t with
+  | None -> Error "No configuration field selected"
+  | Some f -> step_field ~delta f t
+
+let step_keeper_field ?lang ~delta t =
+  match keeper_selected_field ?lang t with
+  | None -> Error "No configuration field selected"
+  | Some f -> step_field ~delta f t
 
 let build_patch_request ~dry_run t =
   let ops =
@@ -1163,96 +1397,82 @@ let begin_edit_new_keeper_name t =
     editing_buffer = t.new_keeper_name;
   }
 
+let stage_remove_field (f : Wire_config.schema_field) t =
+  if not f.writable then
+    Error (Printf.sprintf "Field %s is read-only" f.full_key)
+  else
+    match String_map.find_opt f.full_key t.dirty_fields with
+    | Some (Wire_config.Remove_key _) ->
+        Ok (unstage_patch ~full_key:f.full_key t)
+    | Some
+        ( Wire_config.Set_scalar _
+        | Wire_config.Set_int _
+        | Wire_config.Set_float _
+        | Wire_config.Set_bool _
+        | Wire_config.Set_string_array _ )
+    | None ->
+        let op = Wire_config.Remove_key { table = f.table; key = f.key } in
+        Ok (stage_patch ~full_key:f.full_key op t)
+
 let stage_remove_selected t =
   match selected_field t with
   | None -> Error "No configuration field selected"
-  | Some f when not f.writable ->
-      Error (Printf.sprintf "Field %s is read-only" f.full_key)
-  | Some f -> (
-      match String_map.find_opt f.full_key t.dirty_fields with
-      | Some (Wire_config.Remove_key _) ->
-          Ok (unstage_patch ~full_key:f.full_key t)
-      | Some
-          ( Wire_config.Set_scalar _
-          | Wire_config.Set_int _
-          | Wire_config.Set_float _
-          | Wire_config.Set_bool _
-          | Wire_config.Set_string_array _ )
-      | None ->
-          let op = Wire_config.Remove_key { table = f.table; key = f.key } in
-          Ok (stage_patch ~full_key:f.full_key op t))
+  | Some f -> stage_remove_field f t
+
+let stage_remove_keeper_selected ?lang t =
+  match keeper_selected_field ?lang t with
+  | None -> Error "No configuration field selected"
+  | Some f -> stage_remove_field f t
+
+let begin_edit_field ?(step_enum = true) (f : Wire_config.schema_field) t =
+  if not f.writable then
+    Error (Printf.sprintf "Field %s is read-only" f.full_key)
+  else if f.secret then
+    Error
+      (Printf.sprintf
+         "Secret %s cannot be edited inline; set via environment variable"
+         f.full_key)
+  else
+    match f.kind with
+    | Wire_config.Field_secret ->
+        Error
+          (Printf.sprintf
+             "Secret %s cannot be edited inline; set via environment variable"
+             f.full_key)
+    | Wire_config.Field_structured ->
+        Error
+          (Printf.sprintf
+             "Structured field %s requires opt-in Ctrl+E editor" f.full_key)
+    | Wire_config.Field_bool ->
+        Result.map fst (step_field ~delta:1 f t)
+    | Wire_config.Field_enum _ when step_enum ->
+        Result.map fst (step_field ~delta:1 f t)
+    | Wire_config.Field_int _
+    | Wire_config.Field_float _
+    | Wire_config.Field_string
+    | Wire_config.Field_enum _
+    | Wire_config.Field_string_list ->
+        let initial_buf =
+          match String_map.find_opt f.full_key t.dirty_fields with
+          | Some staged -> string_of_staged_op staged
+          | None -> string_of_field_value f.value
+        in
+        Ok
+          {
+            t with
+            editing_field_key = Some f.full_key;
+            editing_buffer = initial_buf;
+          }
 
 let begin_edit_selected t =
   match selected_field t with
   | None -> Error "No configuration field selected"
-  | Some f when not f.writable ->
-      Error (Printf.sprintf "Field %s is read-only" f.full_key)
-  | Some f when f.secret ->
-      Error
-        (Printf.sprintf
-           "Secret %s cannot be edited inline; set via environment variable"
-           f.full_key)
-  | Some f -> (
-      match f.kind with
-      | Wire_config.Field_secret ->
-          Error
-            (Printf.sprintf
-               "Secret %s cannot be edited inline; set via environment variable"
-               f.full_key)
-      | Wire_config.Field_structured ->
-          Error
-            (Printf.sprintf
-               "Structured field %s requires opt-in Ctrl+E editor" f.full_key)
-      | Wire_config.Field_bool ->
-          let orig_val =
-            match f.value with
-            | Wire_config.Val_bool b -> Some b
-            | Wire_config.Val_int _
-            | Wire_config.Val_float _
-            | Wire_config.Val_string _
-            | Wire_config.Val_string_list _
-            | Wire_config.Val_structured _
-            | Wire_config.Val_secret _
-            | Wire_config.Val_null ->
-                None
-          in
-          let current_val =
-            match String_map.find_opt f.full_key t.dirty_fields with
-            | Some (Wire_config.Set_bool { value; _ }) -> value
-            | Some
-                ( Wire_config.Set_scalar _
-                | Wire_config.Set_int _
-                | Wire_config.Set_float _
-                | Wire_config.Set_string_array _
-                | Wire_config.Remove_key _ )
-            | None -> (
-                match orig_val with Some b -> b | None -> false)
-          in
-          let next_val = not current_val in
-          if Option.equal Bool.equal (Some next_val) orig_val then
-            Ok (unstage_patch ~full_key:f.full_key t)
-          else
-            let op =
-              Wire_config.Set_bool
-                { table = f.table; key = f.key; value = next_val }
-            in
-            Ok (stage_patch ~full_key:f.full_key op t)
-      | Wire_config.Field_int _
-      | Wire_config.Field_float _
-      | Wire_config.Field_string
-      | Wire_config.Field_enum _
-      | Wire_config.Field_string_list ->
-          let initial_buf =
-            match String_map.find_opt f.full_key t.dirty_fields with
-            | Some staged -> string_of_staged_op staged
-            | None -> string_of_field_value f.value
-          in
-          Ok
-            {
-              t with
-              editing_field_key = Some f.full_key;
-              editing_buffer = initial_buf;
-            })
+  | Some f -> begin_edit_field ~step_enum:false f t
+
+let begin_edit_keeper_selected ?lang t =
+  match keeper_selected_field ?lang t with
+  | None -> Error "No configuration field selected"
+  | Some f -> begin_edit_field ~step_enum:true f t
 
 let update_edit_buffer editing_buffer t = { t with editing_buffer }
 
@@ -1430,6 +1650,30 @@ let move_selection ?viewport_rows ~delta t =
           selected_field_index
       in
       { t with selected_field_index; scroll_offset }
+
+let move_keeper_selection ?viewport_rows ?lang ?(fallback_count = 5) ~delta t =
+  let schema_matches_target =
+    match Observed.to_option t.schema with
+    | Some s -> equal_config_target s.target t.target
+    | None -> false
+  in
+  let len =
+    if schema_matches_target then List.length (keeper_visible_fields ?lang t)
+    else max 0 fallback_count
+  in
+  let selected_field_index =
+    clamp_index len (t.selected_field_index + delta)
+  in
+  let scroll_offset =
+    adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_field_index
+  in
+  { t with selected_field_index; scroll_offset }
+
+let move_dry_run_scroll ~max_scroll ~delta t =
+  let dry_run_scroll_offset =
+    Store_scroll.clamp_scroll ~max_scroll (t.dry_run_scroll_offset + delta)
+  in
+  { t with dry_run_scroll_offset }
 
 let mark_stale_all t =
   {

@@ -142,6 +142,7 @@ val move_selection :
   ?pane_index:int ->
   ?has_linked_card:bool ->
   ?viewport_rows:int ->
+  ?max_detail_scroll:int ->
   delta:int ->
   t ->
   t

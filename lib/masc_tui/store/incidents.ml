@@ -7,6 +7,7 @@ type t = {
   next_id : int;
   selected_index : int;
   scroll_offset : int;
+  detail_scroll_offset : int;
   filter_query : string;
   show_dismissed : bool;
   unread_count : int;
@@ -18,6 +19,7 @@ let empty =
     next_id = 1;
     selected_index = 0;
     scroll_offset = 0;
+    detail_scroll_offset = 0;
     filter_query = "";
     show_dismissed = false;
     unread_count = 0;
@@ -103,6 +105,7 @@ let clear_all t =
     entries = [];
     selected_index = 0;
     scroll_offset = 0;
+    detail_scroll_offset = 0;
     unread_count = 0;
   }
 
@@ -119,15 +122,35 @@ let move_selection ?viewport_rows ~delta t =
   let scroll_offset =
     adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
   in
-  { t with selected_index; scroll_offset }
+  let detail_scroll_offset =
+    if Int.equal selected_index t.selected_index then t.detail_scroll_offset
+    else 0
+  in
+  { t with selected_index; scroll_offset; detail_scroll_offset }
+
+let move_detail_scroll ~max_scroll ~delta t =
+  let detail_scroll_offset =
+    Store_scroll.clamp_scroll ~max_scroll (t.detail_scroll_offset + delta)
+  in
+  { t with detail_scroll_offset }
 
 let set_filter filter_query t =
-  let next = { t with filter_query; selected_index = 0; scroll_offset = 0 } in
+  let next =
+    {
+      t with
+      filter_query;
+      selected_index = 0;
+      scroll_offset = 0;
+      detail_scroll_offset = 0;
+    }
+  in
   let vis_len = List.length (visible_entries next) in
   { next with selected_index = clamp_index vis_len next.selected_index }
 
 let toggle_show_dismissed t =
-  let next = { t with show_dismissed = not t.show_dismissed } in
+  let next =
+    { t with show_dismissed = not t.show_dismissed; detail_scroll_offset = 0 }
+  in
   let vis_len = List.length (visible_entries next) in
   { next with selected_index = clamp_index vis_len next.selected_index }
 

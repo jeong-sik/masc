@@ -526,29 +526,14 @@ let compact_infra_tab_label ~(lang : Say.lang) ~compact tab =
     | Nav.Infra_activity_logs -> Say.resolve lang (Say.make ~ko:"활동·로그" ~en:"Logs")
 
 let active_filter_text (m : Model.t) =
-  match Model.active_dive m with
-  | Some (Nav.Dive_keeper { tab = Nav.Keeper_config; _ }) ->
-      m.config.search_query
-  | Some
-      ( Nav.Dive_keeper
-          {
-            tab =
-              ( Nav.Keeper_chat
-              | Nav.Keeper_memory
-              | Nav.Keeper_work_candle
-              | Nav.Keeper_sandbox );
-            _;
-          }
-      | Nav.Dive_work _
-      | Nav.Dive_knowledge _
-      | Nav.Dive_infra _ )
-  | None -> (
-      match m.nav.workspace with
-      | Nav.Pulse | Nav.Keepers -> m.fleet.filter_query
-      | Nav.Work -> m.work.filter_query
-      | Nav.Knowledge -> m.knowledge.filter_query
-      | Nav.Runtime -> m.runtime.filter_query
-      | Nav.Infra -> m.infra.filter_query)
+  if Model.is_keeper_config_active m then m.config.search_query
+  else
+    match m.nav.workspace with
+    | Nav.Pulse | Nav.Keepers -> m.fleet.filter_query
+    | Nav.Work -> m.work.filter_query
+    | Nav.Knowledge -> m.knowledge.filter_query
+    | Nav.Runtime -> m.runtime.filter_query
+    | Nav.Infra -> m.infra.filter_query
 
 let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~breakpoint =
@@ -582,6 +567,15 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
         let txt =
           if compact then "[Esc]"
           else Say.resolve lang (Say.make ~ko:"[Esc] 뒤로" ~en:"[Esc] Back")
+        in
+        (txt, whisper_style)
+      else if Model.is_keeper_config_active model then
+        let txt =
+          if compact then "[[ ]]"
+          else
+            Say.resolve lang
+              (Say.make ~ko:"[/] 검색  [←→] 값  [[ ]] 탭"
+                 ~en:"[/] Filter  [←→] Cycle  [[ ]] Tabs")
         in
         (txt, whisper_style)
       else

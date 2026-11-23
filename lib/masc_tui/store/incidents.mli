@@ -14,6 +14,7 @@ type t = {
   next_id : int;
   selected_index : int;
   scroll_offset : int;
+  detail_scroll_offset : int;
   filter_query : string;
   show_dismissed : bool;
   unread_count : int;
@@ -42,6 +43,7 @@ val selected_entry : t -> Health.incident option
 val find_by_id : int -> t -> Health.incident option
 
 val move_selection : ?viewport_rows:int -> delta:int -> t -> t
+val move_detail_scroll : max_scroll:int -> delta:int -> t -> t
 val set_filter : string -> t -> t
 val toggle_show_dismissed : t -> t
 

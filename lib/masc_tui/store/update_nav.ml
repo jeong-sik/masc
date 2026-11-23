@@ -423,7 +423,16 @@ let sync_config_for_keeper_tab ~name ~tab (config : Config_store.t) =
   | Nav.Keeper_memory
   | Nav.Keeper_work_candle
   | Nav.Keeper_sandbox ->
-      config
+      Config_store.cancel_edit_field config
+
+let sync_fleet_for_keeper_tab ~name ~tab fleet =
+  match tab with
+  | Nav.Keeper_chat -> Fleet_store.mark_chat_history_loading ~keeper:name fleet
+  | Nav.Keeper_memory
+  | Nav.Keeper_work_candle
+  | Nav.Keeper_sandbox
+  | Nav.Keeper_config ->
+      fleet
 
 let sync_config_for_keeper_view (m : Model.t) =
   match m.nav.overlay with
@@ -438,7 +447,11 @@ let sync_config_for_keeper_view (m : Model.t) =
   | None -> (
       match Model.active_dive m with
       | Some (Nav.Dive_keeper { name; tab }) ->
-          { m with config = sync_config_for_keeper_tab ~name ~tab m.config }
+          {
+            m with
+            config = sync_config_for_keeper_tab ~name ~tab m.config;
+            fleet = sync_fleet_for_keeper_tab ~name ~tab m.fleet;
+          }
       | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _) -> m
       | None -> (
           match m.nav.workspace, Fleet_store.selected_keeper_summary m.fleet with
@@ -448,6 +461,9 @@ let sync_config_for_keeper_view (m : Model.t) =
                 config =
                   sync_config_for_keeper_tab ~name:k.name
                     ~tab:m.fleet.keeper_dive_tab m.config;
+                fleet =
+                  sync_fleet_for_keeper_tab ~name:k.name
+                    ~tab:m.fleet.keeper_dive_tab m.fleet;
               }
           | Nav.Keepers, None
           | (Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Runtime | Nav.Infra), _ ->
@@ -467,8 +483,10 @@ let switch_workspace (m : Model.t) ws =
     }
   in
   let drafts = Drafts.set_focus false m.drafts in
+  let config = Config_store.cancel_edit_field m.config in
   let next =
-    { m with nav; drafts; inline_modal = None } |> sync_config_for_keeper_view
+    { m with nav; drafts; config; inline_modal = None }
+    |> sync_config_for_keeper_view
   in
   (next, View_fetches.fetches_for_current_view next)
 
@@ -484,16 +502,43 @@ let open_overlay (m : Model.t) overlay =
     | Nav.System_gate _ ->
         m.nav.help_scroll_offset
   in
+  let queue_scroll_offset =
+    match overlay with
+    | Nav.Queue_context _ -> 0
+    | Nav.Palette
+    | Nav.Settings _
+    | Nav.Incidents
+    | Nav.Inline_action _
+    | Nav.Help
+    | Nav.System_gate _ ->
+        m.nav.queue_scroll_offset
+  in
   let nav =
     {
       m.nav with
       overlay = Some overlay;
       filter_focused = false;
       help_scroll_offset;
+      queue_scroll_offset;
     }
   in
   let drafts = Drafts.set_focus false m.drafts in
-  let next = { m with nav; drafts; inline_modal = None } in
+  let config =
+    match overlay, m.config.target with
+    | Nav.Settings _, Wire_config.Target_keeper_create -> m.config
+    | ( ( Nav.Settings _
+        | Nav.Palette
+        | Nav.Incidents
+        | Nav.Queue_context _
+        | Nav.Inline_action _
+        | Nav.Help
+        | Nav.System_gate _ )
+      , ( Wire_config.Target_runtime
+        | Wire_config.Target_keeper _
+        | Wire_config.Target_keeper_create ) ) ->
+        Config_store.cancel_edit_field m.config
+  in
+  let next = { m with nav; drafts; config; inline_modal = None } in
   (next, View_fetches.fetches_for_current_view next)
 
 let open_global_settings ?search_query (m : Model.t) =
@@ -541,13 +586,15 @@ let open_inline_modal (m : Model.t) kind =
         | Drafts.Btw_failed _ ) ->
         d0
   in
-  ({ m with nav; drafts; inline_modal = Some modal }, [])
+  let config = Config_store.cancel_edit_field m.config in
+  ({ m with nav; drafts; config; inline_modal = Some modal }, [])
 
 let open_palette (m : Model.t) mode =
   let palette = { Model.mode; query = ""; selected = 0 } in
   let nav = { m.nav with overlay = Some Nav.Palette; filter_focused = false } in
   let drafts = Drafts.set_focus false m.drafts in
-  let next = { m with nav; drafts; palette; inline_modal = None } in
+  let config = Config_store.cancel_edit_field m.config in
+  let next = { m with nav; drafts; config; palette; inline_modal = None } in
   let extra_cmds =
     match mode with
     | Model.Palette_models ->
@@ -601,13 +648,15 @@ let push_dive (m : Model.t) dive =
         m.fleet
         |> Fleet_store.select_keeper name
         |> Fleet_store.set_keeper_dive_tab tab
+        |> sync_fleet_for_keeper_tab ~name ~tab
     | Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _ -> m.fleet
   in
   let config =
     match dive with
     | Nav.Dive_keeper { name; tab } ->
         sync_config_for_keeper_tab ~name ~tab m.config
-    | Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _ -> m.config
+    | Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _ ->
+        Config_store.cancel_edit_field m.config
   in
   let next = { m with nav; drafts; fleet; config; inline_modal = None } in
   (next, View_fetches.fetches_for_current_view next)
@@ -625,7 +674,15 @@ let cycle_sub_tab (m : Model.t) dir =
         | Keymap.Next -> Nav.next_queue_context_tab tab
         | Keymap.Prev -> Nav.prev_queue_context_tab tab
       in
-      ( { m with nav = { m.nav with overlay = Some (Nav.Queue_context next_tab) } }
+      ( {
+          m with
+          nav =
+            {
+              m.nav with
+              overlay = Some (Nav.Queue_context next_tab);
+              queue_scroll_offset = 0;
+            };
+        }
       , [] )
   | Some
       ( Nav.Palette
@@ -654,7 +711,11 @@ let cycle_sub_tab (m : Model.t) dir =
             if Nav.equal_keeper_tab next_tab Nav.Keeper_chat then m.drafts
             else Drafts.set_focus false m.drafts
           in
-          let fleet = Fleet_store.set_keeper_dive_tab next_tab m.fleet in
+          let fleet =
+            m.fleet
+            |> Fleet_store.set_keeper_dive_tab next_tab
+            |> sync_fleet_for_keeper_tab ~name ~tab:next_tab
+          in
           let config =
             sync_config_for_keeper_tab ~name ~tab:next_tab m.config
           in
@@ -676,7 +737,11 @@ let cycle_sub_tab (m : Model.t) dir =
               let next = { m with nav; knowledge } in
               (next, View_fetches.fetches_for_current_view next)
           | Nav.Keepers ->
-              if m.nav.pane_index = 1 then
+              let zoomed_keeper =
+                m.nav.zoomed
+                && Option.is_some (Fleet_store.selected_keeper_summary m.fleet)
+              in
+              if m.nav.pane_index = 1 || zoomed_keeper then
                 let fleet = Fleet_store.cycle_keeper_dive_tab dir m.fleet in
                 let drafts =
                   if Nav.equal_keeper_tab fleet.keeper_dive_tab Nav.Keeper_chat
@@ -713,30 +778,15 @@ let current_filter_query (m : Model.t) =
       | Nav.Inline_action _
       | Nav.Help
       | Nav.System_gate _ )
-  | None -> (
-      match Model.active_dive m with
-      | Some (Nav.Dive_keeper { tab = Nav.Keeper_config; _ }) ->
-          m.config.search_query
-      | Some
-          ( Nav.Dive_keeper
-              {
-                tab =
-                  ( Nav.Keeper_chat
-                  | Nav.Keeper_memory
-                  | Nav.Keeper_work_candle
-                  | Nav.Keeper_sandbox );
-                _;
-              }
-          | Nav.Dive_work _
-          | Nav.Dive_knowledge _
-          | Nav.Dive_infra _ )
-      | None -> (
-          match m.nav.workspace with
-          | Nav.Pulse | Nav.Keepers -> m.fleet.filter_query
-          | Nav.Work -> m.work.filter_query
-          | Nav.Knowledge -> m.knowledge.filter_query
-          | Nav.Runtime -> m.runtime.filter_query
-          | Nav.Infra -> m.infra.filter_query))
+  | None ->
+      if Model.is_keeper_config_active m then m.config.search_query
+      else
+        match m.nav.workspace with
+        | Nav.Pulse | Nav.Keepers -> m.fleet.filter_query
+        | Nav.Work -> m.work.filter_query
+        | Nav.Knowledge -> m.knowledge.filter_query
+        | Nav.Runtime -> m.runtime.filter_query
+        | Nav.Infra -> m.infra.filter_query
 
 let set_active_filter_query q (m : Model.t) =
   let updated =
@@ -751,37 +801,23 @@ let set_active_filter_query q (m : Model.t) =
         | Nav.Inline_action _
         | Nav.Help
         | Nav.System_gate _ )
-    | None -> (
-        match Model.active_dive m with
-        | Some (Nav.Dive_keeper { tab = Nav.Keeper_config; _ }) ->
-            {
-              m with
-              nav = { m.nav with dive_scroll_offset = 0 };
-              config = Config_store.set_search_query q m.config;
-            }
-        | Some
-            ( Nav.Dive_keeper
-                {
-                  tab =
-                    ( Nav.Keeper_chat
-                    | Nav.Keeper_memory
-                    | Nav.Keeper_work_candle
-                    | Nav.Keeper_sandbox );
-                  _;
-                }
-            | Nav.Dive_work _
-            | Nav.Dive_knowledge _
-            | Nav.Dive_infra _ )
-        | None -> (
-            match m.nav.workspace with
-            | Nav.Pulse | Nav.Keepers ->
-                { m with fleet = Fleet_store.set_filter q m.fleet }
-            | Nav.Work -> { m with work = Work_store.set_filter q m.work }
-            | Nav.Knowledge ->
-                { m with knowledge = Knowledge_store.set_filter q m.knowledge }
-            | Nav.Runtime ->
-                { m with runtime = Runtime_store.set_filter q m.runtime }
-            | Nav.Infra -> { m with infra = Infra_store.set_filter q m.infra }))
+    | None ->
+        if Model.is_keeper_config_active m then
+          {
+            m with
+            nav = { m.nav with dive_scroll_offset = 0 };
+            config = Config_store.set_search_query q m.config;
+          }
+        else
+          match m.nav.workspace with
+          | Nav.Pulse | Nav.Keepers ->
+              { m with fleet = Fleet_store.set_filter q m.fleet }
+          | Nav.Work -> { m with work = Work_store.set_filter q m.work }
+          | Nav.Knowledge ->
+              { m with knowledge = Knowledge_store.set_filter q m.knowledge }
+          | Nav.Runtime ->
+              { m with runtime = Runtime_store.set_filter q m.runtime }
+          | Nav.Infra -> { m with infra = Infra_store.set_filter q m.infra }
   in
   let max_pane = max 0 (Model.focusable_pane_count updated - 1) in
   if updated.nav.pane_index > max_pane then
@@ -1156,6 +1192,7 @@ let start_btw_query ~now ~prompt (m : Model.t) =
           {
             m with
             nav;
+            config = Config_store.cancel_edit_field m.config;
             drafts = Drafts.set_focus false drafts;
             inline_modal = Some (Model.inline_modal_for Nav.Btw_query);
           }
@@ -2234,8 +2271,1889 @@ let scroll_delta = function
   | Keymap.Page_up -> -10
   | Keymap.Page_down -> 10
   | Keymap.Home -> -100000
-  | Keymap.End -> 80
+  | Keymap.End -> 100000
   | Keymap.Left | Keymap.Right -> 0
+
+let ui_bp (m : Model.t) =
+  Masc_tui_ui.Layout.classify_viewport ~cols:(max 0 m.viewport.cols)
+    ~rows:(max 0 m.viewport.rows)
+
+let ui_body_rect (m : Model.t) =
+  Rect.make ~x:0 ~y:0 ~w:(Model.inner_body_width m)
+    ~h:(Model.inner_body_height m)
+
+let ui_card_inner (r : Rect.t) =
+  if r.w >= 2 && r.h >= 2 then
+    Rect.make ~x:(r.x + 1) ~y:(r.y + 1) ~w:(r.w - 2) ~h:(r.h - 2)
+  else Rect.empty
+
+let ui_pad_content ~bp ?(pad_y = 0) (r : Rect.t) =
+  Masc_tui_ui.Card.pad_inner ~pad_x:(Masc_tui_ui.Layout.card_pad_x bp) ~pad_y r
+
+let markdown_max_scroll ~theme ~width ~height text =
+  if width <= 0 || height <= 0 then 0
+  else
+    let lines = Masc_tui_ui.Markdown.render_lines ~width ~theme text in
+    max 0 (List.length lines - height)
+
+let parse_json_or_wrap_store ~key raw =
+  let trimmed = String.trim raw in
+  if String.equal trimmed "" then `Assoc []
+  else
+    try Yojson.Safe.from_string trimmed
+    with Yojson.Json_error _ -> `Assoc [ (key, `String raw) ]
+
+let extract_embedded_json_store s =
+  let len = String.length s in
+  let rec find_delim i =
+    if i >= len then None
+    else
+      match s.[i] with
+      | '{' | '[' -> Some i
+      | _ -> find_delim (i + 1)
+  in
+  match find_delim 0 with
+  | None -> None
+  | Some idx -> (
+      let prefix = String.trim (String.sub s 0 idx) in
+      let rest = String.sub s idx (len - idx) in
+      match Yojson.Safe.from_string rest with
+      | json -> Some (prefix, json)
+      | exception Yojson.Json_error _ -> None)
+
+let ops_pad_content (r : Rect.t) =
+  let pad_x = if r.w >= 60 then 2 else 1 in
+  Masc_tui_ui.Card.pad_inner ~pad_x ~pad_y:0 r
+
+let rejection_diff_row_count ~lang (v : Wire_work.verification_request) =
+  let say ~ko ~en = Say.resolve lang (Say.make ~ko ~en) in
+  let expected_lines =
+    let c =
+      List.map (fun s -> say ~ko:("계약: " ^ s) ~en:("Contract: " ^ s))
+        v.completion_contract
+    in
+    let a =
+      List.map (fun s -> say ~ko:("필수 산출물: " ^ s) ~en:("Required: " ^ s))
+        v.required_artifacts
+    in
+    c @ a
+  in
+  let observed_lines =
+    let ev =
+      if v.submitted_evidence = [] then
+        [ say ~ko:"제출된 증거: 없음" ~en:"Submitted evidence: none" ]
+      else
+        List.map (fun s -> say ~ko:("증거: " ^ s) ~en:("Evidence: " ^ s))
+          v.submitted_evidence
+    in
+    let err =
+      match v.evidence_projection_error with
+      | Some e -> [ say ~ko:("증거 투영 오류: " ^ e) ~en:("Evidence gap: " ^ e) ]
+      | None -> []
+    in
+    let critique =
+      match v.review_observation with
+      | Some obs when not (String.equal (String.trim obs.detail) "") ->
+          [
+            Printf.sprintf "%s (%s): %s"
+              (say ~ko:"검증자 판정" ~en:"Verifier")
+              obs.actor obs.detail;
+          ]
+      | Some _ | None -> []
+    in
+    ev @ err @ critique
+  in
+  let before = String.concat "\n" expected_lines in
+  let after = String.concat "\n" observed_lines in
+  List.length (Masc_tui_ui.Diff.rows ~before ~after)
+
+let evidence_checklist_row_count (v : Wire_work.verification_request) =
+  List.length v.required_artifacts
+  + List.length v.submitted_evidence
+  + if Option.is_some v.evidence_projection_error then 1 else 0
+
+let json_of_goal_store (g : Wire_work.goal) : Yojson.Safe.t =
+  let opt_s = function Some s -> `String s | None -> `Null in
+  let crit =
+    match g.criterion_verdict with
+    | Wire_work.Criterion_pending -> `String "pending"
+    | Wire_work.Criterion_valid -> `String "valid"
+    | Wire_work.Criterion_invalid r -> `Assoc [ ("invalid", `String r) ]
+    | Wire_work.Criterion_unavailable r -> `Assoc [ ("unavailable", `String r) ]
+  in
+  `Assoc
+    [
+      ("id", `String g.id);
+      ("title", `String g.title);
+      ("phase", `String (Wire_work.goal_phase_to_string g.phase));
+      ("priority", `Int g.priority);
+      ("due_date", opt_s g.due_date);
+      ("measure", `String g.measure);
+      ("procedure", `String g.procedure);
+      ("criterion_revision", opt_s g.criterion_revision);
+      ("criterion_verdict", crit);
+      ("last_review_note", opt_s g.last_review_note);
+    ]
+
+let json_of_task_store (tk : Wire_work.task) : Yojson.Safe.t =
+  let opt_s = function Some s -> `String s | None -> `Null in
+  let st_json =
+    match tk.status with
+    | Wire_work.Todo -> `Assoc [ ("state", `String "Todo") ]
+    | Wire_work.Claimed { assignee; claimed_at } ->
+        `Assoc
+          [
+            ("state", `String "Claimed");
+            ("assignee", `String assignee);
+            ("claimed_at", `String claimed_at);
+          ]
+    | Wire_work.InProgress { assignee; started_at } ->
+        `Assoc
+          [
+            ("state", `String "InProgress");
+            ("assignee", `String assignee);
+            ("started_at", `String started_at);
+          ]
+    | Wire_work.AwaitingVerification
+        { assignee; started_at; submitted_at; verification_id } ->
+        `Assoc
+          [
+            ("state", `String "AwaitingVerification");
+            ("assignee", `String assignee);
+            ("started_at", `String started_at);
+            ("submitted_at", `String submitted_at);
+            ("verification_id", `String verification_id);
+          ]
+    | Wire_work.Done { assignee; completed_at; notes } ->
+        `Assoc
+          [
+            ("state", `String "Done");
+            ("assignee", `String assignee);
+            ("completed_at", `String completed_at);
+            ("notes", opt_s notes);
+          ]
+    | Wire_work.Cancelled { cancelled_by; cancelled_at; reason } ->
+        `Assoc
+          [
+            ("state", `String "Cancelled");
+            ("cancelled_by", `String cancelled_by);
+            ("cancelled_at", `String cancelled_at);
+            ("reason", opt_s reason);
+          ]
+  in
+  let gl_json =
+    match tk.goal_link with
+    | Wire_work.Unlinked -> `Null
+    | Wire_work.Linked gid -> `String gid
+  in
+  `Assoc
+    [
+      ("id", `String tk.id);
+      ("title", `String tk.title);
+      ("priority", `Int tk.priority);
+      ("goal_id", gl_json);
+      ("status", st_json);
+      ("description", opt_s tk.description);
+    ]
+
+let json_of_verification_store (v : Wire_work.verification_request) :
+    Yojson.Safe.t =
+  let opt_s = function Some s -> `String s | None -> `Null in
+  let obs_json =
+    match v.review_observation with
+    | None -> `Null
+    | Some obs ->
+        `Assoc
+          [
+            ("state", `String "observed");
+            ("actor", `String obs.actor);
+            ("detail", `String obs.detail);
+          ]
+  in
+  `Assoc
+    [
+      ("request_id", `String v.request_id);
+      ("task_id", `String v.task_id);
+      ("task_title", `String v.task_title);
+      ("submitted_by", `String v.submitted_by);
+      ( "completion_contract"
+      , `List (List.map (fun s -> `String s) v.completion_contract) );
+      ( "required_artifacts"
+      , `List (List.map (fun s -> `String s) v.required_artifacts) );
+      ( "submitted_evidence"
+      , `List (List.map (fun s -> `String s) v.submitted_evidence) );
+      ("evidence_projection_error", opt_s v.evidence_projection_error);
+      ("review_observation", obs_json);
+    ]
+
+let split_dive_with_json_store ~bp ~(show_raw_json : bool) (rect : Rect.t) =
+  if show_raw_json && rect.w >= 88 then
+    match
+      Masc_tui_ui.Layout.split_h_bp bp rect
+        [ Masc_tui_ui.Layout.Ratio 0.58; Masc_tui_ui.Layout.Flex 1 ]
+    with
+    | [ l; r ] -> (l, r)
+    | _ -> (rect, Rect.empty)
+  else if show_raw_json then (Rect.empty, rect)
+  else (rect, Rect.empty)
+
+let json_card_max_scroll ~max_depth (json_card_rect : Rect.t)
+    (json : Yojson.Safe.t) =
+  let inner = ui_card_inner json_card_rect in
+  if Rect.is_empty inner then 0
+  else
+    let content = ops_pad_content inner in
+    if Rect.is_empty content then 0
+    else
+      let lines =
+        Masc_tui_ui.Json_tree.flatten ~max_depth ~redact_secrets:true json
+      in
+      max 0 (List.length lines - content.h)
+
+let json_of_metrics_store (m : Wire_infra.tool_metrics_24h) : Yojson.Safe.t =
+  let opt_float obs =
+    match Observed.to_option obs with Some f -> `Float f | None -> `Null
+  in
+  let fc = m.failure_classes in
+  `Assoc
+    [
+      ("calls", `Int m.calls);
+      ("failures", `Int m.failures);
+      ("failure_unclassified", `Int m.failure_unclassified);
+      ("p50_ms", opt_float m.p50_ms);
+      ("p95_ms", opt_float m.p95_ms);
+      ("max_ms", opt_float m.max_ms);
+      ( "failure_classes"
+      , `Assoc
+          [
+            ("dependency_unavailable", `Int fc.dependency_unavailable);
+            ("runtime_failure", `Int fc.runtime_failure);
+            ("policy_rejection", `Int fc.policy_rejection);
+            ("workflow_rejection", `Int fc.workflow_rejection);
+            ("operator_cancelled", `Int fc.operator_cancelled);
+          ] );
+    ]
+
+type sandbox_entry_info = {
+  backend_rows : int;
+  json : Yojson.Safe.t;
+}
+
+let sandbox_entry_info_of_detail ~sandboxes
+    (detail : Wire_infra.keeper_sandbox_detail) : sandbox_entry_info =
+  match detail with
+  | Wire_infra.Sandbox_microvm g ->
+      {
+        backend_rows = 5;
+        json =
+          `Assoc
+            [
+              ("keeper", `String g.keeper);
+              ("backend", `String g.backend);
+              ("guest_name", `String g.guest_name);
+              ("presence", `String g.presence);
+              ("socket", `String "socket");
+              ("shim_parity", `String "shim");
+              ("network_mode", `String "net");
+              ("volume", `String "vol");
+              ("metrics_24h", json_of_metrics_store g.metrics_24h);
+            ];
+      }
+  | Wire_infra.Sandbox_ssh_keeper { session = ks; pool = embedded_pool } ->
+      let pool_opt =
+        match embedded_pool with
+        | Some _ as p -> p
+        | None -> (
+            match sandboxes with
+            | Some (s : Wire_infra.sandboxes_snapshot) ->
+                List.find_opt
+                  (fun (p : Wire_infra.ssh_pool) ->
+                    List.exists
+                      (fun (s_ks : Wire_infra.ssh_keeper_session) ->
+                        String.equal s_ks.keeper ks.keeper)
+                      p.keeper_sessions)
+                  s.ssh_pools
+            | None -> None)
+      in
+      let pool_name, host, port, unix_user, remote_root =
+        match pool_opt with
+        | Some p -> (p.pool_name, p.host, p.port, p.unix_user, p.remote_root)
+        | None -> ("remote_ssh", "remote", 22, ks.keeper, "/")
+      in
+      let has_dispatch =
+        match ks.last_dispatch with `Assoc (_ :: _) -> true | _ -> false
+      in
+      {
+        backend_rows = 5 + if has_dispatch then 1 else 0;
+        json =
+          `Assoc
+            [
+              ("keeper", `String ks.keeper);
+              ("pool", `String pool_name);
+              ("host", `String host);
+              ("port", `Int port);
+              ("unix_user", `String unix_user);
+              ("remote_root", `String remote_root);
+              ("last_dispatch", ks.last_dispatch);
+              ("metrics_24h", json_of_metrics_store ks.metrics_24h);
+            ];
+      }
+  | Wire_infra.Sandbox_ssh_unbound u ->
+      {
+        backend_rows = 3 + if Option.is_some u.remote_endpoint then 1 else 0;
+        json =
+          `Assoc
+            [
+              ("keeper", `String u.keeper);
+              ("backend", `String u.backend);
+              ("binding_state", `String u.binding_state);
+              ( "remote_endpoint"
+              , match u.remote_endpoint with Some ep -> `String ep | None -> `Null );
+              ("metrics_24h", json_of_metrics_store u.metrics_24h);
+            ];
+      }
+  | Wire_infra.Sandbox_docker d ->
+      {
+        backend_rows = 2;
+        json =
+          `Assoc
+            [
+              ("keeper", `String d.keeper);
+              ("backend", `String d.backend);
+              ("network_mode", `String "net");
+              ("metrics_24h", json_of_metrics_store d.metrics_24h);
+            ];
+      }
+
+let sandbox_entry_info_for_keeper ~use_keeper_detail ~keeper
+    (inf : Infra_store.t) : sandbox_entry_info option =
+  let sandboxes = Observed.to_option inf.sandboxes in
+  let from_detail =
+    if not use_keeper_detail then None
+    else
+      match Observed.to_option inf.keeper_sandbox with
+      | Some resp when String.equal resp.keeper keeper ->
+          Some (sandbox_entry_info_of_detail ~sandboxes resp.sandbox)
+      | Some _ | None -> None
+  in
+  match from_detail with
+  | Some _ as found -> found
+  | None -> (
+      match sandboxes with
+      | None -> None
+      | Some s -> (
+          match
+            List.find_opt
+              (fun (g : Wire_infra.microvm_guest) -> String.equal g.keeper keeper)
+              s.microvm_guests
+          with
+          | Some g ->
+              Some
+                (sandbox_entry_info_of_detail ~sandboxes
+                   (Wire_infra.Sandbox_microvm g))
+          | None -> (
+              let ssh_bound =
+                List.find_map
+                  (fun (p : Wire_infra.ssh_pool) ->
+                    List.find_map
+                      (fun (ks : Wire_infra.ssh_keeper_session) ->
+                        if String.equal ks.keeper keeper then Some (p, ks)
+                        else None)
+                      p.keeper_sessions)
+                  s.ssh_pools
+              in
+              match ssh_bound with
+              | Some (p, ks) ->
+                  Some
+                    (sandbox_entry_info_of_detail ~sandboxes
+                       (Wire_infra.Sandbox_ssh_keeper
+                          { session = ks; pool = Some p }))
+              | None -> (
+                      match
+                        List.find_opt
+                          (fun (u : Wire_infra.ssh_unbound_keeper) ->
+                            String.equal u.keeper keeper)
+                          s.ssh_unbound_keepers
+                      with
+                      | Some u ->
+                          Some
+                            (sandbox_entry_info_of_detail ~sandboxes
+                               (Wire_infra.Sandbox_ssh_unbound u))
+                      | None -> (
+                          match
+                            List.find_opt
+                              (fun (d : Wire_infra.docker_keeper) ->
+                                String.equal d.keeper keeper)
+                              s.docker_keepers
+                          with
+                          | Some d ->
+                              Some
+                                (sandbox_entry_info_of_detail ~sandboxes
+                                   (Wire_infra.Sandbox_docker d))
+                          | None -> None)))))
+
+let sandbox_inspector_rem_rows ~inner_h (info : sandbox_entry_info) =
+  let band_h = if inner_h >= 8 then 2 else 1 in
+  let content_h = max 0 (inner_h - band_h) in
+  max 0 (content_h - (6 + info.backend_rows))
+
+let help_max_scroll (m : Model.t) =
+  let modal_w = min (max 0 (m.viewport.cols - 4)) 128 in
+  let modal_h = min (max 0 (m.viewport.rows - 4)) 28 in
+  let inner_w = if modal_w >= 2 && modal_h >= 2 then modal_w - 2 else 0 in
+  let inner_h = if modal_w >= 2 && modal_h >= 2 then modal_h - 2 else 0 in
+  if inner_w <= 0 || inner_h <= 0 then 0
+  else
+    let pad_x = if inner_w >= 72 then 2 else 1 in
+    let content_w = max 0 (inner_w - (2 * pad_x)) in
+    let content_h = max 1 inner_h in
+    let compact_count (grp : Keymap.help_group) =
+      let seen_ws = ref false in
+      let seen_move = ref false in
+      let seen_ask = ref false in
+      let n_entries =
+        List.fold_left
+          (fun acc (e : Keymap.help_entry) ->
+            match e.action with
+            | Keymap.Switch_workspace _ ->
+                if !seen_ws then acc
+                else (
+                  seen_ws := true;
+                  acc + 1)
+            | Keymap.Move _ ->
+                if !seen_move then acc
+                else (
+                  seen_move := true;
+                  acc + 1)
+            | Keymap.Ask_select_choice _ ->
+                if !seen_ask then acc
+                else (
+                  seen_ask := true;
+                  acc + 1)
+            | Keymap.Sub_tab _
+            | Keymap.Cycle_focus_pane _
+            | Keymap.Focus_composer
+            | Keymap.Focus_filter
+            | Keymap.Dive_selected
+            | Keymap.Confirm_selected
+            | Keymap.Pop_back_or_close
+            | Keymap.Open_settings
+            | Keymap.Teleport_blocked
+            | Keymap.Open_incidents
+            | Keymap.Voice_ptt_toggle
+            | Keymap.Fast_approve_top
+            | Keymap.Fast_deny_top
+            | Keymap.Open_help
+            | Keymap.Open_palette
+            | Keymap.Open_keeper_switcher
+            | Keymap.Open_model_switcher
+            | Keymap.Toggle_tool_details
+            | Keymap.Open_queue_context
+            | Keymap.Toggle_thinking
+            | Keymap.Cycle_origin_mode
+            | Keymap.Composer_kill_word
+            | Keymap.Composer_newline
+            | Keymap.Submit_steer
+            | Keymap.Submit_followup
+            | Keymap.Toggle_expand
+            | Keymap.Create_new
+            | Keymap.Refresh
+            | Keymap.Open_external
+            | Keymap.Copy_selected
+            | Keymap.Toggle_zoom
+            | Keymap.Quit_app ->
+                acc + 1)
+          0 grp.entries
+      in
+      1 + n_entries + 1
+    in
+    let groups = Keymap.help_entries ~scope_chain:Keymap.all_scopes ~lang:m.lang in
+    let is_left_cat = function
+      | Keymap.Cat_navigation | Keymap.Cat_actions -> true
+      | Keymap.Cat_overlays | Keymap.Cat_composer | Keymap.Cat_approval -> false
+    in
+    let left_lines =
+      List.fold_left
+        (fun acc (g : Keymap.help_group) ->
+          if is_left_cat g.category then acc + compact_count g else acc)
+        0 groups
+    in
+    let right_lines =
+      List.fold_left
+        (fun acc (g : Keymap.help_group) ->
+          if not (is_left_cat g.category) then acc + compact_count g else acc)
+        0 groups
+    in
+    let total =
+      if content_w >= 72 then max left_lines right_lines
+      else left_lines + right_lines
+    in
+    max 0 (total - content_h)
+
+let queue_context_max_scroll (m : Model.t) tab =
+  let modal_h = min (max 0 (m.viewport.rows - 4)) 24 in
+  let inner_h = if modal_h >= 2 then modal_h - 2 else 0 in
+  let body_h = max 1 (inner_h - 2) in
+  let keeper =
+    match resolve_target_keeper m with
+    | Some k -> k
+    | None -> Drafts.target_keeper_key m.drafts
+  in
+  let total_rows =
+    match tab with
+    | Nav.Drawer_queue ->
+        let txs = Drafts.pending_txs_for_keeper ~keeper m.drafts in
+        let others = Drafts.other_keepers_draft_count m.drafts in
+        1 + max 1 (List.length txs) + 1 + 1 + 1 + (if others > 0 then 1 else 0)
+    | Nav.Drawer_schedules -> List.length (Work_store.schedules_list m.work)
+    | Nav.Drawer_context -> 0
+  in
+  max 0 (total_rows - body_h)
+
+let wiki_preview_max_scroll ~bp ~theme ~(rect : Rect.t)
+    ~target_slug (k : Knowledge_store.t) =
+  let inner = ui_card_inner rect in
+  if Rect.is_empty inner then 0
+  else
+    let sel_summary =
+      match target_slug with
+      | Some slug -> (
+          match Observed.to_option k.wiki_index with
+          | Some idx ->
+              List.find_opt
+                (fun (p : Wire_knowledge.wiki_page_summary) ->
+                  String.equal p.slug slug)
+                idx.pages
+          | None -> None)
+      | None -> Knowledge_store.selected_wiki_page k
+    in
+    let active_draft =
+      match target_slug with
+      | None -> k.wiki_edit_draft
+      | Some want -> (
+          match k.wiki_edit_draft with
+          | Some d when String.equal d.slug want -> Some d
+          | Some _ | None -> None)
+    in
+    match active_draft with
+    | Some d ->
+        let md_rect =
+          Rect.make ~x:inner.x ~y:(inner.y + 1) ~w:inner.w
+            ~h:(max 0 (inner.h - 1))
+          |> ui_pad_content ~bp
+        in
+        markdown_max_scroll ~theme ~width:md_rect.w ~height:md_rect.h d.body
+    | None -> (
+        let page_detail =
+          match Observed.to_option k.wiki_page with
+          | Some d -> (
+              match target_slug, sel_summary with
+              | Some want, _ when String.equal d.slug want -> Some d
+              | None, Some s when String.equal d.slug s.slug -> Some d
+              | None, None -> Some d
+              | Some _, _ | None, Some _ -> None)
+          | None -> None
+        in
+        match page_detail with
+        | Some d ->
+            let band_h = if inner.h >= 7 then 2 else 1 in
+            let below =
+              Rect.make ~x:inner.x ~y:(inner.y + band_h) ~w:inner.w
+                ~h:(max 0 (inner.h - band_h))
+            in
+            if Rect.is_empty below then 0
+            else
+              let show_toc_rail =
+                Masc_tui_ui.Layout.equal_breakpoint bp Masc_tui_ui.Layout.Wide
+                && below.w >= 68
+                && below.h >= 8
+              in
+              if show_toc_rail then
+                let toc_w = 22 in
+                let prose_w = max 20 (below.w - toc_w - 1) in
+                let prose_rect =
+                  Rect.make ~x:below.x ~y:below.y ~w:prose_w
+                    ~h:below.h
+                  |> ui_pad_content ~bp ~pad_y:1
+                in
+                markdown_max_scroll ~theme ~width:prose_rect.w
+                  ~height:prose_rect.h d.body_markdown
+              else
+                let content = ui_pad_content ~bp below in
+                let md_h = max 0 (content.h - 2) in
+                markdown_max_scroll ~theme ~width:content.w ~height:md_h
+                  d.body_markdown
+        | None -> (
+            match sel_summary with
+            | Some s ->
+                let content = ui_pad_content ~bp inner in
+                let md_h = max 0 (content.h - 3) in
+                markdown_max_scroll ~theme ~width:content.w ~height:md_h
+                  s.summary
+            | None -> 0))
+
+let memory_right_pane_max_scroll ~bp ~(rect : Rect.t)
+    (k : Knowledge_store.t) =
+  let inner = ui_card_inner rect in
+  let content = ui_pad_content ~bp inner in
+  if Rect.is_empty content then 0
+  else
+    match Observed.to_option k.memory_diff with
+    | None -> 0
+    | Some _ ->
+        (* Matches draw_temporal_memory_diff (screen_knowledge.ml:2183-2317):
+           Row 0 summary (1) + Stacked_bar (2 if y+1 < bottom, unconditionally
+           for both Keeper_diff and World_diff) + OS line (1 if keeper matches)
+           + divider (1). *)
+        let y = ref 0 in
+        let bottom = content.h in
+        if !y < bottom then incr y;
+        if !y + 1 < bottom then y := !y + 2;
+        (match k.memory_diff_keeper, Observed.to_option k.memory_os_internals with
+        | Some kp, Some intr when String.equal intr.keeper kp && !y < bottom ->
+            incr y
+        | Some _, Some _ | Some _, None | None, Some _ | None, None -> ());
+        if !y < bottom then incr y;
+        let avail_h = max 1 (bottom - !y) in
+        max 0 (Knowledge_store.memory_diff_line_count k - avail_h)
+
+let knowledge_detail_max_scroll (m : Model.t) =
+  let bp = ui_bp m in
+  let br = ui_body_rect m in
+  let theme = Theme.of_preset m.theme_preset in
+  let k = m.knowledge in
+  let body_after_bar =
+    match
+      Masc_tui_ui.Layout.split_v br
+        [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
+    with
+    | [ _; b ] -> b
+    | _ -> br
+  in
+  match k.active_tab with
+  | Nav.Knowledge_board -> (
+      match Knowledge_store.selected_post k with
+      | None -> 0
+      | Some p ->
+          let right_rect =
+            if m.nav.zoomed then body_after_bar
+            else
+              snd
+                (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+                   ~left_ratio:0.48 ~top_ratio:0.54 bp body_after_bar)
+          in
+          let inner = ui_card_inner right_rect in
+          let band_h = if inner.h >= 7 then 2 else 1 in
+          let content =
+            Rect.make ~x:inner.x ~y:(inner.y + band_h) ~w:inner.w
+              ~h:(max 0 (inner.h - band_h))
+            |> ui_pad_content ~bp
+          in
+          let header_used =
+            match p.succession_chain_root_id, p.chain_depth with
+            | Some _, Some d when d > 1 -> 2
+            | _ -> if content.h >= 6 then 1 else 0
+          in
+          let rem = max 0 (content.h - header_used) in
+          let comments =
+            match Observed.to_option k.active_thread with
+            | Some (tp, cs) when String.equal tp.id p.id -> cs
+            | Some _ | None -> []
+          in
+          let comment_rows =
+            if comments = [] || rem < 6 then 0
+            else min 5 (1 + List.length comments)
+          in
+          let md_h = max 0 (rem - comment_rows) in
+          markdown_max_scroll ~theme ~width:content.w ~height:md_h p.body)
+  | Nav.Knowledge_wiki_artifacts -> (
+      match k.wiki_artifacts_submode with
+      | `Wiki ->
+          let right_rect =
+            if m.nav.zoomed then body_after_bar
+            else
+              snd
+                (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+                   ~left_ratio:0.38 ~top_ratio:0.48 bp body_after_bar)
+          in
+          wiki_preview_max_scroll ~bp ~theme ~rect:right_rect ~target_slug:None
+            k
+      | `Artifacts -> (
+          match Knowledge_store.selected_artifact k with
+          | None -> 0
+          | Some a ->
+              let _, right_rect =
+                Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+                  ~left_ratio:0.56 ~top_ratio:0.54 bp body_after_bar
+              in
+              let inner = ui_card_inner right_rect in
+              let band_h = if inner.h >= 7 then 2 else 1 in
+              let content =
+                Rect.make ~x:inner.x ~y:(inner.y + band_h) ~w:inner.w
+                  ~h:(max 0 (inner.h - band_h))
+                |> ui_pad_content ~bp
+              in
+              let content_h = max 1 content.h in
+              let total_rows =
+                2
+                + (if Option.is_some a.producer then 1 else 0)
+                + (if Option.is_some a.created_at_unix then 1 else 0)
+                + 1
+              in
+              max 0 (total_rows - content_h)))
+  | Nav.Knowledge_memory ->
+      let right_rect =
+        if m.nav.zoomed then body_after_bar
+        else
+          snd
+            (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+               ~left_ratio:0.48 ~top_ratio:0.48 bp body_after_bar)
+      in
+      memory_right_pane_max_scroll ~bp ~rect:right_rect k
+
+let work_detail_max_scroll (m : Model.t) =
+  let bp = ui_bp m in
+  let br = ui_body_rect m in
+  let theme = Theme.of_preset m.theme_preset in
+  match m.work.active_tab with
+  | Nav.Work_pipeline -> (
+      match Work_store.selected_goal m.work with
+      | None -> 0
+      | Some g ->
+          let right_rect =
+            if br.w >= 96 then
+              match
+                Masc_tui_ui.Layout.split_h_bp bp br
+                  [ Masc_tui_ui.Layout.Ratio 0.46; Masc_tui_ui.Layout.Flex 1 ]
+              with
+              | [ _; r ] -> r
+              | _ -> Rect.empty
+            else
+              let goals_n = List.length (Work_store.filtered_goals m.work) in
+              let top_h =
+                min
+                  (max 5 (br.h / 2))
+                  (Masc_tui_ui.Layout.adaptive_list_height ~items:goals_n
+                     ~overhead:4 ~min_h:5 ~max_h:10 ())
+              in
+              match
+                Masc_tui_ui.Layout.split_v_bp bp br
+                  [ Masc_tui_ui.Layout.Fixed top_h; Masc_tui_ui.Layout.Flex 1 ]
+              with
+              | [ _; b ] -> b
+              | _ -> Rect.empty
+          in
+          let r_inner = ui_card_inner right_rect in
+          let content = ops_pad_content r_inner in
+          if Rect.is_empty content then 0
+          else
+            let y = ref r_inner.y in
+            let bottom = Rect.bottom r_inner in
+            if r_inner.h >= 8 then
+              y := !y + 2 + if r_inner.h >= 16 then 1 else 0
+            else if !y < bottom then incr y;
+            let action_h =
+              if bottom - !y >= 4 then 2
+              else if bottom - !y >= 2 then 1
+              else 0
+            in
+            let body_bot = bottom - action_h in
+            if !y < body_bot then begin
+              let step_avail = body_bot - !y in
+              let step_used =
+                match g.phase with
+                | Wire_work.Paused _ | Wire_work.Blocked _
+                  when min 2 step_avail >= 2 ->
+                    2
+                | Wire_work.Executing
+                | Wire_work.Verifying
+                | Wire_work.Awaiting_confirmation
+                | Wire_work.Paused _
+                | Wire_work.Blocked _
+                | Wire_work.Completed
+                | Wire_work.Dropped ->
+                    1
+              in
+              y := !y + step_used + if step_avail >= 12 then 1 else 0
+            end;
+            if body_bot - !y >= 5 then y := !y + min 2 (body_bot - !y);
+            (match g.last_review_note with
+            | Some note
+              when !y < body_bot && not (String.equal (String.trim note) "") ->
+                incr y
+            | Some _ | None -> ());
+            let all_tasks = Work_store.tasks m.work in
+            let unlinked_n = Work_store.unlinked_task_count m.work in
+            let unattrib_n =
+              match Observed.to_option m.work.candle_ledger with
+              | Some l -> l.diagnostics.unattributed_count
+              | None -> 0
+            in
+            if
+              (not (Model.work_pipeline_has_linked_card m))
+              && (unlinked_n > 0 || unattrib_n > 0)
+              && !y < body_bot
+            then incr y;
+            let rem_h = max 0 (body_bot - !y) in
+            let linked_ids =
+              List.filter_map
+                (fun (tk : Wire_work.task) ->
+                  match tk.goal_link with
+                  | Wire_work.Linked gid when String.equal gid g.id -> Some tk.id
+                  | Wire_work.Linked _ | Wire_work.Unlinked -> None)
+                all_tasks
+            in
+            let related_verifs =
+              List.filter
+                (fun (v : Wire_work.verification_request) ->
+                  List.exists (String.equal v.task_id) linked_ids)
+                (Work_store.verifications_list m.work)
+            in
+            let rejected_verif =
+              List.find_opt
+                (fun (v : Wire_work.verification_request) ->
+                  match v.review_observation with
+                  | Some obs -> (
+                      match obs.state with
+                      | Wire_work.Review_rejected | Wire_work.Review_failed ->
+                          true
+                      | Wire_work.Review_unobserved
+                      | Wire_work.Review_running
+                      | Wire_work.Review_approved
+                      | Wire_work.Review_unavailable
+                      | Wire_work.Review_not_reviewed
+                      | Wire_work.Review_commit_failed
+                      | Wire_work.Review_execution_pending
+                      | Wire_work.Review_execution_repair_required
+                      | Wire_work.Review_cancelled
+                      | Wire_work.Review_superseded ->
+                          false)
+                  | None -> false)
+                related_verifs
+            in
+            let diff_h =
+              match rejected_verif with
+              | Some _ when rem_h >= 10 -> min 6 (rem_h / 3)
+              | Some _ | None -> 0
+            in
+            let ev_h =
+              match rejected_verif, related_verifs with
+              | None, _ :: _ when rem_h >= 9 -> min 4 (rem_h / 3)
+              | _ -> 0
+            in
+            let md_avail = max 0 (rem_h - diff_h - ev_h) in
+            let md_max =
+              if md_avail >= 3 then begin
+                incr y;
+                let md_h = max 0 (md_avail - 1) in
+                let md_src =
+                  Printf.sprintf "**%s:** %s\n\n**%s:** %s"
+                    (Say.resolve m.lang
+                       (Say.make ~ko:"성공 조건" ~en:"Success Measure"))
+                    (Chat_transcript.rewrite_masc_links_for_markdown g.measure)
+                    (Say.resolve m.lang
+                       (Say.make ~ko:"측정 절차" ~en:"Procedure"))
+                    (Chat_transcript.rewrite_masc_links_for_markdown g.procedure)
+                in
+                y := !y + md_h;
+                markdown_max_scroll ~theme ~width:content.w ~height:md_h md_src
+              end
+              else if md_avail >= 1 then begin
+                let md_src =
+                  Chat_transcript.rewrite_masc_links_for_markdown
+                    (g.measure ^ " · " ^ g.procedure)
+                in
+                y := !y + md_avail;
+                markdown_max_scroll ~theme ~width:content.w ~height:md_avail
+                  md_src
+              end
+              else 0
+            in
+            let diff_max =
+              match rejected_verif with
+              | Some rv when diff_h >= 2 && !y < body_bot ->
+                  incr y;
+                  let drect_h = max 0 (min (diff_h - 1) (body_bot - !y)) in
+                  if drect_h <= 0 then 0
+                  else
+                    max 0 (rejection_diff_row_count ~lang:m.lang rv - drect_h)
+              | Some _ | None -> 0
+            in
+            max md_max diff_max)
+  | Nav.Work_inbox -> (
+      match
+        Attention.current_filtered_item ~query:m.work.filter_query m.attention
+      with
+      | None -> 0
+      | Some entry -> (
+          let right_rect =
+            if br.w >= 96 then
+              match
+                Masc_tui_ui.Layout.split_h_bp bp br
+                  [ Masc_tui_ui.Layout.Ratio 0.42; Masc_tui_ui.Layout.Flex 1 ]
+              with
+              | [ _; r ] -> r
+              | _ -> Rect.empty
+            else
+              match
+                Masc_tui_ui.Layout.split_v_bp bp br
+                  [ Masc_tui_ui.Layout.Ratio 0.38; Masc_tui_ui.Layout.Flex 1 ]
+              with
+              | [ _; b ] -> b
+              | _ -> Rect.empty
+          in
+          let r_inner = ui_card_inner right_rect in
+          let content_full = ops_pad_content r_inner in
+          if Rect.is_empty content_full then 0
+          else
+            let band_h =
+              if r_inner.h >= 7 then 2 + if r_inner.h >= 12 then 1 else 0 else 0
+            in
+            let avail_h = max 0 (r_inner.h - band_h) in
+            let w = content_full.w in
+            match entry.payload with
+            | Attention.Payload_tool_approval ta ->
+                let used = 1 + if Option.is_some ta.because then 1 else 0 in
+                let rem = max 0 (avail_h - used) in
+                let q_h = min 4 (max 0 (rem - 4)) in
+                let q_max =
+                  if q_h >= 1 then
+                    markdown_max_scroll ~theme ~width:w ~height:q_h
+                      (Chat_transcript.rewrite_masc_links_for_markdown
+                         ta.question)
+                  else 0
+                in
+                let after_q = max 0 (rem - q_h) in
+                let jt_max =
+                  if after_q > 2 then
+                    let jt_h = max 0 (after_q - 2) in
+                    let json =
+                      parse_json_or_wrap_store ~key:"args" ta.args_preview
+                    in
+                    let lines =
+                      Masc_tui_ui.Json_tree.flatten ~max_depth:3
+                        ~redact_secrets:true json
+                    in
+                    if jt_h <= 0 then 0 else max 0 (List.length lines - jt_h)
+                  else 0
+                in
+                max q_max jt_max
+            | Attention.Payload_gate g ->
+                let jt_h = max 0 (avail_h - 2) in
+                if jt_h <= 0 then 0
+                else
+                  let raw_in = Option.value g.input_preview ~default:"{}" in
+                  let lines =
+                    Masc_tui_ui.Json_tree.flatten ~max_depth:3
+                      ~redact_secrets:true
+                      (parse_json_or_wrap_store ~key:"input" raw_in)
+                  in
+                  max 0 (List.length lines - jt_h)
+            | Attention.Payload_ask ask ->
+                let ctx_md =
+                  match ask.context with
+                  | Some c when not (String.equal (String.trim c) "") ->
+                      c ^ "\n\n"
+                  | Some _ | None -> ""
+                in
+                let q_opt =
+                  match ask.questions with q :: _ -> Some q | [] -> None
+                in
+                let prompt_md =
+                  match q_opt with
+                  | Some q ->
+                      Printf.sprintf "%s**%s**\n\n%s" ctx_md q.header
+                        (Chat_transcript.rewrite_masc_links_for_markdown
+                           q.prompt)
+                  | None -> ctx_md
+                in
+                let choices_h =
+                  match q_opt with
+                  | Some q -> min 6 (List.length q.choices + 2)
+                  | None -> 1
+                in
+                let md_h =
+                  if avail_h = 0 then 0
+                  else min avail_h (max 1 (avail_h - choices_h))
+                in
+                markdown_max_scroll ~theme ~width:w ~height:md_h prompt_md
+            | Attention.Payload_goal_confirmation g ->
+                let md_h = max 0 (avail_h - 3) in
+                if md_h <= 0 then 0
+                else
+                  markdown_max_scroll ~theme ~width:w ~height:md_h
+                    (Chat_transcript.rewrite_masc_links_for_markdown
+                       (g.measure ^ "\n\n" ^ g.procedure))
+            | Attention.Payload_quarantine _ -> 0))
+  | Nav.Work_tasks_schedules | Nav.Work_candle_scorecard -> 0
+
+let runtime_detail_max_scroll (m : Model.t) =
+  let bp = ui_bp m in
+  let br = ui_body_rect m in
+  let body_rect =
+    match
+      Masc_tui_ui.Layout.split_v br
+        [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
+    with
+    | [ _; b ] -> b
+    | _ -> br
+  in
+  match m.runtime.active_tab with
+  | Nav.Runtime_quotas_credits ->
+      let left_rect, _ =
+        Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+          ~left_ratio:0.46 ~top_ratio:0.48 bp body_rect
+      in
+      let total = Runtime_store.subscription_window_count m.runtime in
+      let top_sub_h =
+        Masc_tui_ui.Layout.adaptive_list_height ~items:total ~overhead:4
+          ~min_h:5
+          ~max_h:(max 5 (left_rect.h * 52 / 100))
+          ()
+      in
+      let sub_rect =
+        if left_rect.h >= 11 then
+          match
+            Masc_tui_ui.Layout.split_v_bp bp left_rect
+              [ Masc_tui_ui.Layout.Fixed top_sub_h; Masc_tui_ui.Layout.Flex 1 ]
+          with
+          | [ a; _ ] -> a
+          | _ -> left_rect
+        else left_rect
+      in
+      let content = ui_card_inner sub_rect |> ui_pad_content ~bp in
+      if Rect.is_empty content then 0
+      else
+        let vis = content.h in
+        let truncated = total > vis && vis >= 2 in
+        let visible_limit = if truncated then vis - 1 else vis in
+        max 0 (total - visible_limit)
+  | Nav.Runtime_failover_lanes -> (
+      match Runtime_store.selected_lane m.runtime with
+      | None -> 0
+      | Some lane ->
+          let _, right_rect =
+            Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+              ~left_ratio:0.56 ~top_ratio:0.54 bp body_rect
+          in
+          let insp_rect =
+            match
+              Masc_tui_ui.Layout.split_v_bp bp right_rect
+                [ Masc_tui_ui.Layout.Ratio 0.52; Masc_tui_ui.Layout.Flex 1 ]
+            with
+            | [ a; _ ] -> a
+            | _ -> right_rect
+          in
+          let insp_inner = ui_card_inner insp_rect in
+          if Rect.is_empty insp_inner then 0
+          else
+            let band_h = if insp_inner.h >= 6 then 2 else 1 in
+            let body_area =
+              Rect.make ~x:insp_inner.x ~y:(insp_inner.y + band_h)
+                ~w:insp_inner.w
+                ~h:(max 0 (insp_inner.h - band_h))
+              |> ui_pad_content ~bp
+            in
+            if Rect.is_empty body_area then 0
+            else
+              (* gauge (1) + divider (1) = 2 rows before slot probes *)
+              let avail_slot_rows = max 1 (body_area.h - 2) in
+              max 0 (List.length lane.runtime_ids - avail_slot_rows))
+  | Nav.Runtime_efficiency_spend | Nav.Runtime_tools_connectors -> 0
+
+let infra_detail_max_scroll (m : Model.t) =
+  let bp = ui_bp m in
+  let br = ui_body_rect m in
+  match m.infra.active_tab with
+  | Nav.Infra_sandboxes -> (
+      match Infra_store.selected_sandbox_keeper m.infra with
+      | None -> 0
+      | Some kp -> (
+          let top_h = if br.w >= 100 then 6 else 4 in
+          let body_rect =
+            match
+              Masc_tui_ui.Layout.split_v_bp bp br
+                [ Masc_tui_ui.Layout.Fixed top_h; Masc_tui_ui.Layout.Flex 1 ]
+            with
+            | [ _; b ] -> b
+            | _ -> br
+          in
+          if body_rect.w < 100 then 0
+          else
+            let right_rect =
+              match
+                Masc_tui_ui.Layout.split_h_bp bp body_rect
+                  [ Masc_tui_ui.Layout.Ratio 0.60; Masc_tui_ui.Layout.Flex 1 ]
+              with
+              | [ _; r ] -> r
+              | _ -> Rect.empty
+            in
+            let inner = ui_card_inner right_rect in
+            if Rect.is_empty inner then 0
+            else
+              match
+                sandbox_entry_info_for_keeper ~use_keeper_detail:false
+                  ~keeper:kp m.infra
+              with
+              | None -> 0
+              | Some info ->
+                  let rem_rows =
+                    sandbox_inspector_rem_rows ~inner_h:inner.h info
+                  in
+                  if rem_rows <= 0 then 0
+                  else
+                    max 0
+                      (Infra_store.sandbox_inspector_event_count ~keeper:kp
+                         m.infra
+                      - rem_rows)))
+  | Nav.Infra_repos_changes -> (
+      match Infra_store.selected_repo_file_change m.infra with
+      | Some fc -> (
+          match fc.diff_preview with
+          | Some dp when not (String.equal dp "") ->
+              let _, right_rect =
+                Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+                  ~left_ratio:0.42 ~top_ratio:0.46 bp br
+              in
+              let inner = ui_card_inner right_rect in
+              if Rect.is_empty inner then 0
+              else
+                let band_h = if inner.h >= 5 then 2 else 1 in
+                let link_h =
+                  if Option.is_some (Infra_store.selected_repository m.infra)
+                  then 1
+                  else 0
+                in
+                let diff_h = max 1 (inner.h - band_h - link_h - 1) in
+                max 0 (List.length (Masc_tui_ui.Diff.parse_unified dp) - diff_h)
+          | Some _ | None -> 0)
+      | None -> 0)
+  | Nav.Infra_activity_logs -> (
+      match Infra_store.selected_log m.infra with
+      | None -> 0
+      | Some e ->
+          let body_rect =
+            match
+              Masc_tui_ui.Layout.split_v br
+                [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
+            with
+            | [ _; b ] -> b
+            | _ -> br
+          in
+          let _, right_rect =
+            Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+              ~left_ratio:0.62 ~top_ratio:0.56 bp body_rect
+          in
+          let inner = ui_card_inner right_rect in
+          if Rect.is_empty inner then 0
+          else
+            let band_h = if inner.h >= 6 then 2 else 1 in
+            let content =
+              Rect.make ~x:inner.x ~y:(inner.y + band_h) ~w:inner.w
+                ~h:(max 0 (inner.h - band_h))
+              |> ui_pad_content ~bp
+            in
+            if Rect.is_empty content then 0
+            else
+              let max_msg_rows = min 6 (max 1 (content.h - 2)) in
+              let msg_lines =
+                Chat_transcript.wrap_plain_lines
+                  ~width:(max 1 (content.w - 2))
+                  e.message
+              in
+              let msg_n = min max_msg_rows (List.length msg_lines) in
+              let tree_h = max 1 (content.h - msg_n - 1) in
+              let total =
+                List.length
+                  (Masc_tui_ui.Json_tree.flatten ~max_depth:4
+                     ~redact_secrets:true e.details)
+              in
+              max 0 (total - tree_h))
+
+let keeper_tab_max_scroll ~embedded (m : Model.t) ~name ~tab =
+  let content_w, content_h =
+    Chat_transcript.keeper_content_rect_size ~embedded ~model:m
+  in
+  if content_w <= 0 || content_h <= 0 then 0
+  else
+    match tab with
+    | Nav.Keeper_memory ->
+        let footer_h = if content_h >= 7 then 2 else 0 in
+        let body_h = max 0 (content_h - footer_h) in
+        let hdr_rows =
+          match Observed.to_option m.knowledge.memory_diff with
+          | Some
+              {
+                scope = Wire_knowledge.Scope_keeper k;
+                retrieval_heat = heat;
+                body = Wire_knowledge.Keeper_diff _;
+                _;
+              }
+            when String.equal k name ->
+              let has_os =
+                match Observed.to_option m.knowledge.memory_os_internals with
+                | Some intr -> String.equal intr.keeper name
+                | None -> false
+              in
+              let heat_total =
+                heat.hot + heat.warm + heat.cold + heat.never_retrieved
+              in
+              let base = 2 + if has_os then 1 else 0 in
+              let heat_rows =
+                if heat_total > 0 && body_h - base >= 4 then 3 else 0
+              in
+              base + heat_rows
+          | Some
+              {
+                scope = Wire_knowledge.Scope_world | Wire_knowledge.Scope_keeper _;
+                body = Wire_knowledge.Keeper_diff _ | Wire_knowledge.World_diff _;
+                _;
+              }
+          | None ->
+              0
+        in
+        let vis_h = max 1 (body_h - hdr_rows) in
+        let total =
+          Knowledge_store.keeper_memory_diff_line_count ~name m.knowledge
+        in
+        max 0 (total - vis_h)
+    | Nav.Keeper_work_candle ->
+        let left_h =
+          if content_w >= 76 then content_h
+          else
+            match
+              Masc_tui_ui.Layout.split_v ~gap:1
+                (Rect.make ~x:0 ~y:0 ~w:content_w ~h:content_h)
+                [ Masc_tui_ui.Layout.Ratio 0.56; Masc_tui_ui.Layout.Flex 1 ]
+            with
+            | t :: _ -> t.h
+            | [] -> content_h
+        in
+        let n_tasks =
+          List.length
+            (List.filter
+               (fun (tk : Wire_work.task) ->
+                 match tk.status with
+                 | Wire_work.Claimed { assignee; _ }
+                 | Wire_work.InProgress { assignee; _ }
+                 | Wire_work.AwaitingVerification { assignee; _ }
+                 | Wire_work.Done { assignee; _ } ->
+                     String.equal assignee name
+                 | Wire_work.Cancelled { cancelled_by; _ } ->
+                     String.equal cancelled_by name
+                 | Wire_work.Todo -> false)
+               (Work_store.tasks m.work))
+        in
+        let n_scheds =
+          List.length
+            (List.filter
+               (fun (sc : Wire_work.schedule_row) ->
+                 Option.equal String.equal sc.payload_keeper_name (Some name)
+                 || Option.equal String.equal sc.payload_target (Some name))
+               (Work_store.schedules_list m.work))
+        in
+        let n_posts =
+          List.length
+            (List.filter
+               (fun (p : Wire_knowledge.board_post) -> String.equal p.author name)
+               (Knowledge_store.filtered_posts m.knowledge))
+        in
+        let total_rows = 3 + max 1 n_tasks + max 1 n_scheds + max 1 n_posts in
+        max 0 (total_rows - max 1 left_h)
+    | Nav.Keeper_sandbox ->
+        let top_h = min 10 (max 4 (content_h / 2)) in
+        let rest_h = max 0 (content_h - top_h) in
+        let metrics_h =
+          if rest_h >= 8 then 5 else if rest_h >= 5 then 3 else 0
+        in
+        let logs_h = max 0 (rest_h - metrics_h) in
+        let body_logs_h = max 1 (logs_h - 1) in
+        let n_logs =
+          List.length
+            (List.filter
+               (fun (l : Wire_infra.system_log_entry) ->
+                 Option.equal String.equal l.keeper (Some name))
+               m.infra.logs)
+        in
+        max 0 (n_logs - body_logs_h)
+    | Nav.Keeper_chat | Nav.Keeper_config -> 0
+
+let dive_max_scroll (m : Model.t) active =
+  let bp = ui_bp m in
+  let br = ui_body_rect m in
+  let theme = Theme.of_preset m.theme_preset in
+  match active with
+  | Nav.Dive_keeper { name; tab } ->
+      keeper_tab_max_scroll ~embedded:false m ~name ~tab
+  | Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; from_rev; to_rev }) ->
+      let body_rect =
+        match
+          Masc_tui_ui.Layout.split_v br
+            [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
+        with
+        | [ _; b ] -> b
+        | _ -> br
+      in
+      let right_rect =
+        if m.nav.zoomed then body_rect
+        else
+          snd
+            (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+               ~left_ratio:0.48 ~top_ratio:0.48 bp body_rect)
+      in
+      let k_scoped =
+        {
+          m.knowledge with
+          memory_diff_keeper = keeper;
+          memory_diff_window = Knowledge_store.Window_revs { from_rev; to_rev };
+        }
+      in
+      memory_right_pane_max_scroll ~bp ~rect:right_rect k_scoped
+  | Nav.Dive_knowledge (Nav.Thread_dive post_id) -> (
+      let post_opt, comments =
+        match Observed.to_option m.knowledge.active_thread with
+        | Some (tp, cs) when String.equal tp.id post_id -> (Some tp, cs)
+        | active_opt -> (
+            let all_posts =
+              match Observed.to_option m.knowledge.board with
+              | Some f -> f.posts
+              | None -> []
+            in
+            match
+              List.find_opt
+                (fun (p : Wire_knowledge.board_post) ->
+                  String.equal p.id post_id)
+                all_posts
+            with
+            | Some p -> (Some p, [])
+            | None -> (
+                match active_opt with
+                | Some (tp, cs) -> (Some tp, cs)
+                | None -> (None, [])))
+      in
+      match post_opt with
+      | None -> 0
+      | Some p ->
+          let body_rect =
+            match
+              Masc_tui_ui.Layout.split_v br
+                [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
+            with
+            | [ _; b ] -> b
+            | _ -> br
+          in
+          let inner = ui_card_inner body_rect in
+          let band_h = if inner.h >= 7 then 2 else 1 in
+          let content =
+            Rect.make ~x:inner.x ~y:(inner.y + band_h) ~w:inner.w
+              ~h:(max 0 (inner.h - band_h))
+            |> ui_pad_content ~bp
+          in
+          let comments_h =
+            if comments = [] then 0
+            else min (max 3 (content.h / 3)) (2 + (List.length comments * 2))
+          in
+          let body_h = max 0 (content.h - comments_h) in
+          let body_max =
+            markdown_max_scroll ~theme ~width:content.w ~height:body_h p.body
+          in
+          let comments_body_h = max 0 (comments_h - 1) in
+          let comments_max =
+            if comments_body_h > 0 then
+              max 0 ((List.length comments * 2) - comments_body_h)
+            else 0
+          in
+          body_max + comments_max)
+  | Nav.Dive_knowledge (Nav.Wiki_dive slug) ->
+      let main_rect, _ =
+        Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+          ~left_ratio:0.66 ~top_ratio:0.68 bp br
+      in
+      wiki_preview_max_scroll ~bp ~theme ~rect:main_rect
+        ~target_slug:(Some slug) m.knowledge
+  | Nav.Dive_knowledge (Nav.Artifact_dive sha256) ->
+      let inner = ui_card_inner br in
+      let content = ui_pad_content ~bp inner in
+      let artifacts =
+        match Observed.to_option m.knowledge.artifacts with
+        | Some xs -> xs
+        | None -> []
+      in
+      let header_rows =
+        match
+          List.find_opt
+            (fun (a : Wire_knowledge.artifact_entry) ->
+              String.equal a.sha256 sha256)
+            artifacts
+        with
+        | None -> 0
+        | Some a ->
+            5
+            + (if Option.is_some a.title then 1 else 0)
+            + (if Option.is_some a.producer then 1 else 0)
+      in
+      if artifacts = [] || header_rows + 1 >= content.h then 0
+      else
+        let rev_vis_h = max 1 (content.h - header_rows - 1) in
+        max 0 (List.length artifacts - rev_vis_h)
+  | Nav.Dive_work (Nav.Goal_dive goal_id) -> (
+      match
+        List.find_opt
+          (fun (g : Wire_work.goal) -> String.equal g.id goal_id)
+          (Work_store.goals m.work)
+      with
+      | None -> 0
+      | Some g ->
+          let main_card_rect, json_card_rect =
+            split_dive_with_json_store ~bp ~show_raw_json:m.infra.show_raw_json
+              br
+          in
+          let main_max =
+            let inner = ui_card_inner main_card_rect in
+            if Rect.is_empty inner then 0
+            else
+              let y = ref inner.y in
+              let bot = Rect.bottom inner in
+              if inner.h >= 8 then begin
+                let has_sub =
+                  match g.last_review_note with
+                  | Some n when not (String.equal (String.trim n) "") -> true
+                  | Some _ | None -> Option.is_some g.criterion_revision
+                in
+                let band_h = if has_sub then 2 else 1 in
+                y := !y + band_h + if inner.h >= 14 then 1 else 0
+              end;
+              let content = ops_pad_content inner in
+              let action_h = if bot - !y >= 6 then 1 else 0 in
+              let body_bot = bot - action_h in
+              if !y < body_bot then begin
+                let step_h =
+                  match g.phase with
+                  | Wire_work.Paused _ | Wire_work.Blocked _
+                    when min 2 (body_bot - !y) >= 2 ->
+                      2
+                  | Wire_work.Executing
+                  | Wire_work.Verifying
+                  | Wire_work.Awaiting_confirmation
+                  | Wire_work.Paused _
+                  | Wire_work.Blocked _
+                  | Wire_work.Completed
+                  | Wire_work.Dropped ->
+                      1
+                in
+                y := !y + step_h
+              end;
+              let linked =
+                List.filter
+                  (fun (tk : Wire_work.task) ->
+                    match tk.goal_link with
+                    | Wire_work.Linked gid -> String.equal gid g.id
+                    | Wire_work.Unlinked -> false)
+                  (Work_store.tasks m.work)
+              in
+              let linked_ids =
+                List.map (fun (tk : Wire_work.task) -> tk.id) linked
+              in
+              let verifs =
+                List.filter
+                  (fun (v : Wire_work.verification_request) ->
+                    List.exists (String.equal v.task_id) linked_ids)
+                  (Work_store.verifications_list m.work)
+              in
+              let rem_h = max 0 (body_bot - !y) in
+              let md_h =
+                if rem_h <= 0 then 0
+                else
+                  min 7
+                    (min rem_h (if rem_h >= 2 then max 2 (rem_h / 3) else rem_h))
+              in
+              let md_max =
+                if md_h > 0 then begin
+                  let md_src =
+                    Printf.sprintf "**%s:** %s\n\n**%s:** %s"
+                      (Say.resolve m.lang
+                         (Say.make ~ko:"성공 조건" ~en:"Measure"))
+                      (Chat_transcript.rewrite_masc_links_for_markdown g.measure)
+                      (Say.resolve m.lang
+                         (Say.make ~ko:"측정 절차" ~en:"Procedure"))
+                      (Chat_transcript.rewrite_masc_links_for_markdown
+                         g.procedure)
+                  in
+                  y := !y + md_h;
+                  markdown_max_scroll ~theme ~width:content.w ~height:md_h md_src
+                end
+                else 0
+              in
+              let rest_rect =
+                Rect.make ~x:content.x ~y:!y ~w:content.w
+                  ~h:(max 0 (body_bot - !y))
+              in
+              if Rect.is_empty rest_rect then md_max
+              else
+                let tasks_r, verif_r =
+                  match
+                    Masc_tui_ui.Layout.split_v ~gap:0 rest_rect
+                      [ Masc_tui_ui.Layout.Ratio 0.42; Masc_tui_ui.Layout.Flex 1 ]
+                  with
+                  | [ t; b ] -> (t, b)
+                  | _ -> (rest_rect, Rect.empty)
+                in
+                let t_body_h = max 1 (max 0 (tasks_r.h - 1)) in
+                let linked_max = max 0 (List.length linked - t_body_h) in
+                let chk_max, diff_max =
+                  if Rect.is_empty verif_r then (0, 0)
+                  else
+                    let v_body =
+                      Rect.make ~x:verif_r.x ~y:(verif_r.y + 1) ~w:verif_r.w
+                        ~h:(max 0 (verif_r.h - 1))
+                    in
+                    match verifs with
+                    | [] -> (0, 0)
+                    | v :: _ ->
+                        let check_r, diff_r =
+                          match
+                            Masc_tui_ui.Layout.split_v ~gap:0 v_body
+                              [
+                                Masc_tui_ui.Layout.Ratio 0.45;
+                                Masc_tui_ui.Layout.Flex 1;
+                              ]
+                          with
+                          | [ a; b ] -> (a, b)
+                          | _ -> (v_body, Rect.empty)
+                        in
+                        let cm =
+                          if Rect.is_empty check_r then 0
+                          else
+                            max 0
+                              (evidence_checklist_row_count v
+                              - max 1 check_r.h)
+                        in
+                        let dm =
+                          if Rect.is_empty diff_r then 0
+                          else
+                            max 0
+                              (rejection_diff_row_count ~lang:m.lang v
+                              - diff_r.h)
+                        in
+                        (cm, dm)
+                in
+                max (max md_max linked_max) (max chk_max diff_max)
+          in
+          let json_max =
+            if Rect.is_empty json_card_rect then 0
+            else
+              json_card_max_scroll ~max_depth:4 json_card_rect
+                (json_of_goal_store g)
+          in
+          max main_max json_max)
+  | Nav.Dive_work (Nav.Task_dive task_id) -> (
+      match
+        List.find_opt
+          (fun (tk : Wire_work.task) -> String.equal tk.id task_id)
+          (Work_store.tasks m.work)
+      with
+      | None -> 0
+      | Some tk ->
+          let main_card_rect, json_card_rect =
+            split_dive_with_json_store ~bp ~show_raw_json:m.infra.show_raw_json
+              br
+          in
+          let main_max =
+            let inner = ui_card_inner main_card_rect in
+            if Rect.is_empty inner then 0
+            else
+              let content = ops_pad_content inner in
+              let y = ref inner.y in
+              let bot = Rect.bottom inner in
+              if inner.h >= 8 then begin
+                let has_who =
+                  match tk.status with
+                  | Wire_work.Todo -> false
+                  | Wire_work.Claimed _
+                  | Wire_work.InProgress _
+                  | Wire_work.AwaitingVerification _
+                  | Wire_work.Done _
+                  | Wire_work.Cancelled _ ->
+                      true
+                in
+                let band_h = if has_who then 2 else 1 in
+                y := !y + band_h + if inner.h >= 14 then 1 else 0
+              end;
+              let action_h = if bot - !y >= 6 then 1 else 0 in
+              let body_bot = bot - action_h in
+              (* stepper + assignee + started_at + goal_link = 4 rows *)
+              y := min body_bot (!y + 4);
+              let v_opt =
+                List.find_opt
+                  (fun (v : Wire_work.verification_request) ->
+                    String.equal v.task_id tk.id)
+                  (Work_store.verifications_list m.work)
+              in
+              let rest_h = max 0 (body_bot - !y) in
+              let desc_h =
+                if rest_h <= 0 then 0
+                else
+                  match tk.description, v_opt with
+                  | Some _, Some _ -> min rest_h (max 1 (rest_h / 2))
+                  | Some _, None -> rest_h
+                  | None, _ -> 0
+              in
+              let md_max =
+                match tk.description with
+                | Some d when desc_h > 0 ->
+                    if desc_h >= 3 then incr y;
+                    let actual_h = max 0 (min desc_h (body_bot - !y)) in
+                    y := !y + actual_h;
+                    markdown_max_scroll ~theme ~width:content.w ~height:actual_h
+                      (Chat_transcript.rewrite_masc_links_for_markdown d)
+                | Some _ | None -> 0
+              in
+              let chk_max, diff_max =
+                match v_opt with
+                | Some v when !y < body_bot ->
+                    incr y;
+                    let vr =
+                      Rect.make ~x:content.x ~y:!y ~w:content.w
+                        ~h:(max 0 (body_bot - !y))
+                    in
+                    let chk_r, diff_r =
+                      match
+                        Masc_tui_ui.Layout.split_v ~gap:0 vr
+                          [
+                            Masc_tui_ui.Layout.Ratio 0.45;
+                            Masc_tui_ui.Layout.Flex 1;
+                          ]
+                      with
+                      | [ a; b ] -> (a, b)
+                      | _ -> (vr, Rect.empty)
+                    in
+                    let cm =
+                      if Rect.is_empty chk_r then 0
+                      else
+                        max 0 (evidence_checklist_row_count v - max 1 chk_r.h)
+                    in
+                    let dm =
+                      if Rect.is_empty diff_r then 0
+                      else
+                        max 0
+                          (rejection_diff_row_count ~lang:m.lang v - diff_r.h)
+                    in
+                    (cm, dm)
+                | Some _ | None -> (0, 0)
+              in
+              max md_max (max chk_max diff_max)
+          in
+          let json_max =
+            if Rect.is_empty json_card_rect then 0
+            else
+              json_card_max_scroll ~max_depth:4 json_card_rect
+                (json_of_task_store tk)
+          in
+          max main_max json_max)
+  | Nav.Dive_work (Nav.Verification_dive req_id) -> (
+      match
+        List.find_opt
+          (fun (v : Wire_work.verification_request) ->
+            String.equal v.request_id req_id)
+          (Work_store.verifications_list m.work)
+      with
+      | None -> 0
+      | Some v ->
+          let main_card_rect, json_card_rect =
+            split_dive_with_json_store ~bp ~show_raw_json:m.infra.show_raw_json
+              br
+          in
+          let main_max =
+            let inner = ui_card_inner main_card_rect in
+            if Rect.is_empty inner then 0
+            else
+              let content = ops_pad_content inner in
+              let y = ref inner.y in
+              let bot = Rect.bottom inner in
+              if inner.h >= 8 then y := !y + 2 + if inner.h >= 14 then 1 else 0;
+              let action_h = if bot - !y >= 6 then 1 else 0 in
+              let body_bot = bot - action_h in
+              let kv_rows =
+                2 + if Option.is_some v.review_observation then 1 else 0
+              in
+              y := min body_bot (!y + kv_rows);
+              let rest =
+                Rect.make ~x:content.x ~y:!y ~w:content.w
+                  ~h:(max 0 (body_bot - !y))
+              in
+              let chk_r, diff_r =
+                match
+                  Masc_tui_ui.Layout.split_v ~gap:0 rest
+                    [ Masc_tui_ui.Layout.Ratio 0.44; Masc_tui_ui.Layout.Flex 1 ]
+                with
+                | [ a; b ] -> (a, b)
+                | _ -> (rest, Rect.empty)
+              in
+              let chk_max =
+                if Rect.is_empty chk_r then 0
+                else
+                  let chk_body_h = max 0 (chk_r.h - 1) in
+                  if chk_body_h <= 0 then 0
+                  else max 0 (evidence_checklist_row_count v - chk_body_h)
+              in
+              let diff_max =
+                if Rect.is_empty diff_r then 0
+                else
+                  let dr_h = max 0 (diff_r.h - 1) in
+                  if dr_h <= 0 then 0
+                  else max 0 (rejection_diff_row_count ~lang:m.lang v - dr_h)
+              in
+              max chk_max diff_max
+          in
+          let json_max =
+            if Rect.is_empty json_card_rect then 0
+            else
+              json_card_max_scroll ~max_depth:4 json_card_rect
+                (json_of_verification_store v)
+          in
+          max main_max json_max)
+  | Nav.Dive_infra (Nav.Sandbox_dive keeper) -> (
+      let inner = ui_card_inner br in
+      if Rect.is_empty inner then 0
+      else
+        match
+          sandbox_entry_info_for_keeper ~use_keeper_detail:true ~keeper m.infra
+        with
+        | None -> 0
+        | Some info ->
+            if m.infra.show_raw_json then
+              let content = ui_pad_content ~bp inner in
+              if Rect.is_empty content then 0
+              else
+                let lines =
+                  Masc_tui_ui.Json_tree.flatten ~max_depth:5
+                    ~redact_secrets:true info.json
+                in
+                max 0 (List.length lines - content.h)
+            else
+              let body_rect =
+                match
+                  Masc_tui_ui.Layout.split_v inner
+                    [ Masc_tui_ui.Layout.Fixed 3; Masc_tui_ui.Layout.Flex 1 ]
+                with
+                | [ _; b ] -> b
+                | _ -> Rect.empty
+              in
+              if Rect.is_empty body_rect then 0
+              else
+                let rem_rows =
+                  sandbox_inspector_rem_rows ~inner_h:body_rect.h info
+                in
+                if rem_rows <= 0 then 0
+                else
+                  max 0
+                    (Infra_store.sandbox_inspector_event_count ~keeper m.infra
+                    - rem_rows))
+  | Nav.Dive_infra (Nav.Lane_dive lane_id) ->
+      let inner = ui_card_inner br in
+      let content = ui_pad_content ~bp inner in
+      if m.infra.show_raw_json then
+        let slot_n =
+          match Observed.to_option m.runtime.runtime_resolved with
+          | Some snap -> (
+              match
+                List.find_opt
+                  (fun (l : Wire_runtime.failover_lane) ->
+                    String.equal l.id lane_id)
+                  snap.lanes
+              with
+              | Some l -> List.length l.runtime_ids
+              | None -> 0)
+          | None -> 0
+        in
+        max 0 (4 + slot_n - max 1 content.h)
+      else
+        let tail_h =
+          match
+            Masc_tui_ui.Layout.split_v content
+              [
+                Masc_tui_ui.Layout.Fixed 2;
+                Masc_tui_ui.Layout.Ratio 0.54;
+                Masc_tui_ui.Layout.Flex 1;
+              ]
+          with
+          | [ _; _; t ] -> max 1 (t.h - 1)
+          | _ -> max 1 (content.h / 3)
+        in
+        max 0 (List.length m.infra.logs - tail_h)
+  | Nav.Dive_infra (Nav.Incident_dive incident_id) -> (
+      match Incidents.find_by_id incident_id m.incidents with
+      | None -> 0
+      | Some inc ->
+          let inner = ui_card_inner br in
+          if m.infra.show_raw_json then
+            let detail_lines =
+              match extract_embedded_json_store inc.detail with
+              | Some (_, json) ->
+                  List.length
+                    (Masc_tui_ui.Json_tree.flatten ~max_depth:5
+                       ~redact_secrets:true json)
+              | None -> 1
+            in
+            max 0 (6 + detail_lines - max 1 inner.h)
+          else
+            let band_h = if inner.h >= 6 then 2 else 1 in
+            let content =
+              Rect.make ~x:inner.x ~y:(inner.y + band_h) ~w:inner.w
+                ~h:(max 0 (inner.h - band_h))
+              |> ui_pad_content ~bp
+            in
+            let detail_h = max 1 (content.h / 2) in
+            let detail_max =
+              match extract_embedded_json_store inc.detail with
+              | Some (prefix, parsed_json) ->
+                  let used = if String.equal prefix "" then 0 else 1 in
+                  let tree_h = max 1 (detail_h - used) in
+                  let lines =
+                    Masc_tui_ui.Json_tree.flatten ~max_depth:4
+                      ~redact_secrets:true parsed_json
+                  in
+                  max 0 (List.length lines - tree_h)
+              | None ->
+                  markdown_max_scroll ~theme ~width:content.w ~height:detail_h
+                    inc.detail
+            in
+            let filter_opt =
+              match inc.source with
+              | Health.Source_keeper k -> Some k
+              | Health.Source_sandbox s -> Some s
+              | Health.Source_runtime _
+              | Health.Source_client_http
+              | Health.Source_stream ->
+                  None
+            in
+            let filtered_logs =
+              match filter_opt with
+              | None -> m.infra.logs
+              | Some kp ->
+                  List.filter
+                    (fun (e : Wire_infra.system_log_entry) ->
+                      Option.equal String.equal e.keeper (Some kp)
+                      || String.equal e.module_name kp)
+                    m.infra.logs
+            in
+            let log_h = max 1 (content.h - detail_h - 1) in
+            let log_max = max 0 (List.length filtered_logs - log_h) in
+            max detail_max log_max)
+
+let move_keeper_config_selection ~embedded ~name ~delta (m : Model.t) =
+  let _, content_h =
+    Chat_transcript.keeper_content_rect_size ~embedded ~model:m
+  in
+  let viewport_rows = max 1 (content_h - 4) in
+  let fallback_count =
+    if Option.is_some (Fleet_store.find_keeper ~name m.fleet) then 5 else 0
+  in
+  let config =
+    Config_store.move_keeper_selection ~viewport_rows ~lang:m.lang
+      ~fallback_count ~delta m.config
+  in
+  ({ m with nav = { m.nav with dive_scroll_offset = 0 }; config }, [])
 
 let clamp_for_pane (m : Model.t) =
   let pane_count = Model.focusable_pane_count m in
@@ -2257,34 +4175,38 @@ let clamp_for_pane (m : Model.t) =
       | None -> (
           match m.nav.workspace with
           | Nav.Work ->
+              let max_detail_scroll = work_detail_max_scroll m in
               {
                 m with
                 work =
                   Work_store.move_selection ~pane_index
                     ~has_linked_card:(Model.work_pipeline_has_linked_card m)
-                    ~viewport_rows ~delta:0 m.work;
+                    ~viewport_rows ~max_detail_scroll ~delta:0 m.work;
               }
           | Nav.Runtime ->
               let rt = sync_runtime_companies_if_needed m in
+              let max_detail_scroll = runtime_detail_max_scroll m in
               {
                 m with
                 runtime =
                   Runtime_store.move_selection ~pane_index ~viewport_rows
-                    ~delta:0 rt;
+                    ~max_detail_scroll ~delta:0 rt;
               }
           | Nav.Knowledge ->
+              let max_detail_scroll = knowledge_detail_max_scroll m in
               {
                 m with
                 knowledge =
                   Knowledge_store.move_selection ~pane_index ~viewport_rows
-                    ~delta:0 m.knowledge;
+                    ~max_detail_scroll ~delta:0 m.knowledge;
               }
           | Nav.Infra ->
+              let max_detail_scroll = infra_detail_max_scroll m in
               {
                 m with
                 infra =
-                  Infra_store.move_selection ~pane_index ~viewport_rows ~delta:0
-                    m.infra;
+                  Infra_store.move_selection ~pane_index ~viewport_rows
+                    ~max_detail_scroll ~delta:0 m.infra;
               }
           | Nav.Pulse | Nav.Keepers -> m))
 
@@ -2384,17 +4306,24 @@ let apply_move (m : Model.t) dir =
                     modal
               in
               ({ m with inline_modal = Some next_modal }, []))
-    | Some (Nav.Queue_context _) -> (
+    | Some (Nav.Queue_context tab) -> (
         match dir with
         | Keymap.Left -> cycle_sub_tab m Keymap.Prev
         | Keymap.Right -> cycle_sub_tab m Keymap.Next
         | Keymap.Up | Keymap.Down | Keymap.Page_up | Keymap.Page_down
         | Keymap.Home | Keymap.End ->
-            (m, []))
+            let delta = scroll_delta dir in
+            let max_scroll = queue_context_max_scroll m tab in
+            let queue_scroll_offset =
+              Store_scroll.clamp_scroll ~max_scroll
+                (m.nav.queue_scroll_offset + delta)
+            in
+            ({ m with nav = { m.nav with queue_scroll_offset } }, []))
     | Some Nav.Help ->
         let delta = scroll_delta dir in
+        let max_scroll = help_max_scroll m in
         let help_scroll_offset =
-          Store_scroll.clamp_scroll ~max_scroll:60
+          Store_scroll.clamp_scroll ~max_scroll
             (m.nav.help_scroll_offset + delta)
         in
         ({ m with nav = { m.nav with help_scroll_offset } }, [])
@@ -2409,7 +4338,8 @@ let apply_move (m : Model.t) dir =
             | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }) ->
                 let delta = -(move_delta dir) in
                 let max_scroll =
-                  Chat_transcript.max_scroll_for_model ~model:m ~keeper:name
+                  Chat_transcript.max_scroll_for_model_in ~embedded:false
+                    ~model:m ~keeper:name
                 in
                 ( {
                     m with
@@ -2417,43 +4347,23 @@ let apply_move (m : Model.t) dir =
                       Fleet_store.move_chat_scroll ~max_scroll ~delta m.fleet;
                   }
                 , [] )
+            | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_config }) ->
+                move_keeper_config_selection ~embedded:false ~name
+                  ~delta:(move_delta dir) m
             | Some
                 (( Nav.Dive_keeper
                      {
                        tab =
                          ( Nav.Keeper_memory
                          | Nav.Keeper_work_candle
-                         | Nav.Keeper_sandbox
-                         | Nav.Keeper_config );
+                         | Nav.Keeper_sandbox );
                        _;
                      }
                  | Nav.Dive_work _
                  | Nav.Dive_knowledge _
                  | Nav.Dive_infra _ ) as active) ->
                 let delta = scroll_delta dir in
-                let max_scroll =
-                  match active with
-                  | Nav.Dive_keeper { tab = Nav.Keeper_config; _ } ->
-                      max 0
-                        (List.length (Config_store.visible_fields m.config) - 1)
-                  | Nav.Dive_knowledge (Nav.Memory_diff_dive _) ->
-                      max 0
-                        (Knowledge_store.memory_diff_entry_count m.knowledge - 1)
-                  | Nav.Dive_keeper
-                      {
-                        tab =
-                          ( Nav.Keeper_chat
-                          | Nav.Keeper_memory
-                          | Nav.Keeper_work_candle
-                          | Nav.Keeper_sandbox );
-                        _;
-                      }
-                  | Nav.Dive_work _
-                  | Nav.Dive_knowledge
-                      (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
-                  | Nav.Dive_infra _ ->
-                      160
-                in
+                let max_scroll = dive_max_scroll m active in
                 let dive_scroll_offset =
                   Store_scroll.clamp_scroll ~max_scroll
                     (m.nav.dive_scroll_offset + delta)
@@ -2490,46 +4400,45 @@ let apply_move (m : Model.t) dir =
                         in
                         ({ m with knowledge }, []))
                 | Nav.Keepers ->
-                    if pane_index = 1 then
-                      if
-                        Nav.equal_keeper_tab m.fleet.keeper_dive_tab
-                          Nav.Keeper_chat
-                      then
-                        match Fleet_store.selected_keeper_summary m.fleet with
-                        | None -> (m, [])
-                        | Some k ->
-                            let chat_delta = -(move_delta dir) in
-                            let max_scroll =
-                              Chat_transcript.max_scroll_for_model ~model:m
-                                ~keeper:k.name
-                            in
-                            ( {
-                                m with
-                                fleet =
-                                  Fleet_store.move_chat_scroll ~max_scroll
-                                    ~delta:chat_delta m.fleet;
-                              }
-                            , [] )
-                      else
-                        let sd = scroll_delta dir in
-                        let max_scroll =
+                    let zoomed_keeper =
+                      m.nav.zoomed && Model.can_zoom_current_view m
+                    in
+                    if pane_index = 1 || zoomed_keeper then
+                      let embedded = not zoomed_keeper in
+                      match Fleet_store.selected_keeper_summary m.fleet with
+                      | None -> (m, [])
+                      | Some k -> (
                           match m.fleet.keeper_dive_tab with
+                          | Nav.Keeper_chat ->
+                              let chat_delta = -(move_delta dir) in
+                              let max_scroll =
+                                Chat_transcript.max_scroll_for_model_in
+                                  ~embedded ~model:m ~keeper:k.name
+                              in
+                              ( {
+                                  m with
+                                  fleet =
+                                    Fleet_store.move_chat_scroll ~max_scroll
+                                      ~delta:chat_delta m.fleet;
+                                }
+                              , [] )
                           | Nav.Keeper_config ->
-                              max 0
-                                (List.length
-                                   (Config_store.visible_fields m.config)
-                                 - 1)
-                          | Nav.Keeper_chat
-                          | Nav.Keeper_memory
-                          | Nav.Keeper_work_candle
-                          | Nav.Keeper_sandbox ->
-                              160
-                        in
-                        let dive_scroll_offset =
-                          Store_scroll.clamp_scroll ~max_scroll
-                            (m.nav.dive_scroll_offset + sd)
-                        in
-                        ({ m with nav = { m.nav with dive_scroll_offset } }, [])
+                              move_keeper_config_selection ~embedded
+                                ~name:k.name ~delta:(move_delta dir) m
+                          | ( Nav.Keeper_memory
+                            | Nav.Keeper_work_candle
+                            | Nav.Keeper_sandbox ) as tab ->
+                              let sd = scroll_delta dir in
+                              let max_scroll =
+                                keeper_tab_max_scroll ~embedded m ~name:k.name
+                                  ~tab
+                              in
+                              let dive_scroll_offset =
+                                Store_scroll.clamp_scroll ~max_scroll
+                                  (m.nav.dive_scroll_offset + sd)
+                              in
+                              ( { m with nav = { m.nav with dive_scroll_offset } }
+                              , [] ))
                     else
                       let prev_selected = m.fleet.selected_keeper in
                       let fleet =
@@ -2565,11 +4474,13 @@ let apply_move (m : Model.t) dir =
                     | Nav.Work_inbox ->
                         if pane_index = 1 then
                           let sd = scroll_delta dir in
+                          let max_detail_scroll = work_detail_max_scroll m in
                           ( {
                               m with
                               work =
                                 Work_store.move_selection ~pane_index:1
-                                  ~viewport_rows ~delta:sd m.work;
+                                  ~viewport_rows ~max_detail_scroll ~delta:sd
+                                  m.work;
                             }
                           , [] )
                         else if
@@ -2642,19 +4553,23 @@ let apply_move (m : Model.t) dir =
                         let has_linked_card =
                           Model.work_pipeline_has_linked_card m
                         in
+                        let is_detail =
+                          pane_index = 2
+                          || (pane_index = 1 && not has_linked_card)
+                        in
                         let eff_delta =
-                          if
-                            pane_index = 2
-                            || (pane_index = 1 && not has_linked_card)
-                          then scroll_delta dir
-                          else delta
+                          if is_detail then scroll_delta dir else delta
+                        in
+                        let max_detail_scroll =
+                          if is_detail then Some (work_detail_max_scroll m)
+                          else None
                         in
                         ( {
                             m with
                             work =
                               Work_store.move_selection ~pane_index
-                                ~has_linked_card ~viewport_rows ~delta:eff_delta
-                                m.work;
+                                ~has_linked_card ~viewport_rows
+                                ?max_detail_scroll ~delta:eff_delta m.work;
                           }
                         , [] )
                     | Nav.Work_candle_scorecard ->
@@ -2674,9 +4589,14 @@ let apply_move (m : Model.t) dir =
                     let eff_delta =
                       if pane_index = 1 then scroll_delta dir else delta
                     in
+                    let max_detail_scroll =
+                      if pane_index = 1 then
+                        Some (knowledge_detail_max_scroll m)
+                      else None
+                    in
                     let knowledge =
                       Knowledge_store.move_selection ~pane_index ~viewport_rows
-                        ~delta:eff_delta m.knowledge
+                        ?max_detail_scroll ~delta:eff_delta m.knowledge
                     in
                     let next = { m with knowledge } in
                     let wiki_cmds =
@@ -2716,23 +4636,70 @@ let apply_move (m : Model.t) dir =
                     (next, wiki_cmds)
                 | Nav.Runtime ->
                     let rt = sync_runtime_companies_if_needed m in
-                    let eff_delta =
+                    let is_detail_scroll =
                       match rt.active_tab, pane_index with
                       | Nav.Runtime_quotas_credits, 0
                       | Nav.Runtime_failover_lanes, 1 ->
-                          scroll_delta dir
+                          true
                       | ( ( Nav.Runtime_quotas_credits
                           | Nav.Runtime_efficiency_spend
                           | Nav.Runtime_failover_lanes
                           | Nav.Runtime_tools_connectors )
                         , _ ) ->
-                          delta
+                          false
+                    in
+                    let eff_delta =
+                      if is_detail_scroll then scroll_delta dir else delta
+                    in
+                    let max_detail_scroll =
+                      if is_detail_scroll then
+                        Some (runtime_detail_max_scroll m)
+                      else None
+                    in
+                    let eff_viewport_rows =
+                      match rt.active_tab, pane_index with
+                      | Nav.Runtime_failover_lanes, 0 ->
+                          let bp = ui_bp m in
+                          let br = ui_body_rect m in
+                          let body_rect =
+                            match
+                              Masc_tui_ui.Layout.split_v br
+                                [
+                                  Masc_tui_ui.Layout.Fixed 1;
+                                  Masc_tui_ui.Layout.Flex 1;
+                                ]
+                            with
+                            | [ _; b ] -> b
+                            | _ -> br
+                          in
+                          let left_rect, _ =
+                            Masc_tui_ui.Layout.adaptive_split_2
+                              ~stack_on_compact:true ~left_ratio:0.56
+                              ~top_ratio:0.54 bp body_rect
+                          in
+                          let inner = ui_card_inner left_rect in
+                          let _, outside =
+                            Runtime_store.active_and_outside_probes rt
+                          in
+                          let reserve_ext =
+                            if rt.show_outside_lane_probes && outside <> [] then
+                              min 5 (1 + List.length outside)
+                            else 0
+                          in
+                          max 1 (inner.h - reserve_ext)
+                      | ( ( Nav.Runtime_quotas_credits
+                          | Nav.Runtime_efficiency_spend
+                          | Nav.Runtime_failover_lanes
+                          | Nav.Runtime_tools_connectors )
+                        , _ ) ->
+                          viewport_rows
                     in
                     ( {
                         m with
                         runtime =
                           Runtime_store.move_selection ~pane_index
-                            ~viewport_rows ~delta:eff_delta rt;
+                            ~viewport_rows:eff_viewport_rows ?max_detail_scroll
+                            ~delta:eff_delta rt;
                       }
                     , [] )
                 | Nav.Infra ->
@@ -2740,9 +4707,13 @@ let apply_move (m : Model.t) dir =
                     let eff_delta =
                       if pane_index = 1 then scroll_delta dir else delta
                     in
+                    let max_detail_scroll =
+                      if pane_index = 1 then Some (infra_detail_max_scroll m)
+                      else None
+                    in
                     let infra0 =
                       Infra_store.move_selection ~pane_index ~viewport_rows
-                        ~delta:eff_delta m.infra
+                        ?max_detail_scroll ~delta:eff_delta m.infra
                     in
                     let infra, cmds =
                       if

@@ -96,13 +96,25 @@ val toggle_raw_json : t -> t
 val filtered_sandbox_keepers : t -> string list
 val filtered_repositories : t -> Wire_infra.repository list
 val filtered_file_changes : t -> Wire_infra.file_change list
+val repo_scoped_file_changes : t -> Wire_infra.file_change list
+(** File changes scoped to {!selected_repository}'s keepers (matching
+    [Screen_infra.render_repos_changes]). *)
 val selected_sandbox_keeper : t -> string option
 val selected_repository : t -> Wire_infra.repository option
 val selected_file_change : t -> Wire_infra.file_change option
+val selected_repo_file_change : t -> Wire_infra.file_change option
 val selected_log : t -> Wire_infra.system_log_entry option
+val sandbox_inspector_event_count : keeper:string -> t -> int
+(** Exact combined log + activity row count rendered in the sandbox inspector
+    tail pane for [keeper]. *)
 
 val move_selection :
-  ?pane_index:int -> ?viewport_rows:int -> delta:int -> t -> t
+  ?pane_index:int ->
+  ?viewport_rows:int ->
+  ?max_detail_scroll:int ->
+  delta:int ->
+  t ->
+  t
 val reset_detail_scroll : t -> t
 val set_filter : string -> t -> t
 val mark_stale_all : t -> t

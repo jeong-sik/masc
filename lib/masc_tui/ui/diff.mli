@@ -36,6 +36,10 @@ val number : old_start:int -> new_start:int option -> row list -> numbered list
 val preview_numbered :
   context:int -> max_rows:int -> numbered list -> numbered list * int
 
+val parse_unified : string -> numbered list
+(** Parse a unified diff string (skipping [diff --git]/[index]/[---]/[+++]
+    headers and tracking [@@] hunk line numbers) into {!numbered} rows. *)
+
 val line_number_cell : int option -> string
 (** Five-cell coordinate string (["    -"] for absent lines). *)
 

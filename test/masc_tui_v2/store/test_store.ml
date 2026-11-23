@@ -2318,6 +2318,7 @@ let test_v25_data_pipeline_and_settings_2pane () =
                burned_milli = "2500";
                circulating_milli = "7500";
              });
+      turn_pulses = [];
     }
   in
   let m2, _ =
@@ -5759,6 +5760,35 @@ let test_p2_schedules_attention_scroll_and_filter_guard () =
     true
     (Nav.equal_work_tab m_after_r.work.active_tab Nav.Work_tasks_schedules)
 
+(* The Keepers list and a keeper's work tab read the active schedules: the
+   list's next-due column and the tab's schedule rows depend on them. *)
+let test_keepers_views_request_active_schedules () =
+  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let requests_active_schedules m =
+    List.exists
+      (function
+        | Cmd.Http_get { req = Cmd.Get_schedules { cursor = None } as req; _ } ->
+            String.equal (Cmd.get_request_path req)
+              "/api/v1/dashboard/scheduled-automation?active_only=true"
+        | _ -> false)
+      (Cmd.flatten (View_fetches.fetches_for_current_view ~force:false m))
+  in
+  let keepers = { m0 with nav = { m0.nav with workspace = Nav.Keepers } } in
+  Alcotest.(check bool) "Keepers requests active schedules" true
+    (requests_active_schedules keepers);
+  let work_tab =
+    {
+      keepers with
+      nav =
+        {
+          keepers.nav with
+          dive_stack = [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_work_candle } ];
+        };
+    }
+  in
+  Alcotest.(check bool) "Keeper work tab requests active schedules" true
+    (requests_active_schedules work_tab)
+
 let test_tui_memory_os_internals_fetch_and_runtime_assignment_setup_cmds () =
   let t0 = Clock.Mono.of_ns 10_000_000_000L in
   let m0 = Model.initial ~cols:140 ~rows:40 () in
@@ -8249,6 +8279,8 @@ let () =
             `Quick test_p0_actions_settings_safety_and_wired_cmds;
           Alcotest.test_case "Memory OS internals fetch + Runtime assignment/key/login setup cmds"
             `Quick test_tui_memory_os_internals_fetch_and_runtime_assignment_setup_cmds;
+          Alcotest.test_case "Keepers views request active schedules" `Quick
+            test_keepers_views_request_active_schedules;
         ] );
       ( "arrow_nav_display_order"
       , [

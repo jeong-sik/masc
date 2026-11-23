@@ -121,6 +121,9 @@ let profile_of_driver = function
     ; env_set = [ "AGY_CLI_DISABLE_AUTO_UPDATE", "true" ]
     ; default_strip_env = []
     ; mcp_wiring = Gemini_dir_mcp_config
+    (* Live-verified against agy acp 1.5.14: call_mcp_tool (rawInput ServerName/
+       ToolName), mcp(masc/<tool>) permission syntax, mcp_<server>_<tool>, and
+       vendor kind="mcp". *)
     ; mcp_identifier_syntaxes =
         [ Mcp_call_wrapper
         ; Mcp_paren_wrapper
@@ -146,8 +149,18 @@ let profile_of_driver = function
     ; env_set = []
     ; default_strip_env = []
     ; mcp_wiring = Session_new_http_mcp
+    (* kimi acp 2.7.2: session/new configOptions are live-verified, but no live
+       MCP tool_call wire transcript is recorded yet; preserve all main
+       qualified MCP syntaxes (excluding Antigravity-only call_mcp_tool /
+       mcp(...) wrappers) until live probe capture locks Kimi's exact wire shape. *)
     ; mcp_identifier_syntaxes =
-        [ Mcp_double_underscore; Colon_or_slash_qualified; Implicit_vendor_mcp_kind ]
+        [ Mcp_double_underscore
+        ; Mcp_dot_prefix
+        ; Mcp_underscore_prefix
+        ; Colon_or_slash_qualified
+        ; Server_underscore_prefix
+        ; Implicit_vendor_mcp_kind
+        ]
     ; system_prompt_channel = Framed_in_first_prompt
     ; input_accounting = Inclusive_of_cached
     ; output_accounting = Inclusive_of_thought
@@ -167,6 +180,9 @@ let profile_of_driver = function
        Pro subscription rather than a budget-capped API key. *)
     ; default_strip_env = [ "MISTRAL_API_KEY" ]
     ; mcp_wiring = Session_new_http_mcp
+    (* Live-verified against vibe-acp 3.1.0: _meta.tool_name emits
+       mcp_<server>.<tool> and <server>_<tool> (plus mcp_<server>_<tool> /
+       vendor kind="mcp"). *)
     ; mcp_identifier_syntaxes =
         [ Mcp_dot_prefix
         ; Mcp_underscore_prefix
@@ -1003,7 +1019,8 @@ let is_read_only_tool_kind = function
    Merging within a branch takes the more restrictive kind; any cross-branch
    conflict (empty policy intersection, e.g. Read+Execute, Read+Other,
    Execute+Read) escalates to [Tool_unknown "conflict:<prior>-><incoming>"].
-   Thus every authorization predicate P satisfies P(merge(p, i)) => P(p) && P(i). *)
+   Thus for every non-empty pair [(Some p, Some i)], every authorization
+   predicate P satisfies [P(merge(Some p, Some i)) => P(Some p) && P(Some i)]. *)
 type tool_kind_branch =
   | Branch_read_only
   | Branch_mcp

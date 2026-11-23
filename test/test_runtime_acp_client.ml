@@ -509,6 +509,9 @@ let test_build_argv_and_strict_permission_posture () =
     ; Runtime_acp_client.Antigravity, "masc_probe_ping", Some Runtime_acp_client.Tool_vendor_mcp
     ; Runtime_acp_client.Kimi_code, "masc_probe_ping", Some Runtime_acp_client.Tool_vendor_mcp
     ; Runtime_acp_client.Antigravity, "mcp_masc_masc_probe_ping", Some Runtime_acp_client.Tool_other
+    (* Kimi_code preserves main qualified syntaxes until live MCP wire capture *)
+    ; Runtime_acp_client.Kimi_code, "mcp_masc.masc_probe_ping", Some Runtime_acp_client.Tool_other
+    ; Runtime_acp_client.Kimi_code, "masc_masc_probe_ping", Some Runtime_acp_client.Tool_other
     ];
   (* Dotted tool name under Antigravity Mcp_underscore_prefix must NOT be shadowed by Vibe Mcp_dot_prefix *)
   let dotted_policy =
@@ -520,7 +523,9 @@ let test_build_argv_and_strict_permission_posture () =
   (* URLs with multiple ':'/'/' are NEVER treated as Colon_or_slash_qualified MCP tools *)
   check bool "URL title is not misparsed as Colon_or_slash_qualified under Kimi_code" false
     (allow ~driver:Kimi_code ~policy:mcp_only ~title:"https://example.com/api" ~kind:(Some Tool_other));
-  (* Cross-driver MCP grammar isolation: foreign driver syntax MUST fail closed *)
+  (* Cross-driver MCP grammar isolation: foreign driver syntax MUST fail closed
+     on drivers with recorded wire provenance (agy acp 1.5.14, vibe-acp 3.1.0),
+     and Antigravity-only mcp(...) wrapper is rejected under Kimi_code. *)
   List.iter
     (fun (driver, title, kind) ->
        check bool ("rejects cross-driver MCP syntax " ^ title) false
@@ -531,8 +536,6 @@ let test_build_argv_and_strict_permission_posture () =
     ; Runtime_acp_client.Mistral_vibe, "mcp(masc/keeper_skill)", Some Runtime_acp_client.Tool_other
     ; Runtime_acp_client.Mistral_vibe, "mcp__masc__keeper_skill", Some Runtime_acp_client.Tool_other
     ; Runtime_acp_client.Kimi_code, "mcp(masc/keeper_skill)", Some Runtime_acp_client.Tool_other
-    ; Runtime_acp_client.Kimi_code, "mcp_masc.masc_probe_ping", Some Runtime_acp_client.Tool_other
-    ; Runtime_acp_client.Kimi_code, "masc_masc_probe_ping", Some Runtime_acp_client.Tool_other
     ];
   (* Negative security posture checks under Allow_masc_mcp_only *)
   check bool "denies foreign MCP server even when kind=Tool_vendor_mcp" false

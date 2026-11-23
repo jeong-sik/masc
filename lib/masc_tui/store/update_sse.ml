@@ -1069,6 +1069,25 @@ let apply_chat_stream_decode_warning ~now:_ ~keeper ~request_id ~reason
   in
   ({ m with incidents }, [])
 
+(* The server that answered is not the instance the request went to: a
+   reattach POST that reached a restarted server. *)
+let refused_by_another_instance = function
+  | Msg.Workspace_mismatch _ -> true
+  | Msg.Transport _ | Msg.Http_error _ | Msg.Decode_error _ -> false
+
+(* Queued behind a turn, running, or being cut by a steer: the server had
+   accepted the request. *)
+let accepted_by_server = function
+  | Some (Drafts.Queued | Drafts.Pending_processing | Drafts.Interrupting) ->
+      true
+  | Some
+      ( Drafts.Sending
+      | Drafts.Confirming_delivery
+      | Drafts.Delivered
+      | Drafts.Failed_retryable _ )
+  | None ->
+      false
+
 let apply_chat_stream_done ~now ~keeper ~request_id ~is_btw ~result (m : Model.t)
     =
   if is_btw then
@@ -1084,28 +1103,30 @@ let apply_chat_stream_done ~now ~keeper ~request_id ~is_btw ~result (m : Model.t
           ~context:(Say.make ~ko:"/btw 질의" ~en:"/btw query")
           err { m with drafts }
   else
-    let hist_cmd =
-      get_cmd m.epoch
+    let hist_cmd epoch =
+      get_cmd epoch
         (Cmd.Get_chat_history { keeper; limit = Some 80; cursor = None })
     in
+    let tx_state_opt =
+      match
+        List.find_opt
+          (fun (tx : Drafts.pending_message) ->
+            String.equal tx.request_id request_id)
+          m.drafts.pending_txs
+      with
+      | Some tx -> Some tx.state
+      | None -> None
+    in
+    let context = Say.make ~ko:"키퍼 대화 전송" ~en:"Keeper chat stream" in
     match result with
     | Ok () ->
         let fleet =
           Fleet_store.finish_chat_stream ~keeper ~request_id ~error:None m.fleet
         in
-        let tx_state_opt =
-          match
-            List.find_opt
-              (fun (tx : Drafts.pending_message) ->
-                String.equal tx.request_id request_id)
-              m.drafts.pending_txs
-          with
-          | Some tx -> Some tx.state
-          | None -> None
-        in
         (match tx_state_opt with
         | Some Drafts.Delivered -> ({ m with fleet }, [])
-        | Some (Drafts.Failed_retryable _) -> ({ m with fleet }, [ hist_cmd ])
+        | Some (Drafts.Failed_retryable _) ->
+            ({ m with fleet }, [ hist_cmd m.epoch ])
         | Some
             ( Drafts.Queued
             | Drafts.Sending
@@ -1114,7 +1135,17 @@ let apply_chat_stream_done ~now ~keeper ~request_id ~is_btw ~result (m : Model.t
             | Drafts.Interrupting )
         | None ->
             let drafts = Drafts.mark_confirming ~now ~request_id m.drafts in
-            ({ m with fleet; drafts }, [ hist_cmd ]))
+            ({ m with fleet; drafts }, [ hist_cmd m.epoch ]))
+    | Error err
+      when refused_by_another_instance err && accepted_by_server tx_state_opt
+      ->
+        (* The old instance accepted the request, and only the reattach was
+           refused. The 409 moves the epoch, so [Update.step] ends the buffer
+           and sends the request to [Confirming_delivery], where the next
+           epoch's history settles it. Marking it failed here would keep a
+           failure row beside a reply the history delivers. *)
+        Update_http.record_http_incident ~now
+          ~source:(Health.Source_keeper keeper) ~context err m
     | Error err ->
         let detail = Msg.http_error_detail err in
         let fleet =
@@ -1126,11 +1157,12 @@ let apply_chat_stream_done ~now ~keeper ~request_id ~is_btw ~result (m : Model.t
         in
         let next, inc_cmds =
           Update_http.record_http_incident ~now
-            ~source:(Health.Source_keeper keeper)
-            ~context:(Say.make ~ko:"키퍼 대화 전송" ~en:"Keeper chat stream")
-            err { m with fleet; drafts }
+            ~source:(Health.Source_keeper keeper) ~context err
+            { m with fleet; drafts }
         in
-        (next, inc_cmds @ [ hist_cmd ])
+        (* A 409 moves the epoch, and a history read of the old epoch would
+           be dropped. *)
+        (next, inc_cmds @ [ hist_cmd next.epoch ])
 
 let apply_stream_gap ~now dropped (m : Model.t) =
   if dropped <= 0 then (m, [])

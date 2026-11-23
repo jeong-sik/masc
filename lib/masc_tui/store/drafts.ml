@@ -926,3 +926,19 @@ let fail_btw ~request_id ~reason t =
       t
 
 let clear_btw t = { t with btw = Btw_idle }
+
+let detach_streams ~now t =
+  let t =
+    List.fold_left
+      (fun acc (tx : pending_message) ->
+        match tx.state with
+        | Queued | Sending | Pending_processing | Interrupting ->
+            mark_confirming ~now ~request_id:tx.request_id acc
+        | Confirming_delivery | Delivered | Failed_retryable _ -> acc)
+      t t.pending_txs
+  in
+  match t.btw with
+  | Btw_sending { request_id; _ } | Btw_streaming { request_id; _ } ->
+      fail_btw ~request_id
+        ~reason:"the server connection changed before the answer finished" t
+  | Btw_idle | Btw_answered _ | Btw_failed _ -> t

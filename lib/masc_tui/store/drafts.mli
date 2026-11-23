@@ -246,3 +246,9 @@ val finalize_btw_eof : request_id:string -> t -> t
     {!Btw_answered} or fails cleanly as {!Btw_failed}. *)
 val fail_btw : request_id:string -> reason:string -> t -> t
 val clear_btw : t -> t
+
+val detach_streams : now:Clock.Mono.t -> t -> t
+(** For a new epoch, whose guard drops the earlier epoch's stream frames:
+    every transmission still waiting on its stream ({!Queued}, {!Sending},
+    {!Pending_processing}, {!Interrupting}) moves to {!Confirming_delivery} and
+    is settled from chat history, and an unanswered [/btw] fails. *)

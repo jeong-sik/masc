@@ -322,16 +322,26 @@ let step_raw ~now (m : Model.t) = function
 
 (* A new epoch is a new handshake, and the server behind it may be another
    process. Every path that moves the epoch returns through [step], so what
-   only the previous process could answer is dropped here once. A new process
-   numbers its log lines from zero again, so the next log stream opens without
-   the old cursor and the server answers with a reset frame. *)
-let leave_old_epoch ~(before : Model.t) (after : Model.t) =
+   only the previous process could answer is dropped here once.
+   - A new process numbers its log lines from zero again, so the next log
+     stream opens without the old cursor and the server answers with a reset
+     frame.
+   - Chat stream frames carry the epoch they were sent in, and the guard
+     drops them from now on. Each open chat request waits for the history
+     instead, the way a stream that closed without a terminal does. *)
+let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
   if Epoch.equal before.epoch after.epoch then after
-  else { after with infra = Infra_store.forget_log_cursor after.infra }
+  else
+    {
+      after with
+      infra = Infra_store.forget_log_cursor after.infra;
+      fleet = Fleet_store.detach_chat_streams after.fleet;
+      drafts = Drafts.detach_streams ~now after.drafts;
+    }
 
 let step ~now m msg =
   let next, cmds = step_raw ~now m msg in
-  let next = leave_old_epoch ~before:m next in
+  let next = leave_old_epoch ~now ~before:m next in
   let final_cmds =
     cmds
     |> reconcile_streams ~before:m ~after:next

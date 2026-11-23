@@ -190,6 +190,10 @@ val clear_inactive_chat_stream_error : keeper:string -> t -> t
 val finish_chat_stream :
   keeper:string -> request_id:string -> error:string option -> t -> t
 
+val detach_chat_streams : t -> t
+(** End every active stream buffer and keep what it received. For a new epoch,
+    whose guard drops the frames those streams still send. *)
+
 val set_fleet_mode : Nav.keepers_fleet_mode -> t -> t
 val cycle_fleet_mode : Keymap.cycle_dir -> t -> t
 val set_keeper_dive_tab : Nav.keeper_tab -> t -> t

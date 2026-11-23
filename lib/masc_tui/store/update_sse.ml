@@ -581,8 +581,12 @@ let apply_agent_core (m : Model.t) (ev : Wire_observer.agent_core_event) =
   | Wire_observer.Agent_started
   | Wire_observer.Agent_completed _
   | Wire_observer.Agent_yielded _
+  | Wire_observer.Telemetry ->
+      (* Provider streaming telemetry (first chunk, stream summary) arrives
+         several times a minute and no TUI view reads it, so it is not pushed
+         into the activity log. *)
+      (m, [])
   | Wire_observer.Tool_approval_completed
-  | Wire_observer.Telemetry
   | Wire_observer.Agent_core_other _ ->
       let summary =
         match ev.tool with Some tool -> "tool: " ^ tool | None -> "agent_core"

@@ -231,6 +231,14 @@ let dataset_of_wire ~keeper name =
   | "keepers" | "keeper_composite" -> Dataset_keepers
   | other -> Dataset_other other
 
+(* Custom agent-core payloads are not typed on the wire: sse_event.atd types
+   only native events, and agent-core telemetry arrives as a [ctor, object]
+   tuple. A kind that reads payload fields requires an object; the others
+   accept any payload. *)
+let require_payload_object ~event_type = function
+  | Some obj -> Ok obj
+  | None -> Error (Printf.sprintf "%s requires an object payload" event_type)
+
 let decode_agent_core_kind ~event_type payload =
   match event_type with
   | "tool_called" -> Ok Tool_called
@@ -240,17 +248,21 @@ let decode_agent_core_kind ~event_type payload =
   | "turn_completed" -> Ok Turn_completed
   | "agent_started" -> Ok Agent_started
   | "agent_completed" ->
+      let* payload = require_payload_object ~event_type payload in
       let* elapsed_s = required_finite_float payload "elapsed_s" in
       Ok (Agent_completed { elapsed_s })
   | "agent_failed" ->
+      let* payload = require_payload_object ~event_type payload in
       let* elapsed_s = required_finite_float payload "elapsed_s" in
       let* error_code = required_string_field payload "error_code" in
       let* error = required_string_field payload "error" in
       Ok (Agent_failed { elapsed_s; error_code; error })
   | "agent_yielded" ->
+      let* payload = require_payload_object ~event_type payload in
       let* elapsed_s = required_finite_float payload "elapsed_s" in
       Ok (Agent_yielded { elapsed_s })
   | "agent_input_required" ->
+      let* payload = require_payload_object ~event_type payload in
       let* elapsed_s = required_finite_float payload "elapsed_s" in
       let* request_id = required_nonblank_string payload "request_id" in
       let* question = required_string_field payload "question" in
@@ -258,6 +270,7 @@ let decode_agent_core_kind ~event_type payload =
   | "tool_approval_completed" -> Ok Tool_approval_completed
   | "telemetry_event" -> Ok Telemetry
   | "relay_subscription_loss" ->
+      let* payload = require_payload_object ~event_type payload in
       let* source_id = required_nonblank_string payload "source_id" in
       let* sequence = required_int_field payload "sequence" in
       let* dropped_count = required_int_field payload "dropped_count" in
@@ -278,15 +291,18 @@ let decode_agent_core json =
     let* tool = optional_nonblank_string json "tool_name" in
     let* task = optional_nonblank_string json "task_id" in
     let* run_id = optional_nonblank_string json "run_id" in
-    let* payload =
-      match optional_object_field json "payload" with
-      | Ok (Some obj) -> Ok obj
-      | Ok None -> Ok (`Assoc [])
-      | Error _ as err -> err
+    let payload =
+      match member "payload" json with
+      | `Assoc _ as obj -> Some obj
+      | `Null | `List _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `String _ ->
+          None
     in
-    let* turn = optional_int_field payload "turn" in
-    let* tool_use_id = optional_nonblank_string payload "tool_use_id" in
-    let* execution_id = optional_nonblank_string payload "execution_id" in
+    let payload_field read key =
+      match payload with Some obj -> read obj key | None -> Ok None
+    in
+    let* turn = payload_field optional_int_field "turn" in
+    let* tool_use_id = payload_field optional_nonblank_string "tool_use_id" in
+    let* execution_id = payload_field optional_nonblank_string "execution_id" in
     let* kind = decode_agent_core_kind ~event_type payload in
     Ok
       (Agent_core

@@ -1056,6 +1056,38 @@ let test_wire_config () =
   Alcotest.(check int) "1 diff hunk" 1 (List.length patch_resp.diff_hunks);
   Alcotest.(check bool) "unified_diff non-empty" true (String.length patch_resp.unified_diff > 0)
 
+(* Agent-core Custom payloads are untyped: provider telemetry arrives as a
+   [ctor, object] tuple (keeper_event_bridge relays Telemetry_bus JSON). *)
+let test_wire_observer_agent_core_payload_shapes () =
+  let dec = Wire_observer.create_stream_decoder () in
+  let frame id event_type payload =
+    Printf.sprintf
+      "id: %d\ndata: {\"type\":\"agent_core:%s\",\"event_type\":\"%s\",\"ts_unix\":1795252090.0,\"agent_name\":null,\"payload\":%s}\n\n"
+      id event_type event_type payload
+  in
+  let chunk =
+    frame 200 "telemetry_event"
+      "[\"Streaming_first_chunk\",{\"provider\":\"anthropic\",\"ttfrc_ms\":412}]"
+    ^ frame 201 "agent_completed" "{\"elapsed_s\":3.5,\"turn\":4}"
+    ^ frame 202 "agent_completed" "[1,2]"
+  in
+  match
+    List.map
+      (fun (d : Wire_observer.delivery) -> d.decoded)
+      (Wire_observer.feed_chunk dec chunk)
+  with
+  | [ Wire_observer.Event
+        (Wire_observer.Agent_core { kind = Wire_observer.Telemetry; turn = None; _ });
+      Wire_observer.Event
+        (Wire_observer.Agent_core
+           { kind = Wire_observer.Agent_completed { elapsed_s }; turn = Some 4; _ });
+      Wire_observer.Undecodable _;
+    ] ->
+      Alcotest.(check (float 0.001)) "agent_completed elapsed_s" 3.5 elapsed_s
+  | _ ->
+      Alcotest.fail
+        "telemetry tuple decodes; a kind that reads fields still needs an object"
+
 (* 8. Wire_observer: tui_v2_dataset_changed & workspace_dataset_changed *)
 let test_wire_observer () =
   let dec = Wire_observer.create_stream_decoder () in
@@ -3551,6 +3583,8 @@ let () =
           Alcotest.test_case "wire_infra" `Quick test_wire_infra;
           Alcotest.test_case "wire_config" `Quick test_wire_config;
           Alcotest.test_case "wire_observer" `Quick test_wire_observer;
+          Alcotest.test_case "wire_observer agent_core payload shapes" `Quick
+            test_wire_observer_agent_core_payload_shapes;
           Alcotest.test_case "live_round1_board_and_planning" `Quick
             test_live_round1_wire_payloads;
           Alcotest.test_case "round2_wire_regressions_P1_1_3_4" `Quick

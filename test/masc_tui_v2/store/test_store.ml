@@ -8007,7 +8007,43 @@ let test_candle_fallback_never_makes_a_zero_ledger () =
     (match ledger None with
     | Observed.Unreported -> true
     | Observed.Value _ | Observed.Loading _ | Observed.Absent | Observed.Failed _ ->
-        false)
+        false);
+  (* A token that gets no Candle summary stays Unreported after the 404, and
+     the Candle tab does not ask the route that answered 404 again. *)
+  let m0 = Model.initial () in
+  let on_candle =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Work };
+      work = Work_store.set_tab Nav.Work_candle_scorecard m0.work;
+    }
+  in
+  let ledger_gets cmds =
+    List.length
+      (List.filter
+         (function
+           | Cmd.Http_get { req = Cmd.Get_candle_ledger _; _ } -> true
+           | _ -> false)
+         cmds)
+  in
+  Alcotest.(check int) "the Candle tab asks for the ledger" 1
+    (ledger_gets (View_fetches.fetches_for_current_view on_candle));
+  let after_404, _ =
+    Update.step ~now:t1 on_candle
+      (Msg.Http_reply
+         {
+           epoch = on_candle.epoch;
+           reply =
+             Msg.Reply_candle_ledger
+               (Error
+                  (Msg.Http_error
+                     { status = 404; body = "not found"; api_error = None }));
+         })
+  in
+  Alcotest.(check int) "a ledger route that answered 404 is not asked again" 0
+    (ledger_gets (View_fetches.fetches_for_current_view after_404));
+  Alcotest.(check int) "an explicit refresh asks it again" 1
+    (ledger_gets (View_fetches.fetches_for_current_view ~force:true after_404))
 
 let () =
   Alcotest.run "masc_tui_store"

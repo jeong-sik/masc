@@ -38,6 +38,16 @@ let memory_diff_holds ~keeper (diff : Wire_knowledge.memory_diff) =
 
 let add_if cond req acc = if cond then req :: acc else acc
 
+(* Once the ledger route has answered 404, the Candle panels read the
+   roster's Candle summary, which each roster reply refreshes. Only an
+   explicit refresh asks the route again. *)
+let candle_ledger_reqs ~force (m : Model.t) acc =
+  add_if
+    ((force || not m.work.candle_fallback_404)
+    && needs_fetch ~force m.work.candle_ledger)
+    (Cmd.Get_candle_ledger { limit = Some 50 })
+    acc
+
 (* The keeper-costs window every view asks for: the server's default and
    maximum (Dashboard_http_keeper_feeds.keeper_costs_max_window_minutes), so
    one response serves the Keepers table, the keeper dive and Runtime. *)
@@ -172,9 +182,7 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
   | Nav.Keeper_work_candle ->
       []
       |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
-      |> add_if
-           (needs_fetch ~force m.work.candle_ledger)
-           (Cmd.Get_candle_ledger { limit = Some 50 })
+      |> candle_ledger_reqs ~force m
   | Nav.Keeper_sandbox ->
       let sandbox_needed =
         needs_target_fetch ~force
@@ -290,9 +298,7 @@ let fetches_for_workspace ~force (m : Model.t) =
       |> add_if
            (needs_fetch ~force m.work.verifications)
            (Cmd.Get_verifications { view = `All; limit = 50; offset = 0 })
-      |> add_if
-           (needs_fetch ~force m.work.candle_ledger)
-           (Cmd.Get_candle_ledger { limit = Some 50 })
+      |> candle_ledger_reqs ~force m
       |> add_if (needs_fetch ~force m.infra.sandboxes) Cmd.Get_sandboxes
       |> add_if
            (needs_fetch ~force m.runtime.tool_series)
@@ -342,9 +348,7 @@ let fetches_for_workspace ~force (m : Model.t) =
                Cmd.Get_gate_pending
       | Nav.Work_candle_scorecard ->
           []
-          |> add_if
-               (needs_fetch ~force m.work.candle_ledger)
-               (Cmd.Get_candle_ledger { limit = Some 50 })
+          |> candle_ledger_reqs ~force m
           |> add_if (needs_fetch ~force m.fleet.shell) Cmd.Get_dashboard_shell)
   | Nav.Knowledge -> (
       match m.knowledge.active_tab with

@@ -1,3 +1,5 @@
+open Masc_tui_protocol
+
 type window = {
   turns : int;
   scheduled : int;
@@ -8,10 +10,13 @@ type window = {
   known_from : float option;
 }
 
-let seconds_per_hour = 3600
+let window_hours = [ 6; 24 ]
+let slots_per_hour = 3600 / Wire_fleet.turn_slot_seconds
 
 let window ~now_unix ~hours (pulse : Wire_fleet.turn_pulse) =
-  let window_start = now_unix -. Float.of_int (hours * seconds_per_hour) in
+  let slot = Wire_fleet.turn_slot_seconds in
+  let current_slot = int_of_float now_unix / slot * slot in
+  let window_start = current_slot - (((hours * slots_per_hour) - 1) * slot) in
   let empty =
     {
       turns = 0;
@@ -21,21 +26,22 @@ let window ~now_unix ~hours (pulse : Wire_fleet.turn_pulse) =
       own = 0;
       unknown = 0;
       known_from =
-        (if pulse.known_since > window_start then Some pulse.known_since else None);
+        (if pulse.known_since > Float.of_int window_start then Some pulse.known_since
+         else None);
     }
   in
   List.fold_left
-    (fun acc (slot : Wire_fleet.turn_slot) ->
-      if Float.of_int slot.starts_at < window_start then acc
+    (fun acc (s : Wire_fleet.turn_slot) ->
+      if s.starts_at < window_start then acc
       else
         {
           acc with
-          turns = acc.turns + slot.ok + slot.rested + slot.failed;
-          scheduled = acc.scheduled + slot.scheduled;
-          reacted = acc.reacted + slot.reacted;
-          chat = acc.chat + slot.chat;
-          own = acc.own + slot.own;
-          unknown = acc.unknown + slot.unknown;
+          turns = acc.turns + s.ok + s.rested + s.failed;
+          scheduled = acc.scheduled + s.scheduled;
+          reacted = acc.reacted + s.reacted;
+          chat = acc.chat + s.chat;
+          own = acc.own + s.own;
+          unknown = acc.unknown + s.unknown;
         })
     empty pulse.slots
 
@@ -44,6 +50,7 @@ type next_due =
   | Due_in of float
   | Late_by of float
   | Due_unknown
+  | Past_page_read
 
 let keeper_schedules ~name schedules =
   List.filter
@@ -52,9 +59,9 @@ let keeper_schedules ~name schedules =
       || Option.equal String.equal sc.payload_target (Some name))
     schedules
 
-let next_due ~now_unix schedules =
+let next_due ~now_unix ~more_pages schedules =
   match schedules with
-  | [] -> No_schedule
+  | [] -> if more_pages then Past_page_read else No_schedule
   | _ :: _ -> (
       let earliest =
         List.fold_left
@@ -69,3 +76,13 @@ let next_due ~now_unix schedules =
       | None -> Due_unknown
       | Some due when due >= now_unix -> Due_in (due -. now_unix)
       | Some due -> Late_by (now_unix -. due))
+
+let rows_per_window = 2
+let hairline_rows = 1
+let next_due_rows = 1
+let missing_pulse_rows = 1
+
+let block_rows = function
+  | None -> hairline_rows + missing_pulse_rows + next_due_rows
+  | Some (_ : Wire_fleet.turn_pulse) ->
+      hairline_rows + (rows_per_window * List.length window_hours) + next_due_rows

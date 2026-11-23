@@ -3264,18 +3264,22 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
 let cadence_slot ~starts_at ~ok ~scheduled ~reacted ~chat ~own : Wire_fleet.turn_slot =
   { starts_at; ok; rested = 0; failed = 0; scheduled; reacted; chat; own; unknown = 0 }
 
-(* The window counts slots that start inside it, and a pulse known only from
-   inside the window says so instead of reading as a quiet start. *)
+(* A window is the last [hours * 2] half-hour slots, the current one included,
+   and a pulse known only from inside the window says so instead of reading
+   as a quiet start. *)
 let test_keeper_cadence_window_counts_causes () =
+  let slot = Wire_fleet.turn_slot_seconds in
   let now_unix = 1_795_400_000.0 in
+  let current = int_of_float now_unix / slot * slot in
   let pulse : Wire_fleet.turn_pulse =
     {
       known_since = now_unix -. 90_000.0;
       slots =
         [
-          cadence_slot ~starts_at:(int_of_float now_unix - 30_000) ~ok:2 ~scheduled:2 ~reacted:0 ~chat:0 ~own:0;
-          cadence_slot ~starts_at:(int_of_float now_unix - 7_200) ~ok:3 ~scheduled:1 ~reacted:1 ~chat:1 ~own:0;
-          cadence_slot ~starts_at:(int_of_float now_unix - 1_800) ~ok:1 ~scheduled:0 ~reacted:0 ~chat:0 ~own:1;
+          (* the 6h window's oldest slot starts 11 slots back; 12 is outside *)
+          cadence_slot ~starts_at:(current - (12 * slot)) ~ok:2 ~scheduled:2 ~reacted:0 ~chat:0 ~own:0;
+          cadence_slot ~starts_at:(current - (11 * slot)) ~ok:3 ~scheduled:1 ~reacted:1 ~chat:1 ~own:0;
+          cadence_slot ~starts_at:current ~ok:1 ~scheduled:0 ~reacted:0 ~chat:0 ~own:1;
         ];
     }
   in
@@ -3319,10 +3323,14 @@ let test_keeper_cadence_next_due () =
            cadence_row ~id:"c" ~keeper:"beta" ~next_due:"1795399000.0";
          ])
   in
-  let due name = Keeper_cadence.next_due ~now_unix (Keeper_cadence.keeper_schedules ~name rows) in
+  let due ?(more_pages = false) name =
+    Keeper_cadence.next_due ~now_unix ~more_pages (Keeper_cadence.keeper_schedules ~name rows)
+  in
   Alcotest.(check bool) "alpha is due in 300s" true (due "alpha" = Keeper_cadence.Due_in 300.0);
   Alcotest.(check bool) "beta is 1000s late" true (due "beta" = Keeper_cadence.Late_by 1000.0);
-  Alcotest.(check bool) "gamma has no schedule" true (due "gamma" = Keeper_cadence.No_schedule)
+  Alcotest.(check bool) "gamma has no schedule" true (due "gamma" = Keeper_cadence.No_schedule);
+  Alcotest.(check bool) "gamma may lie past the page read" true
+    (due ~more_pages:true "gamma" = Keeper_cadence.Past_page_read)
 
 let () =
   Alcotest.run "masc_tui_screens_ops"

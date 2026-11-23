@@ -1411,13 +1411,18 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                   (say ~ko:"채팅" ~en:"chat") w.chat
                   (say ~ko:"스스로" ~en:"own") w.own
                   (say ~ko:"모름" ~en:"unknown") w.unknown))
-           [ 6; 24 ]);
+           Keeper_cadence.window_hours);
     let next_due_text =
       match Observed.to_option model.work.schedules with
       | None -> say ~ko:"예약 목록을 아직 못 읽음" ~en:"schedules not read yet"
-      | Some _ -> (
-          match Keeper_cadence.next_due ~now_unix keeper_scheds with
+      | Some (_rows, next_cursor) -> (
+          match
+            Keeper_cadence.next_due ~now_unix
+              ~more_pages:(Option.is_some next_cursor) keeper_scheds
+          with
           | Keeper_cadence.No_schedule -> say ~ko:"없음" ~en:"none"
+          | Keeper_cadence.Past_page_read ->
+              say ~ko:"읽은 쪽에 없음" ~en:"not on the page read"
           | Keeper_cadence.Due_unknown -> say ~ko:"시각 모름" ~en:"time unknown"
           | Keeper_cadence.Due_in sec ->
               say ~ko:(Format_val.format_duration_s sec ^ " 뒤")

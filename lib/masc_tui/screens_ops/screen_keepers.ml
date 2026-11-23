@@ -145,13 +145,15 @@ let keeper_table_row ~(model : Model.t) ~(theme : Theme.t) ~indent_name
   let next_cell =
     match Observed.to_option model.work.schedules with
     | None -> muted_cell Glyph.Missing_unreported
-    | Some (rows, _cursor) -> (
+    | Some (rows, next_cursor) -> (
         match
           Keeper_cadence.next_due ~now_unix:model.freshness.last_wall_unix
+            ~more_pages:(Option.is_some next_cursor)
             (Keeper_cadence.keeper_schedules ~name:k.name rows)
         with
         | Keeper_cadence.No_schedule -> muted_cell Glyph.Separator_dot
-        | Keeper_cadence.Due_unknown -> muted_cell Glyph.Missing_absent
+        | Keeper_cadence.Due_unknown | Keeper_cadence.Past_page_read ->
+            muted_cell Glyph.Missing_absent
         | Keeper_cadence.Due_in s ->
             Table.text_cell ~fg:(Color.of_rgb theme.text_secondary) (Format_val.format_duration_s s)
         | Keeper_cadence.Late_by s ->
@@ -299,7 +301,7 @@ let pulse_wall_columns : Table.column list =
     {
       id = "next";
       header = Say.make ~ko:"다음 예약" ~en:"Next due";
-      priority = 3;
+      priority = 4;
       min_width = 6;
       max_width = Some 10;
       weight = 1;

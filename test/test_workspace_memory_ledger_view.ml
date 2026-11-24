@@ -95,6 +95,32 @@ let test_deferred_inventory_and_selected_search () = with_base (fun base_path ->
     (absent |> member "matches" |> to_list |> List.length);
   View.summary ~base_path |> require |> check_summary "explicit full index" database)
 
+let test_curator_ledger_reads_its_own_generation_in_an_mvcc_workspace () =
+  with_base (fun base_path ->
+    let current = ledger ["Curator claim"] in
+    Ledger.save ~base_path current |> require;
+    let claim = "Independent World Memory claim" in
+    let scope = "workspace" in
+    let fact_id = Masc.World_memory_types.fact_id_of_claim ~scope ~claim in
+    (match
+       Masc.World_memory_store.upsert_fact ~base_path ~now:100. ~actor:"writer"
+         ~fact_id ~claim ~scope ~category:Masc.Keeper_memory_os_types.Fact ~facets:[]
+         ~provenance:(Proposed_by { keeper_id = "writer"; source_fact_ids = [] })
+         ~lifecycle:Working
+     with
+     | Error error -> Alcotest.fail (Masc.World_memory_store.error_to_string error)
+     | Ok _ -> ());
+    let snapshot = View.resolve_snapshot ~base_path |> require in
+    View.summary_in_snapshot snapshot |> require |> check_summary "resolved curator" current;
+    let id = List.hd (Ledger.claims current) |> fst in
+    let detail = View.detail_in_snapshot snapshot ~id |> require in
+    Alcotest.(check string) "detail returns the same curator claim" "Curator claim"
+      Yojson.Safe.Util.(detail |> member "text" |> to_string);
+    View.summary ~base_path |> require |> check_summary "curator index" current;
+    let inventory = View.inventory ~base_path () |> require in
+    Alcotest.(check string) "curator inventory binds its own generation" (Ledger.sha256 current)
+      Yojson.Safe.Util.(inventory |> member "ledger_sha256" |> to_string))
+
 let test_short_queries_remain_retrievable () = with_base (fun base_path ->
   Ledger.save ~base_path (ledger ["배포 전에 승인을 확인한다."; "CI requires the current head.";
                                  "Unrelated orchard observations."]) |> require;
@@ -228,4 +254,6 @@ let () = Alcotest.run "workspace memory ledger view"
       Alcotest.test_case "index failure preserves matches without filler" `Quick
         test_index_failure_preserves_matching_without_filler;
       Alcotest.test_case "200 IDs reuse one immutable resolution" `Quick
-        test_resolved_snapshot_serves_many_ids_without_rereading ] ]
+        test_resolved_snapshot_serves_many_ids_without_rereading;
+      Alcotest.test_case "curator reads its own generation with an existing MVCC store" `Quick
+        test_curator_ledger_reads_its_own_generation_in_an_mvcc_workspace ] ]

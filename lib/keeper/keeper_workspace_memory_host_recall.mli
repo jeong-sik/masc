@@ -41,4 +41,9 @@ module For_testing : sig
     detail:(id:string -> (Yojson.Safe.t,string) result) ->
     evaluate:Keeper_workspace_memory_selection.evaluate ->
     purpose:Yojson.Safe.t -> unit -> (Yojson.Safe.t,string) result
+  val collect_from_store :
+    base_path:string ->
+    is_excluded:(string -> bool) ->
+    evaluate:Keeper_workspace_memory_selection.evaluate ->
+    purpose:Yojson.Safe.t -> (Yojson.Safe.t, string) result
 end

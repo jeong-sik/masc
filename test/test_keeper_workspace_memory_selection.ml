@@ -356,6 +356,61 @@ let test_host_refreshes_one_snapshot_per_phase_for_many_candidates () =
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "cached assessment sources replaced the fresh publication check"
 
+let test_host_binds_mvcc_candidates_details_and_publication () =
+  let module Ledger = Masc.Workspace_memory_ledger in
+  let module Host = Masc.Keeper_workspace_memory_host_recall.For_testing in
+  let base_path = Filename.temp_dir "workspace-recall-mvcc-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    (match Ledger.save ~base_path Ledger.empty with
+     | Ok () -> ()
+     | Error detail -> Alcotest.fail detail);
+    let upsert ~scope ~keeper_id claim =
+      let fact_id = Masc.World_memory_types.fact_id_of_claim ~scope ~claim in
+      match
+        Masc.World_memory_store.upsert_fact ~base_path ~now:100. ~actor:keeper_id
+          ~fact_id ~claim ~scope ~category:Masc.Keeper_memory_os_types.Fact ~facets:[]
+          ~provenance:(Proposed_by { keeper_id; source_fact_ids = [] })
+          ~lifecycle:Working
+      with
+      | Ok fact -> fact
+      | Error error -> Alcotest.fail (Masc.World_memory_store.error_to_string error)
+    in
+    let public = upsert ~scope:"workspace" ~keeper_id:"allowed" "Shared deployment rule" in
+    ignore (upsert ~scope:"keeper:allowed" ~keeper_id:"allowed" "Private rule");
+    ignore (upsert ~scope:"workspace" ~keeper_id:"excluded" "Excluded source rule");
+    let collect ~evaluate =
+      Host.collect_from_store ~base_path ~is_excluded:(String.equal "excluded") ~evaluate ~purpose
+    in
+    let checked_evaluate ~state ~questions =
+      let open Yojson.Safe.Util in
+      let candidates = state |> member "candidates" |> to_list in
+      Alcotest.(check (list string)) "only allowed public candidate reaches evaluation"
+        [public.fact_id]
+        (List.map (fun row -> row |> member "candidate" |> member "id" |> to_string) candidates);
+      Ok (batch_response questions "comparison")
+    in
+    (match collect ~evaluate:checked_evaluate with
+     | Error detail -> Alcotest.fail detail
+     | Ok result ->
+       let open Yojson.Safe.Util in
+       let selected = result |> member "selected" |> to_list in
+       Alcotest.(check (list string)) "stable MVCC selection retains its source id"
+         [public.fact_id]
+         (List.map (fun row -> row |> member "sources" |> member "id" |> to_string) selected);
+       Alcotest.(check int) "excluded source is withheld" 1
+         (result |> member "source_policy_withheld_count" |> to_int));
+    let evaluate ~state ~questions =
+      let result = checked_evaluate ~state ~questions in
+      ignore (upsert ~scope:"workspace" ~keeper_id:"allowed" "New shared fact during evaluation");
+      result
+    in
+    match collect ~evaluate with
+    | Error detail ->
+      Alcotest.(check string) "changed MVCC generation fails publication"
+        "shared ledger changed before retrieval publication" detail
+    | Ok _ -> Alcotest.fail "host published a selection from a changed snapshot")
+;;
+
 let test_batch_partial_and_malformed_answers_stay_deferred () =
   let candidates = [candidate; {candidate with id="second"}] in
   let calls = ref 0 in
@@ -828,6 +883,8 @@ let () = Alcotest.run "purpose-specific workspace memory selection"
     Alcotest.test_case "host honors source Keeper exclusion before dispatch" `Quick test_host_never_dispatches_excluded_source_summaries;
     Alcotest.test_case "200 candidates share phase snapshots and refresh before publication" `Quick
       test_host_refreshes_one_snapshot_per_phase_for_many_candidates;
+    Alcotest.test_case "host binds MVCC candidates and details through publication" `Quick
+      test_host_binds_mvcc_candidates_details_and_publication;
     Alcotest.test_case "batch missing and malformed answers retain uncertainty" `Quick
       test_batch_partial_and_malformed_answers_stay_deferred;
     Alcotest.test_case "batch question identities survive filtering and reordered answers" `Quick

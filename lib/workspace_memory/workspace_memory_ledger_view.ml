@@ -33,7 +33,7 @@ let store_unavailable context = function
      | Some { source_bound = (Context.Missing | Context.Available _);_} | None -> false)
 
 let read ~base_path =
-  match Ledger.observe ~base_path with
+  match Ledger.observe_curator ~base_path with
   | Ledger.Missing -> Ok (`Assoc ["status", `String "missing"])
   | Ledger.Unavailable detail -> Error detail
   | Ledger.Available descriptor ->
@@ -89,7 +89,10 @@ let member_refs facts ~kind ~id =
 let grouped_member_refs facts =
   List.fold_left (fun (claims, conflicts) -> function
     | `Assoc fields ->
-      let reference = `Assoc (List.filter (fun (key, _) -> key <> "disposition") fields) in
+      let reference = `Assoc (List.filter (fun (key, _) ->
+        match key with
+        | "disposition" | "current_claim" | "source_state" -> false
+        | _ -> true) fields) in
       (match List.assoc_opt "disposition" fields with
        | Some (`Assoc disposition) ->
          (match List.assoc_opt "kind" disposition with
@@ -112,25 +115,31 @@ let grouped_member_refs facts =
     | _ -> claims, conflicts)
     (String_map.empty, String_map.empty) facts
 
+let summary_projection ~ledger_sha256 ledger =
+  let open Yojson.Safe.Util in
+  let facts = ledger |> member "facts" |> to_list in
+  let claim_members, conflict_members = grouped_member_refs facts in
+  let rows field id_field text_field members =
+    ledger |> member field |> to_list |> List.map (fun entry ->
+      let id = entry |> member id_field |> to_string in
+      let references = Option.value (String_map.find_opt id members) ~default:[] in
+      `Assoc ["id", `String id; "text", member text_field entry;
+              "members", `List (List.rev references)]) in
+  `Assoc ["status", `String "available";
+          "semantic_verification", `String "not_performed";
+          "ledger_sha256", `String ledger_sha256;
+          "claims", `List (rows "claims" "claim_id" "claim" claim_members);
+          "conflicts", `List (rows "conflicts" "conflict_id" "description" conflict_members);
+          "classified_count", `Int (List.length facts)]
+
 let summary_with_load ~load ~base_path =
-  match Ledger.observe ~base_path with
+  match Ledger.observe_curator ~base_path with
   | Ledger.Missing -> Ok (`Assoc ["status", `String "missing"])
   | Ledger.Unavailable detail -> Error detail
   | Ledger.Available descriptor ->
     let* ledger = load_observed ~load ~base_path
         ~ledger_sha256:descriptor.ledger_sha256 in
-    let facts = Ledger.to_json ledger |> Yojson.Safe.Util.member "facts"
-      |> Yojson.Safe.Util.to_list in
-    let claim_members, conflict_members = grouped_member_refs facts in
-    let rows members entries = List.map (fun (id, text) ->
-      `Assoc ["id", `String id; "text", `String text;
-              "members", `List (List.rev (String_map.find id members))]) entries in
-    Ok (`Assoc ["status", `String "available";
-                "semantic_verification", `String "not_performed";
-                "ledger_sha256", `String descriptor.ledger_sha256;
-                "claims", `List (rows claim_members (Ledger.claims ledger));
-                "conflicts", `List (rows conflict_members (Ledger.conflicts ledger));
-                "classified_count", `Int descriptor.classified_count])
+    Ok (summary_projection ~ledger_sha256:descriptor.ledger_sha256 (Ledger.to_json ledger))
 
 let summary ~base_path = summary_with_load ~load:Ledger.load ~base_path
 
@@ -158,7 +167,7 @@ let ordinary_absence_json ~base_path ledger =
              "missing_stores", `Int counts.missing_stores] @ extra)
 
 let observation ?(now = Unix.gettimeofday ()) ~include_briefing ~base_path () =
-  match Ledger.observe ~base_path with
+  match Ledger.observe_curator ~base_path with
   | Ledger.Missing ->
     let* absence = if include_briefing then Ok [] else
       let* ledger = load_observed ~load:Ledger.load ~base_path ~ledger_sha256:(Ledger.sha256 Ledger.empty) in
@@ -263,6 +272,14 @@ end
 type resolved_snapshot = Yojson.Safe.t
 
 let resolve_snapshot = read
+
+let summary_in_snapshot full =
+  let open Yojson.Safe.Util in
+  match member "status" full, member "ledger_sha256" full with
+  | `String "missing", _ -> Ok (`Assoc ["status", `String "missing"])
+  | `String "available", `String ledger_sha256 ->
+    Ok (summary_projection ~ledger_sha256 (member "ledger" full))
+  | _ -> Error "workspace ledger view has an invalid shape"
 
 let detail_in_snapshot full ~id =
   match full with

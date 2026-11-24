@@ -557,6 +557,12 @@ let observe_world_memory ~base_path =
        always originate from the exact same MVCC snapshot. *)
     (match World_memory_store.read_snapshot ~include_inactive:false ~base_path () with
      | Ok { facts; digest = digest_opt; _ } ->
+       let facts =
+         List.filter
+           (fun (fact : World_memory_types.world_fact) ->
+              not (World_memory_types.is_private_scope fact.scope))
+           facts
+       in
        let claim_count = List.length facts in
        let ledger_sha256, briefing =
          match digest_opt with
@@ -583,56 +589,53 @@ let observe_world_memory ~base_path =
      | Error err -> Unavailable (World_memory_store.error_to_string err))
 ;;
 
-let observe_with_template ~resolve_template ~base_path =
-  (* Prefer lock-free SQLite WAL World Memory whenever world_memory.db exists
-     so prompt observation, keeper_workspace_memory_read, and MCP resources
-     always agree on a single source of truth (no split-brain with legacy
-     ledger.json). Fall back to legacy ledger.json only when world_memory.db
-     is absent. *)
-  if World_memory_store.exists ~base_path
-  then observe_world_memory ~base_path
-  else
-    try
-      match read_current ~base_path with
-       | Error detail -> Unavailable detail
-       | Ok ledger ->
-         let ledger_sha256 = sha256 ledger in
-         let contract = Workspace_memory_briefing.contract ~template:(resolve_template ()) in
-         let briefing_loaded = Workspace_memory_briefing.load ~directory:(directory ~base_path) in
-         let briefing = briefing_loaded
-           |> Result.map (Workspace_memory_briefing.observe ~sources:(briefing_sources ledger) ~contract) in
-         let building = briefing_loaded
-           |> Result.map Workspace_memory_briefing.pass in
-         let excluded_count =
-           Fact_map.fold
-             (fun _ disposition count ->
-               match disposition with
-               | Excluded _ -> count + 1
-               | Claim_member _ | Conflict_member _ -> count)
-             ledger.dispositions 0
-         in
-         Available { ledger_sha256; claim_count = List.length (claims ledger);
-                     conflict_count = List.length (conflicts ledger);
-                     classified_count = List.length (dispositions ledger);
-                     excluded_count;
-                     briefing;
-                     building }
-    with
-    | Unix.Unix_error (Unix.ENOENT, _, _) ->
-      (match io (fun () -> require_base ~base_path) with
-       | Ok () -> Missing
-       | Error detail -> Unavailable detail)
-    | Unix.Unix_error (error, fn, arg) ->
-      Unavailable (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
+let observe_curator_with_template ~resolve_template ~base_path =
+  try
+    match read_current ~base_path with
+     | Error detail -> Unavailable detail
+     | Ok ledger ->
+       let ledger_sha256 = sha256 ledger in
+       let contract = Workspace_memory_briefing.contract ~template:(resolve_template ()) in
+       let briefing_loaded = Workspace_memory_briefing.load ~directory:(directory ~base_path) in
+       let briefing = briefing_loaded
+         |> Result.map (Workspace_memory_briefing.observe ~sources:(briefing_sources ledger) ~contract) in
+       let building = briefing_loaded
+         |> Result.map Workspace_memory_briefing.pass in
+       let excluded_count =
+         Fact_map.fold
+           (fun _ disposition count ->
+             match disposition with
+             | Excluded _ -> count + 1
+             | Claim_member _ | Conflict_member _ -> count)
+           ledger.dispositions 0
+       in
+       Available { ledger_sha256; claim_count = List.length (claims ledger);
+                   conflict_count = List.length (conflicts ledger);
+                   classified_count = List.length (dispositions ledger);
+                   excluded_count;
+                   briefing;
+                   building }
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) ->
+    (match io (fun () -> require_base ~base_path) with
+     | Ok () -> Missing
+     | Error detail -> Unavailable detail)
+  | Unix.Unix_error (error, fn, arg) ->
+    Unavailable (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
+
+let resolve_briefing_template () =
+  (Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing).effective
+
+let observe_curator ~base_path =
+  observe_curator_with_template ~resolve_template:resolve_briefing_template ~base_path
 
 let observe_with_briefing_template ~briefing_template ~base_path =
-  observe_with_template ~resolve_template:(fun () -> briefing_template) ~base_path
+  if World_memory_store.exists ~base_path then observe_world_memory ~base_path
+  else observe_curator_with_template ~resolve_template:(fun () -> briefing_template) ~base_path
 
 let observe ~base_path =
-  observe_with_template
-    ~resolve_template:(fun () ->
-      (Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing).effective)
-    ~base_path
+  if World_memory_store.exists ~base_path then observe_world_memory ~base_path
+  else observe_curator ~base_path
 
 (* Reconciliation *)
 

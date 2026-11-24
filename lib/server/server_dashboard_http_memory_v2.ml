@@ -491,7 +491,7 @@ let world_json ?(now = Time_compat.now ()) ~config () =
   then world_json_from_mvcc_db ~now ~base_path ~writer_health
   else (
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let obs = Ledger.observe ~base_path in
+  let obs = Ledger.observe_curator ~base_path in
   let log_report_json =
     match Wlog.recover_file ~path:(Wlog.log_path ~base_path) with
     | Error err ->

@@ -1,5 +1,5 @@
 val read : base_path:string -> (Yojson.Safe.t, string) result
-(** Current durable ledger with best-effort current Keeper fact resolution.
+(** Current file-backed Curator ledger with best-effort Keeper fact resolution.
     Old proposal files are ignored. A missing ledger is explicit; a corrupt
     ledger is an error. Resolved claims are observations, not verification. *)
 
@@ -30,6 +30,9 @@ val resolve_snapshot : base_path:string -> (resolved_snapshot, string) result
 
 val detail_in_snapshot : resolved_snapshot -> id:string -> (Yojson.Safe.t, string) result
 (** Look up one claim or conflict in a previously resolved snapshot. *)
+
+val summary_in_snapshot : resolved_snapshot -> (Yojson.Safe.t, string) result
+(** Project the candidate list from the same snapshot used for detail reads. *)
 
 val detail : base_path:string -> id:string -> (Yojson.Safe.t, string) result
 (** Resolve one claim or conflict and its current member facts. *)

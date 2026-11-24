@@ -333,7 +333,8 @@ let find_actionable_ask (m : Model.t) =
             | Attention.Payload_gate _
             | Attention.Payload_goal_confirmation _ );
           _;
-        }
+        } ->
+        None
     | None when Option.is_some m.attention.selected_id -> None
     | None -> (
         match Work_store.selected_open_ask m.work with

@@ -1484,6 +1484,8 @@ let test_axis_a_screen_dive_matrix () =
                     Nav.Runtime_connectors
                   || Nav.equal_runtime_tab m.runtime.active_tab
                        Nav.Runtime_failover_lanes
+                  || Nav.equal_runtime_tab m.runtime.active_tab
+                       Nav.Runtime_addons_browser
               | Nav.Infra ->
                   Nav.equal_infra_tab m.infra.active_tab
                     Nav.Infra_repos_changes

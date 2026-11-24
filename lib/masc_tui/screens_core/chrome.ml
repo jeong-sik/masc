@@ -9,6 +9,8 @@ type frame_layout = {
   breakpoint : Layout.breakpoint;
   top_rail : Rect.t;
   sub_tab_bar : Rect.t option;
+  sidebar : Rect.t option;
+  sidebar_is_drawer : bool;
   body : Rect.t;
   approval_strip : Rect.t option;
   composer : Rect.t option;
@@ -57,6 +59,8 @@ let compute_layout ~(model : Model.t) ~cols ~rows =
       breakpoint;
       top_rail;
       sub_tab_bar = None;
+      sidebar = None;
+      sidebar_is_drawer = false;
       body;
       approval_strip = None;
       composer = None;
@@ -122,14 +126,39 @@ let compute_layout ~(model : Model.t) ~cols ~rows =
       else None
     in
     let body_h = Int.max 0 (approval_y - top_h) in
-    let body =
+    let full_body =
       Layout.inset_body breakpoint (Rect.make ~x:0 ~y:top_h ~w:cols ~h:body_h)
+    in
+    let sidebar, sidebar_is_drawer, body =
+      if
+        Model.sidebar_docked sized_model
+        && full_body.w >= Model.sidebar_width + 20
+      then
+        let sw = Model.sidebar_width in
+        let gap = Model.sidebar_gap in
+        let sb_rect =
+          Rect.make ~x:full_body.x ~y:full_body.y ~w:sw ~h:full_body.h
+        in
+        let b_rect =
+          Rect.make ~x:(full_body.x + sw + gap) ~y:full_body.y
+            ~w:(Int.max 0 (full_body.w - sw - gap))
+            ~h:full_body.h
+        in
+        (Some sb_rect, false, b_rect)
+      else if Model.sidebar_drawer_open sized_model && full_body.w >= 20 then
+        let dw = Int.min (Model.sidebar_width + 2) (Int.max 18 (cols - 4)) in
+        let dx = if cols > dw + 2 then 1 else 0 in
+        let sb_rect = Rect.make ~x:dx ~y:top_h ~w:dw ~h:body_h in
+        (Some sb_rect, true, full_body)
+      else (None, false, full_body)
     in
     let chrome_rows = top_h + approval_h + comp_h + footer_sep_h + footer.h in
     {
       breakpoint;
       top_rail;
       sub_tab_bar;
+      sidebar;
+      sidebar_is_drawer;
       body;
       approval_strip;
       composer;
@@ -193,8 +222,28 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     let sep_style = Typography.whisper ~bg ~italic:false theme in
     let sep = Typography.sep_dot in
     let sep_w = Grapheme.display_width sep in
-    (* Left side: 1-cell side margin + Brand (Wide/Std) + 6 Workspace Tabs *)
+    (* Left side: 1-cell side margin + clickable [b] Menu toggle + Brand (Wide/Std) + 6 Workspace Tabs *)
     let x = ref (rect.x + 1) in
+    if not is_micro then begin
+      let sb_focused = Model.sidebar_has_focus model in
+      let menu_st =
+        if sb_focused then
+          Typography.accent ~bg:pill_bg ~bold:true theme
+        else if Model.sidebar_visible model then
+          Typography.accent ~bg theme
+        else Typography.structure ~bg theme
+      in
+      let menu_lbl =
+        if sb_focused then
+          Glyph.to_utf8 Glyph.Focus_caret ^ "b"
+        else "[b]"
+      in
+      let m_adv =
+        Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y ~style:menu_st
+          menu_lbl
+      in
+      x := !x + m_adv + 1
+    end;
     if rect.w >= 100 && not is_micro then begin
       let d_adv =
         Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y
@@ -1156,6 +1205,22 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           mk "Tab" "완료" "Done" (Keymap.Cycle_focus_pane Keymap.Next);
           mk "Esc" "초기화" "Clear" Keymap.Pop_back_or_close;
         ]
+      else if Model.sidebar_has_focus model then
+        let mk key ko en action : Keymap.footer_hint =
+          {
+            Keymap.key_display = key;
+            label = Say.resolve model.lang (Say.make ~ko ~en);
+            action;
+            priority = 1;
+          }
+        in
+        [
+          mk "↑↓" "화면 이동" "Navigate" (Keymap.Move Keymap.Down);
+          mk "Enter" "본문 진입" "Open" Keymap.Confirm_selected;
+          mk "Tab" "본문" "Body" (Keymap.Cycle_focus_pane Keymap.Next);
+          mk "b" "메뉴 접기" "Hide Menu" Keymap.Toggle_sidebar;
+          mk "Esc" "닫기" "Back" Keymap.Pop_back_or_close;
+        ]
       else
         let raw =
           Keymap.footer_hints ~scope_chain ~max_width:(remaining_w + 180)
@@ -1168,7 +1233,9 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               Config_store.is_two_pane_width ~cols:model.viewport.cols
           | Some (Nav.Palette | Nav.Queue_context _ | Nav.Inline_action _) ->
               true
-          | None -> Model.focusable_pane_count model > 1
+          | None ->
+              Model.focusable_pane_count model > 1
+              || Model.sidebar_visible model
         in
         let enter_hint =
           match model.nav.overlay with
@@ -1497,6 +1564,183 @@ let render_micro_cockpit grid ~cache ~(body : Rect.t) ~(theme : Theme.t)
       put_line whisper resize_note
     end
 
+let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
+    ~(model : Model.t) ~elevated =
+  if Rect.is_empty rect then ()
+  else
+    let lang = model.lang in
+    let focused = Model.sidebar_has_focus model in
+    let title = Say.resolve lang (Say.make ~ko:"메뉴" ~en:"Menu") in
+    let hotkey =
+      if focused then Say.resolve lang (Say.make ~ko:"[Tab] 본문" ~en:"[Tab] Body")
+      else "[b]"
+    in
+    let inner =
+      Card.draw ~cache grid ~rect ~theme
+        {
+          (Card.default_spec ~title) with
+          hotkey = Some hotkey;
+          focused;
+          elevated;
+        }
+    in
+    if Rect.is_empty inner then ()
+    else
+      let bg_rgb = if elevated then theme.surface_2 else theme.surface_1 in
+      let bg = Color.of_rgb bg_rgb in
+      let active_target = Model.active_menu_target model in
+      let effective_cursor =
+        if focused then model.nav.sidebar_cursor
+        else Nav.menu_item_index active_target
+      in
+      let rows = Array.of_list Model.sidebar_visual_rows in
+      let total = Array.length rows in
+      let start =
+        Model.sidebar_viewport_start ~inner_h:inner.h
+          ~scroll:model.nav.sidebar_scroll ~cursor:effective_cursor
+      in
+      let attn_n = Attention.count model.attention in
+      let inc_n = Incidents.active_count model.incidents in
+      let hero = Model.pulse_hero_metrics model in
+      for i = 0 to inner.h - 1 do
+        let row_idx = start + i in
+        if row_idx < total then begin
+          let py = inner.y + i in
+          let row_r = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
+          match rows.(row_idx) with
+          | Model.Sidebar_section sec ->
+              let sec_lbl =
+                String.uppercase_ascii
+                  (Say.resolve lang (Nav.menu_section_label sec))
+              in
+              let sec_st = Typography.whisper ~bg ~italic:false theme in
+              let right_edge = Rect.right inner - 1 in
+              let sc_opt = Nav.menu_section_shortcut sec in
+              let sc_w =
+                match sc_opt with
+                | None -> 0
+                | Some s -> Grapheme.display_width s + 1
+              in
+              let max_sec_w =
+                Int.max 0 (right_edge - (inner.x + 1) - sc_w)
+              in
+              ignore
+                (Cell_grid.put_text ~clip:row_r grid ~x:(inner.x + 1) ~y:py
+                   ~style:sec_st
+                   (Grapheme.truncate_to_width ~max_width:max_sec_w sec_lbl));
+              (match sc_opt with
+               | None -> ()
+               | Some s ->
+                   let sw = Grapheme.display_width s in
+                   let sx = right_edge - sw in
+                   if sx > inner.x + 2 then
+                     ignore
+                       (Cell_grid.put_text ~clip:row_r grid ~x:sx ~y:py
+                          ~style:sec_st s))
+          | Model.Sidebar_item { index; item } ->
+              let is_cursor = focused && Int.equal index model.nav.sidebar_cursor in
+              let is_active = Nav.equal_menu_target item.target active_target in
+              let row_bg_rgb =
+                if is_cursor then theme.selection_bg else bg_rgb
+              in
+              let row_bg = Color.of_rgb row_bg_rgb in
+              if is_cursor then
+                Cell_grid.fill_rect ~clip:inner grid ~rect:row_r
+                  ~style:(Typography.primary ~bg:row_bg theme) ();
+              if is_cursor then
+                Card.draw_left_rail ~bg:row_bg ~color:theme.border_focused grid
+                  ~x:inner.x ~y:py ~h:1 ~theme
+              else if is_active then begin
+                let rail_color =
+                  if focused then theme.border_inactive else theme.border_focused
+                in
+                Card.draw_left_rail ~bg:row_bg ~color:rail_color grid
+                  ~x:inner.x ~y:py ~h:1 ~theme
+              end;
+              let badge_opt : (string * Style.t) option =
+                match item.target with
+                | Nav.Menu_work Nav.Work_inbox when attn_n > 0 ->
+                    Some
+                      ( Printf.sprintf "%d" attn_n,
+                        Typography.status ~bg:row_bg ~bold:true theme
+                          Theme.Status_attention )
+                | Nav.Menu_keepers when hero.total_keepers > 0 ->
+                    Some
+                      ( Printf.sprintf "%d/%d" hero.running_keepers
+                          hero.total_keepers,
+                        Typography.whisper ~bg:row_bg ~italic:false theme )
+                | Nav.Menu_incidents when inc_n > 0 ->
+                    Some
+                      ( Printf.sprintf "%d" inc_n,
+                        Typography.status ~bg:row_bg theme
+                          Theme.Status_historical )
+                | Nav.Menu_pulse
+                | Nav.Menu_work
+                    ( Nav.Work_pipeline
+                    | Nav.Work_tasks_schedules
+                    | Nav.Work_inbox
+                    | Nav.Work_candle_scorecard )
+                | Nav.Menu_knowledge _
+                | Nav.Menu_keepers
+                | Nav.Menu_runtime _
+                | Nav.Menu_infra _
+                | Nav.Menu_settings
+                | Nav.Menu_incidents
+                | Nav.Menu_queue_context
+                | Nav.Menu_help -> (
+                    match item.shortcut with
+                    | Some sc ->
+                        Some
+                          ( sc,
+                            Typography.whisper ~bg:row_bg ~italic:false theme )
+                    | None -> None)
+              in
+              let right_edge = Rect.right inner - 1 in
+              let badge_w =
+                match badge_opt with
+                | None -> 0
+                | Some (btxt, _) -> Grapheme.display_width btxt + 1
+              in
+              let lbl_x = inner.x + 2 in
+              let max_lbl_w = Int.max 0 (right_edge - lbl_x - badge_w) in
+              let lbl_st =
+                if is_cursor then Typography.anchor ~bg:row_bg theme
+                else if is_active then
+                  Typography.accent ~bg:row_bg ~bold:(not focused) theme
+                else if focused then Typography.primary ~bg:row_bg theme
+                else Typography.structure ~bg:row_bg theme
+              in
+              let lbl =
+                Grapheme.truncate_to_width ~max_width:max_lbl_w
+                  (Say.resolve lang item.label)
+              in
+              ignore
+                (Cell_grid.put_text ~clip:row_r grid ~x:lbl_x ~y:py
+                   ~style:lbl_st lbl);
+              (match badge_opt with
+               | None -> ()
+               | Some (btxt, bst) ->
+                   let bw = Grapheme.display_width btxt in
+                   let bx = right_edge - bw in
+                   if bx > lbl_x + 2 then
+                     ignore
+                       (Cell_grid.put_text ~clip:row_r grid ~x:bx ~y:py
+                          ~style:bst btxt))
+        end
+      done;
+      if start > 0 && inner.w >= 4 then
+        ignore
+          (Cell_grid.put_text ~clip:inner grid
+             ~x:(Rect.right inner - 1) ~y:inner.y
+             ~style:(Typography.whisper ~bg ~italic:false theme)
+             "▲");
+      if start + inner.h < total && inner.w >= 4 && inner.h >= 2 then
+        ignore
+          (Cell_grid.put_text ~clip:inner grid
+             ~x:(Rect.right inner - 1) ~y:(Rect.bottom inner - 1)
+             ~style:(Typography.whisper ~bg ~italic:false theme)
+             "▼")
+
 let render_frame ~(model : Model.t) ~cache ~render_body ~render_overlay grid =
   let cols = Cell_grid.cols grid in
   let rows = Cell_grid.rows grid in
@@ -1522,7 +1766,20 @@ let render_frame ~(model : Model.t) ~cache ~render_body ~render_overlay grid =
      | None -> ());
     if layout.is_micro_guard then
       render_micro_cockpit grid ~cache ~body:layout.body ~theme ~model
-    else render_body layout.body grid;
+    else begin
+      (match layout.sidebar with
+       | Some sr when not layout.sidebar_is_drawer ->
+           render_sidebar grid ~cache ~rect:sr ~theme ~model ~elevated:false
+       | Some _ | None -> ());
+      render_body layout.body grid;
+      (match layout.sidebar with
+       | Some sr when layout.sidebar_is_drawer ->
+           Cell_grid.dim_rect grid ~rect:layout.body
+             ~fg:(Color.of_rgb theme.border_subtle)
+             ~bg:(Color.of_rgb theme.surface_0);
+           render_sidebar grid ~cache ~rect:sr ~theme ~model ~elevated:true
+       | Some _ | None -> ())
+    end;
     (match layout.approval_strip with
      | Some r -> render_approval_strip grid ~rect:r ~theme ~model
      | None -> ());

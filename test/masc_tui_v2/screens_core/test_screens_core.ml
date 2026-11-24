@@ -1856,8 +1856,10 @@ let test_round2_palette_and_settings_regressions () =
 let test_v25_chrome_margins_and_keycaps () =
   let base_wide = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_ko in
   let l_wide = Chrome.compute_layout ~model:base_wide ~cols:140 ~rows:40 in
-  Alcotest.(check int) "Wide body inset x = 1" 1 l_wide.body.x;
-  Alcotest.(check int) "Wide body inset w = 138" 138 l_wide.body.w;
+  Alcotest.(check bool) "Wide auto-docks left sidebar" true
+    (Option.is_some l_wide.sidebar && not l_wide.sidebar_is_drawer);
+  Alcotest.(check int) "Wide body x after docked sidebar = 26" 26 l_wide.body.x;
+  Alcotest.(check int) "Wide body w after docked sidebar = 113" 113 l_wide.body.w;
 
   let base_std = populated_model ~cols:110 ~rows:32 ~lang:Say.Lang_en in
   let l_std = Chrome.compute_layout ~model:base_std ~cols:110 ~rows:32 in

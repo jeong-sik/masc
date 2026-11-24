@@ -903,6 +903,55 @@ and confirm_palette ~now (m : Model.t) =
 and execute_action ~now (m : Model.t) action =
   match action with
   | Keymap.Switch_workspace ws -> Update_nav.switch_workspace m ws
+  | Keymap.Toggle_sidebar ->
+      if
+        Model.is_too_small_viewport m.viewport
+        || Model.equal_breakpoint m.breakpoint Model.Micro
+      then (m, [])
+      else if not (Model.sidebar_visible m) then
+        let cursor = Nav.menu_item_index (Model.active_menu_target m) in
+        ( {
+            m with
+            nav =
+              {
+                m.nav with
+                overlay = None;
+                filter_focused = false;
+                sidebar_open = Some true;
+                sidebar_focused = true;
+                sidebar_cursor = cursor;
+              };
+            drafts = Drafts.set_focus false m.drafts;
+            inline_modal = None;
+          }
+        , [] )
+      else if not m.nav.sidebar_focused then
+        let cursor = Nav.menu_item_index (Model.active_menu_target m) in
+        ( {
+            m with
+            nav =
+              {
+                m.nav with
+                overlay = None;
+                filter_focused = false;
+                sidebar_focused = true;
+                sidebar_cursor = cursor;
+              };
+            drafts = Drafts.set_focus false m.drafts;
+            inline_modal = None;
+          }
+        , [] )
+      else
+        ( {
+            m with
+            nav =
+              {
+                m.nav with
+                sidebar_open = Some false;
+                sidebar_focused = false;
+              };
+          }
+        , [] )
   | Keymap.Sub_tab dir -> Update_nav.cycle_sub_tab m dir
   | Keymap.Cycle_focus_pane dir -> (
       match m.nav.overlay with
@@ -1885,9 +1934,9 @@ and execute_action ~now (m : Model.t) action =
                       ( Model.with_toast ~now ~level:Model.Toast_info
                           (Say.make
                              ~ko:
-                               "#goals 보드 제안은 Pipeline 탭, 스케줄 생성은 Tasks/Schedules 탭에서 [n]을 누르세요"
+                               "#goals 보드 제안은 목표(Goals) 탭, 스케줄 생성은 작업·일정 탭에서 [n]을 누르세요"
                              ~en:
-                               "Press [n] on Pipeline to post a #goals proposal \
+                               "Press [n] on Goals to post a #goals proposal \
                                 or Tasks/Schedules to add a schedule")
                           m
                       , [] ))

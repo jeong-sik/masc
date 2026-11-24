@@ -51,7 +51,13 @@ let reconcile_memory_diagram ~(before : Model.t) ~(after : Model.t) cmds =
 let apply_resize ~now (m : Model.t) ~cols ~rows =
   let viewport = { Model.cols = max 0 cols; rows = max 0 rows } in
   let breakpoint = Model.classify_viewport viewport in
-  let next = { m with viewport; breakpoint } in
+  let next0 = { m with viewport; breakpoint } in
+  (* Clear sidebar focus if shrinking hid the sidebar so keyboard focus can
+     never remain trapped on an invisible surface. *)
+  let next =
+    if Model.sidebar_visible next0 then next0
+    else { next0 with nav = { next0.nav with sidebar_focused = false } }
+  in
   (* Never clobber [m.nav.overlay] or [m.inline_modal]; [Micro_viewport] gating
      is evaluated dynamically from [Model.is_too_small_viewport m.viewport]. *)
   match

@@ -7,6 +7,8 @@ type frame_layout = {
   breakpoint : Masc_tui_ui.Layout.breakpoint;
   top_rail : Masc_tui_core.Rect.t;
   sub_tab_bar : Masc_tui_core.Rect.t option;
+  sidebar : Masc_tui_core.Rect.t option;
+  sidebar_is_drawer : bool;
   body : Masc_tui_core.Rect.t;
   approval_strip : Masc_tui_core.Rect.t option;
   composer : Masc_tui_core.Rect.t option;

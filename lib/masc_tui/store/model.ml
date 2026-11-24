@@ -25,6 +25,10 @@ type nav_state = {
   pane_index : int;
   zoomed : bool;
   filter_focused : bool;
+  sidebar_open : bool option;
+  sidebar_focused : bool;
+  sidebar_cursor : int;
+  sidebar_scroll : int;
   dive_scroll_offset : int;
   help_scroll_offset : int;
   queue_scroll_offset : int;
@@ -209,6 +213,10 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
         pane_index = 0;
         zoomed = false;
         filter_focused = false;
+        sidebar_open = None;
+        sidebar_focused = false;
+        sidebar_cursor = 0;
+        sidebar_scroll = 0;
         dive_scroll_offset = 0;
         help_scroll_offset = 0;
         queue_scroll_offset = 0;
@@ -344,14 +352,118 @@ let composer_mode m =
         then Auto_folded_pill
         else Collapsed_bar
 
+let sidebar_width = 24
+let sidebar_gap = 1
+let sidebar_docked_min_cols = 132
+
+let sidebar_docked m =
+  (not (is_too_small_viewport m.viewport))
+  && (not (equal_breakpoint m.breakpoint Micro))
+  && m.viewport.cols >= sidebar_docked_min_cols
+  &&
+  match m.nav.sidebar_open with
+  | Some false -> false
+  | None | Some true -> true
+
+let sidebar_drawer_open m =
+  (not (is_too_small_viewport m.viewport))
+  && (not (equal_breakpoint m.breakpoint Micro))
+  && (not (sidebar_docked m))
+  &&
+  match m.nav.sidebar_open with
+  | Some true -> true
+  | None | Some false -> false
+
+let sidebar_visible m = sidebar_docked m || sidebar_drawer_open m
+
+let sidebar_has_focus m =
+  sidebar_visible m
+  && m.nav.sidebar_focused
+  && Option.is_none m.nav.overlay
+  && (not m.nav.filter_focused)
+  && not (Drafts.is_focused m.drafts)
+
+type sidebar_row =
+  | Sidebar_section of Nav.menu_section
+  | Sidebar_item of {
+      index : int;
+      item : Nav.menu_item;
+    }
+
+let sidebar_visual_rows =
+  let acc = ref [] in
+  let prev_sec = ref None in
+  List.iteri
+    (fun index (item : Nav.menu_item) ->
+      let changed =
+        match !prev_sec with
+        | Some s -> not (Nav.equal_menu_section s item.section)
+        | None -> true
+      in
+      if changed then begin
+        acc := Sidebar_section item.section :: !acc;
+        prev_sec := Some item.section
+      end;
+      acc := Sidebar_item { index; item } :: !acc)
+    Nav.all_menu_items;
+  List.rev !acc
+
+let sidebar_cursor_visual_row ~cursor =
+  let rec find row = function
+    | [] -> 0
+    | Sidebar_item { index; _ } :: _ when Int.equal index cursor -> row
+    | (Sidebar_section _ | Sidebar_item _) :: rest -> find (row + 1) rest
+  in
+  find 0 sidebar_visual_rows
+
+let sidebar_viewport_start ~inner_h ~scroll ~cursor =
+  let total = List.length sidebar_visual_rows in
+  if inner_h <= 0 || total <= inner_h then 0
+  else
+    let vis_row = sidebar_cursor_visual_row ~cursor in
+    let max_start = max 0 (total - inner_h) in
+    let s0 = max 0 (min max_start scroll) in
+    let target_top = if cursor = 0 then 0 else max 0 (vis_row - 1) in
+    let s1 =
+      if target_top < s0 then target_top
+      else if vis_row >= s0 + inner_h then vis_row - inner_h + 1
+      else s0
+    in
+    max 0 (min max_start s1)
+
+let active_menu_target m =
+  match m.nav.overlay with
+  | Some (Nav.Settings _) -> Nav.Menu_settings
+  | Some Nav.Incidents -> Nav.Menu_incidents
+  | Some (Nav.Queue_context _) -> Nav.Menu_queue_context
+  | Some Nav.Help -> Nav.Menu_help
+  | Some (Nav.Palette | Nav.Inline_action _ | Nav.System_gate _) | None -> (
+      match m.nav.workspace with
+      | Nav.Pulse -> Nav.Menu_pulse
+      | Nav.Work -> Nav.Menu_work m.work.active_tab
+      | Nav.Knowledge -> Nav.Menu_knowledge m.knowledge.active_tab
+      | Nav.Keepers -> Nav.Menu_keepers
+      | Nav.Runtime -> Nav.Menu_runtime m.runtime.active_tab
+      | Nav.Infra -> Nav.Menu_infra m.infra.active_tab)
+
+let sync_sidebar_cursor m =
+  let idx = Nav.menu_item_index (active_menu_target m) in
+  { m with nav = { m.nav with sidebar_cursor = idx } }
+
 let outer_margin_for = function
   | Wide | Standard -> 1
   | Compact | Micro -> 0
 
-let inner_body_width m =
+let full_inset_width m =
   let cols = max 0 m.viewport.cols in
   let margin = outer_margin_for m.breakpoint in
   if margin <= 0 || cols <= margin * 2 then cols else cols - (margin * 2)
+
+let inner_body_width m =
+  let full = full_inset_width m in
+  if sidebar_docked m && full >= sidebar_width + 20 then
+    max 0 (full - sidebar_width - sidebar_gap)
+  else full
 
 let has_sub_tab_bar_for_model m =
   match active_dive m with
@@ -361,12 +473,14 @@ let has_sub_tab_bar_for_model m =
       | Nav.Pulse -> false
       | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Runtime | Nav.Infra -> true)
 
-let inner_body_height m =
+let vertical_chrome_bands m =
   let rows = max 0 m.viewport.rows in
   let top_rail_h = if rows >= 1 then 1 else 0 in
   let footer_h = if rows >= 2 then 1 else 0 in
   if is_too_small_viewport m.viewport || equal_breakpoint m.breakpoint Micro
-  then max 0 (rows - top_rail_h - footer_h)
+  then
+    let body_h = max 0 (rows - top_rail_h - footer_h) in
+    (top_rail_h, body_h, 0, 0)
   else
     let sub_h = if has_sub_tab_bar_for_model m && rows >= 5 then 1 else 0 in
     let top_h = top_rail_h + sub_h in
@@ -399,8 +513,58 @@ let inner_body_height m =
       then 1
       else 0
     in
-    let approval_y = rows - footer_h - footer_sep_h - comp_h - approval_h in
-    max 0 (approval_y - top_h)
+    let comp_y = rows - footer_h - footer_sep_h - comp_h in
+    let approval_y = comp_y - approval_h in
+    let body_h = max 0 (approval_y - top_h) in
+    (top_h, body_h, comp_y, comp_h)
+
+let inner_body_height m =
+  let _, body_h, _, _ = vertical_chrome_bands m in
+  body_h
+
+let composer_rect m =
+  let cols = max 0 m.viewport.cols in
+  let _, _, comp_y, comp_h = vertical_chrome_bands m in
+  if comp_h > 0 && cols > 0 then
+    Some (Rect.make ~x:0 ~y:comp_y ~w:cols ~h:comp_h)
+  else None
+
+let body_top_y m =
+  let rows = max 0 m.viewport.rows in
+  let top_rail_h = if rows >= 1 then 1 else 0 in
+  if is_too_small_viewport m.viewport || equal_breakpoint m.breakpoint Micro
+  then top_rail_h
+  else
+    let sub_h = if has_sub_tab_bar_for_model m && rows >= 5 then 1 else 0 in
+    top_rail_h + sub_h
+
+let sidebar_rect m =
+  let cols = max 0 m.viewport.cols in
+  let top_h = body_top_y m in
+  let body_h = inner_body_height m in
+  let margin = outer_margin_for m.breakpoint in
+  let full_w = full_inset_width m in
+  if body_h <= 0 then None
+  else if sidebar_docked m && full_w >= sidebar_width + 20 then
+    Some (Rect.make ~x:margin ~y:top_h ~w:sidebar_width ~h:body_h)
+  else if sidebar_drawer_open m && full_w >= 20 then
+    let dw = min (sidebar_width + 2) (max 18 (cols - 4)) in
+    let dx = if cols > dw + 2 then 1 else 0 in
+    Some (Rect.make ~x:dx ~y:top_h ~w:dw ~h:body_h)
+  else None
+
+let body_rect m =
+  let top_h = body_top_y m in
+  let body_h = inner_body_height m in
+  let margin = outer_margin_for m.breakpoint in
+  let full_w = full_inset_width m in
+  if sidebar_docked m && full_w >= sidebar_width + 20 then
+    Rect.make
+      ~x:(margin + sidebar_width + sidebar_gap)
+      ~y:top_h
+      ~w:(max 0 (full_w - sidebar_width - sidebar_gap))
+      ~h:body_h
+  else Rect.make ~x:margin ~y:top_h ~w:full_w ~h:body_h
 
 let work_pipeline_has_linked_card m =
   inner_body_width m >= 96 && inner_body_height m >= 15
@@ -543,6 +707,7 @@ let body_has_focus m =
   (not (is_too_small_viewport m.viewport))
   && Option.is_none m.nav.overlay
   && (not m.nav.filter_focused)
+  && (not (sidebar_has_focus m))
   && not (Drafts.is_focused m.drafts)
 
 let pane_focused m idx = body_has_focus m && Int.equal m.nav.pane_index idx
@@ -586,6 +751,8 @@ let active_focus_label m =
           | Some _ | None -> ""
         in
         Say.make ~ko:("입력창" ^ k) ~en:("COMPOSER" ^ k)
+      else if sidebar_has_focus m then
+        Say.make ~ko:"메뉴" ~en:"MENU"
       else
         match active_dive m with
         | Some (Nav.Dive_keeper { name; _ }) ->

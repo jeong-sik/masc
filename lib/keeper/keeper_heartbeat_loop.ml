@@ -237,8 +237,8 @@ type keepalive_turn_outcome = {
   due_schedule : due_schedule_service;
       (** Whether the cycle's turn served a due schedule. *)
   decided_channel : Keeper_world_observation.keeper_cycle_channel option;
-      (** The channel the cycle decision chose; [None] when the cycle ended
-          before a decision. The adaptive idle transition reads it. *)
+      (** A scheduled decision or an opened reactive turn. A reactive
+          admission failure has no channel for idle accounting. *)
 }
 
 (* The loop-local hint is the in-process view of
@@ -572,7 +572,7 @@ let set_failure_reason_exact registry_entry ~site reason =
 let record_crashed_cycle_failure
       ?(record_pulse = true)
       ~(registry_entry : Keeper_registry.registry_entry)
-      ~(sources : Keeper_heartbeat_source_batch.t)
+      ~cause
       exn
   =
   (* Capture the backtrace before any other call can clobber it. *)
@@ -598,8 +598,7 @@ let record_crashed_cycle_failure
         ~base_path
         ~keeper_name
         ~at:(Time_compat.now ())
-        ~cause:
-          (Keeper_turn_pulse.cause_of_inputs (Keeper_heartbeat_source_batch.stimuli sources))
+        ?cause
         Keeper_turn_pulse.Turn_failed;
     Keeper_row_broadcast.changed ~base_path ~keeper_name);
   Otel_metric_store.inc_counter
@@ -632,7 +631,7 @@ let handle_cycle_exception
       ~registry_entry
       ~(meta : keeper_meta)
       ~decided_channel
-      ~sources
+      ~cause
       exn
   =
   if Keeper_registry_types.is_operator_interrupt exn
@@ -641,7 +640,7 @@ let handle_cycle_exception
     record_crashed_cycle_failure
       ~record_pulse
       ~registry_entry
-      ~sources
+      ~cause
       exn;
     { meta
     ; cycle_status = Turn_cycle_crashed
@@ -1001,7 +1000,7 @@ let pending_at_tick_stimulus_remains ~ctx ~keeper_name =
       keeper_name
       ~now:(Time_compat.now ())
       ~ready:(fun (stimulus : Keeper_event_queue.stimulus) ->
-        match stimulus.urgency with
+        match Keeper_stimulus_wake_policy.effective_urgency stimulus with
         | Keeper_event_queue.Immediate | Keeper_event_queue.Normal -> true
         | Keeper_event_queue.Low -> false)
   with
@@ -1024,7 +1023,7 @@ let next_cycle_starts_now ~after_failure ~stimuli_acked ~pending_stimulus =
 
 let cycle_wake ~periodic_due ~deferred_runtime_lane =
   match deferred_runtime_lane with
-  | Some _ -> Keeper_world_observation.Deferred_runtime_lane
+  | Some _ -> Keeper_world_observation.Deferred_runtime_lane { periodic_due }
   | None ->
     if periodic_due
     then Keeper_world_observation.Periodic_tick
@@ -1080,58 +1079,33 @@ let idle_cycle_of ~cycle_status ~decided_channel =
    deferred suffix from a self-wake at the same boundary. A self-wake backs off
    whether its turn finished, failed or never opened; a reaction that failed
    leaves its rows in the queue for the pulled-in boundary to retry.
-   [cycle_wake] pairs a due boundary with [Periodic_tick] or
-   [Deferred_runtime_lane] and a boundary not yet due with [Attention_wake] or
-   [Deferred_runtime_lane]; the other pairs are listed with the arm they would
-   take. *)
+   The same wake passed to the decision carries the boundary for accounting. *)
 let adaptive_idle_after_cycle
-      ~periodic_due
       ~(wake : Keeper_world_observation.cycle_wake)
       ~cycle_status
       ~decided_channel
       ~due_schedule
-      ~base_interval_sec
       ~now
       (state : Keeper_keepalive_signal.adaptive_idle_state)
   =
-  let hold_stage () =
-    { state with
-      Keeper_keepalive_signal.next_spontaneous_at =
-        now +. Keeper_keepalive_signal.adaptive_idle_interval ~base_interval_sec state.stage
-    }
-  in
   match due_schedule with
   | Due_schedule_served ->
     (* #54338: a completed due schedule fills the boundary. *)
-    Keeper_keepalive_signal.adaptive_idle_after_served_boundary ~base_interval_sec ~now state
+    Keeper_keepalive_signal.adaptive_idle_after_served_boundary ~now state
   | No_due_schedule_served ->
-    (match periodic_due, idle_cycle_of ~cycle_status ~decided_channel, wake with
-     (* A reaction took the due boundary. *)
-     | true, Reaction_turn,
-       (Keeper_world_observation.Periodic_tick | Keeper_world_observation.Attention_wake | Keeper_world_observation.Deferred_runtime_lane) ->
-       Keeper_keepalive_signal.adaptive_idle_after_reaction_at_boundary
-         ~base_interval_sec ~now ()
-     (* A self-wake at the due boundary: its turn finished, failed or never
-        opened. *)
-     | true, Not_a_reaction, (Keeper_world_observation.Periodic_tick | Keeper_world_observation.Attention_wake) ->
-       Keeper_keepalive_signal.adaptive_idle_after_self_wake ~base_interval_sec ~now state
-     (* A deferred suffix took the due boundary. Continuing a failed turn is
-        neither a reaction nor a quiet self-wake, so the stage holds. *)
-     | true, Not_a_reaction, Keeper_world_observation.Deferred_runtime_lane -> hold_stage ()
-     (* The cycle ended before a decision: warmup, lifecycle block, busy owner,
-        owner rejection, or an interrupt or crash before the decision. The
-        boundary is consumed unjudged. *)
-     | true, Undecided,
-       (Keeper_world_observation.Periodic_tick | Keeper_world_observation.Attention_wake | Keeper_world_observation.Deferred_runtime_lane) -> hold_stage ()
-     (* A reaction off the boundary pulls the next self-wake in, never out. *)
-     | false, Reaction_turn,
-       (Keeper_world_observation.Periodic_tick | Keeper_world_observation.Attention_wake | Keeper_world_observation.Deferred_runtime_lane) ->
-       Keeper_keepalive_signal.adaptive_idle_pull_in_on_reactive ~base_interval_sec ~now state
-     (* Off the boundary without a reaction turn: bootstrap, a due schedule the
-        turn did not serve, a deferred suffix, or a reactive decision whose turn
-        never ran. The boundary stays where it is. *)
-     | false, (Not_a_reaction | Undecided),
-       (Keeper_world_observation.Periodic_tick | Keeper_world_observation.Attention_wake | Keeper_world_observation.Deferred_runtime_lane) -> state)
+    let open Keeper_world_observation in
+    (match wake, idle_cycle_of ~cycle_status ~decided_channel with
+     | (Periodic_tick | Deferred_runtime_lane { periodic_due = true }), Reaction_turn ->
+       Keeper_keepalive_signal.adaptive_idle_after_reaction_at_boundary ~now
+     | Periodic_tick, Not_a_reaction ->
+       Keeper_keepalive_signal.adaptive_idle_after_self_wake ~now state
+     | Periodic_tick, Undecided
+     | Deferred_runtime_lane { periodic_due = true }, (Not_a_reaction | Undecided) ->
+       Keeper_keepalive_signal.adaptive_idle_hold_stage ~now state
+     | (Attention_wake | Deferred_runtime_lane { periodic_due = false }), Reaction_turn ->
+       Keeper_keepalive_signal.adaptive_idle_pull_in_on_reactive ~now state
+     | (Attention_wake | Deferred_runtime_lane { periodic_due = false }), (Not_a_reaction | Undecided) ->
+       state)
 ;;
 
 (* A reaction turn that took its batch and did not finish leaves that batch in
@@ -1202,9 +1176,8 @@ let run_keepalive_unified_turn
     ; decided_channel = None
     })
   else
-    (* A turn that crashes or is interrupted after the decision still reports
-       the decision's channel, so a reaction it leaves in the queue pulls the
-       next self-wake in. *)
+    (* Only a reactive turn that actually opens can pull the next self-wake
+       forward. Admission and HITL revalidation can still end the cycle. *)
     let decided_channel = ref None in
     match
       Keeper_owner_registry.run_autonomous_if_idle
@@ -1216,10 +1189,7 @@ let run_keepalive_unified_turn
          @@ Llm_provider.Http_request_observer.capture (fun () ->
            Keeper_turn_dispatch_authority.run (fun admission_token ->
     let source_batch = ref Keeper_heartbeat_source_batch.empty in
-    (* Pre-validation intake batch: preserved unchanged so pulse causes always
-       match [turn_input] and the turn log's [Opened] line even when a source is
-       withdrawn during dispatch validation. *)
-    let pulse_sources = ref Keeper_heartbeat_source_batch.empty in
+    let pulse_cause = ref None in
     let diagnostic_selection = ref None in
     let cycle_outcome_ref = ref None in
     let hitl_resolutions_for_cycle = ref [] in
@@ -1231,6 +1201,7 @@ let run_keepalive_unified_turn
        [Keeper_turn_pulse], subsequent settlement failures surface in registry
        state and logs without adding duplicate [Turn_failed] rows. *)
     let pulse_recorded = ref false in
+    let turn_opened () = Option.is_some !pulse_cause in
     let record_event_queue_failure message =
       event_queue_failed := true;
       match !cycle_outcome_ref with
@@ -1247,12 +1218,12 @@ let run_keepalive_unified_turn
           | Cycle.Rested _
           )
       | None ->
-        let should_record_pulse = not !pulse_recorded in
+        let should_record_pulse = turn_opened () && not !pulse_recorded in
         if should_record_pulse then pulse_recorded := true;
         record_crashed_cycle_failure
           ~record_pulse:should_record_pulse
           ~registry_entry
-          ~sources:!pulse_sources
+          ~cause:!pulse_cause
           (Event_queue_cycle_failed message)
     in
     try
@@ -1288,7 +1259,6 @@ let run_keepalive_unified_turn
           ~pending_board_events
       in
       source_batch := event_intake.source_batch;
-      pulse_sources := event_intake.source_batch;
       diagnostic_selection := event_intake.diagnostic_selection;
       let selected_source_authority () =
         match
@@ -1361,7 +1331,12 @@ let run_keepalive_unified_turn
           obs
       in
       let turn_decision = scheduling.turn_decision in
-      decided_channel := Some turn_decision.channel;
+      (* A selected reactive source can still fail revalidation before the
+         unified turn opens. Only its actual opening starts a reaction. *)
+      (match turn_decision.channel with
+       | Keeper_world_observation.Scheduled_autonomous ->
+         decided_channel := Some Keeper_world_observation.Scheduled_autonomous
+       | Keeper_world_observation.Reactive -> ());
       let should_run_turn =
         should_run_turn_after_event_intake
           ~scheduled:scheduling.should_run_turn
@@ -1490,10 +1465,6 @@ let run_keepalive_unified_turn
              [source_batch] there, and its turn-entry reaction still gets its
              closing half below. *)
           let turn_stimuli = Keeper_heartbeat_source_batch.stimuli !source_batch in
-          record_replay_owned_turn_started_reactions
-            ~ctx
-            ~keeper_name:meta_after_triage.name
-            turn_stimuli;
           let event_bus = Event_bus_slots.get_keeper () in
           (* Preserve the typed resolution as input to the originating
              Keeper's external-effect Gate. It is not an AGENT_CORE approval. *)
@@ -1527,6 +1498,11 @@ let run_keepalive_unified_turn
               hitl_resolutions_for_cycle := Keeper_hitl_resolution_batch.resolutions hitl_resolutions;
               let outcome =
                 run_keeper_cycle
+                  ~on_turn_started:(fun () ->
+                    decided_channel := Some turn_decision.channel;
+                    pulse_cause := Keeper_turn_pulse.cause_of_decision turn_decision;
+                    record_replay_owned_turn_started_reactions
+                      ~ctx ~keeper_name:meta_after_triage.name turn_stimuli)
                   ~admission_token
                   ~record_pulse:(not !pulse_recorded)
                   ?deferred_runtime_lane
@@ -1542,7 +1518,7 @@ let run_keepalive_unified_turn
                   ~turn_input
                   ()
               in
-              if Cycle.recorded_pulse outcome then pulse_recorded := true;
+              if Cycle.recorded_pulse ~turn_started:(turn_opened ()) outcome then pulse_recorded := true;
               outcome
           in
           let run_cycle () = run_fresh_cycle () in
@@ -1561,7 +1537,7 @@ let run_keepalive_unified_turn
              stimulus's evidence otherwise ends at "a turn started", and what
              the turn did is recovered by comparing that clock against the
              keeper's calls. *)
-          record_replay_owned_turn_finished_reactions
+          if turn_opened () then record_replay_owned_turn_finished_reactions
             ~ctx
             ~keeper_name:meta_after_triage.name
             ~disposition:(Cycle.turn_disposition cycle_outcome)
@@ -1706,11 +1682,11 @@ let run_keepalive_unified_turn
          turn failure so the caller does not dispatch
          [Turn_succeeded] for a cycle that never completed. *)
       handle_cycle_exception
-        ~record_pulse:(not !pulse_recorded)
+        ~record_pulse:(turn_opened () && not !pulse_recorded)
         ~registry_entry
         ~meta:meta_after_triage
         ~decided_channel:!decided_channel
-        ~sources:!pulse_sources
+        ~cause:!pulse_cause
         exn)))
     with
   | Ok (`Ran outcome) -> outcome
@@ -1855,6 +1831,9 @@ let run_heartbeat_loop
   let last_wake_source = ref Keeper_keepalive_signal.Timeout in
   let cadence_clock = Monotonic_deadline.start () in
   let cadence_now () = Monotonic_deadline.elapsed_seconds cadence_clock in
+  let base_interval_sec () =
+    float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())
+  in
   let adaptive_idle =
     ref
       (Keeper_keepalive_signal.adaptive_idle_init
@@ -1996,6 +1975,7 @@ let run_heartbeat_loop
         let t_turn_start = t_board_end in
         let periodic_due =
           Keeper_keepalive_signal.adaptive_idle_is_due
+            ~base_interval_sec:(base_interval_sec ())
             ~now:(cadence_now ())
             !adaptive_idle
         in
@@ -2167,17 +2147,12 @@ let run_heartbeat_loop
            41 minutes, 2026-09-09, #34653). The queue keeps the stimulus; the
            wakeup is consumed when the wait ends. *)
         let cycle_now = cadence_now () in
-        let base_interval_sec =
-          float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())
-        in
         adaptive_idle :=
           adaptive_idle_after_cycle
-            ~periodic_due
             ~wake
             ~cycle_status:turn_outcome.cycle_status
             ~decided_channel:turn_outcome.decided_channel
             ~due_schedule:turn_outcome.due_schedule
-            ~base_interval_sec
             ~now:cycle_now
             !adaptive_idle;
         (match turn_outcome.after_failure with
@@ -2238,6 +2213,7 @@ let run_heartbeat_loop
           | Some (Continue_on_deferred_lane _) | None ->
             let periodic_wait =
               Keeper_keepalive_signal.adaptive_idle_remaining
+                ~base_interval_sec:(base_interval_sec ())
                 ~now:(cadence_now ())
                 !adaptive_idle
             in

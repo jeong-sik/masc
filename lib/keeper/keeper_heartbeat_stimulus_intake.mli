@@ -16,7 +16,7 @@ open Keeper_types_profile
 
 (** [pending_board_event_of_stimulus ~meta_after_triage stim] wraps a
     stimulus into a pending board event, threading the keeper meta's
-    continuity summary. A permanently absent row is consumed. A queued signal
+    continuity summary. A permanently absent row yields no observation. A queued signal
     whose original audience is unknown remains pending. *)
 val pending_board_event_of_stimulus
   :  base_path:string
@@ -24,7 +24,7 @@ val pending_board_event_of_stimulus
   -> Keeper_event_queue.stimulus
   -> (Keeper_world_observation.pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
 
-(** Closed consumption result for an Event-Layer stimulus. An unread
+(** Intake observation for an Event-Layer stimulus. An unread
     Connector store cannot become an empty successful rendering: it retains the
     exact pending queue selection for a later heartbeat. A missing referenced
     Connector item retains only its own selection, allowing readable siblings.
@@ -35,10 +35,10 @@ val pending_board_event_of_stimulus
     acknowledges the exact pending selection instead of retaining it.
     Completion rejection authority is checked at intake: obsolete relations
     retire only their exact selection; unread authority retains it for retry.
-    A Board read that established absence is consumed as an empty event; an
+    A Board read that established absence yields an empty observation; an
     unavailable source retains its selection. *)
 type stimulus_intake_result =
-  | Stimulus_consumed of Keeper_world_observation.pending_board_event list
+  | Stimulus_observed of Keeper_world_observation.pending_board_event list
   | Stimulus_board_unavailable of Keeper_world_observation_board_signal.board_unavailable
   | Stimulus_connector_retry_later of Keeper_external_attention.read_error
   | Stimulus_connector_missing of string (** Missing event ID. *)
@@ -50,7 +50,7 @@ type stimulus_intake_result =
   | Stimulus_completion_rejection_retry_later of string
 
 (** Pure boundary for one rendered Board event. An unavailable source is
-    retained; established absence is consumed. *)
+    retained; established absence yields an empty observation. *)
 val classify_pending_board_event_result
   :  (Keeper_world_observation.pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
   -> stimulus_intake_result
@@ -59,7 +59,7 @@ val classify_pending_board_event_result
     renders [stim] into zero-or-one pending board events, reading every store
     through the intake's own [config]. An unavailable posts source
     returns [Stimulus_board_unavailable]; established absence is logged,
-    counted and consumed. Original job
+    counted and returned as an empty observation. Original job
     completions instead require the canonical owner and return
     [Stimulus_job_unavailable] for retention on any source read failure. *)
 val pending_board_events_of_stimulus_result
@@ -120,7 +120,7 @@ val record_event_queue_stimulus_turn_finished
     not decide whether the keeper may continue. *)
 
 (** Result of one heartbeat intake — accumulated pending board events
-    after dedup and the number of stimuli consumed from the queue. *)
+    after dedup and the source selections observed at intake. *)
 type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   source_batch : Keeper_heartbeat_source_batch.t;
@@ -129,15 +129,15 @@ type heartbeat_event_intake = {
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
-(** [consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim]
-    increments Otel_metric_store and logs only after consumption is known.
+(** [observe_single_heartbeat_stimulus ~ctx ~meta_after_triage stim]
+    counts a successful intake read. The exact selection remains queued until its terminal ACK.
 
     [?connector_attention_items]: for a [Connector_attention]
     stimulus, a preloaded (event_id, item) association to resolve [stim]'s
     recorded item from, preserving a typed read failure instead of admitting
     an empty source. Otherwise it uses a fresh
     {!Keeper_external_attention.load_events_result} scan. The caller supplies this
-    when consuming a batch of Connector_attention stimuli (the primary plus
+    when reading a batch of Connector_attention stimuli (the primary plus
     same-conversation companions) so the whole batch costs one scan
     ({!Keeper_external_attention.recorded_items_by_event_ids}) rather than
     one scan per stimulus. Omitted (or [None]), this falls back to the
@@ -153,7 +153,7 @@ type heartbeat_event_intake = {
     Obsolete rejections are retired by exact queue selection without a turn;
     unread authority retains the selection and does not block other sources.
     This check linearizes intake, not later provider rounds or Task mutations. *)
-val consume_single_heartbeat_stimulus
+val observe_single_heartbeat_stimulus
   :  ctx:_ context
   -> meta_after_triage:keeper_meta
   -> ?connector_attention_items:((string * Keeper_external_attention.item) list, Keeper_external_attention.read_error) result

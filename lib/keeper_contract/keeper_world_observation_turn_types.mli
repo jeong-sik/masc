@@ -21,10 +21,7 @@ type event_queue_trigger =
   | Completion_authority_rejection_stimulus
       (** A system LLM completion authority rejected evidence submitted by this
           Keeper; this is a distinct reactive input, not Board activity. *)
-  | Task_outcome_stimulus
-      (** The approval twin: a completion authority approved evidence submitted
-          by this Keeper; a distinct reactive input, never described as a
-          rejection (#25868). *)
+
   | Task_cancellation_stimulus
       (** Another Keeper cancelled a Task this Keeper authored. A distinct
           reactive input: it is not Board activity (no post exists), not
@@ -66,6 +63,7 @@ type turn_verdict =
   | Skip of { reasons : skip_reason * skip_reason list }
 
 val turn_reason_of_event_queue_trigger : event_queue_trigger -> turn_reason
+val turn_reason_to_string : turn_reason -> string
 val skip_reason_to_string : skip_reason -> string
 val channel_to_string : keeper_cycle_channel -> string
 

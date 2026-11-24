@@ -141,7 +141,7 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
       stim
   in
   (match first_pass with
-   | Keeper_heartbeat_stimulus_intake.Stimulus_consumed events ->
+   | Keeper_heartbeat_stimulus_intake.Stimulus_observed events ->
      check
        int
        "first pass produces no pending_board_event (consumed, not crashed)"
@@ -164,7 +164,7 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
       stim
   in
   match second_pass with
-  | Keeper_heartbeat_stimulus_intake.Stimulus_consumed events ->
+  | Keeper_heartbeat_stimulus_intake.Stimulus_observed events ->
     check
       int
       "second pass over the same stimulus stays empty (no crash-loop resurgence)"

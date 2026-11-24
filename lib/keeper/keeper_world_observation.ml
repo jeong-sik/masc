@@ -344,7 +344,6 @@ type event_queue_trigger =
   | Ask_answered_stimulus
   | Hitl_resolved_stimulus
   | Completion_authority_rejection_stimulus
-  | Task_outcome_stimulus
   | Task_cancellation_stimulus
   | Workspace_message_stimulus
 
@@ -1774,15 +1773,14 @@ let has_pending_completion_authority_rejection
     observation.pending_board_events
 ;;
 
-let has_pending_task_outcome (observation : world_observation) =
-  List.exists is_task_outcome_event observation.pending_board_events
-;;
-
 let has_pending_task_cancellation (observation : world_observation) =
   List.exists is_task_cancellation_event observation.pending_board_events
 ;;
 
-type cycle_wake = Periodic_tick | Attention_wake | Deferred_runtime_lane
+type cycle_wake =
+  | Periodic_tick
+  | Attention_wake
+  | Deferred_runtime_lane of { periodic_due : bool }
 
 let keeper_cycle_decision
       ?(wake = Periodic_tick)
@@ -1799,7 +1797,12 @@ let keeper_cycle_decision
   let proactive_gate_enabled =
     Keeper_lifecycle_gate_env.enabled Keeper_lifecycle_gate.Proactive meta
   in
-  let deferred_runtime_lane_pending = wake = Deferred_runtime_lane in
+  let periodic_due, deferred_runtime_lane_pending =
+    match wake with
+    | Periodic_tick -> true, false
+    | Attention_wake -> false, false
+    | Deferred_runtime_lane { periodic_due } -> periodic_due, true
+  in
   (* A scheduler wake delivered through the event queue is a scheduled
      stimulus, not a reactive one. Routing it through the reactive trigger
      list ran the turn with [channel = Reactive], which applied the
@@ -1830,6 +1833,25 @@ let keeper_cycle_decision
       | Never_started -> false)
   in
   let scheduled_due_from_queue = scheduled_due_from_queue <> [] in
+  let approval_wakes, approval_carried =
+    List.fold_left (fun (wakes, carried) (event : pending_board_event) ->
+      match event.event_kind with
+      | Task_outcome outcome ->
+        (* Admission follows the policy table even if a verdict is reclassified. *)
+        (match Keeper_stimulus_wake_policy.task_verdict_wake_policy
+                 ~input_kind:Keeper_stimulus_wake_policy.Task_outcome_approved outcome.to_authority with
+         | Keeper_stimulus_wake_policy.Carry -> wakes, true
+         | Keeper_stimulus_wake_policy.Now | Keeper_stimulus_wake_policy.At_tick -> true, carried)
+      | Board_post_created | Board_post_updated | Board_comment_added _
+      | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
+      | Delegate_completed _ | Ask_answered_row _ | Composition_completed
+      | Owned_job_completed _ | Schedule_due _ | External_attention _
+      | Completion_authority_rejected _ | Task_cancelled _ -> wakes, carried)
+      (false, false) observation.pending_board_events
+  in
+  let add_observed_reason ~pending reason triggers =
+    if pending && not (List.mem reason triggers) then triggers @ [ reason ] else triggers
+  in
   let reactive_triggers =
     [ (if Message_scope.has_kind Message_scope.Mention observation.pending_messages
        then Some Mention_pending
@@ -1840,50 +1862,12 @@ let keeper_cycle_decision
        else None)
     ]
     |> List.filter_map Fun.id
-    |> fun triggers -> triggers @ event_queue_reactive_triggers
-    |> fun triggers ->
-    if has_pending_completion_authority_rejection observation
-       && not
-            (List.exists
-               (function
-                 | Completion_authority_rejection_pending -> true
-                 | Mention_pending
-                 | Board_event_pending
-                 | Scope_message_pending
-                 | Bootstrap_stimulus_pending
-                 | Tool_result_ready_pending
-                 | Connector_attention_pending
-                 | Ask_answered_pending
-                 | Hitl_resolved_pending
-                 | Task_outcome_pending
-                 | Task_cancellation_pending
-                 | Workspace_message_pending
-                 | Deferred_runtime_lane_pending
-                 | Scheduled_autonomous_turn
-                 | Scheduled_automation_due
-                 | Task_backlog _
-                 | Never_started -> false)
-               triggers)
-    then triggers @ [ Completion_authority_rejection_pending ]
-    else triggers
-    (* Same shape as the rejection injection above: the observation may carry a
-       verdict whose stimulus was already consumed from the event queue by an
-       earlier cycle, and the turn must still be attributable to it rather
-       than reported as an unexplained autonomous tick. *)
-  |> fun triggers ->
-    if has_pending_task_outcome observation
-       && not (List.mem Task_outcome_pending triggers)
-    then triggers @ [ Task_outcome_pending ]
-    else triggers
-    (* Same shape as the rejection injection above: the observation may carry a
-       cancellation whose stimulus was already consumed from the event queue by
-       an earlier cycle, and the turn must still be attributable to it rather
-       than reported as an unexplained autonomous tick. *)
-  |> fun triggers ->
-    if has_pending_task_cancellation observation
-       && not (List.mem Task_cancellation_pending triggers)
-    then triggers @ [ Task_cancellation_pending ]
-    else triggers
+    |> (fun triggers -> triggers @ event_queue_reactive_triggers)
+    |> add_observed_reason
+         ~pending:(has_pending_completion_authority_rejection observation)
+         Completion_authority_rejection_pending
+    |> add_observed_reason ~pending:approval_wakes Task_outcome_pending
+    |> add_observed_reason ~pending:(has_pending_task_cancellation observation) Task_cancellation_pending
   in
   let blocked_channel =
     match reactive_triggers with
@@ -1900,6 +1884,16 @@ let keeper_cycle_decision
   if meta.paused
   then blocked Keeper_paused
   else (
+    let requested_schedule_due =
+      scheduled_due_from_queue || observation.scheduled_automation.due_ready_count > 0
+    in
+    let task_backlog_reason () =
+      let unclaimed = claimable_task_count observation in
+      let failed = observation.failed_task_count in
+      if claimable_drives_wake unclaimed || failed_drives_wake failed
+      then Some (Task_backlog { unclaimed; failed })
+      else None
+    in
     let scheduled_autonomous_decision () =
       let since_last_scheduled_autonomous =
         if meta.runtime.proactive_rt.last_ts <= 0.0
@@ -1907,22 +1901,18 @@ let keeper_cycle_decision
         else
           int_of_float (max 0.0 (Time_compat.now () -. meta.runtime.proactive_rt.last_ts))
       in
-      let requested_schedule_due =
-        scheduled_due_from_queue
-        || observation.scheduled_automation.due_ready_count > 0
-      in
       if
         not proactive_gate_enabled
         && not requested_schedule_due
         && not deferred_runtime_lane_pending
+        && not (periodic_due && approval_carried)
       then
         { should_run = false
         ; channel = Scheduled_autonomous
         ; verdict = Skip { reasons = Scheduled_autonomous_disabled, [] }
         ; since_last_scheduled_autonomous = Some since_last_scheduled_autonomous
         }
-      else if wake = Attention_wake && not scheduled_due_from_queue
-              && observation.scheduled_automation.due_ready_count = 0 then
+      else if wake = Attention_wake && not requested_schedule_due then
         { should_run = false
         ; channel = Scheduled_autonomous
         ; verdict = Skip { reasons = No_periodic_or_scheduled_stimulus, [] }
@@ -1931,26 +1921,12 @@ let keeper_cycle_decision
         (* A scheduled heartbeat is itself the wake signal. Backlog, schedule,
            idle time, and previous-turn age remain observations for the model;
            fixed local thresholds never suppress a Keeper cycle. *)
-        let has_actionable_tasks =
-          claimable_drives_wake (claimable_task_count observation)
-          || failed_drives_wake observation.failed_task_count
-        in
-        let has_actionable_schedule =
-          observation.scheduled_automation.due_ready_count > 0
-          || scheduled_due_from_queue
-        in
         let is_bootstrap = since_last_scheduled_autonomous = max_int in
         let run_reasons =
           [ (if is_bootstrap then Some Never_started else None)
-          ; (if has_actionable_tasks
-             then
-               Some
-                 (Task_backlog
-                    { unclaimed = claimable_task_count observation
-                    ; failed = observation.failed_task_count
-                    })
-             else None)
-          ; (if has_actionable_schedule then Some Scheduled_automation_due else None)
+          ; task_backlog_reason ()
+          ; (if requested_schedule_due then Some Scheduled_automation_due else None)
+          ; (if approval_carried then Some Task_outcome_pending else None)
           ]
           |> List.filter_map Fun.id
         in
@@ -1967,14 +1943,18 @@ let keeper_cycle_decision
     in
     match reactive_triggers with
     | first :: rest when reactive_gate_enabled ->
-      let rest =
-        if deferred_runtime_lane_pending
-        then rest @ [ Deferred_runtime_lane_pending ]
-        else rest
+      (* This reaction also serves a due periodic boundary. Its prompt and
+         decision ledger must include the work that boundary would have shown. *)
+      let accompanying_reasons =
+        [ (if periodic_due && proactive_gate_enabled then task_backlog_reason () else None)
+        ; (if requested_schedule_due then Some Scheduled_automation_due else None)
+        ; (if approval_carried then Some Task_outcome_pending else None)
+        ; (if deferred_runtime_lane_pending then Some Deferred_runtime_lane_pending else None)
+        ] |> List.filter_map Fun.id
       in
       { should_run = true
       ; channel = Reactive
-      ; verdict = Run { reasons = first, rest }
+      ; verdict = Run { reasons = first, rest @ accompanying_reasons }
       ; since_last_scheduled_autonomous = None
       }
     | _ ->

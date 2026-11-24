@@ -356,7 +356,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
              [ "kind", `String (stimulus_kind_to_string kind)
              ; "source", `String "keeper_event_queue"
              ; "post_id", `String stimulus.post_id
-             ; "urgency", `String (Keeper_event_queue.urgency_to_string stimulus.urgency)
+             ; "urgency", `String (Keeper_event_queue.urgency_to_string (Keeper_stimulus_wake_policy.effective_urgency stimulus))
              ; "arrived_at_unix", `Float stimulus.arrived_at
              ; "board_updated_at_unix", Json_util.option_to_yojson (fun value -> `Float value) board_updated_at
              ; "payload_preview", `String (stimulus_payload_preview stimulus.payload)
@@ -1342,7 +1342,7 @@ let durable_event_queue_health ~base_path ~keeper_name =
   let immediate_count =
     List.fold_left
       (fun acc (stimulus : Keeper_event_queue.stimulus) ->
-        match stimulus.urgency with
+        match Keeper_stimulus_wake_policy.effective_urgency stimulus with
         | Keeper_event_queue.Immediate -> acc + 1
         | Normal | Low -> acc)
       0

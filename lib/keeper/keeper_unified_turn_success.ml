@@ -638,13 +638,7 @@ let handle
       ~observation
       ~latency_ms
       ~outcome:(decision_outcome_of_terminal_outcome terminal_outcome)
-      ~channel
-      ~execution_path:
-        (match Keeper_execution_outcome.lane execution_outcome with
-         | Keeper_execution_outcome.Direct ->
-           Keeper_unified_metrics_decision.Direct_turn
-         | Keeper_execution_outcome.Autonomous _ ->
-           Keeper_unified_metrics_decision.Autonomous_cycle)
+      ~lane:(Keeper_execution_outcome.lane execution_outcome)
       ~degraded_retry_applied
       ~degraded_retry_deferred
       ~turn_mode

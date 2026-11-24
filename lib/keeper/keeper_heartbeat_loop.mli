@@ -198,8 +198,8 @@ type keepalive_turn_outcome = {
       (** The loop reads it to serve the periodic boundary
           ({!For_testing.periodic_cadence_after_cycle}). *)
   decided_channel : Keeper_world_observation.keeper_cycle_channel option;
-      (** The channel the cycle decision chose; [None] when the cycle ended
-          before a decision ({!For_testing.adaptive_idle_after_cycle}). *)
+      (** The opened turn's channel, or the scheduled channel for an empty
+          self-wake. A rejection before dispatch has no channel. *)
 }
 
 (** Record a swallowed keepalive-cycle exception as a turn failure:
@@ -209,27 +209,22 @@ type keepalive_turn_outcome = {
 val record_crashed_cycle_failure :
   ?record_pulse:bool ->
   registry_entry:Keeper_registry.registry_entry ->
-  sources:Keeper_heartbeat_source_batch.t ->
+  cause:Keeper_turn_pulse.cause option ->
   exn ->
   unit
-(** [sources] are the pre-validation queue entries the cycle took before it
-    crashed; when [record_pulse] is [true] (the default), the turn pulse counts
-    the crash once under the cause they give. Pass [~record_pulse:false] when
-    the cycle already recorded a pulse entry (e.g. post-cycle queue settlement
-    failure after a completed or rested turn) so one cycle is never counted
-    twice. *)
+(** A cycle failure without an opened turn has no known turn cause. A
+    settlement failure after the pulse was recorded does not count twice. *)
 
 (** Convert an exception escaping one autonomous cycle into its accounting
     outcome. Operator interrupts are expected cancellation and do not mutate
     the turn-failure counter; every other exception is recorded as a crash.
-    [decided_channel] is the cycle decision's channel when the exception came
-    after it. *)
+    [decided_channel] carries a scheduled decision or an opened reaction. *)
 val handle_cycle_exception :
   ?record_pulse:bool ->
   registry_entry:Keeper_registry.registry_entry ->
   meta:keeper_meta ->
   decided_channel:Keeper_world_observation.keeper_cycle_channel option ->
-  sources:Keeper_heartbeat_source_batch.t ->
+  cause:Keeper_turn_pulse.cause option ->
   exn -> keepalive_turn_outcome
 
 type turn_terminal_settlement =
@@ -465,9 +460,8 @@ module For_testing : sig
 
   (** Scheduling authority chosen from the loop's exact state. A deferred
       runtime suffix takes precedence over cadence because it is unfinished
-      input, rather than a fabricated periodic tick. When both are present,
-      the label is deferred while {!periodic_cadence_after_cycle} consumes
-      the due cadence boundary independently in the same cycle. *)
+      input. It carries the periodic due fact through the decision and the
+      cadence transition so both duties are served in the same cycle. *)
   val cycle_wake :
     periodic_due:bool ->
     deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
@@ -486,12 +480,10 @@ module For_testing : sig
       interval after that turn. *)
 
   val adaptive_idle_after_cycle :
-    periodic_due:bool ->
     wake:Keeper_world_observation.cycle_wake ->
     cycle_status:keepalive_cycle_status ->
     decided_channel:Keeper_world_observation.keeper_cycle_channel option ->
     due_schedule:due_schedule_service ->
-    base_interval_sec:float ->
     now:float ->
     Keeper_keepalive_signal.adaptive_idle_state ->
     Keeper_keepalive_signal.adaptive_idle_state

@@ -46,7 +46,7 @@ let count tally = function
   | Turn_failed -> { tally with failed = tally.failed + 1 }
 ;;
 
-(* [None] is a seeded turn whose cause the turn log did not say. *)
+(* A missing cause remains unknown during live acquisition and restart. *)
 let count_cause causes = function
   | Some Scheduled -> { causes with scheduled = causes.scheduled + 1 }
   | Some Reacted -> { causes with reacted = causes.reacted + 1 }
@@ -107,46 +107,28 @@ module KeyMap = Map.Make (Key)
 
 let state : pulse KeyMap.t Atomic.t = Atomic.make KeyMap.empty
 
-let cause_of_inputs inputs =
-  match inputs with
-  | [] -> Own
-  | _ :: _ ->
-    if List.for_all
-         (fun input -> Option.is_some (Keeper_event_queue.scheduled_wake input))
-         inputs
-    then Scheduled
-    else Reacted
+let cause_of_channel channel ~schedule_due =
+  match channel with
+  | Keeper_world_observation.Reactive -> Reacted
+  | Keeper_world_observation.Scheduled_autonomous -> if schedule_due then Scheduled else Own
 ;;
 
-(* The turn log names the queue entries a turn took (Keeper_turn_log.stimulus,
-   one constructor per queue entry kind), so a seeded turn gets the cause
-   [cause_of_inputs] gave it when it ran. *)
-let is_logged_schedule : Keeper_turn_log.stimulus -> bool = function
+let cause_of_decision (decision : Keeper_world_observation.keeper_cycle_decision) =
+  match decision.verdict with
+  | Skip _ -> None
+  | Run { reasons = first, rest } ->
+    let schedule_due = List.mem Keeper_world_observation.Scheduled_automation_due (first :: rest) in
+    Some (cause_of_channel decision.channel ~schedule_due)
+;;
+
+let logged_schedule : Keeper_turn_log.stimulus -> bool = function
   | Schedule _ -> true
-  | Board _
-  | Board_routing_pending _
-  | Board_attention _
-  | Bootstrap
-  | Tool_result _
-  | Fusion _
-  | Connector _
-  | Hitl _
-  | Ask _
-  | Completion_rejected _
-  | Completion_approved _
-  | Task_cancelled _
-  | Workspace_message _
-  | Delegate _
-  | Composition _
-  | Owned_job _ -> false
+  | Board _ | Board_routing_pending _ | Board_attention _ | Bootstrap | Tool_result _
+  | Fusion _ | Connector _ | Hitl _ | Ask _ | Completion_rejected _ | Completion_approved _
+  | Task_cancelled _ | Workspace_message _ | Delegate _ | Composition _ | Owned_job _ -> false
 ;;
 
-let cause_of_logged_inputs = function
-  | [] -> Own
-  | _ :: _ as inputs -> if List.for_all is_logged_schedule inputs then Scheduled else Reacted
-;;
-
-let record ~base_path ~keeper_name ~at ~cause outcome =
+let record ~base_path ~keeper_name ~at ?cause outcome =
   let key = base_path, keeper_name in
   let rec loop () =
     let current = Atomic.get state in
@@ -155,7 +137,7 @@ let record ~base_path ~keeper_name ~at ~cause outcome =
       | Some pulse -> pulse
       | None -> { known_since = at; slots = [] }
     in
-    let next = KeyMap.add key (add_to_pulse existing ~at ~cause:(Some cause) outcome) current in
+    let next = KeyMap.add key (add_to_pulse existing ~at ~cause outcome) current in
     if Atomic.compare_and_set state current next then () else loop ()
   in
   loop ()
@@ -240,16 +222,40 @@ let turn_ref_of_row json =
 
 (* Both lanes write an [event = "turn"] row and both record into the live
    pulse, so both seed it. [cause] is [None] for a row that names no lane,
-   which is read past, and [Some None] for an autonomous turn the turn log
-   did not name, which counts as unknown. *)
-let sample_of_row ~cause_of_turn json =
+   which is read past, and [Some None] for a turn whose retained records
+   cannot name its cause, which counts as unknown. *)
+let sample_of_row ~schedule_of_turn json =
+  let autonomous_cause () =
+    let open Keeper_world_observation in
+    match Option.bind (Json_util.get_string json "channel") channel_of_string with
+    | None -> None
+    | Some Reactive -> Some Reacted
+    | Some Scheduled_autonomous ->
+      (match Yojson.Safe.Util.member "wake_reasons" json with
+       | `List reasons when List.for_all (function `String _ -> true | _ -> false) reasons ->
+         let has reason =
+           List.mem (`String (Keeper_world_observation_turn_types.turn_reason_to_string reason)) reasons
+         in
+         if has Scheduled_automation_due then Some Scheduled
+         else if has Scheduled_autonomous_turn then Some Own
+         else None
+       | `Null ->
+         (* Earlier rows kept the observation and a separate turn receipt. *)
+         let observation = Yojson.Safe.Util.member "observation" json in
+         let due_ready = match observation with
+           | `Assoc _ -> Json_util.get_int observation "scheduled_automation_due_ready_count"
+           | _ -> None in
+         (match due_ready with
+          | Some count when count > 0 -> Some Scheduled
+          | _ -> Option.bind (turn_ref_of_row json) schedule_of_turn
+                 |> Option.map (fun due -> cause_of_channel Scheduled_autonomous ~schedule_due:due))
+       | _ -> None)
+  in
   let cause =
-    match Json_util.get_string json "execution_path" with
-    | Some label ->
-      (match Keeper_unified_metrics_decision.execution_path_of_string label with
-       | Some Direct_turn -> Some (Some Chat)
-       | Some Autonomous_cycle -> Some (Option.bind (turn_ref_of_row json) cause_of_turn)
-       | None -> None)
+    match Option.bind (Json_util.get_string json "execution_path")
+            Keeper_unified_metrics_decision.execution_path_of_string with
+    | Some Direct_turn -> Some (Some Chat)
+    | Some Autonomous_cycle -> Some (autonomous_cause ())
     | None -> None
   in
   let outcome =
@@ -294,7 +300,7 @@ let earliest a b =
    its turns, so the caller must not turn it into an empty pulse. A row stamped
    after [now] is dropped: its slot would lie past every hour the TUI draws and
    would prune the day behind it. *)
-let read_tail ~cause_of_turn ~now ~window_start path =
+let read_tail ~schedule_of_turn ~now ~window_start path =
   if not (Fs_compat.file_exists path)
   then Ok Log_absent
   else (
@@ -326,7 +332,7 @@ let read_tail ~cause_of_turn ~now ~window_start path =
               | Some at when at < window_start -> Reaches_window_start (List.rev samples)
               | Some at ->
                 let samples =
-                  match sample_of_row ~cause_of_turn json with
+                  match sample_of_row ~schedule_of_turn json with
                   | Some sample -> sample :: samples
                   | None -> samples
                 in
@@ -349,18 +355,18 @@ let pulse_of_samples ~known_since samples =
 let turn_log_tail_max_bytes = seed_tail_max_bytes
 let turn_log_tail_max_lines = seed_tail_max_lines
 
-(* The causes of the turns the turn log opened since a window before
+(* Schedule inputs of turns the turn log opened since a window before
    [window_start], keyed by turn ref: a turn that ended inside the window may
    have opened before it. A turn opened before the tail read, or a log that
-   cannot be read, gives no cause, and its autonomous turns count as unknown. *)
-let logged_causes ~config ~keeper_name ~window_start =
+   cannot be read, gives no schedule input evidence. *)
+let logged_schedules ~config ~keeper_name ~window_start =
   let path =
     Keeper_turn_log_store.path_for_keepers_dir
       ~keepers_dir:(Workspace.keepers_runtime_dir config)
       ~keeper_id:keeper_name
   in
   let opened_since = window_start -. float_of_int window_seconds in
-  let causes = Hashtbl.create 256 in
+  let schedules = Hashtbl.create 256 in
   let add line =
     match Yojson.Safe.from_string line with
     | exception Yojson.Json_error _ -> ()
@@ -368,9 +374,9 @@ let logged_causes ~config ~keeper_name ~window_start =
       (match Keeper_turn_log_codec.of_json json with
        | Ok (Keeper_turn_log.Opened { at; turn_ref; stimuli; _ }) when at >= opened_since ->
          Hashtbl.replace
-           causes
+           schedules
            (Ids.Turn_ref.to_string turn_ref)
-           (cause_of_logged_inputs stimuli)
+           (List.exists logged_schedule stimuli)
        | Ok
            ( Keeper_turn_log.Opened _
            | Keeper_turn_log.Log_started _
@@ -394,8 +400,8 @@ let logged_causes ~config ~keeper_name ~window_start =
         exn_class;
       Log.Keeper.warn
         ~keeper_name
-        "turn pulse seed could not read the turn log, so its autonomous turns count as unknown");
-  causes
+        "turn pulse seed could not read the turn log, so scheduled-channel rows can lack schedule evidence");
+  schedules
 ;;
 
 (* The logs hold every turn since the oldest row read, so the pulse is known
@@ -404,10 +410,10 @@ let logged_causes ~config ~keeper_name ~window_start =
 let read_seed ~now ~config ~keeper_name =
   let primary_path = Keeper_types_support.keeper_decision_log_path config keeper_name in
   let window_start = now -. float_of_int window_seconds in
-  (* The turn log is read only once an autonomous row asks for a cause. *)
-  let causes = lazy (logged_causes ~config ~keeper_name ~window_start) in
-  let cause_of_turn turn_ref = Hashtbl.find_opt (Lazy.force causes) turn_ref in
-  let read path = read_tail ~cause_of_turn ~now ~window_start path in
+  (* The turn log is read only for a scheduled decision that needs input evidence. *)
+  let schedules = lazy (logged_schedules ~config ~keeper_name ~window_start) in
+  let schedule_of_turn turn_ref = Hashtbl.find_opt (Lazy.force schedules) turn_ref in
+  let read path = read_tail ~schedule_of_turn ~now ~window_start path in
   let known_from oldest_row = Option.value oldest_row ~default:now in
   (* [newer] were read from the primary log, which begins where the rotated log
      ends. A rotated log read whole may still follow a [.2] or a deleted log,

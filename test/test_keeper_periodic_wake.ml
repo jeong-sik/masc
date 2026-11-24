@@ -32,9 +32,9 @@ let base_obs : WO.world_observation =
 ;;
 
 
-let decide wake triggers =
+let decide ?(obs = base_obs) wake triggers =
   Keeper_heartbeat_loop.decide_keepalive_scheduling ~wake
-    ~event_queue_triggers:triggers ~stop:(Atomic.make false) ~meta:(meta ()) base_obs
+    ~event_queue_triggers:triggers ~stop:(Atomic.make false) ~meta:(meta ()) obs
 
 let deferred_lane =
   Keeper_turn_driver.For_testing.make_deferred_runtime_lane
@@ -101,6 +101,29 @@ let test_deferred_lane_remains_visible_with_reactive_input () =
     scheduling.verdict_reasons
 ;;
 
+let test_reaction_carries_exactly_its_due_work () =
+  let obs = { base_obs with failed_task_count = 2 } in
+  let reasons ~periodic_due ~deferred_runtime_lane =
+    let wake = Keeper_heartbeat_loop.For_testing.cycle_wake ~periodic_due ~deferred_runtime_lane in
+    let scheduling = decide ~obs wake [ WO.Workspace_message_stimulus ] in
+    check bool "a workspace message opens a reactive turn" true
+      (scheduling.should_run_turn && scheduling.turn_decision.channel = WO.Reactive);
+    match scheduling.turn_decision.verdict with
+    | WO.Run { reasons = first, rest } -> first :: rest
+    | WO.Skip _ -> fail "the reactive turn was skipped"
+  in
+  let input = WO.Workspace_message_pending in
+  let backlog = WO.Task_backlog { unclaimed = 0; failed = 2 } in
+  let deferred = WO.Deferred_runtime_lane_pending in
+  let check_reasons label expected actual = check bool label true (expected = actual) in
+  check_reasons "a due tick carries backlog with no deferred input" [input; backlog]
+    (reasons ~periodic_due:true ~deferred_runtime_lane:None);
+  check_reasons "an early deferred reaction has no periodic backlog duty" [input; deferred]
+    (reasons ~periodic_due:false ~deferred_runtime_lane:(Some deferred_lane));
+  check_reasons "a due tick with deferred input carries both duties" [input; backlog; deferred]
+    (reasons ~periodic_due:true ~deferred_runtime_lane:(Some deferred_lane))
+;;
+
 let test_deferred_lane_consumes_a_simultaneously_due_cadence () =
   let now = 600. and interval = 600. in
   let cadence = Signal.consume_periodic ~now:0. in
@@ -112,7 +135,7 @@ let test_deferred_lane_consumes_a_simultaneously_due_cadence () =
       ~deferred_runtime_lane:(Some deferred_lane)
   in
   check bool "the unfinished suffix keeps the wake label" true
-    (wake = WO.Deferred_runtime_lane);
+    (wake = WO.Deferred_runtime_lane { periodic_due = true });
   let cadence =
     Keeper_heartbeat_loop.For_testing.periodic_cadence_after_cycle
       ~periodic_due
@@ -240,6 +263,7 @@ let () =
     ; test_case "durable attention remains immediate" `Quick test_durable_attention_remains_immediate
     ; test_case "deferred lane authorizes empty intake" `Quick test_deferred_lane_authorizes_empty_intake
     ; test_case "deferred lane remains visible with reactive input" `Quick test_deferred_lane_remains_visible_with_reactive_input
+    ; test_case "a reaction carries exactly the due and deferred duties" `Quick test_reaction_carries_exactly_its_due_work
     ; test_case "deferred lane consumes a simultaneously due cadence" `Quick
         test_deferred_lane_consumes_a_simultaneously_due_cadence
     ; test_case "a served due schedule moves the periodic boundary" `Quick

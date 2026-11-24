@@ -45,11 +45,6 @@ type event_queue_trigger =
       (** A system LLM completion authority rejected evidence submitted by this
           Keeper. The rejection is a distinct reactive input, not Board or
           scheduled-work activity. *)
-  | Task_outcome_stimulus
-      (** The approval twin: a completion authority approved evidence submitted
-          by this Keeper. Kept distinct from the rejection so a producer's
-          approved turn is never described as a rejection — the misread would
-          send it back to re-submit an already-closed task (#25868). *)
   | Task_cancellation_stimulus
       (** Another Keeper cancelled a Task this Keeper authored. A distinct
           reactive input: it is not Board activity (no post exists), not
@@ -126,7 +121,6 @@ let turn_reason_of_event_queue_trigger = function
   | Hitl_resolved_stimulus -> Hitl_resolved_pending
   | Completion_authority_rejection_stimulus ->
     Completion_authority_rejection_pending
-  | Task_outcome_stimulus -> Task_outcome_pending
   | Task_cancellation_stimulus -> Task_cancellation_pending
   | Workspace_message_stimulus -> Workspace_message_pending
 ;;

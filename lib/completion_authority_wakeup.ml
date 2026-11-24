@@ -23,9 +23,11 @@ let wake_rejected_producer
       ; car_authority = authority
       }
     in
+    let wake_policy = Keeper_keepalive_signal.task_verdict_wake_policy
+        ~input_kind:Keeper_keepalive_signal.Task_cancelled_or_rejected authority in
     let stimulus : Keeper_event_queue.stimulus =
       { post_id = Keeper_event_queue.completion_authority_rejection_post_id rejection
-      ; urgency = Keeper_event_queue.Immediate
+      ; urgency = Keeper_keepalive_signal.urgency_of_stimulus_wake_policy wake_policy
       ; arrived_at = Time_compat.now ()
       ; payload = Keeper_event_queue.Completion_authority_rejected rejection
       }
@@ -51,7 +53,7 @@ let wake_rejected_producer
           renders this durable rejection stimulus. Keeping that mutation out
           of the authority-to-queue boundary means a best-effort Keeper
           projection can never prevent durable delivery or the live wake. *)
-       Delivery (Keeper_task_outcome_wake.wake_producer_keeper ~notify ~config ~keeper_name))
+       Delivery (Keeper_task_outcome_wake.wake_producer_keeper ~wake_policy ~notify ~config ~keeper_name))
 
 
 type recovery_report = { delivered : int; unroutable : int; retained : int }
@@ -180,7 +182,7 @@ let reconcile_rejections ~config =
                 ~task_id:item.task_id ~verification_id:item.verification_id
                 ~reason:item.reason ~authority:item.authority with
         | Rejection_superseded _ -> Ok `Superseded
-        | Delivery (Keeper_task_outcome_wake.Signaled _) -> Ok `Queued
+        | Delivery (Keeper_task_outcome_wake.Signaled _ | Keeper_task_outcome_wake.Queued_for_later _) -> Ok `Queued
         | Delivery (Keeper_task_outcome_wake.Durable_deferred { keeper_name; _ }) ->
           Log.Misc.warn
             "completion repair queued; Keeper wake deferred task_id=%s keeper=%s"
@@ -252,6 +254,7 @@ let reconcile_approvals ~config =
       match Keeper_task_outcome_wake.wake_approved_producer
               ~config ~producer:item.producer ~task_id:item.task_id
               ~verification_id:item.verification_id ~authority:item.authority with
+      | Keeper_task_outcome_wake.Queued_for_later _
       | Keeper_task_outcome_wake.Signaled _
       | Keeper_task_outcome_wake.Durable_deferred _ -> Ok `Queued
       | Keeper_task_outcome_wake.Durable_wake_failed { keeper_name; detail } ->

@@ -13,10 +13,7 @@ type t =
   | Cursor_stale
   | Board_events (** Cursor-based board scan (collect_board_events). *)
   | Board_stimulus_intake
-      (** Event-queue stimulus intake (consume_single_heartbeat_stimulus /
-          consume_single_heartbeat_stimulus) — distinct from [Board_events] so the
-          scan path and the queued-stimulus path do not conflate failure
-          sources in the same metric. *)
+      (** Reading a Board source selected from the Keeper event queue. *)
   | Scheduled_automation
   | Reconcile_read_meta (** Supervisor reconcile-loop meta read failure (#14828 sweep). *)
 

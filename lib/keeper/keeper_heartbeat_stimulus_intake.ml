@@ -5,7 +5,7 @@
 
     - the [heartbeat_event_intake] record returned to the heartbeat loop;
     - per-class string labels used in Otel_metric_store and log lines;
-    - per-stimulus consumption ([consume_single_heartbeat_stimulus]);
+    - per-stimulus observation ([observe_single_heartbeat_stimulus]);
     - the bounded-batch intake function ([heartbeat_event_intake]) that reads
       one durable snapshot. *)
 
@@ -24,7 +24,7 @@ let pending_board_event_of_stimulus ~base_path ~meta_after_triage stim =
 ;;
 
 type stimulus_intake_result =
-  | Stimulus_consumed of Keeper_world_observation.pending_board_event list
+  | Stimulus_observed of Keeper_world_observation.pending_board_event list
   | Stimulus_board_unavailable of Keeper_world_observation_board_signal.board_unavailable
   | Stimulus_connector_retry_later of Keeper_external_attention.read_error
   | Stimulus_connector_missing of string
@@ -85,12 +85,12 @@ let event_queue_intake_error_counts_as_cycle_failure = function
 ;;
 
 let classify_pending_board_event_result = function
-  | Ok events_opt -> Stimulus_consumed (Option.to_list events_opt)
+  | Ok events_opt -> Stimulus_observed (Option.to_list events_opt)
   | Error (unavailable : Keeper_world_observation_board_signal.board_unavailable) ->
     (match unavailable.error with
      | Board.Read_source_unavailable _ -> Stimulus_board_unavailable unavailable
      | Board.Read_invalid_id _ | Board.Read_post_not_found _ | Board.Read_comment_not_found _ ->
-       Stimulus_consumed [])
+       Stimulus_observed [])
 ;;
 
 let completion_rejection_intake ~config ~(meta_after_triage : keeper_meta) stim
@@ -103,7 +103,7 @@ let completion_rejection_intake ~config ~(meta_after_triage : keeper_meta) stim
   | Ok Workspace_task_rejection_outbox.Obsolete -> Stimulus_completion_rejection_obsolete
   | Ok Workspace_task_rejection_outbox.Current ->
     (match pending_board_event_of_stimulus ~base_path:config.base_path ~meta_after_triage stim with
-     | Ok events -> Stimulus_consumed (Option.to_list events)
+     | Ok events -> Stimulus_observed (Option.to_list events)
      | Error unavailable ->
        Stimulus_completion_rejection_retry_later
          (Keeper_world_observation_board_signal.unavailable_to_string unavailable))
@@ -120,7 +120,7 @@ let pending_board_events_of_stimulus_result ~(config : Workspace_utils.config) ~
   | Keeper_event_queue.Owned_job_completed completion ->
     (match Keeper_world_observation.pending_board_event_of_owned_job_completion
        ~base_path ~keeper_name:meta_after_triage.name ~arrived_at:stim.arrived_at completion with
-     | Ok event -> Stimulus_consumed [event]
+     | Ok event -> Stimulus_observed [event]
      | Error error -> Stimulus_job_unavailable (completion.oj_job_id,error))
   | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Tool_result_ready _
@@ -248,11 +248,9 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
     None
   | Keeper_event_queue.Completion_authority_rejected _ ->
     Some Keeper_world_observation.Completion_authority_rejection_stimulus
-  (* Dedicated turn_reason, same principle as the rejection twin: the producer
-     must be able to tell a verdict wake from an autonomous tick — and an
-     approved turn must never be described as a rejection. *)
-  | Keeper_event_queue.Task_outcome _ ->
-    Some Keeper_world_observation.Task_outcome_stimulus
+  (* The authoritative approval observation carries the verdict and selects
+     its wake policy in the cycle decision. *)
+  | Keeper_event_queue.Task_outcome _ -> None
   (* Dedicated turn_reason: the author has to be able to tell a cancellation
      wake from an autonomous tick, otherwise the turn is indistinguishable from
      the 96%-of-turns scheduled channel and the cancellation reads as noise. *)
@@ -265,7 +263,7 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
     Some Keeper_world_observation.Workspace_message_stimulus
 ;;
 
-let consume_single_heartbeat_stimulus
+let observe_single_heartbeat_stimulus
       ~(ctx : _ context)
       ~meta_after_triage
       ?connector_attention_items
@@ -288,12 +286,12 @@ let consume_single_heartbeat_stimulus
         | Keeper_event_queue.Fusion_cancelled -> "cancelled"
       in
       Log.Keeper.info
-        "turn entry: fusion result delivered run_id=%s terminal=%s (keeper=%s)"
+        "turn entry: fusion result observed run_id=%s terminal=%s (keeper=%s)"
         c.run_id terminal meta_after_triage.name;
       pending_board_events_of_stimulus_result ~config:ctx.config ~meta_after_triage stim
     | Keeper_event_queue.Schedule_due sw ->
       Log.Keeper.info
-        "turn entry: scheduled wake delivered schedule_id=%s due_at=%.3f (keeper=%s)"
+        "turn entry: scheduled wake observed schedule_id=%s due_at=%.3f (keeper=%s)"
         sw.schedule_id
         sw.due_at
         meta_after_triage.name;
@@ -302,7 +300,7 @@ let consume_single_heartbeat_stimulus
       pending_board_events_of_stimulus_result ~config:ctx.config ~meta_after_triage stim
     | Keeper_event_queue.Task_cancelled cancellation ->
       Log.Keeper.info
-        "turn entry: task cancellation delivered task_id=%s cancelled_by=%s \
+        "turn entry: task cancellation observed task_id=%s cancelled_by=%s \
          (keeper=%s)"
         cancellation.tc_task_id
         cancellation.tc_cancelled_by
@@ -324,9 +322,9 @@ let consume_single_heartbeat_stimulus
          match List.assoc_opt answered.ask_id rows with
          | Some (ask, Keeper_ask.Answered_by { answers; responder; answered_at }) ->
            Log.Keeper.info
-             "turn entry: ask answer delivered ask_id=%s (keeper=%s)"
+             "turn entry: ask answer observed ask_id=%s (keeper=%s)"
              answered.ask_id meta_after_triage.name;
-           Stimulus_consumed
+           Stimulus_observed
              [ Keeper_world_observation.pending_board_event_of_ask_answer
                  ~meta:meta_after_triage ~ask ~answers ~responder ~answered_at ]
          | Some (_, Keeper_ask.Open)
@@ -335,9 +333,9 @@ let consume_single_heartbeat_stimulus
          | None -> Stimulus_ask_missing answered.ask_id)
     | Keeper_event_queue.Bootstrap ->
       Log.Keeper.info
-        "turn entry: bootstrap stimulus consumed (keeper=%s)"
+        "turn entry: bootstrap stimulus observed (keeper=%s)"
         meta_after_triage.name;
-      Stimulus_consumed []
+      Stimulus_observed []
     | Keeper_event_queue.Connector_attention ca ->
       (* The stimulus woke this keeper.
          The event_id is a pointer only; the message/surface content stays in
@@ -363,10 +361,10 @@ let consume_single_heartbeat_stimulus
        | Ok None -> Stimulus_connector_missing ca.event_id
        | Ok (Some item) ->
          Log.Keeper.info
-           "turn entry: connector attention stimulus consumed event_id=%s (keeper=%s)"
+           "turn entry: connector attention stimulus observed event_id=%s (keeper=%s)"
            ca.event_id
            meta_after_triage.name;
-         Stimulus_consumed
+         Stimulus_observed
            [ Keeper_world_observation.pending_board_event_of_external_attention
                ~meta:meta_after_triage item ])
     | Keeper_event_queue.Hitl_resolved r ->
@@ -374,11 +372,11 @@ let consume_single_heartbeat_stimulus
          is no observation to fabricate: the typed resolution itself is
          threaded as cycle context. *)
       Log.Keeper.info
-        "turn entry: hitl resolution delivered approval=%s decision=%s (keeper=%s)"
+        "turn entry: hitl resolution observed approval=%s decision=%s (keeper=%s)"
         r.approval_id
         (Keeper_event_queue.hitl_resolution_decision_to_string r.decision)
         meta_after_triage.name;
-      Stimulus_consumed []
+      Stimulus_observed []
     | Keeper_event_queue.Delegate_completed dc ->
       (* Same shape as [Fusion_completed]: a turn this Keeper asked another to
          run has ended, and the answer is surfaced as a pending_board_event so
@@ -388,7 +386,7 @@ let consume_single_heartbeat_stimulus
       (match dc.dc_terminal with
        | Keeper_event_queue.Delegate_failed _ -> Log.Keeper.warn
        | Keeper_event_queue.Delegate_replied _ | Keeper_event_queue.Delegate_no_reply -> Log.Keeper.info)
-        "turn entry: delegation answer delivered operation_id=%s from=%s \
+        "turn entry: delegation answer observed operation_id=%s from=%s \
          outcome=%s (keeper=%s)"
         dc.dc_operation_id
         dc.dc_keeper
@@ -408,7 +406,7 @@ let consume_single_heartbeat_stimulus
        | Keeper_event_queue.Composition_failed _
        | Keeper_event_queue.Composition_cancelled _ -> Log.Keeper.warn
        | Keeper_event_queue.Composition_succeeded -> Log.Keeper.info)
-        "turn entry: composition result delivered request_id=%s tool=%s \
+        "turn entry: composition result observed request_id=%s tool=%s \
          outcome=%s (keeper=%s)"
         cc.cc_request_id
         cc.cc_tool
@@ -424,7 +422,7 @@ let consume_single_heartbeat_stimulus
          pending_board_event so this turn acts on it instead of the producer
          discovering its closed task by projection drift. *)
       Log.Keeper.info
-        "turn entry: task outcome delivered task_id=%s verification_id=%s \
+        "turn entry: task outcome observed task_id=%s verification_id=%s \
          authority_kind=%s (keeper=%s)"
         outcome.to_task_id
         outcome.to_verification_id
@@ -437,11 +435,11 @@ let consume_single_heartbeat_stimulus
          fabricate here — injecting one would put the same message in front of
          the keeper twice. *)
       Log.Keeper.info
-        "turn entry: keeper message delivered request_id=%s from=%s (keeper=%s)"
+        "turn entry: keeper message observed request_id=%s from=%s (keeper=%s)"
         message.wmsg_request_id
         message.wmsg_from
         meta_after_triage.name;
-      Stimulus_consumed []
+      Stimulus_observed []
   in
   match intake_result with
   | Stimulus_board_unavailable _
@@ -449,13 +447,14 @@ let consume_single_heartbeat_stimulus
   | Stimulus_ask_retry_later _ | Stimulus_ask_missing _
   | Stimulus_completion_rejection_obsolete | Stimulus_completion_rejection_retry_later _
   | Stimulus_ask_not_answered _ | Stimulus_job_unavailable _ -> intake_result
-  | Stimulus_consumed _ ->
+  | Stimulus_observed _ ->
     Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string StimulusConsumed)
+      Keeper_metrics.(to_string StimulusObserved)
       ~labels:[ "keeper", meta_after_triage.name; "class", class_str ]
       ();
     Log.Keeper.info
-      "turn entry: consumed stimulus stimulus_id=%s urgency=%s class=%s (keeper=%s)"
+      "turn entry: observed stimulus stimulus_id=%s post_id=%s urgency=%s class=%s (keeper=%s)"
+      (Keeper_reaction_ledger.stimulus_id_of_event_queue stim)
       stim.post_id
       (stimulus_urgency_to_string stim.urgency)
       class_str
@@ -954,7 +953,7 @@ let heartbeat_event_intake
     | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
     | Keeper_event_queue.Task_outcome _ -> false
   in
-  let consume_batch selections =
+  let observe_batch selections =
     (* Defer the one Connector snapshot until admission reaches a Connector.
        Index once, then select the first readable conversation and withdraw
        missing pointers in one linear pass without per-pointer reconciliation. *)
@@ -1130,7 +1129,7 @@ let heartbeat_event_intake
              | Keeper_event_queue.Task_outcome _ -> None
            in
            (match
-              consume_single_heartbeat_stimulus
+              observe_single_heartbeat_stimulus
                 ~ctx
                 ~meta_after_triage
                 ?connector_attention_items
@@ -1197,7 +1196,7 @@ let heartbeat_event_intake
               let first_withdrawn = match first_withdrawn with
                 | None -> Some (selection, error) | Some _ as kept -> kept in
               loop remaining observations_rev selections_rev first_withdrawn rest
-            | Stimulus_consumed [] when is_board_source selection ->
+            | Stimulus_observed [] when is_board_source selection ->
               (* Permanent Board absence is terminal before dispatch. It is the
                  one safe empty-source ACK: the post id cannot become readable
                  later, while retaining it would reselect the same poison on
@@ -1225,8 +1224,8 @@ let heartbeat_event_intake
                  , List.rev selections_rev
                  , first_withdrawn
                  , Some (selection, Pending_selection_failed detail) ))
-            | Stimulus_consumed observations ->
-              (* Choose only after canonical consumption succeeds. An unread
+            | Stimulus_observed observations ->
+              (* Choose only after the source read succeeds. An unread
                  Add-on must not anchor the batch and starve independent work. *)
               admitted_scope := extended_source_scope !admitted_scope selection;
               loop
@@ -1239,7 +1238,7 @@ let heartbeat_event_intake
     loop max_events [] [] None selections
   in
   let ( queued_observations
-      , consumed_selections
+      , observed_selections
       , first_withdrawn
       , hard_error )
     =
@@ -1258,14 +1257,14 @@ let heartbeat_event_intake
     | Ok pending ->
       let batch = ready_batch pending in
       let observations, selections, withdrawn, error =
-        consume_batch batch
+        observe_batch batch
       in
       ( observations
       , selections
       , withdrawn
       , Option.map (fun (selection, error) -> Some selection, error) error )
   in
-  let source_batch = Keeper_heartbeat_source_batch.of_selections consumed_selections in
+  let source_batch = Keeper_heartbeat_source_batch.of_selections observed_selections in
   let diagnostic_selection =
     match hard_error, first_withdrawn with
     | Some (Some selection, _), _ -> Some selection
@@ -1286,9 +1285,8 @@ let heartbeat_event_intake
     | Keeper_world_observation.Ask_answered_stimulus -> 4
     | Keeper_world_observation.Hitl_resolved_stimulus -> 5
     | Keeper_world_observation.Completion_authority_rejection_stimulus -> 6
-    | Keeper_world_observation.Task_outcome_stimulus -> 7
-    | Keeper_world_observation.Task_cancellation_stimulus -> 8
-    | Keeper_world_observation.Workspace_message_stimulus -> 9
+    | Keeper_world_observation.Task_cancellation_stimulus -> 7
+    | Keeper_world_observation.Workspace_message_stimulus -> 8
   in
   let compare_event_queue_trigger a b =
     Int.compare (event_queue_trigger_rank a) (event_queue_trigger_rank b)

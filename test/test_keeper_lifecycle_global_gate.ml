@@ -187,6 +187,66 @@ let test_requested_schedules_preserve_activation_modes () =
     [Masc.Keeper_activation_mode.Manual; On_demand; Autonomous]
 ;;
 
+let test_approved_task_rides_the_next_eligible_turn () =
+  without_overrides @@ fun () ->
+  let meta = { (ready_meta ()) with activation_mode = Masc.Keeper_activation_mode.On_demand } in
+  let approval : Keeper_event_queue.task_outcome =
+    { to_task_id = "task-approved"; to_verification_id = "vrf-approved";
+      to_producer = meta.name; to_authority = Masc_domain.System_llm_agent { agent_run_id = "judge" } }
+  in
+  let stimulus : Keeper_event_queue.stimulus =
+    { post_id = Keeper_event_queue.task_outcome_post_id approval; urgency = Low;
+      arrived_at = 1.; payload = Task_outcome approval }
+  in
+  let event =
+    match WO.pending_board_event_of_stimulus ~base_path:(Filename.get_temp_dir_name ()) ~meta stimulus with
+    | Ok (Some event) -> event
+    | Ok None | Error _ -> fail "approval did not reach intake"
+  in
+  let with_approval obs = { obs with WO.pending_board_events = [event] } in
+  let decision wake obs = WO.keeper_cycle_decision ~wake ~meta (with_approval obs) in
+  check bool "a late wake hint does not start a turn for an approval" false
+    (decision WO.Attention_wake base_obs).should_run;
+  check bool "an empty periodic cycle leaves the on-demand keeper idle" false
+    (WO.keeper_cycle_decision ~wake:WO.Periodic_tick ~meta base_obs).should_run;
+  let due = decision WO.Periodic_tick base_obs in
+  check bool "a due boundary serves the queued approval on the scheduled channel" true
+    (due.should_run && due.channel = WO.Scheduled_autonomous);
+  (match due.verdict with
+   | WO.Run { reasons = first, rest } ->
+     check bool "the queued approval is visible on that turn" true
+       (List.mem WO.Task_outcome_pending (first :: rest))
+   | WO.Skip _ -> fail "a due periodic boundary skipped a waiting approval");
+  let mention = decision WO.Attention_wake mention_obs in
+  check bool "a mention can open the turn that carries the approval" true
+    (mention.should_run && mention.channel = WO.Reactive)
+;;
+
+let test_periodic_reactions_surface_due_work () =
+  without_overrides @@ fun () ->
+  let meta = ready_meta () in
+  let observation = { mention_obs with failed_task_count = 1 } in
+  let reasons ~meta ~wake observation =
+    let decision = WO.keeper_cycle_decision ~meta ~wake observation in
+    check bool "the mention still owns the reactive channel" true (decision.channel = WO.Reactive);
+    match decision.verdict with
+    | WO.Run { reasons = first, rest } -> first :: rest
+    | WO.Skip _ -> fail "the mention did not open a turn"
+  in
+  let backlog = WO.Task_backlog { unclaimed = 0; failed = 1 } in
+  let due = reasons ~meta ~wake:WO.Periodic_tick observation in
+  check bool "a reaction serving the boundary carries both duties" true
+    (List.mem WO.Mention_pending due && List.mem backlog due);
+  check bool "an early mention has no periodic work duty" false
+    (List.mem backlog (reasons ~meta ~wake:WO.Attention_wake observation));
+  let on_demand = { meta with activation_mode = Masc.Keeper_activation_mode.On_demand } in
+  check bool "an on-demand owner has no spontaneous backlog duty" false
+    (List.mem backlog (reasons ~meta:on_demand ~wake:WO.Periodic_tick observation));
+  let scheduled = { observation with scheduled_automation = schedule_attention_obs.scheduled_automation } in
+  check bool "a requested due schedule also reaches the reactive prompt" true
+    (List.mem WO.Scheduled_automation_due (reasons ~meta ~wake:WO.Attention_wake scheduled))
+;;
+
 let test_global_proactive_off_suppresses () =
   with_flag "MASC_KEEPER_AUTONOMOUS_ENABLED" "false" @@ fun () ->
   let meta = ready_meta () in
@@ -504,7 +564,9 @@ let () =
             test_global_proactive_off_suppresses
         ] )
     ; ( "reactive"
-      , [ test_case "default runs" `Quick test_default_reactive_runs
+      , [ test_case "a task approval rides an eligible turn" `Quick test_approved_task_rides_the_next_eligible_turn
+        ; test_case "periodic reactions surface due work" `Quick test_periodic_reactions_surface_due_work
+        ; test_case "default runs" `Quick test_default_reactive_runs
         ; test_case "global off does not suppress typed mention" `Quick
             test_global_reactive_off_does_not_suppress_typed_mention
         ; test_case "global off does not starve scheduled-autonomous" `Quick

@@ -158,10 +158,17 @@ let rec stimulus_with_post_id queue post_id =
 ;;
 
 let enqueue_external_decision queue stimulus =
+  (* A retry can meet a verdict written before verdict producers adopted their
+     wake policy. Compare that policy while retaining the committed source and
+     its exact ACK identity. Other inputs keep their recorded urgency. *)
+  let delivery_source source =
+    { source with Keeper_event_queue.urgency = Keeper_stimulus_wake_policy.effective_urgency source }
+  in
   match stimulus_with_post_id queue stimulus.Keeper_event_queue.post_id with
   | None -> Ok (Keeper_event_queue.enqueue queue stimulus)
   | Some committed
-    when Keeper_event_queue.stimulus_identity_equal committed stimulus ->
+    when Keeper_event_queue.stimulus_identity_equal
+           (delivery_source committed) (delivery_source stimulus) ->
     Ok queue
   | Some _ ->
     Error

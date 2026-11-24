@@ -1187,7 +1187,7 @@ let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
          (Masc.Keeper_task_outcome_wake.Durable_deferred _) ->
        Alcotest.fail "unregistered producer Keeper wake should be deferred"
      | Masc.Completion_authority_wakeup.Delivery
-         (Masc.Keeper_task_outcome_wake.Signaled _) ->
+         (Masc.Keeper_task_outcome_wake.Signaled _ | Masc.Keeper_task_outcome_wake.Queued_for_later _) ->
        Alcotest.fail "unregistered producer Keeper cannot be signaled"
      | Masc.Completion_authority_wakeup.Delivery
          ( Masc.Keeper_task_outcome_wake.Durable_wake_failed { detail; _ }
@@ -1267,7 +1267,8 @@ let test_system_llm_rejection_prefers_registered_producer_binding () =
          in
          (match delivery with
           | Masc.Completion_authority_wakeup.Delivery
-              ( Masc.Keeper_task_outcome_wake.Signaled { keeper_name = actual }
+              ( Masc.Keeper_task_outcome_wake.Queued_for_later { keeper_name = actual }
+              | Masc.Keeper_task_outcome_wake.Signaled { keeper_name = actual }
               | Masc.Keeper_task_outcome_wake.Durable_deferred
                   { keeper_name = actual; _ } ) ->
             Alcotest.(check string)
@@ -1350,7 +1351,8 @@ let test_system_llm_rejection_does_not_derive_unregistered_keeper () =
          | Masc.Completion_authority_wakeup.Rejection_superseded _ ->
            Alcotest.fail "current unroutable rejection was superseded"
          | Masc.Completion_authority_wakeup.Delivery
-             ( Masc.Keeper_task_outcome_wake.Signaled _
+             ( Masc.Keeper_task_outcome_wake.Queued_for_later _
+             | Masc.Keeper_task_outcome_wake.Signaled _
              | Masc.Keeper_task_outcome_wake.Durable_deferred _
              | Masc.Keeper_task_outcome_wake.Durable_wake_failed _
              | Masc.Keeper_task_outcome_wake.Durable_queue_failed _ ) ->

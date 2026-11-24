@@ -124,7 +124,7 @@ type t =
   | RegistryUpdateDropped
   | RegistryOrphanThresholdBreached
   | RegistryInvalidEntry
-  | StimulusConsumed
+  | StimulusObserved
   | RestartAttempts
   | RestartOutcomes
   | RuntimeSelected

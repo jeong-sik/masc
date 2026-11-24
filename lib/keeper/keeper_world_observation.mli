@@ -332,7 +332,6 @@ type event_queue_trigger =
   | Ask_answered_stimulus
   | Hitl_resolved_stimulus
   | Completion_authority_rejection_stimulus
-  | Task_outcome_stimulus
   | Task_cancellation_stimulus
   | Workspace_message_stimulus
 
@@ -513,12 +512,12 @@ val observe_direct_keeper_msg :
 val has_pending_board_activity : world_observation -> bool
 
 (** Typed source of scheduling authority. [Deferred_runtime_lane] carries the
-    unfinished input of a deferred runtime suffix; it is separate from a
-    periodic tick and from new Event Queue attention. *)
+    unfinished input of a deferred runtime suffix and whether the independent
+    periodic boundary is due in the same cycle. *)
 type cycle_wake =
   | Periodic_tick
   | Attention_wake
-  | Deferred_runtime_lane
+  | Deferred_runtime_lane of { periodic_due : bool }
 
 val keeper_cycle_decision :
   ?wake:cycle_wake ->

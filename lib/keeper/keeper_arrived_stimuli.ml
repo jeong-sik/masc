@@ -18,7 +18,7 @@ let inbound_mode_rank = function
 let inbound_mode_of_stimulus (stimulus : Keeper_event_queue.stimulus)
   : inbound_queue_mode
   =
-  match stimulus.urgency, stimulus.payload with
+  match Keeper_stimulus_wake_policy.effective_urgency stimulus, stimulus.payload with
   | ( Keeper_event_queue.Immediate
     , ( Keeper_event_queue.Workspace_message _
       | Keeper_event_queue.Connector_attention _
@@ -92,7 +92,7 @@ let receipt_id_of_payload : Keeper_event_queue.stimulus_payload -> string option
 
 let row_of_selection (selection : Keeper_event_queue_state.pending_selection) =
   { arrival = selection.arrival
-  ; urgency = selection.source.urgency
+  ; urgency = Keeper_stimulus_wake_policy.effective_urgency selection.source
   ; mode = inbound_mode_of_stimulus selection.source
   ; arrived_at = selection.source.arrived_at
   ; preview = Keeper_reaction_ledger.stimulus_payload_preview selection.source.payload

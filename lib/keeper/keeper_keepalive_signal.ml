@@ -172,30 +172,7 @@ let periodic_is_due ~now ~interval cadence =
 
 let consume_periodic ~now = After_periodic now
 
-type sender_kind =
-  | Human_sender
-  | Connector_sender
-  | Keeper_sender
-  | Own_async_sender
-  | System_sender
-
-type input_kind =
-  | Direct_message
-  | Board_mention_or_reply
-  | Board_broadcast
-  | Board_reaction_or_vote
-  | Board_attention_ambient
-  | Delegate_completion
-  | Own_async_completion
-  | Task_cancelled_or_rejected
-  | Task_outcome_approved
-  | Scheduled_wake
-  | Workspace_broadcast
-
-type stimulus_wake_policy =
-  | Now
-  | At_tick
-  | Carry
+include Keeper_stimulus_wake_policy
 
 type inbound_queue_mode = Keeper_arrived_stimuli.inbound_queue_mode =
   | Steer
@@ -212,8 +189,9 @@ type idle_activity =
   | Reacted_since_self_wake
 
 type adaptive_idle_state =
-  { stage : idle_backoff_stage
-  ; next_spontaneous_at : float
+  { boundary : periodic_cadence
+  ; boundary_stage : idle_backoff_stage
+  ; first_reaction_at : float option
   ; since_self_wake : idle_activity
   }
 
@@ -221,39 +199,6 @@ let default_stagger_tick_sec = 300.0
 let adaptive_idle_30m_sec = 1800.0
 let adaptive_idle_1h_sec = 3600.0
 let adaptive_idle_2h_sec = 7200.0
-
-(* Total exhaustive wake policy over (input_kind, sender_kind) (#54342):
-   human/connector direct attention and own-async completions wake Now;
-   keeper-authored peer communication coalesces At_tick on a staggered grid;
-   ambient reactions, votes, discoverable attention, and approved outcomes Carry. *)
-let stimulus_wake_policy_of ~input_kind ~sender_kind =
-  match input_kind, sender_kind with
-  | (Own_async_completion | Scheduled_wake),
-    (Human_sender | Connector_sender | Keeper_sender | Own_async_sender | System_sender) ->
-    Now
-  | Direct_message, (Human_sender | Connector_sender | Own_async_sender | System_sender) ->
-    Now
-  | Direct_message, Keeper_sender -> At_tick
-  | Board_mention_or_reply, (Human_sender | Connector_sender) -> Now
-  | Board_mention_or_reply, (Keeper_sender | Own_async_sender | System_sender) -> At_tick
-  | Board_broadcast, (Human_sender | Connector_sender) -> Now
-  | Board_broadcast, (Keeper_sender | Own_async_sender | System_sender) -> At_tick
-  | Workspace_broadcast, (Human_sender | Connector_sender) -> Now
-  | Workspace_broadcast, (Keeper_sender | Own_async_sender | System_sender) -> At_tick
-  | Delegate_completion, (Human_sender | Connector_sender | Own_async_sender) -> Now
-  | Delegate_completion, (Keeper_sender | System_sender) -> At_tick
-  | Task_cancelled_or_rejected, (Human_sender | Connector_sender) -> Now
-  | Task_cancelled_or_rejected, (Keeper_sender | Own_async_sender | System_sender) -> At_tick
-  | (Board_reaction_or_vote | Board_attention_ambient | Task_outcome_approved),
-    (Human_sender | Connector_sender | Keeper_sender | Own_async_sender | System_sender) ->
-    Carry
-;;
-
-let urgency_of_stimulus_wake_policy = function
-  | Now -> Keeper_event_queue.Immediate
-  | At_tick -> Keeper_event_queue.Normal
-  | Carry -> Keeper_event_queue.Low
-;;
 
 let inbound_queue_mode_of ~turn_running ~wake_policy ~sender_kind =
   match turn_running, wake_policy, sender_kind with
@@ -347,71 +292,71 @@ let adaptive_idle_interval ~base_interval_sec stage =
 ;;
 
 let adaptive_idle_init ~now ~warmup_sec =
-  { stage = Idle_30m
-  ; next_spontaneous_at = now +. Float.max 0.0 warmup_sec
+  { boundary = Initial_due (now +. Float.max 0.0 warmup_sec)
+  ; boundary_stage = Idle_30m
+  ; first_reaction_at = None
   ; since_self_wake = Quiet_since_self_wake
   }
 ;;
 
-let adaptive_idle_after_self_wake
-      ?(base_interval_sec = adaptive_idle_30m_sec)
-      ~now
-      state
-  =
+let adaptive_idle_stage state =
+  match state.first_reaction_at with
+  | Some _ -> Idle_30m
+  | None -> state.boundary_stage
+;;
+
+let serve_idle_boundary ~now boundary_stage since_self_wake =
+  { boundary = consume_periodic ~now; boundary_stage; first_reaction_at = None; since_self_wake }
+;;
+
+let adaptive_idle_hold_stage ~now state =
+  serve_idle_boundary ~now (adaptive_idle_stage state) state.since_self_wake
+;;
+
+let adaptive_idle_after_self_wake ~now state =
   let next_stage =
-    match state.since_self_wake, state.stage with
+    match state.since_self_wake, adaptive_idle_stage state with
     | Reacted_since_self_wake, (Idle_30m | Idle_1h | Idle_2h) -> Idle_30m
     | Quiet_since_self_wake, Idle_30m -> Idle_1h
     | Quiet_since_self_wake, (Idle_1h | Idle_2h) -> Idle_2h
   in
-  { stage = next_stage
-  ; next_spontaneous_at = now +. adaptive_idle_interval ~base_interval_sec next_stage
-  ; since_self_wake = Quiet_since_self_wake
-  }
+  serve_idle_boundary ~now next_stage Quiet_since_self_wake
 ;;
 
-let adaptive_idle_after_served_boundary
-      ?(base_interval_sec = adaptive_idle_30m_sec)
-      ~now
-      state
-  =
-  { stage = Idle_30m
-  ; next_spontaneous_at = now +. adaptive_idle_interval ~base_interval_sec Idle_30m
-  ; since_self_wake = state.since_self_wake
-  }
+let adaptive_idle_after_served_boundary ~now state =
+  serve_idle_boundary ~now Idle_30m state.since_self_wake
 ;;
 
-let adaptive_idle_after_reaction_at_boundary
-      ?(base_interval_sec = adaptive_idle_30m_sec)
-      ~now
-      ()
-  =
-  { stage = Idle_30m
-  ; next_spontaneous_at = now +. adaptive_idle_interval ~base_interval_sec Idle_30m
-  ; since_self_wake = Reacted_since_self_wake
-  }
+let adaptive_idle_after_reaction_at_boundary ~now =
+  serve_idle_boundary ~now Idle_30m Reacted_since_self_wake
 ;;
 
-(* A reaction only ever brings the next self-wake closer. A deadline that came
-   due while the reaction ran stays due, so the boundary is served on the next
-   cycle instead of slipping one start interval per crossing reaction. *)
-let adaptive_idle_pull_in_on_reactive
-      ?(base_interval_sec = adaptive_idle_30m_sec)
-      ~now
-      state
-  =
-  let pulled_deadline = now +. adaptive_idle_interval ~base_interval_sec Idle_30m in
-  { stage = Idle_30m
-  ; next_spontaneous_at = Float.min state.next_spontaneous_at pulled_deadline
-  ; since_self_wake = Reacted_since_self_wake
-  }
+let adaptive_idle_pull_in_on_reactive ~now state =
+  let first_reaction_at =
+    match state.first_reaction_at with
+    | Some _ as first -> first
+    | None -> Some now
+  in
+  { state with first_reaction_at; since_self_wake = Reacted_since_self_wake }
 ;;
 
-let adaptive_idle_remaining ~now state =
-  Float.max 0.0 (state.next_spontaneous_at -. now)
+(* Both deadlines are relative to completed work. Re-reading the setting can
+   change which one is earlier. Later reactions cannot postpone either one. *)
+let adaptive_idle_due_at ~base_interval_sec state =
+  let interval = adaptive_idle_interval ~base_interval_sec state.boundary_stage in
+  let periodic_at = periodic_due_at ~interval state.boundary in
+  match state.first_reaction_at with
+  | None -> periodic_at
+  | Some at -> Float.min periodic_at (at +. adaptive_idle_interval ~base_interval_sec Idle_30m)
 ;;
 
-let adaptive_idle_is_due ~now state = now >= state.next_spontaneous_at
+let adaptive_idle_remaining ~now ~base_interval_sec state =
+  Float.max 0.0 (adaptive_idle_due_at ~base_interval_sec state -. now)
+;;
+
+let adaptive_idle_is_due ~now ~base_interval_sec state =
+  now >= adaptive_idle_due_at ~base_interval_sec state
+;;
 
 let input_kind_of_stimulus_payload = function
   | Keeper_event_queue.Workspace_message _ -> Direct_message

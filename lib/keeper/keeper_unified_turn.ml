@@ -157,6 +157,7 @@ let continuation_channel_of_wake = function
 let run_keeper_cycle
       ~(before_dispatch_authority : unit -> (unit, string) result)
       ~(execution_path : Keeper_unified_metrics_decision.execution_path)
+      ?on_turn_started
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
       ~(config : Workspace.config)
@@ -216,6 +217,11 @@ let run_keeper_cycle
       ; deferred_runtime_lane = None
       }
   | Ok (entry_profile_defaults, meta) ->
+  let lane =
+    match execution_path with
+    | Keeper_unified_metrics_decision.Direct_turn -> Keeper_execution_outcome.Direct
+    | Autonomous_cycle -> Keeper_execution_outcome.Autonomous turn_decision
+  in
   let channel = turn_decision.channel in
   (* 0. Phase gate + state-aware runtime routing.
      The gate owns turn executability. *)
@@ -645,6 +651,7 @@ let run_keeper_cycle
          block clears the field, preventing stale state on idle keepers. *)
                Keeper_registry.mark_turn_started ~observation_token ~base_path:config.base_path ~wake
                  ~turn_id:keeper_turn_id meta.name;
+               Option.iter (fun started -> started ()) on_turn_started;
                (* Refresh from the committed owner projection, then put the
                   TOML back on. The projection is durable keeper JSON, which
                   omits the TOML-owned fields on purpose
@@ -1187,7 +1194,7 @@ let run_keeper_cycle
                     ~observation
                     ~latency_ms
                     ~outcome:Keeper_decision_outcome.Failed
-                    ~execution_path
+                    ~lane
                     ~degraded_retry_applied
                     ~degraded_retry_deferred
                     ~error:e_str
@@ -1292,9 +1299,7 @@ let run_keeper_cycle
                      here; this is the sole caller of that function. *)
                   let success =
                     let execution_outcome =
-                      Keeper_execution_outcome.create
-                        ~lane:(Keeper_execution_outcome.Autonomous channel)
-                        result
+                      Keeper_execution_outcome.create ~lane result
                     in
                     Keeper_unified_turn_success.handle
                       ~config

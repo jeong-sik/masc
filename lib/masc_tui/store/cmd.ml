@@ -867,6 +867,19 @@ let mcp_tool_name_of_post_request = function
   | Post_task_transition _ -> Some "masc_transition"
   | Post_goal_upsert _ -> Some "masc_goal_upsert"
   | Post_mcp_tools_call { tool_name; _ } -> Some tool_name
+  | Post_skills_refresh
+  | Post_skill_editor_read _
+  | Post_skill_editor_preview_new _
+  | Post_skill_editor_create _
+  | Post_skill_editor_preview _
+  | Post_skill_editor_save _
+  | Post_prompt_override _
+  | Post_preset_save _
+  | Post_preset_create _
+  | Post_preset_restore _
+  | Post_preset_delete _
+  | Post_runtime_param_set _
+  | Post_runtime_param_clear _
   | Post_hitl_late_approval_restore
   | Post_gate_resolution_policy _
   | Post_gate_mode _

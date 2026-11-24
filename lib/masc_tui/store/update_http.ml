@@ -1245,6 +1245,12 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
+        | Nav.Skill_create_form
+        | Nav.Preset_create_form
+        | Nav.Skill_edit_form _
+        | Nav.Skill_delete_confirm _
+        | Nav.Prompt_override_form _
+        | Nav.Runtime_param_set_form _
         | Nav.Tool_execute_form _
         | Nav.Keeper_control_confirm _
         | Nav.Keeper_clear_form _
@@ -1350,6 +1356,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Skill_create_form
+            | Nav.Preset_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Runtime_param_set_form _
             | Nav.Tool_execute_form _
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
@@ -3423,6 +3435,12 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
+        | Nav.Skill_create_form
+        | Nav.Preset_create_form
+        | Nav.Skill_edit_form _
+        | Nav.Skill_delete_confirm _
+        | Nav.Prompt_override_form _
+        | Nav.Runtime_param_set_form _
         | Nav.Tool_execute_form _
         | Nav.Keeper_control_confirm _
         | Nav.Keeper_clear_form _
@@ -3531,6 +3549,12 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
+        | Nav.Skill_create_form
+        | Nav.Preset_create_form
+        | Nav.Skill_edit_form _
+        | Nav.Skill_delete_confirm _
+        | Nav.Prompt_override_form _
+        | Nav.Runtime_param_set_form _
         | Nav.Tool_execute_form _
         | Nav.Keeper_control_confirm _
         | Nav.Keeper_clear_form _
@@ -4089,6 +4113,12 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
+        | Nav.Skill_create_form
+        | Nav.Preset_create_form
+        | Nav.Skill_edit_form _
+        | Nav.Skill_delete_confirm _
+        | Nav.Prompt_override_form _
+        | Nav.Runtime_param_set_form _
         | Nav.Tool_execute_form _
         | Nav.Keeper_control_confirm _
         | Nav.Keeper_clear_form _
@@ -4180,6 +4210,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Skill_create_form
+            | Nav.Preset_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Runtime_param_set_form _
             | Nav.Tool_execute_form _
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
@@ -4489,6 +4525,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Skill_create_form
+            | Nav.Preset_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Runtime_param_set_form _
             | Nav.Tool_execute_form _
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
@@ -4525,6 +4567,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Skill_create_form
+            | Nav.Preset_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Runtime_param_set_form _
             | Nav.Tool_execute_form _
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
@@ -4704,6 +4752,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Skill_create_form
+            | Nav.Preset_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Runtime_param_set_form _
             | Nav.Tool_execute_form _
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
@@ -4740,6 +4794,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Skill_create_form
+            | Nav.Preset_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Runtime_param_set_form _
             | Nav.Tool_execute_form _
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
@@ -6456,6 +6516,20 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Runtime_lane_create
+            | Nav.Task_create_form
+            | Nav.Addon_attach_form
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _
             | Nav.Code_search_form
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
@@ -6561,6 +6635,20 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Runtime_lane_create
+            | Nav.Task_create_form
+            | Nav.Addon_attach_form
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _
             | Nav.Code_search_form
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
@@ -6695,6 +6783,20 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
+                | Nav.Runtime_lane_create
+                | Nav.Task_create_form
+                | Nav.Addon_attach_form
+                | Nav.Runtime_lane_edit _
+                | Nav.Runtime_lane_delete _
+                | Nav.Task_transition_form _
+                | Nav.Task_link_goal _
+                | Nav.Goal_upsert_form _
+                | Nav.Board_delete_post _
+                | Nav.Keeper_lifecycle_form _
+                | Nav.Keeper_purge_confirm _
+                | Nav.Addon_detach_confirm _
+                | Nav.Addon_invoke_action _
+                | Nav.Setup_login_input_form _
                 | Nav.Code_search_form
                 | Nav.Keeper_control_confirm _
                 | Nav.Keeper_clear_form _
@@ -6752,6 +6854,20 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Runtime_lane_create
+            | Nav.Task_create_form
+            | Nav.Addon_attach_form
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _
             | Nav.Code_search_form
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
@@ -6952,6 +7068,20 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
+                | Nav.Runtime_lane_create
+                | Nav.Task_create_form
+                | Nav.Addon_attach_form
+                | Nav.Runtime_lane_edit _
+                | Nav.Runtime_lane_delete _
+                | Nav.Task_transition_form _
+                | Nav.Task_link_goal _
+                | Nav.Goal_upsert_form _
+                | Nav.Board_delete_post _
+                | Nav.Keeper_lifecycle_form _
+                | Nav.Keeper_purge_confirm _
+                | Nav.Addon_detach_confirm _
+                | Nav.Addon_invoke_action _
+                | Nav.Setup_login_input_form _
                 | Nav.Code_search_form
                 | Nav.Keeper_control_confirm _
                 | Nav.Keeper_clear_form _
@@ -7002,6 +7132,20 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Runtime_lane_create
+            | Nav.Task_create_form
+            | Nav.Addon_attach_form
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _
             | Nav.Code_search_form
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
@@ -7067,6 +7211,20 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
+                | Nav.Runtime_lane_create
+                | Nav.Task_create_form
+                | Nav.Addon_attach_form
+                | Nav.Runtime_lane_edit _
+                | Nav.Runtime_lane_delete _
+                | Nav.Task_transition_form _
+                | Nav.Task_link_goal _
+                | Nav.Goal_upsert_form _
+                | Nav.Board_delete_post _
+                | Nav.Keeper_lifecycle_form _
+                | Nav.Keeper_purge_confirm _
+                | Nav.Addon_detach_confirm _
+                | Nav.Addon_invoke_action _
+                | Nav.Setup_login_input_form _
                 | Nav.Code_search_form
                 | Nav.Keeper_control_confirm _
                 | Nav.Keeper_clear_form _
@@ -7124,6 +7282,20 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Runtime_lane_create
+            | Nav.Task_create_form
+            | Nav.Addon_attach_form
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _
             | Nav.Code_search_form
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _

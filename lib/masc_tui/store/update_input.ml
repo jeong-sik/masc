@@ -2118,7 +2118,9 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
         Keymap.Open_queue_context;
       ]
     in
-    match Keymap.dispatch ~scope_chain:[ Keymap.Global ] norm with
+    match
+      Keymap.dispatch ~scope_chain:[ Keymap.Unfocused_nav; Keymap.Global ] norm
+    with
     | Some act when List.exists (Keymap.equal_action act) micro_allowed ->
         Update_actions.execute_action ~now m act
     | Some _ | None -> (m, [])
@@ -3103,7 +3105,8 @@ let apply_paste ~now:_ (m : Model.t) text =
   if
     String.equal text ""
     || Model.is_too_small_viewport m.viewport
-    || Model.equal_breakpoint m.breakpoint Model.Micro
+    || (Model.equal_breakpoint m.breakpoint Model.Micro
+        && Option.is_none m.nav.overlay)
   then (m, [])
   else
     match m.nav.overlay with

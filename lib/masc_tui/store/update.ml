@@ -83,16 +83,21 @@ let apply_resize ~now (m : Model.t) ~cols ~rows =
     Model.is_too_small_viewport next2.viewport
     || Model.equal_breakpoint next2.breakpoint Model.Micro
   in
+  let overlay_hidden_locked =
+    Model.is_too_small_viewport next2.viewport
+    || (Model.equal_breakpoint next2.breakpoint Model.Micro
+        && Option.is_none next2.nav.overlay)
+  in
   let drafts =
     if micro_locked && Drafts.is_focused next2.drafts then
       Drafts.set_focus false next2.drafts
     else next2.drafts
   in
   let filter_focused =
-    if micro_locked then false else next2.nav.filter_focused
+    if overlay_hidden_locked then false else next2.nav.filter_focused
   in
   let config =
-    if micro_locked && Config_store.is_editing_field next2.config then
+    if overlay_hidden_locked && Config_store.is_editing_field next2.config then
       Config_store.cancel_edit_field next2.config
     else next2.config
   in

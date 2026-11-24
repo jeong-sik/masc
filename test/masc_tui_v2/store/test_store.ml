@@ -11402,6 +11402,60 @@ let test_ux_batch1_focus_resize_micro_zoom_and_cli_prefs () =
   in
   Alcotest.(check bool) "UX-02 Micro still allows Ctrl+Q Quit" true
     (List.exists (function Cmd.Quit _ -> true | _ -> false) cmds_micro_quit);
+  let m_micro_help, _ =
+    Update.step ~now:t0 m_micro_typed (Msg.Key_event (char_key "?"))
+  in
+  Alcotest.(check bool) "UX-02 Micro allows '?' Help overlay" true
+    (match m_micro_help.nav.overlay with Some Nav.Help -> true | _ -> false);
+  let m_micro_attn =
+    let m_ma, _ =
+      Update.step ~now:t0 m_pulse (Msg.Resize { cols = 70; rows = 20 })
+    in
+    m_ma
+  in
+  let m_micro_j, _ =
+    Update.step ~now:t0 m_micro_attn (Msg.Key_event (char_key "J"))
+  in
+  Alcotest.(check bool) "UX-02 Micro allows 'J' Teleport_blocked" true
+    (Nav.equal_workspace m_micro_j.nav.workspace Nav.Work
+     && Nav.equal_work_tab m_micro_j.work.active_tab Nav.Work_inbox);
+  let m_micro_settings =
+    let m_s, _ =
+      Update.step ~now:t0 m_micro_typed
+        (Msg.Key_event
+           {
+             Keymap.Input.key = Keymap.Input.Char ",";
+             mods = { ctrl = true; alt = false; shift = false };
+           })
+    in
+    {
+      m_s with
+      nav = { m_s.nav with filter_focused = true };
+      config =
+        {
+          m_s.config with
+          editing_field_key = Some "tui.theme";
+          editing_buffer = "paper";
+        };
+    }
+  in
+  let m_micro_settings_resized, _ =
+    Update.step ~now:t0 m_micro_settings (Msg.Resize { cols = 72; rows = 21 })
+  in
+  Alcotest.(check bool)
+    "UX-02 Micro resize preserves visible Settings overlay filter_focused" true
+    m_micro_settings_resized.nav.filter_focused;
+  Alcotest.(check bool)
+    "UX-02 Micro resize preserves visible Settings field editing" true
+    (Config_store.is_editing_field m_micro_settings_resized.config);
+  let m_micro_pasted, _ =
+    Update.step ~now:t0
+      { m_micro_settings_resized with nav = { m_micro_settings_resized.nav with filter_focused = false } }
+      (Msg.Paste_text "_light")
+  in
+  Alcotest.(check string)
+    "UX-02 Micro paste works inside visible Settings field editor" "paper_light"
+    m_micro_pasted.config.editing_buffer;
 
   (* UX-03: Resize clamps pane_index, drops unfocused docked pin, Esc closes unfocused drawer *)
   let m_keepers_p1 =

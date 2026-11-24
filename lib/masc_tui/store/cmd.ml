@@ -161,6 +161,7 @@ type get_request =
       provider : string;
       attempt_id : string;
     }
+  | Get_board_quarantines of { keeper : string; generation : int }
   | Get_github_identity of { keeper : string }
   | Get_addon_package_catalog of { directory : string option }
   | Get_addon_package_preview of { manifest_path : string }
@@ -292,6 +293,7 @@ type post_request =
       enabled : bool;
     }
   | Post_oauth_disconnect of { keeper : string; provider : string }
+  | Post_board_recovery of Board_quarantine.inventory_item
   | Post_github_token of {
       keeper : string;
       token : string;
@@ -521,6 +523,8 @@ let get_request_path = function
       Wire_keeper_context.oauth_attached_tools_path ~keeper
   | Get_oauth_attempt_status { keeper; provider; attempt_id } ->
       Wire_keeper_context.oauth_attempt_status_path ~keeper ~provider ~attempt_id
+  | Get_board_quarantines { keeper; _ } ->
+      Wire_knowledge.board_quarantines_path ~keeper
   | Get_github_identity { keeper } ->
       Wire_keeper_context.github_identity_path ~keeper
   | Get_addon_package_catalog { directory } ->
@@ -569,6 +573,9 @@ let post_request_path = function
   | Post_oauth_identity_switch { keeper; _ } ->
       Wire_keeper_context.oauth_identity_switch_path ~keeper
   | Post_oauth_disconnect _ -> Wire_keeper_context.oauth_disconnect_path
+  | Post_board_recovery item ->
+      Wire_knowledge.board_quarantines_path ~keeper:item.keeper_name ^ "/" ^
+      Wire_common.percent_encode item.partition_id ^ "/recovery"
   | Post_github_token { keeper; _ } ->
       Wire_keeper_context.github_token_path ~keeper
 
@@ -694,6 +701,10 @@ let post_request_body = function
       Wire_keeper_context.encode_oauth_switch_body ~provider ~enabled
   | Post_oauth_disconnect { keeper; provider } ->
       Wire_keeper_context.encode_oauth_disconnect_body ~keeper ~provider
+  | Post_board_recovery item ->
+      Board_quarantine.request_to_json
+        { candidate_id = item.candidate_id; expected_quarantine_id = item.quarantine_id;
+          decision = Acknowledge_and_requeue }
   | Post_github_token { token; hostname; _ } ->
       Wire_keeper_context.encode_github_token_body ~token ?hostname ()
 

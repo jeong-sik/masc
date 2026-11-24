@@ -490,6 +490,7 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
       after with
       infra = Infra_store.forget_log_cursor after.infra;
       fleet = Fleet_store.detach_chat_streams after.fleet;
+      knowledge = { after.knowledge with board_recovery = Board_recovery.invalidate after.knowledge.board_recovery };
       drafts = Drafts.detach_streams ~now after.drafts;
       attention = Attention.clear_all_in_flight after.attention;
       inline_modal;

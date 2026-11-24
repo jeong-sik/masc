@@ -7,6 +7,7 @@
   masc_tui_core
   masc_tui_keymap
   masc_tui_protocol
+  masc.masc_board
   masc_tui_store
   masc_tui_term
   masc_tui_ui

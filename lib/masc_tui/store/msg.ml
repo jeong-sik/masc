@@ -438,6 +438,12 @@ type http_reply =
       label : Say.t;
       result : (unit, http_error) result;
     }
+  | Reply_board_quarantines of {
+      keeper : string; generation : int; result : (Board_quarantine.inventory, http_error) result;
+    }
+  | Reply_board_recovery of {
+      item : Board_quarantine.inventory_item; result : (unit, http_error) result;
+    }
   | Reply_github_identity of {
       keeper : string;
       result :

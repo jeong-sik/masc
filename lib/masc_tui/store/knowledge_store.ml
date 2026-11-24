@@ -155,6 +155,7 @@ type keeper_memory_subview =
 
 type t = {
   active_tab : Nav.knowledge_tab;
+  board_recovery : Board_recovery.t;
   board : Wire_knowledge.board_feed Observed.t;
   board_hearths : Wire_knowledge.board_hearth_entry list Observed.t;
   board_signal_only : bool;
@@ -230,6 +231,7 @@ type t = {
 let empty =
   {
     active_tab = Nav.Knowledge_board;
+    board_recovery = Board_recovery.empty;
     board = Observed.unreported;
     board_hearths = Observed.unreported;
     board_signal_only = true;

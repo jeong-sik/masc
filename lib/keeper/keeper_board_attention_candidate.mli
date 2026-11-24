@@ -89,7 +89,7 @@ type resumable_status =
   | Resumable_judged of judged_state
   | Resumable_consumed of consumed_state
 
-type quarantine_failure_category =
+type quarantine_failure_category = Board_quarantine.quarantine_failure_category =
   | Candidate_membership_conflict
   | Durable_partition_invariant
   | Exact_setup_unavailable
@@ -108,7 +108,7 @@ type quarantine_failure_category =
           lane is a read-only model call, so redispatch spends tokens and
           nothing else. *)
 
-type attempt_provenance =
+type attempt_provenance = Board_quarantine.attempt_provenance =
   { slot_id : string
   ; call_id : string
   ; plan_fingerprint : string

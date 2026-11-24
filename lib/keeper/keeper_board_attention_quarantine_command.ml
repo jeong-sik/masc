@@ -3,12 +3,12 @@ module Partition = Keeper_board_attention_partition
 module Quarantine_pair = Keeper_board_attention_quarantine_pair
 module Wake = Keeper_board_attention_worker_wake
 
-let request_schema = "keeper.board_attention.quarantine.recovery.request.v1"
-let result_schema = "keeper.board_attention.quarantine.recovery.result.v1"
+let request_schema = Board_quarantine.request_schema
+let result_schema = Board_quarantine.result_schema
 
-type decision = Acknowledge_and_requeue
+type decision = Board_quarantine.decision = Acknowledge_and_requeue
 
-type request =
+type request = Board_quarantine.request =
   { candidate_id : string
   ; expected_quarantine_id : string
   ; decision : decision
@@ -92,7 +92,7 @@ let schema expected fields =
 ;;
 
 let parse_decision = function
-  | `String "acknowledge_and_requeue" -> Ok Acknowledge_and_requeue
+  | `String decision when String.equal decision (Board_quarantine.decision_to_string Acknowledge_and_requeue) -> Ok Acknowledge_and_requeue
   | `String value -> Error (Unsupported_decision value)
   | _ -> Error (Invalid_field "decision")
 ;;
@@ -523,7 +523,7 @@ let audit config command ~outcome =
           ; "candidate_id", `String command.request.candidate_id
           ; ( "expected_quarantine_id"
             , `String command.request.expected_quarantine_id )
-          ; "decision", `String "acknowledge_and_requeue"
+          ; "decision", `String (Board_quarantine.decision_to_string command.request.decision)
           ])
       ~outcome
       ();
@@ -554,7 +554,7 @@ let success_json ~audit command report =
     ; ( "quarantine_id"
       , `String command.request.expected_quarantine_id )
     ; "failure_category", `String failure_category
-    ; "decision", `String "acknowledge_and_requeue"
+    ; "decision", `String (Board_quarantine.decision_to_string command.request.decision)
     ; "wake", `String (wake_to_string report.wake)
     ; "audit", audit
     ]
@@ -576,15 +576,14 @@ let failure_json ~audit error =
    leaves [Blocked] in a second write, and a process that ends between the two
    leaves a [Requeued] candidate beside a [Blocked] partition that
    [execute] finishes. So the candidate's phase alone cannot say "requeued". *)
-type inventory_phase =
+type inventory_phase = Board_quarantine.inventory_phase =
   | Inventory_quarantined
   | Inventory_requeue_requested
   | Inventory_requeue_unfinished
   | Inventory_requeued
   | Inventory_requeue_unreconciled
-[@@deriving enumerate]
 
-type inventory_item =
+type inventory_item = Board_quarantine.inventory_item =
   { keeper_name : string
   ; partition_id : string
   ; candidate_id : string
@@ -598,17 +597,16 @@ type inventory_item =
   ; requested_by : string option
   }
 
-type inventory_error_kind =
+type inventory_error_kind = Board_quarantine.inventory_error_kind =
   | Inventory_candidate_ledger_unavailable
   | Inventory_partition_ledger_unavailable
-[@@deriving enumerate]
 
-type inventory_error =
+type inventory_error = Board_quarantine.inventory_error =
   { keeper_name : string
   ; kind : inventory_error_kind
   }
 
-type inventory =
+type inventory = Board_quarantine.inventory =
   { items : inventory_item list
   ; errors : inventory_error list
   }
@@ -740,197 +738,12 @@ let inventory ~base_path ~keeper_names =
   }
 ;;
 
-let inventory_phase_to_string = function
-  | Inventory_quarantined -> "quarantined"
-  | Inventory_requeue_requested -> "requeue_requested"
-  | Inventory_requeue_unfinished -> "requeue_unfinished"
-  | Inventory_requeued -> "requeued"
-  | Inventory_requeue_unreconciled -> "requeue_unreconciled"
-;;
-
-let inventory_error_kind_to_string = function
-  | Inventory_candidate_ledger_unavailable -> "candidate_ledger_unavailable"
-  | Inventory_partition_ledger_unavailable -> "partition_ledger_unavailable"
-;;
-
-
-let attempt_provenance_to_json = function
-  | None -> `Null
-  | Some (attempt : Candidate.attempt_provenance) ->
-    `Assoc
-      [ "slot_id", `String attempt.slot_id
-      ; "call_id", `String attempt.call_id
-      ; "plan_fingerprint", `String attempt.plan_fingerprint
-      ; "request_body_sha256", `String attempt.request_body_sha256
-      ]
-;;
-
-let inventory_item_to_json (item : inventory_item) =
-  `Assoc
-    [ "keeper_name", `String item.keeper_name
-    ; "partition_id", `String item.partition_id
-    ; "candidate_id", `String item.candidate_id
-    ; "quarantine_id", `String item.quarantine_id
-    ; "phase", `String (inventory_phase_to_string item.phase)
-    ; ( "failure_category"
-      , `String
-          (Candidate.quarantine_failure_category_to_string item.failure_category) )
-    ; "attempt_provenance", attempt_provenance_to_json item.attempt_provenance
-    ; "quarantined_at", `Float item.quarantined_at
-    ; "requested_at", Json_util.float_opt_to_json item.requested_at
-    ; "requeued_at", Json_util.float_opt_to_json item.requeued_at
-    ; "requested_by", Json_util.string_opt_to_json item.requested_by
-    ]
-;;
-
-let inventory_to_json inventory =
-  `Assoc
-    [ "count", `Int (List.length inventory.items)
-    ; "items", `List (List.map inventory_item_to_json inventory.items)
-    ; ( "errors"
-      , `List
-          (List.map
-             (fun (error : inventory_error) ->
-               `Assoc
-                 [ "keeper_name", `String error.keeper_name
-                 ; "kind", `String (inventory_error_kind_to_string error.kind)
-                 ])
-             inventory.errors) )
-    ]
-;;
+let inventory_to_json = Board_quarantine.inventory_to_json
 
 let inventory_json ~base_path ~keeper_names =
   inventory ~base_path ~keeper_names |> inventory_to_json
 ;;
 
-(* The body [parse_request] accepts, built from the same fields. A client that
-   spelled the schema and the decision itself would be a second copy of them. *)
-let request_to_json (request : request) =
-  `Assoc
-    [ "schema", `String request_schema
-    ; "candidate_id", `String request.candidate_id
-    ; "expected_quarantine_id", `String request.expected_quarantine_id
-    ; ( "decision"
-      , `String
-          (match request.decision with
-           | Acknowledge_and_requeue -> "acknowledge_and_requeue") )
-    ]
-;;
-
-(* Readers of [inventory_item_to_json] and the error rows beside it. They sit
-   next to the writers so the two cannot drift: a field renamed on one side is
-   a failing round trip in this module's own suite. *)
-let inventory_phase_of_string s = List.find_opt (fun v -> String.equal (inventory_phase_to_string v) s) all_of_inventory_phase
-;;
-
-let inventory_error_kind_of_string s = List.find_opt (fun v -> String.equal (inventory_error_kind_to_string v) s) all_of_inventory_error_kind
-;;
-
-let json_field fields name =
-  match List.assoc_opt name fields with
-  | Some value -> Ok value
-  | None -> Error ("missing field " ^ name)
-;;
-
-let json_string fields name =
-  let* value = json_field fields name in
-  match value with
-  | `String text -> Ok text
-  | _ -> Error (name ^ " must be a string")
-;;
-
-let json_number = function
-  | `Float value -> Some value
-  | `Int value -> Some (Float.of_int value)
-  | _ -> None
-;;
-
-let json_float fields name =
-  let* value = json_field fields name in
-  match json_number value with
-  | Some number -> Ok number
-  | None -> Error (name ^ " must be a number")
-;;
-
-let json_float_opt fields name =
-  let* value = json_field fields name in
-  match value with
-  | `Null -> Ok None
-  | other ->
-    (match json_number other with
-     | Some number -> Ok (Some number)
-     | None -> Error (name ^ " must be a number or null"))
-;;
-
-let json_string_opt fields name =
-  let* value = json_field fields name in
-  match value with
-  | `Null -> Ok None
-  | `String text -> Ok (Some text)
-  | _ -> Error (name ^ " must be a string or null")
-;;
-
-let attempt_provenance_of_json = function
-  | `Null -> Ok None
-  | `Assoc fields ->
-    let* slot_id = json_string fields "slot_id" in
-    let* call_id = json_string fields "call_id" in
-    let* plan_fingerprint = json_string fields "plan_fingerprint" in
-    let* request_body_sha256 = json_string fields "request_body_sha256" in
-    Ok
-      (Some
-         ({ slot_id; call_id; plan_fingerprint; request_body_sha256 }
-          : Candidate.attempt_provenance))
-  | _ -> Error "attempt_provenance must be an object or null"
-;;
-
-let inventory_item_of_json = function
-  | `Assoc fields ->
-    let* keeper_name = json_string fields "keeper_name" in
-    let* partition_id = json_string fields "partition_id" in
-    let* candidate_id = json_string fields "candidate_id" in
-    let* quarantine_id = json_string fields "quarantine_id" in
-    let* phase_raw = json_string fields "phase" in
-    let* phase =
-      match inventory_phase_of_string phase_raw with
-      | Some phase -> Ok phase
-      | None -> Error ("unknown phase " ^ phase_raw)
-    in
-    let* category_raw = json_string fields "failure_category" in
-    let* failure_category =
-      match Candidate.quarantine_failure_category_of_string category_raw with
-      | Some category -> Ok category
-      | None -> Error ("unknown failure_category " ^ category_raw)
-    in
-    let* provenance_json = json_field fields "attempt_provenance" in
-    let* attempt_provenance = attempt_provenance_of_json provenance_json in
-    let* quarantined_at = json_float fields "quarantined_at" in
-    let* requested_at = json_float_opt fields "requested_at" in
-    let* requested_by = json_string_opt fields "requested_by" in
-    let* requeued_at = json_float_opt fields "requeued_at" in
-    Ok
-      ({ keeper_name
-       ; partition_id
-       ; candidate_id
-       ; quarantine_id
-       ; phase
-       ; failure_category
-       ; attempt_provenance
-       ; quarantined_at
-       ; requested_at
-       ; requested_by
-       ; requeued_at
-       }
-       : inventory_item)
-  | _ -> Error "inventory item must be an object"
-;;
-
-let inventory_error_of_json = function
-  | `Assoc fields ->
-    let* keeper_name = json_string fields "keeper_name" in
-    let* kind_raw = json_string fields "kind" in
-    (match inventory_error_kind_of_string kind_raw with
-     | Some kind -> Ok ({ keeper_name; kind } : inventory_error)
-     | None -> Error ("unknown inventory error kind " ^ kind_raw))
-  | _ -> Error "inventory error must be an object"
-;;
+let request_to_json = Board_quarantine.request_to_json
+let inventory_item_of_json = Board_quarantine.inventory_item_of_json
+let inventory_error_of_json = Board_quarantine.inventory_error_of_json

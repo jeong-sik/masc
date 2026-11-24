@@ -558,6 +558,7 @@ let fork_safe t fn =
 
 let execute_get t ~epoch req =
   let path = Cmd.get_request_path req in
+  let snapshot_key = ref (Key_get path) in
   fork_safe t (fun () ->
       let observed_at = Clock.Mono.now () in
       let msg =
@@ -1499,6 +1500,10 @@ let execute_get t ~epoch req =
                 }
             in
             Msg.Http_reply { epoch; reply }
+        | Cmd.Get_board_quarantines { keeper; generation } ->
+            snapshot_key := Key_get (path ^ "#read=" ^ string_of_int generation);
+            let result = fetch_and_decode_get t ~path ~decode:(Board_quarantine.inventory_of_json ~keeper) in
+            Msg.Http_reply { epoch; reply = Msg.Reply_board_quarantines { keeper; generation; result } }
         | Cmd.Get_github_identity { keeper } ->
             let reply =
               Msg.Reply_github_identity
@@ -1540,7 +1545,7 @@ let execute_get t ~epoch req =
             in
             Msg.Http_reply { epoch; reply }
       in
-      Ui_bus.publish_snapshot t.bus ~key:(Key_get path) msg)
+      Ui_bus.publish_snapshot t.bus ~key:!snapshot_key msg)
 
 let is_terminal_setup_login_status status =
   match String.lowercase_ascii (String.trim status) with
@@ -1934,6 +1939,9 @@ let execute_post t ~epoch req =
                      Say.make ~ko:"OAuth 연결 해제됨" ~en:"OAuth disconnected";
                    result;
                  })
+        | Cmd.Post_board_recovery item ->
+            let result = post_and_decode t ~path ~body ~decode:(Board_quarantine.recovery_confirmed item) in
+            Some (Msg.Reply_board_recovery { item; result })
         | Cmd.Post_github_token { keeper; _ } ->
             let result =
               post_and_decode t ~path ~body

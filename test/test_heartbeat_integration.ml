@@ -5955,6 +5955,52 @@ let test_crashed_cycle_records_health_failure () =
   R.For_testing.clear ();
   cleanup_dir base_path
 
+let test_crashed_cycle_skip_pulse_prevents_double_count () =
+  Eio_main.run @@ fun env ->
+  install_test_env env;
+  R.For_testing.clear ();
+  Masc.Keeper_turn_pulse.reset_for_tests ();
+  let base_path = temp_dir "pulse-single-count" in
+  Fun.protect
+    ~finally:(fun () ->
+      R.For_testing.clear ();
+      Masc.Keeper_turn_pulse.reset_for_tests ();
+      cleanup_dir base_path)
+    (fun () ->
+      let keeper_name = "pulse-single-count-keeper" in
+      let meta = make_meta keeper_name in
+      let registry_entry = R.For_testing.register ~base_path keeper_name meta in
+      (* Simulate a completed cycle already counted in Keeper_turn_pulse. *)
+      Masc.Keeper_turn_pulse.record
+        ~base_path
+        ~keeper_name
+        ~at:(Unix.gettimeofday ())
+        ~cause:Masc.Keeper_turn_pulse.Own
+        Masc.Keeper_turn_pulse.Turn_ok;
+      (* Post-cycle queue settlement failure must still record registry failure
+         reason and health debt, without adding a second Turn_failed row to the
+         turn pulse. *)
+      KHL.record_crashed_cycle_failure
+        ~record_pulse:false
+        ~registry_entry
+        ~sources:Masc.Keeper_heartbeat_source_batch.empty
+        (Failure "event queue ack failed");
+      check int "registry streak incremented" 1
+        (R.get_turn_failures ~base_path keeper_name);
+      match Masc.Keeper_turn_pulse.get ~base_path ~keeper_name with
+      | None -> fail "expected existing turn pulse"
+      | Some pulse ->
+        let ok_total, failed_total, own_total =
+          List.fold_left
+            (fun (o, f, w) (s : Masc.Keeper_turn_pulse.slot) ->
+              (o + s.tally.ok, f + s.tally.failed, w + s.causes.own))
+            (0, 0, 0)
+            pulse.slots
+        in
+        check int "ok count stays 1" 1 ok_total;
+        check int "no duplicate failed turn recorded" 0 failed_total;
+        check int "cause counted once" 1 own_total)
+
 let test_invalid_keeper_config_revision_name_creates_no_artifact () =
   let base_path = temp_dir "invalid-config-revision-name" in
   Fun.protect
@@ -6233,5 +6279,7 @@ let () =
         test_turn_intake_uses_only_lifecycle;
       test_case "crashed cycles feed agent health breaker" `Quick
         test_crashed_cycle_records_health_failure;
+      test_case "post-cycle queue failure does not double-count turn pulse" `Quick
+        test_crashed_cycle_skip_pulse_prevents_double_count;
     ];
   ]

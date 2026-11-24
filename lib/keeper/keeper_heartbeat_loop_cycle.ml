@@ -80,6 +80,11 @@ let deferred_runtime_lane = function
     None
 ;;
 
+let recorded_pulse = function
+  | Completed _ | Checkpointed _ | Input_required _ | Failed _ | Rested _ -> true
+  | Cancelled _ | Skipped _ -> false
+;;
+
 (* Body of [run_keeper_cycle], runnable only while holding the keeper's
    Keeper Owner child. The post-failure meta re-reads stay
    inside the slot for the same reason as the chat lane: a concurrent turn

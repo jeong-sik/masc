@@ -778,7 +778,7 @@ is-non-interactive = true
 %s
 [models.fixture]
 api-name = "paid-fixture"
-max-context = 4096
+max-context = 200000
 tools-support = true
 %s
 [paid.fixture]

@@ -177,6 +177,11 @@ type get_request =
     }
   | Get_keeper_checkpoints of { keeper : string }
   | Get_keeper_operator_note of { keeper : string }
+  | Get_tool_approval_modes
+  | Get_late_approval_attempts
+  | Get_tool_quality of { n : int option; window_hours : int option }
+  | Get_gate_tool_events of { window_minutes : int option }
+  | Get_keeper_waiting_inventory of { keeper : string }
 
 type keeper_turn_interrupt_target =
   [ `Turn_token of string | `Operation_id of string ]
@@ -415,6 +420,32 @@ type post_request =
       keeper : string;
       request_id : string;
       interrupt_token : string option;
+    }
+  | Post_gate_resolution_policy of {
+      id : string;
+      approved : bool;
+      reason : string option;
+      remember_rule : bool;
+      rule_expires_at : float option;
+      expected_workspace : Wire_work.expected_workspace option;
+    }
+  | Post_gate_mode of { external_lane : bool; mode : Wire_work.gate_mode }
+  | Post_gate_rule_delete of { id : string }
+  | Post_gate_retry of {
+      meta : Wire_work.gate_retry_meta;
+      expected_workspace : Wire_work.expected_workspace option;
+    }
+  | Post_keeper_tool_approval_mode of {
+      keeper : string;
+      mode : Wire_work.keeper_tool_approval_mode;
+    }
+  | Post_hitl_ack_uncertain of { keeper : string; consume_id : string }
+  | Post_hitl_late_approval_restore
+  | Post_mcp_tools_list of { rpc_id : int }
+  | Post_mcp_tools_call of {
+      rpc_id : int;
+      tool_name : string;
+      arguments : Yojson.Safe.t;
     }
 
 type put_request =
@@ -661,6 +692,14 @@ let get_request_path = function
       Wire_keeper_context.keeper_checkpoints_path ~keeper
   | Get_keeper_operator_note { keeper } ->
       Wire_keeper_context.keeper_operator_note_path ~keeper
+  | Get_tool_approval_modes -> Wire_work.keeper_tool_approval_mode_path
+  | Get_late_approval_attempts -> Wire_work.hitl_late_approval_attempts_path
+  | Get_tool_quality { n; window_hours } ->
+      Wire_runtime.tool_quality_path ?n ?window_hours ()
+  | Get_gate_tool_events { window_minutes } ->
+      Wire_work.gate_tool_events_path ?window_minutes ()
+  | Get_keeper_waiting_inventory { keeper } ->
+      Wire_runtime.keeper_waiting_inventory_path ~keeper
 
 let post_request_path = function
   | Post_ask_answer _ -> Wire_work.keeper_ask_answer_path
@@ -742,6 +781,17 @@ let post_request_path = function
   | Post_keeper_operator_note { keeper; _ } ->
       Wire_keeper_context.keeper_operator_note_path ~keeper
   | Post_keeper_run_next _ -> Wire_keeper_context.keeper_run_next_path
+  | Post_gate_resolution_policy _ -> Wire_work.gate_resolve_path
+  | Post_gate_mode { external_lane = false; _ } -> Wire_work.gate_mode_path
+  | Post_gate_mode { external_lane = true; _ } ->
+      Wire_work.gate_external_mode_path
+  | Post_gate_rule_delete _ -> Wire_work.gate_rules_delete_path
+  | Post_gate_retry _ -> Wire_work.gate_retry_path
+  | Post_keeper_tool_approval_mode _ -> Wire_work.keeper_tool_approval_mode_path
+  | Post_hitl_ack_uncertain { consume_id; _ } ->
+      Wire_work.hitl_approval_recover_path ~approval_id:consume_id
+  | Post_hitl_late_approval_restore -> Wire_work.hitl_late_approval_restore_path
+  | Post_mcp_tools_list _ | Post_mcp_tools_call _ -> Wire_runtime.mcp_rpc_path
 
 let mcp_tool_name_of_post_request = function
   | Post_task_create _ -> Some "masc_add_task"
@@ -1007,6 +1057,24 @@ let post_request_body = function
   | Post_keeper_run_next { keeper; request_id; interrupt_token } ->
       Wire_keeper_context.encode_keeper_run_next_body ~keeper ~request_id
         ?interrupt_token ()
+  | Post_gate_resolution_policy
+      { id; approved; reason; remember_rule; rule_expires_at; expected_workspace }
+    ->
+      Wire_work.encode_gate_resolution_with_policy ~id ~approved ~reason
+        ~remember_rule ?rule_expires_at ?expected_workspace ()
+  | Post_gate_mode { mode; _ } -> Wire_work.encode_gate_mode ~mode
+  | Post_gate_rule_delete { id } -> Wire_work.encode_gate_rule_delete ~id
+  | Post_gate_retry { meta; expected_workspace } ->
+      Wire_work.encode_gate_retry ?expected_workspace meta
+  | Post_keeper_tool_approval_mode { keeper; mode } ->
+      Wire_work.encode_tool_approval_mode_set ~keeper ~mode
+  | Post_hitl_ack_uncertain { keeper; consume_id } ->
+      Wire_work.encode_hitl_ack_uncertain ~keeper_name:keeper ~consume_id
+  | Post_hitl_late_approval_restore -> `Assoc []
+  | Post_mcp_tools_list { rpc_id } ->
+      Wire_runtime.encode_mcp_tools_list_body ~id:rpc_id
+  | Post_mcp_tools_call { rpc_id; tool_name; arguments } ->
+      Wire_runtime.encode_mcp_tools_call_body ~id:rpc_id ~tool_name ~arguments
 
 let put_request_path = function
   | Put_wiki_page { page; _ } -> Wire_knowledge.wiki_page_path ~page

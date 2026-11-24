@@ -885,13 +885,17 @@ let focusable_pane_count m =
               | Nav.Work_pipeline ->
                   if work_pipeline_has_linked_card m then 3 else 2
               | Nav.Work_tasks | Nav.Work_schedules -> 2
-              | Nav.Work_inbox ->
-                  if
-                    Option.is_some
-                      (Attention.current_filtered_item ~query:m.work.filter_query
-                         m.attention)
-                  then 2
-                  else 1
+              | Nav.Work_inbox -> (
+                  match m.work.inbox_subview with
+                  | Work_store.Inbox_rules -> 2
+                  | Work_store.Inbox_history -> 1
+                  | Work_store.Inbox_queue ->
+                      if
+                        Option.is_some
+                          (Attention.current_filtered_item
+                             ~query:m.work.filter_query m.attention)
+                      then 2
+                      else 1)
               | Nav.Work_candle_scorecard -> 2
               | Nav.Work_harness -> 2)
           | Nav.Knowledge -> 2
@@ -914,7 +918,9 @@ let focusable_pane_count m =
               | Nav.Runtime_efficiency_spend -> 1
               | Nav.Runtime_tools_usage -> (
                   match m.runtime.tools_subview with
-                  | Runtime_store.Tools_keeper_skills -> 2
+                  | Runtime_store.Tools_keeper_skills
+                  | Runtime_store.Tools_quality_gate ->
+                      2
                   | Runtime_store.Tools_usage_calls
                   | Runtime_store.Tools_catalog_tree ->
                       1)
@@ -1122,6 +1128,8 @@ let active_focus_scope m =
               if
                 Nav.equal_workspace m.nav.workspace Nav.Work
                 && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
+                && Work_store.equal_inbox_subview m.work.inbox_subview
+                     Work_store.Inbox_queue
                 &&
                 if
                   not (Attention.is_empty m.attention)
@@ -1160,11 +1168,16 @@ let focus_scope_chain m =
       && Nav.equal_workspace m.nav.workspace Nav.Work
       && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
     then
-      match
-        Attention.current_filtered_item ~query:m.work.filter_query m.attention
-      with
-      | Some e -> not (Attention.is_in_flight ~id:e.id m.attention)
-      | None -> false
+      if
+        Work_store.equal_inbox_subview m.work.inbox_subview
+          Work_store.Inbox_queue
+      then
+        match
+          Attention.current_filtered_item ~query:m.work.filter_query m.attention
+        with
+        | Some e -> not (Attention.is_in_flight ~id:e.id m.attention)
+        | None -> false
+      else false
     else Option.is_some (fast_approval_strip_item m)
   in
   Keymap.scope_chain_of_focus ~approval_strip_active (active_focus_scope m)
@@ -2043,6 +2056,25 @@ let inline_modal_for kind =
             secret = false;
           };
         ]
+    | Nav.Tool_execute_form { tool_name; args_json } ->
+        [
+          {
+            key = "tool_name";
+            label = Say.make ~ko:"MCP 도구 이름" ~en:"MCP Tool Name";
+            value = tool_name;
+            required = true;
+            secret = false;
+          };
+          {
+            key = "args_json";
+            label =
+              Say.make ~ko:"인자 JSON 객체 (예: {\"limit\": 5})"
+                ~en:"Arguments JSON object (e.g. {\"limit\": 5})";
+            value = args_json;
+            required = true;
+            secret = false;
+          };
+        ]
   in
   let active_field =
     match kind with
@@ -2066,6 +2098,7 @@ let inline_modal_for kind =
     | Nav.Keeper_control_confirm _
     | Nav.Keeper_clear_form _
     | Nav.Keeper_operator_note_form _
+    | Nav.Tool_execute_form _
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
     | Nav.Runtime_lane_delete _

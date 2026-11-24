@@ -2264,13 +2264,54 @@ let keeper_schema_fields ~doc ~is_create ~assigned_runtime_opt ~runtime_choices 
       ()
   ; field
       ~cat:Cat_sandbox_infra
-      ~table:"keeper"
-      ~key:"masc_tools_enabled"
+      ~table:"keeper.tools"
+      ~key:"native"
+      ~type_str:"enum"
+      ~enum_values:Runtime_native_tools.valid_posture_strings
+      ~default_json:`Null
+      ~reload:Next_turn
+      ~secret:false
+      ~description:"Built-in official CLI native-tool posture (none | read | full)"
+      ()
+  ; field
+      ~cat:Cat_sandbox_infra
+      ~table:"keeper.tools"
+      ~key:"masc_enabled"
       ~type_str:"boolean"
       ~default_json:(`Bool true)
       ~reload:Next_turn
       ~secret:false
       ~description:"Expose MASC workspace tools to this Keeper"
+      ()
+  ; field
+      ~cat:Cat_sandbox_infra
+      ~table:"keeper.tools"
+      ~key:"deny"
+      ~type_str:"string_list"
+      ~default_json:(`List [])
+      ~reload:Next_turn
+      ~secret:false
+      ~description:"Model-visible built-in tool names denied for this Keeper"
+      ()
+  ; field
+      ~cat:Cat_sandbox_infra
+      ~table:"keeper.tools"
+      ~key:"attached_allow"
+      ~type_str:"string_list"
+      ~default_json:(`List [])
+      ~reload:Next_turn
+      ~secret:false
+      ~description:"Explicitly allowed attached connector/addon tools for this Keeper"
+      ()
+  ; field
+      ~cat:Cat_keepers_autonomy
+      ~table:"keeper.skills"
+      ~key:"names"
+      ~type_str:"string_list"
+      ~default_json:(`List [])
+      ~reload:Next_turn
+      ~secret:false
+      ~description:"Ordered skill package names loaded into this Keeper's context"
       ()
   ; field
       ~cat:Cat_economy_connectors

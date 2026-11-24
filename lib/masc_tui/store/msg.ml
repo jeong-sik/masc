@@ -627,6 +627,31 @@ type http_reply =
       connector : string;
       result : (Wire_runtime.connector_names_page, http_error) result;
     }
+  | Reply_gate_snapshot of (Wire_work.gate_snapshot, http_error) result
+  | Reply_tool_approval_modes of
+      (Wire_work.tool_approval_modes_snapshot, http_error) result
+  | Reply_late_approval_attempts of
+      (Wire_work.late_approval_attempt list, http_error) result
+  | Reply_gate_tool_events of
+      (Wire_work.gate_tool_events_snapshot, http_error) result
+  | Reply_tool_quality of (Wire_runtime.tool_quality_snapshot, http_error) result
+  | Reply_keeper_waiting_inventory of {
+      keeper : string;
+      result : (Wire_runtime.keeper_waiting_inventory, http_error) result;
+    }
+  | Reply_mcp_tools_list of
+      (Wire_runtime.mcp_tool_schema_entry list, http_error) result
+  | Reply_mcp_tools_call of {
+      tool_name : string;
+      result : (Wire_runtime.mcp_tool_call_result, http_error) result;
+    }
+  | Reply_gate_mutation of {
+      label : Say.t;
+      refresh_gate : bool;
+      refresh_modes : bool;
+      refresh_late : bool;
+      result : (unit, http_error) result;
+    }
 
 let chat_status_reply ~keeper ~operation_id ~requested_at result =
   match result with

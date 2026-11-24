@@ -47,6 +47,10 @@ let is_stale = function
   | Value { stale; data = _; observed_at = _ } -> stale
   | Loading _ | Absent | Unreported | Failed _ -> false
 
+let is_failed = function
+  | Failed _ -> true
+  | Loading _ | Value _ | Absent | Unreported -> false
+
 let mark_stale = function
   | Value { data; observed_at; stale = _ } ->
       Value { data; observed_at; stale = true }

@@ -2364,14 +2364,496 @@ let attention_tag = function
   | Health.Pending_ask _ -> ("ASK", Theme.Status_attention)
   | Health.Goal_confirmation _ -> ("GOAL", Theme.Status_active)
 
+let render_inbox_gate_bar ~(model : Model.t) ~(rect : Rect.t) ~(theme : Theme.t)
+    grid =
+  if Rect.is_empty rect then ()
+  else
+    let bg = Color.of_rgb theme.surface_0 in
+    let rules_n = List.length (Work_store.gate_rules_list model.work) in
+    let hist_n = List.length (Work_store.gate_resolved_list model.work) in
+    let late_n = List.length (Work_store.late_approval_attempts_list model.work) in
+    let queue_n = List.length model.attention.items in
+    let pills =
+      [
+        ( Printf.sprintf "%s (%d)"
+            (Ops_common.say model ~ko:"대기열" ~en:"Queue")
+            queue_n
+        , Work_store.equal_inbox_subview model.work.inbox_subview
+            Work_store.Inbox_queue
+        , Some Theme.Status_attention );
+        ( Printf.sprintf "%s (%d)"
+            (Ops_common.say model ~ko:"Always-Approve 규칙" ~en:"Always Rules")
+            rules_n
+        , Work_store.equal_inbox_subview model.work.inbox_subview
+            Work_store.Inbox_rules
+        , Some Theme.Status_ok );
+        ( Printf.sprintf "%s (%d%s)"
+            (Ops_common.say model ~ko:"결정 이력" ~en:"History")
+            hist_n
+            (if late_n > 0 then Printf.sprintf " · !%d" late_n else "")
+        , Work_store.equal_inbox_subview model.work.inbox_subview
+            Work_store.Inbox_history
+        , if late_n > 0 then Some Theme.Status_critical else Some Theme.Status_active );
+      ]
+    in
+    let used = Ops_common.draw_pills grid ~rect ~theme ~bg pills in
+    let status_txt =
+      let mode_part =
+        match Work_store.hitl_status model.work with
+        | None -> ""
+        | Some h ->
+            let jl =
+              match h.judge_lane with
+              | Wire_work.Judge_lane_available { lane_id; _ } -> lane_id
+              | Wire_work.Judge_lane_unavailable { reason; _ } ->
+                  "off:" ^ Ops_common.scrub_secrets_in_text reason
+            in
+            Printf.sprintf "WS:%s · Ext:%s · Judge:%s"
+              (Wire_work.gate_mode_to_string h.gate_mode.mode)
+              (Wire_work.gate_mode_to_string h.external_gate_mode.mode)
+              jl
+      in
+      let yolo_part =
+        match Observed.to_option model.work.tool_approval_modes with
+        | Some m when m.overrides <> [] ->
+            let yolos =
+              List.filter_map
+                (fun (k, md) ->
+                  match md with
+                  | Wire_work.Approval_yolo -> Some k
+                  | Wire_work.Approval_auto -> None)
+                m.overrides
+            in
+            if yolos = [] then ""
+            else Printf.sprintf " · YOLO(%d)" (List.length yolos)
+        | Some _ | None -> ""
+      in
+      let hint =
+        Ops_common.say model ~ko:"[v] 전환 · /gate" ~en:"[v] View · /gate"
+      in
+      if String.equal mode_part "" then hint ^ yolo_part
+      else mode_part ^ yolo_part ^ " · " ^ hint
+    in
+    let avail = rect.w - used - 2 in
+    if avail >= 8 then
+      ignore
+        (Ops_common.put_line ~clip:rect grid ~x:(rect.x + used + 2) ~y:rect.y
+           ~max_w:avail ~style:(Typography.whisper ~bg theme) status_txt)
+
+let render_inbox_rules ~(model : Model.t) ~cache ~(rect : Rect.t)
+    ~(theme : Theme.t) grid =
+  let bp = Ops_common.layout_bp model in
+  let rules = Work_store.filtered_gate_rules model.work in
+  let rules_err =
+    match Observed.to_option model.work.gate_snapshot with
+    | Some s -> s.rules_error
+    | None -> None
+  in
+  let left_rect, right_rect =
+    if rect.w >= 96 then
+      match Layout.split_h_bp bp rect [ Layout.Ratio 0.56; Layout.Flex 1 ] with
+      | [ l; r ] -> (l, r)
+      | _ -> (rect, Rect.empty)
+    else
+      match Layout.split_v_bp bp rect [ Layout.Ratio 0.52; Layout.Flex 1 ] with
+      | [ t; b ] -> (t, b)
+      | _ -> (rect, Rect.empty)
+  in
+  let l_spec : Card.spec =
+    {
+      (Card.default_spec
+         ~title:
+           (Printf.sprintf "%s (%d)"
+              (Ops_common.say model ~ko:"Always-Approve 규칙"
+                 ~en:"Always-Approve Rules")
+              (List.length rules)))
+      with
+      hotkey =
+        Some
+          (Ops_common.say model
+             ~ko:"[x] 삭제 · /gate del-rule <id> · /gate mode <m>"
+             ~en:"[x] Delete · /gate del-rule <id> · /gate mode <m>");
+      focused = Model.pane_focused model 0;
+    }
+  in
+  let l_inner = Card.draw ~cache grid ~rect:left_rect ~theme l_spec in
+  if not (Rect.is_empty l_inner) then begin
+    match rules_err with
+    | Some raw_err ->
+        let err = Ops_common.scrub_secrets_in_text raw_err in
+        Ops_common.draw_observed_empty grid ~rect:l_inner ~theme ~lang:model.lang
+          (Observed.failed ~reason:err ~retryable:true ~at:Clock.Mono.zero)
+          ~empty_msg:(Say.make ~ko:err ~en:err)
+    | None when rules = [] ->
+        Ops_common.draw_observed_empty grid ~rect:l_inner ~theme ~lang:model.lang
+          model.work.gate_snapshot
+          ~empty_msg:
+            (Say.make
+               ~ko:"저장된 Always-Approve 규칙이 없습니다 (/gate approve-always <id>)"
+               ~en:"No Always-Approve rules saved (/gate approve-always <id>)")
+    | None ->
+        let cols : Table.column list =
+          [
+            {
+              id = "keeper";
+              header = Say.make ~ko:"키퍼" ~en:"Keeper";
+              priority = 0;
+              min_width = 10;
+              max_width = Some 18;
+              weight = 2;
+              align = Table.Left;
+            };
+            {
+              id = "tool";
+              header = Say.make ~ko:"도구" ~en:"Tool";
+              priority = 0;
+              min_width = 14;
+              max_width = None;
+              weight = 4;
+              align = Table.Left;
+            };
+            {
+              id = "exp";
+              header = Say.make ~ko:"만료" ~en:"Expires";
+              priority = 1;
+              min_width = 8;
+              max_width = Some 14;
+              weight = 1;
+              align = Table.Right;
+            };
+            {
+              id = "id";
+              header = Say.make ~ko:"ID" ~en:"ID";
+              priority = 2;
+              min_width = 8;
+              max_width = Some 14;
+              weight = 2;
+              align = Table.Left;
+            };
+          ]
+        in
+        let rows =
+          List.map
+            (fun (r : Wire_work.gate_rule) ->
+              let exp_s =
+                match r.expires_at with
+                | None -> Ops_common.say model ~ko:"영구" ~en:"never"
+                | Some ts ->
+                    if ts <= model.freshness.last_wall_unix then
+                      Ops_common.say model ~ko:"만료됨" ~en:"expired"
+                    else
+                      let rem =
+                        Float.max 0.0 (ts -. model.freshness.last_wall_unix)
+                      in
+                      let dur = Format_val.format_duration_s rem in
+                      Ops_common.say model ~ko:(dur ^ " 후") ~en:("in " ^ dur)
+              in
+              {
+                Table.id = r.id;
+                cells =
+                  [
+                    ("keeper", Table.text_cell ("@" ^ r.keeper_name));
+                    ("tool", Table.text_cell r.tool_name);
+                    ("exp", Table.text_cell exp_s);
+                    ( "id"
+                    , Table.text_cell ~fg:(Color.of_rgb theme.text_muted) r.id );
+                  ];
+              })
+            rules
+        in
+        let sel =
+          Int.max 0
+            (Int.min (List.length rules - 1) model.work.rule_selected_index)
+        in
+        ignore
+          (Table.draw grid ~rect:l_inner ~theme ~caps:Ops_common.default_caps
+             ~lang:model.lang ~scroll:model.work.rule_scroll_offset ~selected:sel
+             ~focused:(Model.pane_focused model 0)
+             ~col_gap:(Layout.table_col_gap bp) ~columns:cols rows)
+  end;
+  if not (Rect.is_empty right_rect) then begin
+    let r_spec : Card.spec =
+      {
+        (Card.default_spec
+           ~title:
+             (Ops_common.say model ~ko:"규칙 상세 · Gate 정책"
+                ~en:"Rule Detail · Gate Policy"))
+        with
+        focused = Model.pane_focused model 1;
+      }
+    in
+    let r_inner = Card.draw ~cache grid ~rect:right_rect ~theme r_spec in
+    if not (Rect.is_empty r_inner) then begin
+      let card_bg = Color.of_rgb theme.surface_1 in
+      let pad_x = Ops_common.pad_x_for ~model r_inner in
+      let content = Card.pad_inner ~pad_x r_inner in
+      let rows_to_draw = ref [] in
+      let push_row row = rows_to_draw := row :: !rows_to_draw in
+      (match Work_store.selected_gate_rule model.work with
+       | None -> ()
+       | Some r ->
+           push_row (`Kv ("Rule ID", r.id));
+           push_row (`Kv ("Keeper", "@" ^ r.keeper_name));
+           push_row (`Kv ("Tool", r.tool_name));
+           push_row (`Kv ("Fingerprint", r.request_fingerprint));
+           push_row (`Kv ("Created By", Option.value r.created_by ~default:"—"));
+           push_row `Blank);
+      push_row
+        (`Rule
+           (Ops_common.say model ~ko:"Gate 모드 & 키퍼 오버라이드"
+              ~en:"Gate Modes & Keeper Overrides"));
+      (match Work_store.hitl_status model.work with
+       | Some h ->
+           push_row
+             (`Kv
+                ( "Workspace"
+                , Printf.sprintf "%s (%s)"
+                    (Wire_work.gate_mode_to_string h.gate_mode.mode)
+                    h.gate_mode.state ));
+           push_row
+             (`Kv
+                ( "External"
+                , Printf.sprintf "%s (%s)"
+                    (Wire_work.gate_mode_to_string h.external_gate_mode.mode)
+                    h.external_gate_mode.state ))
+       | None -> ());
+      (match Observed.to_option model.work.tool_approval_modes with
+       | Some tm ->
+           let ov_s =
+             if tm.overrides = [] then
+               Ops_common.say model ~ko:"없음 (전체 auto)" ~en:"none (all auto)"
+             else
+               tm.overrides
+               |> List.map (fun (k, md) ->
+                      Printf.sprintf "%s=%s" k
+                        (Wire_work.keeper_tool_approval_mode_to_string md))
+               |> String.concat ", "
+           in
+           push_row (`Kv ("Overrides", ov_s))
+       | None -> ());
+      let ordered = List.rev !rows_to_draw in
+      let skip =
+        Int.max 0
+          (Int.min
+             (Int.max 0 (List.length ordered - content.h))
+             model.work.detail_scroll_offset)
+      in
+      let bot = Rect.bottom content in
+      List.iteri
+        (fun idx row ->
+          if idx >= skip && content.y + idx - skip < bot then
+            let y = content.y + idx - skip in
+            match row with
+            | `Blank -> ()
+            | `Rule title ->
+                Ops_common.draw_hrule grid ~rect:content ~y ~theme ~bg:card_bg
+                  ~title ()
+            | `Kv (key, value) ->
+                Ops_common.draw_kv_row grid ~rect:content ~y ~theme ~bg:card_bg
+                  ~label_w:12 ~key ~value ())
+        ordered
+    end
+  end
+
+let render_inbox_history ~(model : Model.t) ~cache ~(rect : Rect.t)
+    ~(theme : Theme.t) grid =
+  let bp = Ops_common.layout_bp model in
+  let rows_data = Work_store.filtered_gate_resolved model.work in
+  let late_rows = Work_store.late_approval_attempts_list model.work in
+  let hist_err =
+    match Observed.to_option model.work.gate_snapshot with
+    | Some s -> s.recent_resolved_error
+    | None -> None
+  in
+  let top_rect, bot_rect =
+    if late_rows <> [] || Observed.is_failed model.work.late_approval_attempts
+    then
+      match Layout.split_v_bp bp rect [ Layout.Ratio 0.65; Layout.Flex 1 ] with
+      | [ t; b ] -> (t, b)
+      | _ -> (rect, Rect.empty)
+    else (rect, Rect.empty)
+  in
+  let t_spec : Card.spec =
+    {
+      (Card.default_spec
+         ~title:
+           (Printf.sprintf "%s (%d)"
+              (Ops_common.say model ~ko:"최근 Gate 결정 이력"
+                 ~en:"Recent Gate Decisions")
+              (List.length rows_data)))
+      with
+      focused = Model.pane_focused model 0;
+    }
+  in
+  let t_inner = Card.draw ~cache grid ~rect:top_rect ~theme t_spec in
+  if not (Rect.is_empty t_inner) then begin
+    match hist_err with
+    | Some raw_err ->
+        let err = Ops_common.scrub_secrets_in_text raw_err in
+        Ops_common.draw_observed_empty grid ~rect:t_inner ~theme ~lang:model.lang
+          (Observed.failed ~reason:err ~retryable:true ~at:Clock.Mono.zero)
+          ~empty_msg:(Say.make ~ko:err ~en:err)
+    | None when rows_data = [] ->
+        Ops_common.draw_observed_empty grid ~rect:t_inner ~theme ~lang:model.lang
+          model.work.gate_snapshot
+          ~empty_msg:
+            (Say.make ~ko:"최근 처리된 Gate 결정이 없습니다"
+               ~en:"No recent resolved Gate decisions")
+    | None ->
+        let cols : Table.column list =
+          [
+            {
+              id = "dec";
+              header = Say.make ~ko:"결정" ~en:"Decision";
+              priority = 0;
+              min_width = 8;
+              max_width = Some 12;
+              weight = 1;
+              align = Table.Left;
+            };
+            {
+              id = "keeper";
+              header = Say.make ~ko:"키퍼" ~en:"Keeper";
+              priority = 0;
+              min_width = 10;
+              max_width = Some 16;
+              weight = 2;
+              align = Table.Left;
+            };
+            {
+              id = "tool";
+              header = Say.make ~ko:"도구" ~en:"Tool";
+              priority = 0;
+              min_width = 14;
+              max_width = None;
+              weight = 4;
+              align = Table.Left;
+            };
+            {
+              id = "src";
+              header = Say.make ~ko:"출처" ~en:"Source";
+              priority = 1;
+              min_width = 10;
+              max_width = Some 18;
+              weight = 2;
+              align = Table.Left;
+            };
+            {
+              id = "age";
+              header = Say.make ~ko:"시각" ~en:"Age";
+              priority = 2;
+              min_width = 6;
+              max_width = Some 10;
+              weight = 1;
+              align = Table.Right;
+            };
+          ]
+        in
+        let tbl_rows =
+          List.map
+            (fun (r : Wire_work.gate_resolved_row) ->
+              let kind_s =
+                Option.value r.decision_kind ~default:r.decision
+              in
+              let tone =
+                if String.equal kind_s "approve" then Theme.Status_ok
+                else Theme.Status_critical
+              in
+              let src_s =
+                match (r.decision_source, r.actor) with
+                | Some s, Some a -> Printf.sprintf "%s (%s)" s a
+                | Some s, None -> s
+                | None, Some a -> a
+                | None, None -> "—"
+              in
+              {
+                Table.id = r.id;
+                cells =
+                  [
+                    ( "dec"
+                    , Table.Badge { glyph = None; text = kind_s; tone } );
+                    ("keeper", Table.text_cell ("@" ^ r.keeper));
+                    ("tool", Table.text_cell r.tool);
+                    ( "src"
+                    , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
+                        src_s );
+                    ( "age"
+                    , Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
+                        (Ops_common.format_age
+                           ~now_unix:model.freshness.last_wall_unix r.ts
+                           ~lang:model.lang) );
+                  ];
+              })
+            rows_data
+        in
+        let sel =
+          Int.max 0
+            (Int.min (List.length rows_data - 1) model.work.history_selected_index)
+        in
+        ignore
+          (Table.draw grid ~rect:t_inner ~theme ~caps:Ops_common.default_caps
+             ~lang:model.lang ~scroll:model.work.history_scroll_offset
+             ~selected:sel ~focused:(Model.pane_focused model 0)
+             ~col_gap:(Layout.table_col_gap bp) ~columns:cols tbl_rows)
+  end;
+  if not (Rect.is_empty bot_rect) then begin
+    let b_spec : Card.spec =
+      {
+        (Card.default_spec
+           ~title:
+             (Printf.sprintf "%s (%d)"
+                (Ops_common.say model ~ko:"불확실 늦은 승인 시도 (HITL Recovery)"
+                   ~en:"Uncertain Late-Approval Attempts (HITL Recovery)")
+                (List.length late_rows)))
+        with
+        hotkey =
+          Some
+            "/gate ack-uncertain <keeper> <consume_id> · /gate restore-late";
+      }
+    in
+    let b_inner = Card.draw ~cache grid ~rect:bot_rect ~theme b_spec in
+    if not (Rect.is_empty b_inner) then begin
+      match model.work.late_approval_attempts with
+      | Observed.Failed { reason; retryable; at } ->
+          let clean = Ops_common.scrub_secrets_in_text reason in
+          Ops_common.draw_observed_empty grid ~rect:b_inner ~theme
+            ~lang:model.lang
+            (Observed.failed ~reason:clean ~retryable ~at)
+            ~empty_msg:(Say.make ~ko:clean ~en:clean)
+      | Observed.Value _ | Observed.Loading _ | Observed.Absent
+      | Observed.Unreported ->
+          let card_bg = Color.of_rgb theme.surface_1 in
+          let content = Card.pad_inner ~pad_x:(Ops_common.pad_x_for ~model b_inner) b_inner in
+          List.iteri
+            (fun i (a : Wire_work.late_approval_attempt) ->
+              if content.y + i < Rect.bottom content then
+                ignore
+                  (Ops_common.put_line ~clip:content grid ~x:content.x
+                     ~y:(content.y + i) ~max_w:content.w
+                     ~style:(Typography.primary ~bg:card_bg theme)
+                     (Printf.sprintf "@%s · %s · consume=%s · %s" a.keeper_name
+                        a.tool_name a.consume_id a.outcome)))
+            late_rows
+    end
+  end
+
 let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
   if Rect.is_empty rect then ()
   else
     let theme = Ops_common.theme_of_model model in
     let bp = Ops_common.layout_bp model in
+    let bar_rect, body_rect = Work_store.inbox_subview_rects rect in
+    render_inbox_gate_bar ~model ~rect:bar_rect ~theme grid;
+    match model.work.inbox_subview with
+    | Work_store.Inbox_rules ->
+        render_inbox_rules ~model ~cache ~rect:body_rect ~theme grid
+    | Work_store.Inbox_history ->
+        render_inbox_history ~model ~cache ~rect:body_rect ~theme grid
+    | Work_store.Inbox_queue ->
     if Attention.is_empty model.attention then
-      render_inbox_empty ~model ~cache ~rect ~theme grid
+      render_inbox_empty ~model ~cache ~rect:body_rect ~theme grid
     else
+      let rect = body_rect in
       let filtered_attn =
         Attention.filtered_items ~query:model.work.filter_query model.attention
       in
@@ -2654,6 +3136,24 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                     ~value:(Printf.sprintf "@%s · %s (%s)" g.keeper g.tool_name g.phase)
                     ~val_fg:theme.status_attention ~val_attrs:Attr.bold ();
                   incr y;
+                  (match Work_store.retry_meta_for_id ~id:g.id model.work with
+                   | Some rm when !y < bot ->
+                       let jdg =
+                         Option.value rm.summary_judgment ~default:"pending"
+                       in
+                       let txt =
+                         Option.value rm.summary_text ~default:""
+                         |> Ops_common.scrub_secrets_in_text
+                       in
+                       Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme
+                         ~bg:card_bg ~label_w:12
+                         ~key:(Ops_common.say model ~ko:"자동판정" ~en:"AutoJudge")
+                         ~value:
+                           (if String.equal txt "" then jdg
+                            else Printf.sprintf "[%s] %s" jdg txt)
+                         ();
+                       incr y
+                   | Some _ | None -> ());
                   let raw_in =
                     match g.input_preview with Some s -> s | None -> "{}"
                   in
@@ -2677,7 +3177,11 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                          ~theme ~bg:card_bg
                          [
                            ("Y", Ops_common.say model ~ko:"승인" ~en:"Approve");
-                           ("N", Ops_common.say model ~ko:"거절 (사유)" ~en:"Reject");
+                           ("N", Ops_common.say model ~ko:"거절" ~en:"Reject");
+                           ( "/gate"
+                           , Ops_common.say model
+                               ~ko:"approve-always / retry"
+                               ~en:"approve-always / retry" );
                          ])
               | Attention.Payload_ask ask ->
                   let q_total = List.length ask.questions in

@@ -43,6 +43,25 @@ let keeper_ask_answer_path = "/api/v1/keepers/ask-answer"
 let keeper_tool_approvals_path = "/api/v1/keepers/tool-approvals"
 let keeper_tool_approval_path = "/api/v1/keepers/tool-approval"
 let gate_path = "/api/v1/dashboard/gate"
+let gate_resolve_path = "/api/v1/dashboard/gate/resolve"
+let gate_mode_path = "/api/v1/dashboard/gate/mode"
+let gate_external_mode_path = "/api/v1/dashboard/gate/external-mode"
+let gate_rules_delete_path = "/api/v1/dashboard/gate/rules/delete"
+let gate_retry_path = "/api/v1/dashboard/gate/retry"
+
+let gate_tool_events_path ?(window_minutes = 60) () =
+  Printf.sprintf "/api/v1/dashboard/gate/tool-events?window=%d"
+    (max 1 window_minutes)
+
+let keeper_tool_approval_mode_path = "/api/v1/keepers/tool-approval-mode"
+let hitl_late_approval_attempts_path =
+  "/api/v1/keepers/hitl/late-approval-attempts"
+let hitl_late_approval_restore_path =
+  "/api/v1/keepers/hitl/late-approval-restore"
+
+let hitl_approval_recover_path ~approval_id =
+  Printf.sprintf "/api/v1/keepers/hitl/approvals/%s/recover"
+    (percent_encode (String.trim approval_id))
 
 let candle_ledger_path ?limit () =
   match limit with
@@ -2236,3 +2255,544 @@ let decode_verification_tlc_results json =
   let* items = optional_list_field body "entries" in
   let* entries = decode_list "entries" decode_tlc_result_entry items in
   Ok { updated_at; results_dir; entries }
+
+(* ========================================================================= *)
+(* Wave 4 Layer 2: HITL Gate Policy, Rules CRUD, Modes, Retry & Recovery     *)
+(* ========================================================================= *)
+
+type gate_mode =
+  | Gate_manual
+  | Gate_auto_judge
+  | Gate_always_allow
+
+let gate_mode_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "manual" -> Some Gate_manual
+  | "auto_judge" -> Some Gate_auto_judge
+  | "always_allow" -> Some Gate_always_allow
+  | _ -> None
+
+let gate_mode_to_string = function
+  | Gate_manual -> "manual"
+  | Gate_auto_judge -> "auto_judge"
+  | Gate_always_allow -> "always_allow"
+
+let equal_gate_mode a b =
+  match (a, b) with
+  | Gate_manual, Gate_manual
+  | Gate_auto_judge, Gate_auto_judge
+  | Gate_always_allow, Gate_always_allow ->
+      true
+  | Gate_manual, (Gate_auto_judge | Gate_always_allow)
+  | Gate_auto_judge, (Gate_manual | Gate_always_allow)
+  | Gate_always_allow, (Gate_manual | Gate_auto_judge) ->
+      false
+
+type gate_mode_status = {
+  mode : gate_mode;
+  configured : bool;
+  state : string;
+  read_error : string option;
+}
+
+type judge_lane_status =
+  | Judge_lane_available of { lane_id : string; slots : string list }
+  | Judge_lane_unavailable of { lane_id : string; reason : string }
+
+type hitl_status = {
+  gate_mode : gate_mode_status;
+  external_gate_mode : gate_mode_status;
+  judge_lane : judge_lane_status;
+}
+
+type gate_retry_meta = {
+  id : string;
+  input_hash : string;
+  sequence : int;
+  exact_attempt : Yojson.Safe.t;
+  summary_attempt_disposition : Yojson.Safe.t;
+  summary_text : string option;
+  summary_judgment : string option;
+}
+
+type gate_rule = {
+  id : string;
+  keeper_name : string;
+  tool_name : string;
+  request_fingerprint : string;
+  created_at : float;
+  created_by : string option;
+  source_approval_id : string option;
+  expires_at : float option;
+}
+
+type gate_resolved_row = {
+  id : string;
+  event : string;
+  keeper : string;
+  tool : string;
+  decision : string;
+  decision_kind : string option;
+  decision_reason : string option;
+  decision_source : string option;
+  authorization_source : string option;
+  actor : string option;
+  ts : float;
+}
+
+type gate_snapshot = {
+  generated_at : string option;
+  pending : gate_pending list;
+  retry_meta : gate_retry_meta list;
+  rules : gate_rule list;
+  rules_error : string option;
+  recent_resolved : gate_resolved_row list;
+  recent_resolved_error : string option;
+  hitl : hitl_status option;
+}
+
+let decode_gate_mode_status json =
+  let* mode = decode_enum ~field:"mode" gate_mode_of_string json in
+  let* configured = required_bool_field json "configured" in
+  let* state = required_nonblank_string json "state" in
+  let* read_error = optional_nonblank_string json "read_error" in
+  Ok { mode; configured; state; read_error }
+
+let decode_judge_lane_status json =
+  let* status = required_nonblank_string json "status" in
+  let* lane_id = required_nonblank_string json "lane_id" in
+  match status with
+  | "available" ->
+      let* slots = optional_string_list json "slots" in
+      Ok (Judge_lane_available { lane_id; slots })
+  | "unavailable" ->
+      let* reason =
+        match optional_nonblank_string json "reason" with
+        | Ok (Some r) -> Ok r
+        | Ok None -> Ok "unavailable"
+        | Error _ as err -> err
+      in
+      Ok (Judge_lane_unavailable { lane_id; reason })
+  | other -> Error (Printf.sprintf "unknown judge_lane status %S" other)
+
+let decode_hitl_status json =
+  let* gm_obj = required_object_field json "gate_mode" in
+  let* gate_mode = decode_gate_mode_status gm_obj in
+  let* egm_obj = required_object_field json "external_gate_mode" in
+  let* external_gate_mode = decode_gate_mode_status egm_obj in
+  let* jl_obj = required_object_field json "judge_lane" in
+  let* judge_lane = decode_judge_lane_status jl_obj in
+  Ok { gate_mode; external_gate_mode; judge_lane }
+
+let decode_gate_retry_meta_opt json =
+  match optional_nonblank_string json "id" with
+  | Error _ | Ok None -> None
+  | Ok (Some id) -> (
+      match optional_nonblank_string json "input_hash" with
+      | Error _ | Ok None -> None
+      | Ok (Some input_hash) -> (
+          match optional_int_field json "sequence" with
+          | Error _ | Ok None -> None
+          | Ok (Some sequence)
+            when sequence > 0
+                 && has_field json "exact_attempt"
+                 && has_field json "summary_attempt_disposition" ->
+              let exact_attempt = member "exact_attempt" json in
+              let summary_attempt_disposition =
+                member "summary_attempt_disposition" json
+              in
+              let summary_text, summary_judgment =
+                match member "summary_status" json with
+                | `Assoc _ as st -> (
+                    match optional_object_field st "summary" with
+                    | Ok (Some s) ->
+                        let txt =
+                          match optional_nonblank_string s "context_summary" with
+                          | Ok v -> v
+                          | Error _ -> None
+                        in
+                        let jdg =
+                          match optional_nonblank_string s "judgment" with
+                          | Ok v -> v
+                          | Error _ -> None
+                        in
+                        (txt, jdg)
+                    | Ok None | Error _ -> (
+                        let r =
+                          match optional_nonblank_string st "reason" with
+                          | Ok v -> v
+                          | Error _ -> None
+                        in
+                        (r, None)))
+                | `String _
+                | `Null
+                | `Bool _
+                | `Int _
+                | `Intlit _
+                | `Float _
+                | `List _ ->
+                    (None, None)
+              in
+              Some
+                {
+                  id;
+                  input_hash;
+                  sequence;
+                  exact_attempt;
+                  summary_attempt_disposition;
+                  summary_text;
+                  summary_judgment;
+                }
+          | Ok (Some _) -> None))
+
+let decode_gate_rule json =
+  let* id = required_nonblank_string json "id" in
+  let* keeper_name = required_nonblank_string json "keeper_name" in
+  let* tool_name = required_nonblank_string json "tool_name" in
+  let* request_fingerprint =
+    required_nonblank_string json "request_fingerprint"
+  in
+  let* created_at = required_finite_float json "created_at" in
+  let* created_by = optional_nonblank_string json "created_by" in
+  let* source_approval_id =
+    optional_nonblank_string json "source_approval_id"
+  in
+  let* expires_at = optional_finite_float json "expires_at" in
+  Ok
+    {
+      id;
+      keeper_name;
+      tool_name;
+      request_fingerprint;
+      created_at;
+      created_by;
+      source_approval_id;
+      expires_at;
+    }
+
+let decode_gate_resolved_row json =
+  let* id = required_nonblank_string json "id" in
+  let* event = required_nonblank_string json "event" in
+  let* keeper =
+    if has_field json "keeper" then required_nonblank_string json "keeper"
+    else required_nonblank_string json "keeper_name"
+  in
+  let* tool =
+    if has_field json "tool" then required_nonblank_string json "tool"
+    else required_nonblank_string json "tool_name"
+  in
+  let* decision = required_string_field json "decision" in
+  let* decision_kind = optional_nonblank_string json "decision_kind" in
+  let* decision_reason = optional_nonblank_string json "decision_reason" in
+  let* decision_source = optional_nonblank_string json "decision_source" in
+  let* authorization_source =
+    optional_nonblank_string json "authorization_source"
+  in
+  let* actor = optional_nonblank_string json "actor" in
+  let* ts =
+    if has_field json "ts" then required_finite_float json "ts"
+    else required_finite_float json "resolved_at"
+  in
+  Ok
+    {
+      id;
+      event;
+      keeper;
+      tool;
+      decision;
+      decision_kind;
+      decision_reason;
+      decision_source;
+      authorization_source;
+      actor;
+      ts;
+    }
+
+let decode_gate_snapshot json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* generated_at = optional_nonblank_string body "generated_at" in
+  let* queue_state = required_object_field body "approval_queue_state" in
+  let* qstate = required_nonblank_string queue_state "state" in
+  let* pending, retry_meta =
+    match qstate with
+    | "ready" ->
+        let* items = required_list_field body "approval_queue" in
+        let* pend = decode_list "approval_queue" decode_gate_pending items in
+        let meta = List.filter_map decode_gate_retry_meta_opt items in
+        Ok (pend, meta)
+    | "unavailable" ->
+        let* title = required_nonblank_string queue_state "title" in
+        let* detail = required_nonblank_string queue_state "operator_detail" in
+        Error (title ^ ": " ^ detail)
+    | other -> Error (Printf.sprintf "unknown approval_queue_state %S" other)
+  in
+  let* rules, rules_error =
+    if not (has_field body "approval_rules_state") then Ok ([], None)
+    else
+      let* rstate_obj = required_object_field body "approval_rules_state" in
+      let* rstate = required_nonblank_string rstate_obj "state" in
+      match rstate with
+      | "ready" ->
+          let* items = optional_list_field body "approval_rules" in
+          let* rs = decode_list "approval_rules" decode_gate_rule items in
+          Ok (rs, None)
+      | "unavailable" ->
+          let* err = optional_nonblank_string rstate_obj "error" in
+          Ok ([], Some (Option.value err ~default:"rules store unavailable"))
+      | other ->
+          Error (Printf.sprintf "unknown approval_rules_state %S" other)
+  in
+  let* recent_resolved, recent_resolved_error =
+    if not (has_field body "recent_resolved_state") then Ok ([], None)
+    else
+      let* hstate_obj = required_object_field body "recent_resolved_state" in
+      let* hstate = required_nonblank_string hstate_obj "state" in
+      match hstate with
+      | "ready" ->
+          let* items = optional_list_field body "recent_resolved" in
+          let* rows =
+            decode_list "recent_resolved" decode_gate_resolved_row items
+          in
+          Ok (rows, None)
+      | "unavailable" ->
+          let* err = optional_nonblank_string hstate_obj "error" in
+          Ok ([], Some (Option.value err ~default:"audit store unavailable"))
+      | other ->
+          Error (Printf.sprintf "unknown recent_resolved_state %S" other)
+  in
+  let* hitl =
+    match optional_object_field body "hitl" with
+    | Error _ as err -> err
+    | Ok None -> Ok None
+    | Ok (Some h) ->
+        let* decoded = decode_hitl_status h in
+        Ok (Some decoded)
+  in
+  Ok
+    {
+      generated_at;
+      pending;
+      retry_meta;
+      rules;
+      rules_error;
+      recent_resolved;
+      recent_resolved_error;
+      hitl;
+    }
+
+let encode_gate_resolution_with_policy ~id ~approved ~reason ~remember_rule
+    ?rule_expires_at ?expected_workspace () =
+  let base =
+    [
+      ("id", `String id);
+      ("decision", `String (if approved then "approve" else "reject"));
+    ]
+  in
+  let reason_f =
+    match reason with
+    | Some r when not (String.equal (String.trim r) "") ->
+        [ ("reason", `String (String.trim r)) ]
+    | Some _ | None -> []
+  in
+  let rule_f =
+    if not remember_rule then []
+    else
+      [ ("remember_rule", `Bool true) ]
+      @
+      match rule_expires_at with
+      | Some ts when Float.is_finite ts -> [ ("rule_expires_at", `Float ts) ]
+      | Some _ | None -> []
+  in
+  let ws_f =
+    match expected_workspace with
+    | Some ws -> [ ("expected_workspace", encode_expected_workspace ws) ]
+    | None -> []
+  in
+  `Assoc (base @ reason_f @ rule_f @ ws_f)
+
+let encode_gate_mode ~mode = `Assoc [ ("mode", `String (gate_mode_to_string mode)) ]
+
+let encode_gate_rule_delete ~id = `Assoc [ ("id", `String (String.trim id)) ]
+
+let encode_gate_retry ?expected_workspace (meta : gate_retry_meta) =
+  (* Exact 5-field closed allowlist (+ optional expected_workspace) enforced by
+     [Server_dashboard_http.dashboard_gate_retry_http_json]. *)
+  let base =
+    [
+      ("id", `String meta.id);
+      ("input_hash", `String meta.input_hash);
+      ("sequence", `Int meta.sequence);
+      ("exact_attempt", meta.exact_attempt);
+      ("summary_attempt_disposition", meta.summary_attempt_disposition);
+    ]
+  in
+  let ws_f =
+    match expected_workspace with
+    | Some ws -> [ ("expected_workspace", encode_expected_workspace ws) ]
+    | None -> []
+  in
+  `Assoc (base @ ws_f)
+
+type keeper_tool_approval_mode =
+  | Approval_auto
+  | Approval_yolo
+
+let keeper_tool_approval_mode_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "auto" -> Some Approval_auto
+  | "yolo" -> Some Approval_yolo
+  | _ -> None
+
+let keeper_tool_approval_mode_to_string = function
+  | Approval_auto -> "auto"
+  | Approval_yolo -> "yolo"
+
+let equal_keeper_tool_approval_mode a b =
+  match (a, b) with
+  | Approval_auto, Approval_auto | Approval_yolo, Approval_yolo -> true
+  | Approval_auto, Approval_yolo | Approval_yolo, Approval_auto -> false
+
+type tool_approval_modes_snapshot = {
+  overrides : (string * keeper_tool_approval_mode) list;
+  default_mode : keeper_tool_approval_mode;
+  restore_error : string option;
+}
+
+let decode_tool_approval_modes json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* default_mode =
+    decode_enum ~field:"default" keeper_tool_approval_mode_of_string body
+  in
+  let* restore_error = optional_nonblank_string body "restore_error" in
+  let* items = required_list_field body "overrides" in
+  let* overrides =
+    decode_list "overrides"
+      (fun item ->
+        let* keeper = required_nonblank_string item "keeper" in
+        let* mode =
+          decode_enum ~field:"mode" keeper_tool_approval_mode_of_string item
+        in
+        Ok (keeper, mode))
+      items
+  in
+  Ok { overrides; default_mode; restore_error }
+
+let encode_tool_approval_mode_set ~keeper ~mode =
+  `Assoc
+    [
+      ("name", `String (String.trim keeper));
+      ("mode", `String (keeper_tool_approval_mode_to_string mode));
+    ]
+
+type late_approval_attempt = {
+  consume_id : string;
+  keeper_name : string;
+  tool_name : string;
+  args_fingerprint : string;
+  consumed_at : float;
+  outcome : string;
+}
+
+let decode_late_approval_attempt json =
+  let* consume_id = required_nonblank_string json "consume_id" in
+  let* keeper_name = required_nonblank_string json "keeper_name" in
+  let* tool_name = required_nonblank_string json "tool_name" in
+  let* args_fingerprint = required_nonblank_string json "args_fingerprint" in
+  let* consumed_at = required_finite_float json "consumed_at" in
+  let* outcome = required_nonblank_string json "outcome" in
+  Ok
+    {
+      consume_id;
+      keeper_name;
+      tool_name;
+      args_fingerprint;
+      consumed_at;
+      outcome;
+    }
+
+let decode_late_approval_attempts json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* items = required_list_field body "attempts" in
+  decode_list "attempts" decode_late_approval_attempt items
+
+let encode_hitl_ack_uncertain ~keeper_name ~consume_id =
+  (* Strict 3-field closed object enforced by
+     [Server_dashboard_http_hitl_recover.parse_ack_fields]. *)
+  `Assoc
+    [
+      ("action", `String "ack_uncertain");
+      ("keeper_name", `String (String.trim keeper_name));
+      ("consume_id", `String (String.trim consume_id));
+    ]
+
+type gate_tool_rejection_row = {
+  tool : string;
+  reason : string;
+  count : int;
+}
+
+type gate_queue_latency_summary = {
+  depth : int;
+  p50_wait_sec : float option;
+  p95_wait_sec : float option;
+  oldest_pending_sec : float option;
+}
+
+type gate_tool_events_snapshot = {
+  generated_at : string;
+  window_minutes : int;
+  tool_rejections : gate_tool_rejection_row list;
+  queue_summary : gate_queue_latency_summary option;
+  queue_error : string option;
+}
+
+let decode_gate_tool_events json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* generated_at = required_nonblank_string body "generated_at" in
+  let* window_minutes = required_nonnegative_int_field body "window_minutes" in
+  let* rej_items = optional_list_field body "tool_rejections" in
+  let* tool_rejections =
+    decode_list "tool_rejections"
+      (fun r ->
+        let* tool = required_nonblank_string r "tool" in
+        let* reason = required_string_field r "reason" in
+        let* count = required_nonnegative_int_field r "count" in
+        Ok { tool; reason; count })
+      rej_items
+  in
+  let* qstate_obj = required_object_field body "approval_queue_state" in
+  let* qstate = required_nonblank_string qstate_obj "state" in
+  let* queue_summary, queue_error =
+    match qstate with
+    | "ready" ->
+        let* aq = required_object_field body "approval_queue" in
+        let* depth = required_nonnegative_int_field aq "depth" in
+        let* p50_wait_sec = optional_finite_float aq "p50_wait_sec" in
+        let* p95_wait_sec = optional_finite_float aq "p95_wait_sec" in
+        let* oldest_pending_sec =
+          optional_finite_float aq "oldest_pending_sec"
+        in
+        Ok
+          ( Some { depth; p50_wait_sec; p95_wait_sec; oldest_pending_sec }
+          , None )
+    | "unavailable" ->
+        let* title = optional_nonblank_string qstate_obj "title" in
+        let* detail = optional_nonblank_string qstate_obj "operator_detail" in
+        let msg =
+          match (title, detail) with
+          | Some t, Some d -> t ^ ": " ^ d
+          | Some t, None -> t
+          | None, Some d -> d
+          | None, None -> "approval queue unavailable"
+        in
+        Ok (None, Some msg)
+    | other -> Error (Printf.sprintf "unknown approval_queue_state %S" other)
+  in
+  Ok
+    {
+      generated_at;
+      window_minutes;
+      tool_rejections;
+      queue_summary;
+      queue_error;
+    }

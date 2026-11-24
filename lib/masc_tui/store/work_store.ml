@@ -49,8 +49,14 @@ type verification_dive_tab =
   | Verif_tab_specs
   | Verif_tab_tlc
 
+type inbox_subview =
+  | Inbox_queue
+  | Inbox_rules
+  | Inbox_history
+
 type t = {
   active_tab : Nav.work_tab;
+  inbox_subview : inbox_subview;
   planning : Wire_work.planning_snapshot Observed.t;
   backlog_counts : Wire_work.task_backlog_counts option;
   verifications : Wire_work.verification_request list Observed.t;
@@ -68,11 +74,21 @@ type t = {
   asks : Wire_work.ask_row list Observed.t;
   tool_approvals : Wire_work.held_tool_approval list Observed.t;
   gate_pending : Wire_work.gate_pending list Observed.t;
+  gate_snapshot : Wire_work.gate_snapshot Observed.t;
+  tool_approval_modes : Wire_work.tool_approval_modes_snapshot Observed.t;
+  tool_approval_modes_absent : bool;
+  late_approval_attempts : Wire_work.late_approval_attempt list Observed.t;
+  late_approval_absent : bool;
+  late_approval_auth_denied : bool;
   recent_decisions_24h : decision_audit_entry list;
   candle_ledger : Wire_work.candle_ledger Observed.t;
   candle_fallback_404 : bool;
   selected_index : int;
   scroll_offset : int;
+  rule_selected_index : int;
+  rule_scroll_offset : int;
+  history_selected_index : int;
+  history_scroll_offset : int;
   verif_selected_index : int;
   verif_scroll_offset : int;
   detail_scroll_offset : int;
@@ -98,6 +114,7 @@ let max_recent_decisions = 100
 let empty =
   {
     active_tab = Nav.Work_pipeline;
+    inbox_subview = Inbox_queue;
     planning = Observed.unreported;
     backlog_counts = None;
     verifications = Observed.unreported;
@@ -114,11 +131,21 @@ let empty =
     asks = Observed.unreported;
     tool_approvals = Observed.unreported;
     gate_pending = Observed.unreported;
+    gate_snapshot = Observed.unreported;
+    tool_approval_modes = Observed.unreported;
+    tool_approval_modes_absent = false;
+    late_approval_attempts = Observed.unreported;
+    late_approval_absent = false;
+    late_approval_auth_denied = false;
     recent_decisions_24h = [];
     candle_ledger = Observed.unreported;
     candle_fallback_404 = false;
     selected_index = 0;
     scroll_offset = 0;
+    rule_selected_index = 0;
+    rule_scroll_offset = 0;
+    history_selected_index = 0;
+    history_scroll_offset = 0;
     verif_selected_index = 0;
     verif_scroll_offset = 0;
     detail_scroll_offset = 0;
@@ -148,6 +175,10 @@ let set_tab active_tab t =
     active_tab;
     selected_index = 0;
     scroll_offset = 0;
+    rule_selected_index = 0;
+    rule_scroll_offset = 0;
+    history_selected_index = 0;
+    history_scroll_offset = 0;
     verif_selected_index = 0;
     verif_scroll_offset = 0;
     detail_scroll_offset = 0;
@@ -771,7 +802,7 @@ let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
           else 0
         in
         { t with selected_index; schedules_scroll_offset; detail_scroll_offset }
-  | Nav.Work_inbox ->
+  | Nav.Work_inbox -> (
       if pane_index = 1 then
         let max_scroll =
           match max_detail_scroll with Some ms -> max 0 ms | None -> 0
@@ -782,21 +813,84 @@ let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
         in
         { t with detail_scroll_offset }
       else
-        let len =
-          List.length (open_asks t)
-          + List.length (tool_approvals_list t)
-          + List.length (gate_pending_list t)
-        in
-        let selected_index = clamp_index len (t.selected_index + delta) in
-        let scroll_offset =
-          adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
-        in
-        let detail_scroll_offset =
-          if Int.equal selected_index t.selected_index then
-            t.detail_scroll_offset
-          else 0
-        in
-        { t with selected_index; scroll_offset; detail_scroll_offset }
+        match t.inbox_subview with
+        | Inbox_queue ->
+            let len =
+              List.length (open_asks t)
+              + List.length (tool_approvals_list t)
+              + List.length (gate_pending_list t)
+            in
+            let selected_index = clamp_index len (t.selected_index + delta) in
+            let scroll_offset =
+              adjust_scroll ?viewport_rows ~scroll:t.scroll_offset
+                selected_index
+            in
+            let detail_scroll_offset =
+              if Int.equal selected_index t.selected_index then
+                t.detail_scroll_offset
+              else 0
+            in
+            { t with selected_index; scroll_offset; detail_scroll_offset }
+        | Inbox_rules ->
+            let rules =
+              match Observed.to_option t.gate_snapshot with
+              | None -> []
+              | Some snap ->
+                  let q = String.trim t.filter_query in
+                  if String.equal q "" then snap.rules
+                  else
+                    List.filter
+                      (fun (r : Wire_work.gate_rule) ->
+                        contains_ci ~needle:q r.id
+                        || contains_ci ~needle:q r.keeper_name
+                        || contains_ci ~needle:q r.tool_name
+                        || contains_ci ~needle:q r.request_fingerprint)
+                      snap.rules
+            in
+            let len = List.length rules in
+            let rule_selected_index =
+              clamp_index len (t.rule_selected_index + delta)
+            in
+            let rule_scroll_offset =
+              adjust_scroll ?viewport_rows ~scroll:t.rule_scroll_offset
+                rule_selected_index
+            in
+            {
+              t with
+              rule_selected_index;
+              rule_scroll_offset;
+              detail_scroll_offset = 0;
+            }
+        | Inbox_history ->
+            let rows =
+              match Observed.to_option t.gate_snapshot with
+              | None -> []
+              | Some snap ->
+                  let q = String.trim t.filter_query in
+                  if String.equal q "" then snap.recent_resolved
+                  else
+                    List.filter
+                      (fun (r : Wire_work.gate_resolved_row) ->
+                        contains_ci ~needle:q r.id
+                        || contains_ci ~needle:q r.keeper
+                        || contains_ci ~needle:q r.tool
+                        || contains_ci ~needle:q r.decision)
+                      snap.recent_resolved
+            in
+            let len = List.length rows in
+            let history_selected_index =
+              clamp_index len (t.history_selected_index + delta)
+            in
+            let history_scroll_offset =
+              adjust_scroll ?viewport_rows ~scroll:t.history_scroll_offset
+                history_selected_index
+            in
+            {
+              t with
+              history_selected_index;
+              history_scroll_offset;
+              detail_scroll_offset = 0;
+            })
   | Nav.Work_candle_scorecard ->
       if pane_index = 1 then
         let max_scroll =
@@ -866,6 +960,10 @@ let set_filter filter_query t =
     filter_query;
     selected_index = 0;
     scroll_offset = 0;
+    rule_selected_index = 0;
+    rule_scroll_offset = 0;
+    history_selected_index = 0;
+    history_scroll_offset = 0;
     verif_selected_index = 0;
     verif_scroll_offset = 0;
     detail_scroll_offset = 0;
@@ -1092,6 +1190,12 @@ let mark_stale_all t =
     asks = Observed.mark_stale t.asks;
     tool_approvals = Observed.mark_stale t.tool_approvals;
     gate_pending = Observed.mark_stale t.gate_pending;
+    gate_snapshot = Observed.mark_stale t.gate_snapshot;
+    tool_approval_modes = Observed.mark_stale t.tool_approval_modes;
+    tool_approval_modes_absent = false;
+    late_approval_attempts = Observed.mark_stale t.late_approval_attempts;
+    late_approval_absent = false;
+    late_approval_auth_denied = false;
     candle_ledger = Observed.mark_stale t.candle_ledger;
   }
 
@@ -1172,3 +1276,161 @@ let apply_verification_specs ~observed_at specs t =
 
 let apply_verification_tlc_results ~observed_at tlc t =
   { t with verification_tlc_results = Observed.value ~observed_at tlc }
+
+let equal_inbox_subview a b =
+  match (a, b) with
+  | Inbox_queue, Inbox_queue
+  | Inbox_rules, Inbox_rules
+  | Inbox_history, Inbox_history ->
+      true
+  | Inbox_queue, (Inbox_rules | Inbox_history)
+  | Inbox_rules, (Inbox_queue | Inbox_history)
+  | Inbox_history, (Inbox_queue | Inbox_rules) ->
+      false
+
+let inbox_subview_rects (rect : Rect.t) =
+  Rect.split_v rect ~top_h:(if rect.h >= 4 then 1 else 0)
+
+let set_inbox_subview inbox_subview t =
+  { t with inbox_subview; detail_scroll_offset = 0 }
+
+let cycle_inbox_subview t =
+  let next =
+    match t.inbox_subview with
+    | Inbox_queue -> Inbox_rules
+    | Inbox_rules -> Inbox_history
+    | Inbox_history -> Inbox_queue
+  in
+  set_inbox_subview next t
+
+let apply_gate_snapshot ~observed_at (snap : Wire_work.gate_snapshot) t =
+  let base =
+    {
+      t with
+      gate_snapshot = Observed.value ~observed_at snap;
+      gate_pending = Observed.value ~observed_at snap.pending;
+    }
+  in
+  let q = String.trim base.filter_query in
+  let filt_rules_len =
+    if String.equal q "" then List.length snap.rules
+    else
+      List.length
+        (List.filter
+           (fun (r : Wire_work.gate_rule) ->
+             contains_ci ~needle:q r.id
+             || contains_ci ~needle:q r.keeper_name
+             || contains_ci ~needle:q r.tool_name
+             || contains_ci ~needle:q r.request_fingerprint)
+           snap.rules)
+  in
+  let filt_hist_len =
+    if String.equal q "" then List.length snap.recent_resolved
+    else
+      List.length
+        (List.filter
+           (fun (r : Wire_work.gate_resolved_row) ->
+             contains_ci ~needle:q r.id
+             || contains_ci ~needle:q r.keeper
+             || contains_ci ~needle:q r.tool
+             || contains_ci ~needle:q r.decision)
+           snap.recent_resolved)
+  in
+  let rule_selected_index = clamp_index filt_rules_len base.rule_selected_index in
+  let rule_scroll_offset =
+    Int.min rule_selected_index (Int.max 0 base.rule_scroll_offset)
+  in
+  let history_selected_index =
+    clamp_index filt_hist_len base.history_selected_index
+  in
+  let history_scroll_offset =
+    Int.min history_selected_index (Int.max 0 base.history_scroll_offset)
+  in
+  {
+    base with
+    rule_selected_index;
+    rule_scroll_offset;
+    history_selected_index;
+    history_scroll_offset;
+  }
+
+let apply_tool_approval_modes ~observed_at modes t =
+  {
+    t with
+    tool_approval_modes = Observed.value ~observed_at modes;
+    tool_approval_modes_absent = false;
+  }
+
+let apply_late_approval_attempts ~observed_at attempts t =
+  {
+    t with
+    late_approval_attempts = Observed.value ~observed_at attempts;
+    late_approval_absent = false;
+    late_approval_auth_denied = false;
+  }
+
+let gate_rules_list t =
+  match Observed.to_option t.gate_snapshot with
+  | Some snap -> snap.rules
+  | None -> []
+
+let filtered_gate_rules t =
+  let all = gate_rules_list t in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then all
+  else
+    List.filter
+      (fun (r : Wire_work.gate_rule) ->
+        contains_ci ~needle:q r.id
+        || contains_ci ~needle:q r.keeper_name
+        || contains_ci ~needle:q r.tool_name
+        || contains_ci ~needle:q r.request_fingerprint)
+      all
+
+let selected_gate_rule t =
+  let xs = filtered_gate_rules t in
+  List.nth_opt xs (clamp_index (List.length xs) t.rule_selected_index)
+
+let gate_resolved_list t =
+  match Observed.to_option t.gate_snapshot with
+  | Some snap -> snap.recent_resolved
+  | None -> []
+
+let filtered_gate_resolved t =
+  let all = gate_resolved_list t in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then all
+  else
+    List.filter
+      (fun (r : Wire_work.gate_resolved_row) ->
+        contains_ci ~needle:q r.id
+        || contains_ci ~needle:q r.keeper
+        || contains_ci ~needle:q r.tool
+        || contains_ci ~needle:q r.decision)
+      all
+
+let late_approval_attempts_list t =
+  match Observed.to_option t.late_approval_attempts with
+  | Some xs -> xs
+  | None -> []
+
+let retry_meta_for_id ~id t =
+  match Observed.to_option t.gate_snapshot with
+  | None -> None
+  | Some snap ->
+      List.find_opt
+        (fun (m : Wire_work.gate_retry_meta) -> String.equal m.id id)
+        snap.retry_meta
+
+let hitl_status t =
+  match Observed.to_option t.gate_snapshot with
+  | Some snap -> snap.hitl
+  | None -> None
+
+let tool_approval_mode_for ~keeper t =
+  match Observed.to_option t.tool_approval_modes with
+  | None -> Wire_work.Approval_auto
+  | Some snap -> (
+      match List.assoc_opt keeper snap.overrides with
+      | Some m -> m
+      | None -> snap.default_mode)

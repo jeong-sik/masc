@@ -2093,31 +2093,36 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                     ~now m
               | _ -> (m, []))
           | Nav.Work_inbox -> (
-              match printable_char with
-              | Some "C" -> (
-                  match
-                    Attention.current_filtered_item ~query:m.work.filter_query
-                      m.attention
-                  with
-                  | Some (entry : Attention.entry) -> (
-                      match entry.payload with
-                      | Attention.Payload_ask ask ->
-                          Update_nav.push_dive m
-                            (Nav.Dive_keeper
-                               { name = ask.keeper; tab = Nav.Keeper_chat })
-                      | Attention.Payload_tool_approval ta ->
-                          Update_nav.push_dive m
-                            (Nav.Dive_keeper
-                               { name = ta.keeper; tab = Nav.Keeper_chat })
-                      | Attention.Payload_gate g ->
-                          if not (String.equal (String.trim g.keeper) "") then
+              if
+                Work_store.equal_inbox_subview m.work.inbox_subview
+                  Work_store.Inbox_queue
+              then
+                match printable_char with
+                | Some "C" -> (
+                    match
+                      Attention.current_filtered_item ~query:m.work.filter_query
+                        m.attention
+                    with
+                    | Some (entry : Attention.entry) -> (
+                        match entry.payload with
+                        | Attention.Payload_ask ask ->
                             Update_nav.push_dive m
                               (Nav.Dive_keeper
-                                 { name = g.keeper; tab = Nav.Keeper_chat })
-                          else (m, [])
-                      | Attention.Payload_goal_confirmation _ -> (m, []))
-                  | None -> (m, []))
-              | _ -> (m, []))
+                                 { name = ask.keeper; tab = Nav.Keeper_chat })
+                        | Attention.Payload_tool_approval ta ->
+                            Update_nav.push_dive m
+                              (Nav.Dive_keeper
+                                 { name = ta.keeper; tab = Nav.Keeper_chat })
+                        | Attention.Payload_gate g ->
+                            if not (String.equal (String.trim g.keeper) "") then
+                              Update_nav.push_dive m
+                                (Nav.Dive_keeper
+                                   { name = g.keeper; tab = Nav.Keeper_chat })
+                            else (m, [])
+                        | Attention.Payload_goal_confirmation _ -> (m, []))
+                    | None -> (m, []))
+                | _ -> (m, [])
+              else (m, []))
           | Nav.Work_schedules
           | Nav.Work_candle_scorecard
           | Nav.Work_harness ->
@@ -2643,6 +2648,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Keeper_control_confirm _
                         | Nav.Keeper_clear_form _
                         | Nav.Keeper_operator_note_form _
+                        | Nav.Tool_execute_form _
                         | Nav.Runtime_lane_create
                         | Nav.Runtime_lane_edit _
                         | Nav.Runtime_lane_delete _
@@ -2870,6 +2876,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Keeper_control_confirm _
                         | Nav.Keeper_clear_form _
                         | Nav.Keeper_operator_note_form _
+                        | Nav.Tool_execute_form _
                         | Nav.Runtime_lane_edit _
                         | Nav.Runtime_lane_delete _
                         | Nav.Task_create_form
@@ -3797,6 +3804,7 @@ let apply_paste ~now:_ (m : Model.t) text =
                   | Nav.Keeper_control_confirm _
                   | Nav.Keeper_clear_form _
                   | Nav.Keeper_operator_note_form _
+                  | Nav.Tool_execute_form _
                   | Nav.Runtime_lane_create
                   | Nav.Runtime_lane_edit _
                   | Nav.Runtime_lane_delete _

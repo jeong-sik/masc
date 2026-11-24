@@ -713,8 +713,18 @@ let fetches_for_workspace ~force (m : Model.t) =
                (needs_fetch ~force m.work.tool_approvals)
                Cmd.Get_tool_approvals
           |> add_if
-               (needs_fetch ~force m.work.gate_pending)
+               (needs_fetch ~force m.work.gate_snapshot)
                Cmd.Get_gate_pending
+          |> add_if
+               ((force || not m.work.tool_approval_modes_absent)
+               && needs_fetch ~force m.work.tool_approval_modes)
+               Cmd.Get_tool_approval_modes
+          |> add_if
+               ((force
+                || (not m.work.late_approval_absent)
+                   && not m.work.late_approval_auth_denied)
+               && needs_fetch ~force m.work.late_approval_attempts)
+               Cmd.Get_late_approval_attempts
       | Nav.Work_candle_scorecard ->
           []
           |> candle_ledger_reqs ~force m
@@ -1018,14 +1028,56 @@ let fetches_for_workspace ~force (m : Model.t) =
           in
           let surface_keeper =
             match m.runtime.tools_subview with
-            | Runtime_store.Tools_keeper_skills ->
+            | Runtime_store.Tools_keeper_skills
+            | Runtime_store.Tools_quality_gate ->
                 Runtime_store.selected_tools_surface_keeper ~keeper_names
                   m.runtime
             | Runtime_store.Tools_usage_calls
             | Runtime_store.Tools_catalog_tree ->
                 None
           in
-          []
+          let quality_reqs =
+            match m.runtime.tools_subview with
+            | Runtime_store.Tools_quality_gate ->
+                let wait_req =
+                  match surface_keeper with
+                  | None -> []
+                  | Some keeper ->
+                      let wait_needed =
+                        match m.runtime.keeper_waiting_inventory with
+                        | Observed.Value { data = k, _; stale = false; _ } ->
+                            force || not (String.equal k keeper)
+                        | Observed.Loading _
+                        | Observed.Value { stale = true; _ }
+                        | Observed.Absent
+                        | Observed.Unreported
+                        | Observed.Failed _ ->
+                            (force || not m.runtime.keeper_waiting_inventory_absent)
+                            && needs_fetch ~force m.runtime.keeper_waiting_inventory
+                      in
+                      if wait_needed then
+                        [ Cmd.Get_keeper_waiting_inventory { keeper } ]
+                      else []
+                in
+                let gate_win_mins = Int.min 1440 (since_hours * 60) in
+                ([]
+                |> add_if
+                     ((force || not m.runtime.tool_quality_absent)
+                     && needs_fetch ~force m.runtime.tool_quality)
+                     (Cmd.Get_tool_quality
+                        { n = Some 5000; window_hours = Some since_hours })
+                |> add_if
+                     ((force || not m.runtime.gate_tool_events_absent)
+                     && needs_fetch ~force m.runtime.gate_tool_events)
+                     (Cmd.Get_gate_tool_events
+                        { window_minutes = Some gate_win_mins }))
+                @ wait_req
+            | Runtime_store.Tools_usage_calls
+            | Runtime_store.Tools_catalog_tree
+            | Runtime_store.Tools_keeper_skills ->
+                []
+          in
+          ([]
           |> add_if
                (needs_fetch ~force m.runtime.tool_series_summary)
                (Cmd.Get_tool_series_filtered
@@ -1033,7 +1085,8 @@ let fetches_for_workspace ~force (m : Model.t) =
           |> add_if
                (needs_fetch ~force m.runtime.tools_dashboard)
                (Cmd.Get_tools_catalog { keeper = surface_keeper })
-          |> add_if (needs_fetch ~force m.runtime.skills) Cmd.Get_skills
+          |> add_if (needs_fetch ~force m.runtime.skills) Cmd.Get_skills)
+          @ quality_reqs
       | Nav.Runtime_connectors ->
           let name_reqs =
             match Runtime_store.selected_connector m.runtime with
@@ -1279,7 +1332,47 @@ let fetches_for_current_view ?(force = false) (m : Model.t) =
             ]
     else []
   in
-  get_cmds @ post_cmds
+  let mcp_schema_cmds =
+    let on_tool_surface =
+      match Model.active_dive m with
+      | Some (Nav.Dive_runtime (Nav.Tool_dive _)) -> true
+      | Some
+          ( Nav.Dive_keeper _
+          | Nav.Dive_work _
+          | Nav.Dive_knowledge _
+          | Nav.Dive_runtime (Nav.Fusion_dive _)
+          | Nav.Dive_infra _ ) ->
+          false
+      | None ->
+          Nav.equal_workspace m.nav.workspace Nav.Runtime
+          && Nav.equal_runtime_tab m.runtime.active_tab
+               Nav.Runtime_tools_usage
+    in
+    let should_fetch_mcp =
+      on_tool_surface
+      &&
+      match m.runtime.mcp_tools_list with
+      | Observed.Value { stale = false; _ }
+      | Observed.Loading _
+      | Observed.Failed { retryable = false; _ } ->
+          force
+      | Observed.Value { stale = true; _ }
+      | Observed.Absent
+      | Observed.Unreported
+      | Observed.Failed { retryable = true; _ } ->
+          true
+    in
+    if should_fetch_mcp then
+      [
+        Cmd.Http_post
+          {
+            epoch = m.epoch;
+            req = Cmd.Post_mcp_tools_list { rpc_id = m.runtime.mcp_next_rpc_id };
+          };
+      ]
+    else []
+  in
+  get_cmds @ post_cmds @ mcp_schema_cmds
 
 let overlay_fetches (m : Model.t) =
   List.map

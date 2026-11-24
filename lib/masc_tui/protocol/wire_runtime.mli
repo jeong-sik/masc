@@ -34,6 +34,10 @@ val tool_series_path : bucket:[ `Hour | `Day ] -> since_hours:int -> string
 val tool_series_filtered_path :
   bucket:[ `Hour | `Day ] -> since_hours:int -> ?tool:string -> unit -> string
 val dashboard_tools_path : ?keeper:string -> unit -> string
+val tool_quality_path : ?n:int -> ?window_hours:int -> unit -> string
+val keeper_waiting_inventory_path : keeper:string -> string
+val mcp_rpc_path : string
+val mcp_protocol_version : string
 val skills_path : string
 val connector_unbind_path : connector:string -> string
 val connector_names_path : connector:string -> ?scope:string -> ?limit:int -> unit -> string
@@ -1194,3 +1198,100 @@ type connector_names_page = {
 
 val decode_connector_names_page :
   Yojson.Safe.t -> (connector_names_page, string) result
+
+(** {1 Wave 4 Layer 2: Tool Quality, Keeper Waiting Inventory & Stateless MCP 2026-07-28} *)
+
+type tool_quality_tool_row = {
+  name : string;
+  calls : int;
+  success_pct : float;
+  avg_ms : float;
+  output_truncated_count : int;
+  avg_output_chars : float;
+}
+
+type tool_quality_rate_row = {
+  name : string;
+  calls : int;
+  success_pct : float;
+}
+
+type tool_quality_failure_cat = {
+  category : string;
+  count : int;
+}
+
+type tool_quality_snapshot = {
+  generated_at : string;
+  sampling_mode : string;
+  total : int;
+  success : int;
+  failure : int;
+  deferred : int;
+  unsettled : int;
+  malformed : int;
+  success_rate : float;
+  by_tool : tool_quality_tool_row list;
+  by_keeper : tool_quality_rate_row list;
+  by_runtime : tool_quality_rate_row list;
+  failure_categories : tool_quality_failure_cat list;
+}
+
+val decode_tool_quality : Yojson.Safe.t -> (tool_quality_snapshot, string) result
+
+type keeper_waiting_row = {
+  keeper_name : string option;
+  source : string;
+  waiting_on : string;
+  what : string;
+  wake_producer : string;
+  since : float option;
+  due_at : float option;
+  next_action : string;
+}
+
+type keeper_waiting_inventory = {
+  schema : string;
+  keeper_count : int;
+  waiting_keeper_count : int;
+  row_count : int;
+  total_row_count : int;
+  oldest_age_seconds : float option;
+  rows : keeper_waiting_row list;
+}
+
+val decode_keeper_waiting_inventory :
+  Yojson.Safe.t -> (keeper_waiting_inventory, string) result
+
+val mcp_headers :
+  method_:string -> ?tool_name:string -> unit -> (string * string) list
+(** Required HTTP headers for stateless MCP [2026-07-28] [POST /mcp], including
+    [Accept], [MCP-Protocol-Version], [Mcp-Method], optional [Mcp-Name], and
+    [X-Masc-Force-Json: true]. *)
+
+val encode_mcp_tools_list_body : id:int -> Yojson.Safe.t
+
+val encode_mcp_tools_call_body :
+  id:int -> tool_name:string -> arguments:Yojson.Safe.t -> Yojson.Safe.t
+
+type mcp_tool_schema_entry = {
+  name : string;
+  description : string option;
+  input_schema : Yojson.Safe.t;
+  required_params : string list;
+  param_names : string list;
+}
+
+val decode_mcp_tools_list :
+  Yojson.Safe.t -> (mcp_tool_schema_entry list, string) result
+
+type mcp_tool_call_result = {
+  tool_name : string;
+  is_error : bool;
+  content_texts : string list;
+  structured_json : Yojson.Safe.t option;
+  raw_error : string option;
+}
+
+val decode_mcp_tools_call_result :
+  tool_name:string -> Yojson.Safe.t -> (mcp_tool_call_result, string) result

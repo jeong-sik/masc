@@ -122,7 +122,10 @@ let timeout_sec_for_get : Cmd.get_request -> float = function
   | Cmd.Get_oauth_attached_tools _
   | Cmd.Get_oauth_attempt_status _
   | Cmd.Get_board_quarantines _
-  | Cmd.Get_keeper_operator_note _ ->
+  | Cmd.Get_keeper_operator_note _
+  | Cmd.Get_tool_approval_modes
+  | Cmd.Get_late_approval_attempts
+  | Cmd.Get_keeper_waiting_inventory _ ->
       standard_timeout_sec
   (* Heavy tier: dashboard/analytics aggregates, disk/git/ripgrep scans,
      memory/keeper context & history reads, probes, and published artifacts *)
@@ -209,7 +212,9 @@ let timeout_sec_for_get : Cmd.get_request -> float = function
   | Cmd.Get_addon_package_preview _
   | Cmd.Get_connector_names _
   | Cmd.Get_keeper_turn_flow _
-  | Cmd.Get_keeper_checkpoints _ ->
+  | Cmd.Get_keeper_checkpoints _
+  | Cmd.Get_tool_quality _
+  | Cmd.Get_gate_tool_events _ ->
       heavy_timeout_sec
 
 let timeout_sec_for_post : Cmd.post_request -> float = function
@@ -257,7 +262,14 @@ let timeout_sec_for_post : Cmd.post_request -> float = function
   | Cmd.Post_board_recovery _
   | Cmd.Post_keeper_directive _
   | Cmd.Post_keeper_operator_note _
-  | Cmd.Post_keeper_run_next _ ->
+  | Cmd.Post_keeper_run_next _
+  | Cmd.Post_gate_resolution_policy _
+  | Cmd.Post_gate_mode _
+  | Cmd.Post_gate_rule_delete _
+  | Cmd.Post_gate_retry _
+  | Cmd.Post_keeper_tool_approval_mode _
+  | Cmd.Post_hitl_ack_uncertain _
+  | Cmd.Post_hitl_late_approval_restore ->
       standard_timeout_sec
   (* Heavy tier: probes, fusion launches, config patches, memory recovery,
      OAuth/GitHub/repo/browser CLI or external-service calls *)
@@ -273,7 +285,9 @@ let timeout_sec_for_post : Cmd.post_request -> float = function
   | Cmd.Post_github_token _
   | Cmd.Post_keeper_control_lifecycle _
   | Cmd.Post_keeper_clear _
-  | Cmd.Post_keeper_checkpoints _ ->
+  | Cmd.Post_keeper_checkpoints _
+  | Cmd.Post_mcp_tools_list _
+  | Cmd.Post_mcp_tools_call _ ->
       heavy_timeout_sec
 
 let stream_spec_of_id = function
@@ -438,6 +452,7 @@ type t = {
   stream_epoch : Epoch.t Atomic.t;
   owned_server : Masc_server_lifecycle.owned_server option Atomic.t;
   active_memory_diagram_cancel : bool Atomic.t option Atomic.t;
+  mcp_tools_list_in_flight : bool Atomic.t;
   sse_hub : Sse_hub.t;
   voice_runner : Voice_runner.t;
   editor_handoff : editor_handoff;
@@ -611,6 +626,7 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
   let editor_active = Atomic.make false in
   let in_flight_gets_mu = Stdlib.Mutex.create () in
   let in_flight_gets = Hashtbl.create 32 in
+  let mcp_tools_list_in_flight = Atomic.make false in
   let sse_hub =
     Sse_hub.create ~io ~clock ~endpoint:initial_ep
       ~on_event:(publish_hub_event ~bus ~stream_epoch)
@@ -649,6 +665,7 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
     stream_epoch;
     owned_server;
     active_memory_diagram_cancel;
+    mcp_tools_list_in_flight;
     sse_hub;
     voice_runner;
     editor_handoff;
@@ -708,6 +725,17 @@ let post_and_decode ~timeout_sec t ~path ~body ~decode =
   let body_str = Yojson.Safe.to_string body in
   match
     Http_client.post_raw ~io:t.io ~clock:t.clock ~timeout_sec
+      ~content_type:"application/json" ~body:body_str ep ~path
+  with
+  | Error err -> Error (msg_error_of_http err)
+  | Ok raw -> decode_raw_json t ~decode raw
+
+let post_mcp_and_decode ~timeout_sec t ~method_ ~tool_name ~path ~body ~decode =
+  let ep = Atomic.get t.endpoint in
+  let body_str = Yojson.Safe.to_string body in
+  let extra_headers = Wire_runtime.mcp_headers ~method_ ?tool_name () in
+  match
+    Http_client.post_raw ~io:t.io ~clock:t.clock ~timeout_sec ~extra_headers
       ~content_type:"application/json" ~body:body_str ep ~path
   with
   | Error err -> Error (msg_error_of_http err)
@@ -973,7 +1001,12 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_connector_names _
   | Cmd.Get_keeper_turn_flow _
   | Cmd.Get_keeper_checkpoints _
-  | Cmd.Get_keeper_operator_note _ ->
+  | Cmd.Get_keeper_operator_note _
+  | Cmd.Get_tool_approval_modes
+  | Cmd.Get_late_approval_attempts
+  | Cmd.Get_tool_quality _
+  | Cmd.Get_gate_tool_events _
+  | Cmd.Get_keeper_waiting_inventory _ ->
       Some base, Key_get path
 
 let rec execute_get t ~epoch req =
@@ -1216,9 +1249,9 @@ let rec execute_get t ~epoch req =
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_gate_pending ->
             let reply =
-              Msg.Reply_gate_pending
+              Msg.Reply_gate_snapshot
                 (fetch_and_decode_get t ~path
-                   ~decode:Wire_work.decode_gate_pending_list)
+                   ~decode:Wire_work.decode_gate_snapshot)
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_candle_ledger _ ->
@@ -2081,6 +2114,45 @@ let rec execute_get t ~epoch req =
                 }
             in
             Msg.Http_reply { epoch; reply }
+        | Cmd.Get_tool_approval_modes ->
+            let reply =
+              Msg.Reply_tool_approval_modes
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_work.decode_tool_approval_modes)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_late_approval_attempts ->
+            let reply =
+              Msg.Reply_late_approval_attempts
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_work.decode_late_approval_attempts)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_tool_quality _ ->
+            let reply =
+              Msg.Reply_tool_quality
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_tool_quality)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_gate_tool_events _ ->
+            let reply =
+              Msg.Reply_gate_tool_events
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_work.decode_gate_tool_events)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_waiting_inventory { keeper } ->
+            let reply =
+              Msg.Reply_keeper_waiting_inventory
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_runtime.decode_keeper_waiting_inventory;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
       in
       Ui_bus.publish_snapshot t.bus ~key:snapshot_key msg;
       completed_ok := true);
@@ -2249,6 +2321,9 @@ let execute_post t ~epoch req =
   let timeout_sec = timeout_sec_for_post req in
   let post_and_decode t ~path ~body ~decode =
     post_and_decode ~timeout_sec t ~path ~body ~decode
+  in
+  let post_mcp_and_decode t ~method_ ~tool_name ~path ~body ~decode =
+    post_mcp_and_decode ~timeout_sec t ~method_ ~tool_name ~path ~body ~decode
   in
   let post_ack t ~path ~body = post_ack ~timeout_sec t ~path ~body in
   let post_mcp_ack tool_name =
@@ -2906,6 +2981,139 @@ let execute_post t ~epoch req =
                    refresh_roster = false;
                    result;
                  })
+        | Cmd.Post_gate_resolution_policy { id; approved; remember_rule; _ } ->
+            let result = post_ack t ~path ~body in
+            let label, decision_kind =
+              if approved && remember_rule then
+                ( Say.make ~ko:"게이트 승인 + Always-Approve 규칙 저장됨"
+                    ~en:"Gate approved + Always-Approve rule saved"
+                , Work_store.Decision_gate_approved )
+              else if approved then
+                ( Say.make ~ko:"게이트 승인됨" ~en:"Gate approved"
+                , Work_store.Decision_gate_approved )
+              else
+                ( Say.make ~ko:"게이트 거절됨" ~en:"Gate rejected"
+                , Work_store.Decision_gate_rejected )
+            in
+            Some
+              (Msg.Reply_work_mutation
+                 {
+                   label;
+                   attention_id = Some ("gate:" ^ id);
+                   decision_kind = Some decision_kind;
+                   target_id = Some id;
+                   keeper = None;
+                   result;
+                 })
+        | Cmd.Post_gate_mode { external_lane; mode } ->
+            let result = post_ack t ~path ~body in
+            let mode_s = Wire_work.gate_mode_to_string mode in
+            let label =
+              if external_lane then
+                Say.make
+                  ~ko:("외부 서비스 Gate 모드 변경됨: " ^ mode_s)
+                  ~en:("External Gate mode set: " ^ mode_s)
+              else
+                Say.make
+                  ~ko:("워크스페이스 Gate 모드 변경됨: " ^ mode_s)
+                  ~en:("Workspace Gate mode set: " ^ mode_s)
+            in
+            Some
+              (Msg.Reply_gate_mutation
+                 {
+                   label;
+                   refresh_gate = true;
+                   refresh_modes = false;
+                   refresh_late = false;
+                   result;
+                 })
+        | Cmd.Post_gate_rule_delete { id } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_gate_mutation
+                 {
+                   label =
+                     Say.make ~ko:("Always-Approve 규칙 삭제됨: " ^ id)
+                       ~en:("Always-Approve rule deleted: " ^ id);
+                   refresh_gate = true;
+                   refresh_modes = false;
+                   refresh_late = false;
+                   result;
+                 })
+        | Cmd.Post_gate_retry { meta; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_gate_mutation
+                 {
+                   label =
+                     Say.make ~ko:("Auto-Judge 재시도 요청됨: " ^ meta.id)
+                       ~en:("Auto-Judge retry requested: " ^ meta.id);
+                   refresh_gate = true;
+                   refresh_modes = false;
+                   refresh_late = false;
+                   result;
+                 })
+        | Cmd.Post_keeper_tool_approval_mode { keeper; mode } ->
+            let result = post_ack t ~path ~body in
+            let mode_s = Wire_work.keeper_tool_approval_mode_to_string mode in
+            Some
+              (Msg.Reply_gate_mutation
+                 {
+                   label =
+                     Say.make
+                       ~ko:(Printf.sprintf "키퍼 승인 모드 변경됨: %s=%s" keeper
+                              mode_s)
+                       ~en:(Printf.sprintf "Keeper approval mode set: %s=%s"
+                              keeper mode_s);
+                   refresh_gate = false;
+                   refresh_modes = true;
+                   refresh_late = false;
+                   result;
+                 })
+        | Cmd.Post_hitl_ack_uncertain { consume_id; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_gate_mutation
+                 {
+                   label =
+                     Say.make ~ko:("불확실 늦은 승인 확인됨: " ^ consume_id)
+                       ~en:("Uncertain late-approval acknowledged: " ^ consume_id);
+                   refresh_gate = false;
+                   refresh_modes = false;
+                   refresh_late = true;
+                   result;
+                 })
+        | Cmd.Post_hitl_late_approval_restore ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_gate_mutation
+                 {
+                   label =
+                     Say.make ~ko:"늦은 승인 저널 복원 완료"
+                       ~en:"Late-approval journal restored";
+                   refresh_gate = false;
+                   refresh_modes = false;
+                   refresh_late = true;
+                   result;
+                 })
+        | Cmd.Post_mcp_tools_list _ ->
+            if Atomic.compare_and_set t.mcp_tools_list_in_flight false true then
+              Fun.protect
+                ~finally:(fun () ->
+                  Atomic.set t.mcp_tools_list_in_flight false)
+                (fun () ->
+                  let result =
+                    post_mcp_and_decode t ~method_:"tools/list" ~tool_name:None ~path ~body
+                      ~decode:Wire_runtime.decode_mcp_tools_list
+                  in
+                  Some (Msg.Reply_mcp_tools_list result))
+            else None
+        | Cmd.Post_mcp_tools_call { tool_name; _ } ->
+            let result =
+              post_mcp_and_decode t ~method_:"tools/call" ~tool_name:(Some tool_name) ~path ~body
+                ~decode:(Wire_runtime.decode_mcp_tools_call_result ~tool_name)
+            in
+            Some (Msg.Reply_mcp_tools_call { tool_name; result })
       in
       Option.iter
         (fun reply ->

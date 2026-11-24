@@ -273,7 +273,7 @@ let test_keymap_footer_width_budget () =
 (* --- 2. Slash Commands Tests --- *)
 
 let test_slash_22_commands () =
-  Alcotest.(check int) "exactly 23 slash commands" 23 (List.length Slash.all);
+  Alcotest.(check int) "exactly 25 slash commands" 25 (List.length Slash.all);
   let cases =
     [
       ("/pulse", Slash.Pulse);
@@ -294,6 +294,23 @@ let test_slash_22_commands () =
       ( "/ctl resume alpha",
         Slash.Ctl { action = Slash.Ctl_resume; target = Some "alpha" } );
       ("/ctl checkpoints", Slash.Ctl { action = Slash.Ctl_checkpoints; target = None });
+      ("/gate mode manual", Slash.Gate (Slash.Gate_mode_set "manual"));
+      ( "/gate external-mode auto_judge",
+        Slash.Gate (Slash.Gate_external_mode_set "auto_judge") );
+      ("/gate del-rule rule-1", Slash.Gate (Slash.Gate_rule_delete "rule-1"));
+      ( "/gate approve-always appr-1",
+        Slash.Gate (Slash.Gate_approve_always "appr-1") );
+      ("/gate retry appr-1", Slash.Gate (Slash.Gate_retry "appr-1"));
+      ( "/gate keeper-mode alpha yolo",
+        Slash.Gate (Slash.Gate_keeper_mode_set { keeper = "alpha"; mode = "yolo" }) );
+      ( "/gate ack-uncertain alpha cons-1",
+        Slash.Gate
+          (Slash.Gate_ack_uncertain { keeper = "alpha"; consume_id = "cons-1" }) );
+      ("/gate restore-late", Slash.Gate Slash.Gate_restore_late);
+      ("/exec masc_status", Slash.Exec { tool_name = "masc_status"; args_json = None });
+      ( "/exec masc_board_list {\"limit\":5}",
+        Slash.Exec
+          { tool_name = "masc_board_list"; args_json = Some "{\"limit\":5}" } );
       ("/tools full", Slash.Tools (Some Slash.Tools_full));
       ("/clear", Slash.Clear);
       ("/theme arcade_hi", Slash.Theme (Some Theme.Arcade_hi));
@@ -303,6 +320,16 @@ let test_slash_22_commands () =
       ("/quit", Slash.Quit);
     ]
   in
+  Alcotest.(check bool) "/gate strict invalid subcommand rejected" true
+    (match Slash.parse "/gate bogus" with
+    | Error (Slash.Invalid_argument _) -> true
+    | Ok _ | Error _ -> false);
+  Alcotest.(check bool) "/exec missing tool name rejected" true
+    (match Slash.parse "/exec" with
+    | Error (Slash.Invalid_argument _) -> true
+    | Ok _ | Error _ -> false);
+  Alcotest.(check bool) "/gate completion lists mode" true
+    (List.mem "/gate mode" (Slash.complete ~prefix:"/gate m"));
   List.iter
     (fun (input, expected) ->
       match Slash.parse input with

@@ -220,7 +220,55 @@ let test_config_schema_server_to_tui_roundtrip () =
          (match Wc.decode_config_schema raw_keeper with
           | Ok ks ->
             Alcotest.(check bool) "keeper target decoded" true
-              (ks.target = Wc.Target_keeper "alpha")
+              (ks.target = Wc.Target_keeper "alpha");
+            let keeper_fields =
+              List.concat_map (fun (s : Wc.schema_section) -> s.fields) ks.sections
+            in
+            let keeper_keys =
+              List.map (fun (f : Wc.schema_field) -> f.full_key) keeper_fields
+            in
+            List.iter
+              (fun expected_key ->
+                 Alcotest.(check bool)
+                   ("keeper schema exposes " ^ expected_key)
+                   true
+                   (List.mem expected_key keeper_keys))
+              [ "keeper.tools.native"
+              ; "keeper.tools.masc_enabled"
+              ; "keeper.tools.deny"
+              ; "keeper.tools.attached_allow"
+              ; "keeper.skills.names"
+              ];
+            Alcotest.(check bool)
+              "legacy invalid keeper.masc_tools_enabled is absent"
+              false
+              (List.mem "keeper.masc_tools_enabled" keeper_keys);
+            let patch_req : Wc.patch_request =
+              { target = Wc.Target_keeper "alpha"
+              ; keeper_name = Some "alpha"
+              ; dry_run = true
+              ; expected_sha256 = Some ks.file_sha256
+              ; ops =
+                  [ Wc.Set_scalar { table = "keeper.tools"; key = "native"; value = "read" }
+                  ; Wc.Set_bool { table = "keeper.tools"; key = "masc_enabled"; value = false }
+                  ; Wc.Set_string_array { table = "keeper.tools"; key = "deny"; values = [ "masc_board_post" ] }
+                  ; Wc.Set_string_array { table = "keeper.skills"; key = "names"; values = [ "review" ] }
+                  ]
+              }
+            in
+            let patch_res =
+              Candle_cfg_api.config_patch_json
+                ~config
+                ~actor:"tui-test"
+                ~body_str:(Yojson.Safe.to_string (Wc.encode_patch_request patch_req))
+                ()
+              |> ok_or_fail "POST /api/v1/config/patch (keeper tools/skills dry_run)"
+            in
+            (match Wc.decode_patch_response patch_res with
+             | Ok pr ->
+               Alcotest.(check bool) "keeper tools/skills dry_run changed" true pr.changed;
+               Alcotest.(check bool) "keeper tools/skills dry_run flag" true pr.dry_run
+             | Error msg -> Alcotest.fail ("decode_patch_response failed: " ^ msg))
           | Error msg -> Alcotest.fail ("keeper schema decode failed: " ^ msg));
          let raw_create =
            Candle_cfg_api.config_schema_json ~base_path ~target:Target_keeper_create ()

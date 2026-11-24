@@ -62,6 +62,22 @@ let dashboard_tools_path ?keeper () =
   | None -> "/api/v1/dashboard/tools"
   | Some k -> "/api/v1/dashboard/tools?keeper=" ^ percent_encode k
 
+let tool_quality_path ?n ?window_hours () =
+  match (window_hours, n) with
+  | Some h, (Some _ | None) when h > 0 ->
+      Printf.sprintf "/api/v1/dashboard/tool-quality?window_hours=%d" h
+  | (Some _ | None), Some count when count > 0 ->
+      Printf.sprintf "/api/v1/dashboard/tool-quality?n=%d" count
+  | Some _, Some _ | Some _, None | None, Some _ | None, None ->
+      "/api/v1/dashboard/tool-quality?n=5000"
+
+let keeper_waiting_inventory_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/waiting-inventory"
+    (percent_encode (String.trim keeper))
+
+let mcp_rpc_path = "/mcp"
+let mcp_protocol_version = "2026-07-28"
+
 let skills_path = "/api/v1/skills"
 
 let connector_unbind_path ~connector =
@@ -4774,3 +4790,341 @@ let decode_connector_names_page json =
   let* items = optional_list_field body "mappings" in
   let* mappings = decode_list "mappings" decode_connector_name_mapping items in
   Ok { connector_id; kind; total; has_more; mappings }
+
+(* ========================================================================= *)
+(* Wave 4 Layer 2: Tool Quality, Keeper Waiting Inventory & Stateless MCP    *)
+(* ========================================================================= *)
+
+type tool_quality_tool_row = {
+  name : string;
+  calls : int;
+  success_pct : float;
+  avg_ms : float;
+  output_truncated_count : int;
+  avg_output_chars : float;
+}
+
+type tool_quality_rate_row = {
+  name : string;
+  calls : int;
+  success_pct : float;
+}
+
+type tool_quality_failure_cat = {
+  category : string;
+  count : int;
+}
+
+type tool_quality_snapshot = {
+  generated_at : string;
+  sampling_mode : string;
+  total : int;
+  success : int;
+  failure : int;
+  deferred : int;
+  unsettled : int;
+  malformed : int;
+  success_rate : float;
+  by_tool : tool_quality_tool_row list;
+  by_keeper : tool_quality_rate_row list;
+  by_runtime : tool_quality_rate_row list;
+  failure_categories : tool_quality_failure_cat list;
+}
+
+let decode_tool_quality_tool_row json =
+  let* name = required_nonblank_string json "name" in
+  let* calls = required_nonnegative_int_field json "calls" in
+  let* success_pct = required_finite_float json "success_pct" in
+  let* avg_ms = required_nonnegative_float json "avg_ms" in
+  let output_truncated_count = int_or_zero json "output_truncated_count" in
+  let avg_output_chars =
+    match optional_finite_float json "avg_output_chars" with
+    | Ok (Some v) -> v
+    | Ok None | Error _ -> 0.0
+  in
+  Ok
+    {
+      name;
+      calls;
+      success_pct;
+      avg_ms;
+      output_truncated_count;
+      avg_output_chars;
+    }
+
+let decode_tool_quality_rate_row json =
+  let* name = required_nonblank_string json "name" in
+  let* calls = required_nonnegative_int_field json "calls" in
+  let* success_pct = required_finite_float json "success_pct" in
+  Ok { name; calls; success_pct }
+
+let decode_tool_quality_failure_cat json =
+  let* category = required_string_field json "category" in
+  let* count = required_nonnegative_int_field json "count" in
+  Ok { category; count }
+
+let decode_tool_quality json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* generated_at = required_nonblank_string body "generated_at" in
+  let sampling_mode =
+    match optional_nonblank_string body "sampling_mode" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "recent_n"
+  in
+  let* total = required_nonnegative_int_field body "total" in
+  let* success = required_nonnegative_int_field body "success" in
+  let* failure = required_nonnegative_int_field body "failure" in
+  let deferred = int_or_zero body "deferred" in
+  let unsettled = int_or_zero body "unsettled" in
+  let malformed = int_or_zero body "malformed" in
+  let* success_rate = required_finite_float body "success_rate" in
+  let* by_tool_items = optional_list_field body "by_tool" in
+  let* by_tool = decode_list "by_tool" decode_tool_quality_tool_row by_tool_items in
+  let* by_keeper_items = optional_list_field body "by_keeper" in
+  let* by_keeper =
+    decode_list "by_keeper" decode_tool_quality_rate_row by_keeper_items
+  in
+  let* by_runtime_items = optional_list_field body "by_runtime" in
+  let* by_runtime =
+    decode_list "by_runtime" decode_tool_quality_rate_row by_runtime_items
+  in
+  let* fc_items = optional_list_field body "failure_categories" in
+  let* failure_categories =
+    decode_list "failure_categories" decode_tool_quality_failure_cat fc_items
+  in
+  Ok
+    {
+      generated_at;
+      sampling_mode;
+      total;
+      success;
+      failure;
+      deferred;
+      unsettled;
+      malformed;
+      success_rate;
+      by_tool;
+      by_keeper;
+      by_runtime;
+      failure_categories;
+    }
+
+type keeper_waiting_row = {
+  keeper_name : string option;
+  source : string;
+  waiting_on : string;
+  what : string;
+  wake_producer : string;
+  since : float option;
+  due_at : float option;
+  next_action : string;
+}
+
+type keeper_waiting_inventory = {
+  schema : string;
+  keeper_count : int;
+  waiting_keeper_count : int;
+  row_count : int;
+  total_row_count : int;
+  oldest_age_seconds : float option;
+  rows : keeper_waiting_row list;
+}
+
+let decode_keeper_waiting_row json =
+  let* keeper_name = optional_nonblank_string json "keeper_name" in
+  let* source = required_nonblank_string json "source" in
+  let* waiting_on = required_nonblank_string json "waiting_on" in
+  let* what = required_string_field json "what" in
+  let* wake_producer = required_nonblank_string json "wake_producer" in
+  let* since = optional_finite_float json "since" in
+  let* due_at = optional_finite_float json "due_at" in
+  let* next_action = required_string_field json "next_action" in
+  Ok
+    {
+      keeper_name;
+      source;
+      waiting_on;
+      what;
+      wake_producer;
+      since;
+      due_at;
+      next_action;
+    }
+
+let decode_keeper_waiting_inventory json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* schema = required_nonblank_string body "schema" in
+  let keeper_count = int_or_zero body "keeper_count" in
+  let waiting_keeper_count = int_or_zero body "waiting_keeper_count" in
+  let row_count = int_or_zero body "row_count" in
+  let total_row_count = int_or_zero body "total_row_count" in
+  let* oldest_age_seconds = optional_finite_float body "oldest_age_seconds" in
+  let* row_items = optional_list_field body "rows" in
+  let* rows = decode_list "rows" decode_keeper_waiting_row row_items in
+  Ok
+    {
+      schema;
+      keeper_count;
+      waiting_keeper_count;
+      row_count;
+      total_row_count;
+      oldest_age_seconds;
+      rows;
+    }
+
+let mcp_headers ~method_ ?tool_name () =
+  let base =
+    [
+      ("Accept", "application/json, text/event-stream");
+      ("MCP-Protocol-Version", mcp_protocol_version);
+      ("Mcp-Method", String.trim method_);
+      ("X-Masc-Force-Json", "true");
+    ]
+  in
+  match tool_name with
+  | Some name when not (String.equal (String.trim name) "") ->
+      base @ [ ("Mcp-Name", String.trim name) ]
+  | Some _ | None -> base
+
+let mcp_request_meta_json () =
+  `Assoc
+    [
+      ("io.modelcontextprotocol/protocolVersion", `String mcp_protocol_version);
+      ("io.modelcontextprotocol/clientCapabilities", `Assoc []);
+    ]
+
+let encode_mcp_tools_list_body ~id =
+  `Assoc
+    [
+      ("jsonrpc", `String "2.0");
+      ("id", `Int id);
+      ("method", `String "tools/list");
+      ("params", `Assoc [ ("_meta", mcp_request_meta_json ()) ]);
+    ]
+
+let encode_mcp_tools_call_body ~id ~tool_name ~arguments =
+  `Assoc
+    [
+      ("jsonrpc", `String "2.0");
+      ("id", `Int id);
+      ("method", `String "tools/call");
+      ( "params",
+        `Assoc
+          [
+            ("name", `String (String.trim tool_name));
+            ("arguments", arguments);
+            ("_meta", mcp_request_meta_json ());
+          ] );
+    ]
+
+type mcp_tool_schema_entry = {
+  name : string;
+  description : string option;
+  input_schema : Yojson.Safe.t;
+  required_params : string list;
+  param_names : string list;
+}
+
+let decode_mcp_tool_schema_entry json =
+  let* name = required_nonblank_string json "name" in
+  let* description = optional_nonblank_string json "description" in
+  let input_schema =
+    if has_field json "inputSchema" then member "inputSchema" json
+    else `Assoc []
+  in
+  let* required_params =
+    match input_schema with
+    | `Assoc _ -> optional_string_list input_schema "required"
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        Ok []
+  in
+  let param_names =
+    match input_schema with
+    | `Assoc _ -> (
+        match member "properties" input_schema with
+        | `Assoc props -> List.map fst props
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _
+          ->
+            [])
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        []
+  in
+  Ok { name; description; input_schema; required_params; param_names }
+
+let extract_jsonrpc_error_opt json =
+  match optional_object_field json "error" with
+  | Ok (Some err_obj) ->
+      let code =
+        match optional_int_field err_obj "code" with
+        | Ok (Some c) -> Printf.sprintf "[%d] " c
+        | Ok None | Error _ -> ""
+      in
+      let msg =
+        match optional_nonblank_string err_obj "message" with
+        | Ok (Some m) -> m
+        | Ok None | Error _ -> Yojson.Safe.to_string err_obj
+      in
+      Some (code ^ msg)
+  | Ok None | Error _ -> None
+
+let decode_mcp_tools_list json =
+  match extract_jsonrpc_error_opt json with
+  | Some err -> Error ("MCP tools/list error: " ^ err)
+  | None ->
+      let* res = required_object_field json "result" in
+      let* items = required_list_field res "tools" in
+      decode_list "tools" decode_mcp_tool_schema_entry items
+
+type mcp_tool_call_result = {
+  tool_name : string;
+  is_error : bool;
+  content_texts : string list;
+  structured_json : Yojson.Safe.t option;
+  raw_error : string option;
+}
+
+let decode_mcp_tools_call_result ~tool_name json =
+  match extract_jsonrpc_error_opt json with
+  | Some err ->
+      Ok
+        {
+          tool_name;
+          is_error = true;
+          content_texts = [];
+          structured_json = None;
+          raw_error = Some err;
+        }
+  | None ->
+      let* res = required_object_field json "result" in
+      let is_error =
+        match optional_bool_field res "isError" with
+        | Ok (Some b) -> b
+        | Ok None | Error _ -> false
+      in
+      let* content_items = optional_list_field res "content" in
+      let content_texts =
+        List.filter_map
+          (function
+            | `Assoc _ as c -> (
+                match optional_string_field c "text" with
+                | Ok (Some t) -> Some t
+                | Ok None | Error _ -> Some (Yojson.Safe.to_string c))
+            | `String s -> Some s
+            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ -> None)
+          content_items
+      in
+      let structured_json =
+        if has_field res "structuredContent" then
+          match member "structuredContent" res with
+          | `Null -> None
+          | v -> Some v
+        else None
+      in
+      Ok
+        {
+          tool_name;
+          is_error;
+          content_texts;
+          structured_json;
+          raw_error = None;
+        }

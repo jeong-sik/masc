@@ -185,6 +185,12 @@ type get_request =
     }
   | Get_keeper_checkpoints of { keeper : string }
   | Get_keeper_operator_note of { keeper : string }
+  (* Wave 4 Layer 2: HITL Gate, Tool Approval Modes, Tool Quality, Waiting Inventory *)
+  | Get_tool_approval_modes
+  | Get_late_approval_attempts
+  | Get_tool_quality of { n : int option; window_hours : int option }
+  | Get_gate_tool_events of { window_minutes : int option }
+  | Get_keeper_waiting_inventory of { keeper : string }
 
 type keeper_turn_interrupt_target =
   [ `Turn_token of string | `Operation_id of string ]
@@ -424,6 +430,33 @@ type post_request =
       keeper : string;
       request_id : string;
       interrupt_token : string option;
+    }
+  (* Wave 4 Layer 2: HITL Gate Policy/Rules/Modes/Retry/Recovery & Stateless MCP Executor *)
+  | Post_gate_resolution_policy of {
+      id : string;
+      approved : bool;
+      reason : string option;
+      remember_rule : bool;
+      rule_expires_at : float option;
+      expected_workspace : Wire_work.expected_workspace option;
+    }
+  | Post_gate_mode of { external_lane : bool; mode : Wire_work.gate_mode }
+  | Post_gate_rule_delete of { id : string }
+  | Post_gate_retry of {
+      meta : Wire_work.gate_retry_meta;
+      expected_workspace : Wire_work.expected_workspace option;
+    }
+  | Post_keeper_tool_approval_mode of {
+      keeper : string;
+      mode : Wire_work.keeper_tool_approval_mode;
+    }
+  | Post_hitl_ack_uncertain of { keeper : string; consume_id : string }
+  | Post_hitl_late_approval_restore
+  | Post_mcp_tools_list of { rpc_id : int }
+  | Post_mcp_tools_call of {
+      rpc_id : int;
+      tool_name : string;
+      arguments : Yojson.Safe.t;
     }
 
 type put_request =

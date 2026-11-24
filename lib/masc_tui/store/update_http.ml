@@ -758,7 +758,23 @@ let apply_http_reply ~now (m : Model.t) reply =
         { m with nav; ask_modal; attention; work }
         |> Model.with_toast ~now ~level:Model.Toast_success label
       in
-      (next, [])
+      let follow_cmds =
+        match decision_kind with
+        | Some
+            ( Work_store.Decision_gate_approved
+            | Work_store.Decision_gate_rejected ) ->
+            [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_gate_pending } ]
+        | Some
+            ( Work_store.Decision_ask_answered
+            | Work_store.Decision_tool_approved
+            | Work_store.Decision_tool_denied
+            | Work_store.Decision_goal_confirmed
+            | Work_store.Decision_verification_approved
+            | Work_store.Decision_verification_rejected )
+        | None ->
+            []
+      in
+      (next, follow_cmds)
   | Msg.Reply_work_mutation { label; attention_id; result = Error err; _ } ->
       let failed, cmds =
         fail_decision_post ~now ~attention_id ~context:label err m
@@ -1014,6 +1030,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Keeper_control_confirm _
         | Nav.Keeper_clear_form _
         | Nav.Keeper_operator_note_form _
+        | Nav.Tool_execute_form _
         | Nav.Runtime_lane_create
         | Nav.Runtime_lane_edit _
         | Nav.Runtime_lane_delete _
@@ -1109,6 +1126,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Tool_execute_form _
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
             | Nav.Runtime_lane_delete _
@@ -2324,7 +2342,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Setup_login_input_form _
         | Nav.Code_search_form
         | Nav.Keeper_clear_form _
-        | Nav.Keeper_operator_note_form _ ->
+        | Nav.Keeper_operator_note_form _
+        | Nav.Tool_execute_form _ ->
             false
       in
       let close_modal =
@@ -2399,7 +2418,8 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Setup_login_input_form _
             | Nav.Code_search_form
             | Nav.Keeper_clear_form _
-            | Nav.Keeper_operator_note_form _ ->
+            | Nav.Keeper_operator_note_form _
+            | Nav.Tool_execute_form _ ->
                 modal)
           m.inline_modal
       in
@@ -2470,7 +2490,8 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Setup_login_input_form _
                 | Nav.Code_search_form
                 | Nav.Keeper_clear_form _
-                | Nav.Keeper_operator_note_form _ );
+                | Nav.Keeper_operator_note_form _
+                | Nav.Tool_execute_form _ );
               _;
             }
         | None ->
@@ -2554,7 +2575,8 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Setup_login_input_form _
             | Nav.Code_search_form
             | Nav.Keeper_clear_form _
-            | Nav.Keeper_operator_note_form _ ->
+            | Nav.Keeper_operator_note_form _
+            | Nav.Tool_execute_form _ ->
                 modal)
           m.inline_modal
       in
@@ -2620,7 +2642,8 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Setup_login_input_form _
             | Nav.Code_search_form
             | Nav.Keeper_control_confirm _
-            | Nav.Keeper_clear_form _ ->
+            | Nav.Keeper_clear_form _
+            | Nav.Tool_execute_form _ ->
                 modal)
           m.inline_modal
       in
@@ -2685,7 +2708,8 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Setup_login_input_form _
                 | Nav.Code_search_form
                 | Nav.Keeper_control_confirm _
-                | Nav.Keeper_clear_form _ );
+                | Nav.Keeper_clear_form _
+                | Nav.Tool_execute_form _ );
               _;
             }
         | None ->
@@ -2747,7 +2771,8 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Setup_login_input_form _
             | Nav.Code_search_form
             | Nav.Keeper_control_confirm _
-            | Nav.Keeper_clear_form _ ->
+            | Nav.Keeper_clear_form _
+            | Nav.Tool_execute_form _ ->
                 modal)
           m.inline_modal
       in
@@ -2811,7 +2836,8 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Addon_invoke_action _
                 | Nav.Setup_login_input_form _
                 | Nav.Code_search_form
-                | Nav.Keeper_operator_note_form _ );
+                | Nav.Keeper_operator_note_form _
+                | Nav.Tool_execute_form _ );
               _;
             }
         | None ->
@@ -2912,7 +2938,8 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Addon_invoke_action _
             | Nav.Setup_login_input_form _
             | Nav.Code_search_form
-            | Nav.Keeper_operator_note_form _ ->
+            | Nav.Keeper_operator_note_form _
+            | Nav.Tool_execute_form _ ->
                 modal)
           m.inline_modal
       in
@@ -4327,6 +4354,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Tool_execute_form _
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
             | Nav.Runtime_lane_delete _
@@ -4429,6 +4457,7 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Keeper_control_confirm _
              | Nav.Keeper_clear_form _
              | Nav.Keeper_operator_note_form _
+             | Nav.Tool_execute_form _
              | Nav.Runtime_lane_create
              | Nav.Runtime_lane_edit _
              | Nav.Runtime_lane_delete _
@@ -4526,6 +4555,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Tool_execute_form _
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
             | Nav.Runtime_lane_delete _
@@ -4628,6 +4658,7 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Keeper_control_confirm _
              | Nav.Keeper_clear_form _
              | Nav.Keeper_operator_note_form _
+             | Nav.Tool_execute_form _
              | Nav.Runtime_lane_create
              | Nav.Runtime_lane_edit _
              | Nav.Runtime_lane_delete _
@@ -5797,3 +5828,379 @@ let apply_http_reply ~now (m : Model.t) reply =
       | Msg.Decode_error _ ->
           err_reply ~fail:Fun.id ~source:Health.Source_client_http
             ~ko:"커넥터 채널 이름 조회" ~en:"Connector names fetch" err)
+  | Msg.Reply_gate_snapshot (Ok snap) ->
+      let work = Work_store.apply_gate_snapshot ~observed_at:now snap m.work in
+      (Model.rebuild_attention { m with work }, [])
+  | Msg.Reply_gate_snapshot (Error err) ->
+      err_reply
+        ~fail:
+          (on_work (fun (x : Work_store.t) ->
+               {
+                 x with
+                 gate_snapshot = failed_slot err x.gate_snapshot;
+                 gate_pending = failed_slot err x.gate_pending;
+               }))
+        ~source:Health.Source_client_http ~ko:"게이트 스냅샷 조회"
+        ~en:"Gate snapshot fetch" err
+  | Msg.Reply_tool_approval_modes (Ok modes) ->
+      let work =
+        Work_store.apply_tool_approval_modes ~observed_at:now modes m.work
+      in
+      ({ m with work }, [])
+  | Msg.Reply_tool_approval_modes (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( on_work
+              (fun (x : Work_store.t) ->
+                {
+                  x with
+                  tool_approval_modes = Observed.absent;
+                  tool_approval_modes_absent = true;
+                })
+              m
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:
+              (on_work (fun (x : Work_store.t) ->
+                   {
+                     x with
+                     tool_approval_modes = failed_slot err x.tool_approval_modes;
+                   }))
+            ~source:Health.Source_client_http ~ko:"키퍼 도구 승인 모드 조회"
+            ~en:"Tool approval modes fetch" err)
+  | Msg.Reply_late_approval_attempts (Ok attempts) ->
+      let work =
+        Work_store.apply_late_approval_attempts ~observed_at:now attempts m.work
+      in
+      ({ m with work }, [])
+  | Msg.Reply_late_approval_attempts (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( on_work
+              (fun (x : Work_store.t) ->
+                {
+                  x with
+                  late_approval_attempts = Observed.absent;
+                  late_approval_absent = true;
+                })
+              m
+          , [] )
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          ( on_work
+              (fun (x : Work_store.t) ->
+                {
+                  x with
+                  late_approval_attempts = Observed.unreported;
+                  late_approval_auth_denied = true;
+                })
+              m
+          , [] )
+      | Msg.Http_error { status = 503; _ } ->
+          ( on_work
+              (fun (x : Work_store.t) ->
+                {
+                  x with
+                  late_approval_attempts =
+                    Observed.failed
+                      ~reason:
+                        (Chat_transcript.scrub_secrets_in_text
+                           (Msg.http_error_detail err))
+                      ~retryable:false ~at:now;
+                })
+              m
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:
+              (on_work (fun (x : Work_store.t) ->
+                   {
+                     x with
+                     late_approval_attempts =
+                       failed_slot err x.late_approval_attempts;
+                   }))
+            ~source:Health.Source_client_http ~ko:"늦은 승인 시도 조회"
+            ~en:"Late-approval attempts fetch" err)
+  | Msg.Reply_gate_tool_events (Ok ev) ->
+      let runtime =
+        Runtime_store.apply_gate_tool_events ~observed_at:now ev m.runtime
+      in
+      ({ m with runtime }, [])
+  | Msg.Reply_gate_tool_events (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( on_runtime
+              (fun (x : Runtime_store.t) ->
+                {
+                  x with
+                  gate_tool_events = Observed.absent;
+                  gate_tool_events_absent = true;
+                })
+              m
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:
+              (on_runtime (fun (x : Runtime_store.t) ->
+                   {
+                     x with
+                     gate_tool_events = failed_slot err x.gate_tool_events;
+                   }))
+            ~source:Health.Source_client_http ~ko:"게이트 도구 거부 지표 조회"
+            ~en:"Gate tool events fetch" err)
+  | Msg.Reply_tool_quality (Ok tq) ->
+      let runtime =
+        Runtime_store.apply_tool_quality ~observed_at:now tq m.runtime
+      in
+      ({ m with runtime }, [])
+  | Msg.Reply_tool_quality (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( on_runtime
+              (fun (x : Runtime_store.t) ->
+                {
+                  x with
+                  tool_quality = Observed.absent;
+                  tool_quality_absent = true;
+                })
+              m
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:
+              (on_runtime (fun (x : Runtime_store.t) ->
+                   { x with tool_quality = failed_slot err x.tool_quality }))
+            ~source:Health.Source_client_http ~ko:"도구 품질 통계 조회"
+            ~en:"Tool quality fetch" err)
+  | Msg.Reply_keeper_waiting_inventory { keeper; result = Ok inv } ->
+      let runtime =
+        Runtime_store.apply_keeper_waiting_inventory ~observed_at:now ~keeper
+          inv m.runtime
+      in
+      ({ m with runtime }, [])
+  | Msg.Reply_keeper_waiting_inventory { keeper; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( on_runtime
+              (fun (x : Runtime_store.t) ->
+                {
+                  x with
+                  keeper_waiting_inventory = Observed.absent;
+                  keeper_waiting_inventory_absent = true;
+                })
+              m
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:
+              (on_runtime (fun (x : Runtime_store.t) ->
+                   {
+                     x with
+                     keeper_waiting_inventory =
+                       failed_slot err x.keeper_waiting_inventory;
+                   }))
+            ~source:(Health.Source_keeper keeper) ~ko:"키퍼 대기 인벤토리 조회"
+            ~en:"Keeper waiting inventory fetch" err)
+  | Msg.Reply_mcp_tools_list (Ok tools) ->
+      let runtime =
+        Runtime_store.apply_mcp_tools_list ~observed_at:now tools m.runtime
+      in
+      ({ m with runtime }, [])
+  | Msg.Reply_mcp_tools_list (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403 | 404; _ } ->
+          ( on_runtime
+              (fun (x : Runtime_store.t) ->
+                {
+                  x with
+                  mcp_tools_list =
+                    Observed.failed
+                      ~reason:
+                        (Chat_transcript.scrub_secrets_in_text
+                           (Msg.http_error_detail err))
+                      ~retryable:false ~at:now;
+                })
+              m
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:
+              (on_runtime (fun (x : Runtime_store.t) ->
+                   {
+                     x with
+                     mcp_tools_list = failed_slot err x.mcp_tools_list;
+                   }))
+            ~source:Health.Source_client_http ~ko:"MCP 도구 스키마 조회"
+            ~en:"MCP tools/list fetch" err)
+  | Msg.Reply_mcp_tools_call { tool_name; result = Ok res } ->
+      let close_modal =
+        match m.inline_modal with
+        | Some { kind = Nav.Tool_execute_form _; _ } -> true
+        | Some
+            {
+              kind =
+                ( Nav.Btw_query
+                | Nav.Gate_reject _
+                | Nav.Verification_reject _
+                | Nav.Harness_overrule _
+                | Nav.Task_cancel _
+                | Nav.Goal_drop _
+                | Nav.Schedule_form
+                | Nav.Connector_form
+                | Nav.Repo_add_form
+                | Nav.Board_new_post
+                | Nav.Board_comment _
+                | Nav.Github_token_form _
+                | Nav.Code_finder_form
+                | Nav.Code_search_form
+                | Nav.Keeper_control_confirm _
+                | Nav.Keeper_clear_form _
+                | Nav.Keeper_operator_note_form _ );
+              _;
+            }
+        | None ->
+            false
+      in
+      let already_on_tool_dive =
+        match Model.active_dive m with
+        | Some (Nav.Dive_runtime (Nav.Tool_dive tn)) ->
+            String.equal tn tool_name
+        | Some
+            ( Nav.Dive_keeper _
+            | Nav.Dive_work _
+            | Nav.Dive_knowledge _
+            | Nav.Dive_runtime (Nav.Fusion_dive _)
+            | Nav.Dive_infra _ )
+        | None ->
+            false
+      in
+      let nav =
+        if close_modal then
+          let base = { m.nav with overlay = None } in
+          if already_on_tool_dive then base
+          else
+            {
+              base with
+              dive_stack =
+                Nav.Dive_runtime (Nav.Tool_dive tool_name) :: base.dive_stack;
+              pane_index = 0;
+              zoomed = false;
+              dive_scroll_offset = 0;
+            }
+        else m.nav
+      in
+      let inline_modal = if close_modal then None else m.inline_modal in
+      let runtime =
+        Runtime_store.apply_mcp_call_result ~observed_at:now res m.runtime
+      in
+      let level, toast_msg =
+        if res.is_error then
+          let detail =
+            (match res.raw_error with
+            | Some e -> e
+            | None -> (
+                match res.content_texts with
+                | first :: _ -> first
+                | [] -> "tool returned isError=true"))
+            |> Chat_transcript.scrub_secrets_in_text
+          in
+          ( Model.Toast_error
+          , Say.make
+              ~ko:(Printf.sprintf "MCP 도구 오류 (%s): %s" tool_name detail)
+              ~en:(Printf.sprintf "MCP tool error (%s): %s" tool_name detail) )
+        else
+          ( Model.Toast_success
+          , Say.make ~ko:("MCP 도구 실행 완료: " ^ tool_name)
+              ~en:("MCP tool executed: " ^ tool_name) )
+      in
+      let next =
+        { m with nav; inline_modal; runtime }
+        |> Model.with_toast ~now ~level toast_msg
+      in
+      let follow_cmds =
+        if close_modal && not already_on_tool_dive then
+          View_fetches.fetches_for_current_view next
+        else []
+      in
+      (next, follow_cmds)
+  | Msg.Reply_mcp_tools_call { tool_name; result = Error err } ->
+      let clean_err =
+        Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
+      in
+      let inline_modal =
+        Option.map
+          (fun (modal : Model.inline_modal_state) ->
+            match modal.kind with
+            | Nav.Tool_execute_form _ ->
+                {
+                  modal with
+                  submitting = false;
+                  error = Some clean_err;
+                }
+            | Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Harness_overrule _
+            | Nav.Task_cancel _
+            | Nav.Goal_drop _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Code_search_form
+            | Nav.Keeper_control_confirm _
+            | Nav.Keeper_clear_form _
+            | Nav.Keeper_operator_note_form _ ->
+                modal)
+          m.inline_modal
+      in
+      let runtime =
+        {
+          m.runtime with
+          mcp_call_result =
+            Observed.failed ~reason:clean_err
+              ~retryable:(Msg.http_error_retryable err) ~at:now;
+        }
+      in
+      let next, cmds =
+        record_http_incident ~now ~source:Health.Source_client_http
+          ~context:
+            (Say.make ~ko:("MCP 도구 실행: " ^ tool_name)
+               ~en:("MCP tool call: " ^ tool_name))
+          err { m with inline_modal; runtime }
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_gate_mutation
+      { label; refresh_gate; refresh_modes; refresh_late; result = Ok () } ->
+      let cmds =
+        (if refresh_gate then
+           [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_gate_pending } ]
+         else [])
+        @ (if refresh_modes then
+             [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_tool_approval_modes } ]
+           else [])
+        @
+        if refresh_late then
+          [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_late_approval_attempts } ]
+        else []
+      in
+      (Model.with_toast ~now ~level:Model.Toast_success label m, cmds)
+  | Msg.Reply_gate_mutation { label; result = Error err; _ } ->
+      let next, cmds =
+        record_http_incident ~now ~source:Health.Source_client_http
+          ~context:label err m
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )

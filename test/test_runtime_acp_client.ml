@@ -2599,15 +2599,31 @@ let test_acp_rpc_error_classification_pool_preservation_and_scopes () =
   check bool "a diagnostic prefix makes string-valued data plain text" true
     (refusal (rpc ~data:(`String ("prior response: " ^ retry_info_payload)) "failed")
      |> Option.is_none);
-  let list_data =
-    `List
-      [ `Assoc [ "code", `Int 404 ]
-      ; `Assoc [ "code", `String "insufficient_quota"; "retryAfter", `Int 45 ]
-      ]
-  in
-  (match refusal (rpc ~data:list_data "failed") with
-   | Some (Retry.Signal_hard_quota { retry_after = Some 45.0; _ }) -> ()
-   | _ -> fail "an array can carry structured quota evidence after an unrelated status");
+  let status = `Assoc [ "code", `Int 429 ] in
+  let quota = `Assoc [ "error", data_code "insufficient_quota" ] in
+  let retry_after = `Assoc [ "retryAfter", `Int 45 ] in
+  List.iter (fun code ->
+    List.iter (fun entries ->
+      match refusal (rpc ~code ~data:(`List entries) "failed") with
+      | Some (Retry.Signal_hard_quota { retry_after = Some 45.; _ }) -> ()
+      | _ -> fail "structured quota and a separate delay must survive status-only array entries")
+      [ [status; quota; retry_after]; [retry_after; quota; status] ])
+    [429; -32603];
+  let retry_info = `Assoc [ "@type", `String "type.googleapis.com/google.rpc.RetryInfo";
+                             "retryDelay", `String "39s" ] in
+  let resource_exhausted = `Assoc [ "error", `Assoc [ "code", `Int 429;
+                                                      "status", `String "RESOURCE_EXHAUSTED" ] ] in
+  List.iter (fun entries ->
+    match refusal (rpc ~data:(`List entries) "failed") with
+    | Some (Retry.Signal_rate_limited { retry_after = Some 39.; _ }) -> ()
+    | _ -> fail "a separate Google RetryInfo record supplies the delay")
+    [[resource_exhausted; retry_info]; [retry_info; resource_exhausted]];
+  (match refusal (rpc ~code:401 ~data:(`List [status; quota; retry_after]) "failed") with
+   | Some (Retry.Signal_auth_error _) -> ()
+   | _ -> fail "the RPC HTTP status still owns authentication classification");
+  check bool "a retry detail or diagnostic alone cannot establish a refusal" true
+    (Option.is_none (refusal (rpc ~data:(`List [retry_info;
+       `Assoc [ "message", `String "previous HTTP 429 insufficient_quota" ]]) "failed")));
   (* Pool preservation: quota / rate-limit RPC refusals must NOT evict healthy persistent child *)
   check bool "quota refusal preserves persistent ACP child" false
     (Keeper_acp_runtime.For_testing.should_evict_persistent_child_on_error quota_err);

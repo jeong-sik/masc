@@ -681,36 +681,14 @@ let rpc_error ~method_name ~code ~message ~data =
     | Jsonrpc_server_error _
     | Jsonrpc_other_code _ -> None
   in
-  let classify ?http_status data =
-    Retry.classify_structured_json ?http_status ~fallback_message:message data
-  in
   let structured_data =
     match data with
-    | Some (`String raw) ->
-      Llm_provider.Json_util.from_string_bounded raw |> Result.to_option
+    | Some (`String raw) -> Llm_provider.Json_util.from_string_bounded raw |> Result.to_option
     | other -> other
   in
   let refusal =
-    match structured_data with
-    | Some (`List items) ->
-      let items = List.take 8 items in
-      (* A status supplied by the RPC code alone can classify any object.
-         Find the actual provider envelope before applying that status. *)
-      let provider_error =
-        List.find_opt (fun item -> Option.is_some (classify item)) items
-      in
-      let evidence =
-        match provider_error with
-        | Some item -> item
-        | None ->
-          Option.value
-            (List.find_opt (fun item -> Option.is_some (Retry.retry_after_of_json item)) items)
-            ~default:`Null
-      in
-      classify ?http_status evidence
-    | Some (`Assoc _ as obj) -> classify ?http_status obj
-    | Some (`String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) | None ->
-      classify ?http_status `Null
+    Retry.classify_structured_json ?http_status ~fallback_message:message
+      (Option.value ~default:`Null structured_data)
   in
   Rpc_error { method_name; code; message; data; refusal }
 ;;

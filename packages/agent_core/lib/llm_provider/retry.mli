@@ -266,7 +266,8 @@ val classify_structured_signals
     [400..599] takes precedence over JSON status fields (non-refusal values
     such as [200] or negative JSON-RPC codes fall back to
     {!http_status_of_json}); JSON [retry_after] takes precedence over
-    caller-supplied [?retry_after]. *)
+    caller-supplied [?retry_after]. A top-level array combines evidence from
+    its first eight entries, including a separate Google RetryInfo object. *)
 val classify_structured_json
   :  ?http_status:int
   -> ?retry_after:float

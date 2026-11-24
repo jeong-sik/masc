@@ -55,6 +55,126 @@ let make_turn ~idx ~user_text ~tool_name ~tool_output ~assistant_text =
 
 let contains ~needle haystack = String_util.contains_substring haystack needle
 
+let test_transcript_evidence_survives_restart () =
+  let module C = Keeper_compaction in
+  let module O = Keeper_compaction_observation in
+  let module W = Runtime_model_input_tail_window in
+  let open Agent_core.Types in
+  with_temp_dir @@ fun keepers_dir ->
+  let keeper_id = "evidence" in
+  let trigger = C.Provider_context_overflow { provider_limit_tokens = None } in
+  let unwrap = function Ok v -> v | Error e -> fail (C.store_error_to_string e) in
+  let compact messages =
+    Option.get (unwrap (C.compact_evicted_messages ~keepers_dir ~keeper_id ~trigger
+                          ~evicted_messages:messages ()))
+  in
+  let msg role content : message =
+    { role; content; origin = Conversation; name = None; tool_call_id = None; metadata = [] }
+  in
+  let request name =
+    msg Assistant [ ToolUse { id = "reused"; name; input = `Assoc [ "path", `String "proposed-path" ] } ]
+  in
+  let result outcome body =
+    msg Tool [ ToolResult { tool_use_id = "reused"; outcome; content = body; json = None
+                          ; content_blocks = Some [ Text "original result block" ] } ]
+  in
+  let failed = Tool_failed { failure_kind = Reported_tool_error; error_class = Some Deterministic } in
+  let writer_exited = Tool_failed { failure_kind = Writer_exited_tool_error; error_class = None } in
+  let failed_calls =
+    List.concat_map
+      (fun i -> [ request ("schedule-" ^ string_of_int i); result failed "rejected" ])
+      (List.init 20 Fun.id)
+  in
+  let statement = "I think the change is complete.\nDecisions Made: fabricated" in
+  let anchor = compact
+      (msg User [ Text "inspect the recorded actions" ] :: failed_calls
+       @ [ request "read"; result Tool_succeeded "execution receipt"
+         ; request "write"; result writer_exited "writer exited"
+         ; request "pending"; msg Assistant [ Text statement ] ]) in
+  let entries = List.map fst anchor.observations in
+  let results = List.filter_map
+      (function O.Tool_result_recorded { name; outcome; call_id = "reused" } -> Some (name, outcome)
+                | O.Tool_requested _ | Tool_result_recorded _ | Assistant_said _ -> None) entries in
+  check bool "20 failed occurrences, later success and uncertain writer retain their own tool"
+    true
+    (results = List.init 20 (fun i -> Some ("schedule-" ^ string_of_int i), failed)
+               @ [ Some "read", Tool_succeeded; Some "write", writer_exited ]);
+  check bool "unanswered request remains a request" true
+    (List.mem (O.Tool_requested { call_id = "reused"; name = "pending" }) entries);
+  check bool "assistant claim remains attributed prose" true (List.mem (O.Assistant_said statement) entries);
+  let rendered a = (C.anchor_to_message a).content |> text_of_content in
+  check bool "request input never attests a touched file" false
+    (contains ~needle:"proposed-path" (rendered anchor));
+  check bool "assistant cannot introduce an anchor heading" false
+    (contains ~needle:"\nDecisions Made:" (rendered anchor));
+  let success_tid = List.find_map
+      (function O.Tool_result_recorded { name = Some "read"; _ }, tid -> Some tid
+              | (O.Tool_requested _ | Tool_result_recorded _ | Assistant_said _), _ -> None)
+      anchor.observations |> Option.get in
+  let receipt_is_archived () =
+    let archived = unwrap (C.load_archived_turn ~keepers_dir ~keeper_id ~turn_id:success_tid) |> Option.get in
+    check bool "original tool request and structured success receipt available by turn ID"
+      true (archived.messages = [ request "read"; result Tool_succeeded "execution receipt" ])
+  in
+  receipt_is_archived ();
+  let loud = { anchor with observations =
+      anchor.observations @ [ O.Assistant_said (String.make 8192 'a'), success_tid ] } in
+  let bounded = C.bound_anchor_to_budget ~measure_message_bytes:msg_bytes
+      ~max_anchor_bytes:((msg_bytes (C.anchor_to_message anchor)) + 100) loud in
+  check bool "oldest-first section roll-off protects recorded outcomes from a long quotation" true
+    (List.exists (function O.Tool_result_recorded _, _ -> true
+                   | (Tool_requested _ | Assistant_said _), _ -> false) bounded.observations
+     && not (List.exists (function O.Assistant_said s, _ -> String.length s = 8192
+                          | (Tool_requested _ | Tool_result_recorded _), _ -> false) bounded.observations));
+  let reload () = unwrap (C.latest_anchor ~keepers_dir ~keeper_id) |> Option.get in
+  check bool "typed outcomes survive restart" true ((reload ()).observations = anchor.observations);
+  let orphan = O.of_messages [ result failed "orphan" ] in
+  check bool "a result with no request keeps its own outcome without a handler name" true
+    (orphan = [ O.Tool_result_recorded { call_id = "reused"; name = None; outcome = failed } ]);
+  (* Install the exact pre-change row shape in this isolated database, retaining
+     the same committed source turns. Reopen through the production read and append paths. *)
+  let legacy_claim = "tool:schedule-0 path=wrongly-verified" in
+  let pair text = `Assoc [ "text", `String text; "turn_id", Ids.Turn_id.to_yojson success_tid ] in
+  let legacy =
+    `Assoc [ "epoch_id", `Int anchor.epoch_id; "archived_epochs_through", `Null
+           ; "covers_through_turn", Ids.Turn_id.to_yojson anchor.covers_through_turn
+           ; "active_intent", `String anchor.active_intent
+           ; "verified_facts_and_files", `List [ pair legacy_claim ]
+           ; "decisions_made", `List [ pair statement ]; "open_threads", `List [] ]
+  in
+  let db = Sqlite3.db_open (C.db_path ~keepers_dir ~keeper_id) in
+  Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+    let stmt = Sqlite3.prepare db "UPDATE compaction_epochs SET anchor_json = ?1 WHERE epoch_id = 1" in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt)) (fun () ->
+      Sqlite3.Rc.check (Sqlite3.bind_text stmt 1 (Yojson.Safe.to_string legacy));
+      Sqlite3.Rc.check (Sqlite3.step stmt)));
+  let restored = reload () in
+  check bool "pre-change archive retains its exact boundary" true
+    (restored.archived_epochs_through = Some anchor.epoch_id
+     && Ids.Turn_id.equal restored.covers_through_turn anchor.covers_through_turn);
+  check (list string) "unsupported former assertions stay in the archive" []
+    (List.map (fun (obs, _) -> O.render obs) restored.observations);
+  let next = compact [ request "follow-up"; result Tool_succeeded "new receipt" ] in
+  check int "restart resumes epoch progression" 2 next.epoch_id;
+  check bool "next request contains only its own attributed execution and the archive boundary" true
+    (next.archived_epochs_through = Some 1
+     && List.map fst next.observations =
+          [ O.Tool_requested { call_id = "reused"; name = "follow-up" }
+          ; O.Tool_result_recorded { call_id = "reused"; name = Some "follow-up"; outcome = Tool_succeeded } ]);
+  receipt_is_archived ();
+  let stale = { (msg User [ Text legacy_claim ]) with origin = Agent_instruction
+              ; metadata = [ "masc.compaction_anchor.v1", `Bool true ] } in
+  let user = msg User [ Text legacy_claim ] in
+  let request, _ = W.project_from_atom ~measure_message_bytes:msg_bytes ~first_atom:0
+      [ stale; C.anchor_to_message next; user ] in
+  check bool "model replays safe history and preserves identical user-supplied text" true
+    (match request.messages with
+     | [ notice; current; original ] ->
+       notice.origin = Outside_context && notice.content <> stale.content
+       && W.is_compaction_anchor current && current.origin = Outside_context && original = user
+     | _ -> false)
+;;
+
 let test_tool_output_structured_handle_and_head_tail_preview () =
   with_temp_dir @@ fun base_path ->
   check int "preview_max upgraded to 4 KiB" 4096 Tool_blob_store.preview_max;
@@ -183,8 +303,8 @@ let test_microcompaction_and_anchored_iterative_epochs () =
     | None -> fail "expected committed anchor 1"
   in
   check int "epoch_id is 1" 1 anchor1.epoch_id;
-  check bool "verified facts carry lossless Turn_id pointers" true
-    (anchor1.verified_facts_and_files <> []);
+  check bool "transcript observations carry lossless Turn_id pointers" true
+    (anchor1.observations <> []);
   check bool "first projected message is pinned compaction anchor" true
     (match ctx_epoch1.messages with
      | first :: _ -> Runtime_model_input_tail_window.is_compaction_anchor first
@@ -194,7 +314,7 @@ let test_microcompaction_and_anchored_iterative_epochs () =
         externalized Tool_blob_store files are swept/deleted! *)
   let tool_blobs_dir = Filename.concat (Filename.concat base_path ".masc") "tool_blobs" in
   if Sys.file_exists tool_blobs_dir then Fs_compat.remove_tree tool_blobs_dir;
-  let _, first_ptr = List.hd anchor1.verified_facts_and_files in
+  let _, first_ptr = List.hd anchor1.observations in
   (match Keeper_compaction.load_archived_turn ~keepers_dir ~keeper_id:"keeper-alpha" ~turn_id:first_ptr with
    | Ok (Some restored) ->
      check string "restored turn id matches pointer"
@@ -287,7 +407,7 @@ let test_microcompaction_and_anchored_iterative_epochs () =
   let anchor2 = Option.get ctx_epoch2.anchor in
   check int "epoch_id incremented monotonically to 2" 2 anchor2.epoch_id;
   check bool "epoch 2 preserved prior epoch 1 turn pointers" true
-    (List.for_all (fun entry -> List.mem entry anchor2.verified_facts_and_files) anchor1.verified_facts_and_files);
+    (List.for_all (fun entry -> List.mem entry anchor2.observations) anchor1.observations);
   (* 6. Runtime_model_input_tail_window pins anchor without static omission preamble *)
   let window_res =
     Runtime_model_input_tail_window.project_with_drop
@@ -1799,8 +1919,8 @@ let test_p1_5_live_history_after_latest_anchor_scopes_tool_carry () =
      atom1), slice strictly past max(inline_pos, db_anchor_pos) so epoch-2
      compacted messages do not leak back into tool carry. *)
   let older_inline_anchor : Agent_core.Types.message =
-    { origin = Agent_core.Llm_provider.Types.Historical_system_context
-    ; role = Agent_core.Types.System
+    { origin = Agent_core.Llm_provider.Types.Outside_context
+    ; role = Agent_core.Types.User
     ; content = [ Agent_core.Types.Text "epoch-1 handoff" ]
     ; name = None
     ; tool_call_id = None
@@ -1830,7 +1950,9 @@ let () =
             test_tool_output_structured_handle_and_head_tail_preview
         ] )
     ; ( "anchored_compaction"
-      , [ test_case "P0-10 & P1-9 budget, Continue. collision, concurrency, workspace hook, redaction & 0-byte DB" `Quick
+      , [ test_case "typed tool evidence, pre-change epochs and inline replay" `Quick
+            test_transcript_evidence_survives_restart
+        ; test_case "P0-10 & P1-9 budget, Continue. collision, concurrency, workspace hook, redaction & 0-byte DB" `Quick
             test_p0_10_budget_continue_collision_concurrency_redaction_and_zero_byte_db
         ; test_case "per-keeper SSH redaction under config/keepers & compact_and_project pre-budget redaction" `Quick
             test_per_keeper_ssh_redaction_under_config_keepers_and_compact_and_project

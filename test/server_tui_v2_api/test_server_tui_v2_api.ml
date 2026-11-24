@@ -3280,9 +3280,7 @@ let test_memory_os_world_mvcc_and_keeper_internals () =
       ; covers_through_turn = turn_id
       ; archived_epochs_through = None
       ; active_intent = "Verify Memory OS internals"
-      ; verified_facts_and_files = [ "server_dashboard_http_memory_v2.ml", turn_id ]
-      ; decisions_made = [ "Expose read-only stats off-domain", turn_id ]
-      ; open_threads = []
+      ; observations = [ Assistant_said "Read-only stats available", turn_id ]
       }
     in
     let evicted_turn : Keeper_compaction.canonical_turn =
@@ -3316,6 +3314,7 @@ let test_memory_os_world_mvcc_and_keeper_internals () =
     Alcotest.(check int) "compaction epoch_count" 1 (json_int_exn "epoch_count" comp);
     Alcotest.(check int) "compaction archived_turns_count" 1 (json_int_exn "archived_turns_count" comp);
     Alcotest.(check bool) "compaction anchor_bytes > 0" true (json_int_exn "anchor_bytes" comp > 0);
+    Alcotest.(check int) "compaction counts attributed observations" 1 (json_int_exn "observations_count" comp);
     let turns = json_member_exn "canonical_turns" internals in
     Alcotest.(check bool) "canonical_turns present" true (json_bool_exn "present" turns);
     Alcotest.(check int) "canonical_turns turn_count" 1 (json_int_exn "turn_count" turns);

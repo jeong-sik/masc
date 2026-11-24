@@ -942,6 +942,7 @@ let start_range_projection ~input_source ?argument_projection
     ~reserved_bytes ?on_model_input_window_observation ?carried_front_seed
     ?librarian_front ?on_carried_front ~turn_start ~keeper_name ~runtime_id
     messages =
+  let messages = Runtime_model_input_tail_window.for_compaction_replay messages in
   match input_source with
   | Keeper_request_source.Completion_review -> Ok messages
   | Keeper_request_source.Keeper_history _ ->

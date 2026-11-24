@@ -554,12 +554,13 @@ let wiki_lint_kind_of_string = function
   | "duplicate_title_candidate" | "duplicate_title" -> Duplicate_title_candidate
   | other -> Other_lint other
 
-let optional_nonnegative_count json key =
+let optional_nonnegative_count_field json key =
   match optional_int_field json key with
-  | Error _ as err -> err
-  | Ok None -> Ok 0
-  | Ok (Some n) when n >= 0 -> Ok n
-  | Ok (Some n) -> Error (Printf.sprintf "field %S must be >= 0, got %d" key n)
+  | Ok (Some n) when n < 0 -> Error (Printf.sprintf "field %S must be >= 0, got %d" key n)
+  | (Ok _ | Error _) as result -> result
+
+let optional_nonnegative_count json key =
+  Result.map (Option.value ~default:0) (optional_nonnegative_count_field json key)
 
 let decode_wiki_lint_counts json =
   (* [Wiki_lint.counts] omits zero-count keys; validate every present key is >= 0. *)
@@ -2090,9 +2091,7 @@ type compaction_internals = {
   latest_epoch_id : int option;
   covers_through_turn : string option;
   archived_epochs_through : int option;
-  verified_facts_count : int;
-  decisions_count : int;
-  open_threads_count : int;
+  observations_count : int option;
   read_error : string option;
 }
 
@@ -2151,15 +2150,7 @@ let decode_memory_os_internals json =
   let* archived_epochs_through =
     optional_int_field comp_obj "archived_epochs_through"
   in
-  let* verified_facts_count =
-    optional_nonnegative_count comp_obj "verified_facts_count"
-  in
-  let* decisions_count =
-    optional_nonnegative_count comp_obj "decisions_count"
-  in
-  let* open_threads_count =
-    optional_nonnegative_count comp_obj "open_threads_count"
-  in
+  let* observations_count = optional_nonnegative_count_field comp_obj "observations_count" in
   let* comp_read_error = optional_nonblank_string comp_obj "read_error" in
   let* turns_obj = required_object_field body "canonical_turns" in
   let* turns_present = required_bool_field turns_obj "present" in
@@ -2220,9 +2211,7 @@ let decode_memory_os_internals json =
           latest_epoch_id;
           covers_through_turn;
           archived_epochs_through;
-          verified_facts_count;
-          decisions_count;
-          open_threads_count;
+          observations_count;
           read_error = comp_read_error;
         };
       canonical_turns =

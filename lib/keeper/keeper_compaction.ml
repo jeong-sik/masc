@@ -6,9 +6,7 @@ type compaction_anchor =
   ; covers_through_turn : Turn_id.t
   ; archived_epochs_through : int option
   ; active_intent : string
-  ; verified_facts_and_files : (string * Turn_id.t) list
-  ; decisions_made : (string * Turn_id.t) list
-  ; open_threads : string list
+  ; observations : (Keeper_compaction_observation.t * Turn_id.t) list
   }
 
 type compaction_trigger =
@@ -139,33 +137,31 @@ let notify_global_epoch_committed ~keepers_dir ~keeper_id ~evicted_turns anchor 
 
 (* --- Strict JSON codecs --- *)
 
-let pair_to_json (text, turn_id) =
-  `Assoc [ "text", `String text; "turn_id", Turn_id.to_yojson turn_id ]
+let observation_to_json (observation, turn_id) =
+  `Assoc
+    [ "observation", Keeper_compaction_observation.to_yojson observation
+    ; "turn_id", Turn_id.to_yojson turn_id
+    ]
 ;;
 
-let pair_of_json = function
+let observation_of_json = function
   | `Assoc fields ->
-    let sorted = List.sort (fun (a, _) (b, _) -> String.compare a b) fields in
-    (match sorted with
-     | [ "text", `String text; "turn_id", tid_json ] ->
-       let* tid = Turn_id.of_yojson tid_json in
-       Ok (text, tid)
-     | _ -> Error "expected exact pair fields text and turn_id")
-  | _ -> Error "expected JSON object for anchored entry"
+    (match List.sort compare fields with
+     | [ "observation", json; "turn_id", tid ] ->
+       let* observation = Keeper_compaction_observation.of_yojson json in
+       let* turn_id = Turn_id.of_yojson tid in
+       Ok (observation, turn_id)
+     | _ -> Error "expected observation and turn_id")
+  | _ -> Error "expected an anchored observation object"
 ;;
 
 let anchor_to_json (a : compaction_anchor) =
   `Assoc
     [ "epoch_id", `Int a.epoch_id
     ; "covers_through_turn", Turn_id.to_yojson a.covers_through_turn
-    ; ( "archived_epochs_through"
-      , match a.archived_epochs_through with
-        | None -> `Null
-        | Some n -> `Int n )
+    ; "archived_epochs_through", Option.fold ~none:`Null ~some:(fun n -> `Int n) a.archived_epochs_through
     ; "active_intent", `String a.active_intent
-    ; "verified_facts_and_files", `List (List.map pair_to_json a.verified_facts_and_files)
-    ; "decisions_made", `List (List.map pair_to_json a.decisions_made)
-    ; "open_threads", `List (List.map (fun s -> `String s) a.open_threads)
+    ; "observations", `List (List.map observation_to_json a.observations)
     ]
 ;;
 
@@ -179,47 +175,44 @@ let decode_list f items =
   loop [] items
 ;;
 
-let anchor_of_json = function
+let anchor_of_json json =
+  let decode epoch_id covers archived active_intent observations =
+    if epoch_id < 1 then Error "epoch_id must be positive"
+    else
+      let* archived_epochs_through =
+        match archived with
+        | `Null -> Ok None
+        | `Int n when n >= 1 && n <= epoch_id -> Ok (Some n)
+        | _ -> Error "archived_epochs_through must be null or an epoch in range"
+      in
+      let* covers_through_turn = Turn_id.of_yojson covers in
+      Ok { epoch_id; covers_through_turn; archived_epochs_through; active_intent; observations }
+  in
+  match json with
   | `Assoc fields ->
-    let sorted = List.sort (fun (a, _) (b, _) -> String.compare a b) fields in
-    (match sorted with
-     | [ "active_intent", `String active_intent
-       ; "archived_epochs_through", archived_json
-       ; "covers_through_turn", covers_json
-       ; "decisions_made", `List decisions_json
-       ; "epoch_id", `Int epoch_id
-       ; "open_threads", `List threads_json
-       ; "verified_facts_and_files", `List facts_json
-       ] ->
-       if epoch_id < 1
-       then Error "epoch_id must be positive"
-       else
-         let* archived_epochs_through =
-           match archived_json with
-           | `Null -> Ok None
-           | `Int n when n >= 1 && n <= epoch_id -> Ok (Some n)
-           | `Int _ -> Error "archived_epochs_through out of range"
-           | _ -> Error "archived_epochs_through must be integer or null"
-         in
-         let* covers_through_turn = Turn_id.of_yojson covers_json in
-         let* verified_facts_and_files = decode_list pair_of_json facts_json in
-         let* decisions_made = decode_list pair_of_json decisions_json in
-         let* open_threads =
-           decode_list
-             (function
-               | `String s -> Ok s
-               | _ -> Error "open_threads elements must be strings")
-             threads_json
-         in
-         Ok
-           { epoch_id
-           ; covers_through_turn
-           ; archived_epochs_through
-           ; active_intent
-           ; verified_facts_and_files
-           ; decisions_made
-           ; open_threads
-           }
+    (match List.sort compare fields with
+     | [ "active_intent", `String intent; "archived_epochs_through", archived
+       ; "covers_through_turn", covers; "epoch_id", `Int epoch; "observations", `List rows ] ->
+       let* observations = decode_list observation_of_json rows in
+       decode epoch covers archived intent observations
+     | [ "active_intent", `String intent; "archived_epochs_through", archived
+       ; "covers_through_turn", covers; "decisions_made", `List decisions
+       ; "epoch_id", `Int epoch; "open_threads", `List threads
+       ; "verified_facts_and_files", `List facts ] ->
+       (* These rows contain untyped tool inputs and assistant prose. Keep the
+          exact archive boundary; only the archived messages can attest outcomes. *)
+       let check_pair = function
+         | `Assoc pair ->
+           (match List.sort compare pair with
+            | [ "text", `String _; "turn_id", tid ] -> Result.map ignore (Turn_id.of_yojson tid)
+            | _ -> Error "expected text and turn_id")
+         | _ -> Error "expected an anchored text object"
+       in
+       let* _ = decode_list check_pair facts in
+       let* _ = decode_list check_pair decisions in
+       let* _ = decode_list (function `String _ -> Ok () | _ -> Error "invalid open thread") threads in
+       let* anchor = decode epoch covers archived intent [] in
+       Ok { anchor with archived_epochs_through = Some epoch }
      | _ -> Error "compaction_anchor field set mismatch")
   | _ -> Error "expected JSON object for compaction_anchor"
 ;;
@@ -276,33 +269,17 @@ let render_anchor_text (a : compaction_anchor) =
        a.epoch_id
        (Turn_id.to_string a.covers_through_turn)
        through_ep);
-  Printf.bprintf buf "Active Intent: %s\n" a.active_intent;
-  (match a.verified_facts_and_files with
-   | [] -> ()
-   | facts ->
-     Buffer.add_string buf "Verified Facts & Files:\n";
-     List.iter
-       (fun (text, tid) ->
-          Printf.bprintf buf "- %s [turn:%s]\n" text (Turn_id.to_string tid))
-       facts);
-  (match a.decisions_made with
-   | [] -> ()
-   | decisions ->
-     Buffer.add_string buf "Decisions Made:\n";
-     List.iter
-       (fun (text, tid) ->
-          Printf.bprintf buf "- %s [turn:%s]\n" text (Turn_id.to_string tid))
-       decisions);
-  (match a.open_threads with
-   | [] -> ()
-   | threads ->
-     Buffer.add_string buf "Open Threads:\n";
-     List.iter (fun thread -> Printf.bprintf buf "- %s\n" thread) threads);
+  Printf.bprintf buf "Last archived user excerpt: %s\n" (Yojson.Safe.to_string (`String a.active_intent));
+  List.iter
+    (fun (observation, tid) ->
+       Printf.bprintf buf "[turn:%s] %s\n" (Turn_id.to_string tid)
+         (Keeper_compaction_observation.render observation))
+    a.observations;
   Buffer.contents buf
 ;;
 
 let anchor_to_message (a : compaction_anchor) : Agent_core.Types.message =
-  { origin = Llm_provider.Types.Agent_instruction
+  { origin = Llm_provider.Types.Outside_context
   ; role = Agent_core.Types.User
   ; content = [ Agent_core.Types.Text (render_anchor_text a) ]
   ; name = None
@@ -312,31 +289,6 @@ let anchor_to_message (a : compaction_anchor) : Agent_core.Types.message =
 ;;
 
 (* --- Pure Incremental Anchored Fold --- *)
-
-let dedup_pairs pairs =
-  let seen = Hashtbl.create 16 in
-  List.filter
-    (fun (text, tid) ->
-       let key = text ^ "\x00" ^ Turn_id.to_string tid in
-       if Hashtbl.mem seen key
-       then false
-       else (
-         Hashtbl.add seen key ();
-         true))
-    pairs
-;;
-
-let dedup_strings items =
-  let seen = Hashtbl.create 16 in
-  List.filter
-    (fun s ->
-       if Hashtbl.mem seen s
-       then false
-       else (
-         Hashtbl.add seen s ();
-         true))
-    items
-;;
 
 let last_turn_id = function
   | [] -> None
@@ -358,16 +310,10 @@ let fold_evicted_span ?previous_anchor ~evicted_turns ~summarize () =
       | Some prev -> prev.epoch_id + 1
     in
     let* folded = summarize ~previous:previous_anchor ~evicted:evicted_turns in
-    let merged_facts =
+    let observations =
       match previous_anchor with
-      | None -> dedup_pairs folded.verified_facts_and_files
-      | Some prev ->
-        dedup_pairs (prev.verified_facts_and_files @ folded.verified_facts_and_files)
-    in
-    let merged_decisions =
-      match previous_anchor with
-      | None -> dedup_pairs folded.decisions_made
-      | Some prev -> dedup_pairs (prev.decisions_made @ folded.decisions_made)
+      | None -> folded.observations
+      | Some prev -> prev.observations @ folded.observations
     in
     let merged_archived_through =
       match previous_anchor, folded.archived_epochs_through with
@@ -383,9 +329,7 @@ let fold_evicted_span ?previous_anchor ~evicted_turns ~summarize () =
       ; covers_through_turn
       ; archived_epochs_through = merged_archived_through
       ; active_intent = folded.active_intent
-      ; verified_facts_and_files = merged_facts
-      ; decisions_made = merged_decisions
-      ; open_threads = dedup_strings folded.open_threads
+      ; observations
       }
 ;;
 
@@ -400,118 +344,34 @@ let first_nonblank_text (blocks : Agent_core.Types.content_block list) =
     blocks
 ;;
 
-let summarize_tool_use_path (input : Yojson.Safe.t) =
-  match input with
-  | `Assoc fields ->
-    List.find_map
-      (fun (k, v) ->
-         match k, v with
-         | ("path" | "file_path" | "target_path" | "uri"), `String s
-           when not (String.equal (String.trim s) "") -> Some s
-         | _ -> None)
-      fields
-  | _ -> None
-;;
-
 let deterministic_fold ~previous ~evicted =
   match last_turn_id evicted with
   | None -> Error "cannot compact an empty evicted turn span"
   | Some covers_through_turn ->
-    let next_epoch =
-      match previous with
-      | None -> 1
-      | Some prev -> prev.epoch_id + 1
+    let active_intent =
+      List.fold_left
+        (fun intent (turn : canonical_turn) ->
+           List.fold_left
+             (fun intent (msg : Agent_core.Types.message) ->
+                if msg.role = User && msg.origin = Conversation then
+                  Option.value ~default:intent (first_nonblank_text msg.content)
+                else intent)
+             intent turn.messages)
+        (Option.fold ~none:"" ~some:(fun a -> a.active_intent) previous) evicted
     in
-    let latest_intent =
-      ref
-        (match previous with
-         | Some prev -> prev.active_intent
-         | None -> "")
-    in
-    let facts_rev = ref [] in
-    let decisions_rev = ref [] in
-    let open_threads_rev = ref [] in
-    List.iter
-      (fun (turn : canonical_turn) ->
-         let tid = turn.turn_id in
-         List.iter
-           (fun (msg : Agent_core.Types.message) ->
-              match msg.role, msg.origin with
-              | Agent_core.Types.User, Llm_provider.Types.Conversation ->
-                (match first_nonblank_text msg.content with
-                 | Some text -> latest_intent := text
-                 | None -> ())
-              | ( Agent_core.Types.User
-                , ( Llm_provider.Types.System_context
-                  | Llm_provider.Types.Historical_system_context
-                  | Llm_provider.Types.Recovery_instruction
-                  | Llm_provider.Types.Tool_result_followup
-                  | Llm_provider.Types.Agent_instruction
-                  | Llm_provider.Types.Outside_context ) )
-              | Agent_core.Types.System, _ -> ()
-              | Agent_core.Types.Assistant, _ ->
-                List.iter
-                  (function
-                    | Agent_core.Types.ToolUse { name; input; _ } ->
-                      let fact =
-                        match summarize_tool_use_path input with
-                        | Some path -> Printf.sprintf "tool:%s path=%s" name path
-                        | None -> Printf.sprintf "tool:%s" name
-                      in
-                      facts_rev := (fact, tid) :: !facts_rev
-                    | Agent_core.Types.Text s ->
-                      let trimmed = String.trim s in
-                      if not (String.equal trimmed "")
-                      then decisions_rev := (trimmed, tid) :: !decisions_rev
-                    | ToolResult _ | ToolReference _ | Thinking _
-                    | ReasoningDetails _ | RedactedThinking _ | Image _
-                    | Document _ | Audio _ -> ())
-                  msg.content
-              | Agent_core.Types.Tool, _ ->
-                List.iter
-                  (function
-                    | Agent_core.Types.ToolResult { outcome = Agent_core.Types.Tool_failed _; tool_use_id; _ } ->
-                      open_threads_rev :=
-                        Printf.sprintf
-                          "unresolved tool error (tool_use_id=%s, turn=%s)"
-                          tool_use_id
-                          (Turn_id.to_string tid)
-                        :: !open_threads_rev
-                    | ToolResult { outcome = Agent_core.Types.Tool_succeeded; _ }
-                    | Text _ | ToolUse _ | ToolReference _ | Thinking _
-                    | ReasoningDetails _ | RedactedThinking _ | Image _
-                    | Document _ | Audio _ -> ())
-                  msg.content)
-           turn.messages)
-      evicted;
-    let prev_facts =
-      match previous with
-      | None -> []
-      | Some prev -> prev.verified_facts_and_files
-    in
-    let prev_decisions =
-      match previous with
-      | None -> []
-      | Some prev -> prev.decisions_made
-    in
-    let prev_threads =
-      match previous with
-      | None -> []
-      | Some prev -> prev.open_threads
-    in
-    let prev_archived_through =
-      match previous with
-      | None -> None
-      | Some prev -> prev.archived_epochs_through
+    let observations =
+      List.concat_map
+        (fun (turn : canonical_turn) ->
+           List.map (fun obs -> obs, turn.turn_id)
+             (Keeper_compaction_observation.of_messages turn.messages))
+        evicted
     in
     Ok
-      { epoch_id = next_epoch
+      { epoch_id = Option.fold ~none:1 ~some:(fun a -> a.epoch_id + 1) previous
       ; covers_through_turn
-      ; archived_epochs_through = prev_archived_through
-      ; active_intent = !latest_intent
-      ; verified_facts_and_files = dedup_pairs (prev_facts @ List.rev !facts_rev)
-      ; decisions_made = dedup_pairs (prev_decisions @ List.rev !decisions_rev)
-      ; open_threads = dedup_strings (prev_threads @ List.rev !open_threads_rev)
+      ; archived_epochs_through = Option.bind previous (fun a -> a.archived_epochs_through)
+      ; active_intent
+      ; observations
       }
 ;;
 
@@ -557,124 +417,64 @@ let truncate_intent_to_budget s budget =
   else utf8_safe_prefix s (budget - 3) ^ "..."
 ;;
 
-let pair_weight (text, tid) =
-  String.length text + String.length (Turn_id.to_string tid) + 12
-;;
-
-let string_weight s = String.length s + 4
-
-let mark_rolled_off (a : compaction_anchor) =
-  let rolled_epoch = if a.epoch_id > 1 then a.epoch_id - 1 else max 1 a.epoch_id in
-  let archived_epochs_through =
-    match a.archived_epochs_through with
-    | None -> Some rolled_epoch
-    | Some prev -> Some (max prev rolled_epoch)
-  in
-  { a with archived_epochs_through }
-;;
-
-let truncate_empty_anchor_intent ~measure_message_bytes ~ceiling (a : compaction_anchor) =
-  if String.equal a.active_intent ""
-  then a
-  else (
-    let empty_intent = { a with active_intent = "" } in
-    let header_bytes = measure_message_bytes (anchor_to_message empty_intent) in
-    let intent_budget = max 0 (ceiling - header_bytes) in
-    let truncated = truncate_intent_to_budget a.active_intent intent_budget in
-    if String.equal truncated a.active_intent then a else { a with active_intent = truncated })
-;;
-
-(* O(N) precomputed drop schedule + O(log N) binary search over
-   [measure_message_bytes], preserving the exact heaviest-section oldest-first
-   eviction order without O(N^2) weight rescans or full buffer re-renders. *)
 let bound_anchor_to_budget ~measure_message_bytes ~max_anchor_bytes (anchor : compaction_anchor) =
-  let ceiling = max 0 max_anchor_bytes in
-  let fits a = measure_message_bytes (anchor_to_message a) <= ceiling in
-  if fits anchor
-  then anchor
-  else (
-    let rolled = mark_rolled_off anchor in
-    if fits rolled
-    then rolled
-    else (
-      let facts_arr = Array.of_list rolled.verified_facts_and_files in
-      let decisions_arr = Array.of_list rolled.decisions_made in
-      let threads_arr = Array.of_list rolled.open_threads in
-      let nf = Array.length facts_arr in
-      let nd = Array.length decisions_arr in
-      let nt = Array.length threads_arr in
-      let total = nf + nd + nt in
-      if total = 0
-      then truncate_empty_anchor_intent ~measure_message_bytes ~ceiling rolled
-      else (
-        let fw = ref 0 in
-        for i = 0 to nf - 1 do
-          fw := !fw + pair_weight facts_arr.(i)
-        done;
-        let dw = ref 0 in
-        for i = 0 to nd - 1 do
-          dw := !dw + pair_weight decisions_arr.(i)
-        done;
-        let tw = ref 0 in
-        for i = 0 to nt - 1 do
-          tw := !tw + string_weight threads_arr.(i)
-        done;
-        let drop_f = Array.make (total + 1) 0 in
-        let drop_d = Array.make (total + 1) 0 in
-        let drop_t = Array.make (total + 1) 0 in
-        let fi = ref 0 in
-        let di = ref 0 in
-        let ti = ref 0 in
-        for step = 1 to total do
-          let has_f = !fi < nf in
-          let has_d = !di < nd in
-          let has_t = !ti < nt in
-          if has_d && !dw >= !fw && !dw >= !tw
-          then (
-            dw := !dw - pair_weight decisions_arr.(!di);
-            incr di)
-          else if has_f && !fw >= !dw && !fw >= !tw
-          then (
-            fw := !fw - pair_weight facts_arr.(!fi);
-            incr fi)
-          else if has_t
-          then (
-            tw := !tw - string_weight threads_arr.(!ti);
-            incr ti)
-          else if has_f
-          then (
-            fw := !fw - pair_weight facts_arr.(!fi);
-            incr fi)
-          else if has_d
-          then (
-            dw := !dw - pair_weight decisions_arr.(!di);
-            incr di);
-          drop_f.(step) <- !fi;
-          drop_d.(step) <- !di;
-          drop_t.(step) <- !ti
-        done;
-        let slice_list arr start len =
-          if start >= len then [] else Array.to_list (Array.sub arr start (len - start))
-        in
-        let anchor_at step =
-          { rolled with
-            verified_facts_and_files = slice_list facts_arr drop_f.(step) nf
-          ; decisions_made = slice_list decisions_arr drop_d.(step) nd
-          ; open_threads = slice_list threads_arr drop_t.(step) nt
-          }
-        in
-        let rec bsearch lo hi =
-          if lo >= hi
-          then lo
-          else (
-            let mid = lo + ((hi - lo) / 2) in
-            if fits (anchor_at mid) then bsearch lo mid else bsearch (mid + 1) hi)
-        in
-        let best_step = bsearch 1 total in
-        let candidate = anchor_at best_step in
-        if fits candidate
-        then candidate
-        else truncate_empty_anchor_intent ~measure_message_bytes ~ceiling candidate)))
+  let fits a = measure_message_bytes (anchor_to_message a) <= max 0 max_anchor_bytes in
+  if fits anchor then anchor
+  else
+    let rolled = { anchor with archived_epochs_through = Some anchor.epoch_id } in
+    (* Keep the oldest-first, heaviest-section roll-off. A long assistant
+       quotation should not evict every tool receipt before it is trimmed. *)
+    let requests = Queue.create (), ref 0 in
+    let results = Queue.create (), ref 0 in
+    let statements = Queue.create (), ref 0 in
+    let weights =
+      Array.of_list
+        (List.mapi
+           (fun index (observation, tid) ->
+              let queue, bytes =
+                match observation with
+                | Keeper_compaction_observation.Tool_requested _ -> requests
+                | Tool_result_recorded _ -> results
+                | Assistant_said _ -> statements
+              in
+              let weight = String.length (Keeper_compaction_observation.render observation)
+                           + String.length (Turn_id.to_string tid) + 9 in
+              Queue.add index queue;
+              bytes := !bytes + weight;
+              weight)
+           rolled.observations)
+    in
+    let count = Array.length weights in
+    let rank = Array.make count 0 in
+    for step = 1 to count do
+      let heavier ((_, a) as left) ((_, b) as right) = if !a >= !b then left else right in
+      let queue, bytes = heavier statements (heavier results requests) in
+      let index = Queue.take queue in
+      rank.(index) <- step;
+      bytes := !bytes - weights.(index)
+    done;
+    let after drop =
+      { rolled with observations = List.filteri (fun i _ -> rank.(i) > drop) rolled.observations }
+    in
+    let rec first_fit lo hi =
+      if lo = hi then after lo
+      else
+        let mid = lo + (hi - lo) / 2 in
+        if fits (after mid) then first_fit lo mid else first_fit (mid + 1) hi
+    in
+    let candidate = first_fit 0 count in
+    if fits candidate then candidate
+    else
+      let with_intent bytes =
+        { candidate with active_intent = truncate_intent_to_budget candidate.active_intent bytes }
+      in
+      let rec fit_intent lo hi =
+        if lo = hi then with_intent lo
+        else
+          let mid = lo + (hi - lo + 1) / 2 in
+          if fits (with_intent mid) then fit_intent mid hi else fit_intent lo (mid - 1)
+      in
+      fit_intent 0 (String.length candidate.active_intent)
 ;;
 
 (* --- Secret Redaction at Compaction & Microcompaction Storage Boundaries --- *)
@@ -742,17 +542,13 @@ let redact_turn redact (turn : canonical_turn) =
 ;;
 
 let redact_anchor redact (a : compaction_anchor) =
+  let redact = Keeper_secret_redaction.redact_text redact in
   { a with
-    active_intent = Keeper_secret_redaction.redact_text redact a.active_intent
-  ; verified_facts_and_files =
+    active_intent = redact a.active_intent
+  ; observations =
       List.map
-        (fun (text, tid) -> Keeper_secret_redaction.redact_text redact text, tid)
-        a.verified_facts_and_files
-  ; decisions_made =
-      List.map
-        (fun (text, tid) -> Keeper_secret_redaction.redact_text redact text, tid)
-        a.decisions_made
-  ; open_threads = List.map (Keeper_secret_redaction.redact_text redact) a.open_threads
+        (fun (obs, tid) -> Keeper_compaction_observation.redact redact obs, tid)
+        a.observations
   }
 ;;
 
@@ -881,7 +677,8 @@ let microcompact_turns ?redact ~blob_store ~keep_recent_turns turns =
 (* --- Provider-Neutral Projection --- *)
 
 let flatten_messages ~anchor turns =
-  let body = List.concat_map (fun (t : canonical_turn) -> t.messages) turns in
+  let body = List.concat_map (fun (t : canonical_turn) -> t.messages) turns
+             |> Runtime_model_input_tail_window.for_compaction_replay in
   match anchor with
   | None -> body
   | Some a -> anchor_to_message a :: body
@@ -1758,10 +1555,7 @@ let remap_anchor_for_disambiguated_turns
     in
     { anchor with
       covers_through_turn = map_id anchor.covers_through_turn
-    ; verified_facts_and_files =
-        List.map (fun (text, tid) -> text, map_id tid) anchor.verified_facts_and_files
-    ; decisions_made =
-        List.map (fun (text, tid) -> text, map_id tid) anchor.decisions_made
+    ; observations = List.map (fun (obs, tid) -> obs, map_id tid) anchor.observations
     })
 ;;
 

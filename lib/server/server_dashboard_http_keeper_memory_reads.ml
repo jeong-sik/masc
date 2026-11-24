@@ -608,27 +608,21 @@ let memory_os_internals_json ~(config : Workspace.config) ~keeper_id =
         ; "latest_epoch_id", `Null
         ; "covers_through_turn", `Null
         ; "archived_epochs_through", `Null
-        ; "verified_facts_count", `Int 0
-        ; "decisions_count", `Int 0
-        ; "open_threads_count", `Int 0
+        ; "observations_count", `Int 0
         ; "read_error", `String (Keeper_compaction.store_error_to_string err)
         ]
     | Ok s ->
       let ( latest_epoch_id
           , covers_through_turn
           , archived_epochs_through
-          , verified_facts_count
-          , decisions_count
-          , open_threads_count ) =
+          , observations_count ) =
         match s.latest_anchor with
-        | None -> `Null, `Null, `Null, 0, 0, 0
+        | None -> `Null, `Null, `Null, 0
         | Some a ->
           ( `Int a.epoch_id
           , `String (Ids.Turn_id.to_string a.covers_through_turn)
           , Json_util.int_opt_to_json a.archived_epochs_through
-          , List.length a.verified_facts_and_files
-          , List.length a.decisions_made
-          , List.length a.open_threads )
+          , List.length a.observations )
       in
       `Assoc
         [ "present", `Bool s.present
@@ -638,9 +632,7 @@ let memory_os_internals_json ~(config : Workspace.config) ~keeper_id =
         ; "latest_epoch_id", latest_epoch_id
         ; "covers_through_turn", covers_through_turn
         ; "archived_epochs_through", archived_epochs_through
-        ; "verified_facts_count", `Int verified_facts_count
-        ; "decisions_count", `Int decisions_count
-        ; "open_threads_count", `Int open_threads_count
+        ; "observations_count", `Int observations_count
         ; "read_error", `Null
         ]
   in

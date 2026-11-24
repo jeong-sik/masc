@@ -5,8 +5,10 @@
     a global history identity. The projection annotates each ToolResult with
     its exact ToolUse name for provider wires that require that name. *)
 
-type t
-type resolved_message
+type 'media projection
+type 'media occurrence
+type t = Types.media_source projection
+type resolved_message = Types.media_source occurrence
 
 type error =
   | Duplicate_tool_use_id of
@@ -32,14 +34,14 @@ type error =
 (** [of_messages messages] resolves ToolResult names by canonical message
     occurrence. A duplicated ToolUse ID is rejected only within one active
     assistant batch; a later assistant batch may reuse that provider ID. *)
-val of_messages : Types.message list -> (t, error) result
+val of_messages : 'media Types.message_with list -> ('media projection, error) result
 
-val messages : t -> resolved_message list
-val original_message : resolved_message -> Types.message
+val messages : 'media projection -> 'media occurrence list
+val original_message : 'media occurrence -> 'media Types.message_with
 
 (** Original content blocks in order. [Some tool_name] occurs exactly on a
     correlated {!Types.ToolResult}; every other block carries [None]. *)
-val content : resolved_message -> (Types.content_block * string option) list
+val content : 'media occurrence -> ('media Types.content_block_with * string option) list
 
 val error_to_string : error -> string
 

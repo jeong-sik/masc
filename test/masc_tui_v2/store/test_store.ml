@@ -15867,6 +15867,26 @@ let test_live_chat_activity_uses_open_content_and_tool_receipts () =
   let legacy_tool = close_tool_block (start_tool model) in
   check_phase "a scope-only prelude can still retire a scope-only tool"
     Phase_awaiting_turn (custom legacy_tool "KEEPER_STREAM_MESSAGE_START" {|{"stream_scope":3}|});
+  let legacy_start m scope =
+    custom m "KEEPER_STREAM_MESSAGE_START"
+      (Printf.sprintf {|{"stream_scope":%d,"provider_message_id":"message","model":"model"}|} scope)
+  in
+  let owned_after_bare = start ~generation:4 (legacy_start fresh_run 9) 0 in
+  check_phase "a prior bare scope without a generation cannot reject the first owned start"
+    (Phase_tool_running "Read") (legacy_start (start_tool owned_after_bare) 10);
+  let old_activity = content (legacy_start fresh_run 1) ~scope:1 ~block:0 "thinking" "observed" in
+  let legacy_wait = close_tool_block (start_tool (legacy_start old_activity 2)) in
+  check_phase "legacy typed content does not prevent the next bare start from retiring its tool"
+    Phase_awaiting_turn (legacy_start legacy_wait 3);
+  check_phase "an equal bare start leaves its tool pending"
+    (Phase_tool_waiting "Read") (legacy_start legacy_wait 2);
+  check_phase "a lower bare start leaves the later tool pending"
+    (Phase_tool_waiting "Read") (legacy_start legacy_wait 1);
+  let legacy_next = legacy_start legacy_wait 3 in
+  check_phase "late activity from the retired legacy scope stays closed"
+    Phase_awaiting_turn (content legacy_next ~scope:2 ~block:9 "text" "observed");
+  check_phase "the new legacy scope can report exact content"
+    Phase_streaming (content legacy_next ~scope:3 ~block:0 "text" "observed");
   let delta m scope text =
     apply_json m (Printf.sprintf
       {|{"type":"TEXT_MESSAGE_CONTENT","delta":"%s","textResponse":{"content_generation":3,"stream_scope":%d}}|}
@@ -15883,6 +15903,16 @@ let test_live_chat_activity_uses_open_content_and_tool_receipts () =
       {|{"type":"TEXT_MESSAGE_CONTENT","runId":"keeper-operation-run-other","delta":"late","textResponse":{"content_generation":3,"stream_scope":2}}|} in
   Alcotest.(check (option string)) "a rejected delta cannot bind its operation to the live request"
     (buffer next_response).operation_id (buffer old_run).operation_id;
+  let owned_activity = content fresh_run ~scope:3 ~block:0 "thinking" "observed" in
+  let matching_start = start owned_activity 3 in
+  let matching_retry = apply matching_start (Wire_fleet.Chunk_runtime_attempt_started { operation_id = None }) in
+  Alcotest.(check string) "retry retires a matching prelude received after content activity alone"
+    "" (buffer (delta matching_retry 3 "late")).text;
+  let after_owned_start = content (start fresh_run 1) ~scope:3 ~block:0 "thinking" "observed" in
+  let retry_after_match = apply (start after_owned_start 3)
+      (Wire_fleet.Chunk_runtime_attempt_started { operation_id = None }) in
+  Alcotest.(check string) "a prior owned prelude cannot mask the retry boundary of a later matching start"
+    "" (buffer (delta retry_after_match 3 "late")).text;
   let current_bytes = delta next_response 3 " fresh" in
   Alcotest.(check string) "only this response can append text after its prelude"
     "Earlier reply text fresh" (buffer (delta current_bytes 2 " late")).text;
@@ -16132,6 +16162,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
         text_ownership = Cut_reply.fresh_ownership;
         thinking = "";
         model_activity = Fleet_store.empty_model_activity;
+        response_start = None;
         tools = [];
         active = false;
         ended = true;
@@ -16328,6 +16359,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
       text_ownership = Cut_reply.fresh_ownership;
       thinking = "";
       model_activity = Fleet_store.empty_model_activity;
+      response_start = None;
       tools =
         [
           {

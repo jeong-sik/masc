@@ -169,9 +169,9 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
   requests the host forwards. With the operator's muse settings on the
   `:ask-me` profile in `$XDG_CONFIG_HOME/muse/settings.json` (default
   `~/.config/muse/settings.json`) and the client in the `promptUnmatched` mode,
-  the host forwarded MCP tool calls in 2 of 2 measured sessions. MASC starts every session in `onRequest`,
-  and `:ask-me` with `onRequest` was not tried. The setting applies to every
-  muse session of that user:
+  the host forwarded MCP tool calls in 2 of 2 measured sessions. MASC starts
+  every session in `onRequest`, and `:ask-me` with `onRequest` was not tried.
+  The setting applies to every muse session of that user:
 
   ```json
   { "schema_version": 1,

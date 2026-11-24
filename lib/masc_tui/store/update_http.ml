@@ -1230,6 +1230,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
+        | Nav.Tool_execute_form _
         | Nav.Keeper_control_confirm _
         | Nav.Keeper_clear_form _
         | Nav.Keeper_operator_note_form _
@@ -1334,6 +1335,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Tool_execute_form _
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
@@ -3352,6 +3354,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
+        | Nav.Tool_execute_form _
         | Nav.Keeper_control_confirm _
         | Nav.Keeper_clear_form _
         | Nav.Keeper_operator_note_form _
@@ -3459,6 +3462,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
+        | Nav.Tool_execute_form _
         | Nav.Keeper_control_confirm _
         | Nav.Keeper_clear_form _
         | Nav.Keeper_operator_note_form _
@@ -4001,6 +4005,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
+        | Nav.Tool_execute_form _
         | Nav.Keeper_control_confirm _
         | Nav.Keeper_clear_form _
         | Nav.Keeper_operator_note_form _
@@ -4091,6 +4096,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Tool_execute_form _
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
@@ -4393,6 +4399,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Tool_execute_form _
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
@@ -4428,6 +4435,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Tool_execute_form _
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
@@ -4594,6 +4602,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Tool_execute_form _
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
@@ -4629,6 +4638,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Tool_execute_form _
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _

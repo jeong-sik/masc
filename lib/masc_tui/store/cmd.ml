@@ -797,6 +797,15 @@ let mcp_tool_name_of_post_request = function
   | Post_task_create _ -> Some "masc_add_task"
   | Post_task_transition _ -> Some "masc_transition"
   | Post_goal_upsert _ -> Some "masc_goal_upsert"
+  | Post_mcp_tools_call { tool_name; _ } -> Some tool_name
+  | Post_hitl_late_approval_restore
+  | Post_gate_resolution_policy _
+  | Post_gate_mode _
+  | Post_gate_rule_delete _
+  | Post_gate_retry _
+  | Post_keeper_tool_approval_mode _
+  | Post_hitl_ack_uncertain _
+  | Post_mcp_tools_list _
   | Post_ask_answer _
   | Post_tool_approval _
   | Post_gate_resolution _

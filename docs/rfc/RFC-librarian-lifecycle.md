@@ -13,6 +13,8 @@ implementation_prs: ["#37020", "#37024", "#37027", "#37030", "#37028", "#37031",
 
 # RFC: Librarian 생명주기
 
+> 이 문서는 L10d(#54451) 이전 설계를 서술한다.
+
 - 상태: Draft
 - 작성: 2026-09-18, 고침: 2026-09-20. 코드는 origin/main `84fb520c34`, 실측은 작성일 라이브 `<base-path>/.masc`. 뒤에 더한 실측은 문장마다 잰 날을 적었다.
 - 관련: 창 RFC(`keeper-context-window-in-tokens`) §13 개정 Draft #37008, Memory OS RFC(`memory-os-bounded-context-and-librarian-curator`), RFC-0456, RFC-0363, 이슈 #37004·#36979

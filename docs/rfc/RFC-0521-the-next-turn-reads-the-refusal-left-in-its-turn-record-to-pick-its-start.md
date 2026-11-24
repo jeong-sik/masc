@@ -214,7 +214,7 @@ masc 는 이 400 을 `Unknown_invalid_request` 로 읽는다. 문장을 읽어 �
   - 원인이 풀린 뒤 받아들여진 시작점이 받아들여진 시작점이 된다. Librarian 지점이 있으면 Librarian 이 따라잡을 때 돌아온다(규칙 5). 없으면 그 시작점이 이후 모든 턴에 남는다(`without_point`, :1281-1288). 빠진 atom 은 checkpoint 에만 남는다.
   - 지금 코드는 같은 턴 안에서 이 비용을 일부러 막는다. `is_size_refusal` 의 주석(:3017-3023)과 규칙 1 의 앞머리 되돌리기(:3250)다. C 는 턴을 넘어 그 비용을 되살린다.
   - 규칙 1 과 판단이 갈린다. 규칙 1 은 경계에서 다시 보낸 요청도 크기 밖 이유로 거절되면 「경계는 이 거절에 답하지 못했다」고 보고 앞머리를 되돌린다. D2 는 그 경계 범위를 마지막 요청으로 적고, 다음 턴에 D3 는 경계보다 뒤로 옮긴다.
-  - 같은 꼴의 위험을 이미 잡는 모델이 있다. `specs/bug-models/LibrarianContinuityWidth.tla` 는 크기 밖 거절에 폭을 좁히는 것을 버그(`RefuseOtherNarrowing`, `LibrarianContinuityWidth.tla:162-173`)로 두고, `WidthHoldsOnOtherRefusal`(`LibrarianContinuityWidth.tla:120-121`)로 막는다. 그 모델은 거절의 원인을 안다. 여기서는 원인을 모른다.
+  - 같은 꼴의 위험을 잡던 이전 모델이 있었다(`specs/bug-models/LibrarianContinuityWidth.tla`, L10d #54451에서 삭제됨). 그 모델은 크기 밖 거절에 폭을 좁히는 것을 버그(`RefuseOtherNarrowing`, `LibrarianContinuityWidth.tla:162-173`)로 두고, `WidthHoldsOnOtherRefusal`(`LibrarianContinuityWidth.tla:120-121`)로 막는다. 그 모델은 거절의 원인을 안다. 여기서는 원인을 모른다.
   - C 도 원인을 크기로 보고 범위를 줄인다. B 와 다른 점은 판정 재료다. 세는 수가 아니라 digest 로 맞춰 본 기록이다. 요청에서 masc 가 바꿀 수 있는 것은 범위뿐이다. 시도 안에서 system prompt 와 도구는 고정이다. 그래서 바꿔 보내는 요청은 범위가 다른 요청일 수밖에 없다.
   - 운영자 결정이 필요하다(§7 의 1 (나)).
 - 판정: 넣는다. 운영자 결정 전에는 L3 를 Draft 로 둔다.
@@ -375,7 +375,7 @@ Agent Core 후보는 시도마다 한 번 `Keeper_carried_front.read_seed` 의 `
 
 각 시험은 옆 칸의 변형을 넣으면 실패해야 한다. 비용을 고정하는 시험(C-13, C-14, C-15)은 그 비용을 없애는 변형에서도 실패한다. 동작을 바꾸려면 이 RFC 부터 고친다.
 
-거절 사다리 자체를 다루는 TLA+ 모델은 없다. 가까운 모델은 `specs/bug-models/` 에 둘 있다. `LibrarianContinuityWidth.tla` 는 Librarian 회차의 폭을 다룬다. 버그 셋을 각자의 Next 로 둔다. 그 가운데 「좁힌 폭을 다음 회차로 넘기지 않는다」는 #52053 과 같은 꼴이다. 「크기 밖 거절에도 좁힌다」는 §3.1 C 의 비용과 같은 꼴이다. `RetainedResultCarrier.tla` 는 carrier 걸음을 다룬다. `specs/` 에는 TLA+ 모듈이 모두 39개 있다. L3 는 새 모델 하나를 더한다(§5.4).
+거절 사다리 자체를 다루는 TLA+ 모델은 없다. 가까운 모델은 `specs/bug-models/` 에 둘 있었다. `LibrarianContinuityWidth.tla`(L10d #54451에서 삭제됨)는 Librarian 회차의 폭을 다룬다. 버그 셋을 각자의 Next 로 둔다. 그 가운데 「좁힌 폭을 다음 회차로 넘기지 않는다」는 #52053 과 같은 꼴이다. 「크기 밖 거절에도 좁힌다」는 §3.1 C 의 비용과 같은 꼴이다. `RetainedResultCarrier.tla` 는 carrier 걸음을 다룬다. `specs/` 에는 TLA+ 모듈이 모두 39개 있다. L3 는 새 모델 하나를 더한다(§5.4).
 
 ### 5.1 L1: 관측과 fixture
 
@@ -442,7 +442,7 @@ L3 는 `specs/bug-models/RefusedRangeCarry.tla` 를 더한다. 정상 cfg 와 bu
   - `NoCarry`: 거절을 기록에 넘기지 않는다(지금 코드).
   - `ResponseMasksLaterRefusal`: 같은 기록의 앞선 응답이 거절을 가린다(지금 scan).
   - `PastThisTurnStart`: 이번 턴의 시작을 모를 때 가장 새 atom 으로 간다.
-- 크기 밖 거절에도 시작점이 옮겨지는 것은 버그로 두지 않는다. §7 의 1 (나)가 받아들일지 정하는 비용이다. 그래서 `LibrarianContinuityWidth` 의 `WidthHoldsOnOtherRefusal` 같은 속성을 이 모델에는 두지 않는다. 모델 주석에 그 이유를 적는다.
+- 크기 밖 거절에도 시작점이 옮겨지는 것은 버그로 두지 않는다. §7 의 1 (나)가 받아들일지 정하는 비용이다. 그래서 이전 `LibrarianContinuityWidth`(L10d #54451에서 삭제됨)의 `WidthHoldsOnOtherRefusal` 같은 속성을 이 모델에는 두지 않는다. 모델 주석에 그 이유를 적는다.
 
 ## 6. 단계
 

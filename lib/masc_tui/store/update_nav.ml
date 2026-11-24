@@ -4679,25 +4679,31 @@ let submit_inline_modal ~now (m : Model.t) =
               | None ->
                   set_modal_error
                     "Action must be one of: claim, start, release, submit_for_verification"
-              | Some Wire_work.Task_submit_for_verification
-                when String.equal notes_raw "" ->
-                  set_modal_error
-                    "Notes are required when submitting a task for verification"
-              | Some action ->
-                  let notes =
-                    if String.equal notes_raw "" then None else Some notes_raw
-                  in
-                  let expected_workspace = expected_workspace_of m in
-                  ( mark_submitting m
-                  , [
-                      Cmd.Http_post
-                        {
-                          epoch = m.epoch;
-                          req =
-                            Cmd.Post_task_transition
-                              { task_id; action; notes; expected_workspace };
-                        };
-                    ] ))
+              | Some action -> (
+                  match action with
+                  | Wire_work.Task_submit_for_verification
+                    when String.equal notes_raw "" ->
+                      set_modal_error
+                        "Notes are required when submitting a task for verification"
+                  | Wire_work.Task_claim
+                  | Wire_work.Task_start
+                  | Wire_work.Task_release
+                  | Wire_work.Task_submit_for_verification ->
+                      let notes =
+                        if String.equal notes_raw "" then None
+                        else Some notes_raw
+                      in
+                      let expected_workspace = expected_workspace_of m in
+                      ( mark_submitting m
+                      , [
+                          Cmd.Http_post
+                            {
+                              epoch = m.epoch;
+                              req =
+                                Cmd.Post_task_transition
+                                  { task_id; action; notes; expected_workspace };
+                            };
+                        ] )))
           | Form_standard (Nav.Task_link_goal { task_id }) -> (
               let goal_id =
                 String.trim (Model.modal_field_value ~key:"link_goal_id" modal)

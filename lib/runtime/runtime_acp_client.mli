@@ -88,13 +88,12 @@ type mcp_identifier_syntax =
       (** [mcp(<server>/<tool>)] or [mcp(<server>:<tool>)] wrapper
           (Antigravity). *)
   | Mcp_double_underscore
-      (** [mcp__<server>__<tool>] identifier (Kimi Code). *)
+      (** [mcp__<server>__<tool>] identifier (live-verified against
+          [kimi acp 2.7.2]). *)
   | Mcp_dot_prefix
       (** [mcp_<server>.<tool>] identifier (Mistral Vibe). *)
   | Mcp_underscore_prefix
       (** [mcp_<server>_<tool>] identifier (Antigravity, Mistral Vibe). *)
-  | Colon_or_slash_qualified
-      (** [<server>:<tool>] or [<server>/<tool>] identifier (Kimi Code). *)
   | Server_underscore_prefix
       (** [<server>_<tool>] identifier scoped to the active MASC server name
           (Mistral Vibe). *)

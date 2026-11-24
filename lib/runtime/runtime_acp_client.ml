@@ -89,7 +89,6 @@ type mcp_identifier_syntax =
   | Mcp_double_underscore
   | Mcp_dot_prefix
   | Mcp_underscore_prefix
-  | Colon_or_slash_qualified
   | Server_underscore_prefix
   | Implicit_vendor_mcp_kind
 [@@deriving show, eq]
@@ -149,18 +148,11 @@ let profile_of_driver = function
     ; env_set = []
     ; default_strip_env = []
     ; mcp_wiring = Session_new_http_mcp
-    (* kimi acp 2.7.2: session/new configOptions are live-verified, but no live
-       MCP tool_call wire transcript is recorded yet; preserve all main
-       qualified MCP syntaxes (excluding Antigravity-only call_mcp_tool /
-       mcp(...) wrappers) until live probe capture locks Kimi's exact wire shape. *)
-    ; mcp_identifier_syntaxes =
-        [ Mcp_double_underscore
-        ; Mcp_dot_prefix
-        ; Mcp_underscore_prefix
-        ; Colon_or_slash_qualified
-        ; Server_underscore_prefix
-        ; Implicit_vendor_mcp_kind
-        ]
+    (* Live-verified against kimi acp 2.7.2: session/update tool_call emits
+       title = "mcp__<server>__<tool>" with kind = "other" (no _meta/name) and
+       session/request_permission emits title = "mcp__<server>__<tool>" with
+       kind omitted; foreign MCP servers emit mcp__<other>__<tool>. *)
+    ; mcp_identifier_syntaxes = [ Mcp_double_underscore ]
     ; system_prompt_channel = Framed_in_first_prompt
     ; input_accounting = Inclusive_of_cached
     ; output_accounting = Inclusive_of_thought
@@ -1339,23 +1331,6 @@ let match_mcp_identifier_syntax ?mcp_server_name ~(kind : tool_kind option) trim
         Some (Mcp_tool { server = Explicit_server expected_srv; tool_name = tool })
       | Some _ | None -> None)
     else None
-  | Colon_or_slash_qualified ->
-    let split_single sep =
-      match String.index_opt trimmed sep with
-      | Some idx when idx > 0 && idx + 1 < String.length trimmed ->
-        let srv = String.sub trimmed 0 idx in
-        let tool = String.sub trimmed (idx + 1) (String.length trimmed - idx - 1) in
-        if String.contains srv ':'
-           || String.contains srv '/'
-           || String.contains tool ':'
-           || String.contains tool '/'
-        then None
-        else Some (Mcp_tool { server = Explicit_server srv; tool_name = tool })
-      | Some _ | None -> None
-    in
-    (match split_single ':' with
-     | Some _ as m -> m
-     | None -> split_single '/')
   | Server_underscore_prefix ->
     (match mcp_server_name with
      | Some expected_srv

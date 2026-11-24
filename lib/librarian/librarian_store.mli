@@ -181,7 +181,9 @@ val commit_molt
     the live [.memory-log.jsonl] into the cold archive sidecar
     ([.memory-archive.jsonl]) and atomically rewrites the live log to a single
     [Checkpoint] baseline line preserving the exact current snapshot, revision,
-    reading position, and working state. Returns the updated store and the
+    reading position, and working state. Malformed historical bytes and
+    conflicting versions are retained in the archive and remain visible as
+    incomplete coverage after each checkpoint. Returns the updated store and the
     number of historical lines compacted. *)
 val compact_log : t -> at:float -> (t * int, stop) result
 

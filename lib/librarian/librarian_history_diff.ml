@@ -71,7 +71,9 @@ let project ~range ~current ~revision (history : Archive.history) =
       match removal with
       | Librarian_effects.Merged_into target -> replace target Program_absorption
       | Revised_into target | Superseded_by target ->
-        let relation = if Hashtbl.find revisions target > 1 then Program_revision else Revision in
+        let relation = match Hashtbl.find_opt revisions target with
+          | Some n when n > 1 -> Program_revision
+          | Some _ | None -> Revision in
         replace target relation
       | Dropped { reason } | Molted { reason } | Retracted { reason; _ } ->
         emit position (Removed { fact; reason = Some reason; missing = None })

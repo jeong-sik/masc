@@ -256,7 +256,44 @@ let test_memory_diff_through_compaction () =
   check int "partial archive reports unreadable rows" 1 (read ()).unreadable;
   Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o600 archive_path
     (fun oc -> output_string oc "{");
-  check int "an incomplete cold record counts separately" 2 (read ()).unreadable
+  check int "an incomplete cold record counts separately" 2 (read ()).unreadable;
+  let checkpoint_at at =
+    let store = match Store.boot ~memory_dir:place.memory_dir ~turns_dir:place.turns_dir ~keeper_id ~at with
+      | Ok store -> store | Error _ -> fail "could not reopen the valid checkpoint tail" in
+    match Store.compact_log store ~at with
+    | Ok _ -> () | Error _ -> fail "unreadable historical data blocked the next checkpoint" in
+  checkpoint_at 207.;
+  check int "a successful checkpoint keeps both damaged cold records visible" 2 (read ()).unreadable;
+  let variant = { c with revision = c.revision + 1 } in
+  Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o600 archive_path
+    (fun oc -> List.iter (fun change ->
+      output_string oc (Yojson.Safe.to_string (Masc.Librarian_memory_change.to_json change) ^ "\n")) [c; variant]);
+  let undecodable = "\255\000broken row" in
+  let damaged_live = undecodable ^ "\n" ^ In_channel.with_open_bin path In_channel.input_all in
+  Out_channel.with_open_bin path (fun oc -> output_string oc damaged_live);
+  checkpoint_at 208.;
+  let renewed = In_channel.with_open_bin path In_channel.input_all in
+  check int "live history returns to one checkpoint" 1 (List.length (String.split_on_char '\n' renewed) - 1);
+  check int "two cold errors, one historical live error and one conflicting sequence survive" 4 (read ()).unreadable;
+  Out_channel.with_open_bin path (fun oc -> output_string oc damaged_live);
+  check int "archive publication overlapping the former damaged live file counts each issue once" 4 (read ()).unreadable;
+  Out_channel.with_open_bin path (fun oc -> output_string oc renewed);
+  checkpoint_at 209.;
+  check int "another checkpoint keeps the same unresolved count" 4 (read ()).unreadable;
+  check bool "neither conflicting generation becomes a fact" true
+    (List.for_all (fun (change : Masc.Librarian_memory_change.t) -> change.seq <> c.seq) (read ()).changes);
+  let rows = In_channel.with_open_bin archive_path In_channel.input_lines |> List.map Yojson.Safe.from_string in
+  let opaque = List.filter_map (function
+    | `List [`String "librarian.unreadable.v1"; `String source; `Int _; `Int _; `String bytes] ->
+      Some (source, Base64.decode_exn bytes)
+    | _ -> None) rows |> List.sort compare in
+  check (list (pair string string)) "raw bytes and the cold fragment are recoverable"
+    ["archive", "damaged"; "archive_fragment", "{"; "live", undecodable] opaque;
+  let versions = List.filter_map (fun row ->
+    match Masc.Librarian_memory_change.of_json row with
+    | Ok change when change.seq = c.seq -> Some change.revision | Ok _ | Error _ -> None) rows in
+  check (list int) "both original sequence versions remain recoverable"
+    [c.revision; variant.revision] (List.sort Int.compare versions)
 ;;
 
 let test_compact_log_preserves_promotions_across_reboot_and_archive_read () =

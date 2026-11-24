@@ -72,6 +72,13 @@ val fold
   -> f:('acc -> scanned -> 'acc)
   -> ('acc, Private_jsonl_scan.error) result
 
+val fold_with_raw
+  :  string
+  -> init:'acc
+  -> f:('acc -> scanned -> string -> 'acc)
+  -> ('acc, Private_jsonl_scan.error) result
+(** As {!fold}, with the original row bytes for lossless archival of decoding failures. *)
+
 type append_error =
   | End_moved of
       { expected : int

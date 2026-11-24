@@ -408,7 +408,6 @@ let compact_log t ~at =
     Librarian_archive.with_path_lock ~log_path:t.log_path (fun () ->
       match Librarian_archive.history_unlocked t.log_path with
       | Error (_ : Private_jsonl_scan.error) -> Error Store_unwritable
-      | Ok history when history.unreadable > 0 -> Error Log_unreadable
       | Ok history ->
          let compacted_lines = history.live_lines in
          let archived = Librarian_archive.left_of_history history ~current:t.memory.facts in

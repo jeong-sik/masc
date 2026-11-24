@@ -678,6 +678,8 @@ type keeper_diff_counts = {
   journal_failures_in_window : int;
   journal_quarantines_in_window : int;
   undecodable_journal_lines : int;
+  (** Historical count across the live commit log and the cold archive, including
+      unresolved conflicting sequences. *)
   history_coverage : keeper_history_coverage option;
 }
 

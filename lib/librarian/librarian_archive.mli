@@ -23,11 +23,14 @@ val with_path_lock : log_path:string -> (unit -> 'a) -> 'a
 (** Old sidecars record a removal and its time. New sidecars store the exact
     sequence, revision, source and added/removed facts of each commit. A
     conflicting sequence is excluded and counted as unreadable. *)
+type retained
+
 type history =
   { unsequenced : left list
   ; changes : Librarian_memory_change.t list
   ; unreadable : int
   ; live_lines : int
+  ; retained : retained (** Private malformed bytes and competing versions for the next checkpoint. *)
   }
 
 val history_unlocked : string -> (history, Private_jsonl_scan.error) result

@@ -25,6 +25,10 @@ let to_json c =
          ; "removed", `List (List.map removed c.removed) ]
 ;;
 
+let same_event a b =
+  Yojson.Safe.equal (to_json { a with line_at = 0 }) (to_json { b with line_at = 0 })
+;;
+
 let of_json = function
   | `Assoc fields ->
     let open Keeper_memory_os_types in

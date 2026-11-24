@@ -95,9 +95,13 @@ type scanned =
    megabyte. *)
 let scan_window_rows = 64
 
-let fold path ~init ~f =
+let fold_with_raw path ~init ~f =
   Private_jsonl_scan.fold path ~rows_per_read:scan_window_rows ~init ~f:(fun acc ~at row ->
-    f acc { at; line = decode row })
+    f acc { at; line = decode row } row)
+;;
+
+let fold path ~init ~f =
+  fold_with_raw path ~init ~f:(fun acc scanned _raw -> f acc scanned)
 ;;
 
 type append_error =

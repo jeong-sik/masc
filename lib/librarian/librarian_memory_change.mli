@@ -12,4 +12,6 @@ type t =
 
 val of_commit : line_at:int -> Librarian_log.commit -> t
 val to_json : t -> Yojson.Safe.t
+val same_event : t -> t -> bool
+(** Equal persisted fact changes, independent of the copy's byte offset. *)
 val of_json : Yojson.Safe.t -> (t, Keeper_memory_os_types.wire_error) result

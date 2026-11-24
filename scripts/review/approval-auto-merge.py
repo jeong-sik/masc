@@ -31,6 +31,7 @@ def sibling(name):
 REVIEWS = sibling('github-reviews')
 STACKS = sibling('stack-scope')
 GET = sibling('github-get')
+FREEZE = sibling('release-freeze')
 ISSUES = sibling('linked-issues')
 KEEP = sibling('branch-deletion')  # the sweep keeps the same branches
 CLIENT = GET.Client(
@@ -60,12 +61,10 @@ MAX_QUOTA_RETRIES = 2
 MAX_QUOTA_WAIT_SECONDS = 3600
 # task-4046: the release freeze lives in a repository variable, not in a file
 # on main — a freeze marker would itself have to land on frozen main, and a
-# variable needs no code change to toggle. The release leader sets
-# `gh variable set MASC_RELEASE_FREEZE --body 1` while the freeze is on and
-# clears it (or sets it to 0) once publishing is over. Only the value '1'
-# freezes: a missing variable, an empty value, or anything else leaves the
-# ordinary behavior untouched.
-FREEZE_VARIABLE = 'MASC_RELEASE_FREEZE'
+# variable needs no code change to toggle. The flag's name, precedence and
+# loud/quiet read rules live in release-freeze.py, shared with the sweep;
+# the leader toggles the variable, no code or workflow change needed.
+FREEZE_VARIABLE = FREEZE.FREEZE_VARIABLE
 # task-4046: only this label opts a scope out of the freeze. The release
 # leader attaches it to the top pull request of a P0/P1 repair scope; no
 # other scope submits while the freeze is on.
@@ -248,8 +247,17 @@ def reservation_reads(repo, number, seen):
     return (current, selected, head), []
 
 
-def auto_merge_default(repo, number):
-    """Arm ordinary Ready PRs; native stacks use the whole-scope worker."""
+def auto_merge_default(repo, number, arm=True):
+    """Arm ordinary Ready PRs; native stacks use the whole-scope worker.
+
+    task-4046: during a release freeze the caller passes arm=False. The
+    reads and the safety disarm still run — a stale reservation must not
+    outlive a run that could not confirm its conditions, frozen or not —
+    and a scope already reserved by an earlier unfrozen run is only
+    observed. The freeze hold itself is raised where arming would have
+    happened, so a merged scope's `closed` event keeps its ordinary wake
+    path instead of a freeze comment (#54644 review).
+    """
     seen = {}
     try:
         reservation, disabled = stable_reads(lambda: reservation_reads(repo, number, seen))
@@ -267,6 +275,16 @@ def auto_merge_default(repo, number):
     if reservation is None:
         return None
     current, selected, head = reservation
+    if not arm and current.get('auto_merge') is None:
+        # Raised past the read-safety block above on purpose: the freeze
+        # stops a new submission and leaves a reservation an earlier run
+        # made alone. GitHub may still land that one on its required
+        # checks, exactly like a receipt this run only follows.
+        freeze_skip_comment(repo, number)
+        raise Hold(f'release freeze is on ({FREEZE_VARIABLE}=1): merge '
+                   f'submission skipped for #{number}; no merge request '
+                   f'was made ({FREEZE_LABEL} on the scope top admits a '
+                   f'P0/P1 repair)')
     attempt = None
     if current.get('auto_merge') is None:
         emit({'status': 'enabling_auto_merge', 'pr': selected, 'head': head})
@@ -822,29 +840,14 @@ def close_linked_issues(repo, numbers):
 def freeze_flag(repo):
     """'1' in the MASC_RELEASE_FREEZE repository variable.
 
-    The environment is read first, so the trusted workflow can pass the vars
-    context for free and tests can pin the flag; without it the variable is
-    read from the repository. A missing or unreadable variable is not a
-    freeze: every other admission hold still applies. A fallback read that
-    fails names itself on stderr — a fail-open gate must not fail open
-    silently (the #54644 review). Setting the variable to '0' instead of
-    deleting it keeps the ordinary off state off this fallback.
+    The shared reader in release-freeze.py owns the precedence and the
+    loud/quiet rules. The worker's REST client raises a typed 404 for a
+    variable that does not exist — the ordinary off state, kept quiet;
+    every other failed read is loud and still fails open (#54644 review).
     """
-    passed = os.environ.get(FREEZE_VARIABLE, '').strip()
-    if passed:
-        return passed == '1'
-    try:
-        value = read(f'repos/{repo}/actions/variables/{FREEZE_VARIABLE}')['value']
-    except (GET.ApiFailure, ValueError, KeyError, TypeError, OSError) as error:
-        if isinstance(error, GET.ApiFailure):
-            detail = f'HTTP {error.status}: {error.details.get("message", "")}'
-        else:
-            detail = f'{type(error).__name__}: {error}'
-        print(f'approval-auto-merge: the {FREEZE_VARIABLE} repository variable '
-              f'is unreadable ({detail[:200]}); treating the release freeze '
-              f'as off', file=sys.stderr)
-        return False
-    return value.strip() == '1'
+    return FREEZE.freeze_flag(repo, read,
+                              missing=lambda error: isinstance(error, GET.ApiFailure)
+                              and error.status == 404)
 
 
 def freeze_exempt_pull(repo, number):
@@ -959,27 +962,35 @@ def main():
             outcome = resume(repo, receipt, dispatch=not args.dry_run)
             emit({'pr': number, 'result': outcome})
             return 0 if outcome.get('status') in SUCCESS else 1
-        # task-4046: the freeze stops new merge submissions mechanically. A
-        # receipt still followed above only observes a request an earlier run
-        # already submitted, so it stays on the unfrozen side of this gate. A
-        # dry run writes nothing and stays inspectable during a freeze.
-        if not args.dry_run and freeze_flag(repo):
-            if freeze_exempt_pull(repo, number):
-                print(f'approval-auto-merge: #{number} carries {FREEZE_LABEL} on '
-                      f'its scope top; admitting it despite the freeze',
-                      file=sys.stderr)
-            else:
-                freeze_skip_comment(repo, number)
-                raise Hold(f'release freeze is on ({FREEZE_VARIABLE}=1): merge '
-                           f'submission skipped for #{number}; no merge request '
-                           f'was made ({FREEZE_LABEL} on the scope top admits a '
-                           f'P0/P1 repair)')
+        # task-4046: the freeze stops new merge submissions and reservation
+        # arming mechanically. A receipt still followed above only observes a
+        # request an earlier run already submitted, so it stays on the
+        # unfrozen side. The arming pass below still runs its safety disarm
+        # while frozen — a stale reservation must not outlive a run that
+        # could not confirm it — and the freeze hold itself is raised only
+        # where a submission would have happened: inside auto_merge_default
+        # for ordinary scopes, and after `prepare` for native stacks, which
+        # plan no reservation there. A merged scope keeps its ordinary wake
+        # path with no freeze comment (#54644 review). A dry run writes
+        # nothing and stays inspectable during a freeze.
+        frozen = not args.dry_run and freeze_flag(repo)
+        if frozen and freeze_exempt_pull(repo, number):
+            frozen = False
+            print(f'approval-auto-merge: #{number} carries {FREEZE_LABEL} on '
+                  f'its scope top; admitting it despite the freeze',
+                  file=sys.stderr)
         if not args.dry_run:
-            automatic = auto_merge_default(repo, number)
+            automatic = auto_merge_default(repo, number, arm=not frozen)
             if automatic is not None:
                 emit(automatic)
                 return 0
         selected, head, scope = prepare(repo, number)
+        if frozen:
+            freeze_skip_comment(repo, number)
+            raise Hold(f'release freeze is on ({FREEZE_VARIABLE}=1): merge '
+                       f'submission skipped for #{number}; no merge request '
+                       f'was made ({FREEZE_LABEL} on the scope top admits a '
+                       f'P0/P1 repair)')
         if not args.dry_run:
             emit({'status': 'admitted', 'pr': selected, 'head': head, 'scope': scope})
         outcome = ({'status': 'eligible_dry_run'} if args.dry_run else

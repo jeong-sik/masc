@@ -642,6 +642,31 @@ class Sweeping(unittest.TestCase):
         self.assertIn('Resource not accessible by integration', recorded)
         self.assertIn('treating the release freeze as off', recorded)
 
+    def test_a_missing_freeze_variable_is_a_quiet_off_state(self):
+        """task-4046 review: a variable that does not exist is the ordinary
+        off state — the sweep walks, no freeze_skipped, no stderr line."""
+        errors = io.StringIO()
+        def gh(arguments):
+            if arguments == ['api', 'repos/owner/repo/actions/variables/'
+                                   'MASC_RELEASE_FREEZE']:
+                raise ValueError('gh: Not Found (HTTP 404)')
+            raise AssertionError(arguments)
+        with patch.object(SWEEP, 'gh', side_effect=gh), \
+             patch.object(SWEEP, 'open_pulls', return_value=[]) as walk, \
+             patch.object(SWEEP, 'quota', return_value=None), \
+             patch.object(SWEEP, 'clean_branches', return_value={'found': 0}), \
+             patch.object(SWEEP, 'close_merged_issues',
+                          return_value={'pull_requests': [], 'not_reached': 0,
+                                        'issues': []}), \
+             patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo'}), \
+             patch.object(SWEEP.sys, 'argv', ['sweep']), \
+             redirect_stdout(io.StringIO()) as output, redirect_stderr(errors):
+            self.assertEqual(SWEEP.main(), 0)
+        self.assertEqual(walk.call_count, 1)
+        self.assertNotIn('freeze_skipped', output.getvalue())
+        self.assertNotIn('release-freeze', errors.getvalue())
+        self.assertNotIn('MASC_RELEASE_FREEZE', errors.getvalue())
+
 
 if __name__ == '__main__':
     unittest.main()

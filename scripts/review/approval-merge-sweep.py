@@ -102,10 +102,6 @@ query($owner: String!, $name: String!, $cursor: String) {
 '''
 PUSH_TIMEOUT_SECONDS = 120
 MERGER = 'github-actions'  # the account the merge worker's token merges as
-# task-4046: the release freeze lives in a repository variable, not in a file
-# on main; only the value '1' freezes. The sweep reads the variable the same
-# way the worker does, with the environment as a free first source.
-FREEZE_VARIABLE = 'MASC_RELEASE_FREEZE'
 
 
 def sibling(name):
@@ -119,6 +115,11 @@ def sibling(name):
 
 ISSUES = sibling('linked-issues')
 KEEP = sibling('branch-deletion')  # the worker keeps the same branches
+# task-4046: the release freeze lives in a repository variable, not in a file
+# on main; only the value '1' freezes. The flag's name, precedence and
+# loud/quiet read rules live in release-freeze.py, shared with the worker.
+FREEZE = sibling('release-freeze')
+FREEZE_VARIABLE = FREEZE.FREEZE_VARIABLE
 
 
 def gh(arguments):
@@ -135,23 +136,16 @@ def gh(arguments):
 
 
 def freeze_flag(repo):
-    """'1' in the MASC_RELEASE_FREEZE repository variable; the environment is
-    read first, so a workflow can pass it (and tests can pin it). A missing
-    or unreadable variable is not a freeze, and a fallback read that fails
-    names itself on stderr — a fail-open gate must not fail open silently
-    (the #54644 review)."""
-    passed = os.environ.get(FREEZE_VARIABLE, '').strip()
-    if passed:
-        return passed == '1'
-    try:
-        value = gh(['api', f'repos/{repo}/actions/variables/{FREEZE_VARIABLE}'])
-    except (ValueError, KeyError, TypeError, OSError) as error:
-        detail = f'{type(error).__name__}: {error}'[:200]
-        print(f'approval-merge-sweep: the {FREEZE_VARIABLE} repository variable '
-              f'is unreadable ({detail}); treating the release freeze as off',
-              file=sys.stderr)
-        return False
-    return str(value.get('value', '')).strip() == '1'
+    """'1' in the MASC_RELEASE_FREEZE repository variable.
+
+    The shared reader in release-freeze.py owns the precedence and the
+    loud/quiet rules. The sweep's gh wrapper reports a missing variable in
+    GitHub's words ("gh: Not Found (HTTP 404)"), which the reader treats as
+    the ordinary quiet off state; every other failed read is loud and still
+    fails open (#54644 review).
+    """
+    return FREEZE.freeze_flag(repo, lambda path: gh(['api', path]),
+                              missing=FREEZE.missing_from_gh)
 
 
 def graphql(document, **variables):

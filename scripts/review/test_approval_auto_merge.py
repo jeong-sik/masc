@@ -2052,7 +2052,10 @@ class ReleaseFreezeGate(unittest.TestCase):
     freeze-exempt label is still admitted; without the label the skip reason
     is left on the pull request, and no reservation or request happens. A
     receipt still being followed only observes a request an earlier run
-    already submitted, so it stays above the gate."""
+    already submitted, so it stays above the gate. The arming pass still
+    runs its safety disarm while frozen, and the hold lands only where a
+    submission would have happened: a merged scope's `closed` event keeps
+    its ordinary wake path (#54644 review)."""
 
     def run_frozen(self, number, value='1', argv=('auto-merge',), receipt=None):
         environment = {'GITHUB_REPOSITORY': REPO,
@@ -2089,11 +2092,12 @@ class ReleaseFreezeGate(unittest.TestCase):
         self.assertIn('release freeze', result['reason'])
         self.assertIn('MASC_RELEASE_FREEZE=1', result['reason'])
         self.assertIn('freeze-exempt', result['reason'])
-        # No reservation, no queue request: the gate fires before admission,
-        # so the run reads the pull request (label probe, merged wake) and
-        # nothing else.
+        # No reservation, no queue request: the hold lands where arming
+        # would have happened, so the run writes nothing. The reads are the
+        # arming pass's own plan reads — the safety disarm while frozen
+        # needs them to tell a would-be submission from a scope whose
+        # conditions already fail (#54644 review).
         self.assertEqual(github.mutations, [])
-        self.assertNotIn(PREFIX + '/rules/branches/main', github.counts)
         self.assertFalse(any(path.startswith(PREFIX + '/compare/')
                              for path in github.counts))
         # The skip reason stays in the run log (this JSON) and on the request.
@@ -2191,32 +2195,120 @@ class ReleaseFreezeGate(unittest.TestCase):
         self.assertEqual(reads[0], PREFIX + '/actions/variables/MASC_RELEASE_FREEZE')
         self.assertEqual(len(github.comments), 1)
 
-    def test_an_unreadable_freeze_variable_is_not_a_freeze_but_not_silent(self):
+    def test_a_missing_freeze_variable_is_the_quiet_off_state(self):
+        """task-4046 review: a variable that does not exist is the ordinary
+        off state — no freeze, no stderr line, no comment."""
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'DISPATCH_PR': '101', 'DISPATCH_RECEIPT': '',
+                       'GITHUB_STEP_SUMMARY': ''}
+        output, errors = io.StringIO(), io.StringIO()
+        with FakeGitHub() as github:
+            def read(path):
+                if path == PREFIX + '/actions/variables/MASC_RELEASE_FREEZE':
+                    raise MERGE.GET.ApiFailure('variables', 404, {}, 'Not Found')
+                return json.loads(github.output(['gh', 'api', path]))
+            with patch.dict(os.environ, environment), \
+                 patch.object(sys, 'argv', ['auto-merge']), \
+                 patch.object(MERGE, 'read', side_effect=read), \
+                 redirect_stdout(output), redirect_stderr(errors):
+                code = MERGE.main()
+        self.assertEqual((code, self.final_json(output.getvalue())['status']),
+                         (0, 'auto_merge_enabled'))
+        self.assertEqual(github.comments, [])
+        self.assertNotIn('release-freeze', errors.getvalue())
+
+    def test_a_failed_freeze_variable_read_is_loud_and_fails_open(self):
         """task-4046 review: the fail-open fallback names itself on stderr."""
-        for status, message in ((404, 'Not Found'),
-                                (403, 'Resource not accessible by integration')):
-            environment = {'GITHUB_REPOSITORY': REPO,
-                           'GITHUB_EVENT_NAME': 'workflow_dispatch',
-                           'DISPATCH_PR': '101', 'DISPATCH_RECEIPT': '',
-                           'GITHUB_STEP_SUMMARY': ''}
-            output, errors = io.StringIO(), io.StringIO()
-            with FakeGitHub() as github:
-                def read(path, status=status, message=message):
-                    if path == PREFIX + '/actions/variables/MASC_RELEASE_FREEZE':
-                        raise MERGE.GET.ApiFailure('variables', status, {}, message)
-                    return json.loads(github.output(['gh', 'api', path]))
-                with patch.dict(os.environ, environment), \
-                     patch.object(sys, 'argv', ['auto-merge']), \
-                     patch.object(MERGE, 'read', side_effect=read), \
-                     redirect_stdout(output), redirect_stderr(errors):
-                    code = MERGE.main()
-            self.assertEqual((code, self.final_json(output.getvalue())['status']),
-                             (0, 'auto_merge_enabled'))
-            self.assertEqual(github.comments, [])
-            recorded = errors.getvalue()
-            self.assertIn(f'HTTP {status}', recorded)
-            self.assertIn(message, recorded)
-            self.assertIn('treating the release freeze as off', recorded)
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'DISPATCH_PR': '101', 'DISPATCH_RECEIPT': '',
+                       'GITHUB_STEP_SUMMARY': ''}
+        output, errors = io.StringIO(), io.StringIO()
+        with FakeGitHub() as github:
+            def read(path):
+                if path == PREFIX + '/actions/variables/MASC_RELEASE_FREEZE':
+                    raise MERGE.GET.ApiFailure('variables', 403, {},
+                                               'Resource not accessible by integration')
+                return json.loads(github.output(['gh', 'api', path]))
+            with patch.dict(os.environ, environment), \
+                 patch.object(sys, 'argv', ['auto-merge']), \
+                 patch.object(MERGE, 'read', side_effect=read), \
+                 redirect_stdout(output), redirect_stderr(errors):
+                code = MERGE.main()
+        self.assertEqual((code, self.final_json(output.getvalue())['status']),
+                         (0, 'auto_merge_enabled'))
+        self.assertEqual(github.comments, [])
+        recorded = errors.getvalue()
+        self.assertIn('HTTP 403', recorded)
+        self.assertIn('Resource not accessible by integration', recorded)
+        self.assertIn('treating the release freeze as off', recorded)
+
+    def test_a_frozen_merged_scope_wakes_instead_of_leaving_a_freeze_comment(self):
+        """task-4046 review: the disarm path sits above the gate, so a
+        `closed` event on already-merged work keeps its ordinary wake path —
+        no freeze hold, no freeze comment."""
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'DISPATCH_PR': '101', 'DISPATCH_RECEIPT': '',
+                       'GITHUB_STEP_SUMMARY': '', 'MASC_RELEASE_FREEZE': '1'}
+        output = io.StringIO()
+        with FakeGitHub(['merged']) as github, \
+             patch.dict(os.environ, environment), \
+             patch.object(sys, 'argv', ['auto-merge']), \
+             patch.object(MERGE, 'wake_main_build', return_value={'dispatched': True}), \
+             patch.object(MERGE, 'delete_merged_heads', return_value=[]), \
+             patch.object(MERGE, 'close_linked_issues', return_value=[]), \
+             redirect_stdout(output), redirect_stderr(io.StringIO()):
+            code = MERGE.main()
+        result = self.final_json(output.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(result['status'], 'held')
+        self.assertNotIn('release freeze', result['reason'])
+        self.assertIn('is not open and ready', result['reason'])
+        self.assertEqual(result['main_build'], {'dispatched': True})
+        self.assertEqual(github.comments, [])
+        self.assertEqual(github.mutations, [])
+
+    def test_a_frozen_run_only_observes_an_armed_reservation(self):
+        """task-4046 review: a reservation an earlier unfrozen run made is
+        observed — not re-submitted, not unwound: no hold, no comment."""
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'DISPATCH_PR': '101', 'DISPATCH_RECEIPT': '',
+                       'GITHUB_STEP_SUMMARY': '', 'MASC_RELEASE_FREEZE': '1'}
+        output = io.StringIO()
+        with FakeGitHub() as github:
+            github.pulls[101]['auto_merge'] = {'merge_method': 'squash'}
+            with patch.dict(os.environ, environment), \
+                 patch.object(sys, 'argv', ['auto-merge']), \
+                 redirect_stdout(output), redirect_stderr(io.StringIO()):
+                code = MERGE.main()
+        self.assertEqual((code, self.final_json(output.getvalue())['status']),
+                         (0, 'auto_merge_enabled'))
+        self.assertEqual(github.comments, [])
+        self.assertEqual(github.mutations, [])
+
+    def test_a_frozen_stack_scope_is_held_after_the_disarm_pass(self):
+        """task-4046 review: native stacks plan no reservation in the arming
+        pass, so their submission is held after `prepare` admitted them and
+        after the members' stale reservations were dropped."""
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'DISPATCH_PR': '101', 'DISPATCH_RECEIPT': '',
+                       'GITHUB_STEP_SUMMARY': '', 'MASC_RELEASE_FREEZE': '1'}
+        output = io.StringIO()
+        with FakeGitHub() as github, \
+             patch.dict(os.environ, environment), \
+             patch.object(sys, 'argv', ['auto-merge']), \
+             patch.object(MERGE, 'auto_merge_default', return_value=None), \
+             patch.object(MERGE, 'prepare',
+                          return_value=(101, sha(101), [{'number': 101}])), \
+             patch.object(MERGE, 'submit') as submit, \
+             redirect_stdout(output), redirect_stderr(io.StringIO()):
+            code = MERGE.main()
+        submit.assert_not_called()
+        result = self.final_json(output.getvalue())
+        self.assertEqual(result['status'], 'held')
+        self.assertIn('release freeze', result['reason'])
+        self.assertIn('MASC_RELEASE_FREEZE=1', result['reason'])
+        self.assertNotIn('"status": "admitted"', output.getvalue())
+        self.assertEqual(len(github.comments), 1)
 
 
 class SweepDispatchContract(unittest.TestCase):
@@ -2244,6 +2336,49 @@ class SweepDispatchContract(unittest.TestCase):
         self.assertTrue(keys, 'no -f keys found at the sweep dispatch site')
         self.assertLessEqual(keys, declared,
                              f'{keys - declared} dispatched but not declared')
+
+
+class ReleaseFreezeWiring(unittest.TestCase):
+    """task-4046 review: both workflows must pass the freeze variable to the
+    scripts, or the gate rides the API fallback whose GITHUB_TOKEN lacks the
+    Variables permission — the defect that started this task. The env wiring
+    itself lands in #54645 together with this PR, so a tree without any of
+    it skips on a pull-request or local run and names the missing file; a
+    partial edit that keeps either file wired is strict on both files, and a
+    dispatched run on main is strict on both. A workflow edit cannot
+    quietly half-drop the env, and a full drop trips the main dispatch."""
+
+    ROOT = Path(__file__).resolve().parents[2]
+    EXPRESSION = 'MASC_RELEASE_FREEZE: ${{ vars.MASC_RELEASE_FREEZE }}'
+
+    def wired_steps(self):
+        missing = []
+        for name in ('approval-auto-merge.yml', 'approval-merge-sweep.yml'):
+            lines = (self.ROOT / '.github/workflows' / name).read_text(
+                encoding='utf-8').splitlines()
+            base = name[:-4]
+            run_at = next(i for i, line in enumerate(lines)
+                          if line.strip().startswith(
+                              f'run: python3 scripts/review/{base}.py'))
+            if self.EXPRESSION not in '\n'.join(lines[max(0, run_at - 15):run_at]):
+                missing.append(name)
+        return missing
+
+    def test_the_workflows_pass_the_freeze_variable_to_the_scripts(self):
+        missing = self.wired_steps()
+        if not missing:
+            return
+        on_main = os.environ.get('GITHUB_REF') == 'refs/heads/main'
+        if len(missing) == 2 and not on_main:
+            self.skipTest('the freeze env wiring lands with #54645; this tree '
+                          'is missing it in ' + ', '.join(missing))
+        self.fail('the workflows must pass the freeze variable to the scripts '
+                  '(#54645); missing in ' + ', '.join(missing))
+
+    def test_the_shared_reader_pins_the_env_name_and_precedence(self):
+        source = (HERE / 'release-freeze.py').read_text(encoding='utf-8')
+        self.assertIn("FREEZE_VARIABLE = 'MASC_RELEASE_FREEZE'", source)
+        self.assertIn("os.environ.get(FREEZE_VARIABLE, '').strip()", source)
 
 
 if __name__ == '__main__':

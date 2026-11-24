@@ -1,0 +1,243 @@
+/* MASC Dashboard — Shared Surface Layouts (Overview, Gate, Work, Logs, Settings, Monitor) */
+
+.ov {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-4);
+  min-width: 0;
+}
+
+.ov-2col {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+@media (max-width: 1023px) {
+  .ov-2col {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.ov-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.ov-eyebrow {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-3);
+}
+
+.ov-head h1 {
+  margin: var(--sp-0) 0 0;
+  font-size: var(--fs-20);
+  font-weight: 600;
+  color: var(--fg-1);
+}
+
+.ov-sub {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-13);
+  color: var(--fg-2);
+}
+
+.ov-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--sp-3);
+}
+
+.ov-kpi {
+  padding: var(--sp-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+}
+
+.ov-kpi-k {
+  font-size: var(--fs-11);
+  color: var(--fg-3);
+}
+
+.ov-kpi-v {
+  margin-top: var(--sp-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-20);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums slashed-zero;
+  color: var(--fg-1);
+}
+
+.ov-kpi-v.ok { color: var(--ok-fg); }
+.ov-kpi-v.warn { color: var(--warn-fg); }
+.ov-kpi-v.bad { color: var(--err-fg); }
+.ov-kpi-v.volt { color: var(--brass-1); }
+
+/* Gate / Approvals */
+.ap-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 42%) minmax(0, 58%);
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+@media (max-width: 1023px) {
+  .ap-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.ap-queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.ap-error {
+  padding: var(--sp-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--err-border);
+  background: var(--err-soft);
+  color: var(--fg-1);
+  font-size: var(--fs-13);
+}
+
+.ap-error.sev-warn {
+  border-color: var(--warn-border);
+  background: var(--warn-soft);
+}
+
+.ap-viewseg {
+  display: inline-flex;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-2);
+}
+
+.ap-viewbtn {
+  padding: var(--sp-1) var(--sp-3);
+  border: none;
+  background: transparent;
+  color: var(--fg-2);
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+
+.ap-viewbtn.on {
+  background: var(--bg-4);
+  color: var(--fg-1);
+  font-weight: 600;
+}
+
+.wka-card {
+  padding: var(--sp-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+}
+
+.wka-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-2);
+}
+
+.wka-h h3 {
+  margin: 0;
+  font-size: var(--fs-13);
+  font-weight: 600;
+}
+
+/* Logs surface */
+.v2-logs-surface {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  min-width: 0;
+}
+
+.v2-logs-panel {
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+
+.v2-logs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line-1);
+  background: var(--bg-2);
+}
+
+.v2-logs-table-header,
+.v2-logs-line {
+  display: grid;
+  grid-template-columns: 92px 62px 72px 120px minmax(0, 1fr);
+  gap: var(--sp-2);
+  align-items: baseline;
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-12);
+}
+
+.v2-logs-table-header {
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line-1);
+  color: var(--fg-3);
+  font-weight: 600;
+}
+
+.v2-logs-row {
+  border-bottom: 1px solid var(--line-1);
+}
+
+.v2-logs-row:hover {
+  background: var(--bg-3);
+}
+
+/* Settings surface */
+.set-shell {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: var(--sp-4);
+  padding: var(--sp-4);
+  min-width: 0;
+}
+
+@media (max-width: 767px) {
+  .set-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.set-card-b {
+  padding: var(--sp-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+}
+
+/* Monitoring surface */
+.v2-monitoring-surface {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-4);
+  min-width: 0;
+}

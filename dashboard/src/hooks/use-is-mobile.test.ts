@@ -23,16 +23,16 @@ describe('useIsMobile', () => {
     container.remove()
   })
 
-  it('returns true when viewport width is at the default 900px breakpoint', () => {
-    window.innerWidth = 900
+  it('returns true when viewport width is at the default 767px mobile breakpoint', () => {
+    window.innerWidth = 767
     render(html`<${TestHarness} />`, container)
 
     const result = container.querySelector('[data-testid="result"]')
     expect(result?.getAttribute('data-is-mobile')).toBe('true')
   })
 
-  it('returns false when viewport width is above the default breakpoint', () => {
-    window.innerWidth = 901
+  it('returns false when viewport width is at or above the 768px tablet breakpoint', () => {
+    window.innerWidth = 768
     render(html`<${TestHarness} />`, container)
 
     const result = container.querySelector('[data-testid="result"]')

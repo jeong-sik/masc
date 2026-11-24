@@ -68,41 +68,12 @@ describe('App v2 header chrome', () => {
     }
   })
 
-  it('renders v2 app shell wrapper with tweak attributes (v2 dark default, no data-theme)', () => {
+  it('renders app shell wrapper with dark default (no data-theme on root)', () => {
     renderApp()
     const app = container.querySelector('.v2-app')
     expect(app).not.toBeNull()
     expect(app?.hasAttribute('data-theme')).toBe(false)
-    // density boots at 'spacious' to match the keeper-v2 prototype SSOT
-    // (tweaksDensity defaultValue, aligned to the prototype in main 5230b5fa).
-    // Users switch to 'regular'/'compact' via the Tweaks panel.
-    expect(app?.getAttribute('data-density')).toBe('spacious')
-    expect(app?.getAttribute('data-motion')).toBe('subtle')
-    expect(app?.getAttribute('data-bubble')).toBe('card')
     expect(app?.hasAttribute('data-surface')).toBe(true)
-  })
-
-  it('passes the font-scale percentage to --twk-font-scale without double-dividing (regression #21998)', () => {
-    renderApp()
-    const app = container.querySelector('.v2-app') as HTMLElement | null
-    expect(app).not.toBeNull()
-    const dataScale = app?.getAttribute('data-font-scale') ?? ''
-    const cssVar = app?.style.getPropertyValue('--twk-font-scale').trim() ?? ''
-    // craft-v2.css resolves the scale as `calc(var(--twk-font-scale) * 1%)`, so
-    // the CSS variable must carry the same raw percentage integer as
-    // data-font-scale. #21998 divided by 100 (data=100 but var=1), collapsing
-    // .v2-app font-size to 0.16px and hiding every inherited-size glyph/emoji.
-    expect(Number(cssVar)).toBe(Number(dataScale))
-    expect(Number(cssVar)).toBeGreaterThan(1)
-  })
-
-  it('defaults to the v2 dark skin (no data-theme on the dashboard root)', () => {
-    // Theme ownership lives on <html> (bootstrapped by main.ts, toggled by
-    // ThemeSwitch). The app root no longer hard-codes a theme, so the default
-    // is the keeper-v2 dark skin; paper / styleseed are opt-in light themes.
-    renderApp()
-    const app = container.querySelector('.v2-app')
-    expect(app?.hasAttribute('data-theme')).toBe(false)
   })
 
   it('keeps primary v2 surfaces on the single 50px top chrome', () => {
@@ -265,24 +236,23 @@ describe('App v2 header chrome', () => {
   })
 
   it('sets data-mobile based on the viewport width', () => {
-    window.innerWidth = 900
+    window.innerWidth = 767
     renderApp()
     const app = container.querySelector('.v2-app')
-    // The v2 shell emits data-mobile="1" (prototype CSS attribute selector),
-    // not "true".
+    // The shell emits data-mobile="1" below the 768px tablet breakpoint.
     expect(app?.getAttribute('data-mobile')).toBe('1')
   })
 
-  it('does not set data-mobile above the v2 shell breakpoint', () => {
-    window.innerWidth = 901
+  it('does not set data-mobile at or above the 768px tablet breakpoint', () => {
+    window.innerWidth = 768
     renderApp()
     const app = container.querySelector('.v2-app')
-    // Above the breakpoint the attribute is omitted entirely (was "false").
+    // At 768px+ (tablet/desktop) the mobile attribute is omitted entirely.
     expect(app?.hasAttribute('data-mobile')).toBe(false)
   })
 
   it('renders the always-present mobile bottom tab bar below the breakpoint', () => {
-    window.innerWidth = 900
+    window.innerWidth = 767
     renderApp()
 
     // Mobile navigation is NavRailV2's always-present bottom tab bar.

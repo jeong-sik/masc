@@ -15653,8 +15653,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
             tool_call_id = None;
             tool_call_name = None;
             execution_id = None;
-            operation_id = None;
-            transcript_slot = None;
+            provenance = None;
             failure_kind = None;
           };
         ];

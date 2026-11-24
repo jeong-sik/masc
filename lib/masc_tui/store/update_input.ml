@@ -72,115 +72,46 @@ let stage_remove_settings_key ~now (m : Model.t) =
               m
           , [] ))
 
-let settings_action_leaves_overlay = function
-  | Keymap.Switch_workspace _
-  | Keymap.Toggle_sidebar
-  | Keymap.Open_palette
-  | Keymap.Open_keeper_switcher
-  | Keymap.Open_model_switcher
-  | Keymap.Open_incidents
-  | Keymap.Open_queue_context
-  | Keymap.Teleport_blocked
-  | Keymap.Focus_composer ->
-      true
-  | Keymap.Sub_tab _
-  | Keymap.Cycle_focus_pane _
-  | Keymap.Focus_filter
-  | Keymap.Dive_selected
-  | Keymap.Confirm_selected
-  | Keymap.Pop_back_or_close
-  | Keymap.Open_settings
-  | Keymap.Voice_ptt_toggle
-  | Keymap.Fast_approve_top
-  | Keymap.Fast_deny_top
-  | Keymap.Ask_select_choice _
-  | Keymap.Open_help
-  | Keymap.Toggle_tool_details
-  | Keymap.Toggle_thinking
-  | Keymap.Cycle_origin_mode
-  | Keymap.Composer_kill_word
-  | Keymap.Composer_newline
-  | Keymap.Submit_steer
-  | Keymap.Submit_followup
-  | Keymap.Move _
-  | Keymap.Toggle_expand
-  | Keymap.Create_new
-  | Keymap.Delete_selected
-  | Keymap.Link_task_goal
-  | Keymap.Refresh
-  | Keymap.Copy_selected
-  | Keymap.Open_external
-  | Keymap.Toggle_zoom
-  | Keymap.Cycle_memory_view
-  | Keymap.Toggle_memory_sort
-  | Keymap.Cycle_signal_or_source
-  | Keymap.Cycle_sort_or_speak
-  | Keymap.Cycle_hearth_or_overrule
-  | Keymap.Cycle_time_window
-  | Keymap.Cycle_view_mode
-  | Keymap.Context_primary_action
-  | Keymap.Toggle_artifact_share
-  | Keymap.Step_revision _
-  | Keymap.Step_context_item _
-  | Keymap.Launch_fusion
-  | Keymap.Toggle_unreported
-  | Keymap.Unbind_connector
-  | Keymap.Entity_approve_or_assign
-  | Keymap.Entity_reject_or_cancel
-  | Keymap.Edit_or_export
-  | Keymap.Configure_provider_key
-  | Keymap.Account_login
-  | Keymap.Poll_account_login
-  | Keymap.Copy_hash
-  | Keymap.Dismiss_errors
-  | Keymap.Board_vote _
-  | Keymap.Toggle_memory_scope
-  | Keymap.Copy_public_url
-  | Keymap.Probe_sandbox
-  | Keymap.Refresh_browser_tabs
-  | Keymap.Open_memory_recovery
-  | Keymap.Search_prev_match
-  | Keymap.Toggle_memory_chart
-  | Keymap.Open_external_editor
-  | Keymap.Interrupt_turn
-  | Keymap.Quit_app ->
-      false
-
 let settings_edit_allows_global_action (act : Keymap.action) =
   Keymap.equal_action act Keymap.Quit_app
   || Keymap.equal_action act Keymap.Confirm_selected
   || Keymap.equal_action act Keymap.Pop_back_or_close
 
-let guard_settings_dirty_leave ~now (m : Model.t) (act : Keymap.action) =
+let settings_is_open (m : Model.t) =
   match m.nav.overlay with
-  | Some (Nav.Settings _)
-    when Config_store.dirty_count m.config > 0
-         && settings_action_leaves_overlay act ->
-      let n = Config_store.dirty_count m.config in
-      let config = Config_store.arm_discard_confirm m.config in
-      ( Model.with_toast ~now ~level:Model.Toast_warning
-          (Say.make
-             ~ko:
-               (Printf.sprintf
-                  "저장하지 않은 변경 %d건 — [Ctrl+S] 저장 · [Esc] 다시 눌러 버리고 닫기"
-                  n)
-             ~en:
-               (Printf.sprintf
-                  "%d unsaved change(s) — [Ctrl+S] save · press [Esc] again to discard"
-                  n))
-          { m with nav = { m.nav with filter_focused = false }; config }
-      , [] )
+  | Some (Nav.Settings _) -> true
   | Some
-      ( Nav.Settings _
-      | Nav.Palette
+      ( Nav.Palette
       | Nav.Incidents
       | Nav.Queue_context _
       | Nav.Inline_action _
       | Nav.Ask_answer
       | Nav.Help
       | Nav.System_gate _ )
-  | None ->
-      Update_actions.execute_action ~now m act
+  | None -> false
+
+let guard_settings_dirty_leave ~now (m : Model.t) act =
+  let next, commands = Update_actions.execute_action ~now m act in
+  if settings_is_open m && not (settings_is_open next)
+     && not (Keymap.equal_action act Keymap.Pop_back_or_close)
+     && Config_store.dirty_count m.config > 0
+  then
+    let n = Config_store.dirty_count m.config in
+    ( Model.with_toast ~now ~level:Model.Toast_warning
+        (Say.make
+           ~ko:
+             (Printf.sprintf
+                "저장하지 않은 변경 %d건 — [Ctrl+S]로 저장하거나 [Esc] 두 번으로 버리고 닫은 뒤 다시 시도하세요"
+                n)
+           ~en:
+             (Printf.sprintf
+                "%d unsaved change(s) — save with [Ctrl+S], or press [Esc] twice to discard and close, then retry"
+                n))
+        { m with
+          nav = { m.nav with filter_focused = false };
+          config = Config_store.disarm_discard_confirm m.config }
+    , [] )
+  else (next, commands)
 
 let extract_embedded_json_opt s =
   let trimmed = String.trim s in
@@ -386,7 +317,7 @@ let dispatch_settings_overlay_key ~now (m : Model.t)
   | Keymap.Input.Char "o" when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m Keymap.Open_external)
   | Keymap.Input.Char "?" when is_printable_key norm ->
-      Some (Update_actions.execute_action ~now m Keymap.Open_help)
+      Some (guard_settings_dirty_leave ~now m Keymap.Open_help)
   | Keymap.Input.Char "d" when is_printable_key norm -> (
       match Config_store.build_patch_request ~dry_run:true m.config with
       | Ok req ->

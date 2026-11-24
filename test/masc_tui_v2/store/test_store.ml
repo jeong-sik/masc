@@ -19560,7 +19560,7 @@ let test_layer1_input_esc_focus_traps () =
     (Config_store.is_editing_field m_set_edit_k.config
     && Option.equal Nav.equal_overlay m_set_edit_k.nav.overlay
          (Some (Nav.Settings Nav.Settings_providers_models)));
-  (* Type a char and commit -> dirty_count = 1 -> Ctrl+K arms discard guard *)
+  (* Commit a field edit. Only two consecutive Esc presses authorize discard. *)
   let m_set_typed, _ =
     Update.step ~now:t0 m_set_edit (Msg.Key_event (char_key "x"))
   in
@@ -19569,15 +19569,64 @@ let test_layer1_input_esc_focus_traps () =
   in
   Alcotest.(check int) "#13b: committed edit stages dirty=1" 1
     (Config_store.dirty_count m_set_dirty.config);
-  let m_set_dirty_k, _ =
-    Update.step ~now:t0 m_set_dirty (Msg.Key_event (char_key ~ctrl:true "k"))
+  let press m ev = Update.step ~now:t0 m (Msg.Key_event ev) in
+  let open_settings m =
+    Option.equal Nav.equal_overlay m.Model.nav.overlay
+      (Some (Nav.Settings Nav.Settings_providers_models))
   in
-  Alcotest.(check bool)
-    "#13b: Ctrl+K with dirty Settings stays in Settings and arms discard confirm"
-    true
-    (Option.equal Nav.equal_overlay m_set_dirty_k.nav.overlay
-       (Some (Nav.Settings Nav.Settings_providers_models))
-    && m_set_dirty_k.config.discard_confirm_armed);
+  let check_blocked label m ev =
+    let next, commands = press m ev in
+    Alcotest.(check bool) label true
+      (open_settings next && Config_store.dirty_count next.config = 1
+       && not next.config.discard_confirm_armed && List.is_empty commands
+       && match next.toast with
+          | Some { level = Model.Toast_warning; _ } -> true
+          | Some _ | None -> false);
+    next
+  in
+  let palette_key = char_key ~ctrl:true "k" in
+  let after_palette =
+    check_blocked "dirty Ctrl+K retains the edit without arming discard"
+      m_set_dirty palette_key
+  in
+  let after_repeat =
+    check_blocked "repeated Ctrl+K leaves discard unarmed" after_palette palette_key
+  in
+  let after_help =
+    check_blocked "Settings ? also protects the edit" after_repeat (char_key "?")
+  in
+  let after_first_esc, _ = press after_help (key Keymap.Input.Escape) in
+  Alcotest.(check bool) "first Esc arms discard and keeps the edit" true
+    (open_settings after_first_esc && after_first_esc.config.discard_confirm_armed
+     && Config_store.dirty_count after_first_esc.config = 1);
+  let after_close, _ = press after_first_esc (key Keymap.Input.Escape) in
+  Alcotest.(check bool) "second Esc closes Settings and discards the edit" true
+    (Option.is_none after_close.nav.overlay && Config_store.dirty_count after_close.config = 0
+     && not after_close.config.discard_confirm_armed);
+  let after_retry, _ = press after_close palette_key in
+  Alcotest.(check bool) "Ctrl+K opens the palette after explicit discard" true
+    (Option.equal Nav.equal_overlay after_retry.nav.overlay (Some Nav.Palette));
+  let teleport_key = char_key ~alt:true "j" in
+  let no_target, _ = press m_set_dirty teleport_key in
+  Alcotest.(check bool) "Alt+J with no target preserves Settings and reports no item" true
+    (open_settings no_target && not no_target.config.discard_confirm_armed
+     && match no_target.toast with
+        | Some { level = Model.Toast_info; _ } -> true
+        | Some _ | None -> false);
+  let attention =
+    Attention.rebuild ~asks:[ sample_ask () ] ~tool_approvals:[]
+      ~gate_pending:[] ~goals:[] Attention.empty
+  in
+  let with_target = { m_set_dirty with attention } in
+  let blocked_jump =
+    check_blocked "Alt+J protects dirty Settings when it would open an ask"
+      with_target teleport_key
+  in
+  Alcotest.(check bool) "blocked jump leaves the ask unopened" true
+    (Option.is_none blocked_jump.ask_modal);
+  let clean_jump, _ = press { m_set_wide with attention } teleport_key in
+  Alcotest.(check bool) "Alt+J opens that same ask from clean Settings" true
+    (Option.equal Nav.equal_overlay clean_jump.nav.overlay (Some Nav.Ask_answer));
   (* Btw_query left via Ctrl+K clears drafts.btw *)
   let m_btw =
     let base = Model.initial ~cols:140 ~rows:40 () in

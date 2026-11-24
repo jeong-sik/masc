@@ -864,31 +864,9 @@ let open_overlay (m : Model.t) overlay =
     }
   in
   let drafts =
-    let d0 = Drafts.set_focus false m.drafts in
-    match overlay with
-    | Nav.Inline_action Nav.Btw_query -> d0
-    | Nav.Inline_action
-        ( Nav.Gate_reject _
-        | Nav.Verification_reject _
-        | Nav.Harness_overrule _
-        | Nav.Task_cancel _
-        | Nav.Goal_drop _
-        | Nav.Schedule_form
-        | Nav.Connector_form
-        | Nav.Repo_add_form
-        | Nav.Board_new_post
-        | Nav.Board_comment _
-        | Nav.Github_token_form _
-        | Nav.Code_finder_form
-        | Nav.Code_search_form )
-    | Nav.Palette
-    | Nav.Settings _
-    | Nav.Incidents
-    | Nav.Queue_context _
-    | Nav.Ask_answer
-    | Nav.Help
-    | Nav.System_gate _ ->
-        clear_btw_if_leaving m d0
+    let drafts = Drafts.set_focus false m.drafts in
+    if Nav.equal_overlay overlay (Nav.Inline_action Nav.Btw_query) then drafts
+    else clear_btw_if_leaving m drafts
   in
   let config =
     (match overlay, m.config.target with

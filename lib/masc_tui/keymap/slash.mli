@@ -1,4 +1,4 @@
-(** Converged 31 orthogonal slash commands with strict typed parsing, fuzzy
+(** Converged 36 orthogonal slash commands with strict typed parsing, fuzzy
     filtering, and prefix completion.
 
     Strict parse contract ([constitution.xml#strict_parse_no_default]):
@@ -22,6 +22,11 @@ type command_id =
   | Cmd_jump
   | Cmd_voice
   | Cmd_btw
+  | Cmd_wake
+  | Cmd_up
+  | Cmd_resume
+  | Cmd_pause
+  | Cmd_down
   | Cmd_queue
   | Cmd_context
   | Cmd_ctl
@@ -183,6 +188,11 @@ type parsed =
   | Jump
   | Voice
   | Btw of string
+  | Wake of string option
+  | Up of string option
+  | Resume of string option
+  | Pause of string option
+  | Down of string option
   | Queue
   | Context
   | Ctl of { action : keeper_ctl_action; target : string option }
@@ -218,7 +228,7 @@ type spec = {
 }
 
 val all : spec list
-(** All 31 canonical slash command specifications in display order. *)
+(** All 36 canonical slash command specifications in display order. *)
 
 val equal_command_id : command_id -> command_id -> bool
 val equal_category : category -> category -> bool

@@ -122,6 +122,7 @@ type inline_modal_state = {
   fields : modal_form_field list;
   active_field : int;
   submitting : bool;
+  submission_id : int;
   error : string option;
 }
 
@@ -208,10 +209,56 @@ type t = {
   ask_modal : ask_modal option;
   toast : toast option;
   quit_armed_at : Clock.Mono.t option;
+  keeper_stop_armed : (string * Clock.Mono.t) option;
+  keeper_resume_op_ids : (string * string * int) list;
+  keeper_lifecycle_seq : int;
+  modal_submission_seq : int;
 }
 
 val quit_arm_window_s : float
 (** Seconds during which a second [Ctrl+Q] confirms and exits the TUI. *)
+
+val keeper_stop_arm_window_s : float
+(** Seconds during which a second [D] confirms and shuts down the armed Keeper. *)
+
+val keeper_stop_arm_toast_message : name:string -> Say.t
+(** Single-SSOT warning toast shown while [D] stop-confirmation is armed. *)
+
+val disarm_keeper_stop : t -> t
+(** Clear [keeper_stop_armed] and any matching {!keeper_stop_arm_toast_message}
+    warning toast without disturbing unrelated toasts. *)
+
+val next_keeper_lifecycle_seq : t -> int * t
+(** Mint a strictly monotonic sequence number for a Keeper lifecycle POST or
+    resume operation id. Never reset across epochs. *)
+
+val next_modal_submission_id : t -> int * t
+(** Mint a strictly monotonic submission identifier for an inline modal POST.
+    Never reset across epochs. *)
+
+val modal_mark_submitting_with_id : inline_modal_state -> t -> int * t
+(** Mint a fresh submission id via {!next_modal_submission_id} and mark the
+    modal submitting with that exact [submission_id] and cleared error. *)
+
+val resume_op_id_for : keeper:string -> t -> string option
+(** Return the currently pinned resume [operator_operation_id] for [keeper],
+    if any. *)
+
+val get_or_create_resume_op_id : keeper:string -> t -> string * t
+(** Return the pending [operator_operation_id] for [keeper] if one exists
+    (for idempotent retry), or mint and record a fresh unique ID tagged with
+    its monotonic [minted_seq]. *)
+
+val clear_resume_op_id :
+  keeper:string -> operator_operation_id:string -> t -> t
+(** Remove [keeper]'s pending [operator_operation_id] when it matches the
+    committed/completed [operator_operation_id]. *)
+
+val clear_resume_op_ids_for_keeper :
+  keeper:string -> before_seq:int -> t -> t
+(** Remove pending [operator_operation_id] entries for [keeper] whose
+    [minted_seq < before_seq], so an out-of-order delayed [ok = true] reply
+    from an earlier lifecycle POST can never erase a later resume's id. *)
 
 val equal_breakpoint : breakpoint -> breakpoint -> bool
 val equal_composer_mode : composer_mode -> composer_mode -> bool
@@ -330,6 +377,18 @@ val drawer_queue :
 val target_keeper : t -> string option
 (** The keeper the composer and the Ctrl+T drawer address: the composer's
     active keeper, else the selected roster keeper. *)
+
+val is_keeper_lifecycle_surface : t -> bool
+(** [true] iff no overlay, Micro/too-small viewport gate, text-capture input,
+    or sidebar focus is active and the operator is on [4 Keepers] or inside a
+    [Dive_keeper] view (where bare [W]/[D] lifecycle hotkeys apply). *)
+
+val target_keeper_for_lifecycle : t -> string option
+(** Single-SSOT target keeper for lifecycle actions ([W]/[D], slash commands,
+    and [Ctrl+K] palette): active [Dive_keeper] name first, then on [4 Keepers]
+    yielding [None] when a collapsed company header is focused on unzoomed
+    [pane 0] else the selected roster keeper (including split [pane 1] and
+    zoomed preview), else {!target_keeper}. *)
 val is_in_keeper_chat : t -> bool
 val uses_keeper_split : width:int -> t -> bool
 val is_keeper_config_active : t -> bool
@@ -439,6 +498,16 @@ val with_toast :
   Say.t ->
   t ->
   t
+
+val with_incident :
+  source:Health.incident_source ->
+  summary:Say.t ->
+  detail:string ->
+  status:Health.incident_status ->
+  t ->
+  t
+(** Append a Channel 3 historical incident to [m.incidents] using
+    [m.freshness.last_wall_unix] without mutating Channel 2 live health. *)
 
 val expire_toast : now:Clock.Mono.t -> t -> t
 

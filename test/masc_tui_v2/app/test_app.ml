@@ -1635,14 +1635,16 @@ let test_setup_login_stream_output_auth_url_input_ready_and_oauth_tick_gate () =
   let t0 = 5_000_000_000L in
   let due_idle, dl_idle =
     App.should_emit_tick ~oauth_poll_deadline_ns:None ~now_ns:t0
-      ~last_voice_tick_ns:0L ~toast_expires_ns:None ~voice_recording:false
+      ~last_voice_tick_ns:0L ~toast_expires_ns:None ~arm_expires_ns:None
+      ~voice_recording:false
   in
   Alcotest.(check bool) "idle oauth deadline emits no tick" false due_idle;
   Alcotest.(check (option int64)) "idle oauth deadline stays 0 Hz" None dl_idle;
   let future_dl = Int64.add t0 2_000_000_000L in
   let due_wait, dl_wait =
     App.should_emit_tick ~oauth_poll_deadline_ns:(Some future_dl) ~now_ns:t0
-      ~last_voice_tick_ns:0L ~toast_expires_ns:None ~voice_recording:false
+      ~last_voice_tick_ns:0L ~toast_expires_ns:None ~arm_expires_ns:None
+      ~voice_recording:false
   in
   Alcotest.(check bool) "future oauth deadline does not emit immediately" false
     due_wait;
@@ -1650,7 +1652,8 @@ let test_setup_login_stream_output_auth_url_input_ready_and_oauth_tick_gate () =
     (Some future_dl) dl_wait;
   let due_now, dl_now =
     App.should_emit_tick ~oauth_poll_deadline_ns:(Some t0) ~now_ns:t0
-      ~last_voice_tick_ns:0L ~toast_expires_ns:None ~voice_recording:false
+      ~last_voice_tick_ns:0L ~toast_expires_ns:None ~arm_expires_ns:None
+      ~voice_recording:false
   in
   Alcotest.(check bool) "elapsed oauth deadline emits tick immediately" true
     due_now;
@@ -1690,14 +1693,16 @@ let test_app_ctrl_c_and_voice_tick_gate () =
   let t0 = 1_000_000_000L in
   let emit_idle, dl_idle =
     App.should_emit_tick ~oauth_poll_deadline_ns:None ~now_ns:t0
-      ~last_voice_tick_ns:0L ~toast_expires_ns:None ~voice_recording:false
+      ~last_voice_tick_ns:0L ~toast_expires_ns:None ~arm_expires_ns:None
+      ~voice_recording:false
   in
   Alcotest.(check bool) "idle emits no tick" false emit_idle;
   Alcotest.(check (option int64)) "idle has no deadline (0 Hz)" None dl_idle;
   let t_33ms = Int64.add t0 33_333_333L in
   let emit_33, dl_33 =
     App.should_emit_tick ~oauth_poll_deadline_ns:None ~now_ns:t_33ms
-      ~last_voice_tick_ns:t0 ~toast_expires_ns:None ~voice_recording:true
+      ~last_voice_tick_ns:t0 ~toast_expires_ns:None ~arm_expires_ns:None
+      ~voice_recording:true
   in
   Alcotest.(check bool) "no voice tick at +33ms" false emit_33;
   Alcotest.(check (option int64)) "next voice deadline at +100ms"
@@ -1706,12 +1711,47 @@ let test_app_ctrl_c_and_voice_tick_gate () =
   let t_100ms = Int64.add t0 App.voice_tick_interval_ns in
   let emit_100, dl_100 =
     App.should_emit_tick ~oauth_poll_deadline_ns:None ~now_ns:t_100ms
-      ~last_voice_tick_ns:t0 ~toast_expires_ns:None ~voice_recording:true
+      ~last_voice_tick_ns:t0 ~toast_expires_ns:None ~arm_expires_ns:None
+      ~voice_recording:true
   in
   Alcotest.(check bool) "voice tick fires at +100ms" true emit_100;
   Alcotest.(check (option int64)) "subsequent deadline at +200ms"
     (Some (Int64.add t_100ms App.voice_tick_interval_ns))
     dl_100;
+
+  (* Keeper stop & quit arm expiry deadlines wake promptly even if toast replaced *)
+  let m_unarmed = Model.initial () in
+  Alcotest.(check (option int64)) "unarmed model has no arm deadline" None
+    (App.armed_expiry_deadline_ns m_unarmed);
+  let arm_at = Clock.Mono.of_ns t0 in
+  let m_stop_armed =
+    { m_unarmed with keeper_stop_armed = Some ("alpha", arm_at) }
+  in
+  let expected_stop_dl =
+    Clock.Mono.to_ns
+      (Clock.Mono.after_s arm_at Model.keeper_stop_arm_window_s)
+  in
+  Alcotest.(check (option int64)) "armed [D] schedules exact +2.5s deadline"
+    (Some expected_stop_dl)
+    (App.armed_expiry_deadline_ns m_stop_armed);
+  let longer_toast = Int64.add t0 7_000_000_000L in
+  let emit_arm_before, dl_arm_before =
+    App.should_emit_tick ~oauth_poll_deadline_ns:None ~now_ns:t_100ms
+      ~last_voice_tick_ns:0L ~toast_expires_ns:(Some longer_toast)
+      ~arm_expires_ns:(Some expected_stop_dl) ~voice_recording:false
+  in
+  Alcotest.(check bool) "no tick before arm deadline" false emit_arm_before;
+  Alcotest.(check (option int64))
+    "arm deadline wins over later 7s toast deadline" (Some expected_stop_dl)
+    dl_arm_before;
+  let emit_arm_at, dl_arm_at =
+    App.should_emit_tick ~oauth_poll_deadline_ns:None ~now_ns:expected_stop_dl
+      ~last_voice_tick_ns:0L ~toast_expires_ns:(Some longer_toast)
+      ~arm_expires_ns:(Some expected_stop_dl) ~voice_recording:false
+  in
+  Alcotest.(check bool) "tick fires at exact arm deadline" true emit_arm_at;
+  Alcotest.(check (option int64)) "remaining deadline falls back to toast"
+    (Some longer_toast) dl_arm_at;
 
   (* R2-P1-2: 1-minute wall-clock boundary scheduler preserves 0 Hz idle sleep *)
   let wall_sec12 = 1_795_252_092.0 in
@@ -2855,6 +2895,44 @@ let test_timeout_budgets_and_reattach_on_timeout_detail () =
       ("Post_browser_tabs", Cmd.Post_browser_tabs { client_id = "c-1" });
       ( "Post_repo_add"
       , Cmd.Post_repo_add { url = "https://example.com/r.git"; branch = None } );
+      ( "Post_keeper_lifecycle(boot)"
+      , Cmd.Post_keeper_lifecycle
+          {
+            keeper = "alpha";
+            op = Masc_tui_protocol.Wire_fleet.Keeper_boot;
+            expected_workspace = None;
+            req_seq = 1;
+            modal_submission_id = None;
+          } );
+      ( "Post_keeper_lifecycle(shutdown)"
+      , Cmd.Post_keeper_lifecycle
+          {
+            keeper = "alpha";
+            op = Masc_tui_protocol.Wire_fleet.Keeper_shutdown;
+            expected_workspace = None;
+            req_seq = 2;
+            modal_submission_id = None;
+          } );
+      ( "Post_keeper_lifecycle(reset)"
+      , Cmd.Post_keeper_lifecycle
+          {
+            keeper = "alpha";
+            op = Masc_tui_protocol.Wire_fleet.Keeper_reset;
+            expected_workspace = None;
+            req_seq = 3;
+            modal_submission_id = None;
+          } );
+      ( "Post_keeper_lifecycle(resume)"
+      , Cmd.Post_keeper_lifecycle
+          {
+            keeper = "alpha";
+            op =
+              Masc_tui_protocol.Wire_fleet.Keeper_resume
+                { operator_operation_id = "op-1" };
+            expected_workspace = None;
+            req_seq = 4;
+            modal_submission_id = None;
+          } );
     ]
   in
   List.iter
@@ -2890,6 +2968,24 @@ let test_timeout_budgets_and_reattach_on_timeout_detail () =
       ( "Post_gate_resolution"
       , Cmd.Post_gate_resolution
           { id = "g-1"; approved = true; reason = None } );
+      ( "Post_keeper_lifecycle(wakeup)"
+      , Cmd.Post_keeper_lifecycle
+          {
+            keeper = "alpha";
+            op = Masc_tui_protocol.Wire_fleet.Keeper_wakeup;
+            expected_workspace = None;
+            req_seq = 5;
+            modal_submission_id = None;
+          } );
+      ( "Post_keeper_lifecycle(pause)"
+      , Cmd.Post_keeper_lifecycle
+          {
+            keeper = "alpha";
+            op = Masc_tui_protocol.Wire_fleet.Keeper_pause;
+            expected_workspace = None;
+            req_seq = 6;
+            modal_submission_id = None;
+          } );
     ]
   in
   List.iter

@@ -13,10 +13,14 @@ val keeper_purge_path : string
 
 type keeper_lifecycle_op =
   | Keeper_boot
+  | Keeper_wakeup
   | Keeper_pause
   | Keeper_resume of { operator_operation_id : string }
   | Keeper_shutdown
   | Keeper_reset
+
+val equal_keeper_lifecycle_op :
+  keeper_lifecycle_op -> keeper_lifecycle_op -> bool
 
 val keeper_lifecycle_path : keeper:string -> keeper_lifecycle_op -> string
 val keeper_lifecycle_op_label : keeper_lifecycle_op -> string
@@ -756,3 +760,20 @@ val decode_chat_stream_chunk : Yojson.Safe.t -> (chat_stream_chunk, string) resu
 val decode_turn_interrupt_response :
   Yojson.Safe.t -> (turn_interrupt_response, string) result
 (** Decode [POST /api/v1/keepers/turn/interrupt] JSON response. *)
+
+(** {1 Keeper Lifecycle Reply ([/boot], [/shutdown], [/directive], [/reset])} *)
+
+type keeper_lifecycle_reply = {
+  ok : bool;
+  action : string option;
+  name : string option;
+  already_live : bool;
+  already_absent : bool;
+  committed : bool;
+  error : string option;
+}
+
+val decode_keeper_lifecycle_reply :
+  Yojson.Safe.t -> (keeper_lifecycle_reply, string) result
+(** Decode JSON reply from [POST /api/v1/keepers/:name/{boot,shutdown,directive,reset}]
+    (including HTTP 202 [committed = true, ok = false] partial resume replies). *)

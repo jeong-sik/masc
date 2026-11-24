@@ -91,6 +91,9 @@ type expected_workspace = {
   masc_root : string;
 }
 
+val encode_expected_workspace : expected_workspace -> Yojson.Safe.t
+(** Encode [{"base_path": ..., "masc_root": ...}] for workspace precondition checks. *)
+
 type goal_confirmation_request = {
   goal_id : string;
   criterion_revision : string;

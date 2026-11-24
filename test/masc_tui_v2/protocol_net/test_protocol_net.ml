@@ -6792,6 +6792,105 @@ let test_wave4_layer4_wire_codecs () =
   Alcotest.(check (option string)) "browser op inner error text" (Some "tab closed")
     op_inner_err.error
 
+let test_keeper_lifecycle_wire_codecs () =
+  (* Path encoding including special characters *)
+  Alcotest.(check string) "boot path plain"
+    "/api/v1/keepers/alpha-1/boot"
+    (Wire_fleet.keeper_lifecycle_path ~keeper:"alpha-1" Wire_fleet.Keeper_boot);
+  Alcotest.(check string) "boot path percent-encodes special chars"
+    "/api/v1/keepers/ops%20team%2F1%25/boot"
+    (Wire_fleet.keeper_lifecycle_path ~keeper:"ops team/1%"
+       Wire_fleet.Keeper_boot);
+  Alcotest.(check string) "shutdown path percent-encodes special chars"
+    "/api/v1/keepers/ops%20team%2F1/shutdown"
+    (Wire_fleet.keeper_lifecycle_path ~keeper:"ops team/1"
+       Wire_fleet.Keeper_shutdown);
+  Alcotest.(check string) "directive path percent-encodes special chars"
+    "/api/v1/keepers/ops%20team%2F1/directive"
+    (Wire_fleet.keeper_lifecycle_path ~keeper:"ops team/1"
+       Wire_fleet.Keeper_wakeup);
+  (* Directive body encoding with & without expected_workspace *)
+  let ws = ("/tmp/ws", "/tmp/ws/.masc") in
+  let wake_no_ws =
+    Wire_fleet.encode_keeper_lifecycle_body Wire_fleet.Keeper_wakeup
+  in
+  Alcotest.(check string) "wakeup without ws"
+    {|{"action":"wakeup"}|} (Yojson.Safe.to_string wake_no_ws);
+  let pause_ws =
+    Wire_fleet.encode_keeper_lifecycle_body ~expected_workspace:ws
+      Wire_fleet.Keeper_pause
+  in
+  Alcotest.(check string) "pause action" "pause"
+    (match Yojson.Safe.Util.member "action" pause_ws with
+    | `String s -> s
+    | _ -> "");
+  Alcotest.(check bool) "pause carries expected_workspace" true
+    (match Yojson.Safe.Util.member "expected_workspace" pause_ws with
+    | `Assoc _ -> true
+    | _ -> false);
+  let resume_ws =
+    Wire_fleet.encode_keeper_lifecycle_body ~expected_workspace:ws
+      (Wire_fleet.Keeper_resume { operator_operation_id = "op-123" })
+  in
+  Alcotest.(check string) "resume action" "resume"
+    (match Yojson.Safe.Util.member "action" resume_ws with
+    | `String s -> s
+    | _ -> "");
+  Alcotest.(check string) "resume operator_operation_id" "op-123"
+    (match Yojson.Safe.Util.member "operator_operation_id" resume_ws with
+    | `String s -> s
+    | _ -> "");
+  (* Lifecycle reply decoding: 200 ok, already_live, already_absent, 202 partial, ok=false error, invalid *)
+  let r_live =
+    expect_ok "decode already_live"
+      (Wire_fleet.decode_keeper_lifecycle_reply
+         (parse_json
+            {|{"ok":true,"action":"boot","name":"alpha","already_live":true}|}))
+  in
+  Alcotest.(check bool) "already_live ok" true r_live.ok;
+  Alcotest.(check bool) "already_live true" true r_live.already_live;
+  Alcotest.(check bool) "already_absent false" false r_live.already_absent;
+  let r_absent =
+    expect_ok "decode already_absent"
+      (Wire_fleet.decode_keeper_lifecycle_reply
+         (parse_json
+            {|{"ok":true,"action":"shutdown","name":"alpha","already_absent":true}|}))
+  in
+  Alcotest.(check bool) "already_absent true" true r_absent.already_absent;
+  let r_202 =
+    expect_ok "decode 202 partial resume"
+      (Wire_fleet.decode_keeper_lifecycle_reply
+         (parse_json
+            {|{"ok":false,"action":"resume","operation":"resume_owner","name":"alpha","committed":true,"error":"projection timeout"}|}))
+  in
+  Alcotest.(check bool) "202 ok=false" false r_202.ok;
+  Alcotest.(check bool) "202 committed=true" true r_202.committed;
+  Alcotest.(check (option string)) "202 error preserved"
+    (Some "projection timeout") r_202.error;
+  let r_err =
+    expect_ok "decode ok=false error"
+      (Wire_fleet.decode_keeper_lifecycle_reply
+         (parse_json {|{"ok":false,"error":"keeper is operator-paused"}|}))
+  in
+  Alcotest.(check bool) "err ok=false" false r_err.ok;
+  Alcotest.(check bool) "err committed=false" false r_err.committed;
+  Alcotest.(check (option string)) "err reason"
+    (Some "keeper is operator-paused") r_err.error;
+  Alcotest.(check bool) "rejects payload without ok" true
+    (Result.is_error
+       (Wire_fleet.decode_keeper_lifecycle_reply
+          (parse_json {|{"action":"boot","name":"alpha"}|})));
+  (* HTTP 202 Accepted is classified as Ok body (never dropped as HTTP error) *)
+  let ep = Http_client.make_endpoint ~host:"127.0.0.1" ~port:8935 () in
+  let body_202 =
+    {|{"ok":false,"action":"resume","name":"alpha","committed":true,"error":"lane offline"}|}
+  in
+  match Http_client.classify_response ep ~status:202 ~body:body_202 with
+  | Ok raw -> Alcotest.(check string) "202 body preserved verbatim" body_202 raw
+  | Error err ->
+      Alcotest.failf "expected HTTP 202 to succeed, got %s"
+        (Http_client.http_error_to_string err)
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -6846,6 +6945,8 @@ let () =
             test_wave4_layer3_wire_codecs;
           Alcotest.test_case "Feature Wave 4 Layer 4: Runtime Lanes CRUD, Exact Run Detail, Verifiers, Quarantines, Add-ons & Browser Operator" `Quick
             test_wave4_layer4_wire_codecs;
+          Alcotest.test_case "Keeper lifecycle wire codecs (paths, directives, 202 partial, replies)" `Quick
+            test_keeper_lifecycle_wire_codecs;
         ] );
       ( "net"
       , [

@@ -229,7 +229,19 @@ let test_keymap_scopes_and_3_tiers () =
        (Keymap.dispatch ~scope_chain:comp_strip_chain (char_ev ~alt:true 'v')));
   Alcotest.(check bool) "Ctrl+B toggles Left Navigation Sidebar" true
     (Option.equal Keymap.equal_action (Some Keymap.Toggle_sidebar)
-       (Keymap.dispatch ~scope_chain:comp_strip_chain (char_ev ~ctrl:true 'b')))
+       (Keymap.dispatch ~scope_chain:comp_strip_chain (char_ev ~ctrl:true 'b')));
+  (* Keeper lifecycle W / D bindings: active in Screen_context, never hijack Composer or other screens *)
+  let keeper_ctx_chain = Keymap.Screen_context :: ws_chain in
+  Alcotest.(check bool) "W -> Keeper_wake_or_online in Screen_context" true
+    (Option.equal Keymap.equal_action (Some Keymap.Keeper_wake_or_online)
+       (Keymap.dispatch ~scope_chain:keeper_ctx_chain (char_ev 'W')));
+  Alcotest.(check bool) "D -> Keeper_stop_armed in Screen_context" true
+    (Option.equal Keymap.equal_action (Some Keymap.Keeper_stop_armed)
+       (Keymap.dispatch ~scope_chain:keeper_ctx_chain (char_ev 'D')));
+  Alcotest.(check bool) "W types in Composer (never triggers lifecycle)" true
+    (Option.is_none (Keymap.dispatch ~scope_chain:comp_strip_chain (char_ev 'W')));
+  Alcotest.(check bool) "D types in Composer (never triggers lifecycle)" true
+    (Option.is_none (Keymap.dispatch ~scope_chain:comp_strip_chain (char_ev 'D')))
 
 let test_keymap_footer_width_budget () =
   let scopes =
@@ -272,8 +284,8 @@ let test_keymap_footer_width_budget () =
 
 (* --- 2. Slash Commands Tests --- *)
 
-let test_slash_22_commands () =
-  Alcotest.(check int) "exactly 31 slash commands" 31 (List.length Slash.all);
+let test_slash_36_commands () =
+  Alcotest.(check int) "exactly 36 slash commands" 36 (List.length Slash.all);
   let cases =
     [
       ("/pulse", Slash.Pulse);
@@ -282,13 +294,21 @@ let test_slash_22_commands () =
       ("/keepers", Slash.Keepers);
       ("/runtime", Slash.Runtime);
       ("/infra", Slash.Infra);
-      ("/keeper wkbl-growth", Slash.Keeper (Some "wkbl-growth"));
+      ("/keeper alpha", Slash.Keeper (Some "alpha"));
       ("/model sonnet", Slash.Model (Some "sonnet"));
       ("/config cache_ttl", Slash.Config (Some "cache_ttl"));
       ("/incidents", Slash.Incidents);
       ("/jump", Slash.Jump);
       ("/voice", Slash.Voice);
       ("/btw what failed?", Slash.Btw "what failed?");
+      ("/wake", Slash.Wake None);
+      ("/wake alpha", Slash.Wake (Some "alpha"));
+      ("/up", Slash.Up None);
+      ("/up alpha", Slash.Up (Some "alpha"));
+      ("/boot alpha", Slash.Up (Some "alpha"));
+      ("/resume alpha", Slash.Resume (Some "alpha"));
+      ("/pause alpha", Slash.Pause (Some "alpha"));
+      ("/down alpha", Slash.Down (Some "alpha"));
       ("/queue", Slash.Queue);
       ("/context", Slash.Context);
       ( "/ctl resume alpha",
@@ -2415,8 +2435,8 @@ let () =
         ] );
       ( "slash",
         [
-          Alcotest.test_case "all 22 slash commands parse, reject invalid, filter & complete"
-            `Quick test_slash_22_commands;
+          Alcotest.test_case "all 36 slash commands (+ /boot alias) parse, reject invalid, filter & complete"
+            `Quick test_slash_36_commands;
           Alcotest.test_case "trailing-space argument completion (/theme /lang /tools)"
             `Quick test_slash_trailing_space_completion;
         ] );

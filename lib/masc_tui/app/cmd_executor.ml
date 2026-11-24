@@ -256,7 +256,8 @@ let timeout_sec_for_post : Cmd.post_request -> float = function
   | Cmd.Post_setup_login_input _
   | Cmd.Post_tui_preference _
   | Cmd.Post_keeper_turn_interrupt _
-  | Cmd.Post_keeper_lifecycle _
+  | Cmd.Post_keeper_lifecycle
+      { op = Wire_fleet.(Keeper_wakeup | Keeper_pause); _ }
   | Cmd.Post_keeper_purge _
   | Cmd.Post_lane_addon_attach _
   | Cmd.Post_lane_addon_detach _
@@ -329,7 +330,14 @@ let timeout_sec_for_post : Cmd.post_request -> float = function
   | Cmd.Post_browser_scene _
   | Cmd.Post_browser_screenshot _
   | Cmd.Post_browser_command _
-  | Cmd.Post_browser_interact _ ->
+  | Cmd.Post_browser_interact _
+  | Cmd.Post_keeper_lifecycle
+      {
+        op =
+          Wire_fleet.(
+            Keeper_boot | Keeper_shutdown | Keeper_resume _ | Keeper_reset);
+        _;
+      } ->
       heavy_timeout_sec
 
 let stream_spec_of_id = function
@@ -3020,27 +3028,15 @@ let execute_post t ~epoch req =
         | Cmd.Post_board_delete { post_id } ->
             let result = post_ack t ~path ~body in
             Some (Msg.Reply_board_delete { post_id; result })
-        | Cmd.Post_keeper_lifecycle { keeper; op; from_modal; _ } ->
-            let result = post_ack t ~path ~body in
-            let op_en = Wire_fleet.keeper_lifecycle_op_label op in
-            let label =
-              Say.make
-                ~ko:(Printf.sprintf "키퍼 %s 요청 완료: @%s" op_en keeper)
-                ~en:(Printf.sprintf "Keeper %s accepted: @%s" op_en keeper)
+        | Cmd.Post_keeper_lifecycle
+            { keeper; op; req_seq; modal_submission_id; _ } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_fleet.decode_keeper_lifecycle_reply
             in
             Some
-              (Msg.Reply_action_ack
-                 {
-                   label;
-                   ack_scope =
-                     (if from_modal then Msg.Ack_close_modal_and_refresh
-                      else Msg.Ack_refresh_view);
-                   for_modal =
-                     (if from_modal then
-                        Some (Nav.Keeper_lifecycle_form { keeper })
-                      else None);
-                   result;
-                 })
+              (Msg.Reply_keeper_lifecycle
+                 { keeper; op; req_seq; modal_submission_id; result })
         | Cmd.Post_keeper_purge { keeper; _ } ->
             let result = post_ack t ~path ~body in
             Some (Msg.Reply_keeper_purge { keeper; result })

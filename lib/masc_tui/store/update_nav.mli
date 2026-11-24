@@ -68,8 +68,18 @@ type palette_section =
   | Pal_sec_settings
   | Pal_sec_slash
 
+type keeper_lifecycle_op =
+  | Op_wake_or_online
+  | Op_pause
+  | Op_resume
+  | Op_shutdown
+
 type palette_action =
   | Pal_keymap_action of Keymap.action
+  | Pal_keeper_lifecycle of {
+      keeper : string;
+      op : keeper_lifecycle_op;
+    }
   | Pal_menu_target of Nav.menu_target
   | Pal_dive_keeper of string
   | Pal_select_company of string

@@ -624,6 +624,268 @@ let apply_http_reply ~now (m : Model.t) reply =
               };
             Cmd.Http_get { epoch = next.epoch; req = Cmd.Get_keeper_turns };
           ] )
+  | Msg.Reply_keeper_lifecycle
+      { keeper; op; req_seq; modal_submission_id; result = Ok reply } -> (
+      let matches_modal (modal : Model.inline_modal_state) =
+        match modal_submission_id with
+        | Some sub_id ->
+            modal.submitting
+            && Int.equal modal.submission_id sub_id
+            && Nav.equal_inline_action_kind modal.kind
+                 (Nav.Keeper_lifecycle_form { keeper })
+        | None -> false
+      in
+      let close_matching_modal (m : Model.t) =
+        let should_close =
+          match m.inline_modal with
+          | Some modal -> matches_modal modal
+          | None -> false
+        in
+        if not should_close then m
+        else
+          let nav =
+            match m.nav.overlay with
+            | Some (Nav.Inline_action _) ->
+                {
+                  m.nav with
+                  overlay = m.nav.return_overlay;
+                  return_overlay = None;
+                }
+            | Some
+                ( Nav.Palette
+                | Nav.Settings _
+                | Nav.Incidents
+                | Nav.Queue_context _
+                | Nav.Ask_answer
+                | Nav.Help
+                | Nav.System_gate _ )
+            | None ->
+                m.nav
+          in
+          { m with nav; inline_modal = None }
+      in
+      let fail_matching_modal ~detail (m : Model.t) =
+        let inline_modal =
+          Option.map
+            (fun (modal : Model.inline_modal_state) ->
+              if matches_modal modal then
+                { modal with submitting = false; error = Some detail }
+              else modal)
+            m.inline_modal
+        in
+        { m with inline_modal }
+      in
+      let m =
+        match op with
+        | Wire_fleet.Keeper_resume { operator_operation_id }
+          when reply.ok || reply.committed ->
+            Model.clear_resume_op_id ~keeper ~operator_operation_id m
+        | Wire_fleet.Keeper_boot
+        | Wire_fleet.Keeper_shutdown
+        | Wire_fleet.Keeper_wakeup
+        | Wire_fleet.Keeper_pause
+        | Wire_fleet.Keeper_reset
+          when reply.ok ->
+            Model.clear_resume_op_ids_for_keeper ~keeper ~before_seq:req_seq m
+        | Wire_fleet.Keeper_resume _
+        | Wire_fleet.Keeper_boot
+        | Wire_fleet.Keeper_shutdown
+        | Wire_fleet.Keeper_wakeup
+        | Wire_fleet.Keeper_pause
+        | Wire_fleet.Keeper_reset ->
+            m
+      in
+      let is_resume_op =
+        match op with
+        | Wire_fleet.Keeper_resume _ -> true
+        | Wire_fleet.Keeper_boot
+        | Wire_fleet.Keeper_shutdown
+        | Wire_fleet.Keeper_wakeup
+        | Wire_fleet.Keeper_pause
+        | Wire_fleet.Keeper_reset ->
+            false
+      in
+      if is_resume_op && (not reply.ok) && reply.committed then
+        (* HTTP 202 Accepted from resume: durable pause is cleared, follow up
+           immediately with idempotent boot to bring the live lane online,
+           re-sync roster/dive so cached paused=true never lingers if boot fails
+           or SSE lags, and preserve any non-empty 202 error as an incident. *)
+        let m_inc =
+          match reply.error with
+          | Some raw ->
+              let detail = String.trim raw in
+              if String.equal detail "" then m
+              else
+                Model.with_incident ~source:(Health.Source_keeper keeper)
+                  ~summary:
+                    (Say.make
+                       ~ko:"키퍼 재개 부분 완료(202) — 후속 부팅 재시도"
+                       ~en:"Keeper resume committed (202) — follow-up boot")
+                  ~detail ~status:Health.Retried m
+          | None -> m
+        in
+        let boot_req_seq, m_seq = Model.next_keeper_lifecycle_seq m_inc in
+        let next =
+          Model.with_toast ~now ~level:Model.Toast_info
+            (Say.make
+               ~ko:
+                 (Printf.sprintf "%s 일시정지 해제 완료 — 부팅 진행 중..." keeper)
+               ~en:(Printf.sprintf "%s resumed — booting online..." keeper))
+            m_seq
+        in
+        ( next
+        , Cmd.Http_post
+            {
+              epoch = next.epoch;
+              req =
+                Cmd.Post_keeper_lifecycle
+                  {
+                    keeper;
+                    op = Wire_fleet.Keeper_boot;
+                    expected_workspace = None;
+                    req_seq = boot_req_seq;
+                    modal_submission_id;
+                  };
+            }
+          :: View_fetches.keeper_lifecycle_refresh_fetches ~name:keeper next )
+      else if reply.ok then
+        let toast_level, toast_msg =
+          match op with
+          | Wire_fleet.Keeper_boot when reply.already_live ->
+              ( Model.Toast_info
+              , Say.make
+                  ~ko:
+                    (Printf.sprintf
+                       "%s은(는) 이미 온라인 상태입니다 (깨우기 전송됨)" keeper)
+                  ~en:
+                    (Printf.sprintf "%s is already online (wakeup sent)" keeper)
+              )
+          | Wire_fleet.Keeper_boot ->
+              ( Model.Toast_success
+              , Say.make
+                  ~ko:(Printf.sprintf "%s 온라인 부팅 완료" keeper)
+                  ~en:(Printf.sprintf "%s booted online" keeper) )
+          | Wire_fleet.Keeper_shutdown when reply.already_absent ->
+              ( Model.Toast_info
+              , Say.make
+                  ~ko:(Printf.sprintf "%s은(는) 이미 오프라인 상태입니다" keeper)
+                  ~en:(Printf.sprintf "%s is already offline" keeper) )
+          | Wire_fleet.Keeper_shutdown ->
+              ( Model.Toast_success
+              , Say.make
+                  ~ko:(Printf.sprintf "%s 중지(오프라인) 완료" keeper)
+                  ~en:(Printf.sprintf "%s shut down (offline)" keeper) )
+          | Wire_fleet.Keeper_wakeup ->
+              ( Model.Toast_success
+              , Say.make
+                  ~ko:(Printf.sprintf "%s 깨우기 완료" keeper)
+                  ~en:(Printf.sprintf "%s woken up" keeper) )
+          | Wire_fleet.Keeper_pause ->
+              ( Model.Toast_success
+              , Say.make
+                  ~ko:(Printf.sprintf "%s 일시정지 완료" keeper)
+                  ~en:(Printf.sprintf "%s paused" keeper) )
+          | Wire_fleet.Keeper_resume _ ->
+              ( Model.Toast_success
+              , Say.make
+                  ~ko:(Printf.sprintf "%s 재개(온라인) 완료" keeper)
+                  ~en:(Printf.sprintf "%s resumed online" keeper) )
+          | Wire_fleet.Keeper_reset ->
+              ( Model.Toast_success
+              , Say.make
+                  ~ko:(Printf.sprintf "%s 초기화(리셋) 완료" keeper)
+                  ~en:(Printf.sprintf "%s reset complete" keeper) )
+        in
+        let next =
+          m |> close_matching_modal
+          |> Model.with_toast ~now ~level:toast_level toast_msg
+        in
+        (next, View_fetches.keeper_lifecycle_refresh_fetches ~name:keeper next)
+      else
+        let reason =
+          Option.value reply.error ~default:"request rejected by server"
+        in
+        let context =
+          match op with
+          | Wire_fleet.Keeper_boot ->
+              Say.make ~ko:"키퍼 부팅 실패" ~en:"Keeper boot failed"
+          | Wire_fleet.Keeper_shutdown ->
+              Say.make ~ko:"키퍼 중지 실패" ~en:"Keeper shutdown failed"
+          | Wire_fleet.Keeper_wakeup ->
+              Say.make ~ko:"키퍼 깨우기 실패" ~en:"Keeper wake failed"
+          | Wire_fleet.Keeper_pause ->
+              Say.make ~ko:"키퍼 일시정지 실패" ~en:"Keeper pause failed"
+          | Wire_fleet.Keeper_resume _ ->
+              Say.make ~ko:"키퍼 재개 실패" ~en:"Keeper resume failed"
+          | Wire_fleet.Keeper_reset ->
+              Say.make ~ko:"키퍼 초기화 실패" ~en:"Keeper reset failed"
+        in
+        let next =
+          m
+          |> Model.with_incident ~source:(Health.Source_keeper keeper)
+               ~summary:context ~detail:reason ~status:Health.Resolved
+          |> fail_matching_modal ~detail:reason
+          |> Model.with_toast ~now ~level:Model.Toast_error
+               (Say.make
+                  ~ko:(Printf.sprintf "%s (%s): %s" context.ko keeper reason)
+                  ~en:(Printf.sprintf "%s (%s): %s" context.en keeper reason))
+        in
+        (next, View_fetches.keeper_lifecycle_refresh_fetches ~name:keeper next))
+  | Msg.Reply_keeper_lifecycle
+      { keeper; op; req_seq = _; modal_submission_id; result = Error err } -> (
+      let context =
+        match op with
+        | Wire_fleet.Keeper_boot ->
+            Say.make ~ko:"키퍼 부팅" ~en:"Keeper boot"
+        | Wire_fleet.Keeper_shutdown ->
+            Say.make ~ko:"키퍼 중지" ~en:"Keeper shutdown"
+        | Wire_fleet.Keeper_wakeup ->
+            Say.make ~ko:"키퍼 깨우기" ~en:"Keeper wake"
+        | Wire_fleet.Keeper_pause ->
+            Say.make ~ko:"키퍼 일시정지" ~en:"Keeper pause"
+        | Wire_fleet.Keeper_resume _ ->
+            Say.make ~ko:"키퍼 재개" ~en:"Keeper resume"
+        | Wire_fleet.Keeper_reset ->
+            Say.make ~ko:"키퍼 초기화" ~en:"Keeper reset"
+      in
+      let m_modal =
+        match modal_submission_id with
+        | None -> m
+        | Some sub_id ->
+            let inline_modal =
+              Option.map
+                (fun (modal : Model.inline_modal_state) ->
+                  if
+                    modal.submitting
+                    && Int.equal modal.submission_id sub_id
+                    && Nav.equal_inline_action_kind modal.kind
+                         (Nav.Keeper_lifecycle_form { keeper })
+                  then
+                    {
+                      modal with
+                      submitting = false;
+                      error = Some (Msg.http_error_detail err);
+                    }
+                  else modal)
+                m.inline_modal
+            in
+            { m with inline_modal }
+      in
+      let next, inc_cmds =
+        record_http_incident ~now ~source:(Health.Source_keeper keeper) ~context
+          err m_modal
+      in
+      match err with
+      | Msg.Workspace_mismatch _ -> (next, inc_cmds)
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _ ->
+          let summary = Msg.http_error_summary err in
+          ( Model.with_toast ~now ~level:Model.Toast_error
+              (Say.make
+                 ~ko:(Printf.sprintf "%s 실패 (%s): %s" context.ko keeper summary.ko)
+                 ~en:(Printf.sprintf "%s failed (%s): %s" context.en keeper summary.en))
+              next
+          , inc_cmds
+            @ View_fetches.keeper_lifecycle_refresh_fetches ~name:keeper next ))
   | Msg.Reply_planning (Ok planning) ->
       let work = Work_store.apply_planning ~observed_at:now planning m.work in
       ( { m with work }

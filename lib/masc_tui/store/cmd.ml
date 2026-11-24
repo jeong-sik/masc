@@ -395,7 +395,8 @@ type post_request =
       keeper : string;
       op : Wire_fleet.keeper_lifecycle_op;
       expected_workspace : (string * string) option;
-      from_modal : bool;
+      req_seq : int;
+      modal_submission_id : int option;
     }
   | Post_keeper_purge of {
       keeper : string;
@@ -1227,8 +1228,14 @@ let post_request_body = function
       Wire_knowledge.encode_board_pin ~post_id ~pinned
   | Post_board_delete { post_id } ->
       Wire_knowledge.encode_board_delete ~post_id
-  | Post_keeper_lifecycle { keeper = _; op; expected_workspace; from_modal = _ }
-    ->
+  | Post_keeper_lifecycle
+      {
+        keeper = _;
+        op;
+        expected_workspace;
+        req_seq = _;
+        modal_submission_id = _;
+      } ->
       Wire_fleet.encode_keeper_lifecycle_body ?expected_workspace op
   | Post_keeper_purge { keeper; expected_workspace } ->
       Wire_fleet.encode_keeper_purge ~agent_name:keeper ~expected_workspace

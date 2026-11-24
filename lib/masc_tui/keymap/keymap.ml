@@ -87,6 +87,8 @@ type action =
   | Interrupt_turn
   | Delete_selected
   | Link_task_goal
+  | Keeper_wake_or_online
+  | Keeper_stop_armed
   | Quit_app
 
 type scope =
@@ -248,6 +250,8 @@ let action_tag = function
   | Quit_app -> 68
   | Delete_selected -> 69
   | Link_task_goal -> 70
+  | Keeper_wake_or_online -> 71
+  | Keeper_stop_armed -> 72
 
 let equal_action a b =
   if not (Int.equal (action_tag a) (action_tag b)) then false
@@ -323,6 +327,8 @@ let equal_action a b =
     | Interrupt_turn, Interrupt_turn
     | Delete_selected, Delete_selected
     | Link_task_goal, Link_task_goal
+    | Keeper_wake_or_online, Keeper_wake_or_online
+    | Keeper_stop_armed, Keeper_stop_armed
     | Quit_app, Quit_app ->
         true
     | ( Switch_workspace _
@@ -394,6 +400,8 @@ let equal_action a b =
       | Interrupt_turn
       | Delete_selected
       | Link_task_goal
+      | Keeper_wake_or_online
+      | Keeper_stop_armed
       | Quit_app ),
       _ ->
         false
@@ -911,6 +919,22 @@ let bindings : binding list =
         ~hint_label:(Say.make ~ko:"오류 닫기" ~en:"Dismiss")
         ~help_desc:(Say.make ~ko:"채팅 실패 알림 닫기 / 하네스 판정 재정의" ~en:"Dismiss chat failure notices / Harness overrule")
         ~footer_priority:0 (bare_char 'X');
+      bind ~scope:Screen_context ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Keeper_wake_or_online ~key_display:"W"
+        ~hint_label:(Say.make ~ko:"깨우기/온라인" ~en:"Wake/Online")
+        ~help_desc:
+          (Say.make
+             ~ko:"[키퍼] 깨우기/온라인/재개 (/up·/resume)"
+             ~en:"[Keepers] Wake/online/resume Keeper (/up·/resume)")
+        ~slash_twin:"/wake" ~footer_priority:0 (bare_char 'W');
+      bind ~scope:Screen_context ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Keeper_stop_armed ~key_display:"D"
+        ~hint_label:(Say.make ~ko:"중지(2회)" ~en:"Stop (2x)")
+        ~help_desc:
+          (Say.make
+             ~ko:"[키퍼] 중지·오프라인 (2회 확인, /pause 일시정지)"
+             ~en:"[Keepers] Stop/shutdown Keeper (2x confirm, /pause)")
+        ~slash_twin:"/down" ~footer_priority:0 (bare_char 'D');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:(Board_vote `Up) ~key_display:"+"
         ~hint_label:(Say.make ~ko:"추천" ~en:"Upvote")
@@ -1429,7 +1453,9 @@ let palette_commands ~lang =
           | Composer_newline
           | Composer_kill_word
           | Open_palette
-          | Pop_back_or_close ->
+          | Pop_back_or_close
+          | Keeper_wake_or_online
+          | Keeper_stop_armed ->
               false
           | Switch_workspace _
           | Toggle_sidebar

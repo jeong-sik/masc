@@ -77,6 +77,13 @@ type http_reply =
       target : Cmd.keeper_turn_interrupt_target;
       result : (Wire_fleet.turn_interrupt_response, http_error) result;
     }
+  | Reply_keeper_lifecycle of {
+      keeper : string;
+      op : Wire_fleet.keeper_lifecycle_op;
+      req_seq : int;
+      modal_submission_id : int option;
+      result : (Wire_fleet.keeper_lifecycle_reply, http_error) result;
+    }
   (* Work *)
   | Reply_planning of (Wire_work.planning_snapshot, http_error) result
   | Reply_planning_backlog of Wire_work.task_backlog_counts

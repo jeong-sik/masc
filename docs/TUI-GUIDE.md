@@ -26,11 +26,12 @@ table from a checkout with `bin/masc_tui_keys_doc_cli.exe`.
 
 Press `Ctrl+K` to open the **Universal Command & Entity Palette** — filter across
 all 9 sections (Commands, Workspaces, Keepers, Companies, Goals/Tasks, Board/Wiki,
-Sandboxes, Settings Keys, and all 31 Slash Commands including `/ctl`, `/gate`,
-`/exec`, `/skill`, `/prompt`, `/preset`, `/lane`, `/addon`, `/browser`, `/theme`,
-`/lang`, `/btw`, `/clear`, `/context`, `/restart`) and press `Enter` to execute or jump
-directly. Use `Ctrl+G` to jump straight to any Keeper's chat, and `Ctrl+L` to
-inspect or switch model runtimes.
+Sandboxes, Settings Keys, and all 36 Slash Commands including `/wake`, `/up`,
+`/resume`, `/pause`, `/down`, `/ctl`, `/gate`, `/exec`, `/skill`, `/prompt`,
+`/preset`, `/lane`, `/addon`, `/browser`, `/theme`, `/lang`, `/btw`, `/clear`,
+`/context`, `/restart`) and press `Enter` to execute or jump directly. Use
+`Ctrl+G` to jump straight to any Keeper's chat, and `Ctrl+L` to inspect or
+switch model runtimes.
 
 ## Quick Start
 
@@ -100,13 +101,14 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
 ### `Esc` vs `Ctrl+Q`
 
 - **`Esc` never quits MASC TUI.** Pressing `Esc` walks back one layer at a time:
-  1. Exit free-text editing inside the Ask Answer Modal (preserving the typed draft), cancel inline field editing in Settings, or close an open overlay (Palette, Settings, Incidents, Queue/Context, Ask Answer Modal, Help, Inline Action modal, Media Viewer).
-  2. Exit the `/` filter box or blur the bottom composer (`i`).
-  3. In **Keeper Chat** with an active turn/stream running, send a turn-interrupt request (`Post_keeper_turn_interrupt`; `Ctrl+X` also interrupts directly).
-  4. Pop one level off the dive stack back to the parent workspace (restoring the exact previous focus pane and zoom state).
-  5. Restore the split layout when a panel is zoomed with `z`.
-  6. Clear an active workspace filter query when at top level.
-  7. Return the Work > Tasks status chip or Work > Goals phase filter to All.
+  1. Disarm an active 2-press confirmation guard (`[D]` Keeper stop or `Ctrl+Q` quit) without popping `Dive_keeper` or closing an open overlay.
+  2. Exit free-text editing inside the Ask Answer Modal (preserving the typed draft), cancel inline field editing in Settings, or close an open overlay (Palette, Settings, Incidents, Queue/Context, Ask Answer Modal, Help, Inline Action modal, Media Viewer).
+  3. Exit the `/` filter box or blur the bottom composer (`i`).
+  4. In **Keeper Chat** with an active turn/stream running, send a turn-interrupt request (`Post_keeper_turn_interrupt`; `Ctrl+X` also interrupts directly).
+  5. Pop one level off the dive stack back to the parent workspace (restoring the exact previous focus pane and zoom state).
+  6. Restore the split layout when a panel is zoomed with `z`.
+  7. Clear an active workspace filter query when at top level.
+  8. Return the Work > Tasks status chip or Work > Goals phase filter to All.
 - **`Ctrl+Q` (pressed twice within 2.5 seconds)** (or `/quit` in the composer, or a double `Ctrl+C`) exits MASC TUI
   cleanly — the first `Ctrl+Q` arms quit with a warning toast, any other key cancels the arm, and pressing `Ctrl+Q` again within 2.5 seconds exits. An externally started server (`masc start` / `masc setup`) keeps
   running; a local server auto-started and owned by this TUI session is stopped
@@ -196,6 +198,11 @@ Type a `/` command in the focused composer and press `Enter`
 | `/jump` | Jump to highest-priority blocked item |
 | `/voice` | Toggle Voice Push-to-Talk |
 | `/btw <question>` | Ask an ephemeral side-query to the target Keeper without polluting chat history |
+| `/wake [name]` | Smart wake / bring online / resume the target Keeper (same logic as `W`) |
+| `/up [name]` (alias `/boot [name]`) | Bring the target Keeper online (auto-resumes if paused, otherwise boots) |
+| `/resume [name]` | Explicitly resume a paused or stopped Keeper (with idempotent `operator_operation_id` and `expected_workspace`) |
+| `/pause [name]` | Pause the target Keeper (with `expected_workspace`) |
+| `/down [name]` | Explicitly shut down the target Keeper to offline (persisting paused state; immediate typed command like `/quit` — use `[D]` for the 2-press arm or `Ctrl+K` / `[x]` for the confirmation modal) |
 | `/queue`, `/context` | Open the Queue or Context tab of the Queue/Context drawer |
 | `/ctl <action> [keeper]` | Keeper lifecycle & context control (`boot`, `shutdown`, `pause`, `resume`, `reset`, `clear`, `directive`, `note`, `run-next`, `checkpoints`) — destructive actions prompt 2-step confirmation |
 | `/gate <subcmd>` | HITL Gate & Always-Approve operator controls (`rules`, `mode`, `external-mode`, `del-rule`, `approve-always`, `retry`, `keeper-mode`, `ack-uncertain`, `restore-late`) |
@@ -381,6 +388,16 @@ the list instead of a row. Fix the TOML; the Keeper returns as a row on the
 next roster refresh.
 
 Press `n` on **Keepers** to open Settings targeted at creating a new Keeper.
+On **4 Keepers** or inside **Keeper Dive**, press `W` to smartly wake, boot online,
+or resume the selected Keeper (automatically matching paused/offline/running
+state), or press `D` twice within 2.5 seconds (`Esc` cancels without popping the
+dive) to shut down the selected Keeper to offline. Shutdown guards: `[D]` uses a
+2.5-second 2-press arm, `Ctrl+K` (`Keeper: Shutdown`) and `[x]` open the
+confirmation modal requiring the exact Keeper name, and `/down [name]` in the
+composer is an explicitly typed immediate command (consistent with `/quit`).
+The same lifecycle controls are available from `Ctrl+K` (`Keeper: Wake / Online`,
+`Pause`, `Resume`, `Shutdown`) and slash commands (`/wake`, `/up`, `/boot`,
+`/resume`, `/pause`, `/down`).
 When focusing the right split pane (`Tab`) or diving into any Keeper (`Enter`,
 or `c` straight into Chat), the top sub-tab bar syncs to all **9 Keeper tabs**
 (`[` / `]` cycles tabs):

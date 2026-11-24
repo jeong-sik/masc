@@ -567,6 +567,7 @@ let open_custom_inline_modal (m : Model.t) (fields : Model.modal_form_field list
       fields;
       active_field = 0;
       submitting = false;
+      submission_id = 0;
       error = None;
     }
   in
@@ -1836,6 +1837,109 @@ let request_keeper_interrupt ?(from_escape = false) ~now ~keeper ~target
         };
     ] )
 
+let expected_ws_pair (m : Model.t) =
+  Option.map
+    (fun (ws : Wire_work.expected_workspace) -> (ws.base_path, ws.masc_root))
+    (Update_nav.expected_workspace_of m)
+
+let dispatch_keeper_lifecycle ~now ~op ~toast ~include_expected_workspace
+    (m : Model.t) keeper =
+  let expected_workspace =
+    if include_expected_workspace then expected_ws_pair m else None
+  in
+  let req_seq, m1 = Model.next_keeper_lifecycle_seq m in
+  ( Model.with_toast ~now ~level:Model.Toast_info toast m1
+  , [
+      Cmd.Http_post
+        {
+          epoch = m1.epoch;
+          req =
+            Cmd.Post_keeper_lifecycle
+              {
+                keeper;
+                op;
+                expected_workspace;
+                req_seq;
+                modal_submission_id = None;
+              };
+        };
+    ] )
+
+let dispatch_keeper_boot ~now ~name (m : Model.t) =
+  dispatch_keeper_lifecycle ~now ~op:Wire_fleet.Keeper_boot
+    ~toast:
+      (Say.make
+         ~ko:(Printf.sprintf "%s 온라인 부팅 요청 전송..." name)
+         ~en:(Printf.sprintf "Booting %s online..." name))
+    ~include_expected_workspace:true m name
+
+let dispatch_keeper_wakeup ~now ~name (m : Model.t) =
+  dispatch_keeper_lifecycle ~now ~op:Wire_fleet.Keeper_wakeup
+    ~toast:
+      (Say.make
+         ~ko:(Printf.sprintf "%s 깨우기 요청 전송..." name)
+         ~en:(Printf.sprintf "Waking %s..." name))
+    ~include_expected_workspace:true m name
+
+let dispatch_keeper_pause ~now ~name (m : Model.t) =
+  dispatch_keeper_lifecycle ~now ~op:Wire_fleet.Keeper_pause
+    ~toast:
+      (Say.make
+         ~ko:(Printf.sprintf "%s 일시정지 요청 전송..." name)
+         ~en:(Printf.sprintf "Pausing %s..." name))
+    ~include_expected_workspace:true m name
+
+let dispatch_keeper_resume ~now ~name (m : Model.t) =
+  let operator_operation_id, m1 =
+    Model.get_or_create_resume_op_id ~keeper:name m
+  in
+  dispatch_keeper_lifecycle ~now
+    ~op:(Wire_fleet.Keeper_resume { operator_operation_id })
+    ~toast:
+      (Say.make
+         ~ko:(Printf.sprintf "%s 재개(온라인) 요청 전송..." name)
+         ~en:(Printf.sprintf "Resuming %s online..." name))
+    ~include_expected_workspace:true m1 name
+
+let dispatch_keeper_shutdown ~now ~name (m : Model.t) =
+  let m_cleared = { m with keeper_stop_armed = None } in
+  dispatch_keeper_lifecycle ~now ~op:Wire_fleet.Keeper_shutdown
+    ~toast:
+      (Say.make
+         ~ko:(Printf.sprintf "%s 중지(오프라인) 요청 전송..." name)
+         ~en:(Printf.sprintf "Shutting down %s..." name))
+    ~include_expected_workspace:true m_cleared name
+
+let dispatch_keeper_smart_wake ~now ~name (m : Model.t) =
+  match Fleet_store.find_keeper ~name m.fleet with
+  | Some k when k.paused -> dispatch_keeper_resume ~now ~name m
+  | Some k when not k.keepalive_running -> dispatch_keeper_boot ~now ~name m
+  | Some _ -> dispatch_keeper_wakeup ~now ~name m
+  | None -> dispatch_keeper_boot ~now ~name m
+
+let dispatch_keeper_up ~now ~name (m : Model.t) =
+  match Fleet_store.find_keeper ~name m.fleet with
+  | Some k when k.paused -> dispatch_keeper_resume ~now ~name m
+  | Some _ | None -> dispatch_keeper_boot ~now ~name m
+
+let resolve_slash_lifecycle_keeper (m : Model.t) (arg : string option) =
+  match arg with
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if String.equal trimmed "" then Model.target_keeper_for_lifecycle m
+      else Some trimmed
+  | None -> Model.target_keeper_for_lifecycle m
+
+let missing_lifecycle_keeper_usage ~now ~cmd (m : Model.t) =
+  ( Model.with_toast ~now ~level:Model.Toast_warning
+      (Say.make
+         ~ko:
+           (Printf.sprintf
+              "사용법: %s <keeper> (또는 키퍼를 선택한 뒤 실행)" cmd)
+         ~en:(Printf.sprintf "Usage: %s <keeper> (or select a Keeper first)" cmd))
+      m
+  , [] )
+
 let rec execute_slash ~now (m : Model.t) cmd =
   match cmd with
   | Slash.Pulse -> Update_nav.switch_workspace m Nav.Pulse
@@ -1862,6 +1966,26 @@ let rec execute_slash ~now (m : Model.t) cmd =
   | Slash.Jump -> Update_nav.teleport_blocked ~now m
   | Slash.Voice -> Update_nav.toggle_voice ~now m
   | Slash.Btw prompt -> Update_nav.start_btw_query ~now ~prompt m
+  | Slash.Wake arg -> (
+      match resolve_slash_lifecycle_keeper m arg with
+      | Some name -> dispatch_keeper_smart_wake ~now ~name m
+      | None -> missing_lifecycle_keeper_usage ~now ~cmd:"/wake" m)
+  | Slash.Up arg -> (
+      match resolve_slash_lifecycle_keeper m arg with
+      | Some name -> dispatch_keeper_up ~now ~name m
+      | None -> missing_lifecycle_keeper_usage ~now ~cmd:"/up" m)
+  | Slash.Resume arg -> (
+      match resolve_slash_lifecycle_keeper m arg with
+      | Some name -> dispatch_keeper_resume ~now ~name m
+      | None -> missing_lifecycle_keeper_usage ~now ~cmd:"/resume" m)
+  | Slash.Pause arg -> (
+      match resolve_slash_lifecycle_keeper m arg with
+      | Some name -> dispatch_keeper_pause ~now ~name m
+      | None -> missing_lifecycle_keeper_usage ~now ~cmd:"/pause" m)
+  | Slash.Down arg -> (
+      match resolve_slash_lifecycle_keeper m arg with
+      | Some name -> dispatch_keeper_shutdown ~now ~name m
+      | None -> missing_lifecycle_keeper_usage ~now ~cmd:"/down" m)
   | Slash.Queue ->
       Update_nav.open_overlay m (Nav.Queue_context Nav.Drawer_queue)
   | Slash.Context ->
@@ -3474,7 +3598,7 @@ and submit_composer ~now ~mode (m : Model.t) =
   let draft = Drafts.current_draft m.drafts in
   let trimmed = String.trim draft.text in
   match Update_nav.resolve_composer_popup m with
-  | Update_nav.Composer_popup_slash { items; selected; _ } -> (
+  | Update_nav.Composer_popup_slash { query; items; selected } -> (
       match List.nth_opt items selected with
       | Some { kind = Update_nav.Popup_slash_cmd spec; _ } ->
           if Update_nav.slash_spec_requires_arg spec then
@@ -3484,9 +3608,54 @@ and submit_composer ~now ~mode (m : Model.t) =
               }
             , [] )
           else submit_slash_text ~now m spec.name
-      | Some { kind = Update_nav.Popup_slash_arg { full_text; _ }; _ } ->
+      | Some { kind = Update_nav.Popup_slash_arg { spec; full_text; _ }; _ } ->
+          let keep_bare_optional_arg =
+            String.equal (String.trim query) ""
+            && (not m.drafts.popup_navigated)
+            &&
+            match spec.id with
+            | Slash.Cmd_wake
+            | Slash.Cmd_up
+            | Slash.Cmd_resume
+            | Slash.Cmd_pause
+            | Slash.Cmd_down ->
+                true
+            | Slash.Cmd_pulse
+            | Slash.Cmd_work
+            | Slash.Cmd_knowledge
+            | Slash.Cmd_keepers
+            | Slash.Cmd_runtime
+            | Slash.Cmd_infra
+            | Slash.Cmd_keeper
+            | Slash.Cmd_model
+            | Slash.Cmd_config
+            | Slash.Cmd_incidents
+            | Slash.Cmd_jump
+            | Slash.Cmd_voice
+            | Slash.Cmd_btw
+            | Slash.Cmd_queue
+            | Slash.Cmd_context
+            | Slash.Cmd_ctl
+            | Slash.Cmd_gate
+            | Slash.Cmd_exec
+            | Slash.Cmd_skill
+            | Slash.Cmd_prompt
+            | Slash.Cmd_preset
+            | Slash.Cmd_lane
+            | Slash.Cmd_addon
+            | Slash.Cmd_browser
+            | Slash.Cmd_tools
+            | Slash.Cmd_clear
+            | Slash.Cmd_theme
+            | Slash.Cmd_lang
+            | Slash.Cmd_help
+            | Slash.Cmd_restart
+            | Slash.Cmd_quit ->
+                false
+          in
           let target_text =
-            if
+            if keep_bare_optional_arg then trimmed
+            else if
               m.drafts.popup_selected = 0
               && List.exists
                    (fun (cand : Update_nav.popup_candidate) ->
@@ -3682,6 +3851,17 @@ and confirm_palette ~now (m : Model.t) =
           let m_closed = { m with nav = { m.nav with overlay = None } } in
           match entry.action with
           | Update_nav.Pal_keymap_action act -> execute_action ~now m_closed act
+          | Update_nav.Pal_keeper_lifecycle { keeper; op } -> (
+              match op with
+              | Update_nav.Op_wake_or_online ->
+                  dispatch_keeper_smart_wake ~now ~name:keeper m_closed
+              | Update_nav.Op_pause ->
+                  dispatch_keeper_pause ~now ~name:keeper m_closed
+              | Update_nav.Op_resume ->
+                  dispatch_keeper_resume ~now ~name:keeper m_closed
+              | Update_nav.Op_shutdown ->
+                  open_keeper_lifecycle_modal m_closed ~keeper
+                    ~default_action:"shutdown")
           | Update_nav.Pal_menu_target target ->
               Update_nav.navigate_menu_target m_closed target
           | Update_nav.Pal_dive_keeper name ->
@@ -7653,54 +7833,10 @@ and execute_action ~now (m : Model.t) action =
                    | Nav.Keeper_logs
                    | Nav.Keeper_identity );
                }) -> (
-            let ws_pair =
-              Option.map
-                (fun (ws : Wire_common.workspace_identity) ->
-                  (ws.base_path, ws.masc_root))
-                m.server_identity.workspace
-            in
             match selected_keeper_for_lifecycle m with
-            | Some k when k.paused ->
-                let operator_operation_id =
-                  Printf.sprintf "tui-resume-%s-%Ld" name (Clock.Mono.to_ns now)
-                in
-                ( Model.with_toast ~now ~level:Model.Toast_info
-                    (Say.make ~ko:("키퍼 재개 요청: @" ^ name)
-                       ~en:("Resuming keeper: @" ^ name))
-                    m
-                , [
-                    Cmd.Http_post
-                      {
-                        epoch = m.epoch;
-                        req =
-                          Cmd.Post_keeper_lifecycle
-                            {
-                              keeper = name;
-                              op = Wire_fleet.Keeper_resume { operator_operation_id };
-                              expected_workspace = ws_pair;
-                              from_modal = false;
-                            };
-                      };
-                  ] )
+            | Some k when k.paused -> dispatch_keeper_resume ~now ~name m
             | Some k when keeper_is_offline k.health ->
-                ( Model.with_toast ~now ~level:Model.Toast_info
-                    (Say.make ~ko:("키퍼 기동 요청: @" ^ name)
-                       ~en:("Booting keeper: @" ^ name))
-                    m
-                , [
-                    Cmd.Http_post
-                      {
-                        epoch = m.epoch;
-                        req =
-                          Cmd.Post_keeper_lifecycle
-                            {
-                              keeper = name;
-                              op = Wire_fleet.Keeper_boot;
-                              expected_workspace = ws_pair;
-                              from_modal = false;
-                            };
-                      };
-                  ] )
+                dispatch_keeper_boot ~now ~name m
             | Some _ | None ->
                 open_keeper_lifecycle_modal m ~keeper:name
                   ~default_action:"pause")
@@ -7846,57 +7982,11 @@ and execute_action ~now (m : Model.t) action =
                   in
                   open_runtime_assign_modal m ~keeper_default ~runtime_default ())
             | Nav.Keepers -> (
-                let ws_pair =
-                  Option.map
-                    (fun (ws : Wire_common.workspace_identity) ->
-                      (ws.base_path, ws.masc_root))
-                    m.server_identity.workspace
-                in
                 match Fleet_store.selected_keeper_summary m.fleet with
                 | Some k when k.paused ->
-                    let operator_operation_id =
-                      Printf.sprintf "tui-resume-%s-%Ld" k.name
-                        (Clock.Mono.to_ns now)
-                    in
-                    ( Model.with_toast ~now ~level:Model.Toast_info
-                        (Say.make ~ko:("키퍼 재개 요청: @" ^ k.name)
-                           ~en:("Resuming keeper: @" ^ k.name))
-                        m
-                    , [
-                        Cmd.Http_post
-                          {
-                            epoch = m.epoch;
-                            req =
-                              Cmd.Post_keeper_lifecycle
-                                {
-                                  keeper = k.name;
-                                  op =
-                                    Wire_fleet.Keeper_resume
-                                      { operator_operation_id };
-                                  expected_workspace = ws_pair;
-                                  from_modal = false;
-                                };
-                          };
-                      ] )
+                    dispatch_keeper_resume ~now ~name:k.name m
                 | Some k when keeper_is_offline k.health ->
-                    ( Model.with_toast ~now ~level:Model.Toast_info
-                        (Say.make ~ko:("키퍼 기동 요청: @" ^ k.name)
-                           ~en:("Booting keeper: @" ^ k.name))
-                        m
-                    , [
-                        Cmd.Http_post
-                          {
-                            epoch = m.epoch;
-                            req =
-                              Cmd.Post_keeper_lifecycle
-                                {
-                                  keeper = k.name;
-                                  op = Wire_fleet.Keeper_boot;
-                                  expected_workspace = ws_pair;
-                                  from_modal = false;
-                                };
-                          };
-                      ] )
+                    dispatch_keeper_boot ~now ~name:k.name m
                 | Some k ->
                     open_keeper_lifecycle_modal m ~keeper:k.name
                       ~default_action:"pause"
@@ -9123,6 +9213,60 @@ and execute_action ~now (m : Model.t) action =
         match task_opt with
         | Some tk -> open_task_link_goal_modal ~now m tk
         | None -> (m, []))
+  | Keymap.Keeper_wake_or_online -> (
+      if not (Model.is_keeper_lifecycle_surface m) then (m, [])
+      else
+        match Model.target_keeper_for_lifecycle m with
+        | None ->
+            ( Model.with_toast ~now ~level:Model.Toast_warning
+                (Say.make ~ko:"선택된 키퍼가 없습니다"
+                   ~en:"No Keeper selected")
+                m
+            , [] )
+        | Some name -> dispatch_keeper_smart_wake ~now ~name m)
+  | Keymap.Keeper_stop_armed -> (
+      if not (Model.is_keeper_lifecycle_surface m) then (m, [])
+      else
+        match Model.target_keeper_for_lifecycle m with
+        | None ->
+            ( Model.with_toast ~now ~level:Model.Toast_warning
+                (Say.make ~ko:"선택된 키퍼가 없습니다"
+                   ~en:"No Keeper selected")
+                m
+            , [] )
+        | Some name -> (
+            match Fleet_store.find_keeper ~name m.fleet with
+            | Some k when (not k.keepalive_running) && k.paused ->
+                ( Model.with_toast ~now ~level:Model.Toast_info
+                    (Say.make
+                       ~ko:(Printf.sprintf "%s은(는) 이미 오프라인 상태입니다" name)
+                       ~en:(Printf.sprintf "%s is already offline" name))
+                    (Model.disarm_keeper_stop m)
+                , [] )
+            | Some _ | None ->
+                let is_armed_same =
+                  match m.keeper_stop_armed with
+                  | Some (armed_name, armed_at) when String.equal armed_name name
+                    ->
+                      let elapsed =
+                        Clock.Mono.seconds_since now ~since:armed_at
+                      in
+                      elapsed >= 0.0
+                      && elapsed < Model.keeper_stop_arm_window_s
+                  | Some _ | None -> false
+                in
+                if is_armed_same then
+                  dispatch_keeper_shutdown ~now ~name
+                    (Model.disarm_keeper_stop m)
+                else
+                  let next =
+                    { m with keeper_stop_armed = Some (name, now) }
+                    |> Model.with_toast ~now
+                         ~duration_s:Model.keeper_stop_arm_window_s
+                         ~level:Model.Toast_warning
+                         (Model.keeper_stop_arm_toast_message ~name)
+                  in
+                  (next, [])))
   | Keymap.Quit_app -> (
       let is_armed =
         match m.quit_armed_at with

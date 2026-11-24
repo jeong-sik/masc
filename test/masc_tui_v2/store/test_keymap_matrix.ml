@@ -1995,7 +1995,11 @@ let test_dynamic_rendered_hint_contracts () =
         }
       in
       let pop_txt = grid_all_text (render_full ~model:pop_m) in
-      assert_has ~label:(lang_s ^ "/Popup/Counter") ~needle:"1/31" pop_txt;
+      let expected_slash_counter =
+        Printf.sprintf "1/%d" (List.length Slash.all)
+      in
+      assert_has ~label:(lang_s ^ "/Popup/Counter")
+        ~needle:expected_slash_counter pop_txt;
       assert_has ~label:(lang_s ^ "/Popup/TabHint") ~needle:"Tab" pop_txt;
       record_case ();
       let filt_m =
@@ -2042,15 +2046,15 @@ let test_journeys_slash_palette_filter () =
   let m1, _ = step m1 (char_key "/") in
   let m1_dn, _ = step m1 (mk_key Keymap.Input.Down) in
   Alcotest.(check int) "J1 popup Down -> 1" 1 m1_dn.drafts.popup_selected;
+  let last_slash_idx = List.length Slash.all - 1 in
   let m1_up, _ = step m1 (mk_key Keymap.Input.Up) in
-  let last_command = List.length Slash.all - 1 in
-  Alcotest.(check int) "J1 popup Up wraps to the last registered command" last_command
-    m1_up.drafts.popup_selected;
+  Alcotest.(check int) "J1 popup Up wraps to the last registered command"
+    last_slash_idx m1_up.drafts.popup_selected;
   let m1_pg, _ = step m1 (mk_key Keymap.Input.Page_down) in
   Alcotest.(check int) "J1 popup PgDn -> 8" 8 m1_pg.drafts.popup_selected;
   let m1_end, _ = step m1 (mk_key Keymap.Input.End) in
-  Alcotest.(check int) "J1 popup End selects the last registered command" last_command
-    m1_end.drafts.popup_selected;
+  Alcotest.(check int) "J1 popup End selects the last registered command"
+    last_slash_idx m1_end.drafts.popup_selected;
   let m1_home, _ = step m1_end (mk_key Keymap.Input.Home) in
   Alcotest.(check int) "J1 popup Home -> 0" 0 m1_home.drafts.popup_selected;
   let m1_exec, _ = step m1_home (mk_key Keymap.Input.Enter) in
@@ -8632,6 +8636,127 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
   Alcotest.(check int) "Keeper_memory Space emits 0 network cmds outside Facts Tree"
     0 (List.length (Cmd.flatten cmds_mem_space))
 
+let test_keeper_lifecycle_keymap_matrix () =
+  Alcotest.(check int) "zero keymap collisions with W and D" 0
+    (List.length (Keymap.collisions ()));
+  let m0 = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
+  let has_lifecycle_post cmds =
+    has_cmd
+      (function
+        | Cmd.Http_post { req = Cmd.Post_keeper_lifecycle _; _ } -> true
+        | _ -> false)
+      cmds
+  in
+  (* Outside Keepers (1 Pulse, 2 Work, 3 Knowledge, 5 Runtime, 6 Infra): W and D are silent no-ops *)
+  List.iter
+    (fun digit ->
+      let m_ws, _ = step m0 (char_key digit) in
+      let _, cmds_w = step m_ws (char_key ~shift:true "W") in
+      let m_d, cmds_d = step m_ws (char_key ~shift:true "D") in
+      Alcotest.(check bool) ("workspace " ^ digit ^ " ignores W") false
+        (has_lifecycle_post cmds_w);
+      Alcotest.(check bool) ("workspace " ^ digit ^ " ignores D") false
+        (has_lifecycle_post cmds_d || Option.is_some m_d.keeper_stop_armed))
+    [ "1"; "2"; "3"; "5"; "6" ];
+  (* On 4 Keepers: W dispatches immediately; D arms on 1st press and shuts down on 2nd *)
+  let m_k, _ = step m0 (char_key "4") in
+  let _, cmds_kw = step m_k (char_key ~shift:true "W") in
+  Alcotest.(check bool) "4 Keepers W dispatches lifecycle POST" true
+    (has_lifecycle_post cmds_kw);
+  let m_kd1, cmds_kd1 = step m_k (char_key ~shift:true "D") in
+  Alcotest.(check bool) "4 Keepers 1st D arms without POST" true
+    (Option.is_some m_kd1.keeper_stop_armed && not (has_lifecycle_post cmds_kd1));
+  let m_kd2, cmds_kd2 = step m_kd1 (char_key ~shift:true "D") in
+  Alcotest.(check bool) "4 Keepers 2nd D confirms Keeper_shutdown" true
+    (Option.is_none m_kd2.keeper_stop_armed && has_lifecycle_post cmds_kd2);
+  (* Global footer shows Esc while [D] stop is armed; narrow split rail (cols=106 -> left_w=37, inner_budget=31 < 34) keeps [Esc] unclipped *)
+  let g_armed_wide = render_full ~model:m_kd1 in
+  let armed_footer_row =
+    grid_row_text g_armed_wide (Cell_grid.rows g_armed_wide - 1)
+  in
+  assert_has ~label:"Armed [D] top-level global footer shows Esc" ~needle:"Esc"
+    armed_footer_row;
+  let m_k_narrow, _ =
+    Update.step ~now:t0 m_k (Msg.Resize { cols = 106; rows = 36 })
+  in
+  let m_k_narrow_armed, _ = step m_k_narrow (char_key ~shift:true "D") in
+  Alcotest.(check bool) "Narrow split 1st D arms stop" true
+    (Option.is_some m_k_narrow_armed.keeper_stop_armed);
+  let g_armed_narrow = render_full ~model:m_k_narrow_armed in
+  let narrow_txt = grid_all_text g_armed_narrow in
+  assert_has ~label:"Narrow left rail armed [D] footer preserves [Esc]"
+    ~needle:"[Esc]" narrow_txt;
+  (* Palette / Ask modal / Goal_drop inline modal / Composer / Filter / Sidebar / Settings edit / Keeper_config edit isolate BOTH W and D *)
+  let m_pal, _ = step m_k (char_key ~ctrl:true "k") in
+  let m_with_ask =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Pulse; overlay = None; dive_stack = [] };
+      work = Work_store.empty |> Work_store.apply_asks ~observed_at:t0 [ mk_single_ask () ];
+    }
+    |> Model.rebuild_attention
+  in
+  let m_ask, _ = step m_with_ask (char_key ~shift:true "Y") in
+  Alcotest.(check bool) "precondition: Y on Ask opens Ask_answer modal" true
+    (Option.equal Nav.equal_overlay m_ask.nav.overlay (Some Nav.Ask_answer));
+  let m_goal_drop, _ =
+    Update_nav.open_inline_modal m_k (Nav.Goal_drop "goal-1")
+  in
+  let m_comp = { m_k with drafts = Drafts.set_focus true m_k.drafts } in
+  let m_filt = { m_k with nav = { m_k.nav with filter_focused = true } } in
+  let m_sb = Update_nav.enter_sidebar_focus m_k in
+  let m_set_edit =
+    {
+      m_k with
+      nav = { m_k.nav with overlay = Some (Nav.Settings Nav.Settings_general_ui) };
+      config =
+        {
+          m_k.config with
+          editing_field_key = Some "server.port";
+          editing_buffer = "8935";
+          editing_cursor = 4;
+        };
+    }
+  in
+  let m_kcfg_edit =
+    let m_dive, _ =
+      Update_nav.push_dive m_k
+        (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_config })
+    in
+    {
+      m_dive with
+      config =
+        {
+          m_dive.config with
+          editing_field_key = Some "keeper.instructions";
+          editing_buffer = "hi";
+          editing_cursor = 2;
+        };
+    }
+  in
+  List.iter
+    (fun (label, surf_m) ->
+      let m_w, cmds_w = step surf_m (char_key ~shift:true "W") in
+      let m_d, cmds_d = step surf_m (char_key ~shift:true "D") in
+      Alcotest.(check bool) (label ^ " isolates W (no POST)") false
+        (has_lifecycle_post cmds_w);
+      Alcotest.(check bool) (label ^ " isolates W (no arm)") true
+        (Option.is_none m_w.keeper_stop_armed);
+      Alcotest.(check bool) (label ^ " isolates D (no POST)") false
+        (has_lifecycle_post cmds_d);
+      Alcotest.(check bool) (label ^ " isolates D (no arm)") true
+        (Option.is_none m_d.keeper_stop_armed))
+    [
+      ("Palette", m_pal);
+      ("Ask modal", m_ask);
+      ("Goal_drop modal", m_goal_drop);
+      ("Composer", m_comp);
+      ("Filter", m_filt);
+      ("Sidebar", m_sb);
+      ("Settings edit", m_set_edit);
+      ("Keeper_config edit", m_kcfg_edit);
+    ]
+
 let () =
   Alcotest.run "masc_tui_keymap_matrix"
     [
@@ -8692,5 +8817,8 @@ let () =
           Alcotest.test_case
             "Part 2: Keymap Consistency (←/→ spatial panes, [/] sub-tabs, 7/8/9/0 overlays, safe Space)"
             `Quick test_part2_keymap_consistency_spatial_overlays_and_safe_space;
+          Alcotest.test_case
+            "Keeper lifecycle keymap matrix (0 collisions, workspace scope & overlay isolation)"
+            `Quick test_keeper_lifecycle_keymap_matrix;
         ] );
     ]

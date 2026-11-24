@@ -1,0 +1,1859 @@
+/**
+ * Keepers Workspace — Epoch-fenced, mode-aware API & AG-UI SSE transport layer.
+ *
+ * Uses ONLY Layer 3 `src/core/*` primitives (`apiGet`, `apiGetV2`, `apiMutate`,
+ * `apiMutateV2`, `resourceCache`, `authSession`, `sessionEpoch`, `currentSessionEpoch`,
+ * `isEpochCurrent`, `getSingleUserToken`, `getActiveCsrfToken`).
+ *
+ * Wire Envelopes strictly matched to #36:
+ * - V2Envelope (`apiGetV2` / `apiMutateV2`): `/candle/ledger`, `/config/schema`, `/config/patch`, `/infra/sandboxes/:k`
+ * - Flat JSON (`apiGet` / `apiMutate`): all `/keepers/*`, `/gate/keepers`, `/dashboard/agents/purge`, `/voice/transcribe`
+ */
+
+import { err, ok, type Result } from '../../lib/result'
+import {
+  authSession,
+  currentSessionEpoch,
+  getActiveCsrfToken,
+  getSingleUserToken,
+  isEpochCurrent,
+  resolveWorkspaceUrl,
+  sessionEpoch,
+} from '../../core/auth'
+import {
+  apiGet,
+  apiGetV2,
+  apiMutate,
+  apiMutateV2,
+  type ApiError,
+} from '../../core/transport'
+import { acquireViewStream } from '../../core/view-stream-slot'
+import {
+  observedAbsent,
+  observedValue,
+  resourceCache,
+  type FetchReason,
+  type Observed,
+} from '../../core/resource-cache'
+import { isKeeperEquipment, type KeeperEquipment } from '../../lib/keeper-portrait'
+import { randomUuid } from '../../lib/uuid'
+import type {
+  CandleBalanceRow,
+  CandleLedgerEventRow,
+  ChatAttachmentDraft,
+  ChatHistoryPage,
+  ChatJournalCursor,
+  ChatJournalEvent,
+  ChatJournalPage,
+  ChatJournalTextOwner,
+  ChatTranscriptEntry,
+  CheckpointInventoryData,
+  ConfigCategorySpec,
+  ConfigFieldSpec,
+  ConfigPatchChange,
+  ConfigPatchResult,
+  ConfigReloadScope,
+  ConfigSchemaData,
+  KeeperAttachedProvider,
+  KeeperCandleLedgerData,
+  KeeperCatalogItem,
+  KeeperItemsData,
+  KeeperLastPromptData,
+  KeeperLinkedTask,
+  KeeperMemoryFactsData,
+  KeeperMemoryJournalData,
+  KeeperMemoryJournalEntry,
+  KeeperMemoryOsInternalsData,
+  KeeperOperatorNoteData,
+  KeeperRosterItem,
+  KeeperSandboxData,
+  KeeperToolCallEntry,
+  KeeperToolCallsData,
+  KeeperToolStatsData,
+  KeeperTurnRecordsData,
+  MemoryActPayload,
+  OrdinaryMemoryBranch,
+  PortraitSlot,
+  ProviderInputData,
+  ProviderInputPartSummary,
+  QueuedChatOperation,
+  RawTraceTurnItem,
+  RosterMode,
+  SourceBoundMemoryBranch,
+  TurnRecordItem,
+  TurnRecordPromptBlock,
+} from './types'
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+function asStr(v: unknown): string | null {
+  return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null
+}
+
+function asNum(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+function wrap<T>(p: Promise<Result<T, ApiError>>): Promise<Result<T | null, ApiError>> {
+  return p.then((r) => (r.ok ? ok<T | null>(r.value) : r))
+}
+
+// ── Shared Formatters ────────────────────────────────────────────────────
+
+export function formatCandleMilli(raw: string | number | null | undefined): Observed<string> {
+  if (raw === null || raw === undefined) return observedAbsent()
+  const text = typeof raw === 'number'
+    ? (Number.isFinite(raw) ? String(Math.trunc(raw)) : '')
+    : raw.trim()
+  if (!/^-?\d+$/.test(text)) return observedAbsent('invalid_milli')
+  const neg = text.startsWith('-')
+  const digits = neg ? text.slice(1) : text
+  const padded = digits.padStart(4, '0')
+  const whole = padded.slice(0, padded.length - 3).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  const frac = padded.slice(padded.length - 3)
+  return observedValue(`${neg ? '-' : ''}${whole}.${frac}`)
+}
+
+export function observeRosterContextPct(item: KeeperRosterItem): Observed<number> {
+  if (typeof item.context_ratio === 'number' && Number.isFinite(item.context_ratio)) {
+    return observedValue(Math.max(0, Math.min(100, Math.round(item.context_ratio * 100))))
+  }
+  if (item.context_unavailable_reason) {
+    return observedAbsent(item.context_unavailable_reason)
+  }
+  return observedAbsent()
+}
+
+/**
+ * Builds the portrait preview URL matching live OCaml server contract:
+ * - `preview`: single bare portrait item ID (`Keeper_portrait_item.of_id`, e.g. `?size=256&preview=crown`)
+ * - `expected_equipment`: 5-key JSON object (`Keeper_portrait_equipment.of_json`)
+ */
+export function buildPortraitPreviewUrl(
+  keeper: string,
+  size = 256,
+  previewItemId?: string | null,
+  expectedEquipment?: KeeperEquipment | null,
+): string {
+  const params = new URLSearchParams({ size: String(size) })
+  const trimmedPreview = typeof previewItemId === 'string' ? previewItemId.trim() : ''
+  if (trimmedPreview.length > 0) {
+    params.set('preview', trimmedPreview)
+  }
+  if (expectedEquipment) {
+    params.set(
+      'expected_equipment',
+      JSON.stringify({
+        face: expectedEquipment.face,
+        neck: expectedEquipment.neck,
+        head: expectedEquipment.head,
+        hand: expectedEquipment.hand,
+        base: expectedEquipment.base,
+      }),
+    )
+  }
+  return `/api/v1/keepers/${encodeURIComponent(keeper)}/portrait.png?${params.toString()}`
+}
+
+// ── Roster Loader & Pure Sorter ──────────────────────────────────────────
+
+interface TurnListItem {
+  readonly keeper_name: string
+  readonly chat_control_token: string | null
+  readonly active: KeeperRosterItem['active_turn']
+}
+
+function decodeTurnsList(raw: unknown): Map<string, TurnListItem> {
+  const map = new Map<string, TurnListItem>()
+  const list = isRecord(raw) && Array.isArray(raw.keepers)
+    ? raw.keepers
+    : Array.isArray(raw)
+      ? raw
+      : []
+  for (const row of list) {
+    if (!isRecord(row)) continue
+    const name = asStr(row.keeper_name) ?? asStr(row.name)
+    if (!name) continue
+    const activeRaw = isRecord(row.active_turn)
+      ? row.active_turn
+      : isRecord(row.turn)
+        ? row.turn
+        : null
+    const active = activeRaw
+      ? {
+          lane: asStr(activeRaw.lane) ?? 'chat',
+          started_at_unix: asNum(activeRaw.started_at_unix) ?? asNum(activeRaw.started_at) ?? 0,
+          tool_in_flight: asStr(activeRaw.tool_in_flight) ?? asStr(activeRaw.tool),
+        }
+      : null
+    map.set(name, {
+      keeper_name: name,
+      chat_control_token: asStr(row.chat_control_token),
+      active,
+    })
+  }
+  return map
+}
+
+function deriveCompany(name: string): string {
+  const dash = name.indexOf('-')
+  return dash > 0 ? name.slice(0, dash) : 'General'
+}
+
+export function decodeKeeperRoster(
+  gateRaw: unknown,
+  turnsByKeeper: ReadonlyMap<string, TurnListItem> = new Map(),
+): KeeperRosterItem[] {
+  const list = isRecord(gateRaw) && Array.isArray(gateRaw.keepers) ? gateRaw.keepers : []
+  const items: KeeperRosterItem[] = []
+  for (const raw of list) {
+    if (!isRecord(raw)) continue
+    const name = asStr(raw.name)
+    if (!name) continue
+    const meta = isRecord(raw.meta) ? raw.meta : null
+    const issue = isRecord(raw.effective_meta_error) ? asStr(raw.effective_meta_error.message) : null
+    const lf = isRecord(raw.last_failure) && asStr(raw.last_failure.cause)
+      ? { cause: asStr(raw.last_failure.cause)!, at_unix: asNum(raw.last_failure.at_unix) }
+      : null
+
+    let turns24h: number | null = null
+    if (isRecord(raw.recent_turns) && Array.isArray(raw.recent_turns.slots)) {
+      let sum = 0
+      for (const s of raw.recent_turns.slots) {
+        if (!isRecord(s)) continue
+        sum += (asNum(s.ok) ?? 0) + (asNum(s.rested) ?? 0) + (asNum(s.failed) ?? 0)
+      }
+      turns24h = sum
+    }
+
+    let portraitEquipment: KeeperEquipment | null = null
+    if (isRecord(raw.portrait) && raw.portrait.state === 'ready' && isKeeperEquipment(raw.portrait.equipment)) {
+      portraitEquipment = raw.portrait.equipment
+    }
+
+    const turnRow = turnsByKeeper.get(name)
+    const candleVal = typeof raw.candle_balance_milli === 'string' || typeof raw.candle_balance_milli === 'number'
+      ? raw.candle_balance_milli
+      : null
+
+    items.push({
+      name,
+      status: asStr(raw.status) ?? 'unknown',
+      phase: asStr(raw.phase) ?? (issue ? 'error' : 'idle'),
+      health: asStr(raw.health) ?? (issue ? 'failing' : 'unknown'),
+      paused: raw.paused === true,
+      keepalive_running: raw.keepalive_running === true,
+      activation_mode: asStr(raw.activation_mode) ?? 'manual',
+      runtime_id: asStr(raw.runtime_id) ?? 'unassigned',
+      sandbox_profile: meta ? asStr(meta.sandbox_profile) : null,
+      company: asStr(raw.group) ?? deriveCompany(name),
+      context_ratio: asNum(raw.context_ratio),
+      context_tokens: asNum(raw.context_tokens),
+      context_max: asNum(raw.context_max),
+      context_unavailable_reason: asStr(raw.context_metrics_unavailable_reason),
+      runtime_blocker_summary: asStr(raw.runtime_blocker_summary),
+      last_failure: lf,
+      directory_issue: issue,
+      turns_24h: turns24h,
+      candle_balance_milli: candleVal,
+      portrait_equipment: portraitEquipment,
+      chat_control_token: turnRow?.chat_control_token ?? null,
+      active_turn: turnRow?.active ?? null,
+    })
+  }
+  return items
+}
+
+export function needsRosterAttention(k: KeeperRosterItem): boolean {
+  if (k.directory_issue || k.runtime_blocker_summary) return true
+  const h = k.health.toLowerCase()
+  return h === 'failing' || h === 'failed' || h === 'degraded' || h === 'error' || h === 'crashed'
+}
+
+export function filterAndSortRoster(
+  items: readonly KeeperRosterItem[],
+  mode: RosterMode,
+  query: string,
+): readonly KeeperRosterItem[] {
+  const q = query.trim().toLowerCase()
+  const filtered = q.length === 0
+    ? [...items]
+    : items.filter((k) =>
+        k.name.toLowerCase().includes(q)
+        || k.company.toLowerCase().includes(q)
+        || k.runtime_id.toLowerCase().includes(q)
+        || k.health.toLowerCase().includes(q),
+      )
+
+  if (mode === 'attention') {
+    return filtered.sort((a, b) => {
+      const aScore = (needsRosterAttention(a) ? 0 : a.paused ? 1 : 2)
+      const bScore = (needsRosterAttention(b) ? 0 : b.paused ? 1 : 2)
+      if (aScore !== bScore) return aScore - bScore
+      return (b.context_ratio ?? -1) - (a.context_ratio ?? -1) || a.name.localeCompare(b.name)
+    })
+  }
+  if (mode === 'wall24h') {
+    return filtered.sort((a, b) => {
+      const diff = (b.turns_24h ?? -1) - (a.turns_24h ?? -1)
+      return diff !== 0 ? diff : a.name.localeCompare(b.name)
+    })
+  }
+  return filtered.sort((a, b) => {
+    const c = a.company.localeCompare(b.company)
+    return c !== 0 ? c : a.name.localeCompare(b.name)
+  })
+}
+
+export async function loadKeeperRoster(reason: FetchReason = 'mount'): Promise<Observed<readonly KeeperRosterItem[]>> {
+  return resourceCache.fetch<readonly KeeperRosterItem[]>(
+    'keepers:roster',
+    async (signal) => {
+      const [gateRes, turnsRes] = await Promise.all([
+        apiGet<unknown>('/api/v1/gate/keepers?detailed=true', { signal }),
+        apiGet<unknown>('/api/v1/keepers/turns', { signal }),
+      ])
+      if (!gateRes.ok) return gateRes
+      const turnsMap = turnsRes.ok ? decodeTurnsList(turnsRes.value) : new Map<string, TurnListItem>()
+      return ok<readonly KeeperRosterItem[] | null>(decodeKeeperRoster(gateRes.value, turnsMap))
+    },
+    { ttlMs: 10_000, topics: ['keeper', 'keeper_turn', 'keeper_lifecycle'], reason },
+  )
+}
+
+export async function fetchKeeperControlToken(keeperName: string): Promise<string | null> {
+  const res = await apiGet<unknown>('/api/v1/keepers/turns')
+  if (!res.ok) return null
+  const map = decodeTurnsList(res.value)
+  return map.get(keeperName)?.chat_control_token ?? null
+}
+
+// ── Lifecycle Mutations ──────────────────────────────────────────────────
+
+export function bootKeeperAction(name: string) {
+  return apiMutate<Record<string, unknown>>('POST', `/api/v1/keepers/${encodeURIComponent(name)}/boot`, {})
+}
+
+export function pauseKeeperAction(name: string) {
+  return apiMutate<Record<string, unknown>>('POST', `/api/v1/keepers/${encodeURIComponent(name)}/directive`, {
+    action: 'pause',
+  })
+}
+
+export function resumeKeeperAction(name: string) {
+  return apiMutate<Record<string, unknown>>('POST', `/api/v1/keepers/${encodeURIComponent(name)}/directive`, {
+    action: 'resume',
+    operator_operation_id: `dashboard-resume-${randomUuid()}`,
+  })
+}
+
+export function interruptKeeperTurnAction(name: string, operationId?: string) {
+  return apiMutate<Record<string, unknown>>('POST', '/api/v1/keepers/turn/interrupt', {
+    name,
+    ...(operationId ? { request_id: operationId } : {}),
+  })
+}
+
+export function deleteKeeperAction(name: string) {
+  return apiMutate<Record<string, unknown>>('POST', '/api/v1/dashboard/agents/purge', {
+    agent_name: name,
+  })
+}
+
+export function clearKeeperHistoryAction(name: string, reason: string, preserveSystemPrompt = true) {
+  return apiMutate<Record<string, unknown>>('POST', `/api/v1/keepers/${encodeURIComponent(name)}/clear`, {
+    reason,
+    preserve_system_prompt: preserveSystemPrompt,
+  })
+}
+
+export function resetKeeperAction(name: string) {
+  return apiMutate<Record<string, unknown>>('POST', `/api/v1/keepers/${encodeURIComponent(name)}/reset`, {})
+}
+
+// ── Chat History, Queued Ops, Cut-Reply Journal & Origin_bare AG-UI SSE ──
+
+function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
+  if (!isRecord(raw)) return null
+  const id = asStr(raw.id)
+  if (!id) return null
+  const roleRaw = asStr(raw.role)
+  const role: ChatTranscriptEntry['role'] =
+    roleRaw === 'user' || roleRaw === 'assistant' || roleRaw === 'system' || roleRaw === 'tool' || roleRaw === 'request_failure'
+      ? roleRaw
+      : 'assistant'
+  const content = typeof raw.content === 'string' ? raw.content : ''
+  const ts = asNum(raw.ts) ?? Date.now() / 1000
+  return {
+    id,
+    role,
+    content,
+    ts,
+    turnRef: asStr(raw.turn_ref) ?? undefined,
+    toolName: asStr(raw.tool_call_name) ?? undefined,
+    deliveryState: 'Delivered',
+  }
+}
+
+export function fetchKeeperChatHistoryPageApi(
+  keeper: string,
+  cursor?: string,
+  limit = 40,
+): Promise<Result<ChatHistoryPage, ApiError>> {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set('cursor', cursor)
+  return apiGet<ChatHistoryPage>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/chat/history/page?${params.toString()}`,
+    {
+      decode: (raw) => {
+        if (!isRecord(raw) || !Array.isArray(raw.messages)) {
+          throw new Error('Invalid chat history page')
+        }
+        const messages = raw.messages
+          .map(decodeHistoryRow)
+          .filter((m): m is ChatTranscriptEntry => m !== null)
+        return {
+          messages,
+          hasMore: raw.has_more === true,
+          nextCursor: typeof raw.next_cursor === 'string' && raw.next_cursor.trim() ? raw.next_cursor : null,
+        }
+      },
+    },
+  )
+}
+
+export function fetchQueuedChatOperations(keeper: string): Promise<Result<readonly QueuedChatOperation[], ApiError>> {
+  return apiGet<readonly QueuedChatOperation[]>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/chat/operations?state=queued`,
+    {
+      decode: (raw) => {
+        if (!isRecord(raw) || !Array.isArray(raw.operations)) return []
+        const ops: QueuedChatOperation[] = []
+        for (const item of raw.operations) {
+          if (!isRecord(item)) continue
+          const opId = asStr(item.operation_id)
+          if (!opId) continue
+          const input = isRecord(item.input) ? item.input : null
+          ops.push({
+            operationId: opId,
+            sequence: asStr(item.sequence) ?? String(asNum(item.sequence) ?? 0),
+            createdAt: asNum(item.created_at) ?? 0,
+            message: input && typeof input.message === 'string' ? input.message : '',
+            state: asStr(item.state) ?? 'Queued',
+          })
+        }
+        return ops
+      },
+    },
+  )
+}
+
+export function cancelQueuedChatOperation(keeper: string, operationId: string) {
+  return apiMutate<unknown>(
+    'POST',
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/chat/operations/${encodeURIComponent(operationId)}/cancel`,
+    {},
+  )
+}
+
+export function moveQueuedChatOperationToEndApi(keeper: string, operationId: string) {
+  return apiMutate<unknown>(
+    'POST',
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/chat/operations/${encodeURIComponent(operationId)}/move-to-end`,
+    {},
+  )
+}
+
+function decodeTextOwner(raw: Record<string, unknown>): ChatJournalTextOwner {
+  const resp = isRecord(raw.response)
+    ? raw.response
+    : isRecord(raw.textResponse)
+      ? raw.textResponse
+      : null
+  if (resp) {
+    const cg = asNum(resp.content_generation)
+    const ss = asNum(resp.stream_scope)
+    if (cg !== null && ss !== null) {
+      return { kind: 'observed_response', contentGeneration: cg, streamScope: ss }
+    }
+  }
+  const bareScope = asNum(raw.stream_scope) ?? asNum(raw.textStreamScope)
+  return { kind: 'unobserved_scope', streamScope: bareScope }
+}
+
+export function decodeChatJournalPage(raw: unknown, operationId: string): ChatJournalPage {
+  if (!isRecord(raw) || !Array.isArray(raw.events)) {
+    throw new Error('Invalid chat journal page')
+  }
+  const events: ChatJournalEvent[] = []
+  for (const item of raw.events) {
+    if (!isRecord(item)) continue
+    const ev = isRecord(item.event) ? item.event : item
+    const type = asStr(ev.type) ?? asStr(item.kind) ?? ''
+    if (type === 'RUN_STARTED' || type === 'run_started') {
+      events.push({ kind: 'run_started' })
+    } else if (
+      type === 'agent_core_runtime_attempt_started'
+      || (type === 'CUSTOM' && asStr(ev.name) === 'KEEPER_RUNTIME_ATTEMPT_STARTED')
+    ) {
+      events.push({ kind: 'runtime_attempt_started' })
+    } else if (type === 'TEXT_MESSAGE_CONTENT' || type === 'text_delta') {
+      const text = typeof ev.delta === 'string' ? ev.delta : typeof ev.text === 'string' ? ev.text : ''
+      events.push({ kind: 'text_delta', text, owner: decodeTextOwner(ev) })
+    } else if (type === 'RUN_FINISHED' || type === 'run_finished') {
+      events.push({ kind: 'run_finished' })
+    } else if (type === 'RUN_ERROR' || type === 'error' || type === 'event_error') {
+      events.push({ kind: 'error', detail: asStr(ev.message) ?? asStr(ev.detail) ?? 'stream error' })
+    } else {
+      events.push({ kind: 'other' })
+    }
+  }
+  const hasMore = raw.has_more === true
+  const nextSeq = asNum(raw.next_since_seq)
+  const nextOffset = asNum(raw.next_since_offset)
+  const next: ChatJournalCursor | null =
+    hasMore && nextSeq !== null && nextOffset !== null
+      ? { lastSeq: nextSeq, nextOffset }
+      : null
+  return { operationId, events, next }
+}
+
+interface ResponseOwner {
+  readonly contentGeneration: number
+  readonly streamScope: number
+}
+
+interface CutReplyOwnership {
+  readonly admitted: ResponseOwner | null
+  readonly closed: ResponseOwner | null
+  readonly unobservedScope: number | null
+}
+
+const FRESH_OWNERSHIP: CutReplyOwnership = {
+  admitted: null,
+  closed: null,
+  unobservedScope: null,
+}
+
+function ownerOrder(a: ResponseOwner, b: ResponseOwner): number {
+  if (a.contentGeneration !== b.contentGeneration) {
+    return a.contentGeneration - b.contentGeneration
+  }
+  return a.streamScope - b.streamScope
+}
+
+function admitOwner(
+  ownership: CutReplyOwnership,
+  owner: ChatJournalTextOwner,
+): { readonly accept: true; readonly ownership: CutReplyOwnership } | { readonly accept: false } {
+  if (owner.kind === 'unobserved_scope') {
+    if (owner.streamScope != null) {
+      return { accept: true, ownership: { ...ownership, unobservedScope: owner.streamScope } }
+    }
+    return { accept: true, ownership }
+  }
+  const candidate: ResponseOwner = {
+    contentGeneration: owner.contentGeneration ?? 0,
+    streamScope: owner.streamScope ?? 0,
+  }
+  const closedOut = ownership.closed !== null && ownerOrder(candidate, ownership.closed) <= 0
+  const precedesCurrent = ownership.admitted !== null && (
+    ownerOrder(candidate, ownership.admitted) < 0
+    || (
+      candidate.contentGeneration === ownership.admitted.contentGeneration
+      && ownership.unobservedScope !== null
+      && candidate.streamScope < ownership.unobservedScope
+    )
+  )
+  if (closedOut || precedesCurrent) {
+    return { accept: false }
+  }
+  return {
+    accept: true,
+    ownership: { ...ownership, admitted: candidate, unobservedScope: null },
+  }
+}
+
+function retireAttempt(ownership: CutReplyOwnership): CutReplyOwnership {
+  let closed = ownership.closed
+  if (ownership.admitted !== null) {
+    if (closed === null || ownerOrder(closed, ownership.admitted) < 0) {
+      closed = ownership.admitted
+    }
+  }
+  return { admitted: null, closed, unobservedScope: null }
+}
+
+/**
+ * Reconstructs the winning reply text from `/keepers/:k/chat/events` journal events.
+ * Exact port of `lib/masc_tui/store/cut_reply.ml:7-102` monotonic response ownership:
+ * - tracks `{ admitted, closed, unobservedScope }`
+ * - retires attempts monotonically on `runtime_attempt_started`
+ * - drops late/superseded `observed_response` frames without wiping newer text
+ * - terminates cleanly on `run_finished` and `event_error`/`RUN_ERROR`.
+ */
+export function reconstructJournalReply(events: readonly ChatJournalEvent[]): {
+  readonly text: string
+  readonly finished: boolean
+  readonly error: string | null
+} {
+  let pieces: string[] = []
+  let ownership: CutReplyOwnership = FRESH_OWNERSHIP
+  let finished = false
+  let error: string | null = null
+
+  for (const ev of events) {
+    switch (ev.kind) {
+      case 'run_started':
+        pieces = []
+        ownership = FRESH_OWNERSHIP
+        break
+      case 'runtime_attempt_started':
+        pieces = []
+        ownership = retireAttempt(ownership)
+        break
+      case 'text_delta': {
+        const res = admitOwner(ownership, ev.owner)
+        if (res.accept) {
+          pieces.push(ev.text)
+          ownership = res.ownership
+        }
+        break
+      }
+      case 'run_finished':
+        finished = true
+        return { text: pieces.join(''), finished, error }
+      case 'error':
+        error = ev.detail
+        return { text: pieces.join(''), finished: false, error }
+      case 'other':
+        break
+    }
+  }
+  return { text: pieces.join(''), finished, error }
+}
+
+export async function recoverCutReplyFromJournal(
+  keeper: string,
+  operationId: string,
+): Promise<Result<{ readonly text: string; readonly finished: boolean; readonly error: string | null }, ApiError>> {
+  const allEvents: ChatJournalEvent[] = []
+  let cursor: ChatJournalCursor | null = null
+  let pages = 0
+
+  while (pages < 8) {
+    pages += 1
+    const params = new URLSearchParams({
+      operation_id: operationId,
+      limit: '2000',
+    })
+    if (cursor) {
+      params.set('since_seq', String(cursor.lastSeq))
+      params.set('since_offset', String(cursor.nextOffset))
+    }
+    const res = await apiGet<ChatJournalPage>(
+      `/api/v1/keepers/${encodeURIComponent(keeper)}/chat/events?${params.toString()}`,
+      { decode: (raw) => decodeChatJournalPage(raw, operationId) },
+    )
+    if (!res.ok) return res
+    allEvents.push(...res.value.events)
+    if (!res.value.next) break
+    cursor = res.value.next
+  }
+
+  return ok(reconstructJournalReply(allEvents))
+}
+
+export type ChatSubmitMode =
+  | { readonly kind: 'queue' }
+  | { readonly kind: 'steer'; readonly controlToken: string }
+  | { readonly kind: 'btw' }
+
+/**
+ * Builds the `Origin_bare` POST payload for `/api/v1/keepers/chat/stream`.
+ * Strictly omits `channel` (`Origin_bare`), attaches `admission_intent` for `⌘↵` Steer
+ * carrying the caller's own `operationId`, and adds concise `/btw` turn instructions.
+ */
+export function buildChatStreamRequestBody(params: {
+  readonly keeper: string
+  readonly message: string
+  readonly operationId: string
+  readonly mode: ChatSubmitMode
+  readonly attachments?: readonly ChatAttachmentDraft[]
+}): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    request_id: params.operationId,
+    name: params.keeper,
+    message: params.message,
+  }
+  if (params.mode.kind === 'steer') {
+    body.admission_intent = {
+      kind: 'interactive',
+      control_token: params.mode.controlToken,
+      interrupt_token: null,
+      operation_id: params.operationId,
+    }
+  } else if (params.mode.kind === 'btw') {
+    body.turn_instructions = 'Answer concisely as an ephemeral /btw side-query.'
+  }
+  if (params.attachments && params.attachments.length > 0) {
+    body.attachments = params.attachments.map((att) => ({
+      id: att.id,
+      type: att.type,
+      name: att.name,
+      size: att.size,
+      mime_type: att.mimeType,
+      data: att.data,
+    }))
+  }
+  return body
+}
+
+export interface StreamKeeperChatCallbacks {
+  readonly onAccepted?: (info: {
+    readonly operationId: string
+    readonly state: string
+    readonly queuedCount: number
+    readonly controlToken: string | null
+  }) => void
+  readonly onRunStarted?: () => void
+  readonly onAttemptStarted?: () => void
+  readonly onTextDelta?: (delta: string) => void
+  readonly onThinkingDelta?: (delta: string) => void
+  readonly onToolStart?: (toolName: string) => void
+  readonly onReplyDetails?: (reply: string, turnRef: string | null) => void
+  readonly onFinished?: () => void
+  readonly onError?: (message: string) => void
+}
+
+/**
+ * Mode-aware, epoch-fenced, 2+1 SSE slot-managed AG-UI chat client
+ * (`POST /api/v1/keepers/chat/stream`). Acquires Layer 3 `acquireViewStream`
+ * so at most one view/chat SSE stream is live at any time.
+ */
+export async function streamKeeperChat(params: {
+  readonly keeper: string
+  readonly message: string
+  readonly operationId: string
+  readonly mode: ChatSubmitMode
+  readonly attachments?: readonly ChatAttachmentDraft[]
+  readonly signal?: AbortSignal
+  readonly fetchImpl?: typeof fetch
+  readonly callbacks: StreamKeeperChatCallbacks
+}): Promise<{ readonly terminal: boolean; readonly error: string | null }> {
+  const fetchImpl = params.fetchImpl ?? globalThis.fetch
+  const startEpoch = currentSessionEpoch()
+  if (params.signal?.aborted) {
+    return { terminal: false, error: 'aborted' }
+  }
+
+  const streamKey = `keeper-chat:${params.keeper}:${params.mode.kind}:${params.operationId}`
+
+  const headers: Record<string, string> = {
+    Accept: 'text/event-stream',
+    'Content-Type': 'application/json',
+  }
+  const session = authSession.peek()
+  if (session.kind === 'multi_account_signed_in') {
+    const csrf = getActiveCsrfToken()
+    if (csrf) headers['x-masc-csrf-token'] = csrf
+  } else {
+    const token = getSingleUserToken()
+    if (token) headers.Authorization = `Bearer ${token}`
+  }
+
+  let runPromise: Promise<{ readonly terminal: boolean; readonly error: string | null }> | null = null
+
+  const handle = acquireViewStream(streamKey, (slotSignal) => {
+    // Guard against visibilitychange re-POSTing a mutation; if hidden aborted
+    // the stream, caller recovers from /chat/events journal instead.
+    if (runPromise !== null) return
+    const controller = new AbortController()
+    const abortMerged = () => controller.abort(slotSignal.aborted ? slotSignal.reason : params.signal?.reason)
+    slotSignal.addEventListener('abort', abortMerged, { once: true })
+    params.signal?.addEventListener('abort', abortMerged, { once: true })
+    const unsubEpoch = sessionEpoch.subscribe((ep) => {
+      if (ep !== startEpoch && !controller.signal.aborted) {
+        controller.abort('session_epoch_changed')
+      }
+    })
+
+    runPromise = (async () => {
+      try {
+        const res = await fetchImpl(resolveWorkspaceUrl('/api/v1/keepers/chat/stream'), {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers,
+          body: JSON.stringify(buildChatStreamRequestBody(params)),
+          signal: controller.signal,
+        })
+
+        if (!isEpochCurrent(startEpoch)) {
+          return { terminal: false, error: 'session_epoch_changed' }
+        }
+        if (!res.ok) {
+          const txt = await res.text().catch(() => `HTTP ${res.status}`)
+          const msg = txt.trim() || `HTTP ${res.status}`
+          params.callbacks.onError?.(msg)
+          return { terminal: true, error: msg }
+        }
+        if (!res.body) {
+          return { terminal: false, error: '스트림 본문 없음' }
+        }
+
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buf = ''
+        let terminal = false
+
+        const handleFrame = (rawFrame: string) => {
+          if (!isEpochCurrent(startEpoch) || controller.signal.aborted) return
+          const dataLines = rawFrame
+            .split(/\r?\n/)
+            .filter((l) => l.startsWith('data:'))
+            .map((l) => l.slice(5).trimStart())
+          if (dataLines.length === 0) return
+          let parsed: unknown
+          try {
+            parsed = JSON.parse(dataLines.join('\n'))
+          } catch {
+            return
+          }
+          if (!isRecord(parsed)) return
+          const type = asStr(parsed.type)
+          if (type === 'RUN_STARTED') {
+            params.callbacks.onRunStarted?.()
+          } else if (type === 'TEXT_MESSAGE_CONTENT' && typeof parsed.delta === 'string') {
+            params.callbacks.onTextDelta?.(parsed.delta)
+          } else if (type === 'TOOL_CALL_START') {
+            params.callbacks.onToolStart?.(asStr(parsed.toolCallName) ?? 'tool')
+          } else if (type === 'RUN_FINISHED') {
+            terminal = true
+            params.callbacks.onFinished?.()
+          } else if (type === 'RUN_ERROR') {
+            terminal = true
+            params.callbacks.onError?.(asStr(parsed.message) ?? 'Turn error')
+          } else if (type === 'CUSTOM') {
+            const name = asStr(parsed.name)
+            const val = isRecord(parsed.value) ? parsed.value : null
+            if (name === 'KEEPER_RUNTIME_ATTEMPT_STARTED') {
+              params.callbacks.onAttemptStarted?.()
+            } else if (name === 'KEEPER_THINKING_DELTA' && val && typeof val.delta === 'string') {
+              params.callbacks.onThinkingDelta?.(val.delta)
+            } else if (name === 'KEEPER_CHAT_OPERATION_ACCEPTED' && val) {
+              const state = asStr(val.state) ?? 'Queued'
+              const inter = isRecord(val.interactive) ? val.interactive : null
+              params.callbacks.onAccepted?.({
+                operationId: asStr(val.operation_id) ?? params.operationId,
+                state,
+                queuedCount: asNum(val.queued_count) ?? 0,
+                controlToken: inter ? asStr(inter.chat_control_token) : null,
+              })
+              if (state === 'Succeeded' || state === 'Failed' || state === 'Cancelled') {
+                terminal = true
+                params.callbacks.onFinished?.()
+              }
+            } else if (name === 'KEEPER_REPLY_DETAILS' && val && typeof val.reply === 'string') {
+              params.callbacks.onReplyDetails?.(val.reply, asStr(val.turn_ref))
+            }
+          }
+        }
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            if (!isEpochCurrent(startEpoch) || controller.signal.aborted) break
+            buf += decoder.decode(value, { stream: true })
+            const parts = buf.split(/\r?\n\r?\n/)
+            buf = parts.pop() ?? ''
+            for (const frame of parts) {
+              handleFrame(frame)
+              if (terminal) break
+            }
+            if (terminal) break
+          }
+          if (!terminal && buf.trim() && isEpochCurrent(startEpoch) && !controller.signal.aborted) {
+            handleFrame(buf)
+          }
+        } finally {
+          try {
+            await reader.cancel()
+          } catch { /* ignore */ }
+          reader.releaseLock()
+        }
+
+        return { terminal, error: null }
+      } catch (cause) {
+        const msg = cause instanceof Error ? cause.message : String(cause)
+        return { terminal: false, error: msg }
+      } finally {
+        unsubEpoch()
+        slotSignal.removeEventListener('abort', abortMerged)
+        params.signal?.removeEventListener('abort', abortMerged)
+      }
+    })()
+
+    return () => {
+      if (!controller.signal.aborted) controller.abort('view_stream_released')
+    }
+  })
+
+  try {
+    if (!runPromise) {
+      return { terminal: false, error: 'tab_hidden' }
+    }
+    return await runPromise
+  } finally {
+    handle.release()
+  }
+}
+
+/**
+ * Sends raw binary audio bytes with `Content-Type: <mimeType>` to
+ * `POST /api/v1/voice/transcribe` (matching `server_routes_http_routes_voice.ml:117-154`).
+ */
+export async function transcribeVoiceAudio(
+  audioBytes: ArrayBuffer | Blob | Uint8Array,
+  mimeType: string,
+  opts: { readonly signal?: AbortSignal; readonly fetchImpl?: typeof fetch } = {},
+): Promise<Result<string, ApiError>> {
+  const fetchImpl = opts.fetchImpl ?? globalThis.fetch
+  const startEpoch = currentSessionEpoch()
+  const controller = new AbortController()
+  const onAbort = () => controller.abort(opts.signal?.reason)
+  if (opts.signal) {
+    if (opts.signal.aborted) {
+      return err({ kind: 'aborted', status: null, code: null, message: 'Aborted', retryable: false })
+    }
+    opts.signal.addEventListener('abort', onAbort, { once: true })
+  }
+  const unsubEpoch = sessionEpoch.subscribe((ep) => {
+    if (ep !== startEpoch) controller.abort('epoch_stale')
+  })
+
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    'Content-Type': mimeType && mimeType.trim() ? mimeType.trim() : 'audio/webm',
+  }
+  const session = authSession.peek()
+  if (session.kind === 'multi_account_signed_in') {
+    const csrf = getActiveCsrfToken()
+    if (csrf) headers['x-masc-csrf-token'] = csrf
+  } else {
+    const token = getSingleUserToken()
+    if (token) headers.Authorization = `Bearer ${token}`
+  }
+
+  try {
+    const bodyInit: BodyInit = audioBytes instanceof Uint8Array
+      ? new Uint8Array(audioBytes)
+      : audioBytes
+    const res = await fetchImpl(resolveWorkspaceUrl('/api/v1/voice/transcribe'), {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers,
+      body: bodyInit,
+      signal: controller.signal,
+    })
+    if (!isEpochCurrent(startEpoch)) {
+      return err({ kind: 'epoch_stale', status: null, code: 'epoch_stale', message: 'Session epoch changed', retryable: false })
+    }
+    const raw: unknown = await res.json().catch(() => null)
+    if (!res.ok) {
+      const msg = isRecord(raw) && typeof raw.error === 'string' ? raw.error : `HTTP ${res.status}`
+      return err({ kind: res.status >= 500 ? 'server' : 'validation', status: res.status, code: null, message: msg, retryable: res.status >= 500 })
+    }
+    const text = isRecord(raw) && typeof raw.text === 'string'
+      ? raw.text
+      : isRecord(raw) && typeof raw.transcript === 'string'
+        ? raw.transcript
+        : ''
+    return ok(text)
+  } catch (cause) {
+    if (!isEpochCurrent(startEpoch)) {
+      return err({ kind: 'epoch_stale', status: null, code: 'epoch_stale', message: 'Session epoch changed', retryable: false, cause })
+    }
+    return err({
+      kind: controller.signal.aborted ? 'aborted' : 'network',
+      status: null,
+      code: null,
+      message: cause instanceof Error ? cause.message : String(cause),
+      retryable: !controller.signal.aborted,
+      cause,
+    })
+  } finally {
+    unsubEpoch()
+    opts.signal?.removeEventListener('abort', onAbort)
+  }
+}
+
+// ── Debug Companion: Turn Records, Tool Calls, Prompt, Provider Input, Raw Traces, Checkpoints ──
+
+function decodePromptBlock(b: unknown): TurnRecordPromptBlock | null {
+  if (!isRecord(b)) return null
+  return {
+    block: asStr(b.block) ?? asStr(b.id) ?? 'block',
+    bytes: asNum(b.bytes) ?? 0,
+    digest: asStr(b.digest) ?? '',
+  }
+}
+
+function decodePromptBlocks(raw: unknown): TurnRecordPromptBlock[] {
+  if (!Array.isArray(raw)) return []
+  const out: TurnRecordPromptBlock[] = []
+  for (const b of raw) {
+    const decoded = decodePromptBlock(b)
+    if (decoded) out.push(decoded)
+  }
+  return out
+}
+
+function decodeChangedPromptBlocks(raw: unknown): { readonly prev: TurnRecordPromptBlock; readonly next: TurnRecordPromptBlock }[] {
+  if (!Array.isArray(raw)) return []
+  const out: { readonly prev: TurnRecordPromptBlock; readonly next: TurnRecordPromptBlock }[] = []
+  for (const item of raw) {
+    if (!isRecord(item)) continue
+    const prev = decodePromptBlock(item.prev)
+    const next = decodePromptBlock(item.next)
+    if (prev && next) out.push({ prev, next })
+  }
+  return out
+}
+
+export function fetchKeeperTurnRecordsApi(keeper: string, limit = 60): Promise<Result<KeeperTurnRecordsData, ApiError>> {
+  return apiGet<KeeperTurnRecordsData>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/turn-records?limit=${limit}`,
+    {
+      decode: (raw) => {
+        const rec = isRecord(raw) ? raw : {}
+        const rawEntries = Array.isArray(rec.entries) ? rec.entries : []
+        const entries: KeeperTurnRecordsData['entries'][number][] = []
+        for (const e of rawEntries) {
+          if (!isRecord(e) || !isRecord(e.record)) continue
+          const r = e.record
+          const refRaw = isRecord(r.raw_trace_run_ref) ? r.raw_trace_run_ref : null
+          const item: TurnRecordItem = {
+            trace_id: asStr(r.trace_id) ?? '',
+            absolute_turn: asNum(r.absolute_turn) ?? 0,
+            turn_ref: asStr(r.turn_ref) ?? '',
+            turn_kind: r.turn_kind === 'direct' ? 'direct' : 'autonomous',
+            runtime_profile: asStr(r.runtime_profile) ?? 'default',
+            selected_model: asStr(r.selected_model) ?? undefined,
+            finish_reason: asStr(r.finish_reason) ?? undefined,
+            context_window: asNum(r.context_window) ?? undefined,
+            provider_context_window: asNum(r.provider_context_window) ?? undefined,
+            request_latency_ms: asNum(r.request_latency_ms) ?? undefined,
+            ttfrc_ms: asNum(r.ttfrc_ms) ?? undefined,
+            input_tokens: asNum(r.input_tokens) ?? undefined,
+            cache_creation_input_tokens: asNum(r.cache_creation_input_tokens) ?? undefined,
+            cache_read_input_tokens: asNum(r.cache_read_input_tokens) ?? undefined,
+            output_tokens: asNum(r.output_tokens) ?? undefined,
+            ts: asNum(r.ts) ?? 0,
+            blocks: decodePromptBlocks(r.blocks),
+            raw_trace_run_ref: refRaw && asStr(refRaw.path)
+              ? {
+                  worker_run_id: asStr(refRaw.worker_run_id) ?? '',
+                  path: asStr(refRaw.path)!,
+                  start_seq: asNum(refRaw.start_seq) ?? 0,
+                  end_seq: asNum(refRaw.end_seq) ?? 0,
+                }
+              : null,
+          }
+          const diffRaw = isRecord(e.diff_vs_prev) ? e.diff_vs_prev : null
+          entries.push({
+            record: item,
+            diff_vs_prev: diffRaw
+              ? {
+                  added: decodePromptBlocks(diffRaw.added),
+                  removed: decodePromptBlocks(diffRaw.removed),
+                  changed: decodeChangedPromptBlocks(diffRaw.changed),
+                }
+              : null,
+          })
+        }
+        return {
+          keeper: asStr(rec.keeper) ?? keeper,
+          count: asNum(rec.count) ?? entries.length,
+          live_turn_in_progress: rec.live_turn_in_progress === true,
+          health: asStr(rec.health) ?? 'unknown',
+          entries,
+        }
+      },
+    },
+  )
+}
+
+export function fetchKeeperToolCallsApi(keeper: string, limit = 50): Promise<Result<KeeperToolCallsData, ApiError>> {
+  return apiGet<KeeperToolCallsData>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/tool-calls?limit=${limit}`,
+    {
+      decode: (raw) => {
+        const rec = isRecord(raw) ? raw : {}
+        const list = Array.isArray(rec.entries) ? rec.entries : []
+        const entries: KeeperToolCallEntry[] = []
+        for (const item of list) {
+          if (!isRecord(item)) continue
+          const rk = item.record_kind
+          entries.push({
+            ts: asNum(item.ts) ?? 0,
+            record_kind: rk === 'composition_run' || rk === 'lifecycle_event' ? rk : 'tool_call',
+            keeper: asStr(item.keeper) ?? keeper,
+            tool: asStr(item.tool) ?? 'unknown',
+            duration_ms: asNum(item.duration_ms) ?? 0,
+            wire_outcome: asStr(item.wire_outcome) ?? 'unknown',
+            disposition:
+              item.disposition === 'completed' || item.disposition === 'deferred' || item.disposition === 'failed'
+                ? item.disposition
+                : undefined,
+            failure_class: asStr(item.failure_class) ?? undefined,
+            execution_id: asStr(item.execution_id) ?? undefined,
+            trace_id: asStr(item.trace_id) ?? undefined,
+            turn: asNum(item.turn) ?? undefined,
+            task_id: asStr(item.task_id) ?? undefined,
+            model: asStr(item.model) ?? undefined,
+            result_bytes: asNum(item.result_bytes) ?? undefined,
+            input: item.input,
+            output: item.output,
+          })
+        }
+        return {
+          keeper: asStr(rec.keeper) ?? keeper,
+          count: asNum(rec.count) ?? entries.length,
+          health: asStr(rec.health) ?? 'unknown',
+          entries,
+        }
+      },
+    },
+  )
+}
+
+export function fetchKeeperToolStatsApi(keeper: string, windowHours = 24): Promise<Result<KeeperToolStatsData, ApiError>> {
+  return apiGet<KeeperToolStatsData>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/tool-stats?window_hours=${windowHours}`,
+    {
+      decode: (raw) => {
+        const rec = isRecord(raw) ? raw : {}
+        const toolsRaw = Array.isArray(rec.tools) ? rec.tools : []
+        const tools = toolsRaw.filter(isRecord).map((t) => ({
+          name: asStr(t.name) ?? 'unknown',
+          call_count: asNum(t.call_count) ?? 0,
+          success_count: asNum(t.success_count) ?? 0,
+          failure_count: asNum(t.failure_count) ?? 0,
+          avg_duration_ms: asNum(t.avg_duration_ms) ?? 0,
+          p95_duration_ms: asNum(t.p95_duration_ms) ?? 0,
+        }))
+        return {
+          keeper: asStr(rec.keeper) ?? keeper,
+          window_hours: asNum(rec.window_hours) ?? windowHours,
+          total_entries: asNum(rec.total_entries) ?? 0,
+          tools,
+        }
+      },
+    },
+  )
+}
+
+export function fetchKeeperLastPromptApi(keeper: string): Promise<Result<KeeperLastPromptData, ApiError>> {
+  return apiGet<KeeperLastPromptData>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/last-prompt`,
+    {
+      decode: (raw) => {
+        const rec = isRecord(raw) ? raw : {}
+        const blocks = Array.isArray(rec.blocks)
+          ? rec.blocks.filter(isRecord).map((b) => ({
+              id: asStr(b.id) ?? 'block',
+              bytes: asNum(b.bytes) ?? 0,
+              text: typeof b.text === 'string' ? b.text : '',
+            }))
+          : []
+        return {
+          keeper: asStr(rec.keeper) ?? keeper,
+          captured_at: asNum(rec.captured_at) ?? 0,
+          trace_id: asStr(rec.trace_id) ?? '',
+          absolute_turn: asNum(rec.absolute_turn) ?? 0,
+          assembled: typeof rec.assembled === 'string' ? rec.assembled : null,
+          assembled_bytes: asNum(rec.assembled_bytes) ?? 0,
+          system_prompt: typeof rec.system_prompt === 'string' ? rec.system_prompt : null,
+          blocks,
+        }
+      },
+    },
+  )
+}
+
+export function fetchKeeperProviderInputApi(keeper: string, turnRef: string): Promise<Result<ProviderInputData, ApiError>> {
+  return apiGet<ProviderInputData>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/provider-input?turn_ref=${encodeURIComponent(turnRef)}`,
+    {
+      decode: (raw) => {
+        const rec = isRecord(raw) ? raw : {}
+        const wire = isRecord(rec.wire) ? rec.wire : {}
+        const parts: ProviderInputPartSummary[] = Array.isArray(rec.parts)
+          ? rec.parts.filter(isRecord).map((p, idx) => ({
+              index: asNum(p.index) ?? idx,
+              kind:
+                p.kind === 'system_prompt' || p.kind === 'tool_schema'
+                  ? p.kind
+                  : 'message',
+              role: asStr(p.role) ?? undefined,
+              name: asStr(p.name) ?? undefined,
+              bytes: asNum(p.bytes) ?? 0,
+              sha256: asStr(p.sha256) ?? '',
+            }))
+          : []
+        return {
+          keeper: asStr(rec.keeper) ?? keeper,
+          turn_ref: asStr(rec.turn_ref) ?? turnRef,
+          runtime_profile: asStr(rec.runtime_profile) ?? '',
+          wire: {
+            provider: asStr(wire.provider) ?? 'unknown',
+            model: asStr(wire.model) ?? 'unknown',
+            http_codec: asStr(wire.http_codec) ?? '',
+            body_bytes: asNum(wire.body_bytes) ?? 0,
+          },
+          parts,
+        }
+      },
+    },
+  )
+}
+
+export function fetchKeeperRawTracesApi(keeper: string, limit = 15): Promise<Result<readonly RawTraceTurnItem[], ApiError>> {
+  return apiGet<readonly RawTraceTurnItem[]>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/raw-traces?limit=${limit}`,
+    {
+      decode: (raw) => {
+        const list = isRecord(raw) && Array.isArray(raw.turns) ? raw.turns : []
+        return list.filter(isRecord).map((t) => {
+          const census = isRecord(t.census) ? t.census : null
+          return {
+            file: asStr(t.file) ?? '',
+            trace_id: asStr(t.trace_id),
+            bytes: asNum(t.bytes) ?? 0,
+            records: census && census.state === 'whole_file' ? asNum(census.records) : null,
+            modified_at: asNum(t.modified_at) ?? 0,
+          }
+        }).filter((t) => t.file.length > 0)
+      },
+    },
+  )
+}
+
+export function fetchKeeperRawTracePageApi(keeper: string, file: string, limit = 30) {
+  const qs = new URLSearchParams({ file, limit: String(limit) })
+  return apiGet<Record<string, unknown>>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/raw-trace?${qs.toString()}`,
+  )
+}
+
+export function fetchKeeperCheckpointsApi(keeper: string): Promise<Result<CheckpointInventoryData, ApiError>> {
+  return apiGet<CheckpointInventoryData>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/checkpoints`,
+    {
+      decode: (raw) => {
+        const rec = isRecord(raw) ? raw : {}
+        const mapSnap = (s: unknown) => {
+          if (!isRecord(s)) return null
+          const sid = asStr(s.snapshot_id)
+          if (!sid) return null
+          return {
+            snapshot_id: sid,
+            message_count: asNum(s.message_count) ?? 0,
+            created_at: asNum(s.created_at) ?? 0,
+            latest_preview: asStr(s.latest_preview),
+          }
+        }
+        const st = rec.current_status
+        return {
+          keeper: asStr(rec.keeper) ?? keeper,
+          trace_id: asStr(rec.trace_id) ?? '',
+          current_status: st === 'available' || st === 'unavailable' ? st : 'missing',
+          current: mapSnap(rec.current),
+          history: Array.isArray(rec.history)
+            ? rec.history.map(mapSnap).filter((x): x is NonNullable<typeof x> => x !== null)
+            : [],
+        }
+      },
+    },
+  )
+}
+
+// ── Memory OS 3-Way Discriminated Parser (#36) & Recovery Actions ────────
+
+export function parseOrdinaryMemoryBranch(raw: unknown): OrdinaryMemoryBranch {
+  if (!isRecord(raw)) return { state: 'read_error', read_error: 'invalid_ordinary_memory_payload' }
+  if (typeof raw.read_error === 'string' && raw.read_error.trim().length > 0) {
+    return { state: 'read_error', read_error: raw.read_error }
+  }
+  if (raw.present === false) {
+    return { state: 'absent' }
+  }
+  if (raw.present === true) {
+    const facts = Array.isArray(raw.facts)
+      ? raw.facts.filter(isRecord).map((f) => ({
+          memory_id: asStr(f.memory_id) ?? '',
+          claim: typeof f.claim === 'string' ? f.claim : '',
+          category: asStr(f.category) ?? 'general',
+          first_seen: asNum(f.first_seen) ?? 0,
+          last_seen: asNum(f.last_seen) ?? 0,
+        }))
+      : []
+    const supportInvalidations = Array.isArray(raw.support_invalidations)
+      ? raw.support_invalidations.filter(isRecord).map((inv) => ({
+          memory_id: asStr(inv.memory_id) ?? '',
+          claim: typeof inv.claim === 'string' ? inv.claim : '',
+          missing_premise_ids: Array.isArray(inv.missing_premise_ids)
+            ? inv.missing_premise_ids.filter((x): x is string => typeof x === 'string')
+            : [],
+        }))
+      : []
+    return {
+      state: 'present',
+      revision: asNum(raw.revision) ?? 0,
+      snapshot_sha256: asStr(raw.snapshot_sha256) ?? '',
+      updated_at: asNum(raw.updated_at) ?? 0,
+      facts,
+      support_invalidations: supportInvalidations,
+    }
+  }
+  return { state: 'read_error', read_error: 'unrecognized_ordinary_memory_discriminant' }
+}
+
+export function parseSourceBoundMemoryBranch(raw: unknown): SourceBoundMemoryBranch {
+  if (!isRecord(raw)) return { state: 'read_error', read_error: 'invalid_source_bound_payload' }
+  if (typeof raw.read_error === 'string' && raw.read_error.trim().length > 0) {
+    return { state: 'read_error', read_error: raw.read_error }
+  }
+  if (raw.present === false) {
+    return { state: 'absent' }
+  }
+  if (raw.present === true) {
+    const facts = Array.isArray(raw.facts)
+      ? raw.facts.filter(isRecord).map((f) => ({
+          claim: typeof f.claim === 'string' ? f.claim : '',
+          first_seen: asNum(f.first_seen) ?? 0,
+          path: asStr(f.path) ?? '',
+          sha256: asStr(f.sha256) ?? '',
+        }))
+      : []
+    const invalidations = Array.isArray(raw.invalidations)
+      ? raw.invalidations.filter(isRecord).map((inv) => ({
+          source_path: asStr(inv.source_path) ?? '',
+          invalidated_at: asNum(inv.invalidated_at) ?? 0,
+          reason: asStr(inv.reason) ?? 'source_changed',
+        }))
+      : []
+    return {
+      state: 'present',
+      revision: asNum(raw.revision) ?? 0,
+      updated_at: asNum(raw.updated_at) ?? 0,
+      facts,
+      invalidations,
+    }
+  }
+  return { state: 'read_error', read_error: 'unrecognized_source_bound_discriminant' }
+}
+
+export function decodeKeeperMemoryFacts(raw: unknown, keeper: string): KeeperMemoryFactsData {
+  const rec = isRecord(raw) ? raw : {}
+  return {
+    keeper: asStr(rec.keeper) ?? keeper,
+    ordinary: parseOrdinaryMemoryBranch(rec.ordinary),
+    source_bound: parseSourceBoundMemoryBranch(rec.source_bound),
+    events_unreadable_lines: asNum(rec.events_unreadable_lines) ?? 0,
+    events_read_error: asStr(rec.events_read_error),
+  }
+}
+
+export function fetchKeeperMemoryFactsApi(keeper: string): Promise<Result<KeeperMemoryFactsData, ApiError>> {
+  return apiGet<KeeperMemoryFactsData>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/memory-facts`,
+    { decode: (raw) => decodeKeeperMemoryFacts(raw, keeper) },
+  )
+}
+
+export function fetchKeeperMemoryOsInternalsApi(keeper: string): Promise<Result<KeeperMemoryOsInternalsData, ApiError>> {
+  return apiGet<KeeperMemoryOsInternalsData>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/memory-os-internals`,
+    {
+      decode: (raw) => {
+        const rec = isRecord(raw) ? raw : {}
+        const comp = isRecord(rec.compaction) ? rec.compaction : {}
+        const canon = isRecord(rec.canonical_turns) ? rec.canonical_turns : {}
+        const dig = isRecord(rec.memory_digest) ? rec.memory_digest : {}
+        const molt = isRecord(rec.librarian_molt) ? rec.librarian_molt : {}
+        const availableActs = Array.isArray(molt.available_acts)
+          ? molt.available_acts.map((a) => (typeof a === 'string' ? a : isRecord(a) ? (asStr(a.action) ?? JSON.stringify(a)) : String(a)))
+          : []
+        return {
+          keeper: asStr(rec.keeper) ?? keeper,
+          compaction: {
+            present: comp.present === true,
+            epoch_count: asNum(comp.epoch_count) ?? 0,
+            archived_turns_count: asNum(comp.archived_turns_count) ?? 0,
+            anchor_bytes: asNum(comp.anchor_bytes) ?? 0,
+            latest_epoch_id: asNum(comp.latest_epoch_id),
+            verified_facts_count: asNum(comp.verified_facts_count) ?? 0,
+            decisions_count: asNum(comp.decisions_count) ?? 0,
+            open_threads_count: asNum(comp.open_threads_count) ?? 0,
+            read_error: asStr(comp.read_error),
+          },
+          canonical_turns: {
+            present: canon.present === true,
+            turn_count: asNum(canon.turn_count) ?? 0,
+            latest_turn_id: asStr(canon.latest_turn_id),
+            compaction_watermark_seq: asNum(canon.compaction_watermark_seq),
+            compaction_watermark_epoch: asNum(canon.compaction_watermark_epoch),
+            history_resets_count: asNum(canon.history_resets_count) ?? 0,
+            read_error: asStr(canon.read_error),
+          },
+          memory_digest: {
+            present: dig.present === true,
+            revision: asNum(dig.revision),
+            digest_sha256: asStr(dig.digest_sha256),
+            bytes: asNum(dig.bytes) ?? 0,
+            fact_count: asNum(dig.fact_count) ?? 0,
+            derived_count: asNum(dig.derived_count) ?? 0,
+          },
+          librarian_molt: {
+            writer_kind: asStr(molt.writer_kind) ?? 'unknown',
+            writer_state: molt.writer_state ?? null,
+            pending_molt: molt.pending_molt ?? null,
+            available_acts: availableActs,
+          },
+        }
+      },
+    },
+  )
+}
+
+export function fetchKeeperMemoryJournalApi(keeper: string, limit = 50): Promise<Result<KeeperMemoryJournalData, ApiError>> {
+  return apiGet<KeeperMemoryJournalData>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/memory-journal?activity=1&limit=${limit}`,
+    {
+      decode: (raw) => {
+        const rec = isRecord(raw) ? raw : {}
+        const entries: KeeperMemoryJournalEntry[] = Array.isArray(rec.entries)
+          ? rec.entries.filter(isRecord).map((e) => {
+              const source = isRecord(e.source) ? e.source : null
+              const change = isRecord(e.change) ? e.change : null
+              return {
+                structural_id: asStr(e.structural_id) ?? '',
+                ok: e.ok === true,
+                error: asStr(e.error) ?? undefined,
+                recorded_at: asNum(e.recorded_at) ?? undefined,
+                revision: asNum(e.revision) ?? undefined,
+                source_kind: source ? (asStr(source.kind) ?? undefined) : undefined,
+                added: change ? (asNum(change.added) ?? 0) : undefined,
+                removed: change ? (asNum(change.removed) ?? 0) : undefined,
+                retained: change ? (asNum(change.retained) ?? 0) : undefined,
+                invalidated: change ? (asNum(change.invalidated) ?? 0) : undefined,
+              }
+            })
+          : []
+        const actRaw = isRecord(rec.activity) ? rec.activity : null
+        const activity = actRaw
+          ? {
+              events: Array.isArray(actRaw.events)
+                ? actRaw.events.filter(isRecord).map((ev) => ({
+                    identity: asStr(ev.identity) ?? '',
+                    recorded_at: asNum(ev.recorded_at) ?? 0,
+                    revision: asNum(ev.revision) ?? 0,
+                    kind: asStr(ev.kind) ?? 'unknown',
+                    reason: asStr(ev.reason),
+                  }))
+                : [],
+              notes: Array.isArray(actRaw.notes)
+                ? actRaw.notes.filter((n): n is string => typeof n === 'string')
+                : [],
+            }
+          : null
+        return {
+          keeper: asStr(rec.keeper) ?? keeper,
+          returned: asNum(rec.returned) ?? entries.length,
+          undecodable_lines: asNum(rec.undecodable_lines) ?? 0,
+          entries,
+          activity,
+        }
+      },
+    },
+  )
+}
+
+export function postKeeperMemoryAct(keeper: string, payload: MemoryActPayload) {
+  return apiMutate<Record<string, unknown>>(
+    'POST',
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/memory/act`,
+    payload,
+  )
+}
+
+export function postKeeperMemoryRetractions(
+  keeper: string,
+  retractions: readonly { readonly memory_id: string; readonly reason: string }[],
+  planId = `dashboard-retract-${randomUuid()}`,
+) {
+  return apiMutate<Record<string, unknown>>(
+    'POST',
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/memory/retractions`,
+    {
+      plan_id: planId,
+      retractions,
+    },
+  )
+}
+
+// ── Portrait & Candle (V2Envelope + Flat /items + MCP purchase/equip) ────
+
+export function fetchKeeperCandleLedgerApi(keeper: string, limit = 100): Promise<Result<KeeperCandleLedgerData, ApiError>> {
+  return apiGetV2<KeeperCandleLedgerData>(
+    `/api/v1/candle/ledger?keeper=${encodeURIComponent(keeper)}&limit=${limit}`,
+    {
+      decode: (raw) => {
+        const rec = isRecord(raw) ? raw : {}
+        const policy = isRecord(rec.policy) ? rec.policy : {}
+        const halfLife = isRecord(policy.half_life) ? policy.half_life : {}
+        const supply = isRecord(rec.supply) ? rec.supply : {}
+        const strMilli = (v: unknown) =>
+          typeof v === 'string' && v.trim() ? v.trim() : typeof v === 'number' ? String(Math.trunc(v)) : '0'
+        const balances = Array.isArray(rec.balances) ? rec.balances.filter(isRecord) : []
+        const balRaw = balances.find((b) => asStr(b.keeper) === keeper) ?? balances[0] ?? null
+        const eqRaw = balRaw && isRecord(balRaw.equipped) ? balRaw.equipped : {}
+        const balance: CandleBalanceRow | null = balRaw
+          ? {
+              keeper: asStr(balRaw.keeper) ?? keeper,
+              balance_milli: asNum(balRaw.balance_milli) ?? 0,
+              decayed_milli: strMilli(balRaw.decayed_milli),
+              last_event_unix: asNum(balRaw.last_event_unix),
+              owned_items: Array.isArray(balRaw.owned_items)
+                ? balRaw.owned_items.filter((x): x is string => typeof x === 'string')
+                : [],
+              equipped: {
+                face: asStr(eqRaw.face),
+                neck: asStr(eqRaw.neck),
+                head: asStr(eqRaw.head),
+                hand: asStr(eqRaw.hand),
+                base: asStr(eqRaw.base),
+              },
+            }
+          : null
+
+        const recentEvents: CandleLedgerEventRow[] = Array.isArray(rec.recent_events)
+          ? rec.recent_events.filter(isRecord).map((ev) => ({
+              seq: asNum(ev.seq) ?? 0,
+              at_unix: asNum(ev.at_unix) ?? 0,
+              at_rfc3339: asStr(ev.at_rfc3339) ?? '',
+              kind: asStr(ev.kind) ?? 'event',
+              summary:
+                asStr(ev.item)
+                  ?? asStr(ev.goal_id)
+                  ?? (typeof ev.amount_milli === 'string' || typeof ev.amount_milli === 'number'
+                    ? `${strMilli(ev.amount_milli)} mC`
+                    : asStr(ev.reason) ?? ''),
+            }))
+          : []
+
+        const cfg = policy.configuration
+        return {
+          ledger_state: rec.ledger_state === 'present' ? 'present' : 'missing',
+          total_events: asNum(rec.total_events) ?? 0,
+          policy_configuration: cfg === 'enabled' ? 'enabled' : cfg === 'disabled' ? 'disabled' : 'off',
+          disabled_reason: asStr(policy.disabled_reason),
+          pricing_mode: asStr(policy.pricing_mode) ?? 'off',
+          half_life_hours: asNum(halfLife.half_life_hours),
+          supply: {
+            issued_milli: strMilli(supply.issued_milli),
+            burned_milli: strMilli(supply.burned_milli),
+            circulating_milli: strMilli(supply.circulating_milli),
+          },
+          balance,
+          recent_events: recentEvents,
+        }
+      },
+    },
+  )
+}
+
+export function fetchKeeperItemsApi(keeper: string): Promise<Result<KeeperItemsData, ApiError>> {
+  return apiGet<KeeperItemsData>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/items`,
+    {
+      decode: (raw) => {
+        const rec = isRecord(raw) ? raw : {}
+        const status = rec.status === 'ready' ? 'ready' : rec.status === 'disabled' ? 'disabled' : 'off'
+        const catalog: KeeperCatalogItem[] = Array.isArray(rec.catalog)
+          ? rec.catalog.filter(isRecord).map((c) => {
+              const slotRaw = asStr(c.slot)
+              const slot: PortraitSlot =
+                slotRaw === 'face' || slotRaw === 'neck' || slotRaw === 'head' || slotRaw === 'hand' || slotRaw === 'base'
+                  ? slotRaw
+                  : 'head'
+              const priceStatus: KeeperCatalogItem['price_status'] =
+                c.price_status === 'priced' ? 'priced' : 'unpriced'
+              return {
+                id: asStr(c.id) ?? '',
+                slot,
+                price_status: priceStatus,
+                price_milli: typeof c.price_milli === 'string' ? c.price_milli : null,
+              }
+            }).filter((c) => c.id.length > 0)
+          : []
+        return {
+          status,
+          reason: asStr(rec.reason) ?? undefined,
+          account_revision: asStr(rec.account_revision),
+          balance_milli: typeof rec.balance_milli === 'string' ? rec.balance_milli : null,
+          owned_items: Array.isArray(rec.owned_items)
+            ? rec.owned_items.filter((x): x is string => typeof x === 'string')
+            : [],
+          catalog,
+        }
+      },
+    },
+  )
+}
+
+// Note: `keeper_candle_purchase` and `keeper_candle_equip` are Keeper-autonomous
+// tools guarded by server wallet policy (`lib/mcp_server_eio_execute.ml:510-519`);
+// operators cannot spoof a Keeper wallet over HTTP/MCP. Portrait try-on uses
+// `GET /api/v1/keepers/:name/portrait.png?size=256&preview=<item_id>`.
+
+// ── Work & Sandbox ───────────────────────────────────────────────────────
+
+export function fetchKeeperLinkedTasksApi(keeper: string): Promise<Result<readonly KeeperLinkedTask[], ApiError>> {
+  return apiGet<readonly KeeperLinkedTask[]>('/api/v1/dashboard/execution', {
+    decode: (raw) => {
+      const list = isRecord(raw) && Array.isArray(raw.tasks) ? raw.tasks : []
+      return list
+        .filter(isRecord)
+        .filter((t) => asStr(t.assignee) === keeper)
+        .map((t) => ({
+          id: asStr(t.id) ?? '',
+          title: asStr(t.title) ?? '',
+          status: asStr(t.status) ?? 'Todo',
+          priority: asNum(t.priority) ?? 0,
+          goal_id: asStr(t.goal_id),
+          updated_at: asStr(t.updated_at),
+        }))
+        .filter((t) => t.id.length > 0)
+    },
+  })
+}
+
+export function fetchKeeperOperatorNoteApi(keeper: string): Promise<Result<KeeperOperatorNoteData, ApiError>> {
+  return apiGet<KeeperOperatorNoteData>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/operator-note`,
+    {
+      decode: (raw) => {
+        const rec = isRecord(raw) ? raw : {}
+        const note = isRecord(rec.note) ? rec.note : {}
+        return {
+          keeper: asStr(rec.keeper) ?? keeper,
+          pending: rec.pending === true,
+          text: typeof note.text === 'string' ? note.text : '',
+          created_by: asStr(note.created_by) ?? '',
+          created_at: asNum(note.created_at) ?? 0,
+          consumed_turn: asNum(note.consumed_turn),
+        }
+      },
+    },
+  )
+}
+
+export function saveKeeperOperatorNoteApi(keeper: string, text: string): Promise<Result<KeeperOperatorNoteData, ApiError>> {
+  return apiMutate<KeeperOperatorNoteData>(
+    'POST',
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/operator-note`,
+    { text },
+    {
+      decode: (raw) => {
+        const rec = isRecord(raw) ? raw : {}
+        const note = isRecord(rec.note) ? rec.note : {}
+        return {
+          keeper: asStr(rec.keeper) ?? keeper,
+          pending: rec.pending === true,
+          text: typeof note.text === 'string' ? note.text : text,
+          created_by: asStr(note.created_by) ?? '',
+          created_at: asNum(note.created_at) ?? 0,
+          consumed_turn: asNum(note.consumed_turn),
+        }
+      },
+    },
+  )
+}
+
+export function fetchKeeperSandboxApi(keeper: string): Promise<Result<KeeperSandboxData, ApiError>> {
+  return apiGetV2<KeeperSandboxData>(
+    `/api/v1/infra/sandboxes/${encodeURIComponent(keeper)}`,
+    {
+      decode: (raw) => {
+        const rec = isRecord(raw) ? raw : {}
+        const probe = isRecord(rec.probe_state) ? rec.probe_state : {}
+        const sb = isRecord(rec.sandbox) ? rec.sandbox : {}
+        return {
+          keeper: asStr(rec.keeper) ?? keeper,
+          probe_kind: asStr(probe.kind) ?? 'unknown',
+          backend: asStr(sb.backend) ?? asStr(sb.kind) ?? asStr(sb.sandbox_profile) ?? 'observed',
+          summary: sb,
+        }
+      },
+    },
+  )
+}
+
+// ── Schema Config CAS & Secrets / OAuth Identity (#36) ───────────────────
+
+export function decodeConfigSchema(raw: unknown): ConfigSchemaData {
+  const rec = isRecord(raw) ? raw : {}
+  const categories: ConfigCategorySpec[] = Array.isArray(rec.categories)
+    ? rec.categories.filter(isRecord).map((c) => {
+        const fields: ConfigFieldSpec[] = Array.isArray(c.fields)
+          ? c.fields.filter(isRecord).map((f) => {
+              const rs = f.reload_scope
+              const reloadScope: ConfigReloadScope =
+                rs === 'hot_reload' || rs === 'restart_required' ? rs : 'next_turn'
+              return {
+                table: typeof f.table === 'string' ? f.table : '',
+                key: asStr(f.key) ?? '',
+                full_key: asStr(f.full_key) ?? '',
+                type: asStr(f.type) ?? 'string',
+                current_value: f.current_value,
+                default_value: f.default_value,
+                provenance: asStr(f.provenance) ?? 'default',
+                reload_scope: reloadScope,
+                secret: f.secret === true,
+                writable: f.writable !== false,
+                description: typeof f.description === 'string' ? f.description : '',
+                enum_values: Array.isArray(f.enum_values)
+                  ? f.enum_values.filter((x): x is string => typeof x === 'string')
+                  : undefined,
+                label: asStr(f.label) ?? undefined,
+              }
+            }).filter((f) => f.key.length > 0)
+          : []
+        return {
+          id: asStr(c.id) ?? 'general',
+          title: asStr(c.title) ?? 'General',
+          field_count: asNum(c.field_count) ?? fields.length,
+          fields,
+        }
+      })
+    : []
+  return {
+    target: asStr(rec.target) ?? '',
+    keeper: asStr(rec.keeper),
+    file_exists: rec.file_exists === true,
+    file_sha256: typeof rec.file_sha256 === 'string' ? rec.file_sha256 : '',
+    categories,
+  }
+}
+
+export function fetchConfigSchemaApi(target: string): Promise<Result<ConfigSchemaData, ApiError>> {
+  return apiGetV2<ConfigSchemaData>(
+    `/api/v1/config/schema?target=${encodeURIComponent(target)}`,
+    { decode: decodeConfigSchema },
+  )
+}
+
+export function postConfigPatchApi(params: {
+  readonly target: string
+  readonly keeperName?: string
+  readonly expectedSha256?: string
+  readonly dryRun: boolean
+  readonly changes: readonly ConfigPatchChange[]
+}): Promise<Result<ConfigPatchResult, ApiError>> {
+  const body: Record<string, unknown> = {
+    target: params.target,
+    dry_run: params.dryRun,
+    changes: params.changes,
+  }
+  if (params.keeperName) body.keeper_name = params.keeperName
+  if (params.expectedSha256) body.expected_sha256 = params.expectedSha256
+
+  return apiMutateV2<ConfigPatchResult>('POST', '/api/v1/config/patch', body, {
+    decode: (raw) => {
+      const rec = isRecord(raw) ? raw : {}
+      const rs = rec.reload_scope
+      const reloadScope: ConfigReloadScope =
+        rs === 'hot_reload' || rs === 'restart_required' ? rs : 'next_turn'
+      return {
+        applied: rec.applied === true,
+        dry_run: rec.dry_run !== false,
+        target: asStr(rec.target) ?? params.target,
+        changed: rec.changed === true,
+        before_sha256: typeof rec.before_sha256 === 'string' ? rec.before_sha256 : '',
+        new_sha256: typeof rec.new_sha256 === 'string' ? rec.new_sha256 : '',
+        snapshot_id: asStr(rec.snapshot_id),
+        reload_scope: reloadScope,
+        unified_diff: typeof rec.unified_diff === 'string' ? rec.unified_diff : '',
+        validation_warnings: Array.isArray(rec.validation_warnings)
+          ? rec.validation_warnings.filter((x): x is string => typeof x === 'string')
+          : [],
+      }
+    },
+  })
+}
+
+export function fetchKeeperAttachedProvidersApi(keeper: string): Promise<Result<readonly KeeperAttachedProvider[], ApiError>> {
+  return apiGet<readonly KeeperAttachedProvider[]>(
+    `/api/v1/keepers/oauth/attached-tools?keeper=${encodeURIComponent(keeper)}`,
+    {
+      decode: (raw) => {
+        const list = isRecord(raw) && Array.isArray(raw.providers) ? raw.providers : []
+        return list.filter(isRecord).map((p) => ({
+          provider: asStr(p.provider) ?? '',
+          provider_label: asStr(p.provider_label) ?? asStr(p.provider) ?? '',
+          attached: p.attached === true,
+          enabled: typeof p.enabled === 'boolean' ? p.enabled : undefined,
+          tools: Array.isArray(p.tools)
+            ? p.tools.filter((x): x is string => typeof x === 'string')
+            : undefined,
+          problem: asStr(p.problem) ?? undefined,
+          switch_problem: asStr(p.switch_problem) ?? undefined,
+        })).filter((p) => p.provider.length > 0)
+      },
+    },
+  )
+}
+
+export function setKeeperIdentitySwitchApi(keeper: string, provider: string, enabled: boolean) {
+  return apiMutate<unknown>(
+    'POST',
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/identity-switch`,
+    { provider, enabled },
+  )
+}
+
+export function refreshKeeperIdentityToolsApi(keeper: string, provider: string) {
+  return apiMutate<unknown>(
+    'POST',
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/identity-refresh`,
+    { provider },
+  )
+}
+
+export function startKeeperOAuthLoginApi(keeper: string, provider: string) {
+  return apiMutate<{ readonly authorize_url?: string }>(
+    'POST',
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/oauth-login`,
+    { provider },
+  )
+}
+
+export function mutateKeeperSecretApi(
+  keeper: string,
+  payload:
+    | { readonly action: 'set_env'; readonly scope: 'keeper' | 'shared'; readonly name: string; readonly value: string }
+    | { readonly action: 'delete_env'; readonly scope: 'keeper' | 'shared'; readonly name: string },
+) {
+  return apiMutate<unknown>(
+    'POST',
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/secrets`,
+    payload,
+  )
+}
+
+export { wrap }

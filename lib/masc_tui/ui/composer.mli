@@ -7,6 +7,7 @@
     {!Masc_tui_core.Glyph.Left_rail} ([▎]) accent when focused, Tier-4 italic
     placeholder hints, and elevated keycap send pill. *)
 
+module Glyph = Masc_tui_core.Glyph
 module Rect = Masc_tui_core.Rect
 module Say = Masc_tui_core.Say
 module Theme = Masc_tui_core.Theme
@@ -25,7 +26,8 @@ type pending_tx =
   | Tx_sending          (** 전송 중 / Sending *)
   | Tx_awaiting_turn    (** 처리 대기 / Awaiting turn *)
   | Tx_thinking         (** 추론 중… / Thinking… *)
-  | Tx_tool_running of string (** 도구 실행 · <tool> / Tool · <tool> *)
+  | Tx_tool_running of string
+  | Tx_tool_waiting of string
   | Tx_streaming        (** 생성 중… / Streaming… *)
   | Tx_turn_running of { kind : turn_running_kind; label : Say.t }
       (** 실행 중인 턴 관측 / Observed running turn *)
@@ -71,6 +73,7 @@ val equal_mode : mode -> mode -> bool
 val empty : target_keeper:string -> state
 
 val pending_tx_label : pending_tx -> Say.t option
+val pending_tx_badge : pending_tx -> (Glyph.t * Theme.status_token * Say.t) option
 (** Exact honest transmission state copy ([전송 대기] / [전송 중] / [처리 대기] /
     [확인 중]) per [tui-chat-design/SKILL.md], or [None] when {!Tx_idle}. *)
 
@@ -118,6 +121,7 @@ val draw_popup :
     [anchor], returning the painted popup rectangle (or [None] if closed). *)
 
 val draw :
+  ?show_pending_tx:bool ->
   Cell_grid.t ->
   rect:Rect.t ->
   theme:Theme.t ->

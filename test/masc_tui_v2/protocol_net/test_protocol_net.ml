@@ -3304,7 +3304,7 @@ let test_agui_chat_stream_and_history_provenance () =
       ()
   | _ -> Alcotest.fail "expected Chunk_tool_args");
   let tc_end =
-    expect_ok "TOOL_CALL_END without tool_name/ok preserves ok=None"
+    expect_ok "TOOL_CALL_END closes arguments before result settlement"
       (Wire_fleet.decode_chat_stream_chunk
          (parse_json
             {|{
@@ -3316,10 +3316,8 @@ let test_agui_chat_stream_and_history_provenance () =
             }|}))
   in
   (match tc_end with
-  | Wire_fleet.Chunk_tool_end
-      { tool_use_id = "scope-2-block-1"; tool_name = None; ok = None; _ } ->
-      ()
-  | _ -> Alcotest.fail "expected Chunk_tool_end with ok=None");
+  | Wire_fleet.Chunk_tool_block_end { tool_use_id = "scope-2-block-1"; _ } -> ()
+  | _ -> Alcotest.fail "argument end must leave the tool unsettled");
   let tool_res =
     expect_ok "CUSTOM KEEPER_TOOL_RESULT_READY"
       (Wire_fleet.decode_chat_stream_chunk
@@ -3348,10 +3346,15 @@ let test_agui_chat_stream_and_history_provenance () =
               "value": { "toolCallId": "nt-1", "toolCallName": "Bash", "toolStreamScope": 1, "toolCallBlockIndex": 0 }
             }|}))
   in
-  (match native_start with
-  | Wire_fleet.Chunk_tool_start { tool_use_id = "nt-1"; tool_name = "Bash"; _ } ->
-      ()
-  | _ -> Alcotest.fail "expected Chunk_tool_start from KEEPER_NATIVE_TOOL_START");
+  let native_occurrence =
+    match native_start with
+    | Wire_fleet.Chunk_tool_start
+        { tool_use_id; tool_name = "Bash"; stream_scope = Some 1; _ } ->
+        tool_use_id
+    | _ -> Alcotest.fail "expected scoped Chunk_tool_start from KEEPER_NATIVE_TOOL_START"
+  in
+  Alcotest.(check string) "native tool uses the stream occurrence when a provider ID is also present"
+    "scope-1-block-0" native_occurrence;
   let native_end =
     expect_ok "CUSTOM KEEPER_NATIVE_TOOL_END error_reported -> ok=Some false"
       (Wire_fleet.decode_chat_stream_chunk
@@ -3372,9 +3375,20 @@ let test_agui_chat_stream_and_history_provenance () =
   in
   (match native_end with
   | Wire_fleet.Chunk_tool_end
-      { tool_use_id = "nt-1"; tool_name = Some "Bash"; ok = Some false; _ } ->
-      ()
-  | _ -> Alcotest.fail "expected Chunk_tool_end with ok=Some false");
+      { tool_use_id; tool_name = Some "Bash"; ok = Some false; _ } ->
+      Alcotest.(check string) "native tool completion settles its original occurrence"
+        native_occurrence tool_use_id
+  | _ -> Alcotest.fail "expected native Chunk_tool_end with ok=Some false");
+  let provider_only =
+    expect_ok "native tool without occurrence coordinates"
+      (Wire_fleet.decode_chat_stream_chunk (parse_json
+         {|{"type":"CUSTOM","name":"KEEPER_NATIVE_TOOL_START",
+            "value":{"toolCallId":"nt-1","toolCallName":"Bash"}}|}))
+  in
+  (match provider_only with
+  | Wire_fleet.Chunk_tool_start { tool_use_id; stream_scope = None; _ } ->
+      Alcotest.(check string) "provider ID identifies an unscoped native tool" "nt-1" tool_use_id
+  | _ -> Alcotest.fail "expected unscoped native Chunk_tool_start");
   let reply_details =
     expect_ok "CUSTOM KEEPER_REPLY_DETAILS"
       (Wire_fleet.decode_chat_stream_chunk

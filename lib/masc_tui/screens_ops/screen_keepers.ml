@@ -1127,10 +1127,7 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       | (Some _ | None), (Some _ | None) -> false
     in
     let is_split =
-      (Model.equal_breakpoint model.breakpoint Model.Wide
-       || Model.equal_breakpoint model.breakpoint Model.Standard)
-      && rect.w >= 104
-      && (not model.nav.zoomed)
+      Model.uses_keeper_split ~width:rect.w model
       && not open_memory_diagram_for_selected
     in
     if

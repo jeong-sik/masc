@@ -2237,8 +2237,27 @@ let render_frame ~(model : Model.t) ~cache ~render_body ~render_overlay grid =
       | None -> Presenter.hidden_cursor
       | Some r ->
           let comp_st = Render_util.composer_state_of_model model in
+          let progress_in_chat =
+            (* The chat needs two inner rows to reserve its status strip. *)
+            layout.body.h >= 4
+            &&
+            match Model.active_dive model with
+            | Some dive ->
+                Nav.equal_dive dive
+                  (Nav.Dive_keeper { name = comp_st.target_keeper; tab = Nav.Keeper_chat })
+            | None ->
+                Nav.equal_workspace model.nav.workspace Nav.Keepers
+                && Nav.equal_keeper_tab model.fleet.keeper_dive_tab Nav.Keeper_chat
+                && (model.nav.zoomed
+                    || Model.uses_keeper_split ~width:layout.body.w model)
+                && Option.exists
+                     (fun (keeper : Wire_fleet.keeper_summary) ->
+                       String.equal keeper.name comp_st.target_keeper)
+                     (Fleet_store.selected_keeper_summary model.fleet)
+          in
           let c =
-            Composer.draw grid ~rect:r ~theme ~lang:model.lang
+            Composer.draw ~show_pending_tx:(not progress_in_chat) grid ~rect:r
+              ~theme ~lang:model.lang
               ~breakpoint:layout.breakpoint comp_st
           in
           (match comp_st.popup with

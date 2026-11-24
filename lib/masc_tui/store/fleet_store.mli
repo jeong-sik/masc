@@ -32,11 +32,18 @@ type memory_display =
   | Memory_summary
   | Memory_full
 
+type tool_call_state =
+  | Tool_pending
+  | Tool_result_pending of { model_output_after_close : bool }
+  | Tool_settled
+  | Tool_unfinished
+
 type active_tool_call = {
   tool_use_id : string;
+  stream_scope : int option;
   tool_name : string;
   args_preview : string option;
-  completed : bool;
+  tool_state : tool_call_state;
   ok : bool option;
   output_preview : string option;
 }
@@ -45,6 +52,8 @@ type chat_queue = {
   operations : Wire_fleet.chat_operation list;
   read : unit Observed.t;
 }
+
+type model_activity
 
 type chat_stream_buffer = {
   request_id : string;
@@ -55,11 +64,17 @@ type chat_stream_buffer = {
   text : string;
   text_ownership : Cut_reply.ownership;
   thinking : string;
+  model_activity : model_activity;
   tools : active_tool_call list;
   active : bool;
   ended : bool;
   last_error : string option;
 }
+
+val empty_model_activity : model_activity
+
+val current_model_content : chat_stream_buffer -> Wire_fleet.model_content_channel option
+val current_tool : chat_stream_buffer -> active_tool_call option
 
 type t = {
   shell : Wire_fleet.dashboard_shell Observed.t;

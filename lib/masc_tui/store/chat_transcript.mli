@@ -43,6 +43,7 @@ type live_chat_phase =
   | Phase_awaiting_turn
   | Phase_thinking
   | Phase_tool_running of string
+  | Phase_tool_waiting of string
   | Phase_streaming
   | Phase_turn_running of {
       turn : Wire_fleet.active_turn;
@@ -71,7 +72,7 @@ val live_chat_phase : model:Model.t -> keeper:string -> live_chat_phase
     header hotkey, composer pill, and viewport geometry from the same state. *)
 
 val live_chat_phase_badge :
-  live_chat_phase -> (Glyph.t * Theme.status_token * Say.t) option
+  model:Model.t -> keeper:string -> (Glyph.t * Theme.status_token * Say.t) option
 (** Width-1 geometric glyph, status tone, and bilingual label for an active or
     failed {!live_chat_phase}, or [None] when {!Phase_idle}. *)
 
@@ -101,7 +102,6 @@ type stream_projection = {
   show_thinking : bool;
   show_tools : bool;
   show_text : bool;
-  show_waiting : bool;
   show_error : string option;
 }
 

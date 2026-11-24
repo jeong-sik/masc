@@ -29,11 +29,18 @@ type memory_display =
   | Memory_summary
   | Memory_full
 
+type tool_call_state =
+  | Tool_pending
+  | Tool_result_pending of { model_output_after_close : bool }
+  | Tool_settled
+  | Tool_unfinished
+
 type active_tool_call = {
   tool_use_id : string;
+  stream_scope : int option;
   tool_name : string;
   args_preview : string option;
-  completed : bool;
+  tool_state : tool_call_state;
   ok : bool option;
   output_preview : string option;
 }
@@ -42,6 +49,15 @@ type chat_queue = {
   operations : Wire_fleet.chat_operation list;
   read : unit Observed.t;
 }
+
+type model_activity =
+  | Waiting_for_content
+  | Receiving_delta of Wire_fleet.model_content_channel
+  | Receiving_response of {
+      owner : Wire_chat_journal.response_owner;
+      blocks : Wire_fleet.model_content_activity list;
+    }
+  | Response_stopped of Wire_chat_journal.response_owner
 
 type chat_stream_buffer = {
   request_id : string;
@@ -52,11 +68,37 @@ type chat_stream_buffer = {
   text : string;
   text_ownership : Cut_reply.ownership;
   thinking : string;
+  model_activity : model_activity;
   tools : active_tool_call list;
   active : bool;
   ended : bool;
   last_error : string option;
 }
+
+let empty_model_activity = Waiting_for_content
+
+let current_model_content buf =
+  match buf.model_activity with
+  | Waiting_for_content | Response_stopped _ -> None
+  | Receiving_delta channel -> Some channel
+  | Receiving_response { blocks; _ } ->
+      List.find_map
+        (fun (block : Wire_fleet.model_content_activity) ->
+          match block.content_state with
+          | Content_observed -> Some block.channel
+          | Content_ended -> None)
+        blocks
+
+let current_tool buf =
+  let receiving_content = Option.is_some (current_model_content buf) in
+  List.fold_left
+    (fun pending tool ->
+      match tool.tool_state with
+      | Tool_result_pending { model_output_after_close = true } when receiving_content ->
+          pending
+      | Tool_pending | Tool_result_pending _ -> Some tool
+      | Tool_settled | Tool_unfinished -> pending)
+    None buf.tools
 
 type t = {
   shell : Wire_fleet.dashboard_shell Observed.t;
@@ -905,6 +947,91 @@ let chat_queue_for ~keeper t =
 let set_chat_queue ~keeper queue t =
   { t with chat_queues = String_map.add keeper queue t.chat_queues }
 
+let note_model_content current (event : Wire_fleet.model_content_activity) =
+  let compare = Wire_chat_journal.compare_response_owner in
+  let start () = Some (Receiving_response { owner = event.owner; blocks = [ event ] }) in
+  match current with
+  | Waiting_for_content | Receiving_delta _ -> start ()
+  | Response_stopped owner ->
+      if compare event.owner owner > 0 then start () else None
+  | Receiving_response { owner; blocks } ->
+      let order = compare event.owner owner in
+      if order < 0 then None
+      else if order > 0 then start ()
+      else
+        let same_block (block : Wire_fleet.model_content_activity) =
+          Int.equal block.block_index event.block_index
+        in
+        match blocks with
+        | latest :: _ when same_block latest
+                           && latest.content_state = event.content_state
+                           && latest.channel = event.channel ->
+            Some current
+        | _ :: _ | [] -> (
+            match List.find_opt same_block blocks with
+            | Some block when block.content_state = Content_ended || block.channel <> event.channel ->
+                None
+            | Some _ | None ->
+                Some (Receiving_response
+                  { owner; blocks = event :: List.filter (fun block -> not (same_block block)) blocks }))
+
+let stop_model_response current owner =
+  match owner, current with
+  | None, (Waiting_for_content | Receiving_delta _) -> Waiting_for_content
+  | None, (Receiving_response _ | Response_stopped _) -> current
+  | Some owner, Receiving_response { owner = prev; _ } ->
+      if Wire_chat_journal.compare_response_owner owner prev = 0 then
+        Response_stopped owner
+      else current
+  | Some _, Response_stopped _ -> current
+  | Some owner, (Waiting_for_content | Receiving_delta _) ->
+      Response_stopped owner
+
+let retire_model_activity = function
+  | Waiting_for_content | Receiving_delta _ -> Waiting_for_content
+  | Receiving_response { owner; _ } | Response_stopped owner -> Response_stopped owner
+
+let note_unscoped_delta current channel delta =
+  match current with
+  | Waiting_for_content | Receiving_delta _ ->
+      if String.equal delta "" then current else Receiving_delta channel
+  | Receiving_response _ | Response_stopped _ -> current
+
+let retire_pending_tool tool =
+  match tool.tool_state with
+  | Tool_pending | Tool_result_pending _ -> { tool with tool_state = Tool_unfinished }
+  | Tool_settled | Tool_unfinished -> tool
+
+let retire_pending_tools tools = List.map retire_pending_tool tools
+
+let close_tool_block tool =
+  match tool.tool_state with
+  | Tool_pending ->
+      { tool with tool_state = Tool_result_pending { model_output_after_close = false } }
+  | Tool_result_pending _ | Tool_settled | Tool_unfinished -> tool
+
+(* A provider can emit text after a tool block closes, before the tool runs.
+   That text takes display precedence while it is open. A later provider
+   scope starts after the earlier tool batch has returned. *)
+let tool_from_earlier_scope ~stream_scope tool =
+  Option.exists (fun scope -> scope < stream_scope) tool.stream_scope
+
+let note_tool_during_model_output ~stream_scope tool =
+  if tool_from_earlier_scope ~stream_scope tool then
+    retire_pending_tool tool
+  else
+    match tool.tool_state with
+    | Tool_result_pending { model_output_after_close = false } ->
+        { tool with tool_state = Tool_result_pending { model_output_after_close = true } }
+    | Tool_pending | Tool_result_pending _ | Tool_settled | Tool_unfinished -> tool
+
+let rec note_tools_during_model_output ~stream_scope = function
+  | [] -> []
+  | tool :: rest as tools ->
+      let next = note_tool_during_model_output ~stream_scope tool in
+      let next_rest = note_tools_during_model_output ~stream_scope rest in
+      if next == tool && next_rest == rest then tools else next :: next_rest
+
 let fresh_stream_buffer ~request_id =
   {
     request_id;
@@ -915,6 +1042,7 @@ let fresh_stream_buffer ~request_id =
     text = "";
     text_ownership = Cut_reply.fresh_ownership;
     thinking = "";
+    model_activity = empty_model_activity;
     tools = [];
     active = true;
     ended = false;
@@ -945,9 +1073,13 @@ let is_explicit_execution_start = function
   | Wire_fleet.Chunk_text_delta _
   | Wire_fleet.Chunk_thinking_delta _
   | Wire_fleet.Chunk_thinking_snapshot _
+  | Wire_fleet.Chunk_model_content _
+  | Wire_fleet.Chunk_model_response_stop _
   | Wire_fleet.Chunk_tool_start _
   | Wire_fleet.Chunk_tool_args _
+  | Wire_fleet.Chunk_tool_block_end _
   | Wire_fleet.Chunk_tool_end _
+  | Wire_fleet.Chunk_tool_quarantined _
   | Wire_fleet.Chunk_reply_details _
   | Wire_fleet.Chunk_turn_done _
   | Wire_fleet.Chunk_error _
@@ -970,19 +1102,81 @@ let is_queued_acceptance = function
   | Wire_fleet.Chunk_text_delta _
   | Wire_fleet.Chunk_thinking_delta _
   | Wire_fleet.Chunk_thinking_snapshot _
+  | Wire_fleet.Chunk_model_content _
+  | Wire_fleet.Chunk_model_response_stop _
   | Wire_fleet.Chunk_tool_start _
   | Wire_fleet.Chunk_tool_args _
+  | Wire_fleet.Chunk_tool_block_end _
   | Wire_fleet.Chunk_tool_end _
+  | Wire_fleet.Chunk_tool_quarantined _
   | Wire_fleet.Chunk_reply_details _
   | Wire_fleet.Chunk_turn_done _
   | Wire_fleet.Chunk_error _
   | Wire_fleet.Chunk_ignored ->
       false
 
+(* Activity frames annotate the matching live buffer. They cannot admit a
+   request, replace another buffer, or reopen a settled stream. *)
+let update_live_stream ~keeper ~request_id ~operation_id update t =
+  match String_map.find_opt keeper t.chat_streams with
+  | Some b when b.active && String.equal b.request_id request_id
+                && Option.for_all
+                     (fun id -> Option.for_all (String.equal id) b.operation_id)
+                     operation_id ->
+      let updated = update b in
+      if updated == b then t
+      else
+        { t with chat_streams = String_map.add keeper updated t.chat_streams }
+  | Some _ | None -> t
+
+let update_model_activity ~keeper ~request_id ~operation_id update t =
+  update_live_stream ~keeper ~request_id ~operation_id
+    (fun b ->
+      let model_activity = update b.model_activity in
+      if model_activity == b.model_activity then b else { b with model_activity })
+    t
+
+let update_stream_tool ~keeper ~request_id ~operation_id ~tool_use_id update t =
+  update_live_stream ~keeper ~request_id ~operation_id
+    (fun b ->
+      let tools =
+        List.map
+          (fun tool ->
+            if String.equal tool.tool_use_id tool_use_id then update tool else tool)
+          b.tools
+      in
+      { b with tools })
+    t
+
 let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
     t =
   match chunk with
   | Wire_fleet.Chunk_ignored -> t
+  | Wire_fleet.Chunk_model_content { operation_id; activity } ->
+      update_live_stream ~keeper ~request_id ~operation_id
+        (fun b ->
+          match note_model_content b.model_activity activity with
+          | None -> b
+          | Some model_activity ->
+              let tools =
+                match activity.content_state with
+                | Content_observed ->
+                    note_tools_during_model_output ~stream_scope:activity.owner.stream_scope
+                      b.tools
+                | Content_ended -> b.tools
+              in
+              if model_activity == b.model_activity && tools == b.tools then b
+              else { b with model_activity; tools })
+        t
+  | Wire_fleet.Chunk_model_response_stop { operation_id; owner } ->
+      update_model_activity ~keeper ~request_id ~operation_id
+        (fun current -> stop_model_response current owner) t
+  | Wire_fleet.Chunk_tool_quarantined { operation_id; tool_use_id } ->
+      update_stream_tool ~keeper ~request_id ~operation_id ~tool_use_id
+        retire_pending_tool t
+  | Wire_fleet.Chunk_tool_block_end { operation_id; tool_use_id } ->
+      update_stream_tool ~keeper ~request_id ~operation_id ~tool_use_id
+        close_tool_block t
   | ( Wire_fleet.Chunk_accepted _
     | Wire_fleet.Chunk_run_started _
     | Wire_fleet.Chunk_runtime_attempt_started _
@@ -1005,9 +1199,13 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
         | Wire_fleet.Chunk_text_delta _
         | Wire_fleet.Chunk_thinking_delta _
         | Wire_fleet.Chunk_thinking_snapshot _
+        | Wire_fleet.Chunk_model_content _
+        | Wire_fleet.Chunk_model_response_stop _
         | Wire_fleet.Chunk_tool_start _
         | Wire_fleet.Chunk_tool_args _
+        | Wire_fleet.Chunk_tool_block_end _
         | Wire_fleet.Chunk_tool_end _
+        | Wire_fleet.Chunk_tool_quarantined _
         | Wire_fleet.Chunk_reply_details _
         | Wire_fleet.Chunk_turn_done _
         | Wire_fleet.Chunk_error _
@@ -1070,6 +1268,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   run_started;
                   active;
                   ended;
+                  tools = if ended then retire_pending_tools prev.tools else prev.tools;
                 }
             | Wire_fleet.Chunk_run_started { operation_id } ->
                 {
@@ -1079,6 +1278,8 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   text = "";
                   text_ownership = Cut_reply.fresh_ownership;
                   thinking = "";
+                  model_activity = empty_model_activity;
+                  tools = retire_pending_tools prev.tools;
                   active = true;
                 }
             | Wire_fleet.Chunk_runtime_attempt_started { operation_id } ->
@@ -1089,6 +1290,8 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   text = "";
                   text_ownership = Cut_reply.retire_attempt prev.text_ownership;
                   thinking = "";
+                  model_activity = retire_model_activity prev.model_activity;
+                  tools = retire_pending_tools prev.tools;
                   active = true;
                 }
             | Wire_fleet.Chunk_text_delta { operation_id; delta; owner } -> (
@@ -1100,6 +1303,8 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                       run_started = true;
                       text = prev.text ^ delta;
                       text_ownership;
+                      model_activity =
+                        note_unscoped_delta prev.model_activity Content_text delta;
                       active = true;
                     }
                 | Cut_reply.Drop ->
@@ -1115,6 +1320,8 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   operation_id = merge_opt_op prev.operation_id operation_id;
                   run_started = true;
                   thinking = prev.thinking ^ delta;
+                  model_activity =
+                    note_unscoped_delta prev.model_activity Content_thinking delta;
                   active = true;
                 }
             | Wire_fleet.Chunk_thinking_snapshot { operation_id; snapshot } ->
@@ -1123,24 +1330,36 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   operation_id = merge_opt_op prev.operation_id operation_id;
                   run_started = true;
                   thinking = snapshot;
+                  model_activity =
+                    note_unscoped_delta prev.model_activity Content_thinking snapshot;
                   active = true;
                 }
             | Wire_fleet.Chunk_tool_start
-                { operation_id; tool_use_id; tool_name; args_preview } ->
+                { operation_id; tool_use_id; stream_scope; tool_name; args_preview } ->
                 let entry =
                   {
                     tool_use_id;
+                    stream_scope;
                     tool_name;
                     args_preview;
-                    completed = false;
+                    tool_state = Tool_pending;
                     ok = None;
                     output_preview = None;
                   }
                 in
                 let tools =
-                  List.filter
-                    (fun (c : active_tool_call) ->
-                      not (String.equal c.tool_use_id tool_use_id))
+                  List.filter_map
+                    (fun tool ->
+                      if String.equal tool.tool_use_id tool_use_id then None
+                      else
+                        let tool =
+                          if Option.exists
+                               (fun stream_scope -> tool_from_earlier_scope ~stream_scope tool)
+                               stream_scope
+                          then retire_pending_tool tool
+                          else tool
+                        in
+                        Some tool)
                     prev.tools
                   @ [ entry ]
                 in
@@ -1148,6 +1367,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   prev with
                   operation_id = merge_opt_op prev.operation_id operation_id;
                   run_started = true;
+                  model_activity = stop_model_response prev.model_activity None;
                   tools;
                   active = true;
                 }
@@ -1192,7 +1412,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                             c with
                             tool_name =
                               Option.value tool_name ~default:c.tool_name;
-                            completed = true;
+                            tool_state = Tool_settled;
                             ok =
                               (match ok with Some _ as x -> x | None -> c.ok);
                             output_preview =
@@ -1207,9 +1427,10 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                     @ [
                         {
                           tool_use_id;
+                          stream_scope = None;
                           tool_name = Option.value tool_name ~default:"tool";
                           args_preview = None;
-                          completed = true;
+                          tool_state = Tool_settled;
                           ok;
                           output_preview;
                         };
@@ -1237,6 +1458,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                     | None -> prev.turn_ref);
                   run_started = true;
                   text;
+                  model_activity = retire_model_activity prev.model_activity;
                   active = true;
                 }
             | Wire_fleet.Chunk_turn_done { operation_id; turn_ref; reply } ->
@@ -1256,6 +1478,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   active = false;
                   ended = true;
                   interrupting = false;
+                  tools = retire_pending_tools prev.tools;
                 }
             | Wire_fleet.Chunk_error { operation_id; message; code = _ } ->
                 {
@@ -1265,7 +1488,12 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   ended = true;
                   interrupting = false;
                   last_error = Some message;
+                  tools = retire_pending_tools prev.tools;
                 }
+            | Wire_fleet.Chunk_model_content _
+            | Wire_fleet.Chunk_model_response_stop _
+            | Wire_fleet.Chunk_tool_quarantined _
+            | Wire_fleet.Chunk_tool_block_end _
             | Wire_fleet.Chunk_ignored -> prev
           in
           let chat_scroll_offset =
@@ -1347,6 +1575,7 @@ let finish_chat_stream ~keeper ~request_id ~error t =
           active = false;
           ended = true;
           interrupting = false;
+          tools = retire_pending_tools b.tools;
           last_error =
             (match error with Some _ as e -> e | None -> b.last_error);
         }
@@ -1362,7 +1591,8 @@ let detach_chat_streams t =
       String_map.map
         (fun (b : chat_stream_buffer) ->
           if b.active then
-            { b with active = false; ended = true; interrupting = false }
+            { b with active = false; ended = true; interrupting = false;
+                     tools = retire_pending_tools b.tools }
           else b)
         t.chat_streams;
   }

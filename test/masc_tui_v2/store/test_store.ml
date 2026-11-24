@@ -6883,6 +6883,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
                {
                  operation_id = None;
                  tool_use_id = "scope-1-block-0";
+                 stream_scope = Some 1;
                  tool_name = "masc_status";
                  args_preview = None;
                };
@@ -11000,6 +11001,7 @@ let test_live_chat_runtime_attempt_and_text_ownership () =
             {
               operation_id = Some req;
               tool_use_id = "tu-1";
+              stream_scope = None;
               tool_name = "read_file";
               args_preview = Some "a.ml";
             })
@@ -15737,6 +15739,96 @@ let test_ux_sweep_12_fixes () =
     (Option.map (fun (e : Attention.entry) -> e.id)
        (Attention.current_filtered_item ~query:"" m_gr_pulse.attention))
 
+let test_live_chat_activity_uses_open_content_and_tool_receipts () =
+  let open Chat_transcript in
+  let keeper = "alpha-leader" and request_id = "activity-request" in
+  let model = Model.initial ~cols:56 ~rows:20 () in
+  let model =
+    { model with fleet = Fleet_store.start_chat_stream ~keeper ~request_id model.fleet }
+  in
+  let apply ?(request_id = request_id) m chunk =
+    fst (Update.step ~now:t1 m
+           (Msg.Chat_stream_chunk
+              { epoch = m.epoch; keeper; request_id; is_btw = false; chunk }))
+  in
+  let apply_json m json =
+    match Wire_fleet.decode_chat_stream_chunk (Yojson.Safe.from_string json) with
+    | Ok chunk -> apply m chunk
+    | Error error -> Alcotest.fail error
+  in
+  let check_phase label expected model =
+    Alcotest.(check bool) label true
+      (equal_live_chat_phase (live_chat_phase ~model ~keeper) expected)
+  in
+  let custom m name value =
+    apply_json m
+      (Printf.sprintf {|{"type":"CUSTOM","name":"%s","value":%s}|} name value)
+  in
+  let content m ~scope ~block channel state =
+    custom m "KEEPER_MODEL_CONTENT_ACTIVITY"
+      (Printf.sprintf
+         {|{"generation":3,"stream_scope":%d,"block_index":%d,"channel":"%s","state":"%s"}|}
+         scope block channel state)
+  in
+  let stop m scope =
+    custom m "KEEPER_STREAM_MESSAGE_STOP"
+      (Printf.sprintf {|{"content_generation":3,"stream_scope":%d}|} scope)
+  in
+  let m =
+    apply_json model
+      {|{"type":"TEXT_MESSAGE_CONTENT","delta":"Earlier reply text","textResponse":{"content_generation":3,"stream_scope":1}}|}
+  in
+  let m = content m ~scope:1 ~block:0 "text" "observed" in
+  let thinking = content m ~scope:1 ~block:1 "thinking" "observed" in
+  check_phase "new reasoning takes precedence over retained reply bytes" Phase_thinking thinking;
+  check_phase "the reasoning detail preference leaves activity visible" Phase_thinking
+    { thinking with fleet = { thinking.fleet with chat_thinking_mode = Thinking_hidden } };
+  let finished_thinking = content thinking ~scope:1 ~block:1 "thinking" "ended" in
+  check_phase "closing reasoning returns to the open text block" Phase_streaming finished_thinking;
+  let repeated = content finished_thinking ~scope:1 ~block:1 "thinking" "observed" in
+  check_phase "replayed activity cannot reopen an ended block" Phase_streaming repeated;
+  let stopped = stop repeated 1 in
+  check_phase "response stop clears activity while the turn is open" Phase_awaiting_turn stopped;
+  let next = content stopped ~scope:2 ~block:1 "thinking" "observed" in
+  check_phase "a previous response stop cannot hide new reasoning" Phase_thinking (stop next 1);
+  let other_request = apply ~request_id:"other-request" next
+      (Wire_fleet.Chunk_model_response_stop
+         { operation_id = None; owner = Some { content_generation = 3; stream_scope = 2 } }) in
+  check_phase "a different request cannot stop this response" Phase_thinking other_request;
+  let start_tool m =
+    apply_json m
+      {|{"type":"TOOL_CALL_START","toolStreamScope":2,"toolCallBlockIndex":2,"toolCallId":"provider-id","toolCallName":"Read"}|}
+  in
+  let close_tool_block m =
+    apply_json m
+      {|{"type":"TOOL_CALL_END","toolStreamScope":2,"toolCallBlockIndex":2,"toolCallId":"provider-id"}|}
+  in
+  let tool = start_tool (stop next 2) in
+  let args_ended = close_tool_block tool in
+  check_phase "end of argument input leaves the tool pending" (Phase_tool_waiting "Read") args_ended;
+  let same_response = close_tool_block (start_tool next) in
+  let trailing_text = content same_response ~scope:2 ~block:3 "text" "observed" in
+  check_phase "fresh content can follow a closed tool without a result in the same response"
+    Phase_streaming trailing_text;
+  check_phase "same-response model output leaves the tool result pending"
+    (Phase_tool_waiting "Read") (stop trailing_text 2);
+  check_phase "fresh content can follow an unadmitted tool in the next response"
+    Phase_thinking (content args_ended ~scope:3 ~block:1 "thinking" "observed");
+  let next_tool = apply_json args_ended
+      {|{"type":"TOOL_CALL_START","toolStreamScope":3,"toolCallBlockIndex":1,"toolCallName":"Write"}|} in
+  check_phase "a tool-only response also retires the earlier unadmitted tool"
+    Phase_awaiting_turn
+    (custom next_tool "KEEPER_TOOL_RESULT_READY"
+       {|{"toolStreamScope":3,"toolCallBlockIndex":1,"executionId":"exec-write"}|});
+  let settled = custom args_ended "KEEPER_TOOL_RESULT_READY"
+      {|{"toolStreamScope":2,"toolCallBlockIndex":2,"executionId":"exec-read"}|} in
+  check_phase "the matching tool result clears the tool activity" Phase_awaiting_turn settled;
+  let quarantined = custom tool "KEEPER_STREAM_PROTOCOL_ERROR"
+      {|{"kind":"sse_stream_incomplete","quarantined_occurrence":{"toolStreamScope":2,"toolCallBlockIndex":2}}|} in
+  check_phase "a quarantined tool occurrence is no longer pending" Phase_awaiting_turn quarantined;
+  let retry = apply args_ended (Wire_fleet.Chunk_runtime_attempt_started { operation_id = None }) in
+  check_phase "retry retires pending tools from the previous attempt" Phase_awaiting_turn retry
+
 let test_active_turn_preview_visibility_and_queued_followup () =
   let keeper = "e-masc-the-leader" in
   let hist_page : Wire_fleet.chat_history_page =
@@ -15946,6 +16038,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
         text = "Earlier unpersisted reply";
         text_ownership = Cut_reply.fresh_ownership;
         thinking = "";
+        model_activity = Fleet_store.empty_model_activity;
         tools = [];
         active = false;
         ended = true;
@@ -16141,13 +16234,15 @@ let test_active_turn_preview_visibility_and_queued_followup () =
       text = "Prior streamed answer";
       text_ownership = Cut_reply.fresh_ownership;
       thinking = "";
+      model_activity = Fleet_store.empty_model_activity;
       tools =
         [
           {
             tool_use_id = "tu-1";
+            stream_scope = None;
             tool_name = "Read";
             args_preview = Some "README.md";
-            completed = true;
+            tool_state = Tool_settled;
             ok = Some true;
             output_preview = None;
           };
@@ -16196,16 +16291,11 @@ let test_active_turn_preview_visibility_and_queued_followup () =
         };
     }
   in
-  Alcotest.(check bool) "active stream with completed tools sets show_waiting = true"
+  Alcotest.(check bool) "active stream with settled tools awaits the response"
     true
-    (List.exists
-       (function
-         | Chat_transcript.Section_stream sp -> sp.show_waiting
-         | Chat_transcript.Section_history _
-         | Chat_transcript.Section_active_turn _
-         | Chat_transcript.Section_pending _ ->
-             false)
-       (Chat_transcript.project_transcript ~model:m_stream_wait ~keeper));
+    (Chat_transcript.equal_live_chat_phase
+       (Chat_transcript.live_chat_phase ~model:m_stream_wait ~keeper)
+       Chat_transcript.Phase_awaiting_turn);
   (* 10. Accepted_running emits Get_keeper_turns for live preview during wait. *)
   let _, cmds_acc_run =
     Update.step ~now:t1 m1
@@ -16986,6 +17076,8 @@ let () =
           Alcotest.test_case
             "Active turn preview visibility, queued follow-up separation, interrupt & Dive SSE refresh"
             `Quick test_active_turn_preview_visibility_and_queued_followup;
+          Alcotest.test_case "live chat activity follows content and tool receipts"
+            `Quick test_live_chat_activity_uses_open_content_and_tool_receipts;
           Alcotest.test_case "interrupt receipts and completion follow their own request"
             `Quick test_interrupt_reply_and_stream_completion_are_request_scoped;
           Alcotest.test_case

@@ -344,157 +344,156 @@ let handle_observer_events ~sw ~clock ~login ~base_path ~engine_state request re
     request
     reqd
     (fun gate_req (_ : authorized) ->
-       match Server_mcp_transport_http_headers.get_last_event_id request with
-       | Error err ->
-         Server_login_http.respond
-           reqd
-           (refused
-              Login_routes.Bad_request_400
-              (Server_mcp_transport_http_headers.last_event_id_error_to_string err))
-       | Ok last_event_id_opt ->
-         let runtime_authority = Sse.runtime_authority_exn ~base_path in
-         let observer_instance_id =
-           Option.map
-             (fun state -> Server_observer_scope.instance_id (Mcp_server.workspace_scope state))
-             (engine_state ())
-         in
-         let headers =
-           Httpun.Headers.of_list
-             [ "content-type", "text/event-stream"
-             ; "cache-control", "private, no-store"
-             ; "connection", "close"
-             ; "x-accel-buffering", "no"
-             ; ( Server_mcp_transport_http_headers.observer_idle_timeout_header
-               , string_of_int Server_mcp_transport_http_headers.observer_idle_timeout_ms )
-             ]
-         in
-         let response =
-           Server_sse_response.respond
-             ~clock
-             ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
-             ~flush_headers_immediately:true
+       with_engine_after_auth ~engine_state reqd (fun state ->
+         match Server_mcp_transport_http_headers.get_last_event_id request with
+         | Error err ->
+           Server_login_http.respond
              reqd
-             (Httpun.Response.create ~headers `OK)
-         in
-         let queue = Server_sse_pump.Queue.create ~max_queued_events:Sse.stream_capacity in
-         (* Subscribe BEFORE replay lookup so no event committed between replay
-            capture and live pump startup can be lost; overlap is deduplicated
-            by [seen_replay_ids]. *)
-         let unsubscribe =
-           Sse.subscribe_publication_inputs
-             ~runtime_authority
-             ?observer_instance_id
-             (Server_sse_pump.Queue.push queue)
-         in
-         let replay_opt =
-           Option.map
-             (fun last_event_id ->
-               let replay =
-                 Sse.replay_after_for_session
-                   ~runtime_authority
-                   ?observer_instance_id
-                   ~session_id:("ma-observer-" ^ string_of_int (Sse.fresh_client_id ()))
-                   ~kind:Sse.Observer
-                   last_event_id
+             (refused
+                Login_routes.Bad_request_400
+                (Server_mcp_transport_http_headers.last_event_id_error_to_string err))
+         | Ok last_event_id_opt ->
+           let runtime_authority = Sse.runtime_authority_exn ~base_path in
+           let observer_instance_id =
+             Server_observer_scope.instance_id (Mcp_server.workspace_scope state)
+           in
+           let headers =
+             Httpun.Headers.of_list
+               [ "content-type", "text/event-stream"
+               ; "cache-control", "private, no-store"
+               ; "connection", "close"
+               ; "x-accel-buffering", "no"
+               ; ( Server_mcp_transport_http_headers.observer_idle_timeout_header
+                 , string_of_int Server_mcp_transport_http_headers.observer_idle_timeout_ms )
+               ]
+           in
+           let response =
+             Server_sse_response.respond
+               ~clock
+               ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+               ~flush_headers_immediately:true
+               reqd
+               (Httpun.Response.create ~headers `OK)
+           in
+           let queue = Server_sse_pump.Queue.create ~max_queued_events:Sse.stream_capacity in
+           (* Subscribe BEFORE replay lookup so no event committed between replay
+              capture and live pump startup can be lost; overlap is deduplicated
+              by [seen_replay_ids]. *)
+           let unsubscribe =
+             Sse.subscribe_publication_inputs
+               ~runtime_authority
+               ~observer_instance_id
+               (Server_sse_pump.Queue.push queue)
+           in
+           let replay_opt =
+             Option.map
+               (fun last_event_id ->
+                 let replay =
+                   Sse.replay_after_for_session
+                     ~runtime_authority
+                     ~observer_instance_id
+                     ~session_id:("ma-observer-" ^ string_of_int (Sse.fresh_client_id ()))
+                     ~kind:Sse.Observer
+                     last_event_id
+                 in
+                 last_event_id, replay)
+               last_event_id_opt
+           in
+           let seen_replay_ids : (int, unit) Hashtbl.t = Hashtbl.create 32 in
+           Option.iter
+             (fun (_last_id, (replay : Sse.replay)) ->
+               List.iter
+                 (fun (delivery : Sse.delivery) ->
+                   Hashtbl.replace seen_replay_ids delivery.Sse.event_id ())
+                 replay.Sse.deliveries)
+             replay_opt;
+           let active_auth () =
+             match Authz_zone.read login.Login_routes.zone with
+             | Error (_ : Authz_zone.uncertain) -> None
+             | Ok trusted ->
+               (match
+                  authorize
+                    trusted
+                    ~now_ms:(Server_login_http.now_ms login)
+                    Browser_observer_sse
+                    gate_req
+                with
+                | Ok auth -> Some auth
+                | Error (_ : Login_routes.answer) -> None)
+           in
+           let send_frame frame =
+             match Server_sse_response.send response frame with
+             | Server_sse_response.Written -> true
+             | Server_sse_response.Closed | Server_sse_response.Stalled -> false
+           in
+           let send_replay () =
+             match replay_opt with
+             | None -> true
+             | Some (last_event_id, { Sse.deliveries; continuity }) ->
+               let after_gap_ok =
+                 match continuity with
+                 | Sse.Continuous -> true
+                 | Sse.After_gap { missed_through } ->
+                   send_frame (resync_gap_frame ~last_event_id ~missed_through)
                in
-               last_event_id, replay)
-             last_event_id_opt
-         in
-         let seen_replay_ids : (int, unit) Hashtbl.t = Hashtbl.create 32 in
-         Option.iter
-           (fun (_last_id, (replay : Sse.replay)) ->
-             List.iter
-               (fun (delivery : Sse.delivery) ->
-                 Hashtbl.replace seen_replay_ids delivery.Sse.event_id ())
-               replay.Sse.deliveries)
-           replay_opt;
-         let active_auth () =
-           match Authz_zone.read login.Login_routes.zone with
-           | Error (_ : Authz_zone.uncertain) -> None
-           | Ok trusted ->
-             (match
-                authorize
-                  trusted
-                  ~now_ms:(Server_login_http.now_ms login)
-                  Browser_observer_sse
-                  gate_req
-              with
-              | Ok auth -> Some auth
-              | Error (_ : Login_routes.answer) -> None)
-         in
-         let send_frame frame =
-           match Server_sse_response.send response frame with
-           | Server_sse_response.Written -> true
-           | Server_sse_response.Closed | Server_sse_response.Stalled -> false
-         in
-         let send_replay () =
-           match replay_opt with
-           | None -> true
-           | Some (last_event_id, { Sse.deliveries; continuity }) ->
-             let after_gap_ok =
-               match continuity with
-               | Sse.Continuous -> true
-               | Sse.After_gap { missed_through } ->
-                 send_frame (resync_gap_frame ~last_event_id ~missed_through)
-             in
-             if not after_gap_ok
-             then false
-             else
-               let rec flush = function
-                 | [] -> true
-                 | (delivery : Sse.delivery) :: rest ->
-                   (match active_auth () with
-                    | None -> false
-                    | Some auth ->
-                      (match
-                         project_observer_event
-                           ~state:auth.state
-                           auth.caller
-                           ~event_id:delivery.Sse.event_id
-                           ~frame:delivery.Sse.frame
-                           ~payload:delivery.Sse.payload
-                       with
-                       | Some projected_frame ->
-                         if send_frame projected_frame then flush rest else false
-                       | None -> flush rest))
-               in
-               flush deliveries
-         in
-         Server_sse_response.serve ~sw ~release:unsubscribe response (fun () ->
-           if send_frame (Server_mcp_transport_http_headers.sse_prime_event ()) && send_replay ()
-           then (
-             let (_ : Server_sse_pump.ending) =
-               Server_sse_pump.run
-                 ~source:(Server_sse_pump.Queue.source queue)
-                 ~step:(fun (ev : Sse.external_event) ->
-                   if Hashtbl.mem seen_replay_ids ev.Sse.ext_event_id
-                   then (
-                     Hashtbl.remove seen_replay_ids ev.Sse.ext_event_id;
-                     Server_sse_pump.Skip)
-                   else (
+               if not after_gap_ok
+               then false
+               else
+                 let rec flush = function
+                   | [] -> true
+                   | (delivery : Sse.delivery) :: rest ->
+                     (match active_auth () with
+                      | None -> false
+                      | Some auth ->
+                        (match
+                           project_observer_event
+                             ~state:auth.state
+                             auth.caller
+                             ~event_id:delivery.Sse.event_id
+                             ~frame:delivery.Sse.frame
+                             ~payload:delivery.Sse.payload
+                         with
+                         | Some projected_frame ->
+                           if send_frame projected_frame then flush rest else false
+                         | None -> flush rest))
+                 in
+                 flush deliveries
+           in
+           Server_sse_response.serve ~sw ~release:unsubscribe response (fun () ->
+             if send_frame (Server_mcp_transport_http_headers.sse_prime_event ()) && send_replay ()
+             then (
+               let (_ : Server_sse_pump.ending) =
+                 Server_sse_pump.run
+                   ~source:(Server_sse_pump.Queue.source queue)
+                   ~step:(fun (ev : Sse.external_event) ->
+                     if Hashtbl.mem seen_replay_ids ev.Sse.ext_event_id
+                     then (
+                       Hashtbl.remove seen_replay_ids ev.Sse.ext_event_id;
+                       Server_sse_pump.Skip)
+                     else (
+                       match active_auth () with
+                       | None -> Server_sse_pump.Stop
+                       | Some auth ->
+                         (match
+                            project_observer_event
+                              ~state:auth.state
+                              auth.caller
+                              ~event_id:ev.Sse.ext_event_id
+                              ~frame:ev.Sse.ext_frame
+                              ~payload:ev.Sse.ext_payload
+                          with
+                          | Some projected_frame -> Server_sse_pump.Send projected_frame
+                          | None -> Server_sse_pump.Skip)))
+                   ~idle:(fun () ->
                      match active_auth () with
-                     | None -> Server_sse_pump.Stop
-                     | Some auth ->
-                       (match
-                          project_observer_event
-                            ~state:auth.state
-                            auth.caller
-                            ~event_id:ev.Sse.ext_event_id
-                            ~frame:ev.Sse.ext_frame
-                            ~payload:ev.Sse.ext_payload
-                        with
-                        | Some projected_frame -> Server_sse_pump.Send projected_frame
-                        | None -> Server_sse_pump.Skip)))
-                 ~idle:(fun () ->
-                   match active_auth () with
-                   | Some (_ : authorized) -> Server_sse_pump.Keepalive
-                   | None -> Server_sse_pump.Finish)
-                 ~clock
-                 ~ping_interval_s:Server_mcp_transport_http_headers.sse_ping_interval_s
-                 ~closed:(fun () -> Server_sse_response.await_closed response)
-                 ~send:(Server_sse_response.send response)
-             in
-             ())))
+                     | Some (_ : authorized) -> Server_sse_pump.Keepalive
+                     | None -> Server_sse_pump.Finish)
+                   ~clock
+                   ~ping_interval_s:Server_mcp_transport_http_headers.sse_ping_interval_s
+                   ~closed:(fun () -> Server_sse_response.await_closed response)
+                   ~send:(Server_sse_response.send response)
+               in
+               ()))))
 ;;
 
 (* ---- Workspace Read handlers (Worker + Admin) ---- *)
@@ -1008,7 +1007,7 @@ let handle_memory_diff ~login ~engine_state req reqd =
 ;;
 
 let handle_sandboxes_fleet ~sw ~clock ~login ~engine_state req reqd =
-  with_engine ~login ~engine_state ~tier:Workspace_read req reqd (fun state (_ : authorized) ->
+  with_engine ~login ~engine_state ~tier:Admin_only req reqd (fun state (_ : authorized) ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     let json = Server_dashboard_http_infra_sandboxes.get_fleet_json ~sw ~clock ~base_path () in
     Http.Response.json_value ~compress:true ~request:req json reqd)
@@ -1386,10 +1385,6 @@ let add_routes ~sw ~clock ~login ~base_path ~engine_state router =
        dashboard_access
        "/api/v1/memory/diff"
        (handle_memory_diff ~login ~engine_state)
-  |> Server_route.get
-       dashboard_access
-       "/api/v1/infra/sandboxes"
-       (handle_sandboxes_fleet ~sw ~clock ~login ~engine_state)
   |> Server_route.prefix_get
        dashboard_access
        sandbox_keeper_prefix
@@ -1416,6 +1411,10 @@ let add_routes ~sw ~clock ~login ~base_path ~engine_state router =
        dashboard_access
        wiki_slug_prefix
        (handle_wiki_put_page ~login ~engine_state)
+  |> Server_route.get
+       dashboard_access
+       "/api/v1/infra/sandboxes"
+       (handle_sandboxes_fleet ~sw ~clock ~login ~engine_state)
   |> Server_route.post
        dashboard_access
        "/api/v1/infra/sandboxes/probe"

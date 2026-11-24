@@ -2606,17 +2606,25 @@ let dashboard_bridge_rbac_and_sse_matrix () =
            ~path:Server_account_dashboard_bridge.observer_events_path
            ~headers:(changing ~origin:(Some "https://evil.example") ()))
           .status;
-      Alcotest.(check int)
-        "authenticated Worker GET /api/v1/auth/events passes auth (malformed Last-Event-ID yields 400)"
-        400
-        (send
-           a_member
-           router
-           ~meth:"GET"
-           ~path:Server_account_dashboard_bridge.observer_events_path
-           ~headers:[ "Last-Event-ID", "not-an-int" ])
-          .status;
-      (* P2-4 RBAC tightening: logs and operator snapshots/digests are Admin_only *)
+      (* Startup gate (P2): authenticated GET /api/v1/auth/events while engine_state () = None
+         must answer 503 engine_starting rather than opening a 200 stream without observer_instance_id. *)
+      List.iter
+        (fun (label, browser) ->
+          let reply =
+            send
+              browser
+              router
+              ~meth:"GET"
+              ~path:Server_account_dashboard_bridge.observer_events_path
+          in
+          Alcotest.(check int) (label ^ " GET /api/v1/auth/events while engine_state=None is 503") 503 reply.status;
+          Alcotest.(check bool)
+            (label ^ " GET /api/v1/auth/events startup error is engine_starting")
+            true
+            (Option.equal Yojson.Safe.equal (Some (`String "engine_starting")) (member "error" reply)))
+        [ "Worker", a_member; "Admin", admin ];
+      (* Admin_only RBAC tightening: logs, operator snapshots/digests, and fleet sandbox inventory
+         are strictly Admin_only (Worker, PAT, and service credentials all receive 403). *)
       List.iter
         (fun path ->
           Alcotest.(check int)
@@ -2624,10 +2632,22 @@ let dashboard_bridge_rbac_and_sse_matrix () =
             403
             (send a_member router ~meth:"GET" ~path).status;
           Alcotest.(check int)
+            ("PAT GET " ^ path ^ " is 403")
+            403
+            (send (fresh_browser ()) router ~meth:"GET" ~path ~headers:pat_headers).status;
+          Alcotest.(check int)
+            ("service credential GET " ^ path ^ " is 403")
+            403
+            (send (fresh_browser ()) router ~meth:"GET" ~path ~headers:svc_headers).status;
+          Alcotest.(check int)
             ("Admin GET " ^ path ^ " passes RBAC (503 engine_starting)")
             503
             (send admin router ~meth:"GET" ~path).status)
-        [ "/api/v1/dashboard/logs"; "/api/v1/operator"; "/api/v1/operator/digest" ];
+        [ "/api/v1/dashboard/logs"
+        ; "/api/v1/operator"
+        ; "/api/v1/operator/digest"
+        ; "/api/v1/infra/sandboxes"
+        ];
       (* Commit a Keeper owned by a_member to test ownership-scoped memory diff,
          sandbox telemetry, board_reader_of, and SSE event visibility filtering. *)
       let member_uid = user_of t a_member in
@@ -3081,7 +3101,19 @@ let dashboard_bridge_live_engine_regressions () =
             (path ^ " binds query.actor to Auth_gate Admin principal")
             (Yojson.Safe.to_string (`String admin_uid_str))
             (Yojson.Safe.to_string (at [ "query"; "actor" ] reply)))
-        [ "/api/v1/operator"; "/api/v1/operator/digest" ]))
+        [ "/api/v1/operator"; "/api/v1/operator/digest" ];
+      (* Once engine_state is ready, GET /api/v1/auth/events passes the startup gate and reaches
+         Last-Event-ID validation (malformed Last-Event-ID returns 400 rather than 503). *)
+      Alcotest.(check int)
+        "live engine GET /api/v1/auth/events passes startup gate (malformed Last-Event-ID yields 400)"
+        400
+        (send
+           admin
+           router
+           ~meth:"GET"
+           ~path:Server_account_dashboard_bridge.observer_events_path
+           ~headers:[ "Last-Event-ID", "not-an-int" ])
+          .status))
 ;;
 
 let () =

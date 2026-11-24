@@ -25,22 +25,31 @@
       via {!Auth_gate.decide}. Permits only active [Admin] browser sessions
       (with Same-Origin and CSRF enforcement on unsafe methods); [Worker]
       principals, PATs, and service credentials are refused with 403. Covers
-      config schema/patch, wiki writes, sandbox probes, standalone/exact lane
+      config schema/patch, wiki writes, fleet sandbox inventory
+      ([GET /api/v1/infra/sandboxes]) and sandbox probes, standalone/exact lane
       runs, ring logs, operator snapshot/digest/action/confirm, and schedule
       pruning.
     - {!Browser_observer_sse}: judged as {!Route_access.Read_auth} via
       {!Auth_gate.decide} AND restricted to browser session bindings
       ({!Auth_gate.Session}) with no query-string credentials
       ({!Auth_gate.Query_credential} yields 401) and no cross-origin requests.
-      Every replayed and live frame passes through {!project_observer_event}
-      against a fresh trusted {!Authz_zone.read} snapshot so private Keeper
-      chat/turn streams never leak to non-owners, raw [notifications/board]
-      payloads (which carry [Direct] titles, 200-byte content previews, and
-      post/comment ids without audience metadata) are redacted into an opaque
-      [board_changed] invalidation frame, and signed-out, disabled, or deleted
-      principals are disconnected promptly. Reconnects carrying [Last-Event-ID]
-      replay projected visible deliveries and emit an explicit
-      [observer_resync_required] event on replay gaps. *)
+      Requires a live engine state (returns 503 [{"error":"engine_starting"}]
+      while [engine_state ()] is [None]) so every subscription binds the
+      admitted workspace's [observer_instance_id] and never opens a stream that
+      silently misses [Scoped_runtime_observers] events. Every replayed and
+      live frame passes through {!project_observer_event} against a fresh
+      trusted {!Authz_zone.read} snapshot so private Keeper chat/turn streams
+      never leak to non-owners, raw [notifications/board] payloads (which carry
+      [Direct] titles, 200-byte content previews, and post/comment ids without
+      audience metadata) are redacted into an opaque [board_changed]
+      invalidation frame, and signed-out, disabled, or deleted principals are
+      disconnected promptly. Reconnects carrying [Last-Event-ID] replay
+      projected visible deliveries and emit an explicit
+      [observer_resync_required] event on replay gaps. Because this stream is
+      not an MCP registered client ([client_id = None]), upstream {!Sse} also
+      withholds [Operator_only]/[Keeper_only] private [lane_addons] deliveries
+      fail-closed; clients observe shared invalidations and refetch authorized
+      HTTP projections. *)
 
 (** [/api/v1/auth/events]: cookie-authenticated observer SSE endpoint for the
     unified web dashboard in multi-account mode. *)

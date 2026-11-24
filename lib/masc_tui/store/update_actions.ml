@@ -1548,14 +1548,32 @@ and submit_composer ~now ~mode (m : Model.t) =
                    ~en:("Target keeper switched to @" ^ mentioned_keeper))
                 { m with drafts }
             , [] )
-        | Some (mentioned_keeper, rest) ->
+        | Some (mentioned_keeper, rest) -> (
+            (* [@keeper msg] sends [rest] through the mentioned Keeper's
+               composer slot. That slot may already hold an unsent draft the
+               operator typed earlier; the submission consumes the slot, so
+               the earlier draft is put back once [rest] has left. *)
+            let prior = Drafts.draft_for ~keeper:mentioned_keeper m.drafts in
             let drafts_switched =
               m.drafts
               |> Drafts.clear_current_draft
               |> Drafts.set_active_keeper mentioned_keeper
               |> Drafts.set_current_text rest
             in
-            submit_composer ~now ~mode { m with drafts = drafts_switched }
+            let sent, cmds =
+              submit_composer ~now ~mode { m with drafts = drafts_switched }
+            in
+            let consumed =
+              String.equal (Drafts.current_draft sent.drafts).text ""
+            in
+            match (String.equal prior.text "", consumed) with
+            | true, (true | false) | false, false -> (sent, cmds)
+            | false, true ->
+                let drafts =
+                  Drafts.set_current_text_and_cursor ~text:prior.text
+                    ~cursor:prior.cursor sent.drafts
+                in
+                ({ sent with drafts }, cmds))
         | None ->
         match Update_nav.resolve_target_keeper m with
         | None ->

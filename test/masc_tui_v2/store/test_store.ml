@@ -11834,6 +11834,29 @@ let test_ux_batch2_modals_settings_overlays () =
   in
   Alcotest.(check int) "UX-13 other_keepers_draft_count excludes __default__" 0
     (Drafts.other_keepers_draft_count d_ghost);
+  let m_mention_send =
+    {
+      m_fleet with
+      drafts =
+        m_fleet.drafts
+        |> Drafts.set_active_keeper "beta"
+        |> Drafts.set_current_text "beta draft 한글"
+        |> Drafts.set_active_keeper "alpha"
+        |> Drafts.set_focus true
+        |> Drafts.set_current_text "@beta hi";
+    }
+  in
+  let m_mention_sent, _ = step m_mention_send (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "UX-13 @beta hi queues body hi for beta" true
+    (List.exists
+       (fun (tx : Drafts.pending_message) ->
+         String.equal tx.keeper "beta" && String.equal tx.body "hi")
+       m_mention_sent.drafts.pending_txs);
+  Alcotest.(check string) "UX-13 @beta hi keeps beta's earlier unsent draft"
+    "beta draft 한글"
+    (Drafts.draft_for ~keeper:"beta" m_mention_sent.drafts).text;
+  Alcotest.(check string) "UX-13 @beta hi clears alpha's composer text" ""
+    (Drafts.draft_for ~keeper:"alpha" m_mention_sent.drafts).text;
 
   (* UX-14: Inline modal field help lookup populated *)
   Alcotest.(check bool) "UX-14 modal_field_help returns help for memory_act" true

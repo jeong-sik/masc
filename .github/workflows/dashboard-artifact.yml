@@ -70,6 +70,7 @@ jobs:
           src/workspaces/settings/settings.test.ts
           src/workspaces/work/work.test.ts
           src/workspaces/knowledge/knowledge.test.ts
+          src/workspaces/layer8-crud-chat-oauth.test.ts
           src/app.test.ts
 
       - name: Verify production bundle contract

@@ -133,7 +133,7 @@ describe('Unified /account wire parsers & workspace surface', () => {
     expect(gate?.querySelector('form')).toBeNull()
     const link = gate?.querySelector('[data-testid="multi-account-signin-link"]') as HTMLAnchorElement | null
     expect(link).not.toBeNull()
-    expect(link?.getAttribute('href')).toBe('/')
+    expect(link?.getAttribute('href')).toBe('/?return_to=%2Fdashboard%23account')
     expect(link?.getAttribute('data-oauth-providers')).toBe('google,github')
     expect(container.querySelector('[data-testid="account-provider-callout"]')?.textContent)
       .toContain('Runtime → Quotas')

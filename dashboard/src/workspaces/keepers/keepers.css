@@ -306,6 +306,10 @@
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding: var(--sp-1) var(--sp-2);
   border-radius: var(--radius-pill);
   border: 1px solid var(--line-1);
@@ -511,6 +515,106 @@
   font-size: var(--fs-12);
   color: var(--fg-3);
   white-space: pre-wrap;
+}
+
+.kp-toggle-btn {
+  font-size: var(--fs-11);
+  padding: var(--sp-1) var(--sp-2);
+}
+
+.kp-toggle-btn[data-active="true"] {
+  border-color: var(--line-3);
+  background: var(--bg-3);
+  color: var(--fg-1);
+}
+
+.kp-block-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.kp-block-card {
+  padding: var(--sp-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+  font-size: var(--fs-12);
+  min-width: 0;
+}
+
+.kp-block-card--tool {
+  border-color: var(--info-border);
+}
+
+.kp-block-card--memory {
+  border-color: var(--brass-border);
+  background: var(--brass-soft);
+}
+
+.kp-block-card--auto {
+  border-color: var(--warn-border);
+  background: var(--warn-soft);
+}
+
+.kp-block-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+  list-style: none;
+  min-width: 0;
+}
+
+.kp-block-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+.kp-block-content {
+  margin-top: var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.kp-block-sublabel {
+  font-size: var(--fs-10);
+  font-weight: 600;
+  color: var(--fg-3);
+  text-transform: uppercase;
+}
+
+.kp-block-pre {
+  margin: 0;
+  padding: var(--sp-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-1);
+  background: var(--bg-0);
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.kp-block-list {
+  margin: var(--sp-2) 0 0;
+  padding-left: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  color: var(--fg-2);
 }
 
 .kp-queue-strip {

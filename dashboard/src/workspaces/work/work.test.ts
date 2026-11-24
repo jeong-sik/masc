@@ -846,6 +846,19 @@ describe('workspaces/work', () => {
       if (url.startsWith('/api/v1/candle/ledger')) {
         return jsonResponse({ schema_version: 1, instance_id: 'i1', generated_at_unix: 1, data: samplePayload })
       }
+      if (url === '/health?full=1') {
+        return jsonResponse({ paths: { effective_base_path: '/work', effective_masc_root: '/work/.masc' } })
+      }
+      if (url.startsWith('/api/v1/dashboard/goals/candle?')) {
+        expect(new URLSearchParams(url.split('?')[1]).get('expected_masc_root')).toBe('/work/.masc')
+        return jsonResponse({
+          goal_id: 'goal-held-1',
+          ledger: {
+            state: 'observed',
+            payout: { state: 'held', origin: 'stored', request_id: 'request-1', verification_run_id: 'verification-2' },
+          },
+        })
+      }
       if (url === '/api/v1/dashboard/goals/candle/hold/release' && init?.method === 'POST') {
         releaseCalls.push({ url, body: JSON.parse(String(init.body)) })
         return jsonResponse({ ok: true, outcome: 'released', goal_id: 'goal-held-1' })
@@ -869,14 +882,37 @@ describe('workspaces/work', () => {
     expect(progressEl).not.toBeNull()
     expect(progressEl!.getAttribute('style')).toBeNull()
 
-    const releaseBtn = [...container.querySelectorAll('button')].find((b) =>
-      b.textContent?.trim() === 'Hold Release',
+    const findButton = (label: string) => [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.trim() === label,
     )
-    expect(releaseBtn).toBeDefined()
-    releaseBtn!.click()
+    const input = container.querySelector<HTMLInputElement>('[aria-label="Goal Candle 조회 ID"]')!
+    expect(findButton('Hold Release')).toBeUndefined()
+    findButton('보류 확인')!.click()
+    await flushUi()
+
+    const confirmation = container.querySelector('[data-request-id="request-1"]')
+    expect(confirmation?.textContent).toContain('goal-held-1')
+    expect(confirmation?.textContent).toContain('verification-2')
+
+    input.value = 'another-goal'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi()
+    expect(findButton('Hold Release')).toBeUndefined()
+    expect(releaseCalls).toHaveLength(0)
+
+    findButton('보류 확인')!.click()
+    await flushUi()
+    findButton('Hold Release')!.click()
     await flushUi()
     expect(releaseCalls).toEqual([
-      { url: '/api/v1/dashboard/goals/candle/hold/release', body: { goal_id: 'goal-held-1' } },
+      {
+        url: '/api/v1/dashboard/goals/candle/hold/release',
+        body: {
+          goal_id: 'goal-held-1',
+          expected_workspace: { base_path: '/work', masc_root: '/work/.masc' },
+          expected_hold: { request_id: 'request-1', verification_run_id: 'verification-2' },
+        },
+      },
     ])
   })
 })

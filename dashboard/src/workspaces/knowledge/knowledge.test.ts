@@ -25,6 +25,7 @@ import { authSession, resetAuthStateForTests } from '../../core/auth'
 import { resetObserverStateForTests } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { resetTimeWindowForTests, setTimeWindow } from '../../core/time-window'
+import { resolveRoute } from '../../routes/router'
 import {
   KnowledgeWorkspace,
   buildMemoryFlowSeries,
@@ -214,6 +215,26 @@ describe('workspaces/knowledge', () => {
     expect(reactCalls).toEqual([{ target_type: 'post', target_id: 'post-0', emoji: '🔥' }])
   })
 
+  it('opens a legacy Board deep link even when the post is outside the current feed', async () => {
+    const post = { id: 'archived-1', title: 'Archived post title', body: 'Direct lookup', author: 'librarian' }
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/board?')) {
+        return jsonResponse({ posts: [{ ...post, id: 'feed-1', title: 'Recent feed post' }] })
+      }
+      if (url.startsWith('/api/v1/board/archived-1?')) {
+        return jsonResponse({ post, comments: [] })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    const route = resolveRoute('#board?post=archived-1')
+    render(html`<${KnowledgeWorkspace} subroute=${route.subroute} entityId=${route.entityId} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('h2.kn-heading')?.textContent).toBe('Archived post title')
+  })
+
   it('Board routes to GET /api/v1/dashboard/board in multi_account_signed_in mode with 0 calls to single-user /api/v1/board*', async () => {
     setMultiAccountSessionForTest()
     const fetchedUrls: string[] = []
@@ -253,6 +274,47 @@ describe('workspaces/knowledge', () => {
     expect(container.textContent).toContain('Multi-Account Design Sync')
     expect(container.textContent).toContain('#architecture')
     expect(container.textContent).toContain('/api/v1/dashboard/board')
+  })
+
+  it('shows Wiki lint and revision-log failures and recovers on retry', async () => {
+    let lintAttempts = 0
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const envelope = { schema_version: 1, instance_id: 'inst-1', generated_at_unix: 1 }
+      if (url.startsWith('/api/v1/wiki/lint')) {
+        if (++lintAttempts === 1) return jsonResponse({ error: 'lint denied' }, 403)
+        return jsonResponse({ ...envelope, data: { counts: {}, duplicate_title_candidates: [], findings: [] } })
+      }
+      if (url.startsWith('/api/v1/wiki/log?')) {
+        return jsonResponse({ error: 'journal unavailable' }, 404)
+      }
+      return jsonResponse({
+        ...envelope,
+        data: {
+          pages_total: 0, pages_readable: 0, pages_unreadable: 0,
+          pages: [], unreadable_pages: [], tags: [], sources: {},
+          lint: { total_findings: 0, counts: {}, log_hole_suppressed: false, orphans: [], duplicate_title_candidates: [], findings: [] },
+        },
+      })
+    }) as typeof fetch
+
+    render(html`<${KnowledgeWorkspace} subroute="wiki" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi()
+    const button = (label: string) => [...container.querySelectorAll('button')].find((b) => b.textContent?.trim().startsWith(label))!
+    button('Lint').click()
+    await flushUi()
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('lint denied')
+    expect(container.textContent).not.toContain('Lint 보고서 불러오는 중…')
+
+    button('다시 검사').click()
+    await flushUi()
+    expect(container.querySelector('[role="alert"]')).toBeNull()
+    expect(container.textContent).toContain('Lint 경고가 없습니다')
+
+    button('Log').click()
+    await flushUi()
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('journal unavailable')
+    expect(container.textContent).not.toContain('로그 불러오는 중…')
   })
 
   it('Wiki aborts stale detail fetch on rapid selection switch so an earlier slow response never overwrites current selection', async () => {

@@ -47,8 +47,10 @@ interface CasConflictState {
 export function WikiTab(props: WorkspaceViewProps) {
   const [leftView, setLeftView] = useState<WikiLeftView>('pages')
   const [wikiIndex, setWikiIndex] = useState<WikiIndexData | null>(null)
-  const [lintData, setLintData] = useState<WikiLintData | null>(null)
-  const [logData, setLogData] = useState<WikiLogData | null>(null)
+  const lintObs = resourceCache.observe<WikiLintData>('kn:wiki:lint').value
+  const logObs = resourceCache.observe<WikiLogData>('kn:wiki:log').value
+  const lintData = lintObs.kind === 'value' ? lintObs.data : null
+  const logData = logObs.kind === 'value' ? logObs.data : null
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -111,19 +113,24 @@ export function WikiTab(props: WorkspaceViewProps) {
     void loadIndex('mount')
   }, [loadIndex])
 
-  const loadLint = useCallback(async () => {
-    const res = await apiGetV2<WikiLintData>('/api/v1/wiki/lint')
-    if (res.ok) setLintData(res.value)
+  const loadLint = useCallback((reason: 'mount' | 'manual') => {
+    void resourceCache.fetch(
+      'kn:wiki:lint',
+      (signal) => apiGetV2<WikiLintData>('/api/v1/wiki/lint', { signal }),
+      { reason, topics: ['wiki', 'wiki_updated'] },
+    )
   }, [])
-
-  const loadLog = useCallback(async () => {
-    const res = await apiGetV2<WikiLogData>('/api/v1/wiki/log?limit=100')
-    if (res.ok) setLogData(res.value)
+  const loadLog = useCallback((reason: 'mount' | 'manual') => {
+    void resourceCache.fetch(
+      'kn:wiki:log',
+      (signal) => apiGetV2<WikiLogData>('/api/v1/wiki/log?limit=100', { signal }),
+      { reason, topics: ['wiki', 'wiki_updated'] },
+    )
   }, [])
 
   useEffect(() => {
-    if (leftView === 'lint') void loadLint()
-    if (leftView === 'log') void loadLog()
+    if (leftView === 'lint') loadLint('mount')
+    if (leftView === 'log') loadLog('mount')
   }, [leftView, loadLint, loadLog])
 
   // Live search via GET /api/v1/wiki/search?q=
@@ -447,9 +454,11 @@ export function WikiTab(props: WorkspaceViewProps) {
         <div class="kn-detail-pad kn-scroll-pad">
           <div class="kn-section-head">
             <h3 class="kn-section-title">Wiki Lint Findings</h3>
-            <button type="button" class="btn-ghost" onClick=${() => void loadLint()}>다시 검사</button>
+            <button type="button" class="btn-ghost" onClick=${() => loadLint('manual')}>다시 검사</button>
           </div>
-          ${!lintData
+          ${(lintObs.kind === 'failed' || lintObs.kind === 'absent' || lintObs.kind === 'unreported')
+            ? html`<div class="kn-notice kn-notice--err" role="alert">Lint 보고서 조회 실패: ${lintObs.kind === 'failed' ? lintObs.error.message : lintObs.reason ?? '응답을 확인할 수 없습니다.'}</div>`
+            : !lintData
             ? html`<span class="dtable-absent">Lint 보고서 불러오는 중…</span>`
             : html`
                 <div class="kn-chips">
@@ -496,9 +505,11 @@ export function WikiTab(props: WorkspaceViewProps) {
         <div class="kn-detail-pad kn-scroll-pad">
           <div class="kn-section-head">
             <h3 class="kn-section-title">Wiki Revision Log</h3>
-            <button type="button" class="btn-ghost" onClick=${() => void loadLog()}>새로고침</button>
+            <button type="button" class="btn-ghost" onClick=${() => loadLog('manual')}>새로고침</button>
           </div>
-          ${!logData
+          ${(logObs.kind === 'failed' || logObs.kind === 'absent' || logObs.kind === 'unreported')
+            ? html`<div class="kn-notice kn-notice--err" role="alert">Wiki 로그 조회 실패: ${logObs.kind === 'failed' ? logObs.error.message : logObs.reason ?? '응답을 확인할 수 없습니다.'}</div>`
+            : !logData
             ? html`<span class="dtable-absent">로그 불러오는 중…</span>`
             : logData.entries.length === 0
               ? html`<span class="dtable-absent">기록된 Wiki 로그가 없습니다.</span>`

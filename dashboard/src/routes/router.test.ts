@@ -83,6 +83,13 @@ describe('Proposal A+ declarative router & RBAC manifest', () => {
     expect(resolveRoute('#account').workspace).toBe('account')
     expect(resolveRoute('#logs').path).toBe('/infra/logs')
     expect(resolveRoute('#board').path).toBe('/knowledge/board')
+    expect(resolveRoute('#board?post=post%2F42&comment=reply')).toMatchObject({
+      path: '/knowledge/board/post%2F42',
+      entityId: 'post/42',
+      query: { post: 'post/42', comment: 'reply' },
+    })
+    expect(resolveRoute('/knowledge/board/explicit?post=legacy').entityId).toBe('explicit')
+    expect(resolveRoute('/monitoring?section=board').path).toBe('/knowledge/board')
   })
 
   it('evaluates RBAC fail-closed across all AuthSession states without speculative 403s', () => {

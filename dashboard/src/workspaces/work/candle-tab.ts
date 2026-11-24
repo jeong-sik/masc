@@ -13,6 +13,7 @@
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type uPlot from 'uplot'
+import { activeWorkspaceId, sessionEpoch } from '../../core/auth'
 import { markViewSynced } from '../../core/observer'
 import { observedAbsent, observedValue, resourceCache } from '../../core/resource-cache'
 import { apiGet, apiGetV2, apiMutate } from '../../core/transport'
@@ -20,18 +21,22 @@ import { err, ok } from '../../lib/result'
 import { KeeperBadge } from '../../components/keeper-badge'
 import {
   DataTable,
+  TargetLockedAction,
   UPlotChart,
   type DataTableColumn,
   type UPlotSeriesSpec,
 } from '../../components/primitives'
 import {
+  asNonEmptyString,
   buildCandleTrendSeries,
   decodeCandleLedger,
   formatMilliCandles,
   formatRelativeTime,
+  isRecord,
   readWorkspacePrecondition,
   type CandleBalanceRow,
   type CandleLedgerData,
+  type ExpectedWorkspace,
   type WorkspaceViewProps,
 } from './types'
 
@@ -40,13 +45,21 @@ const CANDLE_SERIES: readonly UPlotSeriesSpec[] = [
   { label: '감쇠 유통량 (Decayed)', colorToken: '--brass-1', width: 2, fillAlpha: 0.16, unit: 'C' },
 ]
 
+interface GoalCandleObservation {
+  readonly goalId: string
+  readonly workspace: ExpectedWorkspace
+  readonly workspaceId: string
+  readonly epoch: number
+  readonly data: Record<string, unknown>
+}
+
 export function CandleTab(props: WorkspaceViewProps) {
   const [ledger, setLedger] = useState<CandleLedgerData | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [inspectGoalId, setInspectGoalId] = useState(props.entityId ?? '')
-  const [goalCandleData, setGoalCandleData] = useState<Record<string, unknown> | null>(null)
+  const [observation, setObservation] = useState<GoalCandleObservation | null>(null)
   const [goalCandleLoading, setGoalCandleLoading] = useState(false)
   const [goalCandleError, setGoalCandleError] = useState<string | null>(null)
   const [releaseBusy, setReleaseBusy] = useState<string | null>(null)
@@ -88,70 +101,90 @@ export function CandleTab(props: WorkspaceViewProps) {
     void loadLedger('mount')
   }, [loadLedger])
 
-  const inspectGoalCandle = useCallback(async (goalIdRaw: string, externalSignal?: AbortSignal) => {
+  const inspectGoalCandle = useCallback(async (goalIdRaw: string) => {
     const goalId = goalIdRaw.trim()
     if (!goalId) return
     inspectAbortRef.current?.abort()
     const controller = new AbortController()
     inspectAbortRef.current = controller
-    const signal = externalSignal ?? controller.signal
+    const { signal } = controller
+    const workspaceId = activeWorkspaceId.peek()
+    const epoch = sessionEpoch.peek()
 
     setGoalCandleLoading(true)
     setGoalCandleError(null)
-    setGoalCandleData(null)
+    setObservation(null)
     const wsRes = await readWorkspacePrecondition(signal)
     if (signal.aborted) return
-    const params = new URLSearchParams({ goal_id: goalId })
-    if (wsRes.ok) {
-      params.set('expected_base_path', wsRes.value.base_path)
-      params.set('expected_masc_root', wsRes.value.masc_root)
+    if (sessionEpoch.peek() !== epoch) {
+      setGoalCandleLoading(false)
+      return
     }
+    if (!wsRes.ok) {
+      setGoalCandleLoading(false)
+      setGoalCandleError(wsRes.error.message)
+      return
+    }
+    const workspace = { base_path: wsRes.value.base_path, masc_root: wsRes.value.masc_root }
+    const params = new URLSearchParams({
+      goal_id: goalId,
+      expected_base_path: workspace.base_path,
+      expected_masc_root: workspace.masc_root,
+    })
     const res = await apiGet<Record<string, unknown>>(`/api/v1/dashboard/goals/candle?${params.toString()}`, { signal })
     if (signal.aborted) return
     setGoalCandleLoading(false)
+    if (sessionEpoch.peek() !== epoch) return
     if (!res.ok) {
       setGoalCandleError(res.error.message)
-      return
+    } else if (!isRecord(res.value) || res.value.goal_id !== goalId) {
+      setGoalCandleError('요청한 Goal의 Candle 지급 상태를 확인할 수 없습니다.')
+    } else {
+      setObservation({ goalId, workspace, workspaceId, epoch, data: res.value })
     }
-    setGoalCandleData(res.value)
   }, [])
 
   useEffect(() => {
     if (props.entityId) {
-      const controller = new AbortController()
       setInspectGoalId(props.entityId)
-      void inspectGoalCandle(props.entityId, controller.signal)
-      return () => {
-        controller.abort()
-      }
+      void inspectGoalCandle(props.entityId)
     }
-    return undefined
+    return () => inspectAbortRef.current?.abort()
   }, [props.entityId, inspectGoalCandle])
 
-  const handleReleaseHold = async (goalId: string) => {
-    const trimmed = goalId.trim()
-    if (!trimmed) return
-    setReleaseBusy(trimmed)
+  const currentObservation = observation?.goalId === inspectGoalId.trim() ? observation : null
+  const observedLedger = currentObservation?.data.ledger
+  const payout = isRecord(observedLedger) && observedLedger.state === 'observed' ? observedLedger.payout : null
+  const held = isRecord(payout) && payout.state === 'held' && payout.origin === 'stored' ? payout : null
+  const heldRequestId = asNonEmptyString(held?.request_id)
+  const heldVerificationId = asNonEmptyString(held?.verification_run_id)
+
+  const handleReleaseHold = async (target: GoalCandleObservation, requestId: string, verificationRunId: string) => {
+    if (releaseBusy !== null || sessionEpoch.peek() !== target.epoch
+        || activeWorkspaceId.peek() !== target.workspaceId || currentObservation !== target) return
+    const { goalId } = target
+    setReleaseBusy(goalId)
     setReleaseFeedback(null)
     const res = await apiMutate<Record<string, unknown>>(
       'POST',
       '/api/v1/dashboard/goals/candle/hold/release',
-      { goal_id: trimmed },
+      {
+        goal_id: goalId,
+        expected_workspace: target.workspace,
+        expected_hold: { request_id: requestId, verification_run_id: verificationRunId },
+      },
     )
     setReleaseBusy(null)
-    if (!res.ok) {
-      setReleaseFeedback({ kind: 'err', message: `보류 해제 실패 (${trimmed}): ${res.error.message}` })
+    if (sessionEpoch.peek() !== target.epoch) return
+    if (!res.ok || !isRecord(res.value) || res.value.outcome !== 'released' || res.value.goal_id !== goalId) {
+      const detail = res.ok ? '서버가 보류 해제를 확인하지 않았습니다.' : res.error.message
+      setReleaseFeedback({ kind: 'err', message: `보류 해제 실패 (${goalId}): ${detail}` })
+      await inspectGoalCandle(goalId)
       return
     }
-    setReleaseFeedback({
-      kind: 'ok',
-      message: `Goal ${trimmed} Candle 지급 보류 해제됨 (${String(res.value.outcome ?? 'released')})`,
-    })
+    setReleaseFeedback({ kind: 'ok', message: `Goal ${goalId} Candle 지급 보류 해제됨` })
     resourceCache.invalidateTopic('candle')
-    await loadLedger('manual')
-    if (inspectGoalId.trim() === trimmed) {
-      await inspectGoalCandle(trimmed)
-    }
+    await Promise.all([loadLedger('manual'), inspectGoalCandle(goalId)])
   }
 
   const chartData = useMemo<uPlot.AlignedData>(() => {
@@ -349,30 +382,52 @@ export function CandleTab(props: WorkspaceViewProps) {
               class="wk-input wk-flex-input"
               placeholder="Goal ID로 지급 상태 조회 (GET /api/v1/dashboard/goals/candle)…"
               value=${inspectGoalId}
-              onInput=${(e: Event) => setInspectGoalId((e.target as HTMLInputElement).value)}
+              disabled=${releaseBusy !== null}
+              onInput=${(e: Event) => {
+                inspectAbortRef.current?.abort()
+                setInspectGoalId((e.target as HTMLInputElement).value)
+                setObservation(null)
+                setGoalCandleLoading(false)
+                setGoalCandleError(null)
+              }}
               aria-label="Goal Candle 조회 ID"
             />
             <button
               type="button"
               class="btn-ghost"
-              disabled=${goalCandleLoading || !inspectGoalId.trim()}
+              disabled=${goalCandleLoading || releaseBusy !== null || !inspectGoalId.trim()}
               onClick=${() => void inspectGoalCandle(inspectGoalId)}
             >
               ${goalCandleLoading ? '조회 중…' : 'Goal 지급 관측'}
             </button>
-            <button
-              type="button"
-              class="wk-btn-warn"
-              disabled=${releaseBusy !== null || !inspectGoalId.trim()}
-              onClick=${() => void handleReleaseHold(inspectGoalId)}
-            >
-              ${releaseBusy ? '해제 중…' : 'Hold Release 실행'}
-            </button>
           </div>
 
           ${goalCandleError && html`<div class="wk-notice wk-notice--err" role="alert">${goalCandleError}</div>`}
-          ${goalCandleData && html`
-            <pre class="wk-code-preview">${JSON.stringify(goalCandleData, null, 2)}</pre>
+          ${currentObservation && html`
+            <pre class="wk-code-preview">${JSON.stringify(currentObservation.data, null, 2)}</pre>
+          `}
+
+          ${currentObservation && heldRequestId && heldVerificationId && html`
+            <${TargetLockedAction}
+              target=${{
+                workspaceId: currentObservation.workspaceId,
+                keeper: '—',
+                requestId: heldRequestId,
+                revision: heldVerificationId,
+              }}
+              lockedEpoch=${currentObservation.epoch}
+              onRefresh=${() => void inspectGoalCandle(currentObservation.goalId)}
+            >
+              <p>Goal <code>${currentObservation.goalId}</code> · Candle 지급 보류 중</p>
+              <button
+                type="button"
+                class="wk-btn-warn"
+                disabled=${releaseBusy !== null}
+                onClick=${() => void handleReleaseHold(currentObservation, heldRequestId, heldVerificationId)}
+              >
+                ${releaseBusy ? '해제 중…' : 'Hold Release'}
+              </button>
+            </${TargetLockedAction}>
           `}
 
           ${ledger.diagnostics.items.length === 0
@@ -397,23 +452,14 @@ export function CandleTab(props: WorkspaceViewProps) {
                         <button
                           type="button"
                           class="btn-ghost"
+                          disabled=${releaseBusy !== null}
                           onClick=${() => {
                             setInspectGoalId(item.goalId)
                             void inspectGoalCandle(item.goalId)
                           }}
                         >
-                          관측
+                          ${item.kind === 'candidate_window_held' ? '보류 확인' : '관측'}
                         </button>
-                        ${item.kind === 'candidate_window_held' && html`
-                          <button
-                            type="button"
-                            class="wk-btn-warn"
-                            disabled=${releaseBusy !== null}
-                            onClick=${() => void handleReleaseHold(item.goalId)}
-                          >
-                            Hold Release
-                          </button>
-                        `}
                       </div>
                     </div>
                   `)}

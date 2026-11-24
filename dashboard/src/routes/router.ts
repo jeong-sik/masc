@@ -319,6 +319,9 @@ function normalizeRawInput(raw: string): { readonly pathname: string; readonly q
   }
 
   const lower = pathname.toLowerCase()
+  if ((lower === '/monitoring' || lower === '/monitor') && query.section === 'board') {
+    return { pathname: '/knowledge/board', query }
+  }
   const aliased = LEGACY_PATH_ALIASES[lower]
   if (aliased) {
     return { pathname: aliased, query }
@@ -368,7 +371,8 @@ export function resolveRoute(rawInput: string): ResolvedRoute {
     const valid = WORKSPACE_NAV_BY_ID.knowledge.subtabs
     const requested = (segments[1] ?? 'board').toLowerCase()
     const tab = valid.find((t) => t.id === requested) ?? valid[0]!
-    const entityId = segments[2] ? decodeURIComponent(segments[2]) : undefined
+    const entityId = segments[2] ? decodeURIComponent(segments[2])
+      : tab.id === 'board' ? query.post || undefined : undefined
     return {
       path: entityId ? `/knowledge/${tab.id}/${encodeURIComponent(entityId)}` : tab.path,
       workspace: 'knowledge',

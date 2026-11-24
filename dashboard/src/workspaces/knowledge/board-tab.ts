@@ -232,14 +232,17 @@ export function BoardTab(props: WorkspaceViewProps) {
       setBundle(obs.data)
       markViewSynced()
       setSelectedPostId((prev) => {
-        if (props.entityId && obs.data.posts.some((p) => p.id === props.entityId)) return props.entityId
-        if (prev && obs.data.posts.some((p) => p.id === prev)) return prev
+        if (prev && (prev === props.entityId || obs.data.posts.some((p) => p.id === prev))) return prev
         return obs.data.posts[0]?.id ?? null
       })
     } else if (obs.kind === 'failed') {
       setLoadError(obs.error.message)
     }
   }, [sortBy, signalOnly, selectedHearth, props.entityId, isMultiAccount])
+
+  useEffect(() => {
+    if (props.entityId) setSelectedPostId(props.entityId)
+  }, [props.entityId])
 
   useEffect(() => {
     void loadBoard('mount')
@@ -831,7 +834,15 @@ export function BoardTab(props: WorkspaceViewProps) {
       hasSelection=${activePost !== null}
       masterLabel="게시글 목록"
       detailLabel="게시글 상세"
-      emptyDetail=${html`<div class="kn-detail-pad"><span class="dtable-absent">게시글을 선택하세요.</span></div>`}
+      emptyDetail=${html`
+        <div class="kn-detail-pad">
+          ${selectedPostId
+            ? (detailLoading || loading
+                ? html`<span class="dtable-absent">게시글 불러오는 중…</span>`
+                : html`<div class="kn-notice kn-notice--err" role="alert">게시글 <code>${selectedPostId}</code>을 확인할 수 없습니다.</div>`)
+            : html`<span class="dtable-absent">게시글을 선택하세요.</span>`}
+        </div>
+      `}
     />
   `
 }

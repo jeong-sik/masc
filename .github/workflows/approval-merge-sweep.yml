@@ -54,5 +54,9 @@ jobs:
       - name: Run the merge worker on every approved scope still open
         env:
           GH_TOKEN: ${{ github.token }}
+          # task-4046: a frozen repository gets no sweep worker runs. The vars
+          # context needs no extra permission, unlike the variables API the
+          # script falls back to when this is empty.
+          MASC_RELEASE_FREEZE: ${{ vars.MASC_RELEASE_FREEZE }}
         # An empty --pr (the scheduled sweep) walks every approved scope.
         run: python3 scripts/review/approval-merge-sweep.py --pr '${{ inputs.pr }}'

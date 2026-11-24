@@ -1243,6 +1243,11 @@ let toggle_board_pin ~now (m : Model.t) =
         ] )
   | None -> (m, [])
 
+let keeper_is_offline = function
+  | Wire_fleet.Keeper_offline -> true
+  | Keeper_healthy | Keeper_working | Keeper_idle | Keeper_degraded
+  | Keeper_recovering | Keeper_failing | Keeper_paused | Keeper_booting -> false
+
 let selected_keeper_for_lifecycle (m : Model.t) :
     Wire_fleet.keeper_summary option =
   match Model.active_dive m with
@@ -5839,7 +5844,7 @@ and execute_action ~now (m : Model.t) action =
                             };
                       };
                   ] )
-            | Some { health = Wire_fleet.Keeper_offline; _ } ->
+            | Some k when keeper_is_offline k.health ->
                 ( Model.with_toast ~now ~level:Model.Toast_info
                     (Say.make ~ko:("키퍼 기동 요청: @" ^ name)
                        ~en:("Booting keeper: @" ^ name))
@@ -6011,7 +6016,7 @@ and execute_action ~now (m : Model.t) action =
                                 };
                           };
                       ] )
-                | Some ({ health = Wire_fleet.Keeper_offline; _ } as k) ->
+                | Some k when keeper_is_offline k.health ->
                     ( Model.with_toast ~now ~level:Model.Toast_info
                         (Say.make ~ko:("키퍼 기동 요청: @" ^ k.name)
                            ~en:("Booting keeper: @" ^ k.name))
@@ -7019,11 +7024,10 @@ and execute_action ~now (m : Model.t) action =
                 else
                   let in_keeper_config =
                     match Model.active_dive m with
-                    | Some (Nav.Dive_keeper { tab = Nav.Keeper_config; _ }) ->
-                        true
+                    | Some (Nav.Dive_keeper { tab; _ }) ->
+                        Nav.equal_keeper_tab tab Nav.Keeper_config
                     | Some
-                        ( Nav.Dive_keeper _
-                        | Nav.Dive_work _
+                        ( Nav.Dive_work _
                         | Nav.Dive_knowledge _
                         | Nav.Dive_runtime _
                         | Nav.Dive_infra _ ) ->

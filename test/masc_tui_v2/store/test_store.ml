@@ -17857,7 +17857,7 @@ let test_keeper_lifecycle_and_addon_crud_requests () =
       (Msg.Http_reply
          {
            epoch = m_keepers0.epoch;
-           reply = Msg.Reply_keepers (Ok (roster_of [ k_paused; k_offline; k_live ]));
+           reply = Msg.Reply_keepers_roster (Ok (roster_of [ k_paused; k_offline; k_live ]));
          })
   in
   (* [a] on paused keeper alpha emits Keeper_resume immediately *)

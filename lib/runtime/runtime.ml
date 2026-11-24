@@ -3931,10 +3931,8 @@ let edit_runtime_lanes ?runtime_config_path prepared =
   Ok (attach_lock_warnings locked.warnings receipt)
 ;;
 
-let set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision ~lane_id ~runtime_ids () =
+let edit_runtime_lane_source ?runtime_config_path ?expected_source_revision edit =
   let invalid detail = Lane_set_invalid detail in
-  let* lane_id = validated_lane_id lane_id |> Result.map_error invalid in
-  let* runtime_ids = validated_lane_candidates runtime_ids |> Result.map_error invalid in
   let* path = runtime_config_path_result ?runtime_config_path () |> Result.map_error invalid in
   let* locked =
     with_runtime_config_lock_using File_lock_eio.with_durable_lock_observed path
@@ -3944,10 +3942,6 @@ let set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision ~
            |> Result.map_error invalid
          in
          let* content = load_file_result path |> Result.map_error invalid in
-         let* _config =
-           Runtime_toml.parse_string content
-           |> Result.map_error (fun errors -> invalid (runtime_parse_errors_to_string errors))
-         in
          let observed =
            config_source_revision_to_string
              (config_observation ~path content).source_revision
@@ -3958,9 +3952,12 @@ let set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision ~
              Error (Lane_set_revision_conflict { expected; observed })
            | Some _ | None -> Ok ()
          in
-         write_lane_candidates ~content ~lane_id ~runtime_ids
-         |> commit_runtime_config_text ~path
-         |> Result.map_error invalid)
+         let* config =
+           Runtime_toml.parse_string content
+           |> Result.map_error (fun errors -> invalid (runtime_parse_errors_to_string errors))
+         in
+         let* next = edit ~content config |> Result.map_error invalid in
+         commit_runtime_config_text ~path next |> Result.map_error invalid)
     |> Result.map_error invalid
   in
   let* receipt =
@@ -3969,11 +3966,42 @@ let set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision ~
     | Error error ->
       List.iter
         (function Config_lock_release_unconfirmed detail ->
-          Log.Misc.warn "runtime lane candidate edit lock release unconfirmed: %s" detail)
+          Log.Misc.warn "runtime lane source edit lock release unconfirmed: %s" detail)
         locked.warnings;
       Error error
   in
   Ok (attach_lock_warnings locked.warnings receipt)
+;;
+
+let set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision ~lane_id ~runtime_ids () =
+  let invalid detail = Lane_set_invalid detail in
+  let* lane_id = validated_lane_id lane_id |> Result.map_error invalid in
+  let* runtime_ids = validated_lane_candidates runtime_ids |> Result.map_error invalid in
+  edit_runtime_lane_source ?runtime_config_path ?expected_source_revision
+    (fun ~content _ -> Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
+;;
+
+let remove_runtime_lane_if_revision ?runtime_config_path ~expected_source_revision ~lane_id () =
+  let* edit =
+    Lane_edit.remove ~lane_id
+    |> Result.map_error (fun error -> Lane_set_invalid (Lane_edit.error_to_string error))
+  in
+  edit_runtime_lane_source ?runtime_config_path ~expected_source_revision
+    (fun ~content config ->
+      Lane_edit.plan ~content config edit
+      |> Result.map_error Lane_edit.error_to_string)
+;;
+
+let set_runtime_media_failover_if_revision ?runtime_config_path ~expected_source_revision ~runtime_ids () =
+  let runtime_ids = List.map String.trim runtime_ids in
+  if List.exists (String.equal "") runtime_ids then
+    Error (Lane_set_invalid "runtime_ids must not contain empty entries")
+  else if List.exists contains_newline runtime_ids then
+    Error (Lane_set_invalid "runtime_ids must not contain newlines")
+  else
+    edit_runtime_lane_source ?runtime_config_path ~expected_source_revision
+      (fun ~content _ ->
+        Ok (update_runtime_string_array_text content ~key:"media_failover" ~values:runtime_ids))
 ;;
 
 let create_runtime_lane ?runtime_config_path ~lane_id ~runtime_ids () =

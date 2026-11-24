@@ -945,8 +945,15 @@ let open_runtime_lane_create_modal (m : Model.t) =
   in
   (m1, cmds1 @ rev_cmds)
 
-let open_runtime_lane_edit_modal (m : Model.t)
+let open_runtime_lane_edit_modal ~now (m : Model.t)
     (lane : Wire_runtime.failover_lane) =
+  if String.equal lane.id "default" then
+    ( Model.with_toast ~now ~level:Model.Toast_info
+        (Say.make ~ko:"기본 라우트는 런타임 설정에서 변경하세요"
+           ~en:"Change the default route in Runtime Settings")
+        m
+    , [] )
+  else (
   let exact_output, bare_id =
     if String.starts_with ~prefix:"exact/" lane.id then
       (true, String.sub lane.id 6 (String.length lane.id - 6))
@@ -984,7 +991,7 @@ let open_runtime_lane_edit_modal (m : Model.t)
     | None ->
         [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_config_raw } ]
   in
-  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, rev_cmds)
+  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, rev_cmds))
 
 let open_runtime_lane_delete_modal ~now (m : Model.t)
     (lane : Wire_runtime.failover_lane) =
@@ -5701,7 +5708,7 @@ and execute_action ~now (m : Model.t) action =
                     , [] ))
             | Some (Nav.Dive_infra (Nav.Lane_dive lane_id)) -> (
                 match find_resolved_lane m lane_id with
-                | Some lane -> open_runtime_lane_edit_modal m lane
+                | Some lane -> open_runtime_lane_edit_modal ~now m lane
                 | None ->
                     ( Model.with_toast ~now ~level:Model.Toast_warning
                         (Say.make ~ko:("레인을 찾을 수 없습니다: " ^ lane_id)
@@ -5813,7 +5820,7 @@ and execute_action ~now (m : Model.t) action =
                        Nav.Runtime_failover_lanes
                 then (
                   match Runtime_store.selected_lane m.runtime with
-                  | Some lane -> open_runtime_lane_edit_modal m lane
+                  | Some lane -> open_runtime_lane_edit_modal ~now m lane
                   | None ->
                       ( Model.with_toast ~now ~level:Model.Toast_info
                           (Say.make ~ko:"편집할 레인을 선택하세요"

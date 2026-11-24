@@ -14,8 +14,9 @@ type runtime_route_body =
   | Runtime_route_runtime_id of runtime_route_lane * string option
   | Runtime_route_runtime_ids of runtime_route_lane * string list
   | Runtime_route_named_lane_set_if_revision of string * string list * string
+  | Runtime_route_media_failover_set_if_revision of string list * string
   | Runtime_route_lane_created of string * string list
-  | Runtime_route_lane_removed of string
+  | Runtime_route_lane_removed of string * string option
   | Runtime_route_lane_renamed of string * string
   | Runtime_route_exact_slot_appended of Runtime.exact_lane * string
   | Runtime_route_exact_slot_dropped of Runtime.exact_lane * string

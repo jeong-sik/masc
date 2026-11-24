@@ -4524,31 +4524,7 @@ let submit_inline_modal ~now (m : Model.t) =
                       meta.source_revision)
                     (Observed.to_option m.runtime.runtime_config_raw)
                 in
-                let revision_drifted =
-                  if exact_output then false
-                  else
-                    match (opened_revision, current_rev) with
-                    | Some orig, Some cur -> not (String.equal orig cur)
-                    | Some _, None | None, (Some _ | None) -> false
-                in
-                if revision_drifted then
-                  set_modal_error
-                    "Runtime configuration revision changed while editing; close and reopen [e]"
-                else
-                  let expected_source_revision =
-                    if exact_output then None
-                    else
-                      match opened_revision with
-                      | Some rev when Wire_runtime.is_lowercase_sha256_hex rev
-                        ->
-                          Some rev
-                      | Some _ | None -> (
-                          match current_rev with
-                          | Some rev
-                            when Wire_runtime.is_lowercase_sha256_hex rev ->
-                              Some rev
-                          | Some _ | None -> None)
-                  in
+                let submit expected_source_revision =
                   ( mark_submitting m
                   , [
                       Cmd.Http_post
@@ -4563,7 +4539,27 @@ let submit_inline_modal ~now (m : Model.t) =
                                 expected_source_revision;
                               };
                         };
-                    ] ))
+                    ] )
+                in
+                if exact_output then submit None
+                else
+                  match opened_revision, current_rev with
+                  | _, None ->
+                      let m_err, _ =
+                        set_modal_error
+                          "Runtime config revision not loaded yet — refreshing config revision"
+                      in
+                      ( m_err,
+                        [ Cmd.Http_get
+                            { epoch = m.epoch; req = Cmd.Get_runtime_config_raw } ] )
+                  | _, Some cur when not (Wire_runtime.is_lowercase_sha256_hex cur) ->
+                      set_modal_error
+                        "Observed runtime config revision is invalid; press [r] to reload"
+                  | Some original, Some current when String.equal original current ->
+                      submit (Some original)
+                  | _, Some _ ->
+                      set_modal_error
+                        "Runtime configuration revision is unavailable or changed while editing; close and reopen [e]")
           | Form_standard
               (Nav.Runtime_lane_delete { lane_id; opened_revision }) -> (
               let confirm =

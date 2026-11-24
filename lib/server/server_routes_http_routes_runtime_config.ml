@@ -266,6 +266,19 @@ let handle_tui_preference_post state agent_name req reqd body_str =
    body, parsed to a variant, answered by the Runtime writer it names. *)
 let handle_runtime_routing_post state agent_name req reqd body_str =
   let open Runtime_request in
+  let respond_lane_write operation = function
+    | Error error ->
+      let msg = Runtime.lane_set_error_to_string error in
+      audit_runtime_config_write state agent_name ~operation ~text:body_str
+        ~outcome:(Audit_log.Failure msg) ();
+      Keeper_api_types.respond_error
+        ~status:(match error with
+                 | Runtime.Lane_set_revision_conflict _ -> `Conflict
+                 | Runtime.Lane_set_invalid _ -> `Bad_request)
+        ~request:req reqd msg
+    | Ok receipt ->
+      respond_runtime_config_commit state agent_name ~operation ~receipt req reqd
+  in
   match parse_runtime_route_body body_str with
   | Error msg ->
     Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
@@ -323,20 +336,11 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
               (Runtime_named_lane lane_id, runtime_ids))
          ~receipt req reqd)
   | Ok (Runtime_route_named_lane_set_if_revision (lane_id, runtime_ids, revision)) ->
-    let operation = Runtime_config_routing_list (Runtime_named_lane lane_id, runtime_ids) in
-    (match Runtime.set_runtime_lane_candidates ~lane_id ~runtime_ids
-             ~expected_source_revision:revision () with
-     | Error error ->
-       let msg = Runtime.lane_set_error_to_string error in
-       audit_runtime_config_write state agent_name ~operation ~text:body_str
-         ~outcome:(Audit_log.Failure msg) ();
-       Keeper_api_types.respond_error
-         ~status:(match error with
-                  | Runtime.Lane_set_revision_conflict _ -> `Conflict
-                  | Runtime.Lane_set_invalid _ -> `Bad_request)
-         ~request:req reqd msg
-     | Ok receipt ->
-       respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
+    respond_lane_write (Runtime_config_routing_list (Runtime_named_lane lane_id, runtime_ids))
+      (Runtime.set_runtime_lane_candidates ~lane_id ~runtime_ids ~expected_source_revision:revision ())
+  | Ok (Runtime_route_media_failover_set_if_revision (runtime_ids, revision)) ->
+    respond_lane_write (Runtime_config_routing_list (Runtime_media_failover, runtime_ids))
+      (Runtime.set_runtime_media_failover_if_revision ~runtime_ids ~expected_source_revision:revision ())
   | Ok (Runtime_route_runtime_id (Runtime_exact_lane _, _)) ->
     Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd
       "exact-output lane runtime_ids required"
@@ -371,15 +375,17 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
        Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
      | Ok receipt ->
        respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
-  | Ok (Runtime_route_lane_removed lane_id) ->
+  | Ok (Runtime_route_lane_removed (lane_id, revision)) ->
     let operation = Runtime_config_lane_removed lane_id in
-    (match Runtime.remove_runtime_lane ~lane_id () with
-     | Error msg ->
-       audit_runtime_config_write state agent_name ~operation ~text:body_str
-         ~outcome:(Audit_log.Failure msg) ();
-       Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
-     | Ok receipt ->
-       respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
+    let remove =
+      match revision with
+      | Some expected_source_revision ->
+        Runtime.remove_runtime_lane_if_revision ~lane_id ~expected_source_revision ()
+      | None ->
+        Runtime.remove_runtime_lane ~lane_id ()
+        |> Result.map_error (fun detail -> Runtime.Lane_set_invalid detail)
+    in
+    respond_lane_write operation remove
   | Ok (Runtime_route_lane_renamed (lane_id, new_lane_id)) ->
     let operation = Runtime_config_lane_renamed (lane_id, new_lane_id) in
     (match Runtime.rename_runtime_lane ~lane_id ~new_lane_id () with
@@ -621,9 +627,11 @@ module For_testing = struct
         Ok (lane_string lane, "runtime_ids", runtime_ids)
     | Ok (Runtime_route_named_lane_set_if_revision (lane_id, runtime_ids, _)) ->
         Ok (lane_id, "runtime_ids_if_revision", runtime_ids)
+    | Ok (Runtime_route_media_failover_set_if_revision (runtime_ids, _)) ->
+        Ok ("media_failover", "runtime_ids_if_revision", runtime_ids)
     | Ok (Runtime_route_lane_created (lane_id, runtime_ids)) ->
         Ok (lane_id, "create", runtime_ids)
-    | Ok (Runtime_route_lane_removed lane_id) -> Ok (lane_id, "remove", [])
+    | Ok (Runtime_route_lane_removed (lane_id, _)) -> Ok (lane_id, "remove", [])
     | Ok (Runtime_route_lane_renamed (lane_id, new_lane_id)) ->
         Ok (lane_id, "rename", [ new_lane_id ])
     | Ok (Runtime_route_exact_slot_appended (exact, runtime_id)) ->

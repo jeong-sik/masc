@@ -1093,6 +1093,14 @@ val set_runtime_media_failover :
     validate the resulting config, atomically write it, and refresh the
     in-process runtime cache. The list order is preserved. *)
 
+val set_runtime_media_failover_if_revision :
+  ?runtime_config_path:string ->
+  expected_source_revision:string ->
+  runtime_ids:string list ->
+  unit ->
+  (config_commit_receipt, lane_set_error) result
+(** Set media failover order with the same source revision check as a named lane. *)
+
 val set_runtime_lane_candidates :
   ?runtime_config_path:string ->
   ?expected_source_revision:string ->
@@ -1186,6 +1194,15 @@ val remove_runtime_lane :
     removing the lane would either fail the load or silently hand those
     keepers the runtime of the same id. Refused when the file does not declare
     the lane as its own table. *)
+
+val remove_runtime_lane_if_revision :
+  ?runtime_config_path:string ->
+  expected_source_revision:string ->
+  lane_id:string ->
+  unit ->
+  (config_commit_receipt, lane_set_error) result
+(** Remove a named lane only while the source revision still matches, with
+    comparison and publication under the same runtime configuration lock. *)
 
 val set_exact_output_lane_slots :
   ?runtime_config_path:string ->

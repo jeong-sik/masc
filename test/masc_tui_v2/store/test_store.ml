@@ -17028,6 +17028,24 @@ let test_runtime_lane_crud_requests_and_cas () =
   in
   Alcotest.(check bool) "[d] on default lane does not open delete modal" true
     (Option.is_none m_del_default.nav.overlay && Cmd.flatten del_default_cmds = []);
+  let m_edit_default, edit_default_cmds =
+    Update.step ~now:t0 m_lanes (Msg.Key_event (char_key "e"))
+  in
+  Alcotest.(check bool) "[e] on default route skips the candidate editor" true
+    (Option.is_none m_edit_default.inline_modal && Cmd.flatten edit_default_cmds = []);
+  let m_coder_unobserved, _ =
+    Update.step ~now:t0 m_lanes1 (Msg.Key_event (key Keymap.Input.Down))
+  in
+  let m_edit_unobserved, _ =
+    Update.step ~now:t0 m_coder_unobserved (Msg.Key_event (char_key "e"))
+  in
+  let _, edit_unobserved_cmds =
+    Update.step ~now:t0 m_edit_unobserved (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "a named edit without source revision refreshes without writing" true
+    (match Cmd.flatten edit_unobserved_cmds with
+     | [ Cmd.Http_get { req = Cmd.Get_runtime_config_raw; _ } ] -> true
+     | _ -> false);
   let m_coder, _ =
     Update.step ~now:t0 m_lanes (Msg.Key_event (key Keymap.Input.Down))
   in

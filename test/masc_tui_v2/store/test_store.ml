@@ -4534,6 +4534,30 @@ let test_nav_fix1_keepers_grouped_order_collapse_and_resync () =
   Alcotest.(check (option string))
     "stepping off collapsed header clears selected_collapsed_company" None
     f_past_collapsed.selected_collapsed_company;
+  (* A live roster refresh must not leave a ghost selected_collapsed_company: the
+     header selection survives only while that company still has a nav row. *)
+  let raw_without_beta =
+    List.filter
+      (fun (k : Wire_fleet.keeper_summary) ->
+        not (String.equal k.company "org-beta"))
+      raw_ks
+  in
+  let f_beta_vanished =
+    Fleet_store.apply_keepers ~observed_at:t1 raw_without_beta f_collapsed
+  in
+  Alcotest.(check (option string))
+    "roster refresh dropping the collapsed company clears selected_collapsed_company"
+    None f_beta_vanished.selected_collapsed_company;
+  let f_roster_empty = Fleet_store.apply_keepers ~observed_at:t1 [] f_collapsed in
+  Alcotest.(check (option string))
+    "empty roster refresh clears selected_collapsed_company" None
+    f_roster_empty.selected_collapsed_company;
+  let f_roster_kept =
+    Fleet_store.apply_keepers ~observed_at:t1 (List.rev raw_ks) f_collapsed
+  in
+  Alcotest.(check (option string))
+    "roster refresh keeping the collapsed company keeps selected_collapsed_company"
+    (Some "org-beta") f_roster_kept.selected_collapsed_company;
   (* Collapsing ALL companies still leaves collapsed headers navigable via companies_nav_rows *)
   let f_all_collapsed =
     f0

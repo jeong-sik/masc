@@ -33,9 +33,21 @@ type incident = {
   status : incident_status;
 }
 
+type timeout_phase =
+  | Timeout_connect
+  | Timeout_connect_cooldown
+  | Timeout_response
+  | Timeout_stream_header
+  | Timeout_stream_idle
+
 type transport_error =
   | Connect_refused
   | Timeout
+  | Timeout_detail of {
+      phase : timeout_phase;
+      after_sec : float option;
+      path : string option;
+    }
   | Http_status of int
   | Stream_eof
   | Protocol_error of string
@@ -77,6 +89,45 @@ let is_transport_live = function
   | Connecting | Reconnecting _ | Stale _ | Disconnected _
   | Workspace_mismatch _ ->
       false
+
+let is_timeout = function
+  | Timeout | Timeout_detail _ -> true
+  | Connect_refused | Http_status _ | Stream_eof | Protocol_error _
+  | Other_io _ ->
+      false
+
+let timeout_detail_say ~phase ~after_sec ~path =
+  let sec_opt =
+    match after_sec with
+    | Some s when Float.is_finite s && s > 0.0 -> Some (Printf.sprintf "%.1fs" s)
+    | Some _ | None -> None
+  in
+  let path_opt =
+    match path with
+    | Some p ->
+        let trimmed = String.trim p in
+        if String.equal trimmed "" then None else Some trimmed
+    | None -> None
+  in
+  let suffix =
+    match (sec_opt, path_opt) with
+    | Some s, Some p -> Printf.sprintf " (%s · %s)" s p
+    | Some s, None -> Printf.sprintf " (%s)" s
+    | None, Some p -> Printf.sprintf " (%s)" p
+    | None, None -> ""
+  in
+  let ko_base, en_base =
+    match phase with
+    | Timeout_connect -> ("연결 시간 초과", "Connect timed out")
+    | Timeout_connect_cooldown ->
+        ("연결 쿨다운 대기 중", "Connect cooldown active")
+    | Timeout_response -> ("응답 시간 초과", "Response timed out")
+    | Timeout_stream_header ->
+        ("스트림 응답 대기 초과", "Stream header timed out")
+    | Timeout_stream_idle ->
+        ("스트림 유휴 시간 초과", "Stream idle timed out")
+  in
+  Say.make ~ko:(ko_base ^ suffix) ~en:(en_base ^ suffix)
 
 let equal_attention_kind a b =
   match a, b with
@@ -144,21 +195,65 @@ let equal_incident a b =
   && String.equal a.detail b.detail
   && equal_incident_status a.status b.status
 
+let equal_timeout_phase a b =
+  match (a, b) with
+  | Timeout_connect, Timeout_connect
+  | Timeout_connect_cooldown, Timeout_connect_cooldown
+  | Timeout_response, Timeout_response
+  | Timeout_stream_header, Timeout_stream_header
+  | Timeout_stream_idle, Timeout_stream_idle ->
+      true
+  | ( Timeout_connect
+    , ( Timeout_connect_cooldown | Timeout_response | Timeout_stream_header
+      | Timeout_stream_idle ) )
+  | ( Timeout_connect_cooldown
+    , ( Timeout_connect | Timeout_response | Timeout_stream_header
+      | Timeout_stream_idle ) )
+  | ( Timeout_response
+    , ( Timeout_connect | Timeout_connect_cooldown | Timeout_stream_header
+      | Timeout_stream_idle ) )
+  | ( Timeout_stream_header
+    , ( Timeout_connect | Timeout_connect_cooldown | Timeout_response
+      | Timeout_stream_idle ) )
+  | ( Timeout_stream_idle
+    , ( Timeout_connect | Timeout_connect_cooldown | Timeout_response
+      | Timeout_stream_header ) ) ->
+      false
+
 let equal_transport_error a b =
   match a, b with
   | Connect_refused, Connect_refused
   | Timeout, Timeout
   | Stream_eof, Stream_eof ->
       true
+  | Timeout_detail x, Timeout_detail y ->
+      equal_timeout_phase x.phase y.phase
+      && Option.equal Float.equal x.after_sec y.after_sec
+      && Option.equal String.equal x.path y.path
   | Http_status x, Http_status y -> Int.equal x y
   | Protocol_error x, Protocol_error y | Other_io x, Other_io y ->
       String.equal x y
-  | Connect_refused, (Timeout | Http_status _ | Stream_eof | Protocol_error _ | Other_io _)
-  | Timeout, (Connect_refused | Http_status _ | Stream_eof | Protocol_error _ | Other_io _)
-  | Http_status _, (Connect_refused | Timeout | Stream_eof | Protocol_error _ | Other_io _)
-  | Stream_eof, (Connect_refused | Timeout | Http_status _ | Protocol_error _ | Other_io _)
-  | Protocol_error _, (Connect_refused | Timeout | Http_status _ | Stream_eof | Other_io _)
-  | Other_io _, (Connect_refused | Timeout | Http_status _ | Stream_eof | Protocol_error _) ->
+  | ( Connect_refused
+    , ( Timeout | Timeout_detail _ | Http_status _ | Stream_eof
+      | Protocol_error _ | Other_io _ ) )
+  | ( Timeout
+    , ( Connect_refused | Timeout_detail _ | Http_status _ | Stream_eof
+      | Protocol_error _ | Other_io _ ) )
+  | ( Timeout_detail _
+    , ( Connect_refused | Timeout | Http_status _ | Stream_eof
+      | Protocol_error _ | Other_io _ ) )
+  | ( Http_status _
+    , ( Connect_refused | Timeout | Timeout_detail _ | Stream_eof
+      | Protocol_error _ | Other_io _ ) )
+  | ( Stream_eof
+    , ( Connect_refused | Timeout | Timeout_detail _ | Http_status _
+      | Protocol_error _ | Other_io _ ) )
+  | ( Protocol_error _
+    , ( Connect_refused | Timeout | Timeout_detail _ | Http_status _
+      | Stream_eof | Other_io _ ) )
+  | ( Other_io _
+    , ( Connect_refused | Timeout | Timeout_detail _ | Http_status _
+      | Stream_eof | Protocol_error _ ) ) ->
       false
 
 let equal_source_freshness a b =

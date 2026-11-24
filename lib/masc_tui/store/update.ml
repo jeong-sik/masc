@@ -225,6 +225,7 @@ let apply_server_health ~now (m : Model.t)
   | Error
       (( Msg.Transport
            ( Health.Timeout
+           | Health.Timeout_detail _
            | Health.Http_status _
            | Health.Stream_eof
            | Health.Protocol_error _

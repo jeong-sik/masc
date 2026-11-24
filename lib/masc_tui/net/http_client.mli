@@ -74,8 +74,23 @@ val classify_response :
 (** Map HTTP status + body into [Ok body], [Error (Workspace_mismatch ...)] on
     [409] workspace mismatch, or [Error (Http_error ...)]. *)
 
+val sanitize_timeout_path : string -> string
+(** Sanitize an endpoint path or URL for timeout diagnostics: strip ASCII
+    control bytes, cut query strings ([?...]) and fragments ([#...]), and drop
+    any RFC 3986 [<scheme>://authority] or protocol-relative [//authority]
+    prefix so credentials, tokens, or query parameters never leak into error
+    strings or toasts. *)
+
 val transport_error_of_failure :
-  Masc_http_client.failure -> Health.transport_error
+  ?path:string ->
+  ?streaming:bool ->
+  Masc_http_client.failure ->
+  Health.transport_error
+(** Map a {!Masc_http_client.failure} into {!Health.transport_error},
+    preserving exact timeout phase, duration, and sanitized [?path]. When
+    [streaming = true], {!Masc_http_client.Pool.Timed_out} maps to
+    {!Health.Timeout_stream_header}; otherwise it maps to
+    {!Health.Timeout_response}. *)
 
 val should_autostart_server :
   contact:Masc_server_lifecycle.contact -> already_attempted:bool -> bool
@@ -107,6 +122,7 @@ val post_stream :
   io:Io_domain.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?idle_timeout_sec:float ->
+  ?header_timeout_sec:float ->
   ?extra_headers:(string * string) list ->
   content_type:string ->
   body:string ->

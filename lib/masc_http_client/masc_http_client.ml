@@ -143,12 +143,13 @@ let request ?clock ?timeout_sec ?max_body_bytes ?resolved_addresses ~method_ ~ur
     ?resolved_addresses ~method_ ~url ~headers ?body ()
   |> Result.map_error (fun error -> Request_failed error)
 
-let request_stream ~retention ~clock ~idle_timeout_sec ~method_ ~url ~headers
-    ?body ?on_response ~on_chunk () =
+let request_stream ~retention ~clock ~idle_timeout_sec ?header_timeout_seconds
+    ~method_ ~url ~headers ?body ?on_response ~on_chunk () =
   let headers = ensure_default_headers headers in
   with_pool @@ fun pool ->
-  Pool.request_streaming pool ~retention ~clock ~idle_timeout_sec ~method_ ~url
-    ~headers ?body ?on_response ~on_chunk ()
+  Pool.request_streaming pool ~retention ~clock ~idle_timeout_sec
+    ?header_timeout_seconds ~method_ ~url ~headers ?body ?on_response ~on_chunk
+    ()
   |> Result.map_error (fun error -> Request_failed error)
 
 let status_and_body = function

@@ -43,6 +43,9 @@ type http_error =
 let http_error_to_string = function
   | Transport Health.Connect_refused -> "connection refused"
   | Transport Health.Timeout -> "request timed out"
+  | Transport (Health.Timeout_detail { phase; after_sec; path }) ->
+      Say.resolve Say.Lang_en
+        (Health.timeout_detail_say ~phase ~after_sec ~path)
   | Transport (Health.Http_status code) -> Printf.sprintf "HTTP %d" code
   | Transport Health.Stream_eof -> "stream ended unexpectedly"
   | Transport (Health.Protocol_error msg) -> "protocol error: " ^ msg
@@ -182,26 +185,128 @@ let classify_response ep ~status ~body =
     | _, None ->
         Error (Http_error { status; body; api_error })
 
-let transport_error_of_connect_failure = function
-  | Masc_http_client.Pool.Establishment_timeout -> Health.Timeout
+let strip_ascii_control s =
+  let len = String.length s in
+  let buf = Buffer.create len in
+  for i = 0 to len - 1 do
+    let c = s.[i] in
+    let code = Char.code c in
+    if code >= 0x20 && code <> 0x7F then Buffer.add_char buf c
+  done;
+  Buffer.contents buf
+
+let is_uri_scheme_start = function 'A' .. 'Z' | 'a' .. 'z' -> true | _ -> false
+
+let is_uri_scheme_char = function
+  | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '+' | '-' | '.' -> true
+  | _ -> false
+
+let uri_authority_start s =
+  let len = String.length s in
+  if len >= 2 && Char.equal s.[0] '/' && Char.equal s.[1] '/' then Some 2
+  else if len >= 4 && is_uri_scheme_start s.[0] then
+    let rec scan i =
+      if
+        i + 2 < len
+        && Char.equal s.[i] ':'
+        && Char.equal s.[i + 1] '/'
+        && Char.equal s.[i + 2] '/'
+      then Some (i + 3)
+      else if i < len && is_uri_scheme_char s.[i] then scan (i + 1)
+      else None
+    in
+    scan 1
+  else None
+
+let sanitize_timeout_path path =
+  let cleaned = String.trim (strip_ascii_control path) in
+  let len = String.length cleaned in
+  let rec cutoff i =
+    if i >= len then len
+    else
+      match cleaned.[i] with
+      | '?' | '#' -> i
+      | _ -> cutoff (i + 1)
+  in
+  let before_qf = String.sub cleaned 0 (cutoff 0) in
+  let path_only =
+    match uri_authority_start before_qf with
+    | None -> before_qf
+    | Some auth_idx ->
+        let blen = String.length before_qf in
+        if auth_idx >= blen then ""
+        else
+          match String.index_from_opt before_qf auth_idx '/' with
+          | Some slash_idx -> String.sub before_qf slash_idx (blen - slash_idx)
+          | None -> ""
+  in
+  String.trim path_only
+
+let sanitized_path_opt = function
+  | None -> None
+  | Some p ->
+      let clean = sanitize_timeout_path p in
+      if String.equal clean "" then None else Some clean
+
+let transport_error_of_connect_failure ~path ~cooldown_sec = function
+  | Masc_http_client.Pool.Establishment_timeout -> (
+      match cooldown_sec with
+      | None ->
+          Health.Timeout_detail
+            {
+              phase = Health.Timeout_connect;
+              after_sec =
+                Some
+                  Masc_http_client.Pool.default_config.connect_timeout_seconds;
+              path;
+            }
+      | Some retry_in_seconds ->
+          let sec =
+            if Float.is_finite retry_in_seconds && retry_in_seconds > 0.0 then
+              retry_in_seconds
+            else
+              Masc_http_client.Pool.default_config
+                .connect_failure_cooldown_seconds
+          in
+          Health.Timeout_detail
+            {
+              phase = Health.Timeout_connect_cooldown;
+              after_sec = Some sec;
+              path;
+            })
   | Masc_http_client.Pool.Tcp_failure _ -> Health.Connect_refused
   | Masc_http_client.Pool.No_addresses -> Health.Other_io "no resolved addresses"
   | Masc_http_client.Pool.Dns_failure ex ->
       Health.Other_io ("DNS: " ^ Printexc.to_string ex)
   | Masc_http_client.Pool.Client_failure msg -> Health.Protocol_error msg
 
-let transport_error_of_failure = function
+let transport_error_of_failure ?path ?(streaming = false) = function
   | Masc_http_client.Pool_unavailable ->
       Health.Other_io "HTTP client pool unavailable"
   | Masc_http_client.Request_failed err -> (
+      let clean_path = sanitized_path_opt path in
       match err with
       | Masc_http_client.Pool.Connect_failed { failure; _ } ->
-          transport_error_of_connect_failure failure
-      | Masc_http_client.Pool.Connect_held_back { failure; _ } ->
-          transport_error_of_connect_failure failure
-      | Masc_http_client.Pool.Timed_out _
-      | Masc_http_client.Pool.Idle_timed_out _ ->
-          Health.Timeout
+          transport_error_of_connect_failure ~path:clean_path ~cooldown_sec:None
+            failure
+      | Masc_http_client.Pool.Connect_held_back
+          { failure; retry_in_seconds; _ } ->
+          transport_error_of_connect_failure ~path:clean_path
+            ~cooldown_sec:(Some retry_in_seconds) failure
+      | Masc_http_client.Pool.Timed_out { after_seconds } ->
+          let phase =
+            if streaming then Health.Timeout_stream_header
+            else Health.Timeout_response
+          in
+          Health.Timeout_detail
+            { phase; after_sec = Some after_seconds; path = clean_path }
+      | Masc_http_client.Pool.Idle_timed_out { after_seconds } ->
+          Health.Timeout_detail
+            {
+              phase = Health.Timeout_stream_idle;
+              after_sec = Some after_seconds;
+              path = clean_path;
+            }
       | Masc_http_client.Pool.Body_limit_exceeded { status; _ } ->
           Health.Http_status status
       | Masc_http_client.Pool.Exchange_failed msg -> Health.Protocol_error msg
@@ -221,7 +326,9 @@ let send_raw ~io ~clock ?(timeout_sec = 10.0) ?extra_headers ?content_type
           ?body ())
   in
   match result with
-  | Error failure -> Error (Transport (transport_error_of_failure failure))
+  | Error failure ->
+      Error
+        (Transport (transport_error_of_failure ~path ~streaming:false failure))
   | Ok resp -> classify_response ep ~status:resp.status ~body:resp.body
 
 let decode_body ~decode body =
@@ -240,8 +347,8 @@ let post_raw ~io ~clock ?timeout_sec ?extra_headers ~content_type ~body ep ~path
   send_raw ~io ~clock ?timeout_sec ?extra_headers ~content_type ~method_:`POST
     ~body ep ~path
 
-let post_stream ~io ~clock ?(idle_timeout_sec = 120.0) ?(extra_headers = [])
-    ~content_type ~body ~on_response ~on_chunk ep ~path =
+let post_stream ~io ~clock ?(idle_timeout_sec = 120.0) ?header_timeout_sec
+    ?(extra_headers = []) ~content_type ~body ~on_response ~on_chunk ep ~path =
   let url = build_url ep ~path in
   let headers =
     build_headers
@@ -252,10 +359,13 @@ let post_stream ~io ~clock ?(idle_timeout_sec = 120.0) ?(extra_headers = [])
     Io_domain.run io (fun () ->
         Masc_http_client.request_stream
           ~retention:Masc_http_client.Pool.Discard_body ~clock ~idle_timeout_sec
-          ~method_:`POST ~url ~headers ~body ~on_response ~on_chunk ())
+          ?header_timeout_seconds:header_timeout_sec ~method_:`POST ~url
+          ~headers ~body ~on_response ~on_chunk ())
   in
   match result with
-  | Error failure -> Error (Transport (transport_error_of_failure failure))
+  | Error failure ->
+      Error
+        (Transport (transport_error_of_failure ~path ~streaming:true failure))
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
   | Ok (Masc_http_client.Pool.Buffered resp) -> (
       match classify_response ep ~status:resp.status ~body:resp.body with

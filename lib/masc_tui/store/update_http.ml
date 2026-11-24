@@ -3078,6 +3078,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Msg.Transport
             ( Health.Connect_refused
             | Health.Timeout
+            | Health.Timeout_detail _
             | Health.Http_status _
             | Health.Stream_eof
             | Health.Protocol_error _ )

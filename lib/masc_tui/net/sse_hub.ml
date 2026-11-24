@@ -304,7 +304,8 @@ let run_stream_loop t ~generation ~cancelled (spec : Stream_spec.t) ~sw =
         end
       in
       let ep = Atomic.get t.endpoint in
-      let url = Http_client.build_url ep ~path:(Stream_spec.path spec.kind) in
+      let stream_path = Stream_spec.path spec.kind in
+      let url = Http_client.build_url ep ~path:stream_path in
       let cursor_headers =
         match spec.kind with
         | Stream_spec.Observer ->
@@ -418,7 +419,9 @@ let run_stream_loop t ~generation ~cancelled (spec : Stream_spec.t) ~sw =
       | `Result (Ok (Masc_http_client.Pool.Streamed _)) ->
           schedule_reconnect Health.Stream_eof
       | `Result (Error failure) ->
-          schedule_reconnect (Http_client.transport_error_of_failure failure)
+          schedule_reconnect
+            (Http_client.transport_error_of_failure ~path:stream_path
+               ~streaming:true failure)
     end
   in
   loop ~attempt:0

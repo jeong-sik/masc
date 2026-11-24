@@ -42,9 +42,21 @@ type incident = {
   status : incident_status;
 }
 
+type timeout_phase =
+  | Timeout_connect
+  | Timeout_connect_cooldown
+  | Timeout_response
+  | Timeout_stream_header
+  | Timeout_stream_idle
+
 type transport_error =
   | Connect_refused
   | Timeout
+  | Timeout_detail of {
+      phase : timeout_phase;
+      after_sec : float option;
+      path : string option;
+    }
   | Http_status of int
   | Stream_eof
   | Protocol_error of string
@@ -71,11 +83,22 @@ val live_severity_rank : live_state -> int
 (** Higher values indicate higher operational urgency for sorting rosters. *)
 
 val is_transport_live : source_freshness -> bool
+val is_timeout : transport_error -> bool
+(** [true] for both {!Timeout} and {!Timeout_detail}. *)
+
+val timeout_detail_say :
+  phase:timeout_phase ->
+  after_sec:float option ->
+  path:string option ->
+  Say.t
+(** Format a {!Timeout_detail} phase with optional duration and sanitized path
+    in Korean and English. *)
 
 val equal_attention_kind : attention_kind -> attention_kind -> bool
 val equal_live_state : live_state -> live_state -> bool
 val equal_incident_source : incident_source -> incident_source -> bool
 val equal_incident_status : incident_status -> incident_status -> bool
 val equal_incident : incident -> incident -> bool
+val equal_timeout_phase : timeout_phase -> timeout_phase -> bool
 val equal_transport_error : transport_error -> transport_error -> bool
 val equal_source_freshness : source_freshness -> source_freshness -> bool

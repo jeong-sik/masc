@@ -5541,6 +5541,347 @@ let test_ui_bus_concurrent_no_lost_wakeup () =
     true (Atomic.get bell);
   ignore (Ui_bus.drain bus : (string, int, int) Ui_bus.item list)
 
+let test_timeout_diagnostics_and_sanitization () =
+  (* 1. sanitize_timeout_path strips query strings & fragments cleanly *)
+  Alcotest.(check string) "strip query string"
+    "/api/v1/dashboard/tools"
+    (Http_client.sanitize_timeout_path
+       "/api/v1/dashboard/tools?token=secret&limit=20");
+  Alcotest.(check string) "strip fragment"
+    "/api/v1/dashboard/tools"
+    (Http_client.sanitize_timeout_path "/api/v1/dashboard/tools#frag");
+  Alcotest.(check string) "strip query + fragment"
+    "/api/v1/keepers/alpha/chat/stream"
+    (Http_client.sanitize_timeout_path
+       "  /api/v1/keepers/alpha/chat/stream?token=secret&limit=20#frag  ");
+  Alcotest.(check string) "strip fragment before query"
+    "/api/v1/board"
+    (Http_client.sanitize_timeout_path "/api/v1/board#sec?token=secret");
+  Alcotest.(check string) "preserve clean path"
+    "/api/v1/infra/sandboxes"
+    (Http_client.sanitize_timeout_path "/api/v1/infra/sandboxes");
+  Alcotest.(check string) "query-only becomes empty"
+    ""
+    (Http_client.sanitize_timeout_path "?token=secret");
+  Alcotest.(check string) "fragment-only becomes empty"
+    ""
+    (Http_client.sanitize_timeout_path "#frag");
+  Alcotest.(check string) "empty and whitespace become empty"
+    ""
+    (Http_client.sanitize_timeout_path "   \t\r\n  ");
+  Alcotest.(check string) "full http URL strips host and query"
+    "/api/v1/tools"
+    (Http_client.sanitize_timeout_path "http://host:8935/api/v1/tools?token=abc");
+  Alcotest.(check string) "https URL with userinfo strips credentials, query and fragment"
+    "/api/v1/tools"
+    (Http_client.sanitize_timeout_path
+       "https://user:s3cr3t@host:8443/api/v1/tools?token=abc#frag");
+  Alcotest.(check string) "pathless URL with userinfo returns empty (zero credential leak)"
+    ""
+    (Http_client.sanitize_timeout_path
+       "https://user:s3cr3t@host:8443?token=abc");
+  Alcotest.(check string) "root-only URL with userinfo returns slash"
+    "/"
+    (Http_client.sanitize_timeout_path "https://user:s3cr3t@host:8443/?token=abc");
+  Alcotest.(check string) "protocol-relative URL strips userinfo and host"
+    "/api/v1/tools"
+    (Http_client.sanitize_timeout_path "//user:s3cr3t@host/api/v1/tools");
+  Alcotest.(check string) "pathless protocol-relative URL returns empty"
+    ""
+    (Http_client.sanitize_timeout_path "//user:s3cr3t@host?token=abc");
+  Alcotest.(check string) "custom RFC 3986 scheme strips authority"
+    "/api/v1/tools"
+    (Http_client.sanitize_timeout_path "masc+http-1.0://user:pass@host/api/v1/tools#f");
+  Alcotest.(check string) "ASCII control bytes stripped from path and URL"
+    "/api/v1/tools/clean"
+    (Http_client.sanitize_timeout_path
+       "https://user\r\n:pass@host/api/v1/\x1btools\x00/clean\r\n\x7f?token=abc");
+
+  (* 2. Health.is_timeout, equal_timeout_phase, equal_transport_error *)
+  Alcotest.(check bool) "Health.Timeout is_timeout" true
+    (Health.is_timeout Health.Timeout);
+  let all_phases =
+    [
+      Health.Timeout_connect;
+      Health.Timeout_connect_cooldown;
+      Health.Timeout_response;
+      Health.Timeout_stream_header;
+      Health.Timeout_stream_idle;
+    ]
+  in
+  List.iter
+    (fun phase ->
+      let err =
+        Health.Timeout_detail
+          { phase; after_sec = Some 5.0; path = Some "/api/v1/test" }
+      in
+      Alcotest.(check bool) "Timeout_detail is_timeout" true
+        (Health.is_timeout err);
+      Alcotest.(check bool) "equal_timeout_phase reflexive" true
+        (Health.equal_timeout_phase phase phase);
+      Alcotest.(check bool) "equal_transport_error reflexive" true
+        (Health.equal_transport_error err err);
+      Alcotest.(check bool) "Timeout_detail distinct from legacy Timeout" false
+        (Health.equal_transport_error err Health.Timeout))
+    all_phases;
+  Alcotest.(check bool) "Connect_refused not timeout" false
+    (Health.is_timeout Health.Connect_refused);
+  Alcotest.(check bool) "Http_status 504 not transport timeout" false
+    (Health.is_timeout (Health.Http_status 504));
+  Alcotest.(check bool) "Stream_eof not timeout" false
+    (Health.is_timeout Health.Stream_eof);
+  Alcotest.(check bool) "Other_io not timeout" false
+    (Health.is_timeout (Health.Other_io "timeout"));
+  Alcotest.(check bool) "distinct phases not equal" false
+    (Health.equal_timeout_phase Health.Timeout_connect Health.Timeout_response);
+
+  (* 3. All 5 Pool failure variants map accurately & sanitize paths *)
+  let origin : Masc_http_client.Pool.origin =
+    { scheme = "http"; host = "127.0.0.1"; port = 8935 }
+  in
+  let check_te label expected actual =
+    Alcotest.(check bool) label true
+      (Health.equal_transport_error expected actual)
+  in
+  let te_connect =
+    Http_client.transport_error_of_failure
+      ~path:"/api/v1/dashboard/tools?token=secret&limit=20#frag"
+      (Masc_http_client.Request_failed
+         (Masc_http_client.Pool.Connect_failed
+            {
+              origin;
+              failure = Masc_http_client.Pool.Establishment_timeout;
+              retry = Masc_http_client.Pool.Retry_in 5.0;
+            }))
+  in
+  check_te "Connect_failed Establishment_timeout"
+    (Health.Timeout_detail
+       {
+         phase = Health.Timeout_connect;
+         after_sec = Some 5.0;
+         path = Some "/api/v1/dashboard/tools";
+       })
+    te_connect;
+
+  let te_cooldown =
+    Http_client.transport_error_of_failure
+      ~path:"/api/v1/infra/sandboxes?token=secret"
+      (Masc_http_client.Request_failed
+         (Masc_http_client.Pool.Connect_held_back
+            {
+              origin;
+              failure = Masc_http_client.Pool.Establishment_timeout;
+              retry_in_seconds = 5.0;
+            }))
+  in
+  check_te "Connect_held_back Establishment_timeout (5.0s)"
+    (Health.Timeout_detail
+       {
+         phase = Health.Timeout_connect_cooldown;
+         after_sec = Some 5.0;
+         path = Some "/api/v1/infra/sandboxes";
+       })
+    te_cooldown;
+
+  let te_cooldown_rem =
+    Http_client.transport_error_of_failure ~path:"/api/v1/infra/sandboxes"
+      (Masc_http_client.Request_failed
+         (Masc_http_client.Pool.Connect_held_back
+            {
+              origin;
+              failure = Masc_http_client.Pool.Establishment_timeout;
+              retry_in_seconds = 2.4;
+            }))
+  in
+  check_te "Connect_held_back preserves remaining retry_in_seconds"
+    (Health.Timeout_detail
+       {
+         phase = Health.Timeout_connect_cooldown;
+         after_sec = Some 2.4;
+         path = Some "/api/v1/infra/sandboxes";
+       })
+    te_cooldown_rem;
+
+  let te_response =
+    Http_client.transport_error_of_failure ~streaming:false
+      ~path:"/api/v1/dashboard/tools?keeper=alpha"
+      (Masc_http_client.Request_failed
+         (Masc_http_client.Pool.Timed_out { after_seconds = 30.0 }))
+  in
+  check_te "Timed_out non-streaming -> Timeout_response"
+    (Health.Timeout_detail
+       {
+         phase = Health.Timeout_response;
+         after_sec = Some 30.0;
+         path = Some "/api/v1/dashboard/tools";
+       })
+    te_response;
+
+  let te_stream_hdr =
+    Http_client.transport_error_of_failure ~streaming:true
+      ~path:"/api/v1/keepers/chat/stream?token=secret"
+      (Masc_http_client.Request_failed
+         (Masc_http_client.Pool.Timed_out { after_seconds = 45.0 }))
+  in
+  check_te "Timed_out streaming -> Timeout_stream_header"
+    (Health.Timeout_detail
+       {
+         phase = Health.Timeout_stream_header;
+         after_sec = Some 45.0;
+         path = Some "/api/v1/keepers/chat/stream";
+       })
+    te_stream_hdr;
+
+  let te_stream_idle =
+    Http_client.transport_error_of_failure ~streaming:true
+      ~path:"/mcp?sse_kind=observer&token=secret#frag"
+      (Masc_http_client.Request_failed
+         (Masc_http_client.Pool.Idle_timed_out { after_seconds = 120.0 }))
+  in
+  check_te "Idle_timed_out -> Timeout_stream_idle"
+    (Health.Timeout_detail
+       {
+         phase = Health.Timeout_stream_idle;
+         after_sec = Some 120.0;
+         path = Some "/mcp";
+       })
+    te_stream_idle;
+
+  (* Non-timeout connect failures stay Connect_refused *)
+  check_te "Connect_held_back Tcp_failure stays Connect_refused"
+    Health.Connect_refused
+    (Http_client.transport_error_of_failure ~path:"/health"
+       (Masc_http_client.Request_failed
+          (Masc_http_client.Pool.Connect_held_back
+             {
+               origin;
+               failure = Masc_http_client.Pool.Tcp_failure (Failure "refused");
+               retry_in_seconds = 3.0;
+             })));
+
+  (* 4. KO & EN formatting + http_error_to_string + None omissions *)
+  let check_fmt label phase after_sec path exp_ko exp_en =
+    let say = Health.timeout_detail_say ~phase ~after_sec ~path in
+    Alcotest.(check string) (label ^ " KO") exp_ko (Say.resolve Say.Lang_ko say);
+    Alcotest.(check string) (label ^ " EN") exp_en (Say.resolve Say.Lang_en say);
+    let err =
+      Http_client.Transport (Health.Timeout_detail { phase; after_sec; path })
+    in
+    Alcotest.(check string) (label ^ " http_error_to_string") exp_en
+      (Http_client.http_error_to_string err)
+  in
+  check_fmt "connect" Health.Timeout_connect (Some 5.0)
+    (Some "/api/v1/dashboard/tools")
+    "연결 시간 초과 (5.0s · /api/v1/dashboard/tools)"
+    "Connect timed out (5.0s · /api/v1/dashboard/tools)";
+  check_fmt "cooldown" Health.Timeout_connect_cooldown (Some 5.0)
+    (Some "/api/v1/infra/sandboxes")
+    "연결 쿨다운 대기 중 (5.0s · /api/v1/infra/sandboxes)"
+    "Connect cooldown active (5.0s · /api/v1/infra/sandboxes)";
+  check_fmt "response" Health.Timeout_response (Some 30.0)
+    (Some "/api/v1/dashboard/tools")
+    "응답 시간 초과 (30.0s · /api/v1/dashboard/tools)"
+    "Response timed out (30.0s · /api/v1/dashboard/tools)";
+  check_fmt "stream_header" Health.Timeout_stream_header (Some 45.0)
+    (Some "/api/v1/keepers/chat/stream")
+    "스트림 응답 대기 초과 (45.0s · /api/v1/keepers/chat/stream)"
+    "Stream header timed out (45.0s · /api/v1/keepers/chat/stream)";
+  check_fmt "stream_idle" Health.Timeout_stream_idle (Some 120.0) (Some "/mcp")
+    "스트림 유휴 시간 초과 (120.0s · /mcp)"
+    "Stream idle timed out (120.0s · /mcp)";
+  check_fmt "omit path" Health.Timeout_response (Some 12.0) None
+    "응답 시간 초과 (12.0s)" "Response timed out (12.0s)";
+  check_fmt "omit seconds" Health.Timeout_connect None (Some "/health")
+    "연결 시간 초과 (/health)" "Connect timed out (/health)";
+  check_fmt "omit both" Health.Timeout_stream_idle None None
+    "스트림 유휴 시간 초과" "Stream idle timed out";
+  Alcotest.(check string) "legacy Health.Timeout preserved" "request timed out"
+    (Http_client.http_error_to_string (Http_client.Transport Health.Timeout));
+
+  (* 5. End-to-end loopback timeout test on real Io_domain + Pool:
+     proves send_raw -> Timeout_response and post_stream ?header_timeout_sec ->
+     Timeout_stream_header with sanitized path (no leaked query/fragment). *)
+  Eio_main.run @@ fun env ->
+  Eio.Time.with_timeout_exn env#clock 5.0 @@ fun () ->
+  try
+    Eio.Switch.run @@ fun sw ->
+    let clock = Eio.Stdenv.clock env in
+    let listener =
+      Eio.Net.listen ~sw ~backlog:4 env#net
+        (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+    in
+    let port =
+      match Eio.Net.listening_addr listener with
+      | `Tcp (_, p) -> p
+      | `Unix _ -> Alcotest.fail "expected TCP listener"
+    in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+        let rec accept_loop () =
+          let flow, _ = Eio.Net.accept ~sw listener in
+          Eio.Fiber.fork ~sw (fun () ->
+              try
+                let br = Eio.Buf_read.of_flow flow ~max_size:4096 in
+                ignore (Eio.Buf_read.line br : string);
+                Eio.Time.sleep clock 4.0;
+                Eio.Flow.close flow
+              with
+              | Eio.Cancel.Cancelled _ as ex -> raise ex
+              | _ -> ());
+          accept_loop ()
+        in
+        accept_loop ());
+    let io = Io_domain.start ~sw ~env in
+    let ep = Http_client.make_endpoint ~host:"127.0.0.1" ~port () in
+    (match
+       Http_client.get_raw ~io ~clock ~timeout_sec:0.08 ep
+         ~path:"/api/v1/dashboard/tools?token=secret#frag"
+     with
+    | Error
+        (Http_client.Transport
+           (Health.Timeout_detail
+              {
+                phase = Health.Timeout_response;
+                after_sec = Some s;
+                path = Some p;
+              })) ->
+        Alcotest.(check (float 0.01)) "response timeout sec" 0.08 s;
+        Alcotest.(check string) "sanitized response path"
+          "/api/v1/dashboard/tools" p
+    | Error err ->
+        Alcotest.failf "expected Timeout_response, got %s"
+          (Http_client.http_error_to_string err)
+    | Ok _ -> Alcotest.fail "expected response timeout error");
+    let t_start = Clock.Mono.now () in
+    (match
+       Http_client.post_stream ~io ~clock ~idle_timeout_sec:5.0
+         ~header_timeout_sec:0.08 ~content_type:"application/json" ~body:"{}"
+         ~on_response:(fun ~status:_ ~headers:_ -> ())
+         ~on_chunk:(fun _ -> ())
+         ep ~path:"/api/v1/keepers/chat/stream?token=secret#frag"
+     with
+    | Error
+        (Http_client.Transport
+           (Health.Timeout_detail
+              {
+                phase = Health.Timeout_stream_header;
+                after_sec = Some s;
+                path = Some p;
+              })) ->
+        let elapsed = Clock.Mono.seconds_since (Clock.Mono.now ()) ~since:t_start in
+        Alcotest.(check (float 0.01)) "stream header timeout sec" 0.08 s;
+        Alcotest.(check string) "sanitized stream path"
+          "/api/v1/keepers/chat/stream" p;
+        Alcotest.(check bool)
+          (Printf.sprintf "header_timeout_sec enforced quickly (%.3fs < 1.5s)"
+             elapsed)
+          true (elapsed < 1.5)
+    | Error err ->
+        Alcotest.failf "expected Timeout_stream_header, got %s"
+          (Http_client.http_error_to_string err)
+    | Ok () -> Alcotest.fail "expected stream header timeout error");
+    Eio.Switch.fail sw Exit
+  with Exit -> ()
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -5597,6 +5938,8 @@ let () =
             test_ui_bus_concurrent_no_lost_wakeup;
           Alcotest.test_case "sse_hub_diff_and_http_409" `Quick
             test_sse_hub_and_http_client;
+          Alcotest.test_case "timeout_diagnostics_and_sanitization" `Quick
+            test_timeout_diagnostics_and_sanitization;
           Alcotest.test_case "io_domain_isolation_and_shutdown" `Quick
             test_io_domain_isolation_and_shutdown;
           Alcotest.test_case "worker_pool_and_voice_runner" `Quick

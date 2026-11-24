@@ -20,6 +20,9 @@ type http_error =
 let transport_error_detail = function
   | Health.Connect_refused -> "connection refused"
   | Health.Timeout -> "request timed out"
+  | Health.Timeout_detail { phase; after_sec; path } ->
+      Say.resolve Say.Lang_en
+        (Health.timeout_detail_say ~phase ~after_sec ~path)
   | Health.Http_status code -> Printf.sprintf "HTTP %d" code
   | Health.Stream_eof -> "stream closed unexpectedly (EOF)"
   | Health.Protocol_error s -> "protocol error: " ^ s
@@ -112,6 +115,8 @@ let http_error_summary = function
       Say.make ~ko:"서버 연결 거부" ~en:"Server connection refused"
   | Transport Health.Timeout ->
       Say.make ~ko:"요청 시간 초과" ~en:"Request timed out"
+  | Transport (Health.Timeout_detail { phase; after_sec; path }) ->
+      Health.timeout_detail_say ~phase ~after_sec ~path
   | Transport (Health.Http_status code) ->
       Say.make
         ~ko:(Printf.sprintf "HTTP %d 오류" code)

@@ -331,6 +331,13 @@ let test_memory_diff_through_compaction () =
     | Ok w -> w | Error e -> fail (Masc.Private_jsonl_scan.error_to_string e) in
   let recent = read_range at_last in
   let w = Diff.project_window ~range:at_last ~current ~revision:recent_seq recent in
+  check bool "omitting an older folded removal leaves recent input complete" true
+    (not recent.input_limited && not recent.details_limited && not recent.archive_cut.by_rows
+     && recent.unsequenced_count = 1 && recent.unreadable = 0 && recent.conflicting = 0);
+  check bool "first retained revision also follows the fold without a read limit" true
+    (not (read_range (Window.Revisions (4, 4))).input_limited);
+  check bool "complete sequenced input still reports an ahead snapshot" true
+    (Diff.project_window ~range:at_last ~current ~revision:(recent_seq + 1) recent).snapshot_ahead;
   check bool "query materializes only needed out-of-range bodies" true
     (List.for_all (fun (q : Masc.Librarian_memory_change.t) ->
        q.seq = recent_seq || q.added = [] && q.removed = []) recent.changes);
@@ -341,11 +348,44 @@ let test_memory_diff_through_compaction () =
      | Some b -> Window.intersects (Window.Revisions (1, 1)) b
                  && Window.intersects (Window.Time (3., 3.)) b && not (Window.intersects at_last b)
      | None -> false);
+  let old = read_range (Window.Time (3., 3.)) in
+  check bool "omitted removal in the requested time range honestly limits coverage" true
+    (old.input_limited && old.archive_cut.by_rows && not old.details_limited);
+  let gapped = List.map (fun (c : Masc.Librarian_memory_change.t) ->
+    if c.seq = recent_seq then { c with seq = c.seq + 1 } else c) kept.changes in
+  save { kept with changes = gapped };
+  let gapped = Diff.project_window ~range:at_last ~current ~revision:recent_seq (read_range at_last) in
+  check (list (pair int int)) "older prefix omission does not hide a real sequence gap"
+    [recent_seq, recent_seq]
+    (List.map (fun (gap : Diff.gap) -> gap.first_seq, gap.last_seq) gapped.gaps);
+  save kept;
   let short = read_range ~max_bytes:1024 at_last in
   check bool "byte-bounded tail reports actual omitted input" true
-    (short.input_limited && short.archive_cut.by_bytes && List.length short.changes < max_rows);
+    (short.input_limited && short.details_limited && short.archive_cut.by_bytes
+     && List.length short.changes < max_rows);
   check bool "omitted byte prefix never invents a count of missing sequences" true
     ((Diff.project_window ~range:at_last ~current ~revision:recent_seq short).gaps = []);
+  let disputed = { c with seq = recent_seq + 1 } in
+  Out_channel.with_open_gen [Open_wronly; Open_append; Open_binary] 0o600 large_archive (fun oc ->
+    output_string oc "damaged\n";
+    List.iter (fun change ->
+      output_string oc (Yojson.Safe.to_string (Masc.Librarian_memory_change.to_json change) ^ "\n"))
+      [disputed; { disputed with revision = disputed.revision + 1 }]);
+  save (again ());
+  let damaged = read_range at_last in
+  check bool "bounded detail read reports archived damage and conflict outside its row window" true
+    (not damaged.input_limited && damaged.unreadable = 1 && damaged.conflicting = 1);
+  check int "publishing the summary preserves the original damage and conflict evidence" 2 (again ()).unreadable;
+  let legacy_footer = `List [`String "librarian.folded.v1"; `Int 3; `Int 1; `Int 3; `Float 1.; `Float 3.] in
+  let rows = In_channel.with_open_bin large_archive In_channel.input_lines in
+  let legacy_rows = List.rev (List.tl (List.rev rows)) in
+  Out_channel.with_open_bin large_archive (fun oc ->
+    List.iter (fun row -> output_string oc row; output_char oc '\n') legacy_rows;
+    output_string oc (Yojson.Safe.to_string legacy_footer ^ "\n"));
+  let legacy = read_range at_last in
+  check bool "an old footer keeps legacy prefix uncertainty separate from sequence diagnostics" true
+    (legacy.input_limited && legacy.archive_cut.by_rows && not legacy.details_limited
+     && Option.is_some legacy.folded);
   let all = Diff.project ~range:(Diff.Time (0., Float.of_int recent_seq)) ~current ~revision:recent_seq kept in
   check bool "returned changes retain the most recent events and signal the row bound" true
     (all.events_limited && List.length all.events = max_rows

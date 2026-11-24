@@ -4,6 +4,7 @@ module Log_store = Librarian_log_store
 module Codec = Librarian_log_codec
 module By_id = Map.Make (String)
 module By_seq = Map.Make (Int)
+module Seqs = Set.Make (Int)
 module Opaque_rows = Set.Make (String)
 module Change = Librarian_memory_change
 
@@ -24,6 +25,16 @@ let max_detailed_rows = 2000
 type folded =
   { through_seq : int; min_revision : int; max_revision : int; min_at : float; max_at : float }
 
+type coverage =
+  { detail_rows : int
+  ; unsequenced_rows : int
+  ; unsequenced_time : (float * float) option
+  ; unreadable_rows : int
+  ; conflicting_sequences : int
+  ; last_seq : int
+  ; folded_detail : folded option
+  }
+
 let combine_folded a b =
   { through_seq = max a.through_seq b.through_seq;
     min_revision = min a.min_revision b.min_revision; max_revision = max a.max_revision b.max_revision;
@@ -34,6 +45,30 @@ let add_folded prior value = Some (Option.fold ~none:value ~some:(combine_folded
 let folded_json f =
   `List [`String "librarian.folded.v1"; `Int f.through_seq; `Int f.min_revision;
          `Int f.max_revision; `Float f.min_at; `Float f.max_at]
+
+let folded_of_json = function
+  | `List [`String "librarian.folded.v1"; `Int through_seq; `Int min_revision;
+           `Int max_revision; `Float min_at; `Float max_at]
+    when through_seq > 0 && min_revision >= 0 && min_revision <= max_revision
+         && Float.is_finite min_at && Float.is_finite max_at && min_at <= max_at ->
+    Some { through_seq; min_revision; max_revision; min_at; max_at }
+  | _ -> None
+
+let time_range_of_json = function
+  | `List [`Float lo; `Float hi] when Float.is_finite lo && Float.is_finite hi && lo <= hi ->
+    Some (lo, hi)
+  | _ -> None
+
+let decode_optional decode = function
+  | `Null -> Some None
+  | json -> Option.map (fun value -> Some value) (decode json)
+
+let coverage_json c =
+  let unsequenced_time = Option.fold ~none:`Null
+      ~some:(fun (lo, hi) -> `List [`Float lo; `Float hi]) c.unsequenced_time in
+  `List [`String "librarian.coverage.v1"; `Int c.detail_rows; `Int c.unsequenced_rows;
+         unsequenced_time; `Int c.unreadable_rows; `Int c.conflicting_sequences; `Int c.last_seq;
+         Option.fold ~none:`Null ~some:folded_json c.folded_detail]
 
 type retained = { opaque : Opaque_rows.t; conflicts : Change.t list }
 
@@ -72,7 +107,8 @@ let left_of_json = function
     in
     let* at = Types.wire_number_field "at" fields in
     let* line_at = Types.wire_int_field "line_at" fields in
-    Ok { fact; removal; at; line_at }
+    if Float.is_finite at then Ok { fact; removal; at; line_at }
+    else Types.wire_fail [ Types.Wire_field "at" ] Types.Not_finite
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Types.wire_here Types.Expected_object
 ;;
@@ -81,17 +117,26 @@ type cold_row =
   | Left of left
   | Detail of Change.t
   | Folded of folded
+  | Coverage of coverage
   | Opaque of string
   | Invalid
 
 let cold_row raw =
   match Yojson.Safe.from_string raw with
   | exception Yojson.Json_error _ -> Invalid
-  | `List [`String "librarian.folded.v1"; `Int through_seq; `Int min_revision;
-           `Int max_revision; `Float min_at; `Float max_at]
-    when through_seq > 0 && min_revision >= 0 && min_revision <= max_revision
-         && Float.is_finite min_at && Float.is_finite max_at && min_at <= max_at ->
-    Folded { through_seq; min_revision; max_revision; min_at; max_at }
+  | `List (`String "librarian.folded.v1" :: _) as json ->
+    (match folded_of_json json with Some f -> Folded f | None -> Invalid)
+  | `List [`String "librarian.coverage.v1"; `Int detail_rows; `Int unsequenced_rows;
+           time; `Int unreadable_rows; `Int conflicting_sequences; `Int last_seq; folded]
+    when detail_rows >= 0 && detail_rows <= max_detailed_rows && unsequenced_rows >= 0
+         && unreadable_rows >= 0 && conflicting_sequences >= 0 && last_seq >= 0 ->
+    (match decode_optional time_range_of_json time, decode_optional folded_of_json folded with
+     | Some unsequenced_time, Some folded_detail
+       when Bool.equal (unsequenced_rows = 0) (Option.is_none unsequenced_time)
+            && Option.fold ~none:true ~some:(fun f -> f.through_seq <= last_seq) folded_detail ->
+       Coverage { detail_rows; unsequenced_rows; unsequenced_time; unreadable_rows;
+                  conflicting_sequences; last_seq; folded_detail }
+     | _ -> Invalid)
   | `List [`String "librarian.unreadable.v1"; `String ("live" | "archive" | "archive_fragment");
            `Int offset; `Int seq; `String bytes] as marker
     when offset >= 0 && seq >= 0 && Result.is_ok (Base64.decode bytes) -> Opaque (Yojson.Safe.to_string marker)
@@ -132,6 +177,19 @@ let compact_details (history : history) =
         min_at = c.at; max_at = c.at }) history.folded old in
     { history with unsequenced; changes; folded }
 
+let coverage_of_history (history : history) =
+  let unsequenced_time = List.fold_left (fun range (e : left) ->
+      Some (match range with None -> e.at, e.at | Some (lo, hi) -> min lo e.at, max hi e.at))
+      None history.unsequenced in
+  let conflict_seqs = List.fold_left (fun seqs (c : Change.t) -> Seqs.add c.seq seqs)
+      Seqs.empty history.retained.conflicts in
+  let last_seq = Option.fold ~none:0 ~some:(fun f -> f.through_seq) history.folded in
+  let last_seq = max last_seq (Option.value ~default:0 (Seqs.max_elt_opt conflict_seqs)) in
+  let last_seq = List.fold_left (fun n (c : Change.t) -> max n c.seq) last_seq history.changes in
+  { detail_rows = List.length history.changes; unsequenced_rows = List.length history.unsequenced;
+    unsequenced_time; unreadable_rows = Opaque_rows.cardinal history.retained.opaque;
+    conflicting_sequences = Seqs.cardinal conflict_seqs; last_seq; folded_detail = history.folded }
+
 let write_history ~archive_path (history : history) =
   let dir = Filename.dirname archive_path in
   match Fs_compat.mkdir_p dir with
@@ -145,7 +203,7 @@ let write_history ~archive_path (history : history) =
     Opaque_rows.iter (fun row -> Buffer.add_string buf row; Buffer.add_char buf '\n') history.retained.opaque;
     List.iter (fun old -> write (left_to_json old)) history.unsequenced;
     List.iter (fun c -> write (Change.to_json c)) history.changes;
-    Option.iter (fun boundary -> write (folded_json boundary)) history.folded;
+    write (coverage_json (coverage_of_history history));
     Fs_compat.save_file_atomic_strict archive_path (Buffer.contents buf)
 ;;
 
@@ -230,7 +288,10 @@ let history_unlocked path =
         | Opaque marker -> old, versions, Opaque_rows.add marker opaque, next, after_seq, folded
         | Detail c -> old, add_change versions c, opaque, next, max after_seq c.seq, folded
         | Left left -> left :: old, versions, opaque, next, after_seq, folded
-        | Folded boundary -> old, versions, opaque, next, after_seq, add_folded folded boundary)
+        | Folded boundary -> old, versions, opaque, next, after_seq, add_folded folded boundary
+        | Coverage { folded_detail; _ } ->
+          let folded = Option.fold ~none:folded ~some:(add_folded folded) folded_detail in
+          old, versions, opaque, next, after_seq, folded)
   in
   (* A fragment in the atomically published archive is evidence of damage.
      Keep its exact bytes opaque even when those bytes alone parse as JSON. *)

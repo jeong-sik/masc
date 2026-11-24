@@ -358,7 +358,7 @@ let handle_facts_get state req reqd name =
       match read_commit_lineage_from_log ~keepers_dir ~keeper_id:name with
       | Ok (revisions, retractions, unreadable) ->
         revisions, retractions, (if unreadable = 0 then None else
-          Some (Printf.sprintf "%d unreadable memory history rows" unreadable))
+          Some (Printf.sprintf "%d unreadable or conflicting memory history records" unreadable))
       | Error detail ->
         [], [], Some ("memory commit log lineage read failed: " ^ detail)
     in

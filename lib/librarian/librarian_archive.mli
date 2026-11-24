@@ -28,7 +28,25 @@ val max_detailed_rows : int
 type folded =
   { through_seq : int; min_revision : int; max_revision : int; min_at : float; max_at : float }
 
-type cold_row = Left of left | Detail of Librarian_memory_change.t | Folded of folded | Opaque of string | Invalid
+type coverage =
+  { detail_rows : int
+  ; unsequenced_rows : int
+  ; unsequenced_time : (float * float) option
+  ; unreadable_rows : int
+  ; conflicting_sequences : int
+  ; last_seq : int
+  ; folded_detail : folded option
+  }
+(** Counts for one published archive. Its [detail_rows] immediately precede
+    this footer. [unsequenced_time] bounds the retained rows with no revision. *)
+
+type cold_row =
+  | Left of left
+  | Detail of Librarian_memory_change.t
+  | Folded of folded
+  | Coverage of coverage
+  | Opaque of string
+  | Invalid
 val cold_row : string -> cold_row
 val damaged_row : origin:string -> at:int -> after_seq:int -> string -> string
 

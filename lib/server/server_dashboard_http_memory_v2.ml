@@ -793,6 +793,8 @@ let keeper_diff_json ~now ~config ~keeper_id ~range =
       let unplaced =
         match filter, history.changes with
         | Diff.Time _, _ -> 0
+        | Revisions (lo, _), _ when Option.fold ~none:false
+            ~some:(fun (f : Librarian_archive.folded) -> lo > f.max_revision) history.folded -> 0
         | Revisions (lo, _), (first : Librarian_memory_change.t) :: _ when lo > first.revision -> 0
         | Revisions _, _ -> history.unsequenced_count in
       let retention_applies = Option.fold ~none:false ~some:(Librarian_history_window.intersects filter) history.folded in

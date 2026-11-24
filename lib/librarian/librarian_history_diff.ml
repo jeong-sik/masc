@@ -125,5 +125,5 @@ let project ~range ~current ~revision (history : Archive.history) =
   project_rows ~range ~current ~revision ~unsequenced:history.unsequenced ~changes:history.changes ~folded:history.folded ~prefix_limited:false
 ;;
 let project_window ~range ~current ~revision (history : Librarian_history_window.t) =
-  project_rows ~range ~current ~revision ~unsequenced:history.unsequenced ~changes:history.changes ~folded:history.folded ~prefix_limited:history.input_limited
+  project_rows ~range ~current ~revision ~unsequenced:history.unsequenced ~changes:history.changes ~folded:history.folded ~prefix_limited:history.details_limited
 ;;

@@ -625,6 +625,47 @@ let test_three_channel_separation () =
   Alcotest.(check int) "a remembered approval records the decision" 2
     (List.length m_remembered.work.recent_decisions_24h)
 
+let test_exact_settlement_releases_last_attention_selection () =
+  let m = Model.initial ~cols:140 ~rows:40 () in
+  let inbox = { m with nav = { m.nav with workspace = Nav.Work; sidebar_focused = false };
+                       work = Work_store.set_tab Nav.Work_inbox m.work } in
+  let reply (m : Model.t) response =
+    fst (Update.step ~now:t1 m (Msg.Http_reply { epoch = m.epoch; reply = response })) in
+  let inventory ids m =
+    let rows = List.map (fun id -> sample_tool_approval ~id ()) ids in
+    reply m (Msg.Reply_tool_approvals (Ok rows)) in
+  let settle m =
+    reply m (Msg.Reply_tool_approval { keeper = "alpha"; approval_id = "A";
+      attention_id = "tool:A"; decision = Wire_work.Tool_approve;
+      result = Ok Wire_work.Tool_approval_settled }) in
+  let approve m =
+    let next, cmds = Update.execute_action ~now:t2 m Keymap.Fast_approve_top in
+    let ids = List.filter_map (function
+      | Cmd.Http_post { req = Cmd.Post_tool_approval { approval_id; _ }; _ } -> Some approval_id
+      | _ -> None) (Cmd.flatten cmds) in
+    next, ids in
+  let select index (m : Model.t) =
+    { m with attention = Attention.select_triage_index index m.attention } in
+  let selected = select 0 (inventory ["A"] inbox) in
+  let pending, sent = approve selected in
+  Alcotest.(check (list string)) "submit the explicitly selected last approval" ["A"] sent;
+  let updated = inventory ["B"] (settle pending) in
+  Alcotest.(check (list string)) "after its exact receipt the next arrival can be approved"
+    ["B"] (snd (approve updated));
+  let absent = inventory ["B"] pending in
+  Alcotest.(check (list string)) "inventory removal alone leaves the new approval disarmed"
+    [] (snd (approve absent));
+  Alcotest.(check (list string)) "a receipt after inventory replacement also releases the resolved pin"
+    ["B"] (snd (approve (settle absent)));
+  let chosen = select 1 (inventory ["B"; "C"] pending) in
+  let settled = settle chosen in
+  Alcotest.(check (list string)) "a late receipt preserves a newer manual selection"
+    ["C"] (snd (approve settled));
+  let manual = { selected with attention = Attention.set_auto_advance false selected.attention } in
+  let still_manual = inventory ["B"] (settle (fst (approve manual))) in
+  Alcotest.(check (list string)) "manual advance never arms another approval after settlement"
+    [] (snd (approve still_manual))
+
 (* 3. Compact composer auto-fold, draft preservation & transmission lifecycle *)
 let test_compact_composer_and_drafts () =
   let m0 = Model.initial ~cols:90 ~rows:28 () in
@@ -15700,6 +15741,8 @@ let () =
       , [
           Alcotest.test_case "health/attention/incident isolation" `Quick
             test_three_channel_separation;
+          Alcotest.test_case "exact settlement releases the last selected approval" `Quick
+            test_exact_settlement_releases_last_attention_selection;
         ] );
       ( "composer_drafts"
       , [

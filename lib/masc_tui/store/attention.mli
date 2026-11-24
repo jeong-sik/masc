@@ -95,7 +95,8 @@ val advance_past_in_flight : ?query:string -> t -> t
 
 val advance_after_resolution : ?query:string -> resolved_id:string -> t -> t
 (** Advance from the highlighted item when it was resolved and [auto_advance]
-    is enabled. Remove [resolved_id] and its in-flight flag. *)
+    is enabled. If the resolved item is still selected, restore the default
+    priority selection. Remove [resolved_id] and its in-flight flag. *)
 
 val count : t -> int
 val is_empty : t -> bool

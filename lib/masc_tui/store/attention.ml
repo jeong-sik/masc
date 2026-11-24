@@ -303,6 +303,13 @@ let advance_after_resolution ?(query = "") ~resolved_id t =
         t |> mark_in_flight ~id:resolved_id |> advance_past_in_flight ~query
     | Some _ | None -> t
   in
+  (* A matching action receipt can release the resolved selection even when
+     an inventory refresh removed the row before its receipt arrived. *)
+  let t =
+    if t.auto_advance && Option.equal String.equal t.selected_id (Some resolved_id)
+    then position_selection { t with selected_id = None } None
+    else t
+  in
   t |> remove_by_id resolved_id |> sync_selection ~query
 
 let count t = List.length t.items

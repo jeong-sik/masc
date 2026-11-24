@@ -48,6 +48,17 @@ val effort_values_for_log : driver:driver -> string
 (** Human-readable list of effort values accepted by {!effort_of_driver_string}
     for [driver], suitable for startup validation error diagnostics. *)
 
+val resolve_effective_effort
+  :  ?turn_effort:Llm_provider.Reasoning_effort.t
+  -> ?model_effort:Llm_provider.Reasoning_effort.t
+  -> ?provider_effort:Llm_provider.Reasoning_effort.t
+  -> unit
+  -> Llm_provider.Reasoning_effort.t option
+(** Canonical ACP reasoning-effort precedence shared across Keeper, Fusion, and
+    Runtime Verification: [turn_effort > model_effort > provider_effort]
+    (most-specific per-turn hook override, then binding/model declaration, then
+    provider-wide ACP default). *)
+
 type mcp_wiring =
   | Session_new_http_mcp
       (** Driver accepts [mcpServers] directly in [session/new] and

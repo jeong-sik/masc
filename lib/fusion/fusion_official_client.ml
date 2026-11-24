@@ -825,9 +825,10 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
     in
     let profile = Runtime_acp_client.profile_of_driver execution.driver in
     let effective_effort =
-      match execution.effort with
-      | Some _ as e -> e
-      | None -> runtime.model.reasoning_effort
+      Runtime_acp_client.resolve_effective_effort
+        ?model_effort:runtime.model.reasoning_effort
+        ?provider_effort:execution.effort
+        ()
     in
     Eio.Switch.run
     @@ fun sw ->

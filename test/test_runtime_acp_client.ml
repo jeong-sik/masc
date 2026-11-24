@@ -453,14 +453,72 @@ max-context = 1000
 default = "vibe_auto.m"
 |}
   in
-  match Runtime_toml.parse_string vibe_auto with
-  | Error (err :: _) ->
-    check string "mistral_vibe effort=\"auto\" reports effort path" "providers.vibe_auto.effort" err.path;
-    check string "mistral_vibe effort error advertises off alias"
-      (Printf.sprintf "effort must be one of %s/off; got \"auto\"" Llm_provider.Reasoning_effort.values_for_log)
-      err.message
-  | Error [] -> fail "expected error list for mistral_vibe effort=\"auto\""
-  | Ok _ -> fail "unknown effort=\"auto\" must remain fail-closed"
+  (match Runtime_toml.parse_string vibe_auto with
+   | Error (err :: _) ->
+     check string "mistral_vibe effort=\"auto\" reports effort path" "providers.vibe_auto.effort" err.path;
+     check string "mistral_vibe effort error advertises off alias"
+       (Printf.sprintf "effort must be one of %s/off; got \"auto\"" Llm_provider.Reasoning_effort.values_for_log)
+       err.message
+   | Error [] -> fail "expected error list for mistral_vibe effort=\"auto\""
+   | Ok _ -> fail "unknown effort=\"auto\" must remain fail-closed");
+  (* Unified ACP effort precedence SSOT: turn > binding/model > provider *)
+  let check_effort label expected actual =
+    check bool label true
+      (Option.equal Llm_provider.Reasoning_effort.equal expected actual)
+  in
+  let module E = Llm_provider.Reasoning_effort in
+  check_effort "turn_effort wins over model_effort and provider_effort"
+    (Some E.Max)
+    (Runtime_acp_client.resolve_effective_effort
+       ~turn_effort:E.Max ~model_effort:E.High ~provider_effort:E.Low ());
+  check_effort "model_effort wins over provider_effort"
+    (Some E.High)
+    (Runtime_acp_client.resolve_effective_effort
+       ~model_effort:E.High ~provider_effort:E.Low ());
+  check_effort "provider_effort applies when turn and model unset"
+    (Some E.Low)
+    (Runtime_acp_client.resolve_effective_effort
+       ~provider_effort:E.Low ());
+  check_effort "all unset resolves to None"
+    None
+    (Runtime_acp_client.resolve_effective_effort ());
+  (* End-to-end TOML binding > model > provider precedence check *)
+  let layered_toml =
+    {|
+[providers.kimi_prov]
+protocol = "acp"
+driver = "kimi_code"
+command = "kimi"
+is-non-interactive = true
+effort = "low"
+[models.m_high]
+api-name = "kimi-code/k3"
+max-context = 100000
+reasoning-effort = "high"
+[kimi_prov.m_high]
+effort = "max"
+[runtime]
+default = "kimi_prov.m_high"
+|}
+  in
+  match Runtime_toml.parse_string layered_toml with
+  | Error errs ->
+    failf "layered ACP effort TOML failed: %s"
+      (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errs))
+  | Ok cfg ->
+    let runtimes, dropped = Runtime_instance.partition_bindings cfg cfg.bindings in
+    check int "zero dropped for layered ACP effort TOML" 0 (List.length dropped);
+    (match runtimes with
+     | [ ({ execution = Runtime_execution.Acp exec; _ } as rt) ] ->
+       check_effort "provider default stays Low" (Some E.Low) exec.effort;
+       check_effort "binding effort overrides model reasoning_effort" (Some E.Max) rt.model.reasoning_effort;
+       check_effort "SSOT resolver picks binding/model over provider default"
+         (Some E.Max)
+         (Runtime_acp_client.resolve_effective_effort
+            ?model_effort:rt.model.reasoning_effort
+            ?provider_effort:exec.effort
+            ())
+     | _ -> fail "expected single materialized kimi_prov runtime")
 ;;
 
 let test_build_argv_and_strict_permission_posture () =

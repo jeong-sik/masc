@@ -2066,9 +2066,10 @@ let run_without_lifecycle
     | Some secs -> Some secs
   in
   let effective_effort =
-    match prepared.reasoning_effort with
-    | Some _ as eff -> eff
-    | None -> config.effort
+    Acp.resolve_effective_effort
+      ?turn_effort:prepared.reasoning_effort
+      ?provider_effort:config.effort
+      ()
   in
   let effective_mode =
     Acp.resolve_mode_for_posture

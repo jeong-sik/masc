@@ -132,6 +132,17 @@ type inline_action_kind =
       post_id : string;
       title : string;
     }
+  | Keeper_lifecycle_form of { keeper : string }
+  | Keeper_purge_confirm of { keeper : string }
+  | Addon_attach_form
+  | Addon_detach_confirm of {
+      instance_id : string;
+      title : string;
+    }
+  | Addon_invoke_action of {
+      instance_id : string;
+      action_names : string list;
+    }
 
 type system_gate_kind =
   | Micro_viewport

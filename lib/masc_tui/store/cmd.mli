@@ -117,6 +117,7 @@ type get_request =
   | Get_connectors
   | Get_browser_lane
   | Get_lane_addons
+  | Get_lane_addon_asks
   | Get_mcp_clients
   | Get_sandboxes
   | Get_keeper_sandbox of { keeper : string }
@@ -358,6 +359,33 @@ type post_request =
       pinned : bool;
     }
   | Post_board_delete of { post_id : string }
+  | Post_keeper_lifecycle of {
+      keeper : string;
+      op : Wire_fleet.keeper_lifecycle_op;
+      expected_workspace : (string * string) option;
+      from_modal : bool;
+    }
+  | Post_keeper_purge of {
+      keeper : string;
+      expected_workspace : string * string;
+    }
+  | Post_lane_addon_attach of {
+      manifest_path : string;
+      run_id : string;
+      binding : Yojson.Safe.t;
+    }
+  | Post_lane_addon_detach of { instance_id : string }
+  | Post_lane_addon_action of {
+      instance_id : string;
+      expected_incarnation : string;
+      request_id : string;
+      action : Yojson.Safe.t;
+    }
+  | Post_lane_addon_ask_answer of {
+      declaration_id : string;
+      ask_id : string;
+      answers : (string * Wire_work.ask_response) list;
+    }
 
 type put_request =
   | Put_wiki_page of { page : string; request : Wire_knowledge.wiki_put_request }

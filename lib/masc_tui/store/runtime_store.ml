@@ -110,6 +110,7 @@ type t = {
   browser_lane : Wire_runtime.browser_lane_status Observed.t;
   browser_tabs : Wire_runtime.browser_tabs_response Observed.t String_map.t;
   lane_addons : Wire_runtime.lane_addons_snapshot Observed.t;
+  lane_addon_asks : Wire_runtime.lane_addon_ask_row list Observed.t;
   addon_catalog_mode : bool;
   addon_package_catalog : Wire_runtime.addon_package_catalog Observed.t;
   addon_catalog_selected_index : int;
@@ -221,6 +222,7 @@ let empty =
     browser_lane = Observed.unreported;
     browser_tabs = String_map.empty;
     lane_addons = Observed.unreported;
+    lane_addon_asks = Observed.unreported;
     addon_catalog_mode = false;
     addon_package_catalog = Observed.unreported;
     addon_catalog_selected_index = 0;
@@ -517,6 +519,22 @@ let mark_browser_tabs_failed ~at ~client_id ~reason ~retryable t =
 
 let apply_lane_addons ~observed_at snap t =
   { t with lane_addons = Observed.value ~observed_at snap }
+
+let apply_lane_addon_asks ~observed_at asks t =
+  { t with lane_addon_asks = Observed.value ~observed_at asks }
+
+let lane_addon_asks_list t =
+  match Observed.to_option t.lane_addon_asks with
+  | Some rows -> rows
+  | None -> []
+
+let open_lane_addon_asks t =
+  List.filter
+    (fun (row : Wire_runtime.lane_addon_ask_row) ->
+      match row.resolution with
+      | Wire_work.Ask_open -> true
+      | Wire_work.Ask_answered _ | Wire_work.Ask_withdrawn _ -> false)
+    (lane_addon_asks_list t)
 
 let apply_mcp_clients ~observed_at clients t =
   { t with mcp_clients = Observed.value ~observed_at clients }
@@ -1978,6 +1996,7 @@ let mark_stale_all t =
     browser_lane = Observed.mark_stale t.browser_lane;
     browser_tabs = String_map.map Observed.mark_stale t.browser_tabs;
     lane_addons = Observed.mark_stale t.lane_addons;
+    lane_addon_asks = Observed.mark_stale t.lane_addon_asks;
     addon_package_catalog = Observed.mark_stale t.addon_package_catalog;
     addon_package_preview = Observed.mark_stale t.addon_package_preview;
     mcp_clients = Observed.mark_stale t.mcp_clients;

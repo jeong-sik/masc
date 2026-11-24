@@ -121,6 +121,7 @@ type t = {
   browser_lane : Wire_runtime.browser_lane_status Observed.t;
   browser_tabs : Wire_runtime.browser_tabs_response Observed.t String_map.t;
   lane_addons : Wire_runtime.lane_addons_snapshot Observed.t;
+  lane_addon_asks : Wire_runtime.lane_addon_ask_row list Observed.t;
   addon_catalog_mode : bool;
   addon_package_catalog : Wire_runtime.addon_package_catalog Observed.t;
   addon_catalog_selected_index : int;
@@ -238,6 +239,10 @@ val mark_browser_tabs_failed :
   t
 val apply_lane_addons :
   observed_at:Clock.Mono.t -> Wire_runtime.lane_addons_snapshot -> t -> t
+val apply_lane_addon_asks :
+  observed_at:Clock.Mono.t -> Wire_runtime.lane_addon_ask_row list -> t -> t
+val lane_addon_asks_list : t -> Wire_runtime.lane_addon_ask_row list
+val open_lane_addon_asks : t -> Wire_runtime.lane_addon_ask_row list
 val apply_mcp_clients :
   observed_at:Clock.Mono.t -> Wire_runtime.mcp_client_row list -> t -> t
 val toggle_browser_right_focus : t -> t

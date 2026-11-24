@@ -10,6 +10,61 @@ let keepers_turns_path = "/api/v1/keepers/turns"
 let fleet_stream_path = "/api/v1/stream/fleet"
 let keeper_chat_stream_path = "/api/v1/keepers/chat/stream"
 let keeper_turn_interrupt_path = "/api/v1/keepers/turn/interrupt"
+let keeper_purge_path = "/api/v1/dashboard/agents/purge"
+
+type keeper_lifecycle_op =
+  | Keeper_boot
+  | Keeper_pause
+  | Keeper_resume of { operator_operation_id : string }
+  | Keeper_shutdown
+  | Keeper_reset
+
+let keeper_lifecycle_path ~keeper = function
+  | Keeper_boot ->
+      Printf.sprintf "/api/v1/keepers/%s/boot" (percent_encode keeper)
+  | Keeper_pause | Keeper_resume _ ->
+      Printf.sprintf "/api/v1/keepers/%s/directive" (percent_encode keeper)
+  | Keeper_shutdown ->
+      Printf.sprintf "/api/v1/keepers/%s/shutdown" (percent_encode keeper)
+  | Keeper_reset ->
+      Printf.sprintf "/api/v1/keepers/%s/reset" (percent_encode keeper)
+
+let keeper_lifecycle_op_label = function
+  | Keeper_boot -> "boot"
+  | Keeper_pause -> "pause"
+  | Keeper_resume _ -> "resume"
+  | Keeper_shutdown -> "shutdown"
+  | Keeper_reset -> "reset"
+
+let encode_ws_pair (base_path, masc_root) =
+  `Assoc [ ("base_path", `String base_path); ("masc_root", `String masc_root) ]
+
+let encode_keeper_lifecycle_body ?expected_workspace = function
+  | Keeper_boot | Keeper_shutdown | Keeper_reset -> `Assoc []
+  | Keeper_pause ->
+      let ws_field =
+        match expected_workspace with
+        | Some ws -> [ ("expected_workspace", encode_ws_pair ws) ]
+        | None -> []
+      in
+      `Assoc (("action", `String "pause") :: ws_field)
+  | Keeper_resume { operator_operation_id } ->
+      let ws_field =
+        match expected_workspace with
+        | Some ws -> [ ("expected_workspace", encode_ws_pair ws) ]
+        | None -> []
+      in
+      `Assoc
+        (("action", `String "resume")
+        :: ("operator_operation_id", `String operator_operation_id)
+        :: ws_field)
+
+let encode_keeper_purge ~agent_name ~expected_workspace =
+  `Assoc
+    [
+      ("agent_name", `String (String.trim agent_name));
+      ("expected_workspace", encode_ws_pair expected_workspace);
+    ]
 
 let keeper_chat_history_path ~keeper ?limit ?before_seq () =
   let base =

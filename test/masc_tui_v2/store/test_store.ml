@@ -197,6 +197,7 @@ let has_get_health cmds =
               | Cmd.Get_connectors
               | Cmd.Get_browser_lane
               | Cmd.Get_lane_addons
+              | Cmd.Get_lane_addon_asks
               | Cmd.Get_mcp_clients
               | Cmd.Get_sandboxes
               | Cmd.Get_keeper_sandbox _
@@ -1816,7 +1817,13 @@ let test_verifier_regressions () =
         | Cmd.Post_task_link_goal _
         | Cmd.Post_goal_upsert _
         | Cmd.Post_board_pin _
-        | Cmd.Post_board_delete _ ->
+        | Cmd.Post_board_delete _
+        | Cmd.Post_keeper_lifecycle _
+        | Cmd.Post_keeper_purge _
+        | Cmd.Post_lane_addon_attach _
+        | Cmd.Post_lane_addon_detach _
+        | Cmd.Post_lane_addon_action _
+        | Cmd.Post_lane_addon_ask_answer _ ->
             false)
     | Cmd.Batch _
     | Cmd.Http_get _
@@ -17724,6 +17731,494 @@ let test_work_and_board_crud_requests_and_guards () =
          | _ -> false)
        (Cmd.flatten bdeleted_cmds))
 
+let test_keeper_lifecycle_and_addon_crud_requests () =
+  (* 1. Exact wire paths and JSON bodies for Keeper Lifecycle & Lane-Addon CRUD *)
+  let ws_pair = ("/repo", "/repo/.masc") in
+  let boot_req =
+    Cmd.Post_keeper_lifecycle
+      {
+        keeper = "alpha";
+        op = Wire_fleet.Keeper_boot;
+        expected_workspace = Some ws_pair;
+        from_modal = false;
+      }
+  in
+  Alcotest.(check string) "keeper boot path" "/api/v1/keepers/alpha/boot"
+    (Cmd.post_request_path boot_req);
+  Alcotest.(check string) "keeper boot body" "{}"
+    (Yojson.Safe.to_string (Cmd.post_request_body boot_req));
+  let resume_req =
+    Cmd.Post_keeper_lifecycle
+      {
+        keeper = "alpha";
+        op = Wire_fleet.Keeper_resume { operator_operation_id = "op-42" };
+        expected_workspace = Some ws_pair;
+        from_modal = false;
+      }
+  in
+  Alcotest.(check string) "keeper directive path"
+    "/api/v1/keepers/alpha/directive"
+    (Cmd.post_request_path resume_req);
+  Alcotest.(check string) "keeper resume JSON includes operator_operation_id & workspace"
+    {|{"action":"resume","operator_operation_id":"op-42","expected_workspace":{"base_path":"/repo","masc_root":"/repo/.masc"}}|}
+    (Yojson.Safe.to_string (Cmd.post_request_body resume_req));
+  let purge_req =
+    Cmd.Post_keeper_purge { keeper = "alpha"; expected_workspace = ws_pair }
+  in
+  Alcotest.(check string) "keeper purge path" "/api/v1/dashboard/agents/purge"
+    (Cmd.post_request_path purge_req);
+  Alcotest.(check string) "keeper purge JSON"
+    {|{"agent_name":"alpha","expected_workspace":{"base_path":"/repo","masc_root":"/repo/.masc"}}|}
+    (Yojson.Safe.to_string (Cmd.post_request_body purge_req));
+  let attach_req =
+    Cmd.Post_lane_addon_attach
+      {
+        manifest_path = "addons/browser/manifest.toml";
+        run_id = "run-1";
+        binding = `Assoc [ ("mode", `String "local") ];
+      }
+  in
+  Alcotest.(check string) "addon attach path" "/api/v1/lane-addons/attach"
+    (Cmd.post_request_path attach_req);
+  Alcotest.(check string) "addon attach JSON"
+    {|{"manifest_path":"addons/browser/manifest.toml","run_id":"run-1","binding":{"mode":"local"}}|}
+    (Yojson.Safe.to_string (Cmd.post_request_body attach_req));
+  let detach_req = Cmd.Post_lane_addon_detach { instance_id = "inst-1" } in
+  Alcotest.(check string) "addon detach path" "/api/v1/lane-addons/detach"
+    (Cmd.post_request_path detach_req);
+  Alcotest.(check string) "addon detach JSON" {|{"instance_id":"inst-1"}|}
+    (Yojson.Safe.to_string (Cmd.post_request_body detach_req));
+  let act_req =
+    Cmd.Post_lane_addon_action
+      {
+        instance_id = "inst-1";
+        expected_incarnation = "inst-1";
+        request_id = "req-1";
+        action = `Assoc [ ("action", `String "navigate") ];
+      }
+  in
+  Alcotest.(check string) "addon action path" "/api/v1/lane-addons/actions"
+    (Cmd.post_request_path act_req);
+  Alcotest.(check string) "addon action JSON"
+    {|{"instance_id":"inst-1","expected_incarnation":"inst-1","request_id":"req-1","action":{"action":"navigate"}}|}
+    (Yojson.Safe.to_string (Cmd.post_request_body act_req));
+  Alcotest.(check string) "addon asks GET path"
+    "/api/v1/lane-addons/asks?include_resolved=false"
+    (Cmd.get_request_path Cmd.Get_lane_addon_asks);
+  let ask_ans_req =
+    Cmd.Post_lane_addon_ask_answer
+      {
+        declaration_id = "decl-browser";
+        ask_id = "ask-addon-1";
+        answers = [ ("q1", Wire_work.Ask_chose [ "c1" ]) ];
+      }
+  in
+  Alcotest.(check string) "addon ask-answer path" "/api/v1/lane-addons/ask-answer"
+    (Cmd.post_request_path ask_ans_req);
+  Alcotest.(check string) "addon ask-answer JSON"
+    {|{"declaration_id":"decl-browser","ask_id":"ask-addon-1","answers":[{"question_id":"q1","response":{"kind":"choices","choice_ids":["c1"]}}]}|}
+    (Yojson.Safe.to_string (Cmd.post_request_body ask_ans_req));
+  let set_fields pairs (m : Model.t) =
+    match m.inline_modal with
+    | None -> Alcotest.fail "expected inline_modal open"
+    | Some st ->
+        let fields =
+          List.map
+            (fun (f : Model.modal_form_field) ->
+              match List.assoc_opt f.key pairs with
+              | Some v -> { f with value = v }
+              | None -> f)
+            st.fields
+        in
+        { m with inline_modal = Some { st with fields } }
+  in
+  (* 2. Keeper Lifecycle on 4 Keepers & Keeper_dive *)
+  let ws_id : Wire_common.workspace_identity =
+    {
+      instance_id = Some "inst-2";
+      base_path = "/repo";
+      masc_root = "/repo/.masc";
+      workspace_sha256 = Some "sha-ws";
+    }
+  in
+  let m0 = Model.initial () in
+  let k_paused = { (sample_keeper ~health:Wire_fleet.Keeper_paused "alpha") with paused = true } in
+  let k_offline = { (sample_keeper ~health:Wire_fleet.Keeper_offline "beta") with paused = false } in
+  let k_live = sample_keeper ~health:Wire_fleet.Keeper_healthy "gamma" in
+  let m_keepers0 =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Keepers; sidebar_focused = false };
+      server_identity = { m0.server_identity with workspace = Some ws_id };
+    }
+  in
+  let m_keepers, _ =
+    Update.step ~now:t0 m_keepers0
+      (Msg.Http_reply
+         {
+           epoch = m_keepers0.epoch;
+           reply = Msg.Reply_keepers (Ok (roster_of [ k_paused; k_offline; k_live ]));
+         })
+  in
+  (* [a] on paused keeper alpha emits Keeper_resume immediately *)
+  let _, resume_cmds =
+    Update.step ~now:t0 m_keepers (Msg.Key_event (char_key "a"))
+  in
+  Alcotest.(check bool) "[a] on paused keeper emits Keeper_resume" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_keeper_lifecycle
+                   {
+                     keeper = "alpha";
+                     op = Wire_fleet.Keeper_resume { operator_operation_id };
+                     _;
+                   };
+               _;
+             }
+           when not (String.equal operator_operation_id "") ->
+             true
+         | _ -> false)
+       (Cmd.flatten resume_cmds));
+  (* Move to offline keeper beta -> [a] emits Keeper_boot *)
+  let m_beta, _ =
+    Update.step ~now:t0 m_keepers (Msg.Key_event (key Keymap.Input.Down))
+  in
+  let _, boot_cmds = Update.step ~now:t0 m_beta (Msg.Key_event (char_key "a")) in
+  Alcotest.(check bool) "[a] on offline keeper emits Keeper_boot" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_keeper_lifecycle
+                   { keeper = "beta"; op = Wire_fleet.Keeper_boot; _ };
+               _;
+             } ->
+             true
+         | _ -> false)
+       (Cmd.flatten boot_cmds));
+  (* Move to live keeper gamma -> [x] opens Keeper_lifecycle_form seeded with pause; destructive shutdown requires confirm *)
+  let m_gamma, _ =
+    Update.step ~now:t0 m_beta (Msg.Key_event (key Keymap.Input.Down))
+  in
+  let m_lc_open, _ = Update.step ~now:t0 m_gamma (Msg.Key_event (char_key "x")) in
+  (match m_lc_open.nav.overlay with
+  | Some (Nav.Inline_action (Nav.Keeper_lifecycle_form { keeper = "gamma" })) -> ()
+  | _ -> Alcotest.fail "[x] on Keepers must open Keeper_lifecycle_form");
+  let m_lc_sd =
+    set_fields [ ("lifecycle_action", "shutdown"); ("confirm_keeper", "") ] m_lc_open
+  in
+  let _, sd_blocked_cmds =
+    Update.step ~now:t0 m_lc_sd (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check int) "shutdown without keeper confirmation emits no POST" 0
+    (List.length (Cmd.flatten sd_blocked_cmds));
+  let m_lc_sd_ok =
+    set_fields [ ("lifecycle_action", "shutdown"); ("confirm_keeper", "gamma") ] m_lc_open
+  in
+  let _, sd_cmds =
+    Update.step ~now:t0 m_lc_sd_ok (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "confirmed shutdown emits Post_keeper_lifecycle(Keeper_shutdown)" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_keeper_lifecycle
+                   { keeper = "gamma"; op = Wire_fleet.Keeper_shutdown; _ };
+               _;
+             } ->
+             true
+         | _ -> false)
+       (Cmd.flatten sd_cmds));
+  (* [d] in Keeper_dive opens Keeper_purge_confirm; Reply_keeper_purge Ok pops dive *)
+  let m_kdive =
+    {
+      m_gamma with
+      nav =
+        {
+          m_gamma.nav with
+          dive_stack =
+            [ Nav.Dive_keeper { name = "gamma"; tab = Nav.Keeper_chat } ];
+        };
+    }
+  in
+  let m_purge_open, _ =
+    Update.step ~now:t0 m_kdive (Msg.Key_event (char_key "d"))
+  in
+  (match m_purge_open.nav.overlay with
+  | Some (Nav.Inline_action (Nav.Keeper_purge_confirm { keeper = "gamma" })) -> ()
+  | _ -> Alcotest.fail "[d] in Keeper_dive must open Keeper_purge_confirm");
+  let m_purge_filled =
+    set_fields [ ("confirm_purge_keeper", "gamma") ] m_purge_open
+  in
+  let m_purge_submitting, purge_cmds =
+    Update.step ~now:t0 m_purge_filled (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "confirmed purge emits Post_keeper_purge" true
+    (List.exists
+       (function
+         | Cmd.Http_post { req = Cmd.Post_keeper_purge { keeper = "gamma"; _ }; _ } ->
+             true
+         | _ -> false)
+       (Cmd.flatten purge_cmds));
+  let m_purged, purged_cmds =
+    Update.step ~now:t1 m_purge_submitting
+      (Msg.Http_reply
+         {
+           epoch = m_purge_submitting.epoch;
+           reply = Msg.Reply_keeper_purge { keeper = "gamma"; result = Ok () };
+         })
+  in
+  Alcotest.(check bool) "Reply_keeper_purge Ok closes modal and pops Keeper_dive" true
+    (Option.is_none m_purged.inline_modal
+    && Option.is_none m_purged.nav.overlay
+    && m_purged.nav.dive_stack = []);
+  Alcotest.(check bool) "Reply_keeper_purge Ok refreshes Get_keepers" true
+    (List.exists
+       (function Cmd.Http_get { req = Cmd.Get_keepers; _ } -> true | _ -> false)
+       (Cmd.flatten purged_cmds));
+  (* 3. Lane-Addon CRUD & Asks on 5 Runtime > Addons & Browser *)
+  let m_addons0 =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Runtime; sidebar_focused = false };
+      runtime = Runtime_store.set_tab Nav.Runtime_addons_browser m0.runtime;
+    }
+  in
+  let addon_fetches =
+    Cmd.flatten (View_fetches.fetches_for_current_view ~force:true m_addons0)
+  in
+  Alcotest.(check bool) "Runtime_addons_browser fetches Get_lane_addon_asks" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_lane_addon_asks; _ } -> true
+         | _ -> false)
+       addon_fetches);
+  let sample_inst : Wire_runtime.addon_instance =
+    {
+      runtime_presence = Wire_runtime.Addon_live;
+      instance_id = "inst-browser-1";
+      addon_id = "browser-ego";
+      title = "Browser Addon";
+      revision = "rev-1";
+      phase = Wire_runtime.Addon_observing;
+      execution_kind = Some "worker";
+      resolved_image = None;
+      observation_seq = 1;
+      rows_count = 3;
+      observation_pending = false;
+      visibility_kind = Some "shared";
+      visibility_keeper = None;
+      host_cycles = Some 1;
+      host_waiting_count = 0;
+      host_issue_kind = None;
+      action_names = [ "navigate"; "click" ];
+      config_declaration_id = Some "decl-browser";
+    }
+  in
+  let addon_snap : Wire_runtime.lane_addons_snapshot =
+    {
+      configuration_complete = true;
+      declarations = [];
+      instances = [ sample_inst ];
+      issues = [];
+    }
+  in
+  let addon_ask : Wire_runtime.lane_addon_ask_row =
+    {
+      declaration_id = "decl-browser";
+      title = "Browser Setup";
+      ask_id = "ask-addon-1";
+      asked_at = 100.0;
+      context = Some "Allow host profile";
+      questions =
+        [
+          {
+            question_id = "q1";
+            header = "Profile";
+            prompt = "Choose browser profile";
+            mode = Wire_work.Ask_single;
+            allow_free_text = false;
+            free_text_hint = None;
+            choices =
+              [
+                { choice_id = "default"; label = "Default"; description = None };
+                { choice_id = "isolated"; label = "Isolated"; description = None };
+              ];
+          };
+        ];
+      resolution = Wire_work.Ask_open;
+    }
+  in
+  let m_addons1, _ =
+    Update.step ~now:t0 m_addons0
+      (Msg.Http_reply
+         { epoch = m_addons0.epoch; reply = Msg.Reply_lane_addons (Ok addon_snap) })
+  in
+  let m_addons, _ =
+    Update.step ~now:t0 m_addons1
+      (Msg.Http_reply
+         {
+           epoch = m_addons1.epoch;
+           reply = Msg.Reply_lane_addon_asks (Ok [ addon_ask ]);
+         })
+  in
+  (* [n] opens Addon_attach_form and emits Post_lane_addon_attach *)
+  let m_att_open, _ = Update.step ~now:t0 m_addons (Msg.Key_event (char_key "n")) in
+  (match m_att_open.nav.overlay with
+  | Some (Nav.Inline_action Nav.Addon_attach_form) -> ()
+  | _ -> Alcotest.fail "[n] on Runtime_addons_browser must open Addon_attach_form");
+  let m_att_filled =
+    set_fields
+      [
+        ("addon_manifest_path", "addons/browser/manifest.toml");
+        ("addon_run_id", "run-99");
+        ("addon_binding_json", {|{"headless":false}|});
+      ]
+      m_att_open
+  in
+  let _, att_cmds =
+    Update.step ~now:t0 m_att_filled (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "Addon_attach_form emits Post_lane_addon_attach" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_lane_addon_attach
+                   { manifest_path = "addons/browser/manifest.toml"; run_id = "run-99"; _ };
+               _;
+             } ->
+             true
+         | _ -> false)
+       (Cmd.flatten att_cmds));
+  (* [e] opens Addon_invoke_action seeded with 'navigate', Right cycles to 'click' *)
+  let m_act_open, _ = Update.step ~now:t0 m_addons (Msg.Key_event (char_key "e")) in
+  let m_act_cycled, _ =
+    Update.step ~now:t0 m_act_open (Msg.Key_event (key Keymap.Input.Right))
+  in
+  let _, act_cmds =
+    Update.step ~now:t0 m_act_cycled (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "Addon_invoke_action emits Post_lane_addon_action with cycled action" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_lane_addon_action
+                   {
+                     instance_id = "inst-browser-1";
+                     expected_incarnation = "inst-browser-1";
+                     action = `Assoc [ ("action", `String "click") ];
+                     _;
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       (Cmd.flatten act_cmds));
+  (* Blank addon_action_name preserves closed-schema JSON object without injecting "action" *)
+  let m_act_raw =
+    set_fields
+      [
+        ("addon_action_name", "");
+        ("addon_action_payload", {|{"url":"https://example.com"}|});
+      ]
+      m_act_open
+  in
+  let _, act_raw_cmds =
+    Update.step ~now:t0 m_act_raw (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool)
+    "Addon_invoke_action with blank action_name omits 'action' key for closed schemas"
+    true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_lane_addon_action
+                   {
+                     instance_id = "inst-browser-1";
+                     expected_incarnation = "inst-browser-1";
+                     action = `Assoc [ ("url", `String "https://example.com") ];
+                     _;
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       (Cmd.flatten act_raw_cmds));
+  (* [d] opens Addon_detach_confirm -> 'detach' emits Post_lane_addon_detach *)
+  let m_det_open, _ = Update.step ~now:t0 m_addons (Msg.Key_event (char_key "d")) in
+  let m_det_ok = set_fields [ ("confirm_addon_detach", "detach") ] m_det_open in
+  let _, det_cmds =
+    Update.step ~now:t0 m_det_ok (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "Addon_detach_confirm emits Post_lane_addon_detach" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             { req = Cmd.Post_lane_addon_detach { instance_id = "inst-browser-1" }; _ } ->
+             true
+         | _ -> false)
+       (Cmd.flatten det_cmds));
+  (* [c] opens Ask_answer modal for open lane-addon ask -> select choice & Enter -> Post_lane_addon_ask_answer *)
+  let m_ask_open, _ = Update.step ~now:t0 m_addons (Msg.Key_event (char_key "c")) in
+  (match m_ask_open.ask_modal with
+  | Some { lane_addon_declaration_id = Some "decl-browser"; ask; _ }
+    when String.equal ask.ask_id "ask-addon-1" ->
+      ()
+  | _ -> Alcotest.fail "[c] on Runtime_addons_browser must open Ask_answer modal for lane-addon ask");
+  let m_ask_sel, _ =
+    Update.step ~now:t0 m_ask_open (Msg.Key_event (char_key "a"))
+  in
+  let m_ask_sub, ask_cmds =
+    Update.step ~now:t0 m_ask_sel (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "Ask_answer modal emits Post_lane_addon_ask_answer" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_lane_addon_ask_answer
+                   {
+                     declaration_id = "decl-browser";
+                     ask_id = "ask-addon-1";
+                     answers = [ ("q1", Wire_work.Ask_chose [ "default" ]) ];
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       (Cmd.flatten ask_cmds));
+  let m_ask_done, ask_done_cmds =
+    Update.step ~now:t1 m_ask_sub
+      (Msg.Http_reply
+         {
+           epoch = m_ask_sub.epoch;
+           reply =
+             Msg.Reply_lane_addon_ask_answer
+               { declaration_id = "decl-browser"; ask_id = "ask-addon-1"; result = Ok () };
+         })
+  in
+  Alcotest.(check bool) "Reply_lane_addon_ask_answer Ok closes ask_modal and refreshes asks" true
+    (Option.is_none m_ask_done.ask_modal
+    && Option.is_none m_ask_done.nav.overlay
+    && List.exists
+         (function
+           | Cmd.Http_get { req = Cmd.Get_lane_addon_asks; _ } -> true
+           | _ -> false)
+         (Cmd.flatten ask_done_cmds))
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -17741,6 +18236,11 @@ let () =
       , [
           Alcotest.test_case "tasks/goals MCP + link-goal + board reply/upvote/pin/delete"
             `Quick test_work_and_board_crud_requests_and_guards;
+        ] );
+      ( "keeper_lifecycle_and_addon_crud"
+      , [
+          Alcotest.test_case "keeper lifecycle/purge & lane-addon attach/detach/action/asks"
+            `Quick test_keeper_lifecycle_and_addon_crud_requests;
         ] );
       ("Board recovery", [Alcotest.test_case "recover the viewed keeper and exact quarantine generation" `Quick test_keeper_board_quarantine_recovery]);
       ("exact chat lookup", [Alcotest.test_case "retain and dismiss scoped absent operations" `Quick test_exact_operation_absence_recovery]);

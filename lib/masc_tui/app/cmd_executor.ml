@@ -172,6 +172,7 @@ let timeout_sec_for_get : Cmd.get_request -> float = function
   | Cmd.Get_skills
   | Cmd.Get_browser_lane
   | Cmd.Get_lane_addons
+  | Cmd.Get_lane_addon_asks
   | Cmd.Get_sandboxes
   | Cmd.Get_keeper_sandbox _
   | Cmd.Get_repositories
@@ -230,6 +231,12 @@ let timeout_sec_for_post : Cmd.post_request -> float = function
   | Cmd.Post_setup_account_key _
   | Cmd.Post_tui_preference _
   | Cmd.Post_keeper_turn_interrupt _
+  | Cmd.Post_keeper_lifecycle _
+  | Cmd.Post_keeper_purge _
+  | Cmd.Post_lane_addon_attach _
+  | Cmd.Post_lane_addon_detach _
+  | Cmd.Post_lane_addon_action _
+  | Cmd.Post_lane_addon_ask_answer _
   | Cmd.Post_board_create _
   | Cmd.Post_board_comment _
   | Cmd.Post_board_vote _
@@ -843,6 +850,7 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_connectors
   | Cmd.Get_browser_lane
   | Cmd.Get_lane_addons
+  | Cmd.Get_lane_addon_asks
   | Cmd.Get_mcp_clients
   | Cmd.Get_sandboxes
   | Cmd.Get_keeper_sandbox _
@@ -1538,6 +1546,13 @@ let rec execute_get t ~epoch req =
               Msg.Reply_lane_addons
                 (fetch_and_decode_get t ~path
                    ~decode:Wire_runtime.decode_lane_addons)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_lane_addon_asks ->
+            let reply =
+              Msg.Reply_lane_addon_asks
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_lane_addon_asks)
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_mcp_clients ->
@@ -2490,6 +2505,76 @@ let execute_post t ~epoch req =
         | Cmd.Post_board_delete { post_id } ->
             let result = post_ack t ~path ~body in
             Some (Msg.Reply_board_delete { post_id; result })
+        | Cmd.Post_keeper_lifecycle { keeper; op; from_modal; _ } ->
+            let result = post_ack t ~path ~body in
+            let op_en = Wire_fleet.keeper_lifecycle_op_label op in
+            let label =
+              Say.make
+                ~ko:(Printf.sprintf "키퍼 %s 요청 완료: @%s" op_en keeper)
+                ~en:(Printf.sprintf "Keeper %s accepted: @%s" op_en keeper)
+            in
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label;
+                   ack_scope =
+                     (if from_modal then Msg.Ack_close_modal_and_refresh
+                      else Msg.Ack_refresh_view);
+                   for_modal =
+                     (if from_modal then
+                        Some (Nav.Keeper_lifecycle_form { keeper })
+                      else None);
+                   result;
+                 })
+        | Cmd.Post_keeper_purge { keeper; _ } ->
+            let result = post_ack t ~path ~body in
+            Some (Msg.Reply_keeper_purge { keeper; result })
+        | Cmd.Post_lane_addon_attach _ ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label =
+                     Say.make ~ko:"애드온 연결(Attach) 요청 완료"
+                       ~en:"Lane addon attached";
+                   ack_scope = Msg.Ack_close_modal_and_refresh;
+                   for_modal = Some Nav.Addon_attach_form;
+                   result;
+                 })
+        | Cmd.Post_lane_addon_detach { instance_id } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label =
+                     Say.make
+                       ~ko:("애드온 분리 완료: " ^ instance_id)
+                       ~en:("Lane addon detached: " ^ instance_id);
+                   ack_scope = Msg.Ack_close_modal_and_refresh;
+                   for_modal =
+                     Some (Nav.Addon_detach_confirm { instance_id; title = "" });
+                   result;
+                 })
+        | Cmd.Post_lane_addon_action { instance_id; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label =
+                     Say.make
+                       ~ko:("애드온 액션 호출됨: " ^ instance_id)
+                       ~en:("Lane addon action queued: " ^ instance_id);
+                   ack_scope = Msg.Ack_close_modal_and_refresh;
+                   for_modal =
+                     Some
+                       (Nav.Addon_invoke_action
+                          { instance_id; action_names = [] });
+                   result;
+                 })
+        | Cmd.Post_lane_addon_ask_answer { declaration_id; ask_id; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_lane_addon_ask_answer { declaration_id; ask_id; result })
       in
       Option.iter
         (fun reply ->

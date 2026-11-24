@@ -411,6 +411,17 @@ type http_reply =
     }
   | Reply_lane_addons of
       (Wire_runtime.lane_addons_snapshot, http_error) result
+  | Reply_lane_addon_asks of
+      (Wire_runtime.lane_addon_ask_row list, http_error) result
+  | Reply_lane_addon_ask_answer of {
+      declaration_id : string;
+      ask_id : string;
+      result : (unit, http_error) result;
+    }
+  | Reply_keeper_purge of {
+      keeper : string;
+      result : (unit, http_error) result;
+    }
   | Reply_mcp_clients of (Wire_runtime.mcp_client_row list, http_error) result
   | Reply_sandboxes of (Wire_infra.sandboxes_snapshot, http_error) result
   | Reply_keeper_sandbox of {

@@ -1054,6 +1054,9 @@ let fetches_for_workspace ~force (m : Model.t) =
                (needs_fetch ~force m.runtime.lane_addons)
                Cmd.Get_lane_addons
           |> add_if
+               (needs_fetch ~force m.runtime.lane_addon_asks)
+               Cmd.Get_lane_addon_asks
+          |> add_if
                (needs_fetch ~force m.runtime.browser_lane)
                Cmd.Get_browser_lane)
           @ catalog_reqs)

@@ -148,6 +148,7 @@ type ask_live_status =
 
 type ask_modal = {
   ask : Wire_work.ask_row;
+  lane_addon_declaration_id : string option;
   question_idx : int;
   cursor : int;
   prompt_scroll : int;
@@ -1858,6 +1859,100 @@ let inline_modal_for kind =
             secret = false;
           };
         ]
+    | Nav.Keeper_lifecycle_form { keeper } ->
+        [
+          {
+            key = "lifecycle_action";
+            label =
+              Say.make ~ko:"라이프사이클 액션" ~en:"Lifecycle action";
+            value = "pause";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "confirm_keeper";
+            label =
+              Say.make
+                ~ko:(Printf.sprintf "파괴적 작업 확인 (shutdown/reset 시 '%s')" keeper)
+                ~en:(Printf.sprintf "Confirm destructive ('%s' for shutdown/reset)" keeper);
+            value = "";
+            required = false;
+            secret = false;
+          };
+        ]
+    | Nav.Keeper_purge_confirm { keeper } ->
+        [
+          {
+            key = "confirm_purge_keeper";
+            label =
+              Say.make
+                ~ko:(Printf.sprintf "영구 삭제 확인 ('%s' 입력)" keeper)
+                ~en:(Printf.sprintf "Confirm purge (type '%s')" keeper);
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Addon_attach_form ->
+        [
+          {
+            key = "addon_manifest_path";
+            label = Say.make ~ko:"매니페스트 경로" ~en:"Manifest path";
+            value = "";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "addon_run_id";
+            label = Say.make ~ko:"실행 ID (run_id)" ~en:"Run ID";
+            value = "tui-run";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "addon_binding_json";
+            label = Say.make ~ko:"바인딩 JSON 객체" ~en:"Binding JSON object";
+            value = "{}";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Addon_detach_confirm { instance_id; _ } ->
+        [
+          {
+            key = "confirm_addon_detach";
+            label =
+              Say.make
+                ~ko:(Printf.sprintf "분리 확인 ('detach' 또는 '%s')" instance_id)
+                ~en:(Printf.sprintf "Confirm detach ('detach' or '%s')" instance_id);
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Addon_invoke_action { action_names; _ } ->
+        let first_action =
+          match action_names with a :: _ -> a | [] -> ""
+        in
+        [
+          {
+            key = "addon_action_name";
+            label =
+              Say.make ~ko:"애드온 액션 이름 (비워두면 JSON 그대로 전송)"
+                ~en:"Addon action name (blank sends raw JSON)";
+            value = first_action;
+            required = false;
+            secret = false;
+          };
+          {
+            key = "addon_action_payload";
+            label =
+              Say.make ~ko:"액션 JSON 인자 객체" ~en:"Action payload JSON object";
+            value = "{}";
+            required = true;
+            secret = false;
+          };
+        ]
   in
   let active_field =
     match kind with
@@ -1885,7 +1980,12 @@ let inline_modal_for kind =
     | Nav.Task_transition_form _
     | Nav.Task_link_goal _
     | Nav.Goal_upsert_form _
-    | Nav.Board_delete_post _ ->
+    | Nav.Board_delete_post _
+    | Nav.Keeper_lifecycle_form _
+    | Nav.Keeper_purge_confirm _
+    | Nav.Addon_attach_form
+    | Nav.Addon_detach_confirm _
+    | Nav.Addon_invoke_action _ ->
         0
   in
   { kind; fields; active_field; submitting = false; error = None }
@@ -1982,6 +2082,41 @@ let modal_field_help ~key =
         (Say.make
            ~ko:"'delete' 또는 글 ID를 입력 후 Enter (영구 삭제)"
            ~en:"Type 'delete' or post ID + Enter to delete post")
+  | "lifecycle_action" ->
+      Some
+        (Say.make
+           ~ko:"허용: boot | pause | resume | shutdown | reset ([←→] 전환)"
+           ~en:"Allowed: boot | pause | resume | shutdown | reset ([←→] cycle)")
+  | "confirm_keeper" ->
+      Some
+        (Say.make
+           ~ko:"boot/pause/resume은 비워도 됨 · shutdown/reset 시 키퍼 이름 입력 필수"
+           ~en:"Blank OK for boot/pause/resume · type keeper name for shutdown/reset")
+  | "confirm_purge_keeper" ->
+      Some
+        (Say.make
+           ~ko:"키퍼 이름을 정확히 입력하고 Enter (설정·런타임 영구 제거)"
+           ~en:"Type exact keeper name + Enter to permanently purge keeper")
+  | "addon_manifest_path" ->
+      Some
+        (Say.make
+           ~ko:"패키지 매니페스트 경로 (카탈로그 모드에서 [n] 누르면 자동 입력)"
+           ~en:"Manifest path (auto-seeded when pressing [n] in Catalog mode)")
+  | "addon_binding_json" | "addon_action_payload" ->
+      Some
+        (Say.make
+           ~ko:"유효한 JSON 객체 입력 (예: {})"
+           ~en:"Valid JSON object (e.g. {})")
+  | "addon_action_name" ->
+      Some
+        (Say.make
+           ~ko:"선언된 애드온 액션 이름 ([←→] 전환)"
+           ~en:"Declared addon action name ([←→] cycle)")
+  | "confirm_addon_detach" ->
+      Some
+        (Say.make
+           ~ko:"'detach' 또는 인스턴스 ID 입력 후 Enter"
+           ~en:"Type 'detach' or instance ID + Enter to detach addon")
   | "setup_key_integration" ->
       Some
         (Say.make
@@ -2182,7 +2317,14 @@ let ask_live_status (m : t) (ask_id : string) : ask_live_status =
               false)
         m.attention.items
     in
-    if open_in_attention then Ask_live_open else Ask_live_closed
+    let open_in_lane_addons =
+      List.exists
+        (fun (row : Wire_runtime.lane_addon_ask_row) ->
+          String.equal row.ask_id ask_id)
+        (Runtime_store.open_lane_addon_asks m.runtime)
+    in
+    if open_in_attention || open_in_lane_addons then Ask_live_open
+    else Ask_live_closed
 
 let ask_modal_for ?preselect_choice_1based (ask : Wire_work.ask_row) : ask_modal =
   let per_question, cursor =
@@ -2204,6 +2346,7 @@ let ask_modal_for ?preselect_choice_1based (ask : Wire_work.ask_row) : ask_modal
   in
   {
     ask;
+    lane_addon_declaration_id = None;
     question_idx = 0;
     cursor;
     prompt_scroll = 0;
@@ -2212,6 +2355,23 @@ let ask_modal_for ?preselect_choice_1based (ask : Wire_work.ask_row) : ask_modal
     submitting = false;
     error = None;
   }
+
+let ask_modal_for_lane_addon (row : Wire_runtime.lane_addon_ask_row) : ask_modal =
+  let label =
+    if String.equal (String.trim row.title) "" then row.declaration_id
+    else row.title
+  in
+  let ask : Wire_work.ask_row =
+    {
+      ask_id = row.ask_id;
+      keeper = label;
+      asked_at = row.asked_at;
+      context = row.context;
+      questions = row.questions;
+      resolution = row.resolution;
+    }
+  in
+  { (ask_modal_for ask) with lane_addon_declaration_id = Some row.declaration_id }
 
 let with_current_ask_draft f (modal : ask_modal) : ask_modal =
   match ask_modal_current_question modal with

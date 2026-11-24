@@ -1006,7 +1006,12 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Task_transition_form _
         | Nav.Task_link_goal _
         | Nav.Goal_upsert_form _
-        | Nav.Board_delete_post _ ->
+        | Nav.Board_delete_post _
+        | Nav.Keeper_lifecycle_form _
+        | Nav.Keeper_purge_confirm _
+        | Nav.Addon_attach_form
+        | Nav.Addon_detach_confirm _
+        | Nav.Addon_invoke_action _ ->
             false
       in
       let matches_modal =
@@ -1092,7 +1097,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Task_transition_form _
             | Nav.Task_link_goal _
             | Nav.Goal_upsert_form _
-            | Nav.Board_delete_post _ ->
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_attach_form
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _ ->
                 modal)
           m.inline_modal
       in
@@ -1183,7 +1193,12 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Task_create_form
         | Nav.Task_transition_form _
         | Nav.Task_link_goal _
-        | Nav.Goal_upsert_form _ ->
+        | Nav.Goal_upsert_form _
+        | Nav.Keeper_lifecycle_form _
+        | Nav.Keeper_purge_confirm _
+        | Nav.Addon_attach_form
+        | Nav.Addon_detach_confirm _
+        | Nav.Addon_invoke_action _ ->
             false
       in
       let close_modal =
@@ -1278,7 +1293,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Task_create_form
             | Nav.Task_transition_form _
             | Nav.Task_link_goal _
-            | Nav.Goal_upsert_form _ ->
+            | Nav.Goal_upsert_form _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_attach_form
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _ ->
                 modal)
           m.inline_modal
       in
@@ -2510,7 +2530,12 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Task_transition_form _
         | Nav.Task_link_goal _
         | Nav.Goal_upsert_form _
-        | Nav.Board_delete_post _ ->
+        | Nav.Board_delete_post _
+        | Nav.Keeper_lifecycle_form _
+        | Nav.Keeper_purge_confirm _
+        | Nav.Addon_attach_form
+        | Nav.Addon_detach_confirm _
+        | Nav.Addon_invoke_action _ ->
             false
       in
       let close_modal =
@@ -2608,7 +2633,12 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Task_transition_form _
         | Nav.Task_link_goal _
         | Nav.Goal_upsert_form _
-        | Nav.Board_delete_post _ ->
+        | Nav.Board_delete_post _
+        | Nav.Keeper_lifecycle_form _
+        | Nav.Keeper_purge_confirm _
+        | Nav.Addon_attach_form
+        | Nav.Addon_detach_confirm _
+        | Nav.Addon_invoke_action _ ->
             false
       in
       let is_conflict =
@@ -3031,6 +3061,220 @@ let apply_http_reply ~now (m : Model.t) reply =
                    { x with lane_addons = failed_slot err x.lane_addons }))
             ~source:(Health.Source_runtime "lane_addons")
             ~ko:"애드온 레인 조회" ~en:"Lane addons fetch" err)
+  | Msg.Reply_lane_addon_asks (Ok asks) ->
+      ( {
+          m with
+          runtime =
+            Runtime_store.apply_lane_addon_asks ~observed_at:now asks m.runtime;
+        }
+      , [] )
+  | Msg.Reply_lane_addon_asks (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403 | 404; _ } ->
+          let runtime =
+            {
+              m.runtime with
+              lane_addon_asks =
+                Observed.failed ~reason:(Msg.http_error_detail err)
+                  ~retryable:false ~at:now;
+            }
+          in
+          ({ m with runtime }, [])
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:
+              (on_runtime (fun (x : Runtime_store.t) ->
+                   {
+                     x with
+                     lane_addon_asks = failed_slot err x.lane_addon_asks;
+                   }))
+            ~source:(Health.Source_runtime "lane_addon_asks")
+            ~ko:"애드온 질문 목록 조회" ~en:"Lane addon asks fetch" err)
+  | Msg.Reply_lane_addon_ask_answer { declaration_id = _; ask_id; result = Ok () }
+    ->
+      let nav, ask_modal =
+        match m.ask_modal with
+        | Some modal when String.equal modal.ask.ask_id ask_id ->
+            let nav =
+              match m.nav.overlay with
+              | Some Nav.Ask_answer -> { m.nav with overlay = None }
+              | Some
+                  ( Nav.Palette
+                  | Nav.Settings _
+                  | Nav.Incidents
+                  | Nav.Queue_context _
+                  | Nav.Inline_action _
+                  | Nav.Help
+                  | Nav.System_gate _ )
+              | None ->
+                  m.nav
+            in
+            (nav, None)
+        | Some _ | None -> (m.nav, m.ask_modal)
+      in
+      let next =
+        { m with nav; ask_modal }
+        |> Model.with_toast ~now ~level:Model.Toast_success
+             (Say.make ~ko:"애드온 질문 응답이 기록되었습니다"
+                ~en:"Lane addon ask answered")
+      in
+      ( next
+      , [
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_lane_addon_asks };
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_lane_addons };
+        ] )
+  | Msg.Reply_lane_addon_ask_answer { declaration_id = _; ask_id; result = Error err }
+    ->
+      let ask_modal =
+        match (err, m.ask_modal) with
+        | Msg.Workspace_mismatch _, _ -> None
+        | ( (Msg.Transport _ | Msg.Http_error _ | Msg.Decode_error _)
+          , Some modal )
+          when String.equal modal.ask.ask_id ask_id ->
+            Some
+              {
+                modal with
+                submitting = false;
+                error = Some (Msg.http_error_summary err);
+              }
+        | (Msg.Transport _ | Msg.Http_error _ | Msg.Decode_error _), (Some _ | None)
+          ->
+            m.ask_modal
+      in
+      let next, cmds =
+        record_http_incident ~now ~source:(Health.Source_runtime "lane_addon_asks")
+          ~context:(Say.make ~ko:"애드온 질문 응답" ~en:"Lane addon ask answer")
+          err { m with ask_modal }
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_keeper_purge { keeper; result = Ok () } ->
+      let matches_purge = function
+        | Nav.Keeper_purge_confirm { keeper = mk } -> String.equal mk keeper
+        | Nav.Btw_query
+        | Nav.Gate_reject _
+        | Nav.Verification_reject _
+        | Nav.Harness_overrule _
+        | Nav.Task_cancel _
+        | Nav.Goal_drop _
+        | Nav.Schedule_form
+        | Nav.Connector_form
+        | Nav.Repo_add_form
+        | Nav.Board_new_post
+        | Nav.Board_comment _
+        | Nav.Github_token_form _
+        | Nav.Code_finder_form
+        | Nav.Code_search_form
+        | Nav.Runtime_lane_create
+        | Nav.Runtime_lane_edit _
+        | Nav.Runtime_lane_delete _
+        | Nav.Task_create_form
+        | Nav.Task_transition_form _
+        | Nav.Task_link_goal _
+        | Nav.Goal_upsert_form _
+        | Nav.Board_delete_post _
+        | Nav.Keeper_lifecycle_form _
+        | Nav.Addon_attach_form
+        | Nav.Addon_detach_confirm _
+        | Nav.Addon_invoke_action _ ->
+            false
+      in
+      let close_modal =
+        match m.inline_modal with
+        | Some modal -> modal.submitting && matches_purge modal.kind
+        | None -> false
+      in
+      let dive_stack, dive_return_stack =
+        match m.nav.dive_stack with
+        | Nav.Dive_keeper { name; _ } :: rest when String.equal name keeper ->
+            let return_rest =
+              match m.nav.dive_return_stack with
+              | _ :: r -> r
+              | [] -> []
+            in
+            (rest, return_rest)
+        | _ :: _ | [] -> (m.nav.dive_stack, m.nav.dive_return_stack)
+      in
+      let nav =
+        let nav0 = { m.nav with dive_stack; dive_return_stack } in
+        if not close_modal then nav0
+        else
+          match nav0.overlay with
+          | Some (Nav.Inline_action k) when matches_purge k ->
+              { nav0 with overlay = nav0.return_overlay; return_overlay = None }
+          | Some
+              ( Nav.Inline_action _
+              | Nav.Palette
+              | Nav.Settings _
+              | Nav.Incidents
+              | Nav.Queue_context _
+              | Nav.Ask_answer
+              | Nav.Help
+              | Nav.System_gate _ )
+          | None ->
+              nav0
+      in
+      let inline_modal = if close_modal then None else m.inline_modal in
+      let next =
+        { m with nav; inline_modal }
+        |> Model.with_toast ~now ~level:Model.Toast_success
+             (Say.make ~ko:("키퍼 영구 삭제 요청 완료: @" ^ keeper)
+                ~en:("Keeper purge accepted: @" ^ keeper))
+      in
+      (next, [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_keepers } ])
+  | Msg.Reply_keeper_purge { keeper; result = Error err } ->
+      let inline_modal =
+        Option.map
+          (fun (modal : Model.inline_modal_state) ->
+            match modal.kind with
+            | Nav.Keeper_purge_confirm { keeper = mk }
+              when modal.submitting && String.equal mk keeper ->
+                {
+                  modal with
+                  submitting = false;
+                  error = Some (Msg.http_error_detail err);
+                }
+            | Nav.Keeper_purge_confirm _
+            | Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Harness_overrule _
+            | Nav.Task_cancel _
+            | Nav.Goal_drop _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Code_search_form
+            | Nav.Runtime_lane_create
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_create_form
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Addon_attach_form
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _ ->
+                modal)
+          m.inline_modal
+      in
+      let next, cmds =
+        record_http_incident ~now ~source:(Health.Source_keeper keeper)
+          ~context:
+            (Say.make ~ko:("키퍼 삭제: @" ^ keeper) ~en:("Purge keeper: @" ^ keeper))
+          err { m with inline_modal }
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
   | Msg.Reply_mcp_clients (Ok clients) ->
       ( {
           m with
@@ -3275,7 +3519,74 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Task_transition_form _
             | Nav.Task_link_goal _
             | Nav.Goal_upsert_form _
-            | Nav.Board_delete_post _ ->
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_attach_form
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _ ->
+                false)
+        | Some (Nav.Addon_detach_confirm { instance_id = ack_id; _ }) -> (
+            match modal.kind with
+            | Nav.Addon_detach_confirm { instance_id = mid; _ } ->
+                String.equal mid ack_id
+            | Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Harness_overrule _
+            | Nav.Task_cancel _
+            | Nav.Goal_drop _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Code_search_form
+            | Nav.Runtime_lane_create
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_create_form
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_attach_form
+            | Nav.Addon_invoke_action _ ->
+                false)
+        | Some (Nav.Addon_invoke_action { instance_id = ack_id; _ }) -> (
+            match modal.kind with
+            | Nav.Addon_invoke_action { instance_id = mid; _ } ->
+                String.equal mid ack_id
+            | Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Harness_overrule _
+            | Nav.Task_cancel _
+            | Nav.Goal_drop _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Code_search_form
+            | Nav.Runtime_lane_create
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_create_form
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_attach_form
+            | Nav.Addon_detach_confirm _ ->
                 false)
         | Some
             (( Nav.Btw_query
@@ -3298,7 +3609,10 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Task_transition_form _
              | Nav.Task_link_goal _
              | Nav.Goal_upsert_form _
-             | Nav.Board_delete_post _ ) as kind) ->
+             | Nav.Board_delete_post _
+             | Nav.Keeper_lifecycle_form _
+             | Nav.Keeper_purge_confirm _
+             | Nav.Addon_attach_form ) as kind) ->
             Nav.equal_inline_action_kind modal.kind kind
       in
       let close_inline_modal =
@@ -3388,7 +3702,74 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Task_transition_form _
             | Nav.Task_link_goal _
             | Nav.Goal_upsert_form _
-            | Nav.Board_delete_post _ ->
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_attach_form
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _ ->
+                false)
+        | Some (Nav.Addon_detach_confirm { instance_id = ack_id; _ }) -> (
+            match modal.kind with
+            | Nav.Addon_detach_confirm { instance_id = mid; _ } ->
+                String.equal mid ack_id
+            | Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Harness_overrule _
+            | Nav.Task_cancel _
+            | Nav.Goal_drop _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Code_search_form
+            | Nav.Runtime_lane_create
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_create_form
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_attach_form
+            | Nav.Addon_invoke_action _ ->
+                false)
+        | Some (Nav.Addon_invoke_action { instance_id = ack_id; _ }) -> (
+            match modal.kind with
+            | Nav.Addon_invoke_action { instance_id = mid; _ } ->
+                String.equal mid ack_id
+            | Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Harness_overrule _
+            | Nav.Task_cancel _
+            | Nav.Goal_drop _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Code_search_form
+            | Nav.Runtime_lane_create
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_create_form
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_attach_form
+            | Nav.Addon_detach_confirm _ ->
                 false)
         | Some
             (( Nav.Btw_query
@@ -3411,7 +3792,10 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Task_transition_form _
              | Nav.Task_link_goal _
              | Nav.Goal_upsert_form _
-             | Nav.Board_delete_post _ ) as kind) ->
+             | Nav.Board_delete_post _
+             | Nav.Keeper_lifecycle_form _
+             | Nav.Keeper_purge_confirm _
+             | Nav.Addon_attach_form ) as kind) ->
             Nav.equal_inline_action_kind modal.kind kind
       in
       let inline_modal =

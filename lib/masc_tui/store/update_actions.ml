@@ -1243,6 +1243,152 @@ let toggle_board_pin ~now (m : Model.t) =
         ] )
   | None -> (m, [])
 
+let selected_keeper_for_lifecycle (m : Model.t) :
+    Wire_fleet.keeper_summary option =
+  match Model.active_dive m with
+  | Some (Nav.Dive_keeper { name; _ }) -> (
+      match Observed.to_option m.fleet.keepers with
+      | Some ks ->
+          List.find_opt
+            (fun (k : Wire_fleet.keeper_summary) -> String.equal k.name name)
+            ks
+      | None -> None)
+  | Some
+      ( Nav.Dive_work _
+      | Nav.Dive_knowledge _
+      | Nav.Dive_runtime _
+      | Nav.Dive_infra _ ) ->
+      None
+  | None ->
+      if Nav.equal_workspace m.nav.workspace Nav.Keepers then
+        Fleet_store.selected_keeper_summary m.fleet
+      else None
+
+let selected_keeper_name_for_lifecycle (m : Model.t) : string option =
+  match Model.active_dive m with
+  | Some (Nav.Dive_keeper { name; _ }) -> Some name
+  | Some
+      ( Nav.Dive_work _
+      | Nav.Dive_knowledge _
+      | Nav.Dive_runtime _
+      | Nav.Dive_infra _ ) ->
+      None
+  | None ->
+      if Nav.equal_workspace m.nav.workspace Nav.Keepers then
+        Option.map
+          (fun (k : Wire_fleet.keeper_summary) -> k.name)
+          (Fleet_store.selected_keeper_summary m.fleet)
+      else None
+
+let open_keeper_lifecycle_modal (m : Model.t) ~keeper ~default_action =
+  let kind = Nav.Keeper_lifecycle_form { keeper } in
+  let modal0 = Model.inline_modal_for kind in
+  let fields =
+    List.map
+      (fun (f : Model.modal_form_field) ->
+        if String.equal f.key "lifecycle_action" then
+          { f with value = default_action }
+        else f)
+      modal0.fields
+  in
+  let modal = { modal0 with fields } in
+  let nav =
+    {
+      m.nav with
+      overlay = Some (Nav.Inline_action kind);
+      return_overlay = None;
+      filter_focused = false;
+      sidebar_focused = false;
+      modal_edit_cursor = String.length (Model.modal_active_field_value modal);
+    }
+  in
+  let drafts = Drafts.set_focus false m.drafts in
+  let config = Config_store.cancel_edit_field m.config in
+  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, [])
+
+let open_addon_attach_modal (m : Model.t) =
+  let kind = Nav.Addon_attach_form in
+  let modal0 = Model.inline_modal_for kind in
+  let seeded_manifest =
+    if not m.runtime.addon_catalog_mode then None
+    else
+      match Runtime_store.selected_addon_catalog_entry m.runtime with
+      | Some (Wire_runtime.Catalog_package { manifest_path; _ }) ->
+          Some manifest_path
+      | Some (Wire_runtime.Catalog_folder _ | Wire_runtime.Catalog_issue _)
+      | None ->
+          None
+  in
+  let modal =
+    match seeded_manifest with
+    | None -> modal0
+    | Some mp ->
+        let fields =
+          List.map
+            (fun (f : Model.modal_form_field) ->
+              if String.equal f.key "addon_manifest_path" then
+                { f with value = mp }
+              else f)
+            modal0.fields
+        in
+        { modal0 with fields }
+  in
+  let nav =
+    {
+      m.nav with
+      overlay = Some (Nav.Inline_action kind);
+      return_overlay = None;
+      filter_focused = false;
+      sidebar_focused = false;
+      modal_edit_cursor = String.length (Model.modal_active_field_value modal);
+    }
+  in
+  let drafts = Drafts.set_focus false m.drafts in
+  let config = Config_store.cancel_edit_field m.config in
+  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, [])
+
+let open_addon_ask_modal ~now (m : Model.t) =
+  let open_asks = Runtime_store.open_lane_addon_asks m.runtime in
+  let selected_decl_opt =
+    Option.bind (Runtime_store.selected_addon_instance m.runtime)
+      (fun (inst : Wire_runtime.addon_instance) -> inst.config_declaration_id)
+  in
+  let chosen =
+    match selected_decl_opt with
+    | Some decl_id -> (
+        match
+          List.find_opt
+            (fun (a : Wire_runtime.lane_addon_ask_row) ->
+              String.equal a.declaration_id decl_id)
+            open_asks
+        with
+        | Some a -> Some a
+        | None -> List.nth_opt open_asks 0)
+    | None -> List.nth_opt open_asks 0
+  in
+  match chosen with
+  | None ->
+      ( Model.with_toast ~now ~level:Model.Toast_info
+          (Say.make ~ko:"열린 애드온 질문(Ask)이 없습니다"
+             ~en:"No open lane-addon asks")
+          m
+      , [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_lane_addon_asks } ] )
+  | Some ask_row ->
+      let ask_modal = Model.ask_modal_for_lane_addon ask_row in
+      let nav =
+        {
+          m.nav with
+          overlay = Some Nav.Ask_answer;
+          return_overlay = None;
+          filter_focused = false;
+          sidebar_focused = false;
+        }
+      in
+      let drafts = Drafts.set_focus false m.drafts in
+      let config = Config_store.cancel_edit_field m.config in
+      ( { m with nav; drafts; config; inline_modal = None; ask_modal = Some ask_modal }
+      , [] )
+
 let open_harness_overrule_for_selected ~verdict ~now (m : Model.t) =
   Update_nav.open_harness_overrule_for_context ~verdict ~now m
 
@@ -2208,7 +2354,12 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Task_transition_form _
                     | Nav.Task_link_goal _
                     | Nav.Goal_upsert_form _
-                    | Nav.Board_delete_post _ )
+                    | Nav.Board_delete_post _
+                    | Nav.Keeper_lifecycle_form _
+                    | Nav.Keeper_purge_confirm _
+                    | Nav.Addon_attach_form
+                    | Nav.Addon_detach_confirm _
+                    | Nav.Addon_invoke_action _ )
                   , _ ) ->
                     true
               in
@@ -2417,7 +2568,12 @@ and execute_action ~now (m : Model.t) action =
                | Nav.Task_transition_form _
                | Nav.Task_link_goal _
                | Nav.Goal_upsert_form _
-               | Nav.Board_delete_post _ )) ->
+               | Nav.Board_delete_post _
+               | Nav.Keeper_lifecycle_form _
+               | Nav.Keeper_purge_confirm _
+               | Nav.Addon_attach_form
+               | Nav.Addon_detach_confirm _
+               | Nav.Addon_invoke_action _ )) ->
             Update_nav.submit_inline_modal ~now m
         | Some Nav.Ask_answer -> (
             match m.ask_modal with
@@ -2689,7 +2845,12 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Task_transition_form _
             | Nav.Task_link_goal _
             | Nav.Goal_upsert_form _
-            | Nav.Board_delete_post _ ->
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_attach_form
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _ ->
                 m.drafts
           in
           let closed =
@@ -3595,11 +3756,12 @@ and execute_action ~now (m : Model.t) action =
                   | Nav.Runtime_connectors -> open_connector_form_populated m
                   | Nav.Runtime_failover_lanes ->
                       open_runtime_lane_create_modal m
+                  | Nav.Runtime_addons_browser ->
+                      open_addon_attach_modal m
                   | Nav.Runtime_quotas_credits
                   | Nav.Runtime_efficiency_spend
                   | Nav.Runtime_fusion
-                  | Nav.Runtime_tools_usage
-                  | Nav.Runtime_addons_browser ->
+                  | Nav.Runtime_tools_usage ->
                       (m, []))
               | Nav.Infra -> (
                   match m.infra.active_tab with
@@ -3878,7 +4040,12 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Task_transition_form _
                 | Nav.Task_link_goal _
                 | Nav.Goal_upsert_form _
-                | Nav.Board_delete_post _ )
+                | Nav.Board_delete_post _
+                | Nav.Keeper_lifecycle_form _
+                | Nav.Keeper_purge_confirm _
+                | Nav.Addon_attach_form
+                | Nav.Addon_detach_confirm _
+                | Nav.Addon_invoke_action _ )
             | Nav.Ask_answer
             | Nav.Help
             | Nav.System_gate
@@ -5233,6 +5400,10 @@ and execute_action ~now (m : Model.t) action =
                     match Work_store.selected_task m.work with
                     | Some tk -> open_task_transition_modal ~now m tk
                     | None -> (m, []))
+                | Nav.Runtime
+                  when Nav.equal_runtime_tab m.runtime.active_tab
+                         Nav.Runtime_addons_browser ->
+                    open_addon_ask_modal ~now m
                 | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Runtime | Nav.Infra
                   ->
                     (m, []))))
@@ -5627,19 +5798,71 @@ and execute_action ~now (m : Model.t) action =
         | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) ->
             open_board_comment_for_selected m
         | Some
+            (Nav.Dive_keeper
+               {
+                 name;
+                 tab =
+                   ( Nav.Keeper_chat
+                   | Nav.Keeper_context
+                   | Nav.Keeper_tool_calls
+                   | Nav.Keeper_work_candle
+                   | Nav.Keeper_sandbox
+                   | Nav.Keeper_logs
+                   | Nav.Keeper_identity );
+               }) -> (
+            let ws_pair =
+              Option.map
+                (fun (ws : Wire_common.workspace_identity) ->
+                  (ws.base_path, ws.masc_root))
+                m.server_identity.workspace
+            in
+            match selected_keeper_for_lifecycle m with
+            | Some k when k.paused ->
+                let operator_operation_id =
+                  Printf.sprintf "tui-resume-%s-%Ld" name (Clock.Mono.to_ns now)
+                in
+                ( Model.with_toast ~now ~level:Model.Toast_info
+                    (Say.make ~ko:("키퍼 재개 요청: @" ^ name)
+                       ~en:("Resuming keeper: @" ^ name))
+                    m
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Post_keeper_lifecycle
+                            {
+                              keeper = name;
+                              op = Wire_fleet.Keeper_resume { operator_operation_id };
+                              expected_workspace = ws_pair;
+                              from_modal = false;
+                            };
+                      };
+                  ] )
+            | Some { health = Wire_fleet.Keeper_offline; _ } ->
+                ( Model.with_toast ~now ~level:Model.Toast_info
+                    (Say.make ~ko:("키퍼 기동 요청: @" ^ name)
+                       ~en:("Booting keeper: @" ^ name))
+                    m
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Post_keeper_lifecycle
+                            {
+                              keeper = name;
+                              op = Wire_fleet.Keeper_boot;
+                              expected_workspace = ws_pair;
+                              from_modal = false;
+                            };
+                      };
+                  ] )
+            | Some _ | None ->
+                open_keeper_lifecycle_modal m ~keeper:name
+                  ~default_action:"pause")
+        | Some
             ( Nav.Dive_work (Nav.Task_dive _)
-            | Nav.Dive_keeper
-                {
-                  tab =
-                    ( Nav.Keeper_chat
-                    | Nav.Keeper_context
-                    | Nav.Keeper_tool_calls
-                    | Nav.Keeper_work_candle
-                    | Nav.Keeper_sandbox
-                    | Nav.Keeper_logs
-                    | Nav.Keeper_identity );
-                  _;
-                }
             | Nav.Dive_knowledge
                 ( Nav.Wiki_dive _
                 | Nav.Artifact_dive _
@@ -5755,7 +5978,63 @@ and execute_action ~now (m : Model.t) action =
                       | None -> "")
                 in
                 open_runtime_assign_modal m ~keeper_default ~runtime_default ()
-            | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Infra ->
+            | Nav.Keepers -> (
+                let ws_pair =
+                  Option.map
+                    (fun (ws : Wire_common.workspace_identity) ->
+                      (ws.base_path, ws.masc_root))
+                    m.server_identity.workspace
+                in
+                match Fleet_store.selected_keeper_summary m.fleet with
+                | Some k when k.paused ->
+                    let operator_operation_id =
+                      Printf.sprintf "tui-resume-%s-%Ld" k.name
+                        (Clock.Mono.to_ns now)
+                    in
+                    ( Model.with_toast ~now ~level:Model.Toast_info
+                        (Say.make ~ko:("키퍼 재개 요청: @" ^ k.name)
+                           ~en:("Resuming keeper: @" ^ k.name))
+                        m
+                    , [
+                        Cmd.Http_post
+                          {
+                            epoch = m.epoch;
+                            req =
+                              Cmd.Post_keeper_lifecycle
+                                {
+                                  keeper = k.name;
+                                  op =
+                                    Wire_fleet.Keeper_resume
+                                      { operator_operation_id };
+                                  expected_workspace = ws_pair;
+                                  from_modal = false;
+                                };
+                          };
+                      ] )
+                | Some ({ health = Wire_fleet.Keeper_offline; _ } as k) ->
+                    ( Model.with_toast ~now ~level:Model.Toast_info
+                        (Say.make ~ko:("키퍼 기동 요청: @" ^ k.name)
+                           ~en:("Booting keeper: @" ^ k.name))
+                        m
+                    , [
+                        Cmd.Http_post
+                          {
+                            epoch = m.epoch;
+                            req =
+                              Cmd.Post_keeper_lifecycle
+                                {
+                                  keeper = k.name;
+                                  op = Wire_fleet.Keeper_boot;
+                                  expected_workspace = ws_pair;
+                                  from_modal = false;
+                                };
+                          };
+                      ] )
+                | Some k ->
+                    open_keeper_lifecycle_modal m ~keeper:k.name
+                      ~default_action:"pause"
+                | None -> (m, []))
+            | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Infra ->
                 (m, [])))
   | Keymap.Entity_reject_or_cancel -> (
       if Option.is_some m.nav.overlay then (m, [])
@@ -5785,9 +6064,15 @@ and execute_action ~now (m : Model.t) action =
                        ~en:"Verification request not found")
                     m
                 , [] ))
+        | Some (Nav.Dive_keeper { name; _ }) ->
+            let default_action =
+              match selected_keeper_for_lifecycle m with
+              | Some k when k.paused -> "shutdown"
+              | Some _ | None -> "pause"
+            in
+            open_keeper_lifecycle_modal m ~keeper:name ~default_action
         | Some
-            ( Nav.Dive_keeper _
-            | Nav.Dive_knowledge _
+            ( Nav.Dive_knowledge _
             | Nav.Dive_runtime _
             | Nav.Dive_infra _ ) ->
             (m, [])
@@ -5828,8 +6113,15 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Work_inbox
                 | Nav.Work_candle_scorecard ->
                     (m, []))
-            | Nav.Pulse | Nav.Knowledge | Nav.Keepers | Nav.Runtime | Nav.Infra
-              ->
+            | Nav.Keepers -> (
+                match Fleet_store.selected_keeper_summary m.fleet with
+                | Some k ->
+                    let default_action =
+                      if k.paused then "shutdown" else "pause"
+                    in
+                    open_keeper_lifecycle_modal m ~keeper:k.name ~default_action
+                | None -> (m, []))
+            | Nav.Pulse | Nav.Knowledge | Nav.Runtime | Nav.Infra ->
                 (m, [])))
   | Keymap.Edit_or_export -> (
       match active_artifact_target m with
@@ -6076,6 +6368,26 @@ and execute_action ~now (m : Model.t) action =
                              ~en:"Select a lane to edit")
                           m
                       , [] ))
+                else if
+                  Nav.equal_workspace m.nav.workspace Nav.Runtime
+                  && Nav.equal_runtime_tab m.runtime.active_tab
+                       Nav.Runtime_addons_browser
+                  && not m.runtime.addon_catalog_mode
+                then (
+                  match Runtime_store.selected_addon_instance m.runtime with
+                  | Some inst ->
+                      Update_nav.open_inline_modal m
+                        (Nav.Addon_invoke_action
+                           {
+                             instance_id = inst.instance_id;
+                             action_names = inst.action_names;
+                           })
+                  | None ->
+                      ( Model.with_toast ~now ~level:Model.Toast_info
+                          (Say.make ~ko:"액션을 호출할 애드온을 선택하세요"
+                             ~en:"Select an addon instance to invoke an action")
+                          m
+                      , [] ))
                 else (m, [])))
   | Keymap.Configure_provider_key -> (
       match active_keeper_for_tab Nav.Keeper_identity m with
@@ -6178,29 +6490,36 @@ and execute_action ~now (m : Model.t) action =
                   m
               , [] ))
       | None ->
-      if Option.is_some m.nav.overlay || Option.is_some (Model.active_dive m)
-      then (m, [])
+      if Option.is_some m.nav.overlay then (m, [])
       else
-        match m.nav.workspace with
-        | Nav.Runtime -> (
-            match m.runtime.setup_login_receipt with
-            | Some r ->
-                ( Model.with_toast ~now ~level:Model.Toast_info
-                    (Say.make
-                       ~ko:("로그인 영수증 상태 조회: " ^ r.login_id)
-                       ~en:("Polling login status: " ^ r.login_id))
-                    m
-                , [
-                    Cmd.Http_get
-                      {
-                        epoch = m.epoch;
-                        req =
-                          Cmd.Get_setup_login_status { login_id = r.login_id };
-                      };
-                  ] )
-            | None -> open_setup_login_modal m ())
-        | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Infra ->
-            (m, []))
+        match selected_keeper_name_for_lifecycle m with
+        | Some keeper ->
+            open_keeper_lifecycle_modal m ~keeper ~default_action:"boot"
+        | None ->
+            if Option.is_some (Model.active_dive m) then (m, [])
+            else
+              match m.nav.workspace with
+              | Nav.Runtime -> (
+                  match m.runtime.setup_login_receipt with
+                  | Some r ->
+                      ( Model.with_toast ~now ~level:Model.Toast_info
+                          (Say.make
+                             ~ko:("로그인 영수증 상태 조회: " ^ r.login_id)
+                             ~en:("Polling login status: " ^ r.login_id))
+                          m
+                      , [
+                          Cmd.Http_get
+                            {
+                              epoch = m.epoch;
+                              req =
+                                Cmd.Get_setup_login_status
+                                  { login_id = r.login_id };
+                            };
+                        ] )
+                  | None -> open_setup_login_modal m ())
+              | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Infra
+                ->
+                  (m, []))
   | Keymap.Copy_hash -> (
       match active_artifact_target m with
       | Some art ->
@@ -6683,7 +7002,45 @@ and execute_action ~now (m : Model.t) action =
             | Some p ->
                 Update_nav.open_inline_modal m
                   (Nav.Board_delete_post { post_id = p.id; title = p.title })
-            | None -> (m, [])))
+            | None -> (
+                if
+                  Option.is_none (Model.active_dive m)
+                  && Nav.equal_workspace m.nav.workspace Nav.Runtime
+                  && Nav.equal_runtime_tab m.runtime.active_tab
+                       Nav.Runtime_addons_browser
+                  && not m.runtime.addon_catalog_mode
+                then
+                  match Runtime_store.selected_addon_instance m.runtime with
+                  | Some inst ->
+                      Update_nav.open_inline_modal m
+                        (Nav.Addon_detach_confirm
+                           { instance_id = inst.instance_id; title = inst.title })
+                  | None -> (m, [])
+                else
+                  let in_keeper_config =
+                    match Model.active_dive m with
+                    | Some (Nav.Dive_keeper { tab = Nav.Keeper_config; _ }) ->
+                        true
+                    | Some
+                        ( Nav.Dive_keeper _
+                        | Nav.Dive_work _
+                        | Nav.Dive_knowledge _
+                        | Nav.Dive_runtime _
+                        | Nav.Dive_infra _ ) ->
+                        false
+                    | None ->
+                        Nav.equal_workspace m.nav.workspace Nav.Keepers
+                        && (m.nav.pane_index = 1 || m.nav.zoomed)
+                        && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                             Nav.Keeper_config
+                  in
+                  if in_keeper_config then (m, [])
+                  else
+                    match selected_keeper_name_for_lifecycle m with
+                    | Some keeper ->
+                        Update_nav.open_inline_modal m
+                          (Nav.Keeper_purge_confirm { keeper })
+                    | None -> (m, []))))
   | Keymap.Link_task_goal -> (
       if Option.is_some m.nav.overlay || Model.sidebar_has_focus m then (m, [])
       else

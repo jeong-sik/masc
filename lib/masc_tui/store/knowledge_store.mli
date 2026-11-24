@@ -137,6 +137,9 @@ type t = {
   wiki_search : Wire_knowledge.wiki_search_response Observed.t;
   wiki_lint : Wire_knowledge.wiki_lint_report Observed.t;
   wiki_edit_base : wiki_edit_base option;
+  pending_wiki_edit_slug : string option;
+      (** Wiki slug whose edit modal should open automatically once its fresh
+          page detail arrives (Issue #54490). *)
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
   active_artifact_detail : Wire_knowledge.published_artifact_detail Observed.t;
   active_artifact_detail_target : string option;
@@ -358,6 +361,13 @@ val fail_keeper_memory_health :
   reason:string -> retryable:bool -> at:Clock.Mono.t -> t -> t
 val record_memory_act_answer :
   keeper:string -> Wire_knowledge.memory_act_answer -> t -> t
+
+val request_wiki_edit : slug:string -> t -> t
+(** Remember that the operator pressed [e] on [slug] while its page body was
+    missing or stale, so the edit modal opens when the fresh page arrives. *)
+
+val clear_pending_wiki_edit : t -> t
+(** Forget any pending auto-open wiki edit request. *)
 
 val begin_wiki_edit : Wire_knowledge.wiki_page_detail -> t -> t
 (** Remember [page] as the base of the edit form that opens on it. *)

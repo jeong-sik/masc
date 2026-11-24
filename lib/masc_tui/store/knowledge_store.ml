@@ -147,6 +147,7 @@ type t = {
   wiki_search : Wire_knowledge.wiki_search_response Observed.t;
   wiki_lint : Wire_knowledge.wiki_lint_report Observed.t;
   wiki_edit_base : wiki_edit_base option;
+  pending_wiki_edit_slug : string option;
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
   active_artifact_detail : Wire_knowledge.published_artifact_detail Observed.t;
   active_artifact_detail_target : string option;
@@ -195,6 +196,7 @@ let empty =
     wiki_search = Observed.absent;
     wiki_lint = Observed.unreported;
     wiki_edit_base = None;
+    pending_wiki_edit_slug = None;
     artifacts = Observed.unreported;
     active_artifact_detail = Observed.absent;
     active_artifact_detail_target = None;
@@ -568,6 +570,7 @@ let set_tab active_tab t =
     memory_reading = None;
     memory_reading_scroll = 0;
     memory_diagram = None;
+    pending_wiki_edit_slug = None;
   }
 
 let cycle_tab dir t =
@@ -672,6 +675,7 @@ let set_memory_view_mode memory_view_mode t =
     memory_reading = None;
     memory_reading_scroll = 0;
     memory_diagram = None;
+    pending_wiki_edit_slug = None;
   }
 
 let cycle_memory_view_mode t =
@@ -705,6 +709,7 @@ let open_memory_reading entry t =
     memory_reading = Some entry;
     memory_reading_scroll = 0;
     memory_diagram = None;
+    pending_wiki_edit_slug = None;
   }
 
 let close_memory_reading t =
@@ -1370,9 +1375,14 @@ let fail_keeper_memory_health ~reason ~retryable ~at t =
 let record_memory_act_answer ~keeper ans t =
   { t with last_memory_act_answer = Some (keeper, ans) }
 
+let request_wiki_edit ~slug t = { t with pending_wiki_edit_slug = Some slug }
+
+let clear_pending_wiki_edit t = { t with pending_wiki_edit_slug = None }
+
 let begin_wiki_edit (page : Wire_knowledge.wiki_page_detail) t =
   {
     t with
+    pending_wiki_edit_slug = None;
     wiki_edit_base =
       Some
         {
@@ -1384,7 +1394,8 @@ let begin_wiki_edit (page : Wire_knowledge.wiki_page_detail) t =
         };
   }
 
-let end_wiki_edit t = { t with wiki_edit_base = None }
+let end_wiki_edit t =
+  { t with wiki_edit_base = None; pending_wiki_edit_slug = None }
 
 let artifacts_filtered t =
   let items =
@@ -2057,7 +2068,18 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
             t.detail_scroll_offset
           else 0
         in
-        { t with selected_index; scroll_offset; detail_scroll_offset }
+        let pending_wiki_edit_slug =
+          if Int.equal selected_index t.selected_index then
+            t.pending_wiki_edit_slug
+          else None
+        in
+        {
+          t with
+          selected_index;
+          scroll_offset;
+          detail_scroll_offset;
+          pending_wiki_edit_slug;
+        }
   | Nav.Knowledge_memory ->
       if pane_index = 1 then
         match t.memory_diagram with
@@ -2130,6 +2152,7 @@ let set_filter filter_query t =
     memory_reading = None;
     memory_reading_scroll = 0;
     memory_diagram = None;
+    pending_wiki_edit_slug = None;
   }
 
 let mark_stale_all t =

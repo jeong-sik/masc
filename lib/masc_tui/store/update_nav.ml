@@ -554,6 +554,7 @@ let switch_workspace (m : Model.t) ws =
     m.knowledge
     |> Knowledge_store.close_memory_reading
     |> Knowledge_store.close_memory_diagram
+    |> Knowledge_store.clear_pending_wiki_edit
   in
   let next =
     { m with nav; drafts; config; knowledge; inline_modal = None }
@@ -613,7 +614,7 @@ let open_overlay (m : Model.t) overlay =
         Config_store.cancel_edit_field m.config
   in
   let knowledge =
-    match overlay with
+    (match overlay with
     | Nav.System_gate Nav.Media_viewer ->
         { m.knowledge with detail_scroll_offset = 0 }
     | Nav.Palette
@@ -624,7 +625,8 @@ let open_overlay (m : Model.t) overlay =
     | Nav.Help
     | Nav.System_gate
         (Nav.Auth_gate | Nav.Server_offline | Nav.Micro_viewport) ->
-        m.knowledge
+        m.knowledge)
+    |> Knowledge_store.clear_pending_wiki_edit
   in
   let next =
     { m with nav; drafts; config; knowledge; inline_modal = None }
@@ -903,6 +905,7 @@ let push_dive (m : Model.t) dive =
         m.knowledge
         |> Knowledge_store.close_memory_reading
         |> Knowledge_store.close_memory_diagram
+        |> Knowledge_store.clear_pending_wiki_edit
   in
   let next =
     { m with nav; drafts; fleet; config; knowledge; inline_modal = None }

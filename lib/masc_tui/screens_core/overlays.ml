@@ -3824,7 +3824,7 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           Say.resolve lang
             (Say.make ~ko:"미디어 · 아티팩트 뷰어" ~en:"Media & Artifact Viewer")
         in
-        let sel_art = Knowledge_store.selected_artifact model.knowledge in
+        let sel_art = Model.focused_artifact model in
         let fmt_tok, ext_tok =
           match sel_art with
           | Some a -> (

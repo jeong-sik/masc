@@ -8391,6 +8391,27 @@ let test_infra_changes_follow_the_selected_repository () =
   Alcotest.(check (list string)) "the filter narrows by keeper"
     [ "lib/b.ml" ]
     (paths (Infra_store.set_filter "beta" inf1));
+  Alcotest.(check (list string))
+    "filtering by repository URL keeps all changes of the matched repo visible"
+    [ "lib/a.ml"; "lib/b.ml" ]
+    (paths (Infra_store.set_filter "example.invalid" inf1));
+  Alcotest.(check (list string))
+    "filtering by repository name keeps all changes of the matched repo visible"
+    [ "lib/a.ml"; "lib/b.ml" ]
+    (paths (Infra_store.set_filter "masc" inf1));
+  Alcotest.(check (list string))
+    "filtering by changed file path keeps the repo selected and narrows changes"
+    [ "lib/a.ml" ]
+    (paths (Infra_store.set_filter "lib/a.ml" inf1));
+  let inf_with_idle =
+    Infra_store.apply_repositories ~observed_at:t0
+      [ repo "masc" ~keepers:[ "alpha"; "beta"; "idle" ] ]
+      inf1
+  in
+  Alcotest.(check (list string))
+    "filtering by an idle keeper in repo.keepers reports no matching changes"
+    []
+    (paths (Infra_store.set_filter "idle" inf_with_idle));
   Alcotest.(check (list (pair (option int) (option int))))
     "the preview is numbered from the recorded range"
     [ (Some 7, Some 7); (Some 8, None); (None, Some 8) ]
@@ -10713,6 +10734,113 @@ let test_24h_pulse_sparkline_and_sums_use_now_unix () =
   Alcotest.(check (option int))
     "Tick advancing >24h refreshes cached scorecard turns_24h to 0" (Some 0)
     (scorecard_turns m2)
+
+let test_media_viewer_follows_artifact_dive_target () =
+  let art_list : Wire_knowledge.artifact_entry =
+    {
+      id = "artifact-list-001";
+      revision = 1;
+      title = "List Selected";
+      summary = "";
+      author = "alpha";
+      created_at_unix = 1_795_254_000.0;
+      body = { sha256 = "sha-list-001"; bytes = 64; mime = "text/markdown" };
+    }
+  in
+  let art_dive : Wire_knowledge.artifact_entry =
+    {
+      id = "artifact-dive-002";
+      revision = 2;
+      title = "Dive Target";
+      summary = "";
+      author = "beta";
+      created_at_unix = 1_795_254_100.0;
+      body = { sha256 = "sha-dive-002"; bytes = 128; mime = "text/html" };
+    }
+  in
+  let knowledge =
+    Knowledge_store.empty
+    |> Knowledge_store.apply_artifacts ~observed_at:t0 [ art_list; art_dive ]
+  in
+  let m0 =
+    let base = Model.initial () in
+    {
+      base with
+      knowledge;
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Knowledge;
+          dive_stack = [ Nav.Dive_knowledge (Nav.Artifact_dive art_dive.id) ];
+          overlay = Some (Nav.System_gate Nav.Media_viewer);
+        };
+    }
+  in
+  Alcotest.(check (option string))
+    "focused_artifact resolves Artifact_dive target instead of list selection"
+    (Some art_dive.id)
+    (Option.map (fun (a : Wire_knowledge.artifact_entry) -> a.id)
+       (Model.focused_artifact m0));
+  let step_char ch m =
+    Update.step ~now:t1 m
+      (Msg.Key_event
+         { key = Keymap.Input.Char ch; mods = Keymap.Input.no_mods })
+  in
+  let _, cmds_h = step_char "H" m0 in
+  Alcotest.(check bool) "Media_viewer [H] copies dive artifact SHA-256" true
+    (List.exists
+       (function
+         | Cmd.Copy_clipboard s -> String.equal s art_dive.body.sha256
+         | _ -> false)
+       (Cmd.flatten cmds_h));
+  let _, cmds_e = step_char "e" m0 in
+  Alcotest.(check bool) "Media_viewer [e] exports dive artifact" true
+    (List.exists
+       (function
+         | Cmd.Export_artifact { id; open_after = false; _ } ->
+             String.equal id art_dive.id
+         | _ -> false)
+       (Cmd.flatten cmds_e));
+  let _, cmds_o = step_char "o" m0 in
+  Alcotest.(check bool) "Media_viewer [o] opens dive artifact" true
+    (List.exists
+       (function
+         | Cmd.Export_artifact { id; open_after = true; _ } ->
+             String.equal id art_dive.id
+         | _ -> false)
+       (Cmd.flatten cmds_o));
+  let _, cmds_y = step_char "y" m0 in
+  Alcotest.(check bool) "Media_viewer [y] fetches/copies dive artifact" true
+    (List.exists
+       (function
+         | Cmd.Fetch_artifact_and_copy { id; _ } -> String.equal id art_dive.id
+         | _ -> false)
+       (Cmd.flatten cmds_y));
+  (* Missing dive target never falls back to the unrelated list selection. *)
+  let m_missing =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          dive_stack = [ Nav.Dive_knowledge (Nav.Artifact_dive "missing-art") ];
+        };
+    }
+  in
+  Alcotest.(check bool)
+    "missing Artifact_dive target returns None instead of list selection" true
+    (Option.is_none (Model.focused_artifact m_missing));
+  let m_y_miss, cmds_y_miss = step_char "y" m_missing in
+  Alcotest.(check int) "missing dive [y] emits no copy command" 0
+    (List.length (Cmd.flatten cmds_y_miss));
+  Alcotest.(check bool) "missing dive [y] emits warning toast" true
+    (Option.is_some m_y_miss.toast);
+  let m_o_miss, cmds_o_miss = step_char "o" m_missing in
+  Alcotest.(check int) "missing dive [o] emits no export command" 0
+    (List.length (Cmd.flatten cmds_o_miss));
+  Alcotest.(check bool) "missing dive [o] emits warning toast" true
+    (Option.is_some m_o_miss.toast)
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -10866,5 +10994,8 @@ let () =
           Alcotest.test_case
             "24h pulse sparkline, sums, company rollup & wall sort anchor to now_unix"
             `Quick test_24h_pulse_sparkline_and_sums_use_now_unix;
+          Alcotest.test_case
+            "Media_viewer honors Artifact_dive target across actions without list fallback"
+            `Quick test_media_viewer_follows_artifact_dive_target;
         ] );
     ]

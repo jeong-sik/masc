@@ -5232,7 +5232,7 @@ let apply_move (m : Model.t) dir =
                 if content_h <= 0 then 0
                 else
                   let total_lines =
-                    match Knowledge_store.selected_artifact m.knowledge with
+                    match Model.focused_artifact m with
                     | None -> 2
                     | Some art ->
                         let detail_opt =

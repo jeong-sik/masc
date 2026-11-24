@@ -522,6 +522,22 @@ let filtered_sandbox_keepers t =
       in
       microvms @ ssh_bound @ ssh_unbound @ docker
 
+let repo_matches_metadata ~needle (r : Wire_infra.repository) =
+  contains_ci ~needle r.name
+  || contains_ci ~needle r.url
+  || contains_ci ~needle r.default_branch
+
+let change_matches ~needle (fc : Wire_infra.file_change) =
+  contains_ci ~needle fc.path || contains_ci ~needle fc.keeper
+
+let loaded_activity_matches ~needle ~repo_id t =
+  match t.repo_activity with
+  | Some slot when String.equal slot.repo_id repo_id -> (
+      match Observed.to_option slot.activity with
+      | Some activity -> List.exists (change_matches ~needle) activity.changes
+      | None -> false)
+  | Some _ | None -> false
+
 let filtered_repositories t =
   let all =
     match Observed.to_option t.repositories with Some rs -> rs | None -> []
@@ -529,13 +545,20 @@ let filtered_repositories t =
   let q = String.trim t.filter_query in
   if String.equal q "" then all
   else
-    List.filter
-      (fun (r : Wire_infra.repository) ->
-        contains_ci ~needle:q r.name
-        || contains_ci ~needle:q r.url
-        || contains_ci ~needle:q r.default_branch
-        || List.exists (fun kp -> contains_ci ~needle:q kp) r.keepers)
-      all
+    let by_repo =
+      List.filter
+        (fun (r : Wire_infra.repository) ->
+          repo_matches_metadata ~needle:q r
+          || List.exists (fun kp -> contains_ci ~needle:q kp) r.keepers)
+        all
+    in
+    match by_repo with
+    | _ :: _ -> by_repo
+    | [] ->
+        List.filter
+          (fun (r : Wire_infra.repository) ->
+            loaded_activity_matches ~needle:q ~repo_id:r.id t)
+          all
 
 let selected_sandbox_keeper t =
   let names = filtered_sandbox_keepers t in
@@ -595,19 +618,16 @@ let selected_repo_activity t =
     (selected_repository t)
 
 let repo_changes t =
-  match
-    Option.bind (selected_repo_activity t) (fun (_, activity) ->
-        Observed.to_option activity)
-  with
+  match selected_repo_activity t with
   | None -> []
-  | Some (activity : Wire_infra.repository_activity) ->
-      let q = String.trim t.filter_query in
-      if String.equal q "" then activity.changes
-      else
-        List.filter
-          (fun (fc : Wire_infra.file_change) ->
-            contains_ci ~needle:q fc.path || contains_ci ~needle:q fc.keeper)
-          activity.changes
+  | Some (repo, activity_obs) -> (
+      match Observed.to_option activity_obs with
+      | None -> []
+      | Some (activity : Wire_infra.repository_activity) ->
+          let q = String.trim t.filter_query in
+          if String.equal q "" || repo_matches_metadata ~needle:q repo then
+            activity.changes
+          else List.filter (change_matches ~needle:q) activity.changes)
 
 let selected_change t =
   let changes = repo_changes t in

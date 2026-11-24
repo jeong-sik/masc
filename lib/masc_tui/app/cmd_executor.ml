@@ -1385,6 +1385,12 @@ let chat_reattach_same_instance ~(submitted_to : Http_client.workspace_guard)
   | Some held, Some now -> String.equal held now
   | Some _, None | None, Some _ | None, None -> false
 
+let run_chat_stream_result fn =
+  try fn () with
+  | Eio.Cancel.Cancelled _ as ex -> raise ex
+  | Io_domain.Closed as ex -> raise ex
+  | ex -> Error (Msg.Transport (Health.Other_io (Printexc.to_string ex)))
+
 let execute_post_stream t ~epoch req =
   match req with
   | Cmd.Stream_keeper_chat { request; is_btw } ->
@@ -1493,7 +1499,8 @@ let execute_post_stream t ~epoch req =
                 else result
           in
           let result =
-            run submitted_to ~reattaches:0 ~since_seq:request.since_seq
+            run_chat_stream_result (fun () ->
+                run submitted_to ~reattaches:0 ~since_seq:request.since_seq)
           in
           Ui_bus.publish_stream t.bus
             (Msg.Chat_stream_done

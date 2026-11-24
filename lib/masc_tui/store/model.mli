@@ -354,3 +354,9 @@ val server_build_label : t -> string option
 val build_commit_mismatch : t -> bool
 (** [true] iff both the TUI's embedded commit and the server's reported commit
     are non-empty and disagree. *)
+
+val focused_artifact : t -> Wire_knowledge.artifact_entry option
+(** Authoritative artifact for [Nav.Media_viewer] rendering, scrolling, and
+    actions: resolves the [Nav.Artifact_dive] target when diving into an
+    artifact (never falling back to an unrelated list selection), otherwise
+    returns [Knowledge_store.selected_artifact m.knowledge]. *)

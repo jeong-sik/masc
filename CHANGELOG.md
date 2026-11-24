@@ -122,10 +122,17 @@
 - Keep the original input visible for dismissal when its Keeper confirms there is currently no status record. A later receipt for the same request can still settle it (#54583).
 - **TUI Work & Candle scroll**: the `End` key now reaches the last Board post row, because the scroll bound counts the Board quarantine recovery hint row that #54592 added to the top of the tab (#54598).
 - Interpret GLM numeric refusal codes at the GLM codec and preserve other HTTP and ACP refusal states (#54599).
+- **TUI Operator UX Sweep (12 fixes)**: keep Pulse Human Attention `Y`/`N`/`J`/`Enter` and the approval strip synchronized with the selected row (auto-advancing filtered triage on action), scroll active Keeper chat via `PgUp`/`PgDn` while the composer is focused without leaking into non-chat views, guard `Ctrl+Q` behind a 2-press 2.5s confirmation window (the first press also clears an orphaned inline overlay, so quitting from that state takes two presses), restore exact pane and zoom state on `Esc` dive pop, clarify World Pulse Hot Threads and `[3] Knowledge` discovery, add local `Space` phase filter and `S` sort cycling on `Work > Goals`, make `Goal_dive` linked tasks and verifier runs selectable with 1-hop `Enter` drill and clamped Raw JSON toggling, eliminate manual `Harness_overrule` hash entry across all 12 callsites, prevent `a`/`x`/`c` HTTP 400 errors with `Goal_drop` note modal, verification preconditions, and UTF-8-safe server error surfacing, separate `Task_dive` description/verification scrolling with `Lx-y/N` overflow indicators, and unify `Knowledge > Board` post+comment scrolling with auto-fetched threads and non-retryable failure guards (#54588).
+- Keeper Memory history now includes fact changes across Librarian checkpoints. The TUI shows recorded changes in order and identifies gaps and archive entries with an unknown revision (#54589).
 
 ### Internal
 
 - Add `release-coverage` guard to `scripts/changelog-fragments.py` and `.github/workflows/release-build.yml` (`release-body`) so release candidates fail before tagging when post-cut pull requests are missing from `CHANGELOG.md` (#54514).
+
+### Upgrade notes
+
+- The first Librarian checkpoint written by this version stores sequenced fact changes in the cold archive. A binary rollback after that checkpoint requires an archive reader that understands those rows or conversion of the saved state (#54589).
+- A checkpoint retains the latest 2,000 detailed commit sequences and older last-removal evidence per absent fact. Keeper diff reports when a request crosses the folded history or reaches its read or result limit. Checkpoints summarize damaged records and conflicting sequences so a bounded read can report them even when their original rows are outside the read window. The original rows remain available for repair in the private archive (#54589).
 
 ## [0.81.0] - 2026-11-23
 

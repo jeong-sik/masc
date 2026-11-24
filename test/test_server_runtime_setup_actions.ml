@@ -591,7 +591,7 @@ let test_selected_native_account () = fixture (fun base runtime binary _net ->
     Alcotest.check Alcotest.string "repeated selections reuse the scoped reference" reference
       (retried |> member "account_ref" |> to_string);
     let selected=`Assoc ["integration_id",`String id;"account_ref",`String reference] in
-    let request=request base selected in
+    let request=request ~context:200_000 base selected in
     let account_reference=Runtime_setup_accounts.reference_of_string reference |> Result.get_ok in
     let resolve ()=Runtime_setup_accounts.resolve ~workspace:base ~integration_id:id ~cli_path:command account_reference in
     let rejected=match request with
@@ -617,13 +617,13 @@ let test_selected_native_account () = fixture (fun base runtime binary _net ->
 let test_native_save_rechecks_image_capabilities () =
   List.iter (fun client -> List.iter (fun supported -> fixture (fun base runtime binary _net ->
     let before=In_channel.with_open_bin runtime In_channel.input_all in
-    let catalog=`Assoc (["id",`String "selected-model";"max_context",`Int 1024]
+    let catalog=`Assoc (["id",`String "selected-model";"max_context",`Int 200_000]
       @ (match supported with None -> [] | Some value -> ["supports_image_input",`Bool value])) in
     save (Filename.concat base "fixture-native-catalog.json") (Yojson.Safe.to_string (`List [catalog]));
     let revision=Runtime_setup_batch.observe ~base_path:base |> Result.get_ok |> Runtime_setup_batch.revision_to_string in
     let request ?image () = `Assoc ["revision",`String revision;
       "connections",`List [`Assoc ["source",`Assoc ["integration_id",`String client];
-        "models",`List [`Assoc (["id",`String "selected-model";"context",`Int 1024;"streaming",`Bool true]
+        "models",`List [`Assoc (["id",`String "selected-model";"context",`Int 200_000;"streaming",`Bool true]
           @ (match image with None -> [] | Some value -> ["supports_image_input",`Bool value]))]]];
       "selection",`List [`Assoc ["connection",`Int 0;"model",`Int 0]]] in
     let forged=match supported with None -> true | Some value -> not value in

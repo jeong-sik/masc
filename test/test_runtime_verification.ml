@@ -247,6 +247,7 @@ api-name = "first-model"
 max-context = 4096
 tools-support = true
 streaming = true
+[models.first.capabilities]
 [cloud.first]
 |}
     with
@@ -443,6 +444,7 @@ api-name = "first-model"
 max-context = 4096
 tools-support = true
 streaming = true
+[models.first.capabilities]
 [silent.first]
 %s
 |}
@@ -745,8 +747,10 @@ wizard-default = true
         (integration prototypes id |> member "setup_support" |> to_string))
       [ "openai-image"; "zai-image"; "openai-speech" ];
     let gemini = integration prototypes "gemini" in
-    check string "missing native Gemini protocol is explicit" "unsupported"
+    check string "native Gemini setup support is explicit" "new_connection"
       (gemini |> member "setup_support" |> to_string);
+    check string "native Gemini protocol is explicit" "gemini-http"
+      (gemini |> member "protocol" |> to_string);
     let rows = json |> member "runtimes" |> to_list in
     check int "all bindings, not one per provider" 2 (List.length rows);
     List.iter

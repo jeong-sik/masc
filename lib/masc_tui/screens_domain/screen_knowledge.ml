@@ -287,7 +287,7 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   let selected_post = Knowledge_store.selected_post k in
   if model.nav.zoomed then
     draw_board_preview ~grid ~cache ~rect:body_rect ~theme ~bp ~lang ~now_unix ~k
-      selected_post ~focused:true
+      selected_post ~focused:(Model.body_has_focus model)
   else
     let list_rect, preview_rect =
       Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.48
@@ -316,7 +316,7 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     in
     let list_inner =
       Card.draw ~cache grid ~rect:list_rect ~theme
-        (H.card_spec ~focused:(model.nav.pane_index = 0)
+        (H.card_spec ~focused:(Model.pane_focused model 0)
            ~hotkey:(Say.resolve lang space_hint)
            list_title)
     in
@@ -554,7 +554,7 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
              ~theme ~lang obs)
     end;
     draw_board_preview ~grid ~cache ~rect:preview_rect ~theme ~bp ~lang
-      ~now_unix ~k selected_post ~focused:(model.nav.pane_index = 1)
+      ~now_unix ~k selected_post ~focused:(Model.pane_focused model 1)
 
 (* --- 2. Wiki & Artifacts Sub-Tab (38/62 Split + Wide TOC Rail) --- *)
 
@@ -1031,7 +1031,7 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
       if model.nav.zoomed then
         draw_wiki_preview ~target_slug:None ~scroll:k.detail_scroll_offset
           ~grid ~cache ~rect:body_rect ~theme
-          ~bp ~lang ~k ~focused:true
+          ~bp ~lang ~k ~focused:(Model.body_has_focus model)
       else
         let left_rect, right_rect =
           Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.38
@@ -1039,7 +1039,7 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
         in
         let left_inner =
           Card.draw ~cache grid ~rect:left_rect ~theme
-            (H.card_spec ~focused:(model.nav.pane_index = 0)
+            (H.card_spec ~focused:(Model.pane_focused model 0)
                (Say.resolve lang
                   (Say.make ~ko:"위키 주제 트리 · log.md"
                      ~en:"Wiki Topic Tree · log.md")))
@@ -1263,7 +1263,7 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
         end;
         draw_wiki_preview ~target_slug:None ~scroll:k.detail_scroll_offset
           ~grid ~cache ~rect:right_rect ~theme ~bp ~lang ~k
-          ~focused:(model.nav.pane_index = 1)
+          ~focused:(Model.pane_focused model 1)
   | `Artifacts ->
       let left_rect, right_rect =
         Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.56
@@ -1271,7 +1271,7 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
       in
       let left_inner =
         Card.draw ~cache grid ~rect:left_rect ~theme
-          (H.card_spec ~focused:(model.nav.pane_index = 0)
+          (H.card_spec ~focused:(Model.pane_focused model 0)
              (Say.resolve lang
                 (Say.make ~ko:"발행 아티팩트 / 보고서"
                    ~en:"Published Artifacts & Reports")))
@@ -1369,7 +1369,7 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
       end;
       let right_inner =
         Card.draw ~cache grid ~rect:right_rect ~theme
-          (H.card_spec ~focused:(model.nav.pane_index = 1)
+          (H.card_spec ~focused:(Model.pane_focused model 1)
              ~hotkey:(Say.resolve lang (Say.make ~ko:"[Enter] 상세" ~en:"[Enter] Dive"))
              (Say.resolve lang (Say.make ~ko:"아티팩트 상세" ~en:"Artifact Detail")))
       in
@@ -2126,16 +2126,16 @@ let render_memory ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   ignore (H.draw_pills ~grid ~rect:top_rect ~theme pills);
   if model.nav.zoomed then
     draw_temporal_memory_diff ~model ~grid ~cache ~rect:body_rect ~theme ~bp
-      ~lang ~now_unix ~k ~focused:true
+      ~lang ~now_unix ~k ~focused:(Model.body_has_focus model)
   else
     let left_rect, right_rect =
       Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.48
         ~top_ratio:0.48 bp body_rect
     in
     draw_world_and_librarian ~grid ~cache ~rect:left_rect ~theme ~bp ~lang ~k
-      ~focused:(model.nav.pane_index = 0);
+      ~focused:(Model.pane_focused model 0);
     draw_temporal_memory_diff ~model ~grid ~cache ~rect:right_rect ~theme ~bp
-      ~lang ~now_unix ~k ~focused:(model.nav.pane_index = 1)
+      ~lang ~now_unix ~k ~focused:(Model.pane_focused model 1)
 
 (* --- 4. Top-Level Workspace Render & Dive Render --- *)
 
@@ -2262,7 +2262,7 @@ let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   let inner =
     Card.draw ~cache grid ~rect:body_rect ~theme
-      (H.card_spec ?badge ~focused:true
+      (H.card_spec ?badge ~focused:(Model.body_has_focus model)
          ~hotkey:(Say.resolve lang (Say.make ~ko:"[Esc] 뒤로" ~en:"[Esc] Back"))
          title)
   in
@@ -2382,7 +2382,8 @@ let render_dive_wiki ~slug ~(model : Model.t) ~cache ~(rect : Rect.t)
       ~top_ratio:0.68 bp rect
   in
   draw_wiki_preview ~target_slug:(Some slug) ~scroll:model.nav.dive_scroll_offset
-    ~grid ~cache ~rect:main_rect ~theme ~bp ~lang ~k ~focused:true;
+    ~grid ~cache ~rect:main_rect ~theme ~bp ~lang ~k
+    ~focused:(Model.body_has_focus model);
   let side_inner =
     Card.draw ~cache grid ~rect:side_rect ~theme
       (H.card_spec ~subtitle:slug
@@ -2506,7 +2507,7 @@ let render_dive_artifact ~id ~(model : Model.t) ~cache ~(rect : Rect.t)
   let target = Knowledge_store.artifact_by_id k id in
   let inner =
     Card.draw ~cache grid ~rect ~theme
-      (H.card_spec ~focused:true ~subtitle:id
+      (H.card_spec ~focused:(Model.body_has_focus model) ~subtitle:id
          ~hotkey:(Say.resolve lang (Say.make ~ko:"[Esc] 뒤로" ~en:"[Esc] Back"))
          (Say.resolve lang
             (Say.make ~ko:"지식 > 아티팩트 뷰어" ~en:"Knowledge > Artifact Viewer")))

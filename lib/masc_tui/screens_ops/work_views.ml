@@ -363,7 +363,7 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
           }
     in
     let all_filtered_verifs = Work_store.filtered_verifications model.work in
-    let verif_focused = model.nav.pane_index = 1 in
+    let verif_focused = Model.pane_focused model 1 in
     let spec : Card.spec =
       {
         (Card.default_spec
@@ -777,7 +777,7 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 done_goals (List.length goals)))
         with
         hotkey = Some (Ops_common.say model ~ko:"[n] 새 목표" ~en:"[n] New");
-        focused = model.nav.pane_index = 0;
+        focused = Model.pane_focused model 0;
       }
     in
     let l_inner = Card.draw ~cache grid ~rect:goals_rect ~theme left_spec in
@@ -923,8 +923,10 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
               hotkey =
                 Some (Ops_common.say model ~ko:"[Enter] 상세" ~en:"[Enter] Dive");
               focused =
-                (if Rect.is_empty linked_card_rect then model.nav.pane_index = 1
-                 else model.nav.pane_index = 2);
+                Model.body_has_focus model
+                &&
+                if Rect.is_empty linked_card_rect then model.nav.pane_index = 1
+                else model.nav.pane_index = 2;
             }
           in
           let r_inner = Card.draw ~cache grid ~rect:right_rect ~theme r_spec in
@@ -1418,7 +1420,7 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
             Some
               (Ops_common.say model ~ko:"[Space] 상태 · [Enter] 상세"
                  ~en:"[Space] Status · [Enter] Dive");
-          focused = Option.is_some task_sel_opt;
+          focused = Model.pane_focused model 0;
         }
       in
       let t_inner = Card.draw ~cache grid ~rect:tasks_rect ~theme t_spec in
@@ -1842,7 +1844,7 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
             hotkey =
               Some
                 (Ops_common.say model ~ko:"[n] 일정 추가" ~en:"[n] New Schedule");
-            focused = Option.is_some sched_sel_opt;
+            focused = Model.pane_focused model 1;
           }
         in
         let s_inner = Card.draw ~cache grid ~rect:sched_rect ~theme s_spec in
@@ -2044,7 +2046,7 @@ let render_inbox_empty ~(model : Model.t) ~cache ~(rect : Rect.t)
                    ~en:"Recent Decisions Audit (24h)")
                 (List.length model.work.recent_decisions_24h)))
         with
-        focused = true;
+        focused = Model.body_has_focus model;
       }
     in
     let a_inner = Card.draw ~cache grid ~rect:left_rect ~theme audit_spec in
@@ -2284,7 +2286,7 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 text = Int.to_string (List.length filtered_attn);
                 tone = Some Theme.Status_attention;
               };
-          focused = model.nav.pane_index = 0;
+          focused = Model.pane_focused model 0;
         }
       in
       let l_inner = Card.draw ~cache grid ~rect:left_rect ~theme q_spec in
@@ -2409,7 +2411,7 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                       tone = Some tok;
                     };
                 hotkey = Some "[Y] Approve · [N] Deny · [1..4] Choice";
-                focused = model.nav.pane_index = 1;
+                focused = Model.pane_focused model 1;
               }
             in
             let r_inner = Card.draw ~cache grid ~rect:right_rect ~theme p_spec in
@@ -3187,6 +3189,7 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                     ~en:"Ledger Events"))
             with
             subtitle = Some "candle-ledger.jsonl";
+            focused = Model.body_has_focus model;
           }
         in
         let e_inner = Card.draw ~cache grid ~rect:ev_rect ~theme ev_spec in

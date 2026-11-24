@@ -1564,9 +1564,13 @@ let test_pulse_selection_scroll_and_velocity_units () =
   assert_not_contains ~label:"velocity_no_pct_as_tok" ~needle:"95.7 tok" txt_wide;
   assert_contains ~label:"velocity_cache_pct" ~needle:"95.7%" txt_wide;
 
-  (* 2. Companies panel follows selected keeper's company, not index mod N *)
+  (* 2. Companies panel follows selected keeper's company when Companies pane is focused *)
   let m_wkbl =
-    { base with fleet = Fleet_store.select_keeper "wkbl-growth" base.fleet }
+    {
+      base with
+      nav = { base.nav with pane_index = 1 };
+      fleet = Fleet_store.select_keeper "wkbl-growth" base.fleet;
+    }
   in
   let g_wkbl, _ = render_full ~model:m_wkbl ~cols:140 ~rows:40 in
   (match find_focused_row_containing ~needle:"WKBL Startup" g_wkbl with
@@ -1623,12 +1627,17 @@ let test_pulse_selection_scroll_and_velocity_units () =
   in
   let g_scroll, _ = render_full ~model:m_scroll ~cols:140 ~rows:40 in
   assert_clean_grid ~label:"pulse_scroll" g_scroll;
-  (match find_focused_row_containing ~needle:"Company-08" g_scroll with
+  let g_scroll_co, _ =
+    render_full
+      ~model:{ m_scroll with nav = { m_scroll.nav with pane_index = 1 } }
+      ~cols:140 ~rows:40
+  in
+  (match find_focused_row_containing ~needle:"Company-08" g_scroll_co with
    | Some _ -> ()
    | None ->
        Alcotest.fail
          (Printf.sprintf "pulse_company_scroll: expected Company-08 visible & focused:\n%s"
-            (grid_all_text g_scroll)));
+            (grid_all_text g_scroll_co)));
   let last_attn_keeper =
     match Attention.current_triage_item m_scroll.attention with
     | Some item -> (
@@ -1825,20 +1834,22 @@ let test_round2_palette_and_settings_regressions () =
     | Cell_grid.Braille m -> Cell_grid.braille_utf8 m
     | Cell_grid.Continuation -> ""
   in
-  Alcotest.(check string) "settings overlay top-left at col 0 is box corner" "╭"
+  Alcotest.(check string) "settings overlay top-left at col 0 is box corner" "┏"
     (cell_glyph_str g_set ~x:0 ~y:1);
   Alcotest.(check string) "settings overlay top-right at col 139 is box corner"
-    "╮" (cell_glyph_str g_set ~x:139 ~y:1);
+    "┓" (cell_glyph_str g_set ~x:139 ~y:1);
   for y = 2 to 37 do
     let left_ch = cell_glyph_str g_set ~x:0 ~y in
     let right_ch = cell_glyph_str g_set ~x:139 ~y in
     Alcotest.(check bool)
       (Printf.sprintf "no bleed at col 0 row %d (got %S)" y left_ch) true
-      (String.equal left_ch "│" || String.equal left_ch "╰"
+      (String.equal left_ch "│" || String.equal left_ch "┃"
+       || String.equal left_ch "╰" || String.equal left_ch "┗"
        || String.equal left_ch "├");
     Alcotest.(check bool)
       (Printf.sprintf "no bleed at col 139 row %d (got %S)" y right_ch) true
-      (String.equal right_ch "│" || String.equal right_ch "╯"
+      (String.equal right_ch "│" || String.equal right_ch "┃"
+       || String.equal right_ch "╯" || String.equal right_ch "┛"
        || String.equal right_ch "┤")
   done
 
@@ -1976,17 +1987,22 @@ let test_v25_pulse_4kpi_hero_and_5_companies () =
   assert_not_contains ~label:"v25_pulse_hero_no_nested_box" ~needle:"╭" hero_row0;
   (* P3: Companies header shows distinct '성과' column instead of duplicate '24h' *)
   assert_contains ~label:"v25_pulse_company_output_hdr" ~needle:"성과" txt;
-  (* P2 #2: Selected keeper 'wkbl-growth' (company="") syncs selection to WKBL Startup row via g.keepers membership *)
+  (* P2 #2: Selected keeper 'wkbl-growth' (company="") syncs selection to WKBL Startup row via g.keepers membership when Companies pane is focused *)
+  let g_co, _ =
+    render_full
+      ~model:{ m with nav = { m.nav with pane_index = 1 } }
+      ~cols:140 ~rows:40
+  in
   let theme = Theme.of_preset m.theme_preset in
   let sel_bg = Color.of_rgb theme.selection_bg in
   let wkbl_selected = ref false in
   let masc_selected = ref false in
   for y = 6 to 28 do
-    let row_txt = grid_row_text g y in
+    let row_txt = grid_row_text g_co y in
     let has_sel_bg =
       let found = ref false in
       for x = 2 to 60 do
-        if Color.equal (Cell_grid.get g ~x ~y).style.bg sel_bg then
+        if Color.equal (Cell_grid.get g_co ~x ~y).style.bg sel_bg then
           found := true
       done;
       !found

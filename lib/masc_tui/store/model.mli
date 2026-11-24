@@ -196,6 +196,16 @@ val composer_mode : t -> composer_mode
 
 val active_focus_scope : t -> Nav.focus_scope
 val focus_scope_chain : t -> Keymap.scope list
+val body_has_focus : t -> bool
+(** [true] iff the main workspace/dive body owns keyboard focus (composer is
+    unfocused, filter bar is unfocused, and no overlay is open). Body card
+    renderers MUST gate [focused] through this SSOT helper so two surfaces never
+    appear simultaneously focused. *)
+val pane_focused : t -> int -> bool
+(** [body_has_focus m && m.nav.pane_index = idx]. *)
+val active_focus_label : t -> Say.t
+(** Concise human-readable indicator of the currently focused surface/pane for
+    the footer focus pill (e.g. ["1/2 Fleet"], ["COMPOSER"], ["FILTER"]). *)
 val is_text_capture_active : t -> bool
 (** [true] when a free-text input surface (composer, filter bar, palette,
     settings field editor, or inline modal) owns printable characters. *)

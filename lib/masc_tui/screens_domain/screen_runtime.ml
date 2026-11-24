@@ -1307,12 +1307,12 @@ let render_quotas_credits ~(model : Model.t) ~cache ~(rect : Rect.t)
     else (left_rect, Rect.empty)
   in
   draw_subscription_windows ~grid ~cache ~rect:sub_rect ~theme ~bp ~lang
-    ~now_unix ~rt sub_rows rt.usage_windows ~focused:(model.nav.pane_index = 0);
+    ~now_unix ~rt sub_rows rt.usage_windows ~focused:(Model.pane_focused model 0);
   if not (Rect.is_empty health_rect) then
     draw_cooldown_health_summary ~grid ~cache ~rect:health_rect ~theme ~bp ~lang
       ~now_unix ~rt part;
   draw_credit_balances ~grid ~cache ~rect:right_rect ~theme ~bp ~lang ~now_unix
-    ~rt part rt.usage_windows ~focused:(model.nav.pane_index = 1)
+    ~rt part rt.usage_windows ~focused:(Model.pane_focused model 1)
 
 (* --- 2. Sub-Tab 2: Efficiency & Spend (4-KPI Strip + Real btop Braille Charts) --- *)
 
@@ -2003,7 +2003,8 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   let tbl_inner =
     Card.draw ~cache grid ~rect:bottom_rect ~theme
-      (H.card_spec ~focused:true ?badge:tbl_badge ~subtitle:tbl_subtitle
+      (H.card_spec ~focused:(Model.body_has_focus model) ?badge:tbl_badge
+         ~subtitle:tbl_subtitle
          (Say.resolve lang
             (Say.make ~ko:"회사 · 키퍼별 비용 효율 표"
                ~en:"Company & Keeper Cost Efficiency")))
@@ -2381,7 +2382,7 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
   (* Left Card: Visual Flow_down Cascade Tree *)
   let cascade_inner =
     Card.draw ~cache grid ~rect:left_rect ~theme
-      (H.card_spec ~focused:(model.nav.pane_index = 0)
+      (H.card_spec ~focused:(Model.pane_focused model 0)
          ~hotkey:
            (Say.resolve lang
               (Say.make ~ko:"[Enter] 상세 · [f] 퓨전"
@@ -2697,7 +2698,7 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   let insp_inner =
     Card.draw ~cache grid ~rect:insp_rect ~theme
-      (H.card_spec ~focused:(model.nav.pane_index = 1)
+      (H.card_spec ~focused:(Model.pane_focused model 1)
          ?subtitle:(Option.map (fun (l : Wire_runtime.failover_lane) -> l.id) sel_lane)
          ~hotkey:setup_hint
          (Say.resolve lang
@@ -3200,7 +3201,7 @@ let render_tools_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   let tools_inner =
     Card.draw ~cache grid ~rect:left_rect ~theme
-      (H.card_spec ~focused:(model.nav.pane_index = 0)
+      (H.card_spec ~focused:(Model.pane_focused model 0)
          (Say.resolve lang (Say.make ~ko:"도구 카탈로그" ~en:"Tools Catalog")))
   in
   if not (Rect.is_empty tools_inner) then begin
@@ -3287,7 +3288,7 @@ let render_tools_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
   end;
   let right_inner =
     Card.draw ~cache grid ~rect:right_rect ~theme
-      (H.card_spec ~focused:(model.nav.pane_index = 1)
+      (H.card_spec ~focused:(Model.pane_focused model 1)
          (Say.resolve lang
             (Say.make ~ko:"커넥터 · 브라우저 레인 · MCP"
                ~en:"Connectors · Browser · MCP")))
@@ -3317,7 +3318,7 @@ let render_tools_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
              ~viewport_rows:max_conn_rows ~scroll:rt.connector_scroll_offset
              ~selected:(Some sel_c)
          in
-         let conn_focused = model.nav.pane_index = 1 in
+         let conn_focused = Model.pane_focused model 1 in
          List.iteri
            (fun local_i (c : Wire_runtime.connector_row) ->
              let idx = start_c + local_i in

@@ -1694,11 +1694,13 @@ let test_p2_tight_populated_rects_preserve_borders () =
           Alcotest.(check bool)
             (Printf.sprintf "tight %dx%d bottom-left border intact" cols rows)
             true
-            (Cell_grid.glyph_equal bl.glyph (Cell_grid.Utf8 (Glyph.to_utf8 Glyph.Box_bl)));
+            (Cell_grid.glyph_equal bl.glyph (Cell_grid.Utf8 (Glyph.to_utf8 Glyph.Box_bl))
+             || Cell_grid.glyph_equal bl.glyph (Cell_grid.Utf8 (Glyph.to_utf8 Glyph.Box_heavy_bl)));
           Alcotest.(check bool)
             (Printf.sprintf "tight %dx%d bottom-right border intact" cols rows)
             true
-            (Cell_grid.glyph_equal br.glyph (Cell_grid.Utf8 (Glyph.to_utf8 Glyph.Box_br))))
+            (Cell_grid.glyph_equal br.glyph (Cell_grid.Utf8 (Glyph.to_utf8 Glyph.Box_br))
+             || Cell_grid.glyph_equal br.glyph (Cell_grid.Utf8 (Glyph.to_utf8 Glyph.Box_heavy_br))))
         [
           Nav.Goal_dive "goal-overhaul";
           Nav.Task_dive "task-3898";
@@ -1826,10 +1828,13 @@ let test_v25_work_pipeline_adaptive_height_and_linked_card () =
         and bottom-left Linked Tasks & Verifications peer card fills the reclaimed space! *)
   let bl_glyph = Cell_grid.Utf8 (Glyph.to_utf8 Glyph.Box_bl) in
   let first_left_bl_y =
+    let heavy_bl = Cell_grid.Utf8 (Glyph.to_utf8 Glyph.Box_heavy_bl) in
     let rec find y =
       if y >= 40 then None
-      else if Cell_grid.glyph_equal (Cell_grid.get grid ~x:0 ~y).glyph bl_glyph then
-        Some y
+      else if
+        Cell_grid.glyph_equal (Cell_grid.get grid ~x:0 ~y).glyph bl_glyph
+        || Cell_grid.glyph_equal (Cell_grid.get grid ~x:0 ~y).glyph heavy_bl
+      then Some y
       else find (y + 1)
     in
     find 0
@@ -2456,10 +2461,13 @@ let test_p2_standard_viewport_keepers_split_and_kpi_visibility () =
       let g_k = render_to_grid ~cols ~rows (Screen_keepers.render ~model:m) in
       (* 1. Verify left Fleet Tree uses true ~36% (37 at 104, 39 at 112), NEVER slams 46/52 cols *)
       let tr_glyph = Cell_grid.Utf8 (Glyph.to_utf8 Glyph.Box_tr) in
+      let heavy_tr = Cell_grid.Utf8 (Glyph.to_utf8 Glyph.Box_heavy_tr) in
       let first_tr_x =
         let rec scan x =
           if x >= cols then None
-          else if Cell_grid.glyph_equal (Cell_grid.get g_k ~x ~y:0).glyph tr_glyph
+          else if
+            Cell_grid.glyph_equal (Cell_grid.get g_k ~x ~y:0).glyph tr_glyph
+            || Cell_grid.glyph_equal (Cell_grid.get g_k ~x ~y:0).glyph heavy_tr
           then Some x
           else scan (x + 1)
         in

@@ -920,15 +920,18 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         Say.resolve lang
           (Say.make ~ko:"[J] 이동 · [Enter] 상세" ~en:"[J] Jump · [Enter] Dive")
       in
+      let pane_focused =
+        Model.body_has_focus model
+        && Model.equal_pulse_pane (Model.active_pulse_pane model)
+             Model.Pulse_attention
+      in
       let inner =
         Card.draw ~cache grid ~rect ~theme
           {
             (Card.default_spec ~title) with
             badge = Some badge;
             hotkey = Some hotkey;
-            focused =
-              Model.equal_pulse_pane (Model.active_pulse_pane model)
-                Model.Pulse_attention;
+            focused = pane_focused;
             elevated = true;
           }
       in
@@ -950,7 +953,7 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           let e = items.(idx) in
           let py = inner.y + i in
           let row_r = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
-          let is_sel = Int.equal idx sel in
+          let is_sel = pane_focused && Int.equal idx sel in
           let rbg =
             Color.of_rgb (if is_sel then theme.selection_bg else theme.surface_2)
           in
@@ -1169,15 +1172,18 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       Say.resolve lang
         (Say.make ~ko:"[4] 키퍼 · [Enter] 상세" ~en:"[4] Keepers · [Enter]")
     in
+    let pane_focused =
+      Model.body_has_focus model
+      && Model.equal_pulse_pane (Model.active_pulse_pane model)
+           Model.Pulse_companies
+    in
     let inner =
       Card.draw ~cache grid ~rect ~theme
         {
           (Card.default_spec ~title) with
           subtitle = Some subtitle;
           hotkey = Some hotkey;
-          focused =
-            Model.equal_pulse_pane (Model.active_pulse_pane model)
-              Model.Pulse_companies;
+          focused = pane_focused;
         }
     in
     if not (Rect.is_empty inner) then begin
@@ -1371,7 +1377,7 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               let g = groups_arr.(idx) in
               let py = start_y + i in
               let row_r = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
-              let is_sel = Int.equal idx sel_group_idx in
+              let is_sel = pane_focused && Int.equal idx sel_group_idx in
               let rbg =
                 Color.of_rgb
                   (if is_sel then theme.selection_bg else theme.surface_1)
@@ -1501,7 +1507,8 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
     let lang = model.lang in
     let goals = Work_store.pulse_active_goals model.work in
     let pane_focused =
-      Model.equal_pulse_pane (Model.active_pulse_pane model) Model.Pulse_goals
+      Model.body_has_focus model
+      && Model.equal_pulse_pane (Model.active_pulse_pane model) Model.Pulse_goals
     in
     let title =
       Say.resolve lang
@@ -1874,7 +1881,8 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     let lang = model.lang in
     let threads = Knowledge_store.hottest_signal_threads model.knowledge in
     let pane_focused =
-      Model.equal_pulse_pane (Model.active_pulse_pane model) Model.Pulse_world
+      Model.body_has_focus model
+      && Model.equal_pulse_pane (Model.active_pulse_pane model) Model.Pulse_world
     in
     let title =
       Say.resolve lang

@@ -3065,7 +3065,8 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
         badge = badge_opt;
         hotkey;
         footer_hint;
-        focused = (not embedded) || model.nav.pane_index = 1;
+        focused =
+          Model.body_has_focus model && ((not embedded) || model.nav.pane_index = 1);
       }
     in
     let inner = Card.draw ~cache grid ~rect ~theme card_spec in

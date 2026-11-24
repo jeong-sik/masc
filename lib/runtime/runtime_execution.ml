@@ -77,7 +77,9 @@ type usage_report =
   | Client_usage_stream
 
 let supports_native_none = function
-  | Agent_core _ | Claude_code _ | Acp _ -> true
+  | Agent_core _ | Claude_code _ -> true
+  | Acp config ->
+    (Runtime_acp_client.profile_of_driver config.driver).Runtime_acp_client.enforces_native_none
   | Codex_app_server _ | Antigravity_cli _ -> false
 
 let model_id = function

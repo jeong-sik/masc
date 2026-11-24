@@ -1612,12 +1612,7 @@ let acp_execution (provider : Runtime_schema.provider)
          provider.id)
   | Cli command ->
     let make_acp_execution (options : Runtime_schema.acp_options) ~oauth_source =
-      let install_client =
-        match options.driver with
-        | Runtime_acp_client.Antigravity -> Runtime_official_cli_install.Antigravity
-        | Runtime_acp_client.Kimi_code -> Runtime_official_cli_install.Kimi_code
-        | Runtime_acp_client.Mistral_vibe -> Runtime_official_cli_install.Mistral_vibe
-      in
+      let install_client = Runtime_acp_client.install_client_of_driver options.driver in
       let cli_path = Runtime_official_cli_install.spawn_path install_client ~command in
       Runtime_execution.Acp
         { driver = options.driver

@@ -701,6 +701,7 @@ let test_multi_account () =
             ; Acp_client Runtime_acp_client.Antigravity
             ; Acp_client Runtime_acp_client.Kimi_code
             ; Acp_client Runtime_acp_client.Mistral_vibe
+            ; Acp_client Runtime_acp_client.Muse_code
             ; Api_provider
             ; Model_list
             ; Files_api

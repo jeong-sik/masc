@@ -1,6 +1,6 @@
 (** Unified persistent ACP v1 (Agent Client Protocol) JSON-RPC 2.0 over stdio
     client for official subscription CLIs: Antigravity ([agy acp]), Kimi Code
-    ([kimi acp]), and Mistral Vibe ([vibe-acp]).
+    ([kimi acp]), Mistral Vibe ([vibe-acp]), and Muse Code ([muse acp]).
 
     Each client value owns one persistent child process bound to a per-Keeper
     [Eio.Switch.t], amortizing CLI cold start across turns while keeping crash
@@ -12,6 +12,7 @@ type driver =
   | Antigravity
   | Kimi_code
   | Mistral_vibe
+  | Muse_code
 [@@deriving show, eq]
 
 val all_drivers : driver list
@@ -42,7 +43,9 @@ val effort_of_driver_string : driver:driver -> string -> Llm_provider.Reasoning_
     {!Llm_provider.Reasoning_effort} values for every driver, plus ["off"]
     as {!Llm_provider.Reasoning_effort.None_} exclusively for {!Mistral_vibe}
     (live-verified against [vibe-acp 3.1.0]; [agy acp 1.5.14] advertises
-    [low/medium/high/xhigh] and [kimi acp 2.7.2] advertises [low/high/max]). *)
+    [low/medium/high/xhigh] and [kimi acp 2.7.2] advertises [low/high/max]).
+    [muse acp 1.4.25] advertises no effort option; its profile has no
+    [effort_config_id] and the runtime.toml parser refuses [effort] for it. *)
 
 val effort_values_for_log : driver:driver -> string
 (** Human-readable list of effort values accepted by {!effort_of_driver_string}
@@ -62,7 +65,7 @@ val resolve_effective_effort
 type mcp_wiring =
   | Session_new_http_mcp
       (** Driver accepts [mcpServers] directly in [session/new] and
-          [session/load] (Kimi Code, Mistral Vibe). *)
+          [session/load] (Kimi Code, Mistral Vibe, Muse Code). *)
   | Gemini_dir_mcp_config
       (** Driver reads [<gemini_dir>/config/mcp_config.json] at startup and
           ignores ACP [mcpServers] (Antigravity [agy acp]). No [eager] map is
@@ -117,7 +120,7 @@ type mcp_identifier_syntax =
           (Antigravity). *)
   | Mcp_double_underscore
       (** [mcp__<server>__<tool>] identifier (live-verified against
-          [kimi acp 2.7.2]). *)
+          [kimi acp 2.7.2] and [muse acp 1.4.25]). *)
   | Mcp_dot_prefix
       (** [mcp_<server>.<tool>] identifier (Mistral Vibe). *)
   | Mcp_underscore_prefix
@@ -146,6 +149,13 @@ type driver_profile =
   ; mode_for_native_full : string
   ; model_config_id : string
   ; effort_config_id : string option
+      (** ACP config option id that carries reasoning effort. [None] when the
+          client takes effort only as a process setting ([muse acp]). *)
+  ; enforces_native_none : bool
+      (** Whether refusing [session/request_permission] keeps every native
+          tool off. [false] when the client runs some tools without asking
+          (the [muse acp] read tool), so posture [none] runs at the [read]
+          floor ({!Runtime_native_tools.degrade_on_admission}). *)
   }
 
 val profile_of_driver : driver -> driver_profile
@@ -194,6 +204,9 @@ type config =
   }
 
 val default_config : driver:driver -> cwd:string -> config
+
+val install_client_of_driver : driver -> Runtime_official_cli_install.client
+(** The official CLI install entry that locates a driver's executable. *)
 
 type agent_capabilities =
   { load_session : bool

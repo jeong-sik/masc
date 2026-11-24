@@ -1,5 +1,5 @@
 (** Unified persistent ACP v1 (Agent Client Protocol) JSON-RPC 2.0 over stdio
-    client for Antigravity, Kimi Code, and Mistral Vibe. *)
+    client for Antigravity, Kimi Code, Mistral Vibe, and Muse Code. *)
 
 open Result.Syntax
 
@@ -9,20 +9,23 @@ type driver =
   | Antigravity
   | Kimi_code
   | Mistral_vibe
+  | Muse_code
 [@@deriving show, eq]
 
-let all_drivers = [ Antigravity; Kimi_code; Mistral_vibe ]
+let all_drivers = [ Antigravity; Kimi_code; Mistral_vibe; Muse_code ]
 
 let driver_to_string = function
   | Antigravity -> "antigravity"
   | Kimi_code -> "kimi_code"
   | Mistral_vibe -> "mistral_vibe"
+  | Muse_code -> "muse_code"
 ;;
 
 let driver_of_string = function
   | "antigravity" -> Some Antigravity
   | "kimi_code" -> Some Kimi_code
   | "mistral_vibe" -> Some Mistral_vibe
+  | "muse_code" -> Some Muse_code
   | _ -> None
 ;;
 
@@ -50,7 +53,10 @@ let model_selection_to_string = function
    Live-verified CLI configOptions (2026-11-23):
    - agy acp 1.5.14: thought_level = [low; medium; high; xhigh]
    - kimi acp 2.7.2: thinking = [low; high; max]
-   - vibe-acp 3.1.0: thinking = [off; high] *)
+   - vibe-acp 3.1.0: thinking = [off; high]
+   - muse acp 1.4.25 (2026-11-24): no effort option in session/new configOptions
+     (only [mode] and [model]); effort is the process setting
+     [-c reasoning_effort="<level>"]. *)
 let effort_of_driver_string ~driver (raw : string) : Llm_provider.Reasoning_effort.t option =
   let normalized = String.lowercase_ascii (String.trim raw) in
   match Llm_provider.Reasoning_effort.of_string normalized with
@@ -58,13 +64,13 @@ let effort_of_driver_string ~driver (raw : string) : Llm_provider.Reasoning_effo
   | None ->
     (match driver, normalized with
      | Mistral_vibe, "off" -> Some Llm_provider.Reasoning_effort.None_
-     | (Antigravity | Kimi_code | Mistral_vibe), _ -> None)
+     | (Antigravity | Kimi_code | Mistral_vibe | Muse_code), _ -> None)
 ;;
 
 let effort_values_for_log ~driver =
   match driver with
   | Mistral_vibe -> Llm_provider.Reasoning_effort.values_for_log ^ "/off"
-  | Antigravity | Kimi_code -> Llm_provider.Reasoning_effort.values_for_log
+  | Antigravity | Kimi_code | Muse_code -> Llm_provider.Reasoning_effort.values_for_log
 ;;
 
 let resolve_effective_effort ?turn_effort ?model_effort ?provider_effort () =
@@ -124,6 +130,7 @@ type driver_profile =
   ; mode_for_native_full : string
   ; model_config_id : string
   ; effort_config_id : string option
+  ; enforces_native_none : bool
   }
 
 let profile_of_driver = function
@@ -154,6 +161,7 @@ let profile_of_driver = function
     ; mode_for_native_full = "auto"
     ; model_config_id = "model"
     ; effort_config_id = Some "thought_level"
+    ; enforces_native_none = true
     }
   | Kimi_code ->
     { driver = Kimi_code
@@ -176,6 +184,7 @@ let profile_of_driver = function
     ; mode_for_native_full = "yolo"
     ; model_config_id = "model"
     ; effort_config_id = Some "thinking"
+    ; enforces_native_none = true
     }
   | Mistral_vibe ->
     { driver = Mistral_vibe
@@ -207,6 +216,45 @@ let profile_of_driver = function
     ; mode_for_native_full = "auto-approve"
     ; model_config_id = "model"
     ; effort_config_id = Some "thinking"
+    ; enforces_native_none = true
+    }
+  | Muse_code ->
+    { driver = Muse_code
+    ; default_command = "muse"
+    ; default_args = [ "acp" ]
+    (* The launcher script checks for a release and replaces the installed
+       binary in the background (muse launcher v4, [MUSE_NO_AUTO_UPDATE]).
+       A Keeper pool child must not swap the binary under its siblings; the
+       operator updates through [muse] itself. *)
+    ; env_set = [ "MUSE_NO_AUTO_UPDATE", "1" ]
+    ; default_strip_env = []
+    ; mcp_wiring = Session_new_http_mcp
+    (* Live-verified against muse acp 1.4.25 (2026-11-24): session/update
+       tool_call emits title = name = "mcp__<server>__<tool>" with kind =
+       "other"; the later session/request_permission frame carries only the
+       toolCallId, so the identity comes from the tool_call frame. Native tools
+       use plain names ("read_file", kind "read"). *)
+    ; mcp_identifier_syntaxes = [ Mcp_double_underscore ]
+    ; system_prompt_channel = Framed_in_first_prompt
+    (* muse acp reports no per-turn token counts: the prompt result holds only
+       stopReason and usage_update holds [used]/[size] of the context window.
+       The accounting fields are read only when a usage record exists. *)
+    ; input_accounting = Inclusive_of_cached
+    ; output_accounting = Inclusive_of_thought
+    ; supports_skills_dir_flag = false
+    (* Modes advertised by session/new: allowAll, promptUnmatched, onRequest
+       (default), denyUnmatched. Pinning "onRequest" on every session keeps a
+       resumed session from keeping a looser mode an earlier turn set. *)
+    ; mode_for_native_none = "onRequest"
+    ; mode_for_native_read = "onRequest"
+    ; mode_for_native_full = "allowAll"
+    ; model_config_id = "model"
+    ; effort_config_id = None
+    (* muse runs its read tool without a session/request_permission frame in
+       every mode, including for a path outside the workspace
+       (live-verified in onRequest and promptUnmatched), so the client cannot
+       refuse reads and [none] is not enforceable. *)
+    ; enforces_native_none = false
     }
 ;;
 
@@ -2802,9 +2850,43 @@ let install_client_of_driver = function
   | Antigravity -> Runtime_official_cli_install.Antigravity
   | Kimi_code -> Runtime_official_cli_install.Kimi_code
   | Mistral_vibe -> Runtime_official_cli_install.Mistral_vibe
+  | Muse_code -> Runtime_official_cli_install.Muse_code
 ;;
 
 (* ── Lifecycle: spawn + initialize ────────────────────────────────────────── *)
+
+(* muse acp 1.4.25 bundles reminder observers (memory recall, skill recall,
+   goal, todo, scope and verification reminders). Each enabled observer makes
+   its own model calls on the operator's subscription and injects text into the
+   session. A Keeper already carries its own memory, goals and verification, so
+   the host runs with every observer off. The ids are the host's capability
+   names, each present in the 1.4.25 binary; [-c runtime_capabilities.<id>]
+   accepts any id without checking it, so a renamed id fails silently and the
+   observer stays on. *)
+let muse_observer_capability_ids =
+  List.map
+    (fun name -> "plugin:tbh-reminders:reminder:" ^ name)
+    [ "memory"
+    ; "skill-reminder"
+    ; "verify-reminder"
+    ; "goal-reminder"
+    ; "todo-reminder"
+    ; "scope-reminder"
+    ]
+;;
+
+(* [--trust-workspace] is what makes the host connect the MCP servers that
+   session/new carries; without it the session starts with none (muse acp
+   1.4.25, live-verified). It also loads the workspace's own skills and rules,
+   which is the Keeper workspace's content. A repeated [-c] key makes the host
+   refuse to run ("one setting, one occurrence"), so an operator [args] must not
+   repeat the observer keys below. *)
+let muse_required_args =
+  "--trust-workspace"
+  :: List.concat_map
+       (fun id -> [ "-c"; Printf.sprintf "runtime_capabilities.%s.enabled=false" id ])
+       muse_observer_capability_ids
+;;
 
 let build_argv ?native_posture (config : config) ~temp_gemini_dir =
   let profile = profile_of_driver config.driver in
@@ -2844,6 +2926,7 @@ let build_argv ?native_posture (config : config) ~temp_gemini_dir =
     in
     (config.cli_path :: pre_args) @ base_args
   | Mistral_vibe -> config.cli_path :: base_args
+  | Muse_code -> (config.cli_path :: base_args) @ muse_required_args
 ;;
 
 let foreground_process_mgr ~clock ?(grace_seconds = default_reap_grace_seconds) () =
@@ -3225,7 +3308,7 @@ let parse_wire_effort ~driver (raw : string) : Llm_provider.Reasoning_effort.t o
 let preferred_wire_value_of_effort ~driver (effort : Llm_provider.Reasoning_effort.t) : string =
   let module E = Llm_provider.Reasoning_effort in
   match driver with
-  | Antigravity | Kimi_code -> E.to_string effort
+  | Antigravity | Kimi_code | Muse_code -> E.to_string effort
   | Mistral_vibe ->
     (match effort with
      | E.None_ -> "off"

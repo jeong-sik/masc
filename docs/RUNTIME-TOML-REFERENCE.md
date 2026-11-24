@@ -79,7 +79,7 @@ Protocol inventory (`lib/runtime/runtime_protocol.ml`):
 | `claude-code` | CLI | Claude Code client | official client |
 | `codex-app-server` | CLI | Codex app server | official client |
 | `antigravity-cli` | CLI | Antigravity CLI | official client |
-| `acp` | CLI | Persistent ACP v1 JSON-RPC 2.0 over stdio (`agy acp`, `kimi acp`, `vibe-acp`) | official client |
+| `acp` | CLI | Persistent ACP v1 JSON-RPC 2.0 over stdio (`agy acp`, `kimi acp`, `vibe-acp`, `muse acp`) | official client |
 | `messages-cli`, `openai-compatible-cli` | CLI | internal | not editable |
 
 Optional:
@@ -96,7 +96,7 @@ Optional:
 | `exact-body-timeout-s` | positive float | bound on the whole exact-output request (connect, headers, body). See §7 for when it matters |
 | `is-non-interactive` | bool, default `false` | **required `true`** for every official-client protocol (`claude-code`, `codex-app-server`, `antigravity-cli`, `acp`); otherwise the runtime does not materialize |
 | `timeout-s` (+ `agent`, `effort`, `add-dirs`) | positive float (string; `low`\|`medium`\|`high`; absolute paths) | `antigravity-cli` options (`agent` and `add-dirs` are `antigravity-cli` only; `timeout-s` is **required** on `antigravity-cli` and optional on `acp`; `effort` is optional on both) |
-| `driver` (+ `args`, `strip-env`, `skills-dirs`, `mode`) | `antigravity`\|`kimi_code`\|`mistral_vibe` (string arrays; string) | `acp` only — refused on every other protocol. `driver` is **required**; `args`, `strip-env`, `skills-dirs` (absolute paths), and `mode` are optional |
+| `driver` (+ `args`, `strip-env`, `skills-dirs`, `mode`) | `antigravity`\|`kimi_code`\|`mistral_vibe`\|`muse_code` (string arrays; string) | `acp` only — refused on every other protocol. `driver` is **required**; `args`, `strip-env`, `skills-dirs` (absolute paths), and `mode` are optional |
 | `account-home` | non-empty absolute path | accepted for `claude-code`/`codex-app-server`; refused elsewhere |
 | `admission-priority-run-limit` | positive int | bounds consecutive `Priority` grants while a `Standard` request waits, and combined `Priority`/`Standard` grants while `Background` work (`Librarian`, `Librarian_memory`, `Workspace_memory_curator`) waits. Omitted means strict `Priority` → `Standard` → `Background` ordering (FIFO within each class; `Background` runs only when `Priority` and `Standard` queues are empty). Set only to bound `Background`/`Standard` starvation on an intentionally shared account, not to protect Keepers. Refused on official-client providers and when none of the provider's bindings declares `max-concurrent`. See [provider admission fairness](guides/provider-admission-fairness.md) |
 
@@ -109,7 +109,8 @@ for inherited versus explicit homes and Codex configuration requirements.
 `acp` runs a persistent ACP v1 (Agent Client Protocol) JSON-RPC 2.0 child over
 stdio for official subscription CLIs, selected by `driver`: `antigravity`
 (`command = "agy"`, `args = ["acp"]`), `kimi_code` (`command = "kimi"`,
-`args = ["acp"]`), and `mistral_vibe` (`command = "vibe-acp"`). Each Keeper owns
+`args = ["acp"]`), `mistral_vibe` (`command = "vibe-acp"`), and `muse_code`
+(`command = "muse"`, `args = ["acp"]`). Each Keeper owns
 an isolated child process and loopback HTTP MCP bridge. `driver` and
 `is-non-interactive = true` are required; `account-home` is refused. Use
 `strip-env` when a host API-key variable must be removed so the client uses its
@@ -117,6 +118,27 @@ subscription login (for example, `strip-env = ["MISTRAL_API_KEY"]` on `vibe-acp`
 so it uses the host OS keyring). `credentials` may be omitted or a `file`
 credential naming an absolute path (`oauth_source` for Antigravity); `env` and
 `inline` credentials are refused.
+
+`muse_code` differs from the other drivers in four ways (muse 1.4.25):
+
+- The client signs in with `muse login`. On macOS the secret is in the Keychain
+  and `~/.config/muse/auth.json` holds metadata; other platforms are not
+  verified. MASC adds `--trust-workspace` (the host connects the session's MCP
+  server only with it) and one `-c runtime_capabilities.<id>.enabled=false` per
+  bundled reminder observer after `args`, and sets `MUSE_NO_AUTO_UPDATE=1`. The
+  host refuses to start when `args` repeats one of those `-c` keys.
+- The client runs its read tool without asking for permission in every mode, so
+  a Keeper whose `keeper.tools.native` is `none` runs at `read`. Reads, search
+  and MASC MCP tools are allowed; writes, shell and fetch are refused unless the
+  Keeper declares `full`.
+- `effort` is refused at load, because the client has no effort option. Put
+  `-c reasoning_effort="<level>"` in `args`, for example
+  `args = ["acp", "-c", "reasoning_effort=\"low\""]`.
+- Sessions live under `$XDG_DATA_HOME/muse` (default `~/.local/share/muse`), the
+  same store as the operator's own `muse` sessions, and the host loads skills
+  from `~/.claude/skills`, `~/.agents/skills` and `$CODEX_HOME/skills` into every
+  session. The client reports no per-turn token counts over ACP, only the
+  context window use, so MASC writes no cost-ledger row for its turns.
 
 ### `[providers.<id>.credentials]`
 

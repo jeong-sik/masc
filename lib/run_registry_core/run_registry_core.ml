@@ -97,6 +97,7 @@ module type Payload = sig
   val name : string
   val registration_to_yojson : registration -> Yojson.Safe.t
   val registration_of_yojson : Yojson.Safe.t -> (registration, string) result
+  val retired_registration_of_yojson : Yojson.Safe.t -> (string option, string) result
   val completion_to_yojson : completion -> Yojson.Safe.t
   val completion_of_yojson : Yojson.Safe.t -> (completion, string) result
 
@@ -140,6 +141,8 @@ type persistence_failure =
 type replay_report =
   { lines_read : int
   ; malformed_lines : int
+  ; retired_registrations : int
+  ; retired_completions : int
   ; dropped_running : int
   ; reached_end : bool
   }
@@ -152,6 +155,8 @@ type replay_status =
 type cut_report =
   { lines_read : int
   ; malformed_lines : int
+  ; retired_registrations : int
+  ; retired_completions : int
   ; retained_entries : int
   ; reached_end : bool
   ; rewritten : bool
@@ -172,7 +177,7 @@ module Make (Payload : Payload) = struct
   module Id_map = Map.Make (String)
 
   type observer_index = { device:int; inode:int; boundary:int; modified:float; changed:float;
-    line_no:int; rows:entry Id_map.t }
+    line_no:int; rows:entry Id_map.t; retired:unit Id_map.t }
 
   type t =
     { entries : entry list Atomic.t
@@ -193,6 +198,14 @@ module Make (Payload : Payload) = struct
         ; completion : Payload.completion
         }
 
+  type parsed_event =
+    | Live of event
+    | Retired_register of
+        { id : string
+        ; started_at : float
+        ; reason : string
+        }
+
   module Row_map = Map.Make (Int)
 
   (* Positions count the nonblank rows visited by [fold_appended_lines], not
@@ -206,6 +219,8 @@ module Make (Payload : Payload) = struct
     { retained_entries : entry list
     ; rows : event_rows Id_map.t
     ; malformed : string list
+    ; retired_registrations : int
+    ; retired_completions : int
     ; reached_end : bool
     ; boundary : int
     ; lines_read : int
@@ -324,6 +339,44 @@ module Make (Payload : Payload) = struct
       in
       let* completion = Payload.completion_of_yojson completion_json in
       Ok (Complete { id; completion })
+    | label -> Error (Printf.sprintf "unknown %s event %S" Payload.name label)
+  ;;
+
+  let parsed_event_of_yojson json =
+    let* fields = Json.object_fields json in
+    let* event = Json.string_field "event" fields in
+    match event with
+    | "register" ->
+      let* () =
+        Json.exact_fields
+          ~required:[ "event"; "id"; "started_at"; "registration" ]
+          fields
+      in
+      let* id = Json.string_field "id" fields in
+      let* started_at = Json.float_field "started_at" fields in
+      let* registration_json =
+        match List.assoc_opt "registration" fields with
+        | Some value -> Ok value
+        | None -> Error "missing field registration"
+      in
+      (match Payload.retired_registration_of_yojson registration_json with
+       | Error _ as error -> error
+       | Ok (Some reason) -> Ok (Retired_register { id; started_at; reason })
+       | Ok None ->
+         let* registration = Payload.registration_of_yojson registration_json in
+         Ok (Live (Register { id; started_at; registration })))
+    | "complete" ->
+      let* () =
+        Json.exact_fields ~required:[ "event"; "id"; "completion" ] fields
+      in
+      let* id = Json.string_field "id" fields in
+      let* completion_json =
+        match List.assoc_opt "completion" fields with
+        | Some value -> Ok value
+        | None -> Error "missing field completion"
+      in
+      let* completion = Payload.completion_of_yojson completion_json in
+      Ok (Live (Complete { id; completion }))
     | label -> Error (Printf.sprintf "unknown %s event %S" Payload.name label)
   ;;
 
@@ -498,7 +551,7 @@ module Make (Payload : Payload) = struct
          | Yojson.Json_error message -> Error ("invalid JSON: " ^ message)
        with
        | Error _ as error -> error
-       | Ok json -> Result.map Option.some (event_of_yojson json))
+       | Ok json -> Result.map Option.some (parsed_event_of_yojson json))
       |> Result.map_error (fun message ->
         Printf.sprintf "%s:%d: %s" path line_no message)
   ;;
@@ -661,11 +714,11 @@ module Make (Payload : Payload) = struct
               ~init:(None, None)
               ~f:(fun (registration, completion) line ->
                 match parse_event_line ~path ~line_no:0 line with
-                | Ok (Some (Register r)) when String.equal r.id shed.id ->
+                | Ok (Some (Live (Register r))) when String.equal r.id shed.id ->
                   Some r.registration, completion
-                | Ok (Some (Complete c)) when String.equal c.id shed.id ->
+                | Ok (Some (Live (Complete c))) when String.equal c.id shed.id ->
                   registration, Some c.completion
-                | Ok (None | Some (Register _ | Complete _)) | Error _ ->
+                | Ok (None | Some (Live (Register _ | Complete _) | Retired_register _)) | Error _ ->
                   registration, completion)
           in
           let entry =
@@ -740,29 +793,36 @@ module Make (Payload : Payload) = struct
           when report.malformed_lines <> 0 || not report.reached_end ->
         Error (Incomplete_startup report)
       | Some path, (Log_absent | Replayed _) ->
-        (* Track every registration identity to reject unrelated orphan
-           completions, but retain full payloads only for the requested id.
+        (* Track every active and retired registration identity to reject
+           unrelated orphan completions while recognizing paired retired rows,
+           and retain full payloads only for the requested id.
            Never reuse the append-only index as current-source authority. *)
         let folded = Fs_compat.fold_private_jsonl_locked_result path
-          ~init:(Ok (Id_map.empty, None), 1)
+          ~init:(Ok (Id_map.empty, Id_map.empty, None), 1)
           ~f:(fun (reading, line_no) line ->
-            let reading = Result.bind reading (fun (registered, selected) ->
+            let reading = Result.bind reading (fun (registered, retired, selected) ->
               match parse_event_line ~path ~line_no line with
               | Error detail -> Error (Invalid_history detail)
-              | Ok None -> Ok (registered, selected)
-              | Ok (Some (Register r)) ->
+              | Ok None -> Ok (registered, retired, selected)
+              | Ok (Some (Live (Register r))) ->
                 let selected = if String.equal r.id id then
                     Some {id=r.id;started_at=r.started_at;registration=r.registration;status=Running}
                   else selected in
-                Ok (Id_map.add r.id () registered, selected)
-              | Ok (Some (Complete c)) ->
-                if not (Id_map.mem c.id registered) then
-                  Error (Invalid_history (Printf.sprintf "%s:%d: completion has no matching registration" path line_no))
-                else if String.equal c.id id then
-                  (match selected with
-                   | Some entry -> Ok (registered, Some {entry with status=Completed c.completion})
-                   | None -> Error (Invalid_history "requested completion has no selected registration"))
-                else Ok (registered, selected)) in
+                Ok (Id_map.add r.id () registered, Id_map.remove r.id retired, selected)
+              | Ok (Some (Retired_register r)) ->
+                let selected = if String.equal r.id id then None else selected in
+                Ok (Id_map.remove r.id registered, Id_map.add r.id () retired, selected)
+              | Ok (Some (Live (Complete c))) ->
+                if Id_map.mem c.id registered then
+                  if String.equal c.id id then
+                    (match selected with
+                     | Some entry -> Ok (registered, retired, Some {entry with status=Completed c.completion})
+                     | None -> Error (Invalid_history "requested completion has no selected registration"))
+                  else Ok (registered, retired, selected)
+                else if Id_map.mem c.id retired then
+                  Ok (registered, retired, selected)
+                else
+                  Error (Invalid_history (Printf.sprintf "%s:%d: completion has no matching registration" path line_no))) in
             reading, line_no + 1) in
         let read_error = function
           | Fs_compat.Private_jsonl_fold.Snapshot_changed -> Snapshot_changed
@@ -772,7 +832,7 @@ module Make (Payload : Payload) = struct
           | Fs_compat.Private_jsonl_fold.Missing -> Ok None
           | Present {value=(reading,_);rows_end;end_offset} ->
             if rows_end <> end_offset then Error Incomplete_history
-            else Result.map snd reading in
+            else Result.map (fun (_, _, selected) -> selected) reading in
         match folded with
         | Fs_compat.Private_file_failed error -> Error (read_error error)
         | Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
@@ -800,30 +860,36 @@ module Make (Payload : Payload) = struct
   let strict_current_bytes ~path ~id bytes =
     let length=String.length bytes in
     if length>0 && not (Char.equal bytes.[length-1] '\n') then Error Incomplete_history else
-    let rec rows offset line_no registered selected =
+    let rec rows offset line_no registered retired selected =
       match String.index_from_opt bytes offset '\n' with
       | None -> Ok selected
       | Some newline ->
         let line=String.sub bytes offset (newline-offset) in
         let* event=parse_event_line ~path ~line_no line |> Result.map_error (fun e -> Invalid_history e) in
-        let* registered,selected=match event with
-          | None -> Ok (registered,selected)
-          | Some (Register r) ->
+        let* registered,retired,selected=match event with
+          | None -> Ok (registered,retired,selected)
+          | Some (Live (Register r)) ->
             if not (Float.is_finite r.started_at) || r.started_at<0. then
               Error (Invalid_history "registration time must be finite and nonnegative") else
             let selected=if String.equal r.id id then
                 Some {id=r.id;started_at=r.started_at;registration=r.registration;status=Running}
               else selected in
-            Ok (Id_map.add r.id () registered,selected)
-          | Some (Complete c) ->
-            if not (Id_map.mem c.id registered) then
-              Error (Invalid_history (Printf.sprintf "%s:%d: orphan completion" path line_no))
-            else if not (String.equal c.id id) then Ok (registered,selected)
-            else match selected with
-              | None -> Error (Invalid_history "selected completion has no registration")
-              | Some entry -> Ok (registered,Some {entry with status=Completed c.completion}) in
-        rows (newline+1) (line_no+1) registered selected in
-    rows 0 1 Id_map.empty None
+            Ok (Id_map.add r.id () registered,Id_map.remove r.id retired,selected)
+          | Some (Retired_register r) ->
+            if not (Float.is_finite r.started_at) || r.started_at<0. then
+              Error (Invalid_history "registration time must be finite and nonnegative") else
+            let selected=if String.equal r.id id then None else selected in
+            Ok (Id_map.remove r.id registered,Id_map.add r.id () retired,selected)
+          | Some (Live (Complete c)) ->
+            if Id_map.mem c.id registered then
+              if not (String.equal c.id id) then Ok (registered,retired,selected)
+              else match selected with
+                | None -> Error (Invalid_history "selected completion has no registration")
+                | Some entry -> Ok (registered,retired,Some {entry with status=Completed c.completion})
+            else if Id_map.mem c.id retired then Ok (registered,retired,selected)
+            else Error (Invalid_history (Printf.sprintf "%s:%d: orphan completion" path line_no)) in
+        rows (newline+1) (line_no+1) registered retired selected in
+    rows 0 1 Id_map.empty Id_map.empty None
   ;;
 
   let reconcile_current t ~id ~decide =
@@ -914,32 +980,39 @@ module Make (Payload : Payload) = struct
                 && (before.Unix.st_size > index.boundary
                     || (index.modified = before.Unix.st_mtime && index.changed = before.Unix.st_ctime)) -> Some index
             | Some _ | None -> None in
-          let from, rows, line_no = match cached with
-            | Some index -> index.boundary, index.rows, index.line_no
-            | None -> 0, Id_map.empty, 1 in
+          let from, rows, retired, line_no = match cached with
+            | Some index -> index.boundary, index.rows, index.retired, index.line_no
+            | None -> 0, Id_map.empty, Id_map.empty, 1 in
           let (reading, line_no), boundary = Fs_compat.fold_appended_lines
-            ~path ~from ~init:(Ok rows, line_no)
+            ~path ~from ~init:(Ok (rows, retired), line_no)
             ~f:(fun (reading, line_no) line ->
-              let reading = Result.bind reading (fun rows ->
+              let reading = Result.bind reading (fun (rows, retired) ->
                 match parse_event_line ~path ~line_no line with
                 | Error detail -> Error detail
-                | Ok (Some (Register r)) ->
-                  Ok (Id_map.add r.id {id=r.id;started_at=r.started_at;
-                    registration=r.registration;status=Running} rows)
-                | Ok (Some (Complete c)) ->
+                | Ok (Some (Live (Register r))) ->
+                  Ok
+                    ( Id_map.add r.id {id=r.id;started_at=r.started_at;
+                        registration=r.registration;status=Running} rows
+                    , Id_map.remove r.id retired )
+                | Ok (Some (Retired_register r)) ->
+                  Ok (Id_map.remove r.id rows, Id_map.add r.id () retired)
+                | Ok (Some (Live (Complete c))) ->
                   (match Id_map.find_opt c.id rows with
-                   | Some entry -> Ok (Id_map.add c.id {entry with status=Completed c.completion} rows)
-                   | None -> Error "completion has no matching registration")
-                | Ok None -> Ok rows) in
+                   | Some entry ->
+                     Ok (Id_map.add c.id {entry with status=Completed c.completion} rows, retired)
+                   | None ->
+                     if Id_map.mem c.id retired then Ok (rows, retired)
+                     else Error "completion has no matching registration")
+                | Ok None -> Ok (rows, retired)) in
               reading, line_no + 1) in
           let after = Unix.stat path in
           if before.Unix.st_dev <> after.Unix.st_dev || before.Unix.st_ino <> after.Unix.st_ino
              || before.Unix.st_size <> after.Unix.st_size || boundary <> after.Unix.st_size
              || before.Unix.st_mtime <> after.Unix.st_mtime || before.Unix.st_ctime <> after.Unix.st_ctime
           then Error "run history contains an incomplete or changing tail"
-          else Result.map (fun rows ->
+          else Result.map (fun (rows, retired) ->
             t.observer_index <- Some {device=after.Unix.st_dev;inode=after.Unix.st_ino;boundary;
-              modified=after.Unix.st_mtime;changed=after.Unix.st_ctime;line_no;rows};
+              modified=after.Unix.st_mtime;changed=after.Unix.st_ctime;line_no;rows;retired};
             match Id_map.find_opt id rows with
             | Some ({status=Completed _;_} as entry) -> Some entry
             | Some {status=Running;_} | None -> None) reading
@@ -953,6 +1026,8 @@ module Make (Payload : Payload) = struct
       { retained_entries = []
       ; rows = Id_map.empty
       ; malformed = []
+      ; retired_registrations = 0
+      ; retired_completions = 0
       ; reached_end = false
       ; boundary = 0
       ; lines_read = 0
@@ -963,37 +1038,83 @@ module Make (Payload : Payload) = struct
     then unread
     else (
       try
-        let (entries, rows, _registered, malformed, line_no), boundary =
+        let (entries, rows, _registered, _retired, malformed, retired_registrations, retired_completions, line_no), boundary =
           Fs_compat.fold_appended_lines
             ~path
             ~from:0
-            ~init:([], Id_map.empty, Id_map.empty, [], 1)
-            ~f:(fun (entries, rows, registered, malformed, line_no) line ->
+            ~init:([], Id_map.empty, Id_map.empty, Id_map.empty, [], 0, 0, 1)
+            ~f:(fun (entries, rows, registered, retired, malformed, retired_registrations, retired_completions, line_no) line ->
               match parse_event_line ~path ~line_no line with
-              | Ok None -> entries, rows, registered, malformed, line_no + 1
-              | Ok (Some event) ->
-                (* Track all valid registrations, independently of projection
-                   retention. An orphan must prevent compaction/sweep and cannot
-                   disappear before a later strict conditional transaction. *)
-                let registered,malformed=match event with
-                  | Register {id;_} -> Id_map.add id () registered,malformed
-                  | Complete {id;_} -> registered,
-                    (if Id_map.mem id registered then malformed else
-                       Printf.sprintf "%s:%d: completion has no matching registration" path line_no :: malformed) in
+              | Ok None ->
+                entries, rows, registered, retired, malformed, retired_registrations, retired_completions, line_no + 1
+              | Ok (Some (Retired_register { id; _ })) ->
+                let entries = List.filter (fun existing -> not (String.equal existing.id id)) entries in
+                let rows = if retain_completed_history then Id_map.empty else Id_map.remove id rows in
+                ( entries
+                , rows
+                , Id_map.remove id registered
+                , Id_map.add id () retired
+                , malformed
+                , retired_registrations + 1
+                , retired_completions
+                , line_no + 1 )
+              | Ok (Some (Live (Register { id; _ } as event))) ->
+                let registered = Id_map.add id () registered in
+                let retired = Id_map.remove id retired in
                 let entries = apply_event entries event in
                 let entries = if retain_completed_history then prune entries else entries in
-                let rows = if retain_completed_history then Id_map.empty else
-                  match event with
-                  | Register { id; _ } ->
-                    Id_map.add id
-                      { registration_row = line_no; completion_row = None } rows
-                  | Complete { id; _ } ->
-                    Id_map.update id
-                      (Option.map (fun source ->
-                         { source with completion_row = Some line_no })) rows
+                let rows =
+                  if retain_completed_history
+                  then Id_map.empty
+                  else Id_map.add id { registration_row = line_no; completion_row = None } rows
                 in
-                entries, rows, registered, malformed, line_no + 1
-              | Error message -> entries, rows, registered, message :: malformed, line_no + 1)
+                entries, rows, registered, retired, malformed, retired_registrations, retired_completions, line_no + 1
+              | Ok (Some (Live (Complete { id; _ } as event))) ->
+                (* Track all valid registrations, independently of projection
+                   retention. Paired retired completions are counted separately;
+                   a true orphan prevents compaction/sweep and cannot disappear
+                   before a later strict conditional transaction. *)
+                if Id_map.mem id registered
+                then (
+                  let entries = apply_event entries event in
+                  let entries = if retain_completed_history then prune entries else entries in
+                  let rows =
+                    if retain_completed_history
+                    then Id_map.empty
+                    else
+                      Id_map.update
+                        id
+                        (Option.map (fun source -> { source with completion_row = Some line_no }))
+                        rows
+                  in
+                  entries, rows, registered, retired, malformed, retired_registrations, retired_completions, line_no + 1)
+                else if Id_map.mem id retired
+                then
+                  ( entries
+                  , rows
+                  , registered
+                  , retired
+                  , malformed
+                  , retired_registrations
+                  , retired_completions + 1
+                  , line_no + 1 )
+                else (
+                  let malformed =
+                    Printf.sprintf "%s:%d: completion has no matching registration" path line_no
+                    :: malformed
+                  in
+                  let entries = apply_event entries event in
+                  let entries = if retain_completed_history then prune entries else entries in
+                  entries, rows, registered, retired, malformed, retired_registrations, retired_completions, line_no + 1)
+              | Error message ->
+                ( entries
+                , rows
+                , registered
+                , retired
+                , message :: malformed
+                , retired_registrations
+                , retired_completions
+                , line_no + 1 ))
         in
         let reached_end =
           match Fs_compat.file_size path with
@@ -1016,8 +1137,16 @@ module Make (Payload : Payload) = struct
           | None -> List.length (List.filter is_running entries)
         in
         let entries = settle_replayed_running entries |> prune in
-        { retained_entries = entries; rows; malformed = List.rev malformed; reached_end
-        ; boundary; lines_read = line_no - 1; dropped_running }
+        { retained_entries = entries
+        ; rows
+        ; malformed = List.rev malformed
+        ; retired_registrations
+        ; retired_completions
+        ; reached_end
+        ; boundary
+        ; lines_read = line_no - 1
+        ; dropped_running
+        }
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -1032,6 +1161,13 @@ module Make (Payload : Payload) = struct
   let replay_with_policy ~retain_completed_history path =
     let existed = Fs_compat.file_exists path in
     let snapshot = fold_replay_entries ~retain_completed_history path in
+    if snapshot.retired_registrations > 0 || snapshot.retired_completions > 0
+    then
+      Log.Misc.info
+        "%s: skipped %d retired registration(s) and %d paired completion(s) during replay"
+        Payload.name
+        snapshot.retired_registrations
+        snapshot.retired_completions;
     (match snapshot.malformed with
      | [] -> ()
      | first :: _ as errors ->
@@ -1053,6 +1189,8 @@ module Make (Payload : Payload) = struct
         else Replayed
           { lines_read = snapshot.lines_read
           ; malformed_lines = List.length snapshot.malformed
+          ; retired_registrations = snapshot.retired_registrations
+          ; retired_completions = snapshot.retired_completions
           ; dropped_running = snapshot.dropped_running
           ; reached_end = snapshot.reached_end
           }
@@ -1081,6 +1219,8 @@ module Make (Payload : Payload) = struct
     in
     { lines_read = snapshot.lines_read
     ; malformed_lines = List.length snapshot.malformed
+    ; retired_registrations = snapshot.retired_registrations
+    ; retired_completions = snapshot.retired_completions
     ; retained_entries = List.length snapshot.retained_entries
     ; reached_end = snapshot.reached_end
     ; rewritten

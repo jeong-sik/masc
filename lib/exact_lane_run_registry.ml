@@ -424,6 +424,28 @@ module Payload = struct
     Ok { lane; actor; input = Exact_input value; input_source }
   ;;
 
+  let retired_registration_of_yojson json =
+    let ( let* ) = Result.bind in
+    let* fields = Run_registry_core.Json.object_fields json in
+    let* () =
+      Run_registry_core.Json.exact_fields
+        ~required:[ "lane"; "actor"; "input" ]
+        fields
+    in
+    let* lane_key = Run_registry_core.Json.string_field "lane" fields in
+    let* _actor = Run_registry_core.Json.string_field "actor" fields in
+    let* _input_source, _value =
+      match List.assoc_opt "input" fields with
+      | Some value -> payload_source_of_yojson value
+      | None -> Error "missing field input"
+    in
+    match Lane_run_identity.of_id lane_key with
+    | Some standalone when Option.is_none (lane_of_run_lane standalone) ->
+      Ok (Some (Lane_run_identity.to_id standalone))
+    | Some _ -> Ok None
+    | None -> Error (Printf.sprintf "unknown exact lane %S" lane_key)
+  ;;
+
   let completion_to_yojson completion =
     let detail =
       match completion.outcome with

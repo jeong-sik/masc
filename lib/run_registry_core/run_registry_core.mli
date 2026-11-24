@@ -54,6 +54,12 @@ module type Payload = sig
   val name : string
   val registration_to_yojson : registration -> Yojson.Safe.t
   val registration_of_yojson : Yojson.Safe.t -> (registration, string) result
+  val retired_registration_of_yojson : Yojson.Safe.t -> (string option, string) result
+  (** Classify a persisted registration payload before decoding it as active.
+      [Ok (Some label)] marks a structurally valid historical registration for
+      a retired lane/kind so replay and strict reads can pair its completions
+      without treating them as malformed orphans. [Ok None] proceeds to
+      {!registration_of_yojson}. [Error detail] rejects a malformed row. *)
   val completion_to_yojson : completion -> Yojson.Safe.t
   val completion_of_yojson : Yojson.Safe.t -> (completion, string) result
 
@@ -104,6 +110,8 @@ type persistence_failure =
 type replay_report =
   { lines_read : int
   ; malformed_lines : int
+  ; retired_registrations : int
+  ; retired_completions : int
   ; dropped_running : int
   ; reached_end : bool
   }
@@ -116,6 +124,8 @@ type replay_status =
 type cut_report =
   { lines_read : int
   ; malformed_lines : int
+  ; retired_registrations : int
+  ; retired_completions : int
   ; retained_entries : int
   ; reached_end : bool
   ; rewritten : bool

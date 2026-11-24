@@ -390,8 +390,14 @@ let test_startup_replay_diagnostics () =
     ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.;
   R.mark_completed initial ~run_id:"complete" ~outcome:R.Succeeded;
   (match R.replay_status (R.replay path) with
-   | Run_registry_core.Replayed { lines_read = 2; malformed_lines = 0;
-                                  dropped_running = 0; reached_end = true } -> ()
+   | Run_registry_core.Replayed
+       { lines_read = 2
+       ; malformed_lines = 0
+       ; retired_registrations = 0
+       ; retired_completions = 0
+       ; dropped_running = 0
+       ; reached_end = true
+       } -> ()
    | _ -> fail "healthy completed replay must be explicit");
   let channel = open_out_gen [Open_append; Open_binary] 0o600 path in
   output_string channel "{unterminated";

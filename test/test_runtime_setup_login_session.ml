@@ -195,6 +195,83 @@ let python_ignores_relative_path_before_workspace_change () = temporary (fun roo
       | Some path ->
         check string "selection keeps its identity from the child cwd"
           (Unix.realpath expected) (Unix.realpath path))))
+let hint_testable =
+  testable
+    (fun fmt -> function
+      | S.Auth_url { url } -> Format.fprintf fmt "Auth_url(%S)" url
+      | S.Device_code { code; verification_uri } ->
+        Format.fprintf fmt "Device_code(%S, %s)" code
+          (match verification_uri with Some u -> u | None -> "None"))
+    ( = )
+
+let auth_hint_extraction () =
+  let styled =
+    "\027[1;36mOpen\027[0m (\027]8;;https://auth.openai.com/codex/device\027\\link\027]8;;\027\\) \
+     or https://auth.openai.com/codex/device.\n\
+     One-time code: \027[1mA1B2-C3D4E\027[0m (not 2026-1124, not http://insecure.example/x)\n"
+  in
+  check string "ANSI stripped cleanly"
+    "Open (link) or https://auth.openai.com/codex/device.\n\
+     One-time code: A1B2-C3D4E (not 2026-1124, not http://insecure.example/x)\n"
+    (S.strip_ansi styled);
+  check (list hint_testable) "OSC 8 + plain URL deduplicated and device code paired with URI"
+    [ S.Auth_url { url = "https://auth.openai.com/codex/device" }
+    ; S.Device_code
+        { code = "A1B2-C3D4E"; verification_uri = Some "https://auth.openai.com/codex/device" }
+    ]
+    (S.extract_auth_hints styled);
+  let github_box =
+    "│ Visit https://github.com/login/device │\n│ Enter code: WDJB-MJHT │\n"
+  in
+  check (list hint_testable) "box-drawing UTF-8 terminates URL and extracts 4-4 device code"
+    [ S.Auth_url { url = "https://github.com/login/device" }
+    ; S.Device_code
+        { code = "WDJB-MJHT"; verification_uri = Some "https://github.com/login/device" }
+    ]
+    (S.extract_auth_hints github_box)
+
+let piped_auth_hints_dedup_and_chunk_reassembly () = run_process (fun env path session ->
+  let hints = ref [] in
+  let result = S.run session ~env ~child_env:(Unix.environment ()) ~cwd:path
+    ~argv:["python3";"-c";
+           "import sys,time\n"
+           ^ "sys.stdout.write('Visit https://auth.openai')\nsys.stdout.flush()\ntime.sleep(0.05)\n"
+           ^ "sys.stdout.write('.com/codex/device\\nCode: A1B2-C3D4E\\n')\nsys.stdout.flush()\n"
+           ^ "sys.stdout.write('Visit https://auth.openai.com/codex/device\\nCode: A1B2-C3D4E\\n')\nsys.stdout.flush()\n"]
+    ~terminal:false ~is_closed:(fun () -> false)
+    ~on_ready:(fun () -> ()) ~on_input_ready:(fun () -> ())
+    ~on_auth_hint:(fun h -> hints := !hints @ [ h ])
+    ~on_output:(fun _ -> ()) in
+  get result;
+  check (list hint_testable) "split URL reassembled and repeated hints deduplicated"
+    [ S.Auth_url { url = "https://auth.openai.com/codex/device" }
+    ; S.Device_code
+        { code = "A1B2-C3D4E"; verification_uri = Some "https://auth.openai.com/codex/device" }
+    ]
+    !hints;
+  Ok ())
+
+let terminal_auth_hints_dedup_across_redraws () = run_process (fun env path session ->
+  let hints = ref [] in
+  let result = S.run session ~env ~child_env:(Unix.environment ()) ~cwd:path
+    ~argv:["python3";"-c";
+           "import sys,time\n"
+           ^ "for frame in ('|', '/', '-'):\n"
+           ^ "  sys.stdout.write('\\x1b[2J\\x1b[H\\x1b[32mhttps://claude.ai/oauth/authorize?code=true\\x1b[0m\\nCode: WDJB-MJHT ' + frame)\n"
+           ^ "  sys.stdout.flush()\n  time.sleep(0.03)\n"]
+    ~terminal:true ~is_closed:(fun () -> false)
+    ~on_ready:(fun () -> ()) ~on_input_ready:(fun () -> ())
+    ~on_auth_hint:(fun h -> hints := !hints @ [ h ])
+    ~on_output:(fun _ -> ()) in
+  get result;
+  check (list hint_testable) "PTY redraws emit each URL and code once"
+    [ S.Auth_url { url = "https://claude.ai/oauth/authorize?code=true" }
+    ; S.Device_code
+        { code = "WDJB-MJHT"; verification_uri = Some "https://claude.ai/oauth/authorize?code=true" }
+    ]
+    !hints;
+  Ok ())
+
 let () = run "setup-login-session" ["ownership", [test_case "scope and physical account locks" `Quick isolated_scope];
   "process lifetime", [test_case "normal exit" `Quick normal_exit;
     test_case "saved login closes input and reaps client" `Quick saved_login_closes_input;
@@ -202,6 +279,10 @@ let () = run "setup-login-session" ["ownership", [test_case "scope and physical 
     test_case "failed login observation" `Quick failed_login_observation;
     test_case "terminal screen" `Quick terminal_screen; test_case "cancel" `Quick explicit_cancel;
     test_case "disconnect" `Quick disconnect; test_case "pipe EOF" `Quick pipe_eof; test_case "server shutdown" `Quick server_shutdown];
+  "auth hints", [
+    test_case "ANSI stripping and structured extraction" `Quick auth_hint_extraction;
+    test_case "piped chunk reassembly and deduplication" `Quick piped_auth_hints_dedup_and_chunk_reassembly;
+    test_case "terminal redraws deduplicated per session" `Quick terminal_auth_hints_dedup_across_redraws];
   "interpreter", [test_case "bundled release preferred" `Quick python_prefers_the_bundled_release;
     test_case "PATH fallback" `Quick python_falls_back_to_path;
     test_case "relative PATH cannot change with the workspace" `Quick

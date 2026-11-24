@@ -18,6 +18,15 @@ type output =
           line, with SGR styles and OSC 8 hyperlinks. A row the terminal
           wrapped joins the next without a line break. It replaces the
           screen before it. *)
+(** Structured authentication prompts extracted from the official login
+    process's output after stripping terminal escape sequences. Deduplicated
+    per session so repeated terminal redraws emit each prompt once. *)
+type auth_hint =
+  | Auth_url of { url : string }
+  | Device_code of
+      { code : string
+      ; verification_uri : string option
+      }
 (** Whose login it is. The kind tells an agent and a person apart, so no agent
     name reaches the sessions or the receipts of a person. *)
 type actor =
@@ -44,7 +53,17 @@ val python : binary:string -> string option
     entries are ignored because the child runs from the Keeper workspace.
     [None] when neither exists. *)
 
+val strip_ansi : string -> string
+(** Remove ANSI CSI, OSC (including OSC 8 hyperlinks), DCS/APC, and two-byte
+    ESC sequences from terminal or piped output. *)
+
+val extract_auth_hints : string -> auth_hint list
+(** Extract validated [https://] OAuth authorization URLs (including OSC 8
+    hyperlink targets) and RFC 8628 / provider device user codes from raw
+    output after stripping ANSI escapes. *)
+
 val run : ?saved_login:(unit -> (bool, string) result) ->
+  ?on_auth_hint:(auth_hint -> unit) ->
   t -> env:Eio_unix.Stdenv.base -> child_env:string array ->
   cwd:string -> argv:string list -> terminal:bool ->
   is_closed:(unit -> bool) -> on_ready:(unit -> unit) ->
@@ -54,7 +73,9 @@ val run : ?saved_login:(unit -> (bool, string) result) ->
     shutdown own termination. The helper kills/reaps its complete child group.
     With [~terminal:false] the process writes to pipes and [on_output] gets
     {!Piped}; with [~terminal:true] it runs in an 80 x 24 terminal and gets
-    {!Screen}. [saved_login] is a read-only observation for clients without a
+    {!Screen}. When [on_auth_hint] is provided, validated [https://] URLs and
+    device codes are extracted cleanly and delivered once per unique value for
+    the session. [saved_login] is a read-only observation for clients without a
     login-only command. A saved login closes input and ends/reaps the child
     before returning [Ok ()]; a failed observation returns [Completion_failed].
     It is checked while waiting and before forwarding input. *)

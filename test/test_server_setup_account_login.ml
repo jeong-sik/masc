@@ -139,6 +139,37 @@ streaming = true
   check_acp "kimi_acp" Runtime_setup_login_client.Kimi_code "Kimi Code" true;
   check_acp "agy_acp" Runtime_setup_login_client.Antigravity_acp "Antigravity" false
 
+let auth_hint_sse_frames () =
+  let event, payload =
+    Server_setup_account_login.For_testing.auth_hint_sse_event
+      ~login_id:"login-123"
+      (Runtime_setup_login_session.Auth_url { url = "https://auth.openai.com/codex/device" })
+  in
+  check string "auth_url SSE event name" "auth_url" event;
+  check string "auth_url SSE JSON payload"
+    {|{"login_id":"login-123","url":"https://auth.openai.com/codex/device"}|}
+    (Yojson.Safe.to_string payload);
+  let event_with_uri, payload_with_uri =
+    Server_setup_account_login.For_testing.auth_hint_sse_event
+      ~login_id:"login-123"
+      (Runtime_setup_login_session.Device_code
+         { code = "A1B2-C3D4E"; verification_uri = Some "https://auth.openai.com/codex/device" })
+  in
+  check string "device_code SSE event name" "device_code" event_with_uri;
+  check string "device_code with verification_uri JSON payload"
+    {|{"login_id":"login-123","code":"A1B2-C3D4E","verification_uri":"https://auth.openai.com/codex/device"}|}
+    (Yojson.Safe.to_string payload_with_uri);
+  let event_no_uri, payload_no_uri =
+    Server_setup_account_login.For_testing.auth_hint_sse_event
+      ~login_id:"login-123"
+      (Runtime_setup_login_session.Device_code { code = "WDJB-MJHT"; verification_uri = None })
+  in
+  check string "device_code without uri SSE event name" "device_code" event_no_uri;
+  check string "device_code omits absent verification_uri"
+    {|{"login_id":"login-123","code":"WDJB-MJHT"}|}
+    (Yojson.Safe.to_string payload_no_uri)
+
 let () = run "setup-account-login-routes" [
   "boundaries", [test_case "admin and request boundaries" `Quick boundaries];
-  "acp_refusals", [test_case "client-specific host-keyring refusal messages" `Quick acp_person_refusals]]
+  "acp_refusals", [test_case "client-specific host-keyring refusal messages" `Quick acp_person_refusals];
+  "auth_hints", [test_case "typed auth_url and device_code SSE frames" `Quick auth_hint_sse_frames]]

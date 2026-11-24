@@ -361,20 +361,51 @@ let run
   let* authz_state = judged_again zone in
   let* () = no_keeper_definition ~base_path ~authz_state in
   let* () = no_keeper_configuration_change ~base_path in
+  let log_login_refusal refusal =
+    let provider, reason = Server_account_login.disabled_reason_of_refusal refusal in
+    let provider_name =
+      match provider with
+      | Login_routes.Google -> "google"
+      | Login_routes.Github -> "github"
+    in
+    Log.Server.warn
+      "multi-account login preflight refused: provider=%s reason=%s detail=%s"
+      provider_name
+      (Server_account_login.disabled_reason_code reason)
+      (Server_account_login.disabled_reason_detail reason)
+  in
   let* login_clients =
-    Result.map_error
-      (fun refusal -> Login_client_refused refusal)
-      (Server_account_login.clients_of_config
-         ~getenv:Sys.getenv_opt
-         (M.multi_account_login_clients multi_account))
+    match
+      Server_account_login.clients_of_config
+        ~getenv:Sys.getenv_opt
+        (M.multi_account_login_clients multi_account)
+    with
+    | Ok clients -> Ok clients
+    | Error refusal ->
+      log_login_refusal refusal;
+      Error (Login_client_refused refusal)
   in
   (match login_clients with
    | { Server_account_login.google = None; github = None } ->
      Log.Server.warn
-       "config.json names no login client (google, github): the login routes answer 404 and \
-        nobody logs in"
-   | { Server_account_login.google = Some _; github = Some _ | None }
-   | { Server_account_login.google = None; github = Some _ } -> ());
+       "multi-account login preflight: provider=google status=disabled reason=%s \
+        provider=github status=disabled reason=%s (the login routes answer 404 and nobody logs in)"
+       (Server_account_login.disabled_reason_code Server_account_login.Not_configured)
+       (Server_account_login.disabled_reason_code Server_account_login.Not_configured)
+   | { Server_account_login.google = None; github = Some _ } ->
+     Log.Server.info
+       "multi-account login preflight: provider=google status=disabled reason=%s provider=github \
+        status=enabled"
+       (Server_account_login.disabled_reason_code Server_account_login.Not_configured)
+   | { Server_account_login.google = Some _; github = None } ->
+     Log.Server.info
+       "multi-account login preflight: provider=google status=enabled provider=github \
+        status=disabled reason=%s"
+       (Server_account_login.disabled_reason_code Server_account_login.Not_configured)
+   | { Server_account_login.google = Some _; github = Some _ } ->
+     Log.Server.info
+       "multi-account login preflight: provider=google status=enabled provider=github \
+        status=enabled");
   let login = Server_account_login.routes ~clock ~zone login_clients in
   (* Said once, here: the page that stands in for the console names no reason
      to the browser, and the route is open to everyone, so a request does not
@@ -447,7 +478,9 @@ let run
              operator_base_url)
         login_clients
     with
-    | Error refusal -> Error (Login_client_refused refusal)
+    | Error refusal ->
+      log_login_refusal refusal;
+      Error (Login_client_refused refusal)
     | Ok Server_account_login.Compared_with_the_base_url -> Ok ()
     | Ok Server_account_login.No_base_url ->
       (match login_clients with
@@ -460,6 +493,28 @@ let run
            Env_config_core.http_base_url_env_key);
       Ok ()
   in
+  (match login_clients with
+   | { Server_account_login.google = None; github = None } -> ()
+   | { Server_account_login.google = Some _; github = Some _ | None }
+   | { Server_account_login.google = None; github = Some _ } ->
+     let projected = Server_request_authority.projection_context trust_policy in
+     let scheme =
+       match Server_request_authority.scheme projected with
+       | Server_request_authority.Https -> `Https
+       | Server_request_authority.Http -> `Http
+     in
+     let transport =
+       Authz_browser_request.cookie_transport_status
+         ~scheme
+         ~is_loopback:(Server_request_authority.listener_is_loopback projected)
+     in
+     (match Authz_browser_request.cookie_transport_warning transport with
+      | None -> ()
+      | Some warning ->
+        Log.Server.warn
+          "multi-account login cookie transport=%s: %s"
+          (Authz_browser_request.cookie_transport_code transport)
+          warning));
   (* The host reads the port of this server from the kernel
      ([Server_startup_takeover.announce_account_server]). The probes say
      nothing of the workspace, so [masc restart] stops only an owner that

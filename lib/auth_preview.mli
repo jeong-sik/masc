@@ -14,24 +14,53 @@
     A login started from either page comes back to
     {!Account_page.console_path}. *)
 
+(** Validates an optional [?return_to=] query parameter from a sign-in link.
+    Accepts strict host-relative paths validated by
+    {!Oidc_login_transaction.Local_path.of_string} (starting with [/], never
+    [//], no scheme or backslash). The unified dashboard target
+    ["/dashboard#account"] maps to {!Account_page.console_path}, which passes
+    {!Oidc_login_transaction.Local_path} and 303-redirects back to
+    ["/dashboard#account"]. Absent or invalid inputs fall back to
+    {!Account_page.console_path}. *)
+val resolve_return_to : string option -> string
+
 (** [GET /accounts/invite], the page that an invitation link opens: a form
     that starts a GitHub login with the token of the link. [nonce] is the
     nonce of its script. [github] is whether the server has a GitHub login
     client: without one the button cannot be pressed and the page says that
     the server has no GitHub login. When [google] is [true], the page also
-    renders a [POST /auth/oidc/start] form. An address with no token shows how
-    to open the invitation again in place of the form. *)
-val invite_page : google:bool -> nonce:Csp_nonce.t -> github:bool -> Login_routes.answer
+    renders a [POST /auth/oidc/start] form. [return_to] overrides the default
+    {!Account_page.console_path} when valid ({!resolve_return_to}). When
+    [cookie_transport] is non-HTTPS, an explicit diagnostic callout warns about
+    [__Host-] [Secure] cookie handling without weakening cookie security. An
+    address with no token shows how to open the invitation again in place of
+    the form. *)
+val invite_page
+  :  ?return_to:string
+  -> ?cookie_transport:Authz_browser_request.cookie_transport_status
+  -> google:bool
+  -> nonce:Csp_nonce.t
+  -> github:bool
+  -> unit
+  -> Login_routes.answer
 
 (** [GET /]: for a browser with no session, a form that starts a GitHub
     login and no answer of a route. When the session routes do not say whether
     a session is open, the page says so in place of that form. A browser with
-    a session goes on to {!Account_page.console_path}, where the person uses
-    their subscriptions, Keepers and tokens, and signs out. When the server
-    does not give the console (a 503 while the dashboard bundle cannot be
-    read), the page stays, says so, and offers the sign-out
+    a session goes on to the resolved [return_to] target (defaulting to
+    {!Account_page.console_path}, which redirects to [/dashboard#account]),
+    where the person uses their subscriptions, Keepers and tokens, and signs
+    out. When the server does not give the console (a 503 while the dashboard
+    bundle cannot be read), the page stays, says so, and offers the sign-out
     ([POST /auth/logout]) in its place. *)
-val home_page : google:bool -> nonce:Csp_nonce.t -> github:bool -> Login_routes.answer
+val home_page
+  :  ?return_to:string
+  -> ?cookie_transport:Authz_browser_request.cookie_transport_status
+  -> google:bool
+  -> nonce:Csp_nonce.t
+  -> github:bool
+  -> unit
+  -> Login_routes.answer
 
 (** [GET /api/v1/auth/whoami], judged as [Read_auth] by {!Auth_gate.decide}
     on a snapshot the zone could be trusted for ({!Authz_zone.read}), as

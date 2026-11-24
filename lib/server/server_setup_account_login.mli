@@ -209,4 +209,9 @@ module For_testing : sig
     -> login_id:string
     -> Runtime_setup_login_client.t
     -> (Runtime_setup_login_receipt.account, string) result
+
+  val auth_hint_sse_event
+    :  login_id:string
+    -> Runtime_setup_login_session.auth_hint
+    -> string * Yojson.Safe.t
 end

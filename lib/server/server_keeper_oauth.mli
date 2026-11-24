@@ -150,11 +150,14 @@ val attached_tools_json : base_path:string -> keeper:string -> Yojson.Safe.t
 
 val redirect_uri_for : Keeper_oauth_provider.t -> (string, string) result
 (** The redirect URI a login for this provider names: this server's callback
-    under its base URL, or for a provider declared [callback = "loopback"]
-    the RFC 8252 loopback form: [http://127.0.0.1:<bound port>/...] when the
-    server bound 127.0.0.1 or a wildcard, [http://[::1]:<bound port>/...]
-    when it bound ::1, and an [Error] for any other bind, 127.0.0.2
-    included. *)
+    under [MASC_HTTP_BASE_URL] when set, falling back to the local loopback
+    callback ([http://127.0.0.1:<bound port>/...] or
+    [http://[::1]:<bound port>/...]) when [MASC_HTTP_BASE_URL] is unset and
+    [MASC_HOST] is unset or a wildcard bind; or for a provider declared
+    [callback = "loopback"] always the RFC 8252 loopback form:
+    [http://127.0.0.1:<bound port>/...] when the server bound 127.0.0.1 or a
+    wildcard, [http://[::1]:<bound port>/...] when it bound ::1, and an
+    [Error] for any other bind, 127.0.0.2 included. *)
 
 val finish :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

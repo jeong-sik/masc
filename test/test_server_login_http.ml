@@ -3120,12 +3120,63 @@ let dashboard_bridge_live_engine_regressions () =
           .status))
 ;;
 
+let preview_return_to_and_http_diagnostic () =
+  with_installation (fun t ->
+    let router = Server_login_http.add_person_routes t.routes ~env:t.env ~base_path:t.base t.router in
+    let browser = fresh_browser () in
+    let dashboard_home = send browser router ~meth:"GET" ~path:"/?return_to=%2Fdashboard" in
+    Alcotest.(check int) "GET /?return_to=/dashboard" 200 dashboard_home.status;
+    Alcotest.(check (list string))
+      "honors safe relative return_to=/dashboard"
+      [ "/dashboard" ]
+      (return_to_of dashboard_home.body);
+    Alcotest.(check bool)
+      "loopback HTTP authority surfaces explicit cookie transport note"
+      true
+      (contains ~sub:{|data-cookie-transport="loopback_http_cookies"|} dashboard_home.body);
+    let dashboard_account =
+      send browser router ~meth:"GET" ~path:"/?return_to=%2Fdashboard%23account"
+    in
+    Alcotest.(check (list string))
+      "maps /dashboard#account to console path that passes Local_path and redirects to /dashboard#account"
+      [ Account_page.console_path ]
+      (return_to_of dashboard_account.body);
+    List.iter
+      (fun bad ->
+        let reply =
+          send
+            browser
+            router
+            ~meth:"GET"
+            ~path:("/?return_to=" ^ Uri.pct_encode ~component:`Query_value bad)
+        in
+        Alcotest.(check (list string))
+          ("rejects unsafe return_to " ^ bad)
+          [ Account_page.console_path ]
+          (return_to_of reply.body))
+      [ "//evil.example"
+      ; "https://evil.example/pwn"
+      ; "/\\evil.example"
+      ; "javascript:alert(1)"
+      ; "dashboard"
+      ; "/<script>"
+      ];
+    Alcotest.(check string)
+      "resolve_return_to accepts safe relative path with query"
+      "/dashboard/keepers?tab=active"
+      (Masc.Auth_preview.resolve_return_to (Some "/dashboard/keepers?tab=active")))
+;;
+
 let () =
   Alcotest.run
     "server_login_http"
     [ ( "login"
       , [ Alcotest.test_case "a browser signs in, acts and signs out" `Quick a_browser_signs_in_acts_and_signs_out
         ; Alcotest.test_case "the preview follows a login" `Quick the_preview_follows_a_login
+        ; Alcotest.test_case
+            "preview return_to validation and loopback HTTP diagnostic"
+            `Quick
+            preview_return_to_and_http_diagnostic
         ; Alcotest.test_case "a PAT acts until it is revoked" `Quick a_pat_acts_until_it_is_revoked
         ; Alcotest.test_case "a person calls MCP" `Quick a_person_calls_mcp
         ; Alcotest.test_case "a person keeps Keepers over MCP" `Quick a_person_keeps_keepers_over_mcp

@@ -30,6 +30,35 @@ val clear_session_cookie : string
 val set_transaction_cookie : Oidc_login_transaction.Sealed.t -> string
 val clear_transaction_cookie : string
 
+(** Browser cookie storage posture for this server's [__Host-] ([Secure])
+    cookies on the served origin. [__Host-] + [Secure] invariants are never
+    weakened; this closed sum type lets the server surface an explicit
+    diagnostic when multi-account login is served over plain [http://]. *)
+type cookie_transport_status =
+  | Https_secure_cookies
+      (** [https://] origin: every browser honors [__Host-] + [Secure]. *)
+  | Loopback_http_cookies
+      (** Plain [http://] on loopback ([127.0.0.1], [::1], [localhost]):
+          Chromium and Firefox accept [__Host-] + [Secure] on potentially
+          trustworthy loopback origins, while Safari drops [Secure] cookies
+          over plain HTTP and fails the callback with 401. *)
+  | Non_https_cookies_dropped
+      (** Plain [http://] on a non-loopback host: browsers discard [__Host-] +
+          [Secure] cookies on [Set-Cookie], so OAuth callbacks arrive without
+          {!transaction_cookie} (401). *)
+
+val cookie_transport_status
+  :  scheme:[ `Http | `Https ]
+  -> is_loopback:bool
+  -> cookie_transport_status
+
+val cookie_transport_code : cookie_transport_status -> string
+(** Stable snake_case code: ["https_secure_cookies"],
+    ["loopback_http_cookies"], or ["non_https_cookies_dropped"]. *)
+
+val cookie_transport_warning : cookie_transport_status -> string option
+(** Explicit diagnostic when served over plain HTTP; [None] on HTTPS. *)
+
 type method_ =
   | Safe  (** [GET] or [HEAD]: it changes nothing. *)
   | Unsafe  (** Any other method. *)

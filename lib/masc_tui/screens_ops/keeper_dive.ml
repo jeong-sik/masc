@@ -1487,7 +1487,15 @@ let render_board_recovery grid ~(rect : Rect.t) ~theme ~(model : Model.t) ~name 
        line warn (say ~ko:"복구 요청 전송 중" ~en:"Submitting recovery" ^ " · " ^ target.candidate_id)
    | Board_recovery.Result (target, outcome) ->
        let label = match outcome with
-         | Board_recovery.Accepted -> say ~ko:"서버 접수" ~en:"Server accepted"
+         | Board_recovery.Accepted { wake; audit } ->
+             let wake_label = match wake with
+               | Q.Signaled -> say ~ko:"작업자에 알림" ~en:"Worker signaled"
+               | Q.Coalesced -> say ~ko:"기존 작업자 알림에 병합" ~en:"Worker wake coalesced"
+               | Q.Not_registered -> say ~ko:"등록된 작업자 없음" ~en:"No worker registered" in
+             let audit_label = match audit with
+               | Q.Recorded -> ""
+               | Q.Recording_failed -> " · " ^ say ~ko:"감사 기록 실패" ~en:"Audit recording failed" in
+             say ~ko:"서버 접수" ~en:"Server accepted" ^ " · " ^ wake_label ^ audit_label
          | Rejected reason -> say ~ko:"서버 거절" ~en:"Rejected" ^ " · " ^ reason
          | Unconfirmed reason -> say ~ko:"결과 미확인" ~en:"Outcome unconfirmed" ^ " · " ^ reason in
        line warn (label ^ " · " ^ target.candidate_id);

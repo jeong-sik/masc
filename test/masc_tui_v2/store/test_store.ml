@@ -13812,6 +13812,16 @@ let test_keeper_board_quarantine_recovery () =
                            kind = Q.Inventory_partition_ledger_unavailable }] [a; b])) in
   Alcotest.(check int) "partial ledger cannot authorize the mutation" 0 (List.length (posts (snd (action partial))));
   let m = observe m first (Ok (inventory [a; b])) in
+  let force model = reply model (Msg.Reply_action_ack { label = Say.literal "refresh";
+    ack_scope = Msg.Ack_refresh_view; for_modal = None; result = Ok () }) in
+  let refreshing, forced = force m in
+  let _, auto_generation, _ = read forced in
+  Alcotest.(check bool) "background refresh reserves a new read before another action" true
+    (auto_generation > first && posts (snd (action refreshing)) = []);
+  let _, duplicate = force refreshing in
+  Alcotest.(check bool) "a second background refresh shares the pending read" false
+    (List.mem (Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_board_quarantines { keeper; generation = auto_generation } })
+       (Cmd.flatten duplicate));
   let m, _ = act m (Keymap.Move Keymap.Down) in
   let m, cmds = act m Keymap.Refresh in
   let _, second, _ = read cmds in
@@ -13838,14 +13848,25 @@ let test_keeper_board_quarantine_recovery () =
     Alcotest.(check int) "new generation must be selected explicitly" 0 (List.length (posts (snd (action model)))) in
   check_readback (Error forbidden) (function Board_recovery.Rejected _ -> true | _ -> false);
   check_readback (Error (Msg.Http_error { status = 409; body = "stale"; api_error = None }))
-    (function Board_recovery.Rejected _ -> true | _ -> false);
+    (function Board_recovery.Unconfirmed _ -> true | _ -> false);
+  check_readback (Error (Msg.Decode_error "quarantine tuple mismatch"))
+    (function Board_recovery.Unconfirmed _ -> true | _ -> false);
   check_readback (Error (Msg.Transport (Health.Other_io "connection closed")))
     (function Board_recovery.Unconfirmed _ -> true | _ -> false);
-  let accepted, gets = reply pending (Msg.Reply_board_recovery { item = b; result = Ok () }) in
+  let switched, _ = Update.step ~now:t2 pending (Msg.Server_start_result (Ok ())) in
+  let receipt : Q.recovery_receipt = { wake = Q.Not_registered; audit = Q.Recording_failed } in
+  let success = Msg.Reply_board_recovery { item = b; result = Ok receipt } in
+  let switched, late_cmds = Update.step ~now:t2 switched (Msg.Http_reply { epoch = pending.epoch; reply = success }) in
+  let old = Board_recovery.entry ~keeper switched.knowledge.board_recovery in
+  Alcotest.(check bool) "old workspace selection, receipt and read-back are discarded" true
+    (old.command = Board_recovery.Idle && old.selected = None && late_cmds = []);
+  let accepted, gets = reply pending success in
   let _, generation, _ = read gets in
   let complete = { b with phase = Q.Inventory_requeued } in
   let accepted = observe accepted generation (Ok (inventory [a; complete])) in
   let entry = Board_recovery.entry ~keeper accepted.knowledge.board_recovery in
+  Alcotest.(check bool) "receipt preserves the wake and audit outcomes after read-back" true
+    (entry.command = Board_recovery.Result (b, Board_recovery.Accepted receipt));
   Alcotest.(check bool) "completed exact generation cannot be requeued again" true
     (Board_recovery.actionable entry = None && Board_recovery.selection_index entry = Some 1);
   Alcotest.(check bool) "an inventory returned for another Keeper is rejected" true

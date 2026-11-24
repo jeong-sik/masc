@@ -556,6 +556,10 @@ let fork_safe t fn =
                  }))
   end
 
+let board_snapshot_key ~epoch ~path ids =
+  let scope = string_of_int (Epoch.to_int epoch) :: ids in
+  Key_get (path ^ "#" ^ String.concat "/" (List.map Wire_common.percent_encode scope))
+
 let execute_get t ~epoch req =
   let path = Cmd.get_request_path req in
   let snapshot_key = ref (Key_get path) in
@@ -1501,7 +1505,7 @@ let execute_get t ~epoch req =
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_board_quarantines { keeper; generation } ->
-            snapshot_key := Key_get (path ^ "#read=" ^ string_of_int generation);
+            snapshot_key := board_snapshot_key ~epoch ~path [string_of_int generation];
             let result = fetch_and_decode_get t ~path ~decode:(Board_quarantine.inventory_of_json ~keeper) in
             Msg.Http_reply { epoch; reply = Msg.Reply_board_quarantines { keeper; generation; result } }
         | Cmd.Get_github_identity { keeper } ->
@@ -1941,7 +1945,10 @@ let execute_post t ~epoch req =
                  })
         | Cmd.Post_board_recovery item ->
             let result = post_and_decode t ~path ~body ~decode:(Board_quarantine.recovery_confirmed item) in
-            Some (Msg.Reply_board_recovery { item; result })
+            let key = board_snapshot_key ~epoch ~path [item.candidate_id; item.quarantine_id] in
+            Ui_bus.publish_snapshot t.bus ~key
+              (Msg.Http_reply { epoch; reply = Msg.Reply_board_recovery { item; result } });
+            None
         | Cmd.Post_github_token { keeper; _ } ->
             let result =
               post_and_decode t ~path ~body

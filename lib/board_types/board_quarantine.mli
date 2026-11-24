@@ -85,6 +85,10 @@ val inventory_error_of_json : Yojson.Safe.t -> (inventory_error, string) result
 val inventory_phase_to_string : inventory_phase -> string
 val inventory_error_kind_to_string : inventory_error_kind -> string
 val inventory_of_json : keeper:string -> Yojson.Safe.t -> (inventory, string) result
-val recovery_confirmed : inventory_item -> Yojson.Safe.t -> (unit, string) result
+type wake_delivery = Signaled | Coalesced | Not_registered
+type audit_status = Recorded | Recording_failed
+type recovery_receipt = { wake : wake_delivery; audit : audit_status }
+
+val recovery_confirmed : inventory_item -> Yojson.Safe.t -> (recovery_receipt, string) result
 val same_candidate : inventory_item -> inventory_item -> bool
 val recoverable : inventory_phase -> bool

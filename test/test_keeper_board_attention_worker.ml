@@ -4407,6 +4407,23 @@ let test_same_quarantine_command_cas_loser_converges () =
          ~base_path
          command))
   in
+  let observed = List.hd (Q.inventory ~base_path ~keeper_names:["alpha"]).items in
+  let receipt = Q.success_json ~audit:(Q.audit_json (Ok ())) command report in
+  let parsed = Board_quarantine.recovery_confirmed observed receipt in
+  Alcotest.(check bool) "operator receives the exact accepted generation and audit"
+    true (match parsed with Ok { audit = Board_quarantine.Recorded; _ } -> true | _ -> false);
+  let with_field key value =
+    match receipt with
+    | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+    | _ -> Alcotest.fail "expected a recovery receipt object" in
+  List.iter (fun field ->
+    Alcotest.(check bool) ("unrelated receipt field rejected: " ^ field) true
+      (Result.is_error (Board_quarantine.recovery_confirmed observed (with_field field (`String "different")))))
+    ["keeper_name"; "partition_id"; "candidate_id"; "quarantine_id"; "failure_category"; "decision"; "wake"];
+  let unaudited = with_field "audit" (Q.audit_json (Error "synthetic write failure")) in
+  Alcotest.(check bool) "audit write failure remains visible on an accepted command" true
+    (match Board_quarantine.recovery_confirmed observed unaudited with
+     | Ok { audit = Board_quarantine.Recording_failed; _ } -> true | _ -> false);
   match report.partition.state with
   | P.Ready -> ()
   | _ -> Alcotest.fail "same command CAS loser did not converge to Ready"

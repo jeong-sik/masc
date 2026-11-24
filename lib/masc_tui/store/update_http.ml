@@ -4014,8 +4014,8 @@ let apply_http_reply ~now (m : Model.t) reply =
   | Msg.Reply_board_recovery { item; result } ->
       let keeper = item.keeper_name in
       let outcome = match result with
-        | Ok () -> Board_recovery.Accepted
-        | Error (Msg.Http_error { status = (400 | 401 | 403 | 409); _ } as err) ->
+        | Ok receipt -> Board_recovery.Accepted receipt
+        | Error (Msg.Http_error { status = (400 | 401 | 403); _ } as err) ->
             Board_recovery.Rejected (Msg.http_error_detail err)
         | Error ((Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _ | Msg.Workspace_mismatch _) as err) ->
             Board_recovery.Unconfirmed (Msg.http_error_detail err) in
@@ -4025,7 +4025,7 @@ let apply_http_reply ~now (m : Model.t) reply =
        | Error (Msg.Workspace_mismatch _ as err) ->
            record_http_incident ~now ~source:(Health.Source_keeper keeper)
              ~context:(Say.make ~ko:"Board 복구" ~en:"Board recovery") err next
-       | Ok () | Error (Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _) ->
+       | Ok _ | Error (Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _) ->
            View_fetches.read_board_quarantines ~keeper ~now next)
   | Msg.Reply_github_identity { keeper; result = Ok obs } ->
       let keeper_context =

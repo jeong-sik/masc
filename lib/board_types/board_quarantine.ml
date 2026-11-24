@@ -313,12 +313,39 @@ let inventory_of_json ~keeper = function
        | _ -> Error "Board quarantine inventory scope or count mismatch")
   | _ -> Error "Board quarantine inventory must be an object"
 
+type wake_delivery = Signaled | Coalesced | Not_registered
+type audit_status = Recorded | Recording_failed
+type recovery_receipt = { wake : wake_delivery; audit : audit_status }
+
 let recovery_confirmed (item : inventory_item) = function
   | `Assoc fields ->
       let matches key wanted = List.assoc_opt key fields = Some (`String wanted) in
-      if List.assoc_opt "ok" fields = Some (`Bool true)
-         && matches "schema" result_schema && matches "keeper_name" item.keeper_name
-         && matches "partition_id" item.partition_id && matches "candidate_id" item.candidate_id
-         && matches "quarantine_id" item.quarantine_id && matches "decision" (decision_to_string Acknowledge_and_requeue)
-      then Ok () else Error "Board recovery returned an unconfirmed receipt"
+      let* () =
+        if List.assoc_opt "ok" fields = Some (`Bool true)
+           && matches "schema" result_schema
+           && matches "keeper_name" item.keeper_name
+           && matches "partition_id" item.partition_id
+           && matches "candidate_id" item.candidate_id
+           && matches "quarantine_id" item.quarantine_id
+           && matches "failure_category" (quarantine_failure_category_to_string item.failure_category)
+           && matches "decision" (decision_to_string Acknowledge_and_requeue)
+        then Ok () else Error "Board recovery receipt does not match the selected quarantine"
+      in
+      let* wake =
+        match List.assoc_opt "wake" fields with
+        | Some (`String "signaled") -> Ok Signaled
+        | Some (`String "coalesced") -> Ok Coalesced
+        | Some (`String "not_registered") -> Ok Not_registered
+        | _ -> Error "Board recovery receipt has no recognized wake outcome"
+      in
+      let* audit =
+        match List.assoc_opt "audit" fields with
+        | Some (`Assoc audit) ->
+            (match List.assoc_opt "recorded" audit with
+             | Some (`Bool true) -> Ok Recorded
+             | Some (`Bool false) -> Ok Recording_failed
+             | _ -> Error "Board recovery receipt has no audit outcome")
+        | _ -> Error "Board recovery receipt has no audit outcome"
+      in
+      Ok { wake; audit }
   | _ -> Error "Board recovery receipt must be an object"

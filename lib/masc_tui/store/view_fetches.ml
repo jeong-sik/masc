@@ -314,7 +314,7 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
   | Nav.Keeper_work_candle when Board_recovery.shown ~keeper:name m.knowledge.board_recovery ->
       let e = Board_recovery.entry ~keeper:name m.knowledge.board_recovery in
       if needs_fetch ~force e.inventory && not (Observed.is_loading e.inventory) then
-        [Cmd.Get_board_quarantines { keeper = name; generation = e.generation }]
+        [Cmd.Get_board_quarantines { keeper = name; generation = e.generation + 1 }]
       else []
   | Nav.Keeper_work_candle ->
       []

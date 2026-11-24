@@ -2,7 +2,7 @@ open Masc_tui_core
 module Q = Board_quarantine
 module Keeper_map = Map.Make (String)
 
-type outcome = Accepted | Rejected of string | Unconfirmed of string
+type outcome = Accepted of Q.recovery_receipt | Rejected of string | Unconfirmed of string
 type command = Idle | Submitting of Q.inventory_item | Result of Q.inventory_item * outcome
 type entry = {
   generation : int;
@@ -12,6 +12,7 @@ type entry = {
 }
 type t = { view : string option; keepers : entry Keeper_map.t }
 let empty = { view = None; keepers = Keeper_map.empty }
+let viewed_keeper t = t.view
 let shown ~keeper t = Option.equal String.equal (Some keeper) t.view
 let open_view ~keeper t = { t with view = Some keeper }
 let close t = { t with view = None }

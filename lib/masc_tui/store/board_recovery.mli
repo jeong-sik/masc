@@ -1,7 +1,7 @@
 (** Read-only inventory and operator recovery scoped to the same Keeper and quarantine generation. *)
 open Masc_tui_core
 
-type outcome = Accepted | Rejected of string | Unconfirmed of string
+type outcome = Accepted of Board_quarantine.recovery_receipt | Rejected of string | Unconfirmed of string
 type command = Idle | Submitting of Board_quarantine.inventory_item
              | Result of Board_quarantine.inventory_item * outcome
 type entry = {
@@ -12,6 +12,7 @@ type entry = {
 }
 type t
 val empty : t
+val viewed_keeper : t -> string option
 val shown : keeper:string -> t -> bool
 val open_view : keeper:string -> t -> t
 val close : t -> t

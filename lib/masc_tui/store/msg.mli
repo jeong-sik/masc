@@ -405,7 +405,8 @@ type http_reply =
       keeper : string; generation : int; result : (Board_quarantine.inventory, http_error) result;
     }
   | Reply_board_recovery of {
-      item : Board_quarantine.inventory_item; result : (unit, http_error) result;
+      item : Board_quarantine.inventory_item;
+      result : (Board_quarantine.recovery_receipt, http_error) result;
     }
   | Reply_github_identity of {
       keeper : string;

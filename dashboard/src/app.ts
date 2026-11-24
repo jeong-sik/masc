@@ -28,7 +28,7 @@ import {
   initAPlusRouter,
   navigate,
 } from './routes/router'
-import { getWorkspaceComponent } from './workspaces/registry'
+import { getWorkspaceComponent, WorkspaceLoadError } from './workspaces/registry'
 import {
   FastApprovalStrip,
   IncidentsOverlayBody,
@@ -120,14 +120,18 @@ class WorkspaceErrorBoundary extends Component<BoundaryProps, BoundaryState> {
 
   override render() {
     if (this.state.error) {
+      const loadFailed = this.state.error instanceof WorkspaceLoadError
       return html`
         <section class="ap-gate" role="alert">
           <div class="ap-card">
             <h1 class="ap-card-title">화면을 표시하는 중 오류가 발생했습니다</h1>
             <p class="ap-muted mono">${this.state.error.message}</p>
             <div class="ap-placeholder-actions">
-              <button type="button" class="btn-primary" onClick=${() => this.setState({ error: null })}>
-                다시 시도
+              <button type="button" class="btn-primary" onClick=${() => {
+                if (loadFailed) window.location.reload()
+                else this.setState({ error: null })
+              }}>
+                ${loadFailed ? '새로고침' : '다시 시도'}
               </button>
               <button type="button" class="btn-ghost" onClick=${() => navigate('/pulse')}>
                 Pulse로 이동

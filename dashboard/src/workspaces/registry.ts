@@ -161,10 +161,22 @@ export const WORKSPACE_LOADERS: Readonly<Record<WorkspaceId, WorkspaceLoaderEntr
 
 const lazyCache = new Map<WorkspaceId, WorkspaceComponent>()
 
+export class WorkspaceLoadError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause })
+  }
+}
+
 export function getWorkspaceComponent(id: WorkspaceId): WorkspaceComponent {
   let cached = lazyCache.get(id)
   if (!cached) {
-    cached = lazy(WORKSPACE_LOADERS[id].load) as unknown as WorkspaceComponent
+    cached = lazy(async () => {
+      try {
+        return await WORKSPACE_LOADERS[id].load()
+      } catch (error) {
+        throw new WorkspaceLoadError(error)
+      }
+    }) as unknown as WorkspaceComponent
     lazyCache.set(id, cached)
   }
   return cached

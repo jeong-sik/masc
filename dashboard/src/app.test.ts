@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h, render } from 'preact'
-import { act, fireEvent, waitFor } from '@testing-library/preact'
+import { act, fireEvent, waitFor, within } from '@testing-library/preact'
 import { App, shouldBootstrapCommandPaletteShortcut } from './app'
 import { authSession, resetAuthStateForTests } from './core/auth'
 import { resetObserverStateForTests } from './core/observer'
 import { currentRoute, navigate, resetRouterForTests } from './routes/router'
+import { WORKSPACE_LOADERS } from './workspaces/registry'
 import {
   activeOverlay,
   commandPaletteMounted,
@@ -209,6 +210,23 @@ describe('Proposal A+ Application Shell (src/app.ts)', () => {
     expect(currentRoute.value.workspace).toBe('pulse')
     navigate('/work/goals')
     expect(currentRoute.value.path).toBe('/work/goals')
+  })
+
+  it('reloads the document when a workspace chunk fails to load', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ version: '0.81.0' }))
+    const load = vi.spyOn(WORKSPACE_LOADERS.account, 'load').mockRejectedValueOnce(new Error('Chunk unavailable'))
+    const reload = vi.spyOn(window.location, 'reload').mockImplementation(() => {})
+    window.location.hash = '#/account'
+    resetRouterForTests('/account')
+
+    await act(async () => {
+      render(h(App, {}), container)
+    })
+
+    const alert = await within(container).findByRole('alert')
+    fireEvent.click(within(alert).getByRole('button', { name: '새로고침' }))
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(reload).toHaveBeenCalledTimes(1)
   })
 })
 

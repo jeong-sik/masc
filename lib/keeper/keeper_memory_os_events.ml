@@ -181,6 +181,37 @@ let file_read_error_to_string (error : file_read_error) =
   Printf.sprintf "memory event sidecar read failed path=%s: %s" error.path error.message
 ;;
 
+let decode_line line =
+  match Yojson.Safe.from_string line with
+  | json -> Result.map_error (fun e -> Malformed e) (event_of_json json)
+  | exception Yojson.Json_error message -> Error (Not_json message)
+;;
+
+let fold ~keepers_dir ~keeper_id ~init ~f =
+  let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let row acc raw = if non_blank raw then f acc (decode_line raw) else acc in
+  let error message = Error { path; message } in
+  match Fs_compat.fold_private_jsonl_locked_result path ~init ~f:row with
+  | Fs_compat.Private_file_failed e | Private_file_failed_with_cleanup_failure { error = e; _ } ->
+    (match e with
+     | Fs_compat.Private_jsonl_fold.Read_error err -> error (Fs_compat.Private_jsonl_rows.error_to_string err)
+     | Snapshot_changed -> error "retrieval sidecar changed during observation")
+  | Private_file_succeeded r | Private_file_succeeded_with_cleanup_failure { value = r; _ } ->
+    (match r with
+     | Fs_compat.Private_jsonl_fold.Missing -> Ok init
+     | Present { value; rows_end; end_offset } when rows_end = end_offset -> Ok value
+     | Present { value; rows_end; end_offset } ->
+       (* [read] also decodes a final unterminated row. A concurrent append must
+          not turn a prefix of the new row into an event from this observation. *)
+       let length = end_offset - rows_end in
+       match Fs_compat.load_owned_regular_file_range ~ownership_root:keepers_dir
+               ~offset:rows_end ~max_bytes:length path with
+       | Ok (Some tail) when tail.snapshot.file_size = end_offset && String.length tail.content = length
+                             && not (String.contains tail.content '\n') -> Ok (row value tail.content)
+       | Ok _ -> error "retrieval sidecar changed during observation"
+       | Error e -> error (Fs_compat.owned_regular_file_read_error_to_string e))
+;;
+
 let read ~keepers_dir ~keeper_id :
     ((int * (event, read_error) result) list, file_read_error) result =
   let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
@@ -188,17 +219,8 @@ let read ~keepers_dir ~keeper_id :
   | exception Sys_error message -> Error { path; message }
   | None -> Ok []
   | Some contents ->
-    Ok
-      (String.split_on_char '\n' contents
-       |> List.filter (fun line -> non_blank line)
-       |> List.mapi (fun index line ->
-         match Yojson.Safe.from_string line with
-         | json ->
-           ( index
-           , (match event_of_json json with
-              | Ok event -> Ok event
-              | Error error -> Error (Malformed error)) )
-         | exception Yojson.Json_error message -> index, Error (Not_json message)))
+    Ok (String.split_on_char '\n' contents |> List.filter non_blank
+        |> List.mapi (fun index line -> index, decode_line line))
 ;;
 
 type summary =

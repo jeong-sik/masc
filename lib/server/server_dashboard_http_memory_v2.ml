@@ -652,34 +652,20 @@ type heat_stats =
   ; heat : retrieval_heat
   }
 
-let build_event_heat_table ~now ~keepers_dir ~keeper_id =
-  let counts = Hashtbl.create 64 in
-  let last_seen = Hashtbl.create 64 in
-  let unreadable = ref 0 in
-  let total_events = ref 0 in
-  (match Events.read ~keepers_dir ~keeper_id with
-   | Error _ -> ()
-   | Ok indexed_rows ->
-     List.iter
-       (fun (_idx, row_res) ->
-          match row_res with
-          | Error _ -> incr unreadable
-          | Ok (ev : Events.event) ->
-            incr total_events;
-            let prev_c =
-              match Hashtbl.find_opt counts ev.memory_id with
-              | Some n -> n
-              | None -> 0
-            in
-            Hashtbl.replace counts ev.memory_id (prev_c + 1);
-            let prev_ts = Hashtbl.find_opt last_seen ev.memory_id in
-            let next_ts =
-              match prev_ts with
-              | Some t when Float.compare t ev.recorded_at >= 0 -> t
-              | Some _ | None -> ev.recorded_at
-            in
-            Hashtbl.replace last_seen ev.memory_id next_ts)
-       indexed_rows);
+let build_event_heat_table ?(wanted = fun _ -> true) ~now ~keepers_dir ~keeper_id () =
+  let counts = Hashtbl.create 64 and last_seen = Hashtbl.create 64 in
+  let record (total, unreadable) = function
+    | Error _ -> total, unreadable + 1
+    | Ok (ev : Events.event) ->
+      if wanted ev.memory_id then (
+        let prior = Option.value ~default:0 (Hashtbl.find_opt counts ev.memory_id) in
+        Hashtbl.replace counts ev.memory_id (prior + 1);
+        let last = Option.value ~default:ev.recorded_at (Hashtbl.find_opt last_seen ev.memory_id) in
+        Hashtbl.replace last_seen ev.memory_id (max last ev.recorded_at));
+      total + 1, unreadable in
+  let total_events, unreadable = match Events.fold ~keepers_dir ~keeper_id ~init:(0, 0) ~f:record with
+    | Ok totals -> totals
+    | Error _ -> Hashtbl.clear counts; Hashtbl.clear last_seen; 0, 0 in
   let lookup memory_id =
     let retrieved_count =
       match Hashtbl.find_opt counts memory_id with
@@ -690,7 +676,7 @@ let build_event_heat_table ~now ~keepers_dir ~keeper_id =
     let heat = classify_retrieval_heat ~now ~retrieved_count ~last_retrieved_at in
     { retrieved_count; last_retrieved_at; heat }
   in
-  lookup, !total_events, !unreadable
+  lookup, total_events, unreadable
 ;;
 
 let fact_diff_entry_fields ~heat_lookup (fact : Types.fact) =
@@ -737,7 +723,15 @@ let keeper_diff_json ~now ~config ~keeper_id ~range =
         | Range_revs { to_rev = None; _ } -> Some (List.fold_left (fun hi (c : Librarian_memory_change.t) ->
             max hi c.revision) revision history.changes) in
       let diff = Diff.project_window ~range:filter ~current ~revision history in
-      let heat_lookup, total_events, unreadable_events = build_event_heat_table ~now ~keepers_dir ~keeper_id in
+      let visible = Hashtbl.create 64 in
+      let remember fact = Hashtbl.replace visible (Types.memory_id fact) () in
+      List.iter remember current;
+      List.iter (function
+        | _, Diff.Added f -> remember f
+        | _, Updated { before; after; _ } -> remember before; remember after
+        | _, (Removed _ | Successor_unavailable _) -> ()) diff.events;
+      let heat_lookup, total_events, unreadable_events =
+        build_event_heat_table ~wanted:(Hashtbl.mem visible) ~now ~keepers_dir ~keeper_id () in
       let fact_fields = fact_diff_entry_fields ~heat_lookup in
       let int_opt = Json_util.int_opt_to_json in
       let relation = function
@@ -936,7 +930,7 @@ let fleet_retrieval_heat_json ~now ~keepers_dir =
   let unreadable_events = ref 0 in
   List.iter
     (fun kid ->
-       let lookup, ev_c, unr_c = build_event_heat_table ~now ~keepers_dir ~keeper_id:kid in
+       let lookup, ev_c, unr_c = build_event_heat_table ~now ~keepers_dir ~keeper_id:kid () in
        total_events := !total_events + ev_c;
        unreadable_events := !unreadable_events + unr_c;
        match Cur.read_for_keepers_dir ~keepers_dir ~keeper_id:kid with
@@ -1393,7 +1387,7 @@ let world_diff_json ~now ~config ~range =
     let unreadable_events = ref 0 in
     List.iter
       (fun kid ->
-         let lookup, ev_c, unr_c = build_event_heat_table ~now ~keepers_dir ~keeper_id:kid in
+         let lookup, ev_c, unr_c = build_event_heat_table ~now ~keepers_dir ~keeper_id:kid () in
          total_events := !total_events + ev_c;
          unreadable_events := !unreadable_events + unr_c;
          match Cur.read_for_keepers_dir ~keepers_dir ~keeper_id:kid with

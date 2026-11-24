@@ -17978,9 +17978,13 @@ let test_keeper_lifecycle_and_addon_crud_requests () =
     (Option.is_none m_purged.inline_modal
     && Option.is_none m_purged.nav.overlay
     && m_purged.nav.dive_stack = []);
-  Alcotest.(check bool) "Reply_keeper_purge Ok refreshes Get_keepers" true
+  Alcotest.(check bool) "accepted purge refreshes the roster in the current epoch" true
     (List.exists
-       (function Cmd.Http_get { req = Cmd.Get_keepers; _ } -> true | _ -> false)
+       (function
+         | Cmd.Http_get { epoch; req } ->
+             Epoch.equal epoch m_purge_submitting.epoch
+             && String.equal (Cmd.get_request_path req) Wire_fleet.dashboard_keepers_path
+         | _ -> false)
        (Cmd.flatten purged_cmds));
   (* 3. Lane-Addon CRUD & Asks on 5 Runtime > Addons & Browser *)
   let m_addons0 =

@@ -3195,7 +3195,9 @@ let apply_http_reply ~now (m : Model.t) reply =
               | [] -> []
             in
             (rest, return_rest)
-        | _ :: _ | [] -> (m.nav.dive_stack, m.nav.dive_return_stack)
+        | (Nav.Dive_keeper _ | Nav.Dive_work _ | Nav.Dive_knowledge _
+          | Nav.Dive_runtime _ | Nav.Dive_infra _) :: _
+        | [] -> (m.nav.dive_stack, m.nav.dive_return_stack)
       in
       let nav =
         let nav0 = { m.nav with dive_stack; dive_return_stack } in
@@ -3223,7 +3225,7 @@ let apply_http_reply ~now (m : Model.t) reply =
              (Say.make ~ko:("키퍼 영구 삭제 요청 완료: @" ^ keeper)
                 ~en:("Keeper purge accepted: @" ^ keeper))
       in
-      (next, [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_keepers } ])
+      (next, [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_keepers_roster } ])
   | Msg.Reply_keeper_purge { keeper; result = Error err } ->
       let inline_modal =
         Option.map

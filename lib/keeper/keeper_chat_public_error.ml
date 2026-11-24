@@ -2,7 +2,7 @@ type kind =
   | Invalid_input | Unknown_operation | Not_queued | Idempotency_conflict
   | Native_call_unsettled | Store_fenced | Store_commit_unknown | Store_unreadable
   | Owner_unavailable | Owner_stopping
-  | Interrupt_failed | Operation_forbidden | Keeper_paused | Unknown_keeper
+  | Interrupt_failed | Operation_forbidden | Keeper_paused | Keeper_not_started | Unknown_keeper
   | Journal_unreadable | Journal_corrupt | Journal_unsupported_version | Journal_missing | Journal_pruned
   | Cursor_refusal of Keeper_chat_event_log.cursor_refusal
 [@@deriving enumerate]
@@ -23,6 +23,7 @@ let code = function
   | Interrupt_failed -> "interrupt_failed"
   | Operation_forbidden -> "operation_forbidden"
   | Keeper_paused -> "keeper_paused"
+  | Keeper_not_started -> "keeper_not_started"
   | Unknown_keeper -> "unknown_keeper"
   | Journal_unreadable -> "journal_unreadable"
   | Journal_corrupt -> "journal_corrupt"
@@ -46,6 +47,8 @@ let message = function
   | Interrupt_failed -> "The active turn could not be interrupted."
   | Operation_forbidden -> "The operation belongs to another actor."
   | Keeper_paused -> "Resume the Keeper before prioritizing this operation."
+  | Keeper_not_started ->
+    "The Keeper is off and does not start by itself; the message was not accepted. Start the Keeper, then send the message again."
   | Unknown_keeper -> "The Keeper was not found."
   | Journal_unreadable -> "The event journal is unavailable."
   | Journal_corrupt -> "The event journal requires operator attention."
@@ -68,7 +71,7 @@ type pre_acceptance =
    keeps the client's operation held until it reads the operation back. *)
 let pre_acceptance = function
   | Invalid_input | Unknown_operation | Not_queued | Owner_stopping | Owner_unavailable
-  | Store_fenced | Store_unreadable ->
+  | Store_fenced | Store_unreadable | Keeper_not_started ->
     Not_accepted
   | Idempotency_conflict | Native_call_unsettled | Store_commit_unknown | Interrupt_failed
   | Operation_forbidden | Keeper_paused | Unknown_keeper

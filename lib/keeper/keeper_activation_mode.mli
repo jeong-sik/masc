@@ -1,6 +1,16 @@
-(** Declarative owner activation and initiative policy. Explicit requested
-    work remains eligible independently of this mode, subject to lifecycle
-    pause and shutdown ownership. *)
+(** Who starts a keeper, and whether it takes turns of its own.
+
+    - [Manual]: the server never starts it. It is down until an operator
+      starts it, and while it is down nothing runs: a person's chat message
+      is refused as [keeper_not_started] and other queued work waits.
+    - [On_demand]: the server starts it at boot. It takes no turn of its own:
+      a turn opens when a chat message, a mention, a board event, a due
+      schedule or another queued event arrives.
+    - [Autonomous]: the server starts it at boot, and it also takes turns of
+      its own.
+
+    Once a keeper is up, requested work is eligible in every mode, subject to
+    lifecycle pause and shutdown ownership. *)
 type t = Manual | On_demand | Autonomous
 val default : t
 val restore_owner : t -> bool

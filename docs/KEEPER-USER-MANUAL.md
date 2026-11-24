@@ -78,7 +78,7 @@ Counted across the eleven Keepers on one live runtime, 2026-08-25:
 
 | Field | Used by | What it decides |
 |---|---:|---|
-| `activation_mode` | — | Manual start, on-demand owner, or autonomous periodic execution |
+| `activation_mode` | — | `manual`: off until an operator starts it. `on_demand`: started with the server, works only when a message, mention, board event or due schedule arrives. `autonomous`: started with the server and also works on its own |
 | `instructions` | 11/11 | The Keeper's own instructions, composed with the shared runtime prompt; rejected if empty |
 | `sandbox_profile` | 11/11 | `docker`, `microvm`, or `remote_ssh`. A Keeper runs in one of them or not at all |
 | `group` | — | Optional deployment-neutral group label for Pulse/Keepers/Runtime grouping (default `"ungrouped"`) |

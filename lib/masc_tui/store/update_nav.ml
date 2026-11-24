@@ -6826,9 +6826,11 @@ let keeper_tab_max_scroll ~embedded (m : Model.t) ~name ~tab =
                (fun (p : Wire_knowledge.board_post) -> String.equal p.author name)
                (Knowledge_store.filtered_posts m.knowledge))
         in
+        (* Fixed rows besides the cadence block: the Board recovery hint line and
+           the three section hairlines (tasks, schedules, posts). *)
         let total_rows =
           Keeper_cadence.block_rows (Fleet_store.turn_pulse m.fleet name)
-          + 3 + max 1 n_tasks + max 1 n_scheds + max 1 n_posts
+          + 4 + max 1 n_tasks + max 1 n_scheds + max 1 n_posts
         in
         max 0 (total_rows - max 1 left_h)
     | Nav.Keeper_sandbox ->

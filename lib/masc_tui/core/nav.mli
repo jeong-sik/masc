@@ -105,6 +105,7 @@ type inline_action_kind =
   | Verification_reject of string
   | Harness_overrule of string
   | Task_cancel of string
+  | Goal_drop of string
   | Schedule_form
   | Connector_form
   | Repo_add_form

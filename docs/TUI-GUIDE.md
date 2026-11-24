@@ -84,10 +84,10 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
 | `←` / `→` | Unfocused | Spatial pane movement ONLY: move between Left Navigation Sidebar ↔ Pane 0 ↔ Pane 1 across every workspace and dive (never cycles sub-tabs; inside text inputs moves cursor; in Settings Tree collapses/expands categories; in Settings Inspector / Keeper Config cycles enum/bool/numeric values) |
 | `[` / `]` (or `Alt+[` / `Alt+]`) | Unfocused / Overlay / Global | Cycle sub-tabs ONLY (Workspaces, 9-tab Keeper Dive or Keepers split right pane, Settings tabs, Queue/Context drawer, and multi-question Ask modal) |
 | `↑` / `↓` or `j` / `k` | Unfocused / Overlay | Move list selection or scroll Keeper Chat |
-| `PgUp` / `PgDn`, `Home` (`g`) / `End` (`G`) | Unfocused / Overlay | Page scroll or jump to top / bottom (`g` is overridden on Memory screens — World Memory, `Memory_diff_dive`, and `Keeper_memory` — to toggle the Memory Flow Braille chart `Flow ▲/▼` vs `Net Total`, and on `Infra → Code` to cycle Git views; use `Home` to jump to top) |
-| `Tab` / `Shift+Tab` | Unfocused / Overlay | Cycle active focus panes on multi-pane views (omitted on single-pane views and narrow layouts; cycles tabs in Queue/Context, questions in multi-question Ask modal, selection in Palette, or Tree / Inspector in Settings) |
-| `Enter` | Unfocused | Open the **Ask Answer Modal** on pending Asks (`Pulse` / `Work → Inbox`), toggle OAuth on `Keeper → Identity`, 1-hop Dive into selected entity (Keeper, Goal, Task, Verification, Board Thread, Wiki, Artifact, Memory Diff, Fusion Run, Tool Detail, Lane, Sandbox, Runtime Trace, Log Detail), or expand/open files, catalog packages, Facts Tree categories, Provider Input Parts, and Tool Results |
-| `Space` | Unfocused / Overlay | Strictly safe local view/expand/selection toggle — **never sends a network POST** (Board succession chain expand/collapse, Tasks status chip, Addons & Browser Clients/Tabs subfocus, Failover external probes, log level filter, Keeper Chat turn details, multi-select Ask choice toggle, local bool toggle in Settings/Keeper Config; dry-run diff is explicit `d`, Keeper Identity OAuth toggle is `a` / `Enter`) |
+| `PgUp` / `PgDn`, `Home` (`g`) / `End` (`G`) | Unfocused / Overlay / Composer (`PgUp`/`PgDn`) | Page scroll or jump to top / bottom (`PgUp`/`PgDn` also scroll Keeper Chat or the active background view while the bottom composer stays focused with your draft untouched; `g` is overridden on Memory screens — World Memory, `Memory_diff_dive`, and `Keeper_memory` — to toggle the Memory Flow Braille chart `Flow ▲/▼` vs `Net Total`, and on `Infra → Code` to cycle Git views; use `Home` to jump to top) |
+| `Tab` / `Shift+Tab` | Unfocused / Overlay | Cycle active focus panes on multi-pane views (including `Goal_dive` Linked Tasks ↔ Verifier Runs and `Task_dive` Description ↔ Verification; omitted on single-pane views and narrow layouts; cycles tabs in Queue/Context, questions in multi-question Ask modal, selection in Palette, or Tree / Inspector in Settings) |
+| `Enter` | Unfocused | Open the **Ask Answer Modal** on pending Asks (`Pulse` / `Work → Inbox`), toggle OAuth on `Keeper → Identity`, 1-hop Dive into selected entity (Keeper, Goal, Task, Verification, Board Thread, Wiki, Artifact, Memory Diff, Fusion Run, Tool Detail, Lane, Sandbox, Runtime Trace, Log Detail), dive from `Goal_dive` Linked Tasks / Verifier Runs directly into `Task_dive` / `Verification_dive` (or from `Task_dive` Verification into `Verification_dive`), or expand/open files, catalog packages, Facts Tree categories, Provider Input Parts, and Tool Results |
+| `Space` | Unfocused / Overlay | Strictly safe local view/expand/selection toggle — **never sends a network POST** (Work > Goals phase filter All/Active/Verifying/Held/Closed, Board succession chain expand/collapse, Tasks status chip, Addons & Browser Clients/Tabs subfocus, Failover external probes, log level filter, Keeper Chat turn details, multi-select Ask choice toggle, local bool toggle in Settings/Keeper Config; dry-run diff is explicit `d`, Keeper Identity OAuth toggle is `a` / `Enter`) |
 | `v` | Unfocused | Cycle view mode (Artifacts Doc vs Raw, Verification Dive Evidence/Summary/Specs/TLC, Knowledge Memory Diff/Health & Ledger/Context, Keeper Memory Diff/Health/Facts Tree/Journal, Keeper Context sub-tabs, Keeper Logs Metrics vs Sandbox Logs, Runtime Tools Usage/Catalog/Skills, Work Pipeline verification filter) |
 | `/` | Unfocused / Settings / Incidents | Focus inline filter box or in-document search inside Artifact Dive (`n`/`N` step matches; `↑`/`↓` move selection live, `Enter`/`Tab` apply & blur, `Esc` clear & blur; on views without a filter bar such as Pulse or Keeper Chat, focuses the composer with `/`) |
 | `z` | Unfocused | Toggle detail pane zoom (including Knowledge > Artifacts) |
@@ -102,12 +102,12 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
   1. Exit free-text editing inside the Ask Answer Modal (preserving the typed draft), cancel inline field editing in Settings, or close an open overlay (Palette, Settings, Incidents, Queue/Context, Ask Answer Modal, Help, Inline Action modal, Media Viewer).
   2. Exit the `/` filter box or blur the bottom composer (`i`).
   3. In **Keeper Chat** with an active turn/stream running, send a turn-interrupt request (`Post_keeper_turn_interrupt`; `Ctrl+X` also interrupts directly).
-  4. Pop one level off the dive stack back to the parent workspace.
+  4. Pop one level off the dive stack back to the parent workspace (restoring the exact previous focus pane and zoom state).
   5. Restore the split layout when a panel is zoomed with `z`.
   6. Clear an active workspace filter query when at top level.
-  7. Return the Work > Tasks status chip to All.
-- **`Ctrl+Q`** (or `/quit` in the composer, or a double `Ctrl+C`) exits MASC TUI
-  cleanly. An externally started server (`masc start` / `masc setup`) keeps
+  7. Return the Work > Tasks status chip or Work > Goals phase filter to All.
+- **`Ctrl+Q` (pressed twice within 2.5 seconds)** (or `/quit` in the composer, or a double `Ctrl+C`) exits MASC TUI
+  cleanly — the first `Ctrl+Q` arms quit with a warning toast, any other key cancels the arm, and pressing `Ctrl+Q` again within 2.5 seconds exits. An externally started server (`masc start` / `masc setup`) keeps
   running; a local server auto-started and owned by this TUI session is stopped
   via `SIGTERM` on quit (use `/restart` in the composer to re-exec `masc-tui`
   while preserving a TUI-owned server).
@@ -145,6 +145,7 @@ composer dispatches navigation or overlay shortcuts (`1`–`6`, `,`, `I`, `?`,
    - **`/` or `@` popup** — Type `/` (command or argument completion) or `@` (Keeper mention) to open the interactive popup: `↑`/`↓` (`PgUp`/`PgDn`, `Home`/`End`) move selection, `Tab` completes, `Enter` executes or inserts, and `Esc` dismisses the popup while keeping the composer focused (second `Esc` blurs).
    - **`Ctrl+W`** / **`Alt+Backspace`** — Delete the previous word; **`Ctrl+U`** clears to line start; **`Ctrl+A`/`E`** jump to line start/end.
    - **`←` / `→` / `Home` / `End`** — Move the editing cursor inside the draft (`Ctrl+←/→` or `Alt+←/→` jump by word).
+   - **`PgUp` / `PgDn`** — Scroll the Keeper Chat transcript (or underlying scrollable view) without leaving the composer or losing your draft/cursor.
    - **`Esc`** — Dismiss open `/` or `@` popup first, then blur the composer while preserving your per-Keeper draft.
 4. While reading Chat (unfocused):
    - **`Ctrl+O`** or **`/tools [compact|results|full]`** — Cycle or set tool call detail mode (in Memory Explorer, opens the Formation Tree diagram).
@@ -233,14 +234,23 @@ The organization cockpit (`lib/masc_tui/screens_core/screen_pulse.ml`):
 Six 1st-class sub-tabs (`[` / `]`, and Left Navigation Sidebar `b`):
 
 1. **Goals** (Goals & Verifications): side-by-side Goals list and
-   Verification requests (`Tab` switches pane; `Enter` dives into Goal or
-   Verification detail; `v` toggles Verification view between `Pending` and
-   `All`; `n` opens `#goals` proposal modal).
+   Verification requests (`Tab` switches pane; `Space` cycles the Goals phase
+   filter All → Active → Verifying → Held → Closed; `S` cycles Goals sort
+   Phase → Progress → Recent; `Enter` dives into Goal or Verification detail;
+   `v` toggles Verification view between `Pending` and `All`; `n` opens `#goals`
+   proposal modal). Inside **Goal Dive**, use `Tab` / `←` / `→` to switch
+   between **Linked Tasks** and **Verifier Runs & Evidence**, `↑`/`↓` to select
+   any linked task or verifier run, and `Enter` to dive straight into
+   **Task Dive** or **Verification Dive**.
    - Goal hotkeys: `a` advance/approve (opens server-issued confirmation proof
-     modal when `Awaiting_confirmation`), `c` request completion verification,
-     `x` pause (or drop when already paused).
-   - Verification hotkeys: `a` approve verdict, `x` reject modal, `h` / `X`
-     harness overrule modal (`notes_hash`, `verdict`, `reason`). Inside
+     modal when `Awaiting_confirmation`, resumes when `Paused`, unblocks when
+     `Blocked`, reopens when `Completed`/`Dropped`), `c` request completion
+     verification (when `Executing`), `x` pause (or opens the drop-reason modal
+     when already `Paused`).
+   - Verification hotkeys: `a` approve verdict, `x` reject modal (both guarded
+     locally when already resolved or superseded), `h` / `X` context-aware
+     harness overrule modal (auto-fills a linked 64-hex `notes_hash` and places
+     the cursor on `reason`, or warns if no valid verdict is linked). Inside
      **Verification Dive**, press `v` to switch between **Evidence**
      (`GET /api/v1/verification/evidence`, with explicit `CanAdmin` notice on
      401/403), **Summary** (`/api/v1/verification/summary`), **Specs**

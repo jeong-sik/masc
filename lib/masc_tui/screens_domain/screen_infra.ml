@@ -2443,8 +2443,8 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       (H.card_spec ?subtitle:right_subtitle ~focused:(Model.pane_focused model 1)
          ~hotkey:
            (Say.resolve lang
-              (Say.make ~ko:"[v] Git · [p] 찾기 · [f] 검색 · [y] 복사"
-                 ~en:"[v] Git · [p] Find · [f] Search · [y] Copy"))
+              (Say.make ~ko:"[→/Tab] 스크롤 · [v] Git · [p] 찾기 · [f] 검색 · [y] 복사"
+                 ~en:"[→/Tab] Scroll · [v] Git · [p] Find · [f] Search · [y] Copy"))
          (Say.resolve lang (Infra_store.code_right_mode_label code.right_mode)))
   in
   let rc = H.pad_content ~bp right_inner in

@@ -3451,6 +3451,7 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Verification_reject _
     | Nav.Harness_overrule _
     | Nav.Task_cancel _
+    | Nav.Goal_drop _
     | Nav.Schedule_form
     | Nav.Connector_form
     | Nav.Repo_add_form
@@ -3500,6 +3501,9 @@ let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
   | Form_standard (Nav.Task_cancel id) ->
       Say.resolve lang
         (Say.make ~ko:("작업 취소 · " ^ id) ~en:("Cancel Task · " ^ id))
+  | Form_standard (Nav.Goal_drop id) ->
+      Say.resolve lang
+        (Say.make ~ko:("목표 중단(Drop) · " ^ id) ~en:("Drop Goal · " ^ id))
   | Form_standard Nav.Schedule_form ->
       Say.resolve lang (Say.make ~ko:"새 일정 생성" ~en:"Create Schedule")
   | Form_standard Nav.Connector_form ->
@@ -3577,6 +3581,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Nav.Verification_reject _
     | Nav.Harness_overrule _
     | Nav.Task_cancel _
+    | Nav.Goal_drop _
     | Nav.Schedule_form
     | Nav.Connector_form
     | Nav.Repo_add_form
@@ -3618,6 +3623,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Verification_reject _
       | Nav.Harness_overrule _
       | Nav.Task_cancel _
+      | Nav.Goal_drop _
       | Nav.Schedule_form
       | Nav.Connector_form
       | Nav.Repo_add_form
@@ -3762,6 +3768,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Verification_reject _
       | Nav.Harness_overrule _
       | Nav.Task_cancel _
+      | Nav.Goal_drop _
       | Nav.Schedule_form
       | Nav.Connector_form
       | Nav.Repo_add_form
@@ -3792,6 +3799,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Verification_reject _
                 | Nav.Harness_overrule _
                 | Nav.Task_cancel _
+                | Nav.Goal_drop _
                 | Nav.Schedule_form
                 | Nav.Repo_add_form
                 | Nav.Board_new_post
@@ -3899,6 +3907,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Verification_reject _
                 | Nav.Harness_overrule _
                 | Nav.Task_cancel _
+                | Nav.Goal_drop _
                 | Nav.Schedule_form
                 | Nav.Repo_add_form
                 | Nav.Board_new_post

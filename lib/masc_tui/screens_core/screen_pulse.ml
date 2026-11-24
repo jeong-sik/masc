@@ -943,8 +943,7 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         let items = Array.of_list model.attention.items in
         let count = Array.length items in
         let sel =
-          if count <= 0 then 0
-          else Int.max 0 (Int.min (count - 1) model.attention.triage_index)
+          Attention.selected_index_in_filtered ~query:"" model.attention
         in
         let start, _ =
           Table.compute_viewport ~total_rows:count ~viewport_rows:inner.h
@@ -990,7 +989,7 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             | Health.Pending_ask _ ->
                 Say.resolve lang (Say.make ~ko:"[Y] 답변" ~en:"[Y] Answer")
             | Health.Goal_confirmation _ ->
-                Say.resolve lang (Say.make ~ko:"[Enter] 확인" ~en:"[Enter]")
+                Say.resolve lang (Say.make ~ko:"[Enter] 확인" ~en:"[Enter] Confirm")
           in
           let ah_w = Grapheme.display_width action_hint in
           let right_edge = Rect.right inner - pad_x in
@@ -1915,26 +1914,47 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     in
     let title =
       Say.resolve lang
-        (Say.make ~ko:"월드 펄스 · 핵심 토론" ~en:"World Pulse · Signal Threads")
+        (Say.make ~ko:"월드 펄스 · 인기 토론" ~en:"World Pulse · Hot Threads")
     in
     let badge : Card.badge =
+      let n = List.length threads in
+      let badge_say =
+        if rect.w >= 86 then
+          Say.make
+            ~ko:(Printf.sprintf "인기순(댓글×3+점수) · %d" n)
+            ~en:(Printf.sprintf "Hot(cmt×3+score) · %d" n)
+        else
+          Say.make
+            ~ko:(Printf.sprintf "인기순 · %d" n)
+            ~en:(Printf.sprintf "Hot · %d" n)
+      in
       {
         glyph = Some Glyph.Live_healthy;
-        text =
-          Say.resolve lang
-            (Say.make
-               ~ko:(Printf.sprintf "신호만 · %d" (List.length threads))
-               ~en:(Printf.sprintf "Signal · %d" (List.length threads)));
+        text = Say.resolve lang badge_say;
         tone = Some Theme.Status_active;
       }
     in
-    let hotkey = Say.resolve lang (Say.make ~ko:"[3] 지식" ~en:"[3] Knowledge") in
+    let hotkey =
+      Say.resolve lang
+        (if rect.w >= 74 then
+           Say.make ~ko:"[Enter] 스레드 · [3] 지식"
+             ~en:"[Enter] Thread · [3] Knowledge"
+         else Say.make ~ko:"[3] 지식" ~en:"[3] Knowledge")
+    in
+    let footer_hint =
+      if rect.w >= 44 && rect.w < 86 then
+        Some
+          (Say.resolve lang
+             (Say.make ~ko:"인기순(댓글×3+점수)" ~en:"Hot(cmt×3+score)"))
+      else None
+    in
     let inner =
       Card.draw ~cache grid ~rect ~theme
         {
           (Card.default_spec ~title) with
           badge = Some badge;
           hotkey = Some hotkey;
+          footer_hint;
           focused = pane_focused;
         }
     in

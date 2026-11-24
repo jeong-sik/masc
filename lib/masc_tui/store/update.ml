@@ -291,9 +291,18 @@ let step_raw ~now (m : Model.t) = function
         else (m.freshness, m.fleet)
       in
       let drafts = Drafts.voice_tick_elapsed ~now m.drafts in
+      let quit_armed_at =
+        match m.quit_armed_at with
+        | Some armed_at ->
+            let elapsed = Clock.Mono.seconds_since now ~since:armed_at in
+            if elapsed < 0.0 || elapsed > Model.quit_arm_window_s then None
+            else Some armed_at
+        | None -> None
+      in
       let next =
         let m' =
-          { m with freshness; fleet; drafts } |> Model.expire_toast ~now
+          { m with freshness; fleet; drafts; quit_armed_at }
+          |> Model.expire_toast ~now
         in
         if wall_advanced then Model.sync_effective_scorecard ~now m' else m'
       in

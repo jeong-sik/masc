@@ -26,6 +26,9 @@ type entry = {
 
 type t = {
   items : entry list;
+  selected_id : string option;
+      (** Authoritative ID-anchored selection; [None] before explicit selection
+          or filter anchoring so initial bootstrap tracks highest urgency. *)
   triage_index : int;
   triage_scroll_offset : int;
   auto_advance : bool;
@@ -46,14 +49,15 @@ val rebuild :
   t ->
   t
 (** Rebuild the sorted queue from authoritative server slices while preserving
-    [triage_index], [auto_advance], and [in_flight_ids] for still-present items. *)
+    [selected_id] / [triage_index], [auto_advance], and [in_flight_ids] for
+    still-present items. *)
 
 val upsert_entry : entry -> t -> t
 val remove_by_id : string -> t -> t
 
-val top_fast_path : t -> entry option
-(** Highest-urgency item not currently in flight, surfaced on the persistent
-    Approval Strip. *)
+val top_fast_path : ?query:string -> t -> entry option
+(** Highest-urgency item (within [filtered_items ~query t]) not currently in
+    flight, surfaced on the persistent Approval Strip. *)
 
 val current_triage_item : t -> entry option
 (** Currently focused item for rapid 1-key Inbox / Ask triage. *)
@@ -61,11 +65,21 @@ val current_triage_item : t -> entry option
 val filtered_items : query:string -> t -> entry list
 (** Filter queue entries case-insensitively by title, summary, keeper, or id. *)
 
+val selected_index_in_filtered : query:string -> t -> int
+(** Canonical 0-based index of the currently focused item inside
+    {!filtered_items}. Resolves [selected_id] first and falls back to clamped
+    [triage_index], guaranteeing rendered highlight and action target parity. *)
+
 val current_filtered_item : query:string -> t -> entry option
 (** Currently focused item within {!filtered_items}. *)
 
+val sync_selection : query:string -> t -> t
+(** Re-synchronize [triage_index], [triage_scroll_offset], and [selected_id]
+    with {!filtered_items} after filter or view domain transitions so clearing
+    or changing a filter never silently shifts selection to an unrelated row. *)
+
 val move_triage : ?query:string -> ?viewport_rows:int -> delta:int -> t -> t
-val select_triage_index : int -> t -> t
+val select_triage_index : ?query:string -> int -> t -> t
 val set_auto_advance : bool -> t -> t
 
 val is_in_flight : id:string -> t -> bool
@@ -74,10 +88,16 @@ val clear_in_flight : id:string -> t -> t
 val clear_all_in_flight : t -> t
 (** Drop all in-flight markers when leaving an epoch whose replies are
     abandoned. *)
+val advance_past_in_flight : ?query:string -> t -> t
+(** When [auto_advance] is enabled and the highlighted triage item (within
+    [filtered_items ~query t]) is in-flight, move [selected_id] and
+    [triage_index] to the next non-in-flight filtered item so selection and
+    strip advance together without ever silently jumping to an unrelated row. *)
 
-val advance_after_resolution : resolved_id:string -> t -> t
-(** Remove [resolved_id], clear its in-flight flag, and clamp/advance
-    [triage_index] cleanly when [auto_advance] is enabled. *)
+val advance_after_resolution : ?query:string -> resolved_id:string -> t -> t
+(** Remove [resolved_id], clear its in-flight flag, and re-sync/advance
+    selection cleanly within [filtered_items ~query] when [auto_advance] is
+    enabled. *)
 
 val count : t -> int
 val is_empty : t -> bool

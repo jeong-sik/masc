@@ -153,6 +153,7 @@ type t = {
   expanded_succession_chains : String_set.t;
   active_thread :
     (Wire_knowledge.board_post * Wire_knowledge.board_comment list) Observed.t;
+  active_thread_target : string option;
   thread_selected_comment : int option;
   armed_vote : (vote_target * [ `Up | `Down ]) option;
   wiki_index : Wire_knowledge.wiki_index Observed.t;
@@ -296,8 +297,13 @@ val order_comments_threaded :
 (** Thread comments by [parent_id] up to depth 4, chronologically per parent,
     promoting orphans and breaking cycles safely. *)
 
-val step_thread_comment : delta:int -> t -> t
-val selected_thread_comment : t -> threaded_comment option
+val step_thread_comment : post_id:string -> delta:int -> t -> t
+(** Advance comment selection within [active_thread] only when it holds
+    [post_id]; clears comment selection otherwise. *)
+
+val selected_thread_comment : post_id:string -> t -> threaded_comment option
+(** Selected comment only when [active_thread] holds [post_id]; [None] when
+    [active_thread] is missing or belongs to another post. *)
 
 val press_vote :
   target:vote_target ->
@@ -417,6 +423,19 @@ val apply_board_hearths :
 val apply_thread :
   observed_at:Clock.Mono.t ->
   Wire_knowledge.board_post * Wire_knowledge.board_comment list ->
+  t ->
+  t
+val mark_thread_loading :
+  ?force:bool -> post_id:string -> since_ns:Clock.Mono.t -> t -> t
+(** Mark [active_thread] as [Observed.Loading] for [post_id] and clear stale
+    comment selection / armed vote. Unless [force = true], preserves an
+    already-loaded [Value], already-[Loading] slot, or settled non-retryable
+    [Failed] state for the same [post_id]. *)
+val mark_thread_failed :
+  ?target:string ->
+  at:Clock.Mono.t ->
+  reason:string ->
+  retryable:bool ->
   t ->
   t
 val apply_wiki_index :

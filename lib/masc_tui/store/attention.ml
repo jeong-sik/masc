@@ -19,6 +19,7 @@ type entry = {
 
 type t = {
   items : entry list;
+  selected_id : string option;
   triage_index : int;
   triage_scroll_offset : int;
   auto_advance : bool;
@@ -28,6 +29,7 @@ type t = {
 let empty =
   {
     items = [];
+    selected_id = None;
     triage_index = 0;
     triage_scroll_offset = 0;
     auto_advance = true;
@@ -143,6 +145,50 @@ let entry_of_goal (g : Wire_work.goal) : entry option =
   | Wire_work.Blocked _ ->
       None
 
+let index_of_id id (xs : entry list) =
+  let rec loop i = function
+    | [] -> None
+    | (e : entry) :: rest ->
+        if String.equal e.id id then Some i else loop (i + 1) rest
+  in
+  loop 0 xs
+
+let reanchor_unfiltered items t =
+  let len = List.length items in
+  if len <= 0 then
+    {
+      t with
+      items;
+      selected_id = None;
+      triage_index = 0;
+      triage_scroll_offset = 0;
+    }
+  else
+    match t.selected_id with
+    | None ->
+        let triage_index = clamp_index len t.triage_index in
+        let triage_scroll_offset =
+          adjust_scroll ~scroll:t.triage_scroll_offset triage_index
+        in
+        { t with items; triage_index; triage_scroll_offset }
+    | Some id ->
+        let triage_index, selected_id =
+          match index_of_id id items with
+          | Some idx -> (idx, Some id)
+          | None ->
+              let idx = clamp_index len t.triage_index in
+              let next_id =
+                match List.nth_opt items idx with
+                | Some e -> Some e.id
+                | None -> None
+              in
+              (idx, next_id)
+        in
+        let triage_scroll_offset =
+          adjust_scroll ~scroll:t.triage_scroll_offset triage_index
+        in
+        { t with items; selected_id; triage_index; triage_scroll_offset }
+
 let rebuild ~asks ~tool_approvals ~gate_pending ~goals t =
   let raw =
     List.map entry_of_tool_approval tool_approvals
@@ -157,24 +203,14 @@ let rebuild ~asks ~tool_approvals ~gate_pending ~goals t =
       (fun id -> List.exists (String.equal id) present_ids)
       t.in_flight_ids
   in
-  let triage_index = clamp_index (List.length items) t.triage_index in
-  let triage_scroll_offset =
-    if items = [] then 0
-    else adjust_scroll ~scroll:t.triage_scroll_offset triage_index
-  in
-  { t with items; triage_index; triage_scroll_offset; in_flight_ids }
+  reanchor_unfiltered items { t with in_flight_ids }
 
 let upsert_entry (e : entry) t =
   let filtered =
     List.filter (fun (x : entry) -> not (String.equal x.id e.id)) t.items
   in
   let items = sort_and_dedup (e :: filtered) in
-  let triage_index = clamp_index (List.length items) t.triage_index in
-  let triage_scroll_offset =
-    if items = [] then 0
-    else adjust_scroll ~scroll:t.triage_scroll_offset triage_index
-  in
-  { t with items; triage_index; triage_scroll_offset }
+  reanchor_unfiltered items t
 
 let remove_by_id id t =
   let items =
@@ -183,12 +219,7 @@ let remove_by_id id t =
   let in_flight_ids =
     List.filter (fun x -> not (String.equal x id)) t.in_flight_ids
   in
-  let triage_index = clamp_index (List.length items) t.triage_index in
-  let triage_scroll_offset =
-    if items = [] then 0
-    else adjust_scroll ~scroll:t.triage_scroll_offset triage_index
-  in
-  { t with items; triage_index; triage_scroll_offset; in_flight_ids }
+  reanchor_unfiltered items { t with in_flight_ids }
 
 let is_in_flight ~id t = List.exists (String.equal id) t.in_flight_ids
 
@@ -208,9 +239,6 @@ let clear_all_in_flight t =
   | [] -> t
   | _ :: _ -> { t with in_flight_ids = [] }
 
-let top_fast_path t =
-  List.find_opt (fun (e : entry) -> not (is_in_flight ~id:e.id t)) t.items
-
 let filtered_items ~query t =
   let q = String.trim query in
   if String.equal q "" then t.items
@@ -226,39 +254,127 @@ let filtered_items ~query t =
         | None -> false)
       t.items
 
+let top_fast_path ?(query = "") t =
+  List.find_opt
+    (fun (e : entry) -> not (is_in_flight ~id:e.id t))
+    (filtered_items ~query t)
+
+let selected_index_in_filtered ~query t =
+  let xs = filtered_items ~query t in
+  let len = List.length xs in
+  if len <= 0 then 0
+  else
+    match Option.bind t.selected_id (fun id -> index_of_id id xs) with
+    | Some idx -> idx
+    | None -> clamp_index len t.triage_index
+
 let current_filtered_item ~query t =
   let xs = filtered_items ~query t in
-  List.nth_opt xs (clamp_index (List.length xs) t.triage_index)
+  match xs with
+  | [] -> None
+  | _ :: _ -> List.nth_opt xs (selected_index_in_filtered ~query t)
 
 let current_triage_item t = current_filtered_item ~query:"" t
 
-let move_triage ?(query = "") ?viewport_rows ~delta t =
-  let len = List.length (filtered_items ~query t) in
+let sync_selection ~query t =
+  let xs = filtered_items ~query t in
+  let len = List.length xs in
   if len <= 0 then { t with triage_index = 0; triage_scroll_offset = 0 }
   else
-    let triage_index = clamp_index len (t.triage_index + delta) in
+    let idx = selected_index_in_filtered ~query t in
+    let selected_id =
+      match t.selected_id with
+      | Some _ -> (
+          match List.nth_opt xs idx with
+          | Some e -> Some e.id
+          | None -> t.selected_id)
+      | None ->
+          if String.equal (String.trim query) "" then None
+          else
+            match List.nth_opt xs idx with
+            | Some e -> Some e.id
+            | None -> None
+    in
+    let triage_scroll_offset =
+      adjust_scroll ~scroll:t.triage_scroll_offset idx
+    in
+    { t with selected_id; triage_index = idx; triage_scroll_offset }
+
+let move_triage ?(query = "") ?viewport_rows ~delta t =
+  let xs = filtered_items ~query t in
+  let len = List.length xs in
+  if len <= 0 then { t with triage_index = 0; triage_scroll_offset = 0 }
+  else
+    let cur_idx = selected_index_in_filtered ~query t in
+    let triage_index = clamp_index len (cur_idx + delta) in
+    let selected_id =
+      match List.nth_opt xs triage_index with
+      | Some e -> Some e.id
+      | None -> t.selected_id
+    in
     let triage_scroll_offset =
       adjust_scroll ?viewport_rows ~scroll:t.triage_scroll_offset triage_index
     in
-    { t with triage_index; triage_scroll_offset }
+    { t with selected_id; triage_index; triage_scroll_offset }
 
-let select_triage_index idx t =
-  let len = List.length t.items in
+let select_triage_index ?(query = "") idx t =
+  let xs = filtered_items ~query t in
+  let len = List.length xs in
   if len <= 0 then { t with triage_index = 0; triage_scroll_offset = 0 }
   else
     let triage_index = clamp_index len idx in
+    let selected_id =
+      match List.nth_opt xs triage_index with
+      | Some e -> Some e.id
+      | None -> t.selected_id
+    in
     let triage_scroll_offset =
       adjust_scroll ~scroll:t.triage_scroll_offset triage_index
     in
-    { t with triage_index; triage_scroll_offset }
+    { t with selected_id; triage_index; triage_scroll_offset }
 
 let set_auto_advance auto_advance t = { t with auto_advance }
 
-let advance_after_resolution ~resolved_id t =
+let advance_past_in_flight ?(query = "") t =
+  if not t.auto_advance then t
+  else
+    let xs = filtered_items ~query t in
+    let len = List.length xs in
+    if len <= 0 then t
+    else
+      let cur_idx = selected_index_in_filtered ~query t in
+      match List.nth_opt xs cur_idx with
+      | Some cur when is_in_flight ~id:cur.id t -> (
+          let rec find_next offset =
+            if offset >= len then None
+            else
+              let idx = (cur_idx + offset) mod len in
+              match List.nth_opt xs idx with
+              | Some e when not (is_in_flight ~id:e.id t) -> Some (idx, e.id)
+              | Some _ | None -> find_next (offset + 1)
+          in
+          match find_next 1 with
+          | Some (idx, next_id) ->
+              let triage_scroll_offset =
+                adjust_scroll ~scroll:t.triage_scroll_offset idx
+              in
+              {
+                t with
+                selected_id = Some next_id;
+                triage_index = idx;
+                triage_scroll_offset;
+              }
+          | None -> t)
+      | Some _ | None -> t
+
+let advance_after_resolution ?(query = "") ~resolved_id t =
+  let was_selected =
+    Option.equal String.equal t.selected_id (Some resolved_id)
+  in
   let t' = remove_by_id resolved_id t in
   if t'.auto_advance then
-    let len = List.length t'.items in
-    { t' with triage_index = clamp_index len t'.triage_index }
+    let base = if was_selected then { t' with selected_id = None } else t' in
+    sync_selection ~query base
   else t'
 
 let count t = List.length t.items

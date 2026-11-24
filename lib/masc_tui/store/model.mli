@@ -27,6 +27,9 @@ type composer_mode =
 type nav_state = {
   workspace : Nav.workspace;
   dive_stack : Nav.dive list;
+  dive_return_stack : (int * bool) list;
+      (** Parallel return frames [(pane_index, zoomed)] captured on {!Update_nav.push_dive}
+          and restored when [Esc] pops {!dive_stack}. *)
   overlay : Nav.overlay option;
   pane_index : int;
   pre_zoom_pane_index : int option;
@@ -203,7 +206,11 @@ type t = {
   inline_modal : inline_modal_state option;
   ask_modal : ask_modal option;
   toast : toast option;
+  quit_armed_at : Clock.Mono.t option;
 }
+
+val quit_arm_window_s : float
+(** Seconds during which a second [Ctrl+Q] confirms and exits the TUI. *)
 
 val equal_breakpoint : breakpoint -> breakpoint -> bool
 val equal_composer_mode : composer_mode -> composer_mode -> bool
@@ -277,6 +284,15 @@ val focusable_pane_count : t -> int
 (** Single source of truth for the exact number of interactive focusable panes
     currently rendered for [m]'s active view, sub-tab, breakpoint, zoom, and
     data state. Returns [1] when pane cycling is a no-op (never ghost panes). *)
+
+val task_dive_has_two_main_panes : t -> string -> bool
+(** [true] iff [Task_dive task_id] renders both a non-empty Description section
+    and a linked Verification section as separate focusable panes. *)
+
+val dive_work_json_pane_index : t -> int option
+(** Active pane index of the opt-in Raw JSON card inside [Dive_work _], or
+    [None] when [show_raw_json] is off. Returns [Some 0] when the viewport is
+    too narrow ([< 88] cols) and JSON replaces the main card. *)
 
 val classify_viewport : viewport -> breakpoint
 val is_too_small_viewport : viewport -> bool

@@ -164,6 +164,7 @@ type t = {
   expanded_succession_chains : String_set.t;
   active_thread :
     (Wire_knowledge.board_post * Wire_knowledge.board_comment list) Observed.t;
+  active_thread_target : string option;
   thread_selected_comment : int option;
   armed_vote : (vote_target * [ `Up | `Down ]) option;
   wiki_index : Wire_knowledge.wiki_index Observed.t;
@@ -239,6 +240,7 @@ let empty =
     board_hearth = None;
     expanded_succession_chains = String_set.empty;
     active_thread = Observed.absent;
+    active_thread_target = None;
     thread_selected_comment = None;
     armed_vote = None;
     wiki_index = Observed.unreported;
@@ -817,17 +819,16 @@ let order_comments_threaded (comments : Wire_knowledge.board_comment list) :
     (List.sort cmp_comment comments);
   List.rev !out
 
-let selected_thread_comment t =
+let selected_thread_comment ~post_id t =
   match t.thread_selected_comment, Observed.to_option t.active_thread with
-  | Some idx, Some (_, comments) ->
+  | Some idx, Some (tp, comments) when String.equal tp.id post_id ->
       let ordered = order_comments_threaded comments in
       List.nth_opt ordered idx
-  | None, _ | Some _, None -> None
+  | Some _, Some _ | None, _ | Some _, None -> None
 
-let step_thread_comment ~delta t =
+let step_thread_comment ~post_id ~delta t =
   match Observed.to_option t.active_thread with
-  | None -> { t with thread_selected_comment = None; armed_vote = None }
-  | Some (_, comments) ->
+  | Some (tp, comments) when String.equal tp.id post_id ->
       let n = List.length (order_comments_threaded comments) in
       if n <= 0 then { t with thread_selected_comment = None; armed_vote = None }
       else
@@ -839,6 +840,8 @@ let step_thread_comment ~delta t =
           else Some next
         in
         { t with thread_selected_comment; armed_vote = None }
+  | Some _ | None ->
+      { t with thread_selected_comment = None; armed_vote = None }
 
 let equal_vote_dir a b =
   match a, b with
@@ -1632,10 +1635,45 @@ let apply_board ~observed_at feed t =
 let apply_board_hearths ~observed_at hearths t =
   { t with board_hearths = Observed.value ~observed_at hearths }
 
-let apply_thread ~observed_at thread t =
+let apply_thread ~observed_at ((p, _) as thread) t =
   {
     t with
     active_thread = Observed.value ~observed_at thread;
+    active_thread_target = Some p.Wire_knowledge.id;
+    thread_selected_comment = None;
+    armed_vote = None;
+  }
+
+let mark_thread_loading ?(force = false) ~post_id ~since_ns t =
+  let keep_existing =
+    (not force)
+    &&
+    match t.active_thread with
+    | Observed.Value { data = tp, _; _ } -> String.equal tp.id post_id
+    | Observed.Failed { retryable = false; _ } ->
+        Option.equal String.equal t.active_thread_target (Some post_id)
+    | Observed.Loading _ ->
+        Option.equal String.equal t.active_thread_target (Some post_id)
+    | Observed.Absent
+    | Observed.Unreported
+    | Observed.Failed { retryable = true; _ } ->
+        false
+  in
+  if keep_existing then t
+  else
+    {
+      t with
+      active_thread = Observed.loading ~since_ns;
+      active_thread_target = Some post_id;
+      thread_selected_comment = None;
+      armed_vote = None;
+    }
+
+let mark_thread_failed ?target ~at ~reason ~retryable t =
+  {
+    t with
+    active_thread = Observed.failed ~reason ~retryable ~at;
+    active_thread_target = target;
     thread_selected_comment = None;
     armed_vote = None;
   }

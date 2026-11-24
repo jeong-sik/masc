@@ -3634,27 +3634,196 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
          | _ -> false)
        cmds_wsaved);
   (* Until that read lands the slot holds revision 3, so [e] waits for the
-     page instead of opening a form on the text the save replaced. *)
+     page instead of opening a form on the text the save replaced, remembers
+     the pending edit intent, and opens the modal automatically once rev 4
+     arrives while still viewing the page (Issue #54490). *)
   let m_wagain, cmds_wagain = step m_wsaved (char_key "e") in
-  Alcotest.(check bool) "[e] right after a save opens no form" true
+  Alcotest.(check bool) "[e] right after a save opens no form yet" true
     (Option.is_none m_wagain.inline_modal);
+  Alcotest.(check (option string)) "[e] right after a save remembers pending slug"
+    (Some "guide") m_wagain.knowledge.pending_wiki_edit_slug;
   Alcotest.(check bool) "[e] right after a save asks for the page" true
     (has_cmd
        (function
          | Cmd.Http_get { req = Cmd.Get_wiki_page { page = "guide" }; _ } -> true
          | _ -> false)
        cmds_wagain);
-  (* A form opened on revision 3 saves against revision 3 even when
-     revision 4 lands while it is open: the server then refuses the save
-     instead of writing the old text over revision 4. *)
-  let m_wopen, _ = step m_wiki (char_key "e") in
   let page_r4 =
     {
       wiki_page with
       frontmatter = { wiki_page.frontmatter with revision = 4 };
       sha256 = "sha-w4";
+      body_markdown = "# Guide\n\nRevision 4 body.";
     }
   in
+  let m_wauto, _ =
+    Update.step ~now:t1 m_wagain
+      (Msg.Http_reply
+         {
+           epoch = m_wagain.epoch;
+           reply =
+             Msg.Reply_wiki_page { page = page_r4.slug; result = Ok page_r4 };
+         })
+  in
+  Alcotest.(check (option string)) "pending wiki edit slug cleared on auto-open"
+    None m_wauto.knowledge.pending_wiki_edit_slug;
+  (match m_wauto.inline_modal, m_wauto.knowledge.wiki_edit_base with
+  | Some modal, Some base ->
+      Alcotest.(check int) "auto-opened modal uses fresh revision 4" 4
+        base.revision;
+      Alcotest.(check string) "auto-opened modal body uses fresh page"
+        "# Guide\n\nRevision 4 body."
+        (Model.modal_field_value ~key:"wiki_body" modal)
+  | _ -> Alcotest.fail "expected edit modal to auto-open on Reply_wiki_page");
+  (* Navigating away before the reply arrives clears pending without hijacking. *)
+  let m_waway =
+    { m_wagain with nav = { m_wagain.nav with workspace = Nav.Pulse; dive_stack = [] } }
+  in
+  let m_waway_replied, _ =
+    Update.step ~now:t1 m_waway
+      (Msg.Http_reply
+         {
+           epoch = m_waway.epoch;
+           reply =
+             Msg.Reply_wiki_page { page = page_r4.slug; result = Ok page_r4 };
+         })
+  in
+  Alcotest.(check bool) "navigating away suppresses auto-open" true
+    (Option.is_none m_waway_replied.inline_modal
+     && Option.is_none m_waway_replied.knowledge.pending_wiki_edit_slug);
+  (* Fetch error clears pending so a later background reply does not pop open. *)
+  let m_werr, _ =
+    Update.step ~now:t1 m_wagain
+      (Msg.Http_reply
+         {
+           epoch = m_wagain.epoch;
+           reply =
+             Msg.Reply_wiki_page
+               {
+                 page = "guide";
+                 result =
+                   Error
+                     (Msg.Http_error
+                        { status = 503; body = "unavailable"; api_error = None });
+               };
+         })
+  in
+  Alcotest.(check (option string)) "fetch error clears pending wiki edit slug"
+    None m_werr.knowledge.pending_wiki_edit_slug;
+  let m_werr_later, _ =
+    Update.step ~now:t1 m_werr
+      (Msg.Http_reply
+         {
+           epoch = m_werr.epoch;
+           reply =
+             Msg.Reply_wiki_page { page = page_r4.slug; result = Ok page_r4 };
+         })
+  in
+  Alcotest.(check bool) "reply after fetch error does not surprise-open modal"
+    true (Option.is_none m_werr_later.inline_modal);
+  (* Wiki tab (not dive) also auto-opens on first load when [e] is pressed. *)
+  let wiki_summary : Wire_knowledge.wiki_page_summary =
+    {
+      slug = "guide";
+      file = "guide.md";
+      title = "Guide";
+      summary = "Operator guide";
+      source = Wire_knowledge.Source_observation;
+      author = "operator";
+      created = "2026-11-24T00:00:00Z";
+      updated = "2026-11-24T00:00:00Z";
+      revision = 4;
+      tags = [ "ops" ];
+      backlink_count = 0;
+      outgoing_link_count = 0;
+      sources_count = 0;
+      hearsay_count = 0;
+      sha256 = "sha-w4";
+    }
+  in
+  let wiki_idx : Wire_knowledge.wiki_index =
+    {
+      pages_total = 1;
+      pages_readable = 1;
+      pages_unreadable = 0;
+      pages = [ wiki_summary ];
+      unreadable_pages = [];
+      lint =
+        {
+          total_findings = 0;
+          counts =
+            {
+              broken_link = 0;
+              unsupported_link = 0;
+              orphan = 0;
+              orphan_unconfirmed = 0;
+              missing_sources = 0;
+              hearsay_only = 0;
+              unreadable_page = 0;
+              revision_log_gap = 0;
+              revision_log_hole = 0;
+              duplicate_title_candidates = 0;
+            };
+          log_hole_suppressed = false;
+          orphans = [];
+          duplicate_title_candidates = [];
+          findings = [];
+        };
+    }
+  in
+  let m_wtab =
+    {
+      m_wiki with
+      nav = { m_wiki.nav with workspace = Nav.Knowledge; dive_stack = [] };
+      knowledge =
+        Knowledge_store.empty
+        |> Knowledge_store.set_tab Nav.Knowledge_wiki
+        |> Knowledge_store.apply_wiki_index ~observed_at:t1 wiki_idx;
+    }
+  in
+  let m_wtab_req, cmds_wtab_req = step m_wtab (char_key "e") in
+  Alcotest.(check (option string)) "Wiki tab [e] before load records pending slug"
+    (Some "guide") m_wtab_req.knowledge.pending_wiki_edit_slug;
+  Alcotest.(check bool) "Wiki tab [e] before load requests page" true
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_wiki_page { page = "guide" }; _ } -> true
+         | _ -> false)
+       cmds_wtab_req);
+  let m_wtab_open, _ =
+    Update.step ~now:t1 m_wtab_req
+      (Msg.Http_reply
+         {
+           epoch = m_wtab_req.epoch;
+           reply =
+             Msg.Reply_wiki_page { page = page_r4.slug; result = Ok page_r4 };
+         })
+  in
+  Alcotest.(check bool) "Wiki tab auto-opens edit modal on Reply_wiki_page" true
+    (Option.is_some m_wtab_open.inline_modal
+     && Option.is_none m_wtab_open.knowledge.pending_wiki_edit_slug);
+  (* Opening an overlay before Reply_wiki_page arrives suppresses auto-open. *)
+  let m_wtab_help =
+    { m_wtab_req with nav = { m_wtab_req.nav with overlay = Some Nav.Help } }
+  in
+  let m_wtab_help_replied, _ =
+    Update.step ~now:t1 m_wtab_help
+      (Msg.Http_reply
+         {
+           epoch = m_wtab_help.epoch;
+           reply =
+             Msg.Reply_wiki_page { page = page_r4.slug; result = Ok page_r4 };
+         })
+  in
+  Alcotest.(check bool) "active overlay suppresses wiki edit auto-open" true
+    (Option.is_none m_wtab_help_replied.inline_modal
+     && Option.equal Nav.equal_overlay m_wtab_help_replied.nav.overlay
+          (Some Nav.Help)
+     && Option.is_none m_wtab_help_replied.knowledge.pending_wiki_edit_slug);
+  (* A form opened on revision 3 saves against revision 3 even when
+     revision 4 lands while it is open: the server then refuses the save
+     instead of writing the old text over revision 4. *)
+  let m_wopen, _ = step m_wiki (char_key "e") in
   let m_wr4, _ =
     Update.step ~now:t1 m_wopen
       (Msg.Http_reply

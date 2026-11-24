@@ -826,21 +826,37 @@ let apply_http_reply ~now (m : Model.t) reply =
         ~source:Health.Source_client_http ~ko:"위키 색인 조회"
         ~en:"Wiki index fetch" err
   | Msg.Reply_wiki_page { page; result = Ok detail } ->
-      ( {
-          m with
-          knowledge =
-            Knowledge_store.set_wiki_page ~slug:page
-              (Observed.value ~observed_at:now detail)
-              m.knowledge;
-        }
-      , [] )
+      let matches_pending =
+        Option.equal String.equal m.knowledge.pending_wiki_edit_slug (Some page)
+      in
+      let knowledge =
+        Knowledge_store.set_wiki_page ~slug:page
+          (Observed.value ~observed_at:now detail)
+          m.knowledge
+      in
+      let knowledge =
+        if matches_pending then Knowledge_store.clear_pending_wiki_edit knowledge
+        else knowledge
+      in
+      let next = { m with knowledge } in
+      let next =
+        if matches_pending && Model.is_viewing_wiki_slug ~slug:page next then
+          Model.open_wiki_edit_modal_for_detail detail next
+        else next
+      in
+      (next, [])
   | Msg.Reply_wiki_page { page; result = Error err } ->
       err_reply
         ~fail:
           (on_knowledge (fun (x : Knowledge_store.t) ->
-               Knowledge_store.set_wiki_page ~slug:page
-                 (failed_slot err (Knowledge_store.wiki_page_for ~slug:page x))
-                 x))
+               let x =
+                 Knowledge_store.set_wiki_page ~slug:page
+                   (failed_slot err (Knowledge_store.wiki_page_for ~slug:page x))
+                   x
+               in
+               if Option.equal String.equal x.pending_wiki_edit_slug (Some page)
+               then Knowledge_store.clear_pending_wiki_edit x
+               else x))
         ~source:Health.Source_client_http ~ko:"위키 문서 조회"
         ~en:"Wiki page fetch" err
   | Msg.Reply_wiki_log (Ok log) ->

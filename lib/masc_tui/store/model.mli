@@ -265,6 +265,13 @@ val is_text_capture_active : t -> bool
     settings field editor, or inline modal) owns printable characters. *)
 
 val inline_modal_for : Nav.inline_action_kind -> inline_modal_state
+val is_viewing_wiki_slug : slug:string -> t -> bool
+(** [true] when no overlay is open and the user is currently viewing [slug]
+    either in the Knowledge Wiki tab or in a [Wiki_dive slug]. *)
+val open_wiki_edit_modal_for_detail :
+  Wire_knowledge.wiki_page_detail -> t -> t
+(** Open the inline Wiki edit modal seeded with [detail], recording [detail]
+    as [knowledge.wiki_edit_base] and clearing any pending wiki edit slug. *)
 val modal_field_value : key:string -> inline_modal_state -> string
 val modal_update_active_field :
   (string -> string) -> inline_modal_state -> inline_modal_state

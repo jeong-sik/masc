@@ -1076,6 +1076,86 @@ let modal_cycle_field ~delta modal =
     let active_field = if next < 0 then next + len else next in
     { modal with active_field }
 
+let is_viewing_wiki_slug ~slug m =
+  Option.is_none m.nav.overlay
+  &&
+  match active_dive m with
+  | Some (Nav.Dive_knowledge (Nav.Wiki_dive dive_slug)) ->
+      String.equal dive_slug slug
+  | Some
+      ( Nav.Dive_keeper _
+      | Nav.Dive_work _
+      | Nav.Dive_infra _
+      | Nav.Dive_knowledge
+          (Nav.Thread_dive _ | Nav.Memory_diff_dive _ | Nav.Artifact_dive _) )
+    ->
+      false
+  | None -> (
+      Nav.equal_workspace m.nav.workspace Nav.Knowledge
+      && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_wiki
+      &&
+      match Knowledge_store.selected_wiki_page m.knowledge with
+      | Some entry -> String.equal entry.slug slug
+      | None -> false)
+
+let open_wiki_edit_modal_for_detail (d : Wire_knowledge.wiki_page_detail) m =
+  let modal : inline_modal_state =
+    {
+      kind = Nav.Board_new_post;
+      fields =
+        [
+          {
+            key = "wiki_slug";
+            label = Say.make ~ko:"위키 슬러그" ~en:"Wiki slug";
+            value = d.slug;
+            required = true;
+            secret = false;
+          };
+          {
+            key = "wiki_title";
+            label = Say.make ~ko:"제목" ~en:"Title";
+            value = d.frontmatter.title;
+            required = true;
+            secret = false;
+          };
+          {
+            key = "wiki_summary";
+            label = Say.make ~ko:"요약" ~en:"Summary";
+            value = d.frontmatter.summary;
+            required = false;
+            secret = false;
+          };
+          {
+            key = "wiki_body";
+            label = Say.make ~ko:"본문 (Markdown)" ~en:"Body (Markdown)";
+            value = d.body_markdown;
+            required = true;
+            secret = false;
+          };
+          {
+            key = "wiki_note";
+            label = Say.make ~ko:"변경 메모" ~en:"Edit note";
+            value = "";
+            required = false;
+            secret = false;
+          };
+        ];
+      active_field = 0;
+      submitting = false;
+      error = None;
+    }
+  in
+  let nav =
+    {
+      m.nav with
+      overlay = Some (Nav.Inline_action Nav.Board_new_post);
+      filter_focused = false;
+    }
+  in
+  let drafts = Drafts.set_focus false m.drafts in
+  let knowledge = Knowledge_store.begin_wiki_edit d m.knowledge in
+  { m with nav; drafts; knowledge; inline_modal = Some modal }
+
 let with_toast ~now ?(duration_s = 4.0) ~level message m =
   let expires_at = Clock.Mono.after_s now duration_s in
   { m with toast = Some { message; level; expires_at } }

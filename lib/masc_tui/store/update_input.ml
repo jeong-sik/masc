@@ -1009,51 +1009,23 @@ let open_memory_act_modal (m : Model.t) ~(keeper_default : string) =
 let open_wiki_edit_modal ~now (m : Model.t) ~(slug : string) =
   match Knowledge_store.wiki_page_for ~slug m.knowledge with
   | Observed.Value { data = d; stale = false; _ } ->
-      open_custom_inline_modal
-        { m with knowledge = Knowledge_store.begin_wiki_edit d m.knowledge }
-        [
-          {
-            key = "wiki_slug";
-            label = Say.make ~ko:"위키 슬러그" ~en:"Wiki slug";
-            value = slug;
-            required = true;
-            secret = false;
-          };
-          {
-            key = "wiki_title";
-            label = Say.make ~ko:"제목" ~en:"Title";
-            value = d.frontmatter.title;
-            required = true;
-            secret = false;
-          };
-          {
-            key = "wiki_summary";
-            label = Say.make ~ko:"요약" ~en:"Summary";
-            value = d.frontmatter.summary;
-            required = false;
-            secret = false;
-          };
-          {
-            key = "wiki_body";
-            label = Say.make ~ko:"본문 (Markdown)" ~en:"Body (Markdown)";
-            value = d.body_markdown;
-            required = true;
-            secret = false;
-          };
-          {
-            key = "wiki_note";
-            label = Say.make ~ko:"변경 메모" ~en:"Edit note";
-            value = "";
-            required = false;
-            secret = false;
-          };
-        ]
+      (Model.open_wiki_edit_modal_for_detail d m, [])
   | Observed.Value _ | Observed.Loading _ | Observed.Absent
   | Observed.Unreported | Observed.Failed _ ->
+      let m =
+        {
+          m with
+          knowledge = Knowledge_store.request_wiki_edit ~slug m.knowledge;
+        }
+      in
       ( Model.with_toast ~now ~level:Model.Toast_info
           (Say.make
-             ~ko:("위키 본문을 불러오는 중입니다 (" ^ slug ^ ") — 잠시 후 [e]를 다시 누르세요")
-             ~en:("Loading wiki page body (" ^ slug ^ ") — press [e] again once loaded"))
+             ~ko:
+               ("위키 본문을 불러오는 중입니다 (" ^ slug
+              ^ ") — 불러오면 편집 창이 자동으로 열립니다")
+             ~en:
+               ("Loading wiki page body (" ^ slug
+              ^ ") — edit modal will open once loaded"))
           m
       , [
           Cmd.Http_get

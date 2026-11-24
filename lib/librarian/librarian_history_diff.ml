@@ -32,7 +32,7 @@ module Archive = Librarian_archive
 
 let includes = Librarian_history_window.includes
 
-let project_rows ~range ~current ~revision ~unsequenced ~changes ~prefix_limited ~(folded : Archive.folded option) =
+let project_rows ~range ~current ~revision ~unsequenced ~changes ~sequence_suffix ~(folded : Archive.folded option) =
   let id = Types.memory_id in
   let targets = Hashtbl.create 32 in
   let add_target = function
@@ -100,13 +100,16 @@ let project_rows ~range ~current ~revision ~unsequenced ~changes ~prefix_limited
   let last_seq = ref (Option.fold ~none:0 ~some:(fun f -> f.Archive.through_seq) folded)
   and last_rev = ref (Option.fold ~none:0 ~some:(fun f -> f.Archive.max_revision) folded) and gaps = ref [] and ticks = ref [] in
   List.iter (fun (c : Change.t) ->
-    if c.seq > !last_seq + 1 then (
+    if !last_seq < c.seq - 1 then (
       (* A lost sequence has no recorded time. Adjacent timestamps cannot prove
          that a missing commit fell outside a wall-clock window. *)
       let relevant = match range with
         | Time _ -> true
         | Revisions (lo, hi) -> lo <= c.revision && !last_rev <= hi in
-      if relevant && not prefix_limited then gaps := { first_seq = !last_seq + 1; last_seq = c.seq - 1 } :: !gaps;
+      (match sequence_suffix with
+       | Librarian_history_window.From_sequence start when relevant && start < c.seq ->
+         gaps := { first_seq = max start (!last_seq + 1); last_seq = c.seq - 1 } :: !gaps
+       | From_sequence _ | Unknown_suffix -> ());
       Hashtbl.clear held);
     last_seq := c.seq;
     last_rev := c.revision;
@@ -116,14 +119,16 @@ let project_rows ~range ~current ~revision ~unsequenced ~changes ~prefix_limited
         ~added:c.added ~removed:c.removed);
     List.iter (fun (fact, _) -> Hashtbl.remove held (id fact)) c.removed;
     List.iter (fun fact -> if wanted fact then Hashtbl.replace held (id fact) fact) c.added) changes;
-  let snapshot_ahead = not prefix_limited && revision > max 1 !last_rev in
+  let snapshot_ahead = match sequence_suffix with
+    | Librarian_history_window.From_sequence _ -> revision > max 1 !last_rev
+    | Unknown_suffix -> false in
   let snapshot_behind = !last_seq > 0 && revision < !last_rev in
   { events = List.of_seq (Queue.to_seq events); events_limited = !events_limited; ticks = List.rev !ticks; gaps = List.rev !gaps; unsequenced_in_range; snapshot_ahead; snapshot_behind }
 ;;
 
 let project ~range ~current ~revision (history : Archive.history) =
-  project_rows ~range ~current ~revision ~unsequenced:history.unsequenced ~changes:history.changes ~folded:history.folded ~prefix_limited:false
+  project_rows ~range ~current ~revision ~unsequenced:history.unsequenced ~changes:history.changes ~folded:history.folded ~sequence_suffix:(Librarian_history_window.From_sequence 1)
 ;;
 let project_window ~range ~current ~revision (history : Librarian_history_window.t) =
-  project_rows ~range ~current ~revision ~unsequenced:history.unsequenced ~changes:history.changes ~folded:history.folded ~prefix_limited:history.details_limited
+  project_rows ~range ~current ~revision ~unsequenced:history.unsequenced ~changes:history.changes ~folded:history.folded ~sequence_suffix:history.sequence_suffix
 ;;

@@ -5,6 +5,10 @@ val includes : range -> at:float -> revision:int option -> bool
 val intersects : range -> Librarian_archive.folded -> bool
 type cut = { by_rows : bool; by_bytes : bool }
 
+(** Every source has observed the sequenced suffix from this point. A cut
+    without any agreeing detail cannot put an upper bound on its lost prefix. *)
+type sequence_suffix = From_sequence of int | Unknown_suffix
+
 type t =
   { unsequenced : Librarian_archive.left list
   ; changes : Librarian_memory_change.t list
@@ -15,6 +19,7 @@ type t =
   ; live_cut : cut
   ; archive_cut : cut
   ; details_limited : bool
+  ; sequence_suffix : sequence_suffix
   ; input_limited : bool
   }
 (** [archive_cut] describes limits relevant to the requested range.

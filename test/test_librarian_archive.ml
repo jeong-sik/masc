@@ -469,6 +469,67 @@ let test_memory_diff_through_compaction () =
   write_live [leading; same_damage; anchored];
   check int "matching bytes may still overlap a visible slot without an exact copy"
     1 (read_overlap ()).unreadable;
+  let mixed_path = Filename.concat place.memory_dir "mixed.memory-log.jsonl" in
+  let mixed_archive = Log_store.archive_path_of_log_path mixed_path in
+  let live_line seq =
+    match last with
+    | Masc.Librarian_log.Committed template ->
+      let row = Masc.Librarian_log.Committed { template with seq; revision = seq; at = Float.of_int seq } in
+      Yojson.Safe.to_string (Masc.Librarian_log_codec.to_json row) ^ "\n"
+    | Masc.Librarian_log.Started _ -> fail "expected a committed checkpoint" in
+  let save_bytes file raw = Out_channel.with_open_bin file (fun oc -> output_string oc raw) in
+  let sequences start count = List.init count (fun i -> start + i) in
+  let rows ns encode = String.concat "" (List.map encode ns) in
+  let live_suffix = rows (List.filter ((<>) 206) (sequences 205 96)) live_line in
+  let budget = String.length live_suffix in
+  let range = Window.Revisions (0, 310) in
+  let mixed () = match Window.read ~range ~max_bytes:budget mixed_path with
+    | Ok window -> window, Diff.project_window ~range ~current:[] ~revision:310 window
+    | Error e -> fail (Masc.Private_jsonl_scan.error_to_string e) in
+  let intervals (d : Diff.t) = List.map (fun (g : Diff.gap) -> g.first_seq, g.last_seq) d.gaps in
+  let cold_line seq = Yojson.Safe.to_string (Masc.Librarian_memory_change.to_json
+    { c with seq; revision = seq; at = Float.of_int seq; added = []; removed = [] }) ^ "\n" in
+  save_bytes mixed_archive (rows (sequences 1 100) cold_line);
+  save_bytes mixed_path (rows (sequences 101 104) live_line ^ live_suffix);
+  let mixed_window, mixed_diff = mixed () in
+  check bool "full cold 1-100 and live from 205 have a known suffix and latest revision" true
+    (not mixed_window.archive_cut.by_bytes && mixed_window.live_cut.by_bytes && mixed_diff.snapshot_ahead);
+  check (list (pair int int)) "the unseen live prefix is uncertain while live sequence 206 is missing"
+    [206, 206] (intervals mixed_diff);
+  let oversized = String.make (budget + 1) ' ' in
+  save_bytes mixed_archive (oversized ^ cold_line 1 ^ rows [100; 102; 103] cold_line);
+  let both_window, both_diff = mixed () in
+  check bool "two independently cut files certify only the intersection of their visible suffixes" true
+    (both_window.archive_cut.by_bytes && both_window.live_cut.by_bytes
+     && intervals both_diff = [206, 206] && both_diff.snapshot_ahead);
+  save_bytes mixed_path (rows (sequences 1 12) live_line);
+  save_bytes mixed_archive (oversized ^ cold_line 1 ^ rows [205; 207; 208] cold_line);
+  let cold_window, cold_diff = mixed () in
+  check bool "a cut archive and complete live history still expose a gap within the archive suffix" true
+    (cold_window.archive_cut.by_bytes && not cold_window.live_cut.by_bytes
+     && intervals cold_diff = [206, 206] && cold_diff.snapshot_ahead);
+  save_bytes mixed_archive (rows (List.filter ((<>) 42) (sequences 1 100)) cold_line);
+  save_bytes mixed_path (oversized ^ live_line 310);
+  let unbounded_window, unbounded_diff = mixed () in
+  check bool "a cut live file with no complete commit can contain both the gap and the snapshot revision" true
+    (unbounded_window.live_cut.by_bytes && not unbounded_window.archive_cut.by_bytes
+     && intervals unbounded_diff = [] && not unbounded_diff.snapshot_ahead);
+  save_bytes mixed_archive (oversized ^ cold_line 310);
+  save_bytes mixed_path (rows [1; 3] live_line);
+  let unknown_archive, archive_diff = mixed () in
+  check bool "an oversized archive commit cannot establish a gap or latest revision from live alone" true
+    (unknown_archive.archive_cut.by_bytes && not unknown_archive.live_cut.by_bytes
+     && intervals archive_diff = [] && not archive_diff.snapshot_ahead);
+  let last_row = 205 + max_rows in
+  let live_rows = rows (List.filter ((<>) 206) (sequences 101 (last_row - 100))) live_line in
+  save_bytes mixed_archive (rows (sequences 1 100) cold_line);
+  save_bytes mixed_path live_rows;
+  let all_revs = Window.Revisions (0, last_row + 1) in
+  let row_cut = Result.get_ok (Window.read ~range:all_revs ~max_bytes:(String.length live_rows) mixed_path) in
+  let row_diff = Diff.project_window ~range:all_revs ~current:[] ~revision:(last_row + 1) row_cut in
+  check bool "trimming only live rows reports its observed internal gap and its actual tail" true
+    (row_cut.live_cut.by_rows && not row_cut.live_cut.by_bytes
+     && intervals row_diff = [206, 206] && row_diff.snapshot_ahead);
   let all = Diff.project ~range:(Diff.Time (0., Float.of_int recent_seq)) ~current ~revision:recent_seq kept in
   check bool "returned changes retain the most recent events and signal the row bound" true
     (all.events_limited && List.length all.events = max_rows

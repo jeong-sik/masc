@@ -1014,6 +1014,49 @@ let test_memory_v2_world_and_diff () =
     | Ok _ -> Alcotest.fail "conflicting window + from_rev must fail")
 ;;
 
+let test_keeper_diff_complete_with_retention () =
+  with_temp_workspace (fun config ->
+    let keeper_id = "folded" in
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
+    mkdir_p keepers_dir;
+    let log_path = Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id in
+    let archive_path = Librarian_log_store.archive_path_of_log_path log_path in
+    let source : Keeper_memory_os_current.source = { kind = Explicit_write; trace_id = "fixture" } in
+    let fact = Keeper_memory_os_types.observed ~claim:"historical removal" ~category:Fact ~now:1.
+        ~origin:{ kind = Authored; trace_id = "fixture" } in
+    let latest = Librarian_archive.max_detailed_rows + 1 in
+    let time seq = 86_401. *. Float.of_int seq in
+    let changes = List.init latest (fun i ->
+      let seq = i + 1 in
+      { Librarian_memory_change.seq; revision = seq; at = time seq; line_at = 0; source; added = [];
+        removed = (if seq = 1 then [fact, Librarian_effects.Dropped { reason = "historical" }] else []) }) in
+    let empty = Result.get_ok (Librarian_archive.history log_path) in
+    Result.get_ok (Librarian_archive.write_history ~archive_path { empty with changes });
+    let snapshot : Keeper_memory_os_current.t =
+      { revision = latest; updated_at = time latest; source; facts = [];
+        change = { added = []; removed = []; retained = 0; invalidated = [] } } in
+    write_file_raw (Keeper_memory_os_current.path_for_keepers_dir ~keepers_dir ~keeper_id)
+      (Yojson.Safe.to_string (Keeper_memory_os_current.to_json snapshot) ^ "\n");
+    List.iter (fun range ->
+      let data = Memory_api.diff_json ~now:(time latest) ~config ~scope:(Memory_api.Scope_keeper keeper_id) ~range ()
+        |> ok_or_fail "recent keeper diff" |> json_member_exn "data" in
+      let coverage = json_member_exn "coverage" data in
+      Alcotest.(check string) "recent coverage" "complete" (json_string_exn "status" coverage);
+      Alcotest.(check int) "last folded sequence" 1 (json_member_exn "folded_detail" coverage |> json_int_exn "through_seq");
+      Alcotest.(check int) "range retains one revision" 1 (List.length (json_list_exn "revisions" data));
+      Alcotest.(check int) "no input or result limit" 0 (List.length (json_list_exn "limit_causes" coverage)))
+      [Memory_api.Range_window Window_24h; Range_revs { from_rev = latest; to_rev = Some latest }];
+    let historical = Memory_api.diff_json ~now:(time 1) ~config ~scope:(Memory_api.Scope_keeper keeper_id)
+        ~range:(Memory_api.Range_window Window_24h) ()
+      |> ok_or_fail "folded keeper diff" |> json_member_exn "data" in
+    let coverage = json_member_exn "coverage" historical in
+    Alcotest.(check string) "requested folded removal has partial coverage" "partial" (json_string_exn "status" coverage);
+    Alcotest.(check bool) "retention intersects this historical window" true (json_bool_exn "retention_applies" coverage);
+    Alcotest.(check bool) "the archive row cap is reported" true
+      (List.mem (`String "archive_rows") (json_list_exn "limit_causes" coverage));
+    Alcotest.(check int) "clipped removal has no fabricated row" 0 (List.length (json_list_exn "retracted" historical)))
+;;
+
 (* ── 5. Contract 4 — Candle Ledger & Config Schema/Patch API ───────────── *)
 
 let candle_time_exn iso =
@@ -3651,6 +3694,7 @@ let () =
       , [ Alcotest.test_case "non-blocking fleet + 24h failures" `Quick test_infra_sandboxes_api ] )
     ; ( "memory_v2"
       , [ Alcotest.test_case "world conflicts + keeper diff + heat" `Quick test_memory_v2_world_and_diff
+        ; Alcotest.test_case "recent Keeper diff is complete with a folded archive" `Quick test_keeper_diff_complete_with_retention
         ; Alcotest.test_case "Track A4 human-readable claim text in world diff" `Quick test_track_a_memory_diff_human_claim_text
         ; Alcotest.test_case "World_memory_store MVCC + keeper Memory OS internals + program_absorption" `Quick
             test_memory_os_world_mvcc_and_keeper_internals

@@ -19,6 +19,16 @@ type cut = { by_rows : bool; by_bytes : bool }
 let no_cut = { by_rows = false; by_bytes = false }
 let is_cut c = c.by_rows || c.by_bytes
 
+type sequence_suffix = From_sequence of int | Unknown_suffix
+
+let source_suffix ~limited first_sequence =
+  if not limited then From_sequence 1 else
+    match first_sequence with Some seq -> From_sequence seq | None -> Unknown_suffix
+
+let common_suffix a b = match a, b with
+  | From_sequence live, From_sequence cold -> From_sequence (max live cold)
+  | Unknown_suffix, _ | _, Unknown_suffix -> Unknown_suffix
+
 type t =
   { unsequenced : Archive.left list
   ; changes : Change.t list
@@ -29,6 +39,7 @@ type t =
   ; live_cut : cut
   ; archive_cut : cut
   ; details_limited : bool
+  ; sequence_suffix : sequence_suffix
   ; input_limited : bool
   }
 
@@ -135,6 +146,9 @@ let cold_row ~end_offset raw =
     then row else Archive.Invalid
   | (Left _ | Detail _ | Folded _ | Opaque _ | Invalid) as row -> row
 
+type observed_change =
+  { fingerprint : string; change : Change.t; in_live : bool; in_archive : bool }
+
 let read ~range ~max_bytes path =
   let open Result.Syntax in
   Archive.with_path_lock ~log_path:path @@ fun () ->
@@ -213,15 +227,18 @@ let read ~range ~max_bytes path =
         let change = if selected then c else
           { c with added = List.filter wanted c.added; removed = List.filter (fun (f, _) -> wanted f) c.removed } in
         let fingerprint = Change.fingerprint c in
+        let in_live, in_archive = match origin with `Live -> true, false | `Cold -> false, true in
         versions := Sequences.update c.seq (function
-          | None -> Some (Some (fingerprint, change))
-          | Some (Some (prior, _)) as found when String.equal prior fingerprint -> found
+          | None -> Some (Some { fingerprint; change; in_live; in_archive })
+          | Some (Some prior) when String.equal prior.fingerprint fingerprint ->
+            Some (Some { prior with in_live = prior.in_live || in_live; in_archive = prior.in_archive || in_archive })
           | Some _ -> Some None) !versions));
   let published = Option.map snd !coverage in
   let may_hide_conflict seq = match published with
     | Some c -> c.conflicting_sequences > Seq_set.cardinal !archive_conflicts
                 && seq <= c.last_seq && not (Seq_set.mem seq !archive_details)
     | None -> false in
+  let first_live_seq = ref None and first_archive_seq = ref None in
   let changes, conflicting, new_conflicting = Sequences.fold
     (fun seq version (changes, conflicting, new_conflicting) ->
     match version with
@@ -231,7 +248,10 @@ let read ~range ~max_bytes path =
       changes, conflicting + 1, new_conflicting
     | Some _ when not (after_fold seq) || may_hide_conflict seq ->
       changes, conflicting, new_conflicting
-    | Some (_, c) ->
+    | Some observed ->
+      if observed.in_live && Option.is_none !first_live_seq then first_live_seq := Some seq;
+      if observed.in_archive && Option.is_none !first_archive_seq then first_archive_seq := Some seq;
+      let c = observed.change in
       List.iter (fun (fact, removal) -> Hashtbl.replace cold_events (Types.memory_id fact, removal, c.Change.at) ()) c.removed;
       c :: changes, conflicting, new_conflicting) !versions ([], 0, 0) in
   let unsequenced = List.rev !old |> List.filter (fun (e : Archive.left) ->
@@ -255,6 +275,14 @@ let read ~range ~max_bytes path =
         | Some boundary, Some first -> first.seq - 1 = boundary.through_seq
         | _ -> false in
       cold_limited && not detail_known, cold_limited in
+  (* Live commits and the archive's confirmed detail section are ordered by
+     sequence. A partial source may still contain any sequence below its first
+     agreeing detail, even if the other source already reported older rows. *)
+  let cold_suffix = match !coverage with
+    | Some (footer, c) when footer <> !last_cold_index || !detail_rows <> min footer c.detail_rows ->
+      Unknown_suffix
+    | Some _ | None -> source_suffix ~limited:cold_detail_limited !first_archive_seq in
+  let sequence_suffix = common_suffix (source_suffix ~limited:(is_cut live.cut) !first_live_seq) cold_suffix in
   let unreadable, overlap_uncertain = unreadable_rows published archived_damage observed_damage in
   let archive_cut = if cold_detail_limited || relevant_legacy_cut || overlap_uncertain then cold.cut else no_cut in
   let details_limited = is_cut live.cut || cold_detail_limited in
@@ -264,5 +292,5 @@ let read ~range ~max_bytes path =
       ~some:(fun (c : Archive.coverage) -> c.unsequenced_rows) published) in
   Ok { changes = List.rev changes; unsequenced; folded = !folded; conflicting;
        unreadable = add_counts unreadable (if cold.fragment then 1 else 0);
-       unsequenced_count; live_cut = live.cut; archive_cut; details_limited;
+       unsequenced_count; live_cut = live.cut; archive_cut; details_limited; sequence_suffix;
        input_limited = details_limited || relevant_legacy_cut || overlap_uncertain }

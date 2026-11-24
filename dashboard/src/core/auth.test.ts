@@ -236,8 +236,9 @@ describe('core/auth', () => {
     registerWorkspaceTargets([
       { id: 'ws-1', label: 'Workspace 1', baseUrl: '/ws/one/' },
       { id: 'ws-2', label: 'Workspace 2', baseUrl: 'https://evil.example.invalid/ws' },
+      { id: 'ws-3', label: 'Workspace 3', baseUrl: '//evil.example/ws' },
     ])
-    expect(workspaceTargets.value).toHaveLength(2)
+    expect(workspaceTargets.value).toHaveLength(3)
     expect(activeWorkspaceId.value).toBe('ws-1')
     expect(resolveWorkspaceUrl('/api/v1/dashboard/shell')).toBe('/ws/one/api/v1/dashboard/shell')
     expect(sessionEpoch.value).toBeGreaterThan(epoch0)
@@ -248,6 +249,10 @@ describe('core/auth', () => {
     expect(currentSessionEpoch()).toBe(epoch1 + 1)
     expect(isEpochCurrent(epoch1)).toBe(false)
     // Cross-origin baseUrl is refused fail-closed so cookies/CSRF stay same-origin
+    expect(resolveWorkspaceUrl('/api/v1/dashboard/shell')).toBe('/api/v1/dashboard/shell')
+
+    // Protocol-relative baseUrl ("//evil.example/ws") is ALSO refused fail-closed
+    expect(selectWorkspace('ws-3')).toBe(true)
     expect(resolveWorkspaceUrl('/api/v1/dashboard/shell')).toBe('/api/v1/dashboard/shell')
 
     const epoch2 = currentSessionEpoch()

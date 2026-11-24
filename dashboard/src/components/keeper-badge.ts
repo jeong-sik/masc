@@ -4,6 +4,7 @@
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { useState } from 'preact/hooks'
+import { useAuthenticatedPortrait } from '../lib/portrait-cache'
 
 // FNV-1a 32-bit hash mapped onto 1..12 (1-indexed OKLCH keeper slot).
 function hash12(str: string): number {
@@ -69,7 +70,7 @@ export function KeeperBadge({
   const slot = kSlot(id)
   const sigil = kSigil(id)
   const display = name ?? id
-  const [portraitFailed, setPortraitFailed] = useState(false)
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
 
   const portraitSrc = typeof portrait === 'string'
     ? portrait
@@ -77,18 +78,20 @@ export function KeeperBadge({
       ? keeperPortraitUrl(id, 64)
       : null
 
-  const showPortrait = portraitSrc !== null && !portraitFailed
+  const authenticatedPortraitSrc = useAuthenticatedPortrait(portraitSrc)
+  const showPortrait = authenticatedPortraitSrc !== null && failedSrc !== authenticatedPortraitSrc
 
   const avatarEl = showPortrait
     ? html`
         <img
           class=${`kb-portrait kb-portrait--${size}${beat ? ' kb-beat' : ''}`}
-          src=${portraitSrc}
+          src=${authenticatedPortraitSrc}
+          data-portrait-url=${portraitSrc ?? undefined}
           alt=${variant === 'full' ? '' : display}
           aria-hidden=${variant === 'full' ? 'true' : undefined}
           loading="lazy"
           decoding="async"
-          onError=${() => setPortraitFailed(true)}
+          onError=${() => setFailedSrc(authenticatedPortraitSrc)}
         />
       `
     : html`

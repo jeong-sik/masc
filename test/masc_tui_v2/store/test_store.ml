@@ -19544,20 +19544,11 @@ let () =
                 (List.length (Work_store.gate_pending_list m1.work));
               (* /gate mode + del-rule + approve-always + retry + keeper-mode *)
               let run_slash (m : Model.t) cmd_str =
-                let m_d =
-                  {
-                    m with
-                    drafts =
-                      m.drafts |> Drafts.set_focus true
-                      |> Drafts.set_current_text cmd_str;
-                  }
-                in
-                Update.step ~now:t0 m_d
-                  (Msg.Key_event
-                     {
-                       key = Keymap.Input.Enter;
-                       mods = Keymap.Input.no_mods;
-                     })
+                match Slash.parse cmd_str with
+                | Ok p ->
+                    let m_next, cmds = Update_actions.execute_slash ~now:t0 m p in
+                    (m_next, Cmd.flatten cmds)
+                | Error _ -> Alcotest.fail ("slash parse failed: " ^ cmd_str)
               in
               let _, cmds_mode = run_slash m1 "/gate mode manual" in
               Alcotest.(check bool) "/gate mode manual emits Post_gate_mode" true

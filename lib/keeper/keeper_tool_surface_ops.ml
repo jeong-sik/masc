@@ -438,36 +438,9 @@ let keeper_list_row_json_of_shape ~shape ~runtime_class config name =
         | None -> `Null
       in
       let recent_turns =
-        match
-          Keeper_turn_pulse.get
-            ~base_path:config.Workspace.base_path
-            ~keeper_name:meta.name
-        with
-        | None -> `Null
-        | Some pulse ->
-          `Assoc
-            [ "known_since", `Float pulse.known_since
-            ; ( "slots"
-              , `List
-                  (List.map
-                     (fun ({ starts_at
-                           ; tally = { ok; rested; failed }
-                           ; causes = { scheduled; reacted; chat; own; unknown }
-                           } :
-                            Keeper_turn_pulse.slot) ->
-                        `Assoc
-                          [ "starts_at", `Int starts_at
-                          ; "ok", `Int ok
-                          ; "rested", `Int rested
-                          ; "failed", `Int failed
-                          ; "scheduled", `Int scheduled
-                          ; "reacted", `Int reacted
-                          ; "chat", `Int chat
-                          ; "own", `Int own
-                          ; "unknown", `Int unknown
-                          ])
-                     pulse.slots) )
-            ]
+        Keeper_turn_pulse.recent_turns_json
+          ~base_path:config.Workspace.base_path
+          ~keeper_name:meta.name
       in
       let runtime_blocker =
         Option.bind registry_entry (fun entry ->

@@ -84,6 +84,11 @@ val record :
 val get : base_path:string -> keeper_name:string -> pulse option
 (** [None] when the keeper was neither seeded nor recorded. *)
 
+val recent_turns_json : base_path:string -> keeper_name:string -> Yojson.Safe.t
+(** A keeper row's [recent_turns] field: [{known_since, slots}] with one
+    object per slot, newest first, or [null] when the keeper has no pulse. The
+    roster and the execution snapshot both send it. *)
+
 val seed_from_decision_log :
   ?now:float -> config:Workspace.config -> keeper_name:string -> unit -> unit
 (** Fill a keeper's pulse from the tail of [decisions.jsonl], and from

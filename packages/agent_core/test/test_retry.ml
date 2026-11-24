@@ -751,8 +751,21 @@ let test_structured_json_signals_and_status_optional_ssot () =
    with
    | Some (Retry.Signal_provider_unavailable { message = "down" }) -> ()
    | _ -> fail "negative JSON-RPC caller status must not shadow JSON status 503");
-  (* 8. P3: trimmed GLM code, depth boundary, non-object JSON, fallback_message *)
-  check bool "trimmed Z.AI quota code 1113 recognized" true
+  (* 8. P3: trimmed code, depth boundary, non-object JSON, fallback_message.
+     The provider-neutral tables read provider-neutral codes. Z.AI numeric codes
+     are interpreted at the GLM codec boundary
+     ([Complete_common.provider_refusal]), so the same digits arriving from a
+     different provider keep that provider's meaning (#54599). *)
+  check bool "trimmed provider-neutral quota code recognized" true
+    (Retry.signals_indicate_account_quota
+       { Retry.codes = [ " insufficient_quota " ]
+       ; types = []
+       ; statuses = []
+       ; detail_reasons = []
+       ; messages = []
+       ; n_ctx = None
+       });
+  check bool "trimmed Z.AI code names nothing in the neutral tables" false
     (Retry.signals_indicate_account_quota
        { Retry.codes = [ " 1113 " ]
        ; types = []

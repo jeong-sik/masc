@@ -19,6 +19,7 @@ module Typography = Masc_tui_ui.Typography
 module Card = Masc_tui_ui.Card
 module Chart = Masc_tui_ui.Chart
 module Memory_charts = Masc_tui_ui.Memory_charts
+module Memory_flow = Masc_tui_ui.Memory_flow
 module Table = Masc_tui_ui.Table
 module Code_lexer = Masc_tui_ui.Code_lexer
 module Diff = Masc_tui_ui.Diff
@@ -1876,6 +1877,94 @@ let test_memory_age_ladder_math_and_keymap_bindings () =
        (Keymap.dispatch ~scope_chain:nav_chain ctrl_o)
        (Some Keymap.Toggle_tool_details))
 
+let test_memory_flow_braille_chart () =
+  let theme = Theme.default in
+  let caps = Presenter.default_capabilities in
+  let count_braille grid =
+    let n = ref 0 in
+    for y = 0 to Cell_grid.rows grid - 1 do
+      for x = 0 to Cell_grid.cols grid - 1 do
+        match (Cell_grid.get grid ~x ~y).glyph with
+        | Cell_grid.Braille mask when mask <> 0 -> incr n
+        | Cell_grid.Braille _
+        | Cell_grid.Empty
+        | Cell_grid.Ascii _
+        | Cell_grid.Utf8 _
+        | Cell_grid.Continuation ->
+            ()
+      done
+    done;
+    !n
+  in
+  (* Time_window labels for Last_30d & Rev_span *)
+  Alcotest.(check string) "Last_30d label" "30d"
+    (Chart.Time_window.label Chart.Time_window.Last_30d);
+  Alcotest.(check string) "Rev_span label" "r12..r48"
+    (Chart.Time_window.label (Chart.Time_window.Rev_span { from_rev = 12; to_rev = 48 }));
+  (* chart_height_for adaptive breakpoints *)
+  Alcotest.(check int) "chart_height_for 20 = 7" 7 (Memory_flow.chart_height_for ~avail_h:20);
+  Alcotest.(check int) "chart_height_for 8 = 2" 2 (Memory_flow.chart_height_for ~avail_h:8);
+  Alcotest.(check int) "chart_height_for 4 = 0" 0 (Memory_flow.chart_height_for ~avail_h:4);
+  (* Honest empty state -> ZERO Braille dots *)
+  let empty_in : Memory_flow.input =
+    {
+      revisions = [];
+      from_unix = Some 1795167600.0;
+      to_unix = Some 1795254000.0;
+      total_now = 100;
+      is_world = false;
+      window = Memory_flow.Window_24h;
+    }
+  in
+  let g_empty = Cell_grid.create ~cols:68 ~rows:7 in
+  Memory_flow.draw g_empty ~rect:(Rect.make ~x:0 ~y:0 ~w:68 ~h:7) ~theme ~caps
+    ~lang:Say.Lang_en ~now_unix:1795254000.0 ~mode:Memory_flow.Flow_io empty_in;
+  Alcotest.(check int) "empty Memory_flow draws 0 Braille cells" 0 (count_braille g_empty);
+  let txt_empty =
+    String.concat "\n" (List.init 7 (fun y -> grid_row_text g_empty ~y))
+  in
+  Alcotest.(check bool) "empty notice honest" true
+    (contains_sub ~needle:"No observed revisions" ~haystack:txt_empty);
+  (* Honest single-point state -> mentions r42 *)
+  let single_in =
+    {
+      empty_in with
+      revisions =
+        [ { Memory_flow.rev = 42; at_unix = 1795250000.0; added = 5; removed = 1 } ];
+    }
+  in
+  let g_single = Cell_grid.create ~cols:68 ~rows:7 in
+  Memory_flow.draw g_single ~rect:(Rect.make ~x:0 ~y:0 ~w:68 ~h:7) ~theme ~caps
+    ~lang:Say.Lang_en ~now_unix:1795254000.0 ~mode:Memory_flow.Flow_io single_in;
+  let txt_single =
+    String.concat "\n" (List.init 7 (fun y -> grid_row_text g_single ~y))
+  in
+  Alcotest.(check bool) "single-point notice shows r42" true
+    (contains_sub ~needle:"r42" ~haystack:txt_single);
+  (* Real multi-revision series -> Flow_io & Net_total draw non-zero Braille *)
+  let real_revs =
+    List.init 8 (fun i ->
+        {
+          Memory_flow.rev = 10 + i;
+          at_unix = 1795170000.0 +. (float_of_int i *. 10800.0);
+          added = 2 + (i mod 4);
+          removed = if i mod 2 = 0 then 1 else 0;
+        })
+  in
+  let real_in = { empty_in with revisions = real_revs; total_now = 140 } in
+  let g_flow = Cell_grid.create ~cols:68 ~rows:7 in
+  Memory_flow.draw g_flow ~rect:(Rect.make ~x:0 ~y:0 ~w:68 ~h:7) ~theme ~caps
+    ~lang:Say.Lang_en ~now_unix:1795254000.0 ~mode:Memory_flow.Flow_io real_in;
+  Alcotest.(check bool) "Flow_io draws Braille cells" true (count_braille g_flow > 0);
+  let g_net = Cell_grid.create ~cols:68 ~rows:7 in
+  Memory_flow.draw g_net ~rect:(Rect.make ~x:0 ~y:0 ~w:68 ~h:7) ~theme ~caps
+    ~lang:Say.Lang_en ~now_unix:1795254000.0 ~mode:Memory_flow.Net_total real_in;
+  Alcotest.(check bool) "Net_total draws Braille cells" true (count_braille g_net > 0);
+  let txt_net =
+    String.concat "\n" (List.init 7 (fun y -> grid_row_text g_net ~y))
+  in
+  Alcotest.(check bool) "Net_total renders mode label" true
+    (contains_sub ~needle:"Net Total" ~haystack:txt_net)
 let () =
   Alcotest.run "masc_tui_keymap_ui"
     [
@@ -1912,6 +2001,8 @@ let () =
             `Quick test_chart_degradation_and_tiers;
           Alcotest.test_case "P0-2 Dual_independent upper Calls + lower USD axis honesty"
             `Quick test_p0_2_dual_independent_usd_axis;
+          Alcotest.test_case "Memory_flow pure bucketing, Flow_io/Net_total & honest empty/n=1"
+            `Quick test_memory_flow_braille_chart;
         ] );
       ( "table",
         [

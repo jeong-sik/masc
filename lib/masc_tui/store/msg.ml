@@ -139,6 +139,10 @@ type http_reply =
       result : (Wire_knowledge.wiki_put_result, http_error) result;
     }
   | Reply_artifacts of (Wire_knowledge.artifact_entry list, http_error) result
+  | Reply_artifact_detail of {
+      id : string;
+      result : (Wire_knowledge.published_artifact_detail, http_error) result;
+    }
   | Reply_world_memory of (Wire_knowledge.world_memory, http_error) result
   | Reply_memory_diff of {
       keeper : string option;
@@ -204,6 +208,12 @@ type http_reply =
   | Reply_connectors of (Wire_runtime.connector_row list, http_error) result
   | Reply_browser_lane of
       (Wire_runtime.browser_lane_status, http_error) result
+  | Reply_browser_tabs of {
+      client_id : string;
+      result : (Wire_runtime.browser_tabs_response, http_error) result;
+    }
+  | Reply_lane_addons of
+      (Wire_runtime.lane_addons_snapshot, http_error) result
   | Reply_mcp_clients of (Wire_runtime.mcp_client_row list, http_error) result
   | Reply_sandboxes of (Wire_infra.sandboxes_snapshot, http_error) result
   | Reply_keeper_sandbox of {

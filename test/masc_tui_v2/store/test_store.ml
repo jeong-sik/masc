@@ -152,6 +152,7 @@ let has_get_health cmds =
               | Cmd.Get_wiki_search _
               | Cmd.Get_wiki_lint
               | Cmd.Get_artifacts
+              | Cmd.Get_artifact_detail _
               | Cmd.Get_world_memory
               | Cmd.Get_memory_diff _
               | Cmd.Get_keeper_memory_os_internals _
@@ -174,6 +175,7 @@ let has_get_health cmds =
               | Cmd.Get_tools_catalog _
               | Cmd.Get_connectors
               | Cmd.Get_browser_lane
+              | Cmd.Get_lane_addons
               | Cmd.Get_mcp_clients
               | Cmd.Get_sandboxes
               | Cmd.Get_keeper_sandbox _
@@ -192,7 +194,7 @@ let has_get_health cmds =
       | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
-      | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+      | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _
       | Cmd.Start_local_server
       | Cmd.Restart_tui
@@ -212,7 +214,7 @@ let has_sync_streams cmds =
       | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
-      | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+      | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _
       | Cmd.Start_local_server
       | Cmd.Restart_tui
@@ -233,7 +235,7 @@ let has_quit cmds =
       | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
-      | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+      | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _
       | Cmd.Start_local_server
       | Cmd.Restart_tui ->
@@ -432,7 +434,7 @@ let test_three_channel_separation () =
         | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -465,7 +467,7 @@ let test_three_channel_separation () =
         | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -940,7 +942,7 @@ let test_workspace_mismatch_recovery () =
         | Cmd.Sync_streams _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -1010,7 +1012,10 @@ let test_subscriptions_bounded_and_zero_polling () =
       in
       let expected_view =
         match tab with
-        | Nav.Runtime_quotas_credits | Nav.Runtime_failover_lanes -> 0
+        | Nav.Runtime_quotas_credits
+        | Nav.Runtime_failover_lanes
+        | Nav.Runtime_addons_browser ->
+            0
         | Nav.Runtime_efficiency_spend | Nav.Runtime_tools_connectors -> 1
       in
       check_plan "Runtime" m ~expected_view)
@@ -1326,7 +1331,7 @@ let test_verifier_regressions () =
         | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -1594,7 +1599,7 @@ let test_verifier_regressions () =
     | Cmd.Update_workspace_guard _
     | Cmd.Voice_cmd _
     | Cmd.Copy_clipboard _
-    | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+    | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
     | Cmd.Open_editor_escape_hatch _
     | Cmd.Start_local_server
     | Cmd.Restart_tui
@@ -1686,7 +1691,8 @@ let test_verifier_regressions () =
         | Cmd.Post_schedule_create _
         | Cmd.Post_connector_bind _
         | Cmd.Post_repo_add _
-        | Cmd.Post_task_cancel _ ->
+        | Cmd.Post_task_cancel _
+        | Cmd.Post_browser_tabs _ ->
             false)
     | Cmd.Batch _
     | Cmd.Http_get _
@@ -1696,7 +1702,7 @@ let test_verifier_regressions () =
     | Cmd.Update_workspace_guard _
     | Cmd.Voice_cmd _
     | Cmd.Copy_clipboard _
-    | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+    | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
     | Cmd.Open_editor_escape_hatch _
     | Cmd.Start_local_server
     | Cmd.Restart_tui
@@ -1780,7 +1786,7 @@ let test_verifier_regressions () =
         | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -1911,7 +1917,7 @@ let test_round1_settings_and_overlay_transitions () =
         | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -2015,7 +2021,7 @@ let test_round2_store_regressions () =
         | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -2308,7 +2314,7 @@ let test_v25_data_pipeline_and_settings_2pane () =
         | Cmd.Batch _ | Cmd.Http_post _ | Cmd.Http_put _
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
-        | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+        | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
             false)
@@ -2655,7 +2661,7 @@ let test_v25_data_pipeline_and_settings_2pane () =
         | Cmd.Batch _ | Cmd.Http_post _ | Cmd.Http_put _
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
-        | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+        | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
             false)
@@ -3281,7 +3287,8 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _
-        | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+        | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _
+        | Cmd.Export_artifact _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
             None)
@@ -3897,7 +3904,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
              true
          | _ -> false)
        cmds_copy_fresh);
-  (* P2-7b: Media_viewer [y] copies selected artifact SHA256 *)
+  (* P2-7b: Media_viewer [y] copies raw body (or fetches & copies), [H] copies SHA256 *)
   let art1 : Wire_knowledge.artifact_entry =
     {
       id = "artifact-0123456789abcdef0123456789abcdef";
@@ -3906,7 +3913,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
       summary = "Daily report";
       author = "alpha";
       created_at_unix = 1700000000.0;
-      body = { sha256 = "deadbeef0123456789"; bytes = 1024; mime = "text/markdown" };
+      body = { sha256 = "deadbeef0123456789"; bytes = 1024; mime = "text/html" };
     }
   in
   let m_mv =
@@ -3919,12 +3926,46 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     }
   in
   let _, cmds_mv_y = step m_mv (char_key "y") in
-  Alcotest.(check bool) "Media_viewer [y] copies artifact SHA256" true
+  Alcotest.(check bool) "Media_viewer [y] fetches full body when detail absent"
+    true
+    (has_cmd
+       (function
+         | Cmd.Fetch_artifact_and_copy { id; _ } when String.equal id art1.id ->
+             true
+         | _ -> false)
+       cmds_mv_y);
+  let _, cmds_mv_h = step m_mv (char_key "H") in
+  Alcotest.(check bool) "Media_viewer [H] copies artifact SHA256" true
     (has_cmd
        (function
          | Cmd.Copy_clipboard "deadbeef0123456789" -> true
          | _ -> false)
-       cmds_mv_y);
+       cmds_mv_h);
+  let art1_detail : Wire_knowledge.published_artifact_detail =
+    {
+      artifact = art1;
+      content = "<!doctype html><h1>Full Report</h1>";
+      revisions = [];
+      shared = false;
+      share_version = 0;
+    }
+  in
+  let m_mv_loaded =
+    {
+      m_mv with
+      knowledge =
+        Knowledge_store.apply_artifact_detail ~observed_at:t0 art1_detail
+          m_mv.knowledge;
+    }
+  in
+  let _, cmds_mv_y2 = step m_mv_loaded (char_key "y") in
+  Alcotest.(check bool) "Media_viewer [y] copies loaded HTML content directly"
+    true
+    (has_cmd
+       (function
+         | Cmd.Copy_clipboard "<!doctype html><h1>Full Report</h1>" -> true
+         | _ -> false)
+       cmds_mv_y2);
   let m_offline =
     {
       m0 with
@@ -5337,7 +5378,7 @@ let test_p1_work_inbox_ask_approval_sync () =
         | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -5378,7 +5419,7 @@ let test_p1_work_inbox_ask_approval_sync () =
         | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -6735,7 +6776,9 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
         | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram
+        | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _
+        | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -7650,7 +7693,8 @@ let test_failure_is_asked_again_for_a_new_question () =
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _
-        | Cmd.Cancel_memory_diagram | Cmd.Open_external_url _
+        | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _
+        | Cmd.Export_artifact _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
             false)
@@ -8029,6 +8073,8 @@ let sent_get req cmds =
       | Cmd.Copy_clipboard _
       | Cmd.Render_memory_diagram _
       | Cmd.Cancel_memory_diagram
+      | Cmd.Fetch_artifact_and_copy _
+      | Cmd.Export_artifact _
       | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _
       | Cmd.Start_local_server
@@ -8468,6 +8514,948 @@ let test_busy_enter_queues_and_steer_cuts_only_own_request () =
     (queued (one_request "late steer" cmds_g1));
   Alcotest.(check bool) "the late steer fallback warns" true (warned g1)
 
+let test_feature_wave1_store_and_polish_nits () =
+  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let has_cmd pred cmds = List.exists pred (Cmd.flatten cmds) in
+
+  (* === Feature 1: Artifacts auto-detail fetch, stale guard, [y]/[H]/[e]/[o] === *)
+  let art_a : Wire_knowledge.artifact_entry =
+    {
+      id = "art-alpha";
+      revision = 2;
+      title = "Alpha Brief";
+      summary = "Alpha HTML";
+      author = "alpha";
+      created_at_unix = 1795254000.0;
+      body = { sha256 = "sha-alpha-111"; bytes = 128; mime = "text/html" };
+    }
+  in
+  let art_b : Wire_knowledge.artifact_entry =
+    {
+      art_a with
+      id = "art-beta";
+      title = "Beta Note";
+      body = { sha256 = "sha-beta-222"; bytes = 128; mime = "text/markdown" };
+    }
+  in
+  let m_art =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Knowledge };
+      knowledge =
+        Knowledge_store.empty
+        |> Knowledge_store.set_tab Nav.Knowledge_artifacts
+        |> Knowledge_store.apply_artifacts ~observed_at:t0 [ art_a; art_b ];
+    }
+  in
+  let m_art2, cmds_move =
+    Update.step ~now:t1 m_art (Msg.Key_event (char_key "j"))
+  in
+  Alcotest.(check bool) "moving artifact selection fetches Get_artifact_detail(art-beta)"
+    true
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_artifact_detail { id = "art-beta"; _ }; _ } ->
+             true
+         | _ -> false)
+       cmds_move);
+  (* Stale detail for art-alpha must be ignored while art-beta is selected *)
+  let stale_detail : Wire_knowledge.published_artifact_detail =
+    {
+      artifact = art_a;
+      content = "<h1>STALE ALPHA</h1>";
+      revisions = [];
+      shared = false;
+      share_version = 0;
+    }
+  in
+  let m_art_after_stale, _ =
+    Update.step ~now:t1 m_art2
+      (Msg.Http_reply
+         {
+           epoch = m_art2.epoch;
+           reply = Msg.Reply_artifact_detail { id = "art-alpha"; result = Ok stale_detail };
+         })
+  in
+  Alcotest.(check bool) "stale Reply_artifact_detail ignored" true
+    (Option.is_none (Observed.to_option m_art_after_stale.knowledge.active_artifact_detail));
+  let _, cmds_e =
+    Update.step ~now:t1 m_art (Msg.Key_event (char_key "e"))
+  in
+  Alcotest.(check bool) "Artifacts [e] emits Export_artifact(open_after=false, .html)"
+    true
+    (has_cmd
+       (function
+         | Cmd.Export_artifact { id = "art-alpha"; ext = ".html"; open_after = false; _ } ->
+             true
+         | _ -> false)
+       cmds_e);
+  let _, cmds_o =
+    Update.step ~now:t1 m_art (Msg.Key_event (char_key "o"))
+  in
+  Alcotest.(check bool) "Artifacts [o] emits Export_artifact(open_after=true, .html)"
+    true
+    (has_cmd
+       (function
+         | Cmd.Export_artifact { id = "art-alpha"; ext = ".html"; open_after = true; _ } ->
+             true
+         | _ -> false)
+       cmds_o);
+  let _, cmds_h =
+    Update.step ~now:t1 m_art (Msg.Key_event (char_key "H"))
+  in
+  Alcotest.(check bool) "Artifacts [H] copies SHA-256" true
+    (has_cmd
+       (function Cmd.Copy_clipboard "sha-alpha-111" -> true | _ -> false)
+       cmds_h);
+
+  (* === Feature 2: Runtime_addons_browser, stale tab guard, Space/t/y/o, SSE invalidation === *)
+  let client_1 : Wire_runtime.browser_client_row =
+    {
+      client_id = "ego-1";
+      browser = "Ego Browser";
+      version = "131.0";
+      engine_version = "131.0";
+      transport = "ego";
+      space = Some { space_id = 1; space_name = "research" };
+      ownership = Some "agent";
+      presence_state = Some "live";
+      presence_reason = None;
+      interactions = [];
+      last_activities = [];
+    }
+  in
+  let tab_1 : Wire_runtime.browser_tab_row =
+    {
+      id = 7;
+      title = "Docs";
+      url = "https://example.com/docs";
+      active = true;
+      window_id = Some 1;
+      opened_by = Some Wire_runtime.Tab_origin_agent;
+      label = None;
+      dialog_present = false;
+      dialog_kind = None;
+    }
+  in
+  let m_ab =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Runtime; pane_index = 1 };
+      runtime =
+        Runtime_store.empty
+        |> Runtime_store.set_tab Nav.Runtime_addons_browser
+        |> Runtime_store.apply_browser_lane ~observed_at:t0
+             {
+               ok = true;
+               available = true;
+               inventory_complete = true;
+               client_count = 1;
+               issue_count = 0;
+               automatic_browse_ok = true;
+               detail = None;
+               clients = [ client_1 ];
+               issues = [];
+             };
+    }
+  in
+  Alcotest.(check int) "Runtime_addons_browser has 2 focusable panes" 2
+    (Model.focusable_pane_count m_ab);
+  let _, cmds_t = Update.step ~now:t1 m_ab (Msg.Key_event (char_key "t")) in
+  Alcotest.(check bool) "[t] emits Post_browser_tabs for selected client" true
+    (has_cmd
+       (function
+         | Cmd.Http_post { req = Cmd.Post_browser_tabs { client_id = "ego-1" }; _ } ->
+             true
+         | _ -> false)
+       cmds_t);
+  (* Stale Reply_browser_tabs for wrong client_id must be ignored *)
+  let m_ab_stale, _ =
+    Update.step ~now:t1 m_ab
+      (Msg.Http_reply
+         {
+           epoch = m_ab.epoch;
+           reply =
+             Msg.Reply_browser_tabs
+               {
+                 client_id = "other-client";
+                 result =
+                   Ok
+                     {
+                       client_id = Some "other-client";
+                       tabs = [ tab_1 ];
+                       complete = true;
+                       unavailable_count = 0;
+                       error = None;
+                     };
+               };
+         })
+  in
+  Alcotest.(check bool) "stale Reply_browser_tabs ignored" true
+    (Option.is_none
+       (Observed.to_option
+          (Runtime_store.browser_tabs_for ~client_id:"ego-other"
+             m_ab_stale.runtime)));
+  let m_ab_tabs, _ =
+    Update.step ~now:t1 m_ab
+      (Msg.Http_reply
+         {
+           epoch = m_ab.epoch;
+           reply =
+             Msg.Reply_browser_tabs
+               {
+                 client_id = "ego-1";
+                 result =
+                   Ok
+                     {
+                       client_id = Some "ego-1";
+                       tabs = [ tab_1 ];
+                       complete = true;
+                       unavailable_count = 0;
+                       error = None;
+                     };
+               };
+         })
+  in
+  (* Space switches browser_right_focus Clients -> Tabs; y copies URL; o opens URL *)
+  let m_ab_tab_focus, _ =
+    Update.step ~now:t1 m_ab_tabs (Msg.Key_event (char_key " "))
+  in
+  Alcotest.(check bool) "[Space] toggles right focus to `Tabs" true
+    (m_ab_tab_focus.runtime.browser_right_focus = `Tabs);
+  let _, cmds_tab_y =
+    Update.step ~now:t1 m_ab_tab_focus (Msg.Key_event (char_key "y"))
+  in
+  Alcotest.(check bool) "[y] on tab copies tab URL" true
+    (has_cmd
+       (function Cmd.Copy_clipboard "https://example.com/docs" -> true | _ -> false)
+       cmds_tab_y);
+  let _, cmds_tab_o =
+    Update.step ~now:t1 m_ab_tab_focus (Msg.Key_event (char_key "o"))
+  in
+  Alcotest.(check bool) "[o] on tab emits Open_external_url" true
+    (has_cmd
+       (function Cmd.Open_external_url "https://example.com/docs" -> true | _ -> false)
+       cmds_tab_o);
+  (* SSE Dataset_lane_addons triggers Get_lane_addons refetch when viewing Runtime *)
+  let _, cmds_sse_addon =
+    Update.step ~now:t1 m_ab
+      (Msg.Sse_event
+         {
+           epoch = m_ab.epoch;
+           event =
+             Msg.Sse_observer_delivery
+               {
+                 cursor = Some 10;
+                 decoded =
+                   Wire_observer.Event
+                     (Wire_observer.Dataset_changed Wire_observer.Dataset_lane_addons);
+               };
+         })
+  in
+  Alcotest.(check bool) "SSE Dataset_lane_addons refetches Get_lane_addons on Runtime"
+    true
+    (has_cmd
+       (function Cmd.Http_get { req = Cmd.Get_lane_addons; _ } -> true | _ -> false)
+       cmds_sse_addon);
+
+  (* === Feature 3: [g] toggles Memory Flow mode on Knowledge > Memory & Keeper_memory === *)
+  let m_mem =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Knowledge };
+      knowledge = Knowledge_store.set_tab Nav.Knowledge_memory Knowledge_store.empty;
+    }
+  in
+  let mode0 = m_mem.knowledge.memory_flow_mode in
+  let m_mem_g, _ = Update.step ~now:t1 m_mem (Msg.Key_event (char_key "g")) in
+  Alcotest.(check bool) "[g] toggles memory_flow_mode Flow_io -> Net_total" true
+    (m_mem_g.knowledge.memory_flow_mode <> mode0);
+  let m_mem_g2, _ = Update.step ~now:t1 m_mem_g (Msg.Key_event (char_key "g")) in
+  Alcotest.(check bool) "[g] twice toggles back to Flow_io" true
+    (m_mem_g2.knowledge.memory_flow_mode = mode0);
+
+  (* === Feature 4: Honest Per-View SSOT mode + Unified Infra timeline [s] === *)
+  let live_fr =
+    {
+      m0.freshness with
+      observer = Health.Live { last_event_ns = t0; revision = 1 };
+      fleet = Health.Live { last_event_ns = t0; revision = 1 };
+      view_stream = Some (Health.Live { last_event_ns = t0; revision = 1 });
+    }
+  in
+  let m_live = { m0 with freshness = live_fr } in
+  (match Model.active_view_ssot_mode m_live with
+  | Model.Live_sse _ -> ()
+  | Model.Synced_snapshot _ | Model.Snapshot_only _ ->
+      Alcotest.fail "Pulse should be Live_sse");
+  let m_work = { m_live with nav = { m_live.nav with workspace = Nav.Work } } in
+  (match Model.active_view_ssot_mode m_work with
+  | Model.Synced_snapshot _ -> ()
+  | Model.Live_sse _ | Model.Snapshot_only _ ->
+      Alcotest.fail "Work should be Synced_snapshot");
+  let m_repos =
+    {
+      m_live with
+      nav = { m_live.nav with workspace = Nav.Infra };
+      infra = Infra_store.set_tab Nav.Infra_repos_changes m_live.infra;
+    }
+  in
+  (match Model.active_view_ssot_mode m_repos with
+  | Model.Snapshot_only _ -> ()
+  | Model.Live_sse _ | Model.Synced_snapshot _ ->
+      Alcotest.fail "Infra > Repos & Changes should be Snapshot_only");
+  let log_row : Wire_infra.system_log_entry =
+    {
+      seq = 1;
+      ts = "2026-11-23T01:00:00Z";
+      level = Wire_infra.Log_info;
+      source = "server";
+      module_name = "server";
+      message = "server boot log";
+      keeper = Some "alpha";
+      turn_id = None;
+      category = None;
+      details = `Assoc [];
+    }
+  in
+  let m_logs =
+    {
+      m_live with
+      nav = { m_live.nav with workspace = Nav.Infra };
+      infra =
+        Infra_store.empty
+        |> Infra_store.set_tab Nav.Infra_activity_logs
+        |> Infra_store.apply_log_snapshot [ log_row ]
+        |> Infra_store.push_activity
+             {
+               Infra_store.at_unix = 1795400000.0;
+               kind = Infra_store.Activity_tool_call;
+               keeper = Some "beta";
+               summary = "tool_done";
+               detail = Some "ran cargo test";
+             };
+    }
+  in
+  Alcotest.(check int) "Source_all merges 1 log + 1 event = 2" 2
+    (List.length (Infra_store.visible_timeline m_logs.infra));
+  let _, cmds_evt_y = Update.step ~now:t1 m_logs (Msg.Key_event (char_key "y")) in
+  Alcotest.(check bool) "[y] on newest Entry_event copies event detail" true
+    (has_cmd
+       (function
+         | Cmd.Copy_clipboard s ->
+             Store_scroll.contains_ci ~needle:"ran cargo test" s
+         | _ -> false)
+       cmds_evt_y);
+  let m_logs_s1, _ = Update.step ~now:t1 m_logs (Msg.Key_event (char_key "s")) in
+  Alcotest.(check bool) "[s] 1st press -> Source_logs" true
+    (m_logs_s1.infra.source_filter = Infra_store.Source_logs);
+  Alcotest.(check int) "Source_logs has 1 item" 1
+    (List.length (Infra_store.visible_timeline m_logs_s1.infra));
+  let m_logs_s2, _ = Update.step ~now:t1 m_logs_s1 (Msg.Key_event (char_key "s")) in
+  Alcotest.(check bool) "[s] 2nd press -> Source_events" true
+    (m_logs_s2.infra.source_filter = Infra_store.Source_events);
+  Alcotest.(check int) "Source_events has 1 item" 1
+    (List.length (Infra_store.visible_timeline m_logs_s2.infra));
+
+  (* === 4 Polish Nits (#373/#374) === *)
+  (* Nit 2: Left_press in apply_mouse does NOT cancel editing_field_key; Wheel DOES *)
+  let edit_schema : Wire_config.config_schema =
+    {
+      target = Wire_config.Target_runtime;
+      keeper = None;
+      file_exists = true;
+      file_sha256 = "sha-edit";
+      sections =
+        [
+          {
+            id = "tui";
+            category = Wire_config.Cat_general_ui;
+            title = "TUI";
+            fields =
+              [
+                {
+                  table = "tui";
+                  key = "theme";
+                  full_key = "tui.theme";
+                  label = "Theme";
+                  env = None;
+                  description = None;
+                  kind = Wire_config.Field_string;
+                  value = Wire_config.Val_string "midnight";
+                  default_value = None;
+                  provenance = Wire_config.Prov_project;
+                  reload_scope = Wire_config.Hot_reload;
+                  secret = false;
+                  writable = true;
+                };
+              ];
+          };
+        ];
+    }
+  in
+  let m_edit =
+    let cfg =
+      match
+        Config_store.empty
+        |> Config_store.set_tab Nav.Settings_general_ui
+        |> Config_store.apply_schema ~observed_at:t0 edit_schema
+        |> Config_store.begin_edit_selected
+      with
+      | Ok c -> c
+      | Error msg -> Alcotest.fail ("begin_edit_selected failed: " ^ msg)
+    in
+    {
+      m0 with
+      config = cfg;
+      nav = { m0.nav with overlay = Some (Nav.Settings Nav.Settings_general_ui) };
+    }
+  in
+  Alcotest.(check bool) "editing started" true
+    (Config_store.is_editing_field m_edit.config);
+  let m_after_click, _ =
+    Update.step ~now:t1 m_edit
+      (Msg.Mouse_event (Keymap.Input.Left_press { col = 10; row = 5 }))
+  in
+  Alcotest.(check bool) "Nit 2: Left_press preserves editing_field_key" true
+    (Config_store.is_editing_field m_after_click.config);
+  let m_after_wheel, _ =
+    Update.step ~now:t1 m_after_click
+      (Msg.Mouse_event
+         (Keymap.Input.Wheel { col = 10; row = 5; dir = Keymap.Input.Wheel_down }))
+  in
+  Alcotest.(check bool) "Nit 2: Wheel_down cancels editing_field_key" false
+    (Config_store.is_editing_field m_after_wheel.config);
+  (* Nit 4: Incidents [J] scrolls bracket-prefixed embedded JSON via Json_tree line count *)
+  let big_json =
+    "[HTTP 500] {"
+    ^ String.concat ","
+        (List.init 30 (fun i -> Printf.sprintf "\"k%02d\":\"val-%02d\"" i i))
+    ^ "}"
+  in
+  let incidents_with_json, _ =
+    Incidents.push ~occurred_at_unix:1795254000.0
+      ~source:Health.Source_client_http ~summary:(Say.literal "HTTP fail")
+      ~detail:big_json ~status:Health.Resolved Incidents.empty
+  in
+  let m_inc =
+    {
+      m0 with
+      nav = { m0.nav with overlay = Some Nav.Incidents };
+      incidents = incidents_with_json;
+    }
+  in
+  let m_inc_j, _ = Update.step ~now:t1 m_inc (Msg.Key_event (char_key "J")) in
+  Alcotest.(check bool) "Nit 4: Incidents [J] scrolls bracket-prefixed embedded JSON"
+    true (m_inc_j.incidents.detail_scroll_offset > 0);
+
+  (* === Review #389 Regressions (Items 6, 9, 13) === *)
+  (* Item 9: view_stream cleared on tab change, stale freshness ignored, Dive_keeper SSOT *)
+  let m_eff_live =
+    {
+      m_live with
+      nav = { m_live.nav with workspace = Nav.Runtime };
+      runtime = Runtime_store.set_tab Nav.Runtime_efficiency_spend m_live.runtime;
+      freshness =
+        {
+          m_live.freshness with
+          view_stream = Some (Health.Live { last_event_ns = t0; revision = 1 });
+        };
+    }
+  in
+  (match Model.active_view_ssot_mode m_eff_live with
+  | Model.Live_sse { live_count = 3; planned_count = 3; _ } -> ()
+  | _ -> Alcotest.fail "expected Live_sse 3/3 on Runtime_efficiency_spend");
+  let m_failover, _ =
+    Update.step ~now:t1 m_eff_live (Msg.Key_event (char_key "]"))
+  in
+  Alcotest.(check bool) "Item 9: switching away from view-stream tab clears view_stream"
+    true (Option.is_none m_failover.freshness.view_stream);
+  let m_after_stale_sse, _ =
+    Update.step ~now:t1 m_failover
+      (Msg.Sse_freshness
+         {
+           epoch = m_failover.epoch;
+           stream = Subscriptions.Stream_model_metrics;
+           freshness =
+             Health.Disconnected { since_ns = t1; reason = Health.Stream_eof };
+         })
+  in
+  Alcotest.(check bool) "Item 9: stale view_stream Disconnected ignored after tab switch"
+    true (Option.is_none m_after_stale_sse.freshness.view_stream);
+  let m_dive_mem =
+    {
+      m_eff_live with
+      nav =
+        {
+          m_eff_live.nav with
+          dive_stack = [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory } ];
+        };
+    }
+  in
+  Alcotest.(check int) "Item 9: Dive_keeper drops view-scoped stream from Subscriptions.plan"
+    2 (List.length (Subscriptions.plan m_dive_mem));
+  (match Model.active_view_ssot_mode m_dive_mem with
+  | Model.Synced_snapshot _ -> ()
+  | _ -> Alcotest.fail "Item 9: Dive_keeper Keeper_memory must report Synced_snapshot");
+  let m_dive_chat =
+    {
+      m_eff_live with
+      nav =
+        {
+          m_eff_live.nav with
+          dive_stack = [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat } ];
+        };
+    }
+  in
+  (match Model.active_view_ssot_mode m_dive_chat with
+  | Model.Live_sse { stream_name = "fleet/stream"; live_count = 2; planned_count = 2; _ } -> ()
+  | _ -> Alcotest.fail "Item 9: Dive_keeper Keeper_chat must report Live_sse 2/2 (not inherited 3/3)");
+
+  (* Item 13: Runtime_addons_browser pane 1 [y] respects browser_right_focus *)
+  let bl_snap : Wire_runtime.browser_lane_status =
+    {
+      ok = true;
+      available = true;
+      inventory_complete = true;
+      client_count = 1;
+      issue_count = 0;
+      automatic_browse_ok = true;
+      detail = None;
+      clients =
+        [
+          {
+            client_id = "ego-client-focus-1";
+            browser = "Ego";
+            version = "131";
+            engine_version = "131";
+            transport = "ego";
+            space = None;
+            ownership = Some "agent";
+            presence_state = Some "present";
+            presence_reason = None;
+            interactions = [];
+            last_activities = [];
+          };
+        ];
+      issues = [];
+    }
+  in
+  let tabs_snap : Wire_runtime.browser_tabs_response =
+    {
+      client_id = Some "ego-client-focus-1";
+      tabs =
+        [
+          {
+            id = 7;
+            title = "Focus Tab";
+            url = "https://example.com/focus-tab";
+            active = true;
+            window_id = Some 1;
+            opened_by = Some Wire_runtime.Tab_origin_agent;
+            label = None;
+            dialog_present = false;
+            dialog_kind = None;
+          };
+        ];
+      complete = true;
+      unavailable_count = 0;
+      error = None;
+    }
+  in
+  let m_ab_p1 =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Runtime; pane_index = 1 };
+      runtime =
+        Runtime_store.empty
+        |> Runtime_store.set_tab Nav.Runtime_addons_browser
+        |> Runtime_store.apply_browser_lane ~observed_at:t0 bl_snap
+        |> Runtime_store.apply_browser_tabs ~observed_at:t0
+             ~client_id:"ego-client-focus-1" tabs_snap;
+    }
+  in
+  let _, cmds_cl_y = Update.step ~now:t1 m_ab_p1 (Msg.Key_event (char_key "y")) in
+  Alcotest.(check bool) "Item 13: Clients focus [y] copies client_id" true
+    (has_cmd
+       (function Cmd.Copy_clipboard s -> String.equal s "ego-client-focus-1" | _ -> false)
+       cmds_cl_y);
+  let m_ab_tabs, _ = Update.step ~now:t1 m_ab_p1 (Msg.Key_event (char_key " ")) in
+  let _, cmds_tb_y = Update.step ~now:t1 m_ab_tabs (Msg.Key_event (char_key "y")) in
+  Alcotest.(check bool) "Item 13: Tabs focus [y] copies tab URL" true
+    (has_cmd
+       (function Cmd.Copy_clipboard s -> String.equal s "https://example.com/focus-tab" | _ -> false)
+       cmds_tb_y);
+
+  (* Item 6: Reply_artifact_detail Error on SHA-targeted Artifact_dive marks detail failed *)
+  let sha_art : Wire_knowledge.artifact_entry =
+    {
+      id = "artifact-aabbccdd11223344";
+      revision = 1;
+      title = "SHA Doc";
+      summary = "";
+      author = "alpha";
+      created_at_unix = 1795254000.0;
+      body = { sha256 = "sha-target-999"; bytes = 128; mime = "text/html" };
+    }
+  in
+  let m_sha_dive =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Knowledge;
+          dive_stack = [ Nav.Dive_knowledge (Nav.Artifact_dive "sha-target-999") ];
+        };
+      knowledge =
+        Knowledge_store.empty
+        |> Knowledge_store.apply_artifacts ~observed_at:t0 [ sha_art ];
+    }
+  in
+  let m_sha_err, _ =
+    Update.step ~now:t1 m_sha_dive
+      (Msg.Http_reply
+         {
+           epoch = m_sha_dive.epoch;
+           reply =
+             Msg.Reply_artifact_detail
+               {
+                 id = "artifact-aabbccdd11223344";
+                 result =
+                   Error (Msg.Http_error { status = 404; body = "gone"; api_error = None });
+               };
+         })
+  in
+  (match m_sha_err.knowledge.active_artifact_detail with
+  | Observed.Failed _ -> ()
+  | _ -> Alcotest.fail "Item 6: expected active_artifact_detail = Observed.Failed on SHA-targeted dive")
+
+let test_pr54465_p2_fixes () =
+  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let t0 = Clock.Mono.of_ns 1_000_000_000L in
+  let t1 = Clock.Mono.of_ns 2_000_000_000L in
+  let has_cmd pred cmds = List.exists pred (Cmd.flatten cmds) in
+
+  (* P2-1: Browser tabs keyed per client_id — client A failure never leaks to client B *)
+  let mk_client cid : Wire_runtime.browser_client_row =
+    {
+      client_id = cid;
+      browser = "Ego Browser";
+      version = "131.0";
+      engine_version = "131.0";
+      transport = "ego";
+      space = Some { space_id = 1; space_name = cid };
+      ownership = Some "agent";
+      presence_state = Some "present";
+      presence_reason = None;
+      interactions = [];
+      last_activities = [];
+    }
+  in
+  let bl : Wire_runtime.browser_lane_status =
+    {
+      ok = true;
+      available = true;
+      inventory_complete = true;
+      client_count = 2;
+      issue_count = 0;
+      automatic_browse_ok = true;
+      detail = None;
+      clients = [ mk_client "ego-a"; mk_client "ego-b" ];
+      issues = [];
+    }
+  in
+  let m_bl =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Runtime; pane_index = 1 };
+      runtime =
+        Runtime_store.empty
+        |> Runtime_store.set_tab Nav.Runtime_addons_browser
+        |> Runtime_store.apply_browser_lane ~observed_at:t0 bl;
+    }
+  in
+  let m_bl_err, _ =
+    Update.step ~now:t1 m_bl
+      (Msg.Http_reply
+         {
+           epoch = m_bl.epoch;
+           reply =
+             Msg.Reply_browser_tabs
+               {
+                 client_id = "ego-a";
+                 result =
+                   Error
+                     (Msg.Http_error
+                        { status = 500; body = "ego-a boom"; api_error = None });
+               };
+         })
+  in
+  (match Runtime_store.browser_tabs_for ~client_id:"ego-a" m_bl_err.runtime with
+  | Observed.Failed _ -> ()
+  | _ -> Alcotest.fail "P2-1: expected ego-a browser_tabs slot to be Failed");
+  (match Runtime_store.browser_tabs_for ~client_id:"ego-b" m_bl_err.runtime with
+  | Observed.Absent -> ()
+  | _ -> Alcotest.fail "P2-1: expected ego-b browser_tabs slot to stay Absent");
+
+  (* P2-2: Artifact_dive unmatched target must NOT fall back to selected_artifact *)
+  let art_a : Wire_knowledge.artifact_entry =
+    {
+      id = "art-existing";
+      revision = 1;
+      title = "Existing Artifact";
+      summary = "Real";
+      author = "alpha";
+      created_at_unix = 1795254000.0;
+      body = { sha256 = "sha-existing"; bytes = 64; mime = "text/html" };
+    }
+  in
+  let m_missing_dive =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Knowledge;
+          dive_stack =
+            [ Nav.Dive_knowledge (Nav.Artifact_dive "art-nonexistent") ];
+        };
+      knowledge =
+        Knowledge_store.empty
+        |> Knowledge_store.apply_artifacts ~observed_at:t0 [ art_a ];
+    }
+  in
+  List.iter
+    (fun key ->
+      let m_after, cmds =
+        Update.step ~now:t1 m_missing_dive (Msg.Key_event (char_key key))
+      in
+      Alcotest.(check int)
+        (Printf.sprintf "P2-2: Artifact_dive [%s] emits 0 cmds on unmatched target"
+           key)
+        0 (List.length (Cmd.flatten cmds));
+      Alcotest.(check bool)
+        (Printf.sprintf "P2-2: Artifact_dive [%s] shows warning toast" key)
+        true (Option.is_some m_after.toast))
+    [ "y"; "o"; "e"; "H" ];
+
+  (* P2-3 & P3-1: Artifact detail failure is target-scoped and non-retryable skips refire *)
+  let art_b : Wire_knowledge.artifact_entry =
+    {
+      art_a with
+      id = "art-other";
+      title = "Other Artifact";
+      body = { sha256 = "sha-other"; bytes = 32; mime = "text/markdown" };
+    }
+  in
+  let k_fail =
+    Knowledge_store.empty
+    |> Knowledge_store.set_tab Nav.Knowledge_artifacts
+    |> Knowledge_store.apply_artifacts ~observed_at:t0 [ art_a; art_b ]
+    |> Knowledge_store.mark_artifact_detail_failed ~target:"art-existing" ~at:t1
+         ~reason:"HTTP 404: not found" ~retryable:false
+  in
+  Alcotest.(check bool) "P2-3: failure surfaces for matching artifact" true
+    (Option.is_some (Knowledge_store.artifact_detail_failure_for_entry art_a k_fail));
+  Alcotest.(check bool) "P2-3: failure does not bleed to other artifact" false
+    (Option.is_some (Knowledge_store.artifact_detail_failure_for_entry art_b k_fail));
+  let m_fail = { m0 with nav = { m0.nav with workspace = Nav.Knowledge }; knowledge = k_fail } in
+  let reqs_no_force = View_fetches.fetches_for_current_view ~force:false m_fail in
+  Alcotest.(check bool) "P3-1: non-retryable artifact detail failure does not refire"
+    false
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_artifact_detail { id = "art-existing"; _ }; _ } ->
+             true
+         | _ -> false)
+       reqs_no_force);
+  let reqs_force = View_fetches.fetches_for_current_view ~force:true m_fail in
+  Alcotest.(check bool) "P3-1: force refresh DOES refire failed artifact detail"
+    true
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_artifact_detail { id = "art-existing"; _ }; _ } ->
+             true
+         | _ -> false)
+       reqs_force);
+
+  (* P2-4: Reply_lane_addons 5xx marks lane_addons slot as Observed.Failed(retryable=true) *)
+  let m_addons_err, _ =
+    Update.step ~now:t1 m_bl
+      (Msg.Http_reply
+         {
+           epoch = m_bl.epoch;
+           reply =
+             Msg.Reply_lane_addons
+               (Error
+                  (Msg.Http_error
+                     { status = 502; body = "bad gateway"; api_error = None }));
+         })
+  in
+  (match m_addons_err.runtime.lane_addons with
+  | Observed.Failed { retryable = true; _ } -> ()
+  | _ ->
+      Alcotest.fail
+        "P2-4: expected Reply_lane_addons 502 to mark lane_addons Failed(retryable=true)");
+  Alcotest.(check bool) "P2-4: Reply_lane_addons 502 records HTTP incident" true
+    (Incidents.count m_addons_err.incidents > Incidents.count m_bl.incidents)
+
+let test_pr54538_reply_artifacts_dive_target_and_p3_guards () =
+  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let t0 = Clock.Mono.of_ns 1_000_000_000L in
+  let t1 = Clock.Mono.of_ns 2_000_000_000L in
+  let has_cmd pred cmds = List.exists pred (Cmd.flatten cmds) in
+  let art_a : Wire_knowledge.artifact_entry =
+    {
+      id = "art-alpha";
+      revision = 1;
+      title = "Alpha";
+      summary = "First";
+      author = "alpha";
+      created_at_unix = 1795254000.0;
+      body = { sha256 = "sha-alpha"; bytes = 64; mime = "text/html" };
+    }
+  in
+  let art_b : Wire_knowledge.artifact_entry =
+    {
+      art_a with
+      id = "art-beta";
+      revision = 3;
+      title = "Beta";
+      body = { sha256 = "sha-beta"; bytes = 128; mime = "text/markdown" };
+    }
+  in
+  (* P2 #2a: Artifact_dive target != selected_artifact fetches target, not selected_artifact *)
+  let m_dive_b =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Knowledge;
+          dive_stack = [ Nav.Dive_knowledge (Nav.Artifact_dive "art-beta") ];
+        };
+      knowledge = Knowledge_store.empty;
+    }
+  in
+  let _, cmds_dive_b =
+    Update.step ~now:t1 m_dive_b
+      (Msg.Http_reply
+         {
+           epoch = m_dive_b.epoch;
+           reply = Msg.Reply_artifacts (Ok [ art_a; art_b ]);
+         })
+  in
+  Alcotest.(check bool)
+    "P2 #2: Reply_artifacts in Artifact_dive(art-beta) fetches art-beta" true
+    (has_cmd
+       (function
+         | Cmd.Http_get
+             { req = Cmd.Get_artifact_detail { id = "art-beta"; revision = Some 3 }; _ } ->
+             true
+         | _ -> false)
+       cmds_dive_b);
+  Alcotest.(check bool)
+    "P2 #2: Reply_artifacts in Artifact_dive(art-beta) never fetches selected art-alpha"
+    false
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_artifact_detail { id = "art-alpha"; _ }; _ } ->
+             true
+         | _ -> false)
+       cmds_dive_b);
+  (* P2 #2b: Artifact_dive missing target emits 0 cmds (no silent fallback to selected_artifact) *)
+  let m_dive_missing =
+    {
+      m_dive_b with
+      nav =
+        {
+          m_dive_b.nav with
+          dive_stack = [ Nav.Dive_knowledge (Nav.Artifact_dive "art-missing") ];
+        };
+    }
+  in
+  let _, cmds_dive_missing =
+    Update.step ~now:t1 m_dive_missing
+      (Msg.Http_reply
+         {
+           epoch = m_dive_missing.epoch;
+           reply = Msg.Reply_artifacts (Ok [ art_a; art_b ]);
+         })
+  in
+  Alcotest.(check int)
+    "P2 #2: Reply_artifacts in Artifact_dive(missing) emits 0 cmds" 0
+    (List.length (Cmd.flatten cmds_dive_missing));
+  (* P3-1: Reply_artifacts does not refire non-retryable failed artifact detail *)
+  let m_non_retry =
+    {
+      m_dive_b with
+      knowledge =
+        Knowledge_store.empty
+        |> Knowledge_store.mark_artifact_detail_failed ~target:"art-beta" ~at:t0
+             ~reason:"HTTP 404: not found" ~retryable:false;
+    }
+  in
+  let _, cmds_non_retry =
+    Update.step ~now:t1 m_non_retry
+      (Msg.Http_reply
+         {
+           epoch = m_non_retry.epoch;
+           reply = Msg.Reply_artifacts (Ok [ art_a; art_b ]);
+         })
+  in
+  Alcotest.(check int)
+    "P3-1: Reply_artifacts skips refire on non-retryable detail failure" 0
+    (List.length (Cmd.flatten cmds_non_retry));
+  (* P3-2: Moving browser client cursor to client with fresh/non-retryable tabs emits 0 cmds *)
+  let mk_client cid : Wire_runtime.browser_client_row =
+    {
+      client_id = cid;
+      browser = "Ego";
+      version = "131.0";
+      engine_version = "131.0";
+      transport = "ego";
+      space = None;
+      ownership = Some "agent";
+      presence_state = Some "present";
+      presence_reason = None;
+      interactions = [];
+      last_activities = [];
+    }
+  in
+  let bl : Wire_runtime.browser_lane_status =
+    {
+      ok = true;
+      available = true;
+      inventory_complete = true;
+      client_count = 2;
+      issue_count = 0;
+      automatic_browse_ok = true;
+      detail = None;
+      clients = [ mk_client "ego-1"; mk_client "ego-2" ];
+      issues = [];
+    }
+  in
+  let m_bl_fresh =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Runtime; pane_index = 1 };
+      runtime =
+        Runtime_store.empty
+        |> Runtime_store.set_tab Nav.Runtime_addons_browser
+        |> Runtime_store.apply_browser_lane ~observed_at:t0 bl
+        |> Runtime_store.mark_browser_tabs_failed ~at:t0 ~client_id:"ego-2"
+             ~reason:"HTTP 403" ~retryable:false;
+    }
+  in
+  let _, cmds_move_bl =
+    Update.step ~now:t1 m_bl_fresh (Msg.Key_event (char_key "j"))
+  in
+  Alcotest.(check int)
+    "P3-2: cursor move to client with non-retryable tab error emits 0 cmds" 0
+    (List.length (Cmd.flatten cmds_move_bl))
+
 let test_unified_navigation_sidebar_focus_ring_and_mouse () =
   let t0 = Clock.Mono.of_ns 1_000_000_000L in
   let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
@@ -8773,5 +9761,12 @@ let () =
           Alcotest.test_case
             "Busy Enter queues; steer cuts only this TUI's own request"
             `Quick test_busy_enter_queues_and_steer_cuts_only_own_request;
+          Alcotest.test_case "Feature Wave 1: Artifacts, Addons/Browser, Memory Flow, SSOT/Logs & 4 Polish Nits"
+            `Quick test_feature_wave1_store_and_polish_nits;
+          Alcotest.test_case "PR #54465 P2-1..4 & P3-1 regressions" `Quick
+            test_pr54465_p2_fixes;
+          Alcotest.test_case
+            "PR #54538 P2 #2 Reply_artifacts dive target & P3 refire guards"
+            `Quick test_pr54538_reply_artifacts_dive_target_and_p3_guards;
         ] );
     ]

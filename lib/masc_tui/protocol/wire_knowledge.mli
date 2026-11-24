@@ -26,6 +26,8 @@ val wiki_page_path : page:string -> string
 val wiki_log_path : ?limit:int -> ?before_idx:int -> ?page:string -> unit -> string
 val wiki_search_path : query:string -> ?limit:int -> unit -> string
 val wiki_lint_path : string
+val published_artifacts_path : string
+val published_artifact_detail_path : id:string -> ?revision:int -> unit -> string
 val world_memory_path : string
 val workspace_memory_inventory_path : string
 
@@ -349,6 +351,8 @@ val decode_wiki_put_result : Yojson.Safe.t -> (wiki_put_result, string) result
 
 (** {1 Artifacts} *)
 
+type artifact_format = [ `Html | `Markdown ]
+
 (** The content-addressed body of an artifact's latest revision. *)
 type artifact_body = {
   sha256 : string;
@@ -369,7 +373,36 @@ type artifact_entry = {
   body : artifact_body;
 }
 
+val artifact_format_of_entry : artifact_entry -> artifact_format
+(** Infer [`Html] vs [`Markdown] from [a.body.mime]. *)
+
+type artifact_revision_summary = {
+  revision : int;
+  title : string;
+  summary : string;
+  format : artifact_format;
+  author : string;
+  created_at_unix : float option;
+  sha256 : string;
+  bytes : int;
+  mime_type : string;
+  preview : string option;
+  task_id : string option;
+  goal_id : string option;
+}
+
+type published_artifact_detail = {
+  artifact : artifact_entry;
+  content : string;
+  revisions : artifact_revision_summary list;
+  shared : bool;
+  share_version : int;
+}
+
+val artifact_extension : artifact_format -> string
 val decode_artifacts_list : Yojson.Safe.t -> (artifact_entry list, string) result
+val decode_published_artifact_detail :
+  Yojson.Safe.t -> (published_artifact_detail, string) result
 
 (** {1 World Memory, Temporal Memory Diff & Keeper Memory Recovery Acts} *)
 

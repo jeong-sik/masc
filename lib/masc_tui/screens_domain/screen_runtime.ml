@@ -3199,9 +3199,23 @@ let render_tools_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
     Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.50
       ~top_ratio:0.50 bp bottom_rect
   in
+  let tools_sse_badge =
+    match model.freshness.view_stream with
+    | Some (Health.Live _) ->
+        Some
+          (H.make_badge ~glyph:Glyph.Live_healthy ~tone:Theme.Status_ok
+             "LIVE SSE")
+    | Some (Health.Reconnecting _ | Health.Stale _) ->
+        Some
+          (H.make_badge ~glyph:Glyph.Transport_reconnecting
+             ~tone:Theme.Status_attention "SSE RECON")
+    | Some (Health.Connecting | Health.Disconnected _ | Health.Workspace_mismatch _)
+    | None ->
+        None
+  in
   let tools_inner =
     Card.draw ~cache grid ~rect:left_rect ~theme
-      (H.card_spec ~focused:(Model.pane_focused model 0)
+      (H.card_spec ?badge:tools_sse_badge ~focused:(Model.pane_focused model 0)
          (Say.resolve lang (Say.make ~ko:"도구 카탈로그" ~en:"Tools Catalog")))
   in
   if not (Rect.is_empty tools_inner) then begin
@@ -3288,7 +3302,11 @@ let render_tools_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
   end;
   let right_inner =
     Card.draw ~cache grid ~rect:right_rect ~theme
-      (H.card_spec ~focused:(Model.pane_focused model 1)
+      (H.card_spec
+         ~badge:
+           (H.make_badge ~glyph:Glyph.Live_idle ~tone:Theme.Status_historical
+              "SNAPSHOT · [r]")
+         ~focused:(Model.pane_focused model 1)
          (Say.resolve lang
             (Say.make ~ko:"커넥터 · 브라우저 레인 · MCP"
                ~en:"Connectors · Browser · MCP")))
@@ -3383,7 +3401,10 @@ let render_tools_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
          end);
     if !y < bottom then begin
       H.draw_divider ~grid ~rect:right_content ~y:!y ~theme
-        ~label:(Say.resolve lang (Say.make ~ko:"브라우저 레인" ~en:"Browser Lane"))
+        ~label:
+          (Say.resolve lang
+             (Say.make ~ko:"브라우저 · 애드온 요약"
+                ~en:"Browser & Addons Summary"))
         ();
       incr y
     end;
@@ -3397,7 +3418,7 @@ let render_tools_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
          in
          let det = match bl.detail with Some d -> " · " ^ d | None -> "" in
          let line =
-           Printf.sprintf "%s avail=%b · clients=%d · issues=%d · auto=%b%s"
+           Printf.sprintf "%s Browser avail=%b · clients=%d · issues=%d · auto=%b%s"
              (Glyph.to_utf8 g) bl.available bl.client_count bl.issue_count
              bl.automatic_browse_ok det
          in
@@ -3416,6 +3437,33 @@ let render_tools_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
              ~theme ~lang obs;
            incr y
          end);
+    (match rt.lane_addons with
+     | Observed.Value { data = la; _ } when !y < bottom ->
+         let live_n =
+           List.fold_left
+             (fun acc (i : Wire_runtime.addon_instance) ->
+               match i.runtime_presence with
+               | Wire_runtime.Addon_live -> acc + 1
+               | Wire_runtime.Addon_retained -> acc)
+             0 la.instances
+         in
+         let line =
+           Printf.sprintf "%s Addons: %d live / %d total (%d decl) · [→] %s"
+             (Glyph.to_utf8
+                (if live_n > 0 then Glyph.Live_healthy else Glyph.Live_idle))
+             live_n (List.length la.instances) (List.length la.declarations)
+             (Say.resolve lang (Say.make ~ko:"애드온 · 브라우저" ~en:"Addons & Browser"))
+         in
+         ignore
+           (H.put_clipped ~grid ~clip:right_content ~x:right_content.x ~y:!y
+              ~max_w:right_content.w ~style:(H.secondary_style ~theme ()) line);
+         incr y
+     | Observed.Value _
+     | Observed.Loading _
+     | Observed.Absent
+     | Observed.Unreported
+     | Observed.Failed _ ->
+         ());
     if !y < bottom then begin
       H.draw_divider ~grid ~rect:right_content ~y:!y ~theme
         ~label:
@@ -3467,7 +3515,648 @@ let render_tools_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
             ~theme ~lang obs
   end
 
-(* --- 5. Top-Level Runtime Workspace Entry --- *)
+(* --- 5. Addons & Browser Dedicated Runtime Table --- *)
+
+let addon_phase_badge = function
+  | Wire_runtime.Addon_observing -> ("OBS", Theme.Status_ok)
+  | Wire_runtime.Addon_attached -> ("ATT", Theme.Status_active)
+  | Wire_runtime.Addon_detaching -> ("DETG", Theme.Status_attention)
+  | Wire_runtime.Addon_detached -> ("DET", Theme.Status_historical)
+  | Wire_runtime.Addon_failed -> ("FAIL", Theme.Status_critical)
+  | Wire_runtime.Addon_phase_other s ->
+      (String.uppercase_ascii (Grapheme.truncate_to_width ~max_width:6 s),
+       Theme.Status_historical)
+
+let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
+    ~(theme : Theme.t) ~bp grid =
+  let lang = model.lang in
+  let rt = model.runtime in
+  let addons = Runtime_store.filtered_addon_instances rt in
+  let clients = Runtime_store.filtered_browser_clients rt in
+  let tabs = Runtime_store.filtered_browser_tabs rt in
+  let live_addons =
+    List.fold_left
+      (fun acc (inst : Wire_runtime.addon_instance) ->
+        match inst.runtime_presence with
+        | Wire_runtime.Addon_live -> acc + 1
+        | Wire_runtime.Addon_retained -> acc)
+      0 addons
+  in
+  let decl_count =
+    match Observed.to_option rt.lane_addons with
+    | Some snap -> List.length snap.declarations
+    | None -> 0
+  in
+  let browser_issues =
+    match Observed.to_option rt.browser_lane with
+    | Some bl -> bl.issues
+    | None -> []
+  in
+  let bar_rect, body_rect =
+    match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
+    | [ a; b ] -> (a, b)
+    | _ -> (Rect.empty, rect)
+  in
+  let pills =
+    [
+      {
+        H.label =
+          Printf.sprintf "%s %d/%d (%d decl)"
+            (Say.resolve lang (Say.make ~ko:"애드온" ~en:"Addons"))
+            live_addons (List.length addons) decl_count;
+        active = Model.pane_focused model 0;
+        tone = Some (if live_addons > 0 then Theme.Status_ok else Theme.Status_historical);
+        glyph = Some (if live_addons > 0 then Glyph.Live_healthy else Glyph.Live_idle);
+      };
+      {
+        H.label =
+          Printf.sprintf "%s %d · %s %d"
+            (Say.resolve lang (Say.make ~ko:"브라우저" ~en:"Browser"))
+            (List.length clients)
+            (Say.resolve lang (Say.make ~ko:"탭" ~en:"Tabs"))
+            (List.length tabs);
+        active = Model.pane_focused model 1;
+        tone = Some (if clients <> [] then Theme.Status_active else Theme.Status_historical);
+        glyph = None;
+      };
+    ]
+    @
+    if browser_issues <> [] then
+      [
+        {
+          H.label =
+            Printf.sprintf "%s %d"
+              (Say.resolve lang (Say.make ~ko:"이슈" ~en:"Issues"))
+              (List.length browser_issues);
+          active = true;
+          tone = Some Theme.Status_attention;
+          glyph = Some Glyph.Warning_triangle;
+        };
+      ]
+    else []
+  in
+  ignore
+    (H.draw_pills ~grid ~rect:bar_rect ~theme
+       ~right_hint:
+         (Say.resolve lang
+            (Say.make ~ko:"[Tab] 좌/우 · [Space] 클라/탭 · [t] 탭 새로고침 · [o] URL 열기"
+               ~en:"[Tab] Pane · [Space] Client/Tab · [t] Tabs · [o] Open URL"))
+       pills);
+  let left_rect, right_rect =
+    Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.52
+      ~top_ratio:0.50 bp body_rect
+  in
+  (* Left pane (pane 0): Addon Lanes Table + selected detail strip *)
+  let left_inner =
+    Card.draw ~cache grid ~rect:left_rect ~theme
+      (H.card_spec ~focused:(Model.pane_focused model 0)
+         ~badge:
+           (H.make_badge ~glyph:Glyph.Live_working ~tone:Theme.Status_active
+              "SYNCED · observer")
+         ~hotkey:(Say.resolve lang (Say.make ~ko:"[y] ID 복사" ~en:"[y] Copy ID"))
+         (Say.resolve lang (Say.make ~ko:"애드온 레인" ~en:"Addon Lanes")))
+  in
+  if not (Rect.is_empty left_inner) then begin
+    let detail_h =
+      if left_inner.h >= 10 && Option.is_some (Runtime_store.selected_addon_instance rt)
+      then 4
+      else 0
+    in
+    let tbl_rect =
+      Rect.make ~x:left_inner.x ~y:left_inner.y ~w:left_inner.w
+        ~h:(Int.max 0 (left_inner.h - detail_h))
+    in
+    (match rt.lane_addons with
+     | Observed.Value _ when addons <> [] ->
+         let columns : Table.column list =
+           [
+             {
+               id = "addon";
+               header = Say.make ~ko:"애드온" ~en:"Addon";
+               priority = 0;
+               min_width = 14;
+               max_width = None;
+               weight = 3;
+               align = Table.Left;
+             };
+             {
+               id = "pres";
+               header = Say.make ~ko:"상태" ~en:"Pres";
+               priority = 1;
+               min_width = 5;
+               max_width = Some 8;
+               weight = 1;
+               align = Table.Left;
+             };
+             {
+               id = "phase";
+               header = Say.make ~ko:"단계" ~en:"Phase";
+               priority = 1;
+               min_width = 5;
+               max_width = Some 7;
+               weight = 1;
+               align = Table.Left;
+             };
+             {
+               id = "exec";
+               header = Say.make ~ko:"실행" ~en:"Exec";
+               priority = 2;
+               min_width = 6;
+               max_width = Some 10;
+               weight = 1;
+               align = Table.Left;
+             };
+             {
+               id = "obs";
+               header = Say.make ~ko:"관측/행" ~en:"Obs#/Rows";
+               priority = 2;
+               min_width = 8;
+               max_width = Some 12;
+               weight = 1;
+               align = Table.Right;
+             };
+             {
+               id = "decl";
+               header = Say.make ~ko:"선언" ~en:"Decl";
+               priority = 3;
+               min_width = 7;
+               max_width = Some 12;
+               weight = 1;
+               align = Table.Left;
+             };
+           ]
+         in
+         let rows =
+           List.map
+             (fun (inst : Wire_runtime.addon_instance) ->
+               let pres_lbl, pres_tone =
+                 match inst.runtime_presence with
+                 | Wire_runtime.Addon_live -> ("LIVE", Theme.Status_ok)
+                 | Wire_runtime.Addon_retained -> ("RETAIN", Theme.Status_historical)
+               in
+               let ph_lbl, ph_tone = addon_phase_badge inst.phase in
+               let exec_txt =
+                 match inst.execution_kind with
+                 | Some "host_process" -> "host"
+                 | Some "container" -> "container"
+                 | Some s -> s
+                 | None -> Glyph.to_utf8 Glyph.Missing_absent
+               in
+               let obs_txt =
+                 Printf.sprintf "#%d/%d%s" inst.observation_seq inst.rows_count
+                   (if inst.observation_pending then "*" else "")
+               in
+               let decl_txt =
+                 match Runtime_store.declaration_for_addon inst rt with
+                 | Some d ->
+                     Printf.sprintf "%s/%s"
+                       (if d.enabled then "on" else "off")
+                       d.application_kind
+                 | None -> Glyph.to_utf8 Glyph.Missing_absent
+               in
+               let title_s =
+                 if String.equal inst.title inst.addon_id then inst.title
+                 else Printf.sprintf "%s (%s)" inst.title inst.addon_id
+               in
+               {
+                 Table.id = inst.instance_id;
+                 cells =
+                   [
+                     ("addon", Table.text_cell title_s);
+                     ( "pres"
+                     , Table.Badge
+                         { glyph = None; text = pres_lbl; tone = pres_tone } );
+                     ( "phase"
+                     , Table.Badge
+                         { glyph = None; text = ph_lbl; tone = ph_tone } );
+                     ( "exec"
+                     , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
+                         exec_txt );
+                     ("obs", Table.text_cell obs_txt);
+                     ( "decl"
+                     , Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
+                         decl_txt );
+                   ];
+               })
+             addons
+         in
+         let sel = H.clamp_index (List.length addons) rt.addon_selected_index in
+         ignore
+           (Table.draw grid ~rect:tbl_rect ~theme ~caps:H.default_caps ~lang
+              ~col_gap:(Layout.table_col_gap bp) ~scroll:rt.addon_scroll_offset
+              ~selected:sel ~columns rows)
+     | Observed.Value _ ->
+         H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp tbl_rect) ~theme
+           (Say.resolve lang
+              (if String.equal (String.trim rt.filter_query) "" then
+                 Say.make ~ko:"실행 중인 애드온 레인 없음"
+                   ~en:"No addon lanes observed"
+               else
+                 Say.make ~ko:"필터에 일치하는 애드온 없음"
+                   ~en:"No addon lanes match filter"))
+     | ( Observed.Loading _
+       | Observed.Absent
+       | Observed.Unreported
+       | Observed.Failed _ ) as obs ->
+         H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp tbl_rect)
+           ~theme ~lang obs);
+    if detail_h > 0 then begin
+      match Runtime_store.selected_addon_instance rt with
+      | None -> ()
+      | Some inst ->
+          let det_r =
+            Rect.make ~x:left_inner.x ~y:(left_inner.y + tbl_rect.h)
+              ~w:left_inner.w ~h:detail_h
+            |> H.pad_content ~bp
+          in
+          let y = ref det_r.y and bot = Rect.bottom det_r in
+          if !y < bot then begin
+            H.draw_divider ~grid ~rect:det_r ~y:!y ~theme
+              ~label:inst.instance_id ();
+            incr y
+          end;
+          if !y < bot then begin
+            let vis_s =
+              match inst.visibility_kind, inst.visibility_keeper with
+              | Some k, Some kp -> Printf.sprintf "%s:@%s" k kp
+              | Some k, None -> k
+              | None, _ -> Glyph.to_utf8 Glyph.Missing_absent
+            in
+            let host_s =
+              match inst.host_cycles, inst.host_issue_kind with
+              | Some c, Some iss ->
+                  Printf.sprintf "cycles=%d wait=%d issue=%s" c
+                    inst.host_waiting_count iss
+              | Some c, None ->
+                  Printf.sprintf "cycles=%d wait=%d" c inst.host_waiting_count
+              | None, _ -> Glyph.to_utf8 Glyph.Missing_absent
+            in
+            let line =
+              Printf.sprintf "vis=%s · host[%s]%s" vis_s host_s
+                (match inst.resolved_image with
+                | Some img -> " · img=" ^ H.short_hash ~len:14 img
+                | None -> "")
+            in
+            ignore
+              (H.put_clipped ~grid ~clip:det_r ~x:det_r.x ~y:!y ~max_w:det_r.w
+                 ~style:(H.secondary_style ~theme ()) line);
+            incr y
+          end;
+          if !y < bot then begin
+            let acts =
+              if inst.action_names = [] then
+                Say.resolve lang (Say.make ~ko:"액션 스키마 없음" ~en:"no action_schema")
+              else String.concat ", " inst.action_names
+            in
+            H.put_kv ~grid ~clip:det_r ~x:det_r.x ~y:!y ~max_w:det_r.w ~theme
+              ~key_w:8 ~key:"Actions" acts
+          end
+    end
+  end;
+  (* Right pane (pane 1): Browser Lane Clients (top) + Per-Tab Listing (bottom) *)
+  let right_focus_tag =
+    match rt.browser_right_focus with
+    | `Clients -> Say.resolve lang (Say.make ~ko:"클라이언트 포커스" ~en:"Clients focus")
+    | `Tabs -> Say.resolve lang (Say.make ~ko:"탭 포커스" ~en:"Tabs focus")
+  in
+  let right_inner =
+    Card.draw ~cache grid ~rect:right_rect ~theme
+      (H.card_spec ~focused:(Model.pane_focused model 1)
+         ~subtitle:right_focus_tag
+         ~badge:
+           (H.make_badge ~glyph:Glyph.Live_idle ~tone:Theme.Status_historical
+              "SNAPSHOT · [r]")
+         ~hotkey:
+           (Say.resolve lang
+              (Say.make ~ko:"[t] 탭 · [y] URL · [o] 열기"
+                 ~en:"[t] Tabs · [y] URL · [o] Open"))
+         (Say.resolve lang
+            (Say.make ~ko:"브라우저 레인 클라이언트 · 탭"
+               ~en:"Browser Clients & Open Tabs")))
+  in
+  if not (Rect.is_empty right_inner) then begin
+    let issues_h =
+      if browser_issues <> [] && right_inner.h >= 12 then
+        Int.min 3 (List.length browser_issues)
+      else 0
+    in
+    let main_h = Int.max 0 (right_inner.h - issues_h) in
+    let clients_h =
+      if main_h <= 0 then 0 else Int.min main_h (Int.max 4 ((main_h * 45) / 100))
+    in
+    let tabs_h = Int.max 0 (main_h - clients_h) in
+    let clients_rect =
+      Rect.make ~x:right_inner.x ~y:right_inner.y ~w:right_inner.w ~h:clients_h
+    in
+    let issues_rect =
+      Rect.make ~x:right_inner.x ~y:(right_inner.y + clients_h) ~w:right_inner.w
+        ~h:issues_h
+    in
+    let tabs_rect =
+      Rect.make ~x:right_inner.x ~y:(right_inner.y + clients_h + issues_h)
+        ~w:right_inner.w ~h:tabs_h
+    in
+    (* Top: Clients table *)
+    (match rt.browser_lane with
+     | Observed.Value _ when clients <> [] ->
+         let columns : Table.column list =
+           [
+             {
+               id = "client";
+               header = Say.make ~ko:"스페이스/클라이언트" ~en:"Space/Client";
+               priority = 0;
+               min_width = 14;
+               max_width = None;
+               weight = 3;
+               align = Table.Left;
+             };
+             {
+               id = "browser";
+               header = Say.make ~ko:"브라우저" ~en:"Browser/Ver";
+               priority = 1;
+               min_width = 10;
+               max_width = Some 18;
+               weight = 2;
+               align = Table.Left;
+             };
+             {
+               id = "presence";
+               header = Say.make ~ko:"존재/소유" ~en:"Pres/Owner";
+               priority = 1;
+               min_width = 10;
+               max_width = Some 16;
+               weight = 1;
+               align = Table.Left;
+             };
+             {
+               id = "activity";
+               header = Say.make ~ko:"활성 작업" ~en:"Active Actor·Action";
+               priority = 2;
+               min_width = 12;
+               max_width = None;
+               weight = 2;
+               align = Table.Left;
+             };
+           ]
+         in
+         let rows =
+           List.map
+             (fun (cl : Wire_runtime.browser_client_row) ->
+               let name_s =
+                 match cl.space with
+                 | Some sp ->
+                     Printf.sprintf "%s (%s)" sp.space_name
+                       (H.short_hash ~len:8 cl.client_id)
+                 | None -> H.short_hash ~len:14 cl.client_id
+               in
+               let ver_s =
+                 if String.equal cl.version "" then cl.browser
+                 else Printf.sprintf "%s %s" cl.browser cl.version
+               in
+               let pres_txt, pres_tone =
+                 match cl.presence_state, cl.ownership with
+                 | Some "present", Some own ->
+                     (Printf.sprintf "present/%s" own, Theme.Status_ok)
+                 | Some "present", None -> ("present", Theme.Status_ok)
+                 | Some "missing", _ -> ("missing", Theme.Status_critical)
+                 | Some st, Some own ->
+                     (Printf.sprintf "%s/%s" st own, Theme.Status_attention)
+                 | Some st, None -> (st, Theme.Status_attention)
+                 | None, Some own -> (own, Theme.Status_active)
+                 | None, None -> ("live", Theme.Status_active)
+               in
+               let act_s =
+                 match cl.interactions with
+                 | act :: _ ->
+                     let who = Option.value ~default:"agent" act.actor in
+                     Printf.sprintf "%s·%s (%s)" who act.action act.phase
+                 | [] -> (
+                     match cl.last_activities with
+                     | last :: _ ->
+                         let who = Option.value ~default:"agent" last.work.actor in
+                         Printf.sprintf "%s·%s [%s]" who last.work.action
+                           last.outcome
+                     | [] -> "idle")
+               in
+               {
+                 Table.id = cl.client_id;
+                 cells =
+                   [
+                     ("client", Table.text_cell name_s);
+                     ( "browser"
+                     , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
+                         ver_s );
+                     ( "presence"
+                     , Table.Badge
+                         { glyph = None; text = pres_txt; tone = pres_tone } );
+                     ("activity", Table.text_cell act_s);
+                   ];
+               })
+             clients
+         in
+         let sel =
+           H.clamp_index (List.length clients) rt.browser_client_selected_index
+         in
+         ignore
+           (Table.draw grid ~rect:clients_rect ~theme ~caps:H.default_caps ~lang
+              ~col_gap:(Layout.table_col_gap bp)
+              ~scroll:rt.browser_client_scroll_offset ~selected:sel ~columns rows)
+     | Observed.Value _ ->
+         H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp clients_rect) ~theme
+           (Say.resolve lang
+              (Say.make ~ko:"연결된 브라우저 클라이언트 없음"
+                 ~en:"No connected browser clients"))
+     | ( Observed.Loading _
+       | Observed.Absent
+       | Observed.Unreported
+       | Observed.Failed _ ) as obs ->
+         H.draw_observed_placeholder ~grid
+           ~rect:(H.pad_content ~bp clients_rect) ~theme ~lang obs);
+    (* Optional inventoryIssues warning rails *)
+    if issues_h > 0 then begin
+      let pad_r = H.pad_content ~bp issues_rect in
+      let iy = ref pad_r.y and ibot = Rect.bottom pad_r in
+      List.iter
+        (fun (iss : Wire_runtime.browser_inventory_issue) ->
+          if !iy < ibot then begin
+            Card.draw_left_rail ~tone:Theme.Status_attention grid ~x:pad_r.x
+              ~y:!iy ~h:1 ~theme;
+            ignore
+              (H.put_clipped ~grid ~clip:pad_r ~x:(pad_r.x + 2) ~y:!iy
+                 ~max_w:(Int.max 0 (pad_r.w - 2))
+                 ~style:(H.status_style ~theme Theme.Status_attention)
+                 (Printf.sprintf "%s [%s] %s"
+                    (Glyph.to_utf8 Glyph.Warning_triangle)
+                    iss.kind iss.message));
+            incr iy
+          end)
+        (H.safe_take issues_h browser_issues)
+    end;
+    (* Bottom: Per-Tab Listing for selected client *)
+    if tabs_h >= 2 then begin
+      let pad_x = Layout.card_pad_x bp in
+      let sel_cl_label =
+        match Runtime_store.selected_browser_client rt with
+        | Some cl ->
+            Printf.sprintf "%s (%d) · %s"
+              (Say.resolve lang (Say.make ~ko:"열린 탭" ~en:"Open Tabs"))
+              (List.length tabs)
+              (H.short_hash ~len:10 cl.client_id)
+        | None -> Say.resolve lang (Say.make ~ko:"열린 탭" ~en:"Open Tabs")
+      in
+      H.draw_divider ~grid ~rect:tabs_rect ~y:tabs_rect.y ~theme ~pad_x
+        ~label:sel_cl_label ();
+      let tabs_body =
+        Rect.make ~x:tabs_rect.x ~y:(tabs_rect.y + 1) ~w:tabs_rect.w
+          ~h:(Int.max 0 (tabs_rect.h - 1))
+      in
+      match Runtime_store.selected_browser_client rt with
+      | None ->
+          H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp tabs_body) ~theme
+            (Say.resolve lang
+               (Say.make ~ko:"브라우저 클라이언트를 선택하면 탭이 표시됩니다"
+                  ~en:"Select a browser client to inspect open tabs"))
+      | Some cl -> (
+          match Runtime_store.browser_tabs_for ~client_id:cl.client_id rt with
+          | Observed.Value { data = resp; _ } -> (
+              match resp.error with
+              | Some err ->
+                  H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp tabs_body)
+                    ~theme
+                    (Printf.sprintf "%s %s"
+                       (Glyph.to_utf8 Glyph.Warning_triangle) err)
+              | None when tabs = [] ->
+                  H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp tabs_body)
+                    ~theme
+                    (Say.resolve lang
+                       (Say.make ~ko:"열린 탭 없음 · [t] 새로고침"
+                          ~en:"No open tabs · [t] refresh"))
+              | None ->
+                  let columns : Table.column list =
+                    [
+                      {
+                        id = "id";
+                        header = Say.literal "#ID";
+                        priority = 1;
+                        min_width = 4;
+                        max_width = Some 6;
+                        weight = 1;
+                        align = Table.Right;
+                      };
+                      {
+                        id = "act";
+                        header = Say.literal "●";
+                        priority = 1;
+                        min_width = 2;
+                        max_width = Some 3;
+                        weight = 1;
+                        align = Table.Center;
+                      };
+                      {
+                        id = "origin";
+                        header = Say.make ~ko:"출처" ~en:"Origin";
+                        priority = 2;
+                        min_width = 5;
+                        max_width = Some 8;
+                        weight = 1;
+                        align = Table.Left;
+                      };
+                      {
+                        id = "title";
+                        header = Say.make ~ko:"제목" ~en:"Title";
+                        priority = 0;
+                        min_width = 12;
+                        max_width = None;
+                        weight = 2;
+                        align = Table.Left;
+                      };
+                      {
+                        id = "url";
+                        header = Say.literal "URL";
+                        priority = 0;
+                        min_width = 16;
+                        max_width = None;
+                        weight = 3;
+                        align = Table.Left;
+                      };
+                    ]
+                  in
+                  let rows =
+                    List.map
+                      (fun (tb : Wire_runtime.browser_tab_row) ->
+                        let act_cell =
+                          if tb.active then
+                            Table.text_cell ~fg:(Color.of_rgb theme.status_ok)
+                              ~attrs:Attr.bold
+                              (Glyph.to_utf8 Glyph.Live_healthy)
+                          else
+                            Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
+                              (Glyph.to_utf8 Glyph.Live_idle)
+                        in
+                        let orig_lbl, orig_tone =
+                          match tb.opened_by with
+                          | Some Wire_runtime.Tab_origin_agent ->
+                              ("agent", Theme.Status_ai)
+                          | Some Wire_runtime.Tab_origin_unknown ->
+                              ("user", Theme.Status_historical)
+                          | None -> ("—", Theme.Status_historical)
+                        in
+                        let title_s =
+                          let base =
+                            if String.equal (String.trim tb.title) "" then
+                              Option.value ~default:"(untitled)" tb.label
+                            else tb.title
+                          in
+                          if tb.dialog_present then
+                            let dk =
+                              Option.value ~default:"dialog" tb.dialog_kind
+                            in
+                            Printf.sprintf "[%s] %s" dk base
+                          else base
+                        in
+                        {
+                          Table.id = string_of_int tb.id;
+                          cells =
+                            [
+                              ("id", Table.text_cell (Printf.sprintf "#%d" tb.id));
+                              ("act", act_cell);
+                              ( "origin"
+                              , Table.Badge
+                                  {
+                                    glyph = None;
+                                    text = orig_lbl;
+                                    tone = orig_tone;
+                                  } );
+                              ("title", Table.text_cell (H.sanitize_single_line title_s));
+                              ( "url"
+                              , Table.text_cell
+                                  ~fg:(Color.of_rgb theme.accent)
+                                  (H.sanitize_single_line tb.url) );
+                            ];
+                        })
+                      tabs
+                  in
+                  let sel =
+                    H.clamp_index (List.length tabs) rt.browser_tab_selected_index
+                  in
+                  ignore
+                    (Table.draw grid ~rect:tabs_body ~theme ~caps:H.default_caps
+                       ~lang ~col_gap:(Layout.table_col_gap bp)
+                       ~scroll:rt.browser_tab_scroll_offset ~selected:sel
+                       ~columns rows))
+          | Observed.Absent | Observed.Unreported ->
+              H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp tabs_body)
+                ~theme
+                (Say.resolve lang
+                   (Say.make ~ko:"[t] 키로 이 클라이언트의 열린 탭 조회"
+                      ~en:"Press [t] to fetch open tabs for this client"))
+          | (Observed.Loading _ | Observed.Failed _) as obs ->
+              H.draw_observed_placeholder ~grid
+                ~rect:(H.pad_content ~bp tabs_body) ~theme ~lang obs)
+    end
+  end
+
+(* --- 6. Top-Level Runtime Workspace Entry --- *)
 
 let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
   if Rect.is_empty rect then ()
@@ -3484,3 +4173,5 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         render_failover_lanes ~model ~cache ~rect:body ~theme ~bp grid
     | Nav.Runtime_tools_connectors ->
         render_tools_connectors ~model ~cache ~rect:body ~theme ~bp grid
+    | Nav.Runtime_addons_browser ->
+        render_addons_browser ~model ~cache ~rect:body ~theme ~bp grid

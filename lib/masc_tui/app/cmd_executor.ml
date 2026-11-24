@@ -124,6 +124,69 @@ let is_safe_external_url url =
     in
     check 0
 
+let is_existing_dir path =
+  try Sys.is_directory path with Sys_error _ -> false
+
+let resolve_artifact_export_dir ?(getenv = Sys.getenv_opt)
+    ?(is_dir = is_existing_dir) ~base_path () =
+  match Option.bind (getenv "HOME") nonblank_trimmed with
+  | Some home ->
+      let downloads = Filename.concat home "Downloads" in
+      if is_dir downloads then Filename.concat downloads "masc-artifacts"
+      else Filename.concat (Common.masc_dir_from_base_path ~base_path) "exports"
+  | None ->
+      Filename.concat (Common.masc_dir_from_base_path ~base_path) "exports"
+
+let normalize_export_ext ext =
+  match String.lowercase_ascii (String.trim ext) with
+  | ".html" | "html" -> ".html"
+  | ".md" | "md" | "markdown" -> ".md"
+  | _ -> ".md"
+
+let build_artifact_export_filename ~filename_stem ~id ~ext =
+  let safe_ext = normalize_export_ext ext in
+  let raw_stem = Common.safe_filename (String.trim filename_stem) in
+  let stem =
+    let s =
+      if String.length raw_stem > 48 then String.sub raw_stem 0 48 else raw_stem
+    in
+    if String.equal s "" then "artifact" else s
+  in
+  let safe_id = Common.safe_filename (String.trim id) in
+  let stripped_id =
+    if String.starts_with ~prefix:"artifact-" safe_id
+       && String.length safe_id > String.length "artifact-"
+    then
+      String.sub safe_id
+        (String.length "artifact-")
+        (String.length safe_id - String.length "artifact-")
+    else safe_id
+  in
+  let short_id =
+    let len = String.length stripped_id in
+    if len > 8 then String.sub stripped_id (len - 8) 8 else stripped_id
+  in
+  let suffix =
+    if String.equal short_id "" then "" else "-" ^ short_id
+  in
+  stem ^ suffix ^ safe_ext
+
+let is_safe_local_export_file path =
+  let lower = String.lowercase_ascii (String.trim path) in
+  let ext_ok =
+    String.ends_with ~suffix:".html" lower || String.ends_with ~suffix:".md" lower
+  in
+  if not ext_ok then false
+  else
+    try
+      let st = Unix.lstat path in
+      match st.Unix.st_kind with
+      | Unix.S_REG -> true
+      | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+      | Unix.S_SOCK ->
+          false
+    with Unix.Unix_error _ -> false
+
 let fetch_planning_with_tasks ~observed_at ~fetch_planning ~fetch_tasks =
   match fetch_planning () with
   | Error _ as err -> err
@@ -689,6 +752,17 @@ let execute_get t ~epoch req =
                    ~decode:Wire_knowledge.decode_artifacts_list)
             in
             Msg.Http_reply { epoch; reply }
+        | Cmd.Get_artifact_detail { id; _ } ->
+            let reply =
+              Msg.Reply_artifact_detail
+                {
+                  id;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_knowledge.decode_published_artifact_detail;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
         | Cmd.Get_world_memory ->
             let primary =
               fetch_and_decode_get t ~path
@@ -873,6 +947,13 @@ let execute_get t ~epoch req =
               Msg.Reply_browser_lane
                 (fetch_and_decode_get t ~path
                    ~decode:Wire_runtime.decode_browser_lane)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_lane_addons ->
+            let reply =
+              Msg.Reply_lane_addons
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_lane_addons)
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_mcp_clients ->
@@ -1219,6 +1300,12 @@ let execute_post t ~epoch req =
                    label = Say.make ~ko:"작업 취소 완료" ~en:"Task cancelled";
                    result;
                  })
+        | Cmd.Post_browser_tabs { client_id } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_runtime.decode_browser_tabs_response
+            in
+            Some (Msg.Reply_browser_tabs { client_id; result })
       in
       Option.iter
         (fun reply ->
@@ -1930,6 +2017,30 @@ let execute_render_memory_diagram t ~epoch ~request_id ~keeper ~event_identity
                 | None -> ()
             end))
 
+let open_local_export_file path =
+  if not (is_safe_local_export_file path) then
+    Error ("refusing to open unsafe or missing export file: " ^ path)
+  else open_url_sync path
+
+let copy_text_to_clipboard ~in_tmux text =
+  let write_osc52 raw =
+    let seq = Clipboard.osc52_sequence ~in_tmux raw in
+    Terminal_out.write seq;
+    Terminal_out.flush ()
+  in
+  let session = Clipboard.copy_session Sys.getenv_opt in
+  Clipboard.copy_text session ~write_osc52 text
+
+let publish_clipboard_outcome t ~epoch ~bytes outcome =
+  let say = Clipboard.copy_outcome_say outcome in
+  let label =
+    Say.make
+      ~ko:(Printf.sprintf "%s (%dB)" (Say.resolve Say.Lang_ko say) bytes)
+      ~en:(Printf.sprintf "%s (%dB)" (Say.resolve Say.Lang_en say) bytes)
+  in
+  Ui_bus.publish_stream t.bus
+    (Msg.Http_reply
+       { epoch; reply = Msg.Reply_action_ack { label; result = Ok () } })
 let rec execute t = function
   | Cmd.Batch cmds -> List.iter (execute t) cmds
   | Cmd.Http_get { epoch; req } -> execute_get t ~epoch req
@@ -1964,17 +2075,14 @@ let rec execute t = function
       update_workspace_guard t ~instance_id ~workspace_sha256
   | Cmd.Voice_cmd vc -> Voice_runner.dispatch t.voice_runner (voice_cmd_of_store vc)
   | Cmd.Copy_clipboard text ->
+      let epoch = Atomic.get t.stream_epoch in
       fork_safe t (fun () ->
-          let write_osc52 seq =
-            Terminal_out.write seq;
-            Terminal_out.flush ()
-          in
-          let _outcome =
+          let in_tmux = Option.is_some (Sys.getenv_opt "TMUX") in
+          let outcome =
             Eio_unix.run_in_systhread (fun () ->
-                let session = Clipboard.copy_session Sys.getenv_opt in
-                Clipboard.copy_text session ~write_osc52 text)
+                copy_text_to_clipboard ~in_tmux text)
           in
-          ())
+          publish_clipboard_outcome t ~epoch ~bytes:(String.length text) outcome)
   | Cmd.Render_memory_diagram
       {
         epoch;
@@ -1992,6 +2100,169 @@ let rec execute t = function
       execute_render_memory_diagram t ~epoch ~request_id ~keeper ~event_identity
         ~kind ~mode ~ko ~tz_offset_sec ~now_unix ~max_width ~chart
   | Cmd.Cancel_memory_diagram -> cancel_active_memory_diagram t
+  | Cmd.Fetch_artifact_and_copy { epoch; id; revision } ->
+      fork_safe t (fun () ->
+          let path = Wire_knowledge.published_artifact_detail_path ~id ?revision () in
+          match
+            fetch_and_decode_get t ~path
+              ~decode:Wire_knowledge.decode_published_artifact_detail
+          with
+          | Ok detail ->
+              Ui_bus.publish_snapshot t.bus ~key:(Key_get path)
+                (Msg.Http_reply
+                   {
+                     epoch;
+                     reply = Msg.Reply_artifact_detail { id; result = Ok detail };
+                   });
+              let in_tmux = Option.is_some (Sys.getenv_opt "TMUX") in
+              let outcome =
+                Eio_unix.run_in_systhread (fun () ->
+                    copy_text_to_clipboard ~in_tmux detail.content)
+              in
+              publish_clipboard_outcome t ~epoch
+                ~bytes:(String.length detail.content) outcome
+          | Error err ->
+              Ui_bus.publish_stream t.bus
+                (Msg.Http_reply
+                   {
+                     epoch;
+                     reply =
+                       Msg.Reply_action_ack
+                         {
+                           label =
+                             Say.make ~ko:"아티팩트 본문 복사"
+                               ~en:"Copy artifact body";
+                           result = Error err;
+                         };
+                   }))
+  | Cmd.Export_artifact
+      { epoch; id; revision; filename_stem; ext; content_opt; open_after } ->
+      fork_safe t (fun () ->
+          let content_res =
+            match content_opt with
+            | Some body -> Ok body
+            | None -> (
+                let path =
+                  Wire_knowledge.published_artifact_detail_path ~id ?revision ()
+                in
+                match
+                  fetch_and_decode_get t ~path
+                    ~decode:Wire_knowledge.decode_published_artifact_detail
+                with
+                | Ok detail ->
+                    Ui_bus.publish_snapshot t.bus ~key:(Key_get path)
+                      (Msg.Http_reply
+                         {
+                           epoch;
+                           reply =
+                             Msg.Reply_artifact_detail { id; result = Ok detail };
+                         });
+                    Ok detail.content
+                | Error err -> Error err)
+          in
+          match content_res with
+          | Error err ->
+              Ui_bus.publish_stream t.bus
+                (Msg.Http_reply
+                   {
+                     epoch;
+                     reply =
+                       Msg.Reply_action_ack
+                         {
+                           label =
+                             Say.make ~ko:"아티팩트 내보내기"
+                               ~en:"Export artifact";
+                           result = Error err;
+                         };
+                   })
+          | Ok content -> (
+              let save_res =
+                let primary_dir =
+                  resolve_artifact_export_dir ~base_path:t.cli.base_path ()
+                in
+                let fallback_dir =
+                  Filename.concat
+                    (Filename.concat t.cli.base_path Common.masc_dirname)
+                    "exports"
+                in
+                let fname =
+                  build_artifact_export_filename ~filename_stem ~id ~ext
+                in
+                let try_write_in dir =
+                  try
+                    Fs_compat.mkdir_p dir;
+                    let full_path = Filename.concat dir fname in
+                    Eio_unix.run_in_systhread (fun () ->
+                        try
+                          match Fs_compat.save_file_atomic full_path content with
+                          | Ok () -> Ok full_path
+                          | Error detail -> Error detail
+                        with
+                        | Sys_error detail -> Error detail
+                        | Unix.Unix_error (code, fn, arg) ->
+                            Error
+                              (Printf.sprintf "%s(%s): %s" fn arg
+                                 (Unix.error_message code)))
+                  with
+                  | Sys_error detail -> Error detail
+                  | Unix.Unix_error (code, fn, arg) ->
+                      Error
+                        (Printf.sprintf "%s(%s): %s" fn arg
+                           (Unix.error_message code))
+                in
+                let write_res =
+                  match try_write_in primary_dir with
+                  | Ok _ as ok -> ok
+                  | Error _ when not (String.equal primary_dir fallback_dir) ->
+                      try_write_in fallback_dir
+                  | Error _ as err -> err
+                in
+                match write_res with
+                | Ok full_path ->
+                    if open_after then
+                      Eio_unix.run_in_systhread (fun () ->
+                          match open_local_export_file full_path with
+                          | Ok () -> Ok full_path
+                          | Error open_err ->
+                              Error
+                                (Printf.sprintf "saved %s (open failed: %s)"
+                                   full_path open_err))
+                    else Ok full_path
+                | Error detail -> Error detail
+              in
+              match save_res with
+              | Ok saved_path ->
+                  let label =
+                    if open_after then
+                      Say.make
+                        ~ko:("저장 및 열기: " ^ saved_path)
+                        ~en:("Exported & opened: " ^ saved_path)
+                    else
+                      Say.make
+                        ~ko:("저장됨: " ^ saved_path)
+                        ~en:("Exported: " ^ saved_path)
+                  in
+                  Ui_bus.publish_stream t.bus
+                    (Msg.Http_reply
+                       {
+                         epoch;
+                         reply = Msg.Reply_action_ack { label; result = Ok () };
+                       })
+              | Error detail ->
+                  Ui_bus.publish_stream t.bus
+                    (Msg.Http_reply
+                       {
+                         epoch;
+                         reply =
+                           Msg.Reply_action_ack
+                             {
+                               label =
+                                 Say.make ~ko:"아티팩트 내보내기"
+                                   ~en:"Export artifact";
+                               result =
+                                 Error (Msg.Transport (Health.Other_io detail));
+                             };
+                       })))
   | Cmd.Open_external_url url ->
       if is_safe_external_url url then
         fork_safe t (fun () ->

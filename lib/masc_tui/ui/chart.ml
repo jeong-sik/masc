@@ -18,6 +18,8 @@ module Time_window = struct
     | Last_24h
     | Last_7d
     | Last_14d
+    | Last_30d
+    | Rev_span of { from_rev : int; to_rev : int }
 
   let label = function
     | Last_5m -> "5m"
@@ -25,6 +27,8 @@ module Time_window = struct
     | Last_24h -> "24h"
     | Last_7d -> "7d"
     | Last_14d -> "14d"
+    | Last_30d -> "30d"
+    | Rev_span { from_rev; to_rev } -> Printf.sprintf "r%d..r%d" from_rev to_rev
 
   let ticks = function
     | Last_5m -> ("-5m", "-2.5m", "now")
@@ -32,6 +36,12 @@ module Time_window = struct
     | Last_24h -> ("-24h", "-12h", "now")
     | Last_7d -> ("-7d", "-3.5d", "now")
     | Last_14d -> ("-14d", "-7d", "now")
+    | Last_30d -> ("-30d", "-15d", "now")
+    | Rev_span { from_rev; to_rev } ->
+        let mid = (from_rev + to_rev) / 2 in
+        ( Printf.sprintf "r%d" from_rev
+        , Printf.sprintf "r%d" mid
+        , Printf.sprintf "r%d" to_rev )
 end
 
 module Gradient = struct

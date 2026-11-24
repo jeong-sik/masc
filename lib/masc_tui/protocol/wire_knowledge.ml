@@ -75,6 +75,14 @@ let wiki_search_path ~query ?limit () =
   "/api/v1/wiki/search?" ^ String.concat "&" params
 
 let wiki_lint_path = "/api/v1/wiki/lint"
+let published_artifacts_path = "/api/v1/published-artifacts"
+
+let published_artifact_detail_path ~id ?revision () =
+  let base = "/api/v1/published-artifacts/" ^ percent_encode id in
+  match revision with
+  | Some r when r > 0 -> Printf.sprintf "%s?revision=%d" base r
+  | Some _ | None -> base
+
 let world_memory_path = "/api/v1/memory/world"
 let workspace_memory_inventory_path = "/api/v1/dashboard/workspace-memory-inventory"
 
@@ -906,6 +914,8 @@ let encode_wiki_put_request req =
         ("note", `String req.note);
       ])
 
+type artifact_format = [ `Html | `Markdown ]
+
 type artifact_body = {
   sha256 : string;
   bytes : int;
@@ -921,6 +931,66 @@ type artifact_entry = {
   created_at_unix : float;
   body : artifact_body;
 }
+
+type artifact_revision_summary = {
+  revision : int;
+  title : string;
+  summary : string;
+  format : artifact_format;
+  author : string;
+  created_at_unix : float option;
+  sha256 : string;
+  bytes : int;
+  mime_type : string;
+  preview : string option;
+  task_id : string option;
+  goal_id : string option;
+}
+
+type published_artifact_detail = {
+  artifact : artifact_entry;
+  content : string;
+  revisions : artifact_revision_summary list;
+  shared : bool;
+  share_version : int;
+}
+
+let artifact_format_of_mime mime_type =
+  let lower_mime = String.lowercase_ascii (String.trim mime_type) in
+  if
+    String.starts_with ~prefix:"text/html" lower_mime
+    || String.starts_with ~prefix:"application/xhtml" lower_mime
+  then `Html
+  else `Markdown
+
+let artifact_format_of_entry (a : artifact_entry) =
+  artifact_format_of_mime a.body.mime
+
+let artifact_extension = function
+  | `Html -> ".html"
+  | `Markdown -> ".md"
+
+let decode_artifact_format ~mime_type json =
+  match optional_nonblank_string json "format" with
+  | Error _ as err -> err
+  | Ok (Some raw) -> (
+      match String.lowercase_ascii (String.trim raw) with
+      | "html" -> Ok `Html
+      | "markdown" | "md" -> Ok `Markdown
+      | other -> Error ("unknown artifact format: " ^ other))
+  | Ok None -> Ok (artifact_format_of_mime mime_type)
+
+let decode_optional_text_field json key =
+  match member key json with
+  | `Null -> Ok None
+  | `String s -> Ok (Some s)
+  | bad -> field_type_error key "a string or null" bad
+
+let decode_artifact_created_at json =
+  let* ts_primary = decode_optional_timestamp_unix json "created_at" in
+  match ts_primary with
+  | Some _ as hit -> Ok hit
+  | None -> decode_optional_timestamp_unix json "created_at_unix"
 
 (* A row is [Published_artifact.summary_to_json]: the latest revision of one
    artifact, its body a content-addressed [_blob] reference. *)
@@ -948,10 +1018,74 @@ let decode_artifact_entry json =
     ({ id; revision; title; summary; author; created_at_unix; body }
       : artifact_entry)
 
+let decode_artifact_revision_summary json =
+  let* revision = required_int_field json "revision" in
+  let* title_opt = optional_nonblank_string json "title" in
+  let title = Option.value ~default:"" title_opt in
+  let* summary_opt = optional_string_field json "summary" in
+  let summary = Option.value ~default:"" summary_opt in
+  let* author_opt = optional_nonblank_string json "author" in
+  let author = Option.value ~default:"" author_opt in
+  let* created_at_unix = decode_artifact_created_at json in
+  let* body_opt = optional_object_field json "body" in
+  let* src =
+    match body_opt with
+    | None -> Ok json
+    | Some body_obj ->
+        let* blob_opt = optional_object_field body_obj "_blob" in
+        Ok (Option.value ~default:body_obj blob_opt)
+  in
+  let* sha256 = required_nonblank_string src "sha256" in
+  let* bytes = required_nonnegative_int_field src "bytes" in
+  let* mime_opt = optional_nonblank_string src "mime" in
+  let* mime_type =
+    match mime_opt with
+    | Some m -> Ok m
+    | None -> (
+        match optional_nonblank_string src "mime_type" with
+        | Ok (Some m) -> Ok m
+        | Ok None -> Ok "text/plain"
+        | Error _ as err -> err)
+  in
+  let* preview = decode_optional_text_field src "preview" in
+  let* format = decode_artifact_format ~mime_type json in
+  let* task_id = optional_nonblank_string json "task_id" in
+  let* goal_id = optional_nonblank_string json "goal_id" in
+  Ok
+    {
+      revision;
+      title;
+      summary;
+      format;
+      author;
+      created_at_unix;
+      sha256;
+      bytes;
+      mime_type;
+      preview;
+      task_id;
+      goal_id;
+    }
+
 let decode_artifacts_list json =
   let* _, body = unwrap_v2_or_raw json in
   let* items = required_list_field body "artifacts" in
   decode_list "artifacts" decode_artifact_entry items
+
+let decode_published_artifact_detail json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* artifact_json = required_object_field body "artifact" in
+  let* artifact = decode_artifact_entry artifact_json in
+  let* content = required_string_field body "content" in
+  let* rev_items = optional_list_field body "revisions" in
+  let* revisions =
+    decode_list "revisions" decode_artifact_revision_summary rev_items
+  in
+  let* shared_opt = optional_bool_field body "shared" in
+  let shared = Option.value ~default:false shared_opt in
+  let* share_ver_opt = optional_int_field body "share_version" in
+  let share_version = Option.value ~default:0 share_ver_opt in
+  Ok { artifact; content; revisions; shared; share_version }
 
 type world_ledger_state =
   | World_ledger_missing

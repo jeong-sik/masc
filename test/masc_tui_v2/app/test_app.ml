@@ -1676,6 +1676,181 @@ let test_chat_reattach_decision () =
   Alcotest.(check bool) "a request sent before /health named an instance" false
     (same ~submitted_to:None (Some "instance-1"))
 
+let test_feature_wave1_osc52_and_artifact_export_safety () =
+  (* 1. OSC 52 wrapping (never raw text) *)
+  let seq_plain = Masc_tui_term.Clipboard.osc52_sequence ~in_tmux:false "<h1>Hi</h1>" in
+  Alcotest.(check bool) "plain OSC 52 starts with ESC ]52;c;" true
+    (String.starts_with ~prefix:"\x1b]52;c;" seq_plain);
+  Alcotest.(check bool) "plain OSC 52 does not leak raw HTML" false
+    (contains_substring ~needle:"<h1>Hi</h1>" seq_plain);
+  let seq_tmux = Masc_tui_term.Clipboard.osc52_sequence ~in_tmux:true "<h1>Hi</h1>" in
+  Alcotest.(check bool) "tmux OSC 52 wrapped in DCS passthrough" true
+    (String.starts_with ~prefix:"\x1bPtmux;\x1b\x1b]52;c;" seq_tmux);
+  (* 2. Dynamic export directory resolution (ZERO hardcoded /Users) *)
+  let tmp = make_temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf tmp)
+    (fun () ->
+      let fake_home = Filename.concat tmp "home" in
+      let fake_base = Filename.concat tmp "ws" in
+      Fs_compat.mkdir_p fake_home;
+      Fs_compat.mkdir_p fake_base;
+      let env_with_home = function "HOME" -> Some fake_home | _ -> None in
+      let dir_fallback =
+        Cmd_executor.resolve_artifact_export_dir ~getenv:env_with_home
+          ~base_path:fake_base ()
+      in
+      Alcotest.(check bool) "falls back to <base>/.masc/exports when Downloads absent"
+        true
+        (contains_substring ~needle:".masc/exports" dir_fallback);
+      Fs_compat.mkdir_p (Filename.concat fake_home "Downloads");
+      let dir_dl =
+        Cmd_executor.resolve_artifact_export_dir ~getenv:env_with_home
+          ~base_path:fake_base ()
+      in
+      Alcotest.(check bool) "uses $HOME/Downloads/masc-artifacts when Downloads exists"
+        true
+        (contains_substring ~needle:"Downloads/masc-artifacts" dir_dl);
+      (* 3. Filename sanitization + distinct artifact-<32hex> suffixes + local export safety *)
+      let fname =
+        Cmd_executor.build_artifact_export_filename ~filename_stem:"../evil report/v2"
+          ~id:"artifact-a1b2c3d4e5f60718293a4b5c6d7e8f90" ~ext:".html"
+      in
+      let fname2 =
+        Cmd_executor.build_artifact_export_filename ~filename_stem:"../evil report/v2"
+          ~id:"artifact-99998888777766665555444433332222" ~ext:".html"
+      in
+      Alcotest.(check bool) "filename ends with .html" true
+        (Filename.check_suffix fname ".html");
+      Alcotest.(check bool) "filename strips path separators" false
+        (String.contains fname '/');
+      Alcotest.(check bool) "distinct artifact-<32hex> IDs yield unique filenames"
+        false (String.equal fname fname2);
+      Alcotest.(check bool) "suffix uses unique hex tail, not constant '-artifact'"
+        true (contains_substring ~needle:"6d7e8f90.html" fname);
+      let good_file = Filename.concat fake_base "ok.html" in
+      let bad_file = Filename.concat fake_base "bad.sh" in
+      (match Fs_compat.save_file_atomic good_file "<!doctype html><h1>Safe</h1>" with
+      | Ok () -> ()
+      | Error e -> Alcotest.fail e);
+      (match Fs_compat.save_file_atomic bad_file "#!/bin/sh\necho hi\n" with
+      | Ok () -> ()
+      | Error e -> Alcotest.fail e);
+      Alcotest.(check bool) "regular .html allowed for open_local_export_file"
+        true (Cmd_executor.is_safe_local_export_file good_file);
+      Alcotest.(check bool) ".sh rejected for open_local_export_file" false
+        (Cmd_executor.is_safe_local_export_file bad_file);
+      Alcotest.(check bool) "file:// STILL rejected by is_safe_external_url" false
+        (Cmd_executor.is_safe_external_url ("file://" ^ good_file));
+      (* 4. Live Cmd.Export_artifact writes atomic file and publishes Reply_action_ack *)
+      let cli : Cli_args.config =
+        {
+          scheme = "http";
+          host = "127.0.0.1";
+          port = 8935;
+          base_path = fake_base;
+          workspace = "test";
+          theme = Theme.Midnight;
+          lang = Say.Lang_en;
+          auto_start = false;
+        }
+      in
+      let fake_voice : Voice_runner.backend =
+        {
+          probe =
+            (fun () ->
+              Ok
+                {
+                  recorder_available = false;
+                  recorder_cmd = None;
+                  stt_available = false;
+                });
+          record_until_stopped =
+            (fun ~device:_ ~stop_signal ~on_level:_ ->
+              Eio.Promise.await stop_signal;
+              Error "stopped");
+          transcribe = (fun ~audio_path:_ -> Error "unused");
+          cleanup_audio = (fun ~audio_path:_ -> ());
+        }
+      in
+      (* Point HOME at a subdir without Downloads so Export_artifact writes cleanly
+         into <fake_base>/.masc/exports (outside HOME, respecting Fs_compat test guard). *)
+      let empty_home = Filename.concat tmp "home_no_downloads" in
+      Fs_compat.mkdir_p empty_home;
+      let orig_home = Sys.getenv_opt "HOME" in
+      Unix.putenv "HOME" empty_home;
+      let items =
+        Fun.protect
+          ~finally:(fun () ->
+            Unix.putenv "HOME" (Option.value ~default:"" orig_home))
+          (fun () ->
+            Eio_main.run @@ fun env ->
+            Eio.Switch.run @@ fun sw ->
+            let clock = Eio.Stdenv.clock env in
+            let io = Io_domain.start ~sw ~env in
+            let worker = Worker_pool.create ~sw (Eio.Stdenv.domain_mgr env) in
+            let bus = Cmd_executor.create_bus () in
+            let exec =
+              Cmd_executor.create ~sw ~io ~worker ~clock ~cli ~bus
+                ~bearer_token:None ~voice_backend:fake_voice
+                ~on_quit:(fun _ -> ()) ~on_restart:(fun () -> ()) ()
+            in
+            Cmd_executor.execute exec
+              (Cmd.Export_artifact
+                 {
+                   epoch = Epoch.initial;
+                   id = "art-export-1";
+                   revision = Some 1;
+                   filename_stem = "wave1-report";
+                   ext = ".html";
+                   content_opt = Some "<!doctype html><h1>Exported Wave 1</h1>";
+                   open_after = false;
+                 });
+            let rec wait_drain tries acc =
+              let got = Ui_bus.drain bus in
+              let acc = acc @ got in
+              if acc <> [] || tries <= 0 then acc
+              else begin
+                Eio.Time.sleep clock 0.02;
+                wait_drain (tries - 1) acc
+              end
+            in
+            let drained = wait_drain 40 [] in
+            Cmd_executor.shutdown exec;
+            drained)
+      in
+      let saved_label =
+        List.find_map
+          (function
+            | Ui_bus.Stream_event
+                (Msg.Http_reply { reply = Msg.Reply_action_ack { label; result = Ok () }; _ }) ->
+                Some (Say.resolve Say.Lang_en label)
+            | Ui_bus.Stream_event _ | Ui_bus.Snapshot _ | Ui_bus.Stream_gap _ -> None)
+          items
+      in
+      match saved_label with
+      | Some lbl ->
+          Alcotest.(check bool) "ack toast includes .html saved path" true
+            (contains_substring ~needle:".html" lbl);
+          let prefix = "Exported: " in
+          if String.starts_with ~prefix lbl then begin
+            let path =
+              String.sub lbl (String.length prefix)
+                (String.length lbl - String.length prefix)
+            in
+            Alcotest.(check bool) "exported file exists on disk" true
+              (Sys.file_exists path);
+            let ic = In_channel.open_text path in
+            let body =
+              Fun.protect ~finally:(fun () -> In_channel.close_noerr ic)
+                (fun () -> In_channel.input_all ic)
+            in
+            Alcotest.(check string) "exported HTML content matches"
+              "<!doctype html><h1>Exported Wave 1</h1>" body;
+            (try Sys.remove path with Sys_error _ -> ())
+          end
+      | None -> Alcotest.fail "expected Reply_action_ack for Export_artifact")
+
 let () =
   Alcotest.run "masc_tui_app"
     [
@@ -1728,6 +1903,8 @@ let () =
             `Quick test_setup_login_stream_error_and_single_delivery;
           Alcotest.test_case "chat stream reattach decision" `Quick
             test_chat_reattach_decision;
+          Alcotest.test_case "Feature Wave 1: OSC 52 wrapping & safe atomic artifact export"
+            `Quick test_feature_wave1_osc52_and_artifact_export_safety;
         ] );
       ( "app"
       , [

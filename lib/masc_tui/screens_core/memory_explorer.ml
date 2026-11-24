@@ -418,7 +418,8 @@ let draw_mode_pills ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~(lang : Say.lang)
           Printf.sprintf "[s] %s · [Enter] %s" sort_lbl
             (say lang ~ko:"전문" ~en:"Read")
       | Knowledge_store.View_diff ->
-          say lang ~ko:"[Space] 기간 · [Enter] 전문" ~en:"[Space] Win · [Enter] Read"
+          say lang ~ko:"[Space] 기간 · [g] 흐름/총량 · [Enter] 전문"
+            ~en:"[Space] Win · [g] Flow/Net · [Enter] Read"
     in
     let rh_w = Grapheme.display_width right_hint in
     let pills_limit =
@@ -1479,6 +1480,22 @@ let render_keeper_diff_view ~grid ~(rect : Rect.t) ~(theme : Theme.t)
                 incr y
               end
             end;
+            (* Observed Memory Flow Braille chart (Flow ▲/▼ or [g] Net Total) *)
+            let flow_h = Memory_flow.chart_height_for ~avail_h:(bottom - !y) in
+            if flow_h > 0 then begin
+              let flow_r = Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:flow_h in
+              let flow_inp =
+                Knowledge_store.memory_flow_input_of_diff diff
+                  k.memory_diff_window
+              in
+              Memory_flow.draw grid ~rect:flow_r ~theme ~caps:default_caps ~lang
+                ~now_unix ~mode:k.memory_flow_mode flow_inp;
+              y := !y + flow_h;
+              if !y < bottom then begin
+                Card.draw_hairline ~pad_x:0 ~bg grid ~rect ~y:!y ~theme;
+                incr y
+              end
+            end;
             let items =
               Knowledge_store.filtered_memory_diff_items_for
                 ~keeper_opt:(Some keeper) k
@@ -1694,6 +1711,20 @@ let render_world_diff_body ~grid ~(rect : Rect.t) ~(theme : Theme.t)
                         y := !y + used
                     | None -> ())
                 | Some _ | None -> ());
+                (* Observed Memory Flow Braille chart (Flow ▲/▼ or [g] Net Total) *)
+                let flow_h =
+                  Memory_flow.chart_height_for ~avail_h:(bottom - !y)
+                in
+                if flow_h > 0 then begin
+                  let flow_r = Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:flow_h in
+                  let flow_inp =
+                    Knowledge_store.memory_flow_input_of_diff diff
+                      k.memory_diff_window
+                  in
+                  Memory_flow.draw grid ~rect:flow_r ~theme ~caps:default_caps
+                    ~lang ~now_unix ~mode:k.memory_flow_mode flow_inp;
+                  y := !y + flow_h
+                end;
                 if !y < bottom then begin
                   Card.draw_hairline ~pad_x:0 ~bg grid ~rect ~y:!y ~theme;
                   incr y

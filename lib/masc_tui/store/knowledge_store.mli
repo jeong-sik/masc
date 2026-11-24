@@ -138,6 +138,8 @@ type t = {
   wiki_lint : Wire_knowledge.wiki_lint_report Observed.t;
   wiki_edit_base : wiki_edit_base option;
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
+  active_artifact_detail : Wire_knowledge.published_artifact_detail Observed.t;
+  active_artifact_detail_target : string option;
   world_memory : Wire_knowledge.world_memory Observed.t;
   memory_diffs : Wire_knowledge.memory_diff Observed.t Memory_diff_map.t;
   memory_os_internals :
@@ -159,6 +161,7 @@ type t = {
   memory_reading_scroll : int;
   memory_diagram : memory_diagram_state option;
   memory_diagram_seq : int;
+  memory_flow_mode : Masc_tui_ui.Memory_flow.chart_mode;
   last_memory_act_answer : (string * Wire_knowledge.memory_act_answer) option;
   selected_index : int;
   scroll_offset : int;
@@ -280,6 +283,7 @@ val move_memory_activity :
 val move_memory_facts :
   keeper:string -> ?viewport_rows:int -> delta:int -> t -> t
 val move_memory_diff_cursor : delta:int -> t -> t
+val toggle_memory_flow_mode : t -> t
 
 val scope_memory_diff_dive :
   keeper:string option -> from_rev:int -> to_rev:int -> t -> t
@@ -316,6 +320,18 @@ val apply_wiki_lint :
   observed_at:Clock.Mono.t -> Wire_knowledge.wiki_lint_report -> t -> t
 val apply_artifacts :
   observed_at:Clock.Mono.t -> Wire_knowledge.artifact_entry list -> t -> t
+val apply_artifact_detail :
+  observed_at:Clock.Mono.t ->
+  Wire_knowledge.published_artifact_detail ->
+  t ->
+  t
+val mark_artifact_detail_failed :
+  ?target:string ->
+  at:Clock.Mono.t ->
+  reason:string ->
+  retryable:bool ->
+  t ->
+  t
 val apply_world_memory :
   observed_at:Clock.Mono.t -> Wire_knowledge.world_memory -> t -> t
 val apply_keeper_memory_facts :
@@ -446,6 +462,22 @@ val artifacts_filtered : t -> Wire_knowledge.artifact_entry list
     contains the filter text. *)
 
 val selected_artifact : t -> Wire_knowledge.artifact_entry option
+val find_artifact_by_id_or_sha :
+  string -> t -> Wire_knowledge.artifact_entry option
+val artifact_detail_for_entry :
+  Wire_knowledge.artifact_entry ->
+  t ->
+  Wire_knowledge.published_artifact_detail option
+val artifact_detail_failure_for_entry :
+  Wire_knowledge.artifact_entry -> t -> string option
+val artifact_preview_lines :
+  Wire_knowledge.artifact_entry ->
+  Wire_knowledge.published_artifact_detail option ->
+  string list
+val memory_flow_input_of_diff :
+  Wire_knowledge.memory_diff ->
+  memory_diff_window ->
+  Masc_tui_ui.Memory_flow.input
 
 val artifact_by_id : t -> string -> Wire_knowledge.artifact_entry option
 (** The loaded artifact an [Artifact_dive] names. *)

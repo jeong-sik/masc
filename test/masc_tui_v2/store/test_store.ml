@@ -137,6 +137,7 @@ let has_get_health cmds =
               | Cmd.Get_keeper_turns
               | Cmd.Get_keeper_turn_records _
               | Cmd.Get_chat_history _
+              | Cmd.Get_chat_operation_events _
               | Cmd.Get_planning
               | Cmd.Get_verifications _
               | Cmd.Get_schedules _
@@ -9635,6 +9636,403 @@ let test_unified_navigation_sidebar_focus_ring_and_mouse () =
   Alcotest.(check bool) "Click when composer auto-folded leaves composer unfocused"
     false (Drafts.is_focused m_compact_click.drafts)
 
+(* ---------- Cut reply rebuilt from the operation journal ---------- *)
+
+let unowned text =
+  Wire_chat_journal.Text_delta
+    { text; owner = Wire_chat_journal.Unobserved_scope None }
+
+let owned ~generation ~scope text =
+  Wire_chat_journal.Text_delta
+    {
+      text;
+      owner =
+        Wire_chat_journal.Observed_response
+          { content_generation = generation; stream_scope = scope };
+    }
+
+let journal_page ?next events : Wire_chat_journal.page = { events; next }
+
+let rebuilt events =
+  Cut_reply.text (Cut_reply.apply_page (journal_page events) Cut_reply.start)
+
+let from_label = function
+  | Wire_chat_journal.From_start -> "start"
+  | Wire_chat_journal.After { last_seq; next_offset } ->
+      Printf.sprintf "after seq %d at %d" last_seq next_offset
+
+let test_cut_reply_follows_the_connector_fold () =
+  let open Wire_chat_journal in
+  Alcotest.(check (option string))
+    "an attempt boundary drops the earlier attempt and its late bytes"
+    (Some "second")
+    (rebuilt
+       [
+         Run_started;
+         owned ~generation:1 ~scope:0 "first";
+         Runtime_attempt_started;
+         owned ~generation:1 ~scope:0 "late";
+         owned ~generation:2 ~scope:0 "second";
+         Event_error;
+       ]);
+  Alcotest.(check (option string)) "a new run starts the text over" (Some "b")
+    (rebuilt [ Run_started; unowned "a"; Run_started; Other; unowned "b" ]);
+  Alcotest.(check (option string))
+    "an older response of the admitted generation is dropped" (Some "AC")
+    (rebuilt
+       [
+         owned ~generation:1 ~scope:4 "A";
+         owned ~generation:1 ~scope:3 "B";
+         owned ~generation:1 ~scope:5 "C";
+       ]);
+  Alcotest.(check (option string))
+    "a bare scope ahead of the admitted response drops older scopes"
+    (Some "AUC")
+    (rebuilt
+       [
+         owned ~generation:1 ~scope:4 "A";
+         Text_delta { text = "U"; owner = Unobserved_scope (Some 6) };
+         owned ~generation:1 ~scope:5 "B";
+         owned ~generation:1 ~scope:6 "C";
+       ]);
+  Alcotest.(check (option string)) "the first terminal event ends the reply"
+    (Some "kept")
+    (rebuilt [ unowned "kept"; Run_finished; unowned "after" ]);
+  Alcotest.(check (option string)) "a cut with no text draws nothing" None
+    (rebuilt [ Run_started; Event_error ]);
+  let cursor = { last_seq = 2; next_offset = 300 } in
+  let first =
+    Cut_reply.apply_page
+      (journal_page ~next:cursor [ unowned "Hel" ])
+      Cut_reply.start
+  in
+  Alcotest.(check (option string)) "a page with more asks for the next one"
+    (Some "after seq 2 at 300")
+    (Option.map from_label (Cut_reply.next_page first));
+  Alcotest.(check (option string)) "nothing is drawn before the last page" None
+    (Cut_reply.text first);
+  let last = Cut_reply.apply_page (journal_page [ unowned "lo" ]) first in
+  Alcotest.(check (option string)) "the pages join into one reply"
+    (Some "Hello") (Cut_reply.text last);
+  Alcotest.(check (option string)) "the last page ends reading" None
+    (Option.map from_label (Cut_reply.next_page last));
+  let ended =
+    Cut_reply.apply_page
+      (journal_page ~next:cursor [ unowned "x"; Event_error; unowned "y" ])
+      Cut_reply.start
+  in
+  Alcotest.(check (option string))
+    "a terminal event ends reading though the server has more" None
+    (Option.map from_label (Cut_reply.next_page ended));
+  Alcotest.(check (option string)) "a page after the end changes nothing"
+    (Some "x")
+    (Cut_reply.text (Cut_reply.apply_page (journal_page [ unowned "z" ]) ended));
+  Alcotest.(check (option string)) "no journal asks nothing" None
+    (Option.map from_label (Cut_reply.next_page Cut_reply.no_journal));
+  Alcotest.(check (option string)) "no journal draws nothing" None
+    (Cut_reply.text Cut_reply.no_journal)
+
+let chat_row ~id ~role ?operation_id content : Wire_fleet.chat_message =
+  {
+    id;
+    role;
+    content;
+    ts_unix = 1_700_000_000.0;
+    turn_ref = None;
+    model_used = None;
+    tool_call_id = None;
+    tool_call_name = None;
+    execution_id = None;
+    operation_id;
+    transcript_slot = None;
+    failure_kind = None;
+  }
+
+let failure_row ~id ~operation_id =
+  chat_row ~id ~role:Wire_fleet.Role_request_failure ~operation_id
+    "Keeper request failed: cancelled"
+
+let journal_gets cmds =
+  List.filter_map
+    (function
+      | Cmd.Http_get
+          { req = Cmd.Get_chat_operation_events { operation_id; from; _ }; _ }
+        ->
+          Some (operation_id, from_label from)
+      | _ -> None)
+    (Cmd.flatten cmds)
+
+let history_reply ~keeper messages (m : Model.t) =
+  Update.step ~now:t1 m
+    (Msg.Http_reply
+       {
+         epoch = m.epoch;
+         reply =
+           Msg.Reply_chat_history
+             {
+               keeper;
+               result = Ok { messages; has_more = false; next_cursor = None };
+             };
+       })
+
+let journal_reply ~operation_id ~from result (m : Model.t) =
+  Update.step ~now:t2 m
+    (Msg.Http_reply
+       {
+         epoch = m.epoch;
+         reply =
+           Msg.Reply_chat_operation_events
+             { keeper = "alpha"; operation_id; from; result };
+       })
+
+let in_alpha_chat (m : Model.t) =
+  {
+    m with
+    nav =
+      {
+        m.nav with
+        dive_stack = [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat } ];
+      };
+  }
+
+let test_cut_reply_reads_the_operation_journal () =
+  let m0 = in_alpha_chat (Model.initial ()) in
+  let history =
+    [
+      chat_row ~id:"u-cut" ~role:Wire_fleet.Role_user ~operation_id:"op-cut"
+        "question";
+      failure_row ~id:"f-cut" ~operation_id:"op-cut";
+      (* The same operation's settled failure: the reply is drawn once. *)
+      failure_row ~id:"f-cut-settled" ~operation_id:"op-cut";
+      chat_row ~id:"a-done" ~role:Wire_fleet.Role_assistant
+        ~operation_id:"op-done" "delivered reply";
+      (* A failure settled after a delivered reply is not a cut. *)
+      failure_row ~id:"f-done" ~operation_id:"op-done";
+    ]
+  in
+  let m1, cmds1 = history_reply ~keeper:"alpha" history m0 in
+  Alcotest.(check (list (pair string string)))
+    "the history reply asks the cut operation's journal from its start"
+    [ ("op-cut", "start") ] (journal_gets cmds1);
+  Alcotest.(check (list (pair string string)))
+    "only the first failure row of the cut operation stands for it"
+    [ ("f-cut", "op-cut") ]
+    (Fleet_store.cut_reply_rows ~keeper:"alpha" m1.fleet);
+  Alcotest.(check string) "the request names the operation and the page size"
+    "/api/v1/keepers/alpha/chat/events?operation_id=op-cut&limit=2000"
+    (Cmd.get_request_path
+       (Cmd.Get_chat_operation_events
+          {
+            keeper = "alpha";
+            operation_id = "op-cut";
+            from = Wire_chat_journal.From_start;
+          }));
+  Alcotest.(check (list (pair string string)))
+    "the planner asks the same page while no answer is held"
+    [ ("op-cut", "start") ]
+    (journal_gets (View_fetches.fetches_for_current_view m1));
+  let cursor : Wire_chat_journal.cursor = { last_seq = 1; next_offset = 240 } in
+  let m2, cmds2 =
+    journal_reply ~operation_id:"op-cut" ~from:Wire_chat_journal.From_start
+      (Ok (journal_page ~next:cursor [ unowned "cut " ]))
+      m1
+  in
+  Alcotest.(check (list (pair string string)))
+    "a page with more asks for the next page"
+    [ ("op-cut", "after seq 1 at 240") ] (journal_gets cmds2);
+  Alcotest.(check string) "the next page sends both cursors back"
+    "/api/v1/keepers/alpha/chat/events?operation_id=op-cut&since_seq=1&since_offset=240&limit=2000"
+    (Cmd.get_request_path
+       (Cmd.Get_chat_operation_events
+          {
+            keeper = "alpha";
+            operation_id = "op-cut";
+            from = Wire_chat_journal.After cursor;
+          }));
+  Alcotest.(check (list (pair string string)))
+    "nothing is drawn before the last page" []
+    (Fleet_store.String_map.bindings
+       (Fleet_store.cut_replies_by_row ~keeper:"alpha" m2.fleet));
+  let m2_dup, cmds2_dup =
+    journal_reply ~operation_id:"op-cut" ~from:Wire_chat_journal.From_start
+      (Ok (journal_page ~next:cursor [ unowned "cut " ]))
+      m2
+  in
+  Alcotest.(check (list (pair string string)))
+    "a second answer to the first page asks nothing" []
+    (journal_gets cmds2_dup);
+  let m3, cmds3 =
+    journal_reply ~operation_id:"op-cut" ~from:(Wire_chat_journal.After cursor)
+      (Ok (journal_page [ unowned "reply"; Wire_chat_journal.Event_error ]))
+      m2_dup
+  in
+  Alcotest.(check (list (pair string string)))
+    "the reply is drawn once, under the first failure row"
+    [ ("f-cut", "cut reply") ]
+    (Fleet_store.String_map.bindings
+       (Fleet_store.cut_replies_by_row ~keeper:"alpha" m3.fleet));
+  Alcotest.(check (list (pair string string))) "the last page asks nothing more"
+    [] (journal_gets cmds3);
+  Alcotest.(check (list (pair string string)))
+    "a rebuilt reply is not asked again" []
+    (journal_gets (View_fetches.fetches_for_current_view m3));
+  Alcotest.(check bool) "the answer lands on its own keeper's key" true
+    (match Fleet_store.cut_reply_for ~keeper:"beta" ~operation_id:"op-cut" m3.fleet with
+    | Observed.Unreported -> true
+    | Observed.Value _ | Observed.Loading _ | Observed.Absent | Observed.Failed _ ->
+        false);
+  (* Not on screen: the Memory tab does not read journals. *)
+  let on_memory =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory } ];
+        };
+    }
+  in
+  let _, memory_cmds = history_reply ~keeper:"alpha" history on_memory in
+  Alcotest.(check (list (pair string string)))
+    "a history reply under another tab reads no journal" []
+    (journal_gets memory_cmds);
+  (* The Keepers split shows the selected keeper's Chat pane. *)
+  let base = Model.initial () in
+  let with_roster, _ =
+    Update.step ~now:t1 base
+      (Msg.Http_reply
+         {
+           epoch = base.epoch;
+           reply =
+             Msg.Reply_keepers_roster (Ok (roster_of [ sample_keeper "alpha" ]));
+         })
+  in
+  let split =
+    {
+      with_roster with
+      nav = { with_roster.nav with workspace = Nav.Keepers; dive_stack = [] };
+      fleet = { with_roster.fleet with keeper_dive_tab = Nav.Keeper_chat };
+    }
+  in
+  let _, split_cmds = history_reply ~keeper:"alpha" history split in
+  Alcotest.(check (list (pair string string)))
+    "the Keepers split's Chat pane reads the journal too"
+    [ ("op-cut", "start") ] (journal_gets split_cmds)
+
+let test_cut_reply_journal_failures () =
+  let history =
+    [
+      failure_row ~id:"f-gone" ~operation_id:"op-gone";
+      failure_row ~id:"f-broken" ~operation_id:"op-broken";
+    ]
+  in
+  let m1, _ = history_reply ~keeper:"alpha" history (in_alpha_chat (Model.initial ())) in
+  let incidents_before = Incidents.count m1.incidents in
+  let gone, _ =
+    journal_reply ~operation_id:"op-gone" ~from:Wire_chat_journal.From_start
+      (Error (Msg.Http_error { status = 410; body = ""; api_error = None }))
+      m1
+  in
+  Alcotest.(check int) "a pruned journal is not an incident" incidents_before
+    (Incidents.count gone.incidents);
+  Alcotest.(check (list (pair string string)))
+    "a pruned journal is not asked again, only the broken one is"
+    [ ("op-broken", "start") ]
+    (journal_gets (View_fetches.fetches_for_current_view gone));
+  let broken, _ =
+    journal_reply ~operation_id:"op-broken" ~from:Wire_chat_journal.From_start
+      (Error (Msg.Http_error { status = 503; body = "journal unreadable"; api_error = None }))
+      gone
+  in
+  Alcotest.(check int) "a failed read records an incident"
+    (incidents_before + 1)
+    (Incidents.count broken.incidents);
+  Alcotest.(check bool) "the failure lands on the operation's slot" true
+    (match
+       Fleet_store.cut_reply_for ~keeper:"alpha" ~operation_id:"op-broken"
+         broken.fleet
+     with
+    | Observed.Failed { retryable = true; _ } -> true
+    | Observed.Failed { retryable = false; _ }
+    | Observed.Value _ | Observed.Loading _ | Observed.Absent | Observed.Unreported ->
+        false);
+  Alcotest.(check (list (pair string string)))
+    "a retryable failure is asked again from the start"
+    [ ("op-broken", "start") ]
+    (journal_gets (View_fetches.fetches_for_current_view broken));
+  Alcotest.(check (list (pair string string))) "neither draws anything" []
+    (Fleet_store.String_map.bindings
+       (Fleet_store.cut_replies_by_row ~keeper:"alpha" broken.fleet))
+
+(* The first page of a long journal landed and a later page fails. The partial
+   read draws nothing, so the failure replaces it. A stale partial read would
+   be asked for the same page again at every trigger. *)
+let test_cut_reply_failure_after_the_first_page () =
+  let history = [ failure_row ~id:"f-long" ~operation_id:"op-long" ] in
+  let m0, _ =
+    history_reply ~keeper:"alpha" history (in_alpha_chat (Model.initial ()))
+  in
+  let cursor : Wire_chat_journal.cursor = { last_seq = 1; next_offset = 240 } in
+  let page2 = Wire_chat_journal.After cursor in
+  let after_first, _ =
+    journal_reply ~operation_id:"op-long" ~from:Wire_chat_journal.From_start
+      (Ok (journal_page ~next:cursor [ unowned "cut " ]))
+      m0
+  in
+  let slot_failure (m : Model.t) =
+    match
+      Fleet_store.cut_reply_for ~keeper:"alpha" ~operation_id:"op-long" m.fleet
+    with
+    | Observed.Failed { retryable; _ } -> Some retryable
+    | Observed.Value _ | Observed.Loading _ | Observed.Absent
+    | Observed.Unreported ->
+        None
+  in
+  let not_found =
+    Error (Msg.Http_error { status = 404; body = "no such page"; api_error = None })
+  in
+  let incidents_before = Incidents.count after_first.incidents in
+  let gone, gone_cmds =
+    journal_reply ~operation_id:"op-long" ~from:page2 not_found after_first
+  in
+  Alcotest.(check (option bool))
+    "a non-retryable failure replaces the partial read" (Some false)
+    (slot_failure gone);
+  Alcotest.(check int) "the failure records one incident"
+    (incidents_before + 1)
+    (Incidents.count gone.incidents);
+  Alcotest.(check (list (pair string string))) "the failed reply asks nothing"
+    [] (journal_gets gone_cmds);
+  Alcotest.(check (list (pair string string)))
+    "the planner does not ask the failed page again" []
+    (journal_gets (View_fetches.fetches_for_current_view gone));
+  Alcotest.(check (list (pair string string)))
+    "a chat history landing does not ask it again" []
+    (journal_gets (snd (history_reply ~keeper:"alpha" history gone)));
+  let duplicate, duplicate_cmds =
+    journal_reply ~operation_id:"op-long" ~from:page2 not_found gone
+  in
+  Alcotest.(check int) "a second failure of the same page records nothing"
+    (Incidents.count gone.incidents)
+    (Incidents.count duplicate.incidents);
+  Alcotest.(check (list (pair string string)))
+    "a second failure of the same page asks nothing" []
+    (journal_gets duplicate_cmds);
+  let down, _ =
+    journal_reply ~operation_id:"op-long" ~from:page2
+      (Error
+         (Msg.Http_error
+            { status = 503; body = "journal unreadable"; api_error = None }))
+      after_first
+  in
+  Alcotest.(check (option bool)) "a retryable failure replaces the partial read"
+    (Some true) (slot_failure down);
+  Alcotest.(check (list (pair string string)))
+    "a retryable failure asks again from the start"
+    [ ("op-long", "start") ]
+    (journal_gets (View_fetches.fetches_for_current_view down))
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -9768,5 +10166,19 @@ let () =
           Alcotest.test_case
             "PR #54538 P2 #2 Reply_artifacts dive target & P3 refire guards"
             `Quick test_pr54538_reply_artifacts_dive_target_and_p3_guards;
+        ] );
+      ( "chat_cut_reply"
+      , [
+          Alcotest.test_case "The cut reply follows the connectors' fold"
+            `Quick test_cut_reply_follows_the_connector_fold;
+          Alcotest.test_case
+            "A cut reply reads its operation's journal once per page"
+            `Quick test_cut_reply_reads_the_operation_journal;
+          Alcotest.test_case
+            "A pruned journal draws nothing; a failed read is an incident"
+            `Quick test_cut_reply_journal_failures;
+          Alcotest.test_case
+            "A failure after the first page replaces the partial read"
+            `Quick test_cut_reply_failure_after_the_first_page;
         ] );
     ]

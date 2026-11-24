@@ -48,6 +48,9 @@
   ;; its interrupt target names an operation id from these two libraries.
   masc.keeper_chat_operations
   masc.keeper_operation_identity
+  ;; The cut reply case writes text events whose response identity is
+  ;; Ag_ui's, and folds the decoded pages with the TUI store's Cut_reply.
+  masc.ag_ui
   masc.masc_board
   masc.masc_candle
   masc.masc_goal
@@ -60,6 +63,7 @@
   masc.tool_schemas
   masc_tui_core
   masc_tui_protocol
+  masc_tui_store
   masc_workspace
   unix
   yojson))

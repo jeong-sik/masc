@@ -14,6 +14,9 @@ open Masc_tui_protocol
 module String_map : Map.S with type key = string
 module String_set : Set.S with type elt = string
 
+module Operation_map : Map.S with type key = string * string
+(** Keyed by [(keeper, operation_id)]. *)
+
 type chat_display_origin =
   | Display_origin_bare
   | Display_origin_inline
@@ -78,6 +81,9 @@ type t = {
   collapsed_companies : String_set.t;
   chat_histories : Wire_fleet.chat_history_page Observed.t String_map.t;
   chat_streams : chat_stream_buffer String_map.t;
+  cut_replies : Cut_reply.t Observed.t Operation_map.t;
+      (** The reply text each cut operation's journal holds, read for its
+          failure row. *)
   chat_origin_mode : chat_display_origin;
   chat_tools_mode : Slash.tools_mode;
   chat_thinking_mode : thinking_display;
@@ -255,6 +261,25 @@ val turn_records_for :
 
 val set_turn_records :
   keeper:string -> Wire_fleet.keeper_turn_records Observed.t -> t -> t
+
+val cut_reply_for :
+  keeper:string -> operation_id:string -> t -> Cut_reply.t Observed.t
+(** [Unreported] when the operation's journal was never read. *)
+
+val set_cut_reply :
+  keeper:string -> operation_id:string -> Cut_reply.t Observed.t -> t -> t
+
+val cut_reply_rows : keeper:string -> t -> (string * string) list
+(** [(row id, operation_id)] of each failure row in [keeper]'s loaded history
+    that stands for a cut reply: the first failure row of its operation, when
+    no assistant row of that operation is in the history. An assistant row of
+    an operation is its delivered reply, and a failure settled after it is
+    not a cut. *)
+
+val cut_replies_by_row : keeper:string -> t -> string String_map.t
+(** The rebuilt text to draw under each {!cut_reply_rows} row, keyed by the
+    row id: only rows whose journal was read to the end and left text. *)
+
 val mark_chat_history_loading : keeper:string -> t -> t
 val mark_chat_history_failed :
   at:Clock.Mono.t -> keeper:string -> reason:string -> retryable:bool -> t -> t

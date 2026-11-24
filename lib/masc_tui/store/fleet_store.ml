@@ -5,6 +5,15 @@ open Masc_tui_protocol
 module String_map = Map.Make (String)
 module String_set = Set.Make (String)
 
+module Operation_map = Map.Make (struct
+  type t = string * string
+
+  let compare (keeper_a, operation_a) (keeper_b, operation_b) =
+    match String.compare keeper_a keeper_b with
+    | 0 -> String.compare operation_a operation_b
+    | order -> order
+end)
+
 type chat_display_origin =
   | Display_origin_bare
   | Display_origin_inline
@@ -66,6 +75,7 @@ type t = {
   collapsed_companies : String_set.t;
   chat_histories : Wire_fleet.chat_history_page Observed.t String_map.t;
   chat_streams : chat_stream_buffer String_map.t;
+  cut_replies : Cut_reply.t Observed.t Operation_map.t;
   chat_origin_mode : chat_display_origin;
   chat_tools_mode : Slash.tools_mode;
   chat_thinking_mode : thinking_display;
@@ -99,6 +109,7 @@ let empty =
     collapsed_companies = String_set.empty;
     chat_histories = String_map.empty;
     chat_streams = String_map.empty;
+    cut_replies = Operation_map.empty;
     chat_origin_mode = Display_origin_bare;
     chat_tools_mode = Slash.Tools_compact;
     chat_thinking_mode = Thinking_folded;
@@ -1367,6 +1378,82 @@ let turn_records_for ~keeper t =
 let set_turn_records ~keeper obs t =
   { t with turn_records = String_map.add keeper obs t.turn_records }
 
+let cut_reply_for ~keeper ~operation_id t =
+  match Operation_map.find_opt (keeper, operation_id) t.cut_replies with
+  | Some obs -> obs
+  | None -> Observed.unreported
+
+let set_cut_reply ~keeper ~operation_id obs t =
+  {
+    t with
+    cut_replies = Operation_map.add (keeper, operation_id) obs t.cut_replies;
+  }
+
+(* A failure row stands for a cut reply when it is the first failure row of
+   its operation and no assistant row of that operation is in the history.
+   An assistant row with a delivery key sits only in the operation's
+   Terminal_result slot (Keeper_chat_store_delivery_rules.validate_delivery_role),
+   so it is the operation's delivered reply; a settled failure appended after
+   it is a separate fact, not a cut (Keeper_chat_store
+   .append_settled_failure_once). One operation can leave two failure rows,
+   a Terminal_result one and a Settled_failure one; the reply is drawn once. *)
+let cut_reply_rows ~keeper t =
+  let messages =
+    match String_map.find_opt keeper t.chat_histories with
+    | None -> []
+    | Some obs -> (
+        match Observed.to_option obs with
+        | Some (page : Wire_fleet.chat_history_page) -> page.messages
+        | None -> [])
+  in
+  let replied =
+    List.fold_left
+      (fun acc (m : Wire_fleet.chat_message) ->
+        match m.role, m.operation_id with
+        | Wire_fleet.Role_assistant, Some op -> String_set.add op acc
+        | ( ( Wire_fleet.Role_user
+            | Wire_fleet.Role_peer _
+            | Wire_fleet.Role_assistant
+            | Wire_fleet.Role_system
+            | Wire_fleet.Role_tool
+            | Wire_fleet.Role_request_failure )
+          , (Some _ | None) ) ->
+            acc)
+      String_set.empty messages
+  in
+  let _, rows =
+    List.fold_left
+      (fun (seen, rows) (m : Wire_fleet.chat_message) ->
+        match m.role, m.operation_id with
+        | Wire_fleet.Role_request_failure, Some op ->
+            if String_set.mem op seen || String_set.mem op replied then
+              (seen, rows)
+            else (String_set.add op seen, (m.id, op) :: rows)
+        | ( ( Wire_fleet.Role_user
+            | Wire_fleet.Role_peer _
+            | Wire_fleet.Role_assistant
+            | Wire_fleet.Role_system
+            | Wire_fleet.Role_tool
+            | Wire_fleet.Role_request_failure )
+          , (Some _ | None) ) ->
+            (seen, rows))
+      (String_set.empty, []) messages
+  in
+  List.rev rows
+
+let cut_replies_by_row ~keeper t =
+  List.fold_left
+    (fun acc (row_id, operation_id) ->
+      match
+        Option.bind
+          (Observed.to_option (cut_reply_for ~keeper ~operation_id t))
+          Cut_reply.text
+      with
+      | Some text -> String_map.add row_id text acc
+      | None -> acc)
+    String_map.empty
+    (cut_reply_rows ~keeper t)
+
 let mark_chat_history_loading ~keeper t =
   match String_map.find_opt keeper t.chat_histories with
   | None ->
@@ -1411,4 +1498,5 @@ let mark_stale_all t =
     turn_records = String_map.map Observed.mark_stale t.turn_records;
     fleet_reading = Observed.mark_stale t.fleet_reading;
     chat_histories = String_map.map Observed.mark_stale t.chat_histories;
+    cut_replies = Operation_map.map Observed.mark_stale t.cut_replies;
   }

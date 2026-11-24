@@ -426,7 +426,10 @@ let apply_http_reply ~now (m : Model.t) reply =
       let drafts =
         confirm_pending_txs_from_history ~now ~keeper page m.drafts
       in
-      ({ m with fleet; drafts }, [])
+      let next = { m with fleet; drafts } in
+      (* The failure rows of a cut reply are known only once the history has
+         landed, so the reply asks for their journals. *)
+      (next, View_fetches.cut_reply_fetches ~keeper next)
   | Msg.Reply_chat_history { keeper; result = Error err } ->
       let fleet =
         Fleet_store.mark_chat_history_failed ~at:now ~keeper
@@ -436,6 +439,78 @@ let apply_http_reply ~now (m : Model.t) reply =
       record_http_incident ~now ~source:(Health.Source_keeper keeper)
         ~context:(Say.make ~ko:"대화 이력 조회" ~en:"Chat history fetch")
         err { m with fleet }
+  | Msg.Reply_chat_operation_events { keeper; operation_id; from; result } -> (
+      let slot = Fleet_store.cut_reply_for ~keeper ~operation_id m.fleet in
+      (* A page counts only as the answer to the page the slot waits for. A
+         second request for the same page, sent before the first answered,
+         must not append its text again. *)
+      let answers_slot =
+        match Cut_reply.pending_page slot with
+        | Some pending -> Wire_chat_journal.equal_from pending from
+        | None -> false
+      in
+      let set_slot obs (m : Model.t) =
+        if answers_slot then
+          on_fleet (Fleet_store.set_cut_reply ~keeper ~operation_id obs) m
+        else m
+      in
+      match result with
+      | Ok page ->
+          if answers_slot then
+            let cut =
+              Cut_reply.apply_page page
+                (Option.value (Observed.to_option slot) ~default:Cut_reply.start)
+            in
+            let next = set_slot (Observed.value ~observed_at:now cut) m in
+            let cmds =
+              match Cut_reply.next_page cut with
+              | Some from ->
+                  [
+                    Cmd.Http_get
+                      {
+                        epoch = next.epoch;
+                        req =
+                          Cmd.Get_chat_operation_events
+                            { keeper; operation_id; from };
+                      };
+                  ]
+              | None -> []
+            in
+            (next, cmds)
+          else (m, [])
+      (* 410 is the route's [journal_pruned]: the operation ended and the
+         server keeps no journal for it, so there is nothing to show now or
+         later (Server_keeper_chat_public_error.status maps only
+         Journal_pruned to Gone). *)
+      | Error (Msg.Http_error { status = 410; _ }) ->
+          (set_slot (Observed.value ~observed_at:now Cut_reply.no_journal) m, [])
+      | Error
+          (( Msg.Http_error _
+           | Msg.Transport _
+           | Msg.Workspace_mismatch _
+           | Msg.Decode_error _ ) as err) ->
+          (* A reply for a page the slot no longer waits for changes nothing
+             and records no incident. A workspace mismatch is the exception:
+             it is about the workspace, not about this slot. *)
+          let about_workspace =
+            match err with
+            | Msg.Workspace_mismatch _ -> true
+            | Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _ -> false
+          in
+          if answers_slot || about_workspace then
+            (* The failure replaces the slot, partial read included. A
+               failed fetch that kept the partial read stale would ask the
+               same page again after every trigger, so a page that fails for
+               good would never stop. A retryable failure asks again from the
+               start, and the partial read draws nothing meanwhile. *)
+            err_reply
+              ~fail:
+                (set_slot
+                   (Observed.failed ~reason:(Msg.http_error_detail err)
+                      ~retryable:(Msg.http_error_retryable err) ~at:now))
+              ~source:(Health.Source_keeper keeper) ~ko:"끊긴 답장 조회"
+              ~en:"Cut reply fetch" err
+          else (m, []))
   | Msg.Reply_turn_interrupt { keeper; result = Ok resp } ->
       let fleet0 =
         match resp.chat_control_token with

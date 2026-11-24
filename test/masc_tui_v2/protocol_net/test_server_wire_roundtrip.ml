@@ -1436,6 +1436,187 @@ let test_candle_observation_roundtrip () =
                 circulating_milli = "7500";
               })))
 
+(* GET /api/v1/keepers/<keeper>/chat/events. The journal rows are written by
+   the server's own encoder and served through the route's own query parsing,
+   at the paths the TUI builds; the TUI decodes the pages and folds them with
+   Cut_reply. The text has to equal the reply the channel connectors keep
+   from the same events (Keeper_chat_discord, Keeper_chat_slack), folded here
+   with the server's own Keeper_chat_response_ownership. *)
+module Chat_events = Masc.Keeper_chat_events
+module Chat_event_log = Masc.Keeper_chat_event_log
+module Response_ownership = Masc.Keeper_chat_response_ownership
+module Chat_operations_http = Server_dashboard_http_keeper_chat_operations
+module Wire_chat_journal = Masc_tui_protocol.Wire_chat_journal
+module Cut_reply = Masc_tui_store.Cut_reply
+
+(* The connectors' fold: Run_started starts over with fresh ownership, an
+   attempt boundary retires the owner and starts over, a Stale delta is
+   dropped, and Run_finished or Event_error ends the reply. *)
+let connector_reply events =
+  let rec fold ~text ~ownership = function
+    | [] -> text
+    | (event : Chat_events.keeper_chat_event) :: rest -> (
+        match event with
+        | Chat_events.Run_started _ ->
+            fold ~text:"" ~ownership:(Response_ownership.create ()) rest
+        | Chat_events.Agent_core_runtime_attempt_started _ ->
+            fold ~text:""
+              ~ownership:(Response_ownership.retire_attempt ownership)
+              rest
+        | Chat_events.Text_delta { text = delta; response } -> (
+            match Response_ownership.admit ownership response with
+            | Response_ownership.Stale -> fold ~text ~ownership rest
+            | Response_ownership.Admitted ownership
+            | Response_ownership.Preserved_unobserved ownership ->
+                fold ~text:(text ^ delta) ~ownership rest)
+        | Chat_events.Run_finished _ | Chat_events.Event_error _ -> text
+        | _ -> fold ~text ~ownership rest)
+  in
+  match fold ~text:"" ~ownership:(Response_ownership.create ()) events with
+  | "" -> None
+  | text -> Some text
+
+let journal_rows events =
+  events
+  |> List.mapi (fun seq event ->
+         Chat_event_log.journaled_event_to_string
+           { Chat_event_log.seq; ts = 1_781_300_000.0 +. Float.of_int seq; event }
+         ^ "\n")
+  |> String.concat ""
+
+let cut_operation_id = "kmsg-roundtrip-cut"
+
+let tui_reply events =
+  let rows = journal_rows events in
+  let rec read cut =
+    match Cut_reply.next_page cut with
+    | None -> cut
+    | Some from -> (
+        let target =
+          Wire_chat_journal.path ~keeper:"alpha" ~operation_id:cut_operation_id
+            ~from
+        in
+        match
+          Chat_operations_http.For_testing.events_page_of_request
+            ~path:"kmsg-roundtrip-cut.jsonl"
+            (Httpun.Request.create `GET target)
+            rows
+        with
+        | Error (_status, code) ->
+            Alcotest.failf "the route refused %s: %s" target code
+        | Ok body -> (
+            match
+              Wire_chat_journal.decode_page ~operation_id:cut_operation_id body
+            with
+            | Ok page -> read (Cut_reply.apply_page page cut)
+            | Error detail -> Alcotest.failf "the TUI refused a page: %s" detail))
+  in
+  Cut_reply.text (read Cut_reply.start)
+
+let observed generation scope =
+  Chat_events.Observed_response
+    { response_generation = generation; response_scope = scope }
+
+let delta ?(response = Chat_events.Unobserved_scope None) text =
+  Chat_events.Text_delta { text; response }
+
+let run_started =
+  Chat_events.Run_started { run_id = "run-cut"; thread_id = "keeper:alpha" }
+
+let attempt_started index =
+  Chat_events.Agent_core_runtime_attempt_started
+    { runtime_id = Some "runtime-b"; attempt_index = Some index }
+
+let cut = Chat_events.Event_error { message = "interrupted" }
+
+(* Events the fold passes over, the way they sit between text deltas. *)
+let unread_events =
+  [
+    Chat_events.Text_message_start
+      { message_id = "msg-cut"; role = Chat_events.Assistant };
+    Chat_events.Agent_core_thinking_delta
+      { index = 0; delta = "thinking"; response = None };
+    Chat_events.Text_message_end;
+  ]
+
+let random_journal state =
+  let pick list = List.nth list (Random.State.int state (List.length list)) in
+  List.init
+    (1 + Random.State.int state 40)
+    (fun index ->
+      let text = Printf.sprintf "<%d>" index in
+      match Random.State.int state 20 with
+      | 0 -> run_started
+      | 1 | 2 -> attempt_started index
+      | 3 -> cut
+      | 4 | 5 -> pick unread_events
+      | 6 | 7 | 8 -> delta text
+      | 9 | 10 ->
+          delta
+            ~response:
+              (Chat_events.Unobserved_scope (Some (Random.State.int state 4)))
+            text
+      | _ ->
+          delta
+            ~response:
+              (observed (Random.State.int state 3) (Random.State.int state 4))
+            text)
+
+let test_cut_reply_journal_roundtrip () =
+  Alcotest.(check int) "the TUI pages at the route's ceiling"
+    Chat_event_log.page_max_limit Wire_chat_journal.page_limit;
+  let cases =
+    [
+      ( "streamed text before the cut"
+      , [ run_started ] @ unread_events
+        @ [ delta "Hel"; delta "lo"; cut; delta "after the cut" ] );
+      ( "an attempt boundary"
+      , [
+          run_started;
+          delta ~response:(observed 1 0) "first";
+          attempt_started 1;
+          delta ~response:(observed 1 0) "late";
+          delta ~response:(observed 2 0) "second";
+          cut;
+        ] );
+      ("a new run", [ run_started; delta "a"; run_started; delta "b" ]);
+      ( "a bare scope ahead of the admitted response"
+      , [
+          delta ~response:(observed 1 4) "A";
+          delta ~response:(Chat_events.Unobserved_scope (Some 6)) "U";
+          delta ~response:(observed 1 5) "B";
+          delta ~response:(observed 1 6) "C";
+          cut;
+        ] );
+      ( "a finished run"
+      , [
+          run_started;
+          delta "done";
+          Chat_events.Run_finished { run_id = "run-cut" };
+          delta "late";
+        ] );
+      ("no text", [ run_started; cut ]);
+      ( "three pages"
+      , (run_started
+        :: List.init
+             ((2 * Wire_chat_journal.page_limit) + 3)
+             (fun index -> delta (string_of_int (index mod 10))))
+        @ [ cut ] );
+    ]
+  in
+  List.iter
+    (fun (label, events) ->
+      Alcotest.(check (option string)) label (connector_reply events)
+        (tui_reply events))
+    cases;
+  let state = Random.State.make [| 54492 |] in
+  for round = 1 to 300 do
+    let events = random_journal state in
+    Alcotest.(check (option string))
+      (Printf.sprintf "random journal %d" round)
+      (connector_reply events) (tui_reply events)
+  done
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1478,6 +1659,9 @@ let () =
           Alcotest.test_case
             "Candle_observation.to_json -> decode_keepers_roster_extras" `Quick
             test_candle_observation_roundtrip;
+          Alcotest.test_case
+            "chat events route pages -> Wire_chat_journal and Cut_reply"
+            `Quick test_cut_reply_journal_roundtrip;
         ] );
       ( "knowledge",
         [

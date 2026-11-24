@@ -133,22 +133,105 @@ let run ~base_path ~keeper_name ~keeper_id =
       | Owner_projection { stopping = true; _ } ) ) -> ()
 ;;
 
+module Prompt_gate = struct
+  type key =
+    { base_path : string
+    ; keeper_name : string
+    }
+
+  let equal_key a b =
+    String.equal a.base_path b.base_path && String.equal a.keeper_name b.keeper_name
+  ;;
+
+  (* [Awaiting_prompts] holds each Keeper signalled before the prompt registry
+     was pinned, once, oldest first. *)
+  type state =
+    | Awaiting_prompts of key list
+    | Prompts_ready
+
+  type t =
+    { mu : Stdlib.Mutex.t
+    ; mutable state : state
+    }
+
+  type admission =
+    | Dispatch_now
+    | Deferred_until_prompts_ready
+
+  let create () = { mu = Stdlib.Mutex.create (); state = Awaiting_prompts [] }
+
+  let admit t ~base_path ~keeper_name =
+    Stdlib.Mutex.protect t.mu (fun () ->
+      match t.state with
+      | Prompts_ready -> Dispatch_now
+      | Awaiting_prompts pending ->
+        let key = { base_path; keeper_name } in
+        if not (List.exists (equal_key key) pending)
+        then t.state <- Awaiting_prompts (pending @ [ key ]);
+        Deferred_until_prompts_ready)
+  ;;
+
+  (* Flips the gate and hands back the deferred Keepers exactly once. A signal
+     racing the flip either joined [pending] before it, and is returned here,
+     or reads [Prompts_ready] after it and dispatches itself. *)
+  let open_ t =
+    Stdlib.Mutex.protect t.mu (fun () ->
+      match t.state with
+      | Prompts_ready -> []
+      | Awaiting_prompts pending ->
+        t.state <- Prompts_ready;
+        pending)
+  ;;
+end
+
+let dispatch ~base_path ~keeper_name =
+  (* A signal can come from an HTTP or IO domain. Only the short submission
+     crosses to the root switch owner; the model call is detached. *)
+  Eio_context.run_on_owner_domain (fun () ->
+    let (_ : Keeper_memory_lane.outcome) =
+      Keeper_memory_lane.submit ~base_path ~keeper_name (fun () ->
+        match Keeper_identity.Keeper_id.of_string keeper_name with
+        | Some keeper_id -> run ~base_path ~keeper_name ~keeper_id
+        | None -> raise Blank_keeper_name)
+    in
+    ())
+;;
+
+let gated_signal gate ~dispatch ~base_path ~keeper_name =
+  match Prompt_gate.admit gate ~base_path ~keeper_name with
+  | Prompt_gate.Dispatch_now -> dispatch ~base_path ~keeper_name
+  | Prompt_gate.Deferred_until_prompts_ready -> ()
+;;
+
+let open_gate gate ~dispatch =
+  List.iter
+    (fun ({ base_path; keeper_name } : Prompt_gate.key) -> dispatch ~base_path ~keeper_name)
+    (Prompt_gate.open_ gate)
+;;
+
+let gate = Prompt_gate.create ()
+
 let install () =
   Keeper_working_context_signal.install (fun ~base_path ~keeper_name ->
     if Runtime_account_access.is_multi_account ()
     then ()
-    else
-    match Env_config.KeeperMemoryOs.librarian_config_state () with
-    | Disabled | Invalid -> ()
-    | Enabled ->
-      (* A signal can come from an HTTP or IO domain. Only the short submission
-         crosses to the root switch owner; the model call is detached. *)
-      Eio_context.run_on_owner_domain (fun () ->
-        let (_ : Keeper_memory_lane.outcome) =
-          Keeper_memory_lane.submit ~base_path ~keeper_name (fun () ->
-            match Keeper_identity.Keeper_id.of_string keeper_name with
-            | Some keeper_id -> run ~base_path ~keeper_name ~keeper_id
-            | None -> raise Blank_keeper_name)
-        in
-        ()))
+    else (
+      match Env_config.KeeperMemoryOs.librarian_config_state () with
+      | Disabled | Invalid -> ()
+      | Enabled -> gated_signal gate ~dispatch ~base_path ~keeper_name))
 ;;
+
+let prompts_ready ~prompt_markdown_dir =
+  Log.Keeper.info
+    "working-context pass: prompt registry pinned at %s; releasing deferred signals"
+    prompt_markdown_dir;
+  open_gate gate ~dispatch
+;;
+
+module For_testing = struct
+  type gate = Prompt_gate.t
+
+  let create_gate = Prompt_gate.create
+  let signal = gated_signal
+  let open_gate = open_gate
+end

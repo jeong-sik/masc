@@ -5177,6 +5177,7 @@
 (include stanzas/test_keeper_continuity_request_view.inc)
 
 (include stanzas/test_keeper_working_context_signal_flood.inc)
+(include stanzas/test_keeper_working_context_prompt_gate.inc)
 
 
 (include stanzas/test_keeper_continuity_dispatch.inc)

@@ -40,6 +40,36 @@ val run
     no owner, no meta, or is stopping. *)
 
 val install : unit -> unit
-(** Install after the detached memory executor. From then on each queue
-    signal submits one pass to that Keeper's memory lane; the lane keeps the
-    latest. The producer of a signal never waits for the pass. *)
+(** Install after the detached memory executor. Until {!prompts_ready}, a
+    queue signal only records its Keeper once (#54296: a pass run before the
+    prompt registry is pinned renders [librarian.working_contexts_rule] as
+    missing and is lost). From then on each queue signal submits one pass to
+    that Keeper's memory lane; the lane keeps the latest. The producer of a
+    signal never waits for the pass. *)
+
+val prompts_ready : prompt_markdown_dir:string -> unit
+(** Call once the prompt registry is pinned, with the directory
+    {!Prompt_defaults.bootstrap_runtime} returned. Submits exactly one pass
+    for each Keeper signalled before it, in first-signal order, and lets later
+    signals submit directly. A second call submits nothing. *)
+
+module For_testing : sig
+  type gate
+
+  val create_gate : unit -> gate
+
+  val signal
+    :  gate
+    -> dispatch:(base_path:string -> keeper_name:string -> unit)
+    -> base_path:string
+    -> keeper_name:string
+    -> unit
+  (** The admission {!install} runs for one signal, with [dispatch] in place
+      of the memory-lane submission. *)
+
+  val open_gate
+    :  gate
+    -> dispatch:(base_path:string -> keeper_name:string -> unit)
+    -> unit
+  (** What {!prompts_ready} does to the gate. *)
+end

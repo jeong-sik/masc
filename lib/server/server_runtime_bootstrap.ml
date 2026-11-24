@@ -1348,12 +1348,15 @@ let bootstrap_prompt_state ~boot_stage (state : Mcp_server.server_state) =
      its own frontmatter declares, and use each one. Repeating that at start
      decides nothing the build did not already decide. *)
   boot_stage "prompt_registry.begin";
-  ignore
-    (Prompt_defaults.bootstrap_runtime
-       ~workspace_path:config.workspace_path
-       ~base_path:config.base_path
-     : string);
-  boot_stage "prompt_registry.end"
+  let prompt_markdown_dir =
+    Prompt_defaults.bootstrap_runtime
+      ~workspace_path:config.workspace_path
+      ~base_path:config.base_path
+  in
+  boot_stage "prompt_registry.end";
+  (* The working-context pass is installed earlier, with the memory lane, so
+     signals sent before this point are held and released here once (#54296). *)
+  Keeper_working_context_pass.prompts_ready ~prompt_markdown_dir
 
 let start_owner_lazy_tasks ~sw state =
   let run_lazy_task (task_name, task_fn) =

@@ -2639,7 +2639,10 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Board_comment _
                         | Nav.Github_token_form _
                         | Nav.Code_finder_form
-                        | Nav.Code_search_form )
+                        | Nav.Code_search_form
+                        | Nav.Runtime_lane_create
+                        | Nav.Runtime_lane_edit _
+                        | Nav.Runtime_lane_delete _ )
                       , _ ) ->
                         true
                   in
@@ -2760,7 +2763,22 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                             in
                             Some ({ m with inline_modal = Some next_modal }, [])
                         | None -> None)
-                    | ( ( Nav.Connector_form | Nav.Board_new_post )
+                    | Nav.Runtime_lane_create, Some { key = "lane_kind"; value; _ } -> (
+                        match
+                          cycle_in [ "failover"; "exact_output" ]
+                            (String.lowercase_ascii (String.trim value))
+                        with
+                        | Some next_kind ->
+                            let next_modal =
+                              Model.modal_update_active_field
+                                (fun _ -> next_kind)
+                                modal
+                            in
+                            Some ({ m with inline_modal = Some next_modal }, [])
+                        | None -> None)
+                    | ( ( Nav.Connector_form
+                        | Nav.Board_new_post
+                        | Nav.Runtime_lane_create )
                       , (Some _ | None) )
                     | ( ( Nav.Btw_query
                         | Nav.Gate_reject _
@@ -2773,7 +2791,9 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Board_comment _
                         | Nav.Github_token_form _
                         | Nav.Code_finder_form
-                        | Nav.Code_search_form )
+                        | Nav.Code_search_form
+                        | Nav.Runtime_lane_edit _
+                        | Nav.Runtime_lane_delete _ )
                       , (Some _ | None) ) ->
                         None
                   in
@@ -3452,7 +3472,8 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                       | Keymap.Open_memory_recovery
                       | Keymap.Search_prev_match
                       | Keymap.Toggle_memory_chart
-                      | Keymap.Open_external_editor ->
+                      | Keymap.Open_external_editor
+                      | Keymap.Delete_selected ->
                           `Ignore
                     in
                     match
@@ -3633,7 +3654,10 @@ let apply_paste ~now:_ (m : Model.t) text =
                   | Nav.Board_comment _
                   | Nav.Github_token_form _
                   | Nav.Code_finder_form
-                  | Nav.Code_search_form )
+                  | Nav.Code_search_form
+                  | Nav.Runtime_lane_create
+                  | Nav.Runtime_lane_edit _
+                  | Nav.Runtime_lane_delete _ )
                 , _ ) ->
                   true
             in

@@ -225,6 +225,21 @@ type post_request =
       previous_runtime_id : string option;
     }
   | Post_runtime_default_route of { runtime_id : string }
+  | Post_runtime_lane_create of {
+      lane_id : string;
+      kind : Wire_runtime.lane_kind;
+      runtime_ids : string list;
+    }
+  | Post_runtime_lane_update of {
+      lane_id : string;
+      kind : Wire_runtime.lane_kind;
+      runtime_ids : string list;
+      expected_source_revision : string option;
+    }
+  | Post_runtime_lane_delete of {
+      lane_id : string;
+      expected_source_revision : string option;
+    }
   | Post_setup_account_key of {
       integration_id : string;
       key : string;

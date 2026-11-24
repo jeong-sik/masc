@@ -98,6 +98,7 @@ type action =
   | Toggle_memory_chart
   | Open_external_editor
   | Interrupt_turn
+  | Delete_selected
   | Quit_app
 
 type scope =

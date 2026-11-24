@@ -1172,7 +1172,10 @@ let open_inline_modal (m : Model.t) kind =
       | Nav.Board_comment _
       | Nav.Github_token_form _
       | Nav.Code_finder_form
-      | Nav.Code_search_form )
+      | Nav.Code_search_form
+      | Nav.Runtime_lane_create
+      | Nav.Runtime_lane_edit _
+      | Nav.Runtime_lane_delete _ )
       , ( Drafts.Btw_idle
         | Drafts.Btw_sending _
         | Drafts.Btw_streaming _
@@ -3678,7 +3681,10 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Board_comment _
     | Nav.Github_token_form _
     | Nav.Code_finder_form
-    | Nav.Code_search_form ) as std ->
+    | Nav.Code_search_form
+    | Nav.Runtime_lane_create
+    | Nav.Runtime_lane_edit _
+    | Nav.Runtime_lane_delete _ ) as std ->
       Form_standard std
 
 (* The Schedule form's operator text. A delay is a whole count and one unit,
@@ -4420,6 +4426,194 @@ let submit_inline_modal ~now (m : Model.t) =
                         req = Cmd.Get_workspace_search { scope; query };
                       };
                   ] )
+          | Form_standard Nav.Runtime_lane_create -> (
+              let raw_lane_id =
+                String.trim (Model.modal_field_value ~key:"lane_id" modal)
+              in
+              let raw_kind =
+                String.trim (Model.modal_field_value ~key:"lane_kind" modal)
+              in
+              let raw_candidates =
+                Model.modal_field_value ~key:"lane_candidates" modal
+              in
+              let runtime_ids =
+                Wire_runtime.parse_candidate_runtime_ids raw_candidates
+              in
+              match Wire_runtime.lane_kind_of_string raw_kind with
+              | None ->
+                  set_modal_error
+                    "Lane kind must be 'failover' or 'exact_output'"
+              | Some kind -> (
+                  if runtime_ids = [] then
+                    set_modal_error
+                      "At least one candidate runtime ID is required"
+                  else
+                    match kind with
+                    | Wire_runtime.Lane_failover ->
+                        if
+                          String.equal raw_lane_id "default"
+                          || String.equal raw_lane_id "media_failover"
+                          || String.starts_with ~prefix:"exact/" raw_lane_id
+                        then
+                          set_modal_error
+                            "Reserved route name: choose a failover lane ID (not default, media_failover, or exact/*)"
+                        else
+                          ( mark_submitting m
+                          , [
+                              Cmd.Http_post
+                                {
+                                  epoch = m.epoch;
+                                  req =
+                                    Cmd.Post_runtime_lane_create
+                                      {
+                                        lane_id = raw_lane_id;
+                                        kind;
+                                        runtime_ids;
+                                      };
+                                };
+                            ] )
+                    | Wire_runtime.Lane_exact_output ->
+                        let bare_id =
+                          if String.starts_with ~prefix:"exact/" raw_lane_id
+                          then
+                            String.sub raw_lane_id 6
+                              (String.length raw_lane_id - 6)
+                          else raw_lane_id
+                        in
+                        if not (Wire_runtime.is_known_exact_lane_id bare_id)
+                        then
+                          set_modal_error
+                            ("Unknown exact-output lane ID (expected one of: "
+                            ^ String.concat ", "
+                                Wire_runtime.known_exact_lane_ids
+                            ^ ")")
+                        else
+                          ( mark_submitting m
+                          , [
+                              Cmd.Http_post
+                                {
+                                  epoch = m.epoch;
+                                  req =
+                                    Cmd.Post_runtime_lane_create
+                                      {
+                                        lane_id = bare_id;
+                                        kind;
+                                        runtime_ids;
+                                      };
+                                };
+                            ] )))
+          | Form_standard
+              (Nav.Runtime_lane_edit { lane_id; exact_output; opened_revision })
+            -> (
+              let raw_candidates =
+                Model.modal_field_value ~key:"lane_candidates" modal
+              in
+              let runtime_ids =
+                Wire_runtime.parse_candidate_runtime_ids raw_candidates
+              in
+              if runtime_ids = [] then
+                set_modal_error "At least one candidate runtime ID is required"
+              else
+                let kind =
+                  if exact_output then Wire_runtime.Lane_exact_output
+                  else Wire_runtime.Lane_failover
+                in
+                let current_rev =
+                  Option.map
+                    (fun (meta : Wire_runtime.runtime_config_raw_meta) ->
+                      meta.source_revision)
+                    (Observed.to_option m.runtime.runtime_config_raw)
+                in
+                let revision_drifted =
+                  if exact_output then false
+                  else
+                    match (opened_revision, current_rev) with
+                    | Some orig, Some cur -> not (String.equal orig cur)
+                    | Some _, None | None, (Some _ | None) -> false
+                in
+                if revision_drifted then
+                  set_modal_error
+                    "Runtime configuration revision changed while editing; close and reopen [e]"
+                else
+                  let expected_source_revision =
+                    if exact_output then None
+                    else
+                      match opened_revision with
+                      | Some rev when Wire_runtime.is_lowercase_sha256_hex rev
+                        ->
+                          Some rev
+                      | Some _ | None -> (
+                          match current_rev with
+                          | Some rev
+                            when Wire_runtime.is_lowercase_sha256_hex rev ->
+                              Some rev
+                          | Some _ | None -> None)
+                  in
+                  ( mark_submitting m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_runtime_lane_update
+                              {
+                                lane_id;
+                                kind;
+                                runtime_ids;
+                                expected_source_revision;
+                              };
+                        };
+                    ] ))
+          | Form_standard
+              (Nav.Runtime_lane_delete { lane_id; opened_revision }) -> (
+              let confirm =
+                String.trim (Model.modal_field_value ~key:"confirm_lane_id" modal)
+              in
+              if not (String.equal confirm lane_id) then
+                set_modal_error
+                  (Printf.sprintf "Type exact lane ID '%s' to confirm deletion"
+                     lane_id)
+              else
+                let current_rev =
+                  Option.map
+                    (fun (meta : Wire_runtime.runtime_config_raw_meta) ->
+                      meta.source_revision)
+                    (Observed.to_option m.runtime.runtime_config_raw)
+                in
+                match current_rev with
+                | None ->
+                    let m_err, _ =
+                      set_modal_error
+                        "Runtime config revision not loaded yet — refreshing config revision"
+                    in
+                    ( m_err
+                    , [
+                        Cmd.Http_get
+                          { epoch = m.epoch; req = Cmd.Get_runtime_config_raw };
+                      ] )
+                | Some cur when not (Wire_runtime.is_lowercase_sha256_hex cur)
+                  ->
+                    set_modal_error
+                      "Observed runtime config revision is invalid; press [r] to reload"
+                | Some cur -> (
+                    match opened_revision with
+                    | Some orig when not (String.equal orig cur) ->
+                        set_modal_error
+                          "Runtime configuration changed since delete dialog opened (CAS revision mismatch); close and retry"
+                    | Some _ | None ->
+                        ( mark_submitting m
+                        , [
+                            Cmd.Http_post
+                              {
+                                epoch = m.epoch;
+                                req =
+                                  Cmd.Post_runtime_lane_delete
+                                    {
+                                      lane_id;
+                                      expected_source_revision = Some cur;
+                                    };
+                              };
+                          ] )))
           | Form_setup_login_start ->
               let integration_id =
                 String.trim
@@ -5037,6 +5231,7 @@ let help_max_scroll (m : Model.t) =
             | Keymap.Toggle_memory_chart
             | Keymap.Open_external_editor
             | Keymap.Interrupt_turn
+            | Keymap.Delete_selected
             | Keymap.Quit_app ->
                 acc + 1)
           0 grp.entries
@@ -8709,7 +8904,10 @@ let apply_move (m : Model.t) dir =
                   | Nav.Board_comment _
                   | Nav.Github_token_form _
                   | Nav.Code_finder_form
-                  | Nav.Code_search_form )
+                  | Nav.Code_search_form
+                  | Nav.Runtime_lane_create
+                  | Nav.Runtime_lane_edit _
+                  | Nav.Runtime_lane_delete _ )
                 , _ ) ->
                   true
             in
@@ -8735,7 +8933,10 @@ let apply_move (m : Model.t) dir =
               | Nav.Board_comment _
               | Nav.Github_token_form _
               | Nav.Code_finder_form
-              | Nav.Code_search_form ->
+              | Nav.Code_search_form
+              | Nav.Runtime_lane_create
+              | Nav.Runtime_lane_edit _
+              | Nav.Runtime_lane_delete _ ->
                   (m, [])
             else
               let next_modal =

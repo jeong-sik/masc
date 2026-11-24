@@ -3090,7 +3090,10 @@ let render_dive_lane ~lane_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                  else Theme.Status_historical)
               (if inf.show_raw_json then "[Space] Json_tree ON"
                else "[Space] Json_tree"))
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[Esc] 뒤로" ~en:"[Esc] Back"))
+         ~hotkey:
+           (Say.resolve lang
+              (Say.make ~ko:"[n] 생성 · [e] 편집 · [d] 삭제 · [a] 배정 · [Esc] 뒤로"
+                 ~en:"[n] New · [e] Edit · [d] Del · [a] Assign · [Esc] Back"))
          (Say.resolve lang
             (Say.make ~ko:"런타임 > 페일오버 레인 상세"
                ~en:"Runtime > Failover Lane Dive")))

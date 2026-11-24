@@ -109,6 +109,16 @@ type inline_action_kind =
   | Github_token_form of string
   | Code_finder_form
   | Code_search_form
+  | Runtime_lane_create
+  | Runtime_lane_edit of {
+      lane_id : string;
+      exact_output : bool;
+      opened_revision : string option;
+    }
+  | Runtime_lane_delete of {
+      lane_id : string;
+      opened_revision : string option;
+    }
 
 type system_gate_kind =
   | Micro_viewport
@@ -555,6 +565,9 @@ let inline_action_tag = function
   | Github_token_form _ -> 11
   | Code_finder_form -> 12
   | Code_search_form -> 13
+  | Runtime_lane_create -> 14
+  | Runtime_lane_edit _ -> 15
+  | Runtime_lane_delete _ -> 16
 
 let equal_inline_action_kind a b =
   if not (Int.equal (inline_action_tag a) (inline_action_tag b)) then false
@@ -566,7 +579,8 @@ let equal_inline_action_kind a b =
     | Repo_add_form, Repo_add_form
     | Board_new_post, Board_new_post
     | Code_finder_form, Code_finder_form
-    | Code_search_form, Code_search_form ->
+    | Code_search_form, Code_search_form
+    | Runtime_lane_create, Runtime_lane_create ->
         true
     | Gate_reject x, Gate_reject y
     | Verification_reject x, Verification_reject y
@@ -578,6 +592,13 @@ let equal_inline_action_kind a b =
     | Board_comment x, Board_comment y ->
         String.equal x.post_id y.post_id
         && Option.equal String.equal x.parent_id y.parent_id
+    | Runtime_lane_edit x, Runtime_lane_edit y ->
+        String.equal x.lane_id y.lane_id
+        && Bool.equal x.exact_output y.exact_output
+        && Option.equal String.equal x.opened_revision y.opened_revision
+    | Runtime_lane_delete x, Runtime_lane_delete y ->
+        String.equal x.lane_id y.lane_id
+        && Option.equal String.equal x.opened_revision y.opened_revision
     | ( Btw_query
       | Gate_reject _
       | Verification_reject _
@@ -591,7 +612,10 @@ let equal_inline_action_kind a b =
       | Board_comment _
       | Github_token_form _
       | Code_finder_form
-      | Code_search_form ), _ ->
+      | Code_search_form
+      | Runtime_lane_create
+      | Runtime_lane_edit _
+      | Runtime_lane_delete _ ), _ ->
         false
 
 let system_gate_index = function
